@@ -34,8 +34,8 @@ class KotvVlcPlugin : public flutter::Plugin {
   void DisposePlayer();
   void StartPump();
   void StopPump();
-  const FlutterDesktopPixelBuffer* CopyPixelBuffer(size_t* width,
-                                                   size_t* height);
+  // Flutter 3.24+：CopyBufferCallback 为 (size_t width, size_t height)，非指针 out 参数。
+  const FlutterDesktopPixelBuffer* CopyPixelBuffer(size_t width, size_t height);
 
   flutter::PluginRegistrarWindows* registrar_;
   flutter::TextureRegistrar* textures_;

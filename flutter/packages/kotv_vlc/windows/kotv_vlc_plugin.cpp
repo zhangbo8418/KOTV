@@ -188,10 +188,11 @@ void KotvVlcPlugin::HandleMethodCall(
 }
 
 int64_t KotvVlcPlugin::CreateTexture() {
-  texture_ = std::make_unique<flutter::TextureVariant>(flutter::PixelBufferTexture(
-      [this](size_t* width, size_t* height) -> const FlutterDesktopPixelBuffer* {
+  flutter::PixelBufferTexture::CopyBufferCallback cb =
+      [this](size_t width, size_t height) -> const FlutterDesktopPixelBuffer* {
         return CopyPixelBuffer(width, height);
-      }));
+      };
+  texture_ = std::make_unique<flutter::TextureVariant>(flutter::PixelBufferTexture(std::move(cb)));
   texture_id_ = textures_->RegisterTexture(texture_.get());
   return texture_id_;
 }
@@ -280,8 +281,8 @@ void KotvVlcPlugin::StopPump() {
   if (pump_.joinable()) pump_.join();
 }
 
-const FlutterDesktopPixelBuffer* KotvVlcPlugin::CopyPixelBuffer(size_t* width,
-                                                                size_t* height) {
+const FlutterDesktopPixelBuffer* KotvVlcPlugin::CopyPixelBuffer(size_t /*width*/,
+                                                                size_t /*height*/) {
   std::lock_guard<std::mutex> lock(frame_mu_);
   if (frame_w_ < 2 || frame_h_ < 2 || frame_rgba_.empty()) {
     return nullptr;
@@ -289,8 +290,6 @@ const FlutterDesktopPixelBuffer* KotvVlcPlugin::CopyPixelBuffer(size_t* width,
   pixel_buffer_.buffer = frame_rgba_.data();
   pixel_buffer_.width = (size_t)frame_w_;
   pixel_buffer_.height = (size_t)frame_h_;
-  *width = pixel_buffer_.width;
-  *height = pixel_buffer_.height;
   return &pixel_buffer_;
 }
 
