@@ -160,8 +160,8 @@ func (s *jsSpider) runWorker() (err error) {
 		return fmt.Errorf("QuickJS runtime 创建失败")
 	}
 	defer rt.Close()
-	// 有上限时栈溢出变 JS 异常，避免 native 栈打穿进程（Win7 上更易表现为加载源闪退）
-	rt.SetMaxStackSize(1024 * 1024)
+	// 不设 MaxStackSize：与 TV 一致（0=不限）。1MB 对深层爬虫源偏紧，易误杀。
+	// 模块加载路径的 CGO panic 已在 kotvModuleNormalize/Loader 里 recover。
 	installTVModuleLoader(rt)
 	rt.SetInterruptHandler(func() int {
 		if s.epoch.Load() != s.activeEpoch.Load() {
@@ -1147,6 +1147,7 @@ func parseJSTruthy(s string) bool {
 }
 
 func (s *jsSpider) Destroy() {
+	defer func() { _ = recover() }()
 	s.clearTimers()
 	s.interrupt()
 	select {

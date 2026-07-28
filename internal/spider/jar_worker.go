@@ -68,8 +68,9 @@ func SetNetConfig(headers, proxy, hosts, doh []byte) {
 	netConfigMu.Lock()
 	netConfigJSON = payload
 	netConfigMu.Unlock()
-	// 立即推给当前存活的 worker（若不存活会随下次启动重放）。
-	_, _ = callJavaBridge(payload)
+	// 仅热更新已存活的 bridge；不在换源解析时冷启动 JVM。
+	// 冷启动会在 LoadJar / 首次 JAR 调用的 startLocked 里发生，并重放 currentNetConfig。
+	javaBridge.pushIfAlive(payload)
 }
 
 // SetUserProxy 把 KOTV 用户代理设置下发到 bridge，令 JAR 请求在未命中配置 proxy 规则时也走用户代理。
@@ -92,7 +93,7 @@ func SetUserProxy(spec string) {
 	netConfigMu.Lock()
 	userProxyJSON = payload
 	netConfigMu.Unlock()
-	_, _ = callJavaBridge(payload)
+	javaBridge.pushIfAlive(payload)
 }
 
 func currentNetConfig() [][]byte {
@@ -119,6 +120,16 @@ func InterruptJavaBridge() {
 	if p := javaBridge.proc.Load(); p != nil {
 		_ = p.Kill()
 	}
+}
+
+// pushIfAlive 向已运行的 bridge 下发配置；进程不存在时不启动（避免 loadConfig 强制拉 JVM）。
+func (w *javaBridgeClient) pushIfAlive(payload []byte) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.aliveLocked() {
+		return
+	}
+	_ = w.primeLocked(payload)
 }
 
 func (w *javaBridgeClient) call(payload []byte) (string, error) {

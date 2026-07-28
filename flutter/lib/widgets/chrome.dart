@@ -73,13 +73,21 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
         ),
         if (hasWall)
           Positioned.fill(
-            child: Image.network(
-              image,
-              key: ValueKey('$mode|$image'),
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-              filterQuality: FilterQuality.medium,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final dpr = MediaQuery.devicePixelRatioOf(context);
+                final w = (constraints.maxWidth * dpr).round().clamp(1, 1920);
+                return Image.network(
+                  image,
+                  key: ValueKey('$mode|$image'),
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  filterQuality: FilterQuality.medium,
+                  // 限制解码尺寸，降低 Win7 上大图解码导致的原生闪退风险
+                  cacheWidth: w,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                );
+              },
             ),
           ),
         if (hasWall) Positioned.fill(child: ColoredBox(color: wallTint)),

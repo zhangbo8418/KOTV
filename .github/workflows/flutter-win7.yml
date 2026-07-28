@@ -87,29 +87,24 @@ jobs:
           flutter pub get
           flutter build windows --release
 
-      - name: Bundle runtime and engine
+      - name: Bundle engine and verify runtime
         shell: pwsh
         run: |
           $out = "flutter\build\windows\x64\runner\Release"
           if (-not (Test-Path "$out\kotv.exe")) { throw "Flutter build output missing: $out\kotv.exe" }
           Copy-Item -Force "flutter\assets\engine\kotv-engine.exe" "$out\kotv-engine.exe"
 
-          # CMake 已在 flutter build 时装过 runtime；若再 Copy-Item "runtime" "$out\runtime"
-          # 且目标目录已存在，PowerShell 会套出 runtime\runtime。统一清掉后按内容拷贝。
-          if (Test-Path "$out\runtime") { Remove-Item -Recurse -Force "$out\runtime" }
-          New-Item -ItemType Directory -Force -Path "$out\runtime" | Out-Null
-          Copy-Item -Recurse -Force "runtime\*" "$out\runtime\"
-          if (Test-Path "$out\runtime\runtime") {
-            throw "nested runtime\runtime detected — copy layout wrong"
+          # runtime 只由 Windows CMake install 打一次；这里禁止再拷，否则易套出 runtime\runtime。
+          if (-not (Test-Path "$out\runtime")) {
+            throw "CMake did not install runtime under $out\runtime — check flutter/windows/CMakeLists.txt"
           }
-          if (-not (Test-Path "$out\runtime\jre") -and -not (Test-Path "$out\runtime\libvlc")) {
-            throw "runtime missing jre/libvlc under $out\runtime"
+          if (Test-Path "$out\runtime\runtime") {
+            throw "nested runtime\runtime detected — packaging must be single-layer"
           }
 
           Remove-Item -Force "$out\libmpv-2.dll", "$out\mpv-2.dll" -ErrorAction SilentlyContinue
           if (Test-Path "cmd\updater\updater.exe") { Copy-Item -Force "cmd\updater\updater.exe" "$out\updater.exe" }
 
-          # 硬校验：jre/lib、python Lib\site-packages 等缺一不可
           bash ./scripts/verify-runtime.sh "$out/runtime" windows-x64
 
       - name: Compress ZIP

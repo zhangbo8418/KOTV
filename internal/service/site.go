@@ -48,6 +48,8 @@ func (s *SiteService) InvalidateLoads() {
 	s.mu.Lock()
 	s.invalidateContentCache()
 	s.mu.Unlock()
+	// 先软中断脚本，再杀 JVM，最后 Destroy，降低 QuickJS/CGO 与 Kill 竞态。
+	spider.InterruptScriptSpiders()
 	spider.InterruptJavaBridge()
 	spider.ResetScriptSpiders()
 }

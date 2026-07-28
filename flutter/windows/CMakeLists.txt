@@ -118,6 +118,7 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 
 # Bundle full KOTV runtime (jre/python/libvlc/libmpv/…) next to the executable.
+# 唯一安装点：CI 不得再整目录 Copy-Item runtime（会套出 runtime\runtime）。
 # 勿用 PATTERN "lib" EXCLUDE：Windows 大小写不敏感，会误删 python/Lib（site-packages）。
 set(KOTV_RUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../runtime")
 if(EXISTS "${KOTV_RUNTIME_ROOT}/jre" OR EXISTS "${KOTV_RUNTIME_ROOT}/libvlc")

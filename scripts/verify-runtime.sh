@@ -76,13 +76,23 @@ case "$PLAT" in
     ;;
 esac
 
-# JRE 过小通常意味着 lib/ 没拷全（CMake PATTERN lib EXCLUDE / 半包）
+# JRE 过小通常意味着半包。注意：Liberica 21 的 lib/ 本就约十几个文件
+# （modules 为 ~100MB 单体），不能用「lib 文件数 < 20」当半包信号。
 jre_files="$(find "$RT/jre" -type f 2>/dev/null | wc -l | tr -d ' ')"
 if [[ "${jre_files:-0}" -lt 100 ]]; then
   die "jre too incomplete: only ${jre_files} files (expected >=100)"
 fi
+need_any_file "$RT/jre/lib/modules" "$RT/jre/lib/jrt-fs.jar"
+need_file "$RT/jre/lib/security/cacerts"
+if [[ -f "$RT/jre/lib/modules" ]]; then
+  modules_bytes="$(wc -c < "$RT/jre/lib/modules" | tr -d ' ')"
+  # 完整 modules 通常数十 MB；过小多半是空文件/半下载
+  if [[ "${modules_bytes:-0}" -lt 1000000 ]]; then
+    die "jre/lib/modules too small: ${modules_bytes} bytes (Java bridge will EOF)"
+  fi
+fi
 jre_lib_files="$(find "$RT/jre/lib" -type f 2>/dev/null | wc -l | tr -d ' ')"
-if [[ "${jre_lib_files:-0}" -lt 20 ]]; then
+if [[ "${jre_lib_files:-0}" -lt 10 ]]; then
   die "jre/lib too incomplete: only ${jre_lib_files} files (Java bridge will EOF)"
 fi
 
