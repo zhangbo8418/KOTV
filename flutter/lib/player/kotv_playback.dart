@@ -35,8 +35,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setRepeatOne(bool on);
   Future<void> setDecodeMode(String mode);
 
-  /// 音轨/字幕：VLC 暂空，控件仍显示入口。
+  /// 当前片源可切换的真实音轨（不含 media_kit 注入的 `auto` / `no` 控制项）。
   List<KotvTrack> get audioTracks;
+  /// 当前片源可切换的真实字幕轨（同上；关闭/自动请用 [setSubtitleTrack]）。
   List<KotvTrack> get subtitleTracks;
   String? get currentAudioId;
   String? get currentSubtitleId;
@@ -48,6 +49,44 @@ class KotvTrack {
   const KotvTrack({required this.id, required this.label});
   final String id;
   final String label;
+}
+
+/// media_kit 在解析 libmpv 的 `track-list` 时，会**先插入** [AudioTrack.auto]/[SubtitleTrack.no] 等
+/// 控制项（见 media_kit `real.dart`），与 demuxer 里的真实轨混在同一列表；UI 应只读 [KotvPlayback.audioTracks]。
+bool kotvIsPseudoMediaTrack(String id) {
+  switch (id.toLowerCase().trim()) {
+    case 'auto':
+    case 'no':
+      return true;
+    default:
+      return id.trim().isEmpty;
+  }
+}
+
+bool kotvSubtitleIsOff(String? id) {
+  if (id == null) return true;
+  switch (id.toLowerCase().trim()) {
+    case '':
+    case 'no':
+    case 'none':
+    case 'off':
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool kotvSubtitleIsAuto(String? id) => (id ?? '').toLowerCase().trim() == 'auto';
+
+bool kotvAudioIsAuto(String? id) {
+  if (id == null || id.trim().isEmpty) return true;
+  return id.toLowerCase().trim() == 'auto';
+}
+
+String _trackLabel(dynamic t) {
+  if (t.title?.isNotEmpty == true) return t.title! as String;
+  if (t.language?.isNotEmpty == true) return t.language! as String;
+  return t.id as String;
 }
 
 /// media_kit / libmpv
@@ -138,22 +177,14 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   List<KotvTrack> get audioTracks => player.state.tracks.audio
-      .map((t) => KotvTrack(
-            id: t.id,
-            label: (t.title?.isNotEmpty == true)
-                ? t.title!
-                : (t.language?.isNotEmpty == true ? t.language! : t.id),
-          ))
+      .where((t) => !kotvIsPseudoMediaTrack(t.id))
+      .map((t) => KotvTrack(id: t.id, label: _trackLabel(t)))
       .toList();
 
   @override
   List<KotvTrack> get subtitleTracks => player.state.tracks.subtitle
-      .map((t) => KotvTrack(
-            id: t.id,
-            label: (t.title?.isNotEmpty == true)
-                ? t.title!
-                : (t.language?.isNotEmpty == true ? t.language! : t.id),
-          ))
+      .where((t) => !kotvIsPseudoMediaTrack(t.id))
+      .map((t) => KotvTrack(id: t.id, label: _trackLabel(t)))
       .toList();
 
   @override

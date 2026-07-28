@@ -529,70 +529,192 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     widget.onBump();
   }
 
+  Widget _chromeSheetFrame(
+    BuildContext ctx, {
+    required String title,
+    String? subtitle,
+    required List<Widget> children,
+  }) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Material(
+          color: const Color(0xCC2A2A30),
+          borderRadius: BorderRadius.circular(18),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.72),
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(4, 10, 4, 12),
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.28),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+                      if (subtitle != null && subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 13)),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                ...children,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _chromeSelectRow({
+    IconData? icon,
+    required String label,
+    bool selected = false,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 52,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, color: Colors.white, size: 24),
+                  const SizedBox(width: 16),
+                ],
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+                if (selected) const Icon(Icons.check, color: Colors.white, size: 22),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showChromeListSheet({
+    required String title,
+    String? subtitle,
+    required List<Widget> children,
+  }) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black38,
+      isScrollControlled: true,
+      builder: (ctx) => _chromeSheetFrame(ctx, title: title, subtitle: subtitle, children: children),
+    );
+  }
+
   Future<void> _showTrackSheet({required bool audio}) async {
     widget.onBump();
     final audioTracks = widget.player.audioTracks;
     final subTracks = widget.player.subtitleTracks;
     final currentAudio = widget.player.currentAudioId;
     final currentSub = widget.player.currentSubtitleId;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xF0120A24),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
-      builder: (ctx) {
-        return SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            children: [
-              Text(audio ? '音轨' : '字幕', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 12),
-              if (!audio) ...[
-                _moreTile('关闭字幕', () async {
-                  await widget.player.setSubtitleTrack('');
-                  if (ctx.mounted) Navigator.pop(ctx);
-                }),
-                _moreTile('自动', () async {
-                  await widget.player.setSubtitleTrack('auto');
-                  if (ctx.mounted) Navigator.pop(ctx);
-                }),
-                for (final t in subTracks)
-                  _moreTile(
-                    '${t.label}${t.id == currentSub ? ' ●' : ''}',
-                    () async {
-                      await widget.player.setSubtitleTrack(t.id);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                    },
-                  ),
-                if (subTracks.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text('暂无可用字幕轨', style: TextStyle(color: Colors.white54)),
-                  ),
-              ] else ...[
-                _moreTile('自动', () async {
-                  await widget.player.setAudioTrack('auto');
-                  if (ctx.mounted) Navigator.pop(ctx);
-                }),
-                for (final t in audioTracks)
-                  _moreTile(
-                    '${t.label}${t.id == currentAudio ? ' ●' : ''}',
-                    () async {
-                      await widget.player.setAudioTrack(t.id);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                    },
-                  ),
-                if (audioTracks.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text('暂无可用音轨', style: TextStyle(color: Colors.white54)),
-                  ),
-              ],
-            ],
+    final rows = <Widget>[];
+    if (!audio) {
+      rows.addAll([
+        _chromeSelectRow(
+          icon: Icons.closed_caption_off_outlined,
+          label: '关闭字幕',
+          selected: kotvSubtitleIsOff(currentSub),
+          onTap: () async {
+            await widget.player.setSubtitleTrack('');
+            if (context.mounted) Navigator.pop(context);
+          },
+        ),
+        _chromeSelectRow(
+          icon: Icons.auto_awesome,
+          label: '自动',
+          selected: kotvSubtitleIsAuto(currentSub),
+          onTap: () async {
+            await widget.player.setSubtitleTrack('auto');
+            if (context.mounted) Navigator.pop(context);
+          },
+        ),
+        for (final t in subTracks)
+          _chromeSelectRow(
+            label: t.label,
+            selected: t.id == currentSub,
+            onTap: () async {
+              await widget.player.setSubtitleTrack(t.id);
+              if (context.mounted) Navigator.pop(context);
+            },
+          ),
+      ]);
+      if (subTracks.isEmpty) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Text('暂无可用字幕轨', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 15)),
           ),
         );
-      },
-    );
+      }
+    } else {
+      rows.add(
+        _chromeSelectRow(
+          icon: Icons.auto_awesome,
+          label: '自动',
+          selected: kotvAudioIsAuto(currentAudio),
+          onTap: () async {
+            await widget.player.setAudioTrack('auto');
+            if (context.mounted) Navigator.pop(context);
+          },
+        ),
+      );
+      for (final t in audioTracks) {
+        rows.add(
+          _chromeSelectRow(
+            label: t.label,
+            selected: t.id == currentAudio,
+            onTap: () async {
+              await widget.player.setAudioTrack(t.id);
+              if (context.mounted) Navigator.pop(context);
+            },
+          ),
+        );
+      }
+      if (audioTracks.isEmpty) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Text('暂无可用音轨', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 15)),
+          ),
+        );
+      }
+    }
+    await _showChromeListSheet(title: audio ? '音轨' : '字幕', children: rows);
   }
 
   Future<void> _showPlayerDialog() async {
@@ -627,33 +749,23 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     }
 
     if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xF0120A24),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
-      builder: (ctx) {
-        return SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            children: [
-              const Text('请选择播放器', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text(
-                '当前：${flutterPlayerLabel(curVal)}',
-                style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              for (final o in opts)
-                if (listed(o.$3))
-                  _moreTile('${o.$1}${curVal == o.$2 ? ' ●' : ''}', () async {
-                    Navigator.pop(ctx);
-                    await _selectPlayer(o.$2);
-                  }),
-            ],
+    final rows = <Widget>[
+      for (final o in opts)
+        if (listed(o.$3))
+          _chromeSelectRow(
+            icon: Icons.smart_display_outlined,
+            label: o.$1,
+            selected: curVal == o.$2,
+            onTap: () async {
+              Navigator.pop(context);
+              await _selectPlayer(o.$2);
+            },
           ),
-        );
-      },
+    ];
+    await _showChromeListSheet(
+      title: '请选择播放器',
+      subtitle: '当前：${flutterPlayerLabel(curVal)}',
+      children: rows,
     );
   }
 
@@ -997,49 +1109,28 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final picked = await showModalBottomSheet<int>(
       context: sheetCtx,
       backgroundColor: Colors.transparent,
+      barrierColor: Colors.black38,
+      isScrollControlled: true,
       builder: (ctx) {
         Widget opt(String label, int mins) {
-          final sel = _sleepMinutes == mins;
-          return ListTile(
-            title: Text(label, style: TextStyle(color: Colors.white, fontWeight: sel ? FontWeight.w700 : FontWeight.w500)),
-            trailing: sel ? const Icon(Icons.check, color: Colors.white) : null,
+          return _chromeSelectRow(
+            icon: Icons.bedtime_outlined,
+            label: label,
+            selected: _sleepMinutes == mins,
             onTap: () => Navigator.pop(ctx, mins),
           );
         }
 
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: Material(
-            color: const Color(0xCC2A2A30),
-            borderRadius: BorderRadius.circular(18),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(height: 10),
-                  Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.28), borderRadius: BorderRadius.circular(99)),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text('休眠定时器', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
-                    ),
-                  ),
-                  opt('关闭', 0),
-                  opt('15 分钟', 15),
-                  opt('30 分钟', 30),
-                  opt('45 分钟', 45),
-                  opt('60 分钟', 60),
-                  const SizedBox(height: 8),
-                ],
-              ),
-            ),
-          ),
+        return _chromeSheetFrame(
+          ctx,
+          title: '休眠定时器',
+          children: [
+            opt('关闭', 0),
+            opt('15 分钟', 15),
+            opt('30 分钟', 30),
+            opt('45 分钟', 45),
+            opt('60 分钟', 60),
+          ],
         );
       },
     );
@@ -1058,46 +1149,28 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     });
   }
 
-  Widget _moreTile(String label, VoidCallback onTap) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: const Color(0x3318161E),
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 15)),
-          ),
-        ),
-      ),
-    );
-  }
-
   void _showPlayInfo() {
     final w = widget.player.width;
     final h = widget.player.height;
     final pos = widget.player.position;
     final dur = widget.player.duration;
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1028),
-        title: const Text('播放信息', style: TextStyle(color: Colors.white)),
-        content: Text(
-          '标题：${widget.title}\n'
-          '分辨率：$w x $h\n'
-          '进度：${fmtClockHms(pos)} / ${fmtClockHms(dur)}\n'
-          '倍速：x${_speeds[_speedIdx]}\n'
-          '比例：${_aspects[_aspectIdx].$2}\n'
-          '解码：${_decodeModes[_decodeIdx].$2}\n'
-          '播放器：${widget.player.engineLabel}',
-          style: const TextStyle(color: Colors.white70, height: 1.5),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+    unawaited(
+      _showChromeListSheet(
+        title: '播放信息',
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Text(
+              '标题：${widget.title}\n'
+              '分辨率：$w x $h\n'
+              '进度：${fmtClockHms(pos)} / ${fmtClockHms(dur)}\n'
+              '倍速：x${_speeds[_speedIdx]}\n'
+              '比例：${_aspects[_aspectIdx].$2}\n'
+              '解码：${_decodeModes[_decodeIdx].$2}\n'
+              '播放器：${widget.player.engineLabel}',
+              style: TextStyle(color: Colors.white.withOpacity(0.75), height: 1.55, fontSize: 15),
+            ),
+          ),
         ],
       ),
     );
