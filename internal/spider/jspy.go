@@ -1,0 +1,455 @@
+package spider
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/bobo/KOTV/internal/localproxy"
+	"github.com/bobo/KOTV/internal/paths"
+	appruntime "github.com/bobo/KOTV/internal/runtime"
+	"github.com/bobo/KOTV/internal/util"
+
+	_ "embed"
+)
+
+//go:embed pyrunner.py
+var pyRunnerSrc string
+
+//go:embed pybase.py
+var pyBaseSrc string
+
+const pyCallTimeout = 45 * time.Second
+
+var ErrScriptInterrupted = errors.New("脚本调用已中断")
+
+var (
+	jsPyMu      sync.Mutex
+	jsPy        = map[string]Spider{}
+	recentJsKey string
+	recentPyKey string
+)
+
+type pySpider struct {
+	key, api, ext, jar string
+	scriptPath         string
+
+	mu     sync.Mutex
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	proc   atomic.Pointer[os.Process]
+	epoch  atomic.Uint64
+	nextID atomic.Uint64
+	inited bool
+}
+
+func newPySpider(key, api, ext, jar string) Spider {
+	jsPyMu.Lock()
+	defer jsPyMu.Unlock()
+	if s, ok := jsPy[jsPyKey(key, "py")]; ok {
+		return s
+	}
+	s := &pySpider{key: key, api: api, ext: ext, jar: jar}
+	jsPy[jsPyKey(key, "py")] = s
+	return s
+}
+
+func clearJsPy() {
+	jsPyMu.Lock()
+	spiders := make([]Spider, 0, len(jsPy))
+	for _, s := range jsPy {
+		spiders = append(spiders, s)
+	}
+	jsPy = map[string]Spider{}
+	recentJsKey = ""
+	recentPyKey = ""
+	jsPyMu.Unlock()
+	for _, s := range spiders {
+		s.Destroy()
+	}
+}
+
+func jsPyKey(key, kind string) string { return kind + ":" + key }
+
+func setRecentJs(key string) {
+	jsPyMu.Lock()
+	recentJsKey = key
+	jsPyMu.Unlock()
+}
+
+func setRecentPy(key string) {
+	jsPyMu.Lock()
+	recentPyKey = key
+	jsPyMu.Unlock()
+}
+
+func recentJsSpider() Spider {
+	jsPyMu.Lock()
+	defer jsPyMu.Unlock()
+	if recentJsKey == "" {
+		return nil
+	}
+	return jsPy[jsPyKey(recentJsKey, "js")]
+}
+
+func recentPySpider() Spider {
+	jsPyMu.Lock()
+	defer jsPyMu.Unlock()
+	if recentPyKey == "" {
+		return nil
+	}
+	return jsPy[jsPyKey(recentPyKey, "py")]
+}
+
+// InterruptScriptSpiders 打断正在运行的 Python/JavaScript 调用。
+func InterruptScriptSpiders() {
+	jsPyMu.Lock()
+	spiders := make([]Spider, 0, len(jsPy))
+	for _, s := range jsPy {
+		spiders = append(spiders, s)
+	}
+	jsPyMu.Unlock()
+	for _, spider := range spiders {
+		switch s := spider.(type) {
+		case *pySpider:
+			s.interrupt()
+		case *jsSpider:
+			s.interrupt()
+		}
+	}
+}
+
+func (s *pySpider) ensureScript() (string, error) {
+	if s.scriptPath != "" {
+		return s.scriptPath, nil
+	}
+	if st, err := os.Stat(s.api); err == nil && !st.IsDir() {
+		s.scriptPath = s.api
+		return s.api, nil
+	}
+	dest := filepath.Join(paths.PyCache(), util.MD5(s.api)+".py")
+	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
+		s.scriptPath = dest
+		return dest, nil
+	}
+	data, err := util.HTTPGet(s.api, nil)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(dest, []byte(data), 0o644); err != nil {
+		return "", err
+	}
+	s.scriptPath = dest
+	return dest, nil
+}
+
+func pyRunnerPath() (string, error) {
+	dest := filepath.Join(paths.PyCache(), "_kotv_runner.py")
+	current, _ := os.ReadFile(dest)
+	if !bytes.Equal(current, []byte(pyRunnerSrc)) {
+		if err := os.WriteFile(dest, []byte(pyRunnerSrc), 0o644); err != nil {
+			return "", err
+		}
+	}
+	baseDir := filepath.Join(paths.PyCache(), "base")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "__init__.py"), nil, 0o644); err != nil {
+		return "", err
+	}
+	basePath := filepath.Join(baseDir, "spider.py")
+	current, _ = os.ReadFile(basePath)
+	if !bytes.Equal(current, []byte(pyBaseSrc)) {
+		if err := os.WriteFile(basePath, []byte(pyBaseSrc), 0o644); err != nil {
+			return "", err
+		}
+	}
+	return dest, nil
+}
+
+func (s *pySpider) run(method string, args map[string]interface{}) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	script, err := s.ensureScript()
+	if err != nil {
+		return "", err
+	}
+	python := appruntime.Python()
+	if python == "" {
+		return "", fmt.Errorf("未找到捆绑 Python：请运行 ./scripts/prepare-runtime.sh 准备 runtime/python")
+	}
+	runner, err := pyRunnerPath()
+	if err != nil {
+		return "", err
+	}
+
+	startEpoch := s.epoch.Load()
+	if err := s.startLocked(python, runner, script); err != nil {
+		return "", err
+	}
+	if !s.inited && method != "init" {
+		if _, err := s.callLocked(startEpoch, "init", map[string]interface{}{"extend": s.ext}); err != nil {
+			s.stopLocked()
+			return "", err
+		}
+		s.inited = true
+	}
+	out, err := s.callLocked(startEpoch, method, args)
+	if err != nil {
+		return "", err
+	}
+	if method == "init" {
+		s.inited = true
+	}
+	return out, nil
+}
+
+func (s *pySpider) callLocked(startEpoch uint64, method string, args map[string]interface{}) (string, error) {
+	reqID := s.nextID.Add(1)
+	payload := map[string]interface{}{
+		"id":     reqID,
+		"method": method,
+		"args":   args,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
+	type exchangeResult struct {
+		line string
+		err  error
+	}
+
+	exchange := make(chan exchangeResult, 1)
+	stdin, stdout := s.stdin, s.stdout
+	go func() {
+		if _, err := stdin.Write(append(body, '\n')); err != nil {
+			exchange <- exchangeResult{err: err}
+			return
+		}
+		for {
+			line, err := stdout.ReadString('\n')
+			if err != nil {
+				exchange <- exchangeResult{err: err}
+				return
+			}
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "{") {
+				if line != "" {
+					log.Printf("[py:%s] 忽略非 JSON 输出: %s", s.key, line)
+				}
+				continue
+			}
+			var probe struct {
+				ID *uint64 `json:"id"`
+			}
+			if json.Unmarshal([]byte(line), &probe) != nil || probe.ID == nil {
+				log.Printf("[py:%s] 忽略无 id 的 JSON 输出: %s", s.key, truncatePyLog(line))
+				continue
+			}
+			if *probe.ID != reqID {
+				log.Printf("[py:%s] 忽略不匹配 id=%d (want %d)", s.key, *probe.ID, reqID)
+				continue
+			}
+			exchange <- exchangeResult{line: line}
+			return
+		}
+	}()
+
+	select {
+	case result := <-exchange:
+		if s.epoch.Load() != startEpoch {
+			s.stopLocked()
+			return "", ErrScriptInterrupted
+		}
+		if result.err != nil {
+			s.stopLocked()
+			return "", fmt.Errorf("Python 进程异常: %w", result.err)
+		}
+		var response struct {
+			ID     uint64          `json:"id"`
+			OK     bool            `json:"ok"`
+			Result json.RawMessage `json:"result"`
+			Error  string          `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(result.line), &response); err != nil {
+			return "", fmt.Errorf("Python 响应无效: %w", err)
+		}
+		if !response.OK {
+			return "", fmt.Errorf("Python %s 失败: %s", method, response.Error)
+		}
+		var text string
+		if len(response.Result) == 0 || string(response.Result) == "null" {
+			return "{}", nil
+		}
+		if err := json.Unmarshal(response.Result, &text); err == nil {
+			return strings.TrimSpace(text), nil
+		}
+		return strings.TrimSpace(string(response.Result)), nil
+	case <-time.After(pyCallTimeout):
+		s.epoch.Add(1)
+		if p := s.proc.Load(); p != nil {
+			_ = p.Kill()
+		}
+		s.stopLocked()
+		return "", fmt.Errorf("Python %s 调用超过 %s", method, pyCallTimeout)
+	}
+}
+
+func (s *pySpider) startLocked(python, runner, script string) error {
+	if s.cmd != nil && s.cmd.Process != nil && s.cmd.ProcessState == nil {
+		return nil
+	}
+	s.stopLocked()
+	cmd := exec.Command(python, "-u", runner, script, s.key, s.ext, s.api, paths.PyCache())
+	cmd.Env = append(os.Environ(),
+		"PYTHONUNBUFFERED=1",
+		"PYTHONUTF8=1",
+		"PYTHONIOENCODING=utf-8",
+		"PYTHONPATH="+paths.PyCache(),
+		"KOTV_PY_CACHE="+paths.PyCache(),
+		fmt.Sprintf("KOTV_PROXY_PORT=%d", localproxy.Port()),
+	)
+	setHiddenConsoleAttrs(cmd)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		return err
+	}
+	s.cmd, s.stdin, s.stdout = cmd, stdin, bufio.NewReader(stdout)
+	s.proc.Store(cmd.Process)
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			log.Printf("[py:%s] %s", s.key, scanner.Text())
+		}
+	}()
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
+func (s *pySpider) stopLocked() {
+	if s.stdin != nil {
+		_ = s.stdin.Close()
+	}
+	if p := s.proc.Swap(nil); p != nil {
+		_ = p.Kill()
+	}
+	s.cmd, s.stdin, s.stdout = nil, nil, nil
+	s.inited = false
+}
+
+func (s *pySpider) interrupt() {
+	s.epoch.Add(1)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p := s.proc.Load(); p != nil {
+		_ = p.Kill()
+	}
+	s.stopLocked()
+}
+
+func (s *pySpider) Init(ext string) error {
+	// 对齐 TV PyLoader.getSpider：computeIfAbsent 后 init 只一次。
+	s.mu.Lock()
+	if s.inited {
+		s.mu.Unlock()
+		return nil
+	}
+	s.ext = ext
+	s.mu.Unlock()
+	_, err := s.run("init", map[string]interface{}{"extend": ext})
+	return err
+}
+
+func truncatePyLog(line string) string {
+	if len(line) > 160 {
+		return line[:160] + "..."
+	}
+	return line
+}
+func (s *pySpider) HomeContent(filter bool) (string, error) {
+	return s.run("homeContent", map[string]interface{}{"filter": filter})
+}
+func (s *pySpider) HomeVideoContent() (string, error) { return s.run("homeVideoContent", nil) }
+func (s *pySpider) CategoryContent(tid, pg string, filter bool, extend map[string]string) (string, error) {
+	return s.run("categoryContent", map[string]interface{}{"tid": tid, "pg": pg, "filter": filter, "extend": extend})
+}
+func (s *pySpider) DetailContent(ids []string) (string, error) {
+	return s.run("detailContent", map[string]interface{}{"ids": ids})
+}
+func (s *pySpider) SearchContent(key string, quick bool, pg string) (string, error) {
+	return s.run("searchContent", map[string]interface{}{"key": key, "quick": quick, "pg": pg})
+}
+func (s *pySpider) PlayerContent(flag, id string, vipFlags []string) (string, error) {
+	return s.run("playerContent", map[string]interface{}{"flag": flag, "id": id, "vipFlags": vipFlags})
+}
+func (s *pySpider) LiveContent(url string) (string, error) {
+	return s.run("liveContent", map[string]interface{}{"url": url})
+}
+func (s *pySpider) Proxy(params map[string]string) (int, string, []byte, map[string]string, error) {
+	raw, err := s.run("localProxy", map[string]interface{}{"params": params})
+	if err != nil {
+		return 0, "", nil, nil, err
+	}
+	status, contentType, body, headers, parseErr := parseCatvodProxy(raw)
+	return status, contentType, body, headers, parseErr
+}
+
+func (s *pySpider) Action(action string) (string, error) {
+	return s.run("action", map[string]interface{}{"action": action})
+}
+
+func (s *pySpider) ManualVideoCheck() (bool, error) {
+	raw, err := s.run("manualVideoCheck", nil)
+	if err != nil {
+		return false, err
+	}
+	return parseJSTruthy(raw), nil
+}
+
+func (s *pySpider) IsVideoFormat(u string) (bool, error) {
+	raw, err := s.run("isVideoFormat", map[string]interface{}{"url": u})
+	if err != nil {
+		return false, err
+	}
+	return parseJSTruthy(raw), nil
+}
+
+func (s *pySpider) Destroy() {
+	s.mu.Lock()
+	if s.cmd != nil && s.inited {
+		_, _ = s.callLocked(s.epoch.Load(), "destroy", map[string]interface{}{})
+	}
+	s.stopLocked()
+	s.mu.Unlock()
+	s.interrupt()
+}

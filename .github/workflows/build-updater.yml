@@ -1,0 +1,59 @@
+name: build-updater
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            artifact: updater-linux-amd64
+            out: updater
+          - goos: linux
+            goarch: arm64
+            artifact: updater-linux-arm64
+            out: updater
+          - goos: windows
+            goarch: amd64
+            artifact: updater-windows-amd64
+            out: updater.exe
+          - goos: windows
+            goarch: arm64
+            artifact: updater-windows-arm64
+            out: updater.exe
+          - goos: darwin
+            goarch: amd64
+            artifact: updater-macos-amd64
+            out: updater
+          - goos: darwin
+            goarch: arm64
+            artifact: updater-macos-arm64
+            out: updater
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build updater
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -ldflags "-s -w" -o "dist/${{ matrix.out }}" ./cmd/updater
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.out }}

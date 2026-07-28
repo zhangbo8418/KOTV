@@ -1,0 +1,120 @@
+name: KOTV Flutter Win7 (Experimental)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+env:
+  FLUTTER_VERSION: "3.24.5"
+  # 可选：若你后续也维护自定义 flutter engine，可填 zip 下载地址并自动替换。
+  # 例如: https://github.com/<org>/<repo>/releases/download/<tag>/windows-x64-release.zip
+  KOTV_FLUTTER_ENGINE_ZIP_URL: ""
+
+jobs:
+  build-flutter-win7:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install go-legacy-win7
+        shell: pwsh
+        run: |
+          $ver = "1.26.5-1"
+          $zip = "go-legacy-win7-$ver.windows_amd64.zip"
+          $url = "https://github.com/thongtech/go-legacy-win7/releases/download/v$ver/$zip"
+          curl.exe -sSL -o "$env:RUNNER_TEMP\$zip" $url
+          Expand-Archive -Path "$env:RUNNER_TEMP\$zip" -DestinationPath "C:\" -Force
+          echo "GOROOT=C:\go-legacy-win7" >> $env:GITHUB_ENV
+          echo "C:\go-legacy-win7\bin" >> $env:GITHUB_PATH
+          & "C:\go-legacy-win7\bin\go.exe" version
+
+      - name: Install MSVCRT MinGW (Win7-safe CGO)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/niXman/mingw-builds-binaries/releases/download/15.2.0-rt_v13-rev1/x86_64-15.2.0-release-win32-seh-msvcrt-rt_v13-rev1.7z"
+          curl.exe -sSL -o "$env:RUNNER_TEMP\mingw.7z" $url
+          7z x "$env:RUNNER_TEMP\mingw.7z" -o"C:\mingw-msvcrt" | Out-Null
+          Get-ChildItem -Path "C:\mingw-msvcrt" -Recurse -Filter "libwinpthread.dll.a" -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -Force $_.FullName }
+          Get-ChildItem -Path "C:\mingw-msvcrt" -Recurse -Filter "libpthread.dll.a" -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -Force $_.FullName }
+          echo "C:\mingw-msvcrt\mingw64\bin" >> $env:GITHUB_PATH
+          & "C:\mingw-msvcrt\mingw64\bin\gcc.exe" --version
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Setup MSVC (Flutter Windows desktop)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Prepare runtime + build Win7 engine
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+          CC: gcc
+          CXX: g++
+          CGO_CFLAGS: "-O2"
+          CGO_CXXFLAGS: "-O2"
+          CGO_LDFLAGS: "-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic"
+          KOTV_JAVA_TOOLCHAIN: "21"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          ./scripts/prepare-runtime.sh windows-x64
+          (cd internal/spider && go run gen_qjsinc.go)
+          go build -ldflags "-s -w -extldflags '-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic -Wl,--subsystem,windows:6.01'" \
+            -o flutter/assets/engine/kotv-engine.exe ./cmd/engine
+          pwsh -File ./scripts/check-win7-deps.ps1 -Exe "flutter/assets/engine/kotv-engine.exe"
+
+      - name: Build Flutter Windows release (3.24.5)
+        shell: pwsh
+        run: |
+          Set-Location flutter
+          flutter --version
+          flutter config --enable-windows-desktop
+          flutter precache --windows
+          bash ../scripts/patch-flutter-sdk.sh
+
+          $sdkRoot = Split-Path (Split-Path (Get-Command flutter).Source -Parent) -Parent
+          if ("${{ env.KOTV_FLUTTER_ENGINE_ZIP_URL }}") {
+            $tmp = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_.FullName }
+            curl.exe -fsSL -o "$tmp\engine.zip" "${{ env.KOTV_FLUTTER_ENGINE_ZIP_URL }}"
+            Expand-Archive -Path "$tmp\engine.zip" -DestinationPath "$tmp\engine" -Force
+            $engineDir = Join-Path $sdkRoot "bin\cache\artifacts\engine\windows-x64-release"
+            if (Test-Path $engineDir) { Remove-Item -Recurse -Force $engineDir }
+            New-Item -ItemType Directory -Path $engineDir -Force | Out-Null
+            Copy-Item -Recurse -Force "$tmp\engine\*" $engineDir
+            Write-Host "custom engine replaced"
+          }
+
+          flutter pub get
+          flutter build windows --release
+
+      - name: Bundle runtime and engine
+        shell: pwsh
+        run: |
+          $out = "flutter\build\windows\x64\runner\Release"
+          if (-not (Test-Path "$out\kotv.exe")) { throw "Flutter build output missing: $out\kotv.exe" }
+          Copy-Item -Force "flutter\assets\engine\kotv-engine.exe" "$out\kotv-engine.exe"
+          Copy-Item -Recurse -Force "runtime" "$out\runtime"
+          if (Test-Path "cmd\updater\updater.exe") { Copy-Item -Force "cmd\updater\updater.exe" "$out\updater.exe" }
+
+      - name: Compress ZIP
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag) { $tag = "dev" }
+          Compress-Archive -Path "flutter\build\windows\x64\runner\Release\*" -DestinationPath "./KOTV-flutter-win7-experimental-${tag}.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flutter-win7-experimental
+          path: KOTV-flutter-win7-experimental-*.zip

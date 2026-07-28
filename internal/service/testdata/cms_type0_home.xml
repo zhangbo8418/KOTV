@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss>
+  <class>
+    <ty id="1">电影</ty>
+    <ty id="2">电视剧</ty>
+    <ty id="3">综艺</ty>
+  </class>
+  <list>
+    <video>
+      <id>1001</id>
+      <name>测试电影</name>
+      <type>电影</type>
+      <pic></pic>
+      <note>高清</note>
+      <year>2024</year>
+      <area>大陆</area>
+      <director>导演A</director>
+      <actor>演员B</actor>
+      <des>简介</des>
+    </video>
+    <video>
+      <id>1002</id>
+      <name>测试剧集</name>
+      <type>电视剧</type>
+      <pic></pic>
+      <note>更新至10集</note>
+    </video>
+  </list>
+</rss>

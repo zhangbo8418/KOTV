@@ -1,0 +1,631 @@
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+
+	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/localproxy"
+	"github.com/bobo/KOTV/internal/model"
+	"github.com/bobo/KOTV/internal/parse"
+	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/spider"
+	"github.com/bobo/KOTV/internal/util"
+)
+
+// Manager 管理点播配置，点播配置管理。
+type Manager struct {
+	mu   sync.RWMutex
+	api  model.Api
+	home model.Site
+	db   *database.DB
+}
+
+var defaultMgr *Manager
+
+func Default() *Manager {
+	return defaultMgr
+}
+
+func NewManager(db *database.DB) *Manager {
+	defaultMgr = &Manager{db: db, home: model.Site{Key: "", Name: ""}}
+	return defaultMgr
+}
+
+func (m *Manager) API() model.Api {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.api
+}
+
+func (m *Manager) Home() model.Site {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.home
+}
+
+// SetHome 切换首页站点，并持久化到 DB（并持久化）。
+func (m *Manager) SetHome(site model.Site) {
+	m.mu.Lock()
+	m.home = site
+	cfgURL := m.api.URL
+	m.mu.Unlock()
+	if m.db != nil && site.Key != "" && cfgURL != "" {
+		if err := m.db.SetConfigHome(cfgURL, database.ConfigTypeSite, site.Key); err != nil {
+			log.Printf("保存首页站点失败: %v", err)
+		}
+	}
+}
+
+func (m *Manager) Sites() []model.Site {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]model.Site, 0, len(m.api.Sites))
+	for _, s := range m.api.Sites {
+		if !s.IsHide() {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (m *Manager) GetSite(key string) *model.Site {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for i := range m.api.Sites {
+		if m.api.Sites[i].Key == key {
+			s := m.api.Sites[i]
+			return &s
+		}
+	}
+	return nil
+}
+
+// GetLive 对齐 TV LiveConfig.getLive：按直播源 name 查找（proxy siteKey 用）。
+func (m *Manager) GetLive(name string) *model.Live {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	for i := range m.api.Lives {
+		if m.api.Lives[i].Name == name {
+			l := m.api.Lives[i]
+			return &l
+		}
+	}
+	return nil
+}
+
+// ToggleSiteSearchable 切换可搜索。
+func (m *Manager) ToggleSiteSearchable(key string) (*model.Site, error) {
+	return m.toggleSiteFlag(key, true)
+}
+
+// ToggleSiteChangeable 切换可换源。
+func (m *Manager) ToggleSiteChangeable(key string) (*model.Site, error) {
+	return m.toggleSiteFlag(key, false)
+}
+
+// SetAllSitesSearchable 全部可搜索。
+func (m *Manager) SetAllSitesSearchable(on bool) error {
+	return m.setAllSiteFlags(true, on)
+}
+
+// SetAllSitesChangeable 全部可换源。
+func (m *Manager) SetAllSitesChangeable(on bool) error {
+	return m.setAllSiteFlags(false, on)
+}
+
+func (m *Manager) toggleSiteFlag(key string, searchable bool) (*model.Site, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.api.Sites {
+		if m.api.Sites[i].Key != key {
+			continue
+		}
+		site := &m.api.Sites[i]
+		ok := false
+		if searchable {
+			ok = site.SetSearchable(!site.IsSearchable())
+		} else {
+			ok = site.SetChangeable(!site.IsChangeable())
+		}
+		if !ok {
+			s := *site
+			return &s, nil
+		}
+		if err := m.persistSiteFlagsLocked(*site); err != nil {
+			return nil, err
+		}
+		if m.home.Key == site.Key {
+			m.home = *site
+		}
+		s := *site
+		return &s, nil
+	}
+	return nil, fmt.Errorf("site not found: %s", key)
+}
+
+func (m *Manager) setAllSiteFlags(searchable bool, on bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.api.Sites {
+		site := &m.api.Sites[i]
+		if searchable {
+			_ = site.SetSearchable(on)
+		} else {
+			_ = site.SetChangeable(on)
+		}
+		if err := m.persistSiteFlagsLocked(*site); err != nil {
+			return err
+		}
+		if m.home.Key == site.Key {
+			m.home = *site
+		}
+	}
+	return nil
+}
+
+func (m *Manager) persistSiteFlagsLocked(site model.Site) error {
+	if m.db == nil {
+		return nil
+	}
+	if site.ID > 0 {
+		return m.db.UpdateSiteFlags(site.ID, site.Searchable, site.Changeable)
+	}
+	cfg, err := m.db.FindConfig(m.api.URL, database.ConfigTypeSite)
+	if err != nil {
+		return err
+	}
+	if cfg == nil || cfg.ID == 0 {
+		return fmt.Errorf("config not found")
+	}
+	return m.db.UpdateSiteFlagsByKey(cfg.ID, site.Key, site.Searchable, site.Changeable)
+}
+
+func (m *Manager) Clear() {
+	m.mu.Lock()
+	m.api = model.Api{}
+	m.home = model.Site{Key: "", Name: ""}
+	m.mu.Unlock()
+	spider.Clear()
+}
+
+// InitFromSettings 从设置加载点播配置。
+func (m *Manager) InitFromSettings() error {
+	vod := normalizeVodSource(settings.Get(settings.VOD))
+	if vod == "" {
+		return fmt.Errorf("未配置点播源")
+	}
+	// http(s)/file URL 按远程或本地配置拉取
+	if looksLikeURL(vod) {
+		cfg, err := m.db.FindConfig(vod, database.ConfigTypeSite)
+		if err != nil {
+			return err
+		}
+		if cfg == nil {
+			cfg = &database.Config{Type: database.ConfigTypeSite, URL: vod}
+		} else {
+			cfg.URL = vod
+		}
+		return m.ParseConfig(cfg, false)
+	}
+	// 直接粘贴的 JSON 正文
+	if strings.HasPrefix(vod, "{") || strings.HasPrefix(vod, "[") {
+		cfg := &database.Config{Type: database.ConfigTypeSite, URL: "inline://vod", JSON: vod}
+		return m.ParseConfig(cfg, true)
+	}
+	cfg := &database.Config{Type: database.ConfigTypeSite, URL: vod}
+	return m.ParseConfig(cfg, false)
+}
+
+func looksLikeURL(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "file://")
+}
+
+// normalizeVodSource 本地配置路径统一成 file://，便于拉取配置并解析相对 spider.jar。
+func normalizeVodSource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" || looksLikeURL(source) || strings.HasPrefix(source, "{") || strings.HasPrefix(source, "[") {
+		return source
+	}
+	p := source
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, p[2:])
+		}
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if st, err := os.Stat(p); err == nil && !st.IsDir() {
+		u := url.URL{Scheme: "file", Path: filepath.ToSlash(p)}
+		return u.String()
+	}
+	return source
+}
+
+// LoadFromSource 加载 URL 或 JSON 正文，并写回设置。
+func (m *Manager) LoadFromSource(source string) error {
+	source = normalizeVodSource(source)
+	if source == "" {
+		return fmt.Errorf("请输入点播源 URL 或粘贴 JSON")
+	}
+	settings.Set(settings.VOD, source)
+	_ = settings.Save()
+	return m.InitFromSettings()
+}
+
+// ParseConfig 解析配置。
+func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
+	source := cfg.URL
+	if isJSON {
+		source = cfg.JSON
+	}
+	if !isJSON && strings.TrimSpace(source) == "" {
+		return fmt.Errorf("点播源地址无效")
+	}
+
+	data, err := m.fetchData(source, isJSON, cfg.JSON)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(data) == "" {
+		return fmt.Errorf("配置数据为空")
+	}
+
+	cleaned := util.CleanJSONComments(data)
+	if depots := parseDepotIndex(cleaned); len(depots) > 0 {
+		return m.loadDepotIndex(cfg, depots)
+	}
+
+	api, err := util.DecodeJSON[model.Api](cleaned)
+	if err != nil {
+		return fmt.Errorf("配置解析失败: %w", err)
+	}
+	if len(api.Sites) == 0 {
+		return fmt.Errorf("配置中没有可用站点")
+	}
+
+	api.URL = cfg.URL
+	api.Data = data
+	api.Ref++
+
+	// 后续相对 spider.jar / 站点 jar 都相对此基址解析。
+	spider.SetConfigBase(cfg.URL)
+
+	// 把配置里的 headers/proxy/hosts/doh 灌入 spider 侧 OkHttp。
+	spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, api.Doh)
+	// ads 黑名单用于网页嗅探拦广告域名（与 TV CustomWebView 一致）。
+	parse.SetAds(api.Ads)
+
+	if api.Spider != "" {
+		if err := spider.LoadJar(api.Spider, cfg.URL); err != nil {
+			log.Printf("spider.jar 加载失败: %v", err)
+		}
+	}
+
+	resolveSitePaths(&api)
+	resolveParsePaths(&api)
+	resolveApiAssets(&api)
+	// 对齐 TV VodConfig.setParses：非空时在首位插入超级解析（type=4）。
+	injectGodParse(&api)
+
+	visible := filterVisible(api.Sites)
+	home := resolveHome(cfg.Home, visible)
+	if home.Key == "" || isMetaSite(home) {
+		home = pickDefaultHome(visible)
+	}
+	if home.Key != "" {
+		cfg.Home = home.Key
+	}
+
+	cfgID, err := m.db.UpsertConfig(cfg)
+	if err != nil {
+		return err
+	}
+	_ = m.db.SyncSites(cfgID, api.Sites)
+
+	m.mu.Lock()
+	m.api = api
+	m.home = home
+	m.mu.Unlock()
+
+	return nil
+}
+
+// parseDepotIndex 识别多仓索引：{"urls":[{"name":"...","url":"..."}]}。
+func parseDepotIndex(raw string) []model.Depot {
+	type root struct {
+		Msg  string            `json:"msg"`
+		URLs []json.RawMessage `json:"urls"`
+	}
+	idx, err := util.DecodeJSON[root](raw)
+	if err != nil || len(idx.URLs) == 0 {
+		return nil
+	}
+	var out []model.Depot
+	for _, item := range idx.URLs {
+		var d model.Depot
+		if err := json.Unmarshal(item, &d); err == nil && strings.TrimSpace(d.URL) != "" {
+			out = append(out, d)
+			continue
+		}
+		var plain string
+		if err := json.Unmarshal(item, &plain); err == nil && strings.TrimSpace(plain) != "" {
+			out = append(out, model.Depot{URL: plain})
+		}
+	}
+	return out
+}
+
+// 批量写入 name+url → 删除索引自身 → 自动加载第一项真实配置。
+func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot) error {
+	if len(depots) == 0 {
+		return fmt.Errorf("仓库索引 urls 为空")
+	}
+	depotURLs := make(map[string]struct{}, len(depots))
+	for _, d := range depots {
+		url := strings.TrimSpace(d.URL)
+		if url == "" {
+			continue
+		}
+		depotURLs[url] = struct{}{}
+		cfg := &database.Config{
+			Type: database.ConfigTypeSite,
+			URL:  url,
+			Name: d.DisplayName(),
+		}
+		if _, err := m.db.UpsertConfig(cfg); err != nil {
+			return fmt.Errorf("写入线路 %s 失败: %w", d.DisplayName(), err)
+		}
+		log.Printf("仓库索引已入库: %s → %s", d.DisplayName(), url)
+	}
+	if len(depotURLs) == 0 {
+		return fmt.Errorf("仓库索引 urls 为空")
+	}
+
+	indexURL := strings.TrimSpace(index.URL)
+	if indexURL != "" {
+		if _, keep := depotURLs[indexURL]; !keep {
+			_ = m.db.DeleteConfigByURL(indexURL, database.ConfigTypeSite)
+		}
+	}
+
+	first := strings.TrimSpace(depots[0].URL)
+	settings.Set(settings.VOD, first)
+	_ = settings.Save()
+
+	next, err := m.db.FindConfig(first, database.ConfigTypeSite)
+	if err != nil {
+		return err
+	}
+	if next == nil {
+		next = &database.Config{Type: database.ConfigTypeSite, URL: first, Name: depots[0].DisplayName()}
+	}
+	log.Printf("仓库索引展开完成，加载首个线路: %s", first)
+	return m.ParseConfig(next, false)
+}
+
+func (m *Manager) fetchData(source string, isJSON bool, inline string) (string, error) {
+	if isJSON {
+		return inline, nil
+	}
+	source = normalizeVodSource(source)
+	if strings.HasPrefix(source, "file://") {
+		parsed, err := url.Parse(source)
+		if err != nil {
+			return "", err
+		}
+		name, err := url.PathUnescape(parsed.Path)
+		if err != nil {
+			return "", err
+		}
+		b, err := os.ReadFile(filepath.FromSlash(name))
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	}
+	return util.HTTPGet(source, nil)
+}
+
+func resolveHome(homeKey string, sites []model.Site) model.Site {
+	if homeKey != "" {
+		for _, s := range sites {
+			if s.Key == homeKey {
+				return s
+			}
+		}
+	}
+	return model.Site{}
+}
+
+func pickDefaultHome(sites []model.Site) model.Site {
+	for _, s := range sites {
+		if isMetaSite(s) {
+			continue
+		}
+		return s
+	}
+	if len(sites) > 0 {
+		return sites[0]
+	}
+	return model.Site{}
+}
+
+func isMetaSite(s model.Site) bool {
+	n := strings.ToLower(s.Name + " " + s.Key + " " + s.API)
+	for _, bad := range []string{
+		"intruduce", "introduce", "登录", "配置", "网盘登录", "说明", "公告", "push",
+		// 豆瓣首页多为 msearch: id，本站 detail 常为空，不宜作为默认首页。
+		"douban", "豆瓣",
+	} {
+		if strings.Contains(n, bad) {
+			return true
+		}
+	}
+	return false
+}
+
+func filterVisible(sites []model.Site) []model.Site {
+	out := make([]model.Site, 0, len(sites))
+	for _, s := range sites {
+		if !s.IsHide() {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// injectGodParse 对齐 TV VodConfig.setParses：parses 非空时在首位插入超级解析。
+func injectGodParse(api *model.Api) {
+	if api == nil || len(api.Parses) == 0 {
+		return
+	}
+	god := model.Parse{
+		Name: "超级解析",
+		Type: model.FlexInt{Valid: true, Value: 4},
+	}
+	api.Parses = append([]model.Parse{god}, api.Parses...)
+}
+
+// resolveSitePaths 将站点 api/ext/jar 相对路径解析为绝对 URL（站点路径解析）。
+func resolveSitePaths(api *model.Api) {
+	base := strings.TrimSpace(api.URL)
+	spiderJar := strings.TrimSpace(api.Spider)
+	for i := range api.Sites {
+		site := &api.Sites[i]
+		site.API = resolveSiteField(base, site.API)
+		if ext := strings.TrimSpace(site.Ext.String()); ext != "" {
+			site.Ext = model.FlexString(resolveSiteField(base, ext))
+		}
+		// 对齐 TV Site.objectFrom：jar 空则继承根 spider。
+		if strings.TrimSpace(site.Jar) == "" {
+			site.Jar = spiderJar
+		} else {
+			site.Jar = resolveSiteField(base, site.Jar)
+		}
+	}
+	// 对齐 TV Live.objectFrom：直播 jar 空则继承根 spider。
+	for i := range api.Lives {
+		live := &api.Lives[i]
+		if strings.TrimSpace(live.API) != "" {
+			live.API = resolveSiteField(base, live.API)
+		}
+		if ext := strings.TrimSpace(live.Ext.String()); ext != "" {
+			live.Ext = model.FlexString(resolveSiteField(base, ext))
+		}
+		if strings.TrimSpace(live.JAR) == "" {
+			live.JAR = spiderJar
+		} else {
+			live.JAR = resolveSiteField(base, live.JAR)
+		}
+	}
+}
+
+// resolveParsePaths 对齐 TV Parse.getUrl → UrlUtil.convert：解析器 url 支持 assets/proxy/file/相对路径。
+func resolveParsePaths(api *model.Api) {
+	if api == nil {
+		return
+	}
+	base := strings.TrimSpace(api.URL)
+	for i := range api.Parses {
+		p := &api.Parses[i]
+		if u := strings.TrimSpace(p.URL); u != "" {
+			p.URL = resolveSiteField(base, u)
+		}
+	}
+}
+
+// resolveApiAssets 解析配置根上的 logo/wallpaper 相对路径（如 "../bing"）。
+func resolveApiAssets(api *model.Api) {
+	if api == nil {
+		return
+	}
+	base := strings.TrimSpace(api.URL)
+	if w := strings.TrimSpace(api.Wallpaper); w != "" {
+		api.Wallpaper = resolveSiteField(base, w)
+	}
+	if logo := strings.TrimSpace(api.Logo); logo != "" {
+		api.Logo = resolveSiteField(base, logo)
+	}
+}
+
+func resolveSiteField(base, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return value
+	}
+	// 特殊 scheme 交给本地 HTTP 服务。
+	localBase := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
+	if strings.HasPrefix(value, "assets://") {
+		return localBase + "/" + strings.TrimPrefix(value, "assets://")
+	}
+	if strings.HasPrefix(value, "proxy://") {
+		return localBase + "/proxy?" + strings.TrimPrefix(value, "proxy://")
+	}
+	if strings.HasPrefix(value, "file://") {
+		path := url.PathEscape(strings.TrimPrefix(value, "file://"))
+		path = strings.ReplaceAll(path, "%2F", "/")
+		return localBase + "/file/" + path
+	}
+	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") ||
+		strings.HasPrefix(value, "csp_") {
+		return value
+	}
+	// 纯 JSON/脚本正文不当 URL 解析
+	if strings.HasPrefix(value, "{") || strings.HasPrefix(value, "[") || strings.Contains(value, "\n") {
+		return value
+	}
+	// JAR 站常见 ext 为 Base64（如 csp_BD）。不会把它拼到配置根上；
+	// 若误 ResolveRelativeURL，会变成带 ':' 的绝对 URL，随后 base64Decode 直接炸。
+	if looksLikeBase64Payload(value) {
+		return value
+	}
+	if base == "" {
+		return value
+	}
+	if resolved := util.ResolveRelativeURL(base, value); resolved != "" {
+		return resolved
+	}
+	return value
+}
+
+// looksLikeBase64Payload 识别不透明 Base64 载荷（无路径/扩展名语义）。
+func looksLikeBase64Payload(s string) bool {
+	if len(s) < 16 {
+		return false
+	}
+	if strings.ContainsAny(s, ".:\\") || strings.Contains(s, "://") {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		case c == '+', c == '/', c == '=', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Manager) Spider(site model.Site) spider.Spider {
+	jar := site.Jar
+	if jar == "" {
+		jar = m.API().Spider
+	}
+	spider.SetRecent(site.Key, site.API, jar)
+	return spider.Get(site.Key, site.API, site.Ext.String(), jar)
+}

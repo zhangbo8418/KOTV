@@ -1,0 +1,40 @@
+# KOTV
+
+# Build / local binaries
+bin/
+/KOTV
+/KO影视
+*.exe
+*.test
+*.dmg
+fail
+.gocache/
+
+# OS / editor junk
+.DS_Store
+.tmp-*.png
+.tmp-*.jpg
+*.swp
+*~
+__pycache__/
+*.pyc
+
+# Bridge build artifacts
+bridge/build/
+bridge/spider-bridge.jar
+.gradle/
+bridge/.gradle-bootstrap/
+!bridge/gradle/wrapper/gradle-wrapper.jar
+
+# Bundled runtimes & packages (download via scripts)
+# 仅忽略仓库根目录 runtime/，勿匹配 internal/runtime 源码包
+.runtime-cache/
+/runtime/
+/dist/
+
+# Windows resource embedding
+rsrc_windows_*.syso
+
+# Generated QuickJS headers for spider ModuleLoader CGO
+internal/spider/qjsinc/
+

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#243DD0">
+  <title>KO影视 · 遥控</title>
+  <link rel="stylesheet" href="css/ui.css">
+  <script src="js/script.js" defer></script>
+</head>
+<body>
+  <div class="bg-glow bg-glow-a"></div>
+  <div class="bg-glow bg-glow-b"></div>
+
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">KO</div>
+        <div>
+          <div class="brand-title">KO影视</div>
+          <div class="brand-sub" id="device_info">连接中…</div>
+        </div>
+      </div>
+      <div class="status-pill" id="conn_state">在线</div>
+    </header>
+
+    <main class="panels">
+      <!-- 播放 -->
+      <section id="panel-play" class="panel active">
+        <div class="glass hero">
+          <div class="disc-wrap" id="disc_wrap">
+            <div class="disc-ring"></div>
+            <div class="disc-core">
+              <svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+            </div>
+          </div>
+          <div class="hero-meta">
+            <div class="hero-label">正在播放</div>
+            <div class="hero-title" id="media_title">未播放</div>
+            <div class="hero-state" id="media_state">等待指令</div>
+          </div>
+          <div class="progress-wrap">
+            <div class="progress-bar"><div class="progress-fill" id="progress_fill"></div></div>
+            <div class="progress-time">
+              <span id="media_pos">00:00</span>
+              <span id="media_dur">00:00</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-grid">
+          <button class="ctrl-btn" data-action="prev" title="上一集">
+            <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          </button>
+          <button class="ctrl-btn" data-action="back10" title="-10秒">
+            <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="12" y="15" text-anchor="middle" font-size="7" fill="currentColor">10</text></svg>
+          </button>
+          <button class="ctrl-btn primary" data-action="toggle" title="播放/暂停">
+            <svg id="icon_play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="icon_pause" class="hidden" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          </button>
+          <button class="ctrl-btn" data-action="forward10" title="+10秒">
+            <svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/><text x="12" y="15" text-anchor="middle" font-size="7" fill="currentColor">10</text></svg>
+          </button>
+          <button class="ctrl-btn" data-action="next" title="下一集">
+            <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+        </div>
+        <button class="btn-stop" data-action="stop">停止播放</button>
+      </section>
+
+      <!-- 搜索 -->
+      <section id="panel-search" class="panel">
+        <div class="glass card">
+          <h2>远程搜索</h2>
+          <p class="hint">关键词会发送到桌面端并自动搜索</p>
+          <input id="keyword" class="field" type="search" placeholder="输入片名、演员…" autocomplete="off">
+          <button class="btn-primary" id="btn_search">开始搜索</button>
+        </div>
+      </section>
+
+      <!-- 推送 -->
+      <section id="panel-push" class="panel">
+        <div class="glass card">
+          <h2>推送播放</h2>
+          <p class="hint">支持 http(s) / m3u8 / mp4 链接</p>
+          <input id="push_url" class="field" type="url" placeholder="粘贴播放地址…" autocomplete="off">
+          <button class="btn-primary" id="btn_push">推送到桌面</button>
+        </div>
+      </section>
+
+      <!-- 弹幕 -->
+      <section id="panel-danmaku" class="panel">
+        <div class="glass card">
+          <h2>发送弹幕</h2>
+          <div class="chip-row">
+            <button class="chip active" data-mode="1">滚动</button>
+            <button class="chip" data-mode="5">顶部</button>
+            <button class="chip" data-mode="4">底部</button>
+            <button class="chip" data-mode="6">反向</button>
+          </div>
+          <div class="chip-row">
+            <button class="chip" data-size="18">小</button>
+            <button class="chip active" data-size="25">默认</button>
+            <button class="chip" data-size="36">大</button>
+          </div>
+          <input id="danmaku_text" class="field" type="text" placeholder="输入弹幕内容…" maxlength="100">
+          <button class="btn-primary" id="btn_danmaku">发送</button>
+        </div>
+      </section>
+
+      <!-- 设置 -->
+      <section id="panel-setting" class="panel">
+        <div class="glass card">
+          <h2>远程配置</h2>
+          <p class="hint">名称填 vod / live，内容为配置 URL 或 JSON</p>
+          <div class="field-row">
+            <input id="setting_name" class="field short" type="text" placeholder="vod" value="vod">
+            <input id="setting_text" class="field" type="text" placeholder="配置地址或内容">
+          </div>
+          <button class="btn-primary" id="btn_setting">保存到桌面</button>
+        </div>
+      </section>
+
+      <!-- 文件 -->
+      <section id="panel-file" class="panel">
+        <div class="glass card file-toolbar">
+          <h2>本机文件</h2>
+          <p class="hint" id="file_path_hint">应用数据目录</p>
+          <div class="file-actions">
+            <button class="chip" id="btn_file_up" type="button">上级</button>
+            <button class="chip" id="btn_file_refresh" type="button">刷新</button>
+            <button class="chip" id="btn_file_mkdir" type="button">新建文件夹</button>
+            <button class="chip" id="btn_file_upload" type="button">上传</button>
+          </div>
+          <input type="file" id="file_uploader" multiple hidden>
+        </div>
+        <div class="file-list" id="file_list"></div>
+      </section>
+    </main>
+
+    <nav class="nav">
+      <button class="nav-item active" data-tab="play">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <span>播放</span>
+      </button>
+      <button class="nav-item" data-tab="search">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <span>搜索</span>
+      </button>
+      <button class="nav-item" data-tab="push">
+        <svg viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0012 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 000 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+        <span>推送</span>
+      </button>
+      <button class="nav-item" data-tab="file">
+        <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+        <span>文件</span>
+      </button>
+      <button class="nav-item" data-tab="danmaku">
+        <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+        <span>弹幕</span>
+      </button>
+      <button class="nav-item" data-tab="setting">
+        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96a7.035 7.035 0 00-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.488.488 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.49.37 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.58 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/></svg>
+        <span>设置</span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+</body>
+</html>

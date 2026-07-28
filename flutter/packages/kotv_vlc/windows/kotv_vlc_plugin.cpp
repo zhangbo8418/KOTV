@@ -1,0 +1,297 @@
+#include "kotv_vlc_plugin.h"
+
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
+
+#include <chrono>
+#include <cstring>
+
+extern "C" {
+#include "vlc_shim.h"
+}
+
+namespace kotv_vlc {
+
+void KotvVlcPlugin::RegisterWithRegistrar(
+    flutter::PluginRegistrarWindows* registrar) {
+  auto plugin = std::make_unique<KotvVlcPlugin>(registrar);
+  registrar->AddPlugin(std::move(plugin));
+}
+
+KotvVlcPlugin::KotvVlcPlugin(flutter::PluginRegistrarWindows* registrar)
+    : registrar_(registrar), textures_(registrar->texture_registrar()) {
+  channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      registrar->messenger(), "kotv_vlc",
+      &flutter::StandardMethodCodec::GetInstance());
+  channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        HandleMethodCall(call, std::move(result));
+      });
+  frame_rgba_.resize(0);
+}
+
+KotvVlcPlugin::~KotvVlcPlugin() { DisposePlayer(); }
+
+void KotvVlcPlugin::HandleMethodCall(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  const auto* args =
+      std::get_if<flutter::EncodableMap>(method_call.arguments());
+  auto arg_string = [&](const char* key) -> std::string {
+    if (!args) return {};
+    auto it = args->find(flutter::EncodableValue(key));
+    if (it == args->end()) return {};
+    if (const auto* s = std::get_if<std::string>(&it->second)) return *s;
+    return {};
+  };
+  auto arg_int = [&](const char* key, int64_t def = 0) -> int64_t {
+    if (!args) return def;
+    auto it = args->find(flutter::EncodableValue(key));
+    if (it == args->end()) return def;
+    if (const auto* i = std::get_if<int32_t>(&it->second)) return *i;
+    if (const auto* i = std::get_if<int64_t>(&it->second)) return *i;
+    if (const auto* d = std::get_if<double>(&it->second)) return (int64_t)*d;
+    return def;
+  };
+  auto arg_double = [&](const char* key, double def = 0) -> double {
+    if (!args) return def;
+    auto it = args->find(flutter::EncodableValue(key));
+    if (it == args->end()) return def;
+    if (const auto* d = std::get_if<double>(&it->second)) return *d;
+    if (const auto* i = std::get_if<int32_t>(&it->second)) return *i;
+    if (const auto* i = std::get_if<int64_t>(&it->second)) return (double)*i;
+    return def;
+  };
+  auto arg_bool = [&](const char* key) -> bool {
+    if (!args) return false;
+    auto it = args->find(flutter::EncodableValue(key));
+    if (it == args->end()) return false;
+    if (const auto* b = std::get_if<bool>(&it->second)) return *b;
+    return false;
+  };
+
+  const auto& method = method_call.method_name();
+  if (method == "create") {
+    DisposePlayer();
+    CreateTexture();
+    flutter::EncodableMap out;
+    out[flutter::EncodableValue("textureId")] =
+        flutter::EncodableValue(texture_id_);
+    result->Success(flutter::EncodableValue(out));
+    return;
+  }
+  if (method == "load") {
+    std::string err;
+    if (!Load(arg_string("libDir"), arg_string("pluginDir"), &err)) {
+      result->Error("load", err);
+      return;
+    }
+    result->Success();
+    return;
+  }
+  if (method == "play") {
+    std::string err;
+    if (!Play(arg_string("url"), &err)) {
+      result->Error("play", err);
+      return;
+    }
+    result->Success();
+    return;
+  }
+  if (method == "stop") {
+    Stop();
+    result->Success();
+    return;
+  }
+  if (method == "pause") {
+    kotv_vlc_pause(1);
+    result->Success();
+    return;
+  }
+  if (method == "resume") {
+    kotv_vlc_pause(0);
+    result->Success();
+    return;
+  }
+  if (method == "toggle") {
+    const bool playing = kotv_vlc_is_playing() != 0;
+    kotv_vlc_pause(playing ? 1 : 0);
+    flutter::EncodableMap out;
+    out[flutter::EncodableValue("playing")] =
+        flutter::EncodableValue(!playing);
+    result->Success(flutter::EncodableValue(out));
+    return;
+  }
+  if (method == "seek") {
+    kotv_vlc_set_time(arg_int("ms"));
+    result->Success();
+    return;
+  }
+  if (method == "volume") {
+    kotv_vlc_set_volume((int)arg_int("value", 80));
+    result->Success();
+    return;
+  }
+  if (method == "rate") {
+    kotv_vlc_set_rate((float)arg_double("value", 1.0));
+    result->Success();
+    return;
+  }
+  if (method == "decode") {
+    std::string mode = arg_string("mode");
+    if (mode.empty()) {
+      mode = arg_bool("soft") ? "soft" : "hard";
+    }
+    if (mode == "soft")
+      kotv_vlc_set_decode(1);
+    else if (mode == "hard")
+      kotv_vlc_set_decode(0);
+    else
+      kotv_vlc_set_decode(-1);
+    result->Success();
+    return;
+  }
+  if (method == "status") {
+    int w = 0, h = 0;
+    {
+      std::lock_guard<std::mutex> lock(frame_mu_);
+      w = frame_w_;
+      h = frame_h_;
+    }
+    int vw = 0, vh = 0;
+    if (kotv_vlc_video_size(&vw, &vh) == 0 && vw > 0 && vh > 0) {
+      w = vw;
+      h = vh;
+    }
+    flutter::EncodableMap out;
+    out[flutter::EncodableValue("playing")] =
+        flutter::EncodableValue(kotv_vlc_is_playing() != 0);
+    out[flutter::EncodableValue("positionMs")] =
+        flutter::EncodableValue((int64_t)kotv_vlc_get_time());
+    out[flutter::EncodableValue("durationMs")] =
+        flutter::EncodableValue((int64_t)kotv_vlc_get_length());
+    out[flutter::EncodableValue("width")] = flutter::EncodableValue(w);
+    out[flutter::EncodableValue("height")] = flutter::EncodableValue(h);
+    out[flutter::EncodableValue("rate")] =
+        flutter::EncodableValue((double)kotv_vlc_get_rate());
+    out[flutter::EncodableValue("textureId")] =
+        flutter::EncodableValue(texture_id_);
+    result->Success(flutter::EncodableValue(out));
+    return;
+  }
+  if (method == "dispose") {
+    DisposePlayer();
+    result->Success();
+    return;
+  }
+  result->NotImplemented();
+}
+
+int64_t KotvVlcPlugin::CreateTexture() {
+  texture_ = std::make_unique<flutter::TextureVariant>(flutter::PixelBufferTexture(
+      [this](size_t* width, size_t* height) -> const FlutterDesktopPixelBuffer* {
+        return CopyPixelBuffer(width, height);
+      }));
+  texture_id_ = textures_->RegisterTexture(texture_.get());
+  return texture_id_;
+}
+
+bool KotvVlcPlugin::Load(const std::string& lib_dir,
+                         const std::string& plugin_dir, std::string* err) {
+  const int rc = kotv_vlc_load(lib_dir.c_str(), plugin_dir.c_str());
+  if (rc != 0) {
+    if (err) *err = "libvlc load failed (" + std::to_string(rc) + ")";
+    return false;
+  }
+  ready_ = true;
+  return true;
+}
+
+bool KotvVlcPlugin::Play(const std::string& url, std::string* err) {
+  if (!ready_) {
+    if (err) *err = "libvlc not loaded";
+    return false;
+  }
+  const int rc = kotv_vlc_play(url.c_str());
+  if (rc != 0) {
+    if (err) *err = "vlc play failed (" + std::to_string(rc) + ")";
+    return false;
+  }
+  StartPump();
+  return true;
+}
+
+void KotvVlcPlugin::Stop() {
+  StopPump();
+  kotv_vlc_stop();
+}
+
+void KotvVlcPlugin::DisposePlayer() {
+  StopPump();
+  kotv_vlc_stop();
+  ready_ = false;
+  if (texture_id_ >= 0 && textures_) {
+    textures_->UnregisterTexture(texture_id_);
+    texture_id_ = -1;
+  }
+  texture_.reset();
+}
+
+void KotvVlcPlugin::StartPump() {
+  if (pump_running_.exchange(true)) return;
+  pump_ = std::thread([this]() {
+    std::vector<uint8_t> tmp;  // 按实际分辨率动态扩容（含 8K）
+    while (pump_running_) {
+      int pw = 0, ph = 0;
+      int64_t pseq = 0;
+      if (kotv_vlc_peek_frame(&pw, &ph, &pseq) && pw > 1 && ph > 1) {
+        const size_t need = (size_t)pw * (size_t)ph * 4;
+        if (tmp.size() < need) tmp.resize(need);
+      } else if (tmp.empty()) {
+        tmp.resize(1280ull * 720ull * 4);
+      }
+      int w = 0, h = 0;
+      int ok = kotv_vlc_take_frame(tmp.data(), (int)tmp.size(), &w, &h);
+      if (!ok && w > 1 && h > 1) {
+        const size_t need = (size_t)w * (size_t)h * 4;
+        if (tmp.size() < need) tmp.resize(need);
+        ok = kotv_vlc_take_frame(tmp.data(), (int)tmp.size(), &w, &h);
+      }
+      if (ok && w > 1 && h > 1) {
+        const size_t bytes = (size_t)w * (size_t)h * 4;
+        {
+          std::lock_guard<std::mutex> lock(frame_mu_);
+          frame_rgba_.assign(tmp.begin(), tmp.begin() + (std::ptrdiff_t)bytes);
+          for (size_t i = 3; i < bytes; i += 4) frame_rgba_[i] = 255;
+          frame_w_ = w;
+          frame_h_ = h;
+        }
+        if (texture_id_ >= 0 && textures_) {
+          textures_->MarkTextureFrameAvailable(texture_id_);
+        }
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+  });
+}
+
+void KotvVlcPlugin::StopPump() {
+  if (!pump_running_.exchange(false)) return;
+  if (pump_.joinable()) pump_.join();
+}
+
+const FlutterDesktopPixelBuffer* KotvVlcPlugin::CopyPixelBuffer(size_t* width,
+                                                                size_t* height) {
+  std::lock_guard<std::mutex> lock(frame_mu_);
+  if (frame_w_ < 2 || frame_h_ < 2 || frame_rgba_.empty()) {
+    return nullptr;
+  }
+  pixel_buffer_.buffer = frame_rgba_.data();
+  pixel_buffer_.width = (size_t)frame_w_;
+  pixel_buffer_.height = (size_t)frame_h_;
+  *width = pixel_buffer_.width;
+  *height = pixel_buffer_.height;
+  return &pixel_buffer_;
+}
+
+}  // namespace kotv_vlc

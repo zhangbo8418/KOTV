@@ -1,0 +1,503 @@
+# 打 tag / 手动触发 → 多平台打包 → GitHub Release
+name: KOTV Build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+
+# prepare-runtime.sh 拉 GitHub Releases（Chromium REWORK / mpv 等）需要认证，避免匿名 API 403
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  set-tag:
+    uses: ./.github/workflows/set-tag-workflow.yml
+
+  build-updater:
+    uses: ./.github/workflows/build-updater.yml
+    with:
+      release_tag: ${{ needs.set-tag.outputs.tag }}
+    needs: [set-tag]
+
+  build-win-amd64:
+    runs-on: windows-latest
+    needs: [set-tag, build-updater]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install go-legacy-win7
+        shell: pwsh
+        run: |
+          $ver = "1.26.5-1"
+          $zip = "go-legacy-win7-$ver.windows_amd64.zip"
+          $url = "https://github.com/thongtech/go-legacy-win7/releases/download/v$ver/$zip"
+          curl.exe -sSL -o "$env:RUNNER_TEMP\$zip" $url
+          Expand-Archive -Path "$env:RUNNER_TEMP\$zip" -DestinationPath "C:\" -Force
+          echo "GOROOT=C:\go-legacy-win7" >> $env:GITHUB_ENV
+          echo "C:\go-legacy-win7\bin" >> $env:GITHUB_PATH
+          & "C:\go-legacy-win7\bin\go.exe" version
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+
+      - name: Install MSVCRT MinGW (Win7-safe CGO)
+        shell: pwsh
+        run: |
+          # win32 线程模型 + 去掉 winpthread 的 DLL import，迫使 crawshaw/QuickJS 静态链
+          $url = "https://github.com/niXman/mingw-builds-binaries/releases/download/15.2.0-rt_v13-rev1/x86_64-15.2.0-release-win32-seh-msvcrt-rt_v13-rev1.7z"
+          curl.exe -sSL -o "$env:RUNNER_TEMP\mingw.7z" $url
+          7z x "$env:RUNNER_TEMP\mingw.7z" -o"C:\mingw-msvcrt" | Out-Null
+          Get-ChildItem -Path "C:\mingw-msvcrt" -Recurse -Filter "libwinpthread.dll.a" -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "remove $($_.FullName)"
+            Remove-Item -Force $_.FullName
+          }
+          Get-ChildItem -Path "C:\mingw-msvcrt" -Recurse -Filter "libpthread.dll.a" -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "remove $($_.FullName)"
+            Remove-Item -Force $_.FullName
+          }
+          echo "C:\mingw-msvcrt\mingw64\bin" >> $env:GITHUB_PATH
+          & "C:\mingw-msvcrt\mingw64\bin\gcc.exe" --version
+          & "C:\mingw-msvcrt\mingw64\bin\gcc.exe" -v 2>&1 | Select-String "Thread model"
+      - name: Build + package (windows-x64)
+        shell: bash
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          CC: gcc
+          CXX: g++
+          CGO_CFLAGS: "-O2"
+          CGO_CXXFLAGS: "-O2"
+          CGO_LDFLAGS: "-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic"
+          KOTV_JAVA_TOOLCHAIN: "21"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+          GRADLE_OPTS: "-Dfile.encoding=UTF-8"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          ./scripts/prepare-runtime.sh windows-x64
+          test -f runtime/libvlc/libvlc.dll
+          test -d runtime/libvlc/plugins
+          ! test -d runtime/vlc
+          ! test -d runtime/mpv
+          ./scripts/package.sh windows-x64
+          ./scripts/verify-runtime.sh dist/KOTV-windows-x64/runtime windows-x64
+          ! test -d dist/KOTV-windows-x64/bridge
+          ! test -d dist/KOTV-windows-x64/spider
+          test -f dist/KOTV-windows-x64/runtime/jre/bin/server/jvm.dll
+          test -f dist/KOTV-windows-x64/runtime/bridge/spider-bridge.jar
+
+      - name: Win7 dependency gate (QuickJS/CGO)
+        shell: pwsh
+        run: ./scripts/check-win7-deps.ps1 -Exe "dist/KOTV-windows-x64/KOTV.exe"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-windows-amd64
+          path: dist/updater-win
+
+      - name: Compress ZIP
+        shell: pwsh
+        run: |
+          Copy-Item -Force "dist/updater-win/updater.exe" "dist/KOTV-windows-x64/updater.exe"
+          $tag = "${{ needs.set-tag.outputs.tag }}"
+          Compress-Archive -Path "dist/KOTV-windows-x64\*" -DestinationPath "./KOTV-win-amd64-${tag}.zip" -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer (KO影视)
+        shell: pwsh
+        run: |
+          ./scripts/make-win-installer.ps1 -Plat windows-x64 -Tag "${{ needs.set-tag.outputs.tag }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-amd64-file
+          path: |
+            KOTV-win-amd64-*.zip
+            KOTV-win-amd64-*-setup.exe
+
+  build-win-arm64:
+    runs-on: windows-11-arm
+    needs: [set-tag, build-updater]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # 全平台统一 Liberica 21（与捆绑 JRE 一致）
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+
+      # 系统自带/Git 的 gcc 往往是 x86_64，编 ARM64 CGO 会炸 gcc_arm64.S。
+      # llvm-mingw 是目前可用的 Windows on ARM64 工具链。
+      - name: Install llvm-mingw (aarch64)
+        shell: pwsh
+        run: |
+          $ver = "20260616"
+          $zip = "llvm-mingw-$ver-ucrt-aarch64.zip"
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/$zip"
+          $dest = "C:\llvm-mingw"
+          curl.exe -sSL -o "$env:RUNNER_TEMP\$zip" $url
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Expand-Archive -Path "$env:RUNNER_TEMP\$zip" -DestinationPath "C:\" -Force
+          $root = Get-ChildItem "C:\" -Directory -Filter "llvm-mingw-*" | Select-Object -First 1
+          if (-not $root) { throw "llvm-mingw extract failed" }
+          Rename-Item $root.FullName $dest
+          echo "$dest\bin" >> $env:GITHUB_PATH
+          & "$dest\bin\aarch64-w64-mingw32-clang.exe" --version
+
+      - name: Build + package (windows-arm64)
+        shell: bash
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          KOTV_JAVA_TOOLCHAIN: "21"
+          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+          GRADLE_OPTS: "-Dfile.encoding=UTF-8"
+          CC: aarch64-w64-mingw32-clang
+          CXX: aarch64-w64-mingw32-clang++
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          command -v aarch64-w64-mingw32-clang
+          aarch64-w64-mingw32-clang --version
+          ./scripts/prepare-runtime.sh windows-arm64
+          test -f runtime/libvlc/libvlc.dll
+          test -d runtime/libvlc/plugins
+          ! test -d runtime/vlc
+          ! test -d runtime/mpv
+          ./scripts/package.sh windows-arm64
+          ./scripts/verify-runtime.sh dist/KOTV-windows-arm64/runtime windows-arm64
+          ! test -d dist/KOTV-windows-arm64/bridge
+          ! test -d dist/KOTV-windows-arm64/spider
+          test -f dist/KOTV-windows-arm64/runtime/jre/bin/server/jvm.dll
+          test -f dist/KOTV-windows-arm64/runtime/bridge/spider-bridge.jar
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-windows-arm64
+          path: dist/updater-win-arm64
+
+      - name: Compress ZIP
+        shell: pwsh
+        run: |
+          Copy-Item -Force "dist/updater-win-arm64/updater.exe" "dist/KOTV-windows-arm64/updater.exe"
+          $tag = "${{ needs.set-tag.outputs.tag }}"
+          Compress-Archive -Path "dist/KOTV-windows-arm64\*" -DestinationPath "./KOTV-win-arm64-${tag}.zip" -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer (KO影视)
+        shell: pwsh
+        run: |
+          ./scripts/make-win-installer.ps1 -Plat windows-arm64 -Tag "${{ needs.set-tag.outputs.tag }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-arm64-file
+          path: |
+            KOTV-win-arm64-*.zip
+            KOTV-win-arm64-*-setup.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: [set-tag, build-updater]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+
+      - name: Install Linux CGO deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev xorg-dev libxkbcommon-dev gcc pkg-config unzip curl \
+            libmpv2 libmpv-dev vlc vlc-plugin-base libvlc-dev
+
+      - name: Build + package (linux-x64)
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          KOTV_JAVA_TOOLCHAIN: "21"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          ./scripts/prepare-runtime.sh linux-x64
+          test -f runtime/libvlc/libvlc.so.5 || test -f runtime/libvlc/libvlc.so
+          test -d runtime/libvlc/plugins
+          ! test -d runtime/vlc
+          ! test -d runtime/mpv
+          ./scripts/package.sh linux-x64
+          ./scripts/verify-runtime.sh dist/KOTV-linux-x64/runtime linux-x64
+          ! test -d dist/KOTV-linux-x64/bridge
+          ! test -d dist/KOTV-linux-x64/spider
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-linux-amd64
+          path: dist/updater-linux
+
+      - name: Compress ZIP
+        env:
+          TAG: ${{ needs.set-tag.outputs.tag }}
+        run: |
+          cp -f dist/updater-linux/updater dist/KOTV-linux-x64/updater
+          cd dist && zip -q -r "../KOTV-linux-${TAG}.zip" KOTV-linux-x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-file
+          path: KOTV-linux-*.zip
+
+  build-mac-arm64:
+    runs-on: macos-14
+    needs: [set-tag, build-updater]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+
+      - name: Build + package (macos-arm64)
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          KOTV_JAVA_TOOLCHAIN: "21"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          ./scripts/prepare-runtime.sh macos-arm64
+          test -f runtime/libvlc/libvlc.dylib || test -f runtime/libvlc/libvlc.5.dylib
+          test -d runtime/libvlc/plugins
+          ! test -d runtime/vlc
+          ! test -d runtime/mpv
+          ./scripts/package.sh macos-arm64
+          ./scripts/verify-runtime.sh dist/KOTV-macos-arm64/runtime macos-arm64
+          test -f "dist/KO影视.app/Contents/Resources/runtime/jre/lib/libjli.dylib"
+          test -f "dist/KO影视-macos-arm64.dmg"
+          ! test -d dist/KOTV-macos-arm64/bridge
+          ! test -d dist/KOTV-macos-arm64/spider
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-macos-arm64
+          path: dist/updater-mac
+
+      - name: Compress ZIP + keep DMG
+        env:
+          TAG: ${{ needs.set-tag.outputs.tag }}
+        run: |
+          cp -f dist/updater-mac/updater dist/KOTV-macos-arm64/updater
+          # 把 updater 也打进 .app（若已生成）
+          if [[ -d "dist/KO影视.app" ]]; then
+            cp -f dist/updater-mac/updater "dist/KO影视.app/Contents/MacOS/updater"
+            chmod +x "dist/KO影视.app/Contents/MacOS/updater"
+            # 带 updater 重打 DMG
+            ./scripts/macos-app.sh macos-arm64 dist/KOTV-macos-arm64
+          fi
+          cd dist && zip -q -r "../KOTV-mac-arm64-${TAG}.zip" KOTV-macos-arm64
+          cp -f "KO影视-macos-arm64.dmg" "../KOTV-mac-arm64-${TAG}.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-arm64-file
+          path: |
+            KOTV-mac-arm64-*.zip
+            KOTV-mac-arm64-*.dmg
+
+  build-mac-amd64:
+    runs-on: macos-14
+    needs: [set-tag, build-updater]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+          architecture: x64
+
+      - name: Build + package (macos-x64)
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          KOTV_JAVA_TOOLCHAIN: "21"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          ./scripts/prepare-runtime.sh macos-x64
+          test -f runtime/libvlc/libvlc.dylib || test -f runtime/libvlc/libvlc.5.dylib
+          test -d runtime/libvlc/plugins
+          ! test -d runtime/vlc
+          ! test -d runtime/mpv
+          arch -x86_64 env CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
+            ./scripts/package.sh macos-x64
+          ./scripts/verify-runtime.sh dist/KOTV-macos-x64/runtime macos-x64
+          test -f "dist/KO影视.app/Contents/Resources/runtime/jre/lib/libjli.dylib"
+          test -f "dist/KO影视-macos-x64.dmg"
+          ! test -d dist/KOTV-macos-x64/bridge
+          ! test -d dist/KOTV-macos-x64/spider
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-macos-amd64
+          path: dist/updater-mac
+
+      - name: Compress ZIP + keep DMG
+        env:
+          TAG: ${{ needs.set-tag.outputs.tag }}
+        run: |
+          cp -f dist/updater-mac/updater dist/KOTV-macos-x64/updater
+          if [[ -d "dist/KO影视.app" ]]; then
+            cp -f dist/updater-mac/updater "dist/KO影视.app/Contents/MacOS/updater"
+            chmod +x "dist/KO影视.app/Contents/MacOS/updater"
+            ./scripts/macos-app.sh macos-x64 dist/KOTV-macos-x64
+          fi
+          cd dist && zip -q -r "../KOTV-mac-amd64-${TAG}.zip" KOTV-macos-x64
+          cp -f "KO影视-macos-x64.dmg" "../KOTV-mac-amd64-${TAG}.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-amd64-file
+          path: |
+            KOTV-mac-amd64-*.zip
+            KOTV-mac-amd64-*.dmg
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-win-amd64, build-win-arm64, build-linux, build-mac-arm64, build-mac-amd64, set-tag, build-updater]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+
+      - name: Organize release files
+        run: |
+          mkdir -p ./release-files
+          cp ./win-amd64-file/*.zip ./release-files/ 2>/dev/null || true
+          cp ./win-amd64-file/*-setup.exe ./release-files/ 2>/dev/null || true
+          cp ./win-arm64-file/*.zip ./release-files/ 2>/dev/null || true
+          cp ./win-arm64-file/*-setup.exe ./release-files/ 2>/dev/null || true
+          cp ./linux-file/*.zip ./release-files/ 2>/dev/null || true
+          cp ./mac-arm64-file/*.zip ./release-files/ 2>/dev/null || true
+          cp ./mac-arm64-file/*.dmg ./release-files/ 2>/dev/null || true
+          cp ./mac-amd64-file/*.zip ./release-files/ 2>/dev/null || true
+          cp ./mac-amd64-file/*.dmg ./release-files/ 2>/dev/null || true
+          for spec in \
+            "updater-linux-amd64/updater:updater-linux-amd64" \
+            "updater-windows-amd64/updater.exe:updater-windows-amd64.exe" \
+            "updater-windows-arm64/updater.exe:updater-windows-arm64.exe" \
+            "updater-macos-amd64/updater:updater-macos-amd64" \
+            "updater-macos-arm64/updater:updater-macos-arm64"; do
+            src="${spec%%:*}"
+            dst="${spec##*:}"
+            found="$(find . -path "*/${src}" -print -quit)"
+            if [[ -n "$found" ]]; then
+              cp "$found" "./release-files/$dst"
+            fi
+          done
+          ls -la ./release-files/
+
+      - name: Generate version.json
+        env:
+          VERSION: ${{ needs.set-tag.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 <<'PY'
+          import json, os
+          version = os.environ["VERSION"]
+          repo = os.environ["REPO"]
+          base = f"https://github.com/{repo}/releases/download/{version}"
+          ver = version.lstrip("v")
+          data = {
+            "version": ver,
+            "notes": f"KOTV {version}",
+            "downloads": {
+              "windows-amd64": f"{base}/KOTV-win-amd64-{version}.zip",
+              "windows-arm64": f"{base}/KOTV-win-arm64-{version}.zip",
+              "linux-amd64": f"{base}/KOTV-linux-{version}.zip",
+              "darwin-arm64": f"{base}/KOTV-mac-arm64-{version}.zip",
+              "darwin-amd64": f"{base}/KOTV-mac-amd64-{version}.zip",
+            },
+          }
+          open("./release-files/version.json", "w").write(json.dumps(data, indent=2) + "\n")
+          PY
+
+      - name: Extract changelog
+        id: changelog
+        run: |
+          VERSION_WITH_V="${{ needs.set-tag.outputs.tag }}"
+          CHANGELOG=$(awk -v version="$VERSION_WITH_V" '
+            BEGIN { found=0; content="" }
+            /^## / {
+              if (found) exit
+              if ($2 == version) { found=1; next }
+            }
+            found && /^## / { exit }
+            found {
+              if (content != "") content = content "\n"
+              content = content $0
+            }
+            END { print content }
+          ' CHANGELOG.md 2>/dev/null || true)
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG=$(printf -- "- 发布新版本 %s\n- 详细更新内容请查看 CHANGELOG.md" "$VERSION_WITH_V")
+          fi
+          echo "changelog<<CHANGELOG_EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "CHANGELOG_EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./release-files/*
+          tag_name: ${{ needs.set-tag.outputs.tag }}
+          name: "KOTV ${{ needs.set-tag.outputs.tag }}"
+          body: |
+            ## KOTV ${{ needs.set-tag.outputs.tag }} 发布
+
+            ### 更新日志
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ---
+
+            ### 下载
+
+            | 平台 | 下载 |
+            |------|------|
+            | Windows amd64 (Win7+) | [安装包](https://github.com/${{ github.repository }}/releases/download/${{ needs.set-tag.outputs.tag }}/KOTV-win-amd64-${{ needs.set-tag.outputs.tag }}-setup.exe) / [ZIP](https://github.com/${{ github.repository }}/releases/download/${{ needs.set-tag.outputs.tag }}/KOTV-win-amd64-${{ needs.set-tag.outputs.tag }}.zip) |
+            | Windows ARM64 (Win11+) | [安装包](https://github.com/${{ github.repository }}/releases/download/${{ needs.set-tag.outputs.tag }}/KOTV-win-arm64-${{ needs.set-tag.outputs.tag }}-setup.exe) / [ZIP](https://github.com/${{ github.repository }}/releases/download/${{ needs.set-tag.outputs.tag }}/KOTV-win-arm64-${{ needs.set-tag.outputs.tag }}.zip) |
+            | Linux x64 | [ZIP](https://github.com/${{ github.repository }}/releases/download/${{ needs.set-tag.outputs.tag }}/KOTV-linux-${{ needs.set-tag.outputs.tag }}.zip) |
+            | macOS arm64 | [ZIP](https://github.com/${{ github.repository }}/releases/download/${{ needs.set-tag.outputs.tag }}/KOTV-mac-arm64-${{ needs.set-tag.outputs.tag }}.zip) / [DMG](https://github.com/${{ github.repository }}/releases/download/${{ needs.set-tag.outputs.tag }}/KOTV-mac-arm64-${{ needs.set-tag.outputs.tag }}.dmg) |
+            | macOS x86_64 | [ZIP](https://github.com/${{ github.repository }}/releases/download/${{ needs.set-tag.outputs.tag }}/KOTV-mac-amd64-${{ needs.set-tag.outputs.tag }}.zip) / [DMG](https://github.com/${{ github.repository }}/releases/download/${{ needs.set-tag.outputs.tag }}/KOTV-mac-amd64-${{ needs.set-tag.outputs.tag }}.dmg) |
+
+            另附各平台 `updater` 与 `version.json`（更新器仍使用 ZIP）。
+            Windows 安装包桌面快捷方式与「程序和功能」显示名为 **KO影视**；也可直接解压 ZIP。
+            macOS DMG 内为 `KO影视.app`（含完整 JRE / libvlc / libmpv / bridge）。
+          draft: false
+          prerelease: ${{ contains(needs.set-tag.outputs.tag, 'alpha') }}

@@ -1,0 +1,5 @@
+{
+  "url": "https://cdn.example.com/play.m3u8",
+  "parse": 0,
+  "header": {"User-Agent": "kotv-test"}
+}

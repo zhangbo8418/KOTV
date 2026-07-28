@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss>
+  <list>
+    <video>
+      <id>1001</id>
+      <name>测试电影</name>
+      <type>电影</type>
+      <pic>https://example.com/a.jpg</pic>
+      <note>高清</note>
+      <year>2024</year>
+      <des>简介</des>
+      <dl>
+        <dd flag="线路一">正片$https://cdn.example.com/a.m3u8</dd>
+        <dd flag="线路二">正片$https://cdn.example.com/b.mp4</dd>
+      </dl>
+    </video>
+    <video>
+      <id>1002</id>
+      <name>测试剧集</name>
+      <type>电视剧</type>
+      <pic>https://example.com/b.jpg</pic>
+      <dl>
+        <dd flag="默认">第01集$https://cdn.example.com/ep1.m3u8#第02集$https://cdn.example.com/ep2.m3u8</dd>
+      </dl>
+    </video>
+  </list>
+</rss>

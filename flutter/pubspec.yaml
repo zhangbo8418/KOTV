@@ -1,0 +1,33 @@
+name: kotv
+description: KO影视 Flutter UI（Go 引擎 :9978）
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.5.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^2.6.1
+  http: ^1.2.2
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5
+  path_provider: ^2.1.5
+  path: ^1.9.0
+  shared_preferences: ^2.3.3
+  window_manager: 0.4.3
+  url_launcher: ^6.3.1
+  kotv_vlc:
+    path: packages/kotv_vlc
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/engine/

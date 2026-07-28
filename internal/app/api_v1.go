@@ -1,0 +1,1138 @@
+package app
+
+import (
+	"fmt"
+	"net/url"
+	"path"
+	"strings"
+
+	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/live"
+	"github.com/bobo/KOTV/internal/model"
+	"github.com/bobo/KOTV/internal/parse"
+	"github.com/bobo/KOTV/internal/player"
+	"github.com/bobo/KOTV/internal/player/embed"
+	"github.com/bobo/KOTV/internal/remote"
+	appruntime "github.com/bobo/KOTV/internal/runtime"
+	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/spider"
+	"github.com/bobo/KOTV/internal/thunder"
+	"github.com/bobo/KOTV/internal/update"
+	"github.com/bobo/KOTV/internal/util"
+)
+
+// --- ContentAPI（Flutter /api/v1）---
+
+func (a *App) APIHealth() map[string]any {
+	return map[string]any{
+		"ok":      true,
+		"engine":  "kotv",
+		"ready":   a.Ready,
+		"error":   a.ErrMsg,
+		"port":    a.Server.Port(),
+		"version": "0.1.0",
+	}
+}
+
+func (a *App) APIGetConfig() map[string]any {
+	home := a.Config.Home()
+	sites := make([]map[string]any, 0)
+	for _, s := range a.Config.Sites() {
+		sites = append(sites, map[string]any{
+			"key":         s.Key,
+			"name":        s.Name,
+			"type":        s.TypeID(),
+			"searchable":  s.IsSearchable(),
+			"changeable":  s.IsChangeable(),
+			"home":        s.Key == home.Key,
+		})
+	}
+	return map[string]any{
+		"ok":        true,
+		"ready":     a.Ready,
+		"error":     a.ErrMsg,
+		"source":    settings.Get(settings.VOD),
+		"home":      home.Key,
+		"sites":     sites,
+		"wallpaper": strings.TrimSpace(a.Config.API().Wallpaper),
+	}
+}
+
+func (a *App) APILoadConfig(source string) error {
+	a.Sites.InvalidateLoads()
+	if err := a.Config.LoadFromSource(source); err != nil {
+		a.Ready = false
+		a.ErrMsg = err.Error()
+		return err
+	}
+	a.Ready = true
+	a.ErrMsg = ""
+	a.Live.SyncFromConfig()
+	return nil
+}
+
+func (a *App) APISetHome(siteKey string) error {
+	site := a.Config.GetSite(siteKey)
+	if site == nil {
+		return fmt.Errorf("站点不存在: %s", siteKey)
+	}
+	a.Sites.InvalidateLoads()
+	a.Config.SetHome(*site)
+	return nil
+}
+
+func (a *App) APIHome() (map[string]any, error) {
+	if localCrawlerDisabled() {
+		return nil, fmt.Errorf("请先连接可用后端服务")
+	}
+	res, err := a.Sites.HomeContent()
+	if err != nil {
+		return nil, err
+	}
+	home := a.Config.Home()
+	return map[string]any{
+		"ok":    true,
+		"site":  home.Key,
+		"class": typesDTO(res.Types),
+		"list":  vodsDTO(res.List, home.Key),
+	}, nil
+}
+
+func (a *App) APICategory(tid, pg string, extend map[string]string) (map[string]any, error) {
+	if localCrawlerDisabled() {
+		return nil, fmt.Errorf("请先连接可用后端服务")
+	}
+	res, err := a.Sites.CategoryContent(tid, pg, extend)
+	if err != nil {
+		return nil, err
+	}
+	home := a.Config.Home()
+	return map[string]any{
+		"ok":        true,
+		"site":      home.Key,
+		"tid":       tid,
+		"pg":        pg,
+		"pagecount": res.PageCount.Value,
+		"list":      vodsDTO(res.List, home.Key),
+		"filters":   filtersDTO(a.Sites.FiltersForCategory(tid)),
+	}, nil
+}
+
+func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
+	if localCrawlerDisabled() {
+		return nil, fmt.Errorf("请先连接可用后端服务")
+	}
+	vod := model.Vod{VodID: model.FlexString(vodID)}
+	if siteKey != "" {
+		if site := a.Config.GetSite(siteKey); site != nil {
+			vod.Site = site
+		}
+	}
+	if vod.Site == nil {
+		h := a.Config.Home()
+		vod.Site = &h
+	}
+	detail, err := a.Sites.DetailContent(vod)
+	if err != nil {
+		return nil, err
+	}
+	detail.SetVodFlags()
+	sk := ""
+	if detail.Site != nil {
+		sk = detail.Site.Key
+	}
+	return map[string]any{
+		"ok":   true,
+		"vod":  vodDetailDTO(detail, sk),
+	}, nil
+}
+
+func (a *App) APISearch(keyword string, siteKeys []string) (map[string]any, error) {
+	if localCrawlerDisabled() {
+		return nil, fmt.Errorf("请先连接可用后端服务")
+	}
+	settings.AddSearchHistory(keyword)
+	cols, err := a.Sites.SearchParallel(keyword, siteKeys, 4)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(cols))
+	flat := make([]map[string]any, 0)
+	for _, c := range cols {
+		if c.Name == "全部" {
+			continue
+		}
+		sk := ""
+		if c.Site != nil {
+			sk = c.Site.Key
+		}
+		list := vodsDTO(c.List, sk)
+		out = append(out, map[string]any{
+			"site": sk,
+			"name": c.Name,
+			"list": list,
+		})
+		flat = append(flat, list...)
+	}
+	return map[string]any{"ok": true, "keyword": keyword, "collects": out, "list": flat}, nil
+}
+
+func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map[string]any, error) {
+	var site model.Site
+	if siteKey != "" {
+		if s := a.Config.GetSite(siteKey); s != nil {
+			site = *s
+		}
+	}
+	if site.Key == "" {
+		site = a.Config.Home()
+	}
+	epURL := strings.TrimSpace(episodeURL)
+	if epURL == "" {
+		return nil, fmt.Errorf("empty episode url")
+	}
+	// iOS 仅支持前端播放链路：允许直链/磁力，不走站点解析。
+	if localCrawlerDisabled() && !(strings.HasPrefix(epURL, "http") && parse.IsVideoFormat(epURL)) && !thunder.Match(epURL) {
+		return nil, fmt.Errorf("请先连接可用后端服务")
+	}
+
+	var playURL string
+	var headers map[string]string
+	var danmakuURL string
+	var qualNames, qualURLs []string
+
+	if strings.HasPrefix(epURL, "http") && parse.IsVideoFormat(epURL) {
+		playURL = epURL
+	} else if thunder.Match(epURL) {
+		playURL = epURL
+	} else {
+		result, err := a.Sites.PlayerContent(site, flag, epURL)
+		if err != nil {
+			return nil, err
+		}
+		if err := result.Drm.DesktopError(); err != nil {
+			return nil, err
+		}
+		headers = map[string]string(result.Header)
+		danmakuURL = result.Danmaku
+		qualNames = result.URL.Names
+		qualURLs = result.URL.URLs
+		api := a.Config.API()
+		parsed, perr := parse.ResolveWithParses(result, parse.Options{
+			Parses:    api.Parses,
+			Flags:     api.Flags,
+			Rules:     api.Rules,
+			Jar:       api.Spider,
+			Flag:      flag,
+			Click:     result.Click,
+			SiteClick: site.Click,
+			Prefer:    settings.Get(settings.PreferredParse),
+			IsVideo: func(u string) bool {
+				return a.Sites.IsVideoFormat(site, u)
+			},
+		})
+		if perr != nil {
+			cand := apiResolvePlayURL("", result.PlayURL, result.URL.URLs, qualIdx)
+			if cand != "" && (parse.IsVideoFormat(cand) || thunder.Match(cand)) {
+				playURL = cand
+			} else {
+				return nil, fmt.Errorf("解析失败: %w", perr)
+			}
+		} else {
+			result = parsed
+			if err := result.Drm.DesktopError(); err != nil {
+				return nil, err
+			}
+			headers = mergeStringMaps(headers, map[string]string(result.Header))
+			qualNames = result.URL.Names
+			qualURLs = result.URL.URLs
+			playURL = apiResolvePlayURL("", result.PlayURL, result.URL.URLs, qualIdx)
+			if result.Danmaku != "" {
+				danmakuURL = result.Danmaku
+			}
+		}
+	}
+
+	if playURL == "" {
+		return nil, fmt.Errorf("未获取到播放地址")
+	}
+	if apiLooksUnplayable(playURL) {
+		return nil, fmt.Errorf("未解析到可播放地址")
+	}
+
+	mediaURL := playURL
+	magnet := thunder.Match(playURL)
+	if !magnet {
+		playURL = a.PreparePlaybackURL(playURL, headers)
+	}
+
+	title := vodID
+	a.SetMediaPlaying(title, playURL)
+
+	return map[string]any{
+		"ok":       true,
+		"url":      playURL,
+		"media":    mediaURL,
+		"magnet":   magnet,
+		"headers":  headers,
+		"danmaku":  danmakuURL,
+		"qualities": map[string]any{"names": qualNames, "urls": qualURLs},
+		"site":     site.Key,
+		"flag":     flag,
+		"id":       vodID,
+	}, nil
+}
+
+func typesDTO(types []model.Type) []map[string]any {
+	out := make([]map[string]any, 0, len(types))
+	for _, t := range types {
+		out = append(out, map[string]any{
+			"type_id":   t.TypeID.String(),
+			"type_name": t.TypeName,
+			"filters":   filtersDTO(t.Filters),
+		})
+	}
+	return out
+}
+
+func filtersDTO(filters []model.Filter) []map[string]any {
+	out := make([]map[string]any, 0, len(filters))
+	for _, f := range filters {
+		vals := make([]map[string]any, 0, len(f.Value))
+		for _, it := range f.Value {
+			vals = append(vals, map[string]any{"n": it.N, "v": it.V.String()})
+		}
+		out = append(out, map[string]any{
+			"key":   f.Key,
+			"name":  f.Name,
+			"init":  f.Init.String(),
+			"value": vals,
+		})
+	}
+	return out
+}
+
+func vodsDTO(list []model.Vod, siteKey string) []map[string]any {
+	out := make([]map[string]any, 0, len(list))
+	for _, v := range list {
+		sk := siteKey
+		if v.Site != nil && v.Site.Key != "" {
+			sk = v.Site.Key
+		}
+		out = append(out, map[string]any{
+			"vod_id":      v.VodID.String(),
+			"vod_name":    v.VodName,
+			"vod_pic":     v.VodPic,
+			"vod_remarks": v.VodRemarks,
+			"type_name":   v.TypeName,
+			"site":        sk,
+			"action":      v.Action,
+			"vod_tag":     v.VodTag,
+		})
+	}
+	return out
+}
+
+func vodDetailDTO(v model.Vod, siteKey string) map[string]any {
+	flags := make([]map[string]any, 0, len(v.VodFlags))
+	for _, f := range v.VodFlags {
+		eps := make([]map[string]any, 0, len(f.Episodes))
+		for _, ep := range f.Episodes {
+			eps = append(eps, map[string]any{
+				"name": ep.Name,
+				"url":  ep.URL,
+			})
+		}
+		show := f.Show
+		if show == "" {
+			show = f.Flag
+		}
+		flags = append(flags, map[string]any{
+			"flag":     f.Flag,
+			"show":     show,
+			"episodes": eps,
+		})
+	}
+	return map[string]any{
+		"vod_id":       v.VodID.String(),
+		"vod_name":     v.VodName,
+		"vod_pic":      v.VodPic,
+		"vod_remarks":  v.VodRemarks,
+		"vod_year":     v.VodYear.String(),
+		"vod_area":     v.VodArea,
+		"vod_director": v.VodDirector,
+		"vod_actor":    v.VodActor,
+		"vod_content":  v.VodContent,
+		"type_name":    v.TypeName,
+		"site":         siteKey,
+		"flags":        flags,
+	}
+}
+
+func apiResolvePlayURL(raw, playURL string, urls []string, idx int) string {
+	if idx < 0 {
+		idx = 0
+	}
+	if idx < len(urls) && strings.TrimSpace(urls[idx]) != "" {
+		u := strings.TrimSpace(urls[idx])
+		if playURL != "" && !strings.HasPrefix(u, "http") {
+			return playURL + u
+		}
+		return u
+	}
+	if len(urls) > 0 && strings.TrimSpace(urls[0]) != "" {
+		u := strings.TrimSpace(urls[0])
+		if playURL != "" && !strings.HasPrefix(u, "http") {
+			return playURL + u
+		}
+		return u
+	}
+	if strings.TrimSpace(raw) != "" {
+		return strings.TrimSpace(raw)
+	}
+	return strings.TrimSpace(playURL)
+}
+
+func apiLooksUnplayable(u string) bool {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return true
+	}
+	low := strings.ToLower(u)
+	if strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") {
+		if strings.Contains(low, ".html") || strings.HasSuffix(low, "/") {
+			ext := path.Ext(u)
+			if ext == "" || ext == ".html" || ext == ".htm" || ext == ".php" {
+				if !parse.IsVideoFormat(u) && !thunder.Match(u) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if thunder.Match(u) {
+		return false
+	}
+	if _, err := url.Parse(u); err == nil && strings.HasPrefix(u, "/") {
+		return true
+	}
+	return !parse.IsVideoFormat(u)
+}
+
+func mergeStringMaps(a, b map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
+}
+
+func (a *App) APIRemotePoll() map[string]any {
+	ctrls, searches := remote.DefaultQueue.Drain()
+	outCtrl := make([]map[string]any, 0, len(ctrls))
+	for _, c := range ctrls {
+		outCtrl = append(outCtrl, map[string]any{"type": c.Type, "seekMs": c.SeekMs})
+	}
+	return map[string]any{
+		"ok":       true,
+		"controls": outCtrl,
+		"searches": searches,
+	}
+}
+
+func (a *App) APISetMedia(state map[string]string) {
+	remote.SetMediaStore(state)
+}
+
+func (a *App) APIListRepos() map[string]any {
+	cfgs, _ := a.DB.ListConfigs(int64(database.ConfigTypeSite))
+	current := strings.TrimSpace(settings.Get(settings.VOD))
+	list := make([]map[string]any, 0, len(cfgs))
+	for _, c := range cfgs {
+		url := strings.TrimSpace(c.URL)
+		if url == "" {
+			continue
+		}
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			name = url
+		}
+		list = append(list, map[string]any{
+			"url":     url,
+			"name":    name,
+			"home":    c.Home,
+			"current": url == current,
+		})
+	}
+	return map[string]any{"ok": true, "current": current, "repos": list}
+}
+
+func (a *App) APIDeleteRepo(url string) error {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return fmt.Errorf("empty url")
+	}
+	return a.DB.DeleteConfigByURL(url, int64(database.ConfigTypeSite))
+}
+
+func (a *App) APIGetSettings() map[string]any {
+	keys := []settings.Type{
+		settings.VOD, settings.LIVE, settings.Theme, settings.Player,
+		settings.Proxy, settings.PlayerSpeed, settings.PlayerScale, settings.PlayerDecode,
+		settings.PreferredParse, settings.AdFilter, settings.M3U8Cfg, settings.DanmakuOn, settings.DanmakuAPI,
+		settings.AssrtToken, settings.UpdateURL, settings.WallMode, settings.WallURL,
+		settings.WallFile, settings.Incognito, settings.LiveAcross, settings.LiveChange,
+		settings.LiveInvert, settings.DLNARenderer, settings.SyncPairCode, settings.LiveKeep,
+	}
+	out := map[string]any{"ok": true, "port": a.Server.ProxyPort()}
+	vals := map[string]string{}
+	for _, k := range keys {
+		vals[string(k)] = settings.Get(k)
+	}
+	out["settings"] = vals
+	parses := make([]map[string]any, 0)
+	for _, p := range a.Config.API().Parses {
+		parses = append(parses, map[string]any{"name": p.Name, "type": p.TypeID(), "url": p.URL})
+	}
+	out["parses"] = parses
+	out["version"] = update.CurrentVersion
+	out["runtime"] = appruntime.Status()
+	out["crawlerEnabled"] = !localCrawlerDisabled()
+	out["searchHistory"] = settings.GetSearchHistory()
+	out["backdrop"] = a.APIBackdrop()
+	out["pairCode"] = settings.EnsureSyncPairCode()
+	return out
+}
+
+// APIBackdrop 输出统一背景规格，供 Flutter 背景层使用。
+func (a *App) APIBackdrop() map[string]any {
+	mode := strings.TrimSpace(settings.Get(settings.WallMode))
+	if mode == "" {
+		mode = "config"
+	}
+	theme := strings.TrimSpace(settings.Get(settings.Theme))
+	light := theme == "light"
+	// 跟随系统时 Flutter 侧可再判；引擎侧默认按深色出 tint。
+	if theme == "system" {
+		light = false
+	}
+
+	gradStart, gradEnd := "#243DD0", "#B220AC"
+	glowTop, glowBot, glowMid := "#35FF55CB", "#3028C9FF", "#288D50F2"
+	wallTint := "#55120832"
+	if light {
+		gradStart, gradEnd = "#E9EEFB", "#F3E7F8"
+		glowTop, glowBot, glowMid = "#2EFF8AC8", "#2A7AC8FF", "#24B994F5"
+		wallTint = "#73FFFFFF"
+	}
+
+	configWall := ""
+	if a.Ready {
+		configWall = strings.TrimSpace(a.Config.API().Wallpaper)
+	}
+	wallURL := strings.TrimSpace(settings.Get(settings.WallURL))
+	wallFile := strings.TrimSpace(settings.Get(settings.WallFile))
+
+	switch mode {
+	case "builtin1":
+		if light {
+			gradStart, gradEnd = "#DDEEFA", "#C8E0F2"
+		} else {
+			gradStart, gradEnd = "#1A5C8A", "#0E3A5C"
+		}
+		glowTop, glowBot, glowMid = "#304FC3F7", "#28156B8A", "#252E86AB"
+	case "builtin2":
+		if light {
+			gradStart, gradEnd = "#F7E3F2", "#FBE0E6"
+		} else {
+			gradStart, gradEnd = "#7B2D8E", "#C73C62"
+		}
+		glowTop, glowBot, glowMid = "#32FF8A65", "#28E91E63", "#22FF6F91"
+	case "builtin3":
+		if light {
+			gradStart, gradEnd = "#E2EEEE", "#D5E4E8"
+		} else {
+			gradStart, gradEnd = "#0F202E", "#203A43"
+		}
+		glowTop, glowBot, glowMid = "#2880CBC4", "#224DA8DA", "#20266E8C"
+	}
+
+	// UI 色板：卡片/按钮/字体随壁纸主题变化。
+	primary, surface, variant := "#CF4274", "#63248A", "#653AA8"
+	fg, muted, outline := "#FFFFFFFF", "#D8FFFFFF", "#B0D8A5E8"
+	input, pillBg, pillBorder := "#FF582D91", "#E618161E", "#C84A4855"
+	statusBar, catBar, bottomNav := "#60551C72", "#4D653AA8", "#EE1A0F2E"
+	dialogBg, posterBar, posterPh := "#FA3B1970", "#CC653AA8", "#FF3A1A6E"
+	selected, focus := "#F2C73C62", "#FFFFD54F"
+	name := "极光紫"
+	switch mode {
+	case "builtin1":
+		name = "深海蓝"
+		if light {
+			primary, surface, variant = "#156B8A", "#C8E0F2", "#4FC3F7"
+			fg, muted, outline = "#FF0E3A5C", "#CC0E3A5C", "#88156B8A"
+			input, pillBg, pillBorder = "#FFE8F4FC", "#E6FFFFFF", "#882E86AB"
+			statusBar, catBar, bottomNav = "#99C8E0F2", "#88A8D4E8", "#EEF2F8FC"
+			dialogBg, posterBar, posterPh = "#F2E8F4FC", "#CC2E86AB", "#FFB0D4E8"
+			selected, focus = "#F22E86AB", "#FF156B8A"
+		} else {
+			primary, surface, variant = "#4FC3F7", "#156B8A", "#2E86AB"
+			fg, muted, outline = "#FFFFFFFF", "#D8FFFFFF", "#904FC3F7"
+			input, pillBg, pillBorder = "#FF0E3A5C", "#E60A2438", "#884FC3F7"
+			statusBar, catBar, bottomNav = "#600E3A5C", "#4D1A5C8A", "#EE0A1E2E"
+			dialogBg, posterBar, posterPh = "#FA0E3A5C", "#CC156B8A", "#FF0E3A5C"
+			selected, focus = "#F22E86AB", "#FF4FC3F7"
+		}
+	case "builtin2":
+		name = "绯霞玫"
+		if light {
+			primary, surface, variant = "#C73C62", "#F7E3F2", "#E86A83"
+			fg, muted, outline = "#FF5A1A3A", "#CC5A1A3A", "#88C73C62"
+			input, pillBg, pillBorder = "#FFFFF0F5", "#E6FFFFFF", "#88E86A83"
+			statusBar, catBar, bottomNav = "#99F7E3F2", "#88F0D0E0", "#EEFFF5F8"
+			dialogBg, posterBar, posterPh = "#F2FFF0F5", "#CCC73C62", "#FFE8B0C0"
+			selected, focus = "#F2C73C62", "#FFE91E63"
+		} else {
+			primary, surface, variant = "#FF6F91", "#7B2D8E", "#C73C62"
+			fg, muted, outline = "#FFFFFFFF", "#D8FFFFFF", "#B0FF8AA5"
+			input, pillBg, pillBorder = "#FF5A2068", "#E61A0C22", "#C8E86A83"
+			statusBar, catBar, bottomNav = "#60551C48", "#4D7B2D8E", "#EE1A0A1E"
+			dialogBg, posterBar, posterPh = "#FA5A2068", "#CCC73C62", "#FF4A1848"
+			selected, focus = "#F2C73C62", "#FFFF8A65"
+		}
+	case "builtin3":
+		name = "墨夜青"
+		if light {
+			primary, surface, variant = "#266E8C", "#D5E4E8", "#4DA8DA"
+			fg, muted, outline = "#FF0F202E", "#CC0F202E", "#88266E8C"
+			input, pillBg, pillBorder = "#FFE8F0F2", "#E6FFFFFF", "#884DA8DA"
+			statusBar, catBar, bottomNav = "#99D5E4E8", "#88C0D4DA", "#EEF0F4F6"
+			dialogBg, posterBar, posterPh = "#F2E8F0F2", "#CC266E8C", "#FFB0C8D0"
+			selected, focus = "#F24DA8DA", "#FF266E8C"
+		} else {
+			primary, surface, variant = "#80CBC4", "#203A43", "#4DA8DA"
+			fg, muted, outline = "#FFFFFFFF", "#D8FFFFFF", "#9080CBC4"
+			input, pillBg, pillBorder = "#FF152830", "#E60A141C", "#884DA8DA"
+			statusBar, catBar, bottomNav = "#600F202E", "#4D203A43", "#EE0A1218"
+			dialogBg, posterBar, posterPh = "#FA152830", "#CC203A43", "#FF0F202E"
+			selected, focus = "#F24DA8DA", "#FF80CBC4"
+		}
+	default:
+		if mode == "gradient" {
+			name = "极光紫"
+		} else if mode == "config" {
+			name = "配置墙纸"
+		} else if mode == "url" {
+			name = "网络图片"
+		} else if mode == "file" {
+			name = "本地文件"
+		} else {
+			name = "极光紫"
+		}
+		if light {
+			primary, surface, variant = "#1A2A6C", "#E9EEFB", "#B994F5"
+			fg, muted, outline = "#FF1B1B24", "#CC45464F", "#88767680"
+			input, pillBg, pillBorder = "#FFDDE2FF", "#E6FFFFFF", "#88767680"
+			statusBar, catBar, bottomNav = "#99E9EEFB", "#88D8D0F0", "#EEFCF8FF"
+			dialogBg, posterBar, posterPh = "#F2FCF8FF", "#CC653AA8", "#FFD0C8E8"
+			selected, focus = "#F2C73C62", "#FF1A2A6C"
+		}
+	}
+
+	image := ""
+	switch mode {
+	case "url":
+		image = wallURL
+	case "file":
+		image = wallFile
+	case "config":
+		image = configWall
+	case "gradient", "builtin1", "builtin2", "builtin3":
+		image = ""
+	default:
+		if mode == "" {
+			image = configWall
+		}
+	}
+	image = a.resolveBackdropImageURL(image)
+
+	// 本地文件走引擎 /file/ 代理，便于 Flutter Image.network 加载。
+	if image != "" && !strings.HasPrefix(image, "http://") && !strings.HasPrefix(image, "https://") {
+		path := strings.TrimPrefix(image, "file://")
+		if path != "" {
+			port := a.Server.Port()
+			esc := url.PathEscape(path)
+			esc = strings.ReplaceAll(esc, "%2F", "/")
+			image = fmt.Sprintf("http://127.0.0.1:%d/file/%s", port, esc)
+		}
+	}
+
+	return map[string]any{
+		"mode":       mode,
+		"name":       name,
+		"light":      light,
+		"image":      image,
+		"gradStart":  gradStart,
+		"gradEnd":    gradEnd,
+		"glowTop":    glowTop,
+		"glowBottom": glowBot,
+		"glowMid":    glowMid,
+		"wallTint":   wallTint,
+		"wallURL":    wallURL,
+		"wallFile":   wallFile,
+		"configWall": configWall,
+		"primary":    primary,
+		"surface":    surface,
+		"variant":    variant,
+		"fg":         fg,
+		"muted":      muted,
+		"outline":    outline,
+		"input":      input,
+		"pillBg":     pillBg,
+		"pillBorder": pillBorder,
+		"statusBar":  statusBar,
+		"catBar":     catBar,
+		"bottomNav":  bottomNav,
+		"dialogBg":   dialogBg,
+		"posterBar":  posterBar,
+		"posterPh":   posterPh,
+		"selected":   selected,
+		"focus":      focus,
+	}
+}
+
+func (a *App) resolveBackdropImageURL(src string) string {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return ""
+	}
+	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "file://") {
+		return src
+	}
+	// 绝对本地路径原样返回，上层会转 /file/。
+	if strings.HasPrefix(src, "/") {
+		return src
+	}
+	if a.Ready {
+		base := strings.TrimSpace(a.Config.API().URL)
+		if base != "" {
+			if resolved := util.ResolveRelativeURL(base, src); resolved != "" {
+				return resolved
+			}
+		}
+	}
+	return src
+}
+
+func (a *App) APISetSettings(kv map[string]string) error {
+	needProxy := false
+	needLive := false
+	needDLNA := false
+	for k, v := range kv {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		t := settings.Type(k)
+		settings.Set(t, v)
+		if t == settings.Proxy {
+			needProxy = true
+		}
+		if t == settings.LIVE {
+			needLive = true
+		}
+		if t == settings.DLNARenderer {
+			needDLNA = true
+		}
+	}
+	if err := settings.Save(); err != nil {
+		return err
+	}
+	if needProxy {
+		util.SetProxy(settings.Get(settings.Proxy))
+		spider.SetUserProxy(settings.Get(settings.Proxy))
+	}
+	if needLive {
+		a.Live.SyncFromConfig()
+	}
+	if needDLNA {
+		a.SyncDLNARenderer()
+	}
+	return nil
+}
+
+func (a *App) APIToggleSite(key, field string, all *bool) error {
+	field = strings.ToLower(strings.TrimSpace(field))
+	if all != nil {
+		switch field {
+		case "searchable":
+			return a.Config.SetAllSitesSearchable(*all)
+		case "changeable":
+			return a.Config.SetAllSitesChangeable(*all)
+		default:
+			return fmt.Errorf("unknown toggle: %s", field)
+		}
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return fmt.Errorf("missing key")
+	}
+	switch field {
+	case "searchable":
+		_, err := a.Config.ToggleSiteSearchable(key)
+		return err
+	case "changeable":
+		_, err := a.Config.ToggleSiteChangeable(key)
+		return err
+	default:
+		return fmt.Errorf("unknown toggle: %s", field)
+	}
+}
+
+func (a *App) APILiveSources() map[string]any {
+	a.Live.SyncFromConfig()
+	srcs := a.Live.Sources()
+	list := make([]map[string]any, 0, len(srcs))
+	for i, l := range srcs {
+		name := strings.TrimSpace(l.Name)
+		if name == "" {
+			name = l.URL
+		}
+		list = append(list, map[string]any{
+			"index": i,
+			"name":  name,
+			"url":   l.URL,
+			"api":   l.API,
+		})
+	}
+	return map[string]any{
+		"ok":      true,
+		"live":    settings.Get(settings.LIVE),
+		"sources": list,
+	}
+}
+
+func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
+	a.Live.SyncFromConfig()
+	srcs := a.Live.Sources()
+	var live model.Live
+	url = strings.TrimSpace(url)
+	if url != "" {
+		live = model.Live{Name: "自定义", URL: url}
+	} else {
+		if index < 0 || index >= len(srcs) {
+			return nil, fmt.Errorf("直播源索引无效")
+		}
+		live = srcs[index]
+	}
+	loaded, err := a.Live.Load(live)
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]map[string]any, 0, len(loaded.Groups))
+	for gi, g := range loaded.Groups {
+		chs := make([]map[string]any, 0, len(g.Channels))
+		for ci, ch := range g.Channels {
+			chs = append(chs, map[string]any{
+				"index": ci,
+				"name":  ch.Name,
+				"logo":  ch.Logo,
+				"urls":  len(ch.URLs),
+				"line":  ch.URLIndex,
+			})
+		}
+		groups = append(groups, map[string]any{
+			"index":    gi,
+			"name":     g.Name,
+			"locked":   g.Pass != "",
+			"channels": chs,
+		})
+	}
+	name := strings.TrimSpace(loaded.Name)
+	if name == "" {
+		name = loaded.URL
+	}
+	return map[string]any{
+		"ok":     true,
+		"name":   name,
+		"url":    loaded.URL,
+		"groups": groups,
+	}, nil
+}
+
+func (a *App) liveChannelAt(group, channel int) (*model.Live, *model.LiveGroup, *model.LiveChannel, error) {
+	cur := a.Live.Current()
+	if cur == nil || len(cur.Groups) == 0 {
+		return nil, nil, nil, fmt.Errorf("请先加载直播源")
+	}
+	if group < 0 || group >= len(cur.Groups) {
+		return nil, nil, nil, fmt.Errorf("分组无效")
+	}
+	g := &cur.Groups[group]
+	if channel < 0 || channel >= len(g.Channels) {
+		return nil, nil, nil, fmt.Errorf("频道无效")
+	}
+	ch := &g.Channels[channel]
+	ch.ApplyLive(cur)
+	return cur, g, ch, nil
+}
+
+func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
+	_, g, ch, err := a.liveChannelAt(group, channel)
+	if err != nil {
+		return nil, err
+	}
+	if line >= 0 && line < len(ch.URLs) {
+		ch.URLIndex = line
+	}
+	playURL, headers, err := a.Live.ResolvePlayURLParsed(ch)
+	if err != nil && playURL == "" {
+		return nil, err
+	}
+	if playURL == "" {
+		return nil, fmt.Errorf("空播放地址")
+	}
+	return map[string]any{
+		"ok":      true,
+		"url":     playURL,
+		"headers": headers,
+		"name":    ch.Name,
+		"group":   g.Name,
+		"line":    ch.URLIndex,
+		"lines":   len(ch.URLs),
+		"error":   errString(err),
+	}, nil
+}
+
+func (a *App) APILiveUnlock(group int, password string) error {
+	cur := a.Live.Current()
+	if cur == nil || len(cur.Groups) == 0 {
+		return fmt.Errorf("请先加载直播源")
+	}
+	password = strings.TrimSpace(password)
+	if password == "" {
+		return fmt.Errorf("请输入密码")
+	}
+	if group >= 0 && group < len(cur.Groups) {
+		if cur.Groups[group].Pass == password {
+			return nil
+		}
+		return fmt.Errorf("分组密码不正确")
+	}
+	for i := range cur.Groups {
+		if cur.Groups[i].Pass == password {
+			return nil
+		}
+	}
+	return fmt.Errorf("未找到匹配的分组密码")
+}
+
+func (a *App) APILiveEPG(group, channel int) (map[string]any, error) {
+	_, _, ch, err := a.liveChannelAt(group, channel)
+	if err != nil {
+		return nil, err
+	}
+	epgs := live.LoadChannelEPG(ch)
+	if len(epgs) == 0 && ch.Live != nil && strings.TrimSpace(ch.Live.EPG) != "" && !strings.Contains(ch.Live.EPG, "{") {
+		if list, e := live.LoadXMLTV(ch.Live.EPG, ch); e == nil && len(list) > 0 {
+			epgs = []live.Epg{{Date: "", List: list}}
+		}
+	}
+	days := make([]map[string]any, 0, len(epgs))
+	for di, day := range epgs {
+		progs := make([]map[string]any, 0, len(day.List))
+		for pi, p := range day.List {
+			progs = append(progs, map[string]any{
+				"index":   pi,
+				"title":   p.Title,
+				"start":   p.Start,
+				"end":     p.End,
+				"now":     p.IsInRange(),
+				"future":  p.IsFuture(),
+				"label":   p.Format(),
+				"range":   p.Range(),
+				"catchup": ch.HasCatchup() && !p.IsFuture() && p.StartTime > 0,
+			})
+		}
+		days = append(days, map[string]any{
+			"index": di,
+			"date":  day.Date,
+			"list":  progs,
+		})
+	}
+	return map[string]any{
+		"ok":   true,
+		"name": ch.Name,
+		"days": days,
+	}, nil
+}
+
+func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, error) {
+	_, g, ch, err := a.liveChannelAt(group, channel)
+	if err != nil {
+		return nil, err
+	}
+	epgs := live.LoadChannelEPG(ch)
+	if day < 0 || day >= len(epgs) {
+		return nil, fmt.Errorf("节目日期无效")
+	}
+	list := epgs[day].List
+	if prog < 0 || prog >= len(list) {
+		return nil, fmt.Errorf("节目无效")
+	}
+	url, headers, err := live.ResolveCatchupURL(a.Live, ch, list[prog])
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"ok":      true,
+		"url":     url,
+		"headers": headers,
+		"name":    list[prog].Title,
+		"group":   g.Name,
+		"channel": ch.Name,
+	}, nil
+}
+
+// APIPlayerStatus 播放器可用性与当前设置。
+func (a *App) APIPlayerStatus() map[string]any {
+	cur := strings.TrimSpace(settings.Get(settings.Player))
+	if cur == "" {
+		cur = "innie#vlc"
+	}
+	decode := strings.TrimSpace(settings.Get(settings.PlayerDecode))
+	if decode == "" {
+		decode = "auto"
+	}
+	out := map[string]any{
+		"ok":        true,
+		"available": player.Available(),
+		"current":   cur,
+		"decode":    decode,
+		"speed":     settings.Get(settings.PlayerSpeed),
+		"scale":     settings.Get(settings.PlayerScale),
+	}
+	for k, v := range embed.EmbedPlaybackSnapshot() {
+		out[k] = v
+	}
+	return out
+}
+
+// APIPlayerEmbed 页内嵌入播放（Flutter 内置 VLC 走同进程 Texture，不经此路径）。
+// playerVal: innie#vlc / innie#mpv；空则用当前设置。
+func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
+	playURL = strings.TrimSpace(playURL)
+	if playURL == "" {
+		return fmt.Errorf("empty url")
+	}
+	playerVal = strings.TrimSpace(playerVal)
+	if playerVal == "" {
+		playerVal = settings.Get(settings.Player)
+	}
+	if playerVal == "" {
+		playerVal = "innie#vlc"
+	}
+	parts := strings.SplitN(playerVal, "#", 2)
+	mode := parts[0]
+	name := "vlc"
+	if len(parts) > 1 && parts[1] != "" {
+		name = strings.ToLower(parts[1])
+	}
+	if mode != "innie" || (name != "vlc" && name != "mpv") {
+		return fmt.Errorf("embed 仅支持 innie#vlc / innie#mpv")
+	}
+	settings.Set(settings.Player, playerVal)
+	_ = settings.Save()
+	return player.Play(playURL, histKey)
+}
+
+// APIPlayerControl 控制当前页内嵌入引擎。
+// cmd: toggle|play|pause|stop|seek|volume|speed|decode
+func (a *App) APIPlayerControl(cmd string, value float64, mode string) error {
+	cmd = strings.ToLower(strings.TrimSpace(cmd))
+	eng := embed.Active()
+	if eng == nil {
+		return fmt.Errorf("页内播放器未启动")
+	}
+	switch cmd {
+	case "toggle", "playpause":
+		eng.TogglePause()
+	case "play":
+		if !eng.IsPlaying() {
+			eng.TogglePause()
+		}
+	case "pause":
+		if eng.IsPlaying() {
+			eng.TogglePause()
+		}
+	case "stop":
+		eng.Stop()
+	case "seek":
+		eng.SeekMs(int64(value))
+	case "volume":
+		eng.SetVolume(int(value))
+		settings.Set(settings.PlayerVolume, fmt.Sprintf("%d", int(value)))
+		_ = settings.Save()
+	case "speed":
+		if enh, ok := eng.(embed.Enhanced); ok {
+			if !enh.SetSpeed(value) {
+				return fmt.Errorf("当前内核不支持倍速")
+			}
+			settings.Set(settings.PlayerSpeed, fmt.Sprintf("%g", value))
+			_ = settings.Save()
+		} else {
+			return fmt.Errorf("当前内核不支持倍速")
+		}
+	case "decode":
+		m := strings.TrimSpace(mode)
+		if m == "" {
+			m = "auto"
+		}
+		if enh, ok := eng.(embed.Enhanced); ok {
+			enh.SetDecodeMode(m)
+			enh.Reload(true)
+			settings.Set(settings.PlayerDecode, m)
+			_ = settings.Save()
+		}
+	default:
+		return fmt.Errorf("unknown cmd: %s", cmd)
+	}
+	return nil
+}
+
+// APIPlayerExternal 用外部播放器打开 URL；playerVal 如 outie#vlc / outie#mpv / outie#iina。
+func (a *App) APIPlayerExternal(playURL, playerVal string) error {
+	playURL = strings.TrimSpace(playURL)
+	if playURL == "" {
+		return fmt.Errorf("empty url")
+	}
+	playerVal = strings.TrimSpace(playerVal)
+	if playerVal == "" {
+		playerVal = settings.Get(settings.Player)
+	}
+	if playerVal == "" {
+		playerVal = "outie#vlc"
+	}
+	parts := strings.SplitN(playerVal, "#", 2)
+	mode := parts[0]
+	name := "vlc"
+	if len(parts) > 1 && parts[1] != "" {
+		name = strings.ToLower(parts[1])
+	}
+	if mode == "innie" {
+		return fmt.Errorf("内置播放器请在页内播放")
+	}
+	settings.Set(settings.Player, playerVal)
+	_ = settings.Save()
+	return player.ExternalPlay(playURL, name)
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}

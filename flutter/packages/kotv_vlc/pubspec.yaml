@@ -1,0 +1,22 @@
+name: kotv_vlc
+description: In-process libvlc Texture player for KOTV Flutter (desktop)
+version: 0.1.0
+publish_to: "none"
+
+environment:
+  sdk: ^3.5.4
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      macos:
+        pluginClass: KotvVlcPlugin
+      windows:
+        pluginClass: KotvVlcPluginCApi
+      linux:
+        pluginClass: KotvVlcPlugin

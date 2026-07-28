@@ -1,0 +1,14 @@
+{
+  "class": [
+    {"type_id": "1", "type_name": "电影"},
+    {"type_id": "2", "type_name": "电视剧"},
+    {"type_id": "9", "type_name": "其它"}
+  ],
+  "list": [
+    {"vod_id": "2001", "vod_name": "JSON电影", "type_name": "电影", "vod_pic": "https://example.com/j.jpg"}
+  ],
+  "filters": {
+    "1": {"key": "class", "name": "类型", "value": [{"n": "动作", "v": "动作"}]},
+    "2": [{"key": "year", "name": "年份", "value": [{"n": "2024", "v": "2024"}]}]
+  }
+}

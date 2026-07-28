@@ -1,0 +1,90 @@
+plugins {
+    id "java"
+    id "com.gradleup.shadow" version "8.3.6"
+}
+
+group = "com.bobo.kotv"
+version = "1.0.0"
+
+repositories {
+    mavenCentral()
+    maven { url = uri("https://jitpack.io") }
+}
+
+// 默认 Java 21（与捆绑 Liberica 21 对齐）；可用 KOTV_JAVA_TOOLCHAIN 覆盖
+def kotvJavaToolchain = Integer.parseInt(System.getenv().getOrDefault("KOTV_JAVA_TOOLCHAIN", "21"))
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(kotvJavaToolchain)
+    }
+}
+
+// Windows CI 默认 code page 是 windows-1252；源码为 UTF-8（含中文注释 / 繁简映射表）
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+}
+
+configurations {
+    sardineAndroid
+}
+
+dependencies {
+    implementation "com.squareup.okhttp3:okhttp:5.4.0"
+    implementation "com.squareup.okhttp3:okhttp-dnsoverhttps:5.4.0"
+    implementation "com.squareup.okhttp3:logging-interceptor:5.4.0"
+    implementation "org.brotli:dec:0.1.2"
+    implementation "com.hierynomus:smbj:0.14.0"
+    // Android AAR is unpacked explicitly below: only its classes.jar is merged.
+    sardineAndroid("com.github.thegrizzlylabs:sardine-android:0.9@aar") {
+        transitive = false
+    }
+    // sardine-android AAR 以 transitive=false 解包，需显式带上 PROPFIND 依赖的 simple-xml。
+    implementation("org.simpleframework:simple-xml:2.7.1") {
+        exclude group: "xpp3", module: "xpp3"
+        exclude group: "stax", module: "stax-api"
+        exclude group: "stax", module: "stax"
+    }
+    implementation "com.github.lookfirst:sardine:5.10"
+    implementation "com.google.code.gson:gson:2.14.0"
+    implementation "com.google.guava:guava:33.2.1-jre"
+    implementation "com.googlecode.juniversalchardet:juniversalchardet:1.0.3"
+    implementation "com.google.zxing:core:3.5.3"
+
+    implementation "org.jsoup:jsoup:1.22.2"
+    implementation "cn.wanghaomiao:JsoupXpath:2.5.1"
+    implementation "cn.hutool:hutool-all:5.8.28"
+    implementation "org.apache.commons:commons-lang3:3.14.0"
+    implementation "commons-io:commons-io:2.15.1"
+    implementation "org.json:json:20240303"
+    implementation "org.nanohttpd:nanohttpd:2.3.1"
+    implementation "com.github.luben:zstd-jni:1.5.7-4"
+    implementation "org.slf4j:slf4j-simple:2.0.13"
+    implementation "wang.harlon.quickjs:wrapper-java:3.2.3"
+}
+
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+tasks.register("extractSardineAndroid", Copy) {
+    from({ configurations.sardineAndroid.collect { zipTree(it).matching { include "classes.jar" } } })
+    into(layout.buildDirectory.dir("generated/sardine-android"))
+}
+
+tasks.named("shadowJar") {
+    dependsOn(tasks.named("extractSardineAndroid"))
+    archiveFileName.set("spider-bridge.jar")
+    manifest {
+        attributes("Main-Class": "com.bobo.kotv.bridge.SpiderBridge")
+    }
+    // Keep multi-release classes (META-INF/versions) intact for Java 17+.
+    mergeServiceFiles()
+    from({ zipTree(layout.buildDirectory.file("generated/sardine-android/classes.jar").get().asFile) })
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.named("jar") {
+    enabled = false
+}

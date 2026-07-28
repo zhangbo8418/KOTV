@@ -1,0 +1,44 @@
+name: set-tag
+on:
+  workflow_call:
+    outputs:
+      tag:
+        description: "latest tag with optional suffix"
+        value: ${{ jobs.set-tag.outputs.tag }}
+      lastTag:
+        description: "previous tag before latest"
+        value: ${{ jobs.set-tag.outputs.lastTag }}
+
+jobs:
+  set-tag:
+    name: set-tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.set-version.outputs.tag }}
+      lastTag: ${{ steps.get-last-tag.outputs.lastTag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: get-latest-tag
+        run: |
+          LATEST_TAG=$(git tag --list --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.1.0"
+          fi
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - id: get-last-tag
+        run: |
+          LAST_TAG=$(git tag --list --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
+          echo "lastTag=$LAST_TAG" >> $GITHUB_OUTPUT
+
+      - id: set-version
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/pre-release" ]; then
+            NEW_TAG="${{ steps.get-latest-tag.outputs.LATEST_TAG }}-alpha.$(date +'%Y%m%d%H%M')"
+          else
+            NEW_TAG="${{ steps.get-latest-tag.outputs.LATEST_TAG }}"
+          fi
+          echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
