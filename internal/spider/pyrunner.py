@@ -2,9 +2,37 @@
 import importlib.util
 import json
 import os
+import re
 import ssl
 import sys
 import traceback
+
+
+def _prepend_sys_path(*candidates):
+    for path in candidates:
+        if path and os.path.isdir(path) and path not in sys.path:
+            sys.path.insert(0, path)
+
+
+def _ensure_bundled_site_packages():
+    """Windows embed 的 python*._pth 常忽略 PYTHONPATH；显式把 Lib/site-packages 塞进 sys.path。"""
+    exe = os.path.abspath(sys.executable)
+    exe_dir = os.path.dirname(exe)
+    # install_only / embed 布局
+    _prepend_sys_path(
+        os.path.join(exe_dir, "Lib", "site-packages"),
+        os.path.join(exe_dir, "lib", "site-packages"),
+        os.path.join(exe_dir, "lib", "python%d.%d" % sys.version_info[:2], "site-packages"),
+    )
+    # 少数布局：python.exe 在 Scripts/ 下
+    parent = os.path.dirname(exe_dir)
+    _prepend_sys_path(
+        os.path.join(parent, "Lib", "site-packages"),
+        os.path.join(parent, "lib", "site-packages"),
+    )
+
+
+_ensure_bundled_site_packages()
 
 
 def _ensure_ssl_certs():
@@ -73,9 +101,53 @@ ext = sys.argv[3]
 api = sys.argv[4]
 cache = os.path.abspath(sys.argv[5])
 
-for path in (cache, os.path.dirname(script)):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+_prepend_sys_path(cache, os.path.dirname(script), os.path.join(cache, "base"))
+
+
+def _download_dep(name):
+    """从爬虫 api 同目录拉取依赖 py 到 cache（失败忽略，由后续 import 报错）。"""
+    name = name if str(name).endswith(".py") else str(name) + ".py"
+    target = os.path.join(cache, os.path.basename(name))
+    if os.path.isfile(target) and os.path.getsize(target) > 0:
+        return
+    if not str(api).startswith("http"):
+        return
+    # api 常是 …/foo.py，urljoin 会落到同级 …/t4.py
+    dep_url = urljoin(api, os.path.basename(name))
+    if not str(dep_url).startswith("http"):
+        return
+    try:
+        with urlopen(dep_url, timeout=30) as response, open(target, "wb") as output:
+            output.write(response.read())
+    except Exception as exc:
+        print("[pyrunner] download %s failed: %s" % (name, exc), file=sys.stderr)
+
+
+def _preload_imports_from_source():
+    """顶层 import t4 等发生在 init/getDependence 之前，需按源码预拉。"""
+    try:
+        with open(script, "r", encoding="utf-8", errors="ignore") as f:
+            src = f.read()
+    except Exception:
+        return
+    names = set()
+    for m in re.finditer(r"(?:^|\n)\s*(?:import|from)\s+([A-Za-z_][\w]*)", src):
+        mod = m.group(1)
+        if mod in ("base", "os", "sys", "re", "json", "time", "requests", "lxml", "Crypto",
+                   "urllib", "urllib3", "bs4", "beautifulsoup4", "hashlib", "base64",
+                   "datetime", "collections", "typing", "math", "random", "copy", "html",
+                   "xml", "http", "ssl", "socket", "threading", "traceback", "importlib"):
+            continue
+        names.add(mod + ".py")
+    # 常见伴侣模块优先
+    for extra in ("t4.py", "utils.py", "common.py"):
+        if extra.replace(".py", "") in src or extra in names:
+            names.add(extra)
+    for name in sorted(names):
+        _download_dep(name)
+
+
+_preload_imports_from_source()
 
 spec = importlib.util.spec_from_file_location("kotv_spider_" + site_key, script)
 mod = importlib.util.module_from_spec(spec)
@@ -96,13 +168,7 @@ def download_dependencies():
     if sp is None or not hasattr(sp, "getDependence"):
         return
     for item in sp.getDependence() or []:
-        name = item if str(item).endswith(".py") else str(item) + ".py"
-        target = os.path.join(cache, os.path.basename(name))
-        dep_url = urljoin(api, name)
-        if not str(dep_url).startswith("http"):
-            continue
-        with urlopen(dep_url, timeout=30) as response, open(target, "wb") as output:
-            output.write(response.read())
+        _download_dep(item)
 
 
 def encode_result(value):

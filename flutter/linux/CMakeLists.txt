@@ -91,6 +91,16 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+if(PLUGIN_BUNDLED_LIBRARIES)
+  set(_kotv_bundled_libs "")
+  foreach(_lib IN LISTS PLUGIN_BUNDLED_LIBRARIES)
+    if(NOT _lib MATCHES "libmpv\\.so(\\.2|\\.1)?$")
+      list(APPEND _kotv_bundled_libs "${_lib}")
+    endif()
+  endforeach()
+  set(PLUGIN_BUNDLED_LIBRARIES "${_kotv_bundled_libs}")
+endif()
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build
@@ -145,14 +155,17 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
 endif()
 
 # Bundle full KOTV runtime next to the executable.
+# 勿用 PATTERN "lib" EXCLUDE：会误删 python/lib/pythonX.Y/site-packages。
 set(KOTV_RUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../runtime")
 if(EXISTS "${KOTV_RUNTIME_ROOT}/jre" OR EXISTS "${KOTV_RUNTIME_ROOT}/libvlc")
   install(DIRECTORY "${KOTV_RUNTIME_ROOT}/"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/runtime"
     COMPONENT Runtime
     PATTERN "mpv" EXCLUDE
-    PATTERN "vlc" EXCLUDE
-    PATTERN "lib" EXCLUDE)
+    PATTERN "vlc" EXCLUDE)
+  install(CODE "
+    file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/runtime/lib\")
+  " COMPONENT Runtime)
 endif()
 set(KOTV_ENGINE_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../assets/engine/kotv-engine")
 if(EXISTS "${KOTV_ENGINE_BIN}")

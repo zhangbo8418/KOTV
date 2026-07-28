@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'engine/engine_launcher.dart';
+import 'player/kotv_mpv_paths.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
 import 'theme/layout_scale.dart';
@@ -17,7 +18,18 @@ import 'widgets/chrome.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+    final libmpv = KotvMpvPaths.resolveLibPath();
+    if (libmpv == null) {
+      throw StateError(
+        '未找到 runtime/libmpv。请先在本机执行 scripts/prepare-runtime.sh，'
+        '或设置 KOTV_RUNTIME 指向含 libmpv 的 runtime 目录。',
+      );
+    }
+    MediaKit.ensureInitialized(libmpv: libmpv);
+  } else {
+    MediaKit.ensureInitialized();
+  }
   if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
     await windowManager.ensureInitialized();
     const opts = WindowOptions(

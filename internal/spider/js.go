@@ -160,6 +160,8 @@ func (s *jsSpider) runWorker() (err error) {
 		return fmt.Errorf("QuickJS runtime 创建失败")
 	}
 	defer rt.Close()
+	// 有上限时栈溢出变 JS 异常，避免 native 栈打穿进程（Win7 上更易表现为加载源闪退）
+	rt.SetMaxStackSize(1024 * 1024)
 	installTVModuleLoader(rt)
 	rt.SetInterruptHandler(func() int {
 		if s.epoch.Load() != s.activeEpoch.Load() {

@@ -23,26 +23,50 @@ need_file "$RT/bridge/spider-bridge.jar"
 need_dir "$RT/libvlc/plugins"
 need_dir "$RT/libmpv"
 
+# 嵌套 runtime/runtime 一律失败
+if [[ -d "$RT/runtime" ]]; then
+  die "nested $RT/runtime detected (copy layout bug)"
+fi
+
 case "$PLAT" in
   macos-*)
     need_file "$RT/jre/bin/java"
+    need_dir "$RT/jre/lib"
     need_file "$RT/jre/lib/libjli.dylib"
     need_file "$RT/jre/lib/server/libjvm.dylib"
     need_any_file "$RT/libvlc/libvlc.dylib" "$RT/libvlc/libvlc.5.dylib"
     need_any_file "$RT/libmpv/libmpv.dylib" "$RT/libmpv/libmpv.2.dylib" "$RT/libmpv/libmpv.1.dylib"
-    # 冒烟：捆绑 java 能跑
     if ! "$RT/jre/bin/java" -version >/dev/null 2>&1; then
       die "bundled java failed to start (check libjli / quarantine)"
     fi
     ;;
   windows-*)
     need_file "$RT/jre/bin/java.exe"
-    need_file "$RT/jre/bin/server/jvm.dll"
+    need_dir "$RT/jre/lib"
+    need_any_file "$RT/jre/lib/modules" "$RT/jre/lib/jrt-fs.jar"
+    need_any_file "$RT/jre/bin/server/jvm.dll" "$RT/jre/bin/client/jvm.dll"
+    # Win7 路径 API 垫片（缺则 Win7 上 java 起不来）
+    if [[ "$PLAT" == "windows-x64" ]]; then
+      need_file "$RT/jre/bin/api-ms-win-core-path-l1-1-0.dll"
+    fi
     need_file "$RT/libvlc/libvlc.dll"
     need_any_file "$RT/libmpv/libmpv-2.dll" "$RT/libmpv/mpv-2.dll" "$RT/libmpv/libmpv.dll"
+
+    need_file "$RT/python/python.exe"
+    need_dir "$RT/python/Lib/site-packages"
+    need_dir "$RT/python/Lib/site-packages/requests"
+    need_dir "$RT/python/Lib/site-packages/Crypto"
+    need_dir "$RT/python/Lib/site-packages/urllib3"
+    need_dir "$RT/python/Lib/site-packages/lxml"
+    pth="$(find "$RT/python" -maxdepth 1 -name 'python*._pth' | head -1 || true)"
+    if [[ -n "$pth" ]]; then
+      grep -q 'site-packages' "$pth" || die "python ._pth missing Lib\\\\site-packages: $pth"
+      grep -q '^import site' "$pth" || die "python ._pth missing 'import site': $pth"
+    fi
     ;;
   linux-*)
     need_file "$RT/jre/bin/java"
+    need_dir "$RT/jre/lib"
     need_file "$RT/jre/lib/server/libjvm.so"
     need_any_file "$RT/libvlc/libvlc.so" "$RT/libvlc/libvlc.so.5"
     need_any_file "$RT/libmpv/libmpv.so" "$RT/libmpv/libmpv.so.2" "$RT/libmpv/libmpv.so.1"
@@ -52,10 +76,14 @@ case "$PLAT" in
     ;;
 esac
 
-# JRE 过小通常意味着 lib/ 没拷全（曾导致 macOS .app 缺 libjli → bridge EOF）
+# JRE 过小通常意味着 lib/ 没拷全（CMake PATTERN lib EXCLUDE / 半包）
 jre_files="$(find "$RT/jre" -type f 2>/dev/null | wc -l | tr -d ' ')"
 if [[ "${jre_files:-0}" -lt 100 ]]; then
   die "jre too incomplete: only ${jre_files} files (expected >=100)"
+fi
+jre_lib_files="$(find "$RT/jre/lib" -type f 2>/dev/null | wc -l | tr -d ' ')"
+if [[ "${jre_lib_files:-0}" -lt 20 ]]; then
+  die "jre/lib too incomplete: only ${jre_lib_files} files (Java bridge will EOF)"
 fi
 
 # 发行包不应再带整包 VLC.app / 外部 mpv 可执行目录
@@ -66,4 +94,4 @@ if [[ "$fail" -ne 0 ]]; then
   echo "verify-runtime FAILED for $PLAT at $RT" >&2
   exit 1
 fi
-echo "verify-runtime OK: $PLAT ($jre_files jre files)"
+echo "verify-runtime OK: $PLAT (jre=$jre_files files, jre/lib=$jre_lib_files files)"

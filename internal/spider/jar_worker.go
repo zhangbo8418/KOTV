@@ -26,12 +26,13 @@ const javaBridgeCallTimeout = 12 * time.Second
 var ErrJavaBridgeInterrupted = errors.New("JAR 调用已中断")
 
 type javaBridgeClient struct {
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	proc   atomic.Pointer[os.Process]
-	epoch  atomic.Uint64
+	mu         sync.Mutex
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	stdout     *bufio.Reader
+	stderrFile *os.File
+	proc       atomic.Pointer[os.Process]
+	epoch      atomic.Uint64
 }
 
 var javaBridge javaBridgeClient
@@ -221,36 +222,72 @@ func (w *javaBridgeClient) startLocked() error {
 	)
 	cmd.Dir = filepath.Dir(bridgeJar)
 	cmd.Env = append(filterProxyEnv(os.Environ()), fmt.Sprintf("KOTV_PROXY_PORT=%d", proxyPort))
-	cmd.Stderr = os.Stderr
+	// GUI 子系统下 os.Stderr 常不可见；写入日志便于诊断 EOF（JRE 缺库/bridge 崩）。
+	_ = os.MkdirAll(paths.LogDir(), 0o755)
+	stderrPath := filepath.Join(paths.LogDir(), "java-bridge.err.log")
+	stderrFile, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err == nil {
+		cmd.Stderr = stderrFile
+	} else {
+		cmd.Stderr = os.Stderr
+		stderrFile = nil
+	}
 	setHiddenConsoleAttrs(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		if stderrFile != nil {
+			_ = stderrFile.Close()
+		}
 		return fmt.Errorf("创建 Java bridge 输入管道失败: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		_ = stdin.Close()
+		if stderrFile != nil {
+			_ = stderrFile.Close()
+		}
 		return fmt.Errorf("创建 Java bridge 输出管道失败: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
+		if stderrFile != nil {
+			_ = stderrFile.Close()
+		}
 		return fmt.Errorf("启动 Java bridge 失败: %w", err)
 	}
 
 	w.cmd = cmd
 	w.stdin = stdin
 	w.stdout = bufio.NewReader(stdout)
+	w.stderrFile = stderrFile
 	w.proc.Store(cmd.Process)
 
 	// 新 worker 启动后重放点播网络配置与用户代理，重启进程也会重新灌入 OkHttp。
 	for _, cfg := range currentNetConfig() {
 		if err := w.primeLocked(cfg); err != nil {
+			hint := readBridgeErrTail(stderrPath)
 			w.stopLocked()
-			return fmt.Errorf("下发网络配置到 Java bridge 失败: %w", err)
+			if hint != "" {
+				return fmt.Errorf("下发网络配置到 Java bridge 失败: %w（详见 %s：%s）", err, stderrPath, hint)
+			}
+			return fmt.Errorf("下发网络配置到 Java bridge 失败: %w（详见 %s）", err, stderrPath)
 		}
 	}
 	return nil
+}
+
+func readBridgeErrTail(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) == 0 {
+		return ""
+	}
+	s := strings.TrimSpace(string(b))
+	if len(s) > 240 {
+		s = s[len(s)-240:]
+	}
+	s = strings.ReplaceAll(s, "\n", " | ")
+	return s
 }
 
 // primeLocked 在启动新进程后同步下发一次配置请求（configNet 只做内存写入，返回极快）。
@@ -276,9 +313,13 @@ func (w *javaBridgeClient) stopLocked() {
 		}
 		_ = w.cmd.Wait()
 	}
+	if w.stderrFile != nil {
+		_ = w.stderrFile.Close()
+	}
 	w.cmd = nil
 	w.stdin = nil
 	w.stdout = nil
+	w.stderrFile = nil
 }
 
 func findJava() (string, error) {

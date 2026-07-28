@@ -81,8 +81,31 @@ download() {
 prepare_jre() {
   local plat="$1" dest="$OUT_ROOT/jre"
   local jre_ver="$LIBERICA_FEATURE"
-  if [[ -x "$dest/bin/java" || -f "$dest/bin/java.exe" || -x "$dest/Contents/Home/bin/java" ]]; then
-    echo "[jre] already present: $dest"
+
+  jre_complete_for_plat() {
+    case "$plat" in
+      windows-*)
+        # Liberica Windows：必须有 java.exe、jvm.dll、以及完整 jre/lib（modules 等）
+        # 曾被 CMake PATTERN "lib" EXCLUDE 误删 lib/ → bridge EOF
+        [[ -f "$dest/bin/java.exe" ]] \
+          && [[ -d "$dest/lib" ]] \
+          && [[ -f "$dest/lib/modules" || -f "$dest/lib/jrt-fs.jar" ]] \
+          && { [[ -f "$dest/bin/server/jvm.dll" ]] || [[ -f "$dest/bin/client/jvm.dll" ]]; }
+        ;;
+      linux-*)
+        [[ -x "$dest/bin/java" ]] && [[ -d "$dest/lib" ]] && [[ -f "$dest/lib/server/libjvm.so" || -f "$dest/lib/libjvm.so" ]]
+        ;;
+      macos-*)
+        [[ -x "$dest/bin/java" || -x "$dest/Contents/Home/bin/java" ]] && {
+          [[ -d "$dest/lib" ]] || [[ -d "$dest/Contents/Home/lib" ]]
+        }
+        ;;
+      *) return 1 ;;
+    esac
+  }
+
+  if jre_complete_for_plat; then
+    echo "[jre] already present and complete: $dest"
     if [[ -x "$dest/Contents/Home/bin/java" && ! -x "$dest/bin/java" ]]; then
       echo "[jre] normalizing macOS layout"
       local tmp="$dest._home"
@@ -94,6 +117,11 @@ prepare_jre() {
       patch_jre_win7_crt "$dest"
     fi
     return
+  fi
+
+  if [[ -d "$dest" ]]; then
+    echo "[jre] incomplete or wrong platform at $dest — re-downloading for $plat"
+    rm -rf "$dest"
   fi
 
   local os arch pkg ext
@@ -148,10 +176,19 @@ prepare_jre() {
   if [[ "$plat" == "windows-x64" ]]; then
     patch_jre_win7_crt "$dest"
   fi
+  if ! jre_complete_for_plat; then
+    echo "ERROR: [jre] after extract still incomplete for $plat under $dest" >&2
+    echo "  expect bin/java(.exe) + lib/modules (or jrt-fs.jar) + jvm native lib" >&2
+    ls -la "$dest" "$dest/bin" "$dest/lib" 2>&1 | head -40 >&2 || true
+    exit 1
+  fi
   echo "[jre] ready (Liberica ${jre_ver}): $dest"
   if [[ -f "$dest/bin/java.exe" ]]; then
     echo "[jre] windows java.exe present (bundled for JAR spiders)"
   fi
+  local n
+  n="$(find "$dest/lib" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  echo "[jre] lib/ file count: $n"
 }
 
 # 将 Win10 路径 API 垫片放入 jre/bin（缺 path API 时 Win7 无法启动）
@@ -196,6 +233,24 @@ EOF
 }
 
 # --- Python (python-build-standalone / Win7 embed) ---
+# 依赖与 TV/chaquo/requirements.txt 对齐，见 scripts/python-requirements.txt
+patch_windows_python_pth() {
+  local dest="$1"
+  local pth
+  pth="$(find "$dest" -maxdepth 1 -name 'python*._pth' | head -1 || true)"
+  [[ -n "$pth" ]] || return 0
+  # embed 默认忽略 site；必须写入 Lib\site-packages + import site
+  grep -q 'Lib\\site-packages' "$pth" 2>/dev/null || echo 'Lib\site-packages' >> "$pth"
+  if grep -q '^#import site' "$pth" 2>/dev/null; then
+    # macOS/Linux sed；Windows Git Bash 也支持
+    sed -i 's/^#import site/import site/' "$pth" 2>/dev/null \
+      || sed -i.bak 's/^#import site/import site/' "$pth"
+  fi
+  grep -q '^import site$' "$pth" 2>/dev/null || echo "import site" >> "$pth"
+  echo "[python] patched embed ._pth: $pth"
+  cat "$pth" || true
+}
+
 install_python_packages() {
   local plat="$1" dest="$2"
   local python=""
@@ -211,52 +266,79 @@ install_python_packages() {
     return 1
   fi
 
-  if [[ "$plat" == "windows-x64" ]]; then
-    local pth
-    pth="$(find "$dest" -maxdepth 1 -name 'python*._pth' | head -1)"
-    if [[ -n "$pth" ]]; then
-      grep -q '^Lib\\site-packages$' "$pth" 2>/dev/null || echo 'Lib\site-packages' >> "$pth"
-      grep -q '^import site$' "$pth" 2>/dev/null || echo "import site" >> "$pth"
-      sed -i 's/^#import site/import site/' "$pth" 2>/dev/null || true
+  local target=""
+  case "$plat" in
+    windows-*) target="$dest/Lib/site-packages" ;;
+    macos-*|linux-*) target="$dest/lib/python${PYTHON_MM}/site-packages" ;;
+    *) echo "ERROR: unsupported Python platform: $plat" >&2; return 1 ;;
+  esac
+  mkdir -p "$target"
+
+  if [[ "$plat" == windows-* ]]; then
+    patch_windows_python_pth "$dest"
+  fi
+
+  echo "[python] installing spider dependencies → $target (TV/chaquo 对齐) ..."
+
+  # Windows embed：始终 --target，避免 pip 装到用户目录或装不上
+  # 跨平台（在 mac/linux 上为 windows 备包）：host pip + --platform
+  local hostpy=""
+  hostpy="$(command -v python3 || command -v python || true)"
+
+  if [[ "$plat" == windows-* ]]; then
+    local pip_platform="win_amd64"
+    [[ "$plat" == "windows-arm64" ]] && pip_platform="win_arm64"
+    if [[ -n "$hostpy" ]]; then
+      "$hostpy" -m pip install --upgrade --target "$target" \
+        --platform "$pip_platform" --implementation cp --python-version "$PYTHON_MM" --abi "$PYTHON_ABI" \
+        --only-binary=:all: -r "$ROOT/scripts/python-requirements.txt"
+    elif "$python" --version >/dev/null 2>&1; then
+      if ! "$python" -m pip --version >/dev/null 2>&1; then
+        "$python" -m ensurepip --upgrade >/dev/null 2>&1 || {
+          local getpip="$CACHE/get-pip.py"
+          download "https://bootstrap.pypa.io/get-pip.py" "$getpip"
+          "$python" "$getpip" --no-warn-script-location
+        }
+      fi
+      "$python" -m pip install --upgrade --target "$target" --no-warn-script-location \
+        -r "$ROOT/scripts/python-requirements.txt"
+    else
+      echo "ERROR: cannot install Windows Python wheels (need host python3 or runnable python.exe)" >&2
+      return 1
+    fi
+  else
+    if ! "$python" --version >/dev/null 2>&1; then
+      [[ -n "$hostpy" ]] || { echo "ERROR: host Python required for cross-platform wheels" >&2; return 1; }
+      local pip_platform
+      case "$plat" in
+        macos-x64) pip_platform="macosx_10_13_x86_64" ;;
+        macos-arm64) pip_platform="macosx_11_0_arm64" ;;
+        linux-x64) pip_platform="manylinux2014_x86_64" ;;
+        linux-arm64) pip_platform="manylinux2014_aarch64" ;;
+      esac
+      "$hostpy" -m pip install --upgrade --target "$target" \
+        --platform "$pip_platform" --implementation cp --python-version "$PYTHON_MM" --abi "$PYTHON_ABI" \
+        --only-binary=:all: -r "$ROOT/scripts/python-requirements.txt"
+    else
+      if ! "$python" -m pip --version >/dev/null 2>&1; then
+        "$python" -m ensurepip --upgrade >/dev/null 2>&1 || {
+          local getpip="$CACHE/get-pip.py"
+          download "https://bootstrap.pypa.io/get-pip.py" "$getpip"
+          "$python" "$getpip" --no-warn-script-location
+        }
+      fi
+      "$python" -m pip install --upgrade --no-warn-script-location \
+        -r "$ROOT/scripts/python-requirements.txt"
     fi
   fi
 
-  echo "[python] installing locked spider dependencies ..."
-  if ! "$python" --version >/dev/null 2>&1; then
-    local hostpy target pip_platform
-    hostpy="$(command -v python3 || command -v python || true)"
-    [[ -n "$hostpy" ]] || { echo "ERROR: host Python is required for cross-platform wheels" >&2; return 1; }
-    case "$plat" in
-      windows-x64) target="$dest/Lib/site-packages"; pip_platform="win_amd64" ;;
-      windows-arm64) target="$dest/Lib/site-packages"; pip_platform="win_arm64" ;;
-      macos-x64) target="$dest/lib/python${PYTHON_MM}/site-packages"; pip_platform="macosx_10_13_x86_64" ;;
-      macos-arm64) target="$dest/lib/python${PYTHON_MM}/site-packages"; pip_platform="macosx_11_0_arm64" ;;
-      linux-x64) target="$dest/lib/python${PYTHON_MM}/site-packages"; pip_platform="manylinux2014_x86_64" ;;
-      linux-arm64) target="$dest/lib/python${PYTHON_MM}/site-packages"; pip_platform="manylinux2014_aarch64" ;;
-      *) echo "ERROR: unsupported Python wheel platform: $plat" >&2; return 1 ;;
-    esac
-    mkdir -p "$target"
-    "$hostpy" -m pip install --upgrade --target "$target" \
-      --platform "$pip_platform" --implementation cp --python-version "$PYTHON_MM" --abi "$PYTHON_ABI" \
-      --only-binary=:all: -r "$ROOT/scripts/python-requirements.txt"
-    [[ -d "$target/requests" && -d "$target/lxml" && -d "$target/Crypto" ]] || {
-      echo "ERROR: cross-platform Python dependencies incomplete" >&2
-      return 1
-    }
-    echo "[python] cross-platform dependencies verified"
-    return
-  fi
-  if ! "$python" -m pip --version >/dev/null 2>&1; then
-    "$python" -m ensurepip --upgrade >/dev/null 2>&1 || {
-      local getpip="$CACHE/get-pip.py"
-      download "https://bootstrap.pypa.io/get-pip.py" "$getpip"
-      "$python" "$getpip" --no-warn-script-location
-    }
-  fi
-  "$python" -m pip install --upgrade --no-warn-script-location \
-    -r "$ROOT/scripts/python-requirements.txt"
-  "$python" -c 'import lxml,ujson,pyquery,requests,cachetools,Crypto,bs4,certifi'
-  echo "[python] dependencies verified"
+  [[ -d "$target/requests" && -d "$target/lxml" && -d "$target/Crypto" && -d "$target/urllib3" ]] || {
+    echo "ERROR: Python dependencies incomplete under $target" >&2
+    echo "  need: requests lxml Crypto urllib3 (same as TV/chaquo)" >&2
+    ls -la "$target" 2>&1 | head -40 >&2 || true
+    return 1
+  }
+  echo "[python] dependencies verified at $target"
 }
 
 prepare_python() {
@@ -306,16 +388,7 @@ prepare_python() {
   mkdir -p "$dest"
   if [[ "$kind" == "win" ]]; then
     unzip -q "$archive" -d "$dest"
- # Win7 embed：解开 ._pth 限制，依赖在解压后统一安装。
-    local pth
-    pth="$(find "$dest" -maxdepth 1 -name 'python*._pth' | head -1)"
-    if [[ -n "$pth" ]]; then
- # 允许 import site
-      if ! grep -q '^import site' "$pth" 2>/dev/null; then
-        echo "import site" >> "$pth"
-      fi
-      sed -i 's/^#import site/import site/' "$pth" 2>/dev/null || true
-    fi
+    patch_windows_python_pth "$dest"
   else
     local tmp="$CACHE/py-extract-$plat"
     rm -rf "$tmp"
@@ -1012,6 +1085,8 @@ prepare_one() {
 platform=$plat
 prepared=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
+  echo "======== verifying $OUT_ROOT ========"
+  "$ROOT/scripts/verify-runtime.sh" "$OUT_ROOT" "$plat"
   echo "======== done: $OUT_ROOT ========"
   echo "包含: jre / python / chromium / ffmpeg / libvlc / libmpv / bridge"
   echo "JS(QuickJS) 已编译进主程序 (CGO)。Windows 请用 MSVCRT MinGW 打包（见 package.sh / check-win7-deps.ps1）。"

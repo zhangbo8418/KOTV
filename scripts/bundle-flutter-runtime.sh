@@ -56,7 +56,7 @@ else
   mkdir -p "$DEST_RT"
   cp -a "$SRC_RT/." "$DEST_RT/"
 fi
-# 不进包：外部 mpv、旧布局
+# 不进包：外部 mpv、旧布局顶层 lib/（路径是 runtime/lib，不会碰到 python/Lib）
 rm -rf "$DEST_RT/mpv" "$DEST_RT/vlc" "$DEST_RT/lib"
 
 # 校验关键子目录

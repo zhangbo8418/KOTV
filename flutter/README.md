@@ -29,6 +29,8 @@
 - 使用 GitHub Actions 工作流：`.github/workflows/flutter-win7.yml`。
 - 锁 `Flutter 3.24.5`；补丁在 `.github/patches/`，由 `scripts/patch-flutter-sdk.sh` 打入 SDK。
 - **Win7 必须**用 `scripts/install-flutter-win7-engine.ps1` 替换 `windows-x64-release` engine（否则 `kotv.exe` 会因 `GetHostNameW` 无法启动）。
+- 桌面 **内置 MPV** 仅加载 `runtime/libmpv`（与 Go 引擎共用），不随包附带 media_kit 自带的 libmpv。
+- Python 爬虫依赖与 TV `chaquo/requirements.txt` 对齐（`scripts/python-requirements.txt`），打进 `runtime/python`。
 - 该产物为 `KOTV-flutter-win7-experimental-*.zip`，用于 Win7 真机回归与补丁迭代。
 
 ```bash

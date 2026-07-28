@@ -311,17 +311,39 @@ func (s *pySpider) callLocked(startEpoch uint64, method string, args map[string]
 	}
 }
 
+func pySitePackages(pythonExe string) []string {
+	dir := filepath.Dir(pythonExe)
+	cands := []string{
+		filepath.Join(dir, "Lib", "site-packages"),
+		filepath.Join(dir, "lib", "site-packages"),
+	}
+	parent := filepath.Dir(dir)
+	cands = append(cands,
+		filepath.Join(parent, "Lib", "site-packages"),
+		filepath.Join(parent, "lib", "site-packages"),
+	)
+	var out []string
+	for _, c := range cands {
+		if st, err := os.Stat(c); err == nil && st.IsDir() {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func (s *pySpider) startLocked(python, runner, script string) error {
 	if s.cmd != nil && s.cmd.Process != nil && s.cmd.ProcessState == nil {
 		return nil
 	}
 	s.stopLocked()
 	cmd := exec.Command(python, "-u", runner, script, s.key, s.ext, s.api, paths.PyCache())
+	// 缓存目录 + 捆绑 site-packages（Windows embed 常忽略仅含 cache 的 PYTHONPATH）
+	pyPathParts := append([]string{paths.PyCache()}, pySitePackages(python)...)
 	cmd.Env = append(os.Environ(),
 		"PYTHONUNBUFFERED=1",
 		"PYTHONUTF8=1",
 		"PYTHONIOENCODING=utf-8",
-		"PYTHONPATH="+paths.PyCache(),
+		"PYTHONPATH="+strings.Join(pyPathParts, string(os.PathListSeparator)),
 		"KOTV_PY_CACHE="+paths.PyCache(),
 		fmt.Sprintf("KOTV_PROXY_PORT=%d", localproxy.Port()),
 	)

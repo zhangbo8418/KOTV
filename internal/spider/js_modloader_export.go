@@ -10,13 +10,27 @@ extern void kotv_throw_module_error(JSContext *ctx, const char *msg);
 import "C"
 import (
 	"fmt"
+	"log"
 	"strings"
 	"unsafe"
 )
 
 //export kotvModuleNormalize
-func kotvModuleNormalize(ctx *C.JSContext, base, name *C.char, opaque unsafe.Pointer) *C.char {
+func kotvModuleNormalize(ctx *C.JSContext, base, name *C.char, opaque unsafe.Pointer) (ret *C.char) {
 	_ = opaque
+	// CGO 回调里 panic 会直接打崩进程（Win7 上表现为加载 JS 源闪退）
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("kotvModuleNormalize panic: %v", r)
+			fallback := C.GoString(name)
+			if fallback == "" {
+				fallback = "."
+			}
+			tmp := C.CString(fallback)
+			ret = C.js_strdup(ctx, tmp)
+			C.free(unsafe.Pointer(tmp))
+		}
+	}()
 	resolved := moduleNormalize(C.GoString(base), C.GoString(name))
 	if resolved == "" {
 		resolved = C.GoString(name)
@@ -27,8 +41,19 @@ func kotvModuleNormalize(ctx *C.JSContext, base, name *C.char, opaque unsafe.Poi
 }
 
 //export kotvModuleLoader
-func kotvModuleLoader(ctx *C.JSContext, moduleName *C.char, opaque unsafe.Pointer) *C.JSModuleDef {
+func kotvModuleLoader(ctx *C.JSContext, moduleName *C.char, opaque unsafe.Pointer) (ret *C.JSModuleDef) {
 	_ = opaque
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("kotvModuleLoader panic: %v", r)
+			name := ""
+			if moduleName != nil {
+				name = C.GoString(moduleName)
+			}
+			throwModuleLoadError(ctx, name)
+			ret = nil
+		}
+	}()
 	name := C.GoString(moduleName)
 	if name == "" || strings.HasPrefix(name, "node:") {
 		throwModuleLoadError(ctx, name)
