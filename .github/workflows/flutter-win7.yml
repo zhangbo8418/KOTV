@@ -7,9 +7,8 @@ on:
 
 env:
   FLUTTER_VERSION: "3.24.5"
-  # 可选：若你后续也维护自定义 flutter engine，可填 zip 下载地址并自动替换。
-  # 例如: https://github.com/<org>/<repo>/releases/download/<tag>/windows-x64-release.zip
-  KOTV_FLUTTER_ENGINE_ZIP_URL: ""
+  # Win7 必需：替换 engine（避免 flutter_windows.dll 依赖 GetHostNameW）。
+  KOTV_FLUTTER_ENGINE_ZIP_URL: "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip"
 
 jobs:
   build-flutter-win7:
@@ -82,18 +81,7 @@ jobs:
           flutter config --enable-windows-desktop
           flutter precache --windows
           bash ../scripts/patch-flutter-sdk.sh
-
-          $sdkRoot = Split-Path (Split-Path (Get-Command flutter).Source -Parent) -Parent
-          if ("${{ env.KOTV_FLUTTER_ENGINE_ZIP_URL }}") {
-            $tmp = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_.FullName }
-            curl.exe -fsSL -o "$tmp\engine.zip" "${{ env.KOTV_FLUTTER_ENGINE_ZIP_URL }}"
-            Expand-Archive -Path "$tmp\engine.zip" -DestinationPath "$tmp\engine" -Force
-            $engineDir = Join-Path $sdkRoot "bin\cache\artifacts\engine\windows-x64-release"
-            if (Test-Path $engineDir) { Remove-Item -Recurse -Force $engineDir }
-            New-Item -ItemType Directory -Path $engineDir -Force | Out-Null
-            Copy-Item -Recurse -Force "$tmp\engine\*" $engineDir
-            Write-Host "custom engine replaced"
-          }
+          pwsh -File ../scripts/install-flutter-win7-engine.ps1
 
           flutter pub get
           flutter build windows --release

@@ -28,6 +28,7 @@
 - Flutter 官方对 Win7 已非主支持平台，仓库提供 `Flutter 3.24.5` 的实验构建线。
 - 使用 GitHub Actions 工作流：`.github/workflows/flutter-win7.yml`。
 - 锁 `Flutter 3.24.5`；补丁在 `.github/patches/`，由 `scripts/patch-flutter-sdk.sh` 打入 SDK。
+- **Win7 必须**用 `scripts/install-flutter-win7-engine.ps1` 替换 `windows-x64-release` engine（否则 `kotv.exe` 会因 `GetHostNameW` 无法启动）。
 - 该产物为 `KOTV-flutter-win7-experimental-*.zip`，用于 Win7 真机回归与补丁迭代。
 
 ```bash
