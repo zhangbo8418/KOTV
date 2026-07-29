@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
+import '../player/danmaku_layer.dart';
 import '../player/embed_video_view.dart';
 import '../player/kotv_playback.dart';
 import '../providers.dart';
@@ -46,6 +47,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   String _playUrl = '';
   String _decodeMode = 'auto';
   bool _danmakuOn = false;
+  bool _ambientOn = false;
+  bool _stableVolumeOn = false;
+  String _danmakuApi = '';
+  final ValueNotifier<List<DanmakuItem>> _danmakuItems = ValueNotifier(const []);
   AspectSpec _aspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
   int _openingSec = 0;
   int _endingSec = 0;
@@ -151,6 +156,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playingSub?.cancel();
     _endedSub?.cancel();
     _posSub?.cancel();
+    _danmakuItems.dispose();
     _vlc?.dispose();
     _mk.dispose();
     _mkPlayer.dispose();
@@ -175,6 +181,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final decode = '${settings['playerDecode'] ?? 'auto'}';
         if (decode.isNotEmpty) _decodeMode = decode;
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
+        _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
+        _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
+        _danmakuApi = '${settings['danmakuApi'] ?? ''}';
         final speed = double.tryParse('${settings['playerSpeed'] ?? ''}');
         if (speed != null && speed > 0) await _mk.setRate(speed);
         final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
@@ -183,6 +192,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _aspect = _aspectFromScale(scale);
         final playerVal = '${settings['player'] ?? 'innie#mpv'}'.trim();
         _playerVal = playerVal.isEmpty ? 'innie#mpv' : playerVal;
+        if (_stableVolumeOn) {
+          await _applyStableVolume(_mk, true);
+        }
       } catch (_) {}
       setState(() {
         _detail = vod;
@@ -229,6 +241,44 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
   }
 
+  Future<void> _applyStableVolume(KotvPlayback p, bool on) async {
+    if (p is MediaKitPlayback) {
+      try {
+        await (p.player.platform as dynamic).setProperty('af', on ? 'loudnorm' : '');
+      } catch (_) {
+        try {
+          await (p.player.platform as dynamic).setProperty('af', on ? 'dynaudnorm' : '');
+        } catch (_) {}
+      }
+      return;
+    }
+    if (p is EngineVlcPlayback) {
+      await p.setStableVolume(on);
+    }
+  }
+
+  Future<void> _loadDanmakuForEpisode({
+    required String playDanmaku,
+    required String name,
+    required String episode,
+  }) async {
+    _danmakuItems.value = const [];
+    if (playDanmaku.trim().isEmpty && _danmakuApi.trim().isEmpty) return;
+    try {
+      List<DanmakuItem> items = const [];
+      if (playDanmaku.trim().isNotEmpty) {
+        items = await DanmakuLoader.loadUrl(playDanmaku);
+      }
+      if (items.isEmpty && _danmakuApi.trim().isNotEmpty) {
+        items = await DanmakuLoader.loadApi(_danmakuApi, name: name, episode: episode);
+      }
+      if (!mounted) return;
+      _danmakuItems.value = items;
+    } catch (_) {
+      if (mounted) _danmakuItems.value = const [];
+    }
+  }
+
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
     final d = _detail;
     if (d == null || d.flags.isEmpty) return;
@@ -263,6 +313,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _vlc ??= EngineVlcPlayback();
         await _vlc!.setDecodeMode(_decodeMode);
         await _vlc!.open(playUrl);
+        if (_stableVolumeOn) await _applyStableVolume(_vlc!, true);
         if (!mounted) return;
         setState(() {
           _playUrl = playUrl;
@@ -273,12 +324,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           await _vlc?.stop();
         } catch (_) {}
         await _mk.open(playUrl);
+        if (_stableVolumeOn) await _applyStableVolume(_mk, true);
         if (!mounted) return;
         setState(() {
           _playUrl = playUrl;
           _status = '内置 MPV 播放中';
         });
       }
+      unawaited(_loadDanmakuForEpisode(
+        playDanmaku: '${data['danmaku'] ?? ''}',
+        name: d.name,
+        episode: ep.name,
+      ));
       _wireEnded(_playback);
       _wirePosition(_playback);
       _openingSeekDone = false;
@@ -310,7 +367,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     await Navigator.of(context).push(
       PageRouteBuilder(
         opaque: true,
-        pageBuilder: (_, __, ___) => DetailFullscreenPage(
+        pageBuilder: (_, __, ___) => ValueListenableBuilder<List<DanmakuItem>>(
+          valueListenable: _danmakuItems,
+          builder: (context, danmakuItems, _) => DetailFullscreenPage(
           playback: _playback,
           vodName: d.name,
           title: title,
@@ -320,6 +379,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           decodeMode: _decodeMode,
           aspect: _aspect,
           danmakuOn: _danmakuOn,
+          danmakuItems: danmakuItems,
+          ambientOn: _ambientOn,
+          stableVolumeOn: _stableVolumeOn,
           keepLabel: _kept ? '取消收藏' : '收藏',
           offsetId: id,
           offsetSite: site,
@@ -342,6 +404,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             await api.setSetting(k, v);
             if (!mounted) return;
             if (k == 'playerScale') setState(() => _aspect = _aspectFromScale(v));
+            if (k == 'playerAmbient') setState(() => _ambientOn = v.toLowerCase() == 'true');
+            if (k == 'playerStableVolume') {
+              final on = v.toLowerCase() == 'true';
+              setState(() => _stableVolumeOn = on);
+              unawaited(_applyStableVolume(_playback, on));
+            }
+            if (k == 'danmaku') setState(() => _danmakuOn = v.toLowerCase() == 'true');
+            if (k == 'danmakuApi') setState(() => _danmakuApi = v);
             if (k == 'player') {
               final prev = _playerVal;
               setState(() => _playerVal = v);
@@ -362,6 +432,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           onDanmakuChanged: (v) {
             if (mounted) setState(() => _danmakuOn = v);
           },
+          onAmbientChanged: (v) {
+            if (mounted) setState(() => _ambientOn = v);
+          },
+          onParse: () {
+            Navigator.of(context).maybePop();
+            unawaited(_pickParse());
+          },
           onRefresh: () {
             if (_epIdx >= 0) unawaited(_playAt(_epIdx));
           },
@@ -370,6 +447,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             Navigator.of(context).maybePop();
             unawaited(_enterMini());
           },
+        ),
         ),
       ),
     );

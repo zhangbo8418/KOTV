@@ -48,6 +48,17 @@ class KotvVlc {
   Future<void> setDecodeMode(String mode) => _ch.invokeMethod('decode', {'mode': mode});
   Future<void> setDecodeSoft(bool soft) => setDecodeMode(soft ? 'soft' : 'hard');
 
+  Future<void> setRepeatOne(bool on) => _ch.invokeMethod('repeat', {'on': on});
+
+  /// type: 0=音轨 1=字幕
+  Future<Map<String, dynamic>> tracks({required int type}) async {
+    final m = await _ch.invokeMapMethod<String, dynamic>('tracks', {'type': type}) ?? {};
+    return Map<String, dynamic>.from(m);
+  }
+
+  Future<void> setTrack({required int type, required int id}) =>
+      _ch.invokeMethod('setTrack', {'type': type, 'id': id});
+
   Future<Map<String, dynamic>> status() async {
     final m = await _ch.invokeMapMethod<String, dynamic>('status') ?? {};
     return Map<String, dynamic>.from(m);

@@ -300,6 +300,9 @@ class VodFullscreenChrome extends StatefulWidget {
     this.onMini,
     this.danmakuOn = false,
     this.onDanmakuChanged,
+    this.ambientOn = false,
+    this.onAmbientChanged,
+    this.stableVolumeOn = false,
     this.offsetId = '',
     this.offsetSite = '',
     this.openingSec = 0,
@@ -335,6 +338,9 @@ class VodFullscreenChrome extends StatefulWidget {
   final VoidCallback? onMini;
   final bool danmakuOn;
   final ValueChanged<bool>? onDanmakuChanged;
+  final bool ambientOn;
+  final ValueChanged<bool>? onAmbientChanged;
+  final bool stableVolumeOn;
   final String offsetId;
   final String offsetSite;
   final int openingSec;
@@ -373,6 +379,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   void initState() {
     super.initState();
     _danmakuOn = widget.danmakuOn;
+    _ambientOn = widget.ambientOn;
+    _stableVolume = widget.stableVolumeOn;
     _keepLabel = widget.keepLabel;
     _openingSec = widget.openingSec;
     _endingSec = widget.endingSec;
@@ -387,6 +395,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final ai = _aspects.indexWhere((e) => e.$1 == widget.aspect.key);
     if (ai >= 0) _aspectIdx = ai;
     unawaited(_refreshPlayerLabel());
+    if (_stableVolume) unawaited(_applyStableVolume(true));
     _skipSub = widget.player.positionStream.listen(_onPositionTick);
   }
 
@@ -402,6 +411,13 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     }
     if (oldWidget.danmakuOn != widget.danmakuOn) {
       _danmakuOn = widget.danmakuOn;
+    }
+    if (oldWidget.ambientOn != widget.ambientOn) {
+      _ambientOn = widget.ambientOn;
+    }
+    if (oldWidget.stableVolumeOn != widget.stableVolumeOn) {
+      _stableVolume = widget.stableVolumeOn;
+      unawaited(_applyStableVolume(_stableVolume));
     }
     if (oldWidget.aspect.key != widget.aspect.key) {
       final ai = _aspects.indexWhere((e) => e.$1 == widget.aspect.key);
@@ -929,6 +945,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           value: _ambientOn,
                           onChanged: (v) {
                             sync(() => _ambientOn = v);
+                            widget.onAmbientChanged?.call(v);
                             unawaited(_persist('playerAmbient', v ? 'true' : 'false'));
                           },
                         ),
@@ -1095,13 +1112,18 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
   Future<void> _applyStableVolume(bool on) async {
     final p = widget.player;
-    if (p is! MediaKitPlayback) return;
-    try {
-      await (p.player.platform as dynamic).setProperty('af', on ? 'loudnorm' : '');
-    } catch (_) {
+    if (p is MediaKitPlayback) {
       try {
-        await (p.player.platform as dynamic).setProperty('af', on ? 'dynaudnorm' : '');
-      } catch (_) {}
+        await (p.player.platform as dynamic).setProperty('af', on ? 'loudnorm' : '');
+      } catch (_) {
+        try {
+          await (p.player.platform as dynamic).setProperty('af', on ? 'dynaudnorm' : '');
+        } catch (_) {}
+      }
+      return;
+    }
+    if (p is EngineVlcPlayback) {
+      await p.setStableVolume(on);
     }
   }
 

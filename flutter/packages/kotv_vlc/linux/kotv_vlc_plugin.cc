@@ -253,6 +253,50 @@ static void method_call_cb(FlMethodChannel*, FlMethodCall* method_call,
       kotv_vlc_set_decode(v && fl_value_get_bool(v) ? 1 : 0);
     }
     response = respond_ok();
+  } else if (strcmp(method, "repeat") == 0) {
+    FlValue* v = fl_value_lookup_string(args, "on");
+    kotv_vlc_set_repeat(v && fl_value_get_bool(v) ? 1 : 0);
+    response = respond_ok();
+  } else if (strcmp(method, "tracks") == 0) {
+    FlValue* vt = fl_value_lookup_string(args, "type");
+    int type = vt ? (int)fl_value_get_int(vt) : 0;
+    char buf[8192];
+    int n = kotv_vlc_track_list(type, buf, (int)sizeof(buf));
+    g_autoptr(FlValue) list = fl_value_new_list();
+    if (n > 0) {
+      gchar** lines = g_strsplit(buf, "\n", -1);
+      for (int i = 0; lines && lines[i]; i++) {
+        if (!lines[i][0]) continue;
+        gchar** parts = g_strsplit(lines[i], "\t", 2);
+        g_autoptr(FlValue) row = fl_value_new_map();
+        fl_value_set_string_take(row, "id",
+                                 fl_value_new_string(parts[0] ? parts[0] : ""));
+        fl_value_set_string_take(
+            row, "name",
+            fl_value_new_string(parts[1] ? parts[1] : (parts[0] ? parts[0] : "")));
+        fl_value_append(list, row);
+        g_strfreev(parts);
+      }
+      g_strfreev(lines);
+    }
+    g_autoptr(FlValue) map = fl_value_new_map();
+    fl_value_set_string(map, "tracks", list);
+    fl_value_set_string_take(map, "current",
+                             fl_value_new_int(kotv_vlc_get_track(type)));
+    fl_value_set_string_take(map, "count", fl_value_new_int(n < 0 ? 0 : n));
+    response = respond_map(map);
+  } else if (strcmp(method, "setTrack") == 0) {
+    FlValue* vt = fl_value_lookup_string(args, "type");
+    FlValue* vi = fl_value_lookup_string(args, "id");
+    int type = vt ? (int)fl_value_get_int(vt) : 0;
+    int tid = vi ? (int)fl_value_get_int(vi) : -1;
+    int rc = kotv_vlc_set_track(type, tid);
+    if (rc < 0) {
+      response = FL_METHOD_RESPONSE(
+          fl_method_error_response_new("setTrack", "set track failed", nullptr));
+    } else {
+      response = respond_ok();
+    }
   } else if (strcmp(method, "status") == 0) {
     int w = 0, h = 0;
     {

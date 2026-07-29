@@ -151,6 +151,58 @@ void KotvVlcPlugin::HandleMethodCall(
     result->Success();
     return;
   }
+  if (method == "repeat") {
+    kotv_vlc_set_repeat(arg_bool("on") ? 1 : 0);
+    result->Success();
+    return;
+  }
+  if (method == "tracks") {
+    const int type = (int)arg_int("type", 0);
+    char buf[8192];
+    const int n = kotv_vlc_track_list(type, buf, (int)sizeof(buf));
+    flutter::EncodableList tracks;
+    if (n > 0) {
+      std::string raw(buf);
+      size_t start = 0;
+      while (start < raw.size()) {
+        size_t nl = raw.find('\n', start);
+        if (nl == std::string::npos) nl = raw.size();
+        std::string line = raw.substr(start, nl - start);
+        start = nl + 1;
+        if (line.empty()) continue;
+        size_t tab = line.find('\t');
+        flutter::EncodableMap row;
+        if (tab == std::string::npos) {
+          row[flutter::EncodableValue("id")] = flutter::EncodableValue(line);
+          row[flutter::EncodableValue("name")] = flutter::EncodableValue(line);
+        } else {
+          row[flutter::EncodableValue("id")] =
+              flutter::EncodableValue(line.substr(0, tab));
+          row[flutter::EncodableValue("name")] =
+              flutter::EncodableValue(line.substr(tab + 1));
+        }
+        tracks.push_back(flutter::EncodableValue(row));
+      }
+    }
+    flutter::EncodableMap out;
+    out[flutter::EncodableValue("tracks")] = flutter::EncodableValue(tracks);
+    out[flutter::EncodableValue("current")] =
+        flutter::EncodableValue((int64_t)kotv_vlc_get_track(type));
+    out[flutter::EncodableValue("count")] = flutter::EncodableValue(n < 0 ? 0 : n);
+    result->Success(flutter::EncodableValue(out));
+    return;
+  }
+  if (method == "setTrack") {
+    const int type = (int)arg_int("type", 0);
+    const int id = (int)arg_int("id", -1);
+    const int rc = kotv_vlc_set_track(type, id);
+    if (rc < 0) {
+      result->Error("setTrack", "set track failed");
+      return;
+    }
+    result->Success();
+    return;
+  }
   if (method == "status") {
     int w = 0, h = 0;
     {

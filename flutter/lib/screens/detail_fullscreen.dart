@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../player/danmaku_layer.dart';
 import '../player/embed_video_view.dart';
 import '../player/kotv_playback.dart';
 import '../widgets/vod_player_chrome.dart';
@@ -35,6 +37,10 @@ class DetailFullscreenPage extends StatefulWidget {
     this.onMini,
     this.danmakuOn = false,
     this.onDanmakuChanged,
+    this.danmakuItems = const [],
+    this.ambientOn = false,
+    this.onAmbientChanged,
+    this.stableVolumeOn = false,
     this.offsetId = '',
     this.offsetSite = '',
     this.openingSec = 0,
@@ -65,6 +71,10 @@ class DetailFullscreenPage extends StatefulWidget {
   final VoidCallback? onMini;
   final bool danmakuOn;
   final ValueChanged<bool>? onDanmakuChanged;
+  final List<DanmakuItem> danmakuItems;
+  final bool ambientOn;
+  final ValueChanged<bool>? onAmbientChanged;
+  final bool stableVolumeOn;
   final String offsetId;
   final String offsetSite;
   final int openingSec;
@@ -80,8 +90,12 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   late AspectSpec _aspect = widget.aspect;
   late String _decodeMode = widget.decodeMode;
   late int _epIdx = widget.epIdx;
+  late bool _danmakuOn = widget.danmakuOn;
+  late bool _ambientOn = widget.ambientOn;
   Timer? _hideTimer;
   StreamSubscription<bool>? _endedSub;
+  StreamSubscription<Duration>? _posSub;
+  Duration _pos = Duration.zero;
   final GlobalKey<VodFullscreenChromeState> _chromeKey = GlobalKey<VodFullscreenChromeState>();
 
   String get _title {
@@ -95,6 +109,10 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   void initState() {
     super.initState();
     _bumpChrome();
+    _pos = widget.playback.position;
+    _posSub = widget.playback.positionStream.listen((d) {
+      if (mounted) setState(() => _pos = d);
+    });
     _endedSub = widget.playback.completedStream.listen((done) {
       if (!done || !mounted) return;
       final next = _epIdx + 1;
@@ -110,12 +128,15 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     if (oldWidget.decodeMode != widget.decodeMode) _decodeMode = widget.decodeMode;
     if (oldWidget.aspect.key != widget.aspect.key) _aspect = widget.aspect;
     if (oldWidget.epIdx != widget.epIdx) _epIdx = widget.epIdx;
+    if (oldWidget.danmakuOn != widget.danmakuOn) _danmakuOn = widget.danmakuOn;
+    if (oldWidget.ambientOn != widget.ambientOn) _ambientOn = widget.ambientOn;
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
     _endedSub?.cancel();
+    _posSub?.cancel();
     super.dispose();
   }
 
@@ -214,26 +235,66 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
 
   Widget _buildVideo() {
     final pb = widget.playback;
+    Widget video;
     if (pb is EngineVlcPlayback) {
-      return EmbedVideoView(playback: pb, fit: _aspect.fit, aspectRatio: _aspect.ratio);
-    }
-    if (pb is MediaKitPlayback) {
-      final video = Video(controller: pb.controller, controls: NoVideoControls, fit: _aspect.fit);
+      video = EmbedVideoView(playback: pb, fit: _aspect.fit, aspectRatio: _aspect.ratio);
+    } else if (pb is MediaKitPlayback) {
+      final mk = Video(controller: pb.controller, controls: NoVideoControls, fit: _aspect.fit);
       final ratio = _aspect.ratio;
-      if (ratio == null || ratio <= 0) return video;
-      return LayoutBuilder(
-        builder: (context, c) {
-          var w = c.maxWidth;
-          var h = w / ratio;
-          if (h > c.maxHeight) {
-            h = c.maxHeight;
-            w = h * ratio;
-          }
-          return Center(child: SizedBox(width: w, height: h, child: video));
-        },
-      );
+      if (ratio == null || ratio <= 0) {
+        video = mk;
+      } else {
+        video = LayoutBuilder(
+          builder: (context, c) {
+            var w = c.maxWidth;
+            var h = w / ratio;
+            if (h > c.maxHeight) {
+              h = c.maxHeight;
+              w = h * ratio;
+            }
+            return Center(child: SizedBox(width: w, height: h, child: mk));
+          },
+        );
+      }
+    } else {
+      video = const ColoredBox(color: Colors.black);
     }
-    return const ColoredBox(color: Colors.black);
+
+    if (!_ambientOn) return video;
+    // 氛围：背后模糊洗色 + 视频略压暗，形成影院氛围
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                const Color(0xFF141210).withOpacity(0.98),
+                const Color(0xFF0C1218).withOpacity(0.98),
+                const Color(0xFF18140E).withOpacity(0.98),
+              ],
+            ),
+          ),
+        ),
+        BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+          child: const ColoredBox(color: Color(0x33000000)),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 40, spread: const Offset(0, 12)),
+              ],
+            ),
+            child: video,
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -264,6 +325,11 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                     onDoubleTap: () => Navigator.of(context).maybePop(),
                     child: _buildVideo(),
                   ),
+                  DanmakuOverlay(
+                    enabled: _danmakuOn,
+                    position: _pos,
+                    items: widget.danmakuItems,
+                  ),
                   VodFullscreenChrome(
                     key: _chromeKey,
                     player: widget.playback,
@@ -291,8 +357,17 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                     onRefresh: widget.onRefresh,
                     onCast: widget.onCast,
                     onMini: widget.onMini,
-                    danmakuOn: widget.danmakuOn,
-                    onDanmakuChanged: widget.onDanmakuChanged,
+                    danmakuOn: _danmakuOn,
+                    onDanmakuChanged: (v) {
+                      setState(() => _danmakuOn = v);
+                      widget.onDanmakuChanged?.call(v);
+                    },
+                    ambientOn: _ambientOn,
+                    onAmbientChanged: (v) {
+                      setState(() => _ambientOn = v);
+                      widget.onAmbientChanged?.call(v);
+                    },
+                    stableVolumeOn: widget.stableVolumeOn,
                     offsetId: widget.offsetId,
                     offsetSite: widget.offsetSite,
                     openingSec: widget.openingSec,

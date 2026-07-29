@@ -257,6 +257,13 @@ class EngineVlcPlayback extends KotvPlayback {
   int _videoW = 0;
   int _videoH = 0;
   bool _ready = false;
+  bool _repeatOne = false;
+  bool _stableVolume = false;
+  int _userVolume = 80;
+  List<KotvTrack> _audioTracks = const [];
+  List<KotvTrack> _subTracks = const [];
+  String? _audioId;
+  String? _subId;
 
   bool get useTexture => _ready && _native.textureId != null && _native.textureId! >= 0;
   int? get textureId => _native.textureId;
@@ -277,10 +284,42 @@ class EngineVlcPlayback extends KotvPlayback {
       } else if (_playing) {
         _ended = false;
       }
+      // 播放中定期刷新轨列表（开播后才有轨）
+      if (_playing && (_audioTracks.isEmpty || _subTracks.isEmpty)) {
+        unawaited(_refreshTracks());
+      }
       if (!_posCtrl.isClosed) _posCtrl.add(Duration(milliseconds: _positionMs));
       if (_ended && !wasEnded && !_endedCtrl.isClosed) {
         _endedCtrl.add(true);
       }
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> _refreshTracks() async {
+    try {
+      final a = await _native.tracks(type: 0);
+      final s = await _native.tracks(type: 1);
+      final aList = <KotvTrack>[];
+      for (final e in ((a['tracks'] as List?) ?? const [])) {
+        if (e is! Map) continue;
+        final id = '${e['id'] ?? ''}'.trim();
+        if (id.isEmpty || id == '-1') continue;
+        aList.add(KotvTrack(id: id, title: '${e['name'] ?? id}'.trim()));
+      }
+      final sList = <KotvTrack>[];
+      for (final e in ((s['tracks'] as List?) ?? const [])) {
+        if (e is! Map) continue;
+        final id = '${e['id'] ?? ''}'.trim();
+        if (id.isEmpty || id == '-1') continue;
+        sList.add(KotvTrack(id: id, title: '${e['name'] ?? id}'.trim()));
+      }
+      final curA = a['current'];
+      final curS = s['current'];
+      _audioTracks = aList;
+      _subTracks = sList;
+      _audioId = curA == null ? null : '$curA';
+      _subId = curS == null || '$curS' == '-1' ? null : '$curS';
       notifyListeners();
     } catch (_) {}
   }
@@ -318,11 +357,15 @@ class EngineVlcPlayback extends KotvPlayback {
     await _native.create();
     await _native.load(libDir: libDir, pluginDir: KotvVlcPaths.pluginDirFor(libDir));
     await _native.setDecodeMode(_decodeMode);
+    await _native.setRepeatOne(_repeatOne);
     await _native.play(url);
     _ready = true;
+    _audioTracks = const [];
+    _subTracks = const [];
     _statusTimer?.cancel();
     _statusTimer = Timer.periodic(const Duration(milliseconds: 250), (_) => unawaited(_tickNativeStatus()));
     await _tickNativeStatus();
+    unawaited(_refreshTracks());
     notifyListeners();
   }
 
@@ -364,9 +407,22 @@ class EngineVlcPlayback extends KotvPlayback {
 
   @override
   Future<void> setVolume(double v) async {
-    _volume = v.round().clamp(0, 100);
+    _userVolume = v.round().clamp(0, 100);
+    _volume = _stableVolume ? _stableOut(_userVolume) : _userVolume;
     await _native.setVolume(_volume);
     notifyListeners();
+  }
+
+  int _stableOut(int user) {
+    // 软压缩：抬高低音量、压住过高，近似 loudnorm 体感
+    final x = user / 100.0;
+    final y = (0.35 + 0.65 * (1 - (1 - x) * (1 - x))).clamp(0.0, 1.0);
+    return (y * 100).round().clamp(0, 100);
+  }
+
+  Future<void> setStableVolume(bool on) async {
+    _stableVolume = on;
+    await setVolume(_userVolume.toDouble());
   }
 
   @override
@@ -377,7 +433,10 @@ class EngineVlcPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> setRepeatOne(bool on) async {}
+  Future<void> setRepeatOne(bool on) async {
+    _repeatOne = on;
+    await _native.setRepeatOne(on);
+  }
 
   @override
   Future<void> setDecodeMode(String mode) async {
@@ -388,25 +447,63 @@ class EngineVlcPlayback extends KotvPlayback {
     if (_url.isNotEmpty) {
       final pos = position;
       final wasPlaying = playing;
+      await _native.setRepeatOne(_repeatOne);
       await _native.play(_url);
       if (pos > Duration.zero) await seek(pos);
       if (!wasPlaying) await pause();
+      unawaited(_refreshTracks());
     }
   }
 
   @override
-  List<KotvTrack> get audioTracks => const [];
+  List<KotvTrack> get audioTracks => _audioTracks;
   @override
-  List<KotvTrack> get subtitleTracks => const [];
+  List<KotvTrack> get subtitleTracks => _subTracks;
   @override
-  String? get currentAudioId => null;
+  String? get currentAudioId => _audioId;
   @override
-  String? get currentSubtitleId => null;
+  String? get currentSubtitleId => _subId;
   @override
-  Future<void> setAudioTrack(String id) async {}
-  @override
-  Future<void> setSubtitleTrack(String id) async {}
+  Future<void> setAudioTrack(String id) async {
+    if (id == 'auto') {
+      await _refreshTracks();
+      if (_audioTracks.isNotEmpty) {
+        await _native.setTrack(type: 0, id: int.tryParse(_audioTracks.first.id) ?? -1);
+        _audioId = _audioTracks.first.id;
+      }
+      notifyListeners();
+      return;
+    }
+    final tid = int.tryParse(id);
+    if (tid == null) return;
+    await _native.setTrack(type: 0, id: tid);
+    _audioId = id;
+    notifyListeners();
+  }
 
+  @override
+  Future<void> setSubtitleTrack(String id) async {
+    if (id.isEmpty) {
+      await _native.setTrack(type: 1, id: -1);
+      _subId = null;
+      notifyListeners();
+      return;
+    }
+    if (id == 'auto') {
+      await _refreshTracks();
+      if (_subTracks.isNotEmpty) {
+        await _native.setTrack(type: 1, id: int.tryParse(_subTracks.first.id) ?? -1);
+        _subId = _subTracks.first.id;
+      }
+      notifyListeners();
+      return;
+    }
+    final tid = int.tryParse(id);
+    if (tid == null) return;
+    await _native.setTrack(type: 1, id: tid);
+    _subId = id;
+    notifyListeners();
+  }
   @override
   void dispose() {
     _statusTimer?.cancel();

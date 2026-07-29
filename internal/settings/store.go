@@ -87,6 +87,8 @@ func defaultFile() file {
 			{ID: "playerScale", Label: "画面比例", Value: "default"},
 			{ID: "playerDecode", Label: "解码方式", Value: "auto"},
 			{ID: "playerVolume", Label: "默认音量", Value: "80"},
+			{ID: "playerAmbient", Label: "氛围模式", Value: "false"},
+			{ID: "playerStableVolume", Label: "稳定音量", Value: "false"},
 			{ID: "liveKeep", Label: "上次直播", Value: ""},
 			{ID: "liveAcross", Label: "跨组换台", Value: "true"},
 			{ID: "liveChange", Label: "失败换线", Value: "true"},

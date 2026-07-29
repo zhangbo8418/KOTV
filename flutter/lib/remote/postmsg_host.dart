@@ -152,7 +152,7 @@ class PostMsgHost {
         barrierDismissible: true,
         builder: (dialogCtx) {
           return PopScope(
-            onPopInvokedWithResult: (didPop, _) {
+            onPopInvoked: (didPop) {
               if (!didPop) return;
               if (!programmatic) {
                 unawaited(api.uiReply(id: id, action: 'dismiss'));

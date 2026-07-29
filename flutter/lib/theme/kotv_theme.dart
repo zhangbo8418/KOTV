@@ -25,6 +25,9 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     onPrimary: palette.light ? Colors.white : palette.fg,
     secondary: palette.variant,
     onSecondary: palette.fg,
+    // Flutter 3.19 仍要求 background/onBackground；3.22+ 虽弃用但仍可传。
+    background: palette.surface,
+    onBackground: palette.fg,
     surface: palette.surface,
     onSurface: palette.fg,
     error: const Color(0xFFCF4274),
@@ -75,16 +78,17 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: palette.bottomNav,
       indicatorColor: palette.selected,
-      labelTextStyle: WidgetStateProperty.resolveWith((states) {
-        final selected = states.contains(WidgetState.selected);
+      // MaterialState* 在 3.19 可用；3.22+ 为 WidgetState* 的 typedef。
+      labelTextStyle: MaterialStateProperty.resolveWith((states) {
+        final selected = states.contains(MaterialState.selected);
         return TextStyle(
           fontSize: 12,
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
           color: selected ? palette.fg : palette.muted,
         );
       }),
-      iconTheme: WidgetStateProperty.resolveWith((states) {
-        final selected = states.contains(WidgetState.selected);
+      iconTheme: MaterialStateProperty.resolveWith((states) {
+        final selected = states.contains(MaterialState.selected);
         return IconThemeData(color: selected ? Colors.white : palette.muted, size: 24);
       }),
     ),
