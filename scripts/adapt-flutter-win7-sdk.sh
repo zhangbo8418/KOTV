@@ -12,12 +12,34 @@ VLC="$ROOT/flutter/packages/kotv_vlc/pubspec.yaml"
 
 # 主工程：Dart 3.3（Flutter 3.19）
 perl -i -pe 's/sdk:\s*\^3\.5\.4/sdk: ">=3.3.0 <3.4.0"/' "$APP"
-# 过新的 lint 在 3.19 上常不可用
 perl -i -pe 's/flutter_lints:\s*\^4\.0\.0/flutter_lints: ^3.0.0/' "$APP"
+
+# 钉死对 Dart 3.4+ 的直接依赖
+perl -i -pe 's/path_provider:\s*\^2\.1\.5/path_provider: 2.1.4/' "$APP"
+perl -i -pe 's/shared_preferences:\s*\^2\.3\.3/shared_preferences: 2.3.0/' "$APP"
 
 # kotv_vlc：允许 3.19
 perl -i -pe 's/sdk:\s*\^3\.5\.4/sdk: ">=3.3.0 <3.4.0"/' "$VLC"
 perl -i -pe 's/flutter:\s*"?>=3\.24\.0"?/flutter: ">=3.19.0"/' "$VLC"
 
+# 压住传递依赖（path_provider / shared_preferences 平台实现常要求 Dart 3.4+）
+if ! grep -q '^dependency_overrides:' "$APP"; then
+  cat >> "$APP" <<'EOF'
+
+# Win7 / Flutter 3.19 临时覆盖（由 adapt-flutter-win7-sdk.sh 注入）
+dependency_overrides:
+  path_provider: 2.1.4
+  path_provider_android: 2.2.4
+  path_provider_foundation: 2.4.0
+  path_provider_linux: 2.2.1
+  path_provider_windows: 2.3.0
+  shared_preferences: 2.3.0
+  shared_preferences_android: 2.2.2
+  shared_preferences_foundation: 2.5.2
+  shared_preferences_linux: 2.4.1
+  shared_preferences_windows: 2.4.1
+EOF
+fi
+
 echo "adapted pubspec for Flutter 3.19 / Dart 3.3:"
-grep -E 'sdk:|flutter:' "$APP" "$VLC" | head -20
+grep -nE 'sdk:|path_provider|shared_preferences|dependency_overrides|flutter_lints' "$APP" | head -50
