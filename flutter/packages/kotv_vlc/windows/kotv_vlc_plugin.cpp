@@ -4,10 +4,11 @@
 #include <flutter/standard_method_codec.h>
 
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 
 extern "C" {
-#include "vlc_shim.h"
+#include "../common/vlc_shim.h"
 }
 
 namespace kotv_vlc {
