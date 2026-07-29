@@ -5,8 +5,8 @@ package embedpy
 /*
 #cgo CFLAGS: -I${SRCDIR}/native
 #include <stdlib.h>
-#include "bridge.h"
-#include "bridge.c"
+// 用相对包路径，避免 gopls 未展开 ${SRCDIR} 时找不到 bridge.h 而丢掉 C 符号。
+#include "native/bridge.h"
 */
 import "C"
 import (
