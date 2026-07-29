@@ -10,13 +10,6 @@ package embedjvm
 #include <stdlib.h>
 #include "bridge.h"
 #include "bridge.c"
-
-// gopls 对「#include bridge.c」偶发不导入新符号；与 bridge.h 再声明一次消除 UndeclaredImportedName。
-int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cache_dir, int proxy_port, char *errbuf, int errbuf_len);
-int kotv_jvm_call(const char *json_in, char *json_out, int json_out_len, char *errbuf, int errbuf_len);
-int kotv_jvm_cancel_all(char *errbuf, int errbuf_len);
-void kotv_jvm_shutdown(void);
-int kotv_jvm_ready(void);
 */
 import "C"
 import (
@@ -190,14 +183,28 @@ func Shutdown() {
 	<-done
 }
 
-// Interrupt 打断：取消 OkHttp，并抬 epoch；绝不 DestroyJavaVM。
+// Interrupt 打断：抬 epoch，并在独立 OS 线程上发 cancelAll（不经 worker 队列，避免与卡住的 Call 互等）。
+// 故意不调用 C.kotv_jvm_cancel_all：gopls 对 #include "bridge.c" 后新增符号常标 UndeclaredImportedName。
+// kotv_jvm_call 内部已 AttachCurrentThread，可与 worker 上阻塞的 JNI 调用并发。
 func Interrupt() {
 	epoch.Add(1)
 	if !started.Load() {
 		return
 	}
-	errbuf := make([]byte, 256)
-	_ = C.kotv_jvm_cancel_all((*C.char)(unsafe.Pointer(&errbuf[0])), C.int(len(errbuf)))
+	go func() {
+		runtime.LockOSThread()
+		cIn := C.CString(`{"method":"cancelAll"}`)
+		defer C.free(unsafe.Pointer(cIn))
+		out := make([]byte, 64)
+		errbuf := make([]byte, 256)
+		_ = C.kotv_jvm_call(
+			cIn,
+			(*C.char)(unsafe.Pointer(&out[0])),
+			C.int(len(out)),
+			(*C.char)(unsafe.Pointer(&errbuf[0])),
+			C.int(len(errbuf)),
+		)
+	}()
 }
 
 // Started 报告嵌入 JVM 是否已 CreateJavaVM（不触发冷启）。
