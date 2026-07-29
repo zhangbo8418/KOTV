@@ -14,22 +14,55 @@ def _prepend_sys_path(*candidates):
             sys.path.insert(0, path)
 
 
+def _python_home_candidates():
+    homes = []
+    for key in ("PYTHONHOME", "KOTV_PYTHON_HOME"):
+        v = os.environ.get(key, "").strip()
+        if v:
+            homes.append(v)
+    # 进程内 embed：sys.executable 常是 kotv-engine，不能只靠它找 site-packages
+    exe = os.path.abspath(getattr(sys, "executable", "") or "")
+    if exe:
+        exe_dir = os.path.dirname(exe)
+        homes.extend([
+            exe_dir,
+            os.path.dirname(exe_dir),
+            os.path.join(os.path.dirname(exe_dir), "python"),
+            os.path.join(os.path.dirname(os.path.dirname(exe_dir)), "Resources", "runtime", "python"),
+            os.path.join(os.path.dirname(os.path.dirname(exe_dir)), "runtime", "python"),
+        ])
+    rt = os.environ.get("KOTV_RUNTIME", "").strip()
+    if rt:
+        homes.append(os.path.join(rt, "python"))
+        homes.append(rt)
+    # 去重保序
+    out, seen = [], set()
+    for h in homes:
+        h = os.path.abspath(h) if h else ""
+        if h and h not in seen:
+            seen.add(h)
+            out.append(h)
+    return out
+
+
 def _ensure_bundled_site_packages():
     """Windows embed 的 python*._pth 常忽略 PYTHONPATH；显式把 Lib/site-packages 塞进 sys.path。"""
-    exe = os.path.abspath(sys.executable)
-    exe_dir = os.path.dirname(exe)
-    # install_only / embed 布局
-    _prepend_sys_path(
-        os.path.join(exe_dir, "Lib", "site-packages"),
-        os.path.join(exe_dir, "lib", "site-packages"),
-        os.path.join(exe_dir, "lib", "python%d.%d" % sys.version_info[:2], "site-packages"),
-    )
-    # 少数布局：python.exe 在 Scripts/ 下
-    parent = os.path.dirname(exe_dir)
-    _prepend_sys_path(
-        os.path.join(parent, "Lib", "site-packages"),
-        os.path.join(parent, "lib", "site-packages"),
-    )
+    ver = "python%d.%d" % sys.version_info[:2]
+    for home in _python_home_candidates():
+        _prepend_sys_path(
+            os.path.join(home, "Lib", "site-packages"),
+            os.path.join(home, "lib", "site-packages"),
+            os.path.join(home, "lib", ver, "site-packages"),
+            os.path.join(home, "lib", ver),
+            os.path.join(home, "Lib"),
+        )
+        # 少数布局：python.exe 在 Scripts/ 或 bin/ 下
+        parent = os.path.dirname(home)
+        _prepend_sys_path(
+            os.path.join(parent, "Lib", "site-packages"),
+            os.path.join(parent, "lib", "site-packages"),
+            os.path.join(parent, "lib", ver, "site-packages"),
+        )
 
 
 _ensure_bundled_site_packages()

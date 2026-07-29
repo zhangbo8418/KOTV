@@ -31,7 +31,13 @@ class SpiderService private constructor(
 
   override fun serve(session: IHTTPSession): Response {
     val method = session.method
-    val uri = session.uri ?: "/"
+    val uri = (session.uri ?: "/").lowercase(Locale.US)
+
+    if (method == Method.GET && (uri == "/health" || uri == "/")) {
+      val out = JSONObject().put("ok", true)
+      return Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", out.toString())
+    }
+
     if (method != Method.POST) {
       return newJsonError(Status.METHOD_NOT_ALLOWED, "POST required")
     }
@@ -42,7 +48,7 @@ class SpiderService private constructor(
     }
 
     return try {
-      when (uri.lowercase(Locale.US)) {
+      when (uri) {
         "/jar/call" -> {
           // 直接把 Go payload 传给 SpiderBridge。
           val raw = JarLoader.callBridge(body)

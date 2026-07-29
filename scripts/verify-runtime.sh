@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校验发行 runtime 完整性（避免 JRE lib/ 丢失导致 Java bridge EOF）
+# 校验发行 runtime 完整性（embed JVM/Python：要 libjvm/libpython + stdlib，不要依赖 java/python 启动器）
 # 用法: ./scripts/verify-runtime.sh <runtime-dir> <platform>
 set -euo pipefail
 
@@ -29,27 +29,26 @@ fi
 
 case "$PLAT" in
   macos-*)
-    need_file "$RT/jre/bin/java"
     need_dir "$RT/jre/lib"
     need_file "$RT/jre/lib/libjli.dylib"
     need_file "$RT/jre/lib/server/libjvm.dylib"
+    need_any_file \
+      "$RT/python/lib/libpython3.14.dylib" \
+      "$RT/python/lib/libpython3.14t.dylib" \
+      "$RT/python/lib/libpython3.dylib"
     need_any_file "$RT/libvlc/libvlc.dylib" "$RT/libvlc/libvlc.5.dylib"
-    if ! "$RT/jre/bin/java" -version >/dev/null 2>&1; then
-      die "bundled java failed to start (check libjli / quarantine)"
-    fi
     ;;
   windows-*)
-    need_file "$RT/jre/bin/java.exe"
     need_dir "$RT/jre/lib"
     need_any_file "$RT/jre/lib/modules" "$RT/jre/lib/jrt-fs.jar"
     need_any_file "$RT/jre/bin/server/jvm.dll" "$RT/jre/bin/client/jvm.dll"
-    # Win7 路径 API 垫片（缺则 Win7 上 java 起不来）
+    # Win7 路径 API 垫片（JVM 依赖，仍需）
     if [[ "$PLAT" == "windows-x64" ]]; then
       need_file "$RT/jre/bin/api-ms-win-core-path-l1-1-0.dll"
     fi
     need_file "$RT/libvlc/libvlc.dll"
 
-    need_file "$RT/python/python.exe"
+    need_any_file "$RT/python/python3.dll" "$RT/python/python314.dll" "$RT/python/python313.dll"
     need_dir "$RT/python/Lib/site-packages"
     need_dir "$RT/python/Lib/site-packages/requests"
     need_dir "$RT/python/Lib/site-packages/Crypto"
@@ -62,9 +61,12 @@ case "$PLAT" in
     fi
     ;;
   linux-*)
-    need_file "$RT/jre/bin/java"
     need_dir "$RT/jre/lib"
     need_file "$RT/jre/lib/server/libjvm.so"
+    need_any_file \
+      "$RT/python/lib/libpython3.14.so" \
+      "$RT/python/lib/libpython3.14t.so" \
+      "$RT/python/lib/libpython3.so"
     need_any_file "$RT/libvlc/libvlc.so" "$RT/libvlc/libvlc.so.5"
     ;;
   *)
@@ -97,8 +99,23 @@ fi
 [[ ! -d "$RT/mpv" ]] || die "runtime/mpv must not ship (Flutter media_kit / outie#mpv)"
 [[ ! -d "$RT/libmpv" ]] || die "runtime/libmpv must not ship (Flutter media_kit bundles libmpv)"
 
+# embed：发行包不得再带 java/python 启动器。
+# prepare-runtime 本地树可以保留启动器（装 wheel 等）；package/bundle 后设 KOTV_EXPECT_EMBED_STRIP=1。
+if [[ "${KOTV_EXPECT_EMBED_STRIP:-}" == "1" ]]; then
+  forbid_file() { [[ ! -e "$1" ]] || die "must not ship launcher: $1"; }
+  forbid_file "$RT/jre/bin/java"
+  forbid_file "$RT/jre/bin/java.exe"
+  forbid_file "$RT/jre/bin/javaw"
+  forbid_file "$RT/jre/bin/javaw.exe"
+  forbid_file "$RT/python/bin/python"
+  forbid_file "$RT/python/bin/python3"
+  forbid_file "$RT/python/python.exe"
+  forbid_file "$RT/python/python3.exe"
+  forbid_file "$RT/python/pythonw.exe"
+fi
+
 if [[ "$fail" -ne 0 ]]; then
   echo "verify-runtime FAILED for $PLAT at $RT" >&2
   exit 1
 fi
-echo "verify-runtime OK: $PLAT (jre=$jre_files files, jre/lib=$jre_lib_files files)"
+echo "verify-runtime OK: $PLAT (jre=$jre_files files, jre/lib=$jre_lib_files files, embed-jvm/py${KOTV_EXPECT_EMBED_STRIP:+, stripped})"

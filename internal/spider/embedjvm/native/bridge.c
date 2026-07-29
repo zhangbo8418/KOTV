@@ -125,27 +125,56 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 	return 0;
 }
 
+static JNIEnv *jvm_env_for_call(int *attached) {
+	*attached = 0;
+	if (!g_vm)
+		return NULL;
+	JNIEnv *env = NULL;
+	jint st = (*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_10);
+	if (st == JNI_OK && env)
+		return env;
+	if (st == JNI_EDETACHED) {
+		if ((*g_vm)->AttachCurrentThread(g_vm, (void **)&env, NULL) != 0)
+			return NULL;
+		*attached = 1;
+		return env;
+	}
+	/* 创建线程留下的 g_env 仅作回落；正确用法是 Go 侧 LockOSThread 专用 worker。 */
+	return g_env;
+}
+
 int kotv_jvm_call(const char *json_in, char *json_out, int json_out_len, char *errbuf, int errbuf_len) {
-	if (!g_vm || !g_env || !json_in || !json_out || json_out_len <= 1) {
+	if (!g_vm || !json_in || !json_out || json_out_len <= 1) {
 		write_err(errbuf, errbuf_len, "jvm not started");
 		return -1;
 	}
 
-	JNIEnv *env = g_env;
+	int attached = 0;
+	JNIEnv *env = jvm_env_for_call(&attached);
+	if (!env) {
+		write_err(errbuf, errbuf_len, "JNIEnv unavailable");
+		return -1;
+	}
 	jclass cls = (*env)->FindClass(env, "com/bobo/kotv/bridge/SpiderBridge");
 	if (!cls) {
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
 		write_err(errbuf, errbuf_len, "SpiderBridge class not found");
 		return -2;
 	}
 	jmethodID mid = (*env)->GetStaticMethodID(env, cls, "call", "(Ljava/lang/String;)Ljava/lang/String;");
 	if (!mid) {
 		(*env)->DeleteLocalRef(env, cls);
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
 		write_err(errbuf, errbuf_len, "SpiderBridge.call missing");
 		return -3;
 	}
 	jstring jstr = (*env)->NewStringUTF(env, json_in);
 	if (!jstr) {
 		(*env)->DeleteLocalRef(env, cls);
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
 		write_err(errbuf, errbuf_len, "NewStringUTF failed");
 		return -4;
 	}
@@ -154,21 +183,80 @@ int kotv_jvm_call(const char *json_in, char *json_out, int json_out_len, char *e
 	(*env)->DeleteLocalRef(env, cls);
 	if ((*env)->ExceptionCheck(env)) {
 		(*env)->ExceptionClear(env);
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
 		write_err(errbuf, errbuf_len, "Java exception in SpiderBridge.call");
 		return -5;
 	}
 	if (!jret) {
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
 		write_err(errbuf, errbuf_len, "null return from SpiderBridge.call");
 		return -6;
 	}
 	const char *utf = (*env)->GetStringUTFChars(env, jret, NULL);
 	if (!utf) {
 		(*env)->DeleteLocalRef(env, jret);
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
 		write_err(errbuf, errbuf_len, "GetStringUTFChars failed");
 		return -7;
 	}
 	snprintf(json_out, (size_t)json_out_len, "%s", utf);
 	(*env)->ReleaseStringUTFChars(env, jret, utf);
 	(*env)->DeleteLocalRef(env, jret);
+	if (attached)
+		(*g_vm)->DetachCurrentThread(g_vm);
+	return 0;
+}
+
+int kotv_jvm_cancel_all(char *errbuf, int errbuf_len) {
+	if (!g_vm) {
+		write_err(errbuf, errbuf_len, "jvm not started");
+		return -1;
+	}
+	int attached = 0;
+	JNIEnv *env = jvm_env_for_call(&attached);
+	if (!env) {
+		write_err(errbuf, errbuf_len, "JNIEnv unavailable");
+		return -1;
+	}
+	jclass cls = (*env)->FindClass(env, "com/bobo/kotv/bridge/SpiderBridge");
+	if (!cls) {
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
+		write_err(errbuf, errbuf_len, "SpiderBridge class not found");
+		return -2;
+	}
+	jmethodID mid = (*env)->GetStaticMethodID(env, cls, "call", "(Ljava/lang/String;)Ljava/lang/String;");
+	if (!mid) {
+		(*env)->DeleteLocalRef(env, cls);
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
+		write_err(errbuf, errbuf_len, "SpiderBridge.call missing");
+		return -3;
+	}
+	jstring jstr = (*env)->NewStringUTF(env, "{\"method\":\"cancelAll\"}");
+	if (!jstr) {
+		(*env)->DeleteLocalRef(env, cls);
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
+		write_err(errbuf, errbuf_len, "NewStringUTF failed");
+		return -4;
+	}
+	jstring jret = (jstring)(*env)->CallStaticObjectMethod(env, cls, mid, jstr);
+	(*env)->DeleteLocalRef(env, jstr);
+	(*env)->DeleteLocalRef(env, cls);
+	if (jret)
+		(*env)->DeleteLocalRef(env, jret);
+	if ((*env)->ExceptionCheck(env)) {
+		(*env)->ExceptionClear(env);
+		if (attached)
+			(*g_vm)->DetachCurrentThread(g_vm);
+		write_err(errbuf, errbuf_len, "Java exception in cancelAll");
+		return -5;
+	}
+	if (attached)
+		(*g_vm)->DetachCurrentThread(g_vm);
 	return 0;
 }

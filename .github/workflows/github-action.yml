@@ -82,11 +82,13 @@ jobs:
           ! test -d runtime/vlc
           ! test -d runtime/mpv
           ./scripts/package.sh windows-x64
-          ./scripts/verify-runtime.sh dist/KOTV-windows-x64/runtime windows-x64
+          KOTV_EXPECT_EMBED_STRIP=1 ./scripts/verify-runtime.sh dist/KOTV-windows-x64/runtime windows-x64
           ! test -d dist/KOTV-windows-x64/bridge
           ! test -d dist/KOTV-windows-x64/spider
           test -f dist/KOTV-windows-x64/runtime/jre/bin/server/jvm.dll
           test -f dist/KOTV-windows-x64/runtime/bridge/spider-bridge.jar
+          ! test -e dist/KOTV-windows-x64/runtime/jre/bin/java.exe
+          ! test -e dist/KOTV-windows-x64/runtime/python/python.exe
 
       - name: Win7 dependency gate (QuickJS/CGO)
         shell: pwsh
@@ -174,11 +176,13 @@ jobs:
           ! test -d runtime/vlc
           ! test -d runtime/mpv
           ./scripts/package.sh windows-arm64
-          ./scripts/verify-runtime.sh dist/KOTV-windows-arm64/runtime windows-arm64
+          KOTV_EXPECT_EMBED_STRIP=1 ./scripts/verify-runtime.sh dist/KOTV-windows-arm64/runtime windows-arm64
           ! test -d dist/KOTV-windows-arm64/bridge
           ! test -d dist/KOTV-windows-arm64/spider
           test -f dist/KOTV-windows-arm64/runtime/jre/bin/server/jvm.dll
           test -f dist/KOTV-windows-arm64/runtime/bridge/spider-bridge.jar
+          ! test -e dist/KOTV-windows-arm64/runtime/jre/bin/java.exe
+          ! test -e dist/KOTV-windows-arm64/runtime/python/python.exe
 
       - uses: actions/download-artifact@v4
         with:
@@ -242,7 +246,9 @@ jobs:
           ! test -d runtime/vlc
           ! test -d runtime/mpv
           ./scripts/package.sh linux-x64
-          ./scripts/verify-runtime.sh dist/KOTV-linux-x64/runtime linux-x64
+          KOTV_EXPECT_EMBED_STRIP=1 ./scripts/verify-runtime.sh dist/KOTV-linux-x64/runtime linux-x64
+          ! test -e dist/KOTV-linux-x64/runtime/jre/bin/java
+          ! test -e dist/KOTV-linux-x64/runtime/python/bin/python3
           ! test -d dist/KOTV-linux-x64/bridge
           ! test -d dist/KOTV-linux-x64/spider
 
@@ -291,8 +297,10 @@ jobs:
           ! test -d runtime/vlc
           ! test -d runtime/mpv
           ./scripts/package.sh macos-arm64
-          ./scripts/verify-runtime.sh dist/KOTV-macos-arm64/runtime macos-arm64
+          KOTV_EXPECT_EMBED_STRIP=1 ./scripts/verify-runtime.sh dist/KOTV-macos-arm64/runtime macos-arm64
           test -f "dist/KO影视.app/Contents/Resources/runtime/jre/lib/libjli.dylib"
+          ! test -e dist/KOTV-macos-arm64/runtime/jre/bin/java
+          ! test -e dist/KOTV-macos-arm64/runtime/python/bin/python3
           test -f "dist/KO影视-macos-arm64.dmg"
           ! test -d dist/KOTV-macos-arm64/bridge
           ! test -d dist/KOTV-macos-arm64/spider
@@ -354,11 +362,13 @@ jobs:
           ! test -d runtime/mpv
           arch -x86_64 env CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
             ./scripts/package.sh macos-x64
-          ./scripts/verify-runtime.sh dist/KOTV-macos-x64/runtime macos-x64
+          KOTV_EXPECT_EMBED_STRIP=1 ./scripts/verify-runtime.sh dist/KOTV-macos-x64/runtime macos-x64
           test -f "dist/KO影视.app/Contents/Resources/runtime/jre/lib/libjli.dylib"
           test -f "dist/KO影视-macos-x64.dmg"
           ! test -d dist/KOTV-macos-x64/bridge
           ! test -d dist/KOTV-macos-x64/spider
+          ! test -e dist/KOTV-macos-x64/runtime/jre/bin/java
+          ! test -e dist/KOTV-macos-x64/runtime/python/bin/python3
 
       - uses: actions/download-artifact@v4
         with:

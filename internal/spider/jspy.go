@@ -376,10 +376,9 @@ func (s *pySpider) stopLocked() {
 }
 
 func (s *pySpider) interrupt() {
+	// 只抬 epoch：CallSession 持全局 apiMu 时若在此 StopSession 会死锁。
+	// 调用返回后 callEmbedLocked 发现世代变化会 stopEmbedLocked。
 	s.epoch.Add(1)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.stopLocked()
 }
 
 func (s *pySpider) Init(ext string) error {

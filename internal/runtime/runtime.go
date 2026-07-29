@@ -352,21 +352,37 @@ func BridgeJAR() string {
 }
 
 // Status 汇总捆绑/系统运行时状态。
+// JAR/Python 已进程内 embed：展示 libjvm/libpython，不再强调 java/python 启动器。
 func Status() map[string]string {
 	return map[string]string{
-		"platform": Platform(),
-		"java":     orMissing(Java()),
-		"jvm":      orMissing(JVMLib()),
-		"python":   orMissing(Python()),
-		"pythonlib": orMissing(PythonLib()),
-		"chromium": orMissing(Chromium()),
-		"ffmpeg":   orMissing(FFmpeg()),
-		"libvlc":   orMissing(LibVLC()),
-		"vlc":      orMissing(VLC()),
-		"mpv":      orMissing(MPV()),
-		"bridge":   orMissing(BridgeJAR()),
-		"quickjs":  "embedded(CGO)",
+		"platform":  Platform(),
+		"jvm":       embedLibStatus(JVMLib()),
+		"python":    embedLibStatus(PythonLib()),
+		"chromium":  orMissing(Chromium()),
+		"ffmpeg":    orMissing(FFmpeg()),
+		"libvlc":    orMissing(LibVLC()),
+		"vlc":       orMissing(VLC()),
+		"mpv":       orMissing(MPV()),
+		"bridge":    orMissing(BridgeJAR()),
+		"quickjs":   "embedded(CGO)",
+		// 兼容旧客户端字段：若仍存在启动器则附带，否则标注 unused
+		"java":   launcherStatus(Java(), "unused(embed-jvm)"),
+		"python_bin": launcherStatus(Python(), "unused(embed-py)"),
 	}
+}
+
+func embedLibStatus(lib string) string {
+	if lib == "" {
+		return "(missing)"
+	}
+	return "embedded(CGO) " + lib
+}
+
+func launcherStatus(bin, unused string) string {
+	if bin == "" {
+		return unused
+	}
+	return unused + " " + bin
 }
 
 func orMissing(p string) string {

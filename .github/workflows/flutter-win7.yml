@@ -108,7 +108,11 @@ jobs:
 
           if (Test-Path "cmd\updater\updater.exe") { Copy-Item -Force "cmd\updater\updater.exe" "$out\updater.exe" }
 
+          bash ./scripts/strip-runtime-launchers.sh "$out/runtime"
+          $env:KOTV_EXPECT_EMBED_STRIP = "1"
           bash ./scripts/verify-runtime.sh "$out/runtime" windows-x64
+          if (Test-Path "$out\runtime\jre\bin\java.exe") { throw "java.exe must be stripped from Flutter runtime" }
+          if (Test-Path "$out\runtime\python\python.exe") { throw "python.exe must be stripped from Flutter runtime" }
 
       - name: Compress ZIP
         shell: pwsh

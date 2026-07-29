@@ -118,8 +118,22 @@ if(EXISTS "${KOTV_RUNTIME_ROOT}/jre" OR EXISTS "${KOTV_RUNTIME_ROOT}/libvlc")
     PATTERN "libmpv" EXCLUDE
     PATTERN "vlc" EXCLUDE)
   # 仅去掉旧布局顶层 runtime/lib（若存在），不影响 python/Lib 或 libvlc。
+  # 再剥 java/python 启动器（embed 只用 jvm.dll / python3.dll）。
   install(CODE "
     file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/runtime/lib\")
+    set(_kotv_strip
+      \"${CMAKE_INSTALL_PREFIX}/runtime/jre/bin/java.exe\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/jre/bin/javaw.exe\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/jre/bin/keytool.exe\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/jre/bin/jjs.exe\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/python/python.exe\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/python/python3.exe\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/python/pythonw.exe\")
+    foreach(_f IN LISTS _kotv_strip)
+      if(EXISTS \"\${_f}\")
+        file(REMOVE \"\${_f}\")
+      endif()
+    endforeach()
   " COMPONENT Runtime)
 endif()
 # Engine binary from Flutter assets if present (Windows: only .exe).

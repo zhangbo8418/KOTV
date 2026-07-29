@@ -59,16 +59,30 @@ fi
 # 不进包：外部 mpv、残留 libmpv、旧布局顶层 lib/
 rm -rf "$DEST_RT/mpv" "$DEST_RT/vlc" "$DEST_RT/lib" "$DEST_RT/libmpv"
 
+# embed 只要 libjvm/libpython + stdlib/modules；去掉 java/python 启动器
+chmod +x "$ROOT/scripts/strip-runtime-launchers.sh"
+"$ROOT/scripts/strip-runtime-launchers.sh" "$DEST_RT"
+
 # 校验关键子目录
-for need in jre libvlc bridge; do
+for need in jre python libvlc bridge; do
   if [[ ! -e "$DEST_RT/$need" ]]; then
     echo "error: bundle missing $DEST_RT/$need" >&2
     exit 1
   fi
 done
-# Java 可执行
-if [[ "$(uname -s)" == Darwin || "$(uname -s)" == Linux ]]; then
-  test -x "$DEST_RT/jre/bin/java" || { echo "error: jre/bin/java missing" >&2; exit 1; }
+# embed 动态库
+if [[ "$(uname -s)" == Darwin ]]; then
+  test -f "$DEST_RT/jre/lib/server/libjvm.dylib" || { echo "error: libjvm.dylib missing" >&2; exit 1; }
+  test -e "$DEST_RT/python/lib"/libpython*.dylib || { echo "error: libpython missing" >&2; exit 1; }
+elif [[ "$(uname -s)" == Linux ]]; then
+  test -f "$DEST_RT/jre/lib/server/libjvm.so" || { echo "error: libjvm.so missing" >&2; exit 1; }
+  test -e "$DEST_RT/python/lib"/libpython*.so || { echo "error: libpython missing" >&2; exit 1; }
+else
+  # Windows / MSYS
+  test -e "$DEST_RT/jre/bin/server/jvm.dll" -o -e "$DEST_RT/jre/bin/client/jvm.dll" \
+    || { echo "error: jvm.dll missing" >&2; exit 1; }
+  test -e "$DEST_RT/python/python3.dll" -o -e "$DEST_RT/python/python314.dll" \
+    || { echo "error: python3.dll missing" >&2; exit 1; }
 fi
 
 # 引擎二进制：优先 assets 里已编好的

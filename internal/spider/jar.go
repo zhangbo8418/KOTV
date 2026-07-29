@@ -48,12 +48,11 @@ func clearJar() {
 	jarPath = ""
 	configBase = ""
 	jarMu.Unlock()
-	// destroy spiders and drop loaders before killing the worker.
+	// destroy spiders and drop loaders；进程内 embed 不能再 DestroyJavaVM（无法可靠重建）。
 	req := bridgeRequest{Method: "clear"}
 	if payload, err := json.Marshal(req); err == nil {
 		_, _ = callJavaBridge(payload)
 	}
-	InterruptJavaBridge()
 }
 
 // SetConfigBase 设置当前点播配置基址（配置基址）。
@@ -392,7 +391,7 @@ func (s *jarSpider) call(method string, args map[string]interface{}) (string, er
 	if err != nil {
 		return "", fmt.Errorf("爬虫调用失败: %w", err)
 	}
-	raw = strings.TrimSpace(raw)
+	raw = trimCString(raw)
 	if strings.HasPrefix(raw, "{") && strings.Contains(raw, `"error"`) {
 		var errObj struct {
 			Error string `json:"error"`
@@ -524,6 +523,7 @@ func jarProxy(params map[string]string) (int, string, []byte, map[string]string,
 	if err != nil {
 		return 0, "", nil, nil, err
 	}
+	raw = trimCString(raw)
 	var resp struct {
 		Status      int               `json:"status"`
 		ContentType string            `json:"contentType"`
@@ -624,7 +624,7 @@ func callJarMethod(method string, args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("解析调用失败: %w", err)
 	}
-	raw = strings.TrimSpace(raw)
+	raw = trimCString(raw)
 	var errObj struct {
 		Error string `json:"error"`
 	}

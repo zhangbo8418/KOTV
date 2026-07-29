@@ -156,6 +156,24 @@ if(EXISTS "${KOTV_RUNTIME_ROOT}/jre" OR EXISTS "${KOTV_RUNTIME_ROOT}/libvlc")
     PATTERN "vlc" EXCLUDE)
   install(CODE "
     file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/runtime/lib\")
+    set(_kotv_strip
+      \"${CMAKE_INSTALL_PREFIX}/runtime/jre/bin/java\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/jre/bin/javaw\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/jre/bin/keytool\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/python/bin/python\"
+      \"${CMAKE_INSTALL_PREFIX}/runtime/python/bin/python3\")
+    foreach(_f IN LISTS _kotv_strip)
+      if(EXISTS \"\${_f}\")
+        file(REMOVE \"\${_f}\")
+      endif()
+    endforeach()
+    # python3.x 启动器
+    file(GLOB _pybins \"${CMAKE_INSTALL_PREFIX}/runtime/python/bin/python3.*\")
+    foreach(_f IN LISTS _pybins)
+      if(EXISTS \"\${_f}\" AND NOT IS_DIRECTORY \"\${_f}\")
+        file(REMOVE \"\${_f}\")
+      endif()
+    endforeach()
   " COMPONENT Runtime)
 endif()
 set(KOTV_ENGINE_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../assets/engine/kotv-engine")

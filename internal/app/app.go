@@ -137,8 +137,8 @@ func New() (*App, error) {
 	})
 
 	st := appruntime.Status()
-	log.Printf("运行时[%s] java=%s python=%s chromium=%s ffmpeg=%s libvlc=%s bridge=%s",
-		st["platform"], st["java"], st["python"], st["chromium"], st["ffmpeg"], st["libvlc"], st["bridge"])
+	log.Printf("运行时[%s] jvm=%s python=%s chromium=%s ffmpeg=%s libvlc=%s bridge=%s",
+		st["platform"], st["jvm"], st["python"], st["chromium"], st["ffmpeg"], st["libvlc"], st["bridge"])
 
 	return a, nil
 }

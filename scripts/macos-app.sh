@@ -35,6 +35,8 @@ cp "$ROOT/resources/icons/KOTV.icns" "$OUT_APP/Contents/Resources/AppIcon.icns"
 # 完整拷贝 runtime（ditto 保留 dylib/symlink，避免缺 jre/lib）
 mkdir -p "$OUT_APP/Contents/Resources/runtime"
 ditto "$SRC/runtime" "$OUT_APP/Contents/Resources/runtime"
+# 再剥一次（若上游未 strip 也兜底）
+"$ROOT/scripts/strip-runtime-launchers.sh" "$OUT_APP/Contents/Resources/runtime"
 
 # updater（可选）
 if [[ -f "$SRC/updater" ]]; then
@@ -77,7 +79,7 @@ cat > "$OUT_APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-"$ROOT/scripts/verify-runtime.sh" "$OUT_APP/Contents/Resources/runtime" "$PLAT"
+KOTV_EXPECT_EMBED_STRIP=1 "$ROOT/scripts/verify-runtime.sh" "$OUT_APP/Contents/Resources/runtime" "$PLAT"
 xattr -cr "$OUT_APP" 2>/dev/null || true
 
 # DMG：仅 KO影视.app + Applications（系统里看到的名字来自 .app 名 / DisplayName）

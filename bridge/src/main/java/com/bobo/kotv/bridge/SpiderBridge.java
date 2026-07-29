@@ -93,6 +93,14 @@ public class SpiderBridge {
                 clear();
                 return "{}";
             }
+            // 打断卡住的 OkHttp 调用；进程内 embed 不能靠 DestroyJavaVM 模拟杀子进程。
+            if ("cancelAll".equals(method)) {
+                try {
+                    com.github.catvod.net.OkHttp.cancelAll();
+                } catch (Throwable ignored) {
+                }
+                return "{}";
+            }
             if ("setRecent".equals(method)) {
                 String jar = "";
                 if (argsObj.has("jar") && !argsObj.get("jar").isJsonNull()) {

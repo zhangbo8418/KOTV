@@ -203,14 +203,14 @@ func CleanJSONComments(data string) string {
 			i++
 			continue
 		}
- // line comment
+		// line comment
 		if c == '/' && i+1 < len(data) && data[i+1] == '/' {
 			for i < len(data) && data[i] != '\n' {
 				i++
 			}
 			continue
 		}
- // block comment
+		// block comment
 		if c == '/' && i+1 < len(data) && data[i+1] == '*' {
 			i += 2
 			for i+1 < len(data) && !(data[i] == '*' && data[i+1] == '/') {
@@ -281,7 +281,7 @@ func ensureURLDirBase(base string) string {
 	}
 	seg := path.Base(u.Path)
 	if strings.Contains(seg, ".") && !strings.HasPrefix(seg, ".") {
- // config.json / api.json 等：用其所在目录
+		// config.json / api.json 等：用其所在目录
 		return base
 	}
 	return base + "/"

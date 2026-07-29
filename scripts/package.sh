@@ -150,6 +150,9 @@ else
 fi
 # 不进发行包：外部 mpv、残留 libmpv、旧布局 vlc/、空的 lib/
 rm -rf "$DIST/runtime/mpv" "$DIST/runtime/vlc" "$DIST/runtime/lib" "$DIST/runtime/libmpv"
+# embed：去掉 java/python 启动器（GitHub package.sh / macOS app 都走这里）
+chmod +x "$ROOT/scripts/strip-runtime-launchers.sh"
+"$ROOT/scripts/strip-runtime-launchers.sh" "$DIST/runtime"
 
 # bridge 始终重新构建，避免发行包混入旧 ABI。
 mkdir -p "$RUNTIME_SRC/bridge" "$DIST/runtime/bridge"
@@ -170,7 +173,7 @@ elif [[ -f "$ROOT/cmd/updater/updater.exe" ]]; then
 fi
 
 echo "verifying runtime..."
-"$ROOT/scripts/verify-runtime.sh" "$DIST/runtime" "$PLAT"
+KOTV_EXPECT_EMBED_STRIP=1 "$ROOT/scripts/verify-runtime.sh" "$DIST/runtime" "$PLAT"
 
 # macOS：再打 .app + DMG（系统显示名 KO影视）
 if [[ "$PLAT" == macos-* ]]; then
@@ -183,8 +186,8 @@ KO影视 / KOTV 发行包 ($PLAT)
 目录:
   $BIN              主程序（内嵌 QuickJS，JS 爬虫无需额外运行时）
   runtime/          捆绑运行时
-    jre/            Liberica 21（进程内 JNI 加载 libjvm，执行 JAR 爬虫）
-    python/         CPython 3.14（进程内 Py_Initialize，执行 Python 爬虫）
+    jre/            Liberica 21（进程内 JNI：libjvm + modules；不含 java 启动器）
+    python/         CPython 3.14（进程内：libpython + Lib/site-packages；不含 python3 启动器）
     chromium/       嗅探/解析（Win x64=Win7 REWORK 最新；Win ARM64=最新 snapshot）
     ffmpeg/         FFmpeg（Windows 为 7.0）
     libvlc/         libvlc 动态库 + plugins（页内 VLC）
