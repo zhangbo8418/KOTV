@@ -350,7 +350,6 @@ func Status() map[string]string {
 		"libvlc":   orMissing(LibVLC()),
 		"vlc":      orMissing(VLC()),
 		"mpv":      orMissing(MPV()),
-		"libmpv":   orMissing(LibMPV()),
 		"bridge":   orMissing(BridgeJAR()),
 		"quickjs":  "embedded(CGO)",
 	}

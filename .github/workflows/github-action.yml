@@ -498,6 +498,6 @@ jobs:
 
             另附各平台 `updater` 与 `version.json`（更新器仍使用 ZIP）。
             Windows 安装包桌面快捷方式与「程序和功能」显示名为 **KO影视**；也可直接解压 ZIP。
-            macOS DMG 内为 `KO影视.app`（含完整 JRE / libvlc / libmpv / bridge）。
+            macOS DMG 内为 `KO影视.app`（含完整 JRE / libvlc / bridge；页内 MPV 由 media_kit 自带）。
           draft: false
           prerelease: ${{ contains(needs.set-tag.outputs.tag, 'alpha') }}

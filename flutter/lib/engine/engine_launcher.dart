@@ -185,7 +185,7 @@ class EngineLauncher {
       } catch (_) {}
     }
 
-    // 子进程（非 detached）：UI 退出时可主动 SIGTERM；不再 nohup 孤儿化
+    // 子进程（非 detached）：正常退出走 shutdown；Win7 上 UI 原生闪退时父死子活，另起看门狗。
     _proc = await Process.start(
       path,
       const [],
@@ -201,9 +201,53 @@ class EngineLauncher {
       } catch (_) {}
     });
     sink.writeln('pid=${_proc!.pid} owned=true');
+    await _armOrphanWatchdog(_proc!.pid, sink);
     await sink.flush();
     await sink.close();
     await Future<void>.delayed(const Duration(milliseconds: 800));
+  }
+
+  /// UI 进程异常退出时杀掉引擎，避免「窗口没了引擎还在」。
+  Future<void> _armOrphanWatchdog(int enginePid, IOSink log) async {
+    final uiPid = pid;
+    if (Platform.isWindows) {
+      try {
+        await Process.start(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-WindowStyle',
+            'Hidden',
+            '-Command',
+            '\$ui=$uiPid; \$eng=$enginePid; '
+                'while (Get-Process -Id \$ui -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }; '
+                'Stop-Process -Id \$eng -Force -ErrorAction SilentlyContinue; '
+                'Get-Process -Name kotv-engine -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
+          ],
+          mode: ProcessStartMode.detached,
+        );
+        log.writeln('orphan-watchdog armed ui=$uiPid engine=$enginePid');
+      } catch (e) {
+        log.writeln('orphan-watchdog failed: $e');
+      }
+      return;
+    }
+    // macOS / Linux：后台轮询父进程；UI 没了就杀引擎。
+    try {
+      await Process.start(
+        '/bin/sh',
+        [
+          '-c',
+          'UI=$uiPid; ENG=$enginePid; '
+              'while kill -0 "\$UI" 2>/dev/null; do sleep 0.5; done; '
+              'kill -TERM "\$ENG" 2>/dev/null; sleep 1; kill -KILL "\$ENG" 2>/dev/null; true',
+        ],
+        mode: ProcessStartMode.detached,
+      );
+      log.writeln('orphan-watchdog armed ui=$uiPid engine=$enginePid');
+    } catch (e) {
+      log.writeln('orphan-watchdog failed: $e');
+    }
   }
 
   /// 窗口关闭 / 应用退出时调用：结束本进程托管的引擎。

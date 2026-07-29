@@ -57,17 +57,6 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
-# 页内 MPV 仅用 runtime/libmpv（见 KotvMpvPaths + MediaKit.ensureInitialized），不随包复制 media_kit 自带 DLL。
-if(PLUGIN_BUNDLED_LIBRARIES)
-  set(_kotv_bundled_libs "")
-  foreach(_lib IN LISTS PLUGIN_BUNDLED_LIBRARIES)
-    if(NOT _lib MATCHES "(libmpv-2|mpv-2)\\.dll$")
-      list(APPEND _kotv_bundled_libs "${_lib}")
-    endif()
-  endforeach()
-  set(PLUGIN_BUNDLED_LIBRARIES "${_kotv_bundled_libs}")
-endif()
-
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
 # run in place. This is done instead of making a separate bundle (as on Linux)
@@ -117,7 +106,7 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
 
-# Bundle full KOTV runtime (jre/python/libvlc/libmpv/…) next to the executable.
+# Bundle full KOTV runtime (jre/python/libvlc/…；不含 libmpv) next to the executable.
 # 唯一安装点：CI 不得再整目录 Copy-Item runtime（会套出 runtime\runtime）。
 # 勿用 PATTERN "lib" EXCLUDE：Windows 大小写不敏感，会误删 python/Lib（site-packages）。
 set(KOTV_RUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../runtime")
@@ -126,6 +115,7 @@ if(EXISTS "${KOTV_RUNTIME_ROOT}/jre" OR EXISTS "${KOTV_RUNTIME_ROOT}/libvlc")
     DESTINATION "${CMAKE_INSTALL_PREFIX}/runtime"
     COMPONENT Runtime
     PATTERN "mpv" EXCLUDE
+    PATTERN "libmpv" EXCLUDE
     PATTERN "vlc" EXCLUDE)
   # 仅去掉旧布局顶层 runtime/lib（若存在），不影响 python/Lib 或 libvlc。
   install(CODE "

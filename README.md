@@ -16,7 +16,7 @@
 | 局域网 API / 遥控 / 手机同步（历史·收藏） | ✅ |
 | 弹幕 / 自更新 | ✅ |
 | 旁路播放（捆绑 VLC / MPV）+ 续播 | ✅ |
-| 页内嵌入播放（libvlc / libmpv 软渲染） | ✅ |
+| 页内嵌入播放（Flutter media_kit MPV / runtime libvlc） | ✅ |
 | 单集循环（页内 MPV/VLC） | ✅ |
 | 捆绑运行时 (JRE/Python/Chromium/ffmpeg/VLC/MPV) | ✅ |
 | QuickJS 内嵌主程序 (CGO) | ✅ |
@@ -82,8 +82,7 @@ dist/KOTV-macos-arm64/
     python/             # CPython 3.14 → Python 爬虫
     chromium/           # Win=chrome.exe（REWORK/snapshot 展平）；其它=CFT headless-shell 等
     ffmpeg/
-    libvlc/             # libvlc + plugins（页内嵌入）
-    libmpv/             # libmpv 动态库（页内 MPV）
+    libvlc/             # libvlc + plugins（页内 VLC；Flutter kotv_vlc）
     bridge/spider-bridge.jar
   README.txt
 ```
@@ -94,15 +93,14 @@ dist/KOTV-macos-arm64/
 | Python 3.14 | Python 爬虫 | PBS / Win7 embed (PythonVista) |
 | Chromium | 网页嗅探 / 解析 | **macOS / Linux x64**：CFT Stable 最新；**Win x64**：Win7 REWORK 最新；**Win ARM64**：最新 snapshot；Linux ARM64 回落系统 Chrome |
 | FFmpeg | 媒体处理 | osxexperts / Gyan / BtbN |
-| libvlc | **页内嵌入（VLC 软渲染）** | VideoLAN 官方包提取 lib + plugins |
-| libmpv | **页内嵌入（MPV 软渲染）** | media-kit / eko5624 / 系统 libmpv2 |
+| libvlc | **页内嵌入（VLC）** | VideoLAN 官方包提取 lib + plugins |
 | QuickJS | JS 爬虫 | 编译进 KOTV（无需单独目录） |
 
 运行时查找顺序：可执行文件旁 `runtime/` → 环境变量 `KOTV_RUNTIME` → 开发态仓库 `runtime/`。
 
 **Java / Python 仅使用捆绑路径**，不会读取 `JAVA_HOME` 或系统 PATH。JAR 爬虫通过捆绑 JRE 启动常驻 `spider-bridge --serve` 进程（JVM 只初始化一次，崩溃可自动拉起），不嵌入主进程。
 
-**播放**：默认 `innie#vlc`（详情/直播页内嵌画面，运行时 dlopen 捆绑 `runtime/libvlc`）。设置中可改为页内 MPV 或外部 VLC/MPV。外部播放器回落系统安装或 PATH，发行包不再捆绑 mpv 可执行文件。
+**播放**：桌面页内 MPV 由 Flutter **media_kit 自带 libmpv**（不进 `runtime/`）。页内 VLC 使用 `runtime/libvlc`。也可选外部 VLC/MPV。
 
 ## 数据目录
 

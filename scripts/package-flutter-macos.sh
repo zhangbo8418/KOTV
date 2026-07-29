@@ -76,12 +76,11 @@ chmod +x "$WRAP"
 echo "==> verify package"
 test -x "$OUT_APP/Contents/Resources/runtime/jre/bin/java"
 test -e "$OUT_APP/Contents/Resources/runtime/libvlc"
-test -e "$OUT_APP/Contents/Resources/runtime/libmpv"
 test -e "$OUT_APP/Contents/Resources/runtime/bridge/spider-bridge.jar" \
   || test -e "$OUT_APP/Contents/Resources/runtime/bridge"
 test -x "$OUT_APP/Contents/MacOS/kotv-engine" \
   || test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"
-echo "  java ok, libvlc ok, libmpv ok, engine ok"
+echo "  java ok, libvlc ok, engine ok"
 
 echo "==> ad-hoc sign"
 codesign --force --deep --sign - "$OUT_APP" 2>/dev/null || true

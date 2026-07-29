@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 对当前 Flutter SDK 应用仓库内补丁（Win7 实验线使用 3.24.5）。
+# 对当前 Flutter SDK 应用仓库内补丁（仅 3.24.x 主线；Win7 3.19 线请跳过）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,6 +9,13 @@ if ! command -v flutter >/dev/null 2>&1; then
   echo "flutter not in PATH" >&2
   exit 1
 fi
+
+ver="$(flutter --version 2>/dev/null | head -1 || true)"
+if ! echo "$ver" | grep -qE '3\.24\.'; then
+  echo "skip SDK patch (not Flutter 3.24.x): $ver"
+  exit 0
+fi
+
 if [[ ! -f "$PATCH" ]]; then
   echo "missing patch: $PATCH" >&2
   exit 1

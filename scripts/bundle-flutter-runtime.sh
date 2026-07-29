@@ -21,9 +21,9 @@ if [[ ! -d "$SRC_RT" ]]; then
   exit 1
 fi
 
-# 最少要有 jre（JAR 爬虫）、libvlc（页内 VLC）、libmpv（默认内置 MPV / media_kit）、bridge
+# 最少要有 jre（JAR 爬虫）、libvlc（页内 VLC）、bridge；页内 MPV 由 media_kit 自带
 need_ok=1
-for need in jre libvlc libmpv bridge; do
+for need in jre libvlc bridge; do
   if [[ ! -d "$SRC_RT/$need" && ! -e "$SRC_RT/$need" ]]; then
     echo "error: incomplete runtime, missing $SRC_RT/$need" >&2
     echo "  run: ./scripts/prepare-runtime.sh" >&2
@@ -56,11 +56,11 @@ else
   mkdir -p "$DEST_RT"
   cp -a "$SRC_RT/." "$DEST_RT/"
 fi
-# 不进包：外部 mpv、旧布局顶层 lib/（路径是 runtime/lib，不会碰到 python/Lib）
-rm -rf "$DEST_RT/mpv" "$DEST_RT/vlc" "$DEST_RT/lib"
+# 不进包：外部 mpv、残留 libmpv、旧布局顶层 lib/
+rm -rf "$DEST_RT/mpv" "$DEST_RT/vlc" "$DEST_RT/lib" "$DEST_RT/libmpv"
 
 # 校验关键子目录
-for need in jre libvlc libmpv bridge; do
+for need in jre libvlc bridge; do
   if [[ ! -e "$DEST_RT/$need" ]]; then
     echo "error: bundle missing $DEST_RT/$need" >&2
     exit 1

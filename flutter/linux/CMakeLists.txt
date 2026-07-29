@@ -91,16 +91,6 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
-if(PLUGIN_BUNDLED_LIBRARIES)
-  set(_kotv_bundled_libs "")
-  foreach(_lib IN LISTS PLUGIN_BUNDLED_LIBRARIES)
-    if(NOT _lib MATCHES "libmpv\\.so(\\.2|\\.1)?$")
-      list(APPEND _kotv_bundled_libs "${_lib}")
-    endif()
-  endforeach()
-  set(PLUGIN_BUNDLED_LIBRARIES "${_kotv_bundled_libs}")
-endif()
-
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build
@@ -162,6 +152,7 @@ if(EXISTS "${KOTV_RUNTIME_ROOT}/jre" OR EXISTS "${KOTV_RUNTIME_ROOT}/libvlc")
     DESTINATION "${CMAKE_INSTALL_PREFIX}/runtime"
     COMPONENT Runtime
     PATTERN "mpv" EXCLUDE
+    PATTERN "libmpv" EXCLUDE
     PATTERN "vlc" EXCLUDE)
   install(CODE "
     file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/runtime/lib\")

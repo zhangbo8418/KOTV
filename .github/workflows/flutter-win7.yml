@@ -6,9 +6,8 @@ on:
     tags: ["v*"]
 
 env:
-  FLUTTER_VERSION: "3.24.5"
-  # Win7 必需：替换 engine（避免 flutter_windows.dll 依赖 GetHostNameW）。
-  KOTV_FLUTTER_ENGINE_ZIP_URL: "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip"
+  # 官方最后支持 Win7 的稳定版；不再用 3.24 + 魔改 engine。
+  FLUTTER_VERSION: "3.19.6"
 
 jobs:
   build-flutter-win7:
@@ -74,15 +73,16 @@ jobs:
             -o flutter/assets/engine/kotv-engine.exe ./cmd/engine
           pwsh -File ./scripts/check-win7-deps.ps1 -Exe "flutter/assets/engine/kotv-engine.exe"
 
-      - name: Build Flutter Windows release (3.24.5)
+      - name: Build Flutter Windows release (3.19.6 / Win7)
         shell: pwsh
         run: |
           Set-Location flutter
           flutter --version
           flutter config --enable-windows-desktop
           flutter precache --windows
-          bash ../scripts/patch-flutter-sdk.sh
-          pwsh -File ../scripts/install-flutter-win7-engine.ps1
+
+          # 主线 pubspec 面向 3.24+；Win7 线临时放宽到 Dart 3.3
+          bash ../scripts/adapt-flutter-win7-sdk.sh
 
           flutter pub get
           flutter build windows --release
@@ -94,7 +94,7 @@ jobs:
           if (-not (Test-Path "$out\kotv.exe")) { throw "Flutter build output missing: $out\kotv.exe" }
           Copy-Item -Force "flutter\assets\engine\kotv-engine.exe" "$out\kotv-engine.exe"
 
-          # runtime 只由 Windows CMake install 打一次；这里禁止再拷，否则易套出 runtime\runtime。
+          # runtime 只由 Windows CMake install 打一次；禁止二次整目录拷贝。
           if (-not (Test-Path "$out\runtime")) {
             throw "CMake did not install runtime under $out\runtime — check flutter/windows/CMakeLists.txt"
           }
@@ -102,7 +102,6 @@ jobs:
             throw "nested runtime\runtime detected — packaging must be single-layer"
           }
 
-          Remove-Item -Force "$out\libmpv-2.dll", "$out\mpv-2.dll" -ErrorAction SilentlyContinue
           if (Test-Path "cmd\updater\updater.exe") { Copy-Item -Force "cmd\updater\updater.exe" "$out\updater.exe" }
 
           bash ./scripts/verify-runtime.sh "$out/runtime" windows-x64

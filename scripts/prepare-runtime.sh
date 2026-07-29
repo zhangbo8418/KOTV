@@ -943,123 +943,16 @@ prepare_libvlc_linux() {
   echo "[libvlc] ready v${VLC_VER} (system ${sysver}, plugins from $plugins): $dest"
 }
 
-# --- libmpv（详情/直播页内嵌；SW render API 输出 RGBA）---
-# 注意：官方 mpv 可执行包没有独立 libmpv，必须单独准备动态库。
-LIBMPV_DARWIN_VER="0.7.1"
-prepare_libmpv() {
-  local plat="$1" dest="$OUT_ROOT/libmpv"
-  if [[ -f "$dest/libmpv.dylib" || -f "$dest/libmpv-2.dll" || -f "$dest/mpv-2.dll" || -f "$dest/libmpv.so" || -f "$dest/libmpv.so.2" ]]; then
-    echo "[libmpv] already present: $dest"
-    return
-  fi
-  rm -rf "$dest"
-  mkdir -p "$dest"
-
-  case "$plat" in
-    macos-arm64|macos-x64)
-      local arch="arm64"
-      [[ "$plat" == "macos-x64" ]] && arch="amd64"
-      local name="libmpv-libs_v${LIBMPV_DARWIN_VER}_macos-${arch}-video-default.tar.gz"
-      local url="https://github.com/media-kit/libmpv-darwin-build/releases/download/v${LIBMPV_DARWIN_VER}/${name}"
-      local archive="$CACHE/$name"
-      download "$url" "$archive"
-      local tmp="$CACHE/libmpv-extract-$plat"
-      rm -rf "$tmp"
-      mkdir -p "$tmp"
-      tar -xzf "$archive" -C "$tmp"
-      local inner
-      inner="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)"
-      [[ -n "$inner" ]] || { echo "ERROR: [libmpv] archive layout invalid" >&2; return 1; }
-      cp -a "$inner"/. "$dest/"
- # 预构建包的 LC_RPATH 指向 Nix store；发行包必须改为同目录查找依赖。
-      if command -v install_name_tool >/dev/null 2>&1; then
-        local dylib
-        for dylib in "$dest"/*.dylib; do
-          [[ -f "$dylib" ]] || continue
-          install_name_tool -add_rpath "@loader_path" "$dylib" 2>/dev/null || true
-          codesign --force --sign - "$dylib" >/dev/null 2>&1 || true
-        done
-      fi
-      rm -rf "$tmp"
-      ;;
-    windows-x64)
- # eko5624 的 2024-04-29 是最后一个明确支持 Win7 的 libmpv 构建。
-      local name="git-libmpv-win7-2024-04-29.7z"
-      local url="https://github.com/eko5624/mpv-win64/releases/download/2024-04-29/git-libmpv.7z"
-      local archive="$CACHE/$name"
-      download "$url" "$archive"
-      local tmp="$CACHE/libmpv-extract-$plat"
-      rm -rf "$tmp"
-      mkdir -p "$tmp"
-      7z x "$archive" -o"$tmp" >/dev/null
-      local dll
-      dll="$(find "$tmp" -type f \( -iname 'libmpv-2.dll' -o -iname 'mpv-2.dll' \) | head -1)"
-      [[ -n "$dll" ]] || { echo "ERROR: [libmpv] Win7 archive has no libmpv DLL" >&2; return 1; }
-      cp -a "$(dirname "$dll")"/. "$dest/"
-      rm -rf "$tmp"
-      ;;
-    windows-arm64)
-      # SourceForge 的 mpv-*-aarch64.7z 是播放器包，不含 libmpv-2.dll。
-      # 用 zhongfly/mpv-winbuild 的 mpv-dev-aarch64（含 libmpv-2.dll）。
-      local meta="$CACHE/mpv-winbuild-latest.json"
-      download "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest" "$meta"
-      local url name
-      url="$(python3 - "$meta" <<'PY'
-import json,sys,re
-r=json.load(open(sys.argv[1]))
-pat=re.compile(r"^mpv-dev-aarch64-\d{8}-git-.+\.7z$")
-for a in r.get("assets",[]):
-    n=a.get("name") or ""
-    if pat.match(n) and "lgpl" not in n and "debug" not in n:
-        print(a["browser_download_url"])
-        raise SystemExit(0)
-sys.exit("no mpv-dev-aarch64 asset in latest zhongfly/mpv-winbuild release")
-PY
-)"
-      name="$(basename "${url%%\?*}")"
-      local archive="$CACHE/$name"
-      echo "[libmpv] Windows ARM64 via zhongfly: $name"
-      download "$url" "$archive"
-      local tmp="$CACHE/libmpv-extract-$plat"
-      rm -rf "$tmp"
-      mkdir -p "$tmp"
-      if ! command -v 7z >/dev/null 2>&1; then
-        echo "ERROR: [libmpv] need 7z to extract $name" >&2
-        return 1
-      fi
-      7z x "$archive" -o"$tmp" >/dev/null
-      local dll
-      dll="$(find "$tmp" -type f \( -iname 'libmpv-2.dll' -o -iname 'mpv-2.dll' \) | head -1)"
-      [[ -n "$dll" ]] || { echo "ERROR: [libmpv] Windows ARM64 archive has no libmpv DLL ($name)" >&2; return 1; }
-      # 依赖 DLL 通常与 libmpv 同目录
-      cp -a "$(dirname "$dll")"/*.dll "$dest/" 2>/dev/null || true
-      rm -rf "$tmp"
-      ;;
-    linux-x64|linux-arm64)
-      local lib=""
-      lib="$(ldconfig -p 2>/dev/null | awk '/libmpv\.so/{print $NF; exit}')"
-      if [[ -z "$lib" ]]; then
-        echo "ERROR: [libmpv] Linux 需要安装 libmpv2/libmpv-dev" >&2
-        return 1
-      fi
-      cp -L "$lib" "$dest/libmpv.so.2"
-      ln -sfn "libmpv.so.2" "$dest/libmpv.so"
-      ;;
-  esac
-
-  if [[ ! -f "$dest/libmpv.dylib" && ! -f "$dest/libmpv-2.dll" && ! -f "$dest/mpv-2.dll" && ! -f "$dest/libmpv.so" && ! -f "$dest/libmpv.so.2" ]]; then
-    echo "ERROR: [libmpv] dynamic library missing after preparation: $dest" >&2
-    return 1
-  fi
-  echo "[libmpv] ready: $dest"
-}
+# --- libmpv ---
+# 桌面页内 MPV 由 Flutter media_kit 自带；Go 引擎不做页内播放，runtime 不打包 libmpv。
+# （旧 prepare_libmpv 实现已移除；若需恢复 Go embed 再从 git 历史取回。）
 
 prepare_one() {
   local plat="$1"
   echo "======== prepare runtime: $plat ========"
   mkdir -p "$CACHE" "$OUT_ROOT"
-  # 发行包不捆绑外部 mpv；runtime/lib 为旧 libvlc 符号链接遗留，一律清掉
-  rm -rf "$OUT_ROOT/mpv" "$OUT_ROOT/lib" "$OUT_ROOT/vlc"
+  # 发行包不捆绑外部 mpv / libmpv（页内 MPV 由 Flutter media_kit 自带）；runtime/lib 为旧遗留
+  rm -rf "$OUT_ROOT/mpv" "$OUT_ROOT/lib" "$OUT_ROOT/vlc" "$OUT_ROOT/libmpv"
   prepare_jre "$plat"
   prepare_python "$plat"
  # PythonVista 解压后可能带 vcruntime；再扫一遍补进 jre/bin
@@ -1069,7 +962,7 @@ prepare_one() {
   prepare_chromium "$plat"
   prepare_ffmpeg "$plat"
   prepare_libvlc "$plat"
-  prepare_libmpv "$plat"
+  # 不 prepare_libmpv：桌面播放在 Flutter（media_kit）；Go 引擎不做页内 MPV
  # bridge jar（体积变大也无所谓；缺依赖会导致爬虫全挂）
   if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.sh" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/settings.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/bobo/kotv/bridge/SpiderBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/crawler/Spider.java" -nt "$ROOT/bridge/spider-bridge.jar" ]]; then
     echo "[bridge] building fat jar..."
@@ -1088,7 +981,8 @@ EOF
   echo "======== verifying $OUT_ROOT ========"
   "$ROOT/scripts/verify-runtime.sh" "$OUT_ROOT" "$plat"
   echo "======== done: $OUT_ROOT ========"
-  echo "包含: jre / python / chromium / ffmpeg / libvlc / libmpv / bridge"
+  echo "包含: jre / python / chromium / ffmpeg / libvlc / bridge"
+  echo "页内 MPV：Flutter media_kit 自带 libmpv（不进 runtime/）"
   echo "JS(QuickJS) 已编译进主程序 (CGO)。Windows 请用 MSVCRT MinGW 打包（见 package.sh / check-win7-deps.ps1）。"
 }
 

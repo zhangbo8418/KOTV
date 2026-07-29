@@ -25,13 +25,13 @@
 
 ## Windows 7（实验线）
 
-- Flutter 官方对 Win7 已非主支持平台，仓库提供 `Flutter 3.24.5` 的实验构建线。
-- 使用 GitHub Actions 工作流：`.github/workflows/flutter-win7.yml`。
-- 锁 `Flutter 3.24.5`；补丁在 `.github/patches/`，由 `scripts/patch-flutter-sdk.sh` 打入 SDK。
-- **Win7 必须**用 `scripts/install-flutter-win7-engine.ps1` 替换 `windows-x64-release` engine（否则 `kotv.exe` 会因 `GetHostNameW` 无法启动）。
-- 桌面 **内置 MPV** 仅加载 `runtime/libmpv`（与 Go 引擎共用），不随包附带 media_kit 自带的 libmpv。
+- **官方最后支持 Win7 的稳定版是 Flutter 3.19.x**；Win7 CI 钉 `3.19.6`（见 `.github/workflows/flutter-win7.yml`）。
+- 主线（Win10+ / macOS / Linux）仍用较新 Flutter（`sdk: ^3.5.4`）；Win7 构建前会跑 `scripts/adapt-flutter-win7-sdk.sh` 临时放宽约束。
+- **不再**对 Win7 线替换 RustDesk 魔改 engine（那只修启动 `GetHostNameW`，管不了加载后闪退）。
+- 桌面 **内置 MPV** 使用 Flutter **media_kit 自带 libmpv**（不进 `runtime/`）。
 - Python 爬虫依赖与 TV `chaquo/requirements.txt` 对齐（`scripts/python-requirements.txt`），打进 `runtime/python`。
-- 该产物为 `KOTV-flutter-win7-experimental-*.zip`，用于 Win7 真机回归与补丁迭代。
+- UI 闪退时由看门狗杀掉残留 `kotv-engine`（见 `engine_launcher.dart`）。
+- 产物为 `KOTV-flutter-win7-experimental-*.zip`，用于 Win7 真机回归。
 
 ```bash
 cd flutter
