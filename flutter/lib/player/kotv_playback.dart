@@ -305,14 +305,14 @@ class EngineVlcPlayback extends KotvPlayback {
         if (e is! Map) continue;
         final id = '${e['id'] ?? ''}'.trim();
         if (id.isEmpty || id == '-1') continue;
-        aList.add(KotvTrack(id: id, title: '${e['name'] ?? id}'.trim()));
+        aList.add(KotvTrack(id: id, label: '${e['name'] ?? id}'.trim()));
       }
       final sList = <KotvTrack>[];
       for (final e in ((s['tracks'] as List?) ?? const [])) {
         if (e is! Map) continue;
         final id = '${e['id'] ?? ''}'.trim();
         if (id.isEmpty || id == '-1') continue;
-        sList.add(KotvTrack(id: id, title: '${e['name'] ?? id}'.trim()));
+        sList.add(KotvTrack(id: id, label: '${e['name'] ?? id}'.trim()));
       }
       final curA = a['current'];
       final curS = s['current'];

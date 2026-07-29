@@ -287,7 +287,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
           child: DecoratedBox(
             decoration: BoxDecoration(
               boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 40, spread: const Offset(0, 12)),
+                BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 40, offset: const Offset(0, 12)),
               ],
             ),
             child: video,
