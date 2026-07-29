@@ -3,6 +3,7 @@ plugins {
     id "kotlin-android"
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
+    id "com.chaquo.python"
 }
 
 android {
@@ -39,6 +40,51 @@ android {
     }
 }
 
+chaquopy {
+    defaultConfig {
+        pip {
+            // 与 scripts/python-requirements.txt 对齐（用于 Chaquopy 内执行 Python spider）。
+            install "lxml"
+            install "ujson"
+            install "pyquery"
+            install "requests"
+            install "cachetools"
+            install "pycryptodome"
+            install "beautifulsoup4"
+            install "certifi"
+        }
+    }
+}
+
+dependencies {
+    implementation "org.nanohttpd:nanohttpd:2.3.1"
+}
+
 flutter {
     source = "../.."
+}
+
+// 把 bridge/spider-bridge.jar 拷贝进 APK assets，供 JarLoader 读取。
+def repoRoot = file("../../../..")
+def bridgeJar = new File(repoRoot, "bridge/spider-bridge.jar")
+def bridgeAssetDir = file("src/main/assets/kotv")
+
+tasks.register("prepareSpiderBridgeJar") {
+    doLast {
+        if (!bridgeJar.exists() || bridgeJar.length() == 0L) {
+            println "[android] spider-bridge.jar missing; building..."
+            exec {
+                commandLine "bash", "-lc", "${repoRoot}/bridge/build.sh"
+            }
+        }
+        bridgeAssetDir.mkdirs()
+        copy {
+            from bridgeJar
+            into bridgeAssetDir
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn "prepareSpiderBridgeJar"
 }

@@ -183,8 +183,8 @@ KO影视 / KOTV 发行包 ($PLAT)
 目录:
   $BIN              主程序（内嵌 QuickJS，JS 爬虫无需额外运行时）
   runtime/          捆绑运行时
-    jre/            Liberica 21（JAR 爬虫，常驻 bridge 进程）
-    python/         CPython 3.14（Python 爬虫）
+    jre/            Liberica 21（进程内 JNI 加载 libjvm，执行 JAR 爬虫）
+    python/         CPython 3.14（进程内 Py_Initialize，执行 Python 爬虫）
     chromium/       嗅探/解析（Win x64=Win7 REWORK 最新；Win ARM64=最新 snapshot）
     ffmpeg/         FFmpeg（Windows 为 7.0）
     libvlc/         libvlc 动态库 + plugins（页内 VLC）

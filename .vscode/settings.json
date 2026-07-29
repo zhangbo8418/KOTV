@@ -9,10 +9,14 @@
   },
   "files.associations": {
     "**/internal/player/embed/*.c": "plaintext",
-    "**/internal/player/embed/*.h": "plaintext"
+    "**/internal/player/embed/*.h": "plaintext",
+    "**/internal/spider/embedpy/native/*": "plaintext",
+    "**/internal/spider/embedjvm/native/*": "plaintext"
   },
   "C_Cpp.files.exclude": {
-    "**/internal/player/embed": true
+    "**/internal/player/embed": true,
+    "**/internal/spider/embedpy/native": true,
+    "**/internal/spider/embedjvm/native": true
   },
   "clangd.ignoreExclude": false
 }

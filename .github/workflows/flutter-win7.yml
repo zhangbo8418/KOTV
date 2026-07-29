@@ -69,6 +69,8 @@ jobs:
           ./scripts/prepare-runtime.sh windows-x64
           ./scripts/verify-runtime.sh runtime windows-x64
           (cd internal/spider && go run gen_qjsinc.go)
+          # 避免 assets 里残留的 mac/linux kotv-engine 被 CMake 装进 Win 包。
+          rm -f flutter/assets/engine/kotv-engine
           go build -ldflags "-s -w -extldflags '-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic -Wl,--subsystem,windows:6.01'" \
             -o flutter/assets/engine/kotv-engine.exe ./cmd/engine
           pwsh -File ./scripts/check-win7-deps.ps1 -Exe "flutter/assets/engine/kotv-engine.exe"
@@ -93,6 +95,8 @@ jobs:
           $out = "flutter\build\windows\x64\runner\Release"
           if (-not (Test-Path "$out\kotv.exe")) { throw "Flutter build output missing: $out\kotv.exe" }
           Copy-Item -Force "flutter\assets\engine\kotv-engine.exe" "$out\kotv-engine.exe"
+          # 兜底：清掉无后缀的 kotv-engine（历史 CMake 可能装过）。
+          if (Test-Path "$out\kotv-engine") { Remove-Item -Force "$out\kotv-engine" }
 
           # runtime 只由 Windows CMake install 打一次；禁止二次整目录拷贝。
           if (-not (Test-Path "$out\runtime")) {

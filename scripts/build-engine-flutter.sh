@@ -25,7 +25,7 @@ case "$TARGET" in
     PREBUILT="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/* | head -1)"
     CC="$PREBUILT/bin/aarch64-linux-android${API}-clang"
     CGO_ENABLED=1 GOOS=android GOARCH=arm64 CC="$CC" \
-      go build -o "$OUT_DIR/$NAME" ./cmd/engine
+      go build -tags kotv_android -o "$OUT_DIR/$NAME" ./cmd/engine
     echo "built android arm64 $OUT_DIR/$NAME"
     ;;
   *)

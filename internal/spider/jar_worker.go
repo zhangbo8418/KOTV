@@ -1,48 +1,29 @@
 package spider
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"net/http"
+	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/bobo/KOTV/internal/localproxy"
-	"github.com/bobo/KOTV/internal/paths"
-	appruntime "github.com/bobo/KOTV/internal/runtime"
+	"github.com/bobo/KOTV/internal/spider/embedjvm"
 )
 
-// 无效源网络超时不应拖死换源；超时后立刻杀掉 bridge，让有效源马上重试。
-const javaBridgeCallTimeout = 12 * time.Second
-
-// ErrJavaBridgeInterrupted 表示调用被换源/关闭主动打断，不应再重试同一请求。
+// ErrJavaBridgeInterrupted 表示调用被换源/关闭主动打断。
 var ErrJavaBridgeInterrupted = errors.New("JAR 调用已中断")
 
-type javaBridgeClient struct {
-	mu         sync.Mutex
-	cmd        *exec.Cmd
-	stdin      io.WriteCloser
-	stdout     *bufio.Reader
-	stderrFile *os.File
-	proc       atomic.Pointer[os.Process]
-	epoch      atomic.Uint64
-}
-
-var javaBridge javaBridgeClient
-
-// 点播配置的网络参数（headers/proxy/hosts/doh），在每个新 worker 启动时重放，
-// 把配置灌入 OkHttp 拦截器/选择器/DNS 的行为。
+// 点播配置的网络参数（headers/proxy/hosts/doh），在嵌入 JVM 首次启动后重放。
 var (
 	netConfigMu   sync.Mutex
 	netConfigJSON []byte
 	userProxyJSON []byte
+	netPrimed     bool
 )
 
 // SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp。
@@ -68,13 +49,10 @@ func SetNetConfig(headers, proxy, hosts, doh []byte) {
 	netConfigMu.Lock()
 	netConfigJSON = payload
 	netConfigMu.Unlock()
-	// 仅热更新已存活的 bridge；不在换源解析时冷启动 JVM。
-	// 冷启动会在 LoadJar / 首次 JAR 调用的 startLocked 里发生，并重放 currentNetConfig。
-	javaBridge.pushIfAlive(payload)
+	pushBridgeIfAlive(payload)
 }
 
-// SetUserProxy 把 KOTV 用户代理设置下发到 bridge，令 JAR 请求在未命中配置 proxy 规则时也走用户代理。
-// spec 为设置里的原始值（如 "false#" 或 "true#http://127.0.0.1:7890"）。
+// SetUserProxy 把 KOTV 用户代理设置下发到 bridge。
 func SetUserProxy(spec string) {
 	spec = strings.TrimSpace(spec)
 	url := ""
@@ -93,7 +71,7 @@ func SetUserProxy(spec string) {
 	netConfigMu.Lock()
 	userProxyJSON = payload
 	netConfigMu.Unlock()
-	javaBridge.pushIfAlive(payload)
+	pushBridgeIfAlive(payload)
 }
 
 func currentNetConfig() [][]byte {
@@ -109,251 +87,94 @@ func currentNetConfig() [][]byte {
 	return out
 }
 
-// callJavaBridge 通过常驻捆绑 Java 进程调用 spider-bridge（JVM 只启动一次）。
+// callJavaBridge：桌面走进程内 JNI；Android 走 Native Service。
 func callJavaBridge(payload []byte) (string, error) {
-	return javaBridge.call(payload)
-}
-
-// InterruptJavaBridge 打断卡住的 JAR 调用，并作废当前请求的自动重试。
-func InterruptJavaBridge() {
-	javaBridge.epoch.Add(1)
-	if p := javaBridge.proc.Load(); p != nil {
-		_ = p.Kill()
+	if runtime.GOOS == "android" {
+		return androidCallJavaBridge(payload)
 	}
-}
-
-// pushIfAlive 向已运行的 bridge 下发配置；进程不存在时不启动（避免 loadConfig 强制拉 JVM）。
-func (w *javaBridgeClient) pushIfAlive(payload []byte) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if !w.aliveLocked() {
-		return
+	if !embedjvm.Active {
+		return "", fmt.Errorf("嵌入 JVM 不可用：请以 CGO_ENABLED=1 构建")
 	}
-	_ = w.primeLocked(payload)
-}
-
-func (w *javaBridgeClient) call(payload []byte) (string, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	startEpoch := w.epoch.Load()
-	var transportErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		if w.epoch.Load() != startEpoch {
-			w.stopLocked()
-			return "", ErrJavaBridgeInterrupted
-		}
-		if err := w.startLocked(); err != nil {
-			return "", err
-		}
-
-		exchange := make(chan string, 1)
-		exchangeErr := make(chan error, 1)
-		stdin, stdout := w.stdin, w.stdout
-		req := append(append([]byte(nil), bytesTrimSpace(payload)...), '\n')
-		go func() {
-			if _, err := stdin.Write(req); err != nil {
-				exchangeErr <- err
-				return
-			}
-			line, err := stdout.ReadBytes('\n')
-			if err != nil {
-				exchangeErr <- err
-				return
-			}
-			exchange <- strings.TrimSpace(string(line))
-		}()
-
-		select {
-		case response := <-exchange:
-			if w.epoch.Load() != startEpoch {
-				w.stopLocked()
-				return "", ErrJavaBridgeInterrupted
-			}
-			return response, nil
-		case transportErr = <-exchangeErr:
-			w.stopLocked()
-			if w.epoch.Load() != startEpoch {
-				return "", ErrJavaBridgeInterrupted
-			}
-			continue
-		case <-time.After(javaBridgeCallTimeout):
-			transportErr = fmt.Errorf("调用超过 %s", javaBridgeCallTimeout)
-			if p := w.proc.Load(); p != nil {
-				_ = p.Kill()
-			}
-			w.stopLocked()
-			if w.epoch.Load() != startEpoch {
-				return "", ErrJavaBridgeInterrupted
-			}
-			continue
-		}
+	if err := embedjvm.EnsureStarted(""); err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("Java bridge 异常退出，自动重启后仍不可用: %w", transportErr)
+	if err := primeNetConfigOnce(); err != nil {
+		return "", err
+	}
+	out, err := embedjvm.Call(payload)
+	if err != nil && errors.Is(err, embedjvm.ErrInterrupted) {
+		return "", ErrJavaBridgeInterrupted
+	}
+	return out, err
 }
 
-func (w *javaBridgeClient) aliveLocked() bool {
-	return w.cmd != nil && w.cmd.Process != nil && w.cmd.ProcessState == nil
-}
-
-func (w *javaBridgeClient) startLocked() error {
-	if w.aliveLocked() {
+func primeNetConfigOnce() error {
+	netConfigMu.Lock()
+	already := netPrimed
+	netConfigMu.Unlock()
+	if already {
 		return nil
 	}
-	w.stopLocked()
-
-	java, err := findJava()
-	if err != nil {
-		return err
-	}
-	bridgeJar := findBridgeJar()
-	if bridgeJar == "" {
-		return fmt.Errorf("未找到 spider-bridge.jar，请运行 bridge 目录下的构建脚本")
-	}
-
-	proxyPort := localproxy.Port()
-	cmd := exec.Command(java,
-		"-Djava.awt.headless=true",
-		fmt.Sprintf("-Dkotv.cache.dir=%s", paths.Root()),
-		"-Djava.net.useSystemProxies=false",
-		"-DsocksProxyHost=",
-		"-DsocksProxyPort=",
-		"-Dhttp.proxyHost=",
-		"-Dhttp.proxyPort=",
-		"-Dhttps.proxyHost=",
-		"-Dhttps.proxyPort=",
-		"-Dftp.proxyHost=",
-		"-Dftp.proxyPort=",
-		fmt.Sprintf("-Dkotv.proxy.port=%d", proxyPort),
-		"-Dsun.net.client.defaultConnectTimeout=8000",
-		"-Dsun.net.client.defaultReadTimeout=10000",
-		"-Dfile.encoding=UTF-8",
-		"-jar", bridgeJar,
-		"--serve",
-	)
-	cmd.Dir = filepath.Dir(bridgeJar)
-	cmd.Env = append(filterProxyEnv(os.Environ()), fmt.Sprintf("KOTV_PROXY_PORT=%d", proxyPort))
-	// GUI 子系统下 os.Stderr 常不可见；写入日志便于诊断 EOF（JRE 缺库/bridge 崩）。
-	_ = os.MkdirAll(paths.LogDir(), 0o755)
-	stderrPath := filepath.Join(paths.LogDir(), "java-bridge.err.log")
-	stderrFile, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err == nil {
-		cmd.Stderr = stderrFile
-	} else {
-		cmd.Stderr = os.Stderr
-		stderrFile = nil
-	}
-	setHiddenConsoleAttrs(cmd)
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		if stderrFile != nil {
-			_ = stderrFile.Close()
-		}
-		return fmt.Errorf("创建 Java bridge 输入管道失败: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		if stderrFile != nil {
-			_ = stderrFile.Close()
-		}
-		return fmt.Errorf("创建 Java bridge 输出管道失败: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
-		if stderrFile != nil {
-			_ = stderrFile.Close()
-		}
-		return fmt.Errorf("启动 Java bridge 失败: %w", err)
-	}
-
-	w.cmd = cmd
-	w.stdin = stdin
-	w.stdout = bufio.NewReader(stdout)
-	w.stderrFile = stderrFile
-	w.proc.Store(cmd.Process)
-
-	// 新 worker 启动后重放点播网络配置与用户代理，重启进程也会重新灌入 OkHttp。
 	for _, cfg := range currentNetConfig() {
-		if err := w.primeLocked(cfg); err != nil {
-			hint := readBridgeErrTail(stderrPath)
-			w.stopLocked()
-			if hint != "" {
-				return fmt.Errorf("下发网络配置到 Java bridge 失败: %w（详见 %s：%s）", err, stderrPath, hint)
-			}
-			return fmt.Errorf("下发网络配置到 Java bridge 失败: %w（详见 %s）", err, stderrPath)
+		if _, err := embedjvm.Call(cfg); err != nil {
+			return fmt.Errorf("下发网络配置到嵌入 JVM 失败: %w", err)
 		}
 	}
+	netConfigMu.Lock()
+	netPrimed = true
+	netConfigMu.Unlock()
 	return nil
 }
 
-func readBridgeErrTail(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil || len(b) == 0 {
-		return ""
+func pushBridgeIfAlive(payload []byte) {
+	if runtime.GOOS == "android" {
+		_, _ = androidCallJavaBridge(payload)
+		return
 	}
+	if !embedjvm.Active {
+		return
+	}
+	if err := embedjvm.EnsureStarted(""); err != nil {
+		return
+	}
+	_, _ = embedjvm.Call(payload)
+	netConfigMu.Lock()
+	netPrimed = true
+	netConfigMu.Unlock()
+}
+
+func androidCallJavaBridge(payload []byte) (string, error) {
+	const base = "http://127.0.0.1:9979"
+	req, err := http.NewRequest(http.MethodPost, base+"/jar/call", bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	s := strings.TrimSpace(string(b))
-	if len(s) > 240 {
-		s = s[len(s)-240:]
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("android jar call failed: http=%d %s", resp.StatusCode, s)
 	}
-	s = strings.ReplaceAll(s, "\n", " | ")
-	return s
+	if s == "" {
+		return "", fmt.Errorf("android jar call empty response")
+	}
+	return s, nil
 }
 
-// primeLocked 在启动新进程后同步下发一次配置请求（configNet 只做内存写入，返回极快）。
-func (w *javaBridgeClient) primeLocked(payload []byte) error {
-	req := append(append([]byte(nil), bytesTrimSpace(payload)...), '\n')
-	if _, err := w.stdin.Write(req); err != nil {
-		return err
+// InterruptJavaBridge 打断卡住的 JAR 调用。
+func InterruptJavaBridge() {
+	netConfigMu.Lock()
+	netPrimed = false
+	netConfigMu.Unlock()
+	if runtime.GOOS == "android" {
+		return
 	}
-	if _, err := w.stdout.ReadBytes('\n'); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (w *javaBridgeClient) stopLocked() {
-	w.proc.Store(nil)
-	if w.stdin != nil {
-		_ = w.stdin.Close()
-	}
-	if w.cmd != nil {
-		if w.cmd.Process != nil && w.cmd.ProcessState == nil {
-			_ = w.cmd.Process.Kill()
-		}
-		_ = w.cmd.Wait()
-	}
-	if w.stderrFile != nil {
-		_ = w.stderrFile.Close()
-	}
-	w.cmd = nil
-	w.stdin = nil
-	w.stdout = nil
-	w.stderrFile = nil
-}
-
-func findJava() (string, error) {
-	if p := appruntime.Java(); p != "" {
-		return p, nil
-	}
-	return "", fmt.Errorf("未找到捆绑 Java：请运行 ./scripts/prepare-runtime.sh 准备 runtime/jre")
-}
-
-func filterProxyEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, e := range env {
-		el := strings.ToLower(e)
-		if strings.HasPrefix(el, "http_proxy=") || strings.HasPrefix(el, "https_proxy=") ||
-			strings.HasPrefix(el, "all_proxy=") || strings.HasPrefix(el, "socks") ||
-			strings.HasPrefix(el, "java_tool_options=") {
-			continue
-		}
-		out = append(out, e)
-	}
-	return out
-}
-
-func bytesTrimSpace(b []byte) []byte {
-	return []byte(strings.TrimSpace(string(b)))
+	embedjvm.Interrupt()
 }

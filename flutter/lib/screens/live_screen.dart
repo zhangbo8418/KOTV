@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../desktop/mini_player_window.dart';
 import '../player/embed_video_view.dart';
+import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
@@ -31,14 +33,27 @@ class LiveScreen extends ConsumerStatefulWidget {
 }
 
 class _LiveScreenState extends ConsumerState<LiveScreen> {
-  late final Player _mkPlayer = Player();
-  late final MediaKitPlayback _mk = MediaKitPlayback(_mkPlayer);
+  Player? _mkPlayer;
+  MediaKitPlayback? _mk;
   EngineVlcPlayback? _vlc;
   final FocusNode _focus = FocusNode();
 
-  KotvPlayback get _playback => _useVlc ? (_vlc ??= EngineVlcPlayback()) : _mk;
+  KotvPlayback get _playback {
+    if (_useVlc) {
+      return _vlc ??= EngineVlcPlayback();
+    }
+    return _ensureMpv();
+  }
+
   bool get _useVlc => _playerVal.trim() == 'innie#vlc';
-  VideoController get _controller => _mk.controller;
+
+  MediaKitPlayback _ensureMpv() {
+    _mkPlayer ??= Player();
+    _mk ??= MediaKitPlayback(_mkPlayer!);
+    return _mk!;
+  }
+
+  VideoController get _controller => _ensureMpv().controller;
 
   bool _loading = true;
   String? _error;
@@ -61,7 +76,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _status = '点击左侧换台 · 点击右侧换源/设置';
   String _title = '选择频道开始播放';
   String _decodeMode = 'auto';
-  String _playerVal = 'innie#mpv';
+  String _playerVal = kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv';
   String _playUrl = '';
   Timer? _catchupHideTimer;
 
@@ -80,8 +95,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _catchupHideTimer?.cancel();
     _focus.dispose();
     _vlc?.dispose();
-    _mk.dispose();
-    _mkPlayer.dispose();
+    _mk?.dispose();
+    _mkPlayer?.dispose();
     super.dispose();
   }
 
@@ -95,13 +110,23 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       try {
         final st = await ref.read(apiProvider).getSettings();
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-        final decode = '${settings['playerDecode'] ?? 'auto'}';
+        final decode = '${settings['playerDecode'] ?? 'auto'}'.trim();
         if (decode.isNotEmpty) _decodeMode = decode;
-        final playerVal = '${settings['player'] ?? 'innie#mpv'}'.trim();
-        _playerVal = playerVal.isEmpty ? 'innie#mpv' : playerVal;
-        final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
-        if (vol != null) await _playback.setVolume(vol.clamp(0, 100));
-        await _playback.setDecodeMode(_decodeMode);
+        var playerVal = '${settings['player'] ?? 'innie#mpv'}'.trim();
+        if (playerVal.isEmpty) playerVal = 'innie#mpv';
+        // Win7：media_kit/MPV 易卡死整 UI，仅强制换内置 VLC；解码方式仍跟设置/用户选择。
+        if (kotvIsWindows7() && playerVal == 'innie#mpv') {
+          playerVal = 'innie#vlc';
+        }
+        _playerVal = playerVal;
+        // Win7：进页不碰 native 播放器；等用户点台再 open。
+        if (!kotvIsWindows7()) {
+          final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
+          if (vol != null) {
+            await _playback.setVolume(vol.clamp(0, 100));
+          }
+          await _playback.setDecodeMode(_decodeMode);
+        }
       } catch (_) {}
       final data = await ref.read(apiProvider).liveSources();
       _sources = ((data['sources'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
@@ -110,7 +135,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         return;
       }
       final keepSrc = await _preferredSourceIndex();
-      await _loadSource(keepSrc, autoPlay: true);
+      // Win7：进页自动开播易卡死 UI，等用户点台。
+      await _loadSource(keepSrc, autoPlay: !kotvIsWindows7());
+      if (kotvIsWindows7() && mounted) {
+        setState(() => _status = '点击左侧频道开始播放（Win7 已禁用进页自动播）');
+      }
     } catch (e) {
       setState(() {
         _error = '$e';
@@ -352,16 +381,39 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     await _playback.setDecodeMode(_decodeMode);
     if (_useVlc) {
       try {
-        await _mk.stop();
+        await _mk?.stop();
       } catch (_) {}
       _vlc ??= EngineVlcPlayback();
       await _vlc!.setDecodeMode(_decodeMode);
-      await _vlc!.open(url);
+      // 原生 create/load/play 偶发阻塞；超时后提示用户改外部播放器。
+      try {
+        await _vlc!.open(url).timeout(const Duration(seconds: 12));
+      } on TimeoutException {
+        if (mounted) {
+          setState(() => _status = '内置 VLC 开播超时，可改用外部播放器');
+        }
+        rethrow;
+      }
     } else {
       try {
         await _vlc?.stop();
       } catch (_) {}
-      await _mk.open(url);
+      // Win7 上 media_kit 偶发同步卡死：开播加超时，失败则自动切 VLC。
+      final mk = _ensureMpv();
+      try {
+        await mk.open(url).timeout(const Duration(seconds: 8));
+      } on TimeoutException {
+        _playerVal = 'innie#vlc';
+        try {
+          await mk.stop();
+        } catch (_) {}
+        _vlc ??= EngineVlcPlayback();
+        await _vlc!.setDecodeMode(_decodeMode);
+        await _vlc!.open(url);
+        if (mounted) {
+          setState(() => _status = 'MPV 超时，已自动切到内置 VLC');
+        }
+      }
     }
     _playUrl = url;
   }
@@ -370,8 +422,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     if (_playUrl.isEmpty) {
       return const ColoredBox(color: Colors.black);
     }
-    if (_useVlc && _vlc != null) {
-      return EmbedVideoView(playback: _vlc!);
+    if (_useVlc) {
+      final vlc = _vlc ??= EngineVlcPlayback();
+      return EmbedVideoView(playback: vlc);
     }
     return Video(controller: _controller, controls: NoVideoControls);
   }
@@ -510,13 +563,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _pickPlayer() async {
-    final v = await pickChoice(context, title: '播放器', current: _playerVal, options: const [
-      ('内置 MPV', 'innie#mpv'),
+    final options = <(String, String)>[
+      if (!kotvIsWindows7()) ('内置 MPV', 'innie#mpv'),
       ('内置 VLC', 'innie#vlc'),
       ('外部 VLC', 'outie#vlc'),
-      ('外部 MPV', 'outie#mpv'),
+      if (!kotvIsWindows7()) ('外部 MPV', 'outie#mpv'),
       ('外部 IINA', 'outie#iina'),
-    ]);
+    ];
+    final v = await pickChoice(context, title: '播放器', current: _playerVal, options: options);
     if (v == null) return;
     final prev = _playerVal;
     setState(() => _playerVal = v);

@@ -10,6 +10,7 @@ import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
 import '../player/danmaku_layer.dart';
 import '../player/embed_video_view.dart';
+import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
@@ -54,12 +55,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   AspectSpec _aspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
   int _openingSec = 0;
   int _endingSec = 0;
-  String _playerVal = 'innie#mpv';
+  String _playerVal = kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv';
   bool _miniDesktop = false;
   static const _epSize = 20;
 
-  late final Player _mkPlayer = Player();
-  late MediaKitPlayback _mk = MediaKitPlayback(_mkPlayer);
+  Player? _mkPlayer;
+  MediaKitPlayback? _mk;
   EngineVlcPlayback? _vlc;
   StreamSubscription? _playingSub;
   StreamSubscription? _endedSub;
@@ -69,26 +70,34 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _endingSkipFired = false;
 
   /// 当前页内后端：默认 MPV；手动选 VLC 时共用同一套控件。
-  KotvPlayback get _playback => _useVlc ? (_vlc ??= EngineVlcPlayback()) : _mk;
+  KotvPlayback get _playback => _useVlc ? (_vlc ??= EngineVlcPlayback()) : _ensureMpv();
   bool get _useVlc => _playerVal.trim() == 'innie#vlc';
 
-  @override
-  void initState() {
-    super.initState();
-    _playingSub = _mkPlayer.stream.playing.listen((playing) {
+  MediaKitPlayback _ensureMpv() {
+    if (_mk != null) return _mk!;
+    final player = Player();
+    _mkPlayer = player;
+    _mk = MediaKitPlayback(player);
+    _playingSub ??= player.stream.playing.listen((playing) {
       if (!mounted || _playUrl.isEmpty || _useVlc) return;
       setState(() {
         if (playing) {
           _status = '内置 MPV 播放中';
-        } else if (_mkPlayer.state.completed) {
+        } else if (player.state.completed) {
           _status = '播放结束';
         } else {
           _status = '已暂停';
         }
       });
     });
-    _wireEnded(_mk);
-    _wirePosition(_mk);
+    _wireEnded(_mk!);
+    _wirePosition(_mk!);
+    return _mk!;
+  }
+
+  @override
+  void initState() {
+    super.initState();
     _load();
   }
 
@@ -158,8 +167,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _posSub?.cancel();
     _danmakuItems.dispose();
     _vlc?.dispose();
-    _mk.dispose();
-    _mkPlayer.dispose();
+    _mk?.dispose();
+    _mkPlayer?.dispose();
     super.dispose();
   }
 
@@ -184,16 +193,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
         _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
         _danmakuApi = '${settings['danmakuApi'] ?? ''}';
-        final speed = double.tryParse('${settings['playerSpeed'] ?? ''}');
-        if (speed != null && speed > 0) await _mk.setRate(speed);
-        final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
-        if (vol != null) await _mk.setVolume(vol.clamp(0, 100));
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
-        final playerVal = '${settings['player'] ?? 'innie#mpv'}'.trim();
-        _playerVal = playerVal.isEmpty ? 'innie#mpv' : playerVal;
-        if (_stableVolumeOn) {
-          await _applyStableVolume(_mk, true);
+        var playerVal = '${settings['player'] ?? 'innie#mpv'}'.trim();
+        if (playerVal.isEmpty) playerVal = 'innie#mpv';
+        if (kotvIsWindows7() && playerVal == 'innie#mpv') {
+          playerVal = 'innie#vlc';
+        }
+        _playerVal = playerVal;
+        // Win7 / 未开播前不创建 media_kit Player，避免进详情就卡死 UI。
+        if (!kotvIsWindows7() && !_useVlc) {
+          final mk = _ensureMpv();
+          final speed = double.tryParse('${settings['playerSpeed'] ?? ''}');
+          if (speed != null && speed > 0) await mk.setRate(speed);
+          final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
+          if (vol != null) await mk.setVolume(vol.clamp(0, 100));
+          if (_stableVolumeOn) {
+            await _applyStableVolume(mk, true);
+          }
         }
       } catch (_) {}
       setState(() {
@@ -308,7 +325,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       ));
       if (_useVlc) {
         try {
-          await _mk.stop();
+          await _mk?.stop();
         } catch (_) {}
         _vlc ??= EngineVlcPlayback();
         await _vlc!.setDecodeMode(_decodeMode);
@@ -323,8 +340,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         try {
           await _vlc?.stop();
         } catch (_) {}
-        await _mk.open(playUrl);
-        if (_stableVolumeOn) await _applyStableVolume(_mk, true);
+        final mk = _ensureMpv();
+        await mk.open(playUrl);
+        if (_stableVolumeOn) await _applyStableVolume(mk, true);
         if (!mounted) return;
         setState(() {
           _playUrl = playUrl;
@@ -525,7 +543,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           else if (_useVlc && _vlc != null)
             EmbedVideoView(playback: _vlc!)
           else
-            Video(controller: _mk.controller, controls: NoVideoControls),
+            Video(controller: _ensureMpv().controller, controls: NoVideoControls),
           if (_status.contains('解析') || _status.contains('嗅探'))
             const ColoredBox(
               color: Color(0x66000000),

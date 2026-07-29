@@ -89,8 +89,8 @@ dist/KOTV-macos-arm64/
 
 | 组件 | 用途 | 来源 |
 |------|------|------|
-| JRE 21 | JAR 爬虫 (spider-bridge) | BellSoft Liberica |
-| Python 3.14 | Python 爬虫 | PBS / Win7 embed (PythonVista) |
+| JRE 21 | JAR 爬虫（进程内 JNI / libjvm） | BellSoft Liberica |
+| Python 3.14 | Python 爬虫（进程内 CPython API） | PBS / Win7 embed (PythonVista) |
 | Chromium | 网页嗅探 / 解析 | **macOS / Linux x64**：CFT Stable 最新；**Win x64**：Win7 REWORK 最新；**Win ARM64**：最新 snapshot；Linux ARM64 回落系统 Chrome |
 | FFmpeg | 媒体处理 | osxexperts / Gyan / BtbN |
 | libvlc | **页内嵌入（VLC）** | VideoLAN 官方包提取 lib + plugins |
@@ -98,7 +98,7 @@ dist/KOTV-macos-arm64/
 
 运行时查找顺序：可执行文件旁 `runtime/` → 环境变量 `KOTV_RUNTIME` → 开发态仓库 `runtime/`。
 
-**Java / Python 仅使用捆绑路径**，不会读取 `JAVA_HOME` 或系统 PATH。JAR 爬虫通过捆绑 JRE 启动常驻 `spider-bridge --serve` 进程（JVM 只初始化一次，崩溃可自动拉起），不嵌入主进程。
+**Java / Python 仅使用捆绑路径**，不会读取 `JAVA_HOME` 或系统 PATH。桌面端通过 CGO 动态加载捆绑 `libjvm` / `libpython`，在 Go 进程内 `CreateJavaVM` / `Py_Initialize` 执行 JAR/Python 爬虫（不再 fork `java`/`python` 子进程）。Android 走 ART DexClassLoader + Chaquopy；iOS 不跑本地爬虫。
 
 **播放**：桌面页内 MPV 由 Flutter **media_kit 自带 libmpv**（不进 `runtime/`）。页内 VLC 使用 `runtime/libvlc`。也可选外部 VLC/MPV。
 

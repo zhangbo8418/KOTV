@@ -72,7 +72,7 @@ func defaultFile() file {
 			{ID: "vod", Label: "点播", Value: ""},
 			{ID: "live", Label: "直播", Value: ""},
 			{ID: "log", Label: "日志级别", Value: "info"},
-			{ID: "player", Label: "播放器", Value: "innie#vlc"},
+			{ID: "player", Label: "播放器", Value: "innie#mpv"},
 			{ID: "proxy", Label: "代理", Value: "false#"},
 			{ID: "theme", Label: "主题", Value: "system"},
 			{ID: "adFilter", Label: "M3U8广告过滤", Value: "true"},

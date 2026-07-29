@@ -314,8 +314,16 @@ void KotvVlcPlugin::StartPump() {
         const size_t bytes = (size_t)w * (size_t)h * 4;
         {
           std::lock_guard<std::mutex> lock(frame_mu_);
-          frame_rgba_.assign(tmp.begin(), tmp.begin() + (std::ptrdiff_t)bytes);
-          for (size_t i = 3; i < bytes; i += 4) frame_rgba_[i] = 255;
+          frame_rgba_.resize(bytes);
+          // libvlc RV32 = BGRA；Flutter PixelBufferTexture 要 RGBA。
+          const uint8_t* src = tmp.data();
+          uint8_t* dst = frame_rgba_.data();
+          for (size_t i = 0; i + 3 < bytes; i += 4) {
+            dst[i + 0] = src[i + 2];
+            dst[i + 1] = src[i + 1];
+            dst[i + 2] = src[i + 0];
+            dst[i + 3] = 255;
+          }
           frame_w_ = w;
           frame_h_ = h;
         }

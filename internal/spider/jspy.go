@@ -1,16 +1,15 @@
 package spider
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,7 +17,7 @@ import (
 
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
-	appruntime "github.com/bobo/KOTV/internal/runtime"
+	"github.com/bobo/KOTV/internal/spider/embedpy"
 	"github.com/bobo/KOTV/internal/util"
 
 	_ "embed"
@@ -44,12 +43,9 @@ var (
 type pySpider struct {
 	key, api, ext, jar string
 	scriptPath         string
+	embedSID           uintptr
 
 	mu     sync.Mutex
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	proc   atomic.Pointer[os.Process]
 	epoch  atomic.Uint64
 	nextID atomic.Uint64
 	inited bool
@@ -184,31 +180,36 @@ func (s *pySpider) run(method string, args map[string]interface{}) (string, erro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if runtime.GOOS == "android" {
+		return s.runAndroidLocked(method, args)
+	}
+	if !embedpy.Active {
+		return "", fmt.Errorf("嵌入 Python 不可用：请以 CGO_ENABLED=1 构建")
+	}
+	return s.runEmbedLocked(method, args)
+}
+
+func (s *pySpider) runEmbedLocked(method string, args map[string]interface{}) (string, error) {
 	script, err := s.ensureScript()
 	if err != nil {
 		return "", err
-	}
-	python := appruntime.Python()
-	if python == "" {
-		return "", fmt.Errorf("未找到捆绑 Python：请运行 ./scripts/prepare-runtime.sh 准备 runtime/python")
 	}
 	runner, err := pyRunnerPath()
 	if err != nil {
 		return "", err
 	}
-
 	startEpoch := s.epoch.Load()
-	if err := s.startLocked(python, runner, script); err != nil {
+	if err := s.startEmbedLocked(runner, script); err != nil {
 		return "", err
 	}
 	if !s.inited && method != "init" {
-		if _, err := s.callLocked(startEpoch, "init", map[string]interface{}{"extend": s.ext}); err != nil {
-			s.stopLocked()
+		if _, err := s.callEmbedLocked(startEpoch, "init", map[string]interface{}{"extend": s.ext}); err != nil {
+			s.stopEmbedLocked()
 			return "", err
 		}
 		s.inited = true
 	}
-	out, err := s.callLocked(startEpoch, method, args)
+	out, err := s.callEmbedLocked(startEpoch, method, args)
 	if err != nil {
 		return "", err
 	}
@@ -218,7 +219,19 @@ func (s *pySpider) run(method string, args map[string]interface{}) (string, erro
 	return out, nil
 }
 
-func (s *pySpider) callLocked(startEpoch uint64, method string, args map[string]interface{}) (string, error) {
+func (s *pySpider) startEmbedLocked(runner, script string) error {
+	if s.embedSID != 0 {
+		return nil
+	}
+	sid, err := embedpy.StartSession(runner, script, s.key, s.ext, s.api, paths.PyCache())
+	if err != nil {
+		return err
+	}
+	s.embedSID = sid
+	return nil
+}
+
+func (s *pySpider) callEmbedLocked(startEpoch uint64, method string, args map[string]interface{}) (string, error) {
 	reqID := s.nextID.Add(1)
 	payload := map[string]interface{}{
 		"id":     reqID,
@@ -229,173 +242,143 @@ func (s *pySpider) callLocked(startEpoch uint64, method string, args map[string]
 	if err != nil {
 		return "", err
 	}
-
-	type exchangeResult struct {
-		line string
-		err  error
+	line, err := embedpy.CallSession(s.embedSID, string(body))
+	if s.epoch.Load() != startEpoch {
+		s.stopEmbedLocked()
+		return "", ErrScriptInterrupted
 	}
-
-	exchange := make(chan exchangeResult, 1)
-	stdin, stdout := s.stdin, s.stdout
-	go func() {
-		if _, err := stdin.Write(append(body, '\n')); err != nil {
-			exchange <- exchangeResult{err: err}
-			return
-		}
-		for {
-			line, err := stdout.ReadString('\n')
-			if err != nil {
-				exchange <- exchangeResult{err: err}
-				return
-			}
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "{") {
-				if line != "" {
-					log.Printf("[py:%s] 忽略非 JSON 输出: %s", s.key, line)
-				}
-				continue
-			}
-			var probe struct {
-				ID *uint64 `json:"id"`
-			}
-			if json.Unmarshal([]byte(line), &probe) != nil || probe.ID == nil {
-				log.Printf("[py:%s] 忽略无 id 的 JSON 输出: %s", s.key, truncatePyLog(line))
-				continue
-			}
-			if *probe.ID != reqID {
-				log.Printf("[py:%s] 忽略不匹配 id=%d (want %d)", s.key, *probe.ID, reqID)
-				continue
-			}
-			exchange <- exchangeResult{line: line}
-			return
-		}
-	}()
-
-	select {
-	case result := <-exchange:
-		if s.epoch.Load() != startEpoch {
-			s.stopLocked()
-			return "", ErrScriptInterrupted
-		}
-		if result.err != nil {
-			s.stopLocked()
-			return "", fmt.Errorf("Python 进程异常: %w", result.err)
-		}
-		var response struct {
-			ID     uint64          `json:"id"`
-			OK     bool            `json:"ok"`
-			Result json.RawMessage `json:"result"`
-			Error  string          `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(result.line), &response); err != nil {
-			return "", fmt.Errorf("Python 响应无效: %w", err)
-		}
-		if !response.OK {
-			return "", fmt.Errorf("Python %s 失败: %s", method, response.Error)
-		}
-		var text string
-		if len(response.Result) == 0 || string(response.Result) == "null" {
-			return "{}", nil
-		}
-		if err := json.Unmarshal(response.Result, &text); err == nil {
-			return strings.TrimSpace(text), nil
-		}
-		return strings.TrimSpace(string(response.Result)), nil
-	case <-time.After(pyCallTimeout):
-		s.epoch.Add(1)
-		if p := s.proc.Load(); p != nil {
-			_ = p.Kill()
-		}
-		s.stopLocked()
-		return "", fmt.Errorf("Python %s 调用超过 %s", method, pyCallTimeout)
+	if err != nil {
+		s.stopEmbedLocked()
+		return "", err
 	}
+	var response struct {
+		ID     uint64          `json:"id"`
+		OK     bool            `json:"ok"`
+		Result json.RawMessage `json:"result"`
+		Error  string          `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(line), &response); err != nil {
+		return "", fmt.Errorf("Python 响应无效: %w", err)
+	}
+	if !response.OK {
+		return "", fmt.Errorf("Python %s 失败: %s", method, response.Error)
+	}
+	var text string
+	if len(response.Result) == 0 || string(response.Result) == "null" {
+		return "{}", nil
+	}
+	if err := json.Unmarshal(response.Result, &text); err == nil {
+		return strings.TrimSpace(text), nil
+	}
+	return strings.TrimSpace(string(response.Result)), nil
 }
 
-func pySitePackages(pythonExe string) []string {
-	dir := filepath.Dir(pythonExe)
-	cands := []string{
-		filepath.Join(dir, "Lib", "site-packages"),
-		filepath.Join(dir, "lib", "site-packages"),
+func (s *pySpider) stopEmbedLocked() {
+	if s.embedSID != 0 {
+		embedpy.StopSession(s.embedSID)
+		s.embedSID = 0
 	}
-	parent := filepath.Dir(dir)
-	cands = append(cands,
-		filepath.Join(parent, "Lib", "site-packages"),
-		filepath.Join(parent, "lib", "site-packages"),
-	)
-	var out []string
-	for _, c := range cands {
-		if st, err := os.Stat(c); err == nil && st.IsDir() {
-			out = append(out, c)
-		}
-	}
-	return out
+	s.inited = false
 }
 
-func (s *pySpider) startLocked(python, runner, script string) error {
-	if s.cmd != nil && s.cmd.Process != nil && s.cmd.ProcessState == nil {
-		return nil
-	}
-	s.stopLocked()
-	cmd := exec.Command(python, "-u", runner, script, s.key, s.ext, s.api, paths.PyCache())
-	// 缓存目录 + 捆绑 site-packages（Windows embed 常忽略仅含 cache 的 PYTHONPATH）
-	pyPathParts := append([]string{paths.PyCache()}, pySitePackages(python)...)
-	cmd.Env = append(os.Environ(),
-		"PYTHONUNBUFFERED=1",
-		"PYTHONUTF8=1",
-		"PYTHONIOENCODING=utf-8",
-		"PYTHONPATH="+strings.Join(pyPathParts, string(os.PathListSeparator)),
-		"KOTV_PY_CACHE="+paths.PyCache(),
-		fmt.Sprintf("KOTV_PROXY_PORT=%d", localproxy.Port()),
-	)
-	setHiddenConsoleAttrs(cmd)
-	stdin, err := cmd.StdinPipe()
+func (s *pySpider) runAndroidLocked(method string, args map[string]interface{}) (string, error) {
+	script, err := s.ensureScript()
 	if err != nil {
-		return err
+		return "", err
 	}
-	stdout, err := cmd.StdoutPipe()
+	runner, err := pyRunnerPath()
 	if err != nil {
-		_ = stdin.Close()
-		return err
+		return "", err
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
-		return err
-	}
-	s.cmd, s.stdin, s.stdout = cmd, stdin, bufio.NewReader(stdout)
-	s.proc.Store(cmd.Process)
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			log.Printf("[py:%s] %s", s.key, scanner.Text())
+
+	// Android：不启动独立 Python 进程；每次通过 HTTP 触发一次 runner exec。
+	// 对齐 Go 侧语义：init 只跑一次。
+	if !s.inited && method != "init" {
+		if _, err := s.androidCallPythonLocked("init", map[string]interface{}{"extend": s.ext}, script, runner); err != nil {
+			return "", err
 		}
-	}()
-	go func() { _ = cmd.Wait() }()
-	return nil
+		s.inited = true
+	}
+
+	out, err := s.androidCallPythonLocked(method, args, script, runner)
+	if err != nil {
+		return "", err
+	}
+	if method == "init" {
+		s.inited = true
+	}
+	return out, nil
+}
+
+func (s *pySpider) androidCallPythonLocked(method string, args map[string]interface{}, scriptPath, runnerPath string) (string, error) {
+	const base = "http://127.0.0.1:9979"
+	payload := map[string]interface{}{
+		"runnerPath": runnerPath,
+		"scriptPath": scriptPath,
+		"key":         s.key,
+		"ext":         s.ext,
+		"api":         s.api,
+		"cacheRoot":  paths.PyCache(),
+		"proxyPort":   localproxy.Port(),
+		"method":      method,
+		"args":        args,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodPost, base+"/py/call", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	client := &http.Client{Timeout: pyCallTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("android py call failed: http=%d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	// Android 服务成功响应：{"result":"..."}；失败响应：{"ok":false,"error":"..."}。
+	var wrap struct {
+		OK     *bool       `json:"ok"`
+		Error  string      `json:"error"`
+		Result interface{} `json:"result"`
+	}
+	if err := json.Unmarshal(b, &wrap); err != nil {
+		return "", fmt.Errorf("android py call invalid json: %w", err)
+	}
+	if wrap.OK != nil && !*wrap.OK {
+		return "", fmt.Errorf("android py call failed: %s", wrap.Error)
+	}
+	if wrap.Error != "" {
+		return "", fmt.Errorf("android py call failed: %s", wrap.Error)
+	}
+	if wrap.Result == nil {
+		return "{}", nil
+	}
+	// 返回值在 runner 中通常是 JSON 字符串或普通字符串；Go 侧后续会再做 json.Unmarshal。
+	switch v := wrap.Result.(type) {
+	case string:
+		return strings.TrimSpace(v), nil
+	default:
+		return strings.TrimSpace(fmt.Sprint(v)), nil
+	}
 }
 
 func (s *pySpider) stopLocked() {
-	if s.stdin != nil {
-		_ = s.stdin.Close()
-	}
-	if p := s.proc.Swap(nil); p != nil {
-		_ = p.Kill()
-	}
-	s.cmd, s.stdin, s.stdout = nil, nil, nil
-	s.inited = false
+	s.stopEmbedLocked()
 }
 
 func (s *pySpider) interrupt() {
 	s.epoch.Add(1)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if p := s.proc.Load(); p != nil {
-		_ = p.Kill()
-	}
 	s.stopLocked()
 }
 
@@ -412,12 +395,6 @@ func (s *pySpider) Init(ext string) error {
 	return err
 }
 
-func truncatePyLog(line string) string {
-	if len(line) > 160 {
-		return line[:160] + "..."
-	}
-	return line
-}
 func (s *pySpider) HomeContent(filter bool) (string, error) {
 	return s.run("homeContent", map[string]interface{}{"filter": filter})
 }
@@ -468,8 +445,8 @@ func (s *pySpider) IsVideoFormat(u string) (bool, error) {
 
 func (s *pySpider) Destroy() {
 	s.mu.Lock()
-	if s.cmd != nil && s.inited {
-		_, _ = s.callLocked(s.epoch.Load(), "destroy", map[string]interface{}{})
+	if s.embedSID != 0 && s.inited {
+		_, _ = s.callEmbedLocked(s.epoch.Load(), "destroy", map[string]interface{}{})
 	}
 	s.stopLocked()
 	s.mu.Unlock()

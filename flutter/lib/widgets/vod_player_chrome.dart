@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
@@ -749,18 +750,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       });
     }
 
-    // 默认 MPV；VLC 为硬渲兼容选项。
+    // 默认 MPV；VLC 为硬渲兼容选项。Win7 隐藏 media_kit/MPV，避免卡死。
     final opts = <(String label, String val, String key)>[
-      ('内置 MPV', 'innie#mpv', 'embed_mpv'),
+      if (!kotvIsWindows7()) ('内置 MPV', 'innie#mpv', 'embed_mpv'),
       ('内置 VLC', 'innie#vlc', 'embed_vlc'),
       ('外部 VLC', 'outie#vlc', 'vlc'),
-      ('外部 MPV', 'outie#mpv', 'mpv'),
+      if (!kotvIsWindows7()) ('外部 MPV', 'outie#mpv', 'mpv'),
       ('IINA', 'outie#iina', 'iina'),
     ];
 
     bool listed(String key) {
+      // Flutter 内置 MPV 走 media_kit 自带 libmpv，不依赖引擎 runtime/libmpv。
+      if (key == 'embed_mpv') return true;
       if (key == 'embed_vlc') return avail['embed_vlc'] == true || avail['vlc'] == true || avail.isEmpty;
-      if (key == 'embed_mpv') return avail['embed_mpv'] == true || avail.isEmpty;
       return avail[key] == true;
     }
 

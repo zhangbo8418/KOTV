@@ -456,7 +456,8 @@ func Available() map[string]bool {
 		"mpv":       findPlayer("mpv") != "",
 		"iina":      appExists("IINA"),
 		"embed_vlc": embed.Available(),
-		"embed_mpv": embed.MPVAvailable(),
+		// Flutter 页内 MPV 走 media_kit 自带 libmpv，不依赖 runtime/libmpv。
+		"embed_mpv": true,
 	}
 }
 

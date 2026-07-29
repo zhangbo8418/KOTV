@@ -166,6 +166,19 @@ func JVMLib() string {
 	)...)
 }
 
+// PythonLib 返回捆绑 CPython 动态库（进程内 Py_Initialize）。
+func PythonLib() string {
+	return firstExisting(underRoots(
+		filepath.Join("python", "python3.dll"),
+		filepath.Join("python", "python314.dll"),
+		filepath.Join("python", "lib", "libpython3.so"),
+		filepath.Join("python", "lib", "libpython3.14.so"),
+		filepath.Join("python", "lib", "libpython3.14.dylib"),
+		filepath.Join("python", "lib", "libpython3.14t.so"),
+		filepath.Join("python", "lib", "libpython3.14t.dylib"),
+	)...)
+}
+
 // Python 返回捆绑 Python（不回落系统 PATH）。
 func Python() string {
 	return firstExisting(underRoots(
@@ -345,6 +358,7 @@ func Status() map[string]string {
 		"java":     orMissing(Java()),
 		"jvm":      orMissing(JVMLib()),
 		"python":   orMissing(Python()),
+		"pythonlib": orMissing(PythonLib()),
 		"chromium": orMissing(Chromium()),
 		"ffmpeg":   orMissing(FFmpeg()),
 		"libvlc":   orMissing(LibVLC()),

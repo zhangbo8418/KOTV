@@ -15,6 +15,7 @@ class EngineLauncher {
   Process? _proc;
   Future<void>? _starting;
   bool _owned = false;
+  bool _androidSpiderServiceStarted = false;
   String baseUrl = 'http://127.0.0.1:9978';
   DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -117,6 +118,7 @@ class EngineLauncher {
     if (kIsWeb || Platform.isIOS) return;
     _lastStartAttempt = DateTime.now();
     try {
+      await _ensureAndroidSpiderService();
       // 已由本进程拉起且仍存活：直接复用
       if (_owned && _proc != null && await _ping('http://127.0.0.1:9978')) {
         baseUrl = 'http://127.0.0.1:9978';
@@ -151,6 +153,22 @@ class EngineLauncher {
     } catch (e, st) {
       debugPrint('engine start skipped: $e\n$st');
     }
+  }
+
+  Future<void> _ensureAndroidSpiderService() async {
+    if (!Platform.isAndroid) return;
+    if (_androidSpiderServiceStarted) return;
+    _androidSpiderServiceStarted = true;
+
+    const ch = MethodChannel('kotv_android_spider');
+    try {
+      await ch.invokeMethod<void>('start');
+    } catch (e) {
+      // ignore: 若 native 侧已在运行或 ROM 限制，后续由 go 引擎重试/失败兜底处理。
+      debugPrint('android spider service start failed: $e');
+    }
+    // 给 native 线程一点时间完成 DexClassLoader / Chaquopy init。
+    await Future<void>.delayed(const Duration(milliseconds: 450));
   }
 
   Future<void> _killStrayEngines() async {
