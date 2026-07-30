@@ -291,7 +291,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           }
           return key;
         }();
-        // 换源前关掉详情栈，避免后台详情还在播。
+        // 换源前先硬停详情播放，再清栈，避免后台继续出声。
+        await DetailScreen.prepareLeave();
         final nav = Navigator.of(context);
         if (nav.canPop()) {
           nav.popUntil((r) => r.isFirst);

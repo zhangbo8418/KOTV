@@ -32,11 +32,24 @@ class DetailScreen extends ConsumerStatefulWidget {
   final String site;
   final String title;
 
+  /// 换源等场景：在 pop 详情栈前先硬停播（await），避免后台继续出声。
+  static Future<void> prepareLeave() async {
+    final active = _DetailScreenState._active;
+    if (active == null) return;
+    await active._stopHard();
+    if (!active.mounted) return;
+    // 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
+    active._allowPop = true;
+    active.setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
   @override
   ConsumerState<DetailScreen> createState() => _DetailScreenState();
 }
 
 class _DetailScreenState extends ConsumerState<DetailScreen> {
+  static _DetailScreenState? _active;
   VodDetail? _detail;
   String? _error;
   bool _loading = true;
@@ -69,6 +82,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _autoNextArmed = true;
   bool _openingSeekDone = false;
   bool _endingSkipFired = false;
+  bool _stoppedHard = false;
+  /// 硬停完成后再允许真正出栈（配合 [PopScope]）。
+  bool _allowPop = false;
 
   /// 当前页内后端：默认 MPV；手动选 VLC 时共用同一套控件。
   KotvPlayback get _playback => _useVlc ? (_vlc ??= EngineVlcPlayback()) : _ensureMpv();
@@ -99,7 +115,52 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   @override
   void initState() {
     super.initState();
+    _active = this;
     _load();
+  }
+
+  /// pause → await stop，等原生停住（Win7 上 unawaited stop 不够）。不改音量，避免下一集没声。
+  Future<void> _stopHard() async {
+    _autoNextArmed = false;
+    _playingSub?.cancel();
+    _endedSub?.cancel();
+    _posSub?.cancel();
+    _playingSub = null;
+    _endedSub = null;
+    _posSub = null;
+    _playUrl = '';
+
+    Future<void> hardStop(KotvPlayback? p) async {
+      if (p == null) return;
+      try {
+        await p.pause();
+      } catch (_) {}
+      try {
+        await p.stop();
+      } catch (_) {}
+    }
+
+    await Future.wait<void>([
+      hardStop(_vlc),
+      hardStop(_mk),
+    ]);
+    _stoppedHard = true;
+  }
+
+  Future<void> _leavePage({VoidCallback? afterPop}) async {
+    if (_miniDesktop) {
+      try {
+        await _exitMini();
+      } catch (_) {}
+    }
+    await _stopHard();
+    if (!mounted) return;
+    _allowPop = true;
+    setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    afterPop?.call();
   }
 
   void _wireEnded(KotvPlayback p) {
@@ -160,6 +221,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   @override
   void dispose() {
+    if (_active == this) _active = null;
     // 离开详情：回传扫码取消并打断 JAR；不要再 nav.pop（本页正在出栈）。
     final api = ref.read(apiProvider);
     unawaited(PostMsgHost.instance?.cancelAll(reply: true, popDialog: false) ?? Future<void>.value());
@@ -171,9 +233,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _endedSub?.cancel();
     _posSub?.cancel();
     _danmakuItems.dispose();
-    // 先停播再释放，避免返回首页/换源后背景声继续。
-    unawaited(_vlc?.stop() ?? Future<void>.value());
-    unawaited(_mk?.stop() ?? Future<void>.value());
+    // 正常路径已在 [_stopHard] 里 await pause/stop；此处兜底再停一次再释放。
+    if (!_stoppedHard) {
+      unawaited(_vlc?.stop() ?? Future<void>.value());
+      unawaited(_mk?.stop() ?? Future<void>.value());
+    }
     _vlc?.dispose();
     _mk?.dispose();
     _mkPlayer?.dispose();
@@ -310,6 +374,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final eps = _eps;
     if (epIdx < 0 || epIdx >= eps.length) return;
     final ep = eps[epIdx];
+    _stoppedHard = false;
+    _autoNextArmed = true;
     setState(() {
       _epIdx = epIdx;
       _status = '解析中…';
@@ -578,80 +644,77 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       onMini: () => unawaited(_miniDesktop ? _exitMini() : _enterMini()),
       onExpand: () => unawaited(_enterFullscreen()),
       onStop: () async {
-        await _playback.stop();
+        await _stopHard();
         if (_miniDesktop) await _exitMini();
-        setState(() {
-          _playUrl = '';
-          _status = '已停止';
-        });
+        if (mounted) {
+          setState(() {
+            _status = '已停止';
+          });
+        }
       },
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_miniDesktop && _detail != null) {
-      // 主界面已收起：仅桌面悬浮播放层；控件半透明，鼠标移入显示
-      return Scaffold(
-        backgroundColor: Colors.transparent,
-        body: DragToMoveArea(
-          child: MiniHoverShell(
-            video: _videoStage(interactive: true),
-            chrome: VodInlineControls(
-              player: _playback,
-              miniActive: true,
-              translucent: true,
-              onCast: () => unawaited(_cast()),
-              onMini: () => unawaited(_exitMini()),
-              onExpand: () => unawaited(_enterFullscreen()),
-              onStop: () async {
-                await _playback.stop();
-                if (_miniDesktop) await _exitMini();
-                setState(() {
-                  _playUrl = '';
-                  _status = '已停止';
-                });
-              },
+    final body = (_miniDesktop && _detail != null)
+        // 主界面已收起：仅桌面悬浮播放层；控件半透明，鼠标移入显示
+        ? Scaffold(
+            backgroundColor: Colors.transparent,
+            body: DragToMoveArea(
+              child: MiniHoverShell(
+                video: _videoStage(interactive: true),
+                chrome: VodInlineControls(
+                  player: _playback,
+                  miniActive: true,
+                  translucent: true,
+                  onCast: () => unawaited(_cast()),
+                  onMini: () => unawaited(_exitMini()),
+                  onExpand: () => unawaited(_enterFullscreen()),
+                  onStop: () async {
+                    await _stopHard();
+                    if (_miniDesktop) await _exitMini();
+                    if (mounted) {
+                      setState(() {
+                        _status = '已停止';
+                      });
+                    }
+                  },
+                ),
+              ),
             ),
-          ),
-        ),
-      );
-    }
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: AppBackdrop(
-        child: Column(
-          children: [
-            LibraryTopBar(
-              onBack: () async {
-                if (_miniDesktop) await _exitMini();
-                if (mounted) Navigator.of(context).maybePop();
-              },
-              onSearch: () async {
-                if (_miniDesktop) await _exitMini();
-                if (!mounted) return;
-                Navigator.of(context).maybePop();
-                goKotvPage(ref, KotvPage.search);
-              },
-              onProfile: () async {
-                if (_miniDesktop) await _exitMini();
-                if (!mounted) return;
-                Navigator.of(context).maybePop();
-                goKotvPage(ref, KotvPage.profile);
-              },
-              onNews: () => showAppNews(context, remoteHint(ref)),
-              title: widget.title.isNotEmpty ? widget.title : '详情',
+          )
+        : Scaffold(
+            backgroundColor: Colors.transparent,
+            body: AppBackdrop(
+              child: Column(
+                children: [
+                  LibraryTopBar(
+                    onBack: () => unawaited(_leavePage()),
+                    onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
+                    onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
+                    onNews: () => showAppNews(context, remoteHint(ref)),
+                    title: widget.title.isNotEmpty ? widget.title : '详情',
+                  ),
+                  Expanded(
+                    child: _loading
+                        ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                        : _error != null
+                            ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white)))
+                            : _buildBody(),
+                  ),
+                ],
+              ),
             ),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: Colors.white))
-                  : _error != null
-                      ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white)))
-                      : _buildBody(),
-            ),
-          ],
-        ),
-      ),
+          );
+
+    return PopScope(
+      canPop: _allowPop,
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        unawaited(_leavePage());
+      },
+      child: body,
     );
   }
 
@@ -745,9 +808,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             }),
             _action('搜索', Icons.search_rounded, () {
               final q = _quickSearchQuery(d);
-              Navigator.pop(context);
-              ref.read(pendingSearchProvider.notifier).state = q;
-              goKotvPage(ref, KotvPage.search);
+              unawaited(_leavePage(afterPop: () {
+                ref.read(pendingSearchProvider.notifier).state = q;
+                goKotvPage(ref, KotvPage.search);
+              }));
             }),
             _action(_reversed ? '正序' : '倒叙', Icons.swap_vert_rounded, () => setState(() {
                   _reversed = !_reversed;

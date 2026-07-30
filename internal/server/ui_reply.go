@@ -7,14 +7,14 @@ import (
 	"sync"
 )
 
-// uiReplyStore 保存通用 UI 会话的单次回传；id 由调用方生成，宿主不解释其业务含义。
+// uiReplyStore 按会话 id 排队保存宿主回传；支持 shown / 业务事件 / closed 连续握手。
 type uiReplyStore struct {
 	mu sync.Mutex
-	m  map[string]string
+	m  map[string][]string
 }
 
 func newUIReplyStore() *uiReplyStore {
-	return &uiReplyStore{m: map[string]string{}}
+	return &uiReplyStore{m: map[string][]string{}}
 }
 
 func (s *uiReplyStore) put(id, value string) {
@@ -23,7 +23,7 @@ func (s *uiReplyStore) put(id, value string) {
 		return
 	}
 	s.mu.Lock()
-	s.m[id] = value
+	s.m[id] = append(s.m[id], value)
 	s.mu.Unlock()
 }
 
@@ -31,8 +31,16 @@ func (s *uiReplyStore) take(id string) string {
 	id = strings.TrimSpace(id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	v := s.m[id]
-	delete(s.m, id)
+	q := s.m[id]
+	if len(q) == 0 {
+		return ""
+	}
+	v := q[0]
+	if len(q) == 1 {
+		delete(s.m, id)
+	} else {
+		s.m[id] = q[1:]
+	}
 	return v
 }
 
