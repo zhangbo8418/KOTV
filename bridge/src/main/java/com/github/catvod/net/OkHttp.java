@@ -30,7 +30,8 @@ import okhttp3.logging.HttpLoggingInterceptor;
 
 public class OkHttp {
 
-    private static final long TIMEOUT = TimeUnit.SECONDS.toMillis(30);
+    private static final long TIMEOUT = TimeUnit.SECONDS.toMillis(20);
+    private static final long CALL_TIMEOUT = TimeUnit.SECONDS.toMillis(45);
 
     private ResponseInterceptor responseInterceptor;
     private RequestInterceptor requestInterceptor;
@@ -187,7 +188,7 @@ public class OkHttp {
     }
 
     private static OkHttpClient.Builder getBuilder() {
-        OkHttpClient.Builder builder = new OkHttpClient.Builder().addInterceptor(requestInterceptor()).addInterceptor(authInterceptor()).addNetworkInterceptor(responseInterceptor()).connectTimeout(TIMEOUT, TimeUnit.MILLISECONDS).readTimeout(TIMEOUT, TimeUnit.MILLISECONDS).writeTimeout(TIMEOUT, TimeUnit.MILLISECONDS).dns(dns()).hostnameVerifier((hostname, session) -> true).sslSocketFactory(getSSLContext().getSocketFactory(), trustAllCertificates());
+        OkHttpClient.Builder builder = new OkHttpClient.Builder().addInterceptor(requestInterceptor()).addInterceptor(authInterceptor()).addNetworkInterceptor(responseInterceptor()).connectTimeout(TIMEOUT, TimeUnit.MILLISECONDS).readTimeout(TIMEOUT, TimeUnit.MILLISECONDS).writeTimeout(TIMEOUT, TimeUnit.MILLISECONDS).callTimeout(CALL_TIMEOUT, TimeUnit.MILLISECONDS).dns(dns()).hostnameVerifier((hostname, session) -> true).sslSocketFactory(getSSLContext().getSocketFactory(), trustAllCertificates());
         HttpLoggingInterceptor logging = new HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY);
         builder.proxyAuthenticator(authenticator());
         //builder.addNetworkInterceptor(logging);

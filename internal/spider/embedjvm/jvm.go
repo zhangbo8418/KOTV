@@ -33,7 +33,6 @@ import (
 var ErrInterrupted = fmt.Errorf("JAR 调用已中断")
 
 const (
-	callTimeout  = 90 * time.Second  // 对齐 Windows kotv_jvm_post_job；JAR 冷启 parseJar+home 可能较慢
 	startTimeout = 120 * time.Second // 对齐 Windows CreateJavaVM 等待上限
 )
 
@@ -183,7 +182,7 @@ func EnsureStarted(bridgeJar string) error {
 	}
 }
 
-// Call 调用 SpiderBridge.call(JSON)。所有 JNI 走专用 OS 线程。
+// Call 调用 SpiderBridge.call(JSON)。所有 JNI 走专用 OS 线程；超时由 C 层 kotv_jvm_post_job 控制。
 func Call(payload []byte) (string, error) {
 	ensureWorker()
 	if !started.Load() {
@@ -191,13 +190,8 @@ func Call(payload []byte) (string, error) {
 	}
 	resp := make(chan callResp, 1)
 	reqCh <- callReq{payload: payload, resp: resp}
-	select {
-	case r := <-resp:
-		return r.out, r.err
-	case <-time.After(callTimeout):
-		Interrupt()
-		return "", fmt.Errorf("embed JVM 调用超时（%s）", callTimeout)
-	}
+	r := <-resp
+	return r.out, r.err
 }
 
 // Shutdown 仅进程退出时销毁 JVM（同进程内 Destroy 后再 Create 不可靠）。

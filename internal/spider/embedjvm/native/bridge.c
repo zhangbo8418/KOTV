@@ -160,6 +160,7 @@ static volatile jint g_boot_rc;
 
 static int kotv_jvm_call_with_env(JNIEnv *env, const char *json_in, char *json_out, int json_out_len, char *errbuf, int errbuf_len);
 static int kotv_jvm_cancel_all_with_env(JNIEnv *env, char *errbuf, int errbuf_len);
+static int kotv_jvm_cancel_async(char *errbuf, int errbuf_len);
 
 static DWORD WINAPI kotv_jvm_owner_thread(LPVOID arg) {
 	JavaVM *vm = NULL;
@@ -276,6 +277,8 @@ static int kotv_jvm_post_job(kotv_jvm_job_kind kind, const char *json_in, char *
 	if (WaitForSingleObject(done, timeout_ms) != WAIT_OBJECT_0) {
 		write_err(errbuf, errbuf_len, "jvm job timeout");
 		CloseHandle(done);
+		/* 尽力打断 Java 里卡住的 OkHttp，避免 owner 线程长时间占用队列 */
+		(void)kotv_jvm_cancel_async(NULL, 0);
 		return -8;
 	}
 
@@ -623,8 +626,8 @@ int kotv_jvm_call(const char *json_in, char *json_out, int json_out_len, char *e
 		return -1;
 	}
 #if defined(_WIN32)
-	/* 90s：JAR 冷启 parseJar + homeContent 可能较慢 */
-	return kotv_jvm_post_job(KOTV_JVM_JOB_CALL, json_in, json_out, json_out_len, errbuf, errbuf_len, 90000);
+	/* 120s：JAR detailContent 可能含多次网络请求；与 Flutter /api/v1 120s 对齐 */
+	return kotv_jvm_post_job(KOTV_JVM_JOB_CALL, json_in, json_out, json_out_len, errbuf, errbuf_len, 120000);
 #else
 	int attached = 0;
 	JNIEnv *env = jvm_env_for_call(&attached);

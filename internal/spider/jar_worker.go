@@ -93,6 +93,8 @@ func currentNetConfig() [][]byte {
 
 // callJavaBridge：桌面走进程内 JNI；Android 走 Native Service。
 func callJavaBridge(payload []byte) (string, error) {
+	label := bridgeCallLabel(payload)
+	start := time.Now()
 	if runtime.GOOS == "android" {
 		if err := primeAndroidNetConfigOnce(); err != nil {
 			return "", err
@@ -115,9 +117,22 @@ func callJavaBridge(payload []byte) (string, error) {
 		return "", ErrJavaBridgeInterrupted
 	}
 	if err != nil {
-		log.Printf("embed JVM 调用失败: %v", err)
+		log.Printf("embed JVM 调用失败 method=%s elapsed=%s: %v", label, time.Since(start).Round(time.Millisecond), err)
+	} else if d := time.Since(start); d > 10*time.Second {
+		log.Printf("embed JVM call %s took %s", label, d.Round(time.Millisecond))
 	}
 	return trimCString(out), err
+}
+
+func bridgeCallLabel(payload []byte) string {
+	var req bridgeRequest
+	if err := json.Unmarshal(payload, &req); err != nil || req.Method == "" {
+		return "unknown"
+	}
+	if req.Key != "" {
+		return req.Method + "/" + req.Key
+	}
+	return req.Method
 }
 
 // trimCString 去掉 C 缓冲区残留的 \0（TrimSpace 不会去掉）。
