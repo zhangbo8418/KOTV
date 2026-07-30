@@ -278,26 +278,34 @@ class EngineLauncher {
   }
 
   /// UI 进程异常退出时杀掉引擎，避免「窗口没了引擎还在」。
-  /// Windows 不用 PowerShell：Win7 上隐藏 powershell 看门狗常直接 WER 崩溃弹窗。
+  /// Windows：不用 powershell（Win7 WER）也不用可见 cmd 死循环（黑框 + 易误杀引擎）。
   Future<void> _armOrphanWatchdog(int enginePid, IOSink log) async {
     final uiPid = pid;
     if (Platform.isWindows) {
       try {
-        // cmd 轮询：UI PID 消失后 taskkill 引擎。
+        final support = await getApplicationSupportDirectory();
+        final vbsPath = p.join(support.path, 'kotv-orphan-$enginePid.vbs');
+        // wscript //B 无窗口；WMI 查 UI PID，消失后再隐藏 taskkill 引擎。
+        await File(vbsPath).writeAsString(
+          'On Error Resume Next\n'
+          'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'
+          'ui = $uiPid\n'
+          'eng = $enginePid\n'
+          'Do\n'
+          '  Set q = wmi.ExecQuery("Select ProcessId from Win32_Process Where ProcessId=" & ui)\n'
+          '  If q.Count = 0 Then\n'
+          '    CreateObject("WScript.Shell").Run "taskkill /F /PID " & eng, 0, True\n'
+          '    Exit Do\n'
+          '  End If\n'
+          '  WScript.Sleep 800\n'
+          'Loop\n',
+        );
         await Process.start(
-          'cmd.exe',
-          [
-            '/d',
-            '/c',
-            'for /l %i in (0,0,1) do @('
-                'tasklist /FI "PID eq $uiPid" 2>nul | find "$uiPid" >nul || ('
-                'taskkill /F /PID $enginePid >nul 2>&1 & exit /b 0'
-                ') & ping -n 2 127.0.0.1 >nul'
-                ')',
-          ],
+          'wscript.exe',
+          ['//B', '//Nologo', vbsPath],
           mode: ProcessStartMode.detached,
         );
-        log.writeln('orphan-watchdog armed (cmd) ui=$uiPid engine=$enginePid');
+        log.writeln('orphan-watchdog armed (wscript) ui=$uiPid engine=$enginePid');
       } catch (e) {
         log.writeln('orphan-watchdog failed: $e');
       }
