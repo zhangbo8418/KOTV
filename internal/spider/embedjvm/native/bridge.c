@@ -107,11 +107,10 @@ static void write_err(char *errbuf, int errbuf_len, const char *msg) {
 }
 
 #if defined(_WIN32)
-/* Go 传入 UTF-8。HotSpot 对 -D 路径既怕编码又怕空格；优先转 8.3 短路径再 ACP。 */
-static int utf8_to_jvm_path(const char *utf8, char *out, int out_len) {
-	int wlen, alen, short_len;
-	wchar_t *w = NULL;
-	wchar_t *wshort = NULL;
+/* Go 传入 UTF-8；HotSpot -D 选项在中文 Win 上按 ACP(GBK) 解析路径。 */
+static int utf8_to_acp(const char *utf8, char *out, int out_len) {
+	int wlen, alen;
+	wchar_t *w;
 	if (!utf8 || !out || out_len <= 0)
 		return -1;
 	wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
@@ -121,39 +120,67 @@ static int utf8_to_jvm_path(const char *utf8, char *out, int out_len) {
 	if (!w)
 		return -1;
 	MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, wlen);
-
-	short_len = (int)GetShortPathNameW(w, NULL, 0);
-	if (short_len > 0) {
-		wshort = (wchar_t *)malloc((size_t)short_len * sizeof(wchar_t));
-		if (wshort && GetShortPathNameW(w, wshort, (DWORD)short_len) > 0) {
-			free(w);
-			w = wshort;
-			wshort = NULL;
-		} else {
-			free(wshort);
-			wshort = NULL;
-		}
-	}
-
 	alen = WideCharToMultiByte(CP_ACP, 0, w, -1, out, out_len, NULL, NULL);
 	free(w);
 	return alen > 0 ? 0 : -1;
 }
 
-static void set_env_utf8_w(const wchar_t *key, const char *utf8) {
-	int wlen;
-	wchar_t *w;
-	if (!utf8 || !utf8[0])
-		return;
-	wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
-	if (wlen <= 0)
-		return;
-	w = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
-	if (!w)
-		return;
-	MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, wlen);
-	SetEnvironmentVariableW(key, w);
-	free(w);
+/*
+ * Windows：在纯 Win32 线程上调用 CreateJavaVM。
+ * HotSpot 初始化时会故意触发 ACCESS_VIOLATION 并用 SEH 接住；若在 Go 线程上调用，
+ * Go 运行时的 VEH 会抢先当成致命错误（golang/go#58542），表现为进程闪退或卡死。
+ * java.exe 子进程不受影响，因为 JVM 不在 Go 进程里。
+ */
+typedef struct {
+	JNI_CreateJavaVM_t create;
+	JavaVMInitArgs *args;
+	JavaVM **vm;
+	JNIEnv **env;
+	jint rc;
+	HANDLE done;
+} kotv_jvm_boot_ctx;
+
+static DWORD WINAPI kotv_jvm_boot_thread(LPVOID arg) {
+	kotv_jvm_boot_ctx *ctx = (kotv_jvm_boot_ctx *)arg;
+	ctx->rc = ctx->create(ctx->vm, ctx->env, ctx->args);
+	SetEvent(ctx->done);
+	return 0;
+}
+
+static jint kotv_create_java_vm(JNI_CreateJavaVM_t create, JavaVM **vm, JNIEnv **env, JavaVMInitArgs *args) {
+	kotv_jvm_boot_ctx ctx;
+	DWORD tid;
+	HANDLE th;
+
+	ctx.create = create;
+	ctx.args = args;
+	ctx.vm = vm;
+	ctx.env = env;
+	ctx.rc = JNI_ERR;
+	ctx.done = CreateEventW(NULL, TRUE, FALSE, NULL);
+	if (!ctx.done)
+		return JNI_ERR;
+
+	th = CreateThread(NULL, 0, kotv_jvm_boot_thread, &ctx, 0, &tid);
+	if (!th) {
+		CloseHandle(ctx.done);
+		return JNI_ERR;
+	}
+
+	/* 120s：Win7 冷启可能较慢，但不应无限挂死 */
+	if (WaitForSingleObject(ctx.done, 120000) != WAIT_OBJECT_0) {
+		TerminateThread(th, 1);
+		CloseHandle(th);
+		CloseHandle(ctx.done);
+		return JNI_ERR;
+	}
+	CloseHandle(th);
+	CloseHandle(ctx.done);
+	return ctx.rc;
+}
+#else
+static jint kotv_create_java_vm(JNI_CreateJavaVM_t create, JavaVM **vm, JNIEnv **env, JavaVMInitArgs *args) {
+	return create(vm, env, args);
 }
 #endif
 
@@ -226,21 +253,20 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 			*cut = 0;
 		}
 #if defined(_WIN32)
-		if (home[0] && utf8_to_jvm_path(home, home_acp, (int)sizeof(home_acp)) == 0)
+		if (home[0] && utf8_to_acp(home, home_acp, (int)sizeof(home_acp)) == 0)
 			snprintf(java_home_opt, sizeof(java_home_opt), "-Djava.home=%s", home_acp);
 		else if (home[0])
 			snprintf(java_home_opt, sizeof(java_home_opt), "-Djava.home=%s", home);
 		else
 			java_home_opt[0] = 0;
-		if (utf8_to_jvm_path(bridge_jar, jar_acp, (int)sizeof(jar_acp)) != 0)
+		if (utf8_to_acp(bridge_jar, jar_acp, (int)sizeof(jar_acp)) != 0)
 			snprintf(jar_acp, sizeof(jar_acp), "%s", bridge_jar);
-		if (!(cache_dir && cache_dir[0] && utf8_to_jvm_path(cache_dir, cache_acp, (int)sizeof(cache_acp)) == 0))
+		if (cache_dir && cache_dir[0] && utf8_to_acp(cache_dir, cache_acp, (int)sizeof(cache_acp)) == 0)
+			;
+		else
 			snprintf(cache_acp, sizeof(cache_acp), "%s", cache_dir ? cache_dir : ".");
 		snprintf(cp, sizeof(cp), "-Djava.class.path=%s", jar_acp);
 		snprintf(cache, sizeof(cache), "-Dkotv.cache.dir=%s", cache_acp);
-		/* HotSpot 还会读环境变量；宽字符设置，避免中文用户目录乱码。 */
-		if (home[0])
-			set_env_utf8_w(L"JAVA_HOME", home);
 #else
 		if (home[0])
 			snprintf(java_home_opt, sizeof(java_home_opt), "-Djava.home=%s", home);
@@ -252,7 +278,7 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 	}
 	snprintf(proxy, sizeof(proxy), "-Dkotv.proxy.port=%d", proxy_port);
 
-	JavaVMOption opts[16];
+	JavaVMOption opts[20];
 	int n = 0;
 	opts[n++].optionString = strdup("-Djava.awt.headless=true");
 	if (java_home_opt[0])
@@ -261,14 +287,15 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 	opts[n++].optionString = strdup(cache);
 	opts[n++].optionString = strdup(proxy);
 	opts[n++].optionString = strdup("-Djava.net.useSystemProxies=false");
+	opts[n++].optionString = strdup("-DsocksProxyHost=");
+	opts[n++].optionString = strdup("-DsocksProxyPort=");
+	opts[n++].optionString = strdup("-Dhttp.proxyHost=");
+	opts[n++].optionString = strdup("-Dhttp.proxyPort=");
+	opts[n++].optionString = strdup("-Dhttps.proxyHost=");
+	opts[n++].optionString = strdup("-Dhttps.proxyPort=");
 	opts[n++].optionString = strdup("-Dfile.encoding=UTF-8");
 	opts[n++].optionString = strdup("--add-opens=java.base/java.lang=ALL-UNNAMED");
 	opts[n++].optionString = strdup("--add-opens=java.base/java.util=ALL-UNNAMED");
-#if defined(_WIN32)
-	/* 避免 Fatal Error 弹窗把整个引擎进程带走且无 Go 日志。 */
-	opts[n++].optionString = strdup("-XX:+SuppressFatalErrorMessage");
-	opts[n++].optionString = strdup("-XX:ErrorFile=NUL");
-#endif
 
 	JavaVMInitArgs args;
 	memset(&args, 0, sizeof(args));
@@ -279,7 +306,7 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 
 	JavaVM *vm = NULL;
 	JNIEnv *env = NULL;
-	jint rc = create(&vm, &env, &args);
+	jint rc = kotv_create_java_vm(create, &vm, &env, &args);
 	for (int i = 0; i < n; i++)
 		free(opts[i].optionString);
 
