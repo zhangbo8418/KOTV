@@ -278,37 +278,12 @@ class EngineLauncher {
   }
 
   /// UI 进程异常退出时杀掉引擎，避免「窗口没了引擎还在」。
-  /// Windows：不用 powershell（Win7 WER）也不用可见 cmd 死循环（黑框 + 易误杀引擎）。
+  /// Windows：暂时禁用后台看门狗。powershell/cmd 在 Win7 上会 WER/黑框/误杀；
+  /// 残留引擎由下次启动的 `_killStrayEngines` 清理。
   Future<void> _armOrphanWatchdog(int enginePid, IOSink log) async {
     final uiPid = pid;
     if (Platform.isWindows) {
-      try {
-        final support = await getApplicationSupportDirectory();
-        final vbsPath = p.join(support.path, 'kotv-orphan-$enginePid.vbs');
-        // wscript //B 无窗口；WMI 查 UI PID，消失后再隐藏 taskkill 引擎。
-        await File(vbsPath).writeAsString(
-          'On Error Resume Next\n'
-          'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'
-          'ui = $uiPid\n'
-          'eng = $enginePid\n'
-          'Do\n'
-          '  Set q = wmi.ExecQuery("Select ProcessId from Win32_Process Where ProcessId=" & ui)\n'
-          '  If q.Count = 0 Then\n'
-          '    CreateObject("WScript.Shell").Run "taskkill /F /PID " & eng, 0, True\n'
-          '    Exit Do\n'
-          '  End If\n'
-          '  WScript.Sleep 800\n'
-          'Loop\n',
-        );
-        await Process.start(
-          'wscript.exe',
-          ['//B', '//Nologo', vbsPath],
-          mode: ProcessStartMode.detached,
-        );
-        log.writeln('orphan-watchdog armed (wscript) ui=$uiPid engine=$enginePid');
-      } catch (e) {
-        log.writeln('orphan-watchdog failed: $e');
-      }
+      log.writeln('orphan-watchdog skipped on Windows ui=$uiPid engine=$enginePid');
       return;
     }
     // macOS / Linux：后台轮询父进程；UI 没了就杀引擎。
@@ -338,6 +313,17 @@ class EngineLauncher {
     _owned = false;
 
     if (proc != null && owned) {
+      if (Platform.isWindows) {
+        // Win7 上 Process.kill/SIGTERM 不可靠，且易和插件析构打架；直接 taskkill。
+        try {
+          await Process.run('taskkill', ['/F', '/PID', '${proc.pid}']);
+        } catch (_) {
+          try {
+            proc.kill();
+          } catch (_) {}
+        }
+        return;
+      }
       try {
         proc.kill(ProcessSignal.sigterm);
       } catch (_) {}
