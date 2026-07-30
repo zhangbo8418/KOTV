@@ -142,9 +142,15 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 		sk = detail.Site.Key
 	}
 	return map[string]any{
-		"ok":   true,
-		"vod":  vodDetailDTO(detail, sk),
+		"ok":  true,
+		"vod": vodDetailDTO(detail, sk),
 	}, nil
+}
+
+// APICancelPending 离开详情/取消扫码时打断卡住的 JAR/脚本调用。
+func (a *App) APICancelPending() map[string]any {
+	a.Sites.CancelPendingContent()
+	return map[string]any{"ok": true}
 }
 
 func (a *App) APISearch(keyword string, siteKeys []string) (map[string]any, error) {

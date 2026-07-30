@@ -17,9 +17,9 @@ perl -i -pe 's/flutter_lints:\s*\^4\.0\.0/flutter_lints: ^3.0.0/' "$APP"
 # 钉死对 Dart 3.4+ 的直接依赖
 perl -i -pe 's/path_provider:\s*\^2\.1\.5/path_provider: 2.1.4/' "$APP"
 perl -i -pe 's/shared_preferences:\s*\^2\.3\.3/shared_preferences: 2.3.0/' "$APP"
-# media_kit >=1.2 依赖 web ^1.0（Dart >=3.4）；Win7 线钉在 1.1.x / 1.3.x
+# media_kit_video >=1.3 依赖 web ^1.0（Dart >=3.4）；Win7 线钉在 1.1.11 + 1.2.5
 perl -i -pe 's/media_kit:\s*\^[^\n]+/media_kit: 1.1.11/' "$APP"
-perl -i -pe 's/media_kit_video:\s*\^[^\n]+/media_kit_video: 1.3.1/' "$APP"
+perl -i -pe 's/media_kit_video:\s*\^[^\n]+/media_kit_video: 1.2.5/' "$APP"
 perl -i -pe 's/media_kit_libs_video:\s*\^[^\n]+/media_kit_libs_video: 1.0.7/' "$APP"
 
 # kotv_vlc：允许 3.19
@@ -43,7 +43,7 @@ dependency_overrides:
   shared_preferences_linux: 2.4.1
   shared_preferences_windows: 2.4.1
   media_kit: 1.1.11
-  media_kit_video: 1.3.1
+  media_kit_video: 1.2.5
   media_kit_libs_video: 1.0.7
 EOF
 fi

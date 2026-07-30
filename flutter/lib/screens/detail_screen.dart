@@ -13,6 +13,7 @@ import '../player/embed_video_view.dart';
 import '../player/kotv_playback.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
+import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_theme.dart';
@@ -150,6 +151,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   @override
   void dispose() {
+    // 离开详情：关掉网盘扫码窗并打断卡住的 JAR 调用，避免 JVM 单线程一直占着。
+    final api = ref.read(apiProvider);
+    unawaited(PostMsgHost.instance?.cancelAll(reply: true) ?? Future<void>.value());
+    unawaited(api.cancelPending());
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
     }
