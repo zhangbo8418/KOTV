@@ -11,9 +11,11 @@ dependencies:
     sdk: flutter
   flutter_riverpod: ^2.6.1
   http: ^1.2.2
-  media_kit: ^1.1.11
-  media_kit_video: ^1.2.5
-  media_kit_libs_video: ^1.0.5
+  # 主线不钉死小版本：随当前 Flutter/Dart 解析最新兼容版。
+  # Win7 线由 scripts/adapt-flutter-win7-sdk.sh 临时钉到 1.1.11 / 1.2.5。
+  media_kit: ">=1.1.11 <2.0.0"
+  media_kit_video: ">=1.2.5 <3.0.0"
+  media_kit_libs_video: ">=1.0.7 <2.0.0"
   path_provider: ^2.1.5
   path: ^1.9.0
   shared_preferences: ^2.3.3
