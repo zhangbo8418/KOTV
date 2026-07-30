@@ -94,6 +94,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _hideTimer?.cancel();
     _catchupHideTimer?.cancel();
     _focus.dispose();
+    unawaited(_vlc?.stop() ?? Future<void>.value());
+    unawaited(_mk?.stop() ?? Future<void>.value());
     _vlc?.dispose();
     _mk?.dispose();
     _mkPlayer?.dispose();
@@ -112,11 +114,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
         final decode = '${settings['playerDecode'] ?? 'auto'}'.trim();
         if (decode.isNotEmpty) _decodeMode = decode;
-        var playerVal = '${settings['player'] ?? 'innie#mpv'}'.trim();
-        if (playerVal.isEmpty) playerVal = 'innie#mpv';
-        // Win7：media_kit/MPV 易卡死整 UI，仅强制换内置 VLC；解码方式仍跟设置/用户选择。
-        if (kotvIsWindows7() && playerVal == 'innie#mpv') {
-          playerVal = 'innie#vlc';
+        var playerVal = '${settings['player'] ?? (kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv')}'.trim();
+        if (playerVal.isEmpty) {
+          playerVal = kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv';
         }
         _playerVal = playerVal;
         // Win7：进页不碰 native 播放器；等用户点台再 open。
@@ -564,10 +564,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   Future<void> _pickPlayer() async {
     final options = <(String, String)>[
-      if (!kotvIsWindows7()) ('内置 MPV', 'innie#mpv'),
+      ('内置 MPV', 'innie#mpv'),
       ('内置 VLC', 'innie#vlc'),
       ('外部 VLC', 'outie#vlc'),
-      if (!kotvIsWindows7()) ('外部 MPV', 'outie#mpv'),
+      ('外部 MPV', 'outie#mpv'),
       ('外部 IINA', 'outie#iina'),
     ];
     final v = await pickChoice(context, title: '播放器', current: _playerVal, options: options);

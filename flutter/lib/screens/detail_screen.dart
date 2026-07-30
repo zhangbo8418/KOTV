@@ -160,9 +160,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   @override
   void dispose() {
-    // 离开详情：关掉网盘扫码窗并打断卡住的 JAR 调用，避免 JVM 单线程一直占着。
+    // 离开详情：回传扫码取消并打断 JAR；不要再 nav.pop（本页正在出栈）。
     final api = ref.read(apiProvider);
-    unawaited(PostMsgHost.instance?.cancelAll(reply: true) ?? Future<void>.value());
+    unawaited(PostMsgHost.instance?.cancelAll(reply: true, popDialog: false) ?? Future<void>.value());
     unawaited(api.cancelPending());
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
@@ -171,6 +171,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _endedSub?.cancel();
     _posSub?.cancel();
     _danmakuItems.dispose();
+    // 先停播再释放，避免返回首页/换源后背景声继续。
+    unawaited(_vlc?.stop() ?? Future<void>.value());
+    unawaited(_mk?.stop() ?? Future<void>.value());
     _vlc?.dispose();
     _mk?.dispose();
     _mkPlayer?.dispose();
@@ -200,14 +203,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _danmakuApi = '${settings['danmakuApi'] ?? ''}';
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
-        var playerVal = '${settings['player'] ?? 'innie#mpv'}'.trim();
-        if (playerVal.isEmpty) playerVal = 'innie#mpv';
-        if (kotvIsWindows7() && playerVal == 'innie#mpv') {
-          playerVal = 'innie#vlc';
+        var playerVal = '${settings['player'] ?? (kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv')}'.trim();
+        if (playerVal.isEmpty) {
+          playerVal = kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv';
         }
         _playerVal = playerVal;
-        // Win7 / 未开播前不创建 media_kit Player，避免进详情就卡死 UI。
-        if (!kotvIsWindows7() && !_useVlc) {
+        // 未开播前不创建 media_kit Player（Win7 上进详情即创建易卡 UI）；真正点播时再 _ensureMpv。
+        if (!_useVlc && !kotvIsWindows7()) {
           final mk = _ensureMpv();
           final speed = double.tryParse('${settings['playerSpeed'] ?? ''}');
           if (speed != null && speed > 0) await mk.setRate(speed);

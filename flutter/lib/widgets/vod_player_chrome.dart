@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
@@ -750,12 +749,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       });
     }
 
-    // 默认 MPV；VLC 为硬渲兼容选项。Win7 隐藏 media_kit/MPV，避免卡死。
+    // 内置 MPV / VLC 均可选；Win7 默认仍是 VLC，但不强制隐藏 MPV。
     final opts = <(String label, String val, String key)>[
-      if (!kotvIsWindows7()) ('内置 MPV', 'innie#mpv', 'embed_mpv'),
+      ('内置 MPV', 'innie#mpv', 'embed_mpv'),
       ('内置 VLC', 'innie#vlc', 'embed_vlc'),
       ('外部 VLC', 'outie#vlc', 'vlc'),
-      if (!kotvIsWindows7()) ('外部 MPV', 'outie#mpv', 'mpv'),
+      ('外部 MPV', 'outie#mpv', 'mpv'),
       ('IINA', 'outie#iina', 'iina'),
     ];
 
