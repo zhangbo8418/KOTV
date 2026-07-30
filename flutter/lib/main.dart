@@ -127,9 +127,20 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
   @override
   void onWindowClose() async {
     try {
-      await ref.read(engineLauncherProvider).shutdown();
+      await ref
+          .read(engineLauncherProvider)
+          .shutdown()
+          .timeout(const Duration(seconds: 2));
     } catch (_) {}
-    await windowManager.destroy();
+    try {
+      await windowManager.setPreventClose(false);
+    } catch (_) {}
+    try {
+      await windowManager.destroy();
+    } catch (_) {
+      // Win7 上 window_manager.destroy 偶发原生崩溃，直接退出进程。
+      exit(0);
+    }
   }
 
   @override
