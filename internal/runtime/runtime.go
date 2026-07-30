@@ -167,15 +167,19 @@ func JVMLib() string {
 }
 
 // PythonLib 返回捆绑 CPython 动态库（进程内 Py_Initialize）。
+// Windows 必须优先版本化 DLL（python314.dll 等）：python3.dll 是 Stable ABI，
+// 不含 PyGILState_* / PyEval_SaveThread，LoadLibrary 成功但会报 missing GIL APIs。
 func PythonLib() string {
 	return firstExisting(underRoots(
-		filepath.Join("python", "python3.dll"),
 		filepath.Join("python", "python314.dll"),
-		filepath.Join("python", "lib", "libpython3.so"),
+		filepath.Join("python", "python313.dll"),
+		filepath.Join("python", "python312.dll"),
+		filepath.Join("python", "python3.dll"),
 		filepath.Join("python", "lib", "libpython3.14.so"),
 		filepath.Join("python", "lib", "libpython3.14.dylib"),
 		filepath.Join("python", "lib", "libpython3.14t.so"),
 		filepath.Join("python", "lib", "libpython3.14t.dylib"),
+		filepath.Join("python", "lib", "libpython3.so"),
 	)...)
 }
 

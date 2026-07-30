@@ -108,10 +108,15 @@ static int load_symbols(char *errbuf, int errbuf_len) {
 	p_PyModule_GetDict = (PyModule_GetDict_t)kotv_dlsym(g_py_lib, "PyModule_GetDict");
 	p_PyErr_Print = (PyErr_Print_t)kotv_dlsym(g_py_lib, "PyErr_Print");
 	p_PyErr_Clear = (PyErr_Clear_t)kotv_dlsym(g_py_lib, "PyErr_Clear");
+	/* Stable ABI 的 python3.dll 常缺 GIL；须加载 python3xx.dll */
+	if (!p_PyGILState_Ensure || !p_PyGILState_Release || !p_PyEval_SaveThread) {
+		write_err(errbuf, errbuf_len,
+		          "missing GIL symbols (use python3xx.dll, not Stable ABI python3.dll)");
+		return -1;
+	}
 	if (!p_Py_Initialize || !p_PyRun_String || !p_PyUnicode_FromString || !p_PyObject_CallFunctionObjArgs ||
-	    !p_PyImport_AddModule || !p_PyModule_GetDict || !p_PyGILState_Ensure || !p_PyGILState_Release ||
-	    !p_PyEval_SaveThread) {
-		write_err(errbuf, errbuf_len, "missing python symbols (need GIL APIs)");
+	    !p_PyImport_AddModule || !p_PyModule_GetDict) {
+		write_err(errbuf, errbuf_len, "missing python symbols");
 		return -1;
 	}
 	return 0;
@@ -131,20 +136,15 @@ int kotv_embedpy_init(const char *py_lib, const char *py_home, char *errbuf, int
 	}
 	if (load_symbols(errbuf, errbuf_len) != 0)
 		return -3;
-	p_Py_Initialize();
+	/* PYTHONHOME 必须在 Initialize 之前；事后改 sys.prefix 救不了 encodings。 */
 	if (py_home && py_home[0]) {
-		char cmd[2048];
-		snprintf(cmd, sizeof(cmd),
-		         "import os, sys\n"
-		         "os.environ['PYTHONHOME'] = '%s'\n"
-		         "sys.prefix = '%s'\n"
-		         "sys.exec_prefix = '%s'\n",
-		         py_home, py_home, py_home);
-		void *mainmod = p_PyImport_AddModule("__main__");
-		void *globals = mainmod ? p_PyModule_GetDict(mainmod) : NULL;
-		if (globals)
-			p_PyRun_String(cmd, PY_FILE_INPUT, globals, globals);
+#if defined(_WIN32)
+		SetEnvironmentVariableA("PYTHONHOME", py_home);
+#else
+		setenv("PYTHONHOME", py_home, 1);
+#endif
 	}
+	p_Py_Initialize();
 	/* 关键键：Py_Initialize 后必须释放 GIL，否则其它 OS 线程 PyGILState_Ensure 会死锁（UI 表现为超时）。 */
 	g_save_tstate = p_PyEval_SaveThread();
 	g_py_inited = 1;
