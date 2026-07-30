@@ -444,9 +444,6 @@ func (s *pySpider) IsVideoFormat(u string) (bool, error) {
 
 func (s *pySpider) Destroy() {
 	s.mu.Lock()
-	if s.embedSID != 0 && s.inited {
-		_, _ = s.callEmbedLocked(s.epoch.Load(), "destroy", map[string]interface{}{})
-	}
 	s.stopLocked()
 	s.mu.Unlock()
 	s.interrupt()

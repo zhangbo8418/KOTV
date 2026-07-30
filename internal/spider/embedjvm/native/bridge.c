@@ -126,60 +126,189 @@ static int utf8_to_acp(const char *utf8, char *out, int out_len) {
 }
 
 /*
- * Windows：在纯 Win32 线程上调用 CreateJavaVM。
- * HotSpot 初始化时会故意触发 ACCESS_VIOLATION 并用 SEH 接住；若在 Go 线程上调用，
- * Go 运行时的 VEH 会抢先当成致命错误（golang/go#58542），表现为进程闪退或卡死。
- * java.exe 子进程不受影响，因为 JVM 不在 Go 进程里。
+ * Windows：专用 JVM 原生线程（CreateJavaVM + 全部 JNI 调用）。
+ * HotSpot 在初始化与类加载时会用 SEH 探测异常；若在 Go 线程上 Attach 后调 JNI，
+ * Go VEH 仍会干扰（golang/go#58542），表现为闪退或长时间无响应。
  */
-typedef struct {
-	JNI_CreateJavaVM_t create;
-	JavaVMInitArgs *args;
-	JavaVM **vm;
-	JNIEnv **env;
-	jint rc;
-	HANDLE done;
-} kotv_jvm_boot_ctx;
+typedef enum {
+	KOTV_JVM_JOB_NONE = 0,
+	KOTV_JVM_JOB_CALL,
+	KOTV_JVM_JOB_CANCEL,
+	KOTV_JVM_JOB_SHUTDOWN,
+} kotv_jvm_job_kind;
 
-static DWORD WINAPI kotv_jvm_boot_thread(LPVOID arg) {
-	kotv_jvm_boot_ctx *ctx = (kotv_jvm_boot_ctx *)arg;
-	ctx->rc = ctx->create(ctx->vm, ctx->env, ctx->args);
-	SetEvent(ctx->done);
+typedef struct {
+	kotv_jvm_job_kind kind;
+	const char *json_in;
+	char *json_out;
+	int json_out_len;
+	char *errbuf;
+	int errbuf_len;
+	int rc;
+	HANDLE done;
+} kotv_jvm_job;
+
+static HANDLE g_jvm_owner;
+static HANDLE g_jvm_job_posted;
+static HANDLE g_jvm_job_done;
+static CRITICAL_SECTION g_jvm_job_lock;
+static kotv_jvm_job g_jvm_job;
+static JavaVMInitArgs *g_boot_args;
+static JNI_CreateJavaVM_t g_boot_create;
+static HANDLE g_boot_done;
+static volatile jint g_boot_rc;
+
+static int kotv_jvm_call_with_env(JNIEnv *env, const char *json_in, char *json_out, int json_out_len, char *errbuf, int errbuf_len);
+static int kotv_jvm_cancel_all_with_env(JNIEnv *env, char *errbuf, int errbuf_len);
+
+static DWORD WINAPI kotv_jvm_owner_thread(LPVOID arg) {
+	JavaVM *vm = NULL;
+	JNIEnv *env = NULL;
+	(void)arg;
+
+	g_boot_rc = g_boot_create(&vm, &env, g_boot_args);
+	if (g_boot_rc == 0 && vm && env) {
+		g_vm = vm;
+		g_env = env;
+	}
+	if (g_boot_done)
+		SetEvent(g_boot_done);
+
+	if (!g_vm || !g_env)
+		return 1;
+
+	for (;;) {
+		if (WaitForSingleObject(g_jvm_job_posted, INFINITE) != WAIT_OBJECT_0)
+			break;
+		ResetEvent(g_jvm_job_posted);
+
+		EnterCriticalSection(&g_jvm_job_lock);
+		kotv_jvm_job job = g_jvm_job;
+		LeaveCriticalSection(&g_jvm_job_lock);
+
+		switch (job.kind) {
+		case KOTV_JVM_JOB_CALL:
+			job.rc = kotv_jvm_call_with_env(g_env, job.json_in, job.json_out, job.json_out_len, job.errbuf, job.errbuf_len);
+			break;
+		case KOTV_JVM_JOB_CANCEL:
+			job.rc = kotv_jvm_cancel_all_with_env(g_env, job.errbuf, job.errbuf_len);
+			break;
+		case KOTV_JVM_JOB_SHUTDOWN:
+			(*g_vm)->DestroyJavaVM(g_vm);
+			g_vm = NULL;
+			g_env = NULL;
+			if (job.done)
+				SetEvent(job.done);
+			return 0;
+		default:
+			if (job.errbuf && job.errbuf_len > 0)
+				write_err(job.errbuf, job.errbuf_len, "unknown jvm job");
+			job.rc = -1;
+			break;
+		}
+
+		EnterCriticalSection(&g_jvm_job_lock);
+		g_jvm_job.rc = job.rc;
+		LeaveCriticalSection(&g_jvm_job_lock);
+		if (job.done)
+			SetEvent(job.done);
+	}
 	return 0;
 }
 
-static jint kotv_create_java_vm(JNI_CreateJavaVM_t create, JavaVM **vm, JNIEnv **env, JavaVMInitArgs *args) {
-	kotv_jvm_boot_ctx ctx;
+static int kotv_jvm_owner_start(JNI_CreateJavaVM_t create, JavaVMInitArgs *args) {
 	DWORD tid;
-	HANDLE th;
 
-	ctx.create = create;
-	ctx.args = args;
-	ctx.vm = vm;
-	ctx.env = env;
-	ctx.rc = JNI_ERR;
-	ctx.done = CreateEventW(NULL, TRUE, FALSE, NULL);
-	if (!ctx.done)
+	if (g_jvm_owner)
+		return (int)g_boot_rc;
+
+	InitializeCriticalSection(&g_jvm_job_lock);
+	g_jvm_job_posted = CreateEventW(NULL, TRUE, FALSE, NULL);
+	g_jvm_job_done = CreateEventW(NULL, TRUE, FALSE, NULL);
+	g_boot_done = CreateEventW(NULL, TRUE, FALSE, NULL);
+	if (!g_jvm_job_posted || !g_jvm_job_done || !g_boot_done)
 		return JNI_ERR;
 
-	th = CreateThread(NULL, 0, kotv_jvm_boot_thread, &ctx, 0, &tid);
-	if (!th) {
-		CloseHandle(ctx.done);
-		return JNI_ERR;
-	}
+	g_boot_create = create;
+	g_boot_args = args;
+	g_boot_rc = JNI_ERR;
 
-	/* 120s：Win7 冷启可能较慢，但不应无限挂死 */
-	if (WaitForSingleObject(ctx.done, 120000) != WAIT_OBJECT_0) {
-		TerminateThread(th, 1);
-		CloseHandle(th);
-		CloseHandle(ctx.done);
+	g_jvm_owner = CreateThread(NULL, 0, kotv_jvm_owner_thread, NULL, 0, &tid);
+	if (!g_jvm_owner) {
+		g_boot_rc = JNI_ERR;
 		return JNI_ERR;
 	}
-	CloseHandle(th);
-	CloseHandle(ctx.done);
-	return ctx.rc;
+
+	if (WaitForSingleObject(g_boot_done, 120000) != WAIT_OBJECT_0) {
+		TerminateThread(g_jvm_owner, 1);
+		CloseHandle(g_jvm_owner);
+		g_jvm_owner = NULL;
+		return JNI_ERR;
+	}
+	return (int)g_boot_rc;
+}
+
+static int kotv_jvm_post_job(kotv_jvm_job_kind kind, const char *json_in, char *json_out, int json_out_len, char *errbuf, int errbuf_len, DWORD timeout_ms) {
+	HANDLE done;
+	int rc;
+
+	if (!g_jvm_owner || !g_vm)
+		return -1;
+
+	done = CreateEventW(NULL, TRUE, FALSE, NULL);
+	if (!done)
+		return -1;
+
+	EnterCriticalSection(&g_jvm_job_lock);
+	memset(&g_jvm_job, 0, sizeof(g_jvm_job));
+	g_jvm_job.kind = kind;
+	g_jvm_job.json_in = json_in;
+	g_jvm_job.json_out = json_out;
+	g_jvm_job.json_out_len = json_out_len;
+	g_jvm_job.errbuf = errbuf;
+	g_jvm_job.errbuf_len = errbuf_len;
+	g_jvm_job.done = done;
+	LeaveCriticalSection(&g_jvm_job_lock);
+
+	ResetEvent(g_jvm_job_done);
+	SetEvent(g_jvm_job_posted);
+
+	if (WaitForSingleObject(done, timeout_ms) != WAIT_OBJECT_0) {
+		write_err(errbuf, errbuf_len, "jvm job timeout");
+		CloseHandle(done);
+		return -8;
+	}
+
+	EnterCriticalSection(&g_jvm_job_lock);
+	rc = g_jvm_job.rc;
+	LeaveCriticalSection(&g_jvm_job_lock);
+	CloseHandle(done);
+	return rc;
+}
+
+static void kotv_jvm_owner_shutdown(void) {
+	if (!g_jvm_owner)
+		return;
+	kotv_jvm_post_job(KOTV_JVM_JOB_SHUTDOWN, NULL, NULL, 0, NULL, 0, 30000);
+	WaitForSingleObject(g_jvm_owner, 5000);
+	CloseHandle(g_jvm_owner);
+	g_jvm_owner = NULL;
+	if (g_jvm_job_posted) {
+		CloseHandle(g_jvm_job_posted);
+		g_jvm_job_posted = NULL;
+	}
+	if (g_jvm_job_done) {
+		CloseHandle(g_jvm_job_done);
+		g_jvm_job_done = NULL;
+	}
+	if (g_boot_done) {
+		CloseHandle(g_boot_done);
+		g_boot_done = NULL;
+	}
+	DeleteCriticalSection(&g_jvm_job_lock);
 }
 #else
-static jint kotv_create_java_vm(JNI_CreateJavaVM_t create, JavaVM **vm, JNIEnv **env, JavaVMInitArgs *args) {
+static jint kotv_jvm_owner_start(JNI_CreateJavaVM_t create, JavaVM **vm, JNIEnv **env, JavaVMInitArgs *args) {
 	return create(vm, env, args);
 }
 #endif
@@ -187,11 +316,15 @@ static jint kotv_create_java_vm(JNI_CreateJavaVM_t create, JavaVM **vm, JNIEnv *
 int kotv_jvm_ready(void) { return g_vm != NULL ? 1 : 0; }
 
 void kotv_jvm_shutdown(void) {
+#if defined(_WIN32)
+	kotv_jvm_owner_shutdown();
+#else
 	if (g_vm) {
 		(*g_vm)->DestroyJavaVM(g_vm);
 	}
 	g_vm = NULL;
 	g_env = NULL;
+#endif
 	if (g_jvm_lib) {
 		kotv_dlclose(g_jvm_lib);
 		g_jvm_lib = NULL;
@@ -278,7 +411,7 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 	}
 	snprintf(proxy, sizeof(proxy), "-Dkotv.proxy.port=%d", proxy_port);
 
-	JavaVMOption opts[20];
+	JavaVMOption opts[22];
 	int n = 0;
 	opts[n++].optionString = strdup("-Djava.awt.headless=true");
 	if (java_home_opt[0])
@@ -293,6 +426,8 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 	opts[n++].optionString = strdup("-Dhttp.proxyPort=");
 	opts[n++].optionString = strdup("-Dhttps.proxyHost=");
 	opts[n++].optionString = strdup("-Dhttps.proxyPort=");
+	opts[n++].optionString = strdup("-Dsun.net.client.defaultConnectTimeout=8000");
+	opts[n++].optionString = strdup("-Dsun.net.client.defaultReadTimeout=10000");
 	opts[n++].optionString = strdup("-Dfile.encoding=UTF-8");
 	opts[n++].optionString = strdup("--add-opens=java.base/java.lang=ALL-UNNAMED");
 	opts[n++].optionString = strdup("--add-opens=java.base/java.util=ALL-UNNAMED");
@@ -304,13 +439,21 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 	args.options = opts;
 	args.ignoreUnrecognized = JNI_TRUE;
 
+#if defined(_WIN32)
+	jint rc = kotv_jvm_owner_start(create, &args);
+#else
 	JavaVM *vm = NULL;
 	JNIEnv *env = NULL;
-	jint rc = kotv_create_java_vm(create, &vm, &env, &args);
+	jint rc = kotv_jvm_owner_start(create, &vm, &env, &args);
+#endif
 	for (int i = 0; i < n; i++)
 		free(opts[i].optionString);
 
-	if (rc != 0 || !vm || !env) {
+	if (rc != 0
+#if !defined(_WIN32)
+	    || !vm || !env
+#endif
+	) {
 		char msg[96];
 		snprintf(msg, sizeof(msg), "JNI_CreateJavaVM failed (rc=%d)", (int)rc);
 		write_err(errbuf, errbuf_len, msg);
@@ -318,8 +461,92 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 		g_jvm_lib = NULL;
 		return -4;
 	}
+#if !defined(_WIN32)
 	g_vm = vm;
 	g_env = env;
+#endif
+	return 0;
+}
+
+static int kotv_jvm_call_with_env(JNIEnv *env, const char *json_in, char *json_out, int json_out_len, char *errbuf, int errbuf_len) {
+	if (!env || !json_in || !json_out || json_out_len <= 1) {
+		write_err(errbuf, errbuf_len, "jvm not started");
+		return -1;
+	}
+
+	jclass cls = (*env)->FindClass(env, "com/bobo/kotv/bridge/SpiderBridge");
+	if (!cls) {
+		write_err(errbuf, errbuf_len, "SpiderBridge class not found");
+		return -2;
+	}
+	jmethodID mid = (*env)->GetStaticMethodID(env, cls, "call", "(Ljava/lang/String;)Ljava/lang/String;");
+	if (!mid) {
+		(*env)->DeleteLocalRef(env, cls);
+		write_err(errbuf, errbuf_len, "SpiderBridge.call missing");
+		return -3;
+	}
+	jstring jstr = (*env)->NewStringUTF(env, json_in);
+	if (!jstr) {
+		(*env)->DeleteLocalRef(env, cls);
+		write_err(errbuf, errbuf_len, "NewStringUTF failed");
+		return -4;
+	}
+	jstring jret = (jstring)(*env)->CallStaticObjectMethod(env, cls, mid, jstr);
+	(*env)->DeleteLocalRef(env, jstr);
+	(*env)->DeleteLocalRef(env, cls);
+	if ((*env)->ExceptionCheck(env)) {
+		(*env)->ExceptionClear(env);
+		write_err(errbuf, errbuf_len, "Java exception in SpiderBridge.call");
+		return -5;
+	}
+	if (!jret) {
+		write_err(errbuf, errbuf_len, "null return from SpiderBridge.call");
+		return -6;
+	}
+	const char *utf = (*env)->GetStringUTFChars(env, jret, NULL);
+	if (!utf) {
+		(*env)->DeleteLocalRef(env, jret);
+		write_err(errbuf, errbuf_len, "GetStringUTFChars failed");
+		return -7;
+	}
+	snprintf(json_out, (size_t)json_out_len, "%s", utf);
+	(*env)->ReleaseStringUTFChars(env, jret, utf);
+	(*env)->DeleteLocalRef(env, jret);
+	return 0;
+}
+
+static int kotv_jvm_cancel_all_with_env(JNIEnv *env, char *errbuf, int errbuf_len) {
+	if (!env) {
+		write_err(errbuf, errbuf_len, "JNIEnv unavailable");
+		return -1;
+	}
+	jclass cls = (*env)->FindClass(env, "com/bobo/kotv/bridge/SpiderBridge");
+	if (!cls) {
+		write_err(errbuf, errbuf_len, "SpiderBridge class not found");
+		return -2;
+	}
+	jmethodID mid = (*env)->GetStaticMethodID(env, cls, "call", "(Ljava/lang/String;)Ljava/lang/String;");
+	if (!mid) {
+		(*env)->DeleteLocalRef(env, cls);
+		write_err(errbuf, errbuf_len, "SpiderBridge.call missing");
+		return -3;
+	}
+	jstring jstr = (*env)->NewStringUTF(env, "{\"method\":\"cancelAll\"}");
+	if (!jstr) {
+		(*env)->DeleteLocalRef(env, cls);
+		write_err(errbuf, errbuf_len, "NewStringUTF failed");
+		return -4;
+	}
+	jstring jret = (jstring)(*env)->CallStaticObjectMethod(env, cls, mid, jstr);
+	(*env)->DeleteLocalRef(env, jstr);
+	(*env)->DeleteLocalRef(env, cls);
+	if (jret)
+		(*env)->DeleteLocalRef(env, jret);
+	if ((*env)->ExceptionCheck(env)) {
+		(*env)->ExceptionClear(env);
+		write_err(errbuf, errbuf_len, "Java exception in cancelAll");
+		return -5;
+	}
 	return 0;
 }
 
@@ -346,66 +573,21 @@ int kotv_jvm_call(const char *json_in, char *json_out, int json_out_len, char *e
 		write_err(errbuf, errbuf_len, "jvm not started");
 		return -1;
 	}
-
+#if defined(_WIN32)
+	/* 90s：JAR 冷启 parseJar + homeContent 可能较慢 */
+	return kotv_jvm_post_job(KOTV_JVM_JOB_CALL, json_in, json_out, json_out_len, errbuf, errbuf_len, 90000);
+#else
 	int attached = 0;
 	JNIEnv *env = jvm_env_for_call(&attached);
 	if (!env) {
 		write_err(errbuf, errbuf_len, "JNIEnv unavailable");
 		return -1;
 	}
-	jclass cls = (*env)->FindClass(env, "com/bobo/kotv/bridge/SpiderBridge");
-	if (!cls) {
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "SpiderBridge class not found");
-		return -2;
-	}
-	jmethodID mid = (*env)->GetStaticMethodID(env, cls, "call", "(Ljava/lang/String;)Ljava/lang/String;");
-	if (!mid) {
-		(*env)->DeleteLocalRef(env, cls);
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "SpiderBridge.call missing");
-		return -3;
-	}
-	jstring jstr = (*env)->NewStringUTF(env, json_in);
-	if (!jstr) {
-		(*env)->DeleteLocalRef(env, cls);
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "NewStringUTF failed");
-		return -4;
-	}
-	jstring jret = (jstring)(*env)->CallStaticObjectMethod(env, cls, mid, jstr);
-	(*env)->DeleteLocalRef(env, jstr);
-	(*env)->DeleteLocalRef(env, cls);
-	if ((*env)->ExceptionCheck(env)) {
-		(*env)->ExceptionClear(env);
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "Java exception in SpiderBridge.call");
-		return -5;
-	}
-	if (!jret) {
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "null return from SpiderBridge.call");
-		return -6;
-	}
-	const char *utf = (*env)->GetStringUTFChars(env, jret, NULL);
-	if (!utf) {
-		(*env)->DeleteLocalRef(env, jret);
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "GetStringUTFChars failed");
-		return -7;
-	}
-	snprintf(json_out, (size_t)json_out_len, "%s", utf);
-	(*env)->ReleaseStringUTFChars(env, jret, utf);
-	(*env)->DeleteLocalRef(env, jret);
+	int rc = kotv_jvm_call_with_env(env, json_in, json_out, json_out_len, errbuf, errbuf_len);
 	if (attached)
 		(*g_vm)->DetachCurrentThread(g_vm);
-	return 0;
+	return rc;
+#endif
 }
 
 int kotv_jvm_cancel_all(char *errbuf, int errbuf_len) {
@@ -413,48 +595,18 @@ int kotv_jvm_cancel_all(char *errbuf, int errbuf_len) {
 		write_err(errbuf, errbuf_len, "jvm not started");
 		return -1;
 	}
+#if defined(_WIN32)
+	return kotv_jvm_post_job(KOTV_JVM_JOB_CANCEL, NULL, NULL, 0, errbuf, errbuf_len, 10000);
+#else
 	int attached = 0;
 	JNIEnv *env = jvm_env_for_call(&attached);
 	if (!env) {
 		write_err(errbuf, errbuf_len, "JNIEnv unavailable");
 		return -1;
 	}
-	jclass cls = (*env)->FindClass(env, "com/bobo/kotv/bridge/SpiderBridge");
-	if (!cls) {
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "SpiderBridge class not found");
-		return -2;
-	}
-	jmethodID mid = (*env)->GetStaticMethodID(env, cls, "call", "(Ljava/lang/String;)Ljava/lang/String;");
-	if (!mid) {
-		(*env)->DeleteLocalRef(env, cls);
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "SpiderBridge.call missing");
-		return -3;
-	}
-	jstring jstr = (*env)->NewStringUTF(env, "{\"method\":\"cancelAll\"}");
-	if (!jstr) {
-		(*env)->DeleteLocalRef(env, cls);
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "NewStringUTF failed");
-		return -4;
-	}
-	jstring jret = (jstring)(*env)->CallStaticObjectMethod(env, cls, mid, jstr);
-	(*env)->DeleteLocalRef(env, jstr);
-	(*env)->DeleteLocalRef(env, cls);
-	if (jret)
-		(*env)->DeleteLocalRef(env, jret);
-	if ((*env)->ExceptionCheck(env)) {
-		(*env)->ExceptionClear(env);
-		if (attached)
-			(*g_vm)->DetachCurrentThread(g_vm);
-		write_err(errbuf, errbuf_len, "Java exception in cancelAll");
-		return -5;
-	}
+	int rc = kotv_jvm_cancel_all_with_env(env, errbuf, errbuf_len);
 	if (attached)
 		(*g_vm)->DetachCurrentThread(g_vm);
-	return 0;
+	return rc;
+#endif
 }
