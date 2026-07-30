@@ -250,3 +250,19 @@ func InterruptJavaBridge() {
 	}
 	embedjvm.Interrupt()
 }
+
+// ClearJarBridgeOnSwitch 换站时清空 Go 侧 jar 缓存；JVM 已启动则同步 bridge clear（不 DestroyJavaVM）。
+func ClearJarBridgeOnSwitch() {
+	jarMu.Lock()
+	jarSpiders = map[string]*jarSpider{}
+	jarMu.Unlock()
+	if !embedjvm.Active || !embedjvm.Started() {
+		return
+	}
+	req := bridgeRequest{Method: "clear"}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return
+	}
+	_, _ = callJavaBridge(payload)
+}

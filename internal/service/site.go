@@ -14,6 +14,7 @@ import (
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
 	"github.com/bobo/KOTV/internal/util"
+	"golang.org/x/sync/singleflight"
 )
 
 // SiteService 站点内容服务，站点内容服务。
@@ -27,6 +28,8 @@ type SiteService struct {
 	SearchResult []model.Collect
 
 	loadEpoch atomic.Uint64
+
+	homeFlight singleflight.Group
 
 	homeCacheSite string
 	categoryCache map[string]model.Result
@@ -48,10 +51,11 @@ func (s *SiteService) InvalidateLoads() {
 	s.mu.Lock()
 	s.invalidateContentCache()
 	s.mu.Unlock()
-	// 先软中断脚本，再杀 JVM，最后 Destroy，降低 QuickJS/CGO 与 Kill 竞态。
+	// 先软中断脚本，再杀 JVM bridge，最后销毁 JS/PY 实例。
 	spider.InterruptScriptSpiders()
 	spider.InterruptJavaBridge()
 	spider.ResetScriptSpiders()
+	spider.ClearJarBridgeOnSwitch()
 }
 
 // HomeLoadEpoch 返回当前加载世代，供 UI 丢弃过期结果。
@@ -76,17 +80,22 @@ func (s *SiteService) HomeContent() (model.Result, error) {
 	}
 	s.mu.Unlock()
 
-	result, err := s.homeContentFor(site)
+	flightKey := fmt.Sprintf("%s:%d", site.Key, epoch)
+	v, err, _ := s.homeFlight.Do(flightKey, func() (interface{}, error) {
+		return s.homeContentFor(site)
+	})
 	if s.loadEpoch.Load() != epoch {
 		return model.Result{}, ErrHomeLoadCanceled
 	}
-	if err == nil {
-		s.mu.Lock()
-		s.HomeResult = result
-		s.homeCacheSite = site.Key
-		s.mu.Unlock()
+	if err != nil {
+		return model.Result{}, err
 	}
-	return result, err
+	result := v.(model.Result)
+	s.mu.Lock()
+	s.HomeResult = result
+	s.homeCacheSite = site.Key
+	s.mu.Unlock()
+	return result, nil
 }
 
 func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {

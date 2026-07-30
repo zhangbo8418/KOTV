@@ -302,7 +302,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         try {
           await ref.read(apiProvider).setHome(key);
           ref.invalidate(configProvider);
-          ref.invalidate(homeProvider);
           ref.invalidate(settingsProvider);
           await _reload();
         } catch (e) {

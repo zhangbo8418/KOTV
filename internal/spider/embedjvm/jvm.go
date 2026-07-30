@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/bobo/KOTV/internal/localproxy"
@@ -30,6 +31,11 @@ import (
 
 // ErrInterrupted 表示调用被换源/关闭主动打断。
 var ErrInterrupted = fmt.Errorf("JAR 调用已中断")
+
+const (
+	callTimeout  = 90 * time.Second  // 对齐 Windows kotv_jvm_post_job；JAR 冷启 parseJar+home 可能较慢
+	startTimeout = 120 * time.Second // 对齐 Windows CreateJavaVM 等待上限
+)
 
 type startReq struct {
 	jvmLib, bridgeJar, cacheDir string
@@ -169,7 +175,12 @@ func EnsureStarted(bridgeJar string) error {
 		proxyPort: localproxy.Port(),
 		resp:      resp,
 	}
-	return <-resp
+	select {
+	case err := <-resp:
+		return err
+	case <-time.After(startTimeout):
+		return fmt.Errorf("embed JVM 启动超时（%s）", startTimeout)
+	}
 }
 
 // Call 调用 SpiderBridge.call(JSON)。所有 JNI 走专用 OS 线程。
@@ -180,8 +191,13 @@ func Call(payload []byte) (string, error) {
 	}
 	resp := make(chan callResp, 1)
 	reqCh <- callReq{payload: payload, resp: resp}
-	r := <-resp
-	return r.out, r.err
+	select {
+	case r := <-resp:
+		return r.out, r.err
+	case <-time.After(callTimeout):
+		Interrupt()
+		return "", fmt.Errorf("embed JVM 调用超时（%s）", callTimeout)
+	}
 }
 
 // Shutdown 仅进程退出时销毁 JVM（同进程内 Destroy 后再 Create 不可靠）。

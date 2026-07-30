@@ -307,6 +307,69 @@ static void kotv_jvm_owner_shutdown(void) {
 	}
 	DeleteCriticalSection(&g_jvm_job_lock);
 }
+
+typedef struct {
+	char *errbuf;
+	int errbuf_len;
+	int rc;
+	HANDLE done;
+} kotv_jvm_cancel_ctx;
+
+/* cancelAll 不排队等 owner 上的 CALL：独立 Win32 线程 Attach 后触发 OkHttp.cancelAll。 */
+static DWORD WINAPI kotv_jvm_cancel_thread(LPVOID arg) {
+	kotv_jvm_cancel_ctx *ctx = (kotv_jvm_cancel_ctx *)arg;
+	JNIEnv *env = NULL;
+
+	if (!g_vm) {
+		ctx->rc = -1;
+		if (ctx->done)
+			SetEvent(ctx->done);
+		return 1;
+	}
+	if ((*g_vm)->AttachCurrentThread(g_vm, (void **)&env, NULL) != 0 || !env) {
+		if (ctx->errbuf && ctx->errbuf_len > 0)
+			write_err(ctx->errbuf, ctx->errbuf_len, "AttachCurrentThread for cancel failed");
+		ctx->rc = -1;
+		if (ctx->done)
+			SetEvent(ctx->done);
+		return 1;
+	}
+	ctx->rc = kotv_jvm_cancel_all_with_env(env, ctx->errbuf, ctx->errbuf_len);
+	(*g_vm)->DetachCurrentThread(g_vm);
+	if (ctx->done)
+		SetEvent(ctx->done);
+	return 0;
+}
+
+static int kotv_jvm_cancel_async(char *errbuf, int errbuf_len, DWORD wait_ms) {
+	kotv_jvm_cancel_ctx ctx;
+	HANDLE th;
+	DWORD tid;
+
+	if (!g_vm) {
+		write_err(errbuf, errbuf_len, "jvm not started");
+		return -1;
+	}
+	memset(&ctx, 0, sizeof(ctx));
+	ctx.errbuf = errbuf;
+	ctx.errbuf_len = errbuf_len;
+	ctx.rc = -1;
+	ctx.done = CreateEventW(NULL, TRUE, FALSE, NULL);
+	if (!ctx.done)
+		return -1;
+
+	th = CreateThread(NULL, 0, kotv_jvm_cancel_thread, &ctx, 0, &tid);
+	if (!th) {
+		CloseHandle(ctx.done);
+		write_err(errbuf, errbuf_len, "CreateThread for cancel failed");
+		return -1;
+	}
+	if (wait_ms > 0)
+		WaitForSingleObject(ctx.done, wait_ms);
+	CloseHandle(ctx.done);
+	CloseHandle(th);
+	return ctx.rc;
+}
 #else
 static jint kotv_jvm_owner_start(JNI_CreateJavaVM_t create, JavaVM **vm, JNIEnv **env, JavaVMInitArgs *args) {
 	return create(vm, env, args);
@@ -596,7 +659,8 @@ int kotv_jvm_cancel_all(char *errbuf, int errbuf_len) {
 		return -1;
 	}
 #if defined(_WIN32)
-	return kotv_jvm_post_job(KOTV_JVM_JOB_CANCEL, NULL, NULL, 0, errbuf, errbuf_len, 10000);
+	/* 不经过 owner job 队列，避免排在卡住的 CALL 后面 */
+	return kotv_jvm_cancel_async(errbuf, errbuf_len, 3000);
 #else
 	int attached = 0;
 	JNIEnv *env = jvm_env_for_call(&attached);
