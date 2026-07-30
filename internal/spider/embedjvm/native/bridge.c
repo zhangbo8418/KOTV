@@ -106,6 +106,26 @@ static void write_err(char *errbuf, int errbuf_len, const char *msg) {
 	snprintf(errbuf, (size_t)errbuf_len, "%s", msg ? msg : "unknown");
 }
 
+#if defined(_WIN32)
+/* Go 传入 UTF-8；HotSpot -D 选项在中文 Win 上按 ACP(GBK) 解析路径。 */
+static int utf8_to_acp(const char *utf8, char *out, int out_len) {
+	int wlen, alen;
+	wchar_t *w;
+	if (!utf8 || !out || out_len <= 0)
+		return -1;
+	wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+	if (wlen <= 0)
+		return -1;
+	w = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
+	if (!w)
+		return -1;
+	MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, wlen);
+	alen = WideCharToMultiByte(CP_ACP, 0, w, -1, out, out_len, NULL, NULL);
+	free(w);
+	return alen > 0 ? 0 : -1;
+}
+#endif
+
 int kotv_jvm_ready(void) { return g_vm != NULL ? 1 : 0; }
 
 void kotv_jvm_shutdown(void) {
@@ -152,6 +172,9 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 	char cache[1024];
 	char proxy[128];
 	char java_home_opt[1100];
+	char home_acp[1024];
+	char jar_acp[4096];
+	char cache_acp[1024];
 	/* .../jre/bin/server/jvm.dll → java.home=.../jre */
 	{
 		char home[1024];
@@ -171,13 +194,30 @@ int kotv_jvm_start(const char *jvm_lib, const char *bridge_jar, const char *cach
 				break;
 			*cut = 0;
 		}
+#if defined(_WIN32)
+		if (home[0] && utf8_to_acp(home, home_acp, (int)sizeof(home_acp)) == 0)
+			snprintf(java_home_opt, sizeof(java_home_opt), "-Djava.home=%s", home_acp);
+		else if (home[0])
+			snprintf(java_home_opt, sizeof(java_home_opt), "-Djava.home=%s", home);
+		else
+			java_home_opt[0] = 0;
+		if (utf8_to_acp(bridge_jar, jar_acp, (int)sizeof(jar_acp)) != 0)
+			snprintf(jar_acp, sizeof(jar_acp), "%s", bridge_jar);
+		if (cache_dir && cache_dir[0] && utf8_to_acp(cache_dir, cache_acp, (int)sizeof(cache_acp)) == 0)
+			;
+		else
+			snprintf(cache_acp, sizeof(cache_acp), "%s", cache_dir ? cache_dir : ".");
+		snprintf(cp, sizeof(cp), "-Djava.class.path=%s", jar_acp);
+		snprintf(cache, sizeof(cache), "-Dkotv.cache.dir=%s", cache_acp);
+#else
 		if (home[0])
 			snprintf(java_home_opt, sizeof(java_home_opt), "-Djava.home=%s", home);
 		else
 			java_home_opt[0] = 0;
+		snprintf(cp, sizeof(cp), "-Djava.class.path=%s", bridge_jar);
+		snprintf(cache, sizeof(cache), "-Dkotv.cache.dir=%s", cache_dir ? cache_dir : ".");
+#endif
 	}
-	snprintf(cp, sizeof(cp), "-Djava.class.path=%s", bridge_jar);
-	snprintf(cache, sizeof(cache), "-Dkotv.cache.dir=%s", cache_dir ? cache_dir : ".");
 	snprintf(proxy, sizeof(proxy), "-Dkotv.proxy.port=%d", proxy_port);
 
 	JavaVMOption opts[16];

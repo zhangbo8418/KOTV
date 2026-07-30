@@ -278,24 +278,26 @@ class EngineLauncher {
   }
 
   /// UI 进程异常退出时杀掉引擎，避免「窗口没了引擎还在」。
+  /// Windows 不用 PowerShell：Win7 上隐藏 powershell 看门狗常直接 WER 崩溃弹窗。
   Future<void> _armOrphanWatchdog(int enginePid, IOSink log) async {
     final uiPid = pid;
     if (Platform.isWindows) {
       try {
+        // cmd 轮询：UI PID 消失后 taskkill 引擎。
         await Process.start(
-          'powershell.exe',
+          'cmd.exe',
           [
-            '-NoProfile',
-            '-WindowStyle',
-            'Hidden',
-            '-Command',
-            '\$ui=$uiPid; \$eng=$enginePid; '
-                'while (Get-Process -Id \$ui -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }; '
-                'Stop-Process -Id \$eng -Force -ErrorAction SilentlyContinue',
+            '/d',
+            '/c',
+            'for /l %i in (0,0,1) do @('
+                'tasklist /FI "PID eq $uiPid" 2>nul | find "$uiPid" >nul || ('
+                'taskkill /F /PID $enginePid >nul 2>&1 & exit /b 0'
+                ') & ping -n 2 127.0.0.1 >nul'
+                ')',
           ],
           mode: ProcessStartMode.detached,
         );
-        log.writeln('orphan-watchdog armed ui=$uiPid engine=$enginePid');
+        log.writeln('orphan-watchdog armed (cmd) ui=$uiPid engine=$enginePid');
       } catch (e) {
         log.writeln('orphan-watchdog failed: $e');
       }

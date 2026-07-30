@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"runtime"
 	"strings"
@@ -102,14 +103,19 @@ func callJavaBridge(payload []byte) (string, error) {
 		return "", fmt.Errorf("嵌入 JVM 不可用：请以 CGO_ENABLED=1 构建")
 	}
 	if err := embedjvm.EnsureStarted(""); err != nil {
+		log.Printf("embed JVM 启动失败: %v", err)
 		return "", err
 	}
 	if err := primeNetConfigOnce(); err != nil {
+		log.Printf("embed JVM netConfig 失败: %v", err)
 		return "", err
 	}
 	out, err := embedjvm.Call(payload)
 	if err != nil && errors.Is(err, embedjvm.ErrInterrupted) {
 		return "", ErrJavaBridgeInterrupted
+	}
+	if err != nil {
+		log.Printf("embed JVM 调用失败: %v", err)
 	}
 	return trimCString(out), err
 }

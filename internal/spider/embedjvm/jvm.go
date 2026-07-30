@@ -14,6 +14,7 @@ package embedjvm
 import "C"
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -82,6 +83,7 @@ func doStart(r startReq) error {
 	if started.Load() {
 		return nil
 	}
+	log.Printf("embed JVM CreateJavaVM jvm=%s bridge=%s cache=%s", r.jvmLib, r.bridgeJar, r.cacheDir)
 	cJvm := C.CString(r.jvmLib)
 	cJar := C.CString(r.bridgeJar)
 	cCache := C.CString(r.cacheDir)
@@ -92,9 +94,12 @@ func doStart(r startReq) error {
 	errbuf := make([]byte, 512)
 	rc := C.kotv_jvm_start(cJvm, cJar, cCache, C.int(r.proxyPort), (*C.char)(unsafe.Pointer(&errbuf[0])), C.int(len(errbuf)))
 	if rc != 0 {
-		return fmt.Errorf("embed JVM 启动失败: %s", strings.TrimRight(string(errbuf), "\x00"))
+		err := fmt.Errorf("embed JVM 启动失败: %s", strings.TrimRight(string(errbuf), "\x00"))
+		log.Printf("%v", err)
+		return err
 	}
 	started.Store(true)
+	log.Printf("embed JVM ready")
 	return nil
 }
 

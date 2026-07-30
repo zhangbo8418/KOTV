@@ -199,7 +199,16 @@ int kotv_embedpy_init(const char *py_lib, const char *py_home, char *errbuf, int
 	/* PYTHONHOME 必须在 Initialize 之前；事后改 sys.prefix 救不了 encodings。 */
 	if (py_home && py_home[0]) {
 #if defined(_WIN32)
-		SetEnvironmentVariableA("PYTHONHOME", py_home);
+		/* Go 路径是 UTF-8；A 版 API 在中文 Win 上会把路径解成乱码。 */
+		int n = MultiByteToWideChar(CP_UTF8, 0, py_home, -1, NULL, 0);
+		if (n > 0) {
+			wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
+			if (w) {
+				MultiByteToWideChar(CP_UTF8, 0, py_home, -1, w, n);
+				SetEnvironmentVariableW(L"PYTHONHOME", w);
+				free(w);
+			}
+		}
 #else
 		setenv("PYTHONHOME", py_home, 1);
 #endif
