@@ -39,6 +39,7 @@ type ContentAPI interface {
 	APIPlayerEmbed(playURL, playerVal, histKey string) error
 	APIPlayerControl(cmd string, value float64, mode string) error
 	APITools(action string, params map[string]any) (map[string]any, error)
+	APICancelPending() map[string]any
 }
 
 func (s *Server) SetContentAPI(api ContentAPI) {
@@ -71,6 +72,7 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/tools", s.handleAPIv1Tools)
 	mux.HandleFunc("/api/v1/ui/poll", s.handleAPIv1UIPoll)
 	mux.HandleFunc("/api/v1/ui/reply", s.handleAPIv1UIReply)
+	mux.HandleFunc("/api/v1/cancel", s.handleAPIv1Cancel)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -721,4 +723,22 @@ func (s *Server) handleAPIv1UIReply(w http.ResponseWriter, r *http.Request) {
 	}
 	s.uiReply.put(id, string(payload))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleAPIv1Cancel 打断进行中的详情/分类等 spider 请求（网盘扫码卡住后离开详情页）。
+func (s *Server) handleAPIv1Cancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	api := s.content()
+	if api == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, api.APICancelPending())
 }

@@ -212,6 +212,22 @@ class KotvApi {
         'action': action,
         if (values != null && values.isNotEmpty) 'values': values,
       });
+
+  /// 打断进行中的详情/分类等爬虫请求（网盘扫码占住 JVM 后离开页面）。
+  Future<Map<String, dynamic>> cancelPending() async {
+    try {
+      final res = await http
+          .post(
+            _u('/api/v1/cancel'),
+            headers: {'Content-Type': 'application/json'},
+            body: '{}',
+          )
+          .timeout(const Duration(seconds: 5));
+      return _decode(res);
+    } catch (_) {
+      return {'ok': false};
+    }
+  }
 }
 
 class KotvApiException implements Exception {
