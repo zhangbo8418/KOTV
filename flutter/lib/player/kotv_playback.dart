@@ -229,6 +229,9 @@ class MediaKitPlayback extends KotvPlayback {
     for (final s in _subs) {
       s.cancel();
     }
+    try {
+      player.stop();
+    } catch (_) {}
     super.dispose();
   }
 }
@@ -507,6 +510,9 @@ class EngineVlcPlayback extends KotvPlayback {
   @override
   void dispose() {
     _statusTimer?.cancel();
+    try {
+      unawaited(_native.stop());
+    } catch (_) {}
     unawaited(_native.dispose());
     _posCtrl.close();
     _endedCtrl.close();

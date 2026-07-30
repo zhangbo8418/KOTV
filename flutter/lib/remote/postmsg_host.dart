@@ -11,7 +11,7 @@ import '../api/kotv_api.dart';
 /// 对齐 Legacy [listenSpiderPostMsg]：轮询引擎缓冲，只渲染声明式文档（内容/尺寸由 jar·js·py 决定）。
 ///
 /// 网盘登录会先发「正在获取…」再发真正二维码（两个不同 id）。
-/// 这里用**同一条 Dialog 路由原地换文档**，避免 pop+show 时把新窗一起关掉。
+/// 同一条 Dialog 原地换文档；在 Dialog 路由真正挂上之前绝不 nav.pop（否则会误关详情页）。
 class PostMsgHost {
   PostMsgHost(this.api, {required this.navigatorKey});
 
@@ -23,7 +23,10 @@ class PostMsgHost {
 
   Timer? _timer;
   Timer? _timeout;
-  bool _dialogOpen = false;
+  /// 已决定要开窗 / 正在展示（含 showDialog 尚未把路由挂上的窗口期）。
+  bool _sessionActive = false;
+  /// Dialog 路由已在 Navigator 上（只有此时才允许 pop）。
+  bool _routeVisible = false;
   bool _programmaticClose = false;
   String? _activeId;
   final ValueNotifier<Map<String, dynamic>?> _doc = ValueNotifier(null);
@@ -47,12 +50,13 @@ class PostMsgHost {
   }
 
   /// 关掉当前声明式窗，并向引擎回传 dismiss，避免 JAR 登录循环空等。
-  Future<void> cancelAll({bool reply = true}) async {
+  /// [popDialog] 为 false 时只回传、不 nav.pop（详情 dispose 时路由已在拆）。
+  Future<void> cancelAll({bool reply = true, bool popDialog = true}) async {
     final id = _activeId;
     if (reply && id != null && id.isNotEmpty) {
       unawaited(api.uiReply(id: id, action: 'dismiss'));
     }
-    await _hide(reply: false);
+    await _hide(reply: false, popDialog: popDialog);
   }
 
   Future<void> _tick() async {
@@ -72,9 +76,9 @@ class PostMsgHost {
     if (msg.startsWith('UI:')) {
       final payload = msg.substring(3);
       try {
-        final doc = jsonDecode(payload);
-        if (doc is Map<String, dynamic> && '${doc['id'] ?? ''}'.isNotEmpty) {
-          _showOrReplace(Map<String, dynamic>.from(doc));
+        final decoded = jsonDecode(payload);
+        if (decoded is Map && '${decoded['id'] ?? ''}'.isNotEmpty) {
+          _showOrReplace(Map<String, dynamic>.from(decoded));
         }
       } catch (_) {}
       return;
@@ -107,13 +111,12 @@ class PostMsgHost {
     final id = '${doc['id']}'.trim();
     if (id.isEmpty) return;
 
-    final prev = _activeId;
     _activeId = id;
     _armTimeout(doc);
+    _doc.value = doc;
 
-    // 已有弹窗：原地换内容（加载 → 二维码），绝不 pop 再 show。
-    if (_dialogOpen) {
-      _doc.value = doc;
+    // 已有会话：原地换内容（加载 → 二维码），绝不 pop 再 show。
+    if (_sessionActive) {
       return;
     }
 
@@ -121,13 +124,14 @@ class PostMsgHost {
     if (ctx == null) {
       // 无 context 时也必须回传，否则 JAR 端会一直占着 JVM 线程。
       unawaited(api.uiReply(id: id, action: 'dismiss'));
-      _activeId = prev;
+      _activeId = null;
+      _doc.value = null;
       _timeout?.cancel();
       return;
     }
 
-    _doc.value = doc;
-    _dialogOpen = true;
+    _sessionActive = true;
+    _routeVisible = false;
     _programmaticClose = false;
     final done = Completer<void>();
     _dialogDone = done;
@@ -147,13 +151,12 @@ class PostMsgHost {
   }
 
   void _close(String id) {
-    // 关键：加载窗的 UI_CLOSE 常在二维码 UI: 之后才到；
-    // 若当前已经是新 id，必须忽略旧 CLOSE，否则会把二维码一起关掉。
+    // 加载窗的 UI_CLOSE 常在二维码 UI: 之后才到；当前已是新 id 则忽略。
     if (_activeId != id) return;
     unawaited(_hide(reply: false));
   }
 
-  Future<void> _hide({required bool reply}) async {
+  Future<void> _hide({required bool reply, bool popDialog = true}) async {
     _timeout?.cancel();
     _timeout = null;
     final id = _activeId;
@@ -162,14 +165,27 @@ class PostMsgHost {
     }
     _activeId = null;
     _doc.value = null;
-    if (!_dialogOpen) {
+
+    if (!_sessionActive) {
       _dialogDone?.complete();
       _dialogDone = null;
       return;
     }
+
+    // 关键：Dialog 路由还没挂上时绝不能 nav.pop，否则会把详情页 pop 掉，
+    // 表现为「玩偶/木偶进详情闪一下/直接进不去、也不弹窗」。
+    if (!popDialog || !_routeVisible) {
+      _sessionActive = false;
+      _routeVisible = false;
+      final done = _dialogDone;
+      if (done != null && !done.isCompleted) {
+        done.complete();
+      }
+      return;
+    }
+
     _programmaticClose = true;
     final nav = navigatorKey.currentState;
-    // 只在 Dialog 仍在栈顶时 pop，避免误 pop 详情页。
     if (nav != null && nav.canPop()) {
       nav.pop();
     }
@@ -184,13 +200,22 @@ class PostMsgHost {
     final checks = <String, bool>{};
     final radios = <String, String>{};
     final selects = <String, String>{};
+    var opened = false;
 
     try {
+      // 若在 await 前已被 UI_CLOSE/cancel 清掉，不要再开窗。
+      if (_doc.value == null || !_sessionActive) {
+        return;
+      }
+
       await showDialog<void>(
         context: ctx,
-        // 禁止点遮罩误关：加载→二维码切换时旧点击/动画容易误触 barrier。
         barrierDismissible: false,
         builder: (dialogCtx) {
+          if (!_routeVisible) {
+            _routeVisible = true;
+            opened = true;
+          }
           return PopScope(
             canPop: true,
             onPopInvoked: (didPop) {
@@ -201,7 +226,8 @@ class PostMsgHost {
               _activeId = null;
               _timeout?.cancel();
               _doc.value = null;
-              _dialogOpen = false;
+              _sessionActive = false;
+              _routeVisible = false;
               if (!done.isCompleted) done.complete();
             },
             child: ValueListenableBuilder<Map<String, dynamic>?>(
@@ -233,8 +259,6 @@ class PostMsgHost {
                       }
                     }
 
-                    // 换文档时清掉旧输入，避免加载窗控件残留到二维码窗。
-                    // 仅在 id 变化时重置（ValueListenable 每次 build 都会进这里）。
                     final title = '${doc['title'] ?? ''}';
                     final elements = (doc['elements'] as List?) ?? const [];
                     final actions = (doc['actions'] as List?) ?? const [];
@@ -296,23 +320,35 @@ class PostMsgHost {
         c.dispose();
       }
       values.clear();
-      _dialogOpen = false;
+      _sessionActive = false;
+      _routeVisible = false;
       _programmaticClose = false;
       if (_activeId != null && _doc.value == null) {
         _activeId = null;
       }
       if (!done.isCompleted) done.complete();
       if (_dialogDone == done) _dialogDone = null;
-      // 若关闭过程中又来了新文档，重新打开。
+
+      // 关闭过程中又来了新文档，重新打开。
       final pending = _doc.value;
-      if (pending != null && !_dialogOpen) {
+      if (pending != null && !_sessionActive) {
         final nextCtx = navigatorKey.currentContext;
         if (nextCtx != null) {
-          _dialogOpen = true;
+          _sessionActive = true;
+          _routeVisible = false;
           final nextDone = Completer<void>();
           _dialogDone = nextDone;
           unawaited(_openDialog(nextCtx, nextDone));
+        } else {
+          final id = '${pending['id'] ?? ''}'.trim();
+          if (id.isNotEmpty) {
+            unawaited(api.uiReply(id: id, action: 'dismiss'));
+          }
+          _doc.value = null;
+          _activeId = null;
         }
+      } else if (!opened && pending == null) {
+        // showDialog 未真正展示就被取消：无需额外处理。
       }
     }
   }
@@ -518,7 +554,6 @@ class PostMsgHost {
     }
   }
 
-  /// 宿主只打开 URL / app scheme；具体深链由文档提供。
   Future<void> _openExternal(String raw) async {
     final s = raw.trim();
     if (s.isEmpty) return;

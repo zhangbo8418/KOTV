@@ -291,6 +291,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           }
           return key;
         }();
+        // 换源前关掉详情栈，避免后台详情还在播。
+        final nav = Navigator.of(context);
+        if (nav.canPop()) {
+          nav.popUntil((r) => r.isFirst);
+        }
         // 只保留全局遮罩一层转圈，避免与页内 spinner 叠两层
         ref.read(uiBusyProvider.notifier).state = '正在切换到 $name…';
         setState(() {

@@ -749,7 +749,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       });
     }
 
-    // 默认 MPV；VLC 为硬渲兼容选项。
+    // 内置 MPV / VLC 均可选；Win7 默认仍是 VLC，但不强制隐藏 MPV。
     final opts = <(String label, String val, String key)>[
       ('内置 MPV', 'innie#mpv', 'embed_mpv'),
       ('内置 VLC', 'innie#vlc', 'embed_vlc'),
@@ -759,8 +759,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     ];
 
     bool listed(String key) {
+      // Flutter 内置 MPV 走 media_kit 自带 libmpv，不依赖引擎 runtime/libmpv。
+      if (key == 'embed_mpv') return true;
       if (key == 'embed_vlc') return avail['embed_vlc'] == true || avail['vlc'] == true || avail.isEmpty;
-      if (key == 'embed_mpv') return avail['embed_mpv'] == true || avail.isEmpty;
       return avail[key] == true;
     }
 
