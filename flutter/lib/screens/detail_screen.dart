@@ -85,17 +85,34 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _stoppedHard = false;
   /// 硬停完成后再允许真正出栈（配合 [PopScope]）。
   bool _allowPop = false;
+  /// 开播后短时间内忽略 completed，避免 stop 后残留 completed=true 立刻触发下一集/停播。
+  DateTime? _playArmedAt;
 
   /// 当前页内后端：默认 MPV；手动选 VLC 时共用同一套控件。
   KotvPlayback get _playback => _useVlc ? (_vlc ??= EngineVlcPlayback()) : _ensureMpv();
   bool get _useVlc => _playerVal.trim() == 'innie#vlc';
 
   MediaKitPlayback _ensureMpv() {
-    if (_mk != null) return _mk!;
+    if (_mk != null) {
+      // stopHard 会拆掉 playing 订阅；复用 Player 时必须重新挂上。
+      _playingSub ??= _mkPlayer!.stream.playing.listen((playing) {
+        if (!mounted || _playUrl.isEmpty || _useVlc) return;
+        setState(() {
+          if (playing) {
+            _status = '内置 MPV 播放中';
+          } else if (_mkPlayer!.state.completed) {
+            _status = '播放结束';
+          } else {
+            _status = '已暂停';
+          }
+        });
+      });
+      return _mk!;
+    }
     final player = Player();
     _mkPlayer = player;
     _mk = MediaKitPlayback(player);
-    _playingSub ??= player.stream.playing.listen((playing) {
+    _playingSub = player.stream.playing.listen((playing) {
       if (!mounted || _playUrl.isEmpty || _useVlc) return;
       setState(() {
         if (playing) {
@@ -119,7 +136,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _load();
   }
 
-  /// pause → await stop，等原生停住（Win7 上 unawaited stop 不够）。不改音量，避免下一集没声。
+  /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
+  /// 不要 pause/静音：pause 会粘在播放器上，下次 open 只出一帧；静音会带到下一集。
   Future<void> _stopHard() async {
     _autoNextArmed = false;
     _playingSub?.cancel();
@@ -132,9 +150,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
     Future<void> hardStop(KotvPlayback? p) async {
       if (p == null) return;
-      try {
-        await p.pause();
-      } catch (_) {}
       try {
         await p.stop();
       } catch (_) {}
@@ -203,6 +218,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   Future<void> _onPlaybackEnded() async {
+    final armed = _playArmedAt;
+    if (armed != null && DateTime.now().difference(armed) < const Duration(seconds: 2)) {
+      return;
+    }
     if (!_autoNextArmed || _playUrl.isEmpty) return;
     final eps = _eps;
     final next = _epIdx + 1;
@@ -403,6 +422,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _vlc ??= EngineVlcPlayback();
         await _vlc!.setDecodeMode(_decodeMode);
         await _vlc!.open(playUrl);
+        try {
+          await _vlc!.play();
+        } catch (_) {}
         if (_stableVolumeOn) await _applyStableVolume(_vlc!, true);
         if (!mounted) return;
         setState(() {
@@ -415,6 +437,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         } catch (_) {}
         final mk = _ensureMpv();
         await mk.open(playUrl);
+        // stop/pause 后 media_kit 可能仍处暂停态，显式 play 避免只出一帧。
+        try {
+          await mk.play();
+        } catch (_) {}
         if (_stableVolumeOn) await _applyStableVolume(mk, true);
         if (!mounted) return;
         setState(() {
@@ -432,6 +458,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       _openingSeekDone = false;
       _endingSkipFired = false;
       _autoNextArmed = true;
+      _playArmedAt = DateTime.now();
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: '${d.name} · ${ep.name}', url: playUrl);
       if (fullscreen && mounted) {
         await _enterFullscreen();
