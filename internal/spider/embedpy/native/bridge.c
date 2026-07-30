@@ -6,23 +6,75 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#ifndef LOAD_WITH_ALTERED_SEARCH_PATH
+#define LOAD_WITH_ALTERED_SEARCH_PATH 0x00000008
+#endif
 typedef HMODULE kotv_lib_t;
+static DWORD g_kotv_dl_err;
+
+/* 把 DLL 所在目录插入搜索路径，再 LoadLibraryEx（Win7 上 CRT/api-ms 常与 DLL 同目录）。 */
 static kotv_lib_t kotv_dlopen(const char *path) {
 	int n;
-	wchar_t *w;
-	HMODULE h;
+	wchar_t *w = NULL;
+	wchar_t *dir = NULL;
+	HMODULE h = NULL;
+	g_kotv_dl_err = 0;
 	if (!path || !path[0])
 		return NULL;
 	n = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
-	if (n <= 0)
+	if (n <= 0) {
+		g_kotv_dl_err = GetLastError();
 		return NULL;
+	}
 	w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
 	if (!w)
 		return NULL;
 	MultiByteToWideChar(CP_UTF8, 0, path, -1, w, n);
-	h = LoadLibraryW(w);
+
+	dir = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
+	if (dir) {
+		wchar_t *slash;
+		memcpy(dir, w, (size_t)n * sizeof(wchar_t));
+		slash = wcsrchr(dir, L'\\');
+		if (!slash)
+			slash = wcsrchr(dir, L'/');
+		if (slash) {
+			*slash = L'\0';
+			SetDllDirectoryW(dir);
+			{
+				wchar_t pathenv[32768];
+				DWORD plen = GetEnvironmentVariableW(L"PATH", pathenv, 32768);
+				if (plen > 0 && plen < 32000) {
+					size_t dlen = wcslen(dir);
+					if (dlen + 1 + plen + 1 < 32768) {
+						wchar_t *merged = (wchar_t *)malloc((dlen + 1 + plen + 1) * sizeof(wchar_t));
+						if (merged) {
+							memcpy(merged, dir, dlen * sizeof(wchar_t));
+							merged[dlen] = L';';
+							memcpy(merged + dlen + 1, pathenv, (plen + 1) * sizeof(wchar_t));
+							SetEnvironmentVariableW(L"PATH", merged);
+							free(merged);
+						}
+					}
+				} else {
+					SetEnvironmentVariableW(L"PATH", dir);
+				}
+			}
+		}
+	}
+
+	h = LoadLibraryExW(w, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+	if (!h)
+		h = LoadLibraryW(w);
+	if (!h)
+		g_kotv_dl_err = GetLastError();
+	free(dir);
 	free(w);
 	return h;
+}
+
+static unsigned long kotv_dlopen_last_error(void) {
+	return (unsigned long)g_kotv_dl_err;
 }
 #define kotv_dlsym GetProcAddress
 #define kotv_dlclose FreeLibrary
@@ -30,6 +82,7 @@ static kotv_lib_t kotv_dlopen(const char *path) {
 #include <dlfcn.h>
 typedef void *kotv_lib_t;
 #define kotv_dlopen(path) dlopen(path, RTLD_NOW | RTLD_LOCAL)
+static unsigned long kotv_dlopen_last_error(void) { return 0; }
 #define kotv_dlsym dlsym
 #define kotv_dlclose dlclose
 #endif
@@ -131,7 +184,14 @@ int kotv_embedpy_init(const char *py_lib, const char *py_home, char *errbuf, int
 	}
 	g_py_lib = kotv_dlopen(py_lib);
 	if (!g_py_lib) {
-		write_err(errbuf, errbuf_len, "dlopen libpython failed");
+		char msg[768];
+#if defined(_WIN32)
+		snprintf(msg, sizeof(msg), "dlopen libpython failed path=%s GetLastError=%lu",
+		         py_lib, kotv_dlopen_last_error());
+#else
+		snprintf(msg, sizeof(msg), "dlopen libpython failed path=%s", py_lib);
+#endif
+		write_err(errbuf, errbuf_len, msg);
 		return -2;
 	}
 	if (load_symbols(errbuf, errbuf_len) != 0)

@@ -11,6 +11,7 @@ package embedpy
 import "C"
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -168,8 +169,18 @@ func ensureGlobal() error {
 		inited = true
 		return initErr
 	}
+	if abs, err := filepath.Abs(lib); err == nil {
+		lib = abs
+	}
+	home := pythonHomeFromLib(lib)
+	if runtime.GOOS == "windows" && home != "" {
+		path := os.Getenv("PATH")
+		if !strings.Contains(path, home) {
+			_ = os.Setenv("PATH", home+string(os.PathListSeparator)+path)
+		}
+	}
 	resp := make(chan error, 1)
-	reqCh <- initMsg{lib: lib, home: pythonHomeFromLib(lib), resp: resp}
+	reqCh <- initMsg{lib: lib, home: home, resp: resp}
 	initErr = <-resp
 	inited = true
 	return initErr

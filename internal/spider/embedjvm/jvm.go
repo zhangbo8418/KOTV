@@ -199,26 +199,28 @@ func Started() bool { return started.Load() }
 
 func prependJVMLibraryPath(jvmLib string) {
 	jvmLib = filepath.Clean(jvmLib)
-	serverDir := filepath.Dir(jvmLib)
-	jreLib := filepath.Dir(serverDir)
+	serverDir := filepath.Dir(jvmLib) // .../jre/bin/server
+	binDir := filepath.Dir(serverDir) // .../jre/bin
+	jreHome := filepath.Dir(binDir)   // .../jre
 	if runtime.GOOS == "windows" {
-		bin := filepath.Join(filepath.Dir(jreLib), "bin")
+		_ = os.Setenv("JAVA_HOME", jreHome)
 		path := os.Getenv("PATH")
-		if !strings.Contains(path, bin) {
-			_ = os.Setenv("PATH", bin+string(os.PathListSeparator)+path)
+		prefix := binDir + string(os.PathListSeparator) + serverDir
+		if !strings.Contains(path, binDir) {
+			_ = os.Setenv("PATH", prefix+string(os.PathListSeparator)+path)
 		}
 		return
 	}
 	if runtime.GOOS == "darwin" {
 		existing := os.Getenv("DYLD_LIBRARY_PATH")
-		merged := serverDir + string(os.PathListSeparator) + jreLib
+		merged := serverDir + string(os.PathListSeparator) + binDir
 		if existing != "" {
 			merged += string(os.PathListSeparator) + existing
 		}
 		_ = os.Setenv("DYLD_LIBRARY_PATH", merged)
 	} else {
 		existing := os.Getenv("LD_LIBRARY_PATH")
-		merged := serverDir + string(os.PathListSeparator) + jreLib
+		merged := serverDir + string(os.PathListSeparator) + binDir
 		if existing != "" {
 			merged += string(os.PathListSeparator) + existing
 		}
