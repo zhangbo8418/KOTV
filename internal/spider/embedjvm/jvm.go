@@ -14,6 +14,7 @@ package embedjvm
 import "C"
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -84,6 +85,10 @@ func doStart(r startReq) error {
 		return nil
 	}
 	log.Printf("embed JVM CreateJavaVM jvm=%s bridge=%s cache=%s", r.jvmLib, r.bridgeJar, r.cacheDir)
+	// 尽快落盘：CreateJavaVM 若 Fatal Error 直接干掉进程，后面的 ready/失败日志写不出来。
+	if f, ok := log.Writer().(*os.File); ok {
+		_ = f.Sync()
+	}
 	cJvm := C.CString(r.jvmLib)
 	cJar := C.CString(r.bridgeJar)
 	cCache := C.CString(r.cacheDir)
@@ -156,16 +161,76 @@ func EnsureStarted(bridgeJar string) error {
 	if bridgeJar == "" {
 		return fmt.Errorf("未找到 spider-bridge.jar")
 	}
+	cacheDir := paths.Root()
+	if runtime.GOOS == "windows" {
+		// HotSpot 对中文用户目录 / 「Program Files\KO影视」路径极敏感，甚至 Fatal Error 杀进程。
+		// bridge/cache 改放到 ASCII 的 ProgramData；jvm.dll 仍从原 runtime 加载（短路径转换在 C 侧）。
+		safe := windowsSafeEmbedDir()
+		if abs, err := materializeBridgeJar(bridgeJar, filepath.Join(safe, "spider-bridge.jar")); err == nil {
+			bridgeJar = abs
+		} else {
+			log.Printf("embed JVM bridge 复制到 ProgramData 失败，回落原路径: %v", err)
+		}
+		cacheDir = filepath.Join(safe, "cache")
+		_ = os.MkdirAll(cacheDir, 0o755)
+	}
 	prependJVMLibraryPath(jvmLib)
 	resp := make(chan error, 1)
 	reqCh <- startReq{
 		jvmLib:    jvmLib,
 		bridgeJar: bridgeJar,
-		cacheDir:  paths.Root(),
+		cacheDir:  cacheDir,
 		proxyPort: localproxy.Port(),
 		resp:      resp,
 	}
 	return <-resp
+}
+
+func windowsSafeEmbedDir() string {
+	base := strings.TrimSpace(os.Getenv("ProgramData"))
+	if base == "" {
+		base = `C:\ProgramData`
+	}
+	dir := filepath.Join(base, "KOTV", "embed")
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
+}
+
+func materializeBridgeJar(src, dst string) (string, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+	st, err := in.Stat()
+	if err != nil {
+		return "", err
+	}
+	if cur, err := os.Stat(dst); err == nil && cur.Size() == st.Size() {
+		return dst, nil
+	}
+	_ = os.MkdirAll(filepath.Dir(dst), 0o755)
+	tmp := dst + ".tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return "", err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(tmp)
+		return "", copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return "", closeErr
+	}
+	_ = os.Remove(dst)
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	return dst, nil
 }
 
 // Call 调用 SpiderBridge.call(JSON)。所有 JNI 走专用 OS 线程。
