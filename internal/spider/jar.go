@@ -48,7 +48,7 @@ func clearJar() {
 	jarPath = ""
 	configBase = ""
 	jarMu.Unlock()
-	// destroy spiders and drop loaders；进程内 embed 不能再 DestroyJavaVM（无法可靠重建）。
+	// destroy spiders and drop loaders；向 bridge 发 clear；独立进程可按需 Kill 重建。
 	req := bridgeRequest{Method: "clear"}
 	if payload, err := json.Marshal(req); err == nil {
 		_, _ = callJavaBridge(payload)

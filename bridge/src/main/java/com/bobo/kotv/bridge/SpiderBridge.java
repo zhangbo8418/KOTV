@@ -93,7 +93,7 @@ public class SpiderBridge {
                 clear();
                 return "{}";
             }
-            // 打断卡住的 OkHttp 调用；进程内 embed 不能靠 DestroyJavaVM 模拟杀子进程。
+            // 打断卡住的 OkHttp 调用（换源/关停时）。
             if ("cancelAll".equals(method)) {
                 try {
                     com.github.catvod.net.OkHttp.cancelAll();
