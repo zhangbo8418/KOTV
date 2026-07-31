@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -183,6 +185,10 @@ func pyRunnerPath() (string, error) {
 func (s *pySpider) run(method string, args map[string]interface{}) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if goruntime.GOOS == "android" {
+		return s.runAndroidLocked(method, args)
+	}
 
 	script, err := s.ensureScript()
 	if err != nil {
@@ -418,6 +424,90 @@ func truncatePyLog(line string) string {
 	}
 	return line
 }
+
+func (s *pySpider) runAndroidLocked(method string, args map[string]interface{}) (string, error) {
+	script, err := s.ensureScript()
+	if err != nil {
+		return "", err
+	}
+	runner, err := pyRunnerPath()
+	if err != nil {
+		return "", err
+	}
+	if !s.inited && method != "init" {
+		if _, err := s.androidCallPythonLocked("init", map[string]interface{}{"extend": s.ext}, script, runner); err != nil {
+			return "", err
+		}
+		s.inited = true
+	}
+	out, err := s.androidCallPythonLocked(method, args, script, runner)
+	if err != nil {
+		return "", err
+	}
+	if method == "init" {
+		s.inited = true
+	}
+	return out, nil
+}
+
+func (s *pySpider) androidCallPythonLocked(method string, args map[string]interface{}, scriptPath, runnerPath string) (string, error) {
+	const base = "http://127.0.0.1:9979"
+	payload := map[string]interface{}{
+		"runnerPath": runnerPath,
+		"scriptPath": scriptPath,
+		"key":        s.key,
+		"ext":        s.ext,
+		"api":        s.api,
+		"cacheRoot":  paths.PyCache(),
+		"proxyPort":  localproxy.Port(),
+		"method":     method,
+		"args":       args,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodPost, base+"/py/call", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	client := &http.Client{Timeout: pyCallTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("android py call failed: http=%d %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var wrap struct {
+		OK     *bool       `json:"ok"`
+		Error  string      `json:"error"`
+		Result interface{} `json:"result"`
+	}
+	if err := json.Unmarshal(b, &wrap); err != nil {
+		return "", fmt.Errorf("android py call invalid json: %w", err)
+	}
+	if wrap.OK != nil && !*wrap.OK {
+		return "", fmt.Errorf("android py call failed: %s", wrap.Error)
+	}
+	if wrap.Error != "" {
+		return "", fmt.Errorf("android py call failed: %s", wrap.Error)
+	}
+	if wrap.Result == nil {
+		return "{}", nil
+	}
+	switch v := wrap.Result.(type) {
+	case string:
+		return strings.TrimSpace(v), nil
+	default:
+		return strings.TrimSpace(fmt.Sprint(v)), nil
+	}
+}
+
 func (s *pySpider) HomeContent(filter bool) (string, error) {
 	return s.run("homeContent", map[string]interface{}{"filter": filter})
 }

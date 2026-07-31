@@ -52,6 +52,7 @@ func (s *SiteService) InvalidateLoads() {
 	spider.InterruptScriptSpiders()
 	spider.InterruptJavaBridge()
 	spider.ResetScriptSpiders()
+	spider.ClearJarBridgeOnSwitch()
 }
 
 // HomeLoadEpoch 返回当前加载世代，供 UI 丢弃过期结果。

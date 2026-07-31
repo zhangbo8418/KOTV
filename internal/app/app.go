@@ -293,6 +293,8 @@ func (a *App) openPushURL(url string) {
 
 func (a *App) Shutdown() {
 	a.Sites.InvalidateLoads()
+	spider.InterruptScriptSpiders()
+	spider.ShutdownJavaBridge()
 	dlna.StopRenderer()
 	player.Stop()
 	a.Server.Stop()

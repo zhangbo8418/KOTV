@@ -27,4 +27,5 @@ func main() {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-ch
 	log.Printf("engine stopping: %v", sig)
+	a.Shutdown()
 }

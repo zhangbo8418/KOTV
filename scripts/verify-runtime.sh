@@ -33,6 +33,7 @@ case "$PLAT" in
     need_dir "$RT/jre/lib"
     need_file "$RT/jre/lib/libjli.dylib"
     need_file "$RT/jre/lib/server/libjvm.dylib"
+    need_any_file "$RT/python/bin/python3" "$RT/python/bin/python"
     need_any_file "$RT/libvlc/libvlc.dylib" "$RT/libvlc/libvlc.5.dylib"
     if ! "$RT/jre/bin/java" -version >/dev/null 2>&1; then
       die "bundled java failed to start (check libjli / quarantine)"
@@ -65,6 +66,7 @@ case "$PLAT" in
     need_file "$RT/jre/bin/java"
     need_dir "$RT/jre/lib"
     need_file "$RT/jre/lib/server/libjvm.so"
+    need_any_file "$RT/python/bin/python3" "$RT/python/bin/python"
     need_any_file "$RT/libvlc/libvlc.so" "$RT/libvlc/libvlc.so.5"
     ;;
   *)

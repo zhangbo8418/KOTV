@@ -2,13 +2,17 @@ package spider
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,11 +23,11 @@ import (
 	appruntime "github.com/bobo/KOTV/internal/runtime"
 )
 
-// 无效源网络超时不应拖死换源；超时后立刻杀掉 bridge，让有效源马上重试。
-const javaBridgeCallTimeout = 12 * time.Second
-
 // ErrJavaBridgeInterrupted 表示调用被换源/关闭主动打断，不应再重试同一请求。
 var ErrJavaBridgeInterrupted = errors.New("JAR 调用已中断")
+
+// 桌面：独立 java -jar --serve。超时后 Kill 并允许重建。
+const javaBridgeCallTimeout = 120 * time.Second
 
 type javaBridgeClient struct {
 	mu         sync.Mutex
@@ -37,12 +41,12 @@ type javaBridgeClient struct {
 
 var javaBridge javaBridgeClient
 
-// 点播配置的网络参数（headers/proxy/hosts/doh），在每个新 worker 启动时重放，
-// 把配置灌入 OkHttp 拦截器/选择器/DNS 的行为。
+// 点播配置的网络参数（headers/proxy/hosts/doh），在每个新 worker 启动时重放。
 var (
 	netConfigMu   sync.Mutex
 	netConfigJSON []byte
 	userProxyJSON []byte
+	netPrimed     bool // Android HTTP 用
 )
 
 // SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp。
@@ -67,14 +71,13 @@ func SetNetConfig(headers, proxy, hosts, doh []byte) {
 	}
 	netConfigMu.Lock()
 	netConfigJSON = payload
+	netPrimed = false
 	netConfigMu.Unlock()
 	// 仅热更新已存活的 bridge；不在换源解析时冷启动 JVM。
-	// 冷启动会在 LoadJar / 首次 JAR 调用的 startLocked 里发生，并重放 currentNetConfig。
-	javaBridge.pushIfAlive(payload)
+	pushBridgeIfAlive(payload)
 }
 
-// SetUserProxy 把 KOTV 用户代理设置下发到 bridge，令 JAR 请求在未命中配置 proxy 规则时也走用户代理。
-// spec 为设置里的原始值（如 "false#" 或 "true#http://127.0.0.1:7890"）。
+// SetUserProxy 把 KOTV 用户代理设置下发到 bridge。
 func SetUserProxy(spec string) {
 	spec = strings.TrimSpace(spec)
 	url := ""
@@ -92,8 +95,9 @@ func SetUserProxy(spec string) {
 	}
 	netConfigMu.Lock()
 	userProxyJSON = payload
+	netPrimed = false
 	netConfigMu.Unlock()
-	javaBridge.pushIfAlive(payload)
+	pushBridgeIfAlive(payload)
 }
 
 func currentNetConfig() [][]byte {
@@ -109,20 +113,52 @@ func currentNetConfig() [][]byte {
 	return out
 }
 
-// callJavaBridge 通过常驻捆绑 Java 进程调用 spider-bridge（JVM 只启动一次）。
+// callJavaBridge：桌面走独立 java -jar --serve；Android 走 Native Service HTTP。
 func callJavaBridge(payload []byte) (string, error) {
+	if runtime.GOOS == "android" {
+		if err := primeAndroidNetConfigOnce(); err != nil {
+			return "", err
+		}
+		return androidCallJavaBridge(payload)
+	}
 	return javaBridge.call(payload)
 }
 
-// InterruptJavaBridge 打断卡住的 JAR 调用，并作废当前请求的自动重试。
+// InterruptJavaBridge 打断卡住的 JAR：抬 epoch 并 Kill 独立 java 进程。
 func InterruptJavaBridge() {
+	if runtime.GOOS == "android" {
+		return
+	}
 	javaBridge.epoch.Add(1)
 	if p := javaBridge.proc.Load(); p != nil {
 		_ = p.Kill()
 	}
 }
 
-// pushIfAlive 向已运行的 bridge 下发配置；进程不存在时不启动（避免 loadConfig 强制拉 JVM）。
+// ShutdownJavaBridge 引擎退出时杀掉独立 JVM。
+func ShutdownJavaBridge() {
+	if runtime.GOOS == "android" {
+		return
+	}
+	javaBridge.epoch.Add(1)
+	javaBridge.mu.Lock()
+	defer javaBridge.mu.Unlock()
+	javaBridge.stopLocked()
+}
+
+// ClearJarBridgeOnSwitch 换站时清空 Go 侧 jar 缓存，并向 bridge 发 clear。
+func ClearJarBridgeOnSwitch() {
+	jarMu.Lock()
+	jarSpiders = map[string]*jarSpider{}
+	jarMu.Unlock()
+	req := bridgeRequest{Method: "clear"}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return
+	}
+	_, _ = callJavaBridge(payload)
+}
+
 func (w *javaBridgeClient) pushIfAlive(payload []byte) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -228,12 +264,13 @@ func (w *javaBridgeClient) startLocked() error {
 		"-Dsun.net.client.defaultConnectTimeout=8000",
 		"-Dsun.net.client.defaultReadTimeout=10000",
 		"-Dfile.encoding=UTF-8",
+		"--add-opens=java.base/java.lang=ALL-UNNAMED",
+		"--add-opens=java.base/java.util=ALL-UNNAMED",
 		"-jar", bridgeJar,
 		"--serve",
 	)
 	cmd.Dir = filepath.Dir(bridgeJar)
 	cmd.Env = append(filterProxyEnv(os.Environ()), fmt.Sprintf("KOTV_PROXY_PORT=%d", proxyPort))
-	// GUI 子系统下 os.Stderr 常不可见；写入日志便于诊断 EOF（JRE 缺库/bridge 崩）。
 	_ = os.MkdirAll(paths.LogDir(), 0o755)
 	stderrPath := filepath.Join(paths.LogDir(), "java-bridge.err.log")
 	stderrFile, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -273,8 +310,8 @@ func (w *javaBridgeClient) startLocked() error {
 	w.stdout = bufio.NewReader(stdout)
 	w.stderrFile = stderrFile
 	w.proc.Store(cmd.Process)
+	log.Printf("java bridge started pid=%d jar=%s", cmd.Process.Pid, bridgeJar)
 
-	// 新 worker 启动后重放点播网络配置与用户代理，重启进程也会重新灌入 OkHttp。
 	for _, cfg := range currentNetConfig() {
 		if err := w.primeLocked(cfg); err != nil {
 			hint := readBridgeErrTail(stderrPath)
@@ -301,7 +338,6 @@ func readBridgeErrTail(path string) string {
 	return s
 }
 
-// primeLocked 在启动新进程后同步下发一次配置请求（configNet 只做内存写入，返回极快）。
 func (w *javaBridgeClient) primeLocked(payload []byte) error {
 	req := append(append([]byte(nil), bytesTrimSpace(payload)...), '\n')
 	if _, err := w.stdin.Write(req); err != nil {
@@ -356,4 +392,84 @@ func filterProxyEnv(env []string) []string {
 
 func bytesTrimSpace(b []byte) []byte {
 	return []byte(strings.TrimSpace(string(b)))
+}
+
+func pushBridgeIfAlive(payload []byte) {
+	if runtime.GOOS == "android" {
+		client := &http.Client{Timeout: 300 * time.Millisecond}
+		resp, err := client.Get("http://127.0.0.1:9979/health")
+		if err != nil {
+			return
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			return
+		}
+		_, _ = androidCallJavaBridgeShort(payload)
+		netConfigMu.Lock()
+		netPrimed = true
+		netConfigMu.Unlock()
+		return
+	}
+	javaBridge.pushIfAlive(payload)
+}
+
+func primeAndroidNetConfigOnce() error {
+	netConfigMu.Lock()
+	if netPrimed {
+		netConfigMu.Unlock()
+		return nil
+	}
+	cfgs := make([][]byte, 0, 2)
+	if len(netConfigJSON) > 0 {
+		cfgs = append(cfgs, append([]byte(nil), netConfigJSON...))
+	}
+	if len(userProxyJSON) > 0 {
+		cfgs = append(cfgs, append([]byte(nil), userProxyJSON...))
+	}
+	netPrimed = true
+	netConfigMu.Unlock()
+
+	for _, cfg := range cfgs {
+		if _, err := androidCallJavaBridge(cfg); err != nil {
+			netConfigMu.Lock()
+			netPrimed = false
+			netConfigMu.Unlock()
+			return fmt.Errorf("下发网络配置到 Android jar bridge 失败: %w", err)
+		}
+	}
+	return nil
+}
+
+func androidCallJavaBridge(payload []byte) (string, error) {
+	return androidPostJar(payload, 20*time.Second)
+}
+
+func androidCallJavaBridgeShort(payload []byte) (string, error) {
+	return androidPostJar(payload, 2*time.Second)
+}
+
+func androidPostJar(payload []byte, timeout time.Duration) (string, error) {
+	const base = "http://127.0.0.1:9979"
+	req, err := http.NewRequest(http.MethodPost, base+"/jar/call", bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	s := strings.TrimSpace(string(b))
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("android jar call failed: http=%d %s", resp.StatusCode, s)
+	}
+	if s == "" {
+		return "", fmt.Errorf("android jar call empty response")
+	}
+	return s, nil
 }
