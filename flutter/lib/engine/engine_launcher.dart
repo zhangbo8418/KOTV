@@ -340,6 +340,28 @@ class EngineLauncher {
     // 未托管时不要乱 pkill：可能正被另一个 UI 实例使用。
   }
 
+  /// 关程序专用：同步杀掉本进程托管的引擎，再 `exit`，避免残留与 await 挂死。
+  void shutdownSync() {
+    final proc = _proc;
+    _proc = null;
+    final owned = _owned;
+    _owned = false;
+    if (proc == null || !owned) return;
+    if (Platform.isWindows) {
+      try {
+        Process.runSync('taskkill', ['/F', '/PID', '${proc.pid}']);
+      } catch (_) {
+        try {
+          proc.kill();
+        } catch (_) {}
+      }
+      return;
+    }
+    try {
+      proc.kill(ProcessSignal.sigterm);
+    } catch (_) {}
+  }
+
   void dispose() {
     unawaited(shutdown());
   }
