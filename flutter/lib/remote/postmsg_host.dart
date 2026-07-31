@@ -9,9 +9,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api/kotv_api.dart';
 
 /// 通用宿主弹窗：只认协议 [UI:] / [UI_CLOSE:]，不关心业务。
-/// JAR/JS/Py 决定框多大、内容是什么；宿主只负责展示与关闭，并回报窗口生命周期：
-/// - 路由挂上 → `shown`
-/// - 路由卸掉 → `closed`
+/// 脚本（JAR/JS/Py）决定内容与时机；宿主只负责：
+/// - 展示 → 回报 `shown`
+/// - 关闭 → 回报 `closed`
 ///
 /// 不做「原地换文档」：若已有窗时又来 [UI:]，先关旧窗（等 closed），再开新窗。
 class PostMsgHost {
@@ -53,6 +53,9 @@ class PostMsgHost {
   /// 关旧开新时暂存下一份文档。
   Map<String, dynamic>? _pendingDoc;
 
+  /// 生命周期 uiReply 单飞队列，保证同 id shown 先于 closed 入引擎。
+  Future<void> _replyChain = Future<void>.value();
+
   String _lastToast = '';
   DateTime _lastToastAt = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -75,14 +78,13 @@ class PostMsgHost {
   Future<void> cancelAll({bool reply = true, bool popDialog = true}) async {
     final id = _activeId ?? _lifecycleId;
     if (reply && id != null && id.isNotEmpty) {
-      unawaited(api.uiReply(id: id, action: 'dismiss'));
+      await _enqueueReply(id: id, action: 'dismiss');
     }
     _pendingDoc = null;
     if (popDialog || _sessionActive || _opening) {
       _dismiss();
     } else {
       _activeId = null;
-      _doc.value = null;
       _timeout?.cancel();
       _timeout = null;
     }
@@ -181,7 +183,7 @@ class PostMsgHost {
 
     final ctx = navigatorKey.currentContext;
     if (ctx == null) {
-      unawaited(api.uiReply(id: id, action: 'closed'));
+      unawaited(_enqueueReply(id: id, action: 'closed'));
       _resetIdleState();
       return;
     }
@@ -199,7 +201,7 @@ class PostMsgHost {
     final id = '${doc['id']}';
     _timeout = Timer(Duration(milliseconds: timeoutMs), () {
       if (_activeId != id) return;
-      unawaited(api.uiReply(id: id, action: 'timeout'));
+      unawaited(_enqueueReply(id: id, action: 'timeout'));
       _dismiss();
     });
   }
@@ -218,12 +220,12 @@ class PostMsgHost {
     _timeout?.cancel();
     _timeout = null;
     _activeId = null;
-    _doc.value = null;
+    // 不要立刻清空 _doc：保留最后一帧直到路由卸掉，避免空 barrier 闪烁。
     _closedBeforeShow = true;
     _popDialogRoute();
     // 若 showDialog 还没挂上就取消：直接回报 closed。
     if (!_sessionActive && !_opening) {
-      _reportClosed();
+      unawaited(_reportClosed());
     } else if (_opening && _dialogContext == null) {
       // builder 尚未跑；等 finally / 早退路径回报。
     }
@@ -242,18 +244,35 @@ class PostMsgHost {
     nav.pop();
   }
 
-  void _reportShown(String id) {
-    if (_reportedShown || id.isEmpty) return;
-    _reportedShown = true;
-    unawaited(api.uiReply(id: id, action: 'shown'));
+  Future<void> _enqueueReply({
+    required String id,
+    required String action,
+    Map<String, String>? values,
+  }) {
+    final done = Completer<void>();
+    _replyChain = _replyChain.catchError((_) {}).then((_) async {
+      try {
+        await api.uiReply(id: id, action: action, values: values);
+      } catch (_) {
+      } finally {
+        if (!done.isCompleted) done.complete();
+      }
+    });
+    return done.future;
   }
 
-  void _reportClosed() {
+  Future<void> _reportShown(String id) async {
+    if (_reportedShown || id.isEmpty) return;
+    _reportedShown = true;
+    await _enqueueReply(id: id, action: 'shown');
+  }
+
+  Future<void> _reportClosed() async {
     if (_reportedClosed) return;
     final id = (_lifecycleId ?? '').trim();
     if (id.isEmpty) return;
     _reportedClosed = true;
-    unawaited(api.uiReply(id: id, action: 'closed'));
+    await _enqueueReply(id: id, action: 'closed');
   }
 
   void _resetIdleState() {
@@ -283,7 +302,7 @@ class PostMsgHost {
       if (_doc.value == null || _closedBeforeShow) {
         _sessionActive = false;
         _opening = false;
-        _reportClosed();
+        await _reportClosed();
         return;
       }
 
@@ -296,18 +315,21 @@ class PostMsgHost {
           _opening = false;
           mountedRoute = true;
 
-          if (_closedBeforeShow || _doc.value == null) {
+          if (_closedBeforeShow) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _popDialogRoute();
-              _reportClosed();
+              unawaited(_reportClosed());
             });
-            return const SizedBox.shrink();
+            // 仍渲染当前文档一帧，避免空 barrier 闪烁；随即 pop。
+            final doc = _doc.value;
+            if (doc == null) return const SizedBox.shrink();
+            return _buildDialogShell(doc);
           }
 
           final shownId = _lifecycleId ?? _activeId ?? '';
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!_closedBeforeShow && _doc.value != null && shownId.isNotEmpty) {
-              _reportShown(shownId);
+              unawaited(_reportShown(shownId));
             }
           });
 
@@ -317,10 +339,9 @@ class PostMsgHost {
               if (!didPop) return;
               if (!_programmaticClose) {
                 if (_lifecycleId != null) {
-                  unawaited(api.uiReply(id: _lifecycleId!, action: 'dismiss'));
+                  unawaited(_enqueueReply(id: _lifecycleId!, action: 'dismiss'));
                 }
                 _activeId = null;
-                _doc.value = null;
               }
               _dialogContext = null;
             },
@@ -348,7 +369,7 @@ class PostMsgHost {
 
                     Future<void> fire(String action, {bool dismissAfter = false}) async {
                       final id = '${doc['id']}';
-                      await api.uiReply(id: id, action: action, values: collect());
+                      await _enqueueReply(id: id, action: action, values: collect());
                       if (dismissAfter) {
                         _dismiss();
                       }
@@ -419,7 +440,7 @@ class PostMsgHost {
       selects.clear();
 
       if (mountedRoute || _reportedShown || _lifecycleId != null) {
-        _reportClosed();
+        await _reportClosed();
       }
 
       _dialogContext = null;
@@ -439,10 +460,28 @@ class PostMsgHost {
       _reportedClosed = false;
 
       if (pending != null) {
-        // 旧窗 closed 已入队；再开新窗。
+        // closed 已 await 入队后再开新窗。
         _show(pending);
       }
     }
+  }
+
+  /// 关窗瞬间仍展示最后一帧内容（无交互），避免空 barrier。
+  Widget _buildDialogShell(Map<String, dynamic> doc) {
+    final title = '${doc['title'] ?? ''}';
+    final width = (doc['width'] is num) ? (doc['width'] as num).toDouble() : 420.0;
+    final height = (doc['height'] is num) ? (doc['height'] as num).toDouble() : 480.0;
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A1028),
+      title: title.isEmpty ? null : Text(title, style: const TextStyle(color: Colors.white)),
+      content: SizedBox(
+        width: width.clamp(200, 900),
+        height: height.clamp(120, 900),
+        child: const Center(
+          child: CircularProgressIndicator(color: Colors.white54),
+        ),
+      ),
+    );
   }
 
   List<Widget> _buildElement(
