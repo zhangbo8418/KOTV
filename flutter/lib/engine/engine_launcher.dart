@@ -15,6 +15,7 @@ class EngineLauncher {
   Process? _proc;
   Future<void>? _starting;
   bool _owned = false;
+  bool _androidSpiderServiceStarted = false;
   String baseUrl = 'http://127.0.0.1:9978';
   DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -29,6 +30,12 @@ class EngineLauncher {
       if (baseUrl != 'http://127.0.0.1:9978' && await _pingReady('http://127.0.0.1:9978')) {
         baseUrl = 'http://127.0.0.1:9978';
         return true;
+      }
+      // 本进程托管的引擎若已退出，再拉一次；禁止在仍存活时 pkill 重开（竞态根因）。
+      if (_owned && _proc != null && !await _procAlive(_proc!)) {
+        _owned = false;
+        _proc = null;
+        await _startOnce();
       }
       await Future<void>.delayed(const Duration(milliseconds: 400));
     }
@@ -58,6 +65,25 @@ class EngineLauncher {
     try {
       final h = await KotvApi(baseUrl: base).health().timeout(const Duration(seconds: 2));
       return h['ok'] == true && h['ready'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _procAlive(Process proc) async {
+    if (!Platform.isWindows) {
+      try {
+        final r = await Process.run('kill', ['-0', '${proc.pid}']);
+        return r.exitCode == 0;
+      } catch (_) {
+        return false;
+      }
+    }
+    try {
+      await proc.exitCode.timeout(const Duration(milliseconds: 1));
+      return false; // 已退出
+    } on TimeoutException {
+      return true;
     } catch (_) {
       return false;
     }
@@ -117,15 +143,31 @@ class EngineLauncher {
     if (kIsWeb || Platform.isIOS) return;
     _lastStartAttempt = DateTime.now();
     try {
-      // 已由本进程拉起且仍存活：直接复用
-      if (_owned && _proc != null && await _ping('http://127.0.0.1:9978')) {
+      await _ensureAndroidSpiderService();
+
+      // 1) 端口上已有健康引擎：直接复用，绝不要 pkill（多窗口/重试竞态根因）。
+      if (await _ping('http://127.0.0.1:9978')) {
         baseUrl = 'http://127.0.0.1:9978';
+        debugPrint('engine reuse: already healthy on 9978');
         return;
       }
 
-      // 清掉残留（旧 nohup / Debug），再由本进程作为父进程托管
-      await _killStrayEngines();
+      // 2) 本进程已 spawn、只是还没 ready：继续等，不要杀了重开。
+      if (_owned && _proc != null && await _procAlive(_proc!)) {
+        debugPrint('engine wait: owned pid=${_proc!.pid} still starting');
+        return;
+      }
+
+      // 3) 清真正残留，但排除本进程刚拉起的 pid。
+      await _killStrayEngines(exceptPid: _proc?.pid);
       await Future<void>.delayed(const Duration(milliseconds: 250));
+
+      // 清完后再探一次，避免和另一 UI 实例撞车。
+      if (await _ping('http://127.0.0.1:9978')) {
+        baseUrl = 'http://127.0.0.1:9978';
+        debugPrint('engine reuse: healthy after stray cleanup');
+        return;
+      }
 
       final env = _runtimeEnv();
       final exeName = Platform.isWindows ? 'kotv-engine.exe' : 'kotv-engine';
@@ -153,10 +195,31 @@ class EngineLauncher {
     }
   }
 
-  Future<void> _killStrayEngines() async {
+  Future<void> _ensureAndroidSpiderService() async {
+    if (!Platform.isAndroid) return;
+    if (_androidSpiderServiceStarted) return;
+    _androidSpiderServiceStarted = true;
+
+    const ch = MethodChannel('kotv_android_spider');
+    try {
+      await ch.invokeMethod<void>('start');
+    } catch (e) {
+      // ignore: 若 native 侧已在运行或 ROM 限制，后续由 go 引擎重试/失败兜底处理。
+      debugPrint('android spider service start failed: $e');
+    }
+    // 给 native 线程一点时间完成 DexClassLoader / Chaquopy init。
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+  }
+
+  Future<void> _killStrayEngines({int? exceptPid}) async {
     if (Platform.isWindows) {
       try {
-        await Process.run('taskkill', ['/F', '/IM', 'kotv-engine.exe']);
+        // 不误杀刚启动、尚未 listen 的本进程引擎。
+        if (exceptPid != null && exceptPid > 0) {
+          await Process.run('taskkill', ['/F', '/IM', 'kotv-engine.exe', '/FI', 'PID ne $exceptPid']);
+        } else {
+          await Process.run('taskkill', ['/F', '/IM', 'kotv-engine.exe']);
+        }
       } catch (_) {}
       return;
     }
@@ -167,7 +230,14 @@ class EngineLauncher {
       'assets/engine/kotv-engine',
     ]) {
       try {
-        await Process.run('pkill', ['-f', pat]);
+        final r = await Process.run('pgrep', ['-f', pat]);
+        if (r.exitCode != 0) continue;
+        for (final line in '${r.stdout}'.split(RegExp(r'\s+'))) {
+          final id = int.tryParse(line.trim());
+          if (id == null || id <= 0) continue;
+          if (exceptPid != null && id == exceptPid) continue;
+          Process.killPid(id, ProcessSignal.sigterm);
+        }
       } catch (_) {}
     }
   }
@@ -208,31 +278,33 @@ class EngineLauncher {
   }
 
   /// UI 进程异常退出时杀掉引擎，避免「窗口没了引擎还在」。
+  /// Windows 不用 PowerShell：Win7 上隐藏 powershell 看门狗常直接 WER 崩溃弹窗。
   Future<void> _armOrphanWatchdog(int enginePid, IOSink log) async {
     final uiPid = pid;
     if (Platform.isWindows) {
       try {
+        // cmd 轮询：UI PID 消失后 taskkill 引擎。
         await Process.start(
-          'powershell.exe',
+          'cmd.exe',
           [
-            '-NoProfile',
-            '-WindowStyle',
-            'Hidden',
-            '-Command',
-            '\$ui=$uiPid; \$eng=$enginePid; '
-                'while (Get-Process -Id \$ui -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }; '
-                'Stop-Process -Id \$eng -Force -ErrorAction SilentlyContinue; '
-                'Get-Process -Name kotv-engine -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
+            '/d',
+            '/c',
+            'for /l %i in (0,0,1) do @('
+                'tasklist /FI "PID eq $uiPid" 2>nul | find "$uiPid" >nul || ('
+                'taskkill /F /PID $enginePid >nul 2>&1 & exit /b 0'
+                ') & ping -n 2 127.0.0.1 >nul'
+                ')',
           ],
           mode: ProcessStartMode.detached,
         );
-        log.writeln('orphan-watchdog armed ui=$uiPid engine=$enginePid');
+        log.writeln('orphan-watchdog armed (cmd) ui=$uiPid engine=$enginePid');
       } catch (e) {
         log.writeln('orphan-watchdog failed: $e');
       }
       return;
     }
     // macOS / Linux：后台轮询父进程；UI 没了就杀引擎。
+    // 只杀本 enginePid，避免误杀其它窗口刚拉起的引擎。
     try {
       await Process.start(
         '/bin/sh',
@@ -271,8 +343,7 @@ class EngineLauncher {
       return;
     }
 
-    // 兜底：清掉仍可能残留的引擎
-    await _killStrayEngines();
+    // 未托管时不要乱 pkill：可能正被另一个 UI 实例使用。
   }
 
   void dispose() {
