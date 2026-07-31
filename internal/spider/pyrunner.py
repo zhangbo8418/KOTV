@@ -14,22 +14,55 @@ def _prepend_sys_path(*candidates):
             sys.path.insert(0, path)
 
 
+def _python_home_candidates():
+    homes = []
+    for key in ("PYTHONHOME", "KOTV_PYTHON_HOME"):
+        v = os.environ.get(key, "").strip()
+        if v:
+            homes.append(v)
+    # 进程内 embed：sys.executable 常是 kotv-engine，不能只靠它找 site-packages
+    exe = os.path.abspath(getattr(sys, "executable", "") or "")
+    if exe:
+        exe_dir = os.path.dirname(exe)
+        homes.extend([
+            exe_dir,
+            os.path.dirname(exe_dir),
+            os.path.join(os.path.dirname(exe_dir), "python"),
+            os.path.join(os.path.dirname(os.path.dirname(exe_dir)), "Resources", "runtime", "python"),
+            os.path.join(os.path.dirname(os.path.dirname(exe_dir)), "runtime", "python"),
+        ])
+    rt = os.environ.get("KOTV_RUNTIME", "").strip()
+    if rt:
+        homes.append(os.path.join(rt, "python"))
+        homes.append(rt)
+    # 去重保序
+    out, seen = [], set()
+    for h in homes:
+        h = os.path.abspath(h) if h else ""
+        if h and h not in seen:
+            seen.add(h)
+            out.append(h)
+    return out
+
+
 def _ensure_bundled_site_packages():
     """Windows embed 的 python*._pth 常忽略 PYTHONPATH；显式把 Lib/site-packages 塞进 sys.path。"""
-    exe = os.path.abspath(sys.executable)
-    exe_dir = os.path.dirname(exe)
-    # install_only / embed 布局
-    _prepend_sys_path(
-        os.path.join(exe_dir, "Lib", "site-packages"),
-        os.path.join(exe_dir, "lib", "site-packages"),
-        os.path.join(exe_dir, "lib", "python%d.%d" % sys.version_info[:2], "site-packages"),
-    )
-    # 少数布局：python.exe 在 Scripts/ 下
-    parent = os.path.dirname(exe_dir)
-    _prepend_sys_path(
-        os.path.join(parent, "Lib", "site-packages"),
-        os.path.join(parent, "lib", "site-packages"),
-    )
+    ver = "python%d.%d" % sys.version_info[:2]
+    for home in _python_home_candidates():
+        _prepend_sys_path(
+            os.path.join(home, "Lib", "site-packages"),
+            os.path.join(home, "lib", "site-packages"),
+            os.path.join(home, "lib", ver, "site-packages"),
+            os.path.join(home, "lib", ver),
+            os.path.join(home, "Lib"),
+        )
+        # 少数布局：python.exe 在 Scripts/ 或 bin/ 下
+        parent = os.path.dirname(home)
+        _prepend_sys_path(
+            os.path.join(parent, "Lib", "site-packages"),
+            os.path.join(parent, "lib", "site-packages"),
+            os.path.join(parent, "lib", ver, "site-packages"),
+        )
 
 
 _ensure_bundled_site_packages()
@@ -103,13 +136,96 @@ cache = os.path.abspath(sys.argv[5])
 
 _prepend_sys_path(cache, os.path.dirname(script), os.path.join(cache, "base"))
 
+# 标准库 / 捆绑三方：禁止当依赖从爬虫源目录下载，否则会把 cache 里的假文件盖住真模块。
+_STDLIB_TOP = set(getattr(sys, "stdlib_module_names", ())) | {
+    "abc", "argparse", "array", "asyncio", "atexit", "base64", "binascii", "bisect",
+    "builtins", "bz2", "calendar", "cmath", "codecs", "collections", "concurrent",
+    "contextlib", "copy", "csv", "ctypes", "dataclasses", "datetime", "decimal",
+    "dis", "email", "encodings", "enum", "errno", "fnmatch", "fractions", "functools",
+    "gc", "getopt", "getpass", "gettext", "glob", "gzip", "hashlib", "heapq", "hmac",
+    "html", "http", "idlelib", "imaplib", "importlib", "inspect", "io", "ipaddress",
+    "itertools", "json", "keyword", "linecache", "locale", "logging", "lzma", "math",
+    "mimetypes", "mmap", "multiprocessing", "netrc", "numbers", "operator", "os",
+    "pathlib", "pickle", "pkgutil", "platform", "plistlib", "poplib", "posixpath",
+    "pprint", "profile", "pstats", "pty", "pwd", "py_compile", "queue", "quopri",
+    "random", "re", "reprlib", "secrets", "select", "selectors", "shelve", "shlex",
+    "shutil", "signal", "site", "smtplib", "socket", "socketserver", "sqlite3", "ssl",
+    "stat", "statistics", "string", "struct", "subprocess", "sys", "sysconfig",
+    "tarfile", "tempfile", "textwrap", "threading", "time", "timeit", "token",
+    "tokenize", "tomllib", "trace", "traceback", "tracemalloc", "types", "typing",
+    "unicodedata", "unittest", "urllib", "uuid", "venv", "warnings", "wave",
+    "weakref", "webbrowser", "xml", "xmlrpc", "zipfile", "zipimport", "zlib",
+    "_thread", "__future__",
+    # 常见捆绑库（不应从爬虫仓下载）
+    "requests", "urllib3", "certifi", "charset_normalizer", "idna", "lxml", "bs4",
+    "beautifulsoup4", "Crypto", "Cryptodome", "PIL", "numpy", "socks", "websocket",
+}
+
+
+def _is_blocked_dep_name(name):
+    base = os.path.basename(str(name)).replace(".py", "").strip()
+    if not base:
+        return True
+    top = base.split(".")[0]
+    return top in _STDLIB_TOP
+
+
+def _looks_like_python_source(data):
+    """拒绝把接口错误 JSON 写进 cache（否则会盖住 stdlib，如 concurrent.py）。"""
+    if not data:
+        return False
+    head = data.lstrip()[:800]
+    if not head:
+        return False
+    if head.startswith(b"{") or head.startswith(b"["):
+        # 爬虫仓 404/500 常返回 {"code":500,"message":"...","data":null}
+        if b'"code"' in head[:400] or b'"message"' in head[:400] or b'"data"' in head[:400]:
+            return False
+        # 纯 JSON 依赖极少见；宁可跳过也不要毒化 cache
+        return False
+    return True
+
+
+def _scrub_poisoned_cache():
+    """清掉已写入的假依赖（历史 concurrent.py 等）。"""
+    try:
+        names = os.listdir(cache)
+    except Exception:
+        return
+    for fn in names:
+        if not fn.endswith(".py"):
+            continue
+        path = os.path.join(cache, fn)
+        try:
+            with open(path, "rb") as f:
+                data = f.read(800)
+            # stdlib 同名文件一律删（绝不该在 cache）；其它文件若是错误 JSON 也删
+            top = fn[:-3].split(".")[0]
+            if top in _STDLIB_TOP or not _looks_like_python_source(data):
+                os.remove(path)
+                print("[pyrunner] removed poisoned cache file: %s" % fn, file=sys.stderr)
+        except Exception:
+            pass
+
+
+_scrub_poisoned_cache()
+
 
 def _download_dep(name):
     """从爬虫 api 同目录拉取依赖 py 到 cache（失败忽略，由后续 import 报错）。"""
     name = name if str(name).endswith(".py") else str(name) + ".py"
+    if _is_blocked_dep_name(name):
+        return
     target = os.path.join(cache, os.path.basename(name))
     if os.path.isfile(target) and os.path.getsize(target) > 0:
-        return
+        try:
+            with open(target, "rb") as f:
+                existing = f.read(800)
+            if _looks_like_python_source(existing):
+                return
+            os.remove(target)
+        except Exception:
+            return
     if not str(api).startswith("http"):
         return
     # api 常是 …/foo.py，urljoin 会落到同级 …/t4.py
@@ -117,8 +233,13 @@ def _download_dep(name):
     if not str(dep_url).startswith("http"):
         return
     try:
-        with urlopen(dep_url, timeout=30) as response, open(target, "wb") as output:
-            output.write(response.read())
+        with urlopen(dep_url, timeout=30) as response:
+            data = response.read()
+        if not _looks_like_python_source(data):
+            print("[pyrunner] skip non-python dep %s from %s" % (name, dep_url), file=sys.stderr)
+            return
+        with open(target, "wb") as output:
+            output.write(data)
     except Exception as exc:
         print("[pyrunner] download %s failed: %s" % (name, exc), file=sys.stderr)
 
@@ -133,10 +254,7 @@ def _preload_imports_from_source():
     names = set()
     for m in re.finditer(r"(?:^|\n)\s*(?:import|from)\s+([A-Za-z_][\w]*)", src):
         mod = m.group(1)
-        if mod in ("base", "os", "sys", "re", "json", "time", "requests", "lxml", "Crypto",
-                   "urllib", "urllib3", "bs4", "beautifulsoup4", "hashlib", "base64",
-                   "datetime", "collections", "typing", "math", "random", "copy", "html",
-                   "xml", "http", "ssl", "socket", "threading", "traceback", "importlib"):
+        if _is_blocked_dep_name(mod):
             continue
         names.add(mod + ".py")
     # 常见伴侣模块优先
@@ -265,14 +383,27 @@ def invoke(method, args):
     return encode_result(fn())
 
 
-for line in sys.stdin:
-    line = line.strip()
+def kotv_dispatch_json(line):
+    """供 CGO 嵌入 CPython 调用：单行 JSON 请求 → JSON 响应字符串。"""
+    line = (line or "").strip()
     if not line:
-        continue
+        return json.dumps({"id": None, "ok": False, "error": "empty request"}, ensure_ascii=False)
     req = json.loads(line)
     try:
         result = invoke(req.get("method", ""), req.get("args") or {})
-        print(json.dumps({"id": req.get("id"), "ok": True, "result": result}, ensure_ascii=False), flush=True)
+        return json.dumps({"id": req.get("id"), "ok": True, "result": result}, ensure_ascii=False)
     except Exception as exc:
         traceback.print_exc(file=sys.stderr)
-        print(json.dumps({"id": req.get("id"), "ok": False, "error": str(exc)}, ensure_ascii=False), flush=True)
+        return json.dumps({"id": req.get("id"), "ok": False, "error": str(exc)}, ensure_ascii=False)
+
+
+def kotv_repl():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        print(kotv_dispatch_json(line), flush=True)
+
+
+if __name__ == "__main__":
+    kotv_repl()

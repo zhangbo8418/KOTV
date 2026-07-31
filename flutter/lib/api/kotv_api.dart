@@ -11,7 +11,7 @@ class KotvApi {
       Uri.parse('$baseUrl$path').replace(queryParameters: query);
 
   Future<Map<String, dynamic>> _get(String path, [Map<String, String>? query]) async {
-    final res = await http.get(_u(path, query)).timeout(const Duration(seconds: 60));
+    final res = await http.get(_u(path, query)).timeout(const Duration(seconds: 120));
     return _decode(res);
   }
 

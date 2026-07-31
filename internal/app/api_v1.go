@@ -1007,7 +1007,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 func (a *App) APIPlayerStatus() map[string]any {
 	cur := strings.TrimSpace(settings.Get(settings.Player))
 	if cur == "" {
-		cur = "innie#vlc"
+		cur = "innie#mpv"
 	}
 	decode := strings.TrimSpace(settings.Get(settings.PlayerDecode))
 	if decode == "" {
@@ -1039,7 +1039,7 @@ func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
 		playerVal = settings.Get(settings.Player)
 	}
 	if playerVal == "" {
-		playerVal = "innie#vlc"
+		playerVal = "innie#mpv"
 	}
 	parts := strings.SplitN(playerVal, "#", 2)
 	mode := parts[0]

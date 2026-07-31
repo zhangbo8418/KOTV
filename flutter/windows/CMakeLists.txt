@@ -118,16 +118,17 @@ if(EXISTS "${KOTV_RUNTIME_ROOT}/jre" OR EXISTS "${KOTV_RUNTIME_ROOT}/libvlc")
     PATTERN "libmpv" EXCLUDE
     PATTERN "vlc" EXCLUDE)
   # 仅去掉旧布局顶层 runtime/lib（若存在），不影响 python/Lib 或 libvlc。
+  # 保留 java/python 启动器（JAR/Py 独立进程）。
   install(CODE "
     file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/runtime/lib\")
   " COMPONENT Runtime)
 endif()
-# Engine binary from Flutter assets if present.
+# Engine binary from Flutter assets if present (Windows: only .exe).
 set(KOTV_ENGINE_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../assets/engine/kotv-engine.exe")
 if(EXISTS "${KOTV_ENGINE_BIN}")
   install(FILES "${KOTV_ENGINE_BIN}" DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
 endif()
-set(KOTV_ENGINE_BIN_NIX "${CMAKE_CURRENT_SOURCE_DIR}/../assets/engine/kotv-engine")
-if(EXISTS "${KOTV_ENGINE_BIN_NIX}")
-  install(FILES "${KOTV_ENGINE_BIN_NIX}" DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
-endif()
+# 不要安装无后缀的 kotv-engine（那是 macOS/Linux 产物，会出现在 kotv-engine.exe 旁边）。
+install(CODE "
+  file(REMOVE \"${CMAKE_INSTALL_PREFIX}/kotv-engine\")
+" COMPONENT Runtime)

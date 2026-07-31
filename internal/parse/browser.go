@@ -1,9 +1,14 @@
 package parse
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
+	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -52,18 +57,42 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		timeout = defaultParseWebTimeout // 与常见网页解析超时一致：15s
 	}
 
+	// Android：不用 Chromium / chromedp；改走本地 Native Service(Web/HTTP)嗅探。
+	if runtime.GOOS == "android" {
+		return androidBrowserSniff(pageURL, headers, timeout, videoOK)
+	}
+
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", true),
+		// Win7 捆绑多为完整 chrome.exe（非 headless-shell）；用 classic headless，减少闪空白窗。
+		chromedp.Flag("headless", "old"),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("mute-audio", true),
+		chromedp.Flag("hide-scrollbars", true),
 		chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
 	)
+	if runtime.GOOS == "windows" {
+		opts = append(opts,
+			chromedp.Flag("disable-software-rasterizer", true),
+			chromedp.Flag("disable-extensions", true),
+			chromedp.Flag("disable-background-networking", true),
+			chromedp.Flag("disable-background-timer-throttling", true),
+			chromedp.Flag("disable-renderer-backgrounding", true),
+			chromedp.Flag("disable-features", "TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process"),
+			chromedp.WindowSize(800, 600),
+			// headless 被旧版 Chrome 忽略时，把窗口甩出屏幕，避免挡操作的「空白框」。
+			chromedp.Flag("window-position", "-32000,-32000"),
+		)
+	}
 	if ua := headerValue(headers, "User-Agent"); ua != "" {
 		opts = append(opts, chromedp.UserAgent(ua))
 	}
-	if chrome := appruntime.Chromium(); chrome != "" {
-		opts = append(opts, chromedp.ExecPath(chrome))
+	chrome := appruntime.Chromium()
+	if chrome == "" {
+		return "", nil, fmt.Errorf("未找到 Chromium：网页嗅探不可用（请检查 runtime/chromium）")
 	}
+	opts = append(opts, chromedp.ExecPath(chrome))
 
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancelAlloc()
@@ -212,15 +241,70 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			return u, h, nil
 		}
 		if err != nil && ctx.Err() == nil {
-			return "", nil, err
+			return "", nil, fmt.Errorf("网页嗅探失败: %w", err)
 		}
 		return "", nil, fmt.Errorf("未嗅探到媒体地址")
 	case <-ctx.Done():
 		if u, h := fallbackDOM(ctx, rules, isVideo); u != "" {
 			return u, h, nil
 		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", nil, fmt.Errorf("网页嗅探超时（Chromium 未在 %s 内找到媒体地址）", timeout)
+		}
 		return "", nil, ctx.Err()
 	}
+}
+
+func androidBrowserSniff(pageURL string, headers map[string]string, timeout time.Duration, isVideo func(string) bool) (string, map[string]string, error) {
+	const base = "http://127.0.0.1:9979/sniff"
+	reqBody := map[string]interface{}{
+		"url":        pageURL,
+		"headers":   headers,
+		"timeoutMs": int(timeout / time.Millisecond),
+	}
+	b, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", nil, err
+	}
+	req, err := http.NewRequest(http.MethodPost, base, bytes.NewReader(b))
+	if err != nil {
+		return "", nil, err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+
+	client := &http.Client{Timeout: timeout + 5*time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode >= 400 {
+		return "", nil, fmt.Errorf("android sniff failed: http=%d %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var out struct {
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+		Error   string            `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return "", nil, err
+	}
+	if out.Error != "" {
+		return "", nil, fmt.Errorf("android sniff error: %s", out.Error)
+	}
+	u := strings.TrimSpace(out.URL)
+	if u == "" || (isVideo != nil && !isVideo(u)) {
+		return "", nil, fmt.Errorf("未嗅探到媒体地址")
+	}
+	var hdr map[string]string
+	if len(out.Headers) > 0 {
+		hdr = cloneHeaderMap(out.Headers)
+	}
+	// Android sniff 没有请求头细节时 hdr 为空；上层会回退到原 headers。
+	return u, hdr, nil
 }
 
 func fallbackDOM(ctx context.Context, rules []model.Rule, isVideo func(string) bool) (string, map[string]string) {

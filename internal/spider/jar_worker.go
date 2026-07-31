@@ -394,6 +394,14 @@ func bytesTrimSpace(b []byte) []byte {
 	return []byte(strings.TrimSpace(string(b)))
 }
 
+// trimCString 去掉残留的 \0（TrimSpace 不会去掉）。
+func trimCString(s string) string {
+	if i := strings.IndexByte(s, 0); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
 func pushBridgeIfAlive(payload []byte) {
 	if runtime.GOOS == "android" {
 		client := &http.Client{Timeout: 300 * time.Millisecond}
