@@ -126,6 +126,14 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
 
   @override
   void onWindowClose() async {
+    // Windows：关整个程序时不要走 window_manager.destroy（Win7 易 WER）。
+    // 先同步 taskkill 本进程托管的引擎，再 exit，避免残留。
+    if (Platform.isWindows) {
+      try {
+        ref.read(engineLauncherProvider).shutdownSync();
+      } catch (_) {}
+      exit(0);
+    }
     try {
       await ref
           .read(engineLauncherProvider)
@@ -138,7 +146,6 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
     try {
       await windowManager.destroy();
     } catch (_) {
-      // Win7 上 window_manager.destroy 偶发原生崩溃，直接退出进程。
       exit(0);
     }
   }

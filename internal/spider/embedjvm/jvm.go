@@ -67,13 +67,14 @@ func ensureWorker() {
 	workerOnce.Do(func() {
 		reqCh = make(chan any, 8)
 		go func() {
-			// JNIEnv / CreateJavaVM 必须钉在同一条 OS 线程；Go 调度迁移会直接挂死。
+			// 启动/关闭钉在同一 OS 线程；Windows 上 CALL 已在 C 侧多 worker，不经此队列。
 			runtime.LockOSThread()
 			for msg := range reqCh {
 				switch r := msg.(type) {
 				case startReq:
 					r.resp <- doStart(r)
 				case callReq:
+					// 非 Windows：仍串行 Attach，避免历史路径踩坑。
 					r.resp <- doCall(r.payload)
 				case shutdownReq:
 					doShutdown()
@@ -108,7 +109,15 @@ func doStart(r startReq) error {
 		return err
 	}
 	started.Store(true)
-	log.Printf("embed JVM ready")
+	if runtime.GOOS == "windows" {
+		n := os.Getenv("KOTV_JVM_WORKERS")
+		if n == "" {
+			n = "4"
+		}
+		log.Printf("embed JVM ready (windows native workers=%s, queue=%d)", n, 32)
+	} else {
+		log.Printf("embed JVM ready")
+	}
 	return nil
 }
 
@@ -182,12 +191,18 @@ func EnsureStarted(bridgeJar string) error {
 	}
 }
 
-// Call 调用 SpiderBridge.call(JSON)。所有 JNI 走专用 OS 线程；超时由 C 层 kotv_jvm_post_job 控制。
+// Call 调用 SpiderBridge.call(JSON)。
+// Windows：直接进 C 侧有界队列，由多原生 worker 并行 JNI。
+// 其它平台：经 LockOSThread worker 串行 Attach。
 func Call(payload []byte) (string, error) {
-	ensureWorker()
 	if !started.Load() {
 		return "", fmt.Errorf("embed JVM 未启动")
 	}
+	if runtime.GOOS == "windows" {
+		r := doCall(payload)
+		return r.out, r.err
+	}
+	ensureWorker()
 	resp := make(chan callResp, 1)
 	reqCh <- callReq{payload: payload, resp: resp}
 	r := <-resp

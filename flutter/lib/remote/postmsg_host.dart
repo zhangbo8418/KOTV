@@ -13,7 +13,8 @@ import '../api/kotv_api.dart';
 /// - 展示 → 回报 `shown`
 /// - 关闭 → 回报 `closed`
 ///
-/// 不做「原地换文档」：若已有窗时又来 [UI:]，先关旧窗（等 closed），再开新窗。
+/// 已有窗再来 [UI:]：同窗原地换文档（不 pop），并回报旧 id `closed` + 新 id `shown`。
+/// 这是 Win7 关键：关开握手在慢机上会闪死/卡死，macOS 快所以不易踩中。
 class PostMsgHost {
   PostMsgHost(this.api, {required this.navigatorKey});
 
@@ -50,11 +51,14 @@ class PostMsgHost {
   String? _lifecycleId;
   final ValueNotifier<Map<String, dynamic>?> _doc = ValueNotifier(null);
 
-  /// 关旧开新时暂存下一份文档。
+  /// 关旧开新时暂存下一份文档（仅真正关窗后再开时使用）。
   Map<String, dynamic>? _pendingDoc;
 
   /// 生命周期 uiReply 单飞队列，保证同 id shown 先于 closed 入引擎。
   Future<void> _replyChain = Future<void>.value();
+
+  /// 轮询单飞，避免 Win7 上 120ms tick 叠跑拧乱状态机。
+  bool _tickBusy = false;
 
   String _lastToast = '';
   DateTime _lastToastAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -91,10 +95,12 @@ class PostMsgHost {
   }
 
   Future<void> _tick() async {
+    if (_tickBusy) return;
+    _tickBusy = true;
     try {
       final data = await api.uiPoll();
       final msgs = (data['messages'] as List?) ?? const [];
-      // 同一批先 UI_CLOSE: 再 UI:：JAR 关旧开新时，先关干净再开。
+      // 同一批先 UI_CLOSE: 再 UI:：JAR 真正关窗时，先关干净再开。
       final ui = <String>[];
       final closes = <String>[];
       final other = <String>[];
@@ -117,7 +123,10 @@ class PostMsgHost {
       for (final s in other) {
         _handle(s);
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _tickBusy = false;
+    }
   }
 
   void _handle(String raw) {
@@ -162,13 +171,18 @@ class PostMsgHost {
     final id = '${doc['id']}'.trim();
     if (id.isEmpty) return;
 
-    // 已有窗：不原地换内容；记下新文档，先关旧窗，closed 后在 finally 再开。
+    // 已有窗：原地换内容（不 pop）。Win7 关开握手会闪死；macOS 快所以以前不易暴露。
     if (_sessionActive || _opening) {
-      _pendingDoc = doc;
-      if (_activeId == id) {
-        // 同 id 再推一份：仍先关再开，保证 shown 重发。
-      }
-      _dismiss();
+      final oldId = (_activeId ?? _lifecycleId ?? '').trim();
+      _pendingDoc = null;
+      _closedBeforeShow = false;
+      _activeId = id;
+      _lifecycleId = id;
+      _reportedClosed = false;
+      _reportedShown = false;
+      _doc.value = doc;
+      _armTimeout(doc);
+      unawaited(_ackReplace(oldId: oldId, newId: id));
       return;
     }
 
@@ -194,6 +208,16 @@ class PostMsgHost {
     unawaited(_openDialog(ctx));
   }
 
+  /// 同窗换文档：先给旧 session closed，再给新 session shown。
+  Future<void> _ackReplace({required String oldId, required String newId}) async {
+    if (oldId.isNotEmpty && oldId != newId) {
+      await _enqueueReply(id: oldId, action: 'closed');
+    }
+    if (newId.isEmpty) return;
+    if (_lifecycleId != newId || _reportedShown) return;
+    await _reportShown(newId);
+  }
+
   void _armTimeout(Map<String, dynamic> doc) {
     _timeout?.cancel();
     final timeoutMs = (doc['timeoutMs'] is num) ? (doc['timeoutMs'] as num).toInt() : 0;
@@ -207,8 +231,11 @@ class PostMsgHost {
   }
 
   void _close(String id) {
-    // 只关当前窗；旧 id 的 CLOSE 在已换新会话后忽略。
-    if (_activeId != null && _activeId != id && _lifecycleId != id) return;
+    // 旧 session 的 CLOSE：只补 closed，不要关掉当前已换新文档的窗。
+    if (_activeId != null && _activeId != id && _lifecycleId != id) {
+      unawaited(_enqueueReply(id: id, action: 'closed'));
+      return;
+    }
     // 若 pending 是这份 id，清掉，避免关完又开回来。
     if (_pendingDoc != null && '${_pendingDoc!['id']}' == id) {
       _pendingDoc = null;
@@ -328,8 +355,10 @@ class PostMsgHost {
 
           final shownId = _lifecycleId ?? _activeId ?? '';
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!_closedBeforeShow && _doc.value != null && shownId.isNotEmpty) {
-              unawaited(_reportShown(shownId));
+            // 用回调时的当前 id：opening 窗口期内可能已原地换成新 session。
+            final id = (_lifecycleId ?? _activeId ?? '').trim();
+            if (!_closedBeforeShow && _doc.value != null && id.isNotEmpty) {
+              unawaited(_reportShown(id));
             }
           });
 

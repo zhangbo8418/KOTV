@@ -126,18 +126,28 @@ static int utf8_to_acp(const char *utf8, char *out, int out_len) {
 }
 
 /*
- * Windows：专用 JVM 原生线程（CreateJavaVM + 全部 JNI 调用）。
- * HotSpot 在初始化与类加载时会用 SEH 探测异常；若在 Go 线程上 Attach 后调 JNI，
- * Go VEH 仍会干扰（golang/go#58542），表现为闪退或长时间无响应。
+ * Windows：纯 Win32 原生线程池跑 CreateJavaVM + JNI（避开 Go VEH vs HotSpot SEH，golang/go#58542）。
+ * - worker0：CreateJavaVM，保持 Attach，参与 CALL
+ * - worker1..N-1：AttachCurrentThread 后取队列
+ * - cancelAll：旁路独立线程 Attach，不占 CALL 队列
+ * 默认 4 worker；可用环境变量 KOTV_JVM_WORKERS=1..8 覆盖。
  */
+#ifndef KOTV_JVM_WORKER_DEFAULT
+#define KOTV_JVM_WORKER_DEFAULT 4
+#endif
+#ifndef KOTV_JVM_WORKER_MAX
+#define KOTV_JVM_WORKER_MAX 8
+#endif
+#ifndef KOTV_JVM_QUEUE_CAP
+#define KOTV_JVM_QUEUE_CAP 32
+#endif
+
 typedef enum {
 	KOTV_JVM_JOB_NONE = 0,
 	KOTV_JVM_JOB_CALL,
-	KOTV_JVM_JOB_CANCEL,
-	KOTV_JVM_JOB_SHUTDOWN,
 } kotv_jvm_job_kind;
 
-typedef struct {
+typedef struct kotv_jvm_job {
 	kotv_jvm_job_kind kind;
 	const char *json_in;
 	char *json_out;
@@ -146,189 +156,325 @@ typedef struct {
 	int errbuf_len;
 	int rc;
 	HANDLE done;
+	volatile LONG abandoned; /* 调用方超时后置 1，worker 负责释放 */
 } kotv_jvm_job;
 
-static HANDLE g_jvm_owner;
-static HANDLE g_jvm_job_posted;
-static HANDLE g_jvm_job_done;
-static CRITICAL_SECTION g_jvm_job_lock;
-static kotv_jvm_job g_jvm_job;
+typedef struct {
+	int index; /* 0 = boot / CreateJavaVM */
+} kotv_jvm_worker_arg;
+
+static HANDLE g_jvm_workers[KOTV_JVM_WORKER_MAX];
+static int g_jvm_worker_n;
+static CRITICAL_SECTION g_jvm_q_lock;
+static CONDITION_VARIABLE g_jvm_q_not_empty;
+static CONDITION_VARIABLE g_jvm_q_not_full;
+static kotv_jvm_job *g_jvm_q[KOTV_JVM_QUEUE_CAP];
+static int g_jvm_q_head;
+static int g_jvm_q_tail;
+static int g_jvm_q_count;
+static volatile LONG g_jvm_stop;
 static JavaVMInitArgs *g_boot_args;
 static JNI_CreateJavaVM_t g_boot_create;
 static HANDLE g_boot_done;
+static HANDLE g_jvm_siblings_done; /* shutdown：非 0 号 worker 退完后再 Destroy */
 static volatile jint g_boot_rc;
+static int g_jvm_pool_inited;
 
 static int kotv_jvm_call_with_env(JNIEnv *env, const char *json_in, char *json_out, int json_out_len, char *errbuf, int errbuf_len);
 static int kotv_jvm_cancel_all_with_env(JNIEnv *env, char *errbuf, int errbuf_len);
 static int kotv_jvm_cancel_async(char *errbuf, int errbuf_len);
 
-static DWORD WINAPI kotv_jvm_owner_thread(LPVOID arg) {
-	JavaVM *vm = NULL;
-	JNIEnv *env = NULL;
-	(void)arg;
-
-	g_boot_rc = g_boot_create(&vm, &env, g_boot_args);
-	if (g_boot_rc == 0 && vm && env) {
-		g_vm = vm;
-		g_env = env;
+static int kotv_jvm_worker_count(void) {
+	const char *e = getenv("KOTV_JVM_WORKERS");
+	int n = KOTV_JVM_WORKER_DEFAULT;
+	if (e && e[0]) {
+		n = atoi(e);
+		if (n < 1)
+			n = 1;
+		if (n > KOTV_JVM_WORKER_MAX)
+			n = KOTV_JVM_WORKER_MAX;
 	}
-	if (g_boot_done)
-		SetEvent(g_boot_done);
+	return n;
+}
 
-	if (!g_vm || !g_env)
-		return 1;
+static void kotv_jvm_job_finish(kotv_jvm_job *job, int rc) {
+	if (!job)
+		return;
+	job->rc = rc;
+	/* 始终唤醒调用方；超时路径也会 Wait 后再 free，避免双释放 */
+	if (job->done)
+		SetEvent(job->done);
+}
+
+static int kotv_jvm_q_push(kotv_jvm_job *job, DWORD timeout_ms) {
+	DWORD start = GetTickCount();
+	EnterCriticalSection(&g_jvm_q_lock);
+	for (;;) {
+		if (g_jvm_stop) {
+			LeaveCriticalSection(&g_jvm_q_lock);
+			return -1;
+		}
+		if (g_jvm_q_count < KOTV_JVM_QUEUE_CAP) {
+			g_jvm_q[g_jvm_q_tail] = job;
+			g_jvm_q_tail = (g_jvm_q_tail + 1) % KOTV_JVM_QUEUE_CAP;
+			g_jvm_q_count++;
+			WakeConditionVariable(&g_jvm_q_not_empty);
+			LeaveCriticalSection(&g_jvm_q_lock);
+			return 0;
+		}
+		if (timeout_ms == 0) {
+			LeaveCriticalSection(&g_jvm_q_lock);
+			return -2;
+		}
+		DWORD elapsed = GetTickCount() - start;
+		if (elapsed >= timeout_ms) {
+			LeaveCriticalSection(&g_jvm_q_lock);
+			return -2;
+		}
+		if (!SleepConditionVariableCS(&g_jvm_q_not_full, &g_jvm_q_lock, timeout_ms - elapsed)) {
+			if (GetLastError() == ERROR_TIMEOUT) {
+				LeaveCriticalSection(&g_jvm_q_lock);
+				return -2;
+			}
+		}
+	}
+}
+
+static kotv_jvm_job *kotv_jvm_q_pop(void) {
+	EnterCriticalSection(&g_jvm_q_lock);
+	for (;;) {
+		if (g_jvm_q_count > 0) {
+			kotv_jvm_job *job = g_jvm_q[g_jvm_q_head];
+			g_jvm_q[g_jvm_q_head] = NULL;
+			g_jvm_q_head = (g_jvm_q_head + 1) % KOTV_JVM_QUEUE_CAP;
+			g_jvm_q_count--;
+			WakeConditionVariable(&g_jvm_q_not_full);
+			LeaveCriticalSection(&g_jvm_q_lock);
+			return job;
+		}
+		if (g_jvm_stop) {
+			LeaveCriticalSection(&g_jvm_q_lock);
+			return NULL;
+		}
+		SleepConditionVariableCS(&g_jvm_q_not_empty, &g_jvm_q_lock, INFINITE);
+	}
+}
+
+static DWORD WINAPI kotv_jvm_worker_thread(LPVOID arg) {
+	kotv_jvm_worker_arg *wa = (kotv_jvm_worker_arg *)arg;
+	int index = wa ? wa->index : -1;
+	JNIEnv *env = NULL;
+	int attached = 0;
+
+	free(wa);
+
+	if (index == 0) {
+		JavaVM *vm = NULL;
+		g_boot_rc = g_boot_create(&vm, &env, g_boot_args);
+		if (g_boot_rc == 0 && vm && env) {
+			g_vm = vm;
+			g_env = env;
+		}
+		if (g_boot_done)
+			SetEvent(g_boot_done);
+		if (!g_vm || !env)
+			return 1;
+	} else {
+		/* 等 boot 完成 */
+		if (g_boot_done)
+			WaitForSingleObject(g_boot_done, 120000);
+		if (!g_vm)
+			return 1;
+		if ((*g_vm)->AttachCurrentThread(g_vm, (void **)&env, NULL) != 0 || !env)
+			return 1;
+		attached = 1;
+	}
 
 	for (;;) {
-		if (WaitForSingleObject(g_jvm_job_posted, INFINITE) != WAIT_OBJECT_0)
+		kotv_jvm_job *job = kotv_jvm_q_pop();
+		if (!job)
 			break;
-		ResetEvent(g_jvm_job_posted);
+		if (job->kind == KOTV_JVM_JOB_CALL) {
+			int rc = -1;
+			/* 已超时放弃则跳过 JNI，避免写回已返回的调用方缓冲 */
+			if (InterlockedCompareExchange(&job->abandoned, 1, 1) != 1)
+				rc = kotv_jvm_call_with_env(env, job->json_in, job->json_out, job->json_out_len, job->errbuf, job->errbuf_len);
+			else
+				rc = -8;
+			kotv_jvm_job_finish(job, rc);
+		} else {
+			kotv_jvm_job_finish(job, -1);
+		}
+	}
 
-		EnterCriticalSection(&g_jvm_job_lock);
-		kotv_jvm_job job = g_jvm_job;
-		LeaveCriticalSection(&g_jvm_job_lock);
-
-		switch (job.kind) {
-		case KOTV_JVM_JOB_CALL:
-			job.rc = kotv_jvm_call_with_env(g_env, job.json_in, job.json_out, job.json_out_len, job.errbuf, job.errbuf_len);
-			break;
-		case KOTV_JVM_JOB_CANCEL:
-			job.rc = kotv_jvm_cancel_all_with_env(g_env, job.errbuf, job.errbuf_len);
-			break;
-		case KOTV_JVM_JOB_SHUTDOWN:
+	if (index == 0) {
+		/* 等其它 worker Detach 后再 DestroyJavaVM */
+		if (g_jvm_siblings_done)
+			WaitForSingleObject(g_jvm_siblings_done, 30000);
+		if (g_vm) {
 			(*g_vm)->DestroyJavaVM(g_vm);
 			g_vm = NULL;
 			g_env = NULL;
-			if (job.done)
-				SetEvent(job.done);
-			return 0;
-		default:
-			if (job.errbuf && job.errbuf_len > 0)
-				write_err(job.errbuf, job.errbuf_len, "unknown jvm job");
-			job.rc = -1;
-			break;
 		}
-
-		EnterCriticalSection(&g_jvm_job_lock);
-		g_jvm_job.rc = job.rc;
-		LeaveCriticalSection(&g_jvm_job_lock);
-		if (job.done)
-			SetEvent(job.done);
+	} else if (attached && g_vm) {
+		(*g_vm)->DetachCurrentThread(g_vm);
 	}
 	return 0;
 }
 
 static int kotv_jvm_owner_start(JNI_CreateJavaVM_t create, JavaVMInitArgs *args) {
-	DWORD tid;
+	int i;
 
-	if (g_jvm_owner)
+	if (g_jvm_pool_inited)
 		return (int)g_boot_rc;
 
-	InitializeCriticalSection(&g_jvm_job_lock);
-	g_jvm_job_posted = CreateEventW(NULL, TRUE, FALSE, NULL);
-	g_jvm_job_done = CreateEventW(NULL, TRUE, FALSE, NULL);
-	g_boot_done = CreateEventW(NULL, TRUE, FALSE, NULL);
-	if (!g_jvm_job_posted || !g_jvm_job_done || !g_boot_done)
-		return JNI_ERR;
-
+	g_jvm_worker_n = kotv_jvm_worker_count();
+	InitializeCriticalSection(&g_jvm_q_lock);
+	InitializeConditionVariable(&g_jvm_q_not_empty);
+	InitializeConditionVariable(&g_jvm_q_not_full);
+	g_jvm_q_head = g_jvm_q_tail = g_jvm_q_count = 0;
+	g_jvm_stop = 0;
 	g_boot_create = create;
 	g_boot_args = args;
 	g_boot_rc = JNI_ERR;
-
-	g_jvm_owner = CreateThread(NULL, 0, kotv_jvm_owner_thread, NULL, 0, &tid);
-	if (!g_jvm_owner) {
-		g_boot_rc = JNI_ERR;
+	g_boot_done = CreateEventW(NULL, TRUE, FALSE, NULL);
+	g_jvm_siblings_done = CreateEventW(NULL, TRUE, FALSE, NULL);
+	if (!g_boot_done || !g_jvm_siblings_done)
 		return JNI_ERR;
-	}
 
-	if (WaitForSingleObject(g_boot_done, 120000) != WAIT_OBJECT_0) {
-		TerminateThread(g_jvm_owner, 1);
-		CloseHandle(g_jvm_owner);
-		g_jvm_owner = NULL;
-		return JNI_ERR;
+	for (i = 0; i < g_jvm_worker_n; i++) {
+		kotv_jvm_worker_arg *wa = (kotv_jvm_worker_arg *)calloc(1, sizeof(*wa));
+		DWORD tid;
+		if (!wa) {
+			g_boot_rc = JNI_ERR;
+			return JNI_ERR;
+		}
+		wa->index = i;
+		g_jvm_workers[i] = CreateThread(NULL, 0, kotv_jvm_worker_thread, wa, 0, &tid);
+		if (!g_jvm_workers[i]) {
+			free(wa);
+			g_boot_rc = JNI_ERR;
+			return JNI_ERR;
+		}
 	}
+	g_jvm_pool_inited = 1;
+
+	if (WaitForSingleObject(g_boot_done, 120000) != WAIT_OBJECT_0)
+		return JNI_ERR;
 	return (int)g_boot_rc;
 }
 
 static int kotv_jvm_post_job(kotv_jvm_job_kind kind, const char *json_in, char *json_out, int json_out_len, char *errbuf, int errbuf_len, DWORD timeout_ms) {
-	HANDLE done;
+	kotv_jvm_job *job;
 	int rc;
+	DWORD wait_rc;
 
-	if (!g_jvm_owner || !g_vm)
+	if (!g_jvm_pool_inited || !g_vm || g_jvm_stop)
 		return -1;
 
-	done = CreateEventW(NULL, TRUE, FALSE, NULL);
-	if (!done)
+	job = (kotv_jvm_job *)calloc(1, sizeof(*job));
+	if (!job)
 		return -1;
+	job->kind = kind;
+	job->json_in = json_in;
+	job->json_out = json_out;
+	job->json_out_len = json_out_len;
+	job->errbuf = errbuf;
+	job->errbuf_len = errbuf_len;
+	job->done = CreateEventW(NULL, TRUE, FALSE, NULL);
+	if (!job->done) {
+		free(job);
+		return -1;
+	}
 
-	EnterCriticalSection(&g_jvm_job_lock);
-	memset(&g_jvm_job, 0, sizeof(g_jvm_job));
-	g_jvm_job.kind = kind;
-	g_jvm_job.json_in = json_in;
-	g_jvm_job.json_out = json_out;
-	g_jvm_job.json_out_len = json_out_len;
-	g_jvm_job.errbuf = errbuf;
-	g_jvm_job.errbuf_len = errbuf_len;
-	g_jvm_job.done = done;
-	LeaveCriticalSection(&g_jvm_job_lock);
+	if (kotv_jvm_q_push(job, timeout_ms) != 0) {
+		write_err(errbuf, errbuf_len, "jvm job queue full");
+		CloseHandle(job->done);
+		free(job);
+		return -9;
+	}
 
-	ResetEvent(g_jvm_job_done);
-	SetEvent(g_jvm_job_posted);
-
-	if (WaitForSingleObject(done, timeout_ms) != WAIT_OBJECT_0) {
+	wait_rc = WaitForSingleObject(job->done, timeout_ms);
+	if (wait_rc != WAIT_OBJECT_0) {
 		write_err(errbuf, errbuf_len, "jvm job timeout");
-		CloseHandle(done);
-		/* 尽力打断 Java 里卡住的 OkHttp，避免 owner 线程长时间占用队列 */
+		InterlockedExchange(&job->abandoned, 1);
 		(void)kotv_jvm_cancel_async(NULL, 0);
+		/* 必须等 worker 结束再释放 job，避免 UAF */
+		(void)WaitForSingleObject(job->done, 60000);
+		CloseHandle(job->done);
+		free(job);
 		return -8;
 	}
 
-	EnterCriticalSection(&g_jvm_job_lock);
-	rc = g_jvm_job.rc;
-	LeaveCriticalSection(&g_jvm_job_lock);
-	CloseHandle(done);
+	rc = job->rc;
+	CloseHandle(job->done);
+	free(job);
 	return rc;
 }
 
 static void kotv_jvm_owner_shutdown(void) {
-	if (!g_jvm_owner)
+	int i;
+
+	if (!g_jvm_pool_inited)
 		return;
-	kotv_jvm_post_job(KOTV_JVM_JOB_SHUTDOWN, NULL, NULL, 0, NULL, 0, 30000);
-	WaitForSingleObject(g_jvm_owner, 5000);
-	CloseHandle(g_jvm_owner);
-	g_jvm_owner = NULL;
-	if (g_jvm_job_posted) {
-		CloseHandle(g_jvm_job_posted);
-		g_jvm_job_posted = NULL;
+
+	InterlockedExchange(&g_jvm_stop, 1);
+	EnterCriticalSection(&g_jvm_q_lock);
+	WakeAllConditionVariable(&g_jvm_q_not_empty);
+	WakeAllConditionVariable(&g_jvm_q_not_full);
+	LeaveCriticalSection(&g_jvm_q_lock);
+
+	/* 先等 1..N-1 Detach */
+	for (i = 1; i < g_jvm_worker_n; i++) {
+		if (g_jvm_workers[i]) {
+			WaitForSingleObject(g_jvm_workers[i], 15000);
+			CloseHandle(g_jvm_workers[i]);
+			g_jvm_workers[i] = NULL;
+		}
 	}
-	if (g_jvm_job_done) {
-		CloseHandle(g_jvm_job_done);
-		g_jvm_job_done = NULL;
+	if (g_jvm_siblings_done)
+		SetEvent(g_jvm_siblings_done);
+	/* 再等 worker0 DestroyJavaVM */
+	if (g_jvm_workers[0]) {
+		WaitForSingleObject(g_jvm_workers[0], 30000);
+		CloseHandle(g_jvm_workers[0]);
+		g_jvm_workers[0] = NULL;
 	}
+
+	g_vm = NULL;
+	g_env = NULL;
+
 	if (g_boot_done) {
 		CloseHandle(g_boot_done);
 		g_boot_done = NULL;
 	}
-	DeleteCriticalSection(&g_jvm_job_lock);
+	if (g_jvm_siblings_done) {
+		CloseHandle(g_jvm_siblings_done);
+		g_jvm_siblings_done = NULL;
+	}
+	DeleteCriticalSection(&g_jvm_q_lock);
+	g_jvm_pool_inited = 0;
+	g_jvm_worker_n = 0;
+	g_jvm_q_head = g_jvm_q_tail = g_jvm_q_count = 0;
+	g_jvm_stop = 0;
 }
 
 typedef struct {
 	JavaVM *vm;
 } kotv_jvm_cancel_ctx;
 
-/* cancelAll 不排队等 owner 上的 CALL：独立 Win32 线程 Attach 后触发 OkHttp.cancelAll。 */
+/* cancelAll 不排队等 CALL：独立 Win32 线程 Attach 后触发 OkHttp.cancelAll。 */
 static DWORD WINAPI kotv_jvm_cancel_thread(LPVOID arg) {
 	kotv_jvm_cancel_ctx *ctx = (kotv_jvm_cancel_ctx *)arg;
 	JNIEnv *env = NULL;
 	JavaVM *vm = ctx ? ctx->vm : NULL;
 	DWORD ret = 0;
 
-	/* 生命周期由线程自行收尾，避免调用方超时返回后的悬挂指针。 */
 	free(ctx);
 	if (!vm)
 		return 1;
 	if ((*vm)->AttachCurrentThread(vm, (void **)&env, NULL) != 0 || !env)
 		return 1;
-	/* 异步线程不能写调用方 errbuf（Go 栈上临时缓冲），统一忽略错误文本。 */
 	(void)kotv_jvm_cancel_all_with_env(env, NULL, 0);
 	(*vm)->DetachCurrentThread(vm);
 	return ret;
@@ -626,7 +772,7 @@ int kotv_jvm_call(const char *json_in, char *json_out, int json_out_len, char *e
 		return -1;
 	}
 #if defined(_WIN32)
-	/* 120s：JAR detailContent 可能含多次网络请求；与 Flutter /api/v1 120s 对齐 */
+	/* 有界队列 + N 原生 worker；120s 与 Flutter /api/v1 对齐 */
 	return kotv_jvm_post_job(KOTV_JVM_JOB_CALL, json_in, json_out, json_out_len, errbuf, errbuf_len, 120000);
 #else
 	int attached = 0;
