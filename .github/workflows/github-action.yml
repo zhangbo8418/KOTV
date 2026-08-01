@@ -413,6 +413,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Chaquopy 默认 Python 3.10（且需本机同版本做 pip/pyc）
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
@@ -437,9 +442,11 @@ jobs:
         env:
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
           KOTV_JAVA_TOOLCHAIN: "17"
+          CHAQUOPY_BUILD_PYTHON: python3.10
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           chmod +x bridge/build.sh scripts/*.sh
+          python3.10 --version
           test -f flutter/android/app/libs/thunder-release.aar
           ./scripts/package-flutter-android.sh
           ls -lh dist/KO影视-*.apk

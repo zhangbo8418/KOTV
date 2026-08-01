@@ -53,6 +53,15 @@ android {
 
 chaquopy {
     defaultConfig {
+        // 默认 3.10：仍支持 armeabi-v7a；3.12+ 仅 64-bit
+        version "3.10"
+        // CI / 本机需有匹配的 build Python
+        def py = System.getenv("CHAQUOPY_BUILD_PYTHON")
+        if (py != null && !py.trim().isEmpty()) {
+            buildPython py.trim()
+        } else {
+            buildPython "python3.10"
+        }
         // Chaquopy 17：ABI 只认 android.defaultConfig.ndk.abiFilters，不再支持 chaquopy.ndk()
         pip {
             // 与 scripts/python-requirements.txt 对齐（用于 Chaquopy 内执行 Python spider）。
