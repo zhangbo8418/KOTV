@@ -12,6 +12,7 @@ on:
       - "bridge/**"
       - "scripts/build-engine-flutter.sh"
       - "scripts/package-flutter-android.sh"
+      - "scripts/kotv-release-name.sh"
       - ".github/workflows/flutter-android.yml"
       - "go.mod"
       - "go.sum"
