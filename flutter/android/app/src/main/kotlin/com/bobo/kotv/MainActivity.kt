@@ -23,11 +23,14 @@ class MainActivity : FlutterActivity() {
           "paths" -> {
             val cache = cacheDir.absolutePath
             val files = filesDir.absolutePath
+            // codeCacheDir 可执行；files/cache 在 Android 10+ 常为 noexec
+            val codeCache = codeCacheDir.absolutePath
             val nativeLib = applicationInfo.nativeLibraryDir
             result.success(
               mapOf(
                 "cacheDir" to cache,
                 "filesDir" to files,
+                "codeCacheDir" to codeCache,
                 "nativeLibraryDir" to nativeLib,
                 "enginePath" to File(nativeLib, "libkotv_engine.so").absolutePath,
               ),

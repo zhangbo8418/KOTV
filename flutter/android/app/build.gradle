@@ -51,6 +51,13 @@ android {
             signingConfig = signingConfigs.debug
         }
     }
+
+    // 强制抽出 jniLibs，否则 Process.start(libkotv_engine.so) 无法 exec APK 内压缩库
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 chaquopy {

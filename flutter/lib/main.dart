@@ -73,42 +73,6 @@ class KotvApp extends ConsumerStatefulWidget {
 }
 
 class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsBindingObserver {
-  Future<void> _setupBackendUrl() async {
-    final launcher = ref.read(engineLauncherProvider);
-    final ctrl = TextEditingController(
-      text: launcher.baseUrl == 'http://127.0.0.1:9978' ? '' : launcher.baseUrl,
-    );
-    final p = KotvPalette.of(context);
-    final v = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: p.dialogBg,
-        title: Text('连接后端服务', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
-        content: SizedBox(
-          width: 520,
-          child: TextField(
-            controller: ctrl,
-            autofocus: true,
-            style: TextStyle(color: p.fg),
-            decoration: InputDecoration(
-              hintText: '例如：http://10.0.0.8:9978 或 https://api.example.com',
-              hintStyle: TextStyle(color: p.muted),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('保存并重试')),
-        ],
-      ),
-    );
-    if (v == null || v.isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('engine_base_url', v);
-    launcher.baseUrl = v;
-    ref.invalidate(engineReadyProvider);
-  }
-
   @override
   void initState() {
     super.initState();
@@ -213,52 +177,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
       // 色板已按 effectiveLight 生成，固定用当前 theme 即可
       themeMode: ThemeMode.light,
       home: ready.when(
-        data: (ok) {
-          if (!ok) {
-            return AppBackdrop(
-              child: Scaffold(
-                backgroundColor: Colors.transparent,
-                body: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text('KO影视', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 12),
-                        Text(
-                          Platform.isIOS || Platform.isAndroid
-                              ? '请先连接可用后端服务，或确认本机引擎已启动'
-                              : '无法连接 Go 引擎\n请先启动引擎或检查设置中的引擎地址',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7)),
-                        ),
-                        const SizedBox(height: 16),
-                        if (Platform.isIOS || Platform.isAndroid)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              AppPill(label: '连接后端', width: 130, autofocus: true, onTap: _setupBackendUrl),
-                              const SizedBox(width: 10),
-                              AppPill(label: '重试', width: 90, onTap: () => ref.invalidate(engineReadyProvider)),
-                            ],
-                          )
-                        else
-                          AppPill(
-                            label: '重试',
-                            width: 120,
-                            autofocus: true,
-                            onTap: () => ref.invalidate(engineReadyProvider),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }
-          return const AppShell();
-        },
+        data: (ok) => ok ? const AppShell() : const _EngineOfflinePage(),
         loading: () => const AppBackdrop(
           child: Scaffold(
             backgroundColor: Colors.transparent,
@@ -269,6 +188,103 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
           child: Scaffold(
             backgroundColor: Colors.transparent,
             body: Center(child: Text('$e', style: const TextStyle(color: Colors.white))),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 引擎未就绪页：必须作为 MaterialApp.home 的子树，dialog / Theme 才能用到 Navigator。
+class _EngineOfflinePage extends ConsumerWidget {
+  const _EngineOfflinePage();
+
+  Future<void> _setupBackendUrl(BuildContext context, WidgetRef ref) async {
+    final launcher = ref.read(engineLauncherProvider);
+    final ctrl = TextEditingController(
+      text: launcher.baseUrl == 'http://127.0.0.1:9978' ? '' : launcher.baseUrl,
+    );
+    final navCtx = rootNavigatorKey.currentContext ?? context;
+    final p = KotvPalette.of(navCtx);
+    final v = await showDialog<String>(
+      context: navCtx,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: p.dialogBg,
+        title: Text('连接后端服务', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
+        content: SizedBox(
+          width: 520,
+          child: TextField(
+            controller: ctrl,
+            autofocus: true,
+            style: TextStyle(color: p.fg),
+            decoration: InputDecoration(
+              hintText: '例如：http://10.0.0.8:9978 或 https://api.example.com',
+              hintStyle: TextStyle(color: p.muted),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('保存并重试')),
+        ],
+      ),
+    );
+    if (v == null || v.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('engine_base_url', v);
+    launcher.baseUrl = v;
+    ref.invalidate(engineReadyProvider);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final muted = Theme.of(context).colorScheme.onSurface.withOpacity(0.7);
+    return AppBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('KO影视', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 12),
+                Text(
+                  Platform.isIOS || Platform.isAndroid
+                      ? '请先连接可用后端服务，或确认本机引擎已启动'
+                      : '无法连接 Go 引擎\n请先启动引擎或检查设置中的引擎地址',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: muted),
+                ),
+                const SizedBox(height: 16),
+                if (Platform.isIOS || Platform.isAndroid)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AppPill(
+                        label: '连接后端',
+                        width: 130,
+                        autofocus: true,
+                        onTap: () => unawaited(_setupBackendUrl(context, ref)),
+                      ),
+                      const SizedBox(width: 10),
+                      AppPill(
+                        label: '重试',
+                        width: 90,
+                        onTap: () => ref.invalidate(engineReadyProvider),
+                      ),
+                    ],
+                  )
+                else
+                  AppPill(
+                    label: '重试',
+                    width: 120,
+                    autofocus: true,
+                    onTap: () => ref.invalidate(engineReadyProvider),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

@@ -72,14 +72,7 @@ class EngineLauncher {
   }
 
   Future<bool> _procAlive(Process proc) async {
-    if (!Platform.isWindows) {
-      try {
-        final r = await Process.run('kill', ['-0', '${proc.pid}']);
-        return r.exitCode == 0;
-      } catch (_) {
-        return false;
-      }
-    }
+    // Android 无可靠 kill -0；统一用 exitCode 短超时探测。
     try {
       await proc.exitCode.timeout(const Duration(milliseconds: 1));
       return false; // 已退出
@@ -147,23 +140,43 @@ class EngineLauncher {
     return env;
   }
 
-  Future<String?> _androidEnginePath() async {
+  /// Android 可执行候选：优先 nativeLibraryDir（可 exec），再拷到 codeCacheDir。
+  /// 切勿拷到 files/support（Android 10+ 常 noexec，Process.start 会 Permission denied）。
+  Future<List<String>> _androidEngineCandidates() async {
     const ch = MethodChannel('kotv_android_spider');
+    final out = <String>[];
+    String nativeSo = '';
+    String codeCache = '';
     try {
       final raw = await ch.invokeMethod<dynamic>('paths');
       if (raw is Map) {
         final ep = '${raw['enginePath'] ?? ''}'.trim();
-        if (ep.isNotEmpty && await File(ep).exists()) return ep;
         final nativeDir = '${raw['nativeLibraryDir'] ?? ''}'.trim();
-        if (nativeDir.isNotEmpty) {
+        codeCache = '${raw['codeCacheDir'] ?? ''}'.trim();
+        if (ep.isNotEmpty && await File(ep).exists()) {
+          nativeSo = ep;
+        } else if (nativeDir.isNotEmpty) {
           final f = File(p.join(nativeDir, 'libkotv_engine.so'));
-          if (await f.exists()) return f.path;
+          if (await f.exists()) nativeSo = f.path;
         }
       }
     } catch (e) {
       debugPrint('android engine path: $e');
     }
-    return null;
+    if (nativeSo.isNotEmpty) out.add(nativeSo);
+    if (nativeSo.isNotEmpty && codeCache.isNotEmpty) {
+      try {
+        final dest = File(p.join(codeCache, 'libkotv_engine.so'));
+        await File(nativeSo).copy(dest.path);
+        try {
+          await Process.run('chmod', ['+x', dest.path]);
+        } catch (_) {}
+        if (await dest.exists()) out.add(dest.path);
+      } catch (e) {
+        debugPrint('android engine copy to codeCache: $e');
+      }
+    }
+    return out;
   }
 
   List<String> _candidateBins(String exeName) {
@@ -217,27 +230,26 @@ class EngineLauncher {
       var env = _runtimeEnv();
       if (Platform.isAndroid) {
         env = await _androidEnv(env);
-        final so = await _androidEnginePath();
-        if (so != null) {
-          // 拷到 filesDir 再 chmod，规避部分 ROM 对 nativeLibraryDir noexec。
-          final support = await getApplicationSupportDirectory();
-          final out = File(p.join(support.path, 'libkotv_engine.so'));
-          try {
-            await File(so).copy(out.path);
-          } catch (_) {
-            // 同 inode 失败则直接用 so 路径
-            debugPrint('engine start(android native): $so');
-            await _spawn(so, env);
-            return;
-          }
-          try {
-            await Process.run('chmod', ['+x', out.path]);
-          } catch (_) {}
-          debugPrint('engine start(android copy): ${out.path}');
-          await _spawn(out.path, env);
+        final candidates = await _androidEngineCandidates();
+        if (candidates.isEmpty) {
+          debugPrint('engine android: libkotv_engine.so not found in nativeLibraryDir');
           return;
         }
-        debugPrint('engine android: libkotv_engine.so not found in nativeLibraryDir');
+        for (final so in candidates) {
+          try {
+            debugPrint('engine start(android): $so');
+            await _spawn(so, env);
+            // _spawn 末尾已短暂等待；进程立刻退出则换下一候选（常见：noexec）
+            if (_proc != null && await _procAlive(_proc!)) return;
+            debugPrint('engine android: process exited immediately after $so');
+            _owned = false;
+            _proc = null;
+          } catch (e) {
+            debugPrint('engine android spawn failed ($so): $e');
+            _owned = false;
+            _proc = null;
+          }
+        }
         return;
       }
 

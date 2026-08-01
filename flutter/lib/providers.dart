@@ -21,7 +21,8 @@ final apiProvider = Provider<KotvApi>((ref) {
 });
 
 final configProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  await ref.watch(engineReadyProvider.future);
+  final ok = await ref.watch(engineReadyProvider.future);
+  if (!ok) return const <String, dynamic>{};
   final api = ref.watch(apiProvider);
   // 配置可能晚于 health 就绪；最多等几秒拿到 wallpaper。
   for (var i = 0; i < 15; i++) {
@@ -34,7 +35,8 @@ final configProvider = FutureProvider<Map<String, dynamic>>((ref) async {
 
 /// 引擎设置（含 wallMode）+ backdrop 解析结果。
 final settingsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  await ref.watch(engineReadyProvider.future);
+  final ok = await ref.watch(engineReadyProvider.future);
+  if (!ok) return const <String, dynamic>{};
   return ref.watch(apiProvider).getSettings();
 });
 
