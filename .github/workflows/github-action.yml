@@ -355,7 +355,8 @@ jobs:
               ./scripts/prepare-runtime.sh macos-x64
               (cd internal/spider && go run gen_qjsinc.go)
               CGO_ENABLED=1 GOARCH=amd64 go build -o flutter/assets/engine/kotv-engine ./cmd/engine
-              cd flutter && flutter config --enable-macos-desktop && flutter pub get
+              cd flutter && flutter config --enable-macos-desktop && flutter config --no-enable-swift-package-manager || true
+              flutter pub get
               flutter build macos --release
             '
             # 复用 package 脚本后半段：从已构建 app 打 dmg
