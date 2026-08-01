@@ -81,6 +81,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   StreamSubscription? _playingSub;
   StreamSubscription? _endedSub;
   StreamSubscription<Duration>? _posSub;
+  StreamSubscription? _bufferingSub;
   bool _autoNextArmed = true;
   bool _openingSeekDone = false;
   bool _endingSkipFired = false;
@@ -93,38 +94,60 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 当前页内后端：默认 MPV；手动选 VLC 时共用同一套控件。
   KotvPlayback get _playback => _useVlc ? (_vlc ??= EngineVlcPlayback()) : _ensureMpv();
   bool get _useVlc => _playerVal.trim() == 'innie#vlc';
+  String get _enginePrefix => _useVlc ? '内置 VLC' : '内置 MPV';
+
+  /// 按真实播放器状态刷新文案，避免「播放中」但 00:00/00:00。
+  void _syncPlayStatus() {
+    if (!mounted || _playUrl.isEmpty) return;
+    final p = _playback;
+    final prefix = _enginePrefix;
+    final String next;
+    if (p.completed && !p.playing) {
+      next = '播放结束';
+    } else if (!_useVlc && (_mkPlayer?.state.buffering ?? false)) {
+      next = '$prefix 缓冲中…';
+    } else if (p.playing) {
+      final started = p.position > Duration.zero || p.duration > Duration.zero || p.width > 0;
+      if (started) {
+        next = '$prefix 播放中';
+      } else {
+        final armed = _playArmedAt;
+        if (armed != null && DateTime.now().difference(armed) > const Duration(seconds: 10)) {
+          next = '$prefix 无画面（可换源/解析）';
+        } else {
+          next = '$prefix 加载中…';
+        }
+      }
+    } else {
+      next = '已暂停';
+    }
+    if (_status == next) return;
+    setState(() => _status = next);
+  }
 
   MediaKitPlayback _ensureMpv() {
     if (_mk != null) {
       // stopHard 会拆掉 playing 订阅；复用 Player 时必须重新挂上。
-      _playingSub ??= _mkPlayer!.stream.playing.listen((playing) {
+      _playingSub ??= _mkPlayer!.stream.playing.listen((_) {
         if (!mounted || _playUrl.isEmpty || _useVlc) return;
-        setState(() {
-          if (playing) {
-            _status = '内置 MPV 播放中';
-          } else if (_mkPlayer!.state.completed) {
-            _status = '播放结束';
-          } else {
-            _status = '已暂停';
-          }
-        });
+        _syncPlayStatus();
+      });
+      _bufferingSub ??= _mkPlayer!.stream.buffering.listen((_) {
+        if (!mounted || _playUrl.isEmpty || _useVlc) return;
+        _syncPlayStatus();
       });
       return _mk!;
     }
     final player = Player();
     _mkPlayer = player;
     _mk = MediaKitPlayback(player);
-    _playingSub = player.stream.playing.listen((playing) {
+    _playingSub = player.stream.playing.listen((_) {
       if (!mounted || _playUrl.isEmpty || _useVlc) return;
-      setState(() {
-        if (playing) {
-          _status = '内置 MPV 播放中';
-        } else if (player.state.completed) {
-          _status = '播放结束';
-        } else {
-          _status = '已暂停';
-        }
-      });
+      _syncPlayStatus();
+    });
+    _bufferingSub = player.stream.buffering.listen((_) {
+      if (!mounted || _playUrl.isEmpty || _useVlc) return;
+      _syncPlayStatus();
     });
     _wireEnded(_mk!);
     _wirePosition(_mk!);
@@ -145,9 +168,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playingSub?.cancel();
     _endedSub?.cancel();
     _posSub?.cancel();
+    _bufferingSub?.cancel();
     _playingSub = null;
     _endedSub = null;
     _posSub = null;
+    _bufferingSub = null;
     _playUrl = '';
 
     Future<void> hardStop(KotvPlayback? p) async {
@@ -196,6 +221,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 对齐 TV：片头起播跳过；片尾 `ending+position>=duration` 切下一集。
   void _onPositionTick(Duration pos) {
     if (_playUrl.isEmpty || !mounted) return;
+    _syncPlayStatus();
     final dur = _playback.duration;
     if (dur.inMilliseconds <= 0) return;
     final openMs = _openingSec * 1000;
@@ -253,6 +279,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playingSub?.cancel();
     _endedSub?.cancel();
     _posSub?.cancel();
+    _bufferingSub?.cancel();
     _danmakuItems.dispose();
     // 正常路径已在 [_stopHard] 里 await pause/stop；此处兜底再停一次再释放。
     if (!_stoppedHard) {
@@ -399,6 +426,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _autoNextArmed = true;
     setState(() {
       _epIdx = epIdx;
+      _playUrl = '';
       _status = '解析中…';
     });
     try {
@@ -431,7 +459,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (!mounted) return;
         setState(() {
           _playUrl = playUrl;
-          _status = '内置 VLC 播放中';
+          _status = '$_enginePrefix 加载中…';
         });
       } else {
         try {
@@ -447,7 +475,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (!mounted) return;
         setState(() {
           _playUrl = playUrl;
-          _status = '内置 MPV 播放中';
+          _status = '$_enginePrefix 加载中…';
         });
       }
       unawaited(_loadDanmakuForEpisode(
@@ -461,6 +489,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       _endingSkipFired = false;
       _autoNextArmed = true;
       _playArmedAt = DateTime.now();
+      _syncPlayStatus();
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: '${d.name} · ${ep.name}', url: playUrl);
       if (fullscreen && mounted) {
         await _enterFullscreen();
