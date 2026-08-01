@@ -12,6 +12,8 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // thunder-release.aar 要求开启 core library desugaring
+        coreLibraryDesugaringEnabled true
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
@@ -78,6 +80,7 @@ chaquopy {
 }
 
 dependencies {
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
     implementation "org.nanohttpd:nanohttpd:2.3.1"
     // TV 同款迅雷 SDK（含 libxl_*.so）
     implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
