@@ -342,7 +342,21 @@ func BridgeJAR() string {
 
 // Status 汇总捆绑/系统运行时状态（不含 jvm；展示顺序由客户端固定）。
 func Status() map[string]string {
-	out := map[string]string{
+	// Android：只报 bridge/quickjs；不报桌面 chromium/ffmpeg/vlc 等（播放走 Exo/media_kit）。
+	if runtime.GOOS == "android" {
+		st := "android-bridge(down)"
+		if v := probeAndroidSpider(); v != "" {
+			st = v
+		}
+		return map[string]string{
+			"platform": Platform(),
+			"java":     st,
+			"python":   st,
+			"quickjs":  "embedded(CGO)",
+			"bridge":   st,
+		}
+	}
+	return map[string]string{
 		"platform": Platform(),
 		"java":     orMissing(Java()),
 		"python":   orMissing(Python()),
@@ -354,19 +368,6 @@ func Status() map[string]string {
 		"mpv":      orMissing(MPV()),
 		"vlc":      orMissing(VLC()),
 	}
-	// Android：JAR/PY/嗅探走同进程 :9979 Native Service，不是桌面 JRE/Python 路径。
-	if runtime.GOOS == "android" {
-		if st := probeAndroidSpider(); st != "" {
-			out["java"] = st
-			out["python"] = st
-			out["bridge"] = st
-		} else {
-			out["java"] = "android-bridge(down)"
-			out["python"] = "android-bridge(down)"
-			out["bridge"] = "android-bridge(down)"
-		}
-	}
-	return out
 }
 
 func probeAndroidSpider() string {

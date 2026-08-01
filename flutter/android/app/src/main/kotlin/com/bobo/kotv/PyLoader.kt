@@ -77,8 +77,9 @@ finally:
     sys.stdout = __old_stdout
 """.trimIndent()
 
-    // Chaquopy 17：PyObject 无 exec()，走 builtins.exec(code, globals)
-    py.builtins.callAttr("exec", wrapper, main)
+    // builtins.exec(code, globals)：globals 必须是 dict，不能传 module
+    val globals = main.get("__dict__")
+    py.builtins.callAttr("exec", wrapper, globals)
     val out = main.get("__out").toString().trim()
     val firstLine = out.lines().firstOrNull { it.trim().startsWith("{") }.orEmpty()
     if (firstLine.isEmpty()) {
