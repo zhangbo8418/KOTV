@@ -107,13 +107,17 @@ jobs:
           bash ./scripts/verify-runtime.sh "$out/runtime" windows-x64
 
       - name: Compress ZIP
-        shell: pwsh
+        shell: bash
         run: |
-          $tag = "${{ github.ref_name }}"
-          if (-not $tag) { $tag = "dev" }
-          Compress-Archive -Path "flutter\build\windows\x64\runner\Release\*" -DestinationPath "./KOTV-flutter-win7-experimental-${tag}.zip" -Force
+          source ./scripts/kotv-release-name.sh
+          VERSION="$(kotv_release_version flutter/pubspec.yaml)"
+          ARCH="$(kotv_release_arch windows-x64)"
+          OUT="${GITHUB_WORKSPACE}/KO影视-${VERSION}-${ARCH}-win7.zip"
+          rm -f "$OUT"
+          (cd flutter/build/windows/x64/runner/Release && zip -r -q "$OUT" .)
+          ls -lh "$OUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: flutter-win7-experimental
-          path: KOTV-flutter-win7-experimental-*.zip
+          name: KO影视-windows-win7
+          path: KO影视-*-x86_64-win7.zip

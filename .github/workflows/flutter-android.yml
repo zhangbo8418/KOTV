@@ -80,9 +80,9 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KO影视-Flutter-android
+          name: KO影视-android
           path: |
-            dist/KO影视-Flutter-android.apk
-            dist/KO影视-Flutter-android-arm64.apk
+            dist/KO影视-*-aarch64.apk
+            dist/KO影视-*-armv7.apk
           if-no-files-found: error
           retention-days: 14

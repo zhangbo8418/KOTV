@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# 打包 Flutter macOS：完整 runtime（jre/python/…）+ Go 引擎 + UI → .app / .dmg
+# 打包 Flutter macOS：完整 runtime + Go 引擎 + UI → .app / .dmg
+# 产物：dist/KO影视.app 、 dist/KO影视-{version}-{aarch64|x86_64}.dmg
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-release-name.sh
+source "$ROOT/scripts/kotv-release-name.sh"
 export PATH="${HOME}/flutter/bin:${PATH}"
 export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.flutter-io.cn}"
 export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flutter-io.cn}"
@@ -9,6 +12,9 @@ export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flu
 ARCH="$(uname -m)"
 PLAT="macos-x64"
 [[ "$ARCH" == "arm64" ]] && PLAT="macos-arm64"
+VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
+REL_ARCH="$(kotv_release_arch "$PLAT")"
+echo "==> version=$VERSION arch=$REL_ARCH ($PLAT)"
 
 if [[ ! -d "$ROOT/runtime/jre" || ! -d "$ROOT/runtime/libvlc" ]]; then
   echo "==> runtime incomplete, preparing..."
@@ -26,7 +32,6 @@ file "$ROOT/flutter/assets/engine/kotv-engine"
 
 echo "==> flutter build macos --release"
 cd "$ROOT/flutter"
-# 清掉可能残留在 MacOS 的未签名引擎，避免 Xcode CodeSign 失败
 rm -rf \
   "$ROOT/flutter/build/macos/Build/Products/Release/KO影视.app" \
   "$ROOT/flutter/build/macos/Build/Products/Release/kotv.app" \
@@ -34,7 +39,6 @@ rm -rf \
 flutter pub get
 flutter build macos --release
 
-# PRODUCT_NAME = KO影视
 APP_SRC=""
 for cand in \
   "$ROOT/flutter/build/macos/Build/Products/Release/KO影视.app" \
@@ -47,21 +51,18 @@ do
 done
 [[ -n "$APP_SRC" ]] || { echo "missing Release .app under build/macos/..." >&2; exit 1; }
 
-STAGE="$ROOT/dist/_flutter_dmg_stage"
-OUT_APP="$ROOT/dist/KO影视-Flutter.app"
-DMG="$ROOT/dist/KO影视-Flutter-${PLAT}.dmg"
+STAGE="$ROOT/dist/_macos_dmg_stage"
+OUT_APP="$ROOT/dist/KO影视.app"
+DMG="$ROOT/dist/KO影视-${VERSION}-${REL_ARCH}.dmg"
 rm -rf "$STAGE" "$OUT_APP" "$DMG"
 mkdir -p "$ROOT/dist" "$STAGE"
 
 echo "==> stage app from $APP_SRC"
 ditto "$APP_SRC" "$OUT_APP"
 
-# 完整 runtime + 引擎（Xcode Build Phase 已拷 Resources；这里再保证发行包齐全，并放入 MacOS 供启动脚本）
 KOTV_BUNDLE_ENGINE_TO_MACOS=1 "$ROOT/scripts/bundle-flutter-runtime.sh" "$OUT_APP"
 
-# 启动包装：只注入 KOTV_RUNTIME；引擎由 Flutter 托管（随窗口关闭）
 WRAP="$OUT_APP/Contents/MacOS/kotv-launch"
-# 主可执行名与 PRODUCT_NAME 一致
 MAIN_BIN="KO影视"
 [[ -x "$OUT_APP/Contents/MacOS/$MAIN_BIN" ]] || MAIN_BIN="kotv"
 cat > "$WRAP" <<EOF
@@ -90,9 +91,9 @@ echo "==> ad-hoc sign"
 codesign --force --deep --sign - "$OUT_APP" 2>/dev/null || true
 
 echo "==> make dmg"
-ditto "$OUT_APP" "$STAGE/KO影视-Flutter.app"
+ditto "$OUT_APP" "$STAGE/KO影视.app"
 ln -sf /Applications "$STAGE/Applications"
-hdiutil create -volname "KO影视 Flutter" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+hdiutil create -volname "KO影视" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 rm -rf "$STAGE"
 
 echo "app: $OUT_APP"

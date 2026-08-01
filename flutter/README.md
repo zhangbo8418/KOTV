@@ -21,9 +21,14 @@
 ./scripts/package-flutter-android.sh
 ```
 
-产物：`dist/KO影视-Flutter-android.apk`（含 **arm64-v8a + armeabi-v7a**）。
+产物：
 
-无本机 NDK 时推到 `restore-sidecar`，由 GitHub Actions 编译（workflow：`KOTV Flutter Android`），在 Actions → Artifact 下载 APK；也可手动 **Run workflow**。
+- `dist/KO影视-{version}-aarch64.apk`
+- `dist/KO影视-{version}-armv7.apk`
+
+无本机 NDK 时推到 `restore-sidecar`，由 GitHub Actions 编译（workflow：`KOTV Flutter Android`），在 Actions → Artifact 下载；也可手动 **Run workflow**。
+
+其它平台发行名同样为 `KO影视-{version}-{arch}.{ext}`（如 macOS `KO影视-0.1.0-aarch64.dmg`，Win7 `KO影视-0.1.0-x86_64-win7.zip`）。
 
 - 引擎：`libkotv_engine.so` 双 ABI 进 `jniLibs`，由 Flutter 拉起 sidecar
 - 爬虫：同进程 `:9979` SpiderService（JAR/PY/嗅探）
@@ -49,7 +54,7 @@
 - 桌面 **内置 MPV** 使用 Flutter **media_kit 自带 libmpv**（不进 `runtime/`）。
 - Python 爬虫依赖与 TV `chaquo/requirements.txt` 对齐（`scripts/python-requirements.txt`），打进 `runtime/python`。
 - UI 闪退时由看门狗杀掉残留 `kotv-engine`（见 `engine_launcher.dart`）。
-- 产物为 `KOTV-flutter-win7-experimental-*.zip`，用于 Win7 真机回归。
+- 产物为 `KO影视-{version}-x86_64-win7.zip`，用于 Win7 真机回归。
 
 ```bash
 cd flutter

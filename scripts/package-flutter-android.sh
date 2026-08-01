@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# 打包 Flutter Android APK：arm64 + armeabi-v7a Go 引擎 + Spider bridge + 迅雷 AAR
+# 打包 Flutter Android：按 ABI 拆包
+#   dist/KO影视-{version}-aarch64.apk
+#   dist/KO影视-{version}-armv7.apk
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-release-name.sh
+source "$ROOT/scripts/kotv-release-name.sh"
 export PATH="${HOME}/flutter/bin:${PATH}"
 export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.flutter-io.cn}"
 export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flutter-io.cn}"
 
+VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
+echo "==> version=$VERSION"
+
 echo "==> build Go engine (android arm64 + armeabi-v7a)"
-# QuickJS CGO 头文件（未进 git）
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)
 "$ROOT/scripts/build-engine-flutter.sh" android
 
@@ -38,18 +44,22 @@ if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ ! -s "$ROOT/bridge/spider-b
   "$ROOT/bridge/build.sh"
 fi
 
-echo "==> flutter build apk --release (arm64 + armv7)"
+echo "==> flutter build apk --release --split-per-abi"
 cd "$ROOT/flutter"
 flutter pub get
-flutter build apk --release --target-platform=android-arm,android-arm64
+flutter build apk --release --split-per-abi --target-platform=android-arm,android-arm64
 
-APK_SRC="$ROOT/flutter/build/app/outputs/flutter-apk/app-release.apk"
-[[ -f "$APK_SRC" ]] || { echo "missing $APK_SRC" >&2; exit 1; }
+OUT_DIR="$ROOT/flutter/build/app/outputs/flutter-apk"
+ARM64_SRC="$OUT_DIR/app-arm64-v8a-release.apk"
+ARMV7_SRC="$OUT_DIR/app-armeabi-v7a-release.apk"
+[[ -f "$ARM64_SRC" ]] || { echo "missing $ARM64_SRC" >&2; exit 1; }
+[[ -f "$ARMV7_SRC" ]] || { echo "missing $ARMV7_SRC" >&2; exit 1; }
 
 mkdir -p "$ROOT/dist"
-OUT_APK="$ROOT/dist/KO影视-Flutter-android.apk"
-cp -f "$APK_SRC" "$OUT_APK"
-# 兼容旧文件名
-cp -f "$APK_SRC" "$ROOT/dist/KO影视-Flutter-android-arm64.apk"
-echo "==> done: $OUT_APK"
-ls -lh "$OUT_APK"
+OUT_AARCH64="$ROOT/dist/KO影视-${VERSION}-aarch64.apk"
+OUT_ARMV7="$ROOT/dist/KO影视-${VERSION}-armv7.apk"
+cp -f "$ARM64_SRC" "$OUT_AARCH64"
+cp -f "$ARMV7_SRC" "$OUT_ARMV7"
+
+echo "==> done:"
+ls -lh "$OUT_AARCH64" "$OUT_ARMV7"
