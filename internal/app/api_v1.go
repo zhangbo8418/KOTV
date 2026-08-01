@@ -242,7 +242,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			if cand != "" && (parse.IsVideoFormat(cand) || thunder.Match(cand)) {
 				playURL = cand
 			} else {
-				return nil, fmt.Errorf("解析失败: %w", perr)
+				return nil, parse.AnnotateParseErr(perr)
 			}
 		} else {
 			result = parsed
@@ -486,7 +486,7 @@ func (a *App) APIDeleteRepo(url string) error {
 
 func (a *App) APIGetSettings() map[string]any {
 	keys := []settings.Type{
-		settings.VOD, settings.LIVE, settings.Theme, settings.Player,
+		settings.VOD, settings.LIVE, settings.Theme, settings.Player, settings.PlayerLive,
 		settings.Proxy, settings.PlayerSpeed, settings.PlayerScale, settings.PlayerDecode,
 		settings.PreferredParse, settings.AdFilter, settings.M3U8Cfg, settings.DanmakuOn, settings.DanmakuAPI,
 		settings.AssrtToken, settings.UpdateURL, settings.WallMode, settings.WallURL,

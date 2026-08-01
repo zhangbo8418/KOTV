@@ -12,6 +12,7 @@ import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/h_scroll.dart';
 import '../widgets/poster_card.dart';
 import 'detail_screen.dart';
 import 'shell.dart';
@@ -82,14 +83,19 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     await _reload();
   }
 
-  Future<void> _reload() async {
+  Future<void> _reload({bool clearContent = false}) async {
     final gen = ++_loadGen;
     setState(() {
       _loading = true;
       _statusMsg = null;
       _page = 1;
       _bannerIdx = 0;
-      // 不清空 _items/_types：断线重试时保留骨架，避免整页塌成空态
+      // 断线重试保留骨架；换仓/换站必须清空，避免旧海报残留
+      if (clearContent) {
+        _items.clear();
+        _types = [];
+        _filters = [];
+      }
     });
     try {
       // 断线自动拉起引擎
@@ -303,13 +309,15 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _tid = null;
           _extend.clear();
           _filters = [];
+          _types = [];
+          _items.clear();
           _statusMsg = null;
         });
         try {
           await ref.read(apiProvider).setHome(key);
           ref.invalidate(configProvider);
           ref.invalidate(settingsProvider);
-          await _reload();
+          await _reload(clearContent: true);
         } catch (e) {
           if (mounted) setState(() => _statusMsg = '切换失败: $e');
         } finally {
@@ -363,10 +371,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               _tid = null;
               _extend.clear();
               _filters = [];
+              _types = [];
+              _items.clear();
               _statusMsg = null;
             });
-            // 多仓切换已有全局遮罩，这里只刷新内容，不再叠一层 loading
-            await _reload();
+            // 多仓切换已有全局遮罩；内容必须清空后再拉，避免旧仓海报残留
+            await _reload(clearContent: true);
           },
           onSite: () => _openSitePicker(sites),
           onSettings: () => goKotvPage(ref, KotvPage.settings),
@@ -428,8 +438,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   Widget _buildFilters() {
     final compact = KotvLayout.isCompact(context);
+    final p = KotvPalette.of(context);
     final padH = compact ? 10.0 : 24.0;
-    final labelW = compact ? 40.0 : 72.0;
+    // 标签仅两字宽，桌面 72 会造成与胶囊之间大片空档
+    final labelW = compact ? 36.0 : 44.0;
     final pillW = compact ? null : 88.0;
     final pillH = compact ? 28.0 : 36.0;
     final pillFs = compact ? 12.0 : 13.0;
@@ -448,16 +460,16 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                     child: Text(
                       f.name,
                       style: TextStyle(
-                        color: KotvPalette.of(context).muted,
+                        color: p.fg.withOpacity(p.light ? 0.72 : 0.78),
                         fontSize: compact ? 12 : 14,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                   Expanded(
                     child: SizedBox(
                       height: pillH,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
+                      child: HScrollList(
                         itemCount: f.values.length,
                         separatorBuilder: (_, __) => SizedBox(width: sepW),
                         itemBuilder: (_, i) {
@@ -850,7 +862,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           delegate: SliverChildBuilderDelegate(
             (context, i) => PosterCard(
               item: items[i],
-              autofocus: (_tid != null && _tid!.isNotEmpty) && i == 0,
+              autofocus: false,
               onTap: () => _open(items[i]),
             ),
             childCount: items.length,

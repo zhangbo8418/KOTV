@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,6 +49,24 @@ func (s *Server) SetContentAPI(api ContentAPI) {
 	s.mu.Unlock()
 }
 
+// SetShutdownHook 注册本机优雅停机回调（仅 /api/v1/shutdown 触发）。
+func (s *Server) SetShutdownHook(fn func()) {
+	s.mu.Lock()
+	s.onShutdown = fn
+	s.mu.Unlock()
+}
+
+func (s *Server) requestShutdown() bool {
+	s.mu.RLock()
+	fn := s.onShutdown
+	s.mu.RUnlock()
+	if fn == nil {
+		return false
+	}
+	fn()
+	return true
+}
+
 func (s *Server) content() ContentAPI {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -73,6 +92,7 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/ui/poll", s.handleAPIv1UIPoll)
 	mux.HandleFunc("/api/v1/ui/reply", s.handleAPIv1UIReply)
 	mux.HandleFunc("/api/v1/cancel", s.handleAPIv1Cancel)
+	mux.HandleFunc("/api/v1/shutdown", s.handleAPIv1Shutdown)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -741,4 +761,34 @@ func (s *Server) handleAPIv1Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.APICancelPending())
+}
+
+// handleAPIv1Shutdown 仅本机可调用：优雅停引擎（会顺带杀 Java/Python）。
+func (s *Server) handleAPIv1Shutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !isLoopbackAddr(r.RemoteAddr) {
+		writeAPIError(w, http.StatusForbidden, "shutdown only allowed from localhost")
+		return
+	}
+	if !s.requestShutdown() {
+		writeAPIError(w, http.StatusServiceUnavailable, "shutdown hook unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stopping": true})
+}
+
+func isLoopbackAddr(remote string) bool {
+	host := remote
+	if h, _, err := net.SplitHostPort(remote); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

@@ -7,6 +7,7 @@ import '../providers.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import 'h_scroll.dart';
 
 /// Legacy TV 背景：按 settings.backdrop（wallMode）切换渐变/壁纸/内置主题。
 class AppBackdrop extends ConsumerStatefulWidget {
@@ -395,12 +396,16 @@ class EpisodeChip extends StatelessWidget {
     required this.onTap,
     this.selected = false,
     this.autofocus = false,
+    this.height = 40,
+    this.fontSize = 14,
   });
 
   final String label;
   final VoidCallback onTap;
   final bool selected;
   final bool autofocus;
+  final double height;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -415,7 +420,7 @@ class EpisodeChip extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
           child: Container(
-            height: 40,
+            height: height,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: bg,
@@ -425,7 +430,7 @@ class EpisodeChip extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
+              style: TextStyle(color: Colors.white, fontSize: fontSize, fontWeight: FontWeight.w700),
             ),
           ),
         ),
@@ -633,7 +638,11 @@ class LibraryTopBar extends StatelessWidget {
                   title!,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                    color: KotvPalette.of(context).fg,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ] else
@@ -700,8 +709,7 @@ class CategoryNavBar extends StatelessWidget {
           NavPill(label: homeLabel, selected: homeSelected, onTap: onHome),
           SizedBox(width: 8 * s),
           Expanded(
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
+            child: HScrollList(
               itemCount: categories.length,
               separatorBuilder: (_, __) => SizedBox(width: 8 * s),
               itemBuilder: (_, i) {
