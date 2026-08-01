@@ -79,10 +79,10 @@ flutter {
 }
 
 // 把 bridge/spider-bridge.jar 拷贝进 APK assets，供 JarLoader 读取。
-def repoRoot = file("../../../..")
+// app/ → android/ → flutter/ → 仓库根（三级，不是四级）
+def repoRoot = file("../../..")
 def bridgeJar = new File(repoRoot, "bridge/spider-bridge.jar")
 def bridgeAssetDir = file("src/main/assets/kotv")
-def engineSoSrc = new File(repoRoot, "flutter/android/app/src/main/jniLibs/arm64-v8a/libkotv_engine.so")
 def engineSoAlt = new File(repoRoot, "flutter/assets/engine/libkotv_engine.so")
 
 tasks.register("prepareSpiderBridgeJar") {
