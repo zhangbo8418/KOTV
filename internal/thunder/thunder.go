@@ -76,7 +76,43 @@ var (
 	client  *torrent.Client
 	entries = map[string]*entry{} // ih#index → entry
 	portFn  func() int
+
+	progressMu sync.Mutex
+	progress   = FetchProgress{Phase: "idle"}
 )
+
+// FetchProgress 当前磁力任务进度（供 UI 轮询）。
+type FetchProgress struct {
+	Phase   string `json:"phase"` // idle|meta|buffer|ready|error
+	Peers   int    `json:"peers"`
+	Bytes   int64  `json:"bytes"`
+	Need    int64  `json:"need"`
+	Message string `json:"message"`
+}
+
+// CurrentProgress 返回最近一次 Fetch/展开进度快照。
+func CurrentProgress() FetchProgress {
+	progressMu.Lock()
+	defer progressMu.Unlock()
+	return progress
+}
+
+// SetExpandProgress 详情展开阶段文案。
+func SetExpandProgress(msg string) {
+	setProgress("expand", 0, 0, 0, msg)
+}
+
+func setProgress(phase string, peers int, bytes, need int64, msg string) {
+	progressMu.Lock()
+	defer progressMu.Unlock()
+	progress = FetchProgress{
+		Phase:   phase,
+		Peers:   peers,
+		Bytes:   bytes,
+		Need:    need,
+		Message: msg,
+	}
+}
 
 // SetPortFunc 注入本地 HTTP 端口（配合本地代理）。
 func SetPortFunc(fn func() int) { portFn = fn }
@@ -134,6 +170,7 @@ func ParseVodContext(ctx context.Context, vod *model.Vod) {
 	if vod == nil {
 		return
 	}
+	setProgress("expand", 0, 0, 0, "正在展开磁力文件列表…")
 	for i := range vod.VodFlags {
 		if ctx.Err() != nil {
 			log.Printf("thunder: parse cancelled")
@@ -145,6 +182,7 @@ func ParseVodContext(ctx context.Context, vod *model.Vod) {
 		return
 	}
 	vod.SetCurrentFlag(0)
+	setProgress("ready", 0, 0, 0, "磁力文件列表已更新")
 }
 
 // NeedsParse 详情里是否含需展开的 magnet/thunder/.torrent。
@@ -254,6 +292,7 @@ func Fetch(raw string) (string, error) {
 	if strings.HasPrefix(strings.ToLower(raw), "ed2k:") {
 		return "", fmt.Errorf("暂不支持电驴链接")
 	}
+	setProgress("meta", 0, 0, 0, "正在获取磁力元数据…")
 	metaCtx, metaCancel := context.WithTimeout(context.Background(), metaTimeout)
 	defer metaCancel()
 
@@ -268,9 +307,11 @@ func Fetch(raw string) (string, error) {
 		} else if ih != "" {
 			t, err = torrentByInfoHash(ih)
 		} else {
+			setProgress("error", 0, 0, 0, "无效的磁力剧集地址")
 			return "", fmt.Errorf("无效的磁力剧集地址")
 		}
 		if err != nil {
+			setProgress("error", 0, 0, 0, err.Error())
 			return "", err
 		}
 		file = fileByIndex(t, index)
@@ -281,6 +322,7 @@ func Fetch(raw string) (string, error) {
 	} else {
 		t, _, err = openTorrent(metaCtx, raw)
 		if err != nil {
+			setProgress("error", 0, 0, 0, err.Error())
 			return "", err
 		}
 		file = pickLargest(mediaFiles(t))
@@ -290,6 +332,7 @@ func Fetch(raw string) (string, error) {
 		index = fileIndex(t, file)
 	}
 	if file == nil {
+		setProgress("error", 0, 0, 0, "未找到可播文件")
 		return "", fmt.Errorf("未找到可播文件")
 	}
 
@@ -302,15 +345,18 @@ func Fetch(raw string) (string, error) {
 
 	log.Printf("thunder: meta ok ih=%s idx=%d file=%s size=%d，等待片头缓冲…",
 		ih, index, filepath.Base(file.DisplayPath()), file.Length())
+	setProgress("buffer", 0, 0, minStartBytes, "正在缓冲片头…")
 
 	bufCtx, bufCancel := context.WithTimeout(context.Background(), bufferTimeout)
 	defer bufCancel()
 	if err := waitHeadBuffer(bufCtx, t, file); err != nil {
+		setProgress("error", 0, file.BytesCompleted(), minStartBytes, err.Error())
 		return "", err
 	}
 
 	st := t.Stats()
 	u := localURL(key)
+	setProgress("ready", st.ActivePeers+st.ConnectedSeeders, file.BytesCompleted(), minStartBytes, "片头就绪")
 	log.Printf("thunder: fetch ready ih=%s idx=%d file=%s url=%s peers=%d seeders=%d buffered=%d",
 		ih, index, filepath.Base(file.DisplayPath()), u, st.ActivePeers, st.ConnectedSeeders, file.BytesCompleted())
 	return u, nil
@@ -334,6 +380,14 @@ func waitHeadBuffer(ctx context.Context, t *torrent.Torrent, file *torrent.File)
 		done := file.BytesCompleted()
 		st := t.Stats()
 		peers := st.ActivePeers + st.ConnectedSeeders
+		pct := 0
+		if need > 0 {
+			pct = int(done * 100 / need)
+			if pct > 100 {
+				pct = 100
+			}
+		}
+		setProgress("buffer", peers, done, need, fmt.Sprintf("片头缓冲 %d%% · 节点 %d", pct, peers))
 		if done >= need {
 			return nil
 		}

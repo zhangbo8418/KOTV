@@ -20,6 +20,8 @@ type ContentAPI interface {
 	APIHome() (map[string]any, error)
 	APICategory(tid, pg string, extend map[string]string) (map[string]any, error)
 	APIDetail(siteKey, vodID string) (map[string]any, error)
+	APIDetailExpand(siteKey, vodID string) (map[string]any, error)
+	APIBtProgress() map[string]any
 	APISearch(keyword string, siteKeys []string) (map[string]any, error)
 	APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map[string]any, error)
 	APIRemotePoll() map[string]any
@@ -79,6 +81,8 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/home", s.handleAPIv1Home)
 	mux.HandleFunc("/api/v1/category", s.handleAPIv1Category)
 	mux.HandleFunc("/api/v1/detail", s.handleAPIv1Detail)
+	mux.HandleFunc("/api/v1/detail/expand", s.handleAPIv1DetailExpand)
+	mux.HandleFunc("/api/v1/bt/progress", s.handleAPIv1BtProgress)
 	mux.HandleFunc("/api/v1/search", s.handleAPIv1Search)
 	mux.HandleFunc("/api/v1/play", s.handleAPIv1Play)
 	mux.HandleFunc("/api/v1/sites", s.handleAPIv1Sites)
@@ -309,6 +313,56 @@ func (s *Server) handleAPIv1Detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleAPIv1DetailExpand(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	api := s.content()
+	if api == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+		return
+	}
+	siteKey := r.URL.Query().Get("site")
+	vodID := r.URL.Query().Get("id")
+	if r.Method == http.MethodPost {
+		var body struct {
+			Site string `json:"site"`
+			ID   string `json:"id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Site != "" {
+			siteKey = body.Site
+		}
+		if body.ID != "" {
+			vodID = body.ID
+		}
+	}
+	if vodID == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing id")
+		return
+	}
+	out, err := api.APIDetailExpand(siteKey, vodID)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleAPIv1BtProgress(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	api := s.content()
+	if api == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, api.APIBtProgress())
 }
 
 func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {

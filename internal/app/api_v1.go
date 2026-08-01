@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"path"
@@ -142,9 +143,70 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 		sk = detail.Site.Key
 	}
 	return map[string]any{
-		"ok":  true,
-		"vod": vodDetailDTO(detail, sk),
+		"ok":     true,
+		"vod":    vodDetailDTO(detail, sk),
+		"magnet": thunder.NeedsParse(&detail),
 	}, nil
+}
+
+// APIDetailExpand 异步展开磁力/种子为媒体文件列表（可阻塞数十秒）。
+func (a *App) APIDetailExpand(siteKey, vodID string) (map[string]any, error) {
+	if localCrawlerDisabled() {
+		return nil, fmt.Errorf("请先连接可用后端服务")
+	}
+	vod := model.Vod{VodID: model.FlexString(vodID)}
+	if siteKey != "" {
+		if site := a.Config.GetSite(siteKey); site != nil {
+			vod.Site = site
+		}
+	}
+	if vod.Site == nil {
+		h := a.Config.Home()
+		vod.Site = &h
+	}
+	detail, err := a.Sites.DetailContent(vod)
+	if err != nil {
+		return nil, err
+	}
+	detail.SetVodFlags()
+	sk := ""
+	if detail.Site != nil {
+		sk = detail.Site.Key
+	}
+	if !thunder.NeedsParse(&detail) {
+		return map[string]any{
+			"ok":       true,
+			"expanded": false,
+			"magnet":   false,
+			"vod":      vodDetailDTO(detail, sk),
+		}, nil
+	}
+	work := detail
+	work.VodFlags = thunder.CloneFlags(detail.VodFlags)
+	thunder.SetExpandProgress("正在展开磁力文件列表…")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	thunder.ParseVodContext(ctx, &work)
+	thunder.SetExpandProgress("磁力文件列表已更新")
+	return map[string]any{
+		"ok":       true,
+		"expanded": true,
+		"magnet":   true,
+		"vod":      vodDetailDTO(work, sk),
+	}, nil
+}
+
+// APIBtProgress 磁力 Fetch/展开进度（Flutter 轮询）。
+func (a *App) APIBtProgress() map[string]any {
+	p := thunder.CurrentProgress()
+	return map[string]any{
+		"ok":      true,
+		"phase":   p.Phase,
+		"peers":   p.Peers,
+		"bytes":   p.Bytes,
+		"need":    p.Need,
+		"message": p.Message,
+	}
 }
 
 // APICancelPending 离开详情/取消扫码时打断卡住的 JAR/脚本调用。

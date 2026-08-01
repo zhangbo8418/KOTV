@@ -75,6 +75,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _miniDesktop = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
+  Timer? _btProgressTimer;
   static const _epSize = 20;
 
   Player? _mkPlayer;
@@ -181,6 +182,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _bufferingSub = null;
     _playUrl = '';
     _magnetPlay = false;
+    _stopBtProgressPoll();
 
     Future<void> hardStop(KotvPlayback? p) async {
       if (p == null) return;
@@ -287,6 +289,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _endedSub?.cancel();
     _posSub?.cancel();
     _bufferingSub?.cancel();
+    _stopBtProgressPoll();
     _danmakuItems.dispose();
     // 正常路径已在 [_stopHard] 里 await pause/stop；此处兜底再停一次再释放。
     if (!_stoppedHard) {
@@ -353,12 +356,77 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           _endingSec = off.$2;
         });
       }
+      final needExpand = data['magnet'] == true || _detailHasMagnet(vod);
+      if (needExpand && mounted) {
+        unawaited(_expandMagnet(id: id, site: site));
+      }
     } catch (e) {
       setState(() {
         _error = '$e';
         _loading = false;
       });
     }
+  }
+
+  bool _detailHasMagnet(VodDetail vod) {
+    for (final f in vod.flags) {
+      for (final ep in f.episodes) {
+        final u = ep.url.trim().toLowerCase();
+        if (u.startsWith('magnet:') || u.startsWith('thunder:') || u.startsWith('ed2k:') || u.contains('.torrent')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  Future<void> _expandMagnet({required String id, required String site}) async {
+    if (!mounted) return;
+    setState(() => _status = '正在展开磁力文件…');
+    _startBtProgressPoll(expanding: true);
+    try {
+      final data = await ref.read(apiProvider).detailExpand(id: id, site: site);
+      if (!mounted) return;
+      if (data['expanded'] == true && data['vod'] is Map) {
+        final vod = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
+        setState(() {
+          _detail = vod;
+          _flagIdx = 0;
+          _epPage = 0;
+          _epIdx = -1;
+          _status = '磁力文件已展开，可选集播放';
+        });
+      } else if (mounted) {
+        setState(() => _status = '选择剧集开始播放');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _status = '磁力展开失败，仍可点原链起播');
+    } finally {
+      _stopBtProgressPoll();
+    }
+  }
+
+  void _startBtProgressPoll({bool expanding = false}) {
+    _btProgressTimer?.cancel();
+    _btProgressTimer = Timer.periodic(const Duration(milliseconds: 600), (_) async {
+      if (!mounted) return;
+      try {
+        final p = await ref.read(apiProvider).btProgress();
+        final msg = '${p['message'] ?? ''}'.trim();
+        if (msg.isEmpty || !mounted) return;
+        // 展开/起播过程中用引擎进度覆盖状态；已进入正式播放文案则不抢。
+        if (_status.contains('播放中') && !_status.contains('磁力缓冲')) return;
+        if (_status == '已暂停' || _status == '播放结束' || _status.startsWith('播放失败')) return;
+        if (expanding || _magnetPlay || _status.contains('磁力') || _status.contains('解析') || _status.contains('缓冲') || _status.contains('加载')) {
+          if (_status != msg) setState(() => _status = msg);
+        }
+      } catch (_) {}
+    });
+  }
+
+  void _stopBtProgressPoll() {
+    _btProgressTimer?.cancel();
+    _btProgressTimer = null;
   }
 
   List<EpisodeItem> get _eps {
@@ -432,13 +500,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _stoppedHard = false;
     _autoNextArmed = true;
     final epLooksMagnet = RegExp(r'^(magnet|thunder|ed2k):', caseSensitive: false).hasMatch(ep.url.trim()) ||
-        ep.url.toLowerCase().contains('.torrent');
+        ep.url.toLowerCase().contains('.torrent') ||
+        ep.url.contains('/proxy/bt/') ||
+        ep.url.toLowerCase().startsWith('magnet://local');
     setState(() {
       _epIdx = epIdx;
       _playUrl = '';
       _magnetPlay = epLooksMagnet;
       _status = epLooksMagnet ? '磁力解析中…' : '解析中…';
     });
+    if (epLooksMagnet) _startBtProgressPoll();
     try {
       final data = await ref.read(apiProvider).play(
             url: ep.url,
@@ -501,12 +572,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       _endingSkipFired = false;
       _autoNextArmed = true;
       _playArmedAt = DateTime.now();
+      _stopBtProgressPoll();
       _syncPlayStatus();
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: '${d.name} · ${ep.name}', url: playUrl);
       if (fullscreen && mounted) {
         await _enterFullscreen();
       }
     } catch (e) {
+      _stopBtProgressPoll();
       setState(() {
         _playUrl = '';
         _status = _friendlyPlayError(e);

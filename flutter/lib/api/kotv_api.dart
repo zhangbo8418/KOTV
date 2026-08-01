@@ -98,6 +98,14 @@ class KotvApi {
         if (site != null && site.isNotEmpty) 'site': site,
       });
 
+  Future<Map<String, dynamic>> detailExpand({required String id, String? site}) =>
+      _post('/api/v1/detail/expand', {
+        'id': id,
+        if (site != null && site.isNotEmpty) 'site': site,
+      });
+
+  Future<Map<String, dynamic>> btProgress() => _get('/api/v1/bt/progress');
+
   Future<Map<String, dynamic>> search(String keyword) =>
       _post('/api/v1/search', {'keyword': keyword});
 
