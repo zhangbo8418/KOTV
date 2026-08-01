@@ -69,8 +69,17 @@ object JarLoader {
       } catch (_: Throwable) {
       }
     }
-    val out = m.invoke(null, inputJson)
-    return out?.toString().orEmpty()
+    return try {
+      val out = m.invoke(null, inputJson)
+      val s = out?.toString()?.trim().orEmpty()
+      if (s.isEmpty()) {
+        error("SpiderBridge.call returned empty (site jar load/init failed?)")
+      }
+      s
+    } catch (t: java.lang.reflect.InvocationTargetException) {
+      val c = t.cause ?: t
+      throw RuntimeException(c.message ?: c.toString(), c)
+    }
   }
 
   fun clear() {

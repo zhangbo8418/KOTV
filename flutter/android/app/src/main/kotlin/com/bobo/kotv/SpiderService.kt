@@ -81,6 +81,9 @@ class SpiderService private constructor(
         "/jar/call" -> {
           JarLoader.ensureBridgeLoaded(appContext)
           val raw = JarLoader.callBridge(body)
+          if (raw.isBlank()) {
+            return newJsonError(Status.INTERNAL_ERROR, "jar call empty response")
+          }
           json(Status.OK, raw)
         }
 
@@ -93,7 +96,9 @@ class SpiderService private constructor(
           PyLoader.startIfNeeded(appContext)
           val obj = JSONObject(body)
           val result = PyLoader.callPython(obj)
-          json(Status.OK, JSONObject().put("result", result).toString())
+          // 空结果也回包装，避免 Go 侧当成 transport 失败
+          val payload = JSONObject().put("result", result ?: "")
+          json(Status.OK, payload.toString())
         }
 
         "/sniff" -> {
@@ -137,9 +142,27 @@ class SpiderService private constructor(
     } catch (_: Throwable) {
       // ignore
     }
-    return post["postData"]?.trim()
+    val fromMap = post["postData"]?.trim()
       ?: post["data"]?.trim()
       ?: post.values.firstOrNull()?.trim().orEmpty()
+    if (fromMap.isNotEmpty()) return fromMap
+
+    // 部分 ROM / content-type 下 postData 为空：按 content-length 读原始流
+    val len = session.headers["content-length"]?.toIntOrNull() ?: 0
+    if (len <= 0 || len > 2 * 1024 * 1024) return ""
+    return try {
+      val buf = ByteArray(len)
+      var off = 0
+      val ins = session.inputStream
+      while (off < len) {
+        val n = ins.read(buf, off, len - off)
+        if (n < 0) break
+        off += n
+      }
+      String(buf, 0, off, Charsets.UTF_8).trim()
+    } catch (_: Throwable) {
+      ""
+    }
   }
 
   private fun json(status: Status, body: String): Response {

@@ -54,36 +54,62 @@ object PyLoader {
     main.put("__proxy_port", proxyPort)
 
     // 重要：pyrunner.py 里最后是 for line in sys.stdin: ...，因此我们让 stdin 在一行后 EOF。
+    // 勿用空 dict 作 exec globals：部分 spider 依赖 __builtins__/包导入路径。
     val wrapper = """
-import io, sys, os
+import io, sys, os, traceback
 
 __old_argv = sys.argv
 __old_stdin = sys.stdin
 __old_stdout = sys.stdout
+__old_stderr = sys.stderr
+__err = ""
 
 sys.argv = ["pyrunner.py", __script_path, __key, __ext, __api, __cache_root]
 sys.stdin = io.StringIO(__stdin_line + "\n")
 sys.stdout = io.StringIO()
+sys.stderr = io.StringIO()
 
 os.environ["KOTV_PROXY_PORT"] = str(__proxy_port)
+for p in (os.path.dirname(__runner_path), os.path.dirname(__script_path), __cache_root):
+    if p and p not in sys.path:
+        sys.path.insert(0, p)
 
 code = open(__runner_path, "r", encoding="utf-8", errors="ignore").read()
+g = {"__name__": "__main__", "__file__": __runner_path, "__builtins__": __builtins__}
 try:
-    exec(compile(code, __runner_path, "exec"), {})
+    exec(compile(code, __runner_path, "exec"), g)
+except Exception:
+    __err = traceback.format_exc()
 finally:
     __out = sys.stdout.getvalue()
+    if not __err:
+        __err = sys.stderr.getvalue()
     sys.argv = __old_argv
     sys.stdin = __old_stdin
     sys.stdout = __old_stdout
+    sys.stderr = __old_stderr
 """.trimIndent()
 
     // builtins.exec(code, globals)：globals 必须是 dict，不能传 module
     val globals = main.get("__dict__")
     py.builtins.callAttr("exec", wrapper, globals)
-    val out = main.get("__out").toString().trim()
+    val err = try {
+      main.get("__err")?.toString()?.trim().orEmpty()
+    } catch (_: Throwable) {
+      ""
+    }
+    val out = try {
+      main.get("__out").toString().trim()
+    } catch (_: Throwable) {
+      ""
+    }
+    if (err.isNotEmpty() && out.lines().none { it.trim().startsWith("{") }) {
+      throw RuntimeException(err.take(2000))
+    }
     val firstLine = out.lines().firstOrNull { it.trim().startsWith("{") }.orEmpty()
     if (firstLine.isEmpty()) {
-      return out
+      if (out.isNotEmpty()) return out
+      throw RuntimeException(if (err.isNotEmpty()) err.take(2000) else "python produced no output")
     }
 
     val resp = JSONObject(firstLine)

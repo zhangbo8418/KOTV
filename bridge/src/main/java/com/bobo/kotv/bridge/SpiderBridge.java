@@ -277,32 +277,39 @@ public class SpiderBridge {
     private static Spider getSpider(String key, String api, String ext, String jarPath) throws Exception {
         // spKey = md5(jar) + siteKey；对齐 TV JarLoader.getSpider。
         String spKey = md5Hex(jarPath) + key;
-        return spiders.computeIfAbsent(spKey, k -> {
-            try {
-                parseJar(jarPath);
-                ClassLoader loader = loaders.get(jarPath);
-                if (loader == null) {
-                    throw new IllegalStateException("No jar loaded: " + jarPath);
-                }
-                // 对齐 TV：api.split("csp_")[1]
-                String[] parts = api.split("csp_", 2);
-                String spiderName = parts.length > 1 ? parts[1] : api;
-                String className = "com.github.catvod.spider." + spiderName;
-                Class<?> clazz = Class.forName(className, true, loader);
-                Constructor<?> ctor = clazz.getConstructor();
-                Spider spider = (Spider) ctor.newInstance();
-                spider.siteKey = key;
-                initializeSpider(spider, ext);
-                return spider;
-            } catch (Exception e) {
-                // 失败返回 SpiderNull，不拖死整条调用链。
-                System.err.println("getSpider failed key=" + key + " api=" + api + ": " + e);
-                e.printStackTrace(System.err);
-                SpiderNull nullSpider = new SpiderNull();
-                nullSpider.siteKey = key;
-                return nullSpider;
+        Spider cached = spiders.get(spKey);
+        if (cached != null && !(cached instanceof SpiderNull)) {
+            return cached;
+        }
+        // 勿永久缓存 SpiderNull：Android 上首次因 Writable dex 失败后会一直空响应。
+        try {
+            parseJar(jarPath);
+            ClassLoader loader = loaders.get(jarPath);
+            if (loader == null) {
+                throw new IllegalStateException("No jar loaded: " + jarPath);
             }
-        });
+            // 对齐 TV：api.split("csp_")[1]
+            String[] parts = api.split("csp_", 2);
+            String spiderName = parts.length > 1 ? parts[1] : api;
+            String className = "com.github.catvod.spider." + spiderName;
+            Class<?> clazz = Class.forName(className, true, loader);
+            Constructor<?> ctor = clazz.getConstructor();
+            Spider spider = (Spider) ctor.newInstance();
+            spider.siteKey = key;
+            initializeSpider(spider, ext);
+            spiders.put(spKey, spider);
+            return spider;
+        } catch (Exception e) {
+            System.err.println("getSpider failed key=" + key + " api=" + api + ": " + e);
+            e.printStackTrace(System.err);
+            if (isArtVm()) {
+                // Android：直接抛出，让 call() 返回 {"error":...}，避免空串被当成成功。
+                throw e;
+            }
+            SpiderNull nullSpider = new SpiderNull();
+            nullSpider.siteKey = key;
+            return nullSpider;
+        }
     }
 
     /**
@@ -322,6 +329,9 @@ public class SpiderBridge {
             } catch (Exception e) {
                 System.err.println("parseJar failed: " + jarPath + ": " + e);
                 e.printStackTrace(System.err);
+                if (isArtVm()) {
+                    throw new RuntimeException("parseJar failed: " + jarPath + ": " + e, e);
+                }
             }
         }
     }
@@ -437,28 +447,51 @@ public class SpiderBridge {
     }
 
     private static ClassLoader createDexLoader(File jarFile) throws Exception {
+        if (!jarFile.isFile() || jarFile.length() == 0L) {
+            throw new IOException("site jar missing: " + jarFile);
+        }
         Class<?> dcl = Class.forName("dalvik.system.DexClassLoader");
-        File opt = null;
-        Context c = CONTEXT;
-        if (c != null) {
+        Context c = ctx();
+        File codeCache;
+        try {
+            Method m = c.getClass().getMethod("getCodeCacheDir");
+            codeCache = (File) m.invoke(c);
+        } catch (Throwable t) {
+            throw new IOException("getCodeCacheDir failed", t);
+        }
+        // ART 10+：可写路径禁止作 dex。对齐 TV：拷到 codeCache 并 setReadOnly。
+        File sealedDir = new File(codeCache, "kotv_site_jars");
+        if (!sealedDir.isDirectory() && !sealedDir.mkdirs()) {
+            throw new IOException("cannot create " + sealedDir);
+        }
+        String sealName = md5Hex(jarFile.getAbsolutePath() + ":" + jarFile.length() + ":" + jarFile.lastModified()) + ".jar";
+        File sealed = new File(sealedDir, sealName);
+        if (!sealed.isFile() || sealed.length() != jarFile.length()) {
+            File tmp = new File(sealed.getAbsolutePath() + ".tmp");
             try {
-                Method m = c.getClass().getMethod("getCodeCacheDir");
-                Object dir = m.invoke(c);
-                if (dir instanceof File) {
-                    opt = new File((File) dir, "kotv_site_dex");
-                }
+                tmp.delete();
+                sealed.delete();
             } catch (Throwable ignored) {
             }
+            Files.copy(jarFile.toPath(), tmp.toPath());
+            if (!tmp.renameTo(sealed)) {
+                Files.copy(tmp.toPath(), sealed.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                tmp.delete();
+            }
+            if (!sealed.setReadOnly()) {
+                try {
+                    Runtime.getRuntime().exec(new String[]{"chmod", "444", sealed.getAbsolutePath()}).waitFor();
+                } catch (Throwable ignored) {
+                }
+            }
         }
-        if (opt == null) {
-            opt = new File(System.getProperty("java.io.tmpdir", "/data/local/tmp"), "kotv_site_dex");
-        }
+        File opt = new File(codeCache, "kotv_site_dex");
         if (!opt.isDirectory() && !opt.mkdirs()) {
             throw new IOException("cannot create dex opt dir: " + opt);
         }
         Constructor<?> ctor = dcl.getConstructor(String.class, String.class, String.class, ClassLoader.class);
         return (ClassLoader) ctor.newInstance(
-                jarFile.getAbsolutePath(),
+                sealed.getAbsolutePath(),
                 opt.getAbsolutePath(),
                 null,
                 SpiderBridge.class.getClassLoader()
