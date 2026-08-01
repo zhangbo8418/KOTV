@@ -49,6 +49,8 @@ fi
 echo "==> flutter build apk --release (per-ABI, no --split-per-abi)"
 cd "$ROOT/flutter"
 flutter pub get
+chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
+"$ROOT/scripts/patch-android-plugin-namespaces.sh"
 
 OUT_DIR="$ROOT/flutter/build/app/outputs/flutter-apk"
 mkdir -p "$ROOT/dist"
