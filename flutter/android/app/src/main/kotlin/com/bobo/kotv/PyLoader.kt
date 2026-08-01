@@ -5,8 +5,6 @@ import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import org.json.JSONObject
 
-import java.util.UUID
-
 /**
  * Chaquopy 执行 Python spider runner：
  * 复用 KOTV 自带 `pyrunner.py` 的 stdin/stdout JSON 协议。
@@ -33,7 +31,6 @@ object PyLoader {
     val method = req.getString("method")
     val argsObj = req.optJSONObject("args") ?: JSONObject()
 
-    // runner JSON 请求（不追求与 Go 的 reqID 完全一致；只取 result）
     val id = 1
     val stdinLine = JSONObject()
       .put("id", id)
@@ -41,25 +38,22 @@ object PyLoader {
       .put("args", argsObj)
       .toString()
 
-    val py = ensurePythonStarted(req.optString("pythonVersion", ""))
-
-    // 在 __main__ 里执行 runner；用 StringIO 注入 sys.stdin 并抓 sys.stdout。
+    val py = ensurePythonStarted()
     val main = py.getModule("__main__")
-    val token = UUID.randomUUID().toString()
 
-    main.set("__kotv_token", token)
-    main.set("__runner_path", runnerPath)
-    main.set("__script_path", scriptPath)
-    main.set("__key", key)
-    main.set("__ext", ext)
-    main.set("__api", api)
-    main.set("__cache_root", cacheRoot)
-    main.set("__stdin_line", stdinLine)
-    main.set("__proxy_port", proxyPort)
+    // Chaquopy 17：用 put(Object) 而非已收紧签名的 set(PyObject)
+    main.put("__runner_path", runnerPath)
+    main.put("__script_path", scriptPath)
+    main.put("__key", key)
+    main.put("__ext", ext)
+    main.put("__api", api)
+    main.put("__cache_root", cacheRoot)
+    main.put("__stdin_line", stdinLine)
+    main.put("__proxy_port", proxyPort)
 
     // 重要：pyrunner.py 里最后是 for line in sys.stdin: ...，因此我们让 stdin 在一行后 EOF。
     val wrapper = """
-import io, sys, os, traceback
+import io, sys, os
 
 __old_argv = sys.argv
 __old_stdin = sys.stdin
@@ -76,14 +70,13 @@ try:
     exec(compile(code, __runner_path, "exec"), {})
 finally:
     __out = sys.stdout.getvalue()
-    # 恢复 sys 对象（尽量减少污染）
     sys.argv = __old_argv
     sys.stdin = __old_stdin
     sys.stdout = __old_stdout
 """.trimIndent()
 
-    // 让 wrapper 执行后，把 __out 交回给 Kotlin。
-    py.getModule("__main__").exec(wrapper)
+    // Chaquopy 17：PyObject 无 exec()，走 builtins.exec(code, globals)
+    py.builtins.callAttr("exec", wrapper, main)
     val out = main.get("__out").toString().trim()
     val firstLine = out.lines().firstOrNull { it.trim().startsWith("{") }.orEmpty()
     if (firstLine.isEmpty()) {
@@ -95,17 +88,14 @@ finally:
       throw RuntimeException(resp.optString("error", "python call failed"))
     }
 
-    // resp.result 在 runner 中可能是 JSON 字符串（dict/list 的 json.dumps 输出）或普通字符串。
     val result = resp.get("result")
     return if (result == JSONObject.NULL) "" else result.toString()
   }
 
-  private fun ensurePythonStarted(_pythonVersion: String): Python {
-    // Chaquopy 的 Python 启动与 pip 安装由 Gradle 插件完成；这里只做懒启动。
+  private fun ensurePythonStarted(): Python {
     if (!Python.isStarted()) {
       throw IllegalStateException("Chaquopy not started. Call startSpiderService first.")
     }
     return Python.getInstance()
   }
 }
-

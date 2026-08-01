@@ -5,7 +5,7 @@ import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoHTTPD.Method
 import fi.iki.elonen.NanoHTTPD.Response
-import fi.iki.elonen.NanoHTTPD.Status
+import fi.iki.elonen.NanoHTTPD.Response.Status
 import org.json.JSONObject
 import java.util.Locale
 
@@ -19,8 +19,8 @@ import java.util.Locale
  */
 class SpiderService private constructor(
   context: Context,
-  private val bindHost: String,
-  private val bindPort: Int,
+  bindHost: String,
+  bindPort: Int,
 ) : NanoHTTPD(bindHost, bindPort) {
 
   init {
@@ -36,7 +36,7 @@ class SpiderService private constructor(
 
     if (method == Method.GET && (uri == "/health" || uri == "/")) {
       val out = JSONObject().put("ok", true)
-      return Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", out.toString())
+      return json(Status.OK, out.toString())
     }
 
     if (method != Method.POST) {
@@ -56,50 +56,43 @@ class SpiderService private constructor(
     return try {
       when (uri) {
         "/jar/call" -> {
-          // 直接把 Go payload 传给 SpiderBridge。
           val raw = JarLoader.callBridge(body)
-          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", raw)
+          json(Status.OK, raw)
         }
 
         "/jar/interrupt" -> {
           JarLoader.clear()
-          val out = JSONObject().put("ok", true)
-          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", out.toString())
+          json(Status.OK, JSONObject().put("ok", true).toString())
         }
 
         "/py/call" -> {
           val obj = JSONObject(body)
           val result = PyLoader.callPython(obj)
-          val out = JSONObject().put("result", result)
-          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", out.toString())
+          json(Status.OK, JSONObject().put("result", result).toString())
         }
 
         "/sniff" -> {
           val obj = JSONObject(body)
           val resp = SnifferWebView.sniff(obj)
-          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
+          json(Status.OK, resp.toString())
         }
 
         "/thunder/parse" -> {
           val obj = if (body.isBlank()) JSONObject() else JSONObject(body)
-          val resp = ThunderBridge.parse(obj)
-          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
+          json(Status.OK, ThunderBridge.parse(obj).toString())
         }
 
         "/thunder/fetch" -> {
           val obj = if (body.isBlank()) JSONObject() else JSONObject(body)
-          val resp = ThunderBridge.fetch(obj)
-          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
+          json(Status.OK, ThunderBridge.fetch(obj).toString())
         }
 
         "/thunder/progress" -> {
-          val resp = ThunderBridge.progress()
-          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
+          json(Status.OK, ThunderBridge.progress().toString())
         }
 
         "/thunder/clear" -> {
-          val resp = ThunderBridge.clear()
-          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
+          json(Status.OK, ThunderBridge.clear().toString())
         }
 
         else -> newJsonError(Status.NOT_FOUND, "unknown route: $uri")
@@ -110,29 +103,35 @@ class SpiderService private constructor(
   }
 
   private fun readRequestBody(session: IHTTPSession): String {
-    // NanoHTTPD：对 application/json 通常会把 raw body 放到 postData。
     val post = HashMap<String, String>(8)
     try {
       session.parseBody(post)
     } catch (_: Throwable) {
       // ignore
     }
-    // 兼容可能的 key 名。
     return post["postData"]?.trim()
       ?: post["data"]?.trim()
       ?: post.values.firstOrNull()?.trim().orEmpty()
+  }
+
+  private fun json(status: Status, body: String): Response {
+    return newFixedLengthResponse(status, "application/json; charset=utf-8", body)
   }
 
   private fun newJsonError(status: Status, message: String): Response {
     val out = JSONObject()
       .put("ok", false)
       .put("error", message)
-    return Response.newFixedLengthResponse(status, "application/json; charset=utf-8", out.toString())
+    return json(status, out.toString())
   }
 
   companion object {
     const val DefaultHost = "127.0.0.1"
     const val DefaultPort = 9979
+
+    fun create(context: Context, host: String, port: Int): SpiderService {
+      return SpiderService(context.applicationContext, host, port)
+    }
   }
 }
 
@@ -145,9 +144,9 @@ object SpiderServiceManager {
   @Synchronized
   fun start(context: Context, host: String = SpiderService.DefaultHost, port: Int = SpiderService.DefaultPort) {
     if (server != null) return
-    val srv = SpiderService(context.applicationContext, host, port)
-    // 在 NanoHTTPD 内部开启线程，不阻塞调用方。
-    srv.start(SOCKET_READ_TIMEOUT, false)
+    val srv = SpiderService.create(context, host, port)
+    // NanoHTTPD.SOCKET_READ_TIMEOUT = 5000
+    srv.start(5000, false)
     server = srv
   }
 
@@ -162,4 +161,3 @@ object SpiderServiceManager {
     server = null
   }
 }
-
