@@ -382,18 +382,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   Future<void> _expandMagnet({required String id, required String site}) async {
     if (!mounted) return;
+    final cur = _detail;
+    if (cur == null) return;
     setState(() => _status = '正在展开磁力文件…');
     _startBtProgressPoll(expanding: true);
     try {
-      final data = await ref.read(apiProvider).detailExpand(id: id, site: site);
+      final flagsPayload = cur.flags
+          .map((f) => {
+                'flag': f.flag,
+                'show': f.show,
+                'episodes': f.episodes.map((e) => {'name': e.name, 'url': e.url}).toList(),
+              })
+          .toList();
+      final data = await ref.read(apiProvider).detailExpand(id: id, site: site, flags: flagsPayload);
       if (!mounted) return;
       if (data['expanded'] == true && data['vod'] is Map) {
-        final vod = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
+        final expanded = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
+        // 只替换线路/剧集，保留当前详情其它字段，避免整页重建冲掉扫码等弹窗。
         setState(() {
-          _detail = vod;
-          _flagIdx = 0;
+          _detail = cur.withFlags(expanded.flags);
+          if (_flagIdx >= expanded.flags.length) _flagIdx = 0;
           _epPage = 0;
-          _epIdx = -1;
+          if (_epIdx >= 0) _epIdx = -1;
           _status = '磁力文件已展开，可选集播放';
         });
       } else if (mounted) {

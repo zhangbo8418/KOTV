@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/live"
@@ -149,30 +150,47 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 	}, nil
 }
 
-// APIDetailExpand 异步展开磁力/种子为媒体文件列表（可阻塞数十秒）。
-func (a *App) APIDetailExpand(siteKey, vodID string) (map[string]any, error) {
+// APIDetailExpand 展开磁力/种子为媒体文件列表。
+// 优先用客户端传入的 flags / 上次详情缓存，禁止再次 DetailContent（会重跑爬虫并冲掉扫码弹窗）。
+func (a *App) APIDetailExpand(siteKey, vodID string, flagsIn []map[string]any) (map[string]any, error) {
 	if localCrawlerDisabled() {
 		return nil, fmt.Errorf("请先连接可用后端服务")
 	}
-	vod := model.Vod{VodID: model.FlexString(vodID)}
+	sk := siteKey
+	detail := model.Vod{VodID: model.FlexString(vodID)}
 	if siteKey != "" {
 		if site := a.Config.GetSite(siteKey); site != nil {
-			vod.Site = site
+			detail.Site = site
+			sk = site.Key
 		}
 	}
-	if vod.Site == nil {
+	if detail.Site == nil {
 		h := a.Config.Home()
-		vod.Site = &h
+		detail.Site = &h
+		if sk == "" {
+			sk = h.Key
+		}
 	}
-	detail, err := a.Sites.DetailContent(vod)
-	if err != nil {
-		return nil, err
+
+	if len(flagsIn) > 0 {
+		detail.VodFlags = flagsFromDTO(flagsIn)
+		detail.VodName = vodID
+	} else if cached, ok := a.Sites.CachedDetail(vodID); ok {
+		detail = cached
+		if detail.Site != nil && detail.Site.Key != "" {
+			sk = detail.Site.Key
+		}
+	} else {
+		// 无缓存且客户端未传 flags：不再二次拉详情（避免冲弹窗）；直接返回未展开。
+		return map[string]any{
+			"ok":       true,
+			"expanded": false,
+			"magnet":   false,
+			"vod":      vodDetailDTO(detail, sk),
+			"message":  "无详情缓存，跳过展开",
+		}, nil
 	}
 	detail.SetVodFlags()
-	sk := ""
-	if detail.Site != nil {
-		sk = detail.Site.Key
-	}
 	if !thunder.NeedsParse(&detail) {
 		return map[string]any{
 			"ok":       true,
@@ -442,6 +460,36 @@ func vodDetailDTO(v model.Vod, siteKey string) map[string]any {
 		"site":         siteKey,
 		"flags":        flags,
 	}
+}
+
+func flagsFromDTO(in []map[string]any) []model.Flag {
+	out := make([]model.Flag, 0, len(in))
+	for _, m := range in {
+		flag := strings.TrimSpace(fmt.Sprint(m["flag"]))
+		show := strings.TrimSpace(fmt.Sprint(m["show"]))
+		if show == "" {
+			show = flag
+		}
+		var eps []model.Episode
+		rawEps, _ := m["episodes"].([]any)
+		for _, e := range rawEps {
+			em, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			name := strings.TrimSpace(fmt.Sprint(em["name"]))
+			u := strings.TrimSpace(fmt.Sprint(em["url"]))
+			if u == "" {
+				continue
+			}
+			if name == "" {
+				name = u
+			}
+			eps = append(eps, model.Episode{Name: name, URL: u})
+		}
+		out = append(out, model.Flag{Flag: flag, Show: show, Episodes: eps})
+	}
+	return out
 }
 
 func apiResolvePlayURL(raw, playURL string, urls []string, idx int) string {

@@ -98,10 +98,15 @@ class KotvApi {
         if (site != null && site.isNotEmpty) 'site': site,
       });
 
-  Future<Map<String, dynamic>> detailExpand({required String id, String? site}) =>
+  Future<Map<String, dynamic>> detailExpand({
+    required String id,
+    String? site,
+    List<Map<String, dynamic>>? flags,
+  }) =>
       _post('/api/v1/detail/expand', {
         'id': id,
         if (site != null && site.isNotEmpty) 'site': site,
+        if (flags != null) 'flags': flags,
       });
 
   Future<Map<String, dynamic>> btProgress() => _get('/api/v1/bt/progress');

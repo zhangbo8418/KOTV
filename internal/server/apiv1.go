@@ -20,7 +20,7 @@ type ContentAPI interface {
 	APIHome() (map[string]any, error)
 	APICategory(tid, pg string, extend map[string]string) (map[string]any, error)
 	APIDetail(siteKey, vodID string) (map[string]any, error)
-	APIDetailExpand(siteKey, vodID string) (map[string]any, error)
+	APIDetailExpand(siteKey, vodID string, flags []map[string]any) (map[string]any, error)
 	APIBtProgress() map[string]any
 	APISearch(keyword string, siteKeys []string) (map[string]any, error)
 	APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map[string]any, error)
@@ -327,10 +327,12 @@ func (s *Server) handleAPIv1DetailExpand(w http.ResponseWriter, r *http.Request)
 	}
 	siteKey := r.URL.Query().Get("site")
 	vodID := r.URL.Query().Get("id")
+	var flags []map[string]any
 	if r.Method == http.MethodPost {
 		var body struct {
-			Site string `json:"site"`
-			ID   string `json:"id"`
+			Site  string           `json:"site"`
+			ID    string           `json:"id"`
+			Flags []map[string]any `json:"flags"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.Site != "" {
@@ -339,12 +341,13 @@ func (s *Server) handleAPIv1DetailExpand(w http.ResponseWriter, r *http.Request)
 		if body.ID != "" {
 			vodID = body.ID
 		}
+		flags = body.Flags
 	}
 	if vodID == "" {
 		writeAPIError(w, http.StatusBadRequest, "missing id")
 		return
 	}
-	out, err := api.APIDetailExpand(siteKey, vodID)
+	out, err := api.APIDetailExpand(siteKey, vodID, flags)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, err.Error())
 		return

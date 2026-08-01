@@ -141,6 +141,21 @@ class VodDetail {
             .map((e) => FlagLine.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
       );
+
+  VodDetail withFlags(List<FlagLine> next) => VodDetail(
+        id: id,
+        name: name,
+        pic: pic,
+        content: content,
+        site: site,
+        remarks: remarks,
+        year: year,
+        area: area,
+        actor: actor,
+        director: director,
+        typeName: typeName,
+        flags: next,
+      );
 }
 
 class SiteInfo {

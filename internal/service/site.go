@@ -266,6 +266,20 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 	return detail, nil
 }
 
+// CachedDetail 返回最近一次详情（同 vodID），供磁力展开复用，避免二次爬虫冲掉 UI 弹窗。
+func (s *SiteService) CachedDetail(vodID string) (model.Vod, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.DetailResult.List) == 0 {
+		return model.Vod{}, false
+	}
+	v := s.DetailResult.List[0]
+	if vodID != "" && v.VodID.String() != "" && v.VodID.String() != vodID {
+		return model.Vod{}, false
+	}
+	return v, true
+}
+
 func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Result, error) {
 	var result model.Result
 	var err error
