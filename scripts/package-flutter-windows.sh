@@ -15,8 +15,10 @@ VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 ARCH="$(kotv_release_arch windows-x64)"
 SUFFIX="${KOTV_OUT_SUFFIX:-}"
 OUT_ZIP="${ROOT}/KO影视-${VERSION}-${ARCH}${SUFFIX}.zip"
-ENGINE_OUT="$ROOT/flutter/assets/engine/kotv-engine.exe"
+ENGINE_DIR="$ROOT/dist/_win_engine"
+ENGINE_OUT="$ENGINE_DIR/kotv-engine.exe"
 RELEASE_DIR="$ROOT/flutter/build/windows/x64/runner/Release"
+ASSETS_ENG="$ROOT/flutter/assets/engine"
 
 echo "==> Flutter Windows package version=$VERSION arch=$ARCH suffix=${SUFFIX:-<none>}"
 
@@ -31,26 +33,46 @@ EXTLD="-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdy
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
   EXTLD="${EXTLD} -Wl,--subsystem,windows:6.01"
 fi
-# 打 Windows 包时清掉无后缀引擎（mac/linux 产物），避免进 flutter_assets
-rm -f "$ROOT/flutter/assets/engine/kotv-engine"
-(cd "$ROOT" && go build -ldflags "-s -w -extldflags '${EXTLD}'" -o "$ENGINE_OUT" ./cmd/engine)
+mkdir -p "$ENGINE_DIR"
+# 相对路径输出，避免 Git Bash 绝对路径让 go/Windows 写丢
+(cd "$ROOT" && go build -ldflags "-s -w -extldflags '${EXTLD}'" \
+  -o "dist/_win_engine/kotv-engine.exe" ./cmd/engine)
+[[ -f "$ENGINE_OUT" ]] || { echo "missing engine: $ENGINE_OUT" >&2; ls -la "$ENGINE_DIR" >&2; exit 1; }
 if [[ "${KOTV_WIN7:-}" == "1" ]] && command -v pwsh >/dev/null 2>&1; then
   pwsh -File "$ROOT/scripts/check-win7-deps.ps1" -Exe "$ENGINE_OUT"
 fi
 
+# Git Bash 下 `rm kotv-engine` 可能误删 kotv-engine.exe；用 PowerShell -LiteralPath。
+# 打包前清空 assets 里的引擎，避免错误架构二进制进 flutter_assets；安装旁路拷贝到 Release。
+echo "==> clear assets/engine binaries (LiteralPath)"
+pwsh -NoProfile -Command "
+  \$dir = '${ASSETS_ENG}' -replace '/', '\'
+  foreach (\$n in @('kotv-engine', 'kotv-engine.exe')) {
+    \$p = Join-Path \$dir \$n
+    if (Test-Path -LiteralPath \$p) { Remove-Item -LiteralPath \$p -Force; Write-Host \"removed \$p\" }
+  }
+"
+
 echo "==> flutter build windows --release"
 cd "$ROOT/flutter"
-# 再清一次，防止中间步骤又写入无后缀文件
-rm -f assets/engine/kotv-engine
 flutter config --enable-windows-desktop
 flutter pub get
 flutter build windows --release
 
 [[ -f "$RELEASE_DIR/kotv.exe" ]] || { echo "missing $RELEASE_DIR/kotv.exe" >&2; exit 1; }
 cp -f "$ENGINE_OUT" "$RELEASE_DIR/kotv-engine.exe"
-# 安装目录与 flutter_assets 都不应残留无后缀 kotv-engine
-rm -f "$RELEASE_DIR/kotv-engine" \
-  "$RELEASE_DIR/data/flutter_assets/assets/engine/kotv-engine" 2>/dev/null || true
+# 清掉可能误进 assets 的无后缀文件（LiteralPath）
+pwsh -NoProfile -Command "
+  \$paths = @(
+    '${RELEASE_DIR}/kotv-engine',
+    '${RELEASE_DIR}/data/flutter_assets/assets/engine/kotv-engine'
+  )
+  foreach (\$raw in \$paths) {
+    \$p = \$raw -replace '/', '\'
+    if (Test-Path -LiteralPath \$p) { Remove-Item -LiteralPath \$p -Force }
+  }
+"
+[[ -f "$RELEASE_DIR/kotv-engine.exe" ]] || { echo "missing Release kotv-engine.exe" >&2; exit 1; }
 [[ -d "$RELEASE_DIR/runtime" ]] || { echo "missing $RELEASE_DIR/runtime (CMake install)" >&2; exit 1; }
 [[ ! -d "$RELEASE_DIR/runtime/runtime" ]] || { echo "nested runtime/runtime" >&2; exit 1; }
 
@@ -62,8 +84,6 @@ fi
 echo "==> zip $OUT_ZIP"
 rm -f "$OUT_ZIP"
 
-# Git Bash 下绝对路径传给 PowerShell 会被错误改写成 D:\d\a\...；优先用 Git 自带 zip，
-# 否则用 cygpath/手动把 /d/... 转成 D:\... 再 Compress-Archive。
 zip_win() {
   local src="$1" dest="$2"
   local zip_bin=""
@@ -80,7 +100,6 @@ zip_win() {
     src_w="$(cygpath -w "$src")"
     dest_w="$(cygpath -w "$dest")"
   else
-    # /d/a/foo → D:\a\foo（避免 Git Bash 把路径喂给 PowerShell 变成 D:\d\a\...）
     src_w="$(python3 -c "import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())" "$src")"
     dest_w="$(python3 -c "import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())" "$dest")"
   fi

@@ -26,8 +26,15 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // 不要在 defaultConfig 写 ndk.abiFilters：与 flutter --split-per-abi 冲突。
-        // ABI 由 --split-per-abi / jniLibs 目录决定；Chaquopy 17 跟 android splits。
+        // Chaquopy 需要 abiFilters；勿与 --split-per-abi 同用。
+        // 分 ABI 打包由 package-flutter-android.sh 设 KOTV_ABI_FILTERS 后各打一次。
+        ndk {
+            def abis = (System.getenv("KOTV_ABI_FILTERS") ?: "arm64-v8a,armeabi-v7a")
+                .split(",")
+                .collect { it.trim() }
+                .findAll { !it.isEmpty() }
+            abiFilters(*abis)
+        }
     }
 
     sourceSets {

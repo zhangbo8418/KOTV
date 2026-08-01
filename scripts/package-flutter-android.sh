@@ -46,22 +46,30 @@ if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ ! -s "$ROOT/bridge/spider-b
   "$ROOT/bridge/build.sh"
 fi
 
-echo "==> flutter build apk --release --split-per-abi"
+echo "==> flutter build apk --release (per-ABI, no --split-per-abi)"
 cd "$ROOT/flutter"
 flutter pub get
-flutter build apk --release --split-per-abi --target-platform=android-arm,android-arm64
 
 OUT_DIR="$ROOT/flutter/build/app/outputs/flutter-apk"
-ARM64_SRC="$OUT_DIR/app-arm64-v8a-release.apk"
-ARMV7_SRC="$OUT_DIR/app-armeabi-v7a-release.apk"
-[[ -f "$ARM64_SRC" ]] || { echo "missing $ARM64_SRC" >&2; exit 1; }
-[[ -f "$ARMV7_SRC" ]] || { echo "missing $ARMV7_SRC" >&2; exit 1; }
-
 mkdir -p "$ROOT/dist"
-OUT_AARCH64="$ROOT/dist/KO影视-${VERSION}-aarch64.apk"
-OUT_ARMV7="$ROOT/dist/KO影视-${VERSION}-armv7.apk"
-cp -f "$ARM64_SRC" "$OUT_AARCH64"
-cp -f "$ARMV7_SRC" "$OUT_ARMV7"
+
+# Chaquopy 强制要 ndk.abiFilters，不能与 --split-per-abi 并用；分两次单 ABI 构建。
+build_one_abi() {
+  local abi_filter="$1"   # arm64-v8a | armeabi-v7a
+  local flutter_plat="$2" # android-arm64 | android-arm
+  local out_name="$3"     # KO影视-…-aarch64.apk
+  echo "==> ABI $abi_filter ($flutter_plat)"
+  rm -f "$OUT_DIR/app-release.apk"
+  KOTV_ABI_FILTERS="$abi_filter" \
+    flutter build apk --release --target-platform="$flutter_plat"
+  local src="$OUT_DIR/app-release.apk"
+  [[ -f "$src" ]] || { echo "missing $src" >&2; exit 1; }
+  cp -f "$src" "$ROOT/dist/$out_name"
+  ls -lh "$ROOT/dist/$out_name"
+}
+
+build_one_abi "arm64-v8a" "android-arm64" "KO影视-${VERSION}-aarch64.apk"
+build_one_abi "armeabi-v7a" "android-arm" "KO影视-${VERSION}-armv7.apk"
 
 echo "==> done:"
-ls -lh "$OUT_AARCH64" "$OUT_ARMV7"
+ls -lh "$ROOT/dist/KO影视-${VERSION}-aarch64.apk" "$ROOT/dist/KO影视-${VERSION}-armv7.apk"

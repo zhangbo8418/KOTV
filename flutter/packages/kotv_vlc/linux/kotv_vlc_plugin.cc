@@ -377,7 +377,7 @@ static void kotv_vlc_plugin_init(KotvVlcPlugin* self) {
   self->texture = nullptr;
 }
 
-void kotv_vlc_plugin_register_with_registrar(FlPluginRegistrar* registrar) {
+FLUTTER_PLUGIN_EXPORT void kotv_vlc_plugin_register_with_registrar(FlPluginRegistrar* registrar) {
   KotvVlcPlugin* plugin =
       KOTV_VLC_PLUGIN(g_object_new(kotv_vlc_plugin_get_type(), nullptr));
   plugin->textures = fl_plugin_registrar_get_texture_registrar(registrar);
