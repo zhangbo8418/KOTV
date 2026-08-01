@@ -24,7 +24,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 本集自然播完（非手动 stop）时发出 true。
   Stream<bool> get completedStream;
 
-  Future<void> open(String url);
+  Future<void> open(String url, {Map<String, String>? headers});
   Future<void> playOrPause();
   Future<void> play();
   Future<void> pause();
@@ -133,7 +133,7 @@ class MediaKitPlayback extends KotvPlayback {
   Stream<bool> get completedStream => player.stream.completed;
 
   @override
-  Future<void> open(String url) async {
+  Future<void> open(String url, {Map<String, String>? headers}) async {
     _url = url;
     await player.open(Media(url));
   }
@@ -352,7 +352,7 @@ class EngineVlcPlayback extends KotvPlayback {
   Stream<bool> get completedStream => _endedCtrl.stream;
 
   @override
-  Future<void> open(String url) async {
+  Future<void> open(String url, {Map<String, String>? headers}) async {
     _url = url;
     _ended = false;
     final libDir = KotvVlcPaths.resolveLibDir();

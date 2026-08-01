@@ -91,8 +91,13 @@ finally:
       throw RuntimeException(resp.optString("error", "python call failed"))
     }
 
+    if (!resp.has("result") || resp.isNull("result")) return ""
     val result = resp.get("result")
-    return if (result == JSONObject.NULL) "" else result.toString()
+    // 保持 JSON 文本：Go 侧按字符串解析 list/class 等字段
+    return when (result) {
+      is JSONObject, is org.json.JSONArray -> result.toString()
+      else -> result.toString()
+    }
   }
 
   private fun ensurePythonStarted(): Python {

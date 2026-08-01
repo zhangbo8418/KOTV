@@ -583,6 +583,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           );
       final playUrl = '${data['url'] ?? ''}';
       if (playUrl.isEmpty) throw Exception('空播放地址');
+      final headers = <String, String>{
+        for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
+          if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
+      };
       final magnet = data['magnet'] == true || playUrl.contains('/proxy/bt/') || epLooksMagnet;
       _magnetPlay = magnet;
       await LocalHistory.push(VodItem(
@@ -595,7 +599,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       await _stopInactiveBackends(_backend);
       final pb = _playback;
       await pb.setDecodeMode(_decodeMode);
-      await pb.open(playUrl);
+      await pb.open(playUrl, headers: headers.isEmpty ? null : headers);
       try {
         await pb.play();
       } catch (_) {}

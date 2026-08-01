@@ -112,11 +112,65 @@ tasks.register("prepareSpiderBridgeJar") {
                 commandLine "bash", "-lc", "${repoRoot}/bridge/build.sh"
             }
         }
-        bridgeAssetDir.mkdirs()
-        copy {
-            from bridgeJar
-            into bridgeAssetDir
+        if (!bridgeJar.exists() || bridgeJar.length() == 0L) {
+            throw new GradleException("missing ${bridgeJar}")
         }
+        bridgeAssetDir.mkdirs()
+        // ART 只能加载含 classes.dex 的 jar；桌面 shadowJar 需经 d8 转换。
+        def sdkDir = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
+        if (sdkDir == null || sdkDir.trim().isEmpty()) {
+            def homeSdk = new File(System.getProperty("user.home"), "Library/Android/sdk")
+            if (homeSdk.isDirectory()) sdkDir = homeSdk.absolutePath
+        }
+        if (sdkDir == null || !(new File(sdkDir).isDirectory())) {
+            throw new GradleException("ANDROID_HOME/ANDROID_SDK_ROOT required to d8 spider-bridge.jar")
+        }
+        def buildToolsDir = new File(sdkDir, "build-tools")
+        def bt = buildToolsDir.listFiles()?.findAll { it.isDirectory() }?.sort { a, b -> b.name <=> a.name }?.find { new File(it, "d8").exists() || new File(it, "d8.bat").exists() }
+        if (bt == null) {
+            throw new GradleException("d8 not found under ${buildToolsDir}")
+        }
+        def d8Bin = new File(bt, System.getProperty("os.name").toLowerCase().contains("windows") ? "d8.bat" : "d8")
+        def platforms = new File(sdkDir, "platforms")
+        def androidJar = platforms.listFiles()?.findAll { it.isDirectory() && new File(it, "android.jar").exists() }?.sort { a, b -> b.name <=> a.name }?.collect { new File(it, "android.jar") }?.find { it.exists() }
+        if (androidJar == null) {
+            throw new GradleException("android.jar not found under ${platforms}")
+        }
+
+        def work = new File(project.layout.buildDirectory.get().asFile, "kotv-bridge-dex")
+        def merge = new File(work, "merge")
+        work.deleteDir()
+        merge.mkdirs()
+
+        println "[android] d8 spider-bridge.jar via ${d8Bin} lib=${androidJar.name}"
+        exec {
+            commandLine d8Bin.absolutePath,
+                "--min-api", "24",
+                "--lib", androidJar.absolutePath,
+                "--output", work.absolutePath,
+                bridgeJar.absolutePath
+        }
+        def dexFiles = work.listFiles()?.findAll { it.name.startsWith("classes") && it.name.endsWith(".dex") }
+        if (dexFiles == null || dexFiles.isEmpty()) {
+            throw new GradleException("d8 produced no classes.dex from ${bridgeJar}")
+        }
+        dexFiles.each { f ->
+            copy { from f; into merge }
+        }
+        // 保留非 .class 资源（META-INF 服务等）；排除签名与 class
+        copy {
+            from zipTree(bridgeJar)
+            into merge
+            exclude "**/*.class"
+            exclude "META-INF/*.SF"
+            exclude "META-INF/*.RSA"
+            exclude "META-INF/*.DSA"
+            exclude "META-INF/SIG-*"
+        }
+        def outJar = new File(bridgeAssetDir, "spider-bridge.jar")
+        if (outJar.exists()) outJar.delete()
+        ant.jar(destfile: outJar.absolutePath, basedir: merge.absolutePath)
+        println "[android] dex bridge ready: ${outJar} (${outJar.length()} bytes)"
     }
 }
 

@@ -31,11 +31,45 @@ import java.util.jar.JarFile;
  */
 public class SpiderBridge {
     private static final Gson GSON = new Gson();
-    private static final Context CONTEXT = new Application();
+    /** 桌面用 stub Application；Android 须先 [setAndroidContext]。 */
+    private static volatile Context CONTEXT;
     private static final Map<String, Spider> spiders = new ConcurrentHashMap<>();
     private static final Map<String, ClassLoader> loaders = new ConcurrentHashMap<>();
     private static final Map<String, Method> proxyMethods = new ConcurrentHashMap<>();
     private static volatile String recentJar;
+
+    static {
+        if (!isArtVm()) {
+            CONTEXT = new Application();
+        }
+    }
+
+    /** Android Native：注入真实 Application Context（DexClassLoader 加载后调用）。 */
+    public static void setAndroidContext(Context ctx) {
+        if (ctx == null) return;
+        Context app = ctx.getApplicationContext();
+        CONTEXT = app != null ? app : ctx;
+    }
+
+    private static Context ctx() {
+        Context c = CONTEXT;
+        if (c != null) return c;
+        if (isArtVm()) {
+            throw new IllegalStateException("SpiderBridge.setAndroidContext() required on Android");
+        }
+        c = new Application();
+        CONTEXT = c;
+        return c;
+    }
+
+    private static boolean isArtVm() {
+        try {
+            Class.forName("dalvik.system.DexClassLoader");
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
 
     public static void main(String[] args) throws Exception {
         disableSystemProxies();
@@ -293,7 +327,7 @@ public class SpiderBridge {
     }
 
     private static void initializeHost() {
-        Init.set(CONTEXT);
+        Init.set(ctx());
         com.github.catvod.Proxy.set(configuredProxyPort());
     }
 
@@ -315,7 +349,7 @@ public class SpiderBridge {
         if (extend == null) {
             extend = "";
         }
-        spider.init(CONTEXT, extend);
+        spider.init(ctx(), extend);
     }
 
     private static String md5Hex(String s) {
@@ -375,11 +409,15 @@ public class SpiderBridge {
         }
     }
 
-    private static ClassLoader createLoader(String jarPath) throws IOException {
+    private static ClassLoader createLoader(String jarPath) throws Exception {
+        File file = new File(jarPath);
+        // Android ART：站点 jar 已是 dex，必须用 DexClassLoader（无 URLClassLoader）。
+        if (isArtVm()) {
+            return createDexLoader(file);
+        }
         // 默认 child-first：对齐 TV DexClassLoader + FongMi PC manifest。
         // parent-first 仅当清单显式声明 KOTV-ClassLoading: parent-first。
         boolean childFirst = true;
-        File file = new File(jarPath);
         if (file.isFile()) {
             try (JarFile jar = new JarFile(file)) {
                 String mode = jar.getManifest() == null ? null
@@ -398,6 +436,35 @@ public class SpiderBridge {
         );
     }
 
+    private static ClassLoader createDexLoader(File jarFile) throws Exception {
+        Class<?> dcl = Class.forName("dalvik.system.DexClassLoader");
+        File opt = null;
+        Context c = CONTEXT;
+        if (c != null) {
+            try {
+                Method m = c.getClass().getMethod("getCodeCacheDir");
+                Object dir = m.invoke(c);
+                if (dir instanceof File) {
+                    opt = new File((File) dir, "kotv_site_dex");
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (opt == null) {
+            opt = new File(System.getProperty("java.io.tmpdir", "/data/local/tmp"), "kotv_site_dex");
+        }
+        if (!opt.isDirectory() && !opt.mkdirs()) {
+            throw new IOException("cannot create dex opt dir: " + opt);
+        }
+        Constructor<?> ctor = dcl.getConstructor(String.class, String.class, String.class, ClassLoader.class);
+        return (ClassLoader) ctor.newInstance(
+                jarFile.getAbsolutePath(),
+                opt.getAbsolutePath(),
+                null,
+                SpiderBridge.class.getClassLoader()
+        );
+    }
+
     /**
      * CatVod spider jars may expose a shared Init hook. It is optional:
      * older jars do not have it and Android-dependent variants can reject the
@@ -411,7 +478,7 @@ public class SpiderBridge {
                 if (method.getName().equals("init") && method.getParameterCount() == 1
                         && method.getParameterTypes()[0].getName().equals("android.content.Context")) {
                     try {
-                        method.invoke(null, CONTEXT);
+                        method.invoke(null, ctx());
                         initialized = true;
                         break;
                     } catch (Throwable ignored) {
@@ -678,7 +745,7 @@ public class SpiderBridge {
     }
 
     private static File proxySpillDir() {
-        File dir = new File(CONTEXT.getCacheDir(), "proxy");
+        File dir = new File(ctx().getCacheDir(), "proxy");
         dir.mkdirs();
         return dir;
     }

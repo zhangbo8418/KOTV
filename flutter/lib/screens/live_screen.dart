@@ -419,7 +419,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
-  Future<void> _openLiveUrl(String url) async {
+  Future<void> _openLiveUrl(String url, {Map<String, String>? headers}) async {
     await _playback.setDecodeMode(_decodeMode);
     await _stopInactiveBackends(_backend);
     if (_useVlc) {
@@ -427,7 +427,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       await _vlc!.setDecodeMode(_decodeMode);
       // 原生 create/load/play 偶发阻塞；超时后提示用户改外部播放器。
       try {
-        await _vlc!.open(url).timeout(const Duration(seconds: 12));
+        await _vlc!.open(url, headers: headers).timeout(const Duration(seconds: 12));
       } on TimeoutException {
         if (mounted) {
           setState(() => _status = '内置 VLC 开播超时，可改用外部播放器');
@@ -438,7 +438,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       // Win7 上 media_kit 偶发同步卡死：开播加超时，失败则自动切 VLC。
       final mk = _ensureMpv();
       try {
-        await mk.open(url).timeout(const Duration(seconds: 8));
+        await mk.open(url, headers: headers).timeout(const Duration(seconds: 8));
       } on TimeoutException {
         if (kotvIsDesktop()) {
           _playerVal = 'innie#vlc';
@@ -450,7 +450,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           } catch (_) {}
           _vlc ??= EngineVlcPlayback();
           await _vlc!.setDecodeMode(_decodeMode);
-          await _vlc!.open(url);
+          await _vlc!.open(url, headers: headers);
           if (mounted) {
             setState(() => _status = 'MPV 超时，已自动切到内置 VLC');
           }
@@ -461,7 +461,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     } else {
       final pb = _playback;
       await pb.setDecodeMode(_decodeMode);
-      await pb.open(url);
+      await pb.open(url, headers: headers);
       try {
         await pb.play();
       } catch (_) {}
@@ -499,9 +499,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       final data = await ref.read(apiProvider).livePlay(group: _groupIdx, channel: chIdx, line: useLine);
       final url = '${data['url'] ?? ''}';
       if (url.isEmpty) throw Exception('空播放地址');
+      final headers = <String, String>{
+        for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
+          if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
+      };
       _lines = (data['lines'] as int?) ?? 1;
       _line = (data['line'] as int?) ?? useLine;
-      await _openLiveUrl(url);
+      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers);
       setState(() => _status = '播放中 · $_title');
       _scheduleHideOverlays();
       unawaited(_loadEpg());

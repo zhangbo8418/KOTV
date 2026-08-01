@@ -107,7 +107,7 @@ class IjkPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> open(String url) async {
+  Future<void> open(String url, {Map<String, String>? headers}) async {
     _url = url;
     _completed = false;
     await _player.reset();

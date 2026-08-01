@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import 'kotv_playback.dart';
@@ -20,6 +21,7 @@ class ExoPlayback extends KotvPlayback {
   final _endedCtrl = StreamController<bool>.broadcast();
   Timer? _tick;
   String _url = '';
+  Map<String, String> _headers = const {};
   bool _playing = false;
   bool _completed = false;
   bool _buffering = false;
@@ -84,7 +86,7 @@ class ExoPlayback extends KotvPlayback {
       _completed = true;
       if (!_endedCtrl.isClosed) _endedCtrl.add(true);
       if (_repeatOne && _url.isNotEmpty) {
-        unawaited(open(_url));
+        unawaited(open(_url, headers: _headers));
       }
     } else if (v.isPlaying) {
       _completed = false;
@@ -92,18 +94,54 @@ class ExoPlayback extends KotvPlayback {
     notifyListeners();
   }
 
+  static const _defaultUA =
+      'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
+  Map<String, String> _mergeHeaders(Map<String, String>? headers) {
+    final out = <String, String>{
+      'User-Agent': _defaultUA,
+      'Accept': '*/*',
+      'Connection': 'keep-alive',
+    };
+    if (headers != null) {
+      for (final e in headers.entries) {
+        final k = e.key.trim();
+        final v = e.value.trim();
+        if (k.isEmpty || v.isEmpty) continue;
+        out[k] = v;
+      }
+    }
+    // video_player / Exo 对部分头大小写敏感；统一常见键
+    final ua = out.remove('user-agent') ?? out.remove('User-agent');
+    if (ua != null) out['User-Agent'] = ua;
+    return out;
+  }
+
   @override
-  Future<void> open(String url) async {
+  Future<void> open(String url, {Map<String, String>? headers}) async {
     _url = url;
+    _headers = _mergeHeaders(headers);
     _completed = false;
     final old = _c;
     _c = null;
     old?.removeListener(_onUpdate);
     await old?.dispose();
-    final next = VideoPlayerController.networkUrl(Uri.parse(url));
+    final uri = Uri.parse(url);
+    final next = VideoPlayerController.networkUrl(uri, httpHeaders: _headers);
     _c = next;
     next.addListener(_onUpdate);
-    await next.initialize();
+    try {
+      await next.initialize();
+    } on PlatformException catch (e) {
+      await next.dispose();
+      _c = null;
+      final detail = (e.message ?? e.code).trim();
+      throw StateError('Exo 无法播放该地址（$detail）。可换线路或改用 ijk/外部播放器');
+    } catch (e) {
+      await next.dispose();
+      _c = null;
+      rethrow;
+    }
     await next.setVolume((_volume / 100).clamp(0.0, 1.0));
     await next.setPlaybackSpeed(_rate);
     await next.play();

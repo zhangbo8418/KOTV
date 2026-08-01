@@ -5,13 +5,12 @@ import android.util.Log
 import dalvik.system.DexClassLoader
 import java.io.File
 import java.io.FileOutputStream
+import java.util.zip.ZipFile
 
 /**
- * 加载 `bridge/spider-bridge.jar` 并在进程内调用：
- * - SpiderBridge.call(String)
+ * 加载 `kotv/spider-bridge.jar`（须含 classes.dex）并调用 SpiderBridge.call。
  *
- * Android 10+：可写目录里的 jar 不能作为 dex（Writable dex file is not allowed）。
- * 对齐 TV：落盘到 codeCacheDir 后 [File.setReadOnly]。
+ * Android ART 只能加载 dex；桌面 shadowJar 的 .class 包必须在打包期经 d8 转换。
  */
 object JarLoader {
   private const val TAG = "KotvJarLoader"
@@ -21,23 +20,26 @@ object JarLoader {
   @Volatile
   private var bridgeCall: java.lang.reflect.Method? = null
 
+  @Volatile
+  private var appContext: Context? = null
+
   fun isLoaded(): Boolean = bridgeCall != null
 
   fun ensureBridgeLoaded(context: Context) {
     if (bridgeCall != null) return
     synchronized(this) {
       if (bridgeCall != null) return
+      appContext = context.applicationContext
 
-      // codeCacheDir：系统允许放优化产物；再 setReadOnly 满足 ART 限制
       val jarDir = File(context.codeCacheDir, "kotv_bridge").apply { mkdirs() }
       val jarFile = File(jarDir, "spider-bridge.jar")
-      // 清掉旧版写在 filesDir 的可写 jar（会触发 Writable dex 拒绝）
       try {
         File(context.filesDir, "kotv_bridge/spider-bridge.jar").delete()
       } catch (_: Throwable) {
       }
 
       ensureReadonlyJar(context, jarFile)
+      requireDexEntry(jarFile)
 
       val optDir = File(context.codeCacheDir, "kotv_bridge_opt").apply { mkdirs() }
       val cl = DexClassLoader(
@@ -47,6 +49,12 @@ object JarLoader {
         context.classLoader,
       )
       val clazz = cl.loadClass(BridgeClassName)
+      try {
+        val setCtx = clazz.getMethod("setAndroidContext", Context::class.java)
+        setCtx.invoke(null, context.applicationContext)
+      } catch (t: Throwable) {
+        Log.w(TAG, "setAndroidContext missing/failed", t)
+      }
       bridgeCall = clazz.getMethod("call", String::class.java)
       Log.i(TAG, "bridge loaded: ${jarFile.absolutePath}")
     }
@@ -54,11 +62,17 @@ object JarLoader {
 
   fun callBridge(inputJson: String): String {
     val m = bridgeCall ?: error("bridge not loaded")
+    // 每次调用确保 Context（进程内可能被 GC 语义打乱时再设一次）
+    appContext?.let { ctx ->
+      try {
+        m.declaringClass.getMethod("setAndroidContext", Context::class.java).invoke(null, ctx)
+      } catch (_: Throwable) {
+      }
+    }
     val out = m.invoke(null, inputJson)
     return out?.toString().orEmpty()
   }
 
-  /** 换仓/中断：向 bridge 发 clear（若已加载）。 */
   fun clear() {
     try {
       if (bridgeCall == null) return
@@ -68,8 +82,19 @@ object JarLoader {
     }
   }
 
+  private fun requireDexEntry(jarFile: File) {
+    ZipFile(jarFile).use { zf ->
+      val hasDex = zf.entries().asSequence().any { !it.isDirectory && it.name.startsWith("classes") && it.name.endsWith(".dex") }
+      if (!hasDex) {
+        error(
+          "spider-bridge.jar has no classes.dex (JVM jar cannot load on Android). " +
+            "Rebuild with prepareSpiderBridgeJar / d8.",
+        )
+      }
+    }
+  }
+
   private fun ensureReadonlyJar(context: Context, jarFile: File) {
-    // 每次进程首次加载都从 assets 刷新，并锁只读（对齐 TV JarLoader）
     if (jarFile.exists()) {
       try {
         jarFile.setWritable(true)
