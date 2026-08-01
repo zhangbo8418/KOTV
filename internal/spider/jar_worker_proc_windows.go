@@ -15,10 +15,13 @@ func setChildProcAttrs(cmd *exec.Cmd) {
 }
 
 // killProcessTree 用 taskkill /T 杀掉进程树（JVM 可能再拉子进程）。
+// HideWindow：避免 Win7 上闪 cmd 黑框。
 func killProcessTree(proc *os.Process) {
 	if proc == nil {
 		return
 	}
-	_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(proc.Pid)).Run()
+	cmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(proc.Pid))
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = cmd.Run()
 	_ = proc.Kill()
 }

@@ -212,16 +212,98 @@ class EngineLauncher {
     await Future<void>.delayed(const Duration(milliseconds: 450));
   }
 
+  /// Win7 禁 PowerShell（会 WER 弹窗）；直接 `taskkill`/`cmd` 会闪黑框。
+  /// 统一经 wscript //B + Run(...,0,True) 静默执行。
+  Future<void> _winHiddenRun(String commandLine) async {
+    Directory dir;
+    try {
+      dir = await getApplicationSupportDirectory();
+    } catch (_) {
+      dir = Directory.systemTemp;
+    }
+    final vbs = File(p.join(dir.path, 'kotv-hide-${DateTime.now().microsecondsSinceEpoch}.vbs'));
+    final escaped = commandLine.replaceAll('"', '""');
+    try {
+      await vbs.writeAsString(
+        'On Error Resume Next\n'
+        'CreateObject("WScript.Shell").Run "$escaped", 0, True\n',
+      );
+      await Process.run('wscript.exe', ['//B', '//Nologo', vbs.path]);
+    } catch (_) {
+    } finally {
+      try {
+        await vbs.delete();
+      } catch (_) {}
+    }
+  }
+
+  void _winHiddenRunSync(String commandLine) {
+    final vbs = File(p.join(Directory.systemTemp.path, 'kotv-hide-sync-$pid.vbs'));
+    final escaped = commandLine.replaceAll('"', '""');
+    try {
+      vbs.writeAsStringSync(
+        'On Error Resume Next\n'
+        'CreateObject("WScript.Shell").Run "$escaped", 0, True\n',
+      );
+      Process.runSync('wscript.exe', ['//B', '//Nologo', vbs.path]);
+    } catch (_) {
+    } finally {
+      try {
+        vbs.deleteSync();
+      } catch (_) {}
+    }
+  }
+
+  /// WMI VBScript（Win7 可用）按命令行特征结束捆绑 Java/Python，无 PowerShell。
+  static const _winKillStrayRuntimesVbs =
+      'On Error Resume Next\n'
+      'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'
+      'For Each p In wmi.ExecQuery("Select ProcessId,CommandLine from Win32_Process")\n'
+      '  cl = LCase("" & p.CommandLine)\n'
+      '  If InStr(cl, "spider-bridge.jar --serve") > 0 Or InStr(cl, "_kotv_runner.py") > 0 Then\n'
+      '    p.Terminate\n'
+      '  End If\n'
+      'Next\n';
+
+  Future<void> _winKillStrayRuntimes() async {
+    Directory dir;
+    try {
+      dir = await getApplicationSupportDirectory();
+    } catch (_) {
+      dir = Directory.systemTemp;
+    }
+    final vbs = File(p.join(dir.path, 'kotv-kill-rt-${DateTime.now().microsecondsSinceEpoch}.vbs'));
+    try {
+      await vbs.writeAsString(_winKillStrayRuntimesVbs);
+      await Process.run('wscript.exe', ['//B', '//Nologo', vbs.path]);
+    } catch (_) {
+    } finally {
+      try {
+        await vbs.delete();
+      } catch (_) {}
+    }
+  }
+
+  void _winKillStrayRuntimesSync() {
+    final vbs = File(p.join(Directory.systemTemp.path, 'kotv-kill-rt-sync-$pid.vbs'));
+    try {
+      vbs.writeAsStringSync(_winKillStrayRuntimesVbs);
+      Process.runSync('wscript.exe', ['//B', '//Nologo', vbs.path]);
+    } catch (_) {
+    } finally {
+      try {
+        vbs.deleteSync();
+      } catch (_) {}
+    }
+  }
+
   Future<void> _killStrayEngines({int? exceptPid}) async {
     if (Platform.isWindows) {
-      try {
-        // /T：连同 Java/Python 子进程一起清掉。
-        if (exceptPid != null && exceptPid > 0) {
-          await Process.run('taskkill', ['/F', '/T', '/IM', 'kotv-engine.exe', '/FI', 'PID ne $exceptPid']);
-        } else {
-          await Process.run('taskkill', ['/F', '/T', '/IM', 'kotv-engine.exe']);
-        }
-      } catch (_) {}
+      if (exceptPid != null && exceptPid > 0) {
+        await _winHiddenRun('taskkill /F /T /IM kotv-engine.exe /FI "PID ne $exceptPid"');
+      } else {
+        await _winHiddenRun('taskkill /F /T /IM kotv-engine.exe');
+      }
       await _killStrayRuntimes();
       return;
     }
@@ -248,17 +330,7 @@ class EngineLauncher {
   /// 清掉引擎死后残留的捆绑 Java bridge / Python runner（按命令行特征，避免误杀系统解释器）。
   Future<void> _killStrayRuntimes() async {
     if (Platform.isWindows) {
-      try {
-        await Process.run('powershell', [
-          '-NoProfile',
-          '-WindowStyle',
-          'Hidden',
-          '-Command',
-          'Get-CimInstance Win32_Process | Where-Object { '
-              '\$_.CommandLine -match \'spider-bridge\\.jar --serve\' -or \$_.CommandLine -match \'_kotv_runner\\.py\' '
-              '} | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }',
-        ]);
-      } catch (_) {}
+      await _winKillStrayRuntimes();
       return;
     }
     for (final pat in <String>['spider-bridge.jar --serve', '_kotv_runner.py']) {
@@ -271,9 +343,7 @@ class EngineLauncher {
   Future<void> _killEngineTree(int enginePid) async {
     if (enginePid <= 0) return;
     if (Platform.isWindows) {
-      try {
-        await Process.run('taskkill', ['/F', '/T', '/PID', '$enginePid']);
-      } catch (_) {}
+      await _winHiddenRun('taskkill /F /T /PID $enginePid');
       await _killStrayRuntimes();
       return;
     }
@@ -332,28 +402,39 @@ class EngineLauncher {
   }
 
   /// UI 进程异常退出时杀掉引擎 + Java/Python，避免「窗口没了引擎还在」。
+  /// Windows：不用 PowerShell（Win7 WER），用静默 wscript 轮询。
   Future<void> _armOrphanWatchdog(int enginePid, IOSink log) async {
     final uiPid = pid;
     if (Platform.isWindows) {
-      // 无黑框：用 powershell -WindowStyle Hidden 轮询；UI 死后 taskkill /T。
       try {
+        final support = await getApplicationSupportDirectory();
+        final vbsPath = p.join(support.path, 'kotv-orphan-$enginePid.vbs');
+        await File(vbsPath).writeAsString(
+          'On Error Resume Next\n'
+          'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'
+          'ui = $uiPid\n'
+          'eng = $enginePid\n'
+          'Do\n'
+          '  Set q = wmi.ExecQuery("Select ProcessId from Win32_Process Where ProcessId=" & ui)\n'
+          '  If q.Count = 0 Then\n'
+          '    CreateObject("WScript.Shell").Run "taskkill /F /T /PID " & eng, 0, True\n'
+          '    For Each p In wmi.ExecQuery("Select ProcessId,CommandLine from Win32_Process")\n'
+          '      cl = LCase("" & p.CommandLine)\n'
+          '      If InStr(cl, "spider-bridge.jar --serve") > 0 Or InStr(cl, "_kotv_runner.py") > 0 Then\n'
+          '        p.Terminate\n'
+          '      End If\n'
+          '    Next\n'
+          '    Exit Do\n'
+          '  End If\n'
+          '  WScript.Sleep 800\n'
+          'Loop\n',
+        );
         await Process.start(
-          'powershell',
-          [
-            '-NoProfile',
-            '-WindowStyle',
-            'Hidden',
-            '-Command',
-            '\$ui=$uiPid; \$eng=$enginePid; '
-                'while (Get-Process -Id \$ui -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }; '
-                'taskkill /F /T /PID \$eng 2>\$null; '
-                'Get-CimInstance Win32_Process | Where-Object { '
-                '\$_.CommandLine -match \'spider-bridge\\.jar --serve\' -or \$_.CommandLine -match \'_kotv_runner\\.py\' '
-                '} | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }',
-          ],
+          'wscript.exe',
+          ['//B', '//Nologo', vbsPath],
           mode: ProcessStartMode.detached,
         );
-        log.writeln('orphan-watchdog armed(win) ui=$uiPid engine=$enginePid');
+        log.writeln('orphan-watchdog armed(wscript) ui=$uiPid engine=$enginePid');
       } catch (e) {
         log.writeln('orphan-watchdog failed(win): $e');
       }
@@ -428,13 +509,7 @@ class EngineLauncher {
       return;
     }
     if (Platform.isWindows) {
-      try {
-        Process.runSync('taskkill', ['/F', '/T', '/PID', '${proc.pid}']);
-      } catch (_) {
-        try {
-          proc.kill();
-        } catch (_) {}
-      }
+      _winHiddenRunSync('taskkill /F /T /PID ${proc.pid}');
       _killStrayRuntimesSync();
       return;
     }
@@ -453,17 +528,7 @@ class EngineLauncher {
 
   void _killStrayRuntimesSync() {
     if (Platform.isWindows) {
-      try {
-        Process.runSync('powershell', [
-          '-NoProfile',
-          '-WindowStyle',
-          'Hidden',
-          '-Command',
-          'Get-CimInstance Win32_Process | Where-Object { '
-              '\$_.CommandLine -match \'spider-bridge\\.jar --serve\' -or \$_.CommandLine -match \'_kotv_runner\\.py\' '
-              '} | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }',
-        ]);
-      } catch (_) {}
+      _winKillStrayRuntimesSync();
       return;
     }
     for (final pat in <String>['spider-bridge.jar --serve', '_kotv_runner.py']) {
