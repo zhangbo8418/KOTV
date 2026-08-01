@@ -38,3 +38,7 @@ rsrc_windows_*.syso
 # Generated QuickJS headers for spider ModuleLoader CGO
 internal/spider/qjsinc/
 
+# Android arm64 Go engine (built by scripts/build-engine-flutter.sh android)
+flutter/android/app/src/main/jniLibs/**/*.so
+flutter/assets/engine/libkotv_engine.so
+

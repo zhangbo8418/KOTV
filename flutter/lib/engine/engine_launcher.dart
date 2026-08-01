@@ -124,6 +124,48 @@ class EngineLauncher {
     return env;
   }
 
+  /// Android：注入应用可写目录，供 Go paths.Root() 使用。
+  Future<Map<String, String>> _androidEnv(Map<String, String> base) async {
+    final env = Map<String, String>.from(base);
+    const ch = MethodChannel('kotv_android_spider');
+    try {
+      final raw = await ch.invokeMethod<dynamic>('paths');
+      if (raw is Map) {
+        final cache = '${raw['cacheDir'] ?? ''}'.trim();
+        final files = '${raw['filesDir'] ?? ''}'.trim();
+        if (cache.isNotEmpty) {
+          env['KOTV_CACHE_DIR'] = cache;
+          env['KOTV_DATA_DIR'] = p.join(cache, 'KOTV');
+        }
+        if (files.isNotEmpty) {
+          env['HOME'] = files;
+        }
+      }
+    } catch (e) {
+      debugPrint('android paths: $e');
+    }
+    return env;
+  }
+
+  Future<String?> _androidEnginePath() async {
+    const ch = MethodChannel('kotv_android_spider');
+    try {
+      final raw = await ch.invokeMethod<dynamic>('paths');
+      if (raw is Map) {
+        final ep = '${raw['enginePath'] ?? ''}'.trim();
+        if (ep.isNotEmpty && await File(ep).exists()) return ep;
+        final nativeDir = '${raw['nativeLibraryDir'] ?? ''}'.trim();
+        if (nativeDir.isNotEmpty) {
+          final f = File(p.join(nativeDir, 'libkotv_engine.so'));
+          if (await f.exists()) return f.path;
+        }
+      }
+    } catch (e) {
+      debugPrint('android engine path: $e');
+    }
+    return null;
+  }
+
   List<String> _candidateBins(String exeName) {
     final out = <String>[];
     try {
@@ -159,9 +201,11 @@ class EngineLauncher {
         return;
       }
 
-      // 3) 清真正残留，但排除本进程刚拉起的 pid。
-      await _killStrayEngines(exceptPid: _proc?.pid);
-      await Future<void>.delayed(const Duration(milliseconds: 250));
+      // 3) 清真正残留，但排除本进程刚拉起的 pid。Android 跳过桌面式 pkill。
+      if (!Platform.isAndroid) {
+        await _killStrayEngines(exceptPid: _proc?.pid);
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
 
       // 清完后再探一次，避免和另一 UI 实例撞车。
       if (await _ping('http://127.0.0.1:9978')) {
@@ -170,7 +214,33 @@ class EngineLauncher {
         return;
       }
 
-      final env = _runtimeEnv();
+      var env = _runtimeEnv();
+      if (Platform.isAndroid) {
+        env = await _androidEnv(env);
+        final so = await _androidEnginePath();
+        if (so != null) {
+          // 拷到 filesDir 再 chmod，规避部分 ROM 对 nativeLibraryDir noexec。
+          final support = await getApplicationSupportDirectory();
+          final out = File(p.join(support.path, 'libkotv_engine.so'));
+          try {
+            await File(so).copy(out.path);
+          } catch (_) {
+            // 同 inode 失败则直接用 so 路径
+            debugPrint('engine start(android native): $so');
+            await _spawn(so, env);
+            return;
+          }
+          try {
+            await Process.run('chmod', ['+x', out.path]);
+          } catch (_) {}
+          debugPrint('engine start(android copy): ${out.path}');
+          await _spawn(out.path, env);
+          return;
+        }
+        debugPrint('engine android: libkotv_engine.so not found in nativeLibraryDir');
+        return;
+      }
+
       final exeName = Platform.isWindows ? 'kotv-engine.exe' : 'kotv-engine';
 
       for (final c in _candidateBins(exeName)) {
@@ -298,6 +368,7 @@ class EngineLauncher {
   }
 
   Future<void> _killStrayEngines({int? exceptPid}) async {
+    if (Platform.isAndroid) return;
     if (Platform.isWindows) {
       if (exceptPid != null && exceptPid > 0) {
         await _winHiddenRun('taskkill /F /T /IM kotv-engine.exe /FI "PID ne $exceptPid"');
@@ -329,6 +400,7 @@ class EngineLauncher {
 
   /// 清掉引擎死后残留的捆绑 Java bridge / Python runner（按命令行特征，避免误杀系统解释器）。
   Future<void> _killStrayRuntimes() async {
+    if (Platform.isAndroid) return;
     if (Platform.isWindows) {
       await _winKillStrayRuntimes();
       return;
@@ -405,6 +477,11 @@ class EngineLauncher {
   /// Windows：不用 PowerShell（Win7 WER），用静默 wscript 轮询。
   Future<void> _armOrphanWatchdog(int enginePid, IOSink log) async {
     final uiPid = pid;
+    if (Platform.isAndroid) {
+      // Android 无可靠跨进程 pkill；引擎随 UI 进程生命周期托管即可。
+      log.writeln('orphan-watchdog skipped(android) ui=$uiPid engine=$enginePid');
+      return;
+    }
     if (Platform.isWindows) {
       try {
         final support = await getApplicationSupportDirectory();

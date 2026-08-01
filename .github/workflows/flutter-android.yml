@@ -1,0 +1,88 @@
+# Android APK（arm64 + armeabi-v7a）：引擎 sidecar + 迅雷 AAR + Flutter
+name: KOTV Flutter Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [restore-sidecar]
+    paths:
+      - "flutter/**"
+      - "cmd/engine/**"
+      - "internal/**"
+      - "bridge/**"
+      - "scripts/build-engine-flutter.sh"
+      - "scripts/package-flutter-android.sh"
+      - ".github/workflows/flutter-android.yml"
+      - "go.mod"
+      - "go.sum"
+
+concurrency:
+  group: flutter-android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.24.5"
+  GO_VERSION: "1.26.4"
+  NDK_VERSION: "26.1.10909125"
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+          link-to-sdk: true
+          add-to-path: false
+
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses >/dev/null || true
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Ensure thunder AAR
+        run: |
+          test -f flutter/android/app/libs/thunder-release.aar
+          ls -lh flutter/android/app/libs/thunder-release.aar
+
+      - name: Package Android APK
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          export ANDROID_NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          ./scripts/package-flutter-android.sh
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KO影视-Flutter-android
+          path: |
+            dist/KO影视-Flutter-android.apk
+            dist/KO影视-Flutter-android-arm64.apk
+          if-no-files-found: error
+          retention-days: 14

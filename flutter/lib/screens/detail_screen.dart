@@ -3,15 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
 import '../player/danmaku_layer.dart';
-import '../player/embed_video_view.dart';
+import '../player/exo_playback.dart';
+import '../player/ijk_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
+import '../player/kotv_player_factory.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
@@ -81,6 +82,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   Player? _mkPlayer;
   MediaKitPlayback? _mk;
   EngineVlcPlayback? _vlc;
+  ExoPlayback? _exo;
+  IjkPlayback? _ijk;
   StreamSubscription? _playingSub;
   StreamSubscription? _endedSub;
   StreamSubscription<Duration>? _posSub;
@@ -94,10 +97,32 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 开播后短时间内忽略 completed，避免 stop 后残留 completed=true 立刻触发下一集/停播。
   DateTime? _playArmedAt;
 
-  /// 当前页内后端：默认 MPV；手动选 VLC 时共用同一套控件。
-  KotvPlayback get _playback => _useVlc ? (_vlc ??= EngineVlcPlayback()) : _ensureMpv();
-  bool get _useVlc => _playerVal.trim() == 'innie#vlc';
-  String get _enginePrefix => _useVlc ? '内置 VLC' : '内置 MPV';
+  KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
+
+  /// 当前页内后端：按设置选择 Exo / MPV / ijk / VLC。
+  KotvPlayback get _playback {
+    switch (_backend) {
+      case KotvEmbedBackend.vlc:
+        return _vlc ??= EngineVlcPlayback();
+      case KotvEmbedBackend.exo:
+        return _exo ??= ExoPlayback();
+      case KotvEmbedBackend.ijk:
+        return _ijk ??= IjkPlayback();
+      case KotvEmbedBackend.mpv:
+        return _ensureMpv();
+    }
+  }
+
+  bool get _useVlc => _backend == KotvEmbedBackend.vlc;
+  bool get _useMpv => _backend == KotvEmbedBackend.mpv;
+  String get _enginePrefix => flutterPlayerLabel(_playerVal);
+
+  bool get _isBuffering {
+    if (_useMpv) return _mkPlayer?.state.buffering ?? false;
+    if (_backend == KotvEmbedBackend.exo) return _exo?.buffering ?? false;
+    if (_backend == KotvEmbedBackend.ijk) return _ijk?.buffering ?? false;
+    return false;
+  }
 
   /// 按真实播放器状态刷新文案，避免「播放中」但 00:00/00:00。
   void _syncPlayStatus() {
@@ -108,10 +133,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final String next;
     if (p.completed && !p.playing) {
       next = '播放结束';
-    } else if (magnet && ( (!_useVlc && (_mkPlayer?.state.buffering ?? false)) ||
+    } else if (magnet && (_isBuffering ||
             !(p.position > Duration.zero || p.duration > Duration.zero || p.width > 0))) {
       next = '磁力缓冲中…';
-    } else if (!_useVlc && (_mkPlayer?.state.buffering ?? false)) {
+    } else if (_isBuffering) {
       next = '$prefix 缓冲中…';
     } else if (p.playing) {
       final started = p.position > Duration.zero || p.duration > Duration.zero || p.width > 0;
@@ -136,11 +161,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (_mk != null) {
       // stopHard 会拆掉 playing 订阅；复用 Player 时必须重新挂上。
       _playingSub ??= _mkPlayer!.stream.playing.listen((_) {
-        if (!mounted || _playUrl.isEmpty || _useVlc) return;
+        if (!mounted || _playUrl.isEmpty || !_useMpv) return;
         _syncPlayStatus();
       });
       _bufferingSub ??= _mkPlayer!.stream.buffering.listen((_) {
-        if (!mounted || _playUrl.isEmpty || _useVlc) return;
+        if (!mounted || _playUrl.isEmpty || !_useMpv) return;
         _syncPlayStatus();
       });
       return _mk!;
@@ -149,16 +174,39 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _mkPlayer = player;
     _mk = MediaKitPlayback(player);
     _playingSub = player.stream.playing.listen((_) {
-      if (!mounted || _playUrl.isEmpty || _useVlc) return;
+      if (!mounted || _playUrl.isEmpty || !_useMpv) return;
       _syncPlayStatus();
     });
     _bufferingSub = player.stream.buffering.listen((_) {
-      if (!mounted || _playUrl.isEmpty || _useVlc) return;
+      if (!mounted || _playUrl.isEmpty || !_useMpv) return;
       _syncPlayStatus();
     });
     _wireEnded(_mk!);
     _wirePosition(_mk!);
     return _mk!;
+  }
+
+  Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
+    if (keep != KotvEmbedBackend.mpv) {
+      try {
+        await _mk?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.vlc) {
+      try {
+        await _vlc?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.exo) {
+      try {
+        await _exo?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.ijk) {
+      try {
+        await _ijk?.stop();
+      } catch (_) {}
+    }
   }
 
   @override
@@ -194,6 +242,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     await Future.wait<void>([
       hardStop(_vlc),
       hardStop(_mk),
+      hardStop(_exo),
+      hardStop(_ijk),
     ]);
     _stoppedHard = true;
   }
@@ -295,9 +345,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (!_stoppedHard) {
       unawaited(_vlc?.stop() ?? Future<void>.value());
       unawaited(_mk?.stop() ?? Future<void>.value());
+      unawaited(_exo?.stop() ?? Future<void>.value());
+      unawaited(_ijk?.stop() ?? Future<void>.value());
     }
     _vlc?.dispose();
     _mk?.dispose();
+    _exo?.dispose();
+    _ijk?.dispose();
     _mkPlayer?.dispose();
     super.dispose();
   }
@@ -331,7 +385,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         }
         _playerVal = playerVal;
         // 未开播前不创建 media_kit Player（Win7 上进详情即创建易卡 UI）；真正点播时再 _ensureMpv。
-        if (!_useVlc && !kotvIsWindows7()) {
+        if (_backend != KotvEmbedBackend.vlc && !kotvIsWindows7()) {
           final mk = _ensureMpv();
           final speed = double.tryParse('${settings['playerSpeed'] ?? ''}');
           if (speed != null && speed > 0) await mk.setRate(speed);
@@ -538,39 +592,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         site: d.site,
         remarks: ep.name,
       ));
-      if (_useVlc) {
-        try {
-          await _mk?.stop();
-        } catch (_) {}
-        _vlc ??= EngineVlcPlayback();
-        await _vlc!.setDecodeMode(_decodeMode);
-        await _vlc!.open(playUrl);
-        try {
-          await _vlc!.play();
-        } catch (_) {}
-        if (_stableVolumeOn) await _applyStableVolume(_vlc!, true);
-        if (!mounted) return;
-        setState(() {
-          _playUrl = playUrl;
-          _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
-        });
-      } else {
-        try {
-          await _vlc?.stop();
-        } catch (_) {}
-        final mk = _ensureMpv();
-        await mk.open(playUrl);
-        // stop/pause 后 media_kit 可能仍处暂停态，显式 play 避免只出一帧。
-        try {
-          await mk.play();
-        } catch (_) {}
-        if (_stableVolumeOn) await _applyStableVolume(mk, true);
-        if (!mounted) return;
-        setState(() {
-          _playUrl = playUrl;
-          _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
-        });
-      }
+      await _stopInactiveBackends(_backend);
+      final pb = _playback;
+      await pb.setDecodeMode(_decodeMode);
+      await pb.open(playUrl);
+      try {
+        await pb.play();
+      } catch (_) {}
+      if (_stableVolumeOn) await _applyStableVolume(pb, true);
+      if (!mounted) return;
+      setState(() {
+        _playUrl = playUrl;
+        _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
+      });
       unawaited(_loadDanmakuForEpisode(
         playDanmaku: '${data['danmaku'] ?? ''}',
         name: d.name,
@@ -781,10 +815,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                     ),
                   )
                 : Image.network(d.pic, fit: BoxFit.contain))
-          else if (_useVlc && _vlc != null)
-            EmbedVideoView(playback: _vlc!)
           else
-            Video(controller: _ensureMpv().controller, controls: NoVideoControls),
+            kotvPlaybackView(
+              playerVal: _playerVal,
+              playback: _playback,
+              mpv: _mk,
+              fit: _aspect.fit,
+            ),
           if (_status.contains('解析') || _status.contains('嗅探'))
             const ColoredBox(
               color: Color(0x66000000),

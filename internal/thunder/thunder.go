@@ -92,6 +92,9 @@ type FetchProgress struct {
 
 // CurrentProgress 返回最近一次 Fetch/展开进度快照。
 func CurrentProgress() FetchProgress {
+	if p, ok := tryAndroidProgress(); ok {
+		return p
+	}
 	progressMu.Lock()
 	defer progressMu.Unlock()
 	return progress
@@ -254,6 +257,10 @@ func Parse(raw string) ([]model.Episode, error) {
 // ParseContext 在 parent 取消或超时后停止等待元数据。
 func ParseContext(parent context.Context, raw string) ([]model.Episode, error) {
 	raw = Decode(strings.TrimSpace(raw))
+	if androidThunderEnabled() {
+		// Android 只用迅雷 Native，不再回落 anacrolix。
+		return tryAndroidParse(raw)
+	}
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -289,8 +296,13 @@ func ParseContext(parent context.Context, raw string) ([]model.Episode, error) {
 // 避免「无 peer / 无数据」时就返回 URL 导致假就绪、黑屏假播放中。
 func Fetch(raw string) (string, error) {
 	raw = Decode(strings.TrimSpace(raw))
-	if strings.HasPrefix(strings.ToLower(raw), "ed2k:") {
-		return "", fmt.Errorf("暂不支持电驴链接")
+	if androidThunderEnabled() {
+		// Android：迅雷 SDK（magnet / thunder / ed2k / ftp 等），与 TV 一致，不走 anacrolix。
+		return tryAndroidFetch(raw)
+	}
+	low := strings.ToLower(raw)
+	if strings.HasPrefix(low, "ed2k:") || strings.HasPrefix(low, "ftp:") {
+		return "", fmt.Errorf("电驴/FTP 仅 Android 迅雷支持")
 	}
 	setProgress("meta", 0, 0, 0, "正在获取磁力元数据…")
 	metaCtx, metaCancel := context.WithTimeout(context.Background(), metaTimeout)
@@ -685,6 +697,7 @@ func ensureClient() (*torrent.Client, error) {
 
 // ClearStorage 关闭 BT 客户端并删除 thunder 下载目录，返回大约释放字节数。
 func ClearStorage() (int64, error) {
+	tryAndroidClear()
 	mu.Lock()
 	c := client
 	client = nil

@@ -227,14 +227,14 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
                         const Text('KO影视', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700)),
                         const SizedBox(height: 12),
                         Text(
-                          Platform.isIOS
-                              ? '请先连接可用后端服务'
+                          Platform.isIOS || Platform.isAndroid
+                              ? '请先连接可用后端服务，或确认本机引擎已启动'
                               : '无法连接 Go 引擎\n请先启动引擎或检查设置中的引擎地址',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7)),
                         ),
                         const SizedBox(height: 16),
-                        if (Platform.isIOS)
+                        if (Platform.isIOS || Platform.isAndroid)
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [

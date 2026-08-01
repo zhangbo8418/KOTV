@@ -127,6 +127,14 @@ func callJavaBridge(payload []byte) (string, error) {
 // InterruptJavaBridge 打断卡住的 JAR：抬 epoch 并 Kill 独立 java 进程。
 func InterruptJavaBridge() {
 	if runtime.GOOS == "android" {
+		client := &http.Client{Timeout: 2 * time.Second}
+		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:9979/jar/interrupt", bytes.NewReader([]byte("{}")))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			if resp, err := client.Do(req); err == nil {
+				_ = resp.Body.Close()
+			}
+		}
 		return
 	}
 	javaBridge.epoch.Add(1)

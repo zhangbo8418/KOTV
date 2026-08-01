@@ -27,6 +27,7 @@ class SpiderService private constructor(
     PyLoader.startIfNeeded(context)
     SnifferWebView.start(context)
     JarLoader.ensureBridgeLoaded(context)
+    ThunderBridge.start(context)
   }
 
   override fun serve(session: IHTTPSession): Response {
@@ -43,7 +44,12 @@ class SpiderService private constructor(
     }
 
     val body = readRequestBody(session)
-    if (body.isBlank()) {
+    // progress / clear / interrupt 允许空 body
+    if (body.isBlank() &&
+      uri != "/thunder/progress" &&
+      uri != "/thunder/clear" &&
+      uri != "/jar/interrupt"
+    ) {
       return newJsonError(Status.BAD_REQUEST, "empty body")
     }
 
@@ -53,6 +59,12 @@ class SpiderService private constructor(
           // 直接把 Go payload 传给 SpiderBridge。
           val raw = JarLoader.callBridge(body)
           Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", raw)
+        }
+
+        "/jar/interrupt" -> {
+          JarLoader.clear()
+          val out = JSONObject().put("ok", true)
+          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", out.toString())
         }
 
         "/py/call" -> {
@@ -65,6 +77,28 @@ class SpiderService private constructor(
         "/sniff" -> {
           val obj = JSONObject(body)
           val resp = SnifferWebView.sniff(obj)
+          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
+        }
+
+        "/thunder/parse" -> {
+          val obj = if (body.isBlank()) JSONObject() else JSONObject(body)
+          val resp = ThunderBridge.parse(obj)
+          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
+        }
+
+        "/thunder/fetch" -> {
+          val obj = if (body.isBlank()) JSONObject() else JSONObject(body)
+          val resp = ThunderBridge.fetch(obj)
+          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
+        }
+
+        "/thunder/progress" -> {
+          val resp = ThunderBridge.progress()
+          Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
+        }
+
+        "/thunder/clear" -> {
+          val resp = ThunderBridge.clear()
           Response.newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", resp.toString())
         }
 

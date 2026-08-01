@@ -5,14 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../desktop/mini_player_window.dart';
-import '../player/embed_video_view.dart';
+import '../player/exo_playback.dart';
+import '../player/ijk_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
+import '../player/kotv_player_factory.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
@@ -38,16 +39,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   Player? _mkPlayer;
   MediaKitPlayback? _mk;
   EngineVlcPlayback? _vlc;
+  ExoPlayback? _exo;
+  IjkPlayback? _ijk;
   final FocusNode _focus = FocusNode();
 
+  KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
+
   KotvPlayback get _playback {
-    if (_useVlc) {
-      return _vlc ??= EngineVlcPlayback();
+    switch (_backend) {
+      case KotvEmbedBackend.vlc:
+        return _vlc ??= EngineVlcPlayback();
+      case KotvEmbedBackend.exo:
+        return _exo ??= ExoPlayback();
+      case KotvEmbedBackend.ijk:
+        return _ijk ??= IjkPlayback();
+      case KotvEmbedBackend.mpv:
+        return _ensureMpv();
     }
-    return _ensureMpv();
   }
 
-  bool get _useVlc => _playerVal.trim() == 'innie#vlc';
+  bool get _useVlc => _backend == KotvEmbedBackend.vlc;
 
   MediaKitPlayback _ensureMpv() {
     _mkPlayer ??= Player();
@@ -55,7 +66,28 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     return _mk!;
   }
 
-  VideoController get _controller => _ensureMpv().controller;
+  Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
+    if (keep != KotvEmbedBackend.mpv) {
+      try {
+        await _mk?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.vlc) {
+      try {
+        await _vlc?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.exo) {
+      try {
+        await _exo?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.ijk) {
+      try {
+        await _ijk?.stop();
+      } catch (_) {}
+    }
+  }
 
   bool _loading = true;
   String? _error;
@@ -102,8 +134,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _focus.dispose();
     unawaited(_vlc?.stop() ?? Future<void>.value());
     unawaited(_mk?.stop() ?? Future<void>.value());
+    unawaited(_exo?.stop() ?? Future<void>.value());
+    unawaited(_ijk?.stop() ?? Future<void>.value());
     _vlc?.dispose();
     _mk?.dispose();
+    _exo?.dispose();
+    _ijk?.dispose();
     _mkPlayer?.dispose();
     super.dispose();
   }
@@ -385,10 +421,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   Future<void> _openLiveUrl(String url) async {
     await _playback.setDecodeMode(_decodeMode);
+    await _stopInactiveBackends(_backend);
     if (_useVlc) {
-      try {
-        await _mk?.stop();
-      } catch (_) {}
       _vlc ??= EngineVlcPlayback();
       await _vlc!.setDecodeMode(_decodeMode);
       // 原生 create/load/play 偶发阻塞；超时后提示用户改外部播放器。
@@ -400,29 +434,37 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         }
         rethrow;
       }
-    } else {
-      try {
-        await _vlc?.stop();
-      } catch (_) {}
+    } else if (_backend == KotvEmbedBackend.mpv) {
       // Win7 上 media_kit 偶发同步卡死：开播加超时，失败则自动切 VLC。
       final mk = _ensureMpv();
       try {
         await mk.open(url).timeout(const Duration(seconds: 8));
       } on TimeoutException {
-        _playerVal = 'innie#vlc';
-        try {
-          await ref.read(apiProvider).setSetting('playerLive', 'innie#vlc');
-        } catch (_) {}
-        try {
-          await mk.stop();
-        } catch (_) {}
-        _vlc ??= EngineVlcPlayback();
-        await _vlc!.setDecodeMode(_decodeMode);
-        await _vlc!.open(url);
-        if (mounted) {
-          setState(() => _status = 'MPV 超时，已自动切到内置 VLC');
+        if (kotvIsDesktop()) {
+          _playerVal = 'innie#vlc';
+          try {
+            await ref.read(apiProvider).setSetting('playerLive', 'innie#vlc');
+          } catch (_) {}
+          try {
+            await mk.stop();
+          } catch (_) {}
+          _vlc ??= EngineVlcPlayback();
+          await _vlc!.setDecodeMode(_decodeMode);
+          await _vlc!.open(url);
+          if (mounted) {
+            setState(() => _status = 'MPV 超时，已自动切到内置 VLC');
+          }
+        } else {
+          rethrow;
         }
       }
+    } else {
+      final pb = _playback;
+      await pb.setDecodeMode(_decodeMode);
+      await pb.open(url);
+      try {
+        await pb.play();
+      } catch (_) {}
     }
     _playUrl = url;
   }
@@ -431,11 +473,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     if (_playUrl.isEmpty) {
       return const ColoredBox(color: Colors.black);
     }
-    if (_useVlc) {
-      final vlc = _vlc ??= EngineVlcPlayback();
-      return EmbedVideoView(playback: vlc);
-    }
-    return Video(controller: _controller, controls: NoVideoControls);
+    return kotvPlaybackView(
+      playerVal: _playerVal,
+      playback: _playback,
+      mpv: _mk,
+    );
   }
 
   Future<void> _playChannel(int chIdx, {int? line}) async {
@@ -672,13 +714,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _pickPlayer() async {
-    final options = <(String, String)>[
-      ('内置 MPV', 'innie#mpv'),
-      ('内置 VLC', 'innie#vlc'),
-      ('外部 VLC', 'outie#vlc'),
-      ('外部 MPV', 'outie#mpv'),
-      ('外部 IINA', 'outie#iina'),
-    ];
+    final options = kotvLivePlayerOptions();
     final v = await pickChoice(context, title: '直播播放器', current: _playerVal, options: options);
     if (v == null) return;
     final prev = _playerVal;
@@ -698,7 +734,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }
       return;
     }
-    if (v != prev && _playUrl.isNotEmpty && (v == 'innie#mpv' || v == 'innie#vlc')) {
+    if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
       final pos = _playback.position;
       await _openLiveUrl(_playUrl);
       if (pos > Duration.zero) await _playback.seek(pos);

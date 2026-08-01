@@ -7,6 +7,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../player/danmaku_layer.dart';
 import '../player/embed_video_view.dart';
+import '../player/exo_playback.dart';
+import '../player/ijk_playback.dart';
 import '../player/kotv_playback.dart';
 import '../widgets/vod_player_chrome.dart';
 
@@ -256,6 +258,10 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
           },
         );
       }
+    } else if (pb is ExoPlayback) {
+      video = pb.buildView(fit: _aspect.fit);
+    } else if (pb is IjkPlayback) {
+      video = pb.buildView(fit: _aspect.fit);
     } else {
       video = const ColoredBox(color: Colors.black);
     }

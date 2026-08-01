@@ -46,6 +46,16 @@ object JarLoader {
     return out?.toString().orEmpty()
   }
 
+  /** 换仓/中断：向 bridge 发 clear（若已加载）。 */
+  fun clear() {
+    try {
+      if (bridgeCall == null) return
+      callBridge("""{"method":"clear"}""")
+    } catch (_: Throwable) {
+      // ignore
+    }
+  }
+
   private fun copyAsset(context: Context, assetPath: String, destFile: File) {
     val tmp = File(destFile.absolutePath + ".tmp")
     tmp.parentFile?.mkdirs()

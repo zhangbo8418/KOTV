@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../player/kotv_playback.dart';
+import '../player/kotv_platform.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 
@@ -749,18 +750,24 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       });
     }
 
-    // 内置 MPV / VLC 均可选；Win7 默认仍是 VLC，但不强制隐藏 MPV。
+    // 内置后端按平台分流；外置仅桌面。
     final opts = <(String label, String val, String key)>[
-      ('内置 MPV', 'innie#mpv', 'embed_mpv'),
-      ('内置 VLC', 'innie#vlc', 'embed_vlc'),
-      ('外部 VLC', 'outie#vlc', 'vlc'),
-      ('外部 MPV', 'outie#mpv', 'mpv'),
-      ('IINA', 'outie#iina', 'iina'),
+      if (kotvIsAndroid()) ...[
+        ('内置 ExoPlayer', 'innie#exo', 'embed_exo'),
+        ('内置 MPV', 'innie#mpv', 'embed_mpv'),
+        ('内置 ijk', 'innie#ijk', 'embed_ijk'),
+      ] else ...[
+        ('内置 MPV', 'innie#mpv', 'embed_mpv'),
+        ('内置 VLC', 'innie#vlc', 'embed_vlc'),
+        ('外部 VLC', 'outie#vlc', 'vlc'),
+        ('外部 MPV', 'outie#mpv', 'mpv'),
+        ('IINA', 'outie#iina', 'iina'),
+      ],
     ];
 
     bool listed(String key) {
       // Flutter 内置 MPV 走 media_kit 自带 libmpv，不依赖引擎 runtime/libmpv。
-      if (key == 'embed_mpv') return true;
+      if (key == 'embed_mpv' || key == 'embed_exo' || key == 'embed_ijk') return true;
       if (key == 'embed_vlc') return avail['embed_vlc'] == true || avail['vlc'] == true || avail.isEmpty;
       return avail[key] == true;
     }

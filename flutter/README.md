@@ -13,6 +13,24 @@
 ./scripts/run-flutter.sh macos
 ```
 
+## Android APK
+
+需要 `ANDROID_NDK_HOME`（或已安装 Android SDK NDK）。打包：
+
+```bash
+./scripts/package-flutter-android.sh
+```
+
+产物：`dist/KO影视-Flutter-android.apk`（含 **arm64-v8a + armeabi-v7a**）。
+
+无本机 NDK 时推到 `restore-sidecar`，由 GitHub Actions 编译（workflow：`KOTV Flutter Android`），在 Actions → Artifact 下载 APK；也可手动 **Run workflow**。
+
+- 引擎：`libkotv_engine.so` 双 ABI 进 `jniLibs`，由 Flutter 拉起 sidecar
+- 爬虫：同进程 `:9979` SpiderService（JAR/PY/嗅探）
+- **迅雷**（对齐 TV）：`magnet` / `thunder://` / **`ed2k`** / `.torrent`（及解码后的 ftp 等），`libs/thunder-release.aar`，**不走 anacrolix**
+- 播放默认：ExoPlayer；可选手动切 MPV / ijk
+- 迅雷 AAR：`flutter/android/app/libs/thunder-release.aar`（可从 TV `app/libs/` 同步）
+
 ## 遥控器（安卓）
 
 实体遥控方向键 + 手机打开 `http://<引擎IP>:9978/` Web 遥控。

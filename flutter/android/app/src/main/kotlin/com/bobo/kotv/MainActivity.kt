@@ -1,8 +1,9 @@
 package com.bobo.kotv
 
-import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterActivity() {
 
@@ -17,6 +18,26 @@ class MainActivity : FlutterActivity() {
           }
           "stop" -> {
             SpiderServiceManager.stop()
+            result.success(true)
+          }
+          "paths" -> {
+            val cache = cacheDir.absolutePath
+            val files = filesDir.absolutePath
+            val nativeLib = applicationInfo.nativeLibraryDir
+            result.success(
+              mapOf(
+                "cacheDir" to cache,
+                "filesDir" to files,
+                "nativeLibraryDir" to nativeLib,
+                "enginePath" to File(nativeLib, "libkotv_engine.so").absolutePath,
+              ),
+            )
+          }
+          "interruptJar" -> {
+            try {
+              JarLoader.clear()
+            } catch (_: Throwable) {
+            }
             result.success(true)
           }
           else -> result.notImplemented()

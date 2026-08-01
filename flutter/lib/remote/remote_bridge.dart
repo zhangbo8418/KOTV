@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
 import '../models/models.dart';
+import '../player/kotv_platform.dart';
 
 /// 轮询 Go 引擎遥控队列，并把播放状态回写给遥控页。
 class RemoteBridge {
@@ -170,14 +171,18 @@ class LocalPlayOffsets {
   }
 }
 
-/// Flutter 默认页内为 media_kit/MPV；空设置显示为内置 MPV。
+/// Flutter 页内播放器显示名。
 String flutterPlayerLabel(String val) {
-  final v = val.trim().isEmpty ? 'innie#mpv' : val.trim();
+  final v = val.trim().isEmpty ? kotvDefaultVodPlayer() : val.trim();
   switch (v) {
     case 'innie#vlc':
       return '内置 VLC';
     case 'innie#mpv':
       return '内置 MPV';
+    case 'innie#exo':
+      return '内置 ExoPlayer';
+    case 'innie#ijk':
+      return '内置 ijk';
     case 'outie#vlc':
       return '外部 VLC';
     case 'outie#mpv':

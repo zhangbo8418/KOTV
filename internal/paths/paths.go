@@ -4,12 +4,20 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const appName = "KOTV"
 
 // Root 返回用户数据根目录。
+// Android：优先 KOTV_DATA_DIR / KOTV_CACHE_DIR（由 Flutter launcher 注入应用可写目录）。
 func Root() string {
+	if v := strings.TrimSpace(os.Getenv("KOTV_DATA_DIR")); v != "" {
+		return ensure(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("KOTV_CACHE_DIR")); v != "" {
+		return ensure(v)
+	}
 	var base string
 	switch runtime.GOOS {
 	case "windows":
@@ -21,6 +29,13 @@ func Root() string {
 	case "darwin":
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, "Library", "Caches", appName)
+	case "android":
+		// 未注入环境变量时回落到 cwd（通常为应用私有目录）。
+		cwd, _ := os.Getwd()
+		if cwd != "" {
+			return ensure(filepath.Join(cwd, "kotv-cache"))
+		}
+		return ensure(filepath.Join("/data/local/tmp", appName))
 	default:
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, ".cache", appName)

@@ -17,11 +17,70 @@ bool kotvIsWindows7() {
   return RegExp(r'(^|[^\d])6\.1([^\d]|$)').hasMatch(v);
 }
 
-/// 点播默认播放器：全平台（含 Windows / Win7）默认内置 MPV。
-String kotvDefaultVodPlayer() => 'innie#mpv';
+bool kotvIsAndroid() => !kIsWeb && Platform.isAndroid;
 
-/// 直播默认播放器：Windows（含 Win7）默认内置 VLC，其它平台 MPV。
+/// 点播默认：Android=Exo；其它=MPV。
+String kotvDefaultVodPlayer() {
+  if (kotvIsAndroid()) return 'innie#exo';
+  return 'innie#mpv';
+}
+
+/// 直播默认：Android=Exo；Windows=VLC；其它=MPV。
 String kotvDefaultLivePlayer() {
+  if (kotvIsAndroid()) return 'innie#exo';
   if (!kIsWeb && Platform.isWindows) return 'innie#vlc';
   return 'innie#mpv';
+}
+
+/// 页内播放器后端种类。
+enum KotvEmbedBackend { mpv, vlc, exo, ijk }
+
+KotvEmbedBackend kotvEmbedBackend(String playerVal) {
+  switch (playerVal.trim()) {
+    case 'innie#vlc':
+      return KotvEmbedBackend.vlc;
+    case 'innie#exo':
+      return KotvEmbedBackend.exo;
+    case 'innie#ijk':
+      return KotvEmbedBackend.ijk;
+    case 'innie#mpv':
+    default:
+      return KotvEmbedBackend.mpv;
+  }
+}
+
+/// 设置页 / 页内切换：按平台分流选项。
+List<(String, String)> kotvVodPlayerOptions() {
+  if (kotvIsAndroid()) {
+    return const [
+      ('内置 ExoPlayer（默认）', 'innie#exo'),
+      ('内置 MPV', 'innie#mpv'),
+      ('内置 ijk', 'innie#ijk'),
+    ];
+  }
+  return const [
+    ('内置 MPV（默认）', 'innie#mpv'),
+    ('内置 VLC', 'innie#vlc'),
+    ('外部 VLC', 'outie#vlc'),
+    ('外部 MPV', 'outie#mpv'),
+    ('IINA', 'outie#iina'),
+  ];
+}
+
+List<(String, String)> kotvLivePlayerOptions() {
+  if (kotvIsAndroid()) {
+    return const [
+      ('内置 ExoPlayer（默认）', 'innie#exo'),
+      ('内置 MPV', 'innie#mpv'),
+      ('内置 ijk', 'innie#ijk'),
+    ];
+  }
+  final win = !kIsWeb && Platform.isWindows;
+  return [
+    ('内置 MPV${!win ? '（默认）' : ''}', 'innie#mpv'),
+    ('内置 VLC${win ? '（默认）' : ''}', 'innie#vlc'),
+    ('外部 VLC', 'outie#vlc'),
+    ('外部 MPV', 'outie#mpv'),
+    if (!kIsWeb && Platform.isMacOS) ('IINA', 'outie#iina'),
+  ];
 }

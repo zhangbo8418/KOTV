@@ -574,13 +574,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '点播播放器',
                           value: playerLabel,
-                          onTap: () => _pick('点播播放器', 'player', const [
-                            ('内置 MPV（默认）', 'innie#mpv'),
-                            ('内置 VLC', 'innie#vlc'),
-                            ('外部 VLC', 'outie#vlc'),
-                            ('外部 MPV', 'outie#mpv'),
-                            ('IINA', 'outie#iina'),
-                          ], msg: '点播播放器已切换'),
+                          onTap: () => _pick('点播播放器', 'player', kotvVodPlayerOptions(), msg: '点播播放器已切换'),
                         ),
                         KotvSettingsCell(
                           label: '直播播放器',
@@ -588,13 +582,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           onTap: () => _pick(
                             '直播播放器',
                             'playerLive',
-                            [
-                              ('内置 MPV${!Platform.isWindows ? '（默认）' : ''}', 'innie#mpv'),
-                              ('内置 VLC${Platform.isWindows ? '（默认）' : ''}', 'innie#vlc'),
-                              ('外部 VLC', 'outie#vlc'),
-                              ('外部 MPV', 'outie#mpv'),
-                              ('IINA', 'outie#iina'),
-                            ],
+                            kotvLivePlayerOptions(),
                             msg: '直播播放器已切换',
                           ),
                         ),

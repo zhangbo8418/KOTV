@@ -3,6 +3,8 @@ package com.bobo.kotv
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import org.json.JSONObject
@@ -15,10 +17,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Web 嗅探：优先做轻量 HTTPSniff（regex 抽取媒体 URL）。
- *
- * 为了在“先跑通协议链路”的阶段快速落地，这里先不强依赖 WebView 事件流。
- * 后续如果需要“动态请求/JS 后出链路”，再把 fetch 替换成 TV 同款 WebView 拦截。
+ * Web 嗅探：HTTP regex + WebView 资源拦截（含请求头）。
  */
 object SnifferWebView {
   private val mediaURLRe = Regex("(?i)https?://[^\\s\"'<>\\\\]+?\\.(?:m3u8|mp4|mkv|flv|ts|mpd)(?:\\?[^\\s\"'<>\\\\]*)?")
@@ -47,22 +46,24 @@ object SnifferWebView {
     }
 
     try {
+      val foundHeaders = JSONObject()
       val u = if (html.isNotEmpty()) {
         extractMedia(html)
       } else {
         val ctx = appContext
-        if (ctx != null) {
-          webViewSniff(ctx, pageUrl, headers, timeoutMs)
+        val fromWv = if (ctx != null) {
+          webViewSniff(ctx, pageUrl, headers, timeoutMs, foundHeaders)
         } else {
           ""
-        }.ifEmpty {
+        }
+        fromWv.ifEmpty {
           extractMedia(httpGet(pageUrl, headers, timeoutMs))
         }
       }
       resp.put("url", u)
-      resp.put("headers", JSONObject()) // 先不返回嗅探到的请求头
+      resp.put("headers", foundHeaders)
       return resp
-    } catch (t: Throwable) {
+    } catch (_: Throwable) {
       resp.put("url", "")
       resp.put("headers", JSONObject())
       return resp
@@ -78,6 +79,10 @@ object SnifferWebView {
 
   private fun trimUrl(raw: String): String {
     return raw.trim().trimEnd(',', '"', '\'', ')', ']', '>')
+  }
+
+  private fun isMediaUrl(u: String): Boolean {
+    return u.isNotEmpty() && (mediaURLRe.containsMatchIn(u) || snifferRe.containsMatchIn(u))
   }
 
   private fun httpGet(url: String, headers: JSONObject?, timeoutMs: Long): String {
@@ -106,11 +111,20 @@ object SnifferWebView {
     }
   }
 
+  private fun copyRequestHeaders(req: WebResourceRequest?, into: JSONObject) {
+    val map = req?.requestHeaders ?: return
+    for ((k, v) in map) {
+      if (k.isNullOrBlank() || v.isNullOrBlank()) continue
+      into.put(k, v)
+    }
+  }
+
   private fun webViewSniff(
     context: Context,
     pageUrl: String,
     headers: JSONObject?,
     timeoutMs: Long,
+    outHeaders: JSONObject,
   ): String {
     val latch = CountDownLatch(1)
     val found = AtomicReference<String?>(null)
@@ -122,12 +136,20 @@ object SnifferWebView {
         override fun onLoadResource(view: WebView?, url: String?) {
           super.onLoadResource(view, url)
           val u = url?.trim().orEmpty()
-          if (u.isNotEmpty() && (mediaURLRe.containsMatchIn(u) || snifferRe.containsMatchIn(u))) {
-            if (found.get() == null) {
-              found.set(u)
-              latch.countDown()
-            }
+          if (isMediaUrl(u) && found.get() == null) {
+            found.set(u)
+            latch.countDown()
           }
+        }
+
+        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+          val u = request?.url?.toString()?.trim().orEmpty()
+          if (isMediaUrl(u) && found.get() == null) {
+            copyRequestHeaders(request, outHeaders)
+            found.set(u)
+            latch.countDown()
+          }
+          return super.shouldInterceptRequest(view, request)
         }
       }
       webView.webViewClient = client
@@ -140,18 +162,17 @@ object SnifferWebView {
           if (v.isNotEmpty()) headerMap[k] = v
         }
       }
-      // 简化：WebView 默认允许加载资源；若站点依赖 JS，可在后续按需开启。
       webView.settings.javaScriptEnabled = true
+      webView.settings.domStorageEnabled = true
       if (headerMap.isEmpty()) {
         webView.loadUrl(pageUrl)
       } else {
         webView.loadUrl(pageUrl, headerMap)
       }
 
-      // 超时或找到结果后清理，避免泄漏。
       handler.postDelayed({
         try {
-          if (webView != null) webView.destroy()
+          webView.destroy()
         } catch (_: Throwable) {
           // ignore
         } finally {
@@ -164,4 +185,3 @@ object SnifferWebView {
     return found.get()?.let { trimUrl(it) }.orEmpty()
   }
 }
-

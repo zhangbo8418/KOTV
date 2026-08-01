@@ -74,7 +74,7 @@ func defaultFile() file {
 			{ID: "vod", Label: "点播", Value: ""},
 			{ID: "live", Label: "直播", Value: ""},
 			{ID: "log", Label: "日志级别", Value: "info"},
-			{ID: "player", Label: "点播播放器", Value: "innie#mpv"},
+			{ID: "player", Label: "点播播放器", Value: defaultVodPlayerValue()},
 			{ID: "playerLive", Label: "直播播放器", Value: defaultLivePlayerValue()},
 			{ID: "proxy", Label: "代理", Value: "false#"},
 			{ID: "theme", Label: "主题", Value: "system"},
@@ -110,14 +110,24 @@ func defaultFile() file {
 	}
 }
 
+func defaultVodPlayerValue() string {
+	if runtime.GOOS == "android" {
+		return "innie#exo"
+	}
+	return "innie#mpv"
+}
+
 func defaultLivePlayerValue() string {
+	if runtime.GOOS == "android" {
+		return "innie#exo"
+	}
 	if runtime.GOOS == "windows" {
 		return "innie#vlc"
 	}
 	return "innie#mpv"
 }
 
-// ResolvePlayerLive 直播播放器；空则 Windows 默认 VLC，其它平台 MPV。
+// ResolvePlayerLive 直播播放器；空则平台默认。
 func ResolvePlayerLive() string {
 	v := strings.TrimSpace(Get(PlayerLive))
 	if v != "" {
@@ -132,7 +142,7 @@ func ResolvePlayerVod() string {
 	if v != "" {
 		return v
 	}
-	return "innie#mpv"
+	return defaultVodPlayerValue()
 }
 
 // Load 从 setting.ini 加载设置。
