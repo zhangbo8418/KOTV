@@ -683,6 +683,33 @@ func ensureClient() (*torrent.Client, error) {
 	return client, nil
 }
 
+// ClearStorage 关闭 BT 客户端并删除 thunder 下载目录，返回大约释放字节数。
+func ClearStorage() (int64, error) {
+	mu.Lock()
+	c := client
+	client = nil
+	entries = map[string]*entry{}
+	mu.Unlock()
+	if c != nil {
+		c.Close()
+	}
+	dir := filepath.Join(paths.Root(), "thunder")
+	var total int64
+	_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err == nil && info != nil && !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+		return total, err
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	setProgress("idle", 0, 0, 0, "磁力缓存已清理")
+	log.Printf("thunder: storage cleared (~%d bytes)", total)
+	return total, nil
+}
+
 func entryKey(ih string, index int) string {
 	return fmt.Sprintf("%s#%d", ih, index)
 }

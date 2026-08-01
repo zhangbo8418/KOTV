@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/backup"
+	"github.com/bobo/KOTV/internal/cacheclean"
 	"github.com/bobo/KOTV/internal/cast"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/player/embed"
@@ -48,9 +49,65 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 	case "cast":
 		idx := intParam(params, "index", -1)
 		return a.toolCast(idx)
+	case "clearcache":
+		return a.toolClearCache(params)
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
 	}
+}
+
+func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {
+	opt := cacheclean.Options{
+		Script: boolParam(params, "script", true),
+		Jar:    boolParam(params, "jar", true),
+		Magnet: boolParam(params, "magnet", true),
+		Logs:   boolParam(params, "logs", true),
+		Other:  boolParam(params, "other", true),
+	}
+	res := cacheclean.Run(opt)
+	msg := fmt.Sprintf("已清理 %s", res.FreedHuman)
+	if len(res.Cleared) > 0 {
+		msg += "（" + strings.Join(res.Cleared, "、") + "）"
+	}
+	if len(res.Errors) > 0 {
+		msg += "；部分失败: " + strings.Join(res.Errors, "; ")
+	}
+	out := map[string]any{
+		"ok":         true,
+		"message":    msg,
+		"freedBytes": res.FreedBytes,
+		"freedHuman": res.FreedHuman,
+		"cleared":    res.Cleared,
+		"details":    res.Details,
+	}
+	if len(res.Errors) > 0 {
+		out["errors"] = res.Errors
+	}
+	return out, nil
+}
+
+func boolParam(m map[string]any, key string, def bool) bool {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		s := strings.TrimSpace(strings.ToLower(t))
+		if s == "0" || s == "false" || s == "no" || s == "off" {
+			return false
+		}
+		if s == "1" || s == "true" || s == "yes" || s == "on" {
+			return true
+		}
+	case float64:
+		return t != 0
+	case int:
+		return t != 0
+	}
+	return def
 }
 
 func (a *App) toolCheckUpdate() (map[string]any, error) {

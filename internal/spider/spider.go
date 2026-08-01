@@ -97,3 +97,8 @@ func clearScriptCaches() {
 		_ = os.MkdirAll(dir, 0o755)
 	}
 }
+
+// ClearJarDisk 清空 JAR 内存/bridge，并删除 Go 侧 jar 落盘（供设置页清理缓存）。
+func ClearJarDisk() {
+	clearJar()
+}

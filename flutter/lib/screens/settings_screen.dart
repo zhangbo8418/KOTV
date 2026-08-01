@@ -236,6 +236,63 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showAppNews(context, '$msg\n\n${lines.join('\n')}');
   }
 
+  Future<void> _clearCache() async {
+    final choice = await pickChoice(context, title: '清理缓存', current: 'all', options: const [
+      ('全部清理（推荐）', 'all'),
+      ('仅 JS / Python', 'script'),
+      ('仅 JAR', 'jar'),
+      ('仅磁力下载', 'magnet'),
+      ('仅日志', 'logs'),
+      ('杂项（HTTP/EPG/字幕等）', 'other'),
+    ]);
+    if (choice == null || !mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF63248A),
+        title: const Text('确认清理？', style: TextStyle(color: Colors.white)),
+        content: Text(
+          choice == 'all'
+              ? '将清理 JS/PY、JAR、磁力下载、日志与杂项缓存。\n不会删除设置与观看历史。'
+              : '将清理所选缓存，不会删除设置与观看历史。',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('清理')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final params = <String, dynamic>{
+      'script': choice == 'all' || choice == 'script',
+      'jar': choice == 'all' || choice == 'jar',
+      'magnet': choice == 'all' || choice == 'magnet',
+      'logs': choice == 'all' || choice == 'logs',
+      'other': choice == 'all' || choice == 'other',
+    };
+    final data = await _runTool('正在清理缓存', () => ref.read(apiProvider).tools('clearCache', params));
+    // 顺带清 Flutter 侧引擎启动日志
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final spawn = File('${dir.path}/kotv-engine-spawn.log');
+      if (await spawn.exists()) await spawn.writeAsString('');
+      await for (final f in dir.list()) {
+        final name = f.path.split(Platform.pathSeparator).last;
+        if (name.startsWith('kotv-orphan-') || name.startsWith('kotv-hide-') || name.startsWith('kotv-kill-rt-')) {
+          try {
+            await f.delete();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    if (data == null || !mounted) return;
+    final msg = '${data['message'] ?? '清理完成'}';
+    setState(() => _status = msg);
+    showAppNews(context, msg);
+  }
+
   Future<void> _showPair() async {
     final code = _pairCode.isNotEmpty ? _pairCode : g('syncPairCode');
     showAppNews(context, '本机配对码: $code\n\n局域网设备同步时需输入此码\n遥控端口: $_port');
@@ -699,6 +756,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       KotvSettingsGrid(columns: 4, children: [
                         KotvSettingsCell(label: '数据备份', onTap: _backupExport),
                         KotvSettingsCell(label: '恢复备份', onTap: _backupImport),
+                        KotvSettingsCell(label: '清理缓存', onTap: _clearCache),
                         if (!Platform.isIOS) KotvSettingsCell(label: '检测爬虫', onTap: _checkSpider),
                         KotvSettingsCell(label: '检查更新', value: _version, onTap: _checkUpdate),
                         KotvSettingsCell(label: '运行时信息', onTap: () => _showRuntime(launcher, cfg)),
