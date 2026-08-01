@@ -7,6 +7,7 @@ import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
+import '../util/runtime_info.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/poster_card.dart';
@@ -63,13 +64,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _showAbout() async {
     try {
       final st = await ref.read(apiProvider).getSettings();
-      final rt = Map<String, dynamic>.from((st['runtime'] as Map?) ?? {});
+      final rt = <String, String>{
+        for (final e in Map<String, dynamic>.from((st['runtime'] as Map?) ?? {}).entries)
+          e.key: '${e.value ?? ''}',
+      };
       final lines = <String>[
         'KO影视 Flutter ${st['version'] ?? '0.1.0'}',
         '引擎端口：${st['port'] ?? '9978'}',
         '',
         '运行时：',
-        for (final e in rt.entries) '  ${e.key}: ${e.value}',
+        ...formatKotvRuntimeLines(rt).map((e) => '  $e'),
       ];
       if (mounted) showAppNews(context, lines.join('\n'));
     } catch (e) {

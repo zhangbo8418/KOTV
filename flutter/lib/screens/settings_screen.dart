@@ -11,6 +11,7 @@ import '../player/kotv_platform.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
+import '../util/runtime_info.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
@@ -398,8 +399,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _showRuntime(EngineLauncher launcher, AsyncValue<Map<String, dynamic>> cfg) async {
     final buf = StringBuffer('KO影视 $_version\n引擎 ${launcher.baseUrl}\n遥控端口 $_port\n');
     buf.writeln('ready=${cfg.maybeWhen(data: (c) => c['ready'], orElse: () => false)}');
-    for (final k in ['platform', 'java', 'python', 'jvm', 'chromium', 'ffmpeg', 'libvlc', 'bridge', 'quickjs']) {
-      if (_runtime.containsKey(k)) buf.writeln('$k: ${_runtime[k]}');
+    for (final line in formatKotvRuntimeLines(_runtime)) {
+      buf.writeln(line);
     }
     showAppNews(context, buf.toString());
   }
