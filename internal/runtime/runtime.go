@@ -338,17 +338,17 @@ func BridgeJAR() string {
 	return firstExisting(cands...)
 }
 
-// Status 汇总捆绑/系统运行时状态（不含 jvm；mpv/vlc 由客户端排到末尾展示）。
+// Status 汇总捆绑/系统运行时状态（不含 jvm；展示顺序由客户端固定）。
 func Status() map[string]string {
 	return map[string]string{
 		"platform": Platform(),
 		"java":     orMissing(Java()),
 		"python":   orMissing(Python()),
+		"quickjs":  "embedded(CGO)",
+		"bridge":   orMissing(BridgeJAR()),
 		"chromium": orMissing(Chromium()),
 		"ffmpeg":   orMissing(FFmpeg()),
 		"libvlc":   orMissing(LibVLC()),
-		"bridge":   orMissing(BridgeJAR()),
-		"quickjs":  "embedded(CGO)",
 		"mpv":      orMissing(MPV()),
 		"vlc":      orMissing(VLC()),
 	}

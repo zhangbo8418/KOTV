@@ -3,11 +3,11 @@ const kotvRuntimeDisplayKeys = <String>[
   'platform',
   'java',
   'python',
+  'quickjs',
+  'bridge',
   'chromium',
   'ffmpeg',
   'libvlc',
-  'bridge',
-  'quickjs',
   'mpv',
   'vlc',
 ];
