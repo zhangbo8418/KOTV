@@ -26,9 +26,10 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 if ([string]::IsNullOrWhiteSpace($Version)) { $Version = "0.1.0" }
 
+# Inno MyArch 仍用 x64|arm64；发行文件名与 Android 一致：x86_64 / aarch64
 $arch = if ($Plat -eq "windows-arm64") { "arm64" } else { "x64" }
-$archLabel = if ($Plat -eq "windows-arm64") { "arm64" } else { "amd64" }
-$outBase = "KOTV-win-$archLabel-$Tag-setup"
+$archLabel = if ($Plat -eq "windows-arm64") { "aarch64" } else { "x86_64" }
+$outBase = "KO影视-$Version-$archLabel-setup"
 $outDir = $Root
 
 $iscc = $null

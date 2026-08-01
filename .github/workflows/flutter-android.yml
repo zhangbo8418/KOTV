@@ -1,30 +1,11 @@
-# Android APK（arm64 + armeabi-v7a）：引擎 sidecar + 迅雷 AAR + Flutter
-name: KOTV Flutter Android
+# 已并入 github-action.yml（build-android）。此处仅保留手动触发，避免重复编译。
+name: KOTV Flutter Android (manual)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [restore-sidecar]
-    paths:
-      - "flutter/**"
-      - "cmd/engine/**"
-      - "internal/**"
-      - "bridge/**"
-      - "scripts/build-engine-flutter.sh"
-      - "scripts/package-flutter-android.sh"
-      - "scripts/kotv-release-name.sh"
-      - ".github/workflows/flutter-android.yml"
-      - "go.mod"
-      - "go.sum"
-
-concurrency:
-  group: flutter-android-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   FLUTTER_VERSION: "3.24.5"
-  GO_VERSION: "1.26.4"
-  NDK_VERSION: "26.1.10909125"
 
 jobs:
   build-apk:
@@ -35,7 +16,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
 
       - uses: actions/setup-java@v4
@@ -63,27 +44,18 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Ensure thunder AAR
-        run: |
-          test -f flutter/android/app/libs/thunder-release.aar
-          ls -lh flutter/android/app/libs/thunder-release.aar
-
-      - name: Package Android APK
+      - name: Package Android APKs
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
         run: |
           chmod +x bridge/build.sh scripts/*.sh
-          export ANDROID_NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
           ./scripts/package-flutter-android.sh
+          ls -lh dist/KO影视-*.apk
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: KO影视-android
+          name: android
           path: |
             dist/KO影视-*-aarch64.apk
             dist/KO影视-*-armv7.apk
           if-no-files-found: error
-          retention-days: 14

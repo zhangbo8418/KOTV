@@ -1,17 +1,16 @@
-name: KOTV Flutter Win7 (Experimental)
+# 已并入 github-action.yml（build-flutter-win7）。此处仅保留手动触发。
+name: KOTV Flutter Win7 (manual)
 
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*"]
 
 env:
-  # 官方最后支持 Win7 的稳定版；不再用 3.24 + 魔改 engine。
   FLUTTER_VERSION: "3.19.6"
 
 jobs:
   build-flutter-win7:
     runs-on: windows-2022
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -80,10 +79,7 @@ jobs:
           flutter --version
           flutter config --enable-windows-desktop
           flutter precache --windows
-
-          # 主线 pubspec 面向 3.24+；Win7 线临时放宽到 Dart 3.3
           bash ../scripts/adapt-flutter-win7-sdk.sh
-
           flutter pub get
           flutter build windows --release
 
@@ -93,17 +89,13 @@ jobs:
           $out = "flutter\build\windows\x64\runner\Release"
           if (-not (Test-Path "$out\kotv.exe")) { throw "Flutter build output missing: $out\kotv.exe" }
           Copy-Item -Force "flutter\assets\engine\kotv-engine.exe" "$out\kotv-engine.exe"
-
-          # runtime 只由 Windows CMake install 打一次；禁止二次整目录拷贝。
           if (-not (Test-Path "$out\runtime")) {
             throw "CMake did not install runtime under $out\runtime — check flutter/windows/CMakeLists.txt"
           }
           if (Test-Path "$out\runtime\runtime") {
             throw "nested runtime\runtime detected — packaging must be single-layer"
           }
-
           if (Test-Path "cmd\updater\updater.exe") { Copy-Item -Force "cmd\updater\updater.exe" "$out\updater.exe" }
-
           bash ./scripts/verify-runtime.sh "$out/runtime" windows-x64
 
       - name: Compress ZIP
@@ -119,5 +111,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: KO影视-windows-win7
+          name: win-x86_64-flutter-win7
           path: KO影视-*-x86_64-win7.zip
+          if-no-files-found: error
