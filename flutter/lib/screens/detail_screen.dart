@@ -180,6 +180,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _posSub = null;
     _bufferingSub = null;
     _playUrl = '';
+    _magnetPlay = false;
 
     Future<void> hardStop(KotvPlayback? p) async {
       if (p == null) return;
