@@ -268,9 +268,16 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 
 	mediaURL := playURL
 	magnet := thunder.Match(playURL)
-	if !magnet {
+	if magnet {
+		local, err := thunder.Fetch(playURL)
+		if err != nil {
+			return nil, fmt.Errorf("磁力链接解析失败: %w", err)
+		}
+		playURL = local
+	} else if !thunder.IsLocalStream(playURL) {
 		playURL = a.PreparePlaybackURL(playURL, headers)
 	}
+	isMagnetPlay := magnet || thunder.IsLocalStream(playURL)
 
 	title := vodID
 	a.SetMediaPlaying(title, playURL)
@@ -279,7 +286,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		"ok":       true,
 		"url":      playURL,
 		"media":    mediaURL,
-		"magnet":   magnet,
+		"magnet":   isMagnetPlay,
 		"headers":  headers,
 		"danmaku":  danmakuURL,
 		"qualities": map[string]any{"names": qualNames, "urls": qualURLs},

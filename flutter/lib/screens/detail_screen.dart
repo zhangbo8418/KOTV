@@ -73,6 +73,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   int _endingSec = 0;
   String _playerVal = kotvDefaultVodPlayer();
   bool _miniDesktop = false;
+  /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
+  bool _magnetPlay = false;
   static const _epSize = 20;
 
   Player? _mkPlayer;
@@ -101,21 +103,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (!mounted || _playUrl.isEmpty) return;
     final p = _playback;
     final prefix = _enginePrefix;
+    final magnet = _magnetPlay || _playUrl.contains('/proxy/bt/');
     final String next;
     if (p.completed && !p.playing) {
       next = '播放结束';
+    } else if (magnet && ( (!_useVlc && (_mkPlayer?.state.buffering ?? false)) ||
+            !(p.position > Duration.zero || p.duration > Duration.zero || p.width > 0))) {
+      next = '磁力缓冲中…';
     } else if (!_useVlc && (_mkPlayer?.state.buffering ?? false)) {
       next = '$prefix 缓冲中…';
     } else if (p.playing) {
       final started = p.position > Duration.zero || p.duration > Duration.zero || p.width > 0;
       if (started) {
-        next = '$prefix 播放中';
+        next = magnet ? '$prefix 播放中（磁力）' : '$prefix 播放中';
       } else {
         final armed = _playArmedAt;
         if (armed != null && DateTime.now().difference(armed) > const Duration(seconds: 10)) {
-          next = '$prefix 无画面（可换源/解析）';
+          next = magnet ? '磁力无画面（可换源/换节点）' : '$prefix 无画面（可换源/解析）';
         } else {
-          next = '$prefix 加载中…';
+          next = magnet ? '磁力缓冲中…' : '$prefix 加载中…';
         }
       }
     } else {
@@ -424,10 +430,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final ep = eps[epIdx];
     _stoppedHard = false;
     _autoNextArmed = true;
+    final epLooksMagnet = RegExp(r'^(magnet|thunder|ed2k):', caseSensitive: false).hasMatch(ep.url.trim()) ||
+        ep.url.toLowerCase().contains('.torrent');
     setState(() {
       _epIdx = epIdx;
       _playUrl = '';
-      _status = '解析中…';
+      _magnetPlay = epLooksMagnet;
+      _status = epLooksMagnet ? '磁力解析中…' : '解析中…';
     });
     try {
       final data = await ref.read(apiProvider).play(
@@ -438,6 +447,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           );
       final playUrl = '${data['url'] ?? ''}';
       if (playUrl.isEmpty) throw Exception('空播放地址');
+      final magnet = data['magnet'] == true || playUrl.contains('/proxy/bt/') || epLooksMagnet;
+      _magnetPlay = magnet;
       await LocalHistory.push(VodItem(
         id: d.id.isNotEmpty ? d.id : widget.id,
         name: d.name,
@@ -459,7 +470,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (!mounted) return;
         setState(() {
           _playUrl = playUrl;
-          _status = '$_enginePrefix 加载中…';
+          _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
         });
       } else {
         try {
@@ -475,7 +486,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (!mounted) return;
         setState(() {
           _playUrl = playUrl;
-          _status = '$_enginePrefix 加载中…';
+          _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
         });
       }
       unawaited(_loadDanmakuForEpisode(
