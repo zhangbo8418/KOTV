@@ -134,7 +134,9 @@ class _TvFocusState extends State<TvFocus> {
           return null;
         }),
       },
+      // opaque：透明边框区域也要接到点击（手机顶栏胶囊常见点偏失效）
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: widget.onPressed,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),

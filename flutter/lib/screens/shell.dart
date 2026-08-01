@@ -107,59 +107,67 @@ class _AppShellState extends ConsumerState<AppShell> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: AppBackdrop(
-        child: ScaledLayoutBox(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // 详情等子页 push 到此 Navigator，底栏（Scaffold.bottomNavigationBar）保持可见。
-              // 切换主 Tab 时重建 key，自动清空详情栈。
-              Navigator(
-                key: ValueKey('shell-$page'),
-                onGenerateRoute: (settings) {
-                  return MaterialPageRoute<void>(
-                    settings: settings,
-                    builder: (_) => _pageOf(page),
-                  );
-                },
-              ),
-              if (busy != null && busy.isNotEmpty)
-                Positioned.fill(
-                  child: ColoredBox(
-                    color: const Color(0x990A0820),
-                    child: Center(
-                      child: Container(
-                        constraints: BoxConstraints(
-                          minWidth: KotvLayout.isCompact(context) ? 200 : 280,
-                          maxWidth: 420,
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 28),
-                        decoration: BoxDecoration(
-                          color: const Color(0xCC63248A),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: const Color(0x55D8A5E8)),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(
-                              width: 36,
-                              height: 36,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+      // Android edge-to-edge：顶栏按钮若画进状态栏区域会被系统吃掉点击
+      body: SafeArea(
+        bottom: false,
+        child: AppBackdrop(
+          child: ScaledLayoutBox(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // 详情等子页 push 到此 Navigator，底栏（Scaffold.bottomNavigationBar）保持可见。
+                // 切换主 Tab 时重建 key，自动清空详情栈。
+                Navigator(
+                  key: ValueKey('shell-$page'),
+                  onGenerateRoute: (settings) {
+                    return MaterialPageRoute<void>(
+                      settings: settings,
+                      builder: (_) => _pageOf(page),
+                    );
+                  },
+                ),
+                if (busy != null && busy.isNotEmpty)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onLongPress: () => ref.read(uiBusyProvider.notifier).state = null,
+                      child: ColoredBox(
+                        color: const Color(0x990A0820),
+                        child: Center(
+                          child: Container(
+                            constraints: BoxConstraints(
+                              minWidth: KotvLayout.isCompact(context) ? 200 : 280,
+                              maxWidth: 420,
                             ),
-                            const SizedBox(height: 14),
-                            Text(
-                              busy,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                            padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 28),
+                            decoration: BoxDecoration(
+                              color: const Color(0xCC63248A),
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(color: const Color(0x55D8A5E8)),
                             ),
-                          ],
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(
+                                  width: 36,
+                                  height: 36,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                                ),
+                                const SizedBox(height: 14),
+                                Text(
+                                  busy,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

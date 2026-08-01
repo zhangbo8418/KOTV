@@ -1,6 +1,7 @@
 package com.bobo.kotv
 
 import android.content.Context
+import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoHTTPD.Method
@@ -8,6 +9,8 @@ import fi.iki.elonen.NanoHTTPD.Response
 import fi.iki.elonen.NanoHTTPD.Response.Status
 import org.json.JSONObject
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 /**
  * 本地 Native Service，给 Go 引擎转发 jar/py/sniff 能力。
@@ -16,18 +19,35 @@ import java.util.Locale
  * - /jar/call : body 是 Go 侧 callJavaBridge payload（JSON 字符串），返回 SpiderBridge.call 的原样字符串
  * - /py/call  : body 是 Python call 参数，返回 result（字符串；不再返回 runner 的 JSON 封装）
  * - /sniff    : body 是 sniff 请求，返回 { "url": "...", "headers": { ... } }
+ *
+ * 重要：先 bind :9979，再后台 warm-up。任一组件初始化失败不得阻止服务监听。
  */
 class SpiderService private constructor(
-  context: Context,
+  private val appContext: Context,
   bindHost: String,
   bindPort: Int,
 ) : NanoHTTPD(bindHost, bindPort) {
 
-  init {
-    PyLoader.startIfNeeded(context)
-    SnifferWebView.start(context)
-    JarLoader.ensureBridgeLoaded(context)
-    ThunderBridge.start(context)
+  private val warmed = AtomicBoolean(false)
+
+  fun warmUpAsync() {
+    if (!warmed.compareAndSet(false, true)) return
+    thread(name = "kotv-spider-warmup", isDaemon = true) {
+      warmUpOne("sniffer") { SnifferWebView.start(appContext) }
+      warmUpOne("jar") { JarLoader.ensureBridgeLoaded(appContext) }
+      warmUpOne("python") { PyLoader.startIfNeeded(appContext) }
+      warmUpOne("thunder") { ThunderBridge.start(appContext) }
+      Log.i(TAG, "warmup done")
+    }
+  }
+
+  private fun warmUpOne(name: String, block: () -> Unit) {
+    try {
+      block()
+      Log.i(TAG, "warmup ok: $name")
+    } catch (t: Throwable) {
+      Log.e(TAG, "warmup failed: $name", t)
+    }
   }
 
   override fun serve(session: IHTTPSession): Response {
@@ -35,7 +55,10 @@ class SpiderService private constructor(
     val uri = (session.uri ?: "/").lowercase(Locale.US)
 
     if (method == Method.GET && (uri == "/health" || uri == "/")) {
-      val out = JSONObject().put("ok", true)
+      val out = JSONObject()
+        .put("ok", true)
+        .put("jar", JarLoader.isLoaded())
+        .put("python", PyLoader.isStarted())
       return json(Status.OK, out.toString())
     }
 
@@ -56,6 +79,7 @@ class SpiderService private constructor(
     return try {
       when (uri) {
         "/jar/call" -> {
+          JarLoader.ensureBridgeLoaded(appContext)
           val raw = JarLoader.callBridge(body)
           json(Status.OK, raw)
         }
@@ -66,23 +90,27 @@ class SpiderService private constructor(
         }
 
         "/py/call" -> {
+          PyLoader.startIfNeeded(appContext)
           val obj = JSONObject(body)
           val result = PyLoader.callPython(obj)
           json(Status.OK, JSONObject().put("result", result).toString())
         }
 
         "/sniff" -> {
+          SnifferWebView.start(appContext)
           val obj = JSONObject(body)
           val resp = SnifferWebView.sniff(obj)
           json(Status.OK, resp.toString())
         }
 
         "/thunder/parse" -> {
+          ThunderBridge.start(appContext)
           val obj = if (body.isBlank()) JSONObject() else JSONObject(body)
           json(Status.OK, ThunderBridge.parse(obj).toString())
         }
 
         "/thunder/fetch" -> {
+          ThunderBridge.start(appContext)
           val obj = if (body.isBlank()) JSONObject() else JSONObject(body)
           json(Status.OK, ThunderBridge.fetch(obj).toString())
         }
@@ -126,6 +154,7 @@ class SpiderService private constructor(
   }
 
   companion object {
+    private const val TAG = "KotvSpiderService"
     const val DefaultHost = "127.0.0.1"
     const val DefaultPort = 9979
 
@@ -136,6 +165,8 @@ class SpiderService private constructor(
 }
 
 object SpiderServiceManager {
+  private const val TAG = "KotvSpiderService"
+
   @Volatile
   private var server: SpiderService? = null
 
@@ -144,10 +175,18 @@ object SpiderServiceManager {
   @Synchronized
   fun start(context: Context, host: String = SpiderService.DefaultHost, port: Int = SpiderService.DefaultPort) {
     if (server != null) return
-    val srv = SpiderService.create(context, host, port)
-    // NanoHTTPD.SOCKET_READ_TIMEOUT = 5000
-    srv.start(5000, false)
-    server = srv
+    try {
+      val srv = SpiderService.create(context, host, port)
+      // NanoHTTPD.SOCKET_READ_TIMEOUT = 5000；daemon=false 避免进程空闲被回收
+      srv.start(5000, false)
+      server = srv
+      srv.warmUpAsync()
+      Log.i(TAG, "listening on $host:$port")
+    } catch (t: Throwable) {
+      Log.e(TAG, "start failed", t)
+      server = null
+      throw t
+    }
   }
 
   @Synchronized

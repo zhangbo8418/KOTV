@@ -17,6 +17,8 @@ object JarLoader {
   @Volatile
   private var bridgeCall: java.lang.reflect.Method? = null
 
+  fun isLoaded(): Boolean = bridgeCall != null
+
   fun ensureBridgeLoaded(context: Context) {
     if (bridgeCall != null) return
     synchronized(this) {

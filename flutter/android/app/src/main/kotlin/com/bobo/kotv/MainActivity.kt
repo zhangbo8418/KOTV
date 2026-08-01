@@ -9,12 +9,21 @@ class MainActivity : FlutterActivity() {
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
+    // 尽早拉起 :9979，避免仅依赖 Dart 侧调用时序
+    try {
+      SpiderServiceManager.start(this)
+    } catch (_: Throwable) {
+    }
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kotv_android_spider")
       .setMethodCallHandler { call, result ->
         when (call.method) {
           "start" -> {
-            SpiderServiceManager.start(this)
-            result.success(true)
+            try {
+              SpiderServiceManager.start(this)
+              result.success(true)
+            } catch (t: Throwable) {
+              result.error("spider_start", t.message ?: t.toString(), null)
+            }
           }
           "stop" -> {
             SpiderServiceManager.stop()

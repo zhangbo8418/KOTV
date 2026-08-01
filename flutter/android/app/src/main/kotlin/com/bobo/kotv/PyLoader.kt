@@ -13,6 +13,8 @@ import org.json.JSONObject
  */
 object PyLoader {
 
+  fun isStarted(): Boolean = Python.isStarted()
+
   fun startIfNeeded(context: Context) {
     if (!Python.isStarted()) {
       Python.start(AndroidPlatform(context.applicationContext))

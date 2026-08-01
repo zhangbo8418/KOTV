@@ -281,17 +281,39 @@ class EngineLauncher {
   Future<void> _ensureAndroidSpiderService() async {
     if (!Platform.isAndroid) return;
     if (_androidSpiderServiceStarted) return;
-    _androidSpiderServiceStarted = true;
 
     const ch = MethodChannel('kotv_android_spider');
-    try {
-      await ch.invokeMethod<void>('start');
-    } catch (e) {
-      // ignore: 若 native 侧已在运行或 ROM 限制，后续由 go 引擎重试/失败兜底处理。
-      debugPrint('android spider service start failed: $e');
+    for (var i = 0; i < 6; i++) {
+      try {
+        await ch.invokeMethod<void>('start');
+      } catch (e) {
+        debugPrint('android spider service start failed: $e');
+      }
+      // 确认 :9979 已监听（warm-up 失败也不应挡住 bind）
+      if (await _pingHttpOk('http://127.0.0.1:9979/health')) {
+        _androidSpiderServiceStarted = true;
+        debugPrint('android spider service ready on 9979');
+        return;
+      }
+      await Future<void>.delayed(Duration(milliseconds: 300 + i * 200));
     }
-    // 给 native 线程一点时间完成 DexClassLoader / Chaquopy init。
-    await Future<void>.delayed(const Duration(milliseconds: 450));
+    debugPrint('android spider service: 9979 still down after retries');
+  }
+
+  Future<bool> _pingHttpOk(String url) async {
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 1);
+      try {
+        final req = await client.getUrl(Uri.parse(url));
+        final resp = await req.close().timeout(const Duration(seconds: 1));
+        await resp.drain<void>();
+        return resp.statusCode >= 200 && resp.statusCode < 300;
+      } finally {
+        client.close(force: true);
+      }
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Win7 禁 PowerShell（会 WER 弹窗）；直接 `taskkill`/`cmd` 会闪黑框。

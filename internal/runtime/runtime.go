@@ -1,12 +1,14 @@
 package runtime
 
 import (
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 // 平台标识（用于下载键、提示信息等）。
@@ -340,7 +342,7 @@ func BridgeJAR() string {
 
 // Status 汇总捆绑/系统运行时状态（不含 jvm；展示顺序由客户端固定）。
 func Status() map[string]string {
-	return map[string]string{
+	out := map[string]string{
 		"platform": Platform(),
 		"java":     orMissing(Java()),
 		"python":   orMissing(Python()),
@@ -352,6 +354,32 @@ func Status() map[string]string {
 		"mpv":      orMissing(MPV()),
 		"vlc":      orMissing(VLC()),
 	}
+	// Android：JAR/PY/嗅探走同进程 :9979 Native Service，不是桌面 JRE/Python 路径。
+	if runtime.GOOS == "android" {
+		if st := probeAndroidSpider(); st != "" {
+			out["java"] = st
+			out["python"] = st
+			out["bridge"] = st
+		} else {
+			out["java"] = "android-bridge(down)"
+			out["python"] = "android-bridge(down)"
+			out["bridge"] = "android-bridge(down)"
+		}
+	}
+	return out
+}
+
+func probeAndroidSpider() string {
+	client := &http.Client{Timeout: 800 * time.Millisecond}
+	resp, err := client.Get("http://127.0.0.1:9979/health")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
+	return "android-bridge(:9979)"
 }
 
 func orMissing(p string) string {

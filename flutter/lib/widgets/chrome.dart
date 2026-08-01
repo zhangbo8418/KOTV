@@ -226,16 +226,13 @@ class AppPill extends StatelessWidget {
             width: w,
             height: h,
             padding: EdgeInsets.symmetric(horizontal: width == null ? 14 * s : 6 * s),
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(8 * s),
               border: Border.all(color: border),
             ),
-            child: Align(
-              alignment: Alignment.center,
-              widthFactor: w == null ? 1 : null,
-              child: labelText,
-            ),
+            child: labelText,
           ),
         ),
       ),
