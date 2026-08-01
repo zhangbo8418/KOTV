@@ -72,6 +72,20 @@ func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {
 	if len(res.Errors) > 0 {
 		msg += "；部分失败: " + strings.Join(res.Errors, "; ")
 	}
+
+	reloaded := false
+	if opt.Script || opt.Jar {
+		// 爬虫包清掉后必须重载配置，重新下载 JAR / 拉站源。
+		a.Sites.InvalidateLoads()
+		if err := a.ReloadConfig(); err != nil {
+			msg += "；重载源失败: " + err.Error()
+			res.Errors = append(res.Errors, "reload: "+err.Error())
+		} else {
+			reloaded = true
+			msg += "；已重新拉取点播源"
+		}
+	}
+
 	out := map[string]any{
 		"ok":         true,
 		"message":    msg,
@@ -79,6 +93,7 @@ func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {
 		"freedHuman": res.FreedHuman,
 		"cleared":    res.Cleared,
 		"details":    res.Details,
+		"reloaded":   reloaded,
 	}
 	if len(res.Errors) > 0 {
 		out["errors"] = res.Errors

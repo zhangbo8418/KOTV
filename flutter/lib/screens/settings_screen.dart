@@ -253,8 +253,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: const Text('确认清理？', style: TextStyle(color: Colors.white)),
         content: Text(
           choice == 'all'
-              ? '将清理 JS/PY、JAR、磁力下载、日志与杂项缓存。\n不会删除设置与观看历史。'
-              : '将清理所选缓存，不会删除设置与观看历史。',
+              ? '将清理 JS/PY、JAR、磁力下载、日志与杂项缓存。\n不会删除设置与观看历史。\n清理爬虫包后会自动重载点播源。'
+              : (choice == 'script' || choice == 'jar')
+                  ? '将清理所选爬虫缓存，不会删除设置与观看历史。\n清理后会自动重载点播源。'
+                  : '将清理所选缓存，不会删除设置与观看历史。',
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -295,6 +297,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     } catch (_) {}
     if (data == null || !mounted) return;
     final msg = '${data['message'] ?? '清理完成'}';
+    if (data['reloaded'] == true) {
+      ref.invalidate(configProvider);
+      ref.invalidate(homeProvider);
+      ref.invalidate(settingsProvider);
+    }
     setState(() => _status = msg);
     showAppNews(context, msg);
   }
