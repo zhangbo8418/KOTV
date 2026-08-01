@@ -54,11 +54,31 @@ fi
 
 echo "==> zip $OUT_ZIP"
 rm -f "$OUT_ZIP"
-# Git Bash / Windows：优先 zip，否则用 PowerShell
-if command -v zip >/dev/null 2>&1; then
-  (cd "$RELEASE_DIR" && zip -r -q "$OUT_ZIP" .)
-else
-  pwsh -NoProfile -Command "Compress-Archive -Path '$RELEASE_DIR\\*' -DestinationPath '$OUT_ZIP' -Force"
-fi
+
+# Git Bash 下绝对路径传给 PowerShell 会被错误改写成 D:\d\a\...；优先用 Git 自带 zip，
+# 否则用 cygpath/手动把 /d/... 转成 D:\... 再 Compress-Archive。
+zip_win() {
+  local src="$1" dest="$2"
+  local zip_bin=""
+  for c in zip /usr/bin/zip "/c/Program Files/Git/usr/bin/zip.exe" "/mingw64/bin/zip"; do
+    if command -v "$c" >/dev/null 2>&1; then zip_bin="$(command -v "$c")"; break; fi
+    if [[ -x "$c" ]]; then zip_bin="$c"; break; fi
+  done
+  if [[ -n "$zip_bin" ]]; then
+    (cd "$src" && "$zip_bin" -r -q "$dest" .)
+    return
+  fi
+  local src_w dest_w
+  if command -v cygpath >/dev/null 2>&1; then
+    src_w="$(cygpath -w "$src")"
+    dest_w="$(cygpath -w "$dest")"
+  else
+    # /d/a/foo → D:\a\foo（避免 Git Bash 把路径喂给 PowerShell 变成 D:\d\a\...）
+    src_w="$(python3 -c "import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())" "$src")"
+    dest_w="$(python3 -c "import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())" "$dest")"
+  fi
+  pwsh -NoProfile -Command "Compress-Archive -Path (Join-Path -Path '$src_w' -ChildPath '*') -DestinationPath '$dest_w' -Force"
+}
+zip_win "$RELEASE_DIR" "$OUT_ZIP"
 ls -lh "$OUT_ZIP"
 echo "RELEASE_DIR=$RELEASE_DIR"
