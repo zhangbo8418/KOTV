@@ -258,8 +258,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('清理')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清理', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
         ],
       ),
     );
