@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,12 +9,13 @@ import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../widgets/chrome.dart';
+import 'collect_screen.dart';
+import 'detail_screen.dart';
 import 'history_screen.dart';
 import 'live_screen.dart';
 import 'profile_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
-import 'collect_screen.dart';
 import 'video_screen.dart';
 
 /// 对齐 Legacy：宽屏单栈换页；竖屏窄窗用底部菜单（普通 App）。
@@ -45,8 +48,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     _postMsg?.stop();
     _bridge = RemoteBridge(api)
       ..onSearch = (kw) {
+        goKotvPage(ref, KotvPage.search);
         ref.read(pendingSearchProvider.notifier).state = kw;
-        ref.read(kotvPageProvider.notifier).state = KotvPage.search;
       }
       ..start();
     _postMsg = PostMsgHost(api, navigatorKey: rootNavigatorKey)..start();
@@ -81,7 +84,19 @@ class _AppShellState extends ConsumerState<AppShell> {
       2 => KotvPage.search,
       _ => KotvPage.profile,
     };
-    ref.read(kotvPageProvider.notifier).state = next;
+    goKotvPage(ref, next);
+  }
+
+  Widget _pageOf(KotvPage page) {
+    return switch (page) {
+      KotvPage.video => const VideoScreen(),
+      KotvPage.search => const SearchScreen(),
+      KotvPage.history => const HistoryScreen(),
+      KotvPage.live => const LiveScreen(),
+      KotvPage.settings => const SettingsScreen(),
+      KotvPage.profile => const ProfileScreen(),
+      KotvPage.collect => const CollectScreen(),
+    };
   }
 
   @override
@@ -97,15 +112,17 @@ class _AppShellState extends ConsumerState<AppShell> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              switch (page) {
-                KotvPage.video => const VideoScreen(),
-                KotvPage.search => const SearchScreen(),
-                KotvPage.history => const HistoryScreen(),
-                KotvPage.live => const LiveScreen(),
-                KotvPage.settings => const SettingsScreen(),
-                KotvPage.profile => const ProfileScreen(),
-                KotvPage.collect => const CollectScreen(),
-              },
+              // 详情等子页 push 到此 Navigator，底栏（Scaffold.bottomNavigationBar）保持可见。
+              // 切换主 Tab 时重建 key，自动清空详情栈。
+              Navigator(
+                key: ValueKey('shell-$page'),
+                onGenerateRoute: (settings) {
+                  return MaterialPageRoute<void>(
+                    settings: settings,
+                    builder: (_) => _pageOf(page),
+                  );
+                },
+              ),
               if (busy != null && busy.isNotEmpty)
                 Positioned.fill(
                   child: ColoredBox(
@@ -187,6 +204,8 @@ class _AppShellState extends ConsumerState<AppShell> {
 }
 
 void goKotvPage(WidgetRef ref, KotvPage page) {
+  // 切主页面前硬停详情播放，避免后台出声。
+  unawaited(DetailScreen.prepareLeave());
   ref.read(kotvPageProvider.notifier).state = page;
 }
 

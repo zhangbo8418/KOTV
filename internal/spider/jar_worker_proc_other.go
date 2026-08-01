@@ -1,7 +1,17 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package spider
 
-import "os/exec"
+import (
+	"os"
+	"os/exec"
+)
 
-func setHiddenConsoleAttrs(*exec.Cmd) {}
+func setChildProcAttrs(*exec.Cmd) {}
+
+func killProcessTree(proc *os.Process) {
+	if proc == nil {
+		return
+	}
+	_ = proc.Kill()
+}

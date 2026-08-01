@@ -353,7 +353,7 @@ func (s *pySpider) startLocked(python, runner, script string) error {
 		"KOTV_PY_CACHE="+paths.PyCache(),
 		fmt.Sprintf("KOTV_PROXY_PORT=%d", localproxy.Port()),
 	)
-	setHiddenConsoleAttrs(cmd)
+	setChildProcAttrs(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -389,7 +389,7 @@ func (s *pySpider) stopLocked() {
 		_ = s.stdin.Close()
 	}
 	if p := s.proc.Swap(nil); p != nil {
-		_ = p.Kill()
+		killProcessTree(p)
 	}
 	s.cmd, s.stdin, s.stdout = nil, nil, nil
 	s.inited = false
@@ -400,7 +400,7 @@ func (s *pySpider) interrupt() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if p := s.proc.Load(); p != nil {
-		_ = p.Kill()
+		killProcessTree(p)
 	}
 	s.stopLocked()
 }

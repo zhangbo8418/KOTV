@@ -128,7 +128,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
             surface: Color(0xFFE9EEFB),
             variant: Color(0xFFB994F5),
             fg: Color(0xFF14141C),
-            muted: Color(0xE045464F),
+            muted: Color(0xFF3A3B48),
             outline: Color(0x99767680),
             input: Color(0xFFDDE2FF),
             pillBg: Color(0xF2FFFFFF),

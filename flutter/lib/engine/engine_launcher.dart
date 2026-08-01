@@ -15,6 +15,7 @@ class EngineLauncher {
   Process? _proc;
   Future<void>? _starting;
   bool _owned = false;
+  bool _shuttingDown = false;
   bool _androidSpiderServiceStarted = false;
   String baseUrl = 'http://127.0.0.1:9978';
   DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -214,13 +215,14 @@ class EngineLauncher {
   Future<void> _killStrayEngines({int? exceptPid}) async {
     if (Platform.isWindows) {
       try {
-        // 不误杀刚启动、尚未 listen 的本进程引擎。
+        // /T：连同 Java/Python 子进程一起清掉。
         if (exceptPid != null && exceptPid > 0) {
-          await Process.run('taskkill', ['/F', '/IM', 'kotv-engine.exe', '/FI', 'PID ne $exceptPid']);
+          await Process.run('taskkill', ['/F', '/T', '/IM', 'kotv-engine.exe', '/FI', 'PID ne $exceptPid']);
         } else {
-          await Process.run('taskkill', ['/F', '/IM', 'kotv-engine.exe']);
+          await Process.run('taskkill', ['/F', '/T', '/IM', 'kotv-engine.exe']);
         }
       } catch (_) {}
+      await _killStrayRuntimes();
       return;
     }
     for (final pat in <String>[
@@ -240,6 +242,43 @@ class EngineLauncher {
         }
       } catch (_) {}
     }
+    await _killStrayRuntimes();
+  }
+
+  /// 清掉引擎死后残留的捆绑 Java bridge / Python runner（按命令行特征，避免误杀系统解释器）。
+  Future<void> _killStrayRuntimes() async {
+    if (Platform.isWindows) {
+      try {
+        await Process.run('powershell', [
+          '-NoProfile',
+          '-WindowStyle',
+          'Hidden',
+          '-Command',
+          'Get-CimInstance Win32_Process | Where-Object { '
+              '\$_.CommandLine -match \'spider-bridge\\.jar --serve\' -or \$_.CommandLine -match \'_kotv_runner\\.py\' '
+              '} | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }',
+        ]);
+      } catch (_) {}
+      return;
+    }
+    for (final pat in <String>['spider-bridge.jar --serve', '_kotv_runner.py']) {
+      try {
+        await Process.run('pkill', ['-f', pat]);
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _killEngineTree(int enginePid) async {
+    if (enginePid <= 0) return;
+    if (Platform.isWindows) {
+      try {
+        await Process.run('taskkill', ['/F', '/T', '/PID', '$enginePid']);
+      } catch (_) {}
+      await _killStrayRuntimes();
+      return;
+    }
+    Process.killPid(enginePid, ProcessSignal.sigkill);
+    await _killStrayRuntimes();
   }
 
   Future<void> _spawn(String path, Map<String, String> env) async {
@@ -255,7 +294,7 @@ class EngineLauncher {
       } catch (_) {}
     }
 
-    // 子进程（非 detached）：正常退出走 shutdown；Win7 上 UI 原生闪退时父死子活，另起看门狗。
+    // 子进程（非 detached）：正常退出走 shutdown；UI 闪退时由看门狗清引擎+运行时。
     _proc = await Process.start(
       path,
       const [],
@@ -264,30 +303,63 @@ class EngineLauncher {
       mode: ProcessStartMode.normal,
     );
     _owned = true;
-    _proc!.stdout.listen((_) {});
-    _proc!.stderr.listen((chunk) {
+    _shuttingDown = false;
+    final spawned = _proc!;
+    spawned.stdout.listen((_) {});
+    spawned.stderr.listen((chunk) {
       try {
         sink.add(chunk);
       } catch (_) {}
     });
-    sink.writeln('pid=${_proc!.pid} owned=true');
-    await _armOrphanWatchdog(_proc!.pid, sink);
+    // 引擎崩溃：UI 仍在则自动拉起（主动 shutdown 时不重启）。
+    unawaited(spawned.exitCode.then((code) async {
+      if (_shuttingDown) return;
+      if (!identical(_proc, spawned)) return;
+      debugPrint('engine exited code=$code; auto-restart');
+      _owned = false;
+      _proc = null;
+      try {
+        await ensureReady(timeout: const Duration(seconds: 20));
+      } catch (e) {
+        debugPrint('engine auto-restart failed: $e');
+      }
+    }));
+    sink.writeln('pid=${spawned.pid} owned=true');
+    await _armOrphanWatchdog(spawned.pid, sink);
     await sink.flush();
     await sink.close();
     await Future<void>.delayed(const Duration(milliseconds: 800));
   }
 
-  /// UI 进程异常退出时杀掉引擎，避免「窗口没了引擎还在」。
-  /// Windows：暂时禁用后台看门狗。powershell/cmd 在 Win7 上会 WER/黑框/误杀；
-  /// 残留引擎由下次启动的 `_killStrayEngines` 清理。
+  /// UI 进程异常退出时杀掉引擎 + Java/Python，避免「窗口没了引擎还在」。
   Future<void> _armOrphanWatchdog(int enginePid, IOSink log) async {
     final uiPid = pid;
     if (Platform.isWindows) {
-      log.writeln('orphan-watchdog skipped on Windows ui=$uiPid engine=$enginePid');
+      // 无黑框：用 powershell -WindowStyle Hidden 轮询；UI 死后 taskkill /T。
+      try {
+        await Process.start(
+          'powershell',
+          [
+            '-NoProfile',
+            '-WindowStyle',
+            'Hidden',
+            '-Command',
+            '\$ui=$uiPid; \$eng=$enginePid; '
+                'while (Get-Process -Id \$ui -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }; '
+                'taskkill /F /T /PID \$eng 2>\$null; '
+                'Get-CimInstance Win32_Process | Where-Object { '
+                '\$_.CommandLine -match \'spider-bridge\\.jar --serve\' -or \$_.CommandLine -match \'_kotv_runner\\.py\' '
+                '} | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }',
+          ],
+          mode: ProcessStartMode.detached,
+        );
+        log.writeln('orphan-watchdog armed(win) ui=$uiPid engine=$enginePid');
+      } catch (e) {
+        log.writeln('orphan-watchdog failed(win): $e');
+      }
       return;
     }
-    // macOS / Linux：后台轮询父进程；UI 没了就杀引擎。
-    // 只杀本 enginePid，避免误杀其它窗口刚拉起的引擎。
+    // macOS / Linux：UI 没了 → TERM/KILL 引擎，再清捆绑运行时特征进程。
     try {
       await Process.start(
         '/bin/sh',
@@ -295,7 +367,9 @@ class EngineLauncher {
           '-c',
           'UI=$uiPid; ENG=$enginePid; '
               'while kill -0 "\$UI" 2>/dev/null; do sleep 0.5; done; '
-              'kill -TERM "\$ENG" 2>/dev/null; sleep 1; kill -KILL "\$ENG" 2>/dev/null; true',
+              'kill -TERM "\$ENG" 2>/dev/null; sleep 1; kill -KILL "\$ENG" 2>/dev/null; '
+              'pkill -f "spider-bridge.jar --serve" 2>/dev/null; '
+              'pkill -f "_kotv_runner.py" 2>/dev/null; true',
         ],
         mode: ProcessStartMode.detached,
       );
@@ -305,61 +379,98 @@ class EngineLauncher {
     }
   }
 
-  /// 窗口关闭 / 应用退出时调用：结束本进程托管的引擎。
+  bool get _isLocalEngine {
+    final u = baseUrl.toLowerCase();
+    return u.contains('127.0.0.1') || u.contains('localhost');
+  }
+
+  /// 窗口关闭 / 应用退出时调用：优雅停引擎（杀 Java/Python），超时再杀树。
   Future<void> shutdown() async {
+    _shuttingDown = true;
     final proc = _proc;
-    _proc = null;
     final owned = _owned;
+    _proc = null;
     _owned = false;
 
-    if (proc != null && owned) {
-      if (Platform.isWindows) {
-        // Win7 上 Process.kill/SIGTERM 不可靠，且易和插件析构打架；直接 taskkill。
-        try {
-          await Process.run('taskkill', ['/F', '/PID', '${proc.pid}']);
-        } catch (_) {
-          try {
-            proc.kill();
-          } catch (_) {}
-        }
-        return;
-      }
+    if (_isLocalEngine) {
       try {
-        proc.kill(ProcessSignal.sigterm);
+        await KotvApi(baseUrl: baseUrl).requestShutdown();
       } catch (_) {}
+    }
+
+    if (proc != null && owned) {
       try {
-        await proc.exitCode.timeout(const Duration(seconds: 2));
-      } catch (_) {
-        try {
-          proc.kill(ProcessSignal.sigkill);
-        } catch (_) {}
-      }
+        await proc.exitCode.timeout(const Duration(seconds: 4));
+        await _killStrayRuntimes();
+        return;
+      } catch (_) {}
+      await _killEngineTree(proc.pid);
       return;
     }
 
-    // 未托管时不要乱 pkill：可能正被另一个 UI 实例使用。
+    // 未托管时不要乱杀：可能正被另一个 UI 实例使用。
+    // 本机且无其它存活迹象时，仍清一次孤儿运行时。
+    if (_isLocalEngine && proc == null) {
+      await _killStrayRuntimes();
+    }
   }
 
-  /// 关程序专用：同步杀掉本进程托管的引擎，再 `exit`，避免残留与 await 挂死。
+  /// 关程序专用：同步清掉本进程托管的引擎树，再 `exit`，避免残留与 await 挂死。
   void shutdownSync() {
+    _shuttingDown = true;
     final proc = _proc;
-    _proc = null;
     final owned = _owned;
+    _proc = null;
     _owned = false;
-    if (proc == null || !owned) return;
+
+    if (proc == null || !owned) {
+      _killStrayRuntimesSync();
+      return;
+    }
     if (Platform.isWindows) {
       try {
-        Process.runSync('taskkill', ['/F', '/PID', '${proc.pid}']);
+        Process.runSync('taskkill', ['/F', '/T', '/PID', '${proc.pid}']);
       } catch (_) {
         try {
           proc.kill();
         } catch (_) {}
       }
+      _killStrayRuntimesSync();
       return;
     }
     try {
       proc.kill(ProcessSignal.sigterm);
     } catch (_) {}
+    // 给优雅 Shutdown 留一点点时间，再清孤儿运行时。
+    try {
+      sleep(const Duration(milliseconds: 800));
+    } catch (_) {}
+    try {
+      proc.kill(ProcessSignal.sigkill);
+    } catch (_) {}
+    _killStrayRuntimesSync();
+  }
+
+  void _killStrayRuntimesSync() {
+    if (Platform.isWindows) {
+      try {
+        Process.runSync('powershell', [
+          '-NoProfile',
+          '-WindowStyle',
+          'Hidden',
+          '-Command',
+          'Get-CimInstance Win32_Process | Where-Object { '
+              '\$_.CommandLine -match \'spider-bridge\\.jar --serve\' -or \$_.CommandLine -match \'_kotv_runner\\.py\' '
+              '} | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }',
+        ]);
+      } catch (_) {}
+      return;
+    }
+    for (final pat in <String>['spider-bridge.jar --serve', '_kotv_runner.py']) {
+      try {
+        Process.runSync('pkill', ['-f', pat]);
+      } catch (_) {}
+    }
   }
 
   void dispose() {

@@ -23,9 +23,21 @@ func main() {
 		log.Printf("config: %s", a.ErrMsg)
 	}
 
+	apiStop := make(chan struct{}, 1)
+	a.Server.SetShutdownHook(func() {
+		select {
+		case apiStop <- struct{}{}:
+		default:
+		}
+	})
+
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-ch
-	log.Printf("engine stopping: %v", sig)
+	select {
+	case sig := <-ch:
+		log.Printf("engine stopping: %v", sig)
+	case <-apiStop:
+		log.Printf("engine stopping: api shutdown")
+	}
 	a.Shutdown()
 }

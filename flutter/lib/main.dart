@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'desktop/mini_player_window.dart';
 import 'engine/engine_launcher.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
@@ -14,25 +16,39 @@ import 'theme/layout_scale.dart';
 import 'theme/kotv_palette.dart';
 import 'theme/kotv_theme.dart';
 import 'widgets/chrome.dart';
+import 'widgets/h_scroll.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
   if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
     await windowManager.ensureInitialized();
-    const opts = WindowOptions(
-      size: Size(1280, 720),
+    final savedW = prefs.getDouble('window_w');
+    final savedH = prefs.getDouble('window_h');
+    final savedX = prefs.getDouble('window_x');
+    final savedY = prefs.getDouble('window_y');
+    final size = Size(
+      (savedW ?? 1280).clamp(kotvMinWindowSize.width, 10000),
+      (savedH ?? 720).clamp(kotvMinWindowSize.height, 10000),
+    );
+    final opts = WindowOptions(
+      size: size,
       // 允许缩到接近手机竖/横屏，由布局断点自动切底栏/顶栏
       minimumSize: kotvMinWindowSize,
-      center: true,
+      center: savedX == null || savedY == null,
       title: 'KO影视',
     );
     await windowManager.waitUntilReadyToShow(opts, () async {
+      if (savedX != null && savedY != null) {
+        try {
+          await windowManager.setPosition(Offset(savedX, savedY));
+        } catch (_) {}
+      }
       await windowManager.show();
       await windowManager.focus();
     });
   }
-  final prefs = await SharedPreferences.getInstance();
   final engineUrl = prefs.getString('engine_base_url');
   runApp(ProviderScope(
     overrides: [
@@ -111,6 +127,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
 
   @override
   void dispose() {
+    _saveBoundsTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
       windowManager.removeListener(this);
@@ -124,22 +141,54 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
     ref.read(platformBrightnessProvider.notifier).state = b;
   }
 
+  Timer? _saveBoundsTimer;
+
+  Future<void> _persistWindowBounds() async {
+    if (kIsWeb || !(Platform.isMacOS || Platform.isWindows || Platform.isLinux)) return;
+    if (MiniPlayerWindow.active) return;
+    try {
+      final size = await windowManager.getSize();
+      final pos = await windowManager.getPosition();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble('window_w', size.width);
+      await prefs.setDouble('window_h', size.height);
+      await prefs.setDouble('window_x', pos.dx);
+      await prefs.setDouble('window_y', pos.dy);
+    } catch (_) {}
+  }
+
+  void _scheduleSaveWindowBounds() {
+    _saveBoundsTimer?.cancel();
+    _saveBoundsTimer = Timer(const Duration(milliseconds: 400), () {
+      unawaited(_persistWindowBounds());
+    });
+  }
+
+  @override
+  void onWindowResize() => _scheduleSaveWindowBounds();
+
+  @override
+  void onWindowMove() => _scheduleSaveWindowBounds();
+
   @override
   void onWindowClose() async {
-    // Windows：关整个程序时不要走 window_manager.destroy（Win7 易 WER）。
-    // 先同步 taskkill 本进程托管的引擎，再 exit，避免残留。
-    if (Platform.isWindows) {
-      try {
-        ref.read(engineLauncherProvider).shutdownSync();
-      } catch (_) {}
-      exit(0);
-    }
+    _saveBoundsTimer?.cancel();
+    await _persistWindowBounds();
+    // 先优雅停引擎（HTTP shutdown → 杀 Java/Python）；超时再杀进程树。
+    // Windows 仍避免 window_manager.destroy（Win7 易 WER），最后 exit。
     try {
       await ref
           .read(engineLauncherProvider)
           .shutdown()
-          .timeout(const Duration(seconds: 2));
-    } catch (_) {}
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      try {
+        ref.read(engineLauncherProvider).shutdownSync();
+      } catch (_) {}
+    }
+    if (Platform.isWindows) {
+      exit(0);
+    }
     try {
       await windowManager.setPreventClose(false);
     } catch (_) {}
@@ -159,6 +208,8 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
       debugShowCheckedModeBanner: false,
       navigatorKey: rootNavigatorKey,
       theme: buildKotvTheme(palette),
+      // 桌面端默认不把鼠标当拖动设备；芯片/分类栏过长时需可拖拽横滚
+      scrollBehavior: const KotvScrollBehavior(),
       // 色板已按 effectiveLight 生成，固定用当前 theme 即可
       themeMode: ThemeMode.light,
       home: ready.when(

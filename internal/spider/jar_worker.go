@@ -131,7 +131,7 @@ func InterruptJavaBridge() {
 	}
 	javaBridge.epoch.Add(1)
 	if p := javaBridge.proc.Load(); p != nil {
-		_ = p.Kill()
+		killProcessTree(p)
 	}
 }
 
@@ -280,7 +280,7 @@ func (w *javaBridgeClient) startLocked() error {
 		cmd.Stderr = os.Stderr
 		stderrFile = nil
 	}
-	setHiddenConsoleAttrs(cmd)
+	setChildProcAttrs(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -356,7 +356,7 @@ func (w *javaBridgeClient) stopLocked() {
 	}
 	if w.cmd != nil {
 		if w.cmd.Process != nil && w.cmd.ProcessState == nil {
-			_ = w.cmd.Process.Kill()
+			killProcessTree(w.cmd.Process)
 		}
 		_ = w.cmd.Wait()
 	}

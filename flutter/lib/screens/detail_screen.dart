@@ -17,9 +17,11 @@ import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
+import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
+import '../widgets/h_scroll.dart';
 import '../widgets/mini_hover_shell.dart';
 import '../widgets/vod_player_chrome.dart';
 import 'detail_fullscreen.dart';
@@ -69,7 +71,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   AspectSpec _aspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
   int _openingSec = 0;
   int _endingSec = 0;
-  String _playerVal = kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv';
+  String _playerVal = kotvDefaultVodPlayer();
   bool _miniDesktop = false;
   static const _epSize = 20;
 
@@ -286,9 +288,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _danmakuApi = '${settings['danmakuApi'] ?? ''}';
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
-        var playerVal = '${settings['player'] ?? (kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv')}'.trim();
+        var playerVal = '${settings['player'] ?? kotvDefaultVodPlayer()}'.trim();
         if (playerVal.isEmpty) {
-          playerVal = kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv';
+          playerVal = kotvDefaultVodPlayer();
         }
         _playerVal = playerVal;
         // 未开播前不创建 media_kit Player（Win7 上进详情即创建易卡 UI）；真正点播时再 _ensureMpv。
@@ -466,10 +468,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     } catch (e) {
       setState(() {
         _playUrl = '';
-        _status = '播放失败: $e';
+        _status = _friendlyPlayError(e);
       });
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyPlayError(e))));
     }
+  }
+
+  /// 折叠「播放失败: 解析失败: 解析失败: …」这类层层包装。
+  String _friendlyPlayError(Object e) {
+    var s = '$e';
+    s = s.replaceFirst(RegExp(r'^(Exception|KotvApiException):\s*'), '');
+    while (s.contains('解析失败: 解析失败:')) {
+      s = s.replaceAll('解析失败: 解析失败:', '解析失败:');
+    }
+    while (s.contains('播放失败: 播放失败:')) {
+      s = s.replaceAll('播放失败: 播放失败:', '播放失败:');
+    }
+    if (s.startsWith('播放失败:')) return s;
+    if (s.startsWith('解析失败:')) return '播放失败: ${s.substring('解析失败:'.length).trimLeft()}';
+    return '播放失败: $s';
   }
 
   Future<void> _enterFullscreen() async {
@@ -482,7 +499,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final site = d.site.isNotEmpty ? d.site : widget.site;
     final title = '${d.name}${_epIdx >= 0 && _epIdx < eps.length ? ' · ${eps[_epIdx].name}' : ''}';
 
-    await Navigator.of(context).push(
+    await Navigator.of(context, rootNavigator: true).push(
       PageRouteBuilder(
         opaque: true,
         pageBuilder: (_, __, ___) => ValueListenableBuilder<List<DanmakuItem>>(
@@ -725,9 +742,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                   ),
                   Expanded(
                     child: _loading
-                        ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                        ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
                         : _error != null
-                            ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white)))
+                            ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
                             : _buildBody(),
                   ),
                 ],
@@ -755,6 +772,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final actor = d.actor.isEmpty ? '暂无' : d.actor;
     final intro = d.content.isEmpty ? '暂无' : d.content;
     final compact = KotvLayout.isCompact(context);
+    final p = KotvPalette.of(context);
+    final fg = p.fg;
+    final muted = p.muted;
 
     Widget videoPane({required bool expand}) {
       return Container(
@@ -783,7 +803,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       );
     }
 
-    Widget metaBlock({required bool scrollable}) {
+    Widget metaBlock() {
       final info = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -791,39 +811,40 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             '导演：$director',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: Colors.white.withOpacity(0.78), fontSize: 15, height: 1.45),
+            style: TextStyle(color: muted, fontSize: 15, height: 1.45),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             '演员：$actor',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: Colors.white.withOpacity(0.78), fontSize: 15, height: 1.45),
+            style: TextStyle(color: muted, fontSize: 15, height: 1.45),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             '简介：$intro',
-            maxLines: scrollable ? 5 : 4,
+            maxLines: 3,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: Colors.white.withOpacity(0.72), fontSize: 15, height: 1.5),
+            style: TextStyle(color: muted, fontSize: 15, height: 1.5),
           ),
         ],
       );
       return InkWell(
         onTap: () => _showVodMeta(d),
         borderRadius: BorderRadius.circular(8),
-        child: scrollable
-            ? SingleChildScrollView(child: Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: info))
-            : Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: info),
+        child: Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: info),
       );
     }
 
     Widget actionRow() {
+      final compactActions = compact || KotvLayout.useBottomNav(context);
+      final rowH = compactActions ? 40.0 : 58.0;
       return SizedBox(
-        height: 58,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          children: [
+        height: rowH,
+        child: HScroll(
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
             _action('全屏', Icons.crop_free_rounded, () {
               if (_playUrl.isNotEmpty) {
                 unawaited(_enterFullscreen());
@@ -879,28 +900,35 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             _action('解析', Icons.tune_rounded, () => _pickParse()),
           ],
         ),
+        ),
       );
     }
 
     Widget lower() {
+      final pillH = compact ? 28.0 : 36.0;
+      final pillFs = compact ? 12.0 : 15.0;
+      final epH = compact ? 32.0 : 42.0;
+      final epFs = compact ? 12.0 : 14.0;
+      final gap = compact ? 6.0 : 10.0;
+      final srcLabelFs = compact ? 13.0 : 16.0;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 22),
+          SizedBox(height: compact ? 8 : 10),
           Row(
             children: [
-              const Text('视频来源', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
-              const SizedBox(width: 14),
+              Text('视频来源', style: TextStyle(color: fg, fontSize: srcLabelFs, fontWeight: FontWeight.w700)),
+              SizedBox(width: compact ? 8 : 14),
               Expanded(
                 child: SizedBox(
-                  height: 38,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
+                  height: pillH + 2,
+                  child: HScrollList(
                     itemCount: flags.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    separatorBuilder: (_, __) => SizedBox(width: compact ? 6 : 8),
                     itemBuilder: (_, i) => AppPill(
                       label: flags[i].show,
-                      height: 36,
+                      height: pillH,
+                      fontSize: pillFs,
                       selected: i == _flagIdx,
                       onTap: () => setState(() {
                         _flagIdx = i;
@@ -914,19 +942,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             ],
           ),
           if (pageCount > 1) ...[
-            const SizedBox(height: 12),
+            SizedBox(height: compact ? 8 : 10),
             SizedBox(
-              height: 36,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
+              height: pillH,
+              child: HScrollList(
                 itemCount: pageCount,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                separatorBuilder: (_, __) => SizedBox(width: compact ? 6 : 8),
                 itemBuilder: (_, i) {
                   final from = i * _epSize + 1;
                   final to = ((i + 1) * _epSize).clamp(0, eps.length);
                   return AppPill(
                     label: '$from-$to',
-                    height: 36,
+                    height: pillH,
+                    fontSize: pillFs,
                     selected: i == _epPage,
                     onTap: () => setState(() => _epPage = i),
                   );
@@ -934,14 +962,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               ),
             ),
           ],
-          const SizedBox(height: 14),
+          SizedBox(height: compact ? 8 : 12),
           if (pageEps.isEmpty)
-            const Text('无剧集', style: TextStyle(color: Colors.white70))
+            Text('无剧集', style: TextStyle(color: muted))
           else
             LayoutBuilder(
               builder: (context, c) {
                 final cols = compact ? 3 : 6;
-                const gap = 10.0;
                 final w = (c.maxWidth - gap * (cols - 1)) / cols;
                 return Wrap(
                   spacing: gap,
@@ -950,11 +977,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                     for (var i = 0; i < pageEps.length; i++)
                       SizedBox(
                         width: w,
-                        height: 42,
+                        height: epH,
                         child: EpisodeChip(
                           label: pageEps[i].name,
                           selected: _epIdx == _epPage * _epSize + i,
-                          autofocus: i == 0,
+                          autofocus: false,
+                          height: epH,
+                          fontSize: epFs,
                           onTap: () => _playAt(_epPage * _epSize + i),
                         ),
                       ),
@@ -971,14 +1000,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
         children: [
           videoPane(expand: false),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Text(
             d.name,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700, height: 1.25),
+            style: TextStyle(color: fg, fontSize: 22, fontWeight: FontWeight.w700, height: 1.25),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 16,
             runSpacing: 6,
@@ -989,11 +1018,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               if (d.area.isNotEmpty) _meta('地区：${d.area}'),
             ],
           ),
-          const SizedBox(height: 10),
-          metaBlock(scrollable: false),
-          const SizedBox(height: 6),
-          Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 12)),
           const SizedBox(height: 8),
+          metaBlock(),
+          const SizedBox(height: 4),
+          Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: muted.withOpacity(0.85), fontSize: 12)),
+          const SizedBox(height: 6),
           actionRow(),
           lower(),
         ],
@@ -1002,7 +1031,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final upperH = (constraints.maxHeight * 0.52).clamp(360.0, 520.0);
+        // 略压缩上半区，避免简介区与「视频来源」之间大块空档
+        final upperH = (constraints.maxHeight * 0.44).clamp(320.0, 440.0);
         return ListView(
           padding: const EdgeInsets.fromLTRB(48, 8, 48, 36),
           children: [
@@ -1012,7 +1042,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(flex: 42, child: videoPane(expand: true)),
-                  const SizedBox(width: 36),
+                  const SizedBox(width: 28),
                   Expanded(
                     flex: 58,
                     child: Padding(
@@ -1024,17 +1054,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                             d.name,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: fg,
                               fontSize: 28,
                               fontWeight: FontWeight.w700,
                               height: 1.25,
                               letterSpacing: 0.3,
                             ),
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 8),
                           Wrap(
-                            spacing: 28,
+                            spacing: 20,
                             runSpacing: 6,
                             children: [
                               _meta('更新：${d.remarks.isEmpty ? '暂无' : d.remarks}'),
@@ -1043,16 +1073,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                               if (d.area.isNotEmpty) _meta('地区：${d.area}'),
                             ],
                           ),
-                          const SizedBox(height: 12),
-                          Expanded(child: metaBlock(scrollable: true)),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 8),
+                          metaBlock(),
+                          const Spacer(),
                           Text(
                             _status,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 12),
+                            style: TextStyle(color: muted.withOpacity(0.85), fontSize: 12),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
                           actionRow(),
                         ],
                       ),
@@ -1080,21 +1110,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       final cur = '${(st['settings'] as Map?)?['preferredParse'] ?? ''}';
       final picked = await showDialog<String>(
         context: context,
-        builder: (ctx) => SimpleDialog(
-          backgroundColor: const Color(0xFF1C1C22),
-          title: const Text('选择解析器', style: TextStyle(color: Colors.white)),
-          children: [
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, ''),
-              child: Text('自动（默认）${cur.isEmpty ? '  ✓' : ''}', style: const TextStyle(color: Colors.white)),
-            ),
-            for (final n in names)
+        builder: (ctx) {
+          final pal = KotvPalette.of(ctx);
+          return SimpleDialog(
+            backgroundColor: pal.dialogBg,
+            title: Text('选择解析器', style: TextStyle(color: pal.fg)),
+            children: [
               SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, n),
-                child: Text('$n${cur == n ? '  ✓' : ''}', style: const TextStyle(color: Colors.white)),
+                onPressed: () => Navigator.pop(ctx, ''),
+                child: Text('自动（默认）${cur.isEmpty ? '  ✓' : ''}', style: TextStyle(color: pal.fg)),
               ),
-          ],
-        ),
+              for (final n in names)
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, n),
+                  child: Text('$n${cur == n ? '  ✓' : ''}', style: TextStyle(color: pal.fg)),
+                ),
+            ],
+          );
+        },
       );
       if (picked == null) return;
       await ref.read(apiProvider).setSetting('preferredParse', picked);
@@ -1105,10 +1138,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
   }
 
-  Widget _meta(String t) => Text(
-        t,
-        style: TextStyle(color: Colors.white.withOpacity(0.72), fontSize: 14.5, height: 1.3),
-      );
+  Widget _meta(String t) {
+    final p = KotvPalette.of(context);
+    return Text(
+      t,
+      style: TextStyle(color: p.muted, fontSize: 14.5, height: 1.3),
+    );
+  }
 
   String _quickSearchQuery(VodDetail d) {
     var q = d.actor.trim();
@@ -1124,11 +1160,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   void _showVodMeta(VodDetail d) {
+    final p = KotvPalette.of(context);
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1C22),
-        title: Text(d.name, style: const TextStyle(color: Colors.white)),
+        backgroundColor: p.dialogBg,
+        title: Text(d.name, style: TextStyle(color: p.fg)),
         content: SizedBox(
           width: 520,
           child: SingleChildScrollView(
@@ -1140,45 +1177,56 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               '地区：${d.area.isEmpty ? '暂无' : d.area}\n'
               '备注：${d.remarks.isEmpty ? '暂无' : d.remarks}\n\n'
               '${d.content.isEmpty ? '暂无简介' : d.content}',
-              style: const TextStyle(color: Colors.white70, height: 1.55, fontSize: 15),
+              style: TextStyle(color: p.muted, height: 1.55, fontSize: 15),
             ),
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('关闭', style: TextStyle(color: p.primary))),
+        ],
       ),
     );
   }
 
   Widget _action(String label, IconData icon, VoidCallback onTap) {
+    final p = KotvPalette.of(context);
+    final compact = KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
+    final s = LayoutScale.layoutOf(context);
+    final w = (compact ? 48.0 : 72.0) * (compact ? 1.0 : s.clamp(0.75, 1.0));
+    final h = (compact ? 36.0 : 56.0) * (compact ? 1.0 : s.clamp(0.75, 1.0));
+    final iconSz = compact ? 14.0 : 20.0;
+    final fs = compact ? 9.0 : 11.0;
+    final gap = compact ? 1.0 : 4.0;
+    final radius = compact ? 7.0 : 10.0;
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: EdgeInsets.only(right: compact ? 4 : 8),
       child: TvFocus(
         onPressed: onTap,
-        borderRadius: 10,
+        borderRadius: radius,
         child: Material(
           color: Colors.transparent,
           child: InkWell(
             onTap: onTap,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(radius),
             child: Ink(
-              width: 72,
-              height: 56,
+              width: w,
+              height: h,
               decoration: BoxDecoration(
-                color: const Color(0x66101018),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white.withOpacity(0.08)),
+                color: p.pillBg,
+                borderRadius: BorderRadius.circular(radius),
+                border: Border.all(color: p.pillBorder),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(icon, color: Colors.white, size: 20),
-                  const SizedBox(height: 4),
+                  Icon(icon, color: p.fg, size: iconSz),
+                  SizedBox(height: gap),
                   Text(
                     label,
                     textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 11, height: 1.1),
+                    style: TextStyle(color: p.fg.withOpacity(0.85), fontSize: fs, height: 1.1),
                   ),
                 ],
               ),

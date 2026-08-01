@@ -292,8 +292,10 @@ func (a *App) openPushURL(url string) {
 }
 
 func (a *App) Shutdown() {
-	a.Sites.InvalidateLoads()
+	// 不要走 InvalidateLoads：其中 ClearJarBridgeOnSwitch 可能短暂把 JVM 再拉起来。
 	spider.InterruptScriptSpiders()
+	spider.InterruptJavaBridge()
+	spider.ResetScriptSpiders()
 	spider.ShutdownJavaBridge()
 	dlna.StopRenderer()
 	player.Stop()

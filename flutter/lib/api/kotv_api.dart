@@ -52,6 +52,14 @@ class KotvApi {
 
   Future<Map<String, dynamic>> health() => _get('/api/v1/health');
 
+  /// 本机优雅停引擎（会杀 Java/Python）；仅 loopback 可用。
+  Future<Map<String, dynamic>> requestShutdown() async {
+    final res = await http
+        .post(_u('/api/v1/shutdown'), headers: {'Content-Type': 'application/json'}, body: '{}')
+        .timeout(const Duration(seconds: 3));
+    return _decode(res);
+  }
+
   Future<Map<String, dynamic>> getConfig() => _get('/api/v1/config');
 
   Future<Map<String, dynamic>> loadConfig(String source) =>

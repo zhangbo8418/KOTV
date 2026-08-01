@@ -15,6 +15,8 @@ import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
+import '../theme/kotv_palette.dart';
+import '../theme/layout_scale.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
@@ -73,10 +75,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   bool _catchup = false;
   bool _catchupChrome = false;
   bool _miniDesktop = false;
+  /// 竖屏面板：0=频道 1=EPG
+  int _portraitTab = 0;
+  /// 竖屏播放器底栏显隐（点画面切换）
+  bool _portraitChrome = true;
   String _status = '点击左侧换台 · 点击右侧换源/设置';
   String _title = '选择频道开始播放';
   String _decodeMode = 'auto';
-  String _playerVal = kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv';
+  String _playerVal = kotvDefaultLivePlayer();
   String _playUrl = '';
   Timer? _catchupHideTimer;
 
@@ -114,9 +120,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
         final decode = '${settings['playerDecode'] ?? 'auto'}'.trim();
         if (decode.isNotEmpty) _decodeMode = decode;
-        var playerVal = '${settings['player'] ?? (kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv')}'.trim();
+        var playerVal = '${settings['playerLive'] ?? ''}'.trim();
         if (playerVal.isEmpty) {
-          playerVal = kotvIsWindows7() ? 'innie#vlc' : 'innie#mpv';
+          playerVal = kotvDefaultLivePlayer();
         }
         _playerVal = playerVal;
         // Win7：进页不碰 native 播放器；等用户点台再 open。
@@ -405,6 +411,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       } on TimeoutException {
         _playerVal = 'innie#vlc';
         try {
+          await ref.read(apiProvider).setSetting('playerLive', 'innie#vlc');
+        } catch (_) {}
+        try {
           await mk.stop();
         } catch (_) {}
         _vlc ??= EngineVlcPlayback();
@@ -543,6 +552,106 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     setState(() => _miniDesktop = false);
   }
 
+  Future<void> _enterLiveFullscreen() async {
+    if (_playUrl.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先选择频道播放')));
+      }
+      return;
+    }
+    if (_miniDesktop) await _exitMini();
+    if (kotvIsDesktop()) {
+      try {
+        await windowManager.setFullScreen(true);
+      } catch (_) {}
+    }
+    try {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } catch (_) {}
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true).push(
+      PageRouteBuilder(
+        opaque: true,
+        pageBuilder: (ctx, _, __) => Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {},
+                  child: _liveVideo(),
+                ),
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: AppPill(
+                    label: '退出全屏',
+                    height: 32,
+                    fontSize: 12,
+                    onTap: () => Navigator.of(ctx).pop(),
+                  ),
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AppPill(
+                        label: '上一台',
+                        height: 32,
+                        fontSize: 12,
+                        onTap: () {
+                          final chs = _channels;
+                          if (chs.isEmpty) return;
+                          _playChannel(_chIdx <= 0 ? chs.length - 1 : _chIdx - 1);
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      AppPill(
+                        label: '下一台',
+                        height: 32,
+                        fontSize: 12,
+                        onTap: () {
+                          final chs = _channels;
+                          if (chs.isEmpty) return;
+                          _playChannel((_chIdx + 1) % chs.length);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: LiveCatchupChrome(
+                    player: _playback,
+                    playerLabel: flutterPlayerLabel(_playerVal),
+                    decodeLabel: _decodeLabel,
+                    onCast: () => unawaited(_cast()),
+                    onPlayer: () => unawaited(_pickPlayer()),
+                    onDecode: () => unawaited(_pickDecode()),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    try {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    } catch (_) {}
+    if (kotvIsDesktop()) {
+      try {
+        await windowManager.setFullScreen(false);
+      } catch (_) {}
+    }
+  }
+
   Future<void> _pickDecode() async {
     final v = await pickChoice(context, title: '解码方式', current: _decodeMode, options: const [
       ('自动', 'auto'),
@@ -570,12 +679,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       ('外部 MPV', 'outie#mpv'),
       ('外部 IINA', 'outie#iina'),
     ];
-    final v = await pickChoice(context, title: '播放器', current: _playerVal, options: options);
+    final v = await pickChoice(context, title: '直播播放器', current: _playerVal, options: options);
     if (v == null) return;
     final prev = _playerVal;
     setState(() => _playerVal = v);
     try {
-      await ref.read(apiProvider).setSetting('player', v);
+      await ref.read(apiProvider).setSetting('playerLive', v);
     } catch (_) {}
     if (v.startsWith('outie#') && _playUrl.isNotEmpty) {
       try {
@@ -797,6 +906,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           ),
         ),
       );
+    }
+
+    // 竖屏 / 窄窗：上播放器 + 下频道列表（移动端布局）
+    if (KotvLayout.useBottomNav(context) || KotvLayout.isCompact(context)) {
+      return _buildPortraitLive();
     }
 
     return Focus(
@@ -1213,6 +1327,396 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           },
         ),
       ),
+    );
+  }
+
+  /// 竖屏：顶栏 + 播放器(含控件) + 频道/EPG 切换。
+  Widget _buildPortraitLive() {
+    final p = KotvPalette.of(context);
+    final chs = _channels;
+    final title = _title.isNotEmpty ? _title : '直播';
+    final showChrome = _portraitChrome || (_catchup && _catchupChrome);
+    return Column(
+      children: [
+        LibraryTopBar(
+          onBack: () => goKotvPage(ref, KotvPage.video),
+          onSearch: () => goKotvPage(ref, KotvPage.search),
+          onProfile: () => goKotvPage(ref, KotvPage.profile),
+          onNews: () => showAppNews(context, remoteHint(ref)),
+          title: '直播',
+        ),
+        AspectRatio(
+          aspectRatio: 16 / 9,
+          child: ColoredBox(
+            color: Colors.black,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() {
+                    if (_catchup) {
+                      _toggleCatchupChrome();
+                    } else {
+                      _portraitChrome = !_portraitChrome;
+                    }
+                  }),
+                  child: _liveVideo(),
+                ),
+                if (_loading) const Center(child: CircularProgressIndicator(color: Colors.white)),
+                if (_error != null)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+                    ),
+                  ),
+                if (showChrome)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: LiveCatchupChrome(
+                      player: _playback,
+                      playerLabel: flutterPlayerLabel(_playerVal),
+                      decodeLabel: _decodeLabel,
+                      onCast: () => unawaited(_cast()),
+                      onMini: () => unawaited(_enterMini()),
+                      onPlayer: () => unawaited(_pickPlayer()),
+                      onDecode: () => unawaited(_pickDecode()),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+          color: p.catBar,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _LiveChannelLogo(name: title, logo: _currentLogo, width: 40, height: 30),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$_channelNum  $title',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          [
+                            if (_programLabel.isNotEmpty) _programLabel,
+                            if (_lineLabel.isNotEmpty) _lineLabel,
+                            _status,
+                          ].where((e) => e.isNotEmpty).join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: p.muted, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    AppPill(
+                      label: '上一台',
+                      height: 32,
+                      fontSize: 12,
+                      onTap: () {
+                        if (chs.isEmpty) return;
+                        _playChannel(_chIdx <= 0 ? chs.length - 1 : _chIdx - 1);
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                    AppPill(
+                      label: '下一台',
+                      height: 32,
+                      fontSize: 12,
+                      onTap: () {
+                        if (chs.isEmpty) return;
+                        _playChannel((_chIdx + 1) % chs.length);
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                    AppPill(
+                      label: _lines > 1 ? '线路 ${_line + 1}/$_lines' : '线路',
+                      height: 32,
+                      fontSize: 12,
+                      onTap: () {
+                        if (_chIdx < 0 || _lines <= 1) return;
+                        _playChannel(_chIdx, line: (_line + 1) % _lines);
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                    AppPill(label: '刷新EPG', height: 32, fontSize: 12, onTap: _loadEpg),
+                    const SizedBox(width: 6),
+                    AppPill(label: '投屏', height: 32, fontSize: 12, onTap: () => unawaited(_cast())),
+                    const SizedBox(width: 6),
+                    AppPill(label: '全屏', height: 32, fontSize: 12, onTap: () => unawaited(_enterLiveFullscreen())),
+                    const SizedBox(width: 6),
+                    AppPill(
+                      label: flutterPlayerLabel(_playerVal),
+                      height: 32,
+                      fontSize: 12,
+                      onTap: () => unawaited(_pickPlayer()),
+                    ),
+                    const SizedBox(width: 6),
+                    AppPill(
+                      label: '解码·$_decodeLabel',
+                      height: 32,
+                      fontSize: 12,
+                      onTap: () => unawaited(_pickDecode()),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: AppPill(
+                      label: '频道',
+                      height: 34,
+                      fontSize: 13,
+                      selected: _portraitTab == 0,
+                      onTap: () => setState(() => _portraitTab = 0),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: AppPill(
+                      label: 'EPG节目单',
+                      height: 34,
+                      fontSize: 13,
+                      selected: _portraitTab == 1,
+                      onTap: () {
+                        setState(() => _portraitTab = 1);
+                        if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _portraitTab == 0 ? _portraitChannelPanel(p, chs) : _portraitEpgPanel(p),
+        ),
+      ],
+    );
+  }
+
+  Widget _portraitChannelPanel(KotvPalette p, List<Map<String, dynamic>> chs) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: 88,
+          child: ColoredBox(
+            color: p.bottomNav.withOpacity(0.92),
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(4, 4, 3, 4),
+              itemCount: _groups.length,
+              itemBuilder: (_, i) {
+                final g = _groups[i];
+                final locked = _groupLocked(i);
+                final name = '${locked ? '🔒' : ''}${g['name'] ?? ''}';
+                final sel = i == _groupIdx;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Material(
+                    color: sel ? p.selected : p.pillBg.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(6),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => _selectGroup(i),
+                      child: Container(
+                        width: double.infinity,
+                        constraints: const BoxConstraints(minHeight: 28),
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+                        alignment: Alignment.center,
+                        child: Text(
+                          name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: sel ? Colors.white : p.fg,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            height: 1.15,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(3, 4, 6, 4),
+            itemCount: chs.length,
+            itemBuilder: (_, i) {
+              final ch = chs[i];
+              final name = '${ch['name'] ?? ''}';
+              final logo = '${ch['logo'] ?? ''}';
+              final sel = i == _chIdx;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Material(
+                  color: sel ? p.selected.withOpacity(0.28) : p.pillBg.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(6),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () => _playChannel(i),
+                    child: SizedBox(
+                      height: 36,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 22,
+                              child: Text('${i + 1}'.padLeft(2, '0'), style: TextStyle(color: p.muted, fontSize: 11)),
+                            ),
+                            const SizedBox(width: 4),
+                            _LiveChannelLogo(name: name, logo: logo, width: 28, height: 22),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: p.fg,
+                                  fontSize: 12,
+                                  fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _portraitEpgPanel(KotvPalette p) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_epgDays.length > 1)
+          SizedBox(
+            height: 40,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
+              itemCount: _epgDays.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (_, i) {
+                final d = '${_epgDays[i]['date'] ?? 'D$i'}';
+                final label = d.length >= 10 ? d.substring(5, 10) : d;
+                return AppPill(
+                  label: label,
+                  width: 72,
+                  height: 30,
+                  fontSize: 12,
+                  selected: i == _dayIdx,
+                  onTap: () {
+                    final progs = (((_epgDays[i]['list'] as List?) ?? [])
+                        .whereType<Map>()
+                        .map((e) => Map<String, dynamic>.from(e))
+                        .toList());
+                    setState(() {
+                      _dayIdx = i;
+                      _programs = progs;
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+        Expanded(
+          child: _programs.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('暂无节目单', style: TextStyle(color: p.muted, fontSize: 14)),
+                      const SizedBox(height: 10),
+                      AppPill(label: '刷新 EPG', height: 34, fontSize: 13, selected: true, onTap: _loadEpg),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                  itemCount: _programs.length,
+                  itemBuilder: (_, i) {
+                    final prog = _programs[i];
+                    final now = prog['now'] == true;
+                    final catchup = prog['catchup'] == true;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Material(
+                        color: now ? p.selected.withOpacity(0.9) : p.pillBg.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(8),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: catchup ? () => _playCatchup(i) : null,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${prog['label'] ?? prog['title'] ?? ''}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: now ? Colors.white : p.fg,
+                                      fontSize: 13,
+                                      fontWeight: now ? FontWeight.w700 : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                if (catchup)
+                                  Text('回看', style: TextStyle(color: p.primary, fontSize: 12, fontWeight: FontWeight.w700)),
+                                if (now && !catchup)
+                                  const Text('正在播出', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }
