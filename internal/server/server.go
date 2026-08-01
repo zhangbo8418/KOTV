@@ -42,6 +42,7 @@ type Server struct {
 	mediaProvider func() map[string]string
 	syncHandler   *SyncHandler
 	contentAPI    ContentAPI
+	onShutdown    func()
 }
 
 type Action struct {

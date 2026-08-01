@@ -152,7 +152,7 @@ class PosterFlow extends StatelessWidget {
             final it = items[i];
             return PosterCard(
               item: it,
-              autofocus: i == 0,
+              autofocus: false,
               onTap: () => onOpen(it),
             );
           },

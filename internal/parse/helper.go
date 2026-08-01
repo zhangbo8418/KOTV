@@ -27,6 +27,17 @@ type Options struct {
 	IsVideo   func(string) bool // 对齐 TV CustomWebView：站点自定义 isVideo
 }
 
+// AnnotateParseErr 避免「解析失败: 解析失败: …」重复包装。
+func AnnotateParseErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "解析失败") {
+		return err
+	}
+	return fmt.Errorf("解析失败: %w", err)
+}
+
 // NeedParse 是否需要二次解析。
 func NeedParse(r model.Result) bool {
 	if r.Parse.Is(1) {
@@ -160,7 +171,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	}
 	if parsed == "" {
 		if err != nil {
-			return r, fmt.Errorf("解析失败: %w", err)
+			return r, AnnotateParseErr(err)
 		}
 		return r, fmt.Errorf("解析失败: 无可用解析器")
 	}

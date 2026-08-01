@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
+import '../player/kotv_platform.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
@@ -425,8 +426,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       orElse: () => <SiteInfo>[],
     );
 
-    final playerVal = g('player', 'innie#mpv');
-    final playerLabel = flutterPlayerLabel(playerVal.isEmpty ? 'innie#mpv' : playerVal);
+    final playerVal = g('player', kotvDefaultVodPlayer());
+    final playerLabel = flutterPlayerLabel(playerVal.isEmpty ? kotvDefaultVodPlayer() : playerVal);
+    final livePlayerVal = g('playerLive', kotvDefaultLivePlayer());
+    final livePlayerLabel = flutterPlayerLabel(livePlayerVal.isEmpty ? kotvDefaultLivePlayer() : livePlayerVal);
     final speed = g('playerSpeed', '1.0');
     final scale = g('playerScale', 'default');
     final decode = g('playerDecode', 'auto');
@@ -498,15 +501,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       KotvSettingsWideTile(label: '首页数据源', value: homeName, onTap: () => _pickHome(sites)),
                       KotvSettingsGrid(children: [
                         KotvSettingsCell(
-                          label: '播放内核',
+                          label: '点播播放器',
                           value: playerLabel,
-                          onTap: () => _pick('请选择播放器', 'player', const [
+                          onTap: () => _pick('点播播放器', 'player', const [
                             ('内置 MPV（默认）', 'innie#mpv'),
                             ('内置 VLC', 'innie#vlc'),
                             ('外部 VLC', 'outie#vlc'),
                             ('外部 MPV', 'outie#mpv'),
                             ('IINA', 'outie#iina'),
-                          ], msg: '播放内核已切换'),
+                          ], msg: '点播播放器已切换'),
+                        ),
+                        KotvSettingsCell(
+                          label: '直播播放器',
+                          value: livePlayerLabel,
+                          onTap: () => _pick(
+                            '直播播放器',
+                            'playerLive',
+                            [
+                              ('内置 MPV${!Platform.isWindows ? '（默认）' : ''}', 'innie#mpv'),
+                              ('内置 VLC${Platform.isWindows ? '（默认）' : ''}', 'innie#vlc'),
+                              ('外部 VLC', 'outie#vlc'),
+                              ('外部 MPV', 'outie#mpv'),
+                              ('IINA', 'outie#iina'),
+                            ],
+                            msg: '直播播放器已切换',
+                          ),
                         ),
                         KotvSettingsCell(
                           label: '默认倍速',
