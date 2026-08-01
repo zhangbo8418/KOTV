@@ -30,10 +30,12 @@ import (
 )
 
 const (
-	metaTimeout = 30 * time.Second // 元数据超时略放宽
-	fetchWait = 10 * time.Second // 种子就绪轮询上限
-	readahead   = 32 << 20
-	minMedia = 30 << 20 // 最小媒体约 30MB
+	metaTimeout   = 60 * time.Second // 等 DHT/tracker 元数据
+	bufferTimeout = 45 * time.Second // 等片头可播字节
+	minStartBytes = 512 << 10        // 512 KiB：够 demux 探头 + 起播
+	startPieces   = 16               // 片头优先 piece 数
+	readahead     = 32 << 20
+	minMedia      = 30 << 20 // 最小媒体约 30MB
 )
 
 var (
@@ -53,6 +55,9 @@ var (
 		"udp://exodus.desync.com:6969/announce",
 		"udp://open.demonii.com:1337/announce",
 		"udp://explodie.org:6969/announce",
+		"udp://tracker.moeking.me:6969/announce",
+		"udp://tracker.tiny-vps.com:6969/announce",
+		"udp://retracker.lanta-net.ru:2710/announce",
 	}
 )
 
@@ -241,14 +246,16 @@ func ParseContext(parent context.Context, raw string) ([]model.Episode, error) {
 	return out, nil
 }
 
-// 返回本地 HTTP 播放地址。
+// Fetch 返回本地 HTTP 播放地址。
+// 流程：解析元数据 → 选定媒体文件 → 优先拉片头 → 等到有足够字节（或明确失败）再交给播放器，
+// 避免「无 peer / 无数据」时就返回 URL 导致假就绪、黑屏假播放中。
 func Fetch(raw string) (string, error) {
 	raw = Decode(strings.TrimSpace(raw))
 	if strings.HasPrefix(strings.ToLower(raw), "ed2k:") {
 		return "", fmt.Errorf("暂不支持电驴链接")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), metaTimeout)
-	defer cancel()
+	metaCtx, metaCancel := context.WithTimeout(context.Background(), metaTimeout)
+	defer metaCancel()
 
 	path, name, index, ih, isFileMagnet := parsePlayURL(raw)
 	var t *torrent.Torrent
@@ -257,7 +264,7 @@ func Fetch(raw string) (string, error) {
 
 	if isFileMagnet {
 		if path != "" {
-			t, err = addTorrentFile(ctx, path)
+			t, err = addTorrentFile(metaCtx, path)
 		} else if ih != "" {
 			t, err = torrentByInfoHash(ih)
 		} else {
@@ -272,7 +279,7 @@ func Fetch(raw string) (string, error) {
 		}
 		_ = name
 	} else {
-		t, _, err = openTorrent(ctx, raw)
+		t, _, err = openTorrent(metaCtx, raw)
 		if err != nil {
 			return "", err
 		}
@@ -293,12 +300,19 @@ func Fetch(raw string) (string, error) {
 	entries[key] = &entry{t: t, file: file, index: index}
 	mu.Unlock()
 
-	// 任务非 0 状态即可 getLocalUrl，不硬等片头下完。
-	waitFetchReady(ctx, t, file)
+	log.Printf("thunder: meta ok ih=%s idx=%d file=%s size=%d，等待片头缓冲…",
+		ih, index, filepath.Base(file.DisplayPath()), file.Length())
 
+	bufCtx, bufCancel := context.WithTimeout(context.Background(), bufferTimeout)
+	defer bufCancel()
+	if err := waitHeadBuffer(bufCtx, t, file); err != nil {
+		return "", err
+	}
+
+	st := t.Stats()
 	u := localURL(key)
-	log.Printf("thunder: fetch ready ih=%s idx=%d file=%s url=%s peers=%d",
-		ih, index, filepath.Base(file.DisplayPath()), u, t.Stats().ActivePeers)
+	log.Printf("thunder: fetch ready ih=%s idx=%d file=%s url=%s peers=%d seeders=%d buffered=%d",
+		ih, index, filepath.Base(file.DisplayPath()), u, st.ActivePeers, st.ConnectedSeeders, file.BytesCompleted())
 	return u, nil
 }
 
@@ -307,24 +321,38 @@ func IsLocalStream(u string) bool {
 	return strings.Contains(u, "/proxy/bt/")
 }
 
-func waitFetchReady(ctx context.Context, t *torrent.Torrent, file *torrent.File) {
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		deadline = time.Now().Add(fetchWait)
+// waitHeadBuffer 等到片头有足够字节再开播；无节点/无数据时返回明确错误，避免假就绪。
+func waitHeadBuffer(ctx context.Context, t *torrent.Torrent, file *torrent.File) error {
+	need := int64(minStartBytes)
+	if file.Length() > 0 && file.Length() < need {
+		need = file.Length()
 	}
-	if time.Until(deadline) > fetchWait {
-		deadline = time.Now().Add(fetchWait)
-	}
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(400 * time.Millisecond)
 	defer ticker.Stop()
-	for time.Now().Before(deadline) {
+	var lastLog time.Time
+	for {
+		done := file.BytesCompleted()
 		st := t.Stats()
-		if st.ActivePeers > 0 || st.ConnectedSeeders > 0 || file.BytesCompleted() > 0 {
-			return
+		peers := st.ActivePeers + st.ConnectedSeeders
+		if done >= need {
+			return nil
+		}
+		if time.Since(lastLog) >= 2*time.Second {
+			lastLog = time.Now()
+			log.Printf("thunder: buffering peers=%d pending=%d total=%d bytes=%d/%d",
+				st.ActivePeers, st.PendingPeers, st.TotalPeers, done, need)
 		}
 		select {
 		case <-ctx.Done():
-			return
+			if peers == 0 && done == 0 {
+				return fmt.Errorf("暂无可用节点，无法开始播放（资源可能无人做种）")
+			}
+			if done == 0 {
+				return fmt.Errorf("片头缓冲超时（已连 %d 节点，仍无数据）", peers)
+			}
+			// 有一点数据也先开播，避免死等。
+			log.Printf("thunder: buffer timeout with %d bytes, start anyway", done)
+			return nil
 		case <-ticker.C:
 		}
 	}
@@ -562,9 +590,13 @@ func selectFile(t *torrent.Torrent, file *torrent.File) {
 	}
 	begin := file.BeginPieceIndex()
 	end := file.EndPieceIndex()
-	for i := begin; i < end && i < begin+8; i++ {
+	limit := begin + startPieces
+	if limit > end {
+		limit = end
+	}
+	for i := begin; i < limit; i++ {
 		prio := torrent.PiecePriorityHigh
-		if i == begin {
+		if i < begin+4 {
 			prio = torrent.PiecePriorityNow
 		}
 		t.Piece(i).SetPriority(prio)
