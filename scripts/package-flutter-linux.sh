@@ -25,9 +25,16 @@ chmod +x "$ENGINE_OUT"
 
 echo "==> flutter build linux --release"
 cd "$ROOT/flutter"
+# 资产里若有 Windows .exe / 错架构二进制，清掉无害；Linux 引擎由下方 CMake/拷贝处理
+rm -f assets/engine/kotv-engine.exe
 flutter config --enable-linux-desktop
 flutter pub get
-flutter build linux --release
+# 失败时打出详细链接错误
+if ! flutter build linux --release; then
+  echo "==> flutter build failed; retry verbose for linker details" >&2
+  flutter build linux --release -v 2>&1 | tail -200 >&2 || true
+  exit 1
+fi
 
 [[ -x "$BUNDLE/kotv" ]] || { echo "missing $BUNDLE/kotv" >&2; exit 1; }
 cp -f "$ENGINE_OUT" "$BUNDLE/kotv-engine"

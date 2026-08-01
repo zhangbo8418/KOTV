@@ -33,6 +33,10 @@ if [[ -f "$THEME" ]]; then
   perl -i -pe 's/DialogThemeData\(/DialogTheme(/g' "$THEME"
 fi
 
+# 3.19 不认识 flutter.config；去掉以免 pub get 失败（SPM 仅影响 iOS/macOS）
+perl -i -0pe 's/\n  # 3\.44.*?\n  config:\n    enable-swift-package-manager: false\n/\n/s' "$APP" 2>/dev/null || true
+perl -i -0pe 's/\n  config:\n    enable-swift-package-manager: false\n/\n/s' "$APP" 2>/dev/null || true
+
 # 压住传递依赖（path_provider / shared_preferences 平台实现常要求 Dart 3.4+）
 if ! grep -q '^dependency_overrides:' "$APP"; then
   cat >> "$APP" <<'EOF'

@@ -18,6 +18,9 @@ target_include_directories(${PLUGIN_NAME} PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../common")
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
+# Linux：vlc_shim 用 dlopen + pthread
+find_package(Threads REQUIRED)
+target_link_libraries(${PLUGIN_NAME} PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 target_compile_options(${PLUGIN_NAME} PRIVATE -Wno-error=deprecated-declarations)
 
 set(kotv_vlc_bundled_libraries "" PARENT_SCOPE)

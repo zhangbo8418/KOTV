@@ -31,6 +31,8 @@ EXTLD="-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdy
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
   EXTLD="${EXTLD} -Wl,--subsystem,windows:6.01"
 fi
+# 打 Windows 包时清掉无后缀引擎（mac/linux 产物），避免进 flutter_assets
+rm -f "$ROOT/flutter/assets/engine/kotv-engine"
 (cd "$ROOT" && go build -ldflags "-s -w -extldflags '${EXTLD}'" -o "$ENGINE_OUT" ./cmd/engine)
 if [[ "${KOTV_WIN7:-}" == "1" ]] && command -v pwsh >/dev/null 2>&1; then
   pwsh -File "$ROOT/scripts/check-win7-deps.ps1" -Exe "$ENGINE_OUT"
@@ -38,12 +40,17 @@ fi
 
 echo "==> flutter build windows --release"
 cd "$ROOT/flutter"
+# 再清一次，防止中间步骤又写入无后缀文件
+rm -f assets/engine/kotv-engine
 flutter config --enable-windows-desktop
 flutter pub get
 flutter build windows --release
 
 [[ -f "$RELEASE_DIR/kotv.exe" ]] || { echo "missing $RELEASE_DIR/kotv.exe" >&2; exit 1; }
 cp -f "$ENGINE_OUT" "$RELEASE_DIR/kotv-engine.exe"
+# 安装目录与 flutter_assets 都不应残留无后缀 kotv-engine
+rm -f "$RELEASE_DIR/kotv-engine" \
+  "$RELEASE_DIR/data/flutter_assets/assets/engine/kotv-engine" 2>/dev/null || true
 [[ -d "$RELEASE_DIR/runtime" ]] || { echo "missing $RELEASE_DIR/runtime (CMake install)" >&2; exit 1; }
 [[ ! -d "$RELEASE_DIR/runtime/runtime" ]] || { echo "nested runtime/runtime" >&2; exit 1; }
 
