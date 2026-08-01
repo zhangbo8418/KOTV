@@ -80,7 +80,7 @@ chaquopy {
 }
 
 dependencies {
-    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs_nio:2.1.5"
     implementation "org.nanohttpd:nanohttpd:2.3.1"
     // TV 同款迅雷 SDK（含 libxl_*.so）
     implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
