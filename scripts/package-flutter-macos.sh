@@ -36,6 +36,8 @@ rm -rf \
   "$ROOT/flutter/build/macos/Build/Products/Release/KO影视.app" \
   "$ROOT/flutter/build/macos/Build/Products/Release/kotv.app" \
   2>/dev/null || true
+# 双保险：pubspec 已关 SPM，CI 全局再关一次
+flutter config --no-enable-swift-package-manager || true
 flutter pub get
 flutter build macos --release
 

@@ -92,7 +92,7 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
         return IconThemeData(color: selected ? Colors.white : palette.muted, size: 24);
       }),
     ),
-    dialogTheme: DialogTheme(
+    dialogTheme: DialogThemeData(
       backgroundColor: palette.dialogBg,
       contentTextStyle: TextStyle(color: palette.fg),
       titleTextStyle: TextStyle(color: palette.fg, fontSize: 20, fontWeight: FontWeight.w700),

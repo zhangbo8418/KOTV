@@ -27,6 +27,12 @@ perl -i -pe 's/media_kit_libs_video:\s*("[^"]+"|[^\n]+)/media_kit_libs_video: 1.
 perl -i -pe 's/sdk:\s*\^3\.5\.4/sdk: ">=3.3.0 <3.4.0"/' "$VLC"
 perl -i -pe 's/flutter:\s*"?>=3\.24\.0"?/flutter: ">=3.19.0"/' "$VLC"
 
+# Flutter 3.44+ 用 DialogThemeData；3.19 ThemeData 仍要 DialogTheme
+THEME="$ROOT/flutter/lib/theme/kotv_theme.dart"
+if [[ -f "$THEME" ]]; then
+  perl -i -pe 's/DialogThemeData\(/DialogTheme(/g' "$THEME"
+fi
+
 # 压住传递依赖（path_provider / shared_preferences 平台实现常要求 Dart 3.4+）
 if ! grep -q '^dependency_overrides:' "$APP"; then
   cat >> "$APP" <<'EOF'

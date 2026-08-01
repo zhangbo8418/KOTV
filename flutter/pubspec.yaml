@@ -33,5 +33,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # 3.44 默认 SPM；kotv_vlc / media_kit / window_manager 尚未支持，先退回 CocoaPods
+  config:
+    enable-swift-package-manager: false
   assets:
     - assets/engine/

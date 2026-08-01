@@ -34,7 +34,7 @@ if ([string]::IsNullOrWhiteSpace($ExeName)) {
 
 if (-not (Test-Path $Iss)) { throw "missing iss: $Iss" }
 if (-not (Test-Path (Join-Path $SourceDir $ExeName))) {
-    throw "missing package dir or $ExeName: $SourceDir"
+    throw "missing package dir or ${ExeName}: ${SourceDir}"
 }
 
 if ([string]::IsNullOrWhiteSpace($Tag)) {

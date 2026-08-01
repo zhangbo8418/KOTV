@@ -179,6 +179,7 @@ jobs:
           CGO_CXXFLAGS: "-O2"
           CGO_LDFLAGS: "-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic"
           KOTV_JAVA_TOOLCHAIN: "21"
+          CMAKE_GENERATOR: "Visual Studio 17 2022"
         run: |
           chmod +x bridge/build.sh scripts/*.sh
           ./scripts/adapt-flutter-win7-sdk.sh
