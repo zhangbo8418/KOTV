@@ -1,13 +1,15 @@
+//go:build android
+
 package thunder
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"runtime"
 	"strings"
 	"time"
 
@@ -24,19 +26,15 @@ type androidThunderFile struct {
 }
 
 type androidThunderResp struct {
-	OK      bool                `json:"ok"`
-	Error   string              `json:"error"`
-	URL     string              `json:"url"`
+	OK      bool                 `json:"ok"`
+	Error   string               `json:"error"`
+	URL     string               `json:"url"`
 	Files   []androidThunderFile `json:"files"`
-	Phase   string              `json:"phase"`
-	Peers   int                 `json:"peers"`
-	Bytes   int64               `json:"bytes"`
-	Need    int64               `json:"need"`
-	Message string              `json:"message"`
-}
-
-func androidThunderEnabled() bool {
-	return runtime.GOOS == "android"
+	Phase   string               `json:"phase"`
+	Peers   int                  `json:"peers"`
+	Bytes   int64                `json:"bytes"`
+	Need    int64                `json:"need"`
+	Message string               `json:"message"`
 }
 
 func androidThunderPOST(path string, body any) (*androidThunderResp, error) {
@@ -74,9 +72,6 @@ func androidThunderPOST(path string, body any) (*androidThunderResp, error) {
 
 // tryAndroidParse 走 Native 迅雷；Android 无 anacrolix 回落。
 func tryAndroidParse(raw string) ([]model.Episode, error) {
-	if !androidThunderEnabled() {
-		return nil, fmt.Errorf("not android")
-	}
 	out, err := androidThunderPOST("/thunder/parse", map[string]string{"url": raw})
 	if err != nil {
 		return nil, fmt.Errorf("迅雷解析失败: %w", err)
@@ -108,9 +103,6 @@ func tryAndroidParse(raw string) ([]model.Episode, error) {
 }
 
 func tryAndroidFetch(raw string) (string, error) {
-	if !androidThunderEnabled() {
-		return "", fmt.Errorf("not android")
-	}
 	setProgress("meta", 0, 0, 0, "迅雷获取中…")
 	out, err := androidThunderPOST("/thunder/fetch", map[string]string{"url": raw})
 	if err != nil {
@@ -136,9 +128,6 @@ func tryAndroidFetch(raw string) (string, error) {
 }
 
 func tryAndroidProgress() (FetchProgress, bool) {
-	if !androidThunderEnabled() {
-		return FetchProgress{}, false
-	}
 	out, err := androidThunderPOST("/thunder/progress", nil)
 	if err != nil || out == nil {
 		return FetchProgress{}, false
@@ -156,8 +145,30 @@ func tryAndroidProgress() (FetchProgress, bool) {
 }
 
 func tryAndroidClear() {
-	if !androidThunderEnabled() {
-		return
-	}
 	_, _ = androidThunderPOST("/thunder/clear", nil)
+}
+
+// ParseContext 在 Android 上仅走迅雷 Native。
+func ParseContext(_ context.Context, raw string) ([]model.Episode, error) {
+	raw = Decode(strings.TrimSpace(raw))
+	return tryAndroidParse(raw)
+}
+
+// Fetch 在 Android 上仅走迅雷 SDK（magnet / thunder / ed2k / ftp 等）。
+func Fetch(raw string) (string, error) {
+	raw = Decode(strings.TrimSpace(raw))
+	return tryAndroidFetch(raw)
+}
+
+// ClearStorage 清理 Android 迅雷缓存。
+func ClearStorage() (int64, error) {
+	tryAndroidClear()
+	setProgress("idle", 0, 0, 0, "磁力缓存已清理")
+	log.Printf("thunder: android/xunlei storage cleared")
+	return 0, nil
+}
+
+// Handle：Android 播放由迅雷 Native 提供地址，不走 anacrolix 本地 /proxy/bt/。
+func Handle(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "android uses xunlei native streaming", http.StatusNotImplemented)
 }
