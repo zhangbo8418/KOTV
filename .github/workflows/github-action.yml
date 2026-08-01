@@ -1,4 +1,4 @@
-# 打 tag / 手动触发 → 全平台打包（Windows ZIP+安装包、macOS DMG、Linux、Android APK）→ GitHub Release
+# Flutter UI + Go 引擎：全平台打包（含 Windows 安装包 / Win7 / Android）→ GitHub Release
 name: KOTV Build
 on:
   workflow_dispatch:
@@ -9,7 +9,6 @@ on:
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   FLUTTER_VERSION: "3.24.5"
-  # 官方最后支持 Win7 的稳定 Flutter；与主线 Android 的 3.24 分开
   FLUTTER_WIN7_VERSION: "3.19.6"
 
 jobs:
@@ -22,9 +21,11 @@ jobs:
       release_tag: ${{ needs.set-tag.outputs.tag }}
     needs: [set-tag]
 
+  # Win10+ Flutter x86_64：ZIP + Inno 安装包
   build-win-amd64:
     runs-on: windows-latest
     needs: [set-tag, build-updater]
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -51,16 +52,28 @@ jobs:
           $url = "https://github.com/niXman/mingw-builds-binaries/releases/download/15.2.0-rt_v13-rev1/x86_64-15.2.0-release-win32-seh-msvcrt-rt_v13-rev1.7z"
           curl.exe -sSL -o "$env:RUNNER_TEMP\mingw.7z" $url
           7z x "$env:RUNNER_TEMP\mingw.7z" -o"C:\mingw-msvcrt" | Out-Null
-          Get-ChildItem -Path "C:\mingw-msvcrt" -Recurse -Filter "libwinpthread.dll.a" -ErrorAction SilentlyContinue | ForEach-Object {
-            Remove-Item -Force $_.FullName
-          }
-          Get-ChildItem -Path "C:\mingw-msvcrt" -Recurse -Filter "libpthread.dll.a" -ErrorAction SilentlyContinue | ForEach-Object {
-            Remove-Item -Force $_.FullName
-          }
+          Get-ChildItem -Path "C:\mingw-msvcrt" -Recurse -Filter "libwinpthread.dll.a" -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -Force $_.FullName }
+          Get-ChildItem -Path "C:\mingw-msvcrt" -Recurse -Filter "libpthread.dll.a" -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -Force $_.FullName }
           echo "C:\mingw-msvcrt\mingw64\bin" >> $env:GITHUB_PATH
           & "C:\mingw-msvcrt\mingw64\bin\gcc.exe" --version
 
-      - name: Build + package (windows-x64)
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-windows-amd64
+          path: cmd/updater
+
+      - name: Package Flutter Windows
         shell: bash
         env:
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
@@ -71,34 +84,23 @@ jobs:
           CGO_CXXFLAGS: "-O2"
           CGO_LDFLAGS: "-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic"
           KOTV_JAVA_TOOLCHAIN: "21"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
-          GRADLE_OPTS: "-Dfile.encoding=UTF-8"
         run: |
           chmod +x bridge/build.sh scripts/*.sh
-          ./scripts/prepare-runtime.sh windows-x64
-          ./scripts/package.sh windows-x64
-          ./scripts/verify-runtime.sh dist/KOTV-windows-x64/runtime windows-x64
-          test -f dist/KOTV-windows-x64/KOTV.exe
+          ./scripts/package-flutter-windows.sh
 
-      - name: Win7 dependency gate (QuickJS/CGO)
-        shell: pwsh
-        run: ./scripts/check-win7-deps.ps1 -Exe "dist/KOTV-windows-x64/KOTV.exe"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: updater-windows-amd64
-          path: dist/updater-win
-
-      - name: Compress ZIP + build installer
+      - name: Build installer
         shell: pwsh
         env:
           TAG: ${{ needs.set-tag.outputs.tag }}
         run: |
-          Copy-Item -Force "dist/updater-win/updater.exe" "dist/KOTV-windows-x64/updater.exe"
           $ver = $env:TAG.TrimStart("v")
-          Compress-Archive -Path "dist/KOTV-windows-x64\*" -DestinationPath "./KO影视-${ver}-x86_64.zip" -Force
           choco install innosetup -y --no-progress
-          ./scripts/make-win-installer.ps1 -Plat windows-x64 -Tag $env:TAG -Version $ver
+          ./scripts/make-win-installer.ps1 `
+            -Plat windows-x64 `
+            -Tag $env:TAG `
+            -Version $ver `
+            -SourceDir "flutter\build\windows\x64\runner\Release" `
+            -ExeName kotv.exe
           Get-ChildItem "KO影视-${ver}-x86_64*" | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
@@ -107,242 +109,12 @@ jobs:
           path: |
             KO影视-*-x86_64.zip
             KO影视-*-x86_64-setup.exe
+          if-no-files-found: error
 
-  build-win-arm64:
-    runs-on: windows-11-arm
-    needs: [set-tag, build-updater]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: liberica
-          java-version: "21"
-
-      - name: Install llvm-mingw (aarch64)
-        shell: pwsh
-        run: |
-          $ver = "20260616"
-          $zip = "llvm-mingw-$ver-ucrt-aarch64.zip"
-          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/$zip"
-          $dest = "C:\llvm-mingw"
-          curl.exe -sSL -o "$env:RUNNER_TEMP\$zip" $url
-          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-          Expand-Archive -Path "$env:RUNNER_TEMP\$zip" -DestinationPath "C:\" -Force
-          $root = Get-ChildItem "C:\" -Directory -Filter "llvm-mingw-*" | Select-Object -First 1
-          if (-not $root) { throw "llvm-mingw extract failed" }
-          Rename-Item $root.FullName $dest
-          echo "$dest\bin" >> $env:GITHUB_PATH
-          & "$dest\bin\aarch64-w64-mingw32-clang.exe" --version
-
-      - name: Build + package (windows-arm64)
-        shell: bash
-        env:
-          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
-          CGO_ENABLED: "1"
-          KOTV_JAVA_TOOLCHAIN: "21"
-          JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
-          GRADLE_OPTS: "-Dfile.encoding=UTF-8"
-          CC: aarch64-w64-mingw32-clang
-          CXX: aarch64-w64-mingw32-clang++
-        run: |
-          chmod +x bridge/build.sh scripts/*.sh
-          ./scripts/prepare-runtime.sh windows-arm64
-          ./scripts/package.sh windows-arm64
-          ./scripts/verify-runtime.sh dist/KOTV-windows-arm64/runtime windows-arm64
-          test -f dist/KOTV-windows-arm64/KOTV.exe
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: updater-windows-arm64
-          path: dist/updater-win-arm64
-
-      - name: Compress ZIP + build installer
-        shell: pwsh
-        env:
-          TAG: ${{ needs.set-tag.outputs.tag }}
-        run: |
-          Copy-Item -Force "dist/updater-win-arm64/updater.exe" "dist/KOTV-windows-arm64/updater.exe"
-          $ver = $env:TAG.TrimStart("v")
-          Compress-Archive -Path "dist/KOTV-windows-arm64\*" -DestinationPath "./KO影视-${ver}-aarch64-windows.zip" -Force
-          choco install innosetup -y --no-progress
-          ./scripts/make-win-installer.ps1 -Plat windows-arm64 -Tag $env:TAG -Version $ver
-          # 安装包已是 KO影视-{ver}-aarch64-setup.exe；ZIP 加 -windows 以免与 mac/android 混淆
-          Get-ChildItem "KO影视-${ver}-aarch64*" | Format-Table Name, Length
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: win-aarch64
-          path: |
-            KO影视-*-aarch64-windows.zip
-            KO影视-*-aarch64-setup.exe
-
-  build-linux:
-    runs-on: ubuntu-latest
-    needs: [set-tag, build-updater]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: liberica
-          java-version: "21"
-
-      - name: Install Linux CGO deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev xorg-dev libxkbcommon-dev gcc pkg-config unzip curl \
-            libmpv2 libmpv-dev vlc vlc-plugin-base libvlc-dev
-
-      - name: Build + package (linux-x64)
-        env:
-          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
-          CGO_ENABLED: "1"
-          KOTV_JAVA_TOOLCHAIN: "21"
-        run: |
-          chmod +x bridge/build.sh scripts/*.sh
-          ./scripts/prepare-runtime.sh linux-x64
-          ./scripts/package.sh linux-x64
-          ./scripts/verify-runtime.sh dist/KOTV-linux-x64/runtime linux-x64
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: updater-linux-amd64
-          path: dist/updater-linux
-
-      - name: Compress ZIP
-        env:
-          TAG: ${{ needs.set-tag.outputs.tag }}
-        run: |
-          ver="${TAG#v}"
-          cp -f dist/updater-linux/updater dist/KOTV-linux-x64/updater
-          cd dist && zip -q -r "../KO影视-${ver}-linux-x86_64.zip" KOTV-linux-x64
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-x86_64
-          path: KO影视-*-linux-x86_64.zip
-
-  build-mac-arm64:
-    runs-on: macos-14
-    needs: [set-tag, build-updater]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: liberica
-          java-version: "21"
-
-      - name: Build + package (macos-arm64)
-        env:
-          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
-          CGO_ENABLED: "1"
-          KOTV_JAVA_TOOLCHAIN: "21"
-        run: |
-          chmod +x bridge/build.sh scripts/*.sh
-          ./scripts/prepare-runtime.sh macos-arm64
-          ./scripts/package.sh macos-arm64
-          ./scripts/verify-runtime.sh dist/KOTV-macos-arm64/runtime macos-arm64
-          test -f "dist/KO影视.app/Contents/Resources/runtime/jre/lib/libjli.dylib"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: updater-macos-arm64
-          path: dist/updater-mac
-
-      - name: Make DMG
-        env:
-          TAG: ${{ needs.set-tag.outputs.tag }}
-        run: |
-          ver="${TAG#v}"
-          cp -f dist/updater-mac/updater dist/KOTV-macos-arm64/updater
-          if [[ -d "dist/KO影视.app" ]]; then
-            cp -f dist/updater-mac/updater "dist/KO影视.app/Contents/MacOS/updater"
-            chmod +x "dist/KO影视.app/Contents/MacOS/updater"
-            ./scripts/macos-app.sh macos-arm64 dist/KOTV-macos-arm64
-          fi
-          # macos-app.sh 产出 dist/KO影视-macos-arm64.dmg → 统一命名
-          cp -f "dist/KO影视-macos-arm64.dmg" "./KO影视-${ver}-aarch64.dmg"
-          cd dist && zip -q -r "../KO影视-${ver}-darwin-aarch64.zip" KOTV-macos-arm64
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mac-aarch64
-          path: |
-            KO影视-*-aarch64.dmg
-            KO影视-*-darwin-aarch64.zip
-
-  build-mac-amd64:
-    runs-on: macos-14
-    needs: [set-tag, build-updater]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: liberica
-          java-version: "21"
-          architecture: x64
-
-      - name: Build + package (macos-x64)
-        env:
-          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
-          CGO_ENABLED: "1"
-          KOTV_JAVA_TOOLCHAIN: "21"
-        run: |
-          chmod +x bridge/build.sh scripts/*.sh
-          ./scripts/prepare-runtime.sh macos-x64
-          arch -x86_64 env CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
-            ./scripts/package.sh macos-x64
-          ./scripts/verify-runtime.sh dist/KOTV-macos-x64/runtime macos-x64
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: updater-macos-amd64
-          path: dist/updater-mac
-
-      - name: Make DMG
-        env:
-          TAG: ${{ needs.set-tag.outputs.tag }}
-        run: |
-          ver="${TAG#v}"
-          cp -f dist/updater-mac/updater dist/KOTV-macos-x64/updater
-          if [[ -d "dist/KO影视.app" ]]; then
-            cp -f dist/updater-mac/updater "dist/KO影视.app/Contents/MacOS/updater"
-            chmod +x "dist/KO影视.app/Contents/MacOS/updater"
-            ./scripts/macos-app.sh macos-x64 dist/KOTV-macos-x64
-          fi
-          cp -f "dist/KO影视-macos-x64.dmg" "./KO影视-${ver}-x86_64.dmg"
-          cd dist && zip -q -r "../KO影视-${ver}-darwin-x86_64.zip" KOTV-macos-x64
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mac-x86_64
-          path: |
-            KO影视-*-x86_64.dmg
-            KO影视-*-darwin-x86_64.zip
-
-  # Flutter UI + Win7 引擎（实验包）；Go 桌面 Win7 见 build-win-amd64 的 setup/zip
+  # Flutter Win7 实验线：ZIP + Inno 安装包
   build-flutter-win7:
     runs-on: windows-2022
-    needs: [set-tag]
+    needs: [set-tag, build-updater]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -381,14 +153,22 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Setup MSVC (Flutter Windows desktop)
+      - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Prepare runtime + build Win7 engine
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-windows-amd64
+          path: cmd/updater
+
+      - name: Adapt SDK + package Win7
         shell: bash
         env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          KOTV_WIN7: "1"
+          KOTV_OUT_SUFFIX: "-win7"
           CGO_ENABLED: "1"
           CC: gcc
           CXX: g++
@@ -396,59 +176,219 @@ jobs:
           CGO_CXXFLAGS: "-O2"
           CGO_LDFLAGS: "-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic"
           KOTV_JAVA_TOOLCHAIN: "21"
-          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
         run: |
           chmod +x bridge/build.sh scripts/*.sh
-          ./scripts/prepare-runtime.sh windows-x64
-          ./scripts/verify-runtime.sh runtime windows-x64
-          (cd internal/spider && go run gen_qjsinc.go)
-          go build -ldflags "-s -w -extldflags '-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic -Wl,--subsystem,windows:6.01'" \
-            -o flutter/assets/engine/kotv-engine.exe ./cmd/engine
-          pwsh -File ./scripts/check-win7-deps.ps1 -Exe "flutter/assets/engine/kotv-engine.exe"
+          ./scripts/adapt-flutter-win7-sdk.sh
+          ./scripts/package-flutter-windows.sh
 
-      - name: Build Flutter Windows release (3.19.6 / Win7)
+      - name: Build Win7 installer
         shell: pwsh
-        run: |
-          Set-Location flutter
-          flutter --version
-          flutter config --enable-windows-desktop
-          flutter precache --windows
-          bash ../scripts/adapt-flutter-win7-sdk.sh
-          flutter pub get
-          flutter build windows --release
-
-      - name: Bundle engine and verify runtime
-        shell: pwsh
-        run: |
-          $out = "flutter\build\windows\x64\runner\Release"
-          if (-not (Test-Path "$out\kotv.exe")) { throw "Flutter build output missing: $out\kotv.exe" }
-          Copy-Item -Force "flutter\assets\engine\kotv-engine.exe" "$out\kotv-engine.exe"
-          if (-not (Test-Path "$out\runtime")) {
-            throw "CMake did not install runtime under $out\runtime — check flutter/windows/CMakeLists.txt"
-          }
-          if (Test-Path "$out\runtime\runtime") {
-            throw "nested runtime\runtime detected — packaging must be single-layer"
-          }
-          if (Test-Path "cmd\updater\updater.exe") { Copy-Item -Force "cmd\updater\updater.exe" "$out\updater.exe" }
-          bash ./scripts/verify-runtime.sh "$out/runtime" windows-x64
-
-      - name: Compress ZIP
-        shell: bash
         env:
-          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          TAG: ${{ needs.set-tag.outputs.tag }}
         run: |
-          source ./scripts/kotv-release-name.sh
-          VERSION="$(kotv_release_version flutter/pubspec.yaml)"
-          ARCH="$(kotv_release_arch windows-x64)"
-          OUT="${GITHUB_WORKSPACE}/KO影视-${VERSION}-${ARCH}-win7.zip"
-          rm -f "$OUT"
-          (cd flutter/build/windows/x64/runner/Release && zip -r -q "$OUT" .)
-          ls -lh "$OUT"
+          $ver = $env:TAG.TrimStart("v")
+          choco install innosetup -y --no-progress
+          ./scripts/make-win-installer.ps1 `
+            -Plat windows-x64 `
+            -Tag $env:TAG `
+            -Version $ver `
+            -SourceDir "flutter\build\windows\x64\runner\Release" `
+            -ExeName kotv.exe `
+            -NameSuffix "-win7"
+          Get-ChildItem "KO影视-${ver}-x86_64-win7*" | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
           name: win-x86_64-flutter-win7
-          path: KO影视-*-x86_64-win7.zip
+          path: |
+            KO影视-*-x86_64-win7.zip
+            KO影视-*-x86_64-win7-setup.exe
+          if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: [set-tag, build-updater]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            libgl1-mesa-dev xorg-dev libxkbcommon-dev \
+            libmpv2 libmpv-dev vlc vlc-plugin-base libvlc-dev unzip curl zip
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-linux-amd64
+          path: cmd/updater
+
+      - name: Package Flutter Linux
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          KOTV_JAVA_TOOLCHAIN: "21"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          chmod +x cmd/updater/updater || true
+          ./scripts/package-flutter-linux.sh
+          cp -f dist/KO影视-*-linux-x86_64.zip ./
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: KO影视-*-linux-x86_64.zip
+          if-no-files-found: error
+
+  build-mac-arm64:
+    runs-on: macos-14
+    needs: [set-tag, build-updater]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-macos-arm64
+          path: dist/updater-mac
+
+      - name: Package Flutter macOS arm64
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          KOTV_JAVA_TOOLCHAIN: "21"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          ./scripts/package-flutter-macos.sh
+          ver="${KOTV_VERSION#v}"
+          if [[ -f dist/updater-mac/updater && -d "dist/KO影视.app" ]]; then
+            cp -f dist/updater-mac/updater "dist/KO影视.app/Contents/MacOS/updater"
+            chmod +x "dist/KO影视.app/Contents/MacOS/updater"
+          fi
+          cp -f "dist/KO影视-${ver}-aarch64.dmg" "./KO影视-${ver}-aarch64.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-aarch64
+          path: KO影视-*-aarch64.dmg
+          if-no-files-found: error
+
+  build-mac-amd64:
+    runs-on: macos-14
+    needs: [set-tag, build-updater]
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+          architecture: x64
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          architecture: x64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-macos-amd64
+          path: dist/updater-mac
+
+      - name: Package Flutter macOS x86_64
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          KOTV_JAVA_TOOLCHAIN: "21"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          # package-flutter-macos.sh 按本机 arch 选 plat；在 arm runner 上强制走 x64 需 Rosetta
+          if [[ "$(uname -m)" == "arm64" ]]; then
+            echo "==> cross-ish: build under arch -x86_64"
+            arch -x86_64 bash -lc '
+              export PATH="/usr/local/bin:$PATH"
+              ./scripts/prepare-runtime.sh macos-x64
+              (cd internal/spider && go run gen_qjsinc.go)
+              CGO_ENABLED=1 GOARCH=amd64 go build -o flutter/assets/engine/kotv-engine ./cmd/engine
+              cd flutter && flutter config --enable-macos-desktop && flutter pub get
+              flutter build macos --release
+            '
+            # 复用 package 脚本后半段：从已构建 app 打 dmg
+            source ./scripts/kotv-release-name.sh
+            VERSION="$(kotv_release_version flutter/pubspec.yaml)"
+            APP_SRC=""
+            for cand in \
+              flutter/build/macos/Build/Products/Release/KO影视.app \
+              flutter/build/macos/Build/Products/Release/kotv.app; do
+              [[ -d "$cand" ]] && APP_SRC="$cand" && break
+            done
+            [[ -n "$APP_SRC" ]] || { echo "missing macos Release .app" >&2; exit 1; }
+            OUT_APP="dist/KO影视.app"
+            DMG="dist/KO影视-${VERSION}-x86_64.dmg"
+            STAGE="dist/_macos_dmg_stage"
+            rm -rf "$OUT_APP" "$DMG" "$STAGE"
+            mkdir -p dist "$STAGE"
+            ditto "$APP_SRC" "$OUT_APP"
+            KOTV_BUNDLE_ENGINE_TO_MACOS=1 ./scripts/bundle-flutter-runtime.sh "$OUT_APP"
+            if [[ -f dist/updater-mac/updater ]]; then
+              cp -f dist/updater-mac/updater "$OUT_APP/Contents/MacOS/updater"
+              chmod +x "$OUT_APP/Contents/MacOS/updater"
+            fi
+            ditto "$OUT_APP" "$STAGE/KO影视.app"
+            ln -sf /Applications "$STAGE/Applications"
+            hdiutil create -volname "KO影视" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+            cp -f "$DMG" "./KO影视-${VERSION}-x86_64.dmg"
+          else
+            ./scripts/package-flutter-macos.sh
+            ver="${KOTV_VERSION#v}"
+            cp -f "dist/KO影视-${ver}-x86_64.dmg" "./KO影视-${ver}-x86_64.dmg"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-x86_64
+          path: KO影视-*-x86_64.dmg
           if-no-files-found: error
 
   build-android:
@@ -491,6 +431,7 @@ jobs:
       - name: Package Android APKs
         env:
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          KOTV_JAVA_TOOLCHAIN: "17"
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           chmod +x bridge/build.sh scripts/*.sh
@@ -512,12 +453,11 @@ jobs:
       - set-tag
       - build-updater
       - build-win-amd64
-      - build-win-arm64
+      - build-flutter-win7
       - build-linux
       - build-mac-arm64
       - build-mac-amd64
       - build-android
-      - build-flutter-win7
     permissions:
       contents: write
     steps:
@@ -529,9 +469,7 @@ jobs:
         env:
           TAG: ${{ needs.set-tag.outputs.tag }}
         run: |
-          ver="${TAG#v}"
           mkdir -p ./release-files
-          # 各 job artifact 目录下的 KO影视-* 产物
           find . -maxdepth 3 -type f \( \
             -name 'KO影视-*.zip' -o \
             -name 'KO影视-*.dmg' -o \
@@ -571,8 +509,7 @@ jobs:
               "windows-amd64": f"{base}/KO影视-{ver}-x86_64.zip",
               "windows-amd64-setup": f"{base}/KO影视-{ver}-x86_64-setup.exe",
               "windows-amd64-flutter-win7": f"{base}/KO影视-{ver}-x86_64-win7.zip",
-              "windows-arm64": f"{base}/KO影视-{ver}-aarch64-windows.zip",
-              "windows-arm64-setup": f"{base}/KO影视-{ver}-aarch64-setup.exe",
+              "windows-amd64-flutter-win7-setup": f"{base}/KO影视-{ver}-x86_64-win7-setup.exe",
               "linux-amd64": f"{base}/KO影视-{ver}-linux-x86_64.zip",
               "darwin-arm64": f"{base}/KO影视-{ver}-aarch64.dmg",
               "darwin-amd64": f"{base}/KO影视-{ver}-x86_64.dmg",
@@ -615,13 +552,12 @@ jobs:
             echo
             echo "---"
             echo
-            echo "### 下载（\`KO影视-{version}-{arch}\`）"
+            echo "### 下载（Flutter UI + Go 引擎）"
             echo
             echo "| 平台 | 文件 |"
             echo "|------|------|"
             echo "| Windows x86_64 | [安装包](${base}/KO影视-${ver}-x86_64-setup.exe) · [ZIP](${base}/KO影视-${ver}-x86_64.zip) |"
-            echo "| Windows x86_64 Flutter Win7 | [ZIP](${base}/KO影视-${ver}-x86_64-win7.zip) |"
-            echo "| Windows aarch64 | [安装包](${base}/KO影视-${ver}-aarch64-setup.exe) · [ZIP](${base}/KO影视-${ver}-aarch64-windows.zip) |"
+            echo "| Windows x86_64 Win7 | [安装包](${base}/KO影视-${ver}-x86_64-win7-setup.exe) · [ZIP](${base}/KO影视-${ver}-x86_64-win7.zip) |"
             echo "| Linux x86_64 | [ZIP](${base}/KO影视-${ver}-linux-x86_64.zip) |"
             echo "| macOS aarch64 | [DMG](${base}/KO影视-${ver}-aarch64.dmg) |"
             echo "| macOS x86_64 | [DMG](${base}/KO影视-${ver}-x86_64.dmg) |"

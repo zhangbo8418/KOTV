@@ -9,6 +9,16 @@ OUT_FLUTTER="$ROOT/flutter/windows/runner/resources/app_icon.ico"
 
 [[ -f "$SRC" ]] || { echo "missing $SRC" >&2; exit 1; }
 
+# CI 可能未装 Pillow：若 ico 已入库则跳过重生成
+if ! python3 -c 'import PIL' 2>/dev/null; then
+  if [[ -f "$OUT_ICO" && -f "$OUT_FLUTTER" ]]; then
+    echo "PIL missing; reuse existing $OUT_ICO / $OUT_FLUTTER"
+    exit 0
+  fi
+  echo "PIL missing; trying pip install pillow..." >&2
+  python3 -m pip install --user pillow >/dev/null
+fi
+
 export ROOT
 python3 <<'PY'
 from PIL import Image

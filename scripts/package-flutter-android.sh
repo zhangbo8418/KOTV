@@ -41,6 +41,8 @@ fi
 
 if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ ! -s "$ROOT/bridge/spider-bridge.jar" ]]; then
   echo "==> build spider-bridge.jar"
+  # Android CI 常用 JDK 17；bridge 默认 toolchain 21 会编出 class 65 导致 smoke 失败
+  export KOTV_JAVA_TOOLCHAIN="${KOTV_JAVA_TOOLCHAIN:-17}"
   "$ROOT/bridge/build.sh"
 fi
 

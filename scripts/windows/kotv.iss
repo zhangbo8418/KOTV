@@ -20,7 +20,9 @@
 
 #define MyAppName "KO影视"
 #define MyAppPublisher "KOTV"
-#define MyAppExeName "KOTV.exe"
+#ifndef MyAppExeName
+  #define MyAppExeName "kotv.exe"
+#endif
 #define MyAppURL "https://github.com/zhangbo8418/KOTV"
 
 #if MyArch == "arm64"
