@@ -94,8 +94,8 @@ chaquopy {
 dependencies {
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs_nio:2.1.5"
     implementation "org.nanohttpd:nanohttpd:2.3.1"
-    // 站点 spider jar 若只有 .class（桌面 JVM 包），ART 需先转 dex
-    implementation "com.jakewharton.android.repackaged:dalvik-dx:9.0.0_r3"
+    // 站点 spider jar（可含 Java 17 .class）运行时经 D8 转 dex；体积约十几 MB
+    implementation "com.android.tools:r8:8.9.35"
     // 对齐 TV：Exo 走 OkHttp DataSource（video_player 默认 DefaultHttp 易 Source error）
     def media3 = "1.4.1"
     implementation "androidx.media3:media3-exoplayer:$media3"

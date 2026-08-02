@@ -47,19 +47,19 @@ Go Engine
 
 ## JAR：PC + Android 共用 bridge（不要照搬 TV）
 
-站点爬虫 jar **约定只含 JVM `.class`、不含 dex**（同一份给桌面和安卓用）。Android ART 不能直接加载，必须经 App 侧 `JarDexer`（dalvik-dx）转成含 dex 的 sealed jar。
+站点爬虫 jar **约定只含 JVM `.class`、不含 dex**（同一份给桌面和安卓用）。Android ART 不能直接加载，必须经 App 侧 `JarDexer`（嵌入 **D8 / `com.android.tools:r8`**）转成含 dex 的 sealed jar；站点字节码可用 Java 17。
 
 TV（FongMi）把 Spider ABI 放进 **App ClassLoader**。KOTV 要 **同一份 `spider-bridge.jar` 跑桌面 JVM 与 Android ART**，所以 Spider ABI 留在 bridge 内：
 
 | | 桌面 | Android |
 |--|------|---------|
 | bridge | `URLClassLoader` / child-first | 打包期 d8 → APK assets → `DexClassLoader` |
-| 站点 jar | 直接加载 `.class` | **始终** `JarDexer`（dalvik-dx）→ sealed dex jar → `DexClassLoader` |
+| 站点 jar | 直接加载 `.class` | **始终** `JarDexer`（D8）→ sealed dex jar → `DexClassLoader` |
 | 注入 | 无 | `JarLoader` → `setSiteJarEnsureMethod(Method)`（防 R8 把 JarDexer 收成 `u1.a`） |
 
 站点爬虫约定（KOTV 新线）：**一份 JVM `.class` 瘦包**（无 `android/**` / 无 dex）。PC 直载；Android 经 `JarDexer` 转 dex + **child-first** `DexClassLoader`（与桌面一致，避免站点 `OkHttp`/`Util` 被 bridge 盖住）。TV 专用 DEX 包是另一条产品线，不要当双端通用包。
 
-**不要**把 Spider 类挪进 Flutter App：桌面无法共用。Android 专属能力（dx / seal / child-first DexCL）用 **Method 注入** 挂在 App CL。
+**不要**把 Spider 类挪进 Flutter App：桌面无法共用。Android 专属能力（D8 / seal / child-first DexCL）用 **Method 注入** 挂在 App CL。
 
 ## 播放：Exo / MPV / IJK 与 TV 的差异
 

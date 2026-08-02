@@ -12,3 +12,7 @@
     public static java.lang.ClassLoader create(java.lang.Object, java.lang.String, java.lang.ClassLoader);
 }
 -keep class com.bobo.kotv.JarLoader { *; }
+# 运行时 D8（com.android.tools:r8）整包保留，避免被 shrink 掏空
+-keep class com.android.tools.r8.** { *; }
+-dontwarn com.android.tools.r8.**
+-dontwarn com.android.tools.r8.internal.**

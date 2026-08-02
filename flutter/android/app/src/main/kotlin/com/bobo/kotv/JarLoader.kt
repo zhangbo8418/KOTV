@@ -42,9 +42,10 @@ object JarLoader {
     synchronized(this) {
       if (bridgeCall != null) return
       appContext = context.applicationContext
-      // 拉住 JarDexer / ChildFirstDexClassLoader / dalvik-dx，避免被 R8 裁掉
+      // 拉住 JarDexer / ChildFirstDexClassLoader / D8，避免被 R8 裁掉
       check(JarDexer::class.java.name.isNotEmpty())
       check(ChildFirstDexClassLoader::class.java.name.isNotEmpty())
+      check(com.android.tools.r8.D8::class.java.name.isNotEmpty())
       ensureMethod = JarDexer::class.java.getMethod(
         "ensureSiteDexJar",
         Any::class.java,
