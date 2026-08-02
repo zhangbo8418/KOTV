@@ -55,9 +55,11 @@ TV（FongMi）把 Spider ABI 放进 **App ClassLoader**。KOTV 要 **同一份 `
 |--|------|---------|
 | bridge | `URLClassLoader` / child-first | 打包期 d8 → APK assets → `DexClassLoader` |
 | 站点 jar | 直接加载 `.class` | **始终** `JarDexer`（dalvik-dx）→ sealed dex jar → `DexClassLoader` |
-| 注入 | 无 | `JarLoader` → `SpiderBridge.setSiteJarHelper(JarDexer)`（强制；无 helper 直接失败） |
+| 注入 | 无 | `JarLoader` → `setSiteJarEnsureMethod(Method)`（防 R8 把 JarDexer 收成 `u1.a`） |
 
-**不要**把 Spider 类挪进 Flutter App：桌面无法共用。Android 专属能力（dx / seal）用 **helper 注入** 挂在 App CL，bridge 只反射调用。
+站点爬虫请用 **FongMi `pc/` 产出的同一份 JVM jar**（Manifest `KOTV-Spider-Kind: jvm`）；jar 内不得含 `android/**` / `classes.dex`。TV 专用 DEX 包是另一条产品线，不要当双端通用包。
+
+**不要**把 Spider 类挪进 Flutter App：桌面无法共用。Android 专属能力（dx / seal）用 **Method 注入** 挂在 App CL，bridge 只 `Method.invoke`。
 
 ## 播放：Exo / MPV / IJK 与 TV 的差异
 

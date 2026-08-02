@@ -447,10 +447,17 @@ public class SpiderBridge {
     }
 
     private static volatile Object siteJarHelper;
+    /** App 侧在加载 bridge 时注入的 {@link Method}（指向 JarDexer.ensureSiteDexJar），避免 R8 改类名后按 helper 反射失败。 */
+    private static volatile Method siteJarEnsureMethod;
 
-    /** Android：由 JarLoader 注入 App 侧 JarDexer（避免 bridge DexCL 内 Class.forName 找不到）。 */
+    /** Android：由 JarLoader 注入 App 侧 JarDexer（兼容旧路径；优先用 {@link #setSiteJarEnsureMethod}）。 */
     public static void setSiteJarHelper(Object helper) {
         siteJarHelper = helper;
+    }
+
+    /** Android：直接注入 ensure 方法句柄（不受 helper 类名混淆影响）。 */
+    public static void setSiteJarEnsureMethod(Method method) {
+        siteJarEnsureMethod = method;
     }
 
     private static ClassLoader createDexLoader(File jarFile) throws Exception {
@@ -483,25 +490,38 @@ public class SpiderBridge {
 
     /**
      * 站点 jar 约定为 PC/安卓通用的 JVM .class 包（不含 dex）。
-     * Android 必须经 App 注入的 {@code JarDexer.ensureSiteDexJar}（dalvik-dx）转成含 dex 的 sealed jar。
+     * Android 必须经 App 注入的 JarDexer（dalvik-dx）转成含 dex 的 sealed jar。
      *
-     * 注意：bridge 内有桌面用的 {@code android.content.Context} shim，与 App 侧真实
-     * {@code android.content.Context} 不是同一 Class。不能用 {@code getMethod(..., Context.class, ...)}，
-     * 必须按参数类型<strong>名字</strong>匹配（对齐 Init 反射写法）。
+     * <p>优先用 {@link #siteJarEnsureMethod}（JarLoader 注入的 Method 句柄）；
+     * 回退到 helper 上按类型名查找（避开 bridge shim Context vs 真机 Context）。
      */
     private static File resolveSealedSiteJar(Context c, File jarFile) throws Exception {
+        Method ensure = siteJarEnsureMethod;
         Object helper = siteJarHelper;
-        if (helper == null) {
+        if (ensure == null && helper != null) {
+            try {
+                Class<?> hc = (helper instanceof Class) ? (Class<?>) helper : helper.getClass();
+                ensure = findEnsureSiteDexJar(hc);
+            } catch (NoSuchMethodException ignored) {
+            }
+        }
+        if (ensure == null) {
             throw new IOException(
-                    "site jar helper not registered (JarLoader must call setSiteJarHelper). "
-                            + "Universal site jars are .class-only; Android must convert via JarDexer. jar="
+                    "site jar ensure not registered (JarLoader must call setSiteJarEnsureMethod). "
+                            + "helper="
+                            + (helper == null ? "null" : helper.getClass().getName())
+                            + " jar="
                             + jarFile.getName());
         }
         try {
-            Method ensure = findEnsureSiteDexJar(helper.getClass());
-            Object path = java.lang.reflect.Modifier.isStatic(ensure.getModifiers())
-                    ? ensure.invoke(null, c, jarFile.getAbsolutePath())
-                    : ensure.invoke(helper, c, jarFile.getAbsolutePath());
+            Object path;
+            if (java.lang.reflect.Modifier.isStatic(ensure.getModifiers())) {
+                path = ensure.invoke(null, c, jarFile.getAbsolutePath());
+            } else if (helper != null) {
+                path = ensure.invoke(helper, c, jarFile.getAbsolutePath());
+            } else {
+                path = ensure.invoke(null, c, jarFile.getAbsolutePath());
+            }
             if (path != null) {
                 File sealed = new File(path.toString());
                 if (sealed.isFile() && sealed.length() > 0L) {
@@ -511,17 +531,13 @@ public class SpiderBridge {
         } catch (java.lang.reflect.InvocationTargetException e) {
             Throwable cauze = e.getCause() != null ? e.getCause() : e;
             throw new IOException("JarDexer failed: " + cauze.getMessage(), cauze);
-        } catch (NoSuchMethodException e) {
-            throw new IOException(
-                    "JarDexer.ensureSiteDexJar missing on helper class=" + helper.getClass().getName(),
-                    e);
         }
         throw new IOException("JarDexer returned empty for " + jarFile.getName());
     }
 
     /**
-     * 按类型名匹配 ensureSiteDexJar。
-     * bridge shim Context 与框架 Context 的 Class 身份可能不同，不能用 Context.class 字面量。
+     * 按类型名匹配 ensureSiteDexJar（回退路径）。
+     * bridge shim Context 与框架 Context 的 Class 身份可能不同。
      */
     private static Method findEnsureSiteDexJar(Class<?> helperClass) throws NoSuchMethodException {
         Method found = null;
@@ -531,11 +547,10 @@ public class SpiderBridge {
             if (p.length != 2) continue;
             String a0 = p[0].getName();
             String a1 = p[1].getName();
-            // App 侧可能是 (Context,String) 或 (Object,String)
             if (!"java.lang.String".equals(a1)) continue;
             if (!("android.content.Context".equals(a0) || "java.lang.Object".equals(a0))) continue;
             found = m;
-            if ("java.lang.Object".equals(a0)) break; // 优先 Object，彻底避开 Class 不一致
+            if ("java.lang.Object".equals(a0)) break;
         }
         if (found != null) return found;
         throw new NoSuchMethodException(

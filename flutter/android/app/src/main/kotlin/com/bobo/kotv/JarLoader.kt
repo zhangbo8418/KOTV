@@ -5,12 +5,14 @@ import android.util.Log
 import dalvik.system.DexClassLoader
 import java.io.File
 import java.io.FileOutputStream
+import java.lang.reflect.Method
 import java.util.zip.ZipFile
 
 /**
  * 加载 `kotv/spider-bridge.jar`（须含 classes.dex）并调用 SpiderBridge.call。
  *
  * Android ART 只能加载 dex；桌面 shadowJar 的 .class 包必须在打包期经 d8 转换。
+ * 站点 jar（PC/安卓同一份 JVM `.class`）经 [JarDexer] 转 dex。
  */
 object JarLoader {
   private const val TAG = "KotvJarLoader"
@@ -18,10 +20,17 @@ object JarLoader {
   private const val BridgeAssetPath = "kotv/spider-bridge.jar"
 
   @Volatile
-  private var bridgeCall: java.lang.reflect.Method? = null
+  private var bridgeCall: Method? = null
+
+  @Volatile
+  private var bridgeClass: Class<*>? = null
 
   @Volatile
   private var appContext: Context? = null
+
+  /** App CL 上解析好的 Method，R8 keep 后名称稳定；注入 bridge 后不受 helper 类名混淆影响。 */
+  @Volatile
+  private var ensureMethod: Method? = null
 
   fun isLoaded(): Boolean = bridgeCall != null
 
@@ -30,8 +39,13 @@ object JarLoader {
     synchronized(this) {
       if (bridgeCall != null) return
       appContext = context.applicationContext
-      // 确保 JarDexer/dalvik-dx 被编进 APK，供 SpiderBridge 反射调用
+      // 拉住 JarDexer / dalvik-dx，避免被 R8 裁掉
       check(JarDexer::class.java.name.isNotEmpty())
+      ensureMethod = JarDexer::class.java.getMethod(
+        "ensureSiteDexJar",
+        Any::class.java,
+        String::class.java,
+      )
 
       val jarDir = File(context.codeCacheDir, "kotv_bridge").apply { mkdirs() }
       val jarFile = File(jarDir, "spider-bridge.jar")
@@ -51,35 +65,47 @@ object JarLoader {
         context.classLoader,
       )
       val clazz = cl.loadClass(BridgeClassName)
+      bridgeClass = clazz
       try {
-        val setCtx = clazz.getMethod("setAndroidContext", Context::class.java)
-        setCtx.invoke(null, context.applicationContext)
+        clazz.getMethod("setAndroidContext", Context::class.java)
+          .invoke(null, context.applicationContext)
       } catch (t: Throwable) {
         Log.w(TAG, "setAndroidContext missing/failed", t)
       }
-      // 注入 App 侧 JarDexer：bridge DexCL 内 Class.forName 应用类会失败（红米实测）
-      try {
-        clazz.getMethod("setSiteJarHelper", Any::class.java).invoke(null, JarDexer)
-      } catch (t: Throwable) {
-        Log.e(TAG, "setSiteJarHelper failed", t)
-        throw t
-      }
+      injectEnsure(clazz)
       bridgeCall = clazz.getMethod("call", String::class.java)
-      Log.i(TAG, "bridge loaded: ${jarFile.absolutePath}")
+      Log.i(TAG, "bridge loaded: ${jarFile.absolutePath}; ensure=${ensureMethod?.declaringClass?.name}")
+    }
+  }
+
+  private fun injectEnsure(clazz: Class<*>) {
+    val ensure = ensureMethod
+      ?: error("JarDexer.ensureSiteDexJar Method not resolved")
+    try {
+      clazz.getMethod("setSiteJarEnsureMethod", Method::class.java).invoke(null, ensure)
+    } catch (t: Throwable) {
+      Log.e(TAG, "setSiteJarEnsureMethod failed", t)
+      throw t
+    }
+    // 兼容旧 bridge：再塞 helper（Class 上可按名找 static 方法）
+    try {
+      clazz.getMethod("setSiteJarHelper", Any::class.java).invoke(null, JarDexer::class.java)
+    } catch (t: Throwable) {
+      Log.w(TAG, "setSiteJarHelper optional failed", t)
     }
   }
 
   fun callBridge(inputJson: String): String {
     val m = bridgeCall ?: error("bridge not loaded")
+    val clazz = bridgeClass ?: m.declaringClass
     val ctx = appContext
     ctx?.let { c ->
       try {
-        m.declaringClass.getMethod("setAndroidContext", Context::class.java).invoke(null, c)
+        clazz.getMethod("setAndroidContext", Context::class.java).invoke(null, c)
       } catch (_: Throwable) {
       }
-      // 每次调用确保 helper 仍在（部分机型/热重载后静态字段可能丢）
       try {
-        m.declaringClass.getMethod("setSiteJarHelper", Any::class.java).invoke(null, JarDexer)
+        injectEnsure(clazz)
       } catch (_: Throwable) {
       }
     }
