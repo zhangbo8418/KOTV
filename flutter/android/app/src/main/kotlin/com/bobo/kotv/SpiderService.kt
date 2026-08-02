@@ -33,6 +33,11 @@ class SpiderService private constructor(
   fun warmUpAsync() {
     if (!warmed.compareAndSet(false, true)) return
     thread(name = "kotv-spider-warmup", isDaemon = true) {
+      try {
+        com.github.catvod.Init.set(appContext)
+      } catch (t: Throwable) {
+        Log.w(TAG, "Init.set failed", t)
+      }
       warmUpOne("sniffer") { SnifferWebView.start(appContext) }
       warmUpOne("jar") { JarLoader.ensureBridgeLoaded(appContext) }
       warmUpOne("python") { PyLoader.startIfNeeded(appContext) }

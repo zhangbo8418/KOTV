@@ -302,20 +302,37 @@ object ThunderBridge {
 
   fun start(context: android.content.Context) {
     Init.set(context)
+    if (Init.context() == null) {
+      throw IllegalStateException("Init.context is null after Init.set")
+    }
     loader = ThunderXunleiLoader.create()
     Path.thunder()
   }
 
   fun parse(body: JSONObject): JSONObject {
-    val url = body.optString("url", "").trim()
-    if (url.isEmpty()) return JSONObject().put("ok", false).put("error", "empty url")
-    return loader.parse(url)
+    return try {
+      val url = body.optString("url", "").trim()
+      if (url.isEmpty()) return JSONObject().put("ok", false).put("error", "empty url")
+      if (Init.context() == null) {
+        return JSONObject().put("ok", false).put("error", "Init.context null; call ThunderBridge.start first")
+      }
+      loader.parse(url)
+    } catch (t: Throwable) {
+      JSONObject().put("ok", false).put("error", t.message ?: t.toString())
+    }
   }
 
   fun fetch(body: JSONObject): JSONObject {
-    val url = body.optString("url", "").trim()
-    if (url.isEmpty()) return JSONObject().put("ok", false).put("error", "empty url")
-    return loader.fetch(url)
+    return try {
+      val url = body.optString("url", "").trim()
+      if (url.isEmpty()) return JSONObject().put("ok", false).put("error", "empty url")
+      if (Init.context() == null) {
+        return JSONObject().put("ok", false).put("error", "Init.context null; call ThunderBridge.start first")
+      }
+      loader.fetch(url)
+    } catch (t: Throwable) {
+      JSONObject().put("ok", false).put("error", t.message ?: t.toString())
+    }
   }
 
   fun progress(): JSONObject = loader.progress()

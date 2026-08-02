@@ -4,7 +4,10 @@ import android.content.Context;
 
 import java.lang.ref.WeakReference;
 
-/** Minimal shim for thunder-release.aar (same API surface as TV catvod Init). */
+/**
+ * App CL 宿主 Init（迅雷 AAR + 站点父优先都会命中本类）。
+ * 与 TV catvod Init ABI 一致；须在任何 Path/Thunder 调用前 {@link #set(Context)}。
+ */
 public class Init {
 
     private WeakReference<Context> context;
@@ -14,11 +17,14 @@ public class Init {
     }
 
     public static void set(Context context) {
-        get().context = new WeakReference<>(context.getApplicationContext());
+        if (context == null) return;
+        Context app = context.getApplicationContext();
+        get().context = new WeakReference<>(app != null ? app : context);
     }
 
     public static Context context() {
-        return get().context.get();
+        WeakReference<Context> ref = get().context;
+        return ref == null ? null : ref.get();
     }
 
     private static class Loader {

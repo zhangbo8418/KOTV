@@ -178,6 +178,7 @@ class AppPill extends StatelessWidget {
     required this.onTap,
     this.selected = false,
     this.width,
+    this.maxWidth,
     this.height = 40,
     this.fontSize = 15,
     this.autofocus = false,
@@ -187,6 +188,8 @@ class AppPill extends StatelessWidget {
   final VoidCallback onTap;
   final bool selected;
   final double? width;
+  /// 内容自适应宽度时的上限（站名胶囊用）；与 [width] 互斥优先 [width]。
+  final double? maxWidth;
   final double height;
   final double fontSize;
   final bool autofocus;
@@ -200,6 +203,7 @@ class AppPill extends StatelessWidget {
     final border = selected ? p.primary.withOpacity(0.9) : p.pillBorder;
     final h = height * s;
     final w = width == null ? null : width! * s;
+    final maxW = maxWidth == null ? null : maxWidth! * s;
     final labelText = Text(
       label,
       maxLines: 1,
@@ -225,14 +229,21 @@ class AppPill extends StatelessWidget {
           child: Container(
             width: w,
             height: h,
+            constraints: w == null && maxW != null ? BoxConstraints(maxWidth: maxW) : null,
             padding: EdgeInsets.symmetric(horizontal: width == null ? 14 * s : 6 * s),
-            alignment: Alignment.center,
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(8 * s),
               border: Border.all(color: border),
             ),
-            child: labelText,
+            // 固定宽度：居中；自适应：widthFactor=1 按文字收缩，同时垂直居中
+            child: w != null
+                ? Center(child: labelText)
+                : Align(
+                    alignment: Alignment.center,
+                    widthFactor: 1,
+                    child: labelText,
+                  ),
           ),
         ),
       ),
@@ -527,7 +538,9 @@ class _TopStatusBarState extends State<TopStatusBar> {
                       ),
                       const SizedBox(width: 10),
                     ],
+                    // 按文字宽度自适应；loose 避免拉满剩余空间，超长时再省略
                     Flexible(
+                      fit: FlexFit.loose,
                       child: AppPill(
                         label: widget.siteName,
                         height: compact ? 32 : 36,

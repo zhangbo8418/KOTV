@@ -40,6 +40,12 @@ object JarLoader {
     synchronized(this) {
       if (bridgeCall != null) return
       appContext = context.applicationContext
+      // App CL 的 Init/Path 会被站点父优先命中；尽早注入 Context。
+      try {
+        com.github.catvod.Init.set(appContext)
+      } catch (t: Throwable) {
+        Log.w(TAG, "Init.set failed", t)
+      }
       check(JarDexer::class.java.name.isNotEmpty())
       check(com.android.tools.r8.D8::class.java.name.isNotEmpty())
       ensureMethod = JarDexer::class.java.getMethod(
@@ -113,7 +119,7 @@ object JarLoader {
       val out = m.invoke(null, inputJson)
       val s = out?.toString()?.trim().orEmpty()
       if (s.isEmpty()) {
-        error("SpiderBridge.call returned empty (site jar load/init failed?)")
+        error("SpiderBridge.call returned empty")
       }
       s
     } catch (t: java.lang.reflect.InvocationTargetException) {

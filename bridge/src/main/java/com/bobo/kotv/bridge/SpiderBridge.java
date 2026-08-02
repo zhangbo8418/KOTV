@@ -48,6 +48,17 @@ public class SpiderBridge {
         if (ctx == null) return;
         Context app = ctx.getApplicationContext();
         CONTEXT = app != null ? app : ctx;
+        // Android 不允许/不完整支持名为 BC 的 BouncyCastle Provider；
+        // hutool DigestUtil/AES 默认走 BC 会抛 NoSuchAlgorithmException。
+        disableHutoolBouncyCastle();
+    }
+
+    private static void disableHutoolBouncyCastle() {
+        try {
+            Class<?> g = Class.forName("cn.hutool.crypto.GlobalBouncyCastleProvider");
+            g.getMethod("setUseBouncyCastle", boolean.class).invoke(null, false);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static Context ctx() {
@@ -765,45 +776,45 @@ public class SpiderBridge {
                 // getSpider 已 init；对齐 TV 不再二次 init。
                 return "{}";
             case "homeContent":
-                return spider.homeContent(args.has("filter") && args.get("filter").getAsBoolean());
+                return emptyToObject(spider.homeContent(args.has("filter") && args.get("filter").getAsBoolean()));
             case "homeVideoContent":
-                return spider.homeVideoContent();
+                return emptyToObject(spider.homeVideoContent());
             case "categoryContent": {
                 HashMap<String, String> extend = new HashMap<>();
                 if (args.has("extend")) {
                     extend = GSON.fromJson(args.get("extend"), HashMap.class);
                 }
-                return spider.categoryContent(
+                return emptyToObject(spider.categoryContent(
                         args.get("tid").getAsString(),
                         args.get("pg").getAsString(),
                         args.has("filter") && args.get("filter").getAsBoolean(),
                         extend
-                );
+                ));
             }
             case "detailContent": {
                 List<String> ids = GSON.fromJson(args.get("ids"), List.class);
-                return spider.detailContent(ids);
+                return emptyToObject(spider.detailContent(ids));
             }
             case "searchContent":
-                return spider.searchContent(
+                return emptyToObject(spider.searchContent(
                         args.get("key").getAsString(),
                         args.has("quick") && args.get("quick").getAsBoolean(),
                         args.has("pg") ? args.get("pg").getAsString() : "1"
-                );
+                ));
             case "playerContent": {
                 List<String> vip = args.has("vipFlags")
                         ? GSON.fromJson(args.get("vipFlags"), List.class) : null;
-                return spider.playerContent(
+                return emptyToObject(spider.playerContent(
                         args.get("flag").getAsString(),
                         args.get("id").getAsString(),
                         vip
-                );
+                ));
             }
             case "liveContent":
-                return spider.liveContent(args.has("url") ? args.get("url").getAsString() : "");
+                return emptyToObject(spider.liveContent(args.has("url") ? args.get("url").getAsString() : ""));
             case "action": {
                 String result = spider.action(args.has("action") ? args.get("action").getAsString() : "");
-                return result == null ? "" : result;
+                return result == null ? "{}" : result;
             }
             case "manualVideoCheck":
                 return Boolean.toString(spider.manualVideoCheck());
@@ -817,6 +828,12 @@ public class SpiderBridge {
             default:
                 return "{}";
         }
+    }
+
+    /** 避免 null/空串被 JarLoader 误判为「站点 jar 加载失败」。 */
+    private static String emptyToObject(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return "{}";
+        return raw;
     }
 
     /** 对齐 TV JarLoader.requireRecentLoader：Mix/Json 只从 recent jar 反射。 */
