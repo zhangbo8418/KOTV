@@ -7,13 +7,10 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
 
+  private var spiderKickStarted = false
+
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
-    // 尽早拉起 :9979，避免仅依赖 Dart 侧调用时序
-    try {
-      SpiderServiceManager.start(this)
-    } catch (_: Throwable) {
-    }
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kotv_android_spider")
       .setMethodCallHandler { call, result ->
         when (call.method) {
@@ -55,5 +52,18 @@ class MainActivity : FlutterActivity() {
           else -> result.notImplemented()
         }
       }
+  }
+
+  override fun onPostResume() {
+    super.onPostResume()
+    // 等首帧/插件注册完成后再拉 :9979，避免与 texture/GPU 初始化抢资源
+    if (spiderKickStarted) return
+    spiderKickStarted = true
+    window.decorView.post {
+      try {
+        SpiderServiceManager.start(this)
+      } catch (_: Throwable) {
+      }
+    }
   }
 }

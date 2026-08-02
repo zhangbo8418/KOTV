@@ -18,10 +18,9 @@ dependencies:
   media_kit_libs_video: ">=1.0.7 <2.0.0"
   video_player: ^2.9.2
   # 官方 0.11.0 仍引用已删除的 PluginRegistry.Registrar（Flutter 3.29+ 编不过）
+  # 本地 fork：去掉 Android 插件注册时的 warmup SurfaceTexture（红米首启 FATAL）。
   fijkplayer:
-    git:
-      url: https://github.com/kanata996/fijkplayer.git
-      ref: 33e41d14
+    path: packages/fijkplayer
   path_provider: ^2.1.5
   path: ^1.9.0
   shared_preferences: ^2.3.3

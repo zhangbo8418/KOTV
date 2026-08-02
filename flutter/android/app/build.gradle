@@ -89,6 +89,8 @@ chaquopy {
 dependencies {
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs_nio:2.1.5"
     implementation "org.nanohttpd:nanohttpd:2.3.1"
+    // 站点 spider jar 若只有 .class（桌面 JVM 包），ART 需先转 dex
+    implementation "com.jakewharton.android.repackaged:dalvik-dx:9.0.0_r3"
     // TV 同款迅雷 SDK（含 libxl_*.so）
     implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
 }
@@ -106,9 +108,14 @@ def engineSoAlt = new File(repoRoot, "flutter/assets/engine/libkotv_engine.so")
 
 tasks.register("prepareSpiderBridgeJar") {
     doLast {
-        if (!bridgeJar.exists() || bridgeJar.length() == 0L) {
-            println "[android] spider-bridge.jar missing; building..."
+        def bridgeSrc = new File(repoRoot, "bridge/src/main/java/com/bobo/kotv/bridge/SpiderBridge.java")
+        def needBridgeBuild = !bridgeJar.exists() || bridgeJar.length() == 0L ||
+            (bridgeSrc.exists() && bridgeSrc.lastModified() > bridgeJar.lastModified())
+        if (needBridgeBuild) {
+            println "[android] rebuilding spider-bridge.jar..."
+            def toolchain = System.getenv("KOTV_JAVA_TOOLCHAIN") ?: "17"
             exec {
+                environment "KOTV_JAVA_TOOLCHAIN", toolchain
                 commandLine "bash", "-lc", "${repoRoot}/bridge/build.sh"
             }
         }
