@@ -95,26 +95,14 @@ object JarLoader {
   private fun injectEnsure(clazz: Class<*>) {
     val ensure = ensureMethod
       ?: error("JarDexer.ensureSiteDexJar Method not resolved")
+    val create = dexLoaderCreateMethod
+      ?: error("ChildFirstDexClassLoader.create Method not resolved")
     try {
       clazz.getMethod("setSiteJarEnsureMethod", Method::class.java).invoke(null, ensure)
+      clazz.getMethod("setSiteDexLoaderCreateMethod", Method::class.java).invoke(null, create)
     } catch (t: Throwable) {
-      Log.e(TAG, "setSiteJarEnsureMethod failed", t)
+      Log.e(TAG, "inject site Method handles failed", t)
       throw t
-    }
-    val create = dexLoaderCreateMethod
-    if (create != null) {
-      try {
-        clazz.getMethod("setSiteDexLoaderCreateMethod", Method::class.java).invoke(null, create)
-      } catch (t: Throwable) {
-        Log.e(TAG, "setSiteDexLoaderCreateMethod failed", t)
-        throw t
-      }
-    }
-    // 兼容旧 bridge：再塞 helper（Class 上可按名找 static 方法）
-    try {
-      clazz.getMethod("setSiteJarHelper", Any::class.java).invoke(null, JarDexer::class.java)
-    } catch (t: Throwable) {
-      Log.w(TAG, "setSiteJarHelper optional failed", t)
     }
   }
 

@@ -447,23 +447,17 @@ public class SpiderBridge {
         );
     }
 
-    private static volatile Object siteJarHelper;
-    /** App 侧注入：JarDexer.ensureSiteDexJar */
+    /** App 侧注入：JarDexer.ensureSiteDexJar（Method 句柄，无需按类型名查找） */
     private static volatile Method siteJarEnsureMethod;
     /** App 侧注入：ChildFirstDexClassLoader.create（与桌面 child-first 对齐） */
     private static volatile Method siteDexLoaderCreateMethod;
 
-    /** Android：由 JarLoader 注入 App 侧 JarDexer（兼容旧路径；优先用 {@link #setSiteJarEnsureMethod}）。 */
-    public static void setSiteJarHelper(Object helper) {
-        siteJarHelper = helper;
-    }
-
-    /** Android：直接注入 ensure 方法句柄（不受 helper 类名混淆影响）。 */
+    /** Android：JarLoader 注入 ensure 方法句柄。 */
     public static void setSiteJarEnsureMethod(Method method) {
         siteJarEnsureMethod = method;
     }
 
-    /** Android：注入 child-first Dex ClassLoader 工厂（{@code ChildFirstDexClassLoader.create}）。 */
+    /** Android：注入 child-first Dex ClassLoader 工厂。 */
     public static void setSiteDexLoaderCreateMethod(Method method) {
         siteDexLoaderCreateMethod = method;
     }
@@ -476,72 +470,31 @@ public class SpiderBridge {
         File sealed = resolveSealedSiteJar(c, jarFile);
         ClassLoader parent = SpiderBridge.class.getClassLoader();
 
-        // 优先 App 侧 child-first（与桌面 SpiderClassLoader / Manifest child-first 一致）
         Method create = siteDexLoaderCreateMethod;
-        if (create != null) {
-            Object cl = create.invoke(null, c, sealed.getAbsolutePath(), parent);
-            if (cl instanceof ClassLoader) {
-                return (ClassLoader) cl;
-            }
-            throw new IOException("site dex loader factory returned non-ClassLoader: " + cl);
+        if (create == null) {
+            throw new IOException(
+                    "site dex loader not registered (JarLoader must call setSiteDexLoaderCreateMethod)");
         }
-
-        // 回退：标准 DexClassLoader（父优先；站点 OkHttp/Util 可能被 bridge 盖住）
-        Class<?> dcl = Class.forName("dalvik.system.DexClassLoader");
-        File codeCache;
-        try {
-            Method m = c.getClass().getMethod("getCodeCacheDir");
-            codeCache = (File) m.invoke(c);
-        } catch (Throwable t) {
-            throw new IOException("getCodeCacheDir failed", t);
+        Object cl = create.invoke(null, c, sealed.getAbsolutePath(), parent);
+        if (cl instanceof ClassLoader) {
+            return (ClassLoader) cl;
         }
-        File opt = new File(codeCache, "kotv_site_dex");
-        if (!opt.isDirectory() && !opt.mkdirs()) {
-            throw new IOException("cannot create dex opt dir: " + opt);
-        }
-        Constructor<?> ctor = dcl.getConstructor(String.class, String.class, String.class, ClassLoader.class);
-        return (ClassLoader) ctor.newInstance(
-                sealed.getAbsolutePath(),
-                opt.getAbsolutePath(),
-                opt.getAbsolutePath(),
-                parent
-        );
+        throw new IOException("site dex loader factory returned non-ClassLoader: " + cl);
     }
 
     /**
-     * 站点 jar 约定为 PC/安卓通用的 JVM .class 包（不含 dex）。
-     * Android 必须经 App 注入的 JarDexer（dalvik-dx）转成含 dex 的 sealed jar。
-     *
-     * <p>优先用 {@link #siteJarEnsureMethod}（JarLoader 注入的 Method 句柄）；
-     * 回退到 helper 上按类型名查找（避开 bridge shim Context vs 真机 Context）。
+     * 站点 jar = PC/安卓通用 JVM .class 包。Android 经 App 注入的 Method 调 JarDexer 转 dex。
+     * 不在此按 Context.class / 类型名反射查找（bridge shim Context ≠ 真机 Context）。
      */
     private static File resolveSealedSiteJar(Context c, File jarFile) throws Exception {
         Method ensure = siteJarEnsureMethod;
-        Object helper = siteJarHelper;
-        if (ensure == null && helper != null) {
-            try {
-                Class<?> hc = (helper instanceof Class) ? (Class<?>) helper : helper.getClass();
-                ensure = findEnsureSiteDexJar(hc);
-            } catch (NoSuchMethodException ignored) {
-            }
-        }
         if (ensure == null) {
             throw new IOException(
-                    "site jar ensure not registered (JarLoader must call setSiteJarEnsureMethod). "
-                            + "helper="
-                            + (helper == null ? "null" : helper.getClass().getName())
-                            + " jar="
+                    "site jar ensure not registered (JarLoader must call setSiteJarEnsureMethod). jar="
                             + jarFile.getName());
         }
         try {
-            Object path;
-            if (java.lang.reflect.Modifier.isStatic(ensure.getModifiers())) {
-                path = ensure.invoke(null, c, jarFile.getAbsolutePath());
-            } else if (helper != null) {
-                path = ensure.invoke(helper, c, jarFile.getAbsolutePath());
-            } else {
-                path = ensure.invoke(null, c, jarFile.getAbsolutePath());
-            }
+            Object path = ensure.invoke(null, c, jarFile.getAbsolutePath());
             if (path != null) {
                 File sealed = new File(path.toString());
                 if (sealed.isFile() && sealed.length() > 0L) {
@@ -553,28 +506,6 @@ public class SpiderBridge {
             throw new IOException("JarDexer failed: " + cauze.getMessage(), cauze);
         }
         throw new IOException("JarDexer returned empty for " + jarFile.getName());
-    }
-
-    /**
-     * 按类型名匹配 ensureSiteDexJar（回退路径）。
-     * bridge shim Context 与框架 Context 的 Class 身份可能不同。
-     */
-    private static Method findEnsureSiteDexJar(Class<?> helperClass) throws NoSuchMethodException {
-        Method found = null;
-        for (Method m : helperClass.getMethods()) {
-            if (!"ensureSiteDexJar".equals(m.getName())) continue;
-            Class<?>[] p = m.getParameterTypes();
-            if (p.length != 2) continue;
-            String a0 = p[0].getName();
-            String a1 = p[1].getName();
-            if (!"java.lang.String".equals(a1)) continue;
-            if (!("android.content.Context".equals(a0) || "java.lang.Object".equals(a0))) continue;
-            found = m;
-            if ("java.lang.Object".equals(a0)) break;
-        }
-        if (found != null) return found;
-        throw new NoSuchMethodException(
-                "ensureSiteDexJar(Context|Object, String) on " + helperClass.getName());
     }
 
     /**
