@@ -77,6 +77,11 @@ object JarLoader {
         m.declaringClass.getMethod("setAndroidContext", Context::class.java).invoke(null, c)
       } catch (_: Throwable) {
       }
+      // 每次调用确保 helper 仍在（部分机型/热重载后静态字段可能丢）
+      try {
+        m.declaringClass.getMethod("setSiteJarHelper", Any::class.java).invoke(null, JarDexer)
+      } catch (_: Throwable) {
+      }
     }
     val oldCl = Thread.currentThread().contextClassLoader
     if (ctx != null) {

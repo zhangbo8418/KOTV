@@ -16,13 +16,19 @@ import java.util.zip.ZipFile
 object JarDexer {
   private const val TAG = "KotvJarDexer"
 
+  /**
+   * 参数用 [Any]：bridge 反射侧可能带着 shim `android.content.Context` Class，
+   * 与 App 真机 Context 不是同一类型；用 Object 签名可稳定 getMethod/invoke。
+   */
   @JvmStatic
-  fun ensureSiteDexJar(context: Context, srcPath: String): String {
+  fun ensureSiteDexJar(context: Any, srcPath: String): String {
+    val ctx = context as? Context
+      ?: error("ensureSiteDexJar expects android.content.Context, got ${context.javaClass.name}")
     val src = File(srcPath)
     if (!src.isFile || src.length() == 0L) {
       error("site jar missing: $srcPath")
     }
-    val codeCache = context.codeCacheDir
+    val codeCache = ctx.codeCacheDir
     val sealedDir = File(codeCache, "kotv_site_jars").apply { mkdirs() }
     val key = md5Hex("${src.absolutePath}:${src.length()}:${src.lastModified()}")
 

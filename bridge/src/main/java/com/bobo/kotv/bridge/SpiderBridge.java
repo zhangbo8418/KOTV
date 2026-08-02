@@ -484,6 +484,10 @@ public class SpiderBridge {
     /**
      * 站点 jar 约定为 PC/安卓通用的 JVM .class 包（不含 dex）。
      * Android 必须经 App 注入的 {@code JarDexer.ensureSiteDexJar}（dalvik-dx）转成含 dex 的 sealed jar。
+     *
+     * 注意：bridge 内有桌面用的 {@code android.content.Context} shim，与 App 侧真实
+     * {@code android.content.Context} 不是同一 Class。不能用 {@code getMethod(..., Context.class, ...)}，
+     * 必须按参数类型<strong>名字</strong>匹配（对齐 Init 反射写法）。
      */
     private static File resolveSealedSiteJar(Context c, File jarFile) throws Exception {
         Object helper = siteJarHelper;
@@ -494,13 +498,10 @@ public class SpiderBridge {
                             + jarFile.getName());
         }
         try {
-            Method ensure = helper.getClass().getMethod("ensureSiteDexJar", Context.class, String.class);
-            Object path;
-            try {
-                path = ensure.invoke(null, c, jarFile.getAbsolutePath());
-            } catch (Throwable ignored) {
-                path = ensure.invoke(helper, c, jarFile.getAbsolutePath());
-            }
+            Method ensure = findEnsureSiteDexJar(helper.getClass());
+            Object path = java.lang.reflect.Modifier.isStatic(ensure.getModifiers())
+                    ? ensure.invoke(null, c, jarFile.getAbsolutePath())
+                    : ensure.invoke(helper, c, jarFile.getAbsolutePath());
             if (path != null) {
                 File sealed = new File(path.toString());
                 if (sealed.isFile() && sealed.length() > 0L) {
@@ -511,9 +512,34 @@ public class SpiderBridge {
             Throwable cauze = e.getCause() != null ? e.getCause() : e;
             throw new IOException("JarDexer failed: " + cauze.getMessage(), cauze);
         } catch (NoSuchMethodException e) {
-            throw new IOException("JarDexer.ensureSiteDexJar missing on helper", e);
+            throw new IOException(
+                    "JarDexer.ensureSiteDexJar missing on helper class=" + helper.getClass().getName(),
+                    e);
         }
         throw new IOException("JarDexer returned empty for " + jarFile.getName());
+    }
+
+    /**
+     * 按类型名匹配 ensureSiteDexJar。
+     * bridge shim Context 与框架 Context 的 Class 身份可能不同，不能用 Context.class 字面量。
+     */
+    private static Method findEnsureSiteDexJar(Class<?> helperClass) throws NoSuchMethodException {
+        Method found = null;
+        for (Method m : helperClass.getMethods()) {
+            if (!"ensureSiteDexJar".equals(m.getName())) continue;
+            Class<?>[] p = m.getParameterTypes();
+            if (p.length != 2) continue;
+            String a0 = p[0].getName();
+            String a1 = p[1].getName();
+            // App 侧可能是 (Context,String) 或 (Object,String)
+            if (!"java.lang.String".equals(a1)) continue;
+            if (!("android.content.Context".equals(a0) || "java.lang.Object".equals(a0))) continue;
+            found = m;
+            if ("java.lang.Object".equals(a0)) break; // 优先 Object，彻底避开 Class 不一致
+        }
+        if (found != null) return found;
+        throw new NoSuchMethodException(
+                "ensureSiteDexJar(Context|Object, String) on " + helperClass.getName());
     }
 
     /**
