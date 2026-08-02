@@ -45,4 +45,31 @@ Go Engine
 
 工程现状：桌面/安卓已用独立 `cmd/engine` 进程；iOS 嵌入（gomobile/静态链）为下一刀，开发期可连接任意可达后端联调。
 
+## JAR：PC + Android 共用 bridge（不要照搬 TV）
+
+站点爬虫 jar **约定只含 JVM `.class`、不含 dex**（同一份给桌面和安卓用）。Android ART 不能直接加载，必须经 App 侧 `JarDexer`（dalvik-dx）转成含 dex 的 sealed jar。
+
+TV（FongMi）把 Spider ABI 放进 **App ClassLoader**。KOTV 要 **同一份 `spider-bridge.jar` 跑桌面 JVM 与 Android ART**，所以 Spider ABI 留在 bridge 内：
+
+| | 桌面 | Android |
+|--|------|---------|
+| bridge | `URLClassLoader` / child-first | 打包期 d8 → APK assets → `DexClassLoader` |
+| 站点 jar | 直接加载 `.class` | **始终** `JarDexer`（dalvik-dx）→ sealed dex jar → `DexClassLoader` |
+| 注入 | 无 | `JarLoader` → `SpiderBridge.setSiteJarHelper(JarDexer)`（强制；无 helper 直接失败） |
+
+**不要**把 Spider 类挪进 Flutter App：桌面无法共用。Android 专属能力（dx / seal）用 **helper 注入** 挂在 App CL，bridge 只反射调用。
+
+## 播放：Exo / MPV / IJK 与 TV 的差异
+
+- **Exo**（Android）：stock Media3；软硬解 = `EXTENSION_RENDERER_MODE` + 软件 MediaCodec 优先；无 TV 私有 `setFfmpegVideoPrefer`。
+- **IJK**（Android）：`mediacodec*` 软硬解；切换解码须重开（选项仅在 `setDataSource` 前生效）。
+- **MPV**（media_kit，Android + 桌面）：
+
+| 选项 | Android | 桌面 PC |
+|------|---------|---------|
+| hwdec / 解码方式 | ✅ | ✅（`auto`/`no`；系统硬解） |
+| mpv.conf | ✅ | ✅ |
+| Vulkan | ⚠️ 尽力（media_kit 写死 EGL） | ⚠️ 可设 `gpu-api=vulkan`，vo 仍须 `libmpv` |
+| gpu-next | ✅ `vo=gpu-next` | ❌ Flutter Texture 必须 `vo=libmpv` |
+
 详见 [`flutter/README.md`](../flutter/README.md)。

@@ -100,11 +100,9 @@ packages:
   fijkplayer:
     dependency: "direct main"
     description:
-      path: "."
-      ref: "33e41d14"
-      resolved-ref: "33e41d1482fca4120b52de4c787d5fc81db7c0b3"
-      url: "https://github.com/kanata996/fijkplayer.git"
-    source: git
+      path: "packages/fijkplayer"
+      relative: true
+    source: path
     version: "0.11.0"
   file:
     dependency: transitive

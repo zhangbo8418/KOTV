@@ -14,6 +14,8 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
@@ -24,8 +26,14 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 /**
- * 对齐 TV Exo：OkHttpDataSource + Media3，带 headers / mime 提示 / 格式失败重试。
- * Flutter 侧用 Texture 渲染。
+ * 对齐 TV Exo：OkHttpDataSource + Media3，带 headers / mime / DRM / 软硬解。
+ *
+ * 软硬解用 stock Media3 的 [DefaultRenderersFactory.setExtensionRendererMode]：
+ * - hard/auto：EXTENSION_RENDERER_MODE_ON（MediaCodec 优先，扩展作回退）
+ * - soft：EXTENSION_RENDERER_MODE_PREFER + 优先软件 MediaCodec
+ *
+ * TV 私有 AAR 的 setFfmpegVideoPrefer 不可用；官方 FFmpeg 扩展主要为音频，
+ * 需自行编进 APK 才会被 EXTENSION 模式拾取。Flutter 侧用 Texture 渲染。
  */
 class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
@@ -43,6 +51,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var currentMime: String? = null
   private var currentDrm: Map<String, Any?>? = null
   private var formatRetried = false
+  /** auto | soft | hard；对齐 TV 软硬解语义（stock Media3 EXTENSION 模式）。 */
+  private var decodeMode: String = "auto"
+  /** auto 下硬解失败后仅软解重建一次。 */
+  private var decodeFallbackTried = false
 
   private val main = Handler(Looper.getMainLooper())
   private val tick = object : Runnable {
@@ -128,12 +140,32 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val mime = call.argument<String>("mime")?.trim()?.ifEmpty { null }
         @Suppress("UNCHECKED_CAST")
         val drm = call.argument<Map<String, Any?>>("drm")
+        val mode = call.argument<String>("decodeMode")?.trim()?.lowercase().orEmpty()
         main.post {
           try {
+            if (mode.isNotEmpty()) {
+              decodeMode = normalizeDecodeMode(mode)
+            }
+            decodeFallbackTried = false
             openInternal(url, headers, mime, drm)
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_open", t.message, null)
+          }
+        }
+      }
+      "setDecodeMode" -> {
+        val mode = normalizeDecodeMode(call.argument<String>("mode")?.trim().orEmpty())
+        main.post {
+          try {
+            decodeMode = mode
+            decodeFallbackTried = false
+            if (currentUrl.isNotEmpty()) {
+              openInternal(currentUrl, currentHeaders, currentMime, currentDrm)
+            }
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_decode", t.message, null)
           }
         }
       }
@@ -207,9 +239,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       .setDefaultRequestProperties(currentHeaders)
     val dataSourceFactory = DefaultDataSource.Factory(ctx, httpFactory)
     val mediaSourceFactory = DefaultMediaSourceFactory(ctx).setDataSourceFactory(dataSourceFactory)
-    val renderers = DefaultRenderersFactory(ctx)
-      .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-      .setEnableDecoderFallback(true)
+    val effective = effectiveDecodeMode()
+    val renderers = buildRenderersFactory(ctx, effective)
 
     val p = ExoPlayer.Builder(ctx)
       .setMediaSourceFactory(mediaSourceFactory)
@@ -230,13 +261,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               "width" to f.width,
               "height" to f.height,
               "durationMs" to p.duration.coerceAtLeast(0),
+              "decodeMode" to effective,
             ),
           )
         }
       }
 
       override fun onPlayerError(error: PlaybackException) {
-        Log.e(TAG, "exo error code=${error.errorCode} ${error.message}", error)
+        Log.e(TAG, "exo error code=${error.errorCode} mode=$effective ${error.message}", error)
         if (!formatRetried) {
           val retryMime = mimeForError(error.errorCode)
           if (retryMime != null && retryMime != currentMime) {
@@ -252,6 +284,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             }
           }
         }
+        // 对齐 TV：硬解失败时用扩展/软解重建一次
+        if (decodeMode == "auto" && !decodeFallbackTried && isDecoderError(error.errorCode)) {
+          decodeFallbackTried = true
+          Log.w(TAG, "exo decoder failed → soft rebuild")
+          try {
+            openInternal(currentUrl, currentHeaders, currentMime, currentDrm)
+            return
+          } catch (t: Throwable) {
+            Log.e(TAG, "exo soft rebuild failed", t)
+          }
+        }
         emit(mapOf("event" to "error", "message" to (error.message ?: error.errorCodeName)))
       }
 
@@ -264,6 +307,26 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     p.play()
     main.removeCallbacks(tick)
     main.post(tick)
+  }
+
+  private fun effectiveDecodeMode(): String {
+    if (decodeMode == "auto" && decodeFallbackTried) return "soft"
+    return decodeMode
+  }
+
+  private fun buildRenderersFactory(ctx: Context, mode: String): DefaultRenderersFactory {
+    // soft → PREFER（扩展 FFmpeg 优先，若已编入）；hard/auto → ON（MediaCodec 优先）
+    val extMode = when (mode) {
+      "soft" -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+      else -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+    }
+    val factory = DefaultRenderersFactory(ctx)
+      .setExtensionRendererMode(extMode)
+      .setEnableDecoderFallback(true)
+    if (mode == "soft") {
+      factory.setMediaCodecSelector(SOFT_PREFER_SELECTOR)
+    }
+    return factory
   }
 
   private fun buildMediaItem(url: String, mime: String?, drm: Map<String, Any?>?): MediaItem {
@@ -317,6 +380,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentMime = null
     currentDrm = null
     formatRetried = false
+    decodeFallbackTried = false
   }
 
   private fun emit(payload: Map<String, Any?>) {
@@ -332,6 +396,29 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     private const val TAG = "KotvExo"
     private const val DEFAULT_UA =
       "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+
+    /** 软解：优先软件 MediaCodec；无软件实现时回落原列表。 */
+    private val SOFT_PREFER_SELECTOR = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+      val infos = MediaCodecUtil.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+      val soft = infos.filter { !it.hardwareAccelerated }
+      if (soft.isNotEmpty()) soft else infos
+    }
+
+    fun normalizeDecodeMode(raw: String): String {
+      return when (raw.lowercase()) {
+        "soft", "software", "sw" -> "soft"
+        "hard", "hardware", "hw" -> "hard"
+        else -> "auto"
+      }
+    }
+
+    fun isDecoderError(errorCode: Int): Boolean {
+      return errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+        errorCode == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED ||
+        errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
+        errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
+        errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
+    }
 
     fun normalizeHeaders(raw: Map<String, String>): Map<String, String> {
       val out = linkedMapOf(

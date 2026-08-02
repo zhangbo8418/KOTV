@@ -481,12 +481,16 @@ public class SpiderBridge {
         );
     }
 
-    /** 委托 App 注入的 JarDexer.ensureSiteDexJar（不 Class.forName 应用类）。 */
+    /**
+     * 站点 jar 约定为 PC/安卓通用的 JVM .class 包（不含 dex）。
+     * Android 必须经 App 注入的 {@code JarDexer.ensureSiteDexJar}（dalvik-dx）转成含 dex 的 sealed jar。
+     */
     private static File resolveSealedSiteJar(Context c, File jarFile) throws Exception {
         Object helper = siteJarHelper;
         if (helper == null) {
             throw new IOException(
-                    "site jar helper not registered (JarLoader must call setSiteJarHelper). jar="
+                    "site jar helper not registered (JarLoader must call setSiteJarHelper). "
+                            + "Universal site jars are .class-only; Android must convert via JarDexer. jar="
                             + jarFile.getName());
         }
         try {

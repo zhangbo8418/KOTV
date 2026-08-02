@@ -118,7 +118,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  Future<void> _prompt(String title, String hint, String initial, Future<void> Function(String) onOK) async {
+  Future<void> _prompt(
+    String title,
+    String hint,
+    String initial,
+    Future<void> Function(String) onOK, {
+    int maxLines = 1,
+  }) async {
     final c = TextEditingController(text: initial);
     final p = KotvPalette.of(context);
     final v = await showDialog<String>(
@@ -132,6 +138,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           child: TextField(
             controller: c,
             autofocus: true,
+            maxLines: maxLines,
             style: TextStyle(color: p.fg),
             decoration: InputDecoration(
               hintText: hint,
@@ -522,6 +529,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final decodeLabel = {'auto': '自动', 'soft': '软解码', 'hard': '硬解码'}[decode] ?? decode;
     final adLabel = {'off': '关闭', 'on': '开启', 'violent': '暴力'}[ad] ?? ad;
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
+    final mpvVulkan = g('mpvVulkan', 'false') == 'true';
+    final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
+    final mpvConfPreview = g('mpvConf').trim();
+    // MPV 内置：Android + 桌面均可配 hwdec/conf/Vulkan；gpu-next 仅 Android 生效
+    final showMpvOpts = kotvIsAndroid() || kotvIsDesktop();
 
     return Column(
       children: [
@@ -656,6 +668,43 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ('硬解码', 'hard'),
                         ]),
                       ),
+                      if (showMpvOpts)
+                        KotvSettingsGrid(children: [
+                          KotvSettingsCell(
+                            label: 'MPV Vulkan',
+                            value: mpvVulkan ? '开启' : '关闭',
+                            onTap: () => _set(
+                              'mpvVulkan',
+                              mpvVulkan ? 'false' : 'true',
+                              msg: mpvVulkan
+                                  ? '已关闭 Vulkan（重启播放生效）'
+                                  : '已开启 Vulkan（桌面/安卓尽力而为，重启播放生效）',
+                            ),
+                          ),
+                          KotvSettingsCell(
+                            label: kotvIsAndroid() ? 'MPV gpu-next' : 'MPV gpu-next（仅安卓）',
+                            value: mpvGpuNext ? '开启' : '关闭',
+                            onTap: () => _set(
+                              'mpvGpuNext',
+                              mpvGpuNext ? 'false' : 'true',
+                              msg: kotvIsAndroid()
+                                  ? (mpvGpuNext ? '已关闭 gpu-next' : '已开启 vo=gpu-next')
+                                  : '桌面 Flutter 必须 vo=libmpv，此项仅安卓生效',
+                            ),
+                          ),
+                        ]),
+                      if (showMpvOpts)
+                        KotvSettingsWideTile(
+                          label: 'MPV 配置',
+                          value: mpvConfPreview.isEmpty ? '默认' : _ellipsize(mpvConfPreview.replaceAll('\n', ' '), 18),
+                          onTap: () => _prompt(
+                            'MPV 配置（mpv.conf）',
+                            '每行 key=value，# 注释。可写 hwdec=no 等。重启播放后生效。',
+                            g('mpvConf'),
+                            (v) => _set('mpvConf', v, msg: 'MPV 配置已保存'),
+                            maxLines: 12,
+                          ),
+                        ),
                     ]),
                     const KotvSettingsSectionTitle('UI设置'),
                     KotvSettingsCard(children: [

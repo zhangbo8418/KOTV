@@ -8,6 +8,11 @@ import 'kotv_platform.dart';
 import 'play_headers.dart';
 
 /// Android ijkplayer：对齐 Exo 的 headers / 代理 / 软硬解策略。
+///
+/// 软硬解映射 bilibili ijk 选项（须在 setDataSource 前 setOption）：
+/// - hard：mediacodec + avc/hevc/all-videos
+/// - soft：全部 mediacodec* = 0（走 FFmpeg）
+/// - auto：开硬解，失败由 ijk 内部回落软解
 class IjkPlayback extends KotvPlayback {
   IjkPlayback() {
     if (!kotvIsAndroid()) {
@@ -109,18 +114,51 @@ class IjkPlayback extends KotvPlayback {
     notifyListeners();
   }
 
+  String _normalizeDecode(String mode) {
+    final m = mode.trim().toLowerCase();
+    return switch (m) {
+      'soft' || 'software' || 'sw' => 'soft',
+      'hard' || 'hardware' || 'hw' => 'hard',
+      _ => 'auto',
+    };
+  }
+
   Future<void> _applyDecodeOptions() async {
-    // 对齐常见 TVBox/ijk：硬解 mediacodec；软解关
-    final hard = _decodeMode == 'hard';
     final soft = _decodeMode == 'soft';
-    await _player.setOption(FijkOption.playerCategory, 'mediacodec', hard || !soft ? 1 : 0);
-    await _player.setOption(FijkOption.playerCategory, 'mediacodec-auto-rotate', 1);
-    await _player.setOption(FijkOption.playerCategory, 'mediacodec-handle-resolution-change', 1);
+    // soft=0；hard/auto=1（auto 依赖 ijk 硬解失败回落软解）
+    final mc = soft ? 0 : 1;
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec', mc);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-avc', mc);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-hevc', mc);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-mpeg2', mc);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-mpeg4', mc);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-all-videos', mc);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-auto-rotate', mc);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-handle-resolution-change', mc);
+    // 硬解同步（部分机型黑屏可关）；软解无关
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-sync', soft ? 0 : 1);
     await _player.setOption(FijkOption.playerCategory, 'opensles', 0);
     await _player.setOption(FijkOption.playerCategory, 'framedrop', 1);
+    await _player.setOption(FijkOption.playerCategory, 'start-on-prepared', 1);
+    await _player.setOption(FijkOption.playerCategory, 'packet-buffering', 1);
+    await _player.setOption(FijkOption.playerCategory, 'max-buffer-size', 15 * 1024 * 1024);
     await _player.setOption(FijkOption.formatCategory, 'analyzeduration', 1);
     await _player.setOption(FijkOption.formatCategory, 'analyzemaxduration', 100);
     await _player.setOption(FijkOption.formatCategory, 'probesize', 10240);
+    await _player.setOption(FijkOption.formatCategory, 'flush_packets', 1);
+    await _player.setOption(FijkOption.codecCategory, 'skip_loop_filter', soft ? 0 : 48);
+  }
+
+  Future<void> _applyHeaders() async {
+    if (_headers.isEmpty) return;
+    final ua = _headers['User-Agent'];
+    if (ua != null && ua.isNotEmpty) {
+      await _player.setOption(FijkOption.formatCategory, 'user_agent', ua);
+    }
+    final hdr = kotvHeadersToIjkFormat(_headers);
+    if (hdr.isNotEmpty) {
+      await _player.setOption(FijkOption.formatCategory, 'headers', hdr);
+    }
   }
 
   @override
@@ -132,17 +170,9 @@ class IjkPlayback extends KotvPlayback {
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
     await _player.reset();
+    // setOption 必须在 setDataSource 之前
     await _applyDecodeOptions();
-    if (_headers.isNotEmpty) {
-      final ua = _headers['User-Agent'];
-      if (ua != null && ua.isNotEmpty) {
-        await _player.setOption(FijkOption.formatCategory, 'user_agent', ua);
-      }
-      final hdr = kotvHeadersToIjkFormat(_headers);
-      if (hdr.isNotEmpty) {
-        await _player.setOption(FijkOption.formatCategory, 'headers', hdr);
-      }
-    }
+    await _applyHeaders();
     await _player.setDataSource(url, autoPlay: true);
     await _player.setVolume(_volume / 100.0);
     if (_rate != 1.0) await _player.setSpeed(_rate);
@@ -196,7 +226,28 @@ class IjkPlayback extends KotvPlayback {
 
   @override
   Future<void> setDecodeMode(String mode) async {
-    _decodeMode = mode;
+    final next = _normalizeDecode(mode);
+    if (next == _decodeMode && _url.isEmpty) return;
+    final pos = position;
+    final wasPlaying = _playing;
+    _decodeMode = next;
+    if (_url.isEmpty) {
+      notifyListeners();
+      return;
+    }
+    // ijk 选项仅在 open 前生效：保留进度重开
+    await open(_url, headers: _headers);
+    if (pos > Duration.zero) {
+      try {
+        await seek(pos);
+      } catch (_) {}
+    }
+    if (!wasPlaying) {
+      try {
+        await pause();
+      } catch (_) {}
+    }
+    notifyListeners();
   }
 
   @override

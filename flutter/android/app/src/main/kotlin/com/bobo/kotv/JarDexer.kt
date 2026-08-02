@@ -7,8 +7,11 @@ import java.io.File
 import java.util.zip.ZipFile
 
 /**
- * 把仅含 .class 的 JVM 站点 jar 转成含 classes.dex 的 jar（ART DexClassLoader 可加载）。
+ * 站点 jar 是 PC/安卓**通用**的 JVM `.class` 包（不含 dex）。
+ * 本对象在 Android 上用 dalvik-dx 转成含 `classes.dex` 的 sealed jar，供 ART DexClassLoader 加载。
  * 必须在 App ClassLoader 内调用（dalvik-dx 是 app 依赖，bridge DexCL 里 Class.forName 会找不到）。
+ *
+ * [jarHasDex] 分支仅用于命中本机已转换缓存，或异常输入；正常站点 jar 一律走 dx。
  */
 object JarDexer {
   private const val TAG = "KotvJarDexer"

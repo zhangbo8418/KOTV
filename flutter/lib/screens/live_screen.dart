@@ -14,6 +14,7 @@ import '../player/ijk_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
+import '../player/mpv_opts.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
@@ -62,7 +63,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   MediaKitPlayback _ensureMpv() {
     _mkPlayer ??= Player();
-    _mk ??= MediaKitPlayback(_mkPlayer!);
+    _mk ??= MediaKitPlayback(_mkPlayer!, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
     return _mk!;
   }
 
@@ -114,6 +115,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _status = '点击左侧换台 · 点击右侧换源/设置';
   String _title = '选择频道开始播放';
   String _decodeMode = 'auto';
+  KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   String _playerVal = kotvDefaultLivePlayer();
   String _playUrl = '';
   Map<String, String>? _playHeaders;
@@ -157,6 +159,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
         final decode = '${settings['playerDecode'] ?? 'auto'}'.trim();
         if (decode.isNotEmpty) _decodeMode = decode;
+        _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
         var playerVal = '${settings['playerLive'] ?? ''}'.trim();
         if (playerVal.isEmpty) {
           playerVal = kotvDefaultLivePlayer();

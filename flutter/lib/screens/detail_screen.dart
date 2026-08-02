@@ -13,6 +13,7 @@ import '../player/ijk_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
+import '../player/mpv_opts.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
@@ -64,6 +65,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   String _status = '选择剧集开始播放';
   String _playUrl = '';
   String _decodeMode = 'auto';
+  KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   bool _danmakuOn = false;
   bool _ambientOn = false;
   bool _stableVolumeOn = false;
@@ -172,7 +174,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
     final player = Player();
     _mkPlayer = player;
-    _mk = MediaKitPlayback(player);
+    _mk = MediaKitPlayback(player, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
     _playingSub = player.stream.playing.listen((_) {
       if (!mounted || _playUrl.isEmpty || !_useMpv) return;
       _syncPlayStatus();
@@ -373,6 +375,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
         final decode = '${settings['playerDecode'] ?? 'auto'}';
         if (decode.isNotEmpty) _decodeMode = decode;
+        _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
         _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';

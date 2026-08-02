@@ -34,6 +34,7 @@ class ExoPlayback extends KotvPlayback {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _repeatOne = false;
+  String _decodeMode = 'auto';
   String? _lastError;
 
   final _posCtrl = StreamController<Duration>.broadcast();
@@ -156,6 +157,7 @@ class ExoPlayback extends KotvPlayback {
         'headers': _headers,
         'mime': _guessMime(url),
         'drm': drm,
+        'decodeMode': _decodeMode,
       });
       await _ch.invokeMethod('setVolume', {'volume': (_volume / 100).clamp(0.0, 1.0)});
       await _ch.invokeMethod('setRate', {'rate': _rate});
@@ -231,7 +233,18 @@ class ExoPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> setDecodeMode(String mode) async {}
+  Future<void> setDecodeMode(String mode) async {
+    final m = mode.trim().toLowerCase();
+    _decodeMode = switch (m) {
+      'soft' || 'software' || 'sw' => 'soft',
+      'hard' || 'hardware' || 'hw' => 'hard',
+      _ => 'auto',
+    };
+    try {
+      await _ch.invokeMethod('setDecodeMode', {'mode': _decodeMode});
+    } catch (_) {}
+    notifyListeners();
+  }
 
   @override
   List<KotvTrack> get audioTracks => const [];

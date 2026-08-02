@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'kotv_vlc_paths.dart';
+import 'mpv_opts.dart';
 import 'play_headers.dart';
 
 /// 统一播放后端：MPV(media_kit) 与 VLC(同进程 Texture) 共用同一套菜单/控件。
@@ -92,8 +93,13 @@ String _trackLabel(dynamic t) {
 
 /// media_kit / libmpv
 class MediaKitPlayback extends KotvPlayback {
-  MediaKitPlayback(this.player, {VideoController? controller})
-      : controller = controller ?? VideoController(player) {
+  MediaKitPlayback(this.player, {VideoController? controller, KotvMpvOpts? opts})
+      : _opts = opts ?? const KotvMpvOpts(),
+        controller = controller ??
+            VideoController(
+              player,
+              configuration: (opts ?? const KotvMpvOpts()).videoControllerConfiguration(),
+            ) {
     _subs.add(player.stream.playing.listen((_) => notifyListeners()));
     _subs.add(player.stream.position.listen((_) => notifyListeners()));
     _subs.add(player.stream.duration.listen((_) => notifyListeners()));
@@ -102,13 +108,38 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
+    unawaited(_opts.applyAfterAttach(player));
   }
 
   final Player player;
   VideoController controller;
+  KotvMpvOpts _opts;
   final List<StreamSubscription> _subs = [];
   String _url = '';
   Map<String, String> _headers = const {};
+
+  KotvMpvOpts get opts => _opts;
+
+  /// 热更新 Vulkan / gpu-next / conf（不重开 URL 时仅改属性；改 vo/hwdec 会重建 VideoController）。
+  Future<void> applyMpvOpts(KotvMpvOpts next, {bool reopen = false}) async {
+    final voChanged = next.gpuNext != _opts.gpuNext || next.decodeMode != _opts.decodeMode;
+    _opts = next;
+    if (voChanged) {
+      try {
+        await (player.platform as dynamic).setProperty('hwdec', next.hwdecValue());
+      } catch (_) {}
+      controller = VideoController(player, configuration: next.videoControllerConfiguration());
+    }
+    await next.applyAfterAttach(player);
+    if (reopen && _url.isNotEmpty) {
+      final pos = position;
+      final wasPlaying = playing;
+      await player.open(Media(_url, httpHeaders: _headers.isEmpty ? const {} : _headers));
+      await player.seek(pos);
+      if (wasPlaying) await player.play();
+    }
+    notifyListeners();
+  }
 
   @override
   String get engineLabel => '内置 MPV';
@@ -166,21 +197,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> setDecodeMode(String mode) async {
-    try {
-      await (player.platform as dynamic).setProperty('hwdec', mode == 'soft' ? 'no' : 'auto');
-    } catch (_) {}
-    controller = VideoController(
-      player,
-      configuration: VideoControllerConfiguration(enableHardwareAcceleration: mode != 'soft'),
-    );
-    if (_url.isNotEmpty) {
-      final pos = position;
-      final wasPlaying = playing;
-      await player.open(Media(_url, httpHeaders: _headers.isEmpty ? const {} : _headers));
-      await player.seek(pos);
-      if (wasPlaying) await player.play();
-    }
-    notifyListeners();
+    await applyMpvOpts(_opts.copyWith(decodeMode: mode), reopen: _url.isNotEmpty);
   }
 
   @override
