@@ -714,7 +714,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     } catch (_) {}
     if (_playUrl.isNotEmpty) {
       final pos = _playback.position;
-      await _openLiveUrl(_playUrl);
+      await _openLiveUrl(_playUrl, headers: _playHeaders);
       if (pos > Duration.zero) await _playback.seek(pos);
     }
   }
@@ -742,7 +742,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
     if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
       final pos = _playback.position;
-      await _openLiveUrl(_playUrl);
+      await _openLiveUrl(_playUrl, headers: _playHeaders);
       if (pos > Duration.zero) await _playback.seek(pos);
       if (mounted) setState(() {});
     }
