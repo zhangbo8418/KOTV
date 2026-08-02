@@ -20,7 +20,8 @@ public final class ChildFirstDexClassLoader extends DexClassLoader {
 
   @Override
   protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-    synchronized (getClassLoadingLock(name)) {
+    // Android SDK 的 ClassLoader stub 无 getClassLoadingLock（Java 7+ 桌面才有）
+    synchronized (this) {
       Class<?> loaded = findLoadedClass(name);
       if (loaded == null) {
         if (!isHostClass(name)) {
