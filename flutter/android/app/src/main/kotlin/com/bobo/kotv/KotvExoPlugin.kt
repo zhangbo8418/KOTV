@@ -482,7 +482,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         -> MimeTypes.APPLICATION_M3U8
         PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
         PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
-        -> MimeTypes.APPLICATION_OCTET_STREAM
+        -> "application/octet-stream" // Media3 无 APPLICATION_OCTET_STREAM 常量；清 mime 提示让其嗅探
         else -> null
       }
     }
