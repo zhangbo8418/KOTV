@@ -459,39 +459,8 @@ public class SpiderBridge {
         } catch (Throwable t) {
             throw new IOException("getCodeCacheDir failed", t);
         }
-        // ART 10+：可写路径禁止作 dex。对齐 TV：拷到 codeCache 并 setReadOnly。
-        File sealedDir = new File(codeCache, "kotv_site_jars");
-        if (!sealedDir.isDirectory() && !sealedDir.mkdirs()) {
-            throw new IOException("cannot create " + sealedDir);
-        }
-        String key = md5Hex(jarFile.getAbsolutePath() + ":" + jarFile.length() + ":" + jarFile.lastModified());
-        boolean hasDex = jarHasDex(jarFile);
-        File sealed;
-        if (hasDex) {
-            sealed = new File(sealedDir, key + ".jar");
-            if (!sealed.isFile() || sealed.length() != jarFile.length()) {
-                sealCopyReadonly(jarFile, sealed);
-            }
-        } else {
-            // 桌面 JVM jar（仅 .class）：ART DexClassLoader 看不到类 → ClassNotFoundException。
-            // 用应用内 dalvik-dx 转成含 classes.dex 的 jar。
-            sealed = new File(sealedDir, key + "-dx.jar");
-            if (!sealed.isFile() || sealed.length() == 0L || !jarHasDex(sealed)) {
-                File tmp = new File(sealed.getAbsolutePath() + ".tmp");
-                try {
-                    tmp.delete();
-                    sealed.delete();
-                } catch (Throwable ignored) {
-                }
-                convertJvmJarToDexJar(jarFile, tmp);
-                if (!tmp.renameTo(sealed)) {
-                    Files.copy(tmp.toPath(), sealed.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    tmp.delete();
-                }
-                markReadonly(sealed);
-            }
-            System.err.println("site jar dexed: " + jarFile.getName() + " -> " + sealed.getName());
-        }
+        // dex 转换必须在 App ClassLoader（JarDexer + dalvik-dx）；bridge 自身 DexCL 看不到 dx。
+        File sealed = resolveSealedSiteJar(c, jarFile);
         File opt = new File(codeCache, "kotv_site_dex");
         if (!opt.isDirectory() && !opt.mkdirs()) {
             throw new IOException("cannot create dex opt dir: " + opt);
@@ -506,76 +475,36 @@ public class SpiderBridge {
         );
     }
 
-    private static boolean jarHasDex(File jarFile) {
-        try (JarFile jar = new JarFile(jarFile)) {
-            java.util.Enumeration<java.util.jar.JarEntry> en = jar.entries();
-            while (en.hasMoreElements()) {
-                String name = en.nextElement().getName();
-                if (name.startsWith("classes") && name.endsWith(".dex")) {
-                    return true;
+    /** 委托 com.bobo.kotv.JarDexer（App classpath），失败再回退本地 seal（仅已有 dex 的 jar）。 */
+    private static File resolveSealedSiteJar(Context c, File jarFile) throws Exception {
+        ClassLoader appCl;
+        try {
+            Method m = c.getClass().getMethod("getClassLoader");
+            appCl = (ClassLoader) m.invoke(c);
+        } catch (Throwable t) {
+            appCl = c.getClass().getClassLoader();
+        }
+        if (appCl == null) {
+            appCl = Thread.currentThread().getContextClassLoader();
+        }
+        try {
+            Class<?> dexer = Class.forName("com.bobo.kotv.JarDexer", true, appCl);
+            Method ensure = dexer.getMethod("ensureSiteDexJar", Context.class, String.class);
+            Object path = ensure.invoke(null, c, jarFile.getAbsolutePath());
+            if (path != null) {
+                File sealed = new File(path.toString());
+                if (sealed.isFile() && sealed.length() > 0L) {
+                    return sealed;
                 }
             }
-        } catch (Throwable ignored) {
-        }
-        return false;
-    }
-
-    private static void sealCopyReadonly(File src, File sealed) throws IOException {
-        File tmp = new File(sealed.getAbsolutePath() + ".tmp");
-        try {
-            tmp.delete();
-            sealed.delete();
-        } catch (Throwable ignored) {
-        }
-        Files.copy(src.toPath(), tmp.toPath());
-        if (!tmp.renameTo(sealed)) {
-            Files.copy(tmp.toPath(), sealed.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            tmp.delete();
-        }
-        markReadonly(sealed);
-    }
-
-    private static void markReadonly(File f) {
-        if (f.setReadOnly()) return;
-        try {
-            Runtime.getRuntime().exec(new String[]{"chmod", "444", f.getAbsolutePath()}).waitFor();
-        } catch (Throwable ignored) {
-        }
-    }
-
-    /**
-     * 把仅含 .class 的 JVM jar 转成含 classes.dex 的 jar（依赖 App 的 dalvik-dx）。
-     * SpiderBridge 由 DexClassLoader 加载，Class.forName 会经 parent 找到应用 classpath。
-     */
-    private static void convertJvmJarToDexJar(File jvmJar, File outJar) throws Exception {
-        Class<?> argsClz;
-        Class<?> mainClz;
-        try {
-            argsClz = Class.forName("com.android.dx.command.dexer.Main$Arguments");
-            mainClz = Class.forName("com.android.dx.command.dexer.Main");
         } catch (ClassNotFoundException e) {
             throw new IOException(
-                    "site jar has no classes.dex and dalvik-dx missing: " + jvmJar.getName()
-                            + " (PC JVM jars need on-device dex). Rebuild Android app with dalvik-dx dep.",
-                    e);
+                    "JarDexer missing; rebuild Android app. site jar=" + jarFile.getName(), e);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cauze = e.getCause() != null ? e.getCause() : e;
+            throw new IOException("JarDexer failed: " + cauze.getMessage(), cauze);
         }
-        Object args = argsClz.getDeclaredConstructor().newInstance();
-        argsClz.getField("fileNames").set(args, new String[]{jvmJar.getAbsolutePath()});
-        argsClz.getField("outName").set(args, outJar.getAbsolutePath());
-        argsClz.getField("jarOutput").setBoolean(args, true);
-        try {
-            argsClz.getField("multiDex").setBoolean(args, true);
-        } catch (Throwable ignored) {
-        }
-        try {
-            argsClz.getField("coreLibrary").setBoolean(args, true);
-        } catch (Throwable ignored) {
-        }
-        Object rc = mainClz.getMethod("run", argsClz).invoke(null, args);
-        int code = rc instanceof Integer ? (Integer) rc : -1;
-        if (code != 0 || !outJar.isFile() || outJar.length() == 0L || !jarHasDex(outJar)) {
-            throw new IOException("dalvik-dx failed code=" + code + " for " + jvmJar.getName());
-        }
+        throw new IOException("JarDexer returned empty for " + jarFile.getName());
     }
 
     /**

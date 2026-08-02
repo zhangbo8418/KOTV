@@ -399,6 +399,20 @@ func (s *pySpider) interrupt() {
 	s.epoch.Add(1)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if goruntime.GOOS == "android" {
+		// 清 Chaquopy 进程内 session，避免换源后复用旧 Spider
+		client := &http.Client{Timeout: 2 * time.Second}
+		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:9979/py/interrupt", bytes.NewReader([]byte("{}")))
+		if err == nil {
+			resp, err := client.Do(req)
+			if err == nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
+		}
+		s.inited = false
+		return
+	}
 	if p := s.proc.Load(); p != nil {
 		killProcessTree(p)
 	}

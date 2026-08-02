@@ -18,9 +18,12 @@ class Spider(metaclass=ABCMeta):
     _instance = None
 
     def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+        # 必须写在子类自己的 __dict__：否则多站点共用基类 _instance，Android 会话缓存会串源。
+        inst = cls.__dict__.get("_instance")
+        if inst is None:
+            inst = super().__new__(cls)
+            cls._instance = inst
+        return inst
 
     def __init__(self):
         self.extend = ""

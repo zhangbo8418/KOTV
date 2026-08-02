@@ -71,7 +71,8 @@ class SpiderService private constructor(
     if (body.isBlank() &&
       uri != "/thunder/progress" &&
       uri != "/thunder/clear" &&
-      uri != "/jar/interrupt"
+      uri != "/jar/interrupt" &&
+      uri != "/py/interrupt"
     ) {
       return newJsonError(Status.BAD_REQUEST, "empty body")
     }
@@ -89,6 +90,12 @@ class SpiderService private constructor(
 
         "/jar/interrupt" -> {
           JarLoader.clear()
+          PyLoader.clearSessions()
+          json(Status.OK, JSONObject().put("ok", true).toString())
+        }
+
+        "/py/interrupt" -> {
+          PyLoader.clearSessions()
           json(Status.OK, JSONObject().put("ok", true).toString())
         }
 

@@ -30,6 +30,8 @@ object JarLoader {
     synchronized(this) {
       if (bridgeCall != null) return
       appContext = context.applicationContext
+      // 确保 JarDexer/dalvik-dx 被编进 APK，供 SpiderBridge 反射调用
+      check(JarDexer::class.java.name.isNotEmpty())
 
       val jarDir = File(context.codeCacheDir, "kotv_bridge").apply { mkdirs() }
       val jarFile = File(jarDir, "spider-bridge.jar")

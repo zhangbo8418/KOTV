@@ -6,12 +6,16 @@ import com.chaquo.python.android.AndroidPlatform
 import org.json.JSONObject
 
 /**
- * Chaquopy 执行 Python spider runner：
- * 复用 KOTV 自带 `pyrunner.py` 的 stdin/stdout JSON 协议。
+ * Chaquopy 执行 Python spider。
  *
- * 设计目标：不改 Go 侧 Python 协议，仅把“进程 IO”替换成“同进程 Python exec + StringIO”。
+ * 桌面 pyrunner 常驻，init 后的 host/session 会保留。
+ * Android 若每次冷 exec，会出现相对 URL 无 scheme、headers 拼进 URL 等错误。
+ * 这里在解释器里缓存 session（按 siteKey），跨 /py/call 复用同一 Spider 实例。
  */
 object PyLoader {
+
+  @Volatile
+  private var bridgeInstalled = false
 
   fun isStarted(): Boolean = Python.isStarted()
 
@@ -22,107 +26,132 @@ object PyLoader {
   }
 
   fun callPython(req: JSONObject): String {
-    val runnerPath = req.getString("runnerPath")
-    val scriptPath = req.getString("scriptPath")
-    val key = req.getString("key")
-    val ext = req.optString("ext", "")
-    val api = req.getString("api")
-    val cacheRoot = req.getString("cacheRoot")
-    val proxyPort = req.optInt("proxyPort", 9978)
-
-    val method = req.getString("method")
-    val argsObj = req.optJSONObject("args") ?: JSONObject()
-
-    val id = 1
-    val stdinLine = JSONObject()
-      .put("id", id)
-      .put("method", method)
-      .put("args", argsObj)
-      .toString()
-
     val py = ensurePythonStarted()
+    ensureBridge(py)
+
     val main = py.getModule("__main__")
+    main.put("__kotv_req", req.toString())
 
-    // Chaquopy 17：用 put(Object) 而非已收紧签名的 set(PyObject)
-    main.put("__runner_path", runnerPath)
-    main.put("__script_path", scriptPath)
-    main.put("__key", key)
-    main.put("__ext", ext)
-    main.put("__api", api)
-    main.put("__cache_root", cacheRoot)
-    main.put("__stdin_line", stdinLine)
-    main.put("__proxy_port", proxyPort)
-
-    // 重要：pyrunner.py 里最后是 for line in sys.stdin: ...，因此我们让 stdin 在一行后 EOF。
-    // 勿用空 dict 作 exec globals：部分 spider 依赖 __builtins__/包导入路径。
-    val wrapper = """
-import io, sys, os, traceback
-
-__old_argv = sys.argv
-__old_stdin = sys.stdin
-__old_stdout = sys.stdout
-__old_stderr = sys.stderr
-__err = ""
-
-sys.argv = ["pyrunner.py", __script_path, __key, __ext, __api, __cache_root]
-sys.stdin = io.StringIO(__stdin_line + "\n")
-sys.stdout = io.StringIO()
-sys.stderr = io.StringIO()
-
-os.environ["KOTV_PROXY_PORT"] = str(__proxy_port)
-for p in (os.path.dirname(__runner_path), os.path.dirname(__script_path), __cache_root):
-    if p and p not in sys.path:
-        sys.path.insert(0, p)
-
-code = open(__runner_path, "r", encoding="utf-8", errors="ignore").read()
-g = {"__name__": "__main__", "__file__": __runner_path, "__builtins__": __builtins__}
-try:
-    exec(compile(code, __runner_path, "exec"), g)
-except Exception:
-    __err = traceback.format_exc()
-finally:
-    __out = sys.stdout.getvalue()
-    if not __err:
-        __err = sys.stderr.getvalue()
-    sys.argv = __old_argv
-    sys.stdin = __old_stdin
-    sys.stdout = __old_stdout
-    sys.stderr = __old_stderr
+    val runner = """
+__kotv_out = kotv_py_dispatch(__kotv_req)
 """.trimIndent()
 
-    // builtins.exec(code, globals)：globals 必须是 dict，不能传 module
-    val globals = main.get("__dict__")
-    py.builtins.callAttr("exec", wrapper, globals)
-    val err = try {
-      main.get("__err")?.toString()?.trim().orEmpty()
-    } catch (_: Throwable) {
-      ""
-    }
+    py.builtins.callAttr("exec", runner, main.get("__dict__"))
+
     val out = try {
-      main.get("__out").toString().trim()
+      main.get("__kotv_out")?.toString()?.trim().orEmpty()
     } catch (_: Throwable) {
       ""
     }
-    if (err.isNotEmpty() && out.lines().none { it.trim().startsWith("{") }) {
-      throw RuntimeException(err.take(2000))
-    }
-    val firstLine = out.lines().firstOrNull { it.trim().startsWith("{") }.orEmpty()
-    if (firstLine.isEmpty()) {
-      if (out.isNotEmpty()) return out
-      throw RuntimeException(if (err.isNotEmpty()) err.take(2000) else "python produced no output")
+    if (out.isEmpty()) {
+      throw RuntimeException("python produced no output")
     }
 
-    val resp = JSONObject(firstLine)
+    val resp = JSONObject(out)
     if (!resp.optBoolean("ok", false)) {
-      throw RuntimeException(resp.optString("error", "python call failed"))
+      throw RuntimeException(resp.optString("error", "python call failed").take(2000))
     }
-
     if (!resp.has("result") || resp.isNull("result")) return ""
     val result = resp.get("result")
-    // 保持 JSON 文本：Go 侧按字符串解析 list/class 等字段
     return when (result) {
       is JSONObject, is org.json.JSONArray -> result.toString()
       else -> result.toString()
+    }
+  }
+
+  fun clearSessions() {
+    if (!Python.isStarted()) return
+    try {
+      val py = Python.getInstance()
+      ensureBridge(py)
+      py.builtins.callAttr("exec", "kotv_py_clear()", py.getModule("__main__").get("__dict__"))
+    } catch (_: Throwable) {
+    }
+  }
+
+  private fun ensureBridge(py: Python) {
+    if (bridgeInstalled) return
+    synchronized(this) {
+      if (bridgeInstalled) return
+      val main = py.getModule("__main__")
+      val bootstrap = """
+import importlib.util, json, os, sys, traceback, types
+
+_KOTV_PY_SESSIONS = {}
+
+def kotv_py_clear():
+    _KOTV_PY_SESSIONS.clear()
+
+def _kotv_load_session(runner_path, script_path, key, ext, api, cache_root, proxy_port):
+    os.environ["KOTV_PROXY_PORT"] = str(proxy_port)
+    os.environ["KOTV_PY_CACHE"] = str(cache_root)
+    for p in (os.path.dirname(runner_path), os.path.dirname(script_path), cache_root):
+        if p and p not in sys.path:
+            sys.path.insert(0, p)
+
+    # 每次加载用唯一模块名，避免换源/改 ext 后命中旧 sys.modules
+    safe = "".join(ch if ch.isalnum() else "_" for ch in key)[:40]
+    mod_name = "kotv_pyrunner_%s_%d" % (safe, len(_KOTV_PY_SESSIONS) + 1)
+    old_argv, old_stdin = sys.argv, sys.stdin
+    try:
+        sys.argv = ["pyrunner.py", script_path, key, ext, api, cache_root]
+        # pyrunner 仅在 __name__ == "__main__" 时跑 repl；spec 加载不会进 REPL
+        spec = importlib.util.spec_from_file_location(mod_name, runner_path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)
+    finally:
+        sys.argv = old_argv
+        sys.stdin = old_stdin
+
+    return {
+        "mod": mod,
+        "script": script_path,
+        "api": api,
+        "ext": ext,
+        "cache": cache_root,
+        "inited": False,
+    }
+
+def kotv_py_dispatch(req_json):
+    try:
+        req = json.loads(req_json)
+        runner_path = req["runnerPath"]
+        script_path = req["scriptPath"]
+        key = req["key"]
+        ext = req.get("ext") or ""
+        api = req["api"]
+        cache_root = req["cacheRoot"]
+        proxy_port = int(req.get("proxyPort") or 9978)
+        method = req["method"]
+        args = req.get("args") or {}
+
+        sess = _KOTV_PY_SESSIONS.get(key)
+        if (
+            sess is None
+            or sess.get("script") != script_path
+            or sess.get("api") != api
+            or sess.get("ext") != ext
+            or sess.get("cache") != cache_root
+        ):
+            sess = _kotv_load_session(runner_path, script_path, key, ext, api, cache_root, proxy_port)
+            _KOTV_PY_SESSIONS[key] = sess
+
+        mod = sess["mod"]
+        # 非 init：确保先 init 一次（对齐桌面常驻进程）
+        if method != "init" and not sess.get("inited"):
+            mod.invoke("init", {"extend": ext})
+            sess["inited"] = True
+        result = mod.invoke(method, args)
+        if method == "init":
+            sess["inited"] = True
+        return json.dumps({"ok": True, "result": result}, ensure_ascii=False)
+    except Exception as exc:
+        traceback.print_exc()
+        return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
+""".trimIndent()
+      py.builtins.callAttr("exec", bootstrap, main.get("__dict__"))
+      bridgeInstalled = true
     }
   }
 
