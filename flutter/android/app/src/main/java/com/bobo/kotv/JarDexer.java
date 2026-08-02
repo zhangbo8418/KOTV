@@ -66,6 +66,16 @@ public final class JarDexer {
     sealed.delete();
 
     Log.i(TAG, "dalvik-dx convert " + src.getName() + " -> " + sealed.getName());
+    int classMajor = peekClassMajor(src);
+    if (classMajor > 52) {
+      throw new IllegalStateException(
+          "dalvik-dx cannot convert class major="
+              + classMajor
+              + " (Java "
+              + (classMajor - 44)
+              + "); rebuild spider jar with --release 8 / KOTV-Bytecode=8. jar="
+              + src.getName());
+    }
     Main.Arguments args = new Main.Arguments();
     args.fileNames = new String[] {src.getAbsolutePath()};
     args.outName = tmp.getAbsolutePath();
@@ -80,7 +90,12 @@ public final class JarDexer {
     }
     int code = Main.run(args);
     if (code != 0 || !tmp.isFile() || tmp.length() == 0L || !jarHasDex(tmp)) {
-      throw new IllegalStateException("dalvik-dx failed code=" + code + " for " + src.getName());
+      throw new IllegalStateException(
+          "dalvik-dx failed code="
+              + code
+              + " for "
+              + src.getName()
+              + (classMajor > 0 ? " (classMajor=" + classMajor + ")" : ""));
     }
     if (!tmp.renameTo(sealed)) {
       sealCopy(tmp, sealed);
@@ -103,6 +118,24 @@ public final class JarDexer {
     } catch (Throwable ignored) {
     }
     return false;
+  }
+
+  /** 抽检 jar 内第一个 .class 的 major version；失败返回 0。 */
+  private static int peekClassMajor(File jarFile) {
+    try (ZipFile zf = new ZipFile(jarFile)) {
+      Enumeration<? extends ZipEntry> en = zf.entries();
+      while (en.hasMoreElements()) {
+        ZipEntry e = en.nextElement();
+        if (e.isDirectory() || !e.getName().endsWith(".class")) continue;
+        try (java.io.InputStream in = zf.getInputStream(e)) {
+          byte[] hdr = new byte[8];
+          if (in.read(hdr) != 8) continue;
+          return ((hdr[6] & 0xff) << 8) | (hdr[7] & 0xff);
+        }
+      }
+    } catch (Throwable ignored) {
+    }
+    return 0;
   }
 
   private static void sealCopy(File src, File sealed) throws Exception {
