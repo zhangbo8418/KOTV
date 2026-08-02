@@ -57,6 +57,13 @@ object JarLoader {
       } catch (t: Throwable) {
         Log.w(TAG, "setAndroidContext missing/failed", t)
       }
+      // 注入 App 侧 JarDexer：bridge DexCL 内 Class.forName 应用类会失败（红米实测）
+      try {
+        clazz.getMethod("setSiteJarHelper", Any::class.java).invoke(null, JarDexer)
+      } catch (t: Throwable) {
+        Log.e(TAG, "setSiteJarHelper failed", t)
+        throw t
+      }
       bridgeCall = clazz.getMethod("call", String::class.java)
       Log.i(TAG, "bridge loaded: ${jarFile.absolutePath}")
     }
@@ -64,12 +71,16 @@ object JarLoader {
 
   fun callBridge(inputJson: String): String {
     val m = bridgeCall ?: error("bridge not loaded")
-    // 每次调用确保 Context（进程内可能被 GC 语义打乱时再设一次）
-    appContext?.let { ctx ->
+    val ctx = appContext
+    ctx?.let { c ->
       try {
-        m.declaringClass.getMethod("setAndroidContext", Context::class.java).invoke(null, ctx)
+        m.declaringClass.getMethod("setAndroidContext", Context::class.java).invoke(null, c)
       } catch (_: Throwable) {
       }
+    }
+    val oldCl = Thread.currentThread().contextClassLoader
+    if (ctx != null) {
+      Thread.currentThread().contextClassLoader = ctx.classLoader
     }
     return try {
       val out = m.invoke(null, inputJson)
@@ -81,6 +92,8 @@ object JarLoader {
     } catch (t: java.lang.reflect.InvocationTargetException) {
       val c = t.cause ?: t
       throw RuntimeException(c.message ?: c.toString(), c)
+    } finally {
+      Thread.currentThread().contextClassLoader = oldCl
     }
   }
 

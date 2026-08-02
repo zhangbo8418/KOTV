@@ -935,7 +935,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final pageEps = eps.skip(_epPage * _epSize).take(_epSize).toList();
     final director = d.director.isEmpty ? '暂无' : d.director;
     final actor = d.actor.isEmpty ? '暂无' : d.actor;
-    final intro = d.content.isEmpty ? '暂无' : d.content;
+    final introRaw = d.content.isEmpty ? '' : d.content;
+    final intro = introRaw
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final introText = intro.isEmpty ? '暂无' : intro;
     final compact = KotvLayout.isCompact(context);
     final p = KotvPalette.of(context);
     final fg = p.fg;
@@ -987,7 +992,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            '简介：$intro',
+            '简介：$introText',
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: muted, fontSize: 15, height: 1.5),
@@ -1341,7 +1346,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               '年份：${d.year.isEmpty ? '暂无' : d.year}\n'
               '地区：${d.area.isEmpty ? '暂无' : d.area}\n'
               '备注：${d.remarks.isEmpty ? '暂无' : d.remarks}\n\n'
-              '${d.content.isEmpty ? '暂无简介' : d.content}',
+              '${d.content.isEmpty ? '暂无简介' : d.content.replaceAll(RegExp(r'<[^>]*>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim()}',
               style: TextStyle(color: p.muted, height: 1.55, fontSize: 15),
             ),
           ),

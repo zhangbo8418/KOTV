@@ -91,6 +91,13 @@ dependencies {
     implementation "org.nanohttpd:nanohttpd:2.3.1"
     // 站点 spider jar 若只有 .class（桌面 JVM 包），ART 需先转 dex
     implementation "com.jakewharton.android.repackaged:dalvik-dx:9.0.0_r3"
+    // 对齐 TV：Exo 走 OkHttp DataSource（video_player 默认 DefaultHttp 易 Source error）
+    def media3 = "1.4.1"
+    implementation "androidx.media3:media3-exoplayer:$media3"
+    implementation "androidx.media3:media3-exoplayer-hls:$media3"
+    implementation "androidx.media3:media3-exoplayer-dash:$media3"
+    implementation "androidx.media3:media3-datasource-okhttp:$media3"
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
     // TV 同款迅雷 SDK（含 libxl_*.so）
     implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
 }

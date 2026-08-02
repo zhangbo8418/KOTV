@@ -11,6 +11,7 @@ class MainActivity : FlutterActivity() {
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
+    flutterEngine.plugins.add(KotvExoPlugin())
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kotv_android_spider")
       .setMethodCallHandler { call, result ->
         when (call.method) {

@@ -446,6 +446,13 @@ public class SpiderBridge {
         );
     }
 
+    private static volatile Object siteJarHelper;
+
+    /** Android：由 JarLoader 注入 App 侧 JarDexer（避免 bridge DexCL 内 Class.forName 找不到）。 */
+    public static void setSiteJarHelper(Object helper) {
+        siteJarHelper = helper;
+    }
+
     private static ClassLoader createDexLoader(File jarFile) throws Exception {
         if (!jarFile.isFile() || jarFile.length() == 0L) {
             throw new IOException("site jar missing: " + jarFile);
@@ -459,14 +466,13 @@ public class SpiderBridge {
         } catch (Throwable t) {
             throw new IOException("getCodeCacheDir failed", t);
         }
-        // dex 转换必须在 App ClassLoader（JarDexer + dalvik-dx）；bridge 自身 DexCL 看不到 dx。
         File sealed = resolveSealedSiteJar(c, jarFile);
         File opt = new File(codeCache, "kotv_site_dex");
         if (!opt.isDirectory() && !opt.mkdirs()) {
             throw new IOException("cannot create dex opt dir: " + opt);
         }
         Constructor<?> ctor = dcl.getConstructor(String.class, String.class, String.class, ClassLoader.class);
-        // librarySearchPath=opt：对齐 TV JarLoader（部分蜘蛛带 .so）
+        // 对齐 TV：libraryPath=opt；parent=host bridge CL（含 Spider ABI）
         return (ClassLoader) ctor.newInstance(
                 sealed.getAbsolutePath(),
                 opt.getAbsolutePath(),
@@ -475,34 +481,33 @@ public class SpiderBridge {
         );
     }
 
-    /** 委托 com.bobo.kotv.JarDexer（App classpath），失败再回退本地 seal（仅已有 dex 的 jar）。 */
+    /** 委托 App 注入的 JarDexer.ensureSiteDexJar（不 Class.forName 应用类）。 */
     private static File resolveSealedSiteJar(Context c, File jarFile) throws Exception {
-        ClassLoader appCl;
-        try {
-            Method m = c.getClass().getMethod("getClassLoader");
-            appCl = (ClassLoader) m.invoke(c);
-        } catch (Throwable t) {
-            appCl = c.getClass().getClassLoader();
-        }
-        if (appCl == null) {
-            appCl = Thread.currentThread().getContextClassLoader();
+        Object helper = siteJarHelper;
+        if (helper == null) {
+            throw new IOException(
+                    "site jar helper not registered (JarLoader must call setSiteJarHelper). jar="
+                            + jarFile.getName());
         }
         try {
-            Class<?> dexer = Class.forName("com.bobo.kotv.JarDexer", true, appCl);
-            Method ensure = dexer.getMethod("ensureSiteDexJar", Context.class, String.class);
-            Object path = ensure.invoke(null, c, jarFile.getAbsolutePath());
+            Method ensure = helper.getClass().getMethod("ensureSiteDexJar", Context.class, String.class);
+            Object path;
+            try {
+                path = ensure.invoke(null, c, jarFile.getAbsolutePath());
+            } catch (Throwable ignored) {
+                path = ensure.invoke(helper, c, jarFile.getAbsolutePath());
+            }
             if (path != null) {
                 File sealed = new File(path.toString());
                 if (sealed.isFile() && sealed.length() > 0L) {
                     return sealed;
                 }
             }
-        } catch (ClassNotFoundException e) {
-            throw new IOException(
-                    "JarDexer missing; rebuild Android app. site jar=" + jarFile.getName(), e);
         } catch (java.lang.reflect.InvocationTargetException e) {
             Throwable cauze = e.getCause() != null ? e.getCause() : e;
             throw new IOException("JarDexer failed: " + cauze.getMessage(), cauze);
+        } catch (NoSuchMethodException e) {
+            throw new IOException("JarDexer.ensureSiteDexJar missing on helper", e);
         }
         throw new IOException("JarDexer returned empty for " + jarFile.getName());
     }
