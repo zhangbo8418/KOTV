@@ -38,6 +38,10 @@ public class Path {
         return Environment.getExternalStorageDirectory();
     }
 
+    public static File download() {
+        return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+    }
+
     public static File cache() {
         return Init.context().getCacheDir();
     }
@@ -52,6 +56,13 @@ public class Path {
 
     public static File tv() {
         return mkdir(new File(root(), "TV"));
+    }
+
+    /** 站点凭证等：TV/.name（CatVodSpider/KOTV 站点常用） */
+    public static File tv(String name) {
+        if (name == null) name = "";
+        if (!name.isEmpty() && !name.startsWith(".")) name = "." + name;
+        return new File(tv(), name);
     }
 
     public static File so() {
@@ -182,6 +193,10 @@ public class Path {
         } catch (IOException e) {
             return file;
         }
+    }
+
+    public static File write(File file, String data) {
+        return write(file, data == null ? new byte[0] : data.getBytes(StandardCharsets.UTF_8));
     }
 
     public static File write(File file, byte[] data) {

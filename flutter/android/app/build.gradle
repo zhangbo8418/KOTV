@@ -102,9 +102,20 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer-hls:$media3"
     implementation "androidx.media3:media3-exoplayer-dash:$media3"
     implementation "androidx.media3:media3-datasource-okhttp:$media3"
-    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    // 必须与 bridge/spider 同为 OkHttp 5.x：否则 App CL 上的 4.x 会盖住 bridge，
+    // PublicSuffixDatabase 二进制不兼容 → NoSuchFieldError: Companion
+    implementation "com.squareup.okhttp3:okhttp:5.4.0"
     // TV 同款迅雷 SDK（含 libxl_*.so）
     implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
+}
+
+configurations.configureEach {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == "com.squareup.okhttp3") {
+            details.useVersion("5.4.0")
+            details.because("align with spider-bridge OkHttp 5.4.0")
+        }
+    }
 }
 
 flutter {

@@ -21,7 +21,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.jar.JarFile;
 
 /**
  * CatVod JAR 爬虫桥接程序。
@@ -377,46 +376,12 @@ public class SpiderBridge {
     }
 
     /**
-     * ClassLoader lets the spider JAR carry its own implementation
-     * classes. Keep only the host ABI parent-first so desktop JARs do not
-     * accidentally bind to a different bridge-bundled Util/OkHttp version.
+     * Desktop site ClassLoader. Default parent-first（对齐 TV DexClassLoader）：
+     * 站点 jar 不含宿主 Util/OkHttp，由 bridge 提供。
      */
     private static final class SpiderClassLoader extends URLClassLoader {
-        private final boolean childFirst;
-
-        SpiderClassLoader(URL[] urls, ClassLoader parent, boolean childFirst) {
+        SpiderClassLoader(URL[] urls, ClassLoader parent) {
             super(urls, parent);
-            this.childFirst = childFirst;
-        }
-
-        @Override
-        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-            if (!childFirst) return super.loadClass(name, resolve);
-            synchronized (getClassLoadingLock(name)) {
-                Class<?> loaded = findLoadedClass(name);
-                if (loaded == null) {
-                    boolean hostClass = name.startsWith("java.")
-                            || name.startsWith("javax.")
-                            || name.startsWith("jdk.")
-                            || name.startsWith("sun.")
-                            || name.startsWith("android.")
-                            || name.startsWith("androidx.")
-                            || name.equals("com.github.catvod.crawler.Spider")
-                            || name.equals("com.github.catvod.crawler.SpiderNull")
-                            || name.equals("com.github.catvod.crawler.SpiderDebug")
-                            || name.equals("com.github.catvod.Init")
-                            || name.equals("com.github.catvod.Proxy");
-                    if (!hostClass) {
-                        try {
-                            loaded = findClass(name);
-                        } catch (ClassNotFoundException ignored) {
-                        }
-                    }
-                    if (loaded == null) loaded = super.loadClass(name, false);
-                }
-                if (resolve) resolveClass(loaded);
-                return loaded;
-            }
         }
     }
 
@@ -426,40 +391,18 @@ public class SpiderBridge {
         if (isArtVm()) {
             return createDexLoader(file);
         }
-        // 默认 child-first：对齐 TV DexClassLoader + FongMi PC manifest。
-        // parent-first 仅当清单显式声明 KOTV-ClassLoading: parent-first。
-        boolean childFirst = true;
-        if (file.isFile()) {
-            try (JarFile jar = new JarFile(file)) {
-                String mode = jar.getManifest() == null ? null
-                        : jar.getManifest().getMainAttributes().getValue("KOTV-ClassLoading");
-                if ("parent-first".equalsIgnoreCase(mode)) {
-                    childFirst = false;
-                } else if ("child-first".equalsIgnoreCase(mode)) {
-                    childFirst = true;
-                }
-            }
-        }
         return new SpiderClassLoader(
                 new URL[]{file.toURI().toURL()},
-                SpiderBridge.class.getClassLoader(),
-                childFirst
+                SpiderBridge.class.getClassLoader()
         );
     }
 
     /** App 侧注入：JarDexer.ensureSiteDexJar（Method 句柄，无需按类型名查找） */
     private static volatile Method siteJarEnsureMethod;
-    /** App 侧注入：ChildFirstDexClassLoader.create（与桌面 child-first 对齐） */
-    private static volatile Method siteDexLoaderCreateMethod;
 
     /** Android：JarLoader 注入 ensure 方法句柄。 */
     public static void setSiteJarEnsureMethod(Method method) {
         siteJarEnsureMethod = method;
-    }
-
-    /** Android：注入 child-first Dex ClassLoader 工厂。 */
-    public static void setSiteDexLoaderCreateMethod(Method method) {
-        siteDexLoaderCreateMethod = method;
     }
 
     private static ClassLoader createDexLoader(File jarFile) throws Exception {
@@ -469,17 +412,21 @@ public class SpiderBridge {
         Context c = ctx();
         File sealed = resolveSealedSiteJar(c, jarFile);
         ClassLoader parent = SpiderBridge.class.getClassLoader();
-
-        Method create = siteDexLoaderCreateMethod;
-        if (create == null) {
-            throw new IOException(
-                    "site dex loader not registered (JarLoader must call setSiteDexLoaderCreateMethod)");
+        // 对齐 TV：标准父优先 DexClassLoader；宿主 API 在 bridge/App CL。
+        File opt;
+        try {
+            java.lang.reflect.Method getCodeCache = c.getClass().getMethod("getCodeCacheDir");
+            Object dir = getCodeCache.invoke(c);
+            opt = new File(String.valueOf(dir), "kotv_site_dex");
+        } catch (Throwable t) {
+            opt = new File(System.getProperty("java.io.tmpdir"), "kotv_site_dex");
         }
-        Object cl = create.invoke(null, c, sealed.getAbsolutePath(), parent);
-        if (cl instanceof ClassLoader) {
-            return (ClassLoader) cl;
+        if (!opt.isDirectory() && !opt.mkdirs()) {
+            throw new IOException("cannot create dex opt dir: " + opt);
         }
-        throw new IOException("site dex loader factory returned non-ClassLoader: " + cl);
+        Class<?> dcl = Class.forName("dalvik.system.DexClassLoader");
+        return (ClassLoader) dcl.getConstructor(String.class, String.class, String.class, ClassLoader.class)
+                .newInstance(sealed.getAbsolutePath(), opt.getAbsolutePath(), opt.getAbsolutePath(), parent);
     }
 
     /**

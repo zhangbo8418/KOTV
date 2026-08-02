@@ -45,21 +45,31 @@ Go Engine
 
 工程现状：桌面/安卓已用独立 `cmd/engine` 进程；iOS 嵌入（gomobile/静态链）为下一刀，开发期可连接任意可达后端联调。
 
-## JAR：PC + Android 共用 bridge（不要照搬 TV）
+## JAR：PC + Android 对齐 FongMi TV / [CatVodSpider](https://github.com/FongMi/CatVodSpider)
 
-站点爬虫 jar **约定只含 JVM `.class`、不含 dex**（同一份给桌面和安卓用）。Android ART 不能直接加载，必须经 App 侧 `JarDexer`（嵌入 **D8 / `com.android.tools:r8`**）转成含 dex 的 sealed jar；站点字节码可用 Java 17。
+官方模型（TV `catvod` + CatVodSpider `app/`）：
 
-TV（FongMi）把 Spider ABI 放进 **App ClassLoader**。KOTV 要 **同一份 `spider-bridge.jar` 跑桌面 JVM 与 Android ART**，所以 Spider ABI 留在 bridge 内：
+| 角色 | 官方怎么做 |
+|--|--|
+| **宿主** | TV `catvod` 进 **App ClassLoader**：`Spider` ABI、`OkHttp`/`Util`/`Path`/`Init`/`Proxy`、okhttp3 **5.4.0**（`force`） |
+| **站点 jar** | `assembleRelease` + R8（`-flattenpackagehierarchy spider.merge`）+ apktool → 只留 `spider/**` + `js/**`（+ merge）的 **DEX** jar |
+| **加载** | 标准父优先 `DexClassLoader(parent = App.classLoader)`（`TV/.../JarLoader.java`） |
+| **站点自有 OkHttp/Util** | 源码在 CatVodSpider `app/.../net`、`utils`；**出包改名进 `spider.merge`**，不与宿主同 FQCN 冲突；包装内 `Spider.client()` → 宿主 OkHttp |
+
+KOTV 不能把 Spider 塞进 Flutter App（桌面要共用），因此把 **TV catvod 宿主角色**放进 **bridge**（源码以 TV catvod 为基准，并吸收 CatVodSpider 站点常用 API）：
 
 | | 桌面 | Android |
 |--|------|---------|
-| bridge | `URLClassLoader` / child-first | 打包期 d8 → APK assets → `DexClassLoader` |
-| 站点 jar | 直接加载 `.class` | **始终** `JarDexer`（D8）→ sealed dex jar → `DexClassLoader` |
-| 注入 | 无 | `JarLoader` → `setSiteJarEnsureMethod(Method)`（防 R8 把 JarDexer 收成 `u1.a`） |
+| bridge（≈ TV catvod） | `URLClassLoader` **父优先** | 打包期 d8 → APK assets → 父优先 `DexClassLoader` |
+| 站点 jar | JVM `.class` 瘦包（Java 17） | `JarDexer`（D8）→ sealed dex → 父优先 |
+| 注入 | 无 | `JarLoader` → `setSiteJarEnsureMethod`（D8 转站点 jar） |
+| OkHttp | bridge **5.4.0** | App `force` **5.4.0**（与 TV 一致） |
 
-站点爬虫约定（KOTV 新线）：**一份 JVM `.class` 瘦包**（无 `android/**` / 无 dex）。PC 直载；Android 经 `JarDexer` 转 dex + **child-first** `DexClassLoader`（与桌面一致，避免站点 `OkHttp`/`Util` 被 bridge 盖住）。TV 专用 DEX 包是另一条产品线，不要当双端通用包。
+JVM 瘦包无法走 R8 `spider.merge`，因此站点 **exclude** 宿主同名类（`Util`/`OkHttp`/`Json`/`Path`/`Init`/`Proxy`/`crawler`/`UiBridge`），父优先直接用 bridge——运行语义对齐官方「宿主提供 API」。
 
-**不要**把 Spider 类挪进 Flutter App：桌面无法共用。Android 专属能力（D8 / seal / child-first DexCL）用 **Method 注入** 挂在 App CL。
+站点约定：`com.github.catvod.spider.*`；配置 `csp_ClassName`。TV 专用 DEX `custom_spider.jar` 是另一条打包线，宿主模型相同。
+
+**不要**把 Spider 类挪进 Flutter App。Android 专属能力（D8 / seal）用 Method 注入挂在 App CL。
 
 ## 播放：Exo / MPV / IJK 与 TV 的差异
 

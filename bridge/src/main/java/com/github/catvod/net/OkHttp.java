@@ -30,8 +30,7 @@ import okhttp3.logging.HttpLoggingInterceptor;
 
 public class OkHttp {
 
-    private static final long TIMEOUT = TimeUnit.SECONDS.toMillis(20);
-    private static final long CALL_TIMEOUT = TimeUnit.SECONDS.toMillis(45);
+    private static final long TIMEOUT = TimeUnit.SECONDS.toMillis(30);
 
     private ResponseInterceptor responseInterceptor;
     private RequestInterceptor requestInterceptor;
@@ -103,7 +102,7 @@ public class OkHttp {
     }
 
     public static String string(String url) {
-        if (!url.startsWith("http")) return "";
+        if (url == null || !url.startsWith("http")) return "";
         try (Response res = newCall(url).execute()) {
             return res.body().string();
         } catch (Exception e) {
@@ -113,13 +112,73 @@ public class OkHttp {
     }
 
     public static String string(String url, Map<String, String> headers) {
-        if (!url.startsWith("http")) return "";
+        if (url == null || !url.startsWith("http")) return "";
         try (Response res = newCall(url, headers).execute()) {
             return res.body().string();
         } catch (Exception e) {
             e.printStackTrace();
             return "";
         }
+    }
+
+    // --- CatVodSpider app 线常用 API（官方站点源码依赖；R8 后进 spider.merge，KOTV 父优先落到宿主）---
+    public static final String POST = "POST";
+    public static final String GET = "GET";
+
+    public static String string(String url, Map<String, String> params, Map<String, String> header) {
+        if (url == null || !url.startsWith("http")) return "";
+        return new OkRequest(GET, url, params, header).execute(client()).getBody();
+    }
+
+    public static String string(String url, Map<String, String> params, Map<String, String> header, long timeout) {
+        if (url == null || !url.startsWith("http")) return "";
+        return new OkRequest(GET, url, params, header).execute(client(timeout)).getBody();
+    }
+
+    public static String string(String url, long timeout) {
+        return string(url, null, null, timeout);
+    }
+
+    public static String post(String url, Map<String, String> params) {
+        return post(url, params, null).getBody();
+    }
+
+    public static OkResult post(String url, Map<String, String> params, Map<String, String> header) {
+        return new OkRequest(POST, url, params, header).execute(client());
+    }
+
+    public static String post(String url, String json) {
+        return post(url, json, null).getBody();
+    }
+
+    public static OkResult post(String url, String json, Map<String, String> header) {
+        return new OkRequest(POST, url, json, header).execute(client());
+    }
+
+    public static OkResult get(String url, Map<String, String> params, Map<String, String> header) {
+        return new OkRequest(GET, url, params, header).execute(client());
+    }
+
+    public static OkHttpClient shortTimeoutClient() {
+        return client().newBuilder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).writeTimeout(5, TimeUnit.SECONDS).build();
+    }
+
+    public static String getLocation(String url, Map<String, String> header) throws java.io.IOException {
+        Headers h = header == null ? new Headers.Builder().build() : Headers.of(header);
+        try (Response res = noRedirect().newCall(new Request.Builder().url(url).headers(h).build()).execute()) {
+            return getLocation(res.headers().toMultimap());
+        }
+    }
+
+    public static String getLocation(Map<String, java.util.List<String>> headers) {
+        if (headers == null) return null;
+        if (headers.containsKey("location")) return headers.get("location").get(0);
+        if (headers.containsKey("Location")) return headers.get("Location").get(0);
+        return null;
+    }
+
+    public static Call newCall(Request request) {
+        return client().newCall(request);
     }
 
     public static Call newCall(String url) {
@@ -188,7 +247,7 @@ public class OkHttp {
     }
 
     private static OkHttpClient.Builder getBuilder() {
-        OkHttpClient.Builder builder = new OkHttpClient.Builder().addInterceptor(requestInterceptor()).addInterceptor(authInterceptor()).addNetworkInterceptor(responseInterceptor()).connectTimeout(TIMEOUT, TimeUnit.MILLISECONDS).readTimeout(TIMEOUT, TimeUnit.MILLISECONDS).writeTimeout(TIMEOUT, TimeUnit.MILLISECONDS).callTimeout(CALL_TIMEOUT, TimeUnit.MILLISECONDS).dns(dns()).hostnameVerifier((hostname, session) -> true).sslSocketFactory(getSSLContext().getSocketFactory(), trustAllCertificates());
+        OkHttpClient.Builder builder = new OkHttpClient.Builder().addInterceptor(requestInterceptor()).addInterceptor(authInterceptor()).addNetworkInterceptor(responseInterceptor()).connectTimeout(TIMEOUT, TimeUnit.MILLISECONDS).readTimeout(TIMEOUT, TimeUnit.MILLISECONDS).writeTimeout(TIMEOUT, TimeUnit.MILLISECONDS).dns(dns()).hostnameVerifier((hostname, session) -> true).sslSocketFactory(getSSLContext().getSocketFactory(), trustAllCertificates());
         HttpLoggingInterceptor logging = new HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY);
         builder.proxyAuthenticator(authenticator());
         //builder.addNetworkInterceptor(logging);

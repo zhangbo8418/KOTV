@@ -11,8 +11,9 @@ import java.util.zip.ZipFile
 /**
  * 加载 `kotv/spider-bridge.jar`（须含 classes.dex）并调用 SpiderBridge.call。
  *
- * Android ART 只能加载 dex；桌面 shadowJar 的 .class 包必须在打包期经 d8 转换。
- * 站点 jar（PC/安卓同一份 JVM `.class`）经 [JarDexer] 转 dex。
+ * 对齐 TV：bridge / 站点均用标准父优先 [DexClassLoader]；
+ * 宿主 API（Util/OkHttp/Json…）在 bridge，站点瘦包不含这些类。
+ * 站点 jar（PC/安卓同一份 JVM `.class`）经 [JarDexer]（D8）转 dex。
  */
 object JarLoader {
   private const val TAG = "KotvJarLoader"
@@ -28,12 +29,9 @@ object JarLoader {
   @Volatile
   private var appContext: Context? = null
 
-  /** App CL 上解析好的 Method，R8 keep 后名称稳定；注入 bridge 后不受 helper 类名混淆影响。 */
+  /** App CL 上解析好的 Method，R8 keep 后名称稳定。 */
   @Volatile
   private var ensureMethod: Method? = null
-
-  @Volatile
-  private var dexLoaderCreateMethod: Method? = null
 
   fun isLoaded(): Boolean = bridgeCall != null
 
@@ -42,20 +40,12 @@ object JarLoader {
     synchronized(this) {
       if (bridgeCall != null) return
       appContext = context.applicationContext
-      // 拉住 JarDexer / ChildFirstDexClassLoader / D8，避免被 R8 裁掉
       check(JarDexer::class.java.name.isNotEmpty())
-      check(ChildFirstDexClassLoader::class.java.name.isNotEmpty())
       check(com.android.tools.r8.D8::class.java.name.isNotEmpty())
       ensureMethod = JarDexer::class.java.getMethod(
         "ensureSiteDexJar",
         Any::class.java,
         String::class.java,
-      )
-      dexLoaderCreateMethod = ChildFirstDexClassLoader::class.java.getMethod(
-        "create",
-        Any::class.java,
-        String::class.java,
-        ClassLoader::class.java,
       )
 
       val jarDir = File(context.codeCacheDir, "kotv_bridge").apply { mkdirs() }
@@ -69,6 +59,7 @@ object JarLoader {
       requireDexEntry(jarFile)
 
       val optDir = File(context.codeCacheDir, "kotv_bridge_opt").apply { mkdirs() }
+      // 父优先：App 与 bridge 统一 OkHttp 5.4.0；桥内自带依赖与 App 对齐
       val cl = DexClassLoader(
         jarFile.absolutePath,
         optDir.absolutePath,
@@ -85,24 +76,17 @@ object JarLoader {
       }
       injectEnsure(clazz)
       bridgeCall = clazz.getMethod("call", String::class.java)
-      Log.i(
-        TAG,
-        "bridge loaded: ${jarFile.absolutePath}; ensure=${ensureMethod?.declaringClass?.name}; " +
-          "dexLoader=${dexLoaderCreateMethod?.declaringClass?.name}",
-      )
+      Log.i(TAG, "bridge loaded: ${jarFile.absolutePath}; ensure=${ensureMethod?.declaringClass?.name}")
     }
   }
 
   private fun injectEnsure(clazz: Class<*>) {
     val ensure = ensureMethod
       ?: error("JarDexer.ensureSiteDexJar Method not resolved")
-    val create = dexLoaderCreateMethod
-      ?: error("ChildFirstDexClassLoader.create Method not resolved")
     try {
       clazz.getMethod("setSiteJarEnsureMethod", Method::class.java).invoke(null, ensure)
-      clazz.getMethod("setSiteDexLoaderCreateMethod", Method::class.java).invoke(null, create)
     } catch (t: Throwable) {
-      Log.e(TAG, "inject site Method handles failed", t)
+      Log.e(TAG, "inject site Method handle failed", t)
       throw t
     }
   }
@@ -162,50 +146,11 @@ object JarLoader {
   }
 
   private fun ensureReadonlyJar(context: Context, jarFile: File) {
-    if (jarFile.exists()) {
-      try {
-        jarFile.setWritable(true)
-      } catch (_: Throwable) {
-      }
-      try {
-        jarFile.delete()
-      } catch (_: Throwable) {
-      }
+    if (jarFile.isFile && jarFile.length() > 0L) return
+    jarFile.parentFile?.mkdirs()
+    context.assets.open(BridgeAssetPath).use { input ->
+      FileOutputStream(jarFile).use { output -> input.copyTo(output) }
     }
-    copyAsset(context, BridgeAssetPath, jarFile)
-    if (!jarFile.setReadOnly()) {
-      try {
-        Runtime.getRuntime().exec(arrayOf("chmod", "444", jarFile.absolutePath)).waitFor()
-      } catch (t: Throwable) {
-        Log.w(TAG, "chmod 444 failed: ${jarFile.absolutePath}", t)
-      }
-    }
-  }
-
-  private fun copyAsset(context: Context, assetPath: String, destFile: File) {
-    val tmp = File(destFile.absolutePath + ".tmp")
-    tmp.parentFile?.mkdirs()
-    try {
-      tmp.delete()
-    } catch (_: Throwable) {
-    }
-    context.assets.open(assetPath).use { input ->
-      FileOutputStream(tmp).use { out ->
-        input.copyTo(out)
-      }
-    }
-    if (destFile.exists()) {
-      try {
-        destFile.delete()
-      } catch (_: Throwable) {
-      }
-    }
-    if (!tmp.renameTo(destFile)) {
-      tmp.copyTo(destFile, overwrite = true)
-      tmp.delete()
-    }
-    if (!destFile.exists() || destFile.length() == 0L) {
-      error("failed to copy asset: $assetPath")
-    }
+    jarFile.setReadOnly()
   }
 }

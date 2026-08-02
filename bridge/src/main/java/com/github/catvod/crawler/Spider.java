@@ -11,10 +11,6 @@ import java.util.Map;
 import okhttp3.Dns;
 import okhttp3.OkHttpClient;
 
-/**
- * 官方 FongMi / TV catvod ABI。
- * 宿主与 jar 约定：{@link #init(Context, String)}，由 TV JarLoader / KOTV bridge 调用。
- */
 public abstract class Spider {
 
     public String siteKey;
