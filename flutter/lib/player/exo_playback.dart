@@ -5,8 +5,9 @@ import 'package:flutter/services.dart';
 
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'play_headers.dart';
 
-/// Android ExoPlayer：走原生 Media3 + OkHttp（对齐 TV），不用 video_player。
+/// Android ExoPlayer：走原生 Media3 + OkHttp（对齐 TV），支持 DRM。
 class ExoPlayback extends KotvPlayback {
   ExoPlayback() {
     if (!kotvIsAndroid()) {
@@ -21,6 +22,7 @@ class ExoPlayback extends KotvPlayback {
   StreamSubscription? _sub;
   String _url = '';
   Map<String, String> _headers = const {};
+  Map<String, dynamic>? _drm;
   bool _playing = false;
   bool _completed = false;
   bool _buffering = false;
@@ -118,7 +120,7 @@ class ExoPlayback extends KotvPlayback {
         _playing = false;
         if (!_endedCtrl.isClosed) _endedCtrl.add(true);
         if (_repeatOne && _url.isNotEmpty) {
-          unawaited(open(_url, headers: _headers));
+          unawaited(open(_url, headers: _headers, drm: _drm));
         }
         notifyListeners();
         break;
@@ -137,25 +139,11 @@ class ExoPlayback extends KotvPlayback {
     return null;
   }
 
-  Map<String, String> _mergeHeaders(Map<String, String>? headers) {
-    final out = <String, String>{};
-    if (headers != null) {
-      for (final e in headers.entries) {
-        final k = e.key.trim();
-        final v = e.value.trim();
-        if (k.isEmpty || v.isEmpty) continue;
-        out[k] = v;
-      }
-    }
-    return out;
-  }
-
   @override
-  Future<void> open(String url, {Map<String, String>? headers}) async {
+  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
     _url = url;
-    // 对齐 TV：本地 playproxy 已注入远端头；再带 Referer/Cookie 打到 127.0.0.1 会 Source error
-    final localProxy = _isLocalProxyUrl(url);
-    _headers = localProxy ? const {} : _mergeHeaders(headers);
+    _headers = kotvNormalizePlayHeaders(headers, url: url);
+    _drm = drm;
     _completed = false;
     _ready = false;
     _lastError = null;
@@ -167,6 +155,7 @@ class ExoPlayback extends KotvPlayback {
         'url': url,
         'headers': _headers,
         'mime': _guessMime(url),
+        'drm': drm,
       });
       await _ch.invokeMethod('setVolume', {'volume': (_volume / 100).clamp(0.0, 1.0)});
       await _ch.invokeMethod('setRate', {'rate': _rate});
@@ -174,7 +163,6 @@ class ExoPlayback extends KotvPlayback {
       final detail = (e.message ?? e.code).trim();
       throw StateError('Exo 无法播放该地址（$detail）。可换线路或改用 ijk/外部播放器');
     }
-    // 等 ready / error 一小段，避免 UI 立刻当成功
     for (var i = 0; i < 25; i++) {
       if (_ready) break;
       if (_lastError != null) {
@@ -183,14 +171,6 @@ class ExoPlayback extends KotvPlayback {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
     notifyListeners();
-  }
-
-  static bool _isLocalProxyUrl(String url) {
-    final u = url.toLowerCase();
-    return u.contains('/proxy/play') ||
-        u.contains('/proxy/cached_m3u8') ||
-        u.contains('/proxy/bt/') ||
-        (u.contains('127.0.0.1:') && u.contains('/proxy/'));
   }
 
   @override

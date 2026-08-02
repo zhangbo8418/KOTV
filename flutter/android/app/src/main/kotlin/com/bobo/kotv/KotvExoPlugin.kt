@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Surface
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -40,6 +41,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var currentUrl: String = ""
   private var currentHeaders: Map<String, String> = emptyMap()
   private var currentMime: String? = null
+  private var currentDrm: Map<String, Any?>? = null
   private var formatRetried = false
 
   private val main = Handler(Looper.getMainLooper())
@@ -124,9 +126,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
           .toMap()
         val mime = call.argument<String>("mime")?.trim()?.ifEmpty { null }
+        @Suppress("UNCHECKED_CAST")
+        val drm = call.argument<Map<String, Any?>>("drm")
         main.post {
           try {
-            openInternal(url, headers, mime)
+            openInternal(url, headers, mime, drm)
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_open", t.message, null)
@@ -180,13 +184,19 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return e.id()
   }
 
-  private fun openInternal(url: String, headers: Map<String, String>, mime: String?) {
+  private fun openInternal(
+    url: String,
+    headers: Map<String, String>,
+    mime: String?,
+    drm: Map<String, Any?>?,
+  ) {
     val ctx = appContext ?: error("no context")
     ensureTexture()
     formatRetried = false
     currentUrl = url
     currentHeaders = normalizeHeaders(headers)
     currentMime = mime ?: guessMime(url)
+    currentDrm = drm
 
     val old = player
     player = null
@@ -227,14 +237,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
       override fun onPlayerError(error: PlaybackException) {
         Log.e(TAG, "exo error code=${error.errorCode} ${error.message}", error)
-        // 对齐 TV：容器/清单解析失败时改 mime 重试一次
         if (!formatRetried) {
           val retryMime = mimeForError(error.errorCode)
           if (retryMime != null && retryMime != currentMime) {
             formatRetried = true
             currentMime = retryMime
             try {
-              p.setMediaItem(buildMediaItem(currentUrl, currentMime), true)
+              p.setMediaItem(buildMediaItem(currentUrl, currentMime, currentDrm), true)
               p.prepare()
               p.play()
               return
@@ -250,17 +259,49 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         emit(mapOf("event" to "size", "width" to videoSize.width, "height" to videoSize.height))
       }
     })
-    p.setMediaItem(buildMediaItem(url, currentMime), true)
+    p.setMediaItem(buildMediaItem(url, currentMime, currentDrm), true)
     p.prepare()
     p.play()
     main.removeCallbacks(tick)
     main.post(tick)
   }
 
-  private fun buildMediaItem(url: String, mime: String?): MediaItem {
+  private fun buildMediaItem(url: String, mime: String?, drm: Map<String, Any?>?): MediaItem {
     val b = MediaItem.Builder().setUri(url)
     if (!mime.isNullOrBlank()) b.setMimeType(mime)
+    buildDrmConfig(drm)?.let { b.setDrmConfiguration(it) }
     return b.build()
+  }
+
+  /** 对齐 TV MediaItemFactory.buildDrmConfig / bean.Drm */
+  private fun buildDrmConfig(drm: Map<String, Any?>?): MediaItem.DrmConfiguration? {
+    if (drm == null) return null
+    val type = drm["type"]?.toString()?.trim()?.lowercase().orEmpty()
+    val key = drm["key"]?.toString()?.trim().orEmpty()
+    if (type.isEmpty() || key.isEmpty()) return null
+    val uuid = when {
+      type.contains("widevine") -> C.WIDEVINE_UUID
+      type.contains("playready") -> C.PLAYREADY_UUID
+      type.contains("clearkey") -> C.CLEARKEY_UUID
+      else -> return null
+    }
+    val forceKey = drm["forceKey"] == true || drm["forceKey"] == 1
+    @Suppress("UNCHECKED_CAST")
+    val hdrRaw = drm["header"] as? Map<*, *>
+    val licenseHeaders = linkedMapOf<String, String>()
+    hdrRaw?.forEach { (k, v) ->
+      val kk = k?.toString()?.trim().orEmpty()
+      val vv = v?.toString()?.trim().orEmpty()
+      if (kk.isNotEmpty() && vv.isNotEmpty()) licenseHeaders[kk] = vv
+    }
+    val builder = MediaItem.DrmConfiguration.Builder(uuid)
+      .setLicenseUri(key)
+      .setForceDefaultLicenseUri(forceKey)
+      .setMultiSession(uuid != C.CLEARKEY_UUID)
+    if (licenseHeaders.isNotEmpty()) {
+      builder.setLicenseRequestHeaders(licenseHeaders)
+    }
+    return builder.build()
   }
 
   private fun releasePlayer() {
@@ -274,6 +315,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentUrl = ""
     currentHeaders = emptyMap()
     currentMime = null
+    currentDrm = null
     formatRetried = false
   }
 

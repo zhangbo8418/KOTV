@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'kotv_vlc_paths.dart';
+import 'play_headers.dart';
 
 /// 统一播放后端：MPV(media_kit) 与 VLC(同进程 Texture) 共用同一套菜单/控件。
 abstract class KotvPlayback extends ChangeNotifier {
@@ -24,7 +25,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 本集自然播完（非手动 stop）时发出 true。
   Stream<bool> get completedStream;
 
-  Future<void> open(String url, {Map<String, String>? headers});
+  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm});
   Future<void> playOrPause();
   Future<void> play();
   Future<void> pause();
@@ -107,6 +108,7 @@ class MediaKitPlayback extends KotvPlayback {
   VideoController controller;
   final List<StreamSubscription> _subs = [];
   String _url = '';
+  Map<String, String> _headers = const {};
 
   @override
   String get engineLabel => '内置 MPV';
@@ -133,9 +135,15 @@ class MediaKitPlayback extends KotvPlayback {
   Stream<bool> get completedStream => player.stream.completed;
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers}) async {
+  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
     _url = url;
-    await player.open(Media(url));
+    // DRM 需 Exo（对齐 TV requiresExo）；MPV 无法解 Widevine/PlayReady
+    if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
+      throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
+    }
+    final h = kotvNormalizePlayHeaders(headers, url: url);
+    _headers = h;
+    await player.open(Media(url, httpHeaders: h.isEmpty ? const {} : h));
   }
 
   @override
@@ -168,7 +176,7 @@ class MediaKitPlayback extends KotvPlayback {
     if (_url.isNotEmpty) {
       final pos = position;
       final wasPlaying = playing;
-      await player.open(Media(_url));
+      await player.open(Media(_url, httpHeaders: _headers.isEmpty ? const {} : _headers));
       await player.seek(pos);
       if (wasPlaying) await player.play();
     }
@@ -352,8 +360,11 @@ class EngineVlcPlayback extends KotvPlayback {
   Stream<bool> get completedStream => _endedCtrl.stream;
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers}) async {
+  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
     _url = url;
+    if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
+      throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
+    }
     _ended = false;
     final libDir = KotvVlcPaths.resolveLibDir();
     if (libDir == null) throw StateError('未找到 runtime/libvlc');

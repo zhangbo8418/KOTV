@@ -20,10 +20,8 @@ import 'widgets/h_scroll.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Android 默认 Exo/ijk；media_kit 仅桌面需要，避免多余原生初始化。
-  if (!kIsWeb && !Platform.isAndroid) {
-    MediaKit.ensureInitialized();
-  }
+  // Android 也要 init：用户可选 MPV（media_kit）；仅延迟到实际用 MPV 前也可，这里统一初始化更稳。
+  MediaKit.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
   if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
     await windowManager.ensureInitialized();

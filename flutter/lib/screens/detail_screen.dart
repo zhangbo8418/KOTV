@@ -590,6 +590,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       };
       final magnet = data['magnet'] == true || playUrl.contains('/proxy/bt/') || epLooksMagnet;
       _magnetPlay = magnet;
+      final drmRaw = data['drm'];
+      final drm = drmRaw is Map
+          ? Map<String, dynamic>.from(drmRaw)
+          : null;
+      final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
       await LocalHistory.push(VodItem(
         id: d.id.isNotEmpty ? d.id : widget.id,
         name: d.name,
@@ -597,13 +602,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         site: d.site,
         remarks: ep.name,
       ));
-      await _stopInactiveBackends(_backend);
+      // 对齐 TV：有 DRM 强制 Exo（MPV/ijk 不解 Widevine）
+      if (hasDrm && _backend != KotvEmbedBackend.exo && kotvIsAndroid()) {
+        setState(() => _playerVal = 'innie#exo');
+        await _stopInactiveBackends(KotvEmbedBackend.exo);
+      } else {
+        await _stopInactiveBackends(_backend);
+      }
       final pb = _playback;
       await pb.setDecodeMode(_decodeMode);
       // Exo 对齐 TV：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
       var openUrl = playUrl;
       Map<String, String>? openHeaders = headers.isEmpty ? null : headers;
-      if (_backend == KotvEmbedBackend.exo) {
+      if (_backend == KotvEmbedBackend.exo || hasDrm) {
         final cached = playUrl.contains('/proxy/cached_m3u8');
         final proxied = playUrl.contains('/proxy/play');
         if (!cached &&
@@ -616,7 +627,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           openHeaders = null;
         }
       }
-      await pb.open(openUrl, headers: openHeaders);
+      await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
       try {
         await pb.play();
       } catch (_) {}

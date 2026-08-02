@@ -5,8 +5,9 @@ import 'package:flutter/material.dart';
 
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'play_headers.dart';
 
-/// Android ijkplayer（via fijkplayer）。
+/// Android ijkplayer：对齐 Exo 的 headers / 代理 / 软硬解策略。
 class IjkPlayback extends KotvPlayback {
   IjkPlayback() {
     if (!kotvIsAndroid()) {
@@ -21,6 +22,7 @@ class IjkPlayback extends KotvPlayback {
   final _endedCtrl = StreamController<bool>.broadcast();
   Timer? _tick;
   String _url = '';
+  Map<String, String> _headers = const {};
   bool _playing = false;
   bool _completed = false;
   bool _buffering = false;
@@ -29,6 +31,7 @@ class IjkPlayback extends KotvPlayback {
   int _w = 0;
   int _h = 0;
   bool _repeatOne = false;
+  String _decodeMode = 'auto';
 
   FijkPlayer get player => _player;
 
@@ -98,7 +101,7 @@ class IjkPlayback extends KotvPlayback {
       _completed = true;
       if (!_endedCtrl.isClosed) _endedCtrl.add(true);
       if (_repeatOne && _url.isNotEmpty) {
-        unawaited(open(_url));
+        unawaited(open(_url, headers: _headers));
       }
     } else if (_playing) {
       _completed = false;
@@ -106,13 +109,43 @@ class IjkPlayback extends KotvPlayback {
     notifyListeners();
   }
 
+  Future<void> _applyDecodeOptions() async {
+    // 对齐常见 TVBox/ijk：硬解 mediacodec；软解关
+    final hard = _decodeMode == 'hard';
+    final soft = _decodeMode == 'soft';
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec', hard || !soft ? 1 : 0);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-auto-rotate', 1);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-handle-resolution-change', 1);
+    await _player.setOption(FijkOption.playerCategory, 'opensles', 0);
+    await _player.setOption(FijkOption.playerCategory, 'framedrop', 1);
+    await _player.setOption(FijkOption.formatCategory, 'analyzeduration', 1);
+    await _player.setOption(FijkOption.formatCategory, 'analyzemaxduration', 100);
+    await _player.setOption(FijkOption.formatCategory, 'probesize', 10240);
+  }
+
   @override
-  Future<void> open(String url, {Map<String, String>? headers}) async {
+  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+    if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
+      throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
+    }
     _url = url;
+    _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
     await _player.reset();
+    await _applyDecodeOptions();
+    if (_headers.isNotEmpty) {
+      final ua = _headers['User-Agent'];
+      if (ua != null && ua.isNotEmpty) {
+        await _player.setOption(FijkOption.formatCategory, 'user_agent', ua);
+      }
+      final hdr = kotvHeadersToIjkFormat(_headers);
+      if (hdr.isNotEmpty) {
+        await _player.setOption(FijkOption.formatCategory, 'headers', hdr);
+      }
+    }
     await _player.setDataSource(url, autoPlay: true);
     await _player.setVolume(_volume / 100.0);
+    if (_rate != 1.0) await _player.setSpeed(_rate);
     _tick?.cancel();
     _tick = Timer.periodic(const Duration(milliseconds: 400), (_) {
       if (!_posCtrl.isClosed) {
@@ -162,7 +195,9 @@ class IjkPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> setDecodeMode(String mode) async {}
+  Future<void> setDecodeMode(String mode) async {
+    _decodeMode = mode;
+  }
 
   @override
   List<KotvTrack> get audioTracks => const [];
@@ -181,7 +216,7 @@ class IjkPlayback extends KotvPlayback {
   void dispose() {
     _tick?.cancel();
     _player.removeListener(_onUpdate);
-    unawaited(_player.release());
+    _player.release();
     _posCtrl.close();
     _endedCtrl.close();
     super.dispose();

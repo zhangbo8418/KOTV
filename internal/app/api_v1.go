@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"runtime"
 	"strings"
 	"time"
 
@@ -286,6 +287,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	var headers map[string]string
 	var danmakuURL string
 	var qualNames, qualURLs []string
+	var playDrm *model.Drm
 
 	if strings.HasPrefix(epURL, "http") && parse.IsVideoFormat(epURL) {
 		playURL = epURL
@@ -296,9 +298,12 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		if err != nil {
 			return nil, err
 		}
-		if err := result.Drm.DesktopError(); err != nil {
-			return nil, err
+		if runtime.GOOS != "android" {
+			if err := result.Drm.DesktopError(); err != nil {
+				return nil, err
+			}
 		}
+		playDrm = result.Drm
 		headers = map[string]string(result.Header)
 		danmakuURL = result.Danmaku
 		qualNames = result.URL.Names
@@ -326,8 +331,13 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			}
 		} else {
 			result = parsed
-			if err := result.Drm.DesktopError(); err != nil {
-				return nil, err
+			if runtime.GOOS != "android" {
+				if err := result.Drm.DesktopError(); err != nil {
+					return nil, err
+				}
+			}
+			if result.Drm != nil {
+				playDrm = result.Drm
 			}
 			headers = mergeStringMaps(headers, map[string]string(result.Header))
 			qualNames = result.URL.Names
@@ -368,6 +378,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		"media":    mediaURL,
 		"magnet":   isMagnetPlay,
 		"headers":  headers,
+		"drm":      playDrm,
 		"danmaku":  danmakuURL,
 		"qualities": map[string]any{"names": qualNames, "urls": qualURLs},
 		"site":     site.Key,
