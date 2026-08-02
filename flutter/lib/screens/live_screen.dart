@@ -116,6 +116,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _decodeMode = 'auto';
   String _playerVal = kotvDefaultLivePlayer();
   String _playUrl = '';
+  Map<String, String>? _playHeaders;
   Timer? _catchupHideTimer;
 
   @override
@@ -467,6 +468,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       } catch (_) {}
     }
     _playUrl = url;
+    _playHeaders = headers;
   }
 
   Widget _liveVideo() {

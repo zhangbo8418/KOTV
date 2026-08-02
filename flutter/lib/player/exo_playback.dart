@@ -153,7 +153,9 @@ class ExoPlayback extends KotvPlayback {
   @override
   Future<void> open(String url, {Map<String, String>? headers}) async {
     _url = url;
-    _headers = _mergeHeaders(headers);
+    // 对齐 TV：本地 playproxy 已注入远端头；再带 Referer/Cookie 打到 127.0.0.1 会 Source error
+    final localProxy = _isLocalProxyUrl(url);
+    _headers = localProxy ? const {} : _mergeHeaders(headers);
     _completed = false;
     _ready = false;
     _lastError = null;
@@ -181,6 +183,14 @@ class ExoPlayback extends KotvPlayback {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
     notifyListeners();
+  }
+
+  static bool _isLocalProxyUrl(String url) {
+    final u = url.toLowerCase();
+    return u.contains('/proxy/play') ||
+        u.contains('/proxy/cached_m3u8') ||
+        u.contains('/proxy/bt/') ||
+        (u.contains('127.0.0.1:') && u.contains('/proxy/'));
   }
 
   @override

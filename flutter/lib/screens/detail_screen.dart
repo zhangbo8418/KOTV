@@ -583,6 +583,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           );
       final playUrl = '${data['url'] ?? ''}';
       if (playUrl.isEmpty) throw Exception('空播放地址');
+      final mediaUrl = '${data['media'] ?? ''}';
       final headers = <String, String>{
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
@@ -599,7 +600,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       await _stopInactiveBackends(_backend);
       final pb = _playback;
       await pb.setDecodeMode(_decodeMode);
-      await pb.open(playUrl, headers: headers.isEmpty ? null : headers);
+      // Exo 对齐 TV：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
+      var openUrl = playUrl;
+      Map<String, String>? openHeaders = headers.isEmpty ? null : headers;
+      if (_backend == KotvEmbedBackend.exo) {
+        final cached = playUrl.contains('/proxy/cached_m3u8');
+        final proxied = playUrl.contains('/proxy/play');
+        if (!cached &&
+            !magnet &&
+            mediaUrl.startsWith('http') &&
+            headers.isNotEmpty) {
+          openUrl = mediaUrl;
+          openHeaders = headers;
+        } else if (cached || proxied) {
+          openHeaders = null;
+        }
+      }
+      await pb.open(openUrl, headers: openHeaders);
       try {
         await pb.play();
       } catch (_) {}
