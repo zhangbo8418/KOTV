@@ -32,6 +32,9 @@ object JarLoader {
   @Volatile
   private var ensureMethod: Method? = null
 
+  @Volatile
+  private var dexLoaderCreateMethod: Method? = null
+
   fun isLoaded(): Boolean = bridgeCall != null
 
   fun ensureBridgeLoaded(context: Context) {
@@ -39,12 +42,19 @@ object JarLoader {
     synchronized(this) {
       if (bridgeCall != null) return
       appContext = context.applicationContext
-      // 拉住 JarDexer / dalvik-dx，避免被 R8 裁掉
+      // 拉住 JarDexer / ChildFirstDexClassLoader / dalvik-dx，避免被 R8 裁掉
       check(JarDexer::class.java.name.isNotEmpty())
+      check(ChildFirstDexClassLoader::class.java.name.isNotEmpty())
       ensureMethod = JarDexer::class.java.getMethod(
         "ensureSiteDexJar",
         Any::class.java,
         String::class.java,
+      )
+      dexLoaderCreateMethod = ChildFirstDexClassLoader::class.java.getMethod(
+        "create",
+        Any::class.java,
+        String::class.java,
+        ClassLoader::class.java,
       )
 
       val jarDir = File(context.codeCacheDir, "kotv_bridge").apply { mkdirs() }
@@ -74,7 +84,11 @@ object JarLoader {
       }
       injectEnsure(clazz)
       bridgeCall = clazz.getMethod("call", String::class.java)
-      Log.i(TAG, "bridge loaded: ${jarFile.absolutePath}; ensure=${ensureMethod?.declaringClass?.name}")
+      Log.i(
+        TAG,
+        "bridge loaded: ${jarFile.absolutePath}; ensure=${ensureMethod?.declaringClass?.name}; " +
+          "dexLoader=${dexLoaderCreateMethod?.declaringClass?.name}",
+      )
     }
   }
 
@@ -86,6 +100,15 @@ object JarLoader {
     } catch (t: Throwable) {
       Log.e(TAG, "setSiteJarEnsureMethod failed", t)
       throw t
+    }
+    val create = dexLoaderCreateMethod
+    if (create != null) {
+      try {
+        clazz.getMethod("setSiteDexLoaderCreateMethod", Method::class.java).invoke(null, create)
+      } catch (t: Throwable) {
+        Log.e(TAG, "setSiteDexLoaderCreateMethod failed", t)
+        throw t
+      }
     }
     // 兼容旧 bridge：再塞 helper（Class 上可按名找 static 方法）
     try {

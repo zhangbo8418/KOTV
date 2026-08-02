@@ -403,6 +403,7 @@ public class SpiderBridge {
                             || name.startsWith("androidx.")
                             || name.equals("com.github.catvod.crawler.Spider")
                             || name.equals("com.github.catvod.crawler.SpiderNull")
+                            || name.equals("com.github.catvod.crawler.SpiderDebug")
                             || name.equals("com.github.catvod.Init")
                             || name.equals("com.github.catvod.Proxy");
                     if (!hostClass) {
@@ -447,8 +448,10 @@ public class SpiderBridge {
     }
 
     private static volatile Object siteJarHelper;
-    /** App 侧在加载 bridge 时注入的 {@link Method}（指向 JarDexer.ensureSiteDexJar），避免 R8 改类名后按 helper 反射失败。 */
+    /** App 侧注入：JarDexer.ensureSiteDexJar */
     private static volatile Method siteJarEnsureMethod;
+    /** App 侧注入：ChildFirstDexClassLoader.create（与桌面 child-first 对齐） */
+    private static volatile Method siteDexLoaderCreateMethod;
 
     /** Android：由 JarLoader 注入 App 侧 JarDexer（兼容旧路径；优先用 {@link #setSiteJarEnsureMethod}）。 */
     public static void setSiteJarHelper(Object helper) {
@@ -460,12 +463,31 @@ public class SpiderBridge {
         siteJarEnsureMethod = method;
     }
 
+    /** Android：注入 child-first Dex ClassLoader 工厂（{@code ChildFirstDexClassLoader.create}）。 */
+    public static void setSiteDexLoaderCreateMethod(Method method) {
+        siteDexLoaderCreateMethod = method;
+    }
+
     private static ClassLoader createDexLoader(File jarFile) throws Exception {
         if (!jarFile.isFile() || jarFile.length() == 0L) {
             throw new IOException("site jar missing: " + jarFile);
         }
-        Class<?> dcl = Class.forName("dalvik.system.DexClassLoader");
         Context c = ctx();
+        File sealed = resolveSealedSiteJar(c, jarFile);
+        ClassLoader parent = SpiderBridge.class.getClassLoader();
+
+        // 优先 App 侧 child-first（与桌面 SpiderClassLoader / Manifest child-first 一致）
+        Method create = siteDexLoaderCreateMethod;
+        if (create != null) {
+            Object cl = create.invoke(null, c, sealed.getAbsolutePath(), parent);
+            if (cl instanceof ClassLoader) {
+                return (ClassLoader) cl;
+            }
+            throw new IOException("site dex loader factory returned non-ClassLoader: " + cl);
+        }
+
+        // 回退：标准 DexClassLoader（父优先；站点 OkHttp/Util 可能被 bridge 盖住）
+        Class<?> dcl = Class.forName("dalvik.system.DexClassLoader");
         File codeCache;
         try {
             Method m = c.getClass().getMethod("getCodeCacheDir");
@@ -473,18 +495,16 @@ public class SpiderBridge {
         } catch (Throwable t) {
             throw new IOException("getCodeCacheDir failed", t);
         }
-        File sealed = resolveSealedSiteJar(c, jarFile);
         File opt = new File(codeCache, "kotv_site_dex");
         if (!opt.isDirectory() && !opt.mkdirs()) {
             throw new IOException("cannot create dex opt dir: " + opt);
         }
         Constructor<?> ctor = dcl.getConstructor(String.class, String.class, String.class, ClassLoader.class);
-        // 对齐 TV：libraryPath=opt；parent=host bridge CL（含 Spider ABI）
         return (ClassLoader) ctor.newInstance(
                 sealed.getAbsolutePath(),
                 opt.getAbsolutePath(),
                 opt.getAbsolutePath(),
-                SpiderBridge.class.getClassLoader()
+                parent
         );
     }
 
