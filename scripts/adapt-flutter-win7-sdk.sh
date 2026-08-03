@@ -28,9 +28,11 @@ perl -i -pe 's/sdk:\s*\^3\.5\.4/sdk: ">=3.3.0 <3.4.0"/' "$VLC"
 perl -i -pe 's/flutter:\s*"?>=3\.24\.0"?/flutter: ">=3.19.0"/' "$VLC"
 
 # Flutter 3.44+ 用 DialogThemeData；3.19 ThemeData 仍要 DialogTheme
+# PredictiveBackPageTransitionsBuilder 为较新 API，3.19 无此类
 THEME="$ROOT/flutter/lib/theme/kotv_theme.dart"
 if [[ -f "$THEME" ]]; then
   perl -i -pe 's/DialogThemeData\(/DialogTheme(/g' "$THEME"
+  perl -i -pe 's/PredictiveBackPageTransitionsBuilder\(\)/ZoomPageTransitionsBuilder()/g' "$THEME"
 fi
 
 # 3.19 不认识 flutter.config；去掉以免 pub get 失败（SPM 仅影响 iOS/macOS）

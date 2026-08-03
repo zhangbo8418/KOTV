@@ -418,6 +418,9 @@ prepare_python() {
 # 其它平台用 chrome-for-testing 最新 headless-shell。
 CHROMIUM_WIN7_REWORK_REPO="e3kskoy7wqk/Chromium-for-windows-7-REWORK"
 CHROMIUM_SNAPSHOT_BASE="https://storage.googleapis.com/chromium-browser-snapshots"
+# mjd7989：Win7 DirectWrite + 彩色 emoji（seguiemj.ttf）；随 REWORK Release 说明分发
+CHROMIUM_WIN7_DWRITE_URL="${CHROMIUM_WIN7_DWRITE_URL:-https://github.com/user-attachments/files/28444470/webgl_hw_and_dwrite.zip}"
+CHROMIUM_WIN7_DWRITE_STAMP="dwrite-w7-x64-seguiemj-v1"
 
 _find_7z() {
   if command -v 7z >/dev/null 2>&1; then
@@ -581,6 +584,47 @@ _extract_win7_rework_mini_installer() {
   echo "[chromium] ready ($label): $dest"
 }
 
+# Win7 REWORK：把 dwrite_w7_x64 + Segoe UI Emoji 放到 chrome.exe 旁（彩色 emoji / 更好的字体渲染）
+# 说明见 zip 内 readme：Win7 RTM+ 用 dwrite_w7_x64；还需安装 seguiemj.ttf（一并放入 chromium/ 供安装包注册）。
+_ensure_win7_chromium_dwrite() {
+  local dest="$1"
+  [[ -f "$dest/chrome.exe" ]] || return 0
+  if [[ -f "$dest/.kotv-chromium-dwrite" && "$(cat "$dest/.kotv-chromium-dwrite" 2>/dev/null || true)" == "$CHROMIUM_WIN7_DWRITE_STAMP" ]] \
+    && [[ -f "$dest/DWrite.dll" ]] && [[ -f "$dest/seguiemj.ttf" ]]; then
+    echo "[chromium] Win7 DWrite/emoji already applied ($CHROMIUM_WIN7_DWRITE_STAMP)"
+    return 0
+  fi
+  local zip="$CACHE/webgl_hw_and_dwrite.zip"
+  local tmp="$CACHE/webgl_hw_and_dwrite-extract"
+  echo "[chromium] apply Win7 DWrite + Segoe UI Emoji (color emoji)"
+  download "$CHROMIUM_WIN7_DWRITE_URL" "$zip" || {
+    echo "WARNING: download DWrite pack failed; skip color-emoji patch" >&2
+    return 0
+  }
+  rm -rf "$tmp"
+  mkdir -p "$tmp"
+  if ! unzip -q -o "$zip" -d "$tmp"; then
+    echo "WARNING: unzip DWrite pack failed; skip" >&2
+    return 0
+  fi
+  local src="$tmp/dwrite_w7_x64"
+  if [[ ! -d "$src" ]]; then
+    echo "WARNING: dwrite_w7_x64 missing in pack; skip" >&2
+    return 0
+  fi
+  # 覆盖到 chrome.exe 同目录（勿覆盖系统盘；仅捆绑 runtime）
+  cp -f "$src/"*.dll "$dest/" 2>/dev/null || true
+  if [[ -f "$tmp/seguiemj.ttf" ]]; then
+    cp -f "$tmp/seguiemj.ttf" "$dest/seguiemj.ttf"
+  fi
+  if [[ -f "$tmp/readme.txt" ]]; then
+    cp -f "$tmp/readme.txt" "$dest/README-dwrite-emoji.txt"
+  fi
+  printf '%s\n' "$CHROMIUM_WIN7_DWRITE_STAMP" >"$dest/.kotv-chromium-dwrite"
+  echo "[chromium] DWrite/emoji applied → $dest (DWrite.dll + seguiemj.ttf)"
+  rm -rf "$tmp"
+}
+
 # 尝试 CFT Stable：优先 chrome-headless-shell，其次 chrome。成功打印 kind\turl 到 stdout。
 _cft_stable_url() {
   local meta="$1" cft_plat="$2"
@@ -640,12 +684,14 @@ prepare_chromium() {
     if [[ -f "$dest/.kotv-chromium" && "$(cat "$dest/.kotv-chromium" 2>/dev/null || true)" == "$stamp" ]] \
       && [[ -f "$dest/chrome.exe" ]]; then
       echo "[chromium] already present ($stamp): $dest"
+      _ensure_win7_chromium_dwrite "$dest"
       return
     fi
     installer="$CACHE/chromium-win7-rework-${tag}-mini_installer_x64.exe"
     echo "[chromium] Win7 REWORK Chromium ${tag} (unpack mini_installer_x64.exe)"
     download "$url" "$installer"
     _extract_win7_rework_mini_installer "$installer" "$dest" "$stamp" "Win7 REWORK ${tag}"
+    _ensure_win7_chromium_dwrite "$dest"
     return
   fi
 

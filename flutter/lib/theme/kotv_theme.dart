@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +22,32 @@ class KotvColors {
   static const focus = Color(0xFFFFD54F);
 }
 
+/// Windows/Linux 中文与 emoji 回退；Win7 装好 Segoe UI Emoji（seguiemj）后彩色 emoji 才正常。
+List<String>? _kotvFontFallbacks() {
+  if (kIsWeb) return null;
+  if (Platform.isWindows) {
+    return const [
+      'Microsoft YaHei UI',
+      'Microsoft YaHei',
+      'Segoe UI',
+      'Segoe UI Emoji',
+      'Segoe UI Symbol',
+      'Noto Sans SC',
+      'Noto Color Emoji',
+    ];
+  }
+  if (Platform.isLinux) {
+    return const [
+      'Noto Sans CJK SC',
+      'Noto Sans CJK JP',
+      'Noto Sans',
+      'Noto Color Emoji',
+      'DejaVu Sans',
+    ];
+  }
+  return null;
+}
+
 ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
   final scheme = ColorScheme(
     brightness: palette.light ? Brightness.light : Brightness.dark,
@@ -35,13 +64,16 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     onError: Colors.white,
     outline: palette.outline,
   );
+  final fallbacks = _kotvFontFallbacks();
   return ThemeData(
     useMaterial3: true,
     brightness: scheme.brightness,
     colorScheme: scheme,
     scaffoldBackgroundColor: Colors.transparent,
     extensions: [palette],
+    fontFamilyFallback: fallbacks,
     // Android 14+ 预测性返回 / 全面屏手势；iOS/macOS 用 Cupertino 跟手侧滑
+    // Win7（Flutter 3.19）由 adapt-flutter-win7-sdk.sh 将 PredictiveBack 换成 Zoom
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
         TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
@@ -58,18 +90,18 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
       centerTitle: false,
     ),
     textTheme: TextTheme(
-      bodyLarge: TextStyle(color: palette.fg),
-      bodyMedium: TextStyle(color: palette.fg),
-      bodySmall: TextStyle(color: palette.muted),
-      titleLarge: TextStyle(color: palette.fg, fontWeight: FontWeight.w700),
-      titleMedium: TextStyle(color: palette.fg, fontWeight: FontWeight.w700),
-      titleSmall: TextStyle(color: palette.fg, fontWeight: FontWeight.w600),
+      bodyLarge: TextStyle(color: palette.fg, fontFamilyFallback: fallbacks),
+      bodyMedium: TextStyle(color: palette.fg, fontFamilyFallback: fallbacks),
+      bodySmall: TextStyle(color: palette.muted, fontFamilyFallback: fallbacks),
+      titleLarge: TextStyle(color: palette.fg, fontWeight: FontWeight.w700, fontFamilyFallback: fallbacks),
+      titleMedium: TextStyle(color: palette.fg, fontWeight: FontWeight.w700, fontFamilyFallback: fallbacks),
+      titleSmall: TextStyle(color: palette.fg, fontWeight: FontWeight.w600, fontFamilyFallback: fallbacks),
     ),
     chipTheme: ChipThemeData(
       backgroundColor: palette.input,
       selectedColor: palette.selected,
-      labelStyle: TextStyle(color: palette.fg),
-      secondaryLabelStyle: TextStyle(color: palette.fg),
+      labelStyle: TextStyle(color: palette.fg, fontFamilyFallback: fallbacks),
+      secondaryLabelStyle: TextStyle(color: palette.fg, fontFamilyFallback: fallbacks),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
     ),
@@ -77,7 +109,7 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
       filled: true,
       fillColor: palette.input,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-      hintStyle: TextStyle(color: palette.muted),
+      hintStyle: TextStyle(color: palette.muted, fontFamilyFallback: fallbacks),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
@@ -96,6 +128,7 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
           fontSize: 12,
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
           color: selected ? palette.fg : palette.muted,
+          fontFamilyFallback: fallbacks,
         );
       }),
       iconTheme: MaterialStateProperty.resolveWith((states) {
@@ -105,8 +138,8 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     ),
     dialogTheme: DialogThemeData(
       backgroundColor: palette.dialogBg,
-      contentTextStyle: TextStyle(color: palette.fg),
-      titleTextStyle: TextStyle(color: palette.fg, fontSize: 20, fontWeight: FontWeight.w700),
+      contentTextStyle: TextStyle(color: palette.fg, fontFamilyFallback: fallbacks),
+      titleTextStyle: TextStyle(color: palette.fg, fontSize: 20, fontWeight: FontWeight.w700, fontFamilyFallback: fallbacks),
     ),
   );
 }

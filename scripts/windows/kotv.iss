@@ -74,6 +74,11 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 [Files]
 Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; Win7 捆绑 Chromium 彩色 emoji：安装 Segoe UI Emoji（seguiemj.ttf，来自 REWORK dwrite 包）
+; Win10+ 通常已有，onlyifdoesntexist；无该文件时（非 Win7 包）跳过
+[Fonts]
+Source: "{#MySourceDir}\runtime\chromium\seguiemj.ttf"; FontInstall: "Segoe UI Emoji"; Flags: onlyifdoesntexist uninsneveruninstall skipifsourcedoesntexist
+
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
