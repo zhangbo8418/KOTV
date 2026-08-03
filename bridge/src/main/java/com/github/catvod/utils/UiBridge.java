@@ -1,35 +1,24 @@
 package com.github.catvod.utils;
 
 import com.github.catvod.crawler.SpiderDebug;
-import com.google.zxing.BarcodeFormat;
-import com.google.zxing.EncodeHintType;
-import com.google.zxing.MultiFormatWriter;
-import com.google.zxing.common.BitMatrix;
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
 
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
-import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import java.util.zip.CRC32;
-import java.util.zip.Deflater;
 
 /**
- * Jar-owned declarative UI. Host renders a frozen primitive set only;
- * all layout and business meaning live here.
+ * Declarative UI protocol for spider scripts. Host only renders frozen primitives and
+ * reports shown/closed — it never interprets content (image vs anything else) or action ids.
  *
  * <p>Frozen host element types: text, image, input, checkbox, radio, select, button,
- * link, progress, separator, spacer, space, row, column, group. Document actions become bottom buttons.
- * Host renders primitives only; titles, copy, size, timeout and URLs all come from this document.
+ * link, progress, separator, spacer, space, row, column, group.
+ * Bridge: {@link #show}/{@link #close} handshake only; scripts own documents and replies.
  */
 public final class UiBridge {
 
@@ -177,9 +166,10 @@ public final class UiBridge {
         }
 
         public Elements spacer(int height) {
+            if (height <= 0) return this;
             Map<String, Object> element = new LinkedHashMap<>();
             element.put("type", "spacer");
-            element.put("height", height <= 0 ? 8 : height);
+            element.put("height", height);
             target.add(element);
             return this;
         }
@@ -231,9 +221,10 @@ public final class UiBridge {
      * Declarative window builder. Compose with add* then {@link #show(String, Document)}.
      */
     public static final class Document {
-        public String title = "提示";
-        public int width = 420;
-        public int height = 560;
+        public String title = "";
+        /** 0 = 由内容自适应；宿主只在屏幕范围内尊重脚本给出的值。 */
+        public int width = 0;
+        public int height = 0;
         public long timeoutMs = 120_000;
         public final List<Map<String, Object>> elements = new ArrayList<>();
         public final List<Map<String, Object>> actions = new ArrayList<>();
@@ -379,28 +370,20 @@ public final class UiBridge {
             actions.add(UiBridge.action(id, label, dismiss));
             return this;
         }
-
-        public Document defaultActions() {
-            actions.addAll(UiBridge.defaultActions());
-            return this;
-        }
     }
 
     private static final ConcurrentHashMap<String, String> sessionByKind = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<String, Runnable> cancelBySession = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<String, Consumer<String>> submitBySession = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<String, Runnable> qrBySession = new ConcurrentHashMap<>();
     private static final AtomicLong nextSession = new AtomicLong();
 
     private UiBridge() {
     }
 
-    /** Show an arbitrary document under an internal kind key (opaque session to host). */
+    /**
+     * 向宿主开窗：脚本提供完整 {@link Document}。
+     * 宿主只渲染原语并回报 shown / closed；按钮动作与内容语义由脚本自行
+     * {@link Util#takeUiReply(String)} 消费。失败抛 {@link ShowFailedException}。
+     */
     public static Handle show(String kind, Document document) {
-        return show(kind, document, null, null);
-    }
-
-    public static Handle show(String kind, Document document, Consumer<String> onSubmitValue, Runnable onCancel) {
         String key = kindKey(kind);
         String session;
         try {
@@ -410,17 +393,11 @@ public final class UiBridge {
             Util.notify("弹窗关闭确认超时，请重试");
             throw e;
         }
-        if (onCancel != null) registerCancel(session, onCancel);
-        if (onSubmitValue != null) submitBySession.put(session, onSubmitValue);
         Document doc = document == null ? new Document() : document;
-        // 不自动补业务按钮：文案/动作一律由脚本 Document 提供。
         try {
             showDocument(session, doc);
         } catch (ShowFailedException e) {
             SpiderDebug.log("UiBridge showDocument: " + e.getMessage());
-            cancelBySession.remove(session);
-            submitBySession.remove(session);
-            qrBySession.remove(session);
             sessionByKind.remove(key, session);
             closeDocument(session);
             Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
@@ -431,183 +408,25 @@ public final class UiBridge {
     }
 
     /**
-     * @deprecated 业务文案应由脚本组 {@link Document} 后调用 {@link #show}；
-     * 本方法仅保留二维码图+标题/提示，不再擅自加 link/input/按钮。
+     * 脚本主动关窗并等宿主 closed。成功返回 true。
+     * toast 等由脚本自行 {@link Util#notify}。
      */
-    @Deprecated
-    public static Handle showQrContent(String content, String title, String tip, Runnable onCancel) {
-        return showQrContent(guessKind(title, tip), content, title, tip, onCancel);
-    }
-
-    /**
-     * 仅渲染脚本给定的 title/tip + 二维码图。link / 输入框 / 底栏按钮请脚本自己写进 Document 后 {@link #show}。
-     */
-    public static Handle showQrContent(String kind, String content, String title, String tip, Runnable onCancel) {
-        Document doc = new Document().title(title).text(tip).timeoutMs(180_000);
-        String image = qrDataUri(content);
-        if (!image.isEmpty()) doc.image(image, 260, 260);
-        else if (content != null && !content.trim().isEmpty()) doc.text(content);
-        return show(kind, doc, null, onCancel);
-    }
-
-    /** 将文本编码为 QR data-URI，供脚本 {@link Document#image} 使用。 */
-    public static String qrDataUri(String content) {
-        return encodeQrDataUri(content);
-    }
-
-    @Deprecated
-    public static Handle showQrBase64(String base64, String title, String tip, Runnable onCancel) {
-        return showQrBase64(guessKind(title, tip), base64, title, tip, onCancel);
-    }
-
-    /** 仅 title/tip + 图；其它控件由脚本 Document 提供。 */
-    public static Handle showQrBase64(String kind, String base64, String title, String tip, Runnable onCancel) {
-        Document doc = new Document().title(title).text(tip).timeoutMs(180_000);
-        String image = dataUri(base64);
-        if (!image.isEmpty()) doc.image(image, 260, 260);
-        return show(kind, doc, null, onCancel);
-    }
-
-    /**
-     * 拉码加载窗：文案全部由脚本传入。
-     *
-     * @param loadingText 进度下文案
-     * @param cancelLabel 取消按钮文案
-     */
-    public static Handle showFetchQrLoading(String kind, String title, String loadingText, String cancelLabel, Runnable onCancel) {
-        Document doc = new Document()
-                .title(title)
-                .size(360, 220)
-                .timeoutMs(45_000)
-                .progress()
-                .spacer(12)
-                .text(loadingText == null ? "" : loadingText);
-        if (cancelLabel != null && !cancelLabel.trim().isEmpty()) {
-            doc.action("cancel", cancelLabel, true);
-        }
-        return show(kind, doc, null, onCancel);
-    }
-
-    /** @deprecated 请用带 loadingText/cancelLabel 的重载，勿让 bridge 写死业务文案 */
-    @Deprecated
-    public static Handle showFetchQrLoading(String kind, String title, Runnable onCancel) {
-        return showFetchQrLoading(kind, title, "正在获取二维码，请稍候…", "取消", onCancel);
-    }
-
-    /** 拉码失败：关窗并提示。 */
-    public static void failFetchQr(String kind, String message) {
+    public static boolean close(String kind) {
         String key = kindKey(kind);
         String session = currentSession(kind);
-        if (!session.isEmpty()) {
-            cancelBySession.remove(session);
-            submitBySession.remove(session);
-            qrBySession.remove(session);
-            sessionByKind.remove(key, session);
-            // 先发 CLOSE 并等 closed；不要在等待前 bump epoch（会吞掉 CLOSE）。
-            closeDocument(session);
-            Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
-            Util.clearPendingUiNotify();
-        } else {
-            Util.clearPendingUiNotify();
-        }
-        if (message != null && !message.trim().isEmpty()) Util.notify(message);
+        if (session.isEmpty()) return true;
+        sessionByKind.remove(key, session);
+        closeDocument(session);
+        boolean ok = Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
+        Util.clearHostClientInfo(session);
+        Util.clearPendingUiNotify();
+        return ok;
     }
 
-    public static Handle showTokenInput(String title, String tip, Consumer<String> onOk, Runnable onQr) {
-        return showTokenInput(title, tip, onOk, onQr, null);
-    }
-
-    /**
-     * @deprecated 请用带占位符/按钮文案的重载，由脚本传入全部业务文案。
-     */
-    @Deprecated
-    public static Handle showTokenInput(String title, String tip, Consumer<String> onOk, Runnable onQr, Runnable onCancel) {
-        return showTokenInput(guessKind(title, tip), title, tip,
-                "请输入内容", "确认", "扫码登录", "关闭", onOk, onQr, onCancel);
-    }
-
-    /**
-     * Token/Cookie 输入窗：全部文案由脚本传入；宿主只渲染与回报 shown/closed。
-     */
-    public static Handle showTokenInput(String kind, String title, String tip,
-                                        String inputPlaceholder, String submitLabel, String qrLabel, String cancelLabel,
-                                        Consumer<String> onOk, Runnable onQr, Runnable onCancel) {
-        String k = normalizeKind(kind);
-        Document doc = new Document().title(title).text(tip);
-        if (inputPlaceholder != null) {
-            doc.input("value", inputPlaceholder, true);
-        }
-        if (submitLabel != null && !submitLabel.trim().isEmpty()) {
-            doc.action("submit", submitLabel, true);
-        }
-        if (qrLabel != null && !qrLabel.trim().isEmpty()) {
-            doc.action("qrcode", qrLabel, false);
-        }
-        if (cancelLabel != null && !cancelLabel.trim().isEmpty()) {
-            doc.action("cancel", cancelLabel, true);
-        }
-        Handle handle = show(k, doc, onOk, onCancel);
-        if (onQr != null) {
-            String session = currentSession(k);
-            if (!session.isEmpty()) qrBySession.put(session, onQr);
-        }
-        return handle;
-    }
-
-    /** Dispatches a normalized event returned by {@link Util#takeUiReply(String)}. */
-    public static void dispatchHostReply(String session, String reply) {
-        if (session == null || session.isEmpty() || reply == null || reply.isEmpty()) return;
-        if ("QRCODE".equals(reply)) {
-            Runnable qr = qrBySession.get(session);
-            if (qr != null) {
-                try {
-                    qr.run();
-                } catch (Throwable t) {
-                    SpiderDebug.log("UiBridge qrcode: " + t.getMessage());
-                }
-            }
-            return;
-        }
-        if ("CANCEL".equals(reply)) {
-            clearSession(session);
-            Util.clearPendingUiNotify();
-            qrBySession.remove(session);
-            Runnable cancel = cancelBySession.remove(session);
-            submitBySession.remove(session);
-            if (cancel != null) {
-                try {
-                    cancel.run();
-                } catch (Throwable t) {
-                    SpiderDebug.log("UiBridge cancel: " + t.getMessage());
-                }
-            }
-            return;
-        }
-        if (reply.startsWith("SUBMIT:")) {
-            clearSession(session);
-            qrBySession.remove(session);
-            String value = reply.substring(7).trim();
-            Consumer<String> submit = submitBySession.remove(session);
-            cancelBySession.remove(session);
-            if (submit != null && !value.isEmpty()) {
-                try {
-                    submit.accept(value);
-                } catch (Throwable t) {
-                    SpiderDebug.log("UiBridge submit: " + t.getMessage());
-                }
-            }
-        }
-    }
-
-    /** True while a host window session is open for this business kind. */
-    public static boolean hasSession(String kind) {
-        return !currentSession(kind).isEmpty();
-    }
 
     /**
      * 当前 kind 弹窗对应的客户端平台（android/ios/…）。
-     * 以 Flutter 前端为准；按 session 隔离，多前端不会串台。
-     * 须在 {@code show}/{@code shown} 握手成功后读取。
+     * 以 Flutter 前端为准；按 session 隔离。须在 show/shown 握手成功后读取。
      */
     public static String hostPlatform(String kind) {
         return Util.hostPlatform(currentSession(kind));
@@ -615,71 +434,6 @@ public final class UiBridge {
 
     public static boolean hostDesktop(String kind) {
         return Util.hostDesktop(currentSession(kind));
-    }
-
-    /** @deprecated 请用 {@link #hostPlatform(String kind)}，避免多前端串台 */
-    @Deprecated
-    public static String hostPlatform() {
-        return "";
-    }
-
-    /** @deprecated 请用 {@link #hostDesktop(String kind)} */
-    @Deprecated
-    public static boolean hostDesktop() {
-        return false;
-    }
-
-    /**
-     * 等宿主登录窗结局（shown/closed 握手）。
-     * 认 {@code CLOSED}/{@code CANCEL}/{@code SUBMIT:}；不再用 hasSession 消失猜关窗（会与换窗竞态）。
-     *
-     * @param done 已登录成功则结束等待并返回空串
-     * @return {@code CANCEL} / {@code CLOSED} / {@code SUBMIT:...} / {@code TIMEOUT} / {@code ""}（done）
-     */
-    public static String waitHostLoginReply(String kind, long timeoutMs, java.util.function.BooleanSupplier done) {
-        String k = normalizeKind(kind);
-        if (done == null) done = () -> false;
-        long deadline = System.currentTimeMillis() + Math.max(1_000L, timeoutMs);
-        while (!done.getAsBoolean() && System.currentTimeMillis() < deadline) {
-            String reply = Util.takeUiReply(k);
-            // QRCODE 已由 takeUiReply → dispatchHostReply 触发扫码；继续等结局。
-            if ("CLOSED".equals(reply)) return "CLOSED";
-            if ("CANCEL".equals(reply)) return "CANCEL";
-            if (reply != null && reply.startsWith("SUBMIT:")) return reply;
-            try {
-                Thread.sleep(250);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return "CANCEL";
-            }
-        }
-        if (done.getAsBoolean()) {
-            // 登录已成功：脚本侧必须主动关宿主窗（宿主不管业务，不会自己猜关）。
-            String key = kindKey(k);
-            String session = currentSession(k);
-            if (!session.isEmpty()) {
-                cancelBySession.remove(session);
-                submitBySession.remove(session);
-                qrBySession.remove(session);
-                sessionByKind.remove(key, session);
-                closeDocument(session);
-                Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
-                Util.clearPendingUiNotify();
-            }
-            return "";
-        }
-        return "TIMEOUT";
-    }
-
-    private static void clearSession(String session) {
-        if (session == null || session.isEmpty()) return;
-        for (Map.Entry<String, String> e : sessionByKind.entrySet()) {
-            if (session.equals(e.getValue())) {
-                sessionByKind.remove(e.getKey(), session);
-                break;
-            }
-        }
-        Util.clearHostClientInfo(session);
     }
 
     public static void dispose(Handle handle) {
@@ -690,20 +444,7 @@ public final class UiBridge {
         }
     }
 
-    public static void showToast(String msg, int timeMills) {
-        Util.notify(msg == null ? "" : msg);
-    }
-
-    public static String guessKind(String title, String tip) {
-        String s = ((title == null ? "" : title) + " " + (tip == null ? "" : tip)).toLowerCase();
-        if (s.contains("quark") || s.contains("夸克")) return "quark";
-        if (s.contains("uc")) return "uc";
-        if (s.contains("ali") || s.contains("阿里")) return "ali";
-        return "login";
-    }
-
-    /** Business code uses its internal key; only the opaque session id crosses the host boundary.
-     *  多前端：kind 按当前 clientId 隔离，避免扫码窗/登录态串台。 */
+    /** 脚本用的内部 kind；跨宿主边界只有不透明 session id。按 Scope 隔离。 */
     public static String currentSession(String kind) {
         return sessionByKind.getOrDefault(kindKey(kind), "");
     }
@@ -714,15 +455,12 @@ public final class UiBridge {
                 + "-" + Long.toUnsignedString(System.nanoTime(), 36);
         String previous = sessionByKind.put(key, session);
         if (previous != null && !previous.equals(session)) {
-            cancelBySession.remove(previous);
-            submitBySession.remove(previous);
-            qrBySession.remove(previous);
-            // 关旧窗并等宿主 closed，再开新窗（不再依赖宿主原地换内容）。
             closeDocument(previous);
             if (!Util.waitUiAction(previous, "closed", Util.UI_CLOSE_WAIT_MS)) {
                 sessionByKind.remove(key, session);
                 throw new ShowFailedException("wait closed timeout for " + previous);
             }
+            Util.clearHostClientInfo(previous);
         }
         return session;
     }
@@ -730,7 +468,7 @@ public final class UiBridge {
     private static void showDocument(String session, Document doc) {
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("id", session);
-        document.put("title", doc.title == null || doc.title.trim().isEmpty() ? "提示" : doc.title);
+        document.put("title", doc.title == null ? "" : doc.title);
         document.put("width", doc.width);
         document.put("height", doc.height);
         document.put("timeoutMs", doc.timeoutMs);
@@ -773,8 +511,9 @@ public final class UiBridge {
         Map<String, Object> element = new LinkedHashMap<>();
         element.put("type", "image");
         element.put("source", source);
-        element.put("width", width);
-        element.put("height", height);
+        // 宽高由脚本传入；≤0 表示不强制，宿主按图片固有尺寸。
+        if (width > 0) element.put("width", width);
+        if (height > 0) element.put("height", height);
         elements.add(element);
     }
 
@@ -803,13 +542,6 @@ public final class UiBridge {
         return list;
     }
 
-    private static List<Map<String, Object>> defaultActions() {
-        List<Map<String, Object>> actions = new ArrayList<>();
-        actions.add(action("submit", "确认", true));
-        actions.add(action("cancel", "关闭", true));
-        return actions;
-    }
-
     private static Map<String, Object> action(String id, String label, boolean dismiss) {
         Map<String, Object> action = new LinkedHashMap<>();
         action.put("id", id);
@@ -818,18 +550,9 @@ public final class UiBridge {
         return action;
     }
 
-    private static void registerCancel(String session, Runnable onCancel) {
-        if (onCancel != null) cancelBySession.put(session, onCancel);
-        else cancelBySession.remove(session);
-    }
-
     private static Handle handleFor(String kind, String session) {
         return () -> {
-            cancelBySession.remove(session);
-            submitBySession.remove(session);
-            qrBySession.remove(session);
             sessionByKind.remove(kind, session);
-            // 先 CLOSE 再等 closed；成功后再清异步 toast 队列。
             closeDocument(session);
             Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
             Util.clearHostClientInfo(session);
@@ -838,7 +561,7 @@ public final class UiBridge {
     }
 
     private static String normalizeKind(String kind) {
-        if (kind == null || kind.trim().isEmpty()) return "login";
+        if (kind == null || kind.trim().isEmpty()) return "ui";
         return kind.trim().toLowerCase();
     }
 
@@ -851,110 +574,4 @@ public final class UiBridge {
         return scope + '\u0001' + k;
     }
 
-    private static String dataUri(String base64) {
-        if (base64 == null || base64.trim().isEmpty()) return "";
-        String value = base64.trim();
-        if (value.startsWith("data:")) return value;
-        int marker = value.indexOf("base64,");
-        if (marker >= 0) value = value.substring(marker + 7);
-        return "data:image/png;base64," + value;
-    }
-
-    private static boolean looksLikeOpenableUrl(String raw) {
-        if (raw == null) return false;
-        String s = raw.trim().toLowerCase();
-        if (s.isEmpty()) return false;
-        return s.startsWith("http://") || s.startsWith("https://") || s.contains("://");
-    }
-
-    private static String encodeQrDataUri(String content) {
-        if (content == null || content.trim().isEmpty()) return "";
-        try {
-            Map<EncodeHintType, Object> hints = new EnumMap<>(EncodeHintType.class);
-            hints.put(EncodeHintType.CHARACTER_SET, "UTF-8");
-            hints.put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M);
-            hints.put(EncodeHintType.MARGIN, 1);
-            BitMatrix matrix = new MultiFormatWriter().encode(content, BarcodeFormat.QR_CODE, 0, 0, hints);
-            byte[] png = matrixToPng(matrix, 5);
-            return "data:image/png;base64," + Base64.getEncoder().encodeToString(png);
-        } catch (Throwable e) {
-            SpiderDebug.log("UiBridge image encode: " + e.getMessage());
-            return "";
-        }
-    }
-
-    private static byte[] matrixToPng(BitMatrix matrix, int scale) throws Exception {
-        int width = matrix.getWidth() * scale;
-        int height = matrix.getHeight() * scale;
-        byte[] raw = new byte[width * height];
-        for (int y = 0; y < matrix.getHeight(); y++) {
-            for (int x = 0; x < matrix.getWidth(); x++) {
-                byte color = (byte) (matrix.get(x, y) ? 0x00 : 0xFF);
-                for (int dy = 0; dy < scale; dy++) {
-                    int row = (y * scale + dy) * width;
-                    for (int dx = 0; dx < scale; dx++) {
-                        raw[row + x * scale + dx] = color;
-                    }
-                }
-            }
-        }
-
-        byte[] ihdr = new byte[13];
-        putInt(ihdr, 0, width);
-        putInt(ihdr, 4, height);
-        ihdr[8] = 8;
-        ihdr[9] = 0;
-        ihdr[10] = 0;
-        ihdr[11] = 0;
-        ihdr[12] = 0;
-
-        byte[] scanlines = new byte[(width + 1) * height];
-        for (int y = 0; y < height; y++) {
-            int src = y * width;
-            int dst = y * (width + 1);
-            scanlines[dst] = 0;
-            System.arraycopy(raw, src, scanlines, dst + 1, width);
-        }
-        Deflater deflater = new Deflater(Deflater.BEST_SPEED);
-        deflater.setInput(scanlines);
-        deflater.finish();
-        ByteArrayOutputStream compressed = new ByteArrayOutputStream();
-        byte[] buffer = new byte[4096];
-        while (!deflater.finished()) {
-            int count = deflater.deflate(buffer);
-            compressed.write(buffer, 0, count);
-        }
-        deflater.end();
-
-        ByteArrayOutputStream png = new ByteArrayOutputStream();
-        png.write(new byte[]{(byte) 137, 80, 78, 71, 13, 10, 26, 10});
-        writeChunk(png, "IHDR".getBytes(StandardCharsets.US_ASCII), ihdr);
-        writeChunk(png, "IDAT".getBytes(StandardCharsets.US_ASCII), compressed.toByteArray());
-        writeChunk(png, "IEND".getBytes(StandardCharsets.US_ASCII), new byte[0]);
-        return png.toByteArray();
-    }
-
-    private static void writeChunk(ByteArrayOutputStream out, byte[] type, byte[] data) throws Exception {
-        putIntBytes(out, data.length);
-        out.write(type);
-        out.write(data);
-        CRC32 crc = new CRC32();
-        crc.update(type);
-        crc.update(data);
-        putIntBytes(out, (int) crc.getValue());
-    }
-
-    private static void putInt(byte[] target, int offset, int value) {
-        target[offset] = (byte) (value >>> 24);
-        target[offset + 1] = (byte) (value >>> 16);
-        target[offset + 2] = (byte) (value >>> 8);
-        target[offset + 3] = (byte) value;
-    }
-
-    private static void putIntBytes(ByteArrayOutputStream out, int value) {
-        out.write((value >>> 24) & 0xFF);
-        out.write((value >>> 16) & 0xFF);
-        out.write((value >>> 8) & 0xFF);
-        out.write(value & 0xFF);
-    }
 }

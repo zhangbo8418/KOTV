@@ -13,7 +13,6 @@ com.google.guava:failureaccess:1.0.2=compileClasspath,runtimeClasspath,testCompi
 com.google.guava:guava:33.2.1-jre=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.google.j2objc:j2objc-annotations:3.0.0=compileClasspath,testCompileClasspath
-com.google.zxing:core:3.5.3=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.googlecode.juniversalchardet:juniversalchardet:1.0.3=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.hierynomus:asn-one:0.6.0=runtimeClasspath,testRuntimeClasspath
 com.hierynomus:smbj:0.14.0=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath

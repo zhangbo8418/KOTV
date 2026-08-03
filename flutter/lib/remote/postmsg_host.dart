@@ -441,17 +441,15 @@ class PostMsgHost {
                     final title = '${doc['title'] ?? ''}';
                     final elements = (doc['elements'] as List?) ?? const [];
                     final actions = (doc['actions'] as List?) ?? const [];
-                    final width = (doc['width'] is num) ? (doc['width'] as num).toDouble() : 420.0;
-                    final height = (doc['height'] is num) ? (doc['height'] as num).toDouble() : 480.0;
 
                     return AlertDialog(
                       backgroundColor: const Color(0xFF1A1028),
                       title: title.isEmpty
                           ? null
                           : Text(title, style: const TextStyle(color: Colors.white)),
-                      content: SizedBox(
-                        width: width.clamp(200, 900),
-                        height: height.clamp(120, 900),
+                      content: _docContentBox(
+                        dialogCtx,
+                        doc,
                         child: SingleChildScrollView(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -532,18 +530,43 @@ class PostMsgHost {
   /// 关窗瞬间仍展示最后一帧内容（无交互），避免空 barrier。
   Widget _buildDialogShell(Map<String, dynamic> doc) {
     final title = '${doc['title'] ?? ''}';
-    final width = (doc['width'] is num) ? (doc['width'] as num).toDouble() : 420.0;
-    final height = (doc['height'] is num) ? (doc['height'] as num).toDouble() : 480.0;
+    final ctx = navigatorKey.currentContext;
     return AlertDialog(
       backgroundColor: const Color(0xFF1A1028),
       title: title.isEmpty ? null : Text(title, style: const TextStyle(color: Colors.white)),
-      content: SizedBox(
-        width: width.clamp(200, 900),
-        height: height.clamp(120, 900),
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.white54),
-        ),
+      content: ctx == null
+          ? const SizedBox(
+              width: 120,
+              height: 80,
+              child: Center(child: CircularProgressIndicator(color: Colors.white54)),
+            )
+          : _docContentBox(
+              ctx,
+              doc,
+              child: const Center(child: CircularProgressIndicator(color: Colors.white54)),
+            ),
+    );
+  }
+
+  /// 窗口宽高完全跟 Document；仅用屏幕尺寸做上限，避免溢出。未指定则按内容自适应。
+  Widget _docContentBox(BuildContext ctx, Map<String, dynamic> doc, {required Widget child}) {
+    final screen = MediaQuery.sizeOf(ctx);
+    final maxW = screen.width * 0.95;
+    final maxH = screen.height * 0.9;
+    final rawW = (doc['width'] is num) ? (doc['width'] as num).toDouble() : 0.0;
+    final rawH = (doc['height'] is num) ? (doc['height'] as num).toDouble() : 0.0;
+    final w = rawW > 0 ? rawW.clamp(1.0, maxW) : null;
+    final h = rawH > 0 ? rawH.clamp(1.0, maxH) : null;
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: w ?? maxW,
+        maxHeight: h ?? maxH,
+        minWidth: w ?? 0,
+        minHeight: 0,
       ),
+      child: (w != null || h != null)
+          ? SizedBox(width: w, height: h, child: child)
+          : child,
     );
   }
 
@@ -567,9 +590,11 @@ class PostMsgHost {
         ];
       case 'image':
         final img = _decodeDataImage('${el['source'] ?? ''}');
-        final w = (el['width'] is num) ? (el['width'] as num).toDouble() : 260.0;
-        final h = (el['height'] is num) ? (el['height'] as num).toDouble() : 260.0;
         if (img == null) return const [];
+        final rawW = (el['width'] is num) ? (el['width'] as num).toDouble() : 0.0;
+        final rawH = (el['height'] is num) ? (el['height'] as num).toDouble() : 0.0;
+        final w = rawW > 0 ? rawW : null;
+        final h = rawH > 0 ? rawH : null;
         return [
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -711,18 +736,19 @@ class PostMsgHost {
       case 'separator':
         return [Divider(color: Colors.white.withOpacity(0.15))];
       case 'spacer':
-        final h = (el['height'] is num) ? (el['height'] as num).toDouble() : 8.0;
-        return [SizedBox(height: h)];
       case 'space':
-        return [const SizedBox(height: 12)];
+        final h = (el['height'] is num) ? (el['height'] as num).toDouble() : 0.0;
+        if (h <= 0) return const [];
+        return [SizedBox(height: h)];
       case 'row':
       case 'column':
       case 'group':
         final children = (el['children'] as List?) ?? const [];
+        final spacing = (el['spacing'] is num) ? (el['spacing'] as num).toDouble() : 0.0;
         final kids = <Widget>[
           if (type == 'group' && '${el['text'] ?? ''}'.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(bottom: 6),
+              padding: EdgeInsets.only(bottom: spacing > 0 ? spacing : 0),
               child: Text('${el['text']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
             ),
           for (final c in children)
@@ -738,9 +764,18 @@ class PostMsgHost {
               ),
         ];
         if (type == 'row') {
+          final gap = spacing > 0 ? spacing : 0.0;
           return [
-            Wrap(spacing: 8, runSpacing: 8, children: kids),
+            Wrap(spacing: gap, runSpacing: gap, children: kids),
           ];
+        }
+        if (type == 'column' && spacing > 0) {
+          final spaced = <Widget>[];
+          for (var i = 0; i < kids.length; i++) {
+            if (i > 0) spaced.add(SizedBox(height: spacing));
+            spaced.add(kids[i]);
+          }
+          return spaced;
         }
         return kids;
       default:

@@ -245,13 +245,13 @@ public class Util {
     }
 
     /**
-     * 会话隔离键：远端优先 {@code u:<userId>}，本机回退 {@code c:<clientId>} / 已带前缀原样。
-     * 对齐 Go {@code hostclient.ScopeID}。
+     * 会话隔离键：仅远端已登录用 {@code u:<userId>}；本机未登录只用 {@code c:<clientId>}，不造 userId。
      */
     public static String scopeId() {
         String uid = userId();
         if (!uid.isEmpty()) {
-            if (uid.startsWith("u:") || uid.startsWith("c:")) return uid;
+            if (uid.startsWith("u:")) return uid;
+            if (uid.startsWith("c:")) return uid; // 误写入则原样，勿再套 u:
             return "u:" + uid;
         }
         String cid = clientId();
@@ -484,7 +484,10 @@ public class Util {
         }
     }
 
-    /** Non-blocking read of a generic host UI event, normalized for existing jar callers. */
+    /** Non-blocking read of a host UI event for scripts. No business side effects.
+     *  Host returns opaque action ids from the Document; bridge only maps lifecycle
+     *  ({@code shown}/{@code closed}/{@code dismiss}/{@code timeout}) and packs
+     *  {@code submit} values. Other action ids are returned uppercased as-is. */
     public static String takeUiReply(String kind) {
         if (kind == null || kind.isEmpty()) return "";
         try {
@@ -501,7 +504,12 @@ public class Util {
             } else {
                 action = raw.trim();
             }
-            String normalized;
+            if ("shown".equals(action)) {
+                requeueUiReply(session, raw);
+                return "";
+            }
+            if ("closed".equals(action)) return "CLOSED";
+            if ("dismiss".equals(action) || "timeout".equals(action)) return "CANCEL";
             if ("submit".equals(action)) {
                 Object value = null;
                 if (event != null) {
@@ -510,25 +518,11 @@ public class Util {
                         value = ((Map<?, ?>) valuesObj).get("value");
                     }
                 }
-                normalized = value == null ? "" : "SUBMIT:" + value;
-            } else if ("qrcode".equals(action)) {
-                normalized = "QRCODE";
-            } else if ("cancel".equals(action) || "dismiss".equals(action) || "timeout".equals(action)) {
-                normalized = "CANCEL";
-            } else if ("shown".equals(action)) {
-                // 开窗握手归 waitUiAction；业务轮询放回队列。
-                requeueUiReply(session, raw);
-                return "";
-            } else if ("closed".equals(action)) {
-                // 关窗握手：登录等待循环要认 CLOSED，这里消费并返回。
-                return "CLOSED";
-            } else {
-                normalized = "";
+                return value == null ? "SUBMIT:" : "SUBMIT:" + value;
             }
-            if ("CANCEL".equals(normalized) || "QRCODE".equals(normalized) || normalized.startsWith("SUBMIT:")) {
-                UiBridge.dispatchHostReply(session, normalized);
-            }
-            return normalized;
+            if ("cancel".equals(action)) return "CANCEL";
+            if (!action.isEmpty()) return action.toUpperCase(Locale.ROOT);
+            return "";
         } catch (Exception e) {
             return "";
         }
@@ -537,21 +531,28 @@ public class Util {
     private static void postHttpMsg(String msg) throws IOException {
         String base = Proxy.getHostPort();
         if (base == null || base.isEmpty()) return;
-        // 远端：显式 userId，引擎按 u:<userId> 投到该用户设备；本机未登录：clientId / scopeId。
+        // 远端已登录：userId；本机未登录无 userId，只用 clientId（勿伪造 userId）。
         String uid = userId();
         if (uid.startsWith("u:")) uid = uid.substring(2);
         if (uid.startsWith("c:")) uid = "";
-        String scope = scopeId();
+        String cid = clientId();
         String routeQ;
         if (!uid.isEmpty()) {
             routeQ = "userId=" + urlEncode(uid);
-        } else if (!scope.isEmpty()) {
-            routeQ = "scopeId=" + urlEncode(scope);
+        } else if (!cid.isEmpty()) {
+            if (cid.startsWith("c:")) {
+                routeQ = "clientId=" + urlEncode(cid.substring(2));
+            } else if (cid.startsWith("u:")) {
+                // 仅当 ThreadLocal 误带了 Scope 时兼容；正常本机不应走这支
+                routeQ = "userId=" + urlEncode(cid.substring(2));
+            } else {
+                routeQ = "clientId=" + urlEncode(cid);
+            }
         } else {
-            String cid = clientId();
-            routeQ = cid.isEmpty() ? "" : "clientId=" + urlEncode(cid);
+            String scope = scopeId();
+            routeQ = scope.isEmpty() ? "" : "scopeId=" + urlEncode(scope);
         }
-        // Long payloads (QRIMG base64) must use POST body; GET query length is limited.
+        // Long payloads (e.g. image data-URI) must use POST body; GET query length is limited.
         if (msg.length() > 800) {
             RequestBody body = RequestBody.create(msg, MediaType.parse("text/plain; charset=utf-8"));
             String url = base + "/postMsg" + (routeQ.isEmpty() ? "" : "?" + routeQ);
@@ -573,12 +574,11 @@ public class Util {
     }
 
     public static void notify(String msg, Integer timeMills) {
-        if (timeMills != null && timeMills > 0) UiBridge.showToast(msg, timeMills);
-        else notify(msg);
+        notify(msg);
     }
 
     public static void showToast(String msg, Integer timeMills) {
-        UiBridge.showToast(msg, timeMills == null ? 2000 : timeMills);
+        notify(msg == null ? "" : msg);
     }
 
     public static String getDigit(String text) {
