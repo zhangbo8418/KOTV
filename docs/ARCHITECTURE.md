@@ -41,7 +41,7 @@ Go Engine（可部署到服务器，多前端并发）
 | `X-Kotv-Client-Id` | Flutter 持久化身份；API / ui/poll / postMsg 按客户端隔离 |
 | JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`），去掉全局 stdin 串行锁 |
 | Py / JS | 同站 **worker 池**（默认 CPU 数，上限 8，可用 `KOTV_SCRIPT_POOL`）；多用户打同一站可并行 |
-| 取消 | `/api/v1/cancel` 只软取消**当前 client** 的 OkHttp/脚本；换源仍硬 Kill JVM |
+| 取消 | `/api/v1/cancel` 只软取消**当前 client**；换源也不再硬 Kill JVM（只清缓存 + 软取消换源者） |
 | JS | `getClientId()` / `postMsg(msg)` 宿主 API，路由回正确前端 |
 
 ## 平台取舍

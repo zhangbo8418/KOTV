@@ -46,17 +46,30 @@ func NewSiteService(cfg *config.Manager) *SiteService {
 	}
 }
 
-// InvalidateLoads 作废进行中的首页加载，并打断卡住的 JAR bridge。
+// InvalidateLoads 换源后作废缓存，并只软取消当前 client 的进行中请求。
+// 不再硬 Kill JVM：多前端连同一引擎时，硬杀会误伤其他人。
+// 脚本/JAR 缓存仍会清空（配置已变，旧站实例不能复用）。
 func (s *SiteService) InvalidateLoads() {
 	s.loadEpoch.Add(1)
 	s.mu.Lock()
 	s.invalidateContentCache()
 	s.mu.Unlock()
-	// 先软中断脚本，再杀 JVM，最后 Destroy，降低 QuickJS/CGO 与 Kill 竞态。
-	spider.InterruptScriptSpiders()
-	spider.InterruptJavaBridge()
+	cid := hostclient.Current()
+	spider.InterruptJavaBridgeForClient(cid)
+	spider.InterruptScriptSpidersForClient(cid)
 	spider.ResetScriptSpiders()
 	spider.ClearJarBridgeOnSwitch()
+}
+
+// InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前 client，保留脚本/JAR 池。
+func (s *SiteService) InvalidateHomeOnly() {
+	s.loadEpoch.Add(1)
+	s.mu.Lock()
+	s.invalidateContentCache()
+	s.mu.Unlock()
+	cid := hostclient.Current()
+	spider.InterruptJavaBridgeForClient(cid)
+	spider.InterruptScriptSpidersForClient(cid)
 }
 
 // HomeLoadEpoch 返回当前加载世代，供 UI 丢弃过期结果。

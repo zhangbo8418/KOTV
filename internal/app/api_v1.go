@@ -79,7 +79,7 @@ func (a *App) APISetHome(siteKey string) error {
 	if site == nil {
 		return fmt.Errorf("站点不存在: %s", siteKey)
 	}
-	a.Sites.InvalidateLoads()
+	a.Sites.InvalidateHomeOnly()
 	a.Config.SetHome(*site)
 	return nil
 }
