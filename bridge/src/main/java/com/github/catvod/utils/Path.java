@@ -55,14 +55,33 @@ public class Path {
     }
 
     public static File tv() {
-        return mkdir(new File(root(), "TV"));
+        return tvRoot(Util.clientId());
     }
 
-    /** 站点凭证等：TV/.name（CatVodSpider/KOTV 站点常用） */
+    /** 站点凭证等：TV[/scope]/.name（多前端按 clientId 隔离 cookie/token） */
     public static File tv(String name) {
+        return tv(Util.clientId(), name);
+    }
+
+    /** 指定 scope 的凭证文件（异步线程可传实例捕获的 scopeId）。 */
+    public static File tv(String scopeId, String name) {
         if (name == null) name = "";
         if (!name.isEmpty() && !name.startsWith(".")) name = "." + name;
-        return new File(tv(), name);
+        return new File(tvRoot(scopeId), name);
+    }
+
+    private static File tvRoot(String scopeId) {
+        File base = mkdir(new File(root(), "TV"));
+        String s = sanitizeScope(scopeId);
+        if (s.isEmpty()) return base;
+        return mkdir(new File(base, "s_" + s));
+    }
+
+    private static String sanitizeScope(String scopeId) {
+        if (scopeId == null) return "";
+        String s = scopeId.trim().replaceAll("[^a-zA-Z0-9._:-]", "_");
+        if (s.length() > 64) s = s.substring(0, 64);
+        return s;
     }
 
     public static File so() {

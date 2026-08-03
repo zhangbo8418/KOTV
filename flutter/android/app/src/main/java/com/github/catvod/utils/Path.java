@@ -72,14 +72,42 @@ public class Path {
     }
 
     public static File tv() {
-        return mkdir(new File(root(), "TV"));
+        return tvRoot(clientScope());
     }
 
-    /** 站点凭证等：TV/.name */
+    /** 站点凭证等：TV[/scope]/.name */
     public static File tv(String name) {
+        return tv(clientScope(), name);
+    }
+
+    public static File tv(String scopeId, String name) {
         if (name == null) name = "";
         if (!name.isEmpty() && !name.startsWith(".")) name = "." + name;
-        return new File(tv(), name);
+        return new File(tvRoot(scopeId), name);
+    }
+
+    private static File tvRoot(String scopeId) {
+        File base = mkdir(new File(root(), "TV"));
+        String s = sanitizeScope(scopeId);
+        if (s.isEmpty()) return base;
+        return mkdir(new File(base, "s_" + s));
+    }
+
+    private static String clientScope() {
+        try {
+            Class<?> util = Class.forName("com.github.catvod.utils.Util");
+            Object v = util.getMethod("clientId").invoke(null);
+            return v == null ? "" : String.valueOf(v);
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private static String sanitizeScope(String scopeId) {
+        if (scopeId == null) return "";
+        String s = scopeId.trim().replaceAll("[^a-zA-Z0-9._:-]", "_");
+        if (s.length() > 64) s = s.substring(0, 64);
+        return s;
     }
 
     public static File so() {

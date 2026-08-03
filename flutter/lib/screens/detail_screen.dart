@@ -245,8 +245,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playUrl = '';
     _magnetPlay = false;
     _stopBtProgressPoll();
-    // 对齐 TV Source.stop：打断引擎侧磁力等待 + 爬虫
-    unawaited(ref.read(apiProvider).cancelPending());
+    // 对齐 TV Source.stop：离开详情硬杀运行时 + 停磁力
+    unawaited(ref.read(apiProvider).cancelPending(hard: true, thunder: true));
 
     Future<void> hardStop(KotvPlayback? p) async {
       if (p == null) return;
@@ -378,7 +378,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     // 离开详情：回传扫码取消并打断 JAR；不要再 nav.pop（本页正在出栈）。
     final api = ref.read(apiProvider);
     unawaited(PostMsgHost.instance?.cancelAll(reply: true, popDialog: false) ?? Future<void>.value());
-    unawaited(api.cancelPending());
+    unawaited(api.cancelPending(hard: true, thunder: true));
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
     }
@@ -486,7 +486,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (!mounted) return;
     final cur = _detail;
     if (cur == null) return;
-    setState(() => _status = '正在展开磁力文件…');
+    // 已在播非磁力：展开只更新列表，不抢状态栏、不清选集
+    final playingNonMagnet = _playUrl.isNotEmpty && !_magnetPlay;
+    if (!playingNonMagnet) {
+      setState(() => _status = '正在展开磁力文件…');
+    }
     _startBtProgressPoll(expanding: true);
     try {
       final flagsPayload = cur.flags
@@ -505,14 +509,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           _detail = cur.withFlags(expanded.flags);
           if (_flagIdx >= expanded.flags.length) _flagIdx = 0;
           _epPage = 0;
-          if (_epIdx >= 0) _epIdx = -1;
-          _status = '磁力文件已展开，可选集播放';
+          if (!playingNonMagnet && _epIdx >= 0) _epIdx = -1;
+          if (!playingNonMagnet) {
+            _status = '磁力文件已展开，可选集播放';
+          }
         });
-      } else if (mounted) {
+      } else if (mounted && !playingNonMagnet) {
         setState(() => _status = '选择剧集开始播放');
       }
     } catch (e) {
-      if (mounted) setState(() => _status = '磁力展开失败，仍可点原链起播');
+      if (mounted && !playingNonMagnet) setState(() => _status = '磁力展开失败，仍可点原链起播');
     } finally {
       _stopBtProgressPoll();
     }
@@ -526,6 +532,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final p = await ref.read(apiProvider).btProgress();
         final msg = '${p['message'] ?? ''}'.trim();
         if (msg.isEmpty || !mounted) return;
+        // 展开过程中若已在播非磁力，绝不抢状态栏。
+        if (expanding && _playUrl.isNotEmpty && !_magnetPlay) return;
+        // 「已取消」来自 thunder.Stop；非磁力播放时忽略，避免误显示。
+        if (msg == '已取消' && !_magnetPlay) return;
         // 展开/起播过程中用引擎进度覆盖状态；已进入正式播放文案则不抢。
         if (_status.contains('播放中') && !_status.contains('磁力缓冲')) return;
         if (_status == '已暂停' || _status == '播放结束' || _status.startsWith('播放失败')) return;
@@ -620,12 +630,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _endedSub = null;
     _posSub?.cancel();
     _posSub = null;
-    // 对齐 TV playerContent 前 Source.stop：打断上一集磁力/解析等待
-    unawaited(ref.read(apiProvider).cancelPending());
     final epLooksMagnet = RegExp(r'^(magnet|thunder|ed2k):', caseSensitive: false).hasMatch(ep.url.trim()) ||
         ep.url.toLowerCase().contains('.torrent') ||
         ep.url.contains('/proxy/bt/') ||
         ep.url.toLowerCase().startsWith('magnet://local');
+    // 换集：软取消上一集解析；仅磁力相关时才 Stop thunder，避免盖「已取消」打断非磁力播放
+    unawaited(ref.read(apiProvider).cancelPending(
+          hard: false,
+          thunder: _magnetPlay || epLooksMagnet,
+        ));
     setState(() {
       _epIdx = epIdx;
       _playUrl = '';

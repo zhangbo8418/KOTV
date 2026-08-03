@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/util"
@@ -165,7 +166,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		}
 	}
 	if parsed == "" {
-		if u, h, e := browserSniff(webURL, hdr, click, opts.Rules, defaultParseWebTimeout, true, opts.IsVideo); e == nil && u != "" {
+		if u, h, e := browserSniff(webURL, hdr, click, opts.Rules, defaultParseWebTimeout, true, opts.IsVideo, 0); e == nil && u != "" {
 			parsed, sniffHdr, err = u, h, nil
 		}
 	}
@@ -327,7 +328,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		if out, err := PlayPageSniff(target, headers); err == nil && out != "" {
 			return out, nil, nil
 		}
-		u, h, err := browserSniff(target, headers, click, rules, defaultParseWebTimeout, true, isVideo)
+		u, h, err := browserSniff(target, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0)
 		return u, h, err
 	case 2:
 		u, h, needWeb, err := jarJSONExt(p, webURL, parses)
@@ -364,7 +365,7 @@ func sniffParsedWeb(pageURL string, headers map[string]string, click string, rul
 	if out, err := PlayPageSniff(pageURL, headers); err == nil && out != "" {
 		return out, nil, nil
 	}
-	return browserSniff(pageURL, headers, click, rules, defaultParseWebTimeout, true, isVideo)
+	return browserSniff(pageURL, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0)
 }
 
 // superParse 对齐 TV ParseJob.superParse / getParses(type, flag)。
@@ -400,7 +401,26 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// 桌面无 TV /parse?jxs=… WebView 页：对各 type0 前缀+地址竞速嗅探。
+			// 对齐 TV：单页 /parse?jxs=… 聚合 iframe 竞速，只开一次 Chromium tab。
+			var sb strings.Builder
+			for _, item := range webs {
+				sb.WriteString(strings.TrimSpace(item.URL))
+				sb.WriteByte(';')
+			}
+			jxs := strings.TrimSuffix(sb.String(), ";")
+			if jxs != "" {
+				parsePage := fmt.Sprintf("http://127.0.0.1:%d/parse?jxs=%s&url=%s",
+					localproxy.Port(), url.QueryEscape(jxs), url.QueryEscape(webURL))
+				if out, err := PlayPageSniff(parsePage, headers); err == nil && out != "" && matchVideo(out, rules, isVideo) {
+					ch <- result{url: out}
+					return
+				}
+				if u, h, err := browserSniff(parsePage, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0); err == nil && u != "" {
+					ch <- result{url: u, hdr: h}
+					return
+				}
+			}
+			// 回落：顺序嗅探各 type0（共享 Chromium，不再并行开进程）
 			for _, item := range webs {
 				target := strings.TrimSpace(item.URL) + webURL
 				if target == "" {
@@ -411,13 +431,12 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 					ch <- result{url: out}
 					return
 				}
-				if u, h, err := browserSniff(target, hdr, click, rules, defaultParseWebTimeout, true, isVideo); err == nil && u != "" {
+				if u, h, err := browserSniff(target, hdr, click, rules, defaultParseWebTimeout, true, isVideo, 0); err == nil && u != "" {
 					ch <- result{url: u, hdr: h}
 					return
 				}
 			}
-			// 回落：直接嗅探原页（对齐无 jxs 时仍尝试出链）。
-			if u, h, err := browserSniff(webURL, headers, click, rules, defaultParseWebTimeout, true, isVideo); err == nil && u != "" {
+			if u, h, err := browserSniff(webURL, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0); err == nil && u != "" {
 				ch <- result{url: u, hdr: h}
 			}
 		}()

@@ -23,6 +23,49 @@ import (
 // 网页嗅探总超时（秒级）；冷启动 Chromium 也算在这段时间内。
 const defaultParseWebTimeout = 15 * time.Second
 
+// 桌面共享一个 Chromium 进程；最多 2 个并发 tab，避免超级解析打出几十个 chrome。
+var (
+	sharedAllocOnce   sync.Once
+	sharedAllocCtx    context.Context
+	sharedAllocCancel context.CancelFunc
+	sharedAllocErr    error
+	sniffSem          = make(chan struct{}, 2)
+)
+
+func ensureSharedChromium() (context.Context, error) {
+	sharedAllocOnce.Do(func() {
+		chrome := appruntime.Chromium()
+		if chrome == "" {
+			sharedAllocErr = fmt.Errorf("未找到 Chromium：网页嗅探不可用（请检查 runtime/chromium）")
+			return
+		}
+		opts := append(chromedp.DefaultExecAllocatorOptions[:],
+			chromedp.Flag("headless", "old"),
+			chromedp.Flag("disable-gpu", true),
+			chromedp.Flag("no-sandbox", true),
+			chromedp.Flag("disable-dev-shm-usage", true),
+			chromedp.Flag("mute-audio", true),
+			chromedp.Flag("hide-scrollbars", true),
+			chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
+			chromedp.ExecPath(chrome),
+		)
+		if runtime.GOOS == "windows" {
+			opts = append(opts,
+				chromedp.Flag("disable-software-rasterizer", true),
+				chromedp.Flag("disable-extensions", true),
+				chromedp.Flag("disable-background-networking", true),
+				chromedp.Flag("disable-background-timer-throttling", true),
+				chromedp.Flag("disable-renderer-backgrounding", true),
+				chromedp.Flag("disable-features", "TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process"),
+				chromedp.WindowSize(800, 600),
+				chromedp.Flag("window-position", "-32000,-32000"),
+			)
+		}
+		sharedAllocCtx, sharedAllocCancel = chromedp.NewExecAllocator(context.Background(), opts...)
+	})
+	return sharedAllocCtx, sharedAllocErr
+}
+
 // BrowserSniff 用无头 Chromium 拦截网络请求嗅探媒体地址。
 func BrowserSniff(pageURL string, headers map[string]string, timeout time.Duration) (string, error) {
 	return BrowserSniffWithClick(pageURL, headers, "", nil, timeout)
@@ -30,7 +73,7 @@ func BrowserSniff(pageURL string, headers map[string]string, timeout time.Durati
 
 // BrowserSniffWithClick 嗅探媒体地址，可选执行 click / 规则脚本，并应用请求头。
 func BrowserSniffWithClick(pageURL string, headers map[string]string, click string, rules []model.Rule, timeout time.Duration) (string, error) {
-	u, _, err := browserSniff(pageURL, headers, click, rules, timeout, true, nil)
+	u, _, err := browserSniff(pageURL, headers, click, rules, timeout, true, nil, 0)
 	return u, err
 }
 
@@ -39,7 +82,7 @@ type sniffHit struct {
 	headers map[string]string
 }
 
-func browserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, timeout time.Duration, detect bool, isVideo func(string) bool) (string, map[string]string, error) {
+func browserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, timeout time.Duration, detect bool, isVideo func(string) bool, depth int) (string, map[string]string, error) {
 	pageURL = strings.TrimSpace(pageURL)
 	if pageURL == "" {
 		return "", nil, nil
@@ -62,44 +105,17 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		return androidBrowserSniff(pageURL, headers, timeout, videoOK)
 	}
 
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		// Win7 捆绑多为完整 chrome.exe（非 headless-shell）；用 classic headless，减少闪空白窗。
-		chromedp.Flag("headless", "old"),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("mute-audio", true),
-		chromedp.Flag("hide-scrollbars", true),
-		chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
-	)
-	if runtime.GOOS == "windows" {
-		opts = append(opts,
-			chromedp.Flag("disable-software-rasterizer", true),
-			chromedp.Flag("disable-extensions", true),
-			chromedp.Flag("disable-background-networking", true),
-			chromedp.Flag("disable-background-timer-throttling", true),
-			chromedp.Flag("disable-renderer-backgrounding", true),
-			chromedp.Flag("disable-features", "TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process"),
-			chromedp.WindowSize(800, 600),
-			// headless 被旧版 Chrome 忽略时，把窗口甩出屏幕，避免挡操作的「空白框」。
-			chromedp.Flag("window-position", "-32000,-32000"),
-		)
+	allocCtx, err := ensureSharedChromium()
+	if err != nil {
+		return "", nil, err
 	}
-	if ua := headerValue(headers, "User-Agent"); ua != "" {
-		opts = append(opts, chromedp.UserAgent(ua))
-	}
-	chrome := appruntime.Chromium()
-	if chrome == "" {
-		return "", nil, fmt.Errorf("未找到 Chromium：网页嗅探不可用（请检查 runtime/chromium）")
-	}
-	opts = append(opts, chromedp.ExecPath(chrome))
 
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancelAlloc()
+	sniffSem <- struct{}{}
+	defer func() { <-sniffSem }()
 
-	ctx, cancelCtx := chromedp.NewContext(allocCtx)
-	defer cancelCtx()
-	ctx, cancelTimeout := context.WithTimeout(ctx, timeout)
+	tabCtx, cancelTab := chromedp.NewContext(allocCtx)
+	defer cancelTab()
+	ctx, cancelTimeout := context.WithTimeout(tabCtx, timeout)
 	defer cancelTimeout()
 
 	found := make(chan sniffHit, 1)
@@ -133,7 +149,8 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if IsAdURL(u) {
 				return
 			}
-			if detect && playerURLRe.MatchString(u) {
+			// 嵌套嗅探最多一层，且走共享 Chromium，避免递归开进程。
+			if detect && depth < 1 && playerURLRe.MatchString(u) {
 				followMu.Lock()
 				dup := followed[u]
 				if !dup {
@@ -146,7 +163,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 						if remain < 2*time.Second {
 							remain = 2 * time.Second
 						}
-						nested, nh, err := browserSniff(target, mergeHeaders(headers, h), click, rules, remain, false, isVideo)
+						nested, nh, err := browserSniff(target, mergeHeaders(headers, h), click, rules, remain, false, isVideo, depth+1)
 						if err == nil && nested != "" {
 							emit(nested, nh)
 						}

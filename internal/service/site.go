@@ -72,7 +72,14 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 	return s.loadEpoch.Load()
 }
 
-// CancelPendingContent 打断进行中的 spider：立刻硬杀当前所属 JVM/Py/JS（对齐旧版 cancelPending）。
+// SoftCancelPending 软取消当前 Scope 的 JAR/脚本请求（不杀进程）。
+func (s *SiteService) SoftCancelPending() {
+	cid := hostclient.ScopeID()
+	spider.InterruptJavaBridgeForClient(cid)
+	spider.InterruptScriptSpidersForClient(cid)
+}
+
+// CancelPendingContent 硬杀当前所属 JVM/Py/JS（离开详情/卡死恢复）。
 func (s *SiteService) CancelPendingContent() {
 	spider.RestartCallerRuntime()
 }

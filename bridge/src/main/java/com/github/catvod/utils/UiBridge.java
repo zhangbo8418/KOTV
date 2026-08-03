@@ -401,10 +401,10 @@ public final class UiBridge {
     }
 
     public static Handle show(String kind, Document document, Consumer<String> onSubmitValue, Runnable onCancel) {
-        String k = normalizeKind(kind);
+        String key = kindKey(kind);
         String session;
         try {
-            session = openSession(k);
+            session = openSession(kind);
         } catch (ShowFailedException e) {
             SpiderDebug.log("UiBridge openSession: " + e.getMessage());
             Util.notify("弹窗关闭确认超时，请重试");
@@ -421,14 +421,14 @@ public final class UiBridge {
             cancelBySession.remove(session);
             submitBySession.remove(session);
             qrBySession.remove(session);
-            sessionByKind.remove(k, session);
+            sessionByKind.remove(key, session);
             // 尝试关掉可能半开的窗，再等 closed（不 bump epoch，以免吞掉 CLOSE）。
             closeDocument(session);
             Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
             Util.notify("弹窗未能显示，请重试");
             throw e;
         }
-        return handleFor(k, session);
+        return handleFor(key, session);
     }
 
     public static Handle showQrContent(String content, String title, String tip, Runnable onCancel) {
@@ -437,14 +437,22 @@ public final class UiBridge {
 
     public static Handle showQrContent(String kind, String content, String title, String tip, Runnable onCancel) {
         Document doc = new Document().title(title).text(tip).timeoutMs(180_000);
+        String platform = "";
+        // shown 前可能还没有 platform；开窗后再读。先按 tip 区分文案，link 按钮两端都保留。
         String image = encodeQrDataUri(content);
         if (!image.isEmpty()) doc.image(image, 260, 260);
         else if (content != null && !content.trim().isEmpty()) doc.text(content);
         if (looksLikeOpenableUrl(content)) {
-            doc.link("在 App / 浏览器打开", content.trim(), "button");
+            boolean mobileHint = tip != null && (tip.contains("本机") || tip.contains("打开下方"));
+            doc.link(mobileHint ? "打开网盘 App 授权" : "在 App / 浏览器打开", content.trim(), "button");
         }
         doc.input("value", "粘贴凭证", true).defaultActions();
-        return show(kind, doc, null, onCancel);
+        Handle h = show(kind, doc, null, onCancel);
+        platform = hostPlatform(kind);
+        if (("android".equals(platform) || "ios".equals(platform)) && looksLikeOpenableUrl(content)) {
+            SpiderDebug.log("UiBridge cloud login platform=" + platform + " kind=" + normalizeKind(kind));
+        }
+        return h;
     }
 
     public static Handle showQrBase64(String base64, String title, String tip, Runnable onCancel) {
@@ -474,13 +482,13 @@ public final class UiBridge {
 
     /** 拉码失败：关窗并提示。 */
     public static void failFetchQr(String kind, String message) {
-        String k = normalizeKind(kind);
-        String session = currentSession(k);
+        String key = kindKey(kind);
+        String session = currentSession(kind);
         if (!session.isEmpty()) {
             cancelBySession.remove(session);
             submitBySession.remove(session);
             qrBySession.remove(session);
-            sessionByKind.remove(k, session);
+            sessionByKind.remove(key, session);
             // 先发 CLOSE 并等 closed；不要在等待前 bump epoch（会吞掉 CLOSE）。
             closeDocument(session);
             Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
@@ -613,12 +621,13 @@ public final class UiBridge {
         }
         if (done.getAsBoolean()) {
             // 登录已成功：脚本侧必须主动关宿主窗（宿主不管业务，不会自己猜关）。
+            String key = kindKey(k);
             String session = currentSession(k);
             if (!session.isEmpty()) {
                 cancelBySession.remove(session);
                 submitBySession.remove(session);
                 qrBySession.remove(session);
-                sessionByKind.remove(k, session);
+                sessionByKind.remove(key, session);
                 closeDocument(session);
                 Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
                 Util.clearPendingUiNotify();
@@ -659,15 +668,17 @@ public final class UiBridge {
         return "login";
     }
 
-    /** Business code uses its internal key; only the opaque session id crosses the host boundary. */
+    /** Business code uses its internal key; only the opaque session id crosses the host boundary.
+     *  多前端：kind 按当前 clientId 隔离，避免扫码窗/登录态串台。 */
     public static String currentSession(String kind) {
-        return sessionByKind.getOrDefault(normalizeKind(kind), "");
+        return sessionByKind.getOrDefault(kindKey(kind), "");
     }
 
     private static String openSession(String kind) {
+        String key = kindKey(kind);
         String session = "ui-" + Long.toUnsignedString(nextSession.incrementAndGet(), 36)
                 + "-" + Long.toUnsignedString(System.nanoTime(), 36);
-        String previous = sessionByKind.put(kind, session);
+        String previous = sessionByKind.put(key, session);
         if (previous != null && !previous.equals(session)) {
             cancelBySession.remove(previous);
             submitBySession.remove(previous);
@@ -675,7 +686,7 @@ public final class UiBridge {
             // 关旧窗并等宿主 closed，再开新窗（不再依赖宿主原地换内容）。
             closeDocument(previous);
             if (!Util.waitUiAction(previous, "closed", Util.UI_CLOSE_WAIT_MS)) {
-                sessionByKind.remove(kind, session);
+                sessionByKind.remove(key, session);
                 throw new ShowFailedException("wait closed timeout for " + previous);
             }
         }
@@ -795,6 +806,15 @@ public final class UiBridge {
     private static String normalizeKind(String kind) {
         if (kind == null || kind.trim().isEmpty()) return "login";
         return kind.trim().toLowerCase();
+    }
+
+    /** kind 按 clientId 隔离；已带分隔符的 key 不再二次前缀。 */
+    private static String kindKey(String kind) {
+        String k = normalizeKind(kind);
+        if (k.indexOf('\u0001') >= 0) return k;
+        String cid = Util.clientId();
+        if (cid == null || cid.isEmpty()) return k;
+        return cid + '\u0001' + k;
     }
 
     private static String dataUri(String base64) {

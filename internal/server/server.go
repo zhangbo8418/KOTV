@@ -109,6 +109,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/proxy/play", playproxy.Handle)
 	mux.HandleFunc("/proxy/bt/", thunder.Handle)
 	mux.HandleFunc("/proxy", s.handleSpiderProxy)
+	mux.HandleFunc("/parse", s.handleParsePage)
 	mux.HandleFunc("/file/", s.handleFile)
 	mux.HandleFunc("/upload", s.handleUpload)
 	mux.HandleFunc("/newFolder", s.handleNewFolder)
@@ -199,6 +200,28 @@ func safeAssetPath(rel string) (string, bool) {
 		return "", false
 	}
 	return candidate, true
+}
+
+// handleParsePage 对齐 TV /parse?jxs=&url=：单页 iframe 竞速多个 type0 解析器。
+func (s *Server) handleParsePage(w http.ResponseWriter, r *http.Request) {
+	jxs := r.URL.Query().Get("jxs")
+	u := r.URL.Query().Get("url")
+	tpl, err := remoteFS.ReadFile("resources/parse.html")
+	if err != nil {
+		http.Error(w, "parse.html missing", http.StatusInternalServerError)
+		return
+	}
+	// HTML/JS 字符串字面量转义，避免打断 script。
+	esc := func(s string) string {
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		s = strings.ReplaceAll(s, `"`, `\"`)
+		s = strings.ReplaceAll(s, "\n", `\n`)
+		s = strings.ReplaceAll(s, "\r", ``)
+		return s
+	}
+	body := fmt.Sprintf(string(tpl), esc(jxs), esc(u))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(body))
 }
 
 func (s *Server) Stop() {

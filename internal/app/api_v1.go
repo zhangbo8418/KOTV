@@ -274,12 +274,44 @@ func (a *App) APIBtProgress() map[string]any {
 	}
 }
 
-// APICancelPending 离开详情/取消扫码时打断卡住的 JAR/脚本调用，并停掉磁力 Fetch。
-func (a *App) APICancelPending() map[string]any {
+// APICancelPending 打断进行中的爬虫/磁力。
+// opts:
+//   - hard: true 时硬杀当前所属 JVM/Py/JS；false 仅软取消当前 Scope 请求
+//   - thunder: true 时 Stop 磁力 Fetch（会把进度置为「已取消」）；非磁力起播应传 false
+func (a *App) APICancelPending(opts map[string]any) map[string]any {
 	_, sites, _ := a.scope()
-	sites.CancelPendingContent()
-	thunder.Stop()
-	return map[string]any{"ok": true}
+	hard := optBool(opts, "hard", false)
+	stopThunder := optBool(opts, "thunder", true)
+	if hard {
+		sites.CancelPendingContent()
+	} else {
+		sites.SoftCancelPending()
+	}
+	if stopThunder {
+		thunder.Stop()
+	}
+	return map[string]any{"ok": true, "hard": hard, "thunder": stopThunder}
+}
+
+func optBool(opts map[string]any, key string, def bool) bool {
+	if opts == nil {
+		return def
+	}
+	v, ok := opts[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case float64:
+		return t != 0
+	case string:
+		s := strings.TrimSpace(strings.ToLower(t))
+		return s == "1" || s == "true" || s == "yes"
+	default:
+		return def
+	}
 }
 
 func (a *App) APISessionPing() map[string]any {

@@ -43,7 +43,7 @@ type ContentAPI interface {
 	APIPlayerEmbed(playURL, playerVal, histKey string) error
 	APIPlayerControl(cmd string, value float64, mode string) error
 	APITools(action string, params map[string]any) (map[string]any, error)
-	APICancelPending() map[string]any
+	APICancelPending(opts map[string]any) map[string]any
 	APISessionPing() map[string]any
 	APISessionLeave() map[string]any
 }
@@ -833,6 +833,7 @@ func (s *Server) handleAPIv1UIReply(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAPIv1Cancel 打断进行中的详情/分类等 spider 请求（网盘扫码卡住后离开详情页）。
+// body 可选：{"hard":bool,"thunder":bool}；缺省 soft + 停磁力。
 func (s *Server) handleAPIv1Cancel(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -847,7 +848,11 @@ func (s *Server) handleAPIv1Cancel(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, api.APICancelPending())
+	opts := map[string]any{}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&opts)
+	}
+	writeJSON(w, http.StatusOK, api.APICancelPending(opts))
 }
 
 func (s *Server) handleSessionPing(w http.ResponseWriter, r *http.Request) {

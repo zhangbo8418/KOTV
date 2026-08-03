@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -109,10 +110,32 @@ func Discover(timeout time.Duration) ([]Device, error) {
 }
 
 func discoverChromecast(timeout time.Duration) ([]Device, error) {
+	// Android 16+ 常无可用组播网卡（interfaces: []），zeroconf 会失败；软跳过只保留 DLNA。
+	if runtime.GOOS == "android" {
+		ifaces, err := net.Interfaces()
+		usable := 0
+		if err == nil {
+			for _, iface := range ifaces {
+				if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 || iface.Flags&net.FlagLoopback != 0 {
+					continue
+				}
+				usable++
+			}
+		}
+		if usable == 0 {
+			log.Printf("cast: skip Chromecast on Android (no multicast interfaces)")
+			return nil, nil
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	ch, err := castdns.DiscoverCastDNSEntries(ctx, nil)
 	if err != nil {
+		msg := err.Error()
+		if runtime.GOOS == "android" && (strings.Contains(msg, "interfaces: []") || strings.Contains(msg, "failed to join")) {
+			log.Printf("cast: Chromecast discover soft-fail on Android: %v", err)
+			return nil, nil
+		}
 		return nil, err
 	}
 	seen := map[string]bool{}

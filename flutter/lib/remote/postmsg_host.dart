@@ -92,7 +92,7 @@ class PostMsgHost {
       await _enqueueReply(id: id, action: 'dismiss', values: _hostClientValues());
     }
     _pendingDoc = null;
-    unawaited(api.cancelPending());
+    unawaited(api.cancelPending(hard: false, thunder: false));
     if (popDialog || _sessionActive || _opening) {
       _dismiss();
     } else {
@@ -403,7 +403,7 @@ class PostMsgHost {
                 if (_lifecycleId != null) {
                   unawaited(_enqueueReply(id: _lifecycleId!, action: 'dismiss', values: _hostClientValues()));
                 }
-                unawaited(api.cancelPending());
+                unawaited(api.cancelPending(hard: false, thunder: false));
                 _activeId = null;
               }
               _dialogContext = null;
