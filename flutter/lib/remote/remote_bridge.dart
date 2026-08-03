@@ -14,6 +14,7 @@ class RemoteBridge {
 
   final KotvApi api;
   Timer? _timer;
+  Timer? _pingTimer;
   void Function(String type, int seekMs)? onControl;
   void Function(String keyword)? onSearch;
 
@@ -34,8 +35,6 @@ class RemoteBridge {
     _pingTimer?.cancel();
     _pingTimer = null;
   }
-
-  Timer? _pingTimer;
 
   Future<void> _tick() async {
     try {
