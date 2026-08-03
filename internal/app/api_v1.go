@@ -27,20 +27,32 @@ import (
 // --- ContentAPI（Flutter /api/v1）---
 
 func (a *App) APIHealth() map[string]any {
+	_, _, sess := a.scope()
+	ready, errMsg := a.Ready, a.ErrMsg
+	if sess != nil {
+		ready, errMsg = sess.Ready, sess.ErrMsg
+	}
 	return map[string]any{
 		"ok":      true,
 		"engine":  "kotv",
-		"ready":   a.Ready,
-		"error":   a.ErrMsg,
+		"ready":   ready,
+		"error":   errMsg,
 		"port":    a.Server.Port(),
 		"version": "0.1.0",
 	}
 }
 
 func (a *App) APIGetConfig() map[string]any {
-	home := a.Config.Home()
+	cfg, _, sess := a.scope()
+	ready, errMsg := a.Ready, a.ErrMsg
+	source := settings.Get(settings.VOD)
+	if sess != nil {
+		ready, errMsg = sess.Ready, sess.ErrMsg
+		source = sess.Source
+	}
+	home := cfg.Home()
 	sites := make([]map[string]any, 0)
-	for _, s := range a.Config.Sites() {
+	for _, s := range cfg.Sites() {
 		sites = append(sites, map[string]any{
 			"key":         s.Key,
 			"name":        s.Name,
@@ -52,35 +64,57 @@ func (a *App) APIGetConfig() map[string]any {
 	}
 	return map[string]any{
 		"ok":        true,
-		"ready":     a.Ready,
-		"error":     a.ErrMsg,
-		"source":    settings.Get(settings.VOD),
+		"ready":     ready,
+		"error":     errMsg,
+		"source":    source,
 		"home":      home.Key,
 		"sites":     sites,
-		"wallpaper": strings.TrimSpace(a.Config.API().Wallpaper),
+		"wallpaper": strings.TrimSpace(cfg.API().Wallpaper),
 	}
 }
 
 func (a *App) APILoadConfig(source string) error {
-	a.Sites.InvalidateLoads()
-	if err := a.Config.LoadFromSource(source); err != nil {
-		a.Ready = false
-		a.ErrMsg = err.Error()
+	cfg, sites, sess := a.scope()
+	// ephemeral：只作废本 session 缓存 + 软取消当前 client，不清全局脚本/JAR 池。
+	if sess != nil {
+		sites.InvalidateHomeOnly()
+	} else {
+		sites.InvalidateLoads()
+	}
+	if err := cfg.LoadFromSource(source); err != nil {
+		if sess != nil {
+			sess.Ready = false
+			sess.ErrMsg = err.Error()
+		} else {
+			a.Ready = false
+			a.ErrMsg = err.Error()
+		}
 		return err
 	}
-	a.Ready = true
-	a.ErrMsg = ""
-	a.Live.SyncFromConfig()
+	if sess != nil {
+		sess.Ready = true
+		sess.ErrMsg = ""
+		if u := strings.TrimSpace(cfg.API().URL); u != "" {
+			sess.Source = u
+		} else {
+			sess.Source = strings.TrimSpace(source)
+		}
+	} else {
+		a.Ready = true
+		a.ErrMsg = ""
+		a.Live.SyncFromConfig()
+	}
 	return nil
 }
 
 func (a *App) APISetHome(siteKey string) error {
-	site := a.Config.GetSite(siteKey)
+	cfg, sites, _ := a.scope()
+	site := cfg.GetSite(siteKey)
 	if site == nil {
 		return fmt.Errorf("站点不存在: %s", siteKey)
 	}
-	a.Sites.InvalidateHomeOnly()
-	a.Config.SetHome(*site)
+	sites.InvalidateHomeOnly()
+	cfg.SetHome(*site)
 	return nil
 }
 
@@ -88,11 +122,12 @@ func (a *App) APIHome() (map[string]any, error) {
 	if localCrawlerDisabled() {
 		return nil, fmt.Errorf("请先连接可用后端服务")
 	}
-	res, err := a.Sites.HomeContent()
+	cfg, sites, _ := a.scope()
+	res, err := sites.HomeContent()
 	if err != nil {
 		return nil, err
 	}
-	home := a.Config.Home()
+	home := cfg.Home()
 	return map[string]any{
 		"ok":    true,
 		"site":  home.Key,
@@ -105,11 +140,12 @@ func (a *App) APICategory(tid, pg string, extend map[string]string) (map[string]
 	if localCrawlerDisabled() {
 		return nil, fmt.Errorf("请先连接可用后端服务")
 	}
-	res, err := a.Sites.CategoryContent(tid, pg, extend)
+	cfg, sites, _ := a.scope()
+	res, err := sites.CategoryContent(tid, pg, extend)
 	if err != nil {
 		return nil, err
 	}
-	home := a.Config.Home()
+	home := cfg.Home()
 	return map[string]any{
 		"ok":        true,
 		"site":      home.Key,
@@ -117,7 +153,7 @@ func (a *App) APICategory(tid, pg string, extend map[string]string) (map[string]
 		"pg":        pg,
 		"pagecount": res.PageCount.Value,
 		"list":      vodsDTO(res.List, home.Key),
-		"filters":   filtersDTO(a.Sites.FiltersForCategory(tid)),
+		"filters":   filtersDTO(sites.FiltersForCategory(tid)),
 	}, nil
 }
 
@@ -125,17 +161,18 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 	if localCrawlerDisabled() {
 		return nil, fmt.Errorf("请先连接可用后端服务")
 	}
+	cfg, sites, _ := a.scope()
 	vod := model.Vod{VodID: model.FlexString(vodID)}
 	if siteKey != "" {
-		if site := a.Config.GetSite(siteKey); site != nil {
+		if site := cfg.GetSite(siteKey); site != nil {
 			vod.Site = site
 		}
 	}
 	if vod.Site == nil {
-		h := a.Config.Home()
+		h := cfg.Home()
 		vod.Site = &h
 	}
-	detail, err := a.Sites.DetailContent(vod)
+	detail, err := sites.DetailContent(vod)
 	if err != nil {
 		return nil, err
 	}
@@ -157,16 +194,17 @@ func (a *App) APIDetailExpand(siteKey, vodID string, flagsIn []map[string]any) (
 	if localCrawlerDisabled() {
 		return nil, fmt.Errorf("请先连接可用后端服务")
 	}
+	cfg, sites, _ := a.scope()
 	sk := siteKey
 	detail := model.Vod{VodID: model.FlexString(vodID)}
 	if siteKey != "" {
-		if site := a.Config.GetSite(siteKey); site != nil {
+		if site := cfg.GetSite(siteKey); site != nil {
 			detail.Site = site
 			sk = site.Key
 		}
 	}
 	if detail.Site == nil {
-		h := a.Config.Home()
+		h := cfg.Home()
 		detail.Site = &h
 		if sk == "" {
 			sk = h.Key
@@ -176,7 +214,7 @@ func (a *App) APIDetailExpand(siteKey, vodID string, flagsIn []map[string]any) (
 	if len(flagsIn) > 0 {
 		detail.VodFlags = flagsFromDTO(flagsIn)
 		detail.VodName = vodID
-	} else if cached, ok := a.Sites.CachedDetail(vodID); ok {
+	} else if cached, ok := sites.CachedDetail(vodID); ok {
 		detail = cached
 		if detail.Site != nil && detail.Site.Key != "" {
 			sk = detail.Site.Key
@@ -230,7 +268,8 @@ func (a *App) APIBtProgress() map[string]any {
 
 // APICancelPending 离开详情/取消扫码时打断卡住的 JAR/脚本调用，并停掉磁力 Fetch。
 func (a *App) APICancelPending() map[string]any {
-	a.Sites.CancelPendingContent()
+	_, sites, _ := a.scope()
+	sites.CancelPendingContent()
 	thunder.Stop()
 	return map[string]any{"ok": true}
 }
@@ -239,8 +278,9 @@ func (a *App) APISearch(keyword string, siteKeys []string) (map[string]any, erro
 	if localCrawlerDisabled() {
 		return nil, fmt.Errorf("请先连接可用后端服务")
 	}
+	_, sites, _ := a.scope()
 	settings.AddSearchHistory(keyword)
-	cols, err := a.Sites.SearchParallel(keyword, siteKeys, 4)
+	cols, err := sites.SearchParallel(keyword, siteKeys, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -266,14 +306,15 @@ func (a *App) APISearch(keyword string, siteKeys []string) (map[string]any, erro
 }
 
 func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map[string]any, error) {
+	cfg, sites, _ := a.scope()
 	var site model.Site
 	if siteKey != "" {
-		if s := a.Config.GetSite(siteKey); s != nil {
+		if s := cfg.GetSite(siteKey); s != nil {
 			site = *s
 		}
 	}
 	if site.Key == "" {
-		site = a.Config.Home()
+		site = cfg.Home()
 	}
 	epURL := strings.TrimSpace(episodeURL)
 	if epURL == "" {
@@ -295,7 +336,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	} else if thunder.Match(epURL) {
 		playURL = epURL
 	} else {
-		result, err := a.Sites.PlayerContent(site, flag, epURL)
+		result, err := sites.PlayerContent(site, flag, epURL)
 		if err != nil {
 			return nil, err
 		}
@@ -309,7 +350,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		danmakuURL = result.Danmaku
 		qualNames = result.URL.Names
 		qualURLs = result.URL.URLs
-		api := a.Config.API()
+		api := cfg.API()
 		parsed, perr := parse.ResolveWithParses(result, parse.Options{
 			Parses:    api.Parses,
 			Flags:     api.Flags,
@@ -320,7 +361,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			SiteClick: site.Click,
 			Prefer:    settings.Get(settings.PreferredParse),
 			IsVideo: func(u string) bool {
-				return a.Sites.IsVideoFormat(site, u)
+				return sites.IsVideoFormat(site, u)
 			},
 		})
 		if perr != nil {
@@ -586,7 +627,11 @@ func (a *App) APISetMedia(state map[string]string) {
 
 func (a *App) APIListRepos() map[string]any {
 	cfgs, _ := a.DB.ListConfigs(int64(database.ConfigTypeSite))
+	_, _, sess := a.scope()
 	current := strings.TrimSpace(settings.Get(settings.VOD))
+	if sess != nil {
+		current = strings.TrimSpace(sess.Source)
+	}
 	list := make([]map[string]any, 0, len(cfgs))
 	for _, c := range cfgs {
 		url := strings.TrimSpace(c.URL)
@@ -616,6 +661,7 @@ func (a *App) APIDeleteRepo(url string) error {
 }
 
 func (a *App) APIGetSettings() map[string]any {
+	cfg, _, sess := a.scope()
 	keys := []settings.Type{
 		settings.VOD, settings.LIVE, settings.Theme, settings.Player, settings.PlayerLive,
 		settings.Proxy, settings.PlayerSpeed, settings.PlayerScale, settings.PlayerDecode,
@@ -632,9 +678,12 @@ func (a *App) APIGetSettings() map[string]any {
 	for _, k := range keys {
 		vals[string(k)] = settings.Get(k)
 	}
+	if sess != nil {
+		vals[string(settings.VOD)] = sess.Source
+	}
 	out["settings"] = vals
 	parses := make([]map[string]any, 0)
-	for _, p := range a.Config.API().Parses {
+	for _, p := range cfg.API().Parses {
 		parses = append(parses, map[string]any{"name": p.Name, "type": p.TypeID(), "url": p.URL})
 	}
 	out["parses"] = parses
@@ -649,6 +698,11 @@ func (a *App) APIGetSettings() map[string]any {
 
 // APIBackdrop 输出统一背景规格，供 Flutter 背景层使用。
 func (a *App) APIBackdrop() map[string]any {
+	cfg, _, sess := a.scope()
+	ready := a.Ready
+	if sess != nil {
+		ready = sess.Ready
+	}
 	mode := strings.TrimSpace(settings.Get(settings.WallMode))
 	if mode == "" {
 		mode = "config"
@@ -670,8 +724,8 @@ func (a *App) APIBackdrop() map[string]any {
 	}
 
 	configWall := ""
-	if a.Ready {
-		configWall = strings.TrimSpace(a.Config.API().Wallpaper)
+	if ready {
+		configWall = strings.TrimSpace(cfg.API().Wallpaper)
 	}
 	wallURL := strings.TrimSpace(settings.Get(settings.WallURL))
 	wallFile := strings.TrimSpace(settings.Get(settings.WallFile))
@@ -856,8 +910,13 @@ func (a *App) resolveBackdropImageURL(src string) string {
 	if strings.HasPrefix(src, "/") {
 		return src
 	}
-	if a.Ready {
-		base := strings.TrimSpace(a.Config.API().URL)
+	cfg, _, sess := a.scope()
+	ready := a.Ready
+	if sess != nil {
+		ready = sess.Ready
+	}
+	if ready {
+		base := strings.TrimSpace(cfg.API().URL)
 		if base != "" {
 			if resolved := util.ResolveRelativeURL(base, src); resolved != "" {
 				return resolved
@@ -905,13 +964,14 @@ func (a *App) APISetSettings(kv map[string]string) error {
 }
 
 func (a *App) APIToggleSite(key, field string, all *bool) error {
+	cfg, _, _ := a.scope()
 	field = strings.ToLower(strings.TrimSpace(field))
 	if all != nil {
 		switch field {
 		case "searchable":
-			return a.Config.SetAllSitesSearchable(*all)
+			return cfg.SetAllSitesSearchable(*all)
 		case "changeable":
-			return a.Config.SetAllSitesChangeable(*all)
+			return cfg.SetAllSitesChangeable(*all)
 		default:
 			return fmt.Errorf("unknown toggle: %s", field)
 		}
@@ -922,10 +982,10 @@ func (a *App) APIToggleSite(key, field string, all *bool) error {
 	}
 	switch field {
 	case "searchable":
-		_, err := a.Config.ToggleSiteSearchable(key)
+		_, err := cfg.ToggleSiteSearchable(key)
 		return err
 	case "changeable":
-		_, err := a.Config.ToggleSiteChangeable(key)
+		_, err := cfg.ToggleSiteChangeable(key)
 		return err
 	default:
 		return fmt.Errorf("unknown toggle: %s", field)

@@ -21,10 +21,11 @@ import (
 
 // Manager 管理点播配置，点播配置管理。
 type Manager struct {
-	mu   sync.RWMutex
-	api  model.Api
-	home model.Site
-	db   *database.DB
+	mu        sync.RWMutex
+	api       model.Api
+	home      model.Site
+	db        *database.DB
+	ephemeral bool // 多用户临时会话：不写 settings.VOD / 不持久化 home
 }
 
 var defaultMgr *Manager
@@ -50,16 +51,56 @@ func (m *Manager) Home() model.Site {
 	return m.home
 }
 
-// SetHome 切换首页站点，并持久化到 DB（并持久化）。
+// SetHome 切换首页站点；非 ephemeral 时持久化到 DB。
 func (m *Manager) SetHome(site model.Site) {
 	m.mu.Lock()
 	m.home = site
 	cfgURL := m.api.URL
+	ephemeral := m.ephemeral
 	m.mu.Unlock()
+	if ephemeral {
+		return
+	}
 	if m.db != nil && site.Key != "" && cfgURL != "" {
 		if err := m.db.SetConfigHome(cfgURL, database.ConfigTypeSite, site.Key); err != nil {
 			log.Printf("保存首页站点失败: %v", err)
 		}
+	}
+}
+
+// Ephemeral 是否为多用户临时会话（不写共享 settings / home）。
+func (m *Manager) Ephemeral() bool {
+	return m.ephemeral
+}
+
+// CloneEphemeral 深拷贝站点相关切片，供按 clientId 隔离的临时 Manager。
+func (m *Manager) CloneEphemeral() *Manager {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	api := m.api
+	api.Sites = append([]model.Site(nil), m.api.Sites...)
+	api.Lives = append([]model.Live(nil), m.api.Lives...)
+	api.Parses = append([]model.Parse(nil), m.api.Parses...)
+	api.Rules = append([]model.Rule(nil), m.api.Rules...)
+	api.Flags = append([]string(nil), m.api.Flags...)
+	api.Ads = append([]string(nil), m.api.Ads...)
+	if m.api.Headers != nil {
+		api.Headers = append(json.RawMessage(nil), m.api.Headers...)
+	}
+	if m.api.Proxy != nil {
+		api.Proxy = append(json.RawMessage(nil), m.api.Proxy...)
+	}
+	if m.api.Hosts != nil {
+		api.Hosts = append(json.RawMessage(nil), m.api.Hosts...)
+	}
+	if m.api.Doh != nil {
+		api.Doh = append(json.RawMessage(nil), m.api.Doh...)
+	}
+	return &Manager{
+		api:       api,
+		home:      m.home,
+		db:        m.db,
+		ephemeral: true,
 	}
 }
 
@@ -195,13 +236,21 @@ func (m *Manager) Clear() {
 	m.mu.Lock()
 	m.api = model.Api{}
 	m.home = model.Site{Key: "", Name: ""}
+	ephemeral := m.ephemeral
 	m.mu.Unlock()
-	spider.Clear()
+	// ephemeral 换源不得清空全局爬虫池，否则会误伤其他 client。
+	if !ephemeral {
+		spider.Clear()
+	}
 }
 
 // InitFromSettings 从设置加载点播配置。
 func (m *Manager) InitFromSettings() error {
-	vod := normalizeVodSource(settings.Get(settings.VOD))
+	return m.initFromVod(settings.Get(settings.VOD))
+}
+
+func (m *Manager) initFromVod(vod string) error {
+	vod = normalizeVodSource(vod)
 	if vod == "" {
 		return fmt.Errorf("未配置点播源")
 	}
@@ -254,15 +303,17 @@ func normalizeVodSource(source string) string {
 	return source
 }
 
-// LoadFromSource 加载 URL 或 JSON 正文，并写回设置。
+// LoadFromSource 加载 URL 或 JSON 正文；非 ephemeral 时写回 settings.VOD。
 func (m *Manager) LoadFromSource(source string) error {
 	source = normalizeVodSource(source)
 	if source == "" {
 		return fmt.Errorf("请输入点播源 URL 或粘贴 JSON")
 	}
-	settings.Set(settings.VOD, source)
-	_ = settings.Save()
-	return m.InitFromSettings()
+	if !m.ephemeral {
+		settings.Set(settings.VOD, source)
+		_ = settings.Save()
+	}
+	return m.initFromVod(source)
 }
 
 // ParseConfig 解析配置。
@@ -402,8 +453,10 @@ func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot) e
 	}
 
 	first := strings.TrimSpace(depots[0].URL)
-	settings.Set(settings.VOD, first)
-	_ = settings.Save()
+	if !m.ephemeral {
+		settings.Set(settings.VOD, first)
+		_ = settings.Save()
+	}
 
 	next, err := m.db.FindConfig(first, database.ConfigTypeSite)
 	if err != nil {
@@ -626,6 +679,7 @@ func (m *Manager) Spider(site model.Site) spider.Spider {
 	if jar == "" {
 		jar = m.API().Spider
 	}
-	spider.SetRecent(site.Key, site.API, jar)
-	return spider.Get(site.Key, site.API, site.Ext.String(), jar)
+	ext := site.Ext.String()
+	spider.SetRecent(site.Key, site.API, ext, jar)
+	return spider.Get(site.Key, site.API, ext, jar)
 }

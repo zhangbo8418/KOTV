@@ -150,14 +150,19 @@ func (a *App) toolCheckSpider() (map[string]any, error) {
 	if localCrawlerDisabled() {
 		return nil, fmt.Errorf("请先连接可用后端服务")
 	}
-	if !a.Ready {
+	cfg, _, sess := a.scope()
+	ready := a.Ready
+	if sess != nil {
+		ready = sess.Ready
+	}
+	if !ready {
 		return nil, fmt.Errorf("配置未就绪")
 	}
-	sites := a.Config.Sites()
+	sites := cfg.Sites()
 	ok, fail := 0, 0
 	results := make([]map[string]any, 0, len(sites))
 	for _, site := range sites {
-		sp := a.Config.Spider(site)
+		sp := cfg.Spider(site)
 		_, err := sp.HomeContent(true)
 		msg := "ok"
 		st := 1

@@ -11,10 +11,12 @@ import (
 	"sync"
 
 	"github.com/bobo/KOTV/internal/cast"
+	"github.com/bobo/KOTV/internal/clientsession"
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/danmaku"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/dlna"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/paths"
@@ -38,6 +40,8 @@ type App struct {
 	Server *server.Server
 	Ready  bool
 	ErrMsg string
+
+	sessions *clientsession.Hub
 
 	CurrentScreen    string
 	SelectedVod      *model.Vod
@@ -91,6 +95,7 @@ func New() (*App, error) {
 		Config:        cfg,
 		Sites:         sites,
 		Live:          liveSvc,
+		sessions:      clientsession.NewHub(),
 		CurrentScreen: "video",
 		mediaState:    "idle",
 	}
@@ -141,6 +146,27 @@ func New() (*App, error) {
 		st["platform"], st["java"], st["python"], st["chromium"], st["ffmpeg"], st["libvlc"], st["bridge"])
 
 	return a, nil
+}
+
+// scope 按当前 hostclient 返回隔离的点播配置与 SiteService。
+// 空 clientId 走共享 App.Config / App.Sites（兼容桌面单用户）。
+func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *clientsession.Session) {
+	cid := hostclient.Current()
+	if cid == "" {
+		return a.Config, a.Sites, nil
+	}
+	sess = a.sessions.GetOrCreate(cid, func() *clientsession.Session {
+		cloned := a.Config.CloneEphemeral()
+		return &clientsession.Session{
+			ClientID: cid,
+			Cfg:      cloned,
+			Sites:    service.NewSiteService(cloned),
+			Source:   settings.Get(settings.VOD),
+			Ready:    a.Ready,
+			ErrMsg:   a.ErrMsg,
+		}
+	})
+	return sess.Cfg, sess.Sites, sess
 }
 
 func (a *App) listenEvents() {

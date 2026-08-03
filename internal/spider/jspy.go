@@ -68,11 +68,12 @@ func (s *pySpider) activeClientID() string {
 func newPySpider(key, api, ext, jar string) Spider {
 	jsPyMu.Lock()
 	defer jsPyMu.Unlock()
-	if s, ok := jsPy[jsPyKey(key, "py")]; ok {
+	ck := jsPyKey("py", key, api, ext, jar)
+	if s, ok := jsPy[ck]; ok {
 		return s
 	}
 	s := newPyPool(key, api, ext, jar)
-	jsPy[jsPyKey(key, "py")] = s
+	jsPy[ck] = s
 	return s
 }
 
@@ -91,17 +92,20 @@ func clearJsPy() {
 	}
 }
 
-func jsPyKey(key, kind string) string { return kind + ":" + key }
+// jsPyKey 与 jar 一致：key+api+ext+jar，避免不同配置同站 key 撞缓存。
+func jsPyKey(kind, key, api, ext, jar string) string {
+	return kind + ":" + key + "\x00" + api + "\x00" + ext + "\x00" + jar
+}
 
-func setRecentJs(key string) {
+func setRecentJs(key, api, ext, jar string) {
 	jsPyMu.Lock()
-	recentJsKey = key
+	recentJsKey = jsPyKey("js", key, api, ext, jar)
 	jsPyMu.Unlock()
 }
 
-func setRecentPy(key string) {
+func setRecentPy(key, api, ext, jar string) {
 	jsPyMu.Lock()
-	recentPyKey = key
+	recentPyKey = jsPyKey("py", key, api, ext, jar)
 	jsPyMu.Unlock()
 }
 
@@ -111,7 +115,7 @@ func recentJsSpider() Spider {
 	if recentJsKey == "" {
 		return nil
 	}
-	return jsPy[jsPyKey(recentJsKey, "js")]
+	return jsPy[recentJsKey]
 }
 
 func recentPySpider() Spider {
@@ -120,7 +124,7 @@ func recentPySpider() Spider {
 	if recentPyKey == "" {
 		return nil
 	}
-	return jsPy[jsPyKey(recentPyKey, "py")]
+	return jsPy[recentPyKey]
 }
 
 // InterruptScriptSpiders 打断正在运行的全部 Python/JavaScript 调用。

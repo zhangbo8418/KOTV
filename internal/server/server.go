@@ -371,7 +371,7 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		ext := live.Ext.String()
 		sp := spider.Get(live.Name, api, ext, jar)
-		spider.SetRecent(live.Name, api, jar)
+		spider.SetRecent(live.Name, api, ext, jar)
 		status, contentType, body, headers, err := sp.Proxy(params)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)

@@ -39,10 +39,14 @@ Go Engine（可部署到服务器，多前端并发）
 | 能力 | 说明 |
 |------|------|
 | `X-Kotv-Client-Id` | Flutter 持久化身份；API / ui/poll / postMsg 按客户端隔离 |
+| **点播会话** | 有 clientId 时各自持有 ephemeral `config.Manager` + `SiteService`（Ready/Source/home）；空 clientId 仍用共享 `App.Config` |
+| 换源 | ephemeral 不写 `settings.VOD`、不持久化共享 DB home；不清全局脚本/JAR 池（软取消当前 client） |
 | JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`），去掉全局 stdin 串行锁 |
-| Py / JS | 同站 **worker 池**（默认 CPU 数，上限 8，可用 `KOTV_SCRIPT_POOL`）；多用户打同一站可并行 |
+| Py / JS | 同站 **worker 池**（默认 CPU 数，上限 8，可用 `KOTV_SCRIPT_POOL`）；缓存键含 api+ext+jar，不同配置同 key 不撞车 |
 | 取消 | `/api/v1/cancel` 只软取消**当前 client**；换源也不再硬 Kill JVM（只清缓存 + 软取消换源者） |
 | JS | `getClientId()` / `postMsg(msg)` 宿主 API，路由回正确前端 |
+
+仍共享：直播 `Live`、播放器、部分 spider 全局态（`SetConfigBase` / net / ads）。
 
 ## 平台取舍
 

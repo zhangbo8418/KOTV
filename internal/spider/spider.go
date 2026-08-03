@@ -67,12 +67,12 @@ func Get(key, api, ext, jar string) Spider {
 }
 
 // SetRecent 每次选中站点时更新 recent，供全局 proxy 使用。
-func SetRecent(key, api, jar string) {
+func SetRecent(key, api, ext, jar string) {
 	switch {
 	case isPy(api):
-		setRecentPy(key)
+		setRecentPy(key, api, ext, jar)
 	case isJS(api):
-		setRecentJs(key)
+		setRecentJs(key, api, ext, jar)
 	case isCSP(api):
 		setRecentJar(jar)
 	}

@@ -95,7 +95,7 @@ func (s *Service) fetchLiveText(live model.Live) (string, error) {
 		if err := sp.Init(ext); err != nil {
 			return "", fmt.Errorf("直播源初始化失败: %w", err)
 		}
-		spider.SetRecent(live.Name, api, live.JAR)
+		spider.SetRecent(live.Name, api, ext, live.JAR)
 		text, err := sp.LiveContent(live.URL)
 		if err != nil {
 			return "", fmt.Errorf("直播源 liveContent 失败: %w", err)

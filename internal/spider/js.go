@@ -130,17 +130,18 @@ func (s *jsSpider) alive() bool {
 func newJsSpider(key, api, ext, jar string) Spider {
 	jsPyMu.Lock()
 	defer jsPyMu.Unlock()
-	if s, ok := jsPy[jsPyKey(key, "js")]; ok {
+	ck := jsPyKey("js", key, api, ext, jar)
+	if s, ok := jsPy[ck]; ok {
 		if pool, ok := s.(*jsPool); ok {
 			return pool
 		}
 		if js, ok := s.(*jsSpider); ok && js.alive() {
 			return s
 		}
-		delete(jsPy, jsPyKey(key, "js"))
+		delete(jsPy, ck)
 	}
 	s := newJsPool(key, api, ext, jar)
-	jsPy[jsPyKey(key, "js")] = s
+	jsPy[ck] = s
 	return s
 }
 
