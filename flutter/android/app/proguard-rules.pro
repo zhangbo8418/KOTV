@@ -10,3 +10,9 @@
 -keep class com.android.tools.r8.** { *; }
 -dontwarn com.android.tools.r8.**
 -dontwarn com.android.tools.r8.internal.**
+# 迅雷 SDK（对齐 TV）：JNI / 反射不可 shrink
+-keep class com.xunlei.downloadlib.** { *; }
+-keep class com.github.catvod.Init { *; }
+-keep class com.github.catvod.utils.Path { *; }
+-keep class com.github.catvod.utils.Prefers { *; }
+-dontwarn com.xunlei.downloadlib.**

@@ -13,6 +13,9 @@ public class Prefers {
 
     public static SharedPreferences getPrefers() {
         Context ctx = Init.context();
+        if (ctx == null) {
+            throw new IllegalStateException("Init.context is null; KotvApplication must call Init.set");
+        }
         return ctx.getSharedPreferences("catvod_prefers", Context.MODE_PRIVATE);
     }
 

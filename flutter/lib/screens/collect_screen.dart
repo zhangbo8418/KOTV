@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
+import '../nav/kotv_routes.dart';
 import '../remote/local_collect.dart';
 import '../widgets/chrome.dart';
 import '../widgets/poster_card.dart';
@@ -88,7 +89,7 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
                         }
                         if (!context.mounted) return;
                         Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => DetailScreen(id: it.id, site: it.site, title: it.name)),
+                          kotvDetailRoute(builder: (_) => DetailScreen(id: it.id, site: it.site, title: it.name)),
                         );
                       },
                     ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
+import '../nav/kotv_routes.dart';
 import '../remote/remote_bridge.dart';
 import '../widgets/chrome.dart';
 import '../widgets/poster_card.dart';
@@ -89,7 +90,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                         }
                         if (!context.mounted) return;
                         Navigator.of(context).push(
-                          MaterialPageRoute(
+                          kotvDetailRoute(
                             builder: (_) => DetailScreen(id: it.id, site: it.site, title: it.name),
                           ),
                         );

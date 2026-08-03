@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
+import '../nav/kotv_routes.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
@@ -402,7 +403,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         child: PosterCard(
                           item: it,
                           onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => DetailScreen(id: it.id, site: it.site, title: it.name)),
+                            kotvDetailRoute(builder: (_) => DetailScreen(id: it.id, site: it.site, title: it.name)),
                           ),
                         ),
                       );

@@ -52,11 +52,19 @@ public class Path {
     }
 
     public static File cache() {
-        return Init.context().getCacheDir();
+        android.content.Context c = Init.context();
+        if (c == null) {
+            throw new IllegalStateException("Init.context is null; KotvApplication must call Init.set");
+        }
+        return c.getCacheDir();
     }
 
     public static File files() {
-        return Init.context().getFilesDir();
+        android.content.Context c = Init.context();
+        if (c == null) {
+            throw new IllegalStateException("Init.context is null; KotvApplication must call Init.set");
+        }
+        return c.getFilesDir();
     }
 
     public static String rootPath() {

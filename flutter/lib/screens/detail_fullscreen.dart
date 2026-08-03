@@ -95,10 +95,15 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   late bool _danmakuOn = widget.danmakuOn;
   late bool _ambientOn = widget.ambientOn;
   Timer? _hideTimer;
-  StreamSubscription<bool>? _endedSub;
   StreamSubscription<Duration>? _posSub;
   Duration _pos = Duration.zero;
   final GlobalKey<VodFullscreenChromeState> _chromeKey = GlobalKey<VodFullscreenChromeState>();
+
+  /// 抖音式上下滑切集
+  double _dragDy = 0;
+  String? _swipeHint;
+  Timer? _hintTimer;
+  DateTime? _lastSwipeAt;
 
   String get _title {
     if (_epIdx >= 0 && _epIdx < widget.episodes.length) {
@@ -115,13 +120,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     _posSub = widget.playback.positionStream.listen((d) {
       if (mounted) setState(() => _pos = d);
     });
-    _endedSub = widget.playback.completedStream.listen((done) {
-      if (!done || !mounted) return;
-      final next = _epIdx + 1;
-      if (next < widget.episodes.length) {
-        setState(() => _epIdx = next);
-      }
-    });
+    // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
   }
 
   @override
@@ -137,7 +136,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   @override
   void dispose() {
     _hideTimer?.cancel();
-    _endedSub?.cancel();
+    _hintTimer?.cancel();
     _posSub?.cancel();
     super.dispose();
   }
@@ -152,6 +151,14 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     });
   }
 
+  void _flashSwipeHint(String text) {
+    _hintTimer?.cancel();
+    setState(() => _swipeHint = text);
+    _hintTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _swipeHint = null);
+    });
+  }
+
   Future<void> _onDecode(String mode) async {
     setState(() => _decodeMode = mode);
     await widget.playback.setDecodeMode(mode);
@@ -159,6 +166,10 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   }
 
   void _goNext() {
+    if (_epIdx + 1 >= widget.episodes.length) {
+      _flashSwipeHint('已是最后一集');
+      return;
+    }
     widget.onNext?.call();
     final next = _epIdx + 1;
     if (next < widget.episodes.length) {
@@ -168,6 +179,10 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   }
 
   void _goPrev() {
+    if (_epIdx <= 0) {
+      _flashSwipeHint('已是第一集');
+      return;
+    }
     widget.onPrev?.call();
     final prev = _epIdx - 1;
     if (prev >= 0) {
@@ -180,6 +195,34 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     widget.onSelectEp?.call(i);
     setState(() => _epIdx = i);
     _bumpChrome();
+  }
+
+  void _onVerticalDragEnd(DragEndDetails d) {
+    if (_epOpen || widget.episodes.isEmpty) {
+      _dragDy = 0;
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastSwipeAt != null && now.difference(_lastSwipeAt!) < const Duration(milliseconds: 650)) {
+      _dragDy = 0;
+      return;
+    }
+    final v = d.primaryVelocity ?? 0;
+    // 上滑 = 下一集（抖音同款）；下滑 = 上一集
+    if (v < -380 || _dragDy < -72) {
+      _lastSwipeAt = now;
+      final next = _epIdx + 1;
+      final name = next >= 0 && next < widget.episodes.length ? widget.episodes[next] : '';
+      _flashSwipeHint(name.isEmpty ? '下一集' : '下一集 · $name');
+      _goNext();
+    } else if (v > 380 || _dragDy > 72) {
+      _lastSwipeAt = now;
+      final prev = _epIdx - 1;
+      final name = prev >= 0 && prev < widget.episodes.length ? widget.episodes[prev] : '';
+      _flashSwipeHint(name.isEmpty ? '上一集' : '上一集 · $name');
+      _goPrev();
+    }
+    _dragDy = 0;
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
@@ -329,6 +372,12 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                       if (_showChrome) _bumpChrome();
                     },
                     onDoubleTap: () => Navigator.of(context).maybePop(),
+                    onVerticalDragStart: (_) => _dragDy = 0,
+                    onVerticalDragUpdate: (d) {
+                      if (_epOpen) return;
+                      _dragDy += d.delta.dy;
+                    },
+                    onVerticalDragEnd: _onVerticalDragEnd,
                     child: _buildVideo(),
                   ),
                   DanmakuOverlay(
@@ -336,6 +385,30 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                     position: _pos,
                     items: widget.danmakuItems,
                   ),
+                  if (_swipeHint != null)
+                    IgnorePointer(
+                      child: Center(
+                        child: AnimatedOpacity(
+                          opacity: 1,
+                          duration: const Duration(milliseconds: 120),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.62),
+                              borderRadius: BorderRadius.circular(22),
+                            ),
+                            child: Text(
+                              _swipeHint!,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   VodFullscreenChrome(
                     key: _chromeKey,
                     player: widget.playback,

@@ -2,6 +2,7 @@ package com.bobo.kotv
 
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import com.github.catvod.Init
 import com.github.catvod.utils.Path
 import com.xunlei.downloadlib.XLTaskHelper
@@ -12,11 +13,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.regex.Pattern
 
 /**
  * 安卓迅雷：对齐 TV Thunder（magnet / thunder / ed2k / torrent / ftp 等），不走 anacrolix。
+ *
+ * TV 安全点：
+ * - Init 在 Application.attachBaseContext 已 set
+ * - 首次 parse/fetch 才 XLTaskHelper.get() → loadLibrary（不预热）
+ * - clear/stop 只 deleteTask + release，**不** Path.clear 整目录（易与 native 抢文件闪退）
  */
 interface ThunderLoader {
   fun parse(url: String): JSONObject
@@ -46,13 +53,15 @@ object ThunderStubLoader : ThunderLoader {
 }
 
 object ThunderXunleiLoader : ThunderLoader {
+  private const val TAG = "KotvThunder"
   private val matchPat = Pattern.compile("(magnet|thunder|ed2k):.*", Pattern.CASE_INSENSITIVE)
 
   private val currentTask = AtomicReference<GetTaskId?>(null)
   private val currentIndex = AtomicReference(-1)
   private val lastError = AtomicReference("")
+  private val nativeBroken = AtomicBoolean(false)
 
-  private val sdkAvailable: Boolean by lazy {
+  private val classAvailable: Boolean by lazy {
     try {
       Class.forName("com.xunlei.downloadlib.XLTaskHelper")
       true
@@ -61,7 +70,7 @@ object ThunderXunleiLoader : ThunderLoader {
     }
   }
 
-  fun create(): ThunderLoader = if (sdkAvailable) ThunderXunleiLoader else ThunderStubLoader
+  fun create(): ThunderLoader = if (classAvailable) ThunderXunleiLoader else ThunderStubLoader
 
   private fun md5(src: String): String {
     val dig = MessageDigest.getInstance("MD5").digest(src.toByteArray(Charsets.UTF_8))
@@ -85,8 +94,38 @@ object ThunderXunleiLoader : ThunderLoader {
     return String.format("[%.1f%s]", s, units[i])
   }
 
+  /** 对齐 TV：首次调用才触达 native；失败后永久 stub，避免反复 UnsatisfiedLinkError 崩进程。 */
+  private fun xl(): XLTaskHelper {
+    if (nativeBroken.get()) throw IllegalStateException("thunder native unavailable")
+    if (Init.context() == null) throw IllegalStateException("Init.context null")
+    return try {
+      XLTaskHelper.get()
+    } catch (t: Throwable) {
+      if (isNativeLoadFailure(t)) {
+        nativeBroken.set(true)
+        Log.e(TAG, "thunder native broken", t)
+      }
+      throw t
+    }
+  }
+
+  private fun isNativeLoadFailure(t: Throwable): Boolean {
+    var c: Throwable? = t
+    while (c != null) {
+      if (c is UnsatisfiedLinkError || c is LinkageError) return true
+      val m = c.message.orEmpty()
+      if (m.contains("dlopen", ignoreCase = true) ||
+        m.contains("library", ignoreCase = true) && m.contains("find", ignoreCase = true)
+      ) {
+        return true
+      }
+      c = c.cause
+    }
+    return false
+  }
+
   override fun parse(url: String): JSONObject {
-    if (!sdkAvailable) return ThunderStubLoader.parse(url)
+    if (!classAvailable || nativeBroken.get()) return ThunderStubLoader.parse(url)
     return try {
       val raw = url.trim()
       if (raw.isEmpty() || (!matchPat.matcher(raw).find() && !isTorrent(raw))) {
@@ -94,7 +133,7 @@ object ThunderXunleiLoader : ThunderLoader {
       }
       val torrent = isTorrent(raw)
       val dir = Path.thunder(md5(raw))
-      val taskId = XLTaskHelper.get().parse(raw, dir)
+      val taskId = xl().parse(raw, dir)
       // 对齐 TV：非种子且解码后不是 magnet → 单集直链（ed2k / thunder 解码后的 http/ftp/ed2k 等）
       val real = taskId.realUrl?.trim().orEmpty()
       if (!torrent && !real.startsWith("magnet")) {
@@ -110,7 +149,7 @@ object ThunderXunleiLoader : ThunderLoader {
       }
       if (!torrent) waitMetaDone(taskId)
       try {
-        val medias = XLTaskHelper.get().getTorrentInfo(taskId.saveFile).medias
+        val medias = xl().getTorrentInfo(taskId.saveFile).medias
         val files = JSONArray()
         for (info in medias) {
           files.put(fileJson(info))
@@ -121,7 +160,10 @@ object ThunderXunleiLoader : ThunderLoader {
           JSONObject().put("ok", true).put("files", files)
         }
       } finally {
-        XLTaskHelper.get().stopTask(taskId)
+        try {
+          xl().stopTask(taskId)
+        } catch (_: Throwable) {
+        }
       }
     } catch (t: Throwable) {
       JSONObject().put("ok", false).put("error", t.message ?: t.toString())
@@ -139,7 +181,7 @@ object ThunderXunleiLoader : ThunderLoader {
 
   private fun waitMetaDone(taskId: GetTaskId) {
     for (i in 0 until 100) {
-      if (XLTaskHelper.get().getTaskInfo(taskId).taskStatus == 2) return
+      if (xl().getTaskInfo(taskId).taskStatus == 2) return
       SystemClock.sleep(100)
     }
   }
@@ -151,14 +193,14 @@ object ThunderXunleiLoader : ThunderLoader {
    * - ed2k / thunder（解码后）/ ftp 等 → addThunderTask
    */
   override fun fetch(url: String): JSONObject {
-    if (!sdkAvailable) return ThunderStubLoader.fetch(url)
+    if (!classAvailable || nativeBroken.get()) return ThunderStubLoader.fetch(url)
     return try {
       var raw = url.trim()
       lastError.set("")
       // thunder:// 先经 SDK 解码（与 parse 一致），得到 ed2k/magnet/ftp/http…
       if (raw.startsWith("thunder://", ignoreCase = true)) {
         val dir = Path.thunder(md5(raw))
-        val decoded = XLTaskHelper.get().parse(raw, dir).realUrl?.trim().orEmpty()
+        val decoded = xl().parse(raw, dir).realUrl?.trim().orEmpty()
         if (decoded.isNotEmpty()) raw = decoded
       }
       val playUrl = if (raw.startsWith("magnet", ignoreCase = true)) {
@@ -167,13 +209,12 @@ object ThunderXunleiLoader : ThunderLoader {
         } else {
           // magnet:?xt=… 未展开：parse 后播第一个媒体
           val parsed = parse(raw)
-          if (!parsed.optBoolean("ok")) {
-            throw IllegalStateException(parsed.optString("error", "迅雷解析失败"))
+          if (!parsed.optBoolean("ok", false)) {
+            return parsed
           }
           val files = parsed.optJSONArray("files")
-            ?: throw IllegalStateException("迅雷无媒体文件")
-          if (files.length() == 0) throw IllegalStateException("迅雷无媒体文件")
-          val firstPlay = files.getJSONObject(0).optString("playUrl", "")
+          val first = files?.optJSONObject(0)
+          val firstPlay = first?.optString("playUrl").orEmpty()
           if (firstPlay.startsWith("magnet://")) {
             addTorrentTask(Uri.parse(firstPlay))
           } else {
@@ -181,7 +222,6 @@ object ThunderXunleiLoader : ThunderLoader {
           }
         }
       } else {
-        // ed2k / ftp / http(迅雷链解码) / 其它直链
         addThunderTask(raw)
       }
       JSONObject().put("ok", true).put("url", playUrl)
@@ -195,56 +235,46 @@ object ThunderXunleiLoader : ThunderLoader {
     val path = uri.path ?: throw IllegalArgumentException("invalid magnet path")
     val torrent = File(path)
     val parent = torrent.parentFile ?: throw IllegalArgumentException("invalid torrent parent")
-    val name = uri.getQueryParameter("name") ?: throw IllegalArgumentException("missing name")
-    val index = uri.getQueryParameter("index")?.toIntOrNull()
-      ?: throw IllegalArgumentException("missing index")
-    val taskId = XLTaskHelper.get().addTorrentTask(torrent, parent, index)
+    val name = uri.getQueryParameter("name") ?: torrent.name
+    val index = uri.getQueryParameter("index")?.toIntOrNull() ?: 0
+    val taskId = xl().addTorrentTask(torrent, parent, index)
     currentTask.set(taskId)
     currentIndex.set(index)
     for (i in 0 until 100) {
-      val info: XLTaskInfo = XLTaskHelper.get().getBtSubTaskInfo(taskId, index).mTaskInfo
+      val info: XLTaskInfo = xl().getBtSubTaskInfo(taskId, index).mTaskInfo
+        ?: throw IllegalStateException("bt subtask null")
       if (info.mTaskStatus == 3) {
-        throw IllegalStateException(info.errorMsg ?: "迅雷任务失败")
+        throw IllegalStateException(info.errorMsg ?: "迅雷错误")
       }
       if (info.mTaskStatus != 0) {
-        return XLTaskHelper.get().getLocalUrl(File(parent, name))
+        return xl().getLocalUrl(File(parent, name))
       }
       SystemClock.sleep(100)
     }
-    throw IllegalStateException("磁力起播超时")
+    return xl().getLocalUrl(File(parent, name))
   }
 
   private fun addThunderTask(url: String): String {
     val folder = Path.thunder(md5(url))
-    val taskId = XLTaskHelper.get().addThunderTask(url, folder)
+    val taskId = xl().addThunderTask(url, folder)
     currentTask.set(taskId)
-    currentIndex.set(0)
-    return XLTaskHelper.get().getLocalUrl(taskId.saveFile)
+    currentIndex.set(-1)
+    return xl().getLocalUrl(taskId.saveFile)
   }
 
   override fun progress(): JSONObject {
-    if (!sdkAvailable) return ThunderStubLoader.progress()
+    if (!classAvailable || nativeBroken.get()) return ThunderStubLoader.progress()
     val task = currentTask.get()
     if (task == null) {
-      val err = lastError.get()
-      if (err.isNotEmpty()) {
-        return JSONObject()
-          .put("ok", true)
-          .put("phase", "error")
-          .put("peers", 0)
-          .put("bytes", 0)
-          .put("need", 0)
-          .put("message", err)
-      }
       return ThunderStubLoader.progress()
     }
     return try {
       val idx = currentIndex.get()
       val info: XLTaskInfo = if (idx >= 0) {
-        val detail = XLTaskHelper.get().getBtSubTaskInfo(task, idx)
-        detail.mTaskInfo ?: XLTaskHelper.get().getTaskInfo(task)
+        val detail = xl().getBtSubTaskInfo(task, idx)
+        detail.mTaskInfo ?: xl().getTaskInfo(task)
       } else {
-        XLTaskHelper.get().getTaskInfo(task)
+        xl().getTaskInfo(task)
       }
       val status = info.mTaskStatus
       val bytes = info.mDownloadSize
@@ -255,7 +285,7 @@ object ThunderXunleiLoader : ThunderLoader {
         else -> if (bytes > 0) "ready" else "buffer"
       }
       val msg = when (phase) {
-        "error" -> info.errorMsg ?: "迅雷错误"
+        "error" -> info.errorMsg ?: lastError.get().ifBlank { "迅雷错误" }
         "ready" -> "迅雷播放中"
         else -> "迅雷缓冲中…"
       }
@@ -278,17 +308,31 @@ object ThunderXunleiLoader : ThunderLoader {
   }
 
   override fun clear(): JSONObject {
-    if (!sdkAvailable) return ThunderStubLoader.clear()
+    if (!classAvailable || nativeBroken.get()) return ThunderStubLoader.clear()
     return try {
+      // 对齐 TV Thunder.stop/exit：只停任务 + release，不删整棵 thunder 目录
       val task = currentTask.getAndSet(null)
       currentIndex.set(-1)
       lastError.set("")
-      if (task != null) {
-        XLTaskHelper.get().deleteTask(task)
+      val helper = try {
+        xl()
+      } catch (_: Throwable) {
+        null
       }
-      XLTaskHelper.get().release()
-      Path.clear(Path.thunder())
-      Path.thunder()
+      if (helper != null && task != null) {
+        try {
+          helper.deleteTask(task)
+        } catch (t: Throwable) {
+          Log.w(TAG, "deleteTask", t)
+        }
+      }
+      if (helper != null) {
+        try {
+          helper.release()
+        } catch (t: Throwable) {
+          Log.w(TAG, "release", t)
+        }
+      }
       JSONObject().put("ok", true).put("cleared", true)
     } catch (t: Throwable) {
       JSONObject().put("ok", false).put("error", t.message ?: t.toString())
@@ -300,13 +344,13 @@ object ThunderBridge {
   @Volatile
   private var loader: ThunderLoader = ThunderStubLoader
 
+  /** 只注入 Init + 选择 loader；不触达 XLTaskHelper（对齐 TV 懒加载）。 */
   fun start(context: android.content.Context) {
     Init.set(context)
     if (Init.context() == null) {
       throw IllegalStateException("Init.context is null after Init.set")
     }
     loader = ThunderXunleiLoader.create()
-    Path.thunder()
   }
 
   fun parse(body: JSONObject): JSONObject {
@@ -335,7 +379,15 @@ object ThunderBridge {
     }
   }
 
-  fun progress(): JSONObject = loader.progress()
+  fun progress(): JSONObject = try {
+    loader.progress()
+  } catch (t: Throwable) {
+    ThunderStubLoader.progress().put("message", t.message ?: "迅雷进度")
+  }
 
-  fun clear(): JSONObject = loader.clear()
+  fun clear(): JSONObject = try {
+    loader.clear()
+  } catch (t: Throwable) {
+    JSONObject().put("ok", false).put("error", t.message ?: t.toString())
+  }
 }

@@ -306,8 +306,12 @@ class EngineVlcPlayback extends KotvPlayback {
       _videoW = (st['width'] as num?)?.toInt() ?? _videoW;
       _videoH = (st['height'] as num?)?.toInt() ?? _videoH;
       if (st['rate'] is num) _rate = (st['rate'] as num).toDouble();
-      // VLC 无统一 completed 事件：近片尾且停播视为本集结束
-      if (_durationMs > 1500 && !_playing && _positionMs >= _durationMs - 1200) {
+      // VLC 无统一 completed：须本集已真正播过，且近片尾停播，才视为结束（避免换集缓冲期误报）
+      if (_durationMs > 10000 &&
+          _positionMs >= 5000 &&
+          !_playing &&
+          _positionMs >= _durationMs - 1200 &&
+          _videoW > 0) {
         _ended = true;
       } else if (_playing) {
         _ended = false;
@@ -382,7 +386,13 @@ class EngineVlcPlayback extends KotvPlayback {
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
+    // 换集必须清掉上一集的进度/结束态，否则 !_playing 时会用旧 pos≈dur 再报 completed → 连跳
     _ended = false;
+    _playing = false;
+    _positionMs = 0;
+    _durationMs = 0;
+    _videoW = 0;
+    _videoH = 0;
     final libDir = KotvVlcPaths.resolveLibDir();
     if (libDir == null) throw StateError('未找到 runtime/libvlc');
     await _native.create();

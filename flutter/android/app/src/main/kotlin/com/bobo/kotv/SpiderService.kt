@@ -41,7 +41,8 @@ class SpiderService private constructor(
       warmUpOne("sniffer") { SnifferWebView.start(appContext) }
       warmUpOne("jar") { JarLoader.ensureBridgeLoaded(appContext) }
       warmUpOne("python") { PyLoader.startIfNeeded(appContext) }
-      warmUpOne("thunder") { ThunderBridge.start(appContext) }
+      // 对齐 TV：不预热 XLTaskHelper/loadLibrary；仅确保 Init（Application 已 set）
+      warmUpOne("thunder-init") { ThunderBridge.start(appContext) }
       Log.i(TAG, "warmup done")
     }
   }

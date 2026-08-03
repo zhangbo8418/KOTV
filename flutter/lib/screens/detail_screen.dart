@@ -90,14 +90,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   StreamSubscription? _endedSub;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription? _bufferingSub;
-  bool _autoNextArmed = true;
   bool _openingSeekDone = false;
-  bool _endingSkipFired = false;
   bool _stoppedHard = false;
   /// 硬停完成后再允许真正出栈（配合 [PopScope]）。
   bool _allowPop = false;
-  /// 开播后短时间内忽略 completed，避免 stop 后残留 completed=true 立刻触发下一集/停播。
-  DateTime? _playArmedAt;
+  /// 对齐 TV：每次 [_playAt] 一代；仅本代真正进入可播（≈STATE_READY）后才允许自动连播。
+  int _playGen = 0;
+  int _playAtSerial = 0;
+  /// 本代是否已消费过「播完→下一集」（completed / 片尾共用，防连跳）。
+  int _endConsumedGen = -1;
+  /// ≈ TV 在 STATE_READY 后才挂 Clock；开播/解析中为 false。
+  bool _playbackLive = false;
+  bool _advanceBusy = false;
+  DateTime? _sessionStartedAt;
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
@@ -145,8 +150,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       if (started) {
         next = magnet ? '$prefix 播放中（磁力）' : '$prefix 播放中';
       } else {
-        final armed = _playArmedAt;
-        if (armed != null && DateTime.now().difference(armed) > const Duration(seconds: 10)) {
+        final startedAt = _sessionStartedAt;
+        if (startedAt != null && DateTime.now().difference(startedAt) > const Duration(seconds: 10)) {
           next = magnet ? '磁力无画面（可换源/换节点）' : '$prefix 无画面（可换源/解析）';
         } else {
           next = magnet ? '磁力缓冲中…' : '$prefix 加载中…';
@@ -164,6 +169,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       // stopHard 会拆掉 playing 订阅；复用 Player 时必须重新挂上。
       _playingSub ??= _mkPlayer!.stream.playing.listen((_) {
         if (!mounted || _playUrl.isEmpty || !_useMpv) return;
+        _markPlaybackLiveIfNeeded();
         _syncPlayStatus();
       });
       _bufferingSub ??= _mkPlayer!.stream.buffering.listen((_) {
@@ -177,14 +183,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _mk = MediaKitPlayback(player, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
     _playingSub = player.stream.playing.listen((_) {
       if (!mounted || _playUrl.isEmpty || !_useMpv) return;
+      _markPlaybackLiveIfNeeded();
       _syncPlayStatus();
     });
     _bufferingSub = player.stream.buffering.listen((_) {
       if (!mounted || _playUrl.isEmpty || !_useMpv) return;
       _syncPlayStatus();
     });
-    _wireEnded(_mk!);
-    _wirePosition(_mk!);
+    // ended/position 由 _playAt 在 open 后再挂，避免创建 Player 时残留 completed 误触
     return _mk!;
   }
 
@@ -221,7 +227,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
   /// 不要 pause/静音：pause 会粘在播放器上，下次 open 只出一帧；静音会带到下一集。
   Future<void> _stopHard() async {
-    _autoNextArmed = false;
+    _playbackLive = false;
+    _advanceBusy = false;
+    _playGen++;
+    _endConsumedGen = _playGen;
+    _sessionStartedAt = null;
     _playingSub?.cancel();
     _endedSub?.cancel();
     _posSub?.cancel();
@@ -279,10 +289,51 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _posSub = p.positionStream.listen(_onPositionTick);
   }
 
+  /// 对齐 TV STATE_READY：本集真正开播后才允许片尾/completed 自动连播。
+  void _markPlaybackLiveIfNeeded() {
+    if (_playUrl.isEmpty || _playbackLive) return;
+    final p = _playback;
+    if (p.completed) return;
+    final pos = p.position.inMilliseconds;
+    final dur = p.duration.inMilliseconds;
+    // 上一集残留的近片尾进度绝不当作 READY
+    if (dur > 15000 && pos >= dur - 5000 && pos > 8000) return;
+    if (p.playing || pos > 800 || p.width > 0) {
+      _playbackLive = true;
+    }
+  }
+
+  /// 对齐 TV playbackEnded / onTimeChanged→nextEpisode：每集只前进一次。
+  Future<void> _advanceToNextEpisode() async {
+    if (!mounted || _advanceBusy) return;
+    if (!_playbackLive) return;
+    if (_endConsumedGen == _playGen) return;
+    final eps = _eps;
+    final next = _epIdx + 1;
+    if (next < 0 || next >= eps.length) {
+      if (mounted) setState(() => _status = '播放结束');
+      _endConsumedGen = _playGen;
+      _playbackLive = false;
+      return;
+    }
+    _endConsumedGen = _playGen;
+    _playbackLive = false;
+    _advanceBusy = true;
+    if (mounted) setState(() => _status = '自动播放下一集…');
+    try {
+      await _playAt(next);
+    } finally {
+      _advanceBusy = false;
+    }
+  }
+
   /// 对齐 TV：片头起播跳过；片尾 `ending+position>=duration` 切下一集。
+  /// Clock 仅在 READY（[_playbackLive]）后生效，避免解析/换集中连跳。
   void _onPositionTick(Duration pos) {
     if (_playUrl.isEmpty || !mounted) return;
     _syncPlayStatus();
+    _markPlaybackLiveIfNeeded();
+    if (!_playbackLive || _endConsumedGen == _playGen) return;
     final dur = _playback.duration;
     if (dur.inMilliseconds <= 0) return;
     final openMs = _openingSec * 1000;
@@ -295,36 +346,26 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }
       if (pos.inMilliseconds >= openMs) _openingSeekDone = true;
     }
+    // 对齐 TV：ending > 0 && ending + position >= duration
     if (endMs > 0 && pos.inMilliseconds + endMs >= dur.inMilliseconds) {
-      if (!_endingSkipFired) {
-        _endingSkipFired = true;
-        _openingSeekDone = false;
-        unawaited(_playAt(_epIdx + 1));
-      }
-    } else {
-      _endingSkipFired = false;
+      _openingSeekDone = false;
+      unawaited(_advanceToNextEpisode());
     }
   }
 
   Future<void> _onPlaybackEnded() async {
-    final armed = _playArmedAt;
-    if (armed != null && DateTime.now().difference(armed) < const Duration(seconds: 2)) {
+    if (!mounted) return;
+    _markPlaybackLiveIfNeeded();
+    if (!_playbackLive || _endConsumedGen == _playGen) return;
+    final pos = _playback.position.inMilliseconds;
+    final dur = _playback.duration.inMilliseconds;
+    if (dur > 0) {
+      final nearEnd = pos + 8000 >= dur || pos >= (dur * 0.92).round();
+      if (!nearEnd || pos < 3000) return;
+    } else if (pos < 5000) {
       return;
     }
-    if (!_autoNextArmed || _playUrl.isEmpty) return;
-    final eps = _eps;
-    final next = _epIdx + 1;
-    if (next < 0 || next >= eps.length) {
-      if (mounted) setState(() => _status = '播放结束');
-      return;
-    }
-    _autoNextArmed = false;
-    if (mounted) setState(() => _status = '自动播放下一集…');
-    try {
-      await _playAt(next);
-    } finally {
-      _autoNextArmed = true;
-    }
+    await _advanceToNextEpisode();
   }
 
   @override
@@ -565,7 +606,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (epIdx < 0 || epIdx >= eps.length) return;
     final ep = eps[epIdx];
     _stoppedHard = false;
-    _autoNextArmed = true;
+    // 换集：抬世代，关掉 READY/连播（对齐 TV BUFFERING 时 Clock=null）
+    final gen = ++_playGen;
+    final serial = ++_playAtSerial;
+    _playbackLive = false;
+    _sessionStartedAt = null;
+    _openingSeekDone = false;
+    _endedSub?.cancel();
+    _endedSub = null;
+    _posSub?.cancel();
+    _posSub = null;
     final epLooksMagnet = RegExp(r'^(magnet|thunder|ed2k):', caseSensitive: false).hasMatch(ep.url.trim()) ||
         ep.url.toLowerCase().contains('.torrent') ||
         ep.url.contains('/proxy/bt/') ||
@@ -584,6 +634,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             id: widget.id,
             flag: flag.flag,
           );
+      if (serial != _playAtSerial || !mounted) return;
       final playUrl = '${data['url'] ?? ''}';
       if (playUrl.isEmpty) throw Exception('空播放地址');
       final mediaUrl = '${data['media'] ?? ''}';
@@ -612,6 +663,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       } else {
         await _stopInactiveBackends(_backend);
       }
+      if (serial != _playAtSerial || !mounted) return;
       final pb = _playback;
       await pb.setDecodeMode(_decodeMode);
       // Exo 对齐 TV：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
@@ -634,6 +686,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       try {
         await pb.play();
       } catch (_) {}
+      if (serial != _playAtSerial || !mounted) return;
       if (_stableVolumeOn) await _applyStableVolume(pb, true);
       if (!mounted) return;
       setState(() {
@@ -645,12 +698,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         name: d.name,
         episode: ep.name,
       ));
-      _wireEnded(_playback);
-      _wirePosition(_playback);
+      // 仍未 READY：等进度回调 _markPlaybackLiveIfNeeded（对齐 TV STATE_READY 才挂 Clock）
+      _playbackLive = false;
+      _sessionStartedAt = DateTime.now();
       _openingSeekDone = false;
-      _endingSkipFired = false;
-      _autoNextArmed = true;
-      _playArmedAt = DateTime.now();
+      if (gen == _playGen) {
+        _wireEnded(_playback);
+        _wirePosition(_playback);
+      }
       _stopBtProgressPoll();
       _syncPlayStatus();
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: '${d.name} · ${ep.name}', url: playUrl);
@@ -658,7 +713,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await _enterFullscreen();
       }
     } catch (e) {
+      if (serial != _playAtSerial) return;
       _stopBtProgressPoll();
+      _playbackLive = false;
+      _sessionStartedAt = null;
       setState(() {
         _playUrl = '';
         _status = _friendlyPlayError(e);
@@ -949,9 +1007,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           );
 
     return PopScope(
-      canPop: _allowPop,
+      // 未在播时可直接手势/系统返回；播放中先硬停再 pop（对齐停播需求）
+      canPop: _allowPop || (!_miniDesktop && _playUrl.isEmpty),
       onPopInvoked: (didPop) {
-        if (didPop) return;
+        if (didPop) {
+          unawaited(_stopHard());
+          return;
+        }
         unawaited(_leavePage());
       },
       child: body,

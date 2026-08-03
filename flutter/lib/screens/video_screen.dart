@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
+import '../nav/kotv_routes.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
@@ -275,7 +276,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   void _open(VodItem it) {
     LocalHistory.push(it);
-    Navigator.of(context).push(MaterialPageRoute(
+    Navigator.of(context).push(kotvDetailRoute(
       builder: (_) => DetailScreen(id: it.id, site: it.site, title: it.name),
     ));
   }

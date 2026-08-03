@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
+import '../nav/kotv_routes.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
@@ -285,7 +286,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               padding: EdgeInsets.zero,
               onOpen: (it) {
                 LocalHistory.push(it);
-                Navigator.of(context).push(MaterialPageRoute(
+                Navigator.of(context).push(kotvDetailRoute(
                   builder: (_) => DetailScreen(id: it.id, site: it.site.isNotEmpty ? it.site : c.site, title: it.name),
                 ));
               },
