@@ -441,12 +441,23 @@ class PostMsgHost {
                     final title = '${doc['title'] ?? ''}';
                     final elements = (doc['elements'] as List?) ?? const [];
                     final actions = (doc['actions'] as List?) ?? const [];
+                    final docFont = _num(doc['fontSize']);
+                    final titleFont = _num(doc['titleSize']);
+                    final actionFont = _num(doc['actionFontSize']);
+                    final actionW = _num(doc['actionWidth']);
+                    final actionH = _num(doc['actionHeight']);
 
                     return AlertDialog(
                       backgroundColor: const Color(0xFF1A1028),
                       title: title.isEmpty
                           ? null
-                          : Text(title, style: const TextStyle(color: Colors.white)),
+                          : Text(
+                              title,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: titleFont > 0 ? titleFont : (docFont > 0 ? docFont + 2 : null),
+                              ),
+                            ),
                       content: _docContentBox(
                         dialogCtx,
                         doc,
@@ -458,6 +469,7 @@ class PostMsgHost {
                                 if (el is Map)
                                   ..._buildElement(
                                     Map<String, dynamic>.from(el),
+                                    docFontSize: docFont,
                                     values: values,
                                     checks: checks,
                                     radios: radios,
@@ -472,14 +484,14 @@ class PostMsgHost {
                       actions: [
                         for (final a in actions)
                           if (a is Map)
-                            TextButton(
+                            _buildActionButton(
+                              Map<String, dynamic>.from(a),
+                              defaultFont: actionFont > 0 ? actionFont : docFont,
+                              defaultW: actionW,
+                              defaultH: actionH,
                               onPressed: () => fire(
                                 '${a['id'] ?? 'action'}',
                                 dismissAfter: a['dismiss'] == true,
-                              ),
-                              child: Text(
-                                '${a['label'] ?? a['id'] ?? ''}',
-                                style: const TextStyle(color: Colors.white),
                               ),
                             ),
                       ],
@@ -548,30 +560,69 @@ class PostMsgHost {
     );
   }
 
-  /// 窗口宽高完全跟 Document；仅用屏幕尺寸做上限，避免溢出。未指定则按内容自适应。
+  /// 窗口宽高由脚本 Document 指定；有值则固定视口（内容滚动），不是靠内容撑开。
+  /// 仅用屏幕尺寸做上限，避免溢出。
   Widget _docContentBox(BuildContext ctx, Map<String, dynamic> doc, {required Widget child}) {
     final screen = MediaQuery.sizeOf(ctx);
     final maxW = screen.width * 0.95;
     final maxH = screen.height * 0.9;
-    final rawW = (doc['width'] is num) ? (doc['width'] as num).toDouble() : 0.0;
-    final rawH = (doc['height'] is num) ? (doc['height'] as num).toDouble() : 0.0;
+    final rawW = _num(doc['width']);
+    final rawH = _num(doc['height']);
     final w = rawW > 0 ? rawW.clamp(1.0, maxW) : null;
     final h = rawH > 0 ? rawH.clamp(1.0, maxH) : null;
+    if (w != null || h != null) {
+      return SizedBox(
+        width: w ?? maxW,
+        height: h,
+        child: child,
+      );
+    }
     return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: w ?? maxW,
-        maxHeight: h ?? maxH,
-        minWidth: w ?? 0,
-        minHeight: 0,
-      ),
-      child: (w != null || h != null)
-          ? SizedBox(width: w, height: h, child: child)
-          : child,
+      constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
+      child: child,
     );
+  }
+
+  double _num(dynamic v) => (v is num) ? v.toDouble() : 0.0;
+
+  double _fontOf(Map<String, dynamic> el, double docFont) {
+    final own = _num(el['fontSize']);
+    if (own > 0) return own;
+    if (docFont > 0) return docFont;
+    return 14.0;
+  }
+
+  Widget _sized(Map<String, dynamic> el, {required Widget child, double fallbackW = 0, double fallbackH = 0}) {
+    final double? w = _num(el['width']) > 0 ? _num(el['width']) : (fallbackW > 0 ? fallbackW : null);
+    final double? h = _num(el['height']) > 0 ? _num(el['height']) : (fallbackH > 0 ? fallbackH : null);
+    if (w == null && h == null) return child;
+    return SizedBox(width: w, height: h, child: child);
+  }
+
+  Widget _buildActionButton(
+    Map<String, dynamic> a, {
+    required double defaultFont,
+    required double defaultW,
+    required double defaultH,
+    required VoidCallback onPressed,
+  }) {
+    final font = _num(a['fontSize']) > 0
+        ? _num(a['fontSize'])
+        : (defaultFont > 0 ? defaultFont : 14.0);
+    final label = Text(
+      '${a['label'] ?? a['id'] ?? ''}',
+      style: TextStyle(color: Colors.white, fontSize: font),
+    );
+    final btn = TextButton(onPressed: onPressed, child: label);
+    final double? w = _num(a['width']) > 0 ? _num(a['width']) : (defaultW > 0 ? defaultW : null);
+    final double? h = _num(a['height']) > 0 ? _num(a['height']) : (defaultH > 0 ? defaultH : null);
+    if (w == null && h == null) return btn;
+    return SizedBox(width: w, height: h, child: btn);
   }
 
   List<Widget> _buildElement(
     Map<String, dynamic> el, {
+    required double docFontSize,
     required Map<String, TextEditingController> values,
     required Map<String, bool> checks,
     required Map<String, String> radios,
@@ -580,21 +631,23 @@ class PostMsgHost {
     required Future<void> Function(String action, {bool dismissAfter}) fire,
   }) {
     final type = '${el['type'] ?? ''}'.toLowerCase().trim();
+    final font = _fontOf(el, docFontSize);
     switch (type) {
       case 'text':
         return [
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: Text('${el['text'] ?? ''}', style: const TextStyle(color: Colors.white70, height: 1.35)),
+            child: Text(
+              '${el['text'] ?? ''}',
+              style: TextStyle(color: Colors.white70, height: 1.35, fontSize: font),
+            ),
           ),
         ];
       case 'image':
         final img = _decodeDataImage('${el['source'] ?? ''}');
         if (img == null) return const [];
-        final rawW = (el['width'] is num) ? (el['width'] as num).toDouble() : 0.0;
-        final rawH = (el['height'] is num) ? (el['height'] as num).toDouble() : 0.0;
-        final w = rawW > 0 ? rawW : null;
-        final h = rawH > 0 ? rawH : null;
+        final w = _num(el['width']) > 0 ? _num(el['width']) : null;
+        final h = _num(el['height']) > 0 ? _num(el['height']) : null;
         return [
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -617,21 +670,25 @@ class PostMsgHost {
           final c = TextEditingController(text: '${el['value'] ?? ''}');
           return c;
         });
+        final field = TextField(
+          controller: ctrl,
+          obscureText: el['password'] == true,
+          maxLines: el['multiline'] == true ? null : 1,
+          minLines: el['multiline'] == true ? 3 : 1,
+          style: TextStyle(color: Colors.white, fontSize: font),
+          decoration: InputDecoration(
+            hintText: '${el['placeholder'] ?? ''}',
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: font),
+            enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.2))),
+            focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFE53955))),
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+        );
         return [
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: TextField(
-              controller: ctrl,
-              obscureText: el['password'] == true,
-              maxLines: el['multiline'] == true ? 3 : 1,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: '${el['placeholder'] ?? ''}',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
-                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.2))),
-                focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFE53955))),
-              ),
-            ),
+            child: _sized(el, child: field),
           ),
         ];
       case 'checkbox':
@@ -641,10 +698,11 @@ class PostMsgHost {
         return [
           CheckboxListTile(
             value: checks[id] ?? false,
-            title: Text('${el['text'] ?? ''}', style: const TextStyle(color: Colors.white70)),
+            title: Text('${el['text'] ?? ''}', style: TextStyle(color: Colors.white70, fontSize: font)),
             onChanged: (v) => setLocal(() => checks[id] = v ?? false),
             controlAffinity: ListTileControlAffinity.leading,
             activeColor: const Color(0xFFE53955),
+            dense: true,
           ),
         ];
       case 'radio':
@@ -658,9 +716,10 @@ class PostMsgHost {
               RadioListTile<String>(
                 value: '${o['id'] ?? ''}',
                 groupValue: radios[id],
-                title: Text('${o['label'] ?? o['id'] ?? ''}', style: const TextStyle(color: Colors.white70)),
+                title: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: Colors.white70, fontSize: font)),
                 onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
                 activeColor: const Color(0xFFE53955),
+                dense: true,
               ),
         ];
       case 'select':
@@ -668,66 +727,67 @@ class PostMsgHost {
         if (id.isEmpty) return const [];
         final options = (el['options'] as List?) ?? const [];
         selects.putIfAbsent(id, () => '${el['value'] ?? (options.isNotEmpty && options.first is Map ? options.first['id'] : '')}');
+        final dropdown = DropdownButtonFormField<String>(
+          value: selects[id]?.isEmpty == true ? null : selects[id],
+          dropdownColor: const Color(0xFF1A1028),
+          style: TextStyle(color: Colors.white, fontSize: font),
+          items: [
+            for (final o in options)
+              if (o is Map)
+                DropdownMenuItem(value: '${o['id']}', child: Text('${o['label'] ?? o['id']}', style: TextStyle(fontSize: font))),
+          ],
+          onChanged: (v) => setLocal(() => selects[id] = v ?? ''),
+        );
         return [
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: DropdownButtonFormField<String>(
-              value: selects[id]?.isEmpty == true ? null : selects[id],
-              dropdownColor: const Color(0xFF1A1028),
-              style: const TextStyle(color: Colors.white),
-              items: [
-                for (final o in options)
-                  if (o is Map)
-                    DropdownMenuItem(value: '${o['id']}', child: Text('${o['label'] ?? o['id']}')),
-              ],
-              onChanged: (v) => setLocal(() => selects[id] = v ?? ''),
-            ),
+            child: _sized(el, child: dropdown),
           ),
         ];
       case 'button':
         final btnUrl = '${el['url'] ?? ''}'.trim();
+        final label = Text('${el['text'] ?? ''}', style: TextStyle(color: Colors.white, fontSize: font));
+        final btn = TextButton(
+          onPressed: () async {
+            if (btnUrl.isNotEmpty) await _openExternal(btnUrl);
+            await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
+          },
+          child: label,
+        );
         return [
           Align(
             alignment: Alignment.centerLeft,
-            child: TextButton(
-              onPressed: () async {
-                if (btnUrl.isNotEmpty) await _openExternal(btnUrl);
-                await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
-              },
-              child: Text('${el['text'] ?? ''}', style: const TextStyle(color: Colors.white)),
-            ),
+            child: _sized(el, child: btn),
           ),
         ];
       case 'link':
         final linkUrl = '${el['url'] ?? ''}'.trim();
         if (linkUrl.isEmpty) return const [];
-        final label = '${el['text'] ?? ''}'.trim().isEmpty ? linkUrl : '${el['text']}'.trim();
+        final labelText = '${el['text'] ?? ''}'.trim().isEmpty ? linkUrl : '${el['text']}'.trim();
         final asButton = '${el['style'] ?? ''}'.toLowerCase().trim() == 'button';
         if (asButton) {
+          final btn = FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE53955)),
+            onPressed: () => unawaited(_openExternal(linkUrl)),
+            child: Text(labelText, style: TextStyle(fontSize: font)),
+          );
           return [
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE53955)),
-                  onPressed: () => unawaited(_openExternal(linkUrl)),
-                  child: Text(label),
-                ),
-              ),
+              child: Align(alignment: Alignment.centerLeft, child: _sized(el, child: btn)),
             ),
           ];
         }
         return [
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: 4),
             child: Align(
               alignment: Alignment.centerLeft,
               child: TextButton(
                 onPressed: () => unawaited(_openExternal(linkUrl)),
                 child: Text(
-                  label,
-                  style: const TextStyle(color: Color(0xFF7EB8FF), decoration: TextDecoration.underline),
+                  labelText,
+                  style: TextStyle(color: const Color(0xFF7EB8FF), decoration: TextDecoration.underline, fontSize: font),
                 ),
               ),
             ),
@@ -737,24 +797,25 @@ class PostMsgHost {
         return [Divider(color: Colors.white.withOpacity(0.15))];
       case 'spacer':
       case 'space':
-        final h = (el['height'] is num) ? (el['height'] as num).toDouble() : 0.0;
-        if (h <= 0) return const [];
-        return [SizedBox(height: h)];
+        final sp = _num(el['height']);
+        if (sp <= 0) return const [];
+        return [SizedBox(height: sp)];
       case 'row':
       case 'column':
       case 'group':
         final children = (el['children'] as List?) ?? const [];
-        final spacing = (el['spacing'] is num) ? (el['spacing'] as num).toDouble() : 0.0;
+        final spacing = _num(el['spacing']);
         final kids = <Widget>[
           if (type == 'group' && '${el['text'] ?? ''}'.isNotEmpty)
             Padding(
               padding: EdgeInsets.only(bottom: spacing > 0 ? spacing : 0),
-              child: Text('${el['text']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              child: Text('${el['text']}', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: font)),
             ),
           for (final c in children)
             if (c is Map)
               ..._buildElement(
                 Map<String, dynamic>.from(c),
+                docFontSize: docFontSize,
                 values: values,
                 checks: checks,
                 radios: radios,
@@ -765,9 +826,7 @@ class PostMsgHost {
         ];
         if (type == 'row') {
           final gap = spacing > 0 ? spacing : 0.0;
-          return [
-            Wrap(spacing: gap, runSpacing: gap, children: kids),
-          ];
+          return [Wrap(spacing: gap, runSpacing: gap, children: kids)];
         }
         if (type == 'column' && spacing > 0) {
           final spaced = <Widget>[];

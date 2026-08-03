@@ -63,7 +63,12 @@ public final class UiBridge {
         }
 
         public Elements text(String text) {
-            addText(target, text);
+            addText(target, text, 0);
+            return this;
+        }
+
+        public Elements text(String text, int fontSize) {
+            addText(target, text, fontSize);
             return this;
         }
 
@@ -73,26 +78,49 @@ public final class UiBridge {
         }
 
         public Elements input(String id, String placeholder, boolean multiline) {
-            addInput(target, id, placeholder, multiline, false, "");
+            addInput(target, id, placeholder, multiline, false, "", 0, 0, 0);
             return this;
         }
 
         public Elements input(String id, String placeholder, boolean multiline, String value) {
-            addInput(target, id, placeholder, multiline, false, value);
+            addInput(target, id, placeholder, multiline, false, value, 0, 0, 0);
+            return this;
+        }
+
+        /** width/height/fontSize：≤0 表示该项不指定，由宿主用文档级默认或控件固有尺寸。 */
+        public Elements input(String id, String placeholder, boolean multiline,
+                              int width, int height, int fontSize) {
+            addInput(target, id, placeholder, multiline, false, "", width, height, fontSize);
+            return this;
+        }
+
+        public Elements input(String id, String placeholder, boolean multiline, String value,
+                              int width, int height, int fontSize) {
+            addInput(target, id, placeholder, multiline, false, value, width, height, fontSize);
             return this;
         }
 
         public Elements password(String id, String placeholder) {
-            addInput(target, id, placeholder, false, true, "");
+            addInput(target, id, placeholder, false, true, "", 0, 0, 0);
+            return this;
+        }
+
+        public Elements password(String id, String placeholder, int width, int height, int fontSize) {
+            addInput(target, id, placeholder, false, true, "", width, height, fontSize);
             return this;
         }
 
         public Elements checkbox(String id, String text, boolean checked) {
+            return checkbox(id, text, checked, 0);
+        }
+
+        public Elements checkbox(String id, String text, boolean checked, int fontSize) {
             Map<String, Object> element = new LinkedHashMap<>();
             element.put("type", "checkbox");
             element.put("id", id);
             element.put("text", text == null ? "" : text);
             element.put("checked", checked);
+            putStyle(element, 0, 0, fontSize);
             target.add(element);
             return this;
         }
@@ -102,11 +130,16 @@ public final class UiBridge {
         }
 
         public Elements radio(String id, String selected, List<Option> options) {
+            return radio(id, selected, options, 0);
+        }
+
+        public Elements radio(String id, String selected, List<Option> options, int fontSize) {
             Map<String, Object> element = new LinkedHashMap<>();
             element.put("type", "radio");
             element.put("id", id);
             if (selected != null) element.put("value", selected);
             element.put("options", toOptionMaps(options));
+            putStyle(element, 0, 0, fontSize);
             target.add(element);
             return this;
         }
@@ -116,25 +149,37 @@ public final class UiBridge {
         }
 
         public Elements select(String id, String selected, List<Option> options) {
+            return select(id, selected, options, 0, 0, 0);
+        }
+
+        public Elements select(String id, String selected, List<Option> options,
+                               int width, int height, int fontSize) {
             Map<String, Object> element = new LinkedHashMap<>();
             element.put("type", "select");
             element.put("id", id);
             if (selected != null) element.put("value", selected);
             element.put("options", toOptionMaps(options));
+            putStyle(element, width, height, fontSize);
             target.add(element);
             return this;
         }
 
         public Elements button(String id, String label) {
-            return button(id, label, false);
+            return button(id, label, false, 0, 0, 0);
         }
 
         public Elements button(String id, String label, boolean dismiss) {
+            return button(id, label, dismiss, 0, 0, 0);
+        }
+
+        public Elements button(String id, String label, boolean dismiss,
+                               int width, int height, int fontSize) {
             Map<String, Object> element = new LinkedHashMap<>();
             element.put("type", "button");
             element.put("id", id);
             element.put("text", label == null ? "" : label);
             element.put("dismiss", dismiss);
+            putStyle(element, width, height, fontSize);
             target.add(element);
             return this;
         }
@@ -144,16 +189,22 @@ public final class UiBridge {
          * @param style {@code text} (default) or {@code button}
          */
         public Elements link(String text, String url) {
-            return link(text, url, "text");
+            return link(text, url, "text", 0, 0, 0);
         }
 
         public Elements link(String text, String url, String style) {
+            return link(text, url, style, 0, 0, 0);
+        }
+
+        public Elements link(String text, String url, String style,
+                             int width, int height, int fontSize) {
             if (url == null || url.trim().isEmpty()) return this;
             Map<String, Object> element = new LinkedHashMap<>();
             element.put("type", "link");
             element.put("text", text == null || text.trim().isEmpty() ? url : text);
             element.put("url", url.trim());
             if (style != null && !style.trim().isEmpty()) element.put("style", style.trim());
+            putStyle(element, width, height, fontSize);
             target.add(element);
             return this;
         }
@@ -222,9 +273,16 @@ public final class UiBridge {
      */
     public static final class Document {
         public String title = "";
-        /** 0 = 由内容自适应；宿主只在屏幕范围内尊重脚本给出的值。 */
+        /** 窗口固定宽高（逻辑像素）；脚本必填意图尺寸，宿主只做屏幕上限裁剪。 */
         public int width = 0;
         public int height = 0;
+        /** 文档级默认字号；元素未单独指定 fontSize 时宿主用它。 */
+        public int fontSize = 0;
+        public int titleSize = 0;
+        /** 底栏 action 默认样式。 */
+        public int actionFontSize = 0;
+        public int actionWidth = 0;
+        public int actionHeight = 0;
         public long timeoutMs = 120_000;
         public final List<Map<String, Object>> elements = new ArrayList<>();
         public final List<Map<String, Object>> actions = new ArrayList<>();
@@ -241,6 +299,23 @@ public final class UiBridge {
             return this;
         }
 
+        public Document fontSize(int fontSize) {
+            if (fontSize > 0) this.fontSize = fontSize;
+            return this;
+        }
+
+        public Document titleSize(int titleSize) {
+            if (titleSize > 0) this.titleSize = titleSize;
+            return this;
+        }
+
+        public Document actionStyle(int fontSize, int width, int height) {
+            if (fontSize > 0) this.actionFontSize = fontSize;
+            if (width > 0) this.actionWidth = width;
+            if (height > 0) this.actionHeight = height;
+            return this;
+        }
+
         public Document timeoutMs(long timeoutMs) {
             this.timeoutMs = timeoutMs;
             return this;
@@ -248,6 +323,11 @@ public final class UiBridge {
 
         public Document text(String text) {
             els.text(text);
+            return this;
+        }
+
+        public Document text(String text, int fontSize) {
+            els.text(text, fontSize);
             return this;
         }
 
@@ -266,13 +346,35 @@ public final class UiBridge {
             return this;
         }
 
+        public Document input(String id, String placeholder, boolean multiline,
+                              int width, int height, int fontSize) {
+            els.input(id, placeholder, multiline, width, height, fontSize);
+            return this;
+        }
+
+        public Document input(String id, String placeholder, boolean multiline, String value,
+                              int width, int height, int fontSize) {
+            els.input(id, placeholder, multiline, value, width, height, fontSize);
+            return this;
+        }
+
         public Document password(String id, String placeholder) {
             els.password(id, placeholder);
             return this;
         }
 
+        public Document password(String id, String placeholder, int width, int height, int fontSize) {
+            els.password(id, placeholder, width, height, fontSize);
+            return this;
+        }
+
         public Document checkbox(String id, String text, boolean checked) {
             els.checkbox(id, text, checked);
+            return this;
+        }
+
+        public Document checkbox(String id, String text, boolean checked, int fontSize) {
+            els.checkbox(id, text, checked, fontSize);
             return this;
         }
 
@@ -286,6 +388,11 @@ public final class UiBridge {
             return this;
         }
 
+        public Document radio(String id, String selected, List<Option> options, int fontSize) {
+            els.radio(id, selected, options, fontSize);
+            return this;
+        }
+
         public Document select(String id, String selected, Option... options) {
             els.select(id, selected, options);
             return this;
@@ -293,6 +400,12 @@ public final class UiBridge {
 
         public Document select(String id, String selected, List<Option> options) {
             els.select(id, selected, options);
+            return this;
+        }
+
+        public Document select(String id, String selected, List<Option> options,
+                               int width, int height, int fontSize) {
+            els.select(id, selected, options, width, height, fontSize);
             return this;
         }
 
@@ -306,6 +419,12 @@ public final class UiBridge {
             return this;
         }
 
+        public Document button(String id, String label, boolean dismiss,
+                               int width, int height, int fontSize) {
+            els.button(id, label, dismiss, width, height, fontSize);
+            return this;
+        }
+
         public Document link(String text, String url) {
             els.link(text, url);
             return this;
@@ -313,6 +432,12 @@ public final class UiBridge {
 
         public Document link(String text, String url, String style) {
             els.link(text, url, style);
+            return this;
+        }
+
+        public Document link(String text, String url, String style,
+                             int width, int height, int fontSize) {
+            els.link(text, url, style, width, height, fontSize);
             return this;
         }
 
@@ -367,7 +492,13 @@ public final class UiBridge {
         }
 
         public Document action(String id, String label, boolean dismiss) {
-            actions.add(UiBridge.action(id, label, dismiss));
+            actions.add(UiBridge.action(id, label, dismiss, 0, 0, 0));
+            return this;
+        }
+
+        public Document action(String id, String label, boolean dismiss,
+                               int width, int height, int fontSize) {
+            actions.add(UiBridge.action(id, label, dismiss, width, height, fontSize));
             return this;
         }
     }
@@ -471,6 +602,11 @@ public final class UiBridge {
         document.put("title", doc.title == null ? "" : doc.title);
         document.put("width", doc.width);
         document.put("height", doc.height);
+        if (doc.fontSize > 0) document.put("fontSize", doc.fontSize);
+        if (doc.titleSize > 0) document.put("titleSize", doc.titleSize);
+        if (doc.actionFontSize > 0) document.put("actionFontSize", doc.actionFontSize);
+        if (doc.actionWidth > 0) document.put("actionWidth", doc.actionWidth);
+        if (doc.actionHeight > 0) document.put("actionHeight", doc.actionHeight);
         document.put("timeoutMs", doc.timeoutMs);
         document.put("elements", doc.elements);
         document.put("actions", doc.actions);
@@ -486,6 +622,12 @@ public final class UiBridge {
         Util.notifySync("UI_CLOSE:" + Json.toJson(command));
     }
 
+    private static void putStyle(Map<String, Object> element, int width, int height, int fontSize) {
+        if (width > 0) element.put("width", width);
+        if (height > 0) element.put("height", height);
+        if (fontSize > 0) element.put("fontSize", fontSize);
+    }
+
     private static void addLayout(List<Map<String, Object>> target, String type, String title,
                                   int spacing, Consumer<Elements> block) {
         List<Map<String, Object>> children = new ArrayList<>();
@@ -498,11 +640,12 @@ public final class UiBridge {
         target.add(element);
     }
 
-    private static void addText(List<Map<String, Object>> elements, String text) {
+    private static void addText(List<Map<String, Object>> elements, String text, int fontSize) {
         if (text == null || text.trim().isEmpty()) return;
         Map<String, Object> element = new LinkedHashMap<>();
         element.put("type", "text");
         element.put("text", text);
+        putStyle(element, 0, 0, fontSize);
         elements.add(element);
     }
 
@@ -511,14 +654,13 @@ public final class UiBridge {
         Map<String, Object> element = new LinkedHashMap<>();
         element.put("type", "image");
         element.put("source", source);
-        // 宽高由脚本传入；≤0 表示不强制，宿主按图片固有尺寸。
-        if (width > 0) element.put("width", width);
-        if (height > 0) element.put("height", height);
+        putStyle(element, width, height, 0);
         elements.add(element);
     }
 
     private static void addInput(List<Map<String, Object>> elements, String id, String placeholder,
-                                 boolean multiline, boolean password, String value) {
+                                 boolean multiline, boolean password, String value,
+                                 int width, int height, int fontSize) {
         Map<String, Object> element = new LinkedHashMap<>();
         element.put("type", "input");
         element.put("id", id);
@@ -526,6 +668,7 @@ public final class UiBridge {
         element.put("multiline", multiline);
         element.put("password", password);
         if (value != null && !value.isEmpty()) element.put("value", value);
+        putStyle(element, width, height, fontSize);
         elements.add(element);
     }
 
@@ -542,11 +685,13 @@ public final class UiBridge {
         return list;
     }
 
-    private static Map<String, Object> action(String id, String label, boolean dismiss) {
+    private static Map<String, Object> action(String id, String label, boolean dismiss,
+                                              int width, int height, int fontSize) {
         Map<String, Object> action = new LinkedHashMap<>();
         action.put("id", id);
         action.put("label", label);
         action.put("dismiss", dismiss);
+        putStyle(action, width, height, fontSize);
         return action;
     }
 
