@@ -8,7 +8,7 @@ import (
 // Events HTTP 遥控事件总线，对应 ServerEvent。
 type Events struct {
 	mu          sync.RWMutex
-	searchSubs  []chan string
+	searchSubs  []chan searchEvent
 	pushSubs    []chan string
 	danmakuSubs []chan string
 	settingSubs []chan settingEvent
@@ -27,9 +27,15 @@ type settingEvent struct {
 	Name  string
 }
 
+type searchEvent struct {
+	Word     string
+	ClientID string
+}
+
 type controlEvent struct {
-	Type   string
-	SeekMs int64
+	Type     string
+	SeekMs   int64
+	ClientID string
 }
 
 type refreshEvent struct {
@@ -52,13 +58,21 @@ func NewEvents() *Events {
 
 func (e *Events) SubscribePostMsg() <-chan string { return e.subscribe(&e.postMsgSubs, 64) }
 
-func (e *Events) SubscribeSearch() <-chan string        { return e.subscribe(&e.searchSubs, 8) }
+func (e *Events) SubscribeSearch() <-chan searchEvent   { return e.subscribeSearch(8) }
 func (e *Events) SubscribePush() <-chan string          { return e.subscribe(&e.pushSubs, 8) }
 func (e *Events) SubscribeDanmaku() <-chan string       { return e.subscribe(&e.danmakuSubs, 32) }
 func (e *Events) SubscribeSetting() <-chan settingEvent { return e.subscribeSetting(4) }
 func (e *Events) SubscribeControl() <-chan controlEvent { return e.subscribeControl(16) }
 func (e *Events) SubscribeRefresh() <-chan refreshEvent { return e.subscribeRefresh(8) }
 func (e *Events) SubscribeCast() <-chan castEvent       { return e.subscribeCast(4) }
+
+func (e *Events) subscribeSearch(cap int) <-chan searchEvent {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	ch := make(chan searchEvent, cap)
+	e.searchSubs = append(e.searchSubs, ch)
+	return ch
+}
 
 func (e *Events) subscribeSetting(cap int) <-chan settingEvent {
 	e.mu.Lock()
@@ -100,14 +114,16 @@ func (e *Events) subscribe(subs *[]chan string, cap int) <-chan string {
 	return ch
 }
 
-func (e *Events) EmitSearch(word string)  { e.emit(&e.searchSubs, word) }
+func (e *Events) EmitSearch(word, clientID string) {
+	e.emitSearch(searchEvent{Word: word, ClientID: strings.TrimSpace(clientID)})
+}
 func (e *Events) EmitPush(url string)     { e.emit(&e.pushSubs, url) }
 func (e *Events) EmitDanmaku(text string) { e.emit(&e.danmakuSubs, text) }
 func (e *Events) EmitSetting(cfg, name string) {
 	e.emitSetting(settingEvent{Value: cfg, Name: name})
 }
-func (e *Events) EmitControl(typ string, seekMs int64) {
-	e.emitControl(controlEvent{Type: typ, SeekMs: seekMs})
+func (e *Events) EmitControl(typ string, seekMs int64, clientID string) {
+	e.emitControl(controlEvent{Type: typ, SeekMs: seekMs, ClientID: strings.TrimSpace(clientID)})
 }
 func (e *Events) EmitRefresh(typ, path string) {
 	e.emitRefresh(refreshEvent{Type: typ, Path: path})
@@ -185,6 +201,19 @@ func (e *Events) DrainPostMsg(clientID string) []string {
 		e.postMsgUntagged = nil
 	}
 	return out
+}
+
+func (e *Events) emitSearch(msg searchEvent) {
+	e.mu.RLock()
+	snapshot := append([]chan searchEvent(nil), e.searchSubs...)
+	e.mu.RUnlock()
+	for _, ch := range snapshot {
+		select {
+		case ch <- msg:
+		default:
+			go func(c chan searchEvent, m searchEvent) { c <- m }(ch, msg)
+		}
+	}
 }
 
 func (e *Events) emitSetting(msg settingEvent) {

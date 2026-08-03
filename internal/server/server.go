@@ -20,6 +20,7 @@ import (
 	m3u8cache "github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
+	remotectl "github.com/bobo/KOTV/internal/remote"
 	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
@@ -46,17 +47,18 @@ type Server struct {
 }
 
 type Action struct {
-	Do      string
-	Keyword string
-	URL     string
-	Text    string
-	Config  string
-	Name    string
-	Type    string
-	Path    string
-	SeekMs  int64
-	Device  string // do=cast：对端设备 JSON
-	History string // do=cast：历史 JSON
+	Do       string
+	Keyword  string
+	URL      string
+	Text     string
+	Config   string
+	Name     string
+	Type     string
+	Path     string
+	SeekMs   int64
+	Device   string // do=cast：对端设备 JSON
+	History  string // do=cast：历史 JSON
+	ClientID string // 目标 Flutter clientId（空=广播）
 }
 
 var defaultServer *Server
@@ -122,14 +124,29 @@ func (s *Server) Start() error {
 	s.registerAPIv1(mux)
 	mux.HandleFunc("/media", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		s.mu.RLock()
-		fn := s.mediaProvider
-		s.mu.RUnlock()
-		data := map[string]string{"state": "idle", "title": "未播放", "position": "0", "duration": "0", "playing": "false"}
-		if fn != nil {
-			if m := fn(); m != nil {
-				data = m
+		clientID := strings.TrimSpace(r.URL.Query().Get("clientId"))
+		if clientID == "" {
+			clientID = strings.TrimSpace(r.Header.Get("X-Kotv-Client-Id"))
+		}
+		data := remotectl.SnapshotMediaFor(clientID)
+		if data == nil {
+			data = map[string]string{"state": "idle", "title": "未播放", "position": "0", "duration": "0", "playing": "false"}
+		}
+		if _, ok := data["playing"]; !ok {
+			playing := strings.EqualFold(data["state"], "playing")
+			if playing {
+				data["playing"] = "true"
+			} else {
+				data["playing"] = "false"
 			}
+		}
+		if r.URL.Query().Get("list") == "1" || r.URL.Query().Get("clients") == "1" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":      true,
+				"media":   data,
+				"clients": remotectl.ListMediaClients(),
+			})
+			return
 		}
 		_ = json.NewEncoder(w).Encode(data)
 	})
@@ -229,16 +246,17 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	action := Action{
-		Do:      q.Get("do"),
-		Keyword: first(q.Get("keyword"), q.Get("word")),
-		URL:     first(q.Get("url"), q.Get("push")),
-		Text:    q.Get("text"),
-		Config:  first(q.Get("config"), q.Get("text")),
-		Name:    q.Get("name"),
-		Type:    q.Get("type"),
-		Path:    q.Get("path"),
-		Device:  q.Get("device"),
-		History: q.Get("history"),
+		Do:       q.Get("do"),
+		Keyword:  first(q.Get("keyword"), q.Get("word")),
+		URL:      first(q.Get("url"), q.Get("push")),
+		Text:     q.Get("text"),
+		Config:   first(q.Get("config"), q.Get("text")),
+		Name:     q.Get("name"),
+		Type:     q.Get("type"),
+		Path:     q.Get("path"),
+		Device:   q.Get("device"),
+		History:  q.Get("history"),
+		ClientID: first(q.Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
 	}
 	if v := q.Get("seek"); v != "" {
 		if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
@@ -247,7 +265,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	switch action.Do {
 	case "search":
-		s.events.EmitSearch(action.Keyword)
+		s.events.EmitSearch(action.Keyword, action.ClientID)
 	case "push":
 		s.events.EmitPush(action.URL)
 	case "danmaku":
@@ -255,7 +273,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	case "setting":
 		s.events.EmitSetting(action.Config, action.Name)
 	case "control":
-		s.events.EmitControl(action.Type, action.SeekMs)
+		s.events.EmitControl(action.Type, action.SeekMs, action.ClientID)
 	case "file":
 		s.dispatchFileAction(action.Path)
 	case "cast":

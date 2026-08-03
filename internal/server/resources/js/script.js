@@ -5,6 +5,7 @@
   let danmakuSize = 25;
   let mediaTimer = null;
   let toastTimer = null;
+  let targetClientId = localStorage.getItem('kotv_remote_client') || '';
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
@@ -29,15 +30,43 @@
 
   async function postAction(params) {
     const body = new URLSearchParams(params);
+    if (targetClientId) body.set('clientId', targetClientId);
     const res = await fetch('/action', { method: 'POST', body });
     if (!res.ok) throw new Error('请求失败');
     return res.text();
   }
 
+  function renderClients(clients, selected) {
+    const sel = $('#target_client');
+    if (!sel) return;
+    const list = Array.isArray(clients) ? clients : [];
+    const prev = selected || targetClientId || '';
+    const opts = ['<option value="">全部 / 自动</option>'];
+    list.forEach((c) => {
+      const id = c.clientId || '';
+      const title = (c.title || '未播放').slice(0, 24);
+      const st = c.state || 'idle';
+      const label = id ? `${(c.label || id).slice(0, 8)} · ${title} (${st})` : `默认 · ${title} (${st})`;
+      opts.push(`<option value="${escHtml(id)}"${id === prev ? ' selected' : ''}>${escHtml(label)}</option>`);
+    });
+    sel.innerHTML = opts.join('');
+    if (prev && !list.some((c) => (c.clientId || '') === prev)) {
+      sel.value = '';
+    } else {
+      sel.value = prev;
+    }
+  }
+
   async function pollMedia() {
     try {
-      const res = await fetch('/media');
-      const info = await res.json();
+      const q = new URLSearchParams({ list: '1' });
+      if (targetClientId) q.set('clientId', targetClientId);
+      const res = await fetch('/media?' + q.toString());
+      const payload = await res.json();
+      const info = payload.media || payload;
+      if (Array.isArray(payload.clients)) {
+        renderClients(payload.clients, targetClientId || info.clientId || '');
+      }
       const playing = info.playing === true || info.playing === 'true' || info.state === 'playing';
       const pos = Number(info.position || 0);
       const dur = Number(info.duration || 0);
@@ -66,6 +95,7 @@
         $('#icon_play').classList.remove('hidden');
         $('#icon_pause').classList.add('hidden');
       }
+      $('#conn_state').textContent = '在线';
     } catch (_) {
       $('#conn_state').textContent = '离线';
     }
@@ -327,8 +357,21 @@
   });
 
   // Init
+  const targetSel = $('#target_client');
+  if (targetSel) {
+    targetSel.addEventListener('change', () => {
+      targetClientId = targetSel.value || '';
+      localStorage.setItem('kotv_remote_client', targetClientId);
+      pollMedia();
+    });
+  }
   loadDevice();
   startMediaPoll();
   const tab = new URLSearchParams(location.search).get('tab');
   if (tab && $(`#panel-${tab}`)) showTab(tab);
+  const cid = new URLSearchParams(location.search).get('clientId');
+  if (cid) {
+    targetClientId = cid;
+    localStorage.setItem('kotv_remote_client', targetClientId);
+  }
 })();

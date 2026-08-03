@@ -4,10 +4,10 @@ import "sync"
 
 // Handlers 由 UI 层注册，把 HTTP 遥控指令桥接到当前前端。
 type Handlers struct {
-	OnSearch    func(keyword string)
-	OnPush      func()
-	OnControl   func(typ string, seekMs int64)
-	MediaState  func() map[string]string
+	OnSearch   func(keyword, clientID string)
+	OnPush     func()
+	OnControl  func(typ string, seekMs int64, clientID string)
+	MediaState func() map[string]string
 }
 
 var (
@@ -27,9 +27,9 @@ func get() Handlers {
 	return handlers
 }
 
-func NotifySearch(keyword string) {
+func NotifySearch(keyword, clientID string) {
 	if fn := get().OnSearch; fn != nil {
-		fn(keyword)
+		fn(keyword, clientID)
 	}
 }
 
@@ -39,9 +39,9 @@ func NotifyPush() {
 	}
 }
 
-func NotifyControl(typ string, seekMs int64) {
+func NotifyControl(typ string, seekMs int64, clientID string) {
 	if fn := get().OnControl; fn != nil {
-		fn(typ, seekMs)
+		fn(typ, seekMs, clientID)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/parse"
@@ -612,7 +613,7 @@ func mergeStringMaps(a, b map[string]string) map[string]string {
 }
 
 func (a *App) APIRemotePoll() map[string]any {
-	ctrls, searches := remote.DefaultQueue.Drain()
+	ctrls, searches := remote.DefaultQueue.Drain(hostclient.Current())
 	outCtrl := make([]map[string]any, 0, len(ctrls))
 	for _, c := range ctrls {
 		outCtrl = append(outCtrl, map[string]any{"type": c.Type, "seekMs": c.SeekMs})

@@ -183,11 +183,11 @@ func (a *App) scopeLive() *live.Service {
 
 func (a *App) listenEvents() {
 	go func() {
-		for word := range a.Server.Events().SubscribeSearch() {
-			a.PendingSearch = word
+		for ev := range a.Server.Events().SubscribeSearch() {
+			a.PendingSearch = ev.Word
 			a.CurrentScreen = "search"
 			a.RemoteSearchAuto = true
-			remote.NotifySearch(word)
+			remote.NotifySearch(ev.Word, ev.ClientID)
 		}
 	}()
 	go func() {
@@ -203,7 +203,7 @@ func (a *App) listenEvents() {
 	}()
 	go func() {
 		for ev := range a.Server.Events().SubscribeControl() {
-			remote.NotifyControl(ev.Type, ev.SeekMs)
+			remote.NotifyControl(ev.Type, ev.SeekMs, ev.ClientID)
 		}
 	}()
 	go func() {
@@ -358,20 +358,20 @@ func (a *App) startDLNARenderer() {
 			remote.NotifyPush()
 		},
 		OnStop: func() {
-			remote.NotifyControl("stop", 0)
+			remote.NotifyControl("stop", 0, "")
 		},
 		OnPause: func(pause bool) {
 			if pause {
-				remote.NotifyControl("pause", 0)
+				remote.NotifyControl("pause", 0, "")
 			} else {
-				remote.NotifyControl("play", 0)
+				remote.NotifyControl("play", 0, "")
 			}
 		},
 		OnSeek: func(ms int64) {
-			remote.NotifyControl("seek", ms)
+			remote.NotifyControl("seek", ms, "")
 		},
 		OnNext: func() {
-			remote.NotifyControl("next", 0)
+			remote.NotifyControl("next", 0, "")
 		},
 		State: func() dlna.MediaState {
 			st := dlna.MediaState{URI: a.MediaURL(), State: "NO_MEDIA_PRESENT"}
