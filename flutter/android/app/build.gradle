@@ -6,6 +6,14 @@ plugins {
     id "com.chaquo.python"
 }
 
+// Chaquopy 不能与 --split-per-abi 同用；分 ABI 由 package-flutter-android.sh 设 KOTV_ABI_FILTERS 各打一次。
+// Flutter 3.35+ 默认 abiFilters=armv7+arm64+x86_64，会盖住「单 ABI」意图 → APK lib/ 仍三套都在。
+def kotvAbiFilters = (System.getenv("KOTV_ABI_FILTERS") ?: "arm64-v8a,armeabi-v7a")
+        .split(",")
+        .collect { it.trim() }
+        .findAll { !it.isEmpty() }
+def kotvAllAbis = ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
+
 android {
     namespace = "com.bobo.kotv"
     compileSdk = flutter.compileSdkVersion
@@ -28,14 +36,10 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // Chaquopy 需要 abiFilters；勿与 --split-per-abi 同用。
-        // 分 ABI 打包由 package-flutter-android.sh 设 KOTV_ABI_FILTERS 后各打一次。
         ndk {
-            def abis = (System.getenv("KOTV_ABI_FILTERS") ?: "arm64-v8a,armeabi-v7a")
-                .split(",")
-                .collect { it.trim() }
-                .findAll { !it.isEmpty() }
-            abiFilters(*abis)
+            // 清掉 Flutter Gradle Plugin 预置的三 ABI，再写入本包目标
+            abiFilters.clear()
+            abiFilters.addAll(kotvAbiFilters)
         }
     }
 
@@ -51,6 +55,10 @@ android {
             signingConfig = signingConfigs.debug
             // Flutter release 常开 R8；必须带 keep，否则 JarDexer → u1.a 反射失败
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            ndk {
+                abiFilters.clear()
+                abiFilters.addAll(kotvAbiFilters)
+            }
         }
         debug {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -61,6 +69,28 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            for (abi in kotvAllAbis) {
+                if (!kotvAbiFilters.contains(abi)) {
+                    excludes += "**/lib/${abi}/**"
+                    excludes += "lib/${abi}/**"
+                }
+            }
+        }
+        // Chaquopy 的 ABI 原生件大量在 assets/chaquopy（stdlib-<abi>.zip、bootstrap_native/<abi>/…）
+        // AGP abiFilters / AAB split 管不到 assets，必须显式排除。
+        resources {
+            for (abi in kotvAllAbis) {
+                if (!kotvAbiFilters.contains(abi)) {
+                    excludes += "lib/${abi}/**"
+                    excludes += "**/lib/${abi}/**"
+                    excludes += "chaquopy/**/${abi}/**"
+                    excludes += "chaquopy/**/*-${abi}*"
+                    excludes += "chaquopy/**/*_${abi}*"
+                    excludes += "**/chaquopy/**/${abi}/**"
+                    excludes += "**/chaquopy/**/*-${abi}*"
+                    excludes += "**/chaquopy/**/*_${abi}*"
+                }
+            }
         }
     }
 }

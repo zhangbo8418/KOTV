@@ -46,7 +46,7 @@ if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ ! -s "$ROOT/bridge/spider-b
   "$ROOT/bridge/build.sh"
 fi
 
-echo "==> flutter build apk --release (per-ABI, no --split-per-abi)"
+echo "==> flutter build apk --release (per-ABI; Chaquopy 禁用 --split-per-abi)"
 cd "$ROOT/flutter"
 flutter pub get
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
@@ -56,6 +56,7 @@ OUT_DIR="$ROOT/flutter/build/app/outputs/flutter-apk"
 mkdir -p "$ROOT/dist"
 
 # Chaquopy 强制要 ndk.abiFilters，不能与 --split-per-abi 并用；分两次单 ABI 构建。
+# Flutter 3.35+ 默认会塞 armv7+arm64+x86_64：须 -Pdisable-abi-filtering，再靠 KOTV_ABI_FILTERS。
 build_one_abi() {
   local abi_filter="$1"   # arm64-v8a | armeabi-v7a
   local flutter_plat="$2" # android-arm64 | android-arm
@@ -63,9 +64,52 @@ build_one_abi() {
   echo "==> ABI $abi_filter ($flutter_plat)"
   rm -f "$OUT_DIR/app-release.apk"
   KOTV_ABI_FILTERS="$abi_filter" \
-    flutter build apk --release --target-platform="$flutter_plat"
+    flutter build apk --release \
+      --target-platform="$flutter_plat" \
+      -Pdisable-abi-filtering=true
   local src="$OUT_DIR/app-release.apk"
   [[ -f "$src" ]] || { echo "missing $src" >&2; exit 1; }
+  # 校验：整包不得残留其它 ABI（lib/ + assets/chaquopy 等）
+  local listing libs
+  listing="$(unzip -l "$src" | awk 'NR>3 {print $4}')"
+  libs="$(printf '%s\n' "$listing" | awk -F/ '/^lib\//{print $2}' | sort -u | tr '\n' ' ')"
+  echo "  lib ABIs in apk: $libs"
+  case " $libs " in
+    *" ${abi_filter} "*) ;;
+    *) echo "ERROR: apk missing lib/$abi_filter" >&2; exit 1 ;;
+  esac
+  if ! printf '%s\n' "$listing" | python3 -c '
+import re, sys
+want = sys.argv[1]
+# x86_64 须排在 x86 前，避免误伤
+others = [a for a in ("x86_64", "armeabi-v7a", "arm64-v8a", "x86") if a != want]
+hits = []
+for line in sys.stdin:
+    p = line.strip()
+    if not p or p.endswith("/"):
+        continue
+    parts = p.split("/")
+    for a in others:
+        if a in parts:
+            hits.append(p)
+            break
+        # Chaquopy: stdlib-arm64-v8a.zip / xxx-arm64-v8a.yyy
+        if any(re.search(rf"(^|[-_.]){re.escape(a)}([.-_]|$)", seg) for seg in parts):
+            # 避免 x86 匹配到 x86_64
+            if a == "x86" and any("x86_64" in seg for seg in parts):
+                continue
+            hits.append(p)
+            break
+if hits:
+    print("\n".join(hits[:40]), file=sys.stderr)
+    if len(hits) > 40:
+        print(f"... and {len(hits) - 40} more", file=sys.stderr)
+    sys.exit(1)
+' "$abi_filter"
+  then
+    echo "ERROR: apk contains foreign ABI paths (want only $abi_filter)" >&2
+    exit 1
+  fi
   cp -f "$src" "$ROOT/dist/$out_name"
   ls -lh "$ROOT/dist/$out_name"
 }
