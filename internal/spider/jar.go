@@ -27,6 +27,9 @@ var (
 	jarSpiders = map[string]*jarSpider{}
 )
 
+// 多用户：按 clientId 隔离配置基址，避免 A 换源覆盖 B 的相对路径解析。
+var configBaseByClient sync.Map // clientId -> base URL
+
 type jarSpider struct {
 	key, api, ext, jar string
 }
@@ -56,15 +59,31 @@ func clearJar() {
 	}
 }
 
-// SetConfigBase 设置当前点播配置基址（配置基址）。
+// SetConfigBase 设置当前点播配置基址。有 clientId 时只写入该客户端，不覆盖全局。
 func SetConfigBase(base string) {
+	base = strings.TrimSpace(base)
+	if cid := hostclient.Current(); cid != "" {
+		if base == "" {
+			configBaseByClient.Delete(cid)
+		} else {
+			configBaseByClient.Store(cid, base)
+		}
+		return
+	}
 	jarMu.Lock()
-	configBase = strings.TrimSpace(base)
+	configBase = base
 	jarMu.Unlock()
 }
 
-// ConfigBase 返回当前配置基址。
+// ConfigBase 返回当前配置基址（优先当前 clientId）。
 func ConfigBase() string {
+	if cid := hostclient.Current(); cid != "" {
+		if v, ok := configBaseByClient.Load(cid); ok {
+			if s, _ := v.(string); s != "" {
+				return s
+			}
+		}
+	}
 	jarMu.Lock()
 	defer jarMu.Unlock()
 	return configBase

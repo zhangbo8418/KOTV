@@ -216,7 +216,7 @@ func (m *Manager) setAllSiteFlags(searchable bool, on bool) error {
 }
 
 func (m *Manager) persistSiteFlagsLocked(site model.Site) error {
-	if m.db == nil {
+	if m.ephemeral || m.db == nil {
 		return nil
 	}
 	if site.ID > 0 {
@@ -354,10 +354,11 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	// 后续相对 spider.jar / 站点 jar 都相对此基址解析。
 	spider.SetConfigBase(cfg.URL)
 
-	// 把配置里的 headers/proxy/hosts/doh 灌入 spider 侧 OkHttp。
-	spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, api.Doh)
-	// ads 黑名单用于网页嗅探拦广告域名（与 TV CustomWebView 一致）。
-	parse.SetAds(api.Ads)
+	// 共享引擎的 net/ads：仅非 ephemeral 写入全局，避免 A 换源覆盖 B。
+	if !m.ephemeral {
+		spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, api.Doh)
+		parse.SetAds(api.Ads)
+	}
 
 	if api.Spider != "" {
 		if err := spider.LoadJar(api.Spider, cfg.URL); err != nil {
@@ -380,11 +381,13 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 		cfg.Home = home.Key
 	}
 
-	cfgID, err := m.db.UpsertConfig(cfg)
-	if err != nil {
-		return err
+	if !m.ephemeral && m.db != nil {
+		cfgID, err := m.db.UpsertConfig(cfg)
+		if err != nil {
+			return err
+		}
+		_ = m.db.SyncSites(cfgID, api.Sites)
 	}
-	_ = m.db.SyncSites(cfgID, api.Sites)
 
 	m.mu.Lock()
 	m.api = api

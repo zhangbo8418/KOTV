@@ -46,7 +46,7 @@ Go Engine（可部署到服务器，多前端并发）
 | 取消 | `/api/v1/cancel` 只软取消**当前 client**；换源也不再硬 Kill JVM（只清缓存 + 软取消换源者） |
 | JS | `getClientId()` / `postMsg(msg)` 宿主 API，路由回正确前端 |
 
-仍共享：直播 `Live`、播放器、部分 spider 全局态（`SetConfigBase` / net / ads）。
+仍共享（后续可继续拆）：直播 `Live`、播放器/遥控媒体态、配置内全局 OkHttp headers/proxy（ephemeral 换源不覆盖他人已加载的全局 net）。
 
 ## 平台取舍
 
