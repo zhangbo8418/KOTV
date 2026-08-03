@@ -92,9 +92,31 @@ func clearJsPy() {
 	}
 }
 
-// jsPyKey 与 jar 一致：key+api+ext+jar，避免不同配置同站 key 撞缓存。
+// jsPyKey 与 jar 一致：含 userId，避免多用户同站 key 撞缓存。
 func jsPyKey(kind, key, api, ext, jar string) string {
-	return kind + ":" + key + "\x00" + api + "\x00" + ext + "\x00" + jar
+	uid := hostclient.CurrentUserID()
+	return uid + "\x01" + kind + ":" + key + "\x00" + api + "\x00" + ext + "\x00" + jar
+}
+
+// DestroyUserScripts 销毁指定用户的全部 Py/JS 池。
+func DestroyUserScripts(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	prefix := userID + "\x01"
+	jsPyMu.Lock()
+	var doomed []Spider
+	for k, s := range jsPy {
+		if strings.HasPrefix(k, prefix) {
+			doomed = append(doomed, s)
+			delete(jsPy, k)
+		}
+	}
+	jsPyMu.Unlock()
+	for _, s := range doomed {
+		s.Destroy()
+	}
 }
 
 func setRecentJs(key, api, ext, jar string) {

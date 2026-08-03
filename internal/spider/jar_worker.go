@@ -42,6 +42,57 @@ type javaBridgeClient struct {
 
 var javaBridge javaBridgeClient
 
+// 远端已登录用户：每人独立 JVM；空 userId 走共享 javaBridge（本机）。
+var (
+	userBridgesMu sync.Mutex
+	userBridges   = map[string]*javaBridgeClient{}
+)
+
+func bridgeForUser(userID string) *javaBridgeClient {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return &javaBridge
+	}
+	userBridgesMu.Lock()
+	defer userBridgesMu.Unlock()
+	if b, ok := userBridges[userID]; ok {
+		return b
+	}
+	b := &javaBridgeClient{}
+	userBridges[userID] = b
+	return b
+}
+
+func bridgeForCurrent() *javaBridgeClient {
+	return bridgeForUser(hostclient.CurrentUserID())
+}
+
+// KillUserRuntime 杀掉指定用户的 JAR-JVM，并销毁其 Py/JS 池。
+func KillUserRuntime(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	DestroyUserScripts(userID)
+	clearJarForUser(userID)
+	userBridgesMu.Lock()
+	b := userBridges[userID]
+	delete(userBridges, userID)
+	userBridgesMu.Unlock()
+	if b == nil {
+		return
+	}
+	b.epoch.Add(1)
+	b.mu.Lock()
+	b.stopLocked()
+	b.mu.Unlock()
+}
+
+// RestartUserRuntime 硬杀该用户运行时；下次调用会冷启动新 JVM。
+func RestartUserRuntime(userID string) {
+	KillUserRuntime(userID)
+}
+
 // 点播配置的网络参数（headers/proxy/hosts/doh），在每个新 worker 启动时重放。
 var (
 	netConfigMu       sync.Mutex
@@ -190,7 +241,7 @@ func callJavaBridge(payload []byte) (string, error) {
 		}
 		return androidPostJarCtx(ctx, payload)
 	}
-	return javaBridge.callCtx(ctx, payload)
+	return bridgeForCurrent().callCtx(ctx, payload)
 }
 
 // InterruptJavaBridgeForClient 按 clientId 软取消进行中的 JAR（OkHttp + HTTP 客户端），不杀 JVM。
@@ -232,25 +283,53 @@ func softCancelJavaBridge(clientID string) {
 		_, _ = androidPostJarShort(payload)
 		return
 	}
-	base := javaBridge.currentBaseURL()
-	if base == "" {
-		return
+	targets := []*javaBridgeClient{&javaBridge}
+	userBridgesMu.Lock()
+	uid := hostclient.CurrentUserID()
+	if uid != "" {
+		if b := userBridges[uid]; b != nil {
+			targets = []*javaBridgeClient{b}
+		}
+	} else if clientID == "" {
+		for _, b := range userBridges {
+			targets = append(targets, b)
+		}
 	}
-	_ = postJarPath(base, "/jar/cancel", body, 2*time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_, _ = javaBridge.httpPostCtx(ctx, payload)
+	userBridgesMu.Unlock()
+	for _, br := range targets {
+		base := br.currentBaseURL()
+		if base == "" {
+			continue
+		}
+		_ = postJarPath(base, "/jar/cancel", body, 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, _ = br.httpPostCtx(ctx, payload)
+		cancel()
+	}
 }
 
-// ShutdownJavaBridge 引擎退出时杀掉独立 JVM。
+// ShutdownJavaBridge 引擎退出时杀掉共享与所有用户 JVM。
 func ShutdownJavaBridge() {
 	if runtime.GOOS == "android" {
 		return
 	}
 	javaBridge.epoch.Add(1)
 	javaBridge.mu.Lock()
-	defer javaBridge.mu.Unlock()
 	javaBridge.stopLocked()
+	javaBridge.mu.Unlock()
+	userBridgesMu.Lock()
+	all := make([]*javaBridgeClient, 0, len(userBridges))
+	for id, b := range userBridges {
+		all = append(all, b)
+		delete(userBridges, id)
+	}
+	userBridgesMu.Unlock()
+	for _, b := range all {
+		b.epoch.Add(1)
+		b.mu.Lock()
+		b.stopLocked()
+		b.mu.Unlock()
+	}
 }
 
 // ClearJarBridgeOnSwitch 换站时清空 Go 侧 jar 缓存，并向 bridge 发 clear。
@@ -548,7 +627,7 @@ func pushBridgeIfAlive(payload []byte) {
 		netConfigMu.Unlock()
 		return
 	}
-	javaBridge.pushIfAlive(payload)
+	bridgeForCurrent().pushIfAlive(payload)
 }
 
 func primeAndroidNetConfigOnce() error {

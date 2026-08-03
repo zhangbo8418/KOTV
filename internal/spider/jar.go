@@ -37,13 +37,29 @@ type jarSpider struct {
 func newJarSpider(key, api, ext, jar string) Spider {
 	jarMu.Lock()
 	defer jarMu.Unlock()
-	cacheKey := strings.Join([]string{key, api, ext, jar}, "\x00")
+	uid := hostclient.CurrentUserID()
+	cacheKey := uid + "\x01" + strings.Join([]string{key, api, ext, jar}, "\x00")
 	if s, ok := jarSpiders[cacheKey]; ok {
 		return s
 	}
 	s := &jarSpider{key: key, api: api, ext: ext, jar: jar}
 	jarSpiders[cacheKey] = s
 	return s
+}
+
+func clearJarForUser(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	prefix := userID + "\x01"
+	jarMu.Lock()
+	for k := range jarSpiders {
+		if strings.HasPrefix(k, prefix) {
+			delete(jarSpiders, k)
+		}
+	}
+	jarMu.Unlock()
 }
 
 func clearJar() {
@@ -229,7 +245,7 @@ func localConfigDir(configBase string) string {
 			}
 			return filepath.Dir(p)
 		}
- // 配置文件可能尚未 Stat 成功时仍按路径推目录
+		// 配置文件可能尚未 Stat 成功时仍按路径推目录
 		if strings.HasSuffix(strings.ToLower(p), ".json") {
 			return filepath.Dir(p)
 		}
@@ -363,7 +379,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 		if expectMD5 == "" || fileMD5(dest) == expectMD5 {
 			return dest, nil
 		}
- // 有 md5 但缓存不一致 → 当作过期，重新下载
+		// 有 md5 但缓存不一致 → 当作过期，重新下载
 		_ = os.Remove(dest)
 	}
 	if err := downloadBinary(downloadURL, dest); err != nil {
@@ -371,7 +387,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	}
 	if expectMD5 != "" {
 		if actual := fileMD5(dest); actual != expectMD5 {
- log.Printf("spider.jar md5 未命中缓存校验 want=%s got=%s，已按新包加载（不强制失败）", expectMD5, actual)
+			log.Printf("spider.jar md5 未命中缓存校验 want=%s got=%s，已按新包加载（不强制失败）", expectMD5, actual)
 		}
 	}
 	return dest, nil

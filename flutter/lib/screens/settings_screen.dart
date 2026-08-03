@@ -353,6 +353,79 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showAppNews(context, msg);
   }
 
+  Future<void> _engineLogin() async {
+    final api = ref.read(apiProvider);
+    final userCtrl = TextEditingController();
+    final passCtrl = TextEditingController();
+    final p = KotvPalette.of(context);
+    var allowReg = false;
+    try {
+      final st = await api.authStatus();
+      allowReg = st['allowRegister'] == true;
+    } catch (_) {}
+    if (!mounted) return;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: p.dialogBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text('远端登录', style: TextStyle(color: p.fg)),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: userCtrl,
+                style: TextStyle(color: p.fg),
+                decoration: InputDecoration(hintText: '用户名', hintStyle: TextStyle(color: p.muted)),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: passCtrl,
+                obscureText: true,
+                style: TextStyle(color: p.fg),
+                decoration: InputDecoration(hintText: '密码', hintStyle: TextStyle(color: p.muted)),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, 'logout'), child: const Text('清除登录')),
+          if (allowReg) TextButton(onPressed: () => Navigator.pop(ctx, 'register'), child: const Text('注册')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'login'), child: const Text('登录')),
+        ],
+      ),
+    );
+    if (action == null || !mounted) return;
+    try {
+      if (action == 'logout') {
+        await api.logout();
+        setState(() => _status = '已清除远端登录');
+        return;
+      }
+      final u = userCtrl.text.trim();
+      final pw = passCtrl.text;
+      if (u.isEmpty || pw.isEmpty) {
+        setState(() => _status = '请输入用户名和密码');
+        return;
+      }
+      if (action == 'register') {
+        await api.register(u, pw);
+        await api.login(u, pw);
+        setState(() => _status = '注册并登录成功');
+      } else {
+        await api.login(u, pw);
+        setState(() => _status = '登录成功');
+      }
+      ref.invalidate(engineReadyProvider);
+      ref.invalidate(configProvider);
+    } catch (e) {
+      setState(() => _status = '登录失败: $e');
+    }
+  }
+
   Future<void> _showPair() async {
     final code = _pairCode.isNotEmpty ? _pairCode : g('syncPairCode');
     showAppNews(context, '本机配对码: $code\n\n局域网设备同步时需输入此码\n遥控端口: $_port');
@@ -825,6 +898,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ref.invalidate(engineReadyProvider);
                             setState(() => _status = '引擎地址已保存');
                           }),
+                        ),
+                        KotvSettingsCell(
+                          label: '远端登录',
+                          value: '账号',
+                          onTap: _engineLogin,
                         ),
                       ]),
                     ]),

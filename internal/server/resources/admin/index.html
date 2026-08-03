@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KO影视 · 用户管理</title>
+  <link rel="stylesheet" href="/css/ui.css">
+  <style>
+    .admin-wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; }
+    .admin-wrap h1 { font-size: 1.35rem; margin: 0 0 8px; }
+    .admin-wrap .sub { opacity: .7; margin-bottom: 20px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+    .row input, .row select { flex: 1; min-width: 120px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: .9rem; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .btn { cursor: pointer; border: 0; border-radius: 8px; padding: 8px 12px; background: #3b82f6; color: #fff; }
+    .btn.ghost { background: transparent; border: 1px solid rgba(255,255,255,.2); }
+    .btn.danger { background: #b91c1c; }
+    .hidden { display: none !important; }
+    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #111; color: #fff; padding: 10px 16px; border-radius: 8px; opacity: 0; transition: .2s; }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="admin-wrap">
+    <h1>用户管理</h1>
+    <p class="sub">管理员登录后可创建用户、开关注册与远端鉴权</p>
+
+    <section id="login_box" class="glass card">
+      <h2>管理员登录</h2>
+      <div class="row">
+        <input id="login_user" class="field" placeholder="用户名" value="admin">
+        <input id="login_pass" class="field" type="password" placeholder="密码">
+        <button class="btn" id="btn_login">登录</button>
+      </div>
+    </section>
+
+    <section id="panel" class="hidden">
+      <div class="glass card">
+        <div class="row">
+          <label><input type="checkbox" id="opt_remote"> 开启远端鉴权</label>
+          <label><input type="checkbox" id="opt_register"> 开放注册</label>
+          <button class="btn" id="btn_save_opts">保存开关</button>
+          <button class="btn ghost" id="btn_logout">退出</button>
+        </div>
+      </div>
+      <div class="glass card" style="margin-top:12px">
+        <h2>创建用户</h2>
+        <div class="row">
+          <input id="new_user" class="field" placeholder="用户名">
+          <input id="new_pass" class="field" type="password" placeholder="密码≥6位">
+          <select id="new_role" class="field"><option value="user">user</option><option value="admin">admin</option></select>
+          <button class="btn" id="btn_create">创建</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>用户</th><th>角色</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="user_rows"></tbody>
+      </table>
+    </section>
+  </div>
+  <div id="toast"></div>
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

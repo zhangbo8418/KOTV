@@ -44,6 +44,8 @@ type ContentAPI interface {
 	APIPlayerControl(cmd string, value float64, mode string) error
 	APITools(action string, params map[string]any) (map[string]any, error)
 	APICancelPending() map[string]any
+	APISessionPing() map[string]any
+	APISessionLeave() map[string]any
 }
 
 func (s *Server) SetContentAPI(api ContentAPI) {
@@ -77,8 +79,18 @@ func (s *Server) content() ContentAPI {
 }
 
 func (s *Server) registerAPIv1(mux *http.ServeMux) {
-	wrap := s.withHostClient
+	wrap := s.withAuth
 	mux.HandleFunc("/api/v1/health", wrap(s.handleAPIv1Health))
+	mux.HandleFunc("/api/v1/auth/status", wrap(s.handleAuthStatus))
+	mux.HandleFunc("/api/v1/auth/login", wrap(s.handleAuthLogin))
+	mux.HandleFunc("/api/v1/auth/register", wrap(s.handleAuthRegister))
+	mux.HandleFunc("/api/v1/auth/logout", wrap(s.handleAuthLogout))
+	mux.HandleFunc("/api/v1/auth/me", wrap(s.handleAuthMe))
+	mux.HandleFunc("/api/v1/admin/users", s.requireAdmin(s.handleAdminUsers))
+	mux.HandleFunc("/api/v1/admin/users/", s.requireAdmin(s.handleAdminUserAction))
+	mux.HandleFunc("/api/v1/admin/settings", s.requireAdmin(s.handleAdminSettings))
+	mux.HandleFunc("/api/v1/session/ping", wrap(s.handleSessionPing))
+	mux.HandleFunc("/api/v1/session/leave", wrap(s.handleSessionLeave))
 	mux.HandleFunc("/api/v1/config", wrap(s.handleAPIv1Config))
 	mux.HandleFunc("/api/v1/home", wrap(s.handleAPIv1Home))
 	mux.HandleFunc("/api/v1/category", wrap(s.handleAPIv1Category))
@@ -120,8 +132,8 @@ func clientIDFromRequest(r *http.Request) string {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Kotv-Client-Id")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Kotv-Client-Id, Authorization")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
@@ -836,6 +848,40 @@ func (s *Server) handleAPIv1Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.APICancelPending())
+}
+
+func (s *Server) handleSessionPing(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	api := s.content()
+	if api == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, api.APISessionPing())
+}
+
+func (s *Server) handleSessionLeave(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	api := s.content()
+	if api == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, api.APISessionLeave())
 }
 
 // handleAPIv1Shutdown 仅本机可调用：优雅停引擎（会顺带杀 Java/Python）。

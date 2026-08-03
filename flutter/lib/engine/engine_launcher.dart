@@ -591,6 +591,11 @@ class EngineLauncher {
       try {
         await KotvApi(baseUrl: baseUrl).requestShutdown();
       } catch (_) {}
+    } else {
+      // 远端：只离开会话，杀掉该用户 JVM/Py/JS，不关引擎。
+      try {
+        await KotvApi(baseUrl: baseUrl).sessionLeave();
+      } catch (_) {}
     }
 
     if (proc != null && owned) {

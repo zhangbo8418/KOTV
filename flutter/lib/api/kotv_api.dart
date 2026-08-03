@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'kotv_auth_token.dart';
 import 'kotv_client_id.dart';
 
 class KotvApi {
@@ -24,8 +25,10 @@ class KotvApi {
 
   Future<Map<String, String>> _headers([Map<String, String>? extra]) async {
     final id = await ensureClientId();
+    final token = await kotvAuthToken();
     return {
       if (id.isNotEmpty) 'X-Kotv-Client-Id': id,
+      if (token.isNotEmpty) 'Authorization': 'Bearer $token',
       ...?extra,
     };
   }
@@ -73,6 +76,42 @@ class KotvApi {
   }
 
   Future<Map<String, dynamic>> health() => _get('/api/v1/health');
+
+  Future<Map<String, dynamic>> authStatus() => _get('/api/v1/auth/status');
+
+  Future<Map<String, dynamic>> login(String username, String password) async {
+    final data = await _post('/api/v1/auth/login', {
+      'username': username,
+      'password': password,
+    });
+    final token = '${data['token'] ?? ''}';
+    if (token.isNotEmpty) await kotvSetAuthToken(token);
+    return data;
+  }
+
+  Future<Map<String, dynamic>> register(String username, String password) =>
+      _post('/api/v1/auth/register', {'username': username, 'password': password});
+
+  Future<Map<String, dynamic>> logout() async {
+    try {
+      final data = await _post('/api/v1/auth/logout', {});
+      await kotvClearAuthToken();
+      return data;
+    } catch (_) {
+      await kotvClearAuthToken();
+      return {'ok': true};
+    }
+  }
+
+  Future<Map<String, dynamic>> sessionPing() => _post('/api/v1/session/ping', {});
+
+  Future<Map<String, dynamic>> sessionLeave() async {
+    try {
+      return await _post('/api/v1/session/leave', {});
+    } catch (_) {
+      return {'ok': false};
+    }
+  }
 
   /// 本机优雅停引擎（会杀 Java/Python）；仅 loopback 可用。
   Future<Map<String, dynamic>> requestShutdown() async {

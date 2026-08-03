@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"path"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/bobo/KOTV/internal/clientsession"
+	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
@@ -35,12 +37,14 @@ func (a *App) APIHealth() map[string]any {
 		ready, errMsg = sess.Ready, sess.ErrMsg
 	}
 	return map[string]any{
-		"ok":      true,
-		"engine":  "kotv",
-		"ready":   ready,
-		"error":   errMsg,
-		"port":    a.Server.Port(),
-		"version": "0.1.0",
+		"ok":            true,
+		"engine":        "kotv",
+		"ready":         ready,
+		"error":         errMsg,
+		"port":          a.Server.Port(),
+		"version":       "0.1.0",
+		"remoteAuth":    strings.EqualFold(settings.Get(settings.RemoteAuth), "true"),
+		"allowRegister": strings.EqualFold(settings.Get(settings.AllowRegister), "true"),
 	}
 }
 
@@ -83,7 +87,14 @@ func (a *App) APILoadConfig(source string) error {
 	} else {
 		sites.InvalidateLoads()
 	}
-	if err := cfg.LoadFromSource(source); err != nil {
+	var err error
+	uid := hostclient.CurrentUserID()
+	if uid != "" {
+		err = a.loadConfigWithWatchdog(cfg, source, uid)
+	} else {
+		err = cfg.LoadFromSource(source)
+	}
+	if err != nil {
 		if sess != nil {
 			sess.Ready = false
 			sess.ErrMsg = err.Error()
@@ -111,6 +122,35 @@ func (a *App) APILoadConfig(source string) error {
 		a.Live.SyncFromConfig()
 	}
 	return nil
+}
+
+func (a *App) loadConfigWithWatchdog(cfg *config.Manager, source, userID string) error {
+	timeout := 45 * time.Second
+	if v := strings.TrimSpace(os.Getenv("KOTV_USER_CALL_TIMEOUT")); v != "" {
+		if d, e := time.ParseDuration(v); e == nil && d > 0 {
+			timeout = d
+		}
+	}
+	type res struct{ err error }
+	ch := make(chan res, 1)
+	go func() {
+		ch <- res{cfg.LoadFromSource(source)}
+	}()
+	select {
+	case r := <-ch:
+		return r.err
+	case <-time.After(timeout):
+		cid := hostclient.Current()
+		spider.InterruptJavaBridgeForClient(cid)
+		spider.InterruptScriptSpidersForClient(cid)
+		select {
+		case r := <-ch:
+			return r.err
+		case <-time.After(5 * time.Second):
+			spider.RestartUserRuntime(userID)
+			return fmt.Errorf("换源超时，已重启该用户运行时，请重试")
+		}
+	}
 }
 
 func (a *App) APISetHome(siteKey string) error {
@@ -280,6 +320,28 @@ func (a *App) APICancelPending() map[string]any {
 	_, sites, _ := a.scope()
 	sites.CancelPendingContent()
 	thunder.Stop()
+	return map[string]any{"ok": true}
+}
+
+func (a *App) APISessionPing() map[string]any {
+	uid := hostclient.CurrentUserID()
+	if a.presence != nil && uid != "" {
+		a.presence.Ping(uid)
+	}
+	return map[string]any{"ok": true, "userId": uid}
+}
+
+func (a *App) APISessionLeave() map[string]any {
+	cid := hostclient.Current()
+	uid := hostclient.CurrentUserID()
+	if cid != "" {
+		a.sessions.Remove(cid)
+	}
+	if a.presence != nil && uid != "" {
+		a.presence.Leave(uid) // 内部会 KillUserRuntime
+	} else if uid != "" {
+		spider.KillUserRuntime(uid)
+	}
 	return map[string]any{"ok": true}
 }
 
@@ -706,6 +768,8 @@ func (a *App) APIGetSettings() map[string]any {
 	out["searchHistory"] = settings.GetSearchHistory()
 	out["backdrop"] = a.APIBackdrop()
 	out["pairCode"] = settings.EnsureSyncPairCode()
+	out["remoteAuth"] = strings.EqualFold(settings.Get(settings.RemoteAuth), "true")
+	out["allowRegister"] = strings.EqualFold(settings.Get(settings.AllowRegister), "true")
 	return out
 }
 

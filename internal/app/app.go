@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/cast"
 	"github.com/bobo/KOTV/internal/clientsession"
 	"github.com/bobo/KOTV/internal/config"
@@ -42,6 +43,7 @@ type App struct {
 	ErrMsg string
 
 	sessions *clientsession.Hub
+	presence *clientsession.Presence
 
 	CurrentScreen    string
 	SelectedVod      *model.Vod
@@ -78,6 +80,9 @@ func New() (*App, error) {
 	}
 	settings.EnsureDeviceUUID()
 	settings.EnsureSyncPairCode()
+	if err := auth.Init(); err != nil {
+		log.Printf("auth init: %v", err)
+	}
 	util.SetProxy(settings.Get(settings.Proxy))
 	spider.SetUserProxy(settings.Get(settings.Proxy))
 
@@ -99,6 +104,9 @@ func New() (*App, error) {
 		CurrentScreen: "video",
 		mediaState:    "idle",
 	}
+	a.presence = clientsession.NewPresence(func(userID string) {
+		spider.KillUserRuntime(userID)
+	})
 	defaultApp = a
 
 	a.Server = server.New(func(action server.Action) {
@@ -364,6 +372,9 @@ func (a *App) openPushURL(url string) {
 }
 
 func (a *App) Shutdown() {
+	if a.presence != nil {
+		a.presence.Stop()
+	}
 	// 不要走 InvalidateLoads：其中 ClearJarBridgeOnSwitch 可能短暂把 JVM 再拉起来。
 	spider.InterruptScriptSpiders()
 	spider.InterruptJavaBridge()

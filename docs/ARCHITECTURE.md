@@ -44,13 +44,24 @@ Go Engine（可部署到服务器，多前端并发）
 | **遥控队列** | control / search 按 clientId 分桶；`/action` 可带 `clientId`；遥控页可选目标客户端（空=广播已知客户端） |
 | **OkHttp net** | 点播配置 headers/proxy/hosts/doh 按 clientId 写入 bridge `NetProfiles`；ephemeral 换源也会下发，互不覆盖 |
 | **会话恢复** | `clientId` 持久在 Flutter；上次点播源/首页写入引擎 `data/client_sessions.json`，进程重启后首次请求自动恢复 |
+| **远端鉴权** | `settings.remoteAuth` 开启后非本机请求需 `Authorization: Bearer`；`/admin` 管理用户；`allowRegister` 可开关注册 |
+| **每用户运行时** | 已登录远端用户各自独立 JAR-JVM + Py/JS 池；`session/leave` / 90s 无心跳 → 仅杀该用户进程；换源超时 → `RestartUserRuntime` |
 | 换源 | ephemeral 不写 `settings.VOD`、不持久化共享 DB home；不清全局脚本/JAR 池（软取消当前 client） |
 | JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`），去掉全局 stdin 串行锁 |
-| Py / JS | 同站 **worker 池**（默认 CPU 数，上限 8，可用 `KOTV_SCRIPT_POOL`）；缓存键含 api+ext+jar，不同配置同 key 不撞车 |
-| 取消 | `/api/v1/cancel` 只软取消**当前 client**；换源也不再硬 Kill JVM（只清缓存 + 软取消换源者） |
+| Py / JS | 同站 **worker 池**（默认 CPU 数，上限 8，可用 `KOTV_SCRIPT_POOL`）；缓存键含 userId+api+ext+jar |
+| 取消 | `/api/v1/cancel` 只软取消**当前 client**；换源也不再硬 Kill 共享 JVM（只清缓存 + 软取消换源者） |
 | JS | `getClientId()` / `postMsg(msg)` 宿主 API，路由回正确前端 |
 
-仍共享（后续可继续拆）：桌面 Go embed 播放器单例（物理单窗）、用户设置里的全局代理（`settings.Proxy`）、遥控 push/弹幕仍偏广播。直播树/媒体态仅进程内保留（重启不恢复）。
+### 本地 vs 远端
+
+| | 本地（loopback / 未开 remoteAuth） | 远端（remoteAuth + 非本机） |
+|--|--|--|
+| 登录 | 不需要 | 用户名密码 → token |
+| JAR/Py/JS | 共享单 JVM + 池 | 每用户独立进程 |
+| App 关闭 | `/api/v1/shutdown` 关整引擎 | `session/leave` 只杀该用户运行时 |
+| 管理 | — | `/admin` 用户 CRUD、注册/鉴权开关 |
+
+仍共享：桌面 Go embed 播放器单例、用户设置全局代理（`settings.Proxy`）、遥控 push/弹幕偏广播。直播树/媒体态仅进程内保留（重启不恢复）。
 
 ## 平台取舍
 

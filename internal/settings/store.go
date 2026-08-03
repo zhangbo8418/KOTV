@@ -17,45 +17,47 @@ import (
 type Type string
 
 const (
-	VOD          Type = "vod"
-	LIVE         Type = "live"
-	LOG          Type = "log"
-	Player       Type = "player"     // 点播播放器
-	PlayerLive   Type = "playerLive" // 直播播放器（与点播独立）
-	Proxy        Type = "proxy"
-	Theme        Type = "theme"
-	AdFilter     Type = "adFilter"
-	M3U8Cfg      Type = "m3u8FilterConfig"
-	DanmakuOn      Type = "danmaku"
-	DanmakuAPI     Type = "danmakuApi"
-	DanmakuSize    Type = "danmakuSize"
-	DanmakuOpacity Type = "danmakuOpacity"
-	DanmakuRows    Type = "danmakuRows"
-	AssrtToken     Type = "assrtToken"
-	PreferredParse Type = "preferredParse"
-	PlayerSpeed  Type = "playerSpeed"
-	PlayerScale  Type = "playerScale"
-	PlayerDecode Type = "playerDecode"
-	PlayerVolume Type = "playerVolume"
+	VOD                Type = "vod"
+	LIVE               Type = "live"
+	LOG                Type = "log"
+	Player             Type = "player"     // 点播播放器
+	PlayerLive         Type = "playerLive" // 直播播放器（与点播独立）
+	Proxy              Type = "proxy"
+	Theme              Type = "theme"
+	AdFilter           Type = "adFilter"
+	M3U8Cfg            Type = "m3u8FilterConfig"
+	DanmakuOn          Type = "danmaku"
+	DanmakuAPI         Type = "danmakuApi"
+	DanmakuSize        Type = "danmakuSize"
+	DanmakuOpacity     Type = "danmakuOpacity"
+	DanmakuRows        Type = "danmakuRows"
+	AssrtToken         Type = "assrtToken"
+	PreferredParse     Type = "preferredParse"
+	PlayerSpeed        Type = "playerSpeed"
+	PlayerScale        Type = "playerScale"
+	PlayerDecode       Type = "playerDecode"
+	PlayerVolume       Type = "playerVolume"
 	PlayerAmbient      Type = "playerAmbient"
 	PlayerStableVolume Type = "playerStableVolume"
 	// 对齐 TV PlayerSetting：mpv_vulkan / mpv_gpu_next + 自定义 mpv.conf
-	MpvVulkan  Type = "mpvVulkan"
-	MpvGpuNext Type = "mpvGpuNext"
-	MpvConf    Type = "mpvConf"
-	LiveKeep     Type = "liveKeep" // 上次直播：源$$$分组$$$频道$$$线路URL
-	LiveAcross   Type = "liveAcross" // 跨分组换台，默认 true
-	LiveChange   Type = "liveChange" // 播放失败自动换线，默认 true
-	LiveInvert   Type = "liveInvert" // 反转上下换台方向，默认 false
-	DLNARenderer Type = "dlnaRenderer" // 作为 DLNA 被投端，默认 false
-	UpdateURL    Type = "updateUrl"
-	AvatarPath   Type = "avatarPath"
-	WallMode     Type = "wallMode"
-	WallURL      Type = "wallURL"
-	WallFile     Type = "wallFile"
-	Incognito    Type = "incognito"
-	SyncPairCode Type = "syncPairCode"
-	DeviceUUID   Type = "deviceUUID"
+	MpvVulkan     Type = "mpvVulkan"
+	MpvGpuNext    Type = "mpvGpuNext"
+	MpvConf       Type = "mpvConf"
+	LiveKeep      Type = "liveKeep"     // 上次直播：源$$$分组$$$频道$$$线路URL
+	LiveAcross    Type = "liveAcross"   // 跨分组换台，默认 true
+	LiveChange    Type = "liveChange"   // 播放失败自动换线，默认 true
+	LiveInvert    Type = "liveInvert"   // 反转上下换台方向，默认 false
+	DLNARenderer  Type = "dlnaRenderer" // 作为 DLNA 被投端，默认 false
+	UpdateURL     Type = "updateUrl"
+	AvatarPath    Type = "avatarPath"
+	WallMode      Type = "wallMode"
+	WallURL       Type = "wallURL"
+	WallFile      Type = "wallFile"
+	Incognito     Type = "incognito"
+	SyncPairCode  Type = "syncPairCode"
+	DeviceUUID    Type = "deviceUUID"
+	RemoteAuth    Type = "remoteAuth"    // 远端强制登录，默认 false
+	AllowRegister Type = "allowRegister" // 开放注册，默认 false
 )
 
 type item struct {
@@ -114,6 +116,8 @@ func defaultFile() file {
 			{ID: "incognito", Label: "无痕模式", Value: "false"},
 			{ID: "syncPairCode", Label: "同步配对码", Value: ""},
 			{ID: "deviceUUID", Label: "设备标识", Value: ""},
+			{ID: "remoteAuth", Label: "远端鉴权", Value: "false"},
+			{ID: "allowRegister", Label: "开放注册", Value: "false"},
 		},
 		Cache: make(map[string]json.RawMessage),
 	}
@@ -169,6 +173,8 @@ func Load() error {
 		return err
 	}
 	ensureSettingLocked(PlayerLive, "直播播放器", defaultLivePlayerValue())
+	ensureSettingLocked(RemoteAuth, "远端鉴权", "false")
+	ensureSettingLocked(AllowRegister, "开放注册", "false")
 	return nil
 }
 
