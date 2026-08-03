@@ -118,13 +118,36 @@ func CurrentUserID() string {
 	return ""
 }
 
-// ScopeID 会话/队列/媒体隔离键：已登录只用 userId；未登录本机才回退 clientId。
+// ScopeID 会话/队列/媒体/遥控隔离键。
+// 已登录（含远端）：一律 u:<userId>；仅本机未登录才回退 c:<clientId>。
 func ScopeID() string {
 	if u := CurrentUserID(); u != "" {
 		return "u:" + u
 	}
 	if c := Current(); c != "" {
 		return "c:" + c
+	}
+	return ""
+}
+
+// NormalizeScopeKey 把遥控/查询参数规范成 ScopeID。
+// 已带 u:/c: 前缀则原样；裸 id 按 userId（u:）处理（远端目标用户）。
+func NormalizeScopeKey(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "u:") || strings.HasPrefix(raw, "c:") {
+		return raw
+	}
+	return "u:" + raw
+}
+
+// UserIDFromScope 从 ScopeID 取出裸 userId；非 u: 前缀返回空。
+func UserIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if strings.HasPrefix(scope, "u:") {
+		return strings.TrimPrefix(scope, "u:")
 	}
 	return ""
 }

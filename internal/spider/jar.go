@@ -422,7 +422,7 @@ func (s *jarSpider) call(method string, args map[string]interface{}) (string, er
 		Ext:      s.ext,
 		Jar:      jp,
 		Args:     args,
-		ClientID: hostclient.Current(),
+		ClientID: hostclient.ScopeID(),
 	}
 	payload, _ := json.Marshal(req)
 

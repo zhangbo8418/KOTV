@@ -8,7 +8,7 @@ import (
 )
 
 // Flutter 上报的播放状态（供 /media 与遥控页展示）。
-// 按 clientId 分桶；空 clientId 走默认桶（桌面单用户兼容）。
+// 按 ScopeID 分桶：远端登录为 u:<userId>；本机未登录可为 c:<clientId> 或空桶。
 var (
 	mediaMu       sync.RWMutex
 	mediaByClient = map[string]map[string]string{}
@@ -39,15 +39,16 @@ func SnapshotMediaFromStore() map[string]string {
 	return SnapshotMediaFor(mediaKey())
 }
 
-// SnapshotMediaFor 返回指定客户端的媒体快照；clientID 为空时优先选正在播放的桶。
-func SnapshotMediaFor(clientID string) map[string]string {
-	clientID = strings.TrimSpace(clientID)
+// SnapshotMediaFor 返回指定 ScopeID/userId 的媒体快照；空则优先选正在播放的桶。
+func SnapshotMediaFor(raw string) map[string]string {
+	key := hostclient.NormalizeScopeKey(raw)
 	mediaMu.RLock()
 	defer mediaMu.RUnlock()
-	if clientID != "" {
-		return copyMedia(mediaByClient[clientID])
+	if key != "" {
+		out := copyMedia(mediaByClient[key])
+		annotateScope(out, key)
+		return out
 	}
-	// 无指定：优先 playing，其次非 idle，最后空桶
 	bestID := ""
 	bestScore := -1
 	for id, src := range mediaByClient {
@@ -69,40 +70,53 @@ func SnapshotMediaFor(clientID string) map[string]string {
 		}
 	}
 	if bestScore <= 0 {
-		return copyMedia(mediaByClient[""])
+		out := copyMedia(mediaByClient[""])
+		annotateScope(out, "")
+		return out
 	}
 	out := copyMedia(mediaByClient[bestID])
-	if bestID != "" {
-		out["clientId"] = bestID
-	}
+	annotateScope(out, bestID)
 	return out
 }
 
-// ListMediaClients 供遥控页选择目标客户端。
+// ListMediaClients 供遥控页选择目标用户（远端按 userId）。
 func ListMediaClients() []map[string]string {
 	mediaMu.RLock()
 	defer mediaMu.RUnlock()
 	out := make([]map[string]string, 0, len(mediaByClient))
 	for id, src := range mediaByClient {
 		item := copyMedia(src)
-		item["clientId"] = id
-		if id == "" {
-			item["label"] = "默认"
-		} else if len(id) > 8 {
-			item["label"] = id[:8]
-		} else {
-			item["label"] = id
-		}
+		annotateScope(item, id)
 		out = append(out, item)
 	}
 	return out
+}
+
+func annotateScope(m map[string]string, scope string) {
+	m["scopeId"] = scope
+	// 兼容旧遥控页字段名
+	m["clientId"] = scope
+	if uid := hostclient.UserIDFromScope(scope); uid != "" {
+		m["userId"] = uid
+		if len(uid) > 8 {
+			m["label"] = uid[:8]
+		} else {
+			m["label"] = uid
+		}
+	} else if scope == "" {
+		m["label"] = "默认"
+	} else if len(scope) > 10 {
+		m["label"] = scope[:10]
+	} else {
+		m["label"] = scope
+	}
 }
 
 func copyMedia(src map[string]string) map[string]string {
 	if src == nil {
 		return map[string]string{"state": "idle", "title": "未播放"}
 	}
-	out := make(map[string]string, len(src)+2)
+	out := make(map[string]string, len(src)+4)
 	for k, v := range src {
 		out[k] = v
 	}

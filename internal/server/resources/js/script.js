@@ -5,7 +5,7 @@
   let danmakuSize = 25;
   let mediaTimer = null;
   let toastTimer = null;
-  let targetClientId = localStorage.getItem('kotv_remote_client') || '';
+  let targetScopeId = localStorage.getItem('kotv_remote_user') || localStorage.getItem('kotv_remote_client') || '';
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
@@ -30,7 +30,10 @@
 
   async function postAction(params) {
     const body = new URLSearchParams(params);
-    if (targetClientId) body.set('clientId', targetClientId);
+    if (targetScopeId) {
+      body.set('userId', targetScopeId.replace(/^u:/, ''));
+      body.set('scopeId', targetScopeId);
+    }
     const res = await fetch('/action', { method: 'POST', body });
     if (!res.ok) throw new Error('请求失败');
     return res.text();
@@ -40,17 +43,19 @@
     const sel = $('#target_client');
     if (!sel) return;
     const list = Array.isArray(clients) ? clients : [];
-    const prev = selected || targetClientId || '';
+    const prev = selected || targetScopeId || '';
     const opts = ['<option value="">全部 / 自动</option>'];
     list.forEach((c) => {
-      const id = c.clientId || '';
+      const id = c.scopeId || c.clientId || '';
+      const uid = c.userId || '';
       const title = (c.title || '未播放').slice(0, 24);
       const st = c.state || 'idle';
-      const label = id ? `${(c.label || id).slice(0, 8)} · ${title} (${st})` : `默认 · ${title} (${st})`;
+      const who = uid || c.label || id || '默认';
+      const label = `${String(who).slice(0, 10)} · ${title} (${st})`;
       opts.push(`<option value="${escHtml(id)}"${id === prev ? ' selected' : ''}>${escHtml(label)}</option>`);
     });
     sel.innerHTML = opts.join('');
-    if (prev && !list.some((c) => (c.clientId || '') === prev)) {
+    if (prev && !list.some((c) => (c.scopeId || c.clientId || '') === prev)) {
       sel.value = '';
     } else {
       sel.value = prev;
@@ -59,13 +64,17 @@
 
   async function pollMedia() {
     try {
-      const q = new URLSearchParams({ list: '1' });
-      if (targetClientId) q.set('clientId', targetClientId);
+      const q = new URLSearchParams({ list: '1', users: '1' });
+      if (targetScopeId) {
+        q.set('scopeId', targetScopeId);
+        q.set('userId', targetScopeId.replace(/^u:/, ''));
+      }
       const res = await fetch('/media?' + q.toString());
       const payload = await res.json();
       const info = payload.media || payload;
-      if (Array.isArray(payload.clients)) {
-        renderClients(payload.clients, targetClientId || info.clientId || '');
+      const users = payload.users || payload.clients;
+      if (Array.isArray(users)) {
+        renderClients(users, targetScopeId || info.scopeId || info.clientId || '');
       }
       const playing = info.playing === true || info.playing === 'true' || info.state === 'playing';
       const pos = Number(info.position || 0);
@@ -360,8 +369,8 @@
   const targetSel = $('#target_client');
   if (targetSel) {
     targetSel.addEventListener('change', () => {
-      targetClientId = targetSel.value || '';
-      localStorage.setItem('kotv_remote_client', targetClientId);
+      targetScopeId = targetSel.value || '';
+      localStorage.setItem('kotv_remote_user', targetScopeId);
       pollMedia();
     });
   }
@@ -369,9 +378,9 @@
   startMediaPoll();
   const tab = new URLSearchParams(location.search).get('tab');
   if (tab && $(`#panel-${tab}`)) showTab(tab);
-  const cid = new URLSearchParams(location.search).get('clientId');
-  if (cid) {
-    targetClientId = cid;
-    localStorage.setItem('kotv_remote_client', targetClientId);
+  const uid = new URLSearchParams(location.search).get('userId') || new URLSearchParams(location.search).get('clientId');
+  if (uid) {
+    targetScopeId = uid.startsWith('u:') || uid.startsWith('c:') ? uid : ('u:' + uid);
+    localStorage.setItem('kotv_remote_user', targetScopeId);
   }
 })();

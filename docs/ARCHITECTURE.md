@@ -38,19 +38,19 @@ Go Engine（可部署到服务器，多前端并发）
 
 | 能力 | 说明 |
 |------|------|
-| `X-Kotv-Client-Id` | **仅本机未登录**时用于多窗口隔离；已登录远端只用 userId（Bearer） |
-| **点播会话** | 按 `ScopeID`（`u:<userId>` 或本机 `c:<clientId>`）隔离 ephemeral 配置 |
-| **直播 / 媒体态** | 有 clientId 时各自持有 `live.Service` 与媒体元数据；`/media` 与 `remote.SetMediaStore` 按 clientId 分桶 |
-| **遥控队列** | control / search 按 clientId 分桶；`/action` 可带 `clientId`；遥控页可选目标客户端（空=广播已知客户端） |
-| **OkHttp net** | 点播配置 headers/proxy/hosts/doh 按 clientId 写入 bridge `NetProfiles`；ephemeral 换源也会下发，互不覆盖 |
-| **会话恢复** | `clientId` 持久在 Flutter；上次点播源/首页写入引擎 `data/client_sessions.json`，进程重启后首次请求自动恢复 |
+| `ScopeID` | **远端已登录一律 `u:<userId>`**（点播/直播/媒体/遥控/postMsg）；本机未登录才用 `c:<clientId>` |
+| **点播 / 直播 / 媒体** | 均按 ScopeID 隔离 ephemeral 配置与 live/media 桶 |
+| **直播 / 媒体态** | 按 ScopeID 各自持有 `live.Service` 与媒体元数据；`/media` 与 `remote.SetMediaStore` 按 ScopeID 分桶 |
+| **遥控队列** | control / search 按 ScopeID 分桶；`/action` 优先 `userId`/`scopeId`（兼容 `clientId`）；遥控页选「目标用户」（空=广播） |
+| **OkHttp net** | 点播配置 headers/proxy/hosts/doh 按 ScopeID 写入 bridge `NetProfiles`；ephemeral 换源也会下发，互不覆盖 |
+| **会话恢复** | 远端靠 userId；本机未登录才持久 Flutter `clientId`。上次点播源/首页写入 `data/client_sessions.json`，重启后按 ScopeID 恢复 |
 | **远端鉴权** | `settings.remoteAuth` 开启后非本机请求需 `Authorization: Bearer`；`/admin` 管理用户；`allowRegister` 可开关注册 |
 | **每用户运行时** | **脚本文件**（JAR/Py/JS 下载缓存）全局共享；**引擎进程**仅远端租户独立（本机永远共享一套 JVM/Py/JS）。`session/leave` / 90s 无心跳 → 只杀该用户引擎；换源超时 → `RestartUserRuntime` |
-| 换源 | ephemeral 不写 `settings.VOD`、不持久化共享 DB home；不清全局脚本缓存（软取消当前 client） |
+| 换源 | ephemeral 不写 `settings.VOD`、不持久化共享 DB home；不清全局脚本缓存（软取消当前 ScopeID） |
 | JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`）；jar 文件按 URL MD5 全局缓存，各用户 JVM 各自加载 |
 | Py / JS | 脚本按 api 哈希全局缓存；远端每用户独立进程池，本机共享池 |
-| 取消 | `/api/v1/cancel` 只软取消**当前 client**；远端卡死才 Kill 该用户引擎 |
-| JS | `getClientId()` / `postMsg(msg)` 宿主 API，路由回正确前端 |
+| 取消 | `/api/v1/cancel` 只软取消**当前 ScopeID**；远端卡死才 Kill 该用户引擎 |
+| JS | `getClientId()` 返回当前 ScopeID；`postMsg` 路由回正确前端 |
 
 ### 本地 vs 远端
 

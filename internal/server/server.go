@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/bobo/KOTV/internal/config"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	m3u8cache "github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/paths"
@@ -124,11 +125,13 @@ func (s *Server) Start() error {
 	s.registerAPIv1(mux)
 	mux.HandleFunc("/media", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		clientID := strings.TrimSpace(r.URL.Query().Get("clientId"))
-		if clientID == "" {
-			clientID = strings.TrimSpace(r.Header.Get("X-Kotv-Client-Id"))
-		}
-		data := remotectl.SnapshotMediaFor(clientID)
+		target := first(
+			r.URL.Query().Get("userId"),
+			r.URL.Query().Get("scopeId"),
+			r.URL.Query().Get("clientId"),
+			r.Header.Get("X-Kotv-Client-Id"),
+		)
+		data := remotectl.SnapshotMediaFor(target)
 		if data == nil {
 			data = map[string]string{"state": "idle", "title": "未播放", "position": "0", "duration": "0", "playing": "false"}
 		}
@@ -140,11 +143,12 @@ func (s *Server) Start() error {
 				data["playing"] = "false"
 			}
 		}
-		if r.URL.Query().Get("list") == "1" || r.URL.Query().Get("clients") == "1" {
+		if r.URL.Query().Get("list") == "1" || r.URL.Query().Get("clients") == "1" || r.URL.Query().Get("users") == "1" {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ok":      true,
 				"media":   data,
-				"clients": remotectl.ListMediaClients(),
+				"clients": remotectl.ListMediaClients(), // 远端实为用户列表（含 userId/scopeId）
+				"users":   remotectl.ListMediaClients(),
 			})
 			return
 		}
@@ -205,20 +209,21 @@ func (s *Server) Stop() {
 }
 
 // handlePostMsg 承接爬虫 jar Util.notify / UiBridge（GET/POST ?msg=）。
-// 可选 clientId（query / header）把消息投递到对应 Flutter 客户端队列。
+// 目标为 ScopeID：远端 JAR 传入的 clientId 实为 u:<userId>。
 func (s *Server) handlePostMsg(w http.ResponseWriter, r *http.Request) {
 	msg := strings.TrimSpace(r.URL.Query().Get("msg"))
-	clientID := strings.TrimSpace(r.URL.Query().Get("clientId"))
-	if clientID == "" {
-		clientID = strings.TrimSpace(r.Header.Get("X-Kotv-Client-Id"))
-	}
+	clientID := hostclient.NormalizeScopeKey(first(
+		r.URL.Query().Get("userId"),
+		r.URL.Query().Get("clientId"),
+		r.Header.Get("X-Kotv-Client-Id"),
+	))
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		if v := strings.TrimSpace(r.Form.Get("msg")); v != "" {
 			msg = v
 		}
-		if v := strings.TrimSpace(r.Form.Get("clientId")); v != "" {
-			clientID = v
+		if v := first(r.Form.Get("userId"), r.Form.Get("clientId")); v != "" {
+			clientID = hostclient.NormalizeScopeKey(v)
 		}
 		if msg == "" {
 			// Declarative UI documents may include compact images; keep a generous bound.
@@ -246,17 +251,22 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	action := Action{
-		Do:       q.Get("do"),
-		Keyword:  first(q.Get("keyword"), q.Get("word")),
-		URL:      first(q.Get("url"), q.Get("push")),
-		Text:     q.Get("text"),
-		Config:   first(q.Get("config"), q.Get("text")),
-		Name:     q.Get("name"),
-		Type:     q.Get("type"),
-		Path:     q.Get("path"),
-		Device:   q.Get("device"),
-		History:  q.Get("history"),
-		ClientID: first(q.Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
+		Do:      q.Get("do"),
+		Keyword: first(q.Get("keyword"), q.Get("word")),
+		URL:     first(q.Get("url"), q.Get("push")),
+		Text:    q.Get("text"),
+		Config:  first(q.Get("config"), q.Get("text")),
+		Name:    q.Get("name"),
+		Type:    q.Get("type"),
+		Path:    q.Get("path"),
+		Device:  q.Get("device"),
+		History: q.Get("history"),
+		ClientID: hostclient.NormalizeScopeKey(first(
+			q.Get("userId"),
+			q.Get("scopeId"),
+			q.Get("clientId"),
+			r.Header.Get("X-Kotv-Client-Id"),
+		)),
 	}
 	if v := q.Get("seek"); v != "" {
 		if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
@@ -469,11 +479,13 @@ type writeOnly struct{ http.ResponseWriter }
 
 func (w writeOnly) Write(p []byte) (int, error) { return w.ResponseWriter.Write(p) }
 
-func first(a, b string) string {
-	if a != "" {
-		return a
+func first(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
 	}
-	return b
+	return ""
 }
 
 func localIP() string {
