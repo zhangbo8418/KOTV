@@ -18,6 +18,8 @@ type Session struct {
 	Source   string
 	Ready    bool
 	ErrMsg   string
+	// Bootstrapped 是否已尝试从磁盘恢复上次源（只做一次）。
+	Bootstrapped bool
 
 	mediaMu    sync.RWMutex
 	mediaState string

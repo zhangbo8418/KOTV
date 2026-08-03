@@ -169,7 +169,41 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 			ErrMsg:   a.ErrMsg,
 		}
 	})
+	a.bootstrapSession(sess)
 	return sess.Cfg, sess.Sites, sess
+}
+
+// bootstrapSession 首次进入时从磁盘恢复该 clientId 上次点播源。
+func (a *App) bootstrapSession(sess *clientsession.Session) {
+	if sess == nil || sess.Bootstrapped {
+		return
+	}
+	sess.Bootstrapped = true
+	src, homeKey := clientsession.LoadSource(sess.ClientID)
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return
+	}
+	cur := strings.TrimSpace(sess.Source)
+	if cur != "" && cur == src && sess.Ready {
+		return
+	}
+	if err := sess.Cfg.LoadFromSource(src); err != nil {
+		sess.Ready = false
+		sess.ErrMsg = err.Error()
+		return
+	}
+	sess.Source = src
+	sess.Ready = true
+	sess.ErrMsg = ""
+	if homeKey != "" {
+		if site := sess.Cfg.GetSite(homeKey); site != nil {
+			sess.Cfg.SetHome(*site)
+		}
+	}
+	if sess.Live != nil {
+		sess.Live.SyncFromConfig()
+	}
 }
 
 // scopeLive 当前客户端的直播服务（有 clientId 时隔离）。

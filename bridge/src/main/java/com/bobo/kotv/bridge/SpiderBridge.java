@@ -720,27 +720,46 @@ public class SpiderBridge {
         return null;
     }
 
- /** 将 KOTV 点播配置的 headers/proxy/hosts 灌入 bridge OkHttp，。 */
+ /** 将 KOTV 点播配置的 headers/proxy/hosts 灌入 bridge OkHttp（按 clientId 隔离）。 */
     private static void applyNetConfig(JsonObject args) {
         try {
- // 幂等：先清空再灌入，重启 worker 重放 configNet 不会重复叠加。
-            com.github.catvod.net.OkHttp.responseInterceptor().clear();
-            com.github.catvod.net.OkHttp.selector().clear();
-            com.github.catvod.net.OkHttp.dns().clear();
+            String cid = "";
+            if (args.has("clientId") && !args.get("clientId").isJsonNull()) {
+                cid = args.get("clientId").getAsString();
+                if (cid == null) cid = "";
+            }
+            if (cid.isEmpty()) {
+                cid = com.github.catvod.utils.Util.clientId();
+            }
+            List<com.github.catvod.bean.Header> headers = java.util.Collections.emptyList();
+            List<com.github.catvod.bean.Proxy> proxies = java.util.Collections.emptyList();
+            List<String> hosts = java.util.Collections.emptyList();
+            com.github.catvod.bean.Doh doh = null;
             if (args.has("headers") && !args.get("headers").isJsonNull()) {
-                com.github.catvod.net.OkHttp.responseInterceptor()
-                        .addAll(com.github.catvod.bean.Header.arrayFrom(args.get("headers")));
+                headers = com.github.catvod.bean.Header.arrayFrom(args.get("headers"));
             }
             if (args.has("proxy") && !args.get("proxy").isJsonNull()) {
-                com.github.catvod.net.OkHttp.selector()
-                        .addAll(com.github.catvod.bean.Proxy.arrayFrom(args.get("proxy")));
+                proxies = com.github.catvod.bean.Proxy.arrayFrom(args.get("proxy"));
             }
             if (args.has("hosts") && !args.get("hosts").isJsonNull()) {
-                com.github.catvod.net.OkHttp.dns().addAll(jsonToStringList(args.get("hosts")));
+                hosts = jsonToStringList(args.get("hosts"));
             }
             if (args.has("doh") && !args.get("doh").isJsonNull()) {
                 List<com.github.catvod.bean.Doh> list = com.github.catvod.bean.Doh.arrayFrom(args.get("doh"));
-                if (!list.isEmpty()) com.github.catvod.net.OkHttp.dns().setDoh(list.get(0));
+                if (!list.isEmpty()) doh = list.get(0);
+            }
+            java.util.Map<String, String> hostMap = new java.util.HashMap<>();
+            for (String host : hosts) {
+                if (host == null) continue;
+                String[] splits = host.split("=", 2);
+                if (splits.length == 2) hostMap.put(splits[0].trim(), splits[1].trim());
+            }
+            com.github.catvod.net.NetProfiles.replace(cid, headers, proxies, hostMap, doh);
+            // 同步刷新 OkDns DoH 缓存键（replace 已写入 Profile）。
+            if (doh != null) {
+                com.github.catvod.net.OkHttp.dns().putDoh(cid, doh);
+            } else {
+                com.github.catvod.net.OkHttp.dns().putDoh(cid, null);
             }
         } catch (Throwable e) {
             System.err.println("configNet failed: " + e);

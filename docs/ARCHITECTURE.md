@@ -42,13 +42,15 @@ Go Engine（可部署到服务器，多前端并发）
 | **点播会话** | 有 clientId 时各自持有 ephemeral `config.Manager` + `SiteService`（Ready/Source/home）；空 clientId 仍用共享 `App.Config` |
 | **直播 / 媒体态** | 有 clientId 时各自持有 `live.Service` 与媒体元数据；`/media` 与 `remote.SetMediaStore` 按 clientId 分桶 |
 | **遥控队列** | control / search 按 clientId 分桶；`/action` 可带 `clientId`；遥控页可选目标客户端（空=广播已知客户端） |
+| **OkHttp net** | 点播配置 headers/proxy/hosts/doh 按 clientId 写入 bridge `NetProfiles`；ephemeral 换源也会下发，互不覆盖 |
+| **会话恢复** | `clientId` 持久在 Flutter；上次点播源/首页写入引擎 `data/client_sessions.json`，进程重启后首次请求自动恢复 |
 | 换源 | ephemeral 不写 `settings.VOD`、不持久化共享 DB home；不清全局脚本/JAR 池（软取消当前 client） |
 | JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`），去掉全局 stdin 串行锁 |
 | Py / JS | 同站 **worker 池**（默认 CPU 数，上限 8，可用 `KOTV_SCRIPT_POOL`）；缓存键含 api+ext+jar，不同配置同 key 不撞车 |
 | 取消 | `/api/v1/cancel` 只软取消**当前 client**；换源也不再硬 Kill JVM（只清缓存 + 软取消换源者） |
 | JS | `getClientId()` / `postMsg(msg)` 宿主 API，路由回正确前端 |
 
-仍共享（后续可继续拆）：桌面 Go embed 播放器单例（物理单窗）、配置内全局 OkHttp headers/proxy（ephemeral 换源不覆盖他人已加载的全局 net）、遥控 push/弹幕仍偏广播。
+仍共享（后续可继续拆）：桌面 Go embed 播放器单例（物理单窗）、用户设置里的全局代理（`settings.Proxy`）、遥控 push/弹幕仍偏广播。直播树/媒体态仅进程内保留（重启不恢复）。
 
 ## 平台取舍
 

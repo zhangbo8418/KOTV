@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobo/KOTV/internal/clientsession"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
@@ -55,12 +56,12 @@ func (a *App) APIGetConfig() map[string]any {
 	sites := make([]map[string]any, 0)
 	for _, s := range cfg.Sites() {
 		sites = append(sites, map[string]any{
-			"key":         s.Key,
-			"name":        s.Name,
-			"type":        s.TypeID(),
-			"searchable":  s.IsSearchable(),
-			"changeable":  s.IsChangeable(),
-			"home":        s.Key == home.Key,
+			"key":        s.Key,
+			"name":       s.Name,
+			"type":       s.TypeID(),
+			"searchable": s.IsSearchable(),
+			"changeable": s.IsChangeable(),
+			"home":       s.Key == home.Key,
 		})
 	}
 	return map[string]any{
@@ -103,6 +104,7 @@ func (a *App) APILoadConfig(source string) error {
 		if sess.Live != nil {
 			sess.Live.SyncFromConfig()
 		}
+		clientsession.SaveSource(sess.ClientID, sess.Source, cfg.Home().Key)
 	} else {
 		a.Ready = true
 		a.ErrMsg = ""
@@ -112,13 +114,16 @@ func (a *App) APILoadConfig(source string) error {
 }
 
 func (a *App) APISetHome(siteKey string) error {
-	cfg, sites, _ := a.scope()
+	cfg, sites, sess := a.scope()
 	site := cfg.GetSite(siteKey)
 	if site == nil {
 		return fmt.Errorf("站点不存在: %s", siteKey)
 	}
 	sites.InvalidateHomeOnly()
 	cfg.SetHome(*site)
+	if sess != nil {
+		clientsession.SaveSource(sess.ClientID, sess.Source, site.Key)
+	}
 	return nil
 }
 
@@ -421,17 +426,17 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	a.SetMediaPlaying(title, playURL)
 
 	return map[string]any{
-		"ok":       true,
-		"url":      playURL,
-		"media":    mediaURL,
-		"magnet":   isMagnetPlay,
-		"headers":  headers,
-		"drm":      playDrm,
-		"danmaku":  danmakuURL,
+		"ok":        true,
+		"url":       playURL,
+		"media":     mediaURL,
+		"magnet":    isMagnetPlay,
+		"headers":   headers,
+		"drm":       playDrm,
+		"danmaku":   danmakuURL,
 		"qualities": map[string]any{"names": qualNames, "urls": qualURLs},
-		"site":     site.Key,
-		"flag":     flag,
-		"id":       vodID,
+		"site":      site.Key,
+		"flag":      flag,
+		"id":        vodID,
 	}, nil
 }
 

@@ -354,9 +354,9 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	// 后续相对 spider.jar / 站点 jar 都相对此基址解析。
 	spider.SetConfigBase(cfg.URL)
 
-	// 共享引擎的 net/ads：仅非 ephemeral 写入全局，避免 A 换源覆盖 B。
+	// headers/proxy/hosts/doh 按当前 hostclient 下发；ephemeral 也写（按 clientId 隔离，不覆盖他人）。
+	spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, api.Doh)
 	if !m.ephemeral {
-		spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, api.Doh)
 		parse.SetAds(api.Ads)
 	}
 

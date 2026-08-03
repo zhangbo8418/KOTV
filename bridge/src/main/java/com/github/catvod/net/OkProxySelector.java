@@ -9,34 +9,51 @@ import java.net.ProxySelector;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 public class OkProxySelector extends ProxySelector {
 
-    private final List<Proxy> proxy;
     private final ProxySelector system;
     private boolean authSet;
 
     public OkProxySelector() {
-        proxy = new CopyOnWriteArrayList<>();
         system = ProxySelector.getDefault();
         Authenticator.setDefault(new ProxyAuthenticator(this));
+        authSet = true;
     }
 
     public synchronized void addAll(List<Proxy> items) {
-        if (items.isEmpty()) return;
+        put("", items);
+    }
+
+    public synchronized void put(String clientId, List<Proxy> items) {
+        NetProfiles.Profile p = NetProfiles.put(clientId);
+        p.proxies.clear();
+        if (items == null || items.isEmpty()) return;
         items.forEach(Proxy::init);
-        proxy.addAll(items);
-        proxy.sort(null);
+        p.proxies.addAll(items);
+        p.proxies.sort(null);
+        if (!authSet) {
+            Authenticator.setDefault(new ProxyAuthenticator(this));
+            authSet = true;
+        }
     }
 
     public synchronized void clear() {
-        Authenticator.setDefault(null);
-        proxy.clear();
+        NetProfiles.Profile p = NetProfiles.put("");
+        p.proxies.clear();
     }
 
+    public synchronized void clearAll() {
+        Authenticator.setDefault(null);
+        authSet = false;
+        for (NetProfiles.Profile p : NetProfiles.snapshot().values()) {
+            p.proxies.clear();
+        }
+    }
+
+    /** ProxyAuthenticator 用：当前线程 clientId 对应的代理规则。 */
     public List<Proxy> getProxy() {
-        return proxy;
+        return NetProfiles.get(Util.clientId()).proxies;
     }
 
     private List<java.net.Proxy> fallback(URI uri) {
@@ -45,6 +62,7 @@ public class OkProxySelector extends ProxySelector {
 
     @Override
     public List<java.net.Proxy> select(URI uri) {
+        List<Proxy> proxy = getProxy();
         if (proxy.isEmpty() || uri.getHost() == null || "127.0.0.1".equals(uri.getHost())) return fallback(uri);
         for (Proxy item : proxy) for (String host : item.getHosts()) if (Util.containOrMatch(uri.getHost(), host)) return !item.getProxies().isEmpty() ? item.getProxies() : fallback(uri);
         return fallback(uri);

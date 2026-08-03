@@ -44,10 +44,11 @@ var javaBridge javaBridgeClient
 
 // 点播配置的网络参数（headers/proxy/hosts/doh），在每个新 worker 启动时重放。
 var (
-	netConfigMu   sync.Mutex
-	netConfigJSON []byte
-	userProxyJSON []byte
-	netPrimed     bool // Android HTTP 用
+	netConfigMu       sync.Mutex
+	netConfigJSON     []byte // 空 clientId 默认桶（兼容）
+	netConfigByClient map[string][]byte
+	userProxyJSON     []byte
+	netPrimed         bool // Android HTTP 用
 )
 
 // 进行中的 JAR HTTP 调用，按 clientId 软取消（不杀 JVM）。
@@ -87,8 +88,9 @@ func cancelJarCalls(clientID string) {
 	}
 }
 
-// SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp。
+// SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp（按当前 clientId）。
 func SetNetConfig(headers, proxy, hosts, doh []byte) {
+	cid := hostclient.Current()
 	args := map[string]json.RawMessage{}
 	add := func(name string, raw []byte) {
 		trimmed := strings.TrimSpace(string(raw))
@@ -101,14 +103,24 @@ func SetNetConfig(headers, proxy, hosts, doh []byte) {
 	add("proxy", proxy)
 	add("hosts", hosts)
 	add("doh", doh)
+	if cid != "" {
+		b, _ := json.Marshal(cid)
+		args["clientId"] = b
+	}
 
-	req := map[string]interface{}{"method": "configNet", "args": args}
+	req := map[string]interface{}{"method": "configNet", "args": args, "clientId": cid}
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return
 	}
 	netConfigMu.Lock()
-	netConfigJSON = payload
+	if netConfigByClient == nil {
+		netConfigByClient = map[string][]byte{}
+	}
+	netConfigByClient[cid] = payload
+	if cid == "" {
+		netConfigJSON = payload
+	}
 	netPrimed = false
 	netConfigMu.Unlock()
 	// 仅热更新已存活的 bridge；不在换源解析时冷启动 JVM。
@@ -142,8 +154,21 @@ func currentNetConfig() [][]byte {
 	netConfigMu.Lock()
 	defer netConfigMu.Unlock()
 	var out [][]byte
+	seen := map[string]struct{}{}
 	if len(netConfigJSON) > 0 {
 		out = append(out, netConfigJSON)
+		seen[string(netConfigJSON)] = struct{}{}
+	}
+	for _, payload := range netConfigByClient {
+		if len(payload) == 0 {
+			continue
+		}
+		key := string(payload)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, payload)
 	}
 	if len(userProxyJSON) > 0 {
 		out = append(out, userProxyJSON)
