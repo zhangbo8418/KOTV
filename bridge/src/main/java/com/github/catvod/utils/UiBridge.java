@@ -437,8 +437,6 @@ public final class UiBridge {
 
     public static Handle showQrContent(String kind, String content, String title, String tip, Runnable onCancel) {
         Document doc = new Document().title(title).text(tip).timeoutMs(180_000);
-        String platform = "";
-        // shown 前可能还没有 platform；开窗后再读。先按 tip 区分文案，link 按钮两端都保留。
         String image = encodeQrDataUri(content);
         if (!image.isEmpty()) doc.image(image, 260, 260);
         else if (content != null && !content.trim().isEmpty()) doc.text(content);
@@ -447,12 +445,7 @@ public final class UiBridge {
             doc.link(mobileHint ? "打开网盘 App 授权" : "在 App / 浏览器打开", content.trim(), "button");
         }
         doc.input("value", "粘贴凭证", true).defaultActions();
-        Handle h = show(kind, doc, null, onCancel);
-        platform = hostPlatform(kind);
-        if (("android".equals(platform) || "ios".equals(platform)) && looksLikeOpenableUrl(content)) {
-            SpiderDebug.log("UiBridge cloud login platform=" + platform + " kind=" + normalizeKind(kind));
-        }
-        return h;
+        return show(kind, doc, null, onCancel);
     }
 
     public static Handle showQrBase64(String base64, String title, String tip, Runnable onCancel) {
