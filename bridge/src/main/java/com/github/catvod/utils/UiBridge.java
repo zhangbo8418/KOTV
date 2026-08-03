@@ -413,7 +413,7 @@ public final class UiBridge {
         if (onCancel != null) registerCancel(session, onCancel);
         if (onSubmitValue != null) submitBySession.put(session, onSubmitValue);
         Document doc = document == null ? new Document() : document;
-        if (doc.actions.isEmpty()) doc.defaultActions();
+        // 不自动补业务按钮：文案/动作一律由脚本 Document 提供。
         try {
             showDocument(session, doc);
         } catch (ShowFailedException e) {
@@ -422,7 +422,6 @@ public final class UiBridge {
             submitBySession.remove(session);
             qrBySession.remove(session);
             sessionByKind.remove(key, session);
-            // 尝试关掉可能半开的窗，再等 closed（不 bump epoch，以免吞掉 CLOSE）。
             closeDocument(session);
             Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
             Util.notify("弹窗未能显示，请重试");
@@ -431,46 +430,68 @@ public final class UiBridge {
         return handleFor(key, session);
     }
 
+    /**
+     * @deprecated 业务文案应由脚本组 {@link Document} 后调用 {@link #show}；
+     * 本方法仅保留二维码图+标题/提示，不再擅自加 link/input/按钮。
+     */
+    @Deprecated
     public static Handle showQrContent(String content, String title, String tip, Runnable onCancel) {
         return showQrContent(guessKind(title, tip), content, title, tip, onCancel);
     }
 
+    /**
+     * 仅渲染脚本给定的 title/tip + 二维码图。link / 输入框 / 底栏按钮请脚本自己写进 Document 后 {@link #show}。
+     */
     public static Handle showQrContent(String kind, String content, String title, String tip, Runnable onCancel) {
         Document doc = new Document().title(title).text(tip).timeoutMs(180_000);
-        String image = encodeQrDataUri(content);
+        String image = qrDataUri(content);
         if (!image.isEmpty()) doc.image(image, 260, 260);
         else if (content != null && !content.trim().isEmpty()) doc.text(content);
-        if (looksLikeOpenableUrl(content)) {
-            boolean mobileHint = tip != null && (tip.contains("本机") || tip.contains("打开下方"));
-            doc.link(mobileHint ? "打开网盘 App 授权" : "在 App / 浏览器打开", content.trim(), "button");
-        }
-        doc.input("value", "粘贴凭证", true).defaultActions();
         return show(kind, doc, null, onCancel);
     }
 
+    /** 将文本编码为 QR data-URI，供脚本 {@link Document#image} 使用。 */
+    public static String qrDataUri(String content) {
+        return encodeQrDataUri(content);
+    }
+
+    @Deprecated
     public static Handle showQrBase64(String base64, String title, String tip, Runnable onCancel) {
         return showQrBase64(guessKind(title, tip), base64, title, tip, onCancel);
     }
 
+    /** 仅 title/tip + 图；其它控件由脚本 Document 提供。 */
     public static Handle showQrBase64(String kind, String base64, String title, String tip, Runnable onCancel) {
         Document doc = new Document().title(title).text(tip).timeoutMs(180_000);
         String image = dataUri(base64);
         if (!image.isEmpty()) doc.image(image, 260, 260);
-        doc.input("value", "粘贴凭证", true).defaultActions();
         return show(kind, doc, null, onCancel);
     }
 
-    /** 拉取二维码 token 前显示加载窗（可与拉码并行）；同 kind 再 show 时会先等旧窗 closed 再开新窗。 */
-    public static Handle showFetchQrLoading(String kind, String title, Runnable onCancel) {
+    /**
+     * 拉码加载窗：文案全部由脚本传入。
+     *
+     * @param loadingText 进度下文案
+     * @param cancelLabel 取消按钮文案
+     */
+    public static Handle showFetchQrLoading(String kind, String title, String loadingText, String cancelLabel, Runnable onCancel) {
         Document doc = new Document()
                 .title(title)
                 .size(360, 220)
                 .timeoutMs(45_000)
                 .progress()
                 .spacer(12)
-                .text("正在获取二维码，请稍候…")
-                .action("cancel", "取消", true);
+                .text(loadingText == null ? "" : loadingText);
+        if (cancelLabel != null && !cancelLabel.trim().isEmpty()) {
+            doc.action("cancel", cancelLabel, true);
+        }
         return show(kind, doc, null, onCancel);
+    }
+
+    /** @deprecated 请用带 loadingText/cancelLabel 的重载，勿让 bridge 写死业务文案 */
+    @Deprecated
+    public static Handle showFetchQrLoading(String kind, String title, Runnable onCancel) {
+        return showFetchQrLoading(kind, title, "正在获取二维码，请稍候…", "取消", onCancel);
     }
 
     /** 拉码失败：关窗并提示。 */
@@ -496,18 +517,38 @@ public final class UiBridge {
         return showTokenInput(title, tip, onOk, onQr, null);
     }
 
+    /**
+     * @deprecated 请用带占位符/按钮文案的重载，由脚本传入全部业务文案。
+     */
+    @Deprecated
     public static Handle showTokenInput(String title, String tip, Consumer<String> onOk, Runnable onQr, Runnable onCancel) {
-        String kind = normalizeKind(guessKind(title, tip));
-        Document doc = new Document()
-                .title(title)
-                .text(tip)
-                .input("value", "请输入内容", true)
-                .action("submit", "确认", true)
-                .action("qrcode", "扫码登录", false)
-                .action("cancel", "关闭", true);
-        Handle handle = show(kind, doc, onOk, onCancel);
+        return showTokenInput(guessKind(title, tip), title, tip,
+                "请输入内容", "确认", "扫码登录", "关闭", onOk, onQr, onCancel);
+    }
+
+    /**
+     * Token/Cookie 输入窗：全部文案由脚本传入；宿主只渲染与回报 shown/closed。
+     */
+    public static Handle showTokenInput(String kind, String title, String tip,
+                                        String inputPlaceholder, String submitLabel, String qrLabel, String cancelLabel,
+                                        Consumer<String> onOk, Runnable onQr, Runnable onCancel) {
+        String k = normalizeKind(kind);
+        Document doc = new Document().title(title).text(tip);
+        if (inputPlaceholder != null) {
+            doc.input("value", inputPlaceholder, true);
+        }
+        if (submitLabel != null && !submitLabel.trim().isEmpty()) {
+            doc.action("submit", submitLabel, true);
+        }
+        if (qrLabel != null && !qrLabel.trim().isEmpty()) {
+            doc.action("qrcode", qrLabel, false);
+        }
+        if (cancelLabel != null && !cancelLabel.trim().isEmpty()) {
+            doc.action("cancel", cancelLabel, true);
+        }
+        Handle handle = show(k, doc, onOk, onCancel);
         if (onQr != null) {
-            String session = currentSession(kind);
+            String session = currentSession(k);
             if (!session.isEmpty()) qrBySession.put(session, onQr);
         }
         return handle;
@@ -801,13 +842,13 @@ public final class UiBridge {
         return kind.trim().toLowerCase();
     }
 
-    /** kind 按 clientId 隔离；已带分隔符的 key 不再二次前缀。 */
+    /** kind 按 Scope（优先 userId）隔离；已带分隔符的 key 不再二次前缀。 */
     private static String kindKey(String kind) {
         String k = normalizeKind(kind);
         if (k.indexOf('\u0001') >= 0) return k;
-        String cid = Util.clientId();
-        if (cid == null || cid.isEmpty()) return k;
-        return cid + '\u0001' + k;
+        String scope = Util.scopeId();
+        if (scope == null || scope.isEmpty()) return k;
+        return scope + '\u0001' + k;
     }
 
     private static String dataUri(String base64) {

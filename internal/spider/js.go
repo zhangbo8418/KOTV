@@ -86,7 +86,7 @@ func (s *jsSpider) activeClientID() string {
 	return v
 }
 
-// jsPostMsg 把 JS 脚本消息投到引擎 /postMsg，带 clientId 以免多前端串台。
+// jsPostMsg 把 JS 脚本消息投到引擎 /postMsg；远端带 userId，本机带 scopeId/clientId。
 func jsPostMsg(msg, clientID string) {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
@@ -95,8 +95,14 @@ func jsPostMsg(msg, clientID string) {
 	base := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
 	q := url.Values{}
 	q.Set("msg", msg)
-	if clientID != "" {
-		q.Set("clientId", clientID)
+	if uid := hostclient.CurrentUserID(); uid != "" {
+		q.Set("userId", uid)
+	} else if clientID != "" {
+		if strings.HasPrefix(clientID, "u:") || strings.HasPrefix(clientID, "c:") {
+			q.Set("scopeId", clientID)
+		} else {
+			q.Set("clientId", clientID)
+		}
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

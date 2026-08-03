@@ -55,12 +55,12 @@ public class Path {
     }
 
     public static File tv() {
-        return tvRoot(Util.clientId());
+        return tvRoot(Util.scopeId());
     }
 
-    /** 站点凭证等：TV[/scope]/.name（多前端按 clientId 隔离 cookie/token） */
+    /** 站点凭证等：TV[/scope]/.name（多前端按 Scope/userId 隔离 cookie/token） */
     public static File tv(String name) {
-        return tv(Util.clientId(), name);
+        return tv(Util.scopeId(), name);
     }
 
     /** 指定 scope 的凭证文件（异步线程可传实例捕获的 scopeId）。 */

@@ -310,6 +310,7 @@ type bridgeRequest struct {
 	Jar      string                 `json:"jar"`
 	Args     map[string]interface{} `json:"args"`
 	ClientID string                 `json:"clientId,omitempty"`
+	UserID   string                 `json:"userId,omitempty"`
 }
 
 func (s *jarSpider) resolveJarPath() (string, error) {
@@ -423,6 +424,7 @@ func (s *jarSpider) call(method string, args map[string]interface{}) (string, er
 		Jar:      jp,
 		Args:     args,
 		ClientID: hostclient.ScopeID(),
+		UserID:   hostclient.CurrentUserID(),
 	}
 	payload, _ := json.Marshal(req)
 

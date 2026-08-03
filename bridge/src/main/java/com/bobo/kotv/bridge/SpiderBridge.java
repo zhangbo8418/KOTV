@@ -264,14 +264,26 @@ public class SpiderBridge {
     public static String call(String input) {
         disableSystemProxies();
         String clientId = "";
+        String userId = "";
         try {
             JsonObject req = GSON.fromJson(input, JsonObject.class);
             if (req.has("clientId") && !req.get("clientId").isJsonNull()) {
                 clientId = req.get("clientId").getAsString();
                 if (clientId == null) clientId = "";
             }
+            if (req.has("userId") && !req.get("userId").isJsonNull()) {
+                userId = req.get("userId").getAsString();
+                if (userId == null) userId = "";
+            }
+            // clientId 可能已是 ScopeID（u:/c:）；从中拆出 userId。
+            if (userId.isEmpty() && clientId.startsWith("u:") && clientId.length() > 2) {
+                userId = clientId.substring(2);
+            }
             if (!clientId.isEmpty()) {
                 com.github.catvod.utils.Util.setClientId(clientId);
+            }
+            if (!userId.isEmpty()) {
+                com.github.catvod.utils.Util.setUserId(userId);
             }
             String method = req.get("method").getAsString();
             if ("selfCheck".equals(method)) {
@@ -387,7 +399,7 @@ public class SpiderBridge {
             err.addProperty("error", t.toString());
             return GSON.toJson(err);
         } finally {
-            com.github.catvod.utils.Util.clearClientId();
+            com.github.catvod.utils.Util.clearScope();
         }
     }
 

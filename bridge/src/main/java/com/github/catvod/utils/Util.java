@@ -34,8 +34,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Util {
-    /** 当前 JAR 调用所属的 Flutter clientId（由 SpiderBridge 从请求注入）。 */
+    /** 当前 JAR 调用所属的 Flutter clientId / Scope（由 SpiderBridge 从请求注入）。 */
     private static final ThreadLocal<String> CLIENT_ID_TL = new ThreadLocal<>();
+    /** 远端鉴权用户；有则 postMsg 优先按 userId 路由到该用户设备。 */
+    private static final ThreadLocal<String> USER_ID_TL = new ThreadLocal<>();
 
     private static final AtomicLong UI_NOTIFY_EPOCH = new AtomicLong();
     private static final ExecutorService UI_MESSAGES = Executors.newSingleThreadExecutor(r -> {
@@ -221,10 +223,46 @@ public class Util {
         CLIENT_ID_TL.remove();
     }
 
-    /** 当前线程绑定的 clientId；无则空串。 */
+    /** 当前线程绑定的 clientId；无则空串。可能是裸 id，也可能是已带 c:/u: 的 ScopeID。 */
     public static String clientId() {
         String s = CLIENT_ID_TL.get();
         return s == null ? "" : s;
+    }
+
+    /** 绑定远端 userId（裸值，不含 u: 前缀）。 */
+    public static void setUserId(String id) {
+        if (id == null || id.isEmpty()) USER_ID_TL.remove();
+        else USER_ID_TL.set(id.trim());
+    }
+
+    public static void clearUserId() {
+        USER_ID_TL.remove();
+    }
+
+    public static String userId() {
+        String s = USER_ID_TL.get();
+        return s == null ? "" : s;
+    }
+
+    /**
+     * 会话隔离键：远端优先 {@code u:<userId>}，本机回退 {@code c:<clientId>} / 已带前缀原样。
+     * 对齐 Go {@code hostclient.ScopeID}。
+     */
+    public static String scopeId() {
+        String uid = userId();
+        if (!uid.isEmpty()) {
+            if (uid.startsWith("u:") || uid.startsWith("c:")) return uid;
+            return "u:" + uid;
+        }
+        String cid = clientId();
+        if (cid.isEmpty()) return "";
+        if (cid.startsWith("u:") || cid.startsWith("c:")) return cid;
+        return "c:" + cid;
+    }
+
+    public static void clearScope() {
+        clearClientId();
+        clearUserId();
     }
 
     /**
@@ -240,8 +278,9 @@ public class Util {
         }
         SpiderDebug.log(msg);
         long epoch = UI_NOTIFY_EPOCH.get();
-        // 异步队列在另一线程执行，必须捕获当前 clientId，否则会丢路由。
+        // 异步队列在另一线程执行，必须捕获当前 Scope，否则会丢路由。
         final String cid = clientId();
+        final String uid = userId();
         UI_MESSAGES.execute(() -> {
             if (epoch != UI_NOTIFY_EPOCH.get()) {
                 SpiderDebug.log("postMsg dropped (ui cancelled)");
@@ -249,11 +288,12 @@ public class Util {
             }
             try {
                 setClientId(cid);
+                setUserId(uid);
                 postHttpMsg(msg);
             } catch (Exception e) {
                 SpiderDebug.log("postMsg fail: " + e.getMessage());
             } finally {
-                clearClientId();
+                clearScope();
             }
         });
     }
@@ -497,12 +537,24 @@ public class Util {
     private static void postHttpMsg(String msg) throws IOException {
         String base = Proxy.getHostPort();
         if (base == null || base.isEmpty()) return;
-        String cid = clientId();
-        String clientQ = cid.isEmpty() ? "" : "clientId=" + urlEncode(cid);
+        // 远端：显式 userId，引擎按 u:<userId> 投到该用户设备；本机未登录：clientId / scopeId。
+        String uid = userId();
+        if (uid.startsWith("u:")) uid = uid.substring(2);
+        if (uid.startsWith("c:")) uid = "";
+        String scope = scopeId();
+        String routeQ;
+        if (!uid.isEmpty()) {
+            routeQ = "userId=" + urlEncode(uid);
+        } else if (!scope.isEmpty()) {
+            routeQ = "scopeId=" + urlEncode(scope);
+        } else {
+            String cid = clientId();
+            routeQ = cid.isEmpty() ? "" : "clientId=" + urlEncode(cid);
+        }
         // Long payloads (QRIMG base64) must use POST body; GET query length is limited.
         if (msg.length() > 800) {
             RequestBody body = RequestBody.create(msg, MediaType.parse("text/plain; charset=utf-8"));
-            String url = base + "/postMsg" + (clientQ.isEmpty() ? "" : "?" + clientQ);
+            String url = base + "/postMsg" + (routeQ.isEmpty() ? "" : "?" + routeQ);
             Request req = new Request.Builder().url(url).post(body).build();
             try (Response response = OkHttp.newCall(req).execute()) {
                 if (response != null && !response.isSuccessful()) {
@@ -512,7 +564,7 @@ public class Util {
             return;
         }
         String encoded = urlEncode(msg);
-        String url = base + "/postMsg?msg=" + encoded + (clientQ.isEmpty() ? "" : "&" + clientQ);
+        String url = base + "/postMsg?msg=" + encoded + (routeQ.isEmpty() ? "" : "&" + routeQ);
         try (Response response = OkHttp.newCall(url).execute()) {
             if (response != null && !response.isSuccessful()) {
                 SpiderDebug.log("send msg fail：" + msg);
