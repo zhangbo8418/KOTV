@@ -93,6 +93,7 @@ func EnterUser(userID string) func() {
 }
 
 // Current 返回当前 goroutine 绑定的 clientId（无则空串）。
+// 新代码优先用 ScopeID() 做会话隔离。
 func Current() string {
 	v, ok := byG.Load(goid())
 	if !ok {
@@ -113,6 +114,17 @@ func CurrentUserID() string {
 	}
 	if b, ok := v.(binding); ok {
 		return b.UserID
+	}
+	return ""
+}
+
+// ScopeID 会话/队列/媒体隔离键：已登录只用 userId；未登录本机才回退 clientId。
+func ScopeID() string {
+	if u := CurrentUserID(); u != "" {
+		return "u:" + u
+	}
+	if c := Current(); c != "" {
+		return "c:" + c
 	}
 	return ""
 }

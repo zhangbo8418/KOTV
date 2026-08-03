@@ -65,7 +65,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			}
 			// 远端租户：独立引擎；本机 loopback 即使已登录也走共享引擎。
 			dedicated := auth.RemoteAuthEnabled() && !loopback
-			done := hostclient.EnterSession(clientIDFromRequest(r), u.ID, dedicated)
+			done := hostclient.EnterSession("", u.ID, dedicated)
 			defer done()
 			r = r.WithContext(withAuthUser(r.Context(), u))
 			next(w, r)
@@ -74,7 +74,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		if tok != "" {
 			if u, err := auth.LookupToken(tok); err == nil {
 				dedicated := auth.RemoteAuthEnabled() && !loopback
-				done := hostclient.EnterSession(clientIDFromRequest(r), u.ID, dedicated)
+				done := hostclient.EnterSession("", u.ID, dedicated)
 				defer done()
 				r = r.WithContext(withAuthUser(r.Context(), u))
 				next(w, r)

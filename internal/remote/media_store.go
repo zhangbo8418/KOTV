@@ -15,7 +15,7 @@ var (
 )
 
 func mediaKey() string {
-	return hostclient.Current()
+	return hostclient.ScopeID()
 }
 
 func SetMediaStore(m map[string]string) {

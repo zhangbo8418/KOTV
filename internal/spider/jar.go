@@ -76,10 +76,10 @@ func clearJar() {
 	}
 }
 
-// SetConfigBase 设置当前点播配置基址。有 clientId 时只写入该客户端，不覆盖全局。
+// SetConfigBase 设置当前点播配置基址。有 ScopeID 时只写入该会话，不覆盖全局。
 func SetConfigBase(base string) {
 	base = strings.TrimSpace(base)
-	if cid := hostclient.Current(); cid != "" {
+	if cid := hostclient.ScopeID(); cid != "" {
 		if base == "" {
 			configBaseByClient.Delete(cid)
 		} else {
@@ -92,9 +92,9 @@ func SetConfigBase(base string) {
 	jarMu.Unlock()
 }
 
-// ConfigBase 返回当前配置基址（优先当前 clientId）。
+// ConfigBase 返回当前配置基址（优先当前 ScopeID）。
 func ConfigBase() string {
-	if cid := hostclient.Current(); cid != "" {
+	if cid := hostclient.ScopeID(); cid != "" {
 		if v, ok := configBaseByClient.Load(cid); ok {
 			if s, _ := v.(string); s != "" {
 				return s

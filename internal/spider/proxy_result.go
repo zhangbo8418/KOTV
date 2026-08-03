@@ -25,15 +25,24 @@ func parseCatvodProxy(raw string) (status int, contentType string, body []byte, 
 		}
 		if json.Unmarshal([]byte(raw), &res) == nil && (res.Code != nil || res.Content != "" || res.Headers != nil) {
 			status, contentType, body, headers = 200, "application/octet-stream", []byte(res.Content), res.Headers
-			if res.Code != nil { status = *res.Code }
+			if res.Code != nil {
+				status = *res.Code
+			}
 			if headers != nil {
-				if value := headers["Content-Type"]; value != "" { contentType = value
-				} else if value := headers["content-type"]; value != "" { contentType = value }
+				if value := headers["Content-Type"]; value != "" {
+					contentType = value
+				} else if value := headers["content-type"]; value != "" {
+					contentType = value
+				}
 			}
 			if res.Buffer == 2 {
 				text := res.Content
-				if i := strings.Index(text, "base64,"); i >= 0 { text = text[i+len("base64,"):] }
-				if decoded, decErr := base64.StdEncoding.DecodeString(text); decErr == nil { body = decoded }
+				if i := strings.Index(text, "base64,"); i >= 0 {
+					text = text[i+len("base64,"):]
+				}
+				if decoded, decErr := base64.StdEncoding.DecodeString(text); decErr == nil {
+					body = decoded
+				}
 			}
 			return status, contentType, body, headers, nil
 		}

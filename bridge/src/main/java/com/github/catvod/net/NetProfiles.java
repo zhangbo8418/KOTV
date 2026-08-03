@@ -11,8 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * 按 Flutter clientId 隔离点播配置里的 headers / proxy / hosts / doh。
- * 空 clientId 为默认桶（单用户 / 桌面兼容）。
+ * 按 ScopeID（优先 userId）隔离点播配置里的 headers / proxy / hosts / doh。
+ * 空 key 为默认桶（本机单用户兼容）。
  */
 public final class NetProfiles {
 

@@ -30,7 +30,7 @@ func (p *pyPool) acquire() (*pySpider, int) {
 			}
 		}
 		if len(p.slots) < p.max {
-	s := &pySpider{key: p.key, api: p.api, ext: p.ext, jar: p.jar, sessionSlot: len(p.slots)}
+			s := &pySpider{key: p.key, api: p.api, ext: p.ext, jar: p.jar, sessionSlot: len(p.slots)}
 			p.slots = append(p.slots, s)
 			p.busy = append(p.busy, true)
 			idx := len(p.slots) - 1

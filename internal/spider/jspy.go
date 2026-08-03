@@ -237,7 +237,7 @@ func pyRunnerPath() (string, error) {
 func (s *pySpider) run(method string, args map[string]interface{}) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cid := hostclient.Current()
+	cid := hostclient.ScopeID()
 	s.activeClient.Store(cid)
 	defer s.activeClient.Store("")
 
@@ -285,7 +285,7 @@ func (s *pySpider) callLocked(startEpoch uint64, method string, args map[string]
 		"id":       reqID,
 		"method":   method,
 		"args":     args,
-		"clientId": hostclient.Current(),
+		"clientId": hostclient.ScopeID(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -532,7 +532,7 @@ func (s *pySpider) androidCallPythonLocked(method string, args map[string]interf
 		"proxyPort":  localproxy.Port(),
 		"method":     method,
 		"args":       args,
-		"clientId":   hostclient.Current(),
+		"clientId":   hostclient.ScopeID(),
 		"slot":       s.sessionSlot,
 	}
 	body, err := json.Marshal(payload)

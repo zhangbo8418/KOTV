@@ -65,7 +65,7 @@ type jsSpider struct {
 	activeEpoch  atomic.Uint64
 	deadline     atomic.Int64
 	inited       atomic.Bool
-	cat          atomic.Bool // 源码含 __jsEvalReturn：CatVod 初始化包装
+	cat          atomic.Bool  // 源码含 __jsEvalReturn：CatVod 初始化包装
 	activeClient atomic.Value // string
 
 	timerMu sync.Mutex
@@ -363,7 +363,7 @@ func (s *jsSpider) callOn(ctx *qjs.Context, spider *qjs.Value, method string, ar
 		if fn != nil {
 			fn.Free()
 		}
- // init/destroy/action/sniffer/isVideo 可选（对齐 TV 默认空实现）
+		// init/destroy/action/sniffer/isVideo 可选（对齐 TV 默认空实现）
 		if method == "init" || method == "destroy" || method == "action" ||
 			method == "sniffer" || method == "isVideo" {
 			return "", nil
@@ -443,14 +443,14 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		return c.NewInt32(int32(localproxy.Port()))
 	}))
 	g.Set("getClientId", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
-		return c.NewString(hostclient.Current())
+		return c.NewString(hostclient.ScopeID())
 	}))
 	g.Set("postMsg", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		msg := ""
 		if len(args) > 0 {
 			msg = args[0].String()
 		}
-		jsPostMsg(msg, hostclient.Current())
+		jsPostMsg(msg, hostclient.ScopeID())
 		return c.NewBool(true)
 	}))
 	g.Set("getProxy", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
@@ -535,13 +535,27 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 	g.Set("rsaX", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		mode, input, key := "", "", ""
 		pub, encrypt, inB64, outB64 := false, true, false, false
-		if len(args) > 0 { mode = args[0].String() }
-		if len(args) > 1 { pub = args[1].ToBool() }
-		if len(args) > 2 { encrypt = args[2].ToBool() }
-		if len(args) > 3 { input = args[3].String() }
-		if len(args) > 4 { inB64 = args[4].ToBool() }
-		if len(args) > 5 { key = args[5].String() }
-		if len(args) > 6 { outB64 = args[6].ToBool() }
+		if len(args) > 0 {
+			mode = args[0].String()
+		}
+		if len(args) > 1 {
+			pub = args[1].ToBool()
+		}
+		if len(args) > 2 {
+			encrypt = args[2].ToBool()
+		}
+		if len(args) > 3 {
+			input = args[3].String()
+		}
+		if len(args) > 4 {
+			inB64 = args[4].ToBool()
+		}
+		if len(args) > 5 {
+			key = args[5].String()
+		}
+		if len(args) > 6 {
+			outB64 = args[6].ToBool()
+		}
 		return c.NewString(rsaX(mode, pub, encrypt, input, inB64, key, outB64))
 	}))
 	g.Set("req", ctx.NewFunction(s.jsReq))
@@ -847,7 +861,7 @@ func (s *jsSpider) jsReq(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qj
 		}
 	}
 	if complete != nil {
- // 有 complete 时异步回调
+		// 有 complete 时异步回调
 		go func() {
 			result := doJSRequest(u, options)
 			c.Schedule(func(inner *qjs.Context) {
@@ -889,7 +903,7 @@ func (s *jsSpider) jsReqAsync(c *qjs.Context, this *qjs.Value, args []*qjs.Value
 
 type jsHTTPRequest struct {
 	Method, Body, Data, PostType, Charset string
-	Headers                              map[string]string
+	Headers                               map[string]string
 	Buffer, Redirect, Timeout             int
 }
 
@@ -914,7 +928,9 @@ func parseJSRequest(args []*qjs.Value) (string, jsHTTPRequest) {
 			b.Free()
 		} else if b := args[1].Get("data"); b != nil && !b.IsUndefined() && !b.IsNull() {
 			options.Data = b.JSONStringify()
-			if b.IsString() { options.Data = b.String() }
+			if b.IsString() {
+				options.Data = b.String()
+			}
 			b.Free()
 		}
 		parseIntOption := func(name string, dst *int) {
@@ -928,10 +944,22 @@ func parseJSRequest(args []*qjs.Value) (string, jsHTTPRequest) {
 		parseIntOption("buffer", &options.Buffer)
 		parseIntOption("redirect", &options.Redirect)
 		parseIntOption("timeout", &options.Timeout)
-		if v := args[1].Get("postType"); v != nil && !v.IsUndefined() { options.PostType = strings.ToLower(v.String()); v.Free() } else if v != nil { v.Free() }
-		if v := args[1].Get("charset"); v != nil && !v.IsUndefined() { options.Charset = v.String(); v.Free() } else if v != nil { v.Free() }
+		if v := args[1].Get("postType"); v != nil && !v.IsUndefined() {
+			options.PostType = strings.ToLower(v.String())
+			v.Free()
+		} else if v != nil {
+			v.Free()
+		}
+		if v := args[1].Get("charset"); v != nil && !v.IsUndefined() {
+			options.Charset = v.String()
+			v.Free()
+		} else if v != nil {
+			v.Free()
+		}
 	}
-	if options.Method == "HEADER" { options.Method = "HEAD" }
+	if options.Method == "HEADER" {
+		options.Method = "HEAD"
+	}
 	return u, options
 }
 
@@ -1075,7 +1103,7 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 	s.startWorker()
 	resp := make(chan jsResp, 1)
 	epoch := s.epoch.Load()
-	cid := hostclient.Current()
+	cid := hostclient.ScopeID()
 	select {
 	case <-s.quitCh:
 		return "{}", fmt.Errorf("spider 已销毁")
@@ -1229,10 +1257,13 @@ func decodeJSResponse(data []byte, optionCharset, contentType string) string {
 	case "", "utf-8", "utf8":
 		return string(data)
 	case "gbk", "gb2312", "gb18030":
-		if text, err := simplifiedchinese.GBK.NewDecoder().Bytes(data); err == nil { return string(text) }
+		if text, err := simplifiedchinese.GBK.NewDecoder().Bytes(data); err == nil {
+			return string(text)
+		}
 	case "iso-8859-1", "latin1", "latin-1":
-		if text, err := charmap.ISO8859_1.NewDecoder().Bytes(data); err == nil { return string(text) }
+		if text, err := charmap.ISO8859_1.NewDecoder().Bytes(data); err == nil {
+			return string(text)
+		}
 	}
 	return string(data)
 }
-

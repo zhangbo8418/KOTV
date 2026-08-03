@@ -139,7 +139,7 @@ func (a *App) loadConfigWithWatchdog(cfg *config.Manager, source, userID string)
 	case r := <-ch:
 		return r.err
 	case <-time.After(timeout):
-		cid := hostclient.Current()
+		cid := hostclient.ScopeID()
 		spider.InterruptJavaBridgeForClient(cid)
 		spider.InterruptScriptSpidersForClient(cid)
 		select {
@@ -323,18 +323,20 @@ func (a *App) APICancelPending() map[string]any {
 }
 
 func (a *App) APISessionPing() map[string]any {
-	uid := hostclient.CurrentUserID()
-	if a.presence != nil && uid != "" {
-		a.presence.Ping(uid)
+	cid := hostclient.ScopeID()
+	if a.presence != nil {
+		if uid := hostclient.CurrentUserID(); uid != "" {
+			a.presence.Ping(uid)
+		}
 	}
-	return map[string]any{"ok": true, "userId": uid}
+	return map[string]any{"ok": true, "scopeId": cid, "userId": hostclient.CurrentUserID()}
 }
 
 func (a *App) APISessionLeave() map[string]any {
-	cid := hostclient.Current()
+	sid := hostclient.ScopeID()
 	uid := hostclient.CurrentUserID()
-	if cid != "" {
-		a.sessions.Remove(cid)
+	if sid != "" {
+		a.sessions.Remove(sid)
 	}
 	if a.presence != nil && uid != "" {
 		a.presence.Leave(uid) // 内部会 KillUserRuntime
@@ -679,7 +681,7 @@ func mergeStringMaps(a, b map[string]string) map[string]string {
 }
 
 func (a *App) APIRemotePoll() map[string]any {
-	ctrls, searches := remote.DefaultQueue.Drain(hostclient.Current())
+	ctrls, searches := remote.DefaultQueue.Drain(hostclient.ScopeID())
 	outCtrl := make([]map[string]any, 0, len(ctrls))
 	for _, c := range ctrls {
 		outCtrl = append(outCtrl, map[string]any{"type": c.Type, "seekMs": c.SeekMs})

@@ -39,14 +39,14 @@ func (noopSpider) CategoryContent(string, string, bool, map[string]string) (stri
 func (noopSpider) DetailContent([]string) (string, error)                 { return "{}", nil }
 func (noopSpider) SearchContent(string, bool, string) (string, error)     { return "{}", nil }
 func (noopSpider) PlayerContent(string, string, []string) (string, error) { return "{}", nil }
-func (noopSpider) LiveContent(string) (string, error)                      { return "", nil }
+func (noopSpider) LiveContent(string) (string, error)                     { return "", nil }
 func (noopSpider) Proxy(map[string]string) (int, string, []byte, map[string]string, error) {
 	return 0, "", nil, nil, nil
 }
-func (noopSpider) Action(string) (string, error)       { return "", nil }
-func (noopSpider) ManualVideoCheck() (bool, error)     { return false, nil }
-func (noopSpider) IsVideoFormat(string) (bool, error)  { return false, nil }
-func (noopSpider) Destroy()                            {}
+func (noopSpider) Action(string) (string, error)      { return "", nil }
+func (noopSpider) ManualVideoCheck() (bool, error)    { return false, nil }
+func (noopSpider) IsVideoFormat(string) (bool, error) { return false, nil }
+func (noopSpider) Destroy()                           {}
 
 func isJS(api string) bool  { return strings.Contains(api, ".js") }
 func isPy(api string) bool  { return strings.Contains(api, ".py") }

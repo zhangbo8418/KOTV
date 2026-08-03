@@ -54,20 +54,20 @@ func (s *SiteService) InvalidateLoads() {
 	s.mu.Lock()
 	s.invalidateContentCache()
 	s.mu.Unlock()
-	cid := hostclient.Current()
+	cid := hostclient.ScopeID()
 	spider.InterruptJavaBridgeForClient(cid)
 	spider.InterruptScriptSpidersForClient(cid)
 	spider.ResetScriptSpiders()
 	spider.ClearJarBridgeOnSwitch()
 }
 
-// InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前 client，保留脚本/JAR 池。
+// InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前会话，保留脚本/JAR 池。
 func (s *SiteService) InvalidateHomeOnly() {
 	s.loadEpoch.Add(1)
 	s.mu.Lock()
 	s.invalidateContentCache()
 	s.mu.Unlock()
-	cid := hostclient.Current()
+	cid := hostclient.ScopeID()
 	spider.InterruptJavaBridgeForClient(cid)
 	spider.InterruptScriptSpidersForClient(cid)
 }
@@ -77,9 +77,9 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 	return s.loadEpoch.Load()
 }
 
-// CancelPendingContent 打断当前 client 进行中的 spider 请求，不影响其他前端。
+// CancelPendingContent 打断当前会话进行中的 spider 请求，不影响其他用户。
 func (s *SiteService) CancelPendingContent() {
-	cid := hostclient.Current()
+	cid := hostclient.ScopeID()
 	spider.InterruptJavaBridgeForClient(cid)
 	spider.InterruptScriptSpidersForClient(cid)
 }
@@ -460,12 +460,14 @@ func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcu
 	}
 	results := make([]siteResult, len(searchable))
 	var wg sync.WaitGroup
-	cid := hostclient.Current()
+	parentCID := hostclient.Current()
+	parentUID := hostclient.CurrentUserID()
+	parentDed := hostclient.DedicatedRuntime()
 	for i, site := range searchable {
 		wg.Add(1)
 		go func(i int, site model.Site) {
 			defer wg.Done()
-			done := hostclient.Enter(cid)
+			done := hostclient.EnterSession(parentCID, parentUID, parentDed)
 			defer done()
 			sem <- struct{}{}
 			defer func() { <-sem }()

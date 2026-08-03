@@ -6,7 +6,7 @@ import (
 )
 
 // Queue 供无本地桌面 UI 的 headless 引擎（Flutter）轮询遥控指令。
-// 按 clientId 分桶，避免多前端轮询时互相抢走指令。
+// 按 ScopeID（优先 userId）分桶，避免多用户轮询时互相抢走指令。
 type Queue struct {
 	mu       sync.Mutex
 	byClient map[string]*clientBucket

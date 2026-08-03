@@ -1,4 +1,4 @@
-// Package clientsession 按 Flutter clientId 隔离点播/直播会话与媒体态。
+// Package clientsession 按 ScopeID（优先 userId）隔离点播/直播会话与媒体态。
 package clientsession
 
 import (

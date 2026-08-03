@@ -103,10 +103,10 @@ var (
 	netPrimed         bool // Android HTTP 用
 )
 
-// 进行中的 JAR HTTP 调用，按 clientId 软取消（不杀 JVM）。
+// 进行中的 JAR HTTP 调用，按 ScopeID 软取消（不杀 JVM）。
 type jarInflight struct {
 	id       uint64
-	clientID string
+	clientID string // 实为 ScopeID
 	cancel   context.CancelFunc
 }
 
@@ -142,7 +142,7 @@ func cancelJarCalls(clientID string) {
 
 // SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp（按当前 clientId）。
 func SetNetConfig(headers, proxy, hosts, doh []byte) {
-	cid := hostclient.Current()
+	cid := hostclient.ScopeID()
 	args := map[string]json.RawMessage{}
 	add := func(name string, raw []byte) {
 		trimmed := strings.TrimSpace(string(raw))
@@ -230,7 +230,7 @@ func currentNetConfig() [][]byte {
 
 // callJavaBridge：桌面走独立 java HTTP bridge；Android 走 Native Service HTTP。可并发。
 func callJavaBridge(payload []byte) (string, error) {
-	cid := hostclient.Current()
+	cid := hostclient.ScopeID()
 	ctx, end := beginJarCall(cid)
 	defer end()
 	ctx, cancel := context.WithTimeout(ctx, javaBridgeCallTimeout)

@@ -156,10 +156,10 @@ func New() (*App, error) {
 	return a, nil
 }
 
-// scope 按当前 hostclient 返回隔离的点播配置与 SiteService。
-// 空 clientId 走共享 App.Config / App.Sites（兼容桌面单用户）。
+// scope 按 ScopeID（优先 userId）返回隔离的点播配置与 SiteService。
+// 空 ScopeID 走共享 App.Config / App.Sites（本机未登录）。
 func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *clientsession.Session) {
-	cid := hostclient.Current()
+	cid := hostclient.ScopeID()
 	if cid == "" {
 		return a.Config, a.Sites, nil
 	}

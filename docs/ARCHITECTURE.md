@@ -38,8 +38,8 @@ Go Engine（可部署到服务器，多前端并发）
 
 | 能力 | 说明 |
 |------|------|
-| `X-Kotv-Client-Id` | Flutter 持久化身份；API / ui/poll / postMsg 按客户端隔离 |
-| **点播会话** | 有 clientId 时各自持有 ephemeral `config.Manager` + `SiteService`（Ready/Source/home）；空 clientId 仍用共享 `App.Config` |
+| `X-Kotv-Client-Id` | **仅本机未登录**时用于多窗口隔离；已登录远端只用 userId（Bearer） |
+| **点播会话** | 按 `ScopeID`（`u:<userId>` 或本机 `c:<clientId>`）隔离 ephemeral 配置 |
 | **直播 / 媒体态** | 有 clientId 时各自持有 `live.Service` 与媒体元数据；`/media` 与 `remote.SetMediaStore` 按 clientId 分桶 |
 | **遥控队列** | control / search 按 clientId 分桶；`/action` 可带 `clientId`；遥控页可选目标客户端（空=广播已知客户端） |
 | **OkHttp net** | 点播配置 headers/proxy/hosts/doh 按 clientId 写入 bridge `NetProfiles`；ephemeral 换源也会下发，互不覆盖 |

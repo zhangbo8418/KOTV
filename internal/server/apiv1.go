@@ -786,7 +786,7 @@ func (s *Server) handleAPIv1UIPoll(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	msgs := s.events.DrainPostMsg(clientIDFromRequest(r))
+	msgs := s.events.DrainPostMsg(hostclient.ScopeID())
 	if msgs == nil {
 		msgs = []string{}
 	}
