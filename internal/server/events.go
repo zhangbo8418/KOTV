@@ -16,8 +16,10 @@ type Events struct {
 	refreshSubs []chan refreshEvent
 	castSubs    []chan castEvent
 	postMsgSubs []chan string
-	// 无前端订阅时缓冲给 Flutter 轮询（否则 /postMsg 会直接丢弃）
-	postMsgQ []string
+	// 按 Flutter clientId 分队列；无 clientId 的消息进 untagged（广播/兼容）。
+	postMsgQ        map[string][]string
+	postMsgUntagged []string
+	postMsgSeen     map[string]struct{}
 }
 
 type settingEvent struct {
@@ -41,7 +43,12 @@ type castEvent struct {
 	History string
 }
 
-func NewEvents() *Events { return &Events{} }
+func NewEvents() *Events {
+	return &Events{
+		postMsgQ:    map[string][]string{},
+		postMsgSeen: map[string]struct{}{},
+	}
+}
 
 func (e *Events) SubscribePostMsg() <-chan string { return e.subscribe(&e.postMsgSubs, 64) }
 
@@ -108,29 +115,75 @@ func (e *Events) EmitRefresh(typ, path string) {
 func (e *Events) EmitCast(config, device, history string) {
 	e.emitCast(castEvent{Config: config, Device: device, History: history})
 }
+
+// EmitPostMsg 无目标客户端时入 untagged / 广播（兼容旧 JAR）。
 func (e *Events) EmitPostMsg(msg string) {
+	e.EmitPostMsgTo(msg, "")
+}
+
+// EmitPostMsgTo 将消息投递到指定 clientId 的队列；clientId 为空则广播给已知客户端。
+func (e *Events) EmitPostMsgTo(msg, clientID string) {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return
 	}
+	clientID = strings.TrimSpace(clientID)
 	e.mu.Lock()
 	hasSubs := len(e.postMsgSubs) > 0
 	if !hasSubs {
-		e.postMsgQ = append(e.postMsgQ, msg)
-		if len(e.postMsgQ) > 64 {
-			e.postMsgQ = e.postMsgQ[len(e.postMsgQ)-64:]
+		if clientID != "" {
+			e.appendClientLocked(clientID, msg)
+		} else if len(e.postMsgSeen) == 0 {
+			e.postMsgUntagged = append(e.postMsgUntagged, msg)
+			e.trimUntaggedLocked()
+		} else {
+			for cid := range e.postMsgSeen {
+				e.appendClientLocked(cid, msg)
+			}
 		}
 	}
 	e.mu.Unlock()
 	e.emit(&e.postMsgSubs, msg)
 }
 
-// DrainPostMsg 取出并清空缓冲（供 Flutter /api/v1/ui/poll）。
-func (e *Events) DrainPostMsg() []string {
+func (e *Events) appendClientLocked(clientID, msg string) {
+	if e.postMsgQ == nil {
+		e.postMsgQ = map[string][]string{}
+	}
+	q := append(e.postMsgQ[clientID], msg)
+	if len(q) > 64 {
+		q = q[len(q)-64:]
+	}
+	e.postMsgQ[clientID] = q
+}
+
+func (e *Events) trimUntaggedLocked() {
+	if len(e.postMsgUntagged) > 64 {
+		e.postMsgUntagged = e.postMsgUntagged[len(e.postMsgUntagged)-64:]
+	}
+}
+
+// DrainPostMsg 取出并清空指定客户端缓冲（供 Flutter /api/v1/ui/poll）。
+// clientID 为空时只取 untagged（旧客户端兼容）。
+func (e *Events) DrainPostMsg(clientID string) []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := e.postMsgQ
-	e.postMsgQ = nil
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		out := e.postMsgUntagged
+		e.postMsgUntagged = nil
+		return out
+	}
+	if e.postMsgSeen == nil {
+		e.postMsgSeen = map[string]struct{}{}
+	}
+	e.postMsgSeen[clientID] = struct{}{}
+	out := e.postMsgQ[clientID]
+	delete(e.postMsgQ, clientID)
+	if len(e.postMsgUntagged) > 0 {
+		out = append(append([]string{}, e.postMsgUntagged...), out...)
+		e.postMsgUntagged = nil
+	}
 	return out
 }
 

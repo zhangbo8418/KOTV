@@ -148,6 +148,11 @@ func tryAndroidClear() {
 	_, _ = androidThunderPOST("/thunder/clear", nil)
 }
 
+func stopPlatform() {
+	// 对齐 TV Thunder.stop：deleteTask + release，打断阻塞中的 fetch 轮询。
+	tryAndroidClear()
+}
+
 // ParseContext 在 Android 上仅走迅雷 Native。
 func ParseContext(_ context.Context, raw string) ([]model.Episode, error) {
 	raw = Decode(strings.TrimSpace(raw))
@@ -157,6 +162,8 @@ func ParseContext(_ context.Context, raw string) ([]model.Episode, error) {
 // Fetch 在 Android 上仅走迅雷 SDK（magnet / thunder / ed2k / ftp 等）。
 func Fetch(raw string) (string, error) {
 	raw = Decode(strings.TrimSpace(raw))
+	// 对齐 TV playerContent 前 Source.stop：先停旧任务再起新 Fetch。
+	stopPlatform()
 	return tryAndroidFetch(raw)
 }
 

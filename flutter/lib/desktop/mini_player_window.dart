@@ -1,15 +1,19 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../theme/layout_scale.dart';
 
-/// YouTube 式迷你桌面播放：主界面收起，仅留置顶无边框悬浮小窗。
+/// 迷你播放：桌面为置顶无边框小窗；Android 为系统画中画（PiP）。
 class MiniPlayerWindow {
   MiniPlayerWindow._();
+
+  static const _android = MethodChannel('kotv_android');
 
   static bool get active => _active;
   static bool _active = false;
@@ -19,13 +23,24 @@ class MiniPlayerWindow {
   static bool _prevSkipTaskbar = false;
 
   static bool get supported =>
-      !kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
+      !kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux || Platform.isAndroid);
 
   /// 16:9 悬浮窗（约 YouTube PiP 尺寸）。
   static const Size pipSize = Size(400, 256);
 
+  /// Android PiP 进出回调（系统手势扩大/关闭小窗时通知 UI）。
+  static void Function(bool inPip)? onAndroidPipChanged;
+
+  static bool get _isDesktop =>
+      !kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
+
   static Future<void> enter({Size size = pipSize}) async {
     if (!supported || _active) return;
+    if (Platform.isAndroid) {
+      await _enterAndroidPip();
+      return;
+    }
+    if (!_isDesktop) return;
     try {
       _prevSize = await windowManager.getSize();
       _prevPos = await windowManager.getPosition();
@@ -52,10 +67,18 @@ class MiniPlayerWindow {
       _active = true;
     } catch (e) {
       debugPrint('mini player enter failed: $e');
-      // 失败时尽量恢复，避免卡在半状态
       try {
         await exit();
       } catch (_) {}
+    }
+  }
+
+  static Future<void> _enterAndroidPip() async {
+    try {
+      final ok = await _android.invokeMethod<bool>('enterPip') ?? false;
+      if (ok) _active = true;
+    } catch (e) {
+      debugPrint('android pip enter failed: $e');
     }
   }
 
@@ -65,7 +88,6 @@ class MiniPlayerWindow {
       final visible = display.visibleSize;
       final origin = display.visiblePosition ?? Offset.zero;
       if (visible != null) {
-        // 右下角，类似 YouTube PiP
         return Offset(
           origin.dx + visible.width - size.width - 20,
           origin.dy + visible.height - size.height - 28,
@@ -82,9 +104,14 @@ class MiniPlayerWindow {
 
   static Future<void> exit() async {
     if (!supported) return;
+    if (Platform.isAndroid) {
+      // 系统 PiP 由用户点扩大退出；此处只复位状态
+      _active = false;
+      return;
+    }
+    if (!_isDesktop) return;
     final wasActive = _active;
     try {
-      // 恢复系统标题栏（撤销 frameless）
       await windowManager.setTitleBarStyle(
         TitleBarStyle.normal,
         windowButtonVisibility: true,
@@ -115,5 +142,18 @@ class MiniPlayerWindow {
         _prevPos = null;
       }
     }
+  }
+
+  /// 在 main 里调用一次，监听系统 PiP 模式变化。
+  static void bindAndroidPipListener() {
+    if (kIsWeb || !Platform.isAndroid) return;
+    _android.setMethodCallHandler((call) async {
+      if (call.method == 'onPipChanged') {
+        final inPip = call.arguments == true;
+        _active = inPip;
+        onAndroidPipChanged?.call(inPip);
+      }
+      return null;
+    });
   }
 }

@@ -78,6 +78,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    MiniPlayerWindow.bindAndroidPipListener();
     // 同步一次当前系统亮暗
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

@@ -181,6 +181,7 @@ object ThunderXunleiLoader : ThunderLoader {
 
   private fun waitMetaDone(taskId: GetTaskId) {
     for (i in 0 until 100) {
+      if (currentTask.get() != null && currentTask.get() != taskId) return
       if (xl().getTaskInfo(taskId).taskStatus == 2) return
       SystemClock.sleep(100)
     }
@@ -241,6 +242,10 @@ object ThunderXunleiLoader : ThunderLoader {
     currentTask.set(taskId)
     currentIndex.set(index)
     for (i in 0 until 100) {
+      // clear()/Stop 会把 currentTask 置空：立即退出等待，对齐 TV Thunder.stop 可打断
+      if (currentTask.get() != taskId) {
+        throw IllegalStateException("已取消")
+      }
       val info: XLTaskInfo = xl().getBtSubTaskInfo(taskId, index).mTaskInfo
         ?: throw IllegalStateException("bt subtask null")
       if (info.mTaskStatus == 3) {

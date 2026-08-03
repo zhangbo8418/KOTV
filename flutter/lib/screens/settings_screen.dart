@@ -579,7 +579,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return Column(
       children: [
         LibraryTopBar(
-          onBack: () => goKotvPage(ref, KotvPage.video),
+          onBack: () => kotvPageBack(ref),
           onSearch: () => goKotvPage(ref, KotvPage.search),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
           onNews: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port'),

@@ -106,7 +106,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             padding: EdgeInsets.fromLTRB(sidePad, 18 * s, sidePad, 0),
             child: Row(
               children: [
-                AppPill(label: '返回', width: compact ? 88 : 104, height: 40, onTap: () => goKotvPage(ref, KotvPage.video)),
+                AppPill(label: '返回', width: compact ? 88 : 104, height: 40, onTap: () => kotvPageBack(ref)),
                 SizedBox(width: 10 * s),
                 AppPill(label: '搜索', width: compact ? 88 : 104, height: 40, onTap: () => goKotvPage(ref, KotvPage.search)),
                 SizedBox(width: 10 * s),

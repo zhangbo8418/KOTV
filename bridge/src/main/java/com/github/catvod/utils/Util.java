@@ -34,6 +34,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Util {
+    /** 当前 JAR 调用所属的 Flutter clientId（由 SpiderBridge 从请求注入）。 */
+    private static final ThreadLocal<String> CLIENT_ID_TL = new ThreadLocal<>();
+
     private static final AtomicLong UI_NOTIFY_EPOCH = new AtomicLong();
     private static final ExecutorService UI_MESSAGES = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "catvod-ui-messages");
@@ -208,6 +211,22 @@ public class Util {
     public static final long UI_HANDSHAKE_MS = 20_000L;
     public static final long UI_CLOSE_WAIT_MS = 20_000L;
 
+    /** 绑定当前线程的 Flutter clientId（一次 spider 调用期间有效）。 */
+    public static void setClientId(String id) {
+        if (id == null || id.isEmpty()) CLIENT_ID_TL.remove();
+        else CLIENT_ID_TL.set(id);
+    }
+
+    public static void clearClientId() {
+        CLIENT_ID_TL.remove();
+    }
+
+    /** 当前线程绑定的 clientId；无则空串。 */
+    public static String clientId() {
+        String s = CLIENT_ID_TL.get();
+        return s == null ? "" : s;
+    }
+
     /**
      * Notify host via local proxy {@code /postMsg}; also logs.
      * {@code UI:}/{@code UI_CLOSE:} are sent synchronously so waitUiAction can start after delivery.
@@ -221,15 +240,20 @@ public class Util {
         }
         SpiderDebug.log(msg);
         long epoch = UI_NOTIFY_EPOCH.get();
+        // 异步队列在另一线程执行，必须捕获当前 clientId，否则会丢路由。
+        final String cid = clientId();
         UI_MESSAGES.execute(() -> {
             if (epoch != UI_NOTIFY_EPOCH.get()) {
                 SpiderDebug.log("postMsg dropped (ui cancelled)");
                 return;
             }
             try {
+                setClientId(cid);
                 postHttpMsg(msg);
             } catch (Exception e) {
                 SpiderDebug.log("postMsg fail: " + e.getMessage());
+            } finally {
+                clearClientId();
             }
         });
     }
@@ -285,15 +309,77 @@ public class Util {
     }
 
     /**
+     * 按弹窗 session 记住宿主客户端平台（android/ios/…）。
+     * 多前端连同一引擎时不能用全局「最近一次」——会串台。
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> hostPlatformBySession =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, Boolean> hostDesktopBySession =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** @param session 弹窗 id；空则返回空串（勿再依赖全局最近一次） */
+    public static String hostPlatform(String session) {
+        if (session == null || session.isEmpty()) return "";
+        String p = hostPlatformBySession.get(session);
+        return p == null ? "" : p;
+    }
+
+    public static boolean hostDesktop(String session) {
+        if (session == null || session.isEmpty()) return false;
+        return Boolean.TRUE.equals(hostDesktopBySession.get(session));
+    }
+
+    /** @deprecated 多前端会串台；请用 {@link #hostPlatform(String session)} 或 {@link UiBridge#hostPlatform(String kind)} */
+    @Deprecated
+    public static String hostPlatform() {
+        return "";
+    }
+
+    /** @deprecated 多前端会串台；请用 {@link #hostDesktop(String session)} */
+    @Deprecated
+    public static boolean hostDesktop() {
+        return false;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void rememberHostFromReply(String session, String raw) {
+        if (session == null || session.isEmpty()) return;
+        if (raw == null || raw.isEmpty() || !raw.trim().startsWith("{")) return;
+        Map<String, Object> event = Json.parseSafe(raw.trim(), Map.class);
+        if (event == null) return;
+        Object valuesObj = event.get("values");
+        if (!(valuesObj instanceof Map)) return;
+        Map<?, ?> values = (Map<?, ?>) valuesObj;
+        Object platform = values.get("platform");
+        if (platform != null) {
+            String p = String.valueOf(platform).trim().toLowerCase(Locale.ROOT);
+            if (!p.isEmpty() && !"null".equals(p)) hostPlatformBySession.put(session, p);
+        }
+        Object desktop = values.get("desktop");
+        if (desktop != null) {
+            String d = String.valueOf(desktop).trim().toLowerCase(Locale.ROOT);
+            hostDesktopBySession.put(session, "true".equals(d) || "1".equals(d) || "yes".equals(d));
+        }
+    }
+
+    static void clearHostClientInfo(String session) {
+        if (session == null || session.isEmpty()) return;
+        hostPlatformBySession.remove(session);
+        hostDesktopBySession.remove(session);
+    }
+
+    /**
      * Block until host reports {@code want} (or a compatible terminal action) for {@code session}.
      * Used for shown/closed handshake; does not dispatch business cancel/submit handlers.
+     * When waiting for {@code shown}, caches platform under this {@code session}.
      */
     public static boolean waitUiAction(String session, String want, long timeoutMs) {
         if (session == null || session.isEmpty() || want == null || want.isEmpty()) return false;
         long deadline = System.currentTimeMillis() + Math.max(200L, timeoutMs);
         String expect = want.trim().toLowerCase();
         while (System.currentTimeMillis() < deadline) {
-            String action = uiReplyAction(takeUiReplyRaw(session)).toLowerCase(Locale.ROOT);
+            String raw = takeUiReplyRaw(session);
+            String action = uiReplyAction(raw).toLowerCase(Locale.ROOT);
             if (action.isEmpty()) {
                 try {
                     Thread.sleep(40);
@@ -303,7 +389,13 @@ public class Util {
                 }
                 continue;
             }
-            if (action.equals(expect)) return true;
+            if (action.equals(expect)) {
+                if ("shown".equals(expect)) rememberHostFromReply(session, raw);
+                if ("closed".equals(expect) || isUiTerminalAction(action)) {
+                    // closed 后可清；shown 阶段还要给脚本读 platform，等 clearSession/dispose 再清
+                }
+                return true;
+            }
             if ("shown".equals(expect)) {
                 if (isUiTerminalAction(action)) return false;
                 continue;
@@ -320,6 +412,7 @@ public class Util {
                         break;
                     }
                 }
+                clearHostClientInfo(session);
                 return true;
             }
         }
@@ -404,10 +497,13 @@ public class Util {
     private static void postHttpMsg(String msg) throws IOException {
         String base = Proxy.getHostPort();
         if (base == null || base.isEmpty()) return;
+        String cid = clientId();
+        String clientQ = cid.isEmpty() ? "" : "clientId=" + urlEncode(cid);
         // Long payloads (QRIMG base64) must use POST body; GET query length is limited.
         if (msg.length() > 800) {
             RequestBody body = RequestBody.create(msg, MediaType.parse("text/plain; charset=utf-8"));
-            Request req = new Request.Builder().url(base + "/postMsg").post(body).build();
+            String url = base + "/postMsg" + (clientQ.isEmpty() ? "" : "?" + clientQ);
+            Request req = new Request.Builder().url(url).post(body).build();
             try (Response response = OkHttp.newCall(req).execute()) {
                 if (response != null && !response.isSuccessful()) {
                     SpiderDebug.log("send msg fail：" + msg.substring(0, Math.min(40, msg.length())));
@@ -416,7 +512,8 @@ public class Util {
             return;
         }
         String encoded = urlEncode(msg);
-        try (Response response = OkHttp.newCall(base + "/postMsg?msg=" + encoded).execute()) {
+        String url = base + "/postMsg?msg=" + encoded + (clientQ.isEmpty() ? "" : "&" + clientQ);
+        try (Response response = OkHttp.newCall(url).execute()) {
             if (response != null && !response.isSuccessful()) {
                 SpiderDebug.log("send msg fail：" + msg);
             }

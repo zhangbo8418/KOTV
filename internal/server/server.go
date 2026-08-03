@@ -188,12 +188,20 @@ func (s *Server) Stop() {
 }
 
 // handlePostMsg 承接爬虫 jar Util.notify / UiBridge（GET/POST ?msg=）。
+// 可选 clientId（query / header）把消息投递到对应 Flutter 客户端队列。
 func (s *Server) handlePostMsg(w http.ResponseWriter, r *http.Request) {
 	msg := strings.TrimSpace(r.URL.Query().Get("msg"))
+	clientID := strings.TrimSpace(r.URL.Query().Get("clientId"))
+	if clientID == "" {
+		clientID = strings.TrimSpace(r.Header.Get("X-Kotv-Client-Id"))
+	}
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		if v := strings.TrimSpace(r.Form.Get("msg")); v != "" {
 			msg = v
+		}
+		if v := strings.TrimSpace(r.Form.Get("clientId")); v != "" {
+			clientID = v
 		}
 		if msg == "" {
 			// Declarative UI documents may include compact images; keep a generous bound.
@@ -205,7 +213,7 @@ func (s *Server) handlePostMsg(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing msg", http.StatusBadRequest)
 		return
 	}
-	s.events.EmitPostMsg(msg)
+	s.events.EmitPostMsgTo(msg, clientID)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
 }

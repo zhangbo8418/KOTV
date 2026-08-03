@@ -563,6 +563,31 @@ public final class UiBridge {
     }
 
     /**
+     * 当前 kind 弹窗对应的客户端平台（android/ios/…）。
+     * 以 Flutter 前端为准；按 session 隔离，多前端不会串台。
+     * 须在 {@code show}/{@code shown} 握手成功后读取。
+     */
+    public static String hostPlatform(String kind) {
+        return Util.hostPlatform(currentSession(kind));
+    }
+
+    public static boolean hostDesktop(String kind) {
+        return Util.hostDesktop(currentSession(kind));
+    }
+
+    /** @deprecated 请用 {@link #hostPlatform(String kind)}，避免多前端串台 */
+    @Deprecated
+    public static String hostPlatform() {
+        return "";
+    }
+
+    /** @deprecated 请用 {@link #hostDesktop(String kind)} */
+    @Deprecated
+    public static boolean hostDesktop() {
+        return false;
+    }
+
+    /**
      * 等宿主登录窗结局（shown/closed 握手）。
      * 认 {@code CLOSED}/{@code CANCEL}/{@code SUBMIT:}；不再用 hasSession 消失猜关窗（会与换窗竞态）。
      *
@@ -586,7 +611,21 @@ public final class UiBridge {
                 return "CANCEL";
             }
         }
-        return done.getAsBoolean() ? "" : "TIMEOUT";
+        if (done.getAsBoolean()) {
+            // 登录已成功：脚本侧必须主动关宿主窗（宿主不管业务，不会自己猜关）。
+            String session = currentSession(k);
+            if (!session.isEmpty()) {
+                cancelBySession.remove(session);
+                submitBySession.remove(session);
+                qrBySession.remove(session);
+                sessionByKind.remove(k, session);
+                closeDocument(session);
+                Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
+                Util.clearPendingUiNotify();
+            }
+            return "";
+        }
+        return "TIMEOUT";
     }
 
     private static void clearSession(String session) {
@@ -597,6 +636,7 @@ public final class UiBridge {
                 break;
             }
         }
+        Util.clearHostClientInfo(session);
     }
 
     public static void dispose(Handle handle) {
@@ -747,6 +787,7 @@ public final class UiBridge {
             // 先 CLOSE 再等 closed；成功后再清异步 toast 队列。
             closeDocument(session);
             Util.waitUiAction(session, "closed", Util.UI_CLOSE_WAIT_MS);
+            Util.clearHostClientInfo(session);
             Util.clearPendingUiNotify();
         };
     }

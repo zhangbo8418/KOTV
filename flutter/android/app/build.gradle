@@ -162,8 +162,10 @@ def engineSoAlt = new File(repoRoot, "flutter/assets/engine/libkotv_engine.so")
 tasks.register("prepareSpiderBridgeJar") {
     doLast {
         def bridgeSrc = new File(repoRoot, "bridge/src/main/java/com/bobo/kotv/bridge/SpiderBridge.java")
+        def uiBridgeSrc = new File(repoRoot, "bridge/src/main/java/com/github/catvod/utils/UiBridge.java")
         def needBridgeBuild = !bridgeJar.exists() || bridgeJar.length() == 0L ||
-            (bridgeSrc.exists() && bridgeSrc.lastModified() > bridgeJar.lastModified())
+            (bridgeSrc.exists() && bridgeSrc.lastModified() > bridgeJar.lastModified()) ||
+            (uiBridgeSrc.exists() && uiBridgeSrc.lastModified() > bridgeJar.lastModified())
         if (needBridgeBuild) {
             println "[android] rebuilding spider-bridge.jar..."
             def toolchain = System.getenv("KOTV_JAVA_TOOLCHAIN") ?: "17"

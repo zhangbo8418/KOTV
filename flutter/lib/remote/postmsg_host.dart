@@ -7,11 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api/kotv_api.dart';
+import '../player/kotv_platform.dart';
 
 /// 通用宿主弹窗：只认协议 [UI:] / [UI_CLOSE:]，不关心业务。
 /// 脚本（JAR/JS/Py）决定内容与时机；宿主只负责：
-/// - 展示 → 回报 `shown`
+/// - 展示 → 回报 `shown`（附带客户端 platform，供脚本按端生成 deep link）
 /// - 关闭 → 回报 `closed`
+///
+/// platform 以 Flutter 前端为准（非引擎 OS）：iOS 连远程引擎时仍是 `ios`。
 ///
 /// 已有窗再来 [UI:]：同窗原地换文档（不 pop），并回报旧 id `closed` + 新 id `shown`。
 /// 这是 Win7 关键：关开握手在慢机上会闪死/卡死，macOS 快所以不易踩中。
@@ -63,6 +66,9 @@ class PostMsgHost {
   String _lastToast = '';
   DateTime _lastToastAt = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// 是否有声明式窗（含 opening 窗口期）；外壳返回键优先关窗。
+  bool get hasOpenDialog => _sessionActive || _opening || _dialogContext != null;
+
   void start() {
     instance = this;
     _timer?.cancel();
@@ -79,12 +85,14 @@ class PostMsgHost {
 
   /// 关掉当前声明式窗，并向引擎回传 dismiss。
   /// [popDialog] 保留兼容：关窗一律走 dialog context，不会误 pop 其它路由。
+  /// 用户/外壳取消时顺带 [cancelPending]，避免 JAR 占住后详情再也进不去。
   Future<void> cancelAll({bool reply = true, bool popDialog = true}) async {
     final id = _activeId ?? _lifecycleId;
     if (reply && id != null && id.isNotEmpty) {
-      await _enqueueReply(id: id, action: 'dismiss');
+      await _enqueueReply(id: id, action: 'dismiss', values: _hostClientValues());
     }
     _pendingDoc = null;
+    unawaited(api.cancelPending());
     if (popDialog || _sessionActive || _opening) {
       _dismiss();
     } else {
@@ -259,16 +267,30 @@ class PostMsgHost {
   }
 
   void _popDialogRoute() {
+    _programmaticClose = true;
+    NavigatorState? nav;
     final dialogCtx = _dialogContext;
-    if (dialogCtx == null) return;
-    if (!dialogCtx.mounted) {
-      _dialogContext = null;
+    if (dialogCtx != null && dialogCtx.mounted) {
+      try {
+        nav = Navigator.of(dialogCtx, rootNavigator: true);
+      } catch (_) {}
+    }
+    nav ??= navigatorKey.currentState;
+    if (nav != null && nav.canPop()) {
+      nav.pop();
       return;
     }
-    final nav = Navigator.of(dialogCtx, rootNavigator: false);
-    if (!nav.canPop()) return;
-    _programmaticClose = true;
-    nav.pop();
+    // 弹不掉：会话与路由可能失步。清 context，并若已无 opening 则强制 idle，
+    // 避免 hasOpenDialog 永久为 true 导致返回键只打空转、详情再也进不去。
+    _dialogContext = null;
+    if (!_opening && (_sessionActive || _lifecycleId != null)) {
+      final id = (_lifecycleId ?? '').trim();
+      if (id.isNotEmpty && !_reportedClosed) {
+        _reportedClosed = true;
+        unawaited(_enqueueReply(id: id, action: 'closed'));
+      }
+      _resetIdleState();
+    }
   }
 
   Future<void> _enqueueReply({
@@ -288,10 +310,20 @@ class PostMsgHost {
     return done.future;
   }
 
+  /// 客户端宿主信息（不是引擎机器）：脚本用 platform 决定 deep link / 按钮。
+  Map<String, String> _hostClientValues([Map<String, String>? extra]) {
+    final out = <String, String>{
+      'platform': kotvHostPlatform(),
+      'desktop': kotvIsDesktop() ? 'true' : 'false',
+    };
+    if (extra != null && extra.isNotEmpty) out.addAll(extra);
+    return out;
+  }
+
   Future<void> _reportShown(String id) async {
     if (_reportedShown || id.isEmpty) return;
     _reportedShown = true;
-    await _enqueueReply(id: id, action: 'shown');
+    await _enqueueReply(id: id, action: 'shown', values: _hostClientValues());
   }
 
   Future<void> _reportClosed() async {
@@ -299,7 +331,7 @@ class PostMsgHost {
     final id = (_lifecycleId ?? '').trim();
     if (id.isEmpty) return;
     _reportedClosed = true;
-    await _enqueueReply(id: id, action: 'closed');
+    await _enqueueReply(id: id, action: 'closed', values: _hostClientValues());
   }
 
   void _resetIdleState() {
@@ -367,9 +399,11 @@ class PostMsgHost {
             onPopInvoked: (didPop) {
               if (!didPop) return;
               if (!_programmaticClose) {
+                // 手势/遥控返回：只关窗 + 通知脚本 dismiss，并打断占住的爬虫请求。
                 if (_lifecycleId != null) {
-                  unawaited(_enqueueReply(id: _lifecycleId!, action: 'dismiss'));
+                  unawaited(_enqueueReply(id: _lifecycleId!, action: 'dismiss', values: _hostClientValues()));
                 }
+                unawaited(api.cancelPending());
                 _activeId = null;
               }
               _dialogContext = null;

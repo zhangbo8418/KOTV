@@ -22,33 +22,36 @@ class KotvColors {
   static const focus = Color(0xFFFFD54F);
 }
 
-/// Windows/Linux/全平台统一：内嵌 Noto Sans SC + Noto Color Emoji；系统字体作最后回退。
+/// 字体回退：拉丁/数字优先系统无衬线，CJK 次之，emoji 最后。
+/// 切勿把 NotoColorEmoji 放最前——缺字时数字会被 emoji 字体带出怪异字距。
 List<String> _kotvFontFallbacks() {
-  const embedded = <String>['NotoColorEmoji'];
-  if (kIsWeb) return embedded;
+  if (kIsWeb) return const ['NotoColorEmoji'];
   if (Platform.isWindows) {
-    return [
-      ...embedded,
-      'Segoe UI Emoji',
-      'Segoe UI Symbol',
+    return const [
+      'Segoe UI',
       'Microsoft YaHei UI',
       'Microsoft YaHei',
-      'Segoe UI',
+      'NotoSansSC',
+      'NotoColorEmoji',
+      'Segoe UI Emoji',
+      'Segoe UI Symbol',
     ];
   }
   if (Platform.isLinux) {
-    return [
-      ...embedded,
-      'Noto Color Emoji',
-      'Noto Sans CJK SC',
+    return const [
+      'Noto Sans',
       'DejaVu Sans',
+      'NotoSansSC',
+      'Noto Sans CJK SC',
+      'NotoColorEmoji',
+      'Noto Color Emoji',
     ];
   }
   if (Platform.isAndroid) {
-    return [...embedded, 'Noto Color Emoji', 'sans-serif'];
+    // 主字体用系统 Roboto（见 buildKotvTheme）；此处补 CJK + emoji
+    return const ['NotoSansSC', 'sans-serif', 'NotoColorEmoji', 'Noto Color Emoji'];
   }
-  // iOS / macOS：系统中文通常够好，emoji 用内嵌补齐缺字
-  return [...embedded, 'PingFang SC', 'Hiragino Sans GB', 'Apple Color Emoji'];
+  return const ['PingFang SC', 'Hiragino Sans GB', 'NotoSansSC', 'NotoColorEmoji', 'Apple Color Emoji'];
 }
 
 ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
@@ -68,13 +71,16 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     outline: palette.outline,
   );
   final fallbacks = _kotvFontFallbacks();
+  // Android：主字体用系统 Roboto，数字/英文正常；NotoSansSC 仅作 CJK 回退。
+  // 其它平台：NotoSansSC 作主字体（Win7 等缺系统 CJK）。
+  final useSystemLatin = !kIsWeb && Platform.isAndroid;
   return ThemeData(
     useMaterial3: true,
     brightness: scheme.brightness,
     colorScheme: scheme,
     scaffoldBackgroundColor: Colors.transparent,
     extensions: [palette],
-    fontFamily: 'NotoSansSC',
+    fontFamily: useSystemLatin ? null : 'NotoSansSC',
     fontFamilyFallback: fallbacks,
     // Android 14+ 预测性返回 / 全面屏手势；iOS/macOS 用 Cupertino 跟手侧滑
     // Win7（Flutter 3.19）由 adapt-flutter-win7-sdk.sh 将 PredictiveBack 换成 Zoom

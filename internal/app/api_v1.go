@@ -228,9 +228,10 @@ func (a *App) APIBtProgress() map[string]any {
 	}
 }
 
-// APICancelPending 离开详情/取消扫码时打断卡住的 JAR/脚本调用。
+// APICancelPending 离开详情/取消扫码时打断卡住的 JAR/脚本调用，并停掉磁力 Fetch。
 func (a *App) APICancelPending() map[string]any {
 	a.Sites.CancelPendingContent()
+	thunder.Stop()
 	return map[string]any{"ok": true}
 }
 
@@ -359,6 +360,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	mediaURL := playURL
 	magnet := thunder.Match(playURL)
 	if magnet {
+		// 对齐 TV：起播前 Source.stop，确保可被 cancelPending / 换集打断
+		thunder.Stop()
 		local, err := thunder.Fetch(playURL)
 		if err != nil {
 			return nil, fmt.Errorf("磁力链接解析失败: %w", err)

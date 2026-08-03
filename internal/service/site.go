@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/bobo/KOTV/internal/config"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/spider"
@@ -445,10 +446,13 @@ func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcu
 	}
 	results := make([]siteResult, len(searchable))
 	var wg sync.WaitGroup
+	cid := hostclient.Current()
 	for i, site := range searchable {
 		wg.Add(1)
 		go func(i int, site model.Site) {
 			defer wg.Done()
+			done := hostclient.Enter(cid)
+			defer done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			list, err := s.searchSite(site, keyword, false, "1")

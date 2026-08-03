@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/remote"
 )
 
@@ -76,33 +77,50 @@ func (s *Server) content() ContentAPI {
 }
 
 func (s *Server) registerAPIv1(mux *http.ServeMux) {
-	mux.HandleFunc("/api/v1/health", s.handleAPIv1Health)
-	mux.HandleFunc("/api/v1/config", s.handleAPIv1Config)
-	mux.HandleFunc("/api/v1/home", s.handleAPIv1Home)
-	mux.HandleFunc("/api/v1/category", s.handleAPIv1Category)
-	mux.HandleFunc("/api/v1/detail", s.handleAPIv1Detail)
-	mux.HandleFunc("/api/v1/detail/expand", s.handleAPIv1DetailExpand)
-	mux.HandleFunc("/api/v1/bt/progress", s.handleAPIv1BtProgress)
-	mux.HandleFunc("/api/v1/search", s.handleAPIv1Search)
-	mux.HandleFunc("/api/v1/play", s.handleAPIv1Play)
-	mux.HandleFunc("/api/v1/sites", s.handleAPIv1Sites)
-	mux.HandleFunc("/api/v1/remote/poll", s.handleAPIv1RemotePoll)
-	mux.HandleFunc("/api/v1/media", s.handleAPIv1Media)
-	mux.HandleFunc("/api/v1/repos", s.handleAPIv1Repos)
-	mux.HandleFunc("/api/v1/settings", s.handleAPIv1Settings)
-	mux.HandleFunc("/api/v1/live", s.handleAPIv1Live)
-	mux.HandleFunc("/api/v1/player", s.handleAPIv1Player)
-	mux.HandleFunc("/api/v1/tools", s.handleAPIv1Tools)
-	mux.HandleFunc("/api/v1/ui/poll", s.handleAPIv1UIPoll)
-	mux.HandleFunc("/api/v1/ui/reply", s.handleAPIv1UIReply)
-	mux.HandleFunc("/api/v1/cancel", s.handleAPIv1Cancel)
-	mux.HandleFunc("/api/v1/shutdown", s.handleAPIv1Shutdown)
+	wrap := s.withHostClient
+	mux.HandleFunc("/api/v1/health", wrap(s.handleAPIv1Health))
+	mux.HandleFunc("/api/v1/config", wrap(s.handleAPIv1Config))
+	mux.HandleFunc("/api/v1/home", wrap(s.handleAPIv1Home))
+	mux.HandleFunc("/api/v1/category", wrap(s.handleAPIv1Category))
+	mux.HandleFunc("/api/v1/detail", wrap(s.handleAPIv1Detail))
+	mux.HandleFunc("/api/v1/detail/expand", wrap(s.handleAPIv1DetailExpand))
+	mux.HandleFunc("/api/v1/bt/progress", wrap(s.handleAPIv1BtProgress))
+	mux.HandleFunc("/api/v1/search", wrap(s.handleAPIv1Search))
+	mux.HandleFunc("/api/v1/play", wrap(s.handleAPIv1Play))
+	mux.HandleFunc("/api/v1/sites", wrap(s.handleAPIv1Sites))
+	mux.HandleFunc("/api/v1/remote/poll", wrap(s.handleAPIv1RemotePoll))
+	mux.HandleFunc("/api/v1/media", wrap(s.handleAPIv1Media))
+	mux.HandleFunc("/api/v1/repos", wrap(s.handleAPIv1Repos))
+	mux.HandleFunc("/api/v1/settings", wrap(s.handleAPIv1Settings))
+	mux.HandleFunc("/api/v1/live", wrap(s.handleAPIv1Live))
+	mux.HandleFunc("/api/v1/player", wrap(s.handleAPIv1Player))
+	mux.HandleFunc("/api/v1/tools", wrap(s.handleAPIv1Tools))
+	mux.HandleFunc("/api/v1/ui/poll", wrap(s.handleAPIv1UIPoll))
+	mux.HandleFunc("/api/v1/ui/reply", wrap(s.handleAPIv1UIReply))
+	mux.HandleFunc("/api/v1/cancel", wrap(s.handleAPIv1Cancel))
+	mux.HandleFunc("/api/v1/shutdown", wrap(s.handleAPIv1Shutdown))
+}
+
+// withHostClient 把请求头里的 X-Kotv-Client-Id 绑到当前 goroutine，供 JAR 调用携带。
+func (s *Server) withHostClient(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		done := hostclient.Enter(clientIDFromRequest(r))
+		defer done()
+		next(w, r)
+	}
+}
+
+func clientIDFromRequest(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("X-Kotv-Client-Id")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(r.URL.Query().Get("clientId"))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Kotv-Client-Id")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
@@ -756,7 +774,7 @@ func (s *Server) handleAPIv1UIPoll(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	msgs := s.events.DrainPostMsg()
+	msgs := s.events.DrainPostMsg(clientIDFromRequest(r))
 	if msgs == nil {
 		msgs = []string{}
 	}

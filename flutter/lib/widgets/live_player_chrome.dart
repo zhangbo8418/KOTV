@@ -4,7 +4,7 @@ import '../player/kotv_playback.dart';
 import '../theme/kotv_theme.dart';
 import 'vod_player_chrome.dart';
 
-/// 直播回看底栏：进度可拖、音量、投屏、迷你、播放器、软硬解。
+/// 直播底栏控件：播放/暂停、投屏、迷你、全屏、播放器、软硬解、音量；（回看时含进度）。
 class LiveCatchupChrome extends StatelessWidget {
   const LiveCatchupChrome({
     super.key,
@@ -13,6 +13,7 @@ class LiveCatchupChrome extends StatelessWidget {
     this.translucent = false,
     this.onCast,
     this.onMini,
+    this.onExpand,
     this.onPlayer,
     this.onDecode,
     this.playerLabel = '内置 MPV',
@@ -24,6 +25,8 @@ class LiveCatchupChrome extends StatelessWidget {
   final bool translucent;
   final VoidCallback? onCast;
   final VoidCallback? onMini;
+  /// 全屏（移动端播放器控件需要）。
+  final VoidCallback? onExpand;
   final VoidCallback? onPlayer;
   final VoidCallback? onDecode;
   final String playerLabel;
@@ -62,6 +65,13 @@ class LiveCatchupChrome extends StatelessWidget {
                         tip: miniActive ? '还原窗口' : '迷你桌面播放',
                         compact: compact,
                         onTap: onMini!,
+                      ),
+                    if (onExpand != null && !miniActive)
+                      _act(
+                        icon: Icons.fullscreen,
+                        tip: '全屏',
+                        compact: compact,
+                        onTap: onExpand!,
                       ),
                     if (!compact && onPlayer != null)
                       _textAct(playerLabel, onPlayer!),

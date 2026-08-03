@@ -126,7 +126,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     return Column(
       children: [
         LibraryTopBar(
-          onBack: () => goKotvPage(ref, KotvPage.video),
+          onBack: () => kotvPageBack(ref),
           onSearch: () => _search(_ctrl.text),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
           onNews: () => showAppNews(context, remoteHint(ref)),

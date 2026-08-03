@@ -42,7 +42,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     return Column(
       children: [
         LibraryTopBar(
-          onBack: () => goKotvPage(ref, KotvPage.video),
+          onBack: () => kotvPageBack(ref),
           onSearch: () => goKotvPage(ref, KotvPage.search),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
           onNews: () => showAppNews(context, remoteHint(ref)),

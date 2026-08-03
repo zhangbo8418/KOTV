@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../api/kotv_api.dart';
+import '../api/kotv_client_id.dart';
 
 /// 探测并拉起本机 Go 引擎；随 UI 进程生命周期托管（窗口关闭即退出）。
 class EngineLauncher {
@@ -23,6 +24,8 @@ class EngineLauncher {
   KotvApi client() => KotvApi(baseUrl: baseUrl);
 
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {
+    // 尽早固化 clientId，后续 API / ui/poll 带同一身份。
+    await kotvClientId();
     await _startOnce();
 
     final deadline = DateTime.now().add(timeout);

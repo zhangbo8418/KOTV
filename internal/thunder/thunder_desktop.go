@@ -70,10 +70,33 @@ var (
 	mu      sync.Mutex
 	client  *torrent.Client
 	entries = map[string]*entry{} // ih#index → entry
+
+	fetchWaitMu     sync.Mutex
+	fetchWaitCancel context.CancelFunc
 )
 
 // Desktop stubs：Android 迅雷钩子在本平台为空实现。
 func tryAndroidProgress() (FetchProgress, bool) { return FetchProgress{}, false }
+
+func stopPlatform() { cancelFetchWait() }
+
+func cancelFetchWait() {
+	fetchWaitMu.Lock()
+	defer fetchWaitMu.Unlock()
+	if fetchWaitCancel != nil {
+		fetchWaitCancel()
+		fetchWaitCancel = nil
+	}
+}
+
+func beginFetchWait() context.Context {
+	cancelFetchWait()
+	ctx, cancel := context.WithCancel(context.Background())
+	fetchWaitMu.Lock()
+	fetchWaitCancel = cancel
+	fetchWaitMu.Unlock()
+	return ctx
+}
 
 // ParseContext 在 parent 取消或超时后停止等待元数据。
 func ParseContext(parent context.Context, raw string) ([]model.Episode, error) {
@@ -118,7 +141,10 @@ func Fetch(raw string) (string, error) {
 		return "", fmt.Errorf("电驴/FTP 仅 Android 迅雷支持")
 	}
 	setProgress("meta", 0, 0, 0, "正在获取磁力元数据…")
-	metaCtx, metaCancel := context.WithTimeout(context.Background(), metaTimeout)
+	parent := beginFetchWait()
+	defer cancelFetchWait()
+
+	metaCtx, metaCancel := context.WithTimeout(parent, metaTimeout)
 	defer metaCancel()
 
 	path, name, index, ih, isFileMagnet := parsePlayURL(raw)
@@ -172,7 +198,7 @@ func Fetch(raw string) (string, error) {
 		ih, index, filepath.Base(file.DisplayPath()), file.Length())
 	setProgress("buffer", 0, 0, minStartBytes, "正在缓冲片头…")
 
-	bufCtx, bufCancel := context.WithTimeout(context.Background(), bufferTimeout)
+	bufCtx, bufCancel := context.WithTimeout(parent, bufferTimeout)
 	defer bufCancel()
 	if err := waitHeadBuffer(bufCtx, t, file); err != nil {
 		setProgress("error", 0, file.BytesCompleted(), minStartBytes, err.Error())

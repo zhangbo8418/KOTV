@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
@@ -266,12 +267,13 @@ func downloadBinary(rawURL, dest string) error {
 }
 
 type bridgeRequest struct {
-	Method string                 `json:"method"`
-	Key    string                 `json:"key"`
-	API    string                 `json:"api"`
-	Ext    string                 `json:"ext"`
-	Jar    string                 `json:"jar"`
-	Args   map[string]interface{} `json:"args"`
+	Method   string                 `json:"method"`
+	Key      string                 `json:"key"`
+	API      string                 `json:"api"`
+	Ext      string                 `json:"ext"`
+	Jar      string                 `json:"jar"`
+	Args     map[string]interface{} `json:"args"`
+	ClientID string                 `json:"clientId,omitempty"`
 }
 
 func (s *jarSpider) resolveJarPath() (string, error) {
@@ -378,12 +380,13 @@ func (s *jarSpider) call(method string, args map[string]interface{}) (string, er
 
 	req := bridgeRequest{
 		Method: method,
- // spider.siteKey 是站点 key；jar 缓存键由 bridge 用 md5(jar)+key 组合。
-		Key:  s.key,
-		API:  s.api,
-		Ext:  s.ext,
-		Jar:  jp,
-		Args: args,
+		// spider.siteKey 是站点 key；jar 缓存键由 bridge 用 md5(jar)+key 组合。
+		Key:      s.key,
+		API:      s.api,
+		Ext:      s.ext,
+		Jar:      jp,
+		Args:     args,
+		ClientID: hostclient.Current(),
 	}
 	payload, _ := json.Marshal(req)
 

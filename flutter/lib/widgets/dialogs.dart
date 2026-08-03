@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
+import '../theme/kotv_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
@@ -105,6 +106,7 @@ Future<void> showSitePicker(
                                       label: s.name,
                                       height: 40,
                                       selected: s.home,
+                                      autofocus: i == 0,
                                       onTap: () {
                                         Navigator.pop(ctx);
                                         onSelect(s.key);
@@ -145,6 +147,7 @@ Future<void> showSitePicker(
                                     label: s.name,
                                     height: 44,
                                     selected: s.home,
+                                    autofocus: i == 0,
                                     onTap: () {
                                       Navigator.pop(ctx);
                                       onSelect(s.key);
@@ -405,25 +408,35 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
                       Expanded(
                         child: ListView(
                           children: [
-                            for (final r in list)
-                              if ('${r['url']}' != current) ...[
+                            ...() {
+                              final rows = <Widget>[];
+                              var focused = false;
+                              for (final r in list) {
+                                if ('${r['url']}' == current) continue;
+                                rows.add(
+                                  _RepoRow(
+                                    label: '${r['name'] ?? r['url']}',
+                                    autofocus: !focused,
+                                    onTap: () => Navigator.pop(ctx, '${r['url']}'),
+                                    onDelete: () async {
+                                      await api.deleteRepo('${r['url']}');
+                                      await reload();
+                                    },
+                                  ),
+                                );
+                                rows.add(const SizedBox(height: 8));
+                                focused = true;
+                              }
+                              rows.add(
                                 _RepoRow(
-                                  label: '${r['name'] ?? r['url']}',
-                                  onTap: () => Navigator.pop(ctx, '${r['url']}'),
-                                  onDelete: () async {
-                                    await api.deleteRepo('${r['url']}');
-                                    await reload();
-                                  },
+                                  label: '＋ 添加线路',
+                                  autofocus: !focused,
+                                  onTap: () => Navigator.pop(ctx, ''),
+                                  onDelete: null,
                                 ),
-                                const SizedBox(height: 8),
-                              ],
-                            _RepoRow(
-                              label: '＋ 添加线路',
-                              onTap: () {
-                                Navigator.pop(ctx, '');
-                              },
-                              onDelete: null,
-                            ),
+                              );
+                              return rows;
+                            }(),
                           ],
                         ),
                       ),
@@ -499,16 +512,17 @@ Future<String?> pickChoice(
 }
 
 class _RepoRow extends StatelessWidget {
-  const _RepoRow({required this.label, required this.onTap, this.onDelete});
+  const _RepoRow({required this.label, required this.onTap, this.onDelete, this.autofocus = false});
   final String label;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Expanded(child: AppPill(label: label, height: 44, onTap: onTap)),
+        Expanded(child: AppPill(label: label, height: 44, autofocus: autofocus, onTap: onTap)),
         if (onDelete != null) ...[
           const SizedBox(width: 8),
           _CircleIcon(icon: Icons.delete_outline, onTap: onDelete!),
@@ -526,14 +540,19 @@ class _CircleIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: const Color(0xE618161E),
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: SizedBox(width: 36, height: 36, child: Icon(icon, color: Colors.white, size: 18)),
+    // 遥控器要能落到搜索/换源/删除；纯 InkWell 无焦点框。
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: 18,
+      child: Material(
+        color: const Color(0xE618161E),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: SizedBox(width: 36, height: 36, child: Icon(icon, color: Colors.white, size: 18)),
+        ),
       ),
     );
   }
@@ -812,64 +831,53 @@ class KotvSettingsCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
     final oneCol = KotvSettingsGrid.effectiveColumns(context, 3) == 1;
+    final maxLabel = MediaQuery.sizeOf(context).width * (oneCol ? 0.42 : 0.35);
+    final labelStyle = TextStyle(
+      color: p.fg,
+      fontSize: oneCol ? 15 : 14,
+      fontWeight: FontWeight.w500,
+      height: 1.2,
+    );
+    final valueStyle = TextStyle(
+      color: p.muted,
+      fontSize: oneCol ? 14 : 13,
+      height: 1.2,
+    );
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: oneCol ? 14 : 12, vertical: oneCol ? 14 : 13),
-          child: oneCol
-              ? Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        label,
-                        style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500, height: 1.2),
-                      ),
-                    ),
-                    if (value.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Flexible(
-                        flex: 2,
-                        child: Text(
-                          value,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.right,
-                          style: TextStyle(color: p.muted, fontSize: 14, height: 1.2),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(width: 4),
-                    Text('›', style: TextStyle(color: p.muted.withOpacity(0.7), fontSize: 18, height: 1)),
-                  ],
-                )
-              : Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: p.fg, fontSize: 14, fontWeight: FontWeight.w500),
-                      ),
-                    ),
-                    if (value.isNotEmpty) ...[
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          value,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.right,
-                          style: TextStyle(color: p.muted, fontSize: 13),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(width: 2),
-                    Text('›', style: TextStyle(color: p.muted.withOpacity(0.7), fontSize: 16, height: 1)),
-                  ],
+          // 标签按内容宽（有上限），数值占剩余并右对齐，避免中英文被撑到两头。
+          child: Row(
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxLabel),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: labelStyle,
                 ),
+              ),
+              if (value.isNotEmpty) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    value,
+                    maxLines: oneCol ? 2 : 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: valueStyle,
+                  ),
+                ),
+              ] else
+                const Spacer(),
+              const SizedBox(width: 4),
+              Text('›', style: TextStyle(color: p.muted.withOpacity(0.7), fontSize: oneCol ? 18 : 16, height: 1)),
+            ],
+          ),
         ),
       ),
     );

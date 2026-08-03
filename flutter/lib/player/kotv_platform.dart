@@ -2,6 +2,18 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+/// 弹窗宿主平台（发给脚本用）：以 Flutter 客户端为准，不是引擎所在机器。
+/// iOS 连远程引擎时，脚本仍应收到 `ios`。
+String kotvHostPlatform() {
+  if (kIsWeb) return 'web';
+  if (Platform.isAndroid) return 'android';
+  if (Platform.isIOS) return 'ios';
+  if (Platform.isMacOS) return 'macos';
+  if (Platform.isWindows) return 'windows';
+  if (Platform.isLinux) return 'linux';
+  return 'unknown';
+}
+
 /// 桌面端（鼠标/窗口）；与手机/TV 的默认焦点框策略不同。
 bool kotvIsDesktop() {
   if (kIsWeb) return false;

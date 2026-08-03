@@ -231,6 +231,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _advanceBusy = false;
     _playGen++;
     _endConsumedGen = _playGen;
+    // 抬起播世代：返回/停播时丢弃进行中的 play/磁力 Fetch 结果
+    _playAtSerial++;
     _sessionStartedAt = null;
     _playingSub?.cancel();
     _endedSub?.cancel();
@@ -243,6 +245,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playUrl = '';
     _magnetPlay = false;
     _stopBtProgressPoll();
+    // 对齐 TV Source.stop：打断引擎侧磁力等待 + 爬虫
+    unawaited(ref.read(apiProvider).cancelPending());
 
     Future<void> hardStop(KotvPlayback? p) async {
       if (p == null) return;
@@ -616,6 +620,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _endedSub = null;
     _posSub?.cancel();
     _posSub = null;
+    // 对齐 TV playerContent 前 Source.stop：打断上一集磁力/解析等待
+    unawaited(ref.read(apiProvider).cancelPending());
     final epLooksMagnet = RegExp(r'^(magnet|thunder|ed2k):', caseSensitive: false).hasMatch(ep.url.trim()) ||
         ep.url.toLowerCase().contains('.torrent') ||
         ep.url.contains('/proxy/bt/') ||
@@ -867,9 +873,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }
       return;
     }
+    MiniPlayerWindow.onAndroidPipChanged = (inPip) {
+      if (!mounted) return;
+      setState(() => _miniDesktop = inPip);
+    };
     await MiniPlayerWindow.enter();
     if (!mounted) return;
-    setState(() => _miniDesktop = true);
+    if (MiniPlayerWindow.active) {
+      setState(() => _miniDesktop = true);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法进入小窗，请检查系统是否支持画中画')));
+    }
   }
 
   Future<void> _exitMini() async {

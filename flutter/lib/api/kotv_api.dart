@@ -2,16 +2,38 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'kotv_client_id.dart';
+
 class KotvApi {
-  KotvApi({String? baseUrl}) : baseUrl = baseUrl ?? 'http://127.0.0.1:9978';
+  KotvApi({String? baseUrl, String? clientId})
+      : baseUrl = baseUrl ?? 'http://127.0.0.1:9978',
+        _clientId = clientId?.trim() ?? '';
 
   String baseUrl;
+  String _clientId;
+
+  /// 确保已加载稳定 clientId（多前端 UI 路由用）。
+  Future<String> ensureClientId() async {
+    if (_clientId.isNotEmpty) return _clientId;
+    _clientId = await kotvClientId();
+    return _clientId;
+  }
 
   Uri _u(String path, [Map<String, String>? query]) =>
       Uri.parse('$baseUrl$path').replace(queryParameters: query);
 
+  Future<Map<String, String>> _headers([Map<String, String>? extra]) async {
+    final id = await ensureClientId();
+    return {
+      if (id.isNotEmpty) 'X-Kotv-Client-Id': id,
+      ...?extra,
+    };
+  }
+
   Future<Map<String, dynamic>> _get(String path, [Map<String, String>? query]) async {
-    final res = await http.get(_u(path, query)).timeout(const Duration(seconds: 120));
+    final res = await http
+        .get(_u(path, query), headers: await _headers())
+        .timeout(const Duration(seconds: 120));
     return _decode(res);
   }
 
@@ -19,7 +41,7 @@ class KotvApi {
     final res = await http
         .post(
           _u(path),
-          headers: {'Content-Type': 'application/json'},
+          headers: await _headers({'Content-Type': 'application/json'}),
           body: jsonEncode(body),
         )
         .timeout(const Duration(seconds: 120));
@@ -55,7 +77,11 @@ class KotvApi {
   /// 本机优雅停引擎（会杀 Java/Python）；仅 loopback 可用。
   Future<Map<String, dynamic>> requestShutdown() async {
     final res = await http
-        .post(_u('/api/v1/shutdown'), headers: {'Content-Type': 'application/json'}, body: '{}')
+        .post(
+          _u('/api/v1/shutdown'),
+          headers: await _headers({'Content-Type': 'application/json'}),
+          body: '{}',
+        )
         .timeout(const Duration(seconds: 3));
     return _decode(res);
   }
@@ -140,7 +166,7 @@ class KotvApi {
 
   Future<Map<String, dynamic>> deleteRepo(String url) async {
     final res = await http
-        .delete(_u('/api/v1/repos', {'url': url}))
+        .delete(_u('/api/v1/repos', {'url': url}), headers: await _headers())
         .timeout(const Duration(seconds: 30));
     return _decode(res);
   }
@@ -240,7 +266,7 @@ class KotvApi {
       final res = await http
           .post(
             _u('/api/v1/cancel'),
-            headers: {'Content-Type': 'application/json'},
+            headers: await _headers({'Content-Type': 'application/json'}),
             body: '{}',
           )
           .timeout(const Duration(seconds: 5));

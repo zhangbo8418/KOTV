@@ -121,8 +121,16 @@ public class SpiderBridge {
 
     public static String call(String input) {
         disableSystemProxies();
+        String clientId = "";
         try {
             JsonObject req = GSON.fromJson(input, JsonObject.class);
+            if (req.has("clientId") && !req.get("clientId").isJsonNull()) {
+                clientId = req.get("clientId").getAsString();
+                if (clientId == null) clientId = "";
+            }
+            if (!clientId.isEmpty()) {
+                com.github.catvod.utils.Util.setClientId(clientId);
+            }
             String method = req.get("method").getAsString();
             if ("selfCheck".equals(method)) {
                 return selfCheck();
@@ -217,6 +225,8 @@ public class SpiderBridge {
             JsonObject err = new JsonObject();
             err.addProperty("error", t.toString());
             return GSON.toJson(err);
+        } finally {
+            com.github.catvod.utils.Util.clearClientId();
         }
     }
 
