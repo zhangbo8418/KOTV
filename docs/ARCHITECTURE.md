@@ -38,10 +38,11 @@ Go Engine（可部署到服务器，多前端并发）
 
 | 能力 | 说明 |
 |------|------|
-| `ScopeID` | **远端已登录一律 `u:<userId>`**（点播/直播/媒体/遥控/postMsg）；本机未登录才用 `c:<clientId>` |
+| `ScopeID` | **远端已登录** → `u:<userId>`；**本机免登录** → `c:<clientId>`（多窗口）或空（单实例共享）。点播/直播/媒体/遥控/postMsg 同一套键 |
+| **本机** | **不需要登录**；点播、直播、媒体、遥控功能齐全；隔离靠 ClientID |
 | **点播 / 直播 / 媒体** | 均按 ScopeID 隔离 ephemeral 配置与 live/media 桶 |
 | **直播 / 媒体态** | 按 ScopeID 各自持有 `live.Service` 与媒体元数据；`/media` 与 `remote.SetMediaStore` 按 ScopeID 分桶 |
-| **遥控队列** | control / search 按 ScopeID 分桶；`/action` 优先 `userId`/`scopeId`（兼容 `clientId`）；遥控页选「目标用户」（空=广播） |
+| **遥控队列** | control / search 按 ScopeID 分桶；`/action`：`userId`→远端，`clientId`→本机，`scopeId` 带前缀原样；遥控页可选目标（空=广播） |
 | **OkHttp net** | 点播配置 headers/proxy/hosts/doh 按 ScopeID 写入 bridge `NetProfiles`；ephemeral 换源也会下发，互不覆盖 |
 | **会话恢复** | 远端靠 userId；本机未登录才持久 Flutter `clientId`。上次点播源/首页写入 `data/client_sessions.json`，重启后按 ScopeID 恢复 |
 | **远端鉴权** | `settings.remoteAuth` 开启后非本机请求需 `Authorization: Bearer`；`/admin` 管理用户；`allowRegister` 可开关注册 |

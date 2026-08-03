@@ -130,8 +130,35 @@ func ScopeID() string {
 	return ""
 }
 
-// NormalizeScopeKey 把遥控/查询参数规范成 ScopeID。
-// 已带 u:/c: 前缀则原样；裸 id 按 userId（u:）处理（远端目标用户）。
+// ResolveScopeKey 从请求参数解析隔离键（本机免登录也全功能）。
+// 优先级：userId → scopeId → clientId（含 X-Kotv-Client-Id）。
+// - userId：裸值 → u:<id>（远端租户）
+// - scopeId：已带 u:/c: 原样；裸值按 userId 处理
+// - clientId：已带 u:/c: 原样（JAR 可能传 ScopeID）；裸值 → c:<id>（本机多窗口）
+func ResolveScopeKey(userID, scopeID, clientID string) string {
+	if u := strings.TrimSpace(userID); u != "" {
+		if strings.HasPrefix(u, "u:") || strings.HasPrefix(u, "c:") {
+			return u
+		}
+		return "u:" + u
+	}
+	if s := strings.TrimSpace(scopeID); s != "" {
+		if strings.HasPrefix(s, "u:") || strings.HasPrefix(s, "c:") {
+			return s
+		}
+		return "u:" + s
+	}
+	if c := strings.TrimSpace(clientID); c != "" {
+		if strings.HasPrefix(c, "u:") || strings.HasPrefix(c, "c:") {
+			return c
+		}
+		return "c:" + c
+	}
+	return ""
+}
+
+// NormalizeScopeKey 兼容旧调用：已带前缀原样；裸 id 当作 clientId（本机）。
+// 新代码请用 ResolveScopeKey，以便区分 userId / clientId。
 func NormalizeScopeKey(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -140,7 +167,7 @@ func NormalizeScopeKey(raw string) string {
 	if strings.HasPrefix(raw, "u:") || strings.HasPrefix(raw, "c:") {
 		return raw
 	}
-	return "u:" + raw
+	return "c:" + raw
 }
 
 // UserIDFromScope 从 ScopeID 取出裸 userId；非 u: 前缀返回空。
@@ -148,6 +175,15 @@ func UserIDFromScope(scope string) string {
 	scope = strings.TrimSpace(scope)
 	if strings.HasPrefix(scope, "u:") {
 		return strings.TrimPrefix(scope, "u:")
+	}
+	return ""
+}
+
+// ClientIDFromScope 从 ScopeID 取出裸 clientId；非 c: 前缀返回空。
+func ClientIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if strings.HasPrefix(scope, "c:") {
+		return strings.TrimPrefix(scope, "c:")
 	}
 	return ""
 }

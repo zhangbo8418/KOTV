@@ -39,9 +39,22 @@ func SnapshotMediaFromStore() map[string]string {
 	return SnapshotMediaFor(mediaKey())
 }
 
-// SnapshotMediaFor 返回指定 ScopeID/userId 的媒体快照；空则优先选正在播放的桶。
+// SnapshotMediaFor 返回指定 ScopeID 的媒体快照；空则优先选正在播放的桶。
+// raw 可为完整 ScopeID，或已由 ResolveScopeKey 规范化的键。
 func SnapshotMediaFor(raw string) map[string]string {
-	key := hostclient.NormalizeScopeKey(raw)
+	key := strings.TrimSpace(raw)
+	if key != "" && !strings.HasPrefix(key, "u:") && !strings.HasPrefix(key, "c:") {
+		// 兼容裸 id：优先已有桶，否则按本机 clientId。
+		mediaMu.RLock()
+		if _, ok := mediaByClient["u:"+key]; ok {
+			key = "u:" + key
+		} else if _, ok := mediaByClient["c:"+key]; ok {
+			key = "c:" + key
+		} else {
+			key = "c:" + key
+		}
+		mediaMu.RUnlock()
+	}
 	mediaMu.RLock()
 	defer mediaMu.RUnlock()
 	if key != "" {
@@ -94,19 +107,28 @@ func ListMediaClients() []map[string]string {
 
 func annotateScope(m map[string]string, scope string) {
 	m["scopeId"] = scope
-	// 兼容旧遥控页字段名
-	m["clientId"] = scope
 	if uid := hostclient.UserIDFromScope(scope); uid != "" {
 		m["userId"] = uid
+		m["clientId"] = scope // 兼容旧字段：值为完整 ScopeID
 		if len(uid) > 8 {
 			m["label"] = uid[:8]
 		} else {
 			m["label"] = uid
 		}
-	} else if scope == "" {
-		m["label"] = "默认"
-	} else if len(scope) > 10 {
-		m["label"] = scope[:10]
+		return
+	}
+	if cid := hostclient.ClientIDFromScope(scope); cid != "" {
+		m["clientId"] = cid
+		if len(cid) > 8 {
+			m["label"] = cid[:8]
+		} else {
+			m["label"] = cid
+		}
+		return
+	}
+	m["clientId"] = scope
+	if scope == "" {
+		m["label"] = "本机"
 	} else {
 		m["label"] = scope
 	}

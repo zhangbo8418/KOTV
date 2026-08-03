@@ -125,11 +125,10 @@ func (s *Server) Start() error {
 	s.registerAPIv1(mux)
 	mux.HandleFunc("/media", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		target := first(
+		target := hostclient.ResolveScopeKey(
 			r.URL.Query().Get("userId"),
 			r.URL.Query().Get("scopeId"),
-			r.URL.Query().Get("clientId"),
-			r.Header.Get("X-Kotv-Client-Id"),
+			first(r.URL.Query().Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
 		)
 		data := remotectl.SnapshotMediaFor(target)
 		if data == nil {
@@ -209,21 +208,21 @@ func (s *Server) Stop() {
 }
 
 // handlePostMsg 承接爬虫 jar Util.notify / UiBridge（GET/POST ?msg=）。
-// 目标为 ScopeID：远端 JAR 传入的 clientId 实为 u:<userId>。
+// 目标为 ScopeID：远端 JAR 传 u:<userId>；本机未登录传 c:<clientId>。
 func (s *Server) handlePostMsg(w http.ResponseWriter, r *http.Request) {
 	msg := strings.TrimSpace(r.URL.Query().Get("msg"))
-	clientID := hostclient.NormalizeScopeKey(first(
+	clientID := hostclient.ResolveScopeKey(
 		r.URL.Query().Get("userId"),
-		r.URL.Query().Get("clientId"),
-		r.Header.Get("X-Kotv-Client-Id"),
-	))
+		r.URL.Query().Get("scopeId"),
+		first(r.URL.Query().Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
+	)
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		if v := strings.TrimSpace(r.Form.Get("msg")); v != "" {
 			msg = v
 		}
-		if v := first(r.Form.Get("userId"), r.Form.Get("clientId")); v != "" {
-			clientID = hostclient.NormalizeScopeKey(v)
+		if v := hostclient.ResolveScopeKey(r.Form.Get("userId"), r.Form.Get("scopeId"), r.Form.Get("clientId")); v != "" {
+			clientID = v
 		}
 		if msg == "" {
 			// Declarative UI documents may include compact images; keep a generous bound.
@@ -261,12 +260,11 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		Path:    q.Get("path"),
 		Device:  q.Get("device"),
 		History: q.Get("history"),
-		ClientID: hostclient.NormalizeScopeKey(first(
+		ClientID: hostclient.ResolveScopeKey(
 			q.Get("userId"),
 			q.Get("scopeId"),
-			q.Get("clientId"),
-			r.Header.Get("X-Kotv-Client-Id"),
-		)),
+			first(q.Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
+		),
 	}
 	if v := q.Get("seek"); v != "" {
 		if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
