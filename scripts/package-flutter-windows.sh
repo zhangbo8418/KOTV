@@ -22,8 +22,11 @@ ASSETS_ENG="$ROOT/flutter/assets/engine"
 
 echo "==> Flutter Windows package version=$VERSION arch=$ARCH suffix=${SUFFIX:-<none>}"
 
-echo "==> prepare runtime"
+echo "==> fetch embedded fonts (Noto Sans SC + Color Emoji)"
 chmod +x "$ROOT/bridge/build.sh" "$ROOT"/scripts/*.sh
+"$ROOT/scripts/fetch-flutter-fonts.sh"
+
+echo "==> prepare runtime"
 "$ROOT/scripts/prepare-runtime.sh" windows-x64
 "$ROOT/scripts/verify-runtime.sh" runtime windows-x64
 

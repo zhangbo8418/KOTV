@@ -45,3 +45,8 @@ flutter/assets/engine/libkotv_engine.so
 flutter/assets/engine/kotv-engine
 flutter/assets/engine/kotv-engine.exe
 
+# 开源内嵌字体（~26MB，scripts/fetch-flutter-fonts.sh 拉取）
+flutter/assets/fonts/*.otf
+flutter/assets/fonts/*.ttf
+flutter/assets/fonts/LICENSE*
+

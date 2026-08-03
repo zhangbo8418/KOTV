@@ -13,6 +13,10 @@ export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flu
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 echo "==> version=$VERSION"
 
+echo "==> fetch embedded fonts"
+chmod +x "$ROOT"/scripts/*.sh
+"$ROOT/scripts/fetch-flutter-fonts.sh"
+
 echo "==> build Go engine (android arm64 + armeabi-v7a)"
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)
 "$ROOT/scripts/build-engine-flutter.sh" android

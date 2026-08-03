@@ -38,3 +38,15 @@ flutter:
   uses-material-design: true
   assets:
     - assets/engine/
+  # 由 scripts/fetch-flutter-fonts.sh 拉取（约 26MB，不进 git）
+  fonts:
+    - family: NotoSansSC
+      fonts:
+        - asset: assets/fonts/NotoSansSC-Regular.otf
+          weight: 400
+        - asset: assets/fonts/NotoSansSC-Bold.otf
+          weight: 700
+    - family: NotoColorEmoji
+      fonts:
+        - asset: assets/fonts/NotoColorEmoji.ttf
+          weight: 400

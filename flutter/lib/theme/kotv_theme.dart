@@ -22,30 +22,33 @@ class KotvColors {
   static const focus = Color(0xFFFFD54F);
 }
 
-/// Windows/Linux 中文与 emoji 回退；Win7 装好 Segoe UI Emoji（seguiemj）后彩色 emoji 才正常。
-List<String>? _kotvFontFallbacks() {
-  if (kIsWeb) return null;
+/// Windows/Linux/全平台统一：内嵌 Noto Sans SC + Noto Color Emoji；系统字体作最后回退。
+List<String> _kotvFontFallbacks() {
+  const embedded = <String>['NotoColorEmoji'];
+  if (kIsWeb) return embedded;
   if (Platform.isWindows) {
-    return const [
+    return [
+      ...embedded,
+      'Segoe UI Emoji',
+      'Segoe UI Symbol',
       'Microsoft YaHei UI',
       'Microsoft YaHei',
       'Segoe UI',
-      'Segoe UI Emoji',
-      'Segoe UI Symbol',
-      'Noto Sans SC',
-      'Noto Color Emoji',
     ];
   }
   if (Platform.isLinux) {
-    return const [
-      'Noto Sans CJK SC',
-      'Noto Sans CJK JP',
-      'Noto Sans',
+    return [
+      ...embedded,
       'Noto Color Emoji',
+      'Noto Sans CJK SC',
       'DejaVu Sans',
     ];
   }
-  return null;
+  if (Platform.isAndroid) {
+    return [...embedded, 'Noto Color Emoji', 'sans-serif'];
+  }
+  // iOS / macOS：系统中文通常够好，emoji 用内嵌补齐缺字
+  return [...embedded, 'PingFang SC', 'Hiragino Sans GB', 'Apple Color Emoji'];
 }
 
 ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
@@ -71,6 +74,7 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     colorScheme: scheme,
     scaffoldBackgroundColor: Colors.transparent,
     extensions: [palette],
+    fontFamily: 'NotoSansSC',
     fontFamilyFallback: fallbacks,
     // Android 14+ 预测性返回 / 全面屏手势；iOS/macOS 用 Cupertino 跟手侧滑
     // Win7（Flutter 3.19）由 adapt-flutter-win7-sdk.sh 将 PredictiveBack 换成 Zoom
