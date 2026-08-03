@@ -64,10 +64,11 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 	return s.loadEpoch.Load()
 }
 
-// CancelPendingContent 打断进行中的 spider 请求（分类切换等），不影响首页 loadEpoch。
+// CancelPendingContent 打断当前 client 进行中的 spider 请求，不影响其他前端。
 func (s *SiteService) CancelPendingContent() {
-	spider.InterruptJavaBridge()
-	spider.InterruptScriptSpiders()
+	cid := hostclient.Current()
+	spider.InterruptJavaBridgeForClient(cid)
+	spider.InterruptScriptSpidersForClient(cid)
 }
 
 func (s *SiteService) HomeContent() (model.Result, error) {

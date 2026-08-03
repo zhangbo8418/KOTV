@@ -27,6 +27,16 @@ public class RequestInterceptor implements Interceptor {
     public Response intercept(@NonNull Chain chain) throws IOException {
         Request request = chain.request();
         Request.Builder builder = request.newBuilder();
+        // 自动带上当前 JAR 调用的 Flutter clientId，供 OkHttp.cancel(clientId) 软取消。
+        if (request.tag() == null) {
+            try {
+                String cid = com.github.catvod.utils.Util.clientId();
+                if (cid != null && !cid.isEmpty()) {
+                    builder.tag(cid);
+                }
+            } catch (Throwable ignored) {
+            }
+        }
         HttpUrl url = request.url();
         checkAuth(url, builder);
         return chain.proceed(builder.build());

@@ -89,23 +89,165 @@ public class SpiderBridge {
                 return;
             }
         }
-        boolean serve = false;
-        for (String arg : args) {
+        boolean serveHttp = false;
+        boolean serveStdio = false;
+        int httpPort = 0;
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
             if ("--serve".equals(arg)) {
-                serve = true;
-                break;
+                serveHttp = true;
+            } else if ("--serve-stdio".equals(arg)) {
+                serveStdio = true;
+            } else if (arg.startsWith("--http-port=")) {
+                httpPort = Integer.parseInt(arg.substring("--http-port=".length()).trim());
+                serveHttp = true;
+            } else if ("--http-port".equals(arg) && i + 1 < args.length) {
+                httpPort = Integer.parseInt(args[++i].trim());
+                serveHttp = true;
             }
         }
-        if (serve) {
-            serve();
+        String propPort = System.getProperty("kotv.bridge.port", "").trim();
+        if (!propPort.isEmpty()) {
+            try {
+                httpPort = Integer.parseInt(propPort);
+                serveHttp = true;
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (serveStdio) {
+            serveStdio();
+            return;
+        }
+        if (serveHttp) {
+            if (httpPort <= 0) {
+                httpPort = 9979;
+            }
+            serveHttp(httpPort);
             return;
         }
         String input = new String(System.in.readAllBytes(), StandardCharsets.UTF_8);
         System.out.print(call(input));
     }
 
- /** 常驻模式：每行一个 JSON 请求/响应，崩溃由主程序拉起新进程。 */
-    private static void serve() throws IOException {
+    /**
+     * HTTP 常驻：Go 多客户端可并发 POST /jar/call（对齐 Android SpiderService）。
+     * 仍保留 --serve-stdio 供调试。
+     */
+    private static void serveHttp(int port) throws IOException {
+        NanoHTTPD httpd = new NanoHTTPD("127.0.0.1", port) {
+            @Override
+            public Response serve(IHTTPSession session) {
+                try {
+                    String uri = session.getUri() == null ? "/" : session.getUri();
+                    NanoHTTPD.Method method = session.getMethod();
+                    if (NanoHTTPD.Method.GET.equals(method) && ("/health".equals(uri) || "/".equals(uri))) {
+                        return newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "application/json; charset=utf-8",
+                                "{\"ok\":true,\"mode\":\"http\"}");
+                    }
+                    if (!NanoHTTPD.Method.POST.equals(method)) {
+                        return newFixedLengthResponse(NanoHTTPD.Response.Status.METHOD_NOT_ALLOWED, "text/plain", "POST required");
+                    }
+                    String body = readHttpBody(session);
+                    if ("/jar/call".equals(uri)) {
+                        if (body == null || body.isEmpty()) {
+                            return newFixedLengthResponse(NanoHTTPD.Response.Status.BAD_REQUEST, "text/plain", "empty body");
+                        }
+                        String out = call(body);
+                        return newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "application/json; charset=utf-8", out);
+                    }
+                    if ("/jar/cancel".equals(uri)) {
+                        applyCancel(body);
+                        return newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "application/json; charset=utf-8", "{\"ok\":true}");
+                    }
+                    if ("/jar/interrupt".equals(uri)) {
+                        clear();
+                        try {
+                            com.github.catvod.net.OkHttp.cancelAll();
+                        } catch (Throwable ignored) {
+                        }
+                        return newFixedLengthResponse(NanoHTTPD.Response.Status.OK, "application/json; charset=utf-8", "{\"ok\":true}");
+                    }
+                    return newFixedLengthResponse(NanoHTTPD.Response.Status.NOT_FOUND, "text/plain", "not found");
+                } catch (Throwable t) {
+                    JsonObject err = new JsonObject();
+                    err.addProperty("error", t.toString());
+                    return newFixedLengthResponse(NanoHTTPD.Response.Status.INTERNAL_ERROR, "application/json; charset=utf-8",
+                            GSON.toJson(err));
+                }
+            }
+        };
+        httpd.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
+        // Go 侧解析此行等待就绪；勿写 stdout（避免污染其它协议）。
+        System.err.println("KOTV_BRIDGE_HTTP=127.0.0.1:" + port);
+        System.err.flush();
+        Object lock = new Object();
+        synchronized (lock) {
+            try {
+                lock.wait();
+            } catch (InterruptedException ignored) {
+            }
+        }
+    }
+
+    private static void applyCancel(String body) {
+        String cid = "";
+        if (body != null && !body.isEmpty()) {
+            try {
+                JsonObject o = GSON.fromJson(body, JsonObject.class);
+                if (o != null && o.has("clientId") && !o.get("clientId").isJsonNull()) {
+                    cid = o.get("clientId").getAsString();
+                    if (cid == null) cid = "";
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            if (cid.isEmpty()) {
+                com.github.catvod.net.OkHttp.cancelAll();
+            } else {
+                com.github.catvod.net.OkHttp.cancel(cid);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static String readHttpBody(NanoHTTPD.IHTTPSession session) {
+        Map<String, String> files = new HashMap<>();
+        try {
+            session.parseBody(files);
+        } catch (Throwable ignored) {
+        }
+        String fromMap = files.get("postData");
+        if (fromMap == null || fromMap.isEmpty()) {
+            fromMap = files.get("data");
+        }
+        if (fromMap != null && !fromMap.trim().isEmpty()) {
+            return fromMap.trim();
+        }
+        String lenHdr = session.getHeaders() != null ? session.getHeaders().get("content-length") : null;
+        int len = 0;
+        try {
+            if (lenHdr != null) len = Integer.parseInt(lenHdr.trim());
+        } catch (NumberFormatException ignored) {
+        }
+        if (len <= 0 || len > 2 * 1024 * 1024) return "";
+        try {
+            byte[] buf = new byte[len];
+            int off = 0;
+            InputStream in = session.getInputStream();
+            while (off < len) {
+                int n = in.read(buf, off, len - off);
+                if (n < 0) break;
+                off += n;
+            }
+            return new String(buf, 0, off, StandardCharsets.UTF_8).trim();
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    /** 旧版行协议：每行一个 JSON 请求/响应（串行，仅调试）。 */
+    private static void serveStdio() throws IOException {
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
         String line;
         while ((line = in.readLine()) != null) {
@@ -149,6 +291,25 @@ public class SpiderBridge {
             if ("cancelAll".equals(method)) {
                 try {
                     com.github.catvod.net.OkHttp.cancelAll();
+                } catch (Throwable ignored) {
+                }
+                return "{}";
+            }
+            // 按 Flutter clientId 软取消 OkHttp（多前端并发时不杀 JVM）。
+            if ("cancelClient".equals(method)) {
+                String cid = "";
+                if (argsObj.has("clientId") && !argsObj.get("clientId").isJsonNull()) {
+                    cid = argsObj.get("clientId").getAsString();
+                } else if (req.has("clientId") && !req.get("clientId").isJsonNull()) {
+                    cid = req.get("clientId").getAsString();
+                }
+                if (cid == null) cid = "";
+                try {
+                    if (cid.isEmpty()) {
+                        com.github.catvod.net.OkHttp.cancelAll();
+                    } else {
+                        com.github.catvod.net.OkHttp.cancel(cid);
+                    }
                 } catch (Throwable ignored) {
                 }
                 return "{}";

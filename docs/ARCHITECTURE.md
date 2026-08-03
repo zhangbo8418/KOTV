@@ -25,14 +25,23 @@
 
 ```text
 Flutter App（含 iOS IPA）
-   │  HTTP /api/v1  或  同进程嵌入
+   │  HTTP /api/v1 + X-Kotv-Client-Id
    ▼
-Go Engine
+Go Engine（可部署到服务器，多前端并发）
    ├─ CMS
-   ├─ JS  → QuickJS
-   ├─ PY  → Python runtime（打进包）
-   └─ JAR → 仅桌面/安卓；iOS 不启用本地爬虫
+   ├─ JS  → QuickJS（按站 worker；调用带 clientId）
+   ├─ PY  → Python runtime（按站进程；调用带 clientId）
+   └─ JAR → HTTP 多路 bridge（桌面/安卓；可并发，按 client 软取消）
 ```
+
+### 多前端 / 服务器并发
+
+| 能力 | 说明 |
+|------|------|
+| `X-Kotv-Client-Id` | Flutter 持久化身份；API / ui/poll / postMsg 按客户端隔离 |
+| JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`），去掉全局 stdin 串行锁 |
+| 取消 | `/api/v1/cancel` 只软取消**当前 client** 的 OkHttp/脚本；换源仍硬 Kill JVM |
+| JS | `getClientId()` / `postMsg(msg)` 宿主 API，路由回正确前端 |
 
 ## 平台取舍
 
@@ -60,10 +69,10 @@ KOTV 不能把 Spider 塞进 Flutter App（桌面要共用），因此把 **TV c
 
 | | 桌面 | Android |
 |--|------|---------|
-| bridge（≈ TV catvod） | `URLClassLoader` **父优先** | 打包期 d8 → APK assets → 父优先 `DexClassLoader` |
+| bridge（≈ TV catvod） | `URLClassLoader` **父优先**；`--serve` = **HTTP 多路** | 打包期 d8 → APK assets → 父优先 `DexClassLoader` + NanoHTTPD `:9979` |
 | 站点 jar | JVM `.class` 瘦包（Java 17） | `JarDexer`（D8）→ sealed dex → 父优先 |
 | 注入 | 无 | `JarLoader` → `setSiteJarEnsureMethod`（D8 转站点 jar） |
-| OkHttp | bridge **5.4.0** | App `force` **5.4.0**（与 TV 一致） |
+| OkHttp | bridge **5.4.0**；请求自动 tag `clientId` | App `force` **5.4.0**（与 TV 一致） |
 
 JVM 瘦包无法走 R8 `spider.merge`，因此站点 **exclude** 宿主同名类（`Util`/`OkHttp`/`Json`/`Path`/`Init`/`Proxy`/`crawler`/`UiBridge`），父优先直接用 bridge——运行语义对齐官方「宿主提供 API」。
 

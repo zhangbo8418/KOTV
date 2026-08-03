@@ -1,13 +1,14 @@
 package spider
 
 import (
-	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
@@ -26,14 +28,13 @@ import (
 // ErrJavaBridgeInterrupted 表示调用被换源/关闭主动打断，不应再重试同一请求。
 var ErrJavaBridgeInterrupted = errors.New("JAR 调用已中断")
 
-// 桌面：独立 java -jar --serve。超时后 Kill 并允许重建。
+// 桌面：独立 java -jar --serve（HTTP 多路）；超时后 Kill 并允许重建。
 const javaBridgeCallTimeout = 120 * time.Second
 
 type javaBridgeClient struct {
 	mu         sync.Mutex
 	cmd        *exec.Cmd
-	stdin      io.WriteCloser
-	stdout     *bufio.Reader
+	baseURL    string // http://127.0.0.1:port
 	stderrFile *os.File
 	proc       atomic.Pointer[os.Process]
 	epoch      atomic.Uint64
@@ -48,6 +49,43 @@ var (
 	userProxyJSON []byte
 	netPrimed     bool // Android HTTP 用
 )
+
+// 进行中的 JAR HTTP 调用，按 clientId 软取消（不杀 JVM）。
+type jarInflight struct {
+	id       uint64
+	clientID string
+	cancel   context.CancelFunc
+}
+
+var (
+	jarInflightMu sync.Mutex
+	jarInflightQ  = map[uint64]*jarInflight{}
+	jarCallSeq    atomic.Uint64
+)
+
+func beginJarCall(clientID string) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	id := jarCallSeq.Add(1)
+	jarInflightMu.Lock()
+	jarInflightQ[id] = &jarInflight{id: id, clientID: clientID, cancel: cancel}
+	jarInflightMu.Unlock()
+	return ctx, func() {
+		cancel()
+		jarInflightMu.Lock()
+		delete(jarInflightQ, id)
+		jarInflightMu.Unlock()
+	}
+}
+
+func cancelJarCalls(clientID string) {
+	jarInflightMu.Lock()
+	defer jarInflightMu.Unlock()
+	for _, g := range jarInflightQ {
+		if clientID == "" || g.clientID == clientID {
+			g.cancel()
+		}
+	}
+}
 
 // SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp。
 func SetNetConfig(headers, proxy, hosts, doh []byte) {
@@ -113,19 +151,34 @@ func currentNetConfig() [][]byte {
 	return out
 }
 
-// callJavaBridge：桌面走独立 java -jar --serve；Android 走 Native Service HTTP。
+// callJavaBridge：桌面走独立 java HTTP bridge；Android 走 Native Service HTTP。可并发。
 func callJavaBridge(payload []byte) (string, error) {
+	cid := hostclient.Current()
+	ctx, end := beginJarCall(cid)
+	defer end()
+	ctx, cancel := context.WithTimeout(ctx, javaBridgeCallTimeout)
+	defer cancel()
+
 	if runtime.GOOS == "android" {
 		if err := primeAndroidNetConfigOnce(); err != nil {
 			return "", err
 		}
-		return androidCallJavaBridge(payload)
+		return androidPostJarCtx(ctx, payload)
 	}
-	return javaBridge.call(payload)
+	return javaBridge.callCtx(ctx, payload)
 }
 
-// InterruptJavaBridge 打断卡住的 JAR：抬 epoch 并 Kill 独立 java 进程。
+// InterruptJavaBridgeForClient 按 clientId 软取消进行中的 JAR（OkHttp + HTTP 客户端），不杀 JVM。
+// clientID 为空时取消全部进行中的调用，仍不杀进程。
+func InterruptJavaBridgeForClient(clientID string) {
+	cancelJarCalls(clientID)
+	softCancelJavaBridge(clientID)
+}
+
+// InterruptJavaBridge 全局硬打断：软取消后 Kill JVM / Android clear（换源等）。
 func InterruptJavaBridge() {
+	cancelJarCalls("")
+	softCancelJavaBridge("")
 	if runtime.GOOS == "android" {
 		client := &http.Client{Timeout: 2 * time.Second}
 		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:9979/jar/interrupt", bytes.NewReader([]byte("{}")))
@@ -141,6 +194,27 @@ func InterruptJavaBridge() {
 	if p := javaBridge.proc.Load(); p != nil {
 		killProcessTree(p)
 	}
+}
+
+func softCancelJavaBridge(clientID string) {
+	body, _ := json.Marshal(map[string]string{"clientId": clientID})
+	payload, _ := json.Marshal(map[string]interface{}{
+		"method":   "cancelClient",
+		"args":     map[string]string{"clientId": clientID},
+		"clientId": clientID,
+	})
+	if runtime.GOOS == "android" {
+		_, _ = androidPostJarShort(payload)
+		return
+	}
+	base := javaBridge.currentBaseURL()
+	if base == "" {
+		return
+	}
+	_ = postJarPath(base, "/jar/cancel", body, 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _ = javaBridge.httpPostCtx(ctx, payload)
 }
 
 // ShutdownJavaBridge 引擎退出时杀掉独立 JVM。
@@ -167,77 +241,75 @@ func ClearJarBridgeOnSwitch() {
 	_, _ = callJavaBridge(payload)
 }
 
-func (w *javaBridgeClient) pushIfAlive(payload []byte) {
+func (w *javaBridgeClient) currentBaseURL() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if !w.aliveLocked() {
-		return
-	}
-	_ = w.primeLocked(payload)
+	return w.baseURL
 }
 
-func (w *javaBridgeClient) call(payload []byte) (string, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+func (w *javaBridgeClient) pushIfAlive(payload []byte) {
+	base := w.currentBaseURL()
+	if base == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _ = w.httpPostCtx(ctx, payload)
+}
 
+func (w *javaBridgeClient) callCtx(ctx context.Context, payload []byte) (string, error) {
 	startEpoch := w.epoch.Load()
 	var transportErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		if w.epoch.Load() != startEpoch {
-			w.stopLocked()
+		if err := ctx.Err(); err != nil {
 			return "", ErrJavaBridgeInterrupted
 		}
-		if err := w.startLocked(); err != nil {
+		if w.epoch.Load() != startEpoch {
+			return "", ErrJavaBridgeInterrupted
+		}
+		if err := w.ensureStarted(); err != nil {
 			return "", err
 		}
-
-		exchange := make(chan string, 1)
-		exchangeErr := make(chan error, 1)
-		stdin, stdout := w.stdin, w.stdout
-		req := append(append([]byte(nil), bytesTrimSpace(payload)...), '\n')
-		go func() {
-			if _, err := stdin.Write(req); err != nil {
-				exchangeErr <- err
-				return
-			}
-			line, err := stdout.ReadBytes('\n')
-			if err != nil {
-				exchangeErr <- err
-				return
-			}
-			exchange <- strings.TrimSpace(string(line))
-		}()
-
-		select {
-		case response := <-exchange:
-			if w.epoch.Load() != startEpoch {
-				w.stopLocked()
-				return "", ErrJavaBridgeInterrupted
-			}
-			return response, nil
-		case transportErr = <-exchangeErr:
-			w.stopLocked()
+		out, err := w.httpPostCtx(ctx, payload)
+		if err == nil {
 			if w.epoch.Load() != startEpoch {
 				return "", ErrJavaBridgeInterrupted
 			}
-			continue
-		case <-time.After(javaBridgeCallTimeout):
-			transportErr = fmt.Errorf("调用超过 %s", javaBridgeCallTimeout)
-			if p := w.proc.Load(); p != nil {
-				_ = p.Kill()
-			}
-			w.stopLocked()
-			if w.epoch.Load() != startEpoch {
-				return "", ErrJavaBridgeInterrupted
-			}
-			continue
+			return out, nil
 		}
+		transportErr = err
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", ErrJavaBridgeInterrupted
+		}
+		if w.epoch.Load() != startEpoch {
+			return "", ErrJavaBridgeInterrupted
+		}
+		// 传输失败：停掉并重试一次（重建 JVM）。
+		w.mu.Lock()
+		w.stopLocked()
+		w.mu.Unlock()
 	}
 	return "", fmt.Errorf("Java bridge 异常退出，自动重启后仍不可用: %w", transportErr)
 }
 
+func (w *javaBridgeClient) ensureStarted() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.startLocked()
+}
+
+func (w *javaBridgeClient) httpPostCtx(ctx context.Context, payload []byte) (string, error) {
+	w.mu.Lock()
+	base := w.baseURL
+	w.mu.Unlock()
+	if base == "" {
+		return "", fmt.Errorf("Java bridge 未就绪")
+	}
+	return postJarPathCtx(ctx, base, "/jar/call", payload)
+}
+
 func (w *javaBridgeClient) aliveLocked() bool {
-	return w.cmd != nil && w.cmd.Process != nil && w.cmd.ProcessState == nil
+	return w.cmd != nil && w.cmd.Process != nil && w.cmd.ProcessState == nil && w.baseURL != ""
 }
 
 func (w *javaBridgeClient) startLocked() error {
@@ -255,10 +327,16 @@ func (w *javaBridgeClient) startLocked() error {
 		return fmt.Errorf("未找到 spider-bridge.jar，请运行 bridge 目录下的构建脚本")
 	}
 
+	port, err := pickFreeLocalPort()
+	if err != nil {
+		return err
+	}
+
 	proxyPort := localproxy.Port()
 	cmd := exec.Command(java,
 		"-Djava.awt.headless=true",
 		fmt.Sprintf("-Dkotv.cache.dir=%s", paths.Root()),
+		fmt.Sprintf("-Dkotv.bridge.port=%d", port),
 		"-Djava.net.useSystemProxies=false",
 		"-DsocksProxyHost=",
 		"-DsocksProxyPort=",
@@ -276,6 +354,7 @@ func (w *javaBridgeClient) startLocked() error {
 		"--add-opens=java.base/java.util=ALL-UNNAMED",
 		"-jar", bridgeJar,
 		"--serve",
+		fmt.Sprintf("--http-port=%d", port),
 	)
 	cmd.Dir = filepath.Dir(bridgeJar)
 	cmd.Env = append(filterProxyEnv(os.Environ()), fmt.Sprintf("KOTV_PROXY_PORT=%d", proxyPort))
@@ -290,38 +369,34 @@ func (w *javaBridgeClient) startLocked() error {
 	}
 	setChildProcAttrs(cmd)
 
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		if stderrFile != nil {
-			_ = stderrFile.Close()
-		}
-		return fmt.Errorf("创建 Java bridge 输入管道失败: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		if stderrFile != nil {
-			_ = stderrFile.Close()
-		}
-		return fmt.Errorf("创建 Java bridge 输出管道失败: %w", err)
-	}
 	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
 		if stderrFile != nil {
 			_ = stderrFile.Close()
 		}
 		return fmt.Errorf("启动 Java bridge 失败: %w", err)
 	}
 
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	w.cmd = cmd
-	w.stdin = stdin
-	w.stdout = bufio.NewReader(stdout)
+	w.baseURL = base
 	w.stderrFile = stderrFile
 	w.proc.Store(cmd.Process)
-	log.Printf("java bridge started pid=%d jar=%s", cmd.Process.Pid, bridgeJar)
+	log.Printf("java bridge started pid=%d jar=%s url=%s", cmd.Process.Pid, bridgeJar, base)
+
+	if err := waitBridgeHealthy(base, 15*time.Second); err != nil {
+		hint := readBridgeErrTail(stderrPath)
+		w.stopLocked()
+		if hint != "" {
+			return fmt.Errorf("等待 Java bridge HTTP 就绪失败: %w（详见 %s：%s）", err, stderrPath, hint)
+		}
+		return fmt.Errorf("等待 Java bridge HTTP 就绪失败: %w（详见 %s）", err, stderrPath)
+	}
 
 	for _, cfg := range currentNetConfig() {
-		if err := w.primeLocked(cfg); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := postJarPathCtx(ctx, base, "/jar/call", cfg)
+		cancel()
+		if err != nil {
 			hint := readBridgeErrTail(stderrPath)
 			w.stopLocked()
 			if hint != "" {
@@ -331,6 +406,42 @@ func (w *javaBridgeClient) startLocked() error {
 		}
 	}
 	return nil
+}
+
+func pickFreeLocalPort() (int, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer ln.Close()
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok || addr.Port <= 0 {
+		return 0, fmt.Errorf("无法分配本地端口")
+	}
+	return addr.Port, nil
+}
+
+func waitBridgeHealthy(base string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	var last error
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(base + "/health")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode < 400 {
+				return nil
+			}
+			last = fmt.Errorf("http %d", resp.StatusCode)
+		} else {
+			last = err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if last == nil {
+		last = fmt.Errorf("timeout")
+	}
+	return last
 }
 
 func readBridgeErrTail(path string) string {
@@ -346,22 +457,9 @@ func readBridgeErrTail(path string) string {
 	return s
 }
 
-func (w *javaBridgeClient) primeLocked(payload []byte) error {
-	req := append(append([]byte(nil), bytesTrimSpace(payload)...), '\n')
-	if _, err := w.stdin.Write(req); err != nil {
-		return err
-	}
-	if _, err := w.stdout.ReadBytes('\n'); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (w *javaBridgeClient) stopLocked() {
 	w.proc.Store(nil)
-	if w.stdin != nil {
-		_ = w.stdin.Close()
-	}
+	w.baseURL = ""
 	if w.cmd != nil {
 		if w.cmd.Process != nil && w.cmd.ProcessState == nil {
 			killProcessTree(w.cmd.Process)
@@ -372,8 +470,6 @@ func (w *javaBridgeClient) stopLocked() {
 		_ = w.stderrFile.Close()
 	}
 	w.cmd = nil
-	w.stdin = nil
-	w.stdout = nil
 	w.stderrFile = nil
 }
 
@@ -462,17 +558,37 @@ func androidCallJavaBridge(payload []byte) (string, error) {
 }
 
 func androidCallJavaBridgeShort(payload []byte) (string, error) {
+	return androidPostJarShort(payload)
+}
+
+func androidPostJarShort(payload []byte) (string, error) {
 	return androidPostJar(payload, 2*time.Second)
 }
 
 func androidPostJar(payload []byte, timeout time.Duration) (string, error) {
-	const base = "http://127.0.0.1:9979"
-	req, err := http.NewRequest(http.MethodPost, base+"/jar/call", bytes.NewReader(payload))
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return androidPostJarCtx(ctx, payload)
+}
+
+func androidPostJarCtx(ctx context.Context, payload []byte) (string, error) {
+	return postJarPathCtx(ctx, "http://127.0.0.1:9979", "/jar/call", payload)
+}
+
+func postJarPath(base, path string, payload []byte, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_, err := postJarPathCtx(ctx, base, path, payload)
+	return err
+}
+
+func postJarPathCtx(ctx context.Context, base, path string, payload []byte) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+path, bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	client := &http.Client{Timeout: timeout}
+	client := &http.Client{Timeout: javaBridgeCallTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -482,10 +598,10 @@ func androidPostJar(payload []byte, timeout time.Duration) (string, error) {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	s := strings.TrimSpace(string(b))
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("android jar call failed: http=%d %s", resp.StatusCode, s)
+		return "", fmt.Errorf("jar call failed: http=%d %s", resp.StatusCode, s)
 	}
-	if s == "" {
-		return "", fmt.Errorf("android jar call empty response")
+	if path == "/jar/call" && s == "" {
+		return "", fmt.Errorf("jar call empty response")
 	}
 	return s, nil
 }

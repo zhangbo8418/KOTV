@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
@@ -47,14 +48,20 @@ type pySpider struct {
 	key, api, ext, jar string
 	scriptPath         string
 
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	proc   atomic.Pointer[os.Process]
-	epoch  atomic.Uint64
-	nextID atomic.Uint64
-	inited bool
+	mu           sync.Mutex
+	cmd          *exec.Cmd
+	stdin        io.WriteCloser
+	stdout       *bufio.Reader
+	proc         atomic.Pointer[os.Process]
+	epoch        atomic.Uint64
+	nextID       atomic.Uint64
+	inited       bool
+	activeClient atomic.Value // string
+}
+
+func (s *pySpider) activeClientID() string {
+	v, _ := s.activeClient.Load().(string)
+	return v
 }
 
 func newPySpider(key, api, ext, jar string) Spider {
@@ -115,8 +122,13 @@ func recentPySpider() Spider {
 	return jsPy[jsPyKey(recentPyKey, "py")]
 }
 
-// InterruptScriptSpiders 打断正在运行的 Python/JavaScript 调用。
+// InterruptScriptSpiders 打断正在运行的全部 Python/JavaScript 调用。
 func InterruptScriptSpiders() {
+	InterruptScriptSpidersForClient("")
+}
+
+// InterruptScriptSpidersForClient 仅打断属于指定 clientId 的进行中脚本调用；空串表示全部。
+func InterruptScriptSpidersForClient(clientID string) {
 	jsPyMu.Lock()
 	spiders := make([]Spider, 0, len(jsPy))
 	for _, s := range jsPy {
@@ -126,9 +138,13 @@ func InterruptScriptSpiders() {
 	for _, spider := range spiders {
 		switch s := spider.(type) {
 		case *pySpider:
-			s.interrupt()
+			if clientID == "" || s.activeClientID() == clientID {
+				s.interrupt()
+			}
 		case *jsSpider:
-			s.interrupt()
+			if clientID == "" || s.activeClientID() == clientID {
+				s.interrupt()
+			}
 		}
 	}
 }
@@ -185,6 +201,9 @@ func pyRunnerPath() (string, error) {
 func (s *pySpider) run(method string, args map[string]interface{}) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cid := hostclient.Current()
+	s.activeClient.Store(cid)
+	defer s.activeClient.Store("")
 
 	if goruntime.GOOS == "android" {
 		return s.runAndroidLocked(method, args)
@@ -227,9 +246,10 @@ func (s *pySpider) run(method string, args map[string]interface{}) (string, erro
 func (s *pySpider) callLocked(startEpoch uint64, method string, args map[string]interface{}) (string, error) {
 	reqID := s.nextID.Add(1)
 	payload := map[string]interface{}{
-		"id":     reqID,
-		"method": method,
-		"args":   args,
+		"id":       reqID,
+		"method":   method,
+		"args":     args,
+		"clientId": hostclient.Current(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -476,6 +496,7 @@ func (s *pySpider) androidCallPythonLocked(method string, args map[string]interf
 		"proxyPort":  localproxy.Port(),
 		"method":     method,
 		"args":       args,
+		"clientId":   hostclient.Current(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

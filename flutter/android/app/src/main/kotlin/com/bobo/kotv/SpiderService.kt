@@ -78,6 +78,7 @@ class SpiderService private constructor(
       uri != "/thunder/progress" &&
       uri != "/thunder/clear" &&
       uri != "/jar/interrupt" &&
+      uri != "/jar/cancel" &&
       uri != "/py/interrupt"
     ) {
       return newJsonError(Status.BAD_REQUEST, "empty body")
@@ -97,6 +98,23 @@ class SpiderService private constructor(
         "/jar/interrupt" -> {
           JarLoader.clear()
           PyLoader.clearSessions()
+          json(Status.OK, JSONObject().put("ok", true).toString())
+        }
+
+        "/jar/cancel" -> {
+          // 软取消：按 clientId 取消 OkHttp，不 clear ClassLoader。
+          JarLoader.ensureBridgeLoaded(appContext)
+          val cid = try {
+            if (body.isBlank()) "" else JSONObject(body).optString("clientId", "")
+          } catch (_: Throwable) {
+            ""
+          }
+          val payload = JSONObject()
+            .put("method", "cancelClient")
+            .put("args", JSONObject().put("clientId", cid))
+            .put("clientId", cid)
+            .toString()
+          JarLoader.callBridge(payload)
           json(Status.OK, JSONObject().put("ok", true).toString())
         }
 

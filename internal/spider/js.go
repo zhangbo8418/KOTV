@@ -18,6 +18,7 @@ import (
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/simplifiedchinese"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/util"
 
@@ -61,10 +62,11 @@ type jsSpider struct {
 	err    error
 	epoch  atomic.Uint64
 
-	activeEpoch atomic.Uint64
-	deadline    atomic.Int64
-	inited      atomic.Bool
-	cat         atomic.Bool // 源码含 __jsEvalReturn：CatVod 初始化包装
+	activeEpoch  atomic.Uint64
+	deadline     atomic.Int64
+	inited       atomic.Bool
+	cat          atomic.Bool // 源码含 __jsEvalReturn：CatVod 初始化包装
+	activeClient atomic.Value // string
 
 	timerMu sync.Mutex
 	timers  map[int32]context.CancelFunc
@@ -72,10 +74,43 @@ type jsSpider struct {
 }
 
 type jsReq struct {
-	method string
-	args   []interface{}
-	resp   chan jsResp
-	epoch  uint64
+	method   string
+	args     []interface{}
+	resp     chan jsResp
+	epoch    uint64
+	clientID string
+}
+
+func (s *jsSpider) activeClientID() string {
+	v, _ := s.activeClient.Load().(string)
+	return v
+}
+
+// jsPostMsg 把 JS 脚本消息投到引擎 /postMsg，带 clientId 以免多前端串台。
+func jsPostMsg(msg, clientID string) {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return
+	}
+	base := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
+	q := url.Values{}
+	q.Set("msg", msg)
+	if clientID != "" {
+		q.Set("clientId", clientID)
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/postMsg?"+q.Encode(), nil)
+		if err != nil {
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		_ = resp.Body.Close()
+	}()
 }
 
 type jsResp struct {
@@ -251,12 +286,16 @@ func (s *jsSpider) runWorker() (err error) {
 				req.resp <- jsResp{err: ErrScriptInterrupted}
 				continue
 			}
+			s.activeClient.Store(req.clientID)
+			done := hostclient.Enter(req.clientID)
 			s.activeEpoch.Store(req.epoch)
 			s.deadline.Store(time.Now().Add(jsCallTimeout).UnixNano())
 			args := req.args
 			if req.method == "init" {
 				if s.inited.Load() {
 					// 已在 createObj 后 init 过，避免双重初始化
+					done()
+					s.activeClient.Store("")
 					req.resp <- jsResp{out: "{}", err: nil}
 					continue
 				}
@@ -266,6 +305,8 @@ func (s *jsSpider) runWorker() (err error) {
 			if req.method == "init" && err == nil {
 				s.inited.Store(true)
 			}
+			done()
+			s.activeClient.Store("")
 			req.resp <- jsResp{out: out, err: err}
 		}
 	}
@@ -404,6 +445,17 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 	}))
 	g.Set("getPort", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		return c.NewInt32(int32(localproxy.Port()))
+	}))
+	g.Set("getClientId", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
+		return c.NewString(hostclient.Current())
+	}))
+	g.Set("postMsg", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
+		msg := ""
+		if len(args) > 0 {
+			msg = args[0].String()
+		}
+		jsPostMsg(msg, hostclient.Current())
+		return c.NewBool(true)
 	}))
 	g.Set("getProxy", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		// 对齐 TV Global.getProxy：Proxy.getUrl(local)+"?do=js"
@@ -1027,10 +1079,11 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 	s.startWorker()
 	resp := make(chan jsResp, 1)
 	epoch := s.epoch.Load()
+	cid := hostclient.Current()
 	select {
 	case <-s.quitCh:
 		return "{}", fmt.Errorf("spider 已销毁")
-	case s.reqCh <- jsReq{method: method, args: args, resp: resp, epoch: epoch}:
+	case s.reqCh <- jsReq{method: method, args: args, resp: resp, epoch: epoch, clientID: cid}:
 	}
 	select {
 	case r := <-resp:
