@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"path"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/bobo/KOTV/internal/clientsession"
-	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
@@ -81,18 +79,9 @@ func (a *App) APIGetConfig() map[string]any {
 
 func (a *App) APILoadConfig(source string) error {
 	cfg, sites, sess := a.scope()
-	// 有会话：只换该用户当前源（ephemeral），软取消本人请求；脚本磁盘缓存共享不动。
-	if sess != nil {
-		sites.InvalidateHomeOnly()
-	} else {
-		sites.InvalidateLoads()
-	}
-	var err error
-	if rid := hostclient.RuntimeUserID(); rid != "" {
-		err = a.loadConfigWithWatchdog(cfg, source, rid)
-	} else {
-		err = a.loadConfigWithSharedWatchdog(cfg, source)
-	}
+	// 换源立刻硬杀所属运行时（本机共享 / 远端该用户）；脚本磁盘缓存保留。
+	sites.InvalidateLoads()
+	err := cfg.LoadFromSource(source)
 	if err != nil {
 		if sess != nil {
 			sess.Ready = false
@@ -121,65 +110,6 @@ func (a *App) APILoadConfig(source string) error {
 		a.Live.SyncFromConfig()
 	}
 	return nil
-}
-
-func (a *App) loadConfigWithWatchdog(cfg *config.Manager, source, userID string) error {
-	timeout := 45 * time.Second
-	if v := strings.TrimSpace(os.Getenv("KOTV_USER_CALL_TIMEOUT")); v != "" {
-		if d, e := time.ParseDuration(v); e == nil && d > 0 {
-			timeout = d
-		}
-	}
-	type res struct{ err error }
-	ch := make(chan res, 1)
-	go func() {
-		ch <- res{cfg.LoadFromSource(source)}
-	}()
-	select {
-	case r := <-ch:
-		return r.err
-	case <-time.After(timeout):
-		cid := hostclient.ScopeID()
-		spider.InterruptJavaBridgeForClient(cid)
-		spider.InterruptScriptSpidersForClient(cid)
-		select {
-		case r := <-ch:
-			return r.err
-		case <-time.After(5 * time.Second):
-			spider.RestartUserRuntime(userID)
-			return fmt.Errorf("换源超时，已重启该用户运行时，请重试")
-		}
-	}
-}
-
-// loadConfigWithSharedWatchdog 本机换源超时：软取消后硬重启共享 JVM/Py/JS。
-func (a *App) loadConfigWithSharedWatchdog(cfg *config.Manager, source string) error {
-	timeout := 45 * time.Second
-	if v := strings.TrimSpace(os.Getenv("KOTV_USER_CALL_TIMEOUT")); v != "" {
-		if d, e := time.ParseDuration(v); e == nil && d > 0 {
-			timeout = d
-		}
-	}
-	type res struct{ err error }
-	ch := make(chan res, 1)
-	go func() {
-		ch <- res{cfg.LoadFromSource(source)}
-	}()
-	select {
-	case r := <-ch:
-		return r.err
-	case <-time.After(timeout):
-		cid := hostclient.ScopeID()
-		spider.InterruptJavaBridgeForClient(cid)
-		spider.InterruptScriptSpidersForClient(cid)
-		select {
-		case r := <-ch:
-			return r.err
-		case <-time.After(5 * time.Second):
-			spider.RestartSharedRuntime()
-			return fmt.Errorf("换源超时，已重启本机共享运行时，请重试")
-		}
-	}
 }
 
 func (a *App) APISetHome(siteKey string) error {

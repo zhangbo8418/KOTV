@@ -94,6 +94,16 @@ func RestartUserRuntime(userID string) {
 	KillUserRuntime(userID)
 }
 
+// RestartCallerRuntime 硬重启当前请求所属运行时：远端该用户的 JVM/Py/JS，或本机共享池。
+// 取消 / 换源立刻调用，不在外层死等；慢站靠单次 JAR/JS/Py 调用超时。
+func RestartCallerRuntime() {
+	if uid := hostclient.RuntimeUserID(); uid != "" {
+		RestartUserRuntime(uid)
+		return
+	}
+	RestartSharedRuntime()
+}
+
 // 点播配置的网络参数（headers/proxy/hosts/doh），在每个新 worker 启动时重放。
 var (
 	netConfigMu       sync.Mutex

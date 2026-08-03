@@ -46,11 +46,10 @@ Go Engine（可部署到服务器，多前端并发）
 | **OkHttp net** | 随各用户当前源按 ScopeID 写入 `NetProfiles`；请求 ScopeID 兼用于软取消 |
 | **进程模型** | **只有一个 Go 引擎**；远端按用户隔离的是 **JVM（含 dex 加载）/ Python / JS** 运行时，不是多套引擎 |
 | **远端鉴权** | `settings.remoteAuth` 开启后非本机请求需 `Authorization: Bearer`；`/admin` 管理用户；`allowRegister` 可开关注册 |
-| **脚本 vs 运行时** | **脚本文件**（JAR/Py/JS）全局共享；本机共享一套 JVM/Py/JS；远端每用户独立 JVM/Py/JS。`session/leave` / 90s 无心跳 → 只杀该用户的 JVM/Py/JS；换源超时 → `RestartUserRuntime` |
-| 换源 | 有会话时只改该用户当前源；优先软取消；超时则 `RestartUserRuntime`（只杀该用户 JVM/Py/JS） |
-| JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`）；jar 文件按 URL MD5 全局缓存，各用户 JVM 各自加载 |
-| Py / JS | 脚本按 api 哈希全局缓存；远端每用户独立进程池，本机共享池 |
-| 取消 / 卡死 | 日常软取消；**本机**卡死可 `RestartSharedRuntime`（只杀共享池，不动远端用户）；**远端**卡死可 `KillUserRuntime(userId)` |
+| **脚本 vs 运行时** | **脚本文件**全局共享；本机共享一套 JVM/Py/JS；远端每用户独立。`session/leave` → 只杀该用户运行时 |
+| 换源 / 取消 | **立刻硬杀**所属运行时（`RestartCallerRuntime`：本机共享池或远端该用户）；不在外层死等 |
+| JAR / Py / JS | 磁盘缓存共享；**单次调用自带超时**（JAR 120s / JS·Py 45s）；慢站只失败该次请求 |
+| 取消 / 卡死 | `cancelPending` / 换源 → 硬杀所属 JVM/Py/JS（独立进程，互不影响） |
 | JS | `getClientId()` 返回当前 ScopeID；`postMsg` 路由回正确前端 |
 
 ### 本地 vs 远端

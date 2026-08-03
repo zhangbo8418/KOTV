@@ -46,22 +46,17 @@ func NewSiteService(cfg *config.Manager) *SiteService {
 	}
 }
 
-// InvalidateLoads 本机换源：作废缓存 + 软取消，并重置本机共享内存脚本/JAR 实例。
-// 本机单前端：共享池卡死可用 RestartSharedRuntime 硬杀（见换源超时）；不删脚本磁盘缓存。
-// 远端租户：各有独立 JVM/Py/JS，卡死用 KillUserRuntime / RestartUserRuntime。
+// InvalidateLoads 换源：作废缓存，并立刻硬杀当前所属 JVM/Py/JS（本机共享池或远端该用户）。
+// 不删脚本磁盘缓存；慢站靠单次调用超时，不在换源外层死等。
 func (s *SiteService) InvalidateLoads() {
 	s.loadEpoch.Add(1)
 	s.mu.Lock()
 	s.invalidateContentCache()
 	s.mu.Unlock()
-	cid := hostclient.ScopeID()
-	spider.InterruptJavaBridgeForClient(cid)
-	spider.InterruptScriptSpidersForClient(cid)
-	spider.ResetScriptSpiders()
-	spider.ClearJarBridgeOnSwitch()
+	spider.RestartCallerRuntime()
 }
 
-// InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前会话，保留脚本/JAR 池。
+// InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前会话，保留运行时进程。
 func (s *SiteService) InvalidateHomeOnly() {
 	s.loadEpoch.Add(1)
 	s.mu.Lock()
@@ -77,12 +72,9 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 	return s.loadEpoch.Load()
 }
 
-// CancelPendingContent 打断进行中的 spider 请求（软取消）。
-// 本机共享池若仍卡死：换源超时会 RestartSharedRuntime；远端用 KillUserRuntime。
+// CancelPendingContent 打断进行中的 spider：立刻硬杀当前所属 JVM/Py/JS（对齐旧版 cancelPending）。
 func (s *SiteService) CancelPendingContent() {
-	cid := hostclient.ScopeID()
-	spider.InterruptJavaBridgeForClient(cid)
-	spider.InterruptScriptSpidersForClient(cid)
+	spider.RestartCallerRuntime()
 }
 
 func (s *SiteService) HomeContent() (model.Result, error) {

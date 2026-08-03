@@ -108,6 +108,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   bool _catchup = false;
   bool _catchupChrome = false;
   bool _miniDesktop = false;
+  /// 沉浸全屏：复用 PC 左右菜单交互（不再推另一套点播式全屏页）。
+  bool _immersive = false;
   /// 竖屏面板：0=频道 1=EPG
   int _portraitTab = 0;
   /// 竖屏播放器底栏显隐（点画面切换；数秒后自动隐藏）
@@ -125,11 +127,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   @override
   void initState() {
     super.initState();
+    liveScreenHandleBack = _handleLiveBack;
     _bootstrap();
   }
 
   @override
   void dispose() {
+    liveScreenHandleBack = null;
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
     }
@@ -147,6 +151,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _ijk?.dispose();
     _mkPlayer?.dispose();
     super.dispose();
+  }
+
+  /// 返回：沉浸全屏 → 关侧栏 → 未消费（交给外壳双返退桌面）。
+  bool _handleLiveBack() {
+    if (_immersive) {
+      unawaited(_exitImmersive());
+      return true;
+    }
+    if (_leftOpen || _rightOpen) {
+      setState(() {
+        _leftOpen = false;
+        _rightOpen = false;
+      });
+      return true;
+    }
+    return false;
   }
 
   Future<void> _bootstrap() async {
@@ -667,30 +687,25 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } catch (_) {}
     if (!mounted) return;
-    await Navigator.of(context, rootNavigator: true).push(
-      PageRouteBuilder(
-        opaque: true,
-        pageBuilder: (ctx, _, __) => _LiveFullscreenScaffold(
-          video: _liveVideo(),
-          playback: _playback,
-          playerLabel: flutterPlayerLabel(_playerVal),
-          decodeLabel: _decodeLabel,
-          onPrev: () {
-            final chs = _channels;
-            if (chs.isEmpty) return;
-            _playChannel(_chIdx <= 0 ? chs.length - 1 : _chIdx - 1);
-          },
-          onNext: () {
-            final chs = _channels;
-            if (chs.isEmpty) return;
-            _playChannel((_chIdx + 1) % chs.length);
-          },
-          onCast: () => unawaited(_cast()),
-          onPlayer: () => unawaited(_pickPlayer()),
-          onDecode: () => unawaited(_pickDecode()),
-        ),
-      ),
-    );
+    setState(() {
+      _immersive = true;
+      _leftOpen = false;
+      _rightOpen = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
+  }
+
+  Future<void> _exitImmersive() async {
+    if (!_immersive) return;
+    if (mounted) {
+      setState(() {
+        _immersive = false;
+        _leftOpen = false;
+        _rightOpen = false;
+      });
+    }
     try {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     } catch (_) {}
@@ -852,14 +867,18 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     final chs = _channels;
     switch (event.logicalKey) {
       case LogicalKeyboardKey.escape:
-        goKotvPage(ref, KotvPage.video);
-        return KeyEventResult.handled;
+      case LogicalKeyboardKey.goBack:
+        if (_handleLiveBack()) return KeyEventResult.handled;
+        return KeyEventResult.ignored;
       case LogicalKeyboardKey.keyM:
+      case LogicalKeyboardKey.contextMenu:
         _toggleRight();
         return KeyEventResult.handled;
       case LogicalKeyboardKey.enter:
       case LogicalKeyboardKey.space:
-        _toggleLeft();
+      case LogicalKeyboardKey.select:
+      case LogicalKeyboardKey.numpadEnter:
+        _openLeft();
         return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowUp:
         if (chs.isEmpty) return KeyEventResult.handled;
@@ -951,8 +970,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       );
     }
 
-    // 竖屏 / 窄窗：上播放器 + 下频道列表（移动端布局）
-    if (KotvLayout.useBottomNav(context) || KotvLayout.isCompact(context)) {
+    // 竖屏 / 窄窗：上播放器 + 下频道列表（移动端布局）。沉浸全屏则走下方 PC 同款左右菜单。
+    if (!_immersive && (KotvLayout.useBottomNav(context) || KotvLayout.isCompact(context))) {
       return _buildPortraitLive();
     }
 
@@ -1011,7 +1030,18 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                     Positioned(
                       left: 16,
                       top: 12,
-                      child: AppPill(label: '返回', width: 96, height: 36, onTap: () => goKotvPage(ref, KotvPage.video)),
+                      child: AppPill(
+                        label: _immersive ? '退出全屏' : '返回',
+                        width: 96,
+                        height: 36,
+                        onTap: () {
+                          if (_immersive) {
+                            unawaited(_exitImmersive());
+                          } else {
+                            goKotvPage(ref, KotvPage.video);
+                          }
+                        },
+                      ),
                     ),
                   if (_leftOpen)
                     Positioned(
@@ -1847,231 +1877,6 @@ class _LiveChannelLogo extends StatelessWidget {
       color: _bg,
       child: Center(
         child: Text(_letter, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-      ),
-    );
-  }
-}
-
-/// 直播全屏页：点画面显隐控件；上下滑/方向键换台（对齐点播全屏）。
-class _LiveFullscreenScaffold extends StatefulWidget {
-  const _LiveFullscreenScaffold({
-    required this.video,
-    required this.playback,
-    required this.playerLabel,
-    required this.decodeLabel,
-    required this.onPrev,
-    required this.onNext,
-    required this.onCast,
-    required this.onPlayer,
-    required this.onDecode,
-  });
-
-  final Widget video;
-  final KotvPlayback playback;
-  final String playerLabel;
-  final String decodeLabel;
-  final VoidCallback onPrev;
-  final VoidCallback onNext;
-  final VoidCallback onCast;
-  final VoidCallback onPlayer;
-  final VoidCallback onDecode;
-
-  @override
-  State<_LiveFullscreenScaffold> createState() => _LiveFullscreenScaffoldState();
-}
-
-class _LiveFullscreenScaffoldState extends State<_LiveFullscreenScaffold> {
-  bool _showChrome = true;
-  Timer? _hideTimer;
-  Timer? _hintTimer;
-  String? _swipeHint;
-  double _dragDy = 0;
-  DateTime? _lastSwipeAt;
-  final FocusNode _focus = FocusNode();
-
-  @override
-  void initState() {
-    super.initState();
-    _armHide();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focus.requestFocus();
-    });
-  }
-
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    _hintTimer?.cancel();
-    _focus.dispose();
-    super.dispose();
-  }
-
-  void _armHide() {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted) setState(() => _showChrome = false);
-    });
-  }
-
-  void _toggle() {
-    if (_showChrome) {
-      _hideTimer?.cancel();
-      setState(() => _showChrome = false);
-    } else {
-      setState(() => _showChrome = true);
-      _armHide();
-    }
-  }
-
-  void _flashHint(String text) {
-    _hintTimer?.cancel();
-    setState(() => _swipeHint = text);
-    _hintTimer = Timer(const Duration(milliseconds: 900), () {
-      if (mounted) setState(() => _swipeHint = null);
-    });
-  }
-
-  void _goNext() {
-    _flashHint('下一台');
-    widget.onNext();
-    setState(() => _showChrome = true);
-    _armHide();
-  }
-
-  void _goPrev() {
-    _flashHint('上一台');
-    widget.onPrev();
-    setState(() => _showChrome = true);
-    _armHide();
-  }
-
-  void _onVerticalDragEnd(DragEndDetails d) {
-    final now = DateTime.now();
-    if (_lastSwipeAt != null && now.difference(_lastSwipeAt!) < const Duration(milliseconds: 650)) {
-      _dragDy = 0;
-      return;
-    }
-    final v = d.primaryVelocity ?? 0;
-    // 上滑 = 下一台；下滑 = 上一台（对齐点播全屏）
-    if (v < -380 || _dragDy < -72) {
-      _lastSwipeAt = now;
-      _goNext();
-    } else if (v > 380 || _dragDy > 72) {
-      _lastSwipeAt = now;
-      _goPrev();
-    }
-    _dragDy = 0;
-  }
-
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
-      Navigator.of(context).maybePop();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.space || key == LogicalKeyboardKey.mediaPlayPause) {
-      widget.playback.playOrPause();
-      setState(() => _showChrome = true);
-      _armHide();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.channelUp) {
-      _goPrev();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.channelDown) {
-      _goNext();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _focus,
-      autofocus: true,
-      onKeyEvent: _onKey,
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: SafeArea(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _toggle,
-                onVerticalDragStart: (_) => _dragDy = 0,
-                onVerticalDragUpdate: (d) => _dragDy += d.delta.dy,
-                onVerticalDragEnd: _onVerticalDragEnd,
-                child: widget.video,
-              ),
-              if (_swipeHint != null)
-                Center(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: const Color(0x99000000),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      child: Text(
-                        _swipeHint!,
-                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ),
-                ),
-              if (_showChrome) ...[
-                Positioned(
-                  top: 8,
-                  left: 8,
-                  child: AppPill(
-                    label: '退出全屏',
-                    height: 32,
-                    fontSize: 12,
-                    onTap: () => Navigator.of(context).pop(),
-                  ),
-                ),
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AppPill(label: '上一台', height: 32, fontSize: 12, onTap: _goPrev),
-                      const SizedBox(width: 6),
-                      AppPill(label: '下一台', height: 32, fontSize: 12, onTap: _goNext),
-                    ],
-                  ),
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: LiveCatchupChrome(
-                    player: widget.playback,
-                    playerLabel: widget.playerLabel,
-                    decodeLabel: widget.decodeLabel,
-                    onCast: () {
-                      _armHide();
-                      widget.onCast();
-                    },
-                    onPlayer: () {
-                      _armHide();
-                      widget.onPlayer();
-                    },
-                    onDecode: () {
-                      _armHide();
-                      widget.onDecode();
-                    },
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
       ),
     );
   }

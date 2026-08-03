@@ -106,7 +106,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     };
   }
 
-  /// 系统/手势/遥控返回：先关根 Navigator 弹窗 → 再 pop 详情 → 再退主 Tab → 首页连按两次退桌面。
+  /// 系统/手势/遥控返回：先关根弹窗/详情 → 直播面板/全屏 → 首页与直播均连按两次退桌面。
   void _onShellBack() {
     final root = rootNavigatorKey.currentState;
     // 扫码等 useRootNavigator 弹窗在根栈顶：直接 pop，由弹窗 PopScope 回报 dismiss。
@@ -125,12 +125,21 @@ class _AppShellState extends ConsumerState<AppShell> {
       nav.pop();
       return;
     }
+    // 直播：先关侧栏/退出沉浸全屏，再与首页一样「连按两次退桌面」。
+    if (page == KotvPage.live) {
+      if (liveScreenHandleBack?.call() == true) return;
+      _promptDoubleBackExit();
+      return;
+    }
     if (page != KotvPage.video) {
       _lastHomeBackAt = null;
       kotvPageBack(ref);
       return;
     }
-    // 首页：连按两次才退桌面（常见 TV/Android 习惯；避免误触直接出 App）
+    _promptDoubleBackExit();
+  }
+
+  void _promptDoubleBackExit() {
     final now = DateTime.now();
     final last = _lastHomeBackAt;
     if (last != null && now.difference(last) < const Duration(seconds: 2)) {
@@ -268,6 +277,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     );
   }
 }
+
+/// 直播页注册：返回键优先关侧栏/退出沉浸全屏。返回 true 表示已消费。
+bool Function()? liveScreenHandleBack;
 
 void goKotvPage(WidgetRef ref, KotvPage page, {bool recordHistory = true}) {
   final cur = ref.read(kotvPageProvider);
