@@ -92,9 +92,10 @@ func clearJsPy() {
 	}
 }
 
-// jsPyKey 与 jar 一致：含 userId，避免多用户同站 key 撞缓存。
+// jsPyKey 运行时实例键：含 RuntimeUserID（远端租户独立引擎；本机空=共享池）。
+// 脚本文件仍按 api MD5 落在全局 PyCache/JsCache，全用户共用。
 func jsPyKey(kind, key, api, ext, jar string) string {
-	uid := hostclient.CurrentUserID()
+	uid := hostclient.RuntimeUserID()
 	return uid + "\x01" + kind + ":" + key + "\x00" + api + "\x00" + ext + "\x00" + jar
 }
 

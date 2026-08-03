@@ -45,20 +45,21 @@ Go Engine（可部署到服务器，多前端并发）
 | **OkHttp net** | 点播配置 headers/proxy/hosts/doh 按 clientId 写入 bridge `NetProfiles`；ephemeral 换源也会下发，互不覆盖 |
 | **会话恢复** | `clientId` 持久在 Flutter；上次点播源/首页写入引擎 `data/client_sessions.json`，进程重启后首次请求自动恢复 |
 | **远端鉴权** | `settings.remoteAuth` 开启后非本机请求需 `Authorization: Bearer`；`/admin` 管理用户；`allowRegister` 可开关注册 |
-| **每用户运行时** | 已登录远端用户各自独立 JAR-JVM + Py/JS 池；`session/leave` / 90s 无心跳 → 仅杀该用户进程；换源超时 → `RestartUserRuntime` |
-| 换源 | ephemeral 不写 `settings.VOD`、不持久化共享 DB home；不清全局脚本/JAR 池（软取消当前 client） |
-| JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`），去掉全局 stdin 串行锁 |
-| Py / JS | 同站 **worker 池**（默认 CPU 数，上限 8，可用 `KOTV_SCRIPT_POOL`）；缓存键含 userId+api+ext+jar |
-| 取消 | `/api/v1/cancel` 只软取消**当前 client**；换源也不再硬 Kill 共享 JVM（只清缓存 + 软取消换源者） |
+| **每用户运行时** | **脚本文件**（JAR/Py/JS 下载缓存）全局共享；**引擎进程**仅远端租户独立（本机永远共享一套 JVM/Py/JS）。`session/leave` / 90s 无心跳 → 只杀该用户引擎；换源超时 → `RestartUserRuntime` |
+| 换源 | ephemeral 不写 `settings.VOD`、不持久化共享 DB home；不清全局脚本缓存（软取消当前 client） |
+| JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`）；jar 文件按 URL MD5 全局缓存，各用户 JVM 各自加载 |
+| Py / JS | 脚本按 api 哈希全局缓存；远端每用户独立进程池，本机共享池 |
+| 取消 | `/api/v1/cancel` 只软取消**当前 client**；远端卡死才 Kill 该用户引擎 |
 | JS | `getClientId()` / `postMsg(msg)` 宿主 API，路由回正确前端 |
 
 ### 本地 vs 远端
 
-| | 本地（loopback / 未开 remoteAuth） | 远端（remoteAuth + 非本机） |
+| | 本地（loopback / 未开 remoteAuth） | 远端租户（remoteAuth 且非本机已登录） |
 |--|--|--|
 | 登录 | 不需要 | 用户名密码 → token |
-| JAR/Py/JS | 共享单 JVM + 池 | 每用户独立进程 |
-| App 关闭 | `/api/v1/shutdown` 关整引擎 | `session/leave` 只杀该用户运行时 |
+| 爬虫脚本 | 全局共享磁盘缓存 | 同一套全局缓存 |
+| JAR/Py/JS **引擎** | **共享** 单 JVM + 池 | **每用户独立** 进程 |
+| App 关闭 | `/api/v1/shutdown` 关整引擎 | `session/leave` 只杀该用户引擎 |
 | 管理 | — | `/admin` 用户 CRUD、注册/鉴权开关 |
 
 仍共享：桌面 Go embed 播放器单例、用户设置全局代理（`settings.Proxy`）、遥控 push/弹幕偏广播。直播树/媒体态仅进程内保留（重启不恢复）。

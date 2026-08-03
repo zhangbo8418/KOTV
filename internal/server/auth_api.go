@@ -52,6 +52,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		need := authRequiredFor(r) && !publicAuthPath(r.URL.Path)
 		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
+		loopback := isLoopbackRequest(r)
 		if need {
 			if tok == "" {
 				writeAPIError(w, http.StatusUnauthorized, "需要登录")
@@ -62,7 +63,9 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 				writeAPIError(w, http.StatusUnauthorized, err.Error())
 				return
 			}
-			done := hostclient.EnterBoth(clientIDFromRequest(r), u.ID)
+			// 远端租户：独立引擎；本机 loopback 即使已登录也走共享引擎。
+			dedicated := auth.RemoteAuthEnabled() && !loopback
+			done := hostclient.EnterSession(clientIDFromRequest(r), u.ID, dedicated)
 			defer done()
 			r = r.WithContext(withAuthUser(r.Context(), u))
 			next(w, r)
@@ -70,14 +73,15 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if tok != "" {
 			if u, err := auth.LookupToken(tok); err == nil {
-				done := hostclient.EnterBoth(clientIDFromRequest(r), u.ID)
+				dedicated := auth.RemoteAuthEnabled() && !loopback
+				done := hostclient.EnterSession(clientIDFromRequest(r), u.ID, dedicated)
 				defer done()
 				r = r.WithContext(withAuthUser(r.Context(), u))
 				next(w, r)
 				return
 			}
 		}
-		done := hostclient.Enter(clientIDFromRequest(r))
+		done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
 		defer done()
 		next(w, r)
 	}

@@ -64,7 +64,8 @@ func bridgeForUser(userID string) *javaBridgeClient {
 }
 
 func bridgeForCurrent() *javaBridgeClient {
-	return bridgeForUser(hostclient.CurrentUserID())
+	// 脚本（jar 文件）全局共享；仅 RuntimeUserID 非空时用独立 JVM。
+	return bridgeForUser(hostclient.RuntimeUserID())
 }
 
 // KillUserRuntime 杀掉指定用户的 JAR-JVM，并销毁其 Py/JS 池。
@@ -285,9 +286,8 @@ func softCancelJavaBridge(clientID string) {
 	}
 	targets := []*javaBridgeClient{&javaBridge}
 	userBridgesMu.Lock()
-	uid := hostclient.CurrentUserID()
-	if uid != "" {
-		if b := userBridges[uid]; b != nil {
+	if rid := hostclient.RuntimeUserID(); rid != "" {
+		if b := userBridges[rid]; b != nil {
 			targets = []*javaBridgeClient{b}
 		}
 	} else if clientID == "" {

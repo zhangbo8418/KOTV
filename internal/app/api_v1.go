@@ -88,9 +88,8 @@ func (a *App) APILoadConfig(source string) error {
 		sites.InvalidateLoads()
 	}
 	var err error
-	uid := hostclient.CurrentUserID()
-	if uid != "" {
-		err = a.loadConfigWithWatchdog(cfg, source, uid)
+	if rid := hostclient.RuntimeUserID(); rid != "" {
+		err = a.loadConfigWithWatchdog(cfg, source, rid)
 	} else {
 		err = cfg.LoadFromSource(source)
 	}
