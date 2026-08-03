@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
+import '../player/mpv_opts.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
@@ -126,6 +127,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ref.invalidate(configProvider);
     } catch (e) {
       setState(() => _status = '$e');
+    }
+  }
+
+  /// 开启前探测 libmpv 是否真能切到 Vulkan；失败保持关闭并提示。
+  Future<void> _toggleMpvVulkan(bool currentlyOn) async {
+    if (_busy) return;
+    if (currentlyOn) {
+      await _set('mpvVulkan', 'false', msg: '已关闭 Vulkan');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _status = '正在检测 Vulkan…';
+    });
+    try {
+      final (ok, detail) = await KotvMpvOpts.probeVulkan();
+      if (!mounted) return;
+      if (!ok) {
+        // 确保磁盘/内存都是关闭
+        await _set('mpvVulkan', 'false', msg: 'Vulkan 开启失败：$detail');
+        return;
+      }
+      await _set('mpvVulkan', 'true', msg: '已开启 Vulkan（$detail，重启播放生效）');
+    } catch (e) {
+      if (!mounted) return;
+      await _set('mpvVulkan', 'false', msg: 'Vulkan 开启失败：$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -543,8 +572,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final mpvVulkan = g('mpvVulkan', 'false') == 'true';
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
     final mpvConfPreview = g('mpvConf').trim();
-    // MPV 内置：Android + 桌面均可配 hwdec/conf/Vulkan；gpu-next 仅 Android 生效
+    // MPV 内置：Android/桌面均可配 Vulkan+conf；gpu-next 仅 Android 显示
     final showMpvOpts = kotvIsAndroid() || kotvIsDesktop();
+    final showGpuNext = kotvIsAndroid();
 
     return Column(
       children: [
@@ -684,30 +714,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           KotvSettingsCell(
                             label: 'MPV Vulkan',
                             value: mpvVulkan ? '开启' : '关闭',
-                            onTap: () => _set(
-                              'mpvVulkan',
-                              mpvVulkan ? 'false' : 'true',
-                              msg: mpvVulkan
-                                  ? '已关闭 Vulkan（重启播放生效）'
-                                  : '已开启 Vulkan（桌面/安卓尽力而为，重启播放生效）',
-                            ),
+                            onTap: () => unawaited(_toggleMpvVulkan(mpvVulkan)),
                           ),
-                          KotvSettingsCell(
-                            label: kotvIsAndroid() ? 'MPV gpu-next' : 'MPV gpu-next（仅安卓）',
-                            value: mpvGpuNext ? '开启' : '关闭',
-                            onTap: () {
-                              // 对齐 TV：gpu-next 仅 Android Surface；桌面 Flutter Texture 必须 vo=libmpv
-                              if (!kotvIsAndroid()) {
-                                setState(() => _status = '桌面内置 MPV 必须 vo=libmpv，gpu-next 仅安卓生效');
-                                return;
-                              }
-                              unawaited(_set(
+                          if (showGpuNext)
+                            KotvSettingsCell(
+                              label: 'MPV gpu-next',
+                              value: mpvGpuNext ? '开启' : '关闭',
+                              onTap: () => unawaited(_set(
                                 'mpvGpuNext',
                                 mpvGpuNext ? 'false' : 'true',
-                                msg: mpvGpuNext ? '已关闭 gpu-next（重启播放生效）' : '已开启 vo=gpu-next（重启播放生效）',
-                              ));
-                            },
-                          ),
+                                msg: mpvGpuNext
+                                    ? '已关闭 gpu-next（重启播放生效）'
+                                    : '已开启 vo=gpu-next（重启播放生效）',
+                              )),
+                            ),
                         ]),
                       if (showMpvOpts)
                         KotvSettingsWideTile(
