@@ -157,16 +157,28 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 	}
 	sess = a.sessions.GetOrCreate(cid, func() *clientsession.Session {
 		cloned := a.Config.CloneEphemeral()
+		liveSvc := live.NewService(cloned)
+		liveSvc.SyncFromConfig()
 		return &clientsession.Session{
 			ClientID: cid,
 			Cfg:      cloned,
 			Sites:    service.NewSiteService(cloned),
+			Live:     liveSvc,
 			Source:   settings.Get(settings.VOD),
 			Ready:    a.Ready,
 			ErrMsg:   a.ErrMsg,
 		}
 	})
 	return sess.Cfg, sess.Sites, sess
+}
+
+// scopeLive 当前客户端的直播服务（有 clientId 时隔离）。
+func (a *App) scopeLive() *live.Service {
+	_, _, sess := a.scope()
+	if sess != nil && sess.Live != nil {
+		return sess.Live
+	}
+	return a.Live
 }
 
 func (a *App) listenEvents() {
@@ -386,28 +398,52 @@ func (a *App) startDLNARenderer() {
 }
 
 func (a *App) SetMediaPlaying(title, url string) {
-	a.mediaMu.Lock()
-	a.mediaState = "playing"
-	a.mediaTitle = title
-	a.mediaURL = url
-	a.mediaMu.Unlock()
+	_, _, sess := a.scope()
+	if sess != nil {
+		sess.SetMediaPlaying(title, url)
+	} else {
+		a.mediaMu.Lock()
+		a.mediaState = "playing"
+		a.mediaTitle = title
+		a.mediaURL = url
+		a.mediaMu.Unlock()
+	}
+	remote.SetMediaStore(map[string]string{
+		"state": "playing",
+		"title": title,
+		"url":   url,
+	})
 }
 
 func (a *App) SetMediaIdle() {
-	a.mediaMu.Lock()
-	a.mediaState = "idle"
-	a.mediaTitle = ""
-	a.mediaURL = ""
-	a.mediaMu.Unlock()
+	_, _, sess := a.scope()
+	if sess != nil {
+		sess.SetMediaIdle()
+	} else {
+		a.mediaMu.Lock()
+		a.mediaState = "idle"
+		a.mediaTitle = ""
+		a.mediaURL = ""
+		a.mediaMu.Unlock()
+	}
+	remote.SetMediaStore(map[string]string{"state": "idle", "title": "未播放"})
 }
 
 func (a *App) MediaURL() string {
+	_, _, sess := a.scope()
+	if sess != nil {
+		return sess.MediaURL()
+	}
 	a.mediaMu.RLock()
 	defer a.mediaMu.RUnlock()
 	return a.mediaURL
 }
 
 func (a *App) MediaTitle() string {
+	_, _, sess := a.scope()
+	if sess != nil {
+		return sess.MediaTitle()
+	}
 	a.mediaMu.RLock()
 	defer a.mediaMu.RUnlock()
 	return a.mediaTitle

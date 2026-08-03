@@ -99,6 +99,9 @@ func (a *App) APILoadConfig(source string) error {
 		} else {
 			sess.Source = strings.TrimSpace(source)
 		}
+		if sess.Live != nil {
+			sess.Live.SyncFromConfig()
+		}
 	} else {
 		a.Ready = true
 		a.ErrMsg = ""
@@ -622,6 +625,10 @@ func (a *App) APIRemotePoll() map[string]any {
 }
 
 func (a *App) APISetMedia(state map[string]string) {
+	_, _, sess := a.scope()
+	if sess != nil {
+		sess.SetMediaSnapshot(state)
+	}
 	remote.SetMediaStore(state)
 }
 
@@ -955,7 +962,7 @@ func (a *App) APISetSettings(kv map[string]string) error {
 		spider.SetUserProxy(settings.Get(settings.Proxy))
 	}
 	if needLive {
-		a.Live.SyncFromConfig()
+		a.scopeLive().SyncFromConfig()
 	}
 	if needDLNA {
 		a.SyncDLNARenderer()
@@ -993,8 +1000,9 @@ func (a *App) APIToggleSite(key, field string, all *bool) error {
 }
 
 func (a *App) APILiveSources() map[string]any {
-	a.Live.SyncFromConfig()
-	srcs := a.Live.Sources()
+	lv := a.scopeLive()
+	lv.SyncFromConfig()
+	srcs := lv.Sources()
 	list := make([]map[string]any, 0, len(srcs))
 	for i, l := range srcs {
 		name := strings.TrimSpace(l.Name)
@@ -1016,19 +1024,20 @@ func (a *App) APILiveSources() map[string]any {
 }
 
 func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
-	a.Live.SyncFromConfig()
-	srcs := a.Live.Sources()
-	var live model.Live
+	lv := a.scopeLive()
+	lv.SyncFromConfig()
+	srcs := lv.Sources()
+	var liveSrc model.Live
 	url = strings.TrimSpace(url)
 	if url != "" {
-		live = model.Live{Name: "自定义", URL: url}
+		liveSrc = model.Live{Name: "自定义", URL: url}
 	} else {
 		if index < 0 || index >= len(srcs) {
 			return nil, fmt.Errorf("直播源索引无效")
 		}
-		live = srcs[index]
+		liveSrc = srcs[index]
 	}
-	loaded, err := a.Live.Load(live)
+	loaded, err := lv.Load(liveSrc)
 	if err != nil {
 		return nil, err
 	}
@@ -1064,7 +1073,8 @@ func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
 }
 
 func (a *App) liveChannelAt(group, channel int) (*model.Live, *model.LiveGroup, *model.LiveChannel, error) {
-	cur := a.Live.Current()
+	lv := a.scopeLive()
+	cur := lv.Current()
 	if cur == nil || len(cur.Groups) == 0 {
 		return nil, nil, nil, fmt.Errorf("请先加载直播源")
 	}
@@ -1081,6 +1091,7 @@ func (a *App) liveChannelAt(group, channel int) (*model.Live, *model.LiveGroup, 
 }
 
 func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
+	lv := a.scopeLive()
 	_, g, ch, err := a.liveChannelAt(group, channel)
 	if err != nil {
 		return nil, err
@@ -1088,7 +1099,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	if line >= 0 && line < len(ch.URLs) {
 		ch.URLIndex = line
 	}
-	playURL, headers, err := a.Live.ResolvePlayURLParsed(ch)
+	playURL, headers, err := lv.ResolvePlayURLParsed(ch)
 	if err != nil && playURL == "" {
 		return nil, err
 	}
@@ -1108,7 +1119,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 }
 
 func (a *App) APILiveUnlock(group int, password string) error {
-	cur := a.Live.Current()
+	cur := a.scopeLive().Current()
 	if cur == nil || len(cur.Groups) == 0 {
 		return fmt.Errorf("请先加载直播源")
 	}
