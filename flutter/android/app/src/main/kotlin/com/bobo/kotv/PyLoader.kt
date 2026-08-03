@@ -126,7 +126,10 @@ def kotv_py_dispatch(req_json):
         method = req["method"]
         args = req.get("args") or {}
 
-        sess = _KOTV_PY_SESSIONS.get(key)
+        slot = int(req.get("slot") or 0)
+        sess_key = "%s#%d" % (key, slot)
+
+        sess = _KOTV_PY_SESSIONS.get(sess_key)
         if (
             sess is None
             or sess.get("script") != script_path
@@ -135,7 +138,7 @@ def kotv_py_dispatch(req_json):
             or sess.get("cache") != cache_root
         ):
             sess = _kotv_load_session(runner_path, script_path, key, ext, api, cache_root, proxy_port)
-            _KOTV_PY_SESSIONS[key] = sess
+            _KOTV_PY_SESSIONS[sess_key] = sess
 
         mod = sess["mod"]
         # 非 init：确保先 init 一次（对齐桌面常驻进程）

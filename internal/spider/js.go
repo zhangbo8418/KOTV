@@ -131,20 +131,15 @@ func newJsSpider(key, api, ext, jar string) Spider {
 	jsPyMu.Lock()
 	defer jsPyMu.Unlock()
 	if s, ok := jsPy[jsPyKey(key, "js")]; ok {
+		if pool, ok := s.(*jsPool); ok {
+			return pool
+		}
 		if js, ok := s.(*jsSpider); ok && js.alive() {
 			return s
 		}
 		delete(jsPy, jsPyKey(key, "js"))
 	}
-	s := &jsSpider{
-		key:    key,
-		api:    api,
-		ext:    ext,
-		jar:    jar,
-		reqCh:  make(chan jsReq, 8),
-		quitCh: make(chan struct{}),
-		timers: map[int32]context.CancelFunc{},
-	}
+	s := newJsPool(key, api, ext, jar)
 	jsPy[jsPyKey(key, "js")] = s
 	return s
 }

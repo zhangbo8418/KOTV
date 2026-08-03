@@ -29,8 +29,8 @@ Flutter App（含 iOS IPA）
    ▼
 Go Engine（可部署到服务器，多前端并发）
    ├─ CMS
-   ├─ JS  → QuickJS（按站 worker；调用带 clientId）
-   ├─ PY  → Python runtime（按站进程；调用带 clientId）
+   ├─ JS  → QuickJS worker 池（同站可并行）
+   ├─ PY  → Python 进程池（同站可并行）
    └─ JAR → HTTP 多路 bridge（桌面/安卓；可并发，按 client 软取消）
 ```
 
@@ -40,6 +40,7 @@ Go Engine（可部署到服务器，多前端并发）
 |------|------|
 | `X-Kotv-Client-Id` | Flutter 持久化身份；API / ui/poll / postMsg 按客户端隔离 |
 | JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`），去掉全局 stdin 串行锁 |
+| Py / JS | 同站 **worker 池**（默认 CPU 数，上限 8，可用 `KOTV_SCRIPT_POOL`）；多用户打同一站可并行 |
 | 取消 | `/api/v1/cancel` 只软取消**当前 client** 的 OkHttp/脚本；换源仍硬 Kill JVM |
 | JS | `getClientId()` / `postMsg(msg)` 宿主 API，路由回正确前端 |
 

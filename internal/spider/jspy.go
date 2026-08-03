@@ -47,6 +47,7 @@ var (
 type pySpider struct {
 	key, api, ext, jar string
 	scriptPath         string
+	sessionSlot        int // 进程池 slot，Android session 隔离用
 
 	mu           sync.Mutex
 	cmd          *exec.Cmd
@@ -70,7 +71,7 @@ func newPySpider(key, api, ext, jar string) Spider {
 	if s, ok := jsPy[jsPyKey(key, "py")]; ok {
 		return s
 	}
-	s := &pySpider{key: key, api: api, ext: ext, jar: jar}
+	s := newPyPool(key, api, ext, jar)
 	jsPy[jsPyKey(key, "py")] = s
 	return s
 }
@@ -137,8 +138,16 @@ func InterruptScriptSpidersForClient(clientID string) {
 	jsPyMu.Unlock()
 	for _, spider := range spiders {
 		switch s := spider.(type) {
+		case *pyPool:
+			if clientID == "" || s.matchesClient(clientID) {
+				s.interrupt()
+			}
 		case *pySpider:
 			if clientID == "" || s.activeClientID() == clientID {
+				s.interrupt()
+			}
+		case *jsPool:
+			if clientID == "" || s.matchesClient(clientID) {
 				s.interrupt()
 			}
 		case *jsSpider:
@@ -497,6 +506,7 @@ func (s *pySpider) androidCallPythonLocked(method string, args map[string]interf
 		"method":     method,
 		"args":       args,
 		"clientId":   hostclient.Current(),
+		"slot":       s.sessionSlot,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
