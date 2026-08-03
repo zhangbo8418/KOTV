@@ -27,8 +27,8 @@ var (
 	jarSpiders = map[string]*jarSpider{}
 )
 
-// 多用户：按 clientId 隔离配置基址，避免 A 换源覆盖 B 的相对路径解析。
-var configBaseByClient sync.Map // clientId -> base URL
+// 多用户：按 ScopeID 隔离配置基址，避免 A 换源覆盖 B 的相对路径解析。
+var configBaseByClient sync.Map // ScopeID -> base URL
 
 type jarSpider struct {
 	key, api, ext, jar string
@@ -76,7 +76,7 @@ func clearJar() {
 	}
 }
 
-// SetConfigBase 设置当前点播配置基址。有 ScopeID 时只写入该会话，不覆盖全局。
+// SetConfigBase 设置当前点播配置基址。有 ScopeID 时只写入该会话，不覆盖他人。
 func SetConfigBase(base string) {
 	base = strings.TrimSpace(base)
 	if cid := hostclient.ScopeID(); cid != "" {

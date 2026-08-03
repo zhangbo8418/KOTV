@@ -156,8 +156,9 @@ func New() (*App, error) {
 	return a, nil
 }
 
-// scope 按 ScopeID（优先 userId）返回隔离的点播配置与 SiteService。
-// 空 ScopeID 走共享 App.Config / App.Sites（本机未登录）。
+// scope 返回当前 Scope 的点播配置与 SiteService。
+// 无 ScopeID：用全局 App.Config（本机单前端）。
+// 有 ScopeID：ephemeral 会话——可在共享的多仓/单仓列表里各自选不同当前源；脚本磁盘缓存仍全局共享。
 func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *clientsession.Session) {
 	cid := hostclient.ScopeID()
 	if cid == "" {
@@ -181,7 +182,7 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 	return sess.Cfg, sess.Sites, sess
 }
 
-// bootstrapSession 首次进入时从磁盘恢复该 clientId 上次点播源。
+// bootstrapSession 首次进入时从磁盘恢复该 Scope 上次选中的点播源。
 func (a *App) bootstrapSession(sess *clientsession.Session) {
 	if sess == nil || sess.Bootstrapped {
 		return
@@ -214,7 +215,7 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 	}
 }
 
-// scopeLive 当前客户端的直播服务（有 clientId 时隔离）。
+// scopeLive 当前 Scope 的直播服务（有会话则用会话内选中源）。
 func (a *App) scopeLive() *live.Service {
 	_, _, sess := a.scope()
 	if sess != nil && sess.Live != nil {

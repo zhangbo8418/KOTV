@@ -73,7 +73,8 @@ func (m *Manager) Ephemeral() bool {
 	return m.ephemeral
 }
 
-// CloneEphemeral 深拷贝站点相关切片，供按 clientId 隔离的临时 Manager。
+// CloneEphemeral 深拷贝站点相关切片，供按 Scope 隔离的「当前选中源」会话。
+// 列表内容从共享配置克隆起步；之后该会话换源不写全局 settings.VOD。
 func (m *Manager) CloneEphemeral() *Manager {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

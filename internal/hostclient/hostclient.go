@@ -201,7 +201,7 @@ func RuntimeUserID() string {
 	return b.UserID
 }
 
-// DedicatedRuntime 当前请求是否走独立引擎。
+// DedicatedRuntime 当前请求是否走独立 JVM/Py/JS（远端租户）；Go 引擎始终只有一个。
 func DedicatedRuntime() bool {
 	return RuntimeUserID() != ""
 }

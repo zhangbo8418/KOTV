@@ -38,19 +38,19 @@ Go Engine（可部署到服务器，多前端并发）
 
 | 能力 | 说明 |
 |------|------|
-| `ScopeID` | **远端已登录** → `u:<userId>`；**本机免登录** → `c:<clientId>`（多窗口）或空（单实例共享）。点播/直播/媒体/遥控/postMsg 同一套键 |
-| **本机** | **不需要登录**；点播、直播、媒体、遥控功能齐全；隔离靠 ClientID |
-| **点播 / 直播 / 媒体** | 均按 ScopeID 隔离 ephemeral 配置与 live/media 桶 |
-| **直播 / 媒体态** | 按 ScopeID 各自持有 `live.Service` 与媒体元数据；`/media` 与 `remote.SetMediaStore` 按 ScopeID 分桶 |
-| **遥控队列** | control / search 按 ScopeID 分桶；`/action`：`userId`→远端，`clientId`→本机，`scopeId` 带前缀原样；遥控页可选目标（空=广播） |
-| **OkHttp net** | 点播配置 headers/proxy/hosts/doh 按 ScopeID 写入 bridge `NetProfiles`；ephemeral 换源也会下发，互不覆盖 |
-| **会话恢复** | 远端靠 userId；本机未登录才持久 Flutter `clientId`。上次点播源/首页写入 `data/client_sessions.json`，重启后按 ScopeID 恢复 |
+| `ScopeID` | **远端** → `u:<userId>`（媒体/遥控/软取消）；**本机**一般可不强调 ClientID（单前端即可） |
+| **本机** | **不需要登录**；点播、直播、媒体、遥控功能齐全 |
+| **点播 / 直播** | **多仓/单仓列表与脚本缓存全局共享**；**当前选中的源/首页/直播按 Scope 各自独立**（可在同一列表里换不同源） |
+| **媒体态** | 按 ScopeID 分桶（各自播放进度/标题）；`/media` 与遥控按 Scope 定向 |
+| **遥控队列** | control / search 按 ScopeID 分桶；`/action`：`userId`→远端，`clientId`/`scopeId` 兼容本机 |
+| **OkHttp net** | 随各用户当前源按 ScopeID 写入 `NetProfiles`；请求 ScopeID 兼用于软取消 |
+| **进程模型** | **只有一个 Go 引擎**；远端按用户隔离的是 **JVM（含 dex 加载）/ Python / JS** 运行时，不是多套引擎 |
 | **远端鉴权** | `settings.remoteAuth` 开启后非本机请求需 `Authorization: Bearer`；`/admin` 管理用户；`allowRegister` 可开关注册 |
-| **每用户运行时** | **脚本文件**（JAR/Py/JS 下载缓存）全局共享；**引擎进程**仅远端租户独立（本机永远共享一套 JVM/Py/JS）。`session/leave` / 90s 无心跳 → 只杀该用户引擎；换源超时 → `RestartUserRuntime` |
-| 换源 | ephemeral 不写 `settings.VOD`、不持久化共享 DB home；不清全局脚本缓存（软取消当前 ScopeID） |
+| **脚本 vs 运行时** | **脚本文件**（JAR/Py/JS）全局共享；本机共享一套 JVM/Py/JS；远端每用户独立 JVM/Py/JS。`session/leave` / 90s 无心跳 → 只杀该用户的 JVM/Py/JS；换源超时 → `RestartUserRuntime` |
+| 换源 | 有会话时只改该用户当前源；优先软取消；超时则 `RestartUserRuntime`（只杀该用户 JVM/Py/JS） |
 | JAR | 桌面 `--serve` 为本地 HTTP（对齐 Android `:9979`）；jar 文件按 URL MD5 全局缓存，各用户 JVM 各自加载 |
 | Py / JS | 脚本按 api 哈希全局缓存；远端每用户独立进程池，本机共享池 |
-| 取消 | `/api/v1/cancel` 只软取消**当前 ScopeID**；远端卡死才 Kill 该用户引擎 |
+| 取消 / 卡死 | 日常软取消；**本机**卡死可 `RestartSharedRuntime`（只杀共享池，不动远端用户）；**远端**卡死可 `KillUserRuntime(userId)` |
 | JS | `getClientId()` 返回当前 ScopeID；`postMsg` 路由回正确前端 |
 
 ### 本地 vs 远端
@@ -59,11 +59,13 @@ Go Engine（可部署到服务器，多前端并发）
 |--|--|--|
 | 登录 | 不需要 | 用户名密码 → token |
 | 爬虫脚本 | 全局共享磁盘缓存 | 同一套全局缓存 |
-| JAR/Py/JS **引擎** | **共享** 单 JVM + 池 | **每用户独立** 进程 |
-| App 关闭 | `/api/v1/shutdown` 关整引擎 | `session/leave` 只杀该用户引擎 |
+| 多仓/单仓**列表** | 共享（可选仓相同） | 共享 |
+| 当前选中的源 | 本机 settings | **每用户各自**（同一列表里可不同） |
+| JAR/Py/JS **运行时** | **共享** 单 JVM + 池 | **每用户独立** JVM/Py/JS（Go 引擎仍只有一个） |
+| App 关闭 | `/api/v1/shutdown` 关整 Go 引擎 | `session/leave` 只杀该用户的 JVM/Py/JS |
 | 管理 | — | `/admin` 用户 CRUD、注册/鉴权开关 |
 
-仍共享：桌面 Go embed 播放器单例、用户设置全局代理（`settings.Proxy`）、遥控 push/弹幕偏广播。直播树/媒体态仅进程内保留（重启不恢复）。
+仍共享：多仓/单仓列表与脚本磁盘缓存、桌面 Go embed 播放器单例、用户设置全局代理（`settings.Proxy`）、遥控 push/弹幕偏广播。各用户当前选中源与媒体态按 Scope 隔离。
 
 ## 平台取舍
 

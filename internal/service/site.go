@@ -46,9 +46,9 @@ func NewSiteService(cfg *config.Manager) *SiteService {
 	}
 }
 
-// InvalidateLoads 换源后作废缓存，并只软取消当前 client 的进行中请求。
-// 不再硬 Kill JVM：多前端连同一引擎时，硬杀会误伤其他人。
-// 脚本/JAR 缓存仍会清空（配置已变，旧站实例不能复用）。
+// InvalidateLoads 本机换源：作废缓存 + 软取消，并重置本机共享内存脚本/JAR 实例。
+// 本机单前端：共享池卡死可用 RestartSharedRuntime 硬杀（见换源超时）；不删脚本磁盘缓存。
+// 远端租户：各有独立 JVM/Py/JS，卡死用 KillUserRuntime / RestartUserRuntime。
 func (s *SiteService) InvalidateLoads() {
 	s.loadEpoch.Add(1)
 	s.mu.Lock()
@@ -77,7 +77,8 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 	return s.loadEpoch.Load()
 }
 
-// CancelPendingContent 打断当前会话进行中的 spider 请求，不影响其他用户。
+// CancelPendingContent 打断进行中的 spider 请求（软取消）。
+// 本机共享池若仍卡死：换源超时会 RestartSharedRuntime；远端用 KillUserRuntime。
 func (s *SiteService) CancelPendingContent() {
 	cid := hostclient.ScopeID()
 	spider.InterruptJavaBridgeForClient(cid)

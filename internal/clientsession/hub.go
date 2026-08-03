@@ -1,4 +1,5 @@
-// Package clientsession 按 ScopeID（优先 userId）隔离点播/直播会话与媒体态。
+// Package clientsession 按 ScopeID 隔离「当前选中」的点播/直播与媒体态。
+// 多仓/单仓列表的磁盘与脚本缓存全局共享；各用户可在同一列表里选不同源。
 package clientsession
 
 import (
@@ -9,7 +10,7 @@ import (
 	"github.com/bobo/KOTV/internal/service"
 )
 
-// Session 单客户端的会话状态（点播配置 + 直播 + 媒体元数据）。
+// Session 单 Scope：当前点播源/首页/直播选中 + 媒体态（ephemeral，不写全局 settings.VOD）。
 type Session struct {
 	ClientID string
 	Cfg      *config.Manager
@@ -27,7 +28,7 @@ type Session struct {
 	mediaURL   string
 }
 
-// Hub 按 clientId 持有独立 Session。
+// Hub 按 ScopeID 持有会话。
 type Hub struct {
 	mu   sync.Mutex
 	byID map[string]*Session

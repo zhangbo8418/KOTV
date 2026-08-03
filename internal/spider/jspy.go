@@ -92,6 +92,28 @@ func clearJsPy() {
 	}
 }
 
+// clearSharedJsPy 只销毁本机共享池（uid 空），保留远端每用户的 Py/JS。
+func clearSharedJsPy() {
+	jsPyMu.Lock()
+	var doomed []Spider
+	for k, s := range jsPy {
+		if strings.HasPrefix(k, "\x01") {
+			doomed = append(doomed, s)
+			delete(jsPy, k)
+		}
+	}
+	if strings.HasPrefix(recentJsKey, "\x01") {
+		recentJsKey = ""
+	}
+	if strings.HasPrefix(recentPyKey, "\x01") {
+		recentPyKey = ""
+	}
+	jsPyMu.Unlock()
+	for _, s := range doomed {
+		s.Destroy()
+	}
+}
+
 // jsPyKey 运行时实例键：含 RuntimeUserID（远端租户独立引擎；本机空=共享池）。
 // 脚本文件仍按 api MD5 落在全局 PyCache/JsCache，全用户共用。
 func jsPyKey(kind, key, api, ext, jar string) string {

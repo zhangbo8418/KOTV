@@ -81,7 +81,7 @@ func (a *App) APIGetConfig() map[string]any {
 
 func (a *App) APILoadConfig(source string) error {
 	cfg, sites, sess := a.scope()
-	// ephemeral：只作废本 session 缓存 + 软取消当前 client，不清全局脚本/JAR 池。
+	// 有会话：只换该用户当前源（ephemeral），软取消本人请求；脚本磁盘缓存共享不动。
 	if sess != nil {
 		sites.InvalidateHomeOnly()
 	} else {
@@ -91,7 +91,7 @@ func (a *App) APILoadConfig(source string) error {
 	if rid := hostclient.RuntimeUserID(); rid != "" {
 		err = a.loadConfigWithWatchdog(cfg, source, rid)
 	} else {
-		err = cfg.LoadFromSource(source)
+		err = a.loadConfigWithSharedWatchdog(cfg, source)
 	}
 	if err != nil {
 		if sess != nil {
@@ -148,6 +148,36 @@ func (a *App) loadConfigWithWatchdog(cfg *config.Manager, source, userID string)
 		case <-time.After(5 * time.Second):
 			spider.RestartUserRuntime(userID)
 			return fmt.Errorf("换源超时，已重启该用户运行时，请重试")
+		}
+	}
+}
+
+// loadConfigWithSharedWatchdog 本机换源超时：软取消后硬重启共享 JVM/Py/JS。
+func (a *App) loadConfigWithSharedWatchdog(cfg *config.Manager, source string) error {
+	timeout := 45 * time.Second
+	if v := strings.TrimSpace(os.Getenv("KOTV_USER_CALL_TIMEOUT")); v != "" {
+		if d, e := time.ParseDuration(v); e == nil && d > 0 {
+			timeout = d
+		}
+	}
+	type res struct{ err error }
+	ch := make(chan res, 1)
+	go func() {
+		ch <- res{cfg.LoadFromSource(source)}
+	}()
+	select {
+	case r := <-ch:
+		return r.err
+	case <-time.After(timeout):
+		cid := hostclient.ScopeID()
+		spider.InterruptJavaBridgeForClient(cid)
+		spider.InterruptScriptSpidersForClient(cid)
+		select {
+		case r := <-ch:
+			return r.err
+		case <-time.After(5 * time.Second):
+			spider.RestartSharedRuntime()
+			return fmt.Errorf("换源超时，已重启本机共享运行时，请重试")
 		}
 	}
 }

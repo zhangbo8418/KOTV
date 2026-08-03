@@ -140,7 +140,8 @@ func cancelJarCalls(clientID string) {
 	}
 }
 
-// SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp（按当前 clientId）。
+// SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp（按当前 ScopeID）。
+// 各用户当前源可不同，故 net 按 Scope 分桶；空 Scope 写默认桶。
 func SetNetConfig(headers, proxy, hosts, doh []byte) {
 	cid := hostclient.ScopeID()
 	args := map[string]json.RawMessage{}
@@ -175,7 +176,6 @@ func SetNetConfig(headers, proxy, hosts, doh []byte) {
 	}
 	netPrimed = false
 	netConfigMu.Unlock()
-	// 仅热更新已存活的 bridge；不在换源解析时冷启动 JVM。
 	pushBridgeIfAlive(payload)
 }
 
@@ -252,10 +252,11 @@ func InterruptJavaBridgeForClient(clientID string) {
 	softCancelJavaBridge(clientID)
 }
 
-// InterruptJavaBridge 全局硬打断：软取消后 Kill JVM / Android clear（换源等）。
-func InterruptJavaBridge() {
+// RestartSharedRuntime 硬重启本机共享 JVM/Py/JS（不动远端各用户独立运行时，不删脚本磁盘缓存）。
+func RestartSharedRuntime() {
 	cancelJarCalls("")
-	softCancelJavaBridge("")
+	// 只软取消 + 杀掉共享 bridge，绝不碰 userBridges。
+	softCancelSharedBridgeOnly()
 	if runtime.GOOS == "android" {
 		client := &http.Client{Timeout: 2 * time.Second}
 		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:9979/jar/interrupt", bytes.NewReader([]byte("{}")))
@@ -265,12 +266,52 @@ func InterruptJavaBridge() {
 				_ = resp.Body.Close()
 			}
 		}
+	} else {
+		javaBridge.epoch.Add(1)
+		if p := javaBridge.proc.Load(); p != nil {
+			killProcessTree(p)
+		}
+	}
+	clearSharedJsPy()
+	clearSharedJarSpiders()
+}
+
+func softCancelSharedBridgeOnly() {
+	body, _ := json.Marshal(map[string]string{"clientId": ""})
+	payload, _ := json.Marshal(map[string]interface{}{
+		"method":   "cancelClient",
+		"args":     map[string]string{"clientId": ""},
+		"clientId": "",
+	})
+	if runtime.GOOS == "android" {
+		_, _ = androidPostJarShort(payload)
 		return
 	}
-	javaBridge.epoch.Add(1)
-	if p := javaBridge.proc.Load(); p != nil {
-		killProcessTree(p)
+	base := javaBridge.currentBaseURL()
+	if base == "" {
+		return
 	}
+	_ = postJarPath(base, "/jar/cancel", body, 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	_, _ = javaBridge.httpPostCtx(ctx, payload)
+	cancel()
+}
+
+func clearSharedJarSpiders() {
+	jarMu.Lock()
+	for k := range jarSpiders {
+		// 本机共享：RuntimeUserID 为空，cacheKey 以 "\x01" 开头
+		if strings.HasPrefix(k, "\x01") {
+			delete(jarSpiders, k)
+		}
+	}
+	jarMu.Unlock()
+}
+
+// InterruptJavaBridge 硬杀本机共享 JVM（兼容旧调用）；等同 RestartSharedRuntime 的 JVM 部分但不清 Py/JS。
+// 新代码请用 RestartSharedRuntime。
+func InterruptJavaBridge() {
+	RestartSharedRuntime()
 }
 
 func softCancelJavaBridge(clientID string) {
