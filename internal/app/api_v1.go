@@ -616,7 +616,10 @@ func (a *App) APIGetSettings() map[string]any {
 	keys := []settings.Type{
 		settings.VOD, settings.LIVE, settings.Theme, settings.Player, settings.PlayerLive,
 		settings.Proxy, settings.PlayerSpeed, settings.PlayerScale, settings.PlayerDecode,
+		settings.PlayerVolume, settings.PlayerAmbient, settings.PlayerStableVolume,
+		settings.MpvVulkan, settings.MpvGpuNext, settings.MpvConf,
 		settings.PreferredParse, settings.AdFilter, settings.M3U8Cfg, settings.DanmakuOn, settings.DanmakuAPI,
+		settings.DanmakuSize, settings.DanmakuOpacity, settings.DanmakuRows,
 		settings.AssrtToken, settings.UpdateURL, settings.WallMode, settings.WallURL,
 		settings.WallFile, settings.Incognito, settings.LiveAcross, settings.LiveChange,
 		settings.LiveInvert, settings.DLNARenderer, settings.SyncPairCode, settings.LiveKeep,

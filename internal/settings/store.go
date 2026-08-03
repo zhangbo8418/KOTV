@@ -37,6 +37,12 @@ const (
 	PlayerScale  Type = "playerScale"
 	PlayerDecode Type = "playerDecode"
 	PlayerVolume Type = "playerVolume"
+	PlayerAmbient      Type = "playerAmbient"
+	PlayerStableVolume Type = "playerStableVolume"
+	// 对齐 TV PlayerSetting：mpv_vulkan / mpv_gpu_next + 自定义 mpv.conf
+	MpvVulkan  Type = "mpvVulkan"
+	MpvGpuNext Type = "mpvGpuNext"
+	MpvConf    Type = "mpvConf"
 	LiveKeep     Type = "liveKeep" // 上次直播：源$$$分组$$$频道$$$线路URL
 	LiveAcross   Type = "liveAcross" // 跨分组换台，默认 true
 	LiveChange   Type = "liveChange" // 播放失败自动换线，默认 true
@@ -92,6 +98,9 @@ func defaultFile() file {
 			{ID: "playerVolume", Label: "默认音量", Value: "80"},
 			{ID: "playerAmbient", Label: "氛围模式", Value: "false"},
 			{ID: "playerStableVolume", Label: "稳定音量", Value: "false"},
+			{ID: "mpvVulkan", Label: "MPV Vulkan", Value: "false"},
+			{ID: "mpvGpuNext", Label: "MPV gpu-next", Value: "false"},
+			{ID: "mpvConf", Label: "MPV 配置", Value: ""},
 			{ID: "liveKeep", Label: "上次直播", Value: ""},
 			{ID: "liveAcross", Label: "跨组换台", Value: "true"},
 			{ID: "liveChange", Label: "失败换线", Value: "true"},

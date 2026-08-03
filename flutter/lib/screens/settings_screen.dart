@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -77,7 +78,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final data = await ref.read(apiProvider).setSetting(key, value);
       final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
       setState(() {
-        _s = {for (final e in map.entries) e.key: '${e.value ?? ''}'};
+        // 合并而非整表替换：避免 API 白名单漏键时把刚写入的值冲掉
+        _s = {
+          ..._s,
+          for (final e in map.entries) e.key: '${e.value ?? ''}',
+          key: value,
+        };
         _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
         _status = msg ?? '已保存';
       });
@@ -90,6 +96,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           key.startsWith('wall') ||
           key == 'player' ||
           key.startsWith('player') ||
+          key.startsWith('mpv') ||
           key == 'preferredParse' ||
           key == 'adFilter' ||
           key == 'm3u8FilterConfig' ||
@@ -108,7 +115,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final data = await ref.read(apiProvider).setSettings(kv);
       final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
       setState(() {
-        _s = {for (final e in map.entries) e.key: '${e.value ?? ''}'};
+        _s = {
+          ..._s,
+          for (final e in map.entries) e.key: '${e.value ?? ''}',
+          ...kv,
+        };
         _status = msg ?? '已保存';
       });
       ref.invalidate(settingsProvider);
@@ -684,13 +695,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           KotvSettingsCell(
                             label: kotvIsAndroid() ? 'MPV gpu-next' : 'MPV gpu-next（仅安卓）',
                             value: mpvGpuNext ? '开启' : '关闭',
-                            onTap: () => _set(
-                              'mpvGpuNext',
-                              mpvGpuNext ? 'false' : 'true',
-                              msg: kotvIsAndroid()
-                                  ? (mpvGpuNext ? '已关闭 gpu-next' : '已开启 vo=gpu-next')
-                                  : '桌面 Flutter 必须 vo=libmpv，此项仅安卓生效',
-                            ),
+                            onTap: () {
+                              // 对齐 TV：gpu-next 仅 Android Surface；桌面 Flutter Texture 必须 vo=libmpv
+                              if (!kotvIsAndroid()) {
+                                setState(() => _status = '桌面内置 MPV 必须 vo=libmpv，gpu-next 仅安卓生效');
+                                return;
+                              }
+                              unawaited(_set(
+                                'mpvGpuNext',
+                                mpvGpuNext ? 'false' : 'true',
+                                msg: mpvGpuNext ? '已关闭 gpu-next（重启播放生效）' : '已开启 vo=gpu-next（重启播放生效）',
+                              ));
+                            },
                           ),
                         ]),
                       if (showMpvOpts)

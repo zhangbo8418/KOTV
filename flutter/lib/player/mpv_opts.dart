@@ -84,7 +84,8 @@ class KotvMpvOpts {
     );
   }
 
-  /// VideoController 附着后应用 Vulkan / conf。
+  /// VideoController 附着后应用 Vulkan / conf（对齐 TV MpvUtil.addVideoOutputOptions）。
+  /// Vulkan 须尽早 setProperty；media_kit 在 Android 上默认 EGL，开启后覆盖为 androidvk。
   Future<void> applyAfterAttach(Player player) async {
     try {
       final platform = player.platform;
@@ -92,17 +93,24 @@ class KotvMpvOpts {
       Future<void> set(String k, String v) async {
         await (platform as dynamic).setProperty(k, v);
       }
+
       if (vulkan) {
+        // 对齐 TV：gpu-api=vulkan + 平台 context（TV 用 androidvk pre-init）
         await set('gpu-api', 'vulkan');
         if (kotvIsAndroid()) {
           await set('gpu-context', 'androidvk');
         } else if (!kIsWeb && Platform.isLinux) {
-          // 桌面 Vulkan 常见 context；失败则忽略
-          await set('gpu-context', 'waylandvk');
+          try {
+            await set('gpu-context', 'waylandvk');
+          } catch (_) {
+            await set('gpu-context', 'x11vk');
+          }
         } else if (!kIsWeb && Platform.isWindows) {
           await set('gpu-context', 'winvk');
         }
+        // macOS：MoltenVK 视 libmpv 构建而定，失败则忽略
       }
+
       for (final e in parseConfLines(conf)) {
         await set(e.$1, e.$2);
       }
