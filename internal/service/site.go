@@ -731,7 +731,8 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	}
 }
 
-// IsVideoFormat 对齐 TV CustomWebView：manualVideoCheck 为真时走爬虫 isVideo。
+// IsVideoFormat 对齐 TV CustomWebView.isVideoFormat：
+// sniffer() 为真 → 爬虫 isVideo；否则 Sniffer.isVideoFormat（含配置 rules.regex/exclude）。
 func (s *SiteService) IsVideoFormat(site model.Site, u string) bool {
 	sp := s.cfg.Spider(site)
 	if ok, err := sp.ManualVideoCheck(); err == nil && ok {
@@ -739,7 +740,7 @@ func (s *SiteService) IsVideoFormat(site model.Site, u string) bool {
 			return v
 		}
 	}
-	return parse.IsVideoFormat(u)
+	return parse.IsVideoFormatRules(u, s.cfg.API().Rules)
 }
 
 func decodeResult(raw string) (model.Result, error) {

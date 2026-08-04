@@ -6,18 +6,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 
 	"github.com/bobo/KOTV/internal/model"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
+	"github.com/bobo/KOTV/internal/util"
 )
 
 // 网页嗅探总超时（秒级）；冷启动 Chromium 也算在这段时间内。
@@ -198,6 +200,12 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	actions := []chromedp.Action{
 		network.Enable(),
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			// 对齐 TV CustomWebView：结果头里的 UA 必须进 WebView，否则防盗链/移动源不吐流。
+			if ua := headerValue(headers, "User-Agent"); ua != "" {
+				if err := emulation.SetUserAgentOverride(ua).Do(ctx); err != nil {
+					return err
+				}
+			}
 			if len(headers) == 0 {
 				return nil
 			}
@@ -275,7 +283,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 func androidBrowserSniff(pageURL string, headers map[string]string, timeout time.Duration, isVideo func(string) bool) (string, map[string]string, error) {
 	const base = "http://127.0.0.1:9979/sniff"
 	reqBody := map[string]interface{}{
-		"url":        pageURL,
+		"url":       pageURL,
 		"headers":   headers,
 		"timeoutMs": int(timeout / time.Millisecond),
 	}
@@ -356,9 +364,10 @@ func collectScripts(pageURL, click string, rules []model.Rule) []string {
 	if click != "" {
 		out = append(out, click)
 	}
-	host := hostOf(pageURL)
+	// 对齐 TV Sniffer.getRule：page host + ?url= 内层 host
+	hosts := sniffHosts(pageURL)
 	for _, rule := range rules {
-		if !hostMatched(host, rule.Hosts) {
+		if !hostsMatched(hosts, rule.Hosts) {
 			continue
 		}
 		for _, s := range rule.Script {
@@ -471,16 +480,36 @@ func hostOf(raw string) string {
 	return u.Hostname()
 }
 
+// sniffHosts 对齐 TV Sniffer.getRule：主 host + ?url= 内层 host，逗号拼接供 ContainOrMatch。
+func sniffHosts(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	parts := []string{u.Hostname()}
+	if q := u.Query().Get("url"); q != "" {
+		if qu, err := url.Parse(q); err == nil && qu.Hostname() != "" {
+			parts = append(parts, qu.Hostname())
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
 func hostMatched(host string, hosts []string) bool {
-	if host == "" || len(hosts) == 0 {
+	return hostsMatched(host, hosts)
+}
+
+func hostsMatched(hostsCSV string, patterns []string) bool {
+	if hostsCSV == "" || len(patterns) == 0 {
 		return false
 	}
-	for _, h := range hosts {
+	for _, h := range patterns {
 		h = strings.TrimSpace(h)
 		if h == "" {
 			continue
 		}
-		if strings.EqualFold(host, h) || strings.Contains(strings.ToLower(host), strings.ToLower(h)) {
+		// 对齐 TV Util.containOrMatch(hosts, host)
+		if util.ContainOrMatch(hostsCSV, h) {
 			return true
 		}
 	}

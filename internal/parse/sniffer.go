@@ -3,7 +3,6 @@ package parse
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"regexp"
 	"strings"
 
@@ -65,15 +64,9 @@ func matchRule(raw string, rules []model.Rule) model.Rule {
 	if len(rules) == 0 {
 		return model.Rule{}
 	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
+	hosts := sniffHosts(raw)
+	if hosts == "" {
 		return model.Rule{}
-	}
-	hosts := u.Hostname()
-	if q := u.Query().Get("url"); q != "" {
-		if qu, err := url.Parse(q); err == nil && qu.Hostname() != "" {
-			hosts = hosts + "," + qu.Hostname()
-		}
 	}
 	for _, rule := range rules {
 		for _, h := range rule.Hosts {
@@ -81,7 +74,8 @@ func matchRule(raw string, rules []model.Rule) model.Rule {
 			if h == "" {
 				continue
 			}
-			if strings.Contains(strings.ToLower(hosts), strings.ToLower(h)) {
+			// 对齐 TV Sniffer.getRule：Util.containOrMatch(hosts, host)
+			if util.ContainOrMatch(hosts, h) {
 				return rule
 			}
 		}
