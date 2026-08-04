@@ -934,49 +934,81 @@ func parseJSRequest(args []*qjs.Value) (string, jsHTTPRequest) {
 		u = args[0].String()
 	}
 	options := jsHTTPRequest{Method: "GET", Headers: map[string]string{}, Buffer: 0, Redirect: 1, Timeout: 10000, PostType: "json"}
-	if len(args) > 1 && args[1].IsObject() {
-		if m := args[1].Get("method"); m != nil && !m.IsUndefined() {
-			options.Method = strings.ToUpper(m.String())
-			m.Free()
-		}
-		if h := args[1].Get("headers"); h != nil && h.IsObject() {
-			raw := h.JSONStringify()
-			_ = json.Unmarshal([]byte(raw), &options.Headers)
-			h.Free()
-		}
-		if b := args[1].Get("body"); b != nil && !b.IsUndefined() && !b.IsNull() {
-			options.Body = b.String()
-			b.Free()
-		} else if b := args[1].Get("data"); b != nil && !b.IsUndefined() && !b.IsNull() {
-			options.Data = b.JSONStringify()
-			if b.IsString() {
-				options.Data = b.String()
+	if len(args) <= 1 || args[1] == nil || !args[1].IsObject() {
+		return u, options
+	}
+	// 对齐 TV Req.objectFrom(options.stringify())：整包 JSON 解析，避免 redirect:0 等被逐字段漏读。
+	raw := strings.TrimSpace(args[1].JSONStringify())
+	if raw == "" || raw == "undefined" || raw == "null" {
+		return u, options
+	}
+	var opts struct {
+		Method      string          `json:"method"`
+		Headers     json.RawMessage `json:"headers"`
+		Body        json.RawMessage `json:"body"`
+		Data        json.RawMessage `json:"data"`
+		Buffer      *int            `json:"buffer"`
+		Redirect    *int            `json:"redirect"`
+		Timeout     *int            `json:"timeout"`
+		PostType    string          `json:"postType"`
+		Charset     string          `json:"charset"`
+		OnlyHeaders bool            `json:"onlyHeaders"`
+		WithHeaders bool            `json:"withHeaders"`
+	}
+	if err := json.Unmarshal([]byte(raw), &opts); err != nil {
+		jsLog("[js-http] options parse fail raw=%s err=%v", jsPreview(raw, 200), err)
+		return u, options
+	}
+	if m := strings.TrimSpace(opts.Method); m != "" {
+		options.Method = strings.ToUpper(m)
+	}
+	if len(opts.Headers) > 0 {
+		var hdrs map[string]string
+		if json.Unmarshal(opts.Headers, &hdrs) == nil && hdrs != nil {
+			options.Headers = hdrs
+		} else {
+			// headers 偶发为数组/[ ["k","v"] ] 时尽量忽略，保持默认空 map
+			var any map[string]interface{}
+			if json.Unmarshal(opts.Headers, &any) == nil {
+				for k, v := range any {
+					options.Headers[k] = fmt.Sprint(v)
+				}
 			}
-			b.Free()
 		}
-		parseIntOption := func(name string, dst *int) {
-			if v := args[1].Get(name); v != nil && !v.IsUndefined() && !v.IsNull() {
-				*dst = int(v.Int32())
-				v.Free()
-			} else if v != nil {
-				v.Free()
-			}
+	}
+	if len(opts.Body) > 0 && string(opts.Body) != "null" {
+		var s string
+		if json.Unmarshal(opts.Body, &s) == nil {
+			options.Body = s
+		} else {
+			options.Body = string(opts.Body)
 		}
-		parseIntOption("buffer", &options.Buffer)
-		parseIntOption("redirect", &options.Redirect)
-		parseIntOption("timeout", &options.Timeout)
-		if v := args[1].Get("postType"); v != nil && !v.IsUndefined() {
-			options.PostType = strings.ToLower(v.String())
-			v.Free()
-		} else if v != nil {
-			v.Free()
+	} else if len(opts.Data) > 0 && string(opts.Data) != "null" {
+		var s string
+		if json.Unmarshal(opts.Data, &s) == nil {
+			options.Data = s
+		} else {
+			options.Data = string(opts.Data)
 		}
-		if v := args[1].Get("charset"); v != nil && !v.IsUndefined() {
-			options.Charset = v.String()
-			v.Free()
-		} else if v != nil {
-			v.Free()
-		}
+	}
+	if opts.Buffer != nil {
+		options.Buffer = *opts.Buffer
+	}
+	if opts.Redirect != nil {
+		options.Redirect = *opts.Redirect
+	}
+	if opts.Timeout != nil {
+		options.Timeout = *opts.Timeout
+	}
+	if pt := strings.TrimSpace(opts.PostType); pt != "" {
+		options.PostType = strings.ToLower(pt)
+	}
+	if cs := strings.TrimSpace(opts.Charset); cs != "" {
+		options.Charset = cs
+	}
+	// drpy onlyHeaders：不跟随跳转，把 Location 留给脚本拼最终地址。
+	if opts.OnlyHeaders {
+		options.Redirect = 0
 	}
 	if options.Method == "HEADER" {
 		options.Method = "HEAD"
@@ -1079,7 +1111,9 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	b := drainBody(resp)
 	b = decodeJSContentEncoding(resp.Header.Get("Content-Encoding"), b)
 	code, hdrSrc, b := applyJSRedirectDance(u, resp, b)
-	if code == 0 || code >= 400 {
+	if options.Redirect == 0 && isHTTPRedirect(code) {
+		jsLog("[js-http] no-follow redirect method=%s url=%s code=%d location=%s", options.Method, u, code, hdrSrc.Get("Location"))
+	} else if code == 0 || code >= 400 {
 		jsLog("[js-http] bad status method=%s url=%s code=%d bytes=%d", options.Method, u, code, len(b))
 	} else {
 		jsLog("[js-http] ok method=%s url=%s code=%d bytes=%d", options.Method, u, code, len(b))
