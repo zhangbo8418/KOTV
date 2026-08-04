@@ -1,6 +1,28 @@
-let req = (url, options) => http(url, Object.assign({
-    async: false
-}, options));
+let req = (url, options) => {
+    options = options || {};
+    // 与 drpy request() 对齐：在调用宿主前规范化，并写回调用方对象（withHeaders 等）。
+    if (options.redirect === false) {
+        options.redirect = 0;
+    }
+    if (options.onlyHeaders) {
+        options.redirect = 0;
+        options.withHeaders = true;
+    }
+    const res = http(url, Object.assign({ async: false }, options)) || {
+        code: "",
+        content: "",
+        headers: {},
+    };
+    // Marshal 出的 headers 可能不可扩展；drpy 会写 body/url，必须换成普通对象。
+    const headers = Object.assign({}, res.headers || {});
+    if (options.onlyHeaders) {
+        const loc = headers.location || headers.Location || "";
+        if (loc) {
+            headers.url = String(loc).replace(/ /g, "+");
+        }
+    }
+    return Object.assign({}, res, { headers });
+};
 
 function http(url, options = {}) {
     if (options?.async === false) return _http(url, options)

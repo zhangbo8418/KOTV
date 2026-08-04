@@ -926,6 +926,7 @@ type jsHTTPRequest struct {
 	Method, Body, Data, PostType, Charset string
 	Headers                               map[string]string
 	Buffer, Redirect, Timeout             int
+	OnlyHeaders                           bool
 }
 
 func parseJSRequest(args []*qjs.Value) (string, jsHTTPRequest) {
@@ -1009,6 +1010,7 @@ func parseJSRequest(args []*qjs.Value) (string, jsHTTPRequest) {
 	// drpy onlyHeaders：不跟随跳转，把 Location 留给脚本拼最终地址。
 	if opts.OnlyHeaders {
 		options.Redirect = 0
+		options.OnlyHeaders = true
 	}
 	if options.Method == "HEADER" {
 		options.Method = "HEAD"
@@ -1154,6 +1156,21 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 		result["content"] = append([]byte(nil), b...)
 	default:
 		result["content"] = decodeJSResponse(b, charset, "")
+	}
+	// drpy onlyHeaders：request() 最终应返回 JSON.stringify(headers)（含 url=Location）。
+	// Marshal 出的 headers 可能不可扩展，JS 侧 withHeaders 分支赋值失败时会退回 HTML content，
+	// 导致 JSON.parse 报 unexpected token '<'。此处把 headers JSON 直接放进 content 兜底。
+	if options.OnlyHeaders {
+		if loc, _ := hdrs["location"].(string); strings.TrimSpace(loc) != "" {
+			hdrs["url"] = strings.ReplaceAll(loc, " ", "+")
+		} else if loc, _ := hdrs["Location"].(string); strings.TrimSpace(loc) != "" {
+			hdrs["url"] = strings.ReplaceAll(loc, " ", "+")
+		}
+		result["headers"] = hdrs
+		if raw, err := json.Marshal(hdrs); err == nil {
+			result["content"] = string(raw)
+			jsLog("[js-http] onlyHeaders content=headers-json url=%v", hdrs["url"])
+		}
 	}
 	return result
 }
