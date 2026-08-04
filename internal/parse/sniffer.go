@@ -13,10 +13,8 @@ import (
 var (
 	// 与常见嗅探规则一致：媒体扩展名 / 抖音系 video/tos / rtmp
 	snifferRe = regexp.MustCompile(`(?i)https?://[^\s]{12,}\.(?:m3u8|mp4|mkv|flv|mp3|m4a|aac|mpd)(?:\?.*)?|https?://.*?video/tos[^\s]*|rtmp:[^\s]+`)
-	// 内嵌播放器页：再跟进一层
+	// 内嵌播放器页：再跟进一层（对齐 TV CustomWebView PLAYER）
 	playerURLRe = regexp.MustCompile(`(?i)player.*https?://`)
-	// 路漫漫等：iframe 指向 …/404.php、yunbox；不宜过宽以免跟飞。
-	nestedPlayerRe = regexp.MustCompile(`(?i)https?://[^?\s#]+(?:/(?:404|player|yunbox)\.php(?:\?|$)|/yunbox/[^\s]*)`)
 	excludeHint = regexp.MustCompile(`(?i)(url=http|v=http|\.html|javascript:|about:blank)`)
 )
 

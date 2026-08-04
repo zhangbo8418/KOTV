@@ -183,7 +183,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if IsAdURL(u) {
 				return
 			}
-			// 嵌套嗅探：TV player.*http + 常见云解析/iframe 入口；Document 跨域也跟进。
+			// 嵌套嗅探：TV player.*http；跨站 Document/iframe 通用跟进（上限 maxNestedPlayers）。
 			if detect && depth < 1 && shouldFollowNestedPlayer(u, pageURL, e.Type) {
 				followMu.Lock()
 				dup := followed[u]
@@ -499,28 +499,26 @@ func collectIFrameURLs(ctx context.Context) []string {
 	return out
 }
 
-// shouldFollowNestedPlayer 决定是否为 iframe/云解析入口再开一层嗅探。
+// shouldFollowNestedPlayer 决定是否再开一层嗅探。
+// 对齐 TV：PLAYER 正则；并通用跟进跨站 Document/iframe（MacPlayer 等不保证 URL 含 "player"）。
 func shouldFollowNestedPlayer(u, pageURL string, resType network.ResourceType) bool {
 	u = strings.TrimSpace(u)
 	if u == "" || sameURL(u, pageURL) {
 		return false
 	}
-	if playerURLRe.MatchString(u) || nestedPlayerRe.MatchString(u) {
+	if !strings.HasPrefix(strings.ToLower(u), "http://") && !strings.HasPrefix(strings.ToLower(u), "https://") {
+		return false
+	}
+	if playerURLRe.MatchString(u) {
 		return true
 	}
-	// Document 且跨站：常见为播放器 iframe（MacPlayer）。
-	if resType == network.ResourceTypeDocument || resType == network.ResourceTypeOther {
+	switch resType {
+	case network.ResourceTypeDocument, network.ResourceTypeOther, "":
 		ph, uh := hostOf(pageURL), hostOf(u)
-		if ph != "" && uh != "" && !strings.EqualFold(ph, uh) {
-			low := strings.ToLower(u)
-			if strings.Contains(low, "yun") || strings.Contains(low, "player") ||
-				strings.Contains(low, "parse") || strings.Contains(low, "vip") ||
-				strings.Contains(low, "404.php") {
-				return true
-			}
-		}
+		return ph != "" && uh != "" && !strings.EqualFold(ph, uh)
+	default:
+		return false
 	}
-	return false
 }
 
 func collectScripts(pageURL, click string, rules []model.Rule) []string {
