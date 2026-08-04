@@ -360,6 +360,8 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 				return model.Result{Success: false}, err
 			}
 			result.Key = site.Key
+			// 先合并站点头，再补相对 URL（很多 JS 源 play 不带回 Referer，相对 path 依赖站点头）。
+			result.Header = mergeHeaders(site.Header, result.Header)
 			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 4:
@@ -376,6 +378,7 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 			if err != nil {
 				return model.Result{Success: false}, err
 			}
+			result.Header = mergeHeaders(site.Header, result.Header)
 			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 0, 1, 2:
@@ -416,38 +419,61 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 
 // normalizePlayID 清洗剧集 id，并将相对路径尽量补成绝对地址（供 JS request / 二次解析使用）。
 func normalizePlayID(site model.Site, id string) string {
-	id = model.CleanEpisodePlayURL(id)
-	if id == "" || strings.HasPrefix(id, "http://") || strings.HasPrefix(id, "https://") ||
-		thunder.Match(id) || strings.HasPrefix(strings.ToLower(id), "ed2k:") {
-		return id
-	}
-	bases := make([]string, 0, 3)
-	switch site.TypeID() {
-	case 0, 1, 2:
-		bases = append(bases, site.API)
-	}
-	if site.Header != nil {
-		for _, k := range []string{"Referer", "referer"} {
-			if r := strings.TrimSpace(site.Header[k]); strings.HasPrefix(r, "http") {
-				bases = append(bases, r)
-			}
-		}
-	}
-	for _, base := range bases {
-		if abs := util.ResolveRelativeURL(base, id); abs != "" && abs != id {
-			return abs
-		}
-	}
-	return id
+	return resolvePlayAbsolute(id, playURLBases(site, nil)...)
 }
 
 func sanitizeResultPlayURLs(site model.Site, r *model.Result) {
 	if r == nil || len(r.URL.URLs) == 0 {
 		return
 	}
+	bases := playURLBases(site, r)
 	for i, u := range r.URL.URLs {
-		r.URL.URLs[i] = normalizePlayID(site, u)
+		r.URL.URLs[i] = resolvePlayAbsolute(u, bases...)
 	}
+}
+
+// playURLBases 相对播放地址的拼接基址：结果头 Referer/Origin → 站点头 → site.API。
+// 日志里常见 JS 源返回 /play/xxx.html，Referer 为站点根（如 https://www.lmm85.com）。
+func playURLBases(site model.Site, r *model.Result) []string {
+	var bases []string
+	seen := map[string]bool{}
+	add := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || !strings.HasPrefix(raw, "http") || seen[raw] {
+			return
+		}
+		seen[raw] = true
+		bases = append(bases, raw)
+	}
+	addFromHeader := func(h map[string]string) {
+		if h == nil {
+			return
+		}
+		for _, k := range []string{"Referer", "referer", "Origin", "origin"} {
+			add(h[k])
+		}
+	}
+	if r != nil {
+		addFromHeader(map[string]string(r.Header))
+	}
+	addFromHeader(map[string]string(site.Header))
+	add(site.API)
+	return bases
+}
+
+func resolvePlayAbsolute(id string, bases ...string) string {
+	id = model.CleanEpisodePlayURL(id)
+	if id == "" || strings.HasPrefix(id, "http://") || strings.HasPrefix(id, "https://") ||
+		thunder.Match(id) || strings.HasPrefix(strings.ToLower(id), "ed2k:") {
+		return id
+	}
+	for _, base := range bases {
+		if abs := util.ResolveRelativeURL(base, id); abs != "" && abs != id &&
+			(strings.HasPrefix(abs, "http://") || strings.HasPrefix(abs, "https://")) {
+			return abs
+		}
+	}
+	return id
 }
 
 // applySourceFetch 对齐 TV Source.fetch：特殊 scheme / .strm 预处理后再二次解析/起播。

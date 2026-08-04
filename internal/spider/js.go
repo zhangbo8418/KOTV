@@ -993,6 +993,23 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 			"headers": map[string]interface{}{},
 		}
 	}
+	u = strings.TrimSpace(u)
+	// 脚本常带 Referer 却传相对 path（如 /play/xxx.html）；按 Referer/Origin 拼绝对地址。
+	if u != "" && !strings.Contains(u, "://") && !strings.HasPrefix(strings.ToLower(u), "data:") {
+		ref := ""
+		for _, k := range []string{"Referer", "referer", "Origin", "origin"} {
+			if v := strings.TrimSpace(options.Headers[k]); strings.HasPrefix(v, "http") {
+				ref = v
+				break
+			}
+		}
+		if ref != "" {
+			if abs := util.UriResolve(ref, u); abs != "" && strings.Contains(abs, "://") {
+				jsLog("[js-http] resolve relative %s + %s → %s", ref, u, abs)
+				u = abs
+			}
+		}
+	}
 	body := options.Body
 	if options.Data != "" {
 		switch options.PostType {

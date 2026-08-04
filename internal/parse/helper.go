@@ -110,7 +110,29 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 
 	start := time.Now()
 	// 对齐 TV：doInBackground 的 webUrl 始终是 episode URL，json:/parse: 只改 selected parse。
+	hdr := mergeHeaders(nil, map[string]string(r.Header))
 	webURL := EpisodeURL(r)
+	// 相对播放页：用结果头 Referer 拼绝对地址，避免 unsupported protocol scheme。
+	if webURL != "" && !strings.Contains(webURL, "://") {
+		ref := ""
+		for _, k := range []string{"Referer", "referer", "Origin", "origin"} {
+			if v := strings.TrimSpace(hdr[k]); strings.HasPrefix(v, "http") {
+				ref = v
+				break
+			}
+		}
+		if ref != "" {
+			if abs := util.ResolveRelativeURL(ref, webURL); abs != "" && abs != webURL {
+				parseLog("[parse] resolve relative web %s + %s → %s", ref, webURL, abs)
+				webURL = abs
+				if len(r.URL.URLs) > 0 {
+					r.URL.URLs[0] = abs
+				} else {
+					r.URL = model.URL{URLs: []string{abs}}
+				}
+			}
+		}
+	}
 	parseLog("[parse] start need=%v useParse=%v flag=%q prefer=%q click=%q web=%s playUrl=%s parses=%d",
 		need, useParse, firstNonEmpty(opts.Flag, r.Flag), opts.Prefer,
 		firstNonEmpty(opts.SiteClick, opts.Click, r.Click),
@@ -135,7 +157,6 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		return r, nil
 	}
 
-	hdr := mergeHeaders(nil, map[string]string(r.Header))
 	flag := opts.Flag
 	if flag == "" {
 		flag = r.Flag
