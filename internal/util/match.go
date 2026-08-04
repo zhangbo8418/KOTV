@@ -5,7 +5,8 @@ import (
 	"strings"
 )
 
-// ContainOrMatch 文本包含 pattern，或整串匹配 pattern 正则（与 CatVod Util.containOrMatch 一致）。
+// ContainOrMatch 文本包含 pattern，或整串匹配 pattern 正则（对齐 Java Util.containOrMatch：
+// text.contains(regex) || text.matches(regex)；matches 为整串，非子串）。
 func ContainOrMatch(text, pattern string) bool {
 	if text == "" || pattern == "" {
 		return false
@@ -13,7 +14,7 @@ func ContainOrMatch(text, pattern string) bool {
 	if strings.Contains(text, pattern) {
 		return true
 	}
-	re, err := regexp.Compile(pattern)
+	re, err := regexp.Compile("^(?:" + pattern + ")$")
 	if err != nil {
 		return false
 	}

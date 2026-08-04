@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/emulation"
+	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 
@@ -24,6 +25,9 @@ import (
 
 // 网页嗅探总超时（秒级）；冷启动 Chromium 也算在这段时间内。
 const defaultParseWebTimeout = 15 * time.Second
+
+// 对齐 TV CustomWebView.MAX_URLS：嵌套 player 页最多跟进 5 个竞速。
+const maxNestedPlayers = 5
 
 // 桌面共享一个 Chromium 进程；最多 2 个并发 tab，避免超级解析打出几十个 chrome。
 var (
@@ -142,6 +146,20 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	followed := map[string]bool{}
 	chromedp.ListenTarget(ctx, func(ev any) {
 		switch e := ev.(type) {
+		case *fetch.EventRequestPaused:
+			// 对齐 TV shouldInterceptRequest：广告 host 阻断请求（空响应等效）。
+			reqID := e.RequestID
+			u := ""
+			if e.Request != nil {
+				u = e.Request.URL
+			}
+			go func() {
+				if u != "" && IsAdURL(u) {
+					_ = fetch.FailRequest(reqID, network.ErrorReasonBlockedByClient).Do(ctx)
+					return
+				}
+				_ = fetch.ContinueRequest(reqID).Do(ctx)
+			}()
 		case *network.EventRequestWillBeSent:
 			if e.Request == nil {
 				return
@@ -151,12 +169,15 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if IsAdURL(u) {
 				return
 			}
-			// 嵌套嗅探最多一层，且走共享 Chromium，避免递归开进程。
+			// 嵌套嗅探：最多跟进 maxNestedPlayers 个 player URL（对齐 TV MAX_URLS）。
 			if detect && depth < 1 && playerURLRe.MatchString(u) {
 				followMu.Lock()
 				dup := followed[u]
-				if !dup {
+				n := len(followed)
+				if !dup && n < maxNestedPlayers {
 					followed[u] = true
+				} else if !dup {
+					dup = true // 超额不再跟进
 				}
 				followMu.Unlock()
 				if !dup {
@@ -178,7 +199,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if e.Response == nil {
 				return
 			}
-			// 部分源 URL 无扩展名，靠 MIME 识别
+			// 部分源 URL 无扩展名，靠 MIME 识别；仍过 videoOK / ads（与请求路径一致）。
 			mime := strings.ToLower(e.Response.MimeType)
 			u := e.Response.URL
 			if strings.Contains(mime, "mpegurl") ||
@@ -186,11 +207,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 				strings.Contains(mime, "application/vnd.apple.mpegurl") ||
 				strings.HasPrefix(mime, "video/") ||
 				strings.HasPrefix(mime, "audio/") {
-				if !IsAdURL(u) {
-					once.Do(func() {
-						found <- sniffHit{url: u, headers: headerFromNetwork(e.Response.Headers)}
-					})
-				}
+				emit(u, headerFromNetwork(e.Response.Headers))
 				return
 			}
 			emit(u, headerFromNetwork(e.Response.Headers))
@@ -199,6 +216,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 
 	actions := []chromedp.Action{
 		network.Enable(),
+		fetch.Enable(),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// 对齐 TV CustomWebView：结果头里的 UA 必须进 WebView，否则防盗链/移动源不吐流。
 			if ua := headerValue(headers, "User-Agent"); ua != "" {

@@ -13,7 +13,7 @@ var (
 	adsList []string
 )
 
-// SetAds 设置配置里的广告域名黑名单（用于网页嗅探拦截）。
+// SetAds 设置配置里的广告域名黑名单（网页嗅探：Fetch 阻断请求 + 命中过滤）。
 func SetAds(ads []string) {
 	cleaned := make([]string, 0, len(ads))
 	for _, a := range ads {
