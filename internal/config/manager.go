@@ -358,7 +358,8 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	// headers/proxy/hosts/doh 按当前 hostclient 下发；ephemeral 也写（按 clientId 隔离，不覆盖他人）。
 	spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, api.Doh)
 	if !m.ephemeral {
-		parse.SetAds(api.Ads)
+		parse.SetVodAds(api.Ads)
+		parse.SetVodRules(api.Rules)
 	}
 
 	if api.Spider != "" {

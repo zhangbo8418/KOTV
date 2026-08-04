@@ -740,7 +740,11 @@ func (s *SiteService) IsVideoFormat(site model.Site, u string) bool {
 			return v
 		}
 	}
-	return parse.IsVideoFormatRules(u, s.cfg.API().Rules)
+	rules := parse.GetRules()
+	if len(rules) == 0 {
+		rules = s.cfg.API().Rules
+	}
+	return parse.IsVideoFormatRules(u, rules)
 }
 
 func decodeResult(raw string) (model.Result, error) {

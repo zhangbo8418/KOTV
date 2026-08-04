@@ -420,10 +420,14 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		qualNames = result.URL.Names
 		qualURLs = result.URL.URLs
 		api := cfg.API()
+		rules := parse.GetRules()
+		if len(rules) == 0 {
+			rules = api.Rules
+		}
 		parsed, perr := parse.ResolveWithParses(result, parse.Options{
 			Parses:    api.Parses,
 			Flags:     api.Flags,
-			Rules:     api.Rules,
+			Rules:     rules,
 			Jar:       api.Spider,
 			Flag:      flag,
 			Click:     result.Click,

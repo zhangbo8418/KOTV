@@ -106,9 +106,9 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		timeout = defaultParseWebTimeout // 与常见网页解析超时一致：15s
 	}
 
-	// Android：不用 Chromium / chromedp；改走本地 Native Service(Web/HTTP)嗅探。
+	// Android：不用 Chromium / chromedp；改走本地 Native Service(WebView)嗅探。
 	if runtime.GOOS == "android" {
-		return androidBrowserSniff(pageURL, headers, timeout, videoOK)
+		return androidBrowserSniff(pageURL, headers, click, rules, GetAds(), timeout, detect, videoOK)
 	}
 
 	allocCtx, err := ensureSharedChromium()
@@ -298,12 +298,22 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	}
 }
 
-func androidBrowserSniff(pageURL string, headers map[string]string, timeout time.Duration, isVideo func(string) bool) (string, map[string]string, error) {
+func androidBrowserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, ads []string, timeout time.Duration, detect bool, isVideo func(string) bool) (string, map[string]string, error) {
 	const base = "http://127.0.0.1:9979/sniff"
+	if len(rules) == 0 {
+		rules = GetRules()
+	}
+	if len(ads) == 0 {
+		ads = GetAds()
+	}
 	reqBody := map[string]interface{}{
 		"url":       pageURL,
 		"headers":   headers,
 		"timeoutMs": int(timeout / time.Millisecond),
+		"click":     click,
+		"rules":     rules,
+		"ads":       ads,
+		"detect":    detect,
 	}
 	b, err := json.Marshal(reqBody)
 	if err != nil {

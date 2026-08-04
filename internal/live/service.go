@@ -76,6 +76,23 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 对齐 TV LiveConfig：根 JSON 可含 ads/rules/lives，合并进 RuleConfig。
+	if meta, ok := ParseConfigMeta(text); ok {
+		parsepkg.SetLiveAds(meta.Ads)
+		parsepkg.SetLiveRules(meta.Rules)
+		if len(meta.Lives) == 0 {
+			return nil, fmt.Errorf("直播配置无可用直播源")
+		}
+		s.mergeConfigLives(meta.Lives, live.URL)
+		home := meta.Lives[0]
+		if strings.TrimSpace(home.URL) == "" && strings.TrimSpace(home.API) == "" {
+			return nil, fmt.Errorf("直播配置首页源地址为空")
+		}
+		if strings.TrimSpace(home.URL) != "" && strings.TrimSpace(home.URL) == strings.TrimSpace(live.URL) {
+			return nil, fmt.Errorf("直播配置循环引用")
+		}
+		return s.Load(home)
+	}
 	live.Groups = nil
 	Parse(&live, text)
 	if len(live.Groups) == 0 {
@@ -85,6 +102,25 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 	s.current = &live
 	s.mu.Unlock()
 	return &live, nil
+}
+
+// mergeConfigLives 用直播配置里的 lives 替换「自定义 / 同源」条目并置顶。
+func (s *Service) mergeConfigLives(lives []model.Live, configURL string) {
+	configURL = strings.TrimSpace(configURL)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]model.Live, 0, len(s.sources))
+	for _, src := range s.sources {
+		u := strings.TrimSpace(src.URL)
+		if configURL != "" && u == configURL {
+			continue
+		}
+		if src.Name == "自定义" && u == configURL {
+			continue
+		}
+		kept = append(kept, src)
+	}
+	s.sources = append(append([]model.Live(nil), lives...), kept...)
 }
 
 // fetchLiveText csp/js/py 直播源走 spider.liveContent，否则直接 HTTP。
