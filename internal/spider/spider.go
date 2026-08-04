@@ -2,7 +2,6 @@ package spider
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/bobo/KOTV/internal/paths"
@@ -93,12 +92,7 @@ func ResetScriptSpiders() {
 // clearScriptCaches 清空 JS 内存缓存，并清理本地 js/py 目录（含历史落盘残留）。
 func clearScriptCaches() {
 	clearJSMemoryCaches()
-	// 对齐 TV：换源不应丢掉远程 JS 模块缓存，否则会重复网络拉取/编译。
-	// 仅清理本地 js key-value（local/），保留 modules/（远程模块磁盘缓存）。
-	_ = os.RemoveAll(filepath.Join(paths.JsCache(), "local"))
-	_ = os.MkdirAll(filepath.Join(paths.JsCache(), "local"), 0o755)
-	// Python 缓存仍按原策略清理（py 模块/脚本可能随站点变更，需要重取）。
-	for _, dir := range []string{paths.PyCache()} {
+	for _, dir := range []string{paths.JsCache(), paths.PyCache()} {
 		_ = os.RemoveAll(dir)
 		_ = os.MkdirAll(dir, 0o755)
 	}

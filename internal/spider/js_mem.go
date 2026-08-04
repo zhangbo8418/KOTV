@@ -10,7 +10,6 @@ import (
 	qjs "github.com/buke/quickjs-go"
 
 	"github.com/bobo/KOTV/internal/util"
-	"github.com/bobo/KOTV/internal/paths"
 )
 
 // 对齐 TV Module.java：LruCache(50) + http / assets:// / lib/ 取源。
@@ -31,34 +30,6 @@ func clearJSMemoryCaches() {
 	jsMemByKey = map[string]*jsMemEntry{}
 	jsMemOrder = nil
 	jsMemMu.Unlock()
-}
-
-// moduleDiskPath 为远程 JS 模块提供磁盘缓存（对齐 TV：换源不需要重复下载/编译）。
-func moduleDiskPath(name string) string {
-	// remote module cache: .../cache/js/modules/<md5>.js
-	return filepath.Join(paths.JsCache(), "modules", util.MD5(name)+".js")
-}
-
-func moduleDiskGet(name string) string {
-	path := moduleDiskPath(name)
-	b, err := os.ReadFile(path)
-	if err != nil || len(b) == 0 {
-		return ""
-	}
-	s := string(b)
-	if s == "" || looksLikeNonJS(s) {
-		return ""
-	}
-	return s
-}
-
-func moduleDiskSet(name, content string) {
-	if content == "" || looksLikeNonJS(content) {
-		return
-	}
-	path := moduleDiskPath(name)
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	_ = os.WriteFile(path, []byte(content), 0o644)
 }
 
 func jsMemGet(key string) (string, bool) {
@@ -136,11 +107,6 @@ func moduleFetch(name string) string {
 	var content string
 	switch {
 	case strings.HasPrefix(name, "http://") || strings.HasPrefix(name, "https://"):
-		// 先走磁盘缓存：避免换源后重复拉取远端 JS。
-		if cached := moduleDiskGet(name); cached != "" {
-			content = cached
-			break
-		}
 		data, err := util.HTTPGet(name, nil)
 		if err == nil && data != "" && !looksLikeNonJS(data) {
 			content = data
@@ -172,10 +138,6 @@ func moduleFetch(name string) string {
 	}
 	if content != "" {
 		jsMemSet(name, content)
-		if strings.HasPrefix(name, "http://") || strings.HasPrefix(name, "https://") {
-			// 只缓存远端模块到磁盘；assets/lib/ 均由内置资源保证，不必落盘。
-			moduleDiskSet(name, content)
-		}
 	}
 	return content
 }
