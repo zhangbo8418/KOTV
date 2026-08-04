@@ -170,6 +170,19 @@ def _is_blocked_dep_name(name):
     return top in _STDLIB_TOP
 
 
+def _local_package_dir(name):
+    """cache/<name>/ 已是包（如 TV/Chaquopy 的 base.spider）时返回目录。"""
+    top = os.path.basename(str(name)).replace(".py", "").strip().split(".")[0]
+    if not top:
+        return ""
+    pkg = os.path.join(cache, top)
+    if not os.path.isdir(pkg):
+        return ""
+    if os.path.isfile(os.path.join(pkg, "__init__.py")) or os.path.isfile(os.path.join(pkg, "spider.py")):
+        return pkg
+    return ""
+
+
 def _looks_like_python_source(data):
     """拒绝把接口错误 JSON 写进 cache（否则会盖住 stdlib，如 concurrent.py）。"""
     if not data:
@@ -210,11 +223,29 @@ def _scrub_poisoned_cache():
 
 _scrub_poisoned_cache()
 
+# 若历史误下了 cache/base.py，会盖住 cache/base/ 包（from base.spider）。
+for _shadow in list(os.listdir(cache)) if os.path.isdir(cache) else []:
+    if not _shadow.endswith(".py"):
+        continue
+    _top = _shadow[:-3]
+    if _local_package_dir(_top):
+        try:
+            os.remove(os.path.join(cache, _shadow))
+            print("[pyrunner] removed package-shadowing file: %s" % _shadow, file=sys.stderr)
+        except Exception:
+            pass
+
 
 def _download_dep(name):
-    """从爬虫 api 同目录拉取依赖 py 到 cache（失败忽略，由后续 import 报错）。"""
+    """从爬虫 api 同目录拉取依赖 py 到 cache（失败忽略，由后续 import 报错）。
+
+    对齐 TV：依赖来自 getDependence()；内置 base.spider 包不从仓拉 base.py。
+    """
     name = name if str(name).endswith(".py") else str(name) + ".py"
     if _is_blocked_dep_name(name):
+        return
+    # TV Chaquopy 自带 base/spider.py；KOTV 写入 cache/base/。勿再拉同名 .py 以免盖包。
+    if _local_package_dir(name):
         return
     target = os.path.join(cache, os.path.basename(name))
     if os.path.isfile(target) and os.path.getsize(target) > 0:
@@ -245,7 +276,10 @@ def _download_dep(name):
 
 
 def _preload_imports_from_source():
-    """顶层 import t4 等发生在 init/getDependence 之前，需按源码预拉。"""
+    """顶层 import t4 等发生在 init/getDependence 之前，需按源码预拉。
+
+    不把 from base.spider 里的 base 当成要下载的 base.py（TV 用内置包）。
+    """
     try:
         with open(script, "r", encoding="utf-8", errors="ignore") as f:
             src = f.read()
@@ -254,7 +288,7 @@ def _preload_imports_from_source():
     names = set()
     for m in re.finditer(r"(?:^|\n)\s*(?:import|from)\s+([A-Za-z_][\w]*)", src):
         mod = m.group(1)
-        if _is_blocked_dep_name(mod):
+        if _is_blocked_dep_name(mod) or _local_package_dir(mod):
             continue
         names.add(mod + ".py")
     # 常见伴侣模块优先
