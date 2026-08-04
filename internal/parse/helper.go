@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
@@ -100,16 +101,26 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	parses := opts.Parses
 	flags := opts.Flags
 	useParse := IsUseParse(r, flags, parses)
-	if !NeedParse(r) && !useParse {
+	need := NeedParse(r)
+	if !need && !useParse {
+		parseLog("[parse] skip need=%v useParse=%v flag=%q playUrl=%s url=%s",
+			need, useParse, r.Flag, parsePreview(r.PlayURL, 80), parsePreview(EpisodeURL(r), 120))
 		return r, nil
 	}
 
+	start := time.Now()
 	// 对齐 TV：doInBackground 的 webUrl 始终是 episode URL，json:/parse: 只改 selected parse。
 	webURL := EpisodeURL(r)
+	parseLog("[parse] start need=%v useParse=%v flag=%q prefer=%q click=%q web=%s playUrl=%s parses=%d",
+		need, useParse, firstNonEmpty(opts.Flag, r.Flag), opts.Prefer,
+		firstNonEmpty(opts.SiteClick, opts.Click, r.Click),
+		parsePreview(webURL, 160), parsePreview(r.PlayURL, 80), len(parses))
 	if webURL == "" {
+		parseLog("[parse] fail: 无可解析地址")
 		return r, fmt.Errorf("无可解析地址")
 	}
 	if matchVideo(webURL, opts.Rules, opts.IsVideo) {
+		parseLog("[parse] already video web=%s cost=%s", parsePreview(webURL, 160), time.Since(start).Truncate(time.Millisecond))
 		r.Parse = model.FlexInt{Valid: true, Value: 0}
 		return r, nil
 	}
@@ -117,6 +128,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	if full := strings.TrimSpace(r.PlayURL) + webURL; r.PlayURL != "" &&
 		!strings.HasPrefix(r.PlayURL, "json:") && !strings.HasPrefix(r.PlayURL, "parse:") &&
 		matchVideo(full, opts.Rules, opts.IsVideo) {
+		parseLog("[parse] playUrl+web already video full=%s cost=%s", parsePreview(full, 160), time.Since(start).Truncate(time.Millisecond))
 		r.Parse = model.FlexInt{Valid: true, Value: 0}
 		r.URL = model.URL{URLs: []string{full}}
 		r.PlayURL = ""
@@ -140,8 +152,17 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	var parsed string
 	var sniffHdr map[string]string
 	var err error
+	var via string
 	if p != nil {
+		parseLog("[parse] selected name=%q type=%d url=%s", p.Name, p.TypeID(), parsePreview(p.URL, 120))
 		parsed, sniffHdr, err = executeParse(*p, webURL, flag, hdr, parses, opts.Rules, click, opts.IsVideo)
+		if parsed != "" && err == nil {
+			via = fmt.Sprintf("parse:%s/type%d", p.Name, p.TypeID())
+		} else {
+			parseLog("[parse] selected fail name=%q err=%v", p.Name, err)
+		}
+	} else {
+		parseLog("[parse] no selected parse (useParse=%v prefer=%q)", useParse, opts.Prefer)
 	}
 	if parsed == "" || err != nil {
 		for _, cand := range parses {
@@ -152,25 +173,41 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 				continue
 			}
 			var h map[string]string
+			t0 := time.Now()
 			parsed, h, err = JSONParseEx(cand.URL, webURL, mergeHeaders(hdr, parseExtHeaders(cand.Ext.String())))
 			sniffHdr = h
 			if err == nil && parsed != "" {
+				via = fmt.Sprintf("json-fallback:%s", cand.Name)
+				parseLog("[parse] json fallback ok name=%q out=%s cost=%s", cand.Name, parsePreview(parsed, 160), time.Since(t0).Truncate(time.Millisecond))
 				break
 			}
+			parseLog("[parse] json fallback fail name=%q err=%v cost=%s", cand.Name, err, time.Since(t0).Truncate(time.Millisecond))
 		}
 	}
 	if parsed == "" {
-		if sniffed, _ := PlayPageSniff(webURL, hdr); sniffed != "" {
+		t0 := time.Now()
+		if sniffed, e := PlayPageSniff(webURL, hdr); e == nil && sniffed != "" {
 			parsed = sniffed
 			sniffHdr = nil
+			via = "http-sniff"
+			parseLog("[parse] PlayPageSniff ok out=%s cost=%s", parsePreview(parsed, 160), time.Since(t0).Truncate(time.Millisecond))
+		} else if e != nil {
+			parseLog("[parse] PlayPageSniff fail err=%v cost=%s", e, time.Since(t0).Truncate(time.Millisecond))
 		}
 	}
 	if parsed == "" {
+		t0 := time.Now()
 		if u, h, e := browserSniff(webURL, hdr, click, opts.Rules, defaultParseWebTimeout, true, opts.IsVideo, 0); e == nil && u != "" {
 			parsed, sniffHdr, err = u, h, nil
+			via = "browser-sniff"
+			parseLog("[parse] browserSniff ok out=%s cost=%s", parsePreview(parsed, 160), time.Since(t0).Truncate(time.Millisecond))
+		} else {
+			err = e
+			parseLog("[parse] browserSniff fail err=%v cost=%s", e, time.Since(t0).Truncate(time.Millisecond))
 		}
 	}
 	if parsed == "" {
+		parseLog("[parse] fail final err=%v cost=%s", err, time.Since(start).Truncate(time.Millisecond))
 		if err != nil {
 			return r, AnnotateParseErr(err)
 		}
@@ -179,10 +216,12 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	// 过短结果不可信；明显网页地址也不当媒体。
 	if !matchVideo(parsed, opts.Rules, opts.IsVideo) {
 		if len(parsed) <= 40 || looksLikeHTMLPlayPage(parsed) {
+			parseLog("[parse] invalid result via=%s out=%s", via, parsePreview(parsed, 160))
 			return r, fmt.Errorf("解析结果无效")
 		}
 	}
 
+	parseLog("[parse] ok via=%s out=%s cost=%s", via, parsePreview(parsed, 200), time.Since(start).Truncate(time.Millisecond))
 	r.Parse = model.FlexInt{Valid: true, Value: 0}
 	r.URL = model.URL{URLs: []string{parsed}}
 	r.PlayURL = ""
@@ -190,6 +229,15 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		r.Header = model.FlexHeader(mergeHeaders(map[string]string(r.Header), pickPlayHeaders(sniffHdr)))
 	}
 	return r, nil
+}
+
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }
 
 func looksLikeHTMLPlayPage(u string) bool {
@@ -308,16 +356,21 @@ func selectedEmpty(p *model.Parse) bool {
 
 func executeParse(p model.Parse, webURL, flag string, headers map[string]string, parses []model.Parse, rules []model.Rule, click string, isVideo func(string) bool) (string, map[string]string, error) {
 	headers = mergeHeaders(headers, parseExtHeaders(p.Ext.String()))
+	start := time.Now()
+	parseLog("[parse] execute name=%q type=%d web=%s", p.Name, p.TypeID(), parsePreview(webURL, 120))
 	switch p.TypeID() {
 	case 1:
 		u, h, err := JSONParseEx(p.URL, webURL, headers)
 		if err != nil {
+			parseLog("[parse] type1 fail name=%q err=%v cost=%s", p.Name, err, time.Since(start).Truncate(time.Millisecond))
 			return "", nil, err
 		}
 		// 对齐 TV checkResult fatal：url.length() > 40
 		if u != "" && len(u) <= 40 {
+			parseLog("[parse] type1 too-short name=%q out=%q", p.Name, u)
 			return "", nil, fmt.Errorf("json 解析结果过短")
 		}
+		parseLog("[parse] type1 ok name=%q out=%s cost=%s", p.Name, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 		return u, pickPlayHeaders(h), nil
 	case 0:
 		// 对齐 TV startWeb(key, parse, webUrl)：parse.getUrl() + webUrl
@@ -325,16 +378,25 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		if target == "" {
 			return "", nil, fmt.Errorf("无可嗅探地址")
 		}
+		parseLog("[parse] type0 target=%s", parsePreview(target, 160))
 		if out, err := PlayPageSniff(target, headers); err == nil && out != "" {
+			parseLog("[parse] type0 http-sniff ok out=%s cost=%s", parsePreview(out, 160), time.Since(start).Truncate(time.Millisecond))
 			return out, nil, nil
 		}
 		u, h, err := browserSniff(target, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0)
+		if err != nil {
+			parseLog("[parse] type0 browser fail err=%v cost=%s", err, time.Since(start).Truncate(time.Millisecond))
+		} else {
+			parseLog("[parse] type0 browser ok out=%s cost=%s", parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
+		}
 		return u, h, err
 	case 2:
 		u, h, needWeb, err := jarJSONExt(p, webURL, parses)
 		if err != nil {
+			parseLog("[parse] type2 fail name=%q err=%v cost=%s", p.Name, err, time.Since(start).Truncate(time.Millisecond))
 			return "", nil, err
 		}
+		parseLog("[parse] type2 ok name=%q needWeb=%v out=%s cost=%s", p.Name, needWeb, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 		if needWeb {
 			return sniffParsedWeb(u, mergeHeaders(headers, h), click, rules, isVideo)
 		}
@@ -342,14 +404,17 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 	case 3:
 		u, h, needWeb, err := jarJSONExtMix(p, flag, webURL, parses)
 		if err != nil {
+			parseLog("[parse] type3 fail name=%q err=%v cost=%s", p.Name, err, time.Since(start).Truncate(time.Millisecond))
 			return "", nil, err
 		}
+		parseLog("[parse] type3 ok name=%q needWeb=%v out=%s cost=%s", p.Name, needWeb, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 		if needWeb {
 			return sniffParsedWeb(u, mergeHeaders(headers, h), click, rules, isVideo)
 		}
 		return u, pickPlayHeaders(h), nil
 	case 4:
 		// 对齐 TV ParseJob.superParse：type1（按 flag 筛）竞速 + type0 Web 嗅探。
+		parseLog("[parse] type4 superParse flag=%q", flag)
 		return superParse(webURL, flag, headers, parses, rules, click, isVideo)
 	default:
 		return "", nil, fmt.Errorf("未知解析类型: %d", p.TypeID())
@@ -372,6 +437,7 @@ func sniffParsedWeb(pageURL string, headers map[string]string, click string, rul
 func superParse(webURL, flag string, headers map[string]string, parses []model.Parse, rules []model.Rule, click string, isVideo func(string) bool) (string, map[string]string, error) {
 	jsons := getParses(parses, 1, flag)
 	webs := getParses(parses, 0, flag)
+	parseLog("[parse] superParse flag=%q json=%d web=%d", flag, len(jsons), len(webs))
 	type result struct {
 		url string
 		hdr map[string]string
@@ -648,16 +714,19 @@ func PlayPageSniff(pageURL string, headers map[string]string) (string, error) {
 	if IsVideoFormat(pageURL) {
 		return pageURL, nil
 	}
+	start := time.Now()
 	hdr := mergeHeaders(map[string]string{
 		"User-Agent": "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/90.0.4430.91 Mobile Safari/537.36",
 		"Referer":    pageURL,
 	}, headers)
 	body, err := util.HTTPGet(pageURL, hdr)
 	if err != nil {
+		parseLog("[http-sniff] get fail url=%s err=%v cost=%s", parsePreview(pageURL, 120), err, time.Since(start).Truncate(time.Millisecond))
 		return "", err
 	}
 	if m := dataPlayRe.FindStringSubmatch(body); len(m) > 1 {
 		if u := decodeDataPlay(m[1]); u != "" {
+			parseLog("[http-sniff] data-play ok url=%s out=%s cost=%s", parsePreview(pageURL, 100), parsePreview(u, 120), time.Since(start).Truncate(time.Millisecond))
 			return u, nil
 		}
 		if IsVideoFormat(m[1]) {
@@ -666,10 +735,17 @@ func PlayPageSniff(pageURL string, headers map[string]string) (string, error) {
 	}
 	if m := playerConfRe.FindStringSubmatch(body); len(m) > 1 {
 		if u := extractPlayerConfURL(m[1]); u != "" {
+			parseLog("[http-sniff] player conf ok url=%s out=%s cost=%s", parsePreview(pageURL, 100), parsePreview(u, 120), time.Since(start).Truncate(time.Millisecond))
 			return u, nil
 		}
 	}
-	return ExtractMediaURL(body), nil
+	out := ExtractMediaURL(body)
+	if out != "" {
+		parseLog("[http-sniff] extract ok url=%s out=%s cost=%s", parsePreview(pageURL, 100), parsePreview(out, 120), time.Since(start).Truncate(time.Millisecond))
+	} else {
+		parseLog("[http-sniff] miss url=%s body=%d cost=%s", parsePreview(pageURL, 100), len(body), time.Since(start).Truncate(time.Millisecond))
+	}
+	return out, nil
 }
 
 func decodeDataPlay(raw string) string {

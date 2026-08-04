@@ -93,6 +93,8 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	if pageURL == "" {
 		return "", nil, nil
 	}
+	start := time.Now()
+	parseLog("[sniff] start depth=%d detect=%v timeout=%s click=%q url=%s", depth, detect, timeout, click, parsePreview(pageURL, 160))
 	videoOK := func(u string) bool {
 		if isVideo != nil {
 			return isVideo(u)
@@ -100,6 +102,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		return IsVideoFormatRules(u, rules)
 	}
 	if videoOK(pageURL) {
+		parseLog("[sniff] url already video depth=%d url=%s", depth, parsePreview(pageURL, 160))
 		return pageURL, cloneHeaderMap(headers), nil
 	}
 	if timeout <= 0 {
@@ -108,11 +111,18 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 
 	// Android：不用 Chromium / chromedp；改走本地 Native Service(WebView)嗅探。
 	if runtime.GOOS == "android" {
-		return androidBrowserSniff(pageURL, headers, click, rules, GetAds(), timeout, detect, videoOK)
+		u, h, err := androidBrowserSniff(pageURL, headers, click, rules, GetAds(), timeout, detect, videoOK)
+		if err != nil {
+			parseLog("[sniff] android fail depth=%d err=%v cost=%s", depth, err, time.Since(start).Truncate(time.Millisecond))
+		} else {
+			parseLog("[sniff] android ok depth=%d out=%s cost=%s", depth, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
+		}
+		return u, h, err
 	}
 
 	allocCtx, err := ensureSharedChromium()
 	if err != nil {
+		parseLog("[sniff] chromium missing err=%v", err)
 		return "", nil, err
 	}
 
@@ -278,22 +288,29 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	select {
 	case hit := <-found:
 		cancelTimeout()
+		parseLog("[sniff] chromium ok depth=%d out=%s cost=%s", depth, parsePreview(hit.url, 160), time.Since(start).Truncate(time.Millisecond))
 		return hit.url, hit.headers, nil
 	case err := <-runErr:
 		if u, h := fallbackDOM(ctx, rules, isVideo); u != "" {
+			parseLog("[sniff] chromium fallbackDOM ok depth=%d out=%s cost=%s", depth, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 			return u, h, nil
 		}
 		if err != nil && ctx.Err() == nil {
+			parseLog("[sniff] chromium fail depth=%d err=%v cost=%s", depth, err, time.Since(start).Truncate(time.Millisecond))
 			return "", nil, fmt.Errorf("网页嗅探失败: %w", err)
 		}
+		parseLog("[sniff] chromium miss depth=%d cost=%s", depth, time.Since(start).Truncate(time.Millisecond))
 		return "", nil, fmt.Errorf("未嗅探到媒体地址")
 	case <-ctx.Done():
 		if u, h := fallbackDOM(ctx, rules, isVideo); u != "" {
+			parseLog("[sniff] chromium timeout+DOM ok depth=%d out=%s cost=%s", depth, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 			return u, h, nil
 		}
 		if ctx.Err() == context.DeadlineExceeded {
+			parseLog("[sniff] chromium timeout depth=%d after=%s", depth, timeout)
 			return "", nil, fmt.Errorf("网页嗅探超时（Chromium 未在 %s 内找到媒体地址）", timeout)
 		}
+		parseLog("[sniff] chromium canceled depth=%d err=%v", depth, ctx.Err())
 		return "", nil, ctx.Err()
 	}
 }
