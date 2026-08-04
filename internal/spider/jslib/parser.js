@@ -149,15 +149,17 @@ class Jsoup {
     return res;
   }
 
-  pdfl(html, parse, listText, listUrl, _urlKey) {
+  pdfl(html, parse, listText, listUrl, urlKey) {
     if (!html || !parse) return [];
+    // 对齐 jar Parser.parseDomForList：第 5 参 urlKey 才是拼接基址（drpy 传 MY_URL）。
+    const base = urlKey || this.MY_URL || globalThis.MY_URL || "";
     if (parse.startsWith("/") && typeof globalThis.__xpathList === "function") {
       const nodes = globalThis.__xpathList(html, parse);
       if (!Array.isArray(nodes) || nodes.length === 0) return [];
       const out = [];
       for (const fragment of nodes) {
         const title = this.pdfh(fragment, listText || "body&&Text");
-        const href = this.pd(fragment, listUrl || "a&&href", this.MY_URL);
+        const href = this.pd(fragment, listUrl || "a&&href", base);
         out.push(`${title}$${href}`);
       }
       return out;
@@ -173,11 +175,9 @@ class Jsoup {
     const out = [];
     ret.each((_, el) => {
       const fragment = doc.html(el) || "";
-      const sub = load(fragment);
       const title = this.pdfh(fragment, listText || "body&&Text");
-      const href = this.pd(fragment, listUrl || "a&&href", this.MY_URL);
+      const href = this.pd(fragment, listUrl || "a&&href", base);
       out.push(`${title}$${href}`);
-      void sub;
     });
     return out;
   }
@@ -297,13 +297,15 @@ function pd(html, parse, baseUrl) {
   return new Jsoup(baseUrl || globalThis.MY_URL || "").pd(html, parse, baseUrl || "");
 }
 function pdfl(html, parse, listText, listUrl, urlKey) {
+  const base = urlKey || globalThis.MY_URL || "";
   if (typeof globalThis.__jarPdfl === "function") {
     try {
-      const v = globalThis.__jarPdfl(html, parse, listText, listUrl, urlKey);
+      const v = globalThis.__jarPdfl(html, parse, listText, listUrl, base);
       if (Array.isArray(v)) return v;
     } catch (_) {}
   }
-  return new Jsoup().pdfl(html, parse, listText, listUrl, urlKey);
+  // 回落时把 urlKey 传给 pd，避免 new Jsoup() 无 MY_URL 导致集地址保持相对 path。
+  return new Jsoup(base).pdfl(html, parse, listText, listUrl, base);
 }
 
 globalThis.pdfh = pdfh;
