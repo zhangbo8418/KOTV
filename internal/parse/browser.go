@@ -46,13 +46,17 @@ func ensureSharedChromium() (context.Context, error) {
 			return
 		}
 		opts := append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.Flag("headless", "old"),
+			chromedp.Flag("headless", "new"),
 			chromedp.Flag("disable-gpu", true),
 			chromedp.Flag("no-sandbox", true),
 			chromedp.Flag("disable-dev-shm-usage", true),
 			chromedp.Flag("mute-audio", true),
 			chromedp.Flag("hide-scrollbars", true),
 			chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
+			// 降低自动化特征，避免部分播放页在 headless 下不发流。
+			chromedp.Flag("disable-blink-features", "AutomationControlled"),
+			chromedp.Flag("disable-infobars", true),
+			chromedp.Flag("enable-features", "NetworkService,NetworkServiceInProcess"),
 			chromedp.ExecPath(chrome),
 		)
 		if runtime.GOOS == "windows" {
@@ -179,8 +183,8 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if IsAdURL(u) {
 				return
 			}
-			// 嵌套嗅探：最多跟进 maxNestedPlayers 个 player URL（对齐 TV MAX_URLS）。
-			if detect && depth < 1 && playerURLRe.MatchString(u) {
+			// 嵌套嗅探：TV player.*http + 常见云解析/iframe 入口；Document 跨域也跟进。
+			if detect && depth < 1 && shouldFollowNestedPlayer(u, pageURL, e.Type) {
 				followMu.Lock()
 				dup := followed[u]
 				n := len(followed)
@@ -191,10 +195,11 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 				}
 				followMu.Unlock()
 				if !dup {
+					parseLog("[sniff] follow nested depth=%d type=%s url=%s", depth, e.Type, parsePreview(u, 160))
 					go func(target string, h map[string]string) {
 						remain := time.Until(deadlineOf(ctx))
-						if remain < 2*time.Second {
-							remain = 2 * time.Second
+						if remain < 3*time.Second {
+							remain = 3 * time.Second
 						}
 						nested, nh, err := browserSniff(target, mergeHeaders(headers, h), click, rules, remain, false, isVideo, depth+1)
 						if err == nil && nested != "" {
@@ -257,7 +262,12 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			return applyCookies(ctx, pageURL, cookie)
 		}),
 		chromedp.Navigate(pageURL),
-		chromedp.Sleep(800 * time.Millisecond),
+		chromedp.Sleep(600 * time.Millisecond),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			// 去掉 webdriver 标记（部分云解析会检测）。
+			_ = chromedp.Evaluate(`Object.defineProperty(navigator,'webdriver',{get:()=>undefined})`, nil).Do(ctx)
+			return nil
+		}),
 	}
 	scripts := collectScripts(pageURL, click, rules)
 	for _, js := range scripts {
@@ -269,16 +279,58 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 				}
 				return chromedp.Evaluate(js, nil).Do(ctx)
 			}),
-			chromedp.Sleep(400*time.Millisecond),
+			chromedp.Sleep(300*time.Millisecond),
 		)
 	}
-	// 导航 + 脚本后，在剩余超时内持续监听网络（命中即提前返回）。
-	// 2s 只是旧版里导航后的短 sleep，不是总超时；总超时默认 15s。
-	listenFor := time.Until(deadlineOf(ctx)) - time.Second
-	if listenFor < 5*time.Second {
-		listenFor = 5 * time.Second
-	}
-	actions = append(actions, chromedp.Sleep(listenFor))
+	// 主动收集 iframe.src（MacPlayer 延迟写入），跟进嵌套页；同时轮询 DOM 媒体。
+	actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
+		deadline := deadlineOf(ctx)
+		ticker := time.NewTicker(700 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if detect && depth < 1 {
+				for _, iframe := range collectIFrameURLs(ctx) {
+					if IsAdURL(iframe) || !shouldFollowNestedPlayer(iframe, pageURL, network.ResourceTypeDocument) {
+						continue
+					}
+					followMu.Lock()
+					dup := followed[iframe]
+					n := len(followed)
+					if !dup && n < maxNestedPlayers {
+						followed[iframe] = true
+					} else {
+						dup = true
+					}
+					followMu.Unlock()
+					if dup {
+						continue
+					}
+					parseLog("[sniff] follow iframe depth=%d url=%s", depth, parsePreview(iframe, 160))
+					go func(target string) {
+						remain := time.Until(deadline)
+						if remain < 3*time.Second {
+							remain = 3 * time.Second
+						}
+						nested, nh, err := browserSniff(target, headers, click, rules, remain, false, isVideo, depth+1)
+						if err == nil && nested != "" {
+							emit(nested, nh)
+						}
+					}(iframe)
+				}
+			}
+			if u, h := probeDOMMedia(ctx, videoOK); u != "" {
+				emit(u, h)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+				if time.Now().After(deadline.Add(-400 * time.Millisecond)) {
+					return nil
+				}
+			}
+		}
+	}))
 
 	runErr := make(chan error, 1)
 	go func() {
@@ -384,17 +436,38 @@ func fallbackDOM(ctx context.Context, rules []model.Rule, isVideo func(string) b
 		}
 		return IsVideoFormatRules(u, rules)
 	}
+	return probeDOMMedia(ctx, videoOK)
+}
+
+func probeDOMMedia(ctx context.Context, videoOK func(string) bool) (string, map[string]string) {
 	var html string
-	if err := chromedp.Run(ctx, chromedp.OuterHTML("html", &html)); err == nil {
+	if err := chromedp.OuterHTML("html", &html).Do(ctx); err == nil {
 		if u := ExtractMediaURL(html); videoOK(u) {
 			return u, nil
 		}
 	}
 	var hrefs string
-	_ = chromedp.Run(ctx, chromedp.Evaluate(
-		`Array.from(document.querySelectorAll('video,source')).map(e=>e.src||e.currentSrc).filter(Boolean).join('\n')`,
+	_ = chromedp.Evaluate(
+		`(() => {
+			const out = [];
+			document.querySelectorAll('video,source').forEach(e => {
+				const s = e.currentSrc || e.src || e.getAttribute('src') || '';
+				if (s) out.push(s);
+			});
+			document.querySelectorAll('iframe').forEach(f => {
+				try {
+					const d = f.contentDocument;
+					if (!d) return;
+					d.querySelectorAll('video,source').forEach(e => {
+						const s = e.currentSrc || e.src || e.getAttribute('src') || '';
+						if (s) out.push(s);
+					});
+				} catch (e) {}
+			});
+			return out.filter(Boolean).join('\n');
+		})()`,
 		&hrefs,
-	))
+	).Do(ctx)
 	for _, line := range strings.Split(hrefs, "\n") {
 		line = strings.TrimSpace(line)
 		if videoOK(line) {
@@ -402,6 +475,52 @@ func fallbackDOM(ctx context.Context, rules []model.Rule, isVideo func(string) b
 		}
 	}
 	return "", nil
+}
+
+func collectIFrameURLs(ctx context.Context) []string {
+	var raw string
+	_ = chromedp.Evaluate(
+		`Array.from(document.querySelectorAll('iframe'))
+			.map(f => f.src || f.getAttribute('src') || '')
+			.filter(s => /^https?:\/\//i.test(s))
+			.join('\n')`,
+		&raw,
+	).Do(ctx)
+	var out []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || seen[line] {
+			continue
+		}
+		seen[line] = true
+		out = append(out, line)
+	}
+	return out
+}
+
+// shouldFollowNestedPlayer 决定是否为 iframe/云解析入口再开一层嗅探。
+func shouldFollowNestedPlayer(u, pageURL string, resType network.ResourceType) bool {
+	u = strings.TrimSpace(u)
+	if u == "" || sameURL(u, pageURL) {
+		return false
+	}
+	if playerURLRe.MatchString(u) || nestedPlayerRe.MatchString(u) {
+		return true
+	}
+	// Document 且跨站：常见为播放器 iframe（MacPlayer）。
+	if resType == network.ResourceTypeDocument || resType == network.ResourceTypeOther {
+		ph, uh := hostOf(pageURL), hostOf(u)
+		if ph != "" && uh != "" && !strings.EqualFold(ph, uh) {
+			low := strings.ToLower(u)
+			if strings.Contains(low, "yun") || strings.Contains(low, "player") ||
+				strings.Contains(low, "parse") || strings.Contains(low, "vip") ||
+				strings.Contains(low, "404.php") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func collectScripts(pageURL, click string, rules []model.Rule) []string {
