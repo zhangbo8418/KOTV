@@ -4,9 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -17,6 +23,9 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 	"golang.org/x/sync/singleflight"
 )
+
+// PushAgentKey 对齐 TV SiteApi.PUSH：无站点配置时的推送入口。
+const PushAgentKey = "push_agent"
 
 // SiteService 站点内容服务，站点内容服务。
 type SiteService struct {
@@ -150,7 +159,8 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 			return model.Result{Success: false}, err
 		}
 		applyTypes(site, &result)
-	case 0, 1:
+	case 0, 1, 2:
+		// type2 与 TV 一致：非 spider 分支，JSON 解析（FromType≠0→JSON）。
 		var body string
 		body, err = util.HTTPGet(site.API, map[string]string(site.Header))
 		if err != nil {
@@ -197,7 +207,7 @@ func (s *SiteService) CategoryContent(tid, pg string, extend map[string]string) 
 			return model.Result{Success: false}, err
 		}
 		result, err = decodeResult(raw)
-	case 0, 1, 4:
+	case 0, 1, 2, 4:
 		params := map[string]string{
 			"ac": siteAC(site.TypeID()),
 			"t":  tid,
@@ -239,6 +249,24 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 		site = &h
 	}
 
+	// 对齐 TV SiteApi.detailContent：push_agent 把 id 当播放地址。
+	if site.Key == PushAgentKey {
+		id := vod.VodID.String()
+		detail := model.Vod{
+			VodID:       model.FlexString(id),
+			VodName:     id,
+			VodPlayURL:  id,
+			VodPlayFrom: "推送",
+			Site:        site,
+		}
+		detail.SetVodFlags()
+		result := model.Result{Success: true, List: []model.Vod{detail}}
+		s.mu.Lock()
+		s.DetailResult = result
+		s.mu.Unlock()
+		return detail, nil
+	}
+
 	var result model.Result
 	var err error
 	switch site.TypeID() {
@@ -250,7 +278,7 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 			return vod, err
 		}
 		result, err = decodeResult(raw)
-	case 0, 1, 4:
+	case 0, 1, 2, 4:
 		params := map[string]string{
 			"ac":  siteAC(site.TypeID()),
 			"ids": vod.VodID.String(),
@@ -301,55 +329,70 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 
 	id = normalizePlayID(site, id)
 
-	switch site.TypeID() {
-	case 3:
-		sp := s.cfg.Spider(site)
-		vipFlags := s.cfg.API().Flags
-		var raw string
-		raw, err = sp.PlayerContent(flag, id, vipFlags)
-		if err != nil {
-			return model.Result{Success: false}, err
-		}
-		result, err = decodeResult(raw)
-		if err != nil {
-			return model.Result{Success: false}, err
-		}
-		result.Key = site.Key
-		sanitizeResultPlayURLs(site, &result)
-	case 4:
-		params := map[string]string{
-			"play": id,
-			"flag": flag,
-		}
-		var body string
-		body, err = siteCall(site, params)
-		if err != nil {
-			return model.Result{Success: false}, err
-		}
-		result, err = model.FromType(4, body)
-		if err != nil {
-			return model.Result{Success: false}, err
-		}
-		sanitizeResultPlayURLs(site, &result)
-	case 0, 1:
-		// 本地拼 Result，不请求 API。相对路径按站源 api 补成绝对地址再解析。
-		playID := id
-		parseVal := 1
-		if s.IsVideoFormat(site, playID) && strings.TrimSpace(site.PlayURL) == "" {
-			parseVal = 0
-		}
+	// 对齐 TV：push_agent 直接把 id 当 url，再走 Source.fetch。
+	if site.Key == PushAgentKey {
 		result = model.Result{
 			Success: true,
-			URL:     model.URL{URLs: []string{playID}},
+			URL:     model.URL{URLs: []string{id}},
 			Flag:    flag,
-			Header:  site.Header,
-			PlayURL: site.PlayURL,
-			Parse:   model.FlexInt{Valid: true, Value: parseVal},
+			Parse:   model.FlexInt{Valid: true, Value: 0},
 		}
-	default:
-		return model.Result{Success: false}, fmt.Errorf("不支持的站源类型: %d", site.TypeID())
+		applySourceFetch(&result)
+	} else {
+		switch site.TypeID() {
+		case 3:
+			sp := s.cfg.Spider(site)
+			vipFlags := s.cfg.API().Flags
+			var raw string
+			raw, err = sp.PlayerContent(flag, id, vipFlags)
+			if err != nil {
+				return model.Result{Success: false}, err
+			}
+			result, err = decodeResult(raw)
+			if err != nil {
+				return model.Result{Success: false}, err
+			}
+			result.Key = site.Key
+			sanitizeResultPlayURLs(site, &result)
+			applySourceFetch(&result)
+		case 4:
+			params := map[string]string{
+				"play": id,
+				"flag": flag,
+			}
+			var body string
+			body, err = siteCall(site, params)
+			if err != nil {
+				return model.Result{Success: false}, err
+			}
+			result, err = model.FromType(4, body)
+			if err != nil {
+				return model.Result{Success: false}, err
+			}
+			sanitizeResultPlayURLs(site, &result)
+			applySourceFetch(&result)
+		case 0, 1, 2:
+			// 本地拼 Result，不请求 API。相对路径按站源 api 补成绝对地址再解析。
+			playID := id
+			parseVal := 1
+			if s.IsVideoFormat(site, playID) && strings.TrimSpace(site.PlayURL) == "" {
+				parseVal = 0
+			}
+			result = model.Result{
+				Success: true,
+				URL:     model.URL{URLs: []string{playID}},
+				Flag:    flag,
+				Header:  site.Header,
+				PlayURL: site.PlayURL,
+				Parse:   model.FlexInt{Valid: true, Value: parseVal},
+			}
+			applySourceFetch(&result)
+		default:
+			return model.Result{Success: false}, fmt.Errorf("不支持的站源类型: %d", site.TypeID())
+		}
 	}
 
+	// 对齐 TV Result.setHeader：仅当结果头为空时写入站点头。
 	result.Header = mergeHeaders(site.Header, result.Header)
 	if result.Flag == "" && flag != "" {
 		result.Flag = flag
@@ -373,7 +416,7 @@ func normalizePlayID(site model.Site, id string) string {
 	}
 	bases := make([]string, 0, 3)
 	switch site.TypeID() {
-	case 0, 1:
+	case 0, 1, 2:
 		bases = append(bases, site.API)
 	}
 	if site.Header != nil {
@@ -398,6 +441,121 @@ func sanitizeResultPlayURLs(site model.Site, r *model.Result) {
 	for i, u := range r.URL.URLs {
 		r.URL.URLs[i] = normalizePlayID(site, u)
 	}
+}
+
+// applySourceFetch 对齐 TV Source.fetch：特殊 scheme / .strm 预处理后再二次解析/起播。
+// - video:// → 剥前缀 + parse=1（逼宿主嗅探）
+// - push://  → 剥前缀 + parse=0（桌面直接播内层 URL；TV 会新开 VideoActivity）
+// - *.strm  → 读文本首行真实地址 + parse=0
+// Force / JianPian / TVBus / Youtube 依赖 Android/Native，桌面暂不支持。
+func applySourceFetch(r *model.Result) {
+	if r == nil || len(r.URL.URLs) == 0 {
+		return
+	}
+	forceParse := false
+	directPlay := false
+	for i, raw := range r.URL.URLs {
+		u := strings.TrimSpace(raw)
+		lower := strings.ToLower(u)
+		switch {
+		case strings.HasPrefix(lower, "video://"):
+			u = strings.TrimSpace(u[len("video://"):])
+			r.URL.URLs[i] = u
+			forceParse = true
+		case strings.HasPrefix(lower, "push://"):
+			u = strings.TrimSpace(u[len("push://"):])
+			r.URL.URLs[i] = u
+			directPlay = true
+		case strmPath(u):
+			if fetched := fetchStrmURL(u); fetched != "" {
+				r.URL.URLs[i] = fetched
+			}
+			directPlay = true
+		}
+	}
+	switch {
+	case forceParse:
+		r.Parse = model.FlexInt{Valid: true, Value: 1}
+	case directPlay:
+		r.Parse = model.FlexInt{Valid: true, Value: 0}
+	}
+}
+
+func strmPath(u string) bool {
+	p := u
+	if i := strings.Index(u, "?"); i >= 0 {
+		p = u[:i]
+	}
+	if ju, err := url.Parse(u); err == nil && ju.Path != "" {
+		p = ju.Path
+	}
+	return strings.HasSuffix(strings.ToLower(path.Base(p)), ".strm")
+}
+
+func fetchStrmURL(u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return ""
+	}
+	lower := strings.ToLower(u)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return fetchStrmHTTP(u)
+	}
+	filePath := u
+	if strings.HasPrefix(lower, "file://") {
+		filePath = u[len("file://"):]
+	}
+	b, err := os.ReadFile(filePath)
+	if err != nil {
+		return u
+	}
+	return firstLine(string(b))
+}
+
+func fetchStrmHTTP(rawURL string) string {
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequest(http.MethodGet, util.EncodeURL(rawURL), nil)
+	if err != nil {
+		return rawURL
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 KOTV/1.0")
+	resp, err := client.Do(req)
+	if err != nil {
+		return rawURL
+	}
+	defer resp.Body.Close()
+	disp := resp.Header.Get("Content-Disposition")
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	text := strings.Contains(disp, ".strm") || strings.Contains(disp, ".txt") ||
+		strings.Contains(ct, "text/") || strings.HasSuffix(strings.ToLower(path.Base(rawURL)), ".strm")
+	if !text {
+		return rawURL
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return rawURL
+	}
+	line := firstLine(string(b))
+	if line == "" {
+		return rawURL
+	}
+	return line
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return s
 }
 
 func applyThunderFetch(r *model.Result) error {
@@ -515,7 +673,7 @@ func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, pa
 			return nil, err
 		}
 		return result.List, nil
-	case 0, 1, 4:
+	case 0, 1, 2, 4:
 		params := map[string]string{
 			"wd":     keyword,
 			"quick":  fmt.Sprintf("%v", quick),
@@ -543,20 +701,11 @@ func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, pa
 }
 
 func mergeHeaders(siteHdr, resultHdr model.FlexHeader) model.FlexHeader {
-	if len(siteHdr) == 0 {
-		return resultHdr
-	}
+	// 对齐 TV Result.setHeader：结果已有头则保留，否则用站点头。
 	if len(resultHdr) == 0 {
 		return siteHdr
 	}
-	merged := make(model.FlexHeader, len(siteHdr)+len(resultHdr))
-	for k, v := range siteHdr {
-		merged[k] = v
-	}
-	for k, v := range resultHdr {
-		merged[k] = v
-	}
-	return merged
+	return resultHdr
 }
 
 // Action 对齐 TV SiteApi.action：type3 爬虫；type4 把 action 当 URL GET；其它空。

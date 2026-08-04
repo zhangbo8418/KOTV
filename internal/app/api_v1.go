@@ -19,6 +19,7 @@ import (
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/remote"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
+	"github.com/bobo/KOTV/internal/service"
 	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
@@ -171,7 +172,9 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 	}
 	cfg, sites, _ := a.scope()
 	vod := model.Vod{VodID: model.FlexString(vodID)}
-	if siteKey != "" {
+	if siteKey == service.PushAgentKey {
+		vod.Site = &model.Site{Key: service.PushAgentKey, Name: "推送"}
+	} else if siteKey != "" {
 		if site := cfg.GetSite(siteKey); site != nil {
 			vod.Site = site
 		}
@@ -375,6 +378,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	if siteKey != "" {
 		if s := cfg.GetSite(siteKey); s != nil {
 			site = *s
+		} else if siteKey == service.PushAgentKey {
+			site = model.Site{Key: service.PushAgentKey, Name: "推送"}
 		}
 	}
 	if site.Key == "" {
@@ -395,9 +400,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	var qualNames, qualURLs []string
 	var playDrm *model.Drm
 
-	if strings.HasPrefix(epURL, "http") && parse.IsVideoFormat(epURL) {
-		playURL = epURL
-	} else if thunder.Match(epURL) {
+	// 对齐 TV：一律先 SiteApi.playerContent（含站点 Header/PlayURL/parse），再 Source.fetch / ParseJob。
+	// 仅磁力可先占位，真正取流仍在后面 thunder.Fetch。
+	if thunder.Match(epURL) {
 		playURL = epURL
 	} else {
 		result, err := sites.PlayerContent(site, flag, epURL)
@@ -615,24 +620,26 @@ func apiResolvePlayURL(raw, playURL string, urls []string, idx int) string {
 	if idx < 0 {
 		idx = 0
 	}
-	if idx < len(urls) && strings.TrimSpace(urls[idx]) != "" {
-		u := strings.TrimSpace(urls[idx])
-		if playURL != "" && !strings.HasPrefix(u, "http") {
+	pick := func(u string) string {
+		u = strings.TrimSpace(u)
+		if strings.HasPrefix(strings.ToLower(u), "video://") {
+			u = strings.TrimSpace(u[len("video://"):])
+		}
+		if playURL != "" && !strings.HasPrefix(u, "http") && !strings.HasPrefix(u, "magnet:") {
 			return playURL + u
 		}
 		return u
+	}
+	if idx < len(urls) && strings.TrimSpace(urls[idx]) != "" {
+		return pick(urls[idx])
 	}
 	if len(urls) > 0 && strings.TrimSpace(urls[0]) != "" {
-		u := strings.TrimSpace(urls[0])
-		if playURL != "" && !strings.HasPrefix(u, "http") {
-			return playURL + u
-		}
-		return u
+		return pick(urls[0])
 	}
 	if strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw)
+		return pick(raw)
 	}
-	return strings.TrimSpace(playURL)
+	return pick(playURL)
 }
 
 func apiLooksUnplayable(u string) bool {

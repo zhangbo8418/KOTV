@@ -855,7 +855,8 @@ class PostMsgHost {
       if (Platform.isMacOS) {
         await Process.run('open', [s]);
       } else if (Platform.isWindows) {
-        await Process.run('cmd', ['/c', 'start', '', s], runInShell: true);
+        // 勿用 `cmd /c start URL`：查询串里的 & 会被 cmd 当成命令分隔符截断。
+        await Process.run('rundll32', ['url.dll,FileProtocolHandler', s]);
       } else if (Platform.isLinux) {
         await Process.run('xdg-open', [s]);
       }
