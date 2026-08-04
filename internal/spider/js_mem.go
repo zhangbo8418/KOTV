@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	qjs "github.com/buke/quickjs-go"
 
@@ -96,7 +97,7 @@ func readAssetLib(name string) string {
 	return ""
 }
 
-// moduleFetch 对齐 TV Module.fetch。
+// moduleFetch 对齐 TV Module.fetch（仅内存 LruCache，无磁盘缓存）。
 func moduleFetch(name string) string {
 	if name == "" {
 		return ""
@@ -104,40 +105,67 @@ func moduleFetch(name string) string {
 	if cached, ok := jsMemGet(name); ok && cached != "" {
 		return cached
 	}
+	start := time.Now()
 	var content string
+	var via string
 	switch {
 	case strings.HasPrefix(name, "http://") || strings.HasPrefix(name, "https://"):
 		data, err := util.HTTPGet(name, nil)
-		if err == nil && data != "" && !looksLikeNonJS(data) {
+		if err != nil {
+			jsLog("[js-mod] http fail name=%s err=%v", name, err)
+		} else if data == "" {
+			jsLog("[js-mod] http empty name=%s", name)
+		} else if looksLikeNonJS(data) {
+			jsLog("[js-mod] http non-js name=%s preview=%q", name, jsPreview(data, 120))
+		} else {
 			content = data
-		} else if lib := toLibAssetPath(name); lib != "" {
-			content = readAssetLib(lib)
+			via = "http"
+		}
+		if content == "" {
+			if lib := toLibAssetPath(name); lib != "" {
+				content = readAssetLib(lib)
+				if content != "" {
+					via = "asset-fallback:" + lib
+				}
+			}
 		}
 	case strings.HasPrefix(name, "assets://") || strings.HasPrefix(name, "assets/"):
 		content = readAssetLib(strings.TrimPrefix(strings.TrimPrefix(name, "assets://"), "assets/"))
+		via = "assets"
 	case strings.HasPrefix(name, "lib/"):
 		content = readAssetLib(name)
+		via = "lib"
 	case strings.HasPrefix(name, "file://"):
 		b, err := os.ReadFile(strings.TrimPrefix(name, "file://"))
 		if err == nil {
 			content = string(b)
+			via = "file"
+		} else {
+			jsLog("[js-mod] file fail name=%s err=%v", name, err)
 		}
 	default:
 		if st, err := os.Stat(name); err == nil && !st.IsDir() {
 			b, err := os.ReadFile(name)
 			if err == nil {
 				content = string(b)
+				via = "path"
 			}
 		}
 		// UriResolve 后可能变成 js/lib/X；仍回落到内置 assets
 		if content == "" {
 			if lib := toLibAssetPath(name); lib != "" {
 				content = readAssetLib(lib)
+				if content != "" {
+					via = "asset-fallback:" + lib
+				}
 			}
 		}
 	}
 	if content != "" {
 		jsMemSet(name, content)
+		jsLog("[js-mod] ok name=%s via=%s bytes=%d cost=%s", name, via, len(content), time.Since(start).Truncate(time.Millisecond))
+	} else {
+		jsLog("[js-mod] miss name=%s cost=%s", name, time.Since(start).Truncate(time.Millisecond))
 	}
 	return content
 }
@@ -222,23 +250,28 @@ func createSpiderObj(ctx *qjs.Context, api string) (isCat bool, err error) {
 		}
 	}
 	if content == "" || looksLikeNonJS(content) {
+		jsLog("[js] api empty/non-js api=%s preview=%q", api, jsPreview(content, 120))
 		return false, fmt.Errorf("JS api 内容为空，请检查网络或 api 地址: %s", api)
 	}
 
 	isCat = strings.Contains(content, "__jsEvalReturn")
 	content = strings.ReplaceAll(content, "__JS_SPIDER__", "globalThis.__JS_SPIDER__")
+	jsLog("[js] eval api=%s cat=%v bytes=%d", api, isCat, len(content))
 
 	// 对齐 TV createFun：先挂 pdfh，再加载蜘蛛
 	if err := ensurePDFH(ctx); err != nil {
+		jsLog("[js] ensurePDFH fail: %v", err)
 		return isCat, err
 	}
 	// 对齐 TV evaluateModule：走 Eval(MODULE)，勿用 LoadModule 字节码 roundtrip
 	//（后者在大模块上会导致后续 import 报 property is not configurable）。
 	if err := evalJSModule(ctx, content, api); err != nil {
+		jsLog("[js] evaluateModule api fail: %v", err)
 		return isCat, fmt.Errorf("evaluateModule api: %w", err)
 	}
 	wrapper := fmt.Sprintf(jsSpiderLib, api)
 	if err := evalJSModule(ctx, wrapper, "js/lib/spider.js"); err != nil {
+		jsLog("[js] evaluateModule spider.js fail: %v", err)
 		return isCat, fmt.Errorf("evaluateModule spider.js: %w", err)
 	}
 	return isCat, nil

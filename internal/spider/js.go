@@ -185,9 +185,13 @@ func (s *jsSpider) runWorker() (err error) {
 	}()
 
 	// 对齐 TV JsLoader → dex(jar) → createFun：worker 启动即 parseJar（Init+Proxy）。
+	jsLog("[js] worker start key=%s api=%s jar=%s", s.key, s.api, s.resolveJsJar())
 	if jar := s.resolveJsJar(); jar != "" {
 		if err := EnsureJar(jar); err != nil {
+			jsLog("[js] dex(jar) failed key=%s: %v", s.key, err)
 			log.Printf("js spider dex(jar) failed key=%s: %v", s.key, err)
+		} else {
+			jsLog("[js] dex(jar) ok key=%s jar=%s", s.key, jar)
 		}
 	}
 
@@ -233,8 +237,10 @@ func (s *jsSpider) runWorker() (err error) {
 	// 对齐 TV Spider.createObj
 	isCat, err := createSpiderObj(ctx, s.api)
 	if err != nil {
+		jsLog("[js] createObj fail key=%s api=%s err=%v", s.key, s.api, err)
 		return fmt.Errorf("JS 模块加载失败: %w", err)
 	}
+	jsLog("[js] createObj ok key=%s cat=%v", s.key, isCat)
 	s.cat.Store(isCat)
 
 	spider := ctx.Globals().Get("__JS_SPIDER__")
@@ -264,6 +270,7 @@ func (s *jsSpider) runWorker() (err error) {
 		if spider != nil {
 			spider.Free()
 		}
+		jsLog("[js] missing __JS_SPIDER__ key=%s api=%s", s.key, s.api)
 		return fmt.Errorf("JS 爬虫未导出 __JS_SPIDER__")
 	}
 	defer func() {
@@ -275,8 +282,10 @@ func (s *jsSpider) runWorker() (err error) {
 	}()
 	// 对齐 TV：createObj 后立即 init
 	if _, err := s.callOn(ctx, spider, "init", s.initArg()); err != nil {
+		jsLog("[js] init fail key=%s err=%v", s.key, err)
 		return fmt.Errorf("JS init 失败: %w", err)
 	}
+	jsLog("[js] init ok key=%s", s.key)
 	s.inited.Store(true)
 
 	for {
@@ -306,6 +315,11 @@ func (s *jsSpider) runWorker() (err error) {
 			out, err := s.callOn(ctx, spider, req.method, args...)
 			if req.method == "init" && err == nil {
 				s.inited.Store(true)
+			}
+			if err != nil {
+				jsLog("[js] call fail key=%s method=%s err=%v", s.key, req.method, err)
+			} else {
+				jsLog("[js] call ok key=%s method=%s out=%s", s.key, req.method, jsPreview(out, 200))
 			}
 			done()
 			s.activeClient.Store("")
@@ -677,7 +691,8 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 			for i, a := range args {
 				parts[i] = a.String()
 			}
-			fmt.Println(prefix, strings.Join(parts, " "))
+			// 必须走 log（stderr）；fmt.Println 走 stdout，Flutter 侧已丢弃。
+			jsLog("%s %s", prefix, strings.Join(parts, " "))
 			return c.NewUndefined()
 		})
 	}
@@ -1040,12 +1055,18 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		jsLog("[js-http] fail method=%s url=%s err=%v", options.Method, u, err)
 		return jsError()
 	}
 	defer resp.Body.Close()
 	b := drainBody(resp)
 	b = decodeJSContentEncoding(resp.Header.Get("Content-Encoding"), b)
 	code, hdrSrc, b := applyJSRedirectDance(u, resp, b)
+	if code == 0 || code >= 400 {
+		jsLog("[js-http] bad status method=%s url=%s code=%d bytes=%d", options.Method, u, code, len(b))
+	} else {
+		jsLog("[js-http] ok method=%s url=%s code=%d bytes=%d", options.Method, u, code, len(b))
+	}
 	result := map[string]interface{}{
 		"code":    code,
 		"headers": map[string]interface{}{},
@@ -1110,6 +1131,7 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 	resp := make(chan jsResp, 1)
 	epoch := s.epoch.Load()
 	cid := hostclient.ScopeID()
+	start := time.Now()
 	select {
 	case <-s.quitCh:
 		return "{}", fmt.Errorf("spider 已销毁")
@@ -1117,19 +1139,25 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 	}
 	select {
 	case r := <-resp:
+		cost := time.Since(start).Truncate(time.Millisecond)
 		if s.epoch.Load() != epoch {
+			jsLog("[js] invoke interrupted key=%s method=%s cost=%s", s.key, method, cost)
 			return "{}", ErrScriptInterrupted
 		}
 		if r.err != nil {
+			jsLog("[js] invoke err key=%s method=%s cost=%s err=%v", s.key, method, cost, r.err)
 			return "{}", r.err
 		}
 		// action/sniffer/isVideo 允许空串（对齐 TV null/false）；其它业务空结果抬成 "{}"
 		if r.out == "" && method != "action" && method != "sniffer" && method != "isVideo" {
+			jsLog("[js] invoke empty→{} key=%s method=%s cost=%s", s.key, method, cost)
 			return "{}", nil
 		}
+		jsLog("[js] invoke ok key=%s method=%s cost=%s out=%s", s.key, method, cost, jsPreview(r.out, 200))
 		return r.out, nil
 	case <-time.After(jsCallTimeout):
 		s.interrupt()
+		jsLog("[js] invoke timeout key=%s method=%s after=%s", s.key, method, jsCallTimeout)
 		return "{}", fmt.Errorf("JavaScript %s 调用超过 %s", method, jsCallTimeout)
 	}
 }

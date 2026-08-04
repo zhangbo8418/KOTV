@@ -65,6 +65,7 @@ func kotvModuleLoader(ctx *C.JSContext, moduleName *C.char, opaque unsafe.Pointe
 	}
 	code := moduleCodeForLoader(name)
 	if code == "" {
+		jsLog("[js-modloader] empty module name=%s", name)
 		throwModuleLoadError(ctx, name)
 		return nil
 	}

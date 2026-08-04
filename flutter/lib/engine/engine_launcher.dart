@@ -484,14 +484,29 @@ class EngineLauncher {
     _owned = true;
     _shuttingDown = false;
     final spawned = _proc!;
-    spawned.stdout.listen((_) {});
-    spawned.stderr.listen((chunk) {
+    // stdout 以前直接丢弃；JS console 曾误走 fmt.Println→stdout，现已改 stderr，
+    // 两边都落到文件 + debugPrint，便于安卓/桌面排查。
+    void pipe(List<int> chunk) {
       try {
         sink.add(chunk);
       } catch (_) {}
-    });
+      try {
+        final text = String.fromCharCodes(chunk);
+        for (final line in text.split('\n')) {
+          final t = line.trimRight();
+          if (t.isNotEmpty) debugPrint('[engine] $t');
+        }
+      } catch (_) {}
+    }
+    spawned.stdout.listen(pipe);
+    spawned.stderr.listen(pipe);
     // 引擎崩溃：UI 仍在则自动拉起（主动 shutdown 时不重启）。
     unawaited(spawned.exitCode.then((code) async {
+      try {
+        sink.writeln('exit code=$code');
+        await sink.flush();
+        await sink.close();
+      } catch (_) {}
       if (_shuttingDown) return;
       if (!identical(_proc, spawned)) return;
       debugPrint('engine exited code=$code; auto-restart');
@@ -506,7 +521,7 @@ class EngineLauncher {
     sink.writeln('pid=${spawned.pid} owned=true');
     await _armOrphanWatchdog(spawned.pid, sink);
     await sink.flush();
-    await sink.close();
+    // 不要在这里 close sink；进程存活期间 stderr/stdout 仍要写入。
     await Future<void>.delayed(const Duration(milliseconds: 800));
   }
 
