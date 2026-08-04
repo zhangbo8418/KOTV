@@ -46,17 +46,16 @@ func ensureSharedChromium() (context.Context, error) {
 			return
 		}
 		opts := append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.Flag("headless", "new"),
+			// headless-shell 对 headless=new 兼容差，易卡住无收尾日志。
+			chromedp.Flag("headless", "old"),
 			chromedp.Flag("disable-gpu", true),
 			chromedp.Flag("no-sandbox", true),
 			chromedp.Flag("disable-dev-shm-usage", true),
 			chromedp.Flag("mute-audio", true),
 			chromedp.Flag("hide-scrollbars", true),
 			chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
-			// 降低自动化特征，避免部分播放页在 headless 下不发流。
 			chromedp.Flag("disable-blink-features", "AutomationControlled"),
 			chromedp.Flag("disable-infobars", true),
-			chromedp.Flag("enable-features", "NetworkService,NetworkServiceInProcess"),
 			chromedp.ExecPath(chrome),
 		)
 		if runtime.GOOS == "windows" {
@@ -92,13 +91,23 @@ type sniffHit struct {
 	headers map[string]string
 }
 
-func browserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, timeout time.Duration, detect bool, isVideo func(string) bool, depth int) (string, map[string]string, error) {
+func browserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, timeout time.Duration, detect bool, isVideo func(string) bool, depth int) (outURL string, outHdr map[string]string, err error) {
 	pageURL = strings.TrimSpace(pageURL)
 	if pageURL == "" {
 		return "", nil, nil
 	}
 	start := time.Now()
 	parseLog("[sniff] start depth=%d detect=%v timeout=%s click=%q url=%s", depth, detect, timeout, click, parsePreview(pageURL, 160))
+	defer func() {
+		cost := time.Since(start).Truncate(time.Millisecond)
+		if outURL != "" {
+			parseLog("[sniff] end depth=%d ok out=%s cost=%s", depth, parsePreview(outURL, 160), cost)
+		} else if err != nil {
+			parseLog("[sniff] end depth=%d err=%v cost=%s", depth, err, cost)
+		} else {
+			parseLog("[sniff] end depth=%d empty cost=%s", depth, cost)
+		}
+	}()
 	videoOK := func(u string) bool {
 		if isVideo != nil {
 			return isVideo(u)
@@ -106,37 +115,45 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		return IsVideoFormatRules(u, rules)
 	}
 	if videoOK(pageURL) {
-		parseLog("[sniff] url already video depth=%d url=%s", depth, parsePreview(pageURL, 160))
 		return pageURL, cloneHeaderMap(headers), nil
 	}
 	if timeout <= 0 {
-		timeout = defaultParseWebTimeout // 与常见网页解析超时一致：15s
+		timeout = defaultParseWebTimeout
 	}
 
 	// Android：不用 Chromium / chromedp；改走本地 Native Service(WebView)嗅探。
 	if runtime.GOOS == "android" {
-		u, h, err := androidBrowserSniff(pageURL, headers, click, rules, GetAds(), timeout, detect, videoOK)
-		if err != nil {
-			parseLog("[sniff] android fail depth=%d err=%v cost=%s", depth, err, time.Since(start).Truncate(time.Millisecond))
-		} else {
-			parseLog("[sniff] android ok depth=%d out=%s cost=%s", depth, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
+		u, h, e := androidBrowserSniff(pageURL, headers, click, rules, GetAds(), timeout, detect, videoOK)
+		return u, h, e
+	}
+
+	allocCtx, e := ensureSharedChromium()
+	if e != nil {
+		parseLog("[sniff] chromium missing err=%v", e)
+		return "", nil, e
+	}
+
+	// 仅顶层占信号量；嵌套跟进不再抢，避免父子互相堵死。
+	if depth == 0 {
+		select {
+		case sniffSem <- struct{}{}:
+			defer func() { <-sniffSem }()
+		case <-time.After(timeout):
+			return "", nil, fmt.Errorf("网页嗅探排队超时")
 		}
-		return u, h, err
 	}
-
-	allocCtx, err := ensureSharedChromium()
-	if err != nil {
-		parseLog("[sniff] chromium missing err=%v", err)
-		return "", nil, err
-	}
-
-	sniffSem <- struct{}{}
-	defer func() { <-sniffSem }()
 
 	tabCtx, cancelTab := chromedp.NewContext(allocCtx)
 	defer cancelTab()
 	ctx, cancelTimeout := context.WithTimeout(tabCtx, timeout)
 	defer cancelTimeout()
+	// chromedp 偶发不响应 ctx 取消：再加硬超时强杀 tab。
+	hardTimer := time.AfterFunc(timeout+3*time.Second, func() {
+		parseLog("[sniff] hard-cancel depth=%d after=%s", depth, timeout+3*time.Second)
+		cancelTab()
+		cancelTimeout()
+	})
+	defer hardTimer.Stop()
 
 	found := make(chan sniffHit, 1)
 	var once sync.Once
@@ -147,7 +164,6 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		if IsAdURL(u) {
 			return
 		}
-		// 非 detect 时，当前页自身 URL 不算嗅探结果
 		if !detect && sameURL(u, pageURL) {
 			return
 		}
@@ -158,10 +174,37 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 
 	var followMu sync.Mutex
 	followed := map[string]bool{}
+	tryFollow := func(target string, h map[string]string, why string) {
+		if detect && depth < 1 && shouldFollowNestedPlayer(target, pageURL, network.ResourceTypeDocument) {
+			followMu.Lock()
+			dup := followed[target]
+			n := len(followed)
+			if !dup && n < maxNestedPlayers {
+				followed[target] = true
+			} else {
+				dup = true
+			}
+			followMu.Unlock()
+			if dup {
+				return
+			}
+			parseLog("[sniff] follow %s depth=%d url=%s", why, depth, parsePreview(target, 160))
+			go func(target string, h map[string]string) {
+				remain := time.Until(deadlineOf(ctx))
+				if remain < 3*time.Second {
+					remain = 3 * time.Second
+				}
+				nested, nh, nerr := browserSniff(target, mergeHeaders(headers, h), click, rules, remain, false, isVideo, depth+1)
+				if nerr == nil && nested != "" {
+					emit(nested, nh)
+				}
+			}(target, h)
+		}
+	}
+
 	chromedp.ListenTarget(ctx, func(ev any) {
 		switch e := ev.(type) {
 		case *fetch.EventRequestPaused:
-			// 对齐 TV shouldInterceptRequest：广告 host 阻断请求（空响应等效）。
 			reqID := e.RequestID
 			u := ""
 			if e.Request != nil {
@@ -183,30 +226,8 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if IsAdURL(u) {
 				return
 			}
-			// 嵌套嗅探：TV player.*http；跨站 Document/iframe 通用跟进（上限 maxNestedPlayers）。
 			if detect && depth < 1 && shouldFollowNestedPlayer(u, pageURL, e.Type) {
-				followMu.Lock()
-				dup := followed[u]
-				n := len(followed)
-				if !dup && n < maxNestedPlayers {
-					followed[u] = true
-				} else if !dup {
-					dup = true // 超额不再跟进
-				}
-				followMu.Unlock()
-				if !dup {
-					parseLog("[sniff] follow nested depth=%d type=%s url=%s", depth, e.Type, parsePreview(u, 160))
-					go func(target string, h map[string]string) {
-						remain := time.Until(deadlineOf(ctx))
-						if remain < 3*time.Second {
-							remain = 3 * time.Second
-						}
-						nested, nh, err := browserSniff(target, mergeHeaders(headers, h), click, rules, remain, false, isVideo, depth+1)
-						if err == nil && nested != "" {
-							emit(nested, nh)
-						}
-					}(u, reqHdr)
-				}
+				tryFollow(u, reqHdr, "net")
 				return
 			}
 			emit(u, reqHdr)
@@ -214,7 +235,6 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if e.Response == nil {
 				return
 			}
-			// 部分源 URL 无扩展名，靠 MIME 识别；仍过 videoOK / ads（与请求路径一致）。
 			mime := strings.ToLower(e.Response.MimeType)
 			u := e.Response.URL
 			if strings.Contains(mime, "mpegurl") ||
@@ -229,11 +249,11 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		}
 	})
 
+	parseLog("[sniff] chromium run depth=%d", depth)
 	actions := []chromedp.Action{
 		network.Enable(),
 		fetch.Enable(),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			// 对齐 TV CustomWebView：结果头里的 UA 必须进 WebView，否则防盗链/移动源不吐流。
 			if ua := headerValue(headers, "User-Agent"); ua != "" {
 				if err := emulation.SetUserAgentOverride(ua).Do(ctx); err != nil {
 					return err
@@ -262,9 +282,8 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			return applyCookies(ctx, pageURL, cookie)
 		}),
 		chromedp.Navigate(pageURL),
-		chromedp.Sleep(600 * time.Millisecond),
+		chromedp.Sleep(800 * time.Millisecond),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			// 去掉 webdriver 标记（部分云解析会检测）。
 			_ = chromedp.Evaluate(`Object.defineProperty(navigator,'webdriver',{get:()=>undefined})`, nil).Do(ctx)
 			return nil
 		}),
@@ -282,40 +301,18 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			chromedp.Sleep(300*time.Millisecond),
 		)
 	}
-	// 主动收集 iframe.src（MacPlayer 延迟写入），跟进嵌套页；同时轮询 DOM 媒体。
+	// 轮询 iframe.src + DOM 媒体；总时长由 ctx 超时约束。
 	actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
 		deadline := deadlineOf(ctx)
-		ticker := time.NewTicker(700 * time.Millisecond)
+		ticker := time.NewTicker(800 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			if detect && depth < 1 {
 				for _, iframe := range collectIFrameURLs(ctx) {
-					if IsAdURL(iframe) || !shouldFollowNestedPlayer(iframe, pageURL, network.ResourceTypeDocument) {
+					if IsAdURL(iframe) {
 						continue
 					}
-					followMu.Lock()
-					dup := followed[iframe]
-					n := len(followed)
-					if !dup && n < maxNestedPlayers {
-						followed[iframe] = true
-					} else {
-						dup = true
-					}
-					followMu.Unlock()
-					if dup {
-						continue
-					}
-					parseLog("[sniff] follow iframe depth=%d url=%s", depth, parsePreview(iframe, 160))
-					go func(target string) {
-						remain := time.Until(deadline)
-						if remain < 3*time.Second {
-							remain = 3 * time.Second
-						}
-						nested, nh, err := browserSniff(target, headers, click, rules, remain, false, isVideo, depth+1)
-						if err == nil && nested != "" {
-							emit(nested, nh)
-						}
-					}(iframe)
+					tryFollow(iframe, nil, "iframe")
 				}
 			}
 			if u, h := probeDOMMedia(ctx, videoOK); u != "" {
@@ -325,7 +322,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-ticker.C:
-				if time.Now().After(deadline.Add(-400 * time.Millisecond)) {
+				if time.Now().After(deadline.Add(-500 * time.Millisecond)) {
 					return nil
 				}
 			}
@@ -340,30 +337,26 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	select {
 	case hit := <-found:
 		cancelTimeout()
-		parseLog("[sniff] chromium ok depth=%d out=%s cost=%s", depth, parsePreview(hit.url, 160), time.Since(start).Truncate(time.Millisecond))
 		return hit.url, hit.headers, nil
-	case err := <-runErr:
+	case runE := <-runErr:
 		if u, h := fallbackDOM(ctx, rules, isVideo); u != "" {
-			parseLog("[sniff] chromium fallbackDOM ok depth=%d out=%s cost=%s", depth, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 			return u, h, nil
 		}
-		if err != nil && ctx.Err() == nil {
-			parseLog("[sniff] chromium fail depth=%d err=%v cost=%s", depth, err, time.Since(start).Truncate(time.Millisecond))
-			return "", nil, fmt.Errorf("网页嗅探失败: %w", err)
+		if runE != nil && ctx.Err() == nil {
+			return "", nil, fmt.Errorf("网页嗅探失败: %w", runE)
 		}
-		parseLog("[sniff] chromium miss depth=%d cost=%s", depth, time.Since(start).Truncate(time.Millisecond))
 		return "", nil, fmt.Errorf("未嗅探到媒体地址")
 	case <-ctx.Done():
 		if u, h := fallbackDOM(ctx, rules, isVideo); u != "" {
-			parseLog("[sniff] chromium timeout+DOM ok depth=%d out=%s cost=%s", depth, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 			return u, h, nil
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			parseLog("[sniff] chromium timeout depth=%d after=%s", depth, timeout)
 			return "", nil, fmt.Errorf("网页嗅探超时（Chromium 未在 %s 内找到媒体地址）", timeout)
 		}
-		parseLog("[sniff] chromium canceled depth=%d err=%v", depth, ctx.Err())
 		return "", nil, ctx.Err()
+	case <-time.After(timeout + 4*time.Second):
+		cancelTab()
+		return "", nil, fmt.Errorf("网页嗅探硬超时（Chromium 无响应）")
 	}
 }
 
