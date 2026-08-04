@@ -280,7 +280,11 @@ public class Path {
             file.setReadable(true);
             file.setWritable(true);
             file.setExecutable(true);
-            Shell.exec("chmod 777 " + file);
+            // Windows 无 chmod；Runtime.exec("chmod …") 会 CreateProcess error=2 刷栈。
+            String os = System.getProperty("os.name", "").toLowerCase();
+            if (!os.contains("win")) {
+                Shell.exec("chmod 777 " + file);
+            }
             return file;
         } catch (IOException e) {
             return file;

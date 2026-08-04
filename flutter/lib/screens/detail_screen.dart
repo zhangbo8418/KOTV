@@ -634,11 +634,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         ep.url.toLowerCase().contains('.torrent') ||
         ep.url.contains('/proxy/bt/') ||
         ep.url.toLowerCase().startsWith('magnet://local');
-    // 换集：软取消上一集解析；仅磁力相关时才 Stop thunder，避免盖「已取消」打断非磁力播放
-    unawaited(ref.read(apiProvider).cancelPending(
+    // 先 await 软取消上一集，再 play。unawaited 会与本次 play 竞态：
+    // SoftCancel 抬 epoch → JS/JAR 立刻报「脚本调用已中断」。
+    await ref.read(apiProvider).cancelPending(
           hard: false,
           thunder: _magnetPlay || epLooksMagnet,
-        ));
+        );
+    if (serial != _playAtSerial || !mounted) return;
     setState(() {
       _epIdx = epIdx;
       _playUrl = '';

@@ -72,6 +72,9 @@ func (s *SiteService) InvalidateHomeOnly() {
 	s.invalidateContentCache()
 	s.mu.Unlock()
 	cid := hostclient.ScopeID()
+	if cid == "" {
+		return
+	}
 	spider.InterruptJavaBridgeForClient(cid)
 	spider.InterruptScriptSpidersForClient(cid)
 }
@@ -84,6 +87,10 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 // SoftCancelPending 软取消当前 Scope 的 JAR/脚本请求（不杀进程）。
 func (s *SiteService) SoftCancelPending() {
 	cid := hostclient.ScopeID()
+	if cid == "" {
+		// 无会话键时 Interrupt*( "" ) 会打断全部脚本，易误杀其它窗口的 play。
+		return
+	}
 	spider.InterruptJavaBridgeForClient(cid)
 	spider.InterruptScriptSpidersForClient(cid)
 }

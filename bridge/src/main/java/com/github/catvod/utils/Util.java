@@ -291,7 +291,7 @@ public class Util {
                 setUserId(uid);
                 postHttpMsg(msg);
             } catch (Exception e) {
-                SpiderDebug.log("postMsg fail: " + e.getMessage());
+                SpiderDebug.log("postMsg fail: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             } finally {
                 clearScope();
             }
@@ -303,9 +303,11 @@ public class Util {
         if (msg == null || msg.isEmpty()) return;
         SpiderDebug.log(msg);
         try {
+            // 池线程里若刚被 shutdownNow 中断，清掉标志再发，避免 OkHttp 直接失败且 message=null
+            Thread.interrupted();
             postHttpMsg(msg);
         } catch (Exception e) {
-            SpiderDebug.log("postMsg fail: " + e.getMessage());
+            SpiderDebug.log("postMsg fail: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
