@@ -5,7 +5,6 @@ import sys
 import time
 from abc import ABCMeta, abstractmethod
 from importlib.machinery import SourceFileLoader
-from urllib.parse import urlsplit
 
 import requests
 from lxml import etree
@@ -85,28 +84,6 @@ class Spider(metaclass=ABCMeta):
 
     def fetch(self, url, params=None, cookies=None, headers=None, timeout=10, verify=False,
               stream=False, allow_redirects=True):
-        # 部分第三方 Spider 可能把“已是完整 URL 的 id”当作“相对路径”，从而产生：
-        #   https://api.example.comhttps://target.example/...
-        # 这会导致请求 host 被污染（如 api.example.comhttps），从而 NameResolutionError。
-        # 这里做一个保守修正：若 path 以 '//' 开头且 netloc 以 scheme 结尾（如 netloc=...https），则把 path 作为真正的绝对 URL 还原。
-        try:
-            u = (url or "").strip()
-            parts = urlsplit(u)
-            if (
-                parts.scheme in ("http", "https")
-                and u
-                and parts.path.startswith("//")
-                and parts.netloc.endswith(parts.scheme)
-            ):
-                fixed = f"{parts.scheme}:{parts.path}"
-                if parts.query:
-                    fixed = f"{fixed}?{parts.query}"
-                if parts.fragment:
-                    fixed = f"{fixed}#{parts.fragment}"
-                url = fixed
-        except Exception:
-            pass
-
         response = requests.get(
             url, params=params, cookies=cookies, headers=headers, timeout=timeout,
             verify=verify, stream=stream, allow_redirects=allow_redirects,
@@ -116,24 +93,6 @@ class Spider(metaclass=ABCMeta):
 
     def post(self, url, params=None, data=None, json=None, cookies=None, headers=None,
              timeout=10, verify=False, stream=False, allow_redirects=True):
-        try:
-            u = (url or "").strip()
-            parts = urlsplit(u)
-            if (
-                parts.scheme in ("http", "https")
-                and u
-                and parts.path.startswith("//")
-                and parts.netloc.endswith(parts.scheme)
-            ):
-                fixed = f"{parts.scheme}:{parts.path}"
-                if parts.query:
-                    fixed = f"{fixed}?{parts.query}"
-                if parts.fragment:
-                    fixed = f"{fixed}#{parts.fragment}"
-                url = fixed
-        except Exception:
-            pass
-
         response = requests.post(
             url, params=params, data=data, json=json, cookies=cookies, headers=headers,
             timeout=timeout, verify=verify, stream=stream, allow_redirects=allow_redirects,

@@ -367,7 +367,6 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 4:
-			id = normalizePlayID(site, id)
 			params := map[string]string{
 				"play": id,
 				"flag": flag,
