@@ -284,6 +284,7 @@ class EngineVlcPlayback extends KotvPlayback {
   double _rate = 1.0;
   int _videoW = 0;
   int _videoH = 0;
+  int _maxPositionMs = 0;
   bool _ready = false;
   bool _repeatOne = false;
   bool _stableVolume = false;
@@ -305,13 +306,15 @@ class EngineVlcPlayback extends KotvPlayback {
       _durationMs = (st['durationMs'] as num?)?.toInt() ?? _durationMs;
       _videoW = (st['width'] as num?)?.toInt() ?? _videoW;
       _videoH = (st['height'] as num?)?.toInt() ?? _videoH;
+      if (_positionMs > _maxPositionMs) _maxPositionMs = _positionMs;
       if (st['rate'] is num) _rate = (st['rate'] as num).toDouble();
       // VLC 无统一 completed：须本集已真正播过，且近片尾停播，才视为结束（避免换集缓冲期误报）
       if (_durationMs > 10000 &&
-          _positionMs >= 5000 &&
+          _maxPositionMs >= 8000 &&
           !_playing &&
           _positionMs >= _durationMs - 1200 &&
-          _videoW > 0) {
+          _videoW > 0 &&
+          _positionMs >= 3000) {
         _ended = true;
       } else if (_playing) {
         _ended = false;
@@ -393,6 +396,7 @@ class EngineVlcPlayback extends KotvPlayback {
     _durationMs = 0;
     _videoW = 0;
     _videoH = 0;
+    _maxPositionMs = 0;
     final libDir = KotvVlcPaths.resolveLibDir();
     if (libDir == null) throw StateError('未找到 runtime/libvlc');
     await _native.create();

@@ -198,6 +198,18 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		parseLog("[parse] invalid result via=%s out=%s", via, parsePreview(parsed, 160))
 		return r, fmt.Errorf("解析结果无效")
 	}
+	// 对齐 TV checkResult(needParse)→startWeb / CustomWebView：非直链播放页再嗅一次。
+	mergedHdr := mergeHeaders(hdr, sniffHdr)
+	if reParsed, reHdr, reErr := resniffIfNeeded(parsed, mergedHdr, click, opts.Rules, opts.IsVideo); reErr != nil {
+		parseLog("[parse] re-sniff fail via=%s err=%v", via, reErr)
+		return r, reErr
+	} else if reParsed != parsed {
+		parseLog("[parse] re-sniff ok via=%s out=%s", via, parsePreview(reParsed, 200))
+		parsed = reParsed
+		if len(reHdr) > 0 {
+			sniffHdr = mergeHeaders(sniffHdr, reHdr)
+		}
+	}
 
 	parseLog("[parse] ok via=%s out=%s cost=%s", via, parsePreview(parsed, 200), time.Since(start).Truncate(time.Millisecond))
 	r.Parse = model.FlexInt{Valid: true, Value: 0}
@@ -411,6 +423,24 @@ func sniffParsedWeb(pageURL string, headers map[string]string, click string, rul
 	}
 	detect := !strings.Contains(strings.ToLower(pageURL), "player/?url=")
 	return browserSniff(pageURL, headers, click, rules, defaultParseWebTimeout, detect, isVideo, 0)
+}
+
+// resniffIfNeeded 对齐 TV checkResult(Result.needParse)→startWeb：
+// 解析器返回的若是播放页/非直链，再走 http-sniff + Chromium（detect 同 CustomWebView）。
+func resniffIfNeeded(pageURL string, headers map[string]string, click string, rules []model.Rule, isVideo func(string) bool) (string, map[string]string, error) {
+	pageURL = strings.TrimSpace(pageURL)
+	if pageURL == "" || matchVideo(pageURL, rules, isVideo) {
+		return pageURL, nil, nil
+	}
+	parseLog("[parse] re-sniff start page=%s", parsePreview(pageURL, 160))
+	u, h, err := sniffParsedWeb(pageURL, headers, click, rules, isVideo)
+	if err != nil {
+		return "", nil, AnnotateParseErr(err)
+	}
+	if u == "" || len(u) <= 40 {
+		return "", nil, fmt.Errorf("解析结果无效")
+	}
+	return u, h, nil
 }
 
 // superParse 对齐 TV ParseJob.superParse / getParses(type, flag)。

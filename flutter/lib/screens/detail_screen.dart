@@ -158,7 +158,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         }
       }
     } else {
-      next = '已暂停';
+      final startedAt = _sessionStartedAt;
+      final stalled = startedAt != null &&
+          DateTime.now().difference(startedAt) > const Duration(seconds: 12) &&
+          p.position < const Duration(seconds: 2) &&
+          p.width <= 0;
+      next = stalled ? '$prefix 无法播放（可换源/解析）' : '已暂停';
     }
     if (_status == next) return;
     setState(() => _status = next);
@@ -294,6 +299,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   /// 对齐 TV STATE_READY：本集真正开播后才允许片尾/completed 自动连播。
+  /// 仅凭 width>0 不足（解码器探头即可有尺寸但黑屏），须进度真正前进。
   void _markPlaybackLiveIfNeeded() {
     if (_playUrl.isEmpty || _playbackLive) return;
     final p = _playback;
@@ -302,7 +308,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final dur = p.duration.inMilliseconds;
     // 上一集残留的近片尾进度绝不当作 READY
     if (dur > 15000 && pos >= dur - 5000 && pos > 8000) return;
-    if (p.playing || pos > 800 || p.width > 0) {
+    final progressed = pos >= 2500 || (dur > 0 && pos >= 1200 && p.playing);
+    if (progressed && (p.playing || pos >= 2500)) {
       _playbackLive = true;
     }
   }
@@ -363,11 +370,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (!_playbackLive || _endConsumedGen == _playGen) return;
     final pos = _playback.position.inMilliseconds;
     final dur = _playback.duration.inMilliseconds;
+    // 黑屏/假结束：几乎没播过就不自动下一集
+    if (pos < 8000) return;
     if (dur > 0) {
       final nearEnd = pos + 8000 >= dur || pos >= (dur * 0.92).round();
-      if (!nearEnd || pos < 3000) return;
-    } else if (pos < 5000) {
-      return;
+      if (!nearEnd) return;
     }
     await _advanceToNextEpisode();
   }

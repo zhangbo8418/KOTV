@@ -653,6 +653,9 @@ func apiLooksUnplayable(u string) bool {
 	}
 	low := strings.ToLower(u)
 	if strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") {
+		if strings.Contains(low, "player/?url=") && !parse.IsVideoFormat(u) && !thunder.Match(u) {
+			return true
+		}
 		if strings.Contains(low, ".html") || strings.HasSuffix(low, "/") {
 			ext := path.Ext(u)
 			if ext == "" || ext == ".html" || ext == ".htm" || ext == ".php" {
