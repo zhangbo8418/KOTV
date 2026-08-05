@@ -288,7 +288,12 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     if (pb is EngineVlcPlayback) {
       video = EmbedVideoView(playback: pb, fit: _aspect.fit, aspectRatio: _aspect.ratio);
     } else if (pb is MediaKitPlayback) {
-      final mk = Video(controller: pb.controller, controls: NoVideoControls, fit: _aspect.fit);
+      final mk = Video(
+        controller: pb.controller,
+        controls: NoVideoControls,
+        fit: _aspect.fit,
+        wakelock: false,
+      );
       final ratio = _aspect.ratio;
       if (ratio == null || ratio <= 0) {
         video = mk;

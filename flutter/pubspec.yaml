@@ -26,6 +26,8 @@ dependencies:
   shared_preferences: ^2.3.3
   window_manager: 0.4.3
   url_launcher: ^6.3.1
+  # 播放中防休眠/屏保（手机+桌面）；media_kit_video 也传递依赖，这里升为直接依赖以便统一管控。
+  wakelock_plus: 1.4.0
   kotv_vlc:
     path: packages/kotv_vlc
 

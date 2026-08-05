@@ -47,6 +47,7 @@ Widget kotvPlaybackView({
     case KotvEmbedBackend.mpv:
       final m = mpv ?? (playback is MediaKitPlayback ? playback : null);
       if (m == null) return const ColoredBox(color: Colors.black);
-      return Video(controller: m.controller, controls: NoVideoControls, fit: fit);
+      // wakelock 由 [KotvPlayback] 统一管，避免与 media_kit 内置引用计数抢关。
+      return Video(controller: m.controller, controls: NoVideoControls, fit: fit, wakelock: false);
   }
 }

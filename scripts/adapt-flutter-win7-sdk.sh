@@ -58,6 +58,7 @@ dependency_overrides:
   media_kit: 1.1.11
   media_kit_video: 1.2.5
   media_kit_libs_video: 1.0.7
+  wakelock_plus: 1.2.1
 EOF
 fi
 

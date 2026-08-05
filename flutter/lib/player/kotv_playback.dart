@@ -5,12 +5,15 @@ import 'package:kotv_vlc/kotv_vlc.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'keep_awake.dart';
 import 'kotv_vlc_paths.dart';
 import 'mpv_opts.dart';
 import 'play_headers.dart';
 
 /// 统一播放后端：MPV(media_kit) 与 VLC(同进程 Texture) 共用同一套菜单/控件。
 abstract class KotvPlayback extends ChangeNotifier {
+  bool? _keepAwakeWant;
+
   bool get playing;
   bool get completed;
   Duration get position;
@@ -54,6 +57,29 @@ abstract class KotvPlayback extends ChangeNotifier {
   String? get currentSubtitleId;
   Future<void> setAudioTrack(String id);
   Future<void> setSubtitleTrack(String id); // ''=关, 'auto'=自动
+
+  /// 播放或缓冲中保持屏幕常亮；暂停/停止/销毁时释放。
+  void _syncKeepAwake() {
+    final want = playing || buffering;
+    if (_keepAwakeWant == want) return;
+    _keepAwakeWant = want;
+    KotvKeepAwake.setHolding(this, want);
+  }
+
+  @override
+  void notifyListeners() {
+    _syncKeepAwake();
+    super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    if (_keepAwakeWant == true) {
+      _keepAwakeWant = false;
+      KotvKeepAwake.setHolding(this, false);
+    }
+    super.dispose();
+  }
 }
 
 /// 网速文案：统一两位小数，如 `0.00 KB/s` / `12.34 KB/s` / `100.00 MB/s`。
