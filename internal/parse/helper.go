@@ -956,10 +956,15 @@ func ResolveCloudPlayerPage(pageURL string, headers map[string]string) string {
 	if jsh == "" || !strings.HasPrefix(strings.ToLower(jsh), "http") {
 		return ""
 	}
-	// 无 type= 的入口常 302；跟一层 Location。
+	// 无 type= 的入口常 302；跟 Location，但保留原 query 关键字段时不要用丢参的跳转。
 	if !strings.Contains(jsh, "type=") {
 		if loc := httpRedirectLocation(jsh, hdr); loc != "" {
-			jsh = loc
+			// 若 Location 丢了 host= 等关键参数，仍用拼好的 jsh（让浏览器自己跟跳转）。
+			if strings.Contains(jsh, "host=") && !strings.Contains(loc, "host=") {
+				parseLog("[cloud-player] keep src without following stripped redirect src=%s loc=%s", parsePreview(jsh, 100), parsePreview(loc, 100))
+			} else {
+				jsh = loc
+			}
 		}
 	}
 	return jsh

@@ -265,8 +265,21 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		fetch.Enable(),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			prof := resolveSniffProfile(headers)
-			parseLog("[sniff] client depth=%d mobile=%v ua=%s", depth, prof.mobile, parsePreview(prof.ua, 80))
+			parseLog("[sniff] client depth=%d mobile=%v platform=%s ua=%s", depth, prof.mobile, prof.platform, parsePreview(prof.ua, 80))
 			uaOverride := emulation.SetUserAgentOverride(prof.ua).WithPlatform(prof.platform)
+			if prof.mobile {
+				uaOverride = uaOverride.WithUserAgentMetadata(&emulation.UserAgentMetadata{
+					Platform:        "Android",
+					PlatformVersion: "14.0.0",
+					Model:           "Pixel 8",
+					Mobile:          true,
+					Brands: []*emulation.UserAgentBrandVersion{
+						{Brand: "Chromium", Version: "128"},
+						{Brand: "Google Chrome", Version: "128"},
+						{Brand: "Not.A/Brand", Version: "99"},
+					},
+				})
+			}
 			if err := uaOverride.Do(ctx); err != nil {
 				return err
 			}
@@ -296,8 +309,12 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			}
 			return applyCookies(ctx, pageURL, cookie)
 		}),
-		chromedp.Navigate(pageURL),
-		chromedp.Sleep(800 * time.Millisecond),
+		// 勿用 chromedp.Navigate：它会等 load；广告站常永不 load，15s 超时前轮询/跟 iframe 跑不动。
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, _, _, _, err := page.Navigate(pageURL).Do(ctx)
+			return err
+		}),
+		chromedp.Sleep(1200 * time.Millisecond),
 	}
 	scripts := collectScripts(pageURL, click, rules)
 	for _, js := range scripts {
