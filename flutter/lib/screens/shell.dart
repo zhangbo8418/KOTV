@@ -178,8 +178,9 @@ class _AppShellState extends ConsumerState<AppShell> {
 
     return PopScope(
       // 根层始终拦截：禁止系统直接 finish Activity。
+      // 用 onPopInvoked（非 WithResult）以兼容 Win7 / Flutter 3.19。
       canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
+      onPopInvoked: (didPop) {
         if (didPop) return;
         _onShellBack();
       },
@@ -195,8 +196,9 @@ class _AppShellState extends ConsumerState<AppShell> {
                 children: [
                   // 内层 Navigator 会抢走系统返回；无子路由可 pop 时必须用
                   // NavigatorPopHandler 接到外壳，否则 Android 直接退桌面。
+                  // onPop（非 WithResult）兼容 Flutter 3.19。
                   NavigatorPopHandler(
-                    onPopWithResult: (_) => _onShellBack(),
+                    onPop: _onShellBack,
                     child: Navigator(
                       key: GlobalObjectKey<NavigatorState>(page),
                       onGenerateRoute: (settings) {
