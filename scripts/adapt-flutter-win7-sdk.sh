@@ -61,9 +61,9 @@ dependency_overrides:
 EOF
 fi
 
-# Win7：注入黑白 NotoEmoji（COLR 彩色在 Win7 上常渲不出）；其它平台不内嵌。
-if ! grep -q 'family: NotoEmoji' "$APP"; then
-  perl -i -0pe 's/(    - family: NotoColorEmoji\n      fonts:\n        - asset: assets\/fonts\/NotoColorEmoji\.ttf\n          weight: 400\n)/$1    # Win7 only: mono emoji (injected by adapt-flutter-win7-sdk.sh)\n    - family: NotoEmoji\n      fonts:\n        - asset: assets\/fonts\/NotoEmoji.ttf\n          weight: 400\n/s' "$APP"
+# Win7：注入内嵌字体（CJK + 彩色/黑白 emoji）；其它平台 pubspec 不含 fonts。
+if ! grep -q 'family: NotoSansSC' "$APP"; then
+  perl -i -0pe 's/(  assets:\n    - assets\/engine\/\n)/$1  # Win7 only (adapt-flutter-win7-sdk.sh + fetch-flutter-fonts.sh)\n  fonts:\n    - family: NotoSansSC\n      fonts:\n        - asset: assets\/fonts\/NotoSansSC-Regular.otf\n          weight: 400\n        - asset: assets\/fonts\/NotoSansSC-Bold.otf\n          weight: 700\n    - family: NotoColorEmoji\n      fonts:\n        - asset: assets\/fonts\/NotoColorEmoji.ttf\n          weight: 400\n    - family: NotoEmoji\n      fonts:\n        - asset: assets\/fonts\/NotoEmoji.ttf\n          weight: 400\n/s' "$APP"
 fi
 
 echo "adapted pubspec for Flutter 3.19 / Dart 3.3:"

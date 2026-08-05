@@ -7,7 +7,7 @@ DEVICE="${1:-macos}"
 export PATH="${HOME}/flutter/bin:${PATH}"
 
 "$ROOT/scripts/build-engine-flutter.sh"
-"$ROOT/scripts/fetch-flutter-fonts.sh"
+# 本地联调用系统字体；Win7 发行包才内嵌 Noto（见 package-flutter-windows.sh KOTV_WIN7=1）
 # 清掉历史 nohup 残留
 pkill -f '/tmp/kotv-engine' 2>/dev/null || true
 pkill -f 'Contents/Resources/engine/kotv-engine' 2>/dev/null || true

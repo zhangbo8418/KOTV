@@ -17,8 +17,6 @@ REL_ARCH="$(kotv_release_arch "$PLAT")"
 echo "==> version=$VERSION arch=$REL_ARCH ($PLAT)"
 
 chmod +x "$ROOT/scripts/"*.sh
-echo "==> fetch embedded fonts"
-"$ROOT/scripts/fetch-flutter-fonts.sh"
 
 if [[ ! -d "$ROOT/runtime/jre" || ! -d "$ROOT/runtime/libvlc" ]]; then
   echo "==> runtime incomplete, preparing..."

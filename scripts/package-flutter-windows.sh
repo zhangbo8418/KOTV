@@ -22,9 +22,11 @@ ASSETS_ENG="$ROOT/flutter/assets/engine"
 
 echo "==> Flutter Windows package version=$VERSION arch=$ARCH suffix=${SUFFIX:-<none>}"
 
-echo "==> fetch embedded fonts (Noto Sans SC + Color Emoji$([ "${KOTV_WIN7:-}" = 1 ] && echo ' + Win7 mono Emoji'))"
 chmod +x "$ROOT/bridge/build.sh" "$ROOT"/scripts/*.sh
-"$ROOT/scripts/fetch-flutter-fonts.sh"
+if [[ "${KOTV_WIN7:-}" == "1" ]]; then
+  echo "==> fetch embedded fonts (Win7 only)"
+  "$ROOT/scripts/fetch-flutter-fonts.sh"
+fi
 echo "==> prepare runtime"
 "$ROOT/scripts/prepare-runtime.sh" windows-x64
 "$ROOT/scripts/verify-runtime.sh" runtime windows-x64

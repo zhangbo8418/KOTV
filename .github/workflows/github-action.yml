@@ -352,7 +352,6 @@ jobs:
             echo "==> cross-ish: build under arch -x86_64"
             arch -x86_64 bash -lc '
               export PATH="/usr/local/bin:$PATH"
-              ./scripts/fetch-flutter-fonts.sh
               ./scripts/prepare-runtime.sh macos-x64
               (cd internal/spider && go run gen_qjsinc.go)
               CGO_ENABLED=1 GOARCH=amd64 go build -o flutter/assets/engine/kotv-engine ./cmd/engine

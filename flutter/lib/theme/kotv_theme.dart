@@ -23,13 +23,9 @@ class KotvColors {
   static const focus = Color(0xFFFFD54F);
 }
 
-/// 字体回退：拉丁/数字优先系统无衬线，CJK 次之，emoji 最后。
-/// 切勿把 NotoColorEmoji 放最前——缺字时数字会被 emoji 字体带出怪异字距。
-///
-/// Win7：系统无 Segoe UI Emoji，且 COLR 彩色 Noto 常渲不出；
-/// 仅 Win7 内嵌并用黑白轮廓 [NotoEmoji]（由 adapt-flutter-win7-sdk.sh 注入 pubspec）。
+/// 字体回退：各平台优先系统字体；仅 Win7 内嵌 NotoSansSC + NotoEmoji。
 List<String> _kotvFontFallbacks() {
-  if (kIsWeb) return const ['NotoColorEmoji'];
+  if (kIsWeb) return const [];
   if (Platform.isWindows) {
     if (kotvIsWindows7()) {
       return const [
@@ -45,8 +41,6 @@ List<String> _kotvFontFallbacks() {
       'Segoe UI',
       'Microsoft YaHei UI',
       'Microsoft YaHei',
-      'NotoSansSC',
-      'NotoColorEmoji',
       'Segoe UI Emoji',
       'Segoe UI Symbol',
     ];
@@ -55,17 +49,14 @@ List<String> _kotvFontFallbacks() {
     return const [
       'Noto Sans',
       'DejaVu Sans',
-      'NotoSansSC',
       'Noto Sans CJK SC',
-      'NotoColorEmoji',
       'Noto Color Emoji',
     ];
   }
   if (Platform.isAndroid) {
-    // 主字体用系统 Roboto（见 buildKotvTheme）；此处补 CJK + emoji
-    return const ['NotoSansSC', 'sans-serif', 'NotoColorEmoji', 'Noto Color Emoji'];
+    return const ['sans-serif', 'Noto Sans CJK SC', 'Noto Color Emoji'];
   }
-  return const ['PingFang SC', 'Hiragino Sans GB', 'NotoSansSC', 'NotoColorEmoji', 'Apple Color Emoji'];
+  return const ['PingFang SC', 'Hiragino Sans GB', 'Apple Color Emoji'];
 }
 
 ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
@@ -85,22 +76,21 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     outline: palette.outline,
   );
   final fallbacks = _kotvFontFallbacks();
-  // Android：主字体用系统 Roboto，数字/英文正常；NotoSansSC 仅作 CJK 回退。
-  // 其它平台：NotoSansSC 作主字体（Win7 等缺系统 CJK）。
-  final useSystemLatin = !kIsWeb && Platform.isAndroid;
+  // 仅 Win7 内嵌 NotoSansSC；其它平台用系统默认无衬线 + fallback 链。
+  final useEmbeddedCJK = !kIsWeb && Platform.isWindows && kotvIsWindows7();
   return ThemeData(
     useMaterial3: true,
     brightness: scheme.brightness,
     colorScheme: scheme,
     scaffoldBackgroundColor: Colors.transparent,
     extensions: [palette],
-    fontFamily: useSystemLatin ? null : 'NotoSansSC',
+    fontFamily: useEmbeddedCJK ? 'NotoSansSC' : null,
     fontFamilyFallback: fallbacks,
     // Android 14+ 预测性返回 / 全面屏手势；iOS/macOS 用 Cupertino 跟手侧滑
     // Win7（Flutter 3.19）由 adapt-flutter-win7-sdk.sh 将 PredictiveBack 换成 Zoom
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
-        TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+        TargetPlatform.android: ZoomPageTransitionsBuilder(),
         TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.linux: ZoomPageTransitionsBuilder(),
@@ -160,7 +150,7 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
         return IconThemeData(color: selected ? Colors.white : palette.muted, size: 24);
       }),
     ),
-    dialogTheme: DialogThemeData(
+    dialogTheme: DialogTheme(
       backgroundColor: palette.dialogBg,
       contentTextStyle: TextStyle(color: palette.fg, fontFamilyFallback: fallbacks),
       titleTextStyle: TextStyle(color: palette.fg, fontSize: 20, fontWeight: FontWeight.w700, fontFamilyFallback: fallbacks),

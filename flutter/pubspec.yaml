@@ -38,16 +38,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/engine/
-  # 由 scripts/fetch-flutter-fonts.sh 拉取（约 26MB，不进 git）
-  # Win7 黑白 NotoEmoji 由 adapt-flutter-win7-sdk.sh 注入，其它平台用系统 emoji。
-  fonts:
-    - family: NotoSansSC
-      fonts:
-        - asset: assets/fonts/NotoSansSC-Regular.otf
-          weight: 400
-        - asset: assets/fonts/NotoSansSC-Bold.otf
-          weight: 700
-    - family: NotoColorEmoji
-      fonts:
-        - asset: assets/fonts/NotoColorEmoji.ttf
-          weight: 400
+  # 内嵌字体仅 Win7 线：adapt-flutter-win7-sdk.sh 注入 fonts + fetch-flutter-fonts.sh（KOTV_WIN7=1）

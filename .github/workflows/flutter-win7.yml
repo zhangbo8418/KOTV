@@ -80,6 +80,7 @@ jobs:
           flutter config --enable-windows-desktop
           flutter precache --windows
           bash ../scripts/adapt-flutter-win7-sdk.sh
+          KOTV_WIN7=1 bash ../scripts/fetch-flutter-fonts.sh
           flutter pub get
           flutter build windows --release
 

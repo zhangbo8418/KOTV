@@ -10,13 +10,12 @@
 ## 联调
 
 ```bash
-./scripts/fetch-flutter-fonts.sh   # 首次：内嵌 Noto 中文 + 彩色 emoji（约 26MB）
 ./scripts/run-flutter.sh macos
 ```
 
 ## 字体
 
-内嵌 **Noto Sans SC** + **Noto Color Emoji**（Win10+）；**Win7** 另注黑白 **Noto Emoji**。字体不进 git，打包脚本会 `fetch-flutter-fonts.sh`。
+**仅 Win7 发行包**内嵌 Noto（CJK + emoji，约 28MB）；Win10+/macOS/Linux/Android 用系统字体。Win7 线：`KOTV_WIN7=1 ./scripts/fetch-flutter-fonts.sh`（打包脚本会自动调用）。
 
 ## Android APK
 
