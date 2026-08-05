@@ -15,4 +15,6 @@ KOTV_WIN7=1 ./scripts/fetch-flutter-fonts.sh
 | `NotoColorEmoji.ttf` | [noto-emoji](https://github.com/googlefonts/noto-emoji) COLR | 10 MB |
 | `NotoEmoji.ttf` | [google/fonts](https://github.com/google/fonts) `ofl/notoemoji` 黑白 | 2 MB |
 
-`adapt-flutter-win7-sdk.sh` 向 pubspec 注入上述 fonts；主题在 Win7 上用 `NotoEmoji`（黑白），因 COLR 彩色常渲不出。
+`adapt-flutter-win7-sdk.sh` 向 pubspec 注入 CJK + **彩色** + **黑白** emoji 三套字体。
+
+运行时（`kotv_theme.dart`）按系统版本选链：**真 Win7** 在 `NotoColorEmoji` 之后回退 `NotoEmoji`；**Win10/11**（含 Win7 包装在新机运行）只用 `Segoe UI Emoji` / `NotoColorEmoji`，不把 `NotoEmoji` 放进回退链，避免整机 emoji 变黑白。

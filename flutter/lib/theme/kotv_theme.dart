@@ -23,7 +23,11 @@ class KotvColors {
   static const focus = Color(0xFFFFD54F);
 }
 
-/// 字体回退：各平台优先系统字体；仅 Win7 内嵌 NotoSansSC + NotoEmoji。
+/// 字体回退：各平台优先系统字体；内嵌 Noto 仅 Win7 发行包携带。
+///
+/// Emoji：Win7 包内同时带 [NotoColorEmoji] 与 [NotoEmoji]，但回退链按**运行时的系统版本**区分——
+/// Win10/11 只用彩色（Segoe UI Emoji / NotoColorEmoji），绝不把 NotoEmoji 放前面，否则会整页黑白 emoji。
+/// 真 Win7 上 COLR 常渲不出，再在彩色之后回退 NotoEmoji（黑白轮廓）。
 List<String> _kotvFontFallbacks() {
   if (kIsWeb) return const [];
   if (Platform.isWindows) {
@@ -33,6 +37,7 @@ List<String> _kotvFontFallbacks() {
         'Microsoft YaHei UI',
         'Microsoft YaHei',
         'NotoSansSC',
+        'NotoColorEmoji',
         'NotoEmoji',
         'Segoe UI Symbol',
       ];
@@ -41,7 +46,9 @@ List<String> _kotvFontFallbacks() {
       'Segoe UI',
       'Microsoft YaHei UI',
       'Microsoft YaHei',
+      'NotoSansSC',
       'Segoe UI Emoji',
+      'NotoColorEmoji',
       'Segoe UI Symbol',
     ];
   }

@@ -15,7 +15,7 @@
 
 ## 字体
 
-**仅 Win7 发行包**内嵌 Noto（CJK + emoji，约 28MB）；Win10+/macOS/Linux/Android 用系统字体。Win7 线：`KOTV_WIN7=1 ./scripts/fetch-flutter-fonts.sh`（打包脚本会自动调用）。
+**仅 Win7 发行包**内嵌 Noto（CJK + 彩色/黑白 emoji，约 28MB）；Win10+/macOS/Linux/Android 用系统字体。Win7 包在 Win10/11 上仍走彩色 emoji 回退链，不会误用黑白 NotoEmoji。
 
 ## Android APK
 
