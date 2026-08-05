@@ -174,6 +174,8 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	var sniffHdr map[string]string
 	var err error
 	var via string
+	// type0 已对同一 webURL 做过 http/browser 嗅探时，勿再跑第二遍（日志会成双份）。
+	webSniffedSame := false
 	if p != nil {
 		parseLog("[parse] selected name=%q type=%d url=%s", p.Name, p.TypeID(), parsePreview(p.URL, 120))
 		parsed, sniffHdr, err = executeParse(*p, webURL, flag, hdr, parses, opts.Rules, click, opts.IsVideo)
@@ -181,6 +183,9 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 			via = fmt.Sprintf("parse:%s/type%d", p.Name, p.TypeID())
 		} else {
 			parseLog("[parse] selected fail name=%q err=%v", p.Name, err)
+			if p.TypeID() == 0 && strings.TrimSpace(p.URL)+webURL == webURL {
+				webSniffedSame = true
+			}
 		}
 	} else {
 		parseLog("[parse] no selected parse (useParse=%v prefer=%q)", useParse, opts.Prefer)
@@ -205,7 +210,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 			parseLog("[parse] json fallback fail name=%q err=%v cost=%s", cand.Name, err, time.Since(t0).Truncate(time.Millisecond))
 		}
 	}
-	if parsed == "" {
+	if parsed == "" && !webSniffedSame {
 		t0 := time.Now()
 		if sniffed, e := PlayPageSniff(webURL, hdr); e == nil && sniffed != "" {
 			parsed = sniffed
@@ -216,7 +221,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 			parseLog("[parse] PlayPageSniff fail err=%v cost=%s", e, time.Since(t0).Truncate(time.Millisecond))
 		}
 	}
-	if parsed == "" {
+	if parsed == "" && !webSniffedSame {
 		t0 := time.Now()
 		if u, h, e := browserSniff(webURL, hdr, click, opts.Rules, defaultParseWebTimeout, true, opts.IsVideo, 0); e == nil && u != "" {
 			parsed, sniffHdr, err = u, h, nil
@@ -226,6 +231,8 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 			err = e
 			parseLog("[parse] browserSniff fail err=%v cost=%s", e, time.Since(t0).Truncate(time.Millisecond))
 		}
+	} else if parsed == "" && webSniffedSame {
+		parseLog("[parse] skip duplicate web sniff (type0 already tried same url)")
 	}
 	if parsed == "" {
 		parseLog("[parse] fail final err=%v cost=%s", err, time.Since(start).Truncate(time.Millisecond))

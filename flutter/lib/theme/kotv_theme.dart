@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 
+import '../player/kotv_platform.dart';
 import 'kotv_palette.dart';
 
 /// 对齐 Legacy lumen 默认色板（兼容旧引用；新代码优先 [KotvPalette.of]）。
@@ -24,9 +25,22 @@ class KotvColors {
 
 /// 字体回退：拉丁/数字优先系统无衬线，CJK 次之，emoji 最后。
 /// 切勿把 NotoColorEmoji 放最前——缺字时数字会被 emoji 字体带出怪异字距。
+///
+/// Win7：系统无 Segoe UI Emoji，且 COLR 彩色 Noto 常渲不出；
+/// 仅 Win7 内嵌并用黑白轮廓 [NotoEmoji]（由 adapt-flutter-win7-sdk.sh 注入 pubspec）。
 List<String> _kotvFontFallbacks() {
   if (kIsWeb) return const ['NotoColorEmoji'];
   if (Platform.isWindows) {
+    if (kotvIsWindows7()) {
+      return const [
+        'Segoe UI',
+        'Microsoft YaHei UI',
+        'Microsoft YaHei',
+        'NotoSansSC',
+        'NotoEmoji',
+        'Segoe UI Symbol',
+      ];
+    }
     return const [
       'Segoe UI',
       'Microsoft YaHei UI',

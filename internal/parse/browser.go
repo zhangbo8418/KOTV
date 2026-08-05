@@ -25,8 +25,11 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// 网页嗅探总超时（秒级）；冷启动 Chromium 也算在这段时间内。
-const defaultParseWebTimeout = 15 * time.Second
+// 网页嗅探总超时；含嵌套云播页冷启动 + XHR，15s 在 Win7/慢机上不够。
+const defaultParseWebTimeout = 30 * time.Second
+
+// 嵌套嗅探至少留这么久，避免壳页耗掉大半时间后云播页秒超时。
+const nestedSniffMinTimeout = 18 * time.Second
 
 // 对齐 TV CustomWebView.MAX_URLS：嵌套 player 页最多跟进 5 个竞速。
 const maxNestedPlayers = 5
@@ -67,6 +70,8 @@ func ensureSharedChromium() (context.Context, error) {
 			chromedp.Flag("autoplay-policy", "no-user-gesture-required"),
 			chromedp.Flag("disable-blink-features", "AutomationControlled"),
 			chromedp.Flag("disable-infobars", true),
+			// 让跨站 iframe 网络事件落到同一 target，父页才能直接嗅到媒体。
+			chromedp.Flag("disable-features", "TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process"),
 			chromedp.ExecPath(chrome),
 		)
 		if runtime.GOOS == "windows" {
@@ -76,7 +81,6 @@ func ensureSharedChromium() (context.Context, error) {
 				chromedp.Flag("disable-background-networking", true),
 				chromedp.Flag("disable-background-timer-throttling", true),
 				chromedp.Flag("disable-renderer-backgrounding", true),
-				chromedp.Flag("disable-features", "TranslateUI,BlinkGenPropertyTrees,IsolateOrigins,site-per-process"),
 				chromedp.WindowSize(800, 600),
 				chromedp.Flag("window-position", "-32000,-32000"),
 			)
@@ -187,11 +191,12 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	followed := map[string]bool{}
 	tryFollow := func(target string, h map[string]string, why string) {
 		if detect && depth < 1 && shouldFollowNestedPlayer(target, pageURL, network.ResourceTypeDocument) {
+			key := nestedFollowKey(target)
 			followMu.Lock()
-			dup := followed[target]
+			dup := followed[key]
 			n := len(followed)
 			if !dup && n < maxNestedPlayers {
-				followed[target] = true
+				followed[key] = true
 			} else {
 				dup = true
 			}
@@ -199,15 +204,18 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if dup {
 				return
 			}
-			parseLog("[sniff] follow %s depth=%d url=%s", why, depth, parsePreview(target, 160))
+			parseLog("[sniff] follow %s depth=%d key=%s url=%s", why, depth, key, parsePreview(target, 160))
 			go func(target string, h map[string]string) {
 				remain := time.Until(deadlineOf(ctx))
-				if remain < 3*time.Second {
-					remain = 3 * time.Second
+				if remain < nestedSniffMinTimeout {
+					remain = nestedSniffMinTimeout
 				}
+				// 嵌套页自带超时；父页须有足够总时长等它（见 defaultParseWebTimeout）。
 				nested, nh, nerr := browserSniff(target, mergeHeaders(headers, h), click, rules, remain, false, isVideo, depth+1)
 				if nerr == nil && nested != "" {
 					emit(nested, nh)
+				} else if nerr != nil {
+					parseLog("[sniff] follow fail depth=%d err=%v url=%s", depth+1, nerr, parsePreview(target, 120))
 				}
 			}(target, h)
 		}
@@ -240,12 +248,12 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			return
 		}
 		text := string(body)
-		if play, hdr := parseJSONPlayBody(text); play != "" {
-			if strings.HasPrefix(strings.ToLower(play), "http://") || strings.HasPrefix(strings.ToLower(play), "https://") {
-				parseLog("[sniff] xhr-json depth=%d from=%s out=%s", depth, parsePreview(cand.url, 80), parsePreview(play, 120))
-				emit(play, sanitizePlayHeaders(hdr))
-				return
-			}
+		if play, hdr, note := sniffPlayAPIResult(text); note != "" {
+			parseLog("[sniff] play-api depth=%d %s from=%s", depth, note, parsePreview(cand.url, 80))
+		} else if play != "" {
+			parseLog("[sniff] xhr-json depth=%d from=%s out=%s", depth, parsePreview(cand.url, 80), parsePreview(play, 120))
+			emit(play, sanitizePlayHeaders(hdr))
+			return
 		}
 		if u := ExtractMediaURL(text); u != "" {
 			emit(u, nil)
@@ -400,6 +408,10 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		cancelTimeout()
 		return hit.url, hit.headers, nil
 	case runE := <-runErr:
+		if hit, ok := waitSniffHit(found, 2*time.Second); ok {
+			cancelTimeout()
+			return hit.url, hit.headers, nil
+		}
 		select {
 		case <-tabCtx.Done():
 		default:
@@ -413,7 +425,11 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		}
 		return "", nil, fmt.Errorf("未嗅探到媒体地址")
 	case <-ctx.Done():
-		// timeout 后 sniff ctx 已取消；若 tab 仍在，用 tabCtx 做最后一搏。
+		// 嵌套云播页 goroutine 可能略晚于父 ctx；再等一小会儿。
+		if hit, ok := waitSniffHit(found, 5*time.Second); ok {
+			cancelTimeout()
+			return hit.url, hit.headers, nil
+		}
 		select {
 		case <-tabCtx.Done():
 		default:
@@ -427,8 +443,27 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		}
 		return "", nil, ctx.Err()
 	case <-time.After(timeout + 4*time.Second):
+		if hit, ok := waitSniffHit(found, 2*time.Second); ok {
+			cancelTimeout()
+			return hit.url, hit.headers, nil
+		}
 		cancelTab()
 		return "", nil, fmt.Errorf("网页嗅探硬超时（Chromium 无响应）")
+	}
+}
+
+// waitSniffHit 在 grace 内等非阻塞地收嵌套嗅探结果。
+func waitSniffHit(found <-chan sniffHit, grace time.Duration) (sniffHit, bool) {
+	if grace <= 0 {
+		return sniffHit{}, false
+	}
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case hit := <-found:
+		return hit, true
+	case <-timer.C:
+		return sniffHit{}, false
 	}
 }
 
@@ -603,6 +638,67 @@ func collectIFrameURLs(ctx context.Context) []string {
 		out = append(out, line)
 	}
 	return out
+}
+
+// sniffPlayAPIResult 解析嗅探到的播放接口 JSON；code≠200 时返回 note 便于打日志。
+func sniffPlayAPIResult(body string) (play string, hdr map[string]string, note string) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "", nil, ""
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal([]byte(body), &obj) != nil {
+		return "", nil, ""
+	}
+	if raw, ok := obj["code"]; ok && raw != nil {
+		var codeNum float64
+		var codeStr string
+		switch {
+		case json.Unmarshal(raw, &codeNum) == nil:
+			if int(codeNum) != 200 {
+				msg := jsonStringField(obj, "msg")
+				return "", nil, fmt.Sprintf("code=%d msg=%s", int(codeNum), msg)
+			}
+		case json.Unmarshal(raw, &codeStr) == nil:
+			if codeStr != "" && codeStr != "200" {
+				msg := jsonStringField(obj, "msg")
+				return "", nil, fmt.Sprintf("code=%s msg=%s", codeStr, msg)
+			}
+		}
+	}
+	play, hdr = parseJSONPlayBody(body)
+	if play == "" {
+		return "", nil, ""
+	}
+	if !strings.HasPrefix(strings.ToLower(play), "http://") && !strings.HasPrefix(strings.ToLower(play), "https://") {
+		return "", nil, ""
+	}
+	return play, hdr, ""
+}
+
+// nestedFollowKey 合并同站同资源入口（同 host+vid/id 只跟一次，避免 302 前后各开一层）。
+func nestedFollowKey(u string) string {
+	u = strings.TrimSpace(u)
+	host := strings.ToLower(hostOf(u))
+	if host == "" {
+		return u
+	}
+	q, err := url.Parse(u)
+	if err != nil {
+		return host
+	}
+	vid := strings.TrimSpace(q.Query().Get("vid"))
+	if vid == "" {
+		vid = strings.TrimSpace(q.Query().Get("id"))
+	}
+	if vid != "" {
+		return host + "|vid=" + vid
+	}
+	path := strings.ToLower(q.EscapedPath())
+	if path == "" {
+		path = "/"
+	}
+	return host + "|" + path
 }
 
 // shouldFollowNestedPlayer 决定是否再开一层嗅探。

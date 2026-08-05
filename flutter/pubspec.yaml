@@ -39,6 +39,7 @@ flutter:
   assets:
     - assets/engine/
   # 由 scripts/fetch-flutter-fonts.sh 拉取（约 26MB，不进 git）
+  # Win7 黑白 NotoEmoji 由 adapt-flutter-win7-sdk.sh 注入，其它平台用系统 emoji。
   fonts:
     - family: NotoSansSC
       fonts:

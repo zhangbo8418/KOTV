@@ -16,7 +16,7 @@
 
 ## 字体
 
-内嵌 **Noto Sans SC**（Regular/Bold）+ **Noto Color Emoji**，各端 UI 字形统一。字体文件不进 git，打包脚本会自动 `fetch-flutter-fonts.sh`。
+内嵌 **Noto Sans SC** + **Noto Color Emoji**（Win10+）；**Win7** 另注黑白 **Noto Emoji**。字体不进 git，打包脚本会 `fetch-flutter-fonts.sh`。
 
 ## Android APK
 
