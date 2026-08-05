@@ -24,6 +24,12 @@ int kotv_vlc_ended(void);
 void kotv_vlc_set_time(int64_t ms);
 int64_t kotv_vlc_get_time(void);
 int64_t kotv_vlc_get_length(void);
+/* 已缓冲到的大致时间戳（ms）；无事件时退回当前播放位置 */
+int64_t kotv_vlc_get_buffered(void);
+/* Opening/Buffering 或 cache<100 */
+int kotv_vlc_is_buffering(void);
+/* 估算下载速度 bytes/s */
+int64_t kotv_vlc_get_speed_bps(void);
 int kotv_vlc_set_volume(int vol);
 
 /* 有脏帧时：写入 *out_w、*out_h；若 out_cap>=w*h*4 则拷贝 BGRA 并清 dirty，返回 1。

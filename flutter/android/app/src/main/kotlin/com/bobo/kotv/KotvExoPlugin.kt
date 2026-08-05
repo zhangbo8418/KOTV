@@ -12,11 +12,15 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.LoadControl
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -55,6 +59,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var decodeMode: String = "auto"
   /** auto 下硬解失败后仅软解重建一次。 */
   private var decodeFallbackTried = false
+  /** 估算下载速度 bytes/s（来自 BandwidthMeter）。 */
+  @Volatile private var speedBps: Long = 0
 
   private val main = Handler(Looper.getMainLooper())
   private val tick = object : Runnable {
@@ -68,9 +74,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           "bufferedMs" to p.bufferedPosition,
           "playing" to p.isPlaying,
           "buffering" to (p.playbackState == Player.STATE_BUFFERING),
+          "speedBps" to speedBps,
         ),
       )
-      main.postDelayed(this, 400)
+      main.postDelayed(this, 500)
     }
   }
 
@@ -241,13 +248,39 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val mediaSourceFactory = DefaultMediaSourceFactory(ctx).setDataSourceFactory(dataSourceFactory)
     val effective = effectiveDecodeMode()
     val renderers = buildRenderersFactory(ctx, effective)
+    val loadControl: LoadControl = DefaultLoadControl.Builder()
+      .setBufferDurationsMs(
+        /* minBufferMs：尽量多囤 */ 60_000,
+        /* maxBufferMs：接近“缓存到可播完”（1 小时窗口） */ 3_600_000,
+        /* bufferForPlaybackMs */ 1_200,
+        /* bufferForPlaybackAfterRebufferMs */ 2_500,
+      )
+      .setTargetBufferBytes(Int.MAX_VALUE / 4)
+      .setPrioritizeTimeOverSizeThresholds(true)
+      .build()
+    val bandwidthMeter = DefaultBandwidthMeter.getSingletonInstance(ctx)
 
     val p = ExoPlayer.Builder(ctx)
       .setMediaSourceFactory(mediaSourceFactory)
       .setRenderersFactory(renderers)
+      .setLoadControl(loadControl)
+      .setBandwidthMeter(bandwidthMeter)
       .build()
     player = p
     p.setVideoSurface(surface)
+    p.addAnalyticsListener(
+      object : AnalyticsListener {
+        override fun onBandwidthEstimate(
+          eventTime: AnalyticsListener.EventTime,
+          totalLoadTimeMs: Int,
+          totalBytesLoaded: Long,
+          bitrateEstimate: Long,
+        ) {
+          // bitrateEstimate 为 bits/s
+          speedBps = (bitrateEstimate / 8L).coerceAtLeast(0)
+        }
+      },
+    )
     p.addListener(object : Player.Listener {
       override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_ENDED) {

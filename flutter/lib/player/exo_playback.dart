@@ -33,11 +33,14 @@ class ExoPlayback extends KotvPlayback {
   int _h = 0;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
+  Duration _buffered = Duration.zero;
+  int _speedBps = 0;
   bool _repeatOne = false;
   String _decodeMode = 'auto';
   String? _lastError;
 
   final _posCtrl = StreamController<Duration>.broadcast();
+  final _bufCtrl = StreamController<Duration>.broadcast();
   final _endedCtrl = StreamController<bool>.broadcast();
 
   @override
@@ -51,6 +54,12 @@ class ExoPlayback extends KotvPlayback {
   @override
   Duration get duration => _duration;
   @override
+  Duration get buffered => _buffered;
+  @override
+  bool get buffering => _buffering;
+  @override
+  int get networkSpeedBps => _speedBps;
+  @override
   double get volume => _volume;
   @override
   double get rate => _rate;
@@ -61,9 +70,9 @@ class ExoPlayback extends KotvPlayback {
   @override
   Stream<Duration> get positionStream => _posCtrl.stream;
   @override
+  Stream<Duration> get bufferedStream => _bufCtrl.stream;
+  @override
   Stream<bool> get completedStream => _endedCtrl.stream;
-
-  bool get buffering => _buffering;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     final id = _textureId;
@@ -98,12 +107,27 @@ class ExoPlayback extends KotvPlayback {
     final event = '${m['event'] ?? ''}';
     switch (event) {
       case 'position':
-        _position = Duration(milliseconds: (m['positionMs'] as num?)?.toInt() ?? 0);
-        _duration = Duration(milliseconds: (m['durationMs'] as num?)?.toInt() ?? 0);
-        _playing = m['playing'] == true;
-        _buffering = m['buffering'] == true;
+        final nextPos = Duration(milliseconds: (m['positionMs'] as num?)?.toInt() ?? 0);
+        final nextDur = Duration(milliseconds: (m['durationMs'] as num?)?.toInt() ?? 0);
+        final nextBuf = Duration(milliseconds: (m['bufferedMs'] as num?)?.toInt() ?? _buffered.inMilliseconds);
+        final nextPlaying = m['playing'] == true;
+        final nextBuffering = m['buffering'] == true;
+        final nextSpeed = (m['speedBps'] as num?)?.toInt() ?? _speedBps;
+        final changed = nextPlaying != _playing ||
+            nextBuffering != _buffering ||
+            nextSpeed != _speedBps ||
+            (nextPos - _position).inMilliseconds.abs() >= 200 ||
+            (nextBuf - _buffered).inMilliseconds.abs() >= 500 ||
+            nextDur != _duration;
+        _position = nextPos;
+        _duration = nextDur;
+        _buffered = nextBuf;
+        _playing = nextPlaying;
+        _buffering = nextBuffering;
+        _speedBps = nextSpeed < 0 ? 0 : nextSpeed;
         if (!_posCtrl.isClosed) _posCtrl.add(_position);
-        notifyListeners();
+        if (!_bufCtrl.isClosed) _bufCtrl.add(_buffered);
+        if (changed) notifyListeners();
         break;
       case 'ready':
       case 'size':
@@ -150,6 +174,7 @@ class ExoPlayback extends KotvPlayback {
     _lastError = null;
     _position = Duration.zero;
     _duration = Duration.zero;
+    _buffered = Duration.zero;
     await _ensureTexture();
     try {
       await _ch.invokeMethod('open', {
@@ -266,6 +291,7 @@ class ExoPlayback extends KotvPlayback {
     unawaited(_ch.invokeMethod('dispose').catchError((_) {}));
     _textureId = null;
     _posCtrl.close();
+    _bufCtrl.close();
     _endedCtrl.close();
     super.dispose();
   }

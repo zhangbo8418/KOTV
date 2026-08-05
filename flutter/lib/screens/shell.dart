@@ -40,6 +40,8 @@ class _AppShellState extends ConsumerState<AppShell> {
   RemoteBridge? _bridge;
   PostMsgHost? _postMsg;
   DateTime? _lastHomeBackAt;
+  /// 防止 PopScope 与 NavigatorPopHandler 同一次返回各调一次。
+  bool _handlingBack = false;
 
   @override
   void initState() {
@@ -106,10 +108,14 @@ class _AppShellState extends ConsumerState<AppShell> {
     };
   }
 
-  /// 系统/手势/遥控返回：先关根弹窗/详情 → 直播面板/全屏 → 首页与直播均连按两次退桌面。
+  /// 系统/手势/遥控返回：先关根弹窗/详情 → 主 Tab 返回栈 → 首页连按两次退桌面。
   void _onShellBack() {
+    if (_handlingBack) return;
+    _handlingBack = true;
+    scheduleMicrotask(() => _handlingBack = false);
+
     final root = rootNavigatorKey.currentState;
-    // 扫码等 useRootNavigator 弹窗在根栈顶：直接 pop，由弹窗 PopScope 回报 dismiss。
+    // 扫码等 useRootNavigator 弹窗 / 点播全屏在根栈顶：先 pop。
     if (root != null && root.canPop()) {
       root.pop();
       return;
@@ -125,17 +131,23 @@ class _AppShellState extends ConsumerState<AppShell> {
       nav.pop();
       return;
     }
-    // 直播：先关侧栏/退出沉浸全屏，再与首页一样「连按两次退桌面」。
-    if (page == KotvPage.live) {
-      if (liveScreenHandleBack?.call() == true) return;
-      _promptDoubleBackExit();
+    // 详情播放中 PopScope.canPop=false → Navigator.canPop 也是 false，
+    // 但仍须 maybePop 触发详情 onPopInvoked→_leavePage，不能误走退桌面。
+    if (DetailScreen.isOpen && nav != null) {
+      unawaited(nav.maybePop());
       return;
     }
+    // 直播：先关侧栏/退出沉浸全屏。
+    if (page == KotvPage.live) {
+      if (liveScreenHandleBack?.call() == true) return;
+    }
+    // 非首页：退到上一主 Tab（kotvPageStack）；无栈则回点播首页。
     if (page != KotvPage.video) {
       _lastHomeBackAt = null;
       kotvPageBack(ref);
       return;
     }
+    // 已在点播首页：连按两次退桌面。
     _promptDoubleBackExit();
   }
 
@@ -165,9 +177,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     final bottomNav = KotvLayout.useBottomNav(context);
 
     return PopScope(
-      // 根层始终拦截：由 [_onShellBack] 决定 pop 详情 / 换页 / 退桌面
+      // 根层始终拦截：禁止系统直接 finish Activity。
       canPop: false,
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         _onShellBack();
       },
@@ -181,16 +193,19 @@ class _AppShellState extends ConsumerState<AppShell> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // 详情等子页 push 到此 Navigator，底栏保持可见。
-                  // GlobalObjectKey(page)：切 Tab 重建栈，同时可从外壳 pop 详情。
-                  Navigator(
-                    key: GlobalObjectKey<NavigatorState>(page),
-                    onGenerateRoute: (settings) {
-                      return MaterialPageRoute<void>(
-                        settings: settings,
-                        builder: (_) => _pageOf(page),
-                      );
-                    },
+                  // 内层 Navigator 会抢走系统返回；无子路由可 pop 时必须用
+                  // NavigatorPopHandler 接到外壳，否则 Android 直接退桌面。
+                  NavigatorPopHandler(
+                    onPopWithResult: (_) => _onShellBack(),
+                    child: Navigator(
+                      key: GlobalObjectKey<NavigatorState>(page),
+                      onGenerateRoute: (settings) {
+                        return MaterialPageRoute<void>(
+                          settings: settings,
+                          builder: (_) => _pageOf(page),
+                        );
+                      },
+                    ),
                   ),
                   if (busy != null && busy.isNotEmpty)
                     Positioned.fill(

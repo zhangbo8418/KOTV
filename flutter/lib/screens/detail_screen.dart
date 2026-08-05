@@ -21,6 +21,7 @@ import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/h_scroll.dart';
@@ -35,6 +36,9 @@ class DetailScreen extends ConsumerStatefulWidget {
   final String id;
   final String site;
   final String title;
+
+  /// 详情是否在栈上（含播放中 PopScope.canPop=false）。
+  static bool get isOpen => _DetailScreenState._active != null;
 
   /// 换源等场景：在 pop 详情栈前先硬停播（await），避免后台继续出声。
   static Future<void> prepareLeave() async {
@@ -59,6 +63,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _loading = true;
   int _flagIdx = 0;
   int _epIdx = -1;
+  /// 全屏页在 rootNavigator，父 setState 到不了；用 notifier 同步集数高亮。
+  final ValueNotifier<int> _fsEpIdx = ValueNotifier(-1);
   int _epPage = 0;
   bool _reversed = false;
   bool _kept = false;
@@ -90,6 +96,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   StreamSubscription? _endedSub;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription? _bufferingSub;
+  KotvPlayback? _wiredNotifyTarget;
+  VoidCallback? _playbackNotify;
   bool _openingSeekDone = false;
   bool _stoppedHard = false;
   /// 硬停完成后再允许真正出栈（配合 [PopScope]）。
@@ -124,12 +132,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool get _useMpv => _backend == KotvEmbedBackend.mpv;
   String get _enginePrefix => flutterPlayerLabel(_playerVal);
 
-  bool get _isBuffering {
-    if (_useMpv) return _mkPlayer?.state.buffering ?? false;
-    if (_backend == KotvEmbedBackend.exo) return _exo?.buffering ?? false;
-    if (_backend == KotvEmbedBackend.ijk) return _ijk?.buffering ?? false;
-    return false;
-  }
+  bool get _isBuffering => _playUrl.isNotEmpty && _playback.buffering;
 
   /// 按真实播放器状态刷新文案，避免「播放中」但 00:00/00:00。
   void _syncPlayStatus() {
@@ -137,14 +140,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final p = _playback;
     final prefix = _enginePrefix;
     final magnet = _magnetPlay || _playUrl.contains('/proxy/bt/');
+    final speed = kotvFormatSpeed(p.networkSpeedBps, showZero: _isBuffering);
+    final speedSuffix = speed.isEmpty ? '' : ' $speed';
     final String next;
     if (p.completed && !p.playing) {
       next = '播放结束';
     } else if (magnet && (_isBuffering ||
             !(p.position > Duration.zero || p.duration > Duration.zero || p.width > 0))) {
-      next = '磁力缓冲中…';
+      next = '磁力缓冲中…$speedSuffix';
     } else if (_isBuffering) {
-      next = '$prefix 缓冲中…';
+      next = '$prefix 缓冲中…$speedSuffix';
     } else if (p.playing) {
       final started = p.position > Duration.zero || p.duration > Duration.zero || p.width > 0;
       if (started) {
@@ -154,7 +159,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (startedAt != null && DateTime.now().difference(startedAt) > const Duration(seconds: 10)) {
           next = magnet ? '磁力无画面（可换源/换节点）' : '$prefix 无画面（可换源/解析）';
         } else {
-          next = magnet ? '磁力缓冲中…' : '$prefix 加载中…';
+          next = magnet ? '磁力缓冲中…$speedSuffix' : '$prefix 加载中…$speedSuffix';
         }
       }
     } else {
@@ -243,6 +248,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _endedSub?.cancel();
     _posSub?.cancel();
     _bufferingSub?.cancel();
+    _unwirePlaybackNotify();
     _playingSub = null;
     _endedSub = null;
     _posSub = null;
@@ -296,6 +302,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   void _wirePosition(KotvPlayback p) {
     _posSub?.cancel();
     _posSub = p.positionStream.listen(_onPositionTick);
+  }
+
+  void _unwirePlaybackNotify() {
+    final t = _wiredNotifyTarget;
+    final cb = _playbackNotify;
+    if (t != null && cb != null) {
+      try {
+        t.removeListener(cb);
+      } catch (_) {}
+    }
+    _wiredNotifyTarget = null;
+    _playbackNotify = null;
+  }
+
+  void _wirePlaybackNotify(KotvPlayback p) {
+    _unwirePlaybackNotify();
+    _playbackNotify = () {
+      if (!mounted || _playUrl.isEmpty) return;
+      _syncPlayStatus();
+    };
+    _wiredNotifyTarget = p;
+    p.addListener(_playbackNotify!);
   }
 
   /// 对齐 TV STATE_READY：本集真正开播后才允许片尾/completed 自动连播。
@@ -393,8 +421,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _endedSub?.cancel();
     _posSub?.cancel();
     _bufferingSub?.cancel();
+    _unwirePlaybackNotify();
     _stopBtProgressPoll();
     _danmakuItems.dispose();
+    _fsEpIdx.dispose();
     // 正常路径已在 [_stopHard] 里 await pause/stop；此处兜底再停一次再释放。
     if (!_stoppedHard) {
       unawaited(_vlc?.stop() ?? Future<void>.value());
@@ -654,6 +684,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       _magnetPlay = epLooksMagnet;
       _status = epLooksMagnet ? '磁力解析中…' : '解析中…';
     });
+    _fsEpIdx.value = epIdx;
     if (epLooksMagnet) _startBtProgressPoll();
     try {
       final data = await ref.read(apiProvider).play(
@@ -733,6 +764,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       if (gen == _playGen) {
         _wireEnded(_playback);
         _wirePosition(_playback);
+        _wirePlaybackNotify(_playback);
       }
       _stopBtProgressPoll();
       _syncPlayStatus();
@@ -777,18 +809,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final id = d.id.isNotEmpty ? d.id : widget.id;
     final site = d.site.isNotEmpty ? d.site : widget.site;
     final title = '${d.name}${_epIdx >= 0 && _epIdx < eps.length ? ' · ${eps[_epIdx].name}' : ''}';
+    _fsEpIdx.value = _epIdx;
 
     await Navigator.of(context, rootNavigator: true).push(
       PageRouteBuilder(
         opaque: true,
-        pageBuilder: (_, __, ___) => ValueListenableBuilder<List<DanmakuItem>>(
+        pageBuilder: (_, __, ___) => ValueListenableBuilder<int>(
+          valueListenable: _fsEpIdx,
+          builder: (context, epIdx, _) => ValueListenableBuilder<List<DanmakuItem>>(
           valueListenable: _danmakuItems,
           builder: (context, danmakuItems, _) => DetailFullscreenPage(
           playback: _playback,
           vodName: d.name,
           title: title,
           episodes: eps.map((e) => e.name).toList(),
-          epIdx: _epIdx,
+          epIdx: epIdx,
           playUrl: _playUrl,
           decodeMode: _decodeMode,
           aspect: _aspect,
@@ -861,6 +896,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             Navigator.of(context).maybePop();
             unawaited(_enterMini());
           },
+        ),
         ),
         ),
       ),
@@ -950,6 +986,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               playback: _playback,
               mpv: _mk,
               fit: _aspect.fit,
+            ),
+          if (_playUrl.isNotEmpty)
+            KotvBufferingOverlay(
+              player: _playback,
+              force: _status.contains('加载中') || _status.contains('磁力缓冲'),
             ),
           if (_status.contains('解析') || _status.contains('嗅探'))
             const ColoredBox(

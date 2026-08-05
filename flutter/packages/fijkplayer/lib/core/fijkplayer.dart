@@ -497,6 +497,24 @@ class FijkPlayer extends ChangeNotifier implements ValueListenable<FijkValue> {
     }
   }
 
+  /// 实时 TCP 下载速度（字节/秒）。部分 HLS 流可能长期为 0。
+  Future<int> getTcpSpeed() async {
+    await _nativeSetup.future;
+    final v = await _channel.invokeMethod("getTcpSpeed");
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
+  }
+
+  /// 累计下载字节数；可与上次差值估算速率（比 getTcpSpeed 更稳）。
+  Future<int> getTrafficStatisticByteCount() async {
+    await _nativeSetup.future;
+    final v = await _channel.invokeMethod("getTrafficStatisticByteCount");
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
+  }
+
   void _eventListener(dynamic event) {
     final Map<dynamic, dynamic> map = event;
     switch (map['event']) {

@@ -147,6 +147,7 @@ class VodInlineControls extends StatelessWidget {
                       data: _sliderTheme(context),
                       child: Slider(
                         value: pos.inMilliseconds.clamp(0, total.toInt()).toDouble(),
+                        secondaryTrackValue: _sliderBuffered(player, total),
                         max: total,
                         onChanged: (v) => player.seek(Duration(milliseconds: v.round())),
                       ),
@@ -169,8 +170,16 @@ SliderThemeData _sliderTheme(BuildContext context) {
     overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
     activeTrackColor: KotvColors.primary,
     inactiveTrackColor: Colors.white24,
+    secondaryActiveTrackColor: Colors.white38,
     thumbColor: Colors.white,
   );
+}
+
+double _sliderBuffered(KotvPlayback player, double total) {
+  final pos = player.position.inMilliseconds.toDouble();
+  final buf = player.buffered.inMilliseconds.toDouble();
+  if (total <= 0) return pos;
+  return buf.clamp(pos, total);
 }
 
 class _IconAct extends StatelessWidget {
@@ -1305,6 +1314,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                 data: _sliderTheme(context),
                                 child: Slider(
                                   value: pos.inMilliseconds.clamp(0, total.toInt()).toDouble(),
+                                  secondaryTrackValue: _sliderBuffered(widget.player, total),
                                   max: total,
                                   onChangeStart: (_) => widget.onBump(),
                                   onChanged: (v) {

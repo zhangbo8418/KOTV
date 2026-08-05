@@ -479,6 +479,11 @@ public class FijkPlayer implements MethodChannel.MethodCallHandler, IjkEventList
             final Double speed = call.argument("speed");
             mIjkMediaPlayer.setSpeed(speed != null ? speed.floatValue() : 1.0f);
             result.success(null);
+        } else if (call.method.equals("getTcpSpeed")) {
+            // bilibili ijk：字节/秒；HLS 等协议可能长期为 0
+            result.success(mIjkMediaPlayer.getTcpSpeed());
+        } else if (call.method.equals("getTrafficStatisticByteCount")) {
+            result.success(mIjkMediaPlayer.getTrafficStatisticByteCount());
         } else if (call.method.equals("snapshot")) {
             if (mHostOptions.getIntOption(HostOption.ENABLE_SNAPSHOT, 0) > 0) {
                 mIjkMediaPlayer.snapShot();

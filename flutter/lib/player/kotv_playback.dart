@@ -15,6 +15,12 @@ abstract class KotvPlayback extends ChangeNotifier {
   bool get completed;
   Duration get position;
   Duration get duration;
+  /// 已缓冲到的位置（用于进度条 secondary track）；未知时为 zero。
+  Duration get buffered => Duration.zero;
+  /// 是否正在缓冲（卡顿补缓冲 / 起播缓冲）。
+  bool get buffering => false;
+  /// 估算下载速度（字节/秒）；0 表示未知。
+  int get networkSpeedBps => 0;
   double get volume; // 0–100
   double get rate;
   int get width;
@@ -22,6 +28,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   String get engineLabel;
 
   Stream<Duration> get positionStream;
+
+  /// 缓冲位置变化（可选；UI 也可靠 [ChangeNotifier]）。
+  Stream<Duration> get bufferedStream => const Stream<Duration>.empty();
 
   /// 本集自然播完（非手动 stop）时发出 true。
   Stream<bool> get completedStream;
@@ -45,6 +54,17 @@ abstract class KotvPlayback extends ChangeNotifier {
   String? get currentSubtitleId;
   Future<void> setAudioTrack(String id);
   Future<void> setSubtitleTrack(String id); // ''=关, 'auto'=自动
+}
+
+/// 网速文案：统一两位小数，如 `0.00 KB/s` / `12.34 KB/s` / `100.00 MB/s`。
+/// [showZero] 为 true 时，0 也显示（缓冲界面用来判断是否卡死）。
+String kotvFormatSpeed(int bytesPerSec, {bool showZero = false}) {
+  if (bytesPerSec <= 0) return showZero ? '0.00 KB/s' : '';
+  final kb = bytesPerSec / 1024.0;
+  if (kb < 1024) {
+    return '${kb.toStringAsFixed(2)} KB/s';
+  }
+  return '${(kb / 1024.0).toStringAsFixed(2)} MB/s';
 }
 
 class KotvTrack {
@@ -103,11 +123,24 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.playing.listen((_) => notifyListeners()));
     _subs.add(player.stream.position.listen((_) => notifyListeners()));
     _subs.add(player.stream.duration.listen((_) => notifyListeners()));
+    _subs.add(player.stream.buffer.listen((_) => notifyListeners()));
+    _subs.add(player.stream.buffering.listen((v) {
+      _buffering = v;
+      if (v) {
+        unawaited(_pollCacheSpeed());
+      } else {
+        _speedBps = 0;
+      }
+      notifyListeners();
+    }));
     _subs.add(player.stream.width.listen((_) => notifyListeners()));
     _subs.add(player.stream.height.listen((_) => notifyListeners()));
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
+    _speedTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (_buffering || player.state.buffering) unawaited(_pollCacheSpeed());
+    });
     unawaited(_opts.applyAfterAttach(player));
   }
 
@@ -117,6 +150,20 @@ class MediaKitPlayback extends KotvPlayback {
   final List<StreamSubscription> _subs = [];
   String _url = '';
   Map<String, String> _headers = const {};
+  bool _buffering = false;
+  int _speedBps = 0;
+  Timer? _speedTimer;
+
+  Future<void> _pollCacheSpeed() async {
+    try {
+      final raw = await (player.platform as dynamic).getProperty('cache-speed');
+      final v = int.tryParse('$raw'.trim()) ?? 0;
+      if (v != _speedBps) {
+        _speedBps = v < 0 ? 0 : v;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
 
   KotvMpvOpts get opts => _opts;
 
@@ -152,6 +199,12 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Duration get duration => player.state.duration;
   @override
+  Duration get buffered => player.state.buffer;
+  @override
+  bool get buffering => _buffering || player.state.buffering;
+  @override
+  int get networkSpeedBps => _speedBps;
+  @override
   double get volume => player.state.volume.clamp(0, 100);
   @override
   double get rate => player.state.rate;
@@ -161,6 +214,9 @@ class MediaKitPlayback extends KotvPlayback {
   int get height => player.state.height ?? controller.rect.value?.height.round() ?? 0;
   @override
   Stream<Duration> get positionStream => player.stream.position;
+
+  @override
+  Stream<Duration> get bufferedStream => player.stream.buffer;
 
   @override
   Stream<bool> get completedStream => player.stream.completed;
@@ -251,6 +307,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   void dispose() {
+    _speedTimer?.cancel();
     for (final s in _subs) {
       s.cancel();
     }
@@ -280,6 +337,9 @@ class EngineVlcPlayback extends KotvPlayback {
   bool _ended = false;
   int _positionMs = 0;
   int _durationMs = 0;
+  int _bufferedMs = 0;
+  int _speedBps = 0;
+  bool _vlcBuffering = false;
   int _volume = 80;
   double _rate = 1.0;
   int _videoW = 0;
@@ -301,9 +361,19 @@ class EngineVlcPlayback extends KotvPlayback {
     try {
       final st = await _native.status();
       final wasEnded = _ended;
+      final wasPlaying = _playing;
+      final prevPos = _positionMs;
+      final prevBuf = _bufferedMs;
+      final prevBuffering = _vlcBuffering;
+      final prevSpeed = _speedBps;
       _playing = st['playing'] == true;
       _positionMs = (st['positionMs'] as num?)?.toInt() ?? _positionMs;
       _durationMs = (st['durationMs'] as num?)?.toInt() ?? _durationMs;
+      _bufferedMs = (st['bufferedMs'] as num?)?.toInt() ?? _bufferedMs;
+      if (_bufferedMs < _positionMs) _bufferedMs = _positionMs;
+      _vlcBuffering = st['buffering'] == true;
+      _speedBps = (st['speedBps'] as num?)?.toInt() ?? 0;
+      if (_speedBps < 0) _speedBps = 0;
       _videoW = (st['width'] as num?)?.toInt() ?? _videoW;
       _videoH = (st['height'] as num?)?.toInt() ?? _videoH;
       if (_positionMs > _maxPositionMs) _maxPositionMs = _positionMs;
@@ -327,7 +397,18 @@ class EngineVlcPlayback extends KotvPlayback {
       if (_ended && !wasEnded && !_endedCtrl.isClosed) {
         _endedCtrl.add(true);
       }
-      notifyListeners();
+      // 降 UI 刷新频率：状态/进度变化才 notify，避免每 250ms 整树重建导致卡顿
+      final posJump = (_positionMs - prevPos).abs() >= 200;
+      final bufJump = (_bufferedMs - prevBuf).abs() >= 500;
+      final speedJump = (_speedBps - prevSpeed).abs() >= 2048;
+      if (wasPlaying != _playing ||
+          wasEnded != _ended ||
+          posJump ||
+          bufJump ||
+          prevBuffering != _vlcBuffering ||
+          (_vlcBuffering && speedJump)) {
+        notifyListeners();
+      }
     } catch (_) {}
   }
 
@@ -370,6 +451,12 @@ class EngineVlcPlayback extends KotvPlayback {
   @override
   Duration get duration => Duration(milliseconds: _durationMs);
   @override
+  Duration get buffered => Duration(milliseconds: _bufferedMs);
+  @override
+  bool get buffering => _vlcBuffering;
+  @override
+  int get networkSpeedBps => _speedBps;
+  @override
   double get volume => _volume.toDouble();
   @override
   double get rate => _rate;
@@ -394,6 +481,7 @@ class EngineVlcPlayback extends KotvPlayback {
     _playing = false;
     _positionMs = 0;
     _durationMs = 0;
+    _bufferedMs = 0;
     _videoW = 0;
     _videoH = 0;
     _maxPositionMs = 0;
@@ -408,7 +496,7 @@ class EngineVlcPlayback extends KotvPlayback {
     _audioTracks = const [];
     _subTracks = const [];
     _statusTimer?.cancel();
-    _statusTimer = Timer.periodic(const Duration(milliseconds: 250), (_) => unawaited(_tickNativeStatus()));
+    _statusTimer = Timer.periodic(const Duration(milliseconds: 400), (_) => unawaited(_tickNativeStatus()));
     await _tickNativeStatus();
     unawaited(_refreshTracks());
     notifyListeners();

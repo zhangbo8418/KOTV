@@ -10,6 +10,7 @@ import '../player/embed_video_view.dart';
 import '../player/exo_playback.dart';
 import '../player/ijk_playback.dart';
 import '../player/kotv_playback.dart';
+import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
 
 /// 详情页全屏：MPV / VLC 共用同一套顶底控件。
@@ -385,6 +386,8 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                     position: _pos,
                     items: widget.danmakuItems,
                   ),
+                  if (widget.playUrl.isNotEmpty)
+                    KotvBufferingOverlay(player: widget.playback),
                   if (_swipeHint != null)
                     IgnorePointer(
                       child: Center(

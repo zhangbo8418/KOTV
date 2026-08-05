@@ -123,6 +123,43 @@ typedef int (*fn_add_slave)(libvlc_media_player_t *, int, const char *, int);
 typedef int (*fn_set_spu_delay)(libvlc_media_player_t *, int64_t);
 typedef void (*fn_media_add_option)(libvlc_media_t *, const char *);
 
+/* 事件（缓冲进度）；符号缺失时缓冲条退回当前位置 */
+typedef struct libvlc_event_manager_t libvlc_event_manager_t;
+typedef struct libvlc_event_t {
+	int type;
+	void *p_obj;
+	union {
+		struct {
+			float new_cache;
+		} media_player_buffering;
+		char pad[64];
+	} u;
+} libvlc_event_t;
+typedef void (*libvlc_callback_t)(const libvlc_event_t *, void *);
+typedef libvlc_event_manager_t *(*fn_mp_event_manager)(libvlc_media_player_t *);
+typedef int (*fn_event_attach)(libvlc_event_manager_t *, int, libvlc_callback_t, void *);
+typedef libvlc_media_t *(*fn_mp_get_media)(libvlc_media_player_t *);
+typedef struct libvlc_media_stats_t {
+	int i_read_bytes;
+	float f_input_bitrate;
+	int i_demux_read_bytes;
+	float f_demux_bitrate;
+	int i_demux_corrupted;
+	int i_demux_discontinuity;
+	int i_decoded_video;
+	int i_decoded_audio;
+	int i_displayed_pictures;
+	int i_lost_pictures;
+	int i_played_abuffers;
+	int i_lost_abuffers;
+	int i_sent_packets;
+	int i_sent_bytes;
+	float f_send_bitrate;
+} libvlc_media_stats_t;
+typedef int (*fn_media_get_stats)(libvlc_media_t *, libvlc_media_stats_t *);
+/* libvlc_MediaPlayerBuffering = 0x103 */
+enum { KOTV_VLC_EVENT_BUFFERING = 0x103 };
+
 static lib_handle_t g_lib;
 static lib_handle_t g_libcore; /* optional, some platforms need vlccore first */
 
@@ -161,6 +198,10 @@ static fn_track_set p_spu_set;
 static fn_add_slave p_add_slave;
 static fn_set_spu_delay p_set_spu_delay;
 static fn_media_add_option p_media_add_option;
+static fn_mp_event_manager p_mp_event_manager;
+static fn_event_attach p_event_attach;
+static fn_mp_get_media p_mp_get_media;
+static fn_media_get_stats p_media_get_stats;
 
 /* -1 = 未设置（保持 libvlc 默认），0 = 硬解，1 = 软解 */
 static int g_soft_decode = -1; /* -1=auto / 1=soft / 0=hard；由控件设置 */
@@ -168,6 +209,8 @@ static int g_soft_decode = -1; /* -1=auto / 1=soft / 0=hard；由控件设置 */
 static int g_repeat_one = 0;
 static int g_hard;
 static void *g_hwnd;
+/* MediaPlayerBuffering 的 cache 百分比 0–100 */
+static volatile float g_buffer_pct = 0.f;
 
 static libvlc_instance_t *g_inst;
 static libvlc_media_player_t *g_mp;
@@ -244,7 +287,34 @@ static void display_cb(void *opaque, void *picture) {
 	if (g_frame.pixels && g_frame.front && g_frame.w > 0) {
 		int n = g_frame.pitch * g_frame.h;
 		if (n > 0 && n <= g_frame.front_cap) {
-			memcpy(g_frame.front, g_frame.pixels, (size_t)n);
+			/* RV32=BGRA → 预转 RGBA，泵线程只 memcpy，减卡顿 */
+			const uint8_t *src = g_frame.pixels;
+			uint8_t *dst = g_frame.front;
+			int i = 0;
+			for (; i + 16 <= n; i += 16) {
+				dst[i + 0] = src[i + 2];
+				dst[i + 1] = src[i + 1];
+				dst[i + 2] = src[i + 0];
+				dst[i + 3] = 255;
+				dst[i + 4] = src[i + 6];
+				dst[i + 5] = src[i + 5];
+				dst[i + 6] = src[i + 4];
+				dst[i + 7] = 255;
+				dst[i + 8] = src[i + 10];
+				dst[i + 9] = src[i + 9];
+				dst[i + 10] = src[i + 8];
+				dst[i + 11] = 255;
+				dst[i + 12] = src[i + 14];
+				dst[i + 13] = src[i + 13];
+				dst[i + 14] = src[i + 12];
+				dst[i + 15] = 255;
+			}
+			for (; i + 3 < n; i += 4) {
+				dst[i + 0] = src[i + 2];
+				dst[i + 1] = src[i + 1];
+				dst[i + 2] = src[i + 0];
+				dst[i + 3] = 255;
+			}
 			g_frame.front_w = g_frame.w;
 			g_frame.front_h = g_frame.h;
 			g_frame.dirty = 1;
@@ -274,11 +344,27 @@ static void cleanup_cb(void *opaque) {
 	(void)opaque;
 }
 
+static void on_vlc_event(const libvlc_event_t *ev, void *opaque) {
+	(void)opaque;
+	if (!ev) return;
+	if (ev->type == KOTV_VLC_EVENT_BUFFERING) {
+		float c = ev->u.media_player_buffering.new_cache;
+		if (c < 0.f) c = 0.f;
+		if (c > 100.f) c = 100.f;
+		g_buffer_pct = c;
+	}
+}
+
 static void attach_callbacks(void) {
 	if (!g_mp)
 		return;
 	p_set_callbacks(g_mp, lock_cb, unlock_cb, display_cb, NULL);
 	p_set_format_callbacks(g_mp, format_cb, cleanup_cb);
+	if (p_mp_event_manager && p_event_attach) {
+		libvlc_event_manager_t *em = p_mp_event_manager(g_mp);
+		if (em)
+			p_event_attach(em, KOTV_VLC_EVENT_BUFFERING, on_vlc_event, NULL);
+	}
 }
 
 static int bind_syms(void) {
@@ -322,6 +408,10 @@ static int bind_syms(void) {
 	p_add_slave = (fn_add_slave)DL_SYM(g_lib, "libvlc_media_player_add_slave");
 	p_set_spu_delay = (fn_set_spu_delay)DL_SYM(g_lib, "libvlc_video_set_spu_delay");
 	p_media_add_option = (fn_media_add_option)DL_SYM(g_lib, "libvlc_media_add_option");
+	p_mp_event_manager = (fn_mp_event_manager)DL_SYM(g_lib, "libvlc_media_player_event_manager");
+	p_event_attach = (fn_event_attach)DL_SYM(g_lib, "libvlc_event_attach");
+	p_mp_get_media = (fn_mp_get_media)DL_SYM(g_lib, "libvlc_media_player_get_media");
+	p_media_get_stats = (fn_media_get_stats)DL_SYM(g_lib, "libvlc_media_get_stats");
 	return 0;
 }
 
@@ -410,7 +500,13 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	    "--no-video-title-show",
 	    "--quiet",
 	    "--no-osd",
-	    "--network-caching=1000",
+	    /* 流缓冲尽量大：边播边把可缓存部分拉满，减少中途卡顿 */
+	    "--network-caching=300000",
+	    "--file-caching=300000",
+	    "--live-caching=3000",
+	    "--clock-jitter=0",
+	    "--drop-late-frames",
+	    "--skip-frames",
 	};
 	g_inst = p_new((int)(sizeof(args) / sizeof(args[0])), args);
 	if (!g_inst)
@@ -460,6 +556,7 @@ int kotv_vlc_play(const char *mrl) {
 		return -1;
 	p_stop(g_mp);
 	g_frame.dirty = 0;
+	g_buffer_pct = 0.f;
 	libvlc_media_t *media = p_media_new(g_inst, mrl);
 	if (!media)
 		return -2;
@@ -542,6 +639,53 @@ int64_t kotv_vlc_get_length(void) {
 	if (!g_mp)
 		return 0;
 	return p_get_length(g_mp);
+}
+
+int64_t kotv_vlc_get_buffered(void) {
+	if (!g_mp)
+		return 0;
+	int64_t t = p_get_time(g_mp);
+	int64_t len = p_get_length(g_mp);
+	float pct = g_buffer_pct;
+	if (pct >= 99.5f && len > t)
+		return len;
+	if (pct > 0.f && len > t) {
+		int64_t span = len - t;
+		int64_t add = (int64_t)((double)span * (double)pct / 100.0);
+		return t + add;
+	}
+	/* 无缓冲事件时至少不小于当前位置 */
+	return t;
+}
+
+/* Opening=1 Buffering=2（libvlc_state_t） */
+int kotv_vlc_is_buffering(void) {
+	if (!g_mp || !p_get_state)
+		return 0;
+	int st = p_get_state(g_mp);
+	return (st == 1 || st == 2 || (g_buffer_pct > 0.f && g_buffer_pct < 100.f)) ? 1 : 0;
+}
+
+/* 输入码率估算为字节/秒 */
+int64_t kotv_vlc_get_speed_bps(void) {
+	if (!g_mp || !p_mp_get_media || !p_media_get_stats)
+		return 0;
+	libvlc_media_t *m = p_mp_get_media(g_mp);
+	if (!m)
+		return 0;
+	libvlc_media_stats_t st;
+	memset(&st, 0, sizeof(st));
+	int ok = p_media_get_stats(m, &st);
+	if (p_media_release)
+		p_media_release(m);
+	if (!ok)
+		return 0;
+	/* f_input_bitrate 为 bits/s 量级的浮点估算 */
+	if (st.f_input_bitrate > 0.f)
+		return (int64_t)(st.f_input_bitrate / 8.f);
+	if (st.f_demux_bitrate > 0.f)
+		return (int64_t)(st.f_demux_bitrate / 8.f);
+	return 0;
 }
 
 int kotv_vlc_set_volume(int vol) {

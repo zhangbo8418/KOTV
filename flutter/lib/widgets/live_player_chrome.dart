@@ -112,10 +112,16 @@ class LiveCatchupChrome extends StatelessWidget {
                     overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
                     activeTrackColor: KotvColors.primary,
                     inactiveTrackColor: Colors.white24,
+                    secondaryActiveTrackColor: Colors.white38,
                     thumbColor: Colors.white,
                   ),
                   child: Slider(
                     value: pos.inMilliseconds.clamp(0, total.toInt()).toDouble(),
+                    secondaryTrackValue: () {
+                      final p = pos.inMilliseconds.toDouble();
+                      final b = player.buffered.inMilliseconds.toDouble();
+                      return b.clamp(p, total);
+                    }(),
                     max: total,
                     onChanged: dur.inMilliseconds <= 0
                         ? null

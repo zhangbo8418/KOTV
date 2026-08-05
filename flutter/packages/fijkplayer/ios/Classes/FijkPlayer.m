@@ -577,6 +577,18 @@ static int renderType = 0;
         float speed = [argsMap[@"speed"] doubleValue];
         [_ijkMediaPlayer setSpeed:speed];
         result(nil);
+    } else if ([@"getTcpSpeed" isEqualToString:call.method]) {
+        long long speed = 0;
+        if ([_ijkMediaPlayer respondsToSelector:@selector(tcpSpeed)]) {
+            speed = (long long)[_ijkMediaPlayer tcpSpeed];
+        }
+        result(@(speed));
+    } else if ([@"getTrafficStatisticByteCount" isEqualToString:call.method]) {
+        long long n = 0;
+        if ([_ijkMediaPlayer respondsToSelector:@selector(trafficStatisticByteCount)]) {
+            n = (long long)[_ijkMediaPlayer trafficStatisticByteCount];
+        }
+        result(@(n));
     } else if ([@"snapshot" isEqualToString:call.method]) {
         [self takeSnapshot];
         result(nil);

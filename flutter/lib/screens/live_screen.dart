@@ -19,6 +19,7 @@ import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
+import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
@@ -136,6 +137,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     liveScreenHandleBack = null;
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
+    }
+    if (_immersive && !kotvIsDesktop()) {
+      unawaited(SystemChrome.setPreferredOrientations(DeviceOrientation.values));
+      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     }
     _hideTimer?.cancel();
     _catchupHideTimer?.cancel();
@@ -682,6 +687,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       try {
         await windowManager.setFullScreen(true);
       } catch (_) {}
+    } else {
+      // 手机/平板：全屏强制横屏，侧栏才不会竖着撑满。
+      try {
+        await SystemChrome.setPreferredOrientations(const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      } catch (_) {}
     }
     try {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -712,6 +725,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     if (kotvIsDesktop()) {
       try {
         await windowManager.setFullScreen(false);
+      } catch (_) {}
+    } else {
+      try {
+        await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
       } catch (_) {}
     }
   }
@@ -990,6 +1007,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                 fit: StackFit.expand,
                 children: [
                   _liveVideo(),
+                  KotvBufferingOverlay(player: _playback),
                   if (_loading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                   if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
                   // 点击分区：左 28% 频道 / 右 28% 设置 / 中 显隐
@@ -1053,14 +1071,20 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         onExit: (_) => _scheduleHideOverlays(),
                         child: Material(
                           color: const Color(0x99120A24),
-                          child: SizedBox(
-                            width: 640,
+                          child: Builder(builder: (context) {
+                            final screenW = MediaQuery.sizeOf(context).width;
+                            // 手机横屏约 700–900，桌面稿 640 会几乎占满；按屏宽缩放。
+                            final leftW = (screenW * 0.48).clamp(260.0, 420.0);
+                            final groupW = (leftW * 0.30).clamp(96.0, 148.0);
+                            final channelW = (leftW - groupW - 22).clamp(140.0, 260.0);
+                            return SizedBox(
+                            width: leftW,
                             child: Padding(
                               padding: const EdgeInsets.all(8),
                               child: Row(
                                 children: [
                                   SizedBox(
-                                    width: 148,
+                                    width: groupW,
                                     child: ListView.builder(
                                       itemCount: _groups.length,
                                       itemBuilder: (_, i) {
@@ -1081,7 +1105,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   ),
                                   const SizedBox(width: 6),
                                   SizedBox(
-                                    width: 248,
+                                    width: channelW,
                                     child: ListView.builder(
                                       itemCount: _channels.length,
                                       itemBuilder: (_, i) {
@@ -1212,7 +1236,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                 ],
                               ),
                             ),
-                          ),
+                          );
+                          }),
                         ),
                       ),
                     ),
@@ -1226,8 +1251,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         onExit: (_) => _scheduleHideOverlays(),
                         child: Material(
                           color: const Color(0x99120A24),
-                          child: SizedBox(
-                            width: 280,
+                          child: Builder(builder: (context) {
+                            final rightW = (MediaQuery.sizeOf(context).width * 0.32).clamp(200.0, 280.0);
+                            return SizedBox(
+                            width: rightW,
                             child: ListView(
                               padding: const EdgeInsets.all(14),
                               children: [
@@ -1326,7 +1353,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                 AppPill(label: '关闭面板', height: 40, onTap: () => setState(() => _rightOpen = false)),
                               ],
                             ),
-                          ),
+                          );
+                          }),
                         ),
                       ),
                     ),
@@ -1431,6 +1459,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   onTap: _togglePortraitChrome,
                   child: _liveVideo(),
                 ),
+                KotvBufferingOverlay(player: _playback),
                 if (_loading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                 if (_error != null)
                   Center(

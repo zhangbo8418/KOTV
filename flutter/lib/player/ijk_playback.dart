@@ -31,6 +31,9 @@ class IjkPlayback extends KotvPlayback {
   bool _playing = false;
   bool _completed = false;
   bool _buffering = false;
+  int _speedBps = 0;
+  int _lastTrafficBytes = 0;
+  DateTime? _lastTrafficAt;
   double _volume = 80;
   double _rate = 1;
   int _w = 0;
@@ -50,6 +53,12 @@ class IjkPlayback extends KotvPlayback {
   Duration get position => Duration(milliseconds: _player.currentPos.inMilliseconds);
   @override
   Duration get duration => _player.value.duration;
+  @override
+  Duration get buffered => _player.bufferPos;
+  @override
+  bool get buffering => _buffering;
+  @override
+  int get networkSpeedBps => _speedBps;
 
   @override
   double get volume => _volume;
@@ -62,9 +71,9 @@ class IjkPlayback extends KotvPlayback {
   @override
   Stream<Duration> get positionStream => _posCtrl.stream;
   @override
+  Stream<Duration> get bufferedStream => _player.onBufferPosUpdate;
+  @override
   Stream<bool> get completedStream => _endedCtrl.stream;
-
-  bool get buffering => _buffering;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     return FijkView(
@@ -141,11 +150,15 @@ class IjkPlayback extends KotvPlayback {
     await _player.setOption(FijkOption.playerCategory, 'framedrop', 1);
     await _player.setOption(FijkOption.playerCategory, 'start-on-prepared', 1);
     await _player.setOption(FijkOption.playerCategory, 'packet-buffering', 1);
-    await _player.setOption(FijkOption.playerCategory, 'max-buffer-size', 15 * 1024 * 1024);
+    // 尽量多囤包：逼近「缓存到能播完」的上限（受内存约束）
+    await _player.setOption(FijkOption.playerCategory, 'max-buffer-size', 256 * 1024 * 1024);
+    await _player.setOption(FijkOption.playerCategory, 'min-frames', 25);
     await _player.setOption(FijkOption.formatCategory, 'analyzeduration', 1);
     await _player.setOption(FijkOption.formatCategory, 'analyzemaxduration', 100);
     await _player.setOption(FijkOption.formatCategory, 'probesize', 10240);
     await _player.setOption(FijkOption.formatCategory, 'flush_packets', 1);
+    await _player.setOption(FijkOption.formatCategory, 'http-detect-range-support', 0);
+    await _player.setOption(FijkOption.formatCategory, 'fflags', 'fastseek');
     await _player.setOption(FijkOption.codecCategory, 'skip_loop_filter', soft ? 0 : 48);
   }
 
@@ -169,6 +182,9 @@ class IjkPlayback extends KotvPlayback {
     _url = url;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
+    _speedBps = 0;
+    _lastTrafficBytes = 0;
+    _lastTrafficAt = null;
     await _player.reset();
     // setOption 必须在 setDataSource 之前
     await _applyDecodeOptions();
@@ -178,12 +194,37 @@ class IjkPlayback extends KotvPlayback {
     if (_rate != 1.0) await _player.setSpeed(_rate);
     _tick?.cancel();
     _tick = Timer.periodic(const Duration(milliseconds: 400), (_) {
-      if (!_posCtrl.isClosed) {
-        _posCtrl.add(Duration(milliseconds: _player.currentPos.inMilliseconds));
-        notifyListeners();
-      }
+      if (_posCtrl.isClosed) return;
+      _posCtrl.add(Duration(milliseconds: _player.currentPos.inMilliseconds));
+      unawaited(_pollSpeed());
+      notifyListeners();
     });
     notifyListeners();
+  }
+
+  Future<void> _pollSpeed() async {
+    try {
+      final tcp = await _player.getTcpSpeed();
+      var next = tcp < 0 ? 0 : tcp;
+      // HLS 等协议 getTcpSpeed 常为 0：用累计流量差分兜底
+      final traffic = await _player.getTrafficStatisticByteCount();
+      final now = DateTime.now();
+      final prevAt = _lastTrafficAt;
+      final prevBytes = _lastTrafficBytes;
+      if (prevAt != null && traffic >= prevBytes) {
+        final dtMs = now.difference(prevAt).inMilliseconds;
+        if (dtMs >= 200) {
+          final delta = traffic - prevBytes;
+          final fromTraffic = ((delta * 1000) / dtMs).round();
+          if (fromTraffic > next) next = fromTraffic;
+        }
+      }
+      _lastTrafficBytes = traffic;
+      _lastTrafficAt = now;
+      if (next != _speedBps) {
+        _speedBps = next;
+      }
+    } catch (_) {}
   }
 
   @override

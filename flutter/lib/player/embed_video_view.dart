@@ -40,7 +40,7 @@ class EmbedVideoView extends StatelessWidget {
                 child: SizedBox(
                   width: w,
                   height: h,
-                  child: Texture(textureId: texId, filterQuality: FilterQuality.medium),
+                  child: Texture(textureId: texId, filterQuality: FilterQuality.low),
                 ),
               ),
             ),

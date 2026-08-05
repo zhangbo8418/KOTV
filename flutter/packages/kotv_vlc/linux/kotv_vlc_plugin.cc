@@ -114,15 +114,7 @@ static void start_pump(KotvVlcPlugin* self) {
         {
           std::lock_guard<std::mutex> lock(*self->frame_mu);
           self->frame_rgba->resize(bytes);
-          // libvlc RV32 = BGRA；Flutter PixelBufferTexture 要 RGBA。
-          const uint8_t* src = tmp.data();
-          uint8_t* dst = self->frame_rgba->data();
-          for (size_t i = 0; i + 3 < bytes; i += 4) {
-            dst[i + 0] = src[i + 2];
-            dst[i + 1] = src[i + 1];
-            dst[i + 2] = src[i + 0];
-            dst[i + 3] = 255;
-          }
+          memcpy(self->frame_rgba->data(), tmp.data(), bytes);
           self->frame_w = w;
           self->frame_h = h;
         }
@@ -130,8 +122,10 @@ static void start_pump(KotvVlcPlugin* self) {
           fl_texture_registrar_mark_texture_frame_available(self->textures,
                                                             self->texture);
         }
+        g_usleep(2000);
+      } else {
+        g_usleep(4000);
       }
-      g_usleep(16000);
     }
   });
 }
@@ -321,6 +315,12 @@ static void method_call_cb(FlMethodChannel*, FlMethodCall* method_call,
                              fl_value_new_int(kotv_vlc_get_time()));
     fl_value_set_string_take(map, "durationMs",
                              fl_value_new_int(kotv_vlc_get_length()));
+    fl_value_set_string_take(map, "bufferedMs",
+                             fl_value_new_int(kotv_vlc_get_buffered()));
+    fl_value_set_string_take(map, "buffering",
+                             fl_value_new_bool(kotv_vlc_is_buffering() != 0));
+    fl_value_set_string_take(map, "speedBps",
+                             fl_value_new_int(kotv_vlc_get_speed_bps()));
     fl_value_set_string_take(map, "width", fl_value_new_int(w));
     fl_value_set_string_take(map, "height", fl_value_new_int(h));
     fl_value_set_string_take(map, "rate",

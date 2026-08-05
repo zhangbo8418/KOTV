@@ -223,6 +223,12 @@ void KotvVlcPlugin::HandleMethodCall(
         flutter::EncodableValue((int64_t)kotv_vlc_get_time());
     out[flutter::EncodableValue("durationMs")] =
         flutter::EncodableValue((int64_t)kotv_vlc_get_length());
+    out[flutter::EncodableValue("bufferedMs")] =
+        flutter::EncodableValue((int64_t)kotv_vlc_get_buffered());
+    out[flutter::EncodableValue("buffering")] =
+        flutter::EncodableValue(kotv_vlc_is_buffering() != 0);
+    out[flutter::EncodableValue("speedBps")] =
+        flutter::EncodableValue((int64_t)kotv_vlc_get_speed_bps());
     out[flutter::EncodableValue("width")] = flutter::EncodableValue(w);
     out[flutter::EncodableValue("height")] = flutter::EncodableValue(h);
     out[flutter::EncodableValue("rate")] =
@@ -316,23 +322,19 @@ void KotvVlcPlugin::StartPump() {
         {
           std::lock_guard<std::mutex> lock(frame_mu_);
           frame_rgba_.resize(bytes);
-          // libvlc RV32 = BGRA；Flutter PixelBufferTexture 要 RGBA。
-          const uint8_t* src = tmp.data();
-          uint8_t* dst = frame_rgba_.data();
-          for (size_t i = 0; i + 3 < bytes; i += 4) {
-            dst[i + 0] = src[i + 2];
-            dst[i + 1] = src[i + 1];
-            dst[i + 2] = src[i + 0];
-            dst[i + 3] = 255;
-          }
+          // display_cb 已转成 RGBA，此处直接拷贝。
+          memcpy(frame_rgba_.data(), tmp.data(), bytes);
           frame_w_ = w;
           frame_h_ = h;
         }
         if (texture_id_ >= 0 && textures_) {
           textures_->MarkTextureFrameAvailable(texture_id_);
         }
+        // 有新帧尽快再取，冲高帧率；无帧时短睡降 CPU
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      } else {
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
       }
-      std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
   });
 }

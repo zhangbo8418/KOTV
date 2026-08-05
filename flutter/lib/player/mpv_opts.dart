@@ -181,6 +181,16 @@ class KotvMpvOpts {
         if (!api.contains('vulkan')) return false;
       }
 
+      // 尽量缓存到接近整集：大 demuxer 窗口 + 长预读（用户 mpv.conf 可覆盖）
+      try {
+        await set('cache', 'yes');
+        await set('demuxer-max-bytes', '1024MiB');
+        await set('demuxer-max-back-bytes', '128MiB');
+        await set('demuxer-readahead-secs', '3600');
+        await set('cache-secs', '3600');
+        await set('framedrop', 'vo');
+      } catch (_) {}
+
       for (final e in parseConfLines(conf)) {
         await set(e.$1, e.$2);
       }
