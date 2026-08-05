@@ -1,7 +1,9 @@
 package com.bobo.kotv
 
 import android.Manifest
+import android.app.ActivityManager
 import android.app.PictureInPictureParams
+import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
@@ -75,6 +77,23 @@ class MainActivity : FlutterActivity() {
           )
         }
         "ensureCastPermissions" -> ensureCastPermissions(result)
+        "getMemoryInfo" -> {
+          try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val mi = ActivityManager.MemoryInfo()
+            am.getMemoryInfo(mi)
+            result.success(
+              mapOf(
+                "totalBytes" to mi.totalMem,
+                "availBytes" to mi.availMem,
+                "lowMemory" to mi.lowMemory,
+                "threshold" to mi.threshold,
+              ),
+            )
+          } catch (t: Throwable) {
+            result.error("mem", t.message ?: t.toString(), null)
+          }
+        }
         else -> result.notImplemented()
       }
     }

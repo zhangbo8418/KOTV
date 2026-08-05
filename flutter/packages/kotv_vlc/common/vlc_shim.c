@@ -8,7 +8,12 @@
 #include <stdint.h>
 
 #if !defined(_WIN32)
-#include <unistd.h> /* setenv */
+#include <unistd.h> /* setenv / sysconf */
+#endif
+
+#if defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
 #endif
 
 #if defined(_WIN32)
@@ -496,13 +501,59 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 #endif
 	}
 
+	/* VLC 仅暴露时间缓存；按物理内存算字节预算，再换算成 ms（按 ~16Mbps≈2MB/s），
+	 * 使 4K/8K 不会因固定超长 network-caching 占满内存。 */
+	int64_t phys = 0;
+#if defined(_WIN32)
+	MEMORYSTATUSEX ms;
+	ms.dwLength = sizeof(ms);
+	if (GlobalMemoryStatusEx(&ms))
+		phys = (int64_t)ms.ullTotalPhys;
+#elif defined(__APPLE__)
+	{
+		int mib[2] = {CTL_HW, HW_MEMSIZE};
+		uint64_t mem = 0;
+		size_t len = sizeof(mem);
+		if (sysctl(mib, 2, &mem, &len, NULL, 0) == 0)
+			phys = (int64_t)mem;
+	}
+#else
+	{
+		long pages = sysconf(_SC_PHYS_PAGES);
+		long psize = sysconf(_SC_PAGESIZE);
+		if (pages > 0 && psize > 0)
+			phys = (int64_t)pages * (int64_t)psize;
+	}
+#endif
+	if (phys <= 0)
+		phys = (int64_t)8 * 1024 * 1024 * 1024;
+	int64_t budget = (int64_t)(phys * 0.05);
+	{
+		const int64_t min_b = (int64_t)48 * 1024 * 1024;
+		const int64_t max_b = (int64_t)384 * 1024 * 1024;
+		if (budget < min_b)
+			budget = min_b;
+		if (budget > max_b)
+			budget = max_b;
+	}
+	/* ms ≈ budget / 2MB/s；钳到 1.5s–60s */
+	int cache_ms = (int)((budget * 1000) / ((int64_t)2 * 1024 * 1024));
+	if (cache_ms < 1500)
+		cache_ms = 1500;
+	if (cache_ms > 60000)
+		cache_ms = 60000;
+
+	static char net_arg[48];
+	static char file_arg[48];
+	snprintf(net_arg, sizeof(net_arg), "--network-caching=%d", cache_ms);
+	snprintf(file_arg, sizeof(file_arg), "--file-caching=%d", cache_ms);
+
 	const char *args[] = {
 	    "--no-video-title-show",
 	    "--quiet",
 	    "--no-osd",
-	    /* 流缓冲尽量大：边播边把可缓存部分拉满，减少中途卡顿 */
-	    "--network-caching=300000",
-	    "--file-caching=300000",
+	    net_arg,
+	    file_arg,
 	    "--live-caching=3000",
 	    "--clock-jitter=0",
 	    "--drop-late-frames",

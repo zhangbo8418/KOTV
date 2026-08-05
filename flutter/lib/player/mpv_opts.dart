@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:math' show max;
 
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'buffer_budget.dart';
 import 'kotv_platform.dart';
 
 /// MPV / media_kit 选项：解码 + Vulkan / gpu-next / conf。
@@ -181,13 +183,17 @@ class KotvMpvOpts {
         if (!api.contains('vulkan')) return false;
       }
 
-      // 尽量缓存到接近整集：大 demuxer 窗口 + 长预读（用户 mpv.conf 可覆盖）
+      // 按设备内存定 demuxer 字节上限；时间预读给足，真正刹车靠 max-bytes（适配 4K/8K）
       try {
+        await KotvBufferBudget.warm();
+        final budget = KotvBufferBudget.bytes();
+        final forward = KotvBufferBudget.mpvMiB(budget);
+        final back = KotvBufferBudget.mpvMiB(max(16 * 1024 * 1024, budget ~/ 8));
         await set('cache', 'yes');
-        await set('demuxer-max-bytes', '1024MiB');
-        await set('demuxer-max-back-bytes', '128MiB');
-        await set('demuxer-readahead-secs', '3600');
-        await set('cache-secs', '3600');
+        await set('demuxer-max-bytes', forward);
+        await set('demuxer-max-back-bytes', back);
+        await set('demuxer-readahead-secs', '36000');
+        await set('cache-secs', '36000');
         await set('framedrop', 'vo');
       } catch (_) {}
 

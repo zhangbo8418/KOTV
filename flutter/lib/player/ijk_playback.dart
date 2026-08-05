@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'buffer_budget.dart';
 import 'play_headers.dart';
 
 /// Android ijkplayer：对齐 Exo 的 headers / 代理 / 软硬解策略。
@@ -150,8 +151,9 @@ class IjkPlayback extends KotvPlayback {
     await _player.setOption(FijkOption.playerCategory, 'framedrop', 1);
     await _player.setOption(FijkOption.playerCategory, 'start-on-prepared', 1);
     await _player.setOption(FijkOption.playerCategory, 'packet-buffering', 1);
-    // 尽量多囤包：逼近「缓存到能播完」的上限（受内存约束）
-    await _player.setOption(FijkOption.playerCategory, 'max-buffer-size', 256 * 1024 * 1024);
+    await KotvBufferBudget.warm();
+    final budget = KotvBufferBudget.bytes();
+    await _player.setOption(FijkOption.playerCategory, 'max-buffer-size', budget);
     await _player.setOption(FijkOption.playerCategory, 'min-frames', 25);
     await _player.setOption(FijkOption.formatCategory, 'analyzeduration', 1);
     await _player.setOption(FijkOption.formatCategory, 'analyzemaxduration', 100);

@@ -10,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'desktop/mini_player_window.dart';
 import 'engine/engine_launcher.dart';
+import 'player/buffer_budget.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
 import 'theme/layout_scale.dart';
@@ -22,6 +23,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Android 也要 init：用户可选 MPV（media_kit）；仅延迟到实际用 MPV 前也可，这里统一初始化更稳。
   MediaKit.ensureInitialized();
+  unawaited(KotvBufferBudget.warm());
   final prefs = await SharedPreferences.getInstance();
   if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
     await windowManager.ensureInitialized();
