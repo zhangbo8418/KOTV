@@ -16,6 +16,7 @@ import (
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 
 	"github.com/bobo/KOTV/internal/model"
@@ -28,6 +29,15 @@ const defaultParseWebTimeout = 15 * time.Second
 
 // 对齐 TV CustomWebView.MAX_URLS：嵌套 player 页最多跟进 5 个竞速。
 const maxNestedPlayers = 5
+
+// 与 drpy2 顶层常量一致；嗅探展开 headers 魔串 MOBILE_UA/PC_UA/UA/UC_UA/IOS_UA。
+const (
+	sniffUAMobile = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
+	sniffUAPC     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36"
+	sniffUABare   = "Mozilla/5.0"
+	sniffUAUC     = "Mozilla/5.0 (Linux; U; Android 9; zh-CN; MI 9 Build/PKQ1.181121.001) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/57.0.2987.108 UCBrowser/12.5.5.1035 Mobile Safari/537.36"
+	sniffUAIOS    = "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
+)
 
 // 桌面共享一个 Chromium 进程；最多 2 个并发 tab，避免超级解析打出几十个 chrome。
 var (
@@ -254,10 +264,15 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		network.Enable(),
 		fetch.Enable(),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			if ua := headerValue(headers, "User-Agent"); ua != "" {
-				if err := emulation.SetUserAgentOverride(ua).Do(ctx); err != nil {
-					return err
-				}
+			prof := resolveSniffProfile(headers)
+			parseLog("[sniff] client depth=%d mobile=%v ua=%s", depth, prof.mobile, parsePreview(prof.ua, 80))
+			uaOverride := emulation.SetUserAgentOverride(prof.ua).WithPlatform(prof.platform)
+			if err := uaOverride.Do(ctx); err != nil {
+				return err
+			}
+			_, err := page.AddScriptToEvaluateOnNewDocument(sniffStealthJS(prof)).Do(ctx)
+			if err != nil {
+				return err
 			}
 			if len(headers) == 0 {
 				return nil
@@ -283,10 +298,6 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		}),
 		chromedp.Navigate(pageURL),
 		chromedp.Sleep(800 * time.Millisecond),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			_ = chromedp.Evaluate(`Object.defineProperty(navigator,'webdriver',{get:()=>undefined})`, nil).Do(ctx)
-			return nil
-		}),
 	}
 	scripts := collectScripts(pageURL, click, rules)
 	for _, js := range scripts {
@@ -586,6 +597,84 @@ func headerValue(h map[string]string, key string) string {
 		}
 	}
 	return ""
+}
+
+// sniffProfile 决定 Chromium 以手机还是桌面身份打开页面（跟脚本 UA 档位，而不是宿主写死）。
+type sniffProfile struct {
+	ua       string
+	mobile   bool
+	platform string
+}
+
+// resolveSniffProfile：优先结果/站点头（含 drpy 魔串）；空头默认 MOBILE_UA。
+func resolveSniffProfile(headers map[string]string) sniffProfile {
+	raw := strings.TrimSpace(headerValue(headers, "User-Agent"))
+	ua := expandDrpyUA(raw)
+	if ua == "" {
+		ua = sniffUAMobile
+	}
+	mobile := looksLikeMobileUA(ua)
+	platform := "Win32"
+	switch {
+	case strings.Contains(strings.ToLower(ua), "iphone") || strings.Contains(strings.ToLower(ua), "ipad"):
+		platform = "iPhone"
+		mobile = true
+	case mobile:
+		platform = "Linux armv8l"
+	}
+	return sniffProfile{ua: ua, mobile: mobile, platform: platform}
+}
+
+// expandDrpyUA 对齐 drpy2：["MOBILE_UA","PC_UA","UC_UA","IOS_UA","UA"].includes(v) → eval(v)。
+func expandDrpyUA(v string) string {
+	switch strings.ToUpper(strings.TrimSpace(v)) {
+	case "":
+		return ""
+	case "MOBILE_UA":
+		return sniffUAMobile
+	case "PC_UA":
+		return sniffUAPC
+	case "UC_UA":
+		return sniffUAUC
+	case "IOS_UA":
+		return sniffUAIOS
+	case "UA":
+		return sniffUABare
+	default:
+		return strings.TrimSpace(v)
+	}
+}
+
+func looksLikeMobileUA(ua string) bool {
+	l := strings.ToLower(ua)
+	// 裸 "Mozilla/5.0"（drpy UA）不当移动端。
+	if l == "mozilla/5.0" {
+		return false
+	}
+	for _, k := range []string{"mobile", "android", "iphone", "ipad", "ipod", "harmonyos"} {
+		if strings.Contains(l, k) {
+			return true
+		}
+	}
+	return false
+}
+
+func sniffStealthJS(p sniffProfile) string {
+	touch := "0"
+	if p.mobile {
+		touch = "5"
+	}
+	platform := p.platform
+	if platform == "" {
+		platform = "Win32"
+	}
+	return `(function(){
+try{
+  Object.defineProperty(navigator,'webdriver',{get:function(){return undefined}});
+  Object.defineProperty(navigator,'platform',{get:function(){return '` + platform + `'}});
+  Object.defineProperty(navigator,'maxTouchPoints',{get:function(){return ` + touch + `}});
+}catch(e){}
+})();`
 }
 
 func headerFromNetwork(h network.Headers) map[string]string {
