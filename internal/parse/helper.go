@@ -174,7 +174,8 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	var sniffHdr map[string]string
 	var err error
 	var via string
-	// type0 已对同一 webURL 做过 http/browser 嗅探时，勿再跑第二遍（日志会成双份）。
+	// 仅当 type0 且 parse.URL 为空时，executeParse 已对该 webURL 做过 http+browser 嗅探；
+	// 此时跳过外层重复嗅探。其它情况外层仍作兜底：无选中解析器、type1/2/4 失败、type0 带前缀 URL 等。
 	webSniffedSame := false
 	if p != nil {
 		parseLog("[parse] selected name=%q type=%d url=%s", p.Name, p.TypeID(), parsePreview(p.URL, 120))
