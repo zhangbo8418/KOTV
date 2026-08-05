@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
-	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
@@ -212,21 +212,47 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		}
 	}
 
+	// XHR/Fetch 响应体候选（部分接口以 text/html 返回 JSON 播放地址）。
+	type bodyCand struct {
+		url  string
+		mime string
+		typ  network.ResourceType
+	}
+	var bodyMu sync.Mutex
+	bodyPending := map[network.RequestID]bodyCand{}
+	tryEmitFromBody := func(reqID network.RequestID) {
+		bodyMu.Lock()
+		cand, ok := bodyPending[reqID]
+		if ok {
+			delete(bodyPending, reqID)
+		}
+		bodyMu.Unlock()
+		if !ok {
+			return
+		}
+		c := chromedp.FromContext(ctx)
+		if c == nil || c.Target == nil {
+			return
+		}
+		body, err := network.GetResponseBody(reqID).Do(cdp.WithExecutor(context.Background(), c.Target))
+		if err != nil || len(body) == 0 || len(body) > 512*1024 {
+			return
+		}
+		text := string(body)
+		if play, hdr := parseJSONPlayBody(text); play != "" {
+			if strings.HasPrefix(strings.ToLower(play), "http://") || strings.HasPrefix(strings.ToLower(play), "https://") {
+				parseLog("[sniff] xhr-json depth=%d from=%s out=%s", depth, parsePreview(cand.url, 80), parsePreview(play, 120))
+				emit(play, sanitizePlayHeaders(hdr))
+				return
+			}
+		}
+		if u := ExtractMediaURL(text); u != "" {
+			emit(u, nil)
+		}
+	}
+
 	chromedp.ListenTarget(ctx, func(ev any) {
 		switch e := ev.(type) {
-		case *fetch.EventRequestPaused:
-			reqID := e.RequestID
-			u := ""
-			if e.Request != nil {
-				u = e.Request.URL
-			}
-			go func() {
-				if u != "" && IsAdURL(u) {
-					_ = fetch.FailRequest(reqID, network.ErrorReasonBlockedByClient).Do(ctx)
-					return
-				}
-				_ = fetch.ContinueRequest(reqID).Do(ctx)
-			}()
 		case *network.EventRequestWillBeSent:
 			if e.Request == nil {
 				return
@@ -234,6 +260,11 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			u := e.Request.URL
 			reqHdr := headerFromNetwork(e.Request.Headers)
 			if IsAdURL(u) {
+				return
+			}
+			// 已是媒体直链时直接收，勿当嵌套页跟进。
+			if videoOK(u) {
+				emit(u, reqHdr)
 				return
 			}
 			if detect && depth < 1 && shouldFollowNestedPlayer(u, pageURL, e.Type) {
@@ -255,14 +286,21 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 				emit(u, headerFromNetwork(e.Response.Headers))
 				return
 			}
+			if shouldParseSniffBody(u, mime, e.Type) {
+				bodyMu.Lock()
+				bodyPending[e.RequestID] = bodyCand{url: u, mime: mime, typ: e.Type}
+				bodyMu.Unlock()
+			}
 			emit(u, headerFromNetwork(e.Response.Headers))
+		case *network.EventLoadingFinished:
+			reqID := e.RequestID
+			go tryEmitFromBody(reqID)
 		}
 	})
 
 	parseLog("[sniff] chromium run depth=%d", depth)
 	actions := []chromedp.Action{
 		network.Enable(),
-		fetch.Enable(),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			prof := resolveSniffProfile(headers)
 			parseLog("[sniff] client depth=%d mobile=%v platform=%s ua=%s", depth, prof.mobile, prof.platform, parsePreview(prof.ua, 80))
@@ -292,7 +330,8 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			}
 			extra := network.Headers{}
 			for k, v := range headers {
-				if strings.EqualFold(k, "User-Agent") || strings.EqualFold(k, "Cookie") {
+				// Referer 只用于 Navigate.WithReferrer；写进 ExtraHeaders 会污染云播跳转/XHR。
+				if strings.EqualFold(k, "User-Agent") || strings.EqualFold(k, "Cookie") || strings.EqualFold(k, "Referer") {
 					continue
 				}
 				extra[k] = v
@@ -311,7 +350,11 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		}),
 		// 勿用 chromedp.Navigate：它会等 load；广告站常永不 load，15s 超时前轮询/跟 iframe 跑不动。
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			_, _, _, _, err := page.Navigate(pageURL).Do(ctx)
+			nav := page.Navigate(pageURL)
+			if ref := headerValue(headers, "Referer"); ref != "" {
+				nav = nav.WithReferrer(ref)
+			}
+			_, _, _, _, err := nav.Do(ctx)
 			return err
 		}),
 		chromedp.Sleep(1200 * time.Millisecond),
@@ -367,19 +410,28 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		cancelTimeout()
 		return hit.url, hit.headers, nil
 	case runE := <-runErr:
-		if u, h := fallbackDOM(ctx, rules, isVideo); u != "" {
-			return u, h, nil
+		select {
+		case <-tabCtx.Done():
+		default:
+			if u, h := fallbackDOM(tabCtx, rules, isVideo); u != "" {
+				return u, h, nil
+			}
+			logSniffPageDiag(tabCtx, depth)
 		}
-		logSniffPageDiag(ctx, depth)
 		if runE != nil && ctx.Err() == nil {
 			return "", nil, fmt.Errorf("网页嗅探失败: %w", runE)
 		}
 		return "", nil, fmt.Errorf("未嗅探到媒体地址")
 	case <-ctx.Done():
-		if u, h := fallbackDOM(ctx, rules, isVideo); u != "" {
-			return u, h, nil
+		// timeout 后 sniff ctx 已取消；若 tab 仍在，用 tabCtx 做最后一搏。
+		select {
+		case <-tabCtx.Done():
+		default:
+			if u, h := fallbackDOM(tabCtx, rules, isVideo); u != "" {
+				return u, h, nil
+			}
+			logSniffPageDiag(tabCtx, depth)
 		}
-		logSniffPageDiag(ctx, depth)
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", nil, fmt.Errorf("网页嗅探超时（Chromium 未在 %s 内找到媒体地址）", timeout)
 		}
@@ -391,8 +443,18 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 }
 
 func logSniffPageDiag(ctx context.Context, depth int) {
+	if ctx == nil {
+		return
+	}
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	var title, platform string
-	_ = chromedp.Title(&title).Do(ctx)
+	if err := chromedp.Title(&title).Do(ctx); err != nil {
+		return
+	}
 	_ = chromedp.Evaluate(`navigator.platform`, &platform).Do(ctx)
 	iframes := collectIFrameURLs(ctx)
 	parseLog("[sniff] diag depth=%d title=%q platform=%q iframes=%d", depth, title, platform, len(iframes))
@@ -466,7 +528,24 @@ func androidBrowserSniff(pageURL string, headers map[string]string, click string
 	return u, hdr, nil
 }
 
-func fallbackDOM(ctx context.Context, rules []model.Rule, isVideo func(string) bool) (string, map[string]string) {
+func fallbackDOM(ctx context.Context, rules []model.Rule, isVideo func(string) bool) (out string, hdr map[string]string) {
+	defer func() {
+		if recover() != nil {
+			out, hdr = "", nil
+		}
+	}()
+	if ctx == nil {
+		return "", nil
+	}
+	select {
+	case <-ctx.Done():
+		return "", nil
+	default:
+	}
+	c := chromedp.FromContext(ctx)
+	if c == nil || c.Target == nil {
+		return "", nil
+	}
 	videoOK := func(u string) bool {
 		if isVideo != nil {
 			return isVideo(u)
@@ -546,6 +625,10 @@ func shouldFollowNestedPlayer(u, pageURL string, resType network.ResourceType) b
 	if !strings.HasPrefix(strings.ToLower(u), "http://") && !strings.HasPrefix(strings.ToLower(u), "https://") {
 		return false
 	}
+	// 媒体直链不当嵌套页。
+	if IsVideoFormat(u) {
+		return false
+	}
 	if playerURLRe.MatchString(u) {
 		return true
 	}
@@ -556,6 +639,36 @@ func shouldFollowNestedPlayer(u, pageURL string, resType network.ResourceType) b
 	default:
 		return false
 	}
+}
+
+// shouldParseSniffBody 判断是否值得读响应体抽播放地址。
+func shouldParseSniffBody(u, mime string, typ network.ResourceType) bool {
+	switch typ {
+	case network.ResourceTypeXHR, network.ResourceTypeFetch:
+		return true
+	}
+	return strings.Contains(mime, "json")
+}
+
+// sanitizePlayHeaders 处理云播 JSON 里 referer=never 等特殊值。
+func sanitizePlayHeaders(h map[string]string) map[string]string {
+	if len(h) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(h))
+	for k, v := range h {
+		if strings.EqualFold(k, "Referer") && strings.EqualFold(strings.TrimSpace(v), "never") {
+			continue
+		}
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func collectScripts(pageURL, click string, rules []model.Rule) []string {
@@ -647,7 +760,7 @@ func resolveSniffProfile(headers map[string]string) sniffProfile {
 		ua = sniffUAMobile
 	}
 	mobile := looksLikeMobileUA(ua)
-	platform := "Win32"
+	platform := "Win64"
 	switch {
 	case strings.Contains(strings.ToLower(ua), "iphone") || strings.Contains(strings.ToLower(ua), "ipad"):
 		platform = "iPhone"
@@ -699,7 +812,7 @@ func sniffStealthJS(p sniffProfile) string {
 	}
 	platform := p.platform
 	if platform == "" {
-		platform = "Win32"
+		platform = "Win64"
 	}
 	return `(function(){
 try{
