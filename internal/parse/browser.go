@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -304,20 +305,9 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			prof := resolveSniffProfile(headers)
 			parseLog("[sniff] client depth=%d mobile=%v platform=%s ua=%s", depth, prof.mobile, prof.platform, parsePreview(prof.ua, 80))
-			uaOverride := emulation.SetUserAgentOverride(prof.ua).WithPlatform(prof.platform)
-			if prof.mobile {
-				uaOverride = uaOverride.WithUserAgentMetadata(&emulation.UserAgentMetadata{
-					Platform:        "Android",
-					PlatformVersion: "14.0.0",
-					Model:           "Pixel 8",
-					Mobile:          true,
-					Brands: []*emulation.UserAgentBrandVersion{
-						{Brand: "Chromium", Version: "128"},
-						{Brand: "Google Chrome", Version: "128"},
-						{Brand: "Not.A/Brand", Version: "99"},
-					},
-				})
-			}
+			uaOverride := emulation.SetUserAgentOverride(prof.ua).
+				WithPlatform(prof.platform).
+				WithUserAgentMetadata(sniffUAMetadata(prof))
 			if err := uaOverride.Do(ctx); err != nil {
 				return err
 			}
@@ -803,6 +793,125 @@ func looksLikeMobileUA(ua string) bool {
 		}
 	}
 	return false
+}
+
+// sniffUAMetadata 按脚本 UA 生成 Client Hints；Chrome/平台版本从 UA 解析，不写死。
+func sniffUAMetadata(p sniffProfile) *emulation.UserAgentMetadata {
+	ver := chromeMajorFromUA(p.ua)
+	uaLower := strings.ToLower(p.ua)
+	brands := sniffUABrands(uaLower, ver)
+	switch {
+	case strings.EqualFold(p.platform, "iPhone") || strings.Contains(uaLower, "iphone") || strings.Contains(uaLower, "ipad"):
+		return &emulation.UserAgentMetadata{
+			Platform:        "iOS",
+			PlatformVersion: iosVersionFromUA(p.ua),
+			Model:           "iPhone",
+			Mobile:          true,
+			Brands:          brands,
+		}
+	case p.mobile:
+		return &emulation.UserAgentMetadata{
+			Platform:        "Android",
+			PlatformVersion: androidVersionFromUA(p.ua),
+			Model:           androidModelFromUA(p.ua),
+			Mobile:          true,
+			Brands:          brands,
+		}
+	default:
+		return &emulation.UserAgentMetadata{
+			Platform:        "Windows",
+			PlatformVersion: "15.0.0",
+			Architecture:    "x86",
+			Bitness:         "64",
+			Model:           "",
+			Mobile:          false,
+			Brands:          brands,
+		}
+	}
+}
+
+// sniffUABrands：UC 等非 Chrome 壳不冒充 Google Chrome。
+func sniffUABrands(uaLower, ver string) []*emulation.UserAgentBrandVersion {
+	if strings.Contains(uaLower, "ucbrowser") {
+		return []*emulation.UserAgentBrandVersion{
+			{Brand: "Chromium", Version: ver},
+			{Brand: "Not.A/Brand", Version: "99"},
+		}
+	}
+	if strings.Contains(uaLower, "iphone") || strings.Contains(uaLower, "ipad") {
+		// Safari 系：无 Chrome brand 更贴近真实 iOS。
+		if !strings.Contains(uaLower, "crios") && !strings.Contains(uaLower, "chrome/") {
+			return []*emulation.UserAgentBrandVersion{
+				{Brand: "Not.A/Brand", Version: "99"},
+			}
+		}
+	}
+	return []*emulation.UserAgentBrandVersion{
+		{Brand: "Chromium", Version: ver},
+		{Brand: "Google Chrome", Version: ver},
+		{Brand: "Not.A/Brand", Version: "99"},
+	}
+}
+
+var androidModelRe = regexp.MustCompile(`(?i)Android[^;]*;\s*(?:zh-\w+;\s*)?([^;]+?)\s+Build/`)
+
+func androidModelFromUA(ua string) string {
+	if m := androidModelRe.FindStringSubmatch(ua); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return "Pixel 8"
+}
+
+var (
+	chromeVerRe  = regexp.MustCompile(`(?i)(?:Chrome|CriOS)/(\d+)`)
+	androidVerRe = regexp.MustCompile(`(?i)Android\s+(\d+(?:\.\d+)*)`)
+	iosVerRe     = regexp.MustCompile(`(?i)(?:iPhone OS|CPU OS)\s+(\d+)[_.](\d+)`)
+	safariVerRe  = regexp.MustCompile(`(?i)Version/(\d+(?:\.\d+)*)`)
+)
+
+func chromeMajorFromUA(ua string) string {
+	if m := chromeVerRe.FindStringSubmatch(ua); len(m) > 1 {
+		return m[1]
+	}
+	// iOS Safari 无 Chrome/；用 Version/ 主版本凑 Client Hints。
+	if m := safariVerRe.FindStringSubmatch(ua); len(m) > 1 {
+		if i := strings.IndexByte(m[1], '.'); i > 0 {
+			return m[1][:i]
+		}
+		return m[1]
+	}
+	return "128"
+}
+
+func androidVersionFromUA(ua string) string {
+	if m := androidVerRe.FindStringSubmatch(ua); len(m) > 1 {
+		v := m[1]
+		if strings.Count(v, ".") == 0 {
+			return v + ".0.0"
+		}
+		if strings.Count(v, ".") == 1 {
+			return v + ".0"
+		}
+		return v
+	}
+	return "14.0.0"
+}
+
+func iosVersionFromUA(ua string) string {
+	if m := iosVerRe.FindStringSubmatch(ua); len(m) > 2 {
+		return m[1] + "." + m[2] + ".0"
+	}
+	if m := safariVerRe.FindStringSubmatch(ua); len(m) > 1 {
+		v := m[1]
+		if strings.Count(v, ".") == 0 {
+			return v + ".0.0"
+		}
+		if strings.Count(v, ".") == 1 {
+			return v + ".0"
+		}
+		return v
+	}
+	return "18.0.0"
 }
 
 func sniffStealthJS(p sniffProfile) string {
