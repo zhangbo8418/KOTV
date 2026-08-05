@@ -174,9 +174,6 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	var sniffHdr map[string]string
 	var err error
 	var via string
-	// 仅当 type0 且 parse.URL 为空时，executeParse 已对该 webURL 做过 http+browser 嗅探；
-	// 此时跳过外层重复嗅探。其它情况外层仍作兜底：无选中解析器、type1/2/4 失败、type0 带前缀 URL 等。
-	webSniffedSame := false
 	if p != nil {
 		parseLog("[parse] selected name=%q type=%d url=%s", p.Name, p.TypeID(), parsePreview(p.URL, 120))
 		parsed, sniffHdr, err = executeParse(*p, webURL, flag, hdr, parses, opts.Rules, click, opts.IsVideo)
@@ -184,56 +181,9 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 			via = fmt.Sprintf("parse:%s/type%d", p.Name, p.TypeID())
 		} else {
 			parseLog("[parse] selected fail name=%q err=%v", p.Name, err)
-			if p.TypeID() == 0 && strings.TrimSpace(p.URL)+webURL == webURL {
-				webSniffedSame = true
-			}
 		}
 	} else {
 		parseLog("[parse] no selected parse (useParse=%v prefer=%q)", useParse, opts.Prefer)
-	}
-	if parsed == "" || err != nil {
-		for _, cand := range parses {
-			if cand.TypeID() != 1 || cand.URL == "" {
-				continue
-			}
-			if p != nil && cand.Name == p.Name {
-				continue
-			}
-			var h map[string]string
-			t0 := time.Now()
-			parsed, h, err = JSONParseEx(cand.URL, webURL, mergeHeaders(hdr, parseExtHeaders(cand.Ext.String())))
-			sniffHdr = h
-			if err == nil && parsed != "" {
-				via = fmt.Sprintf("json-fallback:%s", cand.Name)
-				parseLog("[parse] json fallback ok name=%q out=%s cost=%s", cand.Name, parsePreview(parsed, 160), time.Since(t0).Truncate(time.Millisecond))
-				break
-			}
-			parseLog("[parse] json fallback fail name=%q err=%v cost=%s", cand.Name, err, time.Since(t0).Truncate(time.Millisecond))
-		}
-	}
-	if parsed == "" && !webSniffedSame {
-		t0 := time.Now()
-		if sniffed, e := PlayPageSniff(webURL, hdr); e == nil && sniffed != "" {
-			parsed = sniffed
-			sniffHdr = nil
-			via = "http-sniff"
-			parseLog("[parse] PlayPageSniff ok out=%s cost=%s", parsePreview(parsed, 160), time.Since(t0).Truncate(time.Millisecond))
-		} else if e != nil {
-			parseLog("[parse] PlayPageSniff fail err=%v cost=%s", e, time.Since(t0).Truncate(time.Millisecond))
-		}
-	}
-	if parsed == "" && !webSniffedSame {
-		t0 := time.Now()
-		if u, h, e := browserSniff(webURL, hdr, click, opts.Rules, defaultParseWebTimeout, true, opts.IsVideo, 0); e == nil && u != "" {
-			parsed, sniffHdr, err = u, h, nil
-			via = "browser-sniff"
-			parseLog("[parse] browserSniff ok out=%s cost=%s", parsePreview(parsed, 160), time.Since(t0).Truncate(time.Millisecond))
-		} else {
-			err = e
-			parseLog("[parse] browserSniff fail err=%v cost=%s", e, time.Since(t0).Truncate(time.Millisecond))
-		}
-	} else if parsed == "" && webSniffedSame {
-		parseLog("[parse] skip duplicate web sniff (type0 already tried same url)")
 	}
 	if parsed == "" {
 		parseLog("[parse] fail final err=%v cost=%s", err, time.Since(start).Truncate(time.Millisecond))
@@ -512,27 +462,7 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 				}
 				if u, h, err := browserSniff(parsePage, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0); err == nil && u != "" {
 					ch <- result{url: u, hdr: h}
-					return
 				}
-			}
-			// 回落：顺序嗅探各 type0（共享 Chromium，不再并行开进程）
-			for _, item := range webs {
-				target := strings.TrimSpace(item.URL) + webURL
-				if target == "" {
-					continue
-				}
-				hdr := mergeHeaders(headers, parseExtHeaders(item.Ext.String()))
-				if out, err := PlayPageSniff(target, hdr); err == nil && out != "" && matchVideo(out, rules, isVideo) {
-					ch <- result{url: out}
-					return
-				}
-				if u, h, err := browserSniff(target, hdr, click, rules, defaultParseWebTimeout, true, isVideo, 0); err == nil && u != "" {
-					ch <- result{url: u, hdr: h}
-					return
-				}
-			}
-			if u, h, err := browserSniff(webURL, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0); err == nil && u != "" {
-				ch <- result{url: u, hdr: h}
 			}
 		}()
 	}
