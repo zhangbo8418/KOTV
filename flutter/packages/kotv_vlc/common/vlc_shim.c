@@ -9,6 +9,7 @@
 
 #if !defined(_WIN32)
 #include <unistd.h> /* setenv / sysconf */
+#include <time.h>   /* clock_gettime */
 #endif
 
 #if defined(__APPLE__)
@@ -50,6 +51,20 @@ typedef void *lib_handle_t;
 #define DL_SYM(h, n) dlsym(h, n)
 #define DL_CLOSE(h) dlclose(h)
 #endif
+
+/* 单调毫秒时钟：缓冲事件新鲜度与速度差分都要用 */
+static int64_t kotv_now_ms(void) {
+#if defined(_WIN32)
+	return (int64_t)GetTickCount64();
+#else
+	struct timespec ts;
+#if defined(CLOCK_MONOTONIC)
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+		return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+#endif
+	return 0;
+#endif
+}
 
 /* ---- 帧缓冲锁：display_cb(VLC 线程) 与 take_frame(Go 轮询) 竞争 front 缓冲 ---- */
 #if defined(_WIN32)
@@ -162,8 +177,13 @@ typedef struct libvlc_media_stats_t {
 	float f_send_bitrate;
 } libvlc_media_stats_t;
 typedef int (*fn_media_get_stats)(libvlc_media_t *, libvlc_media_stats_t *);
-/* libvlc_MediaPlayerBuffering = 0x103 */
-enum { KOTV_VLC_EVENT_BUFFERING = 0x103 };
+/* libvlc_events.h：MediaChanged=0x100 起顺序递增 */
+enum {
+	KOTV_VLC_EVENT_BUFFERING = 0x103,
+	KOTV_VLC_EVENT_PLAYING = 0x104,
+	KOTV_VLC_EVENT_PAUSED = 0x105,
+	KOTV_VLC_EVENT_STOPPED = 0x106,
+};
 
 static lib_handle_t g_lib;
 static lib_handle_t g_libcore; /* optional, some platforms need vlccore first */
@@ -216,6 +236,19 @@ static int g_hard;
 static void *g_hwnd;
 /* MediaPlayerBuffering 的 cache 百分比 0–100 */
 static volatile float g_buffer_pct = 0.f;
+/* 最近一次 buffering 事件时刻；陈旧事件不得再判为"缓冲中"（否则一直假缓冲） */
+static volatile int64_t g_buffer_at_ms = 0;
+/* 实际下发给 libvlc 的 network-caching（ms），用于估算已缓冲时长 */
+static int g_cache_ms = 3000;
+
+/* 速度差分采样：libvlc 只给累计字节，自己按时间差算 bytes/s */
+static int64_t g_speed_last_bytes = -1;
+static int64_t g_speed_last_at_ms = 0;
+static int64_t g_speed_bps = 0;
+
+/* 播放进度是否仍在推进：cache 事件常在正常预读时也发，只有"卡住"才算缓冲 */
+static int64_t g_pos_last_ms = -1;
+static int64_t g_pos_last_at_ms = 0;
 
 static libvlc_instance_t *g_inst;
 static libvlc_media_player_t *g_mp;
@@ -352,11 +385,26 @@ static void cleanup_cb(void *opaque) {
 static void on_vlc_event(const libvlc_event_t *ev, void *opaque) {
 	(void)opaque;
 	if (!ev) return;
-	if (ev->type == KOTV_VLC_EVENT_BUFFERING) {
+	switch (ev->type) {
+	case KOTV_VLC_EVENT_BUFFERING: {
 		float c = ev->u.media_player_buffering.new_cache;
 		if (c < 0.f) c = 0.f;
 		if (c > 100.f) c = 100.f;
 		g_buffer_pct = c;
+		g_buffer_at_ms = kotv_now_ms();
+		break;
+	}
+	case KOTV_VLC_EVENT_PLAYING:
+		/* 已恢复播放：清掉残留的 <100% 事件，避免一直显示"缓冲中" */
+		g_buffer_pct = 100.f;
+		g_buffer_at_ms = 0;
+		break;
+	case KOTV_VLC_EVENT_PAUSED:
+	case KOTV_VLC_EVENT_STOPPED:
+		g_buffer_at_ms = 0;
+		break;
+	default:
+		break;
 	}
 }
 
@@ -367,8 +415,12 @@ static void attach_callbacks(void) {
 	p_set_format_callbacks(g_mp, format_cb, cleanup_cb);
 	if (p_mp_event_manager && p_event_attach) {
 		libvlc_event_manager_t *em = p_mp_event_manager(g_mp);
-		if (em)
+		if (em) {
 			p_event_attach(em, KOTV_VLC_EVENT_BUFFERING, on_vlc_event, NULL);
+			p_event_attach(em, KOTV_VLC_EVENT_PLAYING, on_vlc_event, NULL);
+			p_event_attach(em, KOTV_VLC_EVENT_PAUSED, on_vlc_event, NULL);
+			p_event_attach(em, KOTV_VLC_EVENT_STOPPED, on_vlc_event, NULL);
+		}
 	}
 }
 
@@ -542,6 +594,7 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 		cache_ms = 1500;
 	if (cache_ms > 60000)
 		cache_ms = 60000;
+	g_cache_ms = cache_ms;
 
 	static char net_arg[48];
 	static char file_arg[48];
@@ -552,6 +605,8 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	    "--no-video-title-show",
 	    "--quiet",
 	    "--no-osd",
+	    /* libvlc_media_get_stats 依赖统计开启，否则读不到下载字节数（网速恒 0） */
+	    "--stats",
 	    net_arg,
 	    file_arg,
 	    "--live-caching=3000",
@@ -608,6 +663,12 @@ int kotv_vlc_play(const char *mrl) {
 	p_stop(g_mp);
 	g_frame.dirty = 0;
 	g_buffer_pct = 0.f;
+	g_buffer_at_ms = 0;
+	g_speed_last_bytes = -1;
+	g_speed_last_at_ms = 0;
+	g_speed_bps = 0;
+	g_pos_last_ms = -1;
+	g_pos_last_at_ms = 0;
 	libvlc_media_t *media = p_media_new(g_inst, mrl);
 	if (!media)
 		return -2;
@@ -651,6 +712,9 @@ void kotv_vlc_stop(void) {
 	if (g_mp)
 		p_stop(g_mp);
 	g_frame.dirty = 0;
+	g_buffer_at_ms = 0;
+	g_speed_last_bytes = -1;
+	g_speed_bps = 0;
 }
 
 void kotv_vlc_pause(int do_pause) {
@@ -692,32 +756,64 @@ int64_t kotv_vlc_get_length(void) {
 	return p_get_length(g_mp);
 }
 
+/* 缓冲事件是否仍新鲜；libvlc 稳定播放时不再发事件，陈旧值不可当现状 */
+static int buffer_event_fresh(void) {
+	int64_t at = g_buffer_at_ms;
+	if (at <= 0)
+		return 0;
+	int64_t age = kotv_now_ms() - at;
+	return (age >= 0 && age <= 1200) ? 1 : 0;
+}
+
 int64_t kotv_vlc_get_buffered(void) {
 	if (!g_mp)
 		return 0;
 	int64_t t = p_get_time(g_mp);
 	int64_t len = p_get_length(g_mp);
-	float pct = g_buffer_pct;
-	if (pct >= 99.5f && len > t)
-		return len;
-	if (pct > 0.f && len > t) {
-		int64_t span = len - t;
-		int64_t add = (int64_t)((double)span * (double)pct / 100.0);
-		return t + add;
+	if (len <= t)
+		return t;
+	/* libvlc 不暴露 demux 缓冲时长：用实际下发的 network-caching 作窗口估算。
+	 * 正在补缓冲时按事件百分比缩放，避免进度条虚报成"整集已缓冲"。 */
+	int64_t win = (int64_t)g_cache_ms;
+	if (win < 1000)
+		win = 1000;
+	if (buffer_event_fresh()) {
+		double pct = (double)g_buffer_pct;
+		if (pct < 0.0)
+			pct = 0.0;
+		if (pct > 100.0)
+			pct = 100.0;
+		win = (int64_t)((double)win * pct / 100.0);
 	}
-	/* 无缓冲事件时至少不小于当前位置 */
-	return t;
+	int64_t end = t + win;
+	return end > len ? len : end;
 }
 
-/* Opening=1 Buffering=2（libvlc_state_t） */
+/* 缓冲中 = libvlc_Buffering(2)，或「有新鲜的 <100% cache 事件 且 进度不再推进」。
+ * 只看 cache 事件会误报：正常播放时 libvlc 也会发预读事件（旧实现的假缓冲来源）。 */
 int kotv_vlc_is_buffering(void) {
 	if (!g_mp || !p_get_state)
 		return 0;
-	int st = p_get_state(g_mp);
-	return (st == 1 || st == 2 || (g_buffer_pct > 0.f && g_buffer_pct < 100.f)) ? 1 : 0;
+
+	int64_t now = kotv_now_ms();
+	int64_t t = p_get_time(g_mp);
+	if (t != g_pos_last_ms) {
+		g_pos_last_ms = t;
+		g_pos_last_at_ms = now;
+	}
+	int stalled = (g_pos_last_at_ms <= 0) || (now - g_pos_last_at_ms) >= 700;
+
+	if (p_get_state(g_mp) == 2)
+		return 1;
+	if (!buffer_event_fresh() || g_buffer_pct >= 99.5f)
+		return 0;
+	return stalled ? 1 : 0;
 }
 
-/* 输入码率估算为字节/秒 */
+/* 下载速度（字节/秒）。
+ * 优先用累计 i_read_bytes 自行差分：不依赖 libvlc 内部码率的单位约定。
+ * 兜底才用 f_input_bitrate —— 它是 **bytes/µs**（VLC 界面按 *8000 显示 kbit/s），
+ * 早期按 bits/s 处理导致永远显示 0.00 KB/s。 */
 int64_t kotv_vlc_get_speed_bps(void) {
 	if (!g_mp || !p_mp_get_media || !p_media_get_stats)
 		return 0;
@@ -730,12 +826,29 @@ int64_t kotv_vlc_get_speed_bps(void) {
 	if (p_media_release)
 		p_media_release(m);
 	if (!ok)
-		return 0;
-	/* f_input_bitrate 为 bits/s 量级的浮点估算 */
+		return g_speed_bps;
+
+	int64_t now = kotv_now_ms();
+	int64_t bytes = (int64_t)(uint32_t)st.i_read_bytes;
+	if (g_speed_last_bytes >= 0 && bytes >= g_speed_last_bytes) {
+		int64_t dt = now - g_speed_last_at_ms;
+		if (dt >= 250) {
+			g_speed_bps = ((bytes - g_speed_last_bytes) * 1000) / dt;
+			g_speed_last_bytes = bytes;
+			g_speed_last_at_ms = now;
+		}
+	} else {
+		/* 首次采样或计数回绕：只记录基准 */
+		g_speed_last_bytes = bytes;
+		g_speed_last_at_ms = now;
+	}
+	if (g_speed_bps > 0)
+		return g_speed_bps;
+
 	if (st.f_input_bitrate > 0.f)
-		return (int64_t)(st.f_input_bitrate / 8.f);
+		return (int64_t)((double)st.f_input_bitrate * 1000000.0);
 	if (st.f_demux_bitrate > 0.f)
-		return (int64_t)(st.f_demux_bitrate / 8.f);
+		return (int64_t)((double)st.f_demux_bitrate * 1000000.0);
 	return 0;
 }
 
