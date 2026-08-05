@@ -370,6 +370,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		if u, h := fallbackDOM(ctx, rules, isVideo); u != "" {
 			return u, h, nil
 		}
+		logSniffPageDiag(ctx, depth)
 		if runE != nil && ctx.Err() == nil {
 			return "", nil, fmt.Errorf("网页嗅探失败: %w", runE)
 		}
@@ -378,6 +379,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		if u, h := fallbackDOM(ctx, rules, isVideo); u != "" {
 			return u, h, nil
 		}
+		logSniffPageDiag(ctx, depth)
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", nil, fmt.Errorf("网页嗅探超时（Chromium 未在 %s 内找到媒体地址）", timeout)
 		}
@@ -385,6 +387,20 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	case <-time.After(timeout + 4*time.Second):
 		cancelTab()
 		return "", nil, fmt.Errorf("网页嗅探硬超时（Chromium 无响应）")
+	}
+}
+
+func logSniffPageDiag(ctx context.Context, depth int) {
+	var title, platform string
+	_ = chromedp.Title(&title).Do(ctx)
+	_ = chromedp.Evaluate(`navigator.platform`, &platform).Do(ctx)
+	iframes := collectIFrameURLs(ctx)
+	parseLog("[sniff] diag depth=%d title=%q platform=%q iframes=%d", depth, title, platform, len(iframes))
+	for i, f := range iframes {
+		if i >= 3 {
+			break
+		}
+		parseLog("[sniff] diag iframe[%d]=%s", i, parsePreview(f, 140))
 	}
 }
 
