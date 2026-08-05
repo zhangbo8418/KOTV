@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -218,13 +219,40 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	}
 	if parsed == "" {
 		t0 := time.Now()
-		if u, h, e := browserSniff(webURL, hdr, click, opts.Rules, defaultParseWebTimeout, true, opts.IsVideo, 0); e == nil && u != "" {
-			parsed, sniffHdr, err = u, h, nil
-			via = "browser-sniff"
-			parseLog("[parse] browserSniff ok out=%s cost=%s", parsePreview(parsed, 160), time.Since(t0).Truncate(time.Millisecond))
-		} else {
-			err = e
-			parseLog("[parse] browserSniff fail err=%v cost=%s", e, time.Since(t0).Truncate(time.Millisecond))
+		sniffURL := webURL
+		if cloud := ResolveCloudPlayerPage(webURL, hdr); cloud != "" && cloud != webURL {
+			parseLog("[parse] cloud-player %s", parsePreview(cloud, 160))
+			if matchVideo(cloud, opts.Rules, opts.IsVideo) {
+				parsed, sniffHdr, err = cloud, nil, nil
+				via = "cloud-player"
+			} else {
+				sniffURL = cloud
+			}
+		}
+		if parsed == "" {
+			if u, h, e := browserSniff(sniffURL, hdr, click, opts.Rules, defaultParseWebTimeout, true, opts.IsVideo, 0); e == nil && u != "" {
+				parsed, sniffHdr, err = u, h, nil
+				via = "browser-sniff"
+				parseLog("[parse] browserSniff ok out=%s cost=%s", parsePreview(parsed, 160), time.Since(t0).Truncate(time.Millisecond))
+			} else {
+				if sniffURL != webURL {
+					parseLog("[parse] cloud sniff fail, fallback shell err=%v", e)
+					if u, h, e2 := browserSniff(webURL, hdr, click, opts.Rules, defaultParseWebTimeout, true, opts.IsVideo, 0); e2 == nil && u != "" {
+						parsed, sniffHdr, err = u, h, nil
+						via = "browser-sniff"
+						parseLog("[parse] browserSniff ok out=%s cost=%s", parsePreview(parsed, 160), time.Since(t0).Truncate(time.Millisecond))
+					} else {
+						err = e2
+						if err == nil {
+							err = e
+						}
+						parseLog("[parse] browserSniff fail err=%v cost=%s", err, time.Since(t0).Truncate(time.Millisecond))
+					}
+				} else {
+					err = e
+					parseLog("[parse] browserSniff fail err=%v cost=%s", e, time.Since(t0).Truncate(time.Millisecond))
+				}
+			}
 		}
 	}
 	if parsed == "" {
@@ -404,7 +432,20 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 			parseLog("[parse] type0 http-sniff ok out=%s cost=%s", parsePreview(out, 160), time.Since(start).Truncate(time.Millisecond))
 			return out, nil, nil
 		}
-		u, h, err := browserSniff(target, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0)
+		// 站点壳页常有登录墙/广告脚本；先解析 MacPlayer 云播地址再嗅探（对齐 JS lazy 拼 jsh）。
+		sniffTarget := target
+		if cloud := ResolveCloudPlayerPage(target, headers); cloud != "" && cloud != target {
+			parseLog("[parse] type0 cloud-player %s", parsePreview(cloud, 160))
+			if matchVideo(cloud, rules, isVideo) {
+				return cloud, nil, nil
+			}
+			sniffTarget = cloud
+		}
+		u, h, err := browserSniff(sniffTarget, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0)
+		if err != nil && sniffTarget != target {
+			parseLog("[parse] type0 cloud sniff fail, fallback shell err=%v", err)
+			u, h, err = browserSniff(target, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0)
+		}
 		if err != nil {
 			parseLog("[parse] type0 browser fail err=%v cost=%s", err, time.Since(start).Truncate(time.Millisecond))
 		} else {
@@ -828,6 +869,145 @@ func extractPlayerConfURL(jsonBlob string) string {
 		return result
 	}
 	return ""
+}
+
+var (
+	playerFromRe   = regexp.MustCompile(`"from"\s*:\s*"([^"]+)"`)
+	playerSrcAssignRe = regexp.MustCompile(`(?is)\.src\s*=\s*(.+?);`)
+)
+
+// ResolveCloudPlayerPage 从 CMS 播放页抽出 MacPlayer 云播页（yunbox/404.php 等）。
+// 站点壳常有 Win/Mac 登录墙或非桌面广告劫持；直接嗅探云播页更稳。
+func ResolveCloudPlayerPage(pageURL string, headers map[string]string) string {
+	pageURL = strings.TrimSpace(pageURL)
+	if pageURL == "" || !strings.HasPrefix(strings.ToLower(pageURL), "http") {
+		return ""
+	}
+	hdr := mergeHeaders(map[string]string{
+		"User-Agent": sniffUAMobile,
+		"Referer":    pageURL,
+	}, headers)
+	body, err := util.HTTPGet(pageURL, hdr)
+	if err != nil || body == "" {
+		return ""
+	}
+	m := playerConfRe.FindStringSubmatch(body)
+	if len(m) < 2 {
+		return ""
+	}
+	blob := m[1]
+	if u := extractPlayerConfURL(blob); u != "" {
+		return u
+	}
+	var conf struct {
+		URL     string `json:"url"`
+		From    string `json:"from"`
+		Encrypt int    `json:"encrypt"`
+	}
+	if err := json.Unmarshal([]byte(blob), &conf); err != nil {
+		// 正则截到的 blob 偶发缺引号转义，再走字段正则兜底。
+		playURL := ""
+		if um := urlFieldRe.FindStringSubmatch(blob); len(um) > 1 {
+			playURL = strings.ReplaceAll(um[1], `\/`, "/")
+		}
+		fm := playerFromRe.FindStringSubmatch(blob)
+		if playURL == "" || len(fm) < 2 {
+			return ""
+		}
+		conf.URL, conf.From = playURL, fm[1]
+		if em := encryptRe.FindStringSubmatch(blob); len(em) > 1 {
+			fmt.Sscanf(em[1], "%d", &conf.Encrypt)
+		}
+	}
+	playURL := conf.URL
+	switch conf.Encrypt {
+	case 1:
+		if d, err := url.QueryUnescape(playURL); err == nil {
+			playURL = d
+		}
+	case 2:
+		if b, err := base64.StdEncoding.DecodeString(padBase64(playURL)); err == nil {
+			playURL = string(b)
+			if d, err := url.QueryUnescape(playURL); err == nil {
+				playURL = d
+			}
+		}
+	}
+	playURL = strings.ReplaceAll(playURL, `\/`, "/")
+	from := strings.TrimSpace(conf.From)
+	if playURL == "" || from == "" {
+		return ""
+	}
+	base, err := url.Parse(pageURL)
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return ""
+	}
+	playerJS := base.Scheme + "://" + base.Host + "/static/player/" + from + ".js"
+	jsBody, err := util.HTTPGet(playerJS, mergeHeaders(hdr, map[string]string{"Referer": pageURL}))
+	if err != nil {
+		return ""
+	}
+	sm := playerSrcAssignRe.FindStringSubmatch(jsBody)
+	if len(sm) < 2 {
+		return ""
+	}
+	tpl := sm[1]
+	jsh := buildMacPlayerSrc(tpl, playURL, pageURL)
+	if jsh == "" || !strings.HasPrefix(strings.ToLower(jsh), "http") {
+		return ""
+	}
+	// 无 type= 的入口常 302；跟一层 Location。
+	if !strings.Contains(jsh, "type=") {
+		if loc := httpRedirectLocation(jsh, hdr); loc != "" {
+			jsh = loc
+		}
+	}
+	return jsh
+}
+
+func buildMacPlayerSrc(tpl, playURL, pageURL string) string {
+	s := tpl
+	s = strings.ReplaceAll(s, "+", "")
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "'", "")
+	s = strings.ReplaceAll(s, "MacPlayer.Parse", "")
+	s = strings.ReplaceAll(s, "MacPlayer.PlayUrl", playURL)
+	s = strings.ReplaceAll(s, "window.location.href", pageURL)
+	return strings.TrimSpace(s)
+}
+
+func httpRedirectLocation(raw string, headers map[string]string) string {
+	req, err := http.NewRequest(http.MethodGet, util.EncodeURL(raw), nil)
+	if err != nil {
+		return ""
+	}
+	if headers == nil || headers["User-Agent"] == "" {
+		req.Header.Set("User-Agent", sniffUAMobile)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil || resp == nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	loc := strings.TrimSpace(resp.Header.Get("Location"))
+	if loc == "" {
+		return ""
+	}
+	if strings.HasPrefix(loc, "/") {
+		if u, err := url.Parse(raw); err == nil {
+			loc = u.Scheme + "://" + u.Host + loc
+		}
+	}
+	return strings.ReplaceAll(loc, " ", "+")
 }
 
 func padBase64(s string) string {
