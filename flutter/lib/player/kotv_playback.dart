@@ -73,6 +73,22 @@ class KotvTrack {
   final String label;
 }
 
+/// 安全释放 libmpv [Player]：先停播、给事件线程留出排空时间，再 dispose。
+///
+/// 直接 `stop()`（不 await）后立刻 `dispose()`，libmpv 的 wakeup 回调会打在
+/// 已 close 的 FFI NativeCallable 上，触发
+/// `Callback invoked after it has been deleted` 级别的 abort。
+Future<void> kotvDisposeMpvPlayer(Player? player) async {
+  if (player == null) return;
+  try {
+    await player.stop();
+  } catch (_) {}
+  await Future<void>.delayed(const Duration(milliseconds: 200));
+  try {
+    await player.dispose();
+  } catch (_) {}
+}
+
 /// media_kit 在解析 libmpv 的 `track-list` 时，会**先插入** [AudioTrack.auto]/[SubtitleTrack.no] 等
 /// 控制项（见 media_kit `real.dart`），与 demuxer 里的真实轨混在同一列表；UI 应只读 [KotvPlayback.audioTracks]。
 bool kotvIsPseudoMediaTrack(String id) {
@@ -145,7 +161,7 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   final Player player;
-  VideoController controller;
+  final VideoController controller;
   KotvMpvOpts _opts;
   final List<StreamSubscription> _subs = [];
   String _url = '';
@@ -167,15 +183,16 @@ class MediaKitPlayback extends KotvPlayback {
 
   KotvMpvOpts get opts => _opts;
 
-  /// 热更新 Vulkan / gpu-next / conf（不重开 URL 时仅改属性；改 vo/hwdec 会重建 VideoController）。
+  /// 热更新 Vulkan / gpu-next / conf：全部走 mpv 属性，不重建 VideoController。
   Future<void> applyMpvOpts(KotvMpvOpts next, {bool reopen = false}) async {
     final voChanged = next.gpuNext != _opts.gpuNext || next.decodeMode != _opts.decodeMode;
     _opts = next;
     if (voChanged) {
+      // 只改属性：同一个 Player 再 new 一次 VideoController 并不会换 vo
+      // （原生侧按 mpv handle 复用），却会重复挂监听并残留旧包装对象。
       try {
         await (player.platform as dynamic).setProperty('hwdec', next.hwdecValue());
       } catch (_) {}
-      controller = VideoController(player, configuration: next.videoControllerConfiguration());
     }
     await next.applyAfterAttach(player);
     if (reopen && _url.isNotEmpty) {
@@ -311,9 +328,8 @@ class MediaKitPlayback extends KotvPlayback {
     for (final s in _subs) {
       s.cancel();
     }
-    try {
-      player.stop();
-    } catch (_) {}
+    // 不在这里 stop：Player 由页面持有，停播/释放统一走 [kotvDisposeMpvPlayer]，
+    // 否则 stop 与随后的 dispose 抢跑会让 libmpv 回调打到已释放的 NativeCallable。
     super.dispose();
   }
 }

@@ -35,6 +35,9 @@ class IjkPlayback extends KotvPlayback {
   int _speedBps = 0;
   int _lastTrafficBytes = 0;
   DateTime? _lastTrafficAt;
+  int _lastPosMs = -1;
+  DateTime? _lastPosAt;
+  bool _stalled = false;
   double _volume = 80;
   double _rate = 1;
   int _w = 0;
@@ -57,7 +60,7 @@ class IjkPlayback extends KotvPlayback {
   @override
   Duration get buffered => _player.bufferPos;
   @override
-  bool get buffering => _buffering;
+  bool get buffering => _buffering || _stalled;
   @override
   int get networkSpeedBps => _speedBps;
 
@@ -187,6 +190,9 @@ class IjkPlayback extends KotvPlayback {
     _speedBps = 0;
     _lastTrafficBytes = 0;
     _lastTrafficAt = null;
+    _lastPosMs = -1;
+    _lastPosAt = null;
+    _stalled = false;
     await _player.reset();
     // setOption 必须在 setDataSource 之前
     await _applyDecodeOptions();
@@ -198,6 +204,7 @@ class IjkPlayback extends KotvPlayback {
     _tick = Timer.periodic(const Duration(milliseconds: 400), (_) {
       if (_posCtrl.isClosed) return;
       _posCtrl.add(Duration(milliseconds: _player.currentPos.inMilliseconds));
+      _trackStall();
       unawaited(_pollSpeed());
       notifyListeners();
     });
@@ -205,10 +212,13 @@ class IjkPlayback extends KotvPlayback {
   }
 
   Future<void> _pollSpeed() async {
+    // 两个通道分开 try：老 AAR 上 getTcpSpeed 抛错时，累计流量兜底仍要能跑。
+    var next = 0;
     try {
       final tcp = await _player.getTcpSpeed();
-      var next = tcp < 0 ? 0 : tcp;
-      // HLS 等协议 getTcpSpeed 常为 0：用累计流量差分兜底
+      if (tcp > 0) next = tcp;
+    } catch (_) {}
+    try {
       final traffic = await _player.getTrafficStatisticByteCount();
       final now = DateTime.now();
       final prevAt = _lastTrafficAt;
@@ -216,17 +226,34 @@ class IjkPlayback extends KotvPlayback {
       if (prevAt != null && traffic >= prevBytes) {
         final dtMs = now.difference(prevAt).inMilliseconds;
         if (dtMs >= 200) {
-          final delta = traffic - prevBytes;
-          final fromTraffic = ((delta * 1000) / dtMs).round();
+          final fromTraffic = (((traffic - prevBytes) * 1000) / dtMs).round();
           if (fromTraffic > next) next = fromTraffic;
         }
       }
       _lastTrafficBytes = traffic;
       _lastTrafficAt = now;
-      if (next != _speedBps) {
-        _speedBps = next;
-      }
     } catch (_) {}
+    _speedBps = next;
+  }
+
+  /// ijk 的 freeze 事件并不总会来：播放中进度长时间不前进也算卡住，
+  /// 这样浮层才会亮出网速，让用户能判断线路是不是死了。
+  void _trackStall() {
+    final posMs = _player.currentPos.inMilliseconds;
+    final now = DateTime.now();
+    if (posMs != _lastPosMs) {
+      _lastPosMs = posMs;
+      _lastPosAt = now;
+      _stalled = false;
+      return;
+    }
+    if (!_playing) {
+      _lastPosAt = now;
+      _stalled = false;
+      return;
+    }
+    final since = _lastPosAt;
+    _stalled = since != null && now.difference(since) > const Duration(milliseconds: 1200);
   }
 
   @override

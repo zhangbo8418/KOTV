@@ -53,7 +53,9 @@ class KotvBufferBudget {
       if (byAvail > 0 && byAvail < budget) budget = byAvail;
     }
     final minB = desktop ? 48 * 1024 * 1024 : 24 * 1024 * 1024;
-    final maxB = desktop ? 384 * 1024 * 1024 : 128 * 1024 * 1024;
+    // 手机上限压到 64MiB：解码器 + 纹理 + demuxer 再叠 128MiB 很容易触发
+    // GC 抖动甚至 OOM，全屏播放会掉帧。
+    final maxB = desktop ? 384 * 1024 * 1024 : 64 * 1024 * 1024;
     if (budget < minB) budget = minB;
     if (budget > maxB) budget = maxB;
     return budget;

@@ -147,14 +147,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _portraitHideTimer?.cancel();
     _focus.dispose();
     unawaited(_vlc?.stop() ?? Future<void>.value());
-    unawaited(_mk?.stop() ?? Future<void>.value());
     unawaited(_exo?.stop() ?? Future<void>.value());
     unawaited(_ijk?.stop() ?? Future<void>.value());
     _vlc?.dispose();
     _mk?.dispose();
     _exo?.dispose();
     _ijk?.dispose();
-    _mkPlayer?.dispose();
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
+    unawaited(kotvDisposeMpvPlayer(mkPlayer));
     super.dispose();
   }
 

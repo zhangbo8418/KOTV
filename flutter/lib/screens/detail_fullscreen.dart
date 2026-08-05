@@ -119,7 +119,10 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     _bumpChrome();
     _pos = widget.playback.position;
     _posSub = widget.playback.positionStream.listen((d) {
-      if (mounted) setState(() => _pos = d);
+      if (!mounted) return;
+      // 时间轴只显示到秒：MPV 每帧都推位置，逐条 setState 会整页重建到掉帧。
+      if (d.inSeconds == _pos.inSeconds) return;
+      setState(() => _pos = d);
     });
     // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
   }

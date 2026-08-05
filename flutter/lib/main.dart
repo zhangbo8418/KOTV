@@ -19,8 +19,38 @@ import 'theme/kotv_theme.dart';
 import 'widgets/chrome.dart';
 import 'widgets/h_scroll.dart';
 
+/// Release 构建里 build 抛异常会渲染成一块灰色空白（默认 ErrorWidget），
+/// 页面看着像"没了"却无从追查；换成可读文案并把错误打到日志。
+Widget _kotvErrorWidget(FlutterErrorDetails details) {
+  return Material(
+    color: const Color(0xFF14161B),
+    child: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Color(0xFFE53955), size: 40),
+            const SizedBox(height: 12),
+            const Text('页面渲染出错', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text(
+              '${details.exception}',
+              maxLines: 6,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFF9AA0AA), fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  ErrorWidget.builder = _kotvErrorWidget;
   // Android 也要 init：用户可选 MPV（media_kit）；仅延迟到实际用 MPV 前也可，这里统一初始化更稳。
   MediaKit.ensureInitialized();
   unawaited(KotvBufferBudget.warm());

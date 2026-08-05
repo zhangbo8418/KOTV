@@ -140,16 +140,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final p = _playback;
     final prefix = _enginePrefix;
     final magnet = _magnetPlay || _playUrl.contains('/proxy/bt/');
-    final speed = kotvFormatSpeed(p.networkSpeedBps, showZero: _isBuffering);
-    final speedSuffix = speed.isEmpty ? '' : ' $speed';
+    // 网速只交给 [KotvBufferingOverlay]：写进文案会让每次测速都改字符串，
+    // 从而每秒多次 setState 重建整个详情页（全屏播放明显掉帧）。
     final String next;
     if (p.completed && !p.playing) {
       next = '播放结束';
     } else if (magnet && (_isBuffering ||
             !(p.position > Duration.zero || p.duration > Duration.zero || p.width > 0))) {
-      next = '磁力缓冲中…$speedSuffix';
+      next = '磁力缓冲中…';
     } else if (_isBuffering) {
-      next = '$prefix 缓冲中…$speedSuffix';
+      next = '$prefix 缓冲中…';
     } else if (p.playing) {
       final started = p.position > Duration.zero || p.duration > Duration.zero || p.width > 0;
       if (started) {
@@ -159,7 +159,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (startedAt != null && DateTime.now().difference(startedAt) > const Duration(seconds: 10)) {
           next = magnet ? '磁力无画面（可换源/换节点）' : '$prefix 无画面（可换源/解析）';
         } else {
-          next = magnet ? '磁力缓冲中…$speedSuffix' : '$prefix 加载中…$speedSuffix';
+          next = magnet ? '磁力缓冲中…' : '$prefix 加载中…';
         }
       }
     } else {
@@ -428,7 +428,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     // 正常路径已在 [_stopHard] 里 await pause/stop；此处兜底再停一次再释放。
     if (!_stoppedHard) {
       unawaited(_vlc?.stop() ?? Future<void>.value());
-      unawaited(_mk?.stop() ?? Future<void>.value());
       unawaited(_exo?.stop() ?? Future<void>.value());
       unawaited(_ijk?.stop() ?? Future<void>.value());
     }
@@ -436,7 +435,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _mk?.dispose();
     _exo?.dispose();
     _ijk?.dispose();
-    _mkPlayer?.dispose();
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
+    unawaited(kotvDisposeMpvPlayer(mkPlayer));
     super.dispose();
   }
 
