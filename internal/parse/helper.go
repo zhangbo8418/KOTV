@@ -192,12 +192,11 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		}
 		return r, fmt.Errorf("解析失败: 无可用解析器")
 	}
-	// 过短结果不可信；明显网页地址也不当媒体。
-	if !matchVideo(parsed, opts.Rules, opts.IsVideo) {
-		if len(parsed) <= 40 || looksLikeHTMLPlayPage(parsed) {
-			parseLog("[parse] invalid result via=%s out=%s", via, parsePreview(parsed, 160))
-			return r, fmt.Errorf("解析结果无效")
-		}
+	// 对齐 TV checkResult：仅用 url.length() > 40 判断成功。
+	// （TV 不在该层做额外 rules/isVideo 校验；KOTV 这里收敛到同样的成功判定）
+	if len(parsed) <= 40 {
+		parseLog("[parse] invalid result via=%s out=%s", via, parsePreview(parsed, 160))
+		return r, fmt.Errorf("解析结果无效")
 	}
 
 	parseLog("[parse] ok via=%s out=%s cost=%s", via, parsePreview(parsed, 200), time.Since(start).Truncate(time.Millisecond))
@@ -362,7 +361,8 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 			parseLog("[parse] type0 http-sniff ok out=%s cost=%s", parsePreview(out, 160), time.Since(start).Truncate(time.Millisecond))
 			return out, nil, nil
 		}
-		u, h, err := browserSniff(target, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0)
+		detect := !strings.Contains(strings.ToLower(target), "player/?url=")
+		u, h, err := browserSniff(target, headers, click, rules, defaultParseWebTimeout, detect, isVideo, 0)
 		if err != nil {
 			parseLog("[parse] type0 browser fail err=%v cost=%s", err, time.Since(start).Truncate(time.Millisecond))
 		} else {
@@ -409,7 +409,8 @@ func sniffParsedWeb(pageURL string, headers map[string]string, click string, rul
 	if out, err := PlayPageSniff(pageURL, headers); err == nil && out != "" {
 		return out, nil, nil
 	}
-	return browserSniff(pageURL, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0)
+	detect := !strings.Contains(strings.ToLower(pageURL), "player/?url=")
+	return browserSniff(pageURL, headers, click, rules, defaultParseWebTimeout, detect, isVideo, 0)
 }
 
 // superParse 对齐 TV ParseJob.superParse / getParses(type, flag)。
@@ -456,11 +457,12 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 			if jxs != "" {
 				parsePage := fmt.Sprintf("http://127.0.0.1:%d/parse?jxs=%s&url=%s",
 					localproxy.Port(), url.QueryEscape(jxs), url.QueryEscape(webURL))
-				if out, err := PlayPageSniff(parsePage, headers); err == nil && out != "" && matchVideo(out, rules, isVideo) {
+				if out, err := PlayPageSniff(parsePage, headers); err == nil && len(out) > 40 {
 					ch <- result{url: out}
 					return
 				}
-				if u, h, err := browserSniff(parsePage, headers, click, rules, defaultParseWebTimeout, true, isVideo, 0); err == nil && u != "" {
+				detect := !strings.Contains(strings.ToLower(parsePage), "player/?url=")
+				if u, h, err := browserSniff(parsePage, headers, click, rules, defaultParseWebTimeout, detect, isVideo, 0); err == nil && u != "" {
 					ch <- result{url: u, hdr: h}
 				}
 			}
