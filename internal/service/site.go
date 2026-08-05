@@ -334,10 +334,9 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 	var result model.Result
 	var err error
 
-	id = normalizePlayID(site, id)
-
 	// 对齐 TV：push_agent 直接把 id 当 url，再走 Source.fetch。
 	if site.Key == PushAgentKey {
+		id = normalizePlayID(site, id)
 		result = model.Result{
 			Success: true,
 			URL:     model.URL{URLs: []string{id}},
@@ -348,9 +347,12 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 	} else {
 		switch site.TypeID() {
 		case 3:
+			// 对齐 TV：type=3 spider（JS/PY）传参阶段不强制把剧集 id 补成绝对 URL，
+			// 让 spider 自己按 TV 的输入形态拼接/解析。
 			sp := s.cfg.Spider(site)
 			vipFlags := s.cfg.API().Flags
 			var raw string
+			// 此处保持 id 原样（不 normalize）
 			raw, err = sp.PlayerContent(flag, id, vipFlags)
 			if err != nil {
 				return model.Result{Success: false}, err
@@ -365,6 +367,7 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 4:
+			id = normalizePlayID(site, id)
 			params := map[string]string{
 				"play": id,
 				"flag": flag,
@@ -382,6 +385,7 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 0, 1, 2:
+			id = normalizePlayID(site, id)
 			// 本地拼 Result，不请求 API。相对路径按站源 api 补成绝对地址再解析。
 			playID := id
 			parseVal := 1
