@@ -207,34 +207,55 @@ class MediaKitPlayback extends KotvPlayback {
     _speedBusy = true;
     try {
       var next = 0;
-      // 1) demuxer-cache-state 的 raw-input-rate / fw-bytes 差分（比 cache-speed 更实时）
+      var sampled = false;
       try {
         final state = '${await (player.platform as dynamic).getProperty('demuxer-cache-state')}';
-        final rate = _parseKvInt(state, 'raw-input-rate');
-        if (rate != null && rate > 0) {
-          next = rate;
-        } else {
-          final fw = _parseKvInt(state, 'fw-bytes') ?? _parseKvInt(state, 'total-bytes');
-          if (fw != null) {
-            final now = DateTime.now();
-            final prevAt = _lastCacheAt;
-            final prev = _lastCacheBytes;
-            if (prevAt != null && prev >= 0 && fw >= prev) {
-              final dt = now.difference(prevAt).inMilliseconds;
-              if (dt >= 200) {
-                next = (((fw - prev) * 1000) / dt).round().clamp(0, 1 << 30);
+        // total-bytes / fw-bytes 会随缓冲涨落；用单调「已见最大」做差分，回落则重置。
+        final fw = _parseKvInt(state, 'fw-bytes');
+        final total = _parseKvInt(state, 'total-bytes');
+        final bytes = (fw != null && total != null)
+            ? (fw > total ? fw : total)
+            : (fw ?? total);
+        final now = DateTime.now();
+        if (bytes != null) {
+          final prevAt = _lastCacheAt;
+          final prev = _lastCacheBytes;
+          if (prevAt != null && prev >= 0) {
+            final dt = now.difference(prevAt).inMilliseconds;
+            if (dt >= 200) {
+              if (bytes >= prev) {
+                final delta = bytes - prev;
+                next = delta > 0 ? (((delta * 1000) / dt).round().clamp(0, 1 << 30)) : 0;
+              } else {
+                next = 0; // seek 后缓冲区回落
               }
+              sampled = true;
+              _lastCacheBytes = bytes;
+              _lastCacheAt = now;
             }
-            _lastCacheBytes = fw;
+          } else {
+            _lastCacheBytes = bytes;
             _lastCacheAt = now;
+            sampled = true;
+            next = 0;
+          }
+        }
+        // raw-input-rate 仅作辅助：只在本轮还没采到差分时用，且不得单独黏住跨 tick
+        if (!sampled) {
+          final rate = _parseKvInt(state, 'raw-input-rate');
+          if (rate != null && rate > 0) {
+            next = rate;
+            sampled = true;
           }
         }
       } catch (_) {}
-      // 2) 兜底 cache-speed（部分平台会黏第一帧，仅在上面没采到时用）
-      if (next <= 0) {
+      if (!sampled) {
         try {
           final raw = await (player.platform as dynamic).getProperty('cache-speed');
-          next = _parseMpvBytesPerSec('$raw');
+          final v = _parseMpvBytesPerSec('$raw');
+          // cache-speed 黏值时：连续相同则在缓冲场景仍允许显示，但若与上次相同
+          // 且缓冲字节无增长，下面 sampled 路径会归零。这里仅兜底。
+          if (v > 0) next = v;
         } catch (_) {}
       }
       if (next != _speedBps) {

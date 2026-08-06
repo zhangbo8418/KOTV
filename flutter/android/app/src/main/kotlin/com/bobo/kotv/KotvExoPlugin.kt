@@ -11,13 +11,15 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.LoadControl
-import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -29,6 +31,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlin.math.min
 
@@ -62,15 +65,36 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var decodeMode: String = "auto"
   /** auto 下硬解失败后仅软解重建一次。 */
   private var decodeFallbackTried = false
-  /** 估算下载速度 bytes/s：优先用累计加载字节差分（bitrateEstimate 会长时间黏在第一帧）。 */
+  /** 实时下载速度：TransferListener 累计网络字节，tick 里差分；无增长则归零（避免黏第一帧）。 */
   @Volatile private var speedBps: Long = 0
   private var speedLastBytes: Long = -1
   private var speedLastAtMs: Long = 0
+  private val transferredBytes = AtomicLong(0)
+  private val netTransferListener =
+    object : TransferListener {
+      override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+
+      override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+
+      override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+
+      override fun onBytesTransferred(
+        source: DataSource,
+        dataSpec: DataSpec,
+        isNetwork: Boolean,
+        bytesTransferred: Int,
+      ) {
+        if (isNetwork && bytesTransferred > 0) {
+          transferredBytes.addAndGet(bytesTransferred.toLong())
+        }
+      }
+    }
 
   private val main = Handler(Looper.getMainLooper())
   private val tick = object : Runnable {
     override fun run() {
       val p = player ?: return
+      refreshSpeedFromTransfers()
       emit(
         mapOf(
           "event" to "position",
@@ -82,8 +106,28 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           "speedBps" to speedBps,
         ),
       )
-      main.postDelayed(this, 400)
+      main.postDelayed(this, 300)
     }
+  }
+
+  /** 每 tick 用累计传输字节算瞬时速率；字节不涨则速度归 0。 */
+  private fun refreshSpeedFromTransfers() {
+    val now = android.os.SystemClock.elapsedRealtime()
+    val bytes = transferredBytes.get()
+    val prev = speedLastBytes
+    val prevAt = speedLastAtMs
+    if (prev < 0) {
+      speedLastBytes = bytes
+      speedLastAtMs = now
+      speedBps = 0
+      return
+    }
+    val dt = now - prevAt
+    if (dt < 200L) return
+    val delta = bytes - prev
+    speedBps = if (delta > 0L) (delta * 1000L / dt).coerceAtLeast(0) else 0
+    speedLastBytes = bytes
+    speedLastAtMs = now
   }
 
   private val httpClient: OkHttpClient by lazy {
@@ -244,6 +288,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     speedBps = 0
     speedLastBytes = -1
     speedLastAtMs = 0
+    transferredBytes.set(0)
 
     val old = player
     player = null
@@ -252,6 +297,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val httpFactory = OkHttpDataSource.Factory(httpClient)
       .setUserAgent(currentHeaders["User-Agent"] ?: DEFAULT_UA)
       .setDefaultRequestProperties(currentHeaders)
+      .setTransferListener(netTransferListener)
     val dataSourceFactory = DefaultDataSource.Factory(ctx, httpFactory)
     val mediaSourceFactory = DefaultMediaSourceFactory(ctx).setDataSourceFactory(dataSourceFactory)
     val effective = effectiveDecodeMode()
@@ -268,7 +314,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       .setTargetBufferBytes(budget)
       .setPrioritizeTimeOverSizeThresholds(false)
       .build()
-    val bandwidthMeter = DefaultBandwidthMeter.getSingletonInstance(ctx)
+    // 每播放器独立 BandwidthMeter，避免 getSingletonInstance 的历史码率黏住 UI
+    val bandwidthMeter = DefaultBandwidthMeter.Builder(ctx).build()
 
     val p = ExoPlayer.Builder(ctx)
       .setMediaSourceFactory(mediaSourceFactory)
@@ -278,36 +325,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       .build()
     player = p
     p.setVideoSurface(surface)
-    p.addAnalyticsListener(
-      object : AnalyticsListener {
-        override fun onBandwidthEstimate(
-          eventTime: AnalyticsListener.EventTime,
-          totalLoadTimeMs: Int,
-          totalBytesLoaded: Long,
-          bitrateEstimate: Long,
-        ) {
-          val now = android.os.SystemClock.elapsedRealtime()
-          val prevBytes = speedLastBytes
-          val prevAt = speedLastAtMs
-          if (prevBytes >= 0 && totalBytesLoaded >= prevBytes && now > prevAt) {
-            val dt = now - prevAt
-            if (dt >= 200L) {
-              speedBps = ((totalBytesLoaded - prevBytes) * 1000L / dt).coerceAtLeast(0)
-              speedLastBytes = totalBytesLoaded
-              speedLastAtMs = now
-              return
-            }
-          } else {
-            speedLastBytes = totalBytesLoaded
-            speedLastAtMs = now
-          }
-          // 首样本或间隔过短：退回 BandwidthMeter 瞬时估值（bits/s → bytes/s）
-          if (bitrateEstimate > 0) {
-            speedBps = (bitrateEstimate / 8L).coerceAtLeast(0)
-          }
-        }
-      },
-    )
     p.addListener(object : Player.Listener {
       override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_ENDED) {

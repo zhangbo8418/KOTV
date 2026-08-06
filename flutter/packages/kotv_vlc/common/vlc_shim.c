@@ -833,23 +833,29 @@ int64_t kotv_vlc_get_speed_bps(void) {
 	if (g_speed_last_bytes >= 0 && bytes >= g_speed_last_bytes) {
 		int64_t dt = now - g_speed_last_at_ms;
 		if (dt >= 250) {
-			g_speed_bps = ((bytes - g_speed_last_bytes) * 1000) / dt;
+			int64_t delta = bytes - g_speed_last_bytes;
+			/* 无增长必须归零，否则会一直显示上一帧速率 */
+			g_speed_bps = delta > 0 ? (delta * 1000) / dt : 0;
 			g_speed_last_bytes = bytes;
 			g_speed_last_at_ms = now;
 		}
 	} else {
-		/* 首次采样或计数回绕：只记录基准 */
+		/* 首次采样或计数回绕：只记录基准，速度清零 */
 		g_speed_last_bytes = bytes;
 		g_speed_last_at_ms = now;
+		g_speed_bps = 0;
 	}
 	if (g_speed_bps > 0)
 		return g_speed_bps;
 
-	if (st.f_input_bitrate > 0.f)
-		return (int64_t)((double)st.f_input_bitrate * 1000000.0);
-	if (st.f_demux_bitrate > 0.f)
-		return (int64_t)((double)st.f_demux_bitrate * 1000000.0);
-	return 0;
+	/* 差分尚无样本时才用瞬时码率垫一帧；有基线后不再用，避免黏值 */
+	if (g_speed_last_bytes < 0) {
+		if (st.f_input_bitrate > 0.f)
+			return (int64_t)((double)st.f_input_bitrate * 1000000.0);
+		if (st.f_demux_bitrate > 0.f)
+			return (int64_t)((double)st.f_demux_bitrate * 1000000.0);
+	}
+	return g_speed_bps;
 }
 
 int kotv_vlc_set_volume(int vol) {

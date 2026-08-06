@@ -217,25 +217,37 @@ class IjkPlayback extends KotvPlayback {
     if (_speedBusy) return;
     _speedBusy = true;
     try {
-      // 优先累计流量差分（与 VLC 同源思路）；getTcpSpeed 在不少机型上会黏在第一帧。
       var next = 0;
-      var haveDelta = false;
+      var sampled = false;
       try {
         final traffic = await _player.getTrafficStatisticByteCount();
         final now = DateTime.now();
         final prevAt = _lastTrafficAt;
         final prevBytes = _lastTrafficBytes;
-        if (prevAt != null && traffic >= prevBytes) {
+        if (prevAt != null) {
           final dtMs = now.difference(prevAt).inMilliseconds;
           if (dtMs >= 200) {
-            next = (((traffic - prevBytes) * 1000) / dtMs).round().clamp(0, 1 << 30);
-            haveDelta = true;
+            if (traffic >= prevBytes) {
+              // 有增长才有速度；持平/停滞必须归 0，否则会黏在上一帧
+              final delta = traffic - prevBytes;
+              next = delta > 0 ? (((delta * 1000) / dtMs).round().clamp(0, 1 << 30)) : 0;
+            } else {
+              // seek/重开导致计数回绕：重置基准，本帧先显示 0
+              next = 0;
+            }
+            sampled = true;
+            _lastTrafficBytes = traffic;
+            _lastTrafficAt = now;
           }
+        } else {
+          _lastTrafficBytes = traffic;
+          _lastTrafficAt = now;
+          sampled = true;
+          next = 0;
         }
-        _lastTrafficBytes = traffic;
-        _lastTrafficAt = now;
       } catch (_) {}
-      if (!haveDelta) {
+      // 仅在还从未建立流量基线时，才用 getTcpSpeed 垫一帧（它本身容易黏值）
+      if (!sampled) {
         try {
           final tcp = await _player.getTcpSpeed();
           if (tcp > 0) next = tcp;
