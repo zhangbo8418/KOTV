@@ -180,8 +180,11 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
-    _speedTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (_buffering || player.state.buffering) unawaited(_pollCacheSpeed());
+    _speedTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      // 起播/缓冲/播放中都采：浮层 force 显示「加载中」时也要有数，不能等 buffering 才读。
+      if (_buffering || player.state.buffering || player.state.playing) {
+        unawaited(_pollCacheSpeed());
+      }
     });
     unawaited(_opts.applyAfterAttach(player));
   }
@@ -199,12 +202,34 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> _pollCacheSpeed() async {
     try {
       final raw = await (player.platform as dynamic).getProperty('cache-speed');
-      final v = int.tryParse('$raw'.trim()) ?? 0;
+      // mpv 可能返回纯数字，也可能是 "128.5 KiB"（偶发带单位）
+      final v = _parseMpvBytesPerSec('$raw');
       if (v != _speedBps) {
         _speedBps = v < 0 ? 0 : v;
         notifyListeners();
       }
     } catch (_) {}
+  }
+
+  static int _parseMpvBytesPerSec(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty || s == '0') return 0;
+    final n = int.tryParse(s);
+    if (n != null) return n;
+    final m = RegExp(r'([0-9]+(?:\.[0-9]+)?)\s*([KMG]?i?B)', caseSensitive: false).firstMatch(s);
+    if (m == null) {
+      final only = RegExp(r'[0-9]+').firstMatch(s);
+      return int.tryParse(only?.group(0) ?? '') ?? 0;
+    }
+    final val = double.tryParse(m.group(1)!) ?? 0;
+    final unit = (m.group(2) ?? 'B').toUpperCase();
+    final mul = switch (unit) {
+      'KIB' || 'KB' => 1024.0,
+      'MIB' || 'MB' => 1024.0 * 1024.0,
+      'GIB' || 'GB' => 1024.0 * 1024.0 * 1024.0,
+      _ => 1.0,
+    };
+    return (val * mul).round();
   }
 
   KotvMpvOpts get opts => _opts;
@@ -439,10 +464,11 @@ class EngineVlcPlayback extends KotvPlayback {
       if (_ended && !wasEnded && !_endedCtrl.isClosed) {
         _endedCtrl.add(true);
       }
-      // 降 UI 刷新频率：状态/进度变化才 notify，避免每 250ms 整树重建导致卡顿
+      // 降 UI 刷新频率：状态/进度变化才 notify，避免每 250ms 整树重建导致卡顿。
+      // 缓冲中网速必须实时：任意变化都刷（浮层自己也有 300ms 定时读，双保险）。
       final posJump = (_positionMs - prevPos).abs() >= 200;
       final bufJump = (_bufferedMs - prevBuf).abs() >= 500;
-      final speedJump = (_speedBps - prevSpeed).abs() >= 2048;
+      final speedJump = _speedBps != prevSpeed;
       if (wasPlaying != _playing ||
           wasEnded != _ended ||
           posJump ||

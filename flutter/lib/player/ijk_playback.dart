@@ -204,9 +204,10 @@ class IjkPlayback extends KotvPlayback {
     _tick = Timer.periodic(const Duration(milliseconds: 400), (_) {
       if (_posCtrl.isClosed) return;
       _posCtrl.add(Duration(milliseconds: _player.currentPos.inMilliseconds));
+      final wasStalled = _stalled;
       _trackStall();
+      if (wasStalled != _stalled) notifyListeners();
       unawaited(_pollSpeed());
-      notifyListeners();
     });
     notifyListeners();
   }
@@ -233,7 +234,12 @@ class IjkPlayback extends KotvPlayback {
       _lastTrafficBytes = traffic;
       _lastTrafficAt = now;
     } catch (_) {}
+    final changed = next != _speedBps;
     _speedBps = next;
+    // 必须在异步测速完成后再 notify；以前先 notify 再 unawaited poll，浮层永远慢一拍甚至一直 0。
+    if (changed || _buffering || _stalled) {
+      notifyListeners();
+    }
   }
 
   /// ijk 的 freeze 事件并不总会来：播放中进度长时间不前进也算卡住，
