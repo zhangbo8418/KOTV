@@ -39,6 +39,22 @@ class MainActivity : FlutterActivity() {
             SpiderServiceManager.stop()
             result.success(true)
           }
+          "startEngine" -> {
+            try {
+              KotvEngineService.start(this)
+              result.success(true)
+            } catch (t: Throwable) {
+              result.error("engine_start", t.message ?: t.toString(), null)
+            }
+          }
+          "stopEngine" -> {
+            try {
+              KotvEngineService.stop(this)
+              result.success(true)
+            } catch (t: Throwable) {
+              result.error("engine_stop", t.message ?: t.toString(), null)
+            }
+          }
           "paths" -> {
             val cache = cacheDir.absolutePath
             val files = filesDir.absolutePath
@@ -171,6 +187,10 @@ class MainActivity : FlutterActivity() {
     window.decorView.post {
       try {
         SpiderServiceManager.start(this)
+      } catch (_: Throwable) {
+      }
+      try {
+        KotvEngineService.start(this)
       } catch (_: Throwable) {
       }
     }

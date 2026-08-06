@@ -699,7 +699,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       } catch (e) {
         // 从后台回来常见引擎僵死：Connection closed / refused。先拉起再重试一次。
         if (!_isLocalEngineConnError(e)) rethrow;
-        final ok = await ref.read(engineLauncherProvider).recoverIfNeeded(forceRestart: true);
+        final ok = await ref.read(engineLauncherProvider).recoverIfNeeded();
         if (!ok || serial != _playAtSerial || !mounted) rethrow;
         data = await ref.read(apiProvider).play(
               url: ep.url,

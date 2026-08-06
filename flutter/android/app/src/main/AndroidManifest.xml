@@ -3,6 +3,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
+    <!-- 前台服务托住本机 Go 引擎，避免进后台后子进程被 OEM 杀掉 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Android 13+：局域网 Wi‑Fi 设备发现（DLNA/投屏） -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation"/>
@@ -55,6 +59,10 @@
         <meta-data
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />
+        <service
+            android:name=".KotvEngineService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
     <queries>
         <intent>

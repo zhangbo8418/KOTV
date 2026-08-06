@@ -61,35 +61,50 @@ class EngineLauncher {
   }
 
   /// API 调用失败时调用：若引擎挂了则重启。
-  /// [forceRestart] 为 true 时，即使 ping 偶然成功也先确保 spider，并在随后的 play 失败路径里可再调。
+  /// [forceRestart] 只表示「务必确保可用」，**引擎已通时绝不误杀**。
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
     await _ensureAndroidSpiderService();
-    if (!forceRestart && await _ping(baseUrl)) return true;
-    // 后台被杀/冻结后常见：进程句柄还在但 HTTP 已死。
-    await _killOwnedQuietly();
-    if (DateTime.now().difference(_lastStartAttempt) < const Duration(seconds: 2) && !forceRestart) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-      if (await _ping(baseUrl)) return true;
+    if (await _ping(baseUrl)) return true;
+    debugPrint('engine: recoverIfNeeded force=$forceRestart → restart');
+    if (Platform.isAndroid) {
+      await _startAndroidEngineService();
+    } else {
+      await _killOwnedQuietly();
     }
     return ensureReady(timeout: const Duration(seconds: 20));
   }
 
-  /// 从后台回前台：先确保 :9979 spider，再探 :9978；不通则杀掉僵死子进程并重拉。
+  /// 从后台回前台：先拉前景服务+ spider，再探 :9978；不通才重启。
   Future<bool> onAppResumed() async {
     if (_shuttingDown) return false;
     if (kIsWeb || Platform.isIOS) {
       return _ping(baseUrl);
     }
     debugPrint('engine: app resumed → health check');
+    if (Platform.isAndroid) {
+      await _startAndroidEngineService();
+    }
     await _ensureAndroidSpiderService();
     if (await _ping(baseUrl)) {
       debugPrint('engine: still healthy after resume');
       return true;
     }
     debugPrint('engine: unhealthy after resume → restart');
-    await _killOwnedQuietly();
+    if (!Platform.isAndroid) {
+      await _killOwnedQuietly();
+    }
     return ensureReady(timeout: const Duration(seconds: 15));
+  }
+
+  Future<void> _startAndroidEngineService() async {
+    if (!Platform.isAndroid) return;
+    const ch = MethodChannel('kotv_android_spider');
+    try {
+      await ch.invokeMethod<void>('startEngine');
+    } catch (e) {
+      debugPrint('android engine service start failed: $e');
+    }
   }
 
   Future<void> _killOwnedQuietly() async {
@@ -286,6 +301,18 @@ class EngineLauncher {
 
       var env = _runtimeEnv();
       if (Platform.isAndroid) {
+        // Android：由前台服务托管引擎，避免进后台后 Dart 子进程被 OEM 杀掉。
+        // 详情页用内存缓存看不出问题，一点 /api/v1/play 就 Connection closed。
+        await _startAndroidEngineService();
+        for (var i = 0; i < 40; i++) {
+          if (await _ping('http://127.0.0.1:9978')) {
+            baseUrl = 'http://127.0.0.1:9978';
+            debugPrint('engine android: service healthy on 9978');
+            return;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+        debugPrint('engine android: service failed to bring :9978 up; fallback Process.start');
         env = await _androidEnv(env);
         final candidates = await _androidEngineCandidates();
         if (candidates.isEmpty) {
@@ -294,9 +321,8 @@ class EngineLauncher {
         }
         for (final so in candidates) {
           try {
-            debugPrint('engine start(android): $so');
+            debugPrint('engine start(android-fallback): $so');
             await _spawn(so, env);
-            // _spawn 末尾已短暂等待；进程立刻退出则换下一候选（常见：noexec）
             if (_proc != null && await _procAlive(_proc!)) return;
             debugPrint('engine android: process exited immediately after $so');
             _owned = false;
