@@ -24,13 +24,18 @@ final configProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final ok = await ref.watch(engineReadyProvider.future);
   if (!ok) return const <String, dynamic>{};
   final api = ref.watch(apiProvider);
-  // 配置可能晚于 health 就绪；最多等几秒拿到 wallpaper。
-  for (var i = 0; i < 15; i++) {
-    final cfg = await api.getConfig();
-    if (cfg['ready'] == true) return cfg;
-    await Future<void>.delayed(const Duration(milliseconds: 400));
+  // 引擎起来即可取配置；未填源仓库时 ready=false 也是合法状态，不要空转重试。
+  try {
+    return await api.getConfig();
+  } catch (_) {
+    for (var i = 0; i < 10; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      try {
+        return await api.getConfig();
+      } catch (_) {}
+    }
+    return const <String, dynamic>{};
   }
-  return api.getConfig();
 });
 
 /// 引擎设置（含 wallMode）+ backdrop 解析结果。

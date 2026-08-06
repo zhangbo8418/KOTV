@@ -198,17 +198,61 @@ class MediaKitPlayback extends KotvPlayback {
   bool _buffering = false;
   int _speedBps = 0;
   Timer? _speedTimer;
+  bool _speedBusy = false;
+  int _lastCacheBytes = -1;
+  DateTime? _lastCacheAt;
 
   Future<void> _pollCacheSpeed() async {
+    if (_speedBusy) return;
+    _speedBusy = true;
     try {
-      final raw = await (player.platform as dynamic).getProperty('cache-speed');
-      // mpv 可能返回纯数字，也可能是 "128.5 KiB"（偶发带单位）
-      final v = _parseMpvBytesPerSec('$raw');
-      if (v != _speedBps) {
-        _speedBps = v < 0 ? 0 : v;
+      var next = 0;
+      // 1) demuxer-cache-state 的 raw-input-rate / fw-bytes 差分（比 cache-speed 更实时）
+      try {
+        final state = '${await (player.platform as dynamic).getProperty('demuxer-cache-state')}';
+        final rate = _parseKvInt(state, 'raw-input-rate');
+        if (rate != null && rate > 0) {
+          next = rate;
+        } else {
+          final fw = _parseKvInt(state, 'fw-bytes') ?? _parseKvInt(state, 'total-bytes');
+          if (fw != null) {
+            final now = DateTime.now();
+            final prevAt = _lastCacheAt;
+            final prev = _lastCacheBytes;
+            if (prevAt != null && prev >= 0 && fw >= prev) {
+              final dt = now.difference(prevAt).inMilliseconds;
+              if (dt >= 200) {
+                next = (((fw - prev) * 1000) / dt).round().clamp(0, 1 << 30);
+              }
+            }
+            _lastCacheBytes = fw;
+            _lastCacheAt = now;
+          }
+        }
+      } catch (_) {}
+      // 2) 兜底 cache-speed（部分平台会黏第一帧，仅在上面没采到时用）
+      if (next <= 0) {
+        try {
+          final raw = await (player.platform as dynamic).getProperty('cache-speed');
+          next = _parseMpvBytesPerSec('$raw');
+        } catch (_) {}
+      }
+      if (next != _speedBps) {
+        _speedBps = next < 0 ? 0 : next;
         notifyListeners();
       }
-    } catch (_) {}
+    } finally {
+      _speedBusy = false;
+    }
+  }
+
+  static int? _parseKvInt(String raw, String key) {
+    final m = RegExp('$key\\s*[:=]\\s*(-?\\d+)', caseSensitive: false).firstMatch(raw);
+    if (m != null) return int.tryParse(m.group(1)!);
+    // mpv 偶发 JSON 风格 "raw-input-rate":123
+    final j = RegExp('"$key"\\s*:\\s*(-?\\d+)', caseSensitive: false).firstMatch(raw);
+    if (j != null) return int.tryParse(j.group(1)!);
+    return null;
   }
 
   static int _parseMpvBytesPerSec(String raw) {
@@ -292,6 +336,9 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
     _url = url;
+    _speedBps = 0;
+    _lastCacheBytes = -1;
+    _lastCacheAt = null;
     // DRM 需 Exo（对齐 TV requiresExo）；MPV 无法解 Widevine/PlayReady
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');

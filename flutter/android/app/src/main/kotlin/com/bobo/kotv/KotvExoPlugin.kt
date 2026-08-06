@@ -62,8 +62,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var decodeMode: String = "auto"
   /** auto 下硬解失败后仅软解重建一次。 */
   private var decodeFallbackTried = false
-  /** 估算下载速度 bytes/s（来自 BandwidthMeter）。 */
+  /** 估算下载速度 bytes/s：优先用累计加载字节差分（bitrateEstimate 会长时间黏在第一帧）。 */
   @Volatile private var speedBps: Long = 0
+  private var speedLastBytes: Long = -1
+  private var speedLastAtMs: Long = 0
 
   private val main = Handler(Looper.getMainLooper())
   private val tick = object : Runnable {
@@ -80,7 +82,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           "speedBps" to speedBps,
         ),
       )
-      main.postDelayed(this, 500)
+      main.postDelayed(this, 400)
     }
   }
 
@@ -239,6 +241,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentHeaders = normalizeHeaders(headers)
     currentMime = mime ?: guessMime(url)
     currentDrm = drm
+    speedBps = 0
+    speedLastBytes = -1
+    speedLastAtMs = 0
 
     val old = player
     player = null
@@ -281,8 +286,25 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           totalBytesLoaded: Long,
           bitrateEstimate: Long,
         ) {
-          // bitrateEstimate 为 bits/s
-          speedBps = (bitrateEstimate / 8L).coerceAtLeast(0)
+          val now = android.os.SystemClock.elapsedRealtime()
+          val prevBytes = speedLastBytes
+          val prevAt = speedLastAtMs
+          if (prevBytes >= 0 && totalBytesLoaded >= prevBytes && now > prevAt) {
+            val dt = now - prevAt
+            if (dt >= 200L) {
+              speedBps = ((totalBytesLoaded - prevBytes) * 1000L / dt).coerceAtLeast(0)
+              speedLastBytes = totalBytesLoaded
+              speedLastAtMs = now
+              return
+            }
+          } else {
+            speedLastBytes = totalBytesLoaded
+            speedLastAtMs = now
+          }
+          // 首样本或间隔过短：退回 BandwidthMeter 瞬时估值（bits/s → bytes/s）
+          if (bitrateEstimate > 0) {
+            speedBps = (bitrateEstimate / 8L).coerceAtLeast(0)
+          }
         }
       },
     )

@@ -38,6 +38,7 @@ class IjkPlayback extends KotvPlayback {
   int _lastPosMs = -1;
   DateTime? _lastPosAt;
   bool _stalled = false;
+  bool _speedBusy = false;
   double _volume = 80;
   double _rate = 1;
   int _w = 0;
@@ -213,32 +214,40 @@ class IjkPlayback extends KotvPlayback {
   }
 
   Future<void> _pollSpeed() async {
-    // 两个通道分开 try：老 AAR 上 getTcpSpeed 抛错时，累计流量兜底仍要能跑。
-    var next = 0;
+    if (_speedBusy) return;
+    _speedBusy = true;
     try {
-      final tcp = await _player.getTcpSpeed();
-      if (tcp > 0) next = tcp;
-    } catch (_) {}
-    try {
-      final traffic = await _player.getTrafficStatisticByteCount();
-      final now = DateTime.now();
-      final prevAt = _lastTrafficAt;
-      final prevBytes = _lastTrafficBytes;
-      if (prevAt != null && traffic >= prevBytes) {
-        final dtMs = now.difference(prevAt).inMilliseconds;
-        if (dtMs >= 200) {
-          final fromTraffic = (((traffic - prevBytes) * 1000) / dtMs).round();
-          if (fromTraffic > next) next = fromTraffic;
+      // 优先累计流量差分（与 VLC 同源思路）；getTcpSpeed 在不少机型上会黏在第一帧。
+      var next = 0;
+      var haveDelta = false;
+      try {
+        final traffic = await _player.getTrafficStatisticByteCount();
+        final now = DateTime.now();
+        final prevAt = _lastTrafficAt;
+        final prevBytes = _lastTrafficBytes;
+        if (prevAt != null && traffic >= prevBytes) {
+          final dtMs = now.difference(prevAt).inMilliseconds;
+          if (dtMs >= 200) {
+            next = (((traffic - prevBytes) * 1000) / dtMs).round().clamp(0, 1 << 30);
+            haveDelta = true;
+          }
         }
+        _lastTrafficBytes = traffic;
+        _lastTrafficAt = now;
+      } catch (_) {}
+      if (!haveDelta) {
+        try {
+          final tcp = await _player.getTcpSpeed();
+          if (tcp > 0) next = tcp;
+        } catch (_) {}
       }
-      _lastTrafficBytes = traffic;
-      _lastTrafficAt = now;
-    } catch (_) {}
-    final changed = next != _speedBps;
-    _speedBps = next;
-    // 必须在异步测速完成后再 notify；以前先 notify 再 unawaited poll，浮层永远慢一拍甚至一直 0。
-    if (changed || _buffering || _stalled) {
-      notifyListeners();
+      final changed = next != _speedBps;
+      _speedBps = next;
+      if (changed || _buffering || _stalled) {
+        notifyListeners();
+      }
+    } finally {
+      _speedBusy = false;
     }
   }
 

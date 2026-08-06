@@ -30,8 +30,10 @@ class EngineLauncher {
 
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      if (await _pingReady(baseUrl)) return true;
-      if (baseUrl != 'http://127.0.0.1:9978' && await _pingReady('http://127.0.0.1:9978')) {
+      // 只等引擎进程活着（health.ok）。不要等 health.ready：
+      // 未配置点播源时 ready 会一直 false，否则首启白屏空转最多 30 秒。
+      if (await _ping(baseUrl)) return true;
+      if (baseUrl != 'http://127.0.0.1:9978' && await _ping('http://127.0.0.1:9978')) {
         baseUrl = 'http://127.0.0.1:9978';
         return true;
       }
@@ -41,7 +43,7 @@ class EngineLauncher {
         _proc = null;
         await _startOnce();
       }
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     }
     return _ping(baseUrl);
   }
@@ -60,15 +62,6 @@ class EngineLauncher {
     try {
       final h = await KotvApi(baseUrl: base).health().timeout(const Duration(seconds: 2));
       return h['ok'] == true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<bool> _pingReady(String base) async {
-    try {
-      final h = await KotvApi(baseUrl: base).health().timeout(const Duration(seconds: 2));
-      return h['ok'] == true && h['ready'] == true;
     } catch (_) {
       return false;
     }
