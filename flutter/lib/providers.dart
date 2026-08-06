@@ -24,16 +24,24 @@ final configProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final ok = await ref.watch(engineReadyProvider.future);
   if (!ok) return const <String, dynamic>{};
   final api = ref.watch(apiProvider);
-  // 引擎起来即可取配置；未填源仓库时 ready=false 也是合法状态，不要空转重试。
+  // 有源时短等 ready（拉仓/jar）；无源则立刻返回，避免空转。
+  for (var i = 0; i < 20; i++) {
+    try {
+      final cfg = await api.getConfig();
+      if (cfg['ready'] == true) return cfg;
+      final source = '${cfg['source'] ?? ''}'.trim();
+      final err = '${cfg['error'] ?? ''}';
+      final noSource = source.isEmpty &&
+          (err.isEmpty || err.contains('未配置') || err.contains('点播源') || err.contains('请输入'));
+      if (noSource) return cfg;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    } catch (_) {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+  }
   try {
     return await api.getConfig();
   } catch (_) {
-    for (var i = 0; i < 10; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      try {
-        return await api.getConfig();
-      } catch (_) {}
-    }
     return const <String, dynamic>{};
   }
 });

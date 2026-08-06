@@ -30,12 +30,23 @@ class EngineLauncher {
 
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      // 只等引擎进程活着（health.ok）。不要等 health.ready：
-      // 未配置点播源时 ready 会一直 false，否则首启白屏空转最多 30 秒。
-      if (await _ping(baseUrl)) return true;
-      if (baseUrl != 'http://127.0.0.1:9978' && await _ping('http://127.0.0.1:9978')) {
-        baseUrl = 'http://127.0.0.1:9978';
-        return true;
+      final bases = <String>{baseUrl, 'http://127.0.0.1:9978'};
+      for (final base in bases) {
+        final h = await _health(base);
+        if (h == null || h['ok'] != true) continue;
+        if (base != baseUrl) baseUrl = base;
+
+        // 源已加载完成
+        if (h['ready'] == true) return true;
+
+        final source = '${h['source'] ?? ''}'.trim();
+        final err = '${h['error'] ?? ''}';
+        // 未配置点播源：引擎起来即可进 UI，勿空等 ready（会一直 false）
+        if (source.isEmpty && _looksLikeNoSource(err)) {
+          return true;
+        }
+        // 已配置源但还在拉仓/加载 jar：继续等到 ready 或超时
+        break;
       }
       // 本进程托管的引擎若已退出，再拉一次；禁止在仍存活时 pkill 重开（竞态根因）。
       if (_owned && _proc != null && !await _procAlive(_proc!)) {
@@ -45,6 +56,7 @@ class EngineLauncher {
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
+    // 超时：有源也先放行进壳，页面会显示「未就绪/重试」；无源同理。
     return _ping(baseUrl);
   }
 
@@ -58,13 +70,23 @@ class EngineLauncher {
     return ensureReady(timeout: const Duration(seconds: 20));
   }
 
-  Future<bool> _ping(String base) async {
+  Future<Map<String, dynamic>?> _health(String base) async {
     try {
       final h = await KotvApi(baseUrl: base).health().timeout(const Duration(seconds: 2));
-      return h['ok'] == true;
+      return Map<String, dynamic>.from(h);
     } catch (_) {
-      return false;
+      return null;
     }
+  }
+
+  Future<bool> _ping(String base) async {
+    final h = await _health(base);
+    return h != null && h['ok'] == true;
+  }
+
+  static bool _looksLikeNoSource(String err) {
+    if (err.trim().isEmpty) return true; // 源字段空且无错误：视为未配源
+    return err.contains('未配置') || err.contains('点播源') || err.contains('请输入');
   }
 
   Future<bool> _procAlive(Process proc) async {

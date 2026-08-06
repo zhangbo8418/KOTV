@@ -32,14 +32,17 @@ import (
 func (a *App) APIHealth() map[string]any {
 	_, _, sess := a.scope()
 	ready, errMsg := a.Ready, a.ErrMsg
+	source := settings.Get(settings.VOD)
 	if sess != nil {
 		ready, errMsg = sess.Ready, sess.ErrMsg
+		source = sess.Source
 	}
 	return map[string]any{
 		"ok":            true,
 		"engine":        "kotv",
 		"ready":         ready,
 		"error":         errMsg,
+		"source":        strings.TrimSpace(source),
 		"port":          a.Server.Port(),
 		"version":       "0.1.0",
 		"remoteAuth":    strings.EqualFold(settings.Get(settings.RemoteAuth), "true"),
