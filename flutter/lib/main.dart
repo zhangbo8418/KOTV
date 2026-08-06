@@ -139,6 +139,13 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
     ref.read(platformBrightnessProvider.notifier).state = b;
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    // 后台回来：Android 常把子进程引擎冻死/杀掉，不恢复则 /api/v1/play 会 Connection closed。
+    unawaited(ref.read(engineLauncherProvider).onAppResumed());
+  }
+
   Timer? _saveBoundsTimer;
 
   Future<void> _persistWindowBounds() async {

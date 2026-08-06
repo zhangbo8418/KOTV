@@ -61,13 +61,52 @@ class EngineLauncher {
   }
 
   /// API 调用失败时调用：若引擎挂了则重启。
-  Future<bool> recoverIfNeeded() async {
-    if (await _ping(baseUrl)) return true;
-    if (DateTime.now().difference(_lastStartAttempt) < const Duration(seconds: 2)) {
+  /// [forceRestart] 为 true 时，即使 ping 偶然成功也先确保 spider，并在随后的 play 失败路径里可再调。
+  Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
+    if (_shuttingDown) return false;
+    await _ensureAndroidSpiderService();
+    if (!forceRestart && await _ping(baseUrl)) return true;
+    // 后台被杀/冻结后常见：进程句柄还在但 HTTP 已死。
+    await _killOwnedQuietly();
+    if (DateTime.now().difference(_lastStartAttempt) < const Duration(seconds: 2) && !forceRestart) {
       await Future<void>.delayed(const Duration(seconds: 2));
-      return _ping(baseUrl);
+      if (await _ping(baseUrl)) return true;
     }
     return ensureReady(timeout: const Duration(seconds: 20));
+  }
+
+  /// 从后台回前台：先确保 :9979 spider，再探 :9978；不通则杀掉僵死子进程并重拉。
+  Future<bool> onAppResumed() async {
+    if (_shuttingDown) return false;
+    if (kIsWeb || Platform.isIOS) {
+      return _ping(baseUrl);
+    }
+    debugPrint('engine: app resumed → health check');
+    await _ensureAndroidSpiderService();
+    if (await _ping(baseUrl)) {
+      debugPrint('engine: still healthy after resume');
+      return true;
+    }
+    debugPrint('engine: unhealthy after resume → restart');
+    await _killOwnedQuietly();
+    return ensureReady(timeout: const Duration(seconds: 15));
+  }
+
+  Future<void> _killOwnedQuietly() async {
+    final proc = _proc;
+    if (proc == null || !_owned) {
+      _proc = null;
+      _owned = false;
+      return;
+    }
+    _owned = false;
+    _proc = null;
+    try {
+      proc.kill();
+    } catch (_) {}
+    try {
+      await proc.exitCode.timeout(const Duration(milliseconds: 800));
+    } catch (_) {}
   }
 
   Future<Map<String, dynamic>?> _health(String base) async {
@@ -298,11 +337,22 @@ class EngineLauncher {
 
   Future<void> _ensureAndroidSpiderService() async {
     if (!Platform.isAndroid) return;
-    if (_androidSpiderServiceStarted) return;
+    // 已标记启动过也要再探：后台杀进程后 :9979 会没了，不能靠 flag 跳过。
+    if (_androidSpiderServiceStarted) {
+      if (await _pingHttpOk('http://127.0.0.1:9979/health')) return;
+      debugPrint('android spider service lost on 9979; restarting');
+      _androidSpiderServiceStarted = false;
+    }
 
     const ch = MethodChannel('kotv_android_spider');
     for (var i = 0; i < 6; i++) {
       try {
+        // stop+start：Manager 若仍握着已死实例，单调 start 会直接 return。
+        if (i == 0 || !_androidSpiderServiceStarted) {
+          try {
+            await ch.invokeMethod<void>('stop');
+          } catch (_) {}
+        }
         await ch.invokeMethod<void>('start');
       } catch (e) {
         debugPrint('android spider service start failed: $e');

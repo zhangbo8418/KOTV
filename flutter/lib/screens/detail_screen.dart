@@ -688,12 +688,26 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _fsEpIdx.value = epIdx;
     if (epLooksMagnet) _startBtProgressPoll();
     try {
-      final data = await ref.read(apiProvider).play(
-            url: ep.url,
-            site: d.site.isNotEmpty ? d.site : widget.site,
-            id: widget.id,
-            flag: flag.flag,
-          );
+      Map<String, dynamic> data;
+      try {
+        data = await ref.read(apiProvider).play(
+              url: ep.url,
+              site: d.site.isNotEmpty ? d.site : widget.site,
+              id: widget.id,
+              flag: flag.flag,
+            );
+      } catch (e) {
+        // 从后台回来常见引擎僵死：Connection closed / refused。先拉起再重试一次。
+        if (!_isLocalEngineConnError(e)) rethrow;
+        final ok = await ref.read(engineLauncherProvider).recoverIfNeeded(forceRestart: true);
+        if (!ok || serial != _playAtSerial || !mounted) rethrow;
+        data = await ref.read(apiProvider).play(
+              url: ep.url,
+              site: d.site.isNotEmpty ? d.site : widget.site,
+              id: widget.id,
+              flag: flag.flag,
+            );
+      }
       if (serial != _playAtSerial || !mounted) return;
       final playUrl = '${data['url'] ?? ''}';
       if (playUrl.isEmpty) throw Exception('空播放地址');
@@ -799,6 +813,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (s.startsWith('播放失败:')) return s;
     if (s.startsWith('解析失败:')) return '播放失败: ${s.substring('解析失败:'.length).trimLeft()}';
     return '播放失败: $s';
+  }
+
+  bool _isLocalEngineConnError(Object e) {
+    final s = '$e';
+    return s.contains('Connection closed') ||
+        s.contains('Connection refused') ||
+        s.contains('SocketException') ||
+        s.contains('ClientException') ||
+        s.contains('Failed host lookup') ||
+        s.contains('TimeoutException') ||
+        s.contains('Broken pipe');
   }
 
   Future<void> _enterFullscreen() async {
