@@ -118,9 +118,10 @@ class LiveCatchupChrome extends StatelessWidget {
                   child: Slider(
                     value: pos.inMilliseconds.clamp(0, total.toInt()).toDouble(),
                     secondaryTrackValue: () {
-                      final p = pos.inMilliseconds.toDouble();
-                      final b = player.buffered.inMilliseconds.toDouble();
-                      return b.clamp(p, total);
+                      if (total <= 0) return 0.0;
+                      final p = pos.inMilliseconds.toDouble().clamp(0.0, total);
+                      final b = player.buffered.inMilliseconds.toDouble().clamp(0.0, total);
+                      return b < p ? p : b;
                     }(),
                     max: total,
                     onChanged: dur.inMilliseconds <= 0

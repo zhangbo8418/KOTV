@@ -176,10 +176,12 @@ SliderThemeData _sliderTheme(BuildContext context) {
 }
 
 double _sliderBuffered(KotvPlayback player, double total) {
-  final pos = player.position.inMilliseconds.toDouble();
-  final buf = player.buffered.inMilliseconds.toDouble();
-  if (total <= 0) return pos;
-  return buf.clamp(pos, total);
+  // ijk 等引擎常在 duration 仍为 0 时已有 position（续播/缓冲），
+  // 若 pos > total，`buf.clamp(pos, total)` 会抛 Invalid argument(s): pos。
+  if (total <= 0) return 0;
+  final pos = player.position.inMilliseconds.toDouble().clamp(0.0, total);
+  final buf = player.buffered.inMilliseconds.toDouble().clamp(0.0, total);
+  return buf < pos ? pos : buf;
 }
 
 class _IconAct extends StatelessWidget {

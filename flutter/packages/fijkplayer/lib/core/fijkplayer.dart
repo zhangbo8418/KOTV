@@ -515,23 +515,33 @@ class FijkPlayer extends ChangeNotifier implements ValueListenable<FijkValue> {
     return 0;
   }
 
+  static int _eventInt(dynamic v, [int fallback = 0]) {
+    if (v == null) return fallback;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return fallback;
+  }
+
   void _eventListener(dynamic event) {
     final Map<dynamic, dynamic> map = event;
     switch (map['event']) {
       case 'prepared':
-        int duration = map['duration'] ?? 0;
+        int duration = _eventInt(map['duration']);
         Duration dur = Duration(milliseconds: duration);
         _setValue(value.copyWith(duration: dur, prepared: true));
         FijkLog.i("$this prepared duration $dur");
         break;
       case 'rotate':
-        int degree = map['degree'] ?? 0;
+        int degree = _eventInt(map['degree']);
         _setValue(value.copyWith(rotate: degree));
         FijkLog.i("$this rotate degree $degree");
         break;
       case 'state_change':
-        int newStateId = map['new'] ?? 0;
-        int _oldState = map['old'] ?? 0;
+        int newStateId = _eventInt(map['new']);
+        int _oldState = _eventInt(map['old']);
+        if (newStateId < 0 || newStateId >= FijkState.values.length) {
+          break;
+        }
         FijkState fpState = FijkState.values[newStateId];
         FijkState oldState =
             (_oldState >= 0 && _oldState < FijkState.values.length)
@@ -570,23 +580,26 @@ class FijkPlayer extends ChangeNotifier implements ValueListenable<FijkValue> {
         FijkLog.d("$this freeze ${value ? "start" : "end"}");
         break;
       case 'buffering':
-        int head = map['head'] ?? 0;
-        int percent = map['percent'] ?? 0;
+        int head = _eventInt(map['head']);
+        int percent = _eventInt(map['percent']);
         _bufferPos = Duration(milliseconds: head);
         _bufferPosController.add(_bufferPos);
         _bufferPercent = percent;
         _bufferPercentController.add(percent);
         break;
       case 'pos':
-        int pos = map['pos'];
+        int pos = _eventInt(map['pos']);
         _currentPos = Duration(milliseconds: pos);
         if (!_seeking) {
           _currentPosController.add(_currentPos);
         }
         break;
       case 'size_changed':
-        double width = map['width'].toDouble();
-        double height = map['height'].toDouble();
+        double width = (map['width'] as num?)?.toDouble() ?? 0;
+        double height = (map['height'] as num?)?.toDouble() ?? 0;
+        if (!width.isFinite || !height.isFinite || width <= 0 || height <= 0) {
+          break;
+        }
         FijkLog.i("$this size changed ($width, $height)");
         _setValue(value.copyWith(size: Size(width, height)));
         break;

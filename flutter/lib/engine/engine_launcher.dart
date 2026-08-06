@@ -15,11 +15,13 @@ class EngineLauncher {
 
   Process? _proc;
   Future<void>? _starting;
+  Future<void>? _spiderEnsuring;
   bool _owned = false;
   bool _shuttingDown = false;
   bool _androidSpiderServiceStarted = false;
   String baseUrl = 'http://127.0.0.1:9978';
   DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastResumeCheck = DateTime.fromMillisecondsSinceEpoch(0);
 
   KotvApi client() => KotvApi(baseUrl: baseUrl);
 
@@ -61,37 +63,48 @@ class EngineLauncher {
   }
 
   /// API 调用失败时调用：若引擎挂了则重启。
-  /// [forceRestart] 只表示「务必确保可用」，**引擎已通时绝不误杀**。
+  ///
+  /// **引擎 :9978 已通时绝不动 spider。** bd0a8de 曾在此无条件
+  /// `_ensureAndroidSpiderService`（还先 stop），导致首页 `_reload`/换源每次
+  /// 都把 :9979 干掉；随后 detail/home 的 jar 调用会卡到 ~120s，UI 表现为
+  /// 「无限加载中」而不是立刻失败。
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
-    await _ensureAndroidSpiderService();
     if (await _ping(baseUrl)) return true;
     debugPrint('engine: recoverIfNeeded force=$forceRestart → restart');
     if (Platform.isAndroid) {
       await _startAndroidEngineService();
+      await _ensureAndroidSpiderService(forceRestart: true);
     } else {
       await _killOwnedQuietly();
     }
     return ensureReady(timeout: const Duration(seconds: 20));
   }
 
-  /// 从后台回前台：先拉前景服务+ spider，再探 :9978；不通才重启。
+  /// 从后台回前台：只探活。健康则立即返回，不 stop/restart spider。
   Future<bool> onAppResumed() async {
     if (_shuttingDown) return false;
     if (kIsWeb || Platform.isIOS) {
       return _ping(baseUrl);
     }
-    debugPrint('engine: app resumed → health check');
-    if (Platform.isAndroid) {
-      await _startAndroidEngineService();
+    final now = DateTime.now();
+    if (now.difference(_lastResumeCheck) < const Duration(seconds: 3)) {
+      if (await _ping(baseUrl)) return true;
     }
-    await _ensureAndroidSpiderService();
+    _lastResumeCheck = now;
+    debugPrint('engine: app resumed → health check');
     if (await _ping(baseUrl)) {
       debugPrint('engine: still healthy after resume');
+      // 后台可能只杀了 spider：异步软拉起，不阻塞、不 stop。
+      unawaited(_ensureAndroidSpiderService(forceRestart: false));
       return true;
     }
     debugPrint('engine: unhealthy after resume → restart');
-    if (!Platform.isAndroid) {
+    _lastStartAttempt = now;
+    if (Platform.isAndroid) {
+      await _startAndroidEngineService();
+      await _ensureAndroidSpiderService(forceRestart: true);
+    } else {
       await _killOwnedQuietly();
     }
     return ensureReady(timeout: const Duration(seconds: 15));
@@ -361,37 +374,73 @@ class EngineLauncher {
     }
   }
 
-  Future<void> _ensureAndroidSpiderService() async {
+  /// 确保 :9979 spider 在听。
+  ///
+  /// 注意：MainActivity.onPostResume 也会 start。bd0a8de 曾在每次 ensure 时先
+  /// `stop()`，会杀掉已健康的服务 → 详情/换源打 jar 全部失败。默认只幂等 start；
+  /// 仅 [forceRestart] 或多次 start 仍不通时才 stop+start。
+  Future<void> _ensureAndroidSpiderService({bool forceRestart = false}) async {
     if (!Platform.isAndroid) return;
-    // 已标记启动过也要再探：后台杀进程后 :9979 会没了，不能靠 flag 跳过。
-    if (_androidSpiderServiceStarted) {
-      if (await _pingHttpOk('http://127.0.0.1:9979/health')) return;
-      debugPrint('android spider service lost on 9979; restarting');
-      _androidSpiderServiceStarted = false;
+    if (!forceRestart && await _pingHttpOk('http://127.0.0.1:9979/health')) {
+      _androidSpiderServiceStarted = true;
+      return;
     }
 
-    const ch = MethodChannel('kotv_android_spider');
-    for (var i = 0; i < 6; i++) {
-      try {
-        // stop+start：Manager 若仍握着已死实例，单调 start 会直接 return。
-        if (i == 0 || !_androidSpiderServiceStarted) {
-          try {
-            await ch.invokeMethod<void>('stop');
-          } catch (_) {}
-        }
-        await ch.invokeMethod<void>('start');
-      } catch (e) {
-        debugPrint('android spider service start failed: $e');
-      }
-      // 确认 :9979 已监听（warm-up 失败也不应挡住 bind）
-      if (await _pingHttpOk('http://127.0.0.1:9979/health')) {
+    final inflight = _spiderEnsuring;
+    if (inflight != null) {
+      await inflight;
+      if (!forceRestart && await _pingHttpOk('http://127.0.0.1:9979/health')) {
         _androidSpiderServiceStarted = true;
-        debugPrint('android spider service ready on 9979');
         return;
       }
-      await Future<void>.delayed(Duration(milliseconds: 300 + i * 200));
     }
-    debugPrint('android spider service: 9979 still down after retries');
+
+    final done = Completer<void>();
+    _spiderEnsuring = done.future;
+    try {
+      if (forceRestart) {
+        debugPrint('android spider: forceRestart → stop then start');
+        _androidSpiderServiceStarted = false;
+      } else if (_androidSpiderServiceStarted) {
+        debugPrint('android spider service lost on 9979; restarting without immediate stop');
+        _androidSpiderServiceStarted = false;
+      }
+
+      const ch = MethodChannel('kotv_android_spider');
+      for (var i = 0; i < 6; i++) {
+        // 负载下偶发 ping 失败：停之前再探一次，避免误杀活着的 :9979。
+        if (!forceRestart && await _pingHttpOk('http://127.0.0.1:9979/health')) {
+          _androidSpiderServiceStarted = true;
+          debugPrint('android spider service ready on 9979');
+          return;
+        }
+        try {
+          // i==0 且非 force：只 start（Manager 已在跑则直接 return）。
+          // i>=2 或 force 首轮：stop+start，清掉「句柄还在但端口已死」的僵死实例。
+          final needStop = (forceRestart && i == 0) || i >= 2;
+          if (needStop) {
+            try {
+              await ch.invokeMethod<void>('stop');
+            } catch (_) {}
+          }
+          await ch.invokeMethod<void>('start');
+        } catch (e) {
+          debugPrint('android spider service start failed: $e');
+        }
+        if (await _pingHttpOk('http://127.0.0.1:9979/health')) {
+          _androidSpiderServiceStarted = true;
+          debugPrint('android spider service ready on 9979');
+          return;
+        }
+        await Future<void>.delayed(Duration(milliseconds: 300 + i * 200));
+      }
+      debugPrint('android spider service: 9979 still down after retries');
+    } finally {
+      if (!done.isCompleted) done.complete();
+      if (identical(_spiderEnsuring, done.future)) {
+        _spiderEnsuring = null;
+      }
+    }
   }
 
   Future<bool> _pingHttpOk(String url) async {
