@@ -448,6 +448,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
             onBack: () => Navigator.of(context).maybePop(),
             onSearch: () => goKotvPage(ref, KotvPage.search),
             onProfile: () => goKotvPage(ref, KotvPage.profile),
+            onNews: () => showAppNews(context, '用户管理：远端鉴权、注册开关与账号维护'),
             title: '用户管理',
           ),
           if (_status.isNotEmpty || _busy)
