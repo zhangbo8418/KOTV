@@ -45,7 +45,7 @@ Go Engine（可部署到服务器，多前端并发）
 | **遥控队列** | control / search 按 ScopeID 分桶；`/action`：`userId`→远端，`clientId`/`scopeId` 兼容本机 |
 | **OkHttp net** | 随各用户当前源按 ScopeID 写入 `NetProfiles`；请求 ScopeID 兼用于软取消 |
 | **进程模型** | **只有一个 Go 引擎**；远端按用户隔离的是 **JVM（含 dex 加载）/ Python / JS** 运行时，不是多套引擎 |
-| **远端鉴权** | `settings.remoteAuth` 开启后，非本机前端连接时登录一次，之后与本机同体验并 `u:` 隔离。本机免登录。用户管理：本机免登；非本机需已登录管理员。**Web 包 = 引擎 + webapp，同端口放出**；不进 PC/安卓/iOS 包；无 webapp 时 `/` 仍为遥控，有则遥控在 `/remote/` |
+| **远端鉴权** | `settings.remoteAuth` 开启后，非本机连接需登录。**Web**：固定同源后端，打开页登录账号（无「远端登录/改引擎」）。**PC/安卓**：设置「引擎地址」+「远端登录」。本机免登录。用户管理：本机免登；非本机需已登录管理员。Web 包 = 引擎 + webapp 同端口；无 webapp 时 `/` 仍为遥控 |
 | **脚本 vs 运行时** | **脚本文件**全局共享；本机共享一套 JVM/Py/JS；远端每用户独立。`session/leave` → 只杀该用户运行时 |
 | 换源 / 取消 | **立刻硬杀**所属运行时（`RestartCallerRuntime`：本机共享池或远端该用户）；不在外层死等 |
 | JAR / Py / JS | 磁盘缓存共享；**单次调用自带超时**（JAR 120s / JS·Py 45s）；慢站只失败该次请求 |

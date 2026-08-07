@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../api/kotv_api.dart';
 import '../api/kotv_client_id.dart';
+import '../api/kotv_engine_url.dart';
 
 /// 探测并拉起本机 Go 引擎；随 UI 进程生命周期托管（窗口关闭即退出）。
 class EngineLauncher {
@@ -20,38 +21,44 @@ class EngineLauncher {
   bool _shuttingDown = false;
   bool _androidSpiderServiceStarted = false;
   String baseUrl = 'http://127.0.0.1:9978';
+  KotvApi? _api;
   DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastResumeCheck = DateTime.fromMillisecondsSinceEpoch(0);
 
-  KotvApi client() => KotvApi(baseUrl: baseUrl);
+  KotvApi client() {
+    _api ??= KotvApi(baseUrl: baseUrl);
+    _api!.baseUrl = baseUrl;
+    return _api!;
+  }
+
+  /// 切换引擎地址。远端地址不会再被 ensureReady 静默改回本机。
+  void applyBaseUrl(String url) {
+    final n = kotvNormalizeEngineBaseUrl(url);
+    baseUrl = n.isEmpty ? 'http://127.0.0.1:9978' : n;
+    _api?.baseUrl = baseUrl;
+  }
 
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {
     // 尽早固化 clientId，后续 API / ui/poll 带同一身份。
     await kotvClientId();
-    await _startOnce();
+    final remote = !kotvIsLocalEngineBaseUrl(baseUrl);
+    // 远端引擎：只探测配置的地址，绝不要拉起/回退本机 :9978。
+    if (!remote) {
+      await _startOnce();
+    }
 
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      final bases = <String>{baseUrl, 'http://127.0.0.1:9978'};
-      for (final base in bases) {
-        final h = await _health(base);
-        if (h == null || h['ok'] != true) continue;
-        if (base != baseUrl) baseUrl = base;
-
-        // 源已加载完成
+      final h = await _health(baseUrl);
+      if (h != null && h['ok'] == true) {
         if (h['ready'] == true) return true;
-
         final source = '${h['source'] ?? ''}'.trim();
         final err = '${h['error'] ?? ''}';
-        // 未配置点播源：引擎起来即可进 UI，勿空等 ready（会一直 false）
         if (source.isEmpty && _looksLikeNoSource(err)) {
           return true;
         }
-        // 已配置源但还在拉仓/加载 jar：继续等到 ready 或超时
-        break;
-      }
-      // 本进程托管的引擎若已退出，再拉一次；禁止在仍存活时 pkill 重开（竞态根因）。
-      if (_owned && _proc != null && !await _procAlive(_proc!)) {
+      } else if (!remote && _owned && _proc != null && !await _procAlive(_proc!)) {
+        // 本进程托管的引擎若已退出，再拉一次；禁止在仍存活时 pkill 重开（竞态根因）。
         _owned = false;
         _proc = null;
         await _startOnce();
@@ -71,6 +78,8 @@ class EngineLauncher {
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
     if (await _ping(baseUrl)) return true;
+    // 远端：不能重启本机引擎来「修复」
+    if (!kotvIsLocalEngineBaseUrl(baseUrl)) return false;
     debugPrint('engine: recoverIfNeeded force=$forceRestart → restart');
     if (Platform.isAndroid) {
       await _startAndroidEngineService();
@@ -85,6 +94,9 @@ class EngineLauncher {
   Future<bool> onAppResumed() async {
     if (_shuttingDown) return false;
     if (kIsWeb || Platform.isIOS) {
+      return _ping(baseUrl);
+    }
+    if (!kotvIsLocalEngineBaseUrl(baseUrl)) {
       return _ping(baseUrl);
     }
     final now = DateTime.now();
@@ -282,6 +294,10 @@ class EngineLauncher {
 
   Future<void> _tryStartBundled() async {
     if (kIsWeb || Platform.isIOS) return;
+    if (!kotvIsLocalEngineBaseUrl(baseUrl)) {
+      debugPrint('engine: skip local start; remote baseUrl=$baseUrl');
+      return;
+    }
     _lastStartAttempt = DateTime.now();
     try {
       await _ensureAndroidSpiderService();

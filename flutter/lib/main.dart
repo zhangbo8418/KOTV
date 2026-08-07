@@ -4,12 +4,12 @@ import 'util/kotv_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'desktop/mini_player_window.dart';
+import 'api/kotv_engine_url.dart';
 import 'engine/engine_launcher.dart';
 import 'player/buffer_budget.dart';
 import 'providers.dart';
@@ -19,26 +19,6 @@ import 'theme/kotv_palette.dart';
 import 'theme/kotv_theme.dart';
 import 'widgets/chrome.dart';
 import 'widgets/h_scroll.dart';
-
-Future<String?> httpGetEngineHint(String origin) async {
-  try {
-    final res = await http.get(Uri.parse('$origin/api/engine-hint')).timeout(const Duration(seconds: 2));
-    if (res.statusCode != 200) return null;
-    final m = RegExp(r'"engine"\s*:\s*"([^"]+)"').firstMatch(res.body);
-    return m?.group(1);
-  } catch (_) {
-    return null;
-  }
-}
-
-Future<bool> httpLooksLikeEngine(String origin) async {
-  try {
-    final res = await http.get(Uri.parse('$origin/api/v1/health')).timeout(const Duration(seconds: 2));
-    return res.statusCode == 200 && res.body.contains('"ok"');
-  } catch (_) {
-    return false;
-  }
-}
 
 /// Release 构建里 build 抛异常会渲染成一块灰色空白（默认 ErrorWidget），
 /// 页面看着像"没了"却无从追查；换成可读文案并把错误打到日志。
@@ -105,25 +85,11 @@ Future<void> main() async {
     });
   }
   var engineUrl = prefs.getString('engine_base_url');
-  // Web：?engine= → 已保存 → 同源若是引擎 → engine-hint → 本机默认。
+  // Web：固定同源引擎（本页所在服务器），不可改远端地址。
   if (kIsWeb) {
-    final fromQuery = Uri.base.queryParameters['engine']?.trim();
-    if (fromQuery != null && fromQuery.isNotEmpty) {
-      engineUrl = fromQuery;
-      await prefs.setString('engine_base_url', fromQuery);
-    } else if (engineUrl == null || engineUrl.isEmpty) {
-      final origin = Uri.base.origin;
-      var hinted = 'http://127.0.0.1:9978';
-      if (origin.isNotEmpty && origin != 'null') {
-        if (await httpLooksLikeEngine(origin)) {
-          hinted = origin;
-        } else {
-          final h = await httpGetEngineHint(origin);
-          if (h != null && h.isNotEmpty) hinted = h;
-        }
-      }
-      engineUrl = hinted;
-    }
+    await prefs.remove('engine_base_url');
+    final origin = Uri.base.origin;
+    engineUrl = (origin.isNotEmpty && origin != 'null') ? origin : 'http://127.0.0.1:9978';
   }
   runApp(ProviderScope(
     overrides: [
@@ -301,7 +267,7 @@ class _EngineOfflinePage extends ConsumerWidget {
             autofocus: true,
             style: TextStyle(color: p.fg),
             decoration: InputDecoration(
-              hintText: '例如：http://10.0.0.8:9978 或 https://api.example.com',
+              hintText: 'http://10.0.0.8:9978 或 https://api.example.com',
               hintStyle: TextStyle(color: p.muted),
             ),
           ),
@@ -312,10 +278,17 @@ class _EngineOfflinePage extends ConsumerWidget {
         ],
       ),
     );
-    if (v == null || v.isEmpty) return;
+    if (v == null) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('engine_base_url', v);
-    launcher.baseUrl = v;
+    final n = kotvNormalizeEngineBaseUrl(v);
+    if (n.isEmpty) {
+      await prefs.remove('engine_base_url');
+      launcher.applyBaseUrl('');
+    } else {
+      await prefs.setString('engine_base_url', n);
+      launcher.applyBaseUrl(n);
+    }
+    ref.read(apiProvider).baseUrl = launcher.baseUrl;
     ref.invalidate(engineReadyProvider);
   }
 
@@ -334,14 +307,16 @@ class _EngineOfflinePage extends ConsumerWidget {
                 const Text('KO影视', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 12),
                 Text(
-                  Platform.isIOS || Platform.isAndroid
-                      ? '请先连接可用后端服务，或确认本机引擎已启动'
-                      : '无法连接 Go 引擎\n请先启动引擎或检查设置中的引擎地址',
+                  kIsWeb
+                      ? '无法连接本站后端服务\n请确认引擎已启动后刷新页面'
+                      : Platform.isIOS || Platform.isAndroid
+                          ? '请先连接可用后端服务，或确认本机引擎已启动'
+                          : '无法连接 Go 引擎\n请先启动引擎或检查设置中的引擎地址',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: muted),
                 ),
                 const SizedBox(height: 16),
-                if (Platform.isIOS || Platform.isAndroid)
+                if (!kIsWeb && (Platform.isIOS || Platform.isAndroid))
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -361,7 +336,7 @@ class _EngineOfflinePage extends ConsumerWidget {
                   )
                 else
                   AppPill(
-                    label: '重试',
+                    label: kIsWeb ? '刷新重试' : '重试',
                     width: 120,
                     autofocus: true,
                     onTap: () => ref.invalidate(engineReadyProvider),

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,7 +7,7 @@ import '../api/kotv_auth_token.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
 
-/// 非本机且开启远端鉴权时：连接后端先登录一次，之后整次会话与本机同体验。
+/// Web：打开页登录本站账号（固定同源后端）。PC/安卓请走设置「远端登录」。
 Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
   Map<String, dynamic> st;
@@ -28,7 +29,13 @@ Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async
   }
 
   if (!context.mounted) return false;
-  return showRemoteLoginDialog(context, ref, allowRegister: st['allowRegister'] == true);
+  return showRemoteLoginDialog(
+    context,
+    ref,
+    allowRegister: st['allowRegister'] == true,
+    title: kIsWeb ? '登录' : '远端登录',
+    subtitle: kIsWeb ? '使用本站账号登录后即可观看' : '连接此引擎需登录一次，之后与本机使用相同',
+  );
 }
 
 Future<bool> showRemoteLoginDialog(
@@ -36,12 +43,15 @@ Future<bool> showRemoteLoginDialog(
   WidgetRef ref, {
   bool allowRegister = false,
   String title = '远端登录',
+  String? subtitle,
 }) async {
   final api = ref.read(apiProvider);
   final p = KotvPalette.of(context);
   final userCtrl = TextEditingController();
   final passCtrl = TextEditingController();
   var modeRegister = false;
+  final hint = subtitle ??
+      (kIsWeb ? '使用本站账号登录后即可观看' : '连接此引擎需登录一次，之后与本机使用相同');
 
   final ok = await showDialog<bool>(
     context: context,
@@ -61,7 +71,7 @@ Future<bool> showRemoteLoginDialog(
                 Text(title, style: TextStyle(color: p.fg, fontWeight: FontWeight.w700, fontSize: 18)),
                 const SizedBox(height: 8),
                 Text(
-                  modeRegister ? '创建账号后将自动登录' : '连接此引擎需登录一次，之后与本机使用相同',
+                  modeRegister ? '创建账号后将自动登录' : hint,
                   style: TextStyle(color: p.muted, fontSize: 13),
                 ),
                 const SizedBox(height: 14),

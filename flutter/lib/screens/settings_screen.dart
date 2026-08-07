@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../util/kotv_io.dart';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -358,6 +359,54 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     setState(() => _status = msg);
     showAppNews(context, msg);
+  }
+
+  Future<void> _applyEngineUrl(String raw) async {
+    final launcher = ref.read(engineLauncherProvider);
+    final normalized = kotvNormalizeEngineBaseUrl(raw);
+    _engineCtrl.text = normalized;
+    final prefs = await SharedPreferences.getInstance();
+    if (normalized.isEmpty) {
+      await prefs.remove('engine_base_url');
+      launcher.applyBaseUrl('');
+    } else {
+      await prefs.setString('engine_base_url', normalized);
+      launcher.applyBaseUrl(normalized);
+    }
+    // apiProvider 缓存了 KotvApi 实例，必须同步 baseUrl
+    ref.read(apiProvider).baseUrl = launcher.baseUrl;
+    if (!mounted) return;
+    setState(() => _status = '正在连接 ${launcher.baseUrl}…');
+
+    ref.invalidate(engineReadyProvider);
+    ref.invalidate(configProvider);
+    ref.invalidate(homeProvider);
+    ref.invalidate(settingsProvider);
+
+    try {
+      final api = ref.read(apiProvider);
+      final h = await api.health().timeout(const Duration(seconds: 6));
+      if (h['ok'] != true) {
+        throw Exception('${h['error'] ?? '引擎未就绪'}');
+      }
+      final remote = !kotvIsLocalEngineBaseUrl(launcher.baseUrl);
+      var news = '已连接\n${launcher.baseUrl}';
+      if (remote) {
+        try {
+          final st = await api.authStatus().timeout(const Duration(seconds: 4));
+          if (st['authRequired'] == true) {
+            news += '\n\n此引擎需要登录，请点「远端登录」';
+          }
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      setState(() => _status = remote ? '远端引擎已连接' : '本机引擎已连接');
+      showAppNews(context, news);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '连接失败: $e');
+      showAppNews(context, '连接失败\n${launcher.baseUrl}\n$e');
+    }
   }
 
   Future<void> _engineLogin() async {
@@ -934,23 +983,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             }
                           },
                         ),
-                        KotvSettingsCell(
-                          label: '引擎地址',
-                          value: _ellipsize(launcher.baseUrl, 12),
-                          onTap: () => _prompt('Engine Base URL', 'http://127.0.0.1:9978', _engineCtrl.text, (v) async {
-                            _engineCtrl.text = v;
-                            final p = await SharedPreferences.getInstance();
-                            if (v.isEmpty) {
-                              await p.remove('engine_base_url');
-                            } else {
-                              await p.setString('engine_base_url', v);
-                              launcher.baseUrl = v;
-                            }
-                            ref.invalidate(engineReadyProvider);
-                            setState(() => _status = '引擎地址已保存');
-                          }),
-                        ),
-                        if (!kotvIsLocalEngineBaseUrl(launcher.baseUrl))
+                        // Web 固定同源后端，不提供改引擎地址。
+                        if (!kIsWeb)
+                          KotvSettingsCell(
+                            label: '引擎地址',
+                            value: _ellipsize(launcher.baseUrl, 12),
+                            onTap: () => _prompt(
+                              '引擎地址（http / https）',
+                              'http://192.168.1.8:9978 或 https://tv.example.com',
+                              _engineCtrl.text.isEmpty ? launcher.baseUrl : _engineCtrl.text,
+                              _applyEngineUrl,
+                            ),
+                          ),
+                        // 本机不显示；PC/安卓连远端后显示。Web 打开页登录，无此入口。
+                        if (!kIsWeb && !kotvIsLocalEngineBaseUrl(launcher.baseUrl))
                           KotvSettingsCell(
                             label: '远端登录',
                             value: '账号',

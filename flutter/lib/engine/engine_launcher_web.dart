@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 import '../api/kotv_api.dart';
 import '../api/kotv_client_id.dart';
 
@@ -9,8 +7,20 @@ class EngineLauncher {
 
   bool _shuttingDown = false;
   String baseUrl = 'http://127.0.0.1:9978';
+  KotvApi? _api;
 
-  KotvApi client() => KotvApi(baseUrl: baseUrl);
+  KotvApi client() {
+    _api ??= KotvApi(baseUrl: baseUrl);
+    _api!.baseUrl = baseUrl;
+    return _api!;
+  }
+
+  void applyBaseUrl(String url) {
+    // Web 只能用当前页面同源后端，忽略外部改址。
+    final origin = Uri.base.origin;
+    baseUrl = (origin.isNotEmpty && origin != 'null') ? origin : 'http://127.0.0.1:9978';
+    _api?.baseUrl = baseUrl;
+  }
 
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {
     await kotvClientId();

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,11 +51,15 @@ class _AppShellState extends ConsumerState<AppShell> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      final ok = await ensureRemoteAuthIfNeeded(context, ref);
-      if (!mounted) return;
-      if (!ok) {
-        // 未登录：仍进壳，但内容接口会再提示；Web 可刷新重试。
+      // 仅 Web：打开本站页面登录账号。PC/安卓在设置里「远端登录」。
+      if (kIsWeb) {
+        while (mounted) {
+          final ok = await ensureRemoteAuthIfNeeded(context, ref);
+          if (!mounted) return;
+          if (ok) break;
+        }
       }
+      if (!mounted) return;
       _wireRemote();
     });
   }
