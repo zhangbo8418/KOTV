@@ -5,10 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers.dart';
+import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
+import '../widgets/auth_gate.dart';
 import '../widgets/chrome.dart';
 import 'collect_screen.dart';
 import 'detail_screen.dart';
@@ -46,7 +48,15 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _wireRemote());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final ok = await ensureRemoteAuthIfNeeded(context, ref);
+      if (!mounted) return;
+      if (!ok) {
+        // 未登录：仍进壳，但内容接口会再提示；Web 可刷新重试。
+      }
+      _wireRemote();
+    });
   }
 
   void _wireRemote() {

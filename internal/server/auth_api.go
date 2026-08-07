@@ -24,8 +24,8 @@ func authRequiredFor(r *http.Request) bool {
 	if !auth.RemoteAuthEnabled() {
 		return false
 	}
-	// 本机无 token 可免密调试；带了 token 则仍校验。
-	if isLoopbackRequest(r) && auth.BearerFromHeader(r.Header.Get("Authorization")) == "" {
+	// 本机访问永不鉴权；仅非本机（局域网/公网）连入才要账号。
+	if isLoopbackRequest(r) {
 		return false
 	}
 	return true
@@ -44,15 +44,32 @@ func publicAuthPath(path string) bool {
 }
 
 // withAuth 远端鉴权中间件；成功后绑定 userId。
+// 本机 loopback：永不强制登录，会话只用 clientId（源不跟账号）。
+// 非本机且开启 remoteAuth：必须 Bearer，会话用 u:<userId> 隔离。
 func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return
 		}
-		need := authRequiredFor(r) && !publicAuthPath(r.URL.Path)
-		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
 		loopback := isLoopbackRequest(r)
+		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
+
+		// 本机：忽略 token 对会话的影响，只走 clientId。
+		if loopback {
+			done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
+			defer done()
+			// 可选：有效 token 仍写入 context，供改密等识别身份（不改变 Scope）。
+			if tok != "" {
+				if u, err := auth.LookupToken(tok); err == nil {
+					r = r.WithContext(withAuthUser(r.Context(), u))
+				}
+			}
+			next(w, r)
+			return
+		}
+
+		need := authRequiredFor(r) && !publicAuthPath(r.URL.Path)
 		if need {
 			if tok == "" {
 				writeAPIError(w, http.StatusUnauthorized, "需要登录")
@@ -63,9 +80,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 				writeAPIError(w, http.StatusUnauthorized, err.Error())
 				return
 			}
-			// 远端租户：独立引擎；本机 loopback 即使已登录也走共享引擎。
-			dedicated := auth.RemoteAuthEnabled() && !loopback
-			done := hostclient.EnterSession("", u.ID, dedicated)
+			done := hostclient.EnterSession("", u.ID, true)
 			defer done()
 			r = r.WithContext(withAuthUser(r.Context(), u))
 			next(w, r)
@@ -73,8 +88,13 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if tok != "" {
 			if u, err := auth.LookupToken(tok); err == nil {
-				dedicated := auth.RemoteAuthEnabled() && !loopback
-				done := hostclient.EnterSession("", u.ID, dedicated)
+				// 开启 remoteAuth：按租户隔离；未开则仍用 clientId（有 token 也不切源桶）。
+				dedicated := auth.RemoteAuthEnabled()
+				cid := ""
+				if !dedicated {
+					cid = clientIDFromRequest(r)
+				}
+				done := hostclient.EnterSession(cid, u.ID, dedicated)
 				defer done()
 				r = r.WithContext(withAuthUser(r.Context(), u))
 				next(w, r)
@@ -89,6 +109,11 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return s.withAuth(func(w http.ResponseWriter, r *http.Request) {
+		// 本机管理免登录；非本机：用已登录会话中的管理员身份（连接时登录一次即可）。
+		if isLoopbackRequest(r) {
+			next(w, r)
+			return
+		}
 		u := authUserFrom(r.Context())
 		if u == nil || u.Role != auth.RoleAdmin {
 			writeAPIError(w, http.StatusForbidden, "需要管理员")
@@ -104,10 +129,12 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":            true,
-		"remoteAuth":    auth.RemoteAuthEnabled(),
-		"allowRegister": auth.AllowRegister(),
-		"authRequired":  authRequiredFor(r),
+		"ok":             true,
+		"remoteAuth":     auth.RemoteAuthEnabled(),
+		"allowRegister":  auth.AllowRegister(),
+		"authRequired":   authRequiredFor(r),
+		"adminRequired":  !isLoopbackRequest(r),
+		"loopback":       isLoopbackRequest(r),
 	})
 }
 
@@ -183,6 +210,20 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		var err error
 		u, err = auth.LookupToken(tok)
 		if err != nil {
+			// 本机无 token：机主视图，供用户管理免登录。
+			if isLoopbackRequest(r) {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"ok":    true,
+					"local": true,
+					"user": map[string]any{
+						"id":                 "",
+						"username":           "本机",
+						"role":               auth.RoleAdmin,
+						"mustChangePassword": false,
+					},
+				})
+				return
+			}
 			writeAPIError(w, http.StatusUnauthorized, err.Error())
 			return
 		}

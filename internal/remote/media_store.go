@@ -8,7 +8,7 @@ import (
 )
 
 // Flutter 上报的播放状态（供 /media 与遥控页展示）。
-// 按 ScopeID 分桶：远端登录为 u:<userId>；本机未登录可为 c:<clientId> 或空桶。
+// 按 ScopeID 分桶：远端租户 u:<userId>；本机（含本机已登录）c:<clientId> 或空桶。
 var (
 	mediaMu       sync.RWMutex
 	mediaByClient = map[string]map[string]string{}

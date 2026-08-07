@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import '../util/kotv_io.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../desktop/mini_player_window.dart';
 import '../player/exo_playback.dart';
+import '../player/html_playback.dart';
 import '../player/ijk_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
@@ -43,12 +44,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   EngineVlcPlayback? _vlc;
   ExoPlayback? _exo;
   IjkPlayback? _ijk;
+  HtmlPlayback? _html;
   final FocusNode _focus = FocusNode();
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
   KotvPlayback get _playback {
     switch (_backend) {
+      case KotvEmbedBackend.html:
+        return _html ??= HtmlPlayback();
       case KotvEmbedBackend.vlc:
         return _vlc ??= EngineVlcPlayback();
       case KotvEmbedBackend.exo:
@@ -87,6 +91,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     if (keep != KotvEmbedBackend.ijk) {
       try {
         await _ijk?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.html) {
+      try {
+        await _html?.stop();
       } catch (_) {}
     }
   }
@@ -149,10 +158,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     unawaited(_vlc?.stop() ?? Future<void>.value());
     unawaited(_exo?.stop() ?? Future<void>.value());
     unawaited(_ijk?.stop() ?? Future<void>.value());
+    unawaited(_html?.stop() ?? Future<void>.value());
     _vlc?.dispose();
     _mk?.dispose();
     _exo?.dispose();
     _ijk?.dispose();
+    _html?.dispose();
     final mkPlayer = _mkPlayer;
     _mkPlayer = null;
     unawaited(kotvDisposeMpvPlayer(mkPlayer));

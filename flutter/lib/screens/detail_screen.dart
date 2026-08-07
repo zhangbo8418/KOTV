@@ -9,6 +9,7 @@ import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
 import '../player/danmaku_layer.dart';
 import '../player/exo_playback.dart';
+import '../player/html_playback.dart';
 import '../player/ijk_playback.dart';
 import '../player/buffer_budget.dart';
 import '../player/kotv_platform.dart';
@@ -95,6 +96,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   EngineVlcPlayback? _vlc;
   ExoPlayback? _exo;
   IjkPlayback? _ijk;
+  HtmlPlayback? _html;
   StreamSubscription? _playingSub;
   StreamSubscription? _endedSub;
   StreamSubscription<Duration>? _posSub;
@@ -120,6 +122,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 当前页内后端：按设置选择 Exo / MPV / ijk / VLC。
   KotvPlayback get _playback {
     switch (_backend) {
+      case KotvEmbedBackend.html:
+        return _html ??= HtmlPlayback();
       case KotvEmbedBackend.vlc:
         return _vlc ??= EngineVlcPlayback();
       case KotvEmbedBackend.exo:
@@ -228,6 +232,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await _ijk?.stop();
       } catch (_) {}
     }
+    if (keep != KotvEmbedBackend.html) {
+      try {
+        await _html?.stop();
+      } catch (_) {}
+    }
   }
 
   @override
@@ -274,6 +283,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       hardStop(_mk),
       hardStop(_exo),
       hardStop(_ijk),
+      hardStop(_html),
     ]);
     _stoppedHard = true;
   }
@@ -433,11 +443,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       unawaited(_vlc?.stop() ?? Future<void>.value());
       unawaited(_exo?.stop() ?? Future<void>.value());
       unawaited(_ijk?.stop() ?? Future<void>.value());
+      unawaited(_html?.stop() ?? Future<void>.value());
     }
     _vlc?.dispose();
     _mk?.dispose();
     _exo?.dispose();
     _ijk?.dispose();
+    _html?.dispose();
     final mkPlayer = _mkPlayer;
     _mkPlayer = null;
     unawaited(kotvDisposeMpvPlayer(mkPlayer));

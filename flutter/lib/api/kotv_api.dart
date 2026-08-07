@@ -24,9 +24,9 @@ class KotvApi {
       Uri.parse('$baseUrl$path').replace(queryParameters: query);
 
   Future<Map<String, String>> _headers([Map<String, String>? extra]) async {
+    // 有 token 就带上（用户管理/远端租户）；本机内容会话服务端仍只用 clientId。
     final token = await kotvAuthToken();
-    // 已登录：只用 Bearer（服务端用 userId 隔离）；未登录本机才带 clientId。
-    final id = token.isEmpty ? await ensureClientId() : '';
+    final id = await ensureClientId();
     return {
       if (id.isNotEmpty) 'X-Kotv-Client-Id': id,
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',

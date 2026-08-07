@@ -45,8 +45,11 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
       _status = '';
     });
     try {
+      // 本机（loopback）管理免登录；非本机才要管理员。
+      final st = await _api.authStatus();
+      final adminRequired = st['adminRequired'] == true;
       final tok = await kotvAuthToken();
-      if (tok.isEmpty) {
+      if (adminRequired && tok.isEmpty) {
         if (!mounted) return;
         setState(() {
           _loading = false;
@@ -363,6 +366,12 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
   }
 
   Future<void> _changeOwnPassword({bool forced = false}) async {
+    // 本机免登录的「本机」机主：改密请用列表重置。
+    final meId = '${_me?['id'] ?? ''}';
+    if (meId.isEmpty && '${_me?['username'] ?? ''}' == '本机') {
+      setState(() => _status = '本机管理免登录：请在下方账号列表重置对应账号密码');
+      return;
+    }
     final p = KotvPalette.of(context);
     final oldCtrl = TextEditingController();
     final newCtrl = TextEditingController();
@@ -448,7 +457,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
             onBack: () => Navigator.of(context).maybePop(),
             onSearch: () => goKotvPage(ref, KotvPage.search),
             onProfile: () => goKotvPage(ref, KotvPage.profile),
-            onNews: () => showAppNews(context, '用户管理：远端鉴权、注册开关与账号维护'),
+            onNews: () => showAppNews(context, '用户管理：本机免登录。非本机在连接时登录一次即可；管理员可管账号，看片与本机同体验（按账号隔离）。'),
             title: '用户管理',
           ),
           if (_status.isNotEmpty || _busy)
@@ -490,7 +499,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                           KotvSettingsCard(children: [
                             SwitchListTile(
                               title: Text('开启远端鉴权', style: TextStyle(color: p.fg)),
-                              subtitle: Text('开启后非本机访问需登录', style: TextStyle(color: p.muted, fontSize: 12)),
+                              subtitle: Text('开启后非本机前端连接时登录一次，之后与本机同体验并按账号隔离', style: TextStyle(color: p.muted, fontSize: 12)),
                               value: _remoteAuth,
                               onChanged: _busy ? null : (v) => unawaited(_setFlag(remoteAuth: v)),
                             ),

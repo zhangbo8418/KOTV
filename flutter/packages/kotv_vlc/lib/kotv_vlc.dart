@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -9,8 +8,22 @@ import 'package:flutter/widgets.dart';
 class KotvVlc {
   static const _ch = MethodChannel('kotv_vlc');
 
-  static bool get isSupported =>
-      !kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
+  static bool get isSupported {
+    if (kIsWeb) return false;
+    // ignore: avoid_web_libraries_in_flutter
+    return identical(0, 0) && _desktop;
+  }
+
+  static bool get _desktop {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+        return true;
+      default:
+        return false;
+    }
+  }
 
   int? textureId;
   String mode = 'texture';

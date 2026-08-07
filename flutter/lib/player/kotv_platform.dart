@@ -1,4 +1,4 @@
-import 'dart:io';
+import '../util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -31,24 +31,29 @@ bool kotvIsWindows7() {
 
 bool kotvIsAndroid() => !kIsWeb && Platform.isAndroid;
 
-/// 点播默认：Android=Exo；其它=MPV。
+/// 点播默认：Web=HTML5；Android=Exo；其它=MPV。
 String kotvDefaultVodPlayer() {
+  if (kIsWeb) return 'innie#html';
   if (kotvIsAndroid()) return 'innie#exo';
   return 'innie#mpv';
 }
 
-/// 直播默认：Android=Exo；Windows=VLC；其它=MPV。
+/// 直播默认：Web=HTML5；Android=Exo；Windows=VLC；其它=MPV。
 String kotvDefaultLivePlayer() {
+  if (kIsWeb) return 'innie#html';
   if (kotvIsAndroid()) return 'innie#exo';
   if (!kIsWeb && Platform.isWindows) return 'innie#vlc';
   return 'innie#mpv';
 }
 
 /// 页内播放器后端种类。
-enum KotvEmbedBackend { mpv, vlc, exo, ijk }
+enum KotvEmbedBackend { mpv, vlc, exo, ijk, html }
 
 KotvEmbedBackend kotvEmbedBackend(String playerVal) {
+  if (kIsWeb) return KotvEmbedBackend.html;
   switch (playerVal.trim()) {
+    case 'innie#html':
+      return KotvEmbedBackend.html;
     case 'innie#vlc':
       return KotvEmbedBackend.vlc;
     case 'innie#exo':
@@ -63,6 +68,9 @@ KotvEmbedBackend kotvEmbedBackend(String playerVal) {
 
 /// 设置页 / 页内切换：按平台分流选项。
 List<(String, String)> kotvVodPlayerOptions() {
+  if (kIsWeb) {
+    return const [('浏览器播放（HTML5）', 'innie#html')];
+  }
   if (kotvIsAndroid()) {
     return const [
       ('内置 ExoPlayer（默认）', 'innie#exo'),
@@ -80,6 +88,9 @@ List<(String, String)> kotvVodPlayerOptions() {
 }
 
 List<(String, String)> kotvLivePlayerOptions() {
+  if (kIsWeb) {
+    return const [('浏览器播放（HTML5）', 'innie#html')];
+  }
   if (kotvIsAndroid()) {
     return const [
       ('内置 ExoPlayer（默认）', 'innie#exo'),

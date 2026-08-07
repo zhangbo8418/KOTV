@@ -38,14 +38,14 @@ Go Engine（可部署到服务器，多前端并发）
 
 | 能力 | 说明 |
 |------|------|
-| `ScopeID` | **远端** → `u:<userId>`（媒体/遥控/软取消）；**本机**一般可不强调 ClientID（单前端即可） |
-| **本机** | **不需要登录**；点播、直播、媒体、遥控功能齐全 |
+| `ScopeID` | **远端租户** → `u:<userId>`；**本机**（含本机登录/admin）→ `c:<clientId>`，源不跟账号绑 |
+| **本机** | **不需要登录**也能全功能；本机开鉴权仅管远端访问，本地源仍共享 |
 | **点播 / 直播** | **多仓/单仓列表与脚本缓存全局共享**；**当前选中的源/首页/直播按 Scope 各自独立**（可在同一列表里换不同源） |
 | **媒体态** | 按 ScopeID 分桶（各自播放进度/标题）；`/media` 与遥控按 Scope 定向 |
 | **遥控队列** | control / search 按 ScopeID 分桶；`/action`：`userId`→远端，`clientId`/`scopeId` 兼容本机 |
 | **OkHttp net** | 随各用户当前源按 ScopeID 写入 `NetProfiles`；请求 ScopeID 兼用于软取消 |
 | **进程模型** | **只有一个 Go 引擎**；远端按用户隔离的是 **JVM（含 dex 加载）/ Python / JS** 运行时，不是多套引擎 |
-| **远端鉴权** | `settings.remoteAuth` 开启后非本机请求需 `Authorization: Bearer`；`/admin` 管理用户；`allowRegister` 可开关注册 |
+| **远端鉴权** | `settings.remoteAuth` 开启后，非本机前端连接时登录一次，之后与本机同体验并 `u:` 隔离。本机免登录。用户管理：本机免登；非本机需已登录管理员。**Web 包 = 引擎 + webapp，同端口放出**；不进 PC/安卓/iOS 包；无 webapp 时 `/` 仍为遥控，有则遥控在 `/remote/` |
 | **脚本 vs 运行时** | **脚本文件**全局共享；本机共享一套 JVM/Py/JS；远端每用户独立。`session/leave` → 只杀该用户运行时 |
 | 换源 / 取消 | **立刻硬杀**所属运行时（`RestartCallerRuntime`：本机共享池或远端该用户）；不在外层死等 |
 | JAR / Py / JS | 磁盘缓存共享；**单次调用自带超时**（JAR 120s / JS·Py 45s）；慢站只失败该次请求 |
@@ -56,13 +56,13 @@ Go Engine（可部署到服务器，多前端并发）
 
 | | 本地（loopback / 未开 remoteAuth） | 远端租户（remoteAuth 且非本机已登录） |
 |--|--|--|
-| 登录 | 不需要 | 用户名密码 → token |
+| 登录 | 不需要（本机带 token 也不切换租户） | 用户名密码 → token |
 | 爬虫脚本 | 全局共享磁盘缓存 | 同一套全局缓存 |
 | 多仓/单仓**列表** | 共享（可选仓相同） | 共享 |
-| 当前选中的源 | 本机 settings | **每用户各自**（同一列表里可不同） |
+| 当前选中的源 | 本机 `c:<clientId>` / 全局 settings | **每用户 `u:<userId>` 各自** |
 | JAR/Py/JS **运行时** | **共享** 单 JVM + 池 | **每用户独立** JVM/Py/JS（Go 引擎仍只有一个） |
 | App 关闭 | `/api/v1/shutdown` 关整 Go 引擎 | `session/leave` 只杀该用户的 JVM/Py/JS |
-| 管理 | — | `/admin` 用户 CRUD、注册/鉴权开关 |
+| 管理 | 本机免登录 | 连接时已登录的管理员可管；普通用户同本机体验但不能进管理 |
 
 仍共享：多仓/单仓列表与脚本磁盘缓存、桌面 Go embed 播放器单例、用户设置全局代理（`settings.Proxy`）、遥控 push/弹幕偏广播。各用户当前选中源与媒体态按 Scope 隔离。
 
@@ -72,6 +72,7 @@ Go Engine（可部署到服务器，多前端并发）
 |------|------|
 | 桌面 | Flutter + 本机 Go 进程（JS/PY/JAR 全开） |
 | Android / TV | 同上 + 遥控器 |
+| **浏览器** | Web 包（引擎 + `webapp/`，`:9978/`）；遥控 `/remote/`；不进桌面/手机客户端包 |
 | iOS | Flutter + Go（仅 UI/播放）；启动后先连接可用后端服务 |
 | 直播 | 首期占位 |
 

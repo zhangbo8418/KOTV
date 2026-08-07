@@ -184,6 +184,8 @@ class LocalPlayOffsets {
 String flutterPlayerLabel(String val) {
   final v = val.trim().isEmpty ? kotvDefaultVodPlayer() : val.trim();
   switch (v) {
+    case 'innie#html':
+      return '浏览器 HTML5';
     case 'innie#vlc':
       return '内置 VLC';
     case 'innie#mpv':

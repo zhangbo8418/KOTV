@@ -207,6 +207,8 @@ Windows 运行时（Win7 尽力兼容）：
 
 启动:
   ./$BIN
+  遥控页: http://127.0.0.1:9978/
+  Web 包（引擎+webapp 同端口）见 scripts/package-flutter-web.sh / CI「Flutter Web」
 
 默认播放核心为「页内 VLC」（innie#vlc）；也可选「页内 MPV」（innie#mpv）。
 外部 VLC/MPV 需系统安装或 PATH，发行包不再捆绑 mpv 可执行文件。

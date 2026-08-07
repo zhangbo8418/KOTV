@@ -26,7 +26,6 @@ library fijkplayer;
 import 'dart:async';
 import 'dart:collection';
 import 'dart:core';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -44,3 +43,13 @@ part 'ui/panel.dart';
 part 'ui/panel2.dart';
 part 'ui/slider.dart';
 part 'ui/volume.dart';
+
+/// Web-safe Platform shim for fijkplugin.
+class Platform {
+  static bool get isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  static bool get isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+  static bool get isMacOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+  static bool get isWindows => !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  static bool get isLinux => !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
+  static bool get isFuchsia => !kIsWeb && defaultTargetPlatform == TargetPlatform.fuchsia;
+}

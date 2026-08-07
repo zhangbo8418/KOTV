@@ -1,15 +1,20 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'embed_video_view.dart';
 import 'exo_playback.dart';
+import 'html_playback.dart';
 import 'ijk_playback.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 
 /// 根据播放器 ID 创建页内后端（不负责复用；由页面缓存实例）。
 KotvPlayback createKotvPlayback(String playerVal) {
+  if (kIsWeb) return HtmlPlayback();
   switch (kotvEmbedBackend(playerVal)) {
+    case KotvEmbedBackend.html:
+      return HtmlPlayback();
     case KotvEmbedBackend.vlc:
       return EngineVlcPlayback();
     case KotvEmbedBackend.exo:
@@ -28,7 +33,14 @@ Widget kotvPlaybackView({
   MediaKitPlayback? mpv,
   BoxFit fit = BoxFit.contain,
 }) {
+  if (kIsWeb || playback is HtmlPlayback || kotvEmbedBackend(playerVal) == KotvEmbedBackend.html) {
+    if (playback is HtmlPlayback) return playback.buildView(fit: fit);
+    return const ColoredBox(color: Colors.black);
+  }
   switch (kotvEmbedBackend(playerVal)) {
+    case KotvEmbedBackend.html:
+      if (playback is HtmlPlayback) return playback.buildView(fit: fit);
+      return const ColoredBox(color: Colors.black);
     case KotvEmbedBackend.vlc:
       if (playback is EngineVlcPlayback) {
         return EmbedVideoView(playback: playback);
@@ -47,7 +59,6 @@ Widget kotvPlaybackView({
     case KotvEmbedBackend.mpv:
       final m = mpv ?? (playback is MediaKitPlayback ? playback : null);
       if (m == null) return const ColoredBox(color: Colors.black);
-      // wakelock 由 [KotvPlayback] 统一管，避免与 media_kit 内置引用计数抢关。
       return Video(controller: m.controller, controls: NoVideoControls, fit: fit, wakelock: false);
   }
 }

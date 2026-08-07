@@ -18,6 +18,7 @@
 | 旁路播放（捆绑 VLC / MPV）+ 续播 | ✅ |
 | 页内嵌入播放（Flutter media_kit MPV / runtime libvlc） | ✅ |
 | 单集循环（页内 MPV/VLC） | ✅ |
+| Flutter Web 包（引擎同端口放出；不进 PC/安卓/iOS） | ✅ |
 | 捆绑运行时 (JRE/Python/Chromium/ffmpeg/VLC/MPV) | ✅ |
 | QuickJS 内嵌主程序 (CGO) | ✅ |
 | Win7 运行时 + GitHub Actions 打包 | ✅ |
@@ -101,6 +102,20 @@ dist/KOTV-macos-arm64/
 **Java / Python 仅使用捆绑路径**，不会读取 `JAVA_HOME` 或系统 PATH。JAR 爬虫通过捆绑 JRE 启动常驻 `spider-bridge --serve` 进程（JVM 只初始化一次，崩溃可自动拉起），不嵌入主进程。
 
 **播放**：桌面页内 MPV 由 Flutter **media_kit 自带 libmpv**（不进 `runtime/`）。页内 VLC 使用 `runtime/libvlc`。也可选外部 VLC/MPV。
+
+## 浏览器 Web 包
+
+与 PC / Android / iOS **客户端包分离**：Web 包 = 引擎 + `webapp/`，**同端口**（默认 `:9978`）由引擎直接放出页面。
+
+```bash
+./scripts/package-flutter-web.sh          # → dist/…-web-….zip
+./kotv-engine                             # 旁路需有 webapp/
+# 浏览器
+open http://127.0.0.1:9978/               # Web 客户端
+open http://127.0.0.1:9978/remote/        # 遥控
+```
+
+也可只解压 `*-web-static.zip` 到已有引擎目录下的 `webapp/`。普通引擎/桌面包不含 `webapp` 时，`/` 仍是遥控页。
 
 ## 数据目录
 

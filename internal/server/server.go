@@ -92,19 +92,9 @@ func (s *Server) SetMediaProvider(fn func() map[string]string) {
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	remote, _ := fs.Sub(remoteFS, "resources")
-	remoteServer := http.FileServer(http.FS(remote))
-	// assets:// 映射到根路径，优先命中本地 assets 目录，否则回落遥控 UI。
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if rel := strings.TrimPrefix(r.URL.Path, "/"); rel != "" && rel != "index.html" {
-			if candidate, ok := safeAssetPath(rel); ok {
-				if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
-					http.ServeFile(w, r, candidate)
-					return
-				}
-			}
-		}
-		remoteServer.ServeHTTP(w, r)
-	})
+	// Web 包：旁路 webapp/ 时同端口 / 放出 Flutter Web；否则 / 为遥控页。
+	// PC/安卓/iOS 发行包不含 webapp，行为不变。
+	mountWebOrRemote(mux, remote)
 	mux.HandleFunc("/proxy/cached_m3u8", s.handleCachedM3U8)
 	mux.HandleFunc("/proxy/play", playproxy.Handle)
 	mux.HandleFunc("/proxy/bt/", thunder.Handle)

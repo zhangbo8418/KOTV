@@ -1,9 +1,10 @@
 import 'dart:async';
-import 'dart:io';
+import 'util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
@@ -18,6 +19,26 @@ import 'theme/kotv_palette.dart';
 import 'theme/kotv_theme.dart';
 import 'widgets/chrome.dart';
 import 'widgets/h_scroll.dart';
+
+Future<String?> httpGetEngineHint(String origin) async {
+  try {
+    final res = await http.get(Uri.parse('$origin/api/engine-hint')).timeout(const Duration(seconds: 2));
+    if (res.statusCode != 200) return null;
+    final m = RegExp(r'"engine"\s*:\s*"([^"]+)"').firstMatch(res.body);
+    return m?.group(1);
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<bool> httpLooksLikeEngine(String origin) async {
+  try {
+    final res = await http.get(Uri.parse('$origin/api/v1/health')).timeout(const Duration(seconds: 2));
+    return res.statusCode == 200 && res.body.contains('"ok"');
+  } catch (_) {
+    return false;
+  }
+}
 
 /// Release 构建里 build 抛异常会渲染成一块灰色空白（默认 ErrorWidget），
 /// 页面看着像"没了"却无从追查；换成可读文案并把错误打到日志。
@@ -51,8 +72,10 @@ Widget _kotvErrorWidget(FlutterErrorDetails details) {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ErrorWidget.builder = _kotvErrorWidget;
-  // Android 也要 init：用户可选 MPV（media_kit）；仅延迟到实际用 MPV 前也可，这里统一初始化更稳。
-  MediaKit.ensureInitialized();
+  if (!kIsWeb) {
+    // Android 也要 init：用户可选 MPV（media_kit）；Web 用 HTML5，不初始化 media_kit。
+    MediaKit.ensureInitialized();
+  }
   unawaited(KotvBufferBudget.warm());
   final prefs = await SharedPreferences.getInstance();
   if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
@@ -67,7 +90,6 @@ Future<void> main() async {
     );
     final opts = WindowOptions(
       size: size,
-      // 允许缩到接近手机竖/横屏，由布局断点自动切底栏/顶栏
       minimumSize: kotvMinWindowSize,
       center: savedX == null || savedY == null,
       title: 'KO影视',
@@ -82,7 +104,27 @@ Future<void> main() async {
       await windowManager.focus();
     });
   }
-  final engineUrl = prefs.getString('engine_base_url');
+  var engineUrl = prefs.getString('engine_base_url');
+  // Web：?engine= → 已保存 → 同源若是引擎 → engine-hint → 本机默认。
+  if (kIsWeb) {
+    final fromQuery = Uri.base.queryParameters['engine']?.trim();
+    if (fromQuery != null && fromQuery.isNotEmpty) {
+      engineUrl = fromQuery;
+      await prefs.setString('engine_base_url', fromQuery);
+    } else if (engineUrl == null || engineUrl.isEmpty) {
+      final origin = Uri.base.origin;
+      var hinted = 'http://127.0.0.1:9978';
+      if (origin.isNotEmpty && origin != 'null') {
+        if (await httpLooksLikeEngine(origin)) {
+          hinted = origin;
+        } else {
+          final h = await httpGetEngineHint(origin);
+          if (h != null && h.isNotEmpty) hinted = h;
+        }
+      }
+      engineUrl = hinted;
+    }
+  }
   runApp(ProviderScope(
     overrides: [
       engineLauncherProvider.overrideWith((ref) {

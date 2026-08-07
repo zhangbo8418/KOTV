@@ -1,11 +1,12 @@
 import 'dart:async';
-import 'dart:io';
+import '../util/kotv_io.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
@@ -372,36 +373,82 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!mounted) return;
     final action = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => Dialog(
         backgroundColor: p.dialogBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('远端登录', style: TextStyle(color: p.fg)),
-        content: SizedBox(
-          width: 360,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: userCtrl,
-                style: TextStyle(color: p.fg),
-                decoration: InputDecoration(hintText: '用户名', hintStyle: TextStyle(color: p.muted)),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: passCtrl,
-                obscureText: true,
-                style: TextStyle(color: p.fg),
-                decoration: InputDecoration(hintText: '密码', hintStyle: TextStyle(color: p.muted)),
-              ),
-            ],
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('远端登录', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700, fontSize: 18)),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: userCtrl,
+                  autofocus: true,
+                  style: TextStyle(color: p.fg),
+                  decoration: InputDecoration(
+                    hintText: '用户名',
+                    hintStyle: TextStyle(color: p.muted),
+                    filled: true,
+                    fillColor: p.input,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: passCtrl,
+                  obscureText: true,
+                  onSubmitted: (_) => Navigator.pop(ctx, 'login'),
+                  style: TextStyle(color: p.fg),
+                  decoration: InputDecoration(
+                    hintText: '密码',
+                    hintStyle: TextStyle(color: p.muted),
+                    filled: true,
+                    fillColor: p.input,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 4,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, 'logout'),
+                      child: Text('清除登录', style: TextStyle(color: p.muted)),
+                    ),
+                    if (allowReg)
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, 'register'),
+                        child: Text('注册', style: TextStyle(color: p.primary)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: Text('取消', style: TextStyle(color: p.muted)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(ctx, 'login'),
+                        child: const Text('登录'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, 'logout'), child: const Text('清除登录')),
-          if (allowReg) TextButton(onPressed: () => Navigator.pop(ctx, 'register'), child: const Text('注册')),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, 'login'), child: const Text('登录')),
-        ],
       ),
     );
     if (action == null || !mounted) return;
@@ -660,7 +707,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           onBack: () => kotvPageBack(ref),
           onSearch: () => goKotvPage(ref, KotvPage.search),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
-          onNews: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port'),
+          onNews: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port/\n（Web 包为客户端；普通引擎为遥控。遥控见 /remote/）'),
           title: '设置',
         ),
         if (_status.isNotEmpty)
@@ -773,9 +820,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           onTap: () => _set('dlnaRenderer', dmr ? 'false' : 'true', msg: dmr ? '已关闭 DLNA 被投端' : '已开启 DLNA 被投端'),
                         ),
                         KotvSettingsCell(
-                          label: 'Web 遥控',
+                          label: 'Web / 遥控',
                           value: ':$_port',
-                          onTap: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port'),
+                          onTap: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
                         ),
                       ]),
                       KotvSettingsWideTile(
@@ -903,11 +950,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             setState(() => _status = '引擎地址已保存');
                           }),
                         ),
-                        KotvSettingsCell(
-                          label: '远端登录',
-                          value: '账号',
-                          onTap: _engineLogin,
-                        ),
+                        if (!kotvIsLocalEngineBaseUrl(launcher.baseUrl))
+                          KotvSettingsCell(
+                            label: '远端登录',
+                            value: '账号',
+                            onTap: _engineLogin,
+                          ),
                         KotvSettingsCell(
                           label: '用户管理',
                           value: '管理员',

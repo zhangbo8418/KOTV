@@ -119,10 +119,12 @@ func CurrentUserID() string {
 }
 
 // ScopeID 会话/队列/媒体/遥控隔离键。
-// 已登录（含远端）：一律 u:<userId>；仅本机未登录才回退 c:<clientId>。
+// 远端租户（dedicated）：u:<userId>；本机（含本机已登录/admin）只按 c:<clientId>，源与账号无关。
 func ScopeID() string {
-	if u := CurrentUserID(); u != "" {
-		return "u:" + u
+	if DedicatedRuntime() {
+		if u := CurrentUserID(); u != "" {
+			return "u:" + u
+		}
 	}
 	if c := Current(); c != "" {
 		return "c:" + c

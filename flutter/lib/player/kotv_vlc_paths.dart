@@ -1,10 +1,12 @@
-import 'dart:io';
-
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+
+import '../util/kotv_io.dart';
 
 /// 解析捆绑 libvlc 目录（与引擎 runtime 布局一致）。
 class KotvVlcPaths {
   static String? resolveLibDir() {
+    if (kIsWeb) return null;
     final env = Platform.environment['KOTV_RUNTIME'];
     final candidates = <String>{};
 
@@ -56,6 +58,7 @@ class KotvVlcPaths {
   }
 
   static String pluginDirFor(String libDir) {
+    if (kIsWeb) return libDir;
     final plugins = p.join(libDir, 'plugins');
     if (Directory(plugins).existsSync()) return plugins;
     return libDir;
