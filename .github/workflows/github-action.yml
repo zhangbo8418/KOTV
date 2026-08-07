@@ -499,6 +499,13 @@ jobs:
           flutter config --enable-web
           chmod +x bridge/build.sh scripts/*.sh
           ./scripts/package-flutter-web.sh linux-x64
+          # 确认引擎摆脱宿主 glibc
+          file dist/KOTV-web-linux-x64/kotv-engine
+          if ldd dist/KOTV-web-linux-x64/kotv-engine >/dev/null 2>&1; then
+            echo "engine still dynamically linked:" >&2
+            ldd dist/KOTV-web-linux-x64/kotv-engine >&2
+            exit 1
+          fi
           ls -lh dist/KO影视-*-web-*.zip
 
       - uses: actions/upload-artifact@v4

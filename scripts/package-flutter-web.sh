@@ -61,7 +61,19 @@ echo "==> build engine"
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)
 rm -rf "$DIST"
 mkdir -p "$DIST/runtime" "$DIST/webapp"
-(cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w -X github.com/bobo/KOTV/internal/update.CurrentVersion=${VERSION}" -o "$DIST/$BIN" ./cmd/engine)
+
+ENGINE_NOTE="CGO 动态链系统库"
+if [[ "$GOOS" == "linux" ]]; then
+  # 避开 glibc 版本地狱：musl 全静态（runtime/ 仍外置）
+  chmod +x "$ROOT/scripts/build-engine-static-linux.sh"
+  "$ROOT/scripts/build-engine-static-linux.sh" "$DIST/$BIN" "$GOARCH"
+  ENGINE_NOTE="musl 全静态（不依赖宿主 glibc）"
+elif [[ "$GOOS" == "windows" ]]; then
+  (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w -X github.com/bobo/KOTV/internal/update.CurrentVersion=${VERSION}" -o "$DIST/$BIN" ./cmd/engine)
+else
+  # macOS：无法真正全静态，接受系统库
+  (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w -X github.com/bobo/KOTV/internal/update.CurrentVersion=${VERSION}" -o "$DIST/$BIN" ./cmd/engine)
+fi
 chmod +x "$DIST/$BIN" 2>/dev/null || true
 
 echo "==> copy runtime + webapp"
@@ -82,6 +94,8 @@ KO影视 Web 包 ($PLAT)
 
 本包 = Go 引擎 + 运行时 + Flutter Web（webapp/）。
 引擎在 :9978 直接放出 Web 客户端（与 API 同端口）。
+引擎链接: $ENGINE_NOTE
+runtime/（JRE/Python 等）外置，不编进引擎。
 
 启动:
   ./$BIN

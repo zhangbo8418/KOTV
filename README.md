@@ -107,6 +107,8 @@ dist/KOTV-macos-arm64/
 
 与 PC / Android / iOS **客户端包分离**：Web 包 = 引擎 + `webapp/`，**同端口**（默认 `:9978`）由引擎直接放出页面。浏览器固定使用本站后端；开启远端鉴权时打开页即登录（无「远端登录 / 改引擎地址」）。
 
+Linux Web 包引擎为 **musl 全静态**（不依赖宿主 glibc 版本）；`runtime/` 仍外置。
+
 ```bash
 ./scripts/package-flutter-web.sh          # → dist/…-web-….zip
 ./kotv-engine                             # 旁路需有 webapp/
