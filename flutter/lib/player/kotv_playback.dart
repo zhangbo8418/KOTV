@@ -5,6 +5,7 @@ import 'package:kotv_vlc/kotv_vlc.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'buffer_budget.dart';
 import 'keep_awake.dart';
 import 'kotv_vlc_paths.dart';
 import 'mpv_opts.dart';
@@ -103,16 +104,31 @@ class KotvTrack {
 ///
 /// 直接 `stop()`（不 await）后立刻 `dispose()`，libmpv 的 wakeup 回调会打在
 /// 已 close 的 FFI NativeCallable 上，触发
-/// `Callback invoked after it has been deleted` 级别的 abort。
+/// `Callback invoked after it has been deleted` 级别的 abort（手机表现为闪退）。
 Future<void> kotvDisposeMpvPlayer(Player? player) async {
   if (player == null) return;
   try {
+    await player.pause();
+  } catch (_) {}
+  try {
     await player.stop();
   } catch (_) {}
-  await Future<void>.delayed(const Duration(milliseconds: 200));
+  // media_kit 内部还要等 event 排空；过短仍会 abort。
+  await Future<void>.delayed(const Duration(milliseconds: 400));
   try {
     await player.dispose();
   } catch (_) {}
+}
+
+/// 按缓冲预算创建 [Player]，避免 media_kit 默认 32MiB 再被事后猛改造成起播抖动。
+Player kotvCreateMpvPlayer() {
+  final budget = KotvBufferBudget.bytes();
+  return Player(
+    configuration: PlayerConfiguration(
+      bufferSize: budget,
+      logLevel: MPVLogLevel.error,
+    ),
+  );
 }
 
 /// media_kit 在解析 libmpv 的 `track-list` 时，会**先插入** [AudioTrack.auto]/[SubtitleTrack.no] 等
@@ -186,7 +202,8 @@ class MediaKitPlayback extends KotvPlayback {
         unawaited(_pollCacheSpeed());
       }
     });
-    unawaited(_opts.applyAfterAttach(player));
+    // 必须在 open 前完成：与 VideoController 附着并行 setProperty 会卡死/闪退。
+    _optsReady = _prepareOpts();
   }
 
   final Player player;
@@ -201,6 +218,44 @@ class MediaKitPlayback extends KotvPlayback {
   bool _speedBusy = false;
   int _lastCacheBytes = -1;
   DateTime? _lastCacheAt;
+  late Future<void> _optsReady;
+
+  Future<void> _prepareOpts() async {
+    // 先等 VideoController：media_kit 会写死 gpu-context=android(EGL)，
+    // Vulkan 必须在附着完成后再覆盖，否则会被盖回去。
+    try {
+      final platform = player.platform;
+      if (platform != null && platform.isVideoControllerAttached) {
+        await platform.waitForVideoControllerInitializationIfAttached
+            .timeout(const Duration(seconds: 8));
+      } else {
+        // VC 构造是 post-frame 异步的，稍等再探
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        final p2 = player.platform;
+        if (p2 != null && p2.isVideoControllerAttached) {
+          await p2.waitForVideoControllerInitializationIfAttached
+              .timeout(const Duration(seconds: 8));
+        }
+      }
+    } catch (_) {}
+    try {
+      await _opts.applyAfterAttach(player);
+    } catch (_) {}
+  }
+
+  /// 等 opts + VideoController 就绪后再 open，避免起播竞态卡死。
+  Future<void> _awaitReadyForOpen() async {
+    try {
+      await _optsReady.timeout(const Duration(seconds: 5));
+    } catch (_) {}
+    try {
+      final platform = player.platform;
+      if (platform != null && platform.isVideoControllerAttached) {
+        await platform.waitForVideoControllerInitializationIfAttached
+            .timeout(const Duration(seconds: 8));
+      }
+    } catch (_) {}
+  }
 
   Future<void> _pollCacheSpeed() async {
     if (_speedBusy) return;
@@ -311,9 +366,11 @@ class MediaKitPlayback extends KotvPlayback {
       } catch (_) {}
     }
     await next.applyAfterAttach(player);
+    _optsReady = Future<void>.value();
     if (reopen && _url.isNotEmpty) {
       final pos = position;
       final wasPlaying = playing;
+      await _awaitReadyForOpen();
       await player.open(Media(_url, httpHeaders: _headers.isEmpty ? const {} : _headers));
       await player.seek(pos);
       if (wasPlaying) await player.play();
@@ -366,7 +423,12 @@ class MediaKitPlayback extends KotvPlayback {
     }
     final h = kotvNormalizePlayHeaders(headers, url: url);
     _headers = h;
-    await player.open(Media(url, httpHeaders: h.isEmpty ? const {} : h));
+    await _awaitReadyForOpen();
+    // 让出一帧：Player/VC 刚建完立刻 open 时，PC 偶发卡死 UI、Android 原生 abort。
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    await player
+        .open(Media(url, httpHeaders: h.isEmpty ? const {} : h))
+        .timeout(const Duration(seconds: 45));
   }
 
   @override

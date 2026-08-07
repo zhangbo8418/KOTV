@@ -5,8 +5,8 @@ import 'kotv_platform.dart';
 
 /// 各播放器共用的「前向缓冲」内存预算（字节）。
 ///
-/// 按设备物理内存比例估算，并受可用内存与上下限钳制；
-/// **不以固定时长为目标**，避免 4K/8K 高码率按时间窗撑爆堆。
+/// 按**当前可用内存**为主、总内存为辅估算；只受字节上限约束，
+/// **不用时长窗**控制预读（避免低码率空等、高码率按秒数撑爆）。
 class KotvBufferBudget {
   KotvBufferBudget._();
 
@@ -16,9 +16,9 @@ class KotvBufferBudget {
   /// 同步读取（未 [warm] 时用平台启发式）。
   static int bytes() => _cached ?? _fallback();
 
-  /// 尽量在启动或开播前调用，Android 会读真实 total/avail。
-  static Future<int> warm() async {
-    if (_cached != null) return _cached!;
+  /// 读取/刷新预算。Android 读真实 total/avail；[force] 时按当前可用内存重算。
+  static Future<int> warm({bool force = false}) async {
+    if (!force && _cached != null) return _cached!;
     try {
       if (kotvIsAndroid()) {
         final raw = await _android.invokeMethod<dynamic>('getMemoryInfo');
@@ -38,7 +38,7 @@ class KotvBufferBudget {
     return _cached!;
   }
 
-  /// 统一公式：约 5% 总内存，且不超过可用内存的 20%；再钳到平台上下限。
+  /// 可用内存优先：约 15% avail，且不超过总内存 5%；再钳到平台上下限。
   static int fromDevice({
     required int totalBytes,
     required int availBytes,
@@ -47,15 +47,18 @@ class KotvBufferBudget {
     final total = totalBytes > 0
         ? totalBytes
         : (desktop ? 8 * 1024 * 1024 * 1024 : 3 * 1024 * 1024 * 1024);
-    var budget = (total * 0.05).round();
+    final byTotal = (total * 0.05).round();
+    int budget;
     if (availBytes > 0) {
-      final byAvail = (availBytes * 0.20).round();
-      if (byAvail > 0 && byAvail < budget) budget = byAvail;
+      final byAvail = (availBytes * 0.15).round();
+      // 可用少时跟 avail；可用充裕时也不超过总内存比例
+      budget = byAvail < byTotal ? byAvail : byTotal;
+    } else {
+      budget = byTotal;
     }
     final minB = desktop ? 48 * 1024 * 1024 : 24 * 1024 * 1024;
-    // 手机上限压到 64MiB：解码器 + 纹理 + demuxer 再叠 128MiB 很容易触发
-    // GC 抖动甚至 OOM，全屏播放会掉帧。
-    final maxB = desktop ? 384 * 1024 * 1024 : 64 * 1024 * 1024;
+    // 上限仍钳制，防止极端机器把 demuxer 开到数 GB
+    final maxB = desktop ? 384 * 1024 * 1024 : 96 * 1024 * 1024;
     if (budget < minB) budget = minB;
     if (budget > maxB) budget = maxB;
     return budget;

@@ -25,22 +25,24 @@ const (
 
 // User 远端引擎账号。
 type User struct {
-	ID        string    `json:"id"`
-	Username  string    `json:"username"`
-	PassHash  string    `json:"passHash"`
-	Role      string    `json:"role"` // admin | user
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID                 string    `json:"id"`
+	Username           string    `json:"username"`
+	PassHash           string    `json:"passHash"`
+	Role               string    `json:"role"` // admin | user
+	Enabled            bool      `json:"enabled"`
+	MustChangePassword bool      `json:"mustChangePassword,omitempty"`
+	CreatedAt          time.Time `json:"createdAt"`
 }
 
 // Public 返回不含密码哈希的视图。
 func (u User) Public() map[string]any {
 	return map[string]any{
-		"id":        u.ID,
-		"username":  u.Username,
-		"role":      u.Role,
-		"enabled":   u.Enabled,
-		"createdAt": u.CreatedAt.UTC().Format(time.RFC3339),
+		"id":                 u.ID,
+		"username":           u.Username,
+		"role":               u.Role,
+		"enabled":            u.Enabled,
+		"mustChangePassword": u.MustChangePassword,
+		"createdAt":          u.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -98,27 +100,31 @@ func hasAdminLocked() bool {
 }
 
 func bootstrapAdminLocked() error {
-	pass := randomPassword(12)
+	const pass = "admin"
 	hash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 	u := &User{
-		ID:        newID(),
-		Username:  "admin",
-		PassHash:  string(hash),
-		Role:      RoleAdmin,
-		Enabled:   true,
-		CreatedAt: time.Now().UTC(),
+		ID:                 newID(),
+		Username:           "admin",
+		PassHash:           string(hash),
+		Role:               RoleAdmin,
+		Enabled:            true,
+		MustChangePassword: true,
+		CreatedAt:          time.Now().UTC(),
 	}
 	users[u.ID] = u
 	byName[strings.ToLower(u.Username)] = u
 	if err := saveUsersLocked(); err != nil {
 		return err
 	}
-	msg := fmt.Sprintf("username=admin\npassword=%s\ncreated=%s\n", pass, time.Now().UTC().Format(time.RFC3339))
+	msg := fmt.Sprintf(
+		"username=admin\npassword=admin\ncreated=%s\nnote=请尽快修改默认密码\n",
+		time.Now().UTC().Format(time.RFC3339),
+	)
 	_ = os.WriteFile(bootstrapPath(), []byte(msg), 0o600)
-	log.Printf("auth: 已创建初始管理员 admin，密码见 %s", bootstrapPath())
+	log.Printf("auth: 已创建初始管理员 admin（默认密码 admin，请尽快修改），见 %s", bootstrapPath())
 	return nil
 }
 
@@ -202,17 +208,6 @@ func newID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
-}
-
-func randomPassword(n int) string {
-	const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	out := make([]byte, n)
-	for i := range out {
-		var b [1]byte
-		_, _ = rand.Read(b[:])
-		out[i] = alphabet[int(b[0])%len(alphabet)]
-	}
-	return string(out)
 }
 
 // RemoteAuthEnabled 是否强制远端鉴权。
@@ -434,6 +429,35 @@ func ResetPassword(userID, password string) error {
 		return fmt.Errorf("用户不存在")
 	}
 	u.PassHash = string(hash)
+	u.MustChangePassword = false
+	return saveUsersLocked()
+}
+
+// ChangePassword 登录用户修改自己的密码（需旧密码）。
+func ChangePassword(userID, oldPassword, newPassword string) error {
+	oldPassword = strings.TrimSpace(oldPassword)
+	newPassword = strings.TrimSpace(newPassword)
+	if len(newPassword) < 6 {
+		return fmt.Errorf("密码至少 6 位")
+	}
+	if oldPassword == newPassword {
+		return fmt.Errorf("新密码不能与旧密码相同")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	u := users[userID]
+	if u == nil || !u.Enabled {
+		return fmt.Errorf("用户不可用")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PassHash), []byte(oldPassword)) != nil {
+		return fmt.Errorf("旧密码错误")
+	}
+	u.PassHash = string(hash)
+	u.MustChangePassword = false
 	return saveUsersLocked()
 }
 

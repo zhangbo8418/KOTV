@@ -190,6 +190,37 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": u.Public()})
 }
 
+func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	u := authUserFrom(r.Context())
+	if u == nil {
+		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
+		var err error
+		u, err = auth.LookupToken(tok)
+		if err != nil {
+			writeAPIError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+	}
+	var body struct {
+		OldPassword string `json:"oldPassword"`
+		NewPassword string `json:"newPassword"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+	if err := auth.ChangePassword(u.ID, body.OldPassword, body.NewPassword); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})

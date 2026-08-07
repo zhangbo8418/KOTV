@@ -10,6 +10,7 @@ import '../models/models.dart';
 import '../player/danmaku_layer.dart';
 import '../player/exo_playback.dart';
 import '../player/ijk_playback.dart';
+import '../player/buffer_budget.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
@@ -86,6 +87,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _magnetPlay = false;
   Timer? _btProgressTimer;
   static const _epSize = 20;
+  double? _prefSpeed;
+  double? _prefVolume;
 
   Player? _mkPlayer;
   MediaKitPlayback? _mk;
@@ -188,7 +191,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       });
       return _mk!;
     }
-    final player = Player();
+    final player = kotvCreateMpvPlayer();
     _mkPlayer = player;
     _mk = MediaKitPlayback(player, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
     _playingSub = player.stream.playing.listen((_) {
@@ -470,17 +473,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           playerVal = kotvDefaultVodPlayer();
         }
         _playerVal = playerVal;
-        // 未开播前不创建 media_kit Player（Win7 上进详情即创建易卡 UI）；真正点播时再 _ensureMpv。
-        if (_backend != KotvEmbedBackend.vlc && !kotvIsWindows7()) {
-          final mk = _ensureMpv();
-          final speed = double.tryParse('${settings['playerSpeed'] ?? ''}');
-          if (speed != null && speed > 0) await mk.setRate(speed);
-          final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
-          if (vol != null) await mk.setVolume(vol.clamp(0, 100));
-          if (_stableVolumeOn) {
-            await _applyStableVolume(mk, true);
-          }
-        }
+        // 绝不在进详情时创建 Player：libmpv 初始化 + VideoController 附着会卡死 UI / 手机闪退。
+        // 音量/倍速等偏好先记下，真正 [_playAt] open 后再套。
+        _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
+        _prefVolume = double.tryParse('${settings['playerVolume'] ?? ''}');
+        unawaited(KotvBufferBudget.warm());
       } catch (_) {}
       setState(() {
         _detail = vod;
@@ -761,7 +758,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await pb.play();
       } catch (_) {}
       if (serial != _playAtSerial || !mounted) return;
-      if (_stableVolumeOn) await _applyStableVolume(pb, true);
+      // 起播后再套偏好：loudnorm 在 open 前同步套极易卡死主线程。
+      final speed = _prefSpeed;
+      if (speed != null && speed > 0) {
+        try {
+          await pb.setRate(speed);
+        } catch (_) {}
+      }
+      final vol = _prefVolume;
+      if (vol != null) {
+        try {
+          await pb.setVolume(vol.clamp(0, 100));
+        } catch (_) {}
+      }
+      if (_stableVolumeOn) {
+        // 推迟到首帧后，避免与 demuxer/硬解初始化抢同一条 native 路径。
+        unawaited(Future<void>.delayed(const Duration(milliseconds: 800), () async {
+          if (!mounted || serial != _playAtSerial) return;
+          try {
+            await _applyStableVolume(_playback, true);
+          } catch (_) {}
+        }));
+      }
       if (!mounted) return;
       setState(() {
         _playUrl = playUrl;

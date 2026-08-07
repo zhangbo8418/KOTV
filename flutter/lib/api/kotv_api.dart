@@ -104,6 +104,56 @@ class KotvApi {
     }
   }
 
+  Future<Map<String, dynamic>> authMe() => _get('/api/v1/auth/me');
+
+  Future<Map<String, dynamic>> changePassword({
+    required String oldPassword,
+    required String newPassword,
+  }) =>
+      _post('/api/v1/auth/password', {
+        'oldPassword': oldPassword,
+        'newPassword': newPassword,
+      });
+
+  Future<Map<String, dynamic>> adminListUsers() => _get('/api/v1/admin/users');
+
+  Future<Map<String, dynamic>> adminCreateUser({
+    required String username,
+    required String password,
+    String role = 'user',
+  }) =>
+      _post('/api/v1/admin/users', {
+        'username': username,
+        'password': password,
+        'role': role,
+      });
+
+  Future<Map<String, dynamic>> adminDeleteUser(String id) async {
+    final res = await http
+        .delete(_u('/api/v1/admin/users/$id'), headers: await _headers())
+        .timeout(const Duration(seconds: 30));
+    return _decode(res);
+  }
+
+  Future<Map<String, dynamic>> adminEnableUser(String id) =>
+      _post('/api/v1/admin/users/$id/enable', {});
+
+  Future<Map<String, dynamic>> adminDisableUser(String id) =>
+      _post('/api/v1/admin/users/$id/disable', {});
+
+  Future<Map<String, dynamic>> adminResetPassword(String id, String password) =>
+      _post('/api/v1/admin/users/$id/password', {'password': password});
+
+  Future<Map<String, dynamic>> adminSetSettings({
+    bool? remoteAuth,
+    bool? allowRegister,
+  }) {
+    final body = <String, dynamic>{};
+    if (remoteAuth != null) body['remoteAuth'] = remoteAuth;
+    if (allowRegister != null) body['allowRegister'] = allowRegister;
+    return _post('/api/v1/admin/settings', body);
+  }
+
   Future<Map<String, dynamic>> sessionPing() => _post('/api/v1/session/ping', {});
 
   Future<Map<String, dynamic>> sessionLeave() async {

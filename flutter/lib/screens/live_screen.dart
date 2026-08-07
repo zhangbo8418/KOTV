@@ -63,7 +63,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   bool get _useVlc => _backend == KotvEmbedBackend.vlc;
 
   MediaKitPlayback _ensureMpv() {
-    _mkPlayer ??= Player();
+    _mkPlayer ??= kotvCreateMpvPlayer();
     _mk ??= MediaKitPlayback(_mkPlayer!, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
     return _mk!;
   }

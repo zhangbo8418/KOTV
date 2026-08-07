@@ -86,6 +86,7 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/auth/register", wrap(s.handleAuthRegister))
 	mux.HandleFunc("/api/v1/auth/logout", wrap(s.handleAuthLogout))
 	mux.HandleFunc("/api/v1/auth/me", wrap(s.handleAuthMe))
+	mux.HandleFunc("/api/v1/auth/password", wrap(s.handleAuthPassword))
 	mux.HandleFunc("/api/v1/admin/users", s.requireAdmin(s.handleAdminUsers))
 	mux.HandleFunc("/api/v1/admin/users/", s.requireAdmin(s.handleAdminUserAction))
 	mux.HandleFunc("/api/v1/admin/settings", s.requireAdmin(s.handleAdminSettings))

@@ -18,6 +18,7 @@ import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
 import 'shell.dart';
+import 'user_admin_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -130,11 +131,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  /// 开启前探测 libmpv 是否真能切到 Vulkan；失败保持关闭并提示。
+  /// 开启前探测；桌面 Texture 路径无法 Vulkan，Android 才尝试 androidvk。
   Future<void> _toggleMpvVulkan(bool currentlyOn) async {
     if (_busy) return;
     if (currentlyOn) {
       await _set('mpvVulkan', 'false', msg: '已关闭 Vulkan');
+      return;
+    }
+    if (!kotvIsAndroid()) {
+      setState(() {
+        _status = '桌面内置 MPV 走 Flutter Texture（vo=libmpv），无法开启 Vulkan；请在 Android 上尝试';
+      });
       return;
     }
     setState(() {
@@ -145,11 +152,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final (ok, detail) = await KotvMpvOpts.probeVulkan();
       if (!mounted) return;
       if (!ok) {
-        // 确保磁盘/内存都是关闭
         await _set('mpvVulkan', 'false', msg: 'Vulkan 开启失败：$detail');
         return;
       }
-      await _set('mpvVulkan', 'true', msg: '已开启 Vulkan（$detail，重启播放生效）');
+      await _set('mpvVulkan', 'true', msg: '已开启 Vulkan（$detail，重启播放生效；若黑屏请关闭）');
     } catch (e) {
       if (!mounted) return;
       await _set('mpvVulkan', 'false', msg: 'Vulkan 开启失败：$e');
@@ -645,9 +651,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final mpvVulkan = g('mpvVulkan', 'false') == 'true';
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
     final mpvConfPreview = g('mpvConf').trim();
-    // MPV 内置：Android/桌面均可配 Vulkan+conf；gpu-next 仅 Android 显示
+    // MPV conf：Android/桌面；Vulkan / gpu-next 仅 Android（桌面 Texture 无法 Vulkan）
     final showMpvOpts = kotvIsAndroid() || kotvIsDesktop();
-    final showGpuNext = kotvIsAndroid();
 
     return Column(
       children: [
@@ -782,25 +787,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ('硬解码', 'hard'),
                         ]),
                       ),
-                      if (showMpvOpts)
+                      if (kotvIsAndroid())
                         KotvSettingsGrid(children: [
                           KotvSettingsCell(
                             label: 'MPV Vulkan',
                             value: mpvVulkan ? '开启' : '关闭',
                             onTap: () => unawaited(_toggleMpvVulkan(mpvVulkan)),
                           ),
-                          if (showGpuNext)
-                            KotvSettingsCell(
-                              label: 'MPV gpu-next',
-                              value: mpvGpuNext ? '开启' : '关闭',
-                              onTap: () => unawaited(_set(
-                                'mpvGpuNext',
-                                mpvGpuNext ? 'false' : 'true',
-                                msg: mpvGpuNext
-                                    ? '已关闭 gpu-next（重启播放生效）'
-                                    : '已开启 vo=gpu-next（重启播放生效）',
-                              )),
-                            ),
+                          KotvSettingsCell(
+                            label: 'MPV gpu-next',
+                            value: mpvGpuNext ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'mpvGpuNext',
+                              mpvGpuNext ? 'false' : 'true',
+                              msg: mpvGpuNext
+                                  ? '已关闭 gpu-next（重启播放生效）'
+                                  : '已开启 vo=gpu-next（重启播放生效）',
+                            )),
+                          ),
                         ]),
                       if (showMpvOpts)
                         KotvSettingsWideTile(
@@ -903,6 +907,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           label: '远端登录',
                           value: '账号',
                           onTap: _engineLogin,
+                        ),
+                        KotvSettingsCell(
+                          label: '用户管理',
+                          value: '管理员',
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(builder: (_) => const UserAdminScreen()),
+                            );
+                          },
                         ),
                       ]),
                     ]),
