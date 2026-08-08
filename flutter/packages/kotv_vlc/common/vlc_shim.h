@@ -32,8 +32,8 @@ int kotv_vlc_is_buffering(void);
 int64_t kotv_vlc_get_speed_bps(void);
 int kotv_vlc_set_volume(int vol);
 
-/* 有脏帧时：写入 *out_w、*out_h；若 out_cap>=w*h*4 则拷贝 BGRA 并清 dirty，返回 1。
- * 缓冲不够时仍返回尺寸、返回 0，调用方扩容后再 take（任意分辨率含 8K）。 */
+/* 有脏帧时：写入 *out_w、*out_h；若 out_cap>=w*h*4 则拷贝并清 dirty，返回 1。
+ * 像素：Apple=BGRA，Win/Linux=RGBA。缓冲不够时仍返回尺寸、返回 0，调用方扩容后再 take。 */
 int kotv_vlc_take_frame(uint8_t *out, int out_cap, int *out_w, int *out_h);
 
 /* 已 display 的累计帧序号，watchdog 用于判断是否卡死（无新帧） */

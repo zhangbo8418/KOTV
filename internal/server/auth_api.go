@@ -21,10 +21,15 @@ func isLoopbackRequest(r *http.Request) bool {
 }
 
 func authRequiredFor(r *http.Request) bool {
+	plat := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform")))
+	// Web 固定本站后端：打开页必须登录（与 remoteAuth / 是否本机无关）。
+	if plat == "web" {
+		return true
+	}
 	if !auth.RemoteAuthEnabled() {
 		return false
 	}
-	// 本机访问永不鉴权；仅非本机（局域网/公网）连入才要账号。
+	// PC/安卓：本机访问永不鉴权；仅非本机连入才要账号。
 	if isLoopbackRequest(r) {
 		return false
 	}
@@ -44,7 +49,8 @@ func publicAuthPath(path string) bool {
 }
 
 // withAuth 远端鉴权中间件；成功后绑定 userId。
-// 本机 loopback：永不强制登录，会话只用 clientId（源不跟账号）。
+// Web（X-Kotv-Client-Platform=web）：始终要求登录。
+// 本机 loopback 的 PC/安卓：免登录，会话只用 clientId。
 // 非本机且开启 remoteAuth：必须 Bearer，会话用 u:<userId> 隔离。
 func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -55,20 +61,21 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		loopback := isLoopbackRequest(r)
 		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
 		plat := strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform"))
+		webClient := strings.EqualFold(plat, "web")
 
 		bindPlat := func() {
 			if plat != "" {
 				hostclient.SetPlatform(plat)
 			}
-			hostclient.SetPublicBase(requestPublicBase(r, loopback))
+			hostclient.SetPublicBase(requestPublicBase(r))
 		}
 
-		// 本机：忽略 token 对会话的影响，只走 clientId。
-		if loopback {
+		// 本机 PC/安卓：忽略 token 对会话的影响，只走 clientId。
+		// Web 即使从本机浏览器打开也要走登录。
+		if loopback && !webClient {
 			done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
 			defer done()
 			bindPlat()
-			// 可选：有效 token 仍写入 context，供改密等识别身份（不改变 Scope）。
 			if tok != "" {
 				if u, err := auth.LookupToken(tok); err == nil {
 					r = r.WithContext(withAuthUser(r.Context(), u))
@@ -98,8 +105,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if tok != "" {
 			if u, err := auth.LookupToken(tok); err == nil {
-				// 开启 remoteAuth：按租户隔离；未开则仍用 clientId（有 token 也不切源桶）。
-				dedicated := auth.RemoteAuthEnabled()
+				dedicated := auth.RemoteAuthEnabled() || webClient
 				cid := ""
 				if !dedicated {
 					cid = clientIDFromRequest(r)
@@ -119,12 +125,22 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func requestPublicBase(r *http.Request, loopback bool) string {
-	if loopback || r == nil {
+// requestPublicBase 用请求 Host 作为对外根；Host 为 127/localhost 时不改写。
+// 不以 RemoteAddr 是否 loopback 为准（本机浏览器打开局域网 IP 时 RemoteAddr 也可能是回环）。
+func requestPublicBase(r *http.Request) string {
+	if r == nil {
 		return ""
 	}
 	host := strings.TrimSpace(r.Host)
 	if host == "" {
+		return ""
+	}
+	hostname := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		hostname = h
+	}
+	hostname = strings.Trim(hostname, "[]")
+	if hostname == "127.0.0.1" || strings.EqualFold(hostname, "localhost") || hostname == "::1" {
 		return ""
 	}
 	scheme := "http"

@@ -325,9 +325,17 @@ static void display_cb(void *opaque, void *picture) {
 	if (g_frame.pixels && g_frame.front && g_frame.w > 0) {
 		int n = g_frame.pitch * g_frame.h;
 		if (n > 0 && n <= g_frame.front_cap) {
-			/* RV32=BGRA → 预转 RGBA，泵线程只 memcpy，减卡顿 */
 			const uint8_t *src = g_frame.pixels;
 			uint8_t *dst = g_frame.front;
+#if defined(__APPLE__)
+			/* macOS Flutter Texture → CVPixelBuffer(kCVPixelFormatType_32BGRA)
+			 * 保持 libvlc RV32 的 BGRA 字节序，否则红蓝对调。 */
+			memcpy(dst, src, (size_t)n);
+			for (int i = 3; i < n; i += 4) {
+				dst[i] = 255;
+			}
+#else
+			/* Win/Linux Flutter PixelBuffer 要 RGBA：RV32=BGRA → 预转 RGBA */
 			int i = 0;
 			for (; i + 16 <= n; i += 16) {
 				dst[i + 0] = src[i + 2];
@@ -353,6 +361,7 @@ static void display_cb(void *opaque, void *picture) {
 				dst[i + 2] = src[i + 0];
 				dst[i + 3] = 255;
 			}
+#endif
 			g_frame.front_w = g_frame.w;
 			g_frame.front_h = g_frame.h;
 			g_frame.dirty = 1;

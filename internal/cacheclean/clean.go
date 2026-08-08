@@ -102,11 +102,19 @@ func Run(opt Options) Result {
 
 	if opt.Other {
 		for _, item := range []struct{ label, path string }{
-			{"HTTP缓存", filepath.Join(paths.Data(), "cache", "http")},
+			{"HTTP缓存", paths.HttpCache()},
 			{"EPG", paths.EpgCache()},
-			{"字幕", filepath.Join(paths.Data(), "cache", "sub")},
+			{"字幕", paths.SubCache()},
 			{"封面", paths.PicCache()},
 			{"更新包", filepath.Join(paths.Root(), "update")},
+			// 旧版套娃目录：…/data/cache/*（清理一次即可）
+			{"旧HTTP缓存", filepath.Join(paths.Data(), "cache", "http")},
+			{"旧EPG", filepath.Join(paths.Data(), "cache", "epg")},
+			{"旧字幕", filepath.Join(paths.Data(), "cache", "sub")},
+			{"旧封面", filepath.Join(paths.Data(), "cache", "pic")},
+			{"旧JS", filepath.Join(paths.Data(), "cache", "js")},
+			{"旧JAR", filepath.Join(paths.Data(), "cache", "jar")},
+			{"旧PY", filepath.Join(paths.Data(), "cache", "py")},
 		} {
 			n, err := wipeDirKeepRoot(item.path)
 			if n > 0 || err != nil {

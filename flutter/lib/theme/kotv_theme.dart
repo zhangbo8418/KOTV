@@ -130,7 +130,16 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
       filled: true,
       fillColor: palette.input,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: palette.outline.withOpacity(0.35))),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: palette.primary.withOpacity(0.75), width: 1.2)),
       hintStyle: TextStyle(color: palette.muted, fontFamilyFallback: fallbacks),
+      labelStyle: TextStyle(color: palette.fg, fontFamilyFallback: fallbacks),
+      // 输入文字跟主题前景色，避免浅底白字看不清
+      floatingLabelStyle: TextStyle(color: palette.muted, fontFamilyFallback: fallbacks),
+    ),
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: palette.primary,
+      selectionColor: palette.primary.withOpacity(0.35),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
@@ -142,6 +151,9 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: palette.bottomNav,
       indicatorColor: palette.selected,
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
       // MaterialState* 在 3.19 可用；3.22+ 为 WidgetState* 的 typedef。
       labelTextStyle: MaterialStateProperty.resolveWith((states) {
         final selected = states.contains(MaterialState.selected);

@@ -907,7 +907,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       KotvSettingsGrid(children: [
                         KotvSettingsCell(
                           label: '点播源',
-                          value: g('vod').isEmpty ? '未配置' : _ellipsize(g('vod'), 10),
+                          value: g('vod').isEmpty ? '未配置' : g('vod'),
                           onTap: () async {
                             await showAddVodDialog(context, ref);
                             await _reload();
@@ -915,7 +915,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: '直播源',
-                          value: g('live').isEmpty ? '未配置' : _ellipsize(g('live'), 10),
+                          value: g('live').isEmpty ? '未配置' : g('live'),
                           onTap: () async {
                             await showAddLiveDialog(context, ref);
                             await _reload();
@@ -924,7 +924,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: '代理',
-                          value: g('proxy').isEmpty ? '未配置' : _ellipsize(g('proxy'), 10),
+                          value: g('proxy').isEmpty ? '未配置' : g('proxy'),
                           onTap: () => _prompt('代理', 'false# 或 true#http://127.0.0.1:7890', g('proxy'), (v) => _set('proxy', v, msg: '代理已更新')),
                         ),
                         KotvSettingsCell(
@@ -939,7 +939,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: '更新地址',
-                          value: g('updateUrl').isEmpty ? '未配置' : _ellipsize(g('updateUrl'), 10),
+                          value: g('updateUrl').isEmpty ? '未配置' : g('updateUrl'),
                           onTap: () => _prompt('更新地址', 'version.json URL', g('updateUrl'), (v) => _set('updateUrl', v)),
                         ),
                         KotvSettingsCell(label: '投屏', value: 'DLNA', onTap: _cast),
@@ -958,10 +958,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         if (!kIsWeb)
                           KotvSettingsCell(
                             label: '引擎地址',
-                            value: _ellipsize(
-                              _engineCtrl.text.isNotEmpty ? _engineCtrl.text : launcher.baseUrl,
-                              12,
-                            ),
+                            value: _engineCtrl.text.isNotEmpty ? _engineCtrl.text : launcher.baseUrl,
                             onTap: () => _prompt(
                               '引擎地址（http / https）',
                               'http://192.168.1.8:9978 或 https://tv.example.com',

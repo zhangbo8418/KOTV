@@ -11,10 +11,16 @@ class LocalCollect {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_key);
     if (raw == null || raw.isEmpty) return [];
-    return (jsonDecode(raw) as List)
-        .whereType<Map>()
-        .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map>()
+          .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   static Future<bool> isKept(String id, String site) async {

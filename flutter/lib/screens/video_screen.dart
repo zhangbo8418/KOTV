@@ -355,11 +355,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final ready = _ready || cfg.maybeWhen(data: (c) => c['ready'] == true, orElse: () => false);
     final siteName = !ready
         ? '未配置源'
-        : (home?.name.isNotEmpty == true
-            ? home!.name
+        : ((home != null && home.name.isNotEmpty)
+            ? home.name
             : cfg.maybeWhen(data: (c) => c['ready'] == true ? '选站' : '未配置源', orElse: () => '…') ?? '未配置源');
     final busy = ref.watch(uiBusyProvider);
-    final onHome = _tid == null || _tid!.isEmpty;
+    final onHome = (_tid ?? '').isEmpty;
 
     return Column(
       children: [
@@ -503,9 +503,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       return Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary));
     }
 
-    final onHome = _tid == null || _tid!.isEmpty;
+    final onHome = (_tid ?? '').isEmpty;
     final pad = KotvLayout.isCompact(context) ? 12.0 : 30.0;
     final catPad = KotvLayout.isCompact(context) ? 16.0 : 60.0;
+    final bottomPad = KotvLayout.useBottomNav(context) ? 80.0 : 24.0;
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
         if (!onHome && n.metrics.pixels > n.metrics.maxScrollExtent - 300) _loadMore();
@@ -536,7 +537,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               )
             else
               SliverPadding(
-                padding: EdgeInsets.fromLTRB(pad * LayoutScale.of(context), 0, pad * LayoutScale.of(context), 24 * LayoutScale.of(context)),
+                padding: EdgeInsets.fromLTRB(pad * LayoutScale.of(context), 0, pad * LayoutScale.of(context), bottomPad * LayoutScale.of(context)),
                 sliver: _posterSliver(_items),
               ),
           ] else ...[
@@ -564,7 +565,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               )
             else
               SliverPadding(
-                padding: EdgeInsets.fromLTRB(catPad, 0, catPad, 24),
+                padding: EdgeInsets.fromLTRB(catPad, 0, catPad, bottomPad),
                 sliver: _posterSliver(_items),
               ),
           ],
@@ -577,7 +578,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   /// 左上两卡与下方四卡完全同宽同高；轮播 = 右三列 × 两行高。
   Widget _buildHomeFeatureGrid() {
     final slides = _bannerSlides;
-    final cur = slides.isEmpty ? null : slides[_bannerIdx % slides.length];
+    final cur = slides.isEmpty ? null : slides[_bannerIdx.clamp(0, 1 << 30) % slides.length];
     final bottomNav = KotvLayout.useBottomNav(context);
     final compact = KotvLayout.isCompact(context);
 
@@ -622,8 +623,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 fit: StackFit.expand,
                 children: [
                   const ColoredBox(color: Color(0xFF652291)),
-                  if (cur?.pic.isNotEmpty == true)
-                    Image.network(cur!.pic, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
+                  if (cur != null && cur.pic.isNotEmpty)
+                    Image.network(cur.pic, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
                   const ColoredBox(color: Color(0x66190842)),
                   Positioned(
                     left: 14,
@@ -641,8 +642,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                     right: 64,
                     bottom: 14,
                     child: Text(
-                      (cur?.remarks.isNotEmpty == true)
-                          ? cur!.remarks
+                      (cur != null && cur.remarks.isNotEmpty)
+                          ? cur.remarks
                           : (cur == null ? '配置源后这里会轮播推荐' : '点击查看详情并播放'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -654,7 +655,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                       right: 14,
                       bottom: 14,
                       child: Text(
-                        '${_bannerIdx % slides.length + 1}/${slides.length}',
+                        '${(_bannerIdx % slides.length) + 1}/${slides.length}',
                         style: const TextStyle(color: Colors.white70, fontSize: 12),
                       ),
                     ),
@@ -852,7 +853,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         // 列数按逻辑宽度算，避免 scale 越小列越多、海报被压成扁条
         // 窄屏固定 3 列，不再按 cell 宽度计算（竖屏宽度有限，避免只出 2 列）
         final gap = compact ? 6.0 : 10.0;
-        final cross = compact ? 3 : (constraints.crossAxisExtent / (200.0 + gap)).floor().clamp(3, 5);
+        final extent = constraints.crossAxisExtent;
+        final cross = !extent.isFinite || extent <= 0
+            ? (compact ? 3 : 4)
+            : (compact ? 3 : (extent / (200.0 + gap)).floor().clamp(3, 5));
         return SliverGrid(
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: cross,
@@ -861,11 +865,15 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             childAspectRatio: 214 / 286,
           ),
           delegate: SliverChildBuilderDelegate(
-            (context, i) => PosterCard(
-              item: items[i],
-              autofocus: false,
-              onTap: () => _open(items[i]),
-            ),
+            (context, i) {
+              if (i < 0 || i >= items.length) return const SizedBox.shrink();
+              final it = items[i];
+              return PosterCard(
+                item: it,
+                autofocus: false,
+                onTap: () => _open(it),
+              );
+            },
             childCount: items.length,
           ),
         );

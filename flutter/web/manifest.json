@@ -1,12 +1,12 @@
 {
-    "name": "kotv",
-    "short_name": "kotv",
+    "name": "KO影视",
+    "short_name": "KO影视",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#1a0a2e",
+    "theme_color": "#7B2CBF",
+    "description": "KO影视 Web 客户端",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

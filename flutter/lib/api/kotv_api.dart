@@ -229,8 +229,11 @@ class KotvApi {
 
   Future<Map<String, dynamic>> btProgress() => _get('/api/v1/bt/progress');
 
-  Future<Map<String, dynamic>> search(String keyword) =>
-      _post('/api/v1/search', {'keyword': keyword});
+  Future<Map<String, dynamic>> search(String keyword, {List<String>? sites}) =>
+      _post('/api/v1/search', {
+        'keyword': keyword,
+        if (sites != null && sites.isNotEmpty) 'sites': sites,
+      });
 
   Future<Map<String, dynamic>> play({
     required String url,

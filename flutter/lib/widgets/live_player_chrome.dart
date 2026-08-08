@@ -4,6 +4,7 @@ import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
+import '../theme/layout_scale.dart';
 import 'vod_player_chrome.dart';
 
 /// 直播底栏控件：播放/暂停、投屏、迷你、全屏、播放器、软硬解、音量；（回看时含进度）。
@@ -38,6 +39,8 @@ class LiveCatchupChrome extends StatelessWidget {
   Widget build(BuildContext context) {
     final resolvedPlayerLabel =
         playerLabel.trim().isEmpty ? flutterPlayerLabel(kotvDefaultLivePlayer()) : playerLabel;
+    final land = KotvLayout.isLandscapeCompact(context);
+    final iconSize = land ? 30.0 : 40.0;
     return Material(
       color: translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
       child: StreamBuilder(
@@ -47,9 +50,9 @@ class LiveCatchupChrome extends StatelessWidget {
           final dur = player.duration;
           final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
           final vol = player.volume.clamp(0, 100).toDouble();
-          final compact = miniActive || MediaQuery.sizeOf(context).width < 560;
+          final compact = miniActive || MediaQuery.sizeOf(context).width < 560 || land;
           return Padding(
-            padding: EdgeInsets.fromLTRB(compact ? 4 : 10, 4, compact ? 4 : 10, 6),
+            padding: EdgeInsets.fromLTRB(compact ? 4 : 10, land ? 2 : 4, compact ? 4 : 10, land ? 4 : 6),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -59,15 +62,17 @@ class LiveCatchupChrome extends StatelessWidget {
                       icon: player.playing ? Icons.pause : Icons.play_arrow,
                       tip: player.playing ? '暂停' : '播放',
                       compact: compact,
+                      size: iconSize,
                       onTap: () => player.playOrPause(),
                     ),
                     if (onCast != null)
-                      _act(icon: Icons.cast, tip: '投屏', compact: compact, onTap: onCast!),
+                      _act(icon: Icons.cast, tip: '投屏', compact: compact, size: iconSize, onTap: onCast!),
                     if (onMini != null)
                       _act(
                         icon: miniActive ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
                         tip: miniActive ? '还原窗口' : '迷你桌面播放',
                         compact: compact,
+                        size: iconSize,
                         onTap: onMini!,
                       ),
                     if (onExpand != null && !miniActive)
@@ -75,6 +80,7 @@ class LiveCatchupChrome extends StatelessWidget {
                         icon: Icons.fullscreen,
                         tip: '全屏',
                         compact: compact,
+                        size: iconSize,
                         onTap: onExpand!,
                       ),
                     if (!compact && onPlayer != null)
@@ -84,18 +90,18 @@ class LiveCatchupChrome extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       compact ? fmtPlayerTime(pos) : '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',
-                      style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: compact ? 11 : 12),
+                      style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : (compact ? 11 : 12)),
                     ),
                     const Spacer(),
                     if (!compact)
-                      Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                      Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: land ? 11 : 12)),
                     SizedBox(
-                      width: compact ? 72 : 110,
+                      width: compact ? 72 : (land ? 90 : 110),
                       child: SliderTheme(
                         data: SliderTheme.of(context).copyWith(
-                          trackHeight: 3,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                          trackHeight: land ? 2 : 3,
+                          thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
+                          overlayShape: RoundSliderOverlayShape(overlayRadius: land ? 10 : 12),
                           activeTrackColor: KotvColors.primary,
                           inactiveTrackColor: Colors.white24,
                           thumbColor: Colors.white,
@@ -111,9 +117,9 @@ class LiveCatchupChrome extends StatelessWidget {
                 ),
                 SliderTheme(
                   data: SliderTheme.of(context).copyWith(
-                    trackHeight: 3,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                    trackHeight: land ? 2 : 3,
+                    thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
+                    overlayShape: RoundSliderOverlayShape(overlayRadius: land ? 10 : 12),
                     activeTrackColor: KotvColors.primary,
                     inactiveTrackColor: Colors.white24,
                     secondaryActiveTrackColor: Colors.white38,
@@ -146,17 +152,18 @@ class LiveCatchupChrome extends StatelessWidget {
     required String tip,
     required bool compact,
     required VoidCallback onTap,
+    double? size,
   }) {
-    final size = compact ? 32.0 : 40.0;
+    final sz = size ?? (compact ? 32.0 : 40.0);
     return Tooltip(
       message: tip,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: SizedBox(
-          width: size,
-          height: size,
-          child: Icon(icon, color: Colors.white, size: compact ? 18 : 22),
+          width: sz,
+          height: sz,
+          child: Icon(icon, color: Colors.white, size: sz <= 32 ? 16 : 22),
         ),
       ),
     );

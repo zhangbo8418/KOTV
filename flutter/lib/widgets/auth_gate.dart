@@ -7,9 +7,39 @@ import '../api/kotv_auth_token.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
 
-/// Web：打开页登录本站账号。PC/安卓：设置里探测远端后强制登录。
+/// Web：打开页必须登录本站账号。PC/安卓：仅远端鉴权开启时在设置里登录。
 Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
+
+  if (kIsWeb) {
+    final tok = await kotvAuthToken();
+    if (tok.isNotEmpty) {
+      try {
+        await api.authMe();
+        return true;
+      } catch (_) {
+        await kotvClearAuthToken();
+      }
+    }
+    if (!context.mounted) return false;
+    var allowReg = false;
+    try {
+      final st = await api.authStatus();
+      allowReg = st['allowRegister'] == true;
+    } catch (_) {}
+    if (!context.mounted) return false;
+    final r = await showRemoteLoginDialog(
+      context,
+      ref,
+      api: api,
+      allowRegister: allowReg,
+      allowCancel: false,
+      title: '登录',
+      subtitle: '使用本站账号登录后即可观看',
+    );
+    return r.ok;
+  }
+
   Map<String, dynamic> st;
   try {
     st = await api.authStatus();
@@ -35,8 +65,8 @@ Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async
     api: api,
     allowRegister: st['allowRegister'] == true,
     allowCancel: false,
-    title: kIsWeb ? '登录' : '远端登录',
-    subtitle: kIsWeb ? '使用本站账号登录后即可观看' : '连接此引擎需登录一次，之后与本机使用相同',
+    title: '远端登录',
+    subtitle: '连接此引擎需登录一次，之后与本机使用相同',
   );
   return r.ok;
 }

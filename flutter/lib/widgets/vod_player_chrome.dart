@@ -7,6 +7,7 @@ import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
+import '../theme/layout_scale.dart';
 
 const _speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
@@ -1250,6 +1251,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final w = widget.player.width;
     final h = widget.player.height;
     final res = '[ $w x $h ]';
+    final land = KotvLayout.isLandscapeCompact(context);
+    final titleSize = land ? 16.0 : 22.0;
+    final clockSize = land ? 20.0 : 32.0;
+    final padH = land ? 14.0 : 28.0;
+    final padTopBar = land ? 6.0 : 12.0;
+    final padBot = land ? 10.0 : 22.0;
 
     return Stack(
       fit: StackFit.expand,
@@ -1262,10 +1269,10 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             top: 0,
             child: Container(
               color: const Color(0x66000000),
-              padding: EdgeInsets.fromLTRB(28, padTop + 12, 28, 14),
+              padding: EdgeInsets.fromLTRB(padH, padTop + padTopBar, padH, land ? 8 : 14),
               child: Row(
                 children: [
-                  Container(width: 4, height: 42, color: const Color(0xFFE52D27)),
+                  Container(width: 4, height: land ? 28 : 42, color: const Color(0xFFE52D27)),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -1275,9 +1282,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           widget.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700),
+                          style: TextStyle(color: Colors.white, fontSize: titleSize, fontWeight: FontWeight.w700),
                         ),
-                        Text(res, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 14)),
+                        Text(res, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: land ? 11 : 14)),
                       ],
                     ),
                   ),
@@ -1294,7 +1301,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             child: Material(
               color: const Color(0x99000000),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(28, 12, 28, 22),
+                padding: EdgeInsets.fromLTRB(padH, land ? 6 : 12, padH, padBot),
                 child: StreamBuilder(
                   stream: widget.player.positionStream,
                   builder: (context, _) {
@@ -1313,18 +1320,18 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             children: [
                               Text(
                                 '${_now.hour.toString().padLeft(2, '0')}:${_now.minute.toString().padLeft(2, '0')}:${_now.second.toString().padLeft(2, '0')}',
-                                style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w700, height: 1),
+                                style: TextStyle(color: Colors.white, fontSize: clockSize, fontWeight: FontWeight.w700, height: 1),
                               ),
-                              Text(_endsAt, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13)),
+                              Text(_endsAt, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: land ? 11 : 13)),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        SizedBox(height: land ? 2 : 4),
                         Row(
                           children: [
                             SizedBox(
-                              width: 78,
-                              child: Text(fmtClockHms(pos), style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13)),
+                              width: land ? 64 : 78,
+                              child: Text(fmtClockHms(pos), style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13)),
                             ),
                             Expanded(
                               child: SliderTheme(
@@ -1342,16 +1349,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               ),
                             ),
                             SizedBox(
-                              width: 78,
+                              width: land ? 64 : 78,
                               child: Text(
                                 fmtClockHms(dur),
                                 textAlign: TextAlign.right,
-                                style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13),
+                                style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13),
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 6),
+                        SizedBox(height: land ? 2 : 6),
                         Row(
                           children: [
                             Expanded(
@@ -1359,20 +1366,21 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                 scrollDirection: Axis.horizontal,
                                 child: Row(
                                   children: [
-                                    _IconAct(icon: Icons.skip_previous, tip: '上一集', onTap: () {
+                                    _IconAct(icon: Icons.skip_previous, tip: '上一集', size: land ? 32.0 : 40.0, onTap: () {
                                       widget.onPrev?.call();
                                       widget.onBump();
                                     }),
                                     _IconAct(
                                       icon: widget.player.playing ? Icons.pause : Icons.play_arrow,
                                       tip: widget.player.playing ? '暂停' : '播放',
+                                      size: land ? 32.0 : 40.0,
                                       onTap: () {
                                         widget.player.playOrPause();
                                         widget.onBump();
                                         setState(() {});
                                       },
                                     ),
-                                    _IconAct(icon: Icons.skip_next, tip: '下一集', onTap: () {
+                                    _IconAct(icon: Icons.skip_next, tip: '下一集', size: land ? 32.0 : 40.0, onTap: () {
                                       widget.onNext?.call();
                                       widget.onBump();
                                     }),
@@ -1380,9 +1388,10 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       icon: Icons.fast_forward,
                                       tip: '倍速',
                                       badge: 'x${_speeds[_speedIdx]}',
+                                      size: land ? 32.0 : 40.0,
                                       onTap: _cycleSpeed,
                                     ),
-                                    _IconAct(icon: Icons.replay, tip: '重播', onTap: () {
+                                    _IconAct(icon: Icons.replay, tip: '重播', size: land ? 32.0 : 40.0, onTap: () {
                                       widget.onReplay?.call();
                                       widget.player.seek(Duration.zero);
                                       widget.player.play();
@@ -1391,22 +1400,26 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                     _IconAct(
                                       icon: Icons.aspect_ratio,
                                       tip: _aspects[_aspectIdx].$2,
+                                      size: land ? 32.0 : 40.0,
                                       onTap: _cycleAspect,
                                     ),
                                     _IconAct(
                                       icon: Icons.memory,
                                       tip: _decodeModes[_decodeIdx].$2,
                                       badge: _decodeModes[_decodeIdx].$2.substring(0, 1),
+                                      size: land ? 32.0 : 40.0,
                                       onTap: _cycleDecode,
                                     ),
                                     _IconAct(
                                       icon: Icons.closed_caption,
                                       tip: '字幕',
+                                      size: land ? 32.0 : 40.0,
                                       onTap: () => _showTrackSheet(audio: false),
                                     ),
                                     _IconAct(
                                       icon: Icons.audiotrack,
                                       tip: '音轨',
+                                      size: land ? 32.0 : 40.0,
                                       onTap: () => _showTrackSheet(audio: true),
                                     ),
                                     if (kotvCanSwitchPlayer(live: false))
@@ -1414,6 +1427,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         icon: Icons.devices,
                                         tip: '播放器（$_playerLabel）',
                                         badge: flutterIsEmbedPlayer(_playerVal) ? '内' : '外',
+                                        size: land ? 32.0 : 40.0,
                                         onTap: _showPlayerDialog,
                                       ),
                                     const SizedBox(width: 6),
@@ -1511,16 +1525,23 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               child: Material(
                 color: const Color(0x990A0814),
                 child: SizedBox(
-                  width: 300,
+                  width: KotvLayout.isLandscapeCompact(context) ? 220.0 : 300.0,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(
-                        padding: EdgeInsets.fromLTRB(16, padTop + 14, 8, 10),
+                        padding: EdgeInsets.fromLTRB(16, padTop + (KotvLayout.isLandscapeCompact(context) ? 8 : 14), 8, 10),
                         child: Row(
                           children: [
-                            const Expanded(
-                              child: Text('选集', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700)),
+                            Expanded(
+                              child: Text(
+                                '选集',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: KotvLayout.isLandscapeCompact(context) ? 16 : 20,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
                             IconButton(
                               onPressed: closeEpisodes,

@@ -52,16 +52,25 @@ class KotvLayout {
     return size.height > size.width && size.width < 900;
   }
 
-  /// 窄屏（竖屏手机或缩得很小的桌面窗）。
+  /// 手机横屏（宽但矮）→ 走桌面/横屏布局，不当竖屏紧凑。
+  static bool isLandscapeCompact(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return size.width >= size.height && size.height < 520;
+  }
+
+  /// 窄屏竖屏手机或缩得很小的桌面窗。
+  /// **不含**手机横屏（否则会错误套用竖屏列表/网格）。
   static bool isCompact(BuildContext context) {
+    if (isLandscapeCompact(context)) return false;
     final size = MediaQuery.sizeOf(context);
     return size.width < 720 || size.shortestSide < 560;
   }
 
-  /// 手机横屏（宽但矮）。
-  static bool isLandscapeCompact(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    return size.width >= size.height && size.height < 520;
+  /// 全屏播放器控件缩放：手机横屏缩小菜单/字号。
+  static double chromeScale(BuildContext context) {
+    if (isLandscapeCompact(context)) return 0.72;
+    if (useBottomNav(context)) return 0.88;
+    return 1.0;
   }
 
   static EdgeInsets pagePadding(BuildContext context, {double desk = 28, double compact = 12}) {

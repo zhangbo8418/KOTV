@@ -500,8 +500,8 @@ class _TopStatusBarState extends State<TopStatusBar> {
     final compact = KotvLayout.isCompact(context);
     final bottomNav = KotvLayout.useBottomNav(context);
     final landscape = KotvLayout.isLandscapeCompact(context);
-    final h = compact ? 40.0 : (landscape ? 44.0 : 52.0);
-    final padH = compact ? 10.0 : 24.0 * s;
+    final h = compact ? 40.0 : (landscape ? 36.0 : 52.0);
+    final padH = compact ? 10.0 : (landscape ? 14.0 : 24.0 * s);
     return Container(
       height: h,
       color: p.statusBar,
@@ -516,8 +516,8 @@ class _TopStatusBarState extends State<TopStatusBar> {
             children: [
               AppPill(
                 label: compact ? '多仓' : '多仓切换',
-                height: compact ? 32 : 36,
-                fontSize: compact ? 13 : 15,
+                height: compact || landscape ? 28 : 36,
+                fontSize: compact || landscape ? 12 : 15,
                 onTap: widget.onRepo,
               ),
               if (showNews) ...[
@@ -543,13 +543,13 @@ class _TopStatusBarState extends State<TopStatusBar> {
                       fit: FlexFit.loose,
                       child: AppPill(
                         label: widget.siteName,
-                        height: compact ? 32 : 36,
-                        fontSize: compact ? 13 : 15,
+                        height: compact || landscape ? 28 : 36,
+                        fontSize: compact || landscape ? 12 : 15,
                         onTap: widget.onSite,
                       ),
                     ),
                     if (!bottomNav) ...[
-                      const SizedBox(width: 8),
+                      SizedBox(width: landscape ? 6 : 8),
                       TvFocus(
                         onPressed: widget.onSettings,
                         child: Material(
@@ -559,9 +559,9 @@ class _TopStatusBarState extends State<TopStatusBar> {
                             customBorder: const CircleBorder(),
                             onTap: widget.onSettings,
                             child: SizedBox(
-                              width: 36,
-                              height: 36,
-                              child: Icon(Icons.settings, color: p.fg, size: 20),
+                              width: landscape ? 28 : 36,
+                              height: landscape ? 28 : 36,
+                              child: Icon(Icons.settings, color: p.fg, size: landscape ? 16 : 20),
                             ),
                           ),
                         ),
@@ -633,7 +633,16 @@ class LibraryTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final compact = KotvLayout.isCompact(context);
     final bottomNav = KotvLayout.useBottomNav(context);
-    final pad = EdgeInsets.fromLTRB(compact ? 12 : 50, 10, compact ? 12 : 28, 10);
+    final land = KotvLayout.isLandscapeCompact(context);
+    final pad = EdgeInsets.fromLTRB(
+      land ? 16 : (compact ? 12 : 50),
+      land ? 6 : 10,
+      land ? 16 : (compact ? 12 : 28),
+      land ? 6 : 10,
+    );
+    final pillH = land ? 30.0 : (compact ? 36.0 : 40.0);
+    final pillW = land ? 72.0 : (compact ? 88.0 : 104.0);
+    final pillFs = land ? 12.0 : 15.0;
     // 竖屏底栏已有搜索/我的：顶栏只留返回（+可选标题）
     if (bottomNav) {
       return Padding(
@@ -666,12 +675,12 @@ class LibraryTopBar extends StatelessWidget {
       padding: pad,
       child: Row(
         children: [
-          AppPill(label: '返回', width: compact ? 88 : 104, height: compact ? 36 : 40, onTap: onBack),
-          const SizedBox(width: 10),
-          AppPill(label: '搜索', width: compact ? 88 : 104, height: compact ? 36 : 40, onTap: onSearch),
-          const SizedBox(width: 10),
-          AppPill(label: '我的', width: compact ? 88 : 104, height: compact ? 36 : 40, onTap: onProfile),
-          if (!compact) ...[
+          AppPill(label: '返回', width: pillW, height: pillH, fontSize: pillFs, onTap: onBack),
+          SizedBox(width: land ? 6 : 10),
+          AppPill(label: '搜索', width: pillW, height: pillH, fontSize: pillFs, onTap: onSearch),
+          SizedBox(width: land ? 6 : 10),
+          AppPill(label: '我的', width: pillW, height: pillH, fontSize: pillFs, onTap: onProfile),
+          if (!compact && !land) ...[
             const SizedBox(width: 10),
             _NewsPill(onTap: onNews),
           ],

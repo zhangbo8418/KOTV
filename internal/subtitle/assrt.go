@@ -79,7 +79,7 @@ func Token() string {
 // HasToken 是否已配置 Token。
 func HasToken() bool { return Token() != "" }
 
-func SubCache() string { return paths.Ensure(filepath.Join(paths.Data(), "cache", "sub")) }
+func SubCache() string { return paths.SubCache() }
 
 // Search 用片名搜索字幕（Assrt）。
 func Search(query string, limit int) ([]Item, error) {

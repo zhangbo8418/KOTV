@@ -32,6 +32,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   List<String> _hot = List<String>.from(_hotDefaults);
   String? _status;
   bool _busy = false;
+  int _searchGen = 0;
+  int _doneSites = 0;
+  int _totalSites = 0;
 
   static const _keys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   static const _hotDefaults = [
@@ -65,51 +68,146 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   @override
   void dispose() {
+    _searchGen++;
     _ctrl.dispose();
     super.dispose();
+  }
+
+  List<_SiteCollect> _parseCollects(Map<String, dynamic> data) {
+    final collects = <_SiteCollect>[];
+    for (final c in ((data['collects'] as List?) ?? []).whereType<Map>()) {
+      final name = '${c['name'] ?? ''}';
+      if (name == '全部') continue;
+      final list = ((c['list'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      if (list.isEmpty) continue;
+      collects.add(_SiteCollect(
+        name: name.isEmpty ? '${c['site'] ?? '站点'}' : name,
+        site: '${c['site'] ?? ''}',
+        list: list,
+      ));
+    }
+    if (collects.isEmpty) {
+      final flat = ((data['list'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      if (flat.isNotEmpty) {
+        collects.add(_SiteCollect(name: '搜索结果', site: '', list: flat));
+      }
+    }
+    return collects;
+  }
+
+  int get _hitCount => _collects.fold<int>(0, (a, b) => a + b.list.length);
+
+  void _appendCollects(List<_SiteCollect> next) {
+    if (next.isEmpty) return;
+    final merged = List<_SiteCollect>.from(_collects);
+    for (final c in next) {
+      final i = merged.indexWhere((e) => e.site == c.site && e.site.isNotEmpty);
+      if (i >= 0) {
+        final old = merged[i];
+        final seen = old.list.map((e) => e.id).toSet();
+        merged[i] = _SiteCollect(
+          name: old.name,
+          site: old.site,
+          list: [...old.list, ...c.list.where((e) => !seen.contains(e.id))],
+        );
+      } else {
+        merged.add(c);
+      }
+    }
+    _collects = merged;
   }
 
   Future<void> _search(String q) async {
     final kw = q.trim();
     if (kw.isEmpty) return;
+    final gen = ++_searchGen;
     setState(() {
       _busy = true;
       _status = '搜索中…';
       _collects = [];
+      _doneSites = 0;
+      _totalSites = 0;
     });
+
     try {
-      final data = await ref.read(apiProvider).search(kw);
-      final collects = <_SiteCollect>[];
-      for (final c in ((data['collects'] as List?) ?? []).whereType<Map>()) {
-        final name = '${c['name'] ?? ''}';
-        if (name == '全部') continue;
-        final list = ((c['list'] as List?) ?? [])
-            .whereType<Map>()
-            .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
-            .toList();
-        if (list.isEmpty) continue;
-        collects.add(_SiteCollect(name: name.isEmpty ? '${c['site'] ?? '站点'}' : name, site: '${c['site'] ?? ''}', list: list));
+      final cfg = await ref.read(apiProvider).getConfig();
+      if (!mounted || gen != _searchGen) return;
+      final sites = ((cfg['sites'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
+          .where((s) => s.searchable && s.key.isNotEmpty)
+          .toList();
+
+      if (sites.isEmpty) {
+        final data = await ref.read(apiProvider).search(kw);
+        if (!mounted || gen != _searchGen) return;
+        final collects = _parseCollects(data);
+        setState(() {
+          _collects = collects;
+          _status = collects.isEmpty ? '无结果' : '找到 ${_hitCount} 条';
+        });
+        _loadHot();
+        return;
       }
-      // 兼容旧扁平 list
-      if (collects.isEmpty) {
-        final flat = ((data['list'] as List?) ?? [])
-            .whereType<Map>()
-            .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
-            .toList();
-        if (flat.isNotEmpty) {
-          collects.add(_SiteCollect(name: '搜索结果', site: '', list: flat));
+
+      setState(() {
+        _totalSites = sites.length;
+        _status = '搜索中 0/${sites.length}';
+      });
+
+      var cursor = 0;
+      Future<void> worker() async {
+        while (true) {
+          final i = cursor++;
+          if (i >= sites.length) return;
+          if (!mounted || gen != _searchGen) return;
+          final site = sites[i];
+          try {
+            final data = await ref.read(apiProvider).search(kw, sites: [site.key]);
+            if (!mounted || gen != _searchGen) return;
+            final got = _parseCollects(data);
+            setState(() {
+              _appendCollects(got);
+              _doneSites++;
+              final hits = _hitCount;
+              _status = _doneSites >= _totalSites
+                  ? (hits == 0 ? '无结果' : '找到 $hits 条（${_collects.length} 个站点）')
+                  : '搜索中 $_doneSites/$_totalSites · 已找到 $hits 条';
+            });
+          } catch (_) {
+            if (!mounted || gen != _searchGen) return;
+            setState(() {
+              _doneSites++;
+              final hits = _hitCount;
+              _status = _doneSites >= _totalSites
+                  ? (hits == 0 ? '无结果' : '找到 $hits 条（${_collects.length} 个站点）')
+                  : '搜索中 $_doneSites/$_totalSites · 已找到 $hits 条';
+            });
+          }
         }
       }
-      final total = collects.fold<int>(0, (a, b) => a + b.list.length);
+
+      const workers = 4;
+      await Future.wait(List.generate(workers, (_) => worker()));
+      if (!mounted || gen != _searchGen) return;
+      final hits = _hitCount;
       setState(() {
-        _collects = collects;
-        _status = collects.isEmpty ? '无结果' : '找到 $total 条（${collects.length} 个站点）';
+        _status = hits == 0 ? '无结果' : '找到 $hits 条（${_collects.length} 个站点）';
       });
       _loadHot();
     } catch (e) {
+      if (!mounted || gen != _searchGen) return;
       setState(() => _status = '$e');
     } finally {
-      setState(() => _busy = false);
+      if (mounted && gen == _searchGen) {
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -175,7 +273,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           onSubmitted: _search,
         ),
         const SizedBox(height: 8),
-        AppPill(label: _busy ? '…' : '搜索', width: 130, height: 44, selected: true, onTap: _busy ? () {} : () => _search(_ctrl.text)),
+        AppPill(
+          label: _busy ? '搜索中' : '搜索',
+          width: 130,
+          height: 44,
+          selected: true,
+          onTap: _busy ? () {} : () => _search(_ctrl.text),
+        ),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -183,11 +287,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               child: AppPill(
                 label: '清空',
                 height: 40,
-                onTap: () => setState(() {
-                  _ctrl.clear();
-                  _collects = [];
-                  _status = null;
-                }),
+                onTap: () {
+                  _searchGen++;
+                  setState(() {
+                    _ctrl.clear();
+                    _collects = [];
+                    _status = null;
+                    _busy = false;
+                    _doneSites = 0;
+                    _totalSites = 0;
+                  });
+                },
               ),
             ),
             const SizedBox(width: 8),
@@ -245,35 +355,142 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   Widget _rightPanel() {
     final p = KotvPalette.of(context);
-    if (_collects.isEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          color: p.pillBg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: p.pillBorder),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('热门搜索', style: TextStyle(color: p.fg, fontSize: 20, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 12),
-            for (final h in _hot) ...[
-              AppPill(
-                label: h,
-                width: 220,
-                height: 46,
-                onTap: () {
-                  _ctrl.text = h;
-                  _search(h);
-                },
+    final showHot = _collects.isEmpty && !_busy;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (showHot)
+          _hotPanel(p)
+        else if (_collects.isEmpty)
+          Container(
+            decoration: BoxDecoration(
+              color: p.pillBg,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: p.pillBorder),
+            ),
+          )
+        else
+          _resultsList(),
+        if (_busy && _collects.isEmpty)
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0x66000000),
+                borderRadius: BorderRadius.circular(14),
               ),
-              const SizedBox(height: 8),
-            ],
-          ],
-        ),
-      );
-    }
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 280),
+                  child: Material(
+                    color: const Color(0xCC1A1228),
+                    borderRadius: BorderRadius.circular(14),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: CircularProgressIndicator(strokeWidth: 2.6, color: Colors.white),
+                          ),
+                          const SizedBox(height: 14),
+                          const Text(
+                            '正在搜索…',
+                            style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _totalSites > 0
+                                ? '$_doneSites / $_totalSites 站点 · 已找到 $_hitCount 条'
+                                : (_status ?? ''),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+        else if (_busy && _collects.isNotEmpty)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: Material(
+              color: const Color(0xCC1A1228),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '继续搜索 $_doneSites/$_totalSites · 已找到 $_hitCount 条',
+                        style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _hotPanel(KotvPalette p) {
+    return Container(
+      decoration: BoxDecoration(
+        color: p.pillBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: p.pillBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: Text('热门搜索', style: TextStyle(color: p.fg, fontSize: 20, fontWeight: FontWeight.w700)),
+          ),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              itemCount: _hot.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (_, i) {
+                final h = _hot[i];
+                return Align(
+                  alignment: Alignment.centerLeft,
+                  child: AppPill(
+                    label: h,
+                    width: 220,
+                    height: 46,
+                    onTap: () {
+                      _ctrl.text = h;
+                      _search(h);
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _resultsList() {
     return ListView(
       children: [
         for (final c in _collects) ...[

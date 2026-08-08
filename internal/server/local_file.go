@@ -214,7 +214,7 @@ func (s *Server) handleCache(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing key", http.StatusBadRequest)
 		return
 	}
-	dir := paths.Ensure(filepath.Join(paths.Data(), "cache", "http"))
+	dir := paths.HttpCache()
 	file := filepath.Join(dir, sanitizeCacheKey(key))
 	switch do {
 	case "get":

@@ -83,11 +83,16 @@ class LocalHistory {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_key);
     if (raw == null || raw.isEmpty) return [];
-    final list = (jsonDecode(raw) as List)
-        .whereType<Map>()
-        .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    return list;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map>()
+          .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   static Future<void> push(VodItem item) async {

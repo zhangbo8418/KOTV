@@ -116,6 +116,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   int _lines = 1;
   bool _leftOpen = true;
   bool _rightOpen = false;
+  /// 返回 / 底栏：点屏幕中间显隐；与左右菜单互斥，不一起出现。
+  bool _chromeVisible = false;
   bool _catchup = false;
   bool _catchupChrome = false;
   bool _miniDesktop = false;
@@ -171,16 +173,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     super.dispose();
   }
 
-  /// 返回：沉浸全屏 → 关侧栏 → 未消费（交给外壳双返退桌面）。
+  /// 返回：沉浸全屏 → 关侧栏/控件 → 未消费（交给外壳双返退桌面）。
   bool _handleLiveBack() {
     if (_immersive) {
       unawaited(_exitImmersive());
       return true;
     }
-    if (_leftOpen || _rightOpen) {
+    if (_leftOpen || _rightOpen || _chromeVisible) {
       setState(() {
         _leftOpen = false;
         _rightOpen = false;
+        _chromeVisible = false;
       });
       return true;
     }
@@ -717,6 +720,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _immersive = true;
       _leftOpen = false;
       _rightOpen = false;
+      _chromeVisible = false;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
@@ -730,6 +734,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _immersive = false;
         _leftOpen = false;
         _rightOpen = false;
+        _chromeVisible = false;
       });
     }
     try {
@@ -815,25 +820,32 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   void _scheduleHideOverlays() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 8), () {
+    final land = mounted && KotvLayout.isLandscapeCompact(context);
+    _hideTimer = Timer(Duration(seconds: land ? 12 : 8), () {
       if (mounted) {
         setState(() {
           _leftOpen = false;
           _rightOpen = false;
+          _chromeVisible = false;
         });
       }
     });
   }
 
-  void _openLeft() => setState(() {
-        _leftOpen = true;
-        _rightOpen = false;
-        _cancelHideOverlays();
-      });
+  void _openLeft() {
+    setState(() {
+      _leftOpen = true;
+      _rightOpen = false;
+      _chromeVisible = false;
+      _cancelHideOverlays();
+    });
+    if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
+  }
 
   void _openRight() => setState(() {
         _rightOpen = true;
         _leftOpen = false;
+        _chromeVisible = false;
         _cancelHideOverlays();
       });
 
@@ -841,9 +853,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _leftOpen = !_leftOpen;
         if (_leftOpen) {
           _rightOpen = false;
+          _chromeVisible = false;
           _cancelHideOverlays();
-        } else {
-          _scheduleHideOverlays();
         }
       });
 
@@ -851,11 +862,32 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _rightOpen = !_rightOpen;
         if (_rightOpen) {
           _leftOpen = false;
+          _chromeVisible = false;
           _cancelHideOverlays();
-        } else {
-          _scheduleHideOverlays();
         }
       });
+
+  /// 点中间：关菜单，或切换返回+底栏（与左右菜单互斥）。
+  void _onCenterTap() {
+    if (_leftOpen || _rightOpen) {
+      setState(() {
+        _leftOpen = false;
+        _rightOpen = false;
+        _chromeVisible = false;
+      });
+      return;
+    }
+    if (_catchup) {
+      _toggleCatchupChrome();
+      return;
+    }
+    setState(() => _chromeVisible = !_chromeVisible);
+    if (_chromeVisible) {
+      _scheduleHideOverlays();
+    } else {
+      _cancelHideOverlays();
+    }
+  }
 
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
     const hot = 16.0;
@@ -1023,7 +1055,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   KotvBufferingOverlay(player: _playback),
                   if (_loading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                   if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
-                  // 点击分区：左 28% 频道 / 右 28% 设置 / 中 显隐
+                  // 点击分区：左 28% 频道 / 右 28% 设置 / 中 显隐返回+底栏（与菜单互斥）
                   Positioned.fill(
                     child: Row(
                       children: [
@@ -1035,19 +1067,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           flex: 44,
                           child: GestureDetector(
                             behavior: HitTestBehavior.translucent,
-                            onTap: () {
-                              if (_leftOpen || _rightOpen) {
-                                setState(() {
-                                  _leftOpen = false;
-                                  _rightOpen = false;
-                                });
-                              } else if (_catchup) {
-                                _toggleCatchupChrome();
-                              } else {
-                                _openLeft();
-                                _scheduleHideOverlays();
-                              }
-                            },
+                            onTap: _onCenterTap,
                           ),
                         ),
                         Expanded(
@@ -1057,14 +1077,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                       ],
                     ),
                   ),
-                  if (_leftOpen || _rightOpen)
+                  if (_chromeVisible && !_leftOpen && !_rightOpen)
                     Positioned(
-                      left: 16,
-                      top: 12,
+                      left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
+                      top: KotvLayout.isLandscapeCompact(context) ? 8 : 12,
                       child: AppPill(
                         label: _immersive ? '退出全屏' : '返回',
-                        width: 96,
-                        height: 36,
+                        width: KotvLayout.isLandscapeCompact(context) ? 78 : 96,
+                        height: KotvLayout.isLandscapeCompact(context) ? 28 : 36,
+                        fontSize: KotvLayout.isLandscapeCompact(context) ? 12 : 14,
                         onTap: () {
                           if (_immersive) {
                             unawaited(_exitImmersive());
@@ -1077,23 +1098,32 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   if (_leftOpen)
                     Positioned(
                       left: 0,
-                      top: 56,
-                      bottom: 72,
+                      top: 0,
+                      bottom: 0,
                       child: MouseRegion(
                         onEnter: (_) => _cancelHideOverlays(),
                         onExit: (_) => _scheduleHideOverlays(),
                         child: Material(
                           color: const Color(0x99120A24),
                           child: Builder(builder: (context) {
-                            final screenW = MediaQuery.sizeOf(context).width;
-                            // 手机横屏约 700–900，桌面稿 640 会几乎占满；按屏宽缩放。
-                            final leftW = (screenW * 0.48).clamp(260.0, 420.0);
-                            final groupW = (leftW * 0.30).clamp(96.0, 148.0);
-                            final channelW = (leftW - groupW - 22).clamp(140.0, 260.0);
+                            final screenW = c.maxWidth;
+                            final land = KotvLayout.isLandscapeCompact(context);
+                            // 分类/频道加宽；EPG 固定窄列（约原先一半），不再吃掉剩余空白。
+                            final groupW = land ? 112.0 : 120.0;
+                            final channelW = land ? 248.0 : 240.0;
+                            final epgW = land ? 200.0 : 220.0;
+                            final leftW = groupW + channelW + epgW + (land ? 28.0 : 36.0);
+                            final pillH = land ? 30.0 : 36.0;
+                            final chH = land ? 36.0 : 48.0;
+                            final font = land ? 12.0 : 13.0;
+                            final logoW = land ? 28.0 : 40.0;
+                            final logoH = land ? 22.0 : 30.0;
+                            // 防止超宽屏把侧栏撑满半屏
+                            final panelW = leftW.clamp(0.0, screenW * 0.92);
                             return SizedBox(
-                            width: leftW,
+                            width: panelW,
                             child: Padding(
-                              padding: const EdgeInsets.all(8),
+                              padding: EdgeInsets.fromLTRB(land ? 6 : 8, land ? 8 : 10, land ? 6 : 8, land ? 8 : 10),
                               child: Row(
                                 children: [
                                   SizedBox(
@@ -1104,19 +1134,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                         final g = _groups[i];
                                         final locked = _groupLocked(i);
                                         return Padding(
-                                          padding: const EdgeInsets.only(bottom: 6),
+                                          padding: EdgeInsets.only(bottom: land ? 4 : 6),
                                           child: AppPill(
                                             label: '${locked ? '🔒 ' : ''}${g['name'] ?? ''}',
-                                            height: 36,
-                                            fontSize: 13,
+                                            height: pillH,
+                                            fontSize: font,
                                             selected: i == _groupIdx,
-                                            onTap: () => _selectGroup(i),
+                                            onTap: () {
+                                              _cancelHideOverlays();
+                                              _selectGroup(i);
+                                            },
                                           ),
                                         );
                                       },
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
+                                  SizedBox(width: land ? 4 : 6),
                                   SizedBox(
                                     width: channelW,
                                     child: ListView.builder(
@@ -1127,35 +1160,41 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                         final logo = '${ch['logo'] ?? ''}';
                                         final sel = i == _chIdx;
                                         return Padding(
-                                          padding: const EdgeInsets.only(bottom: 4),
+                                          padding: EdgeInsets.only(bottom: land ? 2 : 4),
                                           child: Material(
                                             color: sel ? const Color(0x2EFFFFFF) : Colors.transparent,
                                             borderRadius: BorderRadius.circular(8),
                                             child: InkWell(
                                               borderRadius: BorderRadius.circular(8),
-                                              onTap: () => _playChannel(i),
+                                              onTap: () {
+                                                _cancelHideOverlays();
+                                                _playChannel(i);
+                                              },
                                               child: SizedBox(
-                                                height: 48,
+                                                height: chH,
                                                 child: Padding(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6),
                                                   child: Row(
                                                     children: [
                                                       SizedBox(
-                                                        width: 28,
+                                                        width: land ? 22 : 28,
                                                         child: Text(
                                                           '${i + 1}'.padLeft(2, '0'),
-                                                          style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 16),
+                                                          style: TextStyle(
+                                                            color: Colors.white.withOpacity(0.8),
+                                                            fontSize: land ? 12 : 16,
+                                                          ),
                                                         ),
                                                       ),
-                                                      const SizedBox(width: 12),
-                                                      _LiveChannelLogo(name: name, logo: logo),
-                                                      const SizedBox(width: 12),
+                                                      SizedBox(width: land ? 4 : 12),
+                                                      _LiveChannelLogo(name: name, logo: logo, width: logoW, height: logoH),
+                                                      SizedBox(width: land ? 6 : 12),
                                                       Expanded(
                                                         child: Text(
                                                           name,
-                                                          maxLines: 1,
+                                                          maxLines: land ? 2 : 1,
                                                           overflow: TextOverflow.ellipsis,
-                                                          style: const TextStyle(color: Colors.white, fontSize: 16),
+                                                          style: TextStyle(color: Colors.white, fontSize: land ? 12 : 16, height: 1.15),
                                                         ),
                                                       ),
                                                     ],
@@ -1168,32 +1207,41 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                       },
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
+                                  SizedBox(width: land ? 6 : 6),
+                                  SizedBox(
+                                    width: epgW,
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.stretch,
                                       children: [
                                         Padding(
-                                          padding: const EdgeInsets.only(bottom: 6, left: 4),
-                                          child: Text('EPG', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13, fontWeight: FontWeight.w600)),
+                                          padding: EdgeInsets.only(bottom: land ? 4 : 6, left: 2),
+                                          child: Text(
+                                            'EPG',
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(0.7),
+                                              fontSize: land ? 11 : 13,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
                                         ),
                                         if (_epgDays.length > 1)
                                           SizedBox(
-                                            height: 34,
+                                            height: land ? 24 : 28,
                                             child: ListView.separated(
                                               scrollDirection: Axis.horizontal,
                                               itemCount: _epgDays.length,
-                                              separatorBuilder: (_, __) => const SizedBox(width: 6),
+                                              separatorBuilder: (_, __) => SizedBox(width: land ? 3 : 4),
                                               itemBuilder: (_, i) {
                                                 final d = '${_epgDays[i]['date'] ?? 'D$i'}';
                                                 final label = d.length >= 10 ? d.substring(5, 10) : d;
                                                 return AppPill(
                                                   label: label,
-                                                  width: 96,
-                                                  height: 32,
-                                                  fontSize: 13,
+                                                  width: land ? 56 : 64,
+                                                  height: land ? 22 : 26,
+                                                  fontSize: land ? 10 : 11,
                                                   selected: i == _dayIdx,
                                                   onTap: () {
+                                                    _cancelHideOverlays();
                                                     final progs = (((_epgDays[i]['list'] as List?) ?? [])
                                                         .whereType<Map>()
                                                         .map((e) => Map<String, dynamic>.from(e))
@@ -1207,34 +1255,70 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                               },
                                             ),
                                           ),
-                                        const SizedBox(height: 6),
+                                        SizedBox(height: land ? 4 : 6),
                                         Expanded(
                                           child: _programs.isEmpty
-                                              ? const Center(child: Text('暂无节目单', style: TextStyle(color: Colors.white54, fontSize: 13)))
+                                              ? Center(
+                                                  child: Text(
+                                                    '暂无节目单',
+                                                    style: TextStyle(color: Colors.white54, fontSize: land ? 11 : 13),
+                                                  ),
+                                                )
                                               : ListView.builder(
                                                   itemCount: _programs.length,
                                                   itemBuilder: (_, i) {
                                                     final p = _programs[i];
                                                     final now = p['now'] == true;
                                                     final catchup = p['catchup'] == true;
+                                                    final start = '${p['start'] ?? ''}'.trim();
+                                                    final title = '${p['title'] ?? ''}'.trim();
+                                                    final fallback = '${p['label'] ?? ''}'.trim();
                                                     return Padding(
-                                                      padding: const EdgeInsets.only(bottom: 4),
+                                                      padding: EdgeInsets.only(bottom: land ? 2 : 4),
                                                       child: Material(
                                                         color: now ? const Color(0xD0C73C62) : const Color(0x9918161E),
                                                         borderRadius: BorderRadius.circular(6),
                                                         child: InkWell(
                                                           borderRadius: BorderRadius.circular(6),
-                                                          onTap: catchup ? () => _playCatchup(i) : null,
+                                                          onTap: () {
+                                                            _cancelHideOverlays();
+                                                            if (catchup) unawaited(_playCatchup(i));
+                                                          },
                                                           child: Padding(
-                                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                                            child: Text(
-                                                              '${p['label'] ?? p['title'] ?? ''}${catchup ? ' · 回看' : ''}',
-                                                              maxLines: 2,
-                                                              overflow: TextOverflow.ellipsis,
-                                                              style: TextStyle(
-                                                                color: Colors.white.withOpacity(now ? 1 : 0.8),
-                                                                fontSize: 12,
-                                                              ),
+                                                            padding: EdgeInsets.symmetric(
+                                                              horizontal: land ? 6 : 8,
+                                                              vertical: land ? 5 : 8,
+                                                            ),
+                                                            child: Row(
+                                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                                              children: [
+                                                                if (start.isNotEmpty)
+                                                                  SizedBox(
+                                                                    width: land ? 38 : 44,
+                                                                    child: Text(
+                                                                      start,
+                                                                      style: TextStyle(
+                                                                        color: Colors.white.withOpacity(now ? 1 : 0.75),
+                                                                        fontSize: land ? 11 : 12,
+                                                                        fontFeatures: const [FontFeature.tabularFigures()],
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                Expanded(
+                                                                  child: Text(
+                                                                    title.isNotEmpty
+                                                                        ? '$title${catchup ? ' · 回看' : ''}'
+                                                                        : '$fallback${catchup ? ' · 回看' : ''}',
+                                                                    maxLines: 2,
+                                                                    overflow: TextOverflow.ellipsis,
+                                                                    style: TextStyle(
+                                                                      color: Colors.white.withOpacity(now ? 1 : 0.85),
+                                                                      fontSize: land ? 12 : 12,
+                                                                      height: 1.2,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ],
                                                             ),
                                                           ),
                                                         ),
@@ -1257,25 +1341,37 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   if (_rightOpen)
                     Positioned(
                       right: 0,
-                      top: 56,
-                      bottom: 72,
+                      top: 0,
+                      bottom: 0,
                       child: MouseRegion(
                         onEnter: (_) => _cancelHideOverlays(),
                         onExit: (_) => _scheduleHideOverlays(),
                         child: Material(
                           color: const Color(0x99120A24),
                           child: Builder(builder: (context) {
-                            final rightW = (MediaQuery.sizeOf(context).width * 0.32).clamp(200.0, 280.0);
+                            final land = KotvLayout.isLandscapeCompact(context);
+                            final rightW = land
+                                ? (c.maxWidth * 0.30).clamp(180.0, 240.0)
+                                : (c.maxWidth * 0.32).clamp(200.0, 280.0);
+                            final pillH = land ? 30.0 : 40.0;
                             return SizedBox(
                             width: rightW,
                             child: ListView(
-                              padding: const EdgeInsets.all(14),
+                              padding: EdgeInsets.all(land ? 8 : 14),
                               children: [
-                                const Text('直播设置', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
-                                const SizedBox(height: 12),
+                                Text(
+                                  '直播设置',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: land ? 14 : 18,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                SizedBox(height: land ? 8 : 12),
                                 AppPill(
                                   label: '上一频道',
-                                  height: 40,
+                                  height: pillH,
+                                  fontSize: land ? 12 : 14,
                                   onTap: () {
                                     final chs = _channels;
                                     if (chs.isEmpty) return;
@@ -1373,8 +1469,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         ),
                       ),
                     ),
-                  // 底栏 info bar：台号 | logo | 名 | 节目 | 线路
-                  if (!_catchup || !_catchupChrome)
+                  // 底栏：仅点中间时显示，与左右菜单互斥
+                  if (_chromeVisible && !_leftOpen && !_rightOpen && (!_catchup || !_catchupChrome))
                     Positioned(
                       left: 16,
                       right: 16,

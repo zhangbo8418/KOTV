@@ -196,7 +196,7 @@ func LoadXMLTV(epgURL string, ch *model.LiveChannel) ([]EpgData, error) {
 	if epgURL == "" || ch == nil || strings.Contains(epgURL, "{") {
 		return nil, nil
 	}
-	cacheDir := paths.Ensure(filepath.Join(paths.Data(), "cache", "epg"))
+	cacheDir := paths.EpgCache()
 	cacheFile := filepath.Join(cacheDir, util.MD5(epgURL)+".xml")
 	needFetch := true
 	if st, err := os.Stat(cacheFile); err == nil {

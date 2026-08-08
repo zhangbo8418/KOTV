@@ -45,18 +45,23 @@ class _AppShellState extends ConsumerState<AppShell> {
   DateTime? _lastHomeBackAt;
   /// 防止 PopScope 与 NavigatorPopHandler 同一次返回各调一次。
   bool _handlingBack = false;
+  /// Web：登录完成前不渲染主界面。
+  bool _webAuthed = !kIsWeb;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      // 仅 Web：打开本站页面登录账号。PC/安卓在设置里「远端登录」。
+      // 仅 Web：打开本站页面必须先登录。PC/安卓在设置里「远端登录」。
       if (kIsWeb) {
         while (mounted) {
           final ok = await ensureRemoteAuthIfNeeded(context, ref);
           if (!mounted) return;
-          if (ok) break;
+          if (ok) {
+            setState(() => _webAuthed = true);
+            break;
+          }
         }
       }
       if (!mounted) return;
@@ -187,6 +192,12 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_webAuthed) {
+      return const Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SizedBox.expand(),
+      );
+    }
     final page = ref.watch(kotvPageProvider);
     final busy = ref.watch(uiBusyProvider);
     final bottomNav = KotvLayout.useBottomNav(context);
@@ -202,6 +213,8 @@ class _AppShellState extends ConsumerState<AppShell> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         // Android edge-to-edge：顶栏按钮若画进状态栏区域会被系统吃掉点击
+        // extendBody：底栏半透明时内容可透出
+        extendBody: bottomNav,
         body: SafeArea(
           bottom: false,
           child: AppBackdrop(
@@ -272,36 +285,57 @@ class _AppShellState extends ConsumerState<AppShell> {
         bottomNavigationBar: bottomNav
             ? Builder(builder: (context) {
                 final p = KotvPalette.of(context);
-                return NavigationBar(
-                  height: 64,
-                  backgroundColor: p.bottomNav,
-                  indicatorColor: p.selected,
-                  surfaceTintColor: Colors.transparent,
-                  selectedIndex: _bottomIndex(page),
-                  onDestinationSelected: _onBottomTap,
-                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                  destinations: [
-                    NavigationDestination(
-                      icon: Icon(Icons.home_outlined, color: p.muted),
-                      selectedIcon: const Icon(Icons.home_rounded, color: Colors.white),
-                      label: '首页',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.live_tv_outlined, color: p.muted),
-                      selectedIcon: const Icon(Icons.live_tv, color: Colors.white),
-                      label: '直播',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.search_rounded, color: p.muted),
-                      selectedIcon: const Icon(Icons.search_rounded, color: Colors.white),
-                      label: '搜索',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.person_outline_rounded, color: p.muted),
-                      selectedIcon: const Icon(Icons.person_rounded, color: Colors.white),
-                      label: '我的',
-                    ),
-                  ],
+                // Material3 默认会叠不透明 surface；强制透明底 + 无阴影才能透出壁纸。
+                final barBg = p.bottomNav.withOpacity(p.light ? 0.72 : 0.55);
+                return NavigationBarTheme(
+                  data: NavigationBarThemeData(
+                    backgroundColor: barBg,
+                    indicatorColor: p.selected.withOpacity(0.92),
+                    elevation: 0,
+                    shadowColor: Colors.transparent,
+                    surfaceTintColor: Colors.transparent,
+                    labelTextStyle: MaterialStateProperty.resolveWith((states) {
+                      final selected = states.contains(MaterialState.selected);
+                      return TextStyle(
+                        fontSize: 12,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                        color: selected ? p.fg : p.muted,
+                      );
+                    }),
+                  ),
+                  child: NavigationBar(
+                    height: 64,
+                    backgroundColor: barBg,
+                    indicatorColor: p.selected.withOpacity(0.92),
+                    surfaceTintColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    elevation: 0,
+                    selectedIndex: _bottomIndex(page),
+                    onDestinationSelected: _onBottomTap,
+                    labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                    destinations: [
+                      NavigationDestination(
+                        icon: Icon(Icons.home_outlined, color: p.muted),
+                        selectedIcon: const Icon(Icons.home_rounded, color: Colors.white),
+                        label: '首页',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.live_tv_outlined, color: p.muted),
+                        selectedIcon: const Icon(Icons.live_tv, color: Colors.white),
+                        label: '直播',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.search_rounded, color: p.muted),
+                        selectedIcon: const Icon(Icons.search_rounded, color: Colors.white),
+                        label: '搜索',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.person_outline_rounded, color: p.muted),
+                        selectedIcon: const Icon(Icons.person_rounded, color: Colors.white),
+                        label: '我的',
+                      ),
+                    ],
+                  ),
                 );
               })
             : null,

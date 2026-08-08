@@ -34,9 +34,18 @@ class PosterCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(10 * s),
             child: LayoutBuilder(
               builder: (context, c) {
+                if (!c.hasBoundedHeight || !c.hasBoundedWidth || c.maxHeight <= 0 || c.maxWidth <= 0) {
+                  return ColoredBox(color: p.posterPh);
+                }
                 final barH = (c.maxHeight * 0.18).clamp(30.0, 48.0);
                 final remarkBottom = barH + 4;
                 final titleLines = barH >= 40 ? 2 : 1;
+                final letter = () {
+                  final s = item.name.trim();
+                  if (s.isEmpty) return '?';
+                  final it = s.runes.iterator;
+                  return it.moveNext() ? String.fromCharCode(it.current) : '?';
+                }();
                 return Stack(
                   fit: StackFit.expand,
                   children: [
@@ -45,7 +54,7 @@ class PosterCard extends StatelessWidget {
                       child: item.pic.isEmpty
                           ? Center(
                               child: Text(
-                                item.name.isEmpty ? '?' : String.fromCharCode(item.name.runes.first),
+                                letter,
                                 style: TextStyle(
                                   color: p.fg.withOpacity(0.35),
                                   fontSize: 54 * s,

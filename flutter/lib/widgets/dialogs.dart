@@ -237,37 +237,41 @@ Future<void> showAddVodDialog(BuildContext context, WidgetRef ref) async {
             }
           }
 
+          final p = KotvPalette.of(ctx);
           return Dialog(
             backgroundColor: Colors.transparent,
             child: Container(
               width: 520,
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: const Color(0xFA3B1970),
+                color: p.dialogBg,
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0x70D8A5E8)),
+                border: Border.all(color: p.outline),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('添加点播源', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
+                  Text('添加点播源', style: TextStyle(color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
-                  const Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                  Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON', style: TextStyle(color: p.muted, fontSize: 13)),
                   const SizedBox(height: 12),
                   TextField(
                     controller: ctrl,
                     maxLines: 4,
                     enabled: !busy,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
+                    style: TextStyle(color: p.fg),
+                    cursorColor: p.primary,
+                    decoration: InputDecoration(
                       hintText: '配置地址、多仓索引，或粘贴 JSON…',
-                      hintStyle: TextStyle(color: Colors.white38),
+                      hintStyle: TextStyle(color: p.muted),
+                      filled: true,
+                      fillColor: p.input,
                     ),
                   ),
                   if (status.isNotEmpty) ...[
                     const SizedBox(height: 10),
-                    Text(status, style: const TextStyle(color: Color(0xFFCF4274), fontSize: 13)),
+                    Text(status, style: TextStyle(color: p.primary, fontSize: 13)),
                   ],
                   const SizedBox(height: 16),
                   Row(
@@ -307,30 +311,35 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
 
   final ok = await showDialog<bool>(
     context: context,
-    builder: (ctx) => Dialog(
+    builder: (ctx) {
+      final p = KotvPalette.of(ctx);
+      return Dialog(
       backgroundColor: Colors.transparent,
       child: Container(
         width: 520,
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: const Color(0xFA3B1970),
+          color: p.dialogBg,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0x70D8A5E8)),
+          border: Border.all(color: p.outline),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('直播源', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
+            Text('直播源', style: TextStyle(color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            const Text('可填在线 M3U/TXT/JSON 地址，或本机路径', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            Text('可填在线 M3U/TXT/JSON 地址，或本机路径', style: TextStyle(color: p.muted, fontSize: 13)),
             const SizedBox(height: 12),
             TextField(
               controller: ctrl,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
+              style: TextStyle(color: p.fg),
+              cursorColor: p.primary,
+              decoration: InputDecoration(
                 hintText: 'M3U/TXT/JSON URL 或本地路径',
-                hintStyle: TextStyle(color: Colors.white38),
+                hintStyle: TextStyle(color: p.muted),
+                filled: true,
+                fillColor: p.input,
               ),
             ),
             const SizedBox(height: 16),
@@ -345,7 +354,8 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
           ],
         ),
       ),
-    ),
+    );
+    },
   );
   if (ok == true) {
     await api.setSetting('live', ctrl.text.trim());
@@ -540,18 +550,19 @@ class _CircleIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = KotvPalette.of(context);
     // 遥控器要能落到搜索/换源/删除；纯 InkWell 无焦点框。
     return TvFocus(
       onPressed: onTap,
       borderRadius: 18,
       child: Material(
-        color: const Color(0xE618161E),
+        color: p.pillBg,
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onTap,
           onLongPress: onLongPress,
-          child: SizedBox(width: 36, height: 36, child: Icon(icon, color: Colors.white, size: 18)),
+          child: SizedBox(width: 36, height: 36, child: Icon(icon, color: p.fg, size: 18)),
         ),
       ),
     );
@@ -684,9 +695,9 @@ class SettingRow extends StatelessWidget {
                   const SizedBox(width: 12),
                   Flexible(
                     child: Text(
-                      value.length > 36 ? '${value.substring(0, 36)}…' : value,
+                      value,
                       textAlign: TextAlign.right,
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: p.muted, fontSize: 13.5),
                     ),
@@ -831,7 +842,6 @@ class KotvSettingsCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
     final oneCol = KotvSettingsGrid.effectiveColumns(context, 3) == 1;
-    final maxLabel = MediaQuery.sizeOf(context).width * (oneCol ? 0.42 : 0.35);
     final labelStyle = TextStyle(
       color: p.fg,
       fontSize: oneCol ? 15 : 14,
@@ -849,24 +859,16 @@ class KotvSettingsCell extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: oneCol ? 14 : 12, vertical: oneCol ? 14 : 13),
-          // 标签按内容宽（有上限），数值占剩余并右对齐，避免中英文被撑到两头。
+          // 标签按内容宽，数值吃满剩余宽度（由布局 ellipsis，不再硬截 10 字）。
           child: Row(
             children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxLabel),
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: labelStyle,
-                ),
-              ),
+              Text(label, maxLines: 1, style: labelStyle),
               if (value.isNotEmpty) ...[
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     value,
-                    maxLines: oneCol ? 2 : 1,
+                    maxLines: oneCol ? 2 : 2,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.right,
                     style: valueStyle,

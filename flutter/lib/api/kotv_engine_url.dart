@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 /// 引擎 baseUrl 是否指向本机（127.0.0.1 / localhost / ::1）。
 /// 本机连接不鉴权、不带账号；仅非本机地址才用远端登录。
 bool kotvIsLocalEngineBaseUrl(String baseUrl) {
@@ -40,13 +42,22 @@ String kotvNormalizeEngineBaseUrl(String raw) {
   return v;
 }
 
-/// 远端引擎返回的 `http://127.0.0.1:port/proxy/...` 对本机不可达；
-/// 改写为当前 [engineBaseUrl] 的 host，便于手机拉流。
+/// 将引擎回环地址改写为客户端可达根。
+/// - 原生：用 [engineBaseUrl]（远端引擎）
+/// - Web：优先用当前页面 [Uri.base.origin]（打开网址），避免仍是 127.0.0.1
 String kotvRewriteEngineLocalUrl(String mediaUrl, String engineBaseUrl) {
   final media = mediaUrl.trim();
-  final baseRaw = engineBaseUrl.trim();
-  if (media.isEmpty || baseRaw.isEmpty) return media;
-  if (kotvIsLocalEngineBaseUrl(baseRaw)) return media;
+  if (media.isEmpty) return media;
+  var baseRaw = engineBaseUrl.trim();
+  if (kIsWeb) {
+    final origin = Uri.base.origin;
+    if (origin.isNotEmpty && origin != 'null') {
+      baseRaw = origin;
+    }
+  }
+  if (baseRaw.isEmpty) return media;
+  // Web 即使用户误把引擎指到 127，仍按页面 origin 改写
+  if (!kIsWeb && kotvIsLocalEngineBaseUrl(baseRaw)) return media;
   late final Uri m;
   late final Uri b;
   try {
