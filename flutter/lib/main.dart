@@ -22,7 +22,29 @@ import 'widgets/h_scroll.dart';
 
 /// Release 构建里 build 抛异常会渲染成一块灰色空白（默认 ErrorWidget），
 /// 页面看着像"没了"却无从追查；换成可读文案并把错误打到日志。
+void _kotvLogUiError(Object error, StackTrace? stack, {String where = 'build'}) {
+  debugPrint('KOTV UI ERROR ($where): $error');
+  if (stack != null) debugPrint('$stack');
+  if (kIsWeb) return;
+  try {
+    final dir = Directory('${Platform.environment['HOME'] ?? ''}/Library/Caches/KOTV/data/log');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final f = File('${dir.path}/flutter-ui.err.log');
+    f.writeAsStringSync(
+      '${DateTime.now().toIso8601String()} [$where]\n$error\n${stack ?? StackTrace.current}\n\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+  } catch (_) {}
+}
+
 Widget _kotvErrorWidget(FlutterErrorDetails details) {
+  _kotvLogUiError(details.exception, details.stack, where: 'ErrorWidget');
+  final stackLine = (details.stack?.toString() ?? '')
+      .split('\n')
+      .where((l) => l.contains('package:kotv/') || l.contains('package:flutter/'))
+      .take(8)
+      .join('\n');
   return Material(
     color: const Color(0xFF14161B),
     child: Center(
@@ -37,11 +59,21 @@ Widget _kotvErrorWidget(FlutterErrorDetails details) {
             const SizedBox(height: 8),
             Text(
               '${details.exception}',
-              maxLines: 6,
+              maxLines: 4,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: const TextStyle(color: Color(0xFF9AA0AA), fontSize: 12),
             ),
+            if (stackLine.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                stackLine,
+                maxLines: 10,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.left,
+                style: const TextStyle(color: Color(0xFF6E7580), fontSize: 10, fontFamily: 'Courier'),
+              ),
+            ],
           ],
         ),
       ),
@@ -52,6 +84,14 @@ Widget _kotvErrorWidget(FlutterErrorDetails details) {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ErrorWidget.builder = _kotvErrorWidget;
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    _kotvLogUiError(details.exception, details.stack, where: 'FlutterError');
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    _kotvLogUiError(error, stack, where: 'PlatformDispatcher');
+    return true;
+  };
   if (!kIsWeb) {
     // Android 也要 init：用户可选 MPV（media_kit）；Web 用 HTML5，不初始化 media_kit。
     MediaKit.ensureInitialized();

@@ -117,6 +117,10 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
       titleLarge: TextStyle(color: palette.fg, fontWeight: FontWeight.w700, fontFamilyFallback: fallbacks),
       titleMedium: TextStyle(color: palette.fg, fontWeight: FontWeight.w700, fontFamilyFallback: fallbacks),
       titleSmall: TextStyle(color: palette.fg, fontWeight: FontWeight.w600, fontFamilyFallback: fallbacks),
+      // NavigationBar 默认会用 labelSmall/labelMedium！；缺了就变「Null check operator」。
+      labelLarge: TextStyle(color: palette.fg, fontSize: 14, fontWeight: FontWeight.w600, fontFamilyFallback: fallbacks),
+      labelMedium: TextStyle(color: palette.fg, fontSize: 12, fontWeight: FontWeight.w600, fontFamilyFallback: fallbacks),
+      labelSmall: TextStyle(color: palette.muted, fontSize: 11, fontWeight: FontWeight.w500, fontFamilyFallback: fallbacks),
     ),
     chipTheme: ChipThemeData(
       backgroundColor: palette.input,

@@ -226,52 +226,57 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   void _applyPage(Map<String, dynamic> data, {required bool replace}) {
-    final list = ((data['list'] as List?) ?? [])
-        .whereType<Map>()
-        .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    final types = ((data['class'] as List?) ?? [])
-        .whereType<Map>()
-        .map((e) => CategoryType.fromJson(Map<String, dynamic>.from(e)))
-        .where((t) => t.id.isNotEmpty && t.id != 'home' && t.name != '首页' && t.name != '推荐')
-        .toList();
-    final filters = ((data['filters'] as List?) ?? [])
-        .whereType<Map>()
-        .map((e) => CategoryFilter.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    setState(() {
-      _statusMsg = null;
-      if (types.isNotEmpty) {
-        _types = types;
-      } else if (replace && (_tid == null || _tid!.isEmpty)) {
-        _types = [];
-      }
-      if (_tid != null && _tid!.isNotEmpty) {
-        if (filters.isNotEmpty) {
-          _filters = filters;
-        } else {
-          for (final t in _types) {
-            if (t.id == _tid && t.filters.isNotEmpty) {
-              _filters = t.filters;
-              break;
+    try {
+      final list = ((data['list'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      final types = ((data['class'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => CategoryType.fromJson(Map<String, dynamic>.from(e)))
+          .where((t) => t.id.isNotEmpty && t.id != 'home' && t.name != '首页' && t.name != '推荐')
+          .toList();
+      final filters = ((data['filters'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => CategoryFilter.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      setState(() {
+        _statusMsg = null;
+        if (types.isNotEmpty) {
+          _types = types;
+        } else if (replace && (_tid == null || _tid!.isEmpty)) {
+          _types = [];
+        }
+        if (_tid != null && _tid!.isNotEmpty) {
+          if (filters.isNotEmpty) {
+            _filters = filters;
+          } else {
+            for (final t in _types) {
+              if (t.id == _tid && t.filters.isNotEmpty) {
+                _filters = t.filters;
+                break;
+              }
             }
           }
+          for (final f in _filters) {
+            _extend.putIfAbsent(f.key, () => f.init.isNotEmpty ? f.init : (f.values.isNotEmpty ? f.values.first.value : ''));
+          }
+        } else {
+          _filters = [];
+          _extend.clear();
         }
-        for (final f in _filters) {
-          _extend.putIfAbsent(f.key, () => f.init.isNotEmpty ? f.init : (f.values.isNotEmpty ? f.values.first.value : ''));
+        if (replace) {
+          _items
+            ..clear()
+            ..addAll(list);
+        } else {
+          _items.addAll(list);
         }
-      } else {
-        _filters = [];
-        _extend.clear();
-      }
-      if (replace) {
-        _items
-          ..clear()
-          ..addAll(list);
-      } else {
-        _items.addAll(list);
-      }
-    });
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _statusMsg = '页面数据异常: $e');
+    }
   }
 
   void _open(VodItem it) {
@@ -336,12 +341,44 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    try {
+      return _buildRoot(context);
+    } catch (e, st) {
+      debugPrint('VideoScreen build error: $e\n$st');
+      final p = KotvPalette.of(context);
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, color: p.primary, size: 40),
+              const SizedBox(height: 12),
+              Text('首页渲染出错', style: TextStyle(color: p.fg, fontSize: 16, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Text('$e', textAlign: TextAlign.center, style: TextStyle(color: p.muted, fontSize: 12)),
+              const SizedBox(height: 16),
+              AppPill(label: '重试', width: 100, onTap: () => _reload(clearContent: true)),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildRoot(BuildContext context) {
     final cfg = ref.watch(configProvider);
     final sites = cfg.maybeWhen(
-      data: (c) => ((c['sites'] as List?) ?? [])
-          .whereType<Map>()
-          .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
-          .toList(),
+      data: (c) {
+        try {
+          return ((c['sites'] as List?) ?? [])
+              .whereType<Map>()
+              .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
+              .toList();
+        } catch (_) {
+          return <SiteInfo>[];
+        }
+      },
       orElse: () => <SiteInfo>[],
     );
     SiteInfo? home;
@@ -407,7 +444,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(_statusMsg!, style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 13)),
+                  child: Text(_statusMsg ?? '', style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 13)),
                 ),
                 AppPill(label: '重试', width: 88, height: 32, fontSize: 13, onTap: _reload),
               ],
@@ -623,7 +660,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 fit: StackFit.expand,
                 children: [
                   const ColoredBox(color: Color(0xFF652291)),
-                  if (cur != null && cur.pic.isNotEmpty)
+                  if (cur != null && _isHttpUrl(cur.pic))
                     Image.network(cur.pic, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
                   const ColoredBox(color: Color(0x66190842)),
                   Positioned(
@@ -742,7 +779,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         final gap = 16.0;
         final w = c.maxWidth;
         // 四列等宽：左列宽 = 下方每张卡宽
-        final cardW = (w - gap * 3) / 4;
+        final cardW = ((w - gap * 3) / 4).clamp(48.0, 400.0);
         // 卡高略小于宽，接近参考图比例
         final cardH = (cardW * 0.52).clamp(100.0, 132.0);
         final heroH = cardH * 2 + gap;
@@ -882,6 +919,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   String _ellipsize(String s, int n) => s.length <= n ? s : '${s.substring(0, n)}…';
+
+  static bool _isHttpUrl(String s) {
+    final t = s.trim();
+    return t.startsWith('http://') || t.startsWith('https://');
+  }
 }
 
 extension _FirstOrNull<E> on Iterable<E> {

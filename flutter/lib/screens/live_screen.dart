@@ -191,6 +191,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _bootstrap() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -199,6 +200,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     try {
       try {
         final st = await ref.read(apiProvider).getSettings();
+        if (!mounted) return;
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
         final decode = '${settings['playerDecode'] ?? 'auto'}'.trim();
         if (decode.isNotEmpty) _decodeMode = decode;
@@ -214,22 +216,27 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           if (vol != null) {
             await _playback.setVolume(vol.clamp(0, 100));
           }
+          if (!mounted) return;
           await _playback.setDecodeMode(_decodeMode);
         }
       } catch (_) {}
+      if (!mounted) return;
       final data = await ref.read(apiProvider).liveSources();
+      if (!mounted) return;
       _sources = ((data['sources'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
       if (_sources.isEmpty) {
         setState(() => _loading = false);
         return;
       }
       final keepSrc = await _preferredSourceIndex();
+      if (!mounted) return;
       // Win7：进页自动开播易卡死 UI，等用户点台。
       await _loadSource(keepSrc, autoPlay: !kotvIsWindows7());
       if (kotvIsWindows7() && mounted) {
         setState(() => _status = '点击左侧频道开始播放（Win7 已禁用进页自动播）');
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = '$e';
         _loading = false;
@@ -269,6 +276,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _loadSource(int index, {bool autoPlay = false}) async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _srcIdx = index;
@@ -281,6 +289,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     });
     try {
       final data = await ref.read(apiProvider).liveLoad(index: index);
+      if (!mounted) return;
       _groups = ((data['groups'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
       _groupIdx = 0;
       _chIdx = -1;
@@ -291,9 +300,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       });
       if (autoPlay) {
         final restored = await _tryRestoreKeep();
+        if (!mounted) return;
         if (!restored) await _playFirstChannel();
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _loading = false;
         _status = '加载失败: $e';

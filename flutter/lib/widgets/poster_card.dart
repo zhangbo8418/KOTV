@@ -51,7 +51,7 @@ class PosterCard extends StatelessWidget {
                   children: [
                     ColoredBox(
                       color: p.posterPh,
-                      child: item.pic.isEmpty
+                      child: item.pic.isEmpty || !_isHttpPic(item.pic)
                           ? Center(
                               child: Text(
                                 letter,
@@ -64,7 +64,7 @@ class PosterCard extends StatelessWidget {
                               ),
                             )
                           : Image.network(
-                              item.pic,
+                              item.pic.trim(),
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => ColoredBox(color: p.posterPh),
                             ),
@@ -121,6 +121,11 @@ class PosterCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static bool _isHttpPic(String s) {
+    final t = s.trim();
+    return t.startsWith('http://') || t.startsWith('https://');
   }
 }
 

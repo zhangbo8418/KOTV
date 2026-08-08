@@ -294,6 +294,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                       elevation: 0,
                       shadowColor: Colors.transparent,
                       surfaceTintColor: Colors.transparent,
+                      overlayColor: MaterialStateProperty.all(Colors.transparent),
                       labelTextStyle: MaterialStateProperty.resolveWith((states) {
                         final selected = states.contains(MaterialState.selected);
                         return TextStyle(
@@ -302,6 +303,10 @@ class _AppShellState extends ConsumerState<AppShell> {
                           color: selected ? p.fg : p.muted,
                         );
                       }),
+                      iconTheme: MaterialStateProperty.resolveWith((states) {
+                        final selected = states.contains(MaterialState.selected);
+                        return IconThemeData(color: selected ? Colors.white : p.muted, size: 24);
+                      }),
                     ),
                     child: NavigationBar(
                       height: 64,
@@ -309,6 +314,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                       indicatorColor: p.selected.withOpacity(0.92),
                       surfaceTintColor: Colors.transparent,
                       shadowColor: Colors.transparent,
+                      overlayColor: MaterialStateProperty.all(Colors.transparent),
                       elevation: 0,
                       selectedIndex: _bottomIndex(page),
                       onDestinationSelected: _onBottomTap,
