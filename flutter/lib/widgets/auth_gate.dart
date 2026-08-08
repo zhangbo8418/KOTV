@@ -7,7 +7,7 @@ import '../api/kotv_auth_token.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
 
-/// Web：打开页登录本站账号（固定同源后端）。PC/安卓请走设置「远端登录」。
+/// Web：打开页登录本站账号。PC/安卓：设置里探测远端后强制登录。
 Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
   Map<String, dynamic> st;
@@ -29,23 +29,35 @@ Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async
   }
 
   if (!context.mounted) return false;
-  return showRemoteLoginDialog(
+  final r = await showRemoteLoginDialog(
     context,
     ref,
+    api: api,
     allowRegister: st['allowRegister'] == true,
+    allowCancel: false,
     title: kIsWeb ? '登录' : '远端登录',
     subtitle: kIsWeb ? '使用本站账号登录后即可观看' : '连接此引擎需登录一次，之后与本机使用相同',
   );
+  return r.ok;
 }
 
-Future<bool> showRemoteLoginDialog(
+class RemoteLoginResult {
+  const RemoteLoginResult({required this.ok, this.username = ''});
+  final bool ok;
+  final String username;
+}
+
+/// [api] 可指向探测用临时客户端（尚未切换业务引擎时）。
+Future<RemoteLoginResult> showRemoteLoginDialog(
   BuildContext context,
   WidgetRef ref, {
+  KotvApi? api,
   bool allowRegister = false,
+  bool allowCancel = true,
   String title = '远端登录',
   String? subtitle,
 }) async {
-  final api = ref.read(apiProvider);
+  final KotvApi client = api ?? ref.read(apiProvider);
   final p = KotvPalette.of(context);
   final userCtrl = TextEditingController();
   final passCtrl = TextEditingController();
@@ -55,7 +67,7 @@ Future<bool> showRemoteLoginDialog(
 
   final ok = await showDialog<bool>(
     context: context,
-    barrierDismissible: false,
+    barrierDismissible: allowCancel,
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setLocal) => Dialog(
         backgroundColor: p.dialogBg,
@@ -111,10 +123,25 @@ Future<bool> showRemoteLoginDialog(
                     ),
                   ),
                 ],
-                const SizedBox(height: 8),
-                FilledButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: Text(modeRegister ? '注册并登录' : '登录'),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    if (allowCancel) ...[
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: Text('取消', style: TextStyle(color: p.muted)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: Text(modeRegister ? '注册并登录' : '登录'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -123,24 +150,24 @@ Future<bool> showRemoteLoginDialog(
       ),
     ),
   );
-  if (ok != true) return false;
+  if (ok != true) return const RemoteLoginResult(ok: false);
   final u = userCtrl.text.trim();
   final pw = passCtrl.text;
-  if (u.isEmpty || pw.isEmpty) return false;
+  if (u.isEmpty || pw.isEmpty) return const RemoteLoginResult(ok: false);
   try {
     if (modeRegister) {
-      await api.register(u, pw);
+      await client.register(u, pw);
     }
-    await api.login(u, pw);
+    await client.login(u, pw);
     ref.invalidate(configProvider);
     ref.invalidate(homeProvider);
     ref.invalidate(settingsProvider);
-    return true;
+    return RemoteLoginResult(ok: true, username: u);
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
-    return false;
+    return const RemoteLoginResult(ok: false);
   }
 }
 
@@ -156,5 +183,6 @@ Future<bool> handleAuthRequiredError(BuildContext context, WidgetRef ref, Object
     allowReg = st['allowRegister'] == true;
   } catch (_) {}
   if (!context.mounted) return false;
-  return showRemoteLoginDialog(context, ref, allowRegister: allowReg);
+  final r = await showRemoteLoginDialog(context, ref, allowRegister: allowReg, allowCancel: true);
+  return r.ok;
 }

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../player/kotv_platform.dart';
 import 'kotv_auth_token.dart';
 import 'kotv_client_id.dart';
 
@@ -30,6 +31,7 @@ class KotvApi {
     return {
       if (id.isNotEmpty) 'X-Kotv-Client-Id': id,
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+      'X-Kotv-Client-Platform': kotvHostPlatform(),
       ...?extra,
     };
   }

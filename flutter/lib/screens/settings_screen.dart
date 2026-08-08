@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../api/kotv_api.dart';
+import '../api/kotv_auth_token.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
@@ -16,6 +18,7 @@ import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
 import '../util/runtime_info.dart';
+import '../widgets/auth_gate.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
@@ -37,6 +40,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _version = '0.1.0';
   String _status = '';
   String _pairCode = '';
+  String _remoteUser = '';
   bool _loading = true;
   bool _busy = false;
   final _engineCtrl = TextEditingController();
@@ -44,8 +48,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((p) {
-      _engineCtrl.text = p.getString('engine_base_url') ?? '';
+    SharedPreferences.getInstance().then((p) async {
+      final draft = p.getString('engine_base_url_draft') ?? '';
+      final effective = p.getString('engine_base_url') ?? '';
+      _engineCtrl.text = draft.isNotEmpty ? draft : effective;
+      _remoteUser = p.getString('remote_username') ?? '';
+      if (mounted) setState(() {});
     });
     _reload();
   }
@@ -366,166 +374,125 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final normalized = kotvNormalizeEngineBaseUrl(raw);
     _engineCtrl.text = normalized;
     final prefs = await SharedPreferences.getInstance();
-    if (normalized.isEmpty) {
-      await prefs.remove('engine_base_url');
-      launcher.applyBaseUrl('');
-    } else {
-      await prefs.setString('engine_base_url', normalized);
-      launcher.applyBaseUrl(normalized);
-    }
-    // apiProvider 缓存了 KotvApi 实例，必须同步 baseUrl
-    ref.read(apiProvider).baseUrl = launcher.baseUrl;
-    if (!mounted) return;
-    setState(() => _status = '正在连接 ${launcher.baseUrl}…');
 
+    // 空 / 本机：立即切回本机，清远端登录态
+    if (normalized.isEmpty || kotvIsLocalEngineBaseUrl(normalized)) {
+      await prefs.remove('engine_base_url_draft');
+      await prefs.remove('engine_base_url');
+      await prefs.remove('remote_username');
+      await kotvClearAuthToken();
+      launcher.applyBaseUrl('');
+      ref.read(apiProvider).baseUrl = launcher.baseUrl;
+      if (!mounted) return;
+      setState(() {
+        _remoteUser = '';
+        _status = '已使用本机引擎';
+      });
+      ref.invalidate(engineReadyProvider);
+      ref.invalidate(configProvider);
+      ref.invalidate(homeProvider);
+      ref.invalidate(settingsProvider);
+      showAppNews(context, '已切换为本机引擎\n${launcher.baseUrl}');
+      return;
+    }
+
+    // 远端：只探测，不切换业务引擎；未登录继续用本机仓
+    await prefs.setString('engine_base_url_draft', normalized);
+    if (!mounted) return;
+    setState(() => _status = '正在探测 $normalized…');
+
+    final probe = KotvApi(baseUrl: normalized);
+    try {
+      final h = await probe.health().timeout(const Duration(seconds: 6));
+      if (h['ok'] != true) {
+        throw Exception('${h['error'] ?? '引擎未就绪'}');
+      }
+      // spider/runtime 未就绪也提示，但仍允许尝试登录
+      final spiderOk = h['spiderOk'];
+      if (spiderOk == false) {
+        if (!mounted) return;
+        showAppNews(context, '引擎可达，但爬虫未就绪\n$normalized\n${h['spiderError'] ?? ''}');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '探测失败: $e');
+      showAppNews(context, '无法连接远端\n$normalized\n$e\n仍使用本机引擎');
+      return;
+    }
+
+    var allowReg = false;
+    try {
+      final st = await probe.authStatus().timeout(const Duration(seconds: 4));
+      allowReg = st['allowRegister'] == true;
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    final login = await showRemoteLoginDialog(
+      context,
+      ref,
+      api: probe,
+      allowRegister: allowReg,
+      allowCancel: true,
+      title: '远端登录',
+      subtitle: '登录成功后才使用远端仓库与能力；取消则继续本机',
+    );
+    if (!mounted) return;
+    if (!login.ok) {
+      setState(() => _status = '已取消远端登录，继续本机');
+      showAppNews(context, '未登录远端，继续使用本机引擎');
+      return;
+    }
+
+    // 登录成功：才切换业务引擎
+    await prefs.setString('engine_base_url', normalized);
+    await prefs.setString('remote_username', login.username);
+    launcher.applyBaseUrl(normalized);
+    ref.read(apiProvider).baseUrl = launcher.baseUrl;
+    setState(() {
+      _remoteUser = login.username;
+      _status = '远端已登录：${login.username}';
+    });
     ref.invalidate(engineReadyProvider);
     ref.invalidate(configProvider);
     ref.invalidate(homeProvider);
     ref.invalidate(settingsProvider);
+    showAppNews(context, '登录成功\n用户：${login.username}\n$normalized');
+  }
 
+  Future<void> _logoutRemote() async {
+    final launcher = ref.read(engineLauncherProvider);
+    final prefs = await SharedPreferences.getInstance();
     try {
-      final api = ref.read(apiProvider);
-      final h = await api.health().timeout(const Duration(seconds: 6));
-      if (h['ok'] != true) {
-        throw Exception('${h['error'] ?? '引擎未就绪'}');
-      }
-      final remote = !kotvIsLocalEngineBaseUrl(launcher.baseUrl);
-      var news = '已连接\n${launcher.baseUrl}';
-      if (remote) {
-        try {
-          final st = await api.authStatus().timeout(const Duration(seconds: 4));
-          if (st['authRequired'] == true) {
-            news += '\n\n此引擎需要登录，请点「远端登录」';
-          }
-        } catch (_) {}
-      }
-      if (!mounted) return;
-      setState(() => _status = remote ? '远端引擎已连接' : '本机引擎已连接');
-      showAppNews(context, news);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _status = '连接失败: $e');
-      showAppNews(context, '连接失败\n${launcher.baseUrl}\n$e');
+      await ref.read(apiProvider).logout();
+    } catch (_) {
+      await kotvClearAuthToken();
     }
+    await prefs.remove('engine_base_url');
+    await prefs.remove('remote_username');
+    // draft 保留，方便再次登录
+    launcher.applyBaseUrl('');
+    ref.read(apiProvider).baseUrl = launcher.baseUrl;
+    if (!mounted) return;
+    setState(() {
+      _remoteUser = '';
+      _status = '已退出远端，回到本机';
+    });
+    ref.invalidate(engineReadyProvider);
+    ref.invalidate(configProvider);
+    ref.invalidate(homeProvider);
+    ref.invalidate(settingsProvider);
+    showAppNews(context, '已退出远端登录\n当前使用本机引擎');
   }
 
   Future<void> _engineLogin() async {
-    final api = ref.read(apiProvider);
-    final userCtrl = TextEditingController();
-    final passCtrl = TextEditingController();
-    final p = KotvPalette.of(context);
-    var allowReg = false;
-    try {
-      final st = await api.authStatus();
-      allowReg = st['allowRegister'] == true;
-    } catch (_) {}
-    if (!mounted) return;
-    final action = await showDialog<String>(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: p.dialogBg,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('远端登录', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700, fontSize: 18)),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: userCtrl,
-                  autofocus: true,
-                  style: TextStyle(color: p.fg),
-                  decoration: InputDecoration(
-                    hintText: '用户名',
-                    hintStyle: TextStyle(color: p.muted),
-                    filled: true,
-                    fillColor: p.input,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: passCtrl,
-                  obscureText: true,
-                  onSubmitted: (_) => Navigator.pop(ctx, 'login'),
-                  style: TextStyle(color: p.fg),
-                  decoration: InputDecoration(
-                    hintText: '密码',
-                    hintStyle: TextStyle(color: p.muted),
-                    filled: true,
-                    fillColor: p.input,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 4,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, 'logout'),
-                      child: Text('清除登录', style: TextStyle(color: p.muted)),
-                    ),
-                    if (allowReg)
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx, 'register'),
-                        child: Text('注册', style: TextStyle(color: p.primary)),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: Text('取消', style: TextStyle(color: p.muted)),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () => Navigator.pop(ctx, 'login'),
-                        child: const Text('登录'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    if (action == null || !mounted) return;
-    try {
-      if (action == 'logout') {
-        await api.logout();
-        setState(() => _status = '已清除远端登录');
-        return;
-      }
-      final u = userCtrl.text.trim();
-      final pw = passCtrl.text;
-      if (u.isEmpty || pw.isEmpty) {
-        setState(() => _status = '请输入用户名和密码');
-        return;
-      }
-      if (action == 'register') {
-        await api.register(u, pw);
-        await api.login(u, pw);
-        setState(() => _status = '注册并登录成功');
-      } else {
-        await api.login(u, pw);
-        setState(() => _status = '登录成功');
-      }
-      ref.invalidate(engineReadyProvider);
-      ref.invalidate(configProvider);
-    } catch (e) {
-      setState(() => _status = '登录失败: $e');
+    // 兼容入口：对当前草稿/远端地址走同一套探测+登录
+    final draft = _engineCtrl.text.trim();
+    if (draft.isEmpty || kotvIsLocalEngineBaseUrl(kotvNormalizeEngineBaseUrl(draft))) {
+      showAppNews(context, '请先填写远端引擎地址');
+      return;
     }
+    await _applyEngineUrl(draft);
   }
 
   Future<void> _showPair() async {
@@ -987,7 +954,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         if (!kIsWeb)
                           KotvSettingsCell(
                             label: '引擎地址',
-                            value: _ellipsize(launcher.baseUrl, 12),
+                            value: _ellipsize(
+                              _engineCtrl.text.isNotEmpty ? _engineCtrl.text : launcher.baseUrl,
+                              12,
+                            ),
                             onTap: () => _prompt(
                               '引擎地址（http / https）',
                               'http://192.168.1.8:9978 或 https://tv.example.com',
@@ -995,12 +965,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               _applyEngineUrl,
                             ),
                           ),
-                        // 本机不显示；PC/安卓连远端后显示。Web 打开页登录，无此入口。
-                        if (!kIsWeb && !kotvIsLocalEngineBaseUrl(launcher.baseUrl))
+                        // 远端登录态 / 入口（Web 打开页登录）
+                        if (!kIsWeb)
                           KotvSettingsCell(
-                            label: '远端登录',
-                            value: '账号',
-                            onTap: _engineLogin,
+                            label: kotvIsLocalEngineBaseUrl(launcher.baseUrl) ? '远端登录' : '远端账号',
+                            value: kotvIsLocalEngineBaseUrl(launcher.baseUrl)
+                                ? '未连接'
+                                : (_remoteUser.isNotEmpty ? '$_remoteUser · 退出' : '退出'),
+                            onTap: () async {
+                              if (!kotvIsLocalEngineBaseUrl(launcher.baseUrl)) {
+                                await _logoutRemote();
+                                return;
+                              }
+                              await _engineLogin();
+                            },
                           ),
                         KotvSettingsCell(
                           label: '用户管理',

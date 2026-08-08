@@ -89,6 +89,23 @@ func KillUserRuntime(userID string) {
 	b.mu.Unlock()
 }
 
+// HostSpiderReady 远端主机爬虫面是否可用（安卓=本机 9979；桌面=捆绑 runtime 可用即可）。
+func HostSpiderReady() (ok bool, errMsg string) {
+	if runtime.GOOS == "android" {
+		client := &http.Client{Timeout: 800 * time.Millisecond}
+		resp, err := client.Get("http://127.0.0.1:9979/health")
+		if err != nil {
+			return false, "安卓 SpiderService(:9979) 不可达：请保持 App/前台服务运行"
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			return false, fmt.Sprintf("安卓 SpiderService 异常: HTTP %d", resp.StatusCode)
+		}
+		return true, ""
+	}
+	return true, ""
+}
+
 // RestartUserRuntime 硬杀该用户运行时；下次调用会冷启动新 JVM。
 func RestartUserRuntime(userID string) {
 	KillUserRuntime(userID)

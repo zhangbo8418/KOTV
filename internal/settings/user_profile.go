@@ -1,0 +1,128 @@
+package settings
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+
+	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/paths"
+)
+
+// 远端租户按「用户 + 前端平台」隔离的设置键（播放器等与客户端能力相关）。
+var clientProfileKeys = map[Type]bool{
+	Player:             true,
+	PlayerLive:         true,
+	PlayerSpeed:        true,
+	PlayerScale:        true,
+	PlayerDecode:       true,
+	PlayerVolume:       true,
+	PlayerAmbient:      true,
+	PlayerStableVolume: true,
+	MpvVulkan:          true,
+	MpvGpuNext:         true,
+	MpvConf:            true,
+}
+
+var userProfMu sync.Mutex
+
+type userClientProfiles struct {
+	Profiles map[string]map[string]string `json:"profiles"` // platform -> key -> value
+}
+
+func userProfilePath(userID string) string {
+	return filepath.Join(paths.Data(), "users", userID, "client_settings.json")
+}
+
+func loadUserProfiles(userID string) userClientProfiles {
+	b, err := os.ReadFile(userProfilePath(userID))
+	if err != nil {
+		return userClientProfiles{Profiles: map[string]map[string]string{}}
+	}
+	var p userClientProfiles
+	if json.Unmarshal(b, &p) != nil || p.Profiles == nil {
+		return userClientProfiles{Profiles: map[string]map[string]string{}}
+	}
+	return p
+}
+
+func saveUserProfiles(userID string, p userClientProfiles) error {
+	dir := filepath.Dir(userProfilePath(userID))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(userProfilePath(userID), b, 0o644)
+}
+
+func normalizePlatform(p string) string {
+	p = strings.ToLower(strings.TrimSpace(p))
+	switch p {
+	case "android", "ios", "windows", "macos", "linux", "web":
+		return p
+	default:
+		if p == "" {
+			return "unknown"
+		}
+		return p
+	}
+}
+
+// OverlayClientProfile 远端租户：用其前端平台画像覆盖 vals 中的播放器等键。
+func OverlayClientProfile(vals map[string]string, platform string) {
+	uid := hostclient.RuntimeUserID()
+	if uid == "" || vals == nil {
+		return
+	}
+	platform = normalizePlatform(platform)
+	userProfMu.Lock()
+	defer userProfMu.Unlock()
+	p := loadUserProfiles(uid)
+	prof := p.Profiles[platform]
+	if prof == nil {
+		return
+	}
+	for k, v := range prof {
+		vals[k] = v
+	}
+}
+
+// SetClientProfileKeys 远端租户写入前端平台画像；返回仍应写全局 setting.ini 的键。
+func SetClientProfileKeys(kv map[string]string, platform string) map[string]string {
+	uid := hostclient.RuntimeUserID()
+	if uid == "" {
+		return kv
+	}
+	platform = normalizePlatform(platform)
+	rest := map[string]string{}
+	userProfMu.Lock()
+	defer userProfMu.Unlock()
+	p := loadUserProfiles(uid)
+	if p.Profiles == nil {
+		p.Profiles = map[string]map[string]string{}
+	}
+	prof := p.Profiles[platform]
+	if prof == nil {
+		prof = map[string]string{}
+		p.Profiles[platform] = prof
+	}
+	changed := false
+	for k, v := range kv {
+		t := Type(k)
+		if clientProfileKeys[t] {
+			prof[k] = v
+			changed = true
+			continue
+		}
+		rest[k] = v
+	}
+	if changed {
+		_ = saveUserProfiles(uid, p)
+	}
+	return rest
+}

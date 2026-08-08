@@ -47,6 +47,12 @@ class KotvEngineService : Service() {
       else -> {
         startAsForeground()
         thread(name = "kotv-engine-ensure", isDaemon = true) {
+          // 作远端主机时 PC 打 :9978，Go 再打本机 :9979 —— 必须与引擎同保活。
+          try {
+            SpiderServiceManager.start(this@KotvEngineService)
+          } catch (t: Throwable) {
+            Log.e(TAG, "spider start failed", t)
+          }
           ensureEngine()
         }
         return START_STICKY
@@ -69,7 +75,7 @@ class KotvEngineService : Service() {
     )
     val notif: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle("KO影视")
-      .setContentText("后台引擎运行中")
+      .setContentText("引擎与爬虫后台运行中（可作远端主机）")
       .setSmallIcon(R.mipmap.ic_launcher)
       .setContentIntent(pi)
       .setOngoing(true)

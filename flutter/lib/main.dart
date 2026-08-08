@@ -90,6 +90,18 @@ Future<void> main() async {
     await prefs.remove('engine_base_url');
     final origin = Uri.base.origin;
     engineUrl = (origin.isNotEmpty && origin != 'null') ? origin : 'http://127.0.0.1:9978';
+  } else {
+    // 远端地址若无 token：降级为草稿，启动仍用本机（不拉远端仓）
+    final tok = (prefs.getString('kotv_auth_token') ?? '').trim();
+    if (engineUrl != null &&
+        engineUrl.isNotEmpty &&
+        !kotvIsLocalEngineBaseUrl(engineUrl) &&
+        tok.isEmpty) {
+      await prefs.setString('engine_base_url_draft', engineUrl);
+      await prefs.remove('engine_base_url');
+      await prefs.remove('remote_username');
+      engineUrl = null;
+    }
   }
   runApp(ProviderScope(
     overrides: [

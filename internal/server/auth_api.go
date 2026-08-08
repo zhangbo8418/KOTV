@@ -54,11 +54,19 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		loopback := isLoopbackRequest(r)
 		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
+		plat := strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform"))
+
+		bindPlat := func() {
+			if plat != "" {
+				hostclient.SetPlatform(plat)
+			}
+		}
 
 		// 本机：忽略 token 对会话的影响，只走 clientId。
 		if loopback {
 			done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
 			defer done()
+			bindPlat()
 			// 可选：有效 token 仍写入 context，供改密等识别身份（不改变 Scope）。
 			if tok != "" {
 				if u, err := auth.LookupToken(tok); err == nil {
@@ -82,6 +90,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			}
 			done := hostclient.EnterSession("", u.ID, true)
 			defer done()
+			bindPlat()
 			r = r.WithContext(withAuthUser(r.Context(), u))
 			next(w, r)
 			return
@@ -96,6 +105,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 				}
 				done := hostclient.EnterSession(cid, u.ID, dedicated)
 				defer done()
+				bindPlat()
 				r = r.WithContext(withAuthUser(r.Context(), u))
 				next(w, r)
 				return
@@ -103,6 +113,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
 		defer done()
+		bindPlat()
 		next(w, r)
 	}
 }

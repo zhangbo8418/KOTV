@@ -20,6 +20,7 @@ import (
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
 	"github.com/bobo/KOTV/internal/model"
+	"github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/player"
 	"github.com/bobo/KOTV/internal/player/embed"
@@ -106,6 +107,8 @@ func New() (*App, error) {
 	}
 	a.presence = clientsession.NewPresence(func(userID string) {
 		spider.KillUserRuntime(userID)
+		parse.CancelUserSniffs(userID)
+		a.sessions.RemoveByUser(userID)
 	})
 	defaultApp = a
 

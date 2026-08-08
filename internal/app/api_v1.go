@@ -37,9 +37,11 @@ func (a *App) APIHealth() map[string]any {
 		ready, errMsg = sess.Ready, sess.ErrMsg
 		source = sess.Source
 	}
+	spiderOk, spiderErr := spider.HostSpiderReady()
 	return map[string]any{
 		"ok":            true,
 		"engine":        "kotv",
+		"platform":      runtime.GOOS,
 		"ready":         ready,
 		"error":         errMsg,
 		"source":        strings.TrimSpace(source),
@@ -47,6 +49,9 @@ func (a *App) APIHealth() map[string]any {
 		"version":       "0.1.0",
 		"remoteAuth":    strings.EqualFold(settings.Get(settings.RemoteAuth), "true"),
 		"allowRegister": strings.EqualFold(settings.Get(settings.AllowRegister), "true"),
+		"spiderOk":      spiderOk,
+		"spiderError":   spiderErr,
+		"hostRole":      "full", // 对外仅 9978；安卓对内仍可有本机 9979
 	}
 }
 
@@ -337,9 +342,11 @@ func (a *App) APISessionLeave() map[string]any {
 		a.sessions.Remove(sid)
 	}
 	if a.presence != nil && uid != "" {
-		a.presence.Leave(uid) // 内部会 KillUserRuntime
+		a.presence.Leave(uid) // KillUserRuntime + CancelUserSniffs + RemoveByUser
 	} else if uid != "" {
 		spider.KillUserRuntime(uid)
+		parse.CancelUserSniffs(uid)
+		a.sessions.RemoveByUser(uid)
 	}
 	return map[string]any{"ok": true}
 }
@@ -766,6 +773,7 @@ func (a *App) APIGetSettings() map[string]any {
 	if sess != nil {
 		vals[string(settings.VOD)] = sess.Source
 	}
+	settings.OverlayClientProfile(vals, hostclient.CurrentPlatform())
 	out["settings"] = vals
 	parses := make([]map[string]any, 0)
 	for _, p := range cfg.API().Parses {
@@ -1017,6 +1025,7 @@ func (a *App) APISetSettings(kv map[string]string) error {
 	needProxy := false
 	needLive := false
 	needDLNA := false
+	kv = settings.SetClientProfileKeys(kv, hostclient.CurrentPlatform())
 	for k, v := range kv {
 		k = strings.TrimSpace(k)
 		if k == "" {

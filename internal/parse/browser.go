@@ -20,6 +20,7 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/model"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
 	"github.com/bobo/KOTV/internal/util"
@@ -44,13 +45,68 @@ const (
 )
 
 // 桌面共享一个 Chromium 进程；最多 2 个并发 tab，避免超级解析打出几十个 chrome。
+// 按 userID 登记进行中的 sniff cancel，供 KillUserRuntime / 心跳回收。
 var (
 	sharedAllocOnce   sync.Once
 	sharedAllocCtx    context.Context
 	sharedAllocCancel context.CancelFunc
 	sharedAllocErr    error
 	sniffSem          = make(chan struct{}, 2)
+
+	userSniffMu sync.Mutex
+	userSniffs  = map[string][]context.CancelFunc{} // userID -> cancels
 )
+
+// trackUserSniff 登记一次嗅探；返回 unregister。
+func trackUserSniff(userID string, cancel context.CancelFunc) func() {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || cancel == nil {
+		return func() {}
+	}
+	userSniffMu.Lock()
+	userSniffs[userID] = append(userSniffs[userID], cancel)
+	idx := len(userSniffs[userID]) - 1
+	userSniffMu.Unlock()
+	return func() {
+		userSniffMu.Lock()
+		defer userSniffMu.Unlock()
+		list := userSniffs[userID]
+		if idx < 0 || idx >= len(list) {
+			return
+		}
+		// 置空保留下标，避免并发 unregister 乱序
+		list[idx] = nil
+		allNil := true
+		for _, c := range list {
+			if c != nil {
+				allNil = false
+				break
+			}
+		}
+		if allNil {
+			delete(userSniffs, userID)
+		} else {
+			userSniffs[userID] = list
+		}
+	}
+}
+
+// CancelUserSniffs 取消该用户全部进行中的 Chromium 嗅探（心跳/登出时调用）。
+func CancelUserSniffs(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	userSniffMu.Lock()
+	list := userSniffs[userID]
+	delete(userSniffs, userID)
+	userSniffMu.Unlock()
+	for _, cancel := range list {
+		if cancel != nil {
+			cancel()
+		}
+	}
+}
 
 func ensureSharedChromium() (context.Context, error) {
 	sharedAllocOnce.Do(func() {
@@ -162,6 +218,11 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	defer cancelTab()
 	ctx, cancelTimeout := context.WithTimeout(tabCtx, timeout)
 	defer cancelTimeout()
+	untrack := trackUserSniff(hostclient.RuntimeUserID(), func() {
+		cancelTab()
+		cancelTimeout()
+	})
+	defer untrack()
 	// chromedp 偶发不响应 ctx 取消：再加硬超时强杀 tab。
 	hardTimer := time.AfterFunc(timeout+3*time.Second, func() {
 		parseLog("[sniff] hard-cancel depth=%d after=%s", depth, timeout+3*time.Second)

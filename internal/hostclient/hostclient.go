@@ -14,6 +14,7 @@ import (
 type binding struct {
 	ClientID  string
 	UserID    string
+	Platform  string
 	Dedicated bool // 远端租户：独立引擎；本机/未开鉴权：共享引擎
 }
 
@@ -114,6 +115,38 @@ func CurrentUserID() string {
 	}
 	if b, ok := v.(binding); ok {
 		return b.UserID
+	}
+	return ""
+}
+
+// SetPlatform 写入当前请求的前端平台（android/windows/…）。
+func SetPlatform(platform string) {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if platform == "" {
+		return
+	}
+	gid := goid()
+	v, ok := byG.Load(gid)
+	if !ok {
+		byG.Store(gid, binding{Platform: platform})
+		return
+	}
+	if b, ok := v.(binding); ok {
+		b.Platform = platform
+		byG.Store(gid, b)
+		return
+	}
+	byG.Store(gid, binding{Platform: platform})
+}
+
+// CurrentPlatform 当前请求前端平台。
+func CurrentPlatform() string {
+	v, ok := byG.Load(goid())
+	if !ok {
+		return ""
+	}
+	if b, ok := v.(binding); ok {
+		return b.Platform
 	}
 	return ""
 }

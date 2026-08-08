@@ -97,7 +97,25 @@ func (h *Hub) Remove(clientID string) {
 	h.mu.Unlock()
 }
 
-// RemoveByUser 删除所有（当前无法按 user 索引时按 client 清由调用方处理）。
+// RemoveByUser 删除该远端用户的全部 Scope 会话（u:<userId>）。
+func (h *Hub) RemoveByUser(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	key := "u:" + userID
+	h.mu.Lock()
+	delete(h.byID, key)
+	// 兼容旧键
+	for id := range h.byID {
+		if id == userID || strings.HasSuffix(id, ":"+userID) {
+			delete(h.byID, id)
+		}
+	}
+	h.mu.Unlock()
+}
+
+// RemoveAll 清空全部会话。
 func (h *Hub) RemoveAll() {
 	h.mu.Lock()
 	h.byID = map[string]*Session{}
