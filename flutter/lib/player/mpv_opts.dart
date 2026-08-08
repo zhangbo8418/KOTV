@@ -198,13 +198,14 @@ class KotvMpvOpts {
         } catch (_) {}
       }
 
+      // 对齐 TV ae4cf046：gpu-next / vulkan 无论开/关都显式写入，避免关掉仍粘住。
       var vulkanOk = !vulkan;
-      if (vulkan) {
-        if (kotvIsAndroid()) {
-          // media_kit AndroidVideoController.create 会写死：
-          // gpu-context=android、opengl-es=yes。必须在 VC 附着之后再盖掉。
-          final vo = gpuNext ? 'gpu-next' : 'gpu';
-          try {
+      if (kotvIsAndroid()) {
+        final vo = gpuNext ? 'gpu-next' : 'gpu';
+        try {
+          if (vulkan) {
+            // media_kit AndroidVideoController.create 会写死：
+            // gpu-context=android、opengl-es=yes。必须在 VC 附着之后再盖掉。
             await set('vo', 'null');
             await set('gpu-api', 'vulkan');
             await set('gpu-context', 'androidvk');
@@ -217,13 +218,19 @@ class KotvMpvOpts {
                 ctx.contains('androidvk') ||
                 ctx.contains('vulkan') ||
                 (api.isEmpty && ctx.isEmpty);
-          } catch (_) {
-            vulkanOk = false;
+          } else {
+            await set('gpu-api', 'auto');
+            await set('gpu-context', 'android');
+            await set('opengl-es', 'yes');
+            await set('vo', vo);
+            vulkanOk = true;
           }
-        } else {
-          // 桌面 Texture 路径无法真正启用；属性写了也不走 Vulkan VO。
-          vulkanOk = false;
+        } catch (_) {
+          vulkanOk = !vulkan;
         }
+      } else if (vulkan) {
+        // 桌面 Texture 路径无法真正启用；属性写了也不走 Vulkan VO。
+        vulkanOk = false;
       }
 
       for (final e in parseConfLines(conf)) {
