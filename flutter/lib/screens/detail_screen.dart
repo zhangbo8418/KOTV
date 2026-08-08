@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../api/kotv_engine_url.dart';
 import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
 import '../player/danmaku_layer.dart';
@@ -484,7 +485,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (playerVal.isEmpty) {
           playerVal = kotvDefaultVodPlayer();
         }
-        _playerVal = playerVal;
+        _playerVal = kotvClampPlayerVal(playerVal, live: false);
         // 绝不在进详情时创建 Player：libmpv 初始化 + VideoController 附着会卡死 UI / 手机闪退。
         // 音量/倍速等偏好先记下，真正 [_playAt] open 后再套。
         _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
@@ -718,9 +719,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             );
       }
       if (serial != _playAtSerial || !mounted) return;
-      final playUrl = '${data['url'] ?? ''}';
+      final playUrl = kotvRewriteEngineLocalUrl(
+        '${data['url'] ?? ''}',
+        ref.read(apiProvider).baseUrl,
+      );
       if (playUrl.isEmpty) throw Exception('空播放地址');
-      final mediaUrl = '${data['media'] ?? ''}';
+      final mediaUrl = kotvRewriteEngineLocalUrl(
+        '${data['media'] ?? ''}',
+        ref.read(apiProvider).baseUrl,
+      );
       final headers = <String, String>{
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
@@ -919,8 +926,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             if (k == 'danmakuApi') setState(() => _danmakuApi = v);
             if (k == 'player') {
               final prev = _playerVal;
-              setState(() => _playerVal = v);
-              if (v != prev && _epIdx >= 0) {
+              final next = kotvClampPlayerVal(v, live: false);
+              setState(() => _playerVal = next);
+              if (next != prev && _epIdx >= 0) {
                 Navigator.of(context).maybePop();
                 unawaited(_playAt(_epIdx));
               }

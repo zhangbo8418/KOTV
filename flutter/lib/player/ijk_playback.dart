@@ -157,7 +157,9 @@ class IjkPlayback extends KotvPlayback {
     await _player.setOption(FijkOption.playerCategory, 'packet-buffering', 1);
     await KotvBufferBudget.warm();
     final budget = KotvBufferBudget.bytes();
+    // 内存水位：max-buffer-size 为上限；infbuf=1 不按时长停拉；播完的包释放后继续补满
     await _player.setOption(FijkOption.playerCategory, 'max-buffer-size', budget);
+    await _player.setOption(FijkOption.playerCategory, 'infbuf', 1);
     await _player.setOption(FijkOption.playerCategory, 'min-frames', 25);
     await _player.setOption(FijkOption.formatCategory, 'analyzeduration', 1);
     await _player.setOption(FijkOption.formatCategory, 'analyzemaxduration', 100);

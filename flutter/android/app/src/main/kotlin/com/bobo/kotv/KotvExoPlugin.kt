@@ -302,17 +302,23 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val mediaSourceFactory = DefaultMediaSourceFactory(ctx).setDataSourceFactory(dataSourceFactory)
     val effective = effectiveDecodeMode()
     val renderers = buildRenderersFactory(ctx, effective)
-    // 按设备内存定字节上限；时间窗仅作上限兜底，不以「囤满 N 分钟」为目标。
+    // 内存水位缓冲（与 Dart KotvBufferBudget 一致）：
+    // - 只按 targetBufferBytes 刹车/续拉；播出去的样本释放后 allocated 下降即继续拉
+    // - minBufferMs 刻意极大：让 DefaultLoadControl 在「未满字节预算」时始终走续拉分支，
+    //   避免按剩余秒数播到快空才再缓冲
+    // - 起播门槛仍用 bufferForPlayback*（短时长），与预读策略无关
+    // - backBuffer=0：已播数据尽快释放，不囤回看内存
     val budget = bufferBudgetBytes(ctx)
     val loadControl: LoadControl = DefaultLoadControl.Builder()
       .setBufferDurationsMs(
-        /* minBufferMs：低于目标字节时的软偏好 */ 5_000,
-        /* maxBufferMs：足够大，真正刹车靠 targetBufferBytes */ 3_600_000,
+        /* minBufferMs */ 3_600_000,
+        /* maxBufferMs */ 3_600_000,
         /* bufferForPlaybackMs */ 1_200,
         /* bufferForPlaybackAfterRebufferMs */ 2_500,
       )
       .setTargetBufferBytes(budget)
       .setPrioritizeTimeOverSizeThresholds(false)
+      .setBackBuffer(/* backBufferDurationMs */ 0, /* retainFromKeyframe */ false)
       .build()
     // 每播放器独立 BandwidthMeter，避免 getSingletonInstance 的历史码率黏住 UI
     val bandwidthMeter = DefaultBandwidthMeter.Builder(ctx).build()
@@ -469,7 +475,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** 与 Dart [KotvBufferBudget] 对齐：约 5% 总内存，且 ≤ 可用 20%；钳到 24–128MiB。 */
+  /** 与 Dart [KotvBufferBudget] 对齐：约 15% avail 且 ≤ 总内存 5%；钳到 24–96MiB。 */
   private fun bufferBudgetBytes(ctx: Context): Int {
     return try {
       val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -477,14 +483,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       am.getMemoryInfo(mi)
       var budget = (mi.totalMem * 0.05).toLong()
       if (mi.availMem > 0) {
-        val byAvail = (mi.availMem * 0.20).toLong()
+        val byAvail = (mi.availMem * 0.15).toLong()
         if (byAvail in 1 until budget) budget = byAvail
       }
       val minB = 24L * 1024 * 1024
-      val maxB = 128L * 1024 * 1024
+      val maxB = 96L * 1024 * 1024
       max(minB, min(maxB, budget)).toInt()
     } catch (_: Throwable) {
-      64 * 1024 * 1024
+      48 * 1024 * 1024
     }
   }
 

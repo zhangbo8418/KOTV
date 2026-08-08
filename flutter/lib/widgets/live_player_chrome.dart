@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
+import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import 'vod_player_chrome.dart';
 
@@ -16,7 +18,7 @@ class LiveCatchupChrome extends StatelessWidget {
     this.onExpand,
     this.onPlayer,
     this.onDecode,
-    this.playerLabel = '内置 MPV',
+    this.playerLabel = '',
     this.decodeLabel = '自动',
   });
 
@@ -34,6 +36,8 @@ class LiveCatchupChrome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final resolvedPlayerLabel =
+        playerLabel.trim().isEmpty ? flutterPlayerLabel(kotvDefaultLivePlayer()) : playerLabel;
     return Material(
       color: translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
       child: StreamBuilder(
@@ -74,7 +78,7 @@ class LiveCatchupChrome extends StatelessWidget {
                         onTap: onExpand!,
                       ),
                     if (!compact && onPlayer != null)
-                      _textAct(playerLabel, onPlayer!),
+                      _textAct(resolvedPlayerLabel, onPlayer!),
                     if (!compact && onDecode != null)
                       _textAct(decodeLabel, onDecode!),
                     const SizedBox(width: 6),

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../player/kotv_playback.dart';
@@ -380,8 +381,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   int _sleepMinutes = 0;
   Timer? _sleepTimer;
   String _keepLabel = '收藏';
-  String _playerVal = 'innie#mpv';
-  String _playerLabel = '内置 MPV';
+  String _playerVal = kotvDefaultVodPlayer();
+  String _playerLabel = flutterPlayerLabel(kotvDefaultVodPlayer());
   Timer? _clockTimer;
   Timer? _epHideTimer;
   StreamSubscription<Duration>? _skipSub;
@@ -469,17 +470,18 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   Future<void> _refreshPlayerLabel() async {
     try {
       final status = await widget.onPlayerStatus?.call() ?? {};
-      final cur = '${status['current'] ?? 'innie#mpv'}'.trim();
+      final cur = kotvClampPlayerVal('${status['current'] ?? ''}'.trim(), live: false);
       if (!mounted) return;
       setState(() {
-        _playerVal = cur.isEmpty ? 'innie#mpv' : cur;
-        _playerLabel = flutterPlayerLabel(_playerVal);
+        _playerVal = cur;
+        _playerLabel = flutterPlayerLabel(cur);
       });
     } catch (_) {
       if (!mounted) return;
+      final cur = kotvDefaultVodPlayer();
       setState(() {
-        _playerVal = 'innie#mpv';
-        _playerLabel = '内置 MPV';
+        _playerVal = cur;
+        _playerLabel = flutterPlayerLabel(cur);
       });
     }
   }
@@ -747,23 +749,32 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
   Future<void> _showPlayerDialog() async {
     widget.onBump();
+    if (!kotvCanSwitchPlayer(live: false)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('当前平台仅支持${flutterPlayerLabel(kotvDefaultVodPlayer())}')),
+        );
+      }
+      return;
+    }
     Map<String, dynamic> status = {};
     try {
       status = await widget.onPlayerStatus?.call() ?? {};
     } catch (_) {}
     final avail = Map<String, dynamic>.from((status['available'] as Map?) ?? const {});
-    final cur = '${status['current'] ?? 'innie#mpv'}'.trim();
-    final curVal = cur.isEmpty ? 'innie#mpv' : cur;
+    final cur = kotvClampPlayerVal('${status['current'] ?? ''}'.trim(), live: false);
     if (mounted) {
       setState(() {
-        _playerVal = curVal;
-        _playerLabel = flutterPlayerLabel(curVal);
+        _playerVal = cur;
+        _playerLabel = flutterPlayerLabel(cur);
       });
     }
 
     // 内置后端按平台分流；外置仅桌面。
     final opts = <(String label, String val, String key)>[
-      if (kotvIsAndroid()) ...[
+      if (kIsWeb)
+        ('浏览器播放（HTML5）', 'innie#html', 'embed_html')
+      else if (kotvIsAndroid()) ...[
         ('内置 ExoPlayer', 'innie#exo', 'embed_exo'),
         ('内置 MPV', 'innie#mpv', 'embed_mpv'),
         ('内置 ijk', 'innie#ijk', 'embed_ijk'),
@@ -778,7 +789,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
     bool listed(String key) {
       // Flutter 内置 MPV 走 media_kit 自带 libmpv，不依赖引擎 runtime/libmpv。
-      if (key == 'embed_mpv' || key == 'embed_exo' || key == 'embed_ijk') return true;
+      if (key == 'embed_mpv' || key == 'embed_exo' || key == 'embed_ijk' || key == 'embed_html') {
+        return true;
+      }
       if (key == 'embed_vlc') return avail['embed_vlc'] == true || avail['vlc'] == true || avail.isEmpty;
       return avail[key] == true;
     }
@@ -790,7 +803,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
           _chromeSelectRow(
             icon: Icons.smart_display_outlined,
             label: o.$1,
-            selected: curVal == o.$2,
+            selected: cur == o.$2,
             onTap: () async {
               Navigator.pop(context);
               await _selectPlayer(o.$2);
@@ -799,20 +812,21 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     ];
     await _showChromeListSheet(
       title: '请选择播放器',
-      subtitle: '当前：${flutterPlayerLabel(curVal)}',
+      subtitle: '当前：${flutterPlayerLabel(cur)}',
       children: rows,
     );
   }
 
   Future<void> _selectPlayer(String val) async {
-    await _persist('player', val);
+    final next = kotvClampPlayerVal(val, live: false);
+    await _persist('player', next);
     if (mounted) {
       setState(() {
-        _playerVal = val;
-        _playerLabel = flutterPlayerLabel(val);
+        _playerVal = next;
+        _playerLabel = flutterPlayerLabel(next);
       });
     }
-    if (val.startsWith('outie#')) {
+    if (next.startsWith('outie#')) {
       final url = widget.playUrl;
       if (url.isEmpty) {
         if (mounted) {
@@ -821,10 +835,10 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         return;
       }
       try {
-        await widget.onExternalPlayer?.call(val);
+        await widget.onExternalPlayer?.call(next);
         await widget.player.pause();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(val)}打开')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(next)}打开')));
           widget.onExit();
         }
       } catch (e) {
@@ -1067,15 +1081,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               if (mounted && label.isNotEmpty) setState(() => _keepLabel = label);
                             },
                           ),
-                        linkRow(
-                          icon: Icons.smart_display_outlined,
-                          label: '播放器',
-                          trailing: _playerLabel,
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            _showPlayerDialog();
-                          },
-                        ),
+                        if (kotvCanSwitchPlayer(live: false))
+                          linkRow(
+                            icon: Icons.smart_display_outlined,
+                            label: '播放器',
+                            trailing: _playerLabel,
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _showPlayerDialog();
+                            },
+                          ),
                         linkRow(
                           icon: Icons.memory,
                           label: '解码',
@@ -1394,12 +1409,13 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       tip: '音轨',
                                       onTap: () => _showTrackSheet(audio: true),
                                     ),
-                                    _IconAct(
-                                      icon: Icons.devices,
-                                      tip: '播放器（$_playerLabel）',
-                                      badge: flutterIsEmbedPlayer(_playerVal) ? '内' : '外',
-                                      onTap: _showPlayerDialog,
-                                    ),
+                                    if (kotvCanSwitchPlayer(live: false))
+                                      _IconAct(
+                                        icon: Icons.devices,
+                                        tip: '播放器（$_playerLabel）',
+                                        badge: flutterIsEmbedPlayer(_playerVal) ? '内' : '外',
+                                        onTap: _showPlayerDialog,
+                                      ),
                                     const SizedBox(width: 6),
                                     Container(width: 1, height: 26, color: const Color(0x4DFFFFFF)),
                                     const SizedBox(width: 8),

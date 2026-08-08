@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/settings"
 )
 
@@ -68,7 +69,11 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 	}
 
 	id := DefaultCache.Put(filtered)
-	return fmt.Sprintf("http://127.0.0.1:%d/proxy/cached_m3u8?id=%s", localPort, id), nil
+	proxyBase := fmt.Sprintf("http://127.0.0.1:%d", localPort)
+	if pb := hostclient.PublicBase(); pb != "" {
+		proxyBase = strings.TrimRight(pb, "/")
+	}
+	return fmt.Sprintf("%s/proxy/cached_m3u8?id=%s", proxyBase, id), nil
 }
 
 func fetch(u string, headers map[string]string) (string, error) {

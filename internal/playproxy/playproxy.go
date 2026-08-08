@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bobo/KOTV/internal/hostclient"
 )
 
 // 将带自定义 Header 的远端媒体转成本地可播地址，供 VLC/MPV 无 header 能力时使用。
@@ -45,13 +48,45 @@ func Register(rawURL string, headers map[string]string) string {
 	mu.Lock()
 	entries[id] = entry{URL: rawURL, Headers: cp, ExpiresAt: time.Now().Add(6 * time.Hour)}
 	mu.Unlock()
+	return fmt.Sprintf("%s/proxy/play?id=%s", LocalHTTPBase(), id)
+}
+
+// LocalHTTPBase 本机默认 127.0.0.1:port；远端请求则用 hostclient.PublicBase。
+func LocalHTTPBase() string {
+	if b := hostclient.PublicBase(); b != "" {
+		return b
+	}
 	port := 9978
 	if portFn != nil {
 		if p := portFn(); p > 0 {
 			port = p
 		}
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d/proxy/play?id=%s", port, id)
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
+// PublicizeURL 将 127.0.0.1 / localhost 换成对外可达根（保留 path/query）。
+func PublicizeURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	base := hostclient.PublicBase()
+	if raw == "" || base == "" {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		return raw
+	}
+	pb, err := url.Parse(base)
+	if err != nil || pb.Host == "" {
+		return raw
+	}
+	u.Scheme = pb.Scheme
+	u.Host = pb.Host
+	return u.String()
 }
 
 func newID() string {

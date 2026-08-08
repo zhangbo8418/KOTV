@@ -169,8 +169,8 @@ class KotvMpvOpts {
         }
       }
 
-      // 内存缓冲：只按 demuxer-max-bytes（可用内存动态算）；不用时长窗卡预读。
-      // cache-on-disk 保持关闭（杀毒/慢盘会拖死 UI）。
+      // 内存水位：demuxer-max-bytes 为前向上限；播过的包释放后继续补满。
+      // 时长类（readahead/cache-secs）拉满，避免按秒数卡预读；回看内存用 back-bytes 限制。
       try {
         await KotvBufferBudget.warm(force: true);
         final budget = KotvBufferBudget.bytes();
@@ -180,7 +180,6 @@ class KotvMpvOpts {
         await set('cache-on-disk', 'no');
         await set('demuxer-max-bytes', forward);
         await set('demuxer-max-back-bytes', back);
-        // mpv 同时受时长与字节约束；时长拉满后只剩 demuxer-max-bytes 刹车
         await set('demuxer-readahead-secs', '1000000');
         await set('cache-secs', '1000000');
         await set('framedrop', 'vo');

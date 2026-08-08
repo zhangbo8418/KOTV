@@ -46,6 +46,21 @@ String kotvDefaultLivePlayer() {
   return 'innie#mpv';
 }
 
+/// 将远端/跨端下发的播放器值钳到**当前客户端**可选集合。
+/// PC→安卓引擎：不会落到 exo/ijk；安卓→PC：不会落到 VLC；Web/iOS：仅 HTML5。
+String kotvClampPlayerVal(String raw, {required bool live}) {
+  final v = raw.trim();
+  final opts = live ? kotvLivePlayerOptions() : kotvVodPlayerOptions();
+  for (final o in opts) {
+    if (o.$2 == v) return v;
+  }
+  return live ? kotvDefaultLivePlayer() : kotvDefaultVodPlayer();
+}
+
+/// 当前平台是否有多个可切换内置/外置播放器（Web 仅 HTML5 → false）。
+bool kotvCanSwitchPlayer({required bool live}) =>
+    (live ? kotvLivePlayerOptions() : kotvVodPlayerOptions()).length > 1;
+
 /// 页内播放器后端种类。
 enum KotvEmbedBackend { mpv, vlc, exo, ijk, html }
 

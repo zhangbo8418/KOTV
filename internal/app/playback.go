@@ -37,7 +37,7 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 		}
 		playURL = playproxy.Register(playURL, headers)
 	}
-	return playURL
+	return playproxy.PublicizeURL(playURL)
 }
 
 // PlayHistory 用历史里保存的原始媒体地址起播（会重新走 m3u8/代理，不依赖旧缓存 id）。

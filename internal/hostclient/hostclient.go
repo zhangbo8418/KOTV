@@ -12,10 +12,11 @@ import (
 )
 
 type binding struct {
-	ClientID  string
-	UserID    string
-	Platform  string
-	Dedicated bool // 远端租户：独立引擎；本机/未开鉴权：共享引擎
+	ClientID   string
+	UserID     string
+	Platform   string
+	PublicBase string // 非本机请求：scheme://host[:port]，供代理 URL 改写
+	Dedicated  bool   // 远端租户：独立引擎；本机/未开鉴权：共享引擎
 }
 
 var byG sync.Map // goroutine id -> binding
@@ -147,6 +148,39 @@ func CurrentPlatform() string {
 	}
 	if b, ok := v.(binding); ok {
 		return b.Platform
+	}
+	return ""
+}
+
+// SetPublicBase 写入当前请求的对外可达根地址（非 loopback 客户端拉 /proxy/* 用）。
+// 空串表示保持 127.0.0.1（本机同机播放）。
+func SetPublicBase(base string) {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	gid := goid()
+	v, ok := byG.Load(gid)
+	if !ok {
+		if base == "" {
+			return
+		}
+		byG.Store(gid, binding{PublicBase: base})
+		return
+	}
+	if b, ok := v.(binding); ok {
+		b.PublicBase = base
+		byG.Store(gid, b)
+		return
+	}
+	byG.Store(gid, binding{PublicBase: base})
+}
+
+// PublicBase 当前请求的对外根地址；本机请求通常为空。
+func PublicBase() string {
+	v, ok := byG.Load(goid())
+	if !ok {
+		return ""
+	}
+	if b, ok := v.(binding); ok {
+		return b.PublicBase
 	}
 	return ""
 }

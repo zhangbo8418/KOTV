@@ -73,23 +73,59 @@ func normalizePlatform(p string) string {
 	}
 }
 
-// OverlayClientProfile 远端租户：用其前端平台画像覆盖 vals 中的播放器等键。
+// OverlayClientProfile 按「用户+前端平台」覆盖播放器等键，并按前端能力钳制选项
+//（手机不落 PC 的 VLC；PC 不落安卓的 Exo/ijk；Web/iOS 仅 HTML5）。
 func OverlayClientProfile(vals map[string]string, platform string) {
-	uid := hostclient.RuntimeUserID()
-	if uid == "" || vals == nil {
+	if vals == nil {
 		return
 	}
 	platform = normalizePlatform(platform)
-	userProfMu.Lock()
-	defer userProfMu.Unlock()
-	p := loadUserProfiles(uid)
-	prof := p.Profiles[platform]
-	if prof == nil {
-		return
+	uid := hostclient.RuntimeUserID()
+	if uid != "" {
+		userProfMu.Lock()
+		p := loadUserProfiles(uid)
+		prof := p.Profiles[platform]
+		userProfMu.Unlock()
+		if prof != nil {
+			for k, v := range prof {
+				vals[k] = v
+			}
+		}
 	}
-	for k, v := range prof {
-		vals[k] = v
+	clampPlayerKeysForPlatform(vals, platform)
+}
+
+func clampPlayerKeysForPlatform(vals map[string]string, platform string) {
+	switch platform {
+	case "android":
+		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#exo",
+			"innie#exo", "innie#mpv", "innie#ijk")
+		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#exo",
+			"innie#exo", "innie#mpv", "innie#ijk")
+	case "windows":
+		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
+			"innie#mpv", "innie#vlc", "outie#vlc", "outie#mpv", "outie#iina")
+		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#vlc",
+			"innie#mpv", "innie#vlc", "outie#vlc", "outie#mpv", "outie#iina")
+	case "macos", "linux":
+		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
+			"innie#mpv", "innie#vlc", "outie#vlc", "outie#mpv", "outie#iina")
+		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
+			"innie#mpv", "innie#vlc", "outie#vlc", "outie#mpv", "outie#iina")
+	case "ios", "web":
+		vals[string(Player)] = "innie#html"
+		vals[string(PlayerLive)] = "innie#html"
 	}
+}
+
+func clampListedPlayer(v, def string, allowed ...string) string {
+	v = strings.TrimSpace(v)
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	return def
 }
 
 // SetClientProfileKeys 远端租户写入前端平台画像；返回仍应写全局 setting.ini 的键。

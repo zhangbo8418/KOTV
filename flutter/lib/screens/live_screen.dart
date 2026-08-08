@@ -8,6 +8,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../api/kotv_engine_url.dart';
 import '../desktop/mini_player_window.dart';
 import '../player/exo_playback.dart';
 import '../player/html_playback.dart';
@@ -203,7 +204,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         if (playerVal.isEmpty) {
           playerVal = kotvDefaultLivePlayer();
         }
-        _playerVal = playerVal;
+        _playerVal = kotvClampPlayerVal(playerVal, live: true);
         // Win7：进页不碰 native 播放器；等用户点台再 open。
         if (!kotvIsWindows7()) {
           final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
@@ -541,7 +542,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     });
     try {
       final data = await ref.read(apiProvider).livePlay(group: _groupIdx, channel: chIdx, line: useLine);
-      final url = '${data['url'] ?? ''}';
+      final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
       if (url.isEmpty) throw Exception('空播放地址');
       final headers = <String, String>{
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
@@ -574,7 +575,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
             day: _dayIdx,
             prog: progIdx,
           );
-      final url = '${data['url'] ?? ''}';
+      final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
       if (url.isEmpty) throw Exception('空回看地址');
       await _openLiveUrl(url);
       setState(() {
@@ -991,7 +992,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
               decodeLabel: _decodeLabel,
               onCast: () => unawaited(_cast()),
               onMini: () => unawaited(_exitMini()),
-              onPlayer: () => unawaited(_pickPlayer()),
+              onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
               onDecode: () => unawaited(_pickDecode()),
             ),
           ),
@@ -1307,12 +1308,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                 const SizedBox(height: 8),
                                 AppPill(label: '迷你桌面播放', height: 40, onTap: () => unawaited(_enterMini())),
                                 const SizedBox(height: 8),
-                                AppPill(
-                                  label: '播放器 · ${flutterPlayerLabel(_playerVal)}',
-                                  height: 40,
-                                  onTap: () => unawaited(_pickPlayer()),
-                                ),
-                                const SizedBox(height: 8),
+                                if (kotvCanSwitchPlayer(live: true)) ...[
+                                  AppPill(
+                                    label: '播放器 · ${flutterPlayerLabel(_playerVal)}',
+                                    height: 40,
+                                    onTap: () => unawaited(_pickPlayer()),
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
                                 AppPill(
                                   label: '解码 · $_decodeLabel',
                                   height: 40,
@@ -1430,7 +1433,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           onCast: () => unawaited(_cast()),
                           onMini: () => unawaited(_enterMini()),
                           onExpand: () => unawaited(_enterLiveFullscreen()),
-                          onPlayer: () => unawaited(_pickPlayer()),
+                          onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
                           onDecode: () => unawaited(_pickDecode()),
                         ),
                       ),
@@ -1501,10 +1504,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         _pulsePortraitChrome();
                         unawaited(_enterLiveFullscreen());
                       },
-                      onPlayer: () {
-                        _pulsePortraitChrome();
-                        unawaited(_pickPlayer());
-                      },
+                      onPlayer: kotvCanSwitchPlayer(live: true)
+                          ? () {
+                              _pulsePortraitChrome();
+                              unawaited(_pickPlayer());
+                            }
+                          : null,
                       onDecode: () {
                         _pulsePortraitChrome();
                         unawaited(_pickDecode());
@@ -1592,13 +1597,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                     const SizedBox(width: 6),
                     AppPill(label: '全屏', height: 32, fontSize: 12, onTap: () => unawaited(_enterLiveFullscreen())),
                     const SizedBox(width: 6),
-                    AppPill(
-                      label: flutterPlayerLabel(_playerVal),
-                      height: 32,
-                      fontSize: 12,
-                      onTap: () => unawaited(_pickPlayer()),
-                    ),
-                    const SizedBox(width: 6),
+                    if (kotvCanSwitchPlayer(live: true)) ...[
+                      AppPill(
+                        label: flutterPlayerLabel(_playerVal),
+                        height: 32,
+                        fontSize: 12,
+                        onTap: () => unawaited(_pickPlayer()),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
                     AppPill(
                       label: '解码·$_decodeLabel',
                       height: 32,

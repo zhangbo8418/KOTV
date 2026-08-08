@@ -17,6 +17,7 @@ import (
 	"github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/player"
 	"github.com/bobo/KOTV/internal/player/embed"
+	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/remote"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
 	"github.com/bobo/KOTV/internal/service"
@@ -501,7 +502,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 
 	return map[string]any{
 		"ok":        true,
-		"url":       playURL,
+		"url":       playproxy.PublicizeURL(playURL),
 		"media":     mediaURL,
 		"magnet":    isMagnetPlay,
 		"headers":   headers,
@@ -1197,7 +1198,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	}
 	return map[string]any{
 		"ok":      true,
-		"url":     playURL,
+		"url":     playproxy.PublicizeURL(playURL),
 		"headers": headers,
 		"name":    ch.Name,
 		"group":   g.Name,
@@ -1289,7 +1290,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	}
 	return map[string]any{
 		"ok":      true,
-		"url":     url,
+		"url":     playproxy.PublicizeURL(url),
 		"headers": headers,
 		"name":    list[prog].Title,
 		"group":   g.Name,
@@ -1299,11 +1300,19 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 
 // APIPlayerStatus 播放器可用性与当前设置。
 func (a *App) APIPlayerStatus() map[string]any {
-	cur := strings.TrimSpace(settings.Get(settings.Player))
+	vals := map[string]string{
+		string(settings.Player):       settings.Get(settings.Player),
+		string(settings.PlayerLive):   settings.Get(settings.PlayerLive),
+		string(settings.PlayerDecode): settings.Get(settings.PlayerDecode),
+		string(settings.PlayerSpeed):  settings.Get(settings.PlayerSpeed),
+		string(settings.PlayerScale):  settings.Get(settings.PlayerScale),
+	}
+	settings.OverlayClientProfile(vals, hostclient.CurrentPlatform())
+	cur := strings.TrimSpace(vals[string(settings.Player)])
 	if cur == "" {
 		cur = "innie#mpv"
 	}
-	decode := strings.TrimSpace(settings.Get(settings.PlayerDecode))
+	decode := strings.TrimSpace(vals[string(settings.PlayerDecode)])
 	if decode == "" {
 		decode = "auto"
 	}
@@ -1312,8 +1321,8 @@ func (a *App) APIPlayerStatus() map[string]any {
 		"available": player.Available(),
 		"current":   cur,
 		"decode":    decode,
-		"speed":     settings.Get(settings.PlayerSpeed),
-		"scale":     settings.Get(settings.PlayerScale),
+		"speed":     vals[string(settings.PlayerSpeed)],
+		"scale":     vals[string(settings.PlayerScale)],
 	}
 	for k, v := range embed.EmbedPlaybackSnapshot() {
 		out[k] = v

@@ -39,3 +39,34 @@ String kotvNormalizeEngineBaseUrl(String raw) {
   }
   return v;
 }
+
+/// 远端引擎返回的 `http://127.0.0.1:port/proxy/...` 对本机不可达；
+/// 改写为当前 [engineBaseUrl] 的 host，便于手机拉流。
+String kotvRewriteEngineLocalUrl(String mediaUrl, String engineBaseUrl) {
+  final media = mediaUrl.trim();
+  final baseRaw = engineBaseUrl.trim();
+  if (media.isEmpty || baseRaw.isEmpty) return media;
+  if (kotvIsLocalEngineBaseUrl(baseRaw)) return media;
+  late final Uri m;
+  late final Uri b;
+  try {
+    m = Uri.parse(media);
+    b = Uri.parse(baseRaw.contains('://') ? baseRaw : 'http://$baseRaw');
+  } catch (_) {
+    return media;
+  }
+  if (b.host.isEmpty) return media;
+  final host = m.host.toLowerCase();
+  if (host != '127.0.0.1' && host != 'localhost' && host != '::1') {
+    return media;
+  }
+  return Uri(
+    scheme: b.scheme.isEmpty ? 'http' : b.scheme,
+    userInfo: m.userInfo.isEmpty ? null : m.userInfo,
+    host: b.host,
+    port: b.hasPort ? b.port : null,
+    path: m.path,
+    query: m.hasQuery ? m.query : null,
+    fragment: m.hasFragment ? m.fragment : null,
+  ).toString();
+}

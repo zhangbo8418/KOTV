@@ -2,7 +2,7 @@ import 'kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
 
-/// 桌面端完整运行时键；安卓只展示引擎/bridge 相关（无捆绑 chromium/ffmpeg/vlc 等）。
+/// 桌面客户端：可展示引擎侧捆绑播放器库（本机 MPV/VLC）。
 const kotvRuntimeDisplayKeysDesktop = <String>[
   'platform',
   'java',
@@ -16,6 +16,7 @@ const kotvRuntimeDisplayKeysDesktop = <String>[
   'vlc',
 ];
 
+/// 安卓客户端：只展示引擎/bridge；不展示桌面播放器库。
 const kotvRuntimeDisplayKeysAndroid = <String>[
   'platform',
   'java',
@@ -24,8 +25,18 @@ const kotvRuntimeDisplayKeysAndroid = <String>[
   'bridge',
 ];
 
+/// Web 客户端：浏览器内不能加载 libmpv/libvlc，列表也不展示这两类。
+const kotvRuntimeDisplayKeysWeb = <String>[
+  'platform',
+  'java',
+  'python',
+  'quickjs',
+  'bridge',
+];
+
 List<String> kotvRuntimeDisplayKeysForPlatform() {
-  if (!kIsWeb && Platform.isAndroid) return kotvRuntimeDisplayKeysAndroid;
+  if (kIsWeb) return kotvRuntimeDisplayKeysWeb;
+  if (Platform.isAndroid) return kotvRuntimeDisplayKeysAndroid;
   return kotvRuntimeDisplayKeysDesktop;
 }
 
@@ -36,13 +47,17 @@ List<String> formatKotvRuntimeLines(
 }) {
   final keys = kotvRuntimeDisplayKeysForPlatform();
   final out = <String>[];
+  final hideMissingPlayerLibs = kIsWeb || (!kIsWeb && Platform.isAndroid);
   for (final k in keys) {
     final v = runtime[k]?.trim();
     if (v != null && v.isNotEmpty) {
-      // 安卓不展示桌面播放器类 missing
-      if (!kIsWeb && Platform.isAndroid && v == '(missing)') continue;
+      if (hideMissingPlayerLibs && v == '(missing)') continue;
       out.add('$k: $v');
-    } else if (includeMissingKeys && (k == 'mpv' || k == 'vlc') && (kIsWeb || !Platform.isAndroid)) {
+    } else if (includeMissingKeys &&
+        !kIsWeb &&
+        !Platform.isAndroid &&
+        (k == 'mpv' || k == 'vlc')) {
+      // 仅桌面客户端补全本机播放器库缺失提示
       out.add('$k: (missing)');
     }
   }

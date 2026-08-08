@@ -60,6 +60,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			if plat != "" {
 				hostclient.SetPlatform(plat)
 			}
+			hostclient.SetPublicBase(requestPublicBase(r, loopback))
 		}
 
 		// 本机：忽略 token 对会话的影响，只走 clientId。
@@ -116,6 +117,24 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		bindPlat()
 		next(w, r)
 	}
+}
+
+func requestPublicBase(r *http.Request, loopback bool) string {
+	if loopback || r == nil {
+		return ""
+	}
+	host := strings.TrimSpace(r.Host)
+	if host == "" {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if xf := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); xf != "" {
+		scheme = strings.ToLower(strings.TrimSpace(strings.Split(xf, ",")[0]))
+	}
+	return scheme + "://" + host
 }
 
 func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {

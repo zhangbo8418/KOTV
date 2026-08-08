@@ -686,10 +686,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       orElse: () => <SiteInfo>[],
     );
 
-    final playerVal = g('player', kotvDefaultVodPlayer());
-    final playerLabel = flutterPlayerLabel(playerVal.isEmpty ? kotvDefaultVodPlayer() : playerVal);
-    final livePlayerVal = g('playerLive', kotvDefaultLivePlayer());
-    final livePlayerLabel = flutterPlayerLabel(livePlayerVal.isEmpty ? kotvDefaultLivePlayer() : livePlayerVal);
+    final playerVal = kotvClampPlayerVal(g('player', kotvDefaultVodPlayer()), live: false);
+    final playerLabel = flutterPlayerLabel(playerVal);
+    final livePlayerVal = kotvClampPlayerVal(g('playerLive', kotvDefaultLivePlayer()), live: true);
+    final livePlayerLabel = flutterPlayerLabel(livePlayerVal);
     final speed = g('playerSpeed', '1.0');
     final scale = g('playerScale', 'default');
     final decode = g('playerDecode', 'auto');
@@ -768,17 +768,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '点播播放器',
                           value: playerLabel,
-                          onTap: () => _pick('点播播放器', 'player', kotvVodPlayerOptions(), msg: '点播播放器已切换'),
+                          onTap: kotvCanSwitchPlayer(live: false)
+                              ? () => _pick('点播播放器', 'player', kotvVodPlayerOptions(), msg: '点播播放器已切换')
+                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/VLC）'),
                         ),
                         KotvSettingsCell(
                           label: '直播播放器',
                           value: livePlayerLabel,
-                          onTap: () => _pick(
-                            '直播播放器',
-                            'playerLive',
-                            kotvLivePlayerOptions(),
-                            msg: '直播播放器已切换',
-                          ),
+                          onTap: kotvCanSwitchPlayer(live: true)
+                              ? () => _pick(
+                                    '直播播放器',
+                                    'playerLive',
+                                    kotvLivePlayerOptions(),
+                                    msg: '直播播放器已切换',
+                                  )
+                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/VLC）'),
                         ),
                         KotvSettingsCell(
                           label: '默认倍速',
