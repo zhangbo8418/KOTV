@@ -151,7 +151,12 @@ class IjkPlayback extends KotvPlayback {
     await _player.setOption(FijkOption.playerCategory, 'mediacodec-handle-resolution-change', mc);
     // 硬解同步（部分机型黑屏可关）；软解无关
     await _player.setOption(FijkOption.playerCategory, 'mediacodec-sync', soft ? 0 : 1);
-    await _player.setOption(FijkOption.playerCategory, 'opensles', 0);
+    // 申请音频焦点；OpenSL ES 在多数机型更稳（AudioTrack 易无声）
+    await _player.setOption(FijkOption.hostCategory, 'request-audio-focus', 1);
+    await _player.setOption(FijkOption.hostCategory, 'release-audio-focus', 1);
+    await _player.setOption(FijkOption.hostCategory, 'request-screen-on', 1);
+    await _player.setOption(FijkOption.playerCategory, 'opensles', 1);
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-audio', 0);
     await _player.setOption(FijkOption.playerCategory, 'framedrop', 1);
     await _player.setOption(FijkOption.playerCategory, 'start-on-prepared', 1);
     await _player.setOption(FijkOption.playerCategory, 'packet-buffering', 1);
@@ -242,13 +247,14 @@ class IjkPlayback extends KotvPlayback {
             _lastTrafficAt = now;
           }
         } else {
+          // 建基线；瞬时 tcp 速度可垫第一帧（对齐 TV 起播就有数）
           _lastTrafficBytes = traffic;
           _lastTrafficAt = now;
-          sampled = true;
+          sampled = false;
           next = 0;
         }
       } catch (_) {}
-      // 仅在还从未建立流量基线时，才用 getTcpSpeed 垫一帧（它本身容易黏值）
+      // 尚无差分样本时用 getTcpSpeed 垫一帧
       if (!sampled) {
         try {
           final tcp = await _player.getTcpSpeed();

@@ -29,7 +29,8 @@ class KotvVlcPlugin : public flutter::Plugin {
   int64_t CreateTexture();
   bool Load(const std::string& lib_dir, const std::string& plugin_dir,
             std::string* err);
-  bool Play(const std::string& url, std::string* err);
+  bool Play(const std::string& url, const std::string& headers,
+            std::string* err);
   void Stop();
   void DisposePlayer();
   void StartPump();

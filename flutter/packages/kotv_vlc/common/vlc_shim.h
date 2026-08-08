@@ -14,6 +14,8 @@ void kotv_vlc_unload(void);
 int kotv_vlc_loaded(void);
 
 int kotv_vlc_play(const char *mrl);
+/* headers_crlf: 多行 "Key: Value\r\n"（可仅 \\n）；在 play 建 media 时注入 http-* 选项 */
+int kotv_vlc_play_with_headers(const char *mrl, const char *headers_crlf);
 void kotv_vlc_stop(void);
 void kotv_vlc_pause(int do_pause);
 int kotv_vlc_is_playing(void);

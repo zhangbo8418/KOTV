@@ -92,7 +92,7 @@ void KotvVlcPlugin::HandleMethodCall(
   }
   if (method == "play") {
     std::string err;
-    if (!Play(arg_string("url"), &err)) {
+    if (!Play(arg_string("url"), arg_string("headers"), &err)) {
       result->Error("play", err);
       return;
     }
@@ -267,12 +267,15 @@ bool KotvVlcPlugin::Load(const std::string& lib_dir,
   return true;
 }
 
-bool KotvVlcPlugin::Play(const std::string& url, std::string* err) {
+bool KotvVlcPlugin::Play(const std::string& url, const std::string& headers,
+                         std::string* err) {
   if (!ready_) {
     if (err) *err = "libvlc not loaded";
     return false;
   }
-  const int rc = kotv_vlc_play(url.c_str());
+  const int rc = headers.empty()
+                     ? kotv_vlc_play(url.c_str())
+                     : kotv_vlc_play_with_headers(url.c_str(), headers.c_str());
   if (rc != 0) {
     if (err) *err = "vlc play failed (" + std::to_string(rc) + ")";
     return false;

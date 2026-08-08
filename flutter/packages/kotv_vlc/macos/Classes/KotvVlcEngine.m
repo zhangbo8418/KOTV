@@ -204,6 +204,10 @@
 }
 
 - (BOOL)playURL:(NSString *)url error:(NSError **)error {
+  return [self playURL:url headers:nil error:error];
+}
+
+- (BOOL)playURL:(NSString *)url headers:(NSString *)headers error:(NSError **)error {
   if (!self.ready) {
     if (error) {
       *error = [NSError errorWithDomain:@"kotv_vlc" code:-1
@@ -212,12 +216,9 @@
     return NO;
   }
   kotv_vlc_set_hard_win(0); // 强制回调出画
-  FILE *f = fopen("/tmp/kotv_vlc_frames.log", "a");
-  if (f) {
-    fprintf(f, "play url=%s hard=%d\n", url.UTF8String, kotv_vlc_hard_active());
-    fclose(f);
-  }
-  int rc = kotv_vlc_play(url.UTF8String);
+  const char *hdr = (headers.length > 0) ? headers.UTF8String : NULL;
+  int rc = hdr ? kotv_vlc_play_with_headers(url.UTF8String, hdr)
+               : kotv_vlc_play(url.UTF8String);
   if (rc != 0) {
     if (error) {
       *error = [NSError errorWithDomain:@"kotv_vlc" code:rc userInfo:@{

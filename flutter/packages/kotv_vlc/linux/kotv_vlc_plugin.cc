@@ -195,8 +195,12 @@ static void method_call_cb(FlMethodChannel*, FlMethodCall* method_call,
           fl_method_error_response_new("play", "libvlc not loaded", nullptr));
     } else {
       FlValue* u = fl_value_lookup_string(args, "url");
+      FlValue* h = fl_value_lookup_string(args, "headers");
       const gchar* url = u ? fl_value_get_string(u) : "";
-      int rc = kotv_vlc_play(url ? url : "");
+      const gchar* headers = h ? fl_value_get_string(h) : nullptr;
+      int rc = (headers && headers[0])
+                   ? kotv_vlc_play_with_headers(url ? url : "", headers)
+                   : kotv_vlc_play(url ? url : "");
       if (rc != 0) {
         response = FL_METHOD_RESPONSE(fl_method_error_response_new(
             "play", g_strdup_printf("vlc play failed (%d)", rc), nullptr));

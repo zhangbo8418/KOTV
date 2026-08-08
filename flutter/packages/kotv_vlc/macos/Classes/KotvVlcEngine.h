@@ -14,6 +14,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithTextures:(NSObject<FlutterTextureRegistry> *)textures;
 - (BOOL)loadLibDir:(NSString *)libDir pluginDir:(NSString *)pluginDir error:(NSError **)error;
 - (BOOL)playURL:(NSString *)url error:(NSError **)error;
+- (BOOL)playURL:(NSString *)url headers:(nullable NSString *)headers error:(NSError **)error;
 - (void)stop;
 - (void)setPaused:(BOOL)paused;
 - (BOOL)isPlaying;
