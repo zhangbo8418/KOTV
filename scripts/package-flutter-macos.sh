@@ -23,6 +23,13 @@ if [[ ! -d "$ROOT/runtime/jre" || ! -d "$ROOT/runtime/libvlc" ]]; then
   "$ROOT/scripts/prepare-runtime.sh" "$PLAT"
 fi
 
+# 始终重编 bridge：Go 引擎已切 HTTP /health，旧 jar 的 --serve 仍是 stdin，会导致 connection refused。
+echo "==> build spider-bridge.jar"
+chmod +x "$ROOT/bridge/build.sh"
+(cd "$ROOT" && ./bridge/build.sh)
+mkdir -p "$ROOT/runtime/bridge"
+cp -f "$ROOT/bridge/spider-bridge.jar" "$ROOT/runtime/bridge/spider-bridge.jar"
+
 echo "==> build Go engine"
 (cd "$ROOT" && CGO_ENABLED=1 go generate ./internal/spider/ && CGO_ENABLED=1 go build -o "$ROOT/flutter/assets/engine/kotv-engine" ./cmd/engine)
 chmod +x "$ROOT/flutter/assets/engine/kotv-engine"

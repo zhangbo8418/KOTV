@@ -506,7 +506,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final onHome = (_tid ?? '').isEmpty;
     final pad = KotvLayout.isCompact(context) ? 12.0 : 30.0;
     final catPad = KotvLayout.isCompact(context) ? 16.0 : 60.0;
-    final bottomPad = KotvLayout.useBottomNav(context) ? 80.0 : 24.0;
+    final bottomPad = 24.0;
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
         if (!onHome && n.metrics.pixels > n.metrics.maxScrollExtent - 300) _loadMore();

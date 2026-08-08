@@ -22,6 +22,9 @@ perl -i -pe 's/shared_preferences:\s*\^2\.3\.3/shared_preferences: 2.3.0/' "$APP
 perl -i -pe 's/media_kit:\s*("[^"]+"|[^\n]+)/media_kit: 1.1.11/' "$APP"
 perl -i -pe 's/media_kit_video:\s*("[^"]+"|[^\n]+)/media_kit_video: 1.2.5/' "$APP"
 perl -i -pe 's/media_kit_libs_video:\s*("[^"]+"|[^\n]+)/media_kit_libs_video: 1.0.7/' "$APP"
+# web 1.x / wakelock_plus 1.4+ 要求 Dart >=3.4；Win7 钉到 0.5.1 + 1.2.8（允许 web>=0.5.1）。
+perl -i -pe 's/web:\s*\^1\.1\.0/web: 0.5.1/' "$APP"
+perl -i -pe 's/wakelock_plus:\s*[^\n]+/wakelock_plus: 1.2.8/' "$APP"
 
 # kotv_vlc：允许 3.19
 perl -i -pe 's/sdk:\s*\^3\.5\.4/sdk: ">=3.3.0 <3.4.0"/' "$VLC"
@@ -58,7 +61,8 @@ dependency_overrides:
   media_kit: 1.1.11
   media_kit_video: 1.2.5
   media_kit_libs_video: 1.0.7
-  wakelock_plus: 1.2.1
+  web: 0.5.1
+  wakelock_plus: 1.2.8
 EOF
 fi
 
