@@ -78,6 +78,9 @@ class ProcessResult {
 
 enum ProcessStartMode { normal, detached, detachedWithStdio }
 
+/// 对齐 dart:io FileMode，供 writeAsStringSync 命名参数在 Web 编译期解析。
+enum FileMode { read, write, append, writeOnly, writeOnlyAppend }
+
 class ProcessSignal {
   static const ProcessSignal sigterm = ProcessSignal._();
   static const ProcessSignal sigkill = ProcessSignal._();
