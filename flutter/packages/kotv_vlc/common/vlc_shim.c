@@ -956,20 +956,13 @@ int64_t kotv_vlc_get_buffered(void) {
 	return end > len ? len : end;
 }
 
-/* 缓冲中 =
- * - libvlc Opening(1) / Buffering(2)
- * - 刚 seek 尚未恢复出画
- * - Playing 但进度卡住 ≥700ms
+/* 缓冲中（对齐 8/8 基线，勿用「Playing 但进度不涨」单独判死——直播 get_time 常停在 0）：
+ * - libvlc Buffering(2)
+ * - 有新鲜 buffering 事件且 cache<99.5%，且进度卡住
+ * seek 强制窗口另计，恢复播放后清掉。
  */
 int kotv_vlc_is_buffering(void) {
 	if (!g_mp || !p_get_state)
-		return 0;
-
-	int state = p_get_state(g_mp);
-	if (state == 1 || state == 2) /* Opening / Buffering */
-		return 1;
-	/* 暂停/停止/结束：进度不涨不算缓冲 */
-	if (state != 3)
 		return 0;
 
 	int64_t now = kotv_now_ms();
@@ -978,26 +971,25 @@ int kotv_vlc_is_buffering(void) {
 		g_pos_last_ms = t;
 		g_pos_last_at_ms = now;
 	}
+	int stalled = (g_pos_last_at_ms <= 0) || (now - g_pos_last_at_ms) >= 700;
 
 	if (g_force_buffer_until_ms > 0) {
 		if (now >= g_force_buffer_until_ms) {
 			g_force_buffer_until_ms = 0;
+		} else if (p_get_state(g_mp) == 3 &&
+		           (!buffer_event_fresh() || g_buffer_pct >= 99.5f)) {
+			/* Playing 且无新鲜欠缓冲事件 → seek 已落地 */
+			g_force_buffer_until_ms = 0;
 		} else {
-			/* 时钟已离开 seek 点并持续推进 → 恢复播放 */
-			int64_t delta = t - g_seek_target_ms;
-			if (delta < 0)
-				delta = -delta;
-			if (g_pos_last_at_ms > 0 && (now - g_pos_last_at_ms) < 700 && delta >= 400) {
-				g_force_buffer_until_ms = 0;
-			} else {
-				return 1;
-			}
+			return 1;
 		}
 	}
 
-	if (g_pos_last_at_ms <= 0)
+	if (p_get_state(g_mp) == 2) /* Buffering */
 		return 1;
-	return (now - g_pos_last_at_ms) >= 700 ? 1 : 0;
+	if (!buffer_event_fresh() || g_buffer_pct >= 99.5f)
+		return 0;
+	return stalled ? 1 : 0;
 }
 
 /* 下载速度（字节/秒）。
