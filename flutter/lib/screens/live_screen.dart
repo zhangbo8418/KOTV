@@ -1119,18 +1119,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           child: Builder(builder: (context) {
                             final screenW = c.maxWidth;
                             final land = KotvLayout.isLandscapeCompact(context);
-                            // 分类/频道加宽；EPG 固定窄列（约原先一半），不再吃掉剩余空白。
-                            final groupW = land ? 112.0 : 120.0;
-                            final channelW = land ? 248.0 : 240.0;
-                            final epgW = land ? 200.0 : 220.0;
+                            // 列宽按屏宽缩放：写死 120/240/220 在 1080P 全屏仍偏窄，中文台名/EPG 会被 ellipsis 裁掉。
+                            final wScale = land
+                                ? 1.0
+                                : (screenW / LayoutScale.designW).clamp(1.0, 1.55);
+                            final groupW = (land ? 112.0 : 136.0) * wScale;
+                            final channelW = (land ? 248.0 : 280.0) * wScale;
+                            final epgW = (land ? 200.0 : 260.0) * wScale;
                             final leftW = groupW + channelW + epgW + (land ? 28.0 : 36.0);
                             final pillH = land ? 30.0 : 36.0;
                             final chH = land ? 36.0 : 48.0;
-                            final font = land ? 12.0 : 13.0;
+                            final font = land ? 12.0 : (13.0 * wScale.clamp(1.0, 1.25));
                             final logoW = land ? 28.0 : 40.0;
                             final logoH = land ? 22.0 : 30.0;
-                            // 防止超宽屏把侧栏撑满半屏
-                            final panelW = leftW.clamp(0.0, screenW * 0.92);
+                            // 桌面全屏最多约占半屏，避免挡完画面；窄屏仍可到 92%
+                            final maxFrac = (_immersive && !land) ? 0.52 : 0.92;
+                            final panelW = leftW.clamp(0.0, screenW * maxFrac);
                             return SizedBox(
                             width: panelW,
                             child: Padding(
@@ -1203,9 +1207,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                                       Expanded(
                                                         child: Text(
                                                           name,
-                                                          maxLines: land ? 2 : 1,
+                                                          maxLines: 2,
                                                           overflow: TextOverflow.ellipsis,
-                                                          style: TextStyle(color: Colors.white, fontSize: land ? 12 : 16, height: 1.15),
+                                                          style: TextStyle(
+                                                            color: Colors.white,
+                                                            fontSize: land ? 12 : (15.0 * wScale.clamp(1.0, 1.2)),
+                                                            height: 1.15,
+                                                          ),
                                                         ),
                                                       ),
                                                     ],
@@ -1324,7 +1332,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                                                     overflow: TextOverflow.ellipsis,
                                                                     style: TextStyle(
                                                                       color: Colors.white.withOpacity(now ? 1 : 0.85),
-                                                                      fontSize: land ? 12 : 12,
+                                                                      fontSize: land ? 12 : (12.0 * wScale.clamp(1.0, 1.2)),
                                                                       height: 1.2,
                                                                     ),
                                                                   ),
@@ -1361,9 +1369,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           color: const Color(0x99120A24),
                           child: Builder(builder: (context) {
                             final land = KotvLayout.isLandscapeCompact(context);
+                            final wScale = land
+                                ? 1.0
+                                : (c.maxWidth / LayoutScale.designW).clamp(1.0, 1.55);
                             final rightW = land
                                 ? (c.maxWidth * 0.30).clamp(180.0, 240.0)
-                                : (c.maxWidth * 0.32).clamp(200.0, 280.0);
+                                : (240.0 * wScale).clamp(220.0, 360.0);
                             final pillH = land ? 30.0 : 40.0;
                             return SizedBox(
                             width: rightW,
