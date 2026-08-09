@@ -303,8 +303,8 @@ class MediaKitPlayback extends KotvPlayback {
             next = 0;
           }
         }
-        // raw-input-rate 仅作辅助：只在本轮还没采到差分时用，且不得单独黏住跨 tick
-        if (!sampled) {
+        // raw-input-rate：差分未采到或差分为 0 时作辅助（起播/卡缓冲常见）
+        if (!sampled || next <= 0) {
           final rate = _parseKvInt(state, 'raw-input-rate');
           if (rate != null && rate > 0) {
             next = rate;
@@ -312,12 +312,10 @@ class MediaKitPlayback extends KotvPlayback {
           }
         }
       } catch (_) {}
-      if (!sampled) {
+      if (!sampled || next <= 0) {
         try {
           final raw = await (player.platform as dynamic).getProperty('cache-speed');
           final v = _parseMpvBytesPerSec('$raw');
-          // cache-speed 黏值时：连续相同则在缓冲场景仍允许显示，但若与上次相同
-          // 且缓冲字节无增长，下面 sampled 路径会归零。这里仅兜底。
           if (v > 0) next = v;
         } catch (_) {}
       }
@@ -613,6 +611,7 @@ class EngineVlcPlayback extends KotvPlayback {
   final _endedCtrl = StreamController<bool>.broadcast();
   Timer? _statusTimer;
   String _url = '';
+  Map<String, String> _headers = const {};
   String _decodeMode = 'auto';
   bool _playing = false;
   bool _ended = false;
@@ -630,6 +629,9 @@ class EngineVlcPlayback extends KotvPlayback {
   bool _repeatOne = false;
   bool _stableVolume = false;
   int _userVolume = 80;
+  /// seek 完成前钉住的目标进度，防止原生短暂回报 0 把 UI 打回开头。
+  int? _seekPinMs;
+  DateTime? _seekPinAt;
   List<KotvTrack> _audioTracks = const [];
   List<KotvTrack> _subTracks = const [];
   String? _audioId;
@@ -647,8 +649,25 @@ class EngineVlcPlayback extends KotvPlayback {
       final prevBuf = _bufferedMs;
       final prevBuffering = _vlcBuffering;
       final prevSpeed = _speedBps;
+      final prevW = _videoW;
       _playing = st['playing'] == true;
-      _positionMs = (st['positionMs'] as num?)?.toInt() ?? _positionMs;
+      final rawPos = (st['positionMs'] as num?)?.toInt() ?? _positionMs;
+      final pin = _seekPinMs;
+      final pinAt = _seekPinAt;
+      if (pin != null && pinAt != null) {
+        final near = (rawPos - pin).abs() <= 1500;
+        final timedOut = DateTime.now().difference(pinAt) > const Duration(seconds: 12);
+        if (near || timedOut) {
+          _seekPinMs = null;
+          _seekPinAt = null;
+          _positionMs = rawPos;
+        } else {
+          // 仍在 seek：忽略原生回落到 0/旧位置
+          _positionMs = pin;
+        }
+      } else {
+        _positionMs = rawPos;
+      }
       _durationMs = (st['durationMs'] as num?)?.toInt() ?? _durationMs;
       _bufferedMs = (st['bufferedMs'] as num?)?.toInt() ?? _bufferedMs;
       if (_bufferedMs < _positionMs) _bufferedMs = _positionMs;
@@ -683,12 +702,16 @@ class EngineVlcPlayback extends KotvPlayback {
       final posJump = (_positionMs - prevPos).abs() >= 200;
       final bufJump = (_bufferedMs - prevBuf).abs() >= 500;
       final speedJump = _speedBps != prevSpeed;
+      final frameReady = prevW <= 0 && _videoW > 0;
+      // dart buffering 还含「未出帧」；宽度变化时也要刷，否则浮层关不掉。
+      final bufferingNow = buffering;
       if (wasPlaying != _playing ||
           wasEnded != _ended ||
           posJump ||
           bufJump ||
           prevBuffering != _vlcBuffering ||
-          (_vlcBuffering && speedJump)) {
+          frameReady ||
+          (bufferingNow && speedJump)) {
         notifyListeners();
       }
     } catch (_) {}
@@ -735,7 +758,8 @@ class EngineVlcPlayback extends KotvPlayback {
   @override
   Duration get buffered => Duration(milliseconds: _bufferedMs);
   @override
-  bool get buffering => _vlcBuffering;
+  bool get buffering =>
+      _vlcBuffering || (_ready && !_ended && _videoW <= 0 && (_playing || _positionMs <= 0));
   @override
   int get networkSpeedBps => _speedBps;
   @override
@@ -767,13 +791,16 @@ class EngineVlcPlayback extends KotvPlayback {
     _videoW = 0;
     _videoH = 0;
     _maxPositionMs = 0;
+    _seekPinMs = null;
+    _seekPinAt = null;
+    _headers = kotvNormalizePlayHeaders(headers, url: url);
     final libDir = KotvVlcPaths.resolveLibDir();
     if (libDir == null) throw StateError('未找到 runtime/libvlc');
     await _native.create();
     await _native.load(libDir: libDir, pluginDir: KotvVlcPaths.pluginDirFor(libDir));
     await _native.setDecodeMode(_decodeMode);
     await _native.setRepeatOne(_repeatOne);
-    await _native.play(url);
+    await _native.play(url, headers: _headers.isEmpty ? null : _headers);
     _ready = true;
     _audioTracks = const [];
     _subTracks = const [];
@@ -815,9 +842,19 @@ class EngineVlcPlayback extends KotvPlayback {
 
   @override
   Future<void> seek(Duration d) async {
-    await _native.seekMs(d.inMilliseconds);
-    _positionMs = d.inMilliseconds;
+    final ms = d.inMilliseconds < 0 ? 0 : d.inMilliseconds;
+    _seekPinMs = ms;
+    _seekPinAt = DateTime.now();
+    _positionMs = ms;
+    _vlcBuffering = true;
     notifyListeners();
+    unawaited(() async {
+      try {
+        await _native.seekMs(ms);
+      } catch (_) {}
+      if (!_ready) return;
+      await _tickNativeStatus();
+    }());
   }
 
   @override
@@ -863,7 +900,7 @@ class EngineVlcPlayback extends KotvPlayback {
       final pos = position;
       final wasPlaying = playing;
       await _native.setRepeatOne(_repeatOne);
-      await _native.play(_url);
+      await _native.play(_url, headers: _headers.isEmpty ? null : _headers);
       if (pos > Duration.zero) await seek(pos);
       if (!wasPlaying) await pause();
       unawaited(_refreshTracks());
@@ -923,6 +960,7 @@ class EngineVlcPlayback extends KotvPlayback {
   void dispose() {
     _statusTimer?.cancel();
     try {
+      // 同步尽量停干净；关进程路径另有 KotvVlc.shutdownAll / atexit unload
       unawaited(_native.stop());
     } catch (_) {}
     unawaited(_native.dispose());

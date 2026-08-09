@@ -246,9 +246,13 @@ static int64_t g_speed_last_bytes = -1;
 static int64_t g_speed_last_at_ms = 0;
 static int64_t g_speed_bps = 0;
 
-/* 播放进度是否仍在推进：cache 事件常在正常预读时也发，只有"卡住"才算缓冲 */
+/* 播放进度是否仍在推进 */
 static int64_t g_pos_last_ms = -1;
 static int64_t g_pos_last_at_ms = 0;
+
+/* 拖进度后强制显示缓冲，直到时钟重新推进或超时 */
+static int64_t g_force_buffer_until_ms = 0;
+static int64_t g_seek_target_ms = -1;
 
 static libvlc_instance_t *g_inst;
 static libvlc_media_player_t *g_mp;
@@ -490,6 +494,8 @@ static void path_join(char *out, size_t n, const char *a, const char *b) {
 		snprintf(out, n, "%s%s", a, b);
 }
 
+void kotv_vlc_unload(void); /* forward：Win atexit 与 load 成功后注册 */
+
 int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	flock_init();
 	if (g_lib)
@@ -562,47 +568,8 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 #endif
 	}
 
-	/* VLC 仅暴露时间缓存；按物理内存算字节预算，再换算成 ms（按 ~16Mbps≈2MB/s），
-	 * 使 4K/8K 不会因固定超长 network-caching 占满内存。 */
-	int64_t phys = 0;
-#if defined(_WIN32)
-	MEMORYSTATUSEX ms;
-	ms.dwLength = sizeof(ms);
-	if (GlobalMemoryStatusEx(&ms))
-		phys = (int64_t)ms.ullTotalPhys;
-#elif defined(__APPLE__)
-	{
-		int mib[2] = {CTL_HW, HW_MEMSIZE};
-		uint64_t mem = 0;
-		size_t len = sizeof(mem);
-		if (sysctl(mib, 2, &mem, &len, NULL, 0) == 0)
-			phys = (int64_t)mem;
-	}
-#else
-	{
-		long pages = sysconf(_SC_PHYS_PAGES);
-		long psize = sysconf(_SC_PAGESIZE);
-		if (pages > 0 && psize > 0)
-			phys = (int64_t)pages * (int64_t)psize;
-	}
-#endif
-	if (phys <= 0)
-		phys = (int64_t)8 * 1024 * 1024 * 1024;
-	int64_t budget = (int64_t)(phys * 0.05);
-	{
-		const int64_t min_b = (int64_t)48 * 1024 * 1024;
-		const int64_t max_b = (int64_t)384 * 1024 * 1024;
-		if (budget < min_b)
-			budget = min_b;
-		if (budget > max_b)
-			budget = max_b;
-	}
-	/* ms ≈ budget / 2MB/s；钳到 1.5s–60s */
-	int cache_ms = (int)((budget * 1000) / ((int64_t)2 * 1024 * 1024));
-	if (cache_ms < 1500)
-		cache_ms = 1500;
-	if (cache_ms > 60000)
-		cache_ms = 60000;
+	/* 拖进度要快，但过短会频繁卡顿；折中 2s + input-fast-seek */
+	int cache_ms = 2000;
 	g_cache_ms = cache_ms;
 
 	static char net_arg[48];
@@ -610,6 +577,48 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	snprintf(net_arg, sizeof(net_arg), "--network-caching=%d", cache_ms);
 	snprintf(file_arg, sizeof(file_arg), "--file-caching=%d", cache_ms);
 
+#if defined(_WIN32)
+	/* Win7：DirectSound 在进程粗暴 exit 后常「声音卡系统」；waveout 释放更干净 */
+	int is_win7 = 0;
+	{
+		OSVERSIONINFOA vi;
+		memset(&vi, 0, sizeof(vi));
+		vi.dwOSVersionInfoSize = sizeof(vi);
+		if (GetVersionExA(&vi) && vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1)
+			is_win7 = 1;
+	}
+	const char *args_win7[] = {
+	    "--no-video-title-show",
+	    "--quiet",
+	    "--no-osd",
+	    "--stats",
+	    net_arg,
+	    file_arg,
+	    "--live-caching=2000",
+	    "--clock-jitter=0",
+	    "--drop-late-frames",
+	    "--skip-frames",
+	    "--input-fast-seek",
+	    "--aout=waveout",
+	};
+	const char *args_win[] = {
+	    "--no-video-title-show",
+	    "--quiet",
+	    "--no-osd",
+	    "--stats",
+	    net_arg,
+	    file_arg,
+	    "--live-caching=2000",
+	    "--clock-jitter=0",
+	    "--drop-late-frames",
+	    "--skip-frames",
+	    "--input-fast-seek",
+	};
+	const char **args = is_win7 ? args_win7 : args_win;
+	int nargs = is_win7 ? (int)(sizeof(args_win7) / sizeof(args_win7[0]))
+	                    : (int)(sizeof(args_win) / sizeof(args_win[0]));
+	g_inst = p_new(nargs, args);
+#else
 	const char *args[] = {
 	    "--no-video-title-show",
 	    "--quiet",
@@ -618,12 +627,15 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	    "--stats",
 	    net_arg,
 	    file_arg,
-	    "--live-caching=3000",
+	    "--live-caching=2000",
 	    "--clock-jitter=0",
 	    "--drop-late-frames",
 	    "--skip-frames",
+	    /* VLC3：优先关键帧 seek */
+	    "--input-fast-seek",
 	};
 	g_inst = p_new((int)(sizeof(args) / sizeof(args[0])), args);
+#endif
 	if (!g_inst)
 		return -4;
 	g_mp = p_mp_new(g_inst);
@@ -632,21 +644,47 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 
 	attach_callbacks();
 	frame_ensure(1280, 720);
+#if defined(_WIN32)
+	/* exit(0) 不会走 Flutter dispose；靠 atexit 静音并卸掉 libvlc，避免 Win7 残留啸叫/卡音频 */
+	{
+		static int atexit_once = 0;
+		if (!atexit_once) {
+			atexit(kotv_vlc_unload);
+			atexit_once = 1;
+		}
+	}
+#endif
 	return 0;
 }
 
+/* 当前播放 MRL/头：供 stop/unload 清理 */
+static char g_mrl[4096];
+static char g_hdr_lines[16][1024];
+static int g_hdr_n = 0;
+
 void kotv_vlc_unload(void) {
 	if (g_mp) {
-		p_stop(g_mp);
-		p_mp_release(g_mp);
+		if (p_set_volume)
+			p_set_volume(g_mp, 0);
+		if (p_set_pause)
+			p_set_pause(g_mp, 1);
+		if (p_stop)
+			p_stop(g_mp);
+		if (p_mp_release)
+			p_mp_release(g_mp);
 		g_mp = NULL;
 	}
 	if (g_inst) {
-		p_release(g_inst);
+		if (p_release)
+			p_release(g_inst);
 		g_inst = NULL;
 	}
 	g_hard = 0;
 	g_hwnd = NULL;
+	g_mrl[0] = '\0';
+	g_hdr_n = 0;
+	g_force_buffer_until_ms = 0;
+	g_seek_target_ms = -1;
 	frame_free();
 	if (g_lib) {
 		DL_CLOSE(g_lib);
@@ -657,6 +695,11 @@ void kotv_vlc_unload(void) {
 		g_libcore = NULL;
 	}
 	p_new = NULL;
+	p_stop = NULL;
+	p_set_volume = NULL;
+	p_set_pause = NULL;
+	p_mp_release = NULL;
+	p_release = NULL;
 	p_set_hwnd = NULL;
 	p_set_nsobject = NULL;
 	p_set_xwindow = NULL;
@@ -666,9 +709,76 @@ int kotv_vlc_loaded(void) {
 	return g_lib && g_inst && g_mp ? 1 : 0;
 }
 
-int kotv_vlc_play(const char *mrl) {
+static void save_mrl(const char *mrl) {
+	if (!mrl) {
+		g_mrl[0] = '\0';
+		return;
+	}
+	strncpy(g_mrl, mrl, sizeof(g_mrl) - 1);
+	g_mrl[sizeof(g_mrl) - 1] = '\0';
+}
+
+static void save_headers(const char *const *header_lines, int n) {
+	g_hdr_n = 0;
+	if (!header_lines || n <= 0)
+		return;
+	if (n > 16)
+		n = 16;
+	for (int i = 0; i < n; ++i) {
+		if (!header_lines[i] || !header_lines[i][0])
+			continue;
+		strncpy(g_hdr_lines[g_hdr_n], header_lines[i], sizeof(g_hdr_lines[0]) - 1);
+		g_hdr_lines[g_hdr_n][sizeof(g_hdr_lines[0]) - 1] = '\0';
+		g_hdr_n++;
+	}
+}
+
+/* 把 "Name: Value" 转成 libvlc media 选项。
+ * UA/Referer/Cookie 用专用项，其它走可重复的 :http-header=。 */
+static void apply_http_header_line(libvlc_media_t *media, const char *line) {
+	if (!media || !p_media_add_option || !line || !line[0])
+		return;
+	const char *colon = strchr(line, ':');
+	if (!colon || colon == line)
+		return;
+	size_t klen = (size_t)(colon - line);
+	while (klen > 0 && (line[klen - 1] == ' ' || line[klen - 1] == '\t'))
+		klen--;
+	const char *val = colon + 1;
+	while (*val == ' ' || *val == '\t')
+		val++;
+	if (klen == 0 || !*val)
+		return;
+
+	char key[128];
+	if (klen >= sizeof(key))
+		klen = sizeof(key) - 1;
+	memcpy(key, line, klen);
+	key[klen] = '\0';
+	for (char *p = key; *p; ++p) {
+		if (*p >= 'A' && *p <= 'Z')
+			*p = (char)(*p - 'A' + 'a');
+	}
+
+	char opt[2048];
+	if (strcmp(key, "user-agent") == 0) {
+		snprintf(opt, sizeof(opt), ":http-user-agent=%s", val);
+	} else if (strcmp(key, "referer") == 0 || strcmp(key, "referrer") == 0) {
+		snprintf(opt, sizeof(opt), ":http-referrer=%s", val);
+	} else if (strcmp(key, "cookie") == 0) {
+		snprintf(opt, sizeof(opt), ":http-cookie=%s", val);
+	} else {
+		/* 保留原始大小写头名 */
+		snprintf(opt, sizeof(opt), ":http-header=%.*s: %s", (int)klen, line, val);
+	}
+	p_media_add_option(media, opt);
+}
+
+static int play_at_internal(const char *mrl, int64_t start_ms, const char *const *header_lines,
+                            int n, int remember) {
 	if (!g_mp || !g_inst || !mrl)
 		return -1;
+	(void)start_ms; /* seek 不再走重建；保留参数以免改动调用方 */
 	p_stop(g_mp);
 	g_frame.dirty = 0;
 	g_buffer_pct = 0.f;
@@ -678,6 +788,8 @@ int kotv_vlc_play(const char *mrl) {
 	g_speed_bps = 0;
 	g_pos_last_ms = -1;
 	g_pos_last_at_ms = 0;
+	g_force_buffer_until_ms = 0;
+	g_seek_target_ms = -1;
 	libvlc_media_t *media = p_media_new(g_inst, mrl);
 	if (!media)
 		return -2;
@@ -687,11 +799,28 @@ int kotv_vlc_play(const char *mrl) {
 	/* 单集无限循环（TV REPEAT_MODE_ONE）；极大次数近似无限 */
 	if (g_repeat_one && p_media_add_option)
 		p_media_add_option(media, ":input-repeat=999999");
+	/* 直连源常需 Referer/UA；不传头时很多 CDN 直接拒流 → 假缓冲 */
+	if (header_lines && n > 0) {
+		for (int i = 0; i < n; ++i)
+			apply_http_header_line(media, header_lines[i]);
+	}
 	p_set_media(g_mp, media);
 	p_media_release(media);
+	if (remember) {
+		save_mrl(mrl);
+		save_headers(header_lines, n);
+	}
 	if (p_play(g_mp) != 0)
 		return -3;
 	return 0;
+}
+
+int kotv_vlc_play(const char *mrl) {
+	return kotv_vlc_play_with_headers(mrl, NULL, 0);
+}
+
+int kotv_vlc_play_with_headers(const char *mrl, const char *const *header_lines, int n) {
+	return play_at_internal(mrl, 0, header_lines, n, 1);
 }
 
 int kotv_vlc_set_decode(int soft) {
@@ -718,12 +847,19 @@ int kotv_vlc_get_repeat(void) {
 }
 
 void kotv_vlc_stop(void) {
-	if (g_mp)
+	if (g_mp) {
+		if (p_set_pause)
+			p_set_pause(g_mp, 1);
 		p_stop(g_mp);
+	}
 	g_frame.dirty = 0;
 	g_buffer_at_ms = 0;
 	g_speed_last_bytes = -1;
 	g_speed_bps = 0;
+	g_force_buffer_until_ms = 0;
+	g_seek_target_ms = -1;
+	g_mrl[0] = '\0';
+	g_hdr_n = 0;
 }
 
 void kotv_vlc_pause(int do_pause) {
@@ -749,8 +885,20 @@ int kotv_vlc_ended(void) {
 }
 
 void kotv_vlc_set_time(int64_t ms) {
-	if (g_mp)
-		p_set_time(g_mp, ms);
+	if (ms < 0)
+		ms = 0;
+	g_seek_target_ms = ms;
+	g_pos_last_ms = ms;
+	g_pos_last_at_ms = 0;
+	g_force_buffer_until_ms = kotv_now_ms() + 20000;
+	g_buffer_pct = 0.f;
+	g_buffer_at_ms = kotv_now_ms();
+	g_frame.dirty = 0;
+
+	if (!g_mp || !p_set_time)
+		return;
+	/* 原地快速 seek（勿 stop/重建：会把进度打回 0 再跳，体验极差） */
+	p_set_time(g_mp, ms);
 }
 
 int64_t kotv_vlc_get_time(void) {
@@ -798,10 +946,20 @@ int64_t kotv_vlc_get_buffered(void) {
 	return end > len ? len : end;
 }
 
-/* 缓冲中 = libvlc_Buffering(2)，或「有新鲜的 <100% cache 事件 且 进度不再推进」。
- * 只看 cache 事件会误报：正常播放时 libvlc 也会发预读事件（旧实现的假缓冲来源）。 */
+/* 缓冲中 =
+ * - libvlc Opening(1) / Buffering(2)
+ * - 刚 seek 尚未恢复出画
+ * - Playing 但进度卡住 ≥700ms
+ */
 int kotv_vlc_is_buffering(void) {
 	if (!g_mp || !p_get_state)
+		return 0;
+
+	int state = p_get_state(g_mp);
+	if (state == 1 || state == 2) /* Opening / Buffering */
+		return 1;
+	/* 暂停/停止/结束：进度不涨不算缓冲 */
+	if (state != 3)
 		return 0;
 
 	int64_t now = kotv_now_ms();
@@ -810,13 +968,26 @@ int kotv_vlc_is_buffering(void) {
 		g_pos_last_ms = t;
 		g_pos_last_at_ms = now;
 	}
-	int stalled = (g_pos_last_at_ms <= 0) || (now - g_pos_last_at_ms) >= 700;
 
-	if (p_get_state(g_mp) == 2)
+	if (g_force_buffer_until_ms > 0) {
+		if (now >= g_force_buffer_until_ms) {
+			g_force_buffer_until_ms = 0;
+		} else {
+			/* 时钟已离开 seek 点并持续推进 → 恢复播放 */
+			int64_t delta = t - g_seek_target_ms;
+			if (delta < 0)
+				delta = -delta;
+			if (g_pos_last_at_ms > 0 && (now - g_pos_last_at_ms) < 700 && delta >= 400) {
+				g_force_buffer_until_ms = 0;
+			} else {
+				return 1;
+			}
+		}
+	}
+
+	if (g_pos_last_at_ms <= 0)
 		return 1;
-	if (!buffer_event_fresh() || g_buffer_pct >= 99.5f)
-		return 0;
-	return stalled ? 1 : 0;
+	return (now - g_pos_last_at_ms) >= 700 ? 1 : 0;
 }
 
 /* 下载速度（字节/秒）。

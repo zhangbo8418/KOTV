@@ -1,5 +1,6 @@
 import '../api/kotv_api.dart';
 import '../api/kotv_client_id.dart';
+import '../player/kotv_traffic.dart';
 
 /// Web：不拉起本机进程，只探测 / 会话离开。
 class EngineLauncher {
@@ -12,6 +13,7 @@ class EngineLauncher {
   KotvApi client() {
     _api ??= KotvApi(baseUrl: baseUrl);
     _api!.baseUrl = baseUrl;
+    KotvTraffic.engineBaseUrl = baseUrl;
     return _api!;
   }
 
@@ -20,6 +22,7 @@ class EngineLauncher {
     final origin = Uri.base.origin;
     baseUrl = (origin.isNotEmpty && origin != 'null') ? origin : 'http://127.0.0.1:9978';
     _api?.baseUrl = baseUrl;
+    KotvTraffic.engineBaseUrl = baseUrl;
   }
 
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {

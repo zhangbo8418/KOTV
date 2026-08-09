@@ -92,7 +92,27 @@ void KotvVlcPlugin::HandleMethodCall(
   }
   if (method == "play") {
     std::string err;
-    if (!Play(arg_string("url"), &err)) {
+    std::vector<std::string> headers;
+    if (args) {
+      auto it = args->find(flutter::EncodableValue("headers"));
+      if (it != args->end()) {
+        if (const auto* hm = std::get_if<flutter::EncodableMap>(&it->second)) {
+          for (const auto& kv : *hm) {
+            const auto* k = std::get_if<std::string>(&kv.first);
+            if (!k || k->empty()) continue;
+            std::string v;
+            if (const auto* s = std::get_if<std::string>(&kv.second)) {
+              v = *s;
+            } else {
+              continue;
+            }
+            if (v.empty()) continue;
+            headers.push_back(*k + ": " + v);
+          }
+        }
+      }
+    }
+    if (!Play(arg_string("url"), headers, &err)) {
       result->Error("play", err);
       return;
     }
@@ -124,7 +144,8 @@ void KotvVlcPlugin::HandleMethodCall(
     return;
   }
   if (method == "seek") {
-    kotv_vlc_set_time(arg_int("ms"));
+    const int64_t ms = arg_int("ms");
+    std::thread([ms]() { kotv_vlc_set_time(ms); }).detach();
     result->Success();
     return;
   }
@@ -243,6 +264,12 @@ void KotvVlcPlugin::HandleMethodCall(
     result->Success();
     return;
   }
+  if (method == "shutdown") {
+    /* 关进程前同步卸掉 libvlc（Win7 exit 前必须，否则声音卡系统） */
+    DisposePlayer();
+    result->Success();
+    return;
+  }
   result->NotImplemented();
 }
 
@@ -267,12 +294,21 @@ bool KotvVlcPlugin::Load(const std::string& lib_dir,
   return true;
 }
 
-bool KotvVlcPlugin::Play(const std::string& url, std::string* err) {
+bool KotvVlcPlugin::Play(const std::string& url,
+                         const std::vector<std::string>& headers,
+                         std::string* err) {
   if (!ready_) {
     if (err) *err = "libvlc not loaded";
     return false;
   }
-  const int rc = kotv_vlc_play(url.c_str());
+  std::vector<const char*> lines;
+  lines.reserve(headers.size());
+  for (const auto& h : headers) {
+    lines.push_back(h.c_str());
+  }
+  const int rc = kotv_vlc_play_with_headers(
+      url.c_str(), lines.empty() ? nullptr : lines.data(),
+      static_cast<int>(lines.size()));
   if (rc != 0) {
     if (err) *err = "vlc play failed (" + std::to_string(rc) + ")";
     return false;
@@ -289,6 +325,7 @@ void KotvVlcPlugin::Stop() {
 void KotvVlcPlugin::DisposePlayer() {
   StopPump();
   kotv_vlc_stop();
+  kotv_vlc_unload();
   ready_ = false;
   if (texture_id_ >= 0 && textures_) {
     textures_->UnregisterTexture(texture_id_);

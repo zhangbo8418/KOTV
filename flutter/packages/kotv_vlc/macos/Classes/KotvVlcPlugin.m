@@ -49,7 +49,8 @@
       return;
     }
     NSError *err = nil;
-    if ([self.engine playURL:args[@"url"] ?: @"" error:&err]) {
+    NSDictionary *headers = [args[@"headers"] isKindOfClass:[NSDictionary class]] ? args[@"headers"] : @{};
+    if ([self.engine playURL:args[@"url"] ?: @"" headers:headers error:&err]) {
       result(nil);
     } else {
       result([FlutterError errorWithCode:@"play" message:err.localizedDescription details:nil]);
@@ -171,6 +172,13 @@
   if ([call.method isEqualToString:@"dispose"]) {
     [self.engine dispose];
     self.engine = nil;
+    result(nil);
+    return;
+  }
+  if ([call.method isEqualToString:@"shutdown"]) {
+    [self.engine dispose];
+    self.engine = nil;
+    kotv_vlc_unload();
     result(nil);
     return;
   }

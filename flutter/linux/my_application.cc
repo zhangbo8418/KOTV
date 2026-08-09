@@ -5,12 +5,69 @@
 #include <gdk/gdkx.h>
 #endif
 
+#include <stdio.h>
+#include <string.h>
+
 #include "flutter/generated_plugin_registrant.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* host_channel;
 };
+
+static gint64 kotv_interface_rx_bytes() {
+  FILE* f = fopen("/proc/net/dev", "r");
+  if (f == nullptr) {
+    return -1;
+  }
+  char line[512];
+  // skip headers
+  if (fgets(line, sizeof(line), f) == nullptr ||
+      fgets(line, sizeof(line), f) == nullptr) {
+    fclose(f);
+    return -1;
+  }
+  guint64 total = 0;
+  while (fgets(line, sizeof(line), f) != nullptr) {
+    char* colon = strchr(line, ':');
+    if (colon == nullptr) {
+      continue;
+    }
+    *colon = '\0';
+    char* name = line;
+    while (*name == ' ') {
+      ++name;
+    }
+    if (strcmp(name, "lo") == 0) {
+      continue;
+    }
+    unsigned long long rx = 0;
+    if (sscanf(colon + 1, "%llu", &rx) == 1) {
+      total += rx;
+    }
+  }
+  fclose(f);
+  return static_cast<gint64>(total);
+}
+
+static void kotv_host_method_call(FlMethodChannel* /*channel*/,
+                                  FlMethodCall* method_call,
+                                  gpointer /*user_data*/) {
+  const gchar* method = fl_method_call_get_name(method_call);
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (strcmp(method, "getInterfaceRxBytes") == 0) {
+    g_autoptr(FlValue) result =
+        fl_value_new_int(kotv_interface_rx_bytes());
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+  g_autoptr(GError) error = nullptr;
+  if (!fl_method_call_respond(method_call, response, &error)) {
+    g_warning("Failed to send method response: %s", error->message);
+  }
+}
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
@@ -59,6 +116,13 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->host_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)), "kotv_host",
+      FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->host_channel, kotv_host_method_call, self, nullptr);
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
@@ -103,6 +167,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->host_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
@@ -114,7 +179,9 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
 }
 
-static void my_application_init(MyApplication* self) {}
+static void my_application_init(MyApplication* self) {
+  self->host_channel = nullptr;
+}
 
 MyApplication* my_application_new() {
   return MY_APPLICATION(g_object_new(my_application_get_type(),

@@ -133,6 +133,7 @@ static void start_pump(KotvVlcPlugin* self) {
 static void dispose_player(KotvVlcPlugin* self) {
   stop_pump(self);
   kotv_vlc_stop();
+  kotv_vlc_unload();
   self->ready = FALSE;
   if (self->textures && self->texture) {
     fl_texture_registrar_unregister_texture(self->textures, self->texture);
@@ -196,7 +197,34 @@ static void method_call_cb(FlMethodChannel*, FlMethodCall* method_call,
     } else {
       FlValue* u = fl_value_lookup_string(args, "url");
       const gchar* url = u ? fl_value_get_string(u) : "";
-      int rc = kotv_vlc_play(url ? url : "");
+      FlValue* headers_v = fl_value_lookup_string(args, "headers");
+      GPtrArray* lines = g_ptr_array_new_with_free_func(g_free);
+      if (headers_v && fl_value_get_type(headers_v) == FL_VALUE_TYPE_MAP) {
+        size_t n = fl_value_get_length(headers_v);
+        for (size_t i = 0; i < n; ++i) {
+          FlValue* k = fl_value_get_map_key(headers_v, i);
+          FlValue* v = fl_value_get_map_value(headers_v, i);
+          if (!k || !v || fl_value_get_type(k) != FL_VALUE_TYPE_STRING ||
+              fl_value_get_type(v) != FL_VALUE_TYPE_STRING) {
+            continue;
+          }
+          const gchar* ks = fl_value_get_string(k);
+          const gchar* vs = fl_value_get_string(v);
+          if (!ks || !ks[0] || !vs || !vs[0]) continue;
+          g_ptr_array_add(lines, g_strdup_printf("%s: %s", ks, vs));
+        }
+      }
+      const char** c_lines = nullptr;
+      int n_lines = (int)lines->len;
+      if (n_lines > 0) {
+        c_lines = (const char**)g_malloc_n((size_t)n_lines, sizeof(char*));
+        for (int i = 0; i < n_lines; ++i) {
+          c_lines[i] = (const char*)g_ptr_array_index(lines, i);
+        }
+      }
+      int rc = kotv_vlc_play_with_headers(url ? url : "", c_lines, n_lines);
+      g_free(c_lines);
+      g_ptr_array_unref(lines);
       if (rc != 0) {
         response = FL_METHOD_RESPONSE(fl_method_error_response_new(
             "play", g_strdup_printf("vlc play failed (%d)", rc), nullptr));
@@ -223,7 +251,8 @@ static void method_call_cb(FlMethodChannel*, FlMethodCall* method_call,
     response = respond_map(map);
   } else if (strcmp(method, "seek") == 0) {
     FlValue* v = fl_value_lookup_string(args, "ms");
-    kotv_vlc_set_time(v ? fl_value_get_int(v) : 0);
+    gint64 ms = v ? fl_value_get_int(v) : 0;
+    std::thread([ms]() { kotv_vlc_set_time(ms); }).detach();
     response = respond_ok();
   } else if (strcmp(method, "volume") == 0) {
     FlValue* v = fl_value_lookup_string(args, "value");
@@ -329,6 +358,9 @@ static void method_call_cb(FlMethodChannel*, FlMethodCall* method_call,
                              fl_value_new_int(self->texture_id));
     response = respond_map(map);
   } else if (strcmp(method, "dispose") == 0) {
+    dispose_player(self);
+    response = respond_ok();
+  } else if (strcmp(method, "shutdown") == 0) {
     dispose_player(self);
     response = respond_ok();
   } else {

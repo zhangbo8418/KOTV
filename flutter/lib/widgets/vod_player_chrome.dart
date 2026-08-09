@@ -8,6 +8,7 @@ import '../player/kotv_platform.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
+import 'seek_slider.dart';
 
 const _speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
@@ -145,14 +146,11 @@ class VodInlineControls extends StatelessWidget {
                         ),
                       ],
                     ),
-                    SliderTheme(
-                      data: _sliderTheme(context),
-                      child: Slider(
-                        value: pos.inMilliseconds.clamp(0, total.toInt()).toDouble(),
-                        secondaryTrackValue: _sliderBuffered(player, total),
-                        max: total,
-                        onChanged: (v) => player.seek(Duration(milliseconds: v.round())),
-                      ),
+                    KotvSeekSlider(
+                      player: player,
+                      maxMs: total,
+                      secondaryMs: _sliderBuffered(player, total),
+                      theme: _sliderTheme(context),
                     ),
                   ],
                 ),
@@ -1334,18 +1332,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               child: Text(fmtClockHms(pos), style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13)),
                             ),
                             Expanded(
-                              child: SliderTheme(
-                                data: _sliderTheme(context),
-                                child: Slider(
-                                  value: pos.inMilliseconds.clamp(0, total.toInt()).toDouble(),
-                                  secondaryTrackValue: _sliderBuffered(widget.player, total),
-                                  max: total,
-                                  onChangeStart: (_) => widget.onBump(),
-                                  onChanged: (v) {
-                                    widget.player.seek(Duration(milliseconds: v.round()));
-                                    widget.onBump();
-                                  },
-                                ),
+                              child: KotvSeekSlider(
+                                player: widget.player,
+                                maxMs: total,
+                                secondaryMs: _sliderBuffered(widget.player, total),
+                                theme: _sliderTheme(context),
+                                onInteraction: widget.onBump,
                               ),
                             ),
                             SizedBox(

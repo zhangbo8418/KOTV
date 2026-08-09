@@ -41,6 +41,7 @@
   self.timer = nil;
   kotv_vlc_set_hard_win(0);
   kotv_vlc_stop();
+  kotv_vlc_unload();
   if (self.pixelBuffer) {
     CVPixelBufferRelease(self.pixelBuffer);
     self.pixelBuffer = nil;
@@ -203,7 +204,9 @@
   return self.pixelBuffer;
 }
 
-- (BOOL)playURL:(NSString *)url error:(NSError **)error {
+- (BOOL)playURL:(NSString *)url
+        headers:(NSDictionary<NSString *, NSString *> *)headers
+          error:(NSError **)error {
   if (!self.ready) {
     if (error) {
       *error = [NSError errorWithDomain:@"kotv_vlc" code:-1
@@ -212,12 +215,25 @@
     return NO;
   }
   kotv_vlc_set_hard_win(0); // 强制回调出画
-  FILE *f = fopen("/tmp/kotv_vlc_frames.log", "a");
-  if (f) {
-    fprintf(f, "play url=%s hard=%d\n", url.UTF8String, kotv_vlc_hard_active());
-    fclose(f);
+  NSMutableArray<NSString *> *lines = [NSMutableArray array];
+  [headers enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *val, BOOL *stop) {
+    if (key.length == 0 || val.length == 0) return;
+    [lines addObject:[NSString stringWithFormat:@"%@: %@", key, val]];
+  }];
+  const char **c_lines = NULL;
+  int n = (int)lines.count;
+  if (n > 0) {
+    c_lines = (const char **)calloc((size_t)n, sizeof(char *));
+    if (c_lines) {
+      for (int i = 0; i < n; ++i) {
+        c_lines[i] = lines[(NSUInteger)i].UTF8String;
+      }
+    } else {
+      n = 0;
+    }
   }
-  int rc = kotv_vlc_play(url.UTF8String);
+  int rc = kotv_vlc_play_with_headers(url.UTF8String, c_lines, n);
+  free(c_lines);
   if (rc != 0) {
     if (error) {
       *error = [NSError errorWithDomain:@"kotv_vlc" code:rc userInfo:@{
@@ -233,7 +249,12 @@
 - (void)stop { kotv_vlc_stop(); }
 - (void)setPaused:(BOOL)paused { kotv_vlc_pause(paused ? 1 : 0); }
 - (BOOL)isPlaying { return kotv_vlc_is_playing() != 0; }
-- (void)seekMs:(int64_t)ms { kotv_vlc_set_time(ms); }
+- (void)seekMs:(int64_t)ms {
+  // 勿堵 Flutter platform 线程：HLS 重建 seek 可能数秒。
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    kotv_vlc_set_time(ms);
+  });
+}
 - (int64_t)positionMs { return kotv_vlc_get_time(); }
 - (int64_t)durationMs { return kotv_vlc_get_length(); }
 - (void)setVolume:(int)volume { kotv_vlc_set_volume(volume); }

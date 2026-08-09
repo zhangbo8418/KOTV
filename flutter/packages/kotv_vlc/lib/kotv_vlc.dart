@@ -42,9 +42,12 @@ class KotvVlc {
     _loaded = true;
   }
 
-  Future<void> play(String url) async {
+  Future<void> play(String url, {Map<String, String>? headers}) async {
     if (!_loaded) throw StateError('kotv_vlc not loaded');
-    await _ch.invokeMethod('play', {'url': url});
+    await _ch.invokeMethod('play', {
+      'url': url,
+      if (headers != null && headers.isNotEmpty) 'headers': headers,
+    });
   }
 
   Future<void> stop() => _ch.invokeMethod('stop');
@@ -83,5 +86,17 @@ class KotvVlc {
     } catch (_) {}
     textureId = null;
     _loaded = false;
+  }
+
+  /// 进程退出前同步卸掉内置 VLC（Win7 上直接 exit 易残留系统声音）。
+  static Future<void> shutdownAll() async {
+    if (!isSupported) return;
+    try {
+      await _ch.invokeMethod('shutdown').timeout(const Duration(milliseconds: 2000));
+    } catch (_) {
+      try {
+        await _ch.invokeMethod('dispose').timeout(const Duration(milliseconds: 800));
+      } catch (_) {}
+    }
   }
 }

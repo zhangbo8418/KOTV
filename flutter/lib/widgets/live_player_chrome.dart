@@ -5,6 +5,7 @@ import '../player/kotv_playback.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
+import 'seek_slider.dart';
 import 'vod_player_chrome.dart';
 
 /// 直播底栏控件：播放/暂停、投屏、迷你、全屏、播放器、软硬解、音量；（回看时含进度）。
@@ -115,8 +116,17 @@ class LiveCatchupChrome extends StatelessWidget {
                     ),
                   ],
                 ),
-                SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
+                KotvSeekSlider(
+                  player: player,
+                  maxMs: total,
+                  secondaryMs: () {
+                    if (total <= 0) return 0.0;
+                    final p = pos.inMilliseconds.toDouble().clamp(0.0, total);
+                    final b = player.buffered.inMilliseconds.toDouble().clamp(0.0, total);
+                    return b < p ? p : b;
+                  }(),
+                  enabled: dur.inMilliseconds > 0,
+                  theme: SliderTheme.of(context).copyWith(
                     trackHeight: land ? 2 : 3,
                     thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
                     overlayShape: RoundSliderOverlayShape(overlayRadius: land ? 10 : 12),
@@ -124,19 +134,6 @@ class LiveCatchupChrome extends StatelessWidget {
                     inactiveTrackColor: Colors.white24,
                     secondaryActiveTrackColor: Colors.white38,
                     thumbColor: Colors.white,
-                  ),
-                  child: Slider(
-                    value: pos.inMilliseconds.clamp(0, total.toInt()).toDouble(),
-                    secondaryTrackValue: () {
-                      if (total <= 0) return 0.0;
-                      final p = pos.inMilliseconds.toDouble().clamp(0.0, total);
-                      final b = player.buffered.inMilliseconds.toDouble().clamp(0.0, total);
-                      return b < p ? p : b;
-                    }(),
-                    max: total,
-                    onChanged: dur.inMilliseconds <= 0
-                        ? null
-                        : (v) => player.seek(Duration(milliseconds: v.round())),
                   ),
                 ),
               ],

@@ -3,11 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../player/kotv_playback.dart';
+import '../player/kotv_traffic.dart';
 
 /// 缓冲中在画面中央显示转圈 + 实时网速。
 ///
-/// 用本地定时器每 300ms 重读 [KotvPlayback.networkSpeedBps]，不依赖各引擎
-/// 是否刚好在那一刻 notify（VLC/Exo 有节流，ijk 异步测速会晚一拍）。
+/// 对齐 TV：浮层自己用 [KotvTraffic] 测速（引擎累计 / UID / 桌面网卡），
+/// 与各播放器内部计数解耦；播放器 [KotvPlayback.networkSpeedBps] 仅作最后兜底。
 class KotvBufferingOverlay extends StatefulWidget {
   const KotvBufferingOverlay({
     super.key,
@@ -28,6 +29,7 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
   Timer? _tick;
   int _speedBps = 0;
   bool _visible = false;
+  bool _trafficArmed = false;
 
   @override
   void initState() {
@@ -52,6 +54,10 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
   void dispose() {
     _tick?.cancel();
     widget.player.removeListener(_onPlayer);
+    if (_trafficArmed) {
+      KotvTraffic.reset();
+      _trafficArmed = false;
+    }
     super.dispose();
   }
 
@@ -59,35 +65,49 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
 
   void _sync({required bool fromPlayer}) {
     final want = widget.force || widget.player.buffering;
-    final speed = widget.player.networkSpeedBps;
-    if (want == _visible && (!want || speed == _speedBps) && fromPlayer) {
+    if (want == _visible && fromPlayer) {
       _ensureTicker(want);
       return;
     }
-    setState(() {
-      _visible = want;
-      _speedBps = speed < 0 ? 0 : speed;
-    });
+    setState(() => _visible = want);
     _ensureTicker(want);
   }
 
   void _ensureTicker(bool on) {
     if (on) {
-      _tick ??= Timer.periodic(const Duration(milliseconds: 300), (_) {
+      if (!_trafficArmed) {
+        // 对齐 TV showProgress：出现时 reset，再按秒差分。
+        KotvTraffic.reset();
+        _trafficArmed = true;
+        _speedBps = 0;
+        unawaited(_pollTraffic());
+      }
+      _tick ??= Timer.periodic(const Duration(milliseconds: 1000), (_) {
         if (!mounted) return;
-        final speed = widget.player.networkSpeedBps;
         final want = widget.force || widget.player.buffering;
         if (!want) {
           _sync(fromPlayer: true);
           return;
         }
-        if (speed != _speedBps) {
-          setState(() => _speedBps = speed < 0 ? 0 : speed);
-        }
+        unawaited(_pollTraffic());
       });
     } else {
       _tick?.cancel();
       _tick = null;
+      if (_trafficArmed) {
+        KotvTraffic.reset();
+        _trafficArmed = false;
+      }
+    }
+  }
+
+  Future<void> _pollTraffic() async {
+    final v = await KotvTraffic.sampleBps(
+      playerFallbackBps: widget.player.networkSpeedBps,
+    );
+    if (!mounted) return;
+    if (v != _speedBps) {
+      setState(() => _speedBps = v);
     }
   }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/remote"
 )
 
@@ -81,6 +82,7 @@ func (s *Server) content() ContentAPI {
 func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	wrap := s.withAuth
 	mux.HandleFunc("/api/v1/health", wrap(s.handleAPIv1Health))
+	mux.HandleFunc("/api/v1/net", wrap(s.handleAPIv1Net))
 	mux.HandleFunc("/api/v1/auth/status", wrap(s.handleAuthStatus))
 	mux.HandleFunc("/api/v1/auth/login", wrap(s.handleAuthLogin))
 	mux.HandleFunc("/api/v1/auth/register", wrap(s.handleAuthRegister))
@@ -154,6 +156,22 @@ func (s *Server) handleAPIv1Health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.APIHealth())
+}
+
+// handleAPIv1Net 缓冲浮层测速：代理累计下行字节（与播放器解耦，对齐 TV Traffic 思路）。
+func (s *Server) handleAPIv1Net(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"rxBytes": playproxy.RxBytes(),
+	})
 }
 
 func (s *Server) handleAPIv1Config(w http.ResponseWriter, r *http.Request) {

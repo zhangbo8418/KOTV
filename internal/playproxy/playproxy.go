@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -26,7 +27,12 @@ var (
 	mu      sync.Mutex
 	entries = map[string]entry{}
 	portFn  func() int
+	// rxBytes 代理从远端拉到的累计字节（供缓冲浮层测速，与播放器解耦）。
+	rxBytes atomic.Uint64
 )
+
+// RxBytes 返回代理累计下行字节。
+func RxBytes() uint64 { return rxBytes.Load() }
 
 // SetPortFunc 注入本地服务端口读取函数。
 func SetPortFunc(fn func() int) { portFn = fn }
@@ -176,7 +182,19 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(writeOnly{w}, resp.Body)
+	_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
+}
+
+type countingWriter struct {
+	w io.Writer
+}
+
+func (c countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	if n > 0 {
+		rxBytes.Add(uint64(n))
+	}
+	return n, err
 }
 
 func isPlaylistURL(raw string) bool {

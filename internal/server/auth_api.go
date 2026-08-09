@@ -39,6 +39,7 @@ func authRequiredFor(r *http.Request) bool {
 func publicAuthPath(path string) bool {
 	switch path {
 	case "/api/v1/health",
+		"/api/v1/net",
 		"/api/v1/auth/login",
 		"/api/v1/auth/register",
 		"/api/v1/auth/status":

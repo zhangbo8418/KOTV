@@ -2,7 +2,34 @@
 
 #include <optional>
 
+#include <flutter/standard_method_codec.h>
+#include <iphlpapi.h>
+#include <netioapi.h>
+
 #include "flutter/generated_plugin_registrant.h"
+
+#pragma comment(lib, "iphlpapi.lib")
+
+namespace {
+
+int64_t InterfaceRxBytes() {
+  PMIB_IF_TABLE2 table = nullptr;
+  if (GetIfTable2(&table) != NO_ERROR || table == nullptr) {
+    return -1;
+  }
+  uint64_t total = 0;
+  for (ULONG i = 0; i < table->NumEntries; ++i) {
+    const MIB_IF_ROW2& row = table->Table[i];
+    if (row.Type == IF_TYPE_SOFTWARE_LOOPBACK) {
+      continue;
+    }
+    total += row.InOctets;
+  }
+  FreeMibTable(table);
+  return static_cast<int64_t>(total);
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +52,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  RegisterHostChannel();
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -39,7 +67,23 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
+void FlutterWindow::RegisterHostChannel() {
+  host_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "kotv_host",
+      &flutter::StandardMethodCodec::GetInstance());
+  host_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == "getInterfaceRxBytes") {
+          result->Success(flutter::EncodableValue(InterfaceRxBytes()));
+        } else {
+          result->NotImplemented();
+        }
+      });
+}
+
 void FlutterWindow::OnDestroy() {
+  host_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

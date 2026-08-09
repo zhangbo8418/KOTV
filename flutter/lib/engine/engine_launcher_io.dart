@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../api/kotv_api.dart';
 import '../api/kotv_client_id.dart';
 import '../api/kotv_engine_url.dart';
+import '../player/kotv_traffic.dart';
 
 /// 探测并拉起本机 Go 引擎；随 UI 进程生命周期托管（窗口关闭即退出）。
 class EngineLauncher {
@@ -28,14 +29,20 @@ class EngineLauncher {
   KotvApi client() {
     _api ??= KotvApi(baseUrl: baseUrl);
     _api!.baseUrl = baseUrl;
+    KotvTraffic.engineBaseUrl = baseUrl;
     return _api!;
+  }
+
+  void _syncBaseUrl(String url) {
+    baseUrl = url;
+    _api?.baseUrl = baseUrl;
+    KotvTraffic.engineBaseUrl = baseUrl;
   }
 
   /// 切换引擎地址。远端地址不会再被 ensureReady 静默改回本机。
   void applyBaseUrl(String url) {
     final n = kotvNormalizeEngineBaseUrl(url);
-    baseUrl = n.isEmpty ? 'http://127.0.0.1:9978' : n;
-    _api?.baseUrl = baseUrl;
+    _syncBaseUrl(n.isEmpty ? 'http://127.0.0.1:9978' : n);
   }
 
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {
@@ -304,7 +311,7 @@ class EngineLauncher {
 
       // 1) 端口上已有健康引擎：直接复用，绝不要 pkill（多窗口/重试竞态根因）。
       if (await _ping('http://127.0.0.1:9978')) {
-        baseUrl = 'http://127.0.0.1:9978';
+        _syncBaseUrl('http://127.0.0.1:9978');
         debugPrint('engine reuse: already healthy on 9978');
         return;
       }
@@ -323,7 +330,7 @@ class EngineLauncher {
 
       // 清完后再探一次，避免和另一 UI 实例撞车。
       if (await _ping('http://127.0.0.1:9978')) {
-        baseUrl = 'http://127.0.0.1:9978';
+        _syncBaseUrl('http://127.0.0.1:9978');
         debugPrint('engine reuse: healthy after stray cleanup');
         return;
       }
@@ -335,7 +342,7 @@ class EngineLauncher {
         await _startAndroidEngineService();
         for (var i = 0; i < 40; i++) {
           if (await _ping('http://127.0.0.1:9978')) {
-            baseUrl = 'http://127.0.0.1:9978';
+            _syncBaseUrl('http://127.0.0.1:9978');
             debugPrint('engine android: service healthy on 9978');
             return;
           }
