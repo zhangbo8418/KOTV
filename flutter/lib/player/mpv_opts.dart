@@ -12,9 +12,9 @@ import 'kotv_platform.dart';
 /// ## 平台能力
 /// | 选项 | Android | 桌面 (PC) |
 /// |------|---------|-----------|
-/// | hwdec | ✅ mediacodec-copy / auto-safe / no | ✅ auto / dxva2-copy(Win7) / no |
+/// | hwdec | ✅ mediacodec-copy / auto-safe / no | ✅ auto / no（系统硬解） |
 /// | mpv.conf | ✅ 事后 setProperty | ✅ 同上 |
-/// | Vulkan | ⚠️ VC 附着后覆盖 EGL→androidvk（视机型） | ❌ Texture 强制 vo=libmpv，无法 Vulkan |
+/// | Vulkan | ❌ media_kit EGL 路径起播后切 androidvk 会 abort | ❌ Texture 强制 vo=libmpv |
 /// | gpu-next | ✅ vo=gpu-next | ❌ Flutter Texture 必须 vo=libmpv，开启无效 |
 class KotvMpvOpts {
   const KotvMpvOpts({
@@ -66,9 +66,7 @@ class KotvMpvOpts {
       // 硬解优先 copy；auto 用 auto-safe 让 libmpv 自己退避。
       return hard ? 'mediacodec-copy' : 'auto-safe';
     }
-    // Win7：裸 auto 易摸到 d3d11va → 黑屏/卡 UI；钉 dxva2-copy。
-    if (kotvIsWindows7()) return 'dxva2-copy';
-    // 其它桌面：auto 让 libmpv 选 d3d11va / videotoolbox / vaapi 等
+    // 桌面：auto 让 libmpv 选 d3d11va / videotoolbox / vaapi 等
     return 'auto';
   }
 
@@ -91,69 +89,20 @@ class KotvMpvOpts {
 
   /// 探测能否启用 Vulkan（写入设置前）。
   ///
-  /// 桌面：media_kit 出画强制 `vo=libmpv`（ANGLE/D3D/Metal Texture），**无法**走 mpv Vulkan VO。
-  /// Android：`vo=gpu` + Surface 嵌入，可在 VC 附着后尝试 `androidvk`（视 GPU/驱动）。
+  /// 桌面 Texture / Android media_kit EGL Surface 路径均无法在起播后安全切 androidvk。
   static Future<(bool ok, String detail)> probeVulkan() async {
     if (kIsWeb) return (false, '当前平台不支持');
     if (!kotvIsAndroid()) {
       return (
         false,
-        '桌面内置 MPV 通过 Flutter Texture 出画（vo=libmpv / ANGLE），无法切换 Vulkan；仅 Android 可尝试',
+        '桌面内置 MPV 通过 Flutter Texture 出画（vo=libmpv / ANGLE），无法切换 Vulkan',
       );
     }
-
-    Player? player;
-    try {
-      MediaKit.ensureInitialized();
-      player = Player();
-      final platform = player.platform;
-      if (platform == null) return (false, 'MPV 后端不可用');
-
-      await platform.waitForPlayerInitialization.timeout(const Duration(seconds: 8));
-
-      Future<void> set(String k, String v) async {
-        await (platform as dynamic).setProperty(k, v);
-      }
-
-      Future<String> get(String k) async {
-        try {
-          return '${await (platform as dynamic).getProperty(k)}'.trim();
-        } catch (_) {
-          return '';
-        }
-      }
-
-      // 无 Surface 时无法完整初始化 androidvk；能写入属性即视为本机 libmpv 认 Vulkan。
-      await set('vo', 'gpu');
-      await set('gpu-api', 'vulkan');
-      await set('gpu-context', 'androidvk');
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-
-      final api = (await get('gpu-api')).toLowerCase();
-      final ctx = (await get('gpu-context')).toLowerCase();
-      if (api.contains('vulkan') || ctx.contains('androidvk') || ctx.contains('vulkan')) {
-        final detail = [
-          if (api.isNotEmpty) 'gpu-api=$api',
-          if (ctx.isNotEmpty) 'context=$ctx',
-        ].join(' · ');
-        return (true, detail.isEmpty ? 'libmpv 接受 Vulkan 属性' : detail);
-      }
-      // 部分 libmpv 读回为空但仍接受 set：允许开启，起播后再覆盖 EGL
-      if (api.isEmpty && ctx.isEmpty) {
-        return (true, '属性读回为空，将在起播后尝试 androidvk（若黑屏请关闭）');
-      }
-      return (false, '未生效（gpu-api=$api context=$ctx）。本机 libmpv 可能未编进 Vulkan/libplacebo');
-    } catch (e) {
-      return (false, '$e');
-    } finally {
-      try {
-        await player?.stop();
-      } catch (_) {}
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      try {
-        await player?.dispose();
-      } catch (_) {}
-    }
+    // 无 Surface 时 setProperty 可能「看起来成功」，但 VC 附着后切 androidvk 会进程 abort。
+    return (
+      false,
+      '当前内置 MPV 由 media_kit 绑定 EGL Surface，起播后无法安全切换 Vulkan（会闪退）',
+    );
   }
 
   /// 在 VideoController 已附着之后调用：先缓冲预算，再（Android）覆盖 media_kit 写死的 EGL。
@@ -163,14 +112,6 @@ class KotvMpvOpts {
       if (platform == null) return !vulkan;
       Future<void> set(String k, String v) async {
         await (platform as dynamic).setProperty(k, v);
-      }
-
-      Future<String> get(String k) async {
-        try {
-          return '${await (platform as dynamic).getProperty(k)}'.trim();
-        } catch (_) {
-          return '';
-        }
       }
 
       // 内存水位：demuxer-max-bytes 为前向上限；播过的包释放后继续补满。
@@ -189,31 +130,8 @@ class KotvMpvOpts {
         await set('framedrop', 'vo');
       } catch (_) {}
 
-      // Vulkan 仅在开启时覆盖 media_kit 写死的 EGL；关闭时不要再改 gpu-api/vo，
-      // 否则与 AndroidVideoController 并行 setProperty 易原生闪退。
-      var vulkanOk = !vulkan;
-      if (kotvIsAndroid() && vulkan) {
-        final vo = gpuNext ? 'gpu-next' : 'gpu';
-        try {
-          await set('vo', 'null');
-          await set('gpu-api', 'vulkan');
-          await set('gpu-context', 'androidvk');
-          await set('opengl-es', 'no');
-          await set('vo', vo);
-          await Future<void>.delayed(const Duration(milliseconds: 80));
-          final api = (await get('gpu-api')).toLowerCase();
-          final ctx = (await get('gpu-context')).toLowerCase();
-          vulkanOk = api.contains('vulkan') ||
-              ctx.contains('androidvk') ||
-              ctx.contains('vulkan') ||
-              (api.isEmpty && ctx.isEmpty);
-        } catch (_) {
-          vulkanOk = false;
-        }
-      } else if (vulkan) {
-        // 桌面 Texture 路径无法真正启用；属性写了也不走 Vulkan VO。
-        vulkanOk = false;
-      }
+      // Vulkan：media_kit 已绑 EGL；中途切 androidvk 会 abort。设置开启也不在此切换。
+      final vulkanOk = !vulkan;
 
       for (final e in parseConfLines(conf)) {
         await set(e.$1, e.$2);

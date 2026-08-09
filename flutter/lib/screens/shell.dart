@@ -47,6 +47,9 @@ class _AppShellState extends ConsumerState<AppShell> {
   bool _handlingBack = false;
   /// Web：登录完成前不渲染主界面。
   bool _webAuthed = !kIsWeb;
+  /// 稳定 Navigator key：切 Tab 用 pushAndRemoveUntil 换根页，勿用 GlobalObjectKey(page)
+  ///（卸树再挂同一 GlobalKey 会在 activate 时 _state! 空指针 →「页面渲染出错」）。
+  final GlobalKey<NavigatorState> _shellNavKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
@@ -146,7 +149,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       return;
     }
     final page = ref.read(kotvPageProvider);
-    final nav = GlobalObjectKey<NavigatorState>(page).currentState;
+    final nav = _shellNavKey.currentState;
     if (nav != null && nav.canPop()) {
       nav.pop();
       return;
@@ -202,6 +205,23 @@ class _AppShellState extends ConsumerState<AppShell> {
     final busy = ref.watch(uiBusyProvider);
     final bottomNav = KotvLayout.useBottomNav(context);
 
+    // 切主 Tab：原地换根路由，Navigator 元素不卸树，避免 GlobalKey reactivate 崩溃。
+    ref.listen<KotvPage>(kotvPageProvider, (prev, next) {
+      if (prev == null || prev == next) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final nav = _shellNavKey.currentState;
+        if (nav == null) return;
+        nav.pushAndRemoveUntil(
+          MaterialPageRoute<void>(
+            settings: RouteSettings(name: next.name),
+            builder: (_) => _pageOf(next),
+          ),
+          (_) => false,
+        );
+      });
+    });
+
     return PopScope(
       // 根层始终拦截：禁止系统直接 finish Activity。
       // 用 onPopInvoked（非 WithResult）以兼容 Win7 / Flutter 3.19。
@@ -229,7 +249,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                   NavigatorPopHandler(
                     onPop: _onShellBack,
                     child: Navigator(
-                      key: GlobalObjectKey<NavigatorState>(page),
+                      key: _shellNavKey,
                       onGenerateRoute: (settings) {
                         return MaterialPageRoute<void>(
                           settings: settings,

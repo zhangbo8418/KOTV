@@ -758,8 +758,7 @@ class EngineVlcPlayback extends KotvPlayback {
   @override
   Duration get buffered => Duration(milliseconds: _bufferedMs);
   @override
-  bool get buffering =>
-      _vlcBuffering || (_ready && !_ended && _videoW <= 0 && (_playing || _positionMs <= 0));
+  bool get buffering => _vlcBuffering;
   @override
   int get networkSpeedBps => _speedBps;
   @override
@@ -779,6 +778,8 @@ class EngineVlcPlayback extends KotvPlayback {
   @override
   Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
     _url = url;
+    // headers 暂不传给 libvlc（78d798e 起播崩排查中撤回）。
+    (headers);
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
@@ -793,14 +794,15 @@ class EngineVlcPlayback extends KotvPlayback {
     _maxPositionMs = 0;
     _seekPinMs = null;
     _seekPinAt = null;
-    _headers = kotvNormalizePlayHeaders(headers, url: url);
+    _headers = const {};
     final libDir = KotvVlcPaths.resolveLibDir();
     if (libDir == null) throw StateError('未找到 runtime/libvlc');
     await _native.create();
     await _native.load(libDir: libDir, pluginDir: KotvVlcPaths.pluginDirFor(libDir));
     await _native.setDecodeMode(_decodeMode);
     await _native.setRepeatOne(_repeatOne);
-    await _native.play(url, headers: _headers.isEmpty ? null : _headers);
+    // PC 崩溃排查：先撤回 78d798e 起播传 headers（曾被判无效后又加回）。
+    await _native.play(url);
     _ready = true;
     _audioTracks = const [];
     _subTracks = const [];
@@ -900,7 +902,7 @@ class EngineVlcPlayback extends KotvPlayback {
       final pos = position;
       final wasPlaying = playing;
       await _native.setRepeatOne(_repeatOne);
-      await _native.play(_url, headers: _headers.isEmpty ? null : _headers);
+      await _native.play(_url);
       if (pos > Duration.zero) await seek(pos);
       if (!wasPlaying) await pause();
       unawaited(_refreshTracks());
