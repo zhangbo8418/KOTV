@@ -30,6 +30,13 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTT
 # Disable Windows macros that collide with C++ standard library functions.
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 
+# 最低目标 Win7，保证 GetIfTable2 / MIB_IF_TABLE2 等 Vista+ API 在头文件中可见。
+target_compile_definitions(${BINARY_NAME} PRIVATE
+  "WINVER=0x0601"
+  "_WIN32_WINNT=0x0601"
+  "NTDDI_VERSION=0x06010000"
+)
+
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)

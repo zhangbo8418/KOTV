@@ -1,6 +1,18 @@
 #ifndef RUNNER_WIN32_WINDOW_H_
 #define RUNNER_WIN32_WINDOW_H_
 
+// 最低 Win7：须在 windows.h 之前声明，否则 iphlpapi 的 GetIfTable2 / MIB_IF_TABLE2
+// 可能因 NTDDI 宏未达 Vista 而不导出（CI 上表现为 undeclared identifier）。
+#ifndef WINVER
+#define WINVER 0x0601
+#endif
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
+#ifndef NTDDI_VERSION
+#define NTDDI_VERSION 0x06010000
+#endif
+
 #include <windows.h>
 
 #include <functional>

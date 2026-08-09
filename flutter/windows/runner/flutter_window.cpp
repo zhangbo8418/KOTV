@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <vector>
 
 #include <flutter/standard_method_codec.h>
 #include <iphlpapi.h>
@@ -13,34 +12,21 @@
 
 namespace {
 
-// 用 GetIfTable（XP+）而非 GetIfTable2：后者依赖 Vista+ netioapi 宏，
-// 在部分 CI/SDK 组合下 PMIB_IF_TABLE2 不会声明，导致 /WX 编译失败。
-// dwInOctets 为 32 位，缓冲期差分测速足够用。
+// Win7+：GetIfTable2 提供 64 位 InOctets（缓冲差分测速更稳）。
 int64_t InterfaceRxBytes() {
-  ULONG size = 0;
-  DWORD err = GetIfTable(nullptr, &size, FALSE);
-  if (err != ERROR_INSUFFICIENT_BUFFER || size == 0) {
-    return -1;
-  }
-  std::vector<BYTE> buf(size);
-  auto* table = reinterpret_cast<MIB_IFTABLE*>(buf.data());
-  err = GetIfTable(table, &size, FALSE);
-  if (err == ERROR_INSUFFICIENT_BUFFER) {
-    buf.resize(size);
-    table = reinterpret_cast<MIB_IFTABLE*>(buf.data());
-    err = GetIfTable(table, &size, FALSE);
-  }
-  if (err != NO_ERROR) {
+  PMIB_IF_TABLE2 table = nullptr;
+  if (GetIfTable2(&table) != NO_ERROR || table == nullptr) {
     return -1;
   }
   uint64_t total = 0;
-  for (DWORD i = 0; i < table->dwNumEntries; ++i) {
-    const MIB_IFROW& row = table->table[i];
-    if (row.dwType == IF_TYPE_SOFTWARE_LOOPBACK) {
+  for (ULONG i = 0; i < table->NumEntries; ++i) {
+    const MIB_IF_ROW2& row = table->Table[i];
+    if (row.Type == IF_TYPE_SOFTWARE_LOOPBACK) {
       continue;
     }
-    total += row.dwInOctets;
+    total += row.InOctets;
   }
+  FreeMibTable(table);
   return static_cast<int64_t>(total);
 }
 
