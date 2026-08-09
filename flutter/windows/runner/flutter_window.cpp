@@ -1,36 +1,11 @@
 #include "flutter_window.h"
 
-#include <cstdint>
 #include <optional>
 
 #include <flutter/standard_method_codec.h>
-#include <iphlpapi.h>
 
 #include "flutter/generated_plugin_registrant.h"
-
-#pragma comment(lib, "iphlpapi.lib")
-
-namespace {
-
-// Win7+：GetIfTable2 提供 64 位 InOctets（缓冲差分测速更稳）。
-int64_t InterfaceRxBytes() {
-  PMIB_IF_TABLE2 table = nullptr;
-  if (GetIfTable2(&table) != NO_ERROR || table == nullptr) {
-    return -1;
-  }
-  uint64_t total = 0;
-  for (ULONG i = 0; i < table->NumEntries; ++i) {
-    const MIB_IF_ROW2& row = table->Table[i];
-    if (row.Type == IF_TYPE_SOFTWARE_LOOPBACK) {
-      continue;
-    }
-    total += row.InOctets;
-  }
-  FreeMibTable(table);
-  return static_cast<int64_t>(total);
-}
-
-}  // namespace
+#include "kotv_iface_rx.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -76,7 +51,7 @@ void FlutterWindow::RegisterHostChannel() {
       [](const flutter::MethodCall<flutter::EncodableValue>& call,
          std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
         if (call.method_name() == "getInterfaceRxBytes") {
-          result->Success(flutter::EncodableValue(InterfaceRxBytes()));
+          result->Success(flutter::EncodableValue(KotvInterfaceRxBytes()));
         } else {
           result->NotImplemented();
         }
