@@ -247,14 +247,13 @@ class IjkPlayback extends KotvPlayback {
             _lastTrafficAt = now;
           }
         } else {
-          // 建基线；瞬时 tcp 速度可垫第一帧（对齐 TV 起播就有数）
           _lastTrafficBytes = traffic;
           _lastTrafficAt = now;
-          sampled = false;
+          sampled = true;
           next = 0;
         }
       } catch (_) {}
-      // 尚无差分样本时用 getTcpSpeed 垫一帧
+      // 仅在还从未建立流量基线时，才用 getTcpSpeed 垫一帧（它本身容易黏值）
       if (!sampled) {
         try {
           final tcp = await _player.getTcpSpeed();

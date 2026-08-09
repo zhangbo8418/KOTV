@@ -6,7 +6,6 @@ import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.net.TrafficStats
 import android.os.Build
 import android.util.Rational
 import androidx.core.app.ActivityCompat
@@ -109,16 +108,6 @@ class MainActivity : FlutterActivity() {
             )
           } catch (t: Throwable) {
             result.error("mem", t.message ?: t.toString(), null)
-          }
-        }
-        // 对齐 TV Traffic：缓冲浮层用 UID 下行字节差分测速（含引擎代理拉流）。
-        "getUidRxBytes" -> {
-          try {
-            val uid = applicationInfo.uid
-            val rx = TrafficStats.getUidRxBytes(uid)
-            result.success(if (rx == TrafficStats.UNSUPPORTED.toLong()) -1L else rx)
-          } catch (t: Throwable) {
-            result.error("traffic", t.message ?: t.toString(), null)
           }
         }
         else -> result.notImplemented()

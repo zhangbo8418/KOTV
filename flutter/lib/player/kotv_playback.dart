@@ -297,14 +297,13 @@ class MediaKitPlayback extends KotvPlayback {
               _lastCacheAt = now;
             }
           } else {
-            // 建基线；瞬时码率可垫第一帧
             _lastCacheBytes = bytes;
             _lastCacheAt = now;
-            sampled = false;
+            sampled = true;
             next = 0;
           }
         }
-        // 尚无差分时用 raw-input-rate / cache-speed 垫一帧
+        // raw-input-rate 仅作辅助：只在本轮还没采到差分时用，且不得单独黏住跨 tick
         if (!sampled) {
           final rate = _parseKvInt(state, 'raw-input-rate');
           if (rate != null && rate > 0) {
@@ -317,6 +316,8 @@ class MediaKitPlayback extends KotvPlayback {
         try {
           final raw = await (player.platform as dynamic).getProperty('cache-speed');
           final v = _parseMpvBytesPerSec('$raw');
+          // cache-speed 黏值时：连续相同则在缓冲场景仍允许显示，但若与上次相同
+          // 且缓冲字节无增长，下面 sampled 路径会归零。这里仅兜底。
           if (v > 0) next = v;
         } catch (_) {}
       }
@@ -682,14 +683,12 @@ class EngineVlcPlayback extends KotvPlayback {
       final posJump = (_positionMs - prevPos).abs() >= 200;
       final bufJump = (_bufferedMs - prevBuf).abs() >= 500;
       final speedJump = _speedBps != prevSpeed;
-      // 网速变化也要刷：桌面无 TrafficStats，浮层 300ms 读 networkSpeedBps，
-      // 但若本帧不更新 _speedBps 的 notify 也无妨；此处保证 buffering 态及时重建。
       if (wasPlaying != _playing ||
           wasEnded != _ended ||
           posJump ||
           bufJump ||
           prevBuffering != _vlcBuffering ||
-          speedJump) {
+          (_vlcBuffering && speedJump)) {
         notifyListeners();
       }
     } catch (_) {}
@@ -774,12 +773,7 @@ class EngineVlcPlayback extends KotvPlayback {
     await _native.load(libDir: libDir, pluginDir: KotvVlcPaths.pluginDirFor(libDir));
     await _native.setDecodeMode(_decodeMode);
     await _native.setRepeatOne(_repeatOne);
-    // 根因：此前 open 收了 headers 却未下发给 libvlc，需 Referer/UA 的直播会一直缓冲有网速。
-    final h = kotvNormalizePlayHeaders(headers, url: url);
-    final hdr = kotvHeadersToIjkFormat(h); // 同为 "Key: Value\r\n"
-    await _native.play(url, headers: hdr.isEmpty ? null : hdr);
-    await _native.setVolume(_volume.round().clamp(0, 100));
-    if (_rate != 1.0) await _native.setRate(_rate);
+    await _native.play(url);
     _ready = true;
     _audioTracks = const [];
     _subTracks = const [];

@@ -42,12 +42,9 @@ class KotvVlc {
     _loaded = true;
   }
 
-  Future<void> play(String url, {String? headers}) async {
+  Future<void> play(String url) async {
     if (!_loaded) throw StateError('kotv_vlc not loaded');
-    await _ch.invokeMethod('play', {
-      'url': url,
-      if (headers != null && headers.isNotEmpty) 'headers': headers,
-    });
+    await _ch.invokeMethod('play', {'url': url});
   }
 
   Future<void> stop() => _ch.invokeMethod('stop');

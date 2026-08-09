@@ -10,7 +10,6 @@
 #if !defined(_WIN32)
 #include <unistd.h> /* setenv / sysconf */
 #include <time.h>   /* clock_gettime */
-#include <strings.h> /* strncasecmp */
 #endif
 
 #if defined(__APPLE__)
@@ -265,7 +264,6 @@ typedef struct {
 } FrameBuf;
 
 static FrameBuf g_frame;
-static int64_t g_frame_at_ms = 0; /* 最近一帧 display 时间，用于区分「真缓冲」与「直播有画」 */
 
 static void frame_free(void) {
 	FLOCK();
@@ -368,7 +366,6 @@ static void display_cb(void *opaque, void *picture) {
 			g_frame.front_h = g_frame.h;
 			g_frame.dirty = 1;
 			g_frame.seq++;
-			g_frame_at_ms = kotv_now_ms();
 		}
 	}
 	FUNLOCK();
@@ -621,7 +618,7 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	    "--stats",
 	    net_arg,
 	    file_arg,
-	    "--live-caching=1500",
+	    "--live-caching=3000",
 	    "--clock-jitter=0",
 	    "--drop-late-frames",
 	    "--skip-frames",
@@ -669,91 +666,11 @@ int kotv_vlc_loaded(void) {
 	return g_lib && g_inst && g_mp ? 1 : 0;
 }
 
-static int kotv_strncasecmp(const char *a, const char *b, size_t n) {
-#if defined(_WIN32)
-	return _strnicmp(a, b, n);
-#else
-	return strncasecmp(a, b, n);
-#endif
-}
-
-/* 把 "Key: Value" 行写成 libvlc media 选项（需要 Referer/UA 的直播否则会一直缓冲）。 */
-static void kotv_vlc_apply_http_header_line(libvlc_media_t *media, const char *line) {
-	char opt[1024];
-	const char *colon;
-	size_t klen;
-	const char *val;
-	if (!media || !p_media_add_option || !line || !line[0])
-		return;
-	while (*line == ' ' || *line == '\t')
-		line++;
-	colon = strchr(line, ':');
-	if (!colon || colon == line)
-		return;
-	klen = (size_t)(colon - line);
-	val = colon + 1;
-	while (*val == ' ' || *val == '\t')
-		val++;
-	if (!val[0] || klen == 0 || klen > 128)
-		return;
-	if (klen == 10 && kotv_strncasecmp(line, "User-Agent", 10) == 0) {
-		snprintf(opt, sizeof(opt), ":http-user-agent=%s", val);
-		p_media_add_option(media, opt);
-		return;
-	}
-	if ((klen == 7 && kotv_strncasecmp(line, "Referer", 7) == 0) ||
-	    (klen == 8 && kotv_strncasecmp(line, "Referrer", 8) == 0)) {
-		snprintf(opt, sizeof(opt), ":http-referrer=%s", val);
-		p_media_add_option(media, opt);
-		return;
-	}
-	if (klen == 6 && kotv_strncasecmp(line, "Cookie", 6) == 0) {
-		snprintf(opt, sizeof(opt), ":http-cookie=%s", val);
-		p_media_add_option(media, opt);
-		return;
-	}
-	/* 其余头走 extra-headers；libvlc 允许重复追加 */
-	if (klen + strlen(val) + 24 >= sizeof(opt))
-		return;
-	snprintf(opt, sizeof(opt), ":http-extra-headers=%.*s: %s", (int)klen, line, val);
-	p_media_add_option(media, opt);
-}
-
-static void kotv_vlc_apply_http_headers(libvlc_media_t *media, const char *headers_crlf) {
-	char buf[4096];
-	char *p;
-	char *nl;
-	size_t n;
-	if (!media || !headers_crlf || !headers_crlf[0])
-		return;
-	n = strlen(headers_crlf);
-	if (n >= sizeof(buf))
-		n = sizeof(buf) - 1;
-	memcpy(buf, headers_crlf, n);
-	buf[n] = 0;
-	p = buf;
-	while (p && *p) {
-		nl = strchr(p, '\n');
-		if (nl) {
-			*nl = 0;
-			if (nl > p && nl[-1] == '\r')
-				nl[-1] = 0;
-		}
-		kotv_vlc_apply_http_header_line(media, p);
-		p = nl ? nl + 1 : NULL;
-	}
-}
-
 int kotv_vlc_play(const char *mrl) {
-	return kotv_vlc_play_with_headers(mrl, NULL);
-}
-
-int kotv_vlc_play_with_headers(const char *mrl, const char *headers_crlf) {
 	if (!g_mp || !g_inst || !mrl)
 		return -1;
 	p_stop(g_mp);
 	g_frame.dirty = 0;
-	g_frame_at_ms = 0;
 	g_buffer_pct = 0.f;
 	g_buffer_at_ms = 0;
 	g_speed_last_bytes = -1;
@@ -764,11 +681,9 @@ int kotv_vlc_play_with_headers(const char *mrl, const char *headers_crlf) {
 	libvlc_media_t *media = p_media_new(g_inst, mrl);
 	if (!media)
 		return -2;
-	/* soft/hard 按设置下发；auto(g_soft_decode<0) 不附加，交给 libvlc 默认。
-	 * 纹理回调路径硬解走 avcodec-hw=any（可 download 到系统内存出帧）。 */
+	/* 软硬解按 media 选项下发；libvlc 不支持运行中切换，重建 media 即生效 */
 	if (g_soft_decode >= 0 && p_media_add_option)
 		p_media_add_option(media, g_soft_decode ? ":avcodec-hw=none" : ":avcodec-hw=any");
-	kotv_vlc_apply_http_headers(media, headers_crlf);
 	/* 单集无限循环（TV REPEAT_MODE_ONE）；极大次数近似无限 */
 	if (g_repeat_one && p_media_add_option)
 		p_media_add_option(media, ":input-repeat=999999");
@@ -883,35 +798,22 @@ int64_t kotv_vlc_get_buffered(void) {
 	return end > len ? len : end;
 }
 
-/* 缓冲中 = libvlc_Buffering，或「点播 Playing 且进度卡住且有新鲜 cache」。
- * 直播（length<=0）Playing 时不要因 time 不动误判永久缓冲；有近期帧则更不算。 */
+/* 缓冲中 = libvlc_Buffering(2)，或「有新鲜的 <100% cache 事件 且 进度不再推进」。
+ * 只看 cache 事件会误报：正常播放时 libvlc 也会发预读事件（旧实现的假缓冲来源）。 */
 int kotv_vlc_is_buffering(void) {
 	if (!g_mp || !p_get_state)
 		return 0;
 
 	int64_t now = kotv_now_ms();
-	int st = p_get_state(g_mp);
-	if (st == 2) /* libvlc_Buffering */
-		return 1;
-
-	/* 近期有解码帧 → 已出画 */
-	if (g_frame_at_ms > 0 && (now - g_frame_at_ms) < 1200)
-		return 0;
-
-	if (st != 3 || !p_is_playing(g_mp)) /* 非 Playing */
-		return 0;
-
-	int64_t len = p_get_length ? p_get_length(g_mp) : 0;
-	/* 直播/无限流：Playing 即视为在播，不再用进度卡住+cache 事件误报 */
-	if (len <= 0)
-		return 0;
-
 	int64_t t = p_get_time(g_mp);
 	if (t != g_pos_last_ms) {
 		g_pos_last_ms = t;
 		g_pos_last_at_ms = now;
 	}
 	int stalled = (g_pos_last_at_ms <= 0) || (now - g_pos_last_at_ms) >= 700;
+
+	if (p_get_state(g_mp) == 2)
+		return 1;
 	if (!buffer_event_fresh() || g_buffer_pct >= 99.5f)
 		return 0;
 	return stalled ? 1 : 0;
@@ -955,13 +857,13 @@ int64_t kotv_vlc_get_speed_bps(void) {
 	if (g_speed_bps > 0)
 		return g_speed_bps;
 
-	/* 根因修复：旧逻辑在建基线后把 g_speed_last_bytes>=0，却仍判断
-	 * `g_speed_last_bytes < 0` 才读瞬时码率 → 兜底永不死路径，起播一直 0。
-	 * 差分尚未产出有效速度时，一律用 f_*_bitrate（bytes/µs → B/s）。 */
-	if (st.f_input_bitrate > 0.f)
-		return (int64_t)((double)st.f_input_bitrate * 1000000.0);
-	if (st.f_demux_bitrate > 0.f)
-		return (int64_t)((double)st.f_demux_bitrate * 1000000.0);
+	/* 差分尚无样本时才用瞬时码率垫一帧；有基线后不再用，避免黏值 */
+	if (g_speed_last_bytes < 0) {
+		if (st.f_input_bitrate > 0.f)
+			return (int64_t)((double)st.f_input_bitrate * 1000000.0);
+		if (st.f_demux_bitrate > 0.f)
+			return (int64_t)((double)st.f_demux_bitrate * 1000000.0);
+	}
 	return g_speed_bps;
 }
 

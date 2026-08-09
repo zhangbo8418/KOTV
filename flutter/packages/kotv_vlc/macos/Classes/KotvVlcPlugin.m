@@ -49,8 +49,7 @@
       return;
     }
     NSError *err = nil;
-    NSString *headers = [args[@"headers"] isKindOfClass:[NSString class]] ? args[@"headers"] : nil;
-    if ([self.engine playURL:args[@"url"] ?: @"" headers:headers error:&err]) {
+    if ([self.engine playURL:args[@"url"] ?: @"" error:&err]) {
       result(nil);
     } else {
       result([FlutterError errorWithCode:@"play" message:err.localizedDescription details:nil]);
