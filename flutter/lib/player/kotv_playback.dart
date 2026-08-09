@@ -883,7 +883,7 @@ class EngineVlcPlayback extends KotvPlayback {
   void dispose() {
     _statusTimer?.cancel();
     try {
-      // 同步尽量停干净；关进程路径另有 KotvVlc.shutdownAll / atexit unload
+      // 同步尽量停干净
       unawaited(_native.stop());
     } catch (_) {}
     unawaited(_native.dispose());
