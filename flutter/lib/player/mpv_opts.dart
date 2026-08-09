@@ -11,7 +11,7 @@ import 'kotv_platform.dart';
 /// ## 平台能力
 /// | 选项 | Android | 桌面 (PC) |
 /// |------|---------|-----------|
-/// | hwdec | ✅ mediacodec-copy / auto-safe / no | ✅ *-copy（Texture 禁零拷贝）/ no |
+/// | hwdec | ✅ mediacodec-copy / auto-safe / no | ✅ auto / no |
 /// | mpv.conf | ✅ 事后 setProperty | ✅ 同上 |
 /// | gpu-next | ✅ vo=gpu-next | ❌ Flutter Texture 必须 vo=libmpv |
 class KotvMpvOpts {
@@ -55,12 +55,12 @@ class KotvMpvOpts {
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
-      // mediacodec 零拷贝在不少机型 abort；copy 更稳。
+      // mediacodec 零拷贝在不少机型 abort；copy 更稳（安卓已验证）。
       return hard ? 'mediacodec-copy' : 'auto-safe';
     }
-    // 桌面 vo=libmpv（Flutter Texture）：零拷贝硬解（d3d11va 等）常见黑屏，必须走 copy。
-    if (kotvIsWindows7()) return 'dxva2-copy';
-    return hard ? 'd3d11va-copy' : 'auto-copy';
+    // 桌面：与 8/8 基线一致，交给 libmpv auto。
+    // dxva2-copy / auto-copy 曾试过：今早 d23f24b 已实测「未解决」并撤回，勿再臆测钉死。
+    return 'auto';
   }
 
   /// Android 可切 gpu/gpu-next；桌面必须 libmpv（Flutter Texture）。
