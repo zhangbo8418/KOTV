@@ -12,7 +12,7 @@ import 'kotv_platform.dart';
 /// ## 平台能力
 /// | 选项 | Android | 桌面 (PC) |
 /// |------|---------|-----------|
-/// | hwdec | ✅ mediacodec / auto-safe / no | ✅ auto / no（系统硬解） |
+/// | hwdec | ✅ mediacodec-copy / auto-safe / no | ✅ auto / dxva2-copy(Win7) / no |
 /// | mpv.conf | ✅ 事后 setProperty | ✅ 同上 |
 /// | Vulkan | ⚠️ VC 附着后覆盖 EGL→androidvk（视机型） | ❌ Texture 强制 vo=libmpv，无法 Vulkan |
 /// | gpu-next | ✅ vo=gpu-next | ❌ Flutter Texture 必须 vo=libmpv，开启无效 |
