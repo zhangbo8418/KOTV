@@ -12,7 +12,7 @@ import 'kotv_platform.dart';
 /// ## 平台能力
 /// | 选项 | Android | 桌面 (PC) |
 /// |------|---------|-----------|
-/// | hwdec | ✅ mediacodec / auto-safe / no | ✅ auto / dxva2-copy(Win7) / no |
+/// | hwdec | ✅ mediacodec / auto-safe / no | ✅ auto / no（系统硬解） |
 /// | mpv.conf | ✅ 事后 setProperty | ✅ 同上 |
 /// | Vulkan | ⚠️ VC 附着后覆盖 EGL→androidvk（视机型） | ❌ Texture 强制 vo=libmpv，无法 Vulkan |
 /// | gpu-next | ✅ vo=gpu-next | ❌ Flutter Texture 必须 vo=libmpv，开启无效 |
@@ -61,10 +61,6 @@ class KotvMpvOpts {
   /// 供 setProperty / VideoController 使用的 hwdec 值。
   String hwdecValue() {
     if (soft) return 'no';
-    if (kotvIsWindows7()) {
-      // Win7 无可用 d3d11va；auto/hard 走 dxva2-copy（根因是 d3d11 硬解冻 UI，不是硬解本身）。
-      return 'dxva2-copy';
-    }
     if (kotvIsAndroid()) {
       // vo=gpu 走 Surface 零拷贝用 mediacodec；mediacodec-copy 在部分机型闪退。
       return hard ? 'mediacodec' : 'auto-safe';
@@ -189,14 +185,6 @@ class KotvMpvOpts {
         await set('cache-secs', '1000000');
         await set('framedrop', 'vo');
       } catch (_) {}
-
-      // Win7：钉死 dxva2-copy，避免 libmpv/auto 再去碰 d3d11va 冻 UI。
-      if (kotvIsWindows7() && !soft) {
-        try {
-          await set('hwdec', 'dxva2-copy');
-          await set('hwdec-codecs', 'all');
-        } catch (_) {}
-      }
 
       // 对齐 TV ae4cf046：gpu-next / vulkan 无论开/关都显式写入，避免关掉仍粘住。
       var vulkanOk = !vulkan;
