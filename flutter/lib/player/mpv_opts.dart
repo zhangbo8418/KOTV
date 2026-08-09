@@ -62,10 +62,13 @@ class KotvMpvOpts {
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
-      // vo=gpu 走 Surface 零拷贝用 mediacodec；mediacodec-copy 在部分机型闪退。
-      return hard ? 'mediacodec' : 'auto-safe';
+      // mediacodec（零拷贝）在不少机型起播即 abort；copy 走 CPU 回读更稳。
+      // 硬解优先 copy；auto 用 auto-safe 让 libmpv 自己退避。
+      return hard ? 'mediacodec-copy' : 'auto-safe';
     }
-    // 桌面：auto 让 libmpv 选 d3d11va / videotoolbox / vaapi 等
+    // Win7：裸 auto 易摸到 d3d11va → 黑屏/卡 UI；钉 dxva2-copy。
+    if (kotvIsWindows7()) return 'dxva2-copy';
+    // 其它桌面：auto 让 libmpv 选 d3d11va / videotoolbox / vaapi 等
     return 'auto';
   }
 
@@ -186,35 +189,26 @@ class KotvMpvOpts {
         await set('framedrop', 'vo');
       } catch (_) {}
 
-      // 对齐 TV ae4cf046：gpu-next / vulkan 无论开/关都显式写入，避免关掉仍粘住。
+      // Vulkan 仅在开启时覆盖 media_kit 写死的 EGL；关闭时不要再改 gpu-api/vo，
+      // 否则与 AndroidVideoController 并行 setProperty 易原生闪退。
       var vulkanOk = !vulkan;
-      if (kotvIsAndroid()) {
+      if (kotvIsAndroid() && vulkan) {
         final vo = gpuNext ? 'gpu-next' : 'gpu';
         try {
-          if (vulkan) {
-            // media_kit AndroidVideoController.create 会写死：
-            // gpu-context=android、opengl-es=yes。必须在 VC 附着之后再盖掉。
-            await set('vo', 'null');
-            await set('gpu-api', 'vulkan');
-            await set('gpu-context', 'androidvk');
-            await set('opengl-es', 'no');
-            await set('vo', vo);
-            await Future<void>.delayed(const Duration(milliseconds: 80));
-            final api = (await get('gpu-api')).toLowerCase();
-            final ctx = (await get('gpu-context')).toLowerCase();
-            vulkanOk = api.contains('vulkan') ||
-                ctx.contains('androidvk') ||
-                ctx.contains('vulkan') ||
-                (api.isEmpty && ctx.isEmpty);
-          } else {
-            await set('gpu-api', 'auto');
-            await set('gpu-context', 'android');
-            await set('opengl-es', 'yes');
-            await set('vo', vo);
-            vulkanOk = true;
-          }
+          await set('vo', 'null');
+          await set('gpu-api', 'vulkan');
+          await set('gpu-context', 'androidvk');
+          await set('opengl-es', 'no');
+          await set('vo', vo);
+          await Future<void>.delayed(const Duration(milliseconds: 80));
+          final api = (await get('gpu-api')).toLowerCase();
+          final ctx = (await get('gpu-context')).toLowerCase();
+          vulkanOk = api.contains('vulkan') ||
+              ctx.contains('androidvk') ||
+              ctx.contains('vulkan') ||
+              (api.isEmpty && ctx.isEmpty);
         } catch (_) {
-          vulkanOk = !vulkan;
+          vulkanOk = false;
         }
       } else if (vulkan) {
         // 桌面 Texture 路径无法真正启用；属性写了也不走 Vulkan VO。

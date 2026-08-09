@@ -159,8 +159,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     } else if (_isBuffering) {
       next = '$prefix 缓冲中…';
     } else if (p.playing) {
-      // 不能仅凭 duration>0：VLC 常先拿到片长、尚未出帧，会关掉「加载中」浮层变成黑屏干等。
-      final started = p.position > Duration.zero || p.width > 0;
+      // VLC 常先有 duration、尚未出帧 → 不能单凭 duration 关浮层。
+      // MPV 则 duration/position 任一即可，否则 width 一直 0 时会一直「加载中」像黑屏。
+      final started = _useVlc
+          ? (p.position > Duration.zero || p.width > 0)
+          : (p.duration > Duration.zero || p.position > Duration.zero || p.width > 0);
       if (started) {
         next = magnet ? '$prefix 播放中（磁力）' : '$prefix 播放中';
       } else {
@@ -772,6 +775,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         } else if (cached || proxied) {
           openHeaders = null;
         }
+      }
+      // open 原生可能崩；文案先切到加载中，避免误报成「解析失败」。
+      if (mounted) {
+        setState(() => _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…');
       }
       await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
       try {

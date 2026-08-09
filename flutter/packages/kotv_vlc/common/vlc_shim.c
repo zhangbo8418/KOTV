@@ -494,7 +494,21 @@ static void path_join(char *out, size_t n, const char *a, const char *b) {
 		snprintf(out, n, "%s%s", a, b);
 }
 
-void kotv_vlc_unload(void); /* forward：Win atexit 与 load 成功后注册 */
+void kotv_vlc_unload(void); /* forward */
+
+#if defined(_WIN32)
+/* atexit：只静音停播，不 FreeLibrary（进程退出时卸库易二次崩）。 */
+static void kotv_vlc_atexit_quiet(void) {
+	if (!g_mp)
+		return;
+	if (p_set_volume)
+		p_set_volume(g_mp, 0);
+	if (p_set_pause)
+		p_set_pause(g_mp, 1);
+	if (p_stop)
+		p_stop(g_mp);
+}
+#endif
 
 int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	flock_init();
@@ -578,36 +592,10 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	snprintf(file_arg, sizeof(file_arg), "--file-caching=%d", cache_ms);
 
 #if defined(_WIN32)
-	/* Win7：DirectSound 在进程粗暴 exit 后常「声音卡系统」；waveout 释放更干净。
-	 * 不用 GetVersionExA（MSVC C4996 + /WX 会当成错误），改走 ntdll RtlGetVersion。 */
-	int is_win7 = 0;
-	{
-		typedef LONG(WINAPI *RtlGetVersion_t)(OSVERSIONINFOW *);
-		HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-		RtlGetVersion_t pRtlGetVersion =
-		    ntdll ? (RtlGetVersion_t)GetProcAddress(ntdll, "RtlGetVersion") : NULL;
-		OSVERSIONINFOW vi;
-		memset(&vi, 0, sizeof(vi));
-		vi.dwOSVersionInfoSize = sizeof(vi);
-		if (pRtlGetVersion && pRtlGetVersion(&vi) == 0 && vi.dwMajorVersion == 6 &&
-		    vi.dwMinorVersion == 1)
-			is_win7 = 1;
-	}
-	const char *args_win7[] = {
-	    "--no-video-title-show",
-	    "--quiet",
-	    "--no-osd",
-	    "--stats",
-	    net_arg,
-	    file_arg,
-	    "--live-caching=2000",
-	    "--clock-jitter=0",
-	    "--drop-late-frames",
-	    "--skip-frames",
-	    "--input-fast-seek",
-	    "--aout=waveout",
-	};
-	const char *args_win[] = {
+	/* Win7 与 Win10+ 共用同一套起播参数。
+	 * 勿在 libvlc_new 钉 --aout=waveout：插件缺失/不兼容时起播即进程崩溃；
+	 * 退出残留音频由 Dart 关窗前 shutdown + unload 静音处理。 */
+	const char *args[] = {
 	    "--no-video-title-show",
 	    "--quiet",
 	    "--no-osd",
@@ -620,10 +608,7 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	    "--skip-frames",
 	    "--input-fast-seek",
 	};
-	const char **args = is_win7 ? args_win7 : args_win;
-	int nargs = is_win7 ? (int)(sizeof(args_win7) / sizeof(args_win7[0]))
-	                    : (int)(sizeof(args_win) / sizeof(args_win[0]));
-	g_inst = p_new(nargs, args);
+	g_inst = p_new((int)(sizeof(args) / sizeof(args[0])), args);
 #else
 	const char *args[] = {
 	    "--no-video-title-show",
@@ -651,11 +636,11 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	attach_callbacks();
 	frame_ensure(1280, 720);
 #if defined(_WIN32)
-	/* exit(0) 不会走 Flutter dispose；靠 atexit 静音并卸掉 libvlc，避免 Win7 残留啸叫/卡音频 */
+	/* exit(0) 不走 Flutter dispose：仅静音停播，不要 FreeLibrary（atexit 里卸库易二次崩）。 */
 	{
 		static int atexit_once = 0;
 		if (!atexit_once) {
-			atexit(kotv_vlc_unload);
+			atexit(kotv_vlc_atexit_quiet);
 			atexit_once = 1;
 		}
 	}
@@ -788,8 +773,8 @@ static void apply_http_header_line(libvlc_media_t *media, const char *line) {
 	} else if (strcmp(key, "cookie") == 0) {
 		snprintf(opt, sizeof(opt), ":http-cookie=%s", val);
 	} else {
-		/* 保留原始大小写头名 */
-		snprintf(opt, sizeof(opt), ":http-header=%.*s: %s", (int)klen, line, val);
+		/* 其它头不走 :http-header=：未转义的 Cookie/奇异值曾导致 libvlc 起播崩 */
+		return;
 	}
 	p_media_add_option(media, opt);
 }
@@ -799,7 +784,8 @@ static int play_at_internal(const char *mrl, int64_t start_ms, const char *const
 	if (!g_mp || !g_inst || !mrl)
 		return -1;
 	(void)start_ms; /* seek 不再走重建；保留参数以免改动调用方 */
-	p_stop(g_mp);
+	if (p_stop)
+		p_stop(g_mp);
 	g_frame.dirty = 0;
 	g_buffer_pct = 0.f;
 	g_buffer_at_ms = 0;
