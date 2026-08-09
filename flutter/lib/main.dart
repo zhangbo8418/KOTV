@@ -240,7 +240,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
   void onWindowClose() async {
     _saveBoundsTimer?.cancel();
     await _persistWindowBounds();
-    // 先停内置 VLC：Windows（尤其 Win7）直接 exit 时 DirectSound 易卡系统声音。
+    // 先停内置 VLC 音频（只 mute/stop，不卸 DLL）。
     if (!kIsWeb && KotvVlc.isSupported) {
       try {
         await KotvVlc.shutdownAll();

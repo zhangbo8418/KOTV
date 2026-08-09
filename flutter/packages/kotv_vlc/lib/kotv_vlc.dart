@@ -88,14 +88,14 @@ class KotvVlc {
     _loaded = false;
   }
 
-  /// 进程退出前同步卸掉内置 VLC（Win7 上直接 exit 易残留系统声音）。
+  /// 进程退出前静音停播（不 FreeLibrary；卸库与 exit 叠在一起会崩）。
   static Future<void> shutdownAll() async {
     if (!isSupported) return;
     try {
-      await _ch.invokeMethod('shutdown').timeout(const Duration(milliseconds: 2000));
+      await _ch.invokeMethod('shutdown').timeout(const Duration(milliseconds: 1500));
     } catch (_) {
       try {
-        await _ch.invokeMethod('dispose').timeout(const Duration(milliseconds: 800));
+        await _ch.invokeMethod('stop').timeout(const Duration(milliseconds: 500));
       } catch (_) {}
     }
   }

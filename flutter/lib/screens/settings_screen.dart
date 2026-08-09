@@ -141,39 +141,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  /// 开启前探测；桌面 Texture 路径无法 Vulkan，Android 才尝试 androidvk。
-  Future<void> _toggleMpvVulkan(bool currentlyOn) async {
-    if (_busy) return;
-    if (currentlyOn) {
-      await _set('mpvVulkan', 'false', msg: '已关闭 Vulkan');
-      return;
-    }
-    if (!kotvIsAndroid()) {
-      setState(() {
-        _status = '桌面内置 MPV 走 Flutter Texture（vo=libmpv），无法开启 Vulkan；请在 Android 上尝试';
-      });
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _status = '正在检测 Vulkan…';
-    });
-    try {
-      final (ok, detail) = await KotvMpvOpts.probeVulkan();
-      if (!mounted) return;
-      if (!ok) {
-        await _set('mpvVulkan', 'false', msg: 'Vulkan 开启失败：$detail');
-        return;
-      }
-      await _set('mpvVulkan', 'true', msg: '已开启 Vulkan（$detail，重启播放生效；若黑屏请关闭）');
-    } catch (e) {
-      if (!mounted) return;
-      await _set('mpvVulkan', 'false', msg: 'Vulkan 开启失败：$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   Future<void> _prompt(
     String title,
     String hint,
@@ -711,10 +678,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final decodeLabel = {'auto': '自动', 'soft': '软解码', 'hard': '硬解码'}[decode] ?? decode;
     final adLabel = {'off': '关闭', 'on': '开启', 'violent': '暴力'}[ad] ?? ad;
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
-    final mpvVulkan = g('mpvVulkan', 'false') == 'true';
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
     final mpvConfPreview = g('mpvConf').trim();
-    // MPV conf：Android/桌面；Vulkan / gpu-next 仅 Android（桌面 Texture 无法 Vulkan）
+    // MPV conf：Android/桌面；gpu-next 仅 Android
     final showMpvOpts = kotvIsAndroid() || kotvIsDesktop();
 
     return Column(
@@ -856,11 +822,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                       if (kotvIsAndroid())
                         KotvSettingsGrid(children: [
-                          KotvSettingsCell(
-                            label: 'MPV Vulkan',
-                            value: mpvVulkan ? '开启' : '关闭',
-                            onTap: () => unawaited(_toggleMpvVulkan(mpvVulkan)),
-                          ),
                           KotvSettingsCell(
                             label: 'MPV gpu-next',
                             value: mpvGpuNext ? '开启' : '关闭',

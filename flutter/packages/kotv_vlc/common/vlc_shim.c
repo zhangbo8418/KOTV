@@ -593,8 +593,8 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 
 #if defined(_WIN32)
 	/* Win7 与 Win10+ 共用同一套起播参数。
-	 * 勿在 libvlc_new 钉 --aout=waveout：插件缺失/不兼容时起播即进程崩溃；
-	 * 退出残留音频由 Dart 关窗前 shutdown + unload 静音处理。 */
+	 * 勿在 libvlc_new 钉 --aout=waveout：插件缺失时起播即崩。
+	 * 退出残留音频：Dart 关窗 shutdown 只 mute/stop，禁止 FreeLibrary。 */
 	const char *args[] = {
 	    "--no-video-title-show",
 	    "--quiet",
@@ -694,6 +694,19 @@ void kotv_vlc_unload(void) {
 	p_set_hwnd = NULL;
 	p_set_nsobject = NULL;
 	p_set_xwindow = NULL;
+	p_is_playing = NULL;
+	p_get_state = NULL;
+	p_set_time = NULL;
+	p_get_time = NULL;
+	p_get_length = NULL;
+	p_set_callbacks = NULL;
+	p_set_format_callbacks = NULL;
+	p_media_add_option = NULL;
+	p_play = NULL;
+	p_set_media = NULL;
+	p_media_new = NULL;
+	p_media_release = NULL;
+	p_mp_new = NULL;
 }
 
 int kotv_vlc_loaded(void) {
@@ -799,9 +812,14 @@ static int play_at_internal(const char *mrl, int64_t start_ms, const char *const
 	libvlc_media_t *media = p_media_new(g_inst, mrl);
 	if (!media)
 		return -2;
-	/* 软硬解按 media 选项下发；libvlc 不支持运行中切换，重建 media 即生效 */
-	if (g_soft_decode >= 0 && p_media_add_option)
-		p_media_add_option(media, g_soft_decode ? ":avcodec-hw=none" : ":avcodec-hw=any");
+	/* 软硬解：Texture/RGBA 回调路径硬解常黑屏或崩，非 HWND 时强制软解 */
+	if (p_media_add_option) {
+		if (!g_hard) {
+			p_media_add_option(media, ":avcodec-hw=none");
+		} else if (g_soft_decode >= 0) {
+			p_media_add_option(media, g_soft_decode ? ":avcodec-hw=none" : ":avcodec-hw=any");
+		}
+	}
 	/* 单集无限循环（TV REPEAT_MODE_ONE）；极大次数近似无限 */
 	if (g_repeat_one && p_media_add_option)
 		p_media_add_option(media, ":input-repeat=999999");

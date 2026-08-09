@@ -73,8 +73,11 @@ void KotvVlcPlugin::HandleMethodCall(
 
   const auto& method = method_call.method_name();
   if (method == "create") {
-    DisposePlayer();
-    CreateTexture();
+    // 复用已有 texture / libvlc：勿每集 Dispose+FreeLibrary（Win 起播/关应用崩主因）。
+    Stop();
+    if (texture_id_ < 0) {
+      CreateTexture();
+    }
     flutter::EncodableMap out;
     out[flutter::EncodableValue("textureId")] =
         flutter::EncodableValue(texture_id_);
@@ -145,7 +148,7 @@ void KotvVlcPlugin::HandleMethodCall(
   }
   if (method == "seek") {
     const int64_t ms = arg_int("ms");
-    std::thread([ms]() { kotv_vlc_set_time(ms); }).detach();
+    kotv_vlc_set_time(ms);
     result->Success();
     return;
   }
@@ -260,13 +263,13 @@ void KotvVlcPlugin::HandleMethodCall(
     return;
   }
   if (method == "dispose") {
-    DisposePlayer();
+    DisposePlayer(/*unload=*/false);
     result->Success();
     return;
   }
   if (method == "shutdown") {
-    /* 关进程前同步卸掉 libvlc（Win7 exit 前必须，否则声音卡系统） */
-    DisposePlayer();
+    /* 关进程：只静音停播，禁止 FreeLibrary（与 exit/atexit 叠在一起必崩）。 */
+    QuietShutdown();
     result->Success();
     return;
   }
@@ -322,11 +325,19 @@ void KotvVlcPlugin::Stop() {
   kotv_vlc_stop();
 }
 
-void KotvVlcPlugin::DisposePlayer() {
+void KotvVlcPlugin::QuietShutdown() {
+  StopPump();
+  /* 只 mute/stop，不 release instance、不 FreeLibrary */
+  kotv_vlc_stop();
+}
+
+void KotvVlcPlugin::DisposePlayer(bool unload) {
   StopPump();
   kotv_vlc_stop();
-  kotv_vlc_unload();
-  ready_ = false;
+  if (unload) {
+    kotv_vlc_unload();
+    ready_ = false;
+  }
   if (texture_id_ >= 0 && textures_) {
     textures_->UnregisterTexture(texture_id_);
     texture_id_ = -1;

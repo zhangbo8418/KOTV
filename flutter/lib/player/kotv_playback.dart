@@ -229,15 +229,13 @@ class MediaKitPlayback extends KotvPlayback {
   bool _hlsRetryBusy = false;
 
   Future<void> _prepareOpts() async {
-    // 先等 VideoController：media_kit 会写死 gpu-context=android(EGL)，
-    // Vulkan 必须在附着完成后再覆盖，否则会被盖回去。
+    // 先等 VideoController 附着，再写缓冲/hwdec，避免与 media_kit 并行 setProperty。
     try {
       final platform = player.platform;
       if (platform != null && platform.isVideoControllerAttached) {
         await platform.waitForVideoControllerInitializationIfAttached
             .timeout(const Duration(seconds: 8));
       } else {
-        // VC 构造是 post-frame 异步的，稍等再探
         await Future<void>.delayed(const Duration(milliseconds: 50));
         final p2 = player.platform;
         if (p2 != null && p2.isVideoControllerAttached) {
@@ -360,18 +358,14 @@ class MediaKitPlayback extends KotvPlayback {
 
   KotvMpvOpts get opts => _opts;
 
-  /// 热更新 Vulkan / gpu-next / conf：全部走 mpv 属性，不重建 VideoController。
+  /// 热更新 gpu-next / conf / 解码：全部走 mpv 属性，不重建 VideoController。
   Future<void> applyMpvOpts(KotvMpvOpts next, {bool reopen = false}) async {
     final voChanged = next.gpuNext != _opts.gpuNext || next.decodeMode != _opts.decodeMode;
-    final gpuFlagChanged = next.gpuNext != _opts.gpuNext || next.vulkan != _opts.vulkan;
     _opts = next;
-    if (voChanged || gpuFlagChanged) {
-      // 只改属性：同一个 Player 再 new 一次 VideoController 并不会换 vo
-      // （原生侧按 mpv handle 复用），却会重复挂监听并残留旧包装对象。
+    if (voChanged) {
       try {
         await (player.platform as dynamic).setProperty('hwdec', next.hwdecValue());
       } catch (_) {}
-      // 对齐 TV：开关变化时显式写 vo（Android）；applyAfterAttach 会再钉死 gpu-api/context。
       if (kotvIsAndroid()) {
         try {
           await (player.platform as dynamic)
