@@ -19,7 +19,6 @@ import 'theme/kotv_palette.dart';
 import 'theme/kotv_theme.dart';
 import 'widgets/chrome.dart';
 import 'widgets/h_scroll.dart';
-import 'package:kotv_vlc/kotv_vlc.dart';
 
 /// Release 构建里 build 抛异常会渲染成一块灰色空白（默认 ErrorWidget），
 /// 页面看着像"没了"却无从追查；换成可读文案并把错误打到日志。
@@ -240,14 +239,9 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
   void onWindowClose() async {
     _saveBoundsTimer?.cancel();
     await _persistWindowBounds();
-    // 先停内置 VLC 音频（只 mute/stop，不卸 DLL）。
-    if (!kIsWeb && KotvVlc.isSupported) {
-      try {
-        await KotvVlc.shutdownAll();
-      } catch (_) {}
-    }
     // 先优雅停引擎（HTTP shutdown → 杀 Java/Python）；超时再杀进程树。
     // Windows 仍避免 window_manager.destroy（Win7 易 WER），最后 exit。
+    // 不对 VLC 再做 shutdownAll：与 exit/析构叠多层 stop 会崩（对齐 8/8 基线）。
     try {
       await ref
           .read(engineLauncherProvider)

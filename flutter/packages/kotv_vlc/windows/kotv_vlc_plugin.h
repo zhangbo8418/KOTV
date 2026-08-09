@@ -32,8 +32,7 @@ class KotvVlcPlugin : public flutter::Plugin {
   bool Play(const std::string& url, const std::vector<std::string>& headers,
             std::string* err);
   void Stop();
-  void QuietShutdown();
-  void DisposePlayer(bool unload = false);
+  void DisposePlayer();
   void StartPump();
   void StopPump();
   // Flutter 3.24+：CopyBufferCallback 为 (size_t width, size_t height)，非指针 out 参数。

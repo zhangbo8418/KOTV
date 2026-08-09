@@ -496,20 +496,6 @@ static void path_join(char *out, size_t n, const char *a, const char *b) {
 
 void kotv_vlc_unload(void); /* forward */
 
-#if defined(_WIN32)
-/* atexit：只静音停播，不 FreeLibrary（进程退出时卸库易二次崩）。 */
-static void kotv_vlc_atexit_quiet(void) {
-	if (!g_mp)
-		return;
-	if (p_set_volume)
-		p_set_volume(g_mp, 0);
-	if (p_set_pause)
-		p_set_pause(g_mp, 1);
-	if (p_stop)
-		p_stop(g_mp);
-}
-#endif
-
 int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	flock_init();
 	if (g_lib)
@@ -582,8 +568,47 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 #endif
 	}
 
-	/* 拖进度要快，但过短会频繁卡顿；折中 2s + input-fast-seek */
-	int cache_ms = 2000;
+	/* VLC 仅暴露时间缓存；按物理内存算字节预算，再换算成 ms（按 ~16Mbps≈2MB/s），
+	 * 使 4K/8K 不会因固定超长 network-caching 占满内存。（对齐 8/8 基线） */
+	int64_t phys = 0;
+#if defined(_WIN32)
+	MEMORYSTATUSEX msx;
+	msx.dwLength = sizeof(msx);
+	if (GlobalMemoryStatusEx(&msx))
+		phys = (int64_t)msx.ullTotalPhys;
+#elif defined(__APPLE__)
+	{
+		int mib[2] = {CTL_HW, HW_MEMSIZE};
+		uint64_t mem = 0;
+		size_t len = sizeof(mem);
+		if (sysctl(mib, 2, &mem, &len, NULL, 0) == 0)
+			phys = (int64_t)mem;
+	}
+#else
+	{
+		long pages = sysconf(_SC_PHYS_PAGES);
+		long psize = sysconf(_SC_PAGESIZE);
+		if (pages > 0 && psize > 0)
+			phys = (int64_t)pages * (int64_t)psize;
+	}
+#endif
+	if (phys <= 0)
+		phys = (int64_t)8 * 1024 * 1024 * 1024;
+	int64_t budget = (int64_t)(phys * 0.05);
+	{
+		const int64_t min_b = (int64_t)48 * 1024 * 1024;
+		const int64_t max_b = (int64_t)384 * 1024 * 1024;
+		if (budget < min_b)
+			budget = min_b;
+		if (budget > max_b)
+			budget = max_b;
+	}
+	/* ms ≈ budget / 2MB/s；钳到 1.5s–60s */
+	int cache_ms = (int)((budget * 1000) / ((int64_t)2 * 1024 * 1024));
+	if (cache_ms < 1500)
+		cache_ms = 1500;
+	if (cache_ms > 60000)
+		cache_ms = 60000;
 	g_cache_ms = cache_ms;
 
 	static char net_arg[48];
@@ -591,25 +616,6 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	snprintf(net_arg, sizeof(net_arg), "--network-caching=%d", cache_ms);
 	snprintf(file_arg, sizeof(file_arg), "--file-caching=%d", cache_ms);
 
-#if defined(_WIN32)
-	/* Win7 与 Win10+ 共用同一套起播参数。
-	 * 勿在 libvlc_new 钉 --aout=waveout：插件缺失时起播即崩。
-	 * 退出残留音频：Dart 关窗 shutdown 只 mute/stop，禁止 FreeLibrary。 */
-	const char *args[] = {
-	    "--no-video-title-show",
-	    "--quiet",
-	    "--no-osd",
-	    "--stats",
-	    net_arg,
-	    file_arg,
-	    "--live-caching=2000",
-	    "--clock-jitter=0",
-	    "--drop-late-frames",
-	    "--skip-frames",
-	    "--input-fast-seek",
-	};
-	g_inst = p_new((int)(sizeof(args) / sizeof(args[0])), args);
-#else
 	const char *args[] = {
 	    "--no-video-title-show",
 	    "--quiet",
@@ -618,15 +624,12 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	    "--stats",
 	    net_arg,
 	    file_arg,
-	    "--live-caching=2000",
+	    "--live-caching=3000",
 	    "--clock-jitter=0",
 	    "--drop-late-frames",
 	    "--skip-frames",
-	    /* VLC3：优先关键帧 seek */
-	    "--input-fast-seek",
 	};
 	g_inst = p_new((int)(sizeof(args) / sizeof(args[0])), args);
-#endif
 	if (!g_inst)
 		return -4;
 	g_mp = p_mp_new(g_inst);
@@ -635,16 +638,7 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 
 	attach_callbacks();
 	frame_ensure(1280, 720);
-#if defined(_WIN32)
-	/* exit(0) 不走 Flutter dispose：仅静音停播，不要 FreeLibrary（atexit 里卸库易二次崩）。 */
-	{
-		static int atexit_once = 0;
-		if (!atexit_once) {
-			atexit(kotv_vlc_atexit_quiet);
-			atexit_once = 1;
-		}
-	}
-#endif
+	/* 不对 atexit 注册 stop：与 Dart 关窗/析构叠多层 stop 会崩（对齐 8/8）。 */
 	return 0;
 }
 
@@ -812,14 +806,9 @@ static int play_at_internal(const char *mrl, int64_t start_ms, const char *const
 	libvlc_media_t *media = p_media_new(g_inst, mrl);
 	if (!media)
 		return -2;
-	/* 软硬解：Texture/RGBA 回调路径硬解常黑屏或崩，非 HWND 时强制软解 */
-	if (p_media_add_option) {
-		if (!g_hard) {
-			p_media_add_option(media, ":avcodec-hw=none");
-		} else if (g_soft_decode >= 0) {
-			p_media_add_option(media, g_soft_decode ? ":avcodec-hw=none" : ":avcodec-hw=any");
-		}
-	}
+	/* 软硬解按 media 选项下发；默认 auto（g_soft_decode<0）不附加，保持 libvlc 默认（对齐 8/8）。 */
+	if (g_soft_decode >= 0 && p_media_add_option)
+		p_media_add_option(media, g_soft_decode ? ":avcodec-hw=none" : ":avcodec-hw=any");
 	/* 单集无限循环（TV REPEAT_MODE_ONE）；极大次数近似无限 */
 	if (g_repeat_one && p_media_add_option)
 		p_media_add_option(media, ":input-repeat=999999");
@@ -871,14 +860,8 @@ int kotv_vlc_get_repeat(void) {
 }
 
 void kotv_vlc_stop(void) {
-	if (g_mp) {
-		if (p_set_volume)
-			p_set_volume(g_mp, 0);
-		if (p_set_pause)
-			p_set_pause(g_mp, 1);
-		if (p_stop)
-			p_stop(g_mp);
-	}
+	if (g_mp && p_stop)
+		p_stop(g_mp);
 	g_frame.dirty = 0;
 	g_buffer_at_ms = 0;
 	g_speed_last_bytes = -1;

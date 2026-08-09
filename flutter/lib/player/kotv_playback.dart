@@ -197,10 +197,6 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
-    // 对齐 TV：伪装 HLS（URL 无 m3u8）IO/demux 失败时强制 HLS 再开一次。
-    _subs.add(player.stream.error.listen((msg) {
-      unawaited(_maybeRetryDisguisedHls(msg));
-    }));
     _speedTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
       // 起播/缓冲/播放中都采：浮层 force 显示「加载中」时也要有数，不能等 buffering 才读。
       if (_buffering || player.state.buffering || player.state.playing) {
@@ -224,9 +220,6 @@ class MediaKitPlayback extends KotvPlayback {
   int _lastCacheBytes = -1;
   DateTime? _lastCacheAt;
   late Future<void> _optsReady;
-  /// 本轮已强制按 HLS 重试过（对齐 TV retryHls，避免死循环）。
-  bool _forcedHls = false;
-  bool _hlsRetryBusy = false;
 
   Future<void> _prepareOpts() async {
     // 先等 VideoController 附着，再写缓冲/hwdec，避免与 media_kit 并行 setProperty。
@@ -379,69 +372,33 @@ class MediaKitPlayback extends KotvPlayback {
       final pos = position;
       final wasPlaying = playing;
       await _awaitReadyForOpen();
-      await _openMedia(_url, _headers, forceHls: _forcedHls);
+      await player
+          .open(Media(_url, httpHeaders: _headers.isEmpty ? const {} : _headers))
+          .timeout(const Duration(seconds: 45));
       await player.seek(pos);
       if (wasPlaying) await player.play();
     }
     notifyListeners();
   }
 
-  static bool _urlLooksLikeHls(String url) {
-    final u = url.toLowerCase();
-    return u.contains('.m3u8') || u.contains('m3u8');
-  }
-
-  static bool _errorLooksLikeIoOrDemux(String msg) {
-    final m = msg.toLowerCase();
-    return m.contains('http') ||
-        m.contains('ffmpeg') ||
-        m.contains('demux') ||
-        m.contains('failed to open') ||
-        m.contains('unable to open') ||
-        m.contains('no such file') ||
-        m.contains('invalid data') ||
-        m.contains('unspecified') ||
-        m.contains('error opening') ||
-        m.contains('failed to recognize');
-  }
-
-  Future<void> _openMedia(String url, Map<String, String> headers, {required bool forceHls}) async {
-    try {
-      final platform = player.platform;
-      if (platform != null) {
-        if (forceHls) {
-          await (platform as dynamic).setProperty('demuxer-lavf-format', 'hls');
-        } else {
-          // 清掉上一轮强制 HLS，避免点播/普通流被钉死
-          try {
-            await (platform as dynamic).setProperty('demuxer-lavf-format', '');
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
-    await player
-        .open(Media(url, httpHeaders: headers.isEmpty ? const {} : headers))
-        .timeout(const Duration(seconds: 45));
-  }
-
-  Future<void> _retryAsHls(String url, Map<String, String> headers) async {
-    _forcedHls = true;
-    await _awaitReadyForOpen();
-    await _openMedia(url, headers, forceHls: true);
-  }
-
-  Future<void> _maybeRetryDisguisedHls(String msg) async {
-    if (_hlsRetryBusy || _forcedHls || _url.isEmpty) return;
-    if (_urlLooksLikeHls(_url)) return;
-    if (!_errorLooksLikeIoOrDemux(msg)) return;
-    _hlsRetryBusy = true;
-    try {
-      await _retryAsHls(_url, _headers);
-    } catch (_) {
-      // 重试仍失败：保留错误流已有信息，不再抛到 UI 线程
-    } finally {
-      _hlsRetryBusy = false;
+  @override
+  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+    _url = url;
+    _speedBps = 0;
+    _lastCacheBytes = -1;
+    _lastCacheAt = null;
+    // DRM 需 Exo（对齐 TV requiresExo）；MPV 无法解 Widevine/PlayReady
+    if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
+      throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
+    final h = kotvNormalizePlayHeaders(headers, url: url);
+    _headers = h;
+    await _awaitReadyForOpen();
+    // 让出一帧：Player/VC 刚建完立刻 open 时，PC 偶发卡死 UI、Android 原生 abort。
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    await player
+        .open(Media(url, httpHeaders: h.isEmpty ? const {} : h))
+        .timeout(const Duration(seconds: 45));
   }
 
   @override
@@ -476,36 +433,6 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Stream<bool> get completedStream => player.stream.completed;
-
-  @override
-  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
-    _url = url;
-    _speedBps = 0;
-    _lastCacheBytes = -1;
-    _lastCacheAt = null;
-    _forcedHls = false;
-    // DRM 需 Exo（对齐 TV requiresExo）；MPV 无法解 Widevine/PlayReady
-    if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
-      throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
-    }
-    final h = kotvNormalizePlayHeaders(headers, url: url);
-    _headers = h;
-    await _awaitReadyForOpen();
-    // 让出一帧：Player/VC 刚建完立刻 open 时，PC 偶发卡死 UI、Android 原生 abort。
-    await Future<void>.delayed(const Duration(milliseconds: 16));
-    try {
-      await _openMedia(url, h, forceHls: false);
-    } catch (e) {
-      // 对齐 TV Retry disguised HLS：open 直接失败且 URL 不像 m3u8 时强制 HLS 再试。
-      if (!_urlLooksLikeHls(url) && !_forcedHls) {
-        try {
-          await _retryAsHls(url, h);
-          return;
-        } catch (_) {}
-      }
-      rethrow;
-    }
-  }
 
   @override
   Future<void> playOrPause() async => player.playOrPause();

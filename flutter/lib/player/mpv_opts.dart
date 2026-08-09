@@ -101,8 +101,6 @@ class KotvMpvOpts {
         await set('demuxer-readahead-secs', '1000000');
         await set('cache-secs', '1000000');
         await set('framedrop', 'vo');
-        // 钉死 hwdec，避免 media_kit/conf 又改回零拷贝。
-        await set('hwdec', hwdecValue());
       } catch (_) {}
 
       for (final e in parseConfLines(conf)) {
@@ -133,10 +131,8 @@ class KotvMpvOpts {
         value = line.substring(m.end).trim();
       }
       if (key.isEmpty) continue;
-      // 跳过会破坏 Flutter Texture 输出的选项；hwdec 由 hwdecValue 统一钉死
-      if (key == 'vo' || key == 'wid' || key == 'android-surface-size' || key == 'hwdec') {
-        continue;
-      }
+      // 跳过会破坏 Flutter Texture 输出的选项
+      if (key == 'vo' || key == 'wid' || key == 'android-surface-size') continue;
       out.add((key, value.isEmpty ? 'yes' : value));
     }
     return out;

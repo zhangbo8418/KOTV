@@ -154,13 +154,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (p.completed && !p.playing) {
       next = '播放结束';
     } else if (magnet && (_isBuffering ||
-            !(p.position > Duration.zero || p.width > 0))) {
+            !(p.position > Duration.zero || p.duration > Duration.zero || p.width > 0))) {
       next = '磁力缓冲中…';
     } else if (_isBuffering) {
       next = '$prefix 缓冲中…';
     } else if (p.playing) {
-      // 不能仅凭 duration>0：VLC 常先拿到片长、尚未出帧，会关掉「加载中」浮层变成黑屏干等。
-      final started = p.position > Duration.zero || p.width > 0;
+      final started = p.position > Duration.zero || p.duration > Duration.zero || p.width > 0;
       if (started) {
         next = magnet ? '$prefix 播放中（磁力）' : '$prefix 播放中';
       } else {
