@@ -578,13 +578,19 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	snprintf(file_arg, sizeof(file_arg), "--file-caching=%d", cache_ms);
 
 #if defined(_WIN32)
-	/* Win7：DirectSound 在进程粗暴 exit 后常「声音卡系统」；waveout 释放更干净 */
+	/* Win7：DirectSound 在进程粗暴 exit 后常「声音卡系统」；waveout 释放更干净。
+	 * 不用 GetVersionExA（MSVC C4996 + /WX 会当成错误），改走 ntdll RtlGetVersion。 */
 	int is_win7 = 0;
 	{
-		OSVERSIONINFOA vi;
+		typedef LONG(WINAPI *RtlGetVersion_t)(OSVERSIONINFOW *);
+		HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+		RtlGetVersion_t pRtlGetVersion =
+		    ntdll ? (RtlGetVersion_t)GetProcAddress(ntdll, "RtlGetVersion") : NULL;
+		OSVERSIONINFOW vi;
 		memset(&vi, 0, sizeof(vi));
 		vi.dwOSVersionInfoSize = sizeof(vi);
-		if (GetVersionExA(&vi) && vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1)
+		if (pRtlGetVersion && pRtlGetVersion(&vi) == 0 && vi.dwMajorVersion == 6 &&
+		    vi.dwMinorVersion == 1)
 			is_win7 = 1;
 	}
 	const char *args_win7[] = {
@@ -709,13 +715,28 @@ int kotv_vlc_loaded(void) {
 	return g_lib && g_inst && g_mp ? 1 : 0;
 }
 
+/* MSVC 下 strncpy 会 C4996（/WX 变错误）；用 memcpy 截断拷贝即可。 */
+static void copy_cstr(char *dst, size_t dst_sz, const char *src) {
+	size_t n;
+	if (!dst || dst_sz == 0)
+		return;
+	if (!src) {
+		dst[0] = '\0';
+		return;
+	}
+	n = strlen(src);
+	if (n >= dst_sz)
+		n = dst_sz - 1;
+	memcpy(dst, src, n);
+	dst[n] = '\0';
+}
+
 static void save_mrl(const char *mrl) {
 	if (!mrl) {
 		g_mrl[0] = '\0';
 		return;
 	}
-	strncpy(g_mrl, mrl, sizeof(g_mrl) - 1);
-	g_mrl[sizeof(g_mrl) - 1] = '\0';
+	copy_cstr(g_mrl, sizeof(g_mrl), mrl);
 }
 
 static void save_headers(const char *const *header_lines, int n) {
@@ -727,8 +748,7 @@ static void save_headers(const char *const *header_lines, int n) {
 	for (int i = 0; i < n; ++i) {
 		if (!header_lines[i] || !header_lines[i][0])
 			continue;
-		strncpy(g_hdr_lines[g_hdr_n], header_lines[i], sizeof(g_hdr_lines[0]) - 1);
-		g_hdr_lines[g_hdr_n][sizeof(g_hdr_lines[0]) - 1] = '\0';
+		copy_cstr(g_hdr_lines[g_hdr_n], sizeof(g_hdr_lines[0]), header_lines[i]);
 		g_hdr_n++;
 	}
 }
