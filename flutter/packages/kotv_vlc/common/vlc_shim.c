@@ -872,9 +872,12 @@ int kotv_vlc_get_repeat(void) {
 
 void kotv_vlc_stop(void) {
 	if (g_mp) {
+		if (p_set_volume)
+			p_set_volume(g_mp, 0);
 		if (p_set_pause)
 			p_set_pause(g_mp, 1);
-		p_stop(g_mp);
+		if (p_stop)
+			p_stop(g_mp);
 	}
 	g_frame.dirty = 0;
 	g_buffer_at_ms = 0;
