@@ -5,8 +5,10 @@ import 'kotv_platform.dart';
 
 /// 注册 libmdk 为 [video_player] 实现（非 Web）。
 ///
-/// 不绑死 `video.decoders`：H.264 / HEVC 等硬解直出交给 mdk 与驱动协商。
-/// Android 仅关 tunnel（Surface 未就绪时隧道模式易黑屏有声），与编码白名单无关。
+/// 此处**不**绑死 `video.decoders`：开播时由 [FvpPlayback.setDecodeMode] /
+/// [kotvFvpVideoDecoders] 按「自动 / 硬解 / 软解」写入。
+/// 自动 = 硬解优先 + 软解回退（mdk 协商）；硬/软解才锁死列表。
+/// Android 仅关 tunnel（Surface 未就绪时隧道模式易黑屏有声）。
 ///
 /// Windows 直播 302：mdk 默认 **custom MediaIO**（`io.avio=0`）对
 /// `https → http` 空体跳转不可靠；切 FFmpeg 原生 avio，并放宽

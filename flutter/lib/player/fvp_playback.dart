@@ -6,6 +6,7 @@ import 'package:fvp/fvp.dart' show FVPControllerExtensions;
 import 'package:video_player/video_player.dart';
 
 import 'buffer_budget.dart';
+import 'fvp_decoders.dart';
 import 'kotv_playback.dart';
 import 'play_headers.dart';
 
@@ -25,6 +26,7 @@ class FvpPlayback extends KotvPlayback {
   String? _lastError;
   double _volume = 100;
   double _rate = 1;
+  String _decodeMode = 'auto';
 
   VideoPlayerController? get controller => _c;
 
@@ -191,6 +193,8 @@ class FvpPlayback extends KotvPlayback {
         notifyListeners();
       };
       c.addListener(_listener!);
+      // initialize 前写入解码器列表（硬/软锁死；自动=硬解优先+软解回退）。
+      _applyDecodeMode(c);
       // 先让父级 rebuild 挂上 VideoPlayer，再 initialize。
       notifyListeners();
       await SchedulerBinding.instance.endOfFrame;
@@ -285,7 +289,26 @@ class FvpPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> setDecodeMode(String mode) async {}
+  Future<void> setDecodeMode(String mode) async {
+    final next = switch (mode.trim().toLowerCase()) {
+      'soft' || 'software' || 'sw' => 'soft',
+      'hard' || 'hardware' || 'hw' => 'hard',
+      _ => 'auto',
+    };
+    if (next == _decodeMode) {
+      _applyDecodeMode(_c);
+      return;
+    }
+    _decodeMode = next;
+    _applyDecodeMode(_c);
+  }
+
+  void _applyDecodeMode(VideoPlayerController? c) {
+    if (c == null) return;
+    try {
+      c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
+    } catch (_) {}
+  }
 
   @override
   Future<void> setAudioTrack(String id) async {}
