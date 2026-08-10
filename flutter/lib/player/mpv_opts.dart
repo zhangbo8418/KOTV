@@ -12,7 +12,7 @@ import 'kotv_platform.dart';
 /// ## 平台能力
 /// | 选项 | Android | 桌面 (PC) |
 /// |------|---------|-----------|
-/// | hwdec | ✅ mediacodec 直出 / auto | ✅ d3d11va/auto 直出（Win 排除 hevc 防卡死） |
+/// | hwdec | ✅ mediacodec 直出 / auto | ✅ 硬解直出（Win10+ d3d11va；Win7 dxva2） |
 /// | mpv.conf | ✅ 事后 setProperty | ✅ 同上 |
 /// | gpu-next | ✅ vo=gpu-next | ❌ Flutter Texture 必须 vo=libmpv |
 class KotvMpvOpts {
@@ -54,8 +54,8 @@ class KotvMpvOpts {
 
   /// 供 setProperty / VideoController 使用的 hwdec 值。
   ///
-  /// PC / Android 默认走硬解**直出**（非 *-copy）。Windows 上部分 HEVC 直播
-  /// （如咪咕 HLS）用 d3d11va 直出会卡死 UI，见 [applyAfterAttach] 对 hevc 的排除。
+  /// H.264 / HEVC 等交给 mpv 与驱动协商，
+  /// 不做按编码白名单。Win7 用 dxva2（见下），不是软解也不是 copy。
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
@@ -64,7 +64,8 @@ class KotvMpvOpts {
     }
     if (hard) {
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-        // Win7 多为 dxva2 直出；Win10+ d3d11va 直出。
+        // Win7：D3D11 视频解码 API（d3d11va）基本不可用/极不稳，用 dxva2 直出。
+        // Win8+ / Win10+：d3d11va 直出。
         return kotvIsWindows7() ? 'dxva2' : 'd3d11va';
       }
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
@@ -103,14 +104,6 @@ class KotvMpvOpts {
       try {
         await set('hwdec', hwdecValue());
       } catch (_) {}
-
-      // Windows：H.264 等保持硬解直出；HEVC 直出在部分直播（咪咕 HLS）会卡死整窗 UI，
-      // 故不把 hevc 交给 d3d11va，改走软解。fengshows 实为 FLV/H264，仍走直出。
-      if (!soft && !kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-        try {
-          await set('hwdec-codecs', 'h264,vc1,wmv3,mpeg2video,vp9,av1');
-        } catch (_) {}
-      }
 
       try {
         await KotvBufferBudget.warm(force: true);
