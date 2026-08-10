@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:video_player/video_player.dart';
 
+import 'fvp_media_url.dart';
 import 'kotv_playback.dart';
 import 'play_headers.dart';
 
@@ -149,11 +150,12 @@ class FvpPlayback extends KotvPlayback {
       await _disposeController();
       notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
-      final uri = Uri.parse(url);
-      // URL 常带 ?id=xxx.m3u8 却实际是 FLV（fengshows）；真实 HLS 也可能是 HEVC（咪咕）。
-      // 不传 FormatHint，交给 mdk/ffmpeg 按内容探测，避免误当成 HLS。
+      // URL 常带 ?id=xxx.m3u8 却实际是 FLV（fengshows）。mdk 若按扩展名走 HLS，
+      // prepare 会失败并显示「invalid or unsupported media」。先探魔数再 mdkopt 强制 input。
+      final inputFmt = await kotvProbeAvInputFormat(url, headers: h);
+      final mediaUrl = kotvFvpMediaUrl(url, inputFormat: inputFmt);
       final c = VideoPlayerController.networkUrl(
-        uri,
+        Uri.parse(mediaUrl),
         httpHeaders: h,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );

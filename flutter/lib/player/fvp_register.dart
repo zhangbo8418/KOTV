@@ -7,17 +7,25 @@ import 'kotv_platform.dart';
 ///
 /// 不绑死 `video.decoders`：H.264 / HEVC 等硬解直出交给 mdk 与驱动协商。
 /// Android 仅关 tunnel（Surface 未就绪时隧道模式易黑屏有声），与编码白名单无关。
+/// 直播伪扩展名由 [kotvProbeAvInputFormat] + mdkopt 处理；此处加大 probesize 辅助协商。
 void kotvRegisterFvp() {
   if (kIsWeb) return;
   const platforms = ['windows', 'macos', 'linux', 'android', 'ios'];
+  const playerOpts = <String, String>{
+    // 直播 / 伪扩展名：给足探测窗口（勿用 lowLatency 的极小 analyzeduration，易 prepare 失败）
+    'avformat.probesize': '8000000',
+    'avformat.analyzeduration': '8000000',
+  };
   if (kotvIsAndroid()) {
     fvp.registerWith(options: {
       'platforms': platforms,
       'tunnel': false,
+      'player': playerOpts,
     });
     return;
   }
   fvp.registerWith(options: {
     'platforms': platforms,
+    'player': playerOpts,
   });
 }
