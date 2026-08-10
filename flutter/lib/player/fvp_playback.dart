@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:video_player/video_player.dart';
 
 import 'kotv_playback.dart';
@@ -10,6 +10,9 @@ import 'play_headers.dart';
 /// 页内 FVP（libmdk）：经 [video_player] + fvp 插件，桌面/手机零拷贝路径。
 ///
 /// 须在 [main] 里先 `registerWith`（见 [kotvRegisterFvp]）。
+///
+/// 起播顺序必须先挂 [VideoPlayer]（建立 Texture/Surface），再 `initialize`/`play`，
+/// 否则常见「有声黑屏」。
 class FvpPlayback extends KotvPlayback {
   VideoPlayerController? _c;
   final _posCtrl = StreamController<Duration>.broadcast();
@@ -83,14 +86,19 @@ class FvpPlayback extends KotvPlayback {
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     final c = _c;
-    if (c == null || !c.value.isInitialized) {
+    if (c == null) {
       return const ColoredBox(color: Colors.black);
+    }
+    // 未 initialize / 尺寸未知时也要挂上 VideoPlayer，否则 fvp 无 Surface 会黑屏有声。
+    final sz = c.value.size;
+    if (!c.value.isInitialized || sz.width <= 0 || sz.height <= 0) {
+      return ColoredBox(color: Colors.black, child: VideoPlayer(c));
     }
     return FittedBox(
       fit: fit,
       child: SizedBox(
-        width: c.value.size.width,
-        height: c.value.size.height,
+        width: sz.width,
+        height: sz.height,
         child: VideoPlayer(c),
       ),
     );
@@ -130,6 +138,10 @@ class FvpPlayback extends KotvPlayback {
         notifyListeners();
       };
       c.addListener(_listener!);
+      // 先让父级 rebuild 挂上 VideoPlayer，再 initialize。
+      notifyListeners();
+      await SchedulerBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 16));
       await c.initialize();
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);

@@ -220,24 +220,33 @@ class MediaKitPlayback extends KotvPlayback {
   late Future<void> _optsReady;
 
   Future<void> _prepareOpts() async {
-    // 先等 VideoController 附着，再写缓冲/hwdec，避免与 media_kit 并行 setProperty。
+    // 等 VideoController 真正附着后再写缓冲/hwdec。
+    // 切勿在未附着时「等 50ms 就假完成」——进页预热 MPV 时 Video 还不在树上，
+    // 提前 setProperty 再 open 会在 Windows 上卡死整窗。
+    await _waitVideoControllerAttached(timeout: const Duration(seconds: 3));
+    final platform = player.platform;
+    if (platform == null || !platform.isVideoControllerAttached) {
+      // 仍未附着：留给 open 前的 _awaitReadyForOpen 再等；此处不 apply。
+      return;
+    }
     try {
-      final platform = player.platform;
-      if (platform != null && platform.isVideoControllerAttached) {
-        await platform.waitForVideoControllerInitializationIfAttached
-            .timeout(const Duration(seconds: 8));
-      } else {
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-        final p2 = player.platform;
-        if (p2 != null && p2.isVideoControllerAttached) {
-          await p2.waitForVideoControllerInitializationIfAttached
-              .timeout(const Duration(seconds: 8));
-        }
-      }
+      await platform.waitForVideoControllerInitializationIfAttached
+          .timeout(const Duration(seconds: 8));
     } catch (_) {}
     try {
       await _opts.applyAfterAttach(player);
     } catch (_) {}
+  }
+
+  Future<void> _waitVideoControllerAttached({required Duration timeout}) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final platform = player.platform;
+      if (platform != null && platform.isVideoControllerAttached) {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
   }
 
   /// 等 opts + VideoController 就绪后再 open，避免起播竞态卡死。
@@ -245,11 +254,16 @@ class MediaKitPlayback extends KotvPlayback {
     try {
       await _optsReady.timeout(const Duration(seconds: 5));
     } catch (_) {}
+    await _waitVideoControllerAttached(timeout: const Duration(seconds: 8));
     try {
       final platform = player.platform;
       if (platform != null && platform.isVideoControllerAttached) {
         await platform.waitForVideoControllerInitializationIfAttached
             .timeout(const Duration(seconds: 8));
+        // 构造时若未附着，opts 可能尚未 apply；open 前补一次。
+        try {
+          await _opts.applyAfterAttach(player);
+        } catch (_) {}
       }
     } catch (_) {}
   }

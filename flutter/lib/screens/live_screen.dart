@@ -163,6 +163,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _decodeMode = 'auto';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   String _playerVal = kotvDefaultLivePlayer();
+  /// 进页时暂存音量，等首播挂上 Video 后再套，避免空树创建 MPV 卡死。
+  double? _pendingVolume;
+  int _playSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
   Timer? _catchupHideTimer;
@@ -241,14 +244,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           playerVal = kotvDefaultLivePlayer();
         }
         _playerVal = kotvClampPlayerVal(playerVal, live: true);
-        // Win7：进页不碰 native 播放器；等用户点台再 open。
+        // Win7 / 桌面：进页不要碰 native 播放器。
+        // 默认 MPV 时若在 _playUrl 空（无 Video）时创建 Player 并 setProperty，Windows 首播会整窗卡死。
         if (!kotvIsWindows7()) {
           final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
-          if (vol != null) {
-            await _playback.setVolume(vol.clamp(0, 100));
-          }
-          if (!mounted) return;
-          await _playback.setDecodeMode(_decodeMode);
+          if (vol != null) _pendingVolume = vol.clamp(0, 100);
         }
       } catch (_) {}
       if (!mounted) return;
@@ -509,23 +509,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _openLiveUrl(String url, {Map<String, String>? headers}) async {
-    await _playback.setDecodeMode(_decodeMode);
     await _stopInactiveBackends(_backend);
+    // 先挂画面再创建/配置播放器：MPV 需 VideoController 附着后才能安全 setProperty/open。
     if (mounted) {
       setState(() {
         _playUrl = url;
         _playHeaders = headers;
       });
       await WidgetsBinding.instance.endOfFrame;
+      await WidgetsBinding.instance.endOfFrame;
     } else {
       _playUrl = url;
       _playHeaders = headers;
     }
     if (_backend == KotvEmbedBackend.mpv) {
-      // Win7 上 media_kit 偶发卡死：开播加超时，失败则自动切 FVP。
       final mk = _ensureMpv();
+      await mk.setDecodeMode(_decodeMode);
       try {
-        await mk.open(url, headers: headers).timeout(const Duration(seconds: 8));
+        await mk.open(url, headers: headers).timeout(const Duration(seconds: 12));
       } on TimeoutException {
         if (kotvIsDesktop()) {
           _playerVal = 'innie#fvp';
@@ -535,9 +536,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           try {
             await mk.stop();
           } catch (_) {}
+          if (mounted) {
+            setState(() {});
+            await WidgetsBinding.instance.endOfFrame;
+          }
           _fvp ??= FvpPlayback();
           await _fvp!.setDecodeMode(_decodeMode);
-          await _fvp!.open(url, headers: headers);
+          await _fvp!.open(url, headers: headers).timeout(const Duration(seconds: 20));
           try {
             await _fvp!.play();
           } catch (_) {}
@@ -551,9 +556,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     } else {
       final pb = _playback;
       await pb.setDecodeMode(_decodeMode);
-      await pb.open(url, headers: headers);
+      await pb.open(url, headers: headers).timeout(const Duration(seconds: 25));
       try {
         await pb.play();
+      } catch (_) {}
+    }
+    final pending = _pendingVolume;
+    if (pending != null) {
+      _pendingVolume = null;
+      try {
+        await _playback.setVolume(pending);
       } catch (_) {}
     }
   }
@@ -562,10 +574,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     if (_playUrl.isEmpty) {
       return const ColoredBox(color: Colors.black);
     }
-    return kotvPlaybackView(
-      playerVal: _playerVal,
-      playback: _playback,
-      mpv: _mk,
+    // FVP/MPV 尺寸与缓冲状态变化时重建画面（否则 0×0 / 晚挂 Texture 会黑屏有声）。
+    return ListenableBuilder(
+      listenable: _playback,
+      builder: (context, _) => kotvPlaybackView(
+        playerVal: _playerVal,
+        playback: _playback,
+        mpv: _mk,
+      ),
     );
   }
 
@@ -573,6 +589,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     if (!await _ensureUnlocked(_groupIdx)) return;
     final chs = _channels;
     if (chIdx < 0 || chIdx >= chs.length) return;
+    final serial = ++_playSerial;
     final ch = chs[chIdx];
     final useLine = line ?? (ch['line'] as int? ?? 0);
     setState(() {
@@ -584,10 +601,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _catchup = false;
       _catchupChrome = false;
     });
+    // EPG 与开播解耦：勿等 open 成功（FVP/MPV 卡住时节目单也出不来）。
+    unawaited(_loadEpg());
     await _stopAllBackends();
-    if (!mounted) return;
+    if (!mounted || serial != _playSerial) return;
     try {
       final data = await ref.read(apiProvider).livePlay(group: _groupIdx, channel: chIdx, line: useLine);
+      if (!mounted || serial != _playSerial) return;
       final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
       if (url.isEmpty) throw Exception('空播放地址');
       final headers = <String, String>{
@@ -597,17 +617,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _lines = (data['lines'] as int?) ?? 1;
       _line = (data['line'] as int?) ?? useLine;
       await _openLiveUrl(url, headers: headers.isEmpty ? null : headers);
-      if (!mounted) return;
+      if (!mounted || serial != _playSerial) return;
       setState(() => _status = '播放中 · $_title');
       _scheduleHideOverlays();
       // 移动端播放器控件：显示后自动隐藏
       if (KotvLayout.useBottomNav(context) || KotvLayout.isCompact(context)) {
         _pulsePortraitChrome();
       }
-      unawaited(_loadEpg());
       await _saveLiveKeep();
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: _title, url: url);
     } catch (e) {
+      if (!mounted || serial != _playSerial) return;
       setState(() => _status = '播放失败: $e');
     }
   }

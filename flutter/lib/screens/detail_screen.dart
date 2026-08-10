@@ -786,11 +786,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await _stopInactiveBackends(_backend);
       }
       if (serial != _playAtSerial || !mounted) return;
-      final pb = _playback;
-      await pb.setDecodeMode(_decodeMode);
       // Exo 对齐 TV：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
       var openUrl = playUrl;
       Map<String, String>? openHeaders = headers.isEmpty ? null : headers;
+      // 先挂画面再取后端：避免默认 MPV 在 Video 未附着时 setDecodeMode/open 卡死。
+      setState(() {
+        _playUrl = playUrl;
+        _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      await WidgetsBinding.instance.endOfFrame;
+      if (serial != _playAtSerial || !mounted) return;
+      final pb = _playback;
+      await pb.setDecodeMode(_decodeMode);
       if (_backend == KotvEmbedBackend.exo || hasDrm) {
         final cached = playUrl.contains('/proxy/cached_m3u8');
         final proxied = playUrl.contains('/proxy/play');
@@ -804,13 +812,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           openHeaders = null;
         }
       }
-      // 先挂播放器视图再 open：macOS VLC 硬渲需 AppKitView 先 created 再 attach。
-      setState(() {
-        _playUrl = playUrl;
-        _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
-      });
-      await WidgetsBinding.instance.endOfFrame;
-      if (serial != _playAtSerial || !mounted) return;
       await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
       try {
         await pb.play();
@@ -1080,11 +1081,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                   )
                 : Image.network(d.pic, fit: BoxFit.contain))
           else
-            kotvPlaybackView(
-              playerVal: _playerVal,
-              playback: _playback,
-              mpv: _mk,
-              fit: _aspect.fit,
+            ListenableBuilder(
+              listenable: _playback,
+              builder: (context, _) => kotvPlaybackView(
+                playerVal: _playerVal,
+                playback: _playback,
+                mpv: _mk,
+                fit: _aspect.fit,
+              ),
             ),
           if (_playUrl.isNotEmpty)
             KotvBufferingOverlay(
