@@ -1113,9 +1113,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                     player: _playback,
                     force: _status.contains('解析') ||
                         _status.contains('加载') ||
-                        _status.contains('缓冲'),
+                        _status.contains('缓冲') ||
+                        _loading,
                   ),
-                  if (_loading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                   if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
                   // 点击分区：左 28% 频道 / 右 28% 设置 / 中 显隐返回+底栏（与菜单互斥）
                   Positioned.fill(
@@ -1647,9 +1647,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   player: _playback,
                   force: _status.contains('解析') ||
                       _status.contains('加载') ||
-                      _status.contains('缓冲'),
+                      _status.contains('缓冲') ||
+                      _loading,
                 ),
-                if (_loading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                 if (_error != null)
                   Center(
                     child: Padding(

@@ -5,7 +5,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:fvp/fvp.dart' show FVPControllerExtensions;
 import 'package:video_player/video_player.dart';
 
-import 'fvp_media_url.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'play_headers.dart';
@@ -156,11 +155,9 @@ class FvpPlayback extends KotvPlayback {
       await _disposeController();
       notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
-      // 网关常 302 到 http CDN（体为空）。跟跳后把最终 URL 交给 mdk，按真实路径/内容协商，
-      // 不按 ?id=xxx.m3u8 这类查询串扩展名猜测，也不强行 mdkopt。
-      final mediaUrl = await kotvResolveFvpMediaUrl(url, headers: h);
+      // 302 交给 mdk/FFmpeg（见 [kotvRegisterFvp] io.avio + protocol_whitelist），勿在 Flutter 预展开。
       final c = VideoPlayerController.networkUrl(
-        Uri.parse(mediaUrl),
+        Uri.parse(url),
         httpHeaders: h,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );
