@@ -811,9 +811,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       });
       await WidgetsBinding.instance.endOfFrame;
       if (serial != _playAtSerial || !mounted) return;
-      await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
       try {
-        await pb.play();
+        await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
+      } on KotvSilentVideoException {
+        if (serial != _playAtSerial || !mounted) return;
+        final ok = await _fallbackSilentMpvToFvp(
+          openUrl: openUrl,
+          headers: openHeaders,
+          serial: serial,
+        );
+        if (!ok) rethrow;
+      }
+      try {
+        await _playback.play();
       } catch (_) {}
       if (serial != _playAtSerial || !mounted) return;
       // 起播后再套偏好：loudnorm 在 open 前同步套极易卡死主线程。
@@ -872,8 +882,35 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
   }
 
+  /// MPV 有声无画：本会话切 FVP 重开（不改设置默认值）。
+  Future<bool> _fallbackSilentMpvToFvp({
+    required String openUrl,
+    required Map<String, String>? headers,
+    required int serial,
+  }) async {
+    try {
+      await _mk?.stop();
+    } catch (_) {}
+    if (!mounted || serial != _playAtSerial) return false;
+    setState(() {
+      _playerVal = 'innie#fvp';
+      _status = 'MPV 无画面，已切 FVP…';
+    });
+    await _stopInactiveBackends(KotvEmbedBackend.fvp);
+    if (!mounted || serial != _playAtSerial) return false;
+    _fvp ??= FvpPlayback();
+    await _fvp!.setDecodeMode(_decodeMode);
+    await _fvp!.open(openUrl, headers: headers);
+    if (!mounted || serial != _playAtSerial) return false;
+    setState(() => _status = '内置 FVP 加载中…');
+    return true;
+  }
+
   /// 折叠「播放失败: 解析失败: 解析失败: …」这类层层包装。
   String _friendlyPlayError(Object e) {
+    if (e is KotvSilentVideoException) {
+      return '播放失败: MPV 无画面（可换 FVP/Exo）';
+    }
     var s = '$e';
     s = s.replaceFirst(RegExp(r'^(Exception|KotvApiException):\s*'), '');
     while (s.contains('解析失败: 解析失败:')) {

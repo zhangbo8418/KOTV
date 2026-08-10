@@ -519,7 +519,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     if (_backend == KotvEmbedBackend.mpv) {
       final mk = _ensureMpv();
       try {
-        await mk.open(url, headers: headers).timeout(const Duration(seconds: 12));
+        await mk.open(url, headers: headers).timeout(const Duration(seconds: 20));
+      } on KotvSilentVideoException {
+        await _fallbackLiveSilentMpvToFvp(url: url, headers: headers);
+        return;
       } on TimeoutException {
         // 硬解卡死时 Future 往往也醒不来；若能超时到这里，先软解重试再切 FVP。
         if (kotvIsDesktop() && _decodeMode != 'soft') {
@@ -530,26 +533,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
               setState(() => _status = 'MPV 硬解超时，已改软解');
             }
             return;
+          } on KotvSilentVideoException {
+            await _fallbackLiveSilentMpvToFvp(url: url, headers: headers);
+            return;
           } catch (_) {}
         }
         if (kotvIsDesktop()) {
-          _playerVal = 'innie#fvp';
-          try {
-            await ref.read(apiProvider).setSetting('playerLive', 'innie#fvp');
-          } catch (_) {}
-          try {
-            await mk.stop();
-          } catch (_) {}
-          if (mounted) setState(() {});
-          _fvp ??= FvpPlayback();
-          await _fvp!.setDecodeMode(_decodeMode);
-          await _fvp!.open(url, headers: headers).timeout(const Duration(seconds: 20));
-          try {
-            await _fvp!.play();
-          } catch (_) {}
-          if (mounted) {
-            setState(() => _status = 'MPV 超时，已自动切到内置 FVP');
-          }
+          await _fallbackLiveSilentMpvToFvp(
+            url: url,
+            headers: headers,
+            status: 'MPV 超时，已自动切到内置 FVP',
+          );
         } else {
           rethrow;
         }
@@ -562,6 +556,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         await pb.play();
       } catch (_) {}
     }
+  }
+
+  Future<void> _fallbackLiveSilentMpvToFvp({
+    required String url,
+    Map<String, String>? headers,
+    String status = 'MPV 无画面，已切 FVP',
+  }) async {
+    _playerVal = 'innie#fvp';
+    try {
+      await _mk?.stop();
+    } catch (_) {}
+    if (mounted) setState(() => _status = status);
+    await _stopInactiveBackends(KotvEmbedBackend.fvp);
+    _fvp ??= FvpPlayback();
+    await _fvp!.setDecodeMode(_decodeMode);
+    await _fvp!.open(url, headers: headers).timeout(const Duration(seconds: 20));
+    try {
+      await _fvp!.play();
+    } catch (_) {}
+    if (mounted) setState(() => _status = status);
   }
 
   Widget _liveVideo() {

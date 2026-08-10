@@ -162,6 +162,14 @@ bool kotvAudioIsAuto(String? id) {
   return id.toLowerCase().trim() == 'auto';
 }
 
+/// MPV 有声无画（硬软解均可能）：选轨/解码失败，调用方可回退 FVP。
+class KotvSilentVideoException implements Exception {
+  const KotvSilentVideoException([this.message = 'MPV 有声无画面']);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 String _trackLabel(dynamic t) {
   if (t.title?.isNotEmpty == true) return t.title! as String;
   if (t.language?.isNotEmpty == true) return t.language! as String;
@@ -397,6 +405,78 @@ class MediaKitPlayback extends KotvPlayback {
     await player
         .open(Media(url, httpHeaders: h.isEmpty ? const {} : h))
         .timeout(const Duration(seconds: 45));
+    await _guardSilentVideo();
+  }
+
+  bool get _videoVisible {
+    if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) return true;
+    final r = controller.rect.value;
+    return r != null && r.width > 1 && r.height > 1;
+  }
+
+  List<VideoTrack> _realVideoTracks() {
+    return player.state.tracks.video.where((t) {
+      if (kotvIsPseudoMediaTrack(t.id)) return false;
+      // 封面/附件图不算正片视频轨
+      if (t.image == true || t.albumart == true) return false;
+      return true;
+    }).toList()
+      ..sort((a, b) {
+        final aa = (a.w ?? 0) * (a.h ?? 0);
+        final bb = (b.w ?? 0) * (b.h ?? 0);
+        return bb.compareTo(aa);
+      });
+  }
+
+  /// 开播后若长时间无画面尺寸：重选视频轨 / 强制 lavc；仍无画面则抛 [KotvSilentVideoException]。
+  Future<void> _guardSilentVideo() async {
+    for (var i = 0; i < 25; i++) {
+      if (_videoVisible) return;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    if (_videoVisible) return;
+
+    await _reselectVideoTracks();
+    for (var i = 0; i < 15; i++) {
+      if (_videoVisible) return;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    if (_videoVisible) return;
+
+    // 再试：软解 lavc（部分源硬解「成功」但 Texture 无帧，软解开关未触发重开时也黑）
+    try {
+      await (player.platform as dynamic).setProperty('hwdec', 'no');
+      await (player.platform as dynamic).setProperty('vd', 'lavc');
+      await player.setVideoTrack(VideoTrack.auto());
+    } catch (_) {}
+    for (var i = 0; i < 10; i++) {
+      if (_videoVisible) return;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    if (_videoVisible) return;
+
+    final alive = player.state.playing ||
+        player.state.buffering ||
+        player.state.position > Duration.zero ||
+        player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack(t.id));
+    if (alive) {
+      throw const KotvSilentVideoException();
+    }
+  }
+
+  Future<void> _reselectVideoTracks() async {
+    final videos = _realVideoTracks();
+    for (final t in videos) {
+      try {
+        await player.setVideoTrack(t);
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        if (_videoVisible) return;
+      } catch (_) {}
+    }
+    try {
+      await player.setVideoTrack(VideoTrack.auto());
+      await (player.platform as dynamic).setProperty('vid', 'auto');
+    } catch (_) {}
   }
 
   @override
