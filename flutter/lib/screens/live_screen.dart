@@ -521,7 +521,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       try {
         await mk.open(url, headers: headers).timeout(const Duration(seconds: 12));
       } on TimeoutException {
-        // Windows 个别 HLS 硬解会卡死；超时后先软解重试，再不行切 FVP。
+        // 硬解卡死时 Future 往往也醒不来；若能超时到这里，先软解重试再切 FVP。
         if (kotvIsDesktop() && _decodeMode != 'soft') {
           try {
             await mk.setDecodeMode('soft');
@@ -1109,7 +1109,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                 fit: StackFit.expand,
                 children: [
                   _liveVideo(),
-                  KotvBufferingOverlay(player: _playback),
+                  KotvBufferingOverlay(
+                    player: _playback,
+                    force: _status.contains('解析') ||
+                        _status.contains('加载') ||
+                        _status.contains('缓冲'),
+                  ),
                   if (_loading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                   if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
                   // 点击分区：左 28% 频道 / 右 28% 设置 / 中 显隐返回+底栏（与菜单互斥）
@@ -1638,7 +1643,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   onTap: _togglePortraitChrome,
                   child: _liveVideo(),
                 ),
-                KotvBufferingOverlay(player: _playback),
+                KotvBufferingOverlay(
+                  player: _playback,
+                  force: _status.contains('解析') ||
+                      _status.contains('加载') ||
+                      _status.contains('缓冲'),
+                ),
                 if (_loading) const Center(child: CircularProgressIndicator(color: Colors.white)),
                 if (_error != null)
                   Center(

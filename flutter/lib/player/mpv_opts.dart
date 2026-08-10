@@ -12,7 +12,7 @@ import 'kotv_platform.dart';
 /// ## 平台能力
 /// | 选项 | Android | 桌面 (PC) |
 /// |------|---------|-----------|
-/// | hwdec | ✅ mediacodec-copy / auto-safe / no | ✅ auto / no |
+/// | hwdec | ✅ mediacodec 直出 / auto | ✅ d3d11va/auto 直出（Win 排除 hevc 防卡死） |
 /// | mpv.conf | ✅ 事后 setProperty | ✅ 同上 |
 /// | gpu-next | ✅ vo=gpu-next | ❌ Flutter Texture 必须 vo=libmpv |
 class KotvMpvOpts {
@@ -53,22 +53,20 @@ class KotvMpvOpts {
       decodeMode == 'hard' || decodeMode == 'hardware' || decodeMode == 'hw';
 
   /// 供 setProperty / VideoController 使用的 hwdec 值。
+  ///
+  /// PC / Android 默认走硬解**直出**（非 *-copy）。Windows 上部分 HEVC 直播
+  /// （如咪咕 HLS）用 d3d11va 直出会卡死 UI，见 [applyAfterAttach] 对 hevc 的排除。
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
-      // mediacodec 直出在不少机型 abort；copy 更稳。
-      return hard ? 'mediacodec-copy' : 'auto-safe';
-    }
-    // Windows + Flutter Texture（vo=libmpv）：
-    // `auto`/`d3d11va` 直出硬解对部分 HLS（如咪咕）会卡死 UI；
-    // 同机其它流（如 fengshows）又能播。一律用 *-copy 回写后再上传 Texture。
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      if (hard) {
-        return kotvIsWindows7() ? 'dxva2-copy' : 'd3d11va-copy';
-      }
-      return 'auto-copy';
+      // 直出：硬解 mediacodec；自动交给 mpv 选（优先硬解）。
+      return hard ? 'mediacodec' : 'auto';
     }
     if (hard) {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+        // Win7 多为 dxva2 直出；Win10+ d3d11va 直出。
+        return kotvIsWindows7() ? 'dxva2' : 'd3d11va';
+      }
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
         return 'videotoolbox';
       }
@@ -105,6 +103,14 @@ class KotvMpvOpts {
       try {
         await set('hwdec', hwdecValue());
       } catch (_) {}
+
+      // Windows：H.264 等保持硬解直出；HEVC 直出在部分直播（咪咕 HLS）会卡死整窗 UI，
+      // 故不把 hevc 交给 d3d11va，改走软解。fengshows 实为 FLV/H264，仍走直出。
+      if (!soft && !kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+        try {
+          await set('hwdec-codecs', 'h264,vc1,wmv3,mpeg2video,vp9,av1');
+        } catch (_) {}
+      }
 
       try {
         await KotvBufferBudget.warm(force: true);

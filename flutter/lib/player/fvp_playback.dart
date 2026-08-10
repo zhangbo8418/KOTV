@@ -7,12 +7,11 @@ import 'package:video_player/video_player.dart';
 import 'kotv_playback.dart';
 import 'play_headers.dart';
 
-/// 页内 FVP（libmdk）：经 [video_player] + fvp 插件，桌面/手机零拷贝路径。
+/// 页内 FVP（libmdk）：经 [video_player] + fvp 插件。
 ///
 /// 须在 [main] 里先 `registerWith`（见 [kotvRegisterFvp]）。
 ///
-/// 起播顺序必须先挂 [VideoPlayer]（建立 Texture/Surface），再 `initialize`/`play`，
-/// 否则常见「有声黑屏」。
+/// 起播顺序：先挂 [VideoPlayer]（建立 Texture/Surface），再 `initialize`/`play`。
 class FvpPlayback extends KotvPlayback {
   VideoPlayerController? _c;
   final _posCtrl = StreamController<Duration>.broadcast();
@@ -21,10 +20,13 @@ class FvpPlayback extends KotvPlayback {
   VoidCallback? _listener;
   bool _completed = false;
   bool _opening = false;
+  String? _lastError;
   double _volume = 100;
   double _rate = 1;
 
   VideoPlayerController? get controller => _c;
+
+  String? get lastError => _lastError;
 
   @override
   bool get playing => _opening ? false : (_c?.value.isPlaying ?? false);
@@ -45,6 +47,7 @@ class FvpPlayback extends KotvPlayback {
     return c.value.buffered.last.end;
   }
 
+  /// 起播整段（含 initialize）视为缓冲，避免 `stop()` 清掉标记后浮层消失。
   @override
   bool get buffering => _opening || (_c?.value.isBuffering ?? false);
 
@@ -89,10 +92,29 @@ class FvpPlayback extends KotvPlayback {
     if (c == null) {
       return const ColoredBox(color: Colors.black);
     }
-    // 未 initialize / 尺寸未知时也要挂上 VideoPlayer，否则 fvp 无 Surface 会黑屏有声。
+    final err = c.value.errorDescription ?? _lastError;
+    if (err != null && err.isNotEmpty && !c.value.isInitialized) {
+      return ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              err,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ),
+        ),
+      );
+    }
+    // 未出尺寸前占满父级，保证 Windows Texture 有非零面积（FittedBox+0x0 会一直黑）。
     final sz = c.value.size;
     if (!c.value.isInitialized || sz.width <= 0 || sz.height <= 0) {
-      return ColoredBox(color: Colors.black, child: VideoPlayer(c));
+      return ColoredBox(
+        color: Colors.black,
+        child: SizedBox.expand(child: VideoPlayer(c)),
+      );
     }
     return FittedBox(
       fit: fit,
@@ -104,18 +126,32 @@ class FvpPlayback extends KotvPlayback {
     );
   }
 
+  Future<void> _disposeController() async {
+    final c = _c;
+    final l = _listener;
+    _c = null;
+    _listener = null;
+    if (c != null && l != null) c.removeListener(l);
+    await c?.dispose();
+  }
+
   @override
   Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
     _opening = true;
+    _lastError = null;
+    _completed = false;
     notifyListeners();
     try {
-      await stop();
-      _completed = false;
+      // 勿调用 stop()：它会把 _opening 清掉，缓冲浮层会立刻消失。
+      await _disposeController();
+      notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
       final uri = Uri.parse(url);
+      // URL 常带 ?id=xxx.m3u8 却实际是 FLV（fengshows）；真实 HLS 也可能是 HEVC（咪咕）。
+      // 不传 FormatHint，交给 mdk/ffmpeg 按内容探测，避免误当成 HLS。
       final c = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: h,
@@ -125,8 +161,15 @@ class FvpPlayback extends KotvPlayback {
       _listener = () {
         if (_c != c) return;
         final v = c.value;
+        if (v.hasError) {
+          _lastError = v.errorDescription ?? 'FVP 播放错误';
+        }
         if (_opening &&
-            (v.isPlaying || v.isBuffering || v.position > Duration.zero || v.isCompleted)) {
+            (v.isPlaying ||
+                v.isBuffering ||
+                v.position > Duration.zero ||
+                (v.isInitialized && v.size.width > 0) ||
+                v.isCompleted)) {
           _opening = false;
         }
         _posCtrl.add(v.position);
@@ -141,14 +184,22 @@ class FvpPlayback extends KotvPlayback {
       // 先让父级 rebuild 挂上 VideoPlayer，再 initialize。
       notifyListeners();
       await SchedulerBinding.instance.endOfFrame;
-      await Future<void>.delayed(const Duration(milliseconds: 16));
+      await Future<void>.delayed(const Duration(milliseconds: 32));
       await c.initialize();
+      if (c.value.hasError) {
+        _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
+        throw StateError(_lastError!);
+      }
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
       await c.play();
-      _opening = false;
+      // 直播可能长时间 size=0：保持 _opening 直到首帧/出尺寸，浮层继续显示。
+      if (c.value.isPlaying && c.value.size.width > 0) {
+        _opening = false;
+      }
       notifyListeners();
     } catch (e) {
+      _lastError = '$e';
       _opening = false;
       notifyListeners();
       rethrow;
@@ -182,12 +233,8 @@ class FvpPlayback extends KotvPlayback {
   @override
   Future<void> stop() async {
     _opening = false;
-    final c = _c;
-    final l = _listener;
-    _c = null;
-    _listener = null;
-    if (c != null && l != null) c.removeListener(l);
-    await c?.dispose();
+    _lastError = null;
+    await _disposeController();
     notifyListeners();
   }
 
