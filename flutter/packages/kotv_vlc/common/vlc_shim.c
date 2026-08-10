@@ -238,8 +238,11 @@ static void *g_hwnd;
 static volatile float g_buffer_pct = 0.f;
 /* 最近一次 buffering 事件时刻；陈旧事件不得再判为"缓冲中"（否则一直假缓冲） */
 static volatile int64_t g_buffer_at_ms = 0;
-/* 实际下发给 libvlc 的 network-caching（ms），用于估算已缓冲时长 */
+/* 起播用短时 caching（ms）。VLC 只暴露时间窗，不是字节预算；
+ * 拉到 60s 会让 HTTP/FLV/HLS（含点播页里的直播）先囤满再出画。 */
 static int g_cache_ms = 3000;
+/* 用户音量；stop 先静音消残留，play/resume 再恢复（勿 pause：会粘一帧） */
+static int g_volume = 80;
 
 /* 速度差分采样：libvlc 只给累计字节，自己按时间差算 bytes/s */
 static int64_t g_speed_last_bytes = -1;
@@ -568,8 +571,12 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 #endif
 	}
 
-	/* VLC 仅暴露时间缓存；按物理内存算字节预算，再换算成 ms（按 ~16Mbps≈2MB/s），
-	 * 使 4K/8K 不会因固定超长 network-caching 占满内存。（对齐 8/8 基线） */
+	/* 对齐 MPV/Exo 策略（VLC 能力所及）：
+	 * - 短时 *-caching：只作起播/重缓冲门槛（勿换成几十秒，否则会「等满才出画」）
+	 * - prefetch-buffer-size：按内存字节囤前向数据；暂停且未满时继续拉（VLC prefetch 行为） */
+	const int cache_ms = 3000;
+	g_cache_ms = cache_ms;
+
 	int64_t phys = 0;
 #if defined(_WIN32)
 	MEMORYSTATUSEX msx;
@@ -603,18 +610,21 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 		if (budget > max_b)
 			budget = max_b;
 	}
-	/* ms ≈ budget / 2MB/s；钳到 1.5s–60s */
-	int cache_ms = (int)((budget * 1000) / ((int64_t)2 * 1024 * 1024));
-	if (cache_ms < 1500)
-		cache_ms = 1500;
-	if (cache_ms > 60000)
-		cache_ms = 60000;
-	g_cache_ms = cache_ms;
+	/* prefetch-buffer-size 单位 KiB；VLC 范围约 4..(1<<20) */
+	int prefetch_kib = (int)(budget / 1024);
+	if (prefetch_kib < 16 * 1024)
+		prefetch_kib = 16 * 1024;
+	if (prefetch_kib > (1 << 20))
+		prefetch_kib = (1 << 20);
 
 	static char net_arg[48];
 	static char file_arg[48];
+	static char live_arg[48];
+	static char prefetch_arg[64];
 	snprintf(net_arg, sizeof(net_arg), "--network-caching=%d", cache_ms);
 	snprintf(file_arg, sizeof(file_arg), "--file-caching=%d", cache_ms);
+	snprintf(live_arg, sizeof(live_arg), "--live-caching=%d", cache_ms);
+	snprintf(prefetch_arg, sizeof(prefetch_arg), "--prefetch-buffer-size=%d", prefetch_kib);
 
 	const char *args[] = {
 	    "--no-video-title-show",
@@ -624,7 +634,9 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 	    "--stats",
 	    net_arg,
 	    file_arg,
-	    "--live-caching=3000",
+	    live_arg,
+	    "--stream-filter=prefetch",
+	    prefetch_arg,
 	    "--clock-jitter=0",
 	    "--drop-late-frames",
 	    "--skip-frames",
@@ -638,7 +650,8 @@ int kotv_vlc_load(const char *lib_dir, const char *plugin_dir) {
 
 	attach_callbacks();
 	frame_ensure(1280, 720);
-	/* 不对 atexit 注册 stop：与 Dart 关窗/析构叠多层 stop 会崩（对齐 8/8）。 */
+	/* 不对 atexit 注册 stop/unload：与 Dart 关窗叠多层 stop 或 FreeLibrary 会崩。
+	 * 关窗残留音：Dart shutdown → kotv_vlc_stop 静音即可。 */
 	return 0;
 }
 
@@ -825,6 +838,9 @@ static int play_at_internal(const char *mrl, int64_t start_ms, const char *const
 	}
 	if (p_play(g_mp) != 0)
 		return -3;
+	/* stop 会静音；起播后恢复用户音量 */
+	if (p_set_volume)
+		p_set_volume(g_mp, g_volume);
 	return 0;
 }
 
@@ -860,8 +876,14 @@ int kotv_vlc_get_repeat(void) {
 }
 
 void kotv_vlc_stop(void) {
-	if (g_mp && p_stop)
-		p_stop(g_mp);
+	/* 先静音再 stop：DirectSound/WASAPI 收尾时常见残留嗡鸣。
+	 * 不要 pause：pause 会粘在 player 上，下次 open 只出一帧。 */
+	if (g_mp) {
+		if (p_set_volume)
+			p_set_volume(g_mp, 0);
+		if (p_stop)
+			p_stop(g_mp);
+	}
 	g_frame.dirty = 0;
 	g_buffer_at_ms = 0;
 	g_speed_last_bytes = -1;
@@ -873,8 +895,12 @@ void kotv_vlc_stop(void) {
 }
 
 void kotv_vlc_pause(int do_pause) {
-	if (g_mp)
-		p_set_pause(g_mp, do_pause);
+	if (!g_mp)
+		return;
+	/* resume 时恢复音量（stop 曾静音） */
+	if (!do_pause && p_set_volume)
+		p_set_volume(g_mp, g_volume);
+	p_set_pause(g_mp, do_pause);
 }
 
 int kotv_vlc_is_playing(void) {
@@ -1041,7 +1067,12 @@ int64_t kotv_vlc_get_speed_bps(void) {
 }
 
 int kotv_vlc_set_volume(int vol) {
-	if (!g_mp)
+	if (vol < 0)
+		vol = 0;
+	if (vol > 200)
+		vol = 200;
+	g_volume = vol;
+	if (!g_mp || !p_set_volume)
 		return -1;
 	return p_set_volume(g_mp, vol);
 }

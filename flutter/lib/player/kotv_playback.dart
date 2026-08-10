@@ -699,8 +699,6 @@ class EngineVlcPlayback extends KotvPlayback {
   @override
   Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
     _url = url;
-    // headers 暂不传给 libvlc（78d798e 起播崩排查中撤回）。
-    (headers);
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
@@ -715,15 +713,30 @@ class EngineVlcPlayback extends KotvPlayback {
     _maxPositionMs = 0;
     _seekPinMs = null;
     _seekPinAt = null;
-    _headers = const {};
+    // 仅传 shim 接受的 UA/Referer/Cookie（其它头会被忽略；乱拼 :http-header 曾致起播崩）
+    final norm = kotvNormalizePlayHeaders(headers, url: url);
+    final vlcHeaders = <String, String>{};
+    for (final e in norm.entries) {
+      switch (e.key.toLowerCase()) {
+        case 'user-agent':
+        case 'referer':
+        case 'referrer':
+        case 'cookie':
+          vlcHeaders[e.key] = e.value;
+      }
+    }
+    _headers = vlcHeaders;
     final libDir = KotvVlcPaths.resolveLibDir();
     if (libDir == null) throw StateError('未找到 runtime/libvlc');
     await _native.create();
     await _native.load(libDir: libDir, pluginDir: KotvVlcPaths.pluginDirFor(libDir));
     await _native.setDecodeMode(_decodeMode);
     await _native.setRepeatOne(_repeatOne);
-    // PC 崩溃排查：先撤回 78d798e 起播传 headers（曾被判无效后又加回）。
-    await _native.play(url);
+    await _native.play(url, headers: vlcHeaders.isEmpty ? null : vlcHeaders);
+    // stop 会静音；起播后把 Dart 侧音量再推一次（与 shim g_volume 对齐）
+    try {
+      await _native.setVolume(_volume);
+    } catch (_) {}
     _ready = true;
     _audioTracks = const [];
     _subTracks = const [];

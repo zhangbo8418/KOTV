@@ -149,8 +149,8 @@ class IjkPlayback extends KotvPlayback {
     await _player.setOption(FijkOption.playerCategory, 'mediacodec-all-videos', mc);
     await _player.setOption(FijkOption.playerCategory, 'mediacodec-auto-rotate', mc);
     await _player.setOption(FijkOption.playerCategory, 'mediacodec-handle-resolution-change', mc);
-    // 硬解同步（部分机型黑屏可关）；软解无关
-    await _player.setOption(FijkOption.playerCategory, 'mediacodec-sync', soft ? 0 : 1);
+    // Flutter SurfaceTexture 路径必须关 sync：开着时硬解常见黑屏有声
+    await _player.setOption(FijkOption.playerCategory, 'mediacodec-sync', 0);
     // 申请音频焦点；OpenSL ES 在多数机型更稳（AudioTrack 易无声）
     await _player.setOption(FijkOption.hostCategory, 'request-audio-focus', 1);
     await _player.setOption(FijkOption.hostCategory, 'release-audio-focus', 1);

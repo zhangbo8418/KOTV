@@ -240,6 +240,37 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
   }
 
+  /// 换集/换源：解析可能要数秒，必须先停当前播放，否则上一集继续出声。
+  Future<void> _stopAllBackends() async {
+    await Future.wait<void>([
+      () async {
+        try {
+          await _mk?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _vlc?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _exo?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _ijk?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _html?.stop();
+        } catch (_) {}
+      }(),
+    ]);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -248,7 +279,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
-  /// 不要 pause/静音：pause 会粘在播放器上，下次 open 只出一帧；静音会带到下一集。
+  /// 不要 pause：pause 会粘在播放器上，下次 open 只出一帧。
+  /// VLC stop 会先静音消残留嗡鸣，下次 open/play 再恢复音量。
   Future<void> _stopHard() async {
     _playbackLive = false;
     _advanceBusy = false;
@@ -682,6 +714,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         ep.url.toLowerCase().contains('.torrent') ||
         ep.url.contains('/proxy/bt/') ||
         ep.url.toLowerCase().startsWith('magnet://local');
+    // 解析/拉流可能要数秒：先停播，避免上一集在后台继续出声。
+    await _stopAllBackends();
+    if (serial != _playAtSerial || !mounted) return;
     // 先 await 软取消上一集，再 play。unawaited 会与本次 play 竞态：
     // SoftCancel 抬 epoch → JS/JAR 立刻报「脚本调用已中断」。
     await ref.read(apiProvider).cancelPending(

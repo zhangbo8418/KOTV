@@ -266,7 +266,7 @@ void KotvVlcPlugin::HandleMethodCall(
     return;
   }
   if (method == "shutdown") {
-    /* 对齐 8/8：关进程不额外折腾 libvlc（exit 路径叠 stop 易崩）。 */
+    /* 只静音 stop，不 FreeLibrary；exit 路径卸库易崩。 */
     Stop();
     result->Success();
     return;

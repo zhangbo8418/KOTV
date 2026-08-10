@@ -101,6 +101,37 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
+  /// 切台/换线：解析前先停，避免上一路在后台出声。
+  Future<void> _stopAllBackends() async {
+    await Future.wait<void>([
+      () async {
+        try {
+          await _mk?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _vlc?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _exo?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _ijk?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _html?.stop();
+        } catch (_) {}
+      }(),
+    ]);
+  }
+
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _sources = [];
@@ -554,6 +585,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _catchup = false;
       _catchupChrome = false;
     });
+    await _stopAllBackends();
+    if (!mounted) return;
     try {
       final data = await ref.read(apiProvider).livePlay(group: _groupIdx, channel: chIdx, line: useLine);
       final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);

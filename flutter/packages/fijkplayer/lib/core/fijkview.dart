@@ -196,8 +196,9 @@ class _FijkViewState extends State<FijkView> {
   }
 
   Future<void> _nativeSetup() async {
-    if (widget.player.value.prepared) {
-      _setupTexture();
+    // 尽早挂 Surface：等 prepared 再 setup 时，MediaCodec 硬解常已在无 surface 下初始化 → 黑屏有声
+    if (_textureId < 0) {
+      await _setupTexture();
     }
     paramNotifier.value = paramNotifier.value + 1;
   }

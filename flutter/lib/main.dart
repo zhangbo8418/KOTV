@@ -11,6 +11,8 @@ import 'package:window_manager/window_manager.dart';
 import 'desktop/mini_player_window.dart';
 import 'api/kotv_engine_url.dart';
 import 'engine/engine_launcher.dart';
+import 'package:kotv_vlc/kotv_vlc.dart';
+
 import 'player/buffer_budget.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
@@ -241,7 +243,10 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
     await _persistWindowBounds();
     // 先优雅停引擎（HTTP shutdown → 杀 Java/Python）；超时再杀进程树。
     // Windows 仍避免 window_manager.destroy（Win7 易 WER），最后 exit。
-    // 不对 VLC 再做 shutdownAll：与 exit/析构叠多层 stop 会崩（对齐 8/8 基线）。
+    // VLC：只 mute+stop（shutdownAll），禁止 unload/FreeLibrary，避免残留嗡鸣又避免卸库崩。
+    try {
+      await KotvVlc.shutdownAll();
+    } catch (_) {}
     try {
       await ref
           .read(engineLauncherProvider)
