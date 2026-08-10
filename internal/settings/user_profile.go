@@ -74,7 +74,7 @@ func normalizePlatform(p string) string {
 }
 
 // OverlayClientProfile 按「用户+前端平台」覆盖播放器等键，并按前端能力钳制选项
-//（手机不落 PC 的 VLC；PC 不落安卓的 Exo/ijk；Web/iOS 仅 HTML5）。
+//（手机不落 PC 外置播放器；PC 不落安卓的 Exo；Web 仅 HTML5/video_player）。
 func OverlayClientProfile(vals map[string]string, platform string) {
 	if vals == nil {
 		return
@@ -97,7 +97,7 @@ func OverlayClientProfile(vals map[string]string, platform string) {
 
 func migratePlayerID(v string) string {
 	switch strings.TrimSpace(v) {
-	case "innie#vlc", "outie#vlc":
+	case "innie#vlc":
 		return "innie#mpv"
 	case "innie#ijk":
 		return "innie#fvp"
@@ -117,14 +117,14 @@ func clampPlayerKeysForPlatform(vals map[string]string, platform string) {
 			"innie#exo", "innie#mpv", "innie#fvp")
 	case "windows":
 		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "outie#mpv", "outie#iina")
+			"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina")
 		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "outie#mpv", "outie#iina")
+			"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina")
 	case "macos", "linux":
 		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "outie#mpv", "outie#iina")
+			"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina")
 		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
-			"innie#mpv", "innie#fvp", "outie#mpv", "outie#iina")
+			"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina")
 	case "ios":
 		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#fvp",
 			"innie#fvp", "innie#mpv", "innie#html")

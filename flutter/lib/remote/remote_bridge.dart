@@ -201,6 +201,8 @@ String flutterPlayerLabel(String val) {
       return '内置 FVP';
     case 'outie#mpv':
       return '外部 MPV';
+    case 'outie#vlc':
+      return '外部 VLC';
     case 'outie#iina':
       return 'IINA';
     default:

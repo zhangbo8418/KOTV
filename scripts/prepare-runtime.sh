@@ -804,7 +804,7 @@ prepare_ffmpeg() {
 }
 
 # --- libvlc ---
-# 已删除页内/捆绑 VLC；prepare 仅清理遗留目录（见 prepare_one）。
+# 页内/捆绑 VLC 已删除；prepare 强制清理遗留目录，发行包不再带 libvlc/vlc。
 
 # --- libmpv ---
 # 桌面页内 MPV 由 Flutter media_kit 自带；Go 引擎不做页内播放，runtime 不打包 libmpv。
@@ -814,8 +814,8 @@ prepare_one() {
   local plat="$1"
   echo "======== prepare runtime: $plat ========"
   mkdir -p "$CACHE" "$OUT_ROOT"
-  # 发行包不捆绑外部 mpv / libmpv（页内 MPV 由 Flutter media_kit 自带）；runtime/lib 为旧遗留
-  rm -rf "$OUT_ROOT/mpv" "$OUT_ROOT/lib" "$OUT_ROOT/vlc" "$OUT_ROOT/libmpv"
+  # 发行包不捆绑外部 mpv / libmpv / VLC（页内 MPV=media_kit；外置 VLC 用系统安装）
+  rm -rf "$OUT_ROOT/mpv" "$OUT_ROOT/lib" "$OUT_ROOT/vlc" "$OUT_ROOT/libvlc" "$OUT_ROOT/libmpv"
   prepare_jre "$plat"
   prepare_python "$plat"
  # PythonVista 解压后可能带 vcruntime；再扫一遍补进 jre/bin
@@ -824,10 +824,7 @@ prepare_one() {
   fi
   prepare_chromium "$plat"
   prepare_ffmpeg "$plat"
-  echo "[libvlc] skipped (VLC removed); cleaning..."
-  rm -rf "$OUT_ROOT/libvlc" "$OUT_ROOT/vlc"
-  # 不 prepare_libmpv：桌面播放在 Flutter（media_kit）；Go 引擎不做页内 MPV
- # bridge jar（体积变大也无所谓；缺依赖会导致爬虫全挂）
+  # 不 prepare_libvlc / prepare_libmpv：捆绑播放器已移除 # bridge jar（体积变大也无所谓；缺依赖会导致爬虫全挂）
   if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.sh" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/settings.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/bobo/kotv/bridge/SpiderBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/utils/UiBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/crawler/Spider.java" -nt "$ROOT/bridge/spider-bridge.jar" ]]; then
     echo "[bridge] building fat jar..."
     (cd "$ROOT" && ./bridge/build.sh)

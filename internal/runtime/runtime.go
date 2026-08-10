@@ -243,17 +243,8 @@ func FFmpeg() string {
 	return ""
 }
 
-// VLC 返回系统 PATH / 常见安装路径下的 VLC（外部播放遗留探测；发行包不捆绑）。
+// VLC 仅探测系统安装的外部 VLC（发行包不捆绑 runtime/vlc、libvlc）。
 func VLC() string {
-	cands := underRoots(
-		filepath.Join("vlc", "VLC.app", "Contents", "MacOS", "VLC"),
-		filepath.Join("vlc", "vlc.exe"),
-		filepath.Join("vlc", "vlc"),
-		filepath.Join("vlc", "bin", "vlc"),
-	)
-	if p := firstExisting(cands...); p != "" {
-		return p
-	}
 	switch runtime.GOOS {
 	case "darwin":
 		if p := firstExisting("/Applications/VLC.app/Contents/MacOS/VLC"); p != "" {

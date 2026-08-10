@@ -148,8 +148,8 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v ditto >/dev/null 2>&1; then
 else
   cp -a "$RUNTIME_SRC/." "$DIST/runtime/"
 fi
-# 不进发行包：外部 mpv、残留 libmpv、旧布局 vlc/、空的 lib/
-rm -rf "$DIST/runtime/mpv" "$DIST/runtime/vlc" "$DIST/runtime/lib" "$DIST/runtime/libmpv"
+# 不进发行包：外部 mpv、残留 libmpv、旧布局 vlc/libvlc、空的 lib/
+rm -rf "$DIST/runtime/mpv" "$DIST/runtime/vlc" "$DIST/runtime/libvlc" "$DIST/runtime/lib" "$DIST/runtime/libmpv"
 
 # bridge 始终重新构建，避免发行包混入旧 ABI。
 mkdir -p "$RUNTIME_SRC/bridge" "$DIST/runtime/bridge"

@@ -786,6 +786,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         ('内置 MPV', 'innie#mpv', 'embed_mpv'),
         ('内置 FVP', 'innie#fvp', 'embed_fvp'),
         ('外部 MPV', 'outie#mpv', 'mpv'),
+        ('外部 VLC', 'outie#vlc', 'vlc'),
         ('IINA', 'outie#iina', 'iina'),
       ],
     ];

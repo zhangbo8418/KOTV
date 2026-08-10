@@ -331,7 +331,7 @@ func playExternal(name, url string) error {
 		}
 		return exec.Command("open", "-a", "IINA", url).Start()
 	case "vlc":
-		// 优先捆绑 VLC.app / 便携包，再用系统安装
+		// 仅系统安装的外部 VLC（不捆绑）
 		if bin := findPlayer("vlc"); bin != "" {
 			if runtime.GOOS == "darwin" {
 				if app := vlcAppBundle(bin); app != "" {
@@ -343,11 +343,11 @@ func playExternal(name, url string) error {
 		if runtime.GOOS == "darwin" && appExists("VLC") {
 			return exec.Command("open", "-a", "VLC", url).Start()
 		}
-		return fmt.Errorf("未找到 VLC：请运行 ./scripts/prepare-runtime.sh 捆绑，或安装系统 VLC")
+		return fmt.Errorf("未找到外部 VLC：请先安装系统 VLC")
 	case "mpv":
 		bin := findPlayer("mpv")
 		if bin == "" {
-			return fmt.Errorf("未找到 MPV：请运行 ./scripts/prepare-runtime.sh 捆绑，或安装 mpv")
+			return fmt.Errorf("未找到外部 MPV：请先安装 mpv")
 		}
 		if resolved, err := filepath.EvalSymlinks(bin); err == nil && resolved != "" {
 			bin = resolved

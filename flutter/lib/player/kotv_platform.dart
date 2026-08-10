@@ -29,11 +29,10 @@ bool kotvIsWindows7() {
 bool kotvIsAndroid() => !kIsWeb && Platform.isAndroid;
 bool kotvIsIOS() => !kIsWeb && Platform.isIOS;
 
-/// 旧配置迁移：vlc→mpv，ijk→fvp。
+/// 旧配置迁移：页内 VLC→MPV；外置 VLC 保留；ijk→fvp。
 String kotvMigratePlayerVal(String raw) {
   switch (raw.trim()) {
     case 'innie#vlc':
-    case 'outie#vlc':
       return 'innie#mpv';
     case 'innie#ijk':
       return 'innie#fvp';
@@ -115,6 +114,7 @@ List<(String, String)> kotvVodPlayerOptions() {
     ('内置 MPV（默认）', 'innie#mpv'),
     ('内置 FVP（零拷贝）', 'innie#fvp'),
     ('外部 MPV', 'outie#mpv'),
+    ('外部 VLC', 'outie#vlc'),
     if (Platform.isMacOS) ('IINA', 'outie#iina'),
   ];
 }
@@ -144,6 +144,7 @@ List<(String, String)> kotvLivePlayerOptions() {
     ('内置 MPV（默认）', 'innie#mpv'),
     ('内置 FVP（零拷贝）', 'innie#fvp'),
     ('外部 MPV', 'outie#mpv'),
+    ('外部 VLC', 'outie#vlc'),
     if (Platform.isMacOS) ('IINA', 'outie#iina'),
   ];
 }
