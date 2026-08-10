@@ -779,8 +779,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         ('内置 MPV', 'innie#mpv', 'embed_mpv'),
         ('内置 FVP', 'innie#fvp', 'embed_fvp'),
       ] else if (kotvIsIOS()) ...[
-        ('内置 FVP', 'innie#fvp', 'embed_fvp'),
         ('内置 MPV', 'innie#mpv', 'embed_mpv'),
+        ('内置 FVP', 'innie#fvp', 'embed_fvp'),
         ('浏览器播放（HTML5）', 'innie#html', 'embed_html'),
       ] else ...[
         ('内置 MPV', 'innie#mpv', 'embed_mpv'),

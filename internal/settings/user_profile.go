@@ -126,10 +126,10 @@ func clampPlayerKeysForPlatform(vals map[string]string, platform string) {
 		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
 			"innie#mpv", "innie#fvp", "outie#mpv", "outie#vlc", "outie#iina")
 	case "ios":
-		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#fvp",
-			"innie#fvp", "innie#mpv", "innie#html")
-		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#fvp",
-			"innie#fvp", "innie#mpv", "innie#html")
+		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
+			"innie#mpv", "innie#fvp", "innie#html")
+		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
+			"innie#mpv", "innie#fvp", "innie#html")
 	case "web":
 		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#html",
 			"innie#html", "innie#vp")

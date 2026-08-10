@@ -41,19 +41,17 @@ String kotvMigratePlayerVal(String raw) {
   }
 }
 
-/// 点播默认：Web=HTML5；Android=Exo；iOS=FVP；其它=MPV。
+/// 点播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。
 String kotvDefaultVodPlayer() {
   if (kIsWeb) return 'innie#html';
   if (kotvIsAndroid()) return 'innie#exo';
-  if (kotvIsIOS()) return 'innie#fvp';
   return 'innie#mpv';
 }
 
-/// 直播默认：Web=HTML5；Android=Exo；iOS=FVP；桌面=MPV（含 Windows）。
+/// 直播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。
 String kotvDefaultLivePlayer() {
   if (kIsWeb) return 'innie#html';
   if (kotvIsAndroid()) return 'innie#exo';
-  if (kotvIsIOS()) return 'innie#fvp';
   return 'innie#mpv';
 }
 
@@ -100,19 +98,19 @@ List<(String, String)> kotvVodPlayerOptions() {
     return const [
       ('内置 ExoPlayer（默认）', 'innie#exo'),
       ('内置 MPV', 'innie#mpv'),
-      ('内置 FVP（零拷贝）', 'innie#fvp'),
+      ('内置 FVP', 'innie#fvp'),
     ];
   }
   if (kotvIsIOS()) {
     return const [
-      ('内置 FVP（默认）', 'innie#fvp'),
-      ('内置 MPV', 'innie#mpv'),
+      ('内置 MPV（默认）', 'innie#mpv'),
+      ('内置 FVP', 'innie#fvp'),
       ('浏览器播放（HTML5）', 'innie#html'),
     ];
   }
   return [
     ('内置 MPV（默认）', 'innie#mpv'),
-    ('内置 FVP（零拷贝）', 'innie#fvp'),
+    ('内置 FVP', 'innie#fvp'),
     ('外部 MPV', 'outie#mpv'),
     ('外部 VLC', 'outie#vlc'),
     if (Platform.isMacOS) ('IINA', 'outie#iina'),
@@ -130,19 +128,19 @@ List<(String, String)> kotvLivePlayerOptions() {
     return const [
       ('内置 ExoPlayer（默认）', 'innie#exo'),
       ('内置 MPV', 'innie#mpv'),
-      ('内置 FVP（零拷贝）', 'innie#fvp'),
+      ('内置 FVP', 'innie#fvp'),
     ];
   }
   if (kotvIsIOS()) {
     return const [
-      ('内置 FVP（默认）', 'innie#fvp'),
-      ('内置 MPV', 'innie#mpv'),
+      ('内置 MPV（默认）', 'innie#mpv'),
+      ('内置 FVP', 'innie#fvp'),
       ('浏览器播放（HTML5）', 'innie#html'),
     ];
   }
   return [
     ('内置 MPV（默认）', 'innie#mpv'),
-    ('内置 FVP（零拷贝）', 'innie#fvp'),
+    ('内置 FVP', 'innie#fvp'),
     ('外部 MPV', 'outie#mpv'),
     ('外部 VLC', 'outie#vlc'),
     if (Platform.isMacOS) ('IINA', 'outie#iina'),
