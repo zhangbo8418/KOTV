@@ -150,10 +150,9 @@ class FvpPlayback extends KotvPlayback {
       await _disposeController();
       notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
-      // URL 常带 ?id=xxx.m3u8 却实际是 FLV（fengshows）。mdk 若按扩展名走 HLS，
-      // prepare 会失败并显示「invalid or unsupported media」。先探魔数再 mdkopt 强制 input。
-      final inputFmt = await kotvProbeAvInputFormat(url, headers: h);
-      final mediaUrl = kotvFvpMediaUrl(url, inputFormat: inputFmt);
+      // 网关常 302 到 http CDN（体为空）。跟跳后把最终 URL 交给 mdk，按真实路径/内容协商，
+      // 不按 ?id=xxx.m3u8 这类查询串扩展名猜测，也不强行 mdkopt。
+      final mediaUrl = await kotvResolveFvpMediaUrl(url, headers: h);
       final c = VideoPlayerController.networkUrl(
         Uri.parse(mediaUrl),
         httpHeaders: h,

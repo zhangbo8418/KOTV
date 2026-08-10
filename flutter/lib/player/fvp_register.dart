@@ -7,7 +7,7 @@ import 'kotv_platform.dart';
 ///
 /// 不绑死 `video.decoders`：H.264 / HEVC 等硬解直出交给 mdk 与驱动协商。
 /// Android 仅关 tunnel（Surface 未就绪时隧道模式易黑屏有声），与编码白名单无关。
-/// 直播伪扩展名由 [kotvProbeAvInputFormat] + mdkopt 处理；此处加大 probesize 辅助协商。
+/// 直播网关 302 由 [kotvResolveFvpMediaUrl] 在开播前展开；此处加大 probesize 辅助协商。
 void kotvRegisterFvp() {
   if (kIsWeb) return;
   const platforms = ['windows', 'macos', 'linux', 'android', 'ios'];
