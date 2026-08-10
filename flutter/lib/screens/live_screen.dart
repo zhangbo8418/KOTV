@@ -163,8 +163,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _decodeMode = 'auto';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   String _playerVal = kotvDefaultLivePlayer();
-  /// 进页时暂存音量，等首播挂上 Video 后再套，避免空树创建 MPV 卡死。
-  double? _pendingVolume;
   int _playSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
@@ -244,9 +242,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           playerVal = kotvDefaultLivePlayer();
         }
         _playerVal = kotvClampPlayerVal(playerVal, live: true);
-        // 进页不要提前创建/配置 native 播放器（空树 setProperty 会卡死）；音量等首播时再套。
         final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
-        if (vol != null) _pendingVolume = vol.clamp(0, 100);
+        if (vol != null) {
+          await _playback.setVolume(vol.clamp(0, 100));
+        }
+        if (!mounted) return;
+        await _playback.setDecodeMode(_decodeMode);
       } catch (_) {}
       if (!mounted) return;
       final data = await ref.read(apiProvider).liveSources();
@@ -503,14 +504,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _openLiveUrl(String url, {Map<String, String>? headers}) async {
+    await _playback.setDecodeMode(_decodeMode);
     await _stopInactiveBackends(_backend);
-    // 先挂画面再创建/配置播放器：MPV 需 VideoController 附着后才能安全 setProperty/open。
     if (mounted) {
       setState(() {
         _playUrl = url;
         _playHeaders = headers;
       });
-      await WidgetsBinding.instance.endOfFrame;
       await WidgetsBinding.instance.endOfFrame;
     } else {
       _playUrl = url;
@@ -518,10 +518,20 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
     if (_backend == KotvEmbedBackend.mpv) {
       final mk = _ensureMpv();
-      await mk.setDecodeMode(_decodeMode);
       try {
         await mk.open(url, headers: headers).timeout(const Duration(seconds: 12));
       } on TimeoutException {
+        // Windows 个别 HLS 硬解会卡死；超时后先软解重试，再不行切 FVP。
+        if (kotvIsDesktop() && _decodeMode != 'soft') {
+          try {
+            await mk.setDecodeMode('soft');
+            await mk.open(url, headers: headers).timeout(const Duration(seconds: 12));
+            if (mounted) {
+              setState(() => _status = 'MPV 硬解超时，已改软解');
+            }
+            return;
+          } catch (_) {}
+        }
         if (kotvIsDesktop()) {
           _playerVal = 'innie#fvp';
           try {
@@ -530,10 +540,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           try {
             await mk.stop();
           } catch (_) {}
-          if (mounted) {
-            setState(() {});
-            await WidgetsBinding.instance.endOfFrame;
-          }
+          if (mounted) setState(() {});
           _fvp ??= FvpPlayback();
           await _fvp!.setDecodeMode(_decodeMode);
           await _fvp!.open(url, headers: headers).timeout(const Duration(seconds: 20));
@@ -553,13 +560,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       await pb.open(url, headers: headers).timeout(const Duration(seconds: 25));
       try {
         await pb.play();
-      } catch (_) {}
-    }
-    final pending = _pendingVolume;
-    if (pending != null) {
-      _pendingVolume = null;
-      try {
-        await _playback.setVolume(pending);
       } catch (_) {}
     }
   }

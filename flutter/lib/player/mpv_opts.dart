@@ -56,15 +56,19 @@ class KotvMpvOpts {
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
-      // mediacodec 零拷贝在不少机型 abort；copy 更稳（安卓已验证）。
+      // mediacodec 直出在不少机型 abort；copy 更稳。
       return hard ? 'mediacodec-copy' : 'auto-safe';
     }
-    // 桌面：media_kit 走 ANGLE Texture，真零拷贝未合入主线；用 auto 选可用硬解。
-    // Win7 常见回落 dxva2-copy；需要零拷贝请改用 innie#fvp。
-    if (hard) {
-      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-        return 'd3d11va-copy';
+    // Windows + Flutter Texture（vo=libmpv）：
+    // `auto`/`d3d11va` 直出硬解对部分 HLS（如咪咕）会卡死 UI；
+    // 同机其它流（如 fengshows）又能播。一律用 *-copy 回写后再上传 Texture。
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      if (hard) {
+        return kotvIsWindows7() ? 'dxva2-copy' : 'd3d11va-copy';
       }
+      return 'auto-copy';
+    }
+    if (hard) {
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
         return 'videotoolbox';
       }
@@ -97,6 +101,10 @@ class KotvMpvOpts {
       Future<void> set(String k, String v) async {
         await (platform as dynamic).setProperty(k, v);
       }
+
+      try {
+        await set('hwdec', hwdecValue());
+      } catch (_) {}
 
       try {
         await KotvBufferBudget.warm(force: true);
