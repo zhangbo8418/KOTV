@@ -187,7 +187,6 @@ KO影视 / KOTV 发行包 ($PLAT)
     python/         CPython 3.14（Python 爬虫）
     chromium/       嗅探/解析（Win x64=Win7 REWORK 最新；Win ARM64=最新 snapshot）
     ffmpeg/         FFmpeg（Windows 为 7.0）
-    libvlc/         libvlc 动态库 + plugins（页内 VLC）
     bridge/         spider-bridge.jar
 
 macOS 另产出:
@@ -199,9 +198,9 @@ Windows 运行时（Win7 尽力兼容）：
   Python = adang1345/PythonVista embed
   Chromium = x64: 109（snapshot 回退）；ARM64: Win_Arm64 最新（CFT 无 win-arm64 时）
   FFmpeg = Gyan 7.0
-  libvlc = 从 VideoLAN 官方包提取 libvlc + plugins（页内 VLC）
   页内 MPV = Flutter media_kit 自带（不进 runtime/）
-  外部 VLC/MPV = 系统安装或 PATH
+  页内 FVP = Flutter fvp/libmdk（零拷贝备选）
+  外部 MPV/IINA = 系统安装或 PATH
   CGO/QuickJS = MinGW MSVCRT win32-seh + 子系统 Win7(6.01) + static-libgcc（posix 则再静态 winpthread）
                CI 用 scripts/check-win7-deps.ps1 拒绝 UCRT / libgcc_s / libwinpthread
 
@@ -210,8 +209,8 @@ Windows 运行时（Win7 尽力兼容）：
   遥控页: http://127.0.0.1:9978/
   Web 包（引擎+webapp 同端口）见 scripts/package-flutter-web.sh / CI「Flutter Web」
 
-默认播放核心为「页内 VLC」（innie#vlc）；也可选「页内 MPV」（innie#mpv）。
-外部 VLC/MPV 需系统安装或 PATH，发行包不再捆绑 mpv 可执行文件。
+默认播放核心为「页内 MPV」（innie#mpv）；桌面可切「页内 FVP」（innie#fvp）。
+外部 MPV/IINA 需系统安装或 PATH，发行包不捆绑 mpv/libvlc。
 
 环境变量(可选):
  KOTV_RUNTIME=/path/to/runtime 覆盖运行时根目录

@@ -20,7 +20,6 @@ need_any_file() {
 
 need_dir "$RT"
 need_file "$RT/bridge/spider-bridge.jar"
-need_dir "$RT/libvlc/plugins"
 
 # 嵌套 runtime/runtime 一律失败
 if [[ -d "$RT/runtime" ]]; then
@@ -34,7 +33,6 @@ case "$PLAT" in
     need_file "$RT/jre/lib/libjli.dylib"
     need_file "$RT/jre/lib/server/libjvm.dylib"
     need_any_file "$RT/python/bin/python3" "$RT/python/bin/python"
-    need_any_file "$RT/libvlc/libvlc.dylib" "$RT/libvlc/libvlc.5.dylib"
     if ! "$RT/jre/bin/java" -version >/dev/null 2>&1; then
       die "bundled java failed to start (check libjli / quarantine)"
     fi
@@ -48,7 +46,6 @@ case "$PLAT" in
     if [[ "$PLAT" == "windows-x64" ]]; then
       need_file "$RT/jre/bin/api-ms-win-core-path-l1-1-0.dll"
     fi
-    need_file "$RT/libvlc/libvlc.dll"
 
     need_file "$RT/python/python.exe"
     need_dir "$RT/python/Lib/site-packages"
@@ -67,7 +64,6 @@ case "$PLAT" in
     need_dir "$RT/jre/lib"
     need_file "$RT/jre/lib/server/libjvm.so"
     need_any_file "$RT/python/bin/python3" "$RT/python/bin/python"
-    need_any_file "$RT/libvlc/libvlc.so" "$RT/libvlc/libvlc.so.5"
     ;;
   *)
     die "unknown platform: $PLAT"
@@ -94,10 +90,11 @@ if [[ "${jre_lib_files:-0}" -lt 10 ]]; then
   die "jre/lib too incomplete: only ${jre_lib_files} files (Java bridge will EOF)"
 fi
 
-# 发行包不应再带整包 VLC.app / 外部 mpv / 残留 libmpv（页内 MPV 由 Flutter media_kit 自带）
-[[ ! -d "$RT/vlc" ]] || die "runtime/vlc must not ship (use libvlc/)"
+# 发行包不应再带整包 VLC / 外部 mpv / 残留 libmpv（页内 MPV 由 Flutter media_kit 自带）
 [[ ! -d "$RT/mpv" ]] || die "runtime/mpv must not ship (Flutter media_kit / outie#mpv)"
 [[ ! -d "$RT/libmpv" ]] || die "runtime/libmpv must not ship (Flutter media_kit bundles libmpv)"
+[[ ! -d "$RT/libvlc" ]] || die "runtime/libvlc must not ship (VLC removed; use media_kit/fvp)"
+[[ ! -d "$RT/vlc" ]] || die "runtime/vlc must not ship (VLC removed)"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "verify-runtime FAILED for $PLAT at $RT" >&2

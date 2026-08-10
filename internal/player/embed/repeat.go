@@ -10,7 +10,7 @@ var repeatOne atomic.Bool
 // IsRepeatOne 当前是否单集循环。
 func IsRepeatOne() bool { return repeatOne.Load() }
 
-// SetRepeatOne 开关单集循环；MPV 立即生效，VLC 通过 media 选项（必要时重载当前片源）。
+// SetRepeatOne 开关单集循环；MPV 立即生效。
 func SetRepeatOne(on bool) {
 	prev := repeatOne.Swap(on)
 	if prev == on {
@@ -31,15 +31,5 @@ func applyRepeatOne(on bool) {
 		_ = mpvSetPropString("loop-file", "inf")
 	} else {
 		_ = mpvSetPropString("loop-file", "no")
-	}
-	vlcSetRepeat(on)
-
-	// VLC 的 input-repeat 绑在 media 上，运行中切换需重建。
-	ctrl := Active()
-	if _, isVLC := ctrl.(*Engine); !isVLC {
-		return
-	}
-	if enh, ok := ctrl.(Enhanced); ok && ctrl.DurationMs() > 0 {
-		_ = enh.Reload(true)
 	}
 }

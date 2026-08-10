@@ -3,7 +3,7 @@ name: KOTV Build
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, master, restore-sidecar]
     tags: ["v*"]
 
 env:
@@ -11,6 +11,8 @@ env:
   # 非 Win7：跟 stable 最新；Win7 钉官方末版 3.19.6
   FLUTTER_VERSION: "3.44.8"
   FLUTTER_WIN7_VERSION: "3.19.6"
+  # fvp cmake：从 GitHub Release 拉 mdk-sdk，避免 SourceForge nightly
+  FVP_DEPS_URL: "https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0"
 
 jobs:
   set-tag:
@@ -231,7 +233,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             libgl1-mesa-dev xorg-dev libxkbcommon-dev \
-            libmpv2 libmpv-dev vlc vlc-plugin-base libvlc-dev unzip curl zip
+            libmpv2 libmpv-dev libass-dev unzip curl zip
 
       - uses: subosito/flutter-action@v2
         with:
@@ -352,6 +354,10 @@ jobs:
             echo "==> cross-ish: build under arch -x86_64"
             arch -x86_64 bash -lc '
               export PATH="/usr/local/bin:$PATH"
+              export FVP_DEPS_URL="${FVP_DEPS_URL:-https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0}"
+              source ./scripts/kotv-fvp-deps.sh
+              kotv_export_fvp_deps
+              kotv_ensure_mdk_apple_pod
               ./scripts/prepare-runtime.sh macos-x64
               (cd internal/spider && go run gen_qjsinc.go)
               CGO_ENABLED=1 GOARCH=amd64 go build -o flutter/assets/engine/kotv-engine ./cmd/engine
@@ -425,7 +431,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r26b
+          ndk-version: r28c
           link-to-sdk: true
           add-to-path: false
 
@@ -482,7 +488,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             libgl1-mesa-dev xorg-dev libxkbcommon-dev \
-            libmpv2 libmpv-dev vlc vlc-plugin-base libvlc-dev unzip curl zip
+            libmpv2 libmpv-dev libass-dev unzip curl zip
 
       - uses: subosito/flutter-action@v2
         with:

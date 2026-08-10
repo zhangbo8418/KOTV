@@ -147,13 +147,14 @@ endif()
 # Bundle full KOTV runtime next to the executable（唯一安装点，勿二次整目录拷贝）。
 # 勿用 PATTERN "lib" EXCLUDE：会误删 python/lib/pythonX.Y/site-packages。
 set(KOTV_RUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../runtime")
-if(EXISTS "${KOTV_RUNTIME_ROOT}/jre" OR EXISTS "${KOTV_RUNTIME_ROOT}/libvlc")
+if(EXISTS "${KOTV_RUNTIME_ROOT}/jre")
   install(DIRECTORY "${KOTV_RUNTIME_ROOT}/"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/runtime"
     COMPONENT Runtime
     PATTERN "mpv" EXCLUDE
     PATTERN "libmpv" EXCLUDE
-    PATTERN "vlc" EXCLUDE)
+    PATTERN "vlc" EXCLUDE
+    PATTERN "libvlc" EXCLUDE)
   install(CODE "
     file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/runtime/lib\")
   " COMPONENT Runtime)

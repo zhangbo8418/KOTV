@@ -7,8 +7,10 @@ import 'package:video_player/video_player.dart';
 import 'kotv_playback.dart';
 import 'play_headers.dart';
 
-/// 非 Web：用 [VideoPlayerController]（桌面/移动若选 html 时的兜底）。
-class HtmlPlayback extends KotvPlayback {
+/// 页内 FVP（libmdk）：经 [video_player] + fvp 插件，桌面/手机零拷贝路径。
+///
+/// 须在 [main] 里先 `registerWith`（见 [kotvRegisterFvp]）。
+class FvpPlayback extends KotvPlayback {
   VideoPlayerController? _c;
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -56,7 +58,7 @@ class HtmlPlayback extends KotvPlayback {
   int get height => _c?.value.size.height.toInt() ?? 0;
 
   @override
-  String get engineLabel => 'HTML5';
+  String get engineLabel => '内置 FVP';
 
   @override
   Stream<Duration> get positionStream => _posCtrl.stream;
@@ -96,6 +98,9 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+    if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
+      throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
+    }
     _opening = true;
     notifyListeners();
     try {
@@ -103,7 +108,11 @@ class HtmlPlayback extends KotvPlayback {
       _completed = false;
       final h = kotvNormalizePlayHeaders(headers, url: url);
       final uri = Uri.parse(url);
-      final c = VideoPlayerController.networkUrl(uri, httpHeaders: h);
+      final c = VideoPlayerController.networkUrl(
+        uri,
+        httpHeaders: h,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+      );
       _c = c;
       _listener = () {
         if (_c != c) return;

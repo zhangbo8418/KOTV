@@ -95,26 +95,46 @@ func OverlayClientProfile(vals map[string]string, platform string) {
 	clampPlayerKeysForPlatform(vals, platform)
 }
 
+func migratePlayerID(v string) string {
+	switch strings.TrimSpace(v) {
+	case "innie#vlc", "outie#vlc":
+		return "innie#mpv"
+	case "innie#ijk":
+		return "innie#fvp"
+	default:
+		return strings.TrimSpace(v)
+	}
+}
+
 func clampPlayerKeysForPlatform(vals map[string]string, platform string) {
+	vals[string(Player)] = migratePlayerID(vals[string(Player)])
+	vals[string(PlayerLive)] = migratePlayerID(vals[string(PlayerLive)])
 	switch platform {
 	case "android":
 		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#exo",
-			"innie#exo", "innie#mpv", "innie#ijk")
+			"innie#exo", "innie#mpv", "innie#fvp")
 		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#exo",
-			"innie#exo", "innie#mpv", "innie#ijk")
+			"innie#exo", "innie#mpv", "innie#fvp")
 	case "windows":
 		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
-			"innie#mpv", "innie#vlc", "outie#vlc", "outie#mpv", "outie#iina")
-		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#vlc",
-			"innie#mpv", "innie#vlc", "outie#vlc", "outie#mpv", "outie#iina")
+			"innie#mpv", "innie#fvp", "outie#mpv", "outie#iina")
+		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
+			"innie#mpv", "innie#fvp", "outie#mpv", "outie#iina")
 	case "macos", "linux":
 		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#mpv",
-			"innie#mpv", "innie#vlc", "outie#vlc", "outie#mpv", "outie#iina")
+			"innie#mpv", "innie#fvp", "outie#mpv", "outie#iina")
 		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#mpv",
-			"innie#mpv", "innie#vlc", "outie#vlc", "outie#mpv", "outie#iina")
-	case "ios", "web":
-		vals[string(Player)] = "innie#html"
-		vals[string(PlayerLive)] = "innie#html"
+			"innie#mpv", "innie#fvp", "outie#mpv", "outie#iina")
+	case "ios":
+		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#fvp",
+			"innie#fvp", "innie#mpv", "innie#html")
+		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#fvp",
+			"innie#fvp", "innie#mpv", "innie#html")
+	case "web":
+		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#html",
+			"innie#html", "innie#vp")
+		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#html",
+			"innie#html", "innie#vp")
 	}
 }
 

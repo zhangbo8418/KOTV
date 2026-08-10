@@ -50,6 +50,9 @@ fi
 
 echo "==> flutter build apk --release (per-ABI; Chaquopy 禁用 --split-per-abi)"
 cd "$ROOT/flutter"
+# shellcheck source=kotv-fvp-deps.sh
+source "$ROOT/scripts/kotv-fvp-deps.sh"
+kotv_export_fvp_deps
 flutter pub get
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 "$ROOT/scripts/patch-android-plugin-namespaces.sh"

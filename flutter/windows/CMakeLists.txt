@@ -106,18 +106,19 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
 
-# Bundle full KOTV runtime (jre/python/libvlc/…；不含 libmpv) next to the executable.
+# Bundle full KOTV runtime (jre/python/…；不含 libmpv / libvlc) next to the executable.
 # 唯一安装点：CI 不得再整目录 Copy-Item runtime（会套出 runtime\runtime）。
 # 勿用 PATTERN "lib" EXCLUDE：Windows 大小写不敏感，会误删 python/Lib（site-packages）。
 set(KOTV_RUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../runtime")
-if(EXISTS "${KOTV_RUNTIME_ROOT}/jre" OR EXISTS "${KOTV_RUNTIME_ROOT}/libvlc")
+if(EXISTS "${KOTV_RUNTIME_ROOT}/jre")
   install(DIRECTORY "${KOTV_RUNTIME_ROOT}/"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/runtime"
     COMPONENT Runtime
     PATTERN "mpv" EXCLUDE
     PATTERN "libmpv" EXCLUDE
-    PATTERN "vlc" EXCLUDE)
-  # 仅去掉旧布局顶层 runtime/lib（若存在），不影响 python/Lib 或 libvlc。
+    PATTERN "vlc" EXCLUDE
+    PATTERN "libvlc" EXCLUDE)
+  # 仅去掉旧布局顶层 runtime/lib（若存在），不影响 python/Lib。
   # 保留 java/python 启动器（JAR/Py 独立进程）。
   install(CODE "
     file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/runtime/lib\")

@@ -16,7 +16,7 @@ type Controller interface {
 	Pause(bool)
 	TogglePause()
 	IsPlaying() bool
-	// PlaybackEnded 是否已真正播完（VLC libvlc_Ended / MPV eof-reached）。
+	// PlaybackEnded 是否已真正播完（如 MPV eof-reached）。
 	PlaybackEnded() bool
 	SeekMs(int64)
 	PositionMs() int64
@@ -81,14 +81,14 @@ var (
 	active   Controller
 )
 
-// SetActive 设置当前页内后端（VLC 或 MPV）。
+// SetActive 设置当前页内后端（MPV）。
 func SetActive(controller Controller) {
 	activeMu.Lock()
 	active = controller
 	activeMu.Unlock()
 }
 
-// Active 返回当前页内后端；默认使用 VLC。
+// Active 返回当前页内后端；默认使用 MPV。
 func Active() Controller {
 	activeMu.RLock()
 	controller := active
@@ -96,14 +96,13 @@ func Active() Controller {
 	if controller != nil {
 		return controller
 	}
-	controller = Ensure()
+	controller = EnsureMPV()
 	SetActive(controller)
 	return controller
 }
 
 // StopAll 页面退出时同时停止两个后端。
 func StopAll() {
-	Ensure().Stop()
 	EnsureMPV().Stop()
 }
 

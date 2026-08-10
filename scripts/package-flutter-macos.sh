@@ -18,7 +18,7 @@ echo "==> version=$VERSION arch=$REL_ARCH ($PLAT)"
 
 chmod +x "$ROOT/scripts/"*.sh
 
-if [[ ! -d "$ROOT/runtime/jre" || ! -d "$ROOT/runtime/libvlc" ]]; then
+if [[ ! -d "$ROOT/runtime/jre" ]]; then
   echo "==> runtime incomplete, preparing..."
   "$ROOT/scripts/prepare-runtime.sh" "$PLAT"
 fi
@@ -47,6 +47,11 @@ rm -rf \
   2>/dev/null || true
 # 双保险：pubspec 已关 SPM，CI 全局再关一次
 flutter config --no-enable-swift-package-manager || true
+# fvp 依赖 mdk；优先用预解压的本地 pod，避免 CocoaPods 卡在 SourceForge。
+# shellcheck source=kotv-fvp-deps.sh
+source "$ROOT/scripts/kotv-fvp-deps.sh"
+kotv_export_fvp_deps
+kotv_ensure_mdk_apple_pod
 flutter pub get
 flutter build macos --release
 
@@ -91,12 +96,11 @@ chmod +x "$WRAP"
 
 echo "==> verify package"
 test -x "$OUT_APP/Contents/Resources/runtime/jre/bin/java"
-test -e "$OUT_APP/Contents/Resources/runtime/libvlc"
 test -e "$OUT_APP/Contents/Resources/runtime/bridge/spider-bridge.jar" \
   || test -e "$OUT_APP/Contents/Resources/runtime/bridge"
 test -x "$OUT_APP/Contents/MacOS/kotv-engine" \
   || test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"
-echo "  java ok, libvlc ok, engine ok"
+echo "  java ok, engine ok"
 
 echo "==> ad-hoc sign"
 codesign --force --deep --sign - "$OUT_APP" 2>/dev/null || true

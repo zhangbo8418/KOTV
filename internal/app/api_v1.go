@@ -1330,8 +1330,8 @@ func (a *App) APIPlayerStatus() map[string]any {
 	return out
 }
 
-// APIPlayerEmbed 页内嵌入播放（Flutter 内置 VLC 走同进程 Texture，不经此路径）。
-// playerVal: innie#vlc / innie#mpv；空则用当前设置。
+// APIPlayerEmbed 页内嵌入播放（Flutter 内置 media_kit/FVP 不经此路径）。
+// playerVal: innie#mpv；空则用当前设置。旧 innie#vlc 映射为 mpv。
 func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
 	playURL = strings.TrimSpace(playURL)
 	if playURL == "" {
@@ -1341,17 +1341,21 @@ func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
 	if playerVal == "" {
 		playerVal = settings.Get(settings.Player)
 	}
-	if playerVal == "" {
+	if playerVal == "" || playerVal == "innie#vlc" {
 		playerVal = "innie#mpv"
 	}
 	parts := strings.SplitN(playerVal, "#", 2)
 	mode := parts[0]
-	name := "vlc"
+	name := "mpv"
 	if len(parts) > 1 && parts[1] != "" {
 		name = strings.ToLower(parts[1])
 	}
-	if mode != "innie" || (name != "vlc" && name != "mpv") {
-		return fmt.Errorf("embed 仅支持 innie#vlc / innie#mpv")
+	if name == "vlc" {
+		name = "mpv"
+		playerVal = "innie#mpv"
+	}
+	if mode != "innie" || name != "mpv" {
+		return fmt.Errorf("embed 仅支持 innie#mpv")
 	}
 	settings.Set(settings.Player, playerVal)
 	_ = settings.Save()
@@ -1412,7 +1416,7 @@ func (a *App) APIPlayerControl(cmd string, value float64, mode string) error {
 	return nil
 }
 
-// APIPlayerExternal 用外部播放器打开 URL；playerVal 如 outie#vlc / outie#mpv / outie#iina。
+// APIPlayerExternal 用外部播放器打开 URL；playerVal 如 outie#mpv / outie#iina。
 func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	playURL = strings.TrimSpace(playURL)
 	if playURL == "" {
@@ -1422,14 +1426,18 @@ func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	if playerVal == "" {
 		playerVal = settings.Get(settings.Player)
 	}
-	if playerVal == "" {
-		playerVal = "outie#vlc"
+	if playerVal == "" || playerVal == "outie#vlc" {
+		playerVal = "outie#mpv"
 	}
 	parts := strings.SplitN(playerVal, "#", 2)
 	mode := parts[0]
-	name := "vlc"
+	name := "mpv"
 	if len(parts) > 1 && parts[1] != "" {
 		name = strings.ToLower(parts[1])
+	}
+	if name == "vlc" {
+		name = "mpv"
+		playerVal = "outie#mpv"
 	}
 	if mode == "innie" {
 		return fmt.Errorf("内置播放器请在页内播放")

@@ -135,7 +135,7 @@ func defaultLivePlayerValue() string {
 		return "innie#exo"
 	}
 	if runtime.GOOS == "windows" {
-		return "innie#vlc"
+		return "innie#mpv"
 	}
 	return "innie#mpv"
 }

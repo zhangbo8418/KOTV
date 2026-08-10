@@ -6,6 +6,7 @@ on:
 
 env:
   FLUTTER_VERSION: "3.44.8"
+  FVP_DEPS_URL: "https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0"
 
 jobs:
   build-apk:
@@ -35,7 +36,7 @@ jobs:
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r26b
+          ndk-version: r28c
           link-to-sdk: true
           add-to-path: false
 

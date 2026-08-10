@@ -187,20 +187,18 @@ class LocalPlayOffsets {
 
 /// Flutter 页内播放器显示名。
 String flutterPlayerLabel(String val) {
-  final v = val.trim().isEmpty ? kotvDefaultVodPlayer() : val.trim();
+  final v = kotvMigratePlayerVal(val.trim().isEmpty ? kotvDefaultVodPlayer() : val.trim());
   switch (v) {
     case 'innie#html':
       return '浏览器 HTML5';
-    case 'innie#vlc':
-      return '内置 VLC';
+    case 'innie#vp':
+      return 'video_player';
     case 'innie#mpv':
       return '内置 MPV';
     case 'innie#exo':
       return '内置 ExoPlayer';
-    case 'innie#ijk':
-      return '内置 ijk';
-    case 'outie#vlc':
-      return '外部 VLC';
+    case 'innie#fvp':
+      return '内置 FVP';
     case 'outie#mpv':
       return '外部 MPV';
     case 'outie#iina':

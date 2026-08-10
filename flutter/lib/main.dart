@@ -11,9 +11,8 @@ import 'package:window_manager/window_manager.dart';
 import 'desktop/mini_player_window.dart';
 import 'api/kotv_engine_url.dart';
 import 'engine/engine_launcher.dart';
-import 'package:kotv_vlc/kotv_vlc.dart';
-
 import 'player/buffer_budget.dart';
+import 'player/fvp_register.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
 import 'theme/layout_scale.dart';
@@ -97,6 +96,7 @@ Future<void> main() async {
   if (!kIsWeb) {
     // Android 也要 init：用户可选 MPV（media_kit）；Web 用 HTML5，不初始化 media_kit。
     MediaKit.ensureInitialized();
+    kotvRegisterFvp();
   }
   unawaited(KotvBufferBudget.warm());
   final prefs = await SharedPreferences.getInstance();
@@ -243,10 +243,6 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
     await _persistWindowBounds();
     // 先优雅停引擎（HTTP shutdown → 杀 Java/Python）；超时再杀进程树。
     // Windows 仍避免 window_manager.destroy（Win7 易 WER），最后 exit。
-    // VLC：只 mute+stop（shutdownAll），禁止 unload/FreeLibrary，避免残留嗡鸣又避免卸库崩。
-    try {
-      await KotvVlc.shutdownAll();
-    } catch (_) {}
     try {
       await ref
           .read(engineLauncherProvider)

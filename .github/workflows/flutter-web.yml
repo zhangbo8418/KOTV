@@ -4,11 +4,12 @@ name: KOTV Flutter Web
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, master, restore-sidecar]
     tags: ["v*"]
 
 env:
   FLUTTER_VERSION: "3.44.8"
+  FVP_DEPS_URL: "https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0"
 
 jobs:
   build-web:
@@ -32,7 +33,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             libgl1-mesa-dev xorg-dev libxkbcommon-dev \
-            libmpv2 libmpv-dev vlc vlc-plugin-base libvlc-dev unzip curl zip
+            libmpv2 libmpv-dev unzip curl zip
 
       - uses: subosito/flutter-action@v2
         with:

@@ -2,7 +2,7 @@ import 'kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
 
-/// 桌面客户端：可展示引擎侧捆绑播放器库（本机 MPV/VLC）。
+/// 桌面客户端：可展示引擎侧捆绑运行时与本机外部 MPV。
 const kotvRuntimeDisplayKeysDesktop = <String>[
   'platform',
   'java',
@@ -11,9 +11,7 @@ const kotvRuntimeDisplayKeysDesktop = <String>[
   'bridge',
   'chromium',
   'ffmpeg',
-  'libvlc',
   'mpv',
-  'vlc',
 ];
 
 /// 安卓客户端：只展示引擎/bridge；不展示桌面播放器库。
@@ -25,7 +23,7 @@ const kotvRuntimeDisplayKeysAndroid = <String>[
   'bridge',
 ];
 
-/// Web 客户端：浏览器内不能加载 libmpv/libvlc，列表也不展示这两类。
+/// Web 客户端：浏览器内不能加载 libmpv，列表也不展示播放器库。
 const kotvRuntimeDisplayKeysWeb = <String>[
   'platform',
   'java',
@@ -56,7 +54,7 @@ List<String> formatKotvRuntimeLines(
     } else if (includeMissingKeys &&
         !kIsWeb &&
         !Platform.isAndroid &&
-        (k == 'mpv' || k == 'vlc')) {
+        (k == 'mpv' )) {
       // 仅桌面客户端补全本机播放器库缺失提示
       out.add('$k: (missing)');
     }

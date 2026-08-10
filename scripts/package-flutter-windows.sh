@@ -59,6 +59,9 @@ pwsh -NoProfile -Command "
 
 echo "==> flutter build windows --release"
 cd "$ROOT/flutter"
+# shellcheck source=kotv-fvp-deps.sh
+source "$ROOT/scripts/kotv-fvp-deps.sh"
+kotv_export_fvp_deps
 flutter config --enable-windows-desktop
 flutter pub get
 flutter build windows --release

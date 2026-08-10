@@ -3,7 +3,6 @@ import '../util/kotv_io.dart';
 import 'package:flutter/foundation.dart';
 
 /// 弹窗宿主平台（发给脚本用）：以 Flutter 客户端为准，不是引擎所在机器。
-/// iOS 连远程引擎时，脚本仍应收到 `ios`。
 String kotvHostPlatform() {
   if (kIsWeb) return 'web';
   if (Platform.isAndroid) return 'android';
@@ -14,42 +13,53 @@ String kotvHostPlatform() {
   return 'unknown';
 }
 
-/// 桌面端（鼠标/窗口）；与手机/TV 的默认焦点框策略不同。
 bool kotvIsDesktop() {
   if (kIsWeb) return false;
   return Platform.isMacOS || Platform.isWindows || Platform.isLinux;
 }
 
-/// Win7 实验线：media_kit/libmpv 在部分机型上会在创建 Player / 开播时卡死 UI。
+/// Win7：media_kit 偶发卡死；失败应回退 fvp。
 bool kotvIsWindows7() {
   if (kIsWeb || !Platform.isWindows) return false;
   final v = Platform.operatingSystemVersion.toLowerCase();
   if (v.contains('windows 7') || v.contains('win7')) return true;
-  // 兼容仅返回内部版本号的环境（6.1 = Win7）。
   return RegExp(r'(^|[^\d])6\.1([^\d]|$)').hasMatch(v);
 }
 
 bool kotvIsAndroid() => !kIsWeb && Platform.isAndroid;
+bool kotvIsIOS() => !kIsWeb && Platform.isIOS;
 
-/// 点播默认：Web=HTML5；Android=Exo；其它=MPV。
+/// 旧配置迁移：vlc→mpv，ijk→fvp。
+String kotvMigratePlayerVal(String raw) {
+  switch (raw.trim()) {
+    case 'innie#vlc':
+    case 'outie#vlc':
+      return 'innie#mpv';
+    case 'innie#ijk':
+      return 'innie#fvp';
+    default:
+      return raw.trim();
+  }
+}
+
+/// 点播默认：Web=HTML5；Android=Exo；iOS=FVP；其它=MPV。
 String kotvDefaultVodPlayer() {
   if (kIsWeb) return 'innie#html';
   if (kotvIsAndroid()) return 'innie#exo';
+  if (kotvIsIOS()) return 'innie#fvp';
   return 'innie#mpv';
 }
 
-/// 直播默认：Web=HTML5；Android=Exo；Windows=VLC；其它=MPV。
+/// 直播默认：Web=HTML5；Android=Exo；iOS=FVP；桌面=MPV（含 Windows）。
 String kotvDefaultLivePlayer() {
   if (kIsWeb) return 'innie#html';
   if (kotvIsAndroid()) return 'innie#exo';
-  if (!kIsWeb && Platform.isWindows) return 'innie#vlc';
+  if (kotvIsIOS()) return 'innie#fvp';
   return 'innie#mpv';
 }
 
-/// 将远端/跨端下发的播放器值钳到**当前客户端**可选集合。
-/// PC→安卓引擎：不会落到 exo/ijk；安卓→PC：不会落到 VLC；Web/iOS：仅 HTML5。
 String kotvClampPlayerVal(String raw, {required bool live}) {
-  final v = raw.trim();
+  final v = kotvMigratePlayerVal(raw);
   final opts = live ? kotvLivePlayerOptions() : kotvVodPlayerOptions();
   for (final o in opts) {
     if (o.$2 == v) return v;
@@ -57,68 +67,83 @@ String kotvClampPlayerVal(String raw, {required bool live}) {
   return live ? kotvDefaultLivePlayer() : kotvDefaultVodPlayer();
 }
 
-/// 当前平台是否有多个可切换内置/外置播放器（Web 仅 HTML5 → false）。
 bool kotvCanSwitchPlayer({required bool live}) =>
     (live ? kotvLivePlayerOptions() : kotvVodPlayerOptions()).length > 1;
 
-/// 页内播放器后端种类。
-enum KotvEmbedBackend { mpv, vlc, exo, ijk, html }
+enum KotvEmbedBackend { mpv, fvp, exo, html, vp }
 
 KotvEmbedBackend kotvEmbedBackend(String playerVal) {
-  if (kIsWeb) return KotvEmbedBackend.html;
-  switch (playerVal.trim()) {
+  switch (kotvMigratePlayerVal(playerVal)) {
     case 'innie#html':
       return KotvEmbedBackend.html;
-    case 'innie#vlc':
-      return KotvEmbedBackend.vlc;
+    case 'innie#vp':
+      return KotvEmbedBackend.vp;
+    case 'innie#fvp':
+      return KotvEmbedBackend.fvp;
     case 'innie#exo':
       return KotvEmbedBackend.exo;
-    case 'innie#ijk':
-      return KotvEmbedBackend.ijk;
     case 'innie#mpv':
     default:
+      // Web 无 MPV/Exo/FVP；非法值由 clamp 纠正，此处兜底 HTML。
+      if (kIsWeb) return KotvEmbedBackend.html;
       return KotvEmbedBackend.mpv;
   }
 }
 
-/// 设置页 / 页内切换：按平台分流选项。
 List<(String, String)> kotvVodPlayerOptions() {
   if (kIsWeb) {
-    return const [('浏览器播放（HTML5）', 'innie#html')];
+    return const [
+      ('浏览器播放（HTML5）（默认）', 'innie#html'),
+      ('video_player', 'innie#vp'),
+    ];
   }
   if (kotvIsAndroid()) {
     return const [
       ('内置 ExoPlayer（默认）', 'innie#exo'),
       ('内置 MPV', 'innie#mpv'),
-      ('内置 ijk', 'innie#ijk'),
+      ('内置 FVP（零拷贝）', 'innie#fvp'),
     ];
   }
-  return const [
+  if (kotvIsIOS()) {
+    return const [
+      ('内置 FVP（默认）', 'innie#fvp'),
+      ('内置 MPV', 'innie#mpv'),
+      ('浏览器播放（HTML5）', 'innie#html'),
+    ];
+  }
+  return [
     ('内置 MPV（默认）', 'innie#mpv'),
-    ('内置 VLC', 'innie#vlc'),
-    ('外部 VLC', 'outie#vlc'),
+    ('内置 FVP（零拷贝）', 'innie#fvp'),
     ('外部 MPV', 'outie#mpv'),
-    ('IINA', 'outie#iina'),
+    if (Platform.isMacOS) ('IINA', 'outie#iina'),
   ];
 }
 
 List<(String, String)> kotvLivePlayerOptions() {
   if (kIsWeb) {
-    return const [('浏览器播放（HTML5）', 'innie#html')];
+    return const [
+      ('浏览器播放（HTML5）（默认）', 'innie#html'),
+      ('video_player', 'innie#vp'),
+    ];
   }
   if (kotvIsAndroid()) {
     return const [
       ('内置 ExoPlayer（默认）', 'innie#exo'),
       ('内置 MPV', 'innie#mpv'),
-      ('内置 ijk', 'innie#ijk'),
+      ('内置 FVP（零拷贝）', 'innie#fvp'),
     ];
   }
-  final win = !kIsWeb && Platform.isWindows;
+  if (kotvIsIOS()) {
+    return const [
+      ('内置 FVP（默认）', 'innie#fvp'),
+      ('内置 MPV', 'innie#mpv'),
+      ('浏览器播放（HTML5）', 'innie#html'),
+    ];
+  }
   return [
-    ('内置 MPV${!win ? '（默认）' : ''}', 'innie#mpv'),
-    ('内置 VLC${win ? '（默认）' : ''}', 'innie#vlc'),
-    ('外部 VLC', 'outie#vlc'),
+    ('内置 MPV（默认）', 'innie#mpv'),
+    ('内置 FVP（零拷贝）', 'innie#fvp'),
     ('外部 MPV', 'outie#mpv'),
-    if (!kIsWeb && Platform.isMacOS) ('IINA', 'outie#iina'),
+    if (Platform.isMacOS) ('IINA', 'outie#iina'),
   ];
 }

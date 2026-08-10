@@ -771,27 +771,34 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
     // 内置后端按平台分流；外置仅桌面。
     final opts = <(String label, String val, String key)>[
-      if (kIsWeb)
-        ('浏览器播放（HTML5）', 'innie#html', 'embed_html')
-      else if (kotvIsAndroid()) ...[
+      if (kIsWeb) ...[
+        ('浏览器播放（HTML5）', 'innie#html', 'embed_html'),
+        ('video_player', 'innie#vp', 'embed_vp'),
+      ] else if (kotvIsAndroid()) ...[
         ('内置 ExoPlayer', 'innie#exo', 'embed_exo'),
         ('内置 MPV', 'innie#mpv', 'embed_mpv'),
-        ('内置 ijk', 'innie#ijk', 'embed_ijk'),
+        ('内置 FVP', 'innie#fvp', 'embed_fvp'),
+      ] else if (kotvIsIOS()) ...[
+        ('内置 FVP', 'innie#fvp', 'embed_fvp'),
+        ('内置 MPV', 'innie#mpv', 'embed_mpv'),
+        ('浏览器播放（HTML5）', 'innie#html', 'embed_html'),
       ] else ...[
         ('内置 MPV', 'innie#mpv', 'embed_mpv'),
-        ('内置 VLC', 'innie#vlc', 'embed_vlc'),
-        ('外部 VLC', 'outie#vlc', 'vlc'),
+        ('内置 FVP', 'innie#fvp', 'embed_fvp'),
         ('外部 MPV', 'outie#mpv', 'mpv'),
         ('IINA', 'outie#iina', 'iina'),
       ],
     ];
 
     bool listed(String key) {
-      // Flutter 内置 MPV 走 media_kit 自带 libmpv，不依赖引擎 runtime/libmpv。
-      if (key == 'embed_mpv' || key == 'embed_exo' || key == 'embed_ijk' || key == 'embed_html') {
+      // Flutter 内置 MPV/FVP/Exo/HTML/video_player 不依赖引擎 runtime。
+      if (key == 'embed_mpv' ||
+          key == 'embed_exo' ||
+          key == 'embed_fvp' ||
+          key == 'embed_html' ||
+          key == 'embed_vp') {
         return true;
       }
-      if (key == 'embed_vlc') return avail['embed_vlc'] == true || avail['vlc'] == true || avail.isEmpty;
       return avail[key] == true;
     }
 
@@ -1154,9 +1161,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         } catch (_) {}
       }
       return;
-    }
-    if (p is EngineVlcPlayback) {
-      await p.setStableVolume(on);
     }
   }
 

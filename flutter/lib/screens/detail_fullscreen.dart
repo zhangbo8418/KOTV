@@ -6,14 +6,15 @@ import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../player/danmaku_layer.dart';
-import '../player/embed_video_view.dart';
 import '../player/exo_playback.dart';
-import '../player/ijk_playback.dart';
+import '../player/fvp_playback.dart';
+import '../player/html_playback.dart';
 import '../player/kotv_playback.dart';
+import '../player/vp_playback.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
 
-/// 详情页全屏：MPV / VLC 共用同一套顶底控件。
+/// 详情页全屏：MPV / FVP / Exo 共用同一套顶底控件。
 class DetailFullscreenPage extends StatefulWidget {
   const DetailFullscreenPage({
     super.key,
@@ -285,9 +286,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   Widget _buildVideo() {
     final pb = widget.playback;
     Widget video;
-    if (pb is EngineVlcPlayback) {
-      video = EmbedVideoView(playback: pb, fit: _aspect.fit, aspectRatio: _aspect.ratio);
-    } else if (pb is MediaKitPlayback) {
+    if (pb is MediaKitPlayback) {
       final mk = Video(
         controller: pb.controller,
         controls: NoVideoControls,
@@ -312,7 +311,11 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
       }
     } else if (pb is ExoPlayback) {
       video = pb.buildView(fit: _aspect.fit);
-    } else if (pb is IjkPlayback) {
+    } else if (pb is FvpPlayback) {
+      video = pb.buildView(fit: _aspect.fit);
+    } else if (pb is HtmlPlayback) {
+      video = pb.buildView(fit: _aspect.fit);
+    } else if (pb is VpPlayback) {
       video = pb.buildView(fit: _aspect.fit);
     } else {
       video = const ColoredBox(color: Colors.black);

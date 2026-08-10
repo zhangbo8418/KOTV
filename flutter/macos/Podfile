@@ -30,6 +30,12 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
+  # 可选：本地 mdk，避免 CocoaPods 从 SourceForge 拉 nightly（慢/易卡）。
+  # 例：KOTV_MDK_POD_PATH=/tmp/mdk-sdk-local ./scripts/package-flutter-macos.sh
+  if ENV['KOTV_MDK_POD_PATH'] && !ENV['KOTV_MDK_POD_PATH'].empty?
+    pod 'mdk', :path => ENV['KOTV_MDK_POD_PATH']
+  end
+
   flutter_install_all_macos_pods File.dirname(File.realpath(__FILE__))
   target 'RunnerTests' do
     inherit! :search_paths

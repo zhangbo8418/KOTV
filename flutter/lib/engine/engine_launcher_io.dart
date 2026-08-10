@@ -209,11 +209,11 @@ class EngineLauncher {
       p.normalize(p.join(Directory.current.path, 'runtime')),
       p.normalize(p.join(Directory.current.path, '..', 'runtime')),
     ]);
-    // 只认单层 runtime（含 jre 或 libvlc）；禁止依赖 runtime\runtime 嵌套布局。
+    // 只认单层 runtime（含 jre）；禁止依赖 runtime\runtime 嵌套布局。
     for (final root in roots) {
       if (Directory(root).existsSync() &&
           (Directory(p.join(root, 'jre')).existsSync() ||
-              Directory(p.join(root, 'libvlc')).existsSync())) {
+              false)) {
         env['KOTV_RUNTIME'] = root;
         break;
       }

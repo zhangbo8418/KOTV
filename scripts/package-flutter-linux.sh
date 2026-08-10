@@ -27,6 +27,9 @@ echo "==> flutter build linux --release"
 cd "$ROOT/flutter"
 # 资产里若有 Windows .exe / 错架构二进制，清掉无害；Linux 引擎由下方 CMake/拷贝处理
 rm -f assets/engine/kotv-engine.exe
+# shellcheck source=kotv-fvp-deps.sh
+source "$ROOT/scripts/kotv-fvp-deps.sh"
+kotv_export_fvp_deps
 flutter config --enable-linux-desktop
 flutter pub get
 # 失败时打出详细链接错误

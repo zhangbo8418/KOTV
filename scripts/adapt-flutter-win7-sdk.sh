@@ -5,46 +5,33 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/flutter/pubspec.yaml"
-VLC="$ROOT/flutter/packages/kotv_vlc/pubspec.yaml"
 
 [[ -f "$APP" ]] || { echo "missing $APP" >&2; exit 1; }
-[[ -f "$VLC" ]] || { echo "missing $VLC" >&2; exit 1; }
 
 # 主工程：Dart 3.3（Flutter 3.19）
 perl -i -pe 's/sdk:\s*\^3\.5\.4/sdk: ">=3.3.0 <3.4.0"/' "$APP"
 perl -i -pe 's/flutter_lints:\s*\^4\.0\.0/flutter_lints: ^3.0.0/' "$APP"
 
-# 钉死对 Dart 3.4+ 的直接依赖
 perl -i -pe 's/path_provider:\s*\^2\.1\.5/path_provider: 2.1.4/' "$APP"
 perl -i -pe 's/shared_preferences:\s*\^2\.3\.3/shared_preferences: 2.3.0/' "$APP"
-# media_kit 1.2.0+ / media_kit_video 1.3.0+ 依赖 web（Dart >=3.4）。
-# Win7 = Flutter 3.19 / Dart 3.3，钉到目前能解析的最新一档：1.1.11 + 1.2.5。
-perl -i -pe 's/media_kit:\s*("[^"]+"|[^\n]+)/media_kit: 1.1.11/' "$APP"
-perl -i -pe 's/media_kit_video:\s*("[^"]+"|[^\n]+)/media_kit_video: 1.2.5/' "$APP"
-perl -i -pe 's/media_kit_libs_video:\s*("[^"]+"|[^\n]+)/media_kit_libs_video: 1.0.7/' "$APP"
-# web 1.x / wakelock_plus 1.4+ 要求 Dart >=3.4；Win7 钉到 0.5.1 + 1.2.8（允许 web>=0.5.1）。
+# Win7：尽量用较新 media_kit；若 pub 解析失败再退回 1.1.11。
+perl -i -pe 's/media_kit:\s*[^\n]+/media_kit: 1.1.11/' "$APP"
+perl -i -pe 's/media_kit_video:\s*[^\n]+/media_kit_video: 1.2.5/' "$APP"
+perl -i -pe 's/media_kit_libs_video:\s*[^\n]+/media_kit_libs_video: 1.0.7/' "$APP"
 perl -i -pe 's/web:\s*\^1\.1\.0/web: 0.5.1/' "$APP"
 perl -i -pe 's/wakelock_plus:\s*[^\n]+/wakelock_plus: 1.2.8/' "$APP"
 
-# kotv_vlc：允许 3.19
-perl -i -pe 's/sdk:\s*\^3\.5\.4/sdk: ">=3.3.0 <3.4.0"/' "$VLC"
-perl -i -pe 's/flutter:\s*"?>=3\.24\.0"?/flutter: ">=3.19.0"/' "$VLC"
-
-# Flutter 3.44+ 用 DialogThemeData；3.19 ThemeData 仍要 DialogTheme
-# PredictiveBackPageTransitionsBuilder 为较新 API，3.19 无此类
 THEME="$ROOT/flutter/lib/theme/kotv_theme.dart"
 if [[ -f "$THEME" ]]; then
   perl -i -pe 's/DialogThemeData\(/DialogTheme(/g' "$THEME"
   perl -i -pe 's/PredictiveBackPageTransitionsBuilder\(\)/ZoomPageTransitionsBuilder()/g' "$THEME"
 fi
 
-# 3.19 不认识 flutter.config；去掉以免 pub get 失败（SPM 仅影响 iOS/macOS）
 perl -i -0pe 's/\n  # 3\.44.*?\n  config:\n    enable-swift-package-manager: false\n/\n/s' "$APP" 2>/dev/null || true
 perl -i -0pe 's/\n  config:\n    enable-swift-package-manager: false\n/\n/s' "$APP" 2>/dev/null || true
 
-# 压住传递依赖（path_provider / shared_preferences 平台实现常要求 Dart 3.4+）
 if ! grep -q '^dependency_overrides:' "$APP"; then
-  cat >> "$APP" <<'EOF'
+  cat >> "$APP" <<'OVERRIDES'
 
 # Win7 / Flutter 3.19 临时覆盖（由 adapt-flutter-win7-sdk.sh 注入）
 dependency_overrides:
@@ -63,13 +50,12 @@ dependency_overrides:
   media_kit_libs_video: 1.0.7
   web: 0.5.1
   wakelock_plus: 1.2.8
-EOF
+OVERRIDES
 fi
 
-# Win7：注入内嵌字体（CJK + 彩色/黑白 emoji）；其它平台 pubspec 不含 fonts。
 if ! grep -q 'family: NotoSansSC' "$APP"; then
   perl -i -0pe 's/(  assets:\n    - assets\/engine\/\n)/$1  # Win7 only (adapt-flutter-win7-sdk.sh + fetch-flutter-fonts.sh)\n  fonts:\n    - family: NotoSansSC\n      fonts:\n        - asset: assets\/fonts\/NotoSansSC-Regular.otf\n          weight: 400\n        - asset: assets\/fonts\/NotoSansSC-Bold.otf\n          weight: 700\n    - family: NotoColorEmoji\n      fonts:\n        - asset: assets\/fonts\/NotoColorEmoji.ttf\n          weight: 400\n    - family: NotoEmoji\n      fonts:\n        - asset: assets\/fonts\/NotoEmoji.ttf\n          weight: 400\n/s' "$APP"
 fi
 
-echo "adapted pubspec for Flutter 3.19 / Dart 3.3:"
-grep -nE 'sdk:|path_provider|shared_preferences|media_kit|dependency_overrides|flutter_lints|NotoEmoji' "$APP" | head -60
+echo "adapted pubspec for Flutter 3.19 / Dart 3.3 (no VLC):"
+grep -nE 'sdk:|media_kit|fvp|dependency_overrides' "$APP" | head -40

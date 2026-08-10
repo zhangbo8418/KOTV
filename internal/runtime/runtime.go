@@ -243,33 +243,13 @@ func FFmpeg() string {
 	return ""
 }
 
-// LibVLC 返回页内 VLC 所需的 libvlc 目录（同级含 plugins/ 子目录）。
-func LibVLC() string {
-	cands := underRoots(
-		filepath.Join("libvlc", "libvlc.dylib"),
-		filepath.Join("libvlc", "libvlc.5.dylib"),
-		filepath.Join("libvlc", "libvlc.dll"),
-		filepath.Join("libvlc", "libvlc.so"),
-		filepath.Join("libvlc", "libvlc.so.5"),
-		// 旧布局
-		filepath.Join("vlc", "VLC.app", "Contents", "MacOS", "lib", "libvlc.dylib"),
-		filepath.Join("vlc", "libvlc.dll"),
-	)
-	if p := firstExisting(cands...); p != "" {
-		return filepath.Dir(p)
-	}
-	return ""
-}
-
-// VLC 返回捆绑或系统 VLC 可执行文件（外部播放；页内嵌入用 LibVLC）。
+// VLC 返回系统 PATH / 常见安装路径下的 VLC（外部播放遗留探测；发行包不捆绑）。
 func VLC() string {
 	cands := underRoots(
 		filepath.Join("vlc", "VLC.app", "Contents", "MacOS", "VLC"),
 		filepath.Join("vlc", "vlc.exe"),
 		filepath.Join("vlc", "vlc"),
 		filepath.Join("vlc", "bin", "vlc"),
-		filepath.Join("lib", "vlc.exe"), // Windows 部分原生库布局
-		filepath.Join("lib", "vlc"),
 	)
 	if p := firstExisting(cands...); p != "" {
 		return p
@@ -342,7 +322,7 @@ func BridgeJAR() string {
 
 // Status 汇总捆绑/系统运行时状态（不含 jvm；展示顺序由客户端固定）。
 func Status() map[string]string {
-	// Android：只报 bridge/quickjs；不报桌面 chromium/ffmpeg/vlc 等（播放走 Exo/media_kit）。
+	// Android：只报 bridge/quickjs；不报桌面 chromium/ffmpeg 等（播放走 Exo/media_kit/fvp）。
 	if runtime.GOOS == "android" {
 		st := "android-bridge(down)"
 		if v := probeAndroidSpider(); v != "" {
@@ -364,9 +344,7 @@ func Status() map[string]string {
 		"bridge":   orMissing(BridgeJAR()),
 		"chromium": orMissing(Chromium()),
 		"ffmpeg":   orMissing(FFmpeg()),
-		"libvlc":   orMissing(LibVLC()),
 		"mpv":      orMissing(MPV()),
-		"vlc":      orMissing(VLC()),
 	}
 }
 

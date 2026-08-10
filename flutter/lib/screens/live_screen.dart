@@ -11,12 +11,13 @@ import 'package:window_manager/window_manager.dart';
 import '../api/kotv_engine_url.dart';
 import '../desktop/mini_player_window.dart';
 import '../player/exo_playback.dart';
+import '../player/fvp_playback.dart';
 import '../player/html_playback.dart';
-import '../player/ijk_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/mpv_opts.dart';
+import '../player/vp_playback.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
@@ -42,10 +43,10 @@ class LiveScreen extends ConsumerStatefulWidget {
 class _LiveScreenState extends ConsumerState<LiveScreen> {
   Player? _mkPlayer;
   MediaKitPlayback? _mk;
-  EngineVlcPlayback? _vlc;
   ExoPlayback? _exo;
-  IjkPlayback? _ijk;
+  FvpPlayback? _fvp;
   HtmlPlayback? _html;
+  VpPlayback? _vp;
   final FocusNode _focus = FocusNode();
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
@@ -54,19 +55,18 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     switch (_backend) {
       case KotvEmbedBackend.html:
         return _html ??= HtmlPlayback();
-      case KotvEmbedBackend.vlc:
-        return _vlc ??= EngineVlcPlayback();
+      case KotvEmbedBackend.vp:
+        return _vp ??= VpPlayback();
+      case KotvEmbedBackend.fvp:
+        return _fvp ??= FvpPlayback();
       case KotvEmbedBackend.exo:
         return _exo ??= ExoPlayback();
-      case KotvEmbedBackend.ijk:
-        return _ijk ??= IjkPlayback();
       case KotvEmbedBackend.mpv:
         return _ensureMpv();
     }
   }
 
-  bool get _useVlc => _backend == KotvEmbedBackend.vlc;
-
+  
   MediaKitPlayback _ensureMpv() {
     _mkPlayer ??= kotvCreateMpvPlayer();
     _mk ??= MediaKitPlayback(_mkPlayer!, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
@@ -79,9 +79,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         await _mk?.stop();
       } catch (_) {}
     }
-    if (keep != KotvEmbedBackend.vlc) {
+    if (keep != KotvEmbedBackend.fvp) {
       try {
-        await _vlc?.stop();
+        await _fvp?.stop();
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.exo) {
@@ -89,14 +89,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         await _exo?.stop();
       } catch (_) {}
     }
-    if (keep != KotvEmbedBackend.ijk) {
-      try {
-        await _ijk?.stop();
-      } catch (_) {}
-    }
     if (keep != KotvEmbedBackend.html) {
       try {
         await _html?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.vp) {
+      try {
+        await _vp?.stop();
       } catch (_) {}
     }
   }
@@ -111,7 +111,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }(),
       () async {
         try {
-          await _vlc?.stop();
+          await _fvp?.stop();
         } catch (_) {}
       }(),
       () async {
@@ -121,12 +121,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }(),
       () async {
         try {
-          await _ijk?.stop();
+          await _html?.stop();
         } catch (_) {}
       }(),
       () async {
         try {
-          await _html?.stop();
+          await _vp?.stop();
         } catch (_) {}
       }(),
     ]);
@@ -189,15 +189,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _catchupHideTimer?.cancel();
     _portraitHideTimer?.cancel();
     _focus.dispose();
-    unawaited(_vlc?.stop() ?? Future<void>.value());
+    unawaited(_fvp?.stop() ?? Future<void>.value());
     unawaited(_exo?.stop() ?? Future<void>.value());
-    unawaited(_ijk?.stop() ?? Future<void>.value());
     unawaited(_html?.stop() ?? Future<void>.value());
-    _vlc?.dispose();
+    unawaited(_vp?.stop() ?? Future<void>.value());
+    _fvp?.dispose();
     _mk?.dispose();
     _exo?.dispose();
-    _ijk?.dispose();
     _html?.dispose();
+    _vp?.dispose();
     final mkPlayer = _mkPlayer;
     _mkPlayer = null;
     unawaited(kotvDisposeMpvPlayer(mkPlayer));
@@ -511,37 +511,38 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   Future<void> _openLiveUrl(String url, {Map<String, String>? headers}) async {
     await _playback.setDecodeMode(_decodeMode);
     await _stopInactiveBackends(_backend);
-    if (_useVlc) {
-      _vlc ??= EngineVlcPlayback();
-      await _vlc!.setDecodeMode(_decodeMode);
-      // 原生 create/load/play 偶发阻塞；超时后提示用户改外部播放器。
-      try {
-        await _vlc!.open(url, headers: headers).timeout(const Duration(seconds: 12));
-      } on TimeoutException {
-        if (mounted) {
-          setState(() => _status = '内置 VLC 开播超时，可改用外部播放器');
-        }
-        rethrow;
-      }
-    } else if (_backend == KotvEmbedBackend.mpv) {
-      // Win7 上 media_kit 偶发同步卡死：开播加超时，失败则自动切 VLC。
+    if (mounted) {
+      setState(() {
+        _playUrl = url;
+        _playHeaders = headers;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+    } else {
+      _playUrl = url;
+      _playHeaders = headers;
+    }
+    if (_backend == KotvEmbedBackend.mpv) {
+      // Win7 上 media_kit 偶发卡死：开播加超时，失败则自动切 FVP。
       final mk = _ensureMpv();
       try {
         await mk.open(url, headers: headers).timeout(const Duration(seconds: 8));
       } on TimeoutException {
         if (kotvIsDesktop()) {
-          _playerVal = 'innie#vlc';
+          _playerVal = 'innie#fvp';
           try {
-            await ref.read(apiProvider).setSetting('playerLive', 'innie#vlc');
+            await ref.read(apiProvider).setSetting('playerLive', 'innie#fvp');
           } catch (_) {}
           try {
             await mk.stop();
           } catch (_) {}
-          _vlc ??= EngineVlcPlayback();
-          await _vlc!.setDecodeMode(_decodeMode);
-          await _vlc!.open(url, headers: headers);
+          _fvp ??= FvpPlayback();
+          await _fvp!.setDecodeMode(_decodeMode);
+          await _fvp!.open(url, headers: headers);
+          try {
+            await _fvp!.play();
+          } catch (_) {}
           if (mounted) {
-            setState(() => _status = 'MPV 超时，已自动切到内置 VLC');
+            setState(() => _status = 'MPV 超时，已自动切到内置 FVP');
           }
         } else {
           rethrow;
@@ -555,8 +556,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         await pb.play();
       } catch (_) {}
     }
-    _playUrl = url;
-    _playHeaders = headers;
   }
 
   Widget _liveVideo() {

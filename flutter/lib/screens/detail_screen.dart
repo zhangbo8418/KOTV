@@ -10,13 +10,14 @@ import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
 import '../player/danmaku_layer.dart';
 import '../player/exo_playback.dart';
+import '../player/fvp_playback.dart';
 import '../player/html_playback.dart';
-import '../player/ijk_playback.dart';
 import '../player/buffer_budget.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/mpv_opts.dart';
+import '../player/vp_playback.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
@@ -94,10 +95,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   Player? _mkPlayer;
   MediaKitPlayback? _mk;
-  EngineVlcPlayback? _vlc;
   ExoPlayback? _exo;
-  IjkPlayback? _ijk;
+  FvpPlayback? _fvp;
   HtmlPlayback? _html;
+  VpPlayback? _vp;
   StreamSubscription? _playingSub;
   StreamSubscription? _endedSub;
   StreamSubscription<Duration>? _posSub;
@@ -120,23 +121,22 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
-  /// 当前页内后端：按设置选择 Exo / MPV / ijk / VLC。
+  /// 当前页内后端：按设置选择 Exo / MPV / FVP / HTML。
   KotvPlayback get _playback {
     switch (_backend) {
       case KotvEmbedBackend.html:
         return _html ??= HtmlPlayback();
-      case KotvEmbedBackend.vlc:
-        return _vlc ??= EngineVlcPlayback();
+      case KotvEmbedBackend.vp:
+        return _vp ??= VpPlayback();
+      case KotvEmbedBackend.fvp:
+        return _fvp ??= FvpPlayback();
       case KotvEmbedBackend.exo:
         return _exo ??= ExoPlayback();
-      case KotvEmbedBackend.ijk:
-        return _ijk ??= IjkPlayback();
       case KotvEmbedBackend.mpv:
         return _ensureMpv();
     }
   }
 
-  bool get _useVlc => _backend == KotvEmbedBackend.vlc;
   bool get _useMpv => _backend == KotvEmbedBackend.mpv;
   String get _enginePrefix => flutterPlayerLabel(_playerVal);
 
@@ -218,9 +218,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await _mk?.stop();
       } catch (_) {}
     }
-    if (keep != KotvEmbedBackend.vlc) {
+    if (keep != KotvEmbedBackend.fvp) {
       try {
-        await _vlc?.stop();
+        await _fvp?.stop();
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.exo) {
@@ -228,14 +228,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await _exo?.stop();
       } catch (_) {}
     }
-    if (keep != KotvEmbedBackend.ijk) {
-      try {
-        await _ijk?.stop();
-      } catch (_) {}
-    }
     if (keep != KotvEmbedBackend.html) {
       try {
         await _html?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.vp) {
+      try {
+        await _vp?.stop();
       } catch (_) {}
     }
   }
@@ -250,7 +250,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }(),
       () async {
         try {
-          await _vlc?.stop();
+          await _fvp?.stop();
         } catch (_) {}
       }(),
       () async {
@@ -260,12 +260,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }(),
       () async {
         try {
-          await _ijk?.stop();
+          await _html?.stop();
         } catch (_) {}
       }(),
       () async {
         try {
-          await _html?.stop();
+          await _vp?.stop();
         } catch (_) {}
       }(),
     ]);
@@ -280,7 +280,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
   /// 不要 pause：pause 会粘在播放器上，下次 open 只出一帧。
-  /// VLC stop 会先静音消残留嗡鸣，下次 open/play 再恢复音量。
   Future<void> _stopHard() async {
     _playbackLive = false;
     _advanceBusy = false;
@@ -312,11 +311,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
 
     await Future.wait<void>([
-      hardStop(_vlc),
+      hardStop(_fvp),
       hardStop(_mk),
       hardStop(_exo),
-      hardStop(_ijk),
       hardStop(_html),
+      hardStop(_vp),
     ]);
     _stoppedHard = true;
   }
@@ -473,16 +472,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _fsEpIdx.dispose();
     // 正常路径已在 [_stopHard] 里 await pause/stop；此处兜底再停一次再释放。
     if (!_stoppedHard) {
-      unawaited(_vlc?.stop() ?? Future<void>.value());
+      unawaited(_fvp?.stop() ?? Future<void>.value());
       unawaited(_exo?.stop() ?? Future<void>.value());
-      unawaited(_ijk?.stop() ?? Future<void>.value());
       unawaited(_html?.stop() ?? Future<void>.value());
+      unawaited(_vp?.stop() ?? Future<void>.value());
     }
-    _vlc?.dispose();
+    _fvp?.dispose();
     _mk?.dispose();
     _exo?.dispose();
-    _ijk?.dispose();
     _html?.dispose();
+    _vp?.dispose();
     final mkPlayer = _mkPlayer;
     _mkPlayer = null;
     unawaited(kotvDisposeMpvPlayer(mkPlayer));
@@ -665,9 +664,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }
       return;
     }
-    if (p is EngineVlcPlayback) {
-      await p.setStableVolume(on);
-    }
+    
   }
 
   Future<void> _loadDanmakuForEpisode({
@@ -807,6 +804,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           openHeaders = null;
         }
       }
+      // 先挂播放器视图再 open：macOS VLC 硬渲需 AppKitView 先 created 再 attach。
+      setState(() {
+        _playUrl = playUrl;
+        _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      if (serial != _playAtSerial || !mounted) return;
       await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
       try {
         await pb.play();
@@ -835,10 +839,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         }));
       }
       if (!mounted) return;
-      setState(() {
-        _playUrl = playUrl;
-        _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
-      });
       unawaited(_loadDanmakuForEpisode(
         playDanmaku: '${data['danmaku'] ?? ''}',
         name: d.name,

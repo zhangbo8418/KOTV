@@ -18,7 +18,7 @@ for p in plats:
   if not p.is_dir():
     continue
   print(f"== {p.name} ==")
-  for name in ["jre","python","chromium","ffmpeg","vlc","mpv","bridge"]:
+  for name in ["jre","python","chromium","ffmpeg","mpv","bridge"]:
     d=p/name
     print(f"  {name}: {'OK' if d.exists() else 'MISSING'}")
 PY

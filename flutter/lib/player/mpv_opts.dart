@@ -1,5 +1,6 @@
 import 'dart:math' show max;
 
+import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -58,8 +59,16 @@ class KotvMpvOpts {
       // mediacodec 零拷贝在不少机型 abort；copy 更稳（安卓已验证）。
       return hard ? 'mediacodec-copy' : 'auto-safe';
     }
-    // 桌面：与 8/8 基线一致，交给 libmpv auto。
-    // dxva2-copy / auto-copy 曾试过：今早 d23f24b 已实测「未解决」并撤回，勿再臆测钉死。
+    // 桌面：media_kit 走 ANGLE Texture，真零拷贝未合入主线；用 auto 选可用硬解。
+    // Win7 常见回落 dxva2-copy；需要零拷贝请改用 innie#fvp。
+    if (hard) {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+        return 'd3d11va-copy';
+      }
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
+        return 'videotoolbox';
+      }
+    }
     return 'auto';
   }
 

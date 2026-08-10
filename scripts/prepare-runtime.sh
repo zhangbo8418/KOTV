@@ -803,191 +803,8 @@ prepare_ffmpeg() {
   echo "[ffmpeg] ready: $dest"
 }
 
-# --- libvlc（页内嵌入软渲染：只保留 lib + plugins，不整包 VLC.app）---
-# macOS: 从官方 DMG 提取 VLC.app/Contents/MacOS/{lib,plugins}
-# Windows: 从官方 zip 便携包提取 libvlc.dll / libvlccore.dll + plugins/
-# Linux: 从系统 vlc 包复制（CI apt install vlc）
-VLC_VER="3.0.23"
-
-libvlc_ready() {
-  local dest="$OUT_ROOT/libvlc"
-  # 必须匹配脚本里的 VLC_VER，否则升级版本号后仍会跳过旧包
-  [[ -f "$dest/.kotv-libvlc" ]] || return 1
-  [[ "$(cat "$dest/.kotv-libvlc" 2>/dev/null)" == "$VLC_VER" ]] || return 1
-  [[ -d "$dest/plugins" ]] || return 1
-  case "$1" in
-    macos-*)
-      [[ -f "$dest/libvlc.dylib" || -f "$dest/libvlc.5.dylib" ]]
-      ;;
-    windows-*)
-      [[ -f "$dest/libvlc.dll" && -f "$dest/libvlccore.dll" ]]
-      ;;
-    linux-*)
-      [[ -f "$dest/libvlc.so" || -f "$dest/libvlc.so.5" ]]
-      ;;
-    *) return 1 ;;
-  esac
-}
-
-prepare_libvlc() {
-  local plat="$1" dest="$OUT_ROOT/libvlc"
-  if libvlc_ready "$plat"; then
-    echo "[libvlc] already present (v${VLC_VER}): $dest"
-    return
-  fi
-  if [[ -d "$dest" ]]; then
-    local old=""
-    old="$(cat "$dest/.kotv-libvlc" 2>/dev/null || true)"
-    if [[ -n "$old" && "$old" != "$VLC_VER" ]]; then
-      echo "[libvlc] version mismatch ($old → $VLC_VER), re-downloading"
-    else
-      echo "[libvlc] incomplete or unversioned, re-downloading → v${VLC_VER}"
-    fi
-  fi
-  # 旧布局遗留：整包 vlc/、空的 runtime/lib 符号链接目录
-  rm -rf "$dest" "$OUT_ROOT/vlc" "$OUT_ROOT/lib"
-  mkdir -p "$dest"
-
-  local url name
-  case "$plat" in
-    macos-arm64)
-      url="https://get.videolan.org/vlc/${VLC_VER}/macosx/vlc-${VLC_VER}-arm64.dmg"
-      name="vlc-${VLC_VER}-arm64.dmg"
-      ;;
-    macos-x64)
-      url="https://get.videolan.org/vlc/${VLC_VER}/macosx/vlc-${VLC_VER}-intel64.dmg"
-      name="vlc-${VLC_VER}-intel64.dmg"
-      ;;
-    windows-x64)
-      url="https://get.videolan.org/vlc/${VLC_VER}/win64/vlc-${VLC_VER}-win64.zip"
-      name="vlc-${VLC_VER}-win64.zip"
-      ;;
-    windows-arm64)
-      url="https://get.videolan.org/vlc/${VLC_VER}/winarm64/vlc-${VLC_VER}-winarm64.zip"
-      name="vlc-${VLC_VER}-winarm64.zip"
-      ;;
-    linux-x64|linux-arm64)
-      prepare_libvlc_linux "$plat" "$dest"
-      return
-      ;;
-    *) return ;;
-  esac
-
-  local archive="$CACHE/$name"
-  if [[ ! -f "$archive" || ! -s "$archive" ]]; then
-    local mirror=""
-    case "$plat" in
-      macos-arm64) mirror="https://mirrors.tuna.tsinghua.edu.cn/videolan-ftp/vlc/${VLC_VER}/macosx/vlc-${VLC_VER}-arm64.dmg" ;;
-      macos-x64)   mirror="https://mirrors.tuna.tsinghua.edu.cn/videolan-ftp/vlc/${VLC_VER}/macosx/vlc-${VLC_VER}-intel64.dmg" ;;
-      windows-x64) mirror="https://mirrors.tuna.tsinghua.edu.cn/videolan-ftp/vlc/${VLC_VER}/win64/vlc-${VLC_VER}-win64.zip" ;;
-      windows-arm64) mirror="https://mirrors.tuna.tsinghua.edu.cn/videolan-ftp/vlc/${VLC_VER}/winarm64/vlc-${VLC_VER}-winarm64.zip" ;;
-    esac
-    if [[ -n "$mirror" ]]; then
-      echo "[libvlc] try mirror: $mirror"
-      if ! download "$mirror" "$archive"; then
-        echo "[libvlc] mirror failed, fallback official"
-        rm -f "$archive" "$archive.partial"
-      fi
-    fi
-  fi
-  download "$url" "$archive"
-
-  case "$plat" in
-    macos-*)
-      if [[ "$(uname -s)" != "Darwin" ]]; then
-        echo "[libvlc] macOS dmg 需在 macOS 上解包，已下载到 $archive"
-        echo "      手动: hdiutil attach $archive"
-        echo "            cp -a \"/Volumes/VLC\"*/VLC.app/Contents/MacOS/lib/* $dest/"
-        echo "            cp -a \"/Volumes/VLC\"*/VLC.app/Contents/MacOS/plugins $dest/"
-        return
-      fi
-      local mnt="$CACHE/vlc-mnt-$plat"
-      hdiutil detach "$mnt" >/dev/null 2>&1 || true
-      rm -rf "$mnt"
-      mkdir -p "$mnt"
-      if ! hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$archive" >/dev/null; then
-        echo "ERROR: cannot mount $archive" >&2
-        exit 1
-      fi
-      if [[ ! -d "$mnt/VLC.app/Contents/MacOS/lib" ]]; then
-        hdiutil detach "$mnt" >/dev/null 2>&1 || true
-        echo "ERROR: libvlc not found in $archive" >&2
-        exit 1
-      fi
-      cp -a "$mnt/VLC.app/Contents/MacOS/lib/"* "$dest/"
-      cp -a "$mnt/VLC.app/Contents/MacOS/plugins" "$dest/"
-      hdiutil detach "$mnt" >/dev/null 2>&1 || true
-      rm -rf "$mnt"
-      ;;
-    windows-x64|windows-arm64)
-      local tmp="$CACHE/vlc-extract-$plat"
-      rm -rf "$tmp"
-      mkdir -p "$tmp"
-      unzip -q "$archive" -d "$tmp"
-      local inner root
-      inner="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)"
-      root="${inner:-$tmp}"
-      cp -a "$root"/libvlc*.dll "$dest/" 2>/dev/null || true
-      cp -a "$root"/axvlc.dll "$root"/npvlc.dll "$dest/" 2>/dev/null || true
-      cp -a "$root/plugins" "$dest/"
-      rm -rf "$tmp"
-      ;;
-  esac
-
-  echo "$VLC_VER" > "$dest/.kotv-libvlc"
-  if ! libvlc_ready "$plat"; then
-    echo "ERROR: [libvlc] 打包后仍缺少 libvlc 或 plugins: $dest" >&2
-    ls -la "$dest" 2>/dev/null || true
-    exit 1
-  fi
-  echo "[libvlc] ready v${VLC_VER}: $dest ($(find "$dest/plugins" -type f 2>/dev/null | wc -l | tr -d ' ') plugins)"
-}
-
-prepare_libvlc_linux() {
-  local plat="$1" dest="$2"
-  local libdir="/usr/lib/x86_64-linux-gnu"
-  [[ "$plat" == "linux-arm64" ]] && libdir="/usr/lib/aarch64-linux-gnu"
-  if [[ ! -f "$libdir/libvlc.so.5" && ! -f "$libdir/libvlc.so" ]]; then
-    echo "ERROR: [libvlc] Linux 未找到 $libdir/libvlc.so*，请先: apt install vlc libvlc-dev" >&2
-    return 1
-  fi
-  cp -a "$libdir"/libvlc.so* "$dest/" 2>/dev/null || true
-  cp -a "$libdir"/libvlccore.so* "$dest/" 2>/dev/null || true
-
-  # Debian/Ubuntu multiarch：plugins 在 $libdir/vlc/plugins，不是 /usr/lib/vlc/plugins
-  local plugins=""
-  for cand in \
-    "$libdir/vlc/plugins" \
-    /usr/lib/vlc/plugins \
-    /usr/lib/x86_64-linux-gnu/vlc/plugins \
-    /usr/lib/aarch64-linux-gnu/vlc/plugins
-  do
-    if [[ -d "$cand" ]]; then
-      plugins="$cand"
-      break
-    fi
-  done
-  if [[ -z "$plugins" ]]; then
-    echo "ERROR: [libvlc] 未找到 VLC plugins（试过 $libdir/vlc/plugins）。请: apt install vlc-plugin-base vlc" >&2
-    return 1
-  fi
-  cp -a "$plugins" "$dest/"
-
-  # 记录实际系统版本，便于排查；发行校验仍要求 plugins + so 齐全
-  local sysver="$VLC_VER"
-  if command -v dpkg-query >/dev/null 2>&1; then
-    sysver="$(dpkg-query -W -f='${Version}' libvlc5 2>/dev/null | sed 's/-[^-]*$//' || true)"
-    [[ -n "$sysver" ]] || sysver="$VLC_VER"
-  fi
-  # .kotv-libvlc 仍写脚本常量，避免 libvlc_ready 因发行版小版本号跳过
-  echo "$VLC_VER" > "$dest/.kotv-libvlc"
-  echo "$sysver" > "$dest/.kotv-libvlc-system" 2>/dev/null || true
-  if ! libvlc_ready "$plat"; then
-    echo "ERROR: [libvlc] 打包后仍缺少 libvlc 或 plugins: $dest" >&2
-    return 1
-  fi
-  echo "[libvlc] ready v${VLC_VER} (system ${sysver}, plugins from $plugins): $dest"
-}
+# --- libvlc ---
+# 已删除页内/捆绑 VLC；prepare 仅清理遗留目录（见 prepare_one）。
 
 # --- libmpv ---
 # 桌面页内 MPV 由 Flutter media_kit 自带；Go 引擎不做页内播放，runtime 不打包 libmpv。
@@ -1007,7 +824,8 @@ prepare_one() {
   fi
   prepare_chromium "$plat"
   prepare_ffmpeg "$plat"
-  prepare_libvlc "$plat"
+  echo "[libvlc] skipped (VLC removed); cleaning..."
+  rm -rf "$OUT_ROOT/libvlc" "$OUT_ROOT/vlc"
   # 不 prepare_libmpv：桌面播放在 Flutter（media_kit）；Go 引擎不做页内 MPV
  # bridge jar（体积变大也无所谓；缺依赖会导致爬虫全挂）
   if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.sh" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/settings.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/bobo/kotv/bridge/SpiderBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/utils/UiBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/crawler/Spider.java" -nt "$ROOT/bridge/spider-bridge.jar" ]]; then
@@ -1027,7 +845,7 @@ EOF
   echo "======== verifying $OUT_ROOT ========"
   "$ROOT/scripts/verify-runtime.sh" "$OUT_ROOT" "$plat"
   echo "======== done: $OUT_ROOT ========"
-  echo "包含: jre / python / chromium / ffmpeg / libvlc / bridge"
+  echo "包含: jre / python / chromium / ffmpeg / bridge"
   echo "页内 MPV：Flutter media_kit 自带 libmpv（不进 runtime/）"
   echo "JS(QuickJS) 已编译进主程序 (CGO)。Windows 请用 MSVCRT MinGW 打包（见 package.sh / check-win7-deps.ps1）。"
 }

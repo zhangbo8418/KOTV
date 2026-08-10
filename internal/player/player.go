@@ -45,30 +45,30 @@ func SetProgressHandler(fn func(Progress)) {
 	mu.Unlock()
 }
 
-// PreferEmbed 当前设置是否应为页内嵌入（innie#vlc / innie#mpv）。
+// PreferEmbed 当前设置是否应为页内嵌入（innie#mpv）。
 func PreferEmbed() bool {
 	player := settings.Get(settings.Player)
 	if player == "" {
-		player = "innie#vlc"
+		player = "innie#mpv"
 	}
 	parts := strings.SplitN(player, "#", 2)
 	mode := parts[0]
-	name := "vlc"
+	name := "mpv"
 	if len(parts) > 1 && parts[1] != "" {
 		name = strings.ToLower(parts[1])
 	}
-	return mode == "innie" && (name == "vlc" || name == "mpv")
+	return mode == "innie" && name == "mpv"
 }
 
-// Play 严格按设置启动对应播放器；innie#vlc 且已挂载画面时走页内嵌入。
+// Play 严格按设置启动对应播放器；innie#mpv 且已挂载画面时走页内嵌入。
 func Play(url string, histKey string) error {
 	player := settings.Get(settings.Player)
 	if player == "" {
-		player = "innie#vlc"
+		player = "innie#mpv"
 	}
 	parts := strings.SplitN(player, "#", 2)
 	mode := parts[0]
-	name := "vlc"
+	name := "mpv"
 	if len(parts) > 1 && parts[1] != "" {
 		name = strings.ToLower(parts[1])
 	}
@@ -98,23 +98,18 @@ func Play(url string, histKey string) error {
 		return nil
 	}
 
-	if mode == "innie" && (name == "vlc" || name == "mpv") {
+	if name == "vlc" {
+		name = "mpv"
+	}
+	if mode == "innie" && name == "mpv" {
 		if !embed.HasSink() {
 			return fmt.Errorf("页内播放器未就绪：请在详情/直播页播放")
 		}
-		if name == "vlc" && !embed.Available() {
-			return fmt.Errorf("未找到捆绑 libvlc：请运行 ./scripts/prepare-runtime.sh 准备 libvlc，或改选外部播放器")
-		}
-		if name == "mpv" && !embed.MPVAvailable() {
-			return fmt.Errorf("未找到捆绑 libmpv：请重新运行 ./scripts/prepare-runtime.sh，或改选外部 MPV")
+		if !embed.MPVAvailable() {
+			return fmt.Errorf("未找到捆绑 libmpv：页内 MPV 由 Flutter media_kit 提供，或改选外部 MPV")
 		}
 		Stop() // 停掉旁路进程
-		var eng embed.Controller
-		if name == "mpv" {
-			eng = embed.EnsureMPV()
-		} else {
-			eng = embed.Ensure()
-		}
+		eng := embed.Controller(embed.EnsureMPV())
 		// 切内核时只停另一个；同内核换台/回看由 Play 内部 stop+load，勿 StopAll。
 		if prev := embed.Active(); prev != nil && prev != eng {
 			prev.Stop()
@@ -191,7 +186,7 @@ func playSidecar(name, url, histKey string) error {
 
 	var cmd *exec.Cmd
 	switch strings.ToLower(name) {
-	case "mpv":
+	case "mpv", "":
 		bin := findPlayer("mpv")
 		if bin == "" {
 			return fmt.Errorf("未找到 MPV")
@@ -213,7 +208,7 @@ func playSidecar(name, url, histKey string) error {
 		cmd.Stdout = nil
 		cmd.Stderr = nil
 		log.Printf("启动内置 MPV: bin=%s dir=%s url=%s", bin, cmd.Dir, url)
-	case "vlc", "":
+	case "vlc":
 		bin := findPlayer("vlc")
 		if bin == "" {
 			return fmt.Errorf("未找到 VLC")
@@ -410,12 +405,12 @@ func stopLocked() {
 // findPlayer 返回可执行路径；找不到返回空字符串（不再返回裸命令名冒充成功）。
 func findPlayer(name string) string {
 	switch strings.ToLower(name) {
-	case "vlc", "":
-		if p := appruntime.VLC(); p != "" {
+	case "mpv", "":
+		if p := appruntime.MPV(); p != "" {
 			return p
 		}
-	case "mpv":
-		if p := appruntime.MPV(); p != "" {
+	case "vlc":
+		if p := appruntime.VLC(); p != "" {
 			return p
 		}
 	}
@@ -444,7 +439,7 @@ func ExternalPlay(url, name string) error {
 		return fmt.Errorf("empty url")
 	}
 	if name == "" {
-		name = "vlc"
+		name = "mpv"
 	}
 	return playSidecar(name, url, "")
 }
@@ -455,7 +450,7 @@ func Available() map[string]bool {
 		"vlc":       findPlayer("vlc") != "" || appExists("VLC"),
 		"mpv":       findPlayer("mpv") != "",
 		"iina":      appExists("IINA"),
-		"embed_vlc": embed.Available(),
+		"embed_fvp": true,
 		// Flutter 页内 MPV 走 media_kit 自带 libmpv，不依赖 runtime/libmpv。
 		"embed_mpv": true,
 	}
