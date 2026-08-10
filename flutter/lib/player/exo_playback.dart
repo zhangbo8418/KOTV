@@ -7,7 +7,7 @@ import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
 
-/// Android ExoPlayer：走原生 Media3 + OkHttp（对齐 TV），支持 DRM。
+/// Android ExoPlayer：Media3 + OkHttp（对齐 TV），DRM；硬解 MediaCodec→Surface 直出。
 class ExoPlayback extends KotvPlayback {
   ExoPlayback() {
     if (!kotvIsAndroid()) {

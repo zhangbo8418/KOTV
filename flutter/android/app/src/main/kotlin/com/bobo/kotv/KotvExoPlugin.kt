@@ -38,12 +38,14 @@ import kotlin.math.min
 /**
  * 对齐 TV Exo：OkHttpDataSource + Media3，带 headers / mime / DRM / 软硬解。
  *
- * 软硬解用 stock Media3 的 [DefaultRenderersFactory.setExtensionRendererMode]：
- * - hard/auto：EXTENSION_RENDERER_MODE_ON（MediaCodec 优先，扩展作回退）
- * - soft：EXTENSION_RENDERER_MODE_PREFER + 优先软件 MediaCodec
+ * 画面路径：MediaCodec 解到 Flutter [SurfaceTexture] 的 [Surface]（[ExoPlayer.setVideoSurface]），
+ * 即硬解**直出**到 GPU Texture；不按 H.264/HEVC 做应用层白名单，交给 MediaCodec 协商。
+ * （Flutter Texture 不能走 Android TV 式 tunnel；关 tunnel 不等于 copy。）
  *
- * TV 私有 AAR 的 setFfmpegVideoPrefer 不可用；官方 FFmpeg 扩展主要为音频，
- * 需自行编进 APK 才会被 EXTENSION 模式拾取。Flutter 侧用 Texture 渲染。
+ * 软硬解：
+ * - hard：仅 MediaCodec，优先 hardwareAccelerated；扩展 FFmpeg 不参与视频
+ * - auto：MediaCodec 硬解优先，扩展可作回退；解码失败再整实例软解重建一次
+ * - soft：EXTENSION PREFER + 软件 MediaCodec 优先
  */
 class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
@@ -61,7 +63,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var currentMime: String? = null
   private var currentDrm: Map<String, Any?>? = null
   private var formatRetried = false
-  /** auto | soft | hard；对齐 TV 软硬解语义（stock Media3 EXTENSION 模式）。 */
+  /** auto | soft | hard；硬/自动优先 MediaCodec 硬解直出。 */
   private var decodeMode: String = "auto"
   /** auto 下硬解失败后仅软解重建一次。 */
   private var decodeFallbackTried = false
@@ -398,16 +400,25 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun buildRenderersFactory(ctx: Context, mode: String): DefaultRenderersFactory {
-    // soft → PREFER（扩展 FFmpeg 优先，若已编入）；hard/auto → ON（MediaCodec 优先）
-    val extMode = when (mode) {
-      "soft" -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
-      else -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-    }
-    val factory = DefaultRenderersFactory(ctx)
-      .setExtensionRendererMode(extMode)
-      .setEnableDecoderFallback(true)
-    if (mode == "soft") {
-      factory.setMediaCodecSelector(SOFT_PREFER_SELECTOR)
+    val factory = DefaultRenderersFactory(ctx).setEnableDecoderFallback(true)
+    when (mode) {
+      "soft" -> {
+        factory
+          .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+          .setMediaCodecSelector(SOFT_PREFER_SELECTOR)
+      }
+      "hard" -> {
+        // 硬解直出：只用 MediaCodec（优先 GPU 硬解）；不把视频交给 FFmpeg 扩展
+        factory
+          .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+          .setMediaCodecSelector(HARD_PREFER_SELECTOR)
+      }
+      else -> {
+        // auto：硬解优先协商；扩展仅作次选，整实例软解见 onPlayerError
+        factory
+          .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+          .setMediaCodecSelector(HARD_PREFER_SELECTOR)
+      }
     }
     return factory
   }
@@ -498,6 +509,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     private const val TAG = "KotvExo"
     private const val DEFAULT_UA =
       "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+
+    /** 硬解直出：优先 hardwareAccelerated；无硬解时仍交完整列表（不按编码阉割）。 */
+    private val HARD_PREFER_SELECTOR = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+      val infos = MediaCodecUtil.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+      val hard = infos.filter { it.hardwareAccelerated }
+      if (hard.isNotEmpty()) hard else infos
+    }
 
     /** 软解：优先软件 MediaCodec；无软件实现时回落原列表。 */
     private val SOFT_PREFER_SELECTOR = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
