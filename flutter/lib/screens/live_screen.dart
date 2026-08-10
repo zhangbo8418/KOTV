@@ -244,12 +244,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           playerVal = kotvDefaultLivePlayer();
         }
         _playerVal = kotvClampPlayerVal(playerVal, live: true);
-        // Win7 / 桌面：进页不要碰 native 播放器。
-        // 默认 MPV 时若在 _playUrl 空（无 Video）时创建 Player 并 setProperty，Windows 首播会整窗卡死。
-        if (!kotvIsWindows7()) {
-          final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
-          if (vol != null) _pendingVolume = vol.clamp(0, 100);
-        }
+        // 进页不要提前创建/配置 native 播放器（空树 setProperty 会卡死）；音量等首播时再套。
+        final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
+        if (vol != null) _pendingVolume = vol.clamp(0, 100);
       } catch (_) {}
       if (!mounted) return;
       final data = await ref.read(apiProvider).liveSources();
@@ -261,11 +258,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }
       final keepSrc = await _preferredSourceIndex();
       if (!mounted) return;
-      // Win7：进页自动开播易卡死 UI，等用户点台。
-      await _loadSource(keepSrc, autoPlay: !kotvIsWindows7());
-      if (kotvIsWindows7() && mounted) {
-        setState(() => _status = '点击左侧频道开始播放（Win7 已禁用进页自动播）');
-      }
+      // 全平台一致：有上次记录则恢复频道，否则自动播第一个可用频道。
+      await _loadSource(keepSrc, autoPlay: true);
     } catch (e) {
       if (!mounted) return;
       setState(() {
