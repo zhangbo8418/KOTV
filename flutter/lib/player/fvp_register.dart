@@ -15,6 +15,10 @@ void kotvRegisterFvp() {
     // 直播 / 伪扩展名：给足探测窗口（勿用 lowLatency 的极小 analyzeduration，易 prepare 失败）
     'avformat.probesize': '8000000',
     'avformat.analyzeduration': '8000000',
+    // 点播进度条：demux 包缓存报已下载区间（默认解码队列仅 ~4s）。
+    // 预读上限仍由开播后 setBufferRange + KotvBufferBudget 换算（mdk 无字节帽 API）。
+    'demux.buffer.ranges': '16',
+    'demux.buffer.protocols': 'http,https',
   };
   if (kotvIsAndroid()) {
     fvp.registerWith(options: {

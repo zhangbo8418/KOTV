@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:fvp/fvp.dart' show FVPControllerExtensions;
 import 'package:video_player/video_player.dart';
 
 import 'fvp_media_url.dart';
+import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'play_headers.dart';
 
@@ -43,9 +45,13 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Duration get buffered {
-    final c = _c;
-    if (c == null || c.value.buffered.isEmpty) return Duration.zero;
-    return c.value.buffered.last.end;
+    final ranges = _c?.value.buffered;
+    if (ranges == null || ranges.isEmpty) return Duration.zero;
+    var end = Duration.zero;
+    for (final r in ranges) {
+      if (r.end > end) end = r.end;
+    }
+    return end;
   }
 
   /// 起播整段（含 initialize）视为缓冲，避免 `stop()` 清掉标记后浮层消失。
@@ -174,7 +180,13 @@ class FvpPlayback extends KotvPlayback {
           _opening = false;
         }
         _posCtrl.add(v.position);
-        if (v.buffered.isNotEmpty) _bufCtrl.add(v.buffered.last.end);
+        if (v.buffered.isNotEmpty) {
+          var end = Duration.zero;
+          for (final r in v.buffered) {
+            if (r.end > end) end = r.end;
+          }
+          _bufCtrl.add(end);
+        }
         if (v.isCompleted && !_completed) {
           _completed = true;
           _doneCtrl.add(true);
@@ -191,6 +203,17 @@ class FvpPlayback extends KotvPlayback {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
       }
+      // MPV：demuxer-max-bytes（内存预算）。mdk 无字节帽，只有 setBufferRange(时间)；
+      // 用同一 KotvBufferBudget 换算 maxMs。直播仍短窗+drop。
+      try {
+        if (c.isLive()) {
+          c.setBufferRange(min: 0, max: 4000, drop: true);
+        } else {
+          await KotvBufferBudget.warm();
+          final maxMs = KotvBufferBudget.fvpMaxBufferMs(KotvBufferBudget.bytes());
+          c.setBufferRange(min: 1000, max: maxMs);
+        }
+      } catch (_) {}
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
       await c.play();

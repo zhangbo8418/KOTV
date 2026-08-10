@@ -83,6 +83,18 @@ class KotvBufferBudget {
     return '${mib}MiB';
   }
 
+  /// mdk [setBufferRange] 只有时间上限、无 `demuxer-max-bytes`。
+  /// 用同一套内存预算 ÷ 参考码率（默认 4Mbps）换成 maxMs，精神对齐 MPV。
+  static int fvpMaxBufferMs(int budgetBytes, {int refBitsPerSec = 4 * 1000 * 1000}) {
+    final bps = refBitsPerSec <= 0 ? 4 * 1000 * 1000 : refBitsPerSec;
+    final bytesPerSec = bps / 8.0;
+    final ms = (budgetBytes / bytesPerSec * 1000.0).round();
+    // 至少约 1 分钟可见预读；上限 2 小时，避免极端预算拖垮内存
+    if (ms < 60 * 1000) return 60 * 1000;
+    if (ms > 2 * 3600 * 1000) return 2 * 3600 * 1000;
+    return ms;
+  }
+
   @visibleForTesting
   static void debugReset() => _cached = null;
 }
