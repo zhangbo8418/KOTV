@@ -181,6 +181,13 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   bool get hasVideoSourceHint {
+    if (isAudioOnlyContent) return true;
+    try {
+      final tracks = _video.videoTracks;
+      if (tracks.length > 0) {
+        return tracks.selectedIndex >= 0;
+      }
+    } catch (_) {}
     return _video.readyState >= 1 || _video.videoWidth > 0;
   }
 
@@ -188,11 +195,35 @@ class HtmlPlayback extends KotvPlayback {
   bool get isAudioOnlyContent {
     if (_buffering || _video.readyState < 2) return false;
     if (_video.videoWidth > 0 && _video.videoHeight > 0) return false;
+    try {
+      final vLen = _video.videoTracks.length;
+      final aLen = _video.audioTracks.length;
+      if (vLen == 0 && aLen > 0) {
+        return !_video.paused || _video.currentTime > 0.5;
+      }
+      if (vLen > 0) return false;
+    } catch (_) {}
     return !_video.paused || _video.currentTime > 0.5;
   }
 
   @override
   Future<void> tryFixVideoSource() async {
+    try {
+      final tracks = _video.videoTracks;
+      final n = tracks.length;
+      if (n > 0) {
+        for (var i = 0; i < n; i++) {
+          for (var j = 0; j < n; j++) {
+            tracks[j].selected = j == i;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 350));
+          if (_video.videoWidth > 0 && _video.videoHeight > 0) {
+            await _video.play().toDart;
+            return;
+          }
+        }
+      }
+    } catch (_) {}
     try {
       await _video.play().toDart;
     } catch (_) {}

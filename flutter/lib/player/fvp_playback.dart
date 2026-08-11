@@ -273,6 +273,16 @@ class FvpPlayback extends KotvPlayback {
     if (c == null) return false;
     final v = c.value;
     if (v.hasError) return false;
+    if (isAudioOnlyContent) return true;
+    try {
+      final info = c.getMediaInfo();
+      final videos = info?.video;
+      if (videos != null && videos.isNotEmpty) {
+        final active = c.getActiveVideoTracks() ?? const <int>[];
+        // 有视频流但未激活任何轨 → 视源异常，触发重选。
+        return active.isNotEmpty;
+      }
+    } catch (_) {}
     return v.isInitialized || _opening;
   }
 
@@ -283,6 +293,17 @@ class FvpPlayback extends KotvPlayback {
     final v = c.value;
     if (!v.isInitialized || v.isBuffering || _opening) return false;
     if (v.size.width > 0 && v.size.height > 0) return false;
+    try {
+      final info = c.getMediaInfo();
+      if (info != null) {
+        final hasVideo = info.video?.isNotEmpty == true;
+        final hasAudio = info.audio?.isNotEmpty == true;
+        if (hasVideo) return false;
+        if (hasAudio) {
+          return v.isPlaying || v.position > const Duration(milliseconds: 500);
+        }
+      }
+    } catch (_) {}
     return v.isPlaying || v.position > const Duration(milliseconds: 500);
   }
 
@@ -291,8 +312,42 @@ class FvpPlayback extends KotvPlayback {
     final c = _c;
     if (c == null) return;
     try {
+      final info = c.getMediaInfo();
+      final videos = [...?info?.video];
+      if (videos.isNotEmpty) {
+        videos.sort((a, b) {
+          final aa = a.codec.width * a.codec.height;
+          final bb = b.codec.width * b.codec.height;
+          return bb.compareTo(aa);
+        });
+        for (final stream in videos) {
+          try {
+            c.setVideoTracks([stream.index]);
+            await Future<void>.delayed(const Duration(milliseconds: 350));
+            if (!identical(_c, c)) return;
+            final sz = c.value.size;
+            if (sz.width > 0 && sz.height > 0) return;
+          } catch (_) {}
+        }
+      }
+      final programs = info?.programs;
+      if (programs != null && programs.length > 1) {
+        for (var i = 0; i < programs.length; i++) {
+          try {
+            c.setProgram(i);
+            await Future<void>.delayed(const Duration(milliseconds: 350));
+            if (!identical(_c, c)) return;
+            final sz = c.value.size;
+            if (sz.width > 0 && sz.height > 0) return;
+          } catch (_) {}
+        }
+      }
       await c.play();
-    } catch (_) {}
+    } catch (_) {
+      try {
+        await c.play();
+      } catch (_) {}
+    }
   }
 
   @override

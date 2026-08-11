@@ -11,6 +11,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -24,6 +26,7 @@ import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
@@ -59,6 +62,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var entry: TextureRegistry.SurfaceTextureEntry? = null
   private var surface: Surface? = null
   private var player: ExoPlayer? = null
+  private var trackSelector: DefaultTrackSelector? = null
   private var currentUrl: String = ""
   private var currentHeaders: Map<String, String> = emptyMap()
   private var currentMime: String? = null
@@ -256,6 +260,22 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           result.success(true)
         }
       }
+      "videoTrackCount" -> {
+        main.post {
+          result.success(videoTrackCandidates().size)
+        }
+      }
+      "selectVideoTrack" -> {
+        val index = call.argument<Number>("index")?.toInt() ?: 0
+        main.post {
+          try {
+            selectVideoTrackAt(index)
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_track", t.message, null)
+          }
+        }
+      }
       "dispose" -> {
         main.post {
           releasePlayer()
@@ -295,6 +315,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
     val old = player
     player = null
+    trackSelector = null
     old?.release()
 
     val httpFactory = OkHttpDataSource.Factory(httpClient)
@@ -305,6 +326,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val mediaSourceFactory = DefaultMediaSourceFactory(ctx).setDataSourceFactory(dataSourceFactory)
     val effective = effectiveDecodeMode()
     val renderers = buildRenderersFactory(ctx, effective)
+    val selector = DefaultTrackSelector(ctx)
+    trackSelector = selector
     // 内存水位缓冲（与 Dart KotvBufferBudget 一致）：
     // - 只按 targetBufferBytes 刹车/续拉；播出去的样本释放后 allocated 下降即继续拉
     // - minBufferMs 刻意极大：让 DefaultLoadControl 在「未满字节预算」时始终走续拉分支，
@@ -329,6 +352,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val p = ExoPlayer.Builder(ctx)
       .setMediaSourceFactory(mediaSourceFactory)
       .setRenderersFactory(renderers)
+      .setTrackSelector(selector)
       .setLoadControl(loadControl)
       .setBandwidthMeter(bandwidthMeter)
       .build()
@@ -466,6 +490,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     main.removeCallbacks(tick)
     player?.release()
     player = null
+    trackSelector = null
     surface?.release()
     surface = null
     entry?.release()
@@ -476,6 +501,43 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentDrm = null
     formatRetried = false
     decodeFallbackTried = false
+  }
+
+  /** 全部可用视频轨，按分辨率降序（与 MPV/FVP 重选策略一致）。 */
+  private fun videoTrackCandidates(): List<Pair<Tracks.Group, Int>> {
+    val p = player ?: return emptyList()
+    val out = ArrayList<Pair<Tracks.Group, Int>>()
+    for (g in p.currentTracks.groups) {
+      if (g.type != C.TRACK_TYPE_VIDEO) continue
+      for (i in 0 until g.length) {
+        if (g.isTrackSupported(i)) {
+          out.add(g to i)
+        }
+      }
+    }
+    out.sortByDescending { (g, i) ->
+      val f = g.getTrackFormat(i)
+      f.width.coerceAtLeast(0) * f.height.coerceAtLeast(0)
+    }
+    return out
+  }
+
+  private fun selectVideoTrackAt(index: Int) {
+    val sel = trackSelector ?: return
+    val candidates = videoTrackCandidates()
+    if (candidates.isEmpty()) {
+      player?.play()
+      return
+    }
+    val i = index.coerceIn(0, candidates.lastIndex)
+    val (g, trackIndex) = candidates[i]
+    sel.setParameters(
+      sel.buildUponParameters()
+        .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, trackIndex))
+        .build(),
+    )
+    player?.play()
   }
 
   private fun emit(payload: Map<String, Any?>) {

@@ -215,6 +215,7 @@ class ExoPlayback extends KotvPlayback {
   @override
   bool get hasVideoSourceHint {
     if (_lastError != null) return false;
+    if (isAudioOnlyContent) return true;
     return _ready || _w > 0 || _position > Duration.zero || _playing;
   }
 
@@ -225,11 +226,26 @@ class ExoPlayback extends KotvPlayback {
     return _playing || _position > const Duration(milliseconds: 500);
   }
 
+  /// 与 MPV 对齐：按分辨率优先轮询全部视频轨；无轨则 play 软重试。
   @override
   Future<void> tryFixVideoSource() async {
     try {
+      final n = await _ch.invokeMethod<int>('videoTrackCount') ?? 0;
+      if (n <= 0) {
+        await play();
+        return;
+      }
+      for (var i = 0; i < n; i++) {
+        await _ch.invokeMethod('selectVideoTrack', {'index': i});
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        if (_w > 0 && _h > 0) return;
+      }
       await play();
-    } catch (_) {}
+    } catch (_) {
+      try {
+        await play();
+      } catch (_) {}
+    }
   }
 
   @override

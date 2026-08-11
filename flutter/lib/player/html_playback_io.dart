@@ -171,11 +171,20 @@ class HtmlPlayback extends KotvPlayback {
     return v.isPlaying || v.position > const Duration(milliseconds: 500);
   }
 
+  /// 非 Web 的 HtmlPlayback 走 video_player，无多轨 API；软重试 seek + play。
   @override
   Future<void> tryFixVideoSource() async {
+    final c = _c;
+    if (c == null) return;
     try {
-      await _c?.play();
-    } catch (_) {}
+      final pos = c.value.position;
+      await c.seekTo(pos > Duration.zero ? pos : Duration.zero);
+      await c.play();
+    } catch (_) {
+      try {
+        await c.play();
+      } catch (_) {}
+    }
   }
 
   @override

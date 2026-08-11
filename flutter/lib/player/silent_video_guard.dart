@@ -8,6 +8,9 @@ import 'kotv_playback.dart';
 /// 4. **有视源但仍无尺寸**（黑屏）：[blackScreenTimeout]（默认 5s）后再修一次，仍失败则抛
 ///    [KotvSilentVideoException]
 ///
+/// **刻意不做**：「已有尺寸但进度长期不动」——静态封面音乐等合法内容会被误杀；
+/// 有尺寸即视为出画成功，是否继续播由用户判断。
+///
 /// 解码翻转 / 换播放器由上层 failover 处理。
 Future<void> kotvGuardSilentVideo({
   required bool Function() hasVideoSize,

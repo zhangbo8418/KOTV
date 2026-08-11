@@ -56,7 +56,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 已确认是纯音频（无视频轨且有音轨）；此时不应要求出画面。
   bool get isAudioOnlyContent => false;
 
-  /// 尝试修复视源（重选视频轨、再 play 等）。默认空操作。
+  /// 尝试修复视源：能枚举轨的引擎应重选视频轨；否则软重试（seek/play）。
   Future<void> tryFixVideoSource() async {}
 
   /// 当前片源可切换的真实音轨（不含 media_kit 注入的 `auto` / `no` 控制项）。
