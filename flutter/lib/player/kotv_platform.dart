@@ -18,7 +18,7 @@ bool kotvIsDesktop() {
   return Platform.isMacOS || Platform.isWindows || Platform.isLinux;
 }
 
-/// Win7：media_kit 偶发卡死；失败应回退 fvp。
+/// 是否 Windows 7（字体/解码等兼容用；直播默认与其它 PC 相同，均为 MPV）。
 bool kotvIsWindows7() {
   if (kIsWeb || !Platform.isWindows) return false;
   final v = Platform.operatingSystemVersion.toLowerCase();
