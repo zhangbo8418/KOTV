@@ -5,7 +5,7 @@ import 'kotv_playback.dart';
 /// 1. **缓冲中**：最多等 [bufferingTimeout]（默认 60s）
 /// 2. **纯音频**（[isAudioOnly]）：不要求画面，直接成功
 /// 3. **视源异常**（有视轨但未选中 / 元数据异常）：[onFixVideoSource] + [sourceFixTimeout]
-/// 4. **有视源但仍无尺寸**（黑屏）：[blackScreenTimeout]（默认 5s）后再修一次，仍失败则抛
+/// 4. **有视源但仍无尺寸**（黑屏）：[blackScreenTimeout]（默认 8s）后再修一次，仍失败则抛
 ///    [KotvSilentVideoException]
 ///
 /// **刻意不做**：「已有尺寸但进度长期不动」——静态封面音乐等合法内容会被误杀；
@@ -23,7 +23,7 @@ Future<void> kotvGuardSilentVideo({
   Future<void> Function()? onFixVideoSource,
   Duration bufferingTimeout = const Duration(seconds: 60),
   Duration sourceFixTimeout = const Duration(seconds: 8),
-  Duration blackScreenTimeout = const Duration(seconds: 5),
+  Duration blackScreenTimeout = const Duration(seconds: 8),
   Duration tick = const Duration(milliseconds: 200),
 }) async {
   final started = DateTime.now();
