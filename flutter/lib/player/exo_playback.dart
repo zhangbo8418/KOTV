@@ -199,6 +199,8 @@ class ExoPlayback extends KotvPlayback {
         if (_lastError != null) return false;
         return _ready || _playing || _position > Duration.zero;
       },
+      hasVideoSource: () => hasVideoSourceHint,
+      onFixVideoSource: tryFixVideoSource,
     );
     if (_lastError != null) {
       throw StateError('Exo 无法播放该地址（$_lastError）。可换线路或改用其它播放器');
@@ -207,6 +209,20 @@ class ExoPlayback extends KotvPlayback {
       throw const KotvSilentVideoException('Exo 未就绪');
     }
     notifyListeners();
+  }
+
+  @override
+  bool get hasVideoSourceHint {
+    if (_lastError != null) return false;
+    // READY 或已有尺寸/进度，视为源已挂上。
+    return _ready || _w > 0 || _position > Duration.zero || _playing;
+  }
+
+  @override
+  Future<void> tryFixVideoSource() async {
+    try {
+      await play();
+    } catch (_) {}
   }
 
   @override

@@ -147,6 +147,8 @@ class VpPlayback extends KotvPlayback {
           final v = c.value;
           return v.isPlaying || v.position > Duration.zero;
         },
+        hasVideoSource: () => hasVideoSourceHint,
+        onFixVideoSource: tryFixVideoSource,
       );
       _opening = false;
       notifyListeners();
@@ -155,6 +157,20 @@ class VpPlayback extends KotvPlayback {
       notifyListeners();
       rethrow;
     }
+  }
+
+  @override
+  bool get hasVideoSourceHint {
+    final c = _c;
+    if (c == null) return false;
+    return c.value.isInitialized || _opening;
+  }
+
+  @override
+  Future<void> tryFixVideoSource() async {
+    try {
+      await _c?.play();
+    } catch (_) {}
   }
 
   @override

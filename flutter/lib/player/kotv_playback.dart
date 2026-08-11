@@ -50,6 +50,12 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setRepeatOne(bool on);
   Future<void> setDecodeMode(String mode);
 
+  /// 是否认为已挂上可用视频源（轨/元数据）。无法判断时返回 true。
+  bool get hasVideoSourceHint => true;
+
+  /// 尝试修复视源（重选视频轨、再 play 等）。默认空操作。
+  Future<void> tryFixVideoSource() async {}
+
   /// 当前片源可切换的真实音轨（不含 media_kit 注入的 `auto` / `no` 控制项）。
   List<KotvTrack> get audioTracks;
   /// 当前片源可切换的真实字幕轨（同上；关闭/自动请用 [setSubtitleTrack]）。
@@ -429,8 +435,7 @@ class MediaKitPlayback extends KotvPlayback {
       });
   }
 
-  /// 开播后若长时间无画面尺寸：重选视频轨；仍无画面则抛 [KotvSilentVideoException]。
-  /// 不在此改硬/软解（交给 [KotvPlaybackFailover]）。
+  /// 开播画面守卫：缓冲 → 视源修复 → 黑屏窗口；解码/换播放器交给 failover。
   Future<void> _guardSilentVideo() async {
     await kotvGuardSilentVideo(
       hasVideoSize: () => _videoVisible,
@@ -439,9 +444,28 @@ class MediaKitPlayback extends KotvPlayback {
           player.state.playing ||
           player.state.position > Duration.zero ||
           player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack(t.id)),
-      onStillInvisible: _reselectVideoTracks,
+      hasVideoSource: () => hasVideoSourceHint,
+      onFixVideoSource: tryFixVideoSource,
     );
   }
+
+  @override
+  bool get hasVideoSourceHint {
+    final videos = _realVideoTracks();
+    if (videos.isEmpty) {
+      // 轨列表尚未出来时不要误判「无源」；有音频且已播过再认为缺视频轨。
+      final audios = player.state.tracks.audio.where((t) => !kotvIsPseudoMediaTrack(t.id));
+      if (audios.isEmpty) return true;
+      return player.state.position <= Duration.zero && !player.state.playing;
+    }
+    final cur = player.state.track.video;
+    if (kotvIsPseudoMediaTrack(cur.id)) return false;
+    if (cur.image == true || cur.albumart == true) return false;
+    return true;
+  }
+
+  @override
+  Future<void> tryFixVideoSource() => _reselectVideoTracks();
 
   Future<void> _reselectVideoTracks() async {
     final videos = _realVideoTracks();

@@ -3,23 +3,53 @@ import 'package:kotv/player/kotv_playback.dart';
 import 'package:kotv/player/silent_video_guard.dart';
 
 void main() {
-  test('black screen without buffering fails in ~5s', () async {
+  test('black screen without buffering fails after fix + black window', () async {
     final sw = Stopwatch()..start();
     var threw = false;
+    var fixes = 0;
     try {
       await kotvGuardSilentVideo(
         hasVideoSize: () => false,
         isBuffering: () => false,
         sessionAlive: () => true,
-        blackScreenTimeout: const Duration(milliseconds: 300),
+        hasVideoSource: () => true,
+        onFixVideoSource: () async {
+          fixes++;
+        },
+        blackScreenTimeout: const Duration(milliseconds: 200),
+        sourceFixTimeout: const Duration(milliseconds: 100),
         bufferingTimeout: const Duration(seconds: 5),
-        tick: const Duration(milliseconds: 50),
+        tick: const Duration(milliseconds: 40),
       );
     } on KotvSilentVideoException {
       threw = true;
     }
     expect(threw, isTrue);
-    expect(sw.elapsedMilliseconds, lessThan(2000));
+    expect(fixes, greaterThanOrEqualTo(1));
+    expect(sw.elapsedMilliseconds, lessThan(3000));
+  });
+
+  test('missing video source throws after sourceFixTimeout', () async {
+    var threw = false;
+    String? msg;
+    try {
+      await kotvGuardSilentVideo(
+        hasVideoSize: () => false,
+        isBuffering: () => false,
+        sessionAlive: () => true,
+        hasVideoSource: () => false,
+        onFixVideoSource: () async {},
+        sourceFixTimeout: const Duration(milliseconds: 250),
+        blackScreenTimeout: const Duration(seconds: 5),
+        bufferingTimeout: const Duration(seconds: 5),
+        tick: const Duration(milliseconds: 40),
+      );
+    } on KotvSilentVideoException catch (e) {
+      threw = true;
+      msg = e.message;
+    }
+    expect(threw, isTrue);
+    expect(msg, contains('视频源'));
   });
 
   test('buffering waits longer than black-screen window', () async {
@@ -34,15 +64,15 @@ void main() {
         hasVideoSize: () => false,
         isBuffering: () => buffering,
         sessionAlive: () => true,
-        blackScreenTimeout: const Duration(milliseconds: 200),
+        hasVideoSource: () => true,
+        blackScreenTimeout: const Duration(milliseconds: 150),
         bufferingTimeout: const Duration(milliseconds: 900),
-        tick: const Duration(milliseconds: 50),
+        tick: const Duration(milliseconds: 40),
       );
     } on KotvSilentVideoException {
       threw = true;
     }
     expect(threw, isTrue);
-    // Must survive past black-screen window while buffering.
     expect(sw.elapsedMilliseconds, greaterThanOrEqualTo(350));
   });
 
@@ -55,7 +85,24 @@ void main() {
       hasVideoSize: () => size,
       isBuffering: () => !size,
       sessionAlive: () => true,
+      hasVideoSource: () => true,
       blackScreenTimeout: const Duration(milliseconds: 100),
+      bufferingTimeout: const Duration(seconds: 2),
+      tick: const Duration(milliseconds: 40),
+    );
+  });
+
+  test('fix video source that unlocks size succeeds', () async {
+    var size = false;
+    await kotvGuardSilentVideo(
+      hasVideoSize: () => size,
+      isBuffering: () => false,
+      sessionAlive: () => true,
+      hasVideoSource: () => true,
+      onFixVideoSource: () async {
+        size = true;
+      },
+      blackScreenTimeout: const Duration(milliseconds: 200),
       bufferingTimeout: const Duration(seconds: 2),
       tick: const Duration(milliseconds: 40),
     );

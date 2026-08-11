@@ -251,6 +251,11 @@ class FvpPlayback extends KotvPlayback {
         if (v.hasError) return false;
         return v.isPlaying || v.position > Duration.zero;
       },
+      hasVideoSource: () {
+        if (!identical(_c, c)) return true;
+        return hasVideoSourceHint;
+      },
+      onFixVideoSource: tryFixVideoSource,
     );
     if (identical(_c, c) && c.value.hasError) {
       throw StateError(c.value.errorDescription ?? _lastError ?? 'FVP 播放错误');
@@ -259,6 +264,25 @@ class FvpPlayback extends KotvPlayback {
       _opening = false;
       notifyListeners();
     }
+  }
+
+  @override
+  bool get hasVideoSourceHint {
+    final c = _c;
+    if (c == null) return false;
+    final v = c.value;
+    if (v.hasError) return false;
+    // initialize 成功即视为有视频源；尺寸稍后才到。
+    return v.isInitialized || _opening;
+  }
+
+  @override
+  Future<void> tryFixVideoSource() async {
+    final c = _c;
+    if (c == null) return;
+    try {
+      await c.play();
+    } catch (_) {}
   }
 
   @override

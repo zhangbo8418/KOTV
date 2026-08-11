@@ -169,11 +169,26 @@ class HtmlPlayback extends KotvPlayback {
       hasVideoSize: () => _video.videoWidth > 0 && _video.videoHeight > 0,
       isBuffering: () => _buffering || _video.readyState < 3,
       sessionAlive: () => !_video.paused || (_video.currentTime > 0) || _opened,
+      hasVideoSource: () => hasVideoSourceHint,
+      onFixVideoSource: tryFixVideoSource,
     );
     _width = _video.videoWidth;
     _height = _video.videoHeight;
     _buffering = false;
     notifyListeners();
+  }
+
+  @override
+  bool get hasVideoSourceHint {
+    // HAVE_METADATA=1 起认为有视频描述；纯音频源会一直无宽高，靠守卫黑屏窗口收口。
+    return _video.readyState >= 1 || _video.videoWidth > 0;
+  }
+
+  @override
+  Future<void> tryFixVideoSource() async {
+    try {
+      await _video.play().toDart;
+    } catch (_) {}
   }
 
   void _wireVideoEvents() {
