@@ -96,20 +96,9 @@ func OverlayClientProfile(vals map[string]string, platform string) {
 	clampPlayerKeysForPlatform(vals, platform)
 }
 
-func migratePlayerID(v string) string {
-	switch strings.TrimSpace(v) {
-	case "innie#vlc":
-		return "innie#mpv"
-	case "innie#ijk":
-		return "innie#fvp"
-	default:
-		return strings.TrimSpace(v)
-	}
-}
-
 func clampPlayerKeysForPlatform(vals map[string]string, platform string) {
-	vals[string(Player)] = migratePlayerID(vals[string(Player)])
-	vals[string(PlayerLive)] = migratePlayerID(vals[string(PlayerLive)])
+	vals[string(Player)] = strings.TrimSpace(vals[string(Player)])
+	vals[string(PlayerLive)] = strings.TrimSpace(vals[string(PlayerLive)])
 	switch platform {
 	case "android":
 		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#exo",

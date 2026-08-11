@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 给 pub-cache 里缺 namespace 的 Android 插件补上 namespace（AGP 8+ 必需）。
-# 通用补丁（历史曾用于 fijkplayer 等停更插件）。
+# 通用补丁（停更/未维护插件常见缺项）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PKG_CFG="$ROOT/flutter/.dart_tool/package_config.json"

@@ -780,7 +780,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         site: d.site,
         remarks: ep.name,
       ));
-      // 对齐 TV：有 DRM 强制 Exo（MPV/ijk 不解 Widevine）
+      // 对齐 TV：有 DRM 强制 Exo（MPV/FVP 不解 Widevine）
       if (hasDrm && _backend != KotvEmbedBackend.exo && kotvIsAndroid()) {
         setState(() => _playerVal = 'innie#exo');
         await _stopInactiveBackends(KotvEmbedBackend.exo);
@@ -813,17 +813,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       });
       await WidgetsBinding.instance.endOfFrame;
       if (serial != _playAtSerial || !mounted) return;
-      try {
-        await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
-      } on KotvSilentVideoException {
-        if (serial != _playAtSerial || !mounted) return;
-        final ok = await _fallbackSilentMpvToFvp(
-          openUrl: openUrl,
-          headers: openHeaders,
-          serial: serial,
-        );
-        if (!ok) rethrow;
-      }
+      await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
       try {
         await _playback.play();
       } catch (_) {}
@@ -884,34 +874,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
   }
 
-  /// MPV 有声无画：本会话切 FVP 重开（不改设置默认值）。
-  Future<bool> _fallbackSilentMpvToFvp({
-    required String openUrl,
-    required Map<String, String>? headers,
-    required int serial,
-  }) async {
-    try {
-      await _mk?.stop();
-    } catch (_) {}
-    if (!mounted || serial != _playAtSerial) return false;
-    setState(() {
-      _playerVal = 'innie#fvp';
-      _status = 'MPV 无画面，已切 FVP…';
-    });
-    await _stopInactiveBackends(KotvEmbedBackend.fvp);
-    if (!mounted || serial != _playAtSerial) return false;
-    _fvp ??= FvpPlayback();
-    await _fvp!.setDecodeMode(_decodeMode);
-    await _fvp!.open(openUrl, headers: headers);
-    if (!mounted || serial != _playAtSerial) return false;
-    setState(() => _status = '内置 FVP 加载中…');
-    return true;
-  }
-
   /// 折叠「播放失败: 解析失败: 解析失败: …」这类层层包装。
   String _friendlyPlayError(Object e) {
     if (e is KotvSilentVideoException) {
-      return '播放失败: MPV 无画面（可换 FVP/Exo）';
+      return '播放失败: MPV 无画面（可在设置中改用 FVP/Exo）';
     }
     var s = '$e';
     s = s.replaceFirst(RegExp(r'^(Exception|KotvApiException):\s*'), '');

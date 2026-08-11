@@ -331,7 +331,7 @@ func playExternal(name, url string) error {
 		}
 		return exec.Command("open", "-a", "IINA", url).Start()
 	case "vlc":
-		// 仅系统安装的外部 VLC（不捆绑）
+		// 系统安装的外部 VLC
 		if bin := findPlayer("vlc"); bin != "" {
 			if runtime.GOOS == "darwin" {
 				if app := vlcAppBundle(bin); app != "" {

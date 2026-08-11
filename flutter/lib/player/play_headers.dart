@@ -87,13 +87,3 @@ String _canonicalHeader(String k) {
       return k;
   }
 }
-
-/// ijkplayer format.headers：每行 `Key: Value`，以 `\r\n` 结尾。
-String kotvHeadersToIjkFormat(Map<String, String> headers) {
-  if (headers.isEmpty) return '';
-  final buf = StringBuffer();
-  for (final e in headers.entries) {
-    buf.write('${e.key}: ${e.value}\r\n');
-  }
-  return buf.toString();
-}

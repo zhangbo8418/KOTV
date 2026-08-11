@@ -811,7 +811,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           value: playerLabel,
                           onTap: kotvCanSwitchPlayer(live: false)
                               ? () => _pick('点播播放器', 'player', kotvVodPlayerOptions(), msg: '点播播放器已切换')
-                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/VLC）'),
+                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/FVP）'),
                         ),
                         KotvSettingsCell(
                           label: '直播播放器',
@@ -823,7 +823,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                     kotvLivePlayerOptions(),
                                     msg: '直播播放器已切换',
                                   )
-                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/VLC）'),
+                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/FVP）'),
                         ),
                         KotvSettingsCell(
                           label: '默认倍速',

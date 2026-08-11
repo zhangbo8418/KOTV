@@ -90,11 +90,11 @@ if [[ "${jre_lib_files:-0}" -lt 10 ]]; then
   die "jre/lib too incomplete: only ${jre_lib_files} files (Java bridge will EOF)"
 fi
 
-# 发行包不应再带整包 VLC / 外部 mpv / 残留 libmpv（页内 MPV 由 Flutter media_kit 自带）
+# 发行包不应带外部播放器目录（页内 MPV 由 Flutter media_kit 自带）
 [[ ! -d "$RT/mpv" ]] || die "runtime/mpv must not ship (Flutter media_kit / outie#mpv)"
 [[ ! -d "$RT/libmpv" ]] || die "runtime/libmpv must not ship (Flutter media_kit bundles libmpv)"
-[[ ! -d "$RT/libvlc" ]] || die "runtime/libvlc must not ship (VLC removed; use media_kit/fvp)"
-[[ ! -d "$RT/vlc" ]] || die "runtime/vlc must not ship (VLC removed)"
+[[ ! -d "$RT/libvlc" ]] || die "runtime/libvlc must not ship"
+[[ ! -d "$RT/vlc" ]] || die "runtime/vlc must not ship"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "verify-runtime FAILED for $PLAT at $RT" >&2

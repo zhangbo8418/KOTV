@@ -5,11 +5,11 @@ import 'kotv_platform.dart';
 
 /// 各播放器共用的「前向缓冲」内存预算（字节）。
 ///
-/// 策略（Exo / MPV / ijk / 桌面 VLC prefetch 对齐）：
+/// 策略（Exo / MPV / 外部 VLC prefetch 对齐）：
 /// 1. **按内存上限**囤前向缓冲，不用「剩余播放秒数」当预读目标；
 /// 2. 播出去的数据应释放，allocated 降到预算以下后**继续补满**到上限；
 /// 3. 短时长参数只用于「能否起播 / 卡顿后重开」，不控制囤多少
-///   （VLC 的 network-caching 属第 3 类；字节囤靠 prefetch-buffer-size）。
+///   （外部 VLC 的 network-caching 属第 3 类；字节囤靠 prefetch-buffer-size）。
 ///
 /// Web / HTML5：由浏览器自己管缓冲，不走本预算。
 ///

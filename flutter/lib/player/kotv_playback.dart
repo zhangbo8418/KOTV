@@ -162,7 +162,7 @@ bool kotvAudioIsAuto(String? id) {
   return id.toLowerCase().trim() == 'auto';
 }
 
-/// MPV 有声无画（硬软解均可能）：选轨/解码失败，调用方可回退 FVP。
+/// MPV 有声无画（硬软解均可能）：选轨/解码失败。
 class KotvSilentVideoException implements Exception {
   const KotvSilentVideoException([this.message = 'MPV 有声无画面']);
   final String message;

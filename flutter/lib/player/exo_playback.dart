@@ -188,12 +188,12 @@ class ExoPlayback extends KotvPlayback {
       await _ch.invokeMethod('setRate', {'rate': _rate});
     } on PlatformException catch (e) {
       final detail = (e.message ?? e.code).trim();
-      throw StateError('Exo 无法播放该地址（$detail）。可换线路或改用 ijk/外部播放器');
+      throw StateError('Exo 无法播放该地址（$detail）。可换线路或改用其它播放器');
     }
     for (var i = 0; i < 25; i++) {
       if (_ready) break;
       if (_lastError != null) {
-        throw StateError('Exo 无法播放该地址（$_lastError）。可换线路或改用 ijk/外部播放器');
+        throw StateError('Exo 无法播放该地址（$_lastError）。可换线路或改用其它播放器');
       }
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }

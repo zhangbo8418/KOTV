@@ -187,7 +187,7 @@ class LocalPlayOffsets {
 
 /// Flutter 页内播放器显示名。
 String flutterPlayerLabel(String val) {
-  final v = kotvMigratePlayerVal(val.trim().isEmpty ? kotvDefaultVodPlayer() : val.trim());
+  final v = (val.trim().isEmpty ? kotvDefaultVodPlayer() : val.trim());
   switch (v) {
     case 'innie#html':
       return '浏览器 HTML5';

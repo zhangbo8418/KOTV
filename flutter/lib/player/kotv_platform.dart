@@ -29,18 +29,6 @@ bool kotvIsWindows7() {
 bool kotvIsAndroid() => !kIsWeb && Platform.isAndroid;
 bool kotvIsIOS() => !kIsWeb && Platform.isIOS;
 
-/// 旧配置迁移：页内 VLC→MPV；外置 VLC 保留；ijk→fvp。
-String kotvMigratePlayerVal(String raw) {
-  switch (raw.trim()) {
-    case 'innie#vlc':
-      return 'innie#mpv';
-    case 'innie#ijk':
-      return 'innie#fvp';
-    default:
-      return raw.trim();
-  }
-}
-
 /// 点播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。
 String kotvDefaultVodPlayer() {
   if (kIsWeb) return 'innie#html';
@@ -56,7 +44,7 @@ String kotvDefaultLivePlayer() {
 }
 
 String kotvClampPlayerVal(String raw, {required bool live}) {
-  final v = kotvMigratePlayerVal(raw);
+  final v = raw.trim();
   final opts = live ? kotvLivePlayerOptions() : kotvVodPlayerOptions();
   for (final o in opts) {
     if (o.$2 == v) return v;
@@ -70,7 +58,7 @@ bool kotvCanSwitchPlayer({required bool live}) =>
 enum KotvEmbedBackend { mpv, fvp, exo, html, vp }
 
 KotvEmbedBackend kotvEmbedBackend(String playerVal) {
-  switch (kotvMigratePlayerVal(playerVal)) {
+  switch (playerVal.trim()) {
     case 'innie#html':
       return KotvEmbedBackend.html;
     case 'innie#vp':

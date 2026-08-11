@@ -104,10 +104,10 @@ JVM 瘦包无法走 R8 `spider.merge`，因此站点 **exclude** 宿主同名类
 
 **不要**把 Spider 类挪进 Flutter App。Android 专属能力（D8 / seal）用 Method 注入挂在 App CL。
 
-## 播放：Exo / MPV / IJK 与 TV 的差异
+## 播放：Exo / MPV / FVP 与 TV 的差异
 
 - **Exo**（Android）：stock Media3；软硬解 = `EXTENSION_RENDERER_MODE` + 软件 MediaCodec 优先；无 TV 私有 `setFfmpegVideoPrefer`。
-- **IJK**（Android）：`mediacodec*` 软硬解；切换解码须重开（选项仅在 `setDataSource` 前生效）。
+- **FVP**（libmdk，Android + 桌面）：硬/软/自动解码列表由设置下发。
 - **MPV**（media_kit，Android + 桌面）：
 
 | 选项 | Android | 桌面 PC |

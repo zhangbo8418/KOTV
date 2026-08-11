@@ -37,7 +37,7 @@
 - 引擎：`libkotv_engine.so` 双 ABI 进 `jniLibs`，由 Flutter 拉起 sidecar
 - 爬虫：同进程 `:9979` SpiderService（JAR/PY/嗅探）
 - **迅雷**（对齐 TV）：`magnet` / `thunder://` / **`ed2k`** / `.torrent`（及解码后的 ftp 等），`libs/thunder-release.aar`，**不走 anacrolix**
-- 播放默认：ExoPlayer；可选手动切 MPV / ijk
+- 播放默认：ExoPlayer；可选手动切 MPV / FVP
 - 迅雷 AAR：`flutter/android/app/libs/thunder-release.aar`（可从 TV `app/libs/` 同步）
 
 ## 遥控器（安卓）

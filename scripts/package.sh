@@ -148,7 +148,7 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v ditto >/dev/null 2>&1; then
 else
   cp -a "$RUNTIME_SRC/." "$DIST/runtime/"
 fi
-# 不进发行包：外部 mpv、残留 libmpv、旧布局 vlc/libvlc、空的 lib/
+# 不进发行包：外部 mpv、残留 libmpv、空的 lib/ 及无用目录
 rm -rf "$DIST/runtime/mpv" "$DIST/runtime/vlc" "$DIST/runtime/libvlc" "$DIST/runtime/lib" "$DIST/runtime/libmpv"
 
 # bridge 始终重新构建，避免发行包混入旧 ABI。
@@ -210,7 +210,7 @@ Windows 运行时（Win7 尽力兼容）：
   Web 包（引擎+webapp 同端口）见 scripts/package-flutter-web.sh / CI「Flutter Web」
 
 默认播放核心为「页内 MPV」（innie#mpv）；桌面可切「页内 FVP」（innie#fvp）。
-外部 MPV/IINA 需系统安装或 PATH，发行包不捆绑 mpv/libvlc。
+外部 MPV/IINA/VLC 需系统安装或 PATH，发行包不捆绑外部播放器。
 
 环境变量(可选):
  KOTV_RUNTIME=/path/to/runtime 覆盖运行时根目录

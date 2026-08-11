@@ -1332,7 +1332,7 @@ func (a *App) APIPlayerStatus() map[string]any {
 }
 
 // APIPlayerEmbed 页内嵌入播放（Flutter 内置 media_kit/FVP 不经此路径）。
-// playerVal: innie#mpv；空则用当前设置。旧 innie#vlc 映射为 mpv。
+// playerVal: innie#mpv；空则用当前设置。
 func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
 	playURL = strings.TrimSpace(playURL)
 	if playURL == "" {
@@ -1342,7 +1342,7 @@ func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
 	if playerVal == "" {
 		playerVal = settings.Get(settings.Player)
 	}
-	if playerVal == "" || playerVal == "innie#vlc" {
+	if playerVal == "" {
 		playerVal = "innie#mpv"
 	}
 	parts := strings.SplitN(playerVal, "#", 2)
@@ -1350,10 +1350,6 @@ func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
 	name := "mpv"
 	if len(parts) > 1 && parts[1] != "" {
 		name = strings.ToLower(parts[1])
-	}
-	if name == "vlc" {
-		name = "mpv"
-		playerVal = "innie#mpv"
 	}
 	if mode != "innie" || name != "mpv" {
 		return fmt.Errorf("embed 仅支持 innie#mpv")

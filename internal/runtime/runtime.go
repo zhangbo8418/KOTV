@@ -243,7 +243,7 @@ func FFmpeg() string {
 	return ""
 }
 
-// VLC 仅探测系统安装的外部 VLC（发行包不捆绑 runtime/vlc、libvlc）。
+// VLC 仅探测系统安装的外部播放器。
 func VLC() string {
 	switch runtime.GOOS {
 	case "darwin":

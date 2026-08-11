@@ -15,11 +15,11 @@
 | DLNA 投屏（DMC 控制 / DMR 接收） | ✅ |
 | 局域网 API / 遥控 / 手机同步（历史·收藏） | ✅ |
 | 弹幕 / 自更新 | ✅ |
-| 旁路播放（捆绑 VLC / MPV）+ 续播 | ✅ |
-| 页内嵌入播放（Flutter media_kit MPV / runtime libvlc） | ✅ |
-| 单集循环（页内 MPV/VLC） | ✅ |
+| 旁路播放（外部 VLC / MPV）+ 续播 | ✅ |
+| 页内嵌入播放（Flutter media_kit MPV / FVP） | ✅ |
+| 单集循环（页内 MPV/FVP） | ✅ |
 | Flutter Web 包（引擎同端口放出；不进 PC/安卓/iOS） | ✅ |
-| 捆绑运行时 (JRE/Python/Chromium/ffmpeg/VLC/MPV) | ✅ |
+| 捆绑运行时 (JRE/Python/Chromium/ffmpeg) | ✅ |
 | QuickJS 内嵌主程序 (CGO) | ✅ |
 | Win7 运行时 + GitHub Actions 打包 | ✅ |
 | Widevine / PlayReady 等 DRM 实播 | ❌（检测并提示） |
@@ -83,7 +83,6 @@ dist/KOTV-macos-arm64/
     python/             # CPython 3.14 → Python 爬虫
     chromium/           # Win=chrome.exe（REWORK/snapshot 展平）；其它=CFT headless-shell 等
     ffmpeg/
-    libvlc/             # libvlc + plugins（页内 VLC；Flutter kotv_vlc）
     bridge/spider-bridge.jar
   README.txt
 ```
@@ -94,14 +93,13 @@ dist/KOTV-macos-arm64/
 | Python 3.14 | Python 爬虫 | PBS / Win7 embed (PythonVista) |
 | Chromium | 网页嗅探 / 解析 | **macOS / Linux x64**：CFT Stable 最新；**Win x64**：Win7 REWORK 最新；**Win ARM64**：最新 snapshot；Linux ARM64 回落系统 Chrome |
 | FFmpeg | 媒体处理 | osxexperts / Gyan / BtbN |
-| libvlc | **页内嵌入（VLC）** | VideoLAN 官方包提取 lib + plugins |
 | QuickJS | JS 爬虫 | 编译进 KOTV（无需单独目录） |
 
 运行时查找顺序：可执行文件旁 `runtime/` → 环境变量 `KOTV_RUNTIME` → 开发态仓库 `runtime/`。
 
 **Java / Python 仅使用捆绑路径**，不会读取 `JAVA_HOME` 或系统 PATH。JAR 爬虫通过捆绑 JRE 启动常驻 `spider-bridge --serve` 进程（JVM 只初始化一次，崩溃可自动拉起），不嵌入主进程。
 
-**播放**：桌面页内 MPV 由 Flutter **media_kit 自带 libmpv**（不进 `runtime/`）。页内 VLC 使用 `runtime/libvlc`。也可选外部 VLC/MPV。
+**播放**：桌面页内 MPV 由 Flutter **media_kit 自带 libmpv**（不进 `runtime/`）；亦可选手动 FVP。外部 VLC/MPV 使用系统安装。
 
 ## 浏览器 Web 包
 
