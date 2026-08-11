@@ -39,7 +39,8 @@ const (
 	PlayerVolume       Type = "playerVolume"
 	PlayerAmbient      Type = "playerAmbient"
 	PlayerStableVolume Type = "playerStableVolume"
-	// 对齐 TV PlayerSetting：mpv_vulkan / mpv_gpu_next + 自定义 mpv.conf
+	UA                 Type = "ua" // 播放 User-Agent；空则用 Media3 默认
+	// MPV：mpv_vulkan / mpv_gpu_next + 自定义 mpv.conf
 	MpvVulkan     Type = "mpvVulkan"
 	MpvGpuNext    Type = "mpvGpuNext"
 	MpvConf       Type = "mpvConf"
@@ -100,6 +101,7 @@ func defaultFile() file {
 			{ID: "playerVolume", Label: "默认音量", Value: "80"},
 			{ID: "playerAmbient", Label: "氛围模式", Value: "false"},
 			{ID: "playerStableVolume", Label: "稳定音量", Value: "false"},
+			{ID: "ua", Label: "User-Agent", Value: ""},
 			{ID: "mpvVulkan", Label: "MPV Vulkan", Value: "false"},
 			{ID: "mpvGpuNext", Label: "MPV gpu-next", Value: "false"},
 			{ID: "mpvConf", Label: "MPV 配置", Value: ""},
@@ -208,6 +210,17 @@ func Get(t Type) string {
 		}
 	}
 	return ""
+}
+
+// DefaultPlayUA 未配置 ua 时的播放缺省 User-Agent（Media3 Util.getUserAgent(applicationId) 格式）。
+const DefaultPlayUA = "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
+
+// PlayUA 播放 User-Agent：设置 ua 非空则用之，否则 DefaultPlayUA。
+func PlayUA() string {
+	if v := strings.TrimSpace(Get(UA)); v != "" {
+		return v
+	}
+	return DefaultPlayUA
 }
 
 // Set 设置值。

@@ -17,6 +17,7 @@ import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/mpv_opts.dart';
+import '../player/play_headers.dart';
 import '../player/vp_playback.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
@@ -246,6 +247,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         if (vol != null) {
           await _playback.setVolume(vol.clamp(0, 100));
         }
+        kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
         if (!mounted) return;
         await _playback.setDecodeMode(_decodeMode);
       } catch (_) {}
@@ -651,7 +653,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           );
       final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
       if (url.isEmpty) throw Exception('空回看地址');
-      await _openLiveUrl(url);
+      final headers = <String, String>{
+        for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
+          if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
+      };
+      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers);
       setState(() {
         _title = '${data['name'] ?? _title}';
         _status = '回看中 · $_title';

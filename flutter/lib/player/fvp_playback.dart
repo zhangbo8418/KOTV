@@ -157,7 +157,7 @@ class FvpPlayback extends KotvPlayback {
       await _disposeController();
       notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
-      // 302 交给 mdk/FFmpeg（见 [kotvRegisterFvp] io.avio + protocol_whitelist），勿在 Flutter 预展开。
+      // 302 交给 mdk 默认 IO 跟跳（未强制 io.avio）。
       final c = VideoPlayerController.networkUrl(
         Uri.parse(url),
         httpHeaders: h,

@@ -11,6 +11,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
@@ -36,7 +37,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * 对齐 TV Exo：OkHttpDataSource + Media3，带 headers / mime / DRM / 软硬解。
+ * OkHttpDataSource + Media3：headers / mime / DRM / 软硬解。
  *
  * 画面路径：MediaCodec 解到 Flutter [SurfaceTexture] 的 [Surface]（[ExoPlayer.setVideoSurface]），
  * 即硬解**直出**到 GPU Texture；不按 H.264/HEVC 做应用层白名单，交给 MediaCodec 协商。
@@ -297,7 +298,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     old?.release()
 
     val httpFactory = OkHttpDataSource.Factory(httpClient)
-      .setUserAgent(currentHeaders["User-Agent"] ?: DEFAULT_UA)
+      .setUserAgent(currentHeaders["User-Agent"] ?: defaultUserAgent())
       .setDefaultRequestProperties(currentHeaders)
       .setTransferListener(netTransferListener)
     val dataSourceFactory = DefaultDataSource.Factory(ctx, httpFactory)
@@ -369,7 +370,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             }
           }
         }
-        // 对齐 TV：硬解失败时用扩展/软解重建一次
+        // 硬解失败时用扩展/软解重建一次
         if (decodeMode == "auto" && !decodeFallbackTried && isDecoderError(error.errorCode)) {
           decodeFallbackTried = true
           Log.w(TAG, "exo decoder failed → soft rebuild")
@@ -430,7 +431,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return b.build()
   }
 
-  /** 对齐 TV MediaItemFactory.buildDrmConfig / bean.Drm */
+  /** MediaItem DRM 配置。 */
   private fun buildDrmConfig(drm: Map<String, Any?>?): MediaItem.DrmConfiguration? {
     if (drm == null) return null
     val type = drm["type"]?.toString()?.trim()?.lowercase().orEmpty()
@@ -505,10 +506,35 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
+  private fun defaultUserAgent(): String {
+    val ctx = appContext ?: return FALLBACK_PLAY_UA
+    return Util.getUserAgent(ctx, ctx.packageName)
+  }
+
+  private fun normalizeHeaders(raw: Map<String, String>): Map<String, String> {
+    val out = linkedMapOf<String, String>()
+    for ((k0, v0) in raw) {
+      var k = k0.trim()
+      var v = v0.trim()
+      if (k.isEmpty() || v.isEmpty()) continue
+      // CatVod 偶发把多头塞进一个 value：User-Agent$xx#Referer$yy
+      if (v.contains('$') && (v.contains('#') || k.equals("header", true))) {
+        parseCatvodHeaderBlob(v).forEach { (hk, hv) -> out[canonicalHeader(hk)] = hv }
+        continue
+      }
+      k = canonicalHeader(k)
+      out[k] = v
+    }
+    if (out.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
+      out["User-Agent"] = defaultUserAgent()
+    }
+    return out
+  }
+
   companion object {
     private const val TAG = "KotvExo"
-    private const val DEFAULT_UA =
-      "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+    private const val FALLBACK_PLAY_UA =
+      "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
 
     /** 硬解直出：优先 hardwareAccelerated；无硬解时仍交完整列表（不按编码阉割）。 */
     private val HARD_PREFER_SELECTOR = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
@@ -540,28 +566,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
     }
 
-    fun normalizeHeaders(raw: Map<String, String>): Map<String, String> {
-      val out = linkedMapOf(
-        "User-Agent" to DEFAULT_UA,
-        "Accept" to "*/*",
-        "Connection" to "keep-alive",
-      )
-      for ((k0, v0) in raw) {
-        var k = k0.trim()
-        var v = v0.trim()
-        if (k.isEmpty() || v.isEmpty()) continue
-        // CatVod 偶发把多头塞进一个 value：User-Agent$xx#Referer$yy
-        if (v.contains('$') && (v.contains('#') || k.equals("header", true))) {
-          parseCatvodHeaderBlob(v).forEach { (hk, hv) -> out[canonicalHeader(hk)] = hv }
-          continue
-        }
-        k = canonicalHeader(k)
-        out[k] = v
-      }
-      return out
-    }
-
-    private fun parseCatvodHeaderBlob(blob: String): Map<String, String> {
+    fun parseCatvodHeaderBlob(blob: String): Map<String, String> {
       val map = linkedMapOf<String, String>()
       for (part in blob.split('#')) {
         val i = part.indexOf('$')
@@ -573,7 +578,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return map
     }
 
-    private fun canonicalHeader(k: String): String {
+    fun canonicalHeader(k: String): String {
       return when (k.lowercase()) {
         "user-agent", "ua" -> "User-Agent"
         "referer", "referrer" -> "Referer"

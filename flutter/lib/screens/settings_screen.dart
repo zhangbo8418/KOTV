@@ -14,6 +14,7 @@ import '../engine/engine_launcher.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
 import '../player/mpv_opts.dart';
+import '../player/play_headers.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
@@ -77,6 +78,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _version = '${data['version'] ?? '0.1.0'}';
       _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
       await LocalHistory.setIncognito(g('incognito', 'false') == 'true');
+      kotvApplyPlayUaSetting(g('ua'));
     } catch (e) {
       _status = '$e';
     }
@@ -99,6 +101,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
         _status = msg ?? '已保存';
       });
+      if (key == 'ua') {
+        kotvApplyPlayUaSetting(value);
+      }
       if (key == 'incognito') {
         await LocalHistory.setIncognito(value == 'true');
       }
@@ -107,6 +112,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           key == 'theme' ||
           key.startsWith('wall') ||
           key == 'player' ||
+          key == 'ua' ||
           key.startsWith('player') ||
           key.startsWith('mpv') ||
           key == 'preferredParse' ||
@@ -184,6 +190,75 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _pick(String title, String key, List<(String, String)> options, {String? msg}) async {
     final v = await pickChoice(context, title: title, current: g(key), options: options);
     if (v != null) await _set(key, v, msg: msg);
+  }
+
+  /// 播放 User-Agent：空=默认；输入 `c`/`o` 快捷填 Chrome / OkHttp。
+  Future<void> _editUa() async {
+    final c = TextEditingController(text: g('ua'));
+    final p = KotvPalette.of(context);
+    var append = true;
+    void detect(String s) {
+      if (append && s.toLowerCase() == 'c') {
+        append = false;
+        c.value = TextEditingValue(
+          text: kotvChromePlayUA,
+          selection: TextSelection.collapsed(offset: kotvChromePlayUA.length),
+        );
+      } else if (append && s.toLowerCase() == 'o') {
+        append = false;
+        c.value = TextEditingValue(
+          text: kotvOkHttpPlayUA,
+          selection: TextSelection.collapsed(offset: kotvOkHttpPlayUA.length),
+        );
+      } else if (s.length > 1) {
+        append = false;
+      } else if (s.isEmpty) {
+        append = true;
+      }
+    }
+
+    final v = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: p.dialogBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text('User-Agent', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
+        content: SizedBox(
+          width: 540,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '留空使用默认。输入 c → Chrome，o → OkHttp。',
+                style: TextStyle(color: p.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: c,
+                autofocus: true,
+                maxLines: 3,
+                style: TextStyle(color: p.fg),
+                onChanged: detect,
+                decoration: InputDecoration(
+                  hintText: kotvDefaultPlayUA,
+                  hintStyle: TextStyle(color: p.muted, fontSize: 12),
+                  filled: true,
+                  fillColor: p.input,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('确定')),
+        ],
+      ),
+    );
+    c.dispose();
+    if (v != null) await _set('ua', v, msg: v.isEmpty ? '已恢复默认 User-Agent' : 'User-Agent 已保存');
   }
 
   Future<T?> _runTool<T>(String label, Future<T> Function() run) async {
@@ -819,6 +894,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ('软解码', 'soft'),
                           ('硬解码', 'hard'),
                         ]),
+                      ),
+                      KotvSettingsWideTile(
+                        label: 'User-Agent',
+                        value: g('ua').isEmpty ? '默认' : _ellipsize(g('ua'), 22),
+                        onTap: _editUa,
                       ),
                       if (kotvIsAndroid())
                         KotvSettingsGrid(children: [

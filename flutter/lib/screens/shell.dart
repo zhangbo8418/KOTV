@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers.dart';
+import '../player/play_headers.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
@@ -86,7 +87,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     ref.read(remoteBridgeProvider.notifier).state = _bridge;
     // 启动时同步无痕开关到本地历史写入逻辑
     api.getSettings().then((st) {
-      final inc = '${((st['settings'] as Map?) ?? const {})['incognito'] ?? ''}'.toLowerCase() == 'true';
+      final map = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      final inc = '${map['incognito'] ?? ''}'.toLowerCase() == 'true';
+      kotvApplyPlayUaSetting('${map['ua'] ?? ''}');
       return LocalHistory.setIncognito(inc);
     }).catchError((_) {});
   }

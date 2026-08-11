@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/settings"
 )
 
 // 将带自定义 Header 的远端媒体转成本地可播地址，供 VLC/MPV 无 header 能力时使用。
@@ -168,7 +169,7 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "Mozilla/5.0 KOTV")
+		req.Header.Set("User-Agent", settings.PlayUA())
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

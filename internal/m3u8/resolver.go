@@ -85,7 +85,7 @@ func fetch(u string, headers map[string]string) (string, error) {
 		req.Header.Set(k, v)
 	}
 	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "Mozilla/5.0 KOTV")
+		req.Header.Set("User-Agent", settings.PlayUA())
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {

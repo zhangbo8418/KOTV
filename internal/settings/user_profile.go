@@ -21,6 +21,7 @@ var clientProfileKeys = map[Type]bool{
 	PlayerVolume:       true,
 	PlayerAmbient:      true,
 	PlayerStableVolume: true,
+	UA:                 true,
 	MpvVulkan:          true,
 	MpvGpuNext:         true,
 	MpvConf:            true,

@@ -759,6 +759,7 @@ func (a *App) APIGetSettings() map[string]any {
 		settings.VOD, settings.LIVE, settings.Theme, settings.Player, settings.PlayerLive,
 		settings.Proxy, settings.PlayerSpeed, settings.PlayerScale, settings.PlayerDecode,
 		settings.PlayerVolume, settings.PlayerAmbient, settings.PlayerStableVolume,
+		settings.UA,
 		settings.MpvVulkan, settings.MpvGpuNext, settings.MpvConf,
 		settings.PreferredParse, settings.AdFilter, settings.M3U8Cfg, settings.DanmakuOn, settings.DanmakuAPI,
 		settings.DanmakuSize, settings.DanmakuOpacity, settings.DanmakuRows,

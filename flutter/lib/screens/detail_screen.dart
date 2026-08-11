@@ -17,6 +17,7 @@ import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/mpv_opts.dart';
+import '../player/play_headers.dart';
 import '../player/vp_playback.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
@@ -521,6 +522,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         // 音量/倍速等偏好先记下，真正 [_playAt] open 后再套。
         _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
         _prefVolume = double.tryParse('${settings['playerVolume'] ?? ''}');
+        kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
         unawaited(KotvBufferBudget.warm());
       } catch (_) {}
       setState(() {
@@ -788,7 +790,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       if (serial != _playAtSerial || !mounted) return;
       final pb = _playback;
       await pb.setDecodeMode(_decodeMode);
-      // Exo 对齐 TV：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
+      // Exo：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
       var openUrl = playUrl;
       Map<String, String>? openHeaders = headers.isEmpty ? null : headers;
       if (_backend == KotvEmbedBackend.exo || hasDrm) {
