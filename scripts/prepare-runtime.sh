@@ -9,8 +9,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CACHE="$ROOT/.runtime-cache"
 OUT_ROOT="$ROOT/runtime"
 
-PYTHON_VER="3.14.6"
-PYTHON_TAG="20260623"
+PYTHON_VER="3.14.7"
+PYTHON_TAG="20260807"
 PYTHON_MM="${PYTHON_VER%.*}"   # 3.14
 PYTHON_ABI="cp${PYTHON_MM//./}" # cp314
 JRE_VER="21"                 # 全平台统一 BellSoft Liberica feature version
@@ -372,7 +372,8 @@ prepare_python() {
       ;;
     windows-x64)
       name="python-${PYTHON_VER}-embed-amd64.zip"
-      url="https://raw.githubusercontent.com/adang1345/PythonVista/master/${PYTHON_VER}/$name"
+      # 资产在 Releases，不在 raw master 路径
+      url="https://github.com/adang1345/PythonVista/releases/download/v${PYTHON_VER}/$name"
       kind=win
       ;;
     windows-arm64)
