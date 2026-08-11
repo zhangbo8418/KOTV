@@ -419,7 +419,7 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   bool get _videoVisible {
-    if ((player.state.width ?? 0) > 0 && (player.state.height ?? 0) > 0) return true;
+    // 只用 VideoController 实际输出矩形：demuxer 的 width/height 可在黑屏时非零。
     final r = controller.rect.value;
     return r != null && r.width > 1 && r.height > 1;
   }
@@ -443,14 +443,16 @@ class MediaKitPlayback extends KotvPlayback {
     await kotvGuardSilentVideo(
       hasVideoSize: () => _videoVisible,
       isBuffering: () => _buffering || player.state.buffering,
+      // 仅真正在播/有进度；有音轨元数据 ≠ 会话已活（否则会误等或误放行）。
       sessionAlive: () =>
-          player.state.playing ||
-          player.state.position > Duration.zero ||
-          player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack(t.id)),
+          player.state.playing || player.state.position > Duration.zero,
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,
       onFixVideoSource: tryFixVideoSource,
     );
+    if (!_videoVisible && !isAudioOnlyContent) {
+      throw const KotvSilentVideoException();
+    }
   }
 
   @override

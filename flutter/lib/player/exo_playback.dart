@@ -209,6 +209,9 @@ class ExoPlayback extends KotvPlayback {
     if (!_ready) {
       throw const KotvSilentVideoException('Exo 未就绪');
     }
+    if (!(_w > 0 && _h > 0) && !isAudioOnlyContent) {
+      throw const KotvSilentVideoException();
+    }
     notifyListeners();
   }
 

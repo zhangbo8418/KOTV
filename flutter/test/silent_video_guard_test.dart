@@ -18,6 +18,7 @@ void main() {
         },
         blackScreenTimeout: const Duration(milliseconds: 200),
         sourceFixTimeout: const Duration(milliseconds: 100),
+        sizeSettleTimeout: const Duration(milliseconds: 40),
         tick: const Duration(milliseconds: 40),
       );
     } on KotvSilentVideoException {
@@ -36,6 +37,7 @@ void main() {
       isAudioOnly: () => true,
       hasVideoSource: () => false,
       blackScreenTimeout: const Duration(milliseconds: 50),
+      sizeSettleTimeout: const Duration(milliseconds: 20),
       tick: const Duration(milliseconds: 20),
     );
   });
@@ -52,6 +54,7 @@ void main() {
         onFixVideoSource: () async {},
         sourceFixTimeout: const Duration(milliseconds: 250),
         blackScreenTimeout: const Duration(seconds: 5),
+        sizeSettleTimeout: const Duration(milliseconds: 40),
         tick: const Duration(milliseconds: 40),
       );
     } on KotvSilentVideoException catch (e) {
@@ -71,11 +74,11 @@ void main() {
     });
     await kotvGuardSilentVideo(
       hasVideoSize: () => size,
-      // 未在播的慢缓冲：sessionAlive=false
       isBuffering: () => buffering,
       sessionAlive: () => false,
       hasVideoSource: () => true,
       blackScreenTimeout: const Duration(milliseconds: 80),
+      sizeSettleTimeout: const Duration(milliseconds: 60),
       tick: const Duration(milliseconds: 40),
     );
   });
@@ -86,11 +89,11 @@ void main() {
     try {
       await kotvGuardSilentVideo(
         hasVideoSize: () => false,
-        // 引擎假 buffering + 已在播 → 仍应按黑屏切
         isBuffering: () => true,
         sessionAlive: () => true,
         hasVideoSource: () => true,
         blackScreenTimeout: const Duration(milliseconds: 150),
+        sizeSettleTimeout: const Duration(milliseconds: 40),
         tick: const Duration(milliseconds: 40),
       );
     } on KotvSilentVideoException {
@@ -116,6 +119,7 @@ void main() {
         sessionAlive: () => alive,
         hasVideoSource: () => true,
         blackScreenTimeout: const Duration(milliseconds: 150),
+        sizeSettleTimeout: const Duration(milliseconds: 40),
         tick: const Duration(milliseconds: 40),
       );
     } on KotvSilentVideoException {
@@ -125,16 +129,45 @@ void main() {
     expect(sw.elapsedMilliseconds, greaterThanOrEqualTo(350));
   });
 
-  test('dead session returns without SilentVideo', () async {
-    await kotvGuardSilentVideo(
-      hasVideoSize: () => false,
-      isBuffering: () => false,
-      sessionAlive: () => false,
-      hasVideoSource: () => true,
-      sessionDeadTimeout: const Duration(milliseconds: 80),
-      blackScreenTimeout: const Duration(milliseconds: 500),
-      tick: const Duration(milliseconds: 20),
-    );
+  test('dead session throws SilentVideo', () async {
+    var threw = false;
+    try {
+      await kotvGuardSilentVideo(
+        hasVideoSize: () => false,
+        isBuffering: () => false,
+        sessionAlive: () => false,
+        hasVideoSource: () => true,
+        sessionDeadTimeout: const Duration(milliseconds: 80),
+        blackScreenTimeout: const Duration(milliseconds: 500),
+        sizeSettleTimeout: const Duration(milliseconds: 40),
+        tick: const Duration(milliseconds: 20),
+      );
+    } on KotvSilentVideoException {
+      threw = true;
+    }
+    expect(threw, isTrue);
+  });
+
+  test('size flicker does not count as success', () async {
+    var size = true;
+    Future<void>.delayed(const Duration(milliseconds: 80), () {
+      size = false;
+    });
+    var threw = false;
+    try {
+      await kotvGuardSilentVideo(
+        hasVideoSize: () => size,
+        isBuffering: () => false,
+        sessionAlive: () => true,
+        hasVideoSource: () => true,
+        blackScreenTimeout: const Duration(milliseconds: 200),
+        sizeSettleTimeout: const Duration(milliseconds: 200),
+        tick: const Duration(milliseconds: 40),
+      );
+    } on KotvSilentVideoException {
+      threw = true;
+    }
+    expect(threw, isTrue);
   });
 
   test('fix video source that unlocks size succeeds', () async {
@@ -148,6 +181,7 @@ void main() {
         size = true;
       },
       blackScreenTimeout: const Duration(milliseconds: 200),
+      sizeSettleTimeout: const Duration(milliseconds: 60),
       tick: const Duration(milliseconds: 40),
     );
   });

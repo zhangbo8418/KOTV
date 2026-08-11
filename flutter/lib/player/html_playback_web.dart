@@ -177,6 +177,9 @@ class HtmlPlayback extends KotvPlayback {
     _height = _video.videoHeight;
     _buffering = false;
     notifyListeners();
+    if (!(_width > 0 && _height > 0) && !isAudioOnlyContent) {
+      throw const KotvSilentVideoException();
+    }
   }
 
   @override

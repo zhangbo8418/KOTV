@@ -264,6 +264,11 @@ class FvpPlayback extends KotvPlayback {
     if (identical(_c, c)) {
       _opening = false;
       notifyListeners();
+      final v = c.value;
+      final hasSize = v.isInitialized && v.size.width > 0 && v.size.height > 0;
+      if (!hasSize && !isAudioOnlyContent) {
+        throw const KotvSilentVideoException();
+      }
     }
   }
 
