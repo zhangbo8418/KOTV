@@ -62,7 +62,7 @@ void main() {
     expect(msg, contains('视频源'));
   });
 
-  test('buffering does not fail; waits until size', () async {
+  test('pre-play buffering waits until size without failing', () async {
     var size = false;
     var buffering = true;
     Future<void>.delayed(const Duration(milliseconds: 350), () {
@@ -71,26 +71,49 @@ void main() {
     });
     await kotvGuardSilentVideo(
       hasVideoSize: () => size,
+      // 未在播的慢缓冲：sessionAlive=false
       isBuffering: () => buffering,
-      sessionAlive: () => true,
+      sessionAlive: () => false,
       hasVideoSource: () => true,
       blackScreenTimeout: const Duration(milliseconds: 80),
       tick: const Duration(milliseconds: 40),
     );
   });
 
-  test('long buffering then black screen still fails after black window', () async {
+  test('playing black despite buffering flag still fails', () async {
+    final sw = Stopwatch()..start();
+    var threw = false;
+    try {
+      await kotvGuardSilentVideo(
+        hasVideoSize: () => false,
+        // 引擎假 buffering + 已在播 → 仍应按黑屏切
+        isBuffering: () => true,
+        sessionAlive: () => true,
+        hasVideoSource: () => true,
+        blackScreenTimeout: const Duration(milliseconds: 150),
+        tick: const Duration(milliseconds: 40),
+      );
+    } on KotvSilentVideoException {
+      threw = true;
+    }
+    expect(threw, isTrue);
+    expect(sw.elapsedMilliseconds, lessThan(2500));
+  });
+
+  test('long pre-play buffering then black screen fails after black window', () async {
     final sw = Stopwatch()..start();
     var buffering = true;
+    var alive = false;
     Future<void>.delayed(const Duration(milliseconds: 300), () {
       buffering = false;
+      alive = true;
     });
     var threw = false;
     try {
       await kotvGuardSilentVideo(
         hasVideoSize: () => false,
         isBuffering: () => buffering,
-        sessionAlive: () => true,
+        sessionAlive: () => alive,
         hasVideoSource: () => true,
         blackScreenTimeout: const Duration(milliseconds: 150),
         tick: const Duration(milliseconds: 40),

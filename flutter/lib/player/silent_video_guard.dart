@@ -3,18 +3,20 @@ import 'kotv_playback.dart';
 /// 各播放器共用的**起播**画面守卫（抛错前尽量自愈；不负责播中卡顿）。
 ///
 /// ## 原则
-/// - **缓冲中**：只等，**不超时、不切播放器**。慢源/磁力换引擎也快不了。
-/// - **非缓冲仍无尺寸**：才当引擎/视源问题 → 修轨 → 短等 → 抛错交给 failover。
-/// - **有尺寸即成功**：不做「进度卡死」误判（静态封面音乐等）。
+/// - **未在播的缓冲**：只等，**不超时、不切播放器**（慢源/磁力）。
+/// - **已在播（[sessionAlive]）却无尺寸**：按黑屏处理——即使引擎仍报 buffering
+///   （很多播放器首帧前会一直标缓冲）。
+/// - **有尺寸即成功**：不做「进度卡死」误判。
+/// - **纯音频**：仅在引擎确认无视轨时放行，禁止用「在播+无尺寸」瞎猜。
 ///
 /// ## 阶梯
-/// 1. 缓冲中 → 一直等（出尺寸 / 纯音频 / 会话死亡则结束）
+/// 1. 缓冲且会话未活 → 一直等
 /// 2. 纯音频（[isAudioOnly]）→ 成功
 /// 3. 视源异常 → [onFixVideoSource] + [sourceFixTimeout]
-/// 4. 有视源但黑屏 → [blackScreenTimeout]（默认 8s）后再修一次，仍失败则抛
+/// 4. 已在播/有源但黑屏 → [blackScreenTimeout]（默认 8s）后再修一次，仍失败则抛
 ///    [KotvSilentVideoException]
 ///
-/// 解码翻转 / 换播放器由上层 failover 处理（仅应对 SilentVideo，不应把慢缓冲当失败）。
+/// 解码翻转 / 换播放器由上层 failover 处理。
 Future<void> kotvGuardSilentVideo({
   required bool Function() hasVideoSize,
   required bool Function() sessionAlive,
@@ -41,9 +43,10 @@ Future<void> kotvGuardSilentVideo({
     if (isAudioOnly?.call() == true) return;
 
     final now = DateTime.now();
+    final alive = sessionAlive();
 
-    // —— 起播仍在缓冲：只等，不计入黑屏，绝不因此切播放器 ——
-    if (isBuffering()) {
+    // —— 仅「还在拉、尚未形成在播」才无限等；已在播的假 buffering 走黑屏 ——
+    if (isBuffering() && !alive) {
       blackSince = null;
       sourceWaitSince = null;
       deadSince = null;
@@ -52,7 +55,7 @@ Future<void> kotvGuardSilentVideo({
     }
 
     // —— 会话已死：交给引擎错误文案，不走黑屏 failover ——
-    if (!sessionAlive()) {
+    if (!alive) {
       blackSince = null;
       sourceWaitSince = null;
       deadSince ??= now;

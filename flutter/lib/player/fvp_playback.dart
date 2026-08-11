@@ -294,18 +294,18 @@ class FvpPlayback extends KotvPlayback {
     final v = c.value;
     if (!v.isInitialized || v.isBuffering || _opening) return false;
     if (v.size.width > 0 && v.size.height > 0) return false;
+    // 仅在 demux 确认「无视轨 + 有音轨」时放行；禁止用「在播+无尺寸」瞎猜。
     try {
       final info = c.getMediaInfo() as dynamic;
       if (info != null) {
         final hasVideo = (info.video as List?)?.isNotEmpty == true;
         final hasAudio = (info.audio as List?)?.isNotEmpty == true;
-        if (hasVideo) return false;
-        if (hasAudio) {
+        if (!hasVideo && hasAudio) {
           return v.isPlaying || v.position > const Duration(milliseconds: 500);
         }
       }
     } catch (_) {}
-    return v.isPlaying || v.position > const Duration(milliseconds: 500);
+    return false;
   }
 
   @override

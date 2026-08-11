@@ -223,7 +223,9 @@ class ExoPlayback extends KotvPlayback {
   bool get isAudioOnlyContent {
     if (_lastError != null || _buffering || !_ready) return false;
     if (_w > 0 && _h > 0) return false;
-    return _playing || _position > const Duration(milliseconds: 500);
+    // 仅当原生回报 0 条视频轨时放行；禁止「在播+无尺寸」瞎猜。
+    // videoTrackCount 为同步 getter 不便；起播守卫里用轨修复，失败再 failover。
+    return false;
   }
 
   /// 与 MPV 对齐：按分辨率优先轮询全部视频轨；无轨则 play 软重试。

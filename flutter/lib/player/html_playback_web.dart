@@ -201,9 +201,9 @@ class HtmlPlayback extends KotvPlayback {
       if (vLen == 0 && aLen > 0) {
         return !_video.paused || _video.currentTime > 0.5;
       }
-      if (vLen > 0) return false;
     } catch (_) {}
-    return !_video.paused || _video.currentTime > 0.5;
+    // 轨 API 不可用时不瞎猜。
+    return false;
   }
 
   @override

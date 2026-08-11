@@ -163,12 +163,8 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   bool get isAudioOnlyContent {
-    final c = _c;
-    if (c == null) return false;
-    final v = c.value;
-    if (!v.isInitialized || v.isBuffering || _opening) return false;
-    if (v.size.width > 0 && v.size.height > 0) return false;
-    return v.isPlaying || v.position > const Duration(milliseconds: 500);
+    // 与 VP 相同：无 demux 轨信息时不瞎猜纯音频。
+    return false;
   }
 
   /// 非 Web 的 HtmlPlayback 走 video_player，无多轨 API；软重试 seek + play。
