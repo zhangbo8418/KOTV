@@ -1,17 +1,20 @@
 import 'kotv_playback.dart';
 
-/// 各播放器共用的开播画面守卫（阶梯判定，抛错前尽量自愈）。
+/// 各播放器共用的**起播**画面守卫（抛错前尽量自愈；不负责播中卡顿）。
 ///
-/// 1. **缓冲中**：最多等 [bufferingTimeout]（默认 60s）
-/// 2. **纯音频**（[isAudioOnly]）：不要求画面，直接成功
-/// 3. **视源异常**（有视轨但未选中 / 元数据异常）：[onFixVideoSource] + [sourceFixTimeout]
-/// 4. **有视源但仍无尺寸**（黑屏）：[blackScreenTimeout]（默认 8s）后再修一次，仍失败则抛
+/// ## 原则
+/// - **缓冲中**：只等，**不超时、不切播放器**。慢源/磁力换引擎也快不了。
+/// - **非缓冲仍无尺寸**：才当引擎/视源问题 → 修轨 → 短等 → 抛错交给 failover。
+/// - **有尺寸即成功**：不做「进度卡死」误判（静态封面音乐等）。
+///
+/// ## 阶梯
+/// 1. 缓冲中 → 一直等（出尺寸 / 纯音频 / 会话死亡则结束）
+/// 2. 纯音频（[isAudioOnly]）→ 成功
+/// 3. 视源异常 → [onFixVideoSource] + [sourceFixTimeout]
+/// 4. 有视源但黑屏 → [blackScreenTimeout]（默认 8s）后再修一次，仍失败则抛
 ///    [KotvSilentVideoException]
 ///
-/// **刻意不做**：「已有尺寸但进度长期不动」——静态封面音乐等合法内容会被误杀；
-/// 有尺寸即视为出画成功，是否继续播由用户判断。
-///
-/// 解码翻转 / 换播放器由上层 failover 处理。
+/// 解码翻转 / 换播放器由上层 failover 处理（仅应对 SilentVideo，不应把慢缓冲当失败）。
 Future<void> kotvGuardSilentVideo({
   required bool Function() hasVideoSize,
   required bool Function() sessionAlive,
@@ -21,14 +24,15 @@ Future<void> kotvGuardSilentVideo({
   /// 是否已挂上可用视频源/轨；`null` 表示引擎无法判断（视为有源）。
   bool Function()? hasVideoSource,
   Future<void> Function()? onFixVideoSource,
-  Duration bufferingTimeout = const Duration(seconds: 60),
   Duration sourceFixTimeout = const Duration(seconds: 8),
   Duration blackScreenTimeout = const Duration(seconds: 8),
+  /// 会话已死且仍无画面时，短暂观察后结束守卫（不抛 SilentVideo，避免误切播放器）。
+  Duration sessionDeadTimeout = const Duration(seconds: 2),
   Duration tick = const Duration(milliseconds: 200),
 }) async {
-  final started = DateTime.now();
   DateTime? blackSince;
   DateTime? sourceWaitSince;
+  DateTime? deadSince;
   var sourceFixDone = false;
   var blackFixDone = false;
 
@@ -37,28 +41,28 @@ Future<void> kotvGuardSilentVideo({
     if (isAudioOnly?.call() == true) return;
 
     final now = DateTime.now();
-    if (now.difference(started) >= bufferingTimeout) {
-      // 超时前再认一次纯音频，避免慢 demux 的音乐被误杀。
-      if (isAudioOnly?.call() == true) return;
-      if (sessionAlive() || isBuffering()) {
-        throw const KotvSilentVideoException('缓冲超时无画面');
-      }
-      return;
-    }
 
+    // —— 起播仍在缓冲：只等，不计入黑屏，绝不因此切播放器 ——
     if (isBuffering()) {
       blackSince = null;
       sourceWaitSince = null;
+      deadSince = null;
       await Future<void>.delayed(tick);
       continue;
     }
 
+    // —— 会话已死：交给引擎错误文案，不走黑屏 failover ——
     if (!sessionAlive()) {
       blackSince = null;
       sourceWaitSince = null;
+      deadSince ??= now;
+      if (now.difference(deadSince) >= sessionDeadTimeout) {
+        return;
+      }
       await Future<void>.delayed(tick);
       continue;
     }
+    deadSince = null;
 
     // —— 视源异常（期望有视频但未挂上正确轨）——
     final sourceOk = hasVideoSource?.call() ?? true;

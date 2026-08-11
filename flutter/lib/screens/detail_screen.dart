@@ -835,16 +835,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await WidgetsBinding.instance.endOfFrame;
         if (serial != _playAtSerial || !mounted) return;
         try {
-          final timeout = const Duration(seconds: 70);
-          await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null).timeout(timeout);
+          // 起播缓冲由守卫无限等待；仅黑屏/视源失败抛 SilentVideo 才 failover。
+          // 勿再套墙钟 timeout：慢源会被误切播放器。
+          await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
           try {
             await _playback.play();
           } catch (_) {}
           opened = true;
           break;
         } on KotvSilentVideoException catch (e) {
-          lastOpenError = e;
-        } on TimeoutException catch (e) {
           lastOpenError = e;
         }
         final step = failover.nextStep();
@@ -925,9 +924,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       final m = e.message.trim();
       if (m.contains('视频源')) {
         return '播放失败: 无可用视频源（已尝试修复并切换播放器）';
-      }
-      if (m.contains('缓冲超时')) {
-        return '播放失败: 缓冲超时无画面';
       }
       return '播放失败: 无画面（已尝试可用播放器）';
     }

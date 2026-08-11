@@ -545,9 +545,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }
       final pb = _playback;
       await pb.setDecodeMode(failover.decodeMode);
-      final timeout = const Duration(seconds: 70);
       try {
-        await pb.open(url, headers: headers).timeout(timeout);
+        // 起播缓冲由守卫等待；仅 SilentVideo（黑屏/视源）才 failover，勿墙钟误切。
+        await pb.open(url, headers: headers);
         if (_backend != KotvEmbedBackend.mpv) {
           try {
             await pb.play();
@@ -555,8 +555,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         }
         return;
       } on KotvSilentVideoException catch (e) {
-        lastError = e;
-      } on TimeoutException catch (e) {
         lastError = e;
       }
       final step = failover.nextStep();
