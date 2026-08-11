@@ -12,9 +12,9 @@ const kotvDefaultPlayUA =
 
 /// 设置里快捷填入用（输入 `c` / `o`）。
 const kotvChromePlayUA =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
 
-const kotvOkHttpPlayUA = 'okhttp/4.12.0';
+const kotvOkHttpPlayUA = 'okhttp/5.4.0';
 
 String _settingsUa = '';
 
