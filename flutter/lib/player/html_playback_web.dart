@@ -169,6 +169,17 @@ class HtmlPlayback extends KotvPlayback {
       hasVideoSize: () => _video.videoWidth > 0 && _video.videoHeight > 0,
       isBuffering: () => _buffering || _video.readyState < 3,
       sessionAlive: () => !_video.paused || (_video.currentTime > 0) || _opened,
+      isPlaying: () => !_video.paused,
+      position: () => Duration(milliseconds: (_video.currentTime * 1000).round()),
+      duration: () {
+        final d = _video.duration;
+        if (d.isNaN || d.isInfinite) return Duration.zero;
+        return Duration(milliseconds: (d * 1000).round());
+      },
+      isLiveContent: () {
+        final d = _video.duration;
+        return d.isInfinite;
+      },
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,

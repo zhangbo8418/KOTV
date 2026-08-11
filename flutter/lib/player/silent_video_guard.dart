@@ -4,12 +4,12 @@ import 'kotv_playback.dart';
 ///
 /// ## 原则
 /// - **未在播的缓冲**：只等，不切播放器。
-/// - **已在播却无稳定画面**：修轨 → 黑屏窗口 → [KotvSilentVideoException] → failover。
-/// - **画面尺寸须稳住** [sizeSettleTimeout]，避免 demux 探头尺寸闪一下就当成功。
-/// - **会话已死仍无画面**：抛错（不再静默 return，否则上层会当成开播成功）。
-/// - **纯音频**：仅引擎确认无视轨时放行。
-///
-/// 不做「有尺寸但进度卡死」判定（静态封面音乐等）。
+/// - **已在播却无稳定画面**：修轨 → 黑屏窗口 → failover。
+/// - **尺寸须稳住** [sizeSettleTimeout]。
+/// - **会话已死仍无画面**：抛错。
+/// - **纯音频**：确认无视轨后仍要进度前进（与点播相同）。
+/// - **播放中进度卡死**：点播在「出画/纯音频」后若 [isPlaying] 且进度长期不涨 → 抛错切播放器。
+///   直播（[isLiveContent] / 时长一直为 0）跳过进度检查。
 Future<void> kotvGuardSilentVideo({
   required bool Function() hasVideoSize,
   required bool Function() sessionAlive,
@@ -17,11 +17,22 @@ Future<void> kotvGuardSilentVideo({
   bool Function()? isAudioOnly,
   bool Function()? hasVideoSource,
   Future<void> Function()? onFixVideoSource,
+  /// 当前播放进度；用于「在播但进度不动」检测。
+  Duration Function()? position,
+  /// 片长；点播通常 >0。一直为 0 且已出画时按直播放行。
+  Duration Function()? duration,
+  /// 是否明确为直播；为 true 时不做进度卡死判定。
+  bool Function()? isLiveContent,
+  /// 是否处于播放中（比 sessionAlive 更严；缺省用 sessionAlive）。
+  bool Function()? isPlaying,
   Duration sourceFixTimeout = const Duration(seconds: 8),
   Duration blackScreenTimeout = const Duration(seconds: 8),
   Duration sessionDeadTimeout = const Duration(seconds: 2),
-  /// 尺寸需连续保持多久才算真正出画（防元数据闪一下）。
   Duration sizeSettleTimeout = const Duration(milliseconds: 400),
+  /// 出画/纯音频后，播放中进度需在此时间内前进，否则视为空转。
+  Duration progressStallTimeout = const Duration(seconds: 8),
+  /// 进度至少前进这么多才算「动了」。
+  Duration progressMinDelta = const Duration(milliseconds: 400),
   Duration tick = const Duration(milliseconds: 200),
 }) async {
   DateTime? blackSince;
@@ -31,14 +42,87 @@ Future<void> kotvGuardSilentVideo({
   var sourceFixDone = false;
   var blackFixDone = false;
 
+  Future<void> ensureProgressOrThrow() async {
+    if (isLiveContent?.call() == true) return;
+    final playingOf = isPlaying ?? sessionAlive;
+    final posOf = position;
+    final durOf = duration;
+    if (posOf == null) return;
+
+    final baseline = posOf();
+    DateTime? stallSince;
+    final watchStart = DateTime.now();
+
+    while (true) {
+      final now = DateTime.now();
+      if (isLiveContent?.call() == true) return;
+      if (isAudioOnly?.call() == true) {
+        // 纯音频也要进度；下面统一看 position。
+      } else if (!hasVideoSize() && isAudioOnly?.call() != true) {
+        // 出画又丢了：回到主循环处理。
+        return;
+      }
+
+      final pos = posOf();
+      // 起播已越过门槛，或监视窗口内相对前进，都算进度正常。
+      if (pos >= progressMinDelta) return;
+      if (pos - baseline >= progressMinDelta) return;
+
+      final dur = durOf?.call() ?? Duration.zero;
+      final playing = playingOf();
+      final buffering = isBuffering();
+
+      // 时长一直未知且已出画：更像直播，超时后放行。
+      if (dur <= Duration.zero &&
+          (hasVideoSize() || isAudioOnly?.call() == true) &&
+          now.difference(watchStart) >= progressStallTimeout) {
+        return;
+      }
+
+      if (buffering && !playing) {
+        stallSince = null;
+        await Future<void>.delayed(tick);
+        continue;
+      }
+
+      if (!sessionAlive()) {
+        throw const KotvSilentVideoException('起播会话中断无画面');
+      }
+
+      if (playing) {
+        stallSince ??= now;
+        if (now.difference(stallSince) >= progressStallTimeout) {
+          throw const KotvSilentVideoException('播放中进度停滞');
+        }
+      } else {
+        stallSince = null;
+        // 已出画但尚未进入 playing：继续短等，避免永久挂死。
+        if (now.difference(watchStart) >= progressStallTimeout * 2) {
+          throw const KotvSilentVideoException('播放中进度停滞');
+        }
+      }
+      await Future<void>.delayed(tick);
+    }
+  }
+
   while (true) {
     final now = DateTime.now();
 
-    if (isAudioOnly?.call() == true) return;
+    final audioOnly = isAudioOnly?.call() == true;
+    if (audioOnly) {
+      await ensureProgressOrThrow();
+      if (isAudioOnly?.call() == true || hasVideoSize()) return;
+      // 进度检查中途失去 audio-only 且仍无画面：继续主循环。
+    }
 
     if (hasVideoSize()) {
       sizeSince ??= now;
-      if (now.difference(sizeSince) >= sizeSettleTimeout) return;
+      if (now.difference(sizeSince) >= sizeSettleTimeout) {
+        await ensureProgressOrThrow();
+        if (hasVideoSize() || isAudioOnly?.call() == true) return;
+        sizeSince = null;
+        continue;
+      }
       await Future<void>.delayed(tick);
       continue;
     }
@@ -46,7 +130,6 @@ Future<void> kotvGuardSilentVideo({
 
     final alive = sessionAlive();
 
-    // —— 仅「还在拉、尚未形成在播」才无限等 ——
     if (isBuffering() && !alive) {
       blackSince = null;
       sourceWaitSince = null;
@@ -55,7 +138,6 @@ Future<void> kotvGuardSilentVideo({
       continue;
     }
 
-    // —— 会话已死：抛错，避免 open() 当成成功（播放中黑屏无声）——
     if (!alive) {
       blackSince = null;
       sourceWaitSince = null;
@@ -74,7 +156,6 @@ Future<void> kotvGuardSilentVideo({
       if (!sourceFixDone) {
         sourceFixDone = true;
         await onFixVideoSource?.call();
-        if (isAudioOnly?.call() == true) return;
         sourceWaitSince = DateTime.now();
         await Future<void>.delayed(tick);
         continue;
@@ -84,14 +165,16 @@ Future<void> kotvGuardSilentVideo({
         await Future<void>.delayed(tick);
         continue;
       }
-      if (isAudioOnly?.call() == true) return;
+      if (isAudioOnly?.call() == true) {
+        await ensureProgressOrThrow();
+        return;
+      }
       throw const KotvSilentVideoException('无可用视频源');
     }
 
     if (!sourceFixDone) {
       sourceFixDone = true;
       await onFixVideoSource?.call();
-      if (isAudioOnly?.call() == true) return;
       blackSince = DateTime.now();
       await Future<void>.delayed(tick);
       continue;
@@ -106,13 +189,15 @@ Future<void> kotvGuardSilentVideo({
     if (!blackFixDone) {
       blackFixDone = true;
       await onFixVideoSource?.call();
-      if (isAudioOnly?.call() == true) return;
       blackSince = DateTime.now();
       await Future<void>.delayed(tick);
       continue;
     }
 
-    if (isAudioOnly?.call() == true) return;
+    if (isAudioOnly?.call() == true) {
+      await ensureProgressOrThrow();
+      return;
+    }
     throw const KotvSilentVideoException();
   }
 }

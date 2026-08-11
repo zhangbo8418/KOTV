@@ -68,17 +68,24 @@ void main() {
   test('pre-play buffering waits until size without failing', () async {
     var size = false;
     var buffering = true;
+    var pos = Duration.zero;
     Future<void>.delayed(const Duration(milliseconds: 350), () {
       buffering = false;
       size = true;
+      pos = const Duration(milliseconds: 500);
     });
     await kotvGuardSilentVideo(
       hasVideoSize: () => size,
       isBuffering: () => buffering,
-      sessionAlive: () => false,
+      sessionAlive: () => size,
+      isPlaying: () => size,
+      position: () => pos,
+      duration: () => const Duration(minutes: 3),
       hasVideoSource: () => true,
       blackScreenTimeout: const Duration(milliseconds: 80),
       sizeSettleTimeout: const Duration(milliseconds: 60),
+      progressStallTimeout: const Duration(milliseconds: 400),
+      progressMinDelta: const Duration(milliseconds: 100),
       tick: const Duration(milliseconds: 40),
     );
   });
@@ -172,16 +179,68 @@ void main() {
 
   test('fix video source that unlocks size succeeds', () async {
     var size = false;
+    var pos = Duration.zero;
     await kotvGuardSilentVideo(
       hasVideoSize: () => size,
       isBuffering: () => false,
       sessionAlive: () => true,
+      isPlaying: () => true,
+      position: () => pos,
+      duration: () => const Duration(minutes: 10),
       hasVideoSource: () => true,
       onFixVideoSource: () async {
         size = true;
+        pos = const Duration(milliseconds: 600);
       },
       blackScreenTimeout: const Duration(milliseconds: 200),
       sizeSettleTimeout: const Duration(milliseconds: 60),
+      progressStallTimeout: const Duration(milliseconds: 400),
+      progressMinDelta: const Duration(milliseconds: 100),
+      tick: const Duration(milliseconds: 40),
+    );
+  });
+
+  test('playing with size but stuck progress fails', () async {
+    var threw = false;
+    String? msg;
+    try {
+      await kotvGuardSilentVideo(
+        hasVideoSize: () => true,
+        isBuffering: () => false,
+        sessionAlive: () => true,
+        isPlaying: () => true,
+        position: () => Duration.zero,
+        duration: () => const Duration(minutes: 5),
+        hasVideoSource: () => true,
+        sizeSettleTimeout: const Duration(milliseconds: 40),
+        progressStallTimeout: const Duration(milliseconds: 200),
+        progressMinDelta: const Duration(milliseconds: 100),
+        tick: const Duration(milliseconds: 40),
+      );
+    } on KotvSilentVideoException catch (e) {
+      threw = true;
+      msg = e.message;
+    }
+    expect(threw, isTrue);
+    expect(msg, contains('进度'));
+  });
+
+  test('playing with size and advancing progress succeeds', () async {
+    var pos = Duration.zero;
+    Future<void>.delayed(const Duration(milliseconds: 80), () {
+      pos = const Duration(milliseconds: 500);
+    });
+    await kotvGuardSilentVideo(
+      hasVideoSize: () => true,
+      isBuffering: () => false,
+      sessionAlive: () => true,
+      isPlaying: () => true,
+      position: () => pos,
+      duration: () => const Duration(minutes: 5),
+      hasVideoSource: () => true,
+      sizeSettleTimeout: const Duration(milliseconds: 40),
+      progressStallTimeout: const Duration(milliseconds: 400),
+      progressMinDelta: const Duration(milliseconds: 100),
       tick: const Duration(milliseconds: 40),
     );
   });

@@ -925,6 +925,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       if (m.contains('视频源')) {
         return '播放失败: 无可用视频源（已尝试修复并切换播放器）';
       }
+      if (m.contains('进度停滞')) {
+        return '播放失败: 播放中进度停滞（已尝试切换播放器）';
+      }
       return '播放失败: 无画面（已尝试可用播放器）';
     }
     var s = '$e';

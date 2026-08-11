@@ -147,6 +147,12 @@ class VpPlayback extends KotvPlayback {
           final v = c.value;
           return v.isPlaying || v.position > Duration.zero;
         },
+        isPlaying: () {
+          if (!identical(_c, c)) return false;
+          return c.value.isPlaying;
+        },
+        position: () => c.value.position,
+        duration: () => c.value.duration,
         hasVideoSource: () => hasVideoSourceHint,
         isAudioOnly: () => isAudioOnlyContent,
         onFixVideoSource: tryFixVideoSource,

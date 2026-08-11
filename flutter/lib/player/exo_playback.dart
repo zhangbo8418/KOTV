@@ -199,6 +199,10 @@ class ExoPlayback extends KotvPlayback {
         if (_lastError != null) return false;
         return _ready || _playing || _position > Duration.zero;
       },
+      isPlaying: () => _playing,
+      position: () => _position,
+      duration: () => _duration,
+      isLiveContent: () => _ready && _duration <= Duration.zero && _playing,
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,

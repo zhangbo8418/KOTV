@@ -443,9 +443,15 @@ class MediaKitPlayback extends KotvPlayback {
     await kotvGuardSilentVideo(
       hasVideoSize: () => _videoVisible,
       isBuffering: () => _buffering || player.state.buffering,
-      // 仅真正在播/有进度；有音轨元数据 ≠ 会话已活（否则会误等或误放行）。
       sessionAlive: () =>
           player.state.playing || player.state.position > Duration.zero,
+      isPlaying: () => player.state.playing,
+      position: () => player.state.position,
+      duration: () => player.state.duration,
+      isLiveContent: () {
+        // media_kit 无稳定 isLive；时长 0 且已出画时由守卫按直播跳过卡死判定。
+        return false;
+      },
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,
       onFixVideoSource: tryFixVideoSource,

@@ -251,6 +251,19 @@ class FvpPlayback extends KotvPlayback {
         if (v.hasError) return false;
         return v.isPlaying || v.position > Duration.zero;
       },
+      isPlaying: () {
+        if (!identical(_c, c)) return false;
+        return c.value.isPlaying;
+      },
+      position: () => c.value.position,
+      duration: () => c.value.duration,
+      isLiveContent: () {
+        try {
+          return c.isLive();
+        } catch (_) {
+          return false;
+        }
+      },
       hasVideoSource: () {
         if (!identical(_c, c)) return true;
         return hasVideoSourceHint;
