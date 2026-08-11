@@ -274,9 +274,10 @@ class FvpPlayback extends KotvPlayback {
     final v = c.value;
     if (v.hasError) return false;
     if (isAudioOnlyContent) return true;
+    // Web 上 fvp 的 MediaInfo 是 dummy（无 video/audio）；用 dynamic 避免 dart2js 编译失败。
     try {
-      final info = c.getMediaInfo();
-      final videos = info?.video;
+      final info = c.getMediaInfo() as dynamic;
+      final videos = info?.video as List?;
       if (videos != null && videos.isNotEmpty) {
         final active = c.getActiveVideoTracks() ?? const <int>[];
         // 有视频流但未激活任何轨 → 视源异常，触发重选。
@@ -294,10 +295,10 @@ class FvpPlayback extends KotvPlayback {
     if (!v.isInitialized || v.isBuffering || _opening) return false;
     if (v.size.width > 0 && v.size.height > 0) return false;
     try {
-      final info = c.getMediaInfo();
+      final info = c.getMediaInfo() as dynamic;
       if (info != null) {
-        final hasVideo = info.video?.isNotEmpty == true;
-        final hasAudio = info.audio?.isNotEmpty == true;
+        final hasVideo = (info.video as List?)?.isNotEmpty == true;
+        final hasAudio = (info.audio as List?)?.isNotEmpty == true;
         if (hasVideo) return false;
         if (hasAudio) {
           return v.isPlaying || v.position > const Duration(milliseconds: 500);
@@ -312,17 +313,17 @@ class FvpPlayback extends KotvPlayback {
     final c = _c;
     if (c == null) return;
     try {
-      final info = c.getMediaInfo();
-      final videos = [...?info?.video];
+      final info = c.getMediaInfo() as dynamic;
+      final videos = List<dynamic>.from((info?.video as List?) ?? const []);
       if (videos.isNotEmpty) {
         videos.sort((a, b) {
-          final aa = a.codec.width * a.codec.height;
-          final bb = b.codec.width * b.codec.height;
+          final aa = (a.codec.width as int) * (a.codec.height as int);
+          final bb = (b.codec.width as int) * (b.codec.height as int);
           return bb.compareTo(aa);
         });
         for (final stream in videos) {
           try {
-            c.setVideoTracks([stream.index]);
+            c.setVideoTracks([stream.index as int]);
             await Future<void>.delayed(const Duration(milliseconds: 350));
             if (!identical(_c, c)) return;
             final sz = c.value.size;
@@ -330,7 +331,7 @@ class FvpPlayback extends KotvPlayback {
           } catch (_) {}
         }
       }
-      final programs = info?.programs;
+      final programs = info?.programs as List?;
       if (programs != null && programs.length > 1) {
         for (var i = 0; i < programs.length; i++) {
           try {
