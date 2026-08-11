@@ -191,25 +191,20 @@ class ExoPlayback extends KotvPlayback {
       final detail = (e.message ?? e.code).trim();
       throw StateError('Exo 无法播放该地址（$detail）。可换线路或改用其它播放器');
     }
-    for (var i = 0; i < 25; i++) {
-      if (_ready) break;
-      if (_lastError != null) {
-        throw StateError('Exo 无法播放该地址（$_lastError）。可换线路或改用其它播放器');
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    }
-    if (!_ready) {
-      throw const KotvSilentVideoException('Exo 未就绪');
-    }
+    // 慢源：未 READY 也按缓冲逻辑最多等 60s，避免过早切播放器。
     await kotvGuardSilentVideo(
-      hasVideoSize: () => _w > 0 && _h > 0,
+      hasVideoSize: () => _ready && _w > 0 && _h > 0,
+      isBuffering: () => !_ready || _buffering,
       sessionAlive: () {
         if (_lastError != null) return false;
-        return _playing || _buffering || _position > Duration.zero || _ready;
+        return _ready || _playing || _position > Duration.zero;
       },
     );
     if (_lastError != null) {
       throw StateError('Exo 无法播放该地址（$_lastError）。可换线路或改用其它播放器');
+    }
+    if (!_ready) {
+      throw const KotvSilentVideoException('Exo 未就绪');
     }
     notifyListeners();
   }

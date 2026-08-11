@@ -434,13 +434,11 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> _guardSilentVideo() async {
     await kotvGuardSilentVideo(
       hasVideoSize: () => _videoVisible,
+      isBuffering: () => _buffering || player.state.buffering,
       sessionAlive: () =>
           player.state.playing ||
-          player.state.buffering ||
           player.state.position > Duration.zero ||
           player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack(t.id)),
-      waitTicks: 25,
-      afterHookTicks: 15,
       onStillInvisible: _reselectVideoTracks,
     );
   }

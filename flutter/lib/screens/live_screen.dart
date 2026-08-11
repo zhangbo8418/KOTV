@@ -545,9 +545,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }
       final pb = _playback;
       await pb.setDecodeMode(failover.decodeMode);
-      final timeout = _backend == KotvEmbedBackend.mpv
-          ? const Duration(seconds: 55)
-          : const Duration(seconds: 25);
+      final timeout = const Duration(seconds: 70);
       try {
         await pb.open(url, headers: headers).timeout(timeout);
         if (_backend != KotvEmbedBackend.mpv) {

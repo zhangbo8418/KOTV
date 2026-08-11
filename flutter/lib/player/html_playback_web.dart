@@ -167,11 +167,8 @@ class HtmlPlayback extends KotvPlayback {
     }
     await kotvGuardSilentVideo(
       hasVideoSize: () => _video.videoWidth > 0 && _video.videoHeight > 0,
-      sessionAlive: () =>
-          !_video.paused ||
-          _buffering ||
-          (_video.currentTime > 0) ||
-          _opened,
+      isBuffering: () => _buffering || _video.readyState < 3,
+      sessionAlive: () => !_video.paused || (_video.currentTime > 0) || _opened,
     );
     _width = _video.videoWidth;
     _height = _video.videoHeight;

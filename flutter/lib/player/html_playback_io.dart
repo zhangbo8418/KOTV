@@ -132,10 +132,14 @@ class HtmlPlayback extends KotvPlayback {
           final v = c.value;
           return v.isInitialized && v.size.width > 0 && v.size.height > 0;
         },
+        isBuffering: () {
+          if (!identical(_c, c)) return false;
+          return _opening || c.value.isBuffering;
+        },
         sessionAlive: () {
           if (!identical(_c, c)) return false;
           final v = c.value;
-          return v.isPlaying || v.isBuffering || v.position > Duration.zero || _opening;
+          return v.isPlaying || v.position > Duration.zero;
         },
       );
       _opening = false;

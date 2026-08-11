@@ -835,9 +835,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await WidgetsBinding.instance.endOfFrame;
         if (serial != _playAtSerial || !mounted) return;
         try {
-          final timeout = _backend == KotvEmbedBackend.mpv
-              ? const Duration(seconds: 55)
-              : const Duration(seconds: 30);
+          final timeout = const Duration(seconds: 70);
           await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null).timeout(timeout);
           try {
             await _playback.play();
