@@ -18,6 +18,7 @@ import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/mpv_opts.dart';
 import '../player/play_headers.dart';
+import '../player/playback_failover.dart';
 import '../player/vp_playback.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
@@ -76,6 +77,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   String _status = '选择剧集开始播放';
   String _playUrl = '';
   String _decodeMode = 'auto';
+  /// 设置/用户所选解码；failover 临时翻转只改 [_decodeMode]。
+  String _prefDecodeMode = 'auto';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   bool _danmakuOn = false;
   bool _ambientOn = false;
@@ -86,6 +89,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   int _openingSec = 0;
   int _endingSec = 0;
   String _playerVal = kotvDefaultVodPlayer();
+  /// 设置/用户所选播放器；failover 临时切换只改 [_playerVal]。
+  String _prefPlayerVal = kotvDefaultVodPlayer();
   bool _miniDesktop = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
@@ -505,7 +510,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final st = await ref.read(apiProvider).getSettings();
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
         final decode = '${settings['playerDecode'] ?? 'auto'}';
-        if (decode.isNotEmpty) _decodeMode = decode;
+        if (decode.isNotEmpty) {
+          _decodeMode = decode;
+          _prefDecodeMode = decode;
+        }
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
@@ -518,6 +526,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           playerVal = kotvDefaultVodPlayer();
         }
         _playerVal = kotvClampPlayerVal(playerVal, live: false);
+        _prefPlayerVal = _playerVal;
         // 绝不在进详情时创建 Player：libmpv 初始化 + VideoController 附着会卡死 UI / 手机闪退。
         // 音量/倍速等偏好先记下，真正 [_playAt] open 后再套。
         _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
@@ -781,54 +790,92 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         remarks: ep.name,
       ));
       // 对齐 TV：有 DRM 强制 Exo（MPV/FVP 不解 Widevine）
-      if (hasDrm && _backend != KotvEmbedBackend.exo && kotvIsAndroid()) {
-        setState(() => _playerVal = 'innie#exo');
-        await _stopInactiveBackends(KotvEmbedBackend.exo);
-      } else {
+      final startPlayer = (hasDrm && kotvIsAndroid())
+          ? 'innie#exo'
+          : _prefPlayerVal;
+      final failover = KotvPlaybackFailover(
+        playerVal: startPlayer,
+        decodeMode: _prefDecodeMode,
+        lockExoForDrm: hasDrm && kotvIsAndroid(),
+      );
+      Object? lastOpenError;
+      var opened = false;
+      for (var attempt = 0; attempt < 8; attempt++) {
+        if (serial != _playAtSerial || !mounted) return;
+        failover.markAttempt();
+        _playerVal = failover.playerVal;
+        _decodeMode = failover.decodeMode;
         await _stopInactiveBackends(_backend);
-      }
-      if (serial != _playAtSerial || !mounted) return;
-      final pb = _playback;
-      await pb.setDecodeMode(_decodeMode);
-      // Exo：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
-      var openUrl = playUrl;
-      Map<String, String>? openHeaders = headers.isEmpty ? null : headers;
-      if (_backend == KotvEmbedBackend.exo || hasDrm) {
-        final cached = playUrl.contains('/proxy/cached_m3u8');
-        final proxied = playUrl.contains('/proxy/play');
-        if (!cached &&
-            !magnet &&
-            mediaUrl.startsWith('http') &&
-            headers.isNotEmpty) {
-          openUrl = mediaUrl;
-          openHeaders = headers;
-        } else if (cached || proxied) {
-          openHeaders = null;
+        if (serial != _playAtSerial || !mounted) return;
+        final pb = _playback;
+        await pb.setDecodeMode(failover.decodeMode);
+        // Exo：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
+        var openUrl = playUrl;
+        Map<String, String>? openHeaders = headers.isEmpty ? null : headers;
+        if (_backend == KotvEmbedBackend.exo || hasDrm) {
+          final cached = playUrl.contains('/proxy/cached_m3u8');
+          final proxied = playUrl.contains('/proxy/play');
+          if (!cached &&
+              !magnet &&
+              mediaUrl.startsWith('http') &&
+              headers.isNotEmpty) {
+            openUrl = mediaUrl;
+            openHeaders = headers;
+          } else if (cached || proxied) {
+            openHeaders = null;
+          }
         }
+        // 先挂播放器视图再 open（Texture / 平台视图需进树）。
+        setState(() {
+          _playUrl = playUrl;
+          _playerVal = failover.playerVal;
+          _decodeMode = failover.decodeMode;
+          _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
+        });
+        await WidgetsBinding.instance.endOfFrame;
+        if (serial != _playAtSerial || !mounted) return;
+        try {
+          final timeout = _backend == KotvEmbedBackend.mpv
+              ? const Duration(seconds: 55)
+              : const Duration(seconds: 30);
+          await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null).timeout(timeout);
+          try {
+            await _playback.play();
+          } catch (_) {}
+          opened = true;
+          break;
+        } on KotvSilentVideoException catch (e) {
+          lastOpenError = e;
+        } on TimeoutException catch (e) {
+          lastOpenError = e;
+        }
+        final step = failover.nextStep();
+        if (step == null) break;
+        if (!mounted || serial != _playAtSerial) return;
+        setState(() {
+          _playerVal = step.playerVal;
+          _decodeMode = step.decodeMode;
+          _status = step.status;
+        });
+        try {
+          await pb.stop();
+        } catch (_) {}
       }
-      // 先挂播放器视图再 open（Texture / 平台视图需进树）。
-      setState(() {
-        _playUrl = playUrl;
-        _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
-      });
-      await WidgetsBinding.instance.endOfFrame;
-      if (serial != _playAtSerial || !mounted) return;
-      await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
-      try {
-        await _playback.play();
-      } catch (_) {}
+      if (!opened) {
+        throw lastOpenError ?? const KotvSilentVideoException();
+      }
       if (serial != _playAtSerial || !mounted) return;
       // 起播后再套偏好：loudnorm 在 open 前同步套极易卡死主线程。
       final speed = _prefSpeed;
       if (speed != null && speed > 0) {
         try {
-          await pb.setRate(speed);
+          await _playback.setRate(speed);
         } catch (_) {}
       }
       final vol = _prefVolume;
       if (vol != null) {
         try {
-          await pb.setVolume(vol.clamp(0, 100));
+          await _playback.setVolume(vol.clamp(0, 100));
         } catch (_) {}
       }
       if (_stableVolumeOn) {
@@ -877,7 +924,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 折叠「播放失败: 解析失败: 解析失败: …」这类层层包装。
   String _friendlyPlayError(Object e) {
     if (e is KotvSilentVideoException) {
-      return '播放失败: MPV 无画面（可在设置中改用 FVP/Exo）';
+      return '播放失败: 无画面（已尝试可用播放器）';
     }
     var s = '$e';
     s = s.replaceFirst(RegExp(r'^(Exception|KotvApiException):\s*'), '');
@@ -950,7 +997,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           onNext: () => _playAt(_epIdx + 1),
           onPrev: () => _playAt(_epIdx - 1),
           onDecodeChanged: (mode) {
-            if (mounted) setState(() => _decodeMode = mode);
+            if (mounted) {
+              setState(() {
+                _decodeMode = mode;
+                _prefDecodeMode = mode;
+              });
+            }
           },
           onPersistSetting: (k, v) async {
             await api.setSetting(k, v);
@@ -967,7 +1019,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             if (k == 'player') {
               final prev = _playerVal;
               final next = kotvClampPlayerVal(v, live: false);
-              setState(() => _playerVal = next);
+              setState(() {
+                _playerVal = next;
+                _prefPlayerVal = next;
+              });
               if (next != prev && _epIdx >= 0) {
                 Navigator.of(context).maybePop();
                 unawaited(_playAt(_epIdx));

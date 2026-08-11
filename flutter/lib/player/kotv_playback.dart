@@ -9,6 +9,7 @@ import 'keep_awake.dart';
 import 'kotv_platform.dart';
 import 'mpv_opts.dart';
 import 'play_headers.dart';
+import 'silent_video_guard.dart';
 
 /// 统一播放后端：MPV(media_kit) 共用同一套菜单/控件。
 abstract class KotvPlayback extends ChangeNotifier {
@@ -162,9 +163,9 @@ bool kotvAudioIsAuto(String? id) {
   return id.toLowerCase().trim() == 'auto';
 }
 
-/// MPV 有声无画（硬软解均可能）：选轨/解码失败。
+/// MPV / FVP / Exo 开播后长时间无视频尺寸（有声无画或 Texture 0×0）。
 class KotvSilentVideoException implements Exception {
-  const KotvSilentVideoException([this.message = 'MPV 有声无画面']);
+  const KotvSilentVideoException([this.message = '播放器无画面']);
   final String message;
   @override
   String toString() => message;
@@ -428,40 +429,20 @@ class MediaKitPlayback extends KotvPlayback {
       });
   }
 
-  /// 开播后若长时间无画面尺寸：重选视频轨 / 强制 lavc；仍无画面则抛 [KotvSilentVideoException]。
+  /// 开播后若长时间无画面尺寸：重选视频轨；仍无画面则抛 [KotvSilentVideoException]。
+  /// 不在此改硬/软解（交给 [KotvPlaybackFailover]）。
   Future<void> _guardSilentVideo() async {
-    for (var i = 0; i < 25; i++) {
-      if (_videoVisible) return;
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    }
-    if (_videoVisible) return;
-
-    await _reselectVideoTracks();
-    for (var i = 0; i < 15; i++) {
-      if (_videoVisible) return;
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    }
-    if (_videoVisible) return;
-
-    // 再试：软解 lavc（部分源硬解「成功」但 Texture 无帧，软解开关未触发重开时也黑）
-    try {
-      await (player.platform as dynamic).setProperty('hwdec', 'no');
-      await (player.platform as dynamic).setProperty('vd', 'lavc');
-      await player.setVideoTrack(VideoTrack.auto());
-    } catch (_) {}
-    for (var i = 0; i < 10; i++) {
-      if (_videoVisible) return;
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    }
-    if (_videoVisible) return;
-
-    final alive = player.state.playing ||
-        player.state.buffering ||
-        player.state.position > Duration.zero ||
-        player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack(t.id));
-    if (alive) {
-      throw const KotvSilentVideoException();
-    }
+    await kotvGuardSilentVideo(
+      hasVideoSize: () => _videoVisible,
+      sessionAlive: () =>
+          player.state.playing ||
+          player.state.buffering ||
+          player.state.position > Duration.zero ||
+          player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack(t.id)),
+      waitTicks: 25,
+      afterHookTicks: 15,
+      onStillInvisible: _reselectVideoTracks,
+    );
   }
 
   Future<void> _reselectVideoTracks() async {

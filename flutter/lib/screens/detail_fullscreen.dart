@@ -384,12 +384,13 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                       if (_showChrome) _bumpChrome();
                     },
                     onDoubleTap: () => Navigator.of(context).maybePop(),
-                    onVerticalDragStart: (_) => _dragDy = 0,
-                    onVerticalDragUpdate: (d) {
-                      if (_epOpen) return;
-                      _dragDy += d.delta.dy;
-                    },
-                    onVerticalDragEnd: _onVerticalDragEnd,
+                    onVerticalDragStart: _epOpen ? null : (_) => _dragDy = 0,
+                    onVerticalDragUpdate: _epOpen
+                        ? null
+                        : (d) {
+                            _dragDy += d.delta.dy;
+                          },
+                    onVerticalDragEnd: _epOpen ? null : _onVerticalDragEnd,
                     child: _buildVideo(),
                   ),
                   DanmakuOverlay(

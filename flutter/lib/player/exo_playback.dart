@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
+import 'silent_video_guard.dart';
 
 /// Android ExoPlayer：Media3 + OkHttp（对齐 TV），DRM；硬解 MediaCodec→Surface 直出。
 class ExoPlayback extends KotvPlayback {
@@ -196,6 +197,19 @@ class ExoPlayback extends KotvPlayback {
         throw StateError('Exo 无法播放该地址（$_lastError）。可换线路或改用其它播放器');
       }
       await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    if (!_ready) {
+      throw const KotvSilentVideoException('Exo 未就绪');
+    }
+    await kotvGuardSilentVideo(
+      hasVideoSize: () => _w > 0 && _h > 0,
+      sessionAlive: () {
+        if (_lastError != null) return false;
+        return _playing || _buffering || _position > Duration.zero || _ready;
+      },
+    );
+    if (_lastError != null) {
+      throw StateError('Exo 无法播放该地址（$_lastError）。可换线路或改用其它播放器');
     }
     notifyListeners();
   }

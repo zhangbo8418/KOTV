@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 
 import 'kotv_playback.dart';
 import 'play_headers.dart';
+import 'silent_video_guard.dart';
 
 /// 非 Web：用 [VideoPlayerController]（桌面/移动若选 html 时的兜底）。
 class HtmlPlayback extends KotvPlayback {
@@ -125,6 +126,18 @@ class HtmlPlayback extends KotvPlayback {
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
       await c.play();
+      await kotvGuardSilentVideo(
+        hasVideoSize: () {
+          if (!identical(_c, c)) return true;
+          final v = c.value;
+          return v.isInitialized && v.size.width > 0 && v.size.height > 0;
+        },
+        sessionAlive: () {
+          if (!identical(_c, c)) return false;
+          final v = c.value;
+          return v.isPlaying || v.isBuffering || v.position > Duration.zero || _opening;
+        },
+      );
       _opening = false;
       notifyListeners();
     } catch (e) {

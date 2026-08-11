@@ -70,6 +70,85 @@ func (d EpgData) Range() string {
 	return "clock=" + fmtUTC(d.StartTime) + "-" + fmtUTC(end)
 }
 
+// SplitEpgURLs 对齐 TV Live.getEpgApi / getEpgXml：逗号拆分模板 API 与 XMLTV 文件。
+func SplitEpgURLs(epg string) (apiTemplate string, xmlURLs []string) {
+	for _, part := range strings.Split(epg, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.Contains(part, "{") {
+			if apiTemplate == "" {
+				apiTemplate = part
+			}
+			continue
+		}
+		low := strings.ToLower(part)
+		if strings.Contains(low, "xml") || strings.HasSuffix(low, ".gz") || strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") {
+			xmlURLs = append(xmlURLs, part)
+		}
+	}
+	return apiTemplate, xmlURLs
+}
+
+// ChannelEPGSource 频道级或源级 EPG 原始串。
+func ChannelEPGSource(ch *model.LiveChannel) string {
+	if ch == nil {
+		return ""
+	}
+	if strings.TrimSpace(ch.EPG) != "" {
+		return strings.TrimSpace(ch.EPG)
+	}
+	if ch.Live != nil {
+		return strings.TrimSpace(ch.Live.EPG)
+	}
+	return ""
+}
+
+// LoadChannelDays 按 TV 策略拉节目单：先模板 API，再 XMLTV。
+func LoadChannelDays(ch *model.LiveChannel) []Epg {
+	if ch == nil {
+		return nil
+	}
+	src := ChannelEPGSource(ch)
+	api, xmls := SplitEpgURLs(src)
+	if api != "" {
+		saved := ch.EPG
+		ch.EPG = api
+		out := LoadChannelEPG(ch)
+		ch.EPG = saved
+		if len(out) > 0 {
+			return out
+		}
+	}
+	for _, u := range xmls {
+		days, logo, err := LoadXMLTVDays(u, ch)
+		if err != nil || len(days) == 0 {
+			continue
+		}
+		if logo != "" && !hasHTTPLogo(ch.Logo) {
+			ch.Logo = logo
+		}
+		return days
+	}
+	// 兼容：整串无逗号且非模板时仍当 XMLTV。
+	if api == "" && len(xmls) == 0 && src != "" && !strings.Contains(src, "{") {
+		days, logo, err := LoadXMLTVDays(src, ch)
+		if err == nil && len(days) > 0 {
+			if logo != "" && !hasHTTPLogo(ch.Logo) {
+				ch.Logo = logo
+			}
+			return days
+		}
+	}
+	return nil
+}
+
+func hasHTTPLogo(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "data:")
+}
+
 // LoadChannelEPG 按模板拉取昨/今/明节目单。
 func LoadChannelEPG(ch *model.LiveChannel) []Epg {
 	if ch == nil {
@@ -78,6 +157,10 @@ func LoadChannelEPG(ch *model.LiveChannel) []Epg {
 	template := ch.EPG
 	if template == "" && ch.Live != nil {
 		template = ch.Live.EPG
+	}
+	api, _ := SplitEpgURLs(template)
+	if api != "" {
+		template = api
 	}
 	if template == "" || !strings.Contains(template, "{") {
 		return nil
@@ -142,6 +225,21 @@ func ParseEPG(text, key, date string) Epg {
 			return epg
 		}
 	}
+	// 简易 XML programme 片段（对齐 TV EpgParser.getEpg）
+	if strings.Contains(text, "<programme") || strings.Contains(text, "<tv") {
+		if days, _, err := matchXMLTVDays([]byte(text), &model.LiveChannel{TvgID: key, Name: key}, date); err == nil {
+			for _, d := range days {
+				if d.Date == date || date == "" {
+					d.Key = key
+					return d
+				}
+			}
+			if len(days) > 0 {
+				days[0].Key = key
+				return days[0]
+			}
+		}
+	}
 	return Epg{Key: key, Date: date}
 }
 
@@ -191,10 +289,10 @@ func parseEpgTime(source string) int64 {
 	return 0
 }
 
-// LoadXMLTV 下载并缓存 XMLTV，按频道 id/name 匹配节目。
-func LoadXMLTV(epgURL string, ch *model.LiveChannel) ([]EpgData, error) {
+// LoadXMLTVDays 下载 XMLTV，返回昨/今/明分桶，并尝试从 <icon> 回填 logo。
+func LoadXMLTVDays(epgURL string, ch *model.LiveChannel) ([]Epg, string, error) {
 	if epgURL == "" || ch == nil || strings.Contains(epgURL, "{") {
-		return nil, nil
+		return nil, "", nil
 	}
 	cacheDir := paths.EpgCache()
 	cacheFile := filepath.Join(cacheDir, util.MD5(epgURL)+".xml")
@@ -207,7 +305,7 @@ func LoadXMLTV(epgURL string, ch *model.LiveChannel) ([]EpgData, error) {
 	if needFetch {
 		body, err := util.HTTPGetBytes(epgURL, nil)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if strings.HasSuffix(strings.ToLower(epgURL), ".gz") || isGzip(body) {
 			gr, err := gzip.NewReader(bytes.NewReader(body))
@@ -221,9 +319,9 @@ func LoadXMLTV(epgURL string, ch *model.LiveChannel) ([]EpgData, error) {
 	}
 	data, err := os.ReadFile(cacheFile)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return matchXMLTV(data, ch)
+	return matchXMLTVDays(data, ch, "")
 }
 
 func isGzip(b []byte) bool {
@@ -231,7 +329,18 @@ func isGzip(b []byte) bool {
 }
 
 type xmltv struct {
+	Channels   []xmlChannel   `xml:"channel"`
 	Programmes []xmlProgramme `xml:"programme"`
+}
+
+type xmlChannel struct {
+	ID           string   `xml:"id,attr"`
+	DisplayNames []string `xml:"display-name"`
+	Icon         xmlIcon  `xml:"icon"`
+}
+
+type xmlIcon struct {
+	Src string `xml:"src,attr"`
 }
 
 type xmlProgramme struct {
@@ -241,39 +350,80 @@ type xmlProgramme struct {
 	Title   string `xml:"title"`
 }
 
-func matchXMLTV(data []byte, ch *model.LiveChannel) ([]EpgData, error) {
+func matchXMLTVDays(data []byte, ch *model.LiveChannel, preferDate string) ([]Epg, string, error) {
 	var doc xmltv
 	if err := xml.Unmarshal(data, &doc); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	ids := map[string]bool{}
 	for _, id := range []string{ch.TvgID, ch.TvgName, ch.Name} {
 		if id != "" {
-			ids[strings.ToLower(id)] = true
+			ids[strings.ToLower(strings.TrimSpace(id))] = true
 		}
 	}
-	var out []EpgData
-	now := time.Now()
-	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
-	dayEnd := dayStart.Add(24 * time.Hour)
+	// display-name → channel id 桥接（对齐 TV findTargetChannel）
+	logo := ""
+	for _, c := range doc.Channels {
+		cid := strings.ToLower(strings.TrimSpace(c.ID))
+		hit := ids[cid]
+		if !hit {
+			for _, dn := range c.DisplayNames {
+				if ids[strings.ToLower(strings.TrimSpace(dn))] {
+					hit = true
+					break
+				}
+			}
+		}
+		if hit {
+			ids[cid] = true
+			if logo == "" && strings.TrimSpace(c.Icon.Src) != "" {
+				logo = strings.TrimSpace(c.Icon.Src)
+			}
+		}
+	}
+
+	byDay := map[string][]EpgData{}
+	zone := time.Local
+	now := time.Now().In(zone)
+	minDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone).AddDate(0, 0, -1)
+	maxDay := minDay.Add(3 * 24 * time.Hour)
 	for _, p := range doc.Programmes {
-		if !ids[strings.ToLower(p.Channel)] {
+		if !ids[strings.ToLower(strings.TrimSpace(p.Channel))] {
 			continue
 		}
- st := parseXMLTVTime(p.Start)
- et := parseXMLTVTime(p.Stop)
-		if et.Before(dayStart) || st.After(dayEnd) {
+		st := parseXMLTVTime(p.Start)
+		et := parseXMLTVTime(p.Stop)
+		if st.IsZero() {
 			continue
 		}
-		out = append(out, EpgData{
+		if et.Before(minDay) || st.After(maxDay) {
+			continue
+		}
+		date := st.In(zone).Format("2006-01-02")
+		if preferDate != "" && date != preferDate {
+			continue
+		}
+		byDay[date] = append(byDay[date], EpgData{
 			Title:     p.Title,
-			Start:     st.Format("15:04"),
-			End:       et.Format("15:04"),
+			Start:     st.In(zone).Format("15:04"),
+			End:       et.In(zone).Format("15:04"),
 			StartTime: st.UnixMilli(),
 			EndTime:   et.UnixMilli(),
 		})
 	}
-	return out, nil
+	var out []Epg
+	for _, offset := range []int{-1, 0, 1} {
+		date := now.AddDate(0, 0, offset).Format("2006-01-02")
+		if list := byDay[date]; len(list) > 0 {
+			out = append(out, Epg{Key: ch.TvgID, Date: date, List: list})
+		}
+	}
+	if len(out) == 0 {
+		for date, list := range byDay {
+			out = append(out, Epg{Key: ch.TvgID, Date: date, List: list})
+		}
+	}
+	return out, logo, nil
 }
 
 func parseXMLTVTime(s string) time.Time {

@@ -7,6 +7,7 @@ import 'package:web/web.dart' as web;
 
 import 'kotv_playback.dart';
 import 'play_headers.dart';
+import 'silent_video_guard.dart';
 
 @JS('kotvHls')
 external KotvHlsApi get _kotvHls;
@@ -164,6 +165,17 @@ class HtmlPlayback extends KotvPlayback {
     } catch (_) {
       // 自动播放策略可能拒绝；等用户点播放
     }
+    await kotvGuardSilentVideo(
+      hasVideoSize: () => _video.videoWidth > 0 && _video.videoHeight > 0,
+      sessionAlive: () =>
+          !_video.paused ||
+          _buffering ||
+          (_video.currentTime > 0) ||
+          _opened,
+    );
+    _width = _video.videoWidth;
+    _height = _video.videoHeight;
+    _buffering = false;
     notifyListeners();
   }
 

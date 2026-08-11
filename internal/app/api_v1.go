@@ -1135,11 +1135,14 @@ func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
 	groups := make([]map[string]any, 0, len(loaded.Groups))
 	for gi, g := range loaded.Groups {
 		chs := make([]map[string]any, 0, len(g.Channels))
-		for ci, ch := range g.Channels {
+		for ci := range g.Channels {
+			ch := &loaded.Groups[gi].Channels[ci]
+			ch.ApplyLive(loaded)
 			chs = append(chs, map[string]any{
 				"index": ci,
 				"name":  ch.Name,
-				"logo":  ch.Logo,
+				"logo":  ch.ResolvedLogo(),
+				"tvgId": ch.TvgID,
 				"urls":  len(ch.URLs),
 				"line":  ch.URLIndex,
 			})
@@ -1237,12 +1240,7 @@ func (a *App) APILiveEPG(group, channel int) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	epgs := live.LoadChannelEPG(ch)
-	if len(epgs) == 0 && ch.Live != nil && strings.TrimSpace(ch.Live.EPG) != "" && !strings.Contains(ch.Live.EPG, "{") {
-		if list, e := live.LoadXMLTV(ch.Live.EPG, ch); e == nil && len(list) > 0 {
-			epgs = []live.Epg{{Date: "", List: list}}
-		}
-	}
+	epgs := live.LoadChannelDays(ch)
 	days := make([]map[string]any, 0, len(epgs))
 	for di, day := range epgs {
 		progs := make([]map[string]any, 0, len(day.List))
@@ -1268,6 +1266,7 @@ func (a *App) APILiveEPG(group, channel int) (map[string]any, error) {
 	return map[string]any{
 		"ok":   true,
 		"name": ch.Name,
+		"logo": ch.ResolvedLogo(),
 		"days": days,
 	}, nil
 }
@@ -1277,7 +1276,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
-	epgs := live.LoadChannelEPG(ch)
+	epgs := live.LoadChannelDays(ch)
 	if day < 0 || day >= len(epgs) {
 		return nil, fmt.Errorf("节目日期无效")
 	}

@@ -18,6 +18,7 @@ import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/mpv_opts.dart';
 import '../player/play_headers.dart';
+import '../player/playback_failover.dart';
 import '../player/vp_playback.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
@@ -162,8 +163,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _status = '点击左侧换台 · 点击右侧换源/设置';
   String _title = '选择频道开始播放';
   String _decodeMode = 'auto';
+  String _prefDecodeMode = 'auto';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   String _playerVal = kotvDefaultLivePlayer();
+  String _prefPlayerVal = kotvDefaultLivePlayer();
   int _playSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
@@ -236,13 +239,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         if (!mounted) return;
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
         final decode = '${settings['playerDecode'] ?? 'auto'}'.trim();
-        if (decode.isNotEmpty) _decodeMode = decode;
+        if (decode.isNotEmpty) {
+          _decodeMode = decode;
+          _prefDecodeMode = decode;
+        }
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
         var playerVal = '${settings['playerLive'] ?? ''}'.trim();
         if (playerVal.isEmpty) {
           playerVal = kotvDefaultLivePlayer();
         }
         _playerVal = kotvClampPlayerVal(playerVal, live: true);
+        _prefPlayerVal = _playerVal;
         final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
         if (vol != null) {
           await _playback.setVolume(vol.clamp(0, 100));
@@ -489,11 +496,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       final progs = days.isEmpty
           ? <Map<String, dynamic>>[]
           : (((days[dayIdx]['list'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList());
+      final logo = '${data['logo'] ?? ''}'.trim();
       if (!mounted) return;
       setState(() {
         _epgDays = days;
         _dayIdx = dayIdx;
         _programs = progs;
+        // XMLTV <icon> 回填：列表里原先无 logo 时补上。
+        if (logo.isNotEmpty && _chIdx >= 0 && _chIdx < _channels.length) {
+          final cur = '${_channels[_chIdx]['logo'] ?? ''}'.trim();
+          if (cur.isEmpty) {
+            _channels[_chIdx] = Map<String, dynamic>.from(_channels[_chIdx])..['logo'] = logo;
+          }
+        }
       });
     } catch (_) {
       if (mounted) {
@@ -506,46 +521,64 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _openLiveUrl(String url, {Map<String, String>? headers}) async {
-    await _playback.setDecodeMode(_decodeMode);
-    await _stopInactiveBackends(_backend);
-    if (mounted) {
-      setState(() {
+    final failover = KotvPlaybackFailover(
+      playerVal: _prefPlayerVal,
+      decodeMode: _prefDecodeMode,
+    );
+    Object? lastError;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      failover.markAttempt();
+      _playerVal = failover.playerVal;
+      _decodeMode = failover.decodeMode;
+      await _stopInactiveBackends(_backend);
+      if (mounted) {
+        setState(() {
+          _playUrl = url;
+          _playHeaders = headers;
+          _playerVal = failover.playerVal;
+          _decodeMode = failover.decodeMode;
+        });
+        await WidgetsBinding.instance.endOfFrame;
+      } else {
         _playUrl = url;
         _playHeaders = headers;
-      });
-      await WidgetsBinding.instance.endOfFrame;
-    } else {
-      _playUrl = url;
-      _playHeaders = headers;
-    }
-    if (_backend == KotvEmbedBackend.mpv) {
-      final mk = _ensureMpv();
-      try {
-        await mk.open(url, headers: headers).timeout(const Duration(seconds: 20));
-      } on TimeoutException {
-        // 硬解卡死时 Future 往往醒不来；若能超时到这里，桌面先软解重试一次。
-        if (kotvIsDesktop() && _decodeMode != 'soft') {
-          try {
-            await mk.setDecodeMode('soft');
-            await mk.open(url, headers: headers).timeout(const Duration(seconds: 12));
-            if (mounted) {
-              setState(() => _status = 'MPV 硬解超时，已改软解');
-            }
-            return;
-          } on TimeoutException {
-            // 软解也超时则仍抛出原超时
-          }
-        }
-        rethrow;
       }
-    } else {
       final pb = _playback;
-      await pb.setDecodeMode(_decodeMode);
-      await pb.open(url, headers: headers).timeout(const Duration(seconds: 25));
+      await pb.setDecodeMode(failover.decodeMode);
+      final timeout = _backend == KotvEmbedBackend.mpv
+          ? const Duration(seconds: 55)
+          : const Duration(seconds: 25);
       try {
-        await pb.play();
+        await pb.open(url, headers: headers).timeout(timeout);
+        if (_backend != KotvEmbedBackend.mpv) {
+          try {
+            await pb.play();
+          } catch (_) {}
+        }
+        return;
+      } on KotvSilentVideoException catch (e) {
+        lastError = e;
+      } on TimeoutException catch (e) {
+        lastError = e;
+      }
+      final step = failover.nextStep();
+      if (step == null) break;
+      if (mounted) {
+        setState(() {
+          _playerVal = step.playerVal;
+          _decodeMode = step.decodeMode;
+          _status = step.status;
+        });
+      } else {
+        _playerVal = step.playerVal;
+        _decodeMode = step.decodeMode;
+      }
+      try {
+        await pb.stop();
       } catch (_) {}
     }
+    if (lastError != null) throw lastError;
+    throw const KotvSilentVideoException();
   }
 
   Widget _liveVideo() {
@@ -803,7 +836,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       ('硬解码', 'hard'),
     ]);
     if (v == null) return;
-    setState(() => _decodeMode = v);
+    setState(() {
+      _decodeMode = v;
+      _prefDecodeMode = v;
+    });
     await _playback.setDecodeMode(v);
     try {
       await ref.read(apiProvider).setSetting('playerDecode', v);
@@ -817,10 +853,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   Future<void> _pickPlayer() async {
     final options = kotvLivePlayerOptions();
-    final v = await pickChoice(context, title: '直播播放器', current: _playerVal, options: options);
+    final v = await pickChoice(context, title: '直播播放器', current: _prefPlayerVal, options: options);
     if (v == null) return;
-    final prev = _playerVal;
-    setState(() => _playerVal = v);
+    final prev = _prefPlayerVal;
+    setState(() {
+      _playerVal = v;
+      _prefPlayerVal = v;
+    });
     try {
       await ref.read(apiProvider).setSetting('playerLive', v);
     } catch (_) {}

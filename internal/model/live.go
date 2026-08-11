@@ -159,7 +159,7 @@ func (c *LiveChannel) ApplyLive(live *Live) {
 	if c.Origin == "" && live.Origin != "" {
 		c.Origin = live.Origin
 	}
-	if c.EPG == "" && containsBrace(live.EPG) {
+	if c.EPG == "" && live.EPG != "" {
 		c.EPG = live.EPG
 	}
 	if len(c.Header) == 0 && len(live.Header) > 0 {

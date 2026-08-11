@@ -9,6 +9,7 @@ import 'buffer_budget.dart';
 import 'fvp_decoders.dart';
 import 'kotv_playback.dart';
 import 'play_headers.dart';
+import 'silent_video_guard.dart';
 
 /// 页内 FVP（libmdk）：经 [video_player] + fvp 插件。
 ///
@@ -223,11 +224,36 @@ class FvpPlayback extends KotvPlayback {
         _opening = false;
       }
       notifyListeners();
+      await _guardSilentVideo(c);
     } catch (e) {
       _lastError = '$e';
       _opening = false;
       notifyListeners();
       rethrow;
+    }
+  }
+
+  /// 开播后短等出尺寸；仍无画面且会话存活则抛 [KotvSilentVideoException]。
+  Future<void> _guardSilentVideo(VideoPlayerController c) async {
+    await kotvGuardSilentVideo(
+      hasVideoSize: () {
+        if (!identical(_c, c)) return true;
+        final v = c.value;
+        return v.isInitialized && v.size.width > 0 && v.size.height > 0;
+      },
+      sessionAlive: () {
+        if (!identical(_c, c)) return false;
+        final v = c.value;
+        if (v.hasError) return false;
+        return v.isPlaying || v.isBuffering || v.position > Duration.zero || _opening;
+      },
+    );
+    if (identical(_c, c) && c.value.hasError) {
+      throw StateError(c.value.errorDescription ?? _lastError ?? 'FVP 播放错误');
+    }
+    if (identical(_c, c)) {
+      _opening = false;
+      notifyListeners();
     }
   }
 

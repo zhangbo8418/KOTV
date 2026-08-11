@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../player/kotv_playback.dart';
@@ -386,6 +387,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   Timer? _epHideTimer;
   StreamSubscription<Duration>? _skipSub;
   DateTime _now = DateTime.now();
+  final ScrollController _epScroll = ScrollController();
+  static const double _epItemExtent = 52;
 
   @override
   void initState() {
@@ -442,6 +445,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     if (oldWidget.epIdx != widget.epIdx) {
       _endingSkipFired = false;
       _openingSeekDone = false;
+      if (_epOpen) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollEpIntoView());
+      }
     }
   }
 
@@ -451,6 +457,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     _epHideTimer?.cancel();
     _sleepTimer?.cancel();
     _skipSub?.cancel();
+    _epScroll.dispose();
     super.dispose();
   }
 
@@ -459,11 +466,20 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   void openEpisodes() {
     _epHideTimer?.cancel();
     setState(() => _epOpen = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollEpIntoView());
   }
 
   void closeEpisodes() {
     _epHideTimer?.cancel();
     setState(() => _epOpen = false);
+  }
+
+  void _scrollEpIntoView() {
+    final i = widget.epIdx;
+    if (i < 0 || !_epScroll.hasClients) return;
+    final pos = _epScroll.position;
+    final target = (i * _epItemExtent).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    _epScroll.jumpTo(target);
   }
 
   Future<void> _refreshPlayerLabel() async {
@@ -1549,37 +1565,54 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                       ),
                       const Divider(height: 1, color: Color(0x44FFFFFF)),
                       Expanded(
-                        child: ListView.builder(
-                          padding: const EdgeInsets.all(12),
-                          itemCount: widget.episodes.length,
-                          itemBuilder: (_, i) {
-                            final sel = i == widget.epIdx;
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Material(
-                                color: sel ? const Color(0x2EFFFFFF) : const Color(0x3318161E),
-                                borderRadius: BorderRadius.circular(8),
-                                child: InkWell(
+                        child: Listener(
+                          onPointerSignal: (e) {
+                            if (e is! PointerScrollEvent || !_epScroll.hasClients) return;
+                            final pos = _epScroll.position;
+                            _epScroll.jumpTo(
+                              (_epScroll.offset + e.scrollDelta.dy)
+                                  .clamp(pos.minScrollExtent, pos.maxScrollExtent),
+                            );
+                          },
+                          child: ListView.builder(
+                            controller: _epScroll,
+                            itemExtent: _epItemExtent,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            itemCount: widget.episodes.length,
+                            itemBuilder: (_, i) {
+                              final sel = i == widget.epIdx;
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Material(
+                                  color: sel ? const Color(0x2EFFFFFF) : const Color(0x3318161E),
                                   borderRadius: BorderRadius.circular(8),
-                                  onTap: () {
-                                    widget.onSelectEp?.call(i);
-                                    closeEpisodes();
-                                  },
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                    child: Text(
-                                      widget.episodes[i],
-                                      style: TextStyle(
-                                        color: Colors.white.withOpacity(sel ? 1 : 0.85),
-                                        fontSize: 14,
-                                        fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(8),
+                                    onTap: () {
+                                      widget.onSelectEp?.call(i);
+                                      closeEpisodes();
+                                    },
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                                        child: Text(
+                                          widget.episodes[i],
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(sel ? 1 : 0.85),
+                                            fontSize: 14,
+                                            fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            );
-                          },
+                              );
+                            },
+                          ),
                         ),
                       ),
                     ],
