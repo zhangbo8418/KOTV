@@ -29,6 +29,19 @@ void main() {
     expect(sw.elapsedMilliseconds, lessThan(3000));
   });
 
+  test('audio-only succeeds without video size', () async {
+    await kotvGuardSilentVideo(
+      hasVideoSize: () => false,
+      isBuffering: () => false,
+      sessionAlive: () => true,
+      isAudioOnly: () => true,
+      hasVideoSource: () => false,
+      blackScreenTimeout: const Duration(milliseconds: 50),
+      bufferingTimeout: const Duration(seconds: 1),
+      tick: const Duration(milliseconds: 20),
+    );
+  });
+
   test('missing video source throws after sourceFixTimeout', () async {
     var threw = false;
     String? msg;

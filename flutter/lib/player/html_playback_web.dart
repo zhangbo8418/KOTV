@@ -170,6 +170,7 @@ class HtmlPlayback extends KotvPlayback {
       isBuffering: () => _buffering || _video.readyState < 3,
       sessionAlive: () => !_video.paused || (_video.currentTime > 0) || _opened,
       hasVideoSource: () => hasVideoSourceHint,
+      isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
     );
     _width = _video.videoWidth;
@@ -180,8 +181,14 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   bool get hasVideoSourceHint {
-    // HAVE_METADATA=1 起认为有视频描述；纯音频源会一直无宽高，靠守卫黑屏窗口收口。
     return _video.readyState >= 1 || _video.videoWidth > 0;
+  }
+
+  @override
+  bool get isAudioOnlyContent {
+    if (_buffering || _video.readyState < 2) return false;
+    if (_video.videoWidth > 0 && _video.videoHeight > 0) return false;
+    return !_video.paused || _video.currentTime > 0.5;
   }
 
   @override

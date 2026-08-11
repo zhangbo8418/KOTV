@@ -200,6 +200,7 @@ class ExoPlayback extends KotvPlayback {
         return _ready || _playing || _position > Duration.zero;
       },
       hasVideoSource: () => hasVideoSourceHint,
+      isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
     );
     if (_lastError != null) {
@@ -214,8 +215,14 @@ class ExoPlayback extends KotvPlayback {
   @override
   bool get hasVideoSourceHint {
     if (_lastError != null) return false;
-    // READY 或已有尺寸/进度，视为源已挂上。
     return _ready || _w > 0 || _position > Duration.zero || _playing;
+  }
+
+  @override
+  bool get isAudioOnlyContent {
+    if (_lastError != null || _buffering || !_ready) return false;
+    if (_w > 0 && _h > 0) return false;
+    return _playing || _position > const Duration(milliseconds: 500);
   }
 
   @override

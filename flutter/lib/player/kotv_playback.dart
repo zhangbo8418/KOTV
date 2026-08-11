@@ -53,6 +53,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 是否认为已挂上可用视频源（轨/元数据）。无法判断时返回 true。
   bool get hasVideoSourceHint => true;
 
+  /// 已确认是纯音频（无视频轨且有音轨）；此时不应要求出画面。
+  bool get isAudioOnlyContent => false;
+
   /// 尝试修复视源（重选视频轨、再 play 等）。默认空操作。
   Future<void> tryFixVideoSource() async {}
 
@@ -444,19 +447,31 @@ class MediaKitPlayback extends KotvPlayback {
           player.state.playing ||
           player.state.position > Duration.zero ||
           player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack(t.id)),
+      isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,
       onFixVideoSource: tryFixVideoSource,
     );
   }
 
   @override
+  bool get isAudioOnlyContent {
+    if (_buffering || player.state.buffering) return false;
+    if (_realVideoTracks().isNotEmpty) return false;
+    final hasAudio =
+        player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack(t.id));
+    if (!hasAudio) return false;
+    // demux 已给出音轨、且没有真实视频轨 → 音乐/电台。
+    return player.state.playing || player.state.position > Duration.zero;
+  }
+
+  @override
   bool get hasVideoSourceHint {
+    // 纯音频：不走「修视源」失败路径。
+    if (isAudioOnlyContent) return true;
     final videos = _realVideoTracks();
     if (videos.isEmpty) {
-      // 轨列表尚未出来时不要误判「无源」；有音频且已播过再认为缺视频轨。
-      final audios = player.state.tracks.audio.where((t) => !kotvIsPseudoMediaTrack(t.id));
-      if (audios.isEmpty) return true;
-      return player.state.position <= Duration.zero && !player.state.playing;
+      // 轨列表未齐：先当未知有源，继续等。
+      return true;
     }
     final cur = player.state.track.video;
     if (kotvIsPseudoMediaTrack(cur.id)) return false;

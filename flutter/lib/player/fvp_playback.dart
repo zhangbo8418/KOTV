@@ -255,6 +255,7 @@ class FvpPlayback extends KotvPlayback {
         if (!identical(_c, c)) return true;
         return hasVideoSourceHint;
       },
+      isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
     );
     if (identical(_c, c) && c.value.hasError) {
@@ -272,8 +273,17 @@ class FvpPlayback extends KotvPlayback {
     if (c == null) return false;
     final v = c.value;
     if (v.hasError) return false;
-    // initialize 成功即视为有视频源；尺寸稍后才到。
     return v.isInitialized || _opening;
+  }
+
+  @override
+  bool get isAudioOnlyContent {
+    final c = _c;
+    if (c == null) return false;
+    final v = c.value;
+    if (!v.isInitialized || v.isBuffering || _opening) return false;
+    if (v.size.width > 0 && v.size.height > 0) return false;
+    return v.isPlaying || v.position > const Duration(milliseconds: 500);
   }
 
   @override

@@ -3,16 +3,18 @@ import 'kotv_playback.dart';
 /// 各播放器共用的开播画面守卫（阶梯判定，抛错前尽量自愈）。
 ///
 /// 1. **缓冲中**：最多等 [bufferingTimeout]（默认 60s）
-/// 2. **视源异常**（[hasVideoSource] 为 false）：调用 [onFixVideoSource] 一次，再等
-///    [sourceFixTimeout]
-/// 3. **有会话但仍无尺寸**（黑屏）：[blackScreenTimeout]（默认 5s）后再尝试一次
-///    [onFixVideoSource]，仍无画面则抛 [KotvSilentVideoException]
+/// 2. **纯音频**（[isAudioOnly]）：不要求画面，直接成功
+/// 3. **视源异常**（有视轨但未选中 / 元数据异常）：[onFixVideoSource] + [sourceFixTimeout]
+/// 4. **有视源但仍无尺寸**（黑屏）：[blackScreenTimeout]（默认 5s）后再修一次，仍失败则抛
+///    [KotvSilentVideoException]
 ///
-/// 解码翻转 / 换播放器由上层 [KotvPlaybackFailover] 处理。
+/// 解码翻转 / 换播放器由上层 failover 处理。
 Future<void> kotvGuardSilentVideo({
   required bool Function() hasVideoSize,
   required bool Function() sessionAlive,
   required bool Function() isBuffering,
+  /// 已确认片源无视频轨（音乐等）；为 true 时守卫成功返回。
+  bool Function()? isAudioOnly,
   /// 是否已挂上可用视频源/轨；`null` 表示引擎无法判断（视为有源）。
   bool Function()? hasVideoSource,
   Future<void> Function()? onFixVideoSource,
@@ -29,9 +31,12 @@ Future<void> kotvGuardSilentVideo({
 
   while (true) {
     if (hasVideoSize()) return;
+    if (isAudioOnly?.call() == true) return;
 
     final now = DateTime.now();
     if (now.difference(started) >= bufferingTimeout) {
+      // 超时前再认一次纯音频，避免慢 demux 的音乐被误杀。
+      if (isAudioOnly?.call() == true) return;
       if (sessionAlive() || isBuffering()) {
         throw const KotvSilentVideoException('缓冲超时无画面');
       }
@@ -52,7 +57,7 @@ Future<void> kotvGuardSilentVideo({
       continue;
     }
 
-    // —— 视源：无真实视频轨 / 未拿到视频元数据 ——
+    // —— 视源异常（期望有视频但未挂上正确轨）——
     final sourceOk = hasVideoSource?.call() ?? true;
     if (!sourceOk) {
       blackSince = null;
@@ -60,6 +65,7 @@ Future<void> kotvGuardSilentVideo({
         sourceFixDone = true;
         await onFixVideoSource?.call();
         if (hasVideoSize()) return;
+        if (isAudioOnly?.call() == true) return;
         sourceWaitSince = DateTime.now();
         await Future<void>.delayed(tick);
         continue;
@@ -69,15 +75,16 @@ Future<void> kotvGuardSilentVideo({
         await Future<void>.delayed(tick);
         continue;
       }
+      if (isAudioOnly?.call() == true) return;
       throw const KotvSilentVideoException('无可用视频源');
     }
 
     // —— 有源提示但仍无画面尺寸：黑屏窗口 ——
     if (!sourceFixDone) {
-      // 进入黑屏前先修一次视源（MPV 重选轨；其它引擎再 play）。
       sourceFixDone = true;
       await onFixVideoSource?.call();
       if (hasVideoSize()) return;
+      if (isAudioOnly?.call() == true) return;
       blackSince = DateTime.now();
       await Future<void>.delayed(tick);
       continue;
@@ -93,11 +100,13 @@ Future<void> kotvGuardSilentVideo({
       blackFixDone = true;
       await onFixVideoSource?.call();
       if (hasVideoSize()) return;
+      if (isAudioOnly?.call() == true) return;
       blackSince = DateTime.now();
       await Future<void>.delayed(tick);
       continue;
     }
 
+    if (isAudioOnly?.call() == true) return;
     throw const KotvSilentVideoException();
   }
 }

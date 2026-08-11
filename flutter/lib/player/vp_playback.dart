@@ -148,6 +148,7 @@ class VpPlayback extends KotvPlayback {
           return v.isPlaying || v.position > Duration.zero;
         },
         hasVideoSource: () => hasVideoSourceHint,
+        isAudioOnly: () => isAudioOnlyContent,
         onFixVideoSource: tryFixVideoSource,
       );
       _opening = false;
@@ -164,6 +165,16 @@ class VpPlayback extends KotvPlayback {
     final c = _c;
     if (c == null) return false;
     return c.value.isInitialized || _opening;
+  }
+
+  @override
+  bool get isAudioOnlyContent {
+    final c = _c;
+    if (c == null) return false;
+    final v = c.value;
+    if (!v.isInitialized || v.isBuffering || _opening) return false;
+    if (v.size.width > 0 && v.size.height > 0) return false;
+    return v.isPlaying || v.position > const Duration(milliseconds: 500);
   }
 
   @override
