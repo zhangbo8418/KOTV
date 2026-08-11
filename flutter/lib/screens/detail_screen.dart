@@ -922,6 +922,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 折叠「播放失败: 解析失败: 解析失败: …」这类层层包装。
   String _friendlyPlayError(Object e) {
     if (e is KotvSilentVideoException) {
+      final m = e.message.trim();
+      if (m.contains('视频源')) {
+        return '播放失败: 无可用视频源（已尝试修复并切换播放器）';
+      }
+      if (m.contains('缓冲超时')) {
+        return '播放失败: 缓冲超时无画面';
+      }
       return '播放失败: 无画面（已尝试可用播放器）';
     }
     var s = '$e';
