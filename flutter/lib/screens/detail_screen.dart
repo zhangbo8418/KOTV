@@ -91,6 +91,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   String _playerVal = kotvDefaultVodPlayer();
   /// 设置/用户所选播放器；failover 临时切换只改 [_playerVal]。
   String _prefPlayerVal = kotvDefaultVodPlayer();
+  /// 设置「自动切换播放器」：auto=开，off=关。
+  String _prefPlayerFailover = 'auto';
   bool _miniDesktop = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
@@ -159,15 +161,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final String next;
     if (p.completed && !p.playing) {
       next = '播放结束';
-    } else if (magnet && (_isBuffering ||
-            !(p.position > Duration.zero || p.duration > Duration.zero || p.width > 0))) {
-      next = '磁力缓冲中…';
-    } else if (_isBuffering) {
-      next = '$prefix 缓冲中…';
     } else if (p.playing) {
+      // MPV 常在 playing=true 时仍报 buffering；已开播优先显示播放中，避免误当成缓冲去切播放器。
       final started = p.position > Duration.zero || p.duration > Duration.zero || p.width > 0;
       if (started) {
         next = magnet ? '$prefix 播放中（磁力）' : '$prefix 播放中';
+      } else if (_isBuffering) {
+        next = magnet ? '磁力缓冲中…' : '$prefix 缓冲中…';
       } else {
         final startedAt = _sessionStartedAt;
         if (startedAt != null && DateTime.now().difference(startedAt) > const Duration(seconds: 10)) {
@@ -176,6 +176,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           next = magnet ? '磁力缓冲中…' : '$prefix 加载中…';
         }
       }
+    } else if (magnet && (_isBuffering ||
+            !(p.position > Duration.zero || p.duration > Duration.zero || p.width > 0))) {
+      next = '磁力缓冲中…';
+    } else if (_isBuffering) {
+      next = '$prefix 缓冲中…';
     } else {
       final startedAt = _sessionStartedAt;
       final stalled = startedAt != null &&
@@ -527,6 +532,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         }
         _playerVal = kotvClampPlayerVal(playerVal, live: false);
         _prefPlayerVal = _playerVal;
+        final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
+        _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
         // 绝不在进详情时创建 Player：libmpv 初始化 + VideoController 附着会卡死 UI / 手机闪退。
         // 音量/倍速等偏好先记下，真正 [_playAt] open 后再套。
         _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
@@ -797,6 +804,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         playerVal: startPlayer,
         decodeMode: _prefDecodeMode,
         lockExoForDrm: hasDrm && kotvIsAndroid(),
+        enabled: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
       );
       Object? lastOpenError;
       var opened = false;
@@ -1156,9 +1164,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           if (_playUrl.isNotEmpty)
             KotvBufferingOverlay(
               player: _playback,
-              force: _status.contains('加载中') ||
-                  _status.contains('磁力缓冲') ||
-                  _status.contains('缓冲中'),
+              force: !_playback.playing &&
+                  (_status.contains('加载中') ||
+                      _status.contains('磁力缓冲') ||
+                      _status.contains('缓冲中')),
             ),
           if (_status.contains('解析') || _status.contains('嗅探'))
             const ColoredBox(

@@ -225,6 +225,53 @@ void main() {
     expect(msg, contains('进度'));
   });
 
+  test('playing+buffering does not count as progress stall', () async {
+    var pos = Duration.zero;
+    Future<void>.delayed(const Duration(milliseconds: 280), () {
+      pos = const Duration(milliseconds: 500);
+    });
+    await kotvGuardSilentVideo(
+      hasVideoSize: () => true,
+      isBuffering: () => true,
+      sessionAlive: () => true,
+      isPlaying: () => true,
+      position: () => pos,
+      duration: () => const Duration(minutes: 5),
+      hasVideoSource: () => true,
+      sizeSettleTimeout: const Duration(milliseconds: 40),
+      progressStallTimeout: const Duration(milliseconds: 120),
+      progressMinDelta: const Duration(milliseconds: 100),
+      tick: const Duration(milliseconds: 40),
+    );
+  });
+
+  test('progress stall starts only after buffering ends', () async {
+    var buffering = true;
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      buffering = false;
+    });
+    var threw = false;
+    try {
+      await kotvGuardSilentVideo(
+        hasVideoSize: () => true,
+        isBuffering: () => buffering,
+        sessionAlive: () => true,
+        isPlaying: () => true,
+        position: () => Duration.zero,
+        duration: () => const Duration(minutes: 5),
+        hasVideoSource: () => true,
+        sizeSettleTimeout: const Duration(milliseconds: 40),
+        progressStallTimeout: const Duration(milliseconds: 150),
+        progressMinDelta: const Duration(milliseconds: 100),
+        tick: const Duration(milliseconds: 40),
+      );
+    } on KotvSilentVideoException catch (e) {
+      threw = true;
+      expect(e.message, contains('进度'));
+    }
+    expect(threw, isTrue);
+  });
+
   test('playing with size and advancing progress succeeds', () async {
     var pos = Duration.zero;
     Future<void>.delayed(const Duration(milliseconds: 80), () {

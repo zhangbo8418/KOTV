@@ -9,6 +9,7 @@ class KotvPlaybackFailover {
     required String playerVal,
     required String decodeMode,
     this.lockExoForDrm = false,
+    this.enabled = true,
   })  : settingsDecodeMode = normDecode(decodeMode),
         _playerVal = playerVal.trim(),
         _decodeMode = normDecode(decodeMode);
@@ -18,6 +19,22 @@ class KotvPlaybackFailover {
 
   /// Android DRM：禁止离开 Exo。
   final bool lockExoForDrm;
+
+  /// 设置「自动切换播放器」为关闭时不 failover。
+  final bool enabled;
+
+  /// `playerFailover`：auto/true/空 = 开；off/false = 关。
+  static bool enabledFromSetting(String raw) {
+    switch (raw.trim().toLowerCase()) {
+      case 'off':
+      case 'false':
+      case '0':
+      case 'no':
+        return false;
+      default:
+        return true;
+    }
+  }
 
   final Set<String> _triedPlayers = {};
   String _playerVal;
@@ -44,6 +61,7 @@ class KotvPlaybackFailover {
 
   /// 开播失败后下一步；`null` 表示放弃。
   KotvFailoverStep? nextStep() {
+    if (!enabled) return null;
     if (lockExoForDrm) return null;
     if (!_playerVal.startsWith('innie#')) return null;
 

@@ -79,7 +79,8 @@ Future<void> kotvGuardSilentVideo({
         return;
       }
 
-      if (buffering && !playing) {
+      // 缓冲中（含 playing+buffering 的补缓存）不计进度停滞，避免误切播放器。
+      if (buffering) {
         stallSince = null;
         await Future<void>.delayed(tick);
         continue;

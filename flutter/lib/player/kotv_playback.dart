@@ -442,7 +442,7 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> _guardSilentVideo() async {
     await kotvGuardSilentVideo(
       hasVideoSize: () => _videoVisible,
-      isBuffering: () => _buffering || player.state.buffering,
+      isBuffering: () => buffering,
       sessionAlive: () =>
           player.state.playing || player.state.position > Duration.zero,
       isPlaying: () => player.state.playing,
@@ -463,7 +463,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   bool get isAudioOnlyContent {
-    if (_buffering || player.state.buffering) return false;
+    if (buffering) return false;
     if (_realVideoTracks().isNotEmpty) return false;
     final hasAudio =
         player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack(t.id));
@@ -518,7 +518,13 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Duration get buffered => player.state.buffer;
   @override
-  bool get buffering => _buffering || player.state.buffering;
+  bool get buffering {
+    final raw = _buffering || player.state.buffering;
+    if (!raw) return false;
+    // media_kit 常在 playing 时仍报 buffering（补缓存）；已出画则不当作起播缓冲。
+    if (player.state.playing && _videoVisible) return false;
+    return true;
+  }
   @override
   int get networkSpeedBps => _speedBps;
   @override

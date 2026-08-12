@@ -49,4 +49,21 @@ void main() {
     expect(next!.playerVal, 'innie#mpv');
     expect(next.decodeMode, 'soft');
   });
+
+  test('disabled failover gives up', () {
+    final f = KotvPlaybackFailover(
+      playerVal: 'innie#mpv',
+      decodeMode: 'hard',
+      enabled: false,
+    );
+    f.markAttempt();
+    expect(f.nextStep(), isNull);
+  });
+
+  test('enabledFromSetting', () {
+    expect(KotvPlaybackFailover.enabledFromSetting('auto'), isTrue);
+    expect(KotvPlaybackFailover.enabledFromSetting(''), isTrue);
+    expect(KotvPlaybackFailover.enabledFromSetting('off'), isFalse);
+    expect(KotvPlaybackFailover.enabledFromSetting('false'), isFalse);
+  });
 }

@@ -167,6 +167,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   String _playerVal = kotvDefaultLivePlayer();
   String _prefPlayerVal = kotvDefaultLivePlayer();
+  String _prefPlayerFailover = 'auto';
   int _playSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
@@ -250,6 +251,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         }
         _playerVal = kotvClampPlayerVal(playerVal, live: true);
         _prefPlayerVal = _playerVal;
+        final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
+        _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
         final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
         if (vol != null) {
           await _playback.setVolume(vol.clamp(0, 100));
@@ -524,6 +527,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     final failover = KotvPlaybackFailover(
       playerVal: _prefPlayerVal,
       decodeMode: _prefDecodeMode,
+      enabled: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
     );
     Object? lastError;
     for (var attempt = 0; attempt < 8; attempt++) {

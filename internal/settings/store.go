@@ -36,6 +36,7 @@ const (
 	PlayerSpeed        Type = "playerSpeed"
 	PlayerScale        Type = "playerScale"
 	PlayerDecode       Type = "playerDecode"
+	PlayerFailover     Type = "playerFailover" // 黑屏/停滞自动切换播放器：auto | off
 	PlayerVolume       Type = "playerVolume"
 	PlayerAmbient      Type = "playerAmbient"
 	PlayerStableVolume Type = "playerStableVolume"
@@ -98,6 +99,7 @@ func defaultFile() file {
 			{ID: "playerSpeed", Label: "默认倍速", Value: "1.0"},
 			{ID: "playerScale", Label: "画面比例", Value: "default"},
 			{ID: "playerDecode", Label: "解码方式", Value: "auto"},
+			{ID: "playerFailover", Label: "自动切换播放器", Value: "auto"},
 			{ID: "playerVolume", Label: "默认音量", Value: "80"},
 			{ID: "playerAmbient", Label: "氛围模式", Value: "false"},
 			{ID: "playerStableVolume", Label: "稳定音量", Value: "false"},

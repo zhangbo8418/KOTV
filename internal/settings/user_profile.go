@@ -18,6 +18,7 @@ var clientProfileKeys = map[Type]bool{
 	PlayerSpeed:        true,
 	PlayerScale:        true,
 	PlayerDecode:       true,
+	PlayerFailover:     true,
 	PlayerVolume:       true,
 	PlayerAmbient:      true,
 	PlayerStableVolume: true,

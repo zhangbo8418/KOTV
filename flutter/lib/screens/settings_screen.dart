@@ -735,6 +735,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final speed = g('playerSpeed', '1.0');
     final scale = g('playerScale', 'default');
     final decode = g('playerDecode', 'auto');
+    final playerFailover = g('playerFailover', 'auto');
     final danOn = g('danmaku', 'false') == 'true';
     final incognito = g('incognito', 'false') == 'true';
     final dmr = g('dlnaRenderer', 'false') == 'true';
@@ -751,6 +752,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         }[scale] ??
         scale;
     final decodeLabel = {'auto': '自动', 'soft': '软解码', 'hard': '硬解码'}[decode] ?? decode;
+    final failoverLabel = (playerFailover == 'off' || playerFailover == 'false') ? '关闭' : '自动';
     final adLabel = {'off': '关闭', 'on': '开启', 'violent': '暴力'}[ad] ?? ad;
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
@@ -893,6 +895,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ('自动（推荐）', 'auto'),
                           ('软解码', 'soft'),
                           ('硬解码', 'hard'),
+                        ]),
+                      ),
+                      KotvSettingsWideTile(
+                        label: '自动切换播放器',
+                        value: failoverLabel,
+                        onTap: () => _pick('自动切换播放器', 'playerFailover', const [
+                          ('自动（黑屏/停滞时换播放器）', 'auto'),
+                          ('关闭（只用所选播放器）', 'off'),
                         ]),
                       ),
                       KotvSettingsWideTile(
