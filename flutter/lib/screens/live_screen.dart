@@ -524,6 +524,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _openLiveUrl(String url, {Map<String, String>? headers}) async {
+    try {
+      final st = await ref.read(apiProvider).getSettings();
+      final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting('${settings['playerFailover'] ?? ''}')
+          ? 'auto'
+          : 'off';
+    } catch (_) {}
     final failover = KotvPlaybackFailover(
       playerVal: _prefPlayerVal,
       decodeMode: _prefDecodeMode,

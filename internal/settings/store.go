@@ -177,6 +177,7 @@ func Load() error {
 		return err
 	}
 	ensureSettingLocked(PlayerLive, "直播播放器", defaultLivePlayerValue())
+	ensureSettingLocked(PlayerFailover, "自动切换播放器", "auto")
 	ensureSettingLocked(RemoteAuth, "远端鉴权", "false")
 	ensureSettingLocked(AllowRegister, "开放注册", "false")
 	return nil

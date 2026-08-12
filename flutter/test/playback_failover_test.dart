@@ -66,4 +66,16 @@ void main() {
     expect(KotvPlaybackFailover.enabledFromSetting('off'), isFalse);
     expect(KotvPlaybackFailover.enabledFromSetting('false'), isFalse);
   });
+
+  test('off does not flip decode or change player', () {
+    final f = KotvPlaybackFailover(
+      playerVal: 'innie#mpv',
+      decodeMode: 'hard',
+      enabled: false,
+    );
+    f.markAttempt();
+    expect(f.nextStep(), isNull);
+    expect(f.playerVal, 'innie#mpv');
+    expect(f.decodeMode, 'hard');
+  });
 }

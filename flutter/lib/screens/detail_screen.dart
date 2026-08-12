@@ -796,6 +796,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         site: d.site,
         remarks: ep.name,
       ));
+      // 起播再读一次：设置页关掉自动切换后，详情页可能还开着。
+      try {
+        final st = await ref.read(apiProvider).getSettings();
+        final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+        _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting('${settings['playerFailover'] ?? ''}')
+            ? 'auto'
+            : 'off';
+      } catch (_) {}
       // 对齐 TV：有 DRM 强制 Exo（MPV/FVP 不解 Widevine）
       final startPlayer = (hasDrm && kotvIsAndroid())
           ? 'innie#exo'
