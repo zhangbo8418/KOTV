@@ -800,9 +800,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       try {
         final st = await ref.read(apiProvider).getSettings();
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-        _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting('${settings['playerFailover'] ?? ''}')
-            ? 'auto'
-            : 'off';
+        final fo = '${settings['playerFailover'] ?? ''}'.trim();
+        if (fo.isNotEmpty) {
+          _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
+        }
         final pv = '${settings['player'] ?? ''}'.trim();
         if (pv.isNotEmpty) {
           _prefPlayerVal = kotvClampPlayerVal(pv, live: false);
@@ -870,6 +871,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           break;
         } on KotvSilentVideoException catch (e) {
           lastOpenError = e;
+          if (!failover.enabled) {
+            // 关闭自动切换：不换引擎、不判失败，继续当前播放器。
+            opened = true;
+            break;
+          }
         }
         final step = failover.nextStep();
         if (step == null) break;
@@ -938,24 +944,38 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       _sessionStartedAt = null;
       setState(() {
         _playUrl = '';
-        _status = _friendlyPlayError(e);
+        _status = _friendlyPlayError(
+          e,
+          triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
+        );
       });
       _syncFullscreen();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyPlayError(e))));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _friendlyPlayError(
+                e,
+                triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
+              ),
+            ),
+          ),
+        );
+      }
     }
   }
 
   /// 折叠「播放失败: 解析失败: 解析失败: …」这类层层包装。
-  String _friendlyPlayError(Object e) {
+  String _friendlyPlayError(Object e, {bool triedSwitch = true}) {
     if (e is KotvSilentVideoException) {
       final m = e.message.trim();
       if (m.contains('视频源')) {
-        return '播放失败: 无可用视频源（已尝试修复并切换播放器）';
+        return triedSwitch ? '播放失败: 无可用视频源（已尝试修复并切换播放器）' : '播放失败: 无可用视频源';
       }
       if (m.contains('进度停滞')) {
-        return '播放失败: 播放中进度停滞（已尝试切换播放器）';
+        return triedSwitch ? '播放失败: 播放中进度停滞（已尝试切换播放器）' : '播放失败: 播放中进度停滞';
       }
-      return '播放失败: 无画面（已尝试可用播放器）';
+      return triedSwitch ? '播放失败: 无画面（已尝试可用播放器）' : '播放失败: 无画面';
     }
     var s = '$e';
     s = s.replaceFirst(RegExp(r'^(Exception|KotvApiException):\s*'), '');

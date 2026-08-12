@@ -527,9 +527,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     try {
       final st = await ref.read(apiProvider).getSettings();
       final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-      _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting('${settings['playerFailover'] ?? ''}')
-          ? 'auto'
-          : 'off';
+      final fo = '${settings['playerFailover'] ?? ''}'.trim();
+      if (fo.isNotEmpty) {
+        _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
+      }
     } catch (_) {}
     final failover = KotvPlaybackFailover(
       playerVal: _prefPlayerVal,
@@ -567,6 +568,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         return;
       } on KotvSilentVideoException catch (e) {
         lastError = e;
+        if (!failover.enabled) return;
       }
       final step = failover.nextStep();
       if (step == null) break;
