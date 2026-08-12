@@ -69,8 +69,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _loading = true;
   int _flagIdx = 0;
   int _epIdx = -1;
-  /// 全屏页在 rootNavigator，父 setState 到不了；用 notifier 同步集数高亮。
-  final ValueNotifier<int> _fsEpIdx = ValueNotifier(-1);
+  /// 全屏页在 rootNavigator，父 setState 到不了；revision 驱动画面/集数/播放器重建。
+  final ValueNotifier<int> _fsRev = ValueNotifier(0);
   int _epPage = 0;
   bool _reversed = false;
   bool _kept = false;
@@ -480,7 +480,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _unwirePlaybackNotify();
     _stopBtProgressPoll();
     _danmakuItems.dispose();
-    _fsEpIdx.dispose();
+    _fsRev.dispose();
     // 正常路径已在 [_stopHard] 里 await pause/stop；此处兜底再停一次再释放。
     if (!_stoppedHard) {
       unawaited(_fvp?.stop() ?? Future<void>.value());
@@ -745,7 +745,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       _magnetPlay = epLooksMagnet;
       _status = epLooksMagnet ? '磁力解析中…' : '解析中…';
     });
-    _fsEpIdx.value = epIdx;
+    _syncFullscreen();
     if (epLooksMagnet) _startBtProgressPoll();
     try {
       Map<String, dynamic> data;
@@ -796,13 +796,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         site: d.site,
         remarks: ep.name,
       ));
-      // 起播再读一次：设置页关掉自动切换后，详情页可能还开着。
+      // 起播再读一次：设置页改播放器/软硬解/自动切换后，详情页可能还开着。
       try {
         final st = await ref.read(apiProvider).getSettings();
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
         _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting('${settings['playerFailover'] ?? ''}')
             ? 'auto'
             : 'off';
+        final pv = '${settings['player'] ?? ''}'.trim();
+        if (pv.isNotEmpty) {
+          _prefPlayerVal = kotvClampPlayerVal(pv, live: false);
+        }
+        final decode = '${settings['playerDecode'] ?? ''}'.trim();
+        if (decode.isNotEmpty) {
+          _prefDecodeMode = decode;
+        }
       } catch (_) {}
       // 对齐 TV：有 DRM 强制 Exo（MPV/FVP 不解 Widevine）
       final startPlayer = (hasDrm && kotvIsAndroid())
@@ -841,13 +849,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             openHeaders = null;
           }
         }
-        // 先挂播放器视图再 open（Texture / 平台视图需进树）。
+        // 先挂播放器视图再 open（Texture / 平台视图需进树；全屏也靠 _fsRev 挂上）。
         setState(() {
           _playUrl = playUrl;
           _playerVal = failover.playerVal;
           _decodeMode = failover.decodeMode;
           _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
         });
+        _syncFullscreen();
         await WidgetsBinding.instance.endOfFrame;
         if (serial != _playAtSerial || !mounted) return;
         try {
@@ -870,6 +879,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           _decodeMode = step.decodeMode;
           _status = step.status;
         });
+        _syncFullscreen();
         try {
           await pb.stop();
         } catch (_) {}
@@ -930,6 +940,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _playUrl = '';
         _status = _friendlyPlayError(e);
       });
+      _syncFullscreen();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyPlayError(e))));
     }
   }
@@ -970,113 +981,150 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         s.contains('Broken pipe');
   }
 
+  /// 全屏在 rootNavigator，详情 setState 到不了，靠 revision 把当前播放器/集数推上去。
+  void _syncFullscreen() {
+    if (!mounted) return;
+    _fsRev.value++;
+  }
+
   Future<void> _enterFullscreen() async {
     final d = _detail;
     if (d == null || !mounted) return;
     if (_miniDesktop) await _exitMini();
-    final eps = _eps;
     final api = ref.read(apiProvider);
     final id = d.id.isNotEmpty ? d.id : widget.id;
     final site = d.site.isNotEmpty ? d.site : widget.site;
-    final title = '${d.name}${_epIdx >= 0 && _epIdx < eps.length ? ' · ${eps[_epIdx].name}' : ''}';
-    _fsEpIdx.value = _epIdx;
+    _syncFullscreen();
 
     await Navigator.of(context, rootNavigator: true).push(
       PageRouteBuilder(
         opaque: true,
         pageBuilder: (_, __, ___) => ValueListenableBuilder<int>(
-          valueListenable: _fsEpIdx,
-          builder: (context, epIdx, _) => ValueListenableBuilder<List<DanmakuItem>>(
-          valueListenable: _danmakuItems,
-          builder: (context, danmakuItems, _) => DetailFullscreenPage(
-          playback: _playback,
-          vodName: d.name,
-          title: title,
-          episodes: eps.map((e) => e.name).toList(),
-          epIdx: epIdx,
-          playUrl: _playUrl,
-          decodeMode: _decodeMode,
-          aspect: _aspect,
-          danmakuOn: _danmakuOn,
-          danmakuItems: danmakuItems,
-          ambientOn: _ambientOn,
-          stableVolumeOn: _stableVolumeOn,
-          keepLabel: _kept ? '取消收藏' : '收藏',
-          offsetId: id,
-          offsetSite: site,
-          openingSec: _openingSec,
-          endingSec: _endingSec,
-          onOffsetsChanged: (open, end) {
-            if (!mounted) return;
-            setState(() {
-              _openingSec = open;
-              _endingSec = end;
-            });
+          valueListenable: _fsRev,
+          builder: (context, _, __) {
+            final vod = _detail;
+            if (vod == null) return const ColoredBox(color: Colors.black);
+            final eps = _eps;
+            final epIdx = _epIdx;
+            final title = '${vod.name}${epIdx >= 0 && epIdx < eps.length ? ' · ${eps[epIdx].name}' : ''}';
+            return ValueListenableBuilder<List<DanmakuItem>>(
+              valueListenable: _danmakuItems,
+              builder: (context, danmakuItems, _) => DetailFullscreenPage(
+                playback: _playback,
+                vodName: vod.name,
+                title: title,
+                episodes: eps.map((e) => e.name).toList(),
+                epIdx: epIdx,
+                playUrl: _playUrl,
+                decodeMode: _decodeMode,
+                aspect: _aspect,
+                danmakuOn: _danmakuOn,
+                danmakuItems: danmakuItems,
+                ambientOn: _ambientOn,
+                stableVolumeOn: _stableVolumeOn,
+                keepLabel: _kept ? '取消收藏' : '收藏',
+                offsetId: id,
+                offsetSite: site,
+                openingSec: _openingSec,
+                endingSec: _endingSec,
+                onOffsetsChanged: (open, end) {
+                  if (!mounted) return;
+                  setState(() {
+                    _openingSec = open;
+                    _endingSec = end;
+                  });
+                },
+                onSelectEp: (i) => _playAt(i),
+                onNext: () => _playAt(_epIdx + 1),
+                onPrev: () => _playAt(_epIdx - 1),
+                onDecodeChanged: (mode) {
+                  if (mounted) {
+                    setState(() {
+                      _decodeMode = mode;
+                      _prefDecodeMode = mode;
+                    });
+                    _syncFullscreen();
+                  }
+                },
+                onPersistSetting: (k, v) async {
+                  await api.setSetting(k, v);
+                  if (!mounted) return;
+                  if (k == 'playerScale') {
+                    setState(() => _aspect = _aspectFromScale(v));
+                    _syncFullscreen();
+                  }
+                  if (k == 'playerAmbient') {
+                    setState(() => _ambientOn = v.toLowerCase() == 'true');
+                    _syncFullscreen();
+                  }
+                  if (k == 'playerStableVolume') {
+                    final on = v.toLowerCase() == 'true';
+                    setState(() => _stableVolumeOn = on);
+                    unawaited(_applyStableVolume(_playback, on));
+                    _syncFullscreen();
+                  }
+                  if (k == 'danmaku') {
+                    setState(() => _danmakuOn = v.toLowerCase() == 'true');
+                    _syncFullscreen();
+                  }
+                  if (k == 'danmakuApi') setState(() => _danmakuApi = v);
+                  if (k == 'playerDecode') {
+                    final next = v.trim().isEmpty ? 'auto' : v.trim();
+                    setState(() {
+                      _decodeMode = next;
+                      _prefDecodeMode = next;
+                    });
+                    _syncFullscreen();
+                  }
+                  if (k == 'player') {
+                    final prev = _playerVal;
+                    final next = kotvClampPlayerVal(v, live: false);
+                    setState(() {
+                      _playerVal = next;
+                      _prefPlayerVal = next;
+                    });
+                    if (next != prev && _epIdx >= 0) {
+                      unawaited(_playAt(_epIdx));
+                    } else {
+                      _syncFullscreen();
+                    }
+                  }
+                },
+                onPlayerStatus: api.playerStatus,
+                onExternalPlayer: (player) => api.playerExternal(url: _playUrl, player: player),
+                onToggleKeep: () async {
+                  final item = VodItem(id: id, name: vod.name, pic: vod.pic, site: site, remarks: vod.remarks);
+                  final kept = await LocalCollect.toggle(item);
+                  if (mounted) {
+                    setState(() => _kept = kept);
+                    _syncFullscreen();
+                  }
+                  return kept ? '取消收藏' : '收藏';
+                },
+                onDanmakuChanged: (v) {
+                  if (mounted) {
+                    setState(() => _danmakuOn = v);
+                    _syncFullscreen();
+                  }
+                },
+                onAmbientChanged: (v) {
+                  if (mounted) {
+                    setState(() => _ambientOn = v);
+                    _syncFullscreen();
+                  }
+                },
+                onParse: () => unawaited(_pickParse()),
+                onRefresh: () {
+                  if (_epIdx >= 0) unawaited(_playAt(_epIdx));
+                },
+                onCast: () => unawaited(_cast()),
+                onMini: () {
+                  Navigator.of(context).maybePop();
+                  unawaited(_enterMini());
+                },
+              ),
+            );
           },
-          onSelectEp: (i) => _playAt(i),
-          onNext: () => _playAt(_epIdx + 1),
-          onPrev: () => _playAt(_epIdx - 1),
-          onDecodeChanged: (mode) {
-            if (mounted) {
-              setState(() {
-                _decodeMode = mode;
-                _prefDecodeMode = mode;
-              });
-            }
-          },
-          onPersistSetting: (k, v) async {
-            await api.setSetting(k, v);
-            if (!mounted) return;
-            if (k == 'playerScale') setState(() => _aspect = _aspectFromScale(v));
-            if (k == 'playerAmbient') setState(() => _ambientOn = v.toLowerCase() == 'true');
-            if (k == 'playerStableVolume') {
-              final on = v.toLowerCase() == 'true';
-              setState(() => _stableVolumeOn = on);
-              unawaited(_applyStableVolume(_playback, on));
-            }
-            if (k == 'danmaku') setState(() => _danmakuOn = v.toLowerCase() == 'true');
-            if (k == 'danmakuApi') setState(() => _danmakuApi = v);
-            if (k == 'player') {
-              final prev = _playerVal;
-              final next = kotvClampPlayerVal(v, live: false);
-              setState(() {
-                _playerVal = next;
-                _prefPlayerVal = next;
-              });
-              if (next != prev && _epIdx >= 0) {
-                Navigator.of(context).maybePop();
-                unawaited(_playAt(_epIdx));
-              }
-            }
-          },
-          onPlayerStatus: api.playerStatus,
-          onExternalPlayer: (player) => api.playerExternal(url: _playUrl, player: player),
-          onToggleKeep: () async {
-            final item = VodItem(id: id, name: d.name, pic: d.pic, site: site, remarks: d.remarks);
-            final kept = await LocalCollect.toggle(item);
-            if (mounted) setState(() => _kept = kept);
-            return kept ? '取消收藏' : '收藏';
-          },
-          onDanmakuChanged: (v) {
-            if (mounted) setState(() => _danmakuOn = v);
-          },
-          onAmbientChanged: (v) {
-            if (mounted) setState(() => _ambientOn = v);
-          },
-          onParse: () {
-            Navigator.of(context).maybePop();
-            unawaited(_pickParse());
-          },
-          onRefresh: () {
-            if (_epIdx >= 0) unawaited(_playAt(_epIdx));
-          },
-          onCast: () => unawaited(_cast()),
-          onMini: () {
-            Navigator.of(context).maybePop();
-            unawaited(_enterMini());
-          },
-        ),
-        ),
         ),
       ),
     );
@@ -1635,6 +1683,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       final cur = '${(st['settings'] as Map?)?['preferredParse'] ?? ''}';
       final picked = await showDialog<String>(
         context: context,
+        useRootNavigator: true,
         builder: (ctx) {
           final pal = KotvPalette.of(ctx);
           return SimpleDialog(

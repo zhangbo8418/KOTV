@@ -136,6 +136,15 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     if (oldWidget.epIdx != widget.epIdx) _epIdx = widget.epIdx;
     if (oldWidget.danmakuOn != widget.danmakuOn) _danmakuOn = widget.danmakuOn;
     if (oldWidget.ambientOn != widget.ambientOn) _ambientOn = widget.ambientOn;
+    if (!identical(oldWidget.playback, widget.playback)) {
+      _posSub?.cancel();
+      _pos = widget.playback.position;
+      _posSub = widget.playback.positionStream.listen((d) {
+        if (!mounted) return;
+        if (d.inSeconds == _pos.inSeconds) return;
+        setState(() => _pos = d);
+      });
+    }
   }
 
   @override

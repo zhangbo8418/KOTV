@@ -449,6 +449,20 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollEpIntoView());
       }
     }
+    if (oldWidget.playUrl != widget.playUrl) {
+      _endingSkipFired = false;
+      _openingSeekDone = false;
+    }
+    if (!identical(oldWidget.player, widget.player)) {
+      _skipSub?.cancel();
+      _skipSub = widget.player.positionStream.listen(_onPositionTick);
+      _endingSkipFired = false;
+      _openingSeekDone = false;
+      final rate = widget.player.rate;
+      final i = _speeds.indexWhere((s) => (s - rate).abs() < 0.01);
+      if (i >= 0) _speedIdx = i;
+      unawaited(_refreshPlayerLabel());
+    }
   }
 
   @override
@@ -870,7 +884,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         }
       }
     } else {
-      widget.onReplay?.call();
+      // 内置切换由 onPersistSetting → 父页 _playAt 真正换引擎；勿对旧实例 seek+play。
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已切换为$_playerLabel')));
       }
