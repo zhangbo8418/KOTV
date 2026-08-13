@@ -50,7 +50,7 @@ flutter/assets/fonts/*.otf
 flutter/assets/fonts/*.ttf
 flutter/assets/fonts/LICENSE*
 
-# Flutter Web 构建产物（scripts/embed-flutter-web.sh / package-flutter-web.sh）
+# Flutter Web 构建产物（package-flutter-web.sh）
 /webapp/
 flutter/build/
 

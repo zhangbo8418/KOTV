@@ -9,8 +9,11 @@
 
 ## 联调
 
+先编译 Go 引擎（被 Flutter EngineLauncher 托管），再跑 Flutter：
+
 ```bash
-./scripts/run-flutter.sh macos
+./scripts/build-engine-flutter.sh
+cd flutter && flutter run -d macos   # KOTV_RUNTIME 默认用仓库 runtime/
 ```
 
 ## 字体
@@ -36,9 +39,9 @@
 
 - 引擎：`libkotv_engine.so` 双 ABI 进 `jniLibs`，由 Flutter 拉起 sidecar
 - 爬虫：同进程 `:9979` SpiderService（JAR/PY/嗅探）
-- **迅雷**（对齐 TV）：`magnet` / `thunder://` / **`ed2k`** / `.torrent`（及解码后的 ftp 等），`libs/thunder-release.aar`，**不走 anacrolix**
+- **迅雷**：`magnet` / `thunder://` / **`ed2k`** / `.torrent`（及解码后的 ftp 等），`libs/thunder-release.aar`，**不走 anacrolix**
 - 播放默认：ExoPlayer；可选手动切 MPV / FVP
-- 迅雷 AAR：`flutter/android/app/libs/thunder-release.aar`（可从 TV `app/libs/` 同步）
+- 迅雷 AAR：`flutter/android/app/libs/thunder-release.aar`
 
 ## 遥控器（安卓）
 
@@ -56,7 +59,7 @@
 - 主线（Win10+ / macOS / Linux）仍用较新 Flutter（`sdk: ^3.5.4`）；Win7 构建前会跑 `scripts/adapt-flutter-win7-sdk.sh` 临时放宽约束。
 - **不再**对 Win7 线替换 RustDesk 魔改 engine（那只修启动 `GetHostNameW`，管不了加载后闪退）。
 - 桌面 **内置 MPV** 使用 Flutter **media_kit 自带 libmpv**（不进 `runtime/`）。
-- Python 爬虫依赖与 TV `chaquo/requirements.txt` 对齐（`scripts/python-requirements.txt`），打进 `runtime/python`。
+- Python 爬虫依赖见 `scripts/python-requirements.txt`，打进 `runtime/python`。
 - UI 闪退时由看门狗杀掉残留 `kotv-engine`（见 `engine_launcher.dart`）。
 - 产物为 `KO影视-{version}-x86_64-win7.zip`，用于 Win7 真机回归。
 
