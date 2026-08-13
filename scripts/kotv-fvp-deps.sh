@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # fvp / mdk-sdk：默认从 GitHub Release 拉，避免 CI 卡在 SourceForge nightly。
 # 用法：在 package-*.sh 里 `source "$ROOT/scripts/kotv-fvp-deps.sh"`
-# 可选覆盖：FVP_DEPS_URL=https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0
+# 可选覆盖：FVP_DEPS_URL=https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0
 
 kotv_fvp_deps_url() {
-  echo "${FVP_DEPS_URL:-https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0}"
+  echo "${FVP_DEPS_URL:-https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0}"
 }
 
 # 导出给 fvp cmake/deps.cmake（Android / Windows / Linux）。
@@ -34,7 +34,7 @@ kotv_ensure_mdk_apple_pod() {
   cat > "$dest/mdk.podspec" <<'EOF'
 Pod::Spec.new do |s|
   s.name             = 'mdk'
-  s.version          = '0.36.0'
+  s.version          = '0.38.0'
   s.summary          = 'Multimedia Development Kit'
   s.homepage         = 'https://github.com/wang-bin/mdk-sdk'
   s.license          = { :type => 'MIT' }
