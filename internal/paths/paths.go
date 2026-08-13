@@ -13,7 +13,7 @@ const appName = "KOTV"
 // Android：优先 KOTV_DATA_DIR / KOTV_CACHE_DIR（由 Flutter launcher 注入应用可写目录）。
 //
 // Windows 现用 %APPDATA%/KOTV；若仅有旧版 %APPDATA%/KOTV/cache 则继续用旧根，避免丢设置。
-// 缓存统一落在 Root()/cache/...，不再出现 cache/data/cache 套娃。
+// 缓存统一落在 Root()/cache/...。
 func Root() string {
 	if v := strings.TrimSpace(os.Getenv("KOTV_DATA_DIR")); v != "" {
 		return ensure(v)
