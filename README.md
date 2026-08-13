@@ -147,6 +147,6 @@ open http://127.0.0.1:9978/remote/        # 遥控
 
 | 平台 | 路径 |
 |------|------|
-| macOS | `~/Library/Caches/KOTV/` |
-| Linux | `~/.cache/KOTV/` |
+| macOS | `~/Library/Application Support/KOTV/` |
+| Linux | `~/.local/share/KOTV/` |
 | Windows | `%AppData%/KOTV/` |
