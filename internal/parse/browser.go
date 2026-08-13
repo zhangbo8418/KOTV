@@ -32,7 +32,7 @@ const defaultParseWebTimeout = 30 * time.Second
 // 嵌套嗅探至少留这么久，避免壳页耗掉大半时间后云播页秒超时。
 const nestedSniffMinTimeout = 18 * time.Second
 
-// 对齐 TV CustomWebView.MAX_URLS：嵌套 player 页最多跟进 5 个竞速。
+// CustomWebView.MAX_URLS：嵌套 player 页最多跟进 5 个竞速。
 const maxNestedPlayers = 5
 
 // 与 drpy2 顶层常量一致；嗅探展开 headers 魔串 MOBILE_UA/PC_UA/UA/UC_UA/IOS_UA。
@@ -763,7 +763,7 @@ func nestedFollowKey(u string) string {
 }
 
 // shouldFollowNestedPlayer 决定是否再开一层嗅探。
-// 对齐 TV：PLAYER 正则；并通用跟进跨站 Document/iframe（MacPlayer 等不保证 URL 含 "player"）。
+// PLAYER 正则；并通用跟进跨站 Document/iframe（MacPlayer 等不保证 URL 含 "player"）。
 func shouldFollowNestedPlayer(u, pageURL string, resType network.ResourceType) bool {
 	u = strings.TrimSpace(u)
 	if u == "" || sameURL(u, pageURL) {
@@ -823,7 +823,7 @@ func collectScripts(pageURL, click string, rules []model.Rule) []string {
 	if click != "" {
 		out = append(out, click)
 	}
-	// 对齐 TV Sniffer.getRule：page host + ?url= 内层 host
+	// Sniffer.getRule：page host + ?url= 内层 host
 	hosts := sniffHosts(pageURL)
 	for _, rule := range rules {
 		if !hostsMatched(hosts, rule.Hosts) {
@@ -918,7 +918,7 @@ func resolveSniffProfile(headers map[string]string) sniffProfile {
 	return sniffProfile{ua: ua, mobile: mobile, platform: platform}
 }
 
-// expandDrpyUA 对齐 drpy2：["MOBILE_UA","PC_UA","UC_UA","IOS_UA","UA"].includes(v) → eval(v)。
+// expandDrpyUA：["MOBILE_UA","PC_UA","UC_UA","IOS_UA","UA"].includes(v) → eval(v)。
 func expandDrpyUA(v string) string {
 	switch strings.ToUpper(strings.TrimSpace(v)) {
 	case "":
@@ -1136,7 +1136,7 @@ func hostOf(raw string) string {
 	return u.Hostname()
 }
 
-// sniffHosts 对齐 TV Sniffer.getRule：主 host + ?url= 内层 host，逗号拼接供 ContainOrMatch。
+// sniffHosts Sniffer.getRule：主 host + ?url= 内层 host，逗号拼接供 ContainOrMatch。
 func sniffHosts(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" {
@@ -1160,7 +1160,7 @@ func hostsMatched(hostsCSV string, patterns []string) bool {
 		if h == "" {
 			continue
 		}
-		// 对齐 TV Util.containOrMatch(hosts, host)
+		// Util.containOrMatch(hosts, host)
 		if util.ContainOrMatch(hostsCSV, h) {
 			return true
 		}

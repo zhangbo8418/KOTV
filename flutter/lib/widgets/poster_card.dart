@@ -5,7 +5,7 @@ import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 
-/// 对齐 Legacy poster：约 214×280、圆角 10、底栏标题、备注粉角标。
+/// poster：约 214×280、圆角 10、底栏标题、备注粉角标。
 class PosterCard extends StatelessWidget {
   const PosterCard({
     super.key,

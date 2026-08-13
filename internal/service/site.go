@@ -24,7 +24,7 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// PushAgentKey 对齐 TV SiteApi.PUSH：无站点配置时的推送入口。
+// PushAgentKey SiteApi.PUSH：无站点配置时的推送入口。
 const PushAgentKey = "push_agent"
 
 // SiteService 站点内容服务，站点内容服务。
@@ -256,7 +256,7 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 		site = &h
 	}
 
-	// 对齐 TV SiteApi.detailContent：push_agent 把 id 当播放地址。
+	// SiteApi.detailContent：push_agent 把 id 当播放地址。
 	if site.Key == PushAgentKey {
 		id := vod.VodID.String()
 		detail := model.Vod{
@@ -334,7 +334,7 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 	var result model.Result
 	var err error
 
-	// 对齐 TV：push_agent 直接把 id 当 url，再走 Source.fetch。
+	// push_agent 直接把 id 当 url，再走 Source.fetch。
 	if site.Key == PushAgentKey {
 		id = normalizePlayID(site, id)
 		result = model.Result{
@@ -347,7 +347,7 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 	} else {
 		switch site.TypeID() {
 		case 3:
-			// 对齐 TV：type=3 spider（JS/PY）传参阶段不强制把剧集 id 补成绝对 URL，
+			// type=3 spider（JS/PY）传参阶段不强制把剧集 id 补成绝对 URL，
 			// 让 spider 自己按 TV 的输入形态拼接/解析。
 			sp := s.cfg.Spider(site)
 			vipFlags := s.cfg.API().Flags
@@ -405,7 +405,7 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 		}
 	}
 
-	// 对齐 TV Result.setHeader：仅当结果头为空时写入站点头。
+	// Result.setHeader：仅当结果头为空时写入站点头。
 	result.Header = mergeHeaders(site.Header, result.Header)
 	if result.Flag == "" && flag != "" {
 		result.Flag = flag
@@ -479,7 +479,7 @@ func resolvePlayAbsolute(id string, bases ...string) string {
 	return id
 }
 
-// applySourceFetch 对齐 TV Source.fetch：特殊 scheme / .strm 预处理后再二次解析/起播。
+// applySourceFetch Source.fetch：特殊 scheme / .strm 预处理后再二次解析/起播。
 // - video:// → 剥前缀 + parse=1（逼宿主嗅探）
 // - push://  → 剥前缀 + parse=0（桌面直接播内层 URL；TV 会新开 VideoActivity）
 // - *.strm  → 读文本首行真实地址 + parse=0
@@ -737,14 +737,14 @@ func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, pa
 }
 
 func mergeHeaders(siteHdr, resultHdr model.FlexHeader) model.FlexHeader {
-	// 对齐 TV Result.setHeader：结果已有头则保留，否则用站点头。
+	// Result.setHeader：结果已有头则保留，否则用站点头。
 	if len(resultHdr) == 0 {
 		return siteHdr
 	}
 	return resultHdr
 }
 
-// Action 对齐 TV SiteApi.action：type3 爬虫；type4 把 action 当 URL GET；其它空。
+// Action SiteApi.action：type3 爬虫；type4 把 action 当 URL GET；其它空。
 func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	action = strings.TrimSpace(action)
 	switch site.TypeID() {
@@ -760,7 +760,7 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	}
 }
 
-// IsVideoFormat 对齐 TV CustomWebView.isVideoFormat：
+// IsVideoFormat CustomWebView.isVideoFormat：
 // sniffer() 为真 → 爬虫 isVideo；否则 Sniffer.isVideoFormat（含配置 rules.regex/exclude）。
 func (s *SiteService) IsVideoFormat(site model.Site, u string) bool {
 	sp := s.cfg.Spider(site)

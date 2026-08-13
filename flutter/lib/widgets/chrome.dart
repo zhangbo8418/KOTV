@@ -24,7 +24,7 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
   @override
   void initState() {
     super.initState();
-    // 对齐 Legacy：配置壁纸（如每日 bing）定时刷新。
+    // 配置壁纸（如每日 bing）定时刷新。
     _wallTimer = Timer.periodic(const Duration(minutes: 30), (_) {
       if (!mounted) return;
       ref.invalidate(settingsProvider);
@@ -251,7 +251,7 @@ class AppPill extends StatelessWidget {
   }
 }
 
-/// 彩色功能卡：对齐 Legacy newTVFeatureCard（纯色半透明底 + 描边，非渐变）。
+/// 彩色功能卡：newTVFeatureCard（纯色半透明底 + 描边，非渐变）。
 class FeatureCard extends StatelessWidget {
   const FeatureCard({
     super.key,
@@ -396,7 +396,7 @@ class SectionTitle extends StatelessWidget {
   }
 }
 
-/// 详情选集芯片：对齐 Legacy newDetailEpisodeChip（半透明紫底 / 选中粉底）。
+/// 详情选集芯片：newDetailEpisodeChip（半透明紫底 / 选中粉底）。
 class EpisodeChip extends StatelessWidget {
   const EpisodeChip({
     super.key,

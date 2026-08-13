@@ -76,7 +76,7 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 对齐 TV LiveConfig：根 JSON 可含 ads/rules/lives，合并进 RuleConfig。
+	// LiveConfig：根 JSON 可含 ads/rules/lives，合并进 RuleConfig。
 	if meta, ok := ParseConfigMeta(text); ok {
 		parsepkg.SetLiveAds(meta.Ads)
 		parsepkg.SetLiveRules(meta.Rules)

@@ -233,7 +233,7 @@ EOF
 }
 
 # --- Python (python-build-standalone / Win7 embed) ---
-# 依赖与 TV/chaquo/requirements.txt 对齐，见 scripts/python-requirements.txt
+# 依赖清单见 scripts/python-requirements.txt
 patch_windows_python_pth() {
   local dest="$1"
   local pth
@@ -278,7 +278,7 @@ install_python_packages() {
     patch_windows_python_pth "$dest"
   fi
 
-  echo "[python] installing spider dependencies → $target (TV/chaquo 对齐) ..."
+  echo "[python] installing spider dependencies → $target ..."
 
   # Windows embed：始终 --target，避免 pip 装到用户目录或装不上
   # 跨平台（在 mac/linux 上为 windows 备包）：host pip + --platform

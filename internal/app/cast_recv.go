@@ -27,7 +27,7 @@ func (a *App) ApplyRemoteCast(configJSON, historyJSON string) {
 	}
 	_ = a.DB.SaveHistory(h)
 
-	// 有可播直链时直接起播；否则打开详情（对齐 TV VideoActivity.cast）。
+	// 有可播直链时直接起播；否则打开详情（VideoActivity.cast）。
 	if h.EpisodeURL != "" && server.MatchPushURL(h.EpisodeURL) && !IsEphemeralPlayURL(h.EpisodeURL) {
 		if err := a.PlayHistory(h); err == nil {
 			remote.NotifyPush()

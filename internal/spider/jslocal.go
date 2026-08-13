@@ -9,10 +9,10 @@ import (
 	"github.com/bobo/KOTV/internal/paths"
 )
 
-// 对齐 TV Local：Prefers key = cache_{rule}_{key}（rule 空则 cache_{key}），全局共享、无 siteKey。
+// Local：Prefers key = cache_{rule}_{key}（rule 空则 cache_{key}），全局共享、无 siteKey。
 var jsLocalMu sync.Mutex
 
-// jsLocalPrefersKey 对齐 TV Local.getKey。
+// jsLocalPrefersKey Local.getKey。
 func jsLocalPrefersKey(rule, key string) string {
 	if rule == "" {
 		return "cache_" + key

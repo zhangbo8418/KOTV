@@ -411,7 +411,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	var qualNames, qualURLs []string
 	var playDrm *model.Drm
 
-	// 对齐 TV：一律先 SiteApi.playerContent（含站点 Header/PlayURL/parse），再 Source.fetch / ParseJob。
+	// 一律先 SiteApi.playerContent（含站点 Header/PlayURL/parse），再 Source.fetch / ParseJob。
 	// 仅磁力可先占位，真正取流仍在后面 thunder.Fetch。
 	if thunder.Match(epURL) {
 		playURL = epURL
@@ -485,7 +485,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	mediaURL := playURL
 	magnet := thunder.Match(playURL)
 	if magnet {
-		// 对齐 TV：起播前 Source.stop，确保可被 cancelPending / 换集打断
+		// 起播前 Source.stop，确保可被 cancelPending / 换集打断
 		thunder.Stop()
 		local, err := thunder.Fetch(playURL)
 		if err != nil {

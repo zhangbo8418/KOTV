@@ -7,7 +7,7 @@ import com.github.catvod.Init;
 
 /**
  * App CL 宿主 Prefers（迅雷 AAR + 站点父优先都会命中本类）。
- * API 对齐 TV/bridge，避免瘦 shim 盖住 bridge 实现后缺方法。
+ * API /bridge，避免瘦 shim 盖住 bridge 实现后缺方法。
  */
 public class Prefers {
 

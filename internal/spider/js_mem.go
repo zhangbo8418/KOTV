@@ -13,7 +13,7 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// 对齐 TV Module.java：LruCache(50) + http / assets:// / lib/ 取源。
+// Module.java：LruCache(50) + http / assets:// / lib/ 取源。
 const jsMemMaxEntries = 50
 
 var (
@@ -73,7 +73,7 @@ func jsMemSet(key, source string) {
 	jsMemOrder = append(jsMemOrder, key)
 }
 
-// assetLibs 对齐 TV assets/js/lib/*（内存 embed，不落盘）。
+// assetLibs assets/js/lib/*（内存 embed，不落盘）。
 func assetLibs() map[string]string {
 	return map[string]string{
 		"cat.js":         jsCat,
@@ -97,7 +97,7 @@ func readAssetLib(name string) string {
 	return ""
 }
 
-// moduleFetch 对齐 TV Module.fetch（仅内存 LruCache，无磁盘缓存）。
+// moduleFetch Module.fetch（仅内存 LruCache，无磁盘缓存）。
 func moduleFetch(name string) string {
 	if name == "" {
 		return ""
@@ -223,7 +223,7 @@ func looksLikeNonJS(content string) bool {
 		strings.Contains(lower, "access denied")
 }
 
-// moduleNormalize 对齐 TV UriUtil.resolve(base, name)（含 lib/ 相对解析）。
+// moduleNormalize UriUtil.resolve(base, name)（含 lib/ 相对解析）。
 func moduleNormalize(base, name string) string {
 	if name == "" {
 		return base
@@ -234,7 +234,7 @@ func moduleNormalize(base, name string) string {
 	return util.UriResolve(base, name)
 }
 
-// createSpiderObj 对齐 TV Spider.createObj：
+// createSpiderObj Spider.createObj：
 // createFun(pdfh) → evaluateModule(api) → evaluateModule(spider.js % api)。
 // 依赖由 installTVModuleLoader 按需 Module.fetch（同 TV BytecodeModuleLoader）。
 func createSpiderObj(ctx *qjs.Context, api string) (isCat bool, err error) {
@@ -258,12 +258,12 @@ func createSpiderObj(ctx *qjs.Context, api string) (isCat bool, err error) {
 	content = strings.ReplaceAll(content, "__JS_SPIDER__", "globalThis.__JS_SPIDER__")
 	jsLog("[js] eval api=%s cat=%v bytes=%d", api, isCat, len(content))
 
-	// 对齐 TV createFun：先挂 pdfh，再加载蜘蛛
+	// createFun：先挂 pdfh，再加载蜘蛛
 	if err := ensurePDFH(ctx); err != nil {
 		jsLog("[js] ensurePDFH fail: %v", err)
 		return isCat, err
 	}
-	// 对齐 TV evaluateModule：走 Eval(MODULE)，勿用 LoadModule 字节码 roundtrip
+	// evaluateModule：走 Eval(MODULE)，勿用 LoadModule 字节码 roundtrip
 	//（后者在大模块上会导致后续 import 报 property is not configurable）。
 	if err := evalJSModule(ctx, content, api); err != nil {
 		jsLog("[js] evaluateModule api fail: %v", err)
@@ -277,7 +277,7 @@ func createSpiderObj(ctx *qjs.Context, api string) (isCat bool, err error) {
 	return isCat, nil
 }
 
-// evalJSModule 对齐 TV QuickJSContext.evaluateModule。
+// evalJSModule QuickJSContext.evaluateModule。
 func evalJSModule(ctx *qjs.Context, code, filename string) error {
 	if code == "" {
 		return fmt.Errorf("空模块: %s", filename)

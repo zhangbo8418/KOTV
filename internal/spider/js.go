@@ -184,7 +184,7 @@ func (s *jsSpider) runWorker() (err error) {
 		}
 	}()
 
-	// 对齐 TV JsLoader → dex(jar) → createFun：worker 启动即 parseJar（Init+Proxy）。
+	// JsLoader → dex(jar) → createFun：worker 启动即 parseJar（Init+Proxy）。
 	jsLog("[js] worker start key=%s api=%s jar=%s", s.key, s.api, s.resolveJsJar())
 	if jar := s.resolveJsJar(); jar != "" {
 		if err := EnsureJar(jar); err != nil {
@@ -195,7 +195,7 @@ func (s *jsSpider) runWorker() (err error) {
 		}
 	}
 
-	// 对齐 TV Spider.createCtx：BytecodeModuleLoader + evaluateModule。
+	// Spider.createCtx：BytecodeModuleLoader + evaluateModule。
 	rt := qjs.NewRuntime()
 	if rt == nil {
 		return fmt.Errorf("QuickJS runtime 创建失败")
@@ -220,7 +220,7 @@ func (s *jsSpider) runWorker() (err error) {
 	defer ctx.Close()
 
 	s.registerHost(ctx)
-	// 对齐 TV：http.js 作全局脚本；crypto-js 为 UMD，同样按脚本注入全局。
+	// http.js 作全局脚本；crypto-js 为 UMD，同样按脚本注入全局。
 	for _, src := range []string{jsHTTP, jsCrypto} {
 		if src == "" {
 			continue
@@ -234,7 +234,7 @@ func (s *jsSpider) runWorker() (err error) {
 		v.Free()
 	}
 
-	// 对齐 TV Spider.createObj
+	// Spider.createObj
 	isCat, err := createSpiderObj(ctx, s.api)
 	if err != nil {
 		jsLog("[js] createObj fail key=%s api=%s err=%v", s.key, s.api, err)
@@ -280,7 +280,7 @@ func (s *jsSpider) runWorker() (err error) {
 		}
 		s.clearTimers()
 	}()
-	// 对齐 TV：createObj 后立即 init
+	// createObj 后立即 init
 	if _, err := s.callOn(ctx, spider, "init", s.initArg()); err != nil {
 		jsLog("[js] init fail key=%s err=%v", s.key, err)
 		return fmt.Errorf("JS init 失败: %w", err)
@@ -383,7 +383,7 @@ func (s *jsSpider) callOn(ctx *qjs.Context, spider *qjs.Value, method string, ar
 		if fn != nil {
 			fn.Free()
 		}
-		// init/destroy/action/sniffer/isVideo 可选（对齐 TV 默认空实现）
+		// init/destroy/action/sniffer/isVideo 可选（默认空实现）
 		if method == "init" || method == "destroy" || method == "action" ||
 			method == "sniffer" || method == "isVideo" {
 			return "", nil
@@ -456,7 +456,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		if len(args) > 1 {
 			child = args[1].String()
 		}
-		// 对齐 TV Global.joinUrl → UriUtil.resolve
+		// Global.joinUrl → UriUtil.resolve
 		return c.NewString(util.UriResolve(parent, child))
 	}))
 	g.Set("getPort", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
@@ -474,7 +474,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		return c.NewBool(true)
 	}))
 	g.Set("getProxy", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
-		// 对齐 TV Global.getProxy：Proxy.getUrl(local)+"?do=js"
+		// Global.getProxy：Proxy.getUrl(local)+"?do=js"
 		local := true
 		if len(args) > 0 && !args[0].IsUndefined() && !args[0].IsNull() {
 			local = args[0].ToBool()
@@ -482,7 +482,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		return c.NewString(localproxy.BaseURL(local) + "?do=js")
 	}))
 	g.Set("js2Proxy", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
-		// 对齐 TV Global.js2Proxy：getProxy(!dynamic)+&from=catvod&…
+		// Global.js2Proxy：getProxy(!dynamic)+&from=catvod&…
 		dynamic, siteType, siteKey, u, headerJSON := false, 0, s.key, "", "{}"
 		if len(args) > 0 {
 			dynamic = args[0].ToBool()
@@ -506,7 +506,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		return c.NewString(fmt.Sprintf("%s?do=js&from=catvod&siteType=%d&siteKey=%s&header=%s&url=%s",
 			localproxy.BaseURL(!dynamic),
 			siteType,
-			siteKey, // 对齐 TV：siteKey 不 URLEncode
+			siteKey, // siteKey 不 URLEncode
 			javaURLEncode(headerJSON),
 			javaURLEncode(u),
 		))
@@ -542,7 +542,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		if len(args) > 4 {
 			key = args[4].String()
 		}
-		// 对齐 TV：iv == null 时 Cipher.init 不带 IvParameterSpec（ECB）
+		// iv == null 时 Cipher.init 不带 IvParameterSpec（ECB）
 		if len(args) > 5 && args[5] != nil && !args[5].IsNull() && !args[5].IsUndefined() {
 			s := args[5].String()
 			iv = &s
@@ -597,7 +597,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 			}()
 		})
 	}))
-	// 对齐 TV Global.setTimeout：宿主 Timer，Destroy 时全部取消
+	// Global.setTimeout：宿主 Timer，Destroy 时全部取消
 	g.Set("setTimeout", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		if len(args) == 0 || !args[0].IsFunction() {
 			return c.NewInt32(0)
@@ -703,7 +703,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 	console.Set("debug", logFn("[js-debug]"))
 	g.Set("console", console)
 
-	// local.get/set/delete — 对齐 TV：全局 cache_rule_key，无 siteKey
+	// local.get/set/delete — 全局 cache_rule_key，无 siteKey
 	local := ctx.NewObject()
 	local.Set("get", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		rule, key := "", ""
@@ -742,7 +742,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 	}))
 	g.Set("local", local)
 
-	// xpath 宿主（对齐 jar Function 的 / 规则）；parser.js 优先调用。
+	// xpath 宿主（/ 规则）；parser.js 优先调用。
 	g.Set("__xpathHtml", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		html, expr := "", ""
 		if len(args) > 0 {
@@ -780,7 +780,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		return v
 	}))
 
-	// 对齐 TV createFun：优先走 jar 内 Parser/Function（bridge jsParse），失败由 parser.js 回落。
+	// createFun：优先走 jar 内 Parser/Function（bridge jsParse），失败由 parser.js 回落。
 	jar := s.resolveJsJar()
 	g.Set("__jarPdfh", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		html, rule := "", ""
@@ -938,7 +938,7 @@ func parseJSRequest(args []*qjs.Value) (string, jsHTTPRequest) {
 	if len(args) <= 1 || args[1] == nil || !args[1].IsObject() {
 		return u, options
 	}
-	// 对齐 TV Req.objectFrom(options.stringify())：整包 JSON 解析，避免 redirect:0 等被逐字段漏读。
+	// Req.objectFrom(options.stringify())：整包 JSON 解析，避免 redirect:0 等被逐字段漏读。
 	raw := strings.TrimSpace(args[1].JSONStringify())
 	if raw == "" || raw == "undefined" || raw == "null" {
 		return u, options
@@ -1019,7 +1019,7 @@ func parseJSRequest(args []*qjs.Value) (string, jsHTTPRequest) {
 }
 
 func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
-	// 对齐 TV Connect.error：code 为空字符串（脚本 if (!res.code) 才成立）
+	// Connect.error：code 为空字符串（脚本 if (!res.code) 才成立）
 	jsError := func() map[string]interface{} {
 		return map[string]interface{}{
 			"code":    "",
@@ -1087,7 +1087,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	for k, v := range options.Headers {
 		req.Header.Set(k, v)
 	}
-	// 对齐 TV：脚本未带 UA 时走 OkHttp 默认类 UA，避免 Go-http-client 被拦
+	// 脚本未带 UA 时走 OkHttp 默认类 UA，避免 Go-http-client 被拦
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", "okhttp/4.12.0")
 	}
@@ -1101,7 +1101,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	if options.Redirect == 0 {
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	} else {
-		// 对齐 TV network interceptor：跟随重定向时仍记录 302→原 URL 映射
+		// network interceptor：跟随重定向时仍记录 302→原 URL 映射
 		client.CheckRedirect = trackJSRedirects
 	}
 	resp, err := client.Do(req)
@@ -1127,7 +1127,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	}
 	hdrs := map[string]interface{}{}
 	for k, vv := range hdrSrc {
-		// 对齐 OkHttp toMultimap：头名小写，供 headers['content-type'] 等读取
+		// 头名小写，供 headers['content-type'] 等读取
 		lk := strings.ToLower(k)
 		if len(vv) == 1 {
 			hdrs[lk] = vv[0]
@@ -1136,14 +1136,14 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 		}
 	}
 	result["headers"] = hdrs
-	// 对齐 TV Req.getCharset：只看请求头 Content-Type
+	// Req.getCharset：只看请求头 Content-Type
 	charset := options.Charset
 	if charset == "" {
 		charset = charsetFromHeaders(options.Headers)
 	}
 	switch options.Buffer {
 	case 1:
-		// 对齐 TV JSUtil.toArray(byte[])：Java signed byte → -128..127
+		// JSUtil.toArray(byte[])：Java signed byte → -128..127
 		content := make([]int, len(b))
 		for i := range b {
 			content[i] = int(int8(b[i]))
@@ -1152,7 +1152,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	case 2:
 		result["content"] = base64Std(b)
 	case 3:
-		// 对齐 TV：原始 byte[] → QuickJS ArrayBuffer（Marshal []byte）
+		// 原始 byte[] → QuickJS ArrayBuffer（Marshal []byte）
 		result["content"] = append([]byte(nil), b...)
 	default:
 		result["content"] = decodeJSResponse(b, charset, "")
@@ -1175,7 +1175,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	return result
 }
 
-// javaURLEncode 对齐 Java URLEncoder.encode(…, UTF-8)：空格为 +。
+// javaURLEncode：与 Java URLEncoder.encode(…, UTF-8) 一致，空格为 +。
 func javaURLEncode(s string) string {
 	return strings.ReplaceAll(url.QueryEscape(s), "%20", "+")
 }
@@ -1216,7 +1216,7 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 			jsLog("[js] invoke err key=%s method=%s cost=%s err=%v", s.key, method, cost, r.err)
 			return "{}", r.err
 		}
-		// action/sniffer/isVideo 允许空串（对齐 TV null/false）；其它业务空结果抬成 "{}"
+		// action/sniffer/isVideo 允许空串（null/false）；其它业务空结果抬成 "{}"
 		if r.out == "" && method != "action" && method != "sniffer" && method != "isVideo" {
 			jsLog("[js] invoke empty→{} key=%s method=%s cost=%s", s.key, method, cost)
 			return "{}", nil
@@ -1236,7 +1236,7 @@ func (s *jsSpider) interrupt() {
 
 func (s *jsSpider) Init(ext string) error {
 	s.ext = ext
-	// EnsureJar 已在 runWorker 对齐 TV dex；此处保留以防 Init 早于 worker。
+	// EnsureJar 已在 runWorker dex；此处保留以防 Init 早于 worker。
 	if jar := s.resolveJsJar(); jar != "" {
 		if err := EnsureJar(jar); err != nil {
 			log.Printf("js spider dex(jar) failed key=%s: %v", s.key, err)

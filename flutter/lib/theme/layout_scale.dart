@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// 桌面默认可缩窗口下限（可模拟手机竖/横屏）；迷你窗可临时更小。
 const Size kotvMinWindowSize = Size(320, 280);
 
-/// 对齐 Legacy 默认窗口 1280×720：随窗口宽度等比缩放布局尺寸。
+/// 默认窗口 1280×720：随窗口宽度等比缩放布局尺寸。
 /// 文字走 [MediaQuery.textScaler]；间距/高度/图标用 [s]/[of]。
 class LayoutScale extends InheritedWidget {
   const LayoutScale({super.key, required this.scale, required super.child});

@@ -9,7 +9,7 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// 对齐 TV RuleConfig：vod + live 的 ads/rules 合并后供嗅探使用。
+// RuleConfig：vod + live 的 ads/rules 合并后供嗅探使用。
 var (
 	ruleMu    sync.RWMutex
 	vodAds    []string

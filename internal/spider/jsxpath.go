@@ -7,7 +7,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// xpathNodes 对齐 jar Function：parse 以 / 开头时走 xpath。
+// xpathNodes：parse 以 / 开头时走 xpath。
 func xpathNodes(docHTML, expr string) []*html.Node {
 	expr = strings.TrimSpace(expr)
 	if expr == "" || docHTML == "" {

@@ -403,7 +403,7 @@ class MediaKitPlayback extends KotvPlayback {
     _speedBps = 0;
     _lastCacheBytes = -1;
     _lastCacheAt = null;
-    // DRM 需 Exo（对齐 TV requiresExo）；MPV 无法解 Widevine/PlayReady
+    // DRM 需 Exo（requiresExo）；MPV 无法解 Widevine/PlayReady
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }

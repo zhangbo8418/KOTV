@@ -788,7 +788,7 @@ public class Util {
     public static void copy(String text) {
         try {
             android.content.ClipboardManager manager = (android.content.ClipboardManager) Init.context().getSystemService(android.content.Context.CLIPBOARD_SERVICE);
-            manager.setPrimaryClip(android.content.ClipData.newPlainText("fongmi", text));
+            manager.setPrimaryClip(android.content.ClipData.newPlainText("kotv", text));
             notify("已复制");
         } catch (Exception e) {
             e.printStackTrace();

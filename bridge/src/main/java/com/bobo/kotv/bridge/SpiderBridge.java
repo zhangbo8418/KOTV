@@ -130,7 +130,7 @@ public class SpiderBridge {
     }
 
     /**
-     * HTTP 常驻：Go 多客户端可并发 POST /jar/call（对齐 Android SpiderService）。
+     * HTTP 常驻：Go 多客户端可并发 POST /jar/call。
      * 仍保留 --serve-stdio 供调试。
      */
     private static void serveHttp(int port) throws IOException {
@@ -334,13 +334,13 @@ public class SpiderBridge {
                     jar = req.get("jar").getAsString();
                 }
                 if (jar != null && !jar.isEmpty()) {
-                    // 对齐 TV BaseLoader.parseJar(jar, true)：加载后再设 recent。
+                    // BaseLoader.parseJar(jar, true)：加载后再设 recent。
                     parseJar(jar);
                     recentJar = jar;
                 }
                 return "{}";
             }
-            // 对齐 TV JarLoader.parseJar / dex：只确保 ClassLoader+Init+Proxy，不改 recent。
+            // JarLoader.parseJar / dex：只确保 ClassLoader+Init+Proxy，不改 recent。
             if ("parseJar".equals(method)) {
                 String jar = "";
                 if (argsObj.has("jar") && !argsObj.get("jar").isJsonNull()) {
@@ -365,7 +365,7 @@ public class SpiderBridge {
                         ? argsObj.get("url").getAsString() : "");
                 return "{}";
             }
-            // 对齐 TV JarLoader.jsonExt / jsonExtMix：只用 recent ClassLoader，不走 getSpider。
+            // JarLoader.jsonExt / jsonExtMix：只用 recent ClassLoader，不走 getSpider。
             if ("jsonExt".equals(method)) {
                 String parseKey = argsObj.get("parseKey").getAsString();
                 LinkedHashMap<String, String> jxs = GSON.fromJson(argsObj.get("jxs"), LinkedHashMap.class);
@@ -381,7 +381,7 @@ public class SpiderBridge {
                 String url = argsObj.get("url").getAsString();
                 return invokeJsonExtMix(parseKey, name, flag, jxs, url);
             }
-            // 对齐 TV JsLoader.createFun：从 jar ClassLoader 调 pdfh/pdfa/pd/pdfl（Go QJS 经 RPC）。
+            // JsLoader.createFun：从 jar ClassLoader 调 pdfh/pdfa/pd/pdfl（Go QJS 经 RPC）。
             if ("jsParse".equals(method)) {
                 return invokeJsParse(argsObj);
             }
@@ -390,7 +390,7 @@ public class SpiderBridge {
             String ext = req.has("ext") ? req.get("ext").getAsString() : "";
             String jar = req.get("jar").getAsString();
             Spider spider = getSpider(key, api, ext, jar);
-            // 对齐 TV：recent 只由 parseJar(recent=true)/setRecent/Site.recent 更新，
+            // recent 只由 parseJar(recent=true)/setRecent/Site.recent 更新，
             // 不在每次 spider 方法调用时覆盖（避免并行多 jar 时 Mix/Json 抖 recent）。
             return invoke(spider, method, argsObj, jar);
         } catch (Throwable t) {
@@ -468,7 +468,7 @@ public class SpiderBridge {
     }
 
     private static Spider getSpider(String key, String api, String ext, String jarPath) throws Exception {
-        // spKey = md5(jar) + siteKey；对齐 TV JarLoader.getSpider。
+        // spKey = md5(jar) + siteKey；JarLoader.getSpider。
         String spKey = md5Hex(jarPath) + key;
         Spider cached = spiders.get(spKey);
         if (cached != null && !(cached instanceof SpiderNull)) {
@@ -481,7 +481,7 @@ public class SpiderBridge {
             if (loader == null) {
                 throw new IllegalStateException("No jar loaded: " + jarPath);
             }
-            // 对齐 TV：api.split("csp_")[1]
+            // api.split("csp_")[1]
             String[] parts = api.split("csp_", 2);
             String spiderName = parts.length > 1 ? parts[1] : api;
             String className = "com.github.catvod.spider." + spiderName;
@@ -506,7 +506,7 @@ public class SpiderBridge {
     }
 
     /**
-     * 对齐 TV JarLoader.parseJar：同一 jar 只加载一次，创建 ClassLoader 并调用 Init / 注册 Proxy。
+     * JarLoader.parseJar：同一 jar 只加载一次，创建 ClassLoader 并调用 Init / 注册 Proxy。
      * 桌面用 URLClassLoader 代替 DexClassLoader。
      */
     private static void parseJar(String jarPath) {
@@ -544,7 +544,7 @@ public class SpiderBridge {
     }
 
     /**
-     * 对齐官方 FongMi / TV JarLoader.getSpider：
+     * JarLoader.getSpider：
      * {@code spider.init(App.get(), ext)} → {@link Spider#init(Context, String)}。
      * 官方蜘蛛均 override 该方法读取 extend；基类默认只转发 {@link Spider#init(Context)}。
      */
@@ -570,7 +570,7 @@ public class SpiderBridge {
     }
 
     /**
-     * Desktop site ClassLoader. Default parent-first（对齐 TV DexClassLoader）：
+     * Desktop site ClassLoader. Default parent-first（DexClassLoader）：
      * 站点 jar 不含宿主 Util/OkHttp，由 bridge 提供。
      */
     private static final class SpiderClassLoader extends URLClassLoader {
@@ -606,7 +606,7 @@ public class SpiderBridge {
         Context c = ctx();
         File sealed = resolveSealedSiteJar(c, jarFile);
         ClassLoader parent = SpiderBridge.class.getClassLoader();
-        // 对齐 TV：标准父优先 DexClassLoader；宿主 API 在 bridge/App CL。
+        // 标准父优先 DexClassLoader；宿主 API 在 bridge/App CL。
         File opt;
         try {
             java.lang.reflect.Method getCodeCache = c.getClass().getMethod("getCodeCacheDir");
@@ -975,7 +975,7 @@ public class SpiderBridge {
     private static String invoke(Spider spider, String method, JsonObject args, String jar) throws Exception {
         switch (method) {
             case "init":
-                // getSpider 已 init；对齐 TV 不再二次 init。
+                // getSpider 已 init；不再二次 init。
                 return "{}";
             case "homeContent":
                 return emptyToObject(spider.homeContent(args.has("filter") && args.get("filter").getAsBoolean()));
@@ -1038,7 +1038,7 @@ public class SpiderBridge {
         return raw;
     }
 
-    /** 对齐 TV JarLoader.requireRecentLoader：Mix/Json 只从 recent jar 反射。 */
+    /** JarLoader.requireRecentLoader：Mix/Json 只从 recent jar 反射。 */
     private static ClassLoader requireRecentLoader() {
         String recent = recentJar;
         if (recent == null || recent.isEmpty()) {
@@ -1057,7 +1057,7 @@ public class SpiderBridge {
     }
 
     /**
-     * 对齐 TV createFun：用官方 FongMi jar 内 {@code com.github.catvod.js.utils.Parser}。
+     * createFun：用官方 jar 内 {@code com.github.catvod.js.utils.Parser}。
      * Go QuickJS 无法直接 new Java Function(whl.ctx)，故经 bridge RPC；失败由 parser.js 回落。
      */
     @SuppressWarnings("unchecked")

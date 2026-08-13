@@ -12,7 +12,7 @@ import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
 import 'shell.dart';
 
-/// 本机引擎用户管理（对齐 Web `/admin`）：鉴权/注册开关、账号 CRUD、改密。
+/// 本机引擎用户管理（`/admin`）：鉴权/注册开关、账号 CRUD、改密。
 class UserAdminScreen extends ConsumerStatefulWidget {
   const UserAdminScreen({super.key});
 

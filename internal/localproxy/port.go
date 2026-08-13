@@ -34,7 +34,7 @@ func Port() int {
 func BaseURL(local bool) string {
 	host := "127.0.0.1"
 	if !local {
-		// 对齐 TV Proxy.getUrl(false)：局域网 IP，供外设回调
+		// Proxy.getUrl(false)：局域网 IP，供外设回调
 		if ip := util.LanIP(); ip != "" {
 			host = ip
 		}

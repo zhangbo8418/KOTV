@@ -53,7 +53,7 @@ final settingsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   return ref.watch(apiProvider).getSettings();
 });
 
-/// 背景规格：优先 settings.backdrop（对齐 Legacy wallMode）。
+/// 背景规格：优先 settings.backdrop（wallMode）。
 final backdropProvider = Provider<Map<String, dynamic>>((ref) {
   final st = ref.watch(settingsProvider);
   return st.maybeWhen(
@@ -79,5 +79,5 @@ final pendingSearchProvider = StateProvider<String?>((ref) => null);
 
 final remoteBridgeProvider = StateProvider<RemoteBridge?>((ref) => null);
 
-/// 全局忙碌遮罩文案；非空时 shell 显示加载层（对齐 Legacy loadingHolder）。
+/// 全局忙碌遮罩文案；非空时 shell 显示加载层（loadingHolder）。
 final uiBusyProvider = StateProvider<String?>((ref) => null);

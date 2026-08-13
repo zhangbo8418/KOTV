@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// LanIP 对齐 TV Util.getIp：优先非回环 IPv4（wlan/eth 名优先）。
+// LanIP Util.getIp：优先非回环 IPv4（wlan/eth 名优先）。
 func LanIP() string {
 	ifaces, err := net.Interfaces()
 	if err != nil {

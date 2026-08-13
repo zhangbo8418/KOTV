@@ -129,7 +129,7 @@ func (m *Manager) GetSite(key string) *model.Site {
 	return nil
 }
 
-// GetLive 对齐 TV LiveConfig.getLive：按直播源 name 查找（proxy siteKey 用）。
+// GetLive LiveConfig.getLive：按直播源 name 查找（proxy siteKey 用）。
 func (m *Manager) GetLive(name string) *model.Live {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -371,7 +371,7 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	resolveSitePaths(&api)
 	resolveParsePaths(&api)
 	resolveApiAssets(&api)
-	// 对齐 TV VodConfig.setParses：非空时在首位插入超级解析（type=4）。
+	// VodConfig.setParses：非空时在首位插入超级解析（type=4）。
 	injectGodParse(&api)
 
 	visible := filterVisible(api.Sites)
@@ -545,7 +545,7 @@ func filterVisible(sites []model.Site) []model.Site {
 	return out
 }
 
-// injectGodParse 对齐 TV VodConfig.setParses：parses 非空时在首位插入超级解析。
+// injectGodParse VodConfig.setParses：parses 非空时在首位插入超级解析。
 func injectGodParse(api *model.Api) {
 	if api == nil || len(api.Parses) == 0 {
 		return
@@ -567,14 +567,14 @@ func resolveSitePaths(api *model.Api) {
 		if ext := strings.TrimSpace(site.Ext.String()); ext != "" {
 			site.Ext = model.FlexString(resolveSiteField(base, ext))
 		}
-		// 对齐 TV Site.objectFrom：jar 空则继承根 spider。
+		// Site.objectFrom：jar 空则继承根 spider。
 		if strings.TrimSpace(site.Jar) == "" {
 			site.Jar = spiderJar
 		} else {
 			site.Jar = resolveSiteField(base, site.Jar)
 		}
 	}
-	// 对齐 TV Live.objectFrom：直播 jar 空则继承根 spider。
+	// Live.objectFrom：直播 jar 空则继承根 spider。
 	for i := range api.Lives {
 		live := &api.Lives[i]
 		if strings.TrimSpace(live.API) != "" {
@@ -591,7 +591,7 @@ func resolveSitePaths(api *model.Api) {
 	}
 }
 
-// resolveParsePaths 对齐 TV Parse.getUrl → UrlUtil.convert：解析器 url 支持 assets/proxy/file/相对路径。
+// resolveParsePaths Parse.getUrl → UrlUtil.convert：解析器 url 支持 assets/proxy/file/相对路径。
 func resolveParsePaths(api *model.Api) {
 	if api == nil {
 		return

@@ -203,7 +203,7 @@ func IsLocalStream(u string) bool {
 	return strings.Contains(u, "/proxy/bt/")
 }
 
-// Stop 打断进行中的磁力 Fetch/解析等待（对齐 TV Source.stop → Thunder.stop）。
+// Stop 打断进行中的磁力 Fetch/解析等待（Source.stop → Thunder.stop）。
 // 不清理已落盘缓存；仅取消当前等待并停掉 Android 迅雷任务。
 func Stop() {
 	stopPlatform()

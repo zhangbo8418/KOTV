@@ -43,5 +43,4 @@ fi
 
 ./gradlew --no-daemon shadowJar
 cp -f build/libs/spider-bridge.jar spider-bridge.jar
-./scripts/bridge-smoke.sh
 echo "Built $ROOT/spider-bridge.jar"

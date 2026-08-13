@@ -163,7 +163,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     }
   }
 
-  /// 对齐 Legacy loadCategory：先切导航/清空列表，再异步加载。
+  /// loadCategory：先切导航/清空列表，再异步加载。
   void _switchCategory(String? tid) {
     final filters = <CategoryFilter>[];
     if (tid != null && tid.isNotEmpty) {
@@ -420,7 +420,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           onSettings: () => goKotvPage(ref, KotvPage.settings),
           onNews: () => showAppNews(context, remoteHint(ref)),
         ),
-        // 对齐 Legacy：未就绪不画分类导航
+        // 未就绪不画分类导航
         if (ready)
           CategoryNavBar(
             homeLabel: onHome ? '换源' : '首页',

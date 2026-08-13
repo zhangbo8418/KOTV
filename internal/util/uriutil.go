@@ -2,7 +2,7 @@ package util
 
 import "strings"
 
-// UriResolve 对齐 TV catvod UriUtil.resolve（ExoPlayer 同源算法）。
+// UriResolve catvod UriUtil.resolve（ExoPlayer 同源算法）。
 func UriResolve(baseUri, referenceUri string) string {
 	if baseUri == "" {
 		baseUri = ""
@@ -119,7 +119,7 @@ func removeDotSegments(uri []byte, offset, limit int) string {
 			limit -= nextSegmentStart - segmentStart
 			i = segmentStart
 		} else if i == segmentStart+2 && uri[segmentStart] == '.' && uri[segmentStart+1] == '.' {
-			// 对齐 Java：从 segmentStart-2 往前找上一段，避免命中「..」前的那个 /
+			// 从 segmentStart-2 往前找上一段，避免命中「..」前的那个 /
 			searchEnd := segmentStart - 1
 			if searchEnd < 0 {
 				searchEnd = 0

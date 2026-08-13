@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 
 import 'kotv_platform.dart';
 
-/// 缓冲浮层统一测速（对齐 TV [Traffic]：与播放器解耦）。
+/// 缓冲浮层统一测速（[Traffic]：与播放器解耦）。
 ///
 /// 累计字节来源（各自建基线，取最大正速度）：
 /// 1. Go 引擎 `/api/v1/net`（代理拉流真下行，全平台）

@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// aesX 对齐 TV Crypto.aes：mode+"Padding" 交给 JCE；短 key/iv 零填充。
+// aesX Crypto.aes：mode+"Padding" 交给 JCE；短 key/iv 零填充。
 // iv == nil 表示 JS null（ECB 场景）；非 nil 则按 CBC 等需 IV 的算法传入。
 func aesX(mode string, encrypt bool, input string, inBase64 bool, key string, iv *string, outBase64 bool) string {
 	data := []byte(input)
@@ -116,7 +116,7 @@ func base64Std(data []byte) string {
 
 func decodeJSBase64(text string) ([]byte, error) {
 	text = strings.TrimSpace(text)
-	// 对齐 TV：先把 URL-safe 字符还原再按标准 Base64 解
+	// 先把 URL-safe 字符还原再按标准 Base64 解
 	normalized := strings.NewReplacer("-", "+", "_", "/").Replace(text)
 	if b, err := base64.StdEncoding.DecodeString(normalized); err == nil {
 		return b, nil
@@ -130,7 +130,7 @@ func decodeJSBase64(text string) ([]byte, error) {
 	return base64.URLEncoding.DecodeString(text)
 }
 
-// rsaX 对齐 TV Crypto.rsa。
+// rsaX Crypto.rsa。
 // 标准 pub+encrypt / priv+decrypt 走 Go crypto/rsa；
 // 反向（priv 加密 / pub 解密）无标准 API，用原始 RSA 模幂尽力对齐（尤其 NoPadding）。
 func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key string, outBase64 bool) string {
@@ -209,7 +209,7 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 	return string(out)
 }
 
-// parseRSAKeyBytes 对齐 TV Crypto.generateKey：支持 PEM 或剥头后的裸 base64。
+// parseRSAKeyBytes Crypto.generateKey：支持 PEM 或剥头后的裸 base64。
 func parseRSAKeyBytes(key string) ([]byte, error) {
 	key = strings.TrimSpace(key)
 	if block, _ := pem.Decode([]byte(key)); block != nil {

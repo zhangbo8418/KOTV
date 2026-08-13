@@ -498,7 +498,7 @@ func (s *pySpider) interrupt() {
 }
 
 func (s *pySpider) Init(ext string) error {
-	// 对齐 TV PyLoader.getSpider：computeIfAbsent 后 init 只一次。
+	// PyLoader.getSpider：computeIfAbsent 后 init 只一次。
 	s.mu.Lock()
 	if s.inited {
 		s.mu.Unlock()

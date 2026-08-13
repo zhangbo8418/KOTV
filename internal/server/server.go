@@ -192,7 +192,7 @@ func safeAssetPath(rel string) (string, bool) {
 	return candidate, true
 }
 
-// handleParsePage 对齐 TV /parse?jxs=&url=：单页 iframe 竞速多个 type0 解析器。
+// handleParsePage /parse?jxs=&url=：单页 iframe 竞速多个 type0 解析器。
 func (s *Server) handleParsePage(w http.ResponseWriter, r *http.Request) {
 	jxs := r.URL.Query().Get("jxs")
 	u := r.URL.Query().Get("url")
@@ -388,7 +388,7 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		writeProxyResponse(w, status, contentType, body, headers)
 		return
 	}
-	// 对齐 TV BaseLoader.getSpider(key)：先 Site，再 Live。
+	// BaseLoader.getSpider(key)：先 Site，再 Live。
 	if site := cfg.GetSite(siteKey); site != nil && site.Key != "" {
 		status, contentType, body, headers, err := cfg.Spider(*site).Proxy(params)
 		if err != nil {

@@ -7,7 +7,7 @@ import '../player/kotv_traffic.dart';
 
 /// 缓冲中在画面中央显示转圈 + 实时网速。
 ///
-/// 对齐 TV：浮层自己用 [KotvTraffic] 测速（引擎累计 / UID / 桌面网卡），
+/// 浮层自己用 [KotvTraffic] 测速（引擎累计 / UID / 桌面网卡），
 /// 与各播放器内部计数解耦；播放器 [KotvPlayback.networkSpeedBps] 仅作最后兜底。
 class KotvBufferingOverlay extends StatefulWidget {
   const KotvBufferingOverlay({
@@ -76,7 +76,7 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
   void _ensureTicker(bool on) {
     if (on) {
       if (!_trafficArmed) {
-        // 对齐 TV showProgress：出现时 reset，再按秒差分。
+        // showProgress：出现时 reset，再按秒差分。
         KotvTraffic.reset();
         _trafficArmed = true;
         _speedBps = 0;

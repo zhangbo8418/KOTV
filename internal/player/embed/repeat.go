@@ -4,7 +4,7 @@ package embed
 
 import "sync/atomic"
 
-// 单集循环（对齐 TV ExoPlayer REPEAT_MODE_ONE）。
+// 单集循环（ExoPlayer REPEAT_MODE_ONE）。
 var repeatOne atomic.Bool
 
 // IsRepeatOne 当前是否单集循环。

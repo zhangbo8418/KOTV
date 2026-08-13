@@ -41,7 +41,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() {
       _histCount = hist.length;
       _keepCount = keeps.length;
-      // 对齐 Legacy progressLabel：个人中心最近观看角标「继续观看」
+      // progressLabel：个人中心最近观看角标「继续观看」
       _recent = hist.take(15).map((e) {
         final r = e.remarks.trim();
         if (r.isNotEmpty && r != '继续观看') return e;
@@ -136,7 +136,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           child: ListView(
             padding: EdgeInsets.fromLTRB(sidePad, 14 * s, sidePad, 24 * s),
             children: [
-              // 对齐 Legacy userCard：宽屏左信息+右三卡；窄屏上下堆叠
+              // userCard：宽屏左信息+右三卡；窄屏上下堆叠
               if (compact)
                 Column(
                   children: [

@@ -24,9 +24,9 @@ type Options struct {
 	Jar       string
 	Flag      string
 	Click     string // 结果自带 click
-	SiteClick string // 对齐 TV ParseJob.getClick：站点 click 优先
+	SiteClick string // ParseJob.getClick：站点 click 优先
 	Prefer    string // 用户指定解析器名称（空=自动）
-	IsVideo   func(string) bool // 对齐 TV CustomWebView：站点自定义 isVideo
+	IsVideo   func(string) bool // CustomWebView：站点自定义 isVideo
 }
 
 // AnnotateParseErr 避免「解析失败: 解析失败: …」重复包装。
@@ -83,7 +83,7 @@ func ShouldShowParseUI(r model.Result, flags []string, parses []model.Parse) boo
 	return IsUseParse(r, flags, parses)
 }
 
-// EpisodeURL 对齐 TV ParseJob：webUrl = result.getUrl().v()（不含 playUrl 前缀）。
+// EpisodeURL ParseJob：webUrl = result.getUrl().v()（不含 playUrl 前缀）。
 func EpisodeURL(r model.Result) string {
 	if len(r.URL.URLs) > 0 {
 		return r.URL.URLs[0]
@@ -109,7 +109,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	}
 
 	start := time.Now()
-	// 对齐 TV：doInBackground 的 webUrl 始终是 episode URL，json:/parse: 只改 selected parse。
+	// doInBackground 的 webUrl 始终是 episode URL，json:/parse: 只改 selected parse。
 	hdr := mergeHeaders(nil, map[string]string(r.Header))
 	webURL := EpisodeURL(r)
 	// 相对播放页：用结果头 Referer 拼绝对地址，避免 unsupported protocol scheme。
@@ -192,13 +192,13 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		}
 		return r, fmt.Errorf("解析失败: 无可用解析器")
 	}
-	// 对齐 TV checkResult：仅用 url.length() > 40 判断成功。
+	// checkResult：仅用 url.length() > 40 判断成功。
 	// （TV 不在该层做额外 rules/isVideo 校验；KOTV 这里收敛到同样的成功判定）
 	if len(parsed) <= 40 {
 		parseLog("[parse] invalid result via=%s out=%s", via, parsePreview(parsed, 160))
 		return r, fmt.Errorf("解析结果无效")
 	}
-	// 对齐 TV checkResult(needParse)→startWeb / CustomWebView：非直链播放页再嗅一次。
+	// checkResult(needParse)→startWeb / CustomWebView：非直链播放页再嗅一次。
 	mergedHdr := mergeHeaders(hdr, sniffHdr)
 	if reParsed, reHdr, reErr := resniffIfNeeded(parsed, mergedHdr, click, opts.Rules, opts.IsVideo); reErr != nil {
 		parseLog("[parse] re-sniff fail via=%s err=%v", via, reErr)
@@ -241,7 +241,7 @@ func looksLikeHTMLPlayPage(u string) bool {
 	return strings.Contains(lower, "/vod/play/") || strings.Contains(lower, "/index.php/vod/")
 }
 
-// matchVideo 优先走站点 isVideo（对齐 TV CustomWebView），否则走规则嗅探。
+// matchVideo 优先走站点 isVideo（CustomWebView），否则走规则嗅探。
 func matchVideo(u string, rules []model.Rule, check func(string) bool) bool {
 	if check != nil {
 		return check(u)
@@ -333,7 +333,7 @@ func resolveParse(r model.Result, parses []model.Parse, useParse bool, prefer st
 	if selected != nil && !selectedEmpty(selected) {
 		return selected
 	}
-	// 对齐 TV ParseJob.setParse：parse 为空 → Parse.get(0, playUrl)（可为无前缀，直接嗅探 episode）。
+	// ParseJob.setParse：parse 为空 → Parse.get(0, playUrl)（可为无前缀，直接嗅探 episode）。
 	return &model.Parse{Name: "inline", Type: model.FlexInt{Valid: true, Value: 0}, URL: playURL}
 }
 
@@ -355,7 +355,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 			parseLog("[parse] type1 fail name=%q err=%v cost=%s", p.Name, err, time.Since(start).Truncate(time.Millisecond))
 			return "", nil, err
 		}
-		// 对齐 TV checkResult fatal：url.length() > 40
+		// checkResult fatal：url.length() > 40
 		if u != "" && len(u) <= 40 {
 			parseLog("[parse] type1 too-short name=%q out=%q", p.Name, u)
 			return "", nil, fmt.Errorf("json 解析结果过短")
@@ -363,7 +363,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		parseLog("[parse] type1 ok name=%q out=%s cost=%s", p.Name, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 		return u, pickPlayHeaders(h), nil
 	case 0:
-		// 对齐 TV startWeb(key, parse, webUrl)：parse.getUrl() + webUrl
+		// startWeb(key, parse, webUrl)：parse.getUrl() + webUrl
 		target := strings.TrimSpace(p.URL) + webURL
 		if target == "" {
 			return "", nil, fmt.Errorf("无可嗅探地址")
@@ -404,7 +404,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		}
 		return u, pickPlayHeaders(h), nil
 	case 4:
-		// 对齐 TV ParseJob.superParse：type1（按 flag 筛）竞速 + type0 Web 嗅探。
+		// ParseJob.superParse：type1（按 flag 筛）竞速 + type0 Web 嗅探。
 		parseLog("[parse] type4 superParse flag=%q", flag)
 		return superParse(webURL, flag, headers, parses, rules, click, isVideo)
 	default:
@@ -412,7 +412,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 	}
 }
 
-// sniffParsedWeb 对齐 TV checkResult：jar 返回 needParse 时再走 Web 嗅探。
+// sniffParsedWeb checkResult：jar 返回 needParse 时再走 Web 嗅探。
 func sniffParsedWeb(pageURL string, headers map[string]string, click string, rules []model.Rule, isVideo func(string) bool) (string, map[string]string, error) {
 	pageURL = strings.TrimSpace(pageURL)
 	if pageURL == "" {
@@ -425,7 +425,7 @@ func sniffParsedWeb(pageURL string, headers map[string]string, click string, rul
 	return browserSniff(pageURL, headers, click, rules, defaultParseWebTimeout, detect, isVideo, 0)
 }
 
-// resniffIfNeeded 对齐 TV checkResult(Result.needParse)→startWeb：
+// resniffIfNeeded checkResult(Result.needParse)→startWeb：
 // 解析器返回的若是播放页/非直链，再走 http-sniff + Chromium（detect 同 CustomWebView）。
 func resniffIfNeeded(pageURL string, headers map[string]string, click string, rules []model.Rule, isVideo func(string) bool) (string, map[string]string, error) {
 	pageURL = strings.TrimSpace(pageURL)
@@ -443,7 +443,7 @@ func resniffIfNeeded(pageURL string, headers map[string]string, click string, ru
 	return u, h, nil
 }
 
-// superParse 对齐 TV ParseJob.superParse / getParses(type, flag)。
+// superParse ParseJob.superParse / getParses(type, flag)。
 func superParse(webURL, flag string, headers map[string]string, parses []model.Parse, rules []model.Rule, click string, isVideo func(string) bool) (string, map[string]string, error) {
 	jsons := getParses(parses, 1, flag)
 	webs := getParses(parses, 0, flag)
@@ -467,7 +467,7 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 			defer wg.Done()
 			hdr := mergeHeaders(headers, parseExtHeaders(p.Ext.String()))
 			u, h, err := JSONParseEx(p.URL, webURL, hdr)
-			// 对齐 TV checkResult：url.length() > 40 才算成功。
+			// checkResult：url.length() > 40 才算成功。
 			if err == nil && len(u) > 40 {
 				ch <- result{url: u, hdr: pickPlayHeaders(h)}
 			}
@@ -477,7 +477,7 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// 对齐 TV：单页 /parse?jxs=… 聚合 iframe 竞速，只开一次 Chromium tab。
+			// 单页 /parse?jxs=… 聚合 iframe 竞速，只开一次 Chromium tab。
 			var sb strings.Builder
 			for _, item := range webs {
 				sb.WriteString(strings.TrimSpace(item.URL))
@@ -510,7 +510,7 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 	return "", nil, fmt.Errorf("超级解析失败")
 }
 
-// getParses 对齐 TV VodConfig.getParses(type) / getParses(type, flag)。
+// getParses VodConfig.getParses(type) / getParses(type, flag)。
 func getParses(parses []model.Parse, typ int, flag string) []model.Parse {
 	var items []model.Parse
 	for _, p := range parses {
@@ -580,7 +580,7 @@ func parseExtEmpty(ext string) bool {
 	return len(obj.Flag) == 0 && len(obj.Header) == 0
 }
 
-// parseExtURL 对齐 TV Parse.extUrl：在 ? 后插入 cat_ext=base64url(ext)。
+// parseExtURL Parse.extUrl：在 ? 后插入 cat_ext=base64url(ext)。
 func parseExtURL(p model.Parse) string {
 	u := p.URL
 	ext := p.Ext.String()
@@ -620,7 +620,7 @@ func jarJSONExt(p model.Parse, webURL string, parses []model.Parse) (string, map
 	jxs := map[string]string{}
 	for _, cand := range parses {
 		if cand.TypeID() == 1 && cand.URL != "" {
-			// 对齐 TV ParseJob.jsonExtend：jxs 用 item.extUrl()
+			// ParseJob.jsonExtend：jxs 用 item.extUrl()
 			jxs[cand.Name] = parseExtURL(cand)
 		}
 	}
@@ -640,7 +640,7 @@ func jarJSONExtMix(p model.Parse, flag, webURL string, parses []model.Parse) (st
 			"ext":  cand.Ext.String(),
 		}
 	}
-	// 对齐 TV ParseJob.jsonMix：key = parse.getUrl()（如 Web → MixWeb）
+	// ParseJob.jsonMix：key = parse.getUrl()（如 Web → MixWeb）
 	raw, err := spider.JsonExtMix(flag, strings.TrimSpace(p.URL), p.Name, jxs, webURL)
 	if err != nil {
 		return "", nil, false, err
@@ -648,7 +648,7 @@ func jarJSONExtMix(p model.Parse, flag, webURL string, parses []model.Parse) (st
 	return extractPlayFromJSON(raw)
 }
 
-// extractPlayFromJSON 对齐 TV checkResult(Result)：抽 url/header，needParse 时需二次 Web。
+// extractPlayFromJSON checkResult(Result)：抽 url/header，needParse 时需二次 Web。
 func extractPlayFromJSON(raw string) (string, map[string]string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

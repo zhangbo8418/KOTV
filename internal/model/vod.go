@@ -46,7 +46,7 @@ func (v *Vod) IsFolder() bool {
 	return v.VodTag == "folder"
 }
 
-// IsAction 对齐 TV Vod.isAction：有 action 字段时走站点 action 而非详情。
+// IsAction Vod.isAction：有 action 字段时走站点 action 而非详情。
 func (v *Vod) IsAction() bool {
 	return strings.TrimSpace(v.Action) != ""
 }

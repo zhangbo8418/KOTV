@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import '../player/kotv_platform.dart';
 import 'kotv_palette.dart';
 
-/// 对齐 Legacy lumen 默认色板（兼容旧引用；新代码优先 [KotvPalette.of]）。
+/// lumen 默认色板（兼容旧引用；新代码优先 [KotvPalette.of]）。
 class KotvColors {
   static const bg = Color(0xFF243DD0);
   static const surface = Color(0xFF63248A);

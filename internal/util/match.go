@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// ContainOrMatch 文本包含 pattern，或整串匹配 pattern 正则（对齐 Java Util.containOrMatch：
+// ContainOrMatch 文本包含 pattern，或整串匹配 pattern 正则（
 // text.contains(regex) || text.matches(regex)；matches 为整串，非子串）。
 func ContainOrMatch(text, pattern string) bool {
 	if text == "" || pattern == "" {

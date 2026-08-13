@@ -117,7 +117,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _stoppedHard = false;
   /// 硬停完成后再允许真正出栈（配合 [PopScope]）。
   bool _allowPop = false;
-  /// 对齐 TV：每次 [_playAt] 一代；仅本代真正进入可播（≈STATE_READY）后才允许自动连播。
+  /// 每次 [_playAt] 一代；仅本代真正进入可播（≈STATE_READY）后才允许自动连播。
   int _playGen = 0;
   int _playAtSerial = 0;
   /// 本代是否已消费过「播完→下一集」（completed / 片尾共用，防连跳）。
@@ -311,7 +311,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playUrl = '';
     _magnetPlay = false;
     _stopBtProgressPoll();
-    // 对齐 TV Source.stop：离开详情硬杀运行时 + 停磁力
+    // Source.stop：离开详情硬杀运行时 + 停磁力
     unawaited(ref.read(apiProvider).cancelPending(hard: true, thunder: true));
 
     Future<void> hardStop(KotvPlayback? p) async {
@@ -382,7 +382,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     p.addListener(_playbackNotify!);
   }
 
-  /// 对齐 TV STATE_READY：本集真正开播后才允许片尾/completed 自动连播。
+  /// STATE_READY：本集真正开播后才允许片尾/completed 自动连播。
   /// 仅凭 width>0 不足（解码器探头即可有尺寸但黑屏），须进度真正前进。
   void _markPlaybackLiveIfNeeded() {
     if (_playUrl.isEmpty || _playbackLive) return;
@@ -398,7 +398,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
   }
 
-  /// 对齐 TV playbackEnded / onTimeChanged→nextEpisode：每集只前进一次。
+  /// playbackEnded / onTimeChanged→nextEpisode：每集只前进一次。
   Future<void> _advanceToNextEpisode() async {
     if (!mounted || _advanceBusy) return;
     if (!_playbackLive) return;
@@ -422,7 +422,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
   }
 
-  /// 对齐 TV：片头起播跳过；片尾 `ending+position>=duration` 切下一集。
+  /// 片头起播跳过；片尾 `ending+position>=duration` 切下一集。
   /// Clock 仅在 READY（[_playbackLive]）后生效，避免解析/换集中连跳。
   void _onPositionTick(Duration pos) {
     if (_playUrl.isEmpty || !mounted) return;
@@ -441,7 +441,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }
       if (pos.inMilliseconds >= openMs) _openingSeekDone = true;
     }
-    // 对齐 TV：ending > 0 && ending + position >= duration
+    // ending > 0 && ending + position >= duration
     if (endMs > 0 && pos.inMilliseconds + endMs >= dur.inMilliseconds) {
       _openingSeekDone = false;
       unawaited(_advanceToNextEpisode());
@@ -715,7 +715,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (epIdx < 0 || epIdx >= eps.length) return;
     final ep = eps[epIdx];
     _stoppedHard = false;
-    // 换集：抬世代，关掉 READY/连播（对齐 TV BUFFERING 时 Clock=null）
+    // 换集：抬世代，关掉 READY/连播（BUFFERING 时 Clock=null）
     final gen = ++_playGen;
     final serial = ++_playAtSerial;
     _playbackLive = false;
@@ -813,7 +813,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           _prefDecodeMode = decode;
         }
       } catch (_) {}
-      // 对齐 TV：有 DRM 强制 Exo（MPV/FVP 不解 Widevine）
+      // 有 DRM 强制 Exo（MPV/FVP 不解 Widevine）
       final startPlayer = (hasDrm && kotvIsAndroid())
           ? 'innie#exo'
           : _prefPlayerVal;
@@ -922,7 +922,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         name: d.name,
         episode: ep.name,
       ));
-      // 仍未 READY：等进度回调 _markPlaybackLiveIfNeeded（对齐 TV STATE_READY 才挂 Clock）
+      // 仍未 READY：等进度回调 _markPlaybackLiveIfNeeded（STATE_READY 才挂 Clock）
       _playbackLive = false;
       _sessionStartedAt = DateTime.now();
       _openingSeekDone = false;

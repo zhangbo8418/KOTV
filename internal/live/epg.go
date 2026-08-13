@@ -70,7 +70,7 @@ func (d EpgData) Range() string {
 	return "clock=" + fmtUTC(d.StartTime) + "-" + fmtUTC(end)
 }
 
-// SplitEpgURLs 对齐 TV Live.getEpgApi / getEpgXml：逗号拆分模板 API 与 XMLTV 文件。
+// SplitEpgURLs Live.getEpgApi / getEpgXml：逗号拆分模板 API 与 XMLTV 文件。
 func SplitEpgURLs(epg string) (apiTemplate string, xmlURLs []string) {
 	for _, part := range strings.Split(epg, ",") {
 		part = strings.TrimSpace(part)
@@ -225,7 +225,7 @@ func ParseEPG(text, key, date string) Epg {
 			return epg
 		}
 	}
-	// 简易 XML programme 片段（对齐 TV EpgParser.getEpg）
+	// 简易 XML programme 片段（EpgParser.getEpg）
 	if strings.Contains(text, "<programme") || strings.Contains(text, "<tv") {
 		if days, _, err := matchXMLTVDays([]byte(text), &model.LiveChannel{TvgID: key, Name: key}, date); err == nil {
 			for _, d := range days {
@@ -361,7 +361,7 @@ func matchXMLTVDays(data []byte, ch *model.LiveChannel, preferDate string) ([]Ep
 			ids[strings.ToLower(strings.TrimSpace(id))] = true
 		}
 	}
-	// display-name → channel id 桥接（对齐 TV findTargetChannel）
+	// display-name → channel id 桥接（findTargetChannel）
 	logo := ""
 	for _, c := range doc.Channels {
 		cid := strings.ToLower(strings.TrimSpace(c.ID))

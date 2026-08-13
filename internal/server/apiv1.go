@@ -158,7 +158,7 @@ func (s *Server) handleAPIv1Health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.APIHealth())
 }
 
-// handleAPIv1Net 缓冲浮层测速：代理累计下行字节（与播放器解耦，对齐 TV Traffic 思路）。
+// handleAPIv1Net 缓冲浮层测速：代理累计下行字节（与播放器解耦，Traffic 思路）。
 func (s *Server) handleAPIv1Net(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})

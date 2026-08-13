@@ -125,7 +125,7 @@ func setRecentJar(jarSpec string) {
 	notifyParseJar(dest, true)
 }
 
-// notifyParseJar 对齐 TV BaseLoader.parseJar(jar, recent)：真加载 ClassLoader+Init+Proxy，可选设 recent。
+// notifyParseJar BaseLoader.parseJar(jar, recent)：真加载 ClassLoader+Init+Proxy，可选设 recent。
 func notifyParseJar(jarPath string, recent bool) {
 	req := bridgeRequest{
 		Method: "parseJar",
@@ -143,7 +143,7 @@ func notifyJarRecent(jarPath string) {
 	notifyParseJar(jarPath, true)
 }
 
-// EnsureJar 对齐 TV JarLoader.dex：下载并 parseJar，不改 recent（供 JS 站挂 Function 用）。
+// EnsureJar JarLoader.dex：下载并 parseJar，不改 recent（供 JS 站挂 Function 用）。
 func EnsureJar(spec string, configBaseArg ...string) error {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
@@ -172,7 +172,7 @@ func LoadJar(spec string, configBaseArg ...string) error {
 		base = strings.TrimSpace(configBaseArg[0])
 		SetConfigBase(base)
 	}
-	// assets:// 根 spider：对齐 TV UrlUtil.convert，走本地代理。
+	// assets:// 根 spider：UrlUtil.convert，走本地代理。
 	if strings.HasPrefix(spec, "assets://") {
 		localBase := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
 		spec = localBase + "/" + strings.TrimPrefix(spec, "assets://")
@@ -184,7 +184,7 @@ func LoadJar(spec string, configBaseArg ...string) error {
 	jarMu.Lock()
 	jarPath = dest
 	jarMu.Unlock()
-	// 对齐 TV VodConfig.parseJar(spider, true)：ClassLoader+Init+Proxy 后设为 recent。
+	// VodConfig.parseJar(spider, true)：ClassLoader+Init+Proxy 后设为 recent。
 	notifyParseJar(dest, true)
 	return nil
 }
@@ -622,7 +622,7 @@ func JsonExtMix(flag, parseKey, name string, jxs map[string]map[string]string, w
 	})
 }
 
-// JsParse 对齐 TV createFun：从 jar ClassLoader 调 pdfh/pdfa/pd/pdfl（经 bridge RPC）。
+// JsParse createFun：从 jar ClassLoader 调 pdfh/pdfa/pd/pdfl（经 bridge RPC）。
 func JsParse(jar, op, html, rule, url, texts, urls string) (value string, list []string, err error) {
 	args := map[string]interface{}{
 		"op":    op,
@@ -654,7 +654,7 @@ func JsParse(jar, op, html, rule, url, texts, urls string) (value string, list [
 }
 
 func callJarMethod(method string, args map[string]interface{}) (string, error) {
-	// 对齐 TV：jsonExt/jsonExtMix 只依赖 Java 侧 recent ClassLoader，
+	// jsonExt/jsonExtMix 只依赖 Java 侧 recent ClassLoader，
 	// 不经 getSpider，也不用假 csp_Null 覆盖 recent。
 	req := bridgeRequest{
 		Method: method,

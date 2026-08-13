@@ -14,7 +14,7 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// jsRedirectMap 对齐 TV ResponseInterceptor.redirectMap：
+// jsRedirectMap ResponseInterceptor.redirectMap：
 // key = 302 Location（绝对 URL），value = 发起 302 的原始请求 URL。
 var jsRedirectMap sync.Map
 
@@ -105,7 +105,7 @@ func drainBody(resp *http.Response) []byte {
 	return b
 }
 
-// jsRequestTransport 关闭自动解压，以便对齐 TV 对 raw deflate 的处理。
+// jsRequestTransport 关闭自动解压，以便对 raw deflate 的处理。
 func jsRequestTransport() http.RoundTripper {
 	base := util.GetClient().Transport
 	if base == nil {
@@ -119,7 +119,7 @@ func jsRequestTransport() http.RoundTripper {
 	return &http.Transport{DisableCompression: true}
 }
 
-// decodeJSContentEncoding 对齐 TV ResponseInterceptor：gzip + Inflater(nowrap) deflate。
+// decodeJSContentEncoding ResponseInterceptor：gzip + Inflater(nowrap) deflate。
 func decodeJSContentEncoding(encoding string, body []byte) []byte {
 	if len(body) == 0 {
 		return body

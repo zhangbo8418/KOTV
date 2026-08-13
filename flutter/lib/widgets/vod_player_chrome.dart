@@ -49,7 +49,7 @@ String fmtMmSs(int sec) {
   return '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 }
 
-/// 详情页内嵌播放器底栏（对齐 Legacy video_surface）。
+/// 详情页内嵌播放器底栏（video_surface）。
 class VodInlineControls extends StatelessWidget {
   const VodInlineControls({
     super.key,
@@ -281,7 +281,7 @@ const _decodeModes = <(String key, String label)>[
   ('hard', '硬解码'),
 ];
 
-/// 全屏点播控制层状态（对齐 Legacy vodFullscreen 底栏）。
+/// 全屏点播控制层状态（vodFullscreen 底栏）。
 class VodFullscreenChrome extends StatefulWidget {
   const VodFullscreenChrome({
     super.key,
@@ -370,7 +370,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   int _decodeIdx = 0;
   int _openingSec = 0;
   int _endingSec = 0;
-  bool _loopSkip = true; // 对齐 TV：有片头/片尾值即生效；开关仅用于临时关闭
+  bool _loopSkip = true; // 有片头/片尾值即生效；开关仅用于临时关闭
   bool _endingSkipFired = false;
   bool _openingSeekDone = false;
   bool _repeatOne = false;
@@ -525,7 +525,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final openMs = _openingSec * 1000;
     final endMs = _endingSec * 1000;
 
-    // 片头：对齐 TV startPositionMs = max(opening, position) —— 起播靠近片头时跳到 opening
+    // 片头：startPositionMs = max(opening, position) —— 起播靠近片头时跳到 opening
     if (openMs > 0 && !_openingSeekDone) {
       if (pos.inMilliseconds + 800 < openMs) {
         _openingSeekDone = true;
@@ -537,7 +537,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       }
     }
 
-    // 片尾：对齐 TV `ending + position >= duration` → 下一集（无需额外开关）
+    // 片尾：`ending + position >= duration` → 下一集（无需额外开关）
     if (endMs > 0 && pos.inMilliseconds + endMs >= dur.inMilliseconds) {
       if (!_endingSkipFired && widget.onNext != null) {
         _endingSkipFired = true;

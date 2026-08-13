@@ -7,7 +7,7 @@ import (
 	"github.com/bobo/KOTV/internal/model"
 )
 
-// ConfigMeta 对齐 TV LiveConfig 根字段：ads / rules / lives。
+// ConfigMeta LiveConfig 根字段：ads / rules / lives。
 type ConfigMeta struct {
 	Ads   []string     `json:"ads"`
 	Rules []model.Rule `json:"rules"`

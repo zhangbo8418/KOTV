@@ -17,7 +17,7 @@ var (
 	parseLogFile *os.File
 )
 
-// parseLog 二次解析诊断：stderr + LogDir/parse.log（对齐 TV ParseJob/SpiderDebug 用途）。
+// parseLog 二次解析诊断：stderr + LogDir/parse.log（ParseJob/SpiderDebug 用途）。
 func parseLog(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	log.Print(msg)

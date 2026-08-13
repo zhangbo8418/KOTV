@@ -18,7 +18,7 @@ import (
 
 //go:generate go run gen_qjsinc.go
 
-// installTVModuleLoader 对齐 TV BytecodeModuleLoader：
+// installTVModuleLoader BytecodeModuleLoader：
 // normalize = moduleNormalize；load = Module.fetch + compile-only（运行时按需）。
 func installTVModuleLoader(rt *qjs.Runtime) {
 	if rt == nil {

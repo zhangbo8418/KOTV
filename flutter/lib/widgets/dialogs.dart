@@ -569,7 +569,7 @@ class _CircleIcon extends StatelessWidget {
   }
 }
 
-/// 设置分段标题 / 芯片 / 行（对齐 tv_pages.go，视觉更清晰）。
+/// 设置分段标题 / 芯片 / 行（视觉更清晰）。
 class SettingTitle extends StatelessWidget {
   const SettingTitle(this.label, {super.key, this.hint});
   final String label;

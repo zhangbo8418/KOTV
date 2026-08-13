@@ -6,7 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-/// 单条弹幕（对齐 Go internal/danmaku.Item）。
+/// 单条弹幕（internal/danmaku.Item）。
 class DanmakuItem {
   const DanmakuItem({
     required this.time,

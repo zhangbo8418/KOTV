@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Drm 播放 DRM 描述（对齐 TV bean.Drm / #KODIPROP）。
+// Drm 播放 DRM 描述（bean.Drm / #KODIPROP）。
 type Drm struct {
 	Key      string            `json:"key"`
 	Type     string            `json:"type"`
