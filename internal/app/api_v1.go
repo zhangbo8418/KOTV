@@ -65,12 +65,6 @@ func (a *App) APIGetConfig() map[string]any {
 		source = sess.Source
 	}
 	home := cfg.Home()
-	// 内联(JSON)源的 source 是 inline://<hash> 键，回填“添加点播源”时应给回原始 JSON 正文。
-	if strings.HasPrefix(source, "inline://") && a.DB != nil {
-		if c, _ := a.DB.FindConfig(source, int64(database.ConfigTypeSite)); c != nil && strings.TrimSpace(c.JSON) != "" {
-			source = c.JSON
-		}
-	}
 	sites := make([]map[string]any, 0)
 	for _, s := range cfg.Sites() {
 		sites = append(sites, map[string]any{
@@ -741,14 +735,11 @@ func (a *App) APIListRepos() map[string]any {
 		if name == "" {
 			name = url
 		}
-		// 当前源判定：URL 源 url==current；内联(JSON)源 settings.VOD 存的是原始 JSON 正文，
-		// 需再用 config.JSON 比对，否则内联当前源拿不到“（当前）”标记。
-		isCurrent := url == current || (strings.TrimSpace(c.JSON) != "" && c.JSON == current)
 		list = append(list, map[string]any{
 			"url":     url,
 			"name":    name,
 			"home":    c.Home,
-			"current": isCurrent,
+			"current": url == current,
 		})
 	}
 	return map[string]any{"ok": true, "current": current, "repos": list}

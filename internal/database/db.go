@@ -436,12 +436,6 @@ func (db *DB) ClearHistory() error {
 	return err
 }
 
-// ClearConfigs 清空全部源配置（测试隔离用；生产代码请勿在运行时调用）。
-func (db *DB) ClearConfigs() error {
-	_, err := db.conn.Exec(`DELETE FROM config`)
-	return err
-}
-
 // ListAllHistory 导出全部历史（备份/同步）。
 func (db *DB) ListAllHistory() ([]History, error) {
 	return db.ListHistory(10000)

@@ -1,8 +1,6 @@
 package config
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -270,46 +268,13 @@ func (m *Manager) initFromVod(vod string) error {
 		}
 		return m.ParseConfig(cfg, false)
 	}
-	// 直接粘贴的 JSON 正文：用内容哈希生成稳定唯一键，避免多个内联源都写成
-	// 同一个 inline://vod，导致 UpsertConfig 按此键命中旧行、把第二个源覆盖第一个。
+	// 直接粘贴的 JSON 正文
 	if strings.HasPrefix(vod, "{") || strings.HasPrefix(vod, "[") {
-		cfg := &database.Config{
-			Type: database.ConfigTypeSite,
-			URL:  inlineConfigKey(vod),
-			Name: inlineConfigName(vod),
-			JSON: vod,
-		}
+		cfg := &database.Config{Type: database.ConfigTypeSite, URL: "inline://vod", JSON: vod}
 		return m.ParseConfig(cfg, true)
 	}
 	cfg := &database.Config{Type: database.ConfigTypeSite, URL: vod}
 	return m.ParseConfig(cfg, false)
-}
-
-// inlineConfigKey 为粘贴的 JSON 源生成基于内容的稳定唯一键。
-// 同一份 JSON 永远得到同一键（可幂等更新），不同 JSON 得到不同键（可并存多个源）。
-func inlineConfigKey(json string) string {
-	sum := sha256.Sum256([]byte(json))
-	return "inline://" + hex.EncodeToString(sum[:])[:16]
-}
-
-// inlineConfigName 从 JSON 提取可读名称，供线路列表展示；取不到则回退为“内联配置”。
-func inlineConfigName(body string) string {
-	var m struct {
-		Name  string `json:"name"`
-		Title string `json:"title"`
-		Key   string `json:"key"`
-	}
-	_ = json.Unmarshal([]byte(body), &m)
-	if m.Name != "" {
-		return m.Name
-	}
-	if m.Title != "" {
-		return m.Title
-	}
-	if m.Key != "" {
-		return m.Key
-	}
-	return "内联配置"
 }
 
 func looksLikeURL(s string) bool {
@@ -345,6 +310,19 @@ func (m *Manager) LoadFromSource(source string) error {
 	if source == "" {
 		return fmt.Errorf("请输入点播源 URL 或粘贴 JSON")
 	}
+	// TV: a newly added source is persisted to the config table before parsing,
+	// so it survives even when the payload has no sites (spider-api style) or the
+	// fetch fails later. Mirrors ConfigDialog inserting the row on add.
+	if !m.ephemeral && m.db != nil {
+		cfg := &database.Config{Type: database.ConfigTypeSite, URL: source}
+		if strings.HasPrefix(source, "{") || strings.HasPrefix(source, "[") {
+			cfg.URL = "inline://vod"
+			cfg.JSON = source
+		}
+		if _, err := m.db.UpsertConfig(cfg); err != nil {
+			return err
+		}
+	}
 	if !m.ephemeral {
 		settings.Set(settings.VOD, source)
 		_ = settings.Save()
@@ -379,11 +357,10 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	if err != nil {
 		return fmt.Errorf("配置解析失败: %w", err)
 	}
-	// 与 TV 行为对齐：即使配置里 sites 为空（典型如 spider-api 类“只给接口、
-	// 站点由运行时 spider 动态提供”的源），也照常入库并设为当前源，而不是
-	// 直接报错导致整行不落盘。空站点时 home 退化为空 Site，由运行时填充。
+	// TV VodConfig.initSite: an empty sites list degrades home to an empty Site
+	// and still loads, instead of failing the whole source.
 	if len(api.Sites) == 0 {
-		log.Printf("配置 %s 未包含站点(sites)，按 TV 行为仍入库（站点可能由 spider 运行时提供）", cfg.URL)
+		log.Printf("vod source %s has no sites, loading as empty", cfg.URL)
 	}
 
 	api.URL = cfg.URL

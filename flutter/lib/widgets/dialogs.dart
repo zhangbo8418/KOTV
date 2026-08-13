@@ -421,8 +421,6 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
                             ...() {
                               final rows = <Widget>[];
                               var focused = false;
-                              // 与 TV 的 ConfigAdapter.remove(0) 一致：当前源不出现在切换列表里，
-                              // 避免“添加第二个看起来替换了第一个”的错觉（数据其实都已落盘）。
                               for (final r in list) {
                                 if ('${r['url']}' == current) continue;
                                 rows.add(
