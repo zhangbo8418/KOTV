@@ -55,7 +55,7 @@ cd flutter && flutter run -d macos   # KOTV_RUNTIME 默认用仓库 runtime/
 
 ## Windows 7（实验线）
 
-- **官方最后支持 Win7 的稳定版是 Flutter 3.19.x**；Win7 CI 钉 `3.19.6`（见 `.github/workflows/flutter-win7.yml`）。
+- **官方最后支持 Win7 的稳定版是 Flutter 3.19.x**；Win7 CI 钉 `3.19.6`（见 `.github/workflows/github-action.yml` 的 `build-flutter-win7` job）。
 - 主线（Win10+ / macOS / Linux）仍用较新 Flutter（`sdk: ^3.5.4`）；Win7 构建前会跑 `scripts/adapt-flutter-win7-sdk.sh` 临时放宽约束。
 - 桌面 **内置 MPV** 使用 Flutter **media_kit 自带 libmpv**（不进 `runtime/`）。
 - Python 爬虫依赖见 `scripts/python-requirements.txt`，打进 `runtime/python`。
