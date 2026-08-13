@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -268,13 +270,46 @@ func (m *Manager) initFromVod(vod string) error {
 		}
 		return m.ParseConfig(cfg, false)
 	}
-	// 直接粘贴的 JSON 正文
+	// 直接粘贴的 JSON 正文：用内容哈希生成稳定唯一键，避免多个内联源都写成
+	// 同一个 inline://vod，导致 UpsertConfig 按此键命中旧行、把第二个源覆盖第一个。
 	if strings.HasPrefix(vod, "{") || strings.HasPrefix(vod, "[") {
-		cfg := &database.Config{Type: database.ConfigTypeSite, URL: "inline://vod", JSON: vod}
+		cfg := &database.Config{
+			Type: database.ConfigTypeSite,
+			URL:  inlineConfigKey(vod),
+			Name: inlineConfigName(vod),
+			JSON: vod,
+		}
 		return m.ParseConfig(cfg, true)
 	}
 	cfg := &database.Config{Type: database.ConfigTypeSite, URL: vod}
 	return m.ParseConfig(cfg, false)
+}
+
+// inlineConfigKey 为粘贴的 JSON 源生成基于内容的稳定唯一键。
+// 同一份 JSON 永远得到同一键（可幂等更新），不同 JSON 得到不同键（可并存多个源）。
+func inlineConfigKey(json string) string {
+	sum := sha256.Sum256([]byte(json))
+	return "inline://" + hex.EncodeToString(sum[:])[:16]
+}
+
+// inlineConfigName 从 JSON 提取可读名称，供线路列表展示；取不到则回退为“内联配置”。
+func inlineConfigName(body string) string {
+	var m struct {
+		Name  string `json:"name"`
+		Title string `json:"title"`
+		Key   string `json:"key"`
+	}
+	_ = json.Unmarshal([]byte(body), &m)
+	if m.Name != "" {
+		return m.Name
+	}
+	if m.Title != "" {
+		return m.Title
+	}
+	if m.Key != "" {
+		return m.Key
+	}
+	return "内联配置"
 }
 
 func looksLikeURL(s string) bool {

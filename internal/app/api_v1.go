@@ -65,6 +65,12 @@ func (a *App) APIGetConfig() map[string]any {
 		source = sess.Source
 	}
 	home := cfg.Home()
+	// 内联(JSON)源的 source 是 inline://<hash> 键，回填“添加点播源”时应给回原始 JSON 正文。
+	if strings.HasPrefix(source, "inline://") && a.DB != nil {
+		if c, _ := a.DB.FindConfig(source, int64(database.ConfigTypeSite)); c != nil && strings.TrimSpace(c.JSON) != "" {
+			source = c.JSON
+		}
+	}
 	sites := make([]map[string]any, 0)
 	for _, s := range cfg.Sites() {
 		sites = append(sites, map[string]any{
