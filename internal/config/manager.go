@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -255,6 +257,18 @@ func (m *Manager) initFromVod(vod string) error {
 	if vod == "" {
 		return fmt.Errorf("未配置点播源")
 	}
+	// TV Config.find(url, type) 以 url 为唯一键；这里的内联键 (inline://<hash>) 与之等价，
+	// 切换时按该键回查已持久化的 JSON 正文重新解析。
+	if isInlineConfigKey(vod) {
+		cfg, err := m.db.FindConfig(vod, database.ConfigTypeSite)
+		if err != nil {
+			return err
+		}
+		if cfg == nil {
+			return fmt.Errorf("配置不存在: %s", vod)
+		}
+		return m.ParseConfig(cfg, cfg.JSON != "")
+	}
 	// http(s)/file URL 按远程或本地配置拉取
 	if looksLikeURL(vod) {
 		cfg, err := m.db.FindConfig(vod, database.ConfigTypeSite)
@@ -268,13 +282,64 @@ func (m *Manager) initFromVod(vod string) error {
 		}
 		return m.ParseConfig(cfg, false)
 	}
-	// 直接粘贴的 JSON 正文
+	// 直接粘贴的 JSON 正文：无 url，按内容派生稳定键（同份幂等、不同份并存）。
 	if strings.HasPrefix(vod, "{") || strings.HasPrefix(vod, "[") {
-		cfg := &database.Config{Type: database.ConfigTypeSite, URL: "inline://vod", JSON: vod}
+		cfg := &database.Config{Type: database.ConfigTypeSite, URL: inlineConfigKey(vod), JSON: vod, Name: inlineConfigName(vod)}
 		return m.ParseConfig(cfg, true)
 	}
 	cfg := &database.Config{Type: database.ConfigTypeSite, URL: vod}
 	return m.ParseConfig(cfg, false)
+}
+
+// resolveConfig 把用户输入（裸 URL / 裸 JSON / 已存的内联键）解析为要持久化的 Config 行。
+// TV 每个源以 (url, type) 唯一键存一行；裸 JSON 没有 url，故用内容哈希键代替，使不同 JSON 不再互相覆盖。
+func (m *Manager) resolveConfig(source string) (*database.Config, error) {
+	if isInlineConfigKey(source) {
+		cfg, err := m.db.FindConfig(source, database.ConfigTypeSite)
+		if err != nil {
+			return nil, err
+		}
+		if cfg == nil {
+			return nil, fmt.Errorf("配置不存在: %s", source)
+		}
+		return cfg, nil
+	}
+	if strings.HasPrefix(source, "{") || strings.HasPrefix(source, "[") {
+		return &database.Config{
+			Type: database.ConfigTypeSite,
+			URL:  inlineConfigKey(source),
+			JSON: source,
+			Name: inlineConfigName(source),
+		}, nil
+	}
+	return &database.Config{Type: database.ConfigTypeSite, URL: source}, nil
+}
+
+// inlineConfigKey 对应 TV 的 (url, type) 唯一键：把无 url 的内联 JSON 映射成稳定 key。
+func inlineConfigKey(vod string) string {
+	sum := sha256.Sum256([]byte(vod))
+	return "inline://" + hex.EncodeToString(sum[:])[:16]
+}
+
+func isInlineConfigKey(s string) bool {
+	return strings.HasPrefix(s, "inline://")
+}
+
+// inlineConfigName 取 JSON 顶层 name/title/key 作显示名（同 TV Config.name）；缺省回退到哈希后缀以便区分。
+func inlineConfigName(vod string) string {
+	var head struct {
+		Key   string `json:"key"`
+		Name  string `json:"name"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal([]byte(vod), &head); err == nil {
+		for _, v := range []string{head.Name, head.Title, head.Key} {
+			if strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v)
+			}
+		}
+	}
+	return "内联配置 " + inlineConfigKey(vod)[len("inline://"):]
 }
 
 func looksLikeURL(s string) bool {
@@ -310,21 +375,17 @@ func (m *Manager) LoadFromSource(source string) error {
 	if source == "" {
 		return fmt.Errorf("请输入点播源 URL 或粘贴 JSON")
 	}
-	// TV: a newly added source is persisted to the config table before parsing,
-	// so it survives even when the payload has no sites (spider-api style) or the
-	// fetch fails later. Mirrors ConfigDialog inserting the row on add.
+	// TV: 新加的源先以 (url, type) 唯一键插入配置表再解析（Config.find 找不到即 create），
+	// 即使 sites 为空或后续拉取失败也保留在源历史里。这里的内联键同样保证不同 JSON 各占一行。
 	if !m.ephemeral && m.db != nil {
-		cfg := &database.Config{Type: database.ConfigTypeSite, URL: source}
-		if strings.HasPrefix(source, "{") || strings.HasPrefix(source, "[") {
-			cfg.URL = "inline://vod"
-			cfg.JSON = source
+		cfg, err := m.resolveConfig(source)
+		if err != nil {
+			return err
 		}
 		if _, err := m.db.UpsertConfig(cfg); err != nil {
 			return err
 		}
-	}
-	if !m.ephemeral {
-		settings.Set(settings.VOD, source)
+		settings.Set(settings.VOD, cfg.URL)
 		_ = settings.Save()
 	}
 	return m.initFromVod(source)
