@@ -4,6 +4,7 @@
 bin/
 /KOTV
 /KO影视
+/engine
 *.exe
 *.test
 *.dmg
