@@ -741,11 +741,14 @@ func (a *App) APIListRepos() map[string]any {
 		if name == "" {
 			name = url
 		}
+		// 当前源判定：URL 源 url==current；内联(JSON)源 settings.VOD 存的是原始 JSON 正文，
+		// 需再用 config.JSON 比对，否则内联当前源拿不到“（当前）”标记。
+		isCurrent := url == current || (strings.TrimSpace(c.JSON) != "" && c.JSON == current)
 		list = append(list, map[string]any{
 			"url":     url,
 			"name":    name,
 			"home":    c.Home,
-			"current": url == current,
+			"current": isCurrent,
 		})
 	}
 	return map[string]any{"ok": true, "current": current, "repos": list}

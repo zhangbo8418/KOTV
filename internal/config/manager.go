@@ -379,8 +379,11 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	if err != nil {
 		return fmt.Errorf("配置解析失败: %w", err)
 	}
+	// 与 TV 行为对齐：即使配置里 sites 为空（典型如 spider-api 类“只给接口、
+	// 站点由运行时 spider 动态提供”的源），也照常入库并设为当前源，而不是
+	// 直接报错导致整行不落盘。空站点时 home 退化为空 Site，由运行时填充。
 	if len(api.Sites) == 0 {
-		return fmt.Errorf("配置中没有可用站点")
+		log.Printf("配置 %s 未包含站点(sites)，按 TV 行为仍入库（站点可能由 spider 运行时提供）", cfg.URL)
 	}
 
 	api.URL = cfg.URL
