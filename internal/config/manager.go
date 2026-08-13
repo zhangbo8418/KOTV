@@ -375,18 +375,23 @@ func (m *Manager) LoadFromSource(source string) error {
 	if source == "" {
 		return fmt.Errorf("请输入点播源 URL 或粘贴 JSON")
 	}
-	// TV: 新加的源先以 (url, type) 唯一键插入配置表再解析（Config.find 找不到即 create），
-	// 即使 sites 为空或后续拉取失败也保留在源历史里。这里的内联键同样保证不同 JSON 各占一行。
-	if !m.ephemeral && m.db != nil {
+	// TV: 每个源以 (url, type) 唯一键持久化到共享库，本机与所有远端会话共用同一份源列表。
+	// ephemeral 只表示该 Scope 不写全局 settings.VOD 指针、不杀共享爬虫，仍必须把源行写入共享库；
+	// 否则会话模式（Flutter 每条请求都带 clientId）下 APIListRepos 读到的永远是空表，换源不落盘。
+	if m.db != nil || !m.ephemeral {
 		cfg, err := m.resolveConfig(source)
 		if err != nil {
 			return err
 		}
-		if _, err := m.db.UpsertConfig(cfg); err != nil {
-			return err
+		if m.db != nil {
+			if _, err := m.db.UpsertConfig(cfg); err != nil {
+				return err
+			}
 		}
-		settings.Set(settings.VOD, cfg.URL)
-		_ = settings.Save()
+		if !m.ephemeral {
+			settings.Set(settings.VOD, cfg.URL)
+			_ = settings.Save()
+		}
 	}
 	return m.initFromVod(source)
 }
@@ -459,7 +464,8 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 		cfg.Home = home.Key
 	}
 
-	if !m.ephemeral && m.db != nil {
+	// 源行与站点始终写入共享库（含会话模式）；ephemeral 只隔离「当前选中源」的内存态，不阻碍持久化。
+	if m.db != nil {
 		cfgID, err := m.db.UpsertConfig(cfg)
 		if err != nil {
 			return err
