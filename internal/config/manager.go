@@ -312,7 +312,29 @@ func (m *Manager) resolveConfig(source string) (*database.Config, error) {
 			Name: inlineConfigName(source),
 		}, nil
 	}
-	return &database.Config{Type: database.ConfigTypeSite, URL: source}, nil
+	return &database.Config{Type: database.ConfigTypeSite, URL: source, Name: deriveNameFromURL(source)}, nil
+}
+
+// deriveNameFromURL 从 URL 派生友好显示名（取最后非空路径段并解码；无路径则回落 host），
+// 对齐 TV 让用户为源命名的行为，使线路列表显示「PC专用」而非整条 URL。
+func deriveNameFromURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err == nil && u.Host != "" {
+		seg := ""
+		for _, p := range strings.Split(strings.Trim(u.Path, "/"), "/") {
+			if p != "" {
+				seg = p
+			}
+		}
+		if seg != "" {
+			if dec, e := url.PathUnescape(seg); e == nil {
+				seg = dec
+			}
+			return seg
+		}
+		return u.Host
+	}
+	return raw
 }
 
 // inlineConfigKey 对应 TV 的 (url, type) 唯一键：把无 url 的内联 JSON 映射成稳定 key。

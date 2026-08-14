@@ -422,16 +422,20 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
                               final rows = <Widget>[];
                               var focused = false;
                               for (final r in list) {
-                                if ('${r['url']}' == current) continue;
+                                final isCurrent = '${r['url']}' == current;
                                 rows.add(
                                   _RepoRow(
-                                    label: '${r['name'] ?? r['url']}',
+                                    label: '${r['name'] ?? r['url']}${isCurrent ? '（当前）' : ''}',
                                     autofocus: !focused,
-                                    onTap: () => Navigator.pop(ctx, '${r['url']}'),
-                                    onDelete: () async {
-                                      await api.deleteRepo('${r['url']}');
-                                      await reload();
-                                    },
+                                    onTap: isCurrent
+                                        ? () {}
+                                        : () => Navigator.pop(ctx, '${r['url']}'),
+                                    onDelete: isCurrent
+                                        ? null
+                                        : () async {
+                                            await api.deleteRepo('${r['url']}');
+                                            await reload();
+                                          },
                                   ),
                                 );
                                 rows.add(const SizedBox(height: 8));
