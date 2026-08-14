@@ -34,6 +34,61 @@ Future<String?> _pickConfigFile() async {
   return Uri.file(file.path).toString();
 }
 
+/// 窄屏把按钮均分弹窗宽度；宽屏保持「选择本地」靠左、确定靠右。
+Widget _configDialogActions({
+  required bool compact,
+  required VoidCallback onPick,
+  required VoidCallback onCancel,
+  required VoidCallback onConfirm,
+  required String confirmLabel,
+  bool confirmSelected = true,
+}) {
+  final gap = compact ? 8.0 : 10.0;
+  Widget stretch({
+    required String label,
+    required VoidCallback onTap,
+    bool selected = false,
+  }) {
+    return Expanded(
+      child: LayoutBuilder(
+        builder: (context, cons) {
+          final s = LayoutScale.layoutOf(context);
+          final w = cons.maxWidth.isFinite && cons.maxWidth > 0 ? cons.maxWidth / s : 72.0;
+          return AppPill(
+            label: label,
+            onTap: onTap,
+            selected: selected,
+            width: w,
+            height: compact ? 36 : 40,
+            fontSize: compact ? 13 : 15,
+          );
+        },
+      ),
+    );
+  }
+
+  if (compact) {
+    return Row(
+      children: [
+        stretch(label: '选择本地', onTap: onPick),
+        SizedBox(width: gap),
+        stretch(label: '取消', onTap: onCancel),
+        SizedBox(width: gap),
+        stretch(label: confirmLabel, onTap: onConfirm, selected: confirmSelected),
+      ],
+    );
+  }
+  return Row(
+    children: [
+      AppPill(label: '选择本地', width: 112, onTap: onPick),
+      const Spacer(),
+      AppPill(label: '取消', width: 96, onTap: onCancel),
+      SizedBox(width: gap),
+      AppPill(label: confirmLabel, width: 96, selected: confirmSelected, onTap: onConfirm),
+    ],
+  );
+}
+
 Future<void> showSitePicker(
   BuildContext context,
   WidgetRef ref, {
@@ -259,61 +314,56 @@ Future<void> showAddVodDialog(BuildContext context, WidgetRef ref) async {
           }
 
           final p = KotvPalette.of(ctx);
+          final m = _dialogMetrics(ctx);
           return Dialog(
             backgroundColor: Colors.transparent,
-            child: Container(
-              width: 520,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: p.dialogBg,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: p.outline),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('添加点播源', style: TextStyle(color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 8),
-                  Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON', style: TextStyle(color: p.muted, fontSize: 13)),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: ctrl,
-                    maxLines: 4,
-                    enabled: !busy,
-                    style: TextStyle(color: p.fg),
-                    cursorColor: p.primary,
-                    decoration: InputDecoration(
-                      hintText: '配置地址、多仓索引，或粘贴 JSON…',
-                      hintStyle: TextStyle(color: p.muted),
-                      filled: true,
-                      fillColor: p.input,
-                    ),
-                  ),
-                  if (status.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(status, style: TextStyle(color: p.primary, fontSize: 13)),
-                  ],
-                  const SizedBox(height: 16),
-                  Row(
+            insetPadding: m.inset,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: m.compact ? m.width : 520),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: p.dialogBg,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: p.outline),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.all(m.compact ? 14 : 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      AppPill(
-                        label: '选择本地',
-                        width: 112,
-                        onTap: busy ? () {} : () => pick(),
+                      Text('添加点播源', style: TextStyle(color: p.fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 8),
+                      Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON', style: TextStyle(color: p.muted, fontSize: m.compact ? 12 : 13)),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: ctrl,
+                        maxLines: m.compact ? 3 : 4,
+                        enabled: !busy,
+                        style: TextStyle(color: p.fg),
+                        cursorColor: p.primary,
+                        decoration: InputDecoration(
+                          hintText: '配置地址、多仓索引，或粘贴 JSON…',
+                          hintStyle: TextStyle(color: p.muted),
+                          filled: true,
+                          fillColor: p.input,
+                        ),
                       ),
-                      const Spacer(),
-                      AppPill(label: '取消', width: 96, onTap: busy ? () {} : () => Navigator.pop(ctx)),
-                      const SizedBox(width: 10),
-                      AppPill(
-                        label: busy ? '加载中…' : '加载',
-                        width: 96,
-                        selected: true,
-                        onTap: busy ? () {} : () => load(ctrl.text),
+                      if (status.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(status, style: TextStyle(color: p.primary, fontSize: 13)),
+                      ],
+                      const SizedBox(height: 16),
+                      _configDialogActions(
+                        compact: m.compact,
+                        onPick: busy ? () {} : () => pick(),
+                        onCancel: busy ? () {} : () => Navigator.pop(ctx),
+                        onConfirm: busy ? () {} : () => load(ctrl.text),
+                        confirmLabel: busy ? '加载中…' : '加载',
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
             ),
           );
@@ -339,6 +389,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
     context: context,
     builder: (ctx) {
       final p = KotvPalette.of(ctx);
+      final m = _dialogMetrics(ctx);
       Future<void> pick() async {
         final picked = await _pickConfigFile();
         if (picked != null && ctx.mounted) {
@@ -347,48 +398,51 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
         }
       }
       return Dialog(
-      backgroundColor: Colors.transparent,
-      child: Container(
-        width: 520,
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: p.dialogBg,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: p.outline),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('直播源', style: TextStyle(color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Text('可填在线 M3U/TXT/JSON 地址，或本机路径', style: TextStyle(color: p.muted, fontSize: 13)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              style: TextStyle(color: p.fg),
-              cursorColor: p.primary,
-              decoration: InputDecoration(
-                hintText: 'M3U/TXT/JSON URL 或本地路径',
-                hintStyle: TextStyle(color: p.muted),
-                filled: true,
-                fillColor: p.input,
+        backgroundColor: Colors.transparent,
+        insetPadding: m.inset,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: m.compact ? m.width : 520),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: p.dialogBg,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: p.outline),
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(m.compact ? 14 : 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('直播源', style: TextStyle(color: p.fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Text('可填在线 M3U/TXT/JSON 地址，或本机路径', style: TextStyle(color: p.muted, fontSize: m.compact ? 12 : 13)),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctrl,
+                    style: TextStyle(color: p.fg),
+                    cursorColor: p.primary,
+                    decoration: InputDecoration(
+                      hintText: 'M3U/TXT/JSON URL 或本地路径',
+                      hintStyle: TextStyle(color: p.muted),
+                      filled: true,
+                      fillColor: p.input,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _configDialogActions(
+                    compact: m.compact,
+                    onPick: () => pick(),
+                    onCancel: () => Navigator.pop(ctx, false),
+                    onConfirm: () => Navigator.pop(ctx, true),
+                    confirmLabel: '保存',
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                AppPill(label: '选择本地', width: 112, onTap: () => pick()),
-                const Spacer(),
-                AppPill(label: '取消', width: 96, onTap: () => Navigator.pop(ctx, false)),
-                const SizedBox(width: 10),
-                AppPill(label: '保存', width: 96, selected: true, onTap: () => Navigator.pop(ctx, true)),
-              ],
-            ),
-          ],
+          ),
         ),
-      ),
-    );
+      );
     },
   );
   if (ok == true) {
