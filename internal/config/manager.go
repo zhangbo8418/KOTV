@@ -864,7 +864,10 @@ func (m *Manager) initLiveFromVod(cfg *database.Config, api *model.Api) {
 		}
 	}
 	liveURL := strings.TrimSpace(settings.Get(settings.LIVE))
-	if liveURL != "" && liveURL != vodURL {
+	oldVodURL := strings.TrimSpace(m.API().URL)
+	// TV LiveConfig.needSync(url): sync || live 为空 || live URL == 新点播 URL。
+	// sync 表示直播当前跟点播同一地址（换源前 live == 旧点播），换点播后仍要跟着切。
+	if liveURL != "" && liveURL != oldVodURL && liveURL != vodURL {
 		return
 	}
 	settings.Set(settings.LIVE, vodURL)

@@ -41,7 +41,7 @@ func (s *Service) Current() *model.Live {
 }
 
 // SyncFromConfig 当前直播配置的 lives 列表。
-// 未单独指定直播地址、或直播地址就是当前点播源时，用点播 JSON 里的 lives。
+// 直播跟着点播（LIVE 空或等于当前点播 URL）时，用点播 JSON 里的 lives。
 func (s *Service) SyncFromConfig() {
 	api := s.cfg.API()
 	liveURL := strings.TrimSpace(settings.Get(settings.LIVE))
