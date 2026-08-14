@@ -64,6 +64,7 @@ source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
 flutter config --enable-windows-desktop
 flutter pub get
+kotv_ensure_mdk_windows_sdk
 flutter build windows --release
 
 [[ -f "$RELEASE_DIR/kotv.exe" ]] || { echo "missing $RELEASE_DIR/kotv.exe" >&2; exit 1; }
