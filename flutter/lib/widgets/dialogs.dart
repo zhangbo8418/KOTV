@@ -518,7 +518,8 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
                                 final name = '${r['name'] ?? url}';
                                 rows.add(
                                   _RepoRow(
-                                    label: '$name${isCurrent ? '（当前）' : ''}',
+                                    label: name,
+                                    current: isCurrent,
                                     autofocus: !focused,
                                     onTap: isCurrent ? () {} : () => Navigator.pop(ctx, url),
                                     onDelete: isCurrent
@@ -631,7 +632,8 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
                                 final isCurrent = '${r['url']}' == current;
                                 rows.add(
                                   _RepoRow(
-                                    label: '${r['name'] ?? r['url']}${isCurrent ? '（当前）' : ''}',
+                                    label: '${r['name'] ?? r['url']}',
+                                    current: isCurrent,
                                     autofocus: !focused,
                                     onTap: isCurrent
                                         ? () {}
@@ -732,17 +734,32 @@ Future<String?> pickChoice(
 }
 
 class _RepoRow extends StatelessWidget {
-  const _RepoRow({required this.label, required this.onTap, this.onDelete, this.autofocus = false});
+  const _RepoRow({
+    required this.label,
+    required this.onTap,
+    this.onDelete,
+    this.autofocus = false,
+    this.current = false,
+  });
   final String label;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
   final bool autofocus;
+  final bool current;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Expanded(child: AppPill(label: label, height: 44, autofocus: autofocus, onTap: onTap)),
+        Expanded(
+          child: AppPill(
+            label: label,
+            suffix: current ? '（当前）' : null,
+            height: 44,
+            autofocus: autofocus,
+            onTap: onTap,
+          ),
+        ),
         if (onDelete != null) ...[
           const SizedBox(width: 8),
           _CircleIcon(icon: Icons.delete_outline, onTap: onDelete!),

@@ -182,6 +182,7 @@ class AppPill extends StatelessWidget {
     this.height = 40,
     this.fontSize = 15,
     this.autofocus = false,
+    this.suffix,
   });
 
   final String label;
@@ -193,6 +194,8 @@ class AppPill extends StatelessWidget {
   final double height;
   final double fontSize;
   final bool autofocus;
+  /// 固定显示在文案后的标记（如「（当前）」），不参与省略，避免长 URL 把标记裁掉。
+  final String? suffix;
 
   @override
   Widget build(BuildContext context) {
@@ -204,19 +207,31 @@ class AppPill extends StatelessWidget {
     final h = height * s;
     final w = width == null ? null : width! * s;
     final maxW = maxWidth == null ? null : maxWidth! * s;
+    final style = TextStyle(
+      color: selected ? Colors.white : p.fg,
+      fontSize: fontSize,
+      fontWeight: FontWeight.w700,
+      height: 1.2,
+    );
+    final hasSuffix = suffix != null && suffix!.isNotEmpty;
     final labelText = Text(
       label,
       maxLines: 1,
       softWrap: false,
       overflow: TextOverflow.ellipsis,
-      textAlign: TextAlign.center,
-      style: TextStyle(
-        color: selected ? Colors.white : p.fg,
-        fontSize: fontSize,
-        fontWeight: FontWeight.w700,
-        height: 1.2,
-      ),
+      textAlign: hasSuffix ? TextAlign.left : TextAlign.center,
+      style: style,
     );
+    // 有 suffix 时拉满可用宽度，保证「（当前）」不被长 URL 挤掉。
+    final effectiveWidth = w ?? (hasSuffix ? double.infinity : null);
+    final content = hasSuffix
+        ? Row(
+            children: [
+              Expanded(child: labelText),
+              Text(suffix!, maxLines: 1, softWrap: false, style: style),
+            ],
+          )
+        : labelText;
     return TvFocus(
       autofocus: autofocus,
       onPressed: onTap,
@@ -227,9 +242,9 @@ class AppPill extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(8 * s),
           child: Container(
-            width: w,
+            width: effectiveWidth,
             height: h,
-            constraints: w == null && maxW != null ? BoxConstraints(maxWidth: maxW) : null,
+            constraints: effectiveWidth == null && maxW != null ? BoxConstraints(maxWidth: maxW) : null,
             padding: EdgeInsets.symmetric(horizontal: width == null ? 14 * s : 6 * s),
             decoration: BoxDecoration(
               color: bg,
@@ -237,12 +252,12 @@ class AppPill extends StatelessWidget {
               border: Border.all(color: border),
             ),
             // 固定宽度：居中；自适应：widthFactor=1 按文字收缩，同时垂直居中
-            child: w != null
-                ? Center(child: labelText)
+            child: effectiveWidth != null
+                ? (hasSuffix ? content : Center(child: content))
                 : Align(
                     alignment: Alignment.center,
                     widthFactor: 1,
-                    child: labelText,
+                    child: content,
                   ),
           ),
         ),

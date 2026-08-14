@@ -1553,7 +1553,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   Padding(
                                     padding: const EdgeInsets.only(bottom: 6),
                                     child: AppPill(
-                                      label: '${_sources[i]['name'] ?? _sources[i]['url']}${_sources[i]['current'] == true || i == _srcIdx ? '（当前）' : ''}',
+                                      label: '${_sources[i]['name'] ?? _sources[i]['url']}',
+                                      suffix: _sources[i]['current'] == true || i == _srcIdx ? '（当前）' : null,
                                       height: 36,
                                       fontSize: 13,
                                       selected: i == _srcIdx,
