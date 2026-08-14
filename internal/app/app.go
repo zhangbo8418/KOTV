@@ -239,10 +239,7 @@ func (a *App) savedLiveSources() []model.Live {
 					continue
 				}
 				seen[url] = struct{}{}
-				name := strings.TrimSpace(c.Name)
-				if name == "" {
-					name = config.SourceDisplayName(url)
-				}
+				name := config.ConfigLabel(c.Name, url)
 				out = append(out, model.Live{Name: name, URL: url})
 			}
 		}

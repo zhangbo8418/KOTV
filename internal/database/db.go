@@ -205,6 +205,9 @@ func (db *DB) UpsertConfig(c *Config) (int64, error) {
 			if c.JSON == "" {
 				c.JSON = existing.JSON
 			}
+			if c.Name == "" {
+				c.Name = existing.Name
+			}
 		}
 	}
 	if c.ID == 0 {

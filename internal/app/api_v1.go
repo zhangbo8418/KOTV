@@ -732,10 +732,7 @@ func (a *App) APIListRepos() map[string]any {
 		if url == "" {
 			continue
 		}
-		name := strings.TrimSpace(c.Name)
-		if name == "" {
-			name = url
-		}
+		name := config.ConfigLabel(c.Name, url)
 		list = append(list, map[string]any{
 			"url":     url,
 			"name":    name,

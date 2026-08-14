@@ -311,28 +311,46 @@ func (m *Manager) resolveConfig(source string) (*database.Config, error) {
 			Name: inlineConfigName(source),
 		}, nil
 	}
-	return &database.Config{Type: database.ConfigTypeSite, URL: source, Name: SourceDisplayName(source)}, nil
+	return &database.Config{Type: database.ConfigTypeSite, URL: source}, nil
 }
 
-// SourceDisplayName 从 URL 派生友好显示名（取最后非空路径段并解码；无路径则回落 host）。
+// SourceDisplayName 单仓库没有接口名时用完整地址。
 func SourceDisplayName(raw string) string {
+	return strings.TrimSpace(raw)
+}
+
+func lastURLPathSegment(raw string) string {
 	u, err := url.Parse(raw)
-	if err == nil && u.Host != "" {
-		seg := ""
-		for _, p := range strings.Split(strings.Trim(u.Path, "/"), "/") {
-			if p != "" {
-				seg = p
-			}
-		}
-		if seg != "" {
-			if dec, e := url.PathUnescape(seg); e == nil {
-				seg = dec
-			}
-			return seg
-		}
-		return u.Host
+	if err != nil || u.Host == "" {
+		return ""
 	}
-	return raw
+	seg := ""
+	for _, p := range strings.Split(strings.Trim(u.Path, "/"), "/") {
+		if p != "" {
+			seg = p
+		}
+	}
+	if seg == "" {
+		return ""
+	}
+	if dec, e := url.PathUnescape(seg); e == nil {
+		return dec
+	}
+	return seg
+}
+
+// ConfigLabel 历史列表：有接口名用接口名，否则完整 URL。
+// 旧数据曾把路径末段写成 name，这种也回退成完整 URL。
+func ConfigLabel(name, rawURL string) string {
+	name = strings.TrimSpace(name)
+	rawURL = strings.TrimSpace(rawURL)
+	if name == "" {
+		return rawURL
+	}
+	if tail := lastURLPathSegment(rawURL); tail != "" && name == tail {
+		return rawURL
+	}
+	return name
 }
 
 // inlineConfigKey 把无 url 的内联 JSON 映射成稳定 key，使不同正文各占一行。
