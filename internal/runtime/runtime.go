@@ -88,12 +88,6 @@ func Roots() []string {
 				p = next
 			}
 		}
-		// 启动脚本把引擎拷到 /tmp 时写入旁路标记
-		if b, err := os.ReadFile(exe + ".runtime"); err == nil {
-			if p := strings.TrimSpace(string(b)); p != "" {
-				roots = append([]string{p}, roots...)
-			}
-		}
 	}
 
 	// 2) 环境变量（优先）

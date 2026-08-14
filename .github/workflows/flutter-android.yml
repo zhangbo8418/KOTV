@@ -6,7 +6,7 @@ on:
 
 env:
   FLUTTER_VERSION: "3.44.8"
-  FVP_DEPS_URL: "https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0"
+  FVP_DEPS_URL: "https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0"
 
 jobs:
   build-apk:

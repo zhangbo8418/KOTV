@@ -21,6 +21,7 @@ class EngineLauncher {
   bool _owned = false;
   bool _shuttingDown = false;
   bool _androidSpiderServiceStarted = false;
+  bool _noBundledEngine = false;
   String baseUrl = 'http://127.0.0.1:9978';
   KotvApi? _api;
   DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -45,6 +46,11 @@ class EngineLauncher {
     _syncBaseUrl(n.isEmpty ? 'http://127.0.0.1:9978' : n);
   }
 
+  bool _acceptLocalHealth() {
+    if (Platform.isAndroid) return true;
+    return _owned && _proc != null;
+  }
+
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {
     // 尽早固化 clientId，后续 API / ui/poll 带同一身份。
     await kotvClientId();
@@ -53,11 +59,14 @@ class EngineLauncher {
     if (!remote) {
       await _startOnce();
     }
+    if (!remote && _noBundledEngine && !Platform.isAndroid) {
+      return false;
+    }
 
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       final h = await _health(baseUrl);
-      if (h != null && h['ok'] == true) {
+      if (h != null && h['ok'] == true && (remote || _acceptLocalHealth())) {
         if (h['ready'] == true) return true;
         final source = '${h['source'] ?? ''}'.trim();
         final err = '${h['error'] ?? ''}';
@@ -65,15 +74,15 @@ class EngineLauncher {
           return true;
         }
       } else if (!remote && _owned && _proc != null && !await _procAlive(_proc!)) {
-        // 本进程托管的引擎若已退出，再拉一次；禁止在仍存活时 pkill 重开（竞态根因）。
         _owned = false;
         _proc = null;
         await _startOnce();
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
-    // 超时：有源也先放行进壳，页面会显示「未就绪/重试」；无源同理。
-    return _ping(baseUrl);
+    if (remote || Platform.isAndroid) return _ping(baseUrl);
+    if (_owned) return _ping(baseUrl);
+    return false;
   }
 
   /// API 调用失败时调用：若引擎挂了则重启。
@@ -84,9 +93,13 @@ class EngineLauncher {
   /// 「无限加载中」而不是立刻失败。
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
-    if (await _ping(baseUrl)) return true;
-    // 远端：不能重启本机引擎来「修复」
-    if (!kotvIsLocalEngineBaseUrl(baseUrl)) return false;
+    if (!kotvIsLocalEngineBaseUrl(baseUrl)) return _ping(baseUrl);
+    if (Platform.isAndroid) {
+      if (await _ping(baseUrl)) return true;
+    } else if (_owned && _proc != null && await _procAlive(_proc!) && await _ping(baseUrl)) {
+      return true;
+    }
+    if (_noBundledEngine && !Platform.isAndroid) return false;
     debugPrint('engine: recoverIfNeeded force=$forceRestart → restart');
     if (Platform.isAndroid) {
       await _startAndroidEngineService();
@@ -108,16 +121,20 @@ class EngineLauncher {
     }
     final now = DateTime.now();
     if (now.difference(_lastResumeCheck) < const Duration(seconds: 3)) {
-      if (await _ping(baseUrl)) return true;
+      if (Platform.isAndroid || (_owned && _proc != null && await _procAlive(_proc!))) {
+        if (await _ping(baseUrl)) return true;
+      }
     }
     _lastResumeCheck = now;
     debugPrint('engine: app resumed → health check');
-    if (await _ping(baseUrl)) {
-      debugPrint('engine: still healthy after resume');
-      // 后台可能只杀了 spider：异步软拉起，不阻塞、不 stop。
-      unawaited(_ensureAndroidSpiderService(forceRestart: false));
-      return true;
+    if (Platform.isAndroid || (_owned && _proc != null && await _procAlive(_proc!))) {
+      if (await _ping(baseUrl)) {
+        debugPrint('engine: still healthy after resume');
+        unawaited(_ensureAndroidSpiderService(forceRestart: false));
+        return true;
+      }
     }
+    if (_noBundledEngine && !Platform.isAndroid) return false;
     debugPrint('engine: unhealthy after resume → restart');
     _lastStartAttempt = now;
     if (Platform.isAndroid) {
@@ -283,16 +300,38 @@ class EngineLauncher {
     return out;
   }
 
+  bool _runningFromAppBundle() {
+    try {
+      final exe = Platform.resolvedExecutable.replaceAll('\\', '/');
+      return exe.contains('.app/Contents/MacOS');
+    } catch (_) {
+      return false;
+    }
+  }
+
   List<String> _candidateBins(String exeName) {
     final out = <String>[];
     try {
       final exe = Platform.resolvedExecutable;
-      out.add(p.normalize(p.join(p.dirname(exe), '..', 'Resources', 'engine', exeName)));
-      out.add(p.normalize(p.join(p.dirname(exe), exeName)));
+      final dir = p.dirname(exe);
+      out.add(p.normalize(p.join(dir, '..', 'Resources', 'engine', exeName)));
+      out.add(p.normalize(p.join(dir, exeName)));
+      out.add(p.normalize(p.join(
+        dir,
+        '..',
+        'Frameworks',
+        'App.framework',
+        'Resources',
+        'flutter_assets',
+        'assets',
+        'engine',
+        exeName,
+      )));
+      if (_runningFromAppBundle()) {
+        return out;
+      }
     } catch (_) {}
     out.addAll([
-      p.join(Directory.current.path, exeName),
-      p.join(Directory.current.path, '..', exeName),
       p.join(Directory.current.path, 'flutter', 'assets', 'engine', exeName),
       p.join(Directory.current.path, 'assets', 'engine', exeName),
     ]);
@@ -306,39 +345,17 @@ class EngineLauncher {
       return;
     }
     _lastStartAttempt = DateTime.now();
+    _noBundledEngine = false;
     try {
       await _ensureAndroidSpiderService();
 
-      // 1) 端口上已有健康引擎：直接复用，绝不要 pkill（多窗口/重试竞态根因）。
-      if (await _ping('http://127.0.0.1:9978')) {
-        _syncBaseUrl('http://127.0.0.1:9978');
-        debugPrint('engine reuse: already healthy on 9978');
-        return;
-      }
-
-      // 2) 本进程已 spawn、只是还没 ready：继续等，不要杀了重开。
       if (_owned && _proc != null && await _procAlive(_proc!)) {
         debugPrint('engine wait: owned pid=${_proc!.pid} still starting');
         return;
       }
 
-      // 3) 清真正残留，但排除本进程刚拉起的 pid。Android 跳过桌面式 pkill。
-      if (!Platform.isAndroid) {
-        await _killStrayEngines(exceptPid: _proc?.pid);
-        await Future<void>.delayed(const Duration(milliseconds: 250));
-      }
-
-      // 清完后再探一次，避免和另一 UI 实例撞车。
-      if (await _ping('http://127.0.0.1:9978')) {
-        _syncBaseUrl('http://127.0.0.1:9978');
-        debugPrint('engine reuse: healthy after stray cleanup');
-        return;
-      }
-
       var env = _runtimeEnv();
       if (Platform.isAndroid) {
-        // Android：由前台服务托管引擎，避免进后台后 Dart 子进程被 OEM 杀掉。
-        // 详情页用内存缓存看不出问题，一点 /api/v1/play 就 Connection closed。
         await _startAndroidEngineService();
         for (var i = 0; i < 40; i++) {
           if (await _ping('http://127.0.0.1:9978')) {
@@ -353,6 +370,7 @@ class EngineLauncher {
         final candidates = await _androidEngineCandidates();
         if (candidates.isEmpty) {
           debugPrint('engine android: libkotv_engine.so not found in nativeLibraryDir');
+          _noBundledEngine = true;
           return;
         }
         for (final so in candidates) {
@@ -373,25 +391,23 @@ class EngineLauncher {
       }
 
       final exeName = Platform.isWindows ? 'kotv-engine.exe' : 'kotv-engine';
-
+      String? bin;
       for (final c in _candidateBins(exeName)) {
-        final f = File(c);
-        if (await f.exists()) {
-          debugPrint('engine start: $c runtime=${env['KOTV_RUNTIME']}');
-          await _spawn(f.path, env);
-          return;
+        if (await File(c).exists()) {
+          bin = c;
+          break;
         }
       }
-
-      final data = await rootBundle.load('assets/engine/$exeName');
-      final dir = await getApplicationSupportDirectory();
-      final out = File(p.join(dir.path, exeName));
-      await out.writeAsBytes(data.buffer.asUint8List(), flush: true);
-      if (!Platform.isWindows) {
-        await Process.run('chmod', ['+x', out.path]);
+      if (bin == null) {
+        _noBundledEngine = true;
+        debugPrint('engine: no bundled kotv-engine, UI only');
+        return;
       }
-      debugPrint('engine start(asset): ${out.path}');
-      await _spawn(out.path, env);
+
+      await _killStrayEngines(exceptPid: _proc?.pid);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      debugPrint('engine start: $bin runtime=${env['KOTV_RUNTIME']}');
+      await _spawn(bin, env);
     } catch (e, st) {
       debugPrint('engine start skipped: $e\n$st');
     }
@@ -578,23 +594,17 @@ class EngineLauncher {
       await _killStrayRuntimes();
       return;
     }
-    for (final pat in <String>[
-      '/tmp/kotv-engine',
-      'Contents/Resources/engine/kotv-engine',
-      'Contents/MacOS/kotv-engine',
-      'assets/engine/kotv-engine',
-    ]) {
-      try {
-        final r = await Process.run('pgrep', ['-f', pat]);
-        if (r.exitCode != 0) continue;
+    try {
+      final r = await Process.run('pgrep', ['-f', 'kotv-engine']);
+      if (r.exitCode == 0) {
         for (final line in '${r.stdout}'.split(RegExp(r'\s+'))) {
           final id = int.tryParse(line.trim());
           if (id == null || id <= 0) continue;
           if (exceptPid != null && id == exceptPid) continue;
           Process.killPid(id, ProcessSignal.sigterm);
         }
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
     await _killStrayRuntimes();
   }
 
@@ -628,13 +638,6 @@ class EngineLauncher {
     final logFile = File(p.join(support.path, 'kotv-engine-spawn.log'));
     final sink = logFile.openWrite(mode: FileMode.append);
     sink.writeln('${DateTime.now().toIso8601String()} spawn $path');
-
-    final rt = (env['KOTV_RUNTIME'] ?? '').trim();
-    if (rt.isNotEmpty) {
-      try {
-        await File('$path.runtime').writeAsString(rt);
-      } catch (_) {}
-    }
 
     // 子进程（非 detached）：正常退出走 shutdown；UI 闪退时由看门狗清引擎+运行时。
     _proc = await Process.start(

@@ -33,7 +33,6 @@ cp -f "$ROOT/bridge/spider-bridge.jar" "$ROOT/runtime/bridge/spider-bridge.jar"
 echo "==> build Go engine"
 (cd "$ROOT" && CGO_ENABLED=1 go generate ./internal/spider/ && CGO_ENABLED=1 go build -o "$ROOT/flutter/assets/engine/kotv-engine" ./cmd/engine)
 chmod +x "$ROOT/flutter/assets/engine/kotv-engine"
-cp -f "$ROOT/flutter/assets/engine/kotv-engine" /tmp/kotv-engine
 ENG_SZ="$(wc -c < "$ROOT/flutter/assets/engine/kotv-engine" | tr -d ' ')"
 ENG_SHA="$(shasum -a 256 "$ROOT/flutter/assets/engine/kotv-engine" | awk '{print $1}')"
 echo "  ok: engine -> $ROOT/flutter/assets/engine/kotv-engine ($ENG_SZ bytes, sha256=$ENG_SHA)"

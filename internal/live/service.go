@@ -25,7 +25,7 @@ func NewService(cfg *config.Manager) *Service {
 	return &Service{cfg: cfg}
 }
 
-// Sources 可用直播源列表（配置 + 设置自定义）。
+// Sources 当前直播配置解析出的源列表。
 func (s *Service) Sources() []model.Live {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -40,26 +40,34 @@ func (s *Service) Current() *model.Live {
 	return s.current
 }
 
-// SyncFromConfig 从 ApiConfig + 设置同步直播源。
+// SyncFromConfig 当前直播配置的 lives 列表。
+// 未单独指定直播地址、或直播地址就是当前点播源时，用点播 JSON 里的 lives。
 func (s *Service) SyncFromConfig() {
-	var sources []model.Live
 	api := s.cfg.API()
-	for _, l := range api.Lives {
-		sources = append(sources, l)
-	}
-	if custom := strings.TrimSpace(settings.Get(settings.LIVE)); custom != "" {
-		found := false
-		for _, l := range sources {
-			if l.URL == custom {
-				found = true
+	liveURL := strings.TrimSpace(settings.Get(settings.LIVE))
+	vodURL := strings.TrimSpace(api.URL)
+	var sources []model.Live
+	if liveURL == "" || liveURL == vodURL {
+		sources = append([]model.Live(nil), api.Lives...)
+	} else {
+		name := strings.TrimSpace(liveURL)
+		for _, l := range api.Lives {
+			if strings.TrimSpace(l.URL) == liveURL {
+				sources = append([]model.Live(nil), api.Lives...)
 				break
 			}
 		}
-		if !found {
-			sources = append([]model.Live{{
-				Name: "自定义",
-				URL:  custom,
-			}}, sources...)
+		if len(sources) == 0 {
+			sources = []model.Live{{Name: name, URL: liveURL}}
+		}
+	}
+	for i := range sources {
+		if strings.TrimSpace(sources[i].Name) == "" {
+			u := strings.TrimSpace(sources[i].URL)
+			if u == "" {
+				u = strings.TrimSpace(sources[i].API)
+			}
+			sources[i].Name = u
 		}
 	}
 	s.mu.Lock()

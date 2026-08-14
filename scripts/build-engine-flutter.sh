@@ -72,8 +72,7 @@ build_android_abi() {
 case "$TARGET" in
   host)
     go build -o "$OUT_DIR/$NAME" ./cmd/engine
-    cp -f "$OUT_DIR/$NAME" /tmp/kotv-engine 2>/dev/null || true
-    chmod +x "$OUT_DIR/$NAME" /tmp/kotv-engine 2>/dev/null || true
+    chmod +x "$OUT_DIR/$NAME"
     echo "built $OUT_DIR/$NAME"
     ;;
   android)

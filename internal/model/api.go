@@ -7,7 +7,7 @@ type Api struct {
 	ID        string          `json:"-"`
 	Spider    string          `json:"spider"`
 	Sites     []Site          `json:"sites"`
-	Lives     []Live          `json:"lives"`
+	Lives     LiveList        `json:"lives"`
 	Parses    []Parse         `json:"parses"`
 	Rules     []Rule          `json:"rules"`
 	Flags     []string        `json:"flags"`

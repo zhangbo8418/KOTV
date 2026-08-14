@@ -227,6 +227,61 @@ func (a *App) scopeLive() *live.Service {
 	return a.Live
 }
 
+func (a *App) savedLiveSources() []model.Live {
+	var out []model.Live
+	seen := map[string]struct{}{}
+	if a.DB != nil {
+		cfgs, err := a.DB.ListConfigs(int64(database.ConfigTypeLive))
+		if err == nil {
+			for _, c := range cfgs {
+				url := strings.TrimSpace(c.URL)
+				if url == "" {
+					continue
+				}
+				seen[url] = struct{}{}
+				name := strings.TrimSpace(c.Name)
+				if name == "" {
+					name = config.SourceDisplayName(url)
+				}
+				out = append(out, model.Live{Name: name, URL: url})
+			}
+		}
+	}
+	current := strings.TrimSpace(settings.Get(settings.LIVE))
+	if current != "" {
+		if _, ok := seen[current]; !ok {
+			a.persistLiveSource(current)
+			out = append([]model.Live{{Name: config.SourceDisplayName(current), URL: current}}, out...)
+		}
+	}
+	return out
+}
+
+func (a *App) persistLiveSource(raw string) string {
+	url := config.NormalizeSource(strings.TrimSpace(raw))
+	if url == "" || a.DB == nil {
+		return url
+	}
+	name := config.SourceDisplayName(url)
+	if _, err := a.DB.UpsertConfig(&database.Config{
+		Type: database.ConfigTypeLive,
+		URL:  url,
+		Name: name,
+	}); err != nil {
+		log.Printf("persist live source %s: %v", url, err)
+	}
+	return url
+}
+
+func (a *App) syncLive() {
+	if lv := a.scopeLive(); lv != nil {
+		lv.SyncFromConfig()
+	}
+	if a.Live != nil && a.scopeLive() != a.Live {
+		a.Live.SyncFromConfig()
+	}
+}
+
 func (a *App) listenEvents() {
 	go func() {
 		for ev := range a.Server.Events().SubscribeSearch() {
@@ -295,7 +350,8 @@ func (a *App) applyRemoteSetting(name, value string) {
 	case "", "vod":
 		settings.Set(settings.VOD, value)
 	case "live":
-		settings.Set(settings.LIVE, value)
+		url := a.persistLiveSource(value)
+		settings.Set(settings.LIVE, url)
 	default:
 		settings.Set(settings.Type(name), value)
 	}

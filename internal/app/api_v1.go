@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/clientsession"
+	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
@@ -753,6 +754,22 @@ func (a *App) APIDeleteRepo(url string) error {
 	return a.DB.DeleteConfigByURL(url, int64(database.ConfigTypeSite))
 }
 
+func (a *App) APIDeleteLive(url string) error {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return fmt.Errorf("empty url")
+	}
+	if err := a.DB.DeleteConfigByURL(url, int64(database.ConfigTypeLive)); err != nil {
+		return err
+	}
+	if strings.TrimSpace(settings.Get(settings.LIVE)) == url {
+		settings.Set(settings.LIVE, "")
+		_ = settings.Save()
+	}
+	a.syncLive()
+	return nil
+}
+
 func (a *App) APIGetSettings() map[string]any {
 	cfg, _, sess := a.scope()
 	keys := []settings.Type{
@@ -1035,12 +1052,13 @@ func (a *App) APISetSettings(kv map[string]string) error {
 			continue
 		}
 		t := settings.Type(k)
+		if t == settings.LIVE {
+			v = a.persistLiveSource(v)
+			needLive = true
+		}
 		settings.Set(t, v)
 		if t == settings.Proxy {
 			needProxy = true
-		}
-		if t == settings.LIVE {
-			needLive = true
 		}
 		if t == settings.DLNARenderer {
 			needDLNA = true
@@ -1054,7 +1072,7 @@ func (a *App) APISetSettings(kv map[string]string) error {
 		spider.SetUserProxy(settings.Get(settings.Proxy))
 	}
 	if needLive {
-		a.scopeLive().SyncFromConfig()
+		a.syncLive()
 	}
 	if needDLNA {
 		a.SyncDLNARenderer()
@@ -1095,6 +1113,12 @@ func (a *App) APILiveSources() map[string]any {
 	lv := a.scopeLive()
 	lv.SyncFromConfig()
 	srcs := lv.Sources()
+	cfg, _, _ := a.scope()
+	vodURL := strings.TrimSpace(cfg.API().URL)
+	current := strings.TrimSpace(settings.Get(settings.LIVE))
+	if current == "" {
+		current = vodURL
+	}
 	list := make([]map[string]any, 0, len(srcs))
 	for i, l := range srcs {
 		name := strings.TrimSpace(l.Name)
@@ -1108,21 +1132,53 @@ func (a *App) APILiveSources() map[string]any {
 			"api":   l.API,
 		})
 	}
+	hist := a.savedLiveSources()
+	configs := make([]map[string]any, 0, len(hist))
+	for _, l := range hist {
+		u := strings.TrimSpace(l.URL)
+		name := strings.TrimSpace(l.Name)
+		if name == "" {
+			name = u
+		}
+		configs = append(configs, map[string]any{
+			"name":    name,
+			"url":     u,
+			"current": u != "" && u == current,
+		})
+	}
 	return map[string]any{
 		"ok":      true,
-		"live":    settings.Get(settings.LIVE),
+		"live":    current,
 		"sources": list,
+		"configs": configs,
 	}
 }
 
 func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
 	lv := a.scopeLive()
-	lv.SyncFromConfig()
-	srcs := lv.Sources()
-	var liveSrc model.Live
 	url = strings.TrimSpace(url)
 	if url != "" {
-		liveSrc = model.Live{Name: "自定义", URL: url}
+		url = a.persistLiveSource(url)
+		settings.Set(settings.LIVE, url)
+		_ = settings.Save()
+		a.syncLive()
+	} else {
+		lv.SyncFromConfig()
+	}
+	srcs := lv.Sources()
+	var liveSrc model.Live
+	if url != "" {
+		if len(srcs) == 0 {
+			liveSrc = model.Live{Name: config.SourceDisplayName(url), URL: url}
+		} else {
+			liveSrc = srcs[0]
+			for _, s := range srcs {
+				if strings.TrimSpace(s.URL) == url {
+					liveSrc = s
+					break
+				}
+			}
+		}
 	} else {
 		if index < 0 || index >= len(srcs) {
 			return nil, fmt.Errorf("直播源索引无效")

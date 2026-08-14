@@ -30,6 +30,7 @@ type ContentAPI interface {
 	APISetMedia(state map[string]string)
 	APIListRepos() map[string]any
 	APIDeleteRepo(url string) error
+	APIDeleteLive(url string) error
 	APIGetSettings() map[string]any
 	APISetSettings(kv map[string]string) error
 	APIToggleSite(key, field string, all *bool) error
@@ -691,6 +692,12 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
+	case "delete":
+		if err := api.APIDeleteLive(body.URL); err != nil {
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "catchup":
 		out, err := api.APILiveCatchup(body.Group, body.Channel, body.Day, body.Prog)
 		if err != nil {

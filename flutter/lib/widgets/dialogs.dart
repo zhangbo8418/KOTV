@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:file_selector/file_selector.dart';
 
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
@@ -19,6 +20,18 @@ import 'chrome.dart';
   final width = innerW.clamp(280.0, 720.0);
   final height = (innerH * (compact ? 0.86 : 0.82)).clamp(compact ? 300.0 : 360.0, 560.0);
   return (width: width, height: height, inset: inset, compact: compact);
+}
+
+// 添加源时选择本机配置文件。桌面走系统原生对话框。
+const _configFileTypes = XTypeGroup(
+  label: '配置文件',
+  extensions: ['json', 'txt', 'xml', 'conf', 'yaml', 'yml'],
+);
+
+Future<String?> _pickConfigFile() async {
+  final XFile? file = await openFile(acceptedTypeGroups: [_configFileTypes]);
+  if (file == null) return null;
+  return Uri.file(file.path).toString();
 }
 
 Future<void> showSitePicker(
@@ -237,6 +250,14 @@ Future<void> showAddVodDialog(BuildContext context, WidgetRef ref) async {
             }
           }
 
+          Future<void> pick() async {
+            final picked = await _pickConfigFile();
+            if (picked != null && ctx.mounted) {
+              ctrl.text = picked;
+              await load(picked);
+            }
+          }
+
           final p = KotvPalette.of(ctx);
           return Dialog(
             backgroundColor: Colors.transparent,
@@ -276,6 +297,11 @@ Future<void> showAddVodDialog(BuildContext context, WidgetRef ref) async {
                   const SizedBox(height: 16),
                   Row(
                     children: [
+                      AppPill(
+                        label: '选择本地',
+                        width: 112,
+                        onTap: busy ? () {} : () => pick(),
+                      ),
                       const Spacer(),
                       AppPill(label: '取消', width: 96, onTap: busy ? () {} : () => Navigator.pop(ctx)),
                       const SizedBox(width: 10),
@@ -313,6 +339,13 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
     context: context,
     builder: (ctx) {
       final p = KotvPalette.of(ctx);
+      Future<void> pick() async {
+        final picked = await _pickConfigFile();
+        if (picked != null && ctx.mounted) {
+          ctrl.text = picked;
+          Navigator.pop(ctx, true);
+        }
+      }
       return Dialog(
       backgroundColor: Colors.transparent,
       child: Container(
@@ -345,6 +378,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
             const SizedBox(height: 16),
             Row(
               children: [
+                AppPill(label: '选择本地', width: 112, onTap: () => pick()),
                 const Spacer(),
                 AppPill(label: '取消', width: 96, onTap: () => Navigator.pop(ctx, false)),
                 const SizedBox(width: 10),
@@ -358,9 +392,127 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
     },
   );
   if (ok == true) {
-    await api.setSetting('live', ctrl.text.trim());
+    final src = ctrl.text.trim();
+    if (src.isNotEmpty) {
+      await api.setSetting('live', src);
+      ref.invalidate(settingsProvider);
+    }
   }
   ctrl.dispose();
+}
+
+/// 已保存的直播源列表。返回 true 表示已切换或新加，调用方应刷新。
+Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
+  final api = ref.read(apiProvider);
+  Map<String, dynamic> data;
+  try {
+    data = await api.liveSources();
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+    return false;
+  }
+  if (!context.mounted) return false;
+  final selected = await showDialog<String>(
+    context: context,
+    builder: (ctx) {
+      var local = data;
+      return StatefulBuilder(
+        builder: (ctx, setLocal) {
+          Future<void> reload() async {
+            final d = await api.liveSources();
+            setLocal(() => local = d);
+          }
+
+          final list = ((local['configs'] as List?) ?? []).whereType<Map>().toList();
+          final current = '${local['live'] ?? ''}';
+          final m = _dialogMetrics(ctx);
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: m.inset,
+            child: SizedBox(
+              width: m.width,
+              height: m.height,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: KotvPalette.of(ctx).dialogBg,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: KotvPalette.of(ctx).outline),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.all(m.compact ? 14 : 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '直播源',
+                        style: TextStyle(color: KotvPalette.of(ctx).fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 6),
+                      Text('点选切换；右侧删除可移除', style: TextStyle(color: KotvPalette.of(ctx).muted, fontSize: 14)),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: ListView(
+                          children: [
+                            ...() {
+                              final rows = <Widget>[];
+                              var focused = false;
+                              for (final r in list) {
+                                final url = '${r['url'] ?? ''}';
+                                final isCurrent = r['current'] == true || url == current;
+                                final name = '${r['name'] ?? url}';
+                                rows.add(
+                                  _RepoRow(
+                                    label: '$name${isCurrent ? '（当前）' : ''}',
+                                    autofocus: !focused,
+                                    onTap: isCurrent ? () {} : () => Navigator.pop(ctx, url),
+                                    onDelete: isCurrent
+                                        ? null
+                                        : () async {
+                                            await api.deleteLive(url);
+                                            await reload();
+                                          },
+                                  ),
+                                );
+                                rows.add(const SizedBox(height: 8));
+                                focused = true;
+                              }
+                              rows.add(
+                                _RepoRow(
+                                  label: '＋ 添加直播源',
+                                  autofocus: !focused,
+                                  onTap: () => Navigator.pop(ctx, ''),
+                                  onDelete: null,
+                                ),
+                              );
+                              return rows;
+                            }(),
+                          ],
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: AppPill(label: '关闭', width: m.compact ? 72 : 96, height: 36, onTap: () => Navigator.pop(ctx)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+  if (!context.mounted) return false;
+  if (selected == null) return false;
+  if (selected.isEmpty) {
+    await showAddLiveDialog(context, ref);
+    return true;
+  }
+  await api.setSetting('live', selected);
+  return true;
 }
 
 /// 多仓/线路切换。返回 true 表示已成功切换并应刷新首页。
@@ -837,10 +989,12 @@ class KotvSettingsCell extends StatelessWidget {
     required this.label,
     this.value = '',
     required this.onTap,
+    this.onLongPress,
   });
   final String label;
   final String value;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -861,6 +1015,7 @@ class KotvSettingsCell extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: oneCol ? 14 : 12, vertical: oneCol ? 14 : 13),
           // 标签按内容宽，数值吃满剩余宽度（由布局 ellipsis，不再硬截 10 字）。

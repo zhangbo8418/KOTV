@@ -253,12 +253,11 @@ func (m *Manager) InitFromSettings() error {
 }
 
 func (m *Manager) initFromVod(vod string) error {
-	vod = normalizeVodSource(vod)
+	vod = NormalizeSource(vod)
 	if vod == "" {
 		return fmt.Errorf("未配置点播源")
 	}
-	// TV Config.find(url, type) 以 url 为唯一键；这里的内联键 (inline://<hash>) 与之等价，
-	// 切换时按该键回查已持久化的 JSON 正文重新解析。
+	// 内联键 (inline://<hash>) 与 URL 一样作为唯一键；切换时按该键回查已落盘的 JSON 正文。
 	if isInlineConfigKey(vod) {
 		cfg, err := m.db.FindConfig(vod, database.ConfigTypeSite)
 		if err != nil {
@@ -292,7 +291,7 @@ func (m *Manager) initFromVod(vod string) error {
 }
 
 // resolveConfig 把用户输入（裸 URL / 裸 JSON / 已存的内联键）解析为要持久化的 Config 行。
-// TV 每个源以 (url, type) 唯一键存一行；裸 JSON 没有 url，故用内容哈希键代替，使不同 JSON 不再互相覆盖。
+// 每个源以 (url, type) 唯一键存一行；裸 JSON 没有 url，用内容哈希键代替，避免不同 JSON 互相覆盖。
 func (m *Manager) resolveConfig(source string) (*database.Config, error) {
 	if isInlineConfigKey(source) {
 		cfg, err := m.db.FindConfig(source, database.ConfigTypeSite)
@@ -312,12 +311,11 @@ func (m *Manager) resolveConfig(source string) (*database.Config, error) {
 			Name: inlineConfigName(source),
 		}, nil
 	}
-	return &database.Config{Type: database.ConfigTypeSite, URL: source, Name: deriveNameFromURL(source)}, nil
+	return &database.Config{Type: database.ConfigTypeSite, URL: source, Name: SourceDisplayName(source)}, nil
 }
 
-// deriveNameFromURL 从 URL 派生友好显示名（取最后非空路径段并解码；无路径则回落 host），
-// 对齐 TV 让用户为源命名的行为，使线路列表显示「PC专用」而非整条 URL。
-func deriveNameFromURL(raw string) string {
+// SourceDisplayName 从 URL 派生友好显示名（取最后非空路径段并解码；无路径则回落 host）。
+func SourceDisplayName(raw string) string {
 	u, err := url.Parse(raw)
 	if err == nil && u.Host != "" {
 		seg := ""
@@ -337,7 +335,7 @@ func deriveNameFromURL(raw string) string {
 	return raw
 }
 
-// inlineConfigKey 对应 TV 的 (url, type) 唯一键：把无 url 的内联 JSON 映射成稳定 key。
+// inlineConfigKey 把无 url 的内联 JSON 映射成稳定 key，使不同正文各占一行。
 func inlineConfigKey(vod string) string {
 	sum := sha256.Sum256([]byte(vod))
 	return "inline://" + hex.EncodeToString(sum[:])[:16]
@@ -347,7 +345,7 @@ func isInlineConfigKey(s string) bool {
 	return strings.HasPrefix(s, "inline://")
 }
 
-// inlineConfigName 取 JSON 顶层 name/title/key 作显示名（同 TV Config.name）；缺省回退到哈希后缀以便区分。
+// inlineConfigName 取 JSON 顶层 name/title/key 作显示名；缺省回退到哈希后缀以便区分。
 func inlineConfigName(vod string) string {
 	var head struct {
 		Key   string `json:"key"`
@@ -369,8 +367,8 @@ func looksLikeURL(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "file://")
 }
 
-// normalizeVodSource 本地配置路径统一成 file://，便于拉取配置并解析相对 spider.jar。
-func normalizeVodSource(source string) string {
+// NormalizeSource 本地配置路径统一成 file://，便于拉取配置并解析相对 spider.jar。
+func NormalizeSource(source string) string {
 	source = strings.TrimSpace(source)
 	if source == "" || looksLikeURL(source) || strings.HasPrefix(source, "{") || strings.HasPrefix(source, "[") {
 		return source
@@ -393,13 +391,13 @@ func normalizeVodSource(source string) string {
 
 // LoadFromSource 加载 URL 或 JSON 正文；非 ephemeral 时写回 settings.VOD。
 func (m *Manager) LoadFromSource(source string) error {
-	source = normalizeVodSource(source)
+	source = NormalizeSource(source)
 	if source == "" {
 		return fmt.Errorf("请输入点播源 URL 或粘贴 JSON")
 	}
-	// TV: 每个源以 (url, type) 唯一键持久化到共享库，本机与所有远端会话共用同一份源列表。
+	// 每个源以 (url, type) 唯一键写入共享库，本机与远端会话共用同一份源列表。
 	// ephemeral 只表示该 Scope 不写全局 settings.VOD 指针、不杀共享爬虫，仍必须把源行写入共享库；
-	// 否则会话模式（Flutter 每条请求都带 clientId）下 APIListRepos 读到的永远是空表，换源不落盘。
+	// 否则会话模式下 APIListRepos 读到的永远是空表，换源不落盘。
 	if m.db != nil || !m.ephemeral {
 		cfg, err := m.resolveConfig(source)
 		if err != nil {
@@ -445,8 +443,7 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	if err != nil {
 		return fmt.Errorf("配置解析失败: %w", err)
 	}
-	// TV VodConfig.initSite: an empty sites list degrades home to an empty Site
-	// and still loads, instead of failing the whole source.
+	// 空 sites 也照常加载（首页退化为空站点），不把整条源判失败。
 	if len(api.Sites) == 0 {
 		log.Printf("vod source %s has no sites, loading as empty", cfg.URL)
 	}
@@ -454,6 +451,7 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	api.URL = cfg.URL
 	api.Data = data
 	api.Ref++
+	m.expandLives(&api)
 
 	// 后续相对 spider.jar / 站点 jar 都相对此基址解析。
 	spider.SetConfigBase(cfg.URL)
@@ -485,6 +483,8 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	if home.Key != "" {
 		cfg.Home = home.Key
 	}
+
+	m.initLiveFromVod(cfg, &api)
 
 	// 源行与站点始终写入共享库（含会话模式）；ephemeral 只隔离「当前选中源」的内存态，不阻碍持久化。
 	if m.db != nil {
@@ -582,7 +582,7 @@ func (m *Manager) fetchData(source string, isJSON bool, inline string) (string, 
 	if isJSON {
 		return inline, nil
 	}
-	source = normalizeVodSource(source)
+	source = NormalizeSource(source)
 	if strings.HasPrefix(source, "file://") {
 		parsed, err := url.Parse(source)
 		if err != nil {
@@ -681,6 +681,9 @@ func resolveSitePaths(api *model.Api) {
 	// Live.objectFrom：直播 jar 空则继承根 spider。
 	for i := range api.Lives {
 		live := &api.Lives[i]
+		if strings.TrimSpace(live.URL) != "" {
+			live.URL = resolveSiteField(base, live.URL)
+		}
 		if strings.TrimSpace(live.API) != "" {
 			live.API = resolveSiteField(base, live.API)
 		}
@@ -791,4 +794,79 @@ func (m *Manager) Spider(site model.Site) spider.Spider {
 	ext := site.Ext.String()
 	spider.SetRecent(site.Key, site.API, ext, jar)
 	return spider.Get(site.Key, site.API, ext, jar)
+}
+
+func (m *Manager) expandLives(api *model.Api) {
+	if api == nil || len(api.Lives) == 0 {
+		return
+	}
+	out := make([]model.Live, 0, len(api.Lives))
+	for _, item := range api.Lives {
+		if !isLiveIndexRef(item) {
+			out = append(out, item)
+			continue
+		}
+		url := resolveSiteField(api.URL, strings.TrimSpace(item.URL))
+		fetched, err := fetchLiveArray(url)
+		if err != nil || len(fetched) == 0 {
+			if err != nil {
+				log.Printf("fetch lives %s: %v", url, err)
+			}
+			item.URL = url
+			out = append(out, item)
+			continue
+		}
+		out = append(out, fetched...)
+	}
+	api.Lives = out
+}
+
+func isLiveIndexRef(l model.Live) bool {
+	if strings.TrimSpace(l.Name) != "" || strings.TrimSpace(l.API) != "" {
+		return false
+	}
+	u := strings.TrimSpace(l.URL)
+	return looksLikeURL(u)
+}
+
+func fetchLiveArray(rawURL string) ([]model.Live, error) {
+	text, err := util.HTTPGet(rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	text = util.CleanJSONComments(text)
+	var list model.LiveList
+	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &list); err != nil {
+		return nil, err
+	}
+	return []model.Live(list), nil
+}
+
+func (m *Manager) initLiveFromVod(cfg *database.Config, api *model.Api) {
+	if cfg == nil || api == nil || len(api.Lives) == 0 {
+		return
+	}
+	vodURL := strings.TrimSpace(cfg.URL)
+	if vodURL == "" {
+		return
+	}
+	name := strings.TrimSpace(cfg.Name)
+	if name == "" {
+		name = SourceDisplayName(vodURL)
+	}
+	if m.db != nil {
+		if _, err := m.db.UpsertConfig(&database.Config{
+			Type: database.ConfigTypeLive,
+			URL:  vodURL,
+			Name: name,
+		}); err != nil {
+			log.Printf("persist live config %s: %v", vodURL, err)
+		}
+	}
+	liveURL := strings.TrimSpace(settings.Get(settings.LIVE))
+	if liveURL != "" && liveURL != vodURL {
+		return
+	}
+	settings.Set(settings.LIVE, vodURL)
+	_ = settings.Save()
 }

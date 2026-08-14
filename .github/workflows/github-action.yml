@@ -12,7 +12,7 @@ env:
   FLUTTER_VERSION: "3.44.8"
   FLUTTER_WIN7_VERSION: "3.19.6"
   # fvp cmake：从 GitHub Release 拉 mdk-sdk，避免 SourceForge nightly
-  FVP_DEPS_URL: "https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0"
+  FVP_DEPS_URL: "https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0"
 
 jobs:
   set-tag:
@@ -354,7 +354,7 @@ jobs:
             echo "==> cross-ish: build under arch -x86_64"
             arch -x86_64 bash -lc '
               export PATH="/usr/local/bin:$PATH"
-              export FVP_DEPS_URL="${FVP_DEPS_URL:-https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0}"
+              export FVP_DEPS_URL="${FVP_DEPS_URL:-https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0}"
               source ./scripts/kotv-fvp-deps.sh
               kotv_export_fvp_deps
               kotv_ensure_mdk_apple_pod

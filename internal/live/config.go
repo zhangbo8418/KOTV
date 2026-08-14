@@ -11,7 +11,7 @@ import (
 type ConfigMeta struct {
 	Ads   []string     `json:"ads"`
 	Rules []model.Rule `json:"rules"`
-	Lives []model.Live `json:"lives"`
+	Lives model.LiveList `json:"lives"`
 }
 
 // ParseConfigMeta 若文本是直播配置 JSON 对象（含 ads/rules/lives 任一），则解析；否则 ok=false。

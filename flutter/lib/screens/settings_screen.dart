@@ -963,6 +963,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             await showAddVodDialog(context, ref);
                             await _reload();
                           },
+                          onLongPress: () async {
+                            final switched = await showRepoPicker(context, ref);
+                            if (switched) {
+                              await _reload();
+                              setState(() => _status = '线路已切换');
+                            }
+                          },
                         ),
                         KotvSettingsCell(
                           label: '直播源',
@@ -971,6 +978,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             await showAddLiveDialog(context, ref);
                             await _reload();
                             setState(() => _status = '直播源已保存');
+                          },
+                          onLongPress: () async {
+                            await showLivePicker(context, ref);
+                            await _reload();
+                            setState(() => _status = '直播源已切换');
                           },
                         ),
                         KotvSettingsCell(

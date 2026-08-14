@@ -363,14 +363,12 @@ class _EngineOfflinePage extends ConsumerWidget {
                 Text(
                   kIsWeb
                       ? '无法连接本站后端服务\n请确认引擎已启动后刷新页面'
-                      : Platform.isIOS || Platform.isAndroid
-                          ? '请先连接可用后端服务，或确认本机引擎已启动'
-                          : '无法连接 Go 引擎\n请先启动引擎或检查设置中的引擎地址',
+                      : '请先连接可用后端服务',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: muted),
                 ),
                 const SizedBox(height: 16),
-                if (!kIsWeb && (Platform.isIOS || Platform.isAndroid))
+                if (!kIsWeb)
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -390,7 +388,7 @@ class _EngineOfflinePage extends ConsumerWidget {
                   )
                 else
                   AppPill(
-                    label: kIsWeb ? '刷新重试' : '重试',
+                    label: '刷新重试',
                     width: 120,
                     autofocus: true,
                     onTap: () => ref.invalidate(engineReadyProvider),

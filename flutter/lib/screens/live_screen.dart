@@ -1553,7 +1553,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   Padding(
                                     padding: const EdgeInsets.only(bottom: 6),
                                     child: AppPill(
-                                      label: '${_sources[i]['name'] ?? _sources[i]['url']}',
+                                      label: '${_sources[i]['name'] ?? _sources[i]['url']}${_sources[i]['current'] == true || i == _srcIdx ? '（当前）' : ''}',
                                       height: 36,
                                       fontSize: 13,
                                       selected: i == _srcIdx,
@@ -1565,7 +1565,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   label: '配置直播源',
                                   height: 40,
                                   onTap: () async {
-                                    await showAddLiveDialog(context, ref);
+                                    await showLivePicker(context, ref);
                                     await _bootstrap();
                                   },
                                 ),

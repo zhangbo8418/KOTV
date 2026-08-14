@@ -276,6 +276,9 @@ class KotvApi {
 
   Future<Map<String, dynamic>> liveSources() => _get('/api/v1/live');
 
+  Future<Map<String, dynamic>> deleteLive(String url) =>
+      _post('/api/v1/live', {'action': 'delete', 'url': url});
+
   Future<Map<String, dynamic>> liveLoad({int index = 0, String url = ''}) =>
       _post('/api/v1/live', {
         'action': 'load',
