@@ -319,35 +319,11 @@ func SourceDisplayName(raw string) string {
 	return strings.TrimSpace(raw)
 }
 
-func lastURLPathSegment(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	seg := ""
-	for _, p := range strings.Split(strings.Trim(u.Path, "/"), "/") {
-		if p != "" {
-			seg = p
-		}
-	}
-	if seg == "" {
-		return ""
-	}
-	if dec, e := url.PathUnescape(seg); e == nil {
-		return dec
-	}
-	return seg
-}
-
 // ConfigLabel 有接口名显示名字，没有则显示完整接口地址。
-// 旧数据曾把路径末段误写入 name，这种按「无名字」处理。
 func ConfigLabel(name, rawURL string) string {
 	name = strings.TrimSpace(name)
 	rawURL = strings.TrimSpace(rawURL)
 	if name == "" {
-		return rawURL
-	}
-	if tail := lastURLPathSegment(rawURL); tail != "" && name == tail {
 		return rawURL
 	}
 	return name

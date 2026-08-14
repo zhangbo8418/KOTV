@@ -3,18 +3,16 @@ package config
 import "testing"
 
 func TestConfigLabelNameOrFullURL(t *testing.T) {
-	u := "https://example.com/path/api.json"
+	u := "https://tv.example.com/🐷PY/"
 	if got := ConfigLabel("", u); got != u {
 		t.Fatalf("empty name = %q", got)
 	}
-	if got := ConfigLabel("api.json", u); got != u {
-		t.Fatalf("legacy path tail = %q", got)
+	// 多仓名字经常等于路径末段，必须原样显示，不能当成「无名字」。
+	if got := ConfigLabel("🐷PY", u); got != "🐷PY" {
+		t.Fatalf("depot name = %q", got)
 	}
-	if got := ConfigLabel("饭太硬", u); got != "饭太硬" {
-		t.Fatalf("json name = %q", got)
-	}
-	if got := ConfigLabel(u, u); got != u {
-		t.Fatalf("name equals url = %q", got)
+	if got := ConfigLabel("短剧.json", "https://d.example.com/download/8344/短剧.json"); got != "短剧.json" {
+		t.Fatalf("file-like name = %q", got)
 	}
 }
 
