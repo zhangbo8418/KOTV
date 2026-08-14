@@ -1083,7 +1083,8 @@ class KotvSettingsCell extends StatelessWidget {
                     value,
                     maxLines: oneCol ? 2 : 2,
                     overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
+                    // 短文案右对齐；完整接口地址左起显示，避免只露路径末段。
+                    textAlign: value.contains('://') ? TextAlign.left : TextAlign.right,
                     style: valueStyle,
                   ),
                 ),

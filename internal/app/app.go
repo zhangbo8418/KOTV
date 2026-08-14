@@ -248,7 +248,7 @@ func (a *App) savedLiveSources() []model.Live {
 	if current != "" {
 		if _, ok := seen[current]; !ok {
 			a.persistLiveSource(current)
-			out = append([]model.Live{{Name: config.SourceDisplayName(current), URL: current}}, out...)
+			out = append([]model.Live{{Name: config.ConfigLabel("", current), URL: current}}, out...)
 		}
 	}
 	return out
@@ -259,11 +259,9 @@ func (a *App) persistLiveSource(raw string) string {
 	if url == "" || a.DB == nil {
 		return url
 	}
-	name := config.SourceDisplayName(url)
 	if _, err := a.DB.UpsertConfig(&database.Config{
 		Type: database.ConfigTypeLive,
 		URL:  url,
-		Name: name,
 	}); err != nil {
 		log.Printf("persist live source %s: %v", url, err)
 	}

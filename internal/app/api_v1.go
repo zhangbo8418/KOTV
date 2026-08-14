@@ -792,6 +792,10 @@ func (a *App) APIGetSettings() map[string]any {
 	}
 	settings.OverlayClientProfile(vals, hostclient.CurrentPlatform())
 	out["settings"] = vals
+	vodURL := strings.TrimSpace(vals[string(settings.VOD)])
+	liveURL := strings.TrimSpace(vals[string(settings.LIVE)])
+	out["vodDesc"] = a.configDesc(database.ConfigTypeSite, vodURL)
+	out["liveDesc"] = a.configDesc(database.ConfigTypeLive, liveURL)
 	parses := make([]map[string]any, 0)
 	for _, p := range cfg.API().Parses {
 		parses = append(parses, map[string]any{"name": p.Name, "type": p.TypeID(), "url": p.URL})
@@ -1106,6 +1110,20 @@ func (a *App) APIToggleSite(key, field string, all *bool) error {
 	}
 }
 
+func (a *App) configDesc(typ int64, rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	name := ""
+	if a.DB != nil {
+		if c, err := a.DB.FindConfig(rawURL, typ); err == nil && c != nil {
+			name = c.Name
+		}
+	}
+	return config.ConfigLabel(name, rawURL)
+}
+
 func (a *App) APILiveSources() map[string]any {
 	lv := a.scopeLive()
 	lv.SyncFromConfig()
@@ -1118,13 +1136,9 @@ func (a *App) APILiveSources() map[string]any {
 	}
 	list := make([]map[string]any, 0, len(srcs))
 	for i, l := range srcs {
-		name := strings.TrimSpace(l.Name)
-		if name == "" {
-			name = l.URL
-		}
 		list = append(list, map[string]any{
 			"index": i,
-			"name":  name,
+			"name":  config.ConfigLabel(l.Name, l.URL),
 			"url":   l.URL,
 			"api":   l.API,
 		})
@@ -1133,12 +1147,8 @@ func (a *App) APILiveSources() map[string]any {
 	configs := make([]map[string]any, 0, len(hist))
 	for _, l := range hist {
 		u := strings.TrimSpace(l.URL)
-		name := strings.TrimSpace(l.Name)
-		if name == "" {
-			name = u
-		}
 		configs = append(configs, map[string]any{
-			"name":    name,
+			"name":    config.ConfigLabel(l.Name, u),
 			"url":     u,
 			"current": u != "" && u == current,
 		})
@@ -1166,7 +1176,7 @@ func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
 	var liveSrc model.Live
 	if url != "" {
 		if len(srcs) == 0 {
-			liveSrc = model.Live{Name: config.SourceDisplayName(url), URL: url}
+			liveSrc = model.Live{Name: config.ConfigLabel("", url), URL: url}
 		} else {
 			liveSrc = srcs[0]
 			for _, s := range srcs {

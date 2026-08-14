@@ -314,7 +314,7 @@ func (m *Manager) resolveConfig(source string) (*database.Config, error) {
 	return &database.Config{Type: database.ConfigTypeSite, URL: source}, nil
 }
 
-// SourceDisplayName 单仓库没有接口名时用完整地址。
+// SourceDisplayName 无接口名时回落为完整地址（勿截成路径末段）。
 func SourceDisplayName(raw string) string {
 	return strings.TrimSpace(raw)
 }
@@ -339,8 +339,8 @@ func lastURLPathSegment(raw string) string {
 	return seg
 }
 
-// ConfigLabel 历史列表：有接口名用接口名，否则完整 URL。
-// 旧数据曾把路径末段写成 name，这种也回退成完整 URL。
+// ConfigLabel 有接口名显示名字，没有则显示完整接口地址。
+// 旧数据曾把路径末段误写入 name，这种按「无名字」处理。
 func ConfigLabel(name, rawURL string) string {
 	name = strings.TrimSpace(name)
 	rawURL = strings.TrimSpace(rawURL)
@@ -561,7 +561,7 @@ func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot) e
 		cfg := &database.Config{
 			Type: database.ConfigTypeSite,
 			URL:  url,
-			Name: d.DisplayName(),
+			Name: strings.TrimSpace(d.Name),
 		}
 		if _, err := m.db.UpsertConfig(cfg); err != nil {
 			return fmt.Errorf("写入线路 %s 失败: %w", d.DisplayName(), err)
@@ -590,7 +590,7 @@ func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot) e
 		return err
 	}
 	if next == nil {
-		next = &database.Config{Type: database.ConfigTypeSite, URL: first, Name: depots[0].DisplayName()}
+		next = &database.Config{Type: database.ConfigTypeSite, URL: first, Name: strings.TrimSpace(depots[0].Name)}
 	}
 	log.Printf("仓库索引展开完成，加载首个线路: %s", first)
 	return m.ParseConfig(next, false)
@@ -869,9 +869,6 @@ func (m *Manager) initLiveFromVod(cfg *database.Config, api *model.Api) {
 		return
 	}
 	name := strings.TrimSpace(cfg.Name)
-	if name == "" {
-		name = SourceDisplayName(vodURL)
-	}
 	if m.db != nil {
 		if _, err := m.db.UpsertConfig(&database.Config{
 			Type: database.ConfigTypeLive,

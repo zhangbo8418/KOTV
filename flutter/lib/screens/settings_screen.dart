@@ -42,6 +42,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _status = '';
   String _pairCode = '';
   String _remoteUser = '';
+  String _vodDesc = '';
+  String _liveDesc = '';
   bool _loading = true;
   bool _busy = false;
   final _engineCtrl = TextEditingController();
@@ -77,6 +79,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _port = '${data['port'] ?? '9978'}';
       _version = '${data['version'] ?? '0.1.0'}';
       _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
+      _vodDesc = '${data['vodDesc'] ?? ''}';
+      _liveDesc = '${data['liveDesc'] ?? ''}';
       await LocalHistory.setIncognito(g('incognito', 'false') == 'true');
       kotvApplyPlayUaSetting(g('ua'));
     } catch (e) {
@@ -958,7 +962,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       KotvSettingsGrid(children: [
                         KotvSettingsCell(
                           label: '点播源',
-                          value: g('vod').isEmpty ? '未配置' : g('vod'),
+                          value: () {
+                            final desc = _vodDesc.trim().isNotEmpty ? _vodDesc.trim() : g('vod');
+                            return desc.isEmpty ? '未配置' : desc;
+                          }(),
                           onTap: () async {
                             await showAddVodDialog(context, ref);
                             await _reload();
@@ -973,7 +980,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: '直播源',
-                          value: g('live').isEmpty ? '未配置' : g('live'),
+                          value: () {
+                            final desc = _liveDesc.trim().isNotEmpty ? _liveDesc.trim() : g('live');
+                            return desc.isEmpty ? '未配置' : desc;
+                          }(),
                           onTap: () async {
                             await showAddLiveDialog(context, ref);
                             await _reload();
