@@ -1,4 +1,8 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_selector/file_selector.dart';
 
 import '../theme/layout_scale.dart';
@@ -22,13 +26,33 @@ import 'chrome.dart';
   return (width: width, height: height, inset: inset, compact: compact);
 }
 
-// 添加源时选择本机配置文件。桌面走系统原生对话框。
+// 添加源时选择本机配置文件。
 const _configFileTypes = XTypeGroup(
   label: '配置文件',
   extensions: ['json', 'txt', 'xml', 'conf', 'yaml', 'yml'],
 );
 
+/// 对齐 TV ConfigDialog + FileChooser：
+/// - Android：解析 Document URI 为真实磁盘路径（不拷贝整目录）
+/// - 桌面：系统文件对话框
+/// 相对 jar/js/py 由引擎相对配置文件目录解析（任意子目录名）。
 Future<String?> _pickConfigFile() async {
+  if (!kIsWeb && Platform.isAndroid) {
+    try {
+      const ch = MethodChannel('kotv_android');
+      // 本地仓需读同目录相对脚本，先尽量申请存储权限（对齐 TV MANAGE_EXTERNAL_STORAGE）
+      try {
+        await ch.invokeMethod<bool>('ensureStoragePermission');
+      } catch (_) {}
+      final path = await ch.invokeMethod<String>('pickConfigFile');
+      final raw = (path ?? '').trim();
+      if (raw.isEmpty) return null;
+      if (raw.startsWith('file:')) return raw;
+      return Uri.file(raw).toString();
+    } catch (_) {
+      // 回落桌面同款选择器
+    }
+  }
   final XFile? file = await openFile(acceptedTypeGroups: [_configFileTypes]);
   if (file == null) return null;
   return Uri.file(file.path).toString();

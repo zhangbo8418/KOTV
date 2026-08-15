@@ -212,10 +212,18 @@ func (s *pySpider) ensureScript() (string, error) {
 		return s.scriptPath, nil
 	}
 	api := strings.TrimSpace(s.api)
+	// 对齐 TV：http（含 /file/ 代理）下载到 py 缓存；file:// / 绝对路径直读。
 	if local, ok := util.FileURLPath(api); ok {
-		api = local
+		if st, err := os.Stat(local); err != nil || st.IsDir() {
+			return "", fmt.Errorf("本地脚本不存在: %s", local)
+		}
+		s.scriptPath = local
+		return local, nil
 	}
-	if st, err := os.Stat(api); err == nil && !st.IsDir() {
+	if filepath.IsAbs(api) {
+		if st, err := os.Stat(api); err != nil || st.IsDir() {
+			return "", fmt.Errorf("本地脚本不存在: %s", api)
+		}
 		s.scriptPath = api
 		return api, nil
 	}

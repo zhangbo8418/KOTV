@@ -1,14 +1,19 @@
 package com.bobo.kotv
 
 import android.Manifest
+import android.app.Activity
 import android.app.ActivityManager
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.TrafficStats
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.util.Rational
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -21,6 +26,32 @@ class MainActivity : FlutterActivity() {
   private var spiderKickStarted = false
   private var androidChannel: MethodChannel? = null
   private var castPermResult: MethodChannel.Result? = null
+  private var pickConfigResult: MethodChannel.Result? = null
+  private var storagePermResult: MethodChannel.Result? = null
+
+  private val pickConfigLauncher =
+    registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+      val pending = pickConfigResult
+      pickConfigResult = null
+      if (pending == null) return@registerForActivityResult
+      if (result.resultCode != Activity.RESULT_OK || result.data?.data == null) {
+        pending.success(null)
+        return@registerForActivityResult
+      }
+      val path = KotvFileChooser.getPathFromUri(this, result.data!!.data!!)
+      if (path.isNullOrBlank()) {
+        pending.success(null)
+        return@registerForActivityResult
+      }
+      // 对齐 TV：真实磁盘路径 → file://（绝对路径，相对 jar/js/py 相对该文件目录解析）
+      pending.success(Uri.fromFile(File(path)).toString())
+    }
+
+  private val manageStorageLauncher =
+    registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+      storagePermResult?.success(KotvFileChooser.hasStoragePermission(this))
+      storagePermResult = null
+    }
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -94,6 +125,9 @@ class MainActivity : FlutterActivity() {
           )
         }
         "ensureCastPermissions" -> ensureCastPermissions(result)
+        "ensureStoragePermission" -> ensureStoragePermission(result)
+        "pickConfigFile" -> pickConfigFile(result)
+        "hasStoragePermission" -> result.success(KotvFileChooser.hasStoragePermission(this))
         "getMemoryInfo" -> {
           try {
             val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -124,6 +158,52 @@ class MainActivity : FlutterActivity() {
         else -> result.notImplemented()
       }
     }
+  }
+
+  /** 对齐 TV ConfigDialog：ACTION_OPEN_DOCUMENT → 真实路径 file:// */
+  private fun pickConfigFile(result: MethodChannel.Result) {
+    if (pickConfigResult != null) {
+      result.error("busy", "picker already open", null)
+      return
+    }
+    pickConfigResult = result
+    try {
+      pickConfigLauncher.launch(KotvFileChooser.openDocumentIntent())
+    } catch (t: Throwable) {
+      pickConfigResult = null
+      result.error("pick", t.message ?: t.toString(), null)
+    }
+  }
+
+  private fun ensureStoragePermission(result: MethodChannel.Result) {
+    if (KotvFileChooser.hasStoragePermission(this)) {
+      result.success(true)
+      return
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      storagePermResult = result
+      try {
+        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+        intent.data = Uri.parse("package:$packageName")
+        manageStorageLauncher.launch(intent)
+      } catch (_: Throwable) {
+        try {
+          manageStorageLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        } catch (t: Throwable) {
+          storagePermResult = null
+          result.error("storage", t.message ?: t.toString(), null)
+        }
+      }
+      return
+    }
+    val need = Manifest.permission.READ_EXTERNAL_STORAGE
+    if (ContextCompat.checkSelfPermission(this, need) == PackageManager.PERMISSION_GRANTED) {
+      result.success(true)
+      return
+    }
+    castPermResult = null
+    storagePermResult = result
+    ActivityCompat.requestPermissions(this, arrayOf(need), REQ_STORAGE)
   }
 
   private fun enterPipMode(): Boolean {
@@ -185,10 +265,17 @@ class MainActivity : FlutterActivity() {
     grantResults: IntArray,
   ) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-    if (requestCode != REQ_CAST) return
-    val ok = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-    castPermResult?.success(ok)
-    castPermResult = null
+    if (requestCode == REQ_CAST) {
+      val ok = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+      castPermResult?.success(ok)
+      castPermResult = null
+      return
+    }
+    if (requestCode == REQ_STORAGE) {
+      val ok = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+      storagePermResult?.success(ok)
+      storagePermResult = null
+    }
   }
 
   override fun onPostResume() {
@@ -209,5 +296,6 @@ class MainActivity : FlutterActivity() {
 
   companion object {
     private const val REQ_CAST = 0xC457
+    private const val REQ_STORAGE = 0xC458
   }
 }

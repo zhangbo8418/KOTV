@@ -16,6 +16,7 @@ import (
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/parse"
+	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/util"
@@ -623,16 +624,20 @@ func (m *Manager) fetchData(source string, isJSON bool, inline string) (string, 
 		return inline, nil
 	}
 	source = NormalizeSource(source)
-	if strings.HasPrefix(source, "file://") {
-		parsed, err := url.Parse(source)
-		if err != nil {
-			return "", err
+	if strings.HasPrefix(source, "file://") || strings.HasPrefix(source, "file:/") {
+		local, ok := util.FileURLPath(source)
+		if !ok {
+			// 兼容 file:/rel 相对外部存储根（TV ConfigDialog 写法）
+			raw := strings.TrimPrefix(strings.TrimPrefix(source, "file://"), "file:/")
+			if u, err := url.PathUnescape(raw); err == nil {
+				raw = u
+			}
+			local = paths.ResolveMediaPath(raw)
+			if local == "" {
+				return "", fmt.Errorf("本地配置不存在: %s", source)
+			}
 		}
-		name, err := url.PathUnescape(parsed.Path)
-		if err != nil {
-			return "", err
-		}
-		b, err := os.ReadFile(filepath.FromSlash(name))
+		b, err := os.ReadFile(local)
 		if err != nil {
 			return "", err
 		}
@@ -774,18 +779,9 @@ func resolveSiteField(base, value string) string {
 	if value == "" {
 		return value
 	}
-	// 特殊 scheme 交给本地 HTTP 服务。
-	localBase := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
-	if strings.HasPrefix(value, "assets://") {
-		return localBase + "/" + strings.TrimPrefix(value, "assets://")
-	}
-	if strings.HasPrefix(value, "proxy://") {
-		return localBase + "/proxy?" + strings.TrimPrefix(value, "proxy://")
-	}
-	if strings.HasPrefix(value, "file://") {
-		path := url.PathEscape(strings.TrimPrefix(value, "file://"))
-		path = strings.ReplaceAll(path, "%2F", "/")
-		return localBase + "/file/" + path
+	// 对齐 TV UrlUtil.convert：assets / proxy / file → 本机 HTTP
+	if converted := convertLocalScheme(value); converted != value {
+		return converted
 	}
 	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") ||
 		strings.HasPrefix(value, "csp_") {
@@ -804,9 +800,38 @@ func resolveSiteField(base, value string) string {
 		return value
 	}
 	if resolved := util.ResolveRelativeURL(base, value); resolved != "" {
-		return resolved
+		// 相对路径解析后若是 file://，再走 convert（对齐 TV：先 resolve 再 convert）
+		return convertLocalScheme(resolved)
 	}
 	return value
+}
+
+// convertLocalScheme 对齐 TV UrlUtil.convert。
+func convertLocalScheme(value string) string {
+	value = strings.TrimSpace(value)
+	localBase := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
+	switch {
+	case strings.HasPrefix(value, "assets://"):
+		return localBase + "/" + strings.TrimPrefix(value, "assets://")
+	case strings.HasPrefix(value, "proxy://"):
+		return localBase + "/proxy?" + strings.TrimPrefix(value, "proxy://")
+	case strings.HasPrefix(value, "file://"), strings.HasPrefix(value, "file:/"):
+		pathPart := value
+		if local, ok := util.FileURLPath(value); ok {
+			pathPart = filepath.ToSlash(local)
+		} else {
+			pathPart = strings.TrimPrefix(pathPart, "file://")
+			pathPart = strings.TrimPrefix(pathPart, "file:/")
+			if u, err := url.PathUnescape(pathPart); err == nil {
+				pathPart = u
+			}
+		}
+		esc := url.PathEscape(pathPart)
+		esc = strings.ReplaceAll(esc, "%2F", "/")
+		return localBase + "/file/" + esc
+	default:
+		return value
+	}
 }
 
 // looksLikeBase64Payload 识别不透明 Base64 载荷（无路径/扩展名语义）。
