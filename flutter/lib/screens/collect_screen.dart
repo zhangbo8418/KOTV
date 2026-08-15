@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../nav/kotv_routes.dart';
 import '../remote/local_collect.dart';
+import '../theme/layout_scale.dart';
 import '../widgets/chrome.dart';
 import '../widgets/poster_card.dart';
 import 'detail_screen.dart';
@@ -39,6 +40,13 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final compact = KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
+    final land = KotvLayout.isLandscapeCompact(context);
+    final pillH = land ? 30.0 : (compact ? 32.0 : 40.0);
+    final pillFs = land ? 12.0 : (compact ? 13.0 : 15.0);
+    final delW = land ? 72.0 : (compact ? 88.0 : 120.0);
+    final clearW = land ? 72.0 : (compact ? 88.0 : 120.0);
+    final gap = land ? 6.0 : (compact ? 6.0 : 8.0);
     return Column(
       children: [
         LibraryTopBar(
@@ -51,15 +59,19 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               AppPill(
-                label: _deleting ? '完成' : '删除记录',
-                width: 120,
+                label: _deleting ? '完成' : (compact ? '删除' : '删除记录'),
+                width: delW,
+                height: pillH,
+                fontSize: pillFs,
                 selected: _deleting,
                 onTap: () => setState(() => _deleting = !_deleting),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: gap),
               AppPill(
-                label: '清空收藏',
-                width: 120,
+                label: compact ? '清空' : '清空收藏',
+                width: clearW,
+                height: pillH,
+                fontSize: pillFs,
                 onTap: () async {
                   await LocalCollect.clear();
                   await _reload();

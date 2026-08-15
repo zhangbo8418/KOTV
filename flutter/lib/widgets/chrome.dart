@@ -661,30 +661,48 @@ class LibraryTopBar extends StatelessWidget {
     final pillH = land ? 30.0 : (compact ? 36.0 : 40.0);
     final pillW = land ? 72.0 : (compact ? 88.0 : 104.0);
     final pillFs = land ? 12.0 : 15.0;
-    // 竖屏底栏已有搜索/我的：顶栏只留返回（+可选标题）
+    // 竖屏底栏已有搜索/我的：顶栏只留返回（+可选标题/操作）
     if (bottomNav) {
+      final backW = 72.0;
+      final backH = land ? 30.0 : 32.0;
+      final backFs = land ? 12.0 : 13.0;
       return Padding(
         padding: pad,
         child: Row(
           children: [
-            AppPill(label: '返回', width: 88, height: 36, onTap: onBack),
+            AppPill(label: '返回', width: backW, height: backH, fontSize: backFs, onTap: onBack),
+            // 有 trailing 时优先保证操作按钮可缩，标题可省略
             if (title != null && title!.isNotEmpty) ...[
-              const SizedBox(width: 10),
-              Expanded(
+              SizedBox(width: land ? 6 : 8),
+              Flexible(
+                flex: trailing != null ? 1 : 2,
                 child: Text(
                   title!,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: KotvPalette.of(context).fg,
-                    fontSize: 17,
+                    fontSize: land ? 14 : 16,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-            ] else
+            ] else if (trailing == null)
               const Spacer(),
-            if (trailing != null) trailing!,
+            if (trailing != null) ...[
+              SizedBox(width: land ? 6 : 8),
+              Flexible(
+                flex: 3,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: trailing!,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       );
