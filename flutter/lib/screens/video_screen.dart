@@ -12,6 +12,7 @@ import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../widgets/chrome.dart';
+import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/poster_card.dart';
@@ -38,6 +39,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   bool _ready = false;
   int _bannerIdx = 0;
   Timer? _bannerTimer;
+  List<ConfigBannerSlide> _apiBanners = [];
+  String _apiBannerUrl = '';
+  int _apiBannerLoadGen = 0;
 
   List<VodItem> _history = [];
   List<VodItem> _keeps = [];
@@ -50,7 +54,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
     _bannerTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted || _tid != null) return;
-      final n = _bannerSlides.length;
+      final n = _apiBanners.isNotEmpty ? _apiBanners.length : _bannerSlides.length;
       if (n < 2) return;
       setState(() => _bannerIdx = (_bannerIdx + 1) % n);
     });
@@ -69,6 +73,42 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     return _items.take(15).toList();
   }
 
+  void _syncApiBanner(String url) {
+    final next = url.trim();
+    if (next == _apiBannerUrl) return;
+    _apiBannerUrl = next;
+    final gen = ++_apiBannerLoadGen;
+    if (next.isEmpty) {
+      if (_apiBanners.isNotEmpty && mounted) {
+        setState(() {
+          _apiBanners = [];
+          _bannerIdx = 0;
+        });
+      }
+      return;
+    }
+    unawaited(_loadApiBanner(next, gen));
+  }
+
+  Future<void> _loadApiBanner(String url, int gen) async {
+    final slides = await fetchConfigBanners(url);
+    if (!mounted || gen != _apiBannerLoadGen) return;
+    setState(() {
+      _apiBanners = slides;
+      _bannerIdx = 0;
+    });
+  }
+
+  void _onApiBannerTap(ConfigBannerSlide slide) {
+    final q = slide.title.trim();
+    if (q.isNotEmpty) {
+      ref.read(pendingSearchProvider.notifier).state = q;
+      goKotvPage(ref, KotvPage.search);
+      return;
+    }
+    goKotvPage(ref, KotvPage.history);
+  }
+
   Future<void> _refreshLocalMeta() async {
     final h = await LocalHistory.list();
     final k = await LocalCollect.list();
@@ -82,6 +122,34 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   Future<void> _bootstrap() async {
     await _refreshLocalMeta();
     await _reload();
+  }
+
+  /// 无点播源：source 空且错误像「未配置」。
+  bool _isNoSourceConfig(Map<String, dynamic> cfg) {
+    final source = '${cfg['source'] ?? ''}'.trim();
+    if (source.isNotEmpty) return false;
+    final err = '${cfg['error'] ?? ''}';
+    return err.isEmpty || err.contains('未配置') || err.contains('点播源') || err.contains('请输入');
+  }
+
+  /// 等到 ready，或确认无源；有源加载中则继续等，避免误显示「请先添加点播源」。
+  Future<Map<String, dynamic>> _waitConfigReady({int maxAttempts = 80}) async {
+    final api = ref.read(apiProvider);
+    Map<String, dynamic> cfg = const {};
+    for (var i = 0; i < maxAttempts; i++) {
+      cfg = await api.getConfig();
+      if (cfg['ready'] == true) return cfg;
+      if (_isNoSourceConfig(cfg)) return cfg;
+      if (i == 0 && mounted) {
+        setState(() {
+          _ready = false;
+          _loading = true;
+          _statusMsg = '正在加载点播源…';
+        });
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    return cfg;
   }
 
   Future<void> _reload({bool clearContent = false}) async {
@@ -112,19 +180,25 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         return;
       }
 
-      final cfg = await ref.read(apiProvider).getConfig();
+      final cfg = await _waitConfigReady();
+      if (!mounted || gen != _loadGen) return;
       final ready = cfg['ready'] == true;
       // 刷新全局配置（壁纸等），避免 FutureProvider 缓存空 wallpaper
       ref.invalidate(configProvider);
-      if (!mounted || gen != _loadGen) return;
       setState(() => _ready = ready);
 
       if (!ready) {
+        final source = '${cfg['source'] ?? ''}'.trim();
+        final err = '${cfg['error'] ?? ''}'.trim();
         setState(() {
           _types = [];
           _filters = [];
           _items.clear();
           _loading = false;
+          // 有源却未 ready：显示错误/重试，不要伪装成「未配置」
+          _statusMsg = source.isEmpty
+              ? null
+              : (err.isNotEmpty ? err : '点播源加载超时，请重试');
         });
         return;
       }
@@ -389,9 +463,13 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       }
     }
     home ??= sites.isEmpty ? null : sites.first;
-    final ready = _ready || cfg.maybeWhen(data: (c) => c['ready'] == true, orElse: () => false);
+    final cfgSource = cfg.maybeWhen(data: (c) => '${c['source'] ?? ''}'.trim(), orElse: () => '');
+    final cfgReady = cfg.maybeWhen(data: (c) => c['ready'] == true, orElse: () => false);
+    final ready = _ready || cfgReady;
+    // 有源但尚未 ready：显示加载，而不是「请先添加点播源」
+    final loadingSource = !ready && (_loading || cfgSource.isNotEmpty || (_statusMsg ?? '').contains('加载'));
     final siteName = !ready
-        ? '未配置源'
+        ? (loadingSource ? '加载中…' : '未配置源')
         : ((home != null && home.name.isNotEmpty)
             ? home.name
             : cfg.maybeWhen(data: (c) => c['ready'] == true ? '选站' : '未配置源', orElse: () => '…') ?? '未配置源');
@@ -450,11 +528,42 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               ],
             ),
           ),
-        Expanded(child: !ready ? _buildNotReady() : _buildBody()),
+        Expanded(
+          child: !ready
+              ? (loadingSource ? _buildLoadingSource() : _buildNotReady())
+              : _buildBody(),
+        ),
         // 有全局遮罩时不再画底栏进度条，避免两层转圈
         if (busy == null && (_loading || _loadingMore))
           const LinearProgressIndicator(minHeight: 2, color: Color(0xFFCF4274)),
       ],
+    );
+  }
+
+  Widget _buildLoadingSource() {
+    final p = KotvPalette.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 36,
+            height: 36,
+            child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFFCF4274)),
+          ),
+          const SizedBox(height: 16),
+          Text('正在加载点播源…', style: TextStyle(color: p.fg, fontSize: 18, fontWeight: FontWeight.w700)),
+          if ((_statusMsg ?? '').isNotEmpty && !(_statusMsg ?? '').contains('正在加载')) ...[
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(_statusMsg!, textAlign: TextAlign.center, style: TextStyle(color: p.muted, fontSize: 13)),
+            ),
+            const SizedBox(height: 14),
+            AppPill(label: '重试', width: 100, onTap: () => _reload(clearContent: true)),
+          ],
+        ],
+      ),
     );
   }
 
@@ -613,7 +722,18 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   /// 对齐参考图：四列等宽网格。
   /// 左上两卡与下方四卡完全同宽同高；轮播 = 右三列 × 两行高。
+  /// 有接口 banner 时只替换轮播内容，功能卡布局不变。
   Widget _buildHomeFeatureGrid() {
+    final bannerUrl = ref.watch(configProvider).maybeWhen(
+          data: (c) => '${c['banner'] ?? ''}'.trim(),
+          orElse: () => '',
+        );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncApiBanner(bannerUrl);
+    });
+
+    final useApi = _apiBanners.isNotEmpty;
+    final apiCur = useApi ? _apiBanners[_bannerIdx.clamp(0, 1 << 30) % _apiBanners.length] : null;
     final slides = _bannerSlides;
     final cur = slides.isEmpty ? null : slides[_bannerIdx.clamp(0, 1 << 30) % slides.length];
     final bottomNav = KotvLayout.useBottomNav(context);
@@ -649,26 +769,42 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       );
     }
 
+    final bannerCount = useApi ? _apiBanners.length : slides.length;
+    final bannerTitle = useApi ? (apiCur?.title ?? '') : (cur?.name ?? '暂无推荐内容');
+    final bannerSub = useApi
+        ? (apiCur == null ? '配置源后这里会轮播推荐' : '点击搜索相关内容')
+        : ((cur != null && cur.remarks.isNotEmpty)
+            ? cur.remarks
+            : (cur == null ? '配置源后这里会轮播推荐' : '点击查看详情并播放'));
+    final bannerPic = useApi ? (apiCur?.image ?? '') : (cur?.pic ?? '');
+    final bannerEmptyTitle = useApi ? '正在加载推荐…' : '暂无推荐内容';
+
     Widget banner(double radius) => TvFocus(
-          onPressed: cur == null ? () {} : () => _open(cur),
+          onPressed: useApi
+              ? () {
+                  if (apiCur != null) _onApiBannerTap(apiCur);
+                }
+              : (cur == null ? () {} : () => _open(cur)),
           borderRadius: radius,
           child: GestureDetector(
-            onTap: cur == null ? null : () => _open(cur),
+            onTap: useApi
+                ? (apiCur == null ? null : () => _onApiBannerTap(apiCur))
+                : (cur == null ? null : () => _open(cur)),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(radius),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   const ColoredBox(color: Color(0xFF652291)),
-                  if (cur != null && _isHttpUrl(cur.pic))
-                    Image.network(cur.pic, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
+                  if (_isHttpUrl(bannerPic))
+                    Image.network(bannerPic, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
                   const ColoredBox(color: Color(0x66190842)),
                   Positioned(
                     left: 14,
                     right: 14,
                     bottom: 40,
                     child: Text(
-                      cur?.name ?? '暂无推荐内容',
+                      bannerTitle.isNotEmpty ? bannerTitle : bannerEmptyTitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, height: 1.15),
@@ -679,20 +815,18 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                     right: 64,
                     bottom: 14,
                     child: Text(
-                      (cur != null && cur.remarks.isNotEmpty)
-                          ? cur.remarks
-                          : (cur == null ? '配置源后这里会轮播推荐' : '点击查看详情并播放'),
+                      bannerSub,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13, height: 1.15),
                     ),
                   ),
-                  if (slides.isNotEmpty)
+                  if (bannerCount > 0)
                     Positioned(
                       right: 14,
                       bottom: 14,
                       child: Text(
-                        '${(_bannerIdx % slides.length) + 1}/${slides.length}',
+                        '${(bannerCount == 0 ? 0 : (_bannerIdx % bannerCount) + 1)}/$bannerCount',
                         style: const TextStyle(color: Colors.white70, fontSize: 12),
                       ),
                     ),

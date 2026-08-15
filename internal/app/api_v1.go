@@ -85,6 +85,8 @@ func (a *App) APIGetConfig() map[string]any {
 		"home":      home.Key,
 		"sites":     sites,
 		"wallpaper": strings.TrimSpace(cfg.API().Wallpaper),
+		"logo":      strings.TrimSpace(cfg.API().Logo),
+		"banner":    strings.TrimSpace(cfg.API().Banner),
 	}
 }
 

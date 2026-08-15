@@ -18,6 +18,7 @@ type Api struct {
 	Doh       json.RawMessage `json:"doh"`
 	Wallpaper string          `json:"wallpaper"`
 	Logo      string          `json:"logo"`
+	Banner    string          `json:"banner"`
 	URL       string          `json:"-"`
 	Data      string          `json:"-"`
 	Ref       int             `json:"-"`

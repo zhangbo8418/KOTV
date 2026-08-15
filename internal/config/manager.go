@@ -706,7 +706,7 @@ func resolveParsePaths(api *model.Api) {
 	}
 }
 
-// resolveApiAssets 解析配置根上的 logo/wallpaper 相对路径（如 "../bing"）。
+// resolveApiAssets 解析配置根上的 logo/wallpaper/banner 相对路径（如 "../bing"、"../tencent/banners"）。
 func resolveApiAssets(api *model.Api) {
 	if api == nil {
 		return
@@ -717,6 +717,9 @@ func resolveApiAssets(api *model.Api) {
 	}
 	if logo := strings.TrimSpace(api.Logo); logo != "" {
 		api.Logo = resolveSiteField(base, logo)
+	}
+	if banner := strings.TrimSpace(api.Banner); banner != "" {
+		api.Banner = resolveSiteField(base, banner)
 	}
 }
 

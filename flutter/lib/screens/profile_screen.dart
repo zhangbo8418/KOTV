@@ -10,6 +10,7 @@ import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../util/runtime_info.dart';
 import '../widgets/chrome.dart';
+import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/poster_card.dart';
 import 'detail_screen.dart';
@@ -90,6 +91,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       data: (c) => ((c['sites'] as List?) ?? []).length,
       orElse: () => 0,
     );
+    final logoUrl = cfg.maybeWhen(data: (c) => '${c['logo'] ?? ''}'.trim(), orElse: () => '');
     final bottomNav = KotvLayout.useBottomNav(context);
     final compact = KotvLayout.isCompact(context);
     // 固定高度：不跟过小的 design scale 把用户信息挤爆
@@ -98,6 +100,178 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final gap = compact ? 12.0 : 16.0;
     final sidePad = compact ? 12.0 : 28.0;
     final p = KotvPalette.of(context);
+
+    Widget logoAvatar({required double radius}) => ConfigLogoAvatar(
+          logoUrl: logoUrl,
+          radius: radius,
+          backgroundColor: p.variant,
+          onTap: () => goKotvPage(ref, KotvPage.history),
+        );
+
+    Widget userHeader() {
+      if (compact) {
+        return Column(
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: p.pillBg,
+                borderRadius: BorderRadius.circular(14 * s),
+                border: Border.all(color: p.pillBorder),
+              ),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(14 * s, 12 * s, 14 * s, 12 * s),
+                child: Row(
+                  children: [
+                    logoAvatar(radius: 28 * s),
+                    SizedBox(width: 12 * s),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('用户：本地用户', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.fg, fontSize: 17, fontWeight: FontWeight.w700, height: 1.15)),
+                          const SizedBox(height: 4),
+                          Text('版本：0.1.0 · 站源：$siteCount', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 13, height: 1.15)),
+                          Text('历史 $_histCount · 收藏 $_keepCount', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted.withOpacity(0.85), fontSize: 12, height: 1.15)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: gap),
+            Column(
+              children: [
+                SizedBox(
+                  height: 72,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FeatureCard(
+                          title: '设置',
+                          subtitle: '播放器与源',
+                          start: const Color(0xEE6E29CD),
+                          end: const Color(0xEE3B19A7),
+                          icon: Icons.settings,
+                          height: 72,
+                          onTap: () => goKotvPage(ref, KotvPage.settings),
+                        ),
+                      ),
+                      SizedBox(width: gap),
+                      Expanded(
+                        child: FeatureCard(
+                          title: '检查更新',
+                          subtitle: '当前 0.1.0',
+                          start: const Color(0xF0E5BA43),
+                          end: const Color(0xF0B57928),
+                          icon: Icons.download,
+                          height: 72,
+                          onTap: _checkUpdate,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: gap),
+                FeatureCard(
+                  title: '关于',
+                  subtitle: '运行时信息',
+                  start: const Color(0xEE49A7E9),
+                  end: const Color(0xEE376EC5),
+                  icon: Icons.info_outline,
+                  height: 72,
+                  onTap: _showAbout,
+                ),
+              ],
+            ),
+          ],
+        );
+      }
+      return SizedBox(
+        height: cardH,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: p.pillBg,
+            borderRadius: BorderRadius.circular(14 * s),
+            border: Border.all(color: p.pillBorder),
+          ),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(18 * s, 14 * s, 18 * s, 14 * s),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 34,
+                  child: Row(
+                    children: [
+                      logoAvatar(radius: 30),
+                      SizedBox(width: 12 * s),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('用户：本地用户', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.fg, fontSize: 18, fontWeight: FontWeight.w700, height: 1.15)),
+                            const SizedBox(height: 4),
+                            Text('版本：0.1.0   站源：$siteCount 个', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 13, height: 1.15)),
+                            const SizedBox(height: 2),
+                            Text('历史 $_histCount 条 · 收藏 $_keepCount 个', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted.withOpacity(0.85), fontSize: 12, height: 1.15)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(width: gap),
+                Expanded(
+                  flex: 66,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FeatureCard(
+                          title: '设置',
+                          subtitle: '播放器与源配置',
+                          start: const Color(0xEE6E29CD),
+                          end: const Color(0xEE3B19A7),
+                          icon: Icons.settings,
+                          height: featureH,
+                          onTap: () => goKotvPage(ref, KotvPage.settings),
+                        ),
+                      ),
+                      SizedBox(width: gap),
+                      Expanded(
+                        child: FeatureCard(
+                          title: '检查更新',
+                          subtitle: '当前 0.1.0',
+                          start: const Color(0xF0E5BA43),
+                          end: const Color(0xF0B57928),
+                          icon: Icons.download,
+                          height: featureH,
+                          onTap: _checkUpdate,
+                        ),
+                      ),
+                      SizedBox(width: gap),
+                      Expanded(
+                        child: FeatureCard(
+                          title: '关于',
+                          subtitle: '运行时与组件信息',
+                          start: const Color(0xEE49A7E9),
+                          end: const Color(0xEE376EC5),
+                          icon: Icons.info_outline,
+                          height: featureH,
+                          onTap: _showAbout,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Column(
       children: [
@@ -136,178 +310,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           child: ListView(
             padding: EdgeInsets.fromLTRB(sidePad, 14 * s, sidePad, 24 * s),
             children: [
-              // userCard：宽屏左信息+右三卡；窄屏上下堆叠
-              if (compact)
-                Column(
-                  children: [
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: p.pillBg,
-                        borderRadius: BorderRadius.circular(14 * s),
-                        border: Border.all(color: p.pillBorder),
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(14 * s, 12 * s, 14 * s, 12 * s),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 28 * s,
-                              backgroundColor: p.variant,
-                              child: Icon(Icons.home_outlined, size: 30 * s, color: Colors.white),
-                            ),
-                            SizedBox(width: 12 * s),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text('用户：本地用户', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.fg, fontSize: 17, fontWeight: FontWeight.w700, height: 1.15)),
-                                  const SizedBox(height: 4),
-                                  Text('版本：0.1.0 · 站源：$siteCount', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 13, height: 1.15)),
-                                  Text('历史 $_histCount · 收藏 $_keepCount', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted.withOpacity(0.85), fontSize: 12, height: 1.15)),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: gap),
-                    // 窄屏：两个一行，第三张单独占半行（避免三列截字）
-                    Column(
-                      children: [
-                        SizedBox(
-                          height: 72,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: FeatureCard(
-                                  title: '设置',
-                                  subtitle: '播放器与源',
-                                  start: const Color(0xEE6E29CD),
-                                  end: const Color(0xEE3B19A7),
-                                  icon: Icons.settings,
-                                  height: 72,
-                                  onTap: () => goKotvPage(ref, KotvPage.settings),
-                                ),
-                              ),
-                              SizedBox(width: gap),
-                              Expanded(
-                                child: FeatureCard(
-                                  title: '检查更新',
-                                  subtitle: '当前 0.1.0',
-                                  start: const Color(0xF0E5BA43),
-                                  end: const Color(0xF0B57928),
-                                  icon: Icons.download,
-                                  height: 72,
-                                  onTap: _checkUpdate,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        SizedBox(height: gap),
-                        FeatureCard(
-                          title: '关于',
-                          subtitle: '运行时信息',
-                          start: const Color(0xEE49A7E9),
-                          end: const Color(0xEE376EC5),
-                          icon: Icons.info_outline,
-                          height: 72,
-                          onTap: _showAbout,
-                        ),
-                      ],
-                    ),
-                  ],
-                )
-              else
-                SizedBox(
-                  height: cardH,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: p.pillBg,
-                      borderRadius: BorderRadius.circular(14 * s),
-                      border: Border.all(color: p.pillBorder),
-                    ),
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(18 * s, 14 * s, 18 * s, 14 * s),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: 34,
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 30,
-                                  backgroundColor: p.variant,
-                                  child: const Icon(Icons.home_outlined, size: 32, color: Colors.white),
-                                ),
-                                SizedBox(width: 12 * s),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text('用户：本地用户', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.fg, fontSize: 18, fontWeight: FontWeight.w700, height: 1.15)),
-                                      const SizedBox(height: 4),
-                                      Text('版本：0.1.0   站源：$siteCount 个', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted, fontSize: 13, height: 1.15)),
-                                      const SizedBox(height: 2),
-                                      Text('历史 $_histCount 条 · 收藏 $_keepCount 个', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.muted.withOpacity(0.85), fontSize: 12, height: 1.15)),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          SizedBox(width: gap),
-                          Expanded(
-                            flex: 66,
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: FeatureCard(
-                                    title: '设置',
-                                    subtitle: '播放器与源配置',
-                                    start: const Color(0xEE6E29CD),
-                                    end: const Color(0xEE3B19A7),
-                                    icon: Icons.settings,
-                                    height: featureH,
-                                    onTap: () => goKotvPage(ref, KotvPage.settings),
-                                  ),
-                                ),
-                                SizedBox(width: gap),
-                                Expanded(
-                                  child: FeatureCard(
-                                    title: '检查更新',
-                                    subtitle: '当前 0.1.0',
-                                    start: const Color(0xF0E5BA43),
-                                    end: const Color(0xF0B57928),
-                                    icon: Icons.download,
-                                    height: featureH,
-                                    onTap: _checkUpdate,
-                                  ),
-                                ),
-                                SizedBox(width: gap),
-                                Expanded(
-                                  child: FeatureCard(
-                                    title: '关于',
-                                    subtitle: '运行时与组件信息',
-                                    start: const Color(0xEE49A7E9),
-                                    end: const Color(0xEE376EC5),
-                                    icon: Icons.info_outline,
-                                    height: featureH,
-                                    onTap: _showAbout,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+              // 用户信息 + 功能卡（logo 来自接口；banner 仅用于首页轮播）
+              userHeader(),
               SizedBox(height: 16 * s),
               if (compact)
                 Wrap(
