@@ -124,6 +124,9 @@ func New() (*App, error) {
 		return remote.SnapshotMedia()
 	})
 
+	// 开 HTTP 前同步 DB 最新源到 settings（对齐 TV Config.vod）。
+	cfg.EnsureVodFromHistory()
+
 	if err := a.Server.Start(); err != nil {
 		log.Printf("HTTP 服务启动失败: %v", err)
 	}

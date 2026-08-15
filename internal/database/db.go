@@ -33,6 +33,12 @@ func Open() (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 单连接 + busy 等待，降低并发写时 SQLITE_BUSY
+	conn.SetMaxOpenConns(1)
+	conn.SetMaxIdleConns(1)
+	conn.SetConnMaxLifetime(0)
+	_, _ = conn.Exec(`PRAGMA busy_timeout = 8000`)
+	_, _ = conn.Exec(`PRAGMA journal_mode = WAL`)
 	db := &DB{conn: conn}
 	if err := db.migrate(); err != nil {
 		return nil, err

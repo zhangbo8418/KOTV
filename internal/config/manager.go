@@ -247,9 +247,55 @@ func (m *Manager) Clear() {
 	}
 }
 
-// InitFromSettings 从设置加载点播配置。
+// EnsureVodFromHistory 对齐 TV Config.vod()：开 HTTP 前用 DB 最新源同步 settings.VOD。
+func (m *Manager) EnsureVodFromHistory() {
+	if u := m.syncVodPointerFromDB(); u != "" {
+		log.Printf("boot: 当前点播源指针 <- DB: %s", u)
+	}
+}
+
+// InitFromSettings 对齐 TV VodConfig.init().load()：当前源 = config 表 time DESC 最新一条。
 func (m *Manager) InitFromSettings() error {
+	if c := m.latestSiteConfig(); c != nil {
+		_ = m.syncVodPointerFromDB()
+		if strings.TrimSpace(c.JSON) != "" {
+			return m.ParseConfig(c, true)
+		}
+		if strings.TrimSpace(c.URL) != "" {
+			return m.ParseConfig(c, false)
+		}
+	}
 	return m.initFromVod(settings.Get(settings.VOD))
+}
+
+func (m *Manager) latestSiteConfig() *database.Config {
+	if m == nil || m.db == nil {
+		return nil
+	}
+	c, err := m.db.FindConfigByType(int64(database.ConfigTypeSite))
+	if err != nil || c == nil {
+		return nil
+	}
+	if strings.TrimSpace(c.URL) == "" && strings.TrimSpace(c.JSON) == "" {
+		return nil
+	}
+	return c
+}
+
+func (m *Manager) syncVodPointerFromDB() string {
+	c := m.latestSiteConfig()
+	if c == nil {
+		return ""
+	}
+	u := strings.TrimSpace(c.URL)
+	if u == "" {
+		return ""
+	}
+	if settings.Get(settings.VOD) != u {
+		settings.Set(settings.VOD, u)
+		_ = settings.Save()
+	}
+	return u
 }
 
 func (m *Manager) initFromVod(vod string) error {

@@ -132,7 +132,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     return err.isEmpty || err.contains('未配置') || err.contains('点播源') || err.contains('请输入');
   }
 
-  /// 等到 ready，或确认无源；有源加载中则继续等，避免误显示「请先添加点播源」。
+  /// 等到 ready，或确认无源；有源加载中则继续等。
   Future<Map<String, dynamic>> _waitConfigReady({int maxAttempts = 80}) async {
     final api = ref.read(apiProvider);
     Map<String, dynamic> cfg = const {};
@@ -798,7 +798,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                   const ColoredBox(color: Color(0xFF652291)),
                   if (_isHttpUrl(bannerPic))
                     Image.network(bannerPic, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
-                  const ColoredBox(color: Color(0x66190842)),
                   Positioned(
                     left: 14,
                     right: 14,
@@ -807,7 +806,13 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                       bannerTitle.isNotEmpty ? bannerTitle : bannerEmptyTitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, height: 1.15),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        height: 1.15,
+                        shadows: const [Shadow(color: Color(0xCC000000), blurRadius: 8, offset: Offset(0, 1))],
+                      ),
                     ),
                   ),
                   Positioned(
@@ -818,7 +823,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                       bannerSub,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13, height: 1.15),
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.92),
+                        fontSize: 13,
+                        height: 1.15,
+                        shadows: const [Shadow(color: Color(0x99000000), blurRadius: 6, offset: Offset(0, 1))],
+                      ),
                     ),
                   ),
                   if (bannerCount > 0)

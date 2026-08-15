@@ -466,41 +466,59 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                   if (widget.playUrl.isNotEmpty)
                     KotvBufferingOverlay(player: widget.playback),
                   if (_showForceLandscape)
-                    Align(
-                      alignment: const Alignment(0, 0.18),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => unawaited(_forceLandscape()),
-                          borderRadius: BorderRadius.circular(24),
-                          child: Ink(
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.55),
-                              borderRadius: BorderRadius.circular(24),
-                              border: Border.all(color: Colors.white.withOpacity(0.28)),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.screen_rotation_rounded, color: Colors.white.withOpacity(0.95), size: 20),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '全屏观看',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.95),
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 0.2,
+                    Builder(
+                      builder: (context) {
+                        final screen = MediaQuery.sizeOf(context);
+                        final videoRect = kotvVideoContainRect(
+                          screen: screen,
+                          videoWidth: widget.playback.width,
+                          videoHeight: widget.playback.height,
+                        );
+                        // 抖音式：按钮落在画面下方 letterbox 黑边，不叠在视频上。
+                        final barTop = videoRect.bottom;
+                        final barH = (screen.height - barTop).clamp(48.0, screen.height);
+                        return Positioned(
+                          left: 0,
+                          right: 0,
+                          top: barTop,
+                          height: barH,
+                          child: Center(
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () => unawaited(_forceLandscape()),
+                                borderRadius: BorderRadius.circular(24),
+                                child: Ink(
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.55),
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(color: Colors.white.withOpacity(0.28)),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.screen_rotation_rounded, color: Colors.white.withOpacity(0.95), size: 20),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '全屏观看',
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(0.95),
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 0.2,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
                   if (_swipeHint != null)
                     IgnorePointer(

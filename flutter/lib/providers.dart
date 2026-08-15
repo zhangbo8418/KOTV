@@ -24,7 +24,7 @@ final configProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final ok = await ref.watch(engineReadyProvider.future);
   if (!ok) return const <String, dynamic>{};
   final api = ref.watch(apiProvider);
-  // 有源时短等 ready（拉仓/jar）；无源则立刻返回，避免空转。
+  // 有源时短等 ready；无源立刻返回。拉仓只由引擎 InitFromSettings 做一次，这里不 loadConfig。
   for (var i = 0; i < 20; i++) {
     try {
       final cfg = await api.getConfig();

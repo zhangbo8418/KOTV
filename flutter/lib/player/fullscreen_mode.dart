@@ -1,4 +1,5 @@
-import 'package:flutter/widgets.dart';
+import 'dart:math' as math;
+
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -61,4 +62,27 @@ bool kotvShouldShowForceLandscape({
   }
   // 未知尺寸时按横屏片处理（点播多数如此）。
   return true;
+}
+
+/// BoxFit.contain 下视频实际绘制区域（用于把控件放到 letterbox 黑边）。
+Rect kotvVideoContainRect({
+  required Size screen,
+  required int videoWidth,
+  required int videoHeight,
+}) {
+  var vw = videoWidth.toDouble();
+  var vh = videoHeight.toDouble();
+  if (vw <= 0 || vh <= 0) {
+    vw = 16;
+    vh = 9;
+  }
+  final scale = math.min(screen.width / vw, screen.height / vh);
+  final dw = vw * scale;
+  final dh = vh * scale;
+  return Rect.fromLTWH(
+    (screen.width - dw) / 2,
+    (screen.height - dh) / 2,
+    dw,
+    dh,
+  );
 }

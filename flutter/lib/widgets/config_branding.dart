@@ -194,15 +194,6 @@ class _ConfigBannerPanelState extends State<ConfigBannerPanel> {
                     ),
                   ),
                 if (!_loading && title.isNotEmpty) ...[
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Color(0x00000000), Color(0x99000000)],
-                      ),
-                    ),
-                  ),
                   Positioned(
                     left: 14,
                     right: 64,
@@ -211,7 +202,13 @@ class _ConfigBannerPanelState extends State<ConfigBannerPanel> {
                       title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, height: 1.15),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        height: 1.15,
+                        shadows: const [Shadow(color: Color(0xCC000000), blurRadius: 8, offset: Offset(0, 1))],
+                      ),
                     ),
                   ),
                 ],
