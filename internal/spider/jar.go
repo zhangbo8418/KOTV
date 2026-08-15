@@ -195,7 +195,7 @@ func normalizeLocalJarURL(downloadURL, configBase string) string {
 	if downloadURL == "" {
 		return ""
 	}
-	if strings.HasPrefix(downloadURL, "http://") || strings.HasPrefix(downloadURL, "https://") || strings.HasPrefix(downloadURL, "file://") {
+	if strings.HasPrefix(downloadURL, "http://") || strings.HasPrefix(downloadURL, "https://") || strings.HasPrefix(strings.ToLower(downloadURL), "file:") {
 		return downloadURL
 	}
 	// 绝对本地路径
@@ -223,16 +223,7 @@ func localConfigDir(configBase string) string {
 	if configBase == "" {
 		return ""
 	}
-	if strings.HasPrefix(configBase, "file://") {
-		parsed, err := url.Parse(configBase)
-		if err != nil {
-			return ""
-		}
-		name, err := url.PathUnescape(parsed.Path)
-		if err != nil || name == "" {
-			return ""
-		}
-		p := filepath.FromSlash(name)
+	if p, ok := util.FileURLPath(configBase); ok {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
 			return p
 		}
@@ -262,16 +253,8 @@ func pathToFileURL(abs string) string {
 
 func localFilePath(rawURL string) (string, bool) {
 	rawURL = strings.TrimSpace(rawURL)
-	if strings.HasPrefix(rawURL, "file://") {
-		parsed, err := url.Parse(rawURL)
-		if err != nil {
-			return "", false
-		}
-		name, err := url.PathUnescape(parsed.Path)
-		if err != nil || name == "" {
-			return "", false
-		}
-		return filepath.FromSlash(name), true
+	if p, ok := util.FileURLPath(rawURL); ok {
+		return p, true
 	}
 	if filepath.IsAbs(rawURL) {
 		return rawURL, true
@@ -364,7 +347,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 		base = ConfigBase()
 	}
 	downloadURL := path
-	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") && !strings.HasPrefix(path, "file://") {
+	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") && !strings.HasPrefix(strings.ToLower(path), "file:") {
 		downloadURL = util.ResolveJarURL(base, spec)
 	}
 	downloadURL = normalizeLocalJarURL(downloadURL, base)
@@ -372,8 +355,20 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 		return "", fmt.Errorf("无效的 spider 地址: %s", spec)
 	}
 	// 相对路径仍未解析成绝对 URL：缺少配置基址时无法下载
-	if !strings.HasPrefix(downloadURL, "http://") && !strings.HasPrefix(downloadURL, "https://") && !strings.HasPrefix(downloadURL, "file://") && !filepath.IsAbs(downloadURL) {
+	if !strings.HasPrefix(downloadURL, "http://") && !strings.HasPrefix(downloadURL, "https://") && !strings.HasPrefix(strings.ToLower(downloadURL), "file:") && !filepath.IsAbs(downloadURL) {
 		return "", fmt.Errorf("无法解析相对 spider 路径 %q（配置基址为空或无效: %q）", path, base)
+	}
+	// 对齐 TV JarLoader：file:// / 本地路径直接加载，不经 HTTP、不强制拷进缓存。
+	if localPath, ok := localFilePath(downloadURL); ok {
+		if st, err := os.Stat(localPath); err == nil && !st.IsDir() && st.Size() > 0 {
+			if expectMD5 != "" {
+				if actual := fileMD5(localPath); actual != expectMD5 {
+					log.Printf("spider.jar 本地 md5 未命中 want=%s got=%s，仍按本地文件加载", expectMD5, actual)
+				}
+			}
+			return localPath, nil
+		}
+		return "", fmt.Errorf("本地 spider.jar 不存在: %s", localPath)
 	}
 	// 按 jar 地址哈希缓存，不用配置里的 md5 当文件名。
 	dest := paths.JarPath(util.MD5(downloadURL))

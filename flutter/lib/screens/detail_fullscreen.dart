@@ -7,9 +7,11 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../player/danmaku_layer.dart';
 import '../player/exo_playback.dart';
+import '../player/fullscreen_mode.dart';
 import '../player/fvp_playback.dart';
 import '../player/html_playback.dart';
 import '../player/kotv_playback.dart';
+import '../player/kotv_platform.dart';
 import '../player/vp_playback.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
@@ -50,6 +52,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.openingSec = 0,
     this.endingSec = 0,
     this.onOffsetsChanged,
+    this.desktopFullscreen = KotvDesktopFullscreenKind.window,
   });
 
   final KotvPlayback playback;
@@ -84,6 +87,8 @@ class DetailFullscreenPage extends StatefulWidget {
   final int openingSec;
   final int endingSec;
   final void Function(int openingSec, int endingSec)? onOffsetsChanged;
+  /// PC：铺满当前窗口 / 占满整块屏幕；移动端忽略。
+  final KotvDesktopFullscreenKind desktopFullscreen;
 
   @override
   State<DetailFullscreenPage> createState() => _DetailFullscreenPageState();
@@ -106,6 +111,8 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   String? _swipeHint;
   Timer? _hintTimer;
   DateTime? _lastSwipeAt;
+  bool _forcedLandscape = false;
+  bool _showForceLandscape = false;
 
   String get _title {
     if (_epIdx >= 0 && _epIdx < widget.episodes.length) {
@@ -125,7 +132,12 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
       if (d.inSeconds == _pos.inSeconds) return;
       setState(() => _pos = d);
     });
+    widget.playback.addListener(_onPlaybackChanged);
     // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
+    unawaited(kotvEnterSystemFullscreen(widget.desktopFullscreen));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _refreshForceLandscapeBtn();
+    });
   }
 
   @override
@@ -137,6 +149,8 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     if (oldWidget.danmakuOn != widget.danmakuOn) _danmakuOn = widget.danmakuOn;
     if (oldWidget.ambientOn != widget.ambientOn) _ambientOn = widget.ambientOn;
     if (!identical(oldWidget.playback, widget.playback)) {
+      oldWidget.playback.removeListener(_onPlaybackChanged);
+      widget.playback.addListener(_onPlaybackChanged);
       _posSub?.cancel();
       _pos = widget.playback.position;
       _posSub = widget.playback.positionStream.listen((d) {
@@ -144,6 +158,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
         if (d.inSeconds == _pos.inSeconds) return;
         setState(() => _pos = d);
       });
+      _refreshForceLandscapeBtn();
     }
   }
 
@@ -152,7 +167,45 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     _hideTimer?.cancel();
     _hintTimer?.cancel();
     _posSub?.cancel();
+    widget.playback.removeListener(_onPlaybackChanged);
+    unawaited(_restoreChrome());
     super.dispose();
+  }
+
+  void _onPlaybackChanged() => _refreshForceLandscapeBtn();
+
+  void _refreshForceLandscapeBtn() {
+    if (!mounted || _forcedLandscape) {
+      if (_showForceLandscape) setState(() => _showForceLandscape = false);
+      return;
+    }
+    final show = kotvShouldShowForceLandscape(
+      screen: MediaQuery.sizeOf(context),
+      videoWidth: widget.playback.width,
+      videoHeight: widget.playback.height,
+    );
+    if (show != _showForceLandscape) {
+      setState(() => _showForceLandscape = show);
+    }
+  }
+
+  Future<void> _forceLandscape() async {
+    setState(() {
+      _forcedLandscape = true;
+      _showForceLandscape = false;
+    });
+    await kotvForceLandscape();
+  }
+
+  Future<void> _restoreChrome() async {
+    await kotvExitSystemFullscreen(
+      wasDisplayFullscreen: widget.desktopFullscreen == KotvDesktopFullscreenKind.display,
+    );
+  }
+
+  Future<void> _exitFullscreen() async {
+    await _restoreChrome();
+    if (mounted) Navigator.of(context).maybePop();
   }
 
   bool get _epOpen => _chromeKey.currentState?.epOpen ?? false;
@@ -248,7 +301,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
         setState(() {});
         return KeyEventResult.handled;
       }
-      Navigator.of(context).maybePop();
+      unawaited(_exitFullscreen());
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.space || key == LogicalKeyboardKey.mediaPlayPause) {
@@ -376,6 +429,9 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
         backgroundColor: Colors.black,
         body: LayoutBuilder(
           builder: (context, c) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _refreshForceLandscapeBtn();
+            });
             return MouseRegion(
               onHover: (e) => _onHover(e, c),
               child: Stack(
@@ -392,7 +448,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                       setState(() => _showChrome = !_showChrome);
                       if (_showChrome) _bumpChrome();
                     },
-                    onDoubleTap: () => Navigator.of(context).maybePop(),
+                    onDoubleTap: () => unawaited(_exitFullscreen()),
                     onVerticalDragStart: _epOpen ? null : (_) => _dragDy = 0,
                     onVerticalDragUpdate: _epOpen
                         ? null
@@ -409,6 +465,43 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                   ),
                   if (widget.playUrl.isNotEmpty)
                     KotvBufferingOverlay(player: widget.playback),
+                  if (_showForceLandscape)
+                    Align(
+                      alignment: const Alignment(0, 0.18),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => unawaited(_forceLandscape()),
+                          borderRadius: BorderRadius.circular(24),
+                          child: Ink(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.55),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: Colors.white.withOpacity(0.28)),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.screen_rotation_rounded, color: Colors.white.withOpacity(0.95), size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '全屏观看',
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.95),
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   if (_swipeHint != null)
                     IgnorePointer(
                       child: Center(
@@ -442,7 +535,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                       setState(() => _showChrome = !_showChrome);
                       if (_showChrome) _bumpChrome();
                     },
-                    onExit: () => Navigator.of(context).maybePop(),
+                    onExit: () => unawaited(_exitFullscreen()),
                     onBump: _bumpChrome,
                     episodes: widget.episodes,
                     epIdx: _epIdx,

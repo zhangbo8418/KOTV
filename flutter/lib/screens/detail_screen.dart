@@ -13,6 +13,7 @@ import '../player/exo_playback.dart';
 import '../player/fvp_playback.dart';
 import '../player/html_playback.dart';
 import '../player/buffer_budget.dart';
+import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
@@ -1007,10 +1008,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _fsRev.value++;
   }
 
-  Future<void> _enterFullscreen() async {
+  Future<void> _enterFullscreen([KotvDesktopFullscreenKind desktopFs = KotvDesktopFullscreenKind.window]) async {
     final d = _detail;
     if (d == null || !mounted) return;
     if (_miniDesktop) await _exitMini();
+    if (!mounted) return;
     final api = ref.read(apiProvider);
     final id = d.id.isNotEmpty ? d.id : widget.id;
     final site = d.site.isNotEmpty ? d.site : widget.site;
@@ -1047,6 +1049,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 offsetSite: site,
                 openingSec: _openingSec,
                 endingSec: _endingSec,
+                desktopFullscreen: desktopFs,
                 onOffsetsChanged: (open, end) {
                   if (!mounted) return;
                   setState(() {
@@ -1270,7 +1273,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       miniActive: _miniDesktop,
       onCast: () => unawaited(_cast()),
       onMini: () => unawaited(_miniDesktop ? _exitMini() : _enterMini()),
-      onExpand: () => unawaited(_enterFullscreen()),
+      onExpand: (kind) => unawaited(_enterFullscreen(kind)),
       onStop: () async {
         await _stopHard();
         if (_miniDesktop) await _exitMini();
@@ -1298,7 +1301,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                   translucent: true,
                   onCast: () => unawaited(_cast()),
                   onMini: () => unawaited(_exitMini()),
-                  onExpand: () => unawaited(_enterFullscreen()),
+                  onExpand: (kind) => unawaited(_enterFullscreen(kind)),
                   onStop: () async {
                     await _stopHard();
                     if (_miniDesktop) await _exitMini();

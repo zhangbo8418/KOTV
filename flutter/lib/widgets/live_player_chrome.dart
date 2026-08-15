@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
+import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
 import 'vod_player_chrome.dart';
 
@@ -29,8 +31,8 @@ class LiveCatchupChrome extends StatelessWidget {
   final bool translucent;
   final VoidCallback? onCast;
   final VoidCallback? onMini;
-  /// 全屏（移动端播放器控件需要）。
-  final VoidCallback? onExpand;
+  /// 全屏：移动端直接进入；桌面在图标上弹出抽屉选项。
+  final ValueChanged<KotvDesktopFullscreenKind>? onExpand;
   final VoidCallback? onPlayer;
   final VoidCallback? onDecode;
   final String playerLabel;
@@ -77,12 +79,10 @@ class LiveCatchupChrome extends StatelessWidget {
                         onTap: onMini!,
                       ),
                     if (onExpand != null && !miniActive)
-                      _act(
-                        icon: Icons.fullscreen,
-                        tip: '全屏',
-                        compact: compact,
+                      KotvFullscreenExpandButton(
                         size: iconSize,
-                        onTap: onExpand!,
+                        iconSize: iconSize <= 32 ? 16 : 22,
+                        onSelect: onExpand!,
                       ),
                     if (!compact && onPlayer != null)
                       _textAct(resolvedPlayerLabel, onPlayer!),

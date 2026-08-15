@@ -13,6 +13,7 @@ import '../desktop/mini_player_window.dart';
 import '../player/exo_playback.dart';
 import '../player/fvp_playback.dart';
 import '../player/html_playback.dart';
+import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
@@ -156,6 +157,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   bool _miniDesktop = false;
   /// 沉浸全屏：复用 PC 左右菜单交互（不再推另一套点播式全屏页）。
   bool _immersive = false;
+  KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
   /// 竖屏面板：0=频道 1=EPG
   int _portraitTab = 0;
   /// 竖屏播放器底栏显隐（点画面切换；数秒后自动隐藏）
@@ -778,7 +780,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     setState(() => _miniDesktop = false);
   }
 
-  Future<void> _enterLiveFullscreen() async {
+  Future<void> _enterLiveFullscreen([KotvDesktopFullscreenKind desktopFs = KotvDesktopFullscreenKind.window]) async {
     if (_playUrl.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先选择频道播放')));
@@ -786,11 +788,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       return;
     }
     if (_miniDesktop) await _exitMini();
-    if (kotvIsDesktop()) {
-      try {
-        await windowManager.setFullScreen(true);
-      } catch (_) {}
-    } else {
+    if (!mounted) return;
+    if (!kotvIsDesktop()) {
       // 手机/平板：全屏强制横屏，侧栏才不会竖着撑满。
       try {
         await SystemChrome.setPreferredOrientations(const [
@@ -799,11 +798,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         ]);
       } catch (_) {}
     }
-    try {
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } catch (_) {}
+    await kotvEnterSystemFullscreen(desktopFs);
     if (!mounted) return;
     setState(() {
+      _desktopFs = desktopFs;
       _immersive = true;
       _leftOpen = false;
       _rightOpen = false;
@@ -824,18 +822,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _chromeVisible = false;
       });
     }
-    try {
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    } catch (_) {}
-    if (kotvIsDesktop()) {
-      try {
-        await windowManager.setFullScreen(false);
-      } catch (_) {}
-    } else {
-      try {
-        await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-      } catch (_) {}
-    }
+    await kotvExitSystemFullscreen(
+      wasDisplayFullscreen: _desktopFs == KotvDesktopFullscreenKind.display,
+    );
   }
 
   Future<void> _pickDecode() async {
@@ -1638,7 +1627,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           decodeLabel: _decodeLabel,
                           onCast: () => unawaited(_cast()),
                           onMini: () => unawaited(_enterMini()),
-                          onExpand: () => unawaited(_enterLiveFullscreen()),
+                          onExpand: (kind) => unawaited(_enterLiveFullscreen(kind)),
                           onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
                           onDecode: () => unawaited(_pickDecode()),
                         ),
@@ -1711,9 +1700,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         _pulsePortraitChrome();
                         unawaited(_enterMini());
                       },
-                      onExpand: () {
+                      onExpand: (kind) {
                         _pulsePortraitChrome();
-                        unawaited(_enterLiveFullscreen());
+                        unawaited(_enterLiveFullscreen(kind));
                       },
                       onPlayer: kotvCanSwitchPlayer(live: true)
                           ? () {

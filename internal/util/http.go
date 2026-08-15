@@ -7,12 +7,40 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 var client = &http.Client{Timeout: 30 * time.Second}
+
+// FileURLPath 将 file:// / file: URL 解析为本地路径；非 file URL 返回 false。
+func FileURLPath(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(strings.ToLower(raw), "file:") {
+		return "", false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	name := u.Path
+	if name == "" {
+		name = u.Opaque
+	}
+	name, err = url.PathUnescape(name)
+	if err != nil || name == "" {
+		return "", false
+	}
+	// Windows: file:///C:/foo → Path=/C:/foo
+	if runtime.GOOS == "windows" && len(name) >= 3 && name[0] == '/' && name[2] == ':' {
+		name = name[1:]
+	}
+	return filepath.FromSlash(name), true
+}
 
 // EncodeURL 对含非 ASCII 的 URL 做 path/query 编码。
 func EncodeURL(raw string) string {
@@ -58,6 +86,10 @@ func HTTPGetParams(rawURL string, headers map[string]string, params map[string]s
 
 // HTTPGetParamsBytes 带 query 参数的 GET，返回字节。
 func HTTPGetParamsBytes(rawURL string, headers map[string]string, params map[string]string) ([]byte, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if local, ok := FileURLPath(rawURL); ok {
+		return os.ReadFile(local)
+	}
 	rawURL = EncodeURL(rawURL)
 	if len(params) > 0 {
 		u, err := url.Parse(rawURL)
@@ -327,7 +359,7 @@ func ResolveJarURL(configURL, spiderSpec string) string {
 	if path == "" {
 		return ""
 	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "file://") {
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(strings.ToLower(path), "file:") {
 		return path
 	}
 	return ResolveRelativeURL(configURL, path)

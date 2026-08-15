@@ -211,9 +211,13 @@ func (s *pySpider) ensureScript() (string, error) {
 	if s.scriptPath != "" {
 		return s.scriptPath, nil
 	}
-	if st, err := os.Stat(s.api); err == nil && !st.IsDir() {
-		s.scriptPath = s.api
-		return s.api, nil
+	api := strings.TrimSpace(s.api)
+	if local, ok := util.FileURLPath(api); ok {
+		api = local
+	}
+	if st, err := os.Stat(api); err == nil && !st.IsDir() {
+		s.scriptPath = api
+		return api, nil
 	}
 	dest := filepath.Join(paths.PyCache(), util.MD5(s.api)+".py")
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {

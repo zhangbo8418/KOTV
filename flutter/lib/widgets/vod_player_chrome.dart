@@ -4,11 +4,13 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../player/fullscreen_mode.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
+import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
 
 const _speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
@@ -63,7 +65,7 @@ class VodInlineControls extends StatelessWidget {
   });
 
   final KotvPlayback player;
-  final VoidCallback? onExpand;
+  final ValueChanged<KotvDesktopFullscreenKind>? onExpand;
   final VoidCallback? onStop;
   final VoidCallback? onCast;
   final VoidCallback? onMini;
@@ -119,7 +121,7 @@ class VodInlineControls extends StatelessWidget {
                             onTap: onMini!,
                           ),
                         if (onExpand != null && !miniActive)
-                          _IconAct(icon: Icons.fullscreen, tip: '全屏', size: iconSize, onTap: onExpand!),
+                          KotvFullscreenExpandButton(size: iconSize, onSelect: onExpand!),
                         SizedBox(width: narrow ? 4 : 8),
                         Flexible(
                           child: Text(

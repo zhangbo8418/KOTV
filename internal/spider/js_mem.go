@@ -135,8 +135,13 @@ func moduleFetch(name string) string {
 	case strings.HasPrefix(name, "lib/"):
 		content = readAssetLib(name)
 		via = "lib"
-	case strings.HasPrefix(name, "file://"):
-		b, err := os.ReadFile(strings.TrimPrefix(name, "file://"))
+	case strings.HasPrefix(name, "file://") || strings.HasPrefix(name, "file:"):
+		path, ok := util.FileURLPath(name)
+		if !ok {
+			jsLog("[js-mod] file bad name=%s", name)
+			break
+		}
+		b, err := os.ReadFile(path)
 		if err == nil {
 			content = string(b)
 			via = "file"
