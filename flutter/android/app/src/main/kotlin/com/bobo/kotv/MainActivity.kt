@@ -13,7 +13,6 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Rational
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -28,30 +27,6 @@ class MainActivity : FlutterActivity() {
   private var castPermResult: MethodChannel.Result? = null
   private var pickConfigResult: MethodChannel.Result? = null
   private var storagePermResult: MethodChannel.Result? = null
-
-  private val pickConfigLauncher =
-    registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-      val pending = pickConfigResult
-      pickConfigResult = null
-      if (pending == null) return@registerForActivityResult
-      if (result.resultCode != Activity.RESULT_OK || result.data?.data == null) {
-        pending.success(null)
-        return@registerForActivityResult
-      }
-      val path = KotvFileChooser.getPathFromUri(this, result.data!!.data!!)
-      if (path.isNullOrBlank()) {
-        pending.success(null)
-        return@registerForActivityResult
-      }
-      // 对齐 TV：真实磁盘路径 → file://（绝对路径，相对 jar/js/py 相对该文件目录解析）
-      pending.success(Uri.fromFile(File(path)).toString())
-    }
-
-  private val manageStorageLauncher =
-    registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-      storagePermResult?.success(KotvFileChooser.hasStoragePermission(this))
-      storagePermResult = null
-    }
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -168,7 +143,9 @@ class MainActivity : FlutterActivity() {
     }
     pickConfigResult = result
     try {
-      pickConfigLauncher.launch(KotvFileChooser.openDocumentIntent())
+      // FlutterActivity 不继承 ComponentActivity，不能用 registerForActivityResult
+      @Suppress("DEPRECATION")
+      startActivityForResult(KotvFileChooser.openDocumentIntent(), REQ_PICK_CONFIG)
     } catch (t: Throwable) {
       pickConfigResult = null
       result.error("pick", t.message ?: t.toString(), null)
@@ -185,10 +162,12 @@ class MainActivity : FlutterActivity() {
       try {
         val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
         intent.data = Uri.parse("package:$packageName")
-        manageStorageLauncher.launch(intent)
+        @Suppress("DEPRECATION")
+        startActivityForResult(intent, REQ_MANAGE_STORAGE)
       } catch (_: Throwable) {
         try {
-          manageStorageLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+          @Suppress("DEPRECATION")
+          startActivityForResult(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION), REQ_MANAGE_STORAGE)
         } catch (t: Throwable) {
           storagePermResult = null
           result.error("storage", t.message ?: t.toString(), null)
@@ -204,6 +183,34 @@ class MainActivity : FlutterActivity() {
     castPermResult = null
     storagePermResult = result
     ActivityCompat.requestPermissions(this, arrayOf(need), REQ_STORAGE)
+  }
+
+  @Deprecated("Deprecated in Java")
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    @Suppress("DEPRECATION")
+    super.onActivityResult(requestCode, resultCode, data)
+    when (requestCode) {
+      REQ_PICK_CONFIG -> {
+        val pending = pickConfigResult
+        pickConfigResult = null
+        if (pending == null) return
+        if (resultCode != Activity.RESULT_OK || data?.data == null) {
+          pending.success(null)
+          return
+        }
+        val path = KotvFileChooser.getPathFromUri(this, data.data!!)
+        if (path.isNullOrBlank()) {
+          pending.success(null)
+          return
+        }
+        // 对齐 TV：真实磁盘路径 → file://（绝对路径，相对 jar/js/py 相对该文件目录解析）
+        pending.success(Uri.fromFile(File(path)).toString())
+      }
+      REQ_MANAGE_STORAGE -> {
+        storagePermResult?.success(KotvFileChooser.hasStoragePermission(this))
+        storagePermResult = null
+      }
+    }
   }
 
   private fun enterPipMode(): Boolean {
@@ -297,5 +304,7 @@ class MainActivity : FlutterActivity() {
   companion object {
     private const val REQ_CAST = 0xC457
     private const val REQ_STORAGE = 0xC458
+    private const val REQ_PICK_CONFIG = 0xC459
+    private const val REQ_MANAGE_STORAGE = 0xC45A
   }
 }
