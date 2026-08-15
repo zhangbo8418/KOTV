@@ -198,7 +198,15 @@ class MainActivity : FlutterActivity() {
           pending.success(null)
           return
         }
-        val path = KotvFileChooser.getPathFromUri(this, data.data!!)
+        val uri = data.data!!
+        try {
+          contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+          )
+        } catch (_: Throwable) {
+        }
+        val path = KotvFileChooser.getPathFromUri(this, uri)
         if (path.isNullOrBlank()) {
           pending.success(null)
           return

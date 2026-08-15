@@ -51,7 +51,8 @@ func UnderMediaRoot(p string) bool {
 
 // ResolveMediaPath 对齐 TV Path.local：
 // 1) 相对路径拼到 MediaRoots；
-// 2) 绝对路径若存在则直接允许（本地仓 / jar / py / js 同目录相对脚本依赖此回退）。
+// 2) 绝对路径若存在则直接允许（本地仓 / jar / py / js 同目录相对脚本依赖此回退）；
+// 3) /file/ 代理经 URL 清洗后常丢掉绝对路径前导 /（/file//storage/... → storage/...），此处还原。
 func ResolveMediaPath(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -67,6 +68,13 @@ func ResolveMediaPath(raw string) string {
 			return name
 		}
 		return ""
+	}
+
+	// http://127.0.0.1/file//storage/emulated/0/... 被清洗成 storage/emulated/0/...
+	if restored := filepath.Clean(string(os.PathSeparator) + name); filepath.IsAbs(restored) && len(restored) > 1 {
+		if st, err := os.Stat(restored); err == nil && (st.IsDir() || st.Mode().IsRegular()) {
+			return restored
+		}
 	}
 
 	for _, root := range MediaRoots() {
