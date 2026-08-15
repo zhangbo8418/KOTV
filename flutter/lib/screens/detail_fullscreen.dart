@@ -94,7 +94,8 @@ class DetailFullscreenPage extends StatefulWidget {
   State<DetailFullscreenPage> createState() => _DetailFullscreenPageState();
 }
 
-class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
+class _DetailFullscreenPageState extends State<DetailFullscreenPage>
+    with SingleTickerProviderStateMixin {
   bool _showChrome = true;
   late AspectSpec _aspect = widget.aspect;
   late String _decodeMode = widget.decodeMode;
@@ -106,8 +107,11 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   Duration _pos = Duration.zero;
   final GlobalKey<VodFullscreenChromeState> _chromeKey = GlobalKey<VodFullscreenChromeState>();
 
-  /// 抖音式上下滑切集
+  /// 抖音式上下滑切集：跟手位移 + 松手吸附/切集
   double _dragDy = 0;
+  bool _dragging = false;
+  late final AnimationController _swipeAnim;
+  Animation<double>? _swipeTween;
   String? _swipeHint;
   Timer? _hintTimer;
   DateTime? _lastSwipeAt;
@@ -124,6 +128,12 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   @override
   void initState() {
     super.initState();
+    _swipeAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 280))
+      ..addListener(() {
+        final t = _swipeTween;
+        if (t == null || !mounted) return;
+        setState(() => _dragDy = t.value);
+      });
     _bumpChrome();
     _pos = widget.playback.position;
     _posSub = widget.playback.positionStream.listen((d) {
@@ -166,6 +176,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
   void dispose() {
     _hideTimer?.cancel();
     _hintTimer?.cancel();
+    _swipeAnim.dispose();
     _posSub?.cancel();
     widget.playback.removeListener(_onPlaybackChanged);
     unawaited(_restoreChrome());
@@ -264,32 +275,101 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
     _bumpChrome();
   }
 
-  void _onVerticalDragEnd(DragEndDetails d) {
-    if (_epOpen || widget.episodes.isEmpty) {
+  bool get _canSwipeEps => !_epOpen && widget.episodes.length > 1;
+
+  void _onVerticalDragStart(DragStartDetails _) {
+    if (!_canSwipeEps) return;
+    _swipeAnim.stop();
+    _swipeTween = null;
+    setState(() {
+      _dragging = true;
       _dragDy = 0;
+    });
+  }
+
+  void _onVerticalDragUpdate(DragUpdateDetails d) {
+    if (!_canSwipeEps || !_dragging) return;
+    final h = MediaQuery.sizeOf(context).height;
+    var next = _dragDy + d.delta.dy;
+    // 到顶/到底橡胶阻尼
+    if ((_epIdx <= 0 && next > 0) || (_epIdx + 1 >= widget.episodes.length && next < 0)) {
+      next = next * 0.35;
+    }
+    next = next.clamp(-h * 0.92, h * 0.92);
+    setState(() => _dragDy = next);
+  }
+
+  Future<void> _animateSwipeTo(double target, {VoidCallback? onDone}) async {
+    final from = _dragDy;
+    _swipeTween = Tween<double>(begin: from, end: target).animate(
+      CurvedAnimation(parent: _swipeAnim, curve: Curves.easeOutCubic),
+    );
+    _swipeAnim.duration = Duration(milliseconds: (180 + (from - target).abs() / 6).round().clamp(180, 360));
+    _swipeAnim.reset();
+    await _swipeAnim.forward();
+    if (!mounted) return;
+    // 切集时直接落到新页 offset=0，避免黑帧闪一下
+    setState(() {
+      _dragDy = 0;
+      _dragging = false;
+    });
+    onDone?.call();
+  }
+
+  void _onVerticalDragEnd(DragEndDetails d) {
+    if (!_canSwipeEps) {
+      setState(() {
+        _dragDy = 0;
+        _dragging = false;
+      });
       return;
     }
     final now = DateTime.now();
-    if (_lastSwipeAt != null && now.difference(_lastSwipeAt!) < const Duration(milliseconds: 650)) {
-      _dragDy = 0;
+    if (_lastSwipeAt != null && now.difference(_lastSwipeAt!) < const Duration(milliseconds: 450)) {
+      unawaited(_animateSwipeTo(0));
       return;
     }
+    final h = MediaQuery.sizeOf(context).height;
     final v = d.primaryVelocity ?? 0;
+    final commitNext = (v < -420 || _dragDy < -h * 0.18) && _epIdx + 1 < widget.episodes.length;
+    final commitPrev = (v > 420 || _dragDy > h * 0.18) && _epIdx > 0;
     // 上滑 = 下一集（抖音同款）；下滑 = 上一集
-    if (v < -380 || _dragDy < -72) {
+    if (commitNext) {
       _lastSwipeAt = now;
       final next = _epIdx + 1;
-      final name = next >= 0 && next < widget.episodes.length ? widget.episodes[next] : '';
+      final name = next < widget.episodes.length ? widget.episodes[next] : '';
       _flashSwipeHint(name.isEmpty ? '下一集' : '下一集 · $name');
-      _goNext();
-    } else if (v > 380 || _dragDy > 72) {
+      unawaited(_animateSwipeTo(-h, onDone: _goNext));
+    } else if (commitPrev) {
       _lastSwipeAt = now;
       final prev = _epIdx - 1;
-      final name = prev >= 0 && prev < widget.episodes.length ? widget.episodes[prev] : '';
+      final name = prev >= 0 ? widget.episodes[prev] : '';
       _flashSwipeHint(name.isEmpty ? '上一集' : '上一集 · $name');
-      _goPrev();
+      unawaited(_animateSwipeTo(h, onDone: _goPrev));
+    } else {
+      unawaited(_animateSwipeTo(0));
     }
-    _dragDy = 0;
+  }
+
+  Widget _swipePeek({required String label, required Alignment align}) {
+    return ColoredBox(
+      color: Colors.black,
+      child: Align(
+        alignment: align,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.88),
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
@@ -437,89 +517,167 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      if (_epOpen) {
-                        _chromeKey.currentState?.closeEpisodes();
-                        setState(() {});
-                        return;
-                      }
-                      setState(() => _showChrome = !_showChrome);
-                      if (_showChrome) _bumpChrome();
-                    },
-                    onDoubleTap: () => unawaited(_exitFullscreen()),
-                    onVerticalDragStart: _epOpen ? null : (_) => _dragDy = 0,
-                    onVerticalDragUpdate: _epOpen
-                        ? null
-                        : (d) {
-                            _dragDy += d.delta.dy;
+                  // 下滑露出上一集预览（从上方跟入）
+                  if (_dragDy > 8 && _epIdx > 0)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: _dragDy - c.maxHeight,
+                      height: c.maxHeight,
+                      child: _swipePeek(
+                        label: '上一集 · ${widget.episodes[_epIdx - 1]}',
+                        align: Alignment.bottomCenter,
+                      ),
+                    ),
+                  // 上滑露出下一集预览（从下方跟入）
+                  if (_dragDy < -8 && _epIdx + 1 < widget.episodes.length)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: c.maxHeight + _dragDy,
+                      height: c.maxHeight,
+                      child: _swipePeek(
+                        label: '下一集 · ${widget.episodes[_epIdx + 1]}',
+                        align: Alignment.topCenter,
+                      ),
+                    ),
+                  Transform.translate(
+                    offset: Offset(0, _dragDy),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            if (_epOpen) {
+                              _chromeKey.currentState?.closeEpisodes();
+                              setState(() {});
+                              return;
+                            }
+                            setState(() => _showChrome = !_showChrome);
+                            if (_showChrome) _bumpChrome();
                           },
-                    onVerticalDragEnd: _epOpen ? null : _onVerticalDragEnd,
-                    child: _buildVideo(),
-                  ),
-                  DanmakuOverlay(
-                    enabled: _danmakuOn,
-                    position: _pos,
-                    items: widget.danmakuItems,
-                  ),
-                  if (widget.playUrl.isNotEmpty)
-                    KotvBufferingOverlay(player: widget.playback),
-                  if (_showForceLandscape)
-                    Builder(
-                      builder: (context) {
-                        final screen = MediaQuery.sizeOf(context);
-                        final videoRect = kotvVideoContainRect(
-                          screen: screen,
-                          videoWidth: widget.playback.width,
-                          videoHeight: widget.playback.height,
-                        );
-                        // 抖音式：按钮落在画面下方 letterbox 黑边，不叠在视频上。
-                        final barTop = videoRect.bottom;
-                        final barH = (screen.height - barTop).clamp(48.0, screen.height);
-                        return Positioned(
-                          left: 0,
-                          right: 0,
-                          top: barTop,
-                          height: barH,
-                          child: Center(
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: () => unawaited(_forceLandscape()),
-                                borderRadius: BorderRadius.circular(24),
-                                child: Ink(
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.55),
-                                    borderRadius: BorderRadius.circular(24),
-                                    border: Border.all(color: Colors.white.withOpacity(0.28)),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.screen_rotation_rounded, color: Colors.white.withOpacity(0.95), size: 20),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          '全屏观看',
-                                          style: TextStyle(
-                                            color: Colors.white.withOpacity(0.95),
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w700,
-                                            letterSpacing: 0.2,
+                          onDoubleTap: () => unawaited(_exitFullscreen()),
+                          onVerticalDragStart: _canSwipeEps ? _onVerticalDragStart : null,
+                          onVerticalDragUpdate: _canSwipeEps ? _onVerticalDragUpdate : null,
+                          onVerticalDragEnd: _canSwipeEps ? _onVerticalDragEnd : null,
+                          child: _buildVideo(),
+                        ),
+                        DanmakuOverlay(
+                          enabled: _danmakuOn,
+                          position: _pos,
+                          items: widget.danmakuItems,
+                        ),
+                        if (widget.playUrl.isNotEmpty)
+                          KotvBufferingOverlay(player: widget.playback),
+                        if (_showForceLandscape)
+                          Builder(
+                            builder: (context) {
+                              final screen = Size(c.maxWidth, c.maxHeight);
+                              final videoRect = kotvVideoContainRect(
+                                screen: screen,
+                                videoWidth: widget.playback.width,
+                                videoHeight: widget.playback.height,
+                              );
+                              // 抖音式：紧贴横屏画面下方一点点，不居中到整块黑边。
+                              final top = videoRect.bottom + 12;
+                              return Positioned(
+                                left: 0,
+                                right: 0,
+                                top: top.clamp(0.0, (c.maxHeight - 52).clamp(0.0, c.maxHeight)),
+                                child: Align(
+                                  alignment: Alignment.topCenter,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () => unawaited(_forceLandscape()),
+                                      borderRadius: BorderRadius.circular(24),
+                                      child: Ink(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withOpacity(0.55),
+                                          borderRadius: BorderRadius.circular(24),
+                                          border: Border.all(color: Colors.white.withOpacity(0.28)),
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.screen_rotation_rounded, color: Colors.white.withOpacity(0.95), size: 20),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                '全屏观看',
+                                                style: TextStyle(
+                                                  color: Colors.white.withOpacity(0.95),
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.w700,
+                                                  letterSpacing: 0.2,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                      ],
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ),
+                              );
+                            },
                           ),
-                        );
-                      },
+                        VodFullscreenChrome(
+                          key: _chromeKey,
+                          player: widget.playback,
+                          title: _title,
+                          visible: _showChrome && !_dragging && _dragDy.abs() < 4,
+                          onToggleVisible: () {
+                            setState(() => _showChrome = !_showChrome);
+                            if (_showChrome) _bumpChrome();
+                          },
+                          onExit: () => unawaited(_exitFullscreen()),
+                          onBump: _bumpChrome,
+                          episodes: widget.episodes,
+                          epIdx: _epIdx,
+                          aspect: _aspect,
+                          onAspectChanged: (a) => setState(() => _aspect = a),
+                          playUrl: widget.playUrl,
+                          decodeMode: _decodeMode,
+                          onDecodeChanged: (m) => unawaited(_onDecode(m)),
+                          onPersistSetting: widget.onPersistSetting,
+                          onPlayerStatus: widget.onPlayerStatus,
+                          onExternalPlayer: widget.onExternalPlayer,
+                          onToggleKeep: widget.onToggleKeep,
+                          keepLabel: widget.keepLabel,
+                          onParse: widget.onParse,
+                          onRefresh: widget.onRefresh,
+                          onCast: widget.onCast,
+                          onMini: widget.onMini,
+                          danmakuOn: _danmakuOn,
+                          onDanmakuChanged: (v) {
+                            setState(() => _danmakuOn = v);
+                            widget.onDanmakuChanged?.call(v);
+                          },
+                          ambientOn: _ambientOn,
+                          onAmbientChanged: (v) {
+                            setState(() => _ambientOn = v);
+                            widget.onAmbientChanged?.call(v);
+                          },
+                          stableVolumeOn: widget.stableVolumeOn,
+                          offsetId: widget.offsetId,
+                          offsetSite: widget.offsetSite,
+                          openingSec: widget.openingSec,
+                          endingSec: widget.endingSec,
+                          onOffsetsChanged: widget.onOffsetsChanged,
+                          onSelectEp: _selectEp,
+                          onNext: _goNext,
+                          onPrev: _goPrev,
+                          onReplay: () {
+                            widget.playback.seek(Duration.zero);
+                            widget.playback.play();
+                          },
+                        ),
+                      ],
                     ),
+                  ),
                   if (_swipeHint != null)
                     IgnorePointer(
                       child: Center(
@@ -544,57 +702,6 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage> {
                         ),
                       ),
                     ),
-                  VodFullscreenChrome(
-                    key: _chromeKey,
-                    player: widget.playback,
-                    title: _title,
-                    visible: _showChrome,
-                    onToggleVisible: () {
-                      setState(() => _showChrome = !_showChrome);
-                      if (_showChrome) _bumpChrome();
-                    },
-                    onExit: () => unawaited(_exitFullscreen()),
-                    onBump: _bumpChrome,
-                    episodes: widget.episodes,
-                    epIdx: _epIdx,
-                    aspect: _aspect,
-                    onAspectChanged: (a) => setState(() => _aspect = a),
-                    playUrl: widget.playUrl,
-                    decodeMode: _decodeMode,
-                    onDecodeChanged: (m) => unawaited(_onDecode(m)),
-                    onPersistSetting: widget.onPersistSetting,
-                    onPlayerStatus: widget.onPlayerStatus,
-                    onExternalPlayer: widget.onExternalPlayer,
-                    onToggleKeep: widget.onToggleKeep,
-                    keepLabel: widget.keepLabel,
-                    onParse: widget.onParse,
-                    onRefresh: widget.onRefresh,
-                    onCast: widget.onCast,
-                    onMini: widget.onMini,
-                    danmakuOn: _danmakuOn,
-                    onDanmakuChanged: (v) {
-                      setState(() => _danmakuOn = v);
-                      widget.onDanmakuChanged?.call(v);
-                    },
-                    ambientOn: _ambientOn,
-                    onAmbientChanged: (v) {
-                      setState(() => _ambientOn = v);
-                      widget.onAmbientChanged?.call(v);
-                    },
-                    stableVolumeOn: widget.stableVolumeOn,
-                    offsetId: widget.offsetId,
-                    offsetSite: widget.offsetSite,
-                    openingSec: widget.openingSec,
-                    endingSec: widget.endingSec,
-                    onOffsetsChanged: widget.onOffsetsChanged,
-                    onSelectEp: _selectEp,
-                    onNext: _goNext,
-                    onPrev: _goPrev,
-                    onReplay: () {
-                      widget.playback.seek(Duration.zero);
-                      widget.playback.play();
-                    },
-                  ),
                 ],
               ),
             );
