@@ -266,6 +266,18 @@ class KotvApi {
     return _decode(res);
   }
 
+  Future<Map<String, dynamic>> editRepo({
+    required String oldUrl,
+    required String url,
+    String name = '',
+  }) =>
+      _post('/api/v1/repos', {
+        'action': 'edit',
+        'oldUrl': oldUrl,
+        'url': url,
+        'name': name,
+      });
+
   Future<Map<String, dynamic>> getSettings() => _get('/api/v1/settings');
 
   Future<Map<String, dynamic>> setSetting(String key, String value) =>
@@ -278,6 +290,18 @@ class KotvApi {
 
   Future<Map<String, dynamic>> deleteLive(String url) =>
       _post('/api/v1/live', {'action': 'delete', 'url': url});
+
+  Future<Map<String, dynamic>> editLive({
+    required String oldUrl,
+    required String url,
+    String name = '',
+  }) =>
+      _post('/api/v1/live', {
+        'action': 'edit',
+        'oldUrl': oldUrl,
+        'url': url,
+        'name': name,
+      });
 
   Future<Map<String, dynamic>> liveLoad({int index = 0, String url = ''}) =>
       _post('/api/v1/live', {

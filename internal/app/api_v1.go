@@ -736,6 +736,7 @@ func (a *App) APIListRepos() map[string]any {
 		list = append(list, map[string]any{
 			"url":     url,
 			"name":    name,
+			"title":   strings.TrimSpace(c.Name),
 			"home":    c.Home,
 			"current": url == current,
 		})
@@ -751,6 +752,11 @@ func (a *App) APIDeleteRepo(url string) error {
 	return a.DB.DeleteConfigByURL(url, int64(database.ConfigTypeSite))
 }
 
+// APIEditRepo 编辑点播源名称/地址（对齐 TV 设置页长按 ConfigDialog.edit）。
+func (a *App) APIEditRepo(oldURL, newURL, name string) error {
+	return a.editConfig(database.ConfigTypeSite, oldURL, newURL, name)
+}
+
 func (a *App) APIDeleteLive(url string) error {
 	url = strings.TrimSpace(url)
 	if url == "" {
@@ -764,6 +770,48 @@ func (a *App) APIDeleteLive(url string) error {
 		_ = settings.Save()
 	}
 	a.syncLive()
+	return nil
+}
+
+// APIEditLive 编辑直播源名称/地址。
+func (a *App) APIEditLive(oldURL, newURL, name string) error {
+	return a.editConfig(database.ConfigTypeLive, oldURL, newURL, name)
+}
+
+func (a *App) editConfig(typ int64, oldURL, newURL, name string) error {
+	if a.DB == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	oldURL = strings.TrimSpace(oldURL)
+	newURL = config.NormalizeSource(strings.TrimSpace(newURL))
+	name = strings.TrimSpace(name)
+	if newURL == "" {
+		return fmt.Errorf("请输入源地址")
+	}
+	if oldURL == "" {
+		oldURL = newURL
+	}
+	if err := a.DB.UpdateConfigURLName(oldURL, typ, newURL, name); err != nil {
+		return err
+	}
+	switch typ {
+	case database.ConfigTypeSite:
+		_, _, sess := a.scope()
+		cur := strings.TrimSpace(settings.Get(settings.VOD))
+		if sess != nil {
+			cur = strings.TrimSpace(sess.Source)
+		}
+		if cur == "" || cur == oldURL || cur == newURL {
+			return a.APILoadConfig(newURL)
+		}
+	case database.ConfigTypeLive:
+		cur := strings.TrimSpace(settings.Get(settings.LIVE))
+		if cur == "" || cur == oldURL || cur == newURL {
+			settings.Set(settings.LIVE, newURL)
+			_ = settings.Save()
+			a.syncLive()
+		}
+	}
 	return nil
 }
 
@@ -1149,6 +1197,7 @@ func (a *App) APILiveSources() map[string]any {
 		u := strings.TrimSpace(l.URL)
 		configs = append(configs, map[string]any{
 			"name":    config.ConfigLabel(l.Name, u),
+			"title":   strings.TrimSpace(l.Name),
 			"url":     u,
 			"current": u != "" && u == current,
 		})

@@ -971,11 +971,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             await _reload();
                           },
                           onLongPress: () async {
-                            final switched = await showRepoPicker(context, ref);
-                            if (switched) {
-                              await _reload();
-                              setState(() => _status = '线路已切换');
-                            }
+                            await showEditVodDialog(context, ref);
+                            await _reload();
+                            setState(() => _status = '点播源已更新');
                           },
                         ),
                         KotvSettingsCell(
@@ -990,9 +988,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             setState(() => _status = '直播源已保存');
                           },
                           onLongPress: () async {
-                            await showLivePicker(context, ref);
+                            await showEditLiveDialog(context, ref);
                             await _reload();
-                            setState(() => _status = '直播源已切换');
+                            setState(() => _status = '直播源已更新');
                           },
                         ),
                         KotvSettingsCell(
@@ -1025,6 +1023,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               await _reload();
                               setState(() => _status = '线路已切换');
                             }
+                          },
+                        ),
+                        KotvSettingsCell(
+                          label: '直播历史',
+                          value: '切换',
+                          onTap: () async {
+                            await showLivePicker(context, ref);
+                            await _reload();
+                            setState(() => _status = '直播源已切换');
                           },
                         ),
                         // Web 固定同源后端，不提供改引擎地址。

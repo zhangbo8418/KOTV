@@ -374,6 +374,209 @@ Future<void> showAddVodDialog(BuildContext context, WidgetRef ref) async {
   ctrl.dispose();
 }
 
+/// 编辑当前点播源名称/地址（对齐 TV 设置页长按 ConfigDialog.edit）。
+Future<void> showEditVodDialog(BuildContext context, WidgetRef ref, {String? url, String? title}) async {
+  final api = ref.read(apiProvider);
+  var oldUrl = (url ?? '').trim();
+  var initialName = (title ?? '').trim();
+  if (oldUrl.isEmpty) {
+    try {
+      final data = await api.listRepos();
+      oldUrl = '${data['current'] ?? ''}'.trim();
+      final list = ((data['repos'] as List?) ?? []).whereType<Map>();
+      for (final r in list) {
+        if ('${r['url']}' == oldUrl) {
+          initialName = '${r['title'] ?? ''}'.trim();
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+  if (!context.mounted) return;
+  if (oldUrl.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先添加点播源')));
+    return;
+  }
+  await _showEditSourceDialog(
+    context,
+    ref,
+    kindTitle: '编辑点播源',
+    hint: '可改名称与地址；名称可空，空则列表显示完整地址',
+    oldUrl: oldUrl,
+    initialName: initialName,
+    onSave: (newUrl, name) => api.editRepo(oldUrl: oldUrl, url: newUrl, name: name),
+  );
+}
+
+/// 编辑当前直播源名称/地址。
+Future<void> showEditLiveDialog(BuildContext context, WidgetRef ref, {String? url, String? title}) async {
+  final api = ref.read(apiProvider);
+  var oldUrl = (url ?? '').trim();
+  var initialName = (title ?? '').trim();
+  if (oldUrl.isEmpty) {
+    try {
+      final data = await api.liveSources();
+      oldUrl = '${data['live'] ?? ''}'.trim();
+      final list = ((data['configs'] as List?) ?? []).whereType<Map>();
+      for (final r in list) {
+        if ('${r['url']}' == oldUrl) {
+          initialName = '${r['title'] ?? ''}'.trim();
+          break;
+        }
+      }
+      if (oldUrl.isEmpty) {
+        final st = await api.getSettings();
+        final map = Map<String, dynamic>.from((st['settings'] as Map?) ?? {});
+        oldUrl = '${map['live'] ?? ''}'.trim();
+      }
+    } catch (_) {}
+  }
+  if (!context.mounted) return;
+  if (oldUrl.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先添加直播源')));
+    return;
+  }
+  await _showEditSourceDialog(
+    context,
+    ref,
+    kindTitle: '编辑直播源',
+    hint: '可改名称与地址；名称可空，空则列表显示完整地址',
+    oldUrl: oldUrl,
+    initialName: initialName,
+    onSave: (newUrl, name) => api.editLive(oldUrl: oldUrl, url: newUrl, name: name),
+  );
+}
+
+Future<void> _showEditSourceDialog(
+  BuildContext context,
+  WidgetRef ref, {
+  required String kindTitle,
+  required String hint,
+  required String oldUrl,
+  required String initialName,
+  required Future<Map<String, dynamic>> Function(String url, String name) onSave,
+}) async {
+  final nameCtrl = TextEditingController(text: initialName);
+  final urlCtrl = TextEditingController(text: oldUrl);
+  var busy = false;
+  var status = '';
+
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: !busy,
+    builder: (ctx) {
+      return StatefulBuilder(
+        builder: (ctx, setLocal) {
+          Future<void> save() async {
+            final name = nameCtrl.text.trim();
+            final url = urlCtrl.text.trim();
+            if (url.isEmpty) {
+              setLocal(() => status = '请输入源地址');
+              return;
+            }
+            setLocal(() {
+              busy = true;
+              status = '保存中…';
+            });
+            try {
+              await onSave(url, name);
+              ref.invalidate(configProvider);
+              ref.invalidate(homeProvider);
+              ref.invalidate(settingsProvider);
+              if (ctx.mounted) Navigator.pop(ctx);
+            } catch (e) {
+              setLocal(() {
+                busy = false;
+                status = '$e';
+              });
+            }
+          }
+
+          Future<void> pick() async {
+            final picked = await _pickConfigFile();
+            if (picked != null && ctx.mounted) {
+              urlCtrl.text = picked;
+              setLocal(() {});
+            }
+          }
+
+          final p = KotvPalette.of(ctx);
+          final m = _dialogMetrics(ctx);
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: m.inset,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: m.compact ? m.width : 520),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: p.dialogBg,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: p.outline),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.all(m.compact ? 14 : 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(kindTitle, style: TextStyle(color: p.fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 8),
+                      Text(hint, style: TextStyle(color: p.muted, fontSize: m.compact ? 12 : 13)),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: nameCtrl,
+                        enabled: !busy,
+                        style: TextStyle(color: p.fg),
+                        cursorColor: p.primary,
+                        decoration: InputDecoration(
+                          hintText: '名称（可选）',
+                          hintStyle: TextStyle(color: p.muted),
+                          filled: true,
+                          fillColor: p.input,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: urlCtrl,
+                        maxLines: m.compact ? 2 : 3,
+                        enabled: !busy,
+                        style: TextStyle(color: p.fg),
+                        cursorColor: p.primary,
+                        decoration: InputDecoration(
+                          hintText: '源地址',
+                          hintStyle: TextStyle(color: p.muted),
+                          filled: true,
+                          fillColor: p.input,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                      ),
+                      if (status.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(status, style: TextStyle(color: p.primary, fontSize: 13)),
+                      ],
+                      const SizedBox(height: 16),
+                      _configDialogActions(
+                        compact: m.compact,
+                        onPick: busy ? () {} : pick,
+                        onCancel: busy ? () {} : () => Navigator.pop(ctx),
+                        onConfirm: busy ? () {} : save,
+                        confirmLabel: busy ? '保存中…' : '保存',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+  nameCtrl.dispose();
+  urlCtrl.dispose();
+}
+
 Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
   String initial = '';
@@ -504,7 +707,7 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
                         style: TextStyle(color: KotvPalette.of(ctx).fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 6),
-                      Text('点选切换；右侧删除可移除', style: TextStyle(color: KotvPalette.of(ctx).muted, fontSize: 14)),
+                      Text('点选切换；长按改名；右侧删除可移除', style: TextStyle(color: KotvPalette.of(ctx).muted, fontSize: 14)),
                       const SizedBox(height: 12),
                       Expanded(
                         child: ListView(
@@ -522,6 +725,15 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
                                     current: isCurrent,
                                     autofocus: !focused,
                                     onTap: isCurrent ? () {} : () => Navigator.pop(ctx, url),
+                                    onLongPress: () async {
+                                      await showEditLiveDialog(
+                                        ctx,
+                                        ref,
+                                        url: url,
+                                        title: '${r['title'] ?? ''}',
+                                      );
+                                      await reload();
+                                    },
                                     onDelete: isCurrent
                                         ? null
                                         : () async {
@@ -620,7 +832,7 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
                         style: TextStyle(color: Colors.white, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 6),
-                      const Text('点选切换；右侧删除可移除', style: TextStyle(color: Color(0xFFCF4274), fontSize: 14)),
+                      const Text('点选切换；长按改名；右侧删除可移除', style: TextStyle(color: Color(0xFFCF4274), fontSize: 14)),
                       const SizedBox(height: 12),
                       Expanded(
                         child: ListView(
@@ -638,6 +850,15 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
                                     onTap: isCurrent
                                         ? () {}
                                         : () => Navigator.pop(ctx, '${r['url']}'),
+                                    onLongPress: () async {
+                                      await showEditVodDialog(
+                                        ctx,
+                                        ref,
+                                        url: '${r['url']}',
+                                        title: '${r['title'] ?? ''}',
+                                      );
+                                      await reload();
+                                    },
                                     onDelete: isCurrent
                                         ? null
                                         : () async {
@@ -738,12 +959,14 @@ class _RepoRow extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.onDelete,
+    this.onLongPress,
     this.autofocus = false,
     this.current = false,
   });
   final String label;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
+  final VoidCallback? onLongPress;
   final bool autofocus;
   final bool current;
 
@@ -758,6 +981,7 @@ class _RepoRow extends StatelessWidget {
             height: 44,
             autofocus: autofocus,
             onTap: onTap,
+            onLongPress: onLongPress,
           ),
         ),
         if (onDelete != null) ...[

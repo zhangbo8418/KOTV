@@ -176,6 +176,7 @@ class AppPill extends StatelessWidget {
     super.key,
     required this.label,
     required this.onTap,
+    this.onLongPress,
     this.selected = false,
     this.width,
     this.maxWidth,
@@ -187,6 +188,7 @@ class AppPill extends StatelessWidget {
 
   final String label;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final bool selected;
   final double? width;
   /// 内容自适应宽度时的上限（站名胶囊用）；与 [width] 互斥优先 [width]。
@@ -240,6 +242,7 @@ class AppPill extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
+          onLongPress: onLongPress,
           borderRadius: BorderRadius.circular(8 * s),
           child: Container(
             width: effectiveWidth,

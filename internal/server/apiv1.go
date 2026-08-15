@@ -30,7 +30,9 @@ type ContentAPI interface {
 	APISetMedia(state map[string]string)
 	APIListRepos() map[string]any
 	APIDeleteRepo(url string) error
+	APIEditRepo(oldURL, newURL, name string) error
 	APIDeleteLive(url string) error
+	APIEditLive(oldURL, newURL, name string) error
 	APIGetSettings() map[string]any
 	APISetSettings(kv map[string]string) error
 	APIToggleSite(key, field string, all *bool) error
@@ -566,6 +568,29 @@ func (s *Server) handleAPIv1Repos(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, api.APIListRepos())
+	case http.MethodPost:
+		var body struct {
+			Action string `json:"action"`
+			URL    string `json:"url"`
+			OldURL string `json:"oldUrl"`
+			Name   string `json:"name"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+		oldURL := strings.TrimSpace(body.OldURL)
+		if oldURL == "" {
+			oldURL = strings.TrimSpace(body.URL)
+		}
+		newURL := strings.TrimSpace(body.URL)
+		switch strings.ToLower(strings.TrimSpace(body.Action)) {
+		case "edit", "rename":
+			if err := api.APIEditRepo(oldURL, newURL, body.Name); err != nil {
+				writeAPIError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		default:
+			writeAPIError(w, http.StatusBadRequest, "unknown action")
+		}
 	case http.MethodDelete:
 		url := strings.TrimSpace(r.URL.Query().Get("url"))
 		if r.Body != nil {
@@ -654,6 +679,8 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		Action   string `json:"action"`
 		Index    int    `json:"index"`
 		URL      string `json:"url"`
+		OldURL   string `json:"oldUrl"`
+		Name     string `json:"name"`
 		Group    int    `json:"group"`
 		Channel  int    `json:"channel"`
 		Line     int    `json:"line"`
@@ -694,6 +721,16 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 	case "delete":
 		if err := api.APIDeleteLive(body.URL); err != nil {
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "edit", "rename":
+		oldURL := strings.TrimSpace(body.OldURL)
+		if oldURL == "" {
+			oldURL = strings.TrimSpace(body.URL)
+		}
+		if err := api.APIEditLive(oldURL, body.URL, body.Name); err != nil {
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}

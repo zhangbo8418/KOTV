@@ -246,6 +246,74 @@ func (db *DB) SetConfigHome(url string, typ int64, home string) error {
 	return err
 }
 
+// SetConfigName 更新配置显示名（空字符串表示清除自定义名，列表回落为完整地址）。
+func (db *DB) SetConfigName(url string, typ int64, name string) error {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return nil
+	}
+	now := time.Now().UnixMilli()
+	res, err := db.conn.Exec(
+		`UPDATE config SET name=?, time=? WHERE url=? AND type=?`,
+		nullStr(strings.TrimSpace(name)), now, url, typ,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		return nil
+	}
+	_, err = db.conn.Exec(
+		`INSERT INTO config(type, time, url, json, name, home, parse) VALUES(?,?,?,?,?,?,?)`,
+		typ, now, url, nil, nullStr(strings.TrimSpace(name)), nil, nil,
+	)
+	return err
+}
+
+// UpdateConfigURLName 编辑源：改地址和/或名称（对齐 TV ConfigDialog.edit）。
+func (db *DB) UpdateConfigURLName(oldURL string, typ int64, newURL, name string) error {
+	oldURL = strings.TrimSpace(oldURL)
+	newURL = strings.TrimSpace(newURL)
+	name = strings.TrimSpace(name)
+	if newURL == "" {
+		return fmt.Errorf("empty url")
+	}
+	if oldURL == "" {
+		oldURL = newURL
+	}
+	now := time.Now().UnixMilli()
+	if oldURL == newURL {
+		return db.SetConfigName(newURL, typ, name)
+	}
+	existing, err := db.FindConfig(oldURL, typ)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		_, err = db.UpsertConfig(&Config{Type: typ, URL: newURL, Name: name})
+		return err
+	}
+	// 若新 URL 已有另一行，先删旧再更新保留字段到新键。
+	if other, err := db.FindConfig(newURL, typ); err == nil && other != nil && other.ID != existing.ID {
+		_ = db.DeleteConfigByURL(oldURL, typ)
+		other.Name = name
+		if other.JSON == "" {
+			other.JSON = existing.JSON
+		}
+		if other.Home == "" {
+			other.Home = existing.Home
+		}
+		_, err = db.UpsertConfig(other)
+		return err
+	}
+	_, err = db.conn.Exec(
+		`UPDATE config SET url=?, name=?, time=? WHERE id=?`,
+		newURL, nullStr(name), now, existing.ID,
+	)
+	return err
+}
+
 func (db *DB) SyncSites(configID int64, sites []model.Site) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()

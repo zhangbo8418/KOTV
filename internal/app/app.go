@@ -239,8 +239,7 @@ func (a *App) savedLiveSources() []model.Live {
 					continue
 				}
 				seen[url] = struct{}{}
-				name := config.ConfigLabel(c.Name, url)
-				out = append(out, model.Live{Name: name, URL: url})
+				out = append(out, model.Live{Name: strings.TrimSpace(c.Name), URL: url})
 			}
 		}
 	}
@@ -248,7 +247,7 @@ func (a *App) savedLiveSources() []model.Live {
 	if current != "" {
 		if _, ok := seen[current]; !ok {
 			a.persistLiveSource(current)
-			out = append([]model.Live{{Name: config.ConfigLabel("", current), URL: current}}, out...)
+			out = append([]model.Live{{Name: "", URL: current}}, out...)
 		}
 	}
 	return out
