@@ -186,7 +186,12 @@ class HtmlPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? drm,
+    bool live = false,
+  }) async {
     await stop();
     _completed = false;
     _buffering = true;
@@ -228,6 +233,7 @@ class HtmlPlayback extends KotvPlayback {
         return Duration(milliseconds: (d * 1000).round());
       },
       isLiveContent: () {
+        if (live) return true;
         final d = _video.duration;
         return d.isInfinite;
       },

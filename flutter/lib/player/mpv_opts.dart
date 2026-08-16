@@ -93,7 +93,9 @@ class KotvMpvOpts {
   }
 
   /// 在 VideoController 已附着之后调用：缓冲预算 + conf。
-  Future<void> applyAfterAttach(Player player) async {
+  ///
+  /// [live]=true 时不写点播 demuxer 预读（TV 直播也是引擎默认缓冲，无自定义 LoadControl/demuxer）。
+  Future<void> applyAfterAttach(Player player, {bool live = false}) async {
     try {
       final platform = player.platform;
       if (platform == null) return;
@@ -105,19 +107,21 @@ class KotvMpvOpts {
         await set('hwdec', hwdecValue());
       } catch (_) {}
 
-      try {
-        await KotvBufferBudget.warm(force: true);
-        final budget = KotvBufferBudget.bytes();
-        final forward = KotvBufferBudget.mpvMiB(budget);
-        final back = KotvBufferBudget.mpvMiB(max(16 * 1024 * 1024, budget ~/ 8));
-        await set('cache', 'yes');
-        await set('cache-on-disk', 'no');
-        await set('demuxer-max-bytes', forward);
-        await set('demuxer-max-back-bytes', back);
-        await set('demuxer-readahead-secs', '1000000');
-        await set('cache-secs', '1000000');
-        await set('framedrop', 'vo');
-      } catch (_) {}
+      if (!live) {
+        try {
+          await KotvBufferBudget.warm(force: true);
+          final budget = KotvBufferBudget.bytes();
+          final forward = KotvBufferBudget.mpvMiB(budget);
+          final back = KotvBufferBudget.mpvMiB(max(16 * 1024 * 1024, budget ~/ 8));
+          await set('cache', 'yes');
+          await set('cache-on-disk', 'no');
+          await set('demuxer-max-bytes', forward);
+          await set('demuxer-max-back-bytes', back);
+          await set('demuxer-readahead-secs', '1000000');
+          await set('cache-secs', '1000000');
+          await set('framedrop', 'vo');
+        } catch (_) {}
+      }
 
       for (final e in parseConfLines(conf)) {
         await set(e.$1, e.$2);

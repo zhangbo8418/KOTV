@@ -278,7 +278,12 @@ class WebJsPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? drm,
+    bool live = false,
+  }) async {
     await stop();
     _completed = false;
     _buffering = true;
@@ -330,6 +335,7 @@ class WebJsPlayback extends KotvPlayback {
         return _duration;
       },
       isLiveContent: () {
+        if (live) return true;
         _pullState();
         return _duration == Duration.zero && _playing;
       },

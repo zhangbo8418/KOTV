@@ -582,7 +582,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
-  Future<void> _openLiveUrl(String url, {Map<String, String>? headers}) async {
+  Future<void> _openLiveUrl(String url, {Map<String, String>? headers, bool live = true}) async {
     try {
       final st = await ref.read(apiProvider).getSettings();
       final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
@@ -618,7 +618,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       await pb.setDecodeMode(failover.decodeMode);
       try {
         // 起播缓冲由守卫等待；仅 SilentVideo（黑屏/视源）才 failover，勿墙钟误切。
-        await pb.open(url, headers: headers);
+        // 直播页显式 live：跳过点播 KotvBufferBudget（对齐 TV 默认缓冲；回看 live:false）。
+        await pb.open(url, headers: headers, live: live);
         if (_backend != KotvEmbedBackend.mpv) {
           try {
             await pb.play();
@@ -728,7 +729,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
       };
-      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers);
+      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, live: false);
       setState(() {
         _title = '${data['name'] ?? _title}';
         _status = '回看中 · $_title';
@@ -966,7 +967,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     } catch (_) {}
     if (_playUrl.isNotEmpty) {
       final pos = _playback.position;
-      await _openLiveUrl(_playUrl, headers: _playHeaders);
+      await _openLiveUrl(_playUrl, headers: _playHeaders, live: !_catchup);
       if (pos > Duration.zero) await _playback.seek(pos);
     }
   }
@@ -997,7 +998,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
     if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
       final pos = _playback.position;
-      await _openLiveUrl(_playUrl, headers: _playHeaders);
+      await _openLiveUrl(_playUrl, headers: _playHeaders, live: !_catchup);
       if (pos > Duration.zero) await _playback.seek(pos);
       if (mounted) setState(() {});
     }

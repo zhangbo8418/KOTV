@@ -39,7 +39,13 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 本集自然播完（非手动 stop）时发出 true。
   Stream<bool> get completedStream;
 
-  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm});
+  /// [live]=true：直播页语境（对齐 TV LiveActivity），跳过点播 KotvBufferBudget 预读。
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? drm,
+    bool live = false,
+  });
   Future<void> playOrPause();
   Future<void> play();
   Future<void> pause();
@@ -262,6 +268,7 @@ class MediaKitPlayback extends KotvPlayback {
   String _url = '';
   Map<String, String> _headers = const {};
   bool _buffering = false;
+  bool _live = false;
   int _speedBps = 0;
   Timer? _speedTimer;
   bool _speedBusy = false;
@@ -271,6 +278,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   Future<void> _prepareOpts() async {
     // 先等 VideoController 附着，再写缓冲/hwdec，避免与 media_kit 并行 setProperty。
+    // 构造时尚不知 live；点播预算可先写，open(live:true) 会再套一遍去掉预读。
     try {
       final platform = player.platform;
       if (platform != null && platform.isVideoControllerAttached) {
@@ -286,7 +294,8 @@ class MediaKitPlayback extends KotvPlayback {
       }
     } catch (_) {}
     try {
-      await _opts.applyAfterAttach(player);
+      // 构造时尚不知 live；只写 hwdec/conf，点播预读留给 open(live:)。
+      await _opts.applyAfterAttach(player, live: true);
     } catch (_) {}
   }
 
@@ -414,7 +423,7 @@ class MediaKitPlayback extends KotvPlayback {
         } catch (_) {}
       }
     }
-    await next.applyAfterAttach(player);
+    await next.applyAfterAttach(player, live: _live);
     _optsReady = Future<void>.value();
     if (reopen && _url.isNotEmpty) {
       final pos = position;
@@ -430,8 +439,14 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? drm,
+    bool live = false,
+  }) async {
     _url = url;
+    _live = live;
     _speedBps = 0;
     _lastCacheBytes = -1;
     _lastCacheAt = null;
@@ -447,6 +462,10 @@ class MediaKitPlayback extends KotvPlayback {
     await player
         .open(Media(url, httpHeaders: h.isEmpty ? const {} : h))
         .timeout(const Duration(seconds: 45));
+    // 直播：去掉构造时可能写过的点播 demuxer 预读（对齐 TV：直播走引擎默认）。
+    try {
+      await _opts.applyAfterAttach(player, live: live);
+    } catch (_) {}
     await _guardSilentVideo();
   }
 
@@ -481,6 +500,7 @@ class MediaKitPlayback extends KotvPlayback {
       position: () => player.state.position,
       duration: () => player.state.duration,
       isLiveContent: () {
+        if (_live) return true;
         // media_kit 无稳定 isLive；时长 0 且已出画/在播 → 按直播处理（对齐 TV，跳过卡死进度判定）。
         return player.state.duration <= Duration.zero &&
             (_videoVisible || player.state.playing);

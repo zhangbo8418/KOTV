@@ -70,6 +70,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var formatRetried = false
   /** auto | soft | hard；硬/自动优先 MediaCodec 硬解直出。 */
   private var decodeMode: String = "auto"
+  /** 直播：跳过点播 KotvBufferBudget（对齐 TV：Exo 用默认 LoadControl）。 */
+  private var livePlayback: Boolean = false
   /** auto 下硬解失败后仅软解重建一次。 */
   private var decodeFallbackTried = false
   /** 实时下载速度：TransferListener 累计网络字节，tick 里差分；无增长则归零（避免黏第一帧）。 */
@@ -204,13 +206,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         @Suppress("UNCHECKED_CAST")
         val drm = call.argument<Map<String, Any?>>("drm")
         val mode = call.argument<String>("decodeMode")?.trim()?.lowercase().orEmpty()
+        val live = call.argument<Boolean>("live") == true
         main.post {
           try {
             if (mode.isNotEmpty()) {
               decodeMode = normalizeDecodeMode(mode)
             }
             decodeFallbackTried = false
-            openInternal(url, headers, mime, drm)
+            openInternal(url, headers, mime, drm, live)
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_open", t.message, null)
@@ -224,7 +227,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             decodeMode = mode
             decodeFallbackTried = false
             if (currentUrl.isNotEmpty()) {
-              openInternal(currentUrl, currentHeaders, currentMime, currentDrm)
+              openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback)
             }
             result.success(true)
           } catch (t: Throwable) {
@@ -300,10 +303,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     headers: Map<String, String>,
     mime: String?,
     drm: Map<String, Any?>?,
+    live: Boolean = false,
   ) {
     val ctx = appContext ?: error("no context")
     ensureTexture()
     formatRetried = false
+    livePlayback = live
     currentUrl = url
     currentHeaders = normalizeHeaders(headers)
     currentMime = mime ?: guessMime(url)
@@ -328,34 +333,41 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val renderers = buildRenderersFactory(ctx, effective)
     val selector = DefaultTrackSelector(ctx)
     trackSelector = selector
-    // 内存水位缓冲（与 Dart KotvBufferBudget 一致）：
-    // - 只按 targetBufferBytes 刹车/续拉；播出去的样本释放后 allocated 下降即继续拉
-    // - minBufferMs 刻意极大：让 DefaultLoadControl 在「未满字节预算」时始终走续拉分支，
-    //   避免按剩余秒数播到快空才再缓冲
-    // - 起播门槛仍用 bufferForPlayback*（短时长），与预读策略无关
-    // - backBuffer=0：已播数据尽快释放，不囤回看内存
-    val budget = bufferBudgetBytes(ctx)
-    val loadControl: LoadControl = DefaultLoadControl.Builder()
-      .setBufferDurationsMs(
-        /* minBufferMs */ 3_600_000,
-        /* maxBufferMs */ 3_600_000,
-        /* bufferForPlaybackMs */ 1_200,
-        /* bufferForPlaybackAfterRebufferMs */ 2_500,
-      )
-      .setTargetBufferBytes(budget)
-      .setPrioritizeTimeOverSizeThresholds(false)
-      .setBackBuffer(/* backBufferDurationMs */ 0, /* retainFromKeyframe */ false)
-      .build()
+    // 直播：对齐 TV，不自定义 LoadControl（点播才套 KotvBufferBudget 猛囤）。
+    val loadControl: LoadControl? = if (live) {
+      null
+    } else {
+      val budget = bufferBudgetBytes(ctx)
+      // 内存水位缓冲（与 Dart KotvBufferBudget 一致）：
+      // - 只按 targetBufferBytes 刹车/续拉；播出去的样本释放后 allocated 下降即继续拉
+      // - minBufferMs 刻意极大：让 DefaultLoadControl 在「未满字节预算」时始终走续拉分支，
+      //   避免按剩余秒数播到快空才再缓冲
+      // - 起播门槛仍用 bufferForPlayback*（短时长），与预读策略无关
+      // - backBuffer=0：已播数据尽快释放，不囤回看内存
+      DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+          /* minBufferMs */ 3_600_000,
+          /* maxBufferMs */ 3_600_000,
+          /* bufferForPlaybackMs */ 1_200,
+          /* bufferForPlaybackAfterRebufferMs */ 2_500,
+        )
+        .setTargetBufferBytes(budget)
+        .setPrioritizeTimeOverSizeThresholds(false)
+        .setBackBuffer(/* backBufferDurationMs */ 0, /* retainFromKeyframe */ false)
+        .build()
+    }
     // 每播放器独立 BandwidthMeter，避免 getSingletonInstance 的历史码率黏住 UI
     val bandwidthMeter = DefaultBandwidthMeter.Builder(ctx).build()
 
-    val p = ExoPlayer.Builder(ctx)
+    val builder = ExoPlayer.Builder(ctx)
       .setMediaSourceFactory(mediaSourceFactory)
       .setRenderersFactory(renderers)
       .setTrackSelector(selector)
-      .setLoadControl(loadControl)
       .setBandwidthMeter(bandwidthMeter)
-      .build()
+    if (loadControl != null) {
+      builder.setLoadControl(loadControl)
+    }
+    val p = builder.build()
     player = p
     p.setVideoSurface(surface)
     p.addListener(object : Player.Listener {
@@ -399,7 +411,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           decodeFallbackTried = true
           Log.w(TAG, "exo decoder failed → soft rebuild")
           try {
-            openInternal(currentUrl, currentHeaders, currentMime, currentDrm)
+              openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback)
             return
           } catch (t: Throwable) {
             Log.e(TAG, "exo soft rebuild failed", t)

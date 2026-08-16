@@ -24,6 +24,7 @@ class FvpPlayback extends KotvPlayback {
   VoidCallback? _listener;
   bool _completed = false;
   bool _opening = false;
+  bool _live = false;
   String? _lastError;
   double _volume = 100;
   double _rate = 1;
@@ -145,11 +146,17 @@ class FvpPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? drm,
+    bool live = false,
+  }) async {
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
     _opening = true;
+    _live = live;
     _lastError = null;
     _completed = false;
     notifyListeners();
@@ -205,10 +212,16 @@ class FvpPlayback extends KotvPlayback {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
       }
-      // MPV：demuxer-max-bytes（内存预算）。mdk 无字节帽，只有 setBufferRange(时间)；
-      // 用同一 KotvBufferBudget 换算 maxMs。直播仍短窗+drop。
+      // 点播才套 KotvBufferBudget；直播（页面 live 或 isLive）勿猛囤——TV 无 FVP，此处只是跳过点播预读。
       try {
-        if (c.isLive()) {
+        final engineLive = () {
+          try {
+            return c.isLive();
+          } catch (_) {
+            return false;
+          }
+        }();
+        if (live || engineLive) {
           c.setBufferRange(min: 0, max: 4000, drop: true);
         } else {
           await KotvBufferBudget.warm();
@@ -258,8 +271,9 @@ class FvpPlayback extends KotvPlayback {
       position: () => c.value.position,
       duration: () => c.value.duration,
       isLiveContent: () {
+        if (_live) return true;
         try {
-          return c.isLive();
+          return identical(_c, c) && c.isLive();
         } catch (_) {
           return false;
         }

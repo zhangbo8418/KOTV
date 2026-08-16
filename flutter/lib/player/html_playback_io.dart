@@ -96,7 +96,12 @@ class HtmlPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? drm,
+    bool live = false,
+  }) async {
     _opening = true;
     notifyListeners();
     try {
@@ -147,6 +152,11 @@ class HtmlPlayback extends KotvPlayback {
         },
         position: () => c.value.position,
         duration: () => c.value.duration,
+        isLiveContent: () =>
+            live ||
+            (identical(_c, c) &&
+                c.value.duration <= Duration.zero &&
+                c.value.isPlaying),
         hasVideoSource: () => hasVideoSourceHint,
         isAudioOnly: () => isAudioOnlyContent,
         onFixVideoSource: tryFixVideoSource,

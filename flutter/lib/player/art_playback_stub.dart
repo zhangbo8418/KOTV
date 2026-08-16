@@ -36,7 +36,12 @@ class ArtPlayback extends KotvPlayback {
   String? get currentSubtitleId => null;
   Widget buildView({BoxFit fit = BoxFit.contain}) => const ColoredBox(color: Colors.black);
   @override
-  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? drm,
+    bool live = false,
+  }) async {
     throw UnsupportedError('ArtPlayer 仅支持 Web');
   }
 

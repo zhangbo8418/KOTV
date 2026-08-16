@@ -38,6 +38,7 @@ class ExoPlayback extends KotvPlayback {
   int _speedBps = 0;
   bool _repeatOne = false;
   String _decodeMode = 'auto';
+  bool _live = false;
   String? _lastError;
 
   final _posCtrl = StreamController<Duration>.broadcast();
@@ -166,8 +167,14 @@ class ExoPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers, Map<String, dynamic>? drm}) async {
+  Future<void> open(
+    String url, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? drm,
+    bool live = false,
+  }) async {
     _url = url;
+    _live = live;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _drm = drm;
     _completed = false;
@@ -184,6 +191,7 @@ class ExoPlayback extends KotvPlayback {
         'mime': _guessMime(url),
         'drm': drm,
         'decodeMode': _decodeMode,
+        'live': live,
       });
       await _ch.invokeMethod('setVolume', {'volume': (_volume / 100).clamp(0.0, 1.0)});
       await _ch.invokeMethod('setRate', {'rate': _rate});
@@ -202,7 +210,8 @@ class ExoPlayback extends KotvPlayback {
       isPlaying: () => _playing,
       position: () => _position,
       duration: () => _duration,
-      isLiveContent: () => _ready && _duration <= Duration.zero && _playing,
+      isLiveContent: () =>
+          _live || (_ready && _duration <= Duration.zero && _playing),
       hasVideoSource: () => hasVideoSourceHint,
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
