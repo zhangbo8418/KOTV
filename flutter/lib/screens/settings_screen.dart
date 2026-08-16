@@ -284,9 +284,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _ellipsize(String s, [int n = 28]) => s.length <= n ? s : '${s.substring(0, n)}…';
 
   String get _adMode {
-    final on = g('adFilter', 'true');
+    final on = g('adFilter', 'false');
     final cfg = g('m3u8FilterConfig');
-    final enabled = on.isEmpty || on == 'true' || on == '1' || on == 'on';
+    final enabled = on == 'true' || on == '1' || on == 'on';
     if (!enabled) return 'off';
     if (cfg.contains('"violentFilterModeFlag":true')) return 'violent';
     return 'on';

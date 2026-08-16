@@ -53,18 +53,34 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 
 	content = absolutizeURIs(content, base)
 	content = absolutizeTagURIs(content, base)
+	origSegs := countSegments(content)
+	origDur := sumExtinfSeconds(content)
 	cfg := DefaultConfig()
 	if raw := settings.GetM3U8FilterConfigJSON(); raw != "" {
 		_ = jsonUnmarshal(raw, &cfg)
 	}
 	filtered := NewFilter(cfg).Process(content)
 	filtered = stripNonVideoSegments(filtered)
-	filtered = keepDominantSegmentGroup(filtered)
+	// VOD（带 ENDLIST）勿按目录「多数派」砍片：广告与正片常分目录，误留广告只剩几十秒。
+	if !strings.Contains(strings.ToUpper(filtered), "#EXT-X-ENDLIST") {
+		filtered = keepDominantSegmentGroup(filtered)
+	}
 	filtered = convertRelativeTsToAbsolute(filtered, base)
 	filtered = absolutizeTagURIs(filtered, base)
 
 	segments := countSegments(filtered)
 	if segments < 2 {
+		return rawURL, nil
+	}
+	// 过滤过猛：片长/分片骤降 → 回退原址（与 TV 直连行为一致）。
+	filtDur := sumExtinfSeconds(filtered)
+	if origSegs >= 8 && segments*5 < origSegs*2 {
+		return rawURL, nil
+	}
+	if origDur >= 180 && filtDur > 0 && filtDur < 90 {
+		return rawURL, nil
+	}
+	if origDur >= 120 && filtDur > 0 && filtDur*2 < origDur {
 		return rawURL, nil
 	}
 
@@ -201,6 +217,26 @@ func countSegments(content string) int {
 		n++
 	}
 	return n
+}
+
+func sumExtinfSeconds(content string) float64 {
+	var total float64
+	for _, line := range strings.Split(content, "\n") {
+		trim := strings.TrimSpace(line)
+		if !strings.HasPrefix(trim, "#EXTINF:") {
+			continue
+		}
+		rest := strings.TrimPrefix(trim, "#EXTINF:")
+		if i := strings.IndexByte(rest, ','); i >= 0 {
+			rest = rest[:i]
+		}
+		rest = strings.TrimSpace(rest)
+		var sec float64
+		if _, err := fmt.Sscanf(rest, "%f", &sec); err == nil && sec > 0 {
+			total += sec
+		}
+	}
+	return total
 }
 
 func keepDominantSegmentGroup(content string) string {
