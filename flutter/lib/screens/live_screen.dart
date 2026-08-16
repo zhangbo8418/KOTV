@@ -1326,11 +1326,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                             var groupW = (land ? 112.0 : 136.0) * wScale;
                             var channelW = (land ? 248.0 : 280.0) * wScale;
                             var epgW = (land ? 200.0 : 260.0) * wScale;
+                            var epgTabW = land ? 28.0 : 32.0;
                             final padH = (land ? 6.0 : 8.0) * 2;
                             final gap1 = land ? 4.0 : 6.0;
+                            final gapTab = land ? 4.0 : 6.0;
                             final gap2 = land ? 6.0 : 6.0;
-                            final contentW =
-                                groupW + gap1 + channelW + (_epgOpen ? gap2 + epgW : 0);
+                            final contentW = groupW +
+                                gap1 +
+                                channelW +
+                                gapTab +
+                                epgTabW +
+                                (_epgOpen ? gap2 + epgW : 0);
                             final leftW = contentW + padH;
                             final pillH = land ? 30.0 : 36.0;
                             final chH = land ? 36.0 : 48.0;
@@ -1346,6 +1352,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                               groupW *= scale;
                               channelW *= scale;
                               epgW *= scale;
+                              epgTabW *= scale;
                             }
                             return SizedBox(
                             width: panelW,
@@ -1380,25 +1387,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   SizedBox(width: gap1),
                                   SizedBox(
                                     width: channelW,
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                                      children: [
-                                        AppPill(
-                                          label: _epgOpen ? '收起节目单' : '节目单',
-                                          height: pillH,
-                                          fontSize: font,
-                                          selected: _epgOpen,
-                                          onTap: () {
-                                            _cancelHideOverlays();
-                                            setState(() => _epgOpen = !_epgOpen);
-                                            if (_epgOpen && _programs.isEmpty && _chIdx >= 0) {
-                                              unawaited(_loadEpg());
-                                            }
-                                          },
-                                        ),
-                                        SizedBox(height: land ? 4 : 6),
-                                        Expanded(
-                                          child: ListView.builder(
+                                    child: ListView.builder(
                                       itemCount: _channels.length,
                                       itemBuilder: (_, i) {
                                         final ch = _channels[i];
@@ -1455,9 +1444,36 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                           ),
                                         );
                                       },
+                                    ),
+                                  ),
+                                  SizedBox(width: gapTab),
+                                  SizedBox(
+                                    width: epgTabW,
+                                    child: Material(
+                                      color: _epgOpen ? const Color(0x40C73C62) : const Color(0x3318161E),
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(8),
+                                        onTap: () {
+                                          _cancelHideOverlays();
+                                          setState(() => _epgOpen = !_epgOpen);
+                                          if (_epgOpen && _programs.isEmpty && _chIdx >= 0) {
+                                            unawaited(_loadEpg());
+                                          }
+                                        },
+                                        child: Center(
+                                          child: Text(
+                                            (_epgOpen ? '收起' : '节目单').split('').join('\n'),
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(_epgOpen ? 1 : 0.85),
+                                              fontSize: land ? 11 : 12,
+                                              height: 1.25,
+                                              fontWeight: FontWeight.w600,
+                                            ),
                                           ),
                                         ),
-                                      ],
+                                      ),
                                     ),
                                   ),
                                   if (_epgOpen) ...[
