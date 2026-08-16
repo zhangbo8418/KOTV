@@ -13,6 +13,7 @@ import 'api/kotv_engine_url.dart';
 import 'engine/engine_launcher.dart';
 import 'player/buffer_budget.dart';
 import 'player/fvp_register.dart';
+import 'player/kotv_playback.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
 import 'theme/layout_scale.dart';
@@ -241,6 +242,10 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
   void onWindowClose() async {
     _saveBoundsTimer?.cancel();
     await _persistWindowBounds();
+    // 先停页面内 libmpv，再关引擎/销毁窗口，避免 mpv core 与 FlutterEngine 竞态崩溃。
+    try {
+      await kotvRunQuitHooks();
+    } catch (_) {}
     // 先优雅停引擎（HTTP shutdown → 杀 Java/Python）；超时再杀进程树。
     // Windows 仍避免 window_manager.destroy（Win7 易 WER），最后 exit。
     try {

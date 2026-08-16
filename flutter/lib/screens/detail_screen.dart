@@ -316,7 +316,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   void initState() {
     super.initState();
     _active = this;
+    kotvRegisterQuitHook(_prepareQuit);
     _load();
+  }
+
+  Future<void> _prepareQuit() async {
+    try {
+      await _stopHard();
+    } catch (_) {}
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
+    try {
+      _mk?.dispose();
+    } catch (_) {}
+    _mk = null;
+    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
@@ -497,6 +511,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   @override
   void dispose() {
+    kotvUnregisterQuitHook(_prepareQuit);
     if (_active == this) _active = null;
     // 离开详情：回传扫码取消并打断 JAR；不要再 nav.pop（本页正在出栈）。
     final api = ref.read(apiProvider);

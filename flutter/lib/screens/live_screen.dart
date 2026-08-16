@@ -211,11 +211,27 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   void initState() {
     super.initState();
     liveScreenHandleBack = _handleLiveBack;
+    kotvRegisterQuitHook(_prepareQuit);
     _bootstrap();
+  }
+
+  /// 关窗前硬停：先停各后端，再 await 释放 libmpv，避免与 FlutterEngine 销毁竞态。
+  Future<void> _prepareQuit() async {
+    try {
+      await _stopAllBackends();
+    } catch (_) {}
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
+    try {
+      _mk?.dispose();
+    } catch (_) {}
+    _mk = null;
+    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   @override
   void dispose() {
+    kotvUnregisterQuitHook(_prepareQuit);
     liveScreenHandleBack = null;
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
@@ -661,6 +677,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _status = '解析中…';
       _title = '${ch['name'] ?? ''}';
       _leftOpen = true;
+      _epgOpen = false;
       _catchup = false;
       _catchupChrome = false;
     });
@@ -718,6 +735,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _catchupChrome = true;
         _leftOpen = false;
         _rightOpen = false;
+        _epgOpen = false;
       });
       _pulseCatchupChrome();
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: _title, url: url);
@@ -1011,6 +1029,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         setState(() {
           _leftOpen = false;
           _rightOpen = false;
+          _epgOpen = false;
           _chromeVisible = false;
         });
       }
@@ -1021,6 +1040,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     setState(() {
       _leftOpen = true;
       _rightOpen = false;
+      _epgOpen = false;
       _chromeVisible = false;
       _cancelHideOverlays();
     });
@@ -1038,8 +1058,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _leftOpen = !_leftOpen;
         if (_leftOpen) {
           _rightOpen = false;
+          _epgOpen = false;
           _chromeVisible = false;
           _cancelHideOverlays();
+        } else {
+          _epgOpen = false;
         }
       });
 

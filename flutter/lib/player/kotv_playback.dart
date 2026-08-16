@@ -116,6 +116,31 @@ class KotvTrack {
   final String label;
 }
 
+/// 桌面端关窗前注册：先硬停页面内 MPV/播放器，再销毁 FlutterEngine，
+/// 避免 `*/mpv core` 与 `shutDownEngine` 竞态 SIGSEGV。
+typedef KotvQuitHook = Future<void> Function();
+
+final List<KotvQuitHook> _kotvQuitHooks = <KotvQuitHook>[];
+
+void kotvRegisterQuitHook(KotvQuitHook hook) {
+  if (!_kotvQuitHooks.contains(hook)) {
+    _kotvQuitHooks.add(hook);
+  }
+}
+
+void kotvUnregisterQuitHook(KotvQuitHook hook) {
+  _kotvQuitHooks.remove(hook);
+}
+
+Future<void> kotvRunQuitHooks() async {
+  final hooks = List<KotvQuitHook>.of(_kotvQuitHooks);
+  await Future.wait<void>(hooks.map((h) async {
+    try {
+      await h().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+  }));
+}
+
 /// 安全释放 libmpv [Player]：先停播、给事件线程留出排空时间，再 dispose。
 ///
 /// 直接 `stop()`（不 await）后立刻 `dispose()`，libmpv 的 wakeup 回调会打在
