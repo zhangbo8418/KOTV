@@ -24,8 +24,10 @@ class LiveCatchupChrome extends StatelessWidget {
     this.onDecode,
     this.playerLabel = '',
     this.decodeLabel = '自动',
-    /// 竖屏传 false：一键进沉浸全屏，不弹「铺满窗口」。
+    /// 竖屏/直播传 false：一键进沉浸全屏，不弹「铺满窗口」。
     this.offerFullscreenChoice,
+    /// 已在真全屏时显示退出图标（回看底栏用）。
+    this.fullscreenActive = false,
   });
 
   final KotvPlayback player;
@@ -40,6 +42,7 @@ class LiveCatchupChrome extends StatelessWidget {
   final String playerLabel;
   final String decodeLabel;
   final bool? offerFullscreenChoice;
+  final bool fullscreenActive;
 
   @override
   Widget build(BuildContext context) {
@@ -82,12 +85,20 @@ class LiveCatchupChrome extends StatelessWidget {
                         onTap: onMini!,
                       ),
                     if (onExpand != null && !miniActive)
-                      KotvFullscreenExpandButton(
-                        size: iconSize,
-                        iconSize: iconSize <= 32 ? 16 : 22,
-                        offerDisplayChoice: offerFullscreenChoice,
-                        onSelect: onExpand!,
-                      ),
+                      (offerFullscreenChoice == false)
+                          ? _act(
+                              icon: fullscreenActive ? Icons.fullscreen_exit : Icons.fullscreen,
+                              tip: fullscreenActive ? '退出全屏' : '全屏',
+                              compact: compact,
+                              size: iconSize,
+                              onTap: () => onExpand!(KotvDesktopFullscreenKind.display),
+                            )
+                          : KotvFullscreenExpandButton(
+                              size: iconSize,
+                              iconSize: iconSize <= 32 ? 16 : 22,
+                              offerDisplayChoice: offerFullscreenChoice,
+                              onSelect: onExpand!,
+                            ),
                     if (!compact && onPlayer != null)
                       _textAct(resolvedPlayerLabel, onPlayer!),
                     if (!compact && onDecode != null)

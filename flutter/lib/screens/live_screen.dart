@@ -179,6 +179,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   int _lines = 1;
   bool _leftOpen = true;
   bool _rightOpen = false;
+  /// 横屏左侧节目单列；默认收起，避免挡画面 / 撑破面板。
+  bool _epgOpen = false;
   /// 返回 / 底栏：点屏幕中间显隐；与左右菜单互斥，不一起出现。
   bool _chromeVisible = false;
   bool _catchup = false;
@@ -873,6 +875,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     await _enterLiveFullscreen(kind);
   }
 
+  Future<void> _toggleLiveFullscreen() async {
+    if (_immersive) {
+      await _exitImmersive();
+    } else {
+      await _enterLiveFullscreenPreferred();
+    }
+  }
+
   Future<void> _enterLiveFullscreen([KotvDesktopFullscreenKind desktopFs = KotvDesktopFullscreenKind.window]) async {
     if (_playUrl.isEmpty) {
       if (mounted) {
@@ -1067,11 +1077,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   /// 双击：未真全屏则占满屏幕；已真全屏则缩回铺满窗口。
   void _onLiveDoubleTap() {
     if (_playUrl.isEmpty) return;
-    if (_immersive) {
-      unawaited(_exitImmersive());
-    } else {
-      unawaited(_enterLiveFullscreenPreferred());
-    }
+    unawaited(_toggleLiveFullscreen());
   }
 
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
@@ -1317,10 +1323,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                             final wScale = land
                                 ? 1.0
                                 : (screenW / LayoutScale.designW).clamp(1.0, 1.55);
-                            final groupW = (land ? 112.0 : 136.0) * wScale;
-                            final channelW = (land ? 248.0 : 280.0) * wScale;
-                            final epgW = (land ? 200.0 : 260.0) * wScale;
-                            final leftW = groupW + channelW + epgW + (land ? 28.0 : 36.0);
+                            var groupW = (land ? 112.0 : 136.0) * wScale;
+                            var channelW = (land ? 248.0 : 280.0) * wScale;
+                            var epgW = (land ? 200.0 : 260.0) * wScale;
+                            final padH = (land ? 6.0 : 8.0) * 2;
+                            final gap1 = land ? 4.0 : 6.0;
+                            final gap2 = land ? 6.0 : 6.0;
+                            final contentW =
+                                groupW + gap1 + channelW + (_epgOpen ? gap2 + epgW : 0);
+                            final leftW = contentW + padH;
                             final pillH = land ? 30.0 : 36.0;
                             final chH = land ? 36.0 : 48.0;
                             final font = land ? 12.0 : (13.0 * wScale.clamp(1.0, 1.25));
@@ -1329,8 +1340,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                             // 桌面全屏最多约占半屏，避免挡完画面；窄屏仍可到 92%
                             final maxFrac = (_immersive && !land) ? 0.52 : 0.92;
                             final panelW = leftW.clamp(0.0, screenW * maxFrac);
+                            final innerMax = (panelW - padH).clamp(1.0, panelW);
+                            if (contentW > innerMax) {
+                              final scale = innerMax / contentW;
+                              groupW *= scale;
+                              channelW *= scale;
+                              epgW *= scale;
+                            }
                             return SizedBox(
                             width: panelW,
+                            child: ClipRect(
                             child: Padding(
                               padding: EdgeInsets.fromLTRB(land ? 6 : 8, land ? 8 : 10, land ? 6 : 8, land ? 8 : 10),
                               child: Row(
@@ -1358,10 +1377,28 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                       },
                                     ),
                                   ),
-                                  SizedBox(width: land ? 4 : 6),
+                                  SizedBox(width: gap1),
                                   SizedBox(
                                     width: channelW,
-                                    child: ListView.builder(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        AppPill(
+                                          label: _epgOpen ? '收起节目单' : '节目单',
+                                          height: pillH,
+                                          fontSize: font,
+                                          selected: _epgOpen,
+                                          onTap: () {
+                                            _cancelHideOverlays();
+                                            setState(() => _epgOpen = !_epgOpen);
+                                            if (_epgOpen && _programs.isEmpty && _chIdx >= 0) {
+                                              unawaited(_loadEpg());
+                                            }
+                                          },
+                                        ),
+                                        SizedBox(height: land ? 4 : 6),
+                                        Expanded(
+                                          child: ListView.builder(
                                       itemCount: _channels.length,
                                       itemBuilder: (_, i) {
                                         final ch = _channels[i];
@@ -1418,9 +1455,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                           ),
                                         );
                                       },
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  SizedBox(width: land ? 6 : 6),
+                                  if (_epgOpen) ...[
+                                  SizedBox(width: gap2),
                                   SizedBox(
                                     width: epgW,
                                     child: Column(
@@ -1543,8 +1584,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                       ],
                                     ),
                                   ),
+                                  ],
                                 ],
                               ),
+                            ),
                             ),
                           );
                           }),
@@ -1623,13 +1666,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                 AppPill(
                                   label: _immersive ? '退出全屏' : '全屏观看',
                                   height: 40,
-                                  onTap: () {
-                                    if (_immersive) {
-                                      unawaited(_exitImmersive());
-                                    } else {
-                                      unawaited(_enterLiveFullscreenPreferred());
-                                    }
-                                  },
+                                  onTap: () => unawaited(_toggleLiveFullscreen()),
                                 ),
                                 const SizedBox(height: 8),
                                 if (kotvCanSwitchPlayer(live: true)) ...[
@@ -1740,29 +1777,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                 Text(_lineLabel, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13)),
                                 const SizedBox(width: 8),
                               ],
-                              if (_immersive)
-                                Tooltip(
-                                  message: '退出全屏',
+                              Tooltip(
+                                  message: _immersive ? '退出全屏' : '全屏',
                                   child: InkWell(
-                                    onTap: () => unawaited(_exitImmersive()),
+                                    onTap: () => unawaited(_toggleLiveFullscreen()),
                                     borderRadius: BorderRadius.circular(8),
-                                    child: const SizedBox(
+                                    child: SizedBox(
                                       width: 40,
                                       height: 40,
-                                      child: Icon(Icons.fullscreen_exit, color: Colors.white, size: 22),
-                                    ),
-                                  ),
-                                )
-                              else
-                                Tooltip(
-                                  message: '全屏',
-                                  child: InkWell(
-                                    onTap: () => unawaited(_enterLiveFullscreenPreferred()),
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: const SizedBox(
-                                      width: 40,
-                                      height: 40,
-                                      child: Icon(Icons.fullscreen, color: Colors.white, size: 22),
+                                      child: Icon(
+                                        _immersive ? Icons.fullscreen_exit : Icons.fullscreen,
+                                        color: Colors.white,
+                                        size: 22,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1784,9 +1811,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           playerLabel: flutterPlayerLabel(_playerVal),
                           decodeLabel: _decodeLabel,
                           offerFullscreenChoice: false,
+                          fullscreenActive: _immersive,
                           onCast: () => unawaited(_cast()),
                           onMini: () => unawaited(_enterMini()),
-                          onExpand: (_) => unawaited(_enterLiveFullscreenPreferred()),
+                          onExpand: (_) => unawaited(_toggleLiveFullscreen()),
                           onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
                           onDecode: () => unawaited(_pickDecode()),
                         ),
@@ -1856,6 +1884,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                       playerLabel: flutterPlayerLabel(_playerVal),
                       decodeLabel: _decodeLabel,
                       offerFullscreenChoice: false,
+                      fullscreenActive: _immersive,
                       onCast: () {
                         _pulsePortraitChrome();
                         unawaited(_cast());
@@ -1866,7 +1895,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                       },
                       onExpand: (_) {
                         _pulsePortraitChrome();
-                        unawaited(_enterLiveFullscreenPreferred());
+                        unawaited(_toggleLiveFullscreen());
                       },
                       onPlayer: kotvCanSwitchPlayer(live: true)
                           ? () {
