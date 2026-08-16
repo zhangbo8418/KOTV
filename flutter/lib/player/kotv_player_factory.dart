@@ -1,20 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'art_playback.dart';
 import 'exo_playback.dart';
 import 'fvp_playback.dart';
 import 'html_playback.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
-import 'vp_playback.dart';
+import 'xg_playback.dart';
+import 'zw_playback.dart';
 
 /// 根据播放器 ID 创建页内后端（不负责复用；由页面缓存实例）。
 KotvPlayback createKotvPlayback(String playerVal) {
   switch (kotvEmbedBackend(playerVal)) {
     case KotvEmbedBackend.html:
       return HtmlPlayback();
-    case KotvEmbedBackend.vp:
-      return VpPlayback();
+    case KotvEmbedBackend.art:
+      return ArtPlayback();
+    case KotvEmbedBackend.xg:
+      return XgPlayback();
+    case KotvEmbedBackend.zw:
+      return ZwPlayback();
     case KotvEmbedBackend.fvp:
       return FvpPlayback();
     case KotvEmbedBackend.exo:
@@ -35,8 +41,14 @@ Widget kotvPlaybackView({
     case KotvEmbedBackend.html:
       if (playback is HtmlPlayback) return playback.buildView(fit: fit);
       return const ColoredBox(color: Colors.black);
-    case KotvEmbedBackend.vp:
-      if (playback is VpPlayback) return playback.buildView(fit: fit);
+    case KotvEmbedBackend.art:
+      if (playback is ArtPlayback) return playback.buildView(fit: fit);
+      return const ColoredBox(color: Colors.black);
+    case KotvEmbedBackend.xg:
+      if (playback is XgPlayback) return playback.buildView(fit: fit);
+      return const ColoredBox(color: Colors.black);
+    case KotvEmbedBackend.zw:
+      if (playback is ZwPlayback) return playback.buildView(fit: fit);
       return const ColoredBox(color: Colors.black);
     case KotvEmbedBackend.fvp:
       if (playback is FvpPlayback) return playback.buildView(fit: fit);

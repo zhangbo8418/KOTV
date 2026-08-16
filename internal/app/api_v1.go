@@ -1527,7 +1527,7 @@ func (a *App) APIPlayerControl(cmd string, value float64, mode string) error {
 	return nil
 }
 
-// APIPlayerExternal 用外部播放器打开 URL；playerVal 如 outie#mpv / outie#iina。
+// APIPlayerExternal 用外部播放器打开 URL；playerVal 如 outie#vlc / outie#mpv / outie#iina。
 func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	playURL = strings.TrimSpace(playURL)
 	if playURL == "" {
@@ -1537,7 +1537,7 @@ func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	if playerVal == "" {
 		playerVal = settings.Get(settings.Player)
 	}
-	if playerVal == "" || playerVal == "outie#vlc" {
+	if playerVal == "" {
 		playerVal = "outie#mpv"
 	}
 	parts := strings.SplitN(playerVal, "#", 2)
@@ -1545,10 +1545,6 @@ func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	name := "mpv"
 	if len(parts) > 1 && parts[1] != "" {
 		name = strings.ToLower(parts[1])
-	}
-	if name == "vlc" {
-		name = "mpv"
-		playerVal = "outie#mpv"
 	}
 	if mode == "innie" {
 		return fmt.Errorf("内置播放器请在页内播放")

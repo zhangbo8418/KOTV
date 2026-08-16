@@ -123,9 +123,9 @@ func clampPlayerKeysForPlatform(vals map[string]string, platform string) {
 			"innie#mpv", "innie#fvp", "innie#html")
 	case "web":
 		vals[string(Player)] = clampListedPlayer(vals[string(Player)], "innie#html",
-			"innie#html", "innie#vp")
+			"innie#html", "innie#art", "innie#xg", "innie#zw")
 		vals[string(PlayerLive)] = clampListedPlayer(vals[string(PlayerLive)], "innie#html",
-			"innie#html", "innie#vp")
+			"innie#html", "innie#art", "innie#xg", "innie#zw")
 	}
 }
 

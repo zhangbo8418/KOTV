@@ -27,9 +27,20 @@
 
   <title>KO影视</title>
   <link rel="manifest" href="manifest.json">
-  <!-- 本地 vendor：Chrome/Firefox 播 m3u8；Safari 走原生 HLS -->
+  <!-- 本地 vendor：HLS + ArtPlayer / xgplayer / ZWPlayer（不走外网 CDN） -->
+  <link rel="stylesheet" href="vendor/xgplayer.min.css">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <script src="vendor/hls.min.js"></script>
+  <script src="vendor/artplayer.js"></script>
+  <script src="vendor/xgplayer.min.js"></script>
+  <script src="vendor/xgplayer-hls.min.js"></script>
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script>window._zwpLeafletLoaded = true;</script>
+  <script src="vendor/zwplayer.js"></script>
   <script src="kotv_hls.js"></script>
+  <script src="kotv_art.js"></script>
+  <script src="kotv_xg.js"></script>
+  <script src="kotv_zw.js"></script>
 </head>
 <body>
   <!--

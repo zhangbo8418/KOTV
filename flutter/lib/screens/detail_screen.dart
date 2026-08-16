@@ -12,6 +12,9 @@ import '../player/danmaku_layer.dart';
 import '../player/exo_playback.dart';
 import '../player/fvp_playback.dart';
 import '../player/html_playback.dart';
+import '../player/art_playback.dart';
+import '../player/xg_playback.dart';
+import '../player/zw_playback.dart';
 import '../player/buffer_budget.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
@@ -20,7 +23,6 @@ import '../player/kotv_player_factory.dart';
 import '../player/mpv_opts.dart';
 import '../player/play_headers.dart';
 import '../player/playback_failover.dart';
-import '../player/vp_playback.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
@@ -107,7 +109,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   ExoPlayback? _exo;
   FvpPlayback? _fvp;
   HtmlPlayback? _html;
-  VpPlayback? _vp;
+  ArtPlayback? _art;
+  XgPlayback? _xg;
+  ZwPlayback? _zw;
   StreamSubscription? _playingSub;
   StreamSubscription? _endedSub;
   StreamSubscription<Duration>? _posSub;
@@ -135,8 +139,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     switch (_backend) {
       case KotvEmbedBackend.html:
         return _html ??= HtmlPlayback();
-      case KotvEmbedBackend.vp:
-        return _vp ??= VpPlayback();
+      case KotvEmbedBackend.art:
+        return _art ??= ArtPlayback();
+      case KotvEmbedBackend.xg:
+        return _xg ??= XgPlayback();
+      case KotvEmbedBackend.zw:
+        return _zw ??= ZwPlayback();
       case KotvEmbedBackend.fvp:
         return _fvp ??= FvpPlayback();
       case KotvEmbedBackend.exo:
@@ -245,9 +253,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await _html?.stop();
       } catch (_) {}
     }
-    if (keep != KotvEmbedBackend.vp) {
+    if (keep != KotvEmbedBackend.art) {
       try {
-        await _vp?.stop();
+        await _art?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.xg) {
+      try {
+        await _xg?.stop();
+      } catch (_) {}
+    }
+    if (keep != KotvEmbedBackend.zw) {
+      try {
+        await _zw?.stop();
       } catch (_) {}
     }
   }
@@ -277,7 +295,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }(),
       () async {
         try {
-          await _vp?.stop();
+          await _art?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _xg?.stop();
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          await _zw?.stop();
         } catch (_) {}
       }(),
     ]);
@@ -327,7 +355,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       hardStop(_mk),
       hardStop(_exo),
       hardStop(_html),
-      hardStop(_vp),
+      hardStop(_art),
+      hardStop(_xg),
+      hardStop(_zw),
     ]);
     _stoppedHard = true;
   }
@@ -487,13 +517,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       unawaited(_fvp?.stop() ?? Future<void>.value());
       unawaited(_exo?.stop() ?? Future<void>.value());
       unawaited(_html?.stop() ?? Future<void>.value());
-      unawaited(_vp?.stop() ?? Future<void>.value());
+      unawaited(_art?.stop() ?? Future<void>.value());
+      unawaited(_xg?.stop() ?? Future<void>.value());
+      unawaited(_zw?.stop() ?? Future<void>.value());
     }
     _fvp?.dispose();
     _mk?.dispose();
     _exo?.dispose();
     _html?.dispose();
-    _vp?.dispose();
+    _art?.dispose();
+    _xg?.dispose();
+    _zw?.dispose();
     final mkPlayer = _mkPlayer;
     _mkPlayer = null;
     unawaited(kotvDisposeMpvPlayer(mkPlayer));

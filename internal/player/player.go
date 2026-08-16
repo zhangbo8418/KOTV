@@ -98,9 +98,6 @@ func Play(url string, histKey string) error {
 		return nil
 	}
 
-	if name == "vlc" {
-		name = "mpv"
-	}
 	if mode == "innie" && name == "mpv" {
 		if !embed.HasSink() {
 			return fmt.Errorf("页内播放器未就绪：请在详情/直播页播放")

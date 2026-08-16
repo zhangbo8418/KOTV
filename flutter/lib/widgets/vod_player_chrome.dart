@@ -805,7 +805,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final opts = <(String label, String val, String key)>[
       if (kIsWeb) ...[
         ('浏览器播放（HTML5）', 'innie#html', 'embed_html'),
-        ('video_player', 'innie#vp', 'embed_vp'),
+        ('ArtPlayer', 'innie#art', 'embed_art'),
+        ('西瓜播放器（xgplayer）', 'innie#xg', 'embed_xg'),
+        ('全能播放器（ZWPlayer）', 'innie#zw', 'embed_zw'),
       ] else if (kotvIsAndroid()) ...[
         ('内置 ExoPlayer', 'innie#exo', 'embed_exo'),
         ('内置 MPV', 'innie#mpv', 'embed_mpv'),
@@ -824,12 +826,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     ];
 
     bool listed(String key) {
-      // Flutter 内置 MPV/FVP/Exo/HTML/video_player 不依赖引擎 runtime。
+      // Flutter 内置 MPV/FVP/Exo/HTML/JS 播放器不依赖引擎 runtime。
       if (key == 'embed_mpv' ||
           key == 'embed_exo' ||
           key == 'embed_fvp' ||
           key == 'embed_html' ||
-          key == 'embed_vp') {
+          key == 'embed_art' ||
+          key == 'embed_xg' ||
+          key == 'embed_zw') {
         return true;
       }
       return avail[key] == true;

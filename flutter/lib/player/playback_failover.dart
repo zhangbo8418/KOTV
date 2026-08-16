@@ -114,7 +114,7 @@ class KotvPlaybackFailover {
   /// 平台内置播放器环（不含 outie）。
   static List<String> innieRing() {
     if (kIsWeb) {
-      return const ['innie#html', 'innie#vp'];
+      return const ['innie#html', 'innie#art', 'innie#xg', 'innie#zw'];
     }
     if (kotvIsAndroid()) {
       return const ['innie#exo', 'innie#mpv', 'innie#fvp'];
@@ -135,8 +135,12 @@ class KotvPlaybackFailover {
         return '内置 FVP';
       case 'innie#html':
         return '浏览器 HTML5';
-      case 'innie#vp':
-        return 'video_player';
+      case 'innie#art':
+        return 'ArtPlayer';
+      case 'innie#xg':
+        return 'xgplayer';
+      case 'innie#zw':
+        return 'ZWPlayer';
       default:
         return playerVal;
     }

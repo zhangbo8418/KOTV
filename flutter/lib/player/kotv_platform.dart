@@ -55,14 +55,18 @@ String kotvClampPlayerVal(String raw, {required bool live}) {
 bool kotvCanSwitchPlayer({required bool live}) =>
     (live ? kotvLivePlayerOptions() : kotvVodPlayerOptions()).length > 1;
 
-enum KotvEmbedBackend { mpv, fvp, exo, html, vp }
+enum KotvEmbedBackend { mpv, fvp, exo, html, art, xg, zw }
 
 KotvEmbedBackend kotvEmbedBackend(String playerVal) {
   switch (playerVal.trim()) {
     case 'innie#html':
       return KotvEmbedBackend.html;
-    case 'innie#vp':
-      return KotvEmbedBackend.vp;
+    case 'innie#art':
+      return KotvEmbedBackend.art;
+    case 'innie#xg':
+      return KotvEmbedBackend.xg;
+    case 'innie#zw':
+      return KotvEmbedBackend.zw;
     case 'innie#fvp':
       return KotvEmbedBackend.fvp;
     case 'innie#exo':
@@ -79,7 +83,9 @@ List<(String, String)> kotvVodPlayerOptions() {
   if (kIsWeb) {
     return const [
       ('浏览器播放（HTML5）（默认）', 'innie#html'),
-      ('video_player', 'innie#vp'),
+      ('ArtPlayer', 'innie#art'),
+      ('西瓜播放器（xgplayer）', 'innie#xg'),
+      ('全能播放器（ZWPlayer）', 'innie#zw'),
     ];
   }
   if (kotvIsAndroid()) {
@@ -109,7 +115,9 @@ List<(String, String)> kotvLivePlayerOptions() {
   if (kIsWeb) {
     return const [
       ('浏览器播放（HTML5）（默认）', 'innie#html'),
-      ('video_player', 'innie#vp'),
+      ('ArtPlayer', 'innie#art'),
+      ('西瓜播放器（xgplayer）', 'innie#xg'),
+      ('全能播放器（ZWPlayer）', 'innie#zw'),
     ];
   }
   if (kotvIsAndroid()) {

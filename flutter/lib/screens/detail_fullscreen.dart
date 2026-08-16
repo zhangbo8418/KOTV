@@ -10,9 +10,11 @@ import '../player/exo_playback.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/fvp_playback.dart';
 import '../player/html_playback.dart';
+import '../player/art_playback.dart';
+import '../player/xg_playback.dart';
+import '../player/zw_playback.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
-import '../player/vp_playback.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
 
@@ -457,7 +459,11 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
       video = pb.buildView(fit: _aspect.fit);
     } else if (pb is HtmlPlayback) {
       video = pb.buildView(fit: _aspect.fit);
-    } else if (pb is VpPlayback) {
+    } else if (pb is ArtPlayback) {
+      video = pb.buildView(fit: _aspect.fit);
+    } else if (pb is XgPlayback) {
+      video = pb.buildView(fit: _aspect.fit);
+    } else if (pb is ZwPlayback) {
       video = pb.buildView(fit: _aspect.fit);
     } else {
       video = const ColoredBox(color: Colors.black);

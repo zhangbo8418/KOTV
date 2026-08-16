@@ -191,8 +191,12 @@ String flutterPlayerLabel(String val) {
   switch (v) {
     case 'innie#html':
       return '浏览器 HTML5';
-    case 'innie#vp':
-      return 'video_player';
+    case 'innie#art':
+      return 'ArtPlayer';
+    case 'innie#xg':
+      return 'xgplayer';
+    case 'innie#zw':
+      return 'ZWPlayer';
     case 'innie#mpv':
       return '内置 MPV';
     case 'innie#exo':
