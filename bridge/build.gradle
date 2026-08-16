@@ -7,6 +7,9 @@ group = "com.bobo.kotv"
 version = "1.0.0"
 
 repositories {
+    // 优先镜像：避免 CI 打 Maven Central 触发 429 Too Many Requests
+    maven { url = uri("https://maven.aliyun.com/repository/public") }
+    maven { url = uri("https://repo.huaweicloud.com/repository/maven/") }
     mavenCentral()
     maven { url = uri("https://jitpack.io") }
 }
