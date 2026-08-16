@@ -37,6 +37,18 @@ class HtmlPlayback extends KotvPlayback {
       ..setProperty('object-fit', 'contain')
       ..setProperty('background', '#000');
     ui_web.platformViewRegistry.registerViewFactory(_viewType, (int _) => _video);
+    _pipEnterListener = ((web.Event _) {
+      _pipActive = true;
+      onPictureInPictureChanged?.call(true);
+      notifyListeners();
+    }).toJS;
+    _pipLeaveListener = ((web.Event _) {
+      _pipActive = false;
+      onPictureInPictureChanged?.call(false);
+      notifyListeners();
+    }).toJS;
+    _video.addEventListener('enterpictureinpicture', _pipEnterListener!);
+    _video.addEventListener('leavepictureinpicture', _pipLeaveListener!);
   }
 
   late final String _viewType;
@@ -55,6 +67,9 @@ class HtmlPlayback extends KotvPlayback {
   int _width = 0;
   int _height = 0;
   String _engine = 'HTML5';
+  bool _pipActive = false;
+  web.EventListener? _pipEnterListener;
+  web.EventListener? _pipLeaveListener;
 
   @override
   bool get playing => !_video.paused && !_video.ended;
@@ -98,6 +113,42 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   String get engineLabel => _engine;
+
+  @override
+  bool get supportsPictureInPicture => web.document.pictureInPictureEnabled;
+
+  @override
+  bool get pictureInPictureActive => _pipActive;
+
+  @override
+  Future<bool> enterPictureInPicture() async {
+    if (!supportsPictureInPicture) return false;
+    try {
+      if (web.document.pictureInPictureElement == _video) {
+        _pipActive = true;
+        return true;
+      }
+      await _video.requestPictureInPicture().toDart;
+      _pipActive = true;
+      onPictureInPictureChanged?.call(true);
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> exitPictureInPicture() async {
+    try {
+      if (web.document.pictureInPictureElement != null) {
+        await web.document.exitPictureInPicture().toDart;
+      }
+    } catch (_) {}
+    _pipActive = false;
+    onPictureInPictureChanged?.call(false);
+    notifyListeners();
+  }
 
   @override
   Stream<Duration> get positionStream => _posCtrl.stream;
@@ -322,6 +373,9 @@ class HtmlPlayback extends KotvPlayback {
     _width = 0;
     _height = 0;
     try {
+      await exitPictureInPicture();
+    } catch (_) {}
+    try {
       _kotvHls.destroy(_video);
     } catch (_) {
       _video.removeAttribute('src');
@@ -369,6 +423,12 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   void dispose() {
+    if (_pipEnterListener != null) {
+      _video.removeEventListener('enterpictureinpicture', _pipEnterListener!);
+    }
+    if (_pipLeaveListener != null) {
+      _video.removeEventListener('leavepictureinpicture', _pipLeaveListener!);
+    }
     unawaited(stop());
     _posCtrl.close();
     _bufCtrl.close();

@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../util/kotv_io.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -244,18 +245,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     super.dispose();
   }
 
-  /// 返回：沉浸全屏 → 关侧栏/控件 → 未消费（交给外壳双返退桌面）。
+  /// 返回：沉浸全屏 → 退出回看 → 关侧栏/控件 → 未消费（交给外壳双返退桌面）。
   bool _handleLiveBack() {
     if (_immersive) {
       unawaited(_exitImmersive());
       return true;
     }
-    if (_leftOpen || _rightOpen || _chromeVisible) {
+    if (_catchup) {
+      unawaited(_exitCatchup());
+      return true;
+    }
+    if (_leftOpen || _rightOpen || _chromeVisible || _catchupChrome) {
       setState(() {
         _leftOpen = false;
         _rightOpen = false;
         _chromeVisible = false;
+        _catchupChrome = false;
       });
+      _catchupHideTimer?.cancel();
       return true;
     }
     return false;
@@ -727,6 +734,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     });
   }
 
+  /// 退出回看，回到当前频道直播。
+  Future<void> _exitCatchup() async {
+    if (!_catchup) return;
+    _catchupHideTimer?.cancel();
+    if (_chIdx >= 0) {
+      await _playChannel(_chIdx, line: _line);
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _catchup = false;
+      _catchupChrome = false;
+    });
+  }
+
   void _toggleCatchupChrome() {
     if (!_catchup) return;
     if (_catchupChrome) {
@@ -779,6 +801,30 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }
       return;
     }
+    if (kIsWeb) {
+      _playback.onPictureInPictureChanged = (inPip) {
+        if (!mounted) return;
+        setState(() {
+          _miniDesktop = inPip;
+          if (_catchup) _catchupChrome = inPip;
+        });
+      };
+      final ok = await _playback.enterPictureInPicture();
+      if (!mounted) return;
+      if (ok) {
+        setState(() {
+          _miniDesktop = true;
+          _leftOpen = false;
+          _rightOpen = false;
+          if (_catchup) _catchupChrome = true;
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法进入画中画，请检查浏览器是否支持')),
+        );
+      }
+      return;
+    }
     if (!MiniPlayerWindow.supported) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('当前平台不支持迷你桌面播放')));
@@ -807,9 +853,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _exitMini() async {
+    if (kIsWeb) {
+      await _playback.exitPictureInPicture();
+      if (!mounted) return;
+      setState(() => _miniDesktop = false);
+      return;
+    }
     await MiniPlayerWindow.exit();
     if (!mounted) return;
     setState(() => _miniDesktop = false);
+  }
+
+  /// 直播横屏本身已是铺满窗口，无需再选「全窗口」。
+  /// 桌面/Web：一键占满整块屏幕；移动竖屏：沉浸 + 强制横屏。
+  Future<void> _enterLiveFullscreenPreferred() async {
+    final kind = (kotvIsDesktop() || kIsWeb)
+        ? KotvDesktopFullscreenKind.display
+        : KotvDesktopFullscreenKind.window;
+    await _enterLiveFullscreen(kind);
   }
 
   Future<void> _enterLiveFullscreen([KotvDesktopFullscreenKind desktopFs = KotvDesktopFullscreenKind.window]) async {
@@ -1003,6 +1064,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
+  /// 双击：未真全屏则占满屏幕；已真全屏则缩回铺满窗口。
+  void _onLiveDoubleTap() {
+    if (_playUrl.isEmpty) return;
+    if (_immersive) {
+      unawaited(_exitImmersive());
+    } else {
+      unawaited(_enterLiveFullscreenPreferred());
+    }
+  }
+
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
     const hot = 16.0;
     var zone = -1;
@@ -1180,34 +1251,49 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                       children: [
                         Expanded(
                           flex: 28,
-                          child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggleLeft),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: _toggleLeft,
+                            onDoubleTap: _onLiveDoubleTap,
+                          ),
                         ),
                         Expanded(
                           flex: 44,
                           child: GestureDetector(
                             behavior: HitTestBehavior.translucent,
                             onTap: _onCenterTap,
+                            onDoubleTap: _onLiveDoubleTap,
                           ),
                         ),
                         Expanded(
                           flex: 28,
-                          child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggleRight),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: _toggleRight,
+                            onDoubleTap: _onLiveDoubleTap,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  if (_chromeVisible && !_leftOpen && !_rightOpen)
+                  if ((_chromeVisible || _catchupChrome) && !_leftOpen && !_rightOpen)
                     Positioned(
                       left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
                       top: KotvLayout.isLandscapeCompact(context) ? 8 : 12,
                       child: AppPill(
-                        label: _immersive ? '退出全屏' : '返回',
-                        width: KotvLayout.isLandscapeCompact(context) ? 78 : 96,
+                        label: _immersive
+                            ? '退出全屏'
+                            : (_catchup ? '返回直播' : '返回'),
+                        width: KotvLayout.isLandscapeCompact(context)
+                            ? (_catchup && !_immersive ? 96.0 : 78.0)
+                            : (_catchup && !_immersive ? 110.0 : 96.0),
                         height: KotvLayout.isLandscapeCompact(context) ? 28 : 36,
                         fontSize: KotvLayout.isLandscapeCompact(context) ? 12 : 14,
                         onTap: () {
                           if (_immersive) {
                             unawaited(_exitImmersive());
+                          } else if (_catchup) {
+                            unawaited(_exitCatchup());
                           } else {
                             goKotvPage(ref, KotvPage.video);
                           }
@@ -1534,6 +1620,18 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                 const SizedBox(height: 8),
                                 AppPill(label: '迷你桌面播放', height: 40, onTap: () => unawaited(_enterMini())),
                                 const SizedBox(height: 8),
+                                AppPill(
+                                  label: _immersive ? '退出全屏' : '全屏观看',
+                                  height: 40,
+                                  onTap: () {
+                                    if (_immersive) {
+                                      unawaited(_exitImmersive());
+                                    } else {
+                                      unawaited(_enterLiveFullscreenPreferred());
+                                    }
+                                  },
+                                ),
+                                const SizedBox(height: 8),
                                 if (kotvCanSwitchPlayer(live: true)) ...[
                                   AppPill(
                                     label: '播放器 · ${flutterPlayerLabel(_playerVal)}',
@@ -1638,8 +1736,36 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   ],
                                 ),
                               ),
-                              if (_lineLabel.isNotEmpty)
+                              if (_lineLabel.isNotEmpty) ...[
                                 Text(_lineLabel, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13)),
+                                const SizedBox(width: 8),
+                              ],
+                              if (_immersive)
+                                Tooltip(
+                                  message: '退出全屏',
+                                  child: InkWell(
+                                    onTap: () => unawaited(_exitImmersive()),
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: const SizedBox(
+                                      width: 40,
+                                      height: 40,
+                                      child: Icon(Icons.fullscreen_exit, color: Colors.white, size: 22),
+                                    ),
+                                  ),
+                                )
+                              else
+                                Tooltip(
+                                  message: '全屏',
+                                  child: InkWell(
+                                    onTap: () => unawaited(_enterLiveFullscreenPreferred()),
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: const SizedBox(
+                                      width: 40,
+                                      height: 40,
+                                      child: Icon(Icons.fullscreen, color: Colors.white, size: 22),
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),
@@ -1657,9 +1783,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           player: _playback,
                           playerLabel: flutterPlayerLabel(_playerVal),
                           decodeLabel: _decodeLabel,
+                          offerFullscreenChoice: false,
                           onCast: () => unawaited(_cast()),
                           onMini: () => unawaited(_enterMini()),
-                          onExpand: (kind) => unawaited(_enterLiveFullscreen(kind)),
+                          onExpand: (_) => unawaited(_enterLiveFullscreenPreferred()),
                           onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
                           onDecode: () => unawaited(_pickDecode()),
                         ),
@@ -1682,14 +1809,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     final showChrome = _portraitChrome || (_catchup && _catchupChrome);
     return Column(
       children: [
-        LibraryTopBar(
-          onBack: () => kotvPageBack(ref),
-          onSearch: () => goKotvPage(ref, KotvPage.search),
-          onProfile: () => goKotvPage(ref, KotvPage.profile),
-          onNews: () => showAppNews(context, remoteHint(ref)),
-          title: '直播',
-        ),
-        AspectRatio(
+          LibraryTopBar(
+            onBack: () {
+              if (_handleLiveBack()) return;
+              kotvPageBack(ref);
+            },
+            onSearch: () => goKotvPage(ref, KotvPage.search),
+            onProfile: () => goKotvPage(ref, KotvPage.profile),
+            onNews: () => showAppNews(context, remoteHint(ref)),
+            title: '直播',
+          ),
+          AspectRatio(
           aspectRatio: 16 / 9,
           child: ColoredBox(
             color: Colors.black,
@@ -1699,6 +1829,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _togglePortraitChrome,
+                  onDoubleTap: _onLiveDoubleTap,
                   child: _liveVideo(),
                 ),
                 KotvBufferingOverlay(
@@ -1724,6 +1855,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                       player: _playback,
                       playerLabel: flutterPlayerLabel(_playerVal),
                       decodeLabel: _decodeLabel,
+                      offerFullscreenChoice: false,
                       onCast: () {
                         _pulsePortraitChrome();
                         unawaited(_cast());
@@ -1732,9 +1864,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         _pulsePortraitChrome();
                         unawaited(_enterMini());
                       },
-                      onExpand: (kind) {
+                      onExpand: (_) {
                         _pulsePortraitChrome();
-                        unawaited(_enterLiveFullscreen(kind));
+                        unawaited(_enterLiveFullscreenPreferred());
                       },
                       onPlayer: kotvCanSwitchPlayer(live: true)
                           ? () {

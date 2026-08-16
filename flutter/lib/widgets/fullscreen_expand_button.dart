@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../player/fullscreen_mode.dart';
@@ -10,11 +11,15 @@ class KotvFullscreenExpandButton extends StatefulWidget {
     required this.onSelect,
     this.size = 40,
     this.iconSize,
+    /// 为 null 时：桌面/Web 弹出「铺满窗口 / 占满屏幕」；其它平台直接进应用内全屏。
+    /// 竖屏等场景可显式传 false，避免多余的「全窗口」选项。
+    this.offerDisplayChoice,
   });
 
   final ValueChanged<KotvDesktopFullscreenKind> onSelect;
   final double size;
   final double? iconSize;
+  final bool? offerDisplayChoice;
 
   @override
   State<KotvFullscreenExpandButton> createState() => _KotvFullscreenExpandButtonState();
@@ -47,8 +52,12 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
     widget.onSelect(kind);
   }
 
+  /// 桌面与 Web 默认可选「铺满窗口 / 占满屏幕」；可由 [offerDisplayChoice] 关闭。
+  bool get _offerDisplayChoice =>
+      widget.offerDisplayChoice ?? (kotvIsDesktop() || kIsWeb);
+
   void _onTap() {
-    if (!kotvIsDesktop()) {
+    if (!_offerDisplayChoice) {
       widget.onSelect(KotvDesktopFullscreenKind.window);
       return;
     }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
@@ -1209,6 +1210,22 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }
       return;
     }
+    if (kIsWeb) {
+      _playback.onPictureInPictureChanged = (inPip) {
+        if (!mounted) return;
+        setState(() => _miniDesktop = inPip);
+      };
+      final ok = await _playback.enterPictureInPicture();
+      if (!mounted) return;
+      if (ok) {
+        setState(() => _miniDesktop = true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法进入画中画，请检查浏览器是否支持')),
+        );
+      }
+      return;
+    }
     if (!MiniPlayerWindow.supported) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('当前平台不支持迷你桌面播放')));
@@ -1229,6 +1246,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   Future<void> _exitMini() async {
+    if (kIsWeb) {
+      await _playback.exitPictureInPicture();
+      if (!mounted) return;
+      setState(() => _miniDesktop = false);
+      return;
+    }
     await MiniPlayerWindow.exit();
     if (!mounted) return;
     setState(() => _miniDesktop = false);

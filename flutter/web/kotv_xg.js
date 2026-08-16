@@ -181,6 +181,10 @@
     } catch (_) {}
   }
 
+  function video(container) {
+    return videoEl(container);
+  }
+
   global.kotvXg = {
     ready: !!global.Player,
     create: create,
@@ -193,5 +197,6 @@
     setLoop: setLoop,
     state: state,
     setObjectFit: setObjectFit,
+    video: video,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

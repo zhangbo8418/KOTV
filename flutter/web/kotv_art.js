@@ -239,6 +239,10 @@
     } catch (_) {}
   }
 
+  function video(container) {
+    return videoEl(container);
+  }
+
   global.kotvArt = {
     ready: !!global.Artplayer,
     create: create,
@@ -251,5 +255,6 @@
     setLoop: setLoop,
     state: state,
     setObjectFit: setObjectFit,
+    video: video,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

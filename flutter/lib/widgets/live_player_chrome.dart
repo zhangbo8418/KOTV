@@ -24,6 +24,8 @@ class LiveCatchupChrome extends StatelessWidget {
     this.onDecode,
     this.playerLabel = '',
     this.decodeLabel = '自动',
+    /// 竖屏传 false：一键进沉浸全屏，不弹「铺满窗口」。
+    this.offerFullscreenChoice,
   });
 
   final KotvPlayback player;
@@ -37,6 +39,7 @@ class LiveCatchupChrome extends StatelessWidget {
   final VoidCallback? onDecode;
   final String playerLabel;
   final String decodeLabel;
+  final bool? offerFullscreenChoice;
 
   @override
   Widget build(BuildContext context) {
@@ -82,6 +85,7 @@ class LiveCatchupChrome extends StatelessWidget {
                       KotvFullscreenExpandButton(
                         size: iconSize,
                         iconSize: iconSize <= 32 ? 16 : 22,
+                        offerDisplayChoice: offerFullscreenChoice,
                         onSelect: onExpand!,
                       ),
                     if (!compact && onPlayer != null)

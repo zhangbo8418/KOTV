@@ -1,16 +1,18 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'fullscreen_sys.dart' if (dart.library.html) 'fullscreen_sys_web.dart' as sys;
 import 'kotv_platform.dart';
 
-/// 桌面全屏：铺满当前窗口，或占满整块屏幕。
+/// 桌面/Web 全屏：铺满当前窗口，或占满整块屏幕。
 enum KotvDesktopFullscreenKind {
-  /// 仅进入应用内全屏页/沉浸布局，不改系统窗口。
+  /// 仅进入应用内全屏页/沉浸布局，不改系统窗口 / 浏览器全屏。
   window,
 
-  /// 系统全屏，占满整块显示器。
+  /// 系统全屏（桌面）或浏览器全屏（Web），占满整块显示器。
   display,
 }
 
@@ -18,7 +20,12 @@ Future<void> kotvEnterSystemFullscreen(KotvDesktopFullscreenKind kind) async {
   try {
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   } catch (_) {}
-  if (kind == KotvDesktopFullscreenKind.display && kotvIsDesktop()) {
+  if (kind != KotvDesktopFullscreenKind.display) return;
+  if (kIsWeb) {
+    await sys.kotvEnterDisplayFullscreen();
+    return;
+  }
+  if (kotvIsDesktop()) {
     try {
       await windowManager.setFullScreen(true);
     } catch (_) {}
@@ -32,7 +39,12 @@ Future<void> kotvExitSystemFullscreen({required bool wasDisplayFullscreen}) asyn
   try {
     await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   } catch (_) {}
-  if (wasDisplayFullscreen && kotvIsDesktop()) {
+  if (!wasDisplayFullscreen) return;
+  if (kIsWeb) {
+    await sys.kotvExitDisplayFullscreen();
+    return;
+  }
+  if (kotvIsDesktop()) {
     try {
       await windowManager.setFullScreen(false);
     } catch (_) {}

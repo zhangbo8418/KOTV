@@ -68,6 +68,13 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setAudioTrack(String id);
   Future<void> setSubtitleTrack(String id); // ''=关, 'auto'=自动
 
+  /// Web 浏览器画中画；其它平台默认不支持。
+  bool get supportsPictureInPicture => false;
+  bool get pictureInPictureActive => false;
+  void Function(bool active)? onPictureInPictureChanged;
+  Future<bool> enterPictureInPicture() async => false;
+  Future<void> exitPictureInPicture() async {}
+
   /// 播放或缓冲中保持屏幕常亮；暂停/停止/销毁时释放。
   void _syncKeepAwake() {
     final want = playing || buffering;

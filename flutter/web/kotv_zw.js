@@ -190,6 +190,10 @@
     } catch (_) {}
   }
 
+  function video(container) {
+    return videoEl(container);
+  }
+
   global.kotvZw = {
     ready: !!global.ZWPlayer,
     create: create,
@@ -202,5 +206,6 @@
     setLoop: setLoop,
     state: state,
     setObjectFit: setObjectFit,
+    video: video,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

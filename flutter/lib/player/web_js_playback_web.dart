@@ -34,6 +34,7 @@ extension type KotvJsPlayerApi._(JSObject _) implements JSObject {
   external void setLoop(web.HTMLDivElement container, bool on);
   external JSObject state(web.HTMLDivElement container);
   external void setObjectFit(web.HTMLDivElement container, String fit);
+  external web.HTMLVideoElement? video(web.HTMLDivElement container);
 }
 
 var _viewSeq = 0;
@@ -84,6 +85,10 @@ class WebJsPlayback extends KotvPlayback {
   Duration _duration = Duration.zero;
   Duration _buffered = Duration.zero;
   late String _engine = _defaultLabel;
+  bool _pipBound = false;
+  bool _pipActive = false;
+  web.EventListener? _pipEnterListener;
+  web.EventListener? _pipLeaveListener;
 
   KotvJsPlayerApi get _api => switch (kind) {
         KotvWebJsKind.art => _kotvArt,
@@ -129,6 +134,88 @@ class WebJsPlayback extends KotvPlayback {
 
   @override
   String get engineLabel => _engine;
+
+  @override
+  bool get supportsPictureInPicture => web.document.pictureInPictureEnabled;
+
+  @override
+  bool get pictureInPictureActive => _pipActive;
+
+  web.HTMLVideoElement? get _video {
+    try {
+      return _api.video(_container);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _ensurePipListeners() {
+    if (_pipBound) return;
+    final v = _video;
+    if (v == null) return;
+    _pipEnterListener = ((web.Event _) {
+      _pipActive = true;
+      onPictureInPictureChanged?.call(true);
+      notifyListeners();
+    }).toJS;
+    _pipLeaveListener = ((web.Event _) {
+      _pipActive = false;
+      onPictureInPictureChanged?.call(false);
+      notifyListeners();
+    }).toJS;
+    v.addEventListener('enterpictureinpicture', _pipEnterListener!);
+    v.addEventListener('leavepictureinpicture', _pipLeaveListener!);
+    _pipBound = true;
+  }
+
+  void _clearPipListeners() {
+    final v = _video;
+    if (v != null) {
+      if (_pipEnterListener != null) {
+        v.removeEventListener('enterpictureinpicture', _pipEnterListener!);
+      }
+      if (_pipLeaveListener != null) {
+        v.removeEventListener('leavepictureinpicture', _pipLeaveListener!);
+      }
+    }
+    _pipEnterListener = null;
+    _pipLeaveListener = null;
+    _pipBound = false;
+    _pipActive = false;
+  }
+
+  @override
+  Future<bool> enterPictureInPicture() async {
+    if (!supportsPictureInPicture) return false;
+    final v = _video;
+    if (v == null) return false;
+    _ensurePipListeners();
+    try {
+      if (web.document.pictureInPictureElement == v) {
+        _pipActive = true;
+        return true;
+      }
+      await v.requestPictureInPicture().toDart;
+      _pipActive = true;
+      onPictureInPictureChanged?.call(true);
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> exitPictureInPicture() async {
+    try {
+      if (web.document.pictureInPictureElement != null) {
+        await web.document.exitPictureInPicture().toDart;
+      }
+    } catch (_) {}
+    _pipActive = false;
+    onPictureInPictureChanged?.call(false);
+    notifyListeners();
+  }
 
   @override
   Stream<Duration> get positionStream => _posCtrl.stream;
@@ -328,6 +415,10 @@ class WebJsPlayback extends KotvPlayback {
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffered = Duration.zero;
+    try {
+      await exitPictureInPicture();
+    } catch (_) {}
+    _clearPipListeners();
     try {
       _api.destroy(_container);
     } catch (_) {}
