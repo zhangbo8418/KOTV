@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -53,34 +52,17 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 
 	content = absolutizeURIs(content, base)
 	content = absolutizeTagURIs(content, base)
-	origSegs := countSegments(content)
-	origDur := sumExtinfSeconds(content)
 	cfg := DefaultConfig()
 	if raw := settings.GetM3U8FilterConfigJSON(); raw != "" {
 		_ = jsonUnmarshal(raw, &cfg)
 	}
 	filtered := NewFilter(cfg).Process(content)
 	filtered = stripNonVideoSegments(filtered)
-	// VOD（带 ENDLIST）勿按目录「多数派」砍片：广告与正片常分目录，误留广告只剩几十秒。
-	if !strings.Contains(strings.ToUpper(filtered), "#EXT-X-ENDLIST") {
-		filtered = keepDominantSegmentGroup(filtered)
-	}
 	filtered = convertRelativeTsToAbsolute(filtered, base)
 	filtered = absolutizeTagURIs(filtered, base)
 
 	segments := countSegments(filtered)
 	if segments < 2 {
-		return rawURL, nil
-	}
-	// 过滤过猛：片长/分片骤降 → 回退原址（与 TV 直连行为一致）。
-	filtDur := sumExtinfSeconds(filtered)
-	if origSegs >= 8 && segments*5 < origSegs*2 {
-		return rawURL, nil
-	}
-	if origDur >= 180 && filtDur > 0 && filtDur < 90 {
-		return rawURL, nil
-	}
-	if origDur >= 120 && filtDur > 0 && filtDur*2 < origDur {
 		return rawURL, nil
 	}
 
@@ -189,7 +171,7 @@ func stripNonVideoSegments(content string) string {
 		line := lines[i]
 		trim := strings.TrimSpace(line)
 		if strings.HasPrefix(trim, "#EXTINF") && i+1 < len(lines) {
-			uri := strings.ToLower(strings.TrimSpace(lines[i+1]))
+			uri := strings.ToLower(mediaBase(lines[i+1]))
 			skip := false
 			for _, ext := range imageExts {
 				if strings.Contains(uri, ext) {
@@ -217,84 +199,6 @@ func countSegments(content string) int {
 		n++
 	}
 	return n
-}
-
-func sumExtinfSeconds(content string) float64 {
-	var total float64
-	for _, line := range strings.Split(content, "\n") {
-		trim := strings.TrimSpace(line)
-		if !strings.HasPrefix(trim, "#EXTINF:") {
-			continue
-		}
-		rest := strings.TrimPrefix(trim, "#EXTINF:")
-		if i := strings.IndexByte(rest, ','); i >= 0 {
-			rest = rest[:i]
-		}
-		rest = strings.TrimSpace(rest)
-		var sec float64
-		if _, err := fmt.Sscanf(rest, "%f", &sec); err == nil && sec > 0 {
-			total += sec
-		}
-	}
-	return total
-}
-
-func keepDominantSegmentGroup(content string) string {
-	type seg struct {
-		idx  int
-		dir  string
-		line string
-	}
-	lines := strings.Split(content, "\n")
-	var segs []seg
-	for i, line := range lines {
-		trim := strings.TrimSpace(line)
-		if trim == "" || strings.HasPrefix(trim, "#") {
-			continue
-		}
-		if !strings.HasPrefix(trim, "http") {
-			continue
-		}
-		u, err := url.Parse(trim)
-		if err != nil {
-			continue
-		}
-		dir := path.Dir(u.Path)
-		segs = append(segs, seg{i, dir, trim})
-	}
-	if len(segs) < 10 {
-		return content
-	}
-	counts := map[string]int{}
-	for _, s := range segs {
-		counts[s.dir]++
-	}
-	best, bestN := "", 0
-	for d, n := range counts {
-		if n > bestN {
-			best, bestN = d, n
-		}
-	}
-	if bestN < len(segs)*2/3 || bestN == len(segs) {
-		return content
-	}
-	drop := map[int]bool{}
-	for _, s := range segs {
-		if s.dir != best {
-			drop[s.idx] = true
-			if s.idx > 0 && strings.HasPrefix(strings.TrimSpace(lines[s.idx-1]), "#EXTINF") {
-				drop[s.idx-1] = true
-			}
-		}
-	}
-	out := make([]string, 0, len(lines))
-	for i, line := range lines {
-		if drop[i] {
-			continue
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
 }
 
 func convertRelativeTsToAbsolute(content, base string) string {

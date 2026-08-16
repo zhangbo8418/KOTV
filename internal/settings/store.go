@@ -88,7 +88,7 @@ func defaultFile() file {
 			{ID: "playerLive", Label: "直播播放器", Value: defaultLivePlayerValue()},
 			{ID: "proxy", Label: "代理", Value: "false#"},
 			{ID: "theme", Label: "主题", Value: "system"},
-			{ID: "adFilter", Label: "M3U8广告过滤", Value: "false"},
+			{ID: "adFilter", Label: "M3U8广告过滤", Value: "true"},
 			{ID: "m3u8FilterConfig", Label: "M3U8过滤配置", Value: ""},
 			{ID: "danmaku", Label: "弹幕", Value: "true"},
 			{ID: "danmakuApi", Label: "弹幕API", Value: ""},
@@ -240,10 +240,9 @@ func Set(t Type, value string) {
 }
 
 // IsAdFilterEnabled M3U8 广告过滤开关。
-// 默认关：对齐 TV（Exo 直连原 m3u8）；过滤误伤时会出现「只播几十秒就结束」。
 func IsAdFilterEnabled() bool {
 	v := strings.ToLower(strings.TrimSpace(Get(AdFilter)))
-	return v == "true" || v == "1" || v == "on"
+	return v == "" || v == "true" || v == "1" || v == "on"
 }
 
 // IsDanmakuEnabled 弹幕开关。

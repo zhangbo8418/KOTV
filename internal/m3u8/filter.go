@@ -1,6 +1,8 @@
 package m3u8
 
 import (
+	"net/url"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -10,15 +12,15 @@ import (
 type Filter struct {
 	cfg FilterConfig
 
-	tsNameLen           int
-	firstExtinfRow      string
-	theExtinfJudgeRowN  int
-	theSameExtinfNameN  int
-	prevTsNameIndex     int
-	firstTsNameIndex    int
-	tsType              int // 0 数字递增 / 1 非数字名 / 2 暴力
-	theExtXMode         int
-	filteredAdCount     int
+	tsNameLen          int
+	firstExtinfRow     string
+	theExtinfJudgeRowN int
+	theSameExtinfNameN int
+	prevTsNameIndex    int
+	firstTsNameIndex   int
+	tsType             int // 0 数字递增 / 1 非数字名 / 2 暴力
+	theExtXMode        int
+	filteredAdCount    int
 }
 
 func NewFilter(cfg FilterConfig) *Filter {
@@ -35,13 +37,44 @@ func (f *Filter) FilteredAdCount() int { return f.filteredAdCount }
 
 var tsNumberRe = regexp.MustCompile(`(\d+)\.ts`)
 
+// mediaBase 只取切片文件名再识别。绝对化后的 URL 若在主机名里带 .ts（如 cdn01.ts.com），
+// 对整串做 indexOf(`\.ts`) / `(\d+)\.ts` 会误把域名当成序号，正片几乎删光只剩几十秒。
+func mediaBase(line string) string {
+	trim := strings.TrimSpace(line)
+	if trim == "" || strings.HasPrefix(trim, "#") {
+		return trim
+	}
+	if i := strings.IndexAny(trim, "?#"); i >= 0 {
+		trim = trim[:i]
+	}
+	if strings.Contains(trim, "://") {
+		if u, err := url.Parse(trim); err == nil && u.Path != "" {
+			return path.Base(u.Path)
+		}
+	}
+	return path.Base(trim)
+}
+
+func tsPrefixLen(line string) int {
+	base := mediaBase(line)
+	i := strings.Index(base, ".ts")
+	if i <= 0 {
+		return -1
+	}
+	return i
+}
+
 func extractNumberBeforeTs(s string) (int, bool) {
-	m := tsNumberRe.FindStringSubmatch(s)
+	m := tsNumberRe.FindStringSubmatch(mediaBase(s))
 	if len(m) < 2 {
 		return 0, false
 	}
 	n, err := strconv.Atoi(m[1])
 	return n, err == nil
+}
+
+func lineHasTs(line string) bool {
+	return tsPrefixLen(line) > 0
 }
 
 // FilterLines 过滤广告分片行。
@@ -107,7 +140,7 @@ func (f *Filter) detectTsType(lines []string) {
 			f.theExtinfJudgeRowN++
 		}
 
-		theTsNameLen := strings.Index(line, ".ts")
+		theTsNameLen := tsPrefixLen(line)
 		if theTsNameLen > 0 {
 			if f.theExtinfJudgeRowN == 1 {
 				f.tsNameLen = theTsNameLen
@@ -167,7 +200,7 @@ func (f *Filter) handleMode0(lines []string, i *int, result *[]string) bool {
 			*i++
 			return true
 		}
-		theTsNameLen := strings.Index(lines[*i+2], ".ts")
+		theTsNameLen := tsPrefixLen(lines[*i+2])
 		if theTsNameLen > 0 {
 			if theTsNameLen-f.tsNameLen > f.cfg.TsNameLenExtend {
 				f.filteredAdCount++
@@ -193,7 +226,7 @@ func (f *Filter) handleMode0(lines []string, i *int, result *[]string) bool {
 	}
 
 	if strings.HasPrefix(line, "#EXTINF") && *i+1 < len(lines) {
-		theTsNameLen := strings.Index(lines[*i+1], ".ts")
+		theTsNameLen := tsPrefixLen(lines[*i+1])
 		if theTsNameLen > 0 {
 			if theTsNameLen-f.tsNameLen > f.cfg.TsNameLenExtend {
 				f.filteredAdCount++
@@ -242,7 +275,7 @@ func (f *Filter) handleMode1(lines []string, i *int, result *[]string) bool {
 			*i++
 			return true
 		}
-		if *i+2 < len(lines) && strings.HasPrefix(lines[*i+1], "#EXTINF") && strings.Contains(lines[*i+2], ".ts") {
+		if *i+2 < len(lines) && strings.HasPrefix(lines[*i+1], "#EXTINF") && lineHasTs(lines[*i+2]) {
 			cond := false
 			if f.theExtXMode == 1 {
 				cond = lines[*i+1] != f.firstExtinfRow && f.theSameExtinfNameN > f.cfg.TheExtinfBenchmarkN
