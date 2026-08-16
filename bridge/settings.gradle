@@ -1,16 +1,1 @@
-pluginManagement {
-    repositories {
-        // 优先镜像：GitHub Actions 直连 Maven Central 易被 429
-        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
-        maven { url = uri("https://repo.huaweicloud.com/repository/maven/") }
-        gradlePluginPortal()
-        mavenCentral()
-    }
-}
-
-dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
-}
-
 rootProject.name = "spider-bridge"
