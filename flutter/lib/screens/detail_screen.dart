@@ -794,7 +794,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       _epIdx = epIdx;
       _playUrl = '';
       _magnetPlay = epLooksMagnet;
-      _status = epLooksMagnet ? '磁力解析中…' : '解析中…';
+      // 对齐 TV：直链换集不显示「解析」；真网页壳/VIP 才进解析浮层。
+      _status = epLooksMagnet
+          ? '磁力解析中…'
+          : (_epLooksDirectPlayUrl(ep.url) ? '换集中…' : '解析中…');
     });
     _syncFullscreen();
     if (epLooksMagnet) _startBtProgressPoll();
@@ -1014,6 +1017,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         );
       }
     }
+  }
+
+  /// 对齐 TV Sniffer.isVideoFormat 的常见直链：这类换集不显示「解析」浮层。
+  bool _epLooksDirectPlayUrl(String raw) {
+    final u = raw.trim().toLowerCase();
+    if (u.isEmpty) return false;
+    if (u.startsWith('rtmp:')) return true;
+    if (!(u.startsWith('http://') || u.startsWith('https://'))) return false;
+    if (u.contains('url=http') || u.contains('v=http') || u.contains('.html')) return false;
+    const marks = ['.m3u8', '.mp4', '.mkv', '.flv', '.mpd', '.mp3', '.m4a', '.aac', 'video/tos'];
+    for (final m in marks) {
+      if (u.contains(m)) return true;
+    }
+    return false;
   }
 
   /// 折叠「播放失败: 解析失败: 解析失败: …」这类层层包装。
@@ -1317,6 +1334,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               player: _playback,
               force: !_playback.playing &&
                   (_status.contains('加载中') ||
+                      _status.contains('换集') ||
                       _status.contains('磁力缓冲') ||
                       _status.contains('缓冲中')),
             ),

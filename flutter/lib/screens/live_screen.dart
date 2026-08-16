@@ -674,7 +674,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     setState(() {
       _chIdx = chIdx;
       _line = useLine;
-      _status = '解析中…';
+      // 直播对齐 TV：频道 URL 直链开播，不走点播「解析」文案。
+      _status = '换台中…';
       _title = '${ch['name'] ?? ''}';
       _leftOpen = true;
       _epgOpen = false;
@@ -1268,7 +1269,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   _liveVideo(),
                   KotvBufferingOverlay(
                     player: _playback,
-                    force: _status.contains('解析') ||
+                    force: _status.contains('换台') ||
+                        _status.contains('解析') ||
                         _status.contains('加载') ||
                         _status.contains('缓冲') ||
                         _loading,
@@ -1901,7 +1903,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                 ),
                 KotvBufferingOverlay(
                   player: _playback,
-                  force: _status.contains('解析') ||
+                  force: _status.contains('换台') ||
+                      _status.contains('解析') ||
                       _status.contains('加载') ||
                       _status.contains('缓冲') ||
                       _loading,

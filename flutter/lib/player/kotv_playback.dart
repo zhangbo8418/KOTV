@@ -481,8 +481,9 @@ class MediaKitPlayback extends KotvPlayback {
       position: () => player.state.position,
       duration: () => player.state.duration,
       isLiveContent: () {
-        // media_kit 无稳定 isLive；时长 0 且已出画时由守卫按直播跳过卡死判定。
-        return false;
+        // media_kit 无稳定 isLive；时长 0 且已出画/在播 → 按直播处理（对齐 TV，跳过卡死进度判定）。
+        return player.state.duration <= Duration.zero &&
+            (_videoVisible || player.state.playing);
       },
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,

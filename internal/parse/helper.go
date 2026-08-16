@@ -278,7 +278,9 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 	if IsVideoFormat(raw) {
 		return raw, nil
 	}
-	if !needParse && !strings.HasPrefix(raw, "http") {
+	// 与 TV LiveApi.getUrl 一致：未标记 parse 的频道直链直接播，
+	// 不要拿全局 type=1 解析器去撞直播 URL（否则普通 m3u8 也会「解析中」）。
+	if !needParse {
 		return raw, nil
 	}
 
@@ -291,13 +293,10 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 			return out, nil
 		}
 	}
-	if needParse {
-		if sniffed, _ := PlayPageSniff(raw, headers); sniffed != "" {
-			return sniffed, nil
-		}
-		return "", fmt.Errorf("直播地址需要解析但无可用解析器")
+	if sniffed, _ := PlayPageSniff(raw, headers); sniffed != "" {
+		return sniffed, nil
 	}
-	return raw, nil
+	return "", fmt.Errorf("直播地址需要解析但无可用解析器")
 }
 
 func resolveParse(r model.Result, parses []model.Parse, useParse bool, prefer string) *model.Parse {

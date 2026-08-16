@@ -413,6 +413,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	var danmakuURL string
 	var qualNames, qualURLs []string
 	var playDrm *model.Drm
+	var didParse bool
 
 	// 一律先 SiteApi.playerContent（含站点 Header/PlayURL/parse），再 Source.fetch / ParseJob。
 	// 仅磁力可先占位，真正取流仍在后面 thunder.Fetch。
@@ -438,6 +439,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		if len(rules) == 0 {
 			rules = api.Rules
 		}
+		// 对齐 TV：仅 needParse / useParse 时才进 ParseJob；直链跳过。
+		didParse = parse.NeedParse(result) || parse.IsUseParse(result, api.Flags, api.Parses)
 		parsed, perr := parse.ResolveWithParses(result, parse.Options{
 			Parses:    api.Parses,
 			Flags:     api.Flags,
@@ -455,6 +458,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			cand := apiResolvePlayURL("", result.PlayURL, result.URL.URLs, qualIdx)
 			if cand != "" && (parse.IsVideoFormat(cand) || thunder.Match(cand)) {
 				playURL = cand
+				didParse = false
 			} else {
 				return nil, parse.AnnotateParseErr(perr)
 			}
@@ -508,6 +512,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		"url":       playproxy.PublicizeURL(playURL),
 		"media":     mediaURL,
 		"magnet":    isMagnetPlay,
+		"parsed":    didParse,
 		"headers":   headers,
 		"drm":       playDrm,
 		"danmaku":   danmakuURL,
@@ -1308,6 +1313,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	if line >= 0 && line < len(ch.URLs) {
 		ch.URLIndex = line
 	}
+	// 对齐 TV：普通频道直取线路 URL；仅 parse/json/video 前缀才二次解析。
 	playURL, headers, err := lv.ResolvePlayURLParsed(ch)
 	if err != nil && playURL == "" {
 		return nil, err
