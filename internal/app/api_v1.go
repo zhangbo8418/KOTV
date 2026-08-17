@@ -92,19 +92,13 @@ func (a *App) APIGetConfig() map[string]any {
 
 func (a *App) APILoadConfig(source string) error {
 	cfg, sites, sess := a.scope()
-	// 换源立刻硬杀所属运行时（本机共享 / 远端该用户）；脚本磁盘缓存保留。
-	sites.InvalidateLoads()
+	// 先解析新源；失败则保留旧配置与 Ready，避免首页一直转圈。
 	err := cfg.LoadFromSource(source)
 	if err != nil {
-		if sess != nil {
-			sess.Ready = false
-			sess.ErrMsg = err.Error()
-		} else {
-			a.Ready = false
-			a.ErrMsg = err.Error()
-		}
 		return err
 	}
+	// 新源已进内存后再硬杀旧运行时（本机共享 / 远端该用户）；脚本磁盘缓存保留。
+	sites.InvalidateLoads()
 	if sess != nil {
 		sess.Ready = true
 		sess.ErrMsg = ""
@@ -800,6 +794,10 @@ func (a *App) editConfig(typ int64, oldURL, newURL, name string) error {
 	}
 	if err := a.DB.UpdateConfigURLName(oldURL, typ, newURL, name); err != nil {
 		return err
+	}
+	// 只改备注名、地址没变：不要整源重载（会卡住，且弹窗列表来不及刷新）。
+	if oldURL == newURL {
+		return nil
 	}
 	switch typ {
 	case database.ConfigTypeSite:

@@ -30,7 +30,8 @@ final configProvider = FutureProvider<Map<String, dynamic>>((ref) async {
       final cfg = await api.getConfig();
       if (cfg['ready'] == true) return cfg;
       final source = '${cfg['source'] ?? ''}'.trim();
-      final err = '${cfg['error'] ?? ''}';
+      final err = '${cfg['error'] ?? ''}'.trim();
+      if (err.isNotEmpty) return cfg;
       final noSource = source.isEmpty &&
           (err.isEmpty || err.contains('未配置') || err.contains('点播源') || err.contains('请输入'));
       if (noSource) return cfg;

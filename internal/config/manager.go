@@ -337,30 +337,6 @@ func (m *Manager) initFromVod(vod string) error {
 	return m.ParseConfig(cfg, false)
 }
 
-// resolveConfig 把用户输入（裸 URL / 裸 JSON / 已存的内联键）解析为要持久化的 Config 行。
-// 每个源以 (url, type) 唯一键存一行；裸 JSON 没有 url，用内容哈希键代替，避免不同 JSON 互相覆盖。
-func (m *Manager) resolveConfig(source string) (*database.Config, error) {
-	if isInlineConfigKey(source) {
-		cfg, err := m.db.FindConfig(source, database.ConfigTypeSite)
-		if err != nil {
-			return nil, err
-		}
-		if cfg == nil {
-			return nil, fmt.Errorf("配置不存在: %s", source)
-		}
-		return cfg, nil
-	}
-	if strings.HasPrefix(source, "{") || strings.HasPrefix(source, "[") {
-		return &database.Config{
-			Type: database.ConfigTypeSite,
-			URL:  inlineConfigKey(source),
-			JSON: source,
-			Name: inlineConfigName(source),
-		}, nil
-	}
-	return &database.Config{Type: database.ConfigTypeSite, URL: source}, nil
-}
-
 // SourceDisplayName 无接口名时回落为完整地址（勿截成路径末段）。
 func SourceDisplayName(raw string) string {
 	return strings.TrimSpace(raw)
@@ -430,29 +406,11 @@ func NormalizeSource(source string) string {
 	return source
 }
 
-// LoadFromSource 加载 URL 或 JSON 正文；非 ephemeral 时写回 settings.VOD。
+// LoadFromSource 加载 URL 或 JSON 正文。解析成功才写库、切当前源；失败时内存里仍是旧配置。
 func (m *Manager) LoadFromSource(source string) error {
 	source = NormalizeSource(source)
 	if source == "" {
 		return fmt.Errorf("请输入点播源 URL 或粘贴 JSON")
-	}
-	// 每个源以 (url, type) 唯一键写入共享库，本机与远端会话共用同一份源列表。
-	// ephemeral 只表示该 Scope 不写全局 settings.VOD 指针、不杀共享爬虫，仍必须把源行写入共享库；
-	// 否则会话模式下 APIListRepos 读到的永远是空表，换源不落盘。
-	if m.db != nil || !m.ephemeral {
-		cfg, err := m.resolveConfig(source)
-		if err != nil {
-			return err
-		}
-		if m.db != nil {
-			if _, err := m.db.UpsertConfig(cfg); err != nil {
-				return err
-			}
-		}
-		if !m.ephemeral {
-			settings.Set(settings.VOD, cfg.URL)
-			_ = settings.Save()
-		}
 	}
 	return m.initFromVod(source)
 }
@@ -541,6 +499,14 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	m.home = home
 	m.mu.Unlock()
 
+	// 解析成功后再切当前源。失败的地址不能写成 settings.VOD，否则首页会一直等 ready。
+	if !m.ephemeral {
+		if u := strings.TrimSpace(cfg.URL); u != "" {
+			settings.Set(settings.VOD, u)
+			_ = settings.Save()
+		}
+	}
+
 	return nil
 }
 
@@ -603,10 +569,6 @@ func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot) e
 	}
 
 	first := strings.TrimSpace(depots[0].URL)
-	if !m.ephemeral {
-		settings.Set(settings.VOD, first)
-		_ = settings.Save()
-	}
 
 	next, err := m.db.FindConfig(first, database.ConfigTypeSite)
 	if err != nil {

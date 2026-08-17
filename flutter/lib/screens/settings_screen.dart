@@ -1021,8 +1021,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           value: '多仓',
                           onTap: () async {
                             final switched = await showRepoPicker(context, ref);
+                            await _reload();
                             if (switched) {
-                              await _reload();
                               setState(() => _status = '线路已切换');
                             }
                           },

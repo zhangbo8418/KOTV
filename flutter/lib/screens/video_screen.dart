@@ -140,6 +140,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       cfg = await api.getConfig();
       if (cfg['ready'] == true) return cfg;
       if (_isNoSourceConfig(cfg)) return cfg;
+      final err = '${cfg['error'] ?? ''}'.trim();
+      if (err.isNotEmpty) return cfg;
       if (i == 0 && mounted) {
         setState(() {
           _ready = false;

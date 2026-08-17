@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -287,21 +288,21 @@ Future<void> showSitePicker(
   );
 }
 
-Future<void> showAddVodDialog(BuildContext context, WidgetRef ref) async {
+Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
   String initial = '';
   try {
     final cfg = await api.getConfig();
     initial = '${cfg['source'] ?? ''}';
   } catch (_) {}
-  if (!context.mounted) return;
+  if (!context.mounted) return false;
   final ctrl = TextEditingController(text: initial);
   var busy = false;
   String status = '';
 
-  await showDialog<void>(
+  final ok = await showDialog<bool>(
     context: context,
-    barrierDismissible: !busy,
+    barrierDismissible: true,
     builder: (ctx) {
       return StatefulBuilder(
         builder: (ctx, setLocal) {
@@ -316,12 +317,19 @@ Future<void> showAddVodDialog(BuildContext context, WidgetRef ref) async {
               status = '加载配置中…';
             });
             try {
-              await api.loadConfig(src);
+              await api.loadConfig(src).timeout(const Duration(seconds: 45));
               ref.invalidate(configProvider);
               ref.invalidate(homeProvider);
               ref.invalidate(settingsProvider);
-              if (ctx.mounted) Navigator.pop(ctx);
+              if (ctx.mounted) Navigator.pop(ctx, true);
+            } on TimeoutException {
+              if (!ctx.mounted) return;
+              setLocal(() {
+                busy = false;
+                status = '加载超时，源地址可能无效';
+              });
             } catch (e) {
+              if (!ctx.mounted) return;
               setLocal(() {
                 busy = false;
                 status = '$e';
@@ -381,7 +389,7 @@ Future<void> showAddVodDialog(BuildContext context, WidgetRef ref) async {
                       _configDialogActions(
                         compact: m.compact,
                         onPick: busy ? () {} : () => pick(),
-                        onCancel: busy ? () {} : () => Navigator.pop(ctx),
+                        onCancel: () => Navigator.pop(ctx, false),
                         onConfirm: busy ? () {} : () => load(ctrl.text),
                         confirmLabel: busy ? '加载中…' : '加载',
                       ),
@@ -396,10 +404,12 @@ Future<void> showAddVodDialog(BuildContext context, WidgetRef ref) async {
     },
   );
   ctrl.dispose();
+  return ok == true;
 }
 
 /// 编辑当前点播源名称/地址（对齐 TV 设置页长按 ConfigDialog.edit）。
-Future<void> showEditVodDialog(BuildContext context, WidgetRef ref, {String? url, String? title}) async {
+/// 返回保存后的地址/名称；取消则为 null。
+Future<({String url, String name})?> showEditVodDialog(BuildContext context, WidgetRef ref, {String? url, String? title}) async {
   final api = ref.read(apiProvider);
   var oldUrl = (url ?? '').trim();
   var initialName = (title ?? '').trim();
@@ -416,12 +426,12 @@ Future<void> showEditVodDialog(BuildContext context, WidgetRef ref, {String? url
       }
     } catch (_) {}
   }
-  if (!context.mounted) return;
+  if (!context.mounted) return null;
   if (oldUrl.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先添加点播源')));
-    return;
+    return null;
   }
-  await _showEditSourceDialog(
+  return _showEditSourceDialog(
     context,
     ref,
     kindTitle: '编辑点播源',
@@ -432,8 +442,8 @@ Future<void> showEditVodDialog(BuildContext context, WidgetRef ref, {String? url
   );
 }
 
-/// 编辑当前直播源名称/地址。
-Future<void> showEditLiveDialog(BuildContext context, WidgetRef ref, {String? url, String? title}) async {
+/// 编辑当前直播源名称/地址。返回保存结果；取消则为 null。
+Future<({String url, String name})?> showEditLiveDialog(BuildContext context, WidgetRef ref, {String? url, String? title}) async {
   final api = ref.read(apiProvider);
   var oldUrl = (url ?? '').trim();
   var initialName = (title ?? '').trim();
@@ -455,12 +465,12 @@ Future<void> showEditLiveDialog(BuildContext context, WidgetRef ref, {String? ur
       }
     } catch (_) {}
   }
-  if (!context.mounted) return;
+  if (!context.mounted) return null;
   if (oldUrl.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先添加直播源')));
-    return;
+    return null;
   }
-  await _showEditSourceDialog(
+  return _showEditSourceDialog(
     context,
     ref,
     kindTitle: '编辑直播源',
@@ -471,7 +481,7 @@ Future<void> showEditLiveDialog(BuildContext context, WidgetRef ref, {String? ur
   );
 }
 
-Future<void> _showEditSourceDialog(
+Future<({String url, String name})?> _showEditSourceDialog(
   BuildContext context,
   WidgetRef ref, {
   required String kindTitle,
@@ -485,7 +495,7 @@ Future<void> _showEditSourceDialog(
   var busy = false;
   var status = '';
 
-  await showDialog<void>(
+  final saved = await showDialog<bool>(
     context: context,
     barrierDismissible: !busy,
     builder: (ctx) {
@@ -503,11 +513,19 @@ Future<void> _showEditSourceDialog(
               status = '保存中…';
             });
             try {
-              await onSave(url, name);
-              ref.invalidate(configProvider);
-              ref.invalidate(homeProvider);
+              await onSave(url, name).timeout(const Duration(seconds: 45));
+              // 只改备注时不要 invalidate 首页，避免底层路由重建把源列表弹窗刷回打开时的快照。
               ref.invalidate(settingsProvider);
-              if (ctx.mounted) Navigator.pop(ctx);
+              if (url != oldUrl) {
+                ref.invalidate(configProvider);
+                ref.invalidate(homeProvider);
+              }
+              if (ctx.mounted) Navigator.of(ctx, rootNavigator: true).pop(true);
+            } on TimeoutException {
+              setLocal(() {
+                busy = false;
+                status = '保存超时，源地址可能无效';
+              });
             } catch (e) {
               setLocal(() {
                 busy = false;
@@ -545,7 +563,7 @@ Future<void> _showEditSourceDialog(
                     children: [
                       Text(kindTitle, style: TextStyle(color: p.fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 8),
-                      Text(hint, style: TextStyle(color: p.muted, fontSize: m.compact ? 12 : 13)),
+                      Text(hint, style: TextStyle(color: p.muted, fontSize: 12)),
                       const SizedBox(height: 12),
                       TextField(
                         controller: nameCtrl,
@@ -583,7 +601,7 @@ Future<void> _showEditSourceDialog(
                       _configDialogActions(
                         compact: m.compact,
                         onPick: busy ? () {} : pick,
-                        onCancel: busy ? () {} : () => Navigator.pop(ctx),
+                        onCancel: () => Navigator.pop(ctx, false),
                         onConfirm: busy ? () {} : save,
                         confirmLabel: busy ? '保存中…' : '保存',
                       ),
@@ -597,8 +615,12 @@ Future<void> _showEditSourceDialog(
       );
     },
   );
+  final url = urlCtrl.text.trim();
+  final name = nameCtrl.text.trim();
   nameCtrl.dispose();
   urlCtrl.dispose();
+  if (saved != true) return null;
+  return (url: url, name: name);
 }
 
 Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
@@ -697,104 +719,19 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
   if (!context.mounted) return false;
   final selected = await showDialog<String>(
     context: context,
-    builder: (ctx) {
-      var local = data;
-      return StatefulBuilder(
-        builder: (ctx, setLocal) {
-          Future<void> reload() async {
-            final d = await api.liveSources();
-            setLocal(() => local = d);
-          }
-
-          final list = ((local['configs'] as List?) ?? []).whereType<Map>().toList();
-          final current = '${local['live'] ?? ''}';
-          final m = _dialogMetrics(ctx);
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: m.inset,
-            child: SizedBox(
-              width: m.width,
-              height: m.height,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: KotvPalette.of(ctx).dialogBg,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: KotvPalette.of(ctx).outline),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.all(m.compact ? 14 : 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        '直播源',
-                        style: TextStyle(color: KotvPalette.of(ctx).fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 6),
-                      Text('点选切换；长按改名；右侧删除可移除', style: TextStyle(color: KotvPalette.of(ctx).muted, fontSize: 14)),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: ListView(
-                          children: [
-                            ...() {
-                              final rows = <Widget>[];
-                              var focused = false;
-                              for (final r in list) {
-                                final url = '${r['url'] ?? ''}';
-                                final isCurrent = r['current'] == true || url == current;
-                                final name = '${r['name'] ?? url}';
-                                rows.add(
-                                  _RepoRow(
-                                    label: name,
-                                    current: isCurrent,
-                                    autofocus: !focused,
-                                    onTap: isCurrent ? () {} : () => Navigator.pop(ctx, url),
-                                    onLongPress: () async {
-                                      await showEditLiveDialog(
-                                        ctx,
-                                        ref,
-                                        url: url,
-                                        title: '${r['title'] ?? ''}',
-                                      );
-                                      await reload();
-                                    },
-                                    onDelete: isCurrent
-                                        ? null
-                                        : () async {
-                                            await api.deleteLive(url);
-                                            await reload();
-                                          },
-                                  ),
-                                );
-                                rows.add(const SizedBox(height: 8));
-                                focused = true;
-                              }
-                              rows.add(
-                                _RepoRow(
-                                  label: '＋ 添加直播源',
-                                  autofocus: !focused,
-                                  onTap: () => Navigator.pop(ctx, ''),
-                                  onDelete: null,
-                                ),
-                              );
-                              return rows;
-                            }(),
-                          ],
-                        ),
-                      ),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: AppPill(label: '关闭', width: m.compact ? 72 : 96, height: 36, onTap: () => Navigator.pop(ctx)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      );
-    },
+    builder: (ctx) => _SourceListDialog(
+      key: const ValueKey('live-source-list'),
+      title: '直播源',
+      hint: '点选切换；长按改名；右侧删除可移除',
+      listKey: 'configs',
+      currentKey: 'live',
+      initial: data,
+      fetch: api.liveSources,
+      addLabel: '＋ 添加直播源',
+      vodStyle: false,
+      onEdit: (url, title) => showEditLiveDialog(ctx, ref, url: url, title: title),
+      onDelete: api.deleteLive,
+    ),
   );
   if (!context.mounted) return false;
   if (selected == null) return false;
@@ -823,120 +760,38 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
   if (!context.mounted) return false;
   final selected = await showDialog<String>(
     context: context,
-    builder: (ctx) {
-      var local = data;
-      return StatefulBuilder(
-        builder: (ctx, setLocal) {
-          Future<void> reload() async {
-            final d = await api.listRepos();
-            setLocal(() => local = d);
-          }
-
-          final list = ((local['repos'] as List?) ?? []).whereType<Map>().toList();
-          final m = _dialogMetrics(ctx);
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: m.inset,
-            child: SizedBox(
-              width: m.width,
-              height: m.height,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xFA3B1970),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0x70D8A5E8)),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.all(m.compact ? 14 : 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        '线路选择',
-                        style: TextStyle(color: Colors.white, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text('点选切换；长按改名；右侧删除可移除', style: TextStyle(color: Color(0xFFCF4274), fontSize: 14)),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: ListView(
-                          children: [
-                            ...() {
-                              final rows = <Widget>[];
-                              var focused = false;
-                              for (final r in list) {
-                                final isCurrent = '${r['url']}' == current;
-                                rows.add(
-                                  _RepoRow(
-                                    label: '${r['name'] ?? r['url']}',
-                                    current: isCurrent,
-                                    autofocus: !focused,
-                                    onTap: isCurrent
-                                        ? () {}
-                                        : () => Navigator.pop(ctx, '${r['url']}'),
-                                    onLongPress: () async {
-                                      await showEditVodDialog(
-                                        ctx,
-                                        ref,
-                                        url: '${r['url']}',
-                                        title: '${r['title'] ?? ''}',
-                                      );
-                                      await reload();
-                                    },
-                                    onDelete: isCurrent
-                                        ? null
-                                        : () async {
-                                            await api.deleteRepo('${r['url']}');
-                                            await reload();
-                                          },
-                                  ),
-                                );
-                                rows.add(const SizedBox(height: 8));
-                                focused = true;
-                              }
-                              rows.add(
-                                _RepoRow(
-                                  label: '＋ 添加线路',
-                                  autofocus: !focused,
-                                  onTap: () => Navigator.pop(ctx, ''),
-                                  onDelete: null,
-                                ),
-                              );
-                              return rows;
-                            }(),
-                          ],
-                        ),
-                      ),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: AppPill(label: '关闭', width: m.compact ? 72 : 96, height: 36, onTap: () => Navigator.pop(ctx)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      );
-    },
+    builder: (ctx) => _SourceListDialog(
+      key: const ValueKey('repo-source-list'),
+      title: '线路选择',
+      hint: '点选切换；长按改名；右侧删除可移除',
+      listKey: 'repos',
+      currentKey: 'current',
+      initial: data,
+      fetch: api.listRepos,
+      addLabel: '＋ 添加线路',
+      vodStyle: true,
+      fallbackCurrent: current,
+      onEdit: (url, title) => showEditVodDialog(ctx, ref, url: url, title: title),
+      onDelete: api.deleteRepo,
+    ),
   );
 
   if (!context.mounted) return false;
   if (selected == null) return false;
   if (selected.isEmpty) {
-    await showAddVodDialog(context, ref);
-    return true;
+    return showAddVodDialog(context, ref);
   }
 
   final label = selected.length > 40 ? '${selected.substring(0, 40)}…' : selected;
   ref.read(uiBusyProvider.notifier).state = '切换线路中…\n$label';
   try {
-    await api.loadConfig(selected);
+    await api.loadConfig(selected).timeout(const Duration(seconds: 45));
     // 等引擎 ready，避免立刻 home 打到半截配置
     for (var i = 0; i < 40; i++) {
       final h = await api.health();
       if (h['ready'] == true) break;
+      final err = '${h['error'] ?? ''}'.trim();
+      if (err.isNotEmpty) break;
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
     ref.invalidate(configProvider);
@@ -945,7 +800,8 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
     return true;
   } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('切换失败: $e')));
+      final msg = e is TimeoutException ? '加载超时，源地址可能无效' : '$e';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('切换失败: $msg')));
     }
     return false;
   } finally {
@@ -978,8 +834,172 @@ Future<String?> pickChoice(
   );
 }
 
+class _SourceListDialog extends StatefulWidget {
+  const _SourceListDialog({
+    super.key,
+    required this.title,
+    required this.hint,
+    required this.listKey,
+    required this.currentKey,
+    required this.initial,
+    required this.fetch,
+    required this.addLabel,
+    required this.vodStyle,
+    required this.onEdit,
+    required this.onDelete,
+    this.fallbackCurrent = '',
+  });
+
+  final String title;
+  final String hint;
+  final String listKey;
+  final String currentKey;
+  final Map<String, dynamic> initial;
+  final Future<Map<String, dynamic>> Function() fetch;
+  final String addLabel;
+  final bool vodStyle;
+  final String fallbackCurrent;
+  final Future<({String url, String name})?> Function(String url, String title) onEdit;
+  final Future<void> Function(String url) onDelete;
+
+  @override
+  State<_SourceListDialog> createState() => _SourceListDialogState();
+}
+
+class _SourceListDialogState extends State<_SourceListDialog> {
+  late Map<String, dynamic> _local;
+
+  @override
+  void initState() {
+    super.initState();
+    _local = Map<String, dynamic>.from(widget.initial);
+  }
+
+  Future<void> _reload() async {
+    try {
+      final d = await widget.fetch();
+      if (!mounted) return;
+      setState(() => _local = Map<String, dynamic>.from(d));
+    } catch (_) {}
+  }
+
+  void _applyLocalEdit(String oldUrl, String newUrl, String name) {
+    final label = name.trim().isEmpty ? newUrl : name.trim();
+    final next = <dynamic>[];
+    for (final e in ((_local[widget.listKey] as List?) ?? [])) {
+      if (e is! Map || '${e['url']}' != oldUrl) {
+        next.add(e);
+        continue;
+      }
+      next.add({
+        ...Map<String, dynamic>.from(e),
+        'url': newUrl,
+        'name': label,
+        'title': name.trim(),
+      });
+    }
+    final updated = Map<String, dynamic>.from(_local);
+    updated[widget.listKey] = next;
+    if ('${_local[widget.currentKey] ?? ''}' == oldUrl) {
+      updated[widget.currentKey] = newUrl;
+    }
+    setState(() => _local = updated);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final list = ((_local[widget.listKey] as List?) ?? []).whereType<Map>().toList();
+    final current = '${_local[widget.currentKey] ?? widget.fallbackCurrent}';
+    final m = _dialogMetrics(context);
+    final p = KotvPalette.of(context);
+    final bg = widget.vodStyle ? const Color(0xFA3B1970) : p.dialogBg;
+    final border = widget.vodStyle ? const Color(0x70D8A5E8) : p.outline;
+    final titleColor = widget.vodStyle ? Colors.white : p.fg;
+    final hintColor = widget.vodStyle ? const Color(0xFFCF4274) : p.muted;
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: m.inset,
+      child: SizedBox(
+        width: m.width,
+        height: m.height,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: border),
+          ),
+          child: Padding(
+            padding: EdgeInsets.all(m.compact ? 14 : 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  widget.title,
+                  style: TextStyle(color: titleColor, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                Text(widget.hint, style: TextStyle(color: hintColor, fontSize: 14)),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: list.length + 1,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) {
+                      if (i == list.length) {
+                        return _RepoRow(
+                          label: widget.addLabel,
+                          autofocus: list.isEmpty,
+                          onTap: () => Navigator.pop(context, ''),
+                          onDelete: null,
+                        );
+                      }
+                      final r = list[i];
+                      final url = '${r['url'] ?? ''}';
+                      final isCurrent = r['current'] == true || url == current;
+                      final name = '${r['name'] ?? url}';
+                      return _RepoRow(
+                        key: ValueKey('$url|$name'),
+                        label: name,
+                        current: isCurrent,
+                        autofocus: i == 0,
+                        onTap: isCurrent ? () {} : () => Navigator.pop(context, url),
+                        onLongPress: () async {
+                          final edited = await widget.onEdit(url, '${r['title'] ?? ''}');
+                          if (edited == null || !mounted) return;
+                          _applyLocalEdit(url, edited.url, edited.name);
+                          await _reload();
+                        },
+                        onDelete: isCurrent
+                            ? null
+                            : () async {
+                                await widget.onDelete(url);
+                                await _reload();
+                              },
+                      );
+                    },
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: AppPill(
+                    label: '关闭',
+                    width: m.compact ? 72 : 96,
+                    height: 36,
+                    onTap: () => Navigator.pop(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RepoRow extends StatelessWidget {
   const _RepoRow({
+    super.key,
     required this.label,
     required this.onTap,
     this.onDelete,
