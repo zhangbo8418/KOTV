@@ -268,6 +268,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           result.success(videoTrackCandidates().size)
         }
       }
+      "audioTrackCount" -> {
+        main.post {
+          result.success(audioTrackCount())
+        }
+      }
       "selectVideoTrack" -> {
         val index = call.argument<Number>("index")?.toInt() ?: 0
         main.post {
@@ -384,6 +389,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               "height" to f.height,
               "durationMs" to p.duration.coerceAtLeast(0),
               "decodeMode" to effective,
+              "videoTrackCount" to videoTrackCandidates().size,
+              "audioTrackCount" to audioTrackCount(),
             ),
           )
         }
@@ -532,6 +539,18 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       f.width.coerceAtLeast(0) * f.height.coerceAtLeast(0)
     }
     return out
+  }
+
+  private fun audioTrackCount(): Int {
+    val p = player ?: return 0
+    var n = 0
+    for (g in p.currentTracks.groups) {
+      if (g.type != C.TRACK_TYPE_AUDIO) continue
+      for (i in 0 until g.length) {
+        if (g.isTrackSupported(i)) n++
+      }
+    }
+    return n
   }
 
   private fun selectVideoTrackAt(index: Int) {

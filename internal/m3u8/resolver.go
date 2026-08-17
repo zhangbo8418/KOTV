@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,12 +65,16 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 
 	fil := NewFilter(cfg)
 	filtered := fil.Apply(content, lms...)
-	filtered = stripNonVideoSegments(filtered)
+	// 不按 URI 扩展名删切片：正片常伪装成 .png/.jpg/.mp3/无后缀等。
 	filtered = convertRelativeTsToAbsolute(filtered, base)
 	filtered = absolutizeTagURIs(filtered, base)
 
 	segments := countSegments(filtered)
 	if segments < 2 {
+		return rawURL, nil
+	}
+	// 过滤把片长砍崩 → 回退原址。
+	if dur := sumExtinf(content); dur >= 120 && sumExtinf(filtered) < dur*0.5 {
 		return rawURL, nil
 	}
 
@@ -269,31 +274,10 @@ func resolveURL(base, ref string) string {
 	return bu.ResolveReference(ru).String()
 }
 
-var imageExts = []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-
+// stripNonVideoSegments 已废弃：按扩展名删切片会误杀伪装正片（如整表 .png 的点播）。
+// 保留空实现以免外部误用；ResolveForPlayback 不再调用。
 func stripNonVideoSegments(content string) string {
-	lines := strings.Split(content, "\n")
-	out := make([]string, 0, len(lines))
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "#EXTINF") && i+1 < len(lines) {
-			uri := strings.ToLower(mediaBase(lines[i+1]))
-			skip := false
-			for _, ext := range imageExts {
-				if strings.Contains(uri, ext) {
-					skip = true
-					break
-				}
-			}
-			if skip {
-				i++ // skip URI
-				continue
-			}
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
+	return content
 }
 
 func countSegments(content string) int {
@@ -306,6 +290,21 @@ func countSegments(content string) int {
 		n++
 	}
 	return n
+}
+
+func sumExtinf(content string) float64 {
+	var sum float64
+	for _, m := range extinfRe.FindAllStringSubmatch(content, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		v, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			continue
+		}
+		sum += v
+	}
+	return sum
 }
 
 func convertRelativeTsToAbsolute(content, base string) string {

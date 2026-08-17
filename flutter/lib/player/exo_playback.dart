@@ -32,6 +32,9 @@ class ExoPlayback extends KotvPlayback {
   double _rate = 1;
   int _w = 0;
   int _h = 0;
+  /// -1=未知；READY 后由原生写入。用于识别纯音频，避免无画面误切播放器。
+  int _videoTrackCount = -1;
+  int _audioTrackCount = -1;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration _buffered = Duration.zero;
@@ -58,7 +61,14 @@ class ExoPlayback extends KotvPlayback {
   @override
   Duration get buffered => _buffered;
   @override
-  bool get buffering => _buffering;
+  bool get buffering {
+    if (!_buffering) return false;
+    // Exo 补缓存时常 STATE_BUFFERING；已在播（含纯音频）不当作起播缓冲，避免浮层/误切。
+    if (_playing && (_w > 0 && _h > 0 || _isAudioOnlyUnlocked || _position > const Duration(seconds: 1))) {
+      return false;
+    }
+    return true;
+  }
   @override
   int get networkSpeedBps => _speedBps;
   @override
@@ -138,6 +148,12 @@ class ExoPlayback extends KotvPlayback {
         if (m['durationMs'] != null) {
           _duration = Duration(milliseconds: (m['durationMs'] as num).toInt());
         }
+        if (m['videoTrackCount'] != null) {
+          _videoTrackCount = (m['videoTrackCount'] as num).toInt();
+        }
+        if (m['audioTrackCount'] != null) {
+          _audioTrackCount = (m['audioTrackCount'] as num).toInt();
+        }
         _ready = true;
         _lastError = null;
         notifyListeners();
@@ -180,6 +196,10 @@ class ExoPlayback extends KotvPlayback {
     _completed = false;
     _ready = false;
     _lastError = null;
+    _videoTrackCount = -1;
+    _audioTrackCount = -1;
+    _w = 0;
+    _h = 0;
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffered = Duration.zero;
@@ -202,7 +222,7 @@ class ExoPlayback extends KotvPlayback {
     // 慢源：未 READY 也按缓冲逻辑最多等 60s，避免过早切播放器。
     await kotvGuardSilentVideo(
       hasVideoSize: () => _ready && _w > 0 && _h > 0,
-      isBuffering: () => !_ready || _buffering,
+      isBuffering: () => !_ready || buffering,
       sessionAlive: () {
         if (_lastError != null) return false;
         return _ready || _playing || _position > Duration.zero;
@@ -216,6 +236,7 @@ class ExoPlayback extends KotvPlayback {
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
     );
+    await _refreshTrackCounts();
     if (_lastError != null) {
       throw StateError('Exo 无法播放该地址（$_lastError）。可换线路或改用其它播放器');
     }
@@ -228,6 +249,24 @@ class ExoPlayback extends KotvPlayback {
     notifyListeners();
   }
 
+  Future<void> _refreshTrackCounts() async {
+    try {
+      final v = await _ch.invokeMethod<int>('videoTrackCount');
+      final a = await _ch.invokeMethod<int>('audioTrackCount');
+      if (v != null) _videoTrackCount = v;
+      if (a != null) _audioTrackCount = a;
+    } catch (_) {}
+  }
+
+  /// 不依赖 buffering 标志：补缓存时仍应识别为纯音频。
+  bool get _isAudioOnlyUnlocked {
+    if (_lastError != null || !_ready) return false;
+    if (_w > 0 && _h > 0) return false;
+    if (_videoTrackCount > 0) return false;
+    // 明确 0 条视频轨 + 有音轨 → 音乐/电台。
+    return _videoTrackCount == 0 && _audioTrackCount > 0;
+  }
+
   @override
   bool get hasVideoSourceHint {
     if (_lastError != null) return false;
@@ -237,22 +276,24 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   bool get isAudioOnlyContent {
-    if (_lastError != null || _buffering || !_ready) return false;
-    if (_w > 0 && _h > 0) return false;
-    // 仅当原生回报 0 条视频轨时放行；禁止「在播+无尺寸」瞎猜。
-    // videoTrackCount 为同步 getter 不便；起播守卫里用轨修复，失败再 failover。
-    return false;
+    if (!_isAudioOnlyUnlocked) return false;
+    return _playing || _position > Duration.zero;
   }
 
   /// 与 MPV 对齐：按分辨率优先轮询全部视频轨；无轨则 play 软重试。
   @override
   Future<void> tryFixVideoSource() async {
     try {
-      final n = await _ch.invokeMethod<int>('videoTrackCount') ?? 0;
-      if (n <= 0) {
+      await _refreshTrackCounts();
+      if (_videoTrackCount == 0) {
+        // 纯音频：无需修视源。
+        if (_audioTrackCount > 0) return;
         await play();
         return;
       }
+      final n = _videoTrackCount > 0
+          ? _videoTrackCount
+          : (await _ch.invokeMethod<int>('videoTrackCount') ?? 0);
       for (var i = 0; i < n; i++) {
         await _ch.invokeMethod('selectVideoTrack', {'index': i});
         await Future<void>.delayed(const Duration(milliseconds: 350));
