@@ -707,6 +707,68 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     return _reversed ? list.reversed.toList() : list;
   }
 
+  String? _currentEpisodeName() {
+    final eps = _eps;
+    if (_epIdx >= 0 && _epIdx < eps.length) return eps[_epIdx].name;
+    return null;
+  }
+
+  /// 对齐 TV Flag.find：按集名 / 集号匹配，不按「第 N 个」。
+  int _matchEpisodeIndex(List<EpisodeItem> eps, String remarks) {
+    if (eps.isEmpty) return -1;
+    if (eps.length == 1) return 0;
+    final want = remarks.trim();
+    if (want.isEmpty) return -1;
+    final wantNum = _episodeNumber(want);
+    var best = -1;
+    var bestScore = 0;
+    for (var i = 0; i < eps.length; i++) {
+      final name = eps[i].name.trim();
+      var score = 0;
+      if (name.toLowerCase() == want.toLowerCase()) {
+        score = 100;
+      } else if (wantNum != -1 && _episodeNumber(name) == wantNum) {
+        score = 80;
+      } else if (wantNum == -1 && want.length >= 2 && name.toLowerCase().contains(want.toLowerCase())) {
+        score = 70;
+      } else if (wantNum == -1 && name.length >= 2 && want.toLowerCase().contains(name.toLowerCase())) {
+        score = 60;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    }
+    if (best >= 0) return best;
+    if (_epIdx >= 0 && _epIdx < eps.length) return _epIdx;
+    return -1;
+  }
+
+  static int _episodeNumber(String name) {
+    final m = RegExp(r'(\d+)').firstMatch(name);
+    if (m == null) return -1;
+    return int.tryParse(m.group(1) ?? '') ?? -1;
+  }
+
+  /// 换线路：立刻切列表并按集名保留当前集（对齐 TV seamless）。
+  void _selectFlag(int i, {bool autoPlay = true}) {
+    final d = _detail;
+    if (d == null || d.flags.isEmpty) return;
+    if (i < 0 || i >= d.flags.length) return;
+    final remarks = _currentEpisodeName() ?? '';
+    _flagIdx = i;
+    final eps = _eps;
+    final idx = _matchEpisodeIndex(eps, remarks);
+    if (!mounted) return;
+    setState(() {
+      _flagIdx = i;
+      _epIdx = idx;
+      _epPage = idx >= 0 ? idx ~/ _epSize : 0;
+      _status = '已切换线路: ${d.flags[i].show}';
+    });
+    if (autoPlay && idx >= 0) unawaited(_playAt(idx));
+  }
+
   AspectSpec _aspectFromScale(String scale) {
     switch (scale) {
       case 'fill':
@@ -780,6 +842,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         ep.url.toLowerCase().contains('.torrent') ||
         ep.url.contains('/proxy/bt/') ||
         ep.url.toLowerCase().startsWith('magnet://local');
+    // 立刻高亮（对齐 TV）：不要等停播/解析，否则 PC 要点 1–2 秒按钮才变色。
+    if (mounted) {
+      setState(() {
+        _epIdx = epIdx;
+        _epPage = epIdx ~/ _epSize;
+        _magnetPlay = epLooksMagnet;
+        _status = epLooksMagnet
+            ? '磁力解析中…'
+            : (_epLooksDirectPlayUrl(ep.url) ? '换集中…' : '解析中…');
+      });
+    }
+    _syncFullscreen();
     // 解析/拉流可能要数秒：先停播，避免上一集在后台继续出声。
     await _stopAllBackends();
     if (serial != _playAtSerial || !mounted) return;
@@ -790,15 +864,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           thunder: _magnetPlay || epLooksMagnet,
         );
     if (serial != _playAtSerial || !mounted) return;
-    setState(() {
-      _epIdx = epIdx;
-      _playUrl = '';
-      _magnetPlay = epLooksMagnet;
-      // 对齐 TV：直链换集不显示「解析」；真网页壳/VIP 才进解析浮层。
-      _status = epLooksMagnet
-          ? '磁力解析中…'
-          : (_epLooksDirectPlayUrl(ep.url) ? '换集中…' : '解析中…');
-    });
+    if (mounted) {
+      setState(() {
+        _playUrl = '';
+        _magnetPlay = epLooksMagnet;
+      });
+    }
     _syncFullscreen();
     if (epLooksMagnet) _startBtProgressPoll();
     try {
@@ -1547,12 +1618,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 goKotvPage(ref, KotvPage.search);
               }));
             }),
-            _action(_reversed ? '正序' : '倒叙', Icons.swap_vert_rounded, () => setState(() {
-                  _reversed = !_reversed;
+            _action(_reversed ? '正序' : '倒叙', Icons.swap_vert_rounded, () {
+              final n = _eps.length;
+              final old = _epIdx;
+              setState(() {
+                _reversed = !_reversed;
+                if (old >= 0 && n > 0) {
+                  _epIdx = n - 1 - old;
+                  _epPage = _epIdx ~/ _epSize;
+                } else {
                   _epPage = 0;
-                  _epIdx = -1;
-                  _status = _reversed ? '已倒序' : '已正序';
-                })),
+                }
+                _status = _reversed ? '已倒序' : '已正序';
+              });
+            }),
             _action(_kept ? '取消收藏' : '收藏', Icons.star_border_rounded, () async {
               final kept = await LocalCollect.toggle(VodItem(
                 id: d.id.isNotEmpty ? d.id : widget.id,
@@ -1572,16 +1651,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 return;
               }
               final next = (_flagIdx + 1) % flags.length;
-              setState(() {
-                _flagIdx = next;
-                _epPage = 0;
-                _epIdx = -1;
-                _status = '已自动切换线路: ${flags[next].show}';
-              });
-              final nextEps = _eps;
-              if (nextEps.isNotEmpty) {
-                _playAt(0);
-              }
+              _selectFlag(next);
             }),
             _action('解析', Icons.tune_rounded, () => _pickParse()),
           ],
@@ -1616,11 +1686,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                       height: pillH,
                       fontSize: pillFs,
                       selected: i == _flagIdx,
-                      onTap: () => setState(() {
-                        _flagIdx = i;
-                        _epPage = 0;
-                        _epIdx = -1;
-                      }),
+                      onTap: () {
+                        if (i == _flagIdx) return;
+                        _selectFlag(i);
+                      },
                     ),
                   ),
                 ),
