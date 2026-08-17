@@ -285,37 +285,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   String get _adMode {
     final on = g('adFilter', 'true');
-    final cfg = g('m3u8FilterConfig');
     final enabled = on.isEmpty || on == 'true' || on == '1' || on == 'on';
     if (!enabled) return 'off';
-    if (cfg.contains('"violentFilterModeFlag":true')) return 'violent';
-    return 'on';
+    final cfg = g('m3u8FilterConfig');
+    if (cfg.contains('"mode":"mild"') || cfg.contains('"mode": "mild"')) return 'mild';
+    // 旧版「暴力」配置 → 温和（只去断点）
+    if (cfg.contains('"violentFilterModeFlag":true')) return 'mild';
+    return 'smart';
   }
 
   Future<void> _setAdMode(String mode) async {
     if (mode == 'off') {
       await _setMany({
         'adFilter': 'false',
-        'm3u8FilterConfig': '{"tsNameLenExtend":1,"theExtinfBenchmarkN":5,"violentFilterModeFlag":false}',
+        'm3u8FilterConfig': '',
       }, msg: '广告过滤已关闭');
-    } else if (mode == 'violent') {
+    } else if (mode == 'mild') {
       await _setMany({
         'adFilter': 'true',
-        'm3u8FilterConfig': '{"tsNameLenExtend":1,"theExtinfBenchmarkN":5,"violentFilterModeFlag":true}',
-      }, msg: '已开启暴力过滤');
+        'm3u8FilterConfig': '{"mode":"mild"}',
+      }, msg: '已开启温和过滤（仅去断点）');
     } else {
       await _setMany({
         'adFilter': 'true',
-        'm3u8FilterConfig': '{"tsNameLenExtend":1,"theExtinfBenchmarkN":5,"violentFilterModeFlag":false}',
-      }, msg: '广告过滤已开启');
+        'm3u8FilterConfig': '{"mode":"smart"}',
+      }, msg: '已开启智能过滤');
     }
   }
 
   Future<void> _pickAd() async {
     final v = await pickChoice(context, title: '广告过滤', current: _adMode, options: const [
       ('关闭', 'off'),
-      ('开启', 'on'),
-      ('暴力模式', 'violent'),
+      ('智能（推荐）', 'smart'),
+      ('温和（仅去断点）', 'mild'),
     ]);
     if (v != null) await _setAdMode(v);
   }
@@ -757,7 +759,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         scale;
     final decodeLabel = {'auto': '自动', 'soft': '软解码', 'hard': '硬解码'}[decode] ?? decode;
     final failoverLabel = (playerFailover == 'off' || playerFailover == 'false') ? '关闭' : '自动';
-    final adLabel = {'off': '关闭', 'on': '开启', 'violent': '暴力'}[ad] ?? ad;
+    final adLabel = {'off': '关闭', 'smart': '智能', 'mild': '温和', 'on': '智能'}[ad] ?? ad;
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
     final mpvConfPreview = g('mpvConf').trim();

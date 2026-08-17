@@ -89,7 +89,7 @@ func defaultFile() file {
 			{ID: "proxy", Label: "代理", Value: "false#"},
 			{ID: "theme", Label: "主题", Value: "system"},
 			{ID: "adFilter", Label: "M3U8广告过滤", Value: "true"},
-			{ID: "m3u8FilterConfig", Label: "M3U8过滤配置", Value: ""},
+			{ID: "m3u8FilterConfig", Label: "M3U8过滤配置(smart|mild)", Value: "{\"mode\":\"smart\"}"},
 			{ID: "danmaku", Label: "弹幕", Value: "true"},
 			{ID: "danmakuApi", Label: "弹幕API", Value: ""},
 			{ID: "danmakuSize", Label: "弹幕字号", Value: "18"},
