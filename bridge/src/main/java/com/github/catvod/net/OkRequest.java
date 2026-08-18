@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.util.Map;
 
 import okhttp3.FormBody;
+import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -45,8 +46,19 @@ class OkRequest {
         Request.Builder builder = new Request.Builder();
         if (method.equals(OkHttp.GET) && params != null) setParams();
         if (method.equals(OkHttp.POST)) builder.post(getRequestBody());
-        if (header != null) for (String key : header.keySet()) builder.addHeader(key, header.get(key));
-        request = builder.url(url).build();
+        if (header != null) {
+            for (String key : header.keySet()) {
+                String value = header.get(key);
+                if (key != null && value != null) builder.addHeader(key, value);
+            }
+        }
+        // OkHttp 5 的 Builder.url 是 Kotlin non-null；TV 站点常传入空串/相对路径。
+        String u = url == null ? "" : url.trim();
+        if (u.isEmpty() || HttpUrl.parse(u) == null) {
+            request = null;
+            return;
+        }
+        request = builder.url(u).build();
     }
 
     private RequestBody getRequestBody() {
@@ -63,6 +75,7 @@ class OkRequest {
     }
 
     public OkResult execute(OkHttpClient client) {
+        if (request == null) return new OkResult();
         try (Response res = client.newCall(request).execute()) {
             return new OkResult(res.code(), res.body().string(), res.headers().toMultimap());
         } catch (IOException e) {

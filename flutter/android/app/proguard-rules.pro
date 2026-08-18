@@ -30,6 +30,9 @@
 -keep class org.jsoup.** { *; }
 -keep class com.google.gson.** { *; }
 -keep class org.json.** { *; }
+# TV dex Config.s / merge 编二维码：EncodeHintType 必须在 App CL 原名可见
+-keep class com.google.zxing.** { *; }
+-dontwarn com.google.zxing.**
 # 对齐 TV：SimpleXML 注解/接口会被 sardine-android 反射访问
 -keep interface org.simpleframework.xml.core.Label { public *; }
 -keep class * implements org.simpleframework.xml.core.Label { public *; }

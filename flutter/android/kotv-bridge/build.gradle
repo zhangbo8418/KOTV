@@ -78,6 +78,9 @@ dependencies {
     implementation "cn.hutool:hutool-core:5.8.28"
     api "org.apache.commons:commons-lang3:3.14.0"
     api "commons-codec:commons-codec:1.16.0"
+    // TV dex 的 Config/merge 按原名链 com.google.zxing（FongMi TV 用 zxing-android-embedded 带上 core）。
+    // 宿主只提供类，不解释二维码业务；PC 瘦包仍可自带一份，父优先会落到这里。
+    api "com.google.zxing:core:3.5.1"
     implementation "commons-io:commons-io:2.15.1"
     implementation "org.json:json:20240303"
     implementation "org.nanohttpd:nanohttpd:2.3.1"
