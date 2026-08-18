@@ -67,6 +67,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         }
       } catch (_) {}
     }
+    if (kIsWeb) {
+      return const [];
+    }
     final d = Directory(dir);
     if (!d.existsSync()) {
       throw StateError('目录不存在');

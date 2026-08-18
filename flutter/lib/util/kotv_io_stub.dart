@@ -48,6 +48,8 @@ class Directory {
   void createSync({bool recursive = false}) {}
   Stream<FileSystemEntity> list({bool recursive = false, bool followLinks = true}) =>
       const Stream.empty();
+  List<FileSystemEntity> listSync({bool recursive = false, bool followLinks = true}) =>
+      const [];
 }
 
 class FileSystemEntity {
