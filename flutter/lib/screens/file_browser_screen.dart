@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../nav/kotv_routes.dart';
 import '../theme/kotv_palette.dart';
@@ -47,23 +49,47 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     return a == b;
   }
 
+  Future<List<_FsItem>> _listDir(String dir) async {
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        const ch = MethodChannel('kotv_android');
+        final raw = await ch.invokeMethod<List<dynamic>>('listDir', dir);
+        if (raw != null) {
+          return [
+            for (final e in raw)
+              if (e is Map)
+                _FsItem(
+                  path: '${e['path'] ?? ''}',
+                  name: '${e['name'] ?? ''}',
+                  isDir: e['isDir'] == true,
+                ),
+          ].where((it) => it.path.isNotEmpty && it.name.isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
+    final d = Directory(dir);
+    if (!d.existsSync()) {
+      throw StateError('目录不存在');
+    }
+    final raw = d.listSync(followLinks: false);
+    final items = <_FsItem>[];
+    for (final e in raw) {
+      final name = e.path.split(RegExp(r'[/\\]')).last;
+      if (name.isEmpty || name == '.' || name == '..') continue;
+      var isDir = e is Directory;
+      if (!isDir) {
+        try {
+          isDir = FileSystemEntity.isDirectorySync(e.path);
+        } catch (_) {}
+      }
+      items.add(_FsItem(path: e.path, name: name, isDir: isDir));
+    }
+    return items;
+  }
+
   Future<void> _load() async {
     try {
-      final d = Directory(_dir);
-      if (!d.existsSync()) {
-        setState(() {
-          _error = '目录不存在';
-          _items = [];
-        });
-        return;
-      }
-      final raw = await d.list(followLinks: false).toList();
-      final items = <_FsItem>[];
-      for (final e in raw) {
-        final name = e.path.split(RegExp(r'[/\\]')).last;
-        if (name.isEmpty || name == '.' || name == '..') continue;
-        items.add(_FsItem(path: e.path, name: name, isDir: FileSystemEntity.isDirectorySync(e.path)));
-      }
+      final items = await _listDir(_dir);
       items.sort((a, b) {
         if (a.isDir != b.isDir) return a.isDir ? -1 : 1;
         return a.name.toLowerCase().compareTo(b.name.toLowerCase());

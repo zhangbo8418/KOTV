@@ -536,10 +536,13 @@ public class SpiderBridge {
                 try {
                     clazz = loader.loadClass(className);
                 } catch (ClassNotFoundException e) {
-                    File jf = new File(jarPath);
+                    String shortName = className;
+                    int dot = shortName.lastIndexOf('.');
+                    if (dot >= 0) shortName = shortName.substring(dot + 1);
+                    System.err.println("getSpider missing " + className + " in " + jarPath
+                            + "; spiders=" + listSiteSpiders(jarPath));
                     throw new ClassNotFoundException(
-                            className + " not in jar " + jarPath + " (" + jf.length() + " bytes)"
-                                    + "; spiders=" + listSiteSpiders(jarPath),
+                            "当前爬虫包没有 " + shortName + "（配置 api=" + api + "）",
                             e);
                 }
                 Constructor<?> ctor = clazz.getDeclaredConstructor();
@@ -645,12 +648,6 @@ public class SpiderBridge {
             extend = "";
         }
         Context initCtx = ctx();
-        if (isArtVm()) {
-            Context ui = UiContext.forUi();
-            if (ui != null) {
-                initCtx = ui;
-            }
-        }
         spider.init(initCtx, extend);
     }
 
@@ -786,8 +783,21 @@ public class SpiderBridge {
             Context app = ctx();
             Activity act = UiContext.activity();
             boolean initialized = false;
-            // 部分改造 jar 的 init 可接受 Activity；标准 TV dex 只收 Application。
-            if (act != null) {
+            // 标准 TV dex：Init.init 必须 Application。先传 Activity 会 CCE；
+            // PC 改造 jar 若先拿到非 Application 还会 new 出无 base 的空 Application（getPackageName NPE）。
+            if (app != null) {
+                try {
+                    Context asApp = app.getApplicationContext();
+                    init.invoke(null, asApp != null ? asApp : app);
+                    initialized = true;
+                } catch (java.lang.reflect.InvocationTargetException ite) {
+                    Throwable cause = ite.getCause() != null ? ite.getCause() : ite;
+                    if (!(cause instanceof ClassCastException)) {
+                        throw ite;
+                    }
+                }
+            }
+            if (!initialized && act != null) {
                 try {
                     init.invoke(null, act);
                     initialized = true;
@@ -797,9 +807,6 @@ public class SpiderBridge {
                         throw ite;
                     }
                 }
-            }
-            if (!initialized) {
-                init.invoke(null, app);
             }
             injectJarInitActivity(clz, act);
         } catch (ClassNotFoundException ignored) {

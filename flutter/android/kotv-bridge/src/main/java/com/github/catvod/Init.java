@@ -1,21 +1,23 @@
 package com.github.catvod;
 
 import android.app.Activity;
+import android.app.Application;
 import android.content.Context;
 
 import com.bobo.kotv.host.UiContext;
 import com.bobo.kotv.host.DialogRelay;
 
-import java.lang.ref.WeakReference;
-
 /**
  * App CL 宿主 Init（迅雷 AAR + 站点父优先都会命中本类）。
  * 与 TV catvod Init ABI 一致；须在任何 Path/Thunder 调用前 {@link #set(Context)}。
  * {@link #uiContext()} 供宿主侧 AlertDialog 等优先拿当前 Activity（对齐 TV {@code App.activity()}）。
+ *
+ * <p>Application 用强引用：WeakReference 在 attachBaseContext 阶段若只拿到短暂 Context，
+ * 会被回收，站点 jar 随后 {@code Init.context().getPackageName()} NPE。
  */
 public class Init {
 
-    private WeakReference<Context> context;
+    private static volatile Context appContext;
 
     private static Init get() {
         return Loader.INSTANCE;
@@ -24,9 +26,12 @@ public class Init {
     public static void set(Context context) {
         if (context == null) return;
         Context app = context.getApplicationContext();
-        get().context = new WeakReference<>(app != null ? app : context);
-        if (app instanceof android.app.Application) {
-            UiContext.setApplication((android.app.Application) app);
+        if (app == null) app = context;
+        if (app instanceof Application) {
+            appContext = app;
+            UiContext.setApplication((Application) app);
+        } else if (appContext == null) {
+            appContext = app;
         }
         if (context instanceof Activity) {
             UiContext.setActivity((Activity) context);
@@ -34,8 +39,14 @@ public class Init {
     }
 
     public static Context context() {
-        WeakReference<Context> ref = get().context;
-        return ref == null ? null : ref.get();
+        Context c = appContext;
+        if (c != null) return c;
+        Application app = UiContext.application();
+        if (app != null) {
+            appContext = app;
+            return app;
+        }
+        return null;
     }
 
     /** 当前前台 Activity；无则 null（对齐 TV App.activity()）。 */

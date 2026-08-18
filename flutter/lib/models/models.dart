@@ -25,9 +25,12 @@ class VodItem {
 
   bool get hasAction => action.trim().isNotEmpty;
 
-  /// 对齐 TV Vod.isFolder：`vod_tag=folder` 或存在 cate → 进目录，不进播放器。
-  bool get isFolder =>
-      folder || vodTag.trim().toLowerCase() == 'folder' || cate.trim().isNotEmpty;
+  /// 对齐 TV Vod.isFolder：显式 `vod_tag=file` 不当目录；`folder` 或 cate 才进文件夹。
+  bool get isFolder {
+    final tag = vodTag.trim().toLowerCase();
+    if (tag == 'file') return false;
+    return folder || tag == 'folder' || cate.trim().isNotEmpty;
+  }
 
   factory VodItem.fromJson(Map<String, dynamic> j) => VodItem(
         id: '${j['vod_id'] ?? ''}',

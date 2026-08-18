@@ -1426,7 +1426,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                       _status.contains('缓冲中')),
             ),
           if (_playUrl.isNotEmpty)
-            CenterPlayPauseButton(player: _playback),
+            CenterPlayPauseButton(player: _playback, chromeVisible: false),
           if (_status.contains('解析') || _status.contains('嗅探'))
             const ColoredBox(
               color: Color(0x66000000),

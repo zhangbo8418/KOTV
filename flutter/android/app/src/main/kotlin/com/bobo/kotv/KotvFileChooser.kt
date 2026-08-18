@@ -324,6 +324,26 @@ object KotvFileChooser {
 
   fun storageRoot(): String = Environment.getExternalStorageDirectory().absolutePath
 
+  /** 对齐 TV FileActivity：Java listFiles 同时列出目录和文件（Dart Directory.list 在无完整存储权限时常见只出目录）。 */
+  fun listDir(path: String): List<Map<String, Any>> {
+    val dir = File(path)
+    val kids = dir.listFiles() ?: return emptyList()
+    Path.sort(kids)
+    val out = ArrayList<Map<String, Any>>(kids.size)
+    for (f in kids) {
+      val name = f.name ?: continue
+      if (name.isEmpty() || name == "." || name == "..") continue
+      out.add(
+        mapOf(
+          "path" to f.absolutePath,
+          "name" to name,
+          "isDir" to f.isDirectory,
+        ),
+      )
+    }
+    return out
+  }
+
   /**
    * 对齐 TV FileChooser.show：电视 / 无可用文档选择器时走应用内 FileActivity，
    * 才能进目录；系统桩选择器常把目录当文件返回。

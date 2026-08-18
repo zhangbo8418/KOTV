@@ -17,6 +17,15 @@
 -dontwarn okio.**
 -keep class okhttp3.** { *; }
 -keep class okio.** { *; }
+# PC 瘦包把 lang3/hutool/guava/codec 留给宿主；R8 改名后站点 jar 会 NoClassDefFoundError。
+-keep class org.apache.commons.lang3.** { *; }
+-keep class org.apache.commons.codec.** { *; }
+-keep class org.apache.commons.io.** { *; }
+-keep class cn.hutool.** { *; }
+-keep class com.google.common.** { *; }
+-dontwarn org.apache.commons.lang3.**
+-dontwarn org.apache.commons.codec.**
+-dontwarn com.google.common.**
 # 其它常见宿主 API：站点 jar 同样按原名链接，R8 看不到 jar 内引用
 -keep class org.jsoup.** { *; }
 -keep class com.google.gson.** { *; }

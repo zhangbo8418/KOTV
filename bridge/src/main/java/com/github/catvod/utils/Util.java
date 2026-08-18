@@ -52,7 +52,11 @@ public class Util {
     public static final String CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36";
     public static final String SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.33";
     public static final String ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
-    public static final List<String> MEDIA = Arrays.asList("mp4", "mkv", "wmv", "flv", "avi", "iso", "mpg", "ts", "mp3", "aac", "flac", "m4a", "ape", "ogg");
+    public static final List<String> MEDIA = Arrays.asList(
+            "mp4", "mkv", "mov", "m4v", "webm", "wmv", "flv", "avi", "iso", "mpg", "mpeg",
+            "ts", "m2ts", "mp3", "aac", "flac", "m4a", "ape", "ogg", "wav", "wma",
+            "rm", "rmvb", "asf", "dts", "dsf", "dff", "m3u8", "mpd"
+    );
     public static final List<String> SUB = Arrays.asList("srt", "ass", "ssa", "vtt");
 
     private static HashMap<String, String> webHttpHeaderMap;
@@ -95,15 +99,16 @@ public class Util {
     }
 
     public static boolean isSub(String ext) {
-        return SUB.contains(ext);
+        return ext != null && SUB.contains(ext.toLowerCase(Locale.ROOT));
     }
 
     public static boolean isMedia(String text) {
-        return MEDIA.contains(getExt(text));
+        return MEDIA.contains(getExt(text).toLowerCase(Locale.ROOT));
     }
 
     public static String getExt(String name) {
-        return name.contains(".") ? name.substring(name.lastIndexOf(".") + 1) : name;
+        if (name == null || !name.contains(".")) return name == null ? "" : name;
+        return name.substring(name.lastIndexOf(".") + 1);
     }
 
     public static String getSize(double size) {

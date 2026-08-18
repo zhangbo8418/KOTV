@@ -43,7 +43,11 @@ func (v *Vod) IsEmpty() bool {
 }
 
 func (v *Vod) IsFolder() bool {
-	if strings.EqualFold(strings.TrimSpace(v.VodTag), "folder") {
+	tag := strings.ToLower(strings.TrimSpace(v.VodTag))
+	if tag == "file" {
+		return false
+	}
+	if tag == "folder" {
 		return true
 	}
 	// 对齐 TV Vod.isFolder：`cate` 对象存在即当目录。
