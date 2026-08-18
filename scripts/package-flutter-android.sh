@@ -82,7 +82,6 @@ build_one_abi() {
   if ! printf '%s\n' "$listing" | python3 -c '
 import re, sys
 want = sys.argv[1]
-# x86_64 须排在 x86 前，避免误伤
 others = [a for a in ("x86_64", "armeabi-v7a", "arm64-v8a", "x86") if a != want]
 hits = []
 for line in sys.stdin:
@@ -90,17 +89,18 @@ for line in sys.stdin:
     if not p or p.endswith("/"):
         continue
     parts = p.split("/")
-    for a in others:
-        if a in parts:
-            hits.append(p)
-            break
-        # Chaquopy: stdlib-arm64-v8a.zip / xxx-arm64-v8a.yyy
-        if any(re.search(rf"(^|[-_.]){re.escape(a)}([.-_]|$)", seg) for seg in parts):
-            # 避免 x86 匹配到 x86_64
-            if a == "x86" and any("x86_64" in seg for seg in parts):
+    # 只认 Android JNI：lib/<abi>/...；不要把 darwin/x86_64、win/x86 当 ABI
+    if len(parts) >= 2 and parts[0] == "lib" and parts[1] in others:
+        hits.append(p)
+        continue
+    # Chaquopy：assets 里带 ABI 后缀的 zip/so
+    if "chaquopy" in p.lower():
+        for a in others:
+            if a == "x86" and "x86_64" in p:
                 continue
-            hits.append(p)
-            break
+            if re.search(rf"(^|[-_./]){re.escape(a)}([.-_/]|$)", p):
+                hits.append(p)
+                break
 if hits:
     print("\n".join(hits[:40]), file=sys.stderr)
     if len(hits) > 40:

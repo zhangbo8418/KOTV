@@ -97,6 +97,25 @@ android {
             excludes += "META-INF/versions/**/OSGI-INF/**"
             excludes += "META-INF/versions/**/module-info.class"
             excludes += "**/module-info.class"
+            // zstd-jni fat jar：桌面/其它 ISA 的 so/dll/dylib。Android 运行时只读 linux/<arch>/。
+            excludes += "darwin/**"
+            excludes += "win/**"
+            excludes += "aix/**"
+            excludes += "freebsd/**"
+            excludes += "linux/amd64/**"
+            excludes += "linux/i386/**"
+            excludes += "linux/ppc64/**"
+            excludes += "linux/ppc64le/**"
+            excludes += "linux/s390x/**"
+            excludes += "linux/riscv64/**"
+            excludes += "linux/loongarch64/**"
+            excludes += "linux/mips64/**"
+            if (!kotvAbiFilters.contains("arm64-v8a")) {
+                excludes += "linux/aarch64/**"
+            }
+            if (!kotvAbiFilters.contains("armeabi-v7a")) {
+                excludes += "linux/arm/**"
+            }
             pickFirsts += "META-INF/INDEX.LIST"
             pickFirsts += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
             pickFirsts += "META-INF/versions/9/module-info.class"
