@@ -11,6 +11,16 @@
 -keep class com.bobo.kotv.bridge.SpiderBridge { *; }
 -keep class com.github.catvod.** { *; }
 -keep class com.orhanobut.logger.** { *; }
+# TV dex jar 从 App CL 按原名解析 OkHttp（DexClassLoader 父优先）。
+# Flutter Release 默认开 R8：未 keep 时 OkHttpClient 会被改成 p3.z，ConnectionPool 直接被删掉。
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-keep class okhttp3.** { *; }
+-keep class okio.** { *; }
+# 其它常见宿主 API：站点 jar 同样按原名链接，R8 看不到 jar 内引用
+-keep class org.jsoup.** { *; }
+-keep class com.google.gson.** { *; }
+-keep class org.json.** { *; }
 -dontwarn cn.hutool.**
 -dontwarn org.bouncycastle.**
 -dontwarn edu.umd.cs.findbugs.**
