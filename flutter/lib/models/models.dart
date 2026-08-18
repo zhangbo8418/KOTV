@@ -6,6 +6,7 @@ class VodItem {
     this.remarks = '',
     this.typeName = '',
     this.site = '',
+    this.action = '',
   });
 
   final String id;
@@ -14,6 +15,9 @@ class VodItem {
   final String remarks;
   final String typeName;
   final String site;
+  final String action;
+
+  bool get hasAction => action.trim().isNotEmpty;
 
   factory VodItem.fromJson(Map<String, dynamic> j) => VodItem(
         id: '${j['vod_id'] ?? ''}',
@@ -22,6 +26,7 @@ class VodItem {
         remarks: '${j['vod_remarks'] ?? ''}',
         typeName: '${j['type_name'] ?? ''}',
         site: '${j['site'] ?? ''}',
+        action: '${j['action'] ?? ''}',
       );
 }
 

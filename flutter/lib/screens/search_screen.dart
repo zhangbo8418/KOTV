@@ -9,7 +9,7 @@ import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../widgets/chrome.dart';
 import '../widgets/poster_card.dart';
-import 'detail_screen.dart';
+import '../vod/vod_open.dart';
 import 'shell.dart';
 
 class _SiteCollect {
@@ -501,12 +501,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             child: PosterFlow(
               items: c.list,
               padding: EdgeInsets.zero,
-              onOpen: (it) {
-                LocalHistory.push(it);
-                Navigator.of(context).push(kotvDetailRoute(
-                  builder: (_) => DetailScreen(id: it.id, site: it.site.isNotEmpty ? it.site : c.site, title: it.name),
-                ));
-              },
+              onOpen: (it) => openVodItem(context, ref, it, site: c.site),
             ),
           ),
           const SizedBox(height: 16),

@@ -382,6 +382,10 @@ class KotvApi {
         if (values != null && values.isNotEmpty) 'values': values,
       });
 
+  /// TV 式站点 action（Market 下载等）：vod 带 action 字段时调用。
+  Future<Map<String, dynamic>> siteAction({required String site, required String action}) =>
+      _post('/api/v1/action', {'site': site, 'action': action});
+
   /// 打断进行中的详情/分类等爬虫请求。
   /// [hard] 硬杀所属 JVM/Py/JS；换集默认 false（软取消）。
   /// [thunder] 停磁力 Fetch（会显示「已取消」）；非磁力起播应 false。

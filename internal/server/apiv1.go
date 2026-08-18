@@ -21,6 +21,7 @@ type ContentAPI interface {
 	APISetHome(siteKey string) error
 	APIHome() (map[string]any, error)
 	APICategory(tid, pg string, extend map[string]string) (map[string]any, error)
+	APIAction(siteKey, action string) (map[string]any, error)
 	APIDetail(siteKey, vodID string) (map[string]any, error)
 	APIDetailExpand(siteKey, vodID string, flags []map[string]any) (map[string]any, error)
 	APIBtProgress() map[string]any
@@ -100,6 +101,7 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/config", wrap(s.handleAPIv1Config))
 	mux.HandleFunc("/api/v1/home", wrap(s.handleAPIv1Home))
 	mux.HandleFunc("/api/v1/category", wrap(s.handleAPIv1Category))
+	mux.HandleFunc("/api/v1/action", wrap(s.handleAPIv1Action))
 	mux.HandleFunc("/api/v1/detail", wrap(s.handleAPIv1Detail))
 	mux.HandleFunc("/api/v1/detail/expand", wrap(s.handleAPIv1DetailExpand))
 	mux.HandleFunc("/api/v1/bt/progress", wrap(s.handleAPIv1BtProgress))
@@ -323,6 +325,41 @@ func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := api.APICategory(tid, pg, extend)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleAPIv1Action(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	api := s.content()
+	if api == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+		return
+	}
+	var body struct {
+		Site   string `json:"site"`
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	action := strings.TrimSpace(body.Action)
+	if action == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing action")
+		return
+	}
+	out, err := api.APIAction(strings.TrimSpace(body.Site), action)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, err.Error())
 		return

@@ -16,6 +16,7 @@ import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/poster_card.dart';
+import '../vod/vod_open.dart';
 import 'detail_screen.dart';
 import 'shell.dart';
 
@@ -356,10 +357,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   void _open(VodItem it) {
-    LocalHistory.push(it);
-    Navigator.of(context).push(kotvDetailRoute(
-      builder: (_) => DetailScreen(id: it.id, site: it.site, title: it.name),
-    ));
+    openVodItem(context, ref, it);
   }
 
   Future<void> _openSitePicker(List<SiteInfo> sites) async {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"path"
@@ -169,6 +170,41 @@ func (a *App) APICategory(tid, pg string, extend map[string]string) (map[string]
 		"pagecount": res.PageCount.Value,
 		"list":      vodsDTO(res.List, home.Key),
 		"filters":   filtersDTO(sites.FiltersForCategory(tid)),
+	}, nil
+}
+
+func (a *App) APIAction(siteKey, action string) (map[string]any, error) {
+	if localCrawlerDisabled() {
+		return nil, fmt.Errorf("请先连接可用后端服务")
+	}
+	action = strings.TrimSpace(action)
+	if action == "" {
+		return nil, fmt.Errorf("missing action")
+	}
+	cfg, sites, _ := a.scope()
+	var site *model.Site
+	if sk := strings.TrimSpace(siteKey); sk != "" {
+		site = cfg.GetSite(sk)
+	}
+	if site == nil {
+		h := cfg.Home()
+		site = &h
+	}
+	raw, err := sites.Action(*site, action)
+	if err != nil {
+		return nil, err
+	}
+	msg := ""
+	var parsed map[string]any
+	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &parsed) == nil {
+		if m, ok := parsed["msg"].(string); ok {
+			msg = strings.TrimSpace(m)
+		}
+	}
+	return map[string]any{
+		"ok":  true,
+		"msg": msg,
+		"raw": raw,
 	}, nil
 }
 
