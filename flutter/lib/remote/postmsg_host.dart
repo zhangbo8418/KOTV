@@ -8,6 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../api/kotv_api.dart';
 import '../player/kotv_platform.dart';
+import '../theme/kotv_palette.dart';
+import '../theme/layout_scale.dart';
+import '../widgets/chrome.dart';
 
 /// 通用宿主弹窗：只认协议 [UI:] / [UI_CLOSE:]，不关心业务。
 /// 脚本（JAR/JS/Py）决定内容与时机；宿主只负责：
@@ -438,63 +441,67 @@ class PostMsgHost {
                       }
                     }
 
+                    final p = KotvPalette.of(ctx);
                     final title = '${doc['title'] ?? ''}';
                     final elements = (doc['elements'] as List?) ?? const [];
                     final actions = (doc['actions'] as List?) ?? const [];
                     final docFont = _num(doc['fontSize']);
                     final titleFont = _num(doc['titleSize']);
                     final actionFont = _num(doc['actionFontSize']);
-                    final actionW = _num(doc['actionWidth']);
                     final actionH = _num(doc['actionHeight']);
+                    final actionMaps = [
+                      for (final a in actions)
+                        if (a is Map) Map<String, dynamic>.from(a),
+                    ];
 
-                    return AlertDialog(
-                      backgroundColor: const Color(0xFF1A1028),
+                    return _hostUiCard(
+                      context: ctx,
+                      doc: doc,
                       title: title.isEmpty
                           ? null
                           : Text(
                               title,
                               style: TextStyle(
-                                color: Colors.white,
-                                fontSize: titleFont > 0 ? titleFont : (docFont > 0 ? docFont + 2 : null),
+                                color: p.fg,
+                                fontSize: titleFont >= 20
+                                    ? titleFont
+                                    : (kotvIsDesktop() ? 22 : (titleFont > 0 ? titleFont : 20)),
+                                fontWeight: FontWeight.w700,
+                                height: 1.2,
                               ),
                             ),
-                      content: _docContentBox(
-                        dialogCtx,
-                        doc,
-                        child: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (final el in elements)
-                                if (el is Map)
-                                  ..._buildElement(
-                                    Map<String, dynamic>.from(el),
-                                    docFontSize: docFont,
-                                    values: values,
-                                    checks: checks,
-                                    radios: radios,
-                                    selects: selects,
-                                    setLocal: setLocal,
-                                    fire: fire,
-                                  ),
-                            ],
-                          ),
+                      body: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final el in elements)
+                              if (el is Map)
+                                ..._buildElement(
+                                  Map<String, dynamic>.from(el),
+                                  palette: p,
+                                  docFontSize: docFont,
+                                  values: values,
+                                  checks: checks,
+                                  radios: radios,
+                                  selects: selects,
+                                  setLocal: setLocal,
+                                  fire: fire,
+                                ),
+                          ],
                         ),
                       ),
-                      actions: [
-                        for (final a in actions)
-                          if (a is Map)
-                            _buildActionButton(
-                              Map<String, dynamic>.from(a),
+                      actions: actionMaps.isEmpty
+                          ? null
+                          : _hostActionRow(
+                              context: ctx,
+                              actions: actionMaps,
                               defaultFont: actionFont > 0 ? actionFont : docFont,
-                              defaultW: actionW,
                               defaultH: actionH,
-                              onPressed: () => fire(
+                              onPressed: (a) => fire(
                                 '${a['id'] ?? 'action'}',
                                 dismissAfter: a['dismiss'] == true,
                               ),
                             ),
-                      ],
                     );
                   },
                 );
@@ -541,45 +548,152 @@ class PostMsgHost {
 
   /// 关窗瞬间仍展示最后一帧内容（无交互），避免空 barrier。
   Widget _buildDialogShell(Map<String, dynamic> doc) {
-    final title = '${doc['title'] ?? ''}';
     final ctx = navigatorKey.currentContext;
-    return AlertDialog(
-      backgroundColor: const Color(0xFF1A1028),
-      title: title.isEmpty ? null : Text(title, style: const TextStyle(color: Colors.white)),
-      content: ctx == null
-          ? const SizedBox(
-              width: 120,
-              height: 80,
-              child: Center(child: CircularProgressIndicator(color: Colors.white54)),
-            )
-          : _docContentBox(
-              ctx,
-              doc,
-              child: const Center(child: CircularProgressIndicator(color: Colors.white54)),
-            ),
+    if (ctx == null) return const SizedBox.shrink();
+    final p = KotvPalette.of(ctx);
+    final title = '${doc['title'] ?? ''}';
+    return _hostUiCard(
+      context: ctx,
+      doc: doc,
+      title: title.isEmpty
+          ? null
+          : Text(title, style: TextStyle(color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
+      body: Center(child: CircularProgressIndicator(color: p.primary)),
     );
   }
 
-  /// 窗口宽高由脚本 Document 指定；有值则固定视口（内容滚动），不是靠内容撑开。
-  /// 仅用屏幕尺寸做上限，避免溢出。
-  Widget _docContentBox(BuildContext ctx, Map<String, dynamic> doc, {required Widget child}) {
-    final screen = MediaQuery.sizeOf(ctx);
+  /// 对齐 TV / 换源大卡片：半透明 dialogBg + 18 圆角描边，桌面默认更宽。
+  Widget _hostUiCard({
+    required BuildContext context,
+    required Map<String, dynamic> doc,
+    required Widget body,
+    Widget? title,
+    Widget? actions,
+  }) {
+    final p = KotvPalette.of(context);
+    final screen = MediaQuery.sizeOf(context);
+    final desktop = kotvIsDesktop();
+    final compact = screen.width < 640 || screen.shortestSide < 560;
+    final inset = compact
+        ? const EdgeInsets.symmetric(horizontal: 10, vertical: 12)
+        : EdgeInsets.symmetric(horizontal: desktop ? 64 : 48, vertical: desktop ? 48 : 40);
     final maxW = screen.width * 0.95;
     final maxH = screen.height * 0.9;
     final rawW = _num(doc['width']);
     final rawH = _num(doc['height']);
-    final w = rawW > 0 ? rawW.clamp(1.0, maxW) : null;
-    final h = rawH > 0 ? rawH.clamp(1.0, maxH) : null;
-    if (w != null || h != null) {
-      return SizedBox(
-        width: w ?? maxW,
-        height: h,
-        child: child,
-      );
-    }
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxW, maxHeight: maxH),
-      child: child,
+    var cardW = rawW > 0 ? rawW : (desktop ? 560.0 : 420.0);
+    if (desktop && cardW < 520) cardW = 520;
+    cardW = cardW.clamp(280.0, maxW);
+    final bodyH = rawH > 0 ? rawH.clamp(120.0, maxH * 0.78) : null;
+
+    final content = bodyH != null
+        ? SizedBox(width: cardW, height: bodyH, child: body)
+        : ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: cardW, maxHeight: maxH * 0.72),
+            child: body,
+          );
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: inset,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: cardW, maxHeight: maxH),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: p.dialogBg,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: p.outline),
+          ),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 14 : 24,
+              compact ? 14 : 22,
+              compact ? 14 : 24,
+              compact ? 12 : 18,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (title != null) ...[
+                  title,
+                  SizedBox(height: compact ? 8 : 12),
+                ],
+                content,
+                if (actions != null) ...[
+                  SizedBox(height: compact ? 12 : 16),
+                  actions,
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _hostActionRow({
+    required BuildContext context,
+    required List<Map<String, dynamic>> actions,
+    required double defaultFont,
+    required double defaultH,
+    required void Function(Map<String, dynamic> action) onPressed,
+  }) {
+    final compact = MediaQuery.sizeOf(context).width < 640;
+    final gap = compact ? 8.0 : 10.0;
+    return Row(
+      children: [
+        for (var i = 0; i < actions.length; i++) ...[
+          if (i > 0) SizedBox(width: gap),
+          Expanded(
+            child: _hostActionPill(
+              actions[i],
+              compact: compact,
+              selected: _isPrimaryAction(actions[i], actions.length),
+              defaultFont: defaultFont,
+              defaultH: defaultH,
+              onPressed: () => onPressed(actions[i]),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  bool _isPrimaryAction(Map<String, dynamic> a, int count) {
+    final id = '${a['id'] ?? ''}'.toLowerCase().trim();
+    if (id == 'submit' || id == 'ok' || id == 'confirm' || id == 'positive') return true;
+    if (id == 'cancel' || id == 'close' || id == 'dismiss' || id == 'negative') return false;
+    return count == 1;
+  }
+
+  Widget _hostActionPill(
+    Map<String, dynamic> a, {
+    required bool compact,
+    required bool selected,
+    required double defaultFont,
+    required double defaultH,
+    required VoidCallback onPressed,
+  }) {
+    final font = _num(a['fontSize']) > 0
+        ? _num(a['fontSize'])
+        : (defaultFont > 0 ? defaultFont : (compact ? 13.0 : 15.0));
+    final h = _num(a['height']) > 0
+        ? _num(a['height'])
+        : (defaultH > 0 ? defaultH : (compact ? 36.0 : 40.0));
+    return LayoutBuilder(
+      builder: (context, cons) {
+        final s = LayoutScale.layoutOf(context);
+        final w = cons.maxWidth.isFinite && cons.maxWidth > 0 ? cons.maxWidth / s : 88.0;
+        return AppPill(
+          label: '${a['label'] ?? a['id'] ?? ''}',
+          onTap: onPressed,
+          selected: selected,
+          width: w,
+          height: h,
+          fontSize: font,
+        );
+      },
     );
   }
 
@@ -599,29 +713,9 @@ class PostMsgHost {
     return SizedBox(width: w, height: h, child: child);
   }
 
-  Widget _buildActionButton(
-    Map<String, dynamic> a, {
-    required double defaultFont,
-    required double defaultW,
-    required double defaultH,
-    required VoidCallback onPressed,
-  }) {
-    final font = _num(a['fontSize']) > 0
-        ? _num(a['fontSize'])
-        : (defaultFont > 0 ? defaultFont : 14.0);
-    final label = Text(
-      '${a['label'] ?? a['id'] ?? ''}',
-      style: TextStyle(color: Colors.white, fontSize: font),
-    );
-    final btn = TextButton(onPressed: onPressed, child: label);
-    final double? w = _num(a['width']) > 0 ? _num(a['width']) : (defaultW > 0 ? defaultW : null);
-    final double? h = _num(a['height']) > 0 ? _num(a['height']) : (defaultH > 0 ? defaultH : null);
-    if (w == null && h == null) return btn;
-    return SizedBox(width: w, height: h, child: btn);
-  }
-
   List<Widget> _buildElement(
     Map<String, dynamic> el, {
+    required KotvPalette palette,
     required double docFontSize,
     required Map<String, TextEditingController> values,
     required Map<String, bool> checks,
@@ -639,7 +733,7 @@ class PostMsgHost {
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
               '${el['text'] ?? ''}',
-              style: TextStyle(color: Colors.white70, height: 1.35, fontSize: font),
+              style: TextStyle(color: palette.muted, height: 1.35, fontSize: font),
             ),
           ),
         ];
@@ -652,15 +746,24 @@ class PostMsgHost {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Center(
-              child: Image.memory(img, width: w, height: h, fit: BoxFit.contain),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Image.memory(img, width: w, height: h, fit: BoxFit.contain),
+                ),
+              ),
             ),
           ),
         ];
       case 'progress':
         return [
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Center(child: CircularProgressIndicator(color: Color(0xFFE53955))),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Center(child: CircularProgressIndicator(color: palette.primary)),
           ),
         ];
       case 'input':
@@ -675,12 +778,21 @@ class PostMsgHost {
           obscureText: el['password'] == true,
           maxLines: el['multiline'] == true ? null : 1,
           minLines: el['multiline'] == true ? 3 : 1,
-          style: TextStyle(color: Colors.white, fontSize: font),
+          style: TextStyle(color: palette.fg, fontSize: font),
+          cursorColor: palette.primary,
           decoration: InputDecoration(
             hintText: '${el['placeholder'] ?? ''}',
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: font),
-            enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.2))),
-            focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFE53955))),
+            hintStyle: TextStyle(color: palette.muted, fontSize: font),
+            filled: true,
+            fillColor: palette.input,
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: palette.outline.withOpacity(0.45)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: palette.primary),
+            ),
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           ),
@@ -698,10 +810,10 @@ class PostMsgHost {
         return [
           CheckboxListTile(
             value: checks[id] ?? false,
-            title: Text('${el['text'] ?? ''}', style: TextStyle(color: Colors.white70, fontSize: font)),
+            title: Text('${el['text'] ?? ''}', style: TextStyle(color: palette.muted, fontSize: font)),
             onChanged: (v) => setLocal(() => checks[id] = v ?? false),
             controlAffinity: ListTileControlAffinity.leading,
-            activeColor: const Color(0xFFE53955),
+            activeColor: palette.primary,
             dense: true,
           ),
         ];
@@ -716,9 +828,9 @@ class PostMsgHost {
               RadioListTile<String>(
                 value: '${o['id'] ?? ''}',
                 groupValue: radios[id],
-                title: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: Colors.white70, fontSize: font)),
+                title: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: palette.muted, fontSize: font)),
                 onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
-                activeColor: const Color(0xFFE53955),
+                activeColor: palette.primary,
                 dense: true,
               ),
         ];
@@ -729,8 +841,8 @@ class PostMsgHost {
         selects.putIfAbsent(id, () => '${el['value'] ?? (options.isNotEmpty && options.first is Map ? options.first['id'] : '')}');
         final dropdown = DropdownButtonFormField<String>(
           value: selects[id]?.isEmpty == true ? null : selects[id],
-          dropdownColor: const Color(0xFF1A1028),
-          style: TextStyle(color: Colors.white, fontSize: font),
+          dropdownColor: palette.dialogBg,
+          style: TextStyle(color: palette.fg, fontSize: font),
           items: [
             for (final o in options)
               if (o is Map)
@@ -746,18 +858,19 @@ class PostMsgHost {
         ];
       case 'button':
         final btnUrl = '${el['url'] ?? ''}'.trim();
-        final label = Text('${el['text'] ?? ''}', style: TextStyle(color: Colors.white, fontSize: font));
-        final btn = TextButton(
-          onPressed: () async {
-            if (btnUrl.isNotEmpty) await _openExternal(btnUrl);
-            await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
-          },
-          child: label,
-        );
         return [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _sized(el, child: btn),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: AppPill(
+              label: '${el['text'] ?? ''}',
+              fontSize: font,
+              height: _num(el['height']) > 0 ? _num(el['height']) : 40,
+              width: _num(el['width']) > 0 ? _num(el['width']) : null,
+              onTap: () async {
+                if (btnUrl.isNotEmpty) await _openExternal(btnUrl);
+                await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
+              },
+            ),
           ),
         ];
       case 'link':
@@ -766,15 +879,17 @@ class PostMsgHost {
         final labelText = '${el['text'] ?? ''}'.trim().isEmpty ? linkUrl : '${el['text']}'.trim();
         final asButton = '${el['style'] ?? ''}'.toLowerCase().trim() == 'button';
         if (asButton) {
-          final btn = FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE53955)),
-            onPressed: () => unawaited(_openExternal(linkUrl)),
-            child: Text(labelText, style: TextStyle(fontSize: font)),
-          );
           return [
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: Align(alignment: Alignment.centerLeft, child: _sized(el, child: btn)),
+              child: AppPill(
+                label: labelText,
+                selected: true,
+                fontSize: font,
+                height: _num(el['height']) > 0 ? _num(el['height']) : 40,
+                width: _num(el['width']) > 0 ? _num(el['width']) : null,
+                onTap: () => unawaited(_openExternal(linkUrl)),
+              ),
             ),
           ];
         }
@@ -787,14 +902,14 @@ class PostMsgHost {
                 onPressed: () => unawaited(_openExternal(linkUrl)),
                 child: Text(
                   labelText,
-                  style: TextStyle(color: const Color(0xFF7EB8FF), decoration: TextDecoration.underline, fontSize: font),
+                  style: TextStyle(color: palette.primary, decoration: TextDecoration.underline, fontSize: font),
                 ),
               ),
             ),
           ),
         ];
       case 'separator':
-        return [Divider(color: Colors.white.withOpacity(0.15))];
+        return [Divider(color: palette.outline.withOpacity(0.45))];
       case 'spacer':
       case 'space':
         final sp = _num(el['height']);
@@ -809,12 +924,13 @@ class PostMsgHost {
           if (type == 'group' && '${el['text'] ?? ''}'.isNotEmpty)
             Padding(
               padding: EdgeInsets.only(bottom: spacing > 0 ? spacing : 0),
-              child: Text('${el['text']}', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: font)),
+              child: Text('${el['text']}', style: TextStyle(color: palette.fg, fontWeight: FontWeight.w600, fontSize: font)),
             ),
           for (final c in children)
             if (c is Map)
               ..._buildElement(
                 Map<String, dynamic>.from(c),
+                palette: palette,
                 docFontSize: docFontSize,
                 values: values,
                 checks: checks,
