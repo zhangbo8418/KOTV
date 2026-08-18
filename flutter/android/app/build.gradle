@@ -82,12 +82,16 @@ android {
             excludes += "META-INF/DEPENDENCIES"
             excludes += "META-INF/LICENSE"
             excludes += "META-INF/LICENSE.txt"
+            excludes += "META-INF/LICENSE.md"
             excludes += "META-INF/NOTICE"
             excludes += "META-INF/NOTICE.txt"
+            excludes += "META-INF/NOTICE.md"
             excludes += "META-INF/*.SF"
             excludes += "META-INF/*.RSA"
             excludes += "META-INF/*.DSA"
             pickFirsts += "META-INF/INDEX.LIST"
+            pickFirsts += "META-INF/LICENSE.md"
+            pickFirsts += "META-INF/NOTICE.md"
             for (abi in kotvAllAbis) {
                 if (!kotvAbiFilters.contains(abi)) {
                     excludes += "lib/${abi}/**"
