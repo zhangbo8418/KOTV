@@ -95,9 +95,7 @@ public class Path {
 
     private static String clientScope() {
         try {
-            Class<?> util = Class.forName("com.github.catvod.utils.Util");
-            Object v = util.getMethod("clientId").invoke(null);
-            return v == null ? "" : String.valueOf(v);
+            return Util.scopeId();
         } catch (Throwable ignored) {
             return "";
         }

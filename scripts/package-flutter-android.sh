@@ -41,12 +41,8 @@ if [[ ! -f "$AAR" ]]; then
   fi
 fi
 
-if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ ! -s "$ROOT/bridge/spider-bridge.jar" ]]; then
-  echo "==> build spider-bridge.jar"
-  # Android CI 常用 JDK 17；bridge 默认 toolchain 21 会编出 class 65 导致 smoke 失败
-  export KOTV_JAVA_TOOLCHAIN="${KOTV_JAVA_TOOLCHAIN:-17}"
-  "$ROOT/bridge/build.sh"
-fi
+# 安卓桥按 Android SDK 编进 App（:kotv-bridge），不打桌面 spider-bridge.jar。
+# 桌面/其他平台仍走 bridge/build.sh → JVM shadowJar。
 
 echo "==> flutter build apk --release (per-ABI; Chaquopy 禁用 --split-per-abi)"
 cd "$ROOT/flutter"

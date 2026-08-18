@@ -87,3 +87,5 @@ tasks.named("shadowJar") {
 tasks.named("jar") {
     enabled = false
 }
+
+// 安卓宿主见 flutter/android/kotv-bridge（Android library，非 d8 本 shadowJar）。

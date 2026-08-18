@@ -2,6 +2,7 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven { url "https://jitpack.io" }
     }
 }
 
@@ -9,8 +10,11 @@ rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
-subprojects {
-    project.evaluationDependsOn(":app")
+subprojects { sub ->
+    // kotv-bridge 是 app 的依赖，不能 evaluationDependsOn app（会循环）
+    if (sub.name != "app" && sub.name != "kotv-bridge") {
+        sub.evaluationDependsOn(":app")
+    }
 }
 
 // AGP 8+：旧插件缺 namespace 时从 Manifest package 回填。

@@ -13,6 +13,8 @@ def kotvAbiFilters = (System.getenv("KOTV_ABI_FILTERS") ?: "arm64-v8a,armeabi-v7
         .collect { it.trim() }
         .findAll { !it.isEmpty() }
 def kotvAllAbis = ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
+def repoRoot = file("../../..")
+def engineSoAlt = new File(repoRoot, "flutter/assets/engine/libkotv_engine.so")
 
 android {
     namespace = "com.bobo.kotv"
@@ -22,12 +24,12 @@ android {
     compileOptions {
         // thunder-release.aar 要求开启 core library desugaring
         coreLibraryDesugaringEnabled true
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8
+        jvmTarget = JavaVersion.VERSION_17
     }
 
     defaultConfig {
@@ -76,9 +78,16 @@ android {
                 }
             }
         }
-        // Chaquopy 的 ABI 原生件大量在 assets/chaquopy（stdlib-<abi>.zip、bootstrap_native/<abi>/…）
-        // AGP abiFilters / AAB split 管不到 assets，必须显式排除。
         resources {
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/LICENSE"
+            excludes += "META-INF/LICENSE.txt"
+            excludes += "META-INF/NOTICE"
+            excludes += "META-INF/NOTICE.txt"
+            excludes += "META-INF/*.SF"
+            excludes += "META-INF/*.RSA"
+            excludes += "META-INF/*.DSA"
+            pickFirsts += "META-INF/INDEX.LIST"
             for (abi in kotvAllAbis) {
                 if (!kotvAbiFilters.contains(abi)) {
                     excludes += "lib/${abi}/**"
@@ -97,18 +106,14 @@ android {
 
 chaquopy {
     defaultConfig {
-        // 默认 3.10：仍支持 armeabi-v7a；3.12+ 仅 64-bit
         version "3.10"
-        // CI / 本机需有匹配的 build Python
         def py = System.getenv("CHAQUOPY_BUILD_PYTHON")
         if (py != null && !py.trim().isEmpty()) {
             buildPython py.trim()
         } else {
             buildPython "python3.10"
         }
-        // Chaquopy 17：ABI 只认 android.defaultConfig.ndk.abiFilters，不再支持 chaquopy.ndk()
         pip {
-            // 与 scripts/python-requirements.txt 对齐（用于 Chaquopy 内执行 Python spider）。
             install "lxml"
             install "ujson"
             install "pyquery"
@@ -123,19 +128,19 @@ chaquopy {
 
 dependencies {
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs_nio:2.1.5"
+    // 安卓宿主：按 Android SDK 编进 App CL（对齐 TV :catvod）。桌面仍走 bridge/spider-bridge.jar。
+    implementation project(":kotv-bridge")
     implementation "org.nanohttpd:nanohttpd:2.3.1"
-    // 站点 spider jar（可含 Java 17 .class）运行时经 D8 转 dex；体积约十几 MB
+    // 站点 PC 瘦包（.class）运行时 D8 → dex
     implementation "com.android.tools:r8:8.9.35"
-    // 对齐 TV：Exo 走 OkHttp DataSource（video_player 默认 DefaultHttp 易 Source error）
     def media3 = "1.4.1"
     implementation "androidx.media3:media3-exoplayer:$media3"
     implementation "androidx.media3:media3-exoplayer-hls:$media3"
     implementation "androidx.media3:media3-exoplayer-dash:$media3"
     implementation "androidx.media3:media3-datasource-okhttp:$media3"
-    // 必须与 bridge/spider 同为 OkHttp 5.x：否则 App CL 上的 4.x 会盖住 bridge，
-    // PublicSuffixDatabase 二进制不兼容 → NoSuchFieldError: Companion
     implementation "com.squareup.okhttp3:okhttp:5.4.0"
-    // TV 同款迅雷 SDK（含 libxl_*.so）
+    // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load
+    implementation "wang.harlon.quickjs:wrapper-android:3.2.3"
     implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
 }
 
@@ -143,97 +148,13 @@ configurations.configureEach {
     resolutionStrategy.eachDependency { details ->
         if (details.requested.group == "com.squareup.okhttp3") {
             details.useVersion("5.4.0")
-            details.because("align with spider-bridge OkHttp 5.4.0")
+            details.because("align with kotv-bridge OkHttp 5.4.0")
         }
     }
 }
 
 flutter {
     source = "../.."
-}
-
-// 把 bridge/spider-bridge.jar 拷贝进 APK assets，供 JarLoader 读取。
-// app/ → android/ → flutter/ → 仓库根（三级，不是四级）
-def repoRoot = file("../../..")
-def bridgeJar = new File(repoRoot, "bridge/spider-bridge.jar")
-def bridgeAssetDir = file("src/main/assets/kotv")
-def engineSoAlt = new File(repoRoot, "flutter/assets/engine/libkotv_engine.so")
-
-tasks.register("prepareSpiderBridgeJar") {
-    doLast {
-        def bridgeSrc = new File(repoRoot, "bridge/src/main/java/com/bobo/kotv/bridge/SpiderBridge.java")
-        def uiBridgeSrc = new File(repoRoot, "bridge/src/main/java/com/github/catvod/utils/UiBridge.java")
-        def needBridgeBuild = !bridgeJar.exists() || bridgeJar.length() == 0L ||
-            (bridgeSrc.exists() && bridgeSrc.lastModified() > bridgeJar.lastModified()) ||
-            (uiBridgeSrc.exists() && uiBridgeSrc.lastModified() > bridgeJar.lastModified())
-        if (needBridgeBuild) {
-            println "[android] rebuilding spider-bridge.jar..."
-            def toolchain = System.getenv("KOTV_JAVA_TOOLCHAIN") ?: "17"
-            exec {
-                environment "KOTV_JAVA_TOOLCHAIN", toolchain
-                commandLine "bash", "-lc", "${repoRoot}/bridge/build.sh"
-            }
-        }
-        if (!bridgeJar.exists() || bridgeJar.length() == 0L) {
-            throw new GradleException("missing ${bridgeJar}")
-        }
-        bridgeAssetDir.mkdirs()
-        // ART 只能加载含 classes.dex 的 jar；桌面 shadowJar 需经 d8 转换。
-        def sdkDir = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
-        if (sdkDir == null || sdkDir.trim().isEmpty()) {
-            def homeSdk = new File(System.getProperty("user.home"), "Library/Android/sdk")
-            if (homeSdk.isDirectory()) sdkDir = homeSdk.absolutePath
-        }
-        if (sdkDir == null || !(new File(sdkDir).isDirectory())) {
-            throw new GradleException("ANDROID_HOME/ANDROID_SDK_ROOT required to d8 spider-bridge.jar")
-        }
-        def buildToolsDir = new File(sdkDir, "build-tools")
-        def bt = buildToolsDir.listFiles()?.findAll { it.isDirectory() }?.sort { a, b -> b.name <=> a.name }?.find { new File(it, "d8").exists() || new File(it, "d8.bat").exists() }
-        if (bt == null) {
-            throw new GradleException("d8 not found under ${buildToolsDir}")
-        }
-        def d8Bin = new File(bt, System.getProperty("os.name").toLowerCase().contains("windows") ? "d8.bat" : "d8")
-        def platforms = new File(sdkDir, "platforms")
-        def androidJar = platforms.listFiles()?.findAll { it.isDirectory() && new File(it, "android.jar").exists() }?.sort { a, b -> b.name <=> a.name }?.collect { new File(it, "android.jar") }?.find { it.exists() }
-        if (androidJar == null) {
-            throw new GradleException("android.jar not found under ${platforms}")
-        }
-
-        def work = new File(project.layout.buildDirectory.get().asFile, "kotv-bridge-dex")
-        def merge = new File(work, "merge")
-        work.deleteDir()
-        merge.mkdirs()
-
-        println "[android] d8 spider-bridge.jar via ${d8Bin} lib=${androidJar.name}"
-        exec {
-            commandLine d8Bin.absolutePath,
-                "--min-api", "24",
-                "--lib", androidJar.absolutePath,
-                "--output", work.absolutePath,
-                bridgeJar.absolutePath
-        }
-        def dexFiles = work.listFiles()?.findAll { it.name.startsWith("classes") && it.name.endsWith(".dex") }
-        if (dexFiles == null || dexFiles.isEmpty()) {
-            throw new GradleException("d8 produced no classes.dex from ${bridgeJar}")
-        }
-        dexFiles.each { f ->
-            copy { from f; into merge }
-        }
-        // 保留非 .class 资源（META-INF 服务等）；排除签名与 class
-        copy {
-            from zipTree(bridgeJar)
-            into merge
-            exclude "**/*.class"
-            exclude "META-INF/*.SF"
-            exclude "META-INF/*.RSA"
-            exclude "META-INF/*.DSA"
-            exclude "META-INF/SIG-*"
-        }
-        def outJar = new File(bridgeAssetDir, "spider-bridge.jar")
-        if (outJar.exists()) outJar.delete()
-        ant.jar(destfile: outJar.absolutePath, basedir: merge.absolutePath)
-        println "[android] dex bridge ready: ${outJar} (${outJar.length()} bytes)"
-    }
 }
 
 tasks.register("prepareKotvEngineSo") {
@@ -265,6 +186,5 @@ tasks.register("prepareKotvEngineSo") {
 }
 
 tasks.named("preBuild") {
-    dependsOn "prepareSpiderBridgeJar"
     dependsOn "prepareKotvEngineSo"
 }

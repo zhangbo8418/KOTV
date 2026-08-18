@@ -64,6 +64,7 @@ class SpiderService private constructor(
       val out = JSONObject()
         .put("ok", true)
         .put("jar", JarLoader.isLoaded())
+        .put("quickjs", JarLoader.isQuickJsNativeLoaded())
         .put("python", PyLoader.isStarted())
       return json(Status.OK, out.toString())
     }

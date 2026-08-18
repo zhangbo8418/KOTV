@@ -81,17 +81,19 @@ Go Engine（单进程，:9978）
 
 ### Java bridge（JAR 爬虫）
 
-桌面/Android 都要共用 Spider，但 Spider 不能塞进 Flutter App，因此把「宿主」角色放进 `bridge/`（Java 项目，产出 `spider-bridge.jar`）：
+`bridge/` 源码两套编译产物（**不要**把桌面 JVM shadowJar 再 d8 进 APK）：
 
-| | 桌面 | Android |
+| | 桌面 / 其他平台 | Android |
 |--|------|---------|
-| bridge（≈ 宿主） | `URLClassLoader` **父优先**；`--serve` = **HTTP 多路**（常驻 `:9979`） | 打包期 d8 → APK assets → 父优先 `DexClassLoader` + NanoHTTPD `:9979` |
-| 站点 jar | JVM `.class` 瘦包（Java 17） | `JarDexer`（D8）→ sealed dex → 父优先 |
+| 怎么编 | `bridge/build.sh` → `spider-bridge.jar`（含 `android/` stub） | Gradle 模块 `:kotv-bridge`（真实 Android SDK，对齐 TV `:catvod`） |
+| 加载宿主 | 捆绑 JRE + `URLClassLoader` 父优先；`--serve` HTTP `:9979` | 编进 **App ClassLoader**；`JarLoader` 直调 `SpiderBridge` |
+| 站点 jar | 只吃 PC JVM `.class` 瘦包 | **同时**吃 TV/CatVodSpider dex jar（`DexClassLoader(file, Path.jar(), Path.jar(), App)`）和 PC 瘦包（先 D8） |
 | OkHttp | bridge **5.4.0**；请求自动 tag `clientId` | App `force` **5.4.0** |
 
-- JVM 瘦包不走 R8 `spider.merge`，站点 **exclude** 宿主同名类（`Util`/`OkHttp`/`Json`/`Path`/`Init`/`Proxy`/`crawler`/`UiBridge`），父优先直接用 bridge——运行语义为「宿主提供 API」。
+- CatVodSpider 的 `custom_spider.jar` 只有 `com.github.catvod.{spider,js}`；`crawler.Spider` / Gson / OkHttp / QuickJS 由宿主提供（见其 `checkJar` allowed refs）。
+- JVM 瘦包不走 R8 `spider.merge`，站点 **exclude** 宿主同名类，父优先用宿主。
 - 站点约定 `com.github.catvod.spider.*`；配置 `csp_ClassName`。
-- **不要**把 Spider 类挪进 Flutter App；Android 专属能力（D8 / seal）用 Method 注入挂在 App ClassLoader。
+- `libquickjs-android-wrapper.so` 仅进 APK，桌面 JRE 不绑这套 JNI。
 
 ## 运行时捆绑
 
@@ -166,7 +168,8 @@ KOTV/
     danmaku/       弹幕
     update/        自更新逻辑
     ...（config/auth/settings/model/player/subtitle/thunder/...）
-  bridge/          Java 项目 → spider-bridge.jar（JAR 爬虫宿主）
+  bridge/          Java 项目 → 桌面 spider-bridge.jar（PC JVM 瘦包宿主）
+  flutter/android/kotv-bridge/  安卓宿主（TV dex + PC 瘦包，编进 App CL）
   flutter/         Flutter UI（lib/ 业务，ios/android/macos/linux/windows/web 平台目录）
   scripts/         运行时准备 / 打包 / 安装
   runtime/         捆绑运行时（开发态；发行时随包）

@@ -1,0 +1,83 @@
+plugins {
+    id "com.android.library"
+}
+
+// flutter/android/kotv-bridge → 仓库根
+def repoRoot = file("../../../")
+def bridgeSrc = layout.buildDirectory.dir("generated/bridge-src")
+
+android {
+    namespace = "com.bobo.kotv.bridge"
+    compileSdk = 36
+
+    defaultConfig {
+        minSdk 24
+    }
+
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            // 固定宿主 ABI（Init/Path/Prefers）+ 同步 bridge 其余源码
+            java.srcDirs = ["src/main/java", bridgeSrc]
+        }
+    }
+}
+
+tasks.register("syncBridgeSources", Copy) {
+    from("${repoRoot}/bridge/src/main/java") {
+        // 桌面 stub；真机用 Android SDK / androidx
+        exclude "android/**"
+        exclude "androidx/**"
+        // 迅雷 AAR + 站点父优先：本模块提供 fat Init/Path/Prefers（对齐 TV :catvod）
+        exclude "com/github/catvod/Init.java"
+        exclude "com/github/catvod/utils/Path.java"
+        exclude "com/github/catvod/utils/Prefers.java"
+    }
+    into bridgeSrc
+    includeEmptyDirs = false
+}
+
+tasks.named("preBuild").configure {
+    dependsOn tasks.named("syncBridgeSources")
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+}
+
+dependencies {
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs_nio:2.1.5"
+    api "com.squareup.okhttp3:okhttp:5.4.0"
+    api "com.squareup.okhttp3:okhttp-dnsoverhttps:5.4.0"
+    api "com.squareup.okhttp3:logging-interceptor:5.4.0"
+    implementation "org.brotli:dec:0.1.2"
+    implementation "com.hierynomus:smbj:0.14.0"
+    implementation("com.github.thegrizzlylabs:sardine-android:0.9") {
+        exclude group: "com.squareup.okhttp3"
+    }
+    implementation("org.simpleframework:simple-xml:2.7.1") {
+        exclude group: "xpp3", module: "xpp3"
+        exclude group: "stax", module: "stax-api"
+        exclude group: "stax", module: "stax"
+    }
+    implementation "com.github.lookfirst:sardine:5.10"
+    implementation "com.google.code.gson:gson:2.14.0"
+    implementation "com.google.guava:guava:33.2.1-android"
+    implementation "com.googlecode.juniversalchardet:juniversalchardet:1.0.3"
+    implementation "org.jsoup:jsoup:1.22.2"
+    implementation "cn.wanghaomiao:JsoupXpath:2.5.1"
+    implementation "cn.hutool:hutool-core:5.8.28"
+    implementation "org.apache.commons:commons-lang3:3.14.0"
+    implementation "commons-io:commons-io:2.15.1"
+    implementation "org.json:json:20240303"
+    implementation "org.nanohttpd:nanohttpd:2.3.1"
+    implementation "com.github.luben:zstd-jni:1.5.7-4"
+    implementation "org.slf4j:slf4j-simple:2.0.13"
+    implementation "androidx.annotation:annotation:1.8.2"
+    implementation "androidx.collection:collection:1.4.5"
+}

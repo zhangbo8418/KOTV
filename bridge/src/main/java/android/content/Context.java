@@ -43,6 +43,11 @@ public class Context {
         return this;
     }
 
+    public ClassLoader getClassLoader() {
+        ClassLoader cl = Context.class.getClassLoader();
+        return cl != null ? cl : ClassLoader.getSystemClassLoader();
+    }
+
     public Object getSystemService(String name) {
         if (CLIPBOARD_SERVICE.equals(name)) return new ClipboardManager();
         return null;

@@ -43,7 +43,7 @@ public class SpiderBridge {
         }
     }
 
-    /** Android Native：注入真实 Application Context（DexClassLoader 加载后调用）。 */
+    /** Android Native：注入真实 Application Context（宿主已编进 App CL）。 */
     public static void setAndroidContext(Context ctx) {
         if (ctx == null) return;
         Context app = ctx.getApplicationContext();
@@ -481,19 +481,38 @@ public class SpiderBridge {
             if (loader == null) {
                 throw new IllegalStateException("No jar loaded: " + jarPath);
             }
-            // api.split("csp_")[1]
-            String[] parts = api.split("csp_", 2);
-            String spiderName = parts.length > 1 ? parts[1] : api;
-            String className = "com.github.catvod.spider." + spiderName;
-            Class<?> clazz = Class.forName(className, true, loader);
-            Constructor<?> ctor = clazz.getConstructor();
-            Spider spider = (Spider) ctor.newInstance();
-            spider.siteKey = key;
-            initializeSpider(spider, ext);
-            spiders.put(spKey, spider);
-            return spider;
+            String className = spiderClassName(api);
+            ClassLoader prev = Thread.currentThread().getContextClassLoader();
+            Thread.currentThread().setContextClassLoader(loader);
+            try {
+                Class<?> clazz;
+                try {
+                    clazz = loader.loadClass(className);
+                } catch (ClassNotFoundException e) {
+                    File jf = new File(jarPath);
+                    throw new ClassNotFoundException(
+                            className + " not in jar " + jarPath + " (" + jf.length() + " bytes)"
+                                    + "; spiders=" + listSiteSpiders(jarPath),
+                            e);
+                }
+                Constructor<?> ctor = clazz.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                Object instance = ctor.newInstance();
+                if (!(instance instanceof Spider)) {
+                    throw new IllegalStateException(
+                            className + " is " + instance.getClass().getName() + ", not Spider");
+                }
+                Spider spider = (Spider) instance;
+                spider.siteKey = key;
+                initializeSpider(spider, ext);
+                spiders.put(spKey, spider);
+                return spider;
+            } finally {
+                Thread.currentThread().setContextClassLoader(prev);
+            }
         } catch (Exception e) {
-            System.err.println("getSpider failed key=" + key + " api=" + api + ": " + e);
+            System.err.println(
+                    "getSpider failed key=" + key + " api=" + api + " jar=" + jarPath + ": " + e);
             e.printStackTrace(System.err);
             if (isArtVm()) {
                 // Android：直接抛出，让 call() 返回 {"error":...}，避免空串被当成成功。
@@ -502,6 +521,26 @@ public class SpiderBridge {
             SpiderNull nullSpider = new SpiderNull();
             nullSpider.siteKey = key;
             return nullSpider;
+        }
+    }
+
+    /** {@code csp_Nostr} → {@code com.github.catvod.spider.Nostr}，与 TV {@code api.split("csp_")[1]} 一致。 */
+    private static String spiderClassName(String api) {
+        String name = api == null ? "" : api.trim();
+        if (name.startsWith("csp_")) {
+            name = name.substring(4);
+        }
+        return "com.github.catvod.spider." + name;
+    }
+
+    private static String listSiteSpiders(String jarPath) {
+        Method m = siteJarListMethod;
+        if (m == null) return "?";
+        try {
+            Object v = m.invoke(null, jarPath);
+            return v == null ? "?" : String.valueOf(v);
+        } catch (Throwable t) {
+            return "list-failed:" + t.getMessage();
         }
     }
 
@@ -516,8 +555,14 @@ public class SpiderBridge {
             if (loaders.containsKey(jarPath)) return;
             try {
                 ClassLoader loader = createLoader(jarPath);
-                initializeHost();
-                initializeSpiderJar(jarPath, loader);
+                ClassLoader prev = Thread.currentThread().getContextClassLoader();
+                try {
+                    Thread.currentThread().setContextClassLoader(loader);
+                    initializeHost();
+                    initializeSpiderJar(jarPath, loader);
+                } finally {
+                    Thread.currentThread().setContextClassLoader(prev);
+                }
                 loaders.put(jarPath, loader);
             } catch (Exception e) {
                 System.err.println("parseJar failed: " + jarPath + ": " + e);
@@ -593,10 +638,20 @@ public class SpiderBridge {
 
     /** App 侧注入：JarDexer.ensureSiteDexJar（Method 句柄，无需按类型名查找） */
     private static volatile Method siteJarEnsureMethod;
+    private static volatile Method siteJarCreateLoaderMethod;
+    private static volatile Method siteJarListMethod;
 
     /** Android：JarLoader 注入 ensure 方法句柄。 */
     public static void setSiteJarEnsureMethod(Method method) {
         siteJarEnsureMethod = method;
+    }
+
+    public static void setSiteJarCreateLoaderMethod(Method method) {
+        siteJarCreateLoaderMethod = method;
+    }
+
+    public static void setSiteJarListMethod(Method method) {
+        siteJarListMethod = method;
     }
 
     private static ClassLoader createDexLoader(File jarFile) throws Exception {
@@ -604,9 +659,24 @@ public class SpiderBridge {
             throw new IOException("site jar missing: " + jarFile);
         }
         Context c = ctx();
+        // 对齐 TV：parent = App.get().getClassLoader()。宿主 Spider 必须在 App CL。
+        ClassLoader parent = c != null ? c.getClassLoader() : SpiderBridge.class.getClassLoader();
+        if (parent == null) {
+            parent = SpiderBridge.class.getClassLoader();
+        }
+        Method create = siteJarCreateLoaderMethod;
+        if (create != null) {
+            try {
+                Object cl = create.invoke(null, c, jarFile.getAbsolutePath(), parent);
+                if (cl instanceof ClassLoader) {
+                    return (ClassLoader) cl;
+                }
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                Throwable cauze = e.getCause() != null ? e.getCause() : e;
+                throw new IOException("createSiteClassLoader failed: " + cauze.getMessage(), cauze);
+            }
+        }
         File sealed = resolveSealedSiteJar(c, jarFile);
-        ClassLoader parent = SpiderBridge.class.getClassLoader();
-        // 标准父优先 DexClassLoader；宿主 API 在 bridge/App CL。
         File opt;
         try {
             java.lang.reflect.Method getCodeCache = c.getClass().getMethod("getCodeCacheDir");
@@ -656,29 +726,19 @@ public class SpiderBridge {
      */
     private static void initializeSpiderJar(String jarPath, ClassLoader loader) {
         try {
-            Class<?> init = Class.forName("com.github.catvod.spider.Init", true, loader);
-            boolean initialized = false;
-            for (Method method : init.getMethods()) {
-                if (method.getName().equals("init") && method.getParameterCount() == 1
-                        && method.getParameterTypes()[0].getName().equals("android.content.Context")) {
-                    try {
-                        method.invoke(null, ctx());
-                        initialized = true;
-                        break;
-                    } catch (Throwable ignored) {
- // Fall through to the legacy zero-argument ABI.
-                    }
-                }
-            }
-            if (!initialized) init.getMethod("init").invoke(null);
+            // 对齐 TV JarLoader.invokeInit：只调 Init.init(Context)，且必须是 static。
+            Class<?> clz = loader.loadClass("com.github.catvod.spider.Init");
+            Method method = clz.getMethod("init", Context.class);
+            method.invoke(clz, ctx());
         } catch (ClassNotFoundException ignored) {
- // Init is not part of the original spider ABI.
+            // Init is not part of the original spider ABI.
         } catch (Throwable error) {
             System.err.println("optional spider Init skipped: " + error);
         }
         try {
-            Class<?> proxy = Class.forName("com.github.catvod.spider.Proxy", true, loader);
+            Class<?> proxy = loader.loadClass("com.github.catvod.spider.Proxy");
             proxyMethods.put(jarPath, proxy.getMethod("proxy", Map.class));
+        } catch (ClassNotFoundException ignored) {
         } catch (Throwable error) {
             System.err.println("optional spider Proxy skipped: " + error);
         }
