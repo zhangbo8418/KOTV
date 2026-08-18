@@ -193,7 +193,18 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 }
 
 func (s *SiteService) CategoryContent(tid, pg string, extend map[string]string) (model.Result, error) {
+	return s.CategoryContentForSite("", tid, pg, extend)
+}
+
+// CategoryContentForSite 按站点拉分类；siteKey 空则用首页源。
+// 对齐 TV TypeFragment.getKey()：进目录用条目所属站，而不是强制首页。
+func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map[string]string) (model.Result, error) {
 	site := s.cfg.Home()
+	if k := strings.TrimSpace(siteKey); k != "" {
+		if found := s.cfg.GetSite(k); found != nil {
+			site = *found
+		}
+	}
 	extend = s.MergeCategoryExtend(tid, extend)
 
 	s.mu.Lock()

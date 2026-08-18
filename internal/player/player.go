@@ -15,6 +15,7 @@ import (
 	"github.com/bobo/KOTV/internal/player/embed"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/thunder"
 )
 
@@ -86,6 +87,13 @@ func Play(url string, histKey string) error {
 			return fmt.Errorf("磁力链接解析失败: %w", err)
 		}
 		log.Printf("thunder fetch → %s", stream)
+		url = stream
+	} else if source.Match(url) {
+		stream, err := source.Fetch(url, nil)
+		if err != nil {
+			return fmt.Errorf("专用源解析失败: %w", err)
+		}
+		log.Printf("source fetch → %s", stream)
 		url = stream
 	} else if isEd2k(url) {
 		if err := openSystemURL(url); err != nil {

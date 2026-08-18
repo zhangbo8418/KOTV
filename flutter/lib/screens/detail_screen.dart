@@ -41,11 +41,13 @@ import 'detail_fullscreen.dart';
 import 'shell.dart';
 
 class DetailScreen extends ConsumerStatefulWidget {
-  const DetailScreen({super.key, required this.id, this.site = '', this.title = ''});
+  const DetailScreen({super.key, required this.id, this.site = '', this.title = '', this.mark = ''});
 
   final String id;
   final String site;
   final String title;
+  /// 对齐 TV VideoActivity.mark：从目录点文件时按集名匹配并起播。
+  final String mark;
 
   /// 详情是否在栈上（含播放中 PopScope.canPop=false）。
   static bool get isOpen => _DetailScreenState._active != null;
@@ -597,6 +599,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _kept = kept;
         _loading = false;
       });
+      _applyFolderMark();
       final id = vod.id.isNotEmpty ? vod.id : widget.id;
       final site = vod.site.isNotEmpty ? vod.site : widget.site;
       final off = await LocalPlayOffsets.get(id, site);
@@ -742,6 +745,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (best >= 0) return best;
     if (_epIdx >= 0 && _epIdx < eps.length) return _epIdx;
     return -1;
+  }
+
+  /// 从目录点文件：按 mark 匹配集名并自动起播（对齐 TV VodHistoryPolicy + mark）。
+  void _applyFolderMark() {
+    final mark = widget.mark.trim();
+    if (mark.isEmpty) return;
+    final eps = _eps;
+    if (eps.isEmpty) return;
+    var idx = _matchEpisodeIndex(eps, mark);
+    if (idx < 0) idx = 0;
+    _epIdx = idx;
+    _epPage = idx ~/ _epSize;
+    unawaited(_playAt(idx));
   }
 
   static int _episodeNumber(String name) {
@@ -1409,6 +1425,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                       _status.contains('磁力缓冲') ||
                       _status.contains('缓冲中')),
             ),
+          if (_playUrl.isNotEmpty)
+            CenterPlayPauseButton(player: _playback),
           if (_status.contains('解析') || _status.contains('嗅探'))
             const ColoredBox(
               color: Color(0x66000000),

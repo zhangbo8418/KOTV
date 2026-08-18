@@ -43,7 +43,11 @@ func (v *Vod) IsEmpty() bool {
 }
 
 func (v *Vod) IsFolder() bool {
-	return v.VodTag == "folder"
+	if strings.EqualFold(strings.TrimSpace(v.VodTag), "folder") {
+		return true
+	}
+	// 对齐 TV Vod.isFolder：`cate` 对象存在即当目录。
+	return strings.TrimSpace(v.Cate.String()) != ""
 }
 
 // IsAction Vod.isAction：有 action 字段时走站点 action 而非详情。

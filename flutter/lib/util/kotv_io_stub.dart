@@ -41,6 +41,7 @@ class Directory {
   final String path;
   static Directory get current => Directory('.');
   static Directory get systemTemp => Directory('/tmp');
+  Directory get parent => Directory(path);
   bool existsSync() => false;
   Future<bool> exists() async => false;
   Future<Directory> create({bool recursive = false}) async => this;
@@ -51,6 +52,7 @@ class Directory {
 
 class FileSystemEntity {
   String get path => '';
+  static bool isDirectorySync(String path) => false;
 }
 
 class FileStat {

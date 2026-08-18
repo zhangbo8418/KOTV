@@ -13,8 +13,10 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Rational
+import android.view.WindowManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.bobo.kotv.host.DialogRelay
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -27,6 +29,20 @@ class MainActivity : FlutterActivity() {
   private var castPermResult: MethodChannel.Result? = null
   private var pickConfigResult: MethodChannel.Result? = null
   private var storagePermResult: MethodChannel.Result? = null
+  private var relayWm: WindowManager? = null
+
+  override fun getSystemService(name: String): Any? {
+    val raw = super.getSystemService(name)
+    if (name == WINDOW_SERVICE && raw is WindowManager) {
+      synchronized(this) {
+        if (relayWm == null) {
+          relayWm = DialogRelay.wrapWindowManager(raw)
+        }
+        return relayWm
+      }
+    }
+    return raw
+  }
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -102,6 +118,8 @@ class MainActivity : FlutterActivity() {
         "ensureCastPermissions" -> ensureCastPermissions(result)
         "ensureStoragePermission" -> ensureStoragePermission(result)
         "pickConfigFile" -> pickConfigFile(result)
+        "useFileBrowser" -> result.success(KotvFileChooser.shouldUseFileBrowser(this))
+        "storageRoot" -> result.success(KotvFileChooser.storageRoot())
         "hasStoragePermission" -> result.success(KotvFileChooser.hasStoragePermission(this))
         "getMemoryInfo" -> {
           try {

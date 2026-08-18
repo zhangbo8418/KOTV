@@ -78,6 +78,7 @@ class SpiderService private constructor(
     if (body.isBlank() &&
       uri != "/thunder/progress" &&
       uri != "/thunder/clear" &&
+      uri != "/source/stop" &&
       uri != "/jar/interrupt" &&
       uri != "/jar/cancel" &&
       uri != "/py/interrupt"
@@ -138,6 +139,16 @@ class SpiderService private constructor(
           val obj = JSONObject(body)
           val resp = SnifferWebView.sniff(obj)
           json(Status.OK, resp.toString())
+        }
+
+        "/source/fetch" -> {
+          val obj = if (body.isBlank()) JSONObject() else JSONObject(body)
+          json(Status.OK, SourceExtractors.fetch(obj).toString())
+        }
+
+        "/source/stop" -> {
+          SourceExtractors.stop()
+          json(Status.OK, JSONObject().put("ok", true).toString())
         }
 
         "/thunder/parse" -> {

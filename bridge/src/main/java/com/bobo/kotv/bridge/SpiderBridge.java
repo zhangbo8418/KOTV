@@ -284,6 +284,7 @@ public class SpiderBridge {
         }
         String clientId = "";
         String userId = "";
+        boolean remoteUi = false;
         try {
             JsonObject req = GSON.fromJson(input, JsonObject.class);
             if (req.has("clientId") && !req.get("clientId").isJsonNull()) {
@@ -303,6 +304,17 @@ public class SpiderBridge {
             }
             if (!userId.isEmpty()) {
                 com.github.catvod.utils.Util.setUserId(userId);
+            }
+            if (req.has("remoteUi") && !req.get("remoteUi").isJsonNull()) {
+                try {
+                    remoteUi = req.get("remoteUi").getAsBoolean();
+                } catch (Throwable ignored) {
+                }
+            }
+            if (remoteUi) {
+                com.github.catvod.utils.Util.enterRemoteUi(clientId, userId);
+            } else {
+                com.github.catvod.utils.Util.clearRemoteUi();
             }
             String method = req.get("method").getAsString();
             if ("selfCheck".equals(method)) {
@@ -389,7 +401,7 @@ public class SpiderBridge {
                 String parseKey = argsObj.get("parseKey").getAsString();
                 LinkedHashMap<String, String> jxs = GSON.fromJson(argsObj.get("jxs"), LinkedHashMap.class);
                 String url = argsObj.get("url").getAsString();
-                return invokeJsonExt(parseKey, jxs, url);
+                return emptyToObject(invokeJsonExt(parseKey, jxs, url));
             }
             if ("jsonExtMix".equals(method)) {
                 String parseKey = argsObj.get("parseKey").getAsString();
@@ -398,7 +410,7 @@ public class SpiderBridge {
                 LinkedHashMap<String, HashMap<String, String>> jxs =
                         GSON.fromJson(argsObj.get("jxs"), LinkedHashMap.class);
                 String url = argsObj.get("url").getAsString();
-                return invokeJsonExtMix(parseKey, name, flag, jxs, url);
+                return emptyToObject(invokeJsonExtMix(parseKey, name, flag, jxs, url));
             }
             // JsLoader.createFun：从 jar ClassLoader 调 pdfh/pdfa/pd/pdfl（Go QJS 经 RPC）。
             if ("jsParse".equals(method)) {
@@ -411,15 +423,28 @@ public class SpiderBridge {
             Spider spider = getSpider(key, api, ext, jar);
             // recent 只由 parseJar(recent=true)/setRecent/Site.recent 更新，
             // 不在每次 spider 方法调用时覆盖（避免并行多 jar 时 Mix/Json 抖 recent）。
-            return invoke(spider, method, argsObj, jar);
+            return nonempty(invoke(spider, method, argsObj, jar));
         } catch (Throwable t) {
             t.printStackTrace(System.err);
             JsonObject err = new JsonObject();
             err.addProperty("error", t.toString());
             return GSON.toJson(err);
         } finally {
+            if (remoteUi) {
+                com.github.catvod.utils.Util.leaveRemoteUi();
+            }
             com.github.catvod.utils.Util.clearScope();
         }
+    }
+
+    /** JarLoader 把空串当成加载失败（HTTP 500）；所有出口至少回 JSON。 */
+    private static String nonempty(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            JsonObject err = new JsonObject();
+            err.addProperty("error", "empty result");
+            return GSON.toJson(err);
+        }
+        return raw;
     }
 
  /** 避免继承系统 SOCKS/HTTP 代理导致 NoRouteToHost。 */
@@ -1178,8 +1203,7 @@ public class SpiderBridge {
             case "liveContent":
                 return emptyToObject(spider.liveContent(args.has("url") ? args.get("url").getAsString() : ""));
             case "action": {
-                String result = spider.action(args.has("action") ? args.get("action").getAsString() : "");
-                return result == null ? "{}" : result;
+                return emptyToObject(spider.action(args.has("action") ? args.get("action").getAsString() : ""));
             }
             case "manualVideoCheck":
                 return Boolean.toString(spider.manualVideoCheck());

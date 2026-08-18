@@ -47,7 +47,8 @@ android {
 
     sourceSets {
         main {
-            jniLibs.srcDirs += ["src/main/jniLibs"]
+            // libs/jpa：jianpian native（jniLibs/*.so 被 gitignore，所以放可入库目录）
+            jniLibs.srcDirs += ["src/main/jniLibs", "libs/jpa"]
         }
     }
 

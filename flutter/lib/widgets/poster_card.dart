@@ -11,11 +11,13 @@ class PosterCard extends StatelessWidget {
     super.key,
     required this.item,
     required this.onTap,
+    this.onLongPress,
     this.autofocus = false,
   });
 
   final VodItem item;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final bool autofocus;
 
   @override
@@ -25,11 +27,13 @@ class PosterCard extends StatelessWidget {
     return TvFocus(
       autofocus: autofocus,
       onPressed: onTap,
+      onLongPress: onLongPress,
       borderRadius: 10 * s,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
           onTap: onTap,
+          onLongPress: onLongPress,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(10 * s),
             child: LayoutBuilder(
@@ -53,15 +57,17 @@ class PosterCard extends StatelessWidget {
                       color: p.posterPh,
                       child: item.pic.isEmpty || !_isHttpPic(item.pic)
                           ? Center(
-                              child: Text(
-                                letter,
-                                style: TextStyle(
-                                  color: p.fg.withOpacity(0.35),
-                                  fontSize: 54 * s,
-                                  fontWeight: FontWeight.w700,
-                                  height: 1.2,
-                                ),
-                              ),
+                              child: item.isFolder
+                                  ? Icon(Icons.folder_outlined, color: p.fg.withOpacity(0.35), size: 54 * s)
+                                  : Text(
+                                      letter,
+                                      style: TextStyle(
+                                        color: p.fg.withOpacity(0.35),
+                                        fontSize: 54 * s,
+                                        fontWeight: FontWeight.w700,
+                                        height: 1.2,
+                                      ),
+                                    ),
                             )
                           : Image.network(
                               item.pic.trim(),
@@ -135,11 +141,13 @@ class PosterFlow extends StatelessWidget {
     super.key,
     required this.items,
     required this.onOpen,
+    this.onLongPress,
     this.padding = const EdgeInsets.fromLTRB(50, 10, 50, 24),
   });
 
   final List<VodItem> items;
   final void Function(VodItem) onOpen;
+  final void Function(VodItem)? onLongPress;
   final EdgeInsets padding;
 
   @override
@@ -168,6 +176,7 @@ class PosterFlow extends StatelessWidget {
               item: it,
               autofocus: false,
               onTap: () => onOpen(it),
+              onLongPress: onLongPress == null ? null : () => onLongPress!(it),
             );
           },
         );

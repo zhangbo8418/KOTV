@@ -34,6 +34,7 @@ import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/live_player_chrome.dart';
 import '../widgets/mini_hover_shell.dart';
+import '../widgets/vod_player_chrome.dart';
 import 'shell.dart';
 
 const _liveKeepSep = '\$\$\$';
@@ -1308,6 +1309,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                       ],
                     ),
                   ),
+                  if (_playUrl.isNotEmpty && !_leftOpen && !_rightOpen)
+                    CenterPlayPauseButton(
+                      player: _playback,
+                      chromeVisible: _chromeVisible || _catchupChrome,
+                      onPressed: () {
+                        if (_catchup) {
+                          _pulseCatchupChrome();
+                          return;
+                        }
+                        if (!_chromeVisible) {
+                          setState(() => _chromeVisible = true);
+                          _scheduleHideOverlays();
+                        }
+                      },
+                    ),
                   if ((_chromeVisible || _catchupChrome) && !_leftOpen && !_rightOpen)
                     Positioned(
                       left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
@@ -1910,6 +1926,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                       _status.contains('缓冲') ||
                       _loading,
                 ),
+                if (_playUrl.isNotEmpty)
+                  CenterPlayPauseButton(
+                    player: _playback,
+                    chromeVisible: showChrome,
+                    onPressed: _pulsePortraitChrome,
+                  ),
                 if (_error != null)
                   Center(
                     child: Padding(

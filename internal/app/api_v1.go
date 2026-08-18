@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -24,6 +26,7 @@ import (
 	appruntime "github.com/bobo/KOTV/internal/runtime"
 	"github.com/bobo/KOTV/internal/service"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
 	"github.com/bobo/KOTV/internal/update"
@@ -75,6 +78,7 @@ func (a *App) APIGetConfig() map[string]any {
 			"type":       s.TypeID(),
 			"searchable": s.IsSearchable(),
 			"changeable": s.IsChangeable(),
+			"indexs":     s.IsIndex(),
 			"home":       s.Key == home.Key,
 		})
 	}
@@ -152,23 +156,28 @@ func (a *App) APIHome() (map[string]any, error) {
 	}, nil
 }
 
-func (a *App) APICategory(tid, pg string, extend map[string]string) (map[string]any, error) {
+func (a *App) APICategory(tid, pg string, extend map[string]string, siteKey string) (map[string]any, error) {
 	if localCrawlerDisabled() {
 		return nil, fmt.Errorf("请先连接可用后端服务")
 	}
 	cfg, sites, _ := a.scope()
-	res, err := sites.CategoryContent(tid, pg, extend)
+	res, err := sites.CategoryContentForSite(siteKey, tid, pg, extend)
 	if err != nil {
 		return nil, err
 	}
-	home := cfg.Home()
+	used := cfg.Home().Key
+	if k := strings.TrimSpace(siteKey); k != "" {
+		if site := cfg.GetSite(k); site != nil && site.Key != "" {
+			used = site.Key
+		}
+	}
 	return map[string]any{
 		"ok":        true,
-		"site":      home.Key,
+		"site":      used,
 		"tid":       tid,
 		"pg":        pg,
 		"pagecount": res.PageCount.Value,
-		"list":      vodsDTO(res.List, home.Key),
+		"list":      vodsDTO(res.List, used),
 		"filters":   filtersDTO(sites.FiltersForCategory(tid)),
 	}, nil
 }
@@ -334,6 +343,7 @@ func (a *App) APICancelPending(opts map[string]any) map[string]any {
 	}
 	if stopThunder {
 		thunder.Stop()
+		source.Stop()
 	}
 	return map[string]any{"ok": true, "hard": hard, "thunder": stopThunder}
 }
@@ -529,6 +539,13 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			return nil, fmt.Errorf("磁力链接解析失败: %w", err)
 		}
 		playURL = local
+	} else if source.Match(playURL) {
+		source.Stop()
+		local, err := source.Fetch(playURL, a.liveCoreJSON())
+		if err != nil {
+			return nil, fmt.Errorf("专用源解析失败: %w", err)
+		}
+		playURL = local
 	} else if !thunder.IsLocalStream(playURL) {
 		playURL = a.PreparePlaybackURL(playURL, headers)
 	}
@@ -559,6 +576,7 @@ func typesDTO(types []model.Type) []map[string]any {
 		out = append(out, map[string]any{
 			"type_id":   t.TypeID.String(),
 			"type_name": t.TypeName,
+			"type_flag": t.TypeFlag,
 			"filters":   filtersDTO(t.Filters),
 		})
 	}
@@ -598,9 +616,26 @@ func vodsDTO(list []model.Vod, siteKey string) []map[string]any {
 			"site":        sk,
 			"action":      v.Action,
 			"vod_tag":     v.VodTag,
+			"cate":        v.Cate.String(),
+			"is_folder":   vodLooksLikeFolder(v),
 		})
 	}
 	return out
+}
+
+// vodLooksLikeFolder 对齐 TV Vod.isFolder，并兜底：vod_id 若是本机已存在目录则不当片播。
+func vodLooksLikeFolder(v model.Vod) bool {
+	if v.IsFolder() {
+		return true
+	}
+	id := strings.TrimSpace(v.VodID.String())
+	id = strings.TrimPrefix(id, "file://")
+	id = strings.TrimPrefix(id, "file:")
+	if id == "" || !filepath.IsAbs(id) {
+		return false
+	}
+	st, err := os.Stat(id)
+	return err == nil && st.IsDir()
 }
 
 func vodDetailDTO(v model.Vod, siteKey string) map[string]any {
@@ -1355,6 +1390,14 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	if playURL == "" {
 		return nil, fmt.Errorf("空播放地址")
 	}
+	if source.Match(playURL) {
+		source.Stop()
+		rewritten, ferr := source.Fetch(playURL, a.liveCoreJSON())
+		if ferr != nil {
+			return nil, fmt.Errorf("专用源解析失败: %w", ferr)
+		}
+		playURL = rewritten
+	}
 	return map[string]any{
 		"ok":      true,
 		"url":     playproxy.PublicizeURL(playURL),
@@ -1592,6 +1635,17 @@ func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	settings.Set(settings.Player, playerVal)
 	_ = settings.Save()
 	return player.ExternalPlay(playURL, name)
+}
+
+func (a *App) liveCoreJSON() json.RawMessage {
+	if a == nil {
+		return nil
+	}
+	cur := a.scopeLive().Current()
+	if cur == nil {
+		return nil
+	}
+	return cur.Core
 }
 
 func errString(err error) string {

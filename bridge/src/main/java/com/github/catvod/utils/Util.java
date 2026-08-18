@@ -265,6 +265,49 @@ public class Util {
         clearUserId();
     }
 
+    /** 远端客户端走安卓 jar 时 sticky：AlertDialog.show() 常 post 到主线程，ThreadLocal 会丢。 */
+    private static final java.util.concurrent.atomic.AtomicInteger REMOTE_UI_DEPTH =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private static volatile String REMOTE_UI_CLIENT = "";
+    private static volatile String REMOTE_UI_USER = "";
+
+    public static void enterRemoteUi(String clientId, String userId) {
+        REMOTE_UI_CLIENT = clientId == null ? "" : clientId;
+        REMOTE_UI_USER = userId == null ? "" : userId;
+        REMOTE_UI_DEPTH.incrementAndGet();
+    }
+
+    public static void leaveRemoteUi() {
+        if (REMOTE_UI_DEPTH.decrementAndGet() < 0) {
+            REMOTE_UI_DEPTH.set(0);
+        }
+        // 不立刻清 clientId：dialog.show() 可能还在主线程队列里。
+    }
+
+    /** 本机调用开始时清掉上一次远端标记，避免本地弹窗被误中继。 */
+    public static void clearRemoteUi() {
+        if (REMOTE_UI_DEPTH.get() <= 0) {
+            REMOTE_UI_CLIENT = "";
+            REMOTE_UI_USER = "";
+            REMOTE_UI_DEPTH.set(0);
+        }
+    }
+
+    public static boolean hasRemoteUi() {
+        String id = REMOTE_UI_CLIENT;
+        return id != null && !id.isEmpty();
+    }
+
+    public static String remoteClientId() {
+        String s = REMOTE_UI_CLIENT;
+        return s == null ? "" : s;
+    }
+
+    public static String remoteUserId() {
+        String s = REMOTE_UI_USER;
+        return s == null ? "" : s;
+    }
+
     /**
      * Notify host via local proxy {@code /postMsg}; also logs.
      * {@code UI:}/{@code UI_CLOSE:} are sent synchronously so waitUiAction can start after delivery.

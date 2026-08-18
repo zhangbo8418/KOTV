@@ -559,9 +559,16 @@ func MatchPushURL(u string) bool {
 	low := strings.ToLower(u)
 	switch {
 	case strings.HasPrefix(low, "http://"), strings.HasPrefix(low, "https://"),
-		strings.HasPrefix(low, "file://"), strings.HasPrefix(low, "magnet:"),
+		strings.HasPrefix(low, "magnet:"),
 		strings.HasPrefix(low, "thunder:"):
 		return true
+	case strings.HasPrefix(low, "file://"):
+		p := strings.TrimPrefix(u, "file://")
+		p = strings.TrimPrefix(p, "file:")
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return true
+		}
+		return false
 	}
 	for _, ext := range videoExts {
 		if strings.HasSuffix(low, ext) {

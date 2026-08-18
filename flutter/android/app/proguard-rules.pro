@@ -21,6 +21,43 @@
 -keep class org.jsoup.** { *; }
 -keep class com.google.gson.** { *; }
 -keep class org.json.** { *; }
+# 对齐 TV：SimpleXML 注解/接口会被 sardine-android 反射访问
+-keep interface org.simpleframework.xml.core.Label { public *; }
+-keep class * implements org.simpleframework.xml.core.Label { public *; }
+-keep interface org.simpleframework.xml.core.Parameter { public *; }
+-keep class * implements org.simpleframework.xml.core.Parameter { public *; }
+-keep interface org.simpleframework.xml.core.Extractor { public *; }
+-keep class * implements org.simpleframework.xml.core.Extractor { public *; }
+-keepclassmembers,allowobfuscation class * { @org.simpleframework.xml.Path <fields>; }
+-keepclassmembers,allowobfuscation class * { @org.simpleframework.xml.Root <fields>; }
+-keepclassmembers,allowobfuscation class * { @org.simpleframework.xml.Text <fields>; }
+-keepclassmembers,allowobfuscation class * { @org.simpleframework.xml.Element <fields>; }
+-keepclassmembers,allowobfuscation class * { @org.simpleframework.xml.Attribute <fields>; }
+-keepclassmembers,allowobfuscation class * { @org.simpleframework.xml.ElementList <fields>; }
+# 桥接自检和站点运行期都会碰到这些宿主 API，按 TV 规则保留原名
+-keeppackagenames org.slf4j.**
+-keep class org.slf4j.** { *; }
+-keep class com.thegrizzlylabs.sardineandroid.** { *; }
+# 对齐 TV：若后续站点 jar / 宿主能力接入 DLNA，需要 JUPnP 原名可见
+-dontwarn org.jupnp.**
+-keep class org.jupnp.** { *; }
+-keep class javax.xml.** { *; }
+# 对齐 TV：NewPipeExtractor / Rhino 相关类由宿主提供时，外部 dex jar 可能按原名链接
+-keep class javax.script.** { *; }
+-keep class jdk.dynalink.** { *; }
+-keep class org.mozilla.javascript.* { *; }
+-keep class org.mozilla.javascript.** { *; }
+-keep class org.mozilla.javascript.engine.** { *; }
+-keep class org.mozilla.classfile.ClassFileWriter
+-keep class org.schabi.newpipe.extractor.timeago.patterns.** { *; }
+-keep class org.schabi.newpipe.extractor.services.youtube.protos.** { *; }
+-dontwarn org.mozilla.javascript.JavaToJSONConverters
+-dontwarn org.mozilla.javascript.tools.**
+-dontwarn com.google.re2j.**
+-dontwarn javax.script.**
+-dontwarn jdk.dynalink.**
+-dontwarn java.awt.datatransfer.Transferable
+-dontwarn java.beans.Introspector
 -dontwarn cn.hutool.**
 -dontwarn org.bouncycastle.**
 -dontwarn edu.umd.cs.findbugs.**
@@ -40,6 +77,11 @@
 # 迅雷 SDK（对齐 TV）：JNI / 反射不可 shrink
 -keep class com.xunlei.downloadlib.** { *; }
 -dontwarn com.xunlei.downloadlib.**
+# TVBus / 荐片 P2P：站点 jar 与播放提取器按原名链接，JNI 不可 shrink
+-keep class com.tvbus.engine.** { *; }
+-dontwarn com.tvbus.engine.**
+-keep class com.p2p.** { *; }
+-dontwarn com.p2p.**
 # TV dex jar 的 jar 内 JS：QuickJS JNI 类名 / native 不可 shrink
 -keep class com.whl.quickjs.** { *; }
 -keep class com.whl.quickjs.android.** { *; }

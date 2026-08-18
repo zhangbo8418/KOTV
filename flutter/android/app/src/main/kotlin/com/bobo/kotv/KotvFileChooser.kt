@@ -5,6 +5,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -320,6 +321,24 @@ object KotvFileChooser {
 
   private fun isMediaDocument(uri: Uri): Boolean =
     "com.android.providers.media.documents" == uri.authority
+
+  fun storageRoot(): String = Environment.getExternalStorageDirectory().absolutePath
+
+  /**
+   * 对齐 TV FileChooser.show：电视 / 无可用文档选择器时走应用内 FileActivity，
+   * 才能进目录；系统桩选择器常把目录当文件返回。
+   */
+  fun shouldUseFileBrowser(context: Context): Boolean {
+    val ui = context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
+    if (ui == Configuration.UI_MODE_TYPE_TELEVISION) return true
+    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+    intent.type = "*/*"
+    val infos = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+    if (infos.isEmpty()) return true
+    val pkg = infos[0].activityInfo?.packageName ?: return true
+    return pkg.contains("frameworkpackagestubs")
+  }
 
   fun hasStoragePermission(context: Context): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

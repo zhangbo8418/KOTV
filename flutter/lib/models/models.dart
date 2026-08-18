@@ -7,6 +7,9 @@ class VodItem {
     this.typeName = '',
     this.site = '',
     this.action = '',
+    this.vodTag = '',
+    this.cate = '',
+    this.folder = false,
   });
 
   final String id;
@@ -16,8 +19,15 @@ class VodItem {
   final String typeName;
   final String site;
   final String action;
+  final String vodTag;
+  final String cate;
+  final bool folder;
 
   bool get hasAction => action.trim().isNotEmpty;
+
+  /// 对齐 TV Vod.isFolder：`vod_tag=folder` 或存在 cate → 进目录，不进播放器。
+  bool get isFolder =>
+      folder || vodTag.trim().toLowerCase() == 'folder' || cate.trim().isNotEmpty;
 
   factory VodItem.fromJson(Map<String, dynamic> j) => VodItem(
         id: '${j['vod_id'] ?? ''}',
@@ -27,6 +37,9 @@ class VodItem {
         typeName: '${j['type_name'] ?? ''}',
         site: '${j['site'] ?? ''}',
         action: '${j['action'] ?? ''}',
+        vodTag: '${j['vod_tag'] ?? ''}',
+        cate: '${j['cate'] ?? ''}',
+        folder: j['is_folder'] == true,
       );
 }
 
@@ -58,14 +71,19 @@ class CategoryFilter {
 }
 
 class CategoryType {
-  CategoryType({required this.id, required this.name, this.filters = const []});
+  CategoryType({required this.id, required this.name, this.typeFlag = '', this.filters = const []});
   final String id;
   final String name;
+  final String typeFlag;
   final List<CategoryFilter> filters;
+
+  /// 对齐 TV Class.isFolder：`type_flag=1` 的分类用列表，并可嵌套进目录。
+  bool get isFolder => typeFlag.trim() == '1';
 
   factory CategoryType.fromJson(Map<String, dynamic> j) => CategoryType(
         id: '${j['type_id'] ?? ''}',
         name: '${j['type_name'] ?? ''}',
+        typeFlag: '${j['type_flag'] ?? ''}',
         filters: ((j['filters'] as List?) ?? [])
             .whereType<Map>()
             .map((e) => CategoryFilter.fromJson(Map<String, dynamic>.from(e)))
@@ -170,12 +188,15 @@ class SiteInfo {
     this.home = false,
     this.searchable = true,
     this.changeable = true,
+    this.indexs = false,
   });
   final String key;
   final String name;
   final bool home;
   final bool searchable;
   final bool changeable;
+  /// 对齐 TV Site.indexs：豆瓣等索引站，点条目去全网搜索而不是本站详情。
+  final bool indexs;
 
   factory SiteInfo.fromJson(Map<String, dynamic> j) => SiteInfo(
         key: '${j['key'] ?? ''}',
@@ -183,5 +204,6 @@ class SiteInfo {
         home: j['home'] == true,
         searchable: j['searchable'] != false,
         changeable: j['changeable'] != false,
+        indexs: j['indexs'] == true,
       );
 }

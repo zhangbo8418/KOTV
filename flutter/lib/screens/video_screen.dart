@@ -357,7 +357,21 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   void _open(VodItem it) {
-    openVodItem(context, ref, it);
+    openVodItem(context, ref, it, site: it.site, fromFolder: _categoryIsFolder);
+  }
+
+  void _searchItem(VodItem it) {
+    if (it.hasAction || it.isFolder) return;
+    searchByName(ref, it.name);
+  }
+
+  bool get _categoryIsFolder {
+    final tid = _tid;
+    if (tid == null || tid.isEmpty) return false;
+    for (final t in _types) {
+      if (t.id == tid) return t.isFolder;
+    }
+    return false;
   }
 
   Future<void> _openSitePicker(List<SiteInfo> sites) async {
@@ -712,7 +726,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             else
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(catPad, 0, catPad, bottomPad),
-                sliver: _posterSliver(_items),
+                sliver: _categoryIsFolder ? _listSliver(_items) : _posterSliver(_items),
               ),
           ],
         ],
@@ -1027,6 +1041,34 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     );
   }
 
+  Widget _listSliver(List<VodItem> items) {
+    final p = KotvPalette.of(context);
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, i) {
+          if (i < 0 || i >= items.length) return const SizedBox.shrink();
+          final it = items[i];
+          return TvFocus(
+            onPressed: () => _open(it),
+            onLongPress: () => _searchItem(it),
+            child: ListTile(
+              leading: Icon(
+                it.isFolder ? Icons.folder_outlined : Icons.movie_outlined,
+                color: p.primary,
+              ),
+              title: Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+              subtitle: it.remarks.isEmpty ? null : Text(it.remarks),
+              trailing: it.isFolder ? const Icon(Icons.chevron_right) : null,
+              onTap: () => _open(it),
+              onLongPress: () => _searchItem(it),
+            ),
+          );
+        },
+        childCount: items.length,
+      ),
+    );
+  }
+
   Widget _posterSliver(List<VodItem> items) {
     return SliverLayoutBuilder(
       builder: (context, constraints) {
@@ -1053,6 +1095,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 item: it,
                 autofocus: false,
                 onTap: () => _open(it),
+                onLongPress: () => _searchItem(it),
               );
             },
             childCount: items.length,

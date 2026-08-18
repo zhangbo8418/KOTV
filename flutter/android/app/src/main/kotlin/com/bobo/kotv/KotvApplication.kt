@@ -6,7 +6,9 @@ import android.content.Context
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.WindowManager
 import com.bobo.kotv.bridge.SpiderBridge
+import com.bobo.kotv.host.DialogRelay
 import com.bobo.kotv.host.UiContext
 import com.github.catvod.Init
 
@@ -19,6 +21,20 @@ import com.github.catvod.Init
 class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
 
   private val mainHandler = Handler(Looper.getMainLooper())
+  private var relayWm: WindowManager? = null
+
+  override fun getSystemService(name: String): Any? {
+    val raw = super.getSystemService(name)
+    if (name == WINDOW_SERVICE && raw is WindowManager) {
+      synchronized(this) {
+        if (relayWm == null) {
+          relayWm = DialogRelay.wrapWindowManager(raw)
+        }
+        return relayWm
+      }
+    }
+    return raw
+  }
 
   override fun attachBaseContext(base: Context) {
     super.attachBaseContext(base)

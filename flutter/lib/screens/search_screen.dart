@@ -502,6 +502,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               items: c.list,
               padding: EdgeInsets.zero,
               onOpen: (it) => openVodItem(context, ref, it, site: c.site),
+              onLongPress: (it) {
+                if (it.hasAction || it.isFolder) return;
+                searchByName(ref, it.name);
+              },
             ),
           ),
           const SizedBox(height: 16),

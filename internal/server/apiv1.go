@@ -20,7 +20,7 @@ type ContentAPI interface {
 	APILoadConfig(source string) error
 	APISetHome(siteKey string) error
 	APIHome() (map[string]any, error)
-	APICategory(tid, pg string, extend map[string]string) (map[string]any, error)
+	APICategory(tid, pg string, extend map[string]string, siteKey string) (map[string]any, error)
 	APIAction(siteKey, action string) (map[string]any, error)
 	APIDetail(siteKey, vodID string) (map[string]any, error)
 	APIDetailExpand(siteKey, vodID string, flags []map[string]any) (map[string]any, error)
@@ -294,9 +294,10 @@ func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
 	if pg == "" {
 		pg = "1"
 	}
+	siteKey := q.Get("site")
 	extend := map[string]string{}
 	for k, vs := range q {
-		if k == "tid" || k == "pg" {
+		if k == "tid" || k == "pg" || k == "site" {
 			continue
 		}
 		if len(vs) > 0 {
@@ -307,6 +308,7 @@ func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Tid    string            `json:"tid"`
 			Pg     string            `json:"pg"`
+			Site   string            `json:"site"`
 			Extend map[string]string `json:"extend"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -316,6 +318,9 @@ func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
 		if body.Pg != "" {
 			pg = body.Pg
 		}
+		if body.Site != "" {
+			siteKey = body.Site
+		}
 		if body.Extend != nil {
 			extend = body.Extend
 		}
@@ -324,7 +329,7 @@ func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "missing tid")
 		return
 	}
-	out, err := api.APICategory(tid, pg, extend)
+	out, err := api.APICategory(tid, pg, extend, siteKey)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, err.Error())
 		return

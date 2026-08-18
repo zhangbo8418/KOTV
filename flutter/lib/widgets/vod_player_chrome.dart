@@ -51,6 +51,59 @@ String fmtMmSs(int sec) {
   return '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 }
 
+/// 画面正中的播放/暂停。暂停时始终露出播放；播放中仅控件层可见时露出暂停。
+class CenterPlayPauseButton extends StatelessWidget {
+  const CenterPlayPauseButton({
+    super.key,
+    required this.player,
+    this.chromeVisible = true,
+    this.enabled = true,
+    this.onPressed,
+  });
+
+  final KotvPlayback player;
+  final bool chromeVisible;
+  final bool enabled;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        if (!enabled) return const SizedBox.shrink();
+        final playing = player.playing;
+        if (playing && !chromeVisible) return const SizedBox.shrink();
+        final land = KotvLayout.isLandscapeCompact(context);
+        final size = land ? 56.0 : 72.0;
+        return Center(
+          child: Material(
+            color: const Color(0x73000000),
+            shape: const CircleBorder(),
+            elevation: 0,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () {
+                unawaited(player.playOrPause());
+                onPressed?.call();
+              },
+              child: SizedBox(
+                width: size,
+                height: size,
+                child: Icon(
+                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: size * 0.58,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// 详情页内嵌播放器底栏（video_surface）。
 class VodInlineControls extends StatelessWidget {
   const VodInlineControls({
@@ -1300,6 +1353,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     return Stack(
       fit: StackFit.expand,
       children: [
+        CenterPlayPauseButton(
+          player: widget.player,
+          chromeVisible: widget.visible && !_epOpen,
+          enabled: widget.playUrl.isNotEmpty,
+          onPressed: widget.onBump,
+        ),
         if (widget.visible && !_epOpen) ...[
           // 顶栏
           Positioned(

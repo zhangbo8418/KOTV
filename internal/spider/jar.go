@@ -294,6 +294,13 @@ type bridgeRequest struct {
 	Args     map[string]interface{} `json:"args"`
 	ClientID string                 `json:"clientId,omitempty"`
 	UserID   string                 `json:"userId,omitempty"`
+	RemoteUI bool                   `json:"remoteUi,omitempty"`
+}
+
+func fillBridgeClient(req *bridgeRequest) {
+	req.ClientID = hostclient.ScopeID()
+	req.UserID = hostclient.CurrentUserID()
+	req.RemoteUI = hostclient.PublicBase() != ""
 }
 
 func (s *jarSpider) resolveJarPath() (string, error) {
@@ -413,14 +420,13 @@ func (s *jarSpider) call(method string, args map[string]interface{}) (string, er
 	req := bridgeRequest{
 		Method: method,
 		// spider.siteKey 是站点 key；jar 缓存键由 bridge 用 md5(jar)+key 组合。
-		Key:      s.key,
-		API:      s.api,
-		Ext:      s.ext,
-		Jar:      jp,
-		Args:     args,
-		ClientID: hostclient.ScopeID(),
-		UserID:   hostclient.CurrentUserID(),
+		Key:  s.key,
+		API:  s.api,
+		Ext:  s.ext,
+		Jar:  jp,
+		Args: args,
 	}
+	fillBridgeClient(&req)
 	payload, _ := json.Marshal(req)
 
 	raw, err := callJavaBridge(payload)
@@ -554,6 +560,7 @@ func jarProxy(params map[string]string) (int, string, []byte, map[string]string,
 		Method: "proxyGlobal",
 		Args:   map[string]interface{}{"params": params},
 	}
+	fillBridgeClient(&req)
 	payload, _ := json.Marshal(req)
 	raw, err := callJavaBridge(payload)
 	if err != nil {
@@ -655,6 +662,7 @@ func callJarMethod(method string, args map[string]interface{}) (string, error) {
 		Method: method,
 		Args:   args,
 	}
+	fillBridgeClient(&req)
 	payload, _ := json.Marshal(req)
 	raw, err := callJavaBridge(payload)
 	if err != nil {

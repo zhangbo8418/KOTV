@@ -129,7 +129,8 @@ object JarLoader {
     return try {
       val s = SpiderBridge.call(inputJson)?.trim().orEmpty()
       if (s.isEmpty()) {
-        error("SpiderBridge.call returned empty")
+        Log.e(TAG, "SpiderBridge.call empty input=${inputJson.take(240)}")
+        return """{"error":"SpiderBridge.call returned empty"}"""
       }
       s
     } finally {

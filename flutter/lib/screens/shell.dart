@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../nav/kotv_page.dart';
 import '../providers.dart';
 import '../player/play_headers.dart';
 import '../remote/local_collect.dart';
@@ -23,13 +24,7 @@ import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'video_screen.dart';
 
-/// 宽屏单栈换页；竖屏窄窗用底部菜单（普通 App）。
-enum KotvPage { video, search, history, live, settings, profile, collect }
-
-final kotvPageProvider = StateProvider<KotvPage>((ref) => KotvPage.video);
-
-/// 主 Tab 返回栈（不含详情 push）；用于设置/我的等返回上一页，而非直接退桌面。
-final kotvPageStackProvider = StateProvider<List<KotvPage>>((ref) => <KotvPage>[]);
+export '../nav/kotv_page.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 

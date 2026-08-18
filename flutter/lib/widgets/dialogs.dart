@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../providers.dart';
+import '../screens/file_browser_screen.dart';
 import 'chrome.dart';
 
 /// 弹窗尺寸：窄屏用满宽减边距，避免固定 720 被压成竖条。
@@ -37,7 +38,7 @@ const _configFileTypes = XTypeGroup(
 /// - Android：解析 Document URI 为真实磁盘路径（不拷贝整目录）
 /// - 桌面：系统文件对话框
 /// 相对 jar/js/py 由引擎相对配置文件目录解析（任意子目录名）。
-Future<String?> _pickConfigFile() async {
+Future<String?> _pickConfigFile(BuildContext context) async {
   if (!kIsWeb && Platform.isAndroid) {
     try {
       const ch = MethodChannel('kotv_android');
@@ -45,6 +46,21 @@ Future<String?> _pickConfigFile() async {
       try {
         await ch.invokeMethod<bool>('ensureStoragePermission');
       } catch (_) {}
+      var useBrowser = false;
+      try {
+        useBrowser = await ch.invokeMethod<bool>('useFileBrowser') ?? false;
+      } catch (_) {}
+      if (useBrowser && context.mounted) {
+        final root = ((await ch.invokeMethod<String>('storageRoot')) ?? '').trim();
+        final picked = await FileBrowserScreen.pick(
+          context,
+          root: root.isEmpty ? '/storage/emulated/0' : root,
+        );
+        final raw = (picked ?? '').trim();
+        if (raw.isEmpty) return null;
+        if (raw.startsWith('file:')) return raw;
+        return Uri.file(raw).toString();
+      }
       final path = await ch.invokeMethod<String>('pickConfigFile');
       final raw = (path ?? '').trim();
       if (raw.isEmpty) return null;
@@ -338,7 +354,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
           }
 
           Future<void> pick() async {
-            final picked = await _pickConfigFile();
+            final picked = await _pickConfigFile(ctx);
             if (picked != null && ctx.mounted) {
               ctrl.text = picked;
               await load(picked);
@@ -535,7 +551,7 @@ Future<({String url, String name})?> _showEditSourceDialog(
           }
 
           Future<void> pick() async {
-            final picked = await _pickConfigFile();
+            final picked = await _pickConfigFile(ctx);
             if (picked != null && ctx.mounted) {
               urlCtrl.text = picked;
               setLocal(() {});
@@ -640,7 +656,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
       final p = KotvPalette.of(ctx);
       final m = _dialogMetrics(ctx);
       Future<void> pick() async {
-        final picked = await _pickConfigFile();
+        final picked = await _pickConfigFile(ctx);
         if (picked != null && ctx.mounted) {
           ctrl.text = picked;
           Navigator.pop(ctx, true);

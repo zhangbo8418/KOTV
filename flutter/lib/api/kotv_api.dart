@@ -199,13 +199,26 @@ class KotvApi {
 
   Future<Map<String, dynamic>> home() => _get('/api/v1/home');
 
-  Future<Map<String, dynamic>> category(String tid, {String pg = '1', Map<String, String>? extend}) async {
-    if (extend == null || extend.isEmpty) {
-      return _get('/api/v1/category', {'tid': tid, 'pg': pg});
-    }
-    return _post('/api/v1/category', {
+  Future<Map<String, dynamic>> category(
+    String tid, {
+    String pg = '1',
+    String? site,
+    Map<String, String>? extend,
+  }) async {
+    final params = <String, dynamic>{
       'tid': tid,
       'pg': pg,
+      if (site != null && site.isNotEmpty) 'site': site,
+    };
+    if (extend == null || extend.isEmpty) {
+      return _get('/api/v1/category', {
+        'tid': tid,
+        'pg': pg,
+        if (site != null && site.isNotEmpty) 'site': site,
+      });
+    }
+    return _post('/api/v1/category', {
+      ...params,
       'extend': extend,
     });
   }

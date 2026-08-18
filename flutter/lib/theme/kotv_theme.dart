@@ -187,12 +187,14 @@ class TvFocus extends StatefulWidget {
     super.key,
     required this.child,
     this.onPressed,
+    this.onLongPress,
     this.autofocus = false,
     this.borderRadius = 12,
   });
 
   final Widget child;
   final VoidCallback? onPressed;
+  final VoidCallback? onLongPress;
   final bool autofocus;
   final double borderRadius;
 
@@ -219,6 +221,7 @@ class _TvFocusState extends State<TvFocus> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onPressed,
+        onLongPress: widget.onLongPress,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
           decoration: BoxDecoration(

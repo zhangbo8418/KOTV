@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -21,6 +22,7 @@ type Live struct {
 	PlayerType FlexInt    `json:"playerType"`
 	Header     FlexHeader `json:"header"`
 	Catchup    Catchup    `json:"catchup"`
+	Core       json.RawMessage `json:"core,omitempty"`
 	Groups     []LiveGroup `json:"-"`
 }
 

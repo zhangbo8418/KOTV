@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 
 import com.bobo.kotv.host.UiContext;
+import com.bobo.kotv.host.DialogRelay;
 
 import java.lang.ref.WeakReference;
 
@@ -42,10 +43,11 @@ public class Init {
         return UiContext.activity();
     }
 
-    /** 弹窗/Toast 优先 Activity，否则 Application。 */
+    /** 弹窗/Toast 优先 Activity，否则 Application。远端客户端时包一层 WindowManager 中继。 */
     public static Context uiContext() {
         Context ui = UiContext.forUi();
-        return ui != null ? ui : context();
+        Context raw = ui != null ? ui : context();
+        return DialogRelay.maybeWrap(raw);
     }
 
     private static class Loader {
