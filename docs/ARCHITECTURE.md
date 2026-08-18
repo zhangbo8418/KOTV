@@ -90,8 +90,8 @@ Go Engine（单进程，:9978）
 | 站点 jar | 只吃 PC JVM `.class` 瘦包 | **同时**吃 TV/CatVodSpider dex jar（`DexClassLoader(file, Path.jar(), Path.jar(), App)`）和 PC 瘦包（先 D8） |
 | OkHttp | bridge **5.4.0**；请求自动 tag `clientId` | App `force` **5.4.0** |
 
-- CatVodSpider 的 `custom_spider.jar` 只有 `com.github.catvod.{spider,js}`；`crawler.Spider` / Gson / OkHttp / QuickJS 由宿主提供（见其 `checkJar` allowed refs）。
-- JVM 瘦包不走 R8 `spider.merge`，站点 **exclude** 宿主同名类，父优先用宿主。
+- **TV dex**（`custom_spider.jar`）：jar 内仅 `com.github.catvod.{js,spider}` + `classes.dex`；外部符号须落在 CatVodSpider `jar/checkJar.ps1` 的 `$allowed`（如 `crawler/`、`android/`、`okhttp3/`、`com/whl/quickjs/`），由宿主 `:catvod`/`:kotv-bridge` 提供。R8 可能把站点依赖 merge 进 `spider.merge.*`，**不是**「jar 里完全没有 okhttp 字节码」。
+- **PC JVM 瘦包**（`FongMi-CatVodSpider/pc` 等）：在同一宿主契约下，打包时 **额外** exclude bridge 宿主同名类 + 不打 okhttp/sardine fat（父 CL 用 bridge）；Android 侧再 D8。验收见 `verifyUniversalJar`，**不能**用 TV dex 的 exclude 文案描述 PC 线。
 - 站点约定 `com.github.catvod.spider.*`；配置 `csp_ClassName`。
 - `libquickjs-android-wrapper.so` 仅进 APK，桌面 JRE 不绑这套 JNI。
 

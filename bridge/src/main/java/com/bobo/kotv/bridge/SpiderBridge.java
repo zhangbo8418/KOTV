@@ -1,7 +1,9 @@
 package com.bobo.kotv.bridge;
 
+import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
+import com.bobo.kotv.host.UiContext;
 import com.github.catvod.Init;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderNull;
@@ -48,9 +50,20 @@ public class SpiderBridge {
         if (ctx == null) return;
         Context app = ctx.getApplicationContext();
         CONTEXT = app != null ? app : ctx;
+        if (CONTEXT instanceof Application) {
+            UiContext.setApplication((Application) CONTEXT);
+        }
+        if (ctx instanceof Activity) {
+            UiContext.setActivity((Activity) ctx);
+        }
         // Android 不允许/不完整支持名为 BC 的 BouncyCastle Provider；
         // hutool DigestUtil/AES 默认走 BC 会抛 NoSuchAlgorithmException。
         disableHutoolBouncyCastle();
+    }
+
+    /** Android：注入当前前台 Activity，供 TV dex jar 内 AlertDialog 拿 window token。 */
+    public static void setAndroidActivity(Activity activity) {
+        UiContext.setActivity(activity);
     }
 
     private static void disableHutoolBouncyCastle() {
@@ -263,6 +276,12 @@ public class SpiderBridge {
 
     public static String call(String input) {
         disableSystemProxies();
+        if (isArtVm()) {
+            Activity act = UiContext.activity();
+            if (act != null) {
+                UiContext.setActivity(act);
+            }
+        }
         String clientId = "";
         String userId = "";
         try {
@@ -472,6 +491,8 @@ public class SpiderBridge {
         String spKey = md5Hex(jarPath) + key;
         Spider cached = spiders.get(spKey);
         if (cached != null && !(cached instanceof SpiderNull)) {
+            ClassLoader existing = loaders.get(jarPath);
+            refreshSpiderJarUi(existing);
             return cached;
         }
         // 勿永久缓存 SpiderNull：Android 上首次因 Writable dex 失败后会一直空响应。
@@ -481,6 +502,7 @@ public class SpiderBridge {
             if (loader == null) {
                 throw new IllegalStateException("No jar loaded: " + jarPath);
             }
+            refreshSpiderJarUi(loader);
             String className = spiderClassName(api);
             ClassLoader prev = Thread.currentThread().getContextClassLoader();
             Thread.currentThread().setContextClassLoader(loader);
@@ -597,7 +619,14 @@ public class SpiderBridge {
         if (extend == null) {
             extend = "";
         }
-        spider.init(ctx(), extend);
+        Context initCtx = ctx();
+        if (isArtVm()) {
+            Context ui = UiContext.forUi();
+            if (ui != null) {
+                initCtx = ui;
+            }
+        }
+        spider.init(initCtx, extend);
     }
 
     private static String md5Hex(String s) {
@@ -615,8 +644,9 @@ public class SpiderBridge {
     }
 
     /**
-     * Desktop site ClassLoader. Default parent-first（DexClassLoader）：
-     * 站点 jar 不含宿主 Util/OkHttp，由 bridge 提供。
+     * Desktop site ClassLoader（URLClassLoader，父 = bridge CL）。
+     * PC JVM 瘦包按 FongMi `pc/` 的 exclude + verifyUniversalJar 打包；运行时 Util/OkHttp 等由 bridge 提供。
+     * TV dex jar 不走此路径（Android 见 {@link #createDexLoader}）。
      */
     private static final class SpiderClassLoader extends URLClassLoader {
         SpiderClassLoader(URL[] urls, ClassLoader parent) {
@@ -724,17 +754,90 @@ public class SpiderBridge {
      * older jars do not have it and Android-dependent variants can reject the
      * desktop Context shim, so loading an individual spider must still work.
      */
-    private static void initializeSpiderJar(String jarPath, ClassLoader loader) {
+    private static void invokeSpiderJarInit(ClassLoader loader) {
         try {
-            // 对齐 TV JarLoader.invokeInit：只调 Init.init(Context)，且必须是 static。
             Class<?> clz = loader.loadClass("com.github.catvod.spider.Init");
-            Method method = clz.getMethod("init", Context.class);
-            method.invoke(clz, ctx());
+            Method init = clz.getMethod("init", Context.class);
+            Context app = ctx();
+            Activity act = UiContext.activity();
+            boolean initialized = false;
+            // 部分改造 jar 的 init 可接受 Activity；标准 TV dex 只收 Application。
+            if (act != null) {
+                try {
+                    init.invoke(null, act);
+                    initialized = true;
+                } catch (java.lang.reflect.InvocationTargetException ite) {
+                    Throwable cause = ite.getCause() != null ? ite.getCause() : ite;
+                    if (!(cause instanceof ClassCastException)) {
+                        throw ite;
+                    }
+                }
+            }
+            if (!initialized) {
+                init.invoke(null, app);
+            }
+            injectJarInitActivity(clz, act);
         } catch (ClassNotFoundException ignored) {
             // Init is not part of the original spider ABI.
         } catch (Throwable error) {
             System.err.println("optional spider Init skipped: " + error);
         }
+    }
+
+    /** 标准 TV Init 只存 Application；有 getActivity/setActivity 的 jar 在此补 Activity。 */
+    private static void injectJarInitActivity(Class<?> initClz, Activity act) {
+        if (act == null || initClz == null) {
+            return;
+        }
+        for (String name : new String[]{"setActivity", "bindActivity", "attachActivity"}) {
+            try {
+                initClz.getMethod(name, Activity.class).invoke(null, act);
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            java.lang.reflect.Field field = initClz.getDeclaredField("activity");
+            field.setAccessible(true);
+            if (Activity.class.isAssignableFrom(field.getType())) {
+                field.set(null, act);
+                return;
+            }
+        } catch (Throwable ignored) {
+        }
+        for (java.lang.reflect.Field field : initClz.getDeclaredFields()) {
+            try {
+                if (!java.lang.ref.WeakReference.class.isAssignableFrom(field.getType())) {
+                    continue;
+                }
+                field.setAccessible(true);
+                Object current = field.get(null);
+                if (current instanceof java.lang.ref.WeakReference) {
+                    java.lang.ref.WeakReference<?> ref = (java.lang.ref.WeakReference<?>) current;
+                    Object target = ref.get();
+                    if (target == null || target instanceof Activity) {
+                        field.set(null, new java.lang.ref.WeakReference<>(act));
+                        return;
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static void refreshSpiderJarUi(ClassLoader loader) {
+        if (!isArtVm() || loader == null) {
+            return;
+        }
+        try {
+            Class<?> clz = loader.loadClass("com.github.catvod.spider.Init");
+            injectJarInitActivity(clz, UiContext.activity());
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void initializeSpiderJar(String jarPath, ClassLoader loader) {
+        invokeSpiderJarInit(loader);
         try {
             Class<?> proxy = loader.loadClass("com.github.catvod.spider.Proxy");
             proxyMethods.put(jarPath, proxy.getMethod("proxy", Map.class));

@@ -451,7 +451,7 @@ jobs:
           CHAQUOPY_BUILD_PYTHON: python3.10
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          chmod +x bridge/build.sh scripts/*.sh
+          chmod +x scripts/*.sh
           python3.10 --version
           test -f flutter/android/app/libs/thunder-release.aar
           ./scripts/package-flutter-android.sh

@@ -1,5 +1,6 @@
 package com.bobo.kotv
 
+import android.app.Activity
 import android.content.Context
 import android.util.Log
 import com.bobo.kotv.bridge.SpiderBridge
@@ -30,6 +31,23 @@ object JarLoader {
   /** TV dex jar 的 jar 内 JS 是否已能调 QuickJS JNI。缺库不影响通用 JVM 瘦包。 */
   fun isQuickJsNativeLoaded(): Boolean = quickJsNative
 
+  private fun syncSpiderUiContext(context: Context) {
+    val act = KotvApplication.activity()
+    if (act != null) {
+      try {
+        SpiderBridge.setAndroidActivity(act)
+      } catch (_: Throwable) {
+      }
+      return
+    }
+    if (context is Activity) {
+      try {
+        SpiderBridge.setAndroidActivity(context)
+      } catch (_: Throwable) {
+      }
+    }
+  }
+
   fun ensureBridgeLoaded(context: Context) {
     if (loaded) return
     synchronized(this) {
@@ -45,12 +63,13 @@ object JarLoader {
       check(com.android.tools.r8.D8::class.java.name.isNotEmpty())
       preloadQuickJsNative()
       SpiderBridge.setAndroidContext(app)
+      syncSpiderUiContext(context)
       injectSiteJarHooks()
       loaded = true
       Log.i(
         TAG,
         "bridge on App CL parent=${SpiderBridge::class.java.classLoader?.javaClass?.name} " +
-          "ensure=${JarDexer::class.java.name}",
+          "ensure=${JarDexer::class.java.name} activity=${KotvApplication.activity()?.javaClass?.simpleName}",
       )
     }
   }
@@ -96,6 +115,7 @@ object JarLoader {
         SpiderBridge.setAndroidContext(c)
       } catch (_: Throwable) {
       }
+      syncSpiderUiContext(c)
       try {
         injectSiteJarHooks()
       } catch (_: Throwable) {

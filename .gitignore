@@ -54,4 +54,8 @@ flutter/assets/fonts/LICENSE*
 # Flutter Web 构建产物（package-flutter-web.sh）
 /webapp/
 flutter/build/
+flutter/android/build/
+
+# Local agent notes (not part of the product)
+.workbuddy/
 

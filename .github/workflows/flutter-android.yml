@@ -55,7 +55,7 @@ jobs:
           CHAQUOPY_BUILD_PYTHON: python3.10
           KOTV_JAVA_TOOLCHAIN: "17"
         run: |
-          chmod +x bridge/build.sh scripts/*.sh
+          chmod +x scripts/*.sh
           python3.10 --version
           ./scripts/package-flutter-android.sh
           ls -lh dist/KO影视-*.apk
