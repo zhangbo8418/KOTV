@@ -79,6 +79,8 @@ android {
             }
         }
         resources {
+            // 多 JAR 同名元数据。Android 不用这些文件；漏一条 CI 就会在 mergeJavaResource 再炸一次。
+            // 不要 excludes += "META-INF/versions/**"：bcprov 的 MRJAR class 在 versions/9|11|15。
             excludes += "META-INF/DEPENDENCIES"
             excludes += "META-INF/LICENSE"
             excludes += "META-INF/LICENSE.txt"
@@ -86,12 +88,18 @@ android {
             excludes += "META-INF/NOTICE"
             excludes += "META-INF/NOTICE.txt"
             excludes += "META-INF/NOTICE.md"
+            excludes += "META-INF/AL2.0"
+            excludes += "META-INF/LGPL2.1"
             excludes += "META-INF/*.SF"
             excludes += "META-INF/*.RSA"
             excludes += "META-INF/*.DSA"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/versions/**/OSGI-INF/**"
+            excludes += "META-INF/versions/**/module-info.class"
+            excludes += "**/module-info.class"
             pickFirsts += "META-INF/INDEX.LIST"
-            pickFirsts += "META-INF/LICENSE.md"
-            pickFirsts += "META-INF/NOTICE.md"
+            pickFirsts += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            pickFirsts += "META-INF/versions/9/module-info.class"
             for (abi in kotvAllAbis) {
                 if (!kotvAbiFilters.contains(abi)) {
                     excludes += "lib/${abi}/**"
