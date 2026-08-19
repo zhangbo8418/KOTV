@@ -981,7 +981,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (_backend == KotvEmbedBackend.exo || hasDrm) {
           final cached = playUrl.contains('/proxy/cached_m3u8');
           final proxied = playUrl.contains('/proxy/play');
-          if (!cached &&
+          final localMedia = mediaUrl.startsWith('file:') ||
+              mediaUrl.startsWith('content:') ||
+              (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
+          if (!cached && !magnet && localMedia) {
+            // csp_Local：直喂 Exo，不走 HTTP 代理/请求头。
+            openUrl = mediaUrl;
+            openHeaders = null;
+          } else if (!cached &&
               !magnet &&
               mediaUrl.startsWith('http') &&
               headers.isNotEmpty) {

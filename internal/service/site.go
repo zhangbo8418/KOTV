@@ -218,13 +218,17 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 	var err error
 	switch site.TypeID() {
 	case 3:
-		sp := s.cfg.Spider(site)
-		var raw string
-		raw, err = sp.CategoryContent(tid, pg, true, extend)
-		if err != nil {
-			return model.Result{Success: false}, err
+		if native, ok := localDirCategory(tid); ok {
+			result = native
+		} else {
+			sp := s.cfg.Spider(site)
+			var raw string
+			raw, err = sp.CategoryContent(tid, pg, true, extend)
+			if err != nil {
+				return model.Result{Success: false}, err
+			}
+			result, err = decodeResult(raw)
 		}
-		result, err = decodeResult(raw)
 	case 0, 1, 2, 4:
 		params := map[string]string{
 			"ac": siteAC(site.TypeID()),

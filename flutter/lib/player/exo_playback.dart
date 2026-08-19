@@ -20,6 +20,7 @@ class ExoPlayback extends KotvPlayback {
   static const _ch = MethodChannel('kotv_exo');
   static const _ev = EventChannel('kotv_exo/events');
   static const _viewType = 'kotv_exo/surface';
+  final _viewKey = GlobalKey();
 
   StreamSubscription? _sub;
   bool _nativeReady = false;
@@ -34,6 +35,7 @@ class ExoPlayback extends KotvPlayback {
   double _rate = 1;
   int _w = 0;
   int _h = 0;
+  double _pixelRatio = 1;
   /// -1=未知；READY 后由原生写入。用于识别纯音频，避免无画面误切播放器。
   int _videoTrackCount = -1;
   int _audioTrackCount = -1;
@@ -90,13 +92,53 @@ class ExoPlayback extends KotvPlayback {
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     final name = _fitName(fit);
-    return kotvExoSurfaceView(
+    final surface = kotvExoSurfaceView(
+      key: _viewKey,
       viewType: _viewType,
       fitName: name,
       onFit: (fitName) {
         unawaited(_ch.invokeMethod('setFit', {'fit': fitName}).catchError((_) {}));
       },
     );
+    // SurfaceView 吃不到 FittedBox 的变换，必须按视频比例给它真实布局尺寸。
+    return ColoredBox(
+      color: Colors.black,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final max = c.biggest;
+          if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
+            return surface;
+          }
+          if (fit == BoxFit.fill || _w <= 0 || _h <= 0) {
+            return SizedBox(width: max.width, height: max.height, child: surface);
+          }
+          final box = _boxFitSize(max, _displaySize, fit);
+          final child = SizedBox(width: box.width, height: box.height, child: surface);
+          if (fit == BoxFit.cover) {
+            return ClipRect(child: Center(child: child));
+          }
+          return Center(child: child);
+        },
+      ),
+    );
+  }
+
+  Size get _displaySize {
+    final par = _pixelRatio > 0 ? _pixelRatio : 1.0;
+    return Size((_w > 0 ? _w : 16) * par, (_h > 0 ? _h : 9).toDouble());
+  }
+
+  static Size _boxFitSize(Size viewport, Size video, BoxFit fit) {
+    final ar = video.width / video.height;
+    final vr = viewport.width / viewport.height;
+    switch (fit) {
+      case BoxFit.cover:
+        if (ar > vr) return Size(viewport.height * ar, viewport.height);
+        return Size(viewport.width, viewport.width / ar);
+      default:
+        if (ar > vr) return Size(viewport.width, viewport.width / ar);
+        return Size(viewport.height * ar, viewport.height);
+    }
   }
 
   static String _fitName(BoxFit fit) {
@@ -151,6 +193,10 @@ class ExoPlayback extends KotvPlayback {
       case 'size':
         _w = (m['width'] as num?)?.toInt() ?? _w;
         _h = (m['height'] as num?)?.toInt() ?? _h;
+        if (m['pixelRatio'] != null) {
+          final par = (m['pixelRatio'] as num).toDouble();
+          if (par > 0) _pixelRatio = par;
+        }
         if (m['durationMs'] != null) {
           _duration = Duration(milliseconds: (m['durationMs'] as num).toInt());
         }
@@ -206,6 +252,7 @@ class ExoPlayback extends KotvPlayback {
     _audioTrackCount = -1;
     _w = 0;
     _h = 0;
+    _pixelRatio = 1;
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffered = Duration.zero;

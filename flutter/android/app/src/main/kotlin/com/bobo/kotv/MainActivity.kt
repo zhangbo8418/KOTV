@@ -27,6 +27,7 @@ class MainActivity : FlutterActivity() {
   private var castPermResult: MethodChannel.Result? = null
   private var pickConfigResult: MethodChannel.Result? = null
   private var storagePermResult: MethodChannel.Result? = null
+  private var storagePromptStarted = false
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -163,7 +164,7 @@ class MainActivity : FlutterActivity() {
       result.success(true)
       return
     }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && canRequestAllFilesAccess()) {
       storagePermResult = result
       try {
         val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
@@ -181,14 +182,61 @@ class MainActivity : FlutterActivity() {
       }
       return
     }
-    val need = Manifest.permission.READ_EXTERNAL_STORAGE
-    if (ContextCompat.checkSelfPermission(this, need) == PackageManager.PERMISSION_GRANTED) {
+    val need = storagePermissionsToRequest()
+    if (need.isEmpty()) {
       result.success(true)
       return
     }
     castPermResult = null
     storagePermResult = result
-    ActivityCompat.requestPermissions(this, arrayOf(need), REQ_STORAGE)
+    ActivityCompat.requestPermissions(this, need.toTypedArray(), REQ_STORAGE)
+  }
+
+  /** 对齐 TV PermissionUtil：部分 TV/盒子没有「所有文件访问」设置页，改走运行时读权限。 */
+  private fun canRequestAllFilesAccess(): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+    val app = Intent(
+      Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+      Uri.parse("package:$packageName"),
+    )
+    val all = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+    return app.resolveActivity(packageManager) != null ||
+      all.resolveActivity(packageManager) != null
+  }
+
+  private fun storagePermissionsToRequest(): List<String> {
+    val out = ArrayList<String>(3)
+    when {
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+        out.add(Manifest.permission.READ_MEDIA_VIDEO)
+        out.add(Manifest.permission.READ_MEDIA_AUDIO)
+      }
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+        out.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+      }
+      else -> {
+        out.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        out.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+      }
+    }
+    return out.filter {
+      ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+    }
+  }
+
+  /** 首启对齐 TV HomeActivity：尽早申请本地文件访问。 */
+  private fun promptStoragePermissionIfNeeded() {
+    if (storagePromptStarted || KotvFileChooser.hasStoragePermission(this)) return
+    storagePromptStarted = true
+    ensureStoragePermission(
+      object : MethodChannel.Result {
+        override fun success(result: Any?) {}
+
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {}
+
+        override fun notImplemented() {}
+      },
+    )
   }
 
   @Deprecated("Deprecated in Java")
@@ -304,6 +352,7 @@ class MainActivity : FlutterActivity() {
     if (spiderKickStarted) return
     spiderKickStarted = true
     window.decorView.post {
+      promptStoragePermissionIfNeeded()
       try {
         SpiderServiceManager.start(this)
       } catch (_: Throwable) {

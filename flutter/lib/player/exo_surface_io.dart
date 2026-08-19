@@ -6,12 +6,14 @@ import 'package:flutter/services.dart';
 
 /// Hybrid Composition + SurfaceView：对齐 TV HDR，避免 Texture 转 SDR 发暗。
 Widget kotvExoSurfaceView({
+  Key? key,
   required String viewType,
   required String fitName,
   required void Function(String fitName) onFit,
 }) {
   onFit(fitName);
   return PlatformViewLink(
+    key: key,
     viewType: viewType,
     surfaceFactory: (context, controller) {
       return AndroidViewSurface(

@@ -3,6 +3,7 @@ import 'util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -83,6 +84,13 @@ Widget _kotvErrorWidget(FlutterErrorDetails details) {
   );
 }
 
+Future<void> _ensureAndroidStoragePermission() async {
+  try {
+    const ch = MethodChannel('kotv_android');
+    await ch.invokeMethod<bool>('ensureStoragePermission');
+  } catch (_) {}
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ErrorWidget.builder = _kotvErrorWidget;
@@ -98,6 +106,9 @@ Future<void> main() async {
     // Android 也要 init：用户可选 MPV（media_kit）；Web 用 HTML5，不初始化 media_kit。
     MediaKit.ensureInitialized();
     kotvRegisterFvp();
+    if (Platform.isAndroid) {
+      unawaited(_ensureAndroidStoragePermission());
+    }
   }
   unawaited(KotvBufferBudget.warm());
   final prefs = await SharedPreferences.getInstance();

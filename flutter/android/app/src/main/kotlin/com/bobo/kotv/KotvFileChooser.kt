@@ -361,10 +361,17 @@ object KotvFileChooser {
   }
 
   fun hasStoragePermission(context: Context): Boolean {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      return Environment.isExternalStorageManager()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+      return true
     }
-    return context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
-      PackageManager.PERMISSION_GRANTED
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      return context.checkSelfPermission(android.Manifest.permission.READ_MEDIA_VIDEO) ==
+        PackageManager.PERMISSION_GRANTED
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      return context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+        PackageManager.PERMISSION_GRANTED
+    }
+    return true
   }
 }

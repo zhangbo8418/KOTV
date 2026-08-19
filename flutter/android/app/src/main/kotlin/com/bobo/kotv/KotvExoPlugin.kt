@@ -3,9 +3,11 @@ package com.bobo.kotv
 import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.widget.FrameLayout
@@ -42,6 +44,8 @@ import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import okhttp3.OkHttpClient
 import java.io.File
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
@@ -314,30 +318,44 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   internal fun attachSurfaceHost(host: KotvExoSurfaceHost) {
     surfaceHost = host
-    bindPlayerSurface()
+    host.bindSurfaceCallbacks(::onSurfaceReady)
+    onSurfaceReady()
   }
 
   internal fun detachSurfaceHost(host: KotvExoSurfaceHost) {
     if (surfaceHost === host) {
+      host.unbindSurfaceCallbacks()
       player?.clearVideoSurface()
       surfaceHost = null
     }
   }
 
+  /** PlatformView / SurfaceView 进树后 surface 才可用；晚于 open() 时必须在此重绑。 */
+  internal fun onSurfaceReady() {
+    main.post { bindPlayerSurface() }
+  }
+
   private fun bindPlayerSurface() {
     val p = player ?: return
     val sv = surfaceHost?.surfaceView ?: return
+    if (!canBindSurface(sv)) return
     p.setVideoSurfaceView(sv)
     applyVideoFit()
   }
 
-  private fun applyVideoFit() {
-    val p = player ?: return
-    p.videoScalingMode = if (videoFit == "cover") {
-      C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+  private fun canBindSurface(sv: SurfaceView): Boolean {
+    val surface = sv.holder.surface ?: return false
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      surface.isValid
     } else {
-      C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+      true
     }
+  }
+
+  private fun applyVideoFit() {
+    // 画幅由 Flutter 按视频比例给 Surface 定尺寸（SurfaceView 不吃 FittedBox 变换）。
+    // 画面在 Surface 内铺满即可，避免再 SCALE 裁切把比例弄丢。
+    player?.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
   }
 
   private fun openInternal(
@@ -425,6 +443,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               "event" to "ready",
               "width" to f.width,
               "height" to f.height,
+              "pixelRatio" to f.pixelWidthHeightRatio,
               "durationMs" to p.duration.coerceAtLeast(0),
               "decodeMode" to effective,
               "videoTrackCount" to videoTrackCandidates().size,
@@ -466,7 +485,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
 
       override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-        emit(mapOf("event" to "size", "width" to videoSize.width, "height" to videoSize.height))
+        emit(
+          mapOf(
+            "event" to "size",
+            "width" to videoSize.width,
+            "height" to videoSize.height,
+            "pixelRatio" to videoSize.pixelWidthHeightRatio,
+          ),
+        )
       }
     })
     p.setMediaItem(buildMediaItem(url, currentMime, currentDrm), true)
@@ -708,13 +734,19 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       val t = url.trim()
       val low = t.lowercase()
       if (low.startsWith("content:")) return Uri.parse(t)
-      if (low.startsWith("file:")) {
-        val parsed = Uri.parse(t)
-        val path = parsed.path
-        if (!path.isNullOrEmpty()) return Uri.fromFile(File(path))
-        return parsed
-      }
       if (t.startsWith("/")) return Uri.fromFile(File(t))
+      if (low.startsWith("file:")) {
+        try {
+          val parsed = Uri.parse(t)
+          var path = parsed.path
+          if (!path.isNullOrEmpty()) {
+            path = URLDecoder.decode(path, StandardCharsets.UTF_8.name())
+            return Uri.fromFile(File(path))
+          }
+        } catch (_: Throwable) {
+        }
+        return Uri.parse(t)
+      }
       return Uri.parse(t)
     }
 
@@ -792,10 +824,34 @@ internal class KotvExoSurfaceFactory(
 /** TV 默认 SurfaceView：HDR 走系统合成，不经 Flutter Texture 转 SDR。 */
 internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
   val surfaceView = SurfaceView(context)
+  private var surfaceCallback: SurfaceHolder.Callback? = null
 
   init {
     setBackgroundColor(android.graphics.Color.BLACK)
     surfaceView.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
     addView(surfaceView)
+  }
+
+  fun bindSurfaceCallbacks(onReady: () -> Unit) {
+    unbindSurfaceCallbacks()
+    val cb = object : SurfaceHolder.Callback {
+      override fun surfaceCreated(holder: SurfaceHolder) {
+        onReady()
+      }
+
+      override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        onReady()
+      }
+
+      override fun surfaceDestroyed(holder: SurfaceHolder) {
+      }
+    }
+    surfaceCallback = cb
+    surfaceView.holder.addCallback(cb)
+  }
+
+  fun unbindSurfaceCallbacks() {
+    surfaceCallback?.let { surfaceView.holder.removeCallback(it) }
+    surfaceCallback = null
   }
 }
