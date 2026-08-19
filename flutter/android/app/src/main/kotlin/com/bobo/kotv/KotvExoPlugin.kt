@@ -352,9 +352,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   internal fun detachSurfaceHost(host: KotvExoSurfaceHost) {
     if (surfaceHost === host) {
+      unbindPlayerOutput(host)
       host.unbind()
-      player?.clearVideoSurface()
-      player?.clearVideoTextureView()
       surfaceHost = null
     }
   }
@@ -366,10 +365,15 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun applyRenderToHost() {
     val host = surfaceHost ?: return
-    player?.clearVideoSurface()
-    player?.clearVideoTextureView()
+    unbindPlayerOutput(host)
     host.setRender(renderTexture, ::onSurfaceReady)
     bindPlayerSurface()
+  }
+
+  private fun unbindPlayerOutput(host: KotvExoSurfaceHost) {
+    val p = player ?: return
+    host.surfaceView?.let { p.clearVideoSurfaceView(it) }
+    host.textureView?.let { p.clearVideoTextureView(it) }
   }
 
   private fun bindPlayerSurface() {
