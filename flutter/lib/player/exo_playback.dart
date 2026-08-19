@@ -1,11 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
+import 'exo_surface.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
@@ -92,29 +90,11 @@ class ExoPlayback extends KotvPlayback {
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     final name = _fitName(fit);
-    unawaited(_ch.invokeMethod('setFit', {'fit': name}).catchError((_) {}));
-    // Hybrid Composition（initExpensiveAndroidView）：SurfaceView 才能走系统 HDR。
-    // 普通 AndroidView / Texture 会把 HDR 转 SDR，画面发暗。
-    return PlatformViewLink(
+    return kotvExoSurfaceView(
       viewType: _viewType,
-      surfaceFactory: (context, controller) {
-        return AndroidViewSurface(
-          controller: controller as AndroidViewController,
-          hitTestBehavior: PlatformViewHitTestBehavior.transparent,
-          gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{},
-        );
-      },
-      onCreatePlatformView: (params) {
-        final controller = PlatformViewsService.initExpensiveAndroidView(
-          id: params.id,
-          viewType: _viewType,
-          layoutDirection: TextDirection.ltr,
-          creationParams: <String, dynamic>{'fit': name},
-          creationParamsCodec: const StandardMessageCodec(),
-        );
-        controller.addOnPlatformViewCreatedListener(params.onPlatformViewCreated);
-        controller.create();
-        return controller;
+      fitName: name,
+      onFit: (fitName) {
+        unawaited(_ch.invokeMethod('setFit', {'fit': fitName}).catchError((_) {}));
       },
     );
   }
