@@ -96,15 +96,14 @@ class DetailFullscreenPage extends StatefulWidget {
   final KotvDesktopFullscreenKind desktopFullscreen;
 
   @override
-  State<DetailFullscreenPage> createState() => _DetailFullscreenPageState();
+  State<DetailFullscreenPage> createState() => DetailFullscreenPageState();
 }
 
-class _DetailFullscreenPageState extends State<DetailFullscreenPage>
+class DetailFullscreenPageState extends State<DetailFullscreenPage>
     with SingleTickerProviderStateMixin {
   bool _showChrome = true;
   MouseCursor _mouseCursor = SystemMouseCursors.basic;
   bool _pointerIn = false;
-  bool _pointerAtBottom = false;
   late AspectSpec _aspect = widget.aspect;
   late String _decodeMode = widget.decodeMode;
   late String _renderMode = widget.renderMode;
@@ -156,7 +155,11 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _refreshForceLandscapeBtn();
-        _syncChrome();
+        if (widget.playback.playing) {
+          _schedulePlayingHide();
+        } else {
+          _setChrome(show: true, hideCursor: false);
+        }
       }
     });
   }
@@ -197,12 +200,16 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _onPlaybackChanged() {
     _refreshForceLandscapeBtn();
-    _syncChrome(startPlayingHide: widget.playback.playing);
+    if (!widget.playback.playing) {
+      _hideTimer?.cancel();
+      _setChrome(show: true, hideCursor: false);
+      return;
+    }
+    if (_showChrome) _schedulePlayingHide();
   }
 
-  /// 显示器全屏 / 手机全屏：底栏只在暂停或鼠标到底部时出现。
-  /// 桌面「全窗口」：鼠标移入露出，播放中超时收起。
-  bool get _edgeRevealOnly =>
+  /// 播放中收起控件时藏鼠标（手机全屏 / 占满显示器）。
+  bool get _hideCursorWhenIdle =>
       widget.desktopFullscreen == KotvDesktopFullscreenKind.display || !kotvIsDesktop();
 
   void _setChrome({required bool show, required bool hideCursor}) {
@@ -219,36 +226,28 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (!widget.playback.playing) return;
     _hideTimer = Timer(const Duration(seconds: 2), () {
       if (!mounted || !widget.playback.playing || _epOpen) return;
-      if (_edgeRevealOnly && _pointerAtBottom) return;
-      _setChrome(show: false, hideCursor: _edgeRevealOnly);
+      _setChrome(show: false, hideCursor: _hideCursorWhenIdle);
     });
-  }
-
-  void _syncChrome({bool startPlayingHide = false}) {
-    final paused = !widget.playback.playing;
-    if (_epOpen || paused) {
-      _hideTimer?.cancel();
-      _setChrome(show: true, hideCursor: false);
-      return;
-    }
-    if (_edgeRevealOnly) {
-      _hideTimer?.cancel();
-      final show = _pointerAtBottom;
-      _setChrome(show: show, hideCursor: !show);
-      return;
-    }
-    if (_pointerIn) {
-      _setChrome(show: true, hideCursor: false);
-      if (startPlayingHide) _schedulePlayingHide();
-    } else {
-      _hideTimer?.cancel();
-      _setChrome(show: false, hideCursor: false);
-    }
   }
 
   void _bumpChrome() {
     _setChrome(show: true, hideCursor: false);
     _schedulePlayingHide();
+  }
+
+  /// 点画面：只显隐控件，不播停。控件已显示则再点一次收起。
+  void _onVideoTap() {
+    if (_epOpen) {
+      _chromeKey.currentState?.closeEpisodes();
+      setState(() {});
+      return;
+    }
+    if (_showChrome) {
+      _hideTimer?.cancel();
+      _setChrome(show: false, hideCursor: _hideCursorWhenIdle && widget.playback.playing);
+      return;
+    }
+    _bumpChrome();
   }
 
   void _refreshForceLandscapeBtn() {
@@ -317,6 +316,26 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
       setState(() => _epIdx = next);
     }
     _bumpChrome();
+  }
+
+  /// 播完自动下一集：与上滑手势同一套跟手/吸附动画（抖音式）。
+  Future<bool> animateAutoNext() async {
+    if (!mounted) return false;
+    if (_epIdx + 1 >= widget.episodes.length) return false;
+    if (_swipeAnim.isAnimating || _dragging) return false;
+    final h = MediaQuery.sizeOf(context).height;
+    if (h <= 0) return false;
+    final next = _epIdx + 1;
+    final name = widget.episodes[next];
+    _flashSwipeHint(name.isEmpty ? '下一集' : '下一集 · $name');
+    _swipeAnim.stop();
+    _swipeTween = null;
+    setState(() {
+      _dragging = true;
+      _dragDy = 0;
+    });
+    await _animateSwipeTo(-h);
+    return mounted;
   }
 
   void _goPrev() {
@@ -486,22 +505,12 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
       _chromeKey.currentState?.openEpisodes();
       setState(() {});
     }
-    final atBottom = e.localPosition.dy >= c.maxHeight - 80;
-    if (_edgeRevealOnly) {
-      if (atBottom != _pointerAtBottom) {
-        _pointerAtBottom = atBottom;
-        _syncChrome();
-      }
-      return;
-    }
-    _pointerAtBottom = false;
-    _syncChrome(startPlayingHide: true);
+    _bumpChrome();
   }
 
   void _onPointerExit() {
     _pointerIn = false;
-    _pointerAtBottom = false;
-    _syncChrome();
+    _schedulePlayingHide();
   }
 
   Widget _buildVideo() {
@@ -632,23 +641,17 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
                       final videoStack = Stack(
                         fit: StackFit.expand,
                         children: [
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () {
-                              if (_epOpen) {
-                                _chromeKey.currentState?.closeEpisodes();
-                                setState(() {});
-                                return;
-                              }
-                              if (widget.playUrl.isEmpty) return;
-                              unawaited(widget.playback.playOrPause());
-                            },
-                            onSecondaryTap: () => kotvHandleAppBack?.call(),
-                            onDoubleTap: () => unawaited(_exitFullscreen()),
-                            onVerticalDragStart: _canSwipeEps ? _onVerticalDragStart : null,
-                            onVerticalDragUpdate: _canSwipeEps ? _onVerticalDragUpdate : null,
-                            onVerticalDragEnd: _canSwipeEps ? _onVerticalDragEnd : null,
-                            child: _buildVideo(),
+                          _buildVideo(),
+                          // 盖在 SurfaceView 上面：控件收起时也能上下滑换集；点按只出控件不暂停。
+                          Positioned.fill(
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: _onVideoTap,
+                              onSecondaryTap: () => kotvHandleAppBack?.call(),
+                              onVerticalDragStart: _canSwipeEps ? _onVerticalDragStart : null,
+                              onVerticalDragUpdate: _canSwipeEps ? _onVerticalDragUpdate : null,
+                              onVerticalDragEnd: _canSwipeEps ? _onVerticalDragEnd : null,
+                            ),
                           ),
                           DanmakuOverlay(
                             enabled: _danmakuOn,

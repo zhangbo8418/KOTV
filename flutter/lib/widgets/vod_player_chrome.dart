@@ -51,40 +51,52 @@ String fmtMmSs(int sec) {
   return '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 }
 
-/// 画面正中的播放三角：仅暂停且未缓冲时显示；点按画面本身即可播/停（抖音式）。
+/// 画面正中播停键：随控件一起出现；点击真正播/停。
 class CenterPlayPauseButton extends StatelessWidget {
   const CenterPlayPauseButton({
     super.key,
     required this.player,
     this.enabled = true,
+    this.visible = true,
     this.hideWhenBuffering = true,
+    this.showWhilePlaying = false,
+    this.onPressed,
   });
 
   final KotvPlayback player;
   final bool enabled;
+  final bool visible;
   final bool hideWhenBuffering;
+  /// 控件层展开时同时显示暂停键；内嵌点播仍可只在暂停时出三角。
+  final bool showWhilePlaying;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: player,
       builder: (context, _) {
-        if (!enabled) return const SizedBox.shrink();
+        if (!enabled || !visible) return const SizedBox.shrink();
         if (hideWhenBuffering && player.buffering) return const SizedBox.shrink();
-        if (player.playing) return const SizedBox.shrink();
+        if (player.playing && !showWhilePlaying) return const SizedBox.shrink();
         final land = KotvLayout.isLandscapeCompact(context);
         final size = land ? 56.0 : 72.0;
-        return IgnorePointer(
-          child: Center(
-            child: Material(
-              color: const Color(0x73000000),
-              shape: const CircleBorder(),
-              elevation: 0,
+        return Center(
+          child: Material(
+            color: const Color(0x73000000),
+            shape: const CircleBorder(),
+            elevation: 0,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () {
+                unawaited(player.playOrPause());
+                onPressed?.call();
+              },
               child: SizedBox(
                 width: size,
                 height: size,
                 child: Icon(
-                  Icons.play_arrow_rounded,
+                  player.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                   color: Colors.white,
                   size: size * 0.58,
                 ),
@@ -1381,11 +1393,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        CenterPlayPauseButton(
-          player: widget.player,
-          enabled: widget.playUrl.isNotEmpty,
-          hideWhenBuffering: true,
-        ),
+        if (widget.visible && !_epOpen)
+          CenterPlayPauseButton(
+            player: widget.player,
+            enabled: widget.playUrl.isNotEmpty,
+            showWhilePlaying: true,
+            hideWhenBuffering: true,
+            onPressed: widget.onBump,
+          ),
         if (widget.visible && !_epOpen) ...[
           // 顶栏
           Positioned(

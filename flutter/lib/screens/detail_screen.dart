@@ -77,6 +77,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   int _epIdx = -1;
   /// 全屏页在 rootNavigator，父 setState 到不了；revision 驱动画面/集数/播放器重建。
   final ValueNotifier<int> _fsRev = ValueNotifier(0);
+  final GlobalKey<DetailFullscreenPageState> _fsPageKey = GlobalKey<DetailFullscreenPageState>();
   int _epPage = 0;
   bool _reversed = false;
   bool _kept = false;
@@ -476,6 +477,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _advanceBusy = true;
     if (mounted) setState(() => _status = '自动播放下一集…');
     try {
+      if (_fullscreenOpen) {
+        await _fsPageKey.currentState?.animateAutoNext();
+      }
+      if (!mounted) return;
       await _playAt(next);
     } finally {
       _advanceBusy = false;
@@ -1220,6 +1225,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             return ValueListenableBuilder<List<DanmakuItem>>(
               valueListenable: _danmakuItems,
               builder: (context, danmakuItems, _) => DetailFullscreenPage(
+                key: _fsPageKey,
                 playback: _playback,
                 vodName: vod.name,
                 title: title,
