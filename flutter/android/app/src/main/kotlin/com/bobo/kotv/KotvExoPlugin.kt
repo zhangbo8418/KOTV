@@ -2,10 +2,13 @@ package com.bobo.kotv
 
 import android.app.ActivityManager
 import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.Surface
+import android.view.SurfaceView
+import android.view.View
+import android.widget.FrameLayout
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -28,12 +31,17 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ts.TsExtractor
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.view.TextureRegistry
+import io.flutter.plugin.common.StandardMessageCodec
+import io.flutter.plugin.platform.PlatformView
+import io.flutter.plugin.platform.PlatformViewFactory
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
@@ -42,9 +50,9 @@ import kotlin.math.min
 /**
  * OkHttpDataSource + Media3：headers / mime / DRM / 软硬解。
  *
- * 画面路径：MediaCodec 解到 Flutter [SurfaceTexture] 的 [Surface]（[ExoPlayer.setVideoSurface]），
- * 即硬解**直出**到 GPU Texture；不按 H.264/HEVC 做应用层白名单，交给 MediaCodec 协商。
- * （Flutter Texture 不能走 Android TV 式 tunnel；关 tunnel 不等于 copy。）
+ * 画面路径对齐 TV：默认 [SurfaceView]（[PlayerView] 的 surface_type=surface_view）。
+ * Flutter Texture / SurfaceTexture 会把 HDR 转 SDR，画面发暗；Hybrid Composition 的
+ * SurfaceView 才能走系统 HDR 合成。
  *
  * 软硬解：
  * - hard：仅 MediaCodec，优先 hardwareAccelerated；扩展 FFmpeg 不参与视频
@@ -57,10 +65,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var events: EventChannel? = null
   private var eventSink: EventChannel.EventSink? = null
   private var appContext: Context? = null
-  private var textures: TextureRegistry? = null
 
-  private var entry: TextureRegistry.SurfaceTextureEntry? = null
-  private var surface: Surface? = null
+  private var surfaceHost: KotvExoSurfaceHost? = null
   private var player: ExoPlayer? = null
   private var trackSelector: DefaultTrackSelector? = null
   private var currentUrl: String = ""
@@ -70,6 +76,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var formatRetried = false
   /** auto | soft | hard；硬/自动优先 MediaCodec 硬解直出。 */
   private var decodeMode: String = "auto"
+  /** contain | cover；对齐 TV PlayerView resizeMode。 */
+  private var videoFit: String = "contain"
   /** 直播：跳过点播 KotvBufferBudget（对齐 TV：Exo 用默认 LoadControl）。 */
   private var livePlayback: Boolean = false
   /** auto 下硬解失败后仅软解重建一次。 */
@@ -151,13 +159,16 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     appContext = binding.applicationContext
-    textures = binding.textureRegistry
     channel = MethodChannel(binding.binaryMessenger, "kotv_exo").also {
       it.setMethodCallHandler(this)
     }
     events = EventChannel(binding.binaryMessenger, "kotv_exo/events").also {
       it.setStreamHandler(this)
     }
+    binding.platformViewRegistry.registerViewFactory(
+      VIEW_TYPE,
+      KotvExoSurfaceFactory(this),
+    )
   }
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -166,7 +177,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     channel = null
     events?.setStreamHandler(null)
     events = null
-    textures = null
+    surfaceHost = null
     appContext = null
   }
 
@@ -182,8 +193,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     when (call.method) {
       "create" -> {
         try {
-          val id = ensureTexture()
-          result.success(id)
+          result.success(1)
         } catch (t: Throwable) {
           result.error("exo_create", t.message, null)
         }
@@ -256,6 +266,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val v = (call.argument<Number>("volume")?.toFloat() ?: 1f).coerceIn(0f, 1f)
         main.post { player?.volume = v; result.success(true) }
       }
+      "setFit" -> {
+        val fit = call.argument<String>("fit")?.trim()?.lowercase().orEmpty()
+        main.post {
+          videoFit = normalizeFit(fit)
+          applyVideoFit()
+          result.success(true)
+        }
+      }
       "setRate" -> {
         val r = (call.argument<Number>("rate")?.toFloat() ?: 1f).coerceIn(0.25f, 4f)
         main.post {
@@ -294,13 +312,32 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  private fun ensureTexture(): Long {
-    if (entry != null) return entry!!.id()
-    val reg = textures ?: error("texture registry missing")
-    val e = reg.createSurfaceTexture()
-    entry = e
-    surface = Surface(e.surfaceTexture())
-    return e.id()
+  internal fun attachSurfaceHost(host: KotvExoSurfaceHost) {
+    surfaceHost = host
+    bindPlayerSurface()
+  }
+
+  internal fun detachSurfaceHost(host: KotvExoSurfaceHost) {
+    if (surfaceHost === host) {
+      player?.clearVideoSurface()
+      surfaceHost = null
+    }
+  }
+
+  private fun bindPlayerSurface() {
+    val p = player ?: return
+    val sv = surfaceHost?.surfaceView ?: return
+    p.setVideoSurfaceView(sv)
+    applyVideoFit()
+  }
+
+  private fun applyVideoFit() {
+    val p = player ?: return
+    p.videoScalingMode = if (videoFit == "cover") {
+      C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+    } else {
+      C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+    }
   }
 
   private fun openInternal(
@@ -311,7 +348,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     live: Boolean = false,
   ) {
     val ctx = appContext ?: error("no context")
-    ensureTexture()
     formatRetried = false
     livePlayback = live
     currentUrl = url
@@ -333,7 +369,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       .setDefaultRequestProperties(currentHeaders)
       .setTransferListener(netTransferListener)
     val dataSourceFactory = DefaultDataSource.Factory(ctx, httpFactory)
-    val mediaSourceFactory = DefaultMediaSourceFactory(ctx).setDataSourceFactory(dataSourceFactory)
+    val extractors = DefaultExtractorsFactory()
+      .setTsExtractorTimestampSearchBytes(TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES * 10)
+    val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, extractors)
     val effective = effectiveDecodeMode()
     val renderers = buildRenderersFactory(ctx, effective)
     val selector = DefaultTrackSelector(ctx)
@@ -374,7 +412,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     val p = builder.build()
     player = p
-    p.setVideoSurface(surface)
+    bindPlayerSurface()
     p.addListener(object : Player.Listener {
       override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_ENDED) {
@@ -468,8 +506,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun buildMediaItem(url: String, mime: String?, drm: Map<String, Any?>?): MediaItem {
-    val b = MediaItem.Builder().setUri(url)
-    if (!mime.isNullOrBlank()) b.setMimeType(mime)
+    val b = MediaItem.Builder().setUri(playUri(url))
+    val local = isLocalPlayUrl(url)
+    if (!local && !mime.isNullOrBlank()) b.setMimeType(mime)
+    if (local && (mime == MimeTypes.APPLICATION_M3U8 || mime == MimeTypes.APPLICATION_MPD)) {
+      b.setMimeType(mime)
+    }
     buildDrmConfig(drm)?.let { b.setDrmConfiguration(it) }
     return b.build()
   }
@@ -507,13 +549,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun releasePlayer() {
     main.removeCallbacks(tick)
+    player?.clearVideoSurface()
     player?.release()
     player = null
     trackSelector = null
-    surface?.release()
-    surface = null
-    entry?.release()
-    entry = null
     currentUrl = ""
     currentHeaders = emptyMap()
     currentMime = null
@@ -626,6 +665,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   companion object {
     private const val TAG = "KotvExo"
+    const val VIEW_TYPE = "kotv_exo/surface"
     private const val FALLBACK_PLAY_UA =
       "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
 
@@ -649,6 +689,33 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         "hard", "hardware", "hw" -> "hard"
         else -> "auto"
       }
+    }
+
+    fun normalizeFit(raw: String): String {
+      return when (raw.lowercase()) {
+        "cover", "zoom", "crop" -> "cover"
+        else -> "contain"
+      }
+    }
+
+    fun isLocalPlayUrl(url: String): Boolean {
+      val t = url.trim()
+      val low = t.lowercase()
+      return low.startsWith("file:") || low.startsWith("content:") || t.startsWith("/")
+    }
+
+    fun playUri(url: String): Uri {
+      val t = url.trim()
+      val low = t.lowercase()
+      if (low.startsWith("content:")) return Uri.parse(t)
+      if (low.startsWith("file:")) {
+        val parsed = Uri.parse(t)
+        val path = parsed.path
+        if (!path.isNullOrEmpty()) return Uri.fromFile(File(path))
+        return parsed
+      }
+      if (t.startsWith("/")) return Uri.fromFile(File(t))
+      return Uri.parse(t)
     }
 
     fun isDecoderError(errorCode: Int): Boolean {
@@ -704,5 +771,31 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         else -> null
       }
     }
+  }
+}
+
+internal class KotvExoSurfaceFactory(
+  private val plugin: KotvExoPlugin,
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+  override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
+    val host = KotvExoSurfaceHost(context)
+    plugin.attachSurfaceHost(host)
+    return object : PlatformView {
+      override fun getView(): View = host
+      override fun dispose() {
+        plugin.detachSurfaceHost(host)
+      }
+    }
+  }
+}
+
+/** TV 默认 SurfaceView：HDR 走系统合成，不经 Flutter Texture 转 SDR。 */
+internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
+  val surfaceView = SurfaceView(context)
+
+  init {
+    setBackgroundColor(android.graphics.Color.BLACK)
+    surfaceView.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+    addView(surfaceView)
   }
 }

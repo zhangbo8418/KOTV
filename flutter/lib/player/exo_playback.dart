@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,7 +10,7 @@ import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
-/// Android ExoPlayer：Media3 + OkHttp，DRM；硬解 MediaCodec→Surface 直出。
+/// Android ExoPlayer：Media3 + OkHttp，DRM；硬解直出到 SurfaceView（对齐 TV HDR）。
 class ExoPlayback extends KotvPlayback {
   ExoPlayback() {
     if (!kotvIsAndroid()) {
@@ -18,9 +20,10 @@ class ExoPlayback extends KotvPlayback {
 
   static const _ch = MethodChannel('kotv_exo');
   static const _ev = EventChannel('kotv_exo/events');
+  static const _viewType = 'kotv_exo/surface';
 
-  int? _textureId;
   StreamSubscription? _sub;
+  bool _nativeReady = false;
   String _url = '';
   Map<String, String> _headers = const {};
   Map<String, dynamic>? _drm;
@@ -87,25 +90,47 @@ class ExoPlayback extends KotvPlayback {
   Stream<bool> get completedStream => _endedCtrl.stream;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
-    final id = _textureId;
-    if (id == null || !_ready) {
-      return const ColoredBox(color: Colors.black);
-    }
-    return FittedBox(
-      fit: fit,
-      child: SizedBox(
-        width: (_w > 0 ? _w : 16).toDouble(),
-        height: (_h > 0 ? _h : 9).toDouble(),
-        child: Texture(textureId: id),
-      ),
+    final name = _fitName(fit);
+    unawaited(_ch.invokeMethod('setFit', {'fit': name}).catchError((_) {}));
+    // Hybrid Composition（initExpensiveAndroidView）：SurfaceView 才能走系统 HDR。
+    // 普通 AndroidView / Texture 会把 HDR 转 SDR，画面发暗。
+    return PlatformViewLink(
+      viewType: _viewType,
+      surfaceFactory: (context, controller) {
+        return AndroidViewSurface(
+          controller: controller as AndroidViewController,
+          hitTestBehavior: PlatformViewHitTestBehavior.transparent,
+          gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{},
+        );
+      },
+      onCreatePlatformView: (params) {
+        final controller = PlatformViewsService.initExpensiveAndroidView(
+          id: params.id,
+          viewType: _viewType,
+          layoutDirection: TextDirection.ltr,
+          creationParams: <String, dynamic>{'fit': name},
+          creationParamsCodec: const StandardMessageCodec(),
+        );
+        controller.addOnPlatformViewCreatedListener(params.onPlatformViewCreated);
+        controller.create();
+        return controller;
+      },
     );
   }
 
-  Future<void> _ensureTexture() async {
-    if (_textureId != null) return;
-    final id = await _ch.invokeMethod<int>('create');
-    if (id == null) throw StateError('Exo texture create failed');
-    _textureId = id;
+  static String _fitName(BoxFit fit) {
+    switch (fit) {
+      case BoxFit.cover:
+        return 'cover';
+      default:
+        return 'contain';
+    }
+  }
+
+  Future<void> _ensureNative() async {
+    if (_nativeReady) return;
+    await _ch.invokeMethod('create');
+    _nativeReady = true;
     await _sub?.cancel();
     _sub = _ev.receiveBroadcastStream().listen(_onEvent, onError: (e) {
       _lastError = '$e';
@@ -203,7 +228,7 @@ class ExoPlayback extends KotvPlayback {
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffered = Duration.zero;
-    await _ensureTexture();
+    await _ensureNative();
     try {
       await _ch.invokeMethod('open', {
         'url': url,
@@ -395,8 +420,8 @@ class ExoPlayback extends KotvPlayback {
   void dispose() {
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _sub = null;
+    _nativeReady = false;
     unawaited(_ch.invokeMethod('dispose').catchError((_) {}));
-    _textureId = null;
     _posCtrl.close();
     _bufCtrl.close();
     _endedCtrl.close();

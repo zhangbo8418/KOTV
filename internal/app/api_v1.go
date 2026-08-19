@@ -546,7 +546,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			return nil, fmt.Errorf("专用源解析失败: %w", err)
 		}
 		playURL = local
-	} else if !thunder.IsLocalStream(playURL) {
+	} else if !thunder.IsLocalStream(playURL) && !IsLocalMediaURL(playURL) {
 		playURL = a.PreparePlaybackURL(playURL, headers)
 	}
 	isMagnetPlay := magnet || thunder.IsLocalStream(playURL)
@@ -751,6 +751,9 @@ func apiLooksUnplayable(u string) bool {
 		return false
 	}
 	if thunder.Match(u) {
+		return false
+	}
+	if IsLocalMediaURL(u) {
 		return false
 	}
 	if _, err := url.Parse(u); err == nil && strings.HasPrefix(u, "/") {
