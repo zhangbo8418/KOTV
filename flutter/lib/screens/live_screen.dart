@@ -1868,7 +1868,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   height: 40,
                                   onTap: () => unawaited(_pickDecode()),
                                 ),
-                                if (kotvIsAndroid()) ...[
+                                if (kotvPlayerRenderApplies(_playerVal)) ...[
                                   const SizedBox(height: 8),
                                   AppPill(
                                     label: '渲染 · ${kotvPlayerRenderLabel(_renderMode)}',

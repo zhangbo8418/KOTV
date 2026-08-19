@@ -44,6 +44,11 @@ String kotvNormalizePlayerRender(String raw) {
 String kotvPlayerRenderLabel(String raw) =>
     kotvNormalizePlayerRender(raw) == 'texture' ? 'Texture' : 'Surface';
 
+/// Surface/Texture 只作用在 Android 内置 Exo（对齐 TV PlayerView.setRender）。
+/// MPV/FVP/Web 走各自的 Texture/vo，不能套这套选项。
+bool kotvPlayerRenderApplies(String playerVal) =>
+    kotvIsAndroid() && kotvEmbedBackend(playerVal) == KotvEmbedBackend.exo;
+
 /// 点播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。
 String kotvDefaultVodPlayer() {
   if (kIsWeb) return 'innie#html';

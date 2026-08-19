@@ -905,14 +905,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ('硬解码', 'hard'),
                         ]),
                       ),
-                      if (kotvIsAndroid())
+                      if (kotvIsAndroid() &&
+                          (kotvPlayerRenderApplies(playerVal) || kotvPlayerRenderApplies(livePlayerVal)))
                         KotvSettingsWideTile(
                           label: '渲染方式',
                           value: renderLabel,
-                          onTap: () => _pick('渲染方式', 'playerRender', const [
+                          onTap: () => _pick('渲染方式（仅 Exo）', 'playerRender', const [
                             ('Surface（推荐，HDR）', 'surface'),
                             ('Texture', 'texture'),
-                          ], msg: '已切换渲染方式，重新播放后生效'),
+                          ], msg: '仅内置 Exo 生效，已保存'),
                         ),
                       KotvSettingsWideTile(
                         label: '自动切换播放器',

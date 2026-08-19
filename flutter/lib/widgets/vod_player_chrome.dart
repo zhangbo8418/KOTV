@@ -1214,7 +1214,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             _cycleDecode();
                           },
                         ),
-                        if (kotvIsAndroid())
+                        if (kotvPlayerRenderApplies(_playerVal))
                           linkRow(
                             icon: Icons.layers_outlined,
                             label: '渲染方式',
