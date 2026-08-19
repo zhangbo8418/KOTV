@@ -15,6 +15,7 @@ import '../player/xg_playback.dart';
 import '../player/zw_playback.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
+import '../nav/kotv_page.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
 
@@ -32,6 +33,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.onPrev,
     this.playUrl = '',
     this.decodeMode = 'auto',
+    this.renderMode = 'surface',
     this.aspect = const AspectSpec(key: 'default', fit: BoxFit.contain),
     this.onDecodeChanged,
     this.onPersistSetting,
@@ -67,6 +69,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final VoidCallback? onPrev;
   final String playUrl;
   final String decodeMode;
+  final String renderMode;
   final AspectSpec aspect;
   final ValueChanged<String>? onDecodeChanged;
   final Future<void> Function(String key, String value)? onPersistSetting;
@@ -99,8 +102,12 @@ class DetailFullscreenPage extends StatefulWidget {
 class _DetailFullscreenPageState extends State<DetailFullscreenPage>
     with SingleTickerProviderStateMixin {
   bool _showChrome = true;
+  MouseCursor _mouseCursor = SystemMouseCursors.basic;
+  bool _pointerIn = false;
+  bool _pointerAtBottom = false;
   late AspectSpec _aspect = widget.aspect;
   late String _decodeMode = widget.decodeMode;
+  late String _renderMode = widget.renderMode;
   late int _epIdx = widget.epIdx;
   late bool _danmakuOn = widget.danmakuOn;
   late bool _ambientOn = widget.ambientOn;
@@ -136,7 +143,6 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
         if (t == null || !mounted) return;
         setState(() => _dragDy = t.value);
       });
-    _bumpChrome();
     _pos = widget.playback.position;
     _posSub = widget.playback.positionStream.listen((d) {
       if (!mounted) return;
@@ -148,7 +154,10 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
     // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
     unawaited(kotvEnterSystemFullscreen(widget.desktopFullscreen));
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refreshForceLandscapeBtn();
+      if (mounted) {
+        _refreshForceLandscapeBtn();
+        _syncChrome();
+      }
     });
   }
 
@@ -156,6 +165,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
   void didUpdateWidget(covariant DetailFullscreenPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.decodeMode != widget.decodeMode) _decodeMode = widget.decodeMode;
+    if (oldWidget.renderMode != widget.renderMode) _renderMode = widget.renderMode;
     if (oldWidget.aspect.key != widget.aspect.key) _aspect = widget.aspect;
     if (oldWidget.epIdx != widget.epIdx) _epIdx = widget.epIdx;
     if (oldWidget.danmakuOn != widget.danmakuOn) _danmakuOn = widget.danmakuOn;
@@ -185,7 +195,61 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
     super.dispose();
   }
 
-  void _onPlaybackChanged() => _refreshForceLandscapeBtn();
+  void _onPlaybackChanged() {
+    _refreshForceLandscapeBtn();
+    _syncChrome(startPlayingHide: widget.playback.playing);
+  }
+
+  /// 显示器全屏 / 手机全屏：底栏只在暂停或鼠标到底部时出现。
+  /// 桌面「全窗口」：鼠标移入露出，播放中超时收起。
+  bool get _edgeRevealOnly =>
+      widget.desktopFullscreen == KotvDesktopFullscreenKind.display || !kotvIsDesktop();
+
+  void _setChrome({required bool show, required bool hideCursor}) {
+    final cursor = hideCursor ? SystemMouseCursors.none : SystemMouseCursors.basic;
+    if (show == _showChrome && cursor == _mouseCursor) return;
+    setState(() {
+      _showChrome = show;
+      _mouseCursor = cursor;
+    });
+  }
+
+  void _schedulePlayingHide() {
+    _hideTimer?.cancel();
+    if (!widget.playback.playing) return;
+    _hideTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || !widget.playback.playing || _epOpen) return;
+      if (_edgeRevealOnly && _pointerAtBottom) return;
+      _setChrome(show: false, hideCursor: _edgeRevealOnly);
+    });
+  }
+
+  void _syncChrome({bool startPlayingHide = false}) {
+    final paused = !widget.playback.playing;
+    if (_epOpen || paused) {
+      _hideTimer?.cancel();
+      _setChrome(show: true, hideCursor: false);
+      return;
+    }
+    if (_edgeRevealOnly) {
+      _hideTimer?.cancel();
+      final show = _pointerAtBottom;
+      _setChrome(show: show, hideCursor: !show);
+      return;
+    }
+    if (_pointerIn) {
+      _setChrome(show: true, hideCursor: false);
+      if (startPlayingHide) _schedulePlayingHide();
+    } else {
+      _hideTimer?.cancel();
+      _setChrome(show: false, hideCursor: false);
+    }
+  }
+
+  void _bumpChrome() {
+    _setChrome(show: true, hideCursor: false);
+    _schedulePlayingHide();
+  }
 
   void _refreshForceLandscapeBtn() {
     if (!mounted || _forcedLandscape) {
@@ -223,14 +287,6 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   bool get _epOpen => _chromeKey.currentState?.epOpen ?? false;
 
-  void _bumpChrome() {
-    _hideTimer?.cancel();
-    setState(() => _showChrome = true);
-    _hideTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted && !_epOpen) setState(() => _showChrome = false);
-    });
-  }
-
   void _flashSwipeHint(String text) {
     _hintTimer?.cancel();
     setState(() => _swipeHint = text);
@@ -243,6 +299,11 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
     setState(() => _decodeMode = mode);
     await widget.playback.setDecodeMode(mode);
     widget.onDecodeChanged?.call(mode);
+  }
+
+  Future<void> _onRender(String mode) async {
+    setState(() => _renderMode = mode);
+    await widget.playback.setRenderMode(mode);
   }
 
   void _goNext() {
@@ -419,12 +480,28 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
+    _pointerIn = true;
     final onRight = e.localPosition.dx >= c.maxWidth - 24;
     if (onRight && !_epOpen && widget.episodes.isNotEmpty) {
       _chromeKey.currentState?.openEpisodes();
       setState(() {});
     }
-    if (_showChrome) _bumpChrome();
+    final atBottom = e.localPosition.dy >= c.maxHeight - 80;
+    if (_edgeRevealOnly) {
+      if (atBottom != _pointerAtBottom) {
+        _pointerAtBottom = atBottom;
+        _syncChrome();
+      }
+      return;
+    }
+    _pointerAtBottom = false;
+    _syncChrome(startPlayingHide: true);
+  }
+
+  void _onPointerExit() {
+    _pointerIn = false;
+    _pointerAtBottom = false;
+    _syncChrome();
   }
 
   Widget _buildVideo() {
@@ -519,7 +596,9 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
               if (mounted) _refreshForceLandscapeBtn();
             });
             return MouseRegion(
+              cursor: _mouseCursor,
               onHover: (e) => _onHover(e, c),
+              onExit: (_) => _onPointerExit(),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -561,9 +640,10 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
                                 setState(() {});
                                 return;
                               }
-                              setState(() => _showChrome = !_showChrome);
-                              if (_showChrome) _bumpChrome();
+                              if (widget.playUrl.isEmpty) return;
+                              unawaited(widget.playback.playOrPause());
                             },
+                            onSecondaryTap: () => kotvHandleAppBack?.call(),
                             onDoubleTap: () => unawaited(_exitFullscreen()),
                             onVerticalDragStart: _canSwipeEps ? _onVerticalDragStart : null,
                             onVerticalDragUpdate: _canSwipeEps ? _onVerticalDragUpdate : null,
@@ -636,8 +716,7 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
                           title: _title,
                           visible: _showChrome && !_dragging && _dragDy.abs() < 4,
                           onToggleVisible: () {
-                            setState(() => _showChrome = !_showChrome);
-                            if (_showChrome) _bumpChrome();
+                            _bumpChrome();
                           },
                           onExit: () => unawaited(_exitFullscreen()),
                           onBump: _bumpChrome,
@@ -647,7 +726,9 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
                           onAspectChanged: (a) => setState(() => _aspect = a),
                           playUrl: widget.playUrl,
                           decodeMode: _decodeMode,
+                          renderMode: _renderMode,
                           onDecodeChanged: (m) => unawaited(_onDecode(m)),
+                          onRenderChanged: (m) => unawaited(_onRender(m)),
                           onPersistSetting: widget.onPersistSetting,
                           onPlayerStatus: widget.onPlayerStatus,
                           onExternalPlayer: widget.onExternalPlayer,

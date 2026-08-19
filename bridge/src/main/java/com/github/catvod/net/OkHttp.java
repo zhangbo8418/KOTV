@@ -11,7 +11,6 @@ import com.github.catvod.net.interceptor.ResponseInterceptor;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.SSLContext;
@@ -164,8 +163,8 @@ public class OkHttp {
     }
 
     public static String getLocation(String url, Map<String, String> header) throws java.io.IOException {
-        Headers h = header == null ? new Headers.Builder().build() : Headers.of(header);
-        try (Response res = noRedirect().newCall(new Request.Builder().url(url).headers(h).build()).execute()) {
+        Headers h = safeHeaders(header);
+        try (Response res = noRedirect().newCall(req(url).headers(h).build()).execute()) {
             return getLocation(res.headers().toMultimap());
         }
     }
@@ -182,39 +181,72 @@ public class OkHttp {
     }
 
     public static Call newCall(String url) {
-        return client().newCall(new Request.Builder().url(url).build());
+        return client().newCall(req(url).build());
     }
 
     public static Call newCall(String url, String tag) {
-        return client().newCall(new Request.Builder().url(url).tag(tag).build());
+        return client().newCall(req(url).tag(tag).build());
     }
 
     public static Call newCall(OkHttpClient client, String url) {
-        return client.newCall(new Request.Builder().url(url).build());
+        return client.newCall(req(url).build());
     }
 
     public static Call newCall(OkHttpClient client, String url, String tag) {
-        return client.newCall(new Request.Builder().url(url).tag(tag).build());
+        return client.newCall(req(url).tag(tag).build());
     }
 
     public static Call newCall(String url, Map<String, String> headers) {
-        return client().newCall(new Request.Builder().url(url).headers(Headers.of(headers)).build());
+        return client().newCall(req(url).headers(safeHeaders(headers)).build());
     }
 
     public static Call newCall(String url, Map<String, String> headers, ArrayMap<String, String> params) {
-        return client().newCall(new Request.Builder().url(buildUrl(url, params)).headers(Headers.of(headers)).build());
+        HttpUrl built;
+        try {
+            built = buildUrl(url, params);
+        } catch (IllegalArgumentException e) {
+            return client().newCall(req(null).headers(safeHeaders(headers)).build());
+        }
+        return client().newCall(new Request.Builder().url(built).headers(safeHeaders(headers)).build());
     }
 
     public static Call newCall(String url, Map<String, String> headers, RequestBody body) {
-        return client().newCall(new Request.Builder().url(url).headers(Headers.of(headers)).post(body).build());
+        return client().newCall(req(url).headers(safeHeaders(headers)).post(body).build());
     }
 
     public static Call newCall(String url, RequestBody body, String tag) {
-        return client().newCall(new Request.Builder().url(url).post(body).tag(tag).build());
+        return client().newCall(req(url).post(body).tag(tag).build());
     }
 
     public static Call newCall(OkHttpClient client, String url, RequestBody body) {
-        return client.newCall(new Request.Builder().url(url).post(body).build());
+        return client.newCall(req(url).post(body).build());
+    }
+
+    /** OkHttp 5 的 Builder.url 是 Kotlin non-null；空/非法 URL 不抛 NPE，交给拦截器立刻失败（对齐站点 OkRequest 空结果）。 */
+    private static Request.Builder req(String url) {
+        HttpUrl parsed = parseHttpUrl(url);
+        if (parsed == null) {
+            return new Request.Builder()
+                    .url(HttpUrl.get("http://127.0.0.1/"))
+                    .header("X-KOTV-Invalid-Url", "1");
+        }
+        return new Request.Builder().url(parsed);
+    }
+
+    private static HttpUrl parseHttpUrl(String url) {
+        if (url == null) return null;
+        String u = url.trim();
+        if (u.isEmpty()) return null;
+        return HttpUrl.parse(u);
+    }
+
+    private static Headers safeHeaders(Map<String, String> headers) {
+        if (headers == null || headers.isEmpty()) return new Headers.Builder().build();
+        Headers.Builder b = new Headers.Builder();
+        for (Map.Entry<String, String> e : headers.entrySet()) {
+            if (e.getKey() != null && e.getValue() != null) b.add(e.getKey(), e.getValue());
+        }
+        return b.build();
     }
 
     public static void cancel(String tag) {
@@ -241,13 +273,28 @@ public class OkHttp {
     }
 
     private static HttpUrl buildUrl(String url, ArrayMap<String, String> params) {
-        HttpUrl.Builder builder = Objects.requireNonNull(HttpUrl.parse(url)).newBuilder();
-        for (Map.Entry<String, String> entry : params.entrySet()) builder.addQueryParameter(entry.getKey(), entry.getValue());
+        String u = url == null ? "" : url.trim();
+        HttpUrl parsed = u.isEmpty() ? null : HttpUrl.parse(u);
+        if (parsed == null) {
+            throw new IllegalArgumentException("url == null");
+        }
+        HttpUrl.Builder builder = parsed.newBuilder();
+        if (params != null) {
+            for (Map.Entry<String, String> entry : params.entrySet()) {
+                if (entry.getKey() != null && entry.getValue() != null) {
+                    builder.addQueryParameter(entry.getKey(), entry.getValue());
+                }
+            }
+        }
         return builder.build();
     }
 
     private static OkHttpClient.Builder getBuilder() {
-        OkHttpClient.Builder builder = new OkHttpClient.Builder().addInterceptor(requestInterceptor()).addInterceptor(authInterceptor()).addNetworkInterceptor(responseInterceptor()).connectTimeout(TIMEOUT, TimeUnit.MILLISECONDS).readTimeout(TIMEOUT, TimeUnit.MILLISECONDS).writeTimeout(TIMEOUT, TimeUnit.MILLISECONDS).dns(dns()).hostnameVerifier((hostname, session) -> true).sslSocketFactory(getSSLContext().getSocketFactory(), trustAllCertificates());
+        OkHttpClient.Builder builder = new OkHttpClient.Builder().addInterceptor(requestInterceptor()).addInterceptor(authInterceptor()).addNetworkInterceptor(responseInterceptor()).connectTimeout(TIMEOUT, TimeUnit.MILLISECONDS).readTimeout(TIMEOUT, TimeUnit.MILLISECONDS).writeTimeout(TIMEOUT, TimeUnit.MILLISECONDS).dns(dns()).hostnameVerifier((hostname, session) -> true);
+        SSLContext ssl = getSSLContext();
+        if (ssl != null) {
+            builder.sslSocketFactory(ssl.getSocketFactory(), trustAllCertificates());
+        }
         HttpLoggingInterceptor logging = new HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY);
         builder.proxyAuthenticator(authenticator());
         //builder.addNetworkInterceptor(logging);

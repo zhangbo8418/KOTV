@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
@@ -278,6 +279,13 @@ func downloadBinary(rawURL, dest string) error {
 	if len(b) < 64 {
 		return fmt.Errorf("文件过小 (%d bytes)", len(b))
 	}
+	if !bytes.HasPrefix(b, []byte("PK")) && !bytes.HasPrefix(b, []byte("dex\n")) {
+		head := string(b)
+		if len(head) > 80 {
+			head = head[:80]
+		}
+		return fmt.Errorf("spider 不是 jar/dex（下载到了网页?）: %q", head)
+	}
 	tmp := dest + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
@@ -331,11 +339,11 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 		return "", fmt.Errorf("空 jar")
 	}
 	if allowOverride {
-		for _, name := range []string{"spider-override.jar", "spider.jar"} {
-			if override := filepath.Join(paths.Data(), name); fileExistsNonEmpty(override) {
-				log.Printf("spider.jar 使用本地文件: %s", override)
-				return override, nil
-			}
+		// 仅 spider-override.jar 可劫持配置里的 spider。
+		// data/spider.jar 若也劫持，会把 TV dex 换成过期的 PC 瘦包（缺 Nostr 等类）。
+		if override := filepath.Join(paths.Data(), "spider-override.jar"); fileExistsNonEmpty(override) {
+			log.Printf("spider.jar 使用本地覆盖: %s", override)
+			return override, nil
 		}
 	}
 	path, expectMD5 := util.SplitJarSpec(spec)

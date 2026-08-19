@@ -899,6 +899,7 @@ func (a *App) APIGetSettings() map[string]any {
 	keys := []settings.Type{
 		settings.VOD, settings.LIVE, settings.Theme, settings.Player, settings.PlayerLive,
 		settings.Proxy, settings.PlayerSpeed, settings.PlayerScale, settings.PlayerDecode,
+		settings.PlayerRender,
 		settings.PlayerFailover,
 		settings.PlayerVolume, settings.PlayerAmbient, settings.PlayerStableVolume,
 		settings.UA,
@@ -1505,6 +1506,7 @@ func (a *App) APIPlayerStatus() map[string]any {
 		string(settings.Player):       settings.Get(settings.Player),
 		string(settings.PlayerLive):   settings.Get(settings.PlayerLive),
 		string(settings.PlayerDecode): settings.Get(settings.PlayerDecode),
+		string(settings.PlayerRender): settings.Get(settings.PlayerRender),
 		string(settings.PlayerSpeed):  settings.Get(settings.PlayerSpeed),
 		string(settings.PlayerScale):  settings.Get(settings.PlayerScale),
 	}
@@ -1517,11 +1519,16 @@ func (a *App) APIPlayerStatus() map[string]any {
 	if decode == "" {
 		decode = "auto"
 	}
+	render := strings.TrimSpace(vals[string(settings.PlayerRender)])
+	if render == "" {
+		render = "surface"
+	}
 	out := map[string]any{
 		"ok":        true,
 		"available": player.Available(),
 		"current":   cur,
 		"decode":    decode,
+		"render":    render,
 		"speed":     vals[string(settings.PlayerSpeed)],
 		"scale":     vals[string(settings.PlayerScale)],
 	}

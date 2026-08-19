@@ -34,6 +34,7 @@ public class Json {
     }
 
     public static JsonElement parse(String json) {
+        if (json == null || json.trim().isEmpty()) return new JsonObject();
         try {
             JsonReader reader = new JsonReader(new StringReader(json));
             reader.setLenient(true);
@@ -169,6 +170,7 @@ public class Json {
 
     public static JsonObject safeObject(JsonElement element) {
         try {
+            if (element == null || element.isJsonNull()) return new JsonObject();
             if (element.isJsonPrimitive()) element = parse(element.getAsJsonPrimitive().getAsString());
             return element.getAsJsonObject();
         } catch (Exception e) {

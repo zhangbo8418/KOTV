@@ -39,8 +39,9 @@ class _AppShellState extends ConsumerState<AppShell> {
   RemoteBridge? _bridge;
   PostMsgHost? _postMsg;
   DateTime? _lastHomeBackAt;
-  /// 防止 PopScope 与 NavigatorPopHandler 同一次返回各调一次。
+  /// 防止 PopScope / 右键 Listener / 画面 onSecondaryTap 短时间内连触发两次。
   bool _handlingBack = false;
+  Timer? _handlingBackReset;
   /// Web：登录完成前不渲染主界面。
   bool _webAuthed = !kIsWeb;
   /// 稳定 Navigator key：切 Tab 用 pushAndRemoveUntil 换根页，勿用 GlobalObjectKey(page)
@@ -50,6 +51,7 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   void initState() {
     super.initState();
+    kotvHandleAppBack = _onShellBack;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       // 仅 Web：打开本站页面必须先登录。PC/安卓在设置里「远端登录」。
@@ -91,6 +93,8 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   @override
   void dispose() {
+    kotvHandleAppBack = null;
+    _handlingBackReset?.cancel();
     _bridge?.stop();
     _postMsg?.stop();
     super.dispose();
@@ -133,7 +137,10 @@ class _AppShellState extends ConsumerState<AppShell> {
   void _onShellBack() {
     if (_handlingBack) return;
     _handlingBack = true;
-    scheduleMicrotask(() => _handlingBack = false);
+    _handlingBackReset?.cancel();
+    _handlingBackReset = Timer(const Duration(milliseconds: 400), () {
+      _handlingBack = false;
+    });
 
     final root = rootNavigatorKey.currentState;
     // 扫码等 useRootNavigator 弹窗 / 点播全屏在根栈顶：先 pop。

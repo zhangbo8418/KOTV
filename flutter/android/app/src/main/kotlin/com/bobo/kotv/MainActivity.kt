@@ -28,6 +28,9 @@ class MainActivity : FlutterActivity() {
   private var pickConfigResult: MethodChannel.Result? = null
   private var storagePermResult: MethodChannel.Result? = null
   private var storagePromptStarted = false
+  private var batteryPromptStarted = false
+  /** 正在播放时：Home/切应用自动进系统画中画（Android 12+ setAutoEnterEnabled）。 */
+  private var pipAutoEnter = false
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -94,6 +97,11 @@ class MainActivity : FlutterActivity() {
       when (call.method) {
         "enterPip" -> {
           result.success(enterPipMode())
+        }
+        "setPipAutoEnter" -> {
+          val on = call.arguments == true
+          setPipAutoEnter(on)
+          result.success(true)
         }
         "isInPip" -> {
           result.success(
@@ -275,16 +283,39 @@ class MainActivity : FlutterActivity() {
     }
   }
 
+  private fun pipParams(autoEnter: Boolean): PictureInPictureParams {
+    val b = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      b.setAutoEnterEnabled(autoEnter)
+      b.setSeamlessResizeEnabled(true)
+    }
+    return b.build()
+  }
+
+  private fun setPipAutoEnter(enabled: Boolean) {
+    pipAutoEnter = enabled
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    try {
+      setPictureInPictureParams(pipParams(enabled))
+    } catch (_: Throwable) {
+    }
+  }
+
   private fun enterPipMode(): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+    if (isInPictureInPictureMode) return true
     return try {
-      val params = PictureInPictureParams.Builder()
-        .setAspectRatio(Rational(16, 9))
-        .build()
-      enterPictureInPictureMode(params)
-    } catch (t: Throwable) {
+      enterPictureInPictureMode(pipParams(pipAutoEnter))
+    } catch (_: Throwable) {
       false
     }
+  }
+
+  override fun onUserLeaveHint() {
+    super.onUserLeaveHint()
+    if (!pipAutoEnter) return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+    enterPipMode()
   }
 
   override fun onPictureInPictureModeChanged(
@@ -361,6 +392,32 @@ class MainActivity : FlutterActivity() {
         KotvEngineService.start(this)
       } catch (_: Throwable) {
       }
+      window.decorView.postDelayed({ promptIgnoreBatteryIfNeeded() }, 1200)
+    }
+  }
+
+  /**
+   * 锁屏作远端主机时，小米/HyperOS 等会在省电策略下冻死前台服务。
+   * 只问一次，避免每次启动弹窗。
+   */
+  private fun promptIgnoreBatteryIfNeeded() {
+    if (batteryPromptStarted || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+    val prefs = getSharedPreferences("kotv", MODE_PRIVATE)
+    if (prefs.getBoolean("asked_ignore_battery", false)) return
+    val pm = getSystemService(android.os.PowerManager::class.java) ?: return
+    if (pm.isIgnoringBatteryOptimizations(packageName)) {
+      prefs.edit().putBoolean("asked_ignore_battery", true).apply()
+      return
+    }
+    batteryPromptStarted = true
+    prefs.edit().putBoolean("asked_ignore_battery", true).apply()
+    try {
+      startActivity(
+        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+          data = Uri.parse("package:$packageName")
+        },
+      )
+    } catch (_: Throwable) {
     }
   }
 

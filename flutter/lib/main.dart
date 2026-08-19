@@ -2,6 +2,7 @@ import 'dart:async';
 import 'util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -295,6 +296,17 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
       scrollBehavior: const KotvScrollBehavior(),
       // 色板已按 effectiveLight 生成，固定用当前 theme 即可
       themeMode: ThemeMode.light,
+      builder: (context, child) {
+        return Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (e) {
+            if (e.kind != PointerDeviceKind.mouse) return;
+            if ((e.buttons & kSecondaryMouseButton) == 0) return;
+            kotvHandleAppBack?.call();
+          },
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: ready.when(
         data: (ok) => ok ? const AppShell() : const _EngineOfflinePage(),
         loading: () => const AppBackdrop(

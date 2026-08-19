@@ -115,32 +115,42 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
   Widget build(BuildContext context) {
     if (!_visible) return const SizedBox.shrink();
     final speed = kotvFormatSpeed(_speedBps, showZero: true);
+    // 不铺半透明全屏、不加文字阴影：Hybrid Composition 的 SurfaceView
+    // 会把半透明白字合成两遍，看起来像「缓冲中」重影。
     return IgnorePointer(
-      child: ColoredBox(
-        color: const Color(0x44000000),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 36,
-                height: 36,
-                child: CircularProgressIndicator(
-                  color: Color(0xFFE53955),
-                  strokeWidth: 3,
-                ),
+      child: Center(
+        child: RepaintBoundary(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color(0xE6111111),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      color: Color(0xFFE53955),
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '缓冲中  $speed',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              Text(
-                '缓冲中  $speed',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

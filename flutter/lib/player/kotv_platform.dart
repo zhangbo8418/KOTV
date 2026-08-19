@@ -29,6 +29,21 @@ bool kotvIsWindows7() {
 bool kotvIsAndroid() => !kIsWeb && Platform.isAndroid;
 bool kotvIsIOS() => !kIsWeb && Platform.isIOS;
 
+/// 对齐 TV `select_render`：Surface=0（默认 HDR），Texture=1。
+String kotvNormalizePlayerRender(String raw) {
+  switch (raw.trim().toLowerCase()) {
+    case 'texture':
+    case 'textureview':
+    case '1':
+      return 'texture';
+    default:
+      return 'surface';
+  }
+}
+
+String kotvPlayerRenderLabel(String raw) =>
+    kotvNormalizePlayerRender(raw) == 'texture' ? 'Texture' : 'Surface';
+
 /// 点播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。
 String kotvDefaultVodPlayer() {
   if (kIsWeb) return 'innie#html';

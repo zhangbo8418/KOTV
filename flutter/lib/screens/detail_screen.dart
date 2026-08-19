@@ -85,6 +85,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   String _decodeMode = 'auto';
   /// 设置/用户所选解码；failover 临时翻转只改 [_decodeMode]。
   String _prefDecodeMode = 'auto';
+  String _renderMode = 'surface';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   bool _danmakuOn = false;
   bool _ambientOn = false;
@@ -321,7 +322,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     super.initState();
     _active = this;
     kotvRegisterQuitHook(_prepareQuit);
+    MiniPlayerWindow.onAndroidPipChanged = (inPip) {
+      if (!mounted) return;
+      setState(() => _miniDesktop = inPip);
+    };
     _load();
+  }
+
+  void _syncAndroidAutoPip() {
+    unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, _playUrl.isNotEmpty));
   }
 
   Future<void> _prepareQuit() async {
@@ -359,6 +368,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playUrl = '';
     _magnetPlay = false;
     _stopBtProgressPoll();
+    _syncAndroidAutoPip();
     // Source.stop：离开详情硬杀运行时 + 停磁力
     unawaited(ref.read(apiProvider).cancelPending(hard: true, thunder: true));
 
@@ -517,6 +527,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   void dispose() {
     kotvUnregisterQuitHook(_prepareQuit);
     if (_active == this) _active = null;
+    MiniPlayerWindow.onAndroidPipChanged = null;
+    unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, false));
     // 离开详情：回传扫码取消并打断 JAR；不要再 nav.pop（本页正在出栈）。
     final api = ref.read(apiProvider);
     unawaited(PostMsgHost.instance?.cancelAll(reply: true, popDialog: false) ?? Future<void>.value());
@@ -574,6 +586,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           _decodeMode = decode;
           _prefDecodeMode = decode;
         }
+        _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
@@ -888,6 +901,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _magnetPlay = epLooksMagnet;
       });
     }
+    _syncAndroidAutoPip();
     _syncFullscreen();
     if (epLooksMagnet) _startBtProgressPoll();
     try {
@@ -977,6 +991,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (serial != _playAtSerial || !mounted) return;
         final pb = _playback;
         await pb.setDecodeMode(failover.decodeMode);
+        await pb.setRenderMode(_renderMode);
         // Exo：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
         var openUrl = playUrl;
         Map<String, String>? openHeaders = headers.isEmpty ? null : headers;
@@ -1007,6 +1022,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           _decodeMode = failover.decodeMode;
           _status = magnet ? '磁力缓冲中…' : '$_enginePrefix 加载中…';
         });
+        _syncAndroidAutoPip();
         _syncFullscreen();
         await WidgetsBinding.instance.endOfFrame;
         if (serial != _playAtSerial || !mounted) return;
@@ -1099,6 +1115,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
         );
       });
+      _syncAndroidAutoPip();
       _syncFullscreen();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1210,6 +1227,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 epIdx: epIdx,
                 playUrl: _playUrl,
                 decodeMode: _decodeMode,
+                renderMode: _renderMode,
                 aspect: _aspect,
                 danmakuOn: _danmakuOn,
                 danmakuItems: danmakuItems,
@@ -1268,6 +1286,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                       _decodeMode = next;
                       _prefDecodeMode = next;
                     });
+                    _syncFullscreen();
+                  }
+                  if (k == 'playerRender') {
+                    final next = kotvNormalizePlayerRender(v);
+                    setState(() => _renderMode = next);
+                    unawaited(_playback.setRenderMode(next));
                     _syncFullscreen();
                   }
                   if (k == 'player') {
@@ -1409,6 +1433,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         unawaited(_playback.playOrPause());
         setState(() {});
       },
+      onSecondaryTap: () => kotvHandleAppBack?.call(),
       onDoubleTap: interactive
           ? () {
               if (_playUrl.isNotEmpty) {
@@ -1452,7 +1477,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                       _status.contains('缓冲中')),
             ),
           if (_playUrl.isNotEmpty)
-            CenterPlayPauseButton(player: _playback, chromeVisible: false),
+            CenterPlayPauseButton(
+              player: _playback,
+              hideWhenBuffering: true,
+              enabled: !_status.contains('加载中') &&
+                  !_status.contains('换集') &&
+                  !_status.contains('磁力缓冲') &&
+                  !_status.contains('缓冲中') &&
+                  !_status.contains('解析') &&
+                  !_status.contains('嗅探'),
+            ),
           if (_status.contains('解析') || _status.contains('嗅探'))
             const ColoredBox(
               color: Color(0x66000000),
@@ -1499,6 +1533,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             backgroundColor: Colors.transparent,
             body: DragToMoveArea(
               child: MiniHoverShell(
+                player: _playback,
                 video: _videoStage(interactive: true),
                 chrome: VodInlineControls(
                   player: _playback,

@@ -51,20 +51,18 @@ String fmtMmSs(int sec) {
   return '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 }
 
-/// 画面正中的播放/暂停。暂停时始终露出播放；播放中仅控件层可见时露出暂停。
+/// 画面正中的播放三角：仅暂停且未缓冲时显示；点按画面本身即可播/停（抖音式）。
 class CenterPlayPauseButton extends StatelessWidget {
   const CenterPlayPauseButton({
     super.key,
     required this.player,
-    this.chromeVisible = true,
     this.enabled = true,
-    this.onPressed,
+    this.hideWhenBuffering = true,
   });
 
   final KotvPlayback player;
-  final bool chromeVisible;
   final bool enabled;
-  final VoidCallback? onPressed;
+  final bool hideWhenBuffering;
 
   @override
   Widget build(BuildContext context) {
@@ -72,26 +70,21 @@ class CenterPlayPauseButton extends StatelessWidget {
       listenable: player,
       builder: (context, _) {
         if (!enabled) return const SizedBox.shrink();
-        final playing = player.playing;
-        if (playing && !chromeVisible) return const SizedBox.shrink();
+        if (hideWhenBuffering && player.buffering) return const SizedBox.shrink();
+        if (player.playing) return const SizedBox.shrink();
         final land = KotvLayout.isLandscapeCompact(context);
         final size = land ? 56.0 : 72.0;
-        return Center(
-          child: Material(
-            color: const Color(0x73000000),
-            shape: const CircleBorder(),
-            elevation: 0,
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: () {
-                unawaited(player.playOrPause());
-                onPressed?.call();
-              },
+        return IgnorePointer(
+          child: Center(
+            child: Material(
+              color: const Color(0x73000000),
+              shape: const CircleBorder(),
+              elevation: 0,
               child: SizedBox(
                 width: size,
                 height: size,
                 child: Icon(
-                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  Icons.play_arrow_rounded,
                   color: Colors.white,
                   size: size * 0.58,
                 ),
@@ -336,6 +329,11 @@ const _decodeModes = <(String key, String label)>[
   ('hard', '硬解码'),
 ];
 
+const _renderModes = <(String key, String label)>[
+  ('surface', 'Surface'),
+  ('texture', 'Texture'),
+];
+
 /// 全屏点播控制层状态（vodFullscreen 底栏）。
 class VodFullscreenChrome extends StatefulWidget {
   const VodFullscreenChrome({
@@ -357,6 +355,8 @@ class VodFullscreenChrome extends StatefulWidget {
     this.playUrl = '',
     this.decodeMode = 'auto',
     this.onDecodeChanged,
+    this.renderMode = 'surface',
+    this.onRenderChanged,
     this.onPersistSetting,
     this.onPlayerStatus,
     this.onExternalPlayer,
@@ -395,6 +395,8 @@ class VodFullscreenChrome extends StatefulWidget {
   final String playUrl;
   final String decodeMode;
   final ValueChanged<String>? onDecodeChanged;
+  final String renderMode;
+  final ValueChanged<String>? onRenderChanged;
   final Future<void> Function(String key, String value)? onPersistSetting;
   final Future<Map<String, dynamic>> Function()? onPlayerStatus;
   final Future<void> Function(String playerVal)? onExternalPlayer;
@@ -423,6 +425,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   int _speedIdx = 2;
   int _aspectIdx = 0;
   int _decodeIdx = 0;
+  int _renderIdx = 0;
   int _openingSec = 0;
   int _endingSec = 0;
   bool _loopSkip = true; // 有片头/片尾值即生效；开关仅用于临时关闭
@@ -462,6 +465,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     if (i >= 0) _speedIdx = i;
     final di = _decodeModes.indexWhere((e) => e.$1 == widget.decodeMode);
     if (di >= 0) _decodeIdx = di;
+    final ri = _renderModes.indexWhere((e) => e.$1 == kotvNormalizePlayerRender(widget.renderMode));
+    if (ri >= 0) _renderIdx = ri;
     final ai = _aspects.indexWhere((e) => e.$1 == widget.aspect.key);
     if (ai >= 0) _aspectIdx = ai;
     unawaited(_refreshPlayerLabel());
@@ -475,6 +480,10 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     if (oldWidget.decodeMode != widget.decodeMode) {
       final di = _decodeModes.indexWhere((e) => e.$1 == widget.decodeMode);
       if (di >= 0) _decodeIdx = di;
+    }
+    if (oldWidget.renderMode != widget.renderMode) {
+      final ri = _renderModes.indexWhere((e) => e.$1 == kotvNormalizePlayerRender(widget.renderMode));
+      if (ri >= 0) _renderIdx = ri;
     }
     if (oldWidget.keepLabel != widget.keepLabel) {
       _keepLabel = widget.keepLabel;
@@ -640,6 +649,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     unawaited(widget.player.setDecodeMode(mode));
     widget.onDecodeChanged?.call(mode);
     unawaited(_persist('playerDecode', mode));
+    widget.onBump();
+  }
+
+  void _cycleRender() {
+    setState(() => _renderIdx = (_renderIdx + 1) % _renderModes.length);
+    final mode = _renderModes[_renderIdx].$1;
+    unawaited(widget.player.setRenderMode(mode));
+    widget.onRenderChanged?.call(mode);
+    unawaited(_persist('playerRender', mode));
     widget.onBump();
   }
 
@@ -1196,6 +1214,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             _cycleDecode();
                           },
                         ),
+                        if (kotvIsAndroid())
+                          linkRow(
+                            icon: Icons.layers_outlined,
+                            label: '渲染方式',
+                            trailing: _renderModes[_renderIdx].$2,
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _cycleRender();
+                            },
+                          ),
                         linkRow(
                           icon: Icons.closed_caption_outlined,
                           label: '字幕',
@@ -1355,9 +1383,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       children: [
         CenterPlayPauseButton(
           player: widget.player,
-          chromeVisible: widget.visible && !_epOpen,
           enabled: widget.playUrl.isNotEmpty,
-          onPressed: widget.onBump,
+          hideWhenBuffering: true,
         ),
         if (widget.visible && !_epOpen) ...[
           // 顶栏

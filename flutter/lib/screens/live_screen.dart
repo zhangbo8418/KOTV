@@ -198,6 +198,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _title = '选择频道开始播放';
   String _decodeMode = 'auto';
   String _prefDecodeMode = 'auto';
+  String _renderMode = 'surface';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   String _playerVal = kotvDefaultLivePlayer();
   String _prefPlayerVal = kotvDefaultLivePlayer();
@@ -207,13 +208,27 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   Map<String, String>? _playHeaders;
   Timer? _catchupHideTimer;
   Timer? _portraitHideTimer;
+  Timer? _cursorHideTimer;
+  MouseCursor _mouseCursor = SystemMouseCursors.basic;
+  bool _pointerAtBottom = false;
 
   @override
   void initState() {
     super.initState();
     liveScreenHandleBack = _handleLiveBack;
     kotvRegisterQuitHook(_prepareQuit);
+    MiniPlayerWindow.onAndroidPipChanged = (inPip) {
+      if (!mounted) return;
+      setState(() {
+        _miniDesktop = inPip;
+        if (_catchup) _catchupChrome = inPip;
+      });
+    };
     _bootstrap();
+  }
+
+  void _syncAndroidAutoPip() {
+    unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, _playUrl.isNotEmpty));
   }
 
   /// 关窗前硬停：先停各后端，再 await 释放 libmpv，避免与 FlutterEngine 销毁竞态。
@@ -234,6 +249,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   void dispose() {
     kotvUnregisterQuitHook(_prepareQuit);
     liveScreenHandleBack = null;
+    MiniPlayerWindow.onAndroidPipChanged = null;
+    unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, false));
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
     }
@@ -244,6 +261,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _hideTimer?.cancel();
     _catchupHideTimer?.cancel();
     _portraitHideTimer?.cancel();
+    _cursorHideTimer?.cancel();
     _focus.dispose();
     unawaited(_fvp?.stop() ?? Future<void>.value());
     unawaited(_exo?.stop() ?? Future<void>.value());
@@ -304,6 +322,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           _decodeMode = decode;
           _prefDecodeMode = decode;
         }
+        _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
         var playerVal = '${settings['playerLive'] ?? ''}'.trim();
         if (playerVal.isEmpty) {
@@ -320,6 +339,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
         if (!mounted) return;
         await _playback.setDecodeMode(_decodeMode);
+        await _playback.setRenderMode(_renderMode);
       } catch (_) {}
       if (!mounted) return;
       final data = await ref.read(apiProvider).liveSources();
@@ -615,8 +635,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _playUrl = url;
         _playHeaders = headers;
       }
+      _syncAndroidAutoPip();
       final pb = _playback;
       await pb.setDecodeMode(failover.decodeMode);
+      await pb.setRenderMode(_renderMode);
       try {
         // 起播缓冲由守卫等待；仅 SilentVideo（黑屏/视源）才 failover，勿墙钟误切。
         // 直播页显式 live：跳过点播 KotvBufferBudget（对齐 TV 默认缓冲；回看 live:false）。
@@ -794,6 +816,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   void _togglePortraitChrome() {
+    if (_playUrl.isNotEmpty) {
+      final wasPlaying = _playback.playing;
+      unawaited(_playback.playOrPause());
+      if (_catchup) {
+        if (wasPlaying) {
+          _pulseCatchupChrome();
+        } else {
+          _catchupHideTimer?.cancel();
+          setState(() => _catchupChrome = false);
+        }
+        return;
+      }
+      if (wasPlaying) {
+        _pulsePortraitChrome();
+      } else {
+        _portraitHideTimer?.cancel();
+        setState(() => _portraitChrome = false);
+      }
+      return;
+    }
     if (_catchup) {
       _toggleCatchupChrome();
       return;
@@ -973,6 +1015,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
+  Future<void> _pickRender() async {
+    final v = await pickChoice(context, title: '渲染方式', current: _renderMode, options: const [
+      ('Surface（推荐，HDR）', 'surface'),
+      ('Texture', 'texture'),
+    ]);
+    if (v == null) return;
+    setState(() => _renderMode = kotvNormalizePlayerRender(v));
+    await _playback.setRenderMode(_renderMode);
+    try {
+      await ref.read(apiProvider).setSetting('playerRender', _renderMode);
+    } catch (_) {}
+  }
+
   Future<void> _pickPlayer() async {
     final options = kotvLivePlayerOptions();
     final v = await pickChoice(context, title: '直播播放器', current: _prefPlayerVal, options: options);
@@ -1078,7 +1133,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         }
       });
 
-  /// 点中间：关菜单，或切换返回+底栏（与左右菜单互斥）。
+  /// 点中间：关菜单，或像抖音一样点画面播/停（左右仍是频道/设置）。
   void _onCenterTap() {
     if (_leftOpen || _rightOpen) {
       setState(() {
@@ -1088,15 +1143,33 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       });
       return;
     }
+    _togglePlayPauseOnSurface();
+  }
+
+  /// 点播放画面：播放中→暂停并出控件；暂停中→继续播并藏控件。
+  void _togglePlayPauseOnSurface() {
+    if (_playUrl.isEmpty) return;
+    final wasPlaying = _playback.playing;
+    unawaited(_playback.playOrPause());
     if (_catchup) {
-      _toggleCatchupChrome();
+      if (wasPlaying) {
+        _pulseCatchupChrome();
+        _keepMouseVisible();
+      } else {
+        _catchupHideTimer?.cancel();
+        setState(() => _catchupChrome = false);
+        _scheduleHideMouse();
+      }
       return;
     }
-    setState(() => _chromeVisible = !_chromeVisible);
-    if (_chromeVisible) {
+    if (wasPlaying) {
+      setState(() => _chromeVisible = true);
       _scheduleHideOverlays();
+      _keepMouseVisible();
     } else {
+      setState(() => _chromeVisible = false);
       _cancelHideOverlays();
+      _scheduleHideMouse();
     }
   }
 
@@ -1121,6 +1194,61 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     } else if (zone == 2) {
       _openRight();
     }
+  }
+
+  void _keepMouseVisible() {
+    _cursorHideTimer?.cancel();
+    if (_mouseCursor != SystemMouseCursors.basic && mounted) {
+      setState(() => _mouseCursor = SystemMouseCursors.basic);
+    }
+  }
+
+  void _scheduleHideMouse() {
+    _cursorHideTimer?.cancel();
+    if (_leftOpen || _rightOpen || _pointerAtBottom) return;
+    _cursorHideTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      if (_leftOpen || _rightOpen || _pointerAtBottom) return;
+      if (_mouseCursor == SystemMouseCursors.none) return;
+      setState(() => _mouseCursor = SystemMouseCursors.none);
+    });
+  }
+
+  void _onLivePointerMove(PointerHoverEvent e, BoxConstraints c, {bool sides = true, bool portrait = false}) {
+    if (sides) _onHover(e, c);
+    _keepMouseVisible();
+    final atBottom = e.localPosition.dy >= c.maxHeight - 80;
+    if (atBottom != _pointerAtBottom) {
+      _pointerAtBottom = atBottom;
+      if (atBottom) {
+        if (portrait) {
+          _portraitHideTimer?.cancel();
+          if (!_portraitChrome) setState(() => _portraitChrome = true);
+        }
+        if (_catchup) {
+          _catchupHideTimer?.cancel();
+          if (!_catchupChrome) setState(() => _catchupChrome = true);
+        } else if (!portrait && !_leftOpen && !_rightOpen && !_chromeVisible) {
+          setState(() => _chromeVisible = true);
+        }
+      } else if (_playback.playing) {
+        if (portrait) {
+          _pulsePortraitChrome();
+        }
+        if (_catchup) {
+          _pulseCatchupChrome();
+        } else if (!portrait && _chromeVisible && !_leftOpen && !_rightOpen) {
+          _scheduleHideOverlays();
+        }
+      }
+    }
+    if (!_pointerAtBottom) _scheduleHideMouse();
+  }
+
+  void _onLivePointerExit() {
+    _edgeZone = -1;
+    _pointerAtBottom = false;
+    _scheduleHideMouse();
   }
 
   String get _currentLogo {
@@ -1232,6 +1360,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         backgroundColor: Colors.transparent,
         body: DragToMoveArea(
           child: MiniHoverShell(
+            player: _playback,
             video: _liveVideo(),
             chrome: LiveCatchupChrome(
               player: _playback,
@@ -1263,8 +1392,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         child: LayoutBuilder(
           builder: (context, c) {
             return MouseRegion(
-              onHover: (e) => _onHover(e, c),
-              onExit: (_) => _edgeZone = -1,
+              cursor: _mouseCursor,
+              onHover: (e) => _onLivePointerMove(e, c),
+              onExit: (_) => _onLivePointerExit(),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -1278,7 +1408,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         _loading,
                   ),
                   if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
-                  // 点击分区：左 28% 频道 / 右 28% 设置 / 中 显隐返回+底栏（与菜单互斥）
+                  // 点击分区：左 28% 频道 / 右 28% 设置 / 中 点画面播停（抖音式）
                   Positioned.fill(
                     child: Row(
                       children: [
@@ -1287,6 +1417,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           child: GestureDetector(
                             behavior: HitTestBehavior.translucent,
                             onTap: _toggleLeft,
+                            onSecondaryTap: () => kotvHandleAppBack?.call(),
                             onDoubleTap: _onLiveDoubleTap,
                           ),
                         ),
@@ -1295,6 +1426,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           child: GestureDetector(
                             behavior: HitTestBehavior.translucent,
                             onTap: _onCenterTap,
+                            onSecondaryTap: () => kotvHandleAppBack?.call(),
                             onDoubleTap: _onLiveDoubleTap,
                           ),
                         ),
@@ -1303,6 +1435,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           child: GestureDetector(
                             behavior: HitTestBehavior.translucent,
                             onTap: _toggleRight,
+                            onSecondaryTap: () => kotvHandleAppBack?.call(),
                             onDoubleTap: _onLiveDoubleTap,
                           ),
                         ),
@@ -1312,17 +1445,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   if (_playUrl.isNotEmpty && !_leftOpen && !_rightOpen)
                     CenterPlayPauseButton(
                       player: _playback,
-                      chromeVisible: _chromeVisible || _catchupChrome,
-                      onPressed: () {
-                        if (_catchup) {
-                          _pulseCatchupChrome();
-                          return;
-                        }
-                        if (!_chromeVisible) {
-                          setState(() => _chromeVisible = true);
-                          _scheduleHideOverlays();
-                        }
-                      },
+                      hideWhenBuffering: true,
+                      enabled: !_loading &&
+                          !_status.contains('换台') &&
+                          !_status.contains('解析') &&
+                          !_status.contains('加载') &&
+                          !_status.contains('缓冲'),
                     ),
                   if ((_chromeVisible || _catchupChrome) && !_leftOpen && !_rightOpen)
                     Positioned(
@@ -1740,6 +1868,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   height: 40,
                                   onTap: () => unawaited(_pickDecode()),
                                 ),
+                                if (kotvIsAndroid()) ...[
+                                  const SizedBox(height: 8),
+                                  AppPill(
+                                    label: '渲染 · ${kotvPlayerRenderLabel(_renderMode)}',
+                                    height: 40,
+                                    onTap: () => unawaited(_pickRender()),
+                                  ),
+                                ],
                                 const SizedBox(height: 8),
                                 StreamBuilder(
                                   stream: _playback.positionStream,
@@ -1862,8 +1998,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                       right: 0,
                       bottom: 0,
                       child: MouseRegion(
-                        onEnter: (_) => _catchupHideTimer?.cancel(),
-                        onExit: (_) => _pulseCatchupChrome(),
+                        onEnter: (_) {
+                          _pointerAtBottom = true;
+                          _keepMouseVisible();
+                          _catchupHideTimer?.cancel();
+                        },
+                        onExit: (_) {
+                          _pointerAtBottom = false;
+                          _pulseCatchupChrome();
+                          _scheduleHideMouse();
+                        },
                         child: LiveCatchupChrome(
                           player: _playback,
                           playerLabel: flutterPlayerLabel(_playerVal),
@@ -1909,12 +2053,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           aspectRatio: 16 / 9,
           child: ColoredBox(
             color: Colors.black,
-            child: Stack(
+            child: LayoutBuilder(
+              builder: (context, c) {
+                return MouseRegion(
+                  cursor: _mouseCursor,
+                  onHover: (e) => _onLivePointerMove(e, c, sides: false, portrait: true),
+                  onExit: (_) => _onLivePointerExit(),
+                  child: Stack(
               fit: StackFit.expand,
               children: [
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _togglePortraitChrome,
+                  onSecondaryTap: () => kotvHandleAppBack?.call(),
                   onDoubleTap: _onLiveDoubleTap,
                   child: _liveVideo(),
                 ),
@@ -1929,8 +2080,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                 if (_playUrl.isNotEmpty)
                   CenterPlayPauseButton(
                     player: _playback,
-                    chromeVisible: showChrome,
-                    onPressed: _pulsePortraitChrome,
+                    hideWhenBuffering: true,
+                    enabled: !_loading &&
+                        !_status.contains('换台') &&
+                        !_status.contains('解析') &&
+                        !_status.contains('加载') &&
+                        !_status.contains('缓冲'),
                   ),
                 if (_error != null)
                   Center(
@@ -1975,6 +2130,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                     ),
                   ),
               ],
+                  ),
+                );
+              },
             ),
           ),
         ),

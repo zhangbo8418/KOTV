@@ -56,6 +56,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setRepeatOne(bool on);
   Future<void> setDecodeMode(String mode);
 
+  /// Android Exo：Surface / Texture，对齐 TV 渲染方式。其它后端忽略。
+  Future<void> setRenderMode(String mode) async {}
+
   /// 是否认为已挂上可用视频源（轨/元数据）。无法判断时返回 true。
   bool get hasVideoSourceHint => true;
 

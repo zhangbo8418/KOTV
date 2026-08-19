@@ -22,11 +22,14 @@ public class RequestInterceptor implements Interceptor {
         authMap.clear();
     }
 
-    @NonNull
-    @Override
-    public Response intercept(@NonNull Chain chain) throws IOException {
-        Request request = chain.request();
-        Request.Builder builder = request.newBuilder();
+        @NonNull
+        @Override
+        public Response intercept(@NonNull Chain chain) throws IOException {
+            Request request = chain.request();
+            if ("1".equals(request.header("X-KOTV-Invalid-Url"))) {
+                throw new IOException("invalid url");
+            }
+            Request.Builder builder = request.newBuilder();
         // 自动带上当前 JAR 调用的 Flutter clientId，供 OkHttp.cancel(clientId) 软取消。
         if (request.tag() == null) {
             try {

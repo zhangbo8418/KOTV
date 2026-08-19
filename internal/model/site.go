@@ -1,5 +1,7 @@
 package model
 
+import "strings"
+
 // Site 站源配置。
 type Site struct {
 	Key         string     `json:"key"`
@@ -26,6 +28,10 @@ type Site struct {
 func (s Site) TypeID() int {
 	if s.Type.Valid {
 		return s.Type.Value
+	}
+	// 配置漏写 type 时：csp_ 站仍走爬虫，避免把 api 当 HTTP 地址去 GET。
+	if strings.HasPrefix(strings.TrimSpace(s.API), "csp_") {
+		return 3
 	}
 	return 0
 }

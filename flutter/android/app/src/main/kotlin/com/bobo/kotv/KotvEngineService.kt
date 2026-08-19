@@ -8,8 +8,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -33,6 +35,8 @@ class KotvEngineService : Service() {
 
   private var engineProcess: Process? = null
   private val starting = AtomicBoolean(false)
+  private var cpuWakeLock: PowerManager.WakeLock? = null
+  private var wifiLock: WifiManager.WifiLock? = null
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -40,12 +44,14 @@ class KotvEngineService : Service() {
     when (intent?.action) {
       ACTION_STOP -> {
         stopEngine()
+        releaseStayLocks()
         stopForegroundCompat()
         stopSelf()
         return START_NOT_STICKY
       }
       else -> {
         startAsForeground()
+        acquireStayLocks()
         thread(name = "kotv-engine-ensure", isDaemon = true) {
           // 作远端主机时 PC 打 :9978，Go 再打本机 :9979 —— 必须与引擎同保活。
           try {
@@ -62,7 +68,60 @@ class KotvEngineService : Service() {
 
   override fun onDestroy() {
     stopEngine()
+    releaseStayLocks()
     super.onDestroy()
+  }
+
+  /** CPU + Wi‑Fi 不随锁屏休眠，远端才能打到本机引擎。不持有亮屏锁。 */
+  private fun acquireStayLocks() {
+    try {
+      val held = cpuWakeLock?.isHeld == true
+      if (!held) {
+        val pm = getSystemService(PowerManager::class.java)
+        cpuWakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kotv:engine")?.apply {
+          setReferenceCounted(false)
+          acquire()
+        }
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "cpu wake lock failed", t)
+    }
+    try {
+      val held = wifiLock?.isHeld == true
+      if (!held) {
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val mode = if (Build.VERSION.SDK_INT >= 29) {
+          WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+          @Suppress("DEPRECATION")
+          WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        wifiLock = try {
+          wm.createWifiLock(mode, "kotv:engine-wifi")
+        } catch (_: Throwable) {
+          @Suppress("DEPRECATION")
+          wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "kotv:engine-wifi")
+        }?.apply {
+          setReferenceCounted(false)
+          acquire()
+        }
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "wifi lock failed", t)
+    }
+  }
+
+  private fun releaseStayLocks() {
+    try {
+      if (cpuWakeLock?.isHeld == true) cpuWakeLock?.release()
+    } catch (_: Throwable) {
+    }
+    cpuWakeLock = null
+    try {
+      if (wifiLock?.isHeld == true) wifiLock?.release()
+    } catch (_: Throwable) {
+    }
+    wifiLock = null
   }
 
   private fun startAsForeground() {

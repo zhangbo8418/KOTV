@@ -252,6 +252,7 @@ public class Path {
     }
 
     public static void sort(File[] files) {
+        if (files == null) return;
         Arrays.sort(files, (o1, o2) -> {
             if (o1.isDirectory() && o2.isFile()) return -1;
             if (o1.isFile() && o2.isDirectory()) return 1;

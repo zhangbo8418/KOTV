@@ -565,7 +565,7 @@ public class SpiderBridge {
                     "getSpider failed key=" + key + " api=" + api + " jar=" + jarPath + ": " + e);
             e.printStackTrace(System.err);
             if (isArtVm()) {
-                // Android：直接抛出，让 call() 返回 {"error":...}，避免空串被当成成功。
+                // 调试期：Android 直接抛出，让 call() 返回 {"error":...} 显示在首页。
                 throw e;
             }
             SpiderNull nullSpider = new SpiderNull();
@@ -577,6 +577,10 @@ public class SpiderBridge {
     /** {@code csp_Nostr} → {@code com.github.catvod.spider.Nostr}，与 TV {@code api.split("csp_")[1]} 一致。 */
     private static String spiderClassName(String api) {
         String name = api == null ? "" : api.trim();
+        String[] parts = name.split("csp_");
+        if (parts.length > 1 && !parts[1].isEmpty()) {
+            return "com.github.catvod.spider." + parts[1];
+        }
         if (name.startsWith("csp_")) {
             name = name.substring(4);
         }

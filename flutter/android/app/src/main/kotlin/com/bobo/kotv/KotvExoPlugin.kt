@@ -3,12 +3,14 @@ package com.bobo.kotv
 import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
+import android.graphics.SurfaceTexture
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
 import android.widget.FrameLayout
 import androidx.media3.common.C
@@ -80,6 +82,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var formatRetried = false
   /** auto | soft | hard；硬/自动优先 MediaCodec 硬解直出。 */
   private var decodeMode: String = "auto"
+  /** false=SurfaceView（TV 默认），true=TextureView。 */
+  private var renderTexture: Boolean = false
   /** contain | cover；对齐 TV PlayerView resizeMode。 */
   private var videoFit: String = "contain"
   /** 直播：跳过点播 KotvBufferBudget（对齐 TV：Exo 用默认 LoadControl）。 */
@@ -196,10 +200,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
     when (call.method) {
       "create" -> {
-        try {
-          result.success(1)
-        } catch (t: Throwable) {
-          result.error("exo_create", t.message, null)
+        val mode = call.argument<String>("render")?.trim().orEmpty()
+        main.post {
+          try {
+            if (mode.isNotEmpty()) {
+              renderTexture = isTextureRender(mode)
+              applyRenderToHost()
+            }
+            result.success(1)
+          } catch (t: Throwable) {
+            result.error("exo_create", t.message, null)
+          }
         }
       }
       "open" -> {
@@ -221,10 +232,15 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val drm = call.argument<Map<String, Any?>>("drm")
         val mode = call.argument<String>("decodeMode")?.trim()?.lowercase().orEmpty()
         val live = call.argument<Boolean>("live") == true
+        val render = call.argument<String>("render")?.trim().orEmpty()
         main.post {
           try {
             if (mode.isNotEmpty()) {
               decodeMode = normalizeDecodeMode(mode)
+            }
+            if (render.isNotEmpty()) {
+              renderTexture = isTextureRender(render)
+              applyRenderToHost()
             }
             decodeFallbackTried = false
             openInternal(url, headers, mime, drm, live)
@@ -246,6 +262,18 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_decode", t.message, null)
+          }
+        }
+      }
+      "setRenderMode" -> {
+        val mode = call.argument<String>("mode")?.trim().orEmpty()
+        main.post {
+          try {
+            renderTexture = isTextureRender(mode)
+            applyRenderToHost()
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_render", t.message, null)
           }
         }
       }
@@ -318,28 +346,44 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   internal fun attachSurfaceHost(host: KotvExoSurfaceHost) {
     surfaceHost = host
-    host.bindSurfaceCallbacks(::onSurfaceReady)
+    host.setRender(renderTexture, ::onSurfaceReady)
     onSurfaceReady()
   }
 
   internal fun detachSurfaceHost(host: KotvExoSurfaceHost) {
     if (surfaceHost === host) {
-      host.unbindSurfaceCallbacks()
+      host.unbind()
       player?.clearVideoSurface()
+      player?.clearVideoTextureView()
       surfaceHost = null
     }
   }
 
-  /** PlatformView / SurfaceView 进树后 surface 才可用；晚于 open() 时必须在此重绑。 */
+  /** PlatformView 进树后 surface 才可用；晚于 open() 时必须在此重绑。 */
   internal fun onSurfaceReady() {
     main.post { bindPlayerSurface() }
   }
 
+  private fun applyRenderToHost() {
+    val host = surfaceHost ?: return
+    player?.clearVideoSurface()
+    player?.clearVideoTextureView()
+    host.setRender(renderTexture, ::onSurfaceReady)
+    bindPlayerSurface()
+  }
+
   private fun bindPlayerSurface() {
     val p = player ?: return
-    val sv = surfaceHost?.surfaceView ?: return
-    if (!canBindSurface(sv)) return
-    p.setVideoSurfaceView(sv)
+    val host = surfaceHost ?: return
+    if (renderTexture) {
+      val tv = host.textureView ?: return
+      if (!tv.isAvailable) return
+      p.setVideoTextureView(tv)
+    } else {
+      val sv = host.surfaceView ?: return
+      if (!canBindSurface(sv)) return
+      p.setVideoSurfaceView(sv)
+    }
     applyVideoFit()
   }
 
@@ -724,6 +768,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     }
 
+    fun isTextureRender(raw: String): Boolean {
+      return when (raw.trim().lowercase()) {
+        "texture", "textureview", "1" -> true
+        else -> false
+      }
+    }
+
     fun isLocalPlayUrl(url: String): Boolean {
       val t = url.trim()
       val low = t.lowercase()
@@ -821,37 +872,82 @@ internal class KotvExoSurfaceFactory(
   }
 }
 
-/** TV 默认 SurfaceView：HDR 走系统合成，不经 Flutter Texture 转 SDR。 */
+/** 对齐 TV PlayerView.setRender：SurfaceView（HDR）或 TextureView。 */
 internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
-  val surfaceView = SurfaceView(context)
+  var surfaceView: SurfaceView? = null
+    private set
+  var textureView: TextureView? = null
+    private set
   private var surfaceCallback: SurfaceHolder.Callback? = null
+  private var textureListener: TextureView.SurfaceTextureListener? = null
+  private var onReady: (() -> Unit)? = null
+  private var useTexture = false
 
   init {
     setBackgroundColor(android.graphics.Color.BLACK)
-    surfaceView.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-    addView(surfaceView)
   }
 
-  fun bindSurfaceCallbacks(onReady: () -> Unit) {
-    unbindSurfaceCallbacks()
-    val cb = object : SurfaceHolder.Callback {
-      override fun surfaceCreated(holder: SurfaceHolder) {
+  fun setRender(texture: Boolean, onReady: () -> Unit) {
+    this.onReady = onReady
+    if (useTexture == texture && (surfaceView != null || textureView != null)) {
+      if (texture) {
+        if (textureView?.isAvailable == true) onReady()
+      } else {
         onReady()
       }
-
-      override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        onReady()
-      }
-
-      override fun surfaceDestroyed(holder: SurfaceHolder) {
-      }
+      return
     }
-    surfaceCallback = cb
-    surfaceView.holder.addCallback(cb)
+    unbind()
+    removeAllViews()
+    surfaceView = null
+    textureView = null
+    useTexture = texture
+    val lp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+    if (texture) {
+      val tv = TextureView(context).apply { layoutParams = lp }
+      textureView = tv
+      val listener = object : TextureView.SurfaceTextureListener {
+        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+          onReady()
+        }
+
+        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+          onReady()
+        }
+
+        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
+
+        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+      }
+      textureListener = listener
+      tv.surfaceTextureListener = listener
+      addView(tv)
+      if (tv.isAvailable) onReady()
+    } else {
+      val sv = SurfaceView(context).apply { layoutParams = lp }
+      surfaceView = sv
+      val cb = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(holder: SurfaceHolder) {
+          onReady()
+        }
+
+        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+          onReady()
+        }
+
+        override fun surfaceDestroyed(holder: SurfaceHolder) {}
+      }
+      surfaceCallback = cb
+      sv.holder.addCallback(cb)
+      addView(sv)
+    }
   }
 
-  fun unbindSurfaceCallbacks() {
-    surfaceCallback?.let { surfaceView.holder.removeCallback(it) }
+  fun unbind() {
+    surfaceCallback?.let { surfaceView?.holder?.removeCallback(it) }
     surfaceCallback = null
+    textureView?.surfaceTextureListener = null
+    textureListener = null
+    onReady = null
   }
 }

@@ -30,6 +30,7 @@ class MiniPlayerWindow {
 
   /// Android PiP 进出回调（系统手势扩大/关闭小窗时通知 UI）。
   static void Function(bool inPip)? onAndroidPipChanged;
+  static final Set<Object> _autoEnterOwners = <Object>{};
 
   static bool get _isDesktop =>
       !kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
@@ -141,6 +142,21 @@ class MiniPlayerWindow {
         _prevSize = null;
         _prevPos = null;
       }
+    }
+  }
+
+  /// 详情/直播有可播内容时打开：按 Home / 切应用自动进系统画中画。
+  static Future<void> setAndroidAutoEnter(Object owner, bool enabled) async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    if (enabled) {
+      _autoEnterOwners.add(owner);
+    } else {
+      _autoEnterOwners.remove(owner);
+    }
+    try {
+      await _android.invokeMethod<void>('setPipAutoEnter', _autoEnterOwners.isNotEmpty);
+    } catch (e) {
+      debugPrint('android pip auto-enter failed: $e');
     }
   }
 

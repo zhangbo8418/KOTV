@@ -36,6 +36,7 @@ const (
 	PlayerSpeed        Type = "playerSpeed"
 	PlayerScale        Type = "playerScale"
 	PlayerDecode       Type = "playerDecode"
+	PlayerRender       Type = "playerRender"   // 渲染方式：surface | texture（对齐 TV PlayerSetting.render）
 	PlayerFailover     Type = "playerFailover" // 黑屏/停滞自动切换播放器：auto | off
 	PlayerVolume       Type = "playerVolume"
 	PlayerAmbient      Type = "playerAmbient"
@@ -99,6 +100,7 @@ func defaultFile() file {
 			{ID: "playerSpeed", Label: "默认倍速", Value: "1.0"},
 			{ID: "playerScale", Label: "画面比例", Value: "default"},
 			{ID: "playerDecode", Label: "解码方式", Value: "auto"},
+			{ID: "playerRender", Label: "渲染方式", Value: "surface"},
 			{ID: "playerFailover", Label: "自动切换播放器", Value: "auto"},
 			{ID: "playerVolume", Label: "默认音量", Value: "80"},
 			{ID: "playerAmbient", Label: "氛围模式", Value: "false"},
@@ -177,6 +179,7 @@ func Load() error {
 		return err
 	}
 	ensureSettingLocked(PlayerLive, "直播播放器", defaultLivePlayerValue())
+	ensureSettingLocked(PlayerRender, "渲染方式", "surface")
 	ensureSettingLocked(PlayerFailover, "自动切换播放器", "auto")
 	ensureSettingLocked(RemoteAuth, "远端鉴权", "false")
 	ensureSettingLocked(AllowRegister, "开放注册", "false")

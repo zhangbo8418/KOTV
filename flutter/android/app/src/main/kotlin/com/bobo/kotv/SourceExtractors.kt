@@ -216,6 +216,7 @@ object SourceExtractors {
   }
 
   private fun ensureSo(url: String): String {
+    if (url.isBlank()) throw IllegalArgumentException("tvbus so url 为空")
     val name = Uri.parse(url).lastPathSegment ?: "tvbus.so"
     val dest = File(Path.so(), name)
     if (Path.exists(dest)) return dest.absolutePath

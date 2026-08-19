@@ -7,3 +7,6 @@ final kotvPageProvider = StateProvider<KotvPage>((ref) => KotvPage.video);
 
 /// 主 Tab 返回栈（不含详情 push）；用于设置/我的等返回上一页，而非直接退桌面。
 final kotvPageStackProvider = StateProvider<List<KotvPage>>((ref) => <KotvPage>[]);
+
+/// 鼠标右键：与系统返回同一套逻辑（含根栈全屏页）。由 AppShell 注册。
+void Function()? kotvHandleAppBack;

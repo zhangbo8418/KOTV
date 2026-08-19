@@ -45,6 +45,7 @@ class ExoPlayback extends KotvPlayback {
   int _speedBps = 0;
   bool _repeatOne = false;
   String _decodeMode = 'auto';
+  String _renderMode = 'surface';
   bool _live = false;
   String? _lastError;
 
@@ -152,7 +153,7 @@ class ExoPlayback extends KotvPlayback {
 
   Future<void> _ensureNative() async {
     if (_nativeReady) return;
-    await _ch.invokeMethod('create');
+    await _ch.invokeMethod('create', {'render': _renderMode});
     _nativeReady = true;
     await _sub?.cancel();
     _sub = _ev.receiveBroadcastStream().listen(_onEvent, onError: (e) {
@@ -264,6 +265,7 @@ class ExoPlayback extends KotvPlayback {
         'mime': _guessMime(url),
         'drm': drm,
         'decodeMode': _decodeMode,
+        'render': _renderMode,
         'live': live,
       });
       await _ch.invokeMethod('setVolume', {'volume': (_volume / 100).clamp(0.0, 1.0)});
@@ -427,6 +429,15 @@ class ExoPlayback extends KotvPlayback {
     };
     try {
       await _ch.invokeMethod('setDecodeMode', {'mode': _decodeMode});
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setRenderMode(String mode) async {
+    _renderMode = kotvNormalizePlayerRender(mode);
+    try {
+      await _ch.invokeMethod('setRenderMode', {'mode': _renderMode});
     } catch (_) {}
     notifyListeners();
   }

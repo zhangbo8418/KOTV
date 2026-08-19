@@ -741,6 +741,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final speed = g('playerSpeed', '1.0');
     final scale = g('playerScale', 'default');
     final decode = g('playerDecode', 'auto');
+    final render = kotvNormalizePlayerRender(g('playerRender', 'surface'));
     final playerFailover = g('playerFailover', 'auto');
     final danOn = g('danmaku', 'false') == 'true';
     final incognito = g('incognito', 'false') == 'true';
@@ -758,6 +759,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         }[scale] ??
         scale;
     final decodeLabel = {'auto': '自动', 'soft': '软解码', 'hard': '硬解码'}[decode] ?? decode;
+    final renderLabel = kotvPlayerRenderLabel(render);
     final failoverLabel = (playerFailover == 'off' || playerFailover == 'false') ? '关闭' : '自动';
     final adLabel = {'off': '关闭', 'smart': '智能', 'mild': '温和', 'on': '智能'}[ad] ?? ad;
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
@@ -903,6 +905,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ('硬解码', 'hard'),
                         ]),
                       ),
+                      if (kotvIsAndroid())
+                        KotvSettingsWideTile(
+                          label: '渲染方式',
+                          value: renderLabel,
+                          onTap: () => _pick('渲染方式', 'playerRender', const [
+                            ('Surface（推荐，HDR）', 'surface'),
+                            ('Texture', 'texture'),
+                          ], msg: '已切换渲染方式，重新播放后生效'),
+                        ),
                       KotvSettingsWideTile(
                         label: '自动切换播放器',
                         value: failoverLabel,
