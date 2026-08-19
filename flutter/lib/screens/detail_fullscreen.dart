@@ -547,90 +547,90 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
                         align: Alignment.topCenter,
                       ),
                     ),
-                  Transform.translate(
-                    offset: Offset(0, _dragDy),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            if (_epOpen) {
-                              _chromeKey.currentState?.closeEpisodes();
-                              setState(() {});
-                              return;
-                            }
-                            setState(() => _showChrome = !_showChrome);
-                            if (_showChrome) _bumpChrome();
-                          },
-                          onDoubleTap: () => unawaited(_exitFullscreen()),
-                          onVerticalDragStart: _canSwipeEps ? _onVerticalDragStart : null,
-                          onVerticalDragUpdate: _canSwipeEps ? _onVerticalDragUpdate : null,
-                          onVerticalDragEnd: _canSwipeEps ? _onVerticalDragEnd : null,
-                          child: _buildVideo(),
-                        ),
-                        DanmakuOverlay(
-                          enabled: _danmakuOn,
-                          position: _pos,
-                          items: widget.danmakuItems,
-                        ),
-                        if (widget.playUrl.isNotEmpty)
-                          KotvBufferingOverlay(player: widget.playback),
-                        if (_showForceLandscape)
-                          Builder(
-                            builder: (context) {
-                              final screen = Size(c.maxWidth, c.maxHeight);
-                              final videoRect = kotvVideoContainRect(
-                                screen: screen,
-                                videoWidth: widget.playback.width,
-                                videoHeight: widget.playback.height,
-                              );
-                              // 抖音式：紧贴横屏画面下方一点点，不居中到整块黑边。
-                              final top = videoRect.bottom + 12;
-                              return Positioned(
-                                left: 0,
-                                right: 0,
-                                top: top.clamp(0.0, (c.maxHeight - 52).clamp(0.0, c.maxHeight)),
-                                child: Align(
-                                  alignment: Alignment.topCenter,
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      onTap: () => unawaited(_forceLandscape()),
-                                      borderRadius: BorderRadius.circular(24),
-                                      child: Ink(
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withOpacity(0.55),
-                                          borderRadius: BorderRadius.circular(24),
-                                          border: Border.all(color: Colors.white.withOpacity(0.28)),
-                                        ),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(Icons.screen_rotation_rounded, color: Colors.white.withOpacity(0.95), size: 20),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                '全屏观看',
-                                                style: TextStyle(
-                                                  color: Colors.white.withOpacity(0.95),
-                                                  fontSize: 15,
-                                                  fontWeight: FontWeight.w700,
-                                                  letterSpacing: 0.2,
+                  // SurfaceView 吃不到 Transform；未跟手时不要套平移层，否则全屏会黑、点一下才闪一帧。
+                  Builder(
+                    builder: (context) {
+                      final videoStack = Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              if (_epOpen) {
+                                _chromeKey.currentState?.closeEpisodes();
+                                setState(() {});
+                                return;
+                              }
+                              setState(() => _showChrome = !_showChrome);
+                              if (_showChrome) _bumpChrome();
+                            },
+                            onDoubleTap: () => unawaited(_exitFullscreen()),
+                            onVerticalDragStart: _canSwipeEps ? _onVerticalDragStart : null,
+                            onVerticalDragUpdate: _canSwipeEps ? _onVerticalDragUpdate : null,
+                            onVerticalDragEnd: _canSwipeEps ? _onVerticalDragEnd : null,
+                            child: _buildVideo(),
+                          ),
+                          DanmakuOverlay(
+                            enabled: _danmakuOn,
+                            position: _pos,
+                            items: widget.danmakuItems,
+                          ),
+                          if (widget.playUrl.isNotEmpty)
+                            KotvBufferingOverlay(player: widget.playback),
+                          if (_showForceLandscape)
+                            Builder(
+                              builder: (context) {
+                                final screen = Size(c.maxWidth, c.maxHeight);
+                                final videoRect = kotvVideoContainRect(
+                                  screen: screen,
+                                  videoWidth: widget.playback.width,
+                                  videoHeight: widget.playback.height,
+                                );
+                                final top = videoRect.bottom + 12;
+                                return Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  top: top.clamp(0.0, (c.maxHeight - 52).clamp(0.0, c.maxHeight)),
+                                  child: Align(
+                                    alignment: Alignment.topCenter,
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        onTap: () => unawaited(_forceLandscape()),
+                                        borderRadius: BorderRadius.circular(24),
+                                        child: Ink(
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withOpacity(0.55),
+                                            borderRadius: BorderRadius.circular(24),
+                                            border: Border.all(color: Colors.white.withOpacity(0.28)),
+                                          ),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.screen_rotation_rounded, color: Colors.white.withOpacity(0.95), size: 20),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  '全屏观看',
+                                                  style: TextStyle(
+                                                    color: Colors.white.withOpacity(0.95),
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w700,
+                                                    letterSpacing: 0.2,
+                                                  ),
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              );
-                            },
-                          ),
-                        VodFullscreenChrome(
+                                );
+                              },
+                            ),
+                          VodFullscreenChrome(
                           key: _chromeKey,
                           player: widget.playback,
                           title: _title,
@@ -682,8 +682,14 @@ class _DetailFullscreenPageState extends State<DetailFullscreenPage>
                           },
                         ),
                       ],
-                    ),
-                  ),
+                    );
+                    if (_dragDy.abs() < 0.5) return videoStack;
+                    return Transform.translate(
+                      offset: Offset(0, _dragDy),
+                      child: videoStack,
+                    );
+                  },
+                ),
                   if (_swipeHint != null)
                     IgnorePointer(
                       child: Center(

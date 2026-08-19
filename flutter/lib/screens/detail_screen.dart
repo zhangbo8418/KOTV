@@ -100,6 +100,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 设置「自动切换播放器」：auto=开，off=关。
   String _prefPlayerFailover = 'auto';
   bool _miniDesktop = false;
+  /// 全屏路由在上层时，详情页不能再挂同一块 Exo SurfaceView（GlobalKey 会被进度刷新抢走，全屏黑屏、点一下才亮）。
+  bool _fullscreenOpen = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
   Timer? _btProgressTimer;
@@ -1177,8 +1179,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final api = ref.read(apiProvider);
     final id = d.id.isNotEmpty ? d.id : widget.id;
     final site = d.site.isNotEmpty ? d.site : widget.site;
+    setState(() => _fullscreenOpen = true);
     _syncFullscreen();
+    // 等详情页卸掉播放器视图，避免和全屏页抢同一 PlatformView。
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) {
+      _fullscreenOpen = false;
+      return;
+    }
 
+    try {
     await Navigator.of(context, rootNavigator: true).push(
       PageRouteBuilder(
         opaque: true,
@@ -1312,6 +1322,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         ),
       ),
     );
+    } finally {
+      if (mounted) {
+        setState(() => _fullscreenOpen = false);
+      } else {
+        _fullscreenOpen = false;
+      }
+    }
   }
 
   Future<void> _cast() async {
@@ -1413,6 +1430,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                     ),
                   )
                 : Image.network(d.pic, fit: BoxFit.contain))
+          else if (_fullscreenOpen)
+            const ColoredBox(color: Colors.black)
           else
             ListenableBuilder(
               listenable: _playback,
