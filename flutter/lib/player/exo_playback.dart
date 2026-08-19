@@ -68,12 +68,15 @@ class ExoPlayback extends KotvPlayback {
   @override
   bool get buffering {
     if (!_buffering) return false;
-    // Exo 补缓存时常 STATE_BUFFERING；已在播（含纯音频）不当作起播缓冲，避免浮层/误切。
+    // Exo 补缓存时常 STATE_BUFFERING；已在播（含纯音频）不当作起播缓冲，避免误切。
     if (_playing && (_w > 0 && _h > 0 || _isAudioOnlyUnlocked || _position > const Duration(seconds: 1))) {
       return false;
     }
     return true;
   }
+
+  @override
+  bool get stalling => _buffering;
   @override
   int get networkSpeedBps => _speedBps;
   @override

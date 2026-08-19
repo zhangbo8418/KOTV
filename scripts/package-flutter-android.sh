@@ -52,6 +52,8 @@ kotv_export_fvp_deps
 flutter pub get
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 "$ROOT/scripts/patch-android-plugin-namespaces.sh"
+chmod +x "$ROOT/scripts/patch-media-kit-android-jars.sh"
+"$ROOT/scripts/patch-media-kit-android-jars.sh"
 
 OUT_DIR="$ROOT/flutter/build/app/outputs/flutter-apk"
 mkdir -p "$ROOT/dist"

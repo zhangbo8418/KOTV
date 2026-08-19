@@ -66,6 +66,7 @@ class CenterPlayPauseButton extends StatelessWidget {
   final KotvPlayback player;
   final bool enabled;
   final bool visible;
+  /// 起播/卡顿补缓存时隐藏，避免和「缓冲中」叠在一起。
   final bool hideWhenBuffering;
   /// 控件层展开时同时显示暂停键；内嵌点播仍可只在暂停时出三角。
   final bool showWhilePlaying;
@@ -77,7 +78,7 @@ class CenterPlayPauseButton extends StatelessWidget {
       listenable: player,
       builder: (context, _) {
         if (!enabled || !visible) return const SizedBox.shrink();
-        if (hideWhenBuffering && player.buffering) return const SizedBox.shrink();
+        if (hideWhenBuffering && player.stalling) return const SizedBox.shrink();
         if (player.playing && !showWhilePlaying) return const SizedBox.shrink();
         final land = KotvLayout.isLandscapeCompact(context);
         final size = land ? 56.0 : 72.0;

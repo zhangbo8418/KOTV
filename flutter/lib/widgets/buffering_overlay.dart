@@ -64,7 +64,7 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
   void _onPlayer() => _sync(fromPlayer: true);
 
   void _sync({required bool fromPlayer}) {
-    final want = widget.force || widget.player.buffering;
+    final want = widget.force || widget.player.stalling;
     if (want == _visible && fromPlayer) {
       _ensureTicker(want);
       return;
@@ -84,7 +84,7 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
       }
       _tick ??= Timer.periodic(const Duration(milliseconds: 1000), (_) {
         if (!mounted) return;
-        final want = widget.force || widget.player.buffering;
+        final want = widget.force || widget.player.stalling;
         if (!want) {
           _sync(fromPlayer: true);
           return;

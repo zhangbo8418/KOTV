@@ -22,7 +22,11 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 已缓冲到的位置（用于进度条 secondary track）；未知时为 zero。
   Duration get buffered => Duration.zero;
   /// 是否正在缓冲（卡顿补缓冲 / 起播缓冲）。
+  ///
+  /// 已出画后的补缓存不要用这个判断（避免误切播放器）；中央按钮 / 缓冲浮层请用 [stalling]。
   bool get buffering => false;
+  /// 起播或播放中卡顿：给「缓冲中」浮层和中央播停键。
+  bool get stalling => buffering;
   /// 估算下载速度（字节/秒）；0 表示未知。
   int get networkSpeedBps => 0;
   double get volume; // 0–100
@@ -86,7 +90,7 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// 播放或缓冲中保持屏幕常亮；暂停/停止/销毁时释放。
   void _syncKeepAwake() {
-    final want = playing || buffering;
+    final want = playing || stalling;
     if (_keepAwakeWant == want) return;
     _keepAwakeWant = want;
     KotvKeepAwake.setHolding(this, want);
@@ -581,6 +585,9 @@ class MediaKitPlayback extends KotvPlayback {
     if (player.state.playing && _videoVisible) return false;
     return true;
   }
+
+  @override
+  bool get stalling => _buffering || player.state.buffering;
   @override
   int get networkSpeedBps => _speedBps;
   @override
