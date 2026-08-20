@@ -837,7 +837,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         ),
                         if (widget.playUrl.isNotEmpty)
                           KotvBufferingOverlay(player: widget.playback),
-                        if (_showForceLandscape) _forceLandscapeChip(c),
                       ],
                     ),
                   ),
@@ -850,6 +849,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                       onPointerCancel: _onSwipePointerCancel,
                     ),
                   ),
+                  if (_showForceLandscape) _forceLandscapeChip(c),
                   _fullscreenChrome(),
                   if (_swipeHint != null)
                     IgnorePointer(
