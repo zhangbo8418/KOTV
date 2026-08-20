@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -111,6 +112,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   late bool _danmakuOn = widget.danmakuOn;
   late bool _ambientOn = widget.ambientOn;
   Timer? _hideTimer;
+  Timer? _hintTimer;
+  DateTime? _lastTapAt;
+  bool? _playingForChrome;
   StreamSubscription<Duration>? _posSub;
   Duration _pos = Duration.zero;
   final GlobalKey<VodFullscreenChromeState> _chromeKey = GlobalKey<VodFullscreenChromeState>();
@@ -118,10 +122,13 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   /// 抖音式上下滑切集：跟手位移 + 松手吸附/切集
   double _dragDy = 0;
   bool _dragging = false;
+  int? _swipePointer;
+  Offset? _swipeDownAt;
+  VelocityTracker? _swipeVelocity;
+  bool _pointerSwiping = false;
   late final AnimationController _swipeAnim;
   Animation<double>? _swipeTween;
   String? _swipeHint;
-  Timer? _hintTimer;
   DateTime? _lastSwipeAt;
   bool _forcedLandscape = false;
   bool _showForceLandscape = false;
@@ -200,7 +207,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _onPlaybackChanged() {
     _refreshForceLandscapeBtn();
-    if (!widget.playback.playing) {
+    final playing = widget.playback.playing;
+    // 位置/缓冲会频繁 notify；只有播/停变化才动控件，否则 2 秒隐藏会被不停重置。
+    if (playing == _playingForChrome) return;
+    _playingForChrome = playing;
+    if (!playing) {
       _hideTimer?.cancel();
       _setChrome(show: true, hideCursor: false);
       return;
@@ -235,7 +246,19 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _schedulePlayingHide();
   }
 
-  /// 点画面：只显隐控件，不播停。控件已显示则再点一次收起。
+  /// 点画面：只显隐控件，不播停。控件已显示则再点一次收起。双击退出全屏。
+  void _handleVideoTap() {
+    final now = DateTime.now();
+    final last = _lastTapAt;
+    _lastTapAt = now;
+    if (last != null && now.difference(last) < kDoubleTapTimeout) {
+      _lastTapAt = null;
+      unawaited(_exitFullscreen());
+      return;
+    }
+    _onVideoTap();
+  }
+
   void _onVideoTap() {
     if (_epOpen) {
       _chromeKey.currentState?.closeEpisodes();
@@ -359,8 +382,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   bool get _canSwipeEps => !_epOpen && widget.episodes.length > 1;
 
-  void _onVerticalDragStart(DragStartDetails _) {
-    if (!_canSwipeEps) return;
+  void _beginSwipe() {
     _swipeAnim.stop();
     _swipeTween = null;
     setState(() {
@@ -369,16 +391,75 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     });
   }
 
-  void _onVerticalDragUpdate(DragUpdateDetails d) {
-    if (!_canSwipeEps || !_dragging) return;
+  void _applySwipeDelta(double dy) {
+    if (!_dragging) return;
     final h = MediaQuery.sizeOf(context).height;
-    var next = _dragDy + d.delta.dy;
-    // 到顶/到底橡胶阻尼
-    if ((_epIdx <= 0 && next > 0) || (_epIdx + 1 >= widget.episodes.length && next < 0)) {
-      next = next * 0.35;
+    var next = _dragDy + dy;
+    final blocked = (_epIdx <= 0 && next > 0) ||
+        (_epIdx + 1 >= widget.episodes.length && next < 0);
+    if (blocked) {
+      next = _dragDy + dy * 0.35;
     }
     next = next.clamp(-h * 0.92, h * 0.92);
     setState(() => _dragDy = next);
+  }
+
+  void _onSwipePointerDown(PointerDownEvent e) {
+    if (e.buttons == kSecondaryMouseButton) {
+      kotvHandleAppBack?.call();
+      return;
+    }
+    if (e.buttons != kPrimaryButton) return;
+    if (_swipePointer != null) return;
+    _swipePointer = e.pointer;
+    _swipeDownAt = e.position;
+    _swipeVelocity = VelocityTracker.withKind(e.kind)..addPosition(e.timeStamp, e.position);
+  }
+
+  void _onSwipePointerMove(PointerMoveEvent e) {
+    if (e.pointer != _swipePointer || _swipeDownAt == null) return;
+    _swipeVelocity?.addPosition(e.timeStamp, e.position);
+    if (!_pointerSwiping) {
+      if (!_canSwipeEps) return;
+      final total = e.position - _swipeDownAt!;
+      if (total.distance < kTouchSlop) return;
+      if (total.dy.abs() <= total.dx.abs()) return;
+      _beginSwipe();
+      _pointerSwiping = true;
+      _applySwipeDelta(total.dy);
+      return;
+    }
+    _applySwipeDelta(e.delta.dy);
+  }
+
+  void _onSwipePointerUp(PointerUpEvent e) {
+    if (e.pointer != _swipePointer) return;
+    _swipeVelocity?.addPosition(e.timeStamp, e.position);
+    final swiping = _pointerSwiping;
+    final downAt = _swipeDownAt;
+    final velocity = _swipeVelocity?.getVelocity().pixelsPerSecond.dy ?? 0;
+    _swipePointer = null;
+    _swipeDownAt = null;
+    _swipeVelocity = null;
+    _pointerSwiping = false;
+    if (swiping) {
+      _commitSwipe(velocity);
+      return;
+    }
+    final dist = downAt == null ? 0.0 : (e.position - downAt).distance;
+    if (dist < kTouchSlop) _handleVideoTap();
+  }
+
+  void _onSwipePointerCancel(PointerCancelEvent e) {
+    if (e.pointer != _swipePointer) return;
+    final swiping = _pointerSwiping;
+    _swipePointer = null;
+    _swipeDownAt = null;
+    _swipeVelocity = null;
+    _pointerSwiping = false;
+    if (swiping || _dragDy.abs() > 0.5) {
+      unawaited(_animateSwipeTo(0));
+    }
   }
 
   Future<void> _animateSwipeTo(double target, {VoidCallback? onDone}) async {
@@ -398,7 +479,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     onDone?.call();
   }
 
-  void _onVerticalDragEnd(DragEndDetails d) {
+  void _commitSwipe(double velocityDy) {
     if (!_canSwipeEps) {
       setState(() {
         _dragDy = 0;
@@ -412,7 +493,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return;
     }
     final h = MediaQuery.sizeOf(context).height;
-    final v = d.primaryVelocity ?? 0;
+    final v = velocityDy;
     final commitNext = (v < -420 || _dragDy < -h * 0.18) && _epIdx + 1 < widget.episodes.length;
     final commitPrev = (v > 420 || _dragDy > h * 0.18) && _epIdx > 0;
     // 上滑 = 下一集（抖音同款）；下滑 = 上一集
@@ -642,15 +723,14 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         fit: StackFit.expand,
                         children: [
                           _buildVideo(),
-                          // 盖在 SurfaceView 上面：控件收起时也能上下滑换集；点按只出控件不暂停。
+                          // 盖在 SurfaceView 上面：手势层不能跟画面一起被 Transform 拆掉，否则滑几像素就被取消。
                           Positioned.fill(
-                            child: GestureDetector(
+                            child: Listener(
                               behavior: HitTestBehavior.opaque,
-                              onTap: _onVideoTap,
-                              onSecondaryTap: () => kotvHandleAppBack?.call(),
-                              onVerticalDragStart: _canSwipeEps ? _onVerticalDragStart : null,
-                              onVerticalDragUpdate: _canSwipeEps ? _onVerticalDragUpdate : null,
-                              onVerticalDragEnd: _canSwipeEps ? _onVerticalDragEnd : null,
+                              onPointerDown: _onSwipePointerDown,
+                              onPointerMove: _onSwipePointerMove,
+                              onPointerUp: _onSwipePointerUp,
+                              onPointerCancel: _onSwipePointerCancel,
                             ),
                           ),
                           DanmakuOverlay(
@@ -767,11 +847,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         ),
                       ],
                     );
-                    if (_dragDy.abs() < 0.5) return videoStack;
-                    return Transform.translate(
-                      offset: Offset(0, _dragDy),
-                      child: videoStack,
-                    );
+                    // SurfaceView 吃不到 Transform；未跟手时不要套平移层。
+                    // 跟手只移动预览层，手势层始终留在原地，避免中途换父节点把滑动掐死。
+                    return videoStack;
                   },
                 ),
                   if (_swipeHint != null)

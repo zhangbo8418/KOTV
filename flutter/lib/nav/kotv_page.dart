@@ -9,4 +9,5 @@ final kotvPageProvider = StateProvider<KotvPage>((ref) => KotvPage.video);
 final kotvPageStackProvider = StateProvider<List<KotvPage>>((ref) => <KotvPage>[]);
 
 /// 鼠标右键：与系统返回同一套逻辑（含根栈全屏页）。由 AppShell 注册。
+/// 到根页即止，不弹出「再按一次返回桌面」。
 void Function()? kotvHandleAppBack;

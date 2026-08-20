@@ -51,7 +51,7 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   void initState() {
     super.initState();
-    kotvHandleAppBack = _onShellBack;
+    kotvHandleAppBack = () => _onShellBack(fromMouse: true);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       // 仅 Web：打开本站页面必须先登录。PC/安卓在设置里「远端登录」。
@@ -134,7 +134,8 @@ class _AppShellState extends ConsumerState<AppShell> {
   }
 
   /// 系统/手势/遥控返回：先关根弹窗/详情 → 主 Tab 返回栈 → 首页连按两次退桌面。
-  void _onShellBack() {
+  /// 鼠标右键走同一套返回，但到根页即止，不提示「再按一次返回桌面」。
+  void _onShellBack({bool fromMouse = false}) {
     if (_handlingBack) return;
     _handlingBack = true;
     _handlingBackReset?.cancel();
@@ -175,7 +176,8 @@ class _AppShellState extends ConsumerState<AppShell> {
       kotvPageBack(ref);
       return;
     }
-    // 已在点播首页：连按两次退桌面。
+    // 已在点播首页：系统返回连按两次退桌面；右键只当返回，不再提示。
+    if (fromMouse) return;
     _promptDoubleBackExit();
   }
 
