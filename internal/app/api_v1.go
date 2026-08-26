@@ -471,7 +471,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		}
 		playDrm = result.Drm
 		headers = map[string]string(result.Header)
-		danmakuURL = result.Danmaku
+		danmakuURL = result.Danmaku.String()
 		qualNames = result.URL.Names
 		qualURLs = result.URL.URLs
 		api := cfg.API()
@@ -517,7 +517,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			qualURLs = result.URL.URLs
 			playURL = apiResolvePlayURL("", result.PlayURL, result.URL.URLs, qualIdx)
 			if result.Danmaku != "" {
-				danmakuURL = result.Danmaku
+				danmakuURL = result.Danmaku.String()
 			}
 		}
 	}

@@ -4,29 +4,31 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+
+	"github.com/bobo/KOTV/internal/lenientjson"
 )
 
 // Result 爬虫返回结果。
 type Result struct {
-	Types     []Type     `json:"class"`
-	List      []Vod      `json:"list"`
-	Filters   FilterMap  `json:"filters"`
-	Header    FlexHeader `json:"header"`
-	PlayURL   string     `json:"playUrl"`
-	JxFrom    string     `json:"jxFrom"`
-	Parse     FlexInt    `json:"parse"`
-	Jx        FlexInt    `json:"jx"`
-	Flag      string     `json:"flag"`
-	Danmaku   string     `json:"danmaku"`
-	Format    string     `json:"format"`
-	URL       URL        `json:"url"`
-	Key       string     `json:"key"`
-	Click     string     `json:"click"`
-	Drm       *Drm       `json:"drm"`
-	PageCount FlexInt    `json:"pagecount"`
-	Code      FlexInt    `json:"code"`
-	Msg       string     `json:"msg"`
-	Success   bool       `json:"-"`
+	Types     []Type      `json:"class"`
+	List      []Vod       `json:"list"`
+	Filters   FilterMap   `json:"filters"`
+	Header    FlexHeader  `json:"header"`
+	PlayURL   string      `json:"playUrl"`
+	JxFrom    string      `json:"jxFrom"`
+	Parse     FlexInt     `json:"parse"`
+	Jx        FlexInt     `json:"jx"`
+	Flag      string      `json:"flag"`
+	Danmaku   FlexDanmaku `json:"danmaku"`
+	Format    string      `json:"format"`
+	URL       URL         `json:"url"`
+	Key       string      `json:"key"`
+	Click     string      `json:"click"`
+	Drm       *Drm        `json:"drm"`
+	PageCount FlexInt     `json:"pagecount"`
+	Code      FlexInt     `json:"code"`
+	Msg       FlexString  `json:"msg"`
+	Success   bool        `json:"-"`
 }
 
 // Type 分类。
@@ -36,6 +38,41 @@ type Type struct {
 	TypeFlag string     `json:"type_flag"`
 	Filters  []Filter   `json:"filters,omitempty"`
 	Selected bool       `json:"-"`
+}
+
+// UnmarshalJSON 对齐 TV Class：type_id/id、type_name/name 互为别名。
+func (t *Type) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || string(data) == "null" {
+		*t = Type{}
+		return nil
+	}
+	var raw struct {
+		TypeID   FlexString `json:"type_id"`
+		ID       FlexString `json:"id"`
+		TypeName string     `json:"type_name"`
+		Name     string     `json:"name"`
+		TypeFlag string     `json:"type_flag"`
+		Filters  []Filter   `json:"filters"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	id := raw.TypeID
+	if strings.TrimSpace(id.String()) == "" {
+		id = raw.ID
+	}
+	name := raw.TypeName
+	if strings.TrimSpace(name) == "" {
+		name = raw.Name
+	}
+	*t = Type{
+		TypeID:   id,
+		TypeName: name,
+		TypeFlag: raw.TypeFlag,
+		Filters:  raw.Filters,
+	}
+	return nil
 }
 
 func HomeType() Type {
@@ -151,9 +188,10 @@ func looksLikePlayURL(s string) bool {
 }
 
 // DecodeResultJSON 反序列化 JSON Result。
+// 先走 lenientjson（对齐 TV Gson lenient：单引号/无引号 key/尾逗号等），再严格 Unmarshal。
 func DecodeResultJSON(raw string) (Result, error) {
 	var result Result
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	if err := lenientjson.Unmarshal([]byte(raw), &result); err != nil {
 		return Result{}, err
 	}
 	return result, nil

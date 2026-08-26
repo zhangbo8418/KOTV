@@ -387,6 +387,21 @@ public class SpiderBridge {
                 }
                 return "{}";
             }
+            // 缓存刷新后按路径重载：丢弃该 jar 的爬虫/ClassLoader 再重新 parseJar，
+            // 否则磁盘换了新包、内存里仍是旧类（TV 靠整包 clear 达成同样效果）。
+            if ("reloadJar".equals(method)) {
+                String jar = "";
+                if (argsObj.has("jar") && !argsObj.get("jar").isJsonNull()) {
+                    jar = argsObj.get("jar").getAsString();
+                } else if (req.has("jar") && !req.get("jar").isJsonNull()) {
+                    jar = req.get("jar").getAsString();
+                }
+                if (jar != null && !jar.isEmpty()) {
+                    unloadJar(jar);
+                    parseJar(jar);
+                }
+                return "{}";
+            }
             if ("configNet".equals(method)) {
                 applyNetConfig(argsObj);
                 return "{}";
@@ -1008,6 +1023,32 @@ public class SpiderBridge {
             }
         }
         loaders.clear();
+    }
+
+    /** 按路径卸载单个 jar：destroy 其爬虫、关闭 loader 并移除缓存，供磁盘包刷新后重载。 */
+    private static void unloadJar(String jarPath) {
+        if (jarPath == null || jarPath.isEmpty()) return;
+        // spKey = md5(jar) + siteKey，见 getSpider。
+        String prefix = md5Hex(jarPath);
+        for (java.util.Iterator<Map.Entry<String, Spider>> it = spiders.entrySet().iterator(); it.hasNext();) {
+            Map.Entry<String, Spider> entry = it.next();
+            if (!entry.getKey().startsWith(prefix)) continue;
+            try {
+                entry.getValue().destroy();
+            } catch (Throwable error) {
+                System.err.println("spider destroy failed: " + error);
+            }
+            it.remove();
+        }
+        ClassLoader loader = loaders.remove(jarPath);
+        if (loader instanceof URLClassLoader) {
+            try {
+                ((URLClassLoader) loader).close();
+            } catch (IOException ignored) {
+            }
+        }
+        proxyMethods.remove(jarPath);
+        // recentJar 只是路径：重载后同路径新 loader 仍是「最近」，保留给 jsonExt 用。
     }
 
     private static Object invokeProxyMethod(Method method, Map<String, String> params) {

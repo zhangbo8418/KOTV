@@ -395,8 +395,15 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 		if expectMD5 == "" && time.Since(st.ModTime()) >= jarRefreshTTL {
 			// 对齐 TV：无 md5 的包冷加载时总是重新下载（TV 不做磁盘命中）。
 			// 这里用 TTL 折中；刷新失败沿用旧包，不因网络抖动把可用站点打挂。
+			oldSum := fileMD5(dest)
 			if err := downloadBinary(downloadURL, dest); err != nil {
 				log.Printf("spider.jar 刷新失败，沿用旧缓存 (%s): %v", downloadURL, err)
+			} else if newSum := fileMD5(dest); newSum != oldSum {
+				// 磁盘包变了必须让 JVM/Dex 侧丢弃旧 ClassLoader+爬虫实例，
+				// 否则 parseJar 命中内存缓存、跑的仍是旧类（TV 靠整包 clear 达成）。
+				if err := reloadBridgeJar(dest); err != nil {
+					log.Printf("spider.jar 内存重载失败，沿用已加载类 (%s): %v", dest, err)
+				}
 			}
 			return dest, nil
 		}
@@ -673,6 +680,31 @@ func JsParse(jar, op, html, rule, url, texts, urls string) (value string, list [
 		return "", nil, fmt.Errorf("%s", resp.Error)
 	}
 	return resp.Value, resp.List, nil
+}
+
+// reloadBridgeJar 磁盘包刷新后让 bridge 丢弃该 jar 的旧 ClassLoader+爬虫并重载。
+func reloadBridgeJar(jarPath string) error {
+	req := bridgeRequest{
+		Method: "reloadJar",
+		Jar:    jarPath,
+	}
+	fillBridgeClient(&req)
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	raw, err := callJavaBridge(payload)
+	if err != nil {
+		return err
+	}
+	raw = trimCString(raw)
+	var errObj struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(raw), &errObj) == nil && errObj.Error != "" {
+		return fmt.Errorf("%s", errObj.Error)
+	}
+	return nil
 }
 
 func callJarMethod(method string, args map[string]interface{}) (string, error) {

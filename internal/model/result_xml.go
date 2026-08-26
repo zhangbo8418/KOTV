@@ -115,7 +115,9 @@ func FromType(typeID int, raw string) (Result, error) {
 	}
 	result, err := DecodeResultJSON(raw)
 	if err != nil {
-		return Result{Success: false}, err
+		// 对齐 TV Result.objectFrom：解析失败返回空结果而非错误，
+		// 避免「脏 JSON」把整页打成失败态（TV 仍显示空列表）。
+		return Result{Success: true}, nil
 	}
 	result.Success = true
 	return result, nil
