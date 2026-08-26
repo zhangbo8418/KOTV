@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
@@ -27,6 +28,9 @@ var (
 	configBase string // 相对 spider.jar / ./js 等据此解析
 	jarSpiders = map[string]*jarSpider{}
 )
+
+// 无 md5 的 jar 缓存有效期；过期后冷加载重新下载（对齐 TV 每次都拉新包的语义）。
+const jarRefreshTTL = 30 * time.Minute
 
 // 多用户：按 ScopeID 隔离配置基址，避免 A 换源覆盖 B 的相对路径解析。
 var configBaseByClient sync.Map // ScopeID -> base URL
@@ -388,6 +392,14 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	// 按 jar 地址哈希缓存，不用配置里的 md5 当文件名。
 	dest := paths.JarPath(util.MD5(downloadURL))
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
+		if expectMD5 == "" && time.Since(st.ModTime()) >= jarRefreshTTL {
+			// 对齐 TV：无 md5 的包冷加载时总是重新下载（TV 不做磁盘命中）。
+			// 这里用 TTL 折中；刷新失败沿用旧包，不因网络抖动把可用站点打挂。
+			if err := downloadBinary(downloadURL, dest); err != nil {
+				log.Printf("spider.jar 刷新失败，沿用旧缓存 (%s): %v", downloadURL, err)
+			}
+			return dest, nil
+		}
 		if expectMD5 == "" || fileMD5(dest) == expectMD5 {
 			return dest, nil
 		}

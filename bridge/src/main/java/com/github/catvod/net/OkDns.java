@@ -21,8 +21,6 @@ import okhttp3.dnsoverhttps.DnsOverHttps;
 
 public class OkDns implements Dns {
 
-    /** DoH unreachable (common when Google/CF blocked); stick to system DNS after first failure. */
-    private volatile boolean dohUnavailable;
     private final ConcurrentHashMap<String, DnsOverHttps> dohCache = new ConcurrentHashMap<>();
 
     public OkDns() {}
@@ -33,11 +31,6 @@ public class OkDns implements Dns {
 
     public void putDoh(String clientId, Doh item) {
         NetProfiles.Profile p = NetProfiles.put(clientId);
-        if (item == null || item.getUrl().isEmpty()) {
-            p.doh = null;
-            return;
-        }
-        dohUnavailable = false;
         p.doh = item;
     }
 
@@ -91,12 +84,12 @@ public class OkDns implements Dns {
     public List<InetAddress> lookup(@NonNull String hostname) throws UnknownHostException {
         NetProfiles.Profile p = NetProfiles.get(Util.clientId());
         hostname = get(hostname, p.hosts);
+        // 对齐 TV：每次查询都先试 DoH；失败仅本次回落系统 DNS，不永久禁用。
         DnsOverHttps doh = dohClient(p.doh);
-        if (doh != null && !dohUnavailable) {
+        if (doh != null) {
             try {
                 return doh.lookup(hostname);
-            } catch (UnknownHostException e) {
-                dohUnavailable = true;
+            } catch (UnknownHostException ignored) {
             }
         }
         return Dns.SYSTEM.lookup(hostname);

@@ -704,13 +704,26 @@ func primeAndroidNetConfigOnce() error {
 		netConfigMu.Unlock()
 		return nil
 	}
-	cfgs := make([][]byte, 0, 2)
-	if len(netConfigJSON) > 0 {
-		cfgs = append(cfgs, append([]byte(nil), netConfigJSON...))
+	// 必须包含当前 Scope 的配置：多用户/多客户端时 headers/hosts/doh 按 Scope 分桶，
+	// 只重放默认桶会导致当前会话的 Referer/UA/DoH 丢失，站点请求被反爬拦成空页。
+	cid := hostclient.ScopeID()
+	cfgs := make([][]byte, 0, 3)
+	push := func(b []byte) {
+		if len(b) == 0 {
+			return
+		}
+		for _, seen := range cfgs {
+			if string(seen) == string(b) {
+				return
+			}
+		}
+		cfgs = append(cfgs, append([]byte(nil), b...))
 	}
-	if len(userProxyJSON) > 0 {
-		cfgs = append(cfgs, append([]byte(nil), userProxyJSON...))
+	push(netConfigJSON)
+	if cid != "" && netConfigByClient != nil {
+		push(netConfigByClient[cid])
 	}
+	push(userProxyJSON)
 	netPrimed = true
 	netConfigMu.Unlock()
 
