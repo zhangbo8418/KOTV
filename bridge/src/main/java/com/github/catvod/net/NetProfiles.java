@@ -25,10 +25,23 @@ public final class NetProfiles {
 
     private static final ConcurrentHashMap<String, Profile> BY_CLIENT = new ConcurrentHashMap<>();
 
+    /**
+     * 最近活跃的非空 Scope。jar 常自起线程/线程池发请求，ThreadLocal clientId 丢失后
+     * 若落到空默认桶会把 headers/hosts/doh 全丢（TV 是全局一份不存在此问题）；
+     * 单前端场景用最近活跃桶兜底即等价 TV 语义。
+     */
+    private static volatile String lastActive = "";
+
     private NetProfiles() {}
 
     public static String key(String clientId) {
         return clientId == null ? "" : clientId.trim();
+    }
+
+    /** SpiderBridge 每次调用绑定 clientId 时记录，供无绑定线程兜底。 */
+    public static void touch(String clientId) {
+        String k = key(clientId);
+        if (!k.isEmpty()) lastActive = k;
     }
 
     public static Profile get(String clientId) {
@@ -38,6 +51,12 @@ public final class NetProfiles {
         if (!k.isEmpty()) {
             p = BY_CLIENT.get("");
             if (p != null) return p;
+        } else {
+            String la = lastActive;
+            if (!la.isEmpty()) {
+                p = BY_CLIENT.get(la);
+                if (p != null) return p;
+            }
         }
         return BY_CLIENT.computeIfAbsent("", x -> new Profile());
     }

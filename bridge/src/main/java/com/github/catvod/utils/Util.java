@@ -34,10 +34,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Util {
-    /** 当前 JAR 调用所属的 Flutter clientId / Scope（由 SpiderBridge 从请求注入）。 */
-    private static final ThreadLocal<String> CLIENT_ID_TL = new ThreadLocal<>();
+    /**
+     * 当前 JAR 调用所属的 Flutter clientId / Scope（由 SpiderBridge 从请求注入）。
+     * InheritableThreadLocal：jar 里 new Thread 的子线程继承 scope；
+     * 线程池内丢失的场景由 NetProfiles.lastActive 兜底。
+     */
+    private static final ThreadLocal<String> CLIENT_ID_TL = new InheritableThreadLocal<>();
     /** 远端鉴权用户；有则 postMsg 优先按 userId 路由到该用户设备。 */
-    private static final ThreadLocal<String> USER_ID_TL = new ThreadLocal<>();
+    private static final ThreadLocal<String> USER_ID_TL = new InheritableThreadLocal<>();
 
     private static final AtomicLong UI_NOTIFY_EPOCH = new AtomicLong();
     private static final ExecutorService UI_MESSAGES = Executors.newSingleThreadExecutor(r -> {
@@ -220,8 +224,13 @@ public class Util {
 
     /** 绑定当前线程的 Flutter clientId（一次 spider 调用期间有效）。 */
     public static void setClientId(String id) {
-        if (id == null || id.isEmpty()) CLIENT_ID_TL.remove();
-        else CLIENT_ID_TL.set(id);
+        if (id == null || id.isEmpty()) {
+            CLIENT_ID_TL.remove();
+        } else {
+            CLIENT_ID_TL.set(id);
+            // 供 jar 自起线程（无 ThreadLocal）拿网络配置时兜底。
+            com.github.catvod.net.NetProfiles.touch(id);
+        }
     }
 
     public static void clearClientId() {

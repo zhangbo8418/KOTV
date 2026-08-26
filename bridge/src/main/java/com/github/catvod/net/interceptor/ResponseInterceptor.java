@@ -33,6 +33,7 @@ public class ResponseInterceptor implements Interceptor {
     }
 
     /** @deprecated 用 {@link #put(String, List)}；保留空实现以免旧调用崩。 */
+    @Deprecated
     public void addAll(List<Header> items) {
         put("", items);
     }
