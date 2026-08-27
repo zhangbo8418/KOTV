@@ -6,6 +6,8 @@
 /// 3. [kotvDefaultPlayUA]
 library;
 
+import 'dart:convert';
+
 /// Media3 `Util.getUserAgent(applicationId)` 格式缺省值。
 const kotvDefaultPlayUA =
     'com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1';
@@ -45,6 +47,124 @@ bool kotvIsLocalProxyUrl(String url) {
     if (path == '/proxy') return true;
   } catch (_) {}
   return u.contains('127.0.0.1:') && u.contains('/proxy');
+}
+
+/// 展开网盘「/proxy?url=&header=」为直链+请求头（对齐后端 ExpandSpiderMediaProxy）。
+/// m3u8 不展开。失败返回 null。
+({String url, Map<String, String> headers})? kotvExpandSpiderMediaProxy(
+  String raw, {
+  Map<String, String>? existing,
+}) {
+  var s = raw.trim();
+  if (s.isEmpty) return null;
+  if (s.startsWith('proxy://')) {
+    s = 'http://127.0.0.1/proxy?${s.substring('proxy://'.length)}';
+  }
+  final Uri uri;
+  try {
+    uri = Uri.parse(s);
+  } catch (_) {
+    return null;
+  }
+  final path = uri.path.endsWith('/') && uri.path.length > 1
+      ? uri.path.substring(0, uri.path.length - 1)
+      : uri.path;
+  if (path != '/proxy') return null;
+  final encUrl = uri.queryParameters['url']?.trim() ?? '';
+  if (encUrl.isEmpty) return null;
+  final decodedUrl = _decodeProxyB64(encUrl)?.trim() ?? '';
+  if (decodedUrl.isEmpty) return null;
+  final low = decodedUrl.toLowerCase();
+  if (low.contains('.m3u8') || low.contains('mpegurl')) return null;
+  if (!low.startsWith('http://') && !low.startsWith('https://')) return null;
+
+  final out = <String, String>{};
+  if (existing != null) {
+    for (final e in existing.entries) {
+      final k = e.key.trim();
+      final v = e.value.trim();
+      if (k.isNotEmpty && v.isNotEmpty) out[k] = v;
+    }
+  }
+  final encHdr =
+      (uri.queryParameters['header'] ?? uri.queryParameters['headers'] ?? '')
+          .trim();
+  if (encHdr.isNotEmpty) {
+    final jsonStr = _decodeProxyB64(encHdr);
+    if (jsonStr != null && jsonStr.isNotEmpty) {
+      try {
+        final parsed = jsonDecode(jsonStr);
+        if (parsed is Map) {
+          parsed.forEach((k, v) {
+            final hk = '$k'.trim();
+            final hv = '$v'.trim();
+            if (hk.isNotEmpty && hv.isNotEmpty) out[hk] = hv;
+          });
+        }
+      } catch (_) {}
+    }
+  }
+  return (url: decodedUrl, headers: out);
+}
+
+/// 选定最终 open 地址：能带请求头的播放器优先直连 CDN（media / 展开 proxy）。
+({String url, Map<String, String>? headers}) kotvResolvePlayOpenTarget({
+  required String playUrl,
+  required String mediaUrl,
+  required Map<String, String> headers,
+  required bool magnet,
+  required bool preferDirectMedia,
+}) {
+  if (magnet) {
+    return (url: playUrl, headers: headers.isEmpty ? null : headers);
+  }
+  final cached = playUrl.contains('/proxy/cached_m3u8');
+  if (cached) {
+    return (url: playUrl, headers: null);
+  }
+
+  if (preferDirectMedia) {
+    final mediaDirect = mediaUrl.startsWith('http') &&
+        !kotvIsLocalProxyUrl(mediaUrl) &&
+        headers.isNotEmpty;
+    if (mediaDirect) {
+      return (url: mediaUrl, headers: headers);
+    }
+    final fromPlay = kotvExpandSpiderMediaProxy(playUrl, existing: headers);
+    if (fromPlay != null) {
+      return (url: fromPlay.url, headers: fromPlay.headers);
+    }
+    final fromMedia = kotvExpandSpiderMediaProxy(mediaUrl, existing: headers);
+    if (fromMedia != null) {
+      return (url: fromMedia.url, headers: fromMedia.headers);
+    }
+  }
+
+  final proxied = kotvIsLocalProxyUrl(playUrl);
+  return (
+    url: playUrl,
+    headers: proxied || headers.isEmpty ? null : headers,
+  );
+}
+
+String? _decodeProxyB64(String s) {
+  var t = s.trim();
+  if (t.isEmpty) return null;
+  try {
+    t = Uri.decodeQueryComponent(t);
+  } catch (_) {}
+  try {
+    var padded = t;
+    final m = padded.length % 4;
+    if (m != 0) padded = padded.padRight(padded.length + (4 - m), '=');
+    return utf8.decode(base64Decode(padded));
+  } catch (_) {
+    try {
+      return utf8.decode(base64Decode(t));
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 /// 规范化请求头；本地代理 URL 返回空（代理侧已带远端头）。

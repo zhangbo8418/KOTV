@@ -373,6 +373,10 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 		return
 	}
+	// 夸克/UC 等 url+header 代理：Go 真流式，避免 jar bridge 溢写整文件。
+	if playproxy.TryHandleEmbeddedProxy(w, r) {
+		return
+	}
 	cfg := config.Default()
 	if cfg == nil {
 		http.Error(w, "config not ready", http.StatusServiceUnavailable)

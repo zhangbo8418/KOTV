@@ -997,30 +997,27 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final pb = _playback;
         await pb.setDecodeMode(failover.decodeMode);
         await pb.setRenderMode(_renderMode);
-        // Exo：本机可直连 media+headers；远端引擎时 CDN 常绑安卓出口 IP，必须走 url（/proxy/play）。
-        var openUrl = playUrl;
-        Map<String, String>? openHeaders = headers.isEmpty ? null : headers;
-        if (_backend == KotvEmbedBackend.exo || hasDrm) {
-          final remoteEngine = !kotvIsLocalEngineBaseUrl(ref.read(apiProvider).baseUrl);
-          final cached = playUrl.contains('/proxy/cached_m3u8');
-          final proxied = playUrl.contains('/proxy/play') || kotvIsLocalProxyUrl(playUrl);
-          final localMedia = mediaUrl.startsWith('file:') ||
-              mediaUrl.startsWith('content:') ||
-              (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
-          if (!cached && !magnet && localMedia) {
-            // csp_Local：直喂 Exo，不走 HTTP 代理/请求头。
-            openUrl = mediaUrl;
-            openHeaders = null;
-          } else if (!remoteEngine &&
-              !cached &&
-              !magnet &&
-              mediaUrl.startsWith('http') &&
-              headers.isNotEmpty) {
-            openUrl = mediaUrl;
-            openHeaders = headers;
-          } else if (cached || proxied) {
-            openHeaders = null;
-          }
+        // 能带请求头的播放器优先直连 CDN（media / 展开 /proxy?url=&header=）。
+        // 远端连安卓时若走 /proxy/play，Go 默认跨域会剥 Cookie，易变成 invalid media。
+        final localMedia = mediaUrl.startsWith('file:') ||
+            mediaUrl.startsWith('content:') ||
+            (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
+        late final String openUrl;
+        late final Map<String, String>? openHeaders;
+        if (!magnet && localMedia) {
+          openUrl = mediaUrl;
+          openHeaders = null;
+        } else {
+          final preferDirect = !hasDrm; // DRM 必须走 Exo+代理链路
+          final resolved = kotvResolvePlayOpenTarget(
+            playUrl: playUrl,
+            mediaUrl: mediaUrl,
+            headers: headers,
+            magnet: magnet,
+            preferDirectMedia: preferDirect,
+          );
+          openUrl = resolved.url;
+          openHeaders = resolved.headers;
         }
         // 先挂播放器视图再 open（Texture / 平台视图需进树；全屏也靠 _fsRev 挂上）。
         setState(() {

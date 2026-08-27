@@ -154,24 +154,13 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, e.URL, nil)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	for k, v := range e.Headers {
-		req.Header.Set(k, v)
-	}
-	// 播放列表不要透传 Range：VLC 常带 bytes=0-，上游若回 206 会截断/搞坏 m3u8。
+	rangeHdr := ""
 	if !isPlaylistURL(e.URL) {
 		if rng := r.Header.Get("Range"); rng != "" && !isFullFileRange(rng) {
-			req.Header.Set("Range", rng)
+			rangeHdr = rng
 		}
 	}
-	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", settings.PlayUA())
-	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := e.fetch(r, rangeHdr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -182,8 +171,55 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set(h, v)
 		}
 	}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
+}
+
+func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, e.URL, nil)
+	if err != nil {
+		return nil, err
+	}
+	applyUpstreamHeaders(req, e.Headers)
+	if rangeHdr != "" {
+		req.Header.Set("Range", rangeHdr)
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", settings.PlayUA())
+	}
+	client := &http.Client{
+		// 网盘 CDN 常 302 到另一域名；默认 Client 跨域会剥 Cookie → 403 HTML →
+		// 播放器报 invalid or unsupported media。
+		CheckRedirect: func(next *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			applyUpstreamHeaders(next, e.Headers)
+			if rangeHdr != "" && !isPlaylistURL(e.URL) {
+				next.Header.Set("Range", rangeHdr)
+			}
+			if next.Header.Get("User-Agent") == "" {
+				next.Header.Set("User-Agent", settings.PlayUA())
+			}
+			return nil
+		},
+	}
+	return client.Do(req)
+}
+
+func applyUpstreamHeaders(req *http.Request, headers map[string]string) {
+	for k, v := range headers {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			continue
+		}
+		lk := strings.ToLower(k)
+		switch lk {
+		case "host", "content-length", "content-type", "connection", "transfer-encoding":
+			continue
+		}
+		req.Header.Set(k, v)
+	}
 }
 
 type countingWriter struct {
