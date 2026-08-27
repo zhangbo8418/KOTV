@@ -455,8 +455,11 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	// 后续相对 spider.jar / 站点 jar 都相对此基址解析。
 	spider.SetConfigBase(cfg.URL)
 
-	// headers/proxy/hosts/doh 按当前 hostclient 下发；ephemeral 也写（按 clientId 隔离，不覆盖他人）。
-	spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, api.Doh)
+	// headers/proxy/hosts 按当前 hostclient 下发；ephemeral 也写（按 clientId 隔离，不覆盖他人）。
+	// 配置里的 doh 数组对齐 TV 语义：仅是设置页候选列表，默认不启用（TV Startup 只用
+	// 用户手选的 Setting.getDoh()，默认空=系统 DNS）。此前自动启用第一个（常为 Google
+	// DoH，国内不可达）会拖死 jar 内所有 DNS 解析，站点整页变空。
+	spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, nil)
 	if !m.ephemeral {
 		parse.SetVodAds(api.Ads)
 		parse.SetVodRules(api.Rules)

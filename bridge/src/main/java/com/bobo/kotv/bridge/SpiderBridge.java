@@ -579,10 +579,8 @@ public class SpiderBridge {
             System.err.println(
                     "getSpider failed key=" + key + " api=" + api + " jar=" + jarPath + ": " + e);
             e.printStackTrace(System.err);
-            if (isArtVm()) {
-                // 调试期：Android 直接抛出，让 call() 返回 {"error":...} 显示在首页。
-                throw e;
-            }
+            // 对齐 TV JarLoader.getSpider：加载失败（含 jar 缺该 csp 类）静默降级为
+            // SpiderNull，站点显示空列表而不是把异常弹到首页。
             SpiderNull nullSpider = new SpiderNull();
             nullSpider.siteKey = key;
             return nullSpider;
@@ -634,11 +632,10 @@ public class SpiderBridge {
                 }
                 loaders.put(jarPath, loader);
             } catch (Exception e) {
+                // 对齐 TV JarLoader.load：加载失败静默记日志；getSpider 侧因 loader 缺失
+                // 落到 SpiderNull（空列表），不把异常弹到界面。
                 System.err.println("parseJar failed: " + jarPath + ": " + e);
                 e.printStackTrace(System.err);
-                if (isArtVm()) {
-                    throw new RuntimeException("parseJar failed: " + jarPath + ": " + e, e);
-                }
             }
         }
     }
