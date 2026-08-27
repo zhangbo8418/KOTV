@@ -54,6 +54,7 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           CHAQUOPY_BUILD_PYTHON: python3.10
           KOTV_JAVA_TOOLCHAIN: "17"
+          KOTV_TARGET_SDK: "28"
         run: |
           chmod +x scripts/*.sh
           python3.10 --version

@@ -448,6 +448,7 @@ jobs:
         env:
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
           KOTV_JAVA_TOOLCHAIN: "17"
+          KOTV_TARGET_SDK: "28"
           CHAQUOPY_BUILD_PYTHON: python3.10
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |

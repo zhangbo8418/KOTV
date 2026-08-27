@@ -13,6 +13,10 @@ export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flu
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 echo "==> version=$VERSION"
 
+# 钉死 targetSdk：潇洒哥 go 多线程依赖 ≤28；勿落到 Flutter 默认 36。
+export KOTV_TARGET_SDK="${KOTV_TARGET_SDK:-28}"
+echo "==> KOTV_TARGET_SDK=$KOTV_TARGET_SDK"
+
 chmod +x "$ROOT"/scripts/*.sh
 
 echo "==> build Go engine (android arm64 + armeabi-v7a)"
@@ -115,6 +119,25 @@ if hits:
   fi
   cp -f "$src" "$ROOT/dist/$out_name"
   ls -lh "$ROOT/dist/$out_name"
+  # 校验 targetSdk（须为 KOTV_TARGET_SDK，默认 28）
+  if command -v aapt >/dev/null 2>&1 || [[ -n "${ANDROID_HOME:-}" ]]; then
+    local aapt_bin=""
+    if command -v aapt >/dev/null 2>&1; then
+      aapt_bin=aapt
+    else
+      aapt_bin="$(ls -1 "$ANDROID_HOME"/build-tools/*/aapt 2>/dev/null | tail -1 || true)"
+    fi
+    if [[ -n "$aapt_bin" && -x "$aapt_bin" ]]; then
+      local badging target
+      badging="$("$aapt_bin" dump badging "$ROOT/dist/$out_name" 2>/dev/null || true)"
+      target="$(printf '%s\n' "$badging" | sed -n "s/.*targetSdkVersion:'\\([^']*\\)'.*/\\1/p" | head -1)"
+      echo "  targetSdkVersion=$target (want $KOTV_TARGET_SDK)"
+      if [[ -n "$target" && "$target" != "$KOTV_TARGET_SDK" ]]; then
+        echo "ERROR: targetSdkVersion=$target, expected $KOTV_TARGET_SDK" >&2
+        exit 1
+      fi
+    fi
+  fi
 }
 
 build_one_abi "arm64-v8a" "android-arm64" "KO影视-${VERSION}-aarch64.apk"

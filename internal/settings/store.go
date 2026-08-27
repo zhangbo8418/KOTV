@@ -189,6 +189,7 @@ func Load() error {
 	ensureSettingLocked(PlayerFailover, "自动切换播放器", "auto")
 	ensureSettingLocked(RemoteAuth, "远端鉴权", "false")
 	ensureSettingLocked(AllowRegister, "开放注册", "false")
+	ensureSettingLocked(BackendProxyPlay, "远端网盘经后端加速", "false")
 	return nil
 }
 

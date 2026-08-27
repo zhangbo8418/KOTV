@@ -930,6 +930,7 @@ func (a *App) APIGetSettings() map[string]any {
 		settings.AssrtToken, settings.UpdateURL, settings.WallMode, settings.WallURL,
 		settings.WallFile, settings.Incognito, settings.LiveAcross, settings.LiveChange,
 		settings.LiveInvert, settings.DLNARenderer, settings.SyncPairCode, settings.LiveKeep,
+		settings.RemoteAuth, settings.AllowRegister, settings.BackendProxyPlay,
 	}
 	out := map[string]any{"ok": true, "port": a.Server.ProxyPort()}
 	vals := map[string]string{}

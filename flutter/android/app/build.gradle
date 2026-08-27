@@ -16,6 +16,8 @@ def kotvAllAbis = ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
 def repoRoot = file("../../..")
 def engineSoAlt = new File(repoRoot, "flutter/assets/engine/libkotv_engine.so")
 
+def kotvTargetSdk = (System.getenv("KOTV_TARGET_SDK") ?: "28").toInteger()
+
 android {
     namespace = "com.bobo.kotv"
     compileSdk = flutter.compileSdkVersion
@@ -39,7 +41,8 @@ android {
         // targetSdk≥29 起系统禁止 exec 应用私有目录可执行文件（W^X），高版本会直接失败。
         // 摸鱼儿玩偶的 so 多线程同样依赖可加载的缓存/库路径，低 target 更稳。
         // 可用 KOTV_TARGET_SDK=34 等覆盖（上架/合规时再抬）。
-        targetSdk = (System.getenv("KOTV_TARGET_SDK") ?: "28").toInteger()
+        // 注意：不要用 flutter.targetSdkVersion（默认 36），CI/本机均默认 28。
+        targetSdk = kotvTargetSdk
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk {
@@ -223,4 +226,10 @@ tasks.register("prepareKotvEngineSo") {
 
 tasks.named("preBuild") {
     dependsOn "prepareKotvEngineSo"
+}
+
+// Flutter Gradle Plugin 偶发在合并后抬高 targetSdk；构建前再钉死一次。
+afterEvaluate {
+    android.defaultConfig.targetSdk = kotvTargetSdk
+    println "[android] pinned targetSdk=${android.defaultConfig.targetSdk} (KOTV_TARGET_SDK=${System.getenv("KOTV_TARGET_SDK") ?: "28"})"
 }
