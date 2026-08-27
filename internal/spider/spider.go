@@ -11,6 +11,10 @@ import (
 // 通过该头把文件路径传给 HTTP 层做流式回写，服务端写响应前会剥离它。
 const ProxyBodyFileHeader = "X-KOTV-Body-File"
 
+// ProxyBodyStreamHeader 是内部标记头：bridge 在 127.0.0.1 上开 TCP 泵流，
+// 值为 "host:port"。Go 拨号后边读边写给客户端，避免整段视频溢写磁盘。
+const ProxyBodyStreamHeader = "X-KOTV-Body-Stream"
+
 // Spider CatVod 爬虫接口。
 type Spider interface {
 	Init(extend string) error

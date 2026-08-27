@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/thunder"
 )
 
@@ -58,11 +60,14 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	}
 	// TV UrlUtil.convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
-	// 夸克/UC 等把 CDN+Cookie 编进 /proxy?url=&header=：展开后走 /proxy/play 真流式，
-	// 避免 bridge 溢写整段原画（远端 PC 连安卓后端时必挂）。
-	if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
-		raw = media
-		headers = hdrs
+	// 远端经后端加速：保留 jar /proxy（so/go 多线程），不展开 CDN。
+	viaBackend := settings.IsBackendProxyPlay() && hostclient.PublicBase() != ""
+	if !viaBackend {
+		// 夸克/UC 等把 CDN+Cookie 编进 /proxy?url=&header=：展开后走 /proxy/play 真流式。
+		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
+			raw = media
+			headers = hdrs
+		}
 	}
 	port := 9978
 	if a != nil && a.Server != nil {
@@ -72,7 +77,7 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	}
 	playURL := raw
 	if !thunder.Match(playURL) {
-		// 仍须走 jar 的本地代理（如 m3u8 分片改写）时，只改写对外可达根，不再包一层 header 代理。
+		// 仍须走 jar 的本地代理（如 m3u8 分片改写 / so 多线程）时，只改写对外可达根。
 		if localproxy.IsSpiderProxyURL(playURL) {
 			return playproxy.PublicizeURL(playURL)
 		}

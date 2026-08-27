@@ -518,17 +518,23 @@ func (s *jarSpider) Proxy(params map[string]string) (int, string, []byte, map[st
 		Body        string            `json:"body"`
 		BodyBase64  string            `json:"bodyBase64"`
 		BodyFile    string            `json:"bodyFile"`
+		BodyStream  string            `json:"bodyStream"`
 		Headers     map[string]string `json:"headers"`
 	}
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		return 200, "text/plain", []byte(raw), nil, nil
 	}
-	if resp.BodyFile != "" {
+	if resp.BodyStream != "" || resp.BodyFile != "" {
 		headers := resp.Headers
 		if headers == nil {
 			headers = map[string]string{}
 		}
-		headers[ProxyBodyFileHeader] = resp.BodyFile
+		if resp.BodyStream != "" {
+			headers[ProxyBodyStreamHeader] = resp.BodyStream
+		}
+		if resp.BodyFile != "" {
+			headers[ProxyBodyFileHeader] = resp.BodyFile
+		}
 		return resp.Status, resp.ContentType, nil, headers, nil
 	}
 	body := []byte(resp.Body)
@@ -600,6 +606,7 @@ func jarProxy(params map[string]string) (int, string, []byte, map[string]string,
 		Body        string            `json:"body"`
 		BodyBase64  string            `json:"bodyBase64"`
 		BodyFile    string            `json:"bodyFile"`
+		BodyStream  string            `json:"bodyStream"`
 		Headers     map[string]string `json:"headers"`
 		Error       string            `json:"error"`
 	}
@@ -609,12 +616,17 @@ func jarProxy(params map[string]string) (int, string, []byte, map[string]string,
 	if resp.Error != "" {
 		return 0, "", nil, nil, fmt.Errorf("%s", resp.Error)
 	}
-	if resp.BodyFile != "" {
+	if resp.BodyStream != "" || resp.BodyFile != "" {
 		headers := resp.Headers
 		if headers == nil {
 			headers = map[string]string{}
 		}
-		headers[ProxyBodyFileHeader] = resp.BodyFile
+		if resp.BodyStream != "" {
+			headers[ProxyBodyStreamHeader] = resp.BodyStream
+		}
+		if resp.BodyFile != "" {
+			headers[ProxyBodyFileHeader] = resp.BodyFile
+		}
 		return resp.Status, resp.ContentType, nil, headers, nil
 	}
 	if resp.Status == 0 && resp.ContentType == "" && resp.Body == "" && resp.BodyBase64 == "" {

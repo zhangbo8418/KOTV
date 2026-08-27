@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -373,8 +374,9 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 		return
 	}
-	// 夸克/UC 等 url+header 代理：Go 真流式，避免 jar bridge 溢写整文件。
-	if playproxy.TryHandleEmbeddedProxy(w, r) {
+	// 夸克/UC 等 url+header 代理：默认 Go 真流式，避免 jar bridge 溢写。
+	// 「网盘经后端加速」开启时交给 jar（so/go 多线程）。
+	if !settings.IsBackendProxyPlay() && playproxy.TryHandleEmbeddedProxy(w, r) {
 		return
 	}
 	cfg := config.Default()
@@ -430,7 +432,7 @@ func writeProxyResponse(w http.ResponseWriter, status int, contentType string, b
 	if status <= 0 {
 		status = http.StatusOK
 	}
-	// 溢写文件：大响应体不经内存缓冲，直接从磁盘流式回写客户端后删除。
+	bodyStream := headers[spider.ProxyBodyStreamHeader]
 	bodyFile := headers[spider.ProxyBodyFileHeader]
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
@@ -445,6 +447,23 @@ func writeProxyResponse(w http.ResponseWriter, status int, contentType string, b
 		w.Header().Set(k, v)
 	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// bridge 本机 TCP 泵：边读边写，支持 so/go 多线程大文件。
+	if bodyStream != "" {
+		w.Header().Del("Content-Length")
+		w.WriteHeader(status)
+		conn, err := net.DialTimeout("tcp", bodyStream, 30*time.Second)
+		if err != nil {
+			log.Printf("proxy bodyStream dial %s: %v", bodyStream, err)
+			return
+		}
+		defer conn.Close()
+		_, _ = io.Copy(writeOnly{w}, conn)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		return
+	}
 
 	if bodyFile != "" {
 		defer os.Remove(bodyFile)
@@ -474,6 +493,7 @@ func writeProxyResponse(w http.ResponseWriter, status int, contentType string, b
 func skipProxyResponseHeader(name string) bool {
 	switch {
 	case strings.EqualFold(name, spider.ProxyBodyFileHeader),
+		strings.EqualFold(name, spider.ProxyBodyStreamHeader),
 		strings.EqualFold(name, "content-length"),
 		strings.EqualFold(name, "transfer-encoding"),
 		strings.EqualFold(name, "connection"),

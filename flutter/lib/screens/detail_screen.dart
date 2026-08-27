@@ -959,6 +959,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         remarks: ep.name,
       ));
       // 起播再读一次：设置页改播放器/软硬解/自动切换后，详情页可能还开着。
+      var backendProxyPlay = data['backendProxyPlay'] == true;
       try {
         final st = await ref.read(apiProvider).getSettings();
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
@@ -973,6 +974,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final decode = '${settings['playerDecode'] ?? ''}'.trim();
         if (decode.isNotEmpty) {
           _prefDecodeMode = decode;
+        }
+        final bp = '${settings['backendProxyPlay'] ?? ''}'.trim().toLowerCase();
+        if (bp.isNotEmpty) {
+          backendProxyPlay = bp == 'true' || bp == '1' || bp == 'on';
         }
       } catch (_) {}
       // 有 DRM 强制 Exo（MPV/FVP 不解 Widevine）
@@ -997,8 +1002,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final pb = _playback;
         await pb.setDecodeMode(failover.decodeMode);
         await pb.setRenderMode(_renderMode);
-        // 能带请求头的播放器优先直连 CDN（media / 展开 /proxy?url=&header=）。
-        // 远端连安卓时若走 /proxy/play，Go 默认跨域会剥 Cookie，易变成 invalid media。
+        // 能带请求头的播放器默认优先直连 CDN；「网盘经后端加速」则强制走 url（安卓 /proxy so/go）。
         final localMedia = mediaUrl.startsWith('file:') ||
             mediaUrl.startsWith('content:') ||
             (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
@@ -1008,7 +1012,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           openUrl = mediaUrl;
           openHeaders = null;
         } else {
-          final preferDirect = !hasDrm; // DRM 必须走 Exo+代理链路
+          final preferDirect = !hasDrm && !backendProxyPlay;
           final resolved = kotvResolvePlayOpenTarget(
             playUrl: playUrl,
             mediaUrl: mediaUrl,

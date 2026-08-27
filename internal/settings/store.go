@@ -61,6 +61,9 @@ const (
 	DeviceUUID    Type = "deviceUUID"
 	RemoteAuth    Type = "remoteAuth"    // 远端强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
+	// BackendProxyPlay 远端（PC 连安卓）网盘是否经后端 /proxy（jar so/go 多线程）。
+	// 默认 false：直连 CDN / Go playproxy；true：强制走安卓爬虫代理加速。
+	BackendProxyPlay Type = "backendProxyPlay"
 )
 
 type item struct {
@@ -124,6 +127,7 @@ func defaultFile() file {
 			{ID: "deviceUUID", Label: "设备标识", Value: ""},
 			{ID: "remoteAuth", Label: "远端鉴权", Value: "false"},
 			{ID: "allowRegister", Label: "开放注册", Value: "false"},
+			{ID: "backendProxyPlay", Label: "网盘经后端加速", Value: "false"},
 		},
 		Cache: make(map[string]json.RawMessage),
 	}
@@ -262,6 +266,9 @@ func IsLiveChange() bool { return boolSetting(LiveChange, true) }
 
 // IsLiveInvert 反转上下换台方向（默认关）。
 func IsLiveInvert() bool { return boolSetting(LiveInvert, false) }
+
+// IsBackendProxyPlay 远端网盘是否经后端 /proxy（so/go 多线程，默认关）。
+func IsBackendProxyPlay() bool { return boolSetting(BackendProxyPlay, false) }
 
 func boolSetting(t Type, def bool) bool {
 	v := strings.ToLower(strings.TrimSpace(Get(t)))

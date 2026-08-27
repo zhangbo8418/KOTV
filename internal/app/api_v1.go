@@ -550,12 +550,18 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		}
 		playURL = local
 	} else if !thunder.IsLocalStream(playURL) && !IsLocalMediaURL(playURL) {
-		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
-			// 网盘原画：media 给本机 Exo 直连；url 走 /proxy/play 真流式（远端必用）。
-			mediaURL = media
-			headers = hdrs
-			playURL = a.PreparePlaybackURL(media, hdrs)
+		viaBackend := settings.IsBackendProxyPlay() && hostclient.PublicBase() != ""
+		if !viaBackend {
+			if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
+				// 网盘原画：media 给本机 Exo 直连；url 走 /proxy/play 真流式（远端默认）。
+				mediaURL = media
+				headers = hdrs
+				playURL = a.PreparePlaybackURL(media, hdrs)
+			} else {
+				playURL = a.PreparePlaybackURL(playURL, headers)
+			}
 		} else {
+			// 经后端加速：保留 /proxy 给 jar so/go，不展开 CDN。
 			playURL = a.PreparePlaybackURL(playURL, headers)
 		}
 	}
@@ -570,18 +576,19 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		pubQualURLs[i] = playproxy.PublicizeURL(localproxy.ConvertScheme(u))
 	}
 	return map[string]any{
-		"ok":        true,
-		"url":       playproxy.PublicizeURL(playURL),
-		"media":     playproxy.PublicizeURL(mediaURL),
-		"magnet":    isMagnetPlay,
-		"parsed":    didParse,
-		"headers":   headers,
-		"drm":       playDrm,
-		"danmaku":   playproxy.PublicizeURL(danmakuURL),
-		"qualities": map[string]any{"names": qualNames, "urls": pubQualURLs},
-		"site":      site.Key,
-		"flag":      flag,
-		"id":        vodID,
+		"ok":               true,
+		"url":              playproxy.PublicizeURL(playURL),
+		"media":            playproxy.PublicizeURL(mediaURL),
+		"magnet":           isMagnetPlay,
+		"parsed":           didParse,
+		"headers":          headers,
+		"drm":              playDrm,
+		"danmaku":          playproxy.PublicizeURL(danmakuURL),
+		"qualities":        map[string]any{"names": qualNames, "urls": pubQualURLs},
+		"backendProxyPlay": settings.IsBackendProxyPlay(),
+		"site":             site.Key,
+		"flag":             flag,
+		"id":               vodID,
 	}, nil
 }
 

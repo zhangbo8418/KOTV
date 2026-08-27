@@ -311,6 +311,12 @@ public class Path {
             file.setWritable(true);
             //noinspection ResultOfMethodCallIgnored
             file.setExecutable(true);
+            // 对齐 TV：潇洒哥等仓下载的 go 多线程程序依赖 chmod 后可 exec。
+            // 仅 setExecutable 在部分机型上不够；高 targetSdk 仍会 W^X 拦截（见 app targetSdk=28）。
+            try {
+                Shell.exec("chmod 777 " + file);
+            } catch (Throwable ignored) {
+            }
             return file;
         } catch (IOException e) {
             return file;

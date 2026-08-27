@@ -35,7 +35,11 @@ android {
     defaultConfig {
         applicationId = "com.bobo.kotv"
         minSdk = Math.max(flutter.minSdkVersion, 24)
-        targetSdk = flutter.targetSdkVersion
+        // 社区仓（潇洒哥玩偶等）会把 go 多线程程序下到缓存再 chmod+exec；
+        // targetSdk≥29 起系统禁止 exec 应用私有目录可执行文件（W^X），高版本会直接失败。
+        // 摸鱼儿玩偶的 so 多线程同样依赖可加载的缓存/库路径，低 target 更稳。
+        // 可用 KOTV_TARGET_SDK=34 等覆盖（上架/合规时再抬）。
+        targetSdk = (System.getenv("KOTV_TARGET_SDK") ?: "28").toInteger()
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk {

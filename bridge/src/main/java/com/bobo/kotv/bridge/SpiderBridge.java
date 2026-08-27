@@ -16,6 +16,9 @@ import java.io.*;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
@@ -1188,8 +1191,8 @@ public class SpiderBridge {
         out.addProperty("status", status);
         out.addProperty("contentType", contentType == null ? "" : contentType);
         if (body instanceof InputStream) {
- // 流式复制到临时文件，低堆占用，交给 Go 直接向客户端流式回写。
-            out.addProperty("bodyFile", spillStream((InputStream) body).getAbsolutePath());
+            // 真流式：本机 TCP 泵给 Go，避免整段原画溢写磁盘（远端 PC→安卓 so/go 多线程必用）。
+            out.addProperty("bodyStream", startBodyStream((InputStream) body));
         } else {
             byte[] bytes;
             if (body instanceof byte[]) {
@@ -1208,6 +1211,55 @@ public class SpiderBridge {
         }
         if (headers != null) out.add("headers", GSON.toJsonTree(headers));
         return GSON.toJson(out);
+    }
+
+    /**
+     * 在 127.0.0.1 上开一次性 TCP：Go 拨号后边读边写客户端。
+     * 返回 "127.0.0.1:port"。
+     */
+    private static String startBodyStream(InputStream in) throws IOException {
+        final ServerSocket ss = new ServerSocket();
+        ss.setReuseAddress(true);
+        ss.bind(new InetSocketAddress("127.0.0.1", 0), 1);
+        ss.setSoTimeout(120_000);
+        final int port = ss.getLocalPort();
+        Thread t = new Thread(() -> {
+            Socket client = null;
+            try {
+                client = ss.accept();
+                try {
+                    ss.close();
+                } catch (IOException ignored) {
+                }
+                OutputStream out = client.getOutputStream();
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    out.write(buf, 0, n);
+                }
+                out.flush();
+            } catch (Throwable e) {
+                System.err.println("kotv proxy bodyStream failed: " + e);
+            } finally {
+                try {
+                    in.close();
+                } catch (IOException ignored) {
+                }
+                if (client != null) {
+                    try {
+                        client.close();
+                    } catch (IOException ignored) {
+                    }
+                }
+                try {
+                    ss.close();
+                } catch (IOException ignored) {
+                }
+            }
+        }, "kotv-proxy-body-stream");
+        t.setDaemon(true);
+        t.start();
+        return "127.0.0.1:" + port;
     }
 
     private static File proxySpillDir() {
