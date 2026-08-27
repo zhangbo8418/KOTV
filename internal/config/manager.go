@@ -761,6 +761,12 @@ func resolveSiteField(base, value string) string {
 	if looksLikeBase64Payload(value) {
 		return value
 	}
+	// 对齐 TV UrlUtil.convert：只改 assets/proxy/file；纯 token（Hgdh/Guazi/woWogg）
+	// 必须原样交给 spider.init。此前把它们拼成「配置根/Hgdh」后 Amns 查不到站点配置，
+	// host 为空 → OkHttp「Expected URL scheme」/ NPE（嗷呜短剧/夏天/玩偶/瓜子等）。
+	if !looksLikeRelativePath(value) {
+		return value
+	}
 	if base == "" {
 		return value
 	}
@@ -769,6 +775,11 @@ func resolveSiteField(base, value string) string {
 		return convertLocalScheme(resolved)
 	}
 	return value
+}
+
+// looksLikeRelativePath 是否像相对路径（./x、../x、a/b、x.json）；纯站点 token 返回 false。
+func looksLikeRelativePath(s string) bool {
+	return strings.ContainsAny(s, "/\\") || strings.HasPrefix(s, ".")
 }
 
 // convertLocalScheme 对齐 TV UrlUtil.convert。

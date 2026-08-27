@@ -435,10 +435,22 @@ public class SpiderBridge {
             String api = req.get("api").getAsString();
             String ext = req.has("ext") ? req.get("ext").getAsString() : "";
             String jar = req.get("jar").getAsString();
-            Spider spider = getSpider(key, api, ext, jar);
-            // recent 只由 parseJar(recent=true)/setRecent/Site.recent 更新，
-            // 不在每次 spider 方法调用时覆盖（避免并行多 jar 时 Mix/Json 抖 recent）。
-            return nonempty(invoke(spider, method, argsObj, jar));
+            String spiderMethod = method;
+            try {
+                Spider spider = getSpider(key, api, ext, jar);
+                // recent 只由 parseJar(recent=true)/setRecent/Site.recent 更新，
+                // 不在每次 spider 方法调用时覆盖（避免并行多 jar 时 Mix/Json 抖 recent）。
+                return nonempty(invoke(spider, spiderMethod, argsObj, jar));
+            } catch (Throwable t) {
+                t.printStackTrace(System.err);
+                // 对齐 TV SiteViewModel：内容接口失败回空结果，不把 Java 异常弹到首页。
+                if (isSoftFailContentMethod(spiderMethod)) {
+                    return "{}";
+                }
+                JsonObject err = new JsonObject();
+                err.addProperty("error", t.toString());
+                return GSON.toJson(err);
+            }
         } catch (Throwable t) {
             t.printStackTrace(System.err);
             JsonObject err = new JsonObject();
@@ -452,12 +464,26 @@ public class SpiderBridge {
         }
     }
 
+    /** home/category/search 等：失败时 TV 发 Result.empty()，不展示堆栈。 */
+    private static boolean isSoftFailContentMethod(String method) {
+        if (method == null) return false;
+        switch (method) {
+            case "homeContent":
+            case "homeVideoContent":
+            case "categoryContent":
+            case "detailContent":
+            case "searchContent":
+            case "liveContent":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     /** JarLoader 把空串当成加载失败（HTTP 500）；所有出口至少回 JSON。 */
     private static String nonempty(String raw) {
         if (raw == null || raw.trim().isEmpty()) {
-            JsonObject err = new JsonObject();
-            err.addProperty("error", "empty result");
-            return GSON.toJson(err);
+            return "{}";
         }
         return raw;
     }

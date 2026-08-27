@@ -30,7 +30,9 @@ func filtersForHomeTid(home model.Result, tid string) []model.Filter {
 	return nil
 }
 
-// mergeFilterDefaults ：把筛选项 init（或首个 value）写入 extend 缺省键。
+// mergeFilterDefaults ：对齐 TV FolderFragment：仅当 filter.init 非空时写入 extend。
+// 不得回退到首个 value——AppDrama 等源无 init、首项常为具体标签（古装/2026…），
+// 误填后 category 被过度收窄，整页「暂无内容」（TV 则空 extend 正常出片）。
 func mergeFilterDefaults(extend map[string]string, filters []model.Filter) {
 	if extend == nil || len(filters) == 0 {
 		return
@@ -42,10 +44,6 @@ func mergeFilterDefaults(extend map[string]string, filters []model.Filter) {
 		}
 		if v := strings.TrimSpace(f.Init.String()); v != "" {
 			extend[key] = v
-			continue
-		}
-		if len(f.Value) > 0 {
-			extend[key] = f.Value[0].V.String()
 		}
 	}
 }
