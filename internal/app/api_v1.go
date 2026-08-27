@@ -550,9 +550,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		}
 		playURL = local
 	} else if !thunder.IsLocalStream(playURL) && !IsLocalMediaURL(playURL) {
-		if !settings.IsBackendProxyPlay() {
+		if !settings.PreferSpiderProxyPlay() {
 			if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
-				// 网盘原画：media 给本机 Exo 直连；url 走 /proxy/play 真流式（默认）。
 				mediaURL = media
 				headers = hdrs
 				playURL = a.PreparePlaybackURL(media, hdrs)
@@ -560,7 +559,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 				playURL = a.PreparePlaybackURL(playURL, headers)
 			}
 		} else {
-			// 经后端加速：各平台均保留 /proxy 给 jar（so/dll/dylib/go/Java），不展开 CDN。
+			// 本机(=TV) 或远端开加速：保留 /proxy。
 			playURL = a.PreparePlaybackURL(playURL, headers)
 		}
 	}
@@ -584,8 +583,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		"drm":              playDrm,
 		"danmaku":          playproxy.PublicizeURL(danmakuURL),
 		"qualities":        map[string]any{"names": qualNames, "urls": pubQualURLs},
-		"backendProxyPlay": settings.IsBackendProxyPlay(),
-		"site":             site.Key,
+		"backendProxyPlay":    settings.IsBackendProxyPlay(),
+		"preferSpiderProxy":   settings.PreferSpiderProxyPlay(),
+		"site":                site.Key,
 		"flag":             flag,
 		"id":               vodID,
 	}, nil

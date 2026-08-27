@@ -59,9 +59,8 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	}
 	// TV UrlUtil.convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
-	// 「网盘经后端加速」：保留 jar /proxy（各平台原生库 / go / Java 多线程），不展开 CDN。
-	if !settings.IsBackendProxyPlay() {
-		// 夸克/UC 等把 CDN+Cookie 编进 /proxy?url=&header=：展开后走 /proxy/play 真流式。
+	// 本机对齐 TV：不展开 CDN，保留 /proxy 给 jar 加速；远端仅开关开启时同样保留。
+	if !settings.PreferSpiderProxyPlay() {
 		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
 			raw = media
 			headers = hdrs

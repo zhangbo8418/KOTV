@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/paths"
 )
 
@@ -61,8 +62,9 @@ const (
 	DeviceUUID    Type = "deviceUUID"
 	RemoteAuth    Type = "remoteAuth"    // 远端强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
-	// BackendProxyPlay 网盘是否经本机/后端 /proxy（jar 原生 so·dll·dylib 或 go/Java 多线程）。
-	// 默认 false：展开 CDN / Go playproxy 直拉；true：保留爬虫代理加速（本机与远端前端均生效）。
+	// BackendProxyPlay 远端前端连入时，网盘是否经引擎 /proxy（jar 原生库/go/Java 多线程）。
+	// 本机播放始终对齐 TV（走本地 /proxy，不展开 CDN），不受此开关影响。
+	// 默认 false：远端优先直连 CDN；true：远端也走引擎代理加速。
 	BackendProxyPlay Type = "backendProxyPlay"
 )
 
@@ -127,7 +129,7 @@ func defaultFile() file {
 			{ID: "deviceUUID", Label: "设备标识", Value: ""},
 			{ID: "remoteAuth", Label: "远端鉴权", Value: "false"},
 			{ID: "allowRegister", Label: "开放注册", Value: "false"},
-			{ID: "backendProxyPlay", Label: "网盘经后端加速", Value: "false"},
+			{ID: "backendProxyPlay", Label: "远端网盘经后端加速", Value: "false"},
 		},
 		Cache: make(map[string]json.RawMessage),
 	}
@@ -267,8 +269,17 @@ func IsLiveChange() bool { return boolSetting(LiveChange, true) }
 // IsLiveInvert 反转上下换台方向（默认关）。
 func IsLiveInvert() bool { return boolSetting(LiveInvert, false) }
 
-// IsBackendProxyPlay 网盘是否经 /proxy 加速（原生库/go/Java 多线程，默认关）。
+// IsBackendProxyPlay 远端是否经 /proxy 加速（默认关）。本机恒按 TV 走本地代理。
 func IsBackendProxyPlay() bool { return boolSetting(BackendProxyPlay, false) }
+
+// PreferSpiderProxyPlay 是否保留 jar /proxy、不展开 CDN。
+// 本机（无 PublicBase）对齐 TV；远端仅当 BackendProxyPlay 开启。
+func PreferSpiderProxyPlay() bool {
+	if hostclient.PublicBase() == "" {
+		return true
+	}
+	return IsBackendProxyPlay()
+}
 
 func boolSetting(t Type, def bool) bool {
 	v := strings.ToLower(strings.TrimSpace(Get(t)))

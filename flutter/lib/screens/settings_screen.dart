@@ -887,14 +887,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           onTap: () => _set('incognito', incognito ? 'false' : 'true', msg: incognito ? '无痕已关闭' : '无痕已开启'),
                         ),
                         KotvSettingsCell(
-                          label: '网盘经后端加速',
+                          label: '远端网盘经后端加速',
                           value: backendProxyPlay ? '开启' : '关闭',
                           onTap: () => _set(
                             'backendProxyPlay',
                             backendProxyPlay ? 'false' : 'true',
                             msg: backendProxyPlay
-                                ? '已关闭：优先直连 CDN'
-                                : '已开启：走引擎 /proxy（原生库/go/Java 多线程）',
+                                ? '已关闭：远端优先直连 CDN（本机仍按 TV 走本地代理）'
+                                : '已开启：远端也走引擎 /proxy（原生库/go/Java 多线程）',
                           ),
                         ),
                         KotvSettingsCell(

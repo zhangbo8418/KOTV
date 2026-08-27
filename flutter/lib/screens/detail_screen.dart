@@ -980,6 +980,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           backendProxyPlay = bp == 'true' || bp == '1' || bp == 'on';
         }
       } catch (_) {}
+      final remoteEngine = !kotvIsLocalEngineBaseUrl(ref.read(apiProvider).baseUrl);
+      // 本机对齐 TV；远端看开关。优先用引擎 play 接口算好的 preferSpiderProxy。
+      final preferSpiderProxy = data.containsKey('preferSpiderProxy')
+          ? data['preferSpiderProxy'] == true
+          : (!remoteEngine || backendProxyPlay);
       // 有 DRM 强制 Exo（MPV/FVP 不解 Widevine）
       final startPlayer = (hasDrm && kotvIsAndroid())
           ? 'innie#exo'
@@ -1002,7 +1007,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final pb = _playback;
         await pb.setDecodeMode(failover.decodeMode);
         await pb.setRenderMode(_renderMode);
-        // 默认优先直连 CDN；「网盘经后端加速」则强制走 url（引擎 /proxy：原生库/go/Java）。
+        // 本机(=TV)/远端开加速：走 playUrl（/proxy）；远端默认才直连 CDN。
         final localMedia = mediaUrl.startsWith('file:') ||
             mediaUrl.startsWith('content:') ||
             (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
@@ -1012,7 +1017,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           openUrl = mediaUrl;
           openHeaders = null;
         } else {
-          final preferDirect = !hasDrm && !backendProxyPlay;
+          final preferDirect = !hasDrm && !preferSpiderProxy;
           final resolved = kotvResolvePlayOpenTarget(
             playUrl: playUrl,
             mediaUrl: mediaUrl,
