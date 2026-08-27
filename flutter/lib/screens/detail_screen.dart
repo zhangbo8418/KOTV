@@ -1002,7 +1002,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final pb = _playback;
         await pb.setDecodeMode(failover.decodeMode);
         await pb.setRenderMode(_renderMode);
-        // 能带请求头的播放器默认优先直连 CDN；「网盘经后端加速」则强制走 url（安卓 /proxy so/go）。
+        // 默认优先直连 CDN；「网盘经后端加速」则强制走 url（引擎 /proxy：原生库/go/Java）。
         final localMedia = mediaUrl.startsWith('file:') ||
             mediaUrl.startsWith('content:') ||
             (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));

@@ -893,8 +893,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             'backendProxyPlay',
                             backendProxyPlay ? 'false' : 'true',
                             msg: backendProxyPlay
-                                ? '已关闭：远端直连 CDN'
-                                : '已开启：远端走后端 /proxy（so/go 多线程）',
+                                ? '已关闭：优先直连 CDN'
+                                : '已开启：走引擎 /proxy（原生库/go/Java 多线程）',
                           ),
                         ),
                         KotvSettingsCell(

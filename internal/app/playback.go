@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/bobo/KOTV/internal/database"
-	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/playproxy"
@@ -60,9 +59,8 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	}
 	// TV UrlUtil.convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
-	// 远端经后端加速：保留 jar /proxy（so/go 多线程），不展开 CDN。
-	viaBackend := settings.IsBackendProxyPlay() && hostclient.PublicBase() != ""
-	if !viaBackend {
+	// 「网盘经后端加速」：保留 jar /proxy（各平台原生库 / go / Java 多线程），不展开 CDN。
+	if !settings.IsBackendProxyPlay() {
 		// 夸克/UC 等把 CDN+Cookie 编进 /proxy?url=&header=：展开后走 /proxy/play 真流式。
 		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
 			raw = media

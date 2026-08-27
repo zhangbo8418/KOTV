@@ -374,8 +374,8 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 		return
 	}
-	// 夸克/UC 等 url+header 代理：默认 Go 真流式，避免 jar bridge 溢写。
-	// 「网盘经后端加速」开启时交给 jar（so/go 多线程）。
+	// 夸克/UC 等 url+header 代理：默认 Go 真流式。
+	// 「网盘经后端加速」开启时交给 jar（各平台原生库 / go / Java 多线程）。
 	if !settings.IsBackendProxyPlay() && playproxy.TryHandleEmbeddedProxy(w, r) {
 		return
 	}

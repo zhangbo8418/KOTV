@@ -61,8 +61,8 @@ const (
 	DeviceUUID    Type = "deviceUUID"
 	RemoteAuth    Type = "remoteAuth"    // 远端强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
-	// BackendProxyPlay 远端（PC 连安卓）网盘是否经后端 /proxy（jar so/go 多线程）。
-	// 默认 false：直连 CDN / Go playproxy；true：强制走安卓爬虫代理加速。
+	// BackendProxyPlay 网盘是否经本机/后端 /proxy（jar 原生 so·dll·dylib 或 go/Java 多线程）。
+	// 默认 false：展开 CDN / Go playproxy 直拉；true：保留爬虫代理加速（本机与远端前端均生效）。
 	BackendProxyPlay Type = "backendProxyPlay"
 )
 
@@ -267,7 +267,7 @@ func IsLiveChange() bool { return boolSetting(LiveChange, true) }
 // IsLiveInvert 反转上下换台方向（默认关）。
 func IsLiveInvert() bool { return boolSetting(LiveInvert, false) }
 
-// IsBackendProxyPlay 远端网盘是否经后端 /proxy（so/go 多线程，默认关）。
+// IsBackendProxyPlay 网盘是否经 /proxy 加速（原生库/go/Java 多线程，默认关）。
 func IsBackendProxyPlay() bool { return boolSetting(BackendProxyPlay, false) }
 
 func boolSetting(t Type, def bool) bool {

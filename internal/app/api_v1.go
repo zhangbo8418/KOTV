@@ -550,10 +550,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		}
 		playURL = local
 	} else if !thunder.IsLocalStream(playURL) && !IsLocalMediaURL(playURL) {
-		viaBackend := settings.IsBackendProxyPlay() && hostclient.PublicBase() != ""
-		if !viaBackend {
+		if !settings.IsBackendProxyPlay() {
 			if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
-				// 网盘原画：media 给本机 Exo 直连；url 走 /proxy/play 真流式（远端默认）。
+				// 网盘原画：media 给本机 Exo 直连；url 走 /proxy/play 真流式（默认）。
 				mediaURL = media
 				headers = hdrs
 				playURL = a.PreparePlaybackURL(media, hdrs)
@@ -561,7 +560,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 				playURL = a.PreparePlaybackURL(playURL, headers)
 			}
 		} else {
-			// 经后端加速：保留 /proxy 给 jar so/go，不展开 CDN。
+			// 经后端加速：各平台均保留 /proxy 给 jar（so/dll/dylib/go/Java），不展开 CDN。
 			playURL = a.PreparePlaybackURL(playURL, headers)
 		}
 	}
