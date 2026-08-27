@@ -17,6 +17,7 @@ import (
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/player"
@@ -525,6 +526,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	if playURL == "" {
 		return nil, fmt.Errorf("未获取到播放地址")
 	}
+	// TV UrlUtil.convert：须在可播判断之前，否则 proxy:// 会被当成不可播。
+	playURL = localproxy.ConvertScheme(playURL)
 	if apiLooksUnplayable(playURL) {
 		return nil, fmt.Errorf("未解析到可播放地址")
 	}
@@ -547,24 +550,29 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		}
 		playURL = local
 	} else if !thunder.IsLocalStream(playURL) && !IsLocalMediaURL(playURL) {
-		playURL = a.PreparePlaybackURL(playURL, headers)
+		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
+			// 网盘原画：media 给本机 Exo 直连；url 走 /proxy/play 真流式（远端必用）。
+			mediaURL = media
+			headers = hdrs
+			playURL = a.PreparePlaybackURL(media, hdrs)
+		} else {
+			playURL = a.PreparePlaybackURL(playURL, headers)
+		}
 	}
 	isMagnetPlay := magnet || thunder.IsLocalStream(playURL)
 
 	title := vodID
 	a.SetMediaPlaying(title, playURL)
 
-	// 远端前端（PC 连安卓后端）场景：jar 产出的 proxy:// 地址已被转成
-	// http://127.0.0.1:PORT/proxy?...，必须整体换成对外可达根，否则远端
-	// 客户端会打到自己机器上导致无法播放（安卓本机同机无感）。
+	// 远端前端（PC 连安卓后端）：把 127.0.0.1 换成对外可达根。
 	pubQualURLs := make([]string, len(qualURLs))
 	for i, u := range qualURLs {
-		pubQualURLs[i] = playproxy.PublicizeURL(u)
+		pubQualURLs[i] = playproxy.PublicizeURL(localproxy.ConvertScheme(u))
 	}
 	return map[string]any{
 		"ok":        true,
 		"url":       playproxy.PublicizeURL(playURL),
-		"media":     mediaURL,
+		"media":     playproxy.PublicizeURL(mediaURL),
 		"magnet":    isMagnetPlay,
 		"parsed":    didParse,
 		"headers":   headers,

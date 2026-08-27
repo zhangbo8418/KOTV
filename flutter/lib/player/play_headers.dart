@@ -31,10 +31,20 @@ String kotvEffectivePlayUa() {
 
 bool kotvIsLocalProxyUrl(String url) {
   final u = url.toLowerCase();
-  return u.contains('/proxy/play') ||
+  if (u.contains('/proxy/play') ||
       u.contains('/proxy/cached_m3u8') ||
-      u.contains('/proxy/bt/') ||
-      (u.contains('127.0.0.1:') && u.contains('/proxy/'));
+      u.contains('/proxy/bt/')) {
+    return true;
+  }
+  // spider 本地代理：改写到局域网 IP 后仍是 /proxy?...，不能再带 CDN 头。
+  try {
+    final uri = Uri.parse(url);
+    final path = uri.path.endsWith('/') && uri.path.length > 1
+        ? uri.path.substring(0, uri.path.length - 1)
+        : uri.path;
+    if (path == '/proxy') return true;
+  } catch (_) {}
+  return u.contains('127.0.0.1:') && u.contains('/proxy');
 }
 
 /// 规范化请求头；本地代理 URL 返回空（代理侧已带远端头）。

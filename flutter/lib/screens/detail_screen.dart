@@ -997,12 +997,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final pb = _playback;
         await pb.setDecodeMode(failover.decodeMode);
         await pb.setRenderMode(_renderMode);
-        // Exo：优先直连 media+headers；cached_m3u8 仍走代理且不带远端头
+        // Exo：本机可直连 media+headers；远端引擎时 CDN 常绑安卓出口 IP，必须走 url（/proxy/play）。
         var openUrl = playUrl;
         Map<String, String>? openHeaders = headers.isEmpty ? null : headers;
         if (_backend == KotvEmbedBackend.exo || hasDrm) {
+          final remoteEngine = !kotvIsLocalEngineBaseUrl(ref.read(apiProvider).baseUrl);
           final cached = playUrl.contains('/proxy/cached_m3u8');
-          final proxied = playUrl.contains('/proxy/play');
+          final proxied = playUrl.contains('/proxy/play') || kotvIsLocalProxyUrl(playUrl);
           final localMedia = mediaUrl.startsWith('file:') ||
               mediaUrl.startsWith('content:') ||
               (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
@@ -1010,7 +1011,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             // csp_Local：直喂 Exo，不走 HTTP 代理/请求头。
             openUrl = mediaUrl;
             openHeaders = null;
-          } else if (!cached &&
+          } else if (!remoteEngine &&
+              !cached &&
               !magnet &&
               mediaUrl.startsWith('http') &&
               headers.isNotEmpty) {

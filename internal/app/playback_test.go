@@ -1,6 +1,12 @@
 package app
 
-import "testing"
+import (
+	"encoding/base64"
+	"strings"
+	"testing"
+
+	"github.com/bobo/KOTV/internal/playproxy"
+)
 
 func TestIsLocalMediaURL(t *testing.T) {
 	t.Parallel()
@@ -49,5 +55,26 @@ func TestPreparePlaybackURLSkipsLocal(t *testing.T) {
 	in := "file:///storage/emulated/0/a.mp4"
 	if got := a.PreparePlaybackURL(in, map[string]string{"User-Agent": "x"}); got != in {
 		t.Fatalf("local url was proxied: %s", got)
+	}
+}
+
+func TestPreparePlaybackURLExpandsQuarkProxy(t *testing.T) {
+	t.Parallel()
+	a := &App{}
+	cdn := "https://cdn-quark.example/01.mkv"
+	hdrJSON := `{"Cookie":"qk=1","User-Agent":"Quark"}`
+	raw := "proxy://do=quark&type=video&url=" +
+		base64.StdEncoding.EncodeToString([]byte(cdn)) +
+		"&header=" + base64.StdEncoding.EncodeToString([]byte(hdrJSON))
+	got := a.PreparePlaybackURL(raw, nil)
+	if !strings.Contains(got, "/proxy/play?id=") {
+		t.Fatalf("expected /proxy/play, got %q", got)
+	}
+	upstream, headers := playproxy.Resolve(got)
+	if upstream != cdn {
+		t.Fatalf("upstream=%q want %q", upstream, cdn)
+	}
+	if headers["Cookie"] != "qk=1" {
+		t.Fatalf("headers=%v", headers)
 	}
 }

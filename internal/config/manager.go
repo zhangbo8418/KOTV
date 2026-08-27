@@ -784,30 +784,7 @@ func looksLikeRelativePath(s string) bool {
 
 // convertLocalScheme 对齐 TV UrlUtil.convert。
 func convertLocalScheme(value string) string {
-	value = strings.TrimSpace(value)
-	localBase := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
-	switch {
-	case strings.HasPrefix(value, "assets://"):
-		return localBase + "/" + strings.TrimPrefix(value, "assets://")
-	case strings.HasPrefix(value, "proxy://"):
-		return localBase + "/proxy?" + strings.TrimPrefix(value, "proxy://")
-	case strings.HasPrefix(value, "file://"), strings.HasPrefix(value, "file:/"):
-		pathPart := value
-		if local, ok := util.FileURLPath(value); ok {
-			pathPart = filepath.ToSlash(local)
-		} else {
-			pathPart = strings.TrimPrefix(pathPart, "file://")
-			pathPart = strings.TrimPrefix(pathPart, "file:/")
-			if u, err := url.PathUnescape(pathPart); err == nil {
-				pathPart = u
-			}
-		}
-		esc := url.PathEscape(pathPart)
-		esc = strings.ReplaceAll(esc, "%2F", "/")
-		return localBase + "/file/" + esc
-	default:
-		return value
-	}
+	return localproxy.ConvertScheme(value)
 }
 
 // looksLikeBase64Payload 识别不透明 Base64 载荷（无路径/扩展名语义）。
