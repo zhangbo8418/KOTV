@@ -554,6 +554,13 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	title := vodID
 	a.SetMediaPlaying(title, playURL)
 
+	// 远端前端（PC 连安卓后端）场景：jar 产出的 proxy:// 地址已被转成
+	// http://127.0.0.1:PORT/proxy?...，必须整体换成对外可达根，否则远端
+	// 客户端会打到自己机器上导致无法播放（安卓本机同机无感）。
+	pubQualURLs := make([]string, len(qualURLs))
+	for i, u := range qualURLs {
+		pubQualURLs[i] = playproxy.PublicizeURL(u)
+	}
 	return map[string]any{
 		"ok":        true,
 		"url":       playproxy.PublicizeURL(playURL),
@@ -562,8 +569,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		"parsed":    didParse,
 		"headers":   headers,
 		"drm":       playDrm,
-		"danmaku":   danmakuURL,
-		"qualities": map[string]any{"names": qualNames, "urls": qualURLs},
+		"danmaku":   playproxy.PublicizeURL(danmakuURL),
+		"qualities": map[string]any{"names": qualNames, "urls": pubQualURLs},
 		"site":      site.Key,
 		"flag":      flag,
 		"id":        vodID,
@@ -1107,6 +1114,8 @@ func (a *App) APIBackdrop() map[string]any {
 			image = fmt.Sprintf("http://127.0.0.1:%d/file/%s", port, esc)
 		}
 	}
+	// 远端客户端需要对外可达地址，否则壁纸加载会打到客户端自身。
+	image = playproxy.PublicizeURL(image)
 
 	return map[string]any{
 		"mode":       mode,
