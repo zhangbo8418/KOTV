@@ -2,9 +2,11 @@ package com.bobo.kotv
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -28,6 +30,8 @@ import java.util.regex.Pattern
  * 对齐 TV CustomWebView 的网页嗅探：ads 阻断、rules.script/click、嵌套 player、isVideoFormat。
  */
 object SnifferWebView {
+  private const val TAG = "KotvSnifferWebView"
+
   private val mediaURLRe = Regex("(?i)https?://[^\\s\"'<>\\\\]+?\\.(?:m3u8|mp4|mkv|flv|ts|mpd)(?:\\?[^\\s\"'<>\\\\]*)?")
   private val snifferRe = Regex(
     "(?i)https?://[^\\s]{12,}\\.(?:m3u8|mp4|mkv|flv|mp3|m4a|aac|mpd)(?:\\?.*)?|https?://.*?video/tos[^\\s]*|rtmp:[^\\s]+"
@@ -60,6 +64,16 @@ object SnifferWebView {
 
   fun start(context: Context) {
     appContext = context.applicationContext
+  }
+
+  /** 对齐 TV ParseJob / WebViewUtil：不可用时不建 WebView，避免主线程 FATAL。 */
+  private fun webViewSupported(context: Context): Boolean {
+    return try {
+      CookieManager.getInstance()
+      context.packageManager.hasSystemFeature(PackageManager.FEATURE_WEBVIEW)
+    } catch (_: Throwable) {
+      false
+    }
   }
 
   fun sniff(req: JSONObject): JSONObject {
@@ -166,8 +180,21 @@ object SnifferWebView {
     val session = Session(found, outHeaders, done, latch, ads, rules, click, timeoutMs)
     val handler = Handler(Looper.getMainLooper())
 
-    handler.post {
-      startWebView(context, handler, session, pageUrl, headers, detect)
+    if (!webViewSupported(context)) {
+      Log.w(TAG, "WebView unavailable, skip sniff for $pageUrl")
+      done.set(true)
+      latch.countDown()
+    } else {
+      handler.post {
+        try {
+          startWebView(context, handler, session, pageUrl, headers, detect)
+        } catch (t: Throwable) {
+          Log.w(TAG, "WebView sniff failed", t)
+          if (done.compareAndSet(false, true)) {
+            latch.countDown()
+          }
+        }
+      }
     }
     handler.postDelayed({
       if (done.compareAndSet(false, true)) {

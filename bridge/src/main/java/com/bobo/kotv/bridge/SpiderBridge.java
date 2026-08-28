@@ -826,10 +826,9 @@ public class SpiderBridge {
             Class<?> clz = loader.loadClass("com.github.catvod.spider.Init");
             Method init = clz.getMethod("init", Context.class);
             Context app = ctx();
-            Activity act = UiContext.activity();
             boolean initialized = false;
-            // 标准 TV dex：Init.init 必须 Application。先传 Activity 会 CCE；
-            // PC 改造 jar 若先拿到非 Application 还会 new 出无 base 的空 Application（getPackageName NPE）。
+            // 对齐 TV JarLoader.invokeInit：只传 Application，不传 Activity、不 inject Activity。
+            // 社区 jar 拿到 Activity 会在主线程立刻 new WebView 弹配置页，WebView 不可用时会 FATAL。
             if (app != null) {
                 try {
                     Context asApp = app.getApplicationContext();
@@ -842,18 +841,19 @@ public class SpiderBridge {
                     }
                 }
             }
-            if (!initialized && act != null) {
-                try {
-                    init.invoke(null, act);
-                    initialized = true;
-                } catch (java.lang.reflect.InvocationTargetException ite) {
-                    Throwable cause = ite.getCause() != null ? ite.getCause() : ite;
-                    if (!(cause instanceof ClassCastException)) {
-                        throw ite;
+            if (!initialized && !isArtVm()) {
+                Activity act = UiContext.activity();
+                if (act != null) {
+                    try {
+                        init.invoke(null, act);
+                    } catch (java.lang.reflect.InvocationTargetException ite) {
+                        Throwable cause = ite.getCause() != null ? ite.getCause() : ite;
+                        if (!(cause instanceof ClassCastException)) {
+                            throw ite;
+                        }
                     }
                 }
             }
-            injectJarInitActivity(clz, act);
         } catch (ClassNotFoundException ignored) {
             // Init is not part of the original spider ABI.
         } catch (Throwable error) {
@@ -861,7 +861,7 @@ public class SpiderBridge {
         }
     }
 
-    /** 标准 TV Init 只存 Application；有 getActivity/setActivity 的 jar 在此补 Activity。 */
+    /** 仅 remoteUi 远端弹窗时补 Activity；Init 阶段不注入，避免 jar 过早建 WebView。 */
     private static void injectJarInitActivity(Class<?> initClz, Activity act) {
         if (act == null || initClz == null) {
             return;
@@ -903,7 +903,7 @@ public class SpiderBridge {
     }
 
     private static void refreshSpiderJarUi(ClassLoader loader) {
-        if (!isArtVm() || loader == null) {
+        if (!isArtVm() || loader == null || !com.github.catvod.utils.Util.hasRemoteUi()) {
             return;
         }
         try {
