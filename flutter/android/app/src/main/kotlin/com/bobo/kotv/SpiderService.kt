@@ -43,6 +43,7 @@ class SpiderService private constructor(
       warmUpOne("python") { PyLoader.startIfNeeded(appContext) }
       // 对齐 TV：不预热 XLTaskHelper/loadLibrary；仅确保 Init（Application 已 set）
       warmUpOne("thunder-init") { ThunderBridge.start(appContext) }
+      warmUpOne("go-proxy-prepare") { GoProxyStarter.prepare(appContext) }
       Log.i(TAG, "warmup done")
     }
   }
@@ -169,6 +170,11 @@ class SpiderService private constructor(
 
         "/thunder/clear" -> {
           json(Status.OK, ThunderBridge.clear().toString())
+        }
+
+        "/go/start" -> {
+          GoProxyStarter.start(appContext)
+          json(Status.OK, JSONObject().put("ok", true).toString())
         }
 
         else -> newJsonError(Status.NOT_FOUND, "unknown route: $uri")
