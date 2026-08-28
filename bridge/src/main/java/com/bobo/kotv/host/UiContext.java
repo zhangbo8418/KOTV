@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
 
+import com.github.catvod.utils.Util;
+
 import java.lang.ref.WeakReference;
 
 /**
@@ -37,6 +39,9 @@ public final class UiContext {
     }
 
     public static Activity activity() {
+        if (!Util.hasRemoteUi()) {
+            return null;
+        }
         Activity act = activityRef.get();
         if (act == null) {
             return null;
