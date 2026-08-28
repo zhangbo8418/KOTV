@@ -21,6 +21,10 @@ class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
 
   private val mainHandler = Handler(Looper.getMainLooper())
 
+  /** 老盒子 WebView relro 超时后，后续 jar post 一律丢弃，避免再次卡死 UI。 */
+  @Volatile
+  private var webViewBroken = false
+
   override fun attachBaseContext(base: Context) {
     super.attachBaseContext(base)
     instance = this
@@ -51,6 +55,7 @@ class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
     val prev = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler { thread, ex ->
       if (thread === mainHandler.looper.thread && isMissingWebView(ex)) {
+        webViewBroken = true
         android.util.Log.w(TAG, "ignored MissingWebView during spider Init", ex)
         return@setDefaultUncaughtExceptionHandler
       }
@@ -131,15 +136,25 @@ class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
 
     @JvmStatic
     fun post(runnable: Runnable) {
-      instance?.mainHandler?.post(runnable)
+      val app = instance ?: return
+      // 非 remoteUi 宿主不需要 jar WebView 配置页；post 到主线程会卡 Flutter UI。
+      if (!Util.hasRemoteUi() || app.webViewBroken) {
+        android.util.Log.d(TAG, "drop jar post headless=${!Util.hasRemoteUi()} broken=${app.webViewBroken}")
+        return
+      }
+      app.mainHandler.post(runnable)
     }
 
     @JvmStatic
     fun post(runnable: Runnable, delayMillis: Long) {
-      val h = instance?.mainHandler ?: return
-      h.removeCallbacks(runnable)
+      val app = instance ?: return
+      if (!Util.hasRemoteUi() || app.webViewBroken) {
+        android.util.Log.d(TAG, "drop jar delayed post headless=${!Util.hasRemoteUi()} broken=${app.webViewBroken}")
+        return
+      }
+      app.mainHandler.removeCallbacks(runnable)
       if (delayMillis >= 0) {
-        h.postDelayed(runnable, delayMillis)
+        app.mainHandler.postDelayed(runnable, delayMillis)
       }
     }
   }

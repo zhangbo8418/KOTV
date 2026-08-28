@@ -208,21 +208,29 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
       final api = ref.read(apiProvider);
       final data = _tid == null || _tid!.isEmpty
-          ? await api.home()
-          : await api.category(_tid!, pg: '1', extend: Map<String, String>.from(_extend));
+          ? await api.home().timeout(const Duration(seconds: 25))
+          : await api
+              .category(_tid!, pg: '1', extend: Map<String, String>.from(_extend))
+              .timeout(const Duration(seconds: 25));
       if (!mounted || gen != _loadGen) return;
       _applyPage(data, replace: true);
     } catch (e) {
       if (!mounted || gen != _loadGen) return;
       final msg = '$e';
+      if (msg.contains('TimeoutException') || msg.contains('Timeout')) {
+        setState(() => _statusMsg = '首页加载超时（爬虫/WebView 可能卡住），请重试或换源');
+        return;
+      }
       if (msg.contains('Connection refused') || msg.contains('SocketException')) {
         final ok = await ref.read(engineLauncherProvider).recoverIfNeeded();
         if (ok) {
           try {
             final api = ref.read(apiProvider);
             final data = _tid == null || _tid!.isEmpty
-                ? await api.home()
-                : await api.category(_tid!, pg: '1', extend: Map<String, String>.from(_extend));
+                ? await api.home().timeout(const Duration(seconds: 25))
+                : await api
+                    .category(_tid!, pg: '1', extend: Map<String, String>.from(_extend))
+                    .timeout(const Duration(seconds: 25));
             if (!mounted || gen != _loadGen) return;
             _applyPage(data, replace: true);
             setState(() => _statusMsg = null);

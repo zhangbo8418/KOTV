@@ -30,6 +30,14 @@ var ErrJavaBridgeInterrupted = errors.New("JAR 调用已中断")
 
 // 桌面：独立 java -jar --serve（HTTP 多路）；超时后 Kill 并允许重建。
 const javaBridgeCallTimeout = 120 * time.Second
+const javaBridgeCallTimeoutAndroid = 45 * time.Second
+
+func jarBridgeCallTimeout() time.Duration {
+	if runtime.GOOS == "android" {
+		return javaBridgeCallTimeoutAndroid
+	}
+	return javaBridgeCallTimeout
+}
 
 type javaBridgeClient struct {
 	mu         sync.Mutex
@@ -260,7 +268,7 @@ func callJavaBridge(payload []byte) (string, error) {
 	cid := hostclient.ScopeID()
 	ctx, end := beginJarCall(cid)
 	defer end()
-	ctx, cancel := context.WithTimeout(ctx, javaBridgeCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, jarBridgeCallTimeout())
 	defer cancel()
 
 	if runtime.GOOS == "android" {
@@ -773,7 +781,7 @@ func postJarPathCtx(ctx context.Context, base, path string, payload []byte) (str
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	client := &http.Client{Timeout: javaBridgeCallTimeout}
+	client := &http.Client{Timeout: jarBridgeCallTimeout()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
