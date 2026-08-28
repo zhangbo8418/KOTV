@@ -108,6 +108,12 @@ public class Path {
         return s;
     }
 
+    /**
+     * 对齐 TV {@code files/so}：摸鱼儿等仓的 .so 多线程走 {@link System#load(String)}，
+     * 不要求 exec 位，高 targetSdk 也能用。
+     * 潇洒哥等同目录落盘的 go 程序则需 {@code chmod+exec}；TV targetSdk 过高无法 exec，
+     * KOTV 默认 targetSdk=28 专为此保留（见 app/build.gradle）。
+     */
     public static File so() {
         return mkdir(new File(files(), "so"));
     }
@@ -311,11 +317,16 @@ public class Path {
             file.setWritable(true);
             //noinspection ResultOfMethodCallIgnored
             file.setExecutable(true);
-            // 对齐 TV：潇洒哥等仓下载的 go 多线程程序依赖 chmod 后可 exec。
-            // 仅 setExecutable 在部分机型上不够；高 targetSdk 仍会 W^X 拦截（见 app targetSdk=28）。
+            // go 多线程：chmod+exec（TV 同逻辑；KOTV 另靠 targetSdk≤28 才能 exec）。
             try {
-                Shell.exec("chmod 777 " + file);
-            } catch (Throwable ignored) {
+                int code = Runtime.getRuntime()
+                        .exec(new String[]{"chmod", "777", file.getAbsolutePath()})
+                        .waitFor();
+                if (code != 0) {
+                    Log.w(TAG, "chmod exit " + code + " for " + file);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "chmod failed for " + file, t);
             }
             return file;
         } catch (IOException e) {
