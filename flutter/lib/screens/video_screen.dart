@@ -218,7 +218,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       if (!mounted || gen != _loadGen) return;
       final msg = '$e';
       if (msg.contains('TimeoutException') || msg.contains('Timeout')) {
-        setState(() => _statusMsg = '首页加载超时（爬虫/WebView 可能卡住），请重试或换源');
+        setState(() => _statusMsg = '首页加载超时，请重试或换源');
         return;
       }
       if (msg.contains('Connection refused') || msg.contains('SocketException')) {

@@ -51,11 +51,8 @@ public class Init {
         return null;
     }
 
-    /** 当前前台 Activity。默认 null，对齐 TV catvod Init（无 activity 方法）；仅 remoteUi 时暴露，避免 jar Init 弹 WebView 配置页。 */
+    /** 当前前台 Activity。对齐 TV App.activity()。 */
     public static Activity activity() {
-        if (!Util.hasRemoteUi()) {
-            return null;
-        }
         return UiContext.activity();
     }
 

@@ -39,9 +39,6 @@ public final class UiContext {
     }
 
     public static Activity activity() {
-        if (!Util.hasRemoteUi()) {
-            return null;
-        }
         Activity act = activityRef.get();
         if (act == null) {
             return null;

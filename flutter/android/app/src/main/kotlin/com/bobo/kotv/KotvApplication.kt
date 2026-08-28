@@ -9,21 +9,16 @@ import android.os.Looper
 import com.bobo.kotv.bridge.SpiderBridge
 import com.bobo.kotv.host.UiContext
 import com.github.catvod.Init
-import com.github.catvod.utils.Util
 
 /**
  * 对齐 TV [com.fongmi.android.tv.App]：
  * - 最早 [Init.set]（attachBaseContext）
- * - 追踪前台 [Activity] 供 TV dex jar 内 AlertDialog / Toast
+ * - 追踪前台 [Activity] 供 jar 内 Dialog / Toast / post（与 TV 一致，不隐藏 Activity）
  * - 主线程 [post] 与 jar 内 Init.post 同 Looper
  */
 class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
 
   private val mainHandler = Handler(Looper.getMainLooper())
-
-  /** 老盒子 WebView relro 超时后，后续 jar post 一律丢弃，避免再次卡死 UI。 */
-  @Volatile
-  private var webViewBroken = false
 
   override fun attachBaseContext(base: Context) {
     super.attachBaseContext(base)
@@ -44,29 +39,28 @@ class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
     } catch (_: Throwable) {
     }
     registerActivityLifecycleCallbacks(this)
-    installWebViewCrashGuard()
+    installInitCrashGuard()
   }
 
-  /**
-   * 社区 jar Init 会反射宿主 App.activity() 读 Activity 类名；非 Fongmi HomeActivity 时会弹 WebView 配置页。
-   * WebView 不可用（老盒子 relro 超时）时主线程 FATAL。此处吞掉该异常，避免整 app 被杀。
-   */
-  private fun installWebViewCrashGuard() {
+  /** jar Init 偶发异常时避免进程被杀；与 TV 一样仍允许 post/Activity。 */
+  private fun installInitCrashGuard() {
     val prev = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler { thread, ex ->
-      if (thread === mainHandler.looper.thread && isMissingWebView(ex)) {
-        webViewBroken = true
-        android.util.Log.w(TAG, "ignored MissingWebView during spider Init", ex)
+      if (thread === mainHandler.looper.thread && isSpiderInitNoise(ex)) {
+        android.util.Log.w(TAG, "ignored spider Init noise on main thread", ex)
         return@setDefaultUncaughtExceptionHandler
       }
       prev?.uncaughtException(thread, ex)
     }
   }
 
-  private fun isMissingWebView(ex: Throwable?): Boolean {
+  private fun isSpiderInitNoise(ex: Throwable?): Boolean {
     var t = ex
     while (t != null) {
-      if (t.javaClass.name.contains("MissingWebViewPackageException")) return true
+      val n = t.javaClass.name
+      if (n.contains("MissingWebViewPackageException") || n.contains("AndroidRuntimeException")) {
+        return true
+      }
       t = t.cause
     }
     return false
@@ -107,11 +101,8 @@ class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
 
   private fun syncUiActivity(activity: Activity?) {
     try {
-      // UiContext 仍更新，供 DialogRelay；jar 侧通过 activity()/Init.activity() 读取，非 remoteUi 时返回 null。
       UiContext.setActivity(activity)
-      if (Util.hasRemoteUi()) {
-        SpiderBridge.setAndroidActivity(activity)
-      }
+      SpiderBridge.setAndroidActivity(activity)
     } catch (_: Throwable) {
     }
   }
@@ -127,34 +118,21 @@ class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
     @JvmStatic
     fun get(): KotvApplication? = instance
 
-    /** 对齐 TV App.activity()；非 remoteUi 时对 jar 隐藏 Activity，避免 Init 弹 WebView 配置页。 */
+    /** 对齐 TV App.activity()：始终返回当前前台 Activity。 */
     @JvmStatic
-    fun activity(): Activity? {
-      if (!Util.hasRemoteUi()) return null
-      return resumedActivity
-    }
+    fun activity(): Activity? = resumedActivity
 
     @JvmStatic
     fun post(runnable: Runnable) {
-      val app = instance ?: return
-      // 非 remoteUi 宿主不需要 jar WebView 配置页；post 到主线程会卡 Flutter UI。
-      if (!Util.hasRemoteUi() || app.webViewBroken) {
-        android.util.Log.d(TAG, "drop jar post headless=${!Util.hasRemoteUi()} broken=${app.webViewBroken}")
-        return
-      }
-      app.mainHandler.post(runnable)
+      instance?.mainHandler?.post(runnable)
     }
 
     @JvmStatic
     fun post(runnable: Runnable, delayMillis: Long) {
-      val app = instance ?: return
-      if (!Util.hasRemoteUi() || app.webViewBroken) {
-        android.util.Log.d(TAG, "drop jar delayed post headless=${!Util.hasRemoteUi()} broken=${app.webViewBroken}")
-        return
-      }
-      app.mainHandler.removeCallbacks(runnable)
+      val h = instance?.mainHandler ?: return
+      h.removeCallbacks(runnable)
       if (delayMillis >= 0) {
-        app.mainHandler.postDelayed(runnable, delayMillis)
+        h.postDelayed(runnable, delayMillis)
       }
     }
   }
