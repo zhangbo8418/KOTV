@@ -34,7 +34,8 @@ public class Init {
         } else if (appContext == null) {
             appContext = app;
         }
-        if (context instanceof Activity) {
+        // 勿在 Init 阶段把 Activity 暴露给 jar（见 KotvApplication.activity / Init.activity）。
+        if (context instanceof Activity && Util.hasRemoteUi()) {
             UiContext.setActivity((Activity) context);
         }
     }

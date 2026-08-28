@@ -9,6 +9,7 @@ import android.os.Looper
 import com.bobo.kotv.bridge.SpiderBridge
 import com.bobo.kotv.host.UiContext
 import com.github.catvod.Init
+import com.github.catvod.utils.Util
 
 /**
  * 对齐 TV [com.fongmi.android.tv.App]：
@@ -39,6 +40,31 @@ class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
     } catch (_: Throwable) {
     }
     registerActivityLifecycleCallbacks(this)
+    installWebViewCrashGuard()
+  }
+
+  /**
+   * 社区 jar Init 会反射宿主 App.activity() 读 Activity 类名；非 Fongmi HomeActivity 时会弹 WebView 配置页。
+   * WebView 不可用（老盒子 relro 超时）时主线程 FATAL。此处吞掉该异常，避免整 app 被杀。
+   */
+  private fun installWebViewCrashGuard() {
+    val prev = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { thread, ex ->
+      if (thread === mainHandler.looper.thread && isMissingWebView(ex)) {
+        android.util.Log.w(TAG, "ignored MissingWebView during spider Init", ex)
+        return@setDefaultUncaughtExceptionHandler
+      }
+      prev?.uncaughtException(thread, ex)
+    }
+  }
+
+  private fun isMissingWebView(ex: Throwable?): Boolean {
+    var t = ex
+    while (t != null) {
+      if (t.javaClass.name.contains("MissingWebViewPackageException")) return true
+      t = t.cause
+    }
+    return false
   }
 
   override fun onActivityResumed(activity: Activity) {
@@ -76,13 +102,17 @@ class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
 
   private fun syncUiActivity(activity: Activity?) {
     try {
+      // UiContext 仍更新，供 DialogRelay；jar 侧通过 activity()/Init.activity() 读取，非 remoteUi 时返回 null。
       UiContext.setActivity(activity)
-      SpiderBridge.setAndroidActivity(activity)
+      if (Util.hasRemoteUi()) {
+        SpiderBridge.setAndroidActivity(activity)
+      }
     } catch (_: Throwable) {
     }
   }
 
   companion object {
+    private const val TAG = "KotvApplication"
     @Volatile
     private var instance: KotvApplication? = null
 
@@ -92,9 +122,12 @@ class KotvApplication : Application(), Application.ActivityLifecycleCallbacks {
     @JvmStatic
     fun get(): KotvApplication? = instance
 
-    /** 对齐 TV App.activity()：当前 resumed Activity，无则 null。 */
+    /** 对齐 TV App.activity()；非 remoteUi 时对 jar 隐藏 Activity，避免 Init 弹 WebView 配置页。 */
     @JvmStatic
-    fun activity(): Activity? = resumedActivity
+    fun activity(): Activity? {
+      if (!Util.hasRemoteUi()) return null
+      return resumedActivity
+    }
 
     @JvmStatic
     fun post(runnable: Runnable) {
