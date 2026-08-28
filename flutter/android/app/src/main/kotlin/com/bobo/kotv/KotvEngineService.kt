@@ -224,7 +224,7 @@ class KotvEngineService : Service() {
           Log.i(TAG, "engine ready after spawn")
           return
         }
-        if (!proc.isAlive) {
+        if (!processAlive(proc)) {
           Log.e(TAG, "engine died during boot")
           return
         }
@@ -260,6 +260,20 @@ class KotvEngineService : Service() {
     val cached = File(codeCacheDir, "libkotv_engine.so")
     if (cached.exists()) return cached.absolutePath
     return null
+  }
+
+  /** API 25 无 [Process.isAlive]；用 exitValue 探测，避免守护线程 NoSuchMethodError。 */
+  private fun processAlive(proc: Process): Boolean {
+    return if (Build.VERSION.SDK_INT >= 26) {
+      proc.isAlive
+    } else {
+      try {
+        proc.exitValue()
+        false
+      } catch (_: IllegalThreadStateException) {
+        true
+      }
+    }
   }
 
   private fun engineHealthy(): Boolean {

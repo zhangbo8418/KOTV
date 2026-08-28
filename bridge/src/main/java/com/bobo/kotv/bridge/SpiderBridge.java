@@ -26,6 +26,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * CatVod JAR 爬虫桥接程序。
@@ -816,12 +821,43 @@ public class SpiderBridge {
         throw new IOException("JarDexer returned empty for " + jarFile.getName());
     }
 
+    /** Android 上社区 wrapper Init 可能卡在 WebView 配置页；超时后继续注册 Proxy。 */
+    private static final long SPIDER_INIT_TIMEOUT_MS = 20_000L;
+
     /**
      * CatVod spider jars may expose a shared Init hook. It is optional:
      * older jars do not have it and Android-dependent variants can reject the
      * desktop Context shim, so loading an individual spider must still work.
      */
     private static void invokeSpiderJarInit(ClassLoader loader) {
+        if (isArtVm()) {
+            invokeSpiderJarInitTimed(loader, SPIDER_INIT_TIMEOUT_MS);
+            return;
+        }
+        invokeSpiderJarInit0(loader);
+    }
+
+    private static void invokeSpiderJarInitTimed(ClassLoader loader, long timeoutMs) {
+        ExecutorService exec = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "kotv-spider-init");
+            t.setDaemon(true);
+            return t;
+        });
+        Future<?> future = exec.submit(() -> invokeSpiderJarInit0(loader));
+        try {
+            future.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            System.err.println("spider Init timed out after " + timeoutMs
+                    + "ms (WebView/config page?), continuing without full Init");
+        } catch (Exception e) {
+            System.err.println("optional spider Init skipped: " + e);
+        } finally {
+            exec.shutdownNow();
+        }
+    }
+
+    private static void invokeSpiderJarInit0(ClassLoader loader) {
         try {
             Class<?> clz = loader.loadClass("com.github.catvod.spider.Init");
             Method init = clz.getMethod("init", Context.class);

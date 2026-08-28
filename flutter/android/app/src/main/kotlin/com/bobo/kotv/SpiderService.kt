@@ -9,7 +9,10 @@ import fi.iki.elonen.NanoHTTPD.Response
 import fi.iki.elonen.NanoHTTPD.Response.Status
 import org.json.JSONObject
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 /**
@@ -29,6 +32,45 @@ class SpiderService private constructor(
 ) : NanoHTTPD(bindHost, bindPort) {
 
   private val warmed = AtomicBoolean(false)
+
+  /**
+   * NanoHTTPD 默认每请求 new Thread；在 Android 7 上 stop/崩溃时易触发
+   * `Thread starting during runtime shutdown` 并带走 Main Listener。
+   * 固定池在启动时建线程，避免 accept 时再创建。
+   */
+  private val workerPool = Executors.newFixedThreadPool(
+    4,
+    object : ThreadFactory {
+      private val n = AtomicInteger(0)
+      override fun newThread(r: Runnable): Thread =
+        Thread(r, "kotv-spider-http-${n.incrementAndGet()}").apply { isDaemon = true }
+    },
+  )
+
+  private val asyncRunner = object : AsyncRunner {
+    override fun exec(clientHandler: ClientHandler?) {
+      if (clientHandler == null) return
+      try {
+        workerPool.execute(clientHandler)
+      } catch (_: Throwable) {
+        // 进程退出/shutdown 时直接在当前线程处理，避免 InternalError 杀进程
+        try {
+          clientHandler.run()
+        } catch (_: Throwable) {
+        }
+      }
+    }
+
+    override fun closeAll() {
+      workerPool.shutdownNow()
+    }
+
+    override fun closed(clientHandler: ClientHandler?) {
+      // no-op
+    }
+  }
+
+  override fun getAsyncRunner(): AsyncRunner = asyncRunner
 
   fun warmUpAsync() {
     if (!warmed.compareAndSet(false, true)) return
@@ -258,11 +300,11 @@ object SpiderServiceManager {
   @Synchronized
   fun stop() {
     val s = server ?: return
+    server = null
     try {
       s.stop()
     } catch (_: Throwable) {
       // ignore
     }
-    server = null
   }
 }

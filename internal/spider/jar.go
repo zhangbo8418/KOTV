@@ -2,6 +2,7 @@ package spider
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -130,6 +132,8 @@ func setRecentJar(jarSpec string) {
 	notifyParseJar(dest, true)
 }
 
+const parseJarBridgeTimeout = 30 * time.Second
+
 // notifyParseJar BaseLoader.parseJar(jar, recent)：真加载 ClassLoader+Init+Proxy，可选设 recent。
 func notifyParseJar(jarPath string, recent bool) {
 	req := bridgeRequest{
@@ -141,7 +145,30 @@ func notifyParseJar(jarPath string, recent bool) {
 		},
 	}
 	payload, _ := json.Marshal(req)
-	_, _ = callJavaBridge(payload)
+	callParseJarBridge(payload)
+}
+
+func callParseJarBridge(payload []byte) {
+	ctx, cancel := context.WithTimeout(context.Background(), parseJarBridgeTimeout)
+	defer cancel()
+	if runtime.GOOS == "android" {
+		if _, err := androidPostJarCtx(ctx, payload); err != nil {
+			log.Printf("parseJar bridge: %v", err)
+		}
+		return
+	}
+	cid := hostclient.ScopeID()
+	ctx2, end := beginJarCall(cid)
+	defer end()
+	ctx2, cancel2 := context.WithTimeout(ctx2, parseJarBridgeTimeout)
+	defer cancel2()
+	if _, err := bridgeForCurrent().callCtx(ctx2, payload); err != nil {
+		log.Printf("parseJar bridge: %v", err)
+	}
+}
+
+func notifyParseJarAsync(jarPath string, recent bool) {
+	go notifyParseJar(jarPath, recent)
 }
 
 func notifyJarRecent(jarPath string) {
@@ -190,7 +217,8 @@ func LoadJar(spec string, configBaseArg ...string) error {
 	jarPath = dest
 	jarMu.Unlock()
 	// VodConfig.parseJar(spider, true)：ClassLoader+Init+Proxy 后设为 recent。
-	notifyParseJar(dest, true)
+	// 换源时不阻塞 HTTP：Init 可能在 WebView 配置页卡住，首页首次拉取时会再触发 parseJar。
+	notifyParseJarAsync(dest, true)
 	return nil
 }
 
