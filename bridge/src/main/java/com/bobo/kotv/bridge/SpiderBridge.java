@@ -939,7 +939,7 @@ public class SpiderBridge {
     }
 
     private static void refreshSpiderJarUi(ClassLoader loader) {
-        if (!isArtVm() || loader == null || !com.github.catvod.utils.Util.hasRemoteUi()) {
+        if (!isArtVm() || loader == null) {
             return;
         }
         try {
