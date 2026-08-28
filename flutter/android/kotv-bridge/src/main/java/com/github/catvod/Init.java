@@ -6,6 +6,7 @@ import android.content.Context;
 
 import com.bobo.kotv.host.UiContext;
 import com.bobo.kotv.host.DialogRelay;
+import com.github.catvod.utils.Util;
 
 /**
  * App CL 宿主 Init（迅雷 AAR + 站点父优先都会命中本类）。
@@ -49,13 +50,19 @@ public class Init {
         return null;
     }
 
-    /** 当前前台 Activity；无则 null（对齐 TV App.activity()）。 */
+    /** 当前前台 Activity。默认 null，对齐 TV catvod Init（无 activity 方法）；仅 remoteUi 时暴露，避免 jar Init 弹 WebView 配置页。 */
     public static Activity activity() {
+        if (!Util.hasRemoteUi()) {
+            return null;
+        }
         return UiContext.activity();
     }
 
     /** 弹窗/Toast 优先 Activity，否则 Application。远端客户端时包一层 WindowManager 中继。 */
     public static Context uiContext() {
+        if (!Util.hasRemoteUi()) {
+            return context();
+        }
         Context ui = UiContext.forUi();
         Context raw = ui != null ? ui : context();
         return DialogRelay.maybeWrap(raw);
