@@ -70,7 +70,9 @@ class SpiderService private constructor(
     }
   }
 
-  override fun getAsyncRunner(): AsyncRunner = asyncRunner
+  init {
+    setAsyncRunner(asyncRunner)
+  }
 
   fun warmUpAsync() {
     if (!warmed.compareAndSet(false, true)) return

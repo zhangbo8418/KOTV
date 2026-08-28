@@ -7,8 +7,8 @@ import '../player/kotv_traffic.dart';
 
 /// 缓冲中在画面中央显示转圈 + 实时网速。
 ///
-/// 浮层自己用 [KotvTraffic] 测速（引擎累计 / UID / 桌面网卡），
-/// 与各播放器内部计数解耦；播放器 [KotvPlayback.networkSpeedBps] 仅作最后兜底。
+/// Android Exo 用 Hybrid Composition + SurfaceView，控件叠在 PlatformView 上
+/// 会被合成两遍（「缓冲中」重影）。用 [OverlayPortal] 挂到 Overlay 层绘制。
 class KotvBufferingOverlay extends StatefulWidget {
   const KotvBufferingOverlay({
     super.key,
@@ -17,8 +17,6 @@ class KotvBufferingOverlay extends StatefulWidget {
   });
 
   final KotvPlayback player;
-
-  /// 额外强制显示（如起播加载文案阶段）。
   final bool force;
 
   @override
@@ -26,6 +24,8 @@ class KotvBufferingOverlay extends StatefulWidget {
 }
 
 class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
+  final _portal = OverlayPortalController();
+
   Timer? _tick;
   int _speedBps = 0;
   bool _visible = false;
@@ -58,6 +58,9 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
       KotvTraffic.reset();
       _trafficArmed = false;
     }
+    if (_portal.isShowing) {
+      _portal.hide();
+    }
     super.dispose();
   }
 
@@ -75,8 +78,10 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
 
   void _ensureTicker(bool on) {
     if (on) {
+      if (!_portal.isShowing) {
+        _portal.show();
+      }
       if (!_trafficArmed) {
-        // showProgress：出现时 reset，再按秒差分。
         KotvTraffic.reset();
         _trafficArmed = true;
         _speedBps = 0;
@@ -92,6 +97,9 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
         unawaited(_pollTraffic());
       });
     } else {
+      if (_portal.isShowing) {
+        _portal.hide();
+      }
       _tick?.cancel();
       _tick = null;
       if (_trafficArmed) {
@@ -111,18 +119,14 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (!_visible) return const SizedBox.shrink();
+  Widget _badge() {
     final speed = kotvFormatSpeed(_speedBps, showZero: true);
-    // 不铺半透明全屏、不加文字阴影：Hybrid Composition 的 SurfaceView
-    // 会把半透明白字合成两遍，看起来像「缓冲中」重影。
     return IgnorePointer(
       child: Center(
         child: RepaintBoundary(
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: const Color(0xE6111111),
+              color: const Color(0xFF111111),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Padding(
@@ -154,6 +158,15 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
           ),
         ),
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return OverlayPortal(
+      controller: _portal,
+      overlayChildBuilder: (context) => _visible ? _badge() : const SizedBox.shrink(),
+      child: const SizedBox.expand(),
     );
   }
 }
