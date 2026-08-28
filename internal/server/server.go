@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/config"
-	"github.com/bobo/KOTV/internal/goproxy"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	m3u8cache "github.com/bobo/KOTV/internal/m3u8"
@@ -101,7 +100,6 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/proxy/play", playproxy.Handle)
 	mux.HandleFunc("/proxy/bt/", thunder.Handle)
 	mux.HandleFunc("/proxy", s.handleSpiderProxy)
-	mux.HandleFunc("/go", s.handleGoSidecar)
 	mux.HandleFunc("/parse", s.handleParsePage)
 	mux.HandleFunc("/file/", s.handleFile)
 	mux.HandleFunc("/upload", s.handleUpload)
@@ -341,21 +339,6 @@ func (s *Server) handleCachedM3U8(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_, _ = w.Write([]byte(content))
-}
-
-func (s *Server) handleGoSidecar(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	// 对齐 TV Nano /go → Go.start()：异步拉起，立即 OK；ProxyVideo 随后轮询 :7777。
-	if err := goproxy.StartSidecar(); err != nil {
-		log.Printf("go sidecar start: %v", err)
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("OK"))
 }
 
 func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
