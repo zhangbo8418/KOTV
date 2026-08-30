@@ -253,10 +253,4 @@ tasks.named("preBuild") {
 afterEvaluate {
     android.defaultConfig.targetSdk = kotvTargetSdk
     println "[android] pinned targetSdk=${android.defaultConfig.targetSdk} (KOTV_TARGET_SDK=${System.getenv("KOTV_TARGET_SDK") ?: "28"})"
-    // nextlib AAR 声明 minCompileSdk 37；实际仍用 compileSdk 36 + targetSdk 28，跳过 AGP 元数据门禁。
-    tasks.configureEach { task ->
-        if (task.name.contains("CheckAarMetadata")) {
-            task.enabled = false
-        }
-    }
 }

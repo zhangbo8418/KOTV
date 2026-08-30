@@ -63,7 +63,10 @@ ensure_libplacebo() {
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d libplacebo/.git ]]; then
-    git clone --depth 1 --branch "$LIBPLACEBO_TAG" https://github.com/haasn/libplacebo.git libplacebo
+    git clone --depth 1 --recurse-submodules --branch "$LIBPLACEBO_TAG" \
+      https://github.com/haasn/libplacebo.git libplacebo
+  else
+    git -C libplacebo submodule update --init --recursive 2>/dev/null || true
   fi
   cd libplacebo
   rm -rf build
@@ -71,6 +74,7 @@ ensure_libplacebo() {
     --prefix="$PREFIX" \
     -Ddefault_library=shared \
     -Dvulkan=enabled \
+    -Dopengl=disabled \
     -Ddemos=false \
     -Dtests=false
   meson compile -C build -j"$JOBS"

@@ -47,4 +47,30 @@ echo "==> fetch Exo AV3A stack (webhtv maven) → $DEST"
 for a in "${artifacts[@]}"; do
   fetch_maven "$a"
 done
+
+# nextlib AAR 声明 minCompileSdk=37，但 AGP 8.11 / Flutter 默认 compileSdk=36，且 SDK 37 包未必可用。
+# 将元数据降到 36，保留 targetSdk=28（可 exec 社区仓）。
+patch_nextlib_aar_sdk() {
+  local aar="$DEST/io/github/anilbeesetti/nextlib-media3ext/1.10.0-0.12.1-fongmi-softload-av3a-r1/nextlib-media3ext-1.10.0-0.12.1-fongmi-softload-av3a-r1.aar"
+  [[ -f "$aar" ]] || return 0
+  local tmp
+  tmp="$(mktemp -d)"
+  (
+    cd "$tmp"
+    unzip -q "$aar"
+    local meta="META-INF/com/android/build/gradle/aar-metadata.properties"
+    if [[ -f "$meta" ]] && grep -q 'minCompileSdk=37' "$meta"; then
+      sed 's/minCompileSdk=37/minCompileSdk=36/' "$meta" >"$meta.new"
+      mv "$meta.new" "$meta"
+      rm -f "$aar"
+      zip -qr "$aar" .
+      echo "patched nextlib minCompileSdk 37→36"
+    else
+      echo "ok nextlib aar metadata (no minCompileSdk=37)"
+    fi
+  )
+  rm -rf "$tmp"
+}
+patch_nextlib_aar_sdk
+
 echo "==> done"
