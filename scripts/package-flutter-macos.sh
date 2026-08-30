@@ -18,7 +18,7 @@ echo "==> version=$VERSION arch=$REL_ARCH ($PLAT)"
 
 chmod +x "$ROOT/scripts/"*.sh
 
-echo "==> fetch desktop libmpv (prebuilt, no local compile)"
+echo "==> fetch desktop libmpv (AV3A source)"
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 
 if [[ ! -d "$ROOT/runtime/jre" ]]; then

@@ -15,7 +15,7 @@ BUNDLE="$ROOT/flutter/build/linux/x64/release/bundle"
 echo "==> Flutter Linux package version=$VERSION"
 
 chmod +x "$ROOT/bridge/build.sh" "$ROOT"/scripts/*.sh
-echo "==> fetch desktop libmpv (prebuilt, no local compile)"
+echo "==> fetch desktop libmpv (AV3A source)"
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 "$ROOT/scripts/prepare-runtime.sh" linux-x64
 "$ROOT/scripts/verify-runtime.sh" runtime linux-x64

@@ -34,7 +34,7 @@ if [[ "${KOTV_WIN7:-}" == "1" ]]; then
   "$ROOT/scripts/fetch-flutter-fonts.sh"
 fi
 
-echo "==> fetch desktop libmpv (prebuilt, no local compile)"
+echo "==> fetch desktop libmpv (AV3A source)"
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 echo "==> prepare runtime"
 "$ROOT/scripts/prepare-runtime.sh" windows-x64
