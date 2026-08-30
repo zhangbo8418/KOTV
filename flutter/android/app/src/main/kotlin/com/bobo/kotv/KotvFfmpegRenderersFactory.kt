@@ -9,7 +9,7 @@ import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
-import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.CompatFfmpegAudioRenderer
+import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegAudioRenderer
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegLibrary
 
 /**
@@ -24,7 +24,7 @@ class KotvFfmpegRenderersFactory(
 
   init {
     setEnableDecoderFallback(true)
-    extensionRendererMode = maxOf(videoExtensionMode, audioExtensionMode)
+    setExtensionRendererMode(maxOf(videoExtensionMode, audioExtensionMode))
   }
 
   override fun buildAudioRenderers(
@@ -49,7 +49,7 @@ class KotvFfmpegRenderersFactory(
     )
     if (audioExtensionMode != EXTENSION_RENDERER_MODE_OFF && FfmpegLibrary.isAvailable()) {
       out.add(
-        CompatFfmpegAudioRenderer(
+        FfmpegAudioRenderer(
           eventHandler,
           eventListener,
           audioSink,

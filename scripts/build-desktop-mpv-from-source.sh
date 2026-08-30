@@ -52,7 +52,7 @@ LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.360.1}"
 LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.360.1}"
 
 ensure_libplacebo() {
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   if pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo 2>/dev/null; then
     echo "ok libplacebo $(pkg-config --modversion libplacebo)"
     return
@@ -72,6 +72,7 @@ ensure_libplacebo() {
   rm -rf build
   meson setup build \
     --prefix="$PREFIX" \
+    --libdir=lib \
     -Ddefault_library=shared \
     -Dvulkan=enabled \
     -Dopengl=disabled \
@@ -79,7 +80,15 @@ ensure_libplacebo() {
     -Dtests=false
   meson compile -C build -j"$JOBS"
   meson install -C build
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"
+  # 某些平台仍会装到 lib/<triplet>/pkgconfig；一并加入 PATH
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  if ! pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo; then
+    echo "ERROR: libplacebo install not visible to pkg-config (>= $LIBPLACEBO_MIN)" >&2
+    pkg-config --modversion libplacebo 2>&1 || true
+    find "$PREFIX" -name 'libplacebo.pc' 2>/dev/null || true
+    exit 1
+  fi
+  echo "ok libplacebo $(pkg-config --modversion libplacebo) (built)"
 }
 
 ensure_lua_pkg() {
@@ -111,7 +120,7 @@ build_mpv_linux() {
   fi
   cd mpv
   rm -rf build
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   meson setup build \
     -Ddefault_library=shared \
     -Dlibmpv=true \

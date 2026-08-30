@@ -211,6 +211,37 @@ cd ffmpeg
 $MAKE distclean 2>/dev/null || true
 
 PREF_NATIVE="$(kotv_native_path "$PREFIX")"
+
+# Windows MinGW：pkg-config 的编译链接探测经常误报；直接 enable + 注入路径。
+if kotv_is_windows_build; then
+  echo "==> Windows: bypass arcdav3a pkg-config link probe"
+  # 先自测一次，失败则打出真实 gcc 错误
+  cat >"$BUILD_DIR/avs3_link_probe.c" <<'PROBE'
+#include <decoder.h>
+#include <stdint.h>
+long check_avs3_create_decoder(void) { return (long)(intptr_t)avs3_create_decoder; }
+int main(void) { return check_avs3_create_decoder() ? 0 : 1; }
+PROBE
+  if ! gcc -O0 -I"${PREF_NATIVE}/include" -L"${PREF_NATIVE}/lib" \
+      -o "$BUILD_DIR/avs3_link_probe.exe" "$BUILD_DIR/avs3_link_probe.c" \
+      -larcdav3a -lm 2>"$BUILD_DIR/avs3_link_probe.log"; then
+    echo "ERROR: MinGW cannot link libarcdav3a:" >&2
+    cat "$BUILD_DIR/avs3_link_probe.log" >&2
+    exit 1
+  fi
+  echo "ok MinGW link probe for avs3_create_decoder"
+  # require_pkg_config → 强制 enable（跳过 check_func_headers）
+  # FFmpeg configure 里 add_cflags/add_extralibs 吃空格分隔参数，路径不要加引号。
+  local cfg_line
+  cfg_line="enabled libarcdav3a       \&\& enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm"
+  if command -v perl >/dev/null 2>&1; then
+    perl -i.bak -pe "s#enabled libarcdav3a\\s+&& require_pkg_config libarcdav3a arcdav3a decoder\\.h avs3_create_decoder#${cfg_line}#" configure
+  else
+    sed -i.bak "s#require_pkg_config libarcdav3a arcdav3a decoder.h avs3_create_decoder#enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm#" configure
+  fi
+  grep -n 'libarcdav3a' configure | head -8
+fi
+
 FFMPEG_EXTRA=(--extra-cflags="-I${PREF_NATIVE}/include")
 FFMPEG_EXTRA+=(--extra-ldflags="-L${PREF_NATIVE}/lib")
 FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
@@ -219,7 +250,7 @@ if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
 fi
 
-./configure \
+if ! ./configure \
   --prefix="$PREFIX" \
   --enable-static \
   --disable-shared \
@@ -231,7 +262,11 @@ fi
   --disable-doc \
   --disable-debug \
   "${FFMPEG_EXTRA[@]}" \
-  ${KOTV_FFMPEG_CONFIGURE_EXTRA:-}
+  ${KOTV_FFMPEG_CONFIGURE_EXTRA:-}; then
+  echo "ERROR: FFmpeg configure failed; last 80 lines of ffbuild/config.log:" >&2
+  tail -80 ffbuild/config.log 2>/dev/null >&2 || true
+  exit 1
+fi
 
 $MAKE -j"$JOBS"
 $MAKE install
