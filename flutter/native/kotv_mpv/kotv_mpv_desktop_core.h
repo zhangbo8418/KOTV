@@ -13,6 +13,9 @@ int kotv_mpv_desktop_init(const char* lib_path);
 void kotv_mpv_desktop_shutdown(void);
 int kotv_mpv_desktop_is_ready(void);
 
+int kotv_mpv_desktop_is_vulkan_available(void);
+char* kotv_mpv_desktop_get_audio_tracks_json(void);
+
 int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
                           const char* hwdec, int gpu_next, int vulkan, int live);
 void kotv_mpv_desktop_stop(void);

@@ -3,6 +3,7 @@ allprojects {
         google()
         mavenCentral()
         maven { url "https://jitpack.io" }
+        maven { url uri("${rootProject.projectDir}/third_party/maven-webhtv") }
     }
 }
 

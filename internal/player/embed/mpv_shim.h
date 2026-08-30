@@ -11,6 +11,13 @@ extern "C" {
 int kotv_mpv_load(const char *lib_path);
 void kotv_mpv_unload(void);
 int kotv_mpv_loaded(void);
+/* 须在 mpv_initialize 前设置；变更后 kotv_mpv_reinit_player() 重建实例。 */
+int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec);
+int kotv_mpv_reinit_player(void);
+/* 扫描 libmpv 二进制是否含 vulkan 特性（无需完整初始化）。 */
+int kotv_mpv_lib_has_vulkan(const char *lib_path);
+/* JSON 数组 [{id,title,lang,codec}]；调用方 kotv_mpv_free_str 释放。 */
+char *kotv_mpv_get_audio_tracks_json(void);
 /* 硬渲：输出到原生窗口（Windows HWND）。win=0 表示回到软件 RGBA。成功 0。 */
 int kotv_mpv_set_hard_win(long long win);
 int kotv_mpv_hard_active(void);

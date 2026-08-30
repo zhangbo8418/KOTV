@@ -32,6 +32,7 @@ bridge/.gradle-bootstrap/
 .runtime-cache/
 /runtime/
 /dist/
+.build/
 
 # Windows resource embedding
 rsrc_windows_*.syso
@@ -46,6 +47,8 @@ flutter/assets/engine/libkotv_engine.so
 flutter/android/app/src/main/assets/mpv-libs/
 # 桌面 libmpv 预编译（scripts/fetch-desktop-mpv-libs.sh 拉取，勿入库；Windows dll >100MB）
 flutter/assets/mpv-libs/
+# Exo AV3A（scripts/fetch-android-exo-av3a.sh 从 webhtv maven 拉取）
+flutter/android/third_party/maven-webhtv/
 # 引擎二进制按平台打包时生成，勿入库（否则 Win 会打进 mac/linux 的 kotv-engine）
 flutter/assets/engine/kotv-engine
 flutter/assets/engine/kotv-engine.exe

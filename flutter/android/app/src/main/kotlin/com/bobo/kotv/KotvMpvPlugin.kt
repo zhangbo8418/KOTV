@@ -20,6 +20,8 @@ import io.flutter.plugin.platform.PlatformViewFactory
 import `is`.xyz.mpv.MPVLib
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 原生 MPV（对齐 TV）：[MPVLib] + SurfaceView，直出硬解。
@@ -394,6 +396,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
+      "getAudioTracks" -> {
+        main.post {
+          try {
+            result.success(buildAudioTracksJson())
+          } catch (e: Throwable) {
+            result.error("TRACKS_FAILED", e.message, null)
+          }
+        }
+      }
       "setSubtitleTrack" -> {
         val id = call.argument<String>("id") ?: ""
         main.post {
@@ -531,6 +542,24 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     } catch (_: Throwable) {
     }
+  }
+
+  /** 音轨列表（含 AV3A 等 FFmpeg/libarcdav3a 解码轨），对齐 TV mpvplayer。 */
+  private fun buildAudioTracksJson(): String {
+    if (!created.get()) return "[]"
+    val count = MPVLib.getPropertyInt("track-list/count") ?: 0
+    val arr = JSONArray()
+    for (i in 0 until count) {
+      val type = MPVLib.getPropertyString("track-list/$i/type") ?: continue
+      if (type != "audio") continue
+      val obj = JSONObject()
+      obj.put("id", MPVLib.getPropertyString("track-list/$i/id") ?: "auto")
+      obj.put("title", MPVLib.getPropertyString("track-list/$i/title") ?: "")
+      obj.put("lang", MPVLib.getPropertyString("track-list/$i/lang") ?: "")
+      obj.put("codec", MPVLib.getPropertyString("track-list/$i/codec") ?: "")
+      arr.put(obj)
+    }
+    return arr.toString()
   }
 
   /** RK3399 等 Rockchip 盒：auto → mediacodec（直出 Surface；Dart auto-safe 由原生覆盖）。 */

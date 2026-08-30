@@ -1,8 +1,10 @@
 #include "kotv_mpv_desktop_core.h"
 
 #include "../../../internal/player/embed/mpv_shim.h"
+#include "kotv_mpv_lib_path.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static kotv_mpv_desktop_event_cb g_event_cb;
@@ -11,6 +13,9 @@ static int g_last_w;
 static int g_last_h;
 static int g_volume = 80;
 static double g_rate = 1.0;
+static int g_gpu_next;
+static int g_vulkan;
+static char g_lib_path[1024];
 
 static void emit(const char* json) {
   if (g_event_cb && json) {
@@ -20,6 +25,8 @@ static void emit(const char* json) {
 
 int kotv_mpv_desktop_init(const char* lib_path) {
   if (!lib_path || !lib_path[0]) return -1;
+  strncpy(g_lib_path, lib_path, sizeof(g_lib_path) - 1);
+  g_lib_path[sizeof(g_lib_path) - 1] = '\0';
   if (kotv_mpv_loaded()) return 0;
   const int rc = kotv_mpv_load(lib_path);
   if (rc != 0) return rc;
@@ -31,21 +38,43 @@ void kotv_mpv_desktop_shutdown(void) {
   kotv_mpv_unload();
   g_last_w = 0;
   g_last_h = 0;
+  g_lib_path[0] = '\0';
 }
 
 int kotv_mpv_desktop_is_ready(void) {
   return kotv_mpv_loaded();
 }
 
+int kotv_mpv_desktop_is_vulkan_available(void) {
+  if (g_lib_path[0]) {
+    return kotv_mpv_lib_has_vulkan(g_lib_path);
+  }
+  char* lib = kotv_find_libmpv_path();
+  if (!lib) return 0;
+  const int ok = kotv_mpv_lib_has_vulkan(lib);
+  free(lib);
+  return ok;
+}
+
+char* kotv_mpv_desktop_get_audio_tracks_json(void) {
+  return kotv_mpv_get_audio_tracks_json();
+}
+
 int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
                           const char* hwdec, int gpu_next, int vulkan, int live) {
-  (void)gpu_next;
-  (void)vulkan;
-  (void)live;
   if (!kotv_mpv_loaded() || !url || !url[0]) return -1;
-  if (hwdec && hwdec[0]) {
+
+  const int opts_changed = (g_gpu_next != (gpu_next ? 1 : 0)) || (g_vulkan != (vulkan ? 1 : 0));
+  g_gpu_next = gpu_next ? 1 : 0;
+  g_vulkan = vulkan ? 1 : 0;
+
+  kotv_mpv_set_preinit_options(g_gpu_next, g_vulkan, hwdec);
+  if (opts_changed) {
+    kotv_mpv_reinit_player();
+  } else if (hwdec && hwdec[0]) {
     kotv_mpv_set_prop_string("hwdec", hwdec);
   }
+
   if (headers_multiline && headers_multiline[0]) {
     kotv_mpv_set_prop_string("http-header-fields", headers_multiline);
   }
@@ -57,6 +86,7 @@ int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
   if (!live) {
     kotv_mpv_set_prop_string("cache", "yes");
   }
+
   const int rc = kotv_mpv_play(url);
   if (rc >= 0) {
     char buf[128];
@@ -97,9 +127,7 @@ int kotv_mpv_desktop_set_rate(double rate) {
 
 int kotv_mpv_desktop_set_prop(const char* key, const char* val) {
   if (!kotv_mpv_loaded() || !key || !val) return -1;
-  if (strcmp(key, "hwdec") == 0 || strcmp(key, "vo") == 0 || strcmp(key, "wid") == 0) {
-    return 0;
-  }
+  if (strcmp(key, "wid") == 0 || strcmp(key, "android-surface-size") == 0) return 0;
   return kotv_mpv_set_prop_string(key, val);
 }
 

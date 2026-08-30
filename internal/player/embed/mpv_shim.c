@@ -113,6 +113,9 @@ static int g_width = 1280;
 static int g_height = 720;
 static int g_capacity;
 static int g_hard; /* 1 = wid 硬渲，无 software render context */
+static int g_gpu_next;
+static int g_vulkan;
+static char g_hwdec_opt[64];
 
 static void update_cb(void *ctx) {
     (void)ctx;
@@ -161,11 +164,70 @@ static void apply_common_opts(mpv_handle *mpv) {
     p_set_option_string(mpv, "osc", "no");
 }
 
+static void apply_gpu_render_opts(mpv_handle *mpv, int sw_vo) {
+    if (g_hwdec_opt[0])
+        p_set_option_string(mpv, "hwdec", g_hwdec_opt);
+    if (sw_vo) {
+        p_set_option_string(mpv, "vo", "libmpv");
+    } else {
+        p_set_option_string(mpv, "vo", g_gpu_next ? "gpu-next" : "gpu");
+        p_set_option_string(mpv, "gpu-context", "auto");
+    }
+    if (g_vulkan)
+        p_set_option_string(mpv, "gpu-api", "vulkan");
+    else
+        p_set_option_string(mpv, "gpu-api", "auto");
+}
+
+int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec) {
+    g_gpu_next = gpu_next ? 1 : 0;
+    g_vulkan = vulkan ? 1 : 0;
+    g_hwdec_opt[0] = '\0';
+    if (hwdec && hwdec[0])
+        strncpy(g_hwdec_opt, hwdec, sizeof(g_hwdec_opt) - 1);
+    return 0;
+}
+
+int kotv_mpv_reinit_player(void) {
+    if (!g_lib || !p_create)
+        return -1;
+    destroy_player();
+    if (g_hard)
+        return -2;
+    return init_sw();
+}
+
+int kotv_mpv_lib_has_vulkan(const char *lib_path) {
+    static const char *needles[] = {"vulkan", "pl_vulkan", "-Dvulkan=enabled"};
+    FILE *f;
+    char buf[65536];
+    size_t n, i, j;
+    if (!lib_path || !lib_path[0])
+        return 0;
+    f = fopen(lib_path, "rb");
+    if (!f)
+        return 0;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        for (i = 0; i < n; ++i) {
+            for (j = 0; j < sizeof(needles) / sizeof(needles[0]); ++j) {
+                const char *nd = needles[j];
+                const size_t len = strlen(nd);
+                if (i + len <= n && memcmp(buf + i, nd, len) == 0) {
+                    fclose(f);
+                    return 1;
+                }
+            }
+        }
+    }
+    fclose(f);
+    return 0;
+}
+
 static int init_sw(void) {
     g_mpv = p_create();
     if (!g_mpv)
         return -4;
-    p_set_option_string(g_mpv, "vo", "libmpv");
+    apply_gpu_render_opts(g_mpv, 1);
     apply_common_opts(g_mpv);
     if (p_initialize(g_mpv) < 0) {
         destroy_player();
@@ -209,9 +271,9 @@ static int init_wid(long long win) {
         snprintf(widbuf, sizeof(widbuf), "%lld", win);
         p_set_option_string(g_mpv, "wid", widbuf);
     }
-    p_set_option_string(g_mpv, "vo", "gpu");
-    p_set_option_string(g_mpv, "hwdec", "auto");
-    p_set_option_string(g_mpv, "gpu-context", "auto");
+    apply_gpu_render_opts(g_mpv, 0);
+    if (!g_hwdec_opt[0])
+        p_set_option_string(g_mpv, "hwdec", "auto");
     apply_common_opts(g_mpv);
     if (p_initialize(g_mpv) < 0) {
         destroy_player();
@@ -448,4 +510,81 @@ int kotv_mpv_take_frame(uint8_t *out, int out_cap, int *out_w, int *out_h) {
     *out_h = g_height;
     g_dirty = 0;
     return 1;
+}
+
+static void json_escape_append(char *dst, size_t cap, size_t *pos, const char *src) {
+    size_t i;
+    if (!dst || !src || !pos || *pos >= cap)
+        return;
+    for (i = 0; src[i] && *pos + 2 < cap; ++i) {
+        char c = src[i];
+        if (c == '\\' || c == '"') {
+            if (*pos + 3 >= cap)
+                break;
+            dst[(*pos)++] = '\\';
+        }
+        dst[(*pos)++] = c;
+    }
+    dst[*pos] = '\0';
+}
+
+char *kotv_mpv_get_audio_tracks_json(void) {
+    char *out;
+    size_t pos = 0;
+    const size_t cap = 16384;
+    int64_t count = 0;
+    int i;
+    if (!g_mpv)
+        return strdup("[]");
+    out = (char *)malloc(cap);
+    if (!out)
+        return NULL;
+    out[pos++] = '[';
+    out[pos] = '\0';
+    if (p_get_property(g_mpv, "track-list/count", MPV_FORMAT_INT64, &count) < 0)
+        count = 0;
+    for (i = 0; i < (int)count && pos + 256 < cap; ++i) {
+        char key[64];
+        char *type = NULL;
+        char *id = NULL;
+        char *title = NULL;
+        char *lang = NULL;
+        char *codec = NULL;
+        int first = (pos == 1);
+        snprintf(key, sizeof(key), "track-list/%d/type", i);
+        type = kotv_mpv_get_prop_string(key);
+        if (!type || strcmp(type, "audio") != 0) {
+            kotv_mpv_free_str(type);
+            continue;
+        }
+        if (!first && pos + 1 < cap)
+            out[pos++] = ',';
+        snprintf(key, sizeof(key), "track-list/%d/id", i);
+        id = kotv_mpv_get_prop_string(key);
+        snprintf(key, sizeof(key), "track-list/%d/title", i);
+        title = kotv_mpv_get_prop_string(key);
+        snprintf(key, sizeof(key), "track-list/%d/lang", i);
+        lang = kotv_mpv_get_prop_string(key);
+        snprintf(key, sizeof(key), "track-list/%d/codec", i);
+        codec = kotv_mpv_get_prop_string(key);
+        pos += (size_t)snprintf(out + pos, cap - pos, "{\"id\":\"");
+        json_escape_append(out, cap, &pos, id && id[0] ? id : "auto");
+        pos += (size_t)snprintf(out + pos, cap - pos, "\",\"title\":\"");
+        json_escape_append(out, cap, &pos, title && title[0] ? title : "");
+        pos += (size_t)snprintf(out + pos, cap - pos, "\",\"lang\":\"");
+        json_escape_append(out, cap, &pos, lang && lang[0] ? lang : "");
+        pos += (size_t)snprintf(out + pos, cap - pos, "\",\"codec\":\"");
+        json_escape_append(out, cap, &pos, codec && codec[0] ? codec : "");
+        pos += (size_t)snprintf(out + pos, cap - pos, "\"}");
+        kotv_mpv_free_str(type);
+        kotv_mpv_free_str(id);
+        kotv_mpv_free_str(title);
+        kotv_mpv_free_str(lang);
+        kotv_mpv_free_str(codec);
+    }
+    if (pos + 2 < cap) {
+        out[pos++] = ']';
+        out[pos] = '\0';
+    }
+    return out;
 }

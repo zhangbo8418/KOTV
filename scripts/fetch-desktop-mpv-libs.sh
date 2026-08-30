@@ -85,6 +85,11 @@ fetch_windows() {
 
 fetch_linux() {
   local out="$ASSET/linux/libmpv.so.2"
+  if [[ "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
+    echo "==> linux libmpv: source build with AV3A (FongMi FFmpeg + libarcdav3a)"
+    "$ROOT/scripts/build-desktop-mpv-from-source.sh" linux
+    return
+  fi
   marker_ok "$out" 500000 && { echo "ok linux/libmpv.so.2 (cached)"; return; }
 
   local deb_url="${KOTV_MPV_LINUX_DEB_URL:-}"
@@ -118,6 +123,15 @@ fetch_linux() {
 
 fetch_macos() {
   local out="$ASSET/macos/libmpv.dylib"
+  if [[ "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
+    echo "==> macOS libmpv: source build with AV3A (FongMi FFmpeg + libarcdav3a)"
+    if [[ "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}" == "x86_64" && "$(uname -m)" == "arm64" ]]; then
+      arch -x86_64 "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
+    else
+      "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
+    fi
+    return
+  fi
   marker_ok "$out" 500000 && { echo "ok macOS/libmpv.dylib (cached)"; return; }
 
   if [[ -n "${KOTV_MPV_MACOS_URL:-}" ]]; then
@@ -181,5 +195,12 @@ echo "==> fetch desktop libmpv (prebuilt, no local compile) → $ASSET"
 fetch_with_fallback windows fetch_windows
 fetch_with_fallback linux fetch_linux
 fetch_with_fallback macos fetch_macos
+"$ROOT/scripts/verify-desktop-mpv-libs.sh" || {
+  if [[ "${KOTV_BUILD_MPV_FROM_SOURCE:-}" == "1" || "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
+    echo "WARN: verify failed after fetch; check source build logs"
+  else
+    exit 1
+  fi
+}
 du -sh "$ASSET"/* 2>/dev/null || true
 echo "==> done"

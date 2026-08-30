@@ -11,6 +11,8 @@
 #include "../native/kotv_mpv/kotv_mpv_desktop_core.h"
 #include "../native/kotv_mpv/kotv_mpv_lib_path.h"
 
+#include "../../../internal/player/embed/mpv_shim.h"
+
 struct KotvTexState {
   FlTextureRegistrar* registrar = nullptr;
   int64_t texture_id = -1;
@@ -131,15 +133,31 @@ static void kotv_mpv_method_call(FlMethodChannel* /*channel*/, FlMethodCall* met
       }
     }
   } else if (strcmp(method, "isVulkanAvailable") == 0) {
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_bool(false)));
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(
+        fl_value_new_bool(kotv_mpv_desktop_is_vulkan_available())));
+  } else if (strcmp(method, "getAudioTracks") == 0) {
+    char* json = kotv_mpv_desktop_get_audio_tracks_json();
+    if (!json) {
+      response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_string("[]")));
+    } else {
+      response = FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_string(json)));
+      kotv_mpv_free_str(json);
+    }
   } else if (strcmp(method, "open") == 0) {
     const char* url = fl_value_lookup_string(args, "url");
     const char* hwdec = fl_value_lookup_string(args, "decode");
     FlValue* live_val = fl_value_lookup(args, "live");
     const bool live = live_val && fl_value_get_type(live_val) == FL_VALUE_TYPE_BOOL && fl_value_get_bool(live_val);
+    FlValue* gpu_next_val = fl_value_lookup(args, "gpuNext");
+    FlValue* vulkan_val = fl_value_lookup(args, "vulkan");
+    const bool gpu_next = gpu_next_val && fl_value_get_type(gpu_next_val) == FL_VALUE_TYPE_BOOL &&
+                          fl_value_get_bool(gpu_next_val);
+    const bool vulkan = vulkan_val && fl_value_get_type(vulkan_val) == FL_VALUE_TYPE_BOOL &&
+                        fl_value_get_bool(vulkan_val);
     FlValue* headers = fl_value_lookup(args, "headers");
     const std::string h = HeadersToMultiline(headers);
-    const int rc = kotv_mpv_desktop_open(url ? url : "", h.c_str(), hwdec ? hwdec : "auto", 0, 0, live ? 1 : 0);
+    const int rc = kotv_mpv_desktop_open(url ? url : "", h.c_str(), hwdec ? hwdec : "auto",
+                                         gpu_next ? 1 : 0, vulkan ? 1 : 0, live ? 1 : 0);
     response = rc < 0 ? FL_METHOD_RESPONSE(fl_method_error_response_new("OPEN_FAILED", "open failed", nullptr))
                       : FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (strcmp(method, "play") == 0) {

@@ -11,6 +11,7 @@
 
 #include "../../native/kotv_mpv/kotv_mpv_desktop_core.h"
 #include "../../native/kotv_mpv/kotv_mpv_lib_path.h"
+#include "../../../internal/player/embed/mpv_shim.h"
 
 @interface KotvMpvMacTexture : NSObject <FlutterTexture>
 @property(nonatomic, assign) int64_t textureId;
@@ -183,15 +184,28 @@ static void HandleMethod(FlutterMethodCall* call, FlutterResult result) {
     return;
   }
   if ([method isEqualToString:@"isVulkanAvailable"]) {
-    result(@NO);
+    result(@(kotv_mpv_desktop_is_vulkan_available()));
+    return;
+  }
+  if ([method isEqualToString:@"getAudioTracks"]) {
+    char* json = kotv_mpv_desktop_get_audio_tracks_json();
+    if (!json) {
+      result(@"[]");
+    } else {
+      result([NSString stringWithUTF8String:json]);
+      kotv_mpv_free_str(json);
+    }
     return;
   }
   if ([method isEqualToString:@"open"]) {
     NSString* url = args[@"url"] ?: @"";
     NSString* hwdec = args[@"decode"] ?: @"auto";
     BOOL live = [args[@"live"] boolValue];
+    BOOL gpuNext = [args[@"gpuNext"] boolValue];
+    BOOL vulkan = [args[@"vulkan"] boolValue];
     NSString* headers = HeadersToMultiline(args[@"headers"]);
-    int rc = kotv_mpv_desktop_open(url.UTF8String, headers.UTF8String, hwdec.UTF8String, 0, 0, live ? 1 : 0);
+    int rc = kotv_mpv_desktop_open(url.UTF8String, headers.UTF8String, hwdec.UTF8String,
+                                   gpuNext ? 1 : 0, vulkan ? 1 : 0, live ? 1 : 0);
     if (rc < 0) {
       result([FlutterError errorWithCode:@"OPEN_FAILED" message:@"open failed" details:nil]);
     } else {

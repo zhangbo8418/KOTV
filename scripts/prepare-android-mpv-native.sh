@@ -41,4 +41,6 @@ verify_abi() {
 
 verify_abi arm64-v8a
 verify_abi armeabi-v7a
+chmod +x "$ROOT/scripts/verify-android-mpv-libs.sh"
+"$ROOT/scripts/verify-android-mpv-libs.sh"
 echo "==> Android MPV native prepare done"

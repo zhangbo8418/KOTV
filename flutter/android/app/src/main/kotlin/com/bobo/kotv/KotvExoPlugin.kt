@@ -683,25 +683,27 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun buildRenderersFactory(ctx: Context, mode: String): DefaultRenderersFactory {
-    val factory = DefaultRenderersFactory(ctx).setEnableDecoderFallback(true)
+    val videoMode: Int
+    val audioMode: Int
     when (mode) {
       "soft" -> {
-        factory
-          .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-          .setMediaCodecSelector(SOFT_PREFER_SELECTOR)
+        videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+        audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
       }
       "hard" -> {
-        // 硬解直出：只用 MediaCodec（优先 GPU 硬解）；不把视频交给 FFmpeg 扩展
-        factory
-          .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
-          .setMediaCodecSelector(HARD_PREFER_SELECTOR)
+        // 硬解视频 MediaCodec；音轨仍走 FFmpeg（AV3A），对齐 TV
+        videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+        audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
       else -> {
-        // auto：硬解优先协商；扩展仅作次选，整实例软解见 onPlayerError
-        factory
-          .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-          .setMediaCodecSelector(HARD_PREFER_SELECTOR)
+        videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+        audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
+    }
+    val factory = KotvFfmpegRenderersFactory(ctx, videoMode, audioMode)
+    when (mode) {
+      "soft" -> factory.setMediaCodecSelector(SOFT_PREFER_SELECTOR)
+      else -> factory.setMediaCodecSelector(HARD_PREFER_SELECTOR)
     }
     return factory
   }

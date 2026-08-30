@@ -12,7 +12,8 @@ import 'kotv_platform.dart';
 /// |------|---------|------|
 /// | hwdec | mediacodec / auto-safe | d3d11va / dxva2 / videotoolbox |
 /// | mpv.conf | setProperty | 同上 |
-/// | gpu-next | vo=gpu-next（Surface） | 原生窗口后可用 |
+/// | gpu-next | vo=gpu-next（Surface） | vo=libmpv + gpu-api=vulkan（预编译 libmpv 需含 Vulkan） |
+/// | AV3A | libmvcodec/libarcdav3a（webhtv） | 源码：FongMi FFmpeg+avs3a（KOTV_BUILD_MPV_AV3A=1） |
 class KotvMpvOpts {
   const KotvMpvOpts({
     this.decodeMode = 'auto',

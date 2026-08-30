@@ -111,17 +111,40 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   Stream<bool> get completedStream => _endedCtrl.stream;
 
-  @override
-  List<KotvTrack> get audioTracks => const [];
+  List<KotvTrack> _audioTracks = const [];
+  List<KotvTrack> _subtitleTracks = const [];
+  String? _currentAudioId;
 
   @override
-  List<KotvTrack> get subtitleTracks => const [];
+  List<KotvTrack> get audioTracks => _audioTracks;
 
   @override
-  String? get currentAudioId => null;
+  List<KotvTrack> get subtitleTracks => _subtitleTracks;
+
+  @override
+  String? get currentAudioId => _currentAudioId;
 
   @override
   String? get currentSubtitleId => null;
+
+  Future<void> _refreshAudioTracks() async {
+    try {
+      final raw = await _ch.invokeMethod<String>('getAudioTracks');
+      if (raw == null || raw.isEmpty) return;
+      final list = jsonDecode(raw) as List<dynamic>;
+      _audioTracks = list.map((e) {
+        final m = Map<String, dynamic>.from(e as Map);
+        final id = '${m['id'] ?? ''}'.trim();
+        final title = '${m['title'] ?? ''}'.trim();
+        final lang = '${m['lang'] ?? ''}'.trim();
+        final codec = '${m['codec'] ?? ''}'.trim();
+        var label = title.isNotEmpty ? title : (lang.isNotEmpty ? lang : id);
+        if (codec.isNotEmpty) label = '$label ($codec)';
+        return KotvTrack(id: id.isEmpty ? 'auto' : id, label: label);
+      }).toList();
+      notifyListeners();
+    } catch (_) {}
+  }
 
   /// Android：Hybrid Composition SurfaceView（对齐 TV）。
   /// 桌面：原生 libmpv 软件渲染 → Flutter Texture（P2）。
@@ -249,6 +272,7 @@ class NativeMpvPlayback extends KotvPlayback {
         _ready = true;
         _lastError = null;
         if (_w > 0 && _h > 0) _buffering = false;
+        unawaited(_refreshAudioTracks());
         notifyListeners();
         break;
       case 'completed':
@@ -453,6 +477,8 @@ class NativeMpvPlayback extends KotvPlayback {
   Future<void> setAudioTrack(String id) async {
     try {
       await _ch.invokeMethod('setAudioTrack', {'id': id});
+      _currentAudioId = id.isEmpty || id == 'auto' ? null : id;
+      notifyListeners();
     } catch (_) {}
   }
 

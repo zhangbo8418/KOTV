@@ -56,6 +56,9 @@ kotv_export_fvp_deps
 "$ROOT/scripts/flutter-pub-get.sh"
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 "$ROOT/scripts/patch-android-plugin-namespaces.sh"
+echo "==> fetch Exo AV3A stack (webhtv nextlib + Media3 fongmi)"
+chmod +x "$ROOT/scripts/fetch-android-exo-av3a.sh"
+"$ROOT/scripts/fetch-android-exo-av3a.sh"
 chmod +x "$ROOT/scripts/prepare-android-mpv-native.sh"
 "$ROOT/scripts/prepare-android-mpv-native.sh"
 

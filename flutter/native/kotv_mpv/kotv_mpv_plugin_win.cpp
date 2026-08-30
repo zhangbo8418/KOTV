@@ -3,6 +3,8 @@
 #include "kotv_mpv_desktop_core.h"
 #include "kotv_mpv_lib_path.h"
 
+#include "../../../internal/player/embed/mpv_shim.h"
+
 #include <flutter/event_channel.h>
 #include <flutter/event_sink.h>
 #include <flutter/event_stream_handler_functions.h>
@@ -194,7 +196,18 @@ class KotvMpvPluginWin {
     }
 
     if (method == "isVulkanAvailable") {
-      result->Success(flutter::EncodableValue(false));
+      result->Success(flutter::EncodableValue(kotv_mpv_desktop_is_vulkan_available()));
+      return;
+    }
+
+    if (method == "getAudioTracks") {
+      char* json = kotv_mpv_desktop_get_audio_tracks_json();
+      if (!json) {
+        result->Success(flutter::EncodableValue("[]"));
+      } else {
+        result->Success(flutter::EncodableValue(std::string(json)));
+        kotv_mpv_free_str(json);
+      }
       return;
     }
 
@@ -202,16 +215,20 @@ class KotvMpvPluginWin {
       std::string url;
       std::string hwdec = "auto";
       int live = 0;
+      int gpu_next = 0;
+      int vulkan = 0;
       std::string headers;
       if (args) {
         if (auto* v = std::get_if<std::string>(&(*args)[flutter::EncodableValue("url")])) url = *v;
         if (auto* v = std::get_if<std::string>(&(*args)[flutter::EncodableValue("decode")])) hwdec = *v;
         if (auto* v = std::get_if<bool>(&(*args)[flutter::EncodableValue("live")])) live = *v ? 1 : 0;
+        if (auto* v = std::get_if<bool>(&(*args)[flutter::EncodableValue("gpuNext")])) gpu_next = *v ? 1 : 0;
+        if (auto* v = std::get_if<bool>(&(*args)[flutter::EncodableValue("vulkan")])) vulkan = *v ? 1 : 0;
         if (auto* h = std::get_if<flutter::EncodableMap>(&(*args)[flutter::EncodableValue("headers")])) {
           headers = HeadersToMultiline(h);
         }
       }
-      const int rc = kotv_mpv_desktop_open(url.c_str(), headers.c_str(), hwdec.c_str(), 0, 0, live);
+      const int rc = kotv_mpv_desktop_open(url.c_str(), headers.c_str(), hwdec.c_str(), gpu_next, vulkan, live);
       if (rc < 0) {
         result->Error("OPEN_FAILED", "mpv open failed", nullptr);
       } else {
