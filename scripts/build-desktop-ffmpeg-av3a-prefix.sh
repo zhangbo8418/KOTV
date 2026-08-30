@@ -9,6 +9,7 @@ PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 FFMPEG_REPO="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
 FFMPEG_COMMIT="${KOTV_FFMPEG_COMMIT:-04482c8d13ac27b2a9fe93f5d388929eef8af5f4}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
+PKG_CONFIG_WRAPPER="$BUILD_DIR/kotv-pkg-config.sh"
 
 kotv_is_windows_build() {
   case "$(uname -s 2>/dev/null)" in
@@ -18,7 +19,6 @@ kotv_is_windows_build() {
 }
 
 if kotv_is_windows_build; then
-  # GitHub Actions：niXman MinGW（与 Go CGO 相同）
   if [[ -d "/c/mingw-msvcrt/mingw64/bin" ]]; then
     export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
   fi
@@ -33,7 +33,6 @@ fi
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 need git
 need cmake
-need pkg-config
 command -v "$MAKE" >/dev/null || need make
 
 mkdir -p "$BUILD_DIR"
@@ -64,6 +63,85 @@ av3a_in_prefix() {
   grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$lib" 2>/dev/null
 }
 
+write_arcdav3a_pc() {
+  local pc="$PREFIX/lib/pkgconfig/arcdav3a.pc"
+  mkdir -p "$PREFIX/lib/pkgconfig"
+  cat >"$pc" <<EOF
+prefix=$PREFIX
+exec_prefix=$PREFIX
+libdir=$PREFIX/lib
+includedir=$PREFIX/include
+
+Name: arcdav3a
+Description: AVS3-P3 / AV3A decoder (libarcdav3a)
+Version: 1.0.0
+Libs: -L$PREFIX/lib -larcdav3a -lm
+Cflags: -I$PREFIX/include
+EOF
+}
+
+write_pkg_config_wrapper() {
+  mkdir -p "$BUILD_DIR"
+  cat >"$PKG_CONFIG_WRAPPER" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+prefix="$PREFIX"
+args=( "\$@" )
+pkg=""
+for a in "\${args[@]}"; do
+  [[ "\$a" == "arcdav3a" ]] && pkg="arcdav3a"
+done
+if [[ "\$pkg" != "arcdav3a" ]]; then
+  echo "kotv-pkg-config: unsupported package (args=\$*)" >&2
+  exit 1
+fi
+joined=" \$* "
+if [[ "\$joined" == *" --exists"* ]]; then
+  [[ -f "\$prefix/lib/libarcdav3a.a" && -f "\$prefix/include/decoder.h" ]] || exit 1
+  exit 0
+fi
+if [[ "\$joined" == *" --modversion"* ]]; then
+  echo "1.0.0"
+  exit 0
+fi
+if [[ "\$joined" == *" --cflags"* ]]; then
+  echo "-I\$prefix/include"
+  exit 0
+fi
+if [[ "\$joined" == *" --libs"* ]]; then
+  echo "-L\$prefix/lib -larcdav3a -lm"
+  exit 0
+fi
+if [[ "\$joined" == *" --variable=includedir"* ]]; then
+  echo "\$prefix/include"
+  exit 0
+fi
+echo "kotv-pkg-config: unhandled (args=\$*)" >&2
+exit 1
+EOF
+  chmod +x "$PKG_CONFIG_WRAPPER"
+}
+
+setup_pkg_config() {
+  write_arcdav3a_pc
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  if kotv_is_windows_build; then
+    write_pkg_config_wrapper
+    export PKG_CONFIG="$PKG_CONFIG_WRAPPER"
+    echo "ok pkg-config wrapper: $PKG_CONFIG"
+    return
+  fi
+  need pkg-config
+  if ! pkg-config --exists arcdav3a; then
+    echo "ERROR: pkg-config cannot see arcdav3a (PKG_CONFIG_PATH=$PKG_CONFIG_PATH)" >&2
+    cat "$PREFIX/lib/pkgconfig/arcdav3a.pc" >&2 || true
+    exit 1
+  fi
+  echo "ok pkg-config arcdav3a: $(pkg-config --modversion arcdav3a)"
+  echo "  cflags=$(pkg-config --cflags arcdav3a)"
+  echo "  libs=$(pkg-config --libs arcdav3a)"
+}
+
 if marker_ok && av3a_in_prefix; then
   echo "ok cached FFmpeg+AV3A prefix: $PREFIX"
   exit 0
@@ -86,38 +164,22 @@ cmake -G "$CMAKE_GENERATOR" -S ffmpeg/dependency/avs3a -B arcdav3a-build \
 cmake --build arcdav3a-build -j"$JOBS"
 cmake --install arcdav3a-build
 
-# Windows/MinGW：cmake 生成的 .pc 常带 D:/ 路径，MSYS pkg-config 找不着；改写为 Unix 前缀。
-mkdir -p "$PREFIX/lib/pkgconfig"
-cat >"$PREFIX/lib/pkgconfig/arcdav3a.pc" <<EOF
-prefix=$PREFIX
-exec_prefix=\${prefix}
-libdir=\${prefix}/lib
-includedir=\${prefix}/include
+[[ -f "$PREFIX/lib/libarcdav3a.a" ]] \
+  || { echo "ERROR: missing $PREFIX/lib/libarcdav3a.a" >&2; exit 1; }
+[[ -f "$PREFIX/include/decoder.h" ]] \
+  || { echo "ERROR: missing $PREFIX/include/decoder.h" >&2; exit 1; }
 
-Name: arcdav3a
-Description: AVS3-P3 / AV3A decoder (libarcdav3a)
-Version: 1.0.0
-Libs: -L\${libdir} -larcdav3a
-Cflags: -I\${includedir}
-EOF
-
-export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-if ! pkg-config --exists arcdav3a; then
-  echo "ERROR: pkg-config cannot see arcdav3a (PKG_CONFIG_PATH=$PKG_CONFIG_PATH)" >&2
-  cat "$PREFIX/lib/pkgconfig/arcdav3a.pc" >&2 || true
-  exit 1
-fi
-echo "ok pkg-config arcdav3a: $(pkg-config --modversion arcdav3a) cflags=$(pkg-config --cflags arcdav3a)"
+setup_pkg_config
 
 echo "==> configure FongMi FFmpeg (static PIC + libarcdav3a)"
 cd ffmpeg
 $MAKE distclean 2>/dev/null || true
 
-FFMPEG_EXTRA=()
+FFMPEG_EXTRA=(--pkg-config-flags="--static")
+FFMPEG_EXTRA+=(--extra-cflags="-I${PREFIX}/include")
+FFMPEG_EXTRA+=(--extra-ldflags="-L${PREFIX}/lib -larcdav3a -lm")
 if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
-  # 再保险：即使 pkg-config 异常，也把头文件/库路径塞进 configure
-  FFMPEG_EXTRA+=(--extra-cflags="-I${PREFIX}/include" --extra-ldflags="-L${PREFIX}/lib")
 fi
 
 ./configure \
@@ -131,7 +193,7 @@ fi
   --disable-programs \
   --disable-doc \
   --disable-debug \
-  ${FFMPEG_EXTRA+"${FFMPEG_EXTRA[@]}"} \
+  "${FFMPEG_EXTRA[@]}" \
   ${KOTV_FFMPEG_CONFIGURE_EXTRA:-}
 
 $MAKE -j"$JOBS"

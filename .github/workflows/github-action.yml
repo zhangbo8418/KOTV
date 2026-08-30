@@ -351,7 +351,7 @@ jobs:
 
       - name: Install desktop MPV source deps
         run: |
-          brew install meson ninja pkg-config libass libplacebo
+          brew install meson ninja pkg-config libass libplacebo nasm
 
       - name: Build desktop libmpv (Vulkan + AV3A source)
         env:
@@ -417,7 +417,7 @@ jobs:
 
       - name: Install desktop MPV source deps
         run: |
-          brew install meson ninja pkg-config libass libplacebo
+          brew install meson ninja pkg-config libass libplacebo nasm
 
       - name: Build desktop libmpv x86_64 (Vulkan + AV3A source)
         env:
@@ -527,9 +527,6 @@ jobs:
 
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses >/dev/null || true
-
-      - name: Install Android platform 37 (nextlib compileSdk)
-        run: sdkmanager "platforms;android-37" "build-tools;37.0.0" || sdkmanager "platforms;android-37"
 
       - name: Install Android build tools (patchelf for libmpv DT_NEEDED)
         run: sudo apt-get update && sudo apt-get install -y patchelf
