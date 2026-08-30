@@ -163,7 +163,7 @@ class KotvMpvPluginWin {
           int h = 0;
           if (kotv_mpv_desktop_take_frame(frame.data(), static_cast<int>(frame.size()), &w, &h)) {
             if (pixel_buffer_) {
-              pixel_buffer_->UpdateFrame(frame, w, h);
+              pixel_buffer_->UpdateFrame(frame.data(), w, h);
               pixel_buffer_->MarkFrame();
             }
           }
