@@ -232,7 +232,6 @@ PROBE
   echo "ok MinGW link probe for avs3_create_decoder"
   # require_pkg_config → 强制 enable（跳过 check_func_headers）
   # FFmpeg configure 里 add_cflags/add_extralibs 吃空格分隔参数，路径不要加引号。
-  local cfg_line
   cfg_line="enabled libarcdav3a       \&\& enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm"
   if command -v perl >/dev/null 2>&1; then
     perl -i.bak -pe "s#enabled libarcdav3a\\s+&& require_pkg_config libarcdav3a arcdav3a decoder\\.h avs3_create_decoder#${cfg_line}#" configure
