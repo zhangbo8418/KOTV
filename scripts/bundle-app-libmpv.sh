@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# 将 libmpv 打进桌面应用包（页内原生 MPV P2）。
+# 将 libmpv 打进桌面应用包，位置与 fvp/mdk 相同（不进 runtime、不单独建 libmpv/ 目录）。
+#   Windows：与 kotv.exe / mdk.dll 同目录
+#   Linux：bundle/lib/（与 libmdk.so 相同，$ORIGIN/lib）
+#   macOS：Contents/Frameworks/（与 mdk.xcframework 相同）
 # 用法: bundle-app-libmpv.sh <KO影视.app | linux/win install dir>
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,6 +14,11 @@ fi
 chmod +x "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 
+strip_runtime_libmpv() {
+  rm -rf "$DEST/libmpv" "$DEST/runtime/libmpv" \
+    "$DEST/Contents/Resources/runtime/libmpv" 2>/dev/null || true
+}
+
 case "$(uname -s)" in
   Darwin)
     MPV="$ROOT/flutter/assets/mpv-libs/macos/libmpv.dylib"
@@ -21,22 +29,16 @@ case "$(uname -s)" in
     if command -v install_name_tool >/dev/null; then
       install_name_tool -id "@rpath/libmpv.dylib" "$FW/libmpv.dylib" 2>/dev/null || true
     fi
+    strip_runtime_libmpv
     echo "bundled macOS Frameworks/libmpv.dylib"
-    mkdir -p "$DEST/Contents/Resources/runtime/libmpv"
-    cp -f "$MPV" "$DEST/Contents/Resources/runtime/libmpv/libmpv.dylib"
-    echo "bundled macOS runtime/libmpv/libmpv.dylib"
     ;;
   Linux)
     MPV="$ROOT/flutter/assets/mpv-libs/linux/libmpv.so.2"
     [[ -f "$MPV" ]] || { echo "ERROR: missing $MPV" >&2; exit 1; }
-    mkdir -p "$DEST/libmpv"
-    cp -f "$MPV" "$DEST/libmpv/libmpv.so.2"
-    echo "bundled linux libmpv/libmpv.so.2"
-    if [[ -d "$DEST/runtime" ]]; then
-      mkdir -p "$DEST/runtime/libmpv"
-      cp -f "$MPV" "$DEST/runtime/libmpv/libmpv.so.2"
-      echo "bundled linux runtime/libmpv/libmpv.so.2"
-    fi
+    mkdir -p "$DEST/lib"
+    cp -f "$MPV" "$DEST/lib/libmpv.so.2"
+    strip_runtime_libmpv
+    echo "bundled linux lib/libmpv.so.2"
     ;;
   MINGW*|MSYS*|CYGWIN*)
     SRC="$ROOT/flutter/assets/mpv-libs/windows"
@@ -44,23 +46,28 @@ case "$(uname -s)" in
       echo "ERROR: missing windows libmpv dll" >&2
       exit 1
     }
-    copy_win_mpv_dlls() {
-      local dest="$1"
-      mkdir -p "$dest"
-      find "$SRC" -maxdepth 1 -type f \( -iname '*.dll' -o -iname '*.pdb' \) -exec cp -f {} "$dest/" \;
-      if [[ -f "$SRC/mpv-2.dll" ]]; then
-        cp -f "$SRC/mpv-2.dll" "$dest/mpv-2.dll"
-      elif [[ -f "$SRC/libmpv-2.dll" ]]; then
-        cp -f "$SRC/libmpv-2.dll" "$dest/mpv-2.dll"
-        cp -f "$SRC/libmpv-2.dll" "$dest/libmpv-2.dll"
-      fi
-    }
-    copy_win_mpv_dlls "$DEST/libmpv"
-    echo "bundled windows libmpv/*.dll"
-    if [[ -d "$DEST/runtime" ]]; then
-      copy_win_mpv_dlls "$DEST/runtime/libmpv"
-      echo "bundled windows runtime/libmpv/*.dll"
+    mkdir -p "$DEST"
+    # 与 mdk.dll 同目录；已有的 Flutter/fvp DLL 不覆盖。
+    if [[ -d "$SRC" ]]; then
+      while IFS= read -r -d '' f; do
+        base="$(basename "$f")"
+        case "$base" in
+          mpv-2.dll|libmpv-2.dll) cp -f "$f" "$DEST/$base" ;;
+          *) [[ -e "$DEST/$base" ]] || cp -f "$f" "$DEST/$base" ;;
+        esac
+      done < <(find "$SRC" -maxdepth 1 -type f \( -iname '*.dll' -o -iname '*.pdb' \) -print0)
     fi
+    if [[ -f "$SRC/mpv-2.dll" ]]; then
+      cp -f "$SRC/mpv-2.dll" "$DEST/mpv-2.dll"
+    elif [[ -f "$SRC/libmpv-2.dll" ]]; then
+      cp -f "$SRC/libmpv-2.dll" "$DEST/mpv-2.dll"
+    fi
+    strip_runtime_libmpv
+    [[ -f "$DEST/mpv-2.dll" || -f "$DEST/libmpv-2.dll" ]] || {
+      echo "ERROR: mpv-2.dll not next to exe" >&2
+      exit 1
+    }
+    echo "bundled windows mpv-2.dll next to exe"
     ;;
   *)
     echo "skip bundle-app-libmpv on $(uname -s)" >&2

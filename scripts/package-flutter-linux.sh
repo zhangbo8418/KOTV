@@ -48,6 +48,7 @@ cp -f "$ENGINE_OUT" "$BUNDLE/kotv-engine"
 chmod +x "$BUNDLE/kotv-engine"
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
 "$ROOT/scripts/bundle-app-libmpv.sh" "$BUNDLE"
+[[ -f "$BUNDLE/lib/libmpv.so.2" ]] || { echo "missing $BUNDLE/lib/libmpv.so.2" >&2; exit 1; }
 [[ -d "$BUNDLE/runtime" ]] || { echo "missing $BUNDLE/runtime" >&2; exit 1; }
 if [[ -f "$ROOT/cmd/updater/updater" ]]; then
   cp -f "$ROOT/cmd/updater/updater" "$BUNDLE/updater"

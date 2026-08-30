@@ -96,12 +96,14 @@ pwsh -NoProfile -Command "
 if [[ -f "$ROOT/cmd/updater/updater.exe" ]]; then
   cp -f "$ROOT/cmd/updater/updater.exe" "$RELEASE_DIR/updater.exe"
 fi
-chmod +x "$ROOT/scripts/install-runtime-libmpv.sh"
-"$ROOT/scripts/install-runtime-libmpv.sh" "$RELEASE_DIR/runtime" windows-x64
 "$ROOT/scripts/verify-runtime.sh" "$RELEASE_DIR/runtime" windows-x64
 
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
-"$ROOT/scripts/bundle-app-libmpv.sh" "$RELEASE_DIR"  # 失败即中断，确保 libmpv 已打进包
+"$ROOT/scripts/bundle-app-libmpv.sh" "$RELEASE_DIR"
+[[ -f "$RELEASE_DIR/mpv-2.dll" || -f "$RELEASE_DIR/libmpv-2.dll" ]] || {
+  echo "missing mpv-2.dll next to kotv.exe" >&2
+  exit 1
+}
 
 echo "==> zip $OUT_ZIP"
 rm -f "$OUT_ZIP"

@@ -59,16 +59,11 @@ static int cwd_dir(char* out, size_t cap) {
   return n > 0 && n < cap;
 }
 static const char* kLeaves[] = {
-    "runtime\\libmpv\\mpv-2.dll",
-    "runtime\\libmpv\\libmpv-2.dll",
-    "libmpv\\mpv-2.dll",
-    "libmpv\\libmpv-2.dll",
     "mpv-2.dll",
     "libmpv-2.dll",
     "flutter\\assets\\mpv-libs\\windows\\mpv-2.dll",
     "assets\\mpv-libs\\windows\\mpv-2.dll",
 };
-static const char* kEnvLeaves[] = {"libmpv\\mpv-2.dll", "libmpv\\libmpv-2.dll"};
 static const char* kSystem[] = {NULL};
 #else
 #include <limits.h>
@@ -87,14 +82,11 @@ static int exe_dir(char* out, size_t cap) {
   return dirname_inplace(out);
 }
 static const char* kLeaves[] = {
-    "runtime/libmpv/libmpv.dylib",
-    "libmpv/libmpv.dylib",
-    "../Resources/runtime/libmpv/libmpv.dylib",
     "../Frameworks/libmpv.dylib",
+    "libmpv.dylib",
     "flutter/assets/mpv-libs/macos/libmpv.dylib",
     "assets/mpv-libs/macos/libmpv.dylib",
 };
-static const char* kEnvLeaves[] = {"libmpv/libmpv.dylib"};
 static const char* kSystem[] = {
     "/opt/homebrew/lib/libmpv.dylib",
     "/usr/local/lib/libmpv.dylib",
@@ -110,14 +102,12 @@ static int exe_dir(char* out, size_t cap) {
   return dirname_inplace(out);
 }
 static const char* kLeaves[] = {
-    "runtime/libmpv/libmpv.so.2",
-    "runtime/libmpv/libmpv.so",
-    "libmpv/libmpv.so.2",
     "lib/libmpv.so.2",
+    "lib/libmpv.so",
+    "libmpv.so.2",
     "flutter/assets/mpv-libs/linux/libmpv.so.2",
     "assets/mpv-libs/linux/libmpv.so.2",
 };
-static const char* kEnvLeaves[] = {"libmpv/libmpv.so.2", "libmpv/libmpv.so"};
 static const char* kSystem[] = {
     "/usr/lib/x86_64-linux-gnu/libmpv.so.2",
     "/usr/lib/aarch64-linux-gnu/libmpv.so.2",
@@ -155,14 +145,6 @@ static char* walk_dir(const char* start) {
 }
 
 char* kotv_find_libmpv_path(void) {
-  const char* env = getenv("KOTV_RUNTIME");
-  if (env && env[0]) {
-    for (size_t i = 0; i < sizeof(kEnvLeaves) / sizeof(kEnvLeaves[0]); ++i) {
-      char* hit = probe_join(env, kEnvLeaves[i]);
-      if (hit) return hit;
-    }
-  }
-
   char base[KOTV_PATH_MAX];
   if (exe_dir(base, sizeof(base))) {
     char* hit = walk_dir(base);

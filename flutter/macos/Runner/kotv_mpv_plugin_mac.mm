@@ -169,7 +169,7 @@ static void HandleMethod(FlutterMethodCall* call, FlutterResult result) {
     char* lib = kotv_find_libmpv_path();
     if (!lib) {
       result([FlutterError errorWithCode:@"NO_LIBMPV"
-                                 message:@"libmpv not found; put it in runtime/libmpv"
+                                 message:@"libmpv not found; put libmpv.dylib in Contents/Frameworks"
                                  details:nil]);
       return;
     }

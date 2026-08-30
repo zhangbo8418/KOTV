@@ -46,7 +46,7 @@ func mpvOpen() error {
 	}
 	lib := appruntime.LibMPV()
 	if lib == "" {
-		return fmt.Errorf("未找到捆绑 libmpv：请重新运行 prepare-runtime.sh")
+		return fmt.Errorf("未找到捆绑 libmpv：请将 mpv-2.dll / libmpv 与应用放在同目录")
 	}
 	prependPathEnv(filepath.Dir(lib))
 	cPath := C.CString(lib)

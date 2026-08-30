@@ -273,16 +273,16 @@ func MPV() string {
 	return ""
 }
 
-// LibMPV 返回页内 MPV 所需的动态库；它与 mpv 可执行文件是不同产物。
+// LibMPV 返回页内 MPV 动态库（与 fvp/mdk 同目录，不在 runtime）。
 func LibMPV() string {
 	cands := underRoots(
-		filepath.Join("libmpv", "libmpv.dylib"),
-		filepath.Join("libmpv", "libmpv.so"),
-		filepath.Join("libmpv", "libmpv.so.2"),
-		filepath.Join("libmpv", "libmpv-2.dll"),
-		filepath.Join("libmpv", "mpv-2.dll"),
-		filepath.Join("mpv", "libmpv.dylib"),
-		filepath.Join("mpv", "libmpv-2.dll"),
+		"mpv-2.dll",
+		"libmpv-2.dll",
+		"libmpv.dylib",
+		filepath.Join("lib", "libmpv.so.2"),
+		filepath.Join("lib", "libmpv.so"),
+		"libmpv.so.2",
+		filepath.Join("..", "Frameworks", "libmpv.dylib"),
 	)
 	return firstExisting(cands...)
 }
@@ -328,7 +328,6 @@ func Status() map[string]string {
 		"bridge":   orMissing(BridgeJAR()),
 		"chromium": orMissing(Chromium()),
 		"ffmpeg":   orMissing(FFmpeg()),
-		"libmpv":   orMissing(LibMPV()),
 		"mpv":      orMissing(MPV()),
 	}
 }

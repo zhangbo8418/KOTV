@@ -105,7 +105,7 @@ test -e "$OUT_APP/Contents/Resources/runtime/bridge/spider-bridge.jar" \
   || test -e "$OUT_APP/Contents/Resources/runtime/bridge"
 test -x "$OUT_APP/Contents/MacOS/kotv-engine" \
   || test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"
-test -f "$OUT_APP/Contents/Resources/runtime/libmpv/libmpv.dylib"
+test -f "$OUT_APP/Contents/Frameworks/libmpv.dylib"
 echo "  java ok, engine ok, libmpv ok"
 
 echo "==> ad-hoc sign"

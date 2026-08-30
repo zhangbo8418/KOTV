@@ -109,6 +109,7 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
 # Bundle full KOTV runtime (jre/python/…) next to the executable.
 # 唯一安装点：CI 不得再整目录 Copy-Item runtime（会套出 runtime\runtime）。
 # 勿用 PATTERN "lib" EXCLUDE：Windows 大小写不敏感，会误删 python/Lib（site-packages）。
+# 页内 libmpv 与 mdk.dll 同目录，不进 runtime。
 set(KOTV_RUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../runtime")
 if(EXISTS "${KOTV_RUNTIME_ROOT}/jre")
   install(DIRECTORY "${KOTV_RUNTIME_ROOT}/"
@@ -122,7 +123,14 @@ if(EXISTS "${KOTV_RUNTIME_ROOT}/jre")
   # 保留 java/python 启动器（JAR/Py 独立进程）。
   install(CODE "
     file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/runtime/lib\")
+    file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/runtime/libmpv\")
   " COMPONENT Runtime)
+endif()
+set(KOTV_MPV_WIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../assets/mpv-libs/windows")
+if(EXISTS "${KOTV_MPV_WIN_DIR}/mpv-2.dll")
+  install(FILES "${KOTV_MPV_WIN_DIR}/mpv-2.dll" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+elseif(EXISTS "${KOTV_MPV_WIN_DIR}/libmpv-2.dll")
+  install(FILES "${KOTV_MPV_WIN_DIR}/libmpv-2.dll" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" RENAME "mpv-2.dll" COMPONENT Runtime)
 endif()
 # Engine binary from Flutter assets if present (Windows: only .exe).
 set(KOTV_ENGINE_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../assets/engine/kotv-engine.exe")

@@ -153,7 +153,7 @@ static void kotv_mpv_method_call(FlMethodChannel* /*channel*/, FlMethodCall* met
     char* lib = kotv_find_libmpv_path();
     if (!lib) {
       response = FL_METHOD_RESPONSE(
-          fl_method_error_response_new("NO_LIBMPV", "libmpv not found; put it in runtime/libmpv", nullptr));
+          fl_method_error_response_new("NO_LIBMPV", "libmpv not found; put libmpv.so.2 in lib/ next to the binary", nullptr));
     } else {
       const int rc = kotv_mpv_desktop_init(lib);
       free(lib);

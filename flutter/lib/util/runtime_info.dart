@@ -2,7 +2,7 @@ import 'kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
 
-/// 桌面客户端：页内 MPV 看 libmpv；外部 mpv 可执行文件另列。
+/// 桌面客户端：可展示引擎侧捆绑运行时与本机外部 MPV。
 const kotvRuntimeDisplayKeysDesktop = <String>[
   'platform',
   'java',
@@ -11,7 +11,6 @@ const kotvRuntimeDisplayKeysDesktop = <String>[
   'bridge',
   'chromium',
   'ffmpeg',
-  'libmpv',
   'mpv',
 ];
 
@@ -40,10 +39,7 @@ List<String> kotvRuntimeDisplayKeysForPlatform() {
 }
 
 /// 按固定顺序输出 `key: value` 行；未知键忽略。
-List<String> formatKotvRuntimeLines(
-  Map<String, String> runtime, {
-  bool includeMissingKeys = true,
-}) {
+List<String> formatKotvRuntimeLines(Map<String, String> runtime) {
   final keys = kotvRuntimeDisplayKeysForPlatform();
   final out = <String>[];
   final hideMissingPlayerLibs = kIsWeb || (!kIsWeb && Platform.isAndroid);
@@ -51,11 +47,9 @@ List<String> formatKotvRuntimeLines(
     final v = runtime[k]?.trim();
     if (v != null && v.isNotEmpty) {
       if (hideMissingPlayerLibs && v == '(missing)') continue;
-      // 页内播放用捆绑 libmpv；外部 mpv.exe 未安装时不必占一行。
+      // 外部 mpv 未安装时不必占一行（页内 MPV 不走 runtime）。
       if (k == 'mpv' && v == '(missing)') continue;
       out.add('$k: $v');
-    } else if (includeMissingKeys && !kIsWeb && !Platform.isAndroid && k == 'libmpv') {
-      out.add('libmpv: (missing)');
     }
   }
   return out;

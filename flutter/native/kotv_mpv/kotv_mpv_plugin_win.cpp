@@ -189,7 +189,7 @@ class KotvMpvPluginWin {
       }
       char* lib = kotv_find_libmpv_path();
       if (!lib) {
-        result->Error("NO_LIBMPV", "libmpv not found; put it in runtime/libmpv", nullptr);
+        result->Error("NO_LIBMPV", "libmpv not found; put mpv-2.dll next to kotv.exe", nullptr);
         return;
       }
       const int rc = kotv_mpv_desktop_init(lib);
