@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -151,7 +152,8 @@ static void kotv_mpv_method_call(FlMethodChannel* /*channel*/, FlMethodCall* met
     EnsureTexture(tex_reg);
     char* lib = kotv_find_libmpv_path();
     if (!lib) {
-      response = FL_METHOD_RESPONSE(fl_method_error_response_new("NO_LIBMPV", "libmpv not found", nullptr));
+      response = FL_METHOD_RESPONSE(
+          fl_method_error_response_new("NO_LIBMPV", "libmpv not found; put it in runtime/libmpv", nullptr));
     } else {
       const int rc = kotv_mpv_desktop_init(lib);
       free(lib);
@@ -192,7 +194,9 @@ static void kotv_mpv_method_call(FlMethodChannel* /*channel*/, FlMethodCall* met
     const std::string h = HeadersToMultiline(headers);
     const int rc = kotv_mpv_desktop_open(url ? url : "", h.c_str(), hwdec ? hwdec : "auto",
                                          gpu_next ? 1 : 0, vulkan ? 1 : 0, live ? 1 : 0);
-    response = rc < 0 ? FL_METHOD_RESPONSE(fl_method_error_response_new("OPEN_FAILED", "open failed", nullptr))
+    char msg[64];
+    snprintf(msg, sizeof(msg), "mpv open failed (rc=%d)", rc);
+    response = rc < 0 ? FL_METHOD_RESPONSE(fl_method_error_response_new("OPEN_FAILED", msg, nullptr))
                       : FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (strcmp(method, "play") == 0) {
     kotv_mpv_desktop_pause(0);

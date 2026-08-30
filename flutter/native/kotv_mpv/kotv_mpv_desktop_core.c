@@ -74,10 +74,16 @@ int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
 
   kotv_mpv_set_preinit_options(g_gpu_next, g_vulkan, hwdec);
   if (opts_changed) {
-    kotv_mpv_reinit_player();
+    if (kotv_mpv_reinit_player() < 0) {
+      g_gpu_next = 0;
+      g_vulkan = 0;
+      kotv_mpv_set_preinit_options(0, 0, hwdec);
+      if (kotv_mpv_reinit_player() < 0) return -2;
+    }
   } else if (hwdec && hwdec[0]) {
     kotv_mpv_set_prop_string("hwdec", hwdec);
   }
+  if (!kotv_mpv_loaded()) return -1;
 
   if (headers_multiline && headers_multiline[0]) {
     kotv_mpv_set_prop_string("http-header-fields", headers_multiline);

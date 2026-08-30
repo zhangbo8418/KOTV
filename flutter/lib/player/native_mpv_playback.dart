@@ -206,7 +206,7 @@ class NativeMpvPlayback extends KotvPlayback {
           child: Text(
             err ??
                 (kotvIsDesktop()
-                    ? '桌面 MPV 未就绪\n请运行 scripts/fetch-desktop-mpv-libs.sh\n或 brew install mpv'
+                    ? '桌面 MPV 未就绪\n请运行 scripts/prepare-runtime.sh\n（runtime/libmpv）'
                     : 'iOS 原生 MPV（P2）接入中…\n请暂用内置 FVP'),
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),

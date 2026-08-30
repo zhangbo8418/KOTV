@@ -22,6 +22,9 @@ case "$(uname -s)" in
       install_name_tool -id "@rpath/libmpv.dylib" "$FW/libmpv.dylib" 2>/dev/null || true
     fi
     echo "bundled macOS Frameworks/libmpv.dylib"
+    mkdir -p "$DEST/Contents/Resources/runtime/libmpv"
+    cp -f "$MPV" "$DEST/Contents/Resources/runtime/libmpv/libmpv.dylib"
+    echo "bundled macOS runtime/libmpv/libmpv.dylib"
     ;;
   Linux)
     MPV="$ROOT/flutter/assets/mpv-libs/linux/libmpv.so.2"
@@ -29,6 +32,11 @@ case "$(uname -s)" in
     mkdir -p "$DEST/libmpv"
     cp -f "$MPV" "$DEST/libmpv/libmpv.so.2"
     echo "bundled linux libmpv/libmpv.so.2"
+    if [[ -d "$DEST/runtime" ]]; then
+      mkdir -p "$DEST/runtime/libmpv"
+      cp -f "$MPV" "$DEST/runtime/libmpv/libmpv.so.2"
+      echo "bundled linux runtime/libmpv/libmpv.so.2"
+    fi
     ;;
   MINGW*|MSYS*|CYGWIN*)
     MPV="$ROOT/flutter/assets/mpv-libs/windows/mpv-2.dll"
@@ -36,6 +44,11 @@ case "$(uname -s)" in
     mkdir -p "$DEST/libmpv"
     cp -f "$MPV" "$DEST/libmpv/mpv-2.dll"
     echo "bundled windows libmpv/mpv-2.dll"
+    if [[ -d "$DEST/runtime" ]]; then
+      mkdir -p "$DEST/runtime/libmpv"
+      cp -f "$MPV" "$DEST/runtime/libmpv/mpv-2.dll"
+      echo "bundled windows runtime/libmpv/mpv-2.dll"
+    fi
     ;;
   *)
     echo "skip bundle-app-libmpv on $(uname -s)" >&2

@@ -17,6 +17,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -188,7 +189,7 @@ class KotvMpvPluginWin {
       }
       char* lib = kotv_find_libmpv_path();
       if (!lib) {
-        result->Error("NO_LIBMPV", "libmpv not found; run scripts/fetch-desktop-mpv-libs.sh", nullptr);
+        result->Error("NO_LIBMPV", "libmpv not found; put it in runtime/libmpv", nullptr);
         return;
       }
       const int rc = kotv_mpv_desktop_init(lib);
@@ -243,7 +244,9 @@ class KotvMpvPluginWin {
       }
       const int rc = kotv_mpv_desktop_open(url.c_str(), headers.c_str(), hwdec.c_str(), gpu_next, vulkan, live);
       if (rc < 0) {
-        result->Error("OPEN_FAILED", "mpv open failed", nullptr);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "mpv open failed (rc=%d)", rc);
+        result->Error("OPEN_FAILED", msg, nullptr);
       } else {
         result->Success();
       }

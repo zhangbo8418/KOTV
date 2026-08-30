@@ -169,7 +169,7 @@ static void HandleMethod(FlutterMethodCall* call, FlutterResult result) {
     char* lib = kotv_find_libmpv_path();
     if (!lib) {
       result([FlutterError errorWithCode:@"NO_LIBMPV"
-                                 message:@"libmpv not found"
+                                 message:@"libmpv not found; put it in runtime/libmpv"
                                  details:nil]);
       return;
     }
@@ -207,7 +207,9 @@ static void HandleMethod(FlutterMethodCall* call, FlutterResult result) {
     int rc = kotv_mpv_desktop_open(url.UTF8String, headers.UTF8String, hwdec.UTF8String,
                                    gpuNext ? 1 : 0, vulkan ? 1 : 0, live ? 1 : 0);
     if (rc < 0) {
-      result([FlutterError errorWithCode:@"OPEN_FAILED" message:@"open failed" details:nil]);
+      result([FlutterError errorWithCode:@"OPEN_FAILED"
+                                 message:[NSString stringWithFormat:@"mpv open failed (rc=%d)", rc]
+                                 details:nil]);
     } else {
       result(nil);
     }

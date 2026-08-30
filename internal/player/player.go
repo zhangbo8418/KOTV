@@ -456,7 +456,7 @@ func Available() map[string]bool {
 		"mpv":       findPlayer("mpv") != "",
 		"iina":      appExists("IINA"),
 		"embed_fvp": true,
-		// Flutter 页内 MPV 走原生通道，不依赖 runtime/libmpv。
+		// Flutter 页内 MPV 走原生通道，库在 runtime/libmpv。
 		"embed_mpv": true,
 	}
 }

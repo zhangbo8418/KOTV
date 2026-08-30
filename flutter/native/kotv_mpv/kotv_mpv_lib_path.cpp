@@ -4,100 +4,178 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define KOTV_PATH_MAX 1024
+
+static char* xdup(const char* s) {
+  if (!s) return NULL;
+  size_t n = strlen(s) + 1;
+  char* p = (char*)malloc(n);
+  if (p) memcpy(p, s, n);
+  return p;
+}
+
+static int dirname_inplace(char* path) {
+  if (!path || !path[0]) return 0;
+  size_t n = strlen(path);
+  while (n > 1 && (path[n - 1] == '/' || path[n - 1] == '\\')) {
+    path[--n] = '\0';
+  }
+  char* slash = strrchr(path, '/');
+#ifdef _WIN32
+  char* bslash = strrchr(path, '\\');
+  if (bslash && (!slash || bslash > slash)) slash = bslash;
+#endif
+  if (!slash) return 0;
+  if (slash == path) {
+    slash[1] = '\0';
+    return 1;
+  }
+  *slash = '\0';
+  return 1;
+}
+
+static void join_path(char* out, size_t cap, const char* dir, const char* rel) {
+#if defined(_WIN32)
+  snprintf(out, cap, "%s\\%s", dir, rel);
+#else
+  snprintf(out, cap, "%s/%s", dir, rel);
+#endif
+}
+
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-static char* join_path(const char* dir, const char* leaf) {
-  if (!dir || !leaf) return NULL;
-  size_t n = strlen(dir) + strlen(leaf) + 2;
-  char* out = (char*)malloc(n);
-  if (!out) return NULL;
-  snprintf(out, n, "%s\\%s", dir, leaf);
-  return out;
-}
 static int file_exists(const char* p) {
-  if (!p) return 0;
+  if (!p || !p[0]) return 0;
   DWORD attr = GetFileAttributesA(p);
   return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
 }
-char* kotv_find_libmpv_path(void) {
-  char exe[MAX_PATH];
-  if (!GetModuleFileNameA(NULL, exe, MAX_PATH)) return NULL;
-  char* slash = strrchr(exe, '\\');
-  if (!slash) return NULL;
-  *slash = '\0';
-  const char* rels[] = {"libmpv\\mpv-2.dll", "libmpv\\libmpv-2.dll", "mpv-2.dll", "libmpv-2.dll"};
-  for (size_t i = 0; i < sizeof(rels) / sizeof(rels[0]); ++i) {
-    char* p = join_path(exe, rels[i]);
-    if (p && file_exists(p)) return p;
-    free(p);
-  }
-  return NULL;
+static int exe_dir(char* out, size_t cap) {
+  if (!GetModuleFileNameA(NULL, out, (DWORD)cap)) return 0;
+  return dirname_inplace(out);
 }
-#elif defined(__APPLE__)
-#include <dlfcn.h>
-#include <limits.h>
-#include <mach-o/dyld.h>
-#include <stdio.h>
-#include <unistd.h>
-static int file_exists(const char* p) {
-  return p && access(p, F_OK) == 0;
+static int cwd_dir(char* out, size_t cap) {
+  DWORD n = GetCurrentDirectoryA((DWORD)cap, out);
+  return n > 0 && n < cap;
 }
-char* kotv_find_libmpv_path(void) {
-  const char* cands[] = {
-      "/opt/homebrew/lib/libmpv.dylib",
-      "/usr/local/lib/libmpv.dylib",
-      "/opt/homebrew/opt/mpv/lib/libmpv.dylib",
-  };
-  for (size_t i = 0; i < sizeof(cands) / sizeof(cands[0]); ++i) {
-    if (file_exists(cands[i])) return strdup(cands[i]);
-  }
-  char exe[PATH_MAX];
-  uint32_t size = sizeof(exe);
-  if (_NSGetExecutablePath(exe, &size) == 0) {
-    char* slash = strrchr(exe, '/');
-    if (slash) {
-      *slash = '\0';
-      char buf[PATH_MAX];
-      snprintf(buf, sizeof(buf), "%s/../Frameworks/libmpv.dylib", exe);
-      if (file_exists(buf)) return strdup(buf);
-      snprintf(buf, sizeof(buf), "%s/libmpv/libmpv.dylib", exe);
-      if (file_exists(buf)) return strdup(buf);
-    }
-  }
-  return NULL;
-}
+static const char* kLeaves[] = {
+    "runtime\\libmpv\\mpv-2.dll",
+    "runtime\\libmpv\\libmpv-2.dll",
+    "libmpv\\mpv-2.dll",
+    "libmpv\\libmpv-2.dll",
+    "mpv-2.dll",
+    "libmpv-2.dll",
+    "flutter\\assets\\mpv-libs\\windows\\mpv-2.dll",
+    "assets\\mpv-libs\\windows\\mpv-2.dll",
+};
+static const char* kEnvLeaves[] = {"libmpv\\mpv-2.dll", "libmpv\\libmpv-2.dll"};
+static const char* kSystem[] = {NULL};
 #else
 #include <limits.h>
-#include <stdio.h>
 #include <unistd.h>
-static int file_exists(const char* p) {
-  return p && access(p, F_OK) == 0;
-}
-char* kotv_find_libmpv_path(void) {
-  const char* cands[] = {
-      "/usr/lib/x86_64-linux-gnu/libmpv.so.2",
-      "/usr/lib/aarch64-linux-gnu/libmpv.so.2",
-      "/usr/lib64/libmpv.so.2",
-      "/usr/lib/libmpv.so.2",
-  };
-  for (size_t i = 0; i < sizeof(cands) / sizeof(cands[0]); ++i) {
-    if (file_exists(cands[i])) return strdup(cands[i]);
+static int file_exists(const char* p) { return p && p[0] && access(p, F_OK) == 0; }
+static int cwd_dir(char* out, size_t cap) { return getcwd(out, cap) != NULL; }
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+static int exe_dir(char* out, size_t cap) {
+  uint32_t size = (uint32_t)cap;
+  if (_NSGetExecutablePath(out, &size) != 0) return 0;
+  char real[KOTV_PATH_MAX];
+  if (realpath(out, real)) {
+    snprintf(out, cap, "%s", real);
   }
-  char exe[PATH_MAX];
-  ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-  if (n > 0) {
-    exe[n] = '\0';
-    char* slash = strrchr(exe, '/');
-    if (slash) {
-      *slash = '\0';
-      char buf[PATH_MAX];
-      snprintf(buf, sizeof(buf), "%s/lib/libmpv.so.2", exe);
-      if (file_exists(buf)) return strdup(buf);
-      snprintf(buf, sizeof(buf), "%s/libmpv/libmpv.so.2", exe);
-      if (file_exists(buf)) return strdup(buf);
+  return dirname_inplace(out);
+}
+static const char* kLeaves[] = {
+    "runtime/libmpv/libmpv.dylib",
+    "libmpv/libmpv.dylib",
+    "../Resources/runtime/libmpv/libmpv.dylib",
+    "../Frameworks/libmpv.dylib",
+    "flutter/assets/mpv-libs/macos/libmpv.dylib",
+    "assets/mpv-libs/macos/libmpv.dylib",
+};
+static const char* kEnvLeaves[] = {"libmpv/libmpv.dylib"};
+static const char* kSystem[] = {
+    "/opt/homebrew/lib/libmpv.dylib",
+    "/usr/local/lib/libmpv.dylib",
+    "/opt/homebrew/opt/mpv/lib/libmpv.dylib",
+    "/usr/local/opt/mpv/lib/libmpv.dylib",
+    NULL,
+};
+#else
+static int exe_dir(char* out, size_t cap) {
+  ssize_t n = readlink("/proc/self/exe", out, cap - 1);
+  if (n <= 0) return 0;
+  out[n] = '\0';
+  return dirname_inplace(out);
+}
+static const char* kLeaves[] = {
+    "runtime/libmpv/libmpv.so.2",
+    "runtime/libmpv/libmpv.so",
+    "libmpv/libmpv.so.2",
+    "lib/libmpv.so.2",
+    "flutter/assets/mpv-libs/linux/libmpv.so.2",
+    "assets/mpv-libs/linux/libmpv.so.2",
+};
+static const char* kEnvLeaves[] = {"libmpv/libmpv.so.2", "libmpv/libmpv.so"};
+static const char* kSystem[] = {
+    "/usr/lib/x86_64-linux-gnu/libmpv.so.2",
+    "/usr/lib/aarch64-linux-gnu/libmpv.so.2",
+    "/usr/lib64/libmpv.so.2",
+    "/usr/lib/libmpv.so.2",
+    NULL,
+};
+#endif
+#endif
+
+static char* probe_file(const char* path) {
+  if (file_exists(path)) return xdup(path);
+  return NULL;
+}
+
+static char* probe_join(const char* dir, const char* rel) {
+  if (!dir || !dir[0] || !rel) return NULL;
+  char buf[KOTV_PATH_MAX];
+  join_path(buf, sizeof(buf), dir, rel);
+  return probe_file(buf);
+}
+
+static char* walk_dir(const char* start) {
+  if (!start || !start[0]) return NULL;
+  char dir[KOTV_PATH_MAX];
+  snprintf(dir, sizeof(dir), "%s", start);
+  for (int up = 0; up <= 12; ++up) {
+    for (size_t i = 0; i < sizeof(kLeaves) / sizeof(kLeaves[0]); ++i) {
+      char* hit = probe_join(dir, kLeaves[i]);
+      if (hit) return hit;
     }
+    if (!dirname_inplace(dir)) break;
   }
   return NULL;
 }
-#endif
+
+char* kotv_find_libmpv_path(void) {
+  const char* env = getenv("KOTV_RUNTIME");
+  if (env && env[0]) {
+    for (size_t i = 0; i < sizeof(kEnvLeaves) / sizeof(kEnvLeaves[0]); ++i) {
+      char* hit = probe_join(env, kEnvLeaves[i]);
+      if (hit) return hit;
+    }
+  }
+
+  char base[KOTV_PATH_MAX];
+  if (exe_dir(base, sizeof(base))) {
+    char* hit = walk_dir(base);
+    if (hit) return hit;
+  }
+  if (cwd_dir(base, sizeof(base))) {
+    char* hit = walk_dir(base);
+    if (hit) return hit;
+  }
+
+  for (size_t i = 0; kSystem[i]; ++i) {
+    char* hit = probe_file(kSystem[i]);
+    if (hit) return hit;
+  }
+  return NULL;
+}

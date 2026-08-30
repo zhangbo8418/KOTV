@@ -105,7 +105,8 @@ test -e "$OUT_APP/Contents/Resources/runtime/bridge/spider-bridge.jar" \
   || test -e "$OUT_APP/Contents/Resources/runtime/bridge"
 test -x "$OUT_APP/Contents/MacOS/kotv-engine" \
   || test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"
-echo "  java ok, engine ok"
+test -f "$OUT_APP/Contents/Resources/runtime/libmpv/libmpv.dylib"
+echo "  java ok, engine ok, libmpv ok"
 
 echo "==> ad-hoc sign"
 codesign --force --deep --sign - "$OUT_APP" 2>/dev/null || true

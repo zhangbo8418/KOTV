@@ -21,7 +21,7 @@ if [[ ! -d "$SRC_RT" ]]; then
   exit 1
 fi
 
-# 最少要有 jre（JAR 爬虫）、bridge；页内 MPV 走原生通道（不进 runtime）
+# 最少要有 jre（JAR 爬虫）、bridge；页内 MPV 的 libmpv 打进 runtime
 need_ok=1
 for need in jre bridge; do
   if [[ ! -d "$SRC_RT/$need" && ! -e "$SRC_RT/$need" ]]; then
@@ -56,8 +56,14 @@ else
   mkdir -p "$DEST_RT"
   cp -a "$SRC_RT/." "$DEST_RT/"
 fi
-# 不进包：外部 mpv、残留 libmpv、旧布局顶层 lib/
-rm -rf "$DEST_RT/mpv" "$DEST_RT/vlc" "$DEST_RT/libvlc" "$DEST_RT/lib" "$DEST_RT/libmpv"
+# 不进包：外部 mpv 可执行文件、旧布局顶层 lib/
+rm -rf "$DEST_RT/mpv" "$DEST_RT/vlc" "$DEST_RT/libvlc" "$DEST_RT/lib"
+chmod +x "$ROOT/scripts/install-runtime-libmpv.sh"
+if [[ ! -f "$DEST_RT/libmpv/libmpv.dylib" && ! -f "$DEST_RT/libmpv/libmpv.so.2" &&
+      ! -f "$DEST_RT/libmpv/mpv-2.dll" && ! -f "$DEST_RT/libmpv/libmpv-2.dll" ]]; then
+  echo "==> runtime missing libmpv, installing…"
+  "$ROOT/scripts/install-runtime-libmpv.sh" "$DEST_RT"
+fi
 
 # 校验关键子目录
 for need in jre bridge; do

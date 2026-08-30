@@ -1369,12 +1369,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (d == null || !mounted || _playUrl.isEmpty) return;
     if (_miniDesktop) await _exitMini();
     if (!mounted) return;
-    if (!kotvIsDesktop()) {
+    if (!kotvIsDesktop() && !kIsWeb) {
+      // 抖音式：全屏保持竖屏，上下滑切集；点「全屏观看」才锁横屏。
       try {
-        await SystemChrome.setPreferredOrientations(const [
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
+        await kotvLockPortrait();
       } catch (_) {}
     }
     setState(() {

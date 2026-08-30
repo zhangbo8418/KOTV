@@ -148,8 +148,13 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v ditto >/dev/null 2>&1; then
 else
   cp -a "$RUNTIME_SRC/." "$DIST/runtime/"
 fi
-# 不进发行包：外部 mpv、残留 libmpv、空的 lib/ 及无用目录
-rm -rf "$DIST/runtime/mpv" "$DIST/runtime/vlc" "$DIST/runtime/libvlc" "$DIST/runtime/lib" "$DIST/runtime/libmpv"
+# 不进发行包：外部 mpv 可执行文件、空的 lib/ 及无用目录；保留 runtime/libmpv
+rm -rf "$DIST/runtime/mpv" "$DIST/runtime/vlc" "$DIST/runtime/libvlc" "$DIST/runtime/lib"
+if [[ ! -f "$DIST/runtime/libmpv/libmpv.dylib" && ! -f "$DIST/runtime/libmpv/libmpv.so.2" &&
+      ! -f "$DIST/runtime/libmpv/mpv-2.dll" && ! -f "$DIST/runtime/libmpv/libmpv-2.dll" ]]; then
+  chmod +x "$ROOT/scripts/install-runtime-libmpv.sh"
+  "$ROOT/scripts/install-runtime-libmpv.sh" "$DIST/runtime" "$PLAT"
+fi
 
 # bridge 始终重新构建，避免发行包混入旧 ABI。
 mkdir -p "$RUNTIME_SRC/bridge" "$DIST/runtime/bridge"

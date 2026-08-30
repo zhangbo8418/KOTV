@@ -51,6 +51,14 @@ Future<void> kotvExitSystemFullscreen({required bool wasDisplayFullscreen}) asyn
   }
 }
 
+Future<void> kotvLockPortrait() async {
+  try {
+    await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.portraitUp,
+    ]);
+  } catch (_) {}
+}
+
 Future<void> kotvForceLandscape() async {
   try {
     await SystemChrome.setPreferredOrientations(const [

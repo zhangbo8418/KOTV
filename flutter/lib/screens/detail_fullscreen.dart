@@ -168,6 +168,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     widget.playback.addListener(_onPlaybackChanged);
     // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
     unawaited(kotvEnterSystemFullscreen(widget.desktopFullscreen));
+    if (!kotvIsDesktop() && !kIsWeb) {
+      unawaited(kotvLockPortrait());
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _refreshForceLandscapeBtn();

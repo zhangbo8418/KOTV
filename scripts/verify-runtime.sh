@@ -90,11 +90,15 @@ if [[ "${jre_lib_files:-0}" -lt 10 ]]; then
   die "jre/lib too incomplete: only ${jre_lib_files} files (Java bridge will EOF)"
 fi
 
-# 发行包不应带外部播放器目录（页内原生 MPV 未打进 runtime；外部用系统安装）
-[[ ! -d "$RT/mpv" ]] || die "runtime/mpv must not ship (native mpv / outie#mpv)"
-[[ ! -d "$RT/libmpv" ]] || die "runtime/libmpv must not ship (page MPV is native, not runtime bundle)"
+# 外部播放器可执行文件不进包；页内 MPV 的 libmpv 必须在 runtime。
+[[ ! -d "$RT/mpv" ]] || die "runtime/mpv must not ship (outie#mpv uses system mpv)"
 [[ ! -d "$RT/libvlc" ]] || die "runtime/libvlc must not ship"
 [[ ! -d "$RT/vlc" ]] || die "runtime/vlc must not ship"
+case "$PLAT" in
+  macos-*) need_file "$RT/libmpv/libmpv.dylib" ;;
+  linux-*) need_any_file "$RT/libmpv/libmpv.so.2" "$RT/libmpv/libmpv.so" ;;
+  windows-*) need_any_file "$RT/libmpv/mpv-2.dll" "$RT/libmpv/libmpv-2.dll" ;;
+esac
 
 if [[ "$fail" -ne 0 ]]; then
   echo "verify-runtime FAILED for $PLAT at $RT" >&2

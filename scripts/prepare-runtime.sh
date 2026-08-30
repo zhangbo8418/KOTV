@@ -805,14 +805,14 @@ prepare_ffmpeg() {
 }
 
 # --- libmpv ---
-# 桌面页内 MPV 走原生通道（P1/P2）；Go 引擎不做页内播放，runtime 不打包 libmpv。
+# 桌面页内 MPV：打进 runtime/libmpv，Flutter 原生通道与 Go embed 都从这里加载。
 
 prepare_one() {
   local plat="$1"
   echo "======== prepare runtime: $plat ========"
   mkdir -p "$CACHE" "$OUT_ROOT"
-  # 不捆绑外部播放器目录（页内 MPV=原生通道；外部播放器用系统安装）
-  rm -rf "$OUT_ROOT/mpv" "$OUT_ROOT/lib" "$OUT_ROOT/vlc" "$OUT_ROOT/libvlc" "$OUT_ROOT/libmpv"
+  # 不捆绑外部播放器可执行文件；libmpv 动态库要进 runtime。
+  rm -rf "$OUT_ROOT/mpv" "$OUT_ROOT/lib" "$OUT_ROOT/vlc" "$OUT_ROOT/libvlc"
   prepare_jre "$plat"
   prepare_python "$plat"
  # PythonVista 解压后可能带 vcruntime；再扫一遍补进 jre/bin
@@ -821,6 +821,8 @@ prepare_one() {
   fi
   prepare_chromium "$plat"
   prepare_ffmpeg "$plat"
+  chmod +x "$ROOT/scripts/install-runtime-libmpv.sh"
+  "$ROOT/scripts/install-runtime-libmpv.sh" "$OUT_ROOT" "$plat"
   # bridge jar（体积变大也无所谓；缺依赖会导致爬虫全挂）
   if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.sh" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/settings.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/bobo/kotv/bridge/SpiderBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/utils/UiBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/crawler/Spider.java" -nt "$ROOT/bridge/spider-bridge.jar" ]]; then
     echo "[bridge] building fat jar..."
@@ -839,8 +841,8 @@ EOF
   echo "======== verifying $OUT_ROOT ========"
   "$ROOT/scripts/verify-runtime.sh" "$OUT_ROOT" "$plat"
   echo "======== done: $OUT_ROOT ========"
-  echo "包含: jre / python / chromium / ffmpeg / bridge"
-  echo "页内 MPV：原生 libmpv（Android assets/mpv-libs；桌面 P2）"
+  echo "包含: jre / python / chromium / ffmpeg / bridge / libmpv"
+  echo "页内 MPV：Android assets/mpv-libs；桌面 runtime/libmpv"
   echo "JS(QuickJS) 已编译进主程序 (CGO)。Windows 请用 MSVCRT MinGW 打包（见 package.sh / check-win7-deps.ps1）。"
 }
 
