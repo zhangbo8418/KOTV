@@ -20,7 +20,16 @@ mkdir -p "$ASSET/windows" "$ASSET/linux" "$ASSET/macos"
 
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 
-# Windows CI：pip 装的 meson 可能不在 PATH，用 python -m meson 兜底
+if ! command -v meson >/dev/null 2>&1; then
+  for d in \
+    "/c/hostedtoolcache/windows/Python/"*"/Scripts" \
+    "$HOME/AppData/Roaming/Python/Python"*/Scripts \
+    "$HOME/AppData/Local/Programs/Python/Python"*/Scripts; do
+    [[ -d "$d" && -x "$d/meson.exe" ]] || continue
+    export PATH="$d:$PATH"
+    break
+  done
+fi
 if ! command -v meson >/dev/null 2>&1; then
   if python3 -m meson --version >/dev/null 2>&1; then
     meson() { python3 -m meson "$@"; }
@@ -39,6 +48,44 @@ if ! command -v ninja >/dev/null 2>&1; then
   done
 fi
 
+LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.360.1}"
+LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.360.1}"
+
+ensure_libplacebo() {
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  if pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo 2>/dev/null; then
+    echo "ok libplacebo $(pkg-config --modversion libplacebo)"
+    return
+  fi
+  echo "==> build libplacebo $LIBPLACEBO_TAG (need >= $LIBPLACEBO_MIN)"
+  need meson
+  need ninja
+  mkdir -p "$BUILD_DIR"
+  cd "$BUILD_DIR"
+  if [[ ! -d libplacebo/.git ]]; then
+    git clone --depth 1 --branch "$LIBPLACEBO_TAG" https://github.com/haasn/libplacebo.git libplacebo
+  fi
+  cd libplacebo
+  rm -rf build
+  meson setup build \
+    --prefix="$PREFIX" \
+    -Ddefault_library=shared \
+    -Dvulkan=enabled \
+    -Ddemos=false \
+    -Dtests=false
+  meson compile -C build -j"$JOBS"
+  meson install -C build
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"
+}
+
+ensure_lua_pkg() {
+  [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || return
+  for lua_prefix in /opt/homebrew/opt/lua@5.2 /usr/local/opt/lua@5.2; do
+    [[ -d "$lua_prefix/lib/pkgconfig" ]] || continue
+    export PKG_CONFIG_PATH="$lua_prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
+  done
+}
+
 build_mpv_linux() {
   need meson
   need ninja
@@ -47,6 +94,7 @@ build_mpv_linux() {
   if [[ "$AV3A" == "1" ]]; then
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
   fi
+  ensure_libplacebo
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d mpv/.git ]]; then
@@ -83,6 +131,7 @@ build_mpv_macos() {
   if [[ "$AV3A" == "1" ]]; then
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
   fi
+  ensure_lua_pkg
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d mpv/.git ]]; then
