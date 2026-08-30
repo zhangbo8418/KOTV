@@ -22,6 +22,7 @@ if kotv_is_windows_build; then
   if [[ -d "/c/mingw-msvcrt/mingw64/bin" ]]; then
     export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
   fi
+  export PATH="/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
   MAKE="${KOTV_MAKE:-mingw32-make}"
   CMAKE_GENERATOR="${KOTV_CMAKE_GENERATOR:-MinGW Makefiles}"
 else
@@ -107,7 +108,7 @@ fi
   --disable-programs \
   --disable-doc \
   --disable-debug \
-  "${FFMPEG_EXTRA[@]}" \
+  ${FFMPEG_EXTRA+"${FFMPEG_EXTRA[@]}"} \
   ${KOTV_FFMPEG_CONFIGURE_EXTRA:-}
 
 $MAKE -j"$JOBS"
