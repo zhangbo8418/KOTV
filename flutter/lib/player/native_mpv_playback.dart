@@ -521,6 +521,7 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   void dispose() {
+    _nativeReady = false;
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _sub = null;
     unawaited(() async {
