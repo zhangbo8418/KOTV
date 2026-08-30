@@ -238,8 +238,10 @@ class NativeMpvPlayback extends KotvPlayback {
       });
       _nativeReady = true;
     } catch (e) {
-      _lastError = '原生 MPV 通道未就绪: $e';
       _nativeReady = false;
+      _lastError = '原生 MPV 通道未就绪: $e';
+      notifyListeners();
+      rethrow;
     }
   }
 
@@ -318,6 +320,11 @@ class NativeMpvPlayback extends KotvPlayback {
     }
 
     await _ensureNative();
+    if (!_nativeReady) {
+      _buffering = false;
+      notifyListeners();
+      throw StateError(_lastError ?? '原生 MPV 未就绪');
+    }
     try {
       await _ch.invokeMethod('open', {
         'url': url,

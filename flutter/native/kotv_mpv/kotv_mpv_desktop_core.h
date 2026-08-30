@@ -10,6 +10,8 @@ extern "C" {
 typedef void (*kotv_mpv_desktop_event_cb)(const char* event_json, void* user);
 
 int kotv_mpv_desktop_init(const char* lib_path);
+/* 停播但保留已加载的 libmpv（供 dispose 用，避免与下一次 create 抢卸库）。 */
+void kotv_mpv_desktop_release(void);
 void kotv_mpv_desktop_shutdown(void);
 int kotv_mpv_desktop_is_ready(void);
 

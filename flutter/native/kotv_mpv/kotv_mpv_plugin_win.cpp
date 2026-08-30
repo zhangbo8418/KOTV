@@ -187,15 +187,30 @@ class KotvMpvPluginWin {
       if (!pixel_buffer_ && tex_reg_) {
         pixel_buffer_ = std::make_unique<KotvMpvPixelBuffer>(tex_reg_);
       }
+      std::string hwdec = "auto";
+      int gpu_next = 0;
+      int vulkan = 0;
+      if (args) {
+        if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
+        if (auto* v = MapGet<bool>(*args, "gpuNext")) gpu_next = *v ? 1 : 0;
+        if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
+      }
       char* lib = kotv_find_libmpv_path();
       if (!lib) {
         result->Error("NO_LIBMPV", "libmpv not found; put mpv-2.dll next to kotv.exe", nullptr);
         return;
       }
-      const int rc = kotv_mpv_desktop_init(lib);
+      kotv_mpv_set_preinit_options(gpu_next, vulkan, hwdec.c_str());
+      int rc = kotv_mpv_desktop_init(lib);
+      if (rc != 0 && (gpu_next || vulkan)) {
+        kotv_mpv_set_preinit_options(0, 0, hwdec.c_str());
+        rc = kotv_mpv_desktop_init(lib);
+      }
       free(lib);
       if (rc != 0) {
-        result->Error("CREATE_FAILED", "libmpv load failed", nullptr);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "libmpv load failed (rc=%d)", rc);
+        result->Error("CREATE_FAILED", msg, nullptr);
         return;
       }
       StartTick();
@@ -319,10 +334,9 @@ class KotvMpvPluginWin {
       return;
     }
     if (method == "dispose") {
-      kotv_mpv_desktop_stop();
-      kotv_mpv_desktop_shutdown();
+      // 只停播，不 FreeLibrary：Dart dispose 是异步的，卸库会与下一次 create/open 抢跑。
+      kotv_mpv_desktop_release();
       StopTick();
-      pixel_buffer_.reset();
       result->Success();
       return;
     }

@@ -256,10 +256,8 @@ static void HandleMethod(FlutterMethodCall* call, FlutterResult result) {
     return;
   }
   if ([method isEqualToString:@"dispose"]) {
-    kotv_mpv_desktop_stop();
-    kotv_mpv_desktop_shutdown();
+    kotv_mpv_desktop_release();
     StopTick();
-    g_texture = nil;
     result(nil);
     return;
   }

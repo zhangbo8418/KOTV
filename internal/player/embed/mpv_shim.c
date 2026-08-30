@@ -283,17 +283,28 @@ int kotv_mpv_lib_has_vulkan(const char *lib_path) {
 }
 
 static int init_sw(void) {
-    g_mpv = p_create();
-    if (!g_mpv)
-        return -4;
-    apply_gpu_render_opts(g_mpv, 1);
-    apply_common_opts(g_mpv);
-    if (p_initialize(g_mpv) < 0) {
-        destroy_player();
-        return -5;
+    int attempt;
+    for (attempt = 0; attempt < 2; ++attempt) {
+        g_mpv = p_create();
+        if (!g_mpv)
+            return -4;
+        apply_gpu_render_opts(g_mpv, 1);
+        apply_common_opts(g_mpv);
+        if (p_initialize(g_mpv) < 0) {
+            destroy_player();
+            /* Win7 等：Vulkan/gpu-next 初始化失败时退回默认再试一次。 */
+            if (attempt == 0 && (g_vulkan || g_gpu_next)) {
+                g_vulkan = 0;
+                g_gpu_next = 0;
+                continue;
+            }
+            return -5;
+        }
+        drain_events();
+        break;
     }
-    drain_events();
 
+    {
     char *api = "sw";
     mpv_render_param init_params[] = {
         {MPV_RENDER_PARAM_API_TYPE, api},
@@ -317,6 +328,7 @@ static int init_sw(void) {
     g_hard = 0;
     g_dirty = 1;
     return 0;
+    }
 }
 
 static int init_wid(long long win) {

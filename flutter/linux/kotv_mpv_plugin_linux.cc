@@ -249,8 +249,7 @@ static void kotv_mpv_method_call(FlMethodChannel* /*channel*/, FlMethodCall* met
     }
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (strcmp(method, "dispose") == 0) {
-    kotv_mpv_desktop_stop();
-    kotv_mpv_desktop_shutdown();
+    kotv_mpv_desktop_release();
     StopTick();
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else {

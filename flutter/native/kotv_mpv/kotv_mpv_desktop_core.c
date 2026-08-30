@@ -70,12 +70,25 @@ int kotv_mpv_desktop_init(const char* lib_path) {
   return rc;
 }
 
+/* dispose 只停播：保留 DLL/实例，避免异步 dispose 与下一次 create/open 抢跑卸库。 */
+void kotv_mpv_desktop_release(void) {
+  kotv_lock();
+  if (kotv_mpv_loaded()) {
+    kotv_mpv_set_volume(0);
+    kotv_mpv_pause(1);
+    kotv_mpv_stop();
+  }
+  kotv_unlock();
+}
+
 void kotv_mpv_desktop_shutdown(void) {
   kotv_lock();
   kotv_mpv_unload();
   g_last_w = 0;
   g_last_h = 0;
-  g_lib_path[0] = '\0';
+  g_gpu_next = 0;
+  g_vulkan = 0;
+  /* 保留 g_lib_path，便于下次 ensure 重载 */
   kotv_unlock();
 }
 
@@ -110,9 +123,32 @@ int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
                           const char* hwdec, int gpu_next, int vulkan, int live) {
   if (!url || !url[0]) return -21;
   kotv_lock();
+
+  /* 被异步 dispose/shutdown 卸掉时，按缓存路径或重新查找 DLL 自愈。 */
   if (!kotv_mpv_loaded()) {
-    kotv_unlock();
-    return -20;
+    char path[1024];
+    snprintf(path, sizeof(path), "%s", g_lib_path);
+    if (!path[0]) {
+      kotv_unlock();
+      {
+        char* lib = kotv_find_libmpv_path();
+        if (!lib) return -20;
+        kotv_lock();
+        snprintf(g_lib_path, sizeof(g_lib_path), "%s", lib);
+        snprintf(path, sizeof(path), "%s", lib);
+        free(lib);
+      }
+    }
+    kotv_mpv_set_preinit_options(gpu_next ? 1 : 0, vulkan ? 1 : 0, hwdec);
+    if (kotv_mpv_load(path) != 0) {
+      kotv_mpv_set_preinit_options(0, 0, hwdec);
+      if (kotv_mpv_load(path) != 0) {
+        kotv_unlock();
+        return -20;
+      }
+      gpu_next = 0;
+      vulkan = 0;
+    }
   }
 
   const int opts_changed = (g_gpu_next != (gpu_next ? 1 : 0)) || (g_vulkan != (vulkan ? 1 : 0));
