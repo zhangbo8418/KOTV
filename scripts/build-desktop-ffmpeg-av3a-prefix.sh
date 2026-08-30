@@ -61,7 +61,11 @@ clone_ffmpeg() {
   git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
 }
 
+# v2: libarcdav3a 必须 -fPIC（链进 libmpv.so）
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v2"
+
 marker_ok() {
+  [[ -f "$STAMP_FILE" ]] || return 1
   [[ -f "$PREFIX/lib/libavcodec.a" ]] \
     || [[ -f "$PREFIX/lib/libavcodec.dll.a" ]] \
     || [[ -f "$PREFIX/lib/libavcodec.dylib" ]] \
@@ -94,66 +98,48 @@ Cflags: -I$pref/include
 EOF
 }
 
-# 包装器：arcdav3a 走硬编码路径；其它包转发给真实 pkg-config。
-# 同时以 bin/pkg-config 身份挂到 PATH，保证 FFmpeg configure 一定用到。
+# 自包含 pkg-config：读 PREFIX/.pc；Windows 另写 .cmd 供 meson(Python) 找到。
 install_pkg_config_wrapper() {
-  local pref real_pc
-  pref="$(kotv_native_path "$PREFIX")"
-  real_pc=""
-  for cand in /usr/bin/pkg-config /bin/pkg-config; do
-    [[ -x "$cand" ]] && real_pc="$cand" && break
-  done
-  if [[ -z "$real_pc" ]] && command -v pkg-config >/dev/null 2>&1; then
-    real_pc="$(command -v pkg-config)"
-  fi
-
+  local py_src="$ROOT/scripts/kotv-pkg-config.py"
+  [[ -f "$py_src" ]] || { echo "ERROR: missing $py_src" >&2; exit 1; }
   mkdir -p "$PKG_BIN"
-  cat >"$PKG_BIN/pkg-config" <<EOF
+  cp -f "$py_src" "$PKG_BIN/kotv-pkg-config.py"
+  cat >"$PKG_BIN/pkg-config" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-prefix="$pref"
-real_pc="${real_pc:-}"
-args=( "\$@" )
-is_arcdav3a=0
-for a in "\${args[@]}"; do
-  [[ "\$a" == "arcdav3a" ]] && is_arcdav3a=1
-done
-if [[ "\$is_arcdav3a" != 1 ]]; then
-  if [[ -n "\$real_pc" && -x "\$real_pc" ]]; then
-    exec "\$real_pc" "\$@"
-  fi
-  echo "kotv-pkg-config: no real pkg-config for \$*" >&2
-  exit 1
+here="$(cd "$(dirname "$0")" && pwd)"
+export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}"
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "$here/kotv-pkg-config.py" "$@"
 fi
-joined=" \$* "
-if [[ "\$joined" == *" --exists"* ]]; then
-  [[ -f "$PREFIX/lib/libarcdav3a.a" && -f "$PREFIX/include/decoder.h" ]] || exit 1
-  exit 0
-fi
-if [[ "\$joined" == *" --modversion"* ]]; then
-  echo "1.0.0"
-  exit 0
-fi
-if [[ "\$joined" == *" --cflags"* ]]; then
-  echo "-I\$prefix/include"
-  exit 0
-fi
-if [[ "\$joined" == *" --libs"* ]]; then
-  echo "-L\$prefix/lib -larcdav3a -lm"
-  exit 0
-fi
-if [[ "\$joined" == *" --variable=includedir"* ]]; then
-  echo "\$prefix/include"
-  exit 0
-fi
-echo "kotv-pkg-config: unhandled (args=\$*)" >&2
-exit 1
+exec python "$here/kotv-pkg-config.py" "$@"
 EOF
   chmod +x "$PKG_BIN/pkg-config"
-  export PATH="$PKG_BIN:$PATH"
+  # Windows meson 只认 .bat/.cmd/.exe，不会跑无扩展名的 bash 脚本
+  cat >"$PKG_BIN/pkg-config.cmd" <<'EOF'
+@echo off
+setlocal
+set "HERE=%~dp0"
+python "%HERE%kotv-pkg-config.py" %*
+exit /b %ERRORLEVEL%
+EOF
+  # 去掉 PATH 里的 Strawberry，避免 meson 优先撞上坏掉的 pkg-config.bat
+  local cleaned="" part
+  IFS=':' read -ra _path_parts <<<"$PATH"
+  for part in "${_path_parts[@]}"; do
+    case "$part" in
+      *[Ss]trawberry*) continue ;;
+    esac
+    if [[ -z "$cleaned" ]]; then
+      cleaned="$part"
+    else
+      cleaned="$cleaned:$part"
+    fi
+  done
+  export PATH="$PKG_BIN:$cleaned"
   export PKG_CONFIG="$PKG_BIN/pkg-config"
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  echo "ok pkg-config wrapper → $PKG_CONFIG (real=${real_pc:-none})"
+  export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  echo "ok pkg-config wrapper → $PKG_BIN (PKG_CONFIG_PATH=$PKG_CONFIG_PATH)"
   "$PKG_CONFIG" --exists arcdav3a
   echo "  cflags=$("$PKG_CONFIG" --cflags arcdav3a)"
   echo "  libs=$("$PKG_CONFIG" --libs arcdav3a)"
@@ -161,7 +147,7 @@ EOF
 
 setup_pkg_config() {
   write_arcdav3a_pc
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   if kotv_is_windows_build; then
     install_pkg_config_wrapper
     return
@@ -179,6 +165,11 @@ setup_pkg_config() {
 
 if marker_ok && av3a_in_prefix; then
   echo "ok cached FFmpeg+AV3A prefix: $PREFIX"
+  # 缓存命中也要装好 pkg-config，供后续 meson 使用（PATH 在子进程，由 mpv 脚本再装一次）
+  write_arcdav3a_pc
+  if kotv_is_windows_build; then
+    install_pkg_config_wrapper
+  fi
   exit 0
 fi
 
@@ -190,12 +181,19 @@ clone_ffmpeg
 grep -q -- '--enable-libarcdav3a' ffmpeg/configure \
   || { echo "ERROR: FongMi FFmpeg lacks --enable-libarcdav3a" >&2; exit 1; }
 
-echo "==> cmake arcdav3a (libarcdav3a) generator=$CMAKE_GENERATOR"
+echo "==> cmake arcdav3a (libarcdav3a, PIC) generator=$CMAKE_GENERATOR"
 rm -rf arcdav3a-build
-cmake -G "$CMAKE_GENERATOR" -S ffmpeg/dependency/avs3a -B arcdav3a-build \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DCMAKE_BUILD_TYPE=Release \
+ARCD_CMAKE_ARGS=(
+  -DCMAKE_INSTALL_PREFIX="$PREFIX"
+  -DCMAKE_BUILD_TYPE=Release
   -DBUILD_SHARED_LIBS=OFF
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+)
+if ! kotv_is_windows_build; then
+  ARCD_CMAKE_ARGS+=(-DCMAKE_C_FLAGS="-fPIC" -DCMAKE_CXX_FLAGS="-fPIC")
+fi
+cmake -G "$CMAKE_GENERATOR" -S ffmpeg/dependency/avs3a -B arcdav3a-build \
+  "${ARCD_CMAKE_ARGS[@]}"
 cmake --build arcdav3a-build -j"$JOBS"
 cmake --install arcdav3a-build
 
@@ -276,4 +274,6 @@ if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$lib" 2>/dev/null; then
   echo "ERROR: $lib built without AV3A/libarcdav3a" >&2
   exit 1
 fi
+mkdir -p "$PREFIX"
+echo "pic+av3a $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
 echo "ok FFmpeg+AV3A prefix: $PREFIX"

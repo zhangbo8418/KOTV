@@ -99,6 +99,130 @@ ensure_lua_pkg() {
   done
 }
 
+# Windows：从 shinchiro mpv-dev 抽取 libass 等（不含 FFmpeg，AV3A 仍用我们的 prefix）。
+ensure_windows_libass_from_mpv_dev() {
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  if pkg-config --exists libass 2>/dev/null; then
+    echo "ok libass $(pkg-config --modversion libass 2>/dev/null || echo found)"
+    return
+  fi
+  need curl
+  local url archive tmp dir pref
+  tmp="$(mktemp -d)"
+  archive="$tmp/mpv-dev.7z"
+  dir="$tmp/extract"
+  url="${KOTV_MPV_WIN_DEV_URL:-}"
+  if [[ -z "$url" ]]; then
+    url="$(curl -fsSL "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" \
+      | grep -Eo 'https://[^"]+mpv-dev-x86_64-[0-9]+[^"]+\.7z' | grep -v '\-v3-' | head -1 || true)"
+  fi
+  [[ -n "$url" ]] || { echo "ERROR: cannot resolve mpv-dev URL for libass" >&2; exit 1; }
+  echo "==> windows deps: fetch libass from $url"
+  curl -fL --retry 5 --retry-delay 2 -o "$archive" "$url"
+  mkdir -p "$dir"
+  if command -v 7z >/dev/null 2>&1; then
+    7z x -y "-o$dir" "$archive" >/dev/null
+  elif command -v 7za >/dev/null 2>&1; then
+    7za x -y "-o$dir" "$archive" >/dev/null
+  else
+    echo "need 7z to extract mpv-dev" >&2
+    exit 1
+  fi
+  mkdir -p "$PREFIX/include" "$PREFIX/lib" "$PREFIX/bin" "$PREFIX/lib/pkgconfig"
+  # 头文件
+  if [[ -d "$dir/include/ass" ]]; then
+    cp -a "$dir/include/ass" "$PREFIX/include/"
+  else
+    local ass_inc
+    ass_inc="$(find "$dir" -type d -name ass | head -1 || true)"
+    [[ -n "$ass_inc" ]] || { echo "ERROR: ass headers missing in mpv-dev" >&2; exit 1; }
+    cp -a "$ass_inc" "$PREFIX/include/"
+  fi
+  # 导入库 / DLL
+  local f
+  for f in "$dir"/lib/libass*.a "$dir"/lib/libass*.dll.a "$dir"/libass*.dll "$dir"/bin/libass*.dll; do
+    [[ -f "$f" ]] || continue
+    case "$f" in
+      *.dll) cp -f "$f" "$PREFIX/bin/" ;;
+      *) cp -f "$f" "$PREFIX/lib/" ;;
+    esac
+  done
+  # 传递依赖（freetype/fribidi/harfbuzz），有则一并放入
+  for f in "$dir"/lib/lib{freetype,fribidi,harfbuzz,iconv,png,zlib}*.a \
+           "$dir"/lib/lib{freetype,fribidi,harfbuzz,iconv,png,z}*.dll.a \
+           "$dir"/bin/lib{freetype,fribidi,harfbuzz,iconv,png,zlib}*.dll \
+           "$dir"/lib{freetype,fribidi,harfbuzz,iconv,png,zlib}*.dll; do
+    [[ -f "$f" ]] || continue
+    case "$f" in
+      *.dll) cp -f "$f" "$PREFIX/bin/" ;;
+      *) cp -f "$f" "$PREFIX/lib/" ;;
+    esac
+  done
+  for f in "$dir"/include/ft2build.h "$dir"/include/fribidi "$dir"/include/harfbuzz "$dir"/include/freetype2; do
+    [[ -e "$f" ]] || continue
+    cp -a "$f" "$PREFIX/include/" 2>/dev/null || true
+  done
+  [[ -d "$dir/include/freetype2" ]] && cp -a "$dir/include/freetype2" "$PREFIX/include/" || true
+
+  pref="$PREFIX"
+  command -v cygpath >/dev/null 2>&1 && pref="$(cygpath -m "$PREFIX")"
+  local ass_lib="-lass"
+  [[ -f "$PREFIX/lib/libass.dll.a" ]] || [[ -f "$PREFIX/lib/libass.a" ]] \
+    || { echo "ERROR: libass import lib missing after extract" >&2; find "$dir" -iname '*ass*' | head -40 >&2; exit 1; }
+
+  cat >"$PREFIX/lib/pkgconfig/libass.pc" <<EOF
+prefix=$pref
+exec_prefix=$pref
+libdir=$pref/lib
+includedir=$pref/include
+
+Name: libass
+Description: libass (from shinchiro mpv-dev)
+Version: 0.17.3
+Libs: -L\${libdir} $ass_lib
+Cflags: -I\${includedir}
+EOF
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  pkg-config --exists libass \
+    || { echo "ERROR: libass.pc not visible" >&2; exit 1; }
+  echo "ok libass staged from mpv-dev → $PREFIX"
+  rm -rf "$tmp"
+}
+
+ensure_windows_vulkan() {
+  # libplacebo / mpv 需要 Vulkan 头与 vulkan-1
+  if [[ -n "${VULKAN_SDK:-}" && -f "${VULKAN_SDK}/Include/vulkan/vulkan.h" ]]; then
+    echo "ok VULKAN_SDK=$VULKAN_SDK"
+  elif [[ -f "/c/VulkanSDK" ]] || ls /c/VulkanSDK/*/Include/vulkan/vulkan.h >/dev/null 2>&1; then
+    local sdk
+    sdk="$(ls -d /c/VulkanSDK/*/ 2>/dev/null | tail -1)"
+    export VULKAN_SDK="$(cygpath -m "$sdk" 2>/dev/null || echo "$sdk")"
+    echo "ok VULKAN_SDK=$VULKAN_SDK"
+  else
+    echo "WARN: VULKAN_SDK not set; libplacebo/meson may fail (CI should choco install vulkan-sdk)" >&2
+  fi
+  if [[ -n "${VULKAN_SDK:-}" ]]; then
+    local pref inc lib
+    pref="$(cygpath -m "${VULKAN_SDK}" 2>/dev/null || echo "${VULKAN_SDK}")"
+    inc="$pref/Include"
+    lib="$pref/Lib"
+    mkdir -p "$PREFIX/lib/pkgconfig"
+    cat >"$PREFIX/lib/pkgconfig/vulkan.pc" <<EOF
+prefix=$pref
+includedir=$inc
+libdir=$lib
+
+Name: Vulkan-Loader
+Description: Vulkan Loader
+Version: 1.3.0
+Libs: -L\${libdir} -lvulkan-1
+Cflags: -I\${includedir}
+EOF
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    echo "ok vulkan.pc → $PREFIX/lib/pkgconfig/vulkan.pc"
+  fi
+}
+
 build_mpv_linux() {
   need meson
   need ninja
@@ -178,7 +302,6 @@ build_mpv_windows() {
   need meson
   need ninja
   need git
-  need pkg-config
   if [[ -d "/c/mingw-msvcrt/mingw64/bin" ]]; then
     export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
   fi
@@ -187,6 +310,64 @@ build_mpv_windows() {
   if [[ "$AV3A" == "1" ]]; then
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
   fi
+  # FFmpeg 脚本在子进程里改 PATH 不会继承；这里强制自包含 pkg-config 在最前。
+  local pkg_bin="$BUILD_DIR/bin" pc_win pkg_win cleaned="" part
+  mkdir -p "$pkg_bin"
+  cp -f "$ROOT/scripts/kotv-pkg-config.py" "$pkg_bin/kotv-pkg-config.py"
+  cat >"$pkg_bin/pkg-config" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "$here/kotv-pkg-config.py" "$@"
+fi
+exec python "$here/kotv-pkg-config.py" "$@"
+EOF
+  chmod +x "$pkg_bin/pkg-config"
+  cat >"$pkg_bin/pkg-config.cmd" <<'EOF'
+@echo off
+setlocal
+set "HERE=%~dp0"
+python "%HERE%kotv-pkg-config.py" %*
+exit /b %ERRORLEVEL%
+EOF
+  IFS=':' read -ra _path_parts <<<"$PATH"
+  for part in "${_path_parts[@]}"; do
+    case "$part" in
+      *[Ss]trawberry*) continue ;;
+    esac
+    if [[ -z "$cleaned" ]]; then cleaned="$part"; else cleaned="$cleaned:$part"; fi
+  done
+  export PATH="$pkg_bin:$cleaned"
+  if command -v cygpath >/dev/null 2>&1; then
+    export PKG_CONFIG_PATH="$(cygpath -m "$PREFIX/lib/pkgconfig")"
+    pc_win="$(cygpath -m "$pkg_bin/pkg-config.cmd")"
+    pkg_win="$(cygpath -m "$PREFIX/lib/pkgconfig")"
+  else
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+    pc_win="$pkg_bin/pkg-config.cmd"
+    pkg_win="$PREFIX/lib/pkgconfig"
+  fi
+  export PKG_CONFIG="$pkg_bin/pkg-config"
+  echo "ok windows pkg-config: $PKG_CONFIG (PATH head=$pkg_bin)"
+  "$PKG_CONFIG" --exists libavcodec \
+    || { echo "ERROR: kotv-pkg-config cannot see libavcodec" >&2; ls -la "$PREFIX/lib/pkgconfig" >&2; exit 1; }
+  echo "  libavcodec cflags=$("$PKG_CONFIG" --cflags libavcodec | head -c 200)"
+
+  ensure_windows_vulkan
+  ensure_windows_libass_from_mpv_dev
+  # 刷新 PKG_CONFIG_PATH（ensure_* 可能改过）
+  if command -v cygpath >/dev/null 2>&1; then
+    export PKG_CONFIG_PATH="$(cygpath -m "$PREFIX/lib/pkgconfig")"
+    pc_win="$(cygpath -m "$pkg_bin/pkg-config.cmd")"
+    pkg_win="$(cygpath -m "$PREFIX/lib/pkgconfig")"
+  else
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+    pc_win="$pkg_bin/pkg-config.cmd"
+    pkg_win="$PREFIX/lib/pkgconfig"
+  fi
+  ensure_libplacebo
+
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d mpv/.git ]]; then
@@ -199,8 +380,16 @@ build_mpv_windows() {
   fi
   cd mpv
   rm -rf build
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  cat >"$BUILD_DIR/meson-native-kotv.ini" <<EOF
+[binaries]
+pkg-config = '$pc_win'
+pkgconfig = '$pc_win'
+
+[built-in options]
+pkg_config_path = '$pkg_win'
+EOF
   meson setup build \
+    --native-file "$BUILD_DIR/meson-native-kotv.ini" \
     -Ddefault_library=shared \
     -Dlibmpv=true \
     -Dcplayer=false \
@@ -216,6 +405,10 @@ build_mpv_windows() {
   [[ -n "$dll" ]] || dll="$(find build -maxdepth 2 -name 'mpv-2.dll' -o -name 'libmpv-2.dll' 2>/dev/null | head -1 || true)"
   [[ -n "$dll" && -f "$dll" ]] || { echo "ERROR: mpv dll not found under build/" >&2; exit 1; }
   cp -f "$dll" "$out"
+  # 运行时依赖：libass 等
+  if [[ -d "$PREFIX/bin" ]]; then
+    find "$PREFIX/bin" -maxdepth 1 -iname '*.dll' -exec cp -f {} "$ASSET/windows/" \;
+  fi
   if [[ "$AV3A" == "1" ]]; then
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" \
       || { echo "ERROR: mpv-2.dll missing AV3A symbols" >&2; exit 1; }
