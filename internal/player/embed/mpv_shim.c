@@ -87,6 +87,15 @@ typedef void (*fn_mpv_render_context_set_update_callback)(mpv_render_context *,
 typedef uint64_t (*fn_mpv_render_context_update)(mpv_render_context *);
 typedef int (*fn_mpv_render_context_render)(mpv_render_context *, mpv_render_param *);
 typedef void (*fn_mpv_free)(void *);
+typedef struct mpv_event {
+    int event_id;
+    int error;
+    uint64_t reply_userdata;
+    void *data;
+} mpv_event;
+typedef mpv_event *(*fn_mpv_wait_event)(mpv_handle *, double);
+
+enum { KOTV_MPV_EVENT_NONE = 0 };
 
 static mpv_lib_t g_lib;
 static mpv_handle *g_mpv;
@@ -106,8 +115,10 @@ static fn_mpv_render_context_set_update_callback p_render_set_update;
 static fn_mpv_render_context_update p_render_update;
 static fn_mpv_render_context_render p_render;
 static fn_mpv_free p_mpv_free;
+static fn_mpv_wait_event p_wait_event;
 
 static volatile int g_dirty;
+static int g_has_file;
 static uint8_t *g_pixels;
 static int g_width = 1280;
 static int g_height = 720;
@@ -172,8 +183,21 @@ static int bind_symbols(void) {
     BIND(p_render_update, "mpv_render_context_update");
     BIND(p_render, "mpv_render_context_render");
     BIND(p_mpv_free, "mpv_free");
+    BIND(p_wait_event, "mpv_wait_event");
 #undef BIND
     return 0;
+}
+
+/* libmpv 不排空事件队列时，后续 command 会返回 MPV_ERROR_EVENT_QUEUE_FULL (-1)。 */
+static void drain_events(void) {
+    int n;
+    if (!g_mpv || !p_wait_event)
+        return;
+    for (n = 0; n < 512; ++n) {
+        mpv_event *ev = p_wait_event(g_mpv, 0.0);
+        if (!ev || ev->event_id == KOTV_MPV_EVENT_NONE)
+            break;
+    }
 }
 
 static void destroy_player(void) {
@@ -187,6 +211,7 @@ static void destroy_player(void) {
         g_mpv = NULL;
     }
     g_hard = 0;
+    g_has_file = 0;
 }
 
 static void apply_common_opts(mpv_handle *mpv) {
@@ -267,6 +292,7 @@ static int init_sw(void) {
         destroy_player();
         return -5;
     }
+    drain_events();
 
     char *api = "sw";
     mpv_render_param init_params[] = {
@@ -313,6 +339,7 @@ static int init_wid(long long win) {
         destroy_player();
         return -5;
     }
+    drain_events();
     g_hard = 1;
     g_dirty = 0;
     return 0;
@@ -385,26 +412,45 @@ int kotv_mpv_set_hard_win(long long win) {
 }
 
 int kotv_mpv_play(const char *url) {
+    int rc;
+    const char *cmd[4];
     if (!g_mpv || !url)
         return -1;
-    const char *cmd[] = {"loadfile", url, "replace", NULL};
-    int rc = p_command(g_mpv, cmd);
-    if (rc >= 0)
+    drain_events();
+    cmd[0] = "loadfile";
+    cmd[1] = url;
+    cmd[2] = "replace";
+    cmd[3] = NULL;
+    rc = p_command(g_mpv, cmd);
+    /* -1 = MPV_ERROR_EVENT_QUEUE_FULL：排空后再试一次（Win7 慢机常见）。 */
+    if (rc == -1) {
+        drain_events();
+        rc = p_command(g_mpv, cmd);
+    }
+    if (rc >= 0) {
         g_dirty = 1;
+        g_has_file = 1;
+    }
     return rc;
 }
 
 void kotv_mpv_stop(void) {
     if (!g_mpv)
         return;
-    const char *cmd[] = {"stop", NULL};
-    p_command(g_mpv, cmd);
+    {
+        const char *cmd[] = {"stop", NULL};
+        drain_events();
+        p_command(g_mpv, cmd);
+    }
     g_dirty = 0;
+    g_has_file = 0;
 }
 
 void kotv_mpv_pause(int pause) {
-    if (g_mpv)
-        p_set_property_string(g_mpv, "pause", pause ? "yes" : "no");
+    if (!g_mpv)
+        return;
+    drain_events();
+    p_set_property_string(g_mpv, "pause", pause ? "yes" : "no");
 }
 
 int kotv_mpv_is_playing(void) {
@@ -436,6 +482,7 @@ static int64_t get_ms(const char *name) {
     if (!g_mpv)
         return 0;
     double seconds = 0;
+    drain_events();
     if (p_get_property(g_mpv, name, MPV_FORMAT_DOUBLE, &seconds) < 0)
         return 0;
     return (int64_t)(seconds * 1000.0);
@@ -453,18 +500,21 @@ int kotv_mpv_set_volume(int volume) {
     if (!g_mpv)
         return -1;
     double value = (double)volume;
+    drain_events();
     return p_set_property(g_mpv, "volume", MPV_FORMAT_DOUBLE, &value);
 }
 
 int kotv_mpv_set_prop_string(const char *name, const char *value) {
     if (!g_mpv || !name || !value)
         return -1;
+    drain_events();
     return p_set_property_string(g_mpv, name, value);
 }
 
 int kotv_mpv_set_prop_double(const char *name, double value) {
     if (!g_mpv || !name)
         return -1;
+    drain_events();
     return p_set_property(g_mpv, name, MPV_FORMAT_DOUBLE, &value);
 }
 
@@ -516,8 +566,9 @@ int kotv_mpv_cmd2(const char *a, const char *b) {
 }
 
 int kotv_mpv_take_frame(uint8_t *out, int out_cap, int *out_w, int *out_h) {
-    if (g_hard || !g_render || !g_pixels || !out || !out_w || !out_h)
+    if (g_hard || !g_has_file || !g_render || !g_pixels || !out || !out_w || !out_h)
         return 0;
+    drain_events();
     uint64_t update = p_render_update(g_render);
     if (!(update & MPV_RENDER_UPDATE_FRAME) && !g_dirty)
         return 0;

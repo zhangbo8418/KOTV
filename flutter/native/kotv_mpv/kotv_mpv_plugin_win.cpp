@@ -244,8 +244,16 @@ class KotvMpvPluginWin {
       }
       const int rc = kotv_mpv_desktop_open(url.c_str(), headers.c_str(), hwdec.c_str(), gpu_next, vulkan, live);
       if (rc < 0) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "mpv open failed (rc=%d)", rc);
+        char msg[96];
+        if (rc == -21) {
+          snprintf(msg, sizeof(msg), "mpv open failed (empty url)");
+        } else if (rc == -20) {
+          snprintf(msg, sizeof(msg), "mpv open failed (not loaded)");
+        } else if (rc == -1) {
+          snprintf(msg, sizeof(msg), "mpv open failed (event queue full)");
+        } else {
+          snprintf(msg, sizeof(msg), "mpv open failed (rc=%d)", rc);
+        }
         result->Error("OPEN_FAILED", msg, nullptr);
       } else {
         result->Success();

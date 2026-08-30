@@ -108,11 +108,11 @@ char* kotv_mpv_desktop_get_audio_tracks_json(void) {
 
 int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
                           const char* hwdec, int gpu_next, int vulkan, int live) {
-  if (!url || !url[0]) return -1;
+  if (!url || !url[0]) return -21;
   kotv_lock();
   if (!kotv_mpv_loaded()) {
     kotv_unlock();
-    return -1;
+    return -20;
   }
 
   const int opts_changed = (g_gpu_next != (gpu_next ? 1 : 0)) || (g_vulkan != (vulkan ? 1 : 0));
@@ -135,7 +135,7 @@ int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
   }
   if (!kotv_mpv_loaded()) {
     kotv_unlock();
-    return -1;
+    return -20;
   }
 
   if (headers_multiline && headers_multiline[0]) {
