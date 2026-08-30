@@ -25,8 +25,12 @@ static void emit(const char* json) {
 
 int kotv_mpv_desktop_init(const char* lib_path) {
   if (!lib_path || !lib_path[0]) return -1;
-  strncpy(g_lib_path, lib_path, sizeof(g_lib_path) - 1);
-  g_lib_path[sizeof(g_lib_path) - 1] = '\0';
+  {
+    size_t n = strlen(lib_path);
+    if (n >= sizeof(g_lib_path)) n = sizeof(g_lib_path) - 1;
+    memcpy(g_lib_path, lib_path, n);
+    g_lib_path[n] = '\0';
+  }
   if (kotv_mpv_loaded()) return 0;
   const int rc = kotv_mpv_load(lib_path);
   if (rc != 0) return rc;

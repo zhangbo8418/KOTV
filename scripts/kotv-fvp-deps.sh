@@ -62,6 +62,8 @@ kotv_mdk_sdk_ver() {
 # 导出给 fvp cmake/deps.cmake（Android / Windows / Linux）。
 kotv_export_fvp_deps() {
   export FVP_DEPS_URL="$(kotv_fvp_deps_url)"
+  FVP_DEPS_URL="${FVP_DEPS_URL//$'\r'/}"
+  export FVP_DEPS_URL
   echo "==> FVP_DEPS_URL=$FVP_DEPS_URL"
 }
 
@@ -131,7 +133,7 @@ def rank(n):
     return 3
 
 for name in sorted(set(cands), key=rank):
-    print(name)
+    sys.stdout.write(name.replace("\r", "") + "\n")
 PY
 )"
   if [[ -n "$names" ]]; then
@@ -241,7 +243,10 @@ kotv_ensure_mdk_windows_sdk() {
   archive=""
   url=""
   for name in $(kotv_mdk_windows_assets); do
+    name="${name//$'\r'/}"
+    [[ -n "$name" ]] || continue
     url="$(kotv_fvp_deps_url)/$name"
+    url="${url//$'\r'/}"
     archive="$archive_dir/$name"
     echo "==> fetch mdk windows sdk $ver: $url"
     if curl -fL --retry 5 --retry-delay 2 -o "$archive" "$url"; then

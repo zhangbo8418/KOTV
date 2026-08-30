@@ -50,7 +50,7 @@ dependency_overrides:
   shared_preferences_linux: 2.4.1
   shared_preferences_windows: 2.4.1
   video_player: 2.9.2
-  video_player_android: 2.7.16
+  video_player_android: 2.4.14
   video_player_platform_interface: 6.2.3
   video_player_avfoundation: 2.6.2
   video_player_web: 2.3.2

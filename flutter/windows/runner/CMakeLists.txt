@@ -43,6 +43,8 @@ target_compile_definitions(${BINARY_NAME} PRIVATE
   "WINVER=0x0601"
   "_WIN32_WINNT=0x0601"
   "NTDDI_VERSION=0x06010000"
+  "_CRT_SECURE_NO_WARNINGS"
+  "_CRT_NONSTDC_NO_DEPRECATE"
 )
 
 # Add dependency libraries and include directories. Add any application-specific

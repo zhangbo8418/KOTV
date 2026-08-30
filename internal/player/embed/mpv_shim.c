@@ -124,8 +124,40 @@ static void update_cb(void *ctx) {
     g_dirty = 1;
 }
 
+static void copy_cstr(char *dst, size_t cap, const char *src) {
+    size_t n;
+    if (!dst || cap == 0)
+        return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    n = strlen(src);
+    if (n >= cap)
+        n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+static char *dup_cstr(const char *s) {
+    size_t n;
+    char *p;
+    if (!s)
+        return NULL;
+    n = strlen(s) + 1;
+    p = (char *)malloc(n);
+    if (p)
+        memcpy(p, s, n);
+    return p;
+}
+
 static int bind_symbols(void) {
-#define BIND(dst, name) do { dst = (void *)MPV_SYM(g_lib, name); if (!dst) return -1; } while (0)
+    /* memcpy 避免 MSVC C4152（void* → 函数指针）。 */
+#define BIND(dst, name) do { \
+        void *_sym = (void *)MPV_SYM(g_lib, name); \
+        if (!_sym) return -1; \
+        memcpy(&(dst), &_sym, sizeof(dst)); \
+    } while (0)
     BIND(p_create, "mpv_create");
     BIND(p_initialize, "mpv_initialize");
     BIND(p_destroy, "mpv_terminate_destroy");
@@ -186,7 +218,7 @@ int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec) {
     g_vulkan = vulkan ? 1 : 0;
     g_hwdec_opt[0] = '\0';
     if (hwdec && hwdec[0])
-        strncpy(g_hwdec_opt, hwdec, sizeof(g_hwdec_opt) - 1);
+        copy_cstr(g_hwdec_opt, sizeof(g_hwdec_opt), hwdec);
     return 0;
 }
 
@@ -537,7 +569,7 @@ char *kotv_mpv_get_audio_tracks_json(void) {
     int64_t count = 0;
     int i;
     if (!g_mpv)
-        return strdup("[]");
+        return dup_cstr("[]");
     out = (char *)malloc(cap);
     if (!out)
         return NULL;
