@@ -90,9 +90,9 @@ if [[ "${jre_lib_files:-0}" -lt 10 ]]; then
   die "jre/lib too incomplete: only ${jre_lib_files} files (Java bridge will EOF)"
 fi
 
-# 发行包不应带外部播放器目录（页内 MPV 由 Flutter media_kit 自带）
-[[ ! -d "$RT/mpv" ]] || die "runtime/mpv must not ship (Flutter media_kit / outie#mpv)"
-[[ ! -d "$RT/libmpv" ]] || die "runtime/libmpv must not ship (Flutter media_kit bundles libmpv)"
+# 发行包不应带外部播放器目录（页内原生 MPV 未打进 runtime；外部用系统安装）
+[[ ! -d "$RT/mpv" ]] || die "runtime/mpv must not ship (native mpv / outie#mpv)"
+[[ ! -d "$RT/libmpv" ]] || die "runtime/libmpv must not ship (page MPV is native, not runtime bundle)"
 [[ ! -d "$RT/libvlc" ]] || die "runtime/libvlc must not ship"
 [[ ! -d "$RT/vlc" ]] || die "runtime/vlc must not ship"
 

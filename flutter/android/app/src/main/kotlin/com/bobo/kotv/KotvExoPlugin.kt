@@ -8,11 +8,14 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
+import io.flutter.view.TextureRegistry
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -56,9 +59,10 @@ import kotlin.math.min
 /**
  * OkHttpDataSource + Media3：headers / mime / DRM / 软硬解。
  *
- * 画面路径对齐 TV：默认 [SurfaceView]（[PlayerView] 的 surface_type=surface_view）。
- * Flutter Texture / SurfaceTexture 会把 HDR 转 SDR，画面发暗；Hybrid Composition 的
- * SurfaceView 才能走系统 HDR 合成。
+ * 画面路径：
+ * - Surface（默认）：Hybrid Composition [SurfaceView]，硬解 HDR 直出，对齐 TV
+ * - Texture（兼容）：Flutter [TextureRegistry]（部分 HDR/10bit 会花屏，仅作回退）
+ * 勿再因 API&lt;26 强制 Texture：RK 盒上 Flutter Texture + HDR 呈绿条花屏。
  *
  * 软硬解：
  * - hard：仅 MediaCodec，优先 hardwareAccelerated；扩展 FFmpeg 不参与视频
@@ -72,6 +76,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var eventSink: EventChannel.EventSink? = null
   private var appContext: Context? = null
 
+  private var textureRegistry: TextureRegistry? = null
+  private var flutterTexture: TextureRegistry.SurfaceTextureEntry? = null
+  private var flutterSurface: Surface? = null
+  /** true：Dart 用 Texture()（兼容模式）。默认 false=SurfaceView HDR。 */
+  private var useFlutterTexture: Boolean = false
   private var surfaceHost: KotvExoSurfaceHost? = null
   private var player: ExoPlayer? = null
   private var trackSelector: DefaultTrackSelector? = null
@@ -82,7 +91,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var formatRetried = false
   /** auto | soft | hard；硬/自动优先 MediaCodec 硬解直出。 */
   private var decodeMode: String = "auto"
-  /** false=SurfaceView（TV 默认），true=TextureView。 */
+  /** false=SurfaceView（TV/HDR 默认），true=Flutter Texture 兼容模式。 */
   private var renderTexture: Boolean = false
   /** contain | cover；对齐 TV PlayerView resizeMode。 */
   private var videoFit: String = "contain"
@@ -167,6 +176,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     appContext = binding.applicationContext
+    textureRegistry = binding.textureRegistry
     channel = MethodChannel(binding.binaryMessenger, "kotv_exo").also {
       it.setMethodCallHandler(this)
     }
@@ -181,11 +191,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     releasePlayer()
+    releaseFlutterTexture()
     channel?.setMethodCallHandler(null)
     channel = null
     events?.setStreamHandler(null)
     events = null
     surfaceHost = null
+    textureRegistry = null
     appContext = null
   }
 
@@ -203,16 +215,33 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val mode = call.argument<String>("render")?.trim().orEmpty()
         main.post {
           try {
-            if (mode.isNotEmpty()) {
-              renderTexture = isTextureRender(mode)
-              applyRenderToHost()
+            renderTexture = if (mode.isNotEmpty()) {
+              resolveRenderTexture(mode)
+            } else {
+              renderTexture
             }
-            result.success(1)
+            syncOutputPath()
+            val tid = if (useFlutterTexture) ensureFlutterTexture() else -1L
+            Log.i(
+              TAG,
+              "create sdk=${Build.VERSION.SDK_INT} render=${if (renderTexture) "texture" else "surface"} " +
+                "path=${if (useFlutterTexture) "flutterTexture" else "platformView"} tid=$tid",
+            )
+            result.success(
+              mapOf(
+                "ok" to 1,
+                "sdkInt" to Build.VERSION.SDK_INT,
+                "render" to if (renderTexture) "texture" else "surface",
+                "path" to if (useFlutterTexture) "flutterTexture" else "platformView",
+                "textureId" to tid,
+              ),
+            )
           } catch (t: Throwable) {
             result.error("exo_create", t.message, null)
           }
         }
       }
+      "sdkInt" -> result.success(Build.VERSION.SDK_INT)
       "open" -> {
         val url = call.argument<String>("url")?.trim().orEmpty()
         if (url.isEmpty()) {
@@ -239,8 +268,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               decodeMode = normalizeDecodeMode(mode)
             }
             if (render.isNotEmpty()) {
-              renderTexture = isTextureRender(render)
-              applyRenderToHost()
+              renderTexture = resolveRenderTexture(render)
+              syncOutputPath()
             }
             decodeFallbackTried = false
             openInternal(url, headers, mime, drm, live)
@@ -269,9 +298,18 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val mode = call.argument<String>("mode")?.trim().orEmpty()
         main.post {
           try {
-            renderTexture = isTextureRender(mode)
-            applyRenderToHost()
-            result.success(true)
+            renderTexture = resolveRenderTexture(mode)
+            syncOutputPath()
+            val tid = if (useFlutterTexture) ensureFlutterTexture() else -1L
+            result.success(
+              mapOf(
+                "ok" to true,
+                "render" to if (renderTexture) "texture" else "surface",
+                "path" to if (useFlutterTexture) "flutterTexture" else "platformView",
+                "textureId" to tid,
+                "sdkInt" to Build.VERSION.SDK_INT,
+              ),
+            )
           } catch (t: Throwable) {
             result.error("exo_render", t.message, null)
           }
@@ -285,8 +323,16 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "stop" -> {
         main.post {
-          player?.pause()
-          player?.seekTo(0)
+          player?.apply {
+            pause()
+            volume = 0f
+            try {
+              clearVideoSurface()
+            } catch (_: Throwable) {
+            }
+            stop()
+            seekTo(0)
+          }
           result.success(true)
         }
       }
@@ -303,6 +349,15 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           videoFit = normalizeFit(fit)
           applyVideoFit()
+          result.success(true)
+        }
+      }
+      // SurfaceView Hybrid Composition 上 Flutter 叠字会重影；缓冲 UI 画在原生宿主里。
+      "setBufferingUi" -> {
+        val show = call.argument<Boolean>("show") == true
+        val text = call.argument<String>("text") ?: "缓冲中"
+        main.post {
+          surfaceHost?.setBufferingUi(show, text)
           result.success(true)
         }
       }
@@ -337,6 +392,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "dispose" -> {
         main.post {
           releasePlayer()
+          releaseFlutterTexture()
           result.success(true)
         }
       }
@@ -345,8 +401,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   internal fun attachSurfaceHost(host: KotvExoSurfaceHost) {
+    if (useFlutterTexture) {
+      // 老盒不走 PlatformView；若误挂了宿主也不绑 Surface，避免双输出。
+      Log.w(TAG, "ignore PlatformView host (flutterTexture path)")
+      return
+    }
     surfaceHost = host
-    host.setRender(renderTexture, ::onSurfaceReady)
+    host.setRender(false, ::onSurfaceReady)
     onSurfaceReady()
   }
 
@@ -363,10 +424,67 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     main.post { bindPlayerSurface() }
   }
 
+  /** Texture → Flutter Texture（兼容）；Surface → Hybrid SurfaceView（HDR）。 */
+  private fun syncOutputPath() {
+    // 仅用户显式选 Texture 才走 Flutter Texture；API 级不再强制（否则 HDR 绿条）。
+    val wantFlutter = renderTexture
+    useFlutterTexture = wantFlutter
+    if (useFlutterTexture) {
+      surfaceHost?.let { unbindPlayerOutput(it) }
+      ensureFlutterTexture()
+      bindPlayerSurface()
+    } else {
+      releaseFlutterTexture()
+      applyRenderToHost()
+    }
+  }
+
+  private fun ensureFlutterTexture(): Long {
+    flutterTexture?.let { return it.id() }
+    val reg = textureRegistry ?: error("no texture registry")
+    val entry = reg.createSurfaceTexture()
+    // 起播前占位；收到 videoSize 后再 setDefaultBufferSize。
+    entry.surfaceTexture().setDefaultBufferSize(1280, 720)
+    flutterTexture = entry
+    flutterSurface?.release()
+    flutterSurface = Surface(entry.surfaceTexture())
+    Log.i(TAG, "flutterTexture id=${entry.id()}")
+    return entry.id()
+  }
+
+  private fun releaseFlutterTexture() {
+    try {
+      player?.clearVideoSurface()
+    } catch (_: Throwable) {
+    }
+    try {
+      flutterSurface?.release()
+    } catch (_: Throwable) {
+    }
+    flutterSurface = null
+    try {
+      flutterTexture?.release()
+    } catch (_: Throwable) {
+    }
+    flutterTexture = null
+  }
+
+  private fun resizeFlutterTexture(width: Int, height: Int) {
+    val w = width.coerceAtLeast(1)
+    val h = height.coerceAtLeast(1)
+    try {
+      flutterTexture?.surfaceTexture()?.setDefaultBufferSize(w, h)
+    } catch (t: Throwable) {
+      Log.w(TAG, "setDefaultBufferSize failed", t)
+    }
+  }
+
   private fun applyRenderToHost() {
+    if (useFlutterTexture) return
     val host = surfaceHost ?: return
     unbindPlayerOutput(host)
-    host.setRender(renderTexture, ::onSurfaceReady)
+    // PlatformView 路径仅 SurfaceView（Texture 已改走 Flutter Texture）。
+    host.setRender(false, ::onSurfaceReady)
     bindPlayerSurface()
   }
 
@@ -378,16 +496,19 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun bindPlayerSurface() {
     val p = player ?: return
-    val host = surfaceHost ?: return
-    if (renderTexture) {
-      val tv = host.textureView ?: return
-      if (!tv.isAvailable) return
-      p.setVideoTextureView(tv)
-    } else {
-      val sv = host.surfaceView ?: return
-      if (!canBindSurface(sv)) return
-      p.setVideoSurfaceView(sv)
+    if (useFlutterTexture) {
+      val s = flutterSurface ?: run {
+        ensureFlutterTexture()
+        flutterSurface
+      } ?: return
+      p.setVideoSurface(s)
+      applyVideoFit()
+      return
     }
+    val host = surfaceHost ?: return
+    val sv = host.surfaceView ?: return
+    if (!canBindSurface(sv)) return
+    p.setVideoSurfaceView(sv)
     applyVideoFit()
   }
 
@@ -486,6 +607,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
         if (playbackState == Player.STATE_READY) {
           val f = p.videoSize
+          if (f.width > 0 && f.height > 0) {
+            resizeFlutterTexture(f.width, f.height)
+          }
           emit(
             mapOf(
               "event" to "ready",
@@ -533,6 +657,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
 
       override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+        if (videoSize.width > 0 && videoSize.height > 0) {
+          resizeFlutterTexture(videoSize.width, videoSize.height)
+        }
         emit(
           mapOf(
             "event" to "size",
@@ -623,7 +750,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun releasePlayer() {
     main.removeCallbacks(tick)
-    player?.clearVideoSurface()
+    surfaceHost?.setBufferingUi(false, "")
+    try {
+      player?.clearVideoSurface()
+    } catch (_: Throwable) {
+    }
     player?.release()
     player = null
     trackSelector = null
@@ -633,6 +764,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentDrm = null
     formatRetried = false
     decodeFallbackTried = false
+    // Flutter Texture 跨 open 复用；仅 dispose/detach 时 releaseFlutterTexture。
   }
 
   /** 全部可用视频轨，按分辨率降序（与 MPV/FVP 重选策略一致）。 */
@@ -779,6 +911,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     }
 
+    /** 不再因老 API 强制 Texture：Flutter Texture + Rockchip HDR 会绿条花屏。 */
+    fun preferTextureOnDevice(): Boolean = false
+
+    fun resolveRenderTexture(requested: String): Boolean {
+      return if (requested.isNotEmpty()) isTextureRender(requested) else false
+    }
+
     fun isLocalPlayUrl(url: String): Boolean {
       val t = url.trim()
       val low = t.lowercase()
@@ -870,7 +1009,10 @@ internal class KotvExoSurfaceFactory(
     return object : PlatformView {
       override fun getView(): View = host
       override fun dispose() {
-        plugin.detachSurfaceHost(host)
+        // 延后卸树：同帧 dispose + Flutter detach 易触发 _owner != null 断言。
+        Handler(Looper.getMainLooper()).post {
+          plugin.detachSurfaceHost(host)
+        }
       }
     }
   }
@@ -886,9 +1028,76 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
   private var textureListener: TextureView.SurfaceTextureListener? = null
   private var onReady: (() -> Unit)? = null
   private var useTexture = false
+  private val bufferingPanel: android.widget.LinearLayout
+  private val bufferingProgress: android.widget.ProgressBar
+  private val bufferingText: android.widget.TextView
 
   init {
     setBackgroundColor(android.graphics.Color.BLACK)
+    // 遥控器焦点必须留在 Flutter TvFocus，否则 Hybrid SurfaceView 吃掉 DPAD 后进得去出不来。
+    isFocusable = false
+    isFocusableInTouchMode = false
+    descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+    importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+    val density = resources.displayMetrics.density
+    fun dp(v: Int): Int = (v * density + 0.5f).toInt()
+    bufferingProgress = android.widget.ProgressBar(context).apply {
+      isIndeterminate = true
+      isFocusable = false
+      indeterminateDrawable?.setColorFilter(
+        android.graphics.Color.parseColor("#E53955"),
+        android.graphics.PorterDuff.Mode.SRC_IN,
+      )
+      layoutParams = android.widget.LinearLayout.LayoutParams(dp(28), dp(28)).apply {
+        gravity = android.view.Gravity.CENTER_HORIZONTAL
+      }
+    }
+    bufferingText = android.widget.TextView(context).apply {
+      setTextColor(android.graphics.Color.WHITE)
+      textSize = 15f
+      typeface = android.graphics.Typeface.DEFAULT_BOLD
+      gravity = android.view.Gravity.CENTER
+      setPadding(0, dp(10), 0, 0)
+      isFocusable = false
+      maxLines = 2
+    }
+    bufferingPanel = android.widget.LinearLayout(context).apply {
+      orientation = android.widget.LinearLayout.VERTICAL
+      gravity = android.view.Gravity.CENTER
+      setPadding(dp(18), dp(14), dp(18), dp(14))
+      isFocusable = false
+      setBackgroundColor(android.graphics.Color.parseColor("#FF111111"))
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        background = android.graphics.drawable.GradientDrawable().apply {
+          setColor(android.graphics.Color.parseColor("#FF111111"))
+          cornerRadius = 20 * density
+        }
+      }
+      addView(bufferingProgress)
+      addView(bufferingText)
+      visibility = View.GONE
+      elevation = 8f
+    }
+    addView(
+      bufferingPanel,
+      LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+        gravity = android.view.Gravity.CENTER
+      },
+    )
+  }
+
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    // Flutter PlatformViewWrapper 默认 focusable，需连父链一起关掉。
+    stripPlatformViewFocus()
+  }
+
+  fun setBufferingUi(show: Boolean, text: String) {
+    bufferingText.text = text.ifBlank { "缓冲中" }
+    bufferingPanel.visibility = if (show) View.VISIBLE else View.GONE
+    if (show) {
+      bufferingPanel.bringToFront()
+    }
   }
 
   fun setRender(texture: Boolean, onReady: () -> Unit) {
@@ -902,13 +1111,18 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
       return
     }
     unbind()
-    removeAllViews()
+    // 保留 bufferingPanel；只换视频面，避免缓冲 UI 被拆掉。
+    listOfNotNull(surfaceView, textureView).forEach { removeView(it) }
     surfaceView = null
     textureView = null
     useTexture = texture
     val lp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-    if (texture) {
-      val tv = TextureView(context).apply { layoutParams = lp }
+      if (texture) {
+      val tv = TextureView(context).apply {
+        layoutParams = lp
+        isFocusable = false
+        isFocusableInTouchMode = false
+      }
       textureView = tv
       val listener = object : TextureView.SurfaceTextureListener {
         override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
@@ -925,10 +1139,16 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
       }
       textureListener = listener
       tv.surfaceTextureListener = listener
-      addView(tv)
+      addView(tv, 0)
       if (tv.isAvailable) onReady()
     } else {
-      val sv = SurfaceView(context).apply { layoutParams = lp }
+      val sv = SurfaceView(context).apply {
+        layoutParams = lp
+        // Hybrid Composition 需要媒体层叠出；关了会黑屏。缓冲文案改走 Flutter 层。
+        setZOrderMediaOverlay(true)
+        isFocusable = false
+        isFocusableInTouchMode = false
+      }
       surfaceView = sv
       val cb = object : SurfaceHolder.Callback {
         override fun surfaceCreated(holder: SurfaceHolder) {
@@ -943,8 +1163,9 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
       }
       surfaceCallback = cb
       sv.holder.addCallback(cb)
-      addView(sv)
+      addView(sv, 0)
     }
+    bufferingPanel.bringToFront()
   }
 
   fun unbind() {

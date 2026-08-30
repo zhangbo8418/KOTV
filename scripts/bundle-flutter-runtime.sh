@@ -21,7 +21,7 @@ if [[ ! -d "$SRC_RT" ]]; then
   exit 1
 fi
 
-# 最少要有 jre（JAR 爬虫）、bridge；页内 MPV 由 media_kit 自带
+# 最少要有 jre（JAR 爬虫）、bridge；页内 MPV 走原生通道（不进 runtime）
 need_ok=1
 for need in jre bridge; do
   if [[ ! -d "$SRC_RT/$need" && ! -e "$SRC_RT/$need" ]]; then

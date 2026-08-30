@@ -79,27 +79,29 @@ class KotvLayout {
   }
 }
 
-/// 给子树注入缩放 + textScaler，窗口拖拽时整页比例跟手。
-/// 紧凑模式（scale < 0.85）下不再缩文字，避免字被裁切/过小。
+/// 给子树注入缩放；文字缩放仅在与父级不同时才包一层 MediaQuery，
+/// 避免每帧嵌套替换 MediaQuery 触发 InheritedElement.notifyClients 断言崩溃。
 class ScaledLayoutBox extends StatelessWidget {
   const ScaledLayoutBox({super.key, required this.child});
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
+    final parentMq = MediaQuery.of(context);
     return LayoutBuilder(
       builder: (context, c) {
         final scale = LayoutScale.compute(c.maxWidth, c.maxHeight);
-        final mq = MediaQuery.of(context);
         // scale < 0.85 意味着窗口很小（竖屏/手机），此时文字保持 1.0 不缩放
         final textScale = scale < 0.85 ? 1.0 : scale;
-        return LayoutScale(
-          scale: scale,
-          child: MediaQuery(
-            data: mq.copyWith(textScaler: TextScaler.linear(textScale)),
-            child: child,
-          ),
-        );
+        final parentText = parentMq.textScaler.scale(1.0);
+        Widget subtree = LayoutScale(scale: scale, child: child);
+        if ((parentText - textScale).abs() > 0.001) {
+          subtree = MediaQuery(
+            data: parentMq.copyWith(textScaler: TextScaler.linear(textScale)),
+            child: subtree,
+          );
+        }
+        return subtree;
       },
     );
   }

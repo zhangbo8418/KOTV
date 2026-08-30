@@ -135,7 +135,13 @@ public final class JarDexer {
     Log.i(TAG, "d8 library jars=" + libCount);
 
     try {
-      D8.run(builder.build());
+      try {
+        D8.run(builder.build());
+      } catch (NoClassDefFoundError | ExceptionInInitializerError e) {
+        throw new IllegalStateException(
+            "安卓仅支持含 classes.dex 的站点包（对齐 TV）；当前 jar 需 PC 侧预转 dex: " + src.getName(),
+            e);
+      }
     } catch (Throwable t) {
       deleteRecursive(work);
       throw new IllegalStateException(
@@ -215,7 +221,35 @@ public final class JarDexer {
             + (appParent == null ? "null" : appParent.getClass().getName())
             + " spiders="
             + listSpiderClasses(hasDex ? src.getAbsolutePath() : load.getAbsolutePath()));
-    return new DexClassLoader(load.getAbsolutePath(), cachePath, cachePath, appParent);
+    // 对齐 TV：普通 DexClassLoader(parent=App)。
+    // TV 同样经 NewPipeExtractor 带 protobuf-javalite；并非「不带 protobuf」。
+    // KOTV 若再叠 R8 工具链/其它 protobuf 变体，站点 jar（如 AppDrama）易 NPE。
+    // 过滤父加载器对 protobuf/com.base.model 抛 CNFE，让 DexClassLoader 回落到站点 dex。
+    return new DexClassLoader(
+        load.getAbsolutePath(), cachePath, cachePath, hideSpiderPrivateApis(appParent));
+  }
+
+  /**
+   * 对站点私有 API（protobuf / AppDrama 模型）假装父 ClassLoader 没有，逼 DexClassLoader
+   * 从站点 dex 加载——效果对齐「TV 宿主 classpath 不提供这套类」。
+   */
+  private static ClassLoader hideSpiderPrivateApis(ClassLoader appParent) {
+    if (appParent == null) return null;
+    return new ClassLoader(appParent) {
+      @Override
+      protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+        if (isSpiderPrivateApi(name)) {
+          throw new ClassNotFoundException(name);
+        }
+        return super.loadClass(name, resolve);
+      }
+    };
+  }
+
+  private static boolean isSpiderPrivateApi(String name) {
+    return name.startsWith("com.google.protobuf.")
+        || name.startsWith("com.base.model.")
+        || name.startsWith("com.google.crypto.tink.");
   }
 
   /** 给 CNF 诊断：jar 里实际有哪些 {@code com.github.catvod.spider.*}。 */

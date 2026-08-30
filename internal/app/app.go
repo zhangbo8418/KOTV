@@ -194,9 +194,29 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 		return
 	}
 	sess.Bootstrapped = true
+	adoptGlobal := func() {
+		if !a.Ready {
+			return
+		}
+		sess.Cfg = a.Config.CloneEphemeral()
+		sess.Ready = true
+		sess.ErrMsg = ""
+		sess.Source = settings.Get(settings.VOD)
+		// 全局 home 若是「点我切源」等元站点，会话侧换成第一个真实站，避免 home API 空 URL。
+		if home := sess.Cfg.Home(); home.Key == "" || home.API == "" || config.IsMetaSite(home) {
+			if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
+				sess.Cfg.SetHome(alt)
+			}
+		}
+		if sess.Live != nil {
+			sess.Live = live.NewService(sess.Cfg)
+			sess.Live.SyncFromConfig()
+		}
+	}
 	src, homeKey := clientsession.LoadSource(sess.ClientID)
 	src = strings.TrimSpace(src)
 	if src == "" {
+		adoptGlobal()
 		return
 	}
 	cur := strings.TrimSpace(sess.Source)
@@ -204,6 +224,10 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 		return
 	}
 	if err := sess.Cfg.LoadFromSource(src); err != nil {
+		if a.Ready {
+			adoptGlobal()
+			return
+		}
 		sess.Ready = false
 		sess.ErrMsg = err.Error()
 		return

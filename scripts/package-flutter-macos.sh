@@ -75,6 +75,21 @@ mkdir -p "$ROOT/dist" "$STAGE"
 echo "==> stage app from $APP_SRC"
 ditto "$APP_SRC" "$OUT_APP"
 
+echo "==> bundle libmpv (desktop native MPV)"
+chmod +x "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
+"$ROOT/scripts/fetch-desktop-mpv-libs.sh"
+MPV_ASSET="$ROOT/flutter/assets/mpv-libs/macos/libmpv.dylib"
+if [[ -f "$MPV_ASSET" ]]; then
+  mkdir -p "$OUT_APP/Contents/Frameworks"
+  cp -f "$MPV_ASSET" "$OUT_APP/Contents/Frameworks/libmpv.dylib"
+  if command -v install_name_tool >/dev/null; then
+    install_name_tool -id "@rpath/libmpv.dylib" "$OUT_APP/Contents/Frameworks/libmpv.dylib" 2>/dev/null || true
+  fi
+  echo "  bundled Contents/Frameworks/libmpv.dylib"
+else
+  echo "  WARNING: libmpv.dylib missing — run: brew install mpv" >&2
+fi
+
 KOTV_BUNDLE_ENGINE_TO_MACOS=1 "$ROOT/scripts/bundle-flutter-runtime.sh" "$OUT_APP"
 
 WRAP="$OUT_APP/Contents/MacOS/kotv-launch"

@@ -4,7 +4,6 @@ import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 
 import '../player/danmaku_layer.dart';
 import '../player/exo_playback.dart';
@@ -16,6 +15,8 @@ import '../player/xg_playback.dart';
 import '../player/zw_playback.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
+import '../player/native_mpv_playback.dart';
+import '../player/tv_remote_keys.dart';
 import '../nav/kotv_page.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
@@ -25,8 +26,11 @@ class DetailFullscreenPage extends StatefulWidget {
   const DetailFullscreenPage({
     super.key,
     required this.playback,
+    required this.videoChild,
     required this.vodName,
     required this.title,
+    this.embedded = false,
+    this.onExitEmbedded,
     this.episodes = const [],
     this.epIdx = -1,
     this.onSelectEp,
@@ -61,8 +65,13 @@ class DetailFullscreenPage extends StatefulWidget {
   });
 
   final KotvPlayback playback;
+  /// 详情页传入的同一块 PlatformView/Texture（对齐 TV 原位全屏，不重绑 Surface）。
+  final Widget videoChild;
   final String vodName;
   final String title;
+  /// true：嵌在详情页内切换布局；false：独立路由（遗留）。
+  final bool embedded;
+  final VoidCallback? onExitEmbedded;
   final List<String> episodes;
   final int epIdx;
   final void Function(int idx)? onSelectEp;
@@ -304,6 +313,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   Future<void> _exitFullscreen() async {
     await _restoreChrome();
+    if (widget.embedded) {
+      widget.onExitEmbedded?.call();
+      return;
+    }
     if (mounted) Navigator.of(context).maybePop();
   }
 
@@ -538,42 +551,80 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
+    if (kotvIsBackKey(key)) {
       if (_epOpen) {
         _chromeKey.currentState?.closeEpisodes();
         setState(() {});
         return KeyEventResult.handled;
       }
+      if (_showChrome) {
+        _setChrome(show: false, hideCursor: true);
+        return KeyEventResult.handled;
+      }
       unawaited(_exitFullscreen());
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.space || key == LogicalKeyboardKey.mediaPlayPause) {
-      widget.playback.playOrPause();
-      _bumpChrome();
+    // 菜单：对齐 TV VideoActivity → onToggle 显隐控件，便于遥控选按钮。
+    if (kotvIsMenuKey(key)) {
+      if (_epOpen) {
+        _chromeKey.currentState?.closeEpisodes();
+        setState(() {});
+      }
+      _setChrome(show: !_showChrome, hideCursor: _showChrome);
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
+    // E：选集面板（保留，菜单键留给控件）
+    if (key == LogicalKeyboardKey.keyE) {
+      _chromeKey.currentState?.openEpisodes();
+      setState(() {});
+      return KeyEventResult.handled;
+    }
+    final activate = kotvIsEnterKey(key) || kotvIsMediaPlayPause(key);
+    if (activate) {
+      // 控件隐藏：先亮出控件并播停；控件已亮且焦点在具体按钮上：交给 ActivateIntent。
+      if (!_showChrome) {
+        widget.playback.playOrPause();
+        _bumpChrome();
+        return KeyEventResult.handled;
+      }
+      final primary = FocusManager.instance.primaryFocus;
+      if (primary == null || primary == node) {
+        widget.playback.playOrPause();
+        _bumpChrome();
+        return KeyEventResult.handled;
+      }
+      _bumpChrome();
+      return KeyEventResult.ignored;
+    }
+    final arrow = kotvIsLeftKey(key) ||
+        kotvIsRightKey(key) ||
+        kotvIsUpKey(key) ||
+        kotvIsDownKey(key) ||
+        kotvIsMediaRewind(key) ||
+        kotvIsMediaFastForward(key);
+    // 控件/选集面板打开时：方向键交给焦点遍历（遥控器选按钮），勿截获成快进/切集。
+    if (arrow && (_showChrome || _epOpen)) {
+      _bumpChrome();
+      return KeyEventResult.ignored;
+    }
+    if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
       final p = widget.playback.position - const Duration(seconds: 10);
       widget.playback.seek(p.isNegative ? Duration.zero : p);
       _bumpChrome();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
+    if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
       widget.playback.seek(widget.playback.position + const Duration(seconds: 10));
       _bumpChrome();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowUp) {
+    // 控件隐藏时：上下切集（KOTV 扩展；TV 是亮控件）
+    if (kotvIsUpKey(key)) {
       _goPrev();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowDown) {
+    if (kotvIsDownKey(key)) {
       _goNext();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.keyE || key == LogicalKeyboardKey.keyM) {
-      _chromeKey.currentState?.openEpisodes();
-      setState(() {});
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -595,45 +646,20 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Widget _buildVideo() {
-    final pb = widget.playback;
-    Widget video;
-    if (pb is MediaKitPlayback) {
-      final mk = Video(
-        controller: pb.controller,
-        controls: NoVideoControls,
-        fit: _aspect.fit,
-        wakelock: false,
+    Widget video = widget.videoChild;
+    final ratio = _aspect.ratio;
+    if (ratio != null && ratio > 0) {
+      video = LayoutBuilder(
+        builder: (context, c) {
+          var w = c.maxWidth;
+          var h = w / ratio;
+          if (h > c.maxHeight) {
+            h = c.maxHeight;
+            w = h * ratio;
+          }
+          return Center(child: SizedBox(width: w, height: h, child: video));
+        },
       );
-      final ratio = _aspect.ratio;
-      if (ratio == null || ratio <= 0) {
-        video = mk;
-      } else {
-        video = LayoutBuilder(
-          builder: (context, c) {
-            var w = c.maxWidth;
-            var h = w / ratio;
-            if (h > c.maxHeight) {
-              h = c.maxHeight;
-              w = h * ratio;
-            }
-            return Center(child: SizedBox(width: w, height: h, child: mk));
-          },
-        );
-      }
-    } else if (pb is ExoPlayback) {
-      video = pb.buildView(fit: _aspect.fit);
-    } else if (pb is FvpPlayback) {
-      video = pb.buildView(fit: _aspect.fit);
-    } else if (pb is HtmlPlayback) {
-      video = pb.buildView(fit: _aspect.fit);
-    } else if (pb is ArtPlayback) {
-      video = pb.buildView(fit: _aspect.fit);
-    } else if (pb is XgPlayback) {
-      video = pb.buildView(fit: _aspect.fit);
-    } else if (pb is ZwPlayback) {
-      video = pb.buildView(fit: _aspect.fit);
-    } else {
-      video = const ColoredBox(color: Colors.black);
     }
 
     if (!_ambientOn) return video;

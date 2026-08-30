@@ -35,6 +35,11 @@ class MainActivity : FlutterActivity() {
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
     flutterEngine.plugins.add(KotvExoPlugin())
+    flutterEngine.plugins.add(KotvMpvPlugin())
+    flutterEngine
+      .platformViewsController
+      .registry
+      .registerViewFactory("kotv/glide_image", KotvGlideImageFactory())
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kotv_android_spider")
       .setMethodCallHandler { call, result ->
         when (call.method) {

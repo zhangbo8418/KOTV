@@ -49,18 +49,18 @@ String kotvPlayerRenderLabel(String raw) =>
 bool kotvPlayerRenderApplies(String playerVal) =>
     kotvIsAndroid() && kotvEmbedBackend(playerVal) == KotvEmbedBackend.exo;
 
-/// 点播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。
+/// 点播默认：Web=HTML5；Android=Exo；其它=FVP（原生 MPV 接入前暂用）。
 String kotvDefaultVodPlayer() {
   if (kIsWeb) return 'innie#html';
   if (kotvIsAndroid()) return 'innie#exo';
-  return 'innie#mpv';
+  return 'innie#fvp';
 }
 
-/// 直播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。
+/// 直播默认：Web=HTML5；Android=Exo；其它=FVP（原生 MPV 接入前暂用）。
 String kotvDefaultLivePlayer() {
   if (kIsWeb) return 'innie#html';
   if (kotvIsAndroid()) return 'innie#exo';
-  return 'innie#mpv';
+  return 'innie#fvp';
 }
 
 String kotvClampPlayerVal(String raw, {required bool live}) {
@@ -117,14 +117,14 @@ List<(String, String)> kotvVodPlayerOptions() {
   }
   if (kotvIsIOS()) {
     return const [
-      ('内置 MPV（默认）', 'innie#mpv'),
-      ('内置 FVP', 'innie#fvp'),
+      ('内置 FVP（默认）', 'innie#fvp'),
+      ('内置 MPV', 'innie#mpv'),
       ('浏览器播放（HTML5）', 'innie#html'),
     ];
   }
   return [
-    ('内置 MPV（默认）', 'innie#mpv'),
-    ('内置 FVP', 'innie#fvp'),
+    ('内置 FVP（默认）', 'innie#fvp'),
+    ('内置 MPV', 'innie#mpv'),
     ('外部 MPV', 'outie#mpv'),
     ('外部 VLC', 'outie#vlc'),
     if (Platform.isMacOS) ('IINA', 'outie#iina'),
@@ -149,14 +149,14 @@ List<(String, String)> kotvLivePlayerOptions() {
   }
   if (kotvIsIOS()) {
     return const [
-      ('内置 MPV（默认）', 'innie#mpv'),
-      ('内置 FVP', 'innie#fvp'),
+      ('内置 FVP（默认）', 'innie#fvp'),
+      ('内置 MPV', 'innie#mpv'),
       ('浏览器播放（HTML5）', 'innie#html'),
     ];
   }
   return [
-    ('内置 MPV（默认）', 'innie#mpv'),
-    ('内置 FVP', 'innie#fvp'),
+    ('内置 FVP（默认）', 'innie#fvp'),
+    ('内置 MPV', 'innie#mpv'),
     ('外部 MPV', 'outie#mpv'),
     ('外部 VLC', 'outie#vlc'),
     if (Platform.isMacOS) ('IINA', 'outie#iina'),

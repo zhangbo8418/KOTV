@@ -6,6 +6,7 @@ Widget kotvExoSurfaceView({
   required String viewType,
   required String fitName,
   required void Function(String fitName) onFit,
+  bool hybrid = false,
 }) {
   return const ColoredBox(color: Colors.black);
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
+import '../theme/kotv_theme.dart';
 
 /// 播放器全屏按钮：移动端直接进入；桌面在图标上方弹出抽屉式选项。
 class KotvFullscreenExpandButton extends StatefulWidget {
@@ -167,9 +168,9 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
       link: _link,
       child: Tooltip(
         message: '全屏',
-        child: InkWell(
-          onTap: _onTap,
-          borderRadius: BorderRadius.circular(8),
+        child: TvFocus(
+          onPressed: _onTap,
+          borderRadius: 8,
           child: SizedBox(
             width: widget.size,
             height: widget.size,

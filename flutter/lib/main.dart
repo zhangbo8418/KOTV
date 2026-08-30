@@ -6,7 +6,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -43,6 +42,12 @@ void _kotvLogUiError(Object error, StackTrace? stack, {String where = 'build'}) 
 }
 
 Widget _kotvErrorWidget(FlutterErrorDetails details) {
+  final msg = '${details.exception}';
+  // 已知框架竞态：勿整页「页面渲染出错」，保留黑底以免打断播放/导航。
+  if (msg.contains('_owner != null') || msg.contains('notifyClients')) {
+    _kotvLogUiError(details.exception, details.stack, where: 'ErrorWidget-soft');
+    return const ColoredBox(color: Color(0xFF14161B));
+  }
   _kotvLogUiError(details.exception, details.stack, where: 'ErrorWidget');
   final stackLine = (details.stack?.toString() ?? '')
       .split('\n')
@@ -96,6 +101,16 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ErrorWidget.builder = _kotvErrorWidget;
   FlutterError.onError = (details) {
+    final msg = '${details.exception}';
+    // InheritedElement.notifyClients：Theme/MediaQuery 与路由竞态。
+    // RenderObject.detach `_owner != null`：PlatformView 卸树竞态（异常文案常无 detach 字样）。
+    // presentError 会整页 ErrorWidget；只记日志，勿毁树。
+    if (msg.contains('notifyClients') ||
+        (msg.contains('Failed assertion') && msg.contains('dependents')) ||
+        msg.contains('_owner != null')) {
+      _kotvLogUiError(details.exception, details.stack, where: 'FlutterError-soft');
+      return;
+    }
     FlutterError.presentError(details);
     _kotvLogUiError(details.exception, details.stack, where: 'FlutterError');
   };
@@ -104,8 +119,6 @@ Future<void> main() async {
     return true;
   };
   if (!kIsWeb) {
-    // Android 也要 init：用户可选 MPV（media_kit）；Web 用 HTML5，不初始化 media_kit。
-    MediaKit.ensureInitialized();
     kotvRegisterFvp();
     if (Platform.isAndroid) {
       unawaited(_ensureAndroidStoragePermission());

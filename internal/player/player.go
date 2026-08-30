@@ -111,7 +111,7 @@ func Play(url string, histKey string) error {
 			return fmt.Errorf("页内播放器未就绪：请在详情/直播页播放")
 		}
 		if !embed.MPVAvailable() {
-			return fmt.Errorf("未找到捆绑 libmpv：页内 MPV 由 Flutter media_kit 提供，或改选外部 MPV")
+			return fmt.Errorf("未找到捆绑 libmpv：页内 MPV 由 Flutter 原生通道提供，或改选外部 MPV")
 		}
 		Stop() // 停掉旁路进程
 		eng := embed.Controller(embed.EnsureMPV())
@@ -456,7 +456,7 @@ func Available() map[string]bool {
 		"mpv":       findPlayer("mpv") != "",
 		"iina":      appExists("IINA"),
 		"embed_fvp": true,
-		// Flutter 页内 MPV 走 media_kit 自带 libmpv，不依赖 runtime/libmpv。
+		// Flutter 页内 MPV 走原生通道，不依赖 runtime/libmpv。
 		"embed_mpv": true,
 	}
 }

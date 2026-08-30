@@ -63,6 +63,10 @@ android {
         release {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.debug
+            // Temporary: skip R8 on low-RAM/swap Mac so MPV/libvulkan stub APK can ship for device verify.
+            // Re-enable minifyEnabled=true when disk/RAM allows (JarDexer needs proguard keep rules).
+            minifyEnabled false
+            shrinkResources false
             // Flutter release 常开 R8；必须带 keep，否则 JarDexer → u1.a 反射失败
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             ndk {
@@ -78,6 +82,9 @@ android {
     // 强制抽出 jniLibs，否则 Process.start(libkotv_engine.so) 无法 exec APK 内压缩库
     packaging {
         jniLibs {
+            // stub .so is already small; AGP stripReleaseDebugSymbols corrupts it
+            keepDebugSymbols.add("**/libvulkan.so")
+            keepDebugSymbols.add("**/libkotv_dl.so")
             useLegacyPackaging = true
             for (abi in kotvAllAbis) {
                 if (!kotvAbiFilters.contains(abi)) {
@@ -170,7 +177,8 @@ dependencies {
     // 安卓宿主：按 Android SDK 编进 App CL（对齐 TV :catvod）。桌面仍走 bridge/spider-bridge.jar。
     implementation project(":kotv-bridge")
     implementation "org.nanohttpd:nanohttpd:2.3.1"
-    // 站点 PC 瘦包（.class）运行时 D8 → dex
+    // 站点 PC 瘦包（.class）运行时 D8 → dex，须打进 APK。
+    // TV 也带 NewPipe→protobuf-javalite；站点冲突由 JarDexer 过滤父 CL，不靠去掉 protobuf。
     implementation "com.android.tools:r8:8.9.35"
     def media3 = "1.4.1"
     implementation "androidx.media3:media3-exoplayer:$media3"
@@ -178,6 +186,8 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer-dash:$media3"
     implementation "androidx.media3:media3-datasource-okhttp:$media3"
     implementation "com.squareup.okhttp3:okhttp:5.4.0"
+    // 对齐 TV ImgUtil：海报用 Glide + @Headers=
+    implementation "com.github.bumptech.glide:glide:4.16.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load
     implementation "wang.harlon.quickjs:wrapper-android:3.2.3"
     implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
@@ -224,8 +234,27 @@ tasks.register("prepareKotvEngineSo") {
     }
 }
 
+// 原生 MPV：assets/mpv-libs/{abi}/*.so（与 TV MPVLib 配套）；缺失时尝试拉取。
+tasks.register("prepareKotvMpvLibs", Exec) {
+    def marker = file("src/main/assets/mpv-libs/arm64-v8a/libmpv.so")
+    onlyIf { !marker.exists() || marker.length() == 0L }
+    workingDir = repoRoot
+    commandLine "bash", "scripts/fetch-android-mpv-libs.sh"
+    ignoreExitValue = true
+    doFirst {
+        println "[android] fetching MPV native libs into assets/mpv-libs …"
+    }
+    doLast {
+        if (!marker.exists() || marker.length() == 0L) {
+            println "[android] WARNING: MPV libs missing. Run scripts/fetch-android-mpv-libs.sh (innie#mpv needs them)"
+        } else {
+            println "[android] MPV libs ready: ${marker}"
+        }
+    }
+}
+
 tasks.named("preBuild") {
-    dependsOn "prepareKotvEngineSo"
+    dependsOn "prepareKotvEngineSo", "prepareKotvMpvLibs"
 }
 
 // Flutter Gradle Plugin 偶发在合并后抬高 targetSdk；构建前再钉死一次。

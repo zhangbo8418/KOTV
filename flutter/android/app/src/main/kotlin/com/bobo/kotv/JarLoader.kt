@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.util.Log
 import com.bobo.kotv.bridge.SpiderBridge
+import com.fongmi.android.tv.App
 
 /**
  * 安卓宿主在 `:kotv-bridge` 模块（对齐 TV `:catvod`），不再 d8 桌面 spider-bridge.jar。
@@ -32,7 +33,7 @@ object JarLoader {
   fun isQuickJsNativeLoaded(): Boolean = quickJsNative
 
   private fun syncSpiderUiContext(context: Context) {
-    val act = KotvApplication.activity()
+    val act = App.activity()
     if (act != null) {
       try {
         SpiderBridge.setAndroidActivity(act)
@@ -69,7 +70,7 @@ object JarLoader {
       Log.i(
         TAG,
         "bridge on App CL parent=${SpiderBridge::class.java.classLoader?.javaClass?.name} " +
-          "ensure=${JarDexer::class.java.name} activity=${KotvApplication.activity()?.javaClass?.simpleName}",
+          "ensure=${JarDexer::class.java.name} activity=${App.activity()?.javaClass?.simpleName}",
       )
     }
   }

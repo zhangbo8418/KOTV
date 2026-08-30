@@ -701,8 +701,14 @@ func JsParse(jar, op, html, rule, url, texts, urls string) (value string, list [
 		"texts": texts,
 		"urls":  urls,
 	}
-	if strings.TrimSpace(jar) != "" {
-		args["jar"] = jar
+	jar = strings.TrimSpace(jar)
+	if jar != "" {
+		// 必须传本地已缓存路径。相对 spider.jar;md5;… 会让 Android 当成文件名反复失败。
+		if dest, e := cacheJar(jar, ConfigBase(), false); e == nil && strings.TrimSpace(dest) != "" {
+			args["jar"] = dest
+		} else if e != nil {
+			log.Printf("jsParse cacheJar skip (%s): %v", jar, e)
+		}
 	}
 	raw, err := callJarMethod("jsParse", args)
 	if err != nil {

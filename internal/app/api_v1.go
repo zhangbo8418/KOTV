@@ -69,6 +69,36 @@ func (a *App) APIGetConfig() map[string]any {
 	if sess != nil {
 		ready, errMsg = sess.Ready, sess.ErrMsg
 		source = sess.Source
+		if !ready && a.Ready && len(cfg.Sites()) == 0 {
+			sess.Cfg = a.Config.CloneEphemeral()
+			sess.Ready = true
+			sess.ErrMsg = ""
+			if src := strings.TrimSpace(settings.Get(settings.VOD)); src != "" {
+				sess.Source = src
+			}
+			if home := sess.Cfg.Home(); home.Key == "" || home.API == "" || config.IsMetaSite(home) {
+				if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
+					sess.Cfg.SetHome(alt)
+				}
+			}
+			if sess.Live != nil {
+				sess.Live = live.NewService(sess.Cfg)
+				sess.Live.SyncFromConfig()
+			}
+			cfg = sess.Cfg
+			ready, errMsg = sess.Ready, sess.ErrMsg
+			source = sess.Source
+		} else if ready && cfg != nil {
+			// 已 ready 但 home 仍是空 API 元站点时纠正一次
+			if home := cfg.Home(); home.API == "" || config.IsMetaSite(home) {
+				if alt := config.PickDefaultHome(cfg.Sites()); alt.Key != "" && alt.Key != home.Key {
+					cfg.SetHome(alt)
+					if sess != nil {
+						clientsession.SaveSource(sess.ClientID, sess.Source, alt.Key)
+					}
+				}
+			}
+		}
 	}
 	home := cfg.Home()
 	sites := make([]map[string]any, 0)
@@ -1562,7 +1592,7 @@ func (a *App) APIPlayerStatus() map[string]any {
 	return out
 }
 
-// APIPlayerEmbed 页内嵌入播放（Flutter 内置 media_kit/FVP 不经此路径）。
+// APIPlayerEmbed 页内嵌入播放（Flutter 内置 Exo/MPV/FVP 不经此路径）。
 // playerVal: innie#mpv；空则用当前设置。
 func (a *App) APIPlayerEmbed(playURL, playerVal, histKey string) error {
 	playURL = strings.TrimSpace(playURL)

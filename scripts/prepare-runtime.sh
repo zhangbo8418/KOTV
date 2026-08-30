@@ -805,13 +805,13 @@ prepare_ffmpeg() {
 }
 
 # --- libmpv ---
-# 桌面页内 MPV 由 Flutter media_kit 自带；Go 引擎不做页内播放，runtime 不打包 libmpv。
+# 桌面页内 MPV 走原生通道（P1/P2）；Go 引擎不做页内播放，runtime 不打包 libmpv。
 
 prepare_one() {
   local plat="$1"
   echo "======== prepare runtime: $plat ========"
   mkdir -p "$CACHE" "$OUT_ROOT"
-  # 不捆绑外部播放器目录（页内 MPV=media_kit；外部播放器用系统安装）
+  # 不捆绑外部播放器目录（页内 MPV=原生通道；外部播放器用系统安装）
   rm -rf "$OUT_ROOT/mpv" "$OUT_ROOT/lib" "$OUT_ROOT/vlc" "$OUT_ROOT/libvlc" "$OUT_ROOT/libmpv"
   prepare_jre "$plat"
   prepare_python "$plat"
@@ -840,7 +840,7 @@ EOF
   "$ROOT/scripts/verify-runtime.sh" "$OUT_ROOT" "$plat"
   echo "======== done: $OUT_ROOT ========"
   echo "包含: jre / python / chromium / ffmpeg / bridge"
-  echo "页内 MPV：Flutter media_kit 自带 libmpv（不进 runtime/）"
+  echo "页内 MPV：原生 libmpv（Android assets/mpv-libs；桌面 P2）"
   echo "JS(QuickJS) 已编译进主程序 (CGO)。Windows 请用 MSVCRT MinGW 打包（见 package.sh / check-win7-deps.ps1）。"
 }
 

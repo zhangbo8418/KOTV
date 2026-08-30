@@ -33,12 +33,15 @@ Future<void> kotvGuardSilentVideo({
   Duration progressStallTimeout = const Duration(seconds: 8),
   /// 进度至少前进这么多才算「动了」。
   Duration progressMinDelta = const Duration(milliseconds: 400),
+  /// 一直缓冲却始终无画面/未真正起播：超时抛错，交给 [KotvPlaybackFailover]。
+  Duration bufferingNoVideoTimeout = const Duration(seconds: 18),
   Duration tick = const Duration(milliseconds: 200),
 }) async {
   DateTime? blackSince;
   DateTime? sourceWaitSince;
   DateTime? deadSince;
   DateTime? sizeSince;
+  DateTime? bufferingNoVideoSince;
   var sourceFixDone = false;
   var blackFixDone = false;
 
@@ -117,6 +120,7 @@ Future<void> kotvGuardSilentVideo({
     }
 
     if (hasVideoSize()) {
+      bufferingNoVideoSince = null;
       sizeSince ??= now;
       if (now.difference(sizeSince) >= sizeSettleTimeout) {
         await ensureProgressOrThrow();
@@ -128,6 +132,16 @@ Future<void> kotvGuardSilentVideo({
       continue;
     }
     sizeSince = null;
+
+    // 缓冲很久仍无画面：MPV/硬解卡死常见；勿因 isBuffering&&!alive 永久空转。
+    if (isBuffering()) {
+      bufferingNoVideoSince ??= now;
+      if (now.difference(bufferingNoVideoSince!) >= bufferingNoVideoTimeout) {
+        throw const KotvSilentVideoException('缓冲过久仍无画面');
+      }
+    } else {
+      bufferingNoVideoSince = null;
+    }
 
     final alive = sessionAlive();
 

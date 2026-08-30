@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
+import '../player/native_mpv_playback.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
@@ -60,6 +61,7 @@ class CenterPlayPauseButton extends StatelessWidget {
     this.visible = true,
     this.hideWhenBuffering = true,
     this.showWhilePlaying = false,
+    this.autofocus = false,
     this.onPressed,
   });
 
@@ -70,6 +72,7 @@ class CenterPlayPauseButton extends StatelessWidget {
   final bool hideWhenBuffering;
   /// 控件层展开时同时显示暂停键；内嵌点播仍可只在暂停时出三角。
   final bool showWhilePlaying;
+  final bool autofocus;
   final VoidCallback? onPressed;
 
   @override
@@ -82,17 +85,19 @@ class CenterPlayPauseButton extends StatelessWidget {
         if (player.playing && !showWhilePlaying) return const SizedBox.shrink();
         final land = KotvLayout.isLandscapeCompact(context);
         final size = land ? 56.0 : 72.0;
+        void toggle() {
+          unawaited(player.playOrPause());
+          onPressed?.call();
+        }
         return Center(
-          child: Material(
-            color: const Color(0x73000000),
-            shape: const CircleBorder(),
-            elevation: 0,
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: () {
-                unawaited(player.playOrPause());
-                onPressed?.call();
-              },
+          child: TvFocus(
+            autofocus: autofocus,
+            onPressed: toggle,
+            borderRadius: size / 2,
+            child: Material(
+              color: const Color(0x73000000),
+              shape: const CircleBorder(),
+              elevation: 0,
               child: SizedBox(
                 width: size,
                 height: size,
@@ -121,6 +126,7 @@ class VodInlineControls extends StatelessWidget {
     this.onMini,
     this.miniActive = false,
     this.translucent = false,
+    this.autofocusPlay = false,
   });
 
   final KotvPlayback player;
@@ -130,6 +136,7 @@ class VodInlineControls extends StatelessWidget {
   final VoidCallback? onMini;
   final bool miniActive;
   final bool translucent;
+  final bool autofocusPlay;
 
   @override
   Widget build(BuildContext context) {
@@ -159,6 +166,7 @@ class VodInlineControls extends StatelessWidget {
                           icon: player.playing ? Icons.pause : Icons.play_arrow,
                           tip: player.playing ? '暂停' : '播放',
                           size: iconSize,
+                          autofocus: autofocusPlay,
                           onTap: () => player.playOrPause(),
                         ),
                         _IconAct(
@@ -253,6 +261,7 @@ class _IconAct extends StatelessWidget {
     required this.onTap,
     this.badge,
     this.size = 40,
+    this.autofocus = false,
   });
 
   final IconData icon;
@@ -260,15 +269,17 @@ class _IconAct extends StatelessWidget {
   final VoidCallback onTap;
   final String? badge;
   final double size;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
     final iconSz = size <= 34 ? 18.0 : 22.0;
     return Tooltip(
       message: tip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+      child: TvFocus(
+        autofocus: autofocus,
+        onPressed: onTap,
+        borderRadius: 8,
         child: SizedBox(
           width: size,
           height: size,
@@ -302,9 +313,9 @@ class _TextAct extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: 8,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
@@ -321,9 +332,9 @@ class _TinyBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: 6,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
@@ -1283,15 +1294,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
   Future<void> _applyStableVolume(bool on) async {
     final p = widget.player;
-    if (p is MediaKitPlayback) {
-      try {
-        await (p.player.platform as dynamic).setProperty('af', on ? 'loudnorm' : '');
-      } catch (_) {
-        try {
-          await (p.player.platform as dynamic).setProperty('af', on ? 'dynaudnorm' : '');
-        } catch (_) {}
-      }
-      return;
+    if (p is NativeMpvPlayback) {
+      await p.setStableVolume(on);
     }
   }
 
@@ -1400,6 +1404,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             enabled: widget.playUrl.isNotEmpty,
             showWhilePlaying: true,
             hideWhenBuffering: true,
+            autofocus: true,
             onPressed: widget.onBump,
           ),
         if (widget.visible && !_epOpen) ...[

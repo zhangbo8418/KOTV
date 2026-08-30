@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "kotv_mpv_plugin_linux.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -115,6 +116,8 @@ static void my_application_activate(GApplication* application) {
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  kotv_mpv_plugin_register_linux(view);
 
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   self->host_channel = fl_method_channel_new(

@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -22,8 +21,10 @@ import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/mpv_opts.dart';
+import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
 import '../player/playback_failover.dart';
+import '../player/tv_remote_keys.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
@@ -48,8 +49,7 @@ class LiveScreen extends ConsumerStatefulWidget {
 }
 
 class _LiveScreenState extends ConsumerState<LiveScreen> {
-  Player? _mkPlayer;
-  MediaKitPlayback? _mk;
+  NativeMpvPlayback? _mk;
   ExoPlayback? _exo;
   FvpPlayback? _fvp;
   HtmlPlayback? _html;
@@ -80,9 +80,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   
-  MediaKitPlayback _ensureMpv() {
-    _mkPlayer ??= kotvCreateMpvPlayer();
-    _mk ??= MediaKitPlayback(_mkPlayer!, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
+  NativeMpvPlayback _ensureMpv() {
+    _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
     return _mk!;
   }
 
@@ -91,6 +90,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       try {
         await _mk?.stop();
       } catch (_) {}
+      if (kotvIsAndroid() && _mk != null) {
+        try {
+          _mk?.dispose();
+        } catch (_) {}
+        _mk = null;
+      }
     }
     if (keep != KotvEmbedBackend.fvp) {
       try {
@@ -101,6 +106,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       try {
         await _exo?.stop();
       } catch (_) {}
+      try {
+        _exo?.dispose();
+      } catch (_) {}
+      _exo = null;
     }
     if (keep != KotvEmbedBackend.html) {
       try {
@@ -190,6 +199,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   /// 沉浸全屏：复用 PC 左右菜单交互（不再推另一套点播式全屏页）。
   bool _immersive = false;
   KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
+  /// 竖屏/横屏/沉浸全屏共用同一块 PlatformView/Texture（对齐 TV 原位全屏）。
+  final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_live_video');
   /// 竖屏面板：0=频道 1=EPG
   int _portraitTab = 0;
   /// 竖屏播放器底栏显隐（点画面切换；数秒后自动隐藏）
@@ -231,18 +242,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, _playUrl.isNotEmpty));
   }
 
-  /// 关窗前硬停：先停各后端，再 await 释放 libmpv，避免与 FlutterEngine 销毁竞态。
+  /// 关窗前硬停：先停各后端，再释放原生播放器，避免与 FlutterEngine 销毁竞态。
   Future<void> _prepareQuit() async {
     try {
       await _stopAllBackends();
     } catch (_) {}
-    final mkPlayer = _mkPlayer;
-    _mkPlayer = null;
     try {
       _mk?.dispose();
     } catch (_) {}
     _mk = null;
-    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   @override
@@ -264,6 +272,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _cursorHideTimer?.cancel();
     _focus.dispose();
     unawaited(_fvp?.stop() ?? Future<void>.value());
+    unawaited(_mk?.stop() ?? Future<void>.value());
     unawaited(_exo?.stop() ?? Future<void>.value());
     unawaited(_html?.stop() ?? Future<void>.value());
     unawaited(_art?.stop() ?? Future<void>.value());
@@ -276,9 +285,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _art?.dispose();
     _xg?.dispose();
     _zw?.dispose();
-    final mkPlayer = _mkPlayer;
-    _mkPlayer = null;
-    unawaited(kotvDisposeMpvPlayer(mkPlayer));
+    _mk = null;
     super.dispose();
   }
 
@@ -323,6 +330,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           _prefDecodeMode = decode;
         }
         _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
+        if (_renderMode == 'texture') {
+          _renderMode = 'surface';
+          unawaited(ref.read(apiProvider).setSetting('playerRender', 'surface'));
+        }
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
         var playerVal = '${settings['playerLive'] ?? ''}'.trim();
         if (playerVal.isEmpty) {
@@ -673,17 +684,36 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     throw const KotvSilentVideoException();
   }
 
-  Widget _liveVideo() {
+  /// 全屏/竖屏/横屏共用同一块原生输出（GlobalKey 在布局间 reparent）。
+  Widget _buildSharedLiveVideo() {
+    return KeyedSubtree(
+      key: _videoHostKey,
+      child: _liveVideoInner(),
+    );
+  }
+
+  Widget _liveVideoInner() {
     if (_playUrl.isEmpty) {
       return const ColoredBox(color: Colors.black);
     }
-    // FVP/MPV 尺寸与缓冲状态变化时重建画面（否则 0×0 / 晚挂 Texture 会黑屏有声）。
+    // MPV：勿随 listenable 重建 Video（会 seek(0) 播停循环）；FVP/Exo 仍需尺寸变化时刷新。
+    if (kotvEmbedBackend(_playerVal) == KotvEmbedBackend.mpv) {
+      return ExcludeFocus(
+        child: kotvPlaybackView(
+          playerVal: _playerVal,
+          playback: _playback,
+          mpv: _mk,
+        ),
+      );
+    }
     return ListenableBuilder(
       listenable: _playback,
-      builder: (context, _) => kotvPlaybackView(
-        playerVal: _playerVal,
-        playback: _playback,
-        mpv: _mk,
+      builder: (context, _) => ExcludeFocus(
+        child: kotvPlaybackView(
+          playerVal: _playerVal,
+          playback: _playback,
+          mpv: _mk,
+        ),
       ),
     );
   }
@@ -1269,53 +1299,92 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   String get _lineLabel => _chIdx < 0 || _lines <= 1 ? '' : '线路 ${_line + 1}/$_lines';
 
+  /// 对齐 TV LiveActivity.CustomKeyDownLive.dispatch：
+  /// 频道列表 / 设置面板 / 底栏控件打开时，方向键与确定交给焦点遍历，不换台。
+  bool get _liveUiOpen =>
+      _leftOpen || _rightOpen || _chromeVisible || _catchupChrome;
+
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
     final chs = _channels;
-    switch (event.logicalKey) {
-      case LogicalKeyboardKey.escape:
-      case LogicalKeyboardKey.goBack:
-        if (_handleLiveBack()) return KeyEventResult.handled;
-        return KeyEventResult.ignored;
-      case LogicalKeyboardKey.keyM:
-      case LogicalKeyboardKey.contextMenu:
-        _toggleRight();
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.enter:
-      case LogicalKeyboardKey.space:
-      case LogicalKeyboardKey.select:
-      case LogicalKeyboardKey.numpadEnter:
-        _openLeft();
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowUp:
-        if (chs.isEmpty) return KeyEventResult.handled;
-        final next = _chIdx <= 0 ? chs.length - 1 : _chIdx - 1;
-        _playChannel(next);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowDown:
-        if (chs.isEmpty) return KeyEventResult.handled;
-        _playChannel((_chIdx + 1) % chs.length);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowLeft:
-        if (_catchup) {
-          final next = _playback.position - const Duration(seconds: 15);
-          unawaited(_playback.seek(next < Duration.zero ? Duration.zero : next));
-          _pulseCatchupChrome();
-        } else if (_chIdx >= 0 && _lines > 1) {
-          _playChannel(_chIdx, line: (_line - 1 + _lines) % _lines);
-        }
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowRight:
-        if (_catchup) {
-          unawaited(_playback.seek(_playback.position + const Duration(seconds: 15)));
-          _pulseCatchupChrome();
-        } else if (_chIdx >= 0 && _lines > 1) {
-          _playChannel(_chIdx, line: (_line + 1) % _lines);
-        }
-        return KeyEventResult.handled;
-      default:
-        return KeyEventResult.ignored;
+
+    if (kotvIsBackKey(key)) {
+      if (_handleLiveBack()) return KeyEventResult.handled;
+      return KeyEventResult.ignored;
     }
+
+    // 菜单：对齐 TV onMenu → 显示底栏控件（可遥控选按钮）。
+    if (kotvIsMenuKey(key)) {
+      if (_leftOpen || _rightOpen) {
+        setState(() {
+          _leftOpen = false;
+          _rightOpen = false;
+          _chromeVisible = true;
+        });
+      } else {
+        setState(() => _chromeVisible = !_chromeVisible);
+      }
+      if (_chromeVisible) _scheduleHideOverlays();
+      return KeyEventResult.handled;
+    }
+
+    // 面板/控件已开：方向键与确定留给 TvFocus（选控件 / 频道列表）。
+    if (_liveUiOpen) {
+      if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+        final primary = FocusManager.instance.primaryFocus;
+        if (primary == null || primary == node) {
+          // 焦点仍在根 Focus：确定 = 频道列表（对齐 TV onKeyCenter → showUI）
+          _openLeft();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      }
+      if (kotvIsUpKey(key) ||
+          kotvIsDownKey(key) ||
+          kotvIsLeftKey(key) ||
+          kotvIsRightKey(key)) {
+        return KeyEventResult.ignored;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    // 沉浸播放：上下换台、左右换线（对齐 TV + KeyUtil CHANNEL_UP/DOWN）。
+    if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+      _openLeft();
+      return KeyEventResult.handled;
+    }
+    if (kotvIsUpKey(key)) {
+      if (chs.isEmpty) return KeyEventResult.handled;
+      final next = _chIdx <= 0 ? chs.length - 1 : _chIdx - 1;
+      _playChannel(next);
+      return KeyEventResult.handled;
+    }
+    if (kotvIsDownKey(key)) {
+      if (chs.isEmpty) return KeyEventResult.handled;
+      _playChannel((_chIdx + 1) % chs.length);
+      return KeyEventResult.handled;
+    }
+    if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
+      if (_catchup) {
+        final next = _playback.position - const Duration(seconds: 15);
+        unawaited(_playback.seek(next < Duration.zero ? Duration.zero : next));
+        _pulseCatchupChrome();
+      } else if (_chIdx >= 0 && _lines > 1) {
+        _playChannel(_chIdx, line: (_line - 1 + _lines) % _lines);
+      }
+      return KeyEventResult.handled;
+    }
+    if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
+      if (_catchup) {
+        unawaited(_playback.seek(_playback.position + const Duration(seconds: 15)));
+        _pulseCatchupChrome();
+      } else if (_chIdx >= 0 && _lines > 1) {
+        _playChannel(_chIdx, line: (_line + 1) % _lines);
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -1361,7 +1430,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         body: DragToMoveArea(
           child: MiniHoverShell(
             player: _playback,
-            video: _liveVideo(),
+            video: _buildSharedLiveVideo(),
             chrome: LiveCatchupChrome(
               player: _playback,
               miniActive: true,
@@ -1398,7 +1467,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  _liveVideo(),
+                  _buildSharedLiveVideo(),
                   KotvBufferingOverlay(
                     player: _playback,
                     force: _status.contains('换台') ||
@@ -1443,14 +1512,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                     ),
                   ),
                   if (_playUrl.isNotEmpty && !_leftOpen && !_rightOpen)
-                    CenterPlayPauseButton(
-                      player: _playback,
-                      hideWhenBuffering: true,
-                      enabled: !_loading &&
-                          !_status.contains('换台') &&
-                          !_status.contains('解析') &&
-                          !_status.contains('加载') &&
-                          !_status.contains('缓冲'),
+                    // 中心播停仅触控；遥控走底栏 / 菜单，避免焦点停在画面正中。
+                    ExcludeFocus(
+                      child: CenterPlayPauseButton(
+                        player: _playback,
+                        hideWhenBuffering: true,
+                        enabled: !_loading &&
+                            !_status.contains('换台') &&
+                            !_status.contains('解析') &&
+                            !_status.contains('加载') &&
+                            !_status.contains('缓冲'),
+                      ),
                     ),
                   if ((_chromeVisible || _catchupChrome) && !_leftOpen && !_rightOpen)
                     Positioned(
@@ -1929,12 +2001,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         ),
                       ),
                     ),
-                  // 底栏：仅点中间时显示，与左右菜单互斥
+                  // 底栏信息条（频道名）；遥控选控件走下方 LiveCatchupChrome
                   if (_chromeVisible && !_leftOpen && !_rightOpen && (!_catchup || !_catchupChrome))
                     Positioned(
                       left: 16,
                       right: 16,
-                      bottom: _catchupChrome ? 88 : 12,
+                      bottom: 72,
                       child: Material(
                         color: const Color(0xA6000000),
                         borderRadius: BorderRadius.circular(10),
@@ -1971,28 +2043,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                 Text(_lineLabel, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13)),
                                 const SizedBox(width: 8),
                               ],
-                              Tooltip(
-                                  message: _immersive ? '退出全屏' : '全屏',
-                                  child: InkWell(
-                                    onTap: () => unawaited(_toggleLiveFullscreen()),
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: SizedBox(
-                                      width: 40,
-                                      height: 40,
-                                      child: Icon(
-                                        _immersive ? Icons.fullscreen_exit : Icons.fullscreen,
-                                        color: Colors.white,
-                                        size: 22,
-                                      ),
-                                    ),
-                                  ),
-                                ),
                             ],
                           ),
                         ),
                       ),
                     ),
-                  if (_catchup && _catchupChrome)
+                  // 对齐 TV onMenu：底栏控件可 TvFocus 遥控选择
+                  if ((_chromeVisible || (_catchup && _catchupChrome)) && !_leftOpen && !_rightOpen)
                     Positioned(
                       left: 0,
                       right: 0,
@@ -2002,14 +2059,20 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                           _pointerAtBottom = true;
                           _keepMouseVisible();
                           _catchupHideTimer?.cancel();
+                          _cancelHideOverlays();
                         },
                         onExit: (_) {
                           _pointerAtBottom = false;
-                          _pulseCatchupChrome();
+                          if (_catchup) {
+                            _pulseCatchupChrome();
+                          } else {
+                            _scheduleHideOverlays();
+                          }
                           _scheduleHideMouse();
                         },
                         child: LiveCatchupChrome(
                           player: _playback,
+                          autofocusPlay: true,
                           playerLabel: flutterPlayerLabel(_playerVal),
                           decodeLabel: _decodeLabel,
                           offerFullscreenChoice: false,
@@ -2067,7 +2130,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   onTap: _togglePortraitChrome,
                   onSecondaryTap: () => kotvHandleAppBack?.call(),
                   onDoubleTap: _onLiveDoubleTap,
-                  child: _liveVideo(),
+                  child: _buildSharedLiveVideo(),
                 ),
                 KotvBufferingOverlay(
                   player: _playback,

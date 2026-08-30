@@ -7,7 +7,9 @@ import '../player/kotv_traffic.dart';
 
 /// 缓冲中在**播放器 Stack 内**居中显示转圈 + 实时网速（必须叠在视频区域，不能挂全局 Overlay）。
 ///
-/// 浮层用 [KotvTraffic] 测速；Hybrid Composition 下用不透明底避免 SurfaceView 叠字重影。
+/// Exo SurfaceView：改由原生宿主画浮层（Hybrid Composition 上 Flutter 叠字会重影）。
+/// 其它后端（MPV/FVP/Texture）仍用本组件 Flutter 浮层。
+/// 浮层用 [KotvTraffic] 测速。
 class KotvBufferingOverlay extends StatefulWidget {
   const KotvBufferingOverlay({
     super.key,
@@ -27,6 +29,8 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
   int _speedBps = 0;
   bool _visible = false;
   bool _trafficArmed = false;
+  bool? _lastNativeVisible;
+  String? _lastNativeText;
 
   @override
   void initState() {
@@ -54,6 +58,10 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
     if (_trafficArmed) {
       KotvTraffic.reset();
       _trafficArmed = false;
+    }
+    if (widget.player.preferNativeBufferingOverlay) {
+      _lastNativeVisible = null;
+      unawaited(widget.player.setNativeBufferingOverlay(visible: false, text: ''));
     }
     super.dispose();
   }
@@ -107,10 +115,24 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
     }
   }
 
+  void _syncNative(bool visible, String label) {
+    if (!widget.player.preferNativeBufferingOverlay) return;
+    if (_lastNativeVisible == visible && _lastNativeText == label) return;
+    _lastNativeVisible = visible;
+    _lastNativeText = label;
+    unawaited(widget.player.setNativeBufferingOverlay(visible: visible, text: label));
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (!_visible) return const SizedBox.shrink();
     final speed = kotvFormatSpeed(_speedBps, showZero: true);
+    final label = '缓冲中  $speed';
+    // Exo Surface：缓冲 UI 画在原生宿主，避免 Hybrid Composition 叠字重影。
+    if (widget.player.preferNativeBufferingOverlay) {
+      _syncNative(_visible, label);
+      return const SizedBox.shrink();
+    }
+    if (!_visible) return const SizedBox.shrink();
     return IgnorePointer(
       child: Center(
         child: RepaintBoundary(
@@ -134,7 +156,7 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    '缓冲中  $speed',
+                    label,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 15,

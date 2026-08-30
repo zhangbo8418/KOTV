@@ -286,6 +286,9 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Install mpv (desktop native player)
+        run: brew install mpv
+
       - uses: actions/download-artifact@v4
         with:
           name: updater-macos-arm64
@@ -296,6 +299,8 @@ jobs:
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
           CGO_ENABLED: "1"
           KOTV_JAVA_TOOLCHAIN: "21"
+          LANG: en_US.UTF-8
+          LC_ALL: en_US.UTF-8
         run: |
           chmod +x bridge/build.sh scripts/*.sh
           ./scripts/package-flutter-macos.sh
@@ -337,6 +342,9 @@ jobs:
           cache: true
           architecture: x64
 
+      - name: Install mpv (desktop native player)
+        run: brew install mpv
+
       - uses: actions/download-artifact@v4
         with:
           name: updater-macos-amd64
@@ -347,6 +355,8 @@ jobs:
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
           CGO_ENABLED: "1"
           KOTV_JAVA_TOOLCHAIN: "21"
+          LANG: en_US.UTF-8
+          LC_ALL: en_US.UTF-8
         run: |
           chmod +x bridge/build.sh scripts/*.sh
           # package-flutter-macos.sh 按本机 arch 选 plat；在 arm runner 上强制走 x64 需 Rosetta
@@ -382,6 +392,12 @@ jobs:
             mkdir -p dist "$STAGE"
             ditto "$APP_SRC" "$OUT_APP"
             KOTV_BUNDLE_ENGINE_TO_MACOS=1 ./scripts/bundle-flutter-runtime.sh "$OUT_APP"
+            ./scripts/fetch-desktop-mpv-libs.sh
+            if [[ -f flutter/assets/mpv-libs/macos/libmpv.dylib ]]; then
+              mkdir -p "$OUT_APP/Contents/Frameworks"
+              cp -f flutter/assets/mpv-libs/macos/libmpv.dylib "$OUT_APP/Contents/Frameworks/libmpv.dylib"
+              install_name_tool -id "@rpath/libmpv.dylib" "$OUT_APP/Contents/Frameworks/libmpv.dylib" 2>/dev/null || true
+            fi
             if [[ -f dist/updater-mac/updater ]]; then
               cp -f dist/updater-mac/updater "$OUT_APP/Contents/MacOS/updater"
               chmod +x "$OUT_APP/Contents/MacOS/updater"
@@ -437,6 +453,9 @@ jobs:
 
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Install Android build tools (patchelf for libmpv DT_NEEDED)
+        run: sudo apt-get update && sudo apt-get install -y patchelf
 
       - uses: subosito/flutter-action@v2
         with:

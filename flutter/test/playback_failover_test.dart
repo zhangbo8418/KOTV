@@ -19,9 +19,15 @@ void main() {
     expect(next.decodeMode, 'hard');
   });
 
-  test('auto skips decode flip', () {
+  test('auto flips soft then next player restores settings decode', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
     f.markAttempt();
+    final flip = f.nextStep();
+    expect(flip, isNotNull);
+    expect(flip!.kind, KotvFailoverKind.flipDecode);
+    expect(flip.decodeMode, 'soft');
+    expect(f.decodeMode, 'soft');
+
     final next = f.nextStep();
     expect(next, isNotNull);
     expect(next!.kind, KotvFailoverKind.nextPlayer);

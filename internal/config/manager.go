@@ -623,6 +623,11 @@ func resolveHome(homeKey string, sites []model.Site) model.Site {
 }
 
 func pickDefaultHome(sites []model.Site) model.Site {
+	return PickDefaultHome(sites)
+}
+
+// PickDefaultHome 导出给会话 bootstrap：跳过元站点。
+func PickDefaultHome(sites []model.Site) model.Site {
 	for _, s := range sites {
 		if isMetaSite(s) {
 			continue
@@ -636,11 +641,18 @@ func pickDefaultHome(sites []model.Site) model.Site {
 }
 
 func isMetaSite(s model.Site) bool {
+	return IsMetaSite(s)
+}
+
+// IsMetaSite 导航/说明类站点：不宜作为默认首页。
+func IsMetaSite(s model.Site) bool {
 	n := strings.ToLower(s.Name + " " + s.Key + " " + s.API)
 	for _, bad := range []string{
 		"intruduce", "introduce", "登录", "配置", "网盘登录", "说明", "公告", "push",
 		// 豆瓣首页多为 msearch: id，本站 detail 常为空，不宜作为默认首页。
 		"douban", "豆瓣",
+		// 仓内导航站：API 常为空，home 会报 unsupported protocol scheme。
+		"切源", "换源", "点我", "选源", "站点列表",
 	} {
 		if strings.Contains(n, bad) {
 			return true

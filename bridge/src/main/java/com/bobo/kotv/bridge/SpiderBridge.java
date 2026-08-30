@@ -868,8 +868,27 @@ public class SpiderBridge {
             if (app != null) {
                 try {
                     Context asApp = app.getApplicationContext();
-                    init.invoke(null, asApp != null ? asApp : app);
-                    initialized = true;
+                    Context initCtx = asApp != null ? asApp : app;
+                    // 必须传真正的 Application：饭太硬 wrapper Init 会 (Application) context。
+                    // 包名伪装走 KotvApplication.spoofFongmiPackage（反射，避免 bridge→app 循环依赖）。
+                    boolean spoofed = setSpoofFongmiPackage(true);
+                    try {
+                        init.invoke(null, initCtx);
+                        initialized = true;
+                    } finally {
+                        // DexNative 可能延迟数秒再读包名 / post Ly；伪装保持更久，并由 MessageQueue 清扫兜底。
+                        if (spoofed) {
+                            try {
+                                android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+                                h.postDelayed(() -> setSpoofFongmiPackage(false), 45000L);
+                                startMergeLyGuard(45000L);
+                            } catch (Throwable ignored) {
+                                setSpoofFongmiPackage(false);
+                            }
+                        }
+                        purgeMergeLyFromMainQueue();
+                        scheduleMergeLyPurge();
+                    }
                 } catch (java.lang.reflect.InvocationTargetException ite) {
                     Throwable cause = ite.getCause() != null ? ite.getCause() : ite;
                     if (!(cause instanceof ClassCastException)) {
@@ -890,10 +909,163 @@ public class SpiderBridge {
                     }
                 }
             }
+            hookSpiderInitHandler(loader);
+            purgeMergeLyFromMainQueue();
         } catch (ClassNotFoundException ignored) {
             // Init is not part of the original spider ABI.
         } catch (Throwable error) {
             System.err.println("optional spider Init skipped: " + error);
+        }
+    }
+
+    private static boolean setSpoofFongmiPackage(boolean on) {
+        try {
+            Class<?> clz = Class.forName("com.fongmi.android.tv.App");
+            Object r = clz.getMethod("setSpoofFongmiPackage", boolean.class).invoke(null, on);
+            return r instanceof Boolean ? (Boolean) r : true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static void startMergeLyGuard(long durationMs) {
+        try {
+            Class<?> clz = Class.forName("com.fongmi.android.tv.App");
+            clz.getMethod("startMergeLyGuard", long.class).invoke(null, durationMs);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 社区 jar merge.Ly：非 Fongmi 宿主弹 WebView 配置页，老盒子 relro 会卡死主线程。 */
+    private static boolean isJarHostConfigRunnable(Runnable runnable) {
+        if (runnable == null) {
+            return false;
+        }
+        Class<?> clz = runnable.getClass();
+        String name = clz.getName();
+        // 饭太硬：com.github.catvod.spider.merge.Ly；混淆后也可能是 merge.* 短名。
+        if (name.endsWith(".Ly") || name.contains("merge.Ly") || name.contains(".merge.L")) {
+            return true;
+        }
+        String simple = clz.getSimpleName();
+        if ("Ly".equals(simple)) {
+            return true;
+        }
+        String trace = String.valueOf(runnable);
+        return trace.contains("merge.Ly") || trace.contains("catvod.spider.merge.Ly");
+    }
+
+    /** 从主线程 MessageQueue 摘掉已排队的 merge.Ly（Init 返回后仍可能已 post）。 */
+    private static void purgeMergeLyFromMainQueue() {
+        if (!isArtVm()) {
+            return;
+        }
+        try {
+            android.os.Looper looper = android.os.Looper.getMainLooper();
+            if (looper == null) {
+                return;
+            }
+            Runnable purge = () -> {
+                try {
+                    android.os.MessageQueue queue = looper.getQueue();
+                    java.lang.reflect.Field mMessages = android.os.MessageQueue.class.getDeclaredField("mMessages");
+                    mMessages.setAccessible(true);
+                    java.lang.reflect.Field nextField = android.os.Message.class.getDeclaredField("next");
+                    nextField.setAccessible(true);
+                    int removed = 0;
+                    synchronized (queue) {
+                        android.os.Message msg = (android.os.Message) mMessages.get(queue);
+                        android.os.Message prev = null;
+                        while (msg != null) {
+                            android.os.Message next = (android.os.Message) nextField.get(msg);
+                            Runnable cb = msg.getCallback();
+                            if (cb != null && isJarHostConfigRunnable(cb)) {
+                                removed++;
+                                try {
+                                    android.os.Handler target = msg.getTarget();
+                                    if (target != null) {
+                                        target.removeCallbacks(cb);
+                                    }
+                                } catch (Throwable ignored) {
+                                }
+                                if (prev == null) {
+                                    mMessages.set(queue, next);
+                                } else {
+                                    nextField.set(prev, next);
+                                }
+                            } else {
+                                prev = msg;
+                            }
+                            msg = next;
+                        }
+                    }
+                    if (removed > 0) {
+                        System.out.println("purged merge.Ly x" + removed + " from main MessageQueue");
+                    }
+                } catch (Throwable error) {
+                    System.err.println("purgeMergeLyFromMainQueue skipped: " + error);
+                }
+            };
+            if (android.os.Looper.myLooper() == looper) {
+                purge.run();
+            } else {
+                new android.os.Handler(looper).post(purge);
+            }
+        } catch (Throwable error) {
+            System.err.println("purgeMergeLyFromMainQueue setup skipped: " + error);
+        }
+    }
+
+    private static void scheduleMergeLyPurge() {
+        if (!isArtVm()) {
+            return;
+        }
+        try {
+            android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+            // DexNative 可能延迟数秒才 post merge.Ly（实测 ~6s）；扫到 20s。
+            for (long delay = 0L; delay <= 20000L; delay += 50L) {
+                h.postDelayed(SpiderBridge::purgeMergeLyFromMainQueue, delay);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** spider Init 内 static Handler 替换为 dispatchMessage 过滤 merge.Ly（post 为 final 不可 override）。 */
+    private static void hookSpiderInitHandler(ClassLoader loader) {
+        if (!isArtVm() || loader == null) {
+            return;
+        }
+        try {
+            Class<?> initClz = loader.loadClass("com.github.catvod.spider.Init");
+            for (java.lang.reflect.Field field : initClz.getDeclaredFields()) {
+                if (!android.os.Handler.class.isAssignableFrom(field.getType())) {
+                    continue;
+                }
+                field.setAccessible(true);
+                Object current = field.get(null);
+                android.os.Looper looper = android.os.Looper.getMainLooper();
+                if (current instanceof android.os.Handler) {
+                    looper = ((android.os.Handler) current).getLooper();
+                }
+                final android.os.Handler delegate =
+                        current instanceof android.os.Handler
+                                ? (android.os.Handler) current
+                                : new android.os.Handler(looper);
+                field.set(null, new android.os.Handler(looper) {
+                    @Override
+                    public void dispatchMessage(android.os.Message msg) {
+                        Runnable cb = msg.getCallback();
+                        if (cb != null && isJarHostConfigRunnable(cb)) {
+                            System.out.println("skip merge.Ly spider Init Handler");
+                            return;
+                        }
+                        delegate.dispatchMessage(msg);
+                    }
+                });
+                return;
+            }
+        } catch (Throwable error) {
+            System.err.println("hookSpiderInitHandler skipped: " + error);
         }
     }
 
@@ -939,7 +1111,7 @@ public class SpiderBridge {
     }
 
     private static void refreshSpiderJarUi(ClassLoader loader) {
-        if (!isArtVm() || loader == null) {
+        if (!isArtVm() || loader == null || !com.github.catvod.utils.Util.hasRemoteUi()) {
             return;
         }
         try {
@@ -1417,7 +1589,13 @@ public class SpiderBridge {
             String jar = args.has("jar") && !args.get("jar").isJsonNull()
                     ? args.get("jar").getAsString() : "";
             if (jar != null && !jar.isEmpty()) {
-                parseJar(jar);
+                File jf = new File(jar);
+                // 仅加载真实本地路径；相对 spider.jar;md5;… 勿当文件名（Go 应先 cacheJar）。
+                if (jf.isFile() && jf.length() > 0L) {
+                    parseJar(jar);
+                } else {
+                    System.err.println("jsParse skip unresolved jar key: " + jar);
+                }
             }
             ClassLoader loader = (jar != null && !jar.isEmpty() && loaders.containsKey(jar))
                     ? loaders.get(jar) : requireRecentLoader();

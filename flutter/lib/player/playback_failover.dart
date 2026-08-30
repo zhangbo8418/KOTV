@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'kotv_platform.dart';
 
-/// 开播黑屏/超时后的会话内回退：先硬↔软翻解码，再按平台内置播放器环切换。
+/// 开播黑屏/超时后的会话内回退（各平台同一套，不写死某一引擎）：
+/// 1. hard↔soft 翻转；**auto 先改软解重试**（引擎 auto-safe 在 API25 等盒子上常卡 mediacodec-copy）
+/// 2. 再按 [innieRing] 换下一个内置播放器，并恢复用户设置的解码
 /// 不写回设置里的 `player` / `playerLive` / `playerDecode`。
 class KotvPlaybackFailover {
   KotvPlaybackFailover({
@@ -65,16 +67,19 @@ class KotvPlaybackFailover {
     if (lockExoForDrm) return null;
     if (!_playerVal.startsWith('innie#')) return null;
 
-    if (_shouldFlipDecode(_decodeMode) && !_flippedDecodeForCurrent) {
-      _flippedDecodeForCurrent = true;
-      _decodeMode = _flippedDecode(_decodeMode);
-      final label = _decodeMode == 'soft' ? '软解' : '硬解';
-      return KotvFailoverStep(
-        kind: KotvFailoverKind.flipDecode,
-        playerVal: _playerVal,
-        decodeMode: _decodeMode,
-        status: '无画面，已改$label重试',
-      );
+    if (!_flippedDecodeForCurrent) {
+      final flipped = _flipDecodeForFailover(_decodeMode);
+      if (flipped != null) {
+        _flippedDecodeForCurrent = true;
+        _decodeMode = flipped;
+        final label = flipped == 'soft' ? '软解' : '硬解';
+        return KotvFailoverStep(
+          kind: KotvFailoverKind.flipDecode,
+          playerVal: _playerVal,
+          decodeMode: flipped,
+          status: '无画面，已改$label重试',
+        );
+      }
     }
 
     final next = _nextUntriedInnie(_playerVal);
@@ -107,9 +112,19 @@ class KotvPlaybackFailover {
     }
   }
 
-  static bool _shouldFlipDecode(String mode) => mode == 'hard' || mode == 'soft';
-
-  static String _flippedDecode(String mode) => mode == 'hard' ? 'soft' : 'hard';
+  /// auto：协商失败 → 软解；hard/soft：互翻。
+  static String? _flipDecodeForFailover(String mode) {
+    switch (mode) {
+      case 'auto':
+        return 'soft';
+      case 'hard':
+        return 'soft';
+      case 'soft':
+        return 'hard';
+      default:
+        return null;
+    }
+  }
 
   /// 平台内置播放器环（不含 outie）。
   static List<String> innieRing() {
@@ -117,12 +132,13 @@ class KotvPlaybackFailover {
       return const ['innie#html', 'innie#art', 'innie#xg', 'innie#zw'];
     }
     if (kotvIsAndroid()) {
-      return const ['innie#exo', 'innie#mpv', 'innie#fvp'];
+      // 原生 MPV（P1）未就绪前，failover 优先 Exo → FVP。
+      return const ['innie#exo', 'innie#fvp', 'innie#mpv'];
     }
     if (kotvIsIOS()) {
-      return const ['innie#mpv', 'innie#fvp', 'innie#html'];
+      return const ['innie#fvp', 'innie#html', 'innie#mpv'];
     }
-    return const ['innie#mpv', 'innie#fvp'];
+    return const ['innie#fvp', 'innie#mpv'];
   }
 
   static String _innieLabel(String playerVal) {

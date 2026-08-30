@@ -13,7 +13,6 @@ import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
-import '../player/mpv_opts.dart';
 import '../player/play_headers.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
@@ -765,8 +764,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final adLabel = {'off': '关闭', 'smart': '智能', 'mild': '温和', 'on': '智能'}[ad] ?? ad;
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
+    final mpvVulkan = g('mpvVulkan', 'false') == 'true';
     final mpvConfPreview = g('mpvConf').trim();
-    // MPV conf：Android/桌面；gpu-next 仅 Android
+    final mpvSelected = kotvEmbedBackend(playerVal) == KotvEmbedBackend.mpv ||
+        kotvEmbedBackend(livePlayerVal) == KotvEmbedBackend.mpv;
+    // MPV conf / gpu-next / Vulkan：Android + 桌面
     final showMpvOpts = kotvIsAndroid() || kotvIsDesktop();
 
     return Column(
@@ -927,6 +929,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ('Texture', 'texture'),
                           ], msg: '仅内置 Exo 生效，已保存'),
                         ),
+                      if (mpvSelected && !kotvPlayerRenderApplies(playerVal))
+                        KotvSettingsWideTile(
+                          label: '渲染方式',
+                          value: 'Surface（MPV 固定）',
+                          onTap: () => showAppNews(
+                            context,
+                            '内置 MPV 对齐 TV mpvplayer：固定 Surface 直出，\n'
+                            '无 Exo 的 Surface/Texture 切换项。',
+                          ),
+                        ),
                       KotvSettingsWideTile(
                         label: '自动切换播放器',
                         value: failoverLabel,
@@ -940,7 +952,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         value: g('ua').isEmpty ? '默认' : _ellipsize(g('ua'), 22),
                         onTap: _editUa,
                       ),
-                      if (kotvIsAndroid())
+                      if (showMpvOpts)
                         KotvSettingsGrid(children: [
                           KotvSettingsCell(
                             label: 'MPV gpu-next',
@@ -951,6 +963,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               msg: mpvGpuNext
                                   ? '已关闭 gpu-next（重启播放生效）'
                                   : '已开启 vo=gpu-next（重启播放生效）',
+                            )),
+                          ),
+                          KotvSettingsCell(
+                            label: 'MPV Vulkan',
+                            value: mpvVulkan ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'mpvVulkan',
+                              mpvVulkan ? 'false' : 'true',
+                              msg: mpvVulkan
+                                  ? '已关闭 Vulkan（重启播放生效）'
+                                  : '已开启 gpu-api=vulkan（重启播放生效）',
                             )),
                           ),
                         ]),

@@ -14,10 +14,6 @@ perl -i -pe 's/flutter_lints:\s*\^4\.0\.0/flutter_lints: ^3.0.0/' "$APP"
 
 perl -i -pe 's/path_provider:\s*\^2\.1\.5/path_provider: 2.1.4/' "$APP"
 perl -i -pe 's/shared_preferences:\s*\^2\.3\.3/shared_preferences: 2.3.0/' "$APP"
-# Win7：尽量用较新 media_kit；若 pub 解析失败再退回 1.1.11。
-perl -i -pe 's/media_kit:\s*[^\n]+/media_kit: 1.1.11/' "$APP"
-perl -i -pe 's/media_kit_video:\s*[^\n]+/media_kit_video: 1.2.5/' "$APP"
-perl -i -pe 's/media_kit_libs_video:\s*[^\n]+/media_kit_libs_video: 1.0.7/' "$APP"
 perl -i -pe 's/web:\s*\^1\.1\.0/web: 0.5.1/' "$APP"
 perl -i -pe 's/wakelock_plus:\s*[^\n]+/wakelock_plus: 1.2.8/' "$APP"
 
@@ -45,9 +41,6 @@ dependency_overrides:
   shared_preferences_foundation: 2.5.2
   shared_preferences_linux: 2.4.1
   shared_preferences_windows: 2.4.1
-  media_kit: 1.1.11
-  media_kit_video: 1.2.5
-  media_kit_libs_video: 1.0.7
   web: 0.5.1
   wakelock_plus: 1.2.8
 OVERRIDES
@@ -58,4 +51,4 @@ if ! grep -q 'family: NotoSansSC' "$APP"; then
 fi
 
 echo "adapted pubspec for Flutter 3.19 / Dart 3.3 (no VLC):"
-grep -nE 'sdk:|media_kit|fvp|dependency_overrides' "$APP" | head -40
+grep -nE 'sdk:|fvp|dependency_overrides' "$APP" | head -40

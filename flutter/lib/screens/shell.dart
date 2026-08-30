@@ -215,7 +215,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     // 切主 Tab：原地换根路由，Navigator 元素不卸树，避免 GlobalKey reactivate 崩溃。
     ref.listen<KotvPage>(kotvPageProvider, (prev, next) {
       if (prev == null || prev == next) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        await DetailScreen.prepareLeave();
         if (!mounted) return;
         final nav = _shellNavKey.currentState;
         if (nav == null) return;

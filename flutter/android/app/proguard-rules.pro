@@ -5,7 +5,7 @@
     public static java.lang.String listSpiderClasses(java.lang.String);
 }
 -keep class com.bobo.kotv.JarLoader { *; }
--keep class com.bobo.kotv.KotvApplication { *; }
+-keep class com.fongmi.android.tv.App { *; }
 -keep class com.bobo.kotv.host.UiContext { *; }
 # 安卓桥编进 App CL；站点 jar 链接 crawler.Spider / OkHttp 等宿主类
 -keep class com.bobo.kotv.bridge.SpiderBridge { *; }
@@ -89,6 +89,13 @@
 # 迅雷 SDK（对齐 TV）：JNI / 反射不可 shrink
 -keep class com.xunlei.downloadlib.** { *; }
 -dontwarn com.xunlei.downloadlib.**
+# 原生 MPV（is.xyz.mpv.MPVLib ↔ libplayer.so）
+-keep class is.xyz.mpv.** { *; }
+-keepclassmembers class is.xyz.mpv.MPVLib {
+    public static *** *(...);
+    native <methods>;
+}
+-dontwarn is.xyz.mpv.**
 # TVBus / 荐片 P2P：站点 jar 与播放提取器按原名链接，JNI 不可 shrink
 -keep class com.tvbus.engine.** { *; }
 -dontwarn com.tvbus.engine.**

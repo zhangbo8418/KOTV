@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import '../util/kotv_io.dart';
 import 'dart:typed_data';
 
@@ -442,6 +443,7 @@ class PostMsgHost {
                     }
 
                     final p = KotvPalette.of(ctx);
+                    final s = hostUiScale(ctx);
                     final title = '${doc['title'] ?? ''}';
                     final elements = (doc['elements'] as List?) ?? const [];
                     final actions = (doc['actions'] as List?) ?? const [];
@@ -453,6 +455,10 @@ class PostMsgHost {
                       for (final a in actions)
                         if (a is Map) Map<String, dynamic>.from(a),
                     ];
+                    final resolvedTitleFont = (titleFont >= 20
+                            ? titleFont
+                            : (kotvIsDesktop() ? 22.0 : (titleFont > 0 ? titleFont : 20.0))) *
+                        s;
 
                     return _hostUiCard(
                       context: ctx,
@@ -463,9 +469,7 @@ class PostMsgHost {
                               title,
                               style: TextStyle(
                                 color: p.fg,
-                                fontSize: titleFont >= 20
-                                    ? titleFont
-                                    : (kotvIsDesktop() ? 22 : (titleFont > 0 ? titleFont : 20)),
+                                fontSize: resolvedTitleFont,
                                 fontWeight: FontWeight.w700,
                                 height: 1.2,
                               ),
@@ -480,6 +484,7 @@ class PostMsgHost {
                                   Map<String, dynamic>.from(el),
                                   palette: p,
                                   docFontSize: docFont,
+                                  uiScale: s,
                                   values: values,
                                   checks: checks,
                                   radios: radios,
@@ -495,8 +500,8 @@ class PostMsgHost {
                           : _hostActionRow(
                               context: ctx,
                               actions: actionMaps,
-                              defaultFont: actionFont > 0 ? actionFont : docFont,
-                              defaultH: actionH,
+                              defaultFont: (actionFont > 0 ? actionFont : docFont) * s,
+                              defaultH: (actionH > 0 ? actionH : 40) * s,
                               onPressed: (a) => fire(
                                 '${a['id'] ?? 'action'}',
                                 dismissAfter: a['dismiss'] == true,
@@ -562,7 +567,19 @@ class PostMsgHost {
     );
   }
 
-  /// 对齐 TV / 换源大卡片：半透明 dialogBg + 18 圆角描边，桌面默认更宽。
+  /// 对齐 TV leanback [AndroidAutoSize]：设计稿 960×540，整窗（含弹窗）按屏等比缩放。
+  /// 桌面仍用 [LayoutScale]（1280×720）。
+  static double hostUiScale(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    if (kotvIsAndroid()) {
+      final byW = size.width / 960.0;
+      final byH = size.height / 540.0;
+      return math.min(byW, byH).clamp(0.75, 1.55);
+    }
+    return LayoutScale.layoutOf(context);
+  }
+
+  /// 对齐 TV / 换源大卡片：半透明 dialogBg + 18 圆角描边；尺寸随 [hostUiScale] 自动缩放。
   Widget _hostUiCard({
     required BuildContext context,
     required Map<String, dynamic> doc,
@@ -573,23 +590,40 @@ class PostMsgHost {
     final p = KotvPalette.of(context);
     final screen = MediaQuery.sizeOf(context);
     final desktop = kotvIsDesktop();
-    final compact = screen.width < 640 || screen.shortestSide < 560;
-    final inset = compact
-        ? const EdgeInsets.symmetric(horizontal: 10, vertical: 12)
-        : EdgeInsets.symmetric(horizontal: desktop ? 64 : 48, vertical: desktop ? 48 : 40);
+    final s = hostUiScale(context);
+    final compact = screen.width < 640 * s || screen.shortestSide < 560 * s;
+    final inset = EdgeInsets.symmetric(
+      horizontal: (compact ? 10.0 : (desktop ? 64.0 : 48.0)) * s,
+      vertical: (compact ? 12.0 : (desktop ? 48.0 : 40.0)) * s,
+    );
     final maxW = screen.width * 0.95;
     final maxH = screen.height * 0.9;
     final rawW = _num(doc['width']);
     final rawH = _num(doc['height']);
-    var cardW = rawW > 0 ? rawW : (desktop ? 560.0 : 420.0);
-    if (desktop && cardW < 520) cardW = 520;
-    cardW = cardW.clamp(280.0, maxW);
-    final bodyH = rawH > 0 ? rawH.clamp(120.0, maxH * 0.78) : null;
+    // 脚本给的 width/font 按 TV 设计稿 dp；未给时默认卡宽也按 s 缩放。
+    var cardW = rawW > 0 ? rawW * s : (desktop ? 560.0 : 420.0) * s;
+    if (desktop && cardW < 520 * s) cardW = 520 * s;
+    cardW = cardW.clamp(280.0 * s, maxW);
+    final padH = (compact ? 14.0 : 24.0) * s;
+    final padVT = (compact ? 14.0 : 22.0) * s;
+    final padVB = (compact ? 12.0 : 18.0) * s;
+    final gapTitle = (compact ? 8.0 : 12.0) * s;
+    final gapActions = (compact ? 12.0 : 16.0) * s;
+    final radius = 18.0 * s;
 
-    final content = bodyH != null
-        ? SizedBox(width: cardW, height: bodyH, child: body)
+    // 内容区：可滚动 + 最大高度封顶；短内容随内容收缩（不强制撑满）。
+    final bodyMaxH = math.max(
+      80.0,
+      maxH - padVT - padVB - (title != null ? 48 * s + gapTitle : 0) - (actions != null ? 48 * s + gapActions : 0) - 8,
+    );
+    final content = rawH > 0
+        ? SizedBox(
+            width: cardW,
+            height: (rawH * s).clamp(120.0 * s, bodyMaxH),
+            child: body,
+          )
         : ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: cardW, maxHeight: maxH * 0.72),
+            constraints: BoxConstraints(maxWidth: cardW, maxHeight: bodyMaxH),
             child: body,
           );
 
@@ -601,27 +635,22 @@ class PostMsgHost {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: p.dialogBg,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(radius),
             border: Border.all(color: p.outline),
           ),
           child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              compact ? 14 : 24,
-              compact ? 14 : 22,
-              compact ? 14 : 24,
-              compact ? 12 : 18,
-            ),
+            padding: EdgeInsets.fromLTRB(padH, padVT, padH, padVB),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (title != null) ...[
                   title,
-                  SizedBox(height: compact ? 8 : 12),
+                  SizedBox(height: gapTitle),
                 ],
                 content,
                 if (actions != null) ...[
-                  SizedBox(height: compact ? 12 : 16),
+                  SizedBox(height: gapActions),
                   actions,
                 ],
               ],
@@ -639,8 +668,9 @@ class PostMsgHost {
     required double defaultH,
     required void Function(Map<String, dynamic> action) onPressed,
   }) {
-    final compact = MediaQuery.sizeOf(context).width < 640;
-    final gap = compact ? 8.0 : 10.0;
+    final s = hostUiScale(context);
+    final compact = MediaQuery.sizeOf(context).width < 640 * s;
+    final gap = (compact ? 8.0 : 10.0) * s;
     return Row(
       children: [
         for (var i = 0; i < actions.length; i++) ...[
@@ -652,6 +682,7 @@ class PostMsgHost {
               selected: _isPrimaryAction(actions[i], actions.length),
               defaultFont: defaultFont,
               defaultH: defaultH,
+              uiScale: s,
               onPressed: () => onPressed(actions[i]),
             ),
           ),
@@ -673,25 +704,30 @@ class PostMsgHost {
     required bool selected,
     required double defaultFont,
     required double defaultH,
+    required double uiScale,
     required VoidCallback onPressed,
   }) {
-    final font = _num(a['fontSize']) > 0
-        ? _num(a['fontSize'])
-        : (defaultFont > 0 ? defaultFont : (compact ? 13.0 : 15.0));
-    final h = _num(a['height']) > 0
-        ? _num(a['height'])
-        : (defaultH > 0 ? defaultH : (compact ? 36.0 : 40.0));
     return LayoutBuilder(
       builder: (context, cons) {
-        final s = LayoutScale.layoutOf(context);
-        final w = cons.maxWidth.isFinite && cons.maxWidth > 0 ? cons.maxWidth / s : 88.0;
+        final ls = LayoutScale.layoutOf(context);
+        final inv = ls > 0 ? 1.0 / ls : 1.0;
+        // defaultFont/H 已含 uiScale；去掉 LayoutScale 再交给 AppPill，避免双重放大。
+        final designFont = (_num(a['fontSize']) > 0
+                ? _num(a['fontSize']) * uiScale
+                : (defaultFont > 0 ? defaultFont : (compact ? 13.0 : 15.0) * uiScale)) *
+            inv;
+        final designH = (_num(a['height']) > 0
+                ? _num(a['height']) * uiScale
+                : (defaultH > 0 ? defaultH : (compact ? 36.0 : 40.0) * uiScale)) *
+            inv;
+        final w = cons.maxWidth.isFinite && cons.maxWidth > 0 ? cons.maxWidth / ls : 88.0;
         return AppPill(
           label: '${a['label'] ?? a['id'] ?? ''}',
           onTap: onPressed,
           selected: selected,
           width: w,
-          height: h,
-          fontSize: font,
+          height: designH,
+          fontSize: designFont,
         );
       },
     );
@@ -706,9 +742,13 @@ class PostMsgHost {
     return 14.0;
   }
 
-  Widget _sized(Map<String, dynamic> el, {required Widget child, double fallbackW = 0, double fallbackH = 0}) {
-    final double? w = _num(el['width']) > 0 ? _num(el['width']) : (fallbackW > 0 ? fallbackW : null);
-    final double? h = _num(el['height']) > 0 ? _num(el['height']) : (fallbackH > 0 ? fallbackH : null);
+  Widget _sized(Map<String, dynamic> el, {required Widget child, double uiScale = 1, double fallbackW = 0, double fallbackH = 0}) {
+    final double? w = _num(el['width']) > 0
+        ? _num(el['width']) * uiScale
+        : (fallbackW > 0 ? fallbackW * uiScale : null);
+    final double? h = _num(el['height']) > 0
+        ? _num(el['height']) * uiScale
+        : (fallbackH > 0 ? fallbackH * uiScale : null);
     if (w == null && h == null) return child;
     return SizedBox(width: w, height: h, child: child);
   }
@@ -717,6 +757,7 @@ class PostMsgHost {
     Map<String, dynamic> el, {
     required KotvPalette palette,
     required double docFontSize,
+    required double uiScale,
     required Map<String, TextEditingController> values,
     required Map<String, bool> checks,
     required Map<String, String> radios,
@@ -725,12 +766,13 @@ class PostMsgHost {
     required Future<void> Function(String action, {bool dismissAfter}) fire,
   }) {
     final type = '${el['type'] ?? ''}'.toLowerCase().trim();
-    final font = _fontOf(el, docFontSize);
+    final font = _fontOf(el, docFontSize) * uiScale;
+    final pad = 8.0 * uiScale;
     switch (type) {
       case 'text':
         return [
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: EdgeInsets.only(bottom: pad),
             child: Text(
               '${el['text'] ?? ''}',
               style: TextStyle(color: palette.muted, height: 1.35, fontSize: font),
@@ -740,19 +782,19 @@ class PostMsgHost {
       case 'image':
         final img = _decodeDataImage('${el['source'] ?? ''}');
         if (img == null) return const [];
-        final w = _num(el['width']) > 0 ? _num(el['width']) : null;
-        final h = _num(el['height']) > 0 ? _num(el['height']) : null;
+        final w = _num(el['width']) > 0 ? _num(el['width']) * uiScale : null;
+        final h = _num(el['height']) > 0 ? _num(el['height']) * uiScale : null;
         return [
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: EdgeInsets.symmetric(vertical: pad),
             child: Center(
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(12 * uiScale),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(8),
+                  padding: EdgeInsets.all(pad),
                   child: Image.memory(img, width: w, height: h, fit: BoxFit.contain),
                 ),
               ),
@@ -762,7 +804,7 @@ class PostMsgHost {
       case 'progress':
         return [
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            padding: EdgeInsets.symmetric(vertical: 12 * uiScale),
             child: Center(child: CircularProgressIndicator(color: palette.primary)),
           ),
         ];
@@ -786,21 +828,21 @@ class PostMsgHost {
             filled: true,
             fillColor: palette.input,
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(10 * uiScale),
               borderSide: BorderSide(color: palette.outline.withOpacity(0.45)),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(10 * uiScale),
               borderSide: BorderSide(color: palette.primary),
             ),
             isDense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 10 * uiScale),
           ),
         );
         return [
           Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _sized(el, child: field),
+            padding: EdgeInsets.only(bottom: 10 * uiScale),
+            child: _sized(el, uiScale: uiScale, child: field),
           ),
         ];
       case 'checkbox':
@@ -852,23 +894,29 @@ class PostMsgHost {
         );
         return [
           Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _sized(el, child: dropdown),
+            padding: EdgeInsets.only(bottom: 10 * uiScale),
+            child: _sized(el, uiScale: uiScale, child: dropdown),
           ),
         ];
       case 'button':
         final btnUrl = '${el['url'] ?? ''}'.trim();
         return [
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: AppPill(
-              label: '${el['text'] ?? ''}',
-              fontSize: font,
-              height: _num(el['height']) > 0 ? _num(el['height']) : 40,
-              width: _num(el['width']) > 0 ? _num(el['width']) : null,
-              onTap: () async {
-                if (btnUrl.isNotEmpty) await _openExternal(btnUrl);
-                await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
+            padding: EdgeInsets.only(bottom: pad),
+            child: Builder(
+              builder: (context) {
+                final ls = LayoutScale.layoutOf(context);
+                final inv = ls > 0 ? 1.0 / ls : 1.0;
+                return AppPill(
+                  label: '${el['text'] ?? ''}',
+                  fontSize: font * inv,
+                  height: (_num(el['height']) > 0 ? _num(el['height']) * uiScale : 40 * uiScale) * inv,
+                  width: _num(el['width']) > 0 ? _num(el['width']) * uiScale * inv : null,
+                  onTap: () async {
+                    if (btnUrl.isNotEmpty) await _openExternal(btnUrl);
+                    await fire('${el['id'] ?? 'button'}', dismissAfter: el['dismiss'] == true);
+                  },
+                );
               },
             ),
           ),
@@ -881,21 +929,27 @@ class PostMsgHost {
         if (asButton) {
           return [
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: AppPill(
-                label: labelText,
-                selected: true,
-                fontSize: font,
-                height: _num(el['height']) > 0 ? _num(el['height']) : 40,
-                width: _num(el['width']) > 0 ? _num(el['width']) : null,
-                onTap: () => unawaited(_openExternal(linkUrl)),
+              padding: EdgeInsets.only(bottom: pad),
+              child: Builder(
+                builder: (context) {
+                  final ls = LayoutScale.layoutOf(context);
+                  final inv = ls > 0 ? 1.0 / ls : 1.0;
+                  return AppPill(
+                    label: labelText,
+                    selected: true,
+                    fontSize: font * inv,
+                    height: (_num(el['height']) > 0 ? _num(el['height']) * uiScale : 40 * uiScale) * inv,
+                    width: _num(el['width']) > 0 ? _num(el['width']) * uiScale * inv : null,
+                    onTap: () => unawaited(_openExternal(linkUrl)),
+                  );
+                },
               ),
             ),
           ];
         }
         return [
           Padding(
-            padding: const EdgeInsets.only(bottom: 4),
+            padding: EdgeInsets.only(bottom: 4 * uiScale),
             child: Align(
               alignment: Alignment.centerLeft,
               child: TextButton(
@@ -912,18 +966,18 @@ class PostMsgHost {
         return [Divider(color: palette.outline.withOpacity(0.45))];
       case 'spacer':
       case 'space':
-        final sp = _num(el['height']);
+        final sp = _num(el['height']) * uiScale;
         if (sp <= 0) return const [];
         return [SizedBox(height: sp)];
       case 'row':
       case 'column':
       case 'group':
         final children = (el['children'] as List?) ?? const [];
-        final spacing = _num(el['spacing']);
+        final spacing = (_num(el['spacing']) > 0 ? _num(el['spacing']) : 0.0) * uiScale;
         final kids = <Widget>[
           if (type == 'group' && '${el['text'] ?? ''}'.isNotEmpty)
             Padding(
-              padding: EdgeInsets.only(bottom: spacing > 0 ? spacing : 0),
+              padding: EdgeInsets.only(bottom: spacing),
               child: Text('${el['text']}', style: TextStyle(color: palette.fg, fontWeight: FontWeight.w600, fontSize: font)),
             ),
           for (final c in children)
@@ -932,6 +986,7 @@ class PostMsgHost {
                 Map<String, dynamic>.from(c),
                 palette: palette,
                 docFontSize: docFontSize,
+                uiScale: uiScale,
                 values: values,
                 checks: checks,
                 radios: radios,
@@ -941,8 +996,7 @@ class PostMsgHost {
               ),
         ];
         if (type == 'row') {
-          final gap = spacing > 0 ? spacing : 0.0;
-          return [Wrap(spacing: gap, runSpacing: gap, children: kids)];
+          return [Wrap(spacing: spacing, runSpacing: spacing, children: kids)];
         }
         if (type == 'column' && spacing > 0) {
           final spaced = <Widget>[];

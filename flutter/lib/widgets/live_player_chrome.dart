@@ -28,6 +28,8 @@ class LiveCatchupChrome extends StatelessWidget {
     this.offerFullscreenChoice,
     /// 已在真全屏时显示退出图标（回看底栏用）。
     this.fullscreenActive = false,
+    /// 遥控菜单弹出时，自动焦点到播停键。
+    this.autofocusPlay = false,
   });
 
   final KotvPlayback player;
@@ -43,6 +45,7 @@ class LiveCatchupChrome extends StatelessWidget {
   final String decodeLabel;
   final bool? offerFullscreenChoice;
   final bool fullscreenActive;
+  final bool autofocusPlay;
 
   @override
   Widget build(BuildContext context) {
@@ -72,6 +75,7 @@ class LiveCatchupChrome extends StatelessWidget {
                       tip: player.playing ? '暂停' : '播放',
                       compact: compact,
                       size: iconSize,
+                      autofocus: autofocusPlay,
                       onTap: () => player.playOrPause(),
                     ),
                     if (onCast != null)
@@ -165,13 +169,15 @@ class LiveCatchupChrome extends StatelessWidget {
     required bool compact,
     required VoidCallback onTap,
     double? size,
+    bool autofocus = false,
   }) {
     final sz = size ?? (compact ? 32.0 : 40.0);
     return Tooltip(
       message: tip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+      child: TvFocus(
+        autofocus: autofocus,
+        onPressed: onTap,
+        borderRadius: 8,
         child: SizedBox(
           width: sz,
           height: sz,
@@ -182,9 +188,9 @@ class LiveCatchupChrome extends StatelessWidget {
   }
 
   Widget _textAct(String label, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: 8,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),

@@ -15,6 +15,7 @@ import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/h_scroll.dart';
+import '../widgets/kotv_network_image.dart';
 import '../widgets/poster_card.dart';
 import '../vod/vod_open.dart';
 import 'detail_screen.dart';
@@ -134,7 +135,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   /// 等到 ready，或确认无源；有源加载中则继续等。
-  Future<Map<String, dynamic>> _waitConfigReady({int maxAttempts = 80}) async {
+  /// RK3399 等弱机：jar Init + DexNative 常要 30~90s，40s 窗口会误报超时。
+  Future<Map<String, dynamic>> _waitConfigReady({int maxAttempts = 480}) async {
     final api = ref.read(apiProvider);
     Map<String, dynamic> cfg = const {};
     for (var i = 0; i < maxAttempts; i++) {
@@ -186,8 +188,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final cfg = await _waitConfigReady();
       if (!mounted || gen != _loadGen) return;
       final ready = cfg['ready'] == true;
-      // 刷新全局配置（壁纸等），避免 FutureProvider 缓存空 wallpaper
-      ref.invalidate(configProvider);
       setState(() => _ready = ready);
 
       if (!ready) {
@@ -214,6 +214,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               .timeout(const Duration(seconds: 25));
       if (!mounted || gen != _loadGen) return;
       _applyPage(data, replace: true);
+      await _fillHomeRecommendIfEmpty(gen);
+      // 拉完首页再刷配置缓存，避免 invalidate 与首页 setState 同帧竞态触发 Inherited 断言
+      ref.invalidate(configProvider);
     } catch (e) {
       if (!mounted || gen != _loadGen) return;
       final msg = '$e';
@@ -233,6 +236,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                     .timeout(const Duration(seconds: 25));
             if (!mounted || gen != _loadGen) return;
             _applyPage(data, replace: true);
+            await _fillHomeRecommendIfEmpty(gen);
             setState(() => _statusMsg = null);
             return;
           } catch (e2) {
@@ -246,6 +250,33 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     } finally {
       if (mounted && gen == _loadGen) setState(() => _loading = false);
     }
+  }
+
+  /// APP 源常见 home 只返分类、list 为空 → 首页「为你推荐」空白；用首个分类顶上。
+  Future<void> _fillHomeRecommendIfEmpty(int gen) async {
+    if (!mounted || gen != _loadGen) return;
+    if (_tid != null && _tid!.isNotEmpty) return;
+    if (_items.isNotEmpty || _types.isEmpty) return;
+    final tid = _types.first.id;
+    if (tid.isEmpty) return;
+    try {
+      final data = await ref
+          .read(apiProvider)
+          .category(tid, pg: '1')
+          .timeout(const Duration(seconds: 25));
+      if (!mounted || gen != _loadGen) return;
+      if (_tid != null && _tid!.isNotEmpty) return;
+      final list = ((data['list'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      if (list.isEmpty) return;
+      setState(() {
+        _items
+          ..clear()
+          ..addAll(list);
+      });
+    } catch (_) {}
   }
 
   /// loadCategory：先切导航/清空列表，再异步加载。
@@ -491,7 +522,15 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final cfgReady = cfg.maybeWhen(data: (c) => c['ready'] == true, orElse: () => false);
     final ready = _ready || cfgReady;
     // 有源但尚未 ready：显示加载，而不是「请先添加点播源」
-    final loadingSource = !ready && (_loading || cfgSource.isNotEmpty || (_statusMsg ?? '').contains('加载'));
+    // 勿用 contains('加载')：会误伤「点播源加载超时」，导致超时后永久转圈。
+    final msg = _statusMsg ?? '';
+    final hasConfiguredSource = cfgSource.isNotEmpty || sites.isNotEmpty;
+    final loadingSource = !ready &&
+        (_loading ||
+            msg.contains('正在加载') ||
+            msg.contains('超时') ||
+            msg.contains('无法连接') ||
+            (hasConfiguredSource && msg.isEmpty));
     final siteName = !ready
         ? (loadingSource ? '加载中…' : '未配置源')
         : ((home != null && home.name.isNotEmpty)
@@ -821,7 +860,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 children: [
                   const ColoredBox(color: Color(0xFF652291)),
                   if (_isHttpUrl(bannerPic))
-                    Image.network(bannerPic, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
+                    KotvNetworkImage(bannerPic, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
                   Positioned(
                     left: 14,
                     right: 14,
@@ -1118,8 +1157,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   String _ellipsize(String s, int n) => s.length <= n ? s : '${s.substring(0, n)}…';
 
   static bool _isHttpUrl(String s) {
-    final t = s.trim();
-    return t.startsWith('http://') || t.startsWith('https://');
+    final u = kotvParseImageUrl(s).url;
+    return u.startsWith('http://') || u.startsWith('https://');
   }
 }
 

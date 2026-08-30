@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 
 import 'art_playback.dart';
 import 'exo_playback.dart';
@@ -7,6 +6,7 @@ import 'fvp_playback.dart';
 import 'html_playback.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'native_mpv_playback.dart';
 import 'xg_playback.dart';
 import 'zw_playback.dart';
 
@@ -26,15 +26,15 @@ KotvPlayback createKotvPlayback(String playerVal) {
     case KotvEmbedBackend.exo:
       return ExoPlayback();
     case KotvEmbedBackend.mpv:
-      throw StateError('MPV 请用 MediaKitPlayback(Player()) 复用');
+      return NativeMpvPlayback();
   }
 }
 
-/// 页内画面：按后端选择 Texture / VideoPlayer / media_kit Video。
+/// 页内画面：按后端选择 PlatformView / Texture / HTML。
 Widget kotvPlaybackView({
   required String playerVal,
   required KotvPlayback playback,
-  MediaKitPlayback? mpv,
+  NativeMpvPlayback? mpv,
   BoxFit fit = BoxFit.contain,
 }) {
   switch (kotvEmbedBackend(playerVal)) {
@@ -57,8 +57,8 @@ Widget kotvPlaybackView({
       if (playback is ExoPlayback) return playback.buildView(fit: fit);
       return const ColoredBox(color: Colors.black);
     case KotvEmbedBackend.mpv:
-      final m = mpv ?? (playback is MediaKitPlayback ? playback : null);
+      final m = mpv ?? (playback is NativeMpvPlayback ? playback : null);
       if (m == null) return const ColoredBox(color: Colors.black);
-      return Video(controller: m.controller, controls: NoVideoControls, fit: fit, wakelock: false);
+      return m.buildView(fit: fit);
   }
 }

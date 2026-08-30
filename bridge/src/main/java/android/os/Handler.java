@@ -12,7 +12,14 @@ public class Handler {
         return thread;
     });
 
+    private final Looper looper;
+
     public Handler(Looper looper) {
+        this.looper = looper != null ? looper : Looper.getMainLooper();
+    }
+
+    public Looper getLooper() {
+        return looper;
     }
 
     public boolean post(Runnable runnable) {
@@ -23,5 +30,15 @@ public class Handler {
     public boolean postDelayed(Runnable runnable, long delayMillis) {
         EXECUTOR.schedule(runnable, Math.max(0, delayMillis), TimeUnit.MILLISECONDS);
         return true;
+    }
+
+    public void removeCallbacks(Runnable runnable) {
+        // Desktop stub: no-op (merge.Ly purge is ART-only).
+    }
+
+    public void dispatchMessage(Message msg) {
+        if (msg != null && msg.callback != null) {
+            msg.callback.run();
+        }
     }
 }

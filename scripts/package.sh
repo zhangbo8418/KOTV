@@ -198,7 +198,7 @@ Windows 运行时（Win7 尽力兼容）：
   Python = adang1345/PythonVista embed
   Chromium = x64: 109（snapshot 回退）；ARM64: Win_Arm64 最新（CFT 无 win-arm64 时）
   FFmpeg = Gyan 7.0
-  页内 MPV = Flutter media_kit 自带（不进 runtime/）
+  页内 MPV = 原生通道（接入前桌面默认 FVP；不进 runtime/）
   页内 FVP = Flutter fvp/libmdk（备选）
   外部 MPV/IINA = 系统安装或 PATH
   CGO/QuickJS = MinGW MSVCRT win32-seh + 子系统 Win7(6.01) + static-libgcc（posix 则再静态 winpthread）

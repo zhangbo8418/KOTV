@@ -1,29 +1,29 @@
 import 'dart:math' show max;
 
 import 'package:flutter/foundation.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
 import 'kotv_platform.dart';
 
-/// MPV / media_kit 选项：解码 / gpu-next / conf。
+/// 原生 MPV 选项：解码 / gpu-next / conf（对齐 TV mpvplayer，不再走 media_kit Texture）。
 ///
-/// ## 平台能力
-/// | 选项 | Android | 桌面 (PC) |
-/// |------|---------|-----------|
-/// | hwdec | ✅ mediacodec 直出 / auto | ✅ 硬解直出（Win10+ d3d11va；Win7 dxva2） |
-/// | mpv.conf | ✅ 事后 setProperty | ✅ 同上 |
-/// | gpu-next | ✅ vo=gpu-next | ❌ Flutter Texture 必须 vo=libmpv |
+/// ## 平台能力（目标）
+/// | 选项 | Android | 桌面 |
+/// |------|---------|------|
+/// | hwdec | mediacodec / auto-safe | d3d11va / dxva2 / videotoolbox |
+/// | mpv.conf | setProperty | 同上 |
+/// | gpu-next | vo=gpu-next（Surface） | 原生窗口后可用 |
 class KotvMpvOpts {
   const KotvMpvOpts({
     this.decodeMode = 'auto',
     this.gpuNext = false,
+    this.vulkan = false,
     this.conf = '',
   });
 
   final String decodeMode;
   final bool gpuNext;
+  final bool vulkan;
   final String conf;
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
@@ -31,6 +31,7 @@ class KotvMpvOpts {
     return KotvMpvOpts(
       decodeMode: decode.isEmpty ? 'auto' : decode,
       gpuNext: '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true',
+      vulkan: '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true',
       conf: '${settings['mpvConf'] ?? ''}',
     );
   }
@@ -38,11 +39,13 @@ class KotvMpvOpts {
   KotvMpvOpts copyWith({
     String? decodeMode,
     bool? gpuNext,
+    bool? vulkan,
     String? conf,
   }) {
     return KotvMpvOpts(
       decodeMode: decodeMode ?? this.decodeMode,
       gpuNext: gpuNext ?? this.gpuNext,
+      vulkan: vulkan ?? this.vulkan,
       conf: conf ?? this.conf,
     );
   }
@@ -52,20 +55,17 @@ class KotvMpvOpts {
   bool get hard =>
       decodeMode == 'hard' || decodeMode == 'hardware' || decodeMode == 'hw';
 
-  /// 供 setProperty / VideoController 使用的 hwdec 值。
+  /// 供原生 setProperty 使用的 hwdec 值。
   ///
-  /// H.264 / HEVC 等交给 mpv 与驱动协商，
-  /// 不做按编码白名单。Win7 用 dxva2（见下），不是软解也不是 copy。
+  /// Android：auto → `auto-safe`；hard → `mediacodec`；soft → `no`。
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
-      // 直出：硬解 mediacodec；自动交给 mpv 选（优先硬解）。
-      return hard ? 'mediacodec' : 'auto';
+      if (hard) return 'mediacodec';
+      return 'auto-safe';
     }
     if (hard) {
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-        // Win7：D3D11 视频解码 API（d3d11va）基本不可用/极不稳，用 dxva2 直出。
-        // Win8+ / Win10+：d3d11va 直出。
         return kotvIsWindows7() ? 'dxva2' : 'd3d11va';
       }
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
@@ -75,58 +75,45 @@ class KotvMpvOpts {
     return 'auto';
   }
 
-  /// Android 可切 gpu/gpu-next；桌面必须 libmpv（Flutter Texture）。
-  VideoControllerConfiguration videoControllerConfiguration() {
-    final hw = hwdecValue();
-    if (kotvIsAndroid()) {
-      return VideoControllerConfiguration(
-        vo: gpuNext ? 'gpu-next' : 'gpu',
-        hwdec: hw,
-        enableHardwareAcceleration: !soft,
-      );
-    }
-    return VideoControllerConfiguration(
-      // 勿改 vo：NativeVideoController 默认 libmpv，换 gpu-next 会黑屏
-      hwdec: hw,
-      enableHardwareAcceleration: !soft,
-    );
-  }
-
-  /// 在 VideoController 已附着之后调用：缓冲预算 + conf。
+  /// 交给原生通道的属性表（P1/P2 open / setOpts）。
   ///
-  /// [live]=true 时不写点播 demuxer 预读（TV 直播也是引擎默认缓冲，无自定义 LoadControl/demuxer）。
-  Future<void> applyAfterAttach(Player player, {bool live = false}) async {
-    try {
-      final platform = player.platform;
-      if (platform == null) return;
-      Future<void> set(String k, String v) async {
-        await (platform as dynamic).setProperty(k, v);
+  /// [live]=true 时不写点播 demuxer 预读（对齐 TV 直播默认缓冲）。
+  Map<String, String> propertyMap({bool live = false}) {
+    final out = <String, String>{
+      'hwdec': hwdecValue(),
+    };
+    if (gpuNext) {
+      out['vo'] = 'gpu-next';
+    }
+    if (vulkan && !kotvIsAndroid()) {
+      out['gpu-api'] = 'vulkan';
+    }
+    if (!live) {
+      if (kotvIsAndroid()) {
+        out['cache'] = 'yes';
+        out['cache-on-disk'] = 'no';
+        out['demuxer-max-bytes'] = '48MiB';
+        out['demuxer-max-back-bytes'] = '8MiB';
+        out['demuxer-readahead-secs'] = '20';
+        out['cache-secs'] = '30';
+        out['framedrop'] = 'vo';
+      } else {
+        final budget = KotvBufferBudget.bytes();
+        final forward = KotvBufferBudget.mpvMiB(budget);
+        final back = KotvBufferBudget.mpvMiB(max(16 * 1024 * 1024, budget ~/ 8));
+        out['cache'] = 'yes';
+        out['cache-on-disk'] = 'no';
+        out['demuxer-max-bytes'] = forward;
+        out['demuxer-max-back-bytes'] = back;
+        out['demuxer-readahead-secs'] = '1000000';
+        out['cache-secs'] = '1000000';
+        out['framedrop'] = 'vo';
       }
-
-      try {
-        await set('hwdec', hwdecValue());
-      } catch (_) {}
-
-      if (!live) {
-        try {
-          await KotvBufferBudget.warm(force: true);
-          final budget = KotvBufferBudget.bytes();
-          final forward = KotvBufferBudget.mpvMiB(budget);
-          final back = KotvBufferBudget.mpvMiB(max(16 * 1024 * 1024, budget ~/ 8));
-          await set('cache', 'yes');
-          await set('cache-on-disk', 'no');
-          await set('demuxer-max-bytes', forward);
-          await set('demuxer-max-back-bytes', back);
-          await set('demuxer-readahead-secs', '1000000');
-          await set('cache-secs', '1000000');
-          await set('framedrop', 'vo');
-        } catch (_) {}
-      }
-
-      for (final e in parseConfLines(conf)) {
-        await set(e.$1, e.$2);
-      }
-    } catch (_) {}
+    }
+    for (final e in parseConfLines(conf)) {
+      out[e.$1] = e.$2;
+    }
+    return out;
   }
 
   /// 解析 mpv.conf 风格：`key=value` / `key value`；忽略空行与 `#` 注释。
@@ -151,7 +138,7 @@ class KotvMpvOpts {
         value = line.substring(m.end).trim();
       }
       if (key.isEmpty) continue;
-      // 跳过会破坏 Flutter Texture 输出的选项
+      // 跳过会破坏原生 Surface 绑定的选项（由引擎自己设 vo/wid）
       if (key == 'vo' || key == 'wid' || key == 'android-surface-size') continue;
       out.add((key, value.isEmpty ? 'yes' : value));
     }

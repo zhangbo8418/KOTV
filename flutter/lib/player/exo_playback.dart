@@ -20,10 +20,12 @@ class ExoPlayback extends KotvPlayback {
   static const _ch = MethodChannel('kotv_exo');
   static const _ev = EventChannel('kotv_exo/events');
   static const _viewType = 'kotv_exo/surface';
-  final _viewKey = GlobalKey();
 
   StreamSubscription? _sub;
   bool _nativeReady = false;
+  /// Flutter Texture 仅「渲染方式=Texture」兼容模式；默认 SurfaceView 走 PlatformView。
+  int? _textureId;
+  bool _useFlutterTexture = false;
   String _url = '';
   Map<String, String> _headers = const {};
   Map<String, dynamic>? _drm;
@@ -45,6 +47,8 @@ class ExoPlayback extends KotvPlayback {
   int _speedBps = 0;
   bool _repeatOne = false;
   String _decodeMode = 'auto';
+  int _surfaceGeneration = 0;
+  /// 默认 Surface：Hybrid SurfaceView，对齐 TV HDR；Texture 为兼容回退（HDR 可能花屏）。
   String _renderMode = 'surface';
   bool _live = false;
   String? _lastError;
@@ -69,14 +73,36 @@ class ExoPlayback extends KotvPlayback {
   bool get buffering {
     if (!_buffering) return false;
     // Exo 补缓存时常 STATE_BUFFERING；已在播（含纯音频）不当作起播缓冲，避免误切。
-    if (_playing && (_w > 0 && _h > 0 || _isAudioOnlyUnlocked || _position > const Duration(seconds: 1))) {
+    if (_w > 0 && _h > 0) return false;
+    if (_position > const Duration(milliseconds: 300)) return false;
+    if (_ready && _playing) return false;
+    if (_playing && (_isAudioOnlyUnlocked || _position > const Duration(seconds: 1))) {
       return false;
     }
     return true;
   }
 
+  /// 原位全屏不再 bump PlatformView（对齐 TV）。
+  void bumpSurfaceView() {}
+
   @override
-  bool get stalling => _buffering;
+  /// 浮层「缓冲中」与 [buffering] 一致：已出画/已在播时的补缓存不再盖网速。
+  bool get stalling => buffering;
+  @override
+  /// SurfaceView Hybrid Composition：原生叠字会被 MediaOverlay 盖住只剩残字；
+  /// 改回 Flutter 缓冲层（可能轻微重影，但可完整显示「缓冲中」且不挡画面）。
+  bool get preferNativeBufferingOverlay => false;
+  @override
+  Future<void> setNativeBufferingOverlay({required bool visible, required String text}) async {
+    if (!preferNativeBufferingOverlay) return;
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('setBufferingUi', {
+        'show': visible,
+        'text': text,
+      });
+    } catch (_) {}
+  }
   @override
   int get networkSpeedBps => _speedBps;
   @override
@@ -95,11 +121,49 @@ class ExoPlayback extends KotvPlayback {
   Stream<bool> get completedStream => _endedCtrl.stream;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
+    final tid = _textureId;
+    if (_useFlutterTexture) {
+      // Texture 兼容模式：create 完成前 tid 可能为空。
+      if (tid == null || tid < 0) {
+        return const ColoredBox(color: Colors.black);
+      }
+      return ColoredBox(
+        color: Colors.black,
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final max = c.biggest;
+            if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
+              return Texture(textureId: tid);
+            }
+            if (fit == BoxFit.fill || _w <= 0 || _h <= 0) {
+              return SizedBox(
+                width: max.width,
+                height: max.height,
+                child: Texture(textureId: tid),
+              );
+            }
+            final box = _boxFitSize(max, _displaySize, fit);
+            final child = SizedBox(
+              width: box.width,
+              height: box.height,
+              child: Texture(textureId: tid),
+            );
+            if (fit == BoxFit.cover) {
+              return ClipRect(child: Center(child: child));
+            }
+            return Center(child: child);
+          },
+        ),
+      );
+    }
     final name = _fitName(fit);
+    // Surface：Hybrid Composition + SurfaceView（HDR 对齐 TV）。
     final surface = kotvExoSurfaceView(
-      key: _viewKey,
+      key: ValueKey('kotv_exo_surface_$_surfaceGeneration'),
+      // 勿用 GlobalKey：全屏进出会挪 PlatformView，易触发 RenderObject.detach 断言。
       viewType: _viewType,
       fitName: name,
+      hybrid: true,
       onFit: (fitName) {
         unawaited(_ch.invokeMethod('setFit', {'fit': fitName}).catchError((_) {}));
       },
@@ -156,13 +220,33 @@ class ExoPlayback extends KotvPlayback {
 
   Future<void> _ensureNative() async {
     if (_nativeReady) return;
-    await _ch.invokeMethod('create', {'render': _renderMode});
+    final created = await _ch.invokeMethod<dynamic>('create', {'render': _renderMode});
+    if (created is Map) {
+      final render = '${created['render'] ?? ''}';
+      final path = '${created['path'] ?? ''}';
+      final tid = (created['textureId'] as num?)?.toInt();
+      if (render == 'texture' || render == 'surface') {
+        _renderMode = render;
+      }
+      _applyNativePath(path: path, textureId: tid);
+    }
     _nativeReady = true;
     await _sub?.cancel();
     _sub = _ev.receiveBroadcastStream().listen(_onEvent, onError: (e) {
       _lastError = '$e';
       notifyListeners();
     });
+  }
+
+  void _applyNativePath({required String path, int? textureId}) {
+    if (path == 'flutterTexture' && textureId != null && textureId >= 0) {
+      _useFlutterTexture = true;
+      _textureId = textureId;
+      _renderMode = 'texture';
+    } else {
+      _useFlutterTexture = false;
+      _textureId = null;
+    }
   }
 
   void _onEvent(dynamic raw) {
@@ -438,9 +522,18 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> setRenderMode(String mode) async {
-    _renderMode = kotvNormalizePlayerRender(mode);
+    final next = kotvNormalizePlayerRender(mode);
+    _renderMode = next;
     try {
-      await _ch.invokeMethod('setRenderMode', {'mode': _renderMode});
+      await _ensureNative();
+      final raw = await _ch.invokeMethod<dynamic>('setRenderMode', {'mode': _renderMode});
+      if (raw is Map) {
+        final path = '${raw['path'] ?? ''}';
+        final tid = (raw['textureId'] as num?)?.toInt();
+        final render = '${raw['render'] ?? ''}';
+        if (render == 'texture' || render == 'surface') _renderMode = render;
+        _applyNativePath(path: path, textureId: tid);
+      }
     } catch (_) {}
     notifyListeners();
   }
@@ -463,6 +556,8 @@ class ExoPlayback extends KotvPlayback {
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _sub = null;
     _nativeReady = false;
+    _useFlutterTexture = false;
+    _textureId = null;
     unawaited(_ch.invokeMethod('dispose').catchError((_) {}));
     _posCtrl.close();
     _bufCtrl.close();

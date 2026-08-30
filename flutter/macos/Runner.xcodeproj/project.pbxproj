@@ -29,6 +29,10 @@
 		33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F42044A3C60003C045 /* MainMenu.xib */; };
 		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
 		B5BD1C0C8E4E192E09488365 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 63EEDF5091B840E4929AF367 /* Pods_Runner.framework */; };
+		AA0000010000000000000001 /* kotv_mpv_plugin_mac.mm in Sources */ = {isa = PBXBuildFile; fileRef = AA0000110000000000000001 /* kotv_mpv_plugin_mac.mm */; };
+		AA0000020000000000000001 /* kotv_mpv_desktop_core.c in Sources */ = {isa = PBXBuildFile; fileRef = AA0000120000000000000001 /* kotv_mpv_desktop_core.c */; };
+		AA0000030000000000000001 /* kotv_mpv_lib_path.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA0000130000000000000001 /* kotv_mpv_lib_path.cpp */; };
+		AA0000040000000000000001 /* mpv_shim.c in Sources */ = {isa = PBXBuildFile; fileRef = AA0000140000000000000001 /* mpv_shim.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -88,6 +92,11 @@
 		93D235F547D60D3A9DC1EFF3 /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		EC9922EF2FBFD4840178CA5D /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
+		AA0000110000000000000001 /* kotv_mpv_plugin_mac.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = kotv_mpv_plugin_mac.mm; sourceTree = "<group>"; };
+		AA0000120000000000000001 /* kotv_mpv_desktop_core.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = kotv_mpv_desktop_core.c; path = ../../native/kotv_mpv/kotv_mpv_desktop_core.c; sourceTree = "<group>"; };
+		AA0000130000000000000001 /* kotv_mpv_lib_path.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = kotv_mpv_lib_path.cpp; path = ../../native/kotv_mpv/kotv_mpv_lib_path.cpp; sourceTree = "<group>"; };
+		AA0000140000000000000001 /* mpv_shim.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = mpv_shim.c; path = ../../../internal/player/embed/mpv_shim.c; sourceTree = "<group>"; };
+		AA0000150000000000000001 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -177,6 +186,11 @@
 			children = (
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
+				AA0000110000000000000001 /* kotv_mpv_plugin_mac.mm */,
+				AA0000120000000000000001 /* kotv_mpv_desktop_core.c */,
+				AA0000130000000000000001 /* kotv_mpv_lib_path.cpp */,
+				AA0000140000000000000001 /* mpv_shim.c */,
+				AA0000150000000000000001 /* Runner-Bridging-Header.h */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
 				33E51914231749380026EE4D /* Release.entitlements */,
 				33CC11242044D66E0003C045 /* Resources */,
@@ -461,6 +475,10 @@
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
+				AA0000010000000000000001 /* kotv_mpv_plugin_mac.mm in Sources */,
+				AA0000020000000000000001 /* kotv_mpv_desktop_core.c in Sources */,
+				AA0000030000000000000001 /* kotv_mpv_lib_path.cpp in Sources */,
+				AA0000040000000000000001 /* mpv_shim.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -600,7 +618,12 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ldl",
+				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Profile;
@@ -732,7 +755,12 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ldl",
+				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 			};
@@ -752,7 +780,12 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ldl",
+				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;

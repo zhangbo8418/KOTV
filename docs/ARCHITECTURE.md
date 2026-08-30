@@ -113,7 +113,7 @@ Go Engine（单进程，:9978）
 
 | 引擎 | 平台 | 说明 |
 |------|------|------|
-| **MPV**（media_kit） | Android + 桌面 | 页内 libmpv 由 media_kit 自带（不进 `runtime/`）；`vo=libmpv`，可配 `mpv.conf`/hwdec |
+| **MPV**（原生） | Android + 桌面 | 对齐 TV `media3.mpvplayer` + Surface；选项 `mpv.conf`/hwdec；接入完成前桌面默认 FVP |
 | **FVP**（libmdk） | Android + 桌面 | 备选页内引擎，硬/软/自动解码列表由设置下发 |
 | 外部 VLC / MPV | 桌面 | 旁路播放，使用系统安装或 PATH |
 

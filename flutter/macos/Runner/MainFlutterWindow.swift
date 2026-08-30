@@ -30,6 +30,8 @@ class MainFlutterWindow: NSWindow {
     }
     hostChannel = ch
 
+    kotv_mpv_plugin_register_macos(flutterViewController.engine)
+
     super.awakeFromNib()
   }
 

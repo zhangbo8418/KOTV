@@ -56,8 +56,13 @@ kotv_export_fvp_deps
 flutter pub get
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 "$ROOT/scripts/patch-android-plugin-namespaces.sh"
-chmod +x "$ROOT/scripts/patch-media-kit-android-jars.sh"
-"$ROOT/scripts/patch-media-kit-android-jars.sh"
+chmod +x "$ROOT/scripts/fetch-android-mpv-libs.sh"
+"$ROOT/scripts/fetch-android-mpv-libs.sh"
+
+echo "==> build libvulkan stub (API 25+ / RK3399)"
+for abi in arm64-v8a armeabi-v7a; do
+  "$ROOT/scripts/build-android-libvulkan-stub.sh" "$abi"
+done
 
 OUT_DIR="$ROOT/flutter/build/app/outputs/flutter-apk"
 mkdir -p "$ROOT/dist"
