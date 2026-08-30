@@ -117,6 +117,8 @@ static int g_gpu_next;
 static int g_vulkan;
 static char g_hwdec_opt[64];
 
+static int init_sw(void);
+
 static void update_cb(void *ctx) {
     (void)ctx;
     g_dirty = 1;

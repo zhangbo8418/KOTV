@@ -208,6 +208,27 @@ fetch_with_fallback() {
   return 1
 }
 
+detect_desktop_plat() {
+  case "$(uname -s 2>/dev/null)" in
+    Linux*) echo linux ;;
+    Darwin*) echo macos ;;
+    MINGW*|MSYS*|CYGWIN*) echo windows ;;
+    *)
+      if [[ "${OS:-}" == "Windows_NT" ]]; then
+        echo windows
+      fi
+      ;;
+  esac
+}
+
+if [[ -z "${KOTV_FETCH_DESKTOP_PLAT:-}" ]]; then
+  auto="$(detect_desktop_plat || true)"
+  if [[ -n "$auto" ]]; then
+    KOTV_FETCH_DESKTOP_PLAT="$auto"
+    echo "==> auto KOTV_FETCH_DESKTOP_PLAT=$KOTV_FETCH_DESKTOP_PLAT"
+  fi
+fi
+
 echo "==> fetch desktop libmpv (prebuilt, no local compile) → $ASSET"
 if [[ -n "${KOTV_FETCH_DESKTOP_PLAT:-}" ]]; then
   case "${KOTV_FETCH_DESKTOP_PLAT}" in

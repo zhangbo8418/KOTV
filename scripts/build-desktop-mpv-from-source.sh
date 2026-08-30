@@ -20,6 +20,25 @@ mkdir -p "$ASSET/windows" "$ASSET/linux" "$ASSET/macos"
 
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 
+# Windows CI：pip 装的 meson 可能不在 PATH，用 python -m meson 兜底
+if ! command -v meson >/dev/null 2>&1; then
+  if python3 -m meson --version >/dev/null 2>&1; then
+    meson() { python3 -m meson "$@"; }
+  elif python -m meson --version >/dev/null 2>&1; then
+    meson() { python -m meson "$@"; }
+  fi
+fi
+if ! command -v ninja >/dev/null 2>&1; then
+  for d in \
+    "/c/hostedtoolcache/windows/Python/"*"/Scripts" \
+    "$HOME/AppData/Roaming/Python/Python"*/Scripts \
+    "$HOME/AppData/Local/Programs/Python/Python"*/Scripts; do
+    [[ -d "$d" && -x "$d/ninja.exe" ]] || continue
+    export PATH="$d:$PATH"
+    break
+  done
+fi
+
 build_mpv_linux() {
   need meson
   need ninja
