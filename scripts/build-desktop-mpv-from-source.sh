@@ -64,6 +64,27 @@ _harvest_is_system_dll() {
   return 1
 }
 
+_harvest_copy_dll() {
+  local from="$1" to="$2"
+  [[ -f "$from" ]] || return 0
+  # MSYS/Git Bash：cp 同一文件会报 "are the same file" 并非零退出。
+  [[ "$from" -ef "$to" ]] && return 0
+  cp -f "$from" "$to"
+}
+
+_harvest_copy_tree_dlls() {
+  local src="$1" dest="$2" depth="${3:-8}"
+  [[ -d "$src" ]] || return 0
+  local f base
+  while IFS= read -r f; do
+    base="$(basename "$f")"
+    case "$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')" in
+      mpv-2.dll|libmpv-2.dll) continue ;;
+    esac
+    _harvest_copy_dll "$f" "$dest/$base"
+  done < <(find "$src" -maxdepth "$depth" -type f -iname '*.dll' 2>/dev/null)
+}
+
 # 把 mpv-2.dll 的非系统依赖拷进 assets/windows（与 exe 同目录加载）。
 harvest_windows_mpv_dlls() {
   local dest="$ASSET/windows"
@@ -74,17 +95,15 @@ harvest_windows_mpv_dlls() {
   local src
   for src in "$PREFIX/bin" "$PREFIX/lib" "$BUILD_DIR/prefix/bin" "$BUILD_DIR/prefix/lib" \
              "$BUILD_DIR/mpv/build" "$BUILD_DIR/libplacebo/build"; do
-    [[ -d "$src" ]] || continue
-    find "$src" -maxdepth 3 -type f -iname '*.dll' -exec cp -f {} "$dest/" \; 2>/dev/null || true
+    _harvest_copy_tree_dlls "$src" "$dest" 3
   done
-  find "$PREFIX" -type f -iname '*.dll' -exec cp -f {} "$dest/" \; 2>/dev/null || true
-  cp -f "$dll" "$dest/mpv-2.dll"
+  _harvest_copy_tree_dlls "$PREFIX" "$dest" 8
 
   local vk
   for vk in \
     "${VULKAN_SDK:-}/Bin/vulkan-1.dll" \
     "${VULKAN_SDK:-}/Bin32/vulkan-1.dll"; do
-    [[ -f "$vk" ]] && cp -f "$vk" "$dest/vulkan-1.dll"
+    [[ -f "$vk" ]] && _harvest_copy_dll "$vk" "$dest/vulkan-1.dll"
   done
   vk="$(ls /c/VulkanSDK/*/Bin/vulkan-1.dll 2>/dev/null | tail -1 || true)"
   [[ -n "$vk" && -f "$vk" && ! -f "$dest/vulkan-1.dll" ]] && cp -f "$vk" "$dest/vulkan-1.dll"
@@ -97,13 +116,13 @@ harvest_windows_mpv_dlls() {
     local printed
     for printed in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
       src="$(gcc -print-file-name="$printed" 2>/dev/null || true)"
-      [[ -n "$src" && -f "$src" && "$src" != "$printed" ]] && cp -f "$src" "$dest/$(basename "$src")"
+      [[ -n "$src" && -f "$src" && "$src" != "$printed" ]] && _harvest_copy_dll "$src" "$dest/$(basename "$src")"
     done
   fi
   if [[ -n "$gcc_bin" ]]; then
     local mingw
     for mingw in libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll libssp-0.dll; do
-      [[ -f "$gcc_bin/$mingw" ]] && cp -f "$gcc_bin/$mingw" "$dest/$mingw"
+      [[ -f "$gcc_bin/$mingw" ]] && _harvest_copy_dll "$gcc_bin/$mingw" "$dest/$mingw"
     done
   fi
 
@@ -125,7 +144,7 @@ harvest_windows_mpv_dlls() {
           [[ -f "$dest/$name" ]] && continue
           for src in "${search_dirs[@]}"; do
             [[ -n "$src" && -f "$src/$name" ]] || continue
-            cp -f "$src/$name" "$dest/$name"
+            _harvest_copy_dll "$src/$name" "$dest/$name"
             changed=1
             break
           done
