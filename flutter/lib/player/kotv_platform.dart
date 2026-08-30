@@ -44,10 +44,12 @@ String kotvNormalizePlayerRender(String raw) {
 String kotvPlayerRenderLabel(String raw) =>
     kotvNormalizePlayerRender(raw) == 'texture' ? 'Texture' : 'Surface';
 
-/// Surface/Texture 只作用在 Android 内置 Exo（对齐 TV PlayerView.setRender）。
-/// MPV/FVP/Web 走各自的 Texture/vo，不能套这套选项。
-bool kotvPlayerRenderApplies(String playerVal) =>
-    kotvIsAndroid() && kotvEmbedBackend(playerVal) == KotvEmbedBackend.exo;
+/// Surface/Texture 对齐 TV `PlayerView.setRender`：Android 内置 Exo 与 MPV 共用。
+bool kotvPlayerRenderApplies(String playerVal) {
+  if (!kotvIsAndroid()) return false;
+  final b = kotvEmbedBackend(playerVal);
+  return b == KotvEmbedBackend.exo || b == KotvEmbedBackend.mpv;
+}
 
 /// 点播默认：Web=HTML5；Android=Exo；其它=FVP（原生 MPV 接入前暂用）。
 String kotvDefaultVodPlayer() {

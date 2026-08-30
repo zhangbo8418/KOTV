@@ -35,12 +35,46 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
     installInitCrashGuard()
     // Before Flutter/GPU can load system libvulkan.so: register app stub first
     // so libmpv DT_NEEDED libvulkan.so binds to our 1.1 symbol stubs (API 25).
+    preloadLibcxx()
     preloadAppLibvulkan()
     try {
       Init.set(base)
     } catch (_: Throwable) {
     }
     hookGlobalMainDispatch()
+  }
+
+  private fun preloadLibcxx() {
+    // 必须在 Flutter/fvp 之前加载我们的 libc++。fvp 的旧 libc++ 缺 from_chars，libmpv dlopen 会挂。
+    try {
+      val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull { candidate ->
+        try {
+          assets.open("mpv-libs/$candidate/libc++_shared.so").close()
+          true
+        } catch (_: Throwable) {
+          false
+        }
+      }
+      if (abi.isNullOrEmpty()) {
+        System.loadLibrary("c++_shared")
+        android.util.Log.i(TAG, "preload libc++_shared from nativeLibraryDir")
+        return
+      }
+      val dest = java.io.File(java.io.File(getDir("mpv-libs", MODE_PRIVATE), abi), "libc++_shared.so")
+      dest.parentFile?.mkdirs()
+      assets.open("mpv-libs/$abi/libc++_shared.so").use { input ->
+        java.io.FileOutputStream(dest).use { output -> input.copyTo(output) }
+      }
+      System.load(dest.absolutePath)
+      android.util.Log.i(TAG, "preload libc++_shared from assets/$abi ${dest.absolutePath}")
+    } catch (t: Throwable) {
+      try {
+        System.loadLibrary("c++_shared")
+        android.util.Log.w(TAG, "preload libc++_shared fallback jniLibs", t)
+      } catch (t2: Throwable) {
+        android.util.Log.w(TAG, "preload libc++_shared failed", t2)
+      }
+    }
   }
 
   private fun preloadAppLibvulkan() {

@@ -11,9 +11,13 @@ check_abi() {
   local mpv="$dir/libmpv.so"
   local codec="$dir/libmvcodec.so"
   local vulkan_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libvulkan.so"
+  local cxx="$dir/libc++_shared.so"
+  local cxx_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libc++_shared.so"
 
   [[ -f "$mpv" ]] || { echo "ERROR: missing $mpv" >&2; fail=1; return; }
   [[ -f "$codec" ]] || { echo "ERROR: missing $codec" >&2; fail=1; return; }
+  [[ -f "$cxx" ]] || { echo "ERROR: missing $cxx" >&2; fail=1; return; }
+  [[ -f "$cxx_jni" ]] || { echo "ERROR: missing $cxx_jni" >&2; fail=1; return; }
   [[ -f "$vulkan_jni" ]] || { echo "ERROR: missing $vulkan_jni" >&2; fail=1; return; }
 
   if grep -aqE 'vulkan|androidvk|-Dvulkan=enabled' "$mpv" 2>/dev/null; then

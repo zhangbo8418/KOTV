@@ -605,11 +605,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           _prefDecodeMode = decode;
         }
         _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
-        // 旧包曾默认/强制 Texture；Flutter Texture + Rockchip HDR 会绿条，纠正回 Surface。
-        if (_renderMode == 'texture') {
-          _renderMode = 'surface';
-          unawaited(ref.read(apiProvider).setSetting('playerRender', 'surface'));
-        }
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';

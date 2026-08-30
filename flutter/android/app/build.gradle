@@ -86,6 +86,8 @@ android {
             // stub .so is already small; AGP stripReleaseDebugSymbols corrupts it
             keepDebugSymbols.add("**/libvulkan.so")
             keepDebugSymbols.add("**/libkotv_dl.so")
+            // fvp/mdk 也会带 libc++_shared；优先用我们 overlay 的 NDK 副本（libmpv from_chars）。
+            pickFirsts += "**/libc++_shared.so"
             useLegacyPackaging = true
             for (abi in kotvAllAbis) {
                 if (!kotvAbiFilters.contains(abi)) {
@@ -253,4 +255,30 @@ tasks.named("preBuild") {
 afterEvaluate {
     android.defaultConfig.targetSdk = kotvTargetSdk
     println "[android] pinned targetSdk=${android.defaultConfig.targetSdk} (KOTV_TARGET_SDK=${System.getenv("KOTV_TARGET_SDK") ?: "28"})"
+    // fvp/mdk 的 libc++ 往往更旧；合并后再盖一层我们 overlay 的 NDK 副本，保证 libmpv from_chars。
+    android.applicationVariants.configureEach { variant ->
+        def mergeName = "merge${variant.name.capitalize()}NativeLibs"
+        tasks.matching { it.name == mergeName }.configureEach { task ->
+            task.doLast {
+                kotvAbiFilters.each { abi ->
+                    def src = file("src/main/jniLibs/${abi}/libc++_shared.so")
+                    if (!src.exists() || src.length() == 0L) return
+                    def matches = fileTree("${project.buildDir}/intermediates").matching {
+                        include "**/lib/${abi}/libc++_shared.so"
+                    }
+                    if (matches.isEmpty()) {
+                        def dest = file("${project.buildDir}/intermediates/merged_native_libs/${variant.dirName}/merge${variant.name.capitalize()}NativeLibs/out/lib/${abi}/libc++_shared.so")
+                        dest.parentFile.mkdirs()
+                        ant.copy(file: src, tofile: dest, overwrite: true)
+                        println "[android] overlay libc++_shared.so → ${dest}"
+                    } else {
+                        matches.each { dest ->
+                            ant.copy(file: src, tofile: dest, overwrite: true)
+                            println "[android] overlay libc++_shared.so → ${dest}"
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

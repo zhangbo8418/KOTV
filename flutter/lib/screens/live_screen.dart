@@ -330,10 +330,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           _prefDecodeMode = decode;
         }
         _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
-        if (_renderMode == 'texture') {
-          _renderMode = 'surface';
-          unawaited(ref.read(apiProvider).setSetting('playerRender', 'surface'));
-        }
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
         var playerVal = '${settings['playerLive'] ?? ''}'.trim();
         if (playerVal.isEmpty) {

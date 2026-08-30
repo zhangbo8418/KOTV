@@ -766,8 +766,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
     final mpvVulkan = g('mpvVulkan', 'false') == 'true';
     final mpvConfPreview = g('mpvConf').trim();
-    final mpvSelected = kotvEmbedBackend(playerVal) == KotvEmbedBackend.mpv ||
-        kotvEmbedBackend(livePlayerVal) == KotvEmbedBackend.mpv;
     // MPV conf / gpu-next / Vulkan：Android + 桌面
     final showMpvOpts = kotvIsAndroid() || kotvIsDesktop();
 
@@ -924,20 +922,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsWideTile(
                           label: '渲染方式',
                           value: renderLabel,
-                          onTap: () => _pick('渲染方式（仅 Exo）', 'playerRender', const [
+                          onTap: () => _pick('渲染方式', 'playerRender', const [
                             ('Surface（推荐，HDR）', 'surface'),
                             ('Texture', 'texture'),
-                          ], msg: '仅内置 Exo 生效，已保存'),
-                        ),
-                      if (mpvSelected && !kotvPlayerRenderApplies(playerVal))
-                        KotvSettingsWideTile(
-                          label: '渲染方式',
-                          value: 'Surface（MPV 固定）',
-                          onTap: () => showAppNews(
-                            context,
-                            '内置 MPV 对齐 TV mpvplayer：固定 Surface 直出，\n'
-                            '无 Exo 的 Surface/Texture 切换项。',
-                          ),
+                          ]),
                         ),
                       KotvSettingsWideTile(
                         label: '自动切换播放器',

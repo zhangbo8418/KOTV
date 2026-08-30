@@ -103,6 +103,15 @@ public final class MPVLib {
             // App-local libvulkan.so must win over /system/lib64/libvulkan.so (same soname).
             // System Vulkan on API 25 lacks 1.1 symbols; load ours via absolute path +
             // RTLD_GLOBAL/FORCE_LOAD before libmpv relocates DT_NEEDED libvulkan.so.
+            File bundledCxx = new File(dir, "libc++_shared.so");
+            if (bundledCxx.isFile()) {
+                try {
+                    System.load(bundledCxx.getAbsolutePath());
+                    Log.i(TAG, "libc++_shared loaded from " + bundledCxx.getAbsolutePath());
+                } catch (UnsatisfiedLinkError e) {
+                    Log.w(TAG, "libc++_shared already loaded or failed: " + bundledCxx.getAbsolutePath(), e);
+                }
+            }
             System.loadLibrary("kotv_dl");
             File appVulkan = new File(app.getApplicationInfo().nativeLibraryDir, "libvulkan.so");
             File extractedVulkan = new File(dir, "libvulkan.so");
@@ -116,7 +125,6 @@ public final class MPVLib {
             boolean usedJniLibs = false;
             try {
                 for (String lib : new String[] {
-                        "c++_shared",
                         "mvutil",
                         "mwresample",
                         "mwscale",
@@ -136,7 +144,7 @@ public final class MPVLib {
                 // Ensure stub is global again before absolute-loading libmpv.
                 nativeLoadGlobal(vulkanSo.getAbsolutePath());
                 for (String lib : LOAD_ORDER) {
-                    if ("kotv_dl".equals(lib) || "vulkan".equals(lib)) continue;
+                    if ("c++_shared".equals(lib) || "kotv_dl".equals(lib) || "vulkan".equals(lib)) continue;
                     File so = new File(dir, System.mapLibraryName(lib));
                     System.load(so.getAbsolutePath());
                 }
@@ -229,7 +237,7 @@ public final class MPVLib {
     private static String getBundleId(Context app, String abi) throws IOException {
         try {
             PackageInfo info = app.getPackageManager().getPackageInfo(app.getPackageName(), 0);
-            return info.lastUpdateTime + ":" + abi + ":vulkan10";
+            return info.lastUpdateTime + ":" + abi + ":cxx-ndk";
         } catch (PackageManager.NameNotFoundException e) {
             throw new IOException("Unable to read app update time", e);
         }

@@ -2,12 +2,15 @@ package com.bobo.kotv
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.SurfaceTexture
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -25,7 +28,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 原生 MPV（对齐 TV）：[MPVLib] + SurfaceView，直出硬解。
+ * 原生 MPV（对齐 TV）：[MPVLib] + SurfaceView/TextureView（PlayerView.setRender）。
  *
  * native 库从 assets/mpv-libs/{abi}/ 解压加载（与 TV/webhtv 同路径约定）。
  */
@@ -58,6 +61,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var livePlayback = false
   private var volume = 80.0
   private var rate = 1.0
+  private var renderTexture = false
 
   private val tick = object : Runnable {
     override fun run() {
@@ -145,9 +149,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
     }
+    host.setRender(renderTexture)
     // Surface 可能早于 callback 就绪（详情↔全屏挪 PlatformView）。
-    val holder = host.surfaceView.holder
-    if (holder.surface?.isValid == true) {
+    if (host.currentSurface() != null) {
       surfaceReady = true
       tryAttachSurface()
       maybeLoadPending()
@@ -181,8 +185,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         gpuNext = call.argument<Boolean>("gpuNext") == true
         vulkanEnabled = call.argument<Boolean>("vulkan") == true
         conf = call.argument<String>("conf") ?: conf
+        call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+          renderTexture = resolveRenderTexture(it)
+        }
         main.post {
           try {
+            surfaceHost?.setRender(renderTexture)
             ensurePlayer()
             result.success(mapOf("ok" to true, "ready" to created.get()))
           } catch (e: Throwable) {
@@ -202,12 +210,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         gpuNext = call.argument<Boolean>("gpuNext") == true
         vulkanEnabled = call.argument<Boolean>("vulkan") == true
         conf = call.argument<String>("conf") ?: conf
+        call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+          renderTexture = resolveRenderTexture(it)
+        }
         @Suppress("UNCHECKED_CAST")
         val props = (call.argument<Map<*, *>>("props") ?: emptyMap<Any, Any>())
           .entries
           .associate { "${it.key}" to "${it.value}" }
         main.post {
           try {
+            surfaceHost?.setRender(renderTexture)
             ensurePlayer()
             applyRuntimeOpts(props)
             applyGpuApiIfNeeded()
@@ -346,6 +358,24 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             result.success(null)
           } catch (e: Throwable) {
             result.error("DECODE_FAILED", e.message, null)
+          }
+        }
+      }
+      "setRenderMode" -> {
+        val mode = call.argument<String>("mode") ?: ""
+        main.post {
+          try {
+            renderTexture = resolveRenderTexture(mode)
+            surfaceHost?.setRender(renderTexture)
+            result.success(
+              mapOf(
+                "ok" to true,
+                "render" to if (renderTexture) "texture" else "surface",
+                "path" to "platformView",
+              ),
+            )
+          } catch (e: Throwable) {
+            result.error("RENDER_FAILED", e.message, null)
           }
         }
       }
@@ -653,9 +683,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.observeProperty("video-params/h", MPVLib.MpvFormat.MPV_FORMAT_INT64)
   }
 
+  private fun resolveRenderTexture(mode: String): Boolean {
+    val m = mode.trim().lowercase()
+    return m == "texture" || m == "textureview" || m == "1"
+  }
+
   private fun tryAttachSurface() {
     if (!created.get()) return
-    val surface = surfaceHost?.surfaceView?.holder?.surface ?: return
+    val surface = surfaceHost?.currentSurface() ?: return
     if (!surface.isValid) return
     try {
       MPVLib.attachSurface(surface)
@@ -838,16 +873,18 @@ internal class KotvMpvSurfaceFactory(
   }
 }
 
-/** SurfaceView 宿主：对齐 TV / Exo，Hybrid Composition 直出。 */
-internal class KotvMpvSurfaceHost(context: Context) : FrameLayout(context), SurfaceHolder.Callback {
-  val surfaceView: SurfaceView = SurfaceView(context).apply {
-    layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-    isFocusable = false
-    isFocusableInTouchMode = false
-    holder.addCallback(this@KotvMpvSurfaceHost)
-    // Hybrid Composition：媒体层叠在 Flutter 下，避免抢遥控器焦点。
-    setZOrderMediaOverlay(true)
-  }
+/** SurfaceView / TextureView 宿主：对齐 TV PlayerView.setRender。 */
+internal class KotvMpvSurfaceHost(context: Context) :
+  FrameLayout(context),
+  SurfaceHolder.Callback,
+  TextureView.SurfaceTextureListener {
+
+  var surfaceView: SurfaceView? = null
+    private set
+  var textureView: TextureView? = null
+    private set
+  private var textureSurface: Surface? = null
+  private var useTexture = false
   var onSurface: ((Boolean) -> Unit)? = null
 
   init {
@@ -856,17 +893,98 @@ internal class KotvMpvSurfaceHost(context: Context) : FrameLayout(context), Surf
     isFocusableInTouchMode = false
     descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-    addView(surfaceView)
+    stripPlatformViewFocus()
+  }
+
+  fun currentSurface(): Surface? {
+    if (useTexture) {
+      val s = textureSurface
+      return if (s != null && s.isValid) s else null
+    }
+    val s = surfaceView?.holder?.surface
+    return if (s != null && s.isValid) s else null
+  }
+
+  fun setRender(texture: Boolean) {
+    if (useTexture == texture && (surfaceView != null || textureView != null)) {
+      if (currentSurface() != null) onSurface?.invoke(true)
+      return
+    }
+    if (surfaceView != null || textureView != null) {
+      onSurface?.invoke(false)
+    }
+    unbindViews()
+    listOfNotNull(surfaceView, textureView).forEach { removeView(it) }
+    surfaceView = null
+    textureView = null
+    releaseTextureSurface()
+    useTexture = texture
+    val lp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+    if (texture) {
+      val tv = TextureView(context).apply {
+        layoutParams = lp
+        isFocusable = false
+        isFocusableInTouchMode = false
+      }
+      textureView = tv
+      tv.surfaceTextureListener = this
+      addView(tv)
+      if (tv.isAvailable) {
+        bindTextureSurface(tv.surfaceTexture, tv.width, tv.height)
+      }
+    } else {
+      val sv = SurfaceView(context).apply {
+        layoutParams = lp
+        isFocusable = false
+        isFocusableInTouchMode = false
+        setZOrderMediaOverlay(true)
+        holder.addCallback(this@KotvMpvSurfaceHost)
+      }
+      surfaceView = sv
+      addView(sv)
+    }
     stripPlatformViewFocus()
   }
 
   fun release() {
-    try {
-      surfaceView.holder.removeCallback(this)
-    } catch (_: Throwable) {
-    }
+    unbindViews()
+    releaseTextureSurface()
     onSurface = null
     removeAllViews()
+  }
+
+  private fun unbindViews() {
+    try {
+      surfaceView?.holder?.removeCallback(this)
+    } catch (_: Throwable) {
+    }
+    textureView?.surfaceTextureListener = null
+  }
+
+  private fun releaseTextureSurface() {
+    try {
+      textureSurface?.release()
+    } catch (_: Throwable) {
+    }
+    textureSurface = null
+  }
+
+  private fun bindTextureSurface(st: SurfaceTexture?, width: Int, height: Int) {
+    if (st == null) return
+    releaseTextureSurface()
+    textureSurface = Surface(st)
+    applySurfaceSize(width, height)
+    onSurface?.invoke(true)
+  }
+
+  private fun applySurfaceSize(width: Int, height: Int) {
+    if (width <= 0 || height <= 0) return
+    try {
+      if (MPVLib.getLoadedAbi() != null) {
+        MPVLib.setPropertyString("android-surface-size", "${width}x$height")
+      }
+    } catch (_: Throwable) {
+    }
   }
 
   override fun surfaceCreated(holder: SurfaceHolder) {
@@ -874,17 +992,28 @@ internal class KotvMpvSurfaceHost(context: Context) : FrameLayout(context), Surf
   }
 
   override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-    try {
-      // Only touch natives if libs actually loaded (avoid "No implementation found").
-      if (MPVLib.getLoadedAbi() != null) {
-        MPVLib.setPropertyString("android-surface-size", "${width}x$height")
-      }
-    } catch (_: Throwable) {
-    }
+    applySurfaceSize(width, height)
     onSurface?.invoke(true)
   }
 
   override fun surfaceDestroyed(holder: SurfaceHolder) {
     onSurface?.invoke(false)
   }
+
+  override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+    bindTextureSurface(surface, width, height)
+  }
+
+  override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+    applySurfaceSize(width, height)
+    onSurface?.invoke(true)
+  }
+
+  override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+    onSurface?.invoke(false)
+    releaseTextureSurface()
+    return true
+  }
+
+  override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
 }

@@ -11,10 +11,9 @@ import 'mpv_surface.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
-/// 原生 libmpv 播放后端（对齐 TV `androidx.media3.mpvplayer` + Surface）。
+/// 原生 libmpv 播放后端（对齐 TV `androidx.media3.mpvplayer`）。
 ///
-/// 不再使用 media_kit / Flutter Texture。
-/// - Android：MethodChannel `kotv_mpv` + PlatformView Surface（P1 接 media3-mpvplayer）
+/// - Android：MethodChannel `kotv_mpv` + PlatformView（Surface / Texture，对齐 TV PlayerView.setRender）
 /// - 桌面/iOS：同通道，P2 接 FFI/插件
 class NativeMpvPlayback extends KotvPlayback {
   NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
@@ -42,6 +41,7 @@ class NativeMpvPlayback extends KotvPlayback {
   Map<String, String> _headers = const {};
   String? _lastError;
   int? _textureId;
+  String _renderMode = 'surface';
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -146,7 +146,7 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  /// Android：Hybrid Composition SurfaceView（对齐 TV）。
+  /// Android：Hybrid Composition SurfaceView / TextureView（对齐 TV setRender）。
   /// 桌面：原生 libmpv 软件渲染 → Flutter Texture（P2）。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     if (kotvIsAndroid()) {
@@ -224,6 +224,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
         'conf': _opts.conf,
+        'render': _renderMode,
       });
       if (res is Map) {
         final tid = res['textureId'];
@@ -326,6 +327,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
         'conf': _opts.conf,
+        'render': _renderMode,
         'props': _opts.propertyMap(live: live),
       });
     } on MissingPluginException {
@@ -442,6 +444,17 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await _ch.invokeMethod('setDecode', {'decode': _opts.hwdecValue()});
     } catch (_) {}
+  }
+
+  @override
+  Future<void> setRenderMode(String mode) async {
+    _renderMode = kotvNormalizePlayerRender(mode);
+    try {
+      if (_nativeReady) {
+        await _ch.invokeMethod('setRenderMode', {'mode': _renderMode});
+      }
+    } catch (_) {}
+    notifyListeners();
   }
 
   Future<void> applyOpts(KotvMpvOpts opts) async {
