@@ -56,11 +56,17 @@ fetch_windows() {
     want="win7"
   fi
 
+  local sibling_ok=0
+  if find "$ASSET/windows" -maxdepth 1 -iname 'libplacebo*.dll' 2>/dev/null | grep -q .; then
+    sibling_ok=1
+  fi
+
   # Win7 与 Win10 一样：KOTV_BUILD_MPV_AV3A=1 时走 Vulkan+AV3A 源码包。
   if [[ "$want" == "av3a" ]]; then
     if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
-      && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a" ]]; then
-      echo "ok windows/mpv-2.dll (cached AV3A)"
+      && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a" ]] \
+      && [[ "$sibling_ok" == 1 ]]; then
+      echo "ok windows/mpv-2.dll (cached AV3A + sibling dlls)"
       return
     fi
     echo "==> windows libmpv: source build with AV3A (FongMi FFmpeg + MinGW)"
@@ -69,8 +75,9 @@ fetch_windows() {
     return
   fi
 
-  if marker_ok "$out" 500000 && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want" ]]; then
-    echo "ok windows/mpv-2.dll (cached $want)"
+  if marker_ok "$out" 500000 && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want" ]] \
+    && [[ "$sibling_ok" == 1 ]]; then
+    echo "ok windows/mpv-2.dll (cached $want + sibling dlls)"
     return
   fi
 

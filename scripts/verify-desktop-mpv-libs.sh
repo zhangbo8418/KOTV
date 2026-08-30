@@ -35,6 +35,16 @@ echo "==> verify desktop libmpv (Vulkan${KOTV_EXPECT_MPV_AV3A:+ + AV3A})"
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
   check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  if [[ -f "$ASSET/windows/mpv-2.dll" ]]; then
+    if ! find "$ASSET/windows" -maxdepth 1 -iname 'libplacebo*.dll' | grep -q .; then
+      echo "ERROR: windows assets missing libplacebo*.dll (must sit next to mpv-2.dll)" >&2
+      fail=1
+    else
+      echo "ok windows sibling: libplacebo"
+    fi
+    win_n="$(find "$ASSET/windows" -maxdepth 1 -type f -iname '*.dll' | wc -l | tr -d ' ')"
+    echo "ok windows dll count=$win_n"
+  fi
 fi
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == linux* ]]; then
   check_vulkan "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"

@@ -67,7 +67,10 @@ case "$(uname -s)" in
       echo "ERROR: mpv-2.dll not next to exe" >&2
       exit 1
     }
-    echo "bundled windows mpv-2.dll next to exe"
+    staged="$(find "$SRC" -maxdepth 1 -type f -iname '*.dll' | wc -l | tr -d ' ')"
+    echo "bundled windows mpv-2.dll next to exe (assets dlls=$staged)"
+    find "$SRC" -maxdepth 1 -type f -iname '*.dll' -printf '  asset %f\n' 2>/dev/null \
+      || find "$SRC" -maxdepth 1 -type f -iname '*.dll' | sed 's|.*/||;s|^|  asset |'
     ;;
   *)
     echo "skip bundle-app-libmpv on $(uname -s)" >&2

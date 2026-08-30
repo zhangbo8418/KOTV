@@ -104,6 +104,16 @@ chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
   echo "missing mpv-2.dll next to kotv.exe" >&2
   exit 1
 }
+asset_n="$(find "$ROOT/flutter/assets/mpv-libs/windows" -maxdepth 1 -type f -iname '*.dll' 2>/dev/null | wc -l | tr -d ' ')"
+if [[ "${asset_n:-0}" -lt 2 ]] || ! find "$ROOT/flutter/assets/mpv-libs/windows" -maxdepth 1 -iname 'libplacebo*.dll' | grep -q .; then
+  echo "ERROR: flutter/assets/mpv-libs/windows 只有 ${asset_n:-0} 个 DLL，或缺 libplacebo（须与 mpv-2.dll 同目录）" >&2
+  ls -la "$ROOT/flutter/assets/mpv-libs/windows" >&2 || true
+  exit 1
+fi
+if [[ ! -f "$RELEASE_DIR/vulkan-1.dll" ]]; then
+  echo "WARN: vulkan-1.dll 未打进 exe 旁（可依赖系统显卡驱动的 loader）" >&2
+fi
+echo "ok mpv-2.dll + $asset_n sibling dlls staged from assets"
 
 echo "==> zip $OUT_ZIP"
 rm -f "$OUT_ZIP"

@@ -48,6 +48,102 @@ if ! command -v ninja >/dev/null 2>&1; then
   done
 fi
 
+# 系统 DLL，不打进安装包。
+_harvest_is_system_dll() {
+  local lower
+  lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$lower" in
+    kernel32.dll|user32.dll|gdi32.dll|gdiplus.dll|advapi32.dll|shell32.dll|ole32.dll|oleaut32.dll| \
+    ws2_32.dll|wsock32.dll|winmm.dll|dwmapi.dll|d3d9.dll|d3d11.dll|d3d12.dll|dxgi.dll|dxva2.dll| \
+    opengl32.dll|ntdll.dll|msvcrt.dll|ucrtbase.dll|sechost.dll|rpcrt4.dll|comdlg32.dll|comctl32.dll| \
+    imm32.dll|setupapi.dll|cfgmgr32.dll|version.dll|shlwapi.dll|crypt32.dll|bcrypt.dll|iphlpapi.dll| \
+    dnsapi.dll|normaliz.dll|winhttp.dll|wininet.dll|avrt.dll|mfplat.dll|mf.dll|mfreadwrite.dll| \
+    msvcp*.dll|vcruntime*.dll|concrt*.dll|api-ms-*|ext-ms-*|kernelbase.dll|userenv.dll| \
+    powrprof.dll|wtsapi32.dll|dbghelp.dll|psapi.dll|oleacc.dll) return 0 ;;
+  esac
+  return 1
+}
+
+# 把 mpv-2.dll 的非系统依赖拷进 assets/windows（与 exe 同目录加载）。
+harvest_windows_mpv_dlls() {
+  local dest="$ASSET/windows"
+  local dll="$dest/mpv-2.dll"
+  mkdir -p "$dest"
+  [[ -f "$dll" ]] || return 0
+
+  local src
+  for src in "$PREFIX/bin" "$PREFIX/lib" "$BUILD_DIR/prefix/bin" "$BUILD_DIR/prefix/lib" \
+             "$BUILD_DIR/mpv/build" "$BUILD_DIR/libplacebo/build"; do
+    [[ -d "$src" ]] || continue
+    find "$src" -maxdepth 3 -type f -iname '*.dll' -exec cp -f {} "$dest/" \; 2>/dev/null || true
+  done
+  find "$PREFIX" -type f -iname '*.dll' -exec cp -f {} "$dest/" \; 2>/dev/null || true
+  cp -f "$dll" "$dest/mpv-2.dll"
+
+  local vk
+  for vk in \
+    "${VULKAN_SDK:-}/Bin/vulkan-1.dll" \
+    "${VULKAN_SDK:-}/Bin32/vulkan-1.dll"; do
+    [[ -f "$vk" ]] && cp -f "$vk" "$dest/vulkan-1.dll"
+  done
+  vk="$(ls /c/VulkanSDK/*/Bin/vulkan-1.dll 2>/dev/null | tail -1 || true)"
+  [[ -n "$vk" && -f "$vk" && ! -f "$dest/vulkan-1.dll" ]] && cp -f "$vk" "$dest/vulkan-1.dll"
+
+  local gcc_bin=""
+  local -a search_dirs=()
+  if command -v gcc >/dev/null 2>&1; then
+    gcc_bin="$(cd "$(dirname "$(command -v gcc)")" && pwd)"
+    search_dirs+=("$gcc_bin")
+    local printed
+    for printed in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
+      src="$(gcc -print-file-name="$printed" 2>/dev/null || true)"
+      [[ -n "$src" && -f "$src" && "$src" != "$printed" ]] && cp -f "$src" "$dest/$(basename "$src")"
+    done
+  fi
+  if [[ -n "$gcc_bin" ]]; then
+    local mingw
+    for mingw in libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll libssp-0.dll; do
+      [[ -f "$gcc_bin/$mingw" ]] && cp -f "$gcc_bin/$mingw" "$dest/$mingw"
+    done
+  fi
+
+  search_dirs+=(
+    "$PREFIX/bin" "$PREFIX/lib"
+    "${VULKAN_SDK:-}/Bin" "${VULKAN_SDK:-}/Bin32"
+  )
+
+  if command -v objdump >/dev/null 2>&1; then
+    local round=0 changed=1 name dllpath
+    while [[ "$changed" == 1 && "$round" -lt 5 ]]; do
+      changed=0
+      round=$((round + 1))
+      while IFS= read -r dllpath; do
+        [[ -f "$dllpath" ]] || continue
+        while read -r name; do
+          [[ -n "$name" ]] || continue
+          _harvest_is_system_dll "$name" && continue
+          [[ -f "$dest/$name" ]] && continue
+          for src in "${search_dirs[@]}"; do
+            [[ -n "$src" && -f "$src/$name" ]] || continue
+            cp -f "$src/$name" "$dest/$name"
+            changed=1
+            break
+          done
+        done < <(objdump -p "$dllpath" 2>/dev/null | awk '/DLL Name:/{print $3}')
+      done < <(find "$dest" -maxdepth 1 -type f -iname '*.dll')
+    done
+  fi
+
+  local n
+  n="$(find "$dest" -maxdepth 1 -type f -iname '*.dll' | wc -l | tr -d ' ')"
+  echo "harvested $n dlls → $dest"
+  find "$dest" -maxdepth 1 -type f -iname '*.dll' -printf '  %f\n' 2>/dev/null \
+    || find "$dest" -maxdepth 1 -type f -iname '*.dll' | sed 's|.*/||;s|^|  |'
+  if ! find "$dest" -maxdepth 1 -iname 'libplacebo*.dll' | grep -q .; then
+    echo "ERROR: harvested windows dlls missing libplacebo*.dll (mpv is linked shared)" >&2
+    exit 1
+  fi
+}
 LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.360.1}"
 LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.360.1}"
 
@@ -390,10 +486,7 @@ EOF
   [[ -n "$dll" ]] || dll="$(find build -maxdepth 2 -name 'mpv-2.dll' -o -name 'libmpv-2.dll' 2>/dev/null | head -1 || true)"
   [[ -n "$dll" && -f "$dll" ]] || { echo "ERROR: mpv dll not found under build/" >&2; exit 1; }
   cp -f "$dll" "$out"
-  # 运行时依赖：libass 等
-  if [[ -d "$PREFIX/bin" ]]; then
-    find "$PREFIX/bin" -maxdepth 1 -iname '*.dll' -exec cp -f {} "$ASSET/windows/" \;
-  fi
+  harvest_windows_mpv_dlls
   if [[ "$AV3A" == "1" ]]; then
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" \
       || { echo "ERROR: mpv-2.dll missing AV3A symbols" >&2; exit 1; }
