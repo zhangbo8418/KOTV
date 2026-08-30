@@ -39,15 +39,27 @@ case "$(uname -s)" in
     fi
     ;;
   MINGW*|MSYS*|CYGWIN*)
-    MPV="$ROOT/flutter/assets/mpv-libs/windows/mpv-2.dll"
-    [[ -f "$MPV" ]] || { echo "ERROR: missing $MPV" >&2; exit 1; }
-    mkdir -p "$DEST/libmpv"
-    cp -f "$MPV" "$DEST/libmpv/mpv-2.dll"
-    echo "bundled windows libmpv/mpv-2.dll"
+    SRC="$ROOT/flutter/assets/mpv-libs/windows"
+    [[ -f "$SRC/mpv-2.dll" || -f "$SRC/libmpv-2.dll" ]] || {
+      echo "ERROR: missing windows libmpv dll" >&2
+      exit 1
+    }
+    copy_win_mpv_dlls() {
+      local dest="$1"
+      mkdir -p "$dest"
+      find "$SRC" -maxdepth 1 -type f \( -iname '*.dll' -o -iname '*.pdb' \) -exec cp -f {} "$dest/" \;
+      if [[ -f "$SRC/mpv-2.dll" ]]; then
+        cp -f "$SRC/mpv-2.dll" "$dest/mpv-2.dll"
+      elif [[ -f "$SRC/libmpv-2.dll" ]]; then
+        cp -f "$SRC/libmpv-2.dll" "$dest/mpv-2.dll"
+        cp -f "$SRC/libmpv-2.dll" "$dest/libmpv-2.dll"
+      fi
+    }
+    copy_win_mpv_dlls "$DEST/libmpv"
+    echo "bundled windows libmpv/*.dll"
     if [[ -d "$DEST/runtime" ]]; then
-      mkdir -p "$DEST/runtime/libmpv"
-      cp -f "$MPV" "$DEST/runtime/libmpv/mpv-2.dll"
-      echo "bundled windows runtime/libmpv/mpv-2.dll"
+      copy_win_mpv_dlls "$DEST/runtime/libmpv"
+      echo "bundled windows runtime/libmpv/*.dll"
     fi
     ;;
   *)

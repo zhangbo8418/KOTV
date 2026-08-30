@@ -198,7 +198,34 @@ static void apply_common_opts(mpv_handle *mpv) {
     p_set_option_string(mpv, "osc", "no");
 }
 
+int kotv_mpv_os_win7(void) {
+#if defined(_WIN32)
+    OSVERSIONINFOW v;
+    memset(&v, 0, sizeof(v));
+    v.dwOSVersionInfoSize = sizeof(v);
+    if (!GetVersionExW(&v))
+        return 0;
+    return v.dwMajorVersion < 6 || (v.dwMajorVersion == 6 && v.dwMinorVersion <= 1);
+#else
+    return 0;
+#endif
+}
+
 static void apply_gpu_render_opts(mpv_handle *mpv, int sw_vo) {
+#if defined(_WIN32)
+    if (kotv_mpv_os_win7()) {
+        const char *hw = "no";
+        if (g_hwdec_opt[0] && (strcmp(g_hwdec_opt, "dxva2") == 0 || strcmp(g_hwdec_opt, "dxva2-copy") == 0))
+            hw = g_hwdec_opt;
+        /* 页内是 vo=libmpv + SW render；不要 gpu-api=d3d11（没装 Platform Update 的 Win7 会在 initialize/loadfile 挂）。 */
+        p_set_option_string(mpv, "hwdec", hw);
+        p_set_option_string(mpv, "vo", "libmpv");
+        p_set_option_string(mpv, "vd-lavc-dr", "no");
+        p_set_option_string(mpv, "audio-exclusive", "no");
+        (void)sw_vo;
+        return;
+    }
+#endif
     if (g_hwdec_opt[0])
         p_set_option_string(mpv, "hwdec", g_hwdec_opt);
     if (sw_vo) {

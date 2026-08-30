@@ -193,39 +193,13 @@ jobs:
           name: updater-windows-amd64
           path: cmd/updater
 
-      - name: Install desktop MPV source deps
-        shell: bash
-        run: |
-          choco install nasm vulkan-sdk -y --no-progress
-          python -m pip install meson ninja
-          export PATH="/c/mingw-msvcrt/mingw64/bin:/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
-          export PATH="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"
-          gcc --version
-          nasm -v
-          meson --version
-          if [[ -z "${VULKAN_SDK:-}" ]]; then
-            sdk="$(ls -d /c/VulkanSDK/*/ 2>/dev/null | tail -1 || true)"
-            [[ -n "$sdk" ]] && echo "VULKAN_SDK=$(cygpath -w "$sdk")" >> "$GITHUB_ENV"
-          fi
-
-      - name: Build desktop libmpv (Vulkan + AV3A source)
-        shell: bash
-        env:
-          KOTV_FETCH_DESKTOP_PLAT: windows
-          KOTV_BUILD_MPV_AV3A: "1"
-          KOTV_MPV_JOBS: "4"
-        run: |
-          chmod +x scripts/*.sh
-          export PATH="/c/mingw-msvcrt/mingw64/bin:/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
-          export PATH="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"
-          ./scripts/fetch-desktop-mpv-libs.sh
-
       - name: Adapt SDK + package Win7
         shell: bash
         env:
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
           KOTV_WIN7: "1"
           KOTV_OUT_SUFFIX: "-win7"
+          KOTV_BUILD_MPV_AV3A: "0"
           CGO_ENABLED: "1"
           CC: gcc
           CXX: g++

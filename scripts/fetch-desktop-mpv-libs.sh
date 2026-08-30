@@ -48,20 +48,35 @@ marker_ok() {
 
 fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
-  if [[ "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
-    if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null; then
+  local kind_file="$ASSET/windows/.kind"
+  local want="prebuilt"
+  if [[ "${KOTV_WIN7:-}" == "1" ]]; then
+    want="win7"
+  elif [[ "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
+    want="av3a"
+  fi
+
+  # Win7 不能用 Vulkan+AV3A 源码包（新 FFmpeg/libplacebo 会在 loadfile 阶段挂）。
+  if [[ "$want" == "av3a" ]]; then
+    if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
+      && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a" ]]; then
       echo "ok windows/mpv-2.dll (cached AV3A)"
       return
     fi
     echo "==> windows libmpv: source build with AV3A (FongMi FFmpeg + MinGW)"
     "$ROOT/scripts/build-desktop-mpv-from-source.sh" windows
+    echo av3a > "$kind_file"
     return
   fi
-  marker_ok "$out" 500000 && { echo "ok windows/mpv-2.dll (cached)"; return; }
+
+  if marker_ok "$out" 500000 && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want" ]]; then
+    echo "ok windows/mpv-2.dll (cached $want)"
+    return
+  fi
 
   local url="${KOTV_MPV_WIN_URL:-}"
   if [[ -z "$url" ]]; then
-    # 非 v3：Win7 / 老 CPU 可用；dev 包含 libmpv-2.dll（CI/打包拉取，勿提交 git）
+    # 非 v3：老 CPU 可用；Win7 仍须再拷整包 DLL（不能只留 libmpv）。
     url="$(curl -fsSL "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" \
       | grep -Eo 'https://[^"]+mpv-dev-x86_64-[0-9]+[^"]+\.7z' | grep -v '\-v3-' | head -1 || true)"
     if [[ -z "$url" ]]; then
@@ -84,12 +99,15 @@ fetch_windows() {
     [[ -f "$cand" ]] && dll="$cand" && break
   done
   if [[ -z "$dll" ]]; then
-    dll="$(find "$dir" -name 'libmpv-2.dll' -o -name 'mpv-2.dll' 2>/dev/null | head -1 || true)"
+    dll="$(find "$dir" \( -iname 'libmpv-2.dll' -o -iname 'mpv-2.dll' \) 2>/dev/null | head -1 || true)"
   fi
   [[ -n "$dll" && -f "$dll" ]] || { echo "ERROR: libmpv dll not found in $url" >&2; exit 1; }
+  mkdir -p "$ASSET/windows"
+  find "$dir" -type f \( -iname '*.dll' -o -iname '*.pdb' \) -exec cp -f {} "$ASSET/windows/" \;
   cp -f "$dll" "$out"
+  echo "$want" > "$kind_file"
   rm -rf "$tmp"
-  echo "ok windows/mpv-2.dll ($(wc -c <"$out" | tr -d ' ') bytes)"
+  echo "ok windows/mpv-2.dll ($(wc -c <"$out" | tr -d ' ') bytes) kind=$want (+ sibling dlls)"
 }
 
 fetch_linux() {

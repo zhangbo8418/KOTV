@@ -80,6 +80,8 @@ apply_standard_settings(${BINARY_NAME})
 # Add dependency libraries. Add any application-specific dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
+find_package(Threads REQUIRED)
+target_link_libraries(${BINARY_NAME} PRIVATE Threads::Threads)
 target_include_directories(${BINARY_NAME} PRIVATE "${KOTV_MPV_NATIVE}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

@@ -155,13 +155,13 @@ class KotvMpvPluginWin {
   void StartTick() {
     if (tick_running_.exchange(true)) return;
     tick_thread_ = std::thread([this] {
-      uint8_t frame[1920 * 1080 * 4];
+      std::vector<uint8_t> frame(1920 * 1080 * 4);
       while (tick_running_) {
         kotv_mpv_desktop_tick();
         if (kotv_mpv_desktop_is_ready()) {
           int w = 0;
           int h = 0;
-          if (kotv_mpv_desktop_take_frame(frame, static_cast<int>(sizeof(frame)), &w, &h)) {
+          if (kotv_mpv_desktop_take_frame(frame.data(), static_cast<int>(frame.size()), &w, &h)) {
             if (pixel_buffer_) {
               pixel_buffer_->UpdateFrame(frame, w, h);
               pixel_buffer_->MarkFrame();
