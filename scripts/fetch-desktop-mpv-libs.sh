@@ -1,54 +1,185 @@
 #!/usr/bin/env bash
-# 桌面 libmpv 分发（页内 MPV P2）：放入 flutter/assets/mpv-libs/{windows,linux,macos}/
-# 构建时 CMake/install 会拷到可执行文件旁的 libmpv/。
+# 桌面 libmpv 预编译拉取（打进安装包；开发机/CI 均无需 brew/apt 编译）。
+# 产物：flutter/assets/mpv-libs/{windows,linux,macos}/
+# 可选：KOTV_BUILD_MPV_FROM_SOURCE=1 时走 build-desktop-mpv-from-source.sh（仅 CI 兜底）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ASSET="$ROOT/flutter/assets/mpv-libs"
 mkdir -p "$ASSET/windows" "$ASSET/linux" "$ASSET/macos"
 
-copy_if() {
-  local src="$1" dest="$2"
-  if [[ -f "$src" ]]; then
-    cp -f "$src" "$dest"
-    echo "ok $(basename "$dest") <- $src"
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { echo "missing command: $1" >&2; exit 1; }
+}
+
+extract_7z() {
+  local archive="$1" dest="$2"
+  mkdir -p "$dest"
+  if command -v 7z >/dev/null 2>&1; then
+    7z x -y "-o$dest" "$archive" >/dev/null
+  elif command -v 7za >/dev/null 2>&1; then
+    7za x -y "-o$dest" "$archive" >/dev/null
+  else
+    echo "need 7z to extract $archive" >&2
+    exit 1
+  fi
+}
+
+extract_deb() {
+  local deb="$1" dest="$2"
+  mkdir -p "$dest"
+  if command -v dpkg-deb >/dev/null 2>&1; then
+    dpkg-deb -x "$deb" "$dest"
+    return
+  fi
+  need_cmd ar
+  need_cmd tar
+  local tmp
+  tmp="$(mktemp -d)"
+  cp -f "$deb" "$tmp/pkg.deb"
+  (cd "$tmp" && ar x pkg.deb && tar xf data.tar.* -C "$dest")
+  rm -rf "$tmp"
+}
+
+marker_ok() {
+  local f="$1" min="${2:-100000}"
+  [[ -f "$f" && "$(wc -c <"$f" | tr -d ' ')" -ge "$min" ]]
+}
+
+fetch_windows() {
+  local out="$ASSET/windows/mpv-2.dll"
+  marker_ok "$out" 500000 && { echo "ok windows/mpv-2.dll (cached)"; return; }
+
+  local url="${KOTV_MPV_WIN_URL:-}"
+  if [[ -z "$url" ]]; then
+    # 非 v3：Win7 / 老 CPU 可用；dev 包含 libmpv-2.dll（CI/打包拉取，勿提交 git）
+    url="$(curl -fsSL "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" \
+      | grep -Eo 'https://[^"]+mpv-dev-x86_64-[0-9]+[^"]+\.7z' | grep -v '\-v3-' | head -1 || true)"
+    if [[ -z "$url" ]]; then
+      url="$(curl -fsSL "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases" \
+        | grep -Eo 'https://[^"]+mpv-dev-x86_64-[0-9]+[^"]+\.7z' | grep -v '\-v3-' | head -1 || true)"
+    fi
+  fi
+  [[ -n "$url" ]] || { echo "ERROR: cannot resolve Windows libmpv URL (set KOTV_MPV_WIN_URL)" >&2; exit 1; }
+
+  need_cmd curl
+  local tmp archive dir
+  tmp="$(mktemp -d)"
+  archive="$tmp/mpv-win.7z"
+  dir="$tmp/extract"
+  echo "GET $url"
+  curl -fL --retry 5 --retry-delay 2 -o "$archive" "$url"
+  extract_7z "$archive" "$dir"
+  local dll=""
+  for cand in "$dir"/libmpv-2.dll "$dir"/mpv-2.dll; do
+    [[ -f "$cand" ]] && dll="$cand" && break
+  done
+  if [[ -z "$dll" ]]; then
+    dll="$(find "$dir" -name 'libmpv-2.dll' -o -name 'mpv-2.dll' 2>/dev/null | head -1 || true)"
+  fi
+  [[ -n "$dll" && -f "$dll" ]] || { echo "ERROR: libmpv dll not found in $url" >&2; exit 1; }
+  cp -f "$dll" "$out"
+  rm -rf "$tmp"
+  echo "ok windows/mpv-2.dll ($(wc -c <"$out" | tr -d ' ') bytes)"
+}
+
+fetch_linux() {
+  local out="$ASSET/linux/libmpv.so.2"
+  marker_ok "$out" 500000 && { echo "ok linux/libmpv.so.2 (cached)"; return; }
+
+  local deb_url="${KOTV_MPV_LINUX_DEB_URL:-}"
+  if [[ -z "$deb_url" ]]; then
+    deb_url="http://archive.ubuntu.com/ubuntu/pool/universe/m/mpv/libmpv2_0.37.0-1ubuntu4_amd64.deb"
+  fi
+  need_cmd curl
+  local tmp deb dest so ok=0
+  tmp="$(mktemp -d)"
+  deb="$tmp/libmpv.deb"
+  dest="$tmp/root"
+  for deb_url in \
+    "${KOTV_MPV_LINUX_DEB_URL:-}" \
+    "http://archive.ubuntu.com/ubuntu/pool/universe/m/mpv/libmpv2_0.37.0-1ubuntu4_amd64.deb" \
+    "http://archive.ubuntu.com/ubuntu/pool/universe/m/mpv/libmpv1_0.34.1-1ubuntu3_amd64.deb"; do
+    [[ -n "$deb_url" ]] || continue
+    echo "GET $deb_url"
+    if curl -fL --retry 3 --retry-delay 2 -o "$deb" "$deb_url"; then
+      ok=1
+      break
+    fi
+  done
+  [[ "$ok" == 1 ]] || { echo "ERROR: cannot download Linux libmpv deb" >&2; exit 1; }
+  extract_deb "$deb" "$dest"
+  so="$(find "$dest" -name 'libmpv.so.2' -o -name 'libmpv.so.1' 2>/dev/null | head -1 || true)"
+  [[ -n "$so" && -f "$so" ]] || { echo "ERROR: libmpv.so not in deb" >&2; exit 1; }
+  cp -f "$so" "$out"
+  rm -rf "$tmp"
+  echo "ok linux/libmpv.so.2 ($(wc -c <"$out" | tr -d ' ') bytes)"
+}
+
+fetch_macos() {
+  local out="$ASSET/macos/libmpv.dylib"
+  marker_ok "$out" 500000 && { echo "ok macOS/libmpv.dylib (cached)"; return; }
+
+  if [[ -n "${KOTV_MPV_MACOS_URL:-}" ]]; then
+    need_cmd curl
+    echo "GET $KOTV_MPV_MACOS_URL"
+    curl -fL --retry 5 --retry-delay 2 -o "$out" "$KOTV_MPV_MACOS_URL"
+    marker_ok "$out" 500000 || { echo "ERROR: bad macOS libmpv download" >&2; exit 1; }
+    echo "ok macOS/libmpv.dylib ($(wc -c <"$out" | tr -d ' ') bytes)"
+    return
+  fi
+
+  local want_arch="${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
+  local brew_prefix=""
+  # CI：从 Homebrew bottle 复制预编译 dylib（非源码编译）；x64 交叉包用 arch -x86_64 brew
+  if [[ "${CI:-}" == "true" ]] && command -v brew >/dev/null 2>&1; then
+    if [[ "$want_arch" == "x86_64" && "$(uname -m)" == "arm64" ]]; then
+      arch -x86_64 brew list mpv &>/dev/null 2>&1 || arch -x86_64 brew install mpv
+      brew_prefix="$(arch -x86_64 brew --prefix mpv 2>/dev/null || echo /usr/local/opt/mpv)"
+    else
+      brew list mpv &>/dev/null 2>&1 || brew install mpv
+      brew_prefix="$(brew --prefix mpv 2>/dev/null || true)"
+    fi
+  fi
+
+  for p in \
+    "${brew_prefix:+$brew_prefix/lib/libmpv.dylib}" \
+    /usr/local/opt/mpv/lib/libmpv.dylib \
+    /usr/local/lib/libmpv.dylib \
+    /opt/homebrew/opt/mpv/lib/libmpv.dylib \
+    /opt/homebrew/lib/libmpv.dylib; do
+    [[ -n "$p" && -f "$p" ]] || continue
+    cp -f "$p" "$out"
+    echo "ok macOS/libmpv.dylib <- $p"
+    return
+  done
+
+  if [[ "${KOTV_BUILD_MPV_FROM_SOURCE:-}" == "1" && -x "$ROOT/scripts/build-desktop-mpv-from-source.sh" ]]; then
+    "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
+    marker_ok "$out" 500000 && return
+  fi
+
+  echo "ERROR: macOS libmpv not available. CI 会自动拉 bottle；本地请设 KOTV_MPV_MACOS_URL 或 KOTV_BUILD_MPV_FROM_SOURCE=1" >&2
+  exit 1
+}
+
+fetch_with_fallback() {
+  local name="$1"
+  shift
+  if ( "$@" ); then
     return 0
+  fi
+  if [[ "${KOTV_BUILD_MPV_FROM_SOURCE:-}" == "1" && "$name" != "windows" ]]; then
+    echo "WARN: prebuilt $name failed; trying build-desktop-mpv-from-source.sh $name"
+    "$ROOT/scripts/build-desktop-mpv-from-source.sh" "$name"
+    return $?
   fi
   return 1
 }
 
-echo "==> fetch desktop libmpv → $ASSET"
-
-case "$(uname -s)" in
-  Darwin)
-    for p in \
-      /opt/homebrew/lib/libmpv.dylib \
-      /usr/local/lib/libmpv.dylib \
-      /opt/homebrew/opt/mpv/lib/libmpv.dylib; do
-      if copy_if "$p" "$ASSET/macos/libmpv.dylib"; then break; fi
-    done
-    if [[ ! -f "$ASSET/macos/libmpv.dylib" ]]; then
-      echo "macOS: brew install mpv 后重试，或手动复制 libmpv.dylib → $ASSET/macos/"
-    fi
-    ;;
-  Linux)
-    for p in \
-      /usr/lib/x86_64-linux-gnu/libmpv.so.2 \
-      /usr/lib/aarch64-linux-gnu/libmpv.so.2 \
-      /usr/lib64/libmpv.so.2; do
-      if copy_if "$p" "$ASSET/linux/libmpv.so.2"; then break; fi
-    done
-    if [[ ! -f "$ASSET/linux/libmpv.so.2" ]]; then
-      echo "Linux: apt install libmpv2 后重试，或手动复制 libmpv.so.2 → $ASSET/linux/"
-    fi
-    ;;
-  MINGW*|MSYS*|CYGWIN*)
-    echo "Windows: 请从 mpv-winbuild-cmake 发行包复制 mpv-2.dll → $ASSET/windows/"
-    ;;
-  *)
-    echo "当前 OS $(uname -s)：请手动放置 libmpv 到 $ASSET/{windows,linux,macos}/"
-    ;;
-esac
-
+echo "==> fetch desktop libmpv (prebuilt, no local compile) → $ASSET"
+fetch_with_fallback windows fetch_windows
+fetch_with_fallback linux fetch_linux
+fetch_with_fallback macos fetch_macos
 du -sh "$ASSET"/* 2>/dev/null || true
 echo "==> done"

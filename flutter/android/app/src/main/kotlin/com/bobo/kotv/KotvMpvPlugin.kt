@@ -464,6 +464,23 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("gpu-shader-cache-dir", cacheDir.absolutePath)
       MPVLib.setOptionString("icc-cache-dir", cacheDir.absolutePath)
       MPVLib.setOptionString("hwdec", resolveHwdec(decodeMode))
+      if (isRockchipMpp()) {
+        // RK3399/RK3588：auto-safe 会走 mediacodec-copy，Surface 未绑时必黑屏；直出 mediacodec + OMX 优化
+        val board = (Build.BOARD ?: "").lowercase()
+        val model = (Build.MODEL ?: "").lowercase()
+        val product = (Build.PRODUCT ?: "").lowercase()
+        MPVLib.setOptionString("hwdec-codecs", "all")
+        val rk3399 = board.contains("rk3399") ||
+            model.contains("rk3399") ||
+            model.contains("cr19") ||
+            product.contains("rk3399") ||
+            product.contains("rk3399_box")
+        if (rk3399) {
+          MPVLib.setOptionString("hwdec-extraframes", "8")
+          MPVLib.setOptionString("mediacodec-hevc", "yes")
+          MPVLib.setOptionString("vd-lavc-dr", "no")
+        }
+      }
       MPVLib.setOptionString("vo", if (gpuNext) "gpu-next" else "gpu")
       MPVLib.setOptionString("gpu-context", "android")
       applyGpuApiOptions()
@@ -516,11 +533,29 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** 映射 Dart decode 字符串；auto 仍走 auto-safe，失败由 [KotvPlaybackFailover] 改软解。 */
+  /** RK3399 等 Rockchip 盒：auto → mediacodec（直出 Surface；Dart auto-safe 由原生覆盖）。 */
+  private fun isRockchipMpp(): Boolean {
+    val hw = (Build.HARDWARE ?: "").lowercase()
+    val board = (Build.BOARD ?: "").lowercase()
+    val model = (Build.MODEL ?: "").lowercase()
+    val product = (Build.PRODUCT ?: "").lowercase()
+    return hw.contains("rk") ||
+        board.contains("rk3399") ||
+        board.contains("rk3588") ||
+        model.contains("rk3399") ||
+        model.contains("cr19") ||
+        product.contains("rk3399") ||
+        product.contains("rk3399_box")
+  }
+
+  /** 映射 Dart decode 字符串；RK 盒 auto → mediacodec（直出 Surface，勿 copy）。 */
   private fun resolveHwdec(raw: String?): String {
     val mode = raw?.trim().orEmpty()
     if (mode == "no" || mode == "soft" || mode == "software" || mode == "sw") return "no"
     if (mode == "mediacodec" || mode == "hard" || mode == "hardware" || mode == "hw") {
+      return "mediacodec"
+    }
+    if ((mode.isBlank() || mode == "auto") && isRockchipMpp()) {
       return "mediacodec"
     }
     return mode.ifBlank { "auto-safe" }

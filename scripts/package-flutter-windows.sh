@@ -23,10 +23,19 @@ ASSETS_ENG="$ROOT/flutter/assets/engine"
 echo "==> Flutter Windows package version=$VERSION arch=$ARCH suffix=${SUFFIX:-<none>}"
 
 chmod +x "$ROOT/bridge/build.sh" "$ROOT"/scripts/*.sh
+
+# Win7 线 / Flutter 3.19（Dart 3.3）：必须先 adapt，否则 video_player_android 2.11 要 SDK ^3.10
+if [[ "${KOTV_WIN7:-}" == "1" ]] || flutter --version 2>&1 | grep -qE 'Dart 3\.3\.|Flutter 3\.19'; then
+  echo "==> adapt pubspec for Win7 / Dart 3.3"
+  "$ROOT/scripts/adapt-flutter-win7-sdk.sh"
+fi
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
   echo "==> fetch embedded fonts (Win7 only)"
   "$ROOT/scripts/fetch-flutter-fonts.sh"
 fi
+
+echo "==> fetch desktop libmpv (prebuilt, no local compile)"
+"$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 echo "==> prepare runtime"
 "$ROOT/scripts/prepare-runtime.sh" windows-x64
 "$ROOT/scripts/verify-runtime.sh" runtime windows-x64
@@ -63,7 +72,7 @@ cd "$ROOT/flutter"
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
 flutter config --enable-windows-desktop
-flutter pub get
+"$ROOT/scripts/flutter-pub-get.sh"
 kotv_ensure_mdk_windows_sdk
 flutter build windows --release
 
@@ -90,7 +99,7 @@ fi
 "$ROOT/scripts/verify-runtime.sh" "$RELEASE_DIR/runtime" windows-x64
 
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
-"$ROOT/scripts/bundle-app-libmpv.sh" "$RELEASE_DIR" || true
+"$ROOT/scripts/bundle-app-libmpv.sh" "$RELEASE_DIR"  # 失败即中断，确保 libmpv 已打进包
 
 echo "==> zip $OUT_ZIP"
 rm -f "$OUT_ZIP"

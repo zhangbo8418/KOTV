@@ -44,6 +44,8 @@ flutter/android/app/src/main/jniLibs/**/*.so
 flutter/assets/engine/libkotv_engine.so
 # 原生 MPV（scripts/fetch-android-mpv-libs.sh；与 TV MPVLib 配套）
 flutter/android/app/src/main/assets/mpv-libs/
+# 桌面 libmpv 预编译（scripts/fetch-desktop-mpv-libs.sh 拉取，勿入库；Windows dll >100MB）
+flutter/assets/mpv-libs/
 # 引擎二进制按平台打包时生成，勿入库（否则 Win 会打进 mac/linux 的 kotv-engine）
 flutter/assets/engine/kotv-engine
 flutter/assets/engine/kotv-engine.exe

@@ -57,7 +57,7 @@ class KotvMpvOpts {
 
   /// 供原生 setProperty 使用的 hwdec 值。
   ///
-  /// Android：auto → `auto-safe`；hard → `mediacodec`；soft → `no`。
+  /// Android：auto → `auto-safe`（RK3399 等盒在原生层改 mediacodec 直出 Surface）；hard → `mediacodec`；soft → `no`。
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {

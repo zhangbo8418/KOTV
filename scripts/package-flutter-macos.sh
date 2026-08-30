@@ -18,6 +18,9 @@ echo "==> version=$VERSION arch=$REL_ARCH ($PLAT)"
 
 chmod +x "$ROOT/scripts/"*.sh
 
+echo "==> fetch desktop libmpv (prebuilt, no local compile)"
+"$ROOT/scripts/fetch-desktop-mpv-libs.sh"
+
 if [[ ! -d "$ROOT/runtime/jre" ]]; then
   echo "==> runtime incomplete, preparing..."
   "$ROOT/scripts/prepare-runtime.sh" "$PLAT"
@@ -51,7 +54,7 @@ flutter config --no-enable-swift-package-manager || true
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
 kotv_ensure_mdk_apple_pod
-flutter pub get
+"$ROOT/scripts/flutter-pub-get.sh"
 flutter build macos --release
 
 APP_SRC=""

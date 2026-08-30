@@ -53,7 +53,7 @@ cd "$ROOT/flutter"
 # shellcheck source=kotv-fvp-deps.sh
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
-flutter pub get
+"$ROOT/scripts/flutter-pub-get.sh"
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 chmod +x "$ROOT/scripts/prepare-android-mpv-native.sh"

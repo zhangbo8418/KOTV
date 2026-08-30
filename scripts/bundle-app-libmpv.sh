@@ -14,10 +14,7 @@ chmod +x "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 case "$(uname -s)" in
   Darwin)
     MPV="$ROOT/flutter/assets/mpv-libs/macos/libmpv.dylib"
-    if [[ ! -f "$MPV" ]]; then
-      echo "WARNING: $MPV missing (brew install mpv)" >&2
-      exit 0
-    fi
+    [[ -f "$MPV" ]] || { echo "ERROR: missing $MPV (fetch-desktop-mpv-libs failed)" >&2; exit 1; }
     FW="$DEST/Contents/Frameworks"
     mkdir -p "$FW"
     cp -f "$MPV" "$FW/libmpv.dylib"
@@ -28,20 +25,14 @@ case "$(uname -s)" in
     ;;
   Linux)
     MPV="$ROOT/flutter/assets/mpv-libs/linux/libmpv.so.2"
-    if [[ ! -f "$MPV" ]]; then
-      echo "WARNING: $MPV missing (apt install libmpv2)" >&2
-      exit 0
-    fi
+    [[ -f "$MPV" ]] || { echo "ERROR: missing $MPV" >&2; exit 1; }
     mkdir -p "$DEST/libmpv"
     cp -f "$MPV" "$DEST/libmpv/libmpv.so.2"
     echo "bundled linux libmpv/libmpv.so.2"
     ;;
   MINGW*|MSYS*|CYGWIN*)
     MPV="$ROOT/flutter/assets/mpv-libs/windows/mpv-2.dll"
-    if [[ ! -f "$MPV" ]]; then
-      echo "WARNING: $MPV missing — copy from mpv-winbuild-cmake" >&2
-      exit 0
-    fi
+    [[ -f "$MPV" ]] || { echo "ERROR: missing $MPV" >&2; exit 1; }
     mkdir -p "$DEST/libmpv"
     cp -f "$MPV" "$DEST/libmpv/mpv-2.dll"
     echo "bundled windows libmpv/mpv-2.dll"

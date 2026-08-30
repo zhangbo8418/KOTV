@@ -15,6 +15,8 @@ BUNDLE="$ROOT/flutter/build/linux/x64/release/bundle"
 echo "==> Flutter Linux package version=$VERSION"
 
 chmod +x "$ROOT/bridge/build.sh" "$ROOT"/scripts/*.sh
+echo "==> fetch desktop libmpv (prebuilt, no local compile)"
+"$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 "$ROOT/scripts/prepare-runtime.sh" linux-x64
 "$ROOT/scripts/verify-runtime.sh" runtime linux-x64
 
@@ -31,7 +33,7 @@ rm -f assets/engine/kotv-engine.exe
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
 flutter config --enable-linux-desktop
-flutter pub get
+"$ROOT/scripts/flutter-pub-get.sh"
 # 失败时打出详细链接错误
 if ! flutter build linux --release; then
   echo "==> flutter build failed; retry verbose for linker details" >&2
