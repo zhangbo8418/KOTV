@@ -392,12 +392,7 @@ jobs:
             mkdir -p dist "$STAGE"
             ditto "$APP_SRC" "$OUT_APP"
             KOTV_BUNDLE_ENGINE_TO_MACOS=1 ./scripts/bundle-flutter-runtime.sh "$OUT_APP"
-            ./scripts/fetch-desktop-mpv-libs.sh
-            if [[ -f flutter/assets/mpv-libs/macos/libmpv.dylib ]]; then
-              mkdir -p "$OUT_APP/Contents/Frameworks"
-              cp -f flutter/assets/mpv-libs/macos/libmpv.dylib "$OUT_APP/Contents/Frameworks/libmpv.dylib"
-              install_name_tool -id "@rpath/libmpv.dylib" "$OUT_APP/Contents/Frameworks/libmpv.dylib" 2>/dev/null || true
-            fi
+            ./scripts/bundle-app-libmpv.sh "$OUT_APP"
             if [[ -f dist/updater-mac/updater ]]; then
               cp -f dist/updater-mac/updater "$OUT_APP/Contents/MacOS/updater"
               chmod +x "$OUT_APP/Contents/MacOS/updater"
@@ -475,6 +470,7 @@ jobs:
           python3.10 --version
           test -f flutter/android/app/libs/thunder-release.aar
           ./scripts/package-flutter-android.sh
+          ./scripts/verify-android-mpv-apk.sh dist/KO影视-*-aarch64.apk
           ls -lh dist/KO影视-*.apk
 
       - uses: actions/upload-artifact@v4

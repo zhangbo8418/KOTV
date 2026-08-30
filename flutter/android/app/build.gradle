@@ -234,27 +234,17 @@ tasks.register("prepareKotvEngineSo") {
     }
 }
 
-// 原生 MPV：assets/mpv-libs/{abi}/*.so（与 TV MPVLib 配套）；缺失时尝试拉取。
-tasks.register("prepareKotvMpvLibs", Exec) {
-    def marker = file("src/main/assets/mpv-libs/arm64-v8a/libmpv.so")
-    onlyIf { !marker.exists() || marker.length() == 0L }
+// 页内原生 MPV：assets/mpv-libs + libvulkan/libkotv_dl stub（缺失时拉取/编译）。
+tasks.register("prepareKotvMpvNative", Exec) {
     workingDir = repoRoot
-    commandLine "bash", "scripts/fetch-android-mpv-libs.sh"
-    ignoreExitValue = true
+    commandLine "bash", "scripts/prepare-android-mpv-native.sh"
     doFirst {
-        println "[android] fetching MPV native libs into assets/mpv-libs …"
-    }
-    doLast {
-        if (!marker.exists() || marker.length() == 0L) {
-            println "[android] WARNING: MPV libs missing. Run scripts/fetch-android-mpv-libs.sh (innie#mpv needs them)"
-        } else {
-            println "[android] MPV libs ready: ${marker}"
-        }
+        println "[android] preparing bundled MPV + Vulkan natives …"
     }
 }
 
 tasks.named("preBuild") {
-    dependsOn "prepareKotvEngineSo", "prepareKotvMpvLibs"
+    dependsOn "prepareKotvEngineSo", "prepareKotvMpvNative"
 }
 
 // Flutter Gradle Plugin 偶发在合并后抬高 targetSdk；构建前再钉死一次。

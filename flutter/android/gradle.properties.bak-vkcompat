@@ -1,0 +1,9 @@
+org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=2G -XX:+HeapDumpOnOutOfMemoryError
+# CI / Flutter 会重复 watch flutter/android，关掉 VFS 避免 "Already watching path"
+org.gradle.vfs.watch=false
+android.useAndroidX=true
+android.enableJetifier=true
+# This builtInKotlin flag was added automatically by Flutter migrator
+android.builtInKotlin=false
+# This newDsl flag was added automatically by Flutter migrator
+android.newDsl=false

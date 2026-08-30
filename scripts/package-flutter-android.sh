@@ -56,13 +56,8 @@ kotv_export_fvp_deps
 flutter pub get
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 "$ROOT/scripts/patch-android-plugin-namespaces.sh"
-chmod +x "$ROOT/scripts/fetch-android-mpv-libs.sh"
-"$ROOT/scripts/fetch-android-mpv-libs.sh"
-
-echo "==> build libvulkan stub (API 25+ / RK3399)"
-for abi in arm64-v8a armeabi-v7a; do
-  "$ROOT/scripts/build-android-libvulkan-stub.sh" "$abi"
-done
+chmod +x "$ROOT/scripts/prepare-android-mpv-native.sh"
+"$ROOT/scripts/prepare-android-mpv-native.sh"
 
 OUT_DIR="$ROOT/flutter/build/app/outputs/flutter-apk"
 mkdir -p "$ROOT/dist"
@@ -124,6 +119,7 @@ if hits:
   fi
   cp -f "$src" "$ROOT/dist/$out_name"
   ls -lh "$ROOT/dist/$out_name"
+  "$ROOT/scripts/verify-android-mpv-apk.sh" "$ROOT/dist/$out_name"
   # 校验 targetSdk（须为 KOTV_TARGET_SDK，默认 28）
   if command -v aapt >/dev/null 2>&1 || [[ -n "${ANDROID_HOME:-}" ]]; then
     local aapt_bin=""

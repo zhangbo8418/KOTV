@@ -42,6 +42,8 @@ fi
 [[ -x "$BUNDLE/kotv" ]] || { echo "missing $BUNDLE/kotv" >&2; exit 1; }
 cp -f "$ENGINE_OUT" "$BUNDLE/kotv-engine"
 chmod +x "$BUNDLE/kotv-engine"
+chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
+"$ROOT/scripts/bundle-app-libmpv.sh" "$BUNDLE"
 [[ -d "$BUNDLE/runtime" ]] || { echo "missing $BUNDLE/runtime" >&2; exit 1; }
 if [[ -f "$ROOT/cmd/updater/updater" ]]; then
   cp -f "$ROOT/cmd/updater/updater" "$BUNDLE/updater"

@@ -28,6 +28,7 @@ DEPENDENCIES:
   - file_selector_macos (from `Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - fvp (from `Flutter/ephemeral/.symlinks/plugins/fvp/darwin`)
+  - mdk (from `/tmp/mdk-sdk-local`)
   - package_info_plus (from `Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos`)
   - screen_retriever_macos (from `Flutter/ephemeral/.symlinks/plugins/screen_retriever_macos/macos`)
   - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
@@ -36,10 +37,6 @@ DEPENDENCIES:
   - wakelock_plus (from `Flutter/ephemeral/.symlinks/plugins/wakelock_plus/macos`)
   - window_manager (from `Flutter/ephemeral/.symlinks/plugins/window_manager/macos`)
 
-SPEC REPOS:
-  trunk:
-    - mdk
-
 EXTERNAL SOURCES:
   file_selector_macos:
     :path: Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos
@@ -47,6 +44,8 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral
   fvp:
     :path: Flutter/ephemeral/.symlinks/plugins/fvp/darwin
+  mdk:
+    :path: "/tmp/mdk-sdk-local"
   package_info_plus:
     :path: Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos
   screen_retriever_macos:
@@ -66,7 +65,7 @@ SPEC CHECKSUMS:
   file_selector_macos: 9e9e068e90ebee155097d00e89ae91edb2374db7
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   fvp: f8b3b61cf8c696ecaa5608ae0d282ba710e65ae9
-  mdk: 3bfb53e0bcc9643180eaa864360051f281e4c17b
+  mdk: d51f11e4c062fbf994044cbaa7ae5359008e15cf
   package_info_plus: f0052d280d17aa382b932f399edf32507174e870
   screen_retriever_macos: c5508cc3c66ff0d4db650480cf0ab691e220d933
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb

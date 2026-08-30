@@ -89,6 +89,9 @@ if [[ -f "$ROOT/cmd/updater/updater.exe" ]]; then
 fi
 "$ROOT/scripts/verify-runtime.sh" "$RELEASE_DIR/runtime" windows-x64
 
+chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
+"$ROOT/scripts/bundle-app-libmpv.sh" "$RELEASE_DIR" || true
+
 echo "==> zip $OUT_ZIP"
 rm -f "$OUT_ZIP"
 
