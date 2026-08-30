@@ -114,7 +114,7 @@ build_mpv_linux() {
     -Dcplayer=false \
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
-    -Dlua=enabled
+    -Dlua=disabled
   meson compile -C build -j"$JOBS"
   cp -f build/libmpv.so.2 "$ASSET/linux/libmpv.so.2"
   if [[ "$AV3A" == "1" ]]; then
@@ -151,7 +151,7 @@ build_mpv_macos() {
     -Dcplayer=false \
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
-    -Dlua=enabled
+    -Dlua=disabled
   meson compile -C build -j"$JOBS"
   cp -f build/libmpv.dylib "$ASSET/macos/libmpv.dylib"
   if [[ "$AV3A" == "1" ]]; then
@@ -193,7 +193,7 @@ build_mpv_windows() {
     -Dcplayer=false \
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
-    -Dlua=enabled
+    -Dlua=disabled
   meson compile -C build -j"$JOBS"
   local out="$ASSET/windows/mpv-2.dll"
   local dll=""

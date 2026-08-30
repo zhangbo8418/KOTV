@@ -20,7 +20,8 @@ def kotvTargetSdk = (System.getenv("KOTV_TARGET_SDK") ?: "28").toInteger()
 
 android {
     namespace = "com.bobo.kotv"
-    compileSdk = flutter.compileSdkVersion
+    // nextlib-media3ext (AV3A) 要求 compileSdk ≥ 37；targetSdk 仍钉 28（可 exec 社区仓）。
+    compileSdk = Math.max(flutter.compileSdkVersion as Integer, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

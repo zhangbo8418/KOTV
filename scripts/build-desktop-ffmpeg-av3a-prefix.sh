@@ -86,7 +86,28 @@ cmake -G "$CMAKE_GENERATOR" -S ffmpeg/dependency/avs3a -B arcdav3a-build \
 cmake --build arcdav3a-build -j"$JOBS"
 cmake --install arcdav3a-build
 
+# Windows/MinGW：cmake 生成的 .pc 常带 D:/ 路径，MSYS pkg-config 找不着；改写为 Unix 前缀。
+mkdir -p "$PREFIX/lib/pkgconfig"
+cat >"$PREFIX/lib/pkgconfig/arcdav3a.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: arcdav3a
+Description: AVS3-P3 / AV3A decoder (libarcdav3a)
+Version: 1.0.0
+Libs: -L\${libdir} -larcdav3a
+Cflags: -I\${includedir}
+EOF
+
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+if ! pkg-config --exists arcdav3a; then
+  echo "ERROR: pkg-config cannot see arcdav3a (PKG_CONFIG_PATH=$PKG_CONFIG_PATH)" >&2
+  cat "$PREFIX/lib/pkgconfig/arcdav3a.pc" >&2 || true
+  exit 1
+fi
+echo "ok pkg-config arcdav3a: $(pkg-config --modversion arcdav3a) cflags=$(pkg-config --cflags arcdav3a)"
 
 echo "==> configure FongMi FFmpeg (static PIC + libarcdav3a)"
 cd ffmpeg
@@ -95,6 +116,8 @@ $MAKE distclean 2>/dev/null || true
 FFMPEG_EXTRA=()
 if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
+  # 再保险：即使 pkg-config 异常，也把头文件/库路径塞进 configure
+  FFMPEG_EXTRA+=(--extra-cflags="-I${PREFIX}/include" --extra-ldflags="-L${PREFIX}/lib")
 fi
 
 ./configure \
