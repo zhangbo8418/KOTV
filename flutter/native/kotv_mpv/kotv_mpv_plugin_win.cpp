@@ -10,9 +10,9 @@
 #include <flutter/event_stream_handler_functions.h>
 #include <flutter/flutter_engine.h>
 #include <flutter/method_channel.h>
-#include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
-#include <flutter/texture_registrar.h>
+#include <flutter_plugin_registrar.h>
+#include <flutter_texture_registrar.h>
 
 #include <atomic>
 #include <chrono>
@@ -47,17 +47,20 @@ const T* MapGet(const flutter::EncodableMap& m, const char* key) {
 
 class KotvMpvPixelBuffer {
  public:
-  explicit KotvMpvPixelBuffer(flutter::TextureRegistrar* registrar)
+  explicit KotvMpvPixelBuffer(FlutterDesktopTextureRegistrarRef registrar)
       : registrar_(registrar) {
     pixels_.assign(1280 * 720 * 4, 0);
-    texture_ = std::make_unique<flutter::TextureVariant>(flutter::PixelBufferTexture(
-        [this](size_t width, size_t height) { return CopyBuffer(width, height); }));
-    texture_id_ = registrar_->RegisterTexture(texture_.get());
+    FlutterDesktopTextureInfo info{};
+    info.type = kFlutterDesktopPixelBufferTexture;
+    info.pixel_buffer_config.callback = &KotvMpvPixelBuffer::OnCopy;
+    info.pixel_buffer_config.user_data = this;
+    texture_id_ = FlutterDesktopTextureRegistrarRegisterExternalTexture(registrar_, &info);
   }
 
   ~KotvMpvPixelBuffer() {
     if (texture_id_ >= 0 && registrar_) {
-      registrar_->UnregisterTexture(texture_id_);
+      FlutterDesktopTextureRegistrarUnregisterExternalTexture(registrar_, texture_id_, nullptr,
+                                                              nullptr);
     }
   }
 
@@ -65,23 +68,10 @@ class KotvMpvPixelBuffer {
 
   void MarkFrame() {
     if (texture_id_ >= 0 && registrar_) {
-      registrar_->MarkTextureFrameAvailable(texture_id_);
+      FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(registrar_, texture_id_);
     }
   }
 
- private:
-  const FlutterDesktopPixelBuffer* CopyBuffer(size_t width, size_t height) {
-    (void)width;
-    (void)height;
-    std::lock_guard<std::mutex> lock(mu_);
-    if (frame_w_ <= 0 || frame_h_ <= 0 || pixels_.empty()) return nullptr;
-    pixel_buffer_.buffer = pixels_.data();
-    pixel_buffer_.width = static_cast<size_t>(frame_w_);
-    pixel_buffer_.height = static_cast<size_t>(frame_h_);
-    return &pixel_buffer_;
-  }
-
- public:
   void UpdateFrame(const uint8_t* src, int w, int h) {
     if (!src || w <= 0 || h <= 0) return;
     const size_t need = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
@@ -93,8 +83,22 @@ class KotvMpvPixelBuffer {
   }
 
  private:
-  flutter::TextureRegistrar* registrar_;
-  std::unique_ptr<flutter::TextureVariant> texture_;
+  static const FlutterDesktopPixelBuffer* OnCopy(size_t width, size_t height, void* user) {
+    return static_cast<KotvMpvPixelBuffer*>(user)->CopyBuffer(width, height);
+  }
+
+  const FlutterDesktopPixelBuffer* CopyBuffer(size_t width, size_t height) {
+    (void)width;
+    (void)height;
+    std::lock_guard<std::mutex> lock(mu_);
+    if (frame_w_ <= 0 || frame_h_ <= 0 || pixels_.empty()) return nullptr;
+    pixel_buffer_.buffer = pixels_.data();
+    pixel_buffer_.width = static_cast<size_t>(frame_w_);
+    pixel_buffer_.height = static_cast<size_t>(frame_h_);
+    return &pixel_buffer_;
+  }
+
+  FlutterDesktopTextureRegistrarRef registrar_ = nullptr;
   int64_t texture_id_ = -1;
   std::mutex mu_;
   std::vector<uint8_t> pixels_;
@@ -111,10 +115,9 @@ class KotvMpvPluginWin {
   }
 
   void Register(flutter::FlutterEngine* engine) {
-    plugin_registrar_ = std::make_unique<flutter::PluginRegistrarWindows>(
-        engine->GetRegistrarForPlugin("kotv_mpv"));
-    registrar_ = plugin_registrar_->texture_registrar();
-    auto* messenger = plugin_registrar_->messenger();
+    FlutterDesktopPluginRegistrarRef native = engine->GetRegistrarForPlugin("kotv_mpv");
+    tex_reg_ = FlutterDesktopRegistrarGetTextureRegistrar(native);
+    auto* messenger = engine->messenger();
     method_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
         messenger, "kotv_mpv", &flutter::StandardMethodCodec::GetInstance());
     method_channel_->SetMethodCallHandler(
@@ -180,8 +183,8 @@ class KotvMpvPluginWin {
     const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
 
     if (method == "create") {
-      if (!pixel_buffer_ && registrar_) {
-        pixel_buffer_ = std::make_unique<KotvMpvPixelBuffer>(registrar_);
+      if (!pixel_buffer_ && tex_reg_) {
+        pixel_buffer_ = std::make_unique<KotvMpvPixelBuffer>(tex_reg_);
       }
       char* lib = kotv_find_libmpv_path();
       if (!lib) {
@@ -316,8 +319,7 @@ class KotvMpvPluginWin {
     result->NotImplemented();
   }
 
-  std::unique_ptr<flutter::PluginRegistrarWindows> plugin_registrar_;
-  flutter::TextureRegistrar* registrar_ = nullptr;
+  FlutterDesktopTextureRegistrarRef tex_reg_ = nullptr;
   std::unique_ptr<KotvMpvPixelBuffer> pixel_buffer_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> method_channel_;
   std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>> event_channel_;
