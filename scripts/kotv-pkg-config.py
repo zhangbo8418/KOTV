@@ -118,13 +118,14 @@ def collect(
         if want_libs:
             if fields.get("Libs"):
                 libs.extend(fields["Libs"].split())
-            if static and fields.get("Libs.private"):
+            # 前缀全是静态库；Windows meson 经常不传 --static
+            if fields.get("Libs.private"):
                 libs.extend(fields["Libs.private"].split())
-        req = fields.get("Requires", "")
-        if static:
-            req = f"{req} {fields.get('Requires.private', '')}"
+        req = f"{fields.get('Requires', '')} {fields.get('Requires.private', '')}"
         for dep in split_mods(req):
             walk(dep)
+
+    _ = static  # 保留参数：调用方仍传 static=
 
     for m in modules:
         walk(m)

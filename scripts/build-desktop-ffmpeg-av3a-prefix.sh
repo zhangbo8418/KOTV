@@ -98,6 +98,29 @@ Cflags: -I$pref/include
 EOF
 }
 
+# meson 链 libmpv 时若不带 --static，Libs.private 会被丢掉；把 -larcdav3a 提到 Libs。
+promote_arcdav3a_in_avcodec_pc() {
+  local pc="$PREFIX/lib/pkgconfig/libavcodec.pc"
+  [[ -f "$pc" ]] || return 0
+  if grep -E '^Libs:' "$pc" | grep -q -- '-larcdav3a'; then
+    return 0
+  fi
+  python3 - "$pc" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+lines = p.read_text(encoding="utf-8", errors="replace").splitlines(True)
+out = []
+for line in lines:
+    if line.startswith("Libs:") and "-larcdav3a" not in line:
+        nl = "\n" if line.endswith("\n") else ""
+        line = line.rstrip("\r\n") + " -larcdav3a -lm" + nl
+    out.append(line)
+p.write_text("".join(out), encoding="utf-8")
+PY
+  echo "ok patched $pc (+ -larcdav3a on Libs)"
+}
+
 # 自包含 pkg-config：读 PREFIX/.pc；Windows 另写 .cmd 供 meson(Python) 找到。
 install_pkg_config_wrapper() {
   local py_src="$ROOT/scripts/kotv-pkg-config.py"
@@ -167,6 +190,7 @@ if marker_ok && av3a_in_prefix; then
   echo "ok cached FFmpeg+AV3A prefix: $PREFIX"
   # 缓存命中也要装好 pkg-config，供后续 meson 使用（PATH 在子进程，由 mpv 脚本再装一次）
   write_arcdav3a_pc
+  promote_arcdav3a_in_avcodec_pc
   if kotv_is_windows_build; then
     install_pkg_config_wrapper
   fi
@@ -275,5 +299,6 @@ if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$lib" 2>/dev/null; then
   exit 1
 fi
 mkdir -p "$PREFIX"
+promote_arcdav3a_in_avcodec_pc
 echo "pic+av3a $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
 echo "ok FFmpeg+AV3A prefix: $PREFIX"
