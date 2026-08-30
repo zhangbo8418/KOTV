@@ -34,6 +34,8 @@ source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
 flutter config --enable-linux-desktop
 "$ROOT/scripts/flutter-pub-get.sh"
+# mpv/FFmpeg 源码编可能留下 Unix Makefiles 等 CMake 变量；Flutter Linux 需要 Ninja + C 语言。
+unset CMAKE_GENERATOR CMAKE_TOOLCHAIN_FILE CMAKE_C_COMPILER CMAKE_CXX_COMPILER || true
 # 失败时打出详细链接错误
 if ! flutter build linux --release; then
   echo "==> flutter build failed; retry verbose for linker details" >&2

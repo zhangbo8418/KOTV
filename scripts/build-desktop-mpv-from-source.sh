@@ -99,94 +99,79 @@ ensure_lua_pkg() {
   done
 }
 
-# Windows：从 shinchiro mpv-dev 抽取 libass 等（不含 FFmpeg，AV3A 仍用我们的 prefix）。
-ensure_windows_libass_from_mpv_dev() {
+# Windows：用同一套 MinGW 源码编 libass（mpv-dev 包只有 libmpv 头，没有 libass）。
+ensure_windows_libass() {
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   if pkg-config --exists libass 2>/dev/null; then
     echo "ok libass $(pkg-config --modversion libass 2>/dev/null || echo found)"
     return
   fi
-  need curl
-  local url archive tmp dir pref
-  tmp="$(mktemp -d)"
-  archive="$tmp/mpv-dev.7z"
-  dir="$tmp/extract"
-  url="${KOTV_MPV_WIN_DEV_URL:-}"
-  if [[ -z "$url" ]]; then
-    url="$(curl -fsSL "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" \
-      | grep -Eo 'https://[^"]+mpv-dev-x86_64-[0-9]+[^"]+\.7z' | grep -v '\-v3-' | head -1 || true)"
+  need git
+  need meson
+  need ninja
+  local tag="${KOTV_LIBASS_TAG:-0.17.3}"
+  echo "==> build libass $tag (MinGW static, DirectWrite)"
+  mkdir -p "$BUILD_DIR"
+  cd "$BUILD_DIR"
+  if [[ ! -d libass/.git ]]; then
+    git clone --depth 1 --branch "$tag" https://github.com/libass/libass.git libass
   fi
-  [[ -n "$url" ]] || { echo "ERROR: cannot resolve mpv-dev URL for libass" >&2; exit 1; }
-  echo "==> windows deps: fetch libass from $url"
-  curl -fL --retry 5 --retry-delay 2 -o "$archive" "$url"
-  mkdir -p "$dir"
-  if command -v 7z >/dev/null 2>&1; then
-    7z x -y "-o$dir" "$archive" >/dev/null
-  elif command -v 7za >/dev/null 2>&1; then
-    7za x -y "-o$dir" "$archive" >/dev/null
-  else
-    echo "need 7z to extract mpv-dev" >&2
-    exit 1
-  fi
-  mkdir -p "$PREFIX/include" "$PREFIX/lib" "$PREFIX/bin" "$PREFIX/lib/pkgconfig"
-  # 头文件
-  if [[ -d "$dir/include/ass" ]]; then
-    cp -a "$dir/include/ass" "$PREFIX/include/"
-  else
-    local ass_inc
-    ass_inc="$(find "$dir" -type d -name ass | head -1 || true)"
-    [[ -n "$ass_inc" ]] || { echo "ERROR: ass headers missing in mpv-dev" >&2; exit 1; }
-    cp -a "$ass_inc" "$PREFIX/include/"
-  fi
-  # 导入库 / DLL
-  local f
-  for f in "$dir"/lib/libass*.a "$dir"/lib/libass*.dll.a "$dir"/libass*.dll "$dir"/bin/libass*.dll; do
-    [[ -f "$f" ]] || continue
-    case "$f" in
-      *.dll) cp -f "$f" "$PREFIX/bin/" ;;
-      *) cp -f "$f" "$PREFIX/lib/" ;;
-    esac
-  done
-  # 传递依赖（freetype/fribidi/harfbuzz），有则一并放入
-  for f in "$dir"/lib/lib{freetype,fribidi,harfbuzz,iconv,png,zlib}*.a \
-           "$dir"/lib/lib{freetype,fribidi,harfbuzz,iconv,png,z}*.dll.a \
-           "$dir"/bin/lib{freetype,fribidi,harfbuzz,iconv,png,zlib}*.dll \
-           "$dir"/lib{freetype,fribidi,harfbuzz,iconv,png,zlib}*.dll; do
-    [[ -f "$f" ]] || continue
-    case "$f" in
-      *.dll) cp -f "$f" "$PREFIX/bin/" ;;
-      *) cp -f "$f" "$PREFIX/lib/" ;;
-    esac
-  done
-  for f in "$dir"/include/ft2build.h "$dir"/include/fribidi "$dir"/include/harfbuzz "$dir"/include/freetype2; do
-    [[ -e "$f" ]] || continue
-    cp -a "$f" "$PREFIX/include/" 2>/dev/null || true
-  done
-  [[ -d "$dir/include/freetype2" ]] && cp -a "$dir/include/freetype2" "$PREFIX/include/" || true
+  mkdir -p libass/subprojects
+  cat >libass/subprojects/freetype2.wrap <<'EOF'
+[wrap-git]
+directory = freetype
+url = https://github.com/freetype/freetype.git
+revision = VER-2-13-3
+depth = 1
 
-  pref="$PREFIX"
-  command -v cygpath >/dev/null 2>&1 && pref="$(cygpath -m "$PREFIX")"
-  local ass_lib="-lass"
-  [[ -f "$PREFIX/lib/libass.dll.a" ]] || [[ -f "$PREFIX/lib/libass.a" ]] \
-    || { echo "ERROR: libass import lib missing after extract" >&2; find "$dir" -iname '*ass*' | head -40 >&2; exit 1; }
-
-  cat >"$PREFIX/lib/pkgconfig/libass.pc" <<EOF
-prefix=$pref
-exec_prefix=$pref
-libdir=$pref/lib
-includedir=$pref/include
-
-Name: libass
-Description: libass (from shinchiro mpv-dev)
-Version: 0.17.3
-Libs: -L\${libdir} $ass_lib
-Cflags: -I\${includedir}
+[provide]
+dependency_names = freetype2
 EOF
+  cat >libass/subprojects/fribidi.wrap <<'EOF'
+[wrap-git]
+directory = fribidi
+url = https://github.com/fribidi/fribidi.git
+revision = v1.0.16
+depth = 1
+
+[provide]
+dependency_names = fribidi
+EOF
+  cat >libass/subprojects/harfbuzz.wrap <<'EOF'
+[wrap-git]
+directory = harfbuzz
+url = https://github.com/harfbuzz/harfbuzz.git
+revision = 8.5.0
+depth = 1
+
+[provide]
+dependency_names = harfbuzz
+EOF
+  cd libass
+  rm -rf build
+  meson setup build \
+    --prefix="$PREFIX" \
+    --libdir=lib \
+    -Ddefault_library=static \
+    -Dfontconfig=disabled \
+    -Dlibunibreak=disabled \
+    -Dasm=disabled \
+    --force-fallback-for=freetype2,fribidi,harfbuzz \
+    -Dfreetype2:harfbuzz=disabled \
+    -Dharfbuzz:tests=disabled \
+    -Dharfbuzz:cairo=disabled \
+    -Dharfbuzz:gobject=disabled \
+    -Dharfbuzz:glib=disabled \
+    -Dharfbuzz:freetype=disabled \
+    -Dfribidi:docs=false \
+    -Dfribidi:bin=false \
+    -Dfribidi:tests=false
+  meson compile -C build -j"$JOBS"
+  meson install -C build
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   pkg-config --exists libass \
-    || { echo "ERROR: libass.pc not visible" >&2; exit 1; }
-  echo "ok libass staged from mpv-dev → $PREFIX"
-  rm -rf "$tmp"
+    || { echo "ERROR: libass not visible after install" >&2; find "$PREFIX" -name 'libass*' >&2; exit 1; }
+  echo "ok libass $(pkg-config --modversion libass) (built)"
 }
 
 ensure_windows_vulkan() {
@@ -355,7 +340,7 @@ EOF
   echo "  libavcodec cflags=$("$PKG_CONFIG" --cflags libavcodec | head -c 200)"
 
   ensure_windows_vulkan
-  ensure_windows_libass_from_mpv_dev
+  ensure_windows_libass
   # 刷新 PKG_CONFIG_PATH（ensure_* 可能改过）
   if command -v cygpath >/dev/null 2>&1; then
     export PKG_CONFIG_PATH="$(cygpath -m "$PREFIX/lib/pkgconfig")"
