@@ -11,8 +11,6 @@ env:
   # 非 Win7：跟 stable 最新；Win7 钉官方末版 3.19.6
   FLUTTER_VERSION: "3.44.8"
   FLUTTER_WIN7_VERSION: "3.19.6"
-  # fvp cmake：从 GitHub Release 拉 mdk-sdk，避免 SourceForge nightly
-  FVP_DEPS_URL: "https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0"
 
 jobs:
   set-tag:
@@ -451,15 +449,14 @@ jobs:
             echo "==> cross-ish: build under arch -x86_64"
             arch -x86_64 bash -lc '
               export PATH="/usr/local/bin:$PATH"
-              export FVP_DEPS_URL="${FVP_DEPS_URL:-https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0}"
               source ./scripts/kotv-fvp-deps.sh
               kotv_export_fvp_deps
-              kotv_ensure_mdk_apple_pod
               ./scripts/prepare-runtime.sh macos-x64
               (cd internal/spider && go run gen_qjsinc.go)
               CGO_ENABLED=1 GOARCH=amd64 go build -o flutter/assets/engine/kotv-engine ./cmd/engine
+              ./scripts/flutter-pub-get.sh
+              kotv_ensure_mdk_apple_pod
               cd flutter && flutter config --enable-macos-desktop && flutter config --no-enable-swift-package-manager || true
-              flutter pub get
               flutter build macos --release
             '
             # 复用 package 脚本后半段：从已构建 app 打 dmg

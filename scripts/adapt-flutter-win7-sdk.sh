@@ -16,6 +16,7 @@ perl -i -pe 's/shared_preferences:\s*\^2\.3\.3/shared_preferences: 2.3.0/' "$APP
 perl -i -pe 's/web:\s*\^1\.1\.0/web: 0.5.1/' "$APP"
 perl -i -pe 's/wakelock_plus:\s*[^\n]+/wakelock_plus: 1.2.8/' "$APP"
 perl -i -pe 's/video_player:\s*\^[^\n]+/video_player: 2.9.2/' "$APP"
+perl -i -pe 's/fvp:\s*[^\n]+/fvp: 0.37.3/' "$APP"
 
 THEME="$ROOT/flutter/lib/theme/kotv_theme.dart"
 if [[ -f "$THEME" ]]; then
@@ -53,6 +54,7 @@ dependency_overrides:
   video_player_platform_interface: 6.2.3
   video_player_avfoundation: 2.6.2
   video_player_web: 2.3.2
+  fvp: 0.37.3
   web: 0.5.1
   wakelock_plus: 1.2.8
 OVERRIDES

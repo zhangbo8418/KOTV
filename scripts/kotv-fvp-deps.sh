@@ -1,13 +1,56 @@
 #!/usr/bin/env bash
-# fvp / mdk-sdk：默认从 GitHub Release 拉 v0.38.0，避免 CI 卡在 SourceForge nightly。
+# fvp / mdk-sdk：默认跟 GitHub Release 最新（与 Chromium 同一策略），避免写死版本、也避免 SourceForge nightly。
 # 用法：在 package-*.sh 里 `source "$ROOT/scripts/kotv-fvp-deps.sh"`
-# 可选覆盖：FVP_DEPS_URL=https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0
+# 可选覆盖：FVP_DEPS_URL=https://github.com/wang-bin/mdk-sdk/releases/download/vX.Y.Z
 #
-# 注意：fvp 0.37.3 的 podspec 写死 `mdk ~> 0.36.0`（即 >=0.36.0 <0.37.0）。
-# 本地 pod 的 s.version 必须写成 0.36.0 才能过 CocoaPods；实际解压的是 0.38.0 SDK。
+# 注意：fvp 的 darwin podspec 会写 `mdk ~> X.Y.Z`（0.38.1 起是 ~> 0.38.0）。
+# 本地 pod 的 s.version 用该下限才能过 CocoaPods；实际解压的是上面解析到的最新 SDK。
 
 kotv_fvp_deps_url() {
-  echo "${FVP_DEPS_URL:-https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0}"
+  if [[ -n "${FVP_DEPS_URL:-}" ]]; then
+    echo "$FVP_DEPS_URL"
+    return
+  fi
+  local resolved=""
+  resolved="$(_kotv_python - <<'PY' || true
+import json, os, sys, time, urllib.request
+
+url = "https://api.github.com/repos/wang-bin/mdk-sdk/releases/latest"
+token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
+headers = {
+    "Accept": "application/vnd.github+json",
+    "User-Agent": "KOTV-fvp-deps",
+    "X-GitHub-Api-Version": "2022-11-28",
+}
+if token:
+    headers["Authorization"] = f"Bearer {token}"
+
+last_err = None
+for attempt in range(1, 6):
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.load(resp)
+        tag = (data.get("tag_name") or "").strip()
+        if not tag:
+            raise RuntimeError("empty tag_name")
+        print(f"https://github.com/wang-bin/mdk-sdk/releases/download/{tag}")
+        raise SystemExit(0)
+    except Exception as e:
+        last_err = str(e)
+        if attempt < 5:
+            time.sleep(attempt * 2)
+            continue
+        print(f"WARN: mdk-sdk latest lookup failed: {last_err}", file=sys.stderr)
+        raise SystemExit(1)
+PY
+)"
+  if [[ -n "$resolved" ]]; then
+    echo "$resolved"
+    return
+  fi
+  echo "WARN: mdk-sdk latest lookup failed; fallback v0.38.0" >&2
+  echo "https://github.com/wang-bin/mdk-sdk/releases/download/v0.38.0"
 }
 
 kotv_mdk_sdk_ver() {
@@ -22,11 +65,80 @@ kotv_export_fvp_deps() {
   echo "==> FVP_DEPS_URL=$FVP_DEPS_URL"
 }
 
-# GitHub mdk-sdk v0.37+ 不再发布 mdk-sdk-windows-x64.7z，改为 *-vs2026.7z。
-# fvp 0.37.3 / 0.38.0 的 cmake 仍拼旧文件名；CMake file(DOWNLOAD) 遇 404 会写成空文件
-# （MD5 d41d8cd98f00b204e9800998ecf8427e），随后解压失败。
+# GitHub mdk-sdk v0.37+ 不再发布 mdk-sdk-windows-x64.7z，改为 *-vsYYYY.7z。
+# fvp cmake 仍拼旧文件名；CMake file(DOWNLOAD) 遇 404 会写成空文件，随后解压失败。
 kotv_mdk_windows_assets() {
-  echo "${KOTV_MDK_WINDOWS_ASSET:-mdk-sdk-windows-x64-vs2026.7z}"
+  if [[ -n "${KOTV_MDK_WINDOWS_ASSET:-}" ]]; then
+    echo "$KOTV_MDK_WINDOWS_ASSET"
+    echo "mdk-sdk-windows-x64.7z"
+    return
+  fi
+  local names=""
+  names="$(_kotv_python - <<'PY' || true
+import json, os, re, sys, time, urllib.request
+
+base = (os.environ.get("FVP_DEPS_URL") or "").rstrip("/")
+tag = ""
+m = re.search(r"/download/([^/]+)$", base)
+if m:
+    tag = m.group(1)
+url = (
+    f"https://api.github.com/repos/wang-bin/mdk-sdk/releases/tags/{tag}"
+    if tag
+    else "https://api.github.com/repos/wang-bin/mdk-sdk/releases/latest"
+)
+token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
+headers = {
+    "Accept": "application/vnd.github+json",
+    "User-Agent": "KOTV-fvp-deps",
+    "X-GitHub-Api-Version": "2022-11-28",
+}
+if token:
+    headers["Authorization"] = f"Bearer {token}"
+
+data = None
+for attempt in range(1, 6):
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.load(resp)
+        break
+    except Exception:
+        if attempt < 5:
+            time.sleep(attempt * 2)
+            continue
+        raise SystemExit(1)
+
+cands = []
+for asset in data.get("assets") or []:
+    name = asset.get("name") or ""
+    nl = name.lower()
+    if not nl.endswith(".7z") or "windows" not in nl:
+        continue
+    if "ltl" in nl or "clang" in nl or "uwp" in nl:
+        continue
+    if "x64" in nl or re.search(r"windows-vs\d", nl):
+        cands.append(name)
+
+def rank(n):
+    nl = n.lower()
+    if "x64" in nl and "vs" in nl:
+        return 0
+    if "x64" in nl:
+        return 1
+    if "vs" in nl:
+        return 2
+    return 3
+
+for name in sorted(set(cands), key=rank):
+    print(name)
+PY
+)"
+  if [[ -n "$names" ]]; then
+    echo "$names"
+  else
+    echo "mdk-sdk-windows-x64-vs2026.7z"
+  fi
   echo "mdk-sdk-windows-x64.7z"
 }
 
@@ -185,13 +297,33 @@ kotv_ensure_mdk_apple_pod() {
   echo "==> mdk apple pod prepared ($ver): $KOTV_MDK_POD_PATH"
 }
 
-# fvp 要求 mdk ~> 0.36.0；s.version 用 0.36.0，二进制仍是上面拉到的 SDK。
+# fvp podspec 会写 `mdk ~> X.Y.Z`。本地 pod 的 s.version 用该下限以过 CocoaPods；
+# 实际解压的仍是 GitHub 解析到的最新 SDK。
+_kotv_mdk_pod_version() {
+  local fvp_root spec ver
+  fvp_root="$(kotv_fvp_package_root 2>/dev/null)" || true
+  if [[ -n "${fvp_root:-}" ]]; then
+    for spec in "$fvp_root/darwin/fvp.podspec" "$fvp_root/macos/fvp.podspec" "$fvp_root/ios/fvp.podspec"; do
+      [[ -f "$spec" ]] || continue
+      ver="$(perl -ne 'print $1 if /dependency\s+['\''"]mdk['\''"]\s*,\s*['\''"]~>\s*([0-9.]+)/' "$spec")"
+      if [[ -n "$ver" ]]; then
+        echo "$ver"
+        return
+      fi
+    done
+  fi
+  kotv_mdk_sdk_ver
+}
+
 kotv_write_mdk_podspec() {
   local dest="$1"
-  cat > "$dest/mdk.podspec" <<'EOF'
+  local ver
+  ver="$(_kotv_mdk_pod_version)"
+  ver="${ver#v}"
+  cat > "$dest/mdk.podspec" <<EOF
 Pod::Spec.new do |s|
   s.name             = 'mdk'
-  s.version          = '0.36.0'
+  s.version          = '${ver}'
   s.summary          = 'Multimedia Development Kit'
   s.homepage         = 'https://github.com/wang-bin/mdk-sdk'
   s.license          = { :type => 'MIT' }

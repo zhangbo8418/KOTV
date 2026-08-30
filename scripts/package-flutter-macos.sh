@@ -53,8 +53,8 @@ flutter config --no-enable-swift-package-manager || true
 # shellcheck source=kotv-fvp-deps.sh
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
-kotv_ensure_mdk_apple_pod
 "$ROOT/scripts/flutter-pub-get.sh"
+kotv_ensure_mdk_apple_pod
 flutter build macos --release
 
 APP_SRC=""

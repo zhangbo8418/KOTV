@@ -16,6 +16,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -35,6 +36,13 @@ std::string HeadersToMultiline(const flutter::EncodableMap* headers) {
     out += *k + ": " + *v + "\r\n";
   }
   return out;
+}
+
+template <typename T>
+const T* MapGet(const flutter::EncodableMap& m, const char* key) {
+  const auto it = m.find(flutter::EncodableValue(std::string(key)));
+  if (it == m.end()) return nullptr;
+  return std::get_if<T>(&it->second);
 }
 
 class KotvMpvPixelBuffer {
@@ -103,8 +111,10 @@ class KotvMpvPluginWin {
   }
 
   void Register(flutter::FlutterEngine* engine) {
-    registrar_ = engine->texture_registrar();
-    auto messenger = engine->messenger();
+    plugin_registrar_ = std::make_unique<flutter::PluginRegistrarWindows>(
+        engine->GetRegistrarForPlugin("kotv_mpv"));
+    registrar_ = plugin_registrar_->texture_registrar();
+    auto* messenger = plugin_registrar_->messenger();
     method_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
         messenger, "kotv_mpv", &flutter::StandardMethodCodec::GetInstance());
     method_channel_->SetMethodCallHandler(
@@ -219,12 +229,12 @@ class KotvMpvPluginWin {
       int vulkan = 0;
       std::string headers;
       if (args) {
-        if (auto* v = std::get_if<std::string>(&(*args)[flutter::EncodableValue("url")])) url = *v;
-        if (auto* v = std::get_if<std::string>(&(*args)[flutter::EncodableValue("decode")])) hwdec = *v;
-        if (auto* v = std::get_if<bool>(&(*args)[flutter::EncodableValue("live")])) live = *v ? 1 : 0;
-        if (auto* v = std::get_if<bool>(&(*args)[flutter::EncodableValue("gpuNext")])) gpu_next = *v ? 1 : 0;
-        if (auto* v = std::get_if<bool>(&(*args)[flutter::EncodableValue("vulkan")])) vulkan = *v ? 1 : 0;
-        if (auto* h = std::get_if<flutter::EncodableMap>(&(*args)[flutter::EncodableValue("headers")])) {
+        if (auto* v = MapGet<std::string>(*args, "url")) url = *v;
+        if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
+        if (auto* v = MapGet<bool>(*args, "live")) live = *v ? 1 : 0;
+        if (auto* v = MapGet<bool>(*args, "gpuNext")) gpu_next = *v ? 1 : 0;
+        if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
+        if (auto* h = MapGet<flutter::EncodableMap>(*args, "headers")) {
           headers = HeadersToMultiline(h);
         }
       }
@@ -255,8 +265,9 @@ class KotvMpvPluginWin {
     if (method == "seek") {
       int64_t ms = 0;
       if (args) {
-        if (auto* v = std::get_if<int32_t>(&(*args)[flutter::EncodableValue("positionMs")])) ms = *v;
-        if (auto* v = std::get_if<int64_t>(&(*args)[flutter::EncodableValue("positionMs")])) ms = *v;
+        if (auto* v = MapGet<int32_t>(*args, "positionMs")) ms = *v;
+        if (auto* v = MapGet<int64_t>(*args, "positionMs")) ms = *v;
+        if (auto* v = MapGet<double>(*args, "positionMs")) ms = static_cast<int64_t>(*v);
       }
       kotv_mpv_desktop_seek_ms(ms);
       result->Success();
@@ -265,8 +276,9 @@ class KotvMpvPluginWin {
     if (method == "setVolume") {
       int vol = 80;
       if (args) {
-        if (auto* v = std::get_if<double>(&(*args)[flutter::EncodableValue("volume")])) vol = static_cast<int>(*v);
-        if (auto* v = std::get_if<int32_t>(&(*args)[flutter::EncodableValue("volume")])) vol = *v;
+        if (auto* v = MapGet<double>(*args, "volume")) vol = static_cast<int>(*v);
+        if (auto* v = MapGet<int32_t>(*args, "volume")) vol = *v;
+        if (auto* v = MapGet<int64_t>(*args, "volume")) vol = static_cast<int>(*v);
       }
       kotv_mpv_desktop_set_volume(vol);
       result->Success();
@@ -275,7 +287,7 @@ class KotvMpvPluginWin {
     if (method == "setRate") {
       double rate = 1.0;
       if (args) {
-        if (auto* v = std::get_if<double>(&(*args)[flutter::EncodableValue("rate")])) rate = *v;
+        if (auto* v = MapGet<double>(*args, "rate")) rate = *v;
       }
       kotv_mpv_desktop_set_rate(rate);
       result->Success();
@@ -285,8 +297,8 @@ class KotvMpvPluginWin {
       std::string key;
       std::string value;
       if (args) {
-        if (auto* v = std::get_if<std::string>(&(*args)[flutter::EncodableValue("key")])) key = *v;
-        if (auto* v = std::get_if<std::string>(&(*args)[flutter::EncodableValue("value")])) value = *v;
+        if (auto* v = MapGet<std::string>(*args, "key")) key = *v;
+        if (auto* v = MapGet<std::string>(*args, "value")) value = *v;
       }
       kotv_mpv_desktop_set_prop(key.c_str(), value.c_str());
       result->Success();
@@ -304,6 +316,7 @@ class KotvMpvPluginWin {
     result->NotImplemented();
   }
 
+  std::unique_ptr<flutter::PluginRegistrarWindows> plugin_registrar_;
   flutter::TextureRegistrar* registrar_ = nullptr;
   std::unique_ptr<KotvMpvPixelBuffer> pixel_buffer_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> method_channel_;

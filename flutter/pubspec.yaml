@@ -14,7 +14,8 @@ dependencies:
   # 主线拉最新兼容版；Win7 线由 adapt-flutter-win7-sdk.sh 尽量钉到同档新版本。
   video_player: ^2.9.2
   web: ^1.1.0
-  fvp: ^0.37.3
+  # 主线不写死小版本；flutter-pub-get.sh 会解析 pub.dev 最新版（Win7 钉 0.37.3）。
+  fvp: any
   path_provider: ^2.1.5
   path: ^1.9.0
   shared_preferences: ^2.3.3
