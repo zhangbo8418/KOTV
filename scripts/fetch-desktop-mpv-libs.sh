@@ -50,13 +50,13 @@ fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
   local want="prebuilt"
-  if [[ "${KOTV_WIN7:-}" == "1" ]]; then
-    want="win7"
-  elif [[ "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
+  if [[ "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
     want="av3a"
+  elif [[ "${KOTV_WIN7:-}" == "1" ]]; then
+    want="win7"
   fi
 
-  # Win7 不能用 Vulkan+AV3A 源码包（新 FFmpeg/libplacebo 会在 loadfile 阶段挂）。
+  # Win7 与 Win10 一样：KOTV_BUILD_MPV_AV3A=1 时走 Vulkan+AV3A 源码包。
   if [[ "$want" == "av3a" ]]; then
     if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
       && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a" ]]; then

@@ -32,12 +32,6 @@ check_av3a() {
 }
 
 echo "==> verify desktop libmpv (Vulkan${KOTV_EXPECT_MPV_AV3A:+ + AV3A})"
-if [[ "${KOTV_WIN7:-}" == "1" ]]; then
-  echo "Win7: skip vulkan/AV3A hard checks (sw libmpv + bundled dlls)"
-  [[ -f "$ASSET/windows/mpv-2.dll" ]] || { echo "ERROR: missing windows/mpv-2.dll" >&2; exit 1; }
-  echo "==> ok: Win7 libmpv present"
-  exit 0
-fi
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
   check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"

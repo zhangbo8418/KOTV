@@ -29,11 +29,10 @@ class KotvMpvOpts {
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
-    final win7 = kotvIsWindows7();
     return KotvMpvOpts(
       decodeMode: decode.isEmpty ? 'auto' : decode,
-      gpuNext: win7 ? false : '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true',
-      vulkan: win7 ? false : '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true',
+      gpuNext: '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true',
+      vulkan: '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true',
       conf: '${settings['mpvConf'] ?? ''}',
     );
   }
@@ -44,11 +43,10 @@ class KotvMpvOpts {
     bool? vulkan,
     String? conf,
   }) {
-    final win7 = kotvIsWindows7();
     return KotvMpvOpts(
       decodeMode: decodeMode ?? this.decodeMode,
-      gpuNext: win7 ? false : (gpuNext ?? this.gpuNext),
-      vulkan: win7 ? false : (vulkan ?? this.vulkan),
+      gpuNext: gpuNext ?? this.gpuNext,
+      vulkan: vulkan ?? this.vulkan,
       conf: conf ?? this.conf,
     );
   }
@@ -75,7 +73,6 @@ class KotvMpvOpts {
         return 'videotoolbox';
       }
     }
-    if (kotvIsWindows7()) return 'no';
     return 'auto';
   }
 
@@ -86,10 +83,10 @@ class KotvMpvOpts {
     final out = <String, String>{
       'hwdec': hwdecValue(),
     };
-    if (gpuNext && !kotvIsWindows7()) {
+    if (gpuNext) {
       out['vo'] = 'gpu-next';
     }
-    if (vulkan && !kotvIsAndroid() && !kotvIsWindows7()) {
+    if (vulkan && !kotvIsAndroid()) {
       out['gpu-api'] = 'vulkan';
     }
     if (!live) {
@@ -101,7 +98,7 @@ class KotvMpvOpts {
         out['demuxer-readahead-secs'] = '20';
         out['cache-secs'] = '30';
         out['framedrop'] = 'vo';
-      } else if (!kotvIsWindows7()) {
+      } else {
         final budget = KotvBufferBudget.bytes();
         final forward = KotvBufferBudget.mpvMiB(budget);
         final back = KotvBufferBudget.mpvMiB(max(16 * 1024 * 1024, budget ~/ 8));
@@ -116,14 +113,6 @@ class KotvMpvOpts {
     }
     for (final e in parseConfLines(conf)) {
       out[e.$1] = e.$2;
-    }
-    if (kotvIsWindows7()) {
-      out.remove('vo');
-      out.remove('gpu-api');
-      out.remove('gpu-context');
-      out.remove('gpu-next');
-      out.remove('cache');
-      out['hwdec'] = hwdecValue();
     }
     return out;
   }

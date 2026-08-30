@@ -328,6 +328,7 @@ func Status() map[string]string {
 		"bridge":   orMissing(BridgeJAR()),
 		"chromium": orMissing(Chromium()),
 		"ffmpeg":   orMissing(FFmpeg()),
+		"libmpv":   orMissing(LibMPV()),
 		"mpv":      orMissing(MPV()),
 	}
 }

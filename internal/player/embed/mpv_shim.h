@@ -11,8 +11,6 @@ extern "C" {
 int kotv_mpv_load(const char *lib_path);
 void kotv_mpv_unload(void);
 int kotv_mpv_loaded(void);
-/* 1 = Windows 7 / Server 2008 R2（含更旧）；其它平台恒为 0。 */
-int kotv_mpv_os_win7(void);
 /* 须在 mpv_initialize 前设置；变更后 kotv_mpv_reinit_player() 重建实例。 */
 int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec);
 int kotv_mpv_reinit_player(void);

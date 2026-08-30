@@ -1126,7 +1126,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(label: '清理缓存', onTap: _clearCache),
                         if (!Platform.isIOS) KotvSettingsCell(label: '检测爬虫', onTap: _checkSpider),
                         KotvSettingsCell(label: '检查更新', value: _version, onTap: _checkUpdate),
-                        KotvSettingsCell(label: '运行时信息', onTap: () => _showRuntime(launcher, cfg)),
+                        KotvSettingsCell(label: '运行库', onTap: () => _showRuntime(launcher, cfg)),
                         KotvSettingsCell(
                           label: '关于',
                           value: 'KO影视',

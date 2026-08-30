@@ -136,9 +136,9 @@ class KotvPlaybackFailover {
       return const ['innie#exo', 'innie#fvp', 'innie#mpv'];
     }
     if (kotvIsIOS()) {
-      return const ['innie#fvp', 'innie#html', 'innie#mpv'];
+      return const ['innie#mpv', 'innie#fvp', 'innie#html'];
     }
-    return const ['innie#fvp', 'innie#mpv'];
+    return const ['innie#mpv', 'innie#fvp'];
   }
 
   static String _innieLabel(String playerVal) {

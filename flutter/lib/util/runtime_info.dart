@@ -2,7 +2,7 @@ import 'kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
 
-/// 桌面客户端：可展示引擎侧捆绑运行时与本机外部 MPV。
+/// 桌面客户端：页内 MPV 看 libmpv；外部 mpv 可执行文件另列。
 const kotvRuntimeDisplayKeysDesktop = <String>[
   'platform',
   'java',
@@ -11,6 +11,7 @@ const kotvRuntimeDisplayKeysDesktop = <String>[
   'bridge',
   'chromium',
   'ffmpeg',
+  'libmpv',
   'mpv',
 ];
 
@@ -50,13 +51,11 @@ List<String> formatKotvRuntimeLines(
     final v = runtime[k]?.trim();
     if (v != null && v.isNotEmpty) {
       if (hideMissingPlayerLibs && v == '(missing)') continue;
+      // 页内播放用捆绑 libmpv；外部 mpv.exe 未安装时不必占一行。
+      if (k == 'mpv' && v == '(missing)') continue;
       out.add('$k: $v');
-    } else if (includeMissingKeys &&
-        !kIsWeb &&
-        !Platform.isAndroid &&
-        (k == 'mpv' )) {
-      // 仅桌面客户端补全本机播放器库缺失提示
-      out.add('$k: (missing)');
+    } else if (includeMissingKeys && !kIsWeb && !Platform.isAndroid && k == 'libmpv') {
+      out.add('libmpv: (missing)');
     }
   }
   return out;

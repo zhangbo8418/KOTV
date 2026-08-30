@@ -109,10 +109,6 @@ char* kotv_mpv_desktop_get_audio_tracks_json(void) {
 int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
                           const char* hwdec, int gpu_next, int vulkan, int live) {
   if (!url || !url[0]) return -1;
-  if (kotv_mpv_os_win7()) {
-    gpu_next = 0;
-    vulkan = 0;
-  }
   kotv_lock();
   if (!kotv_mpv_loaded()) {
     kotv_unlock();
@@ -150,7 +146,7 @@ int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
     kotv_mpv_set_prop_double("speed", g_rate);
   }
   kotv_mpv_set_prop_string("ytdl", "no");
-  if (!live && !kotv_mpv_os_win7()) {
+  if (!live) {
     kotv_mpv_set_prop_string("cache", "yes");
   }
 
@@ -205,16 +201,6 @@ int kotv_mpv_desktop_set_rate(double rate) {
 int kotv_mpv_desktop_set_prop(const char* key, const char* val) {
   if (!key || !val) return -1;
   if (strcmp(key, "wid") == 0 || strcmp(key, "android-surface-size") == 0) return 0;
-  if (kotv_mpv_os_win7()) {
-    if (strcmp(key, "vo") == 0 || strcmp(key, "gpu-api") == 0 || strcmp(key, "gpu-context") == 0 ||
-        strcmp(key, "gpu-next") == 0) {
-      return 0;
-    }
-    if (strcmp(key, "hwdec") == 0 && strcmp(val, "dxva2") != 0 && strcmp(val, "dxva2-copy") != 0 &&
-        strcmp(val, "no") != 0) {
-      val = "no";
-    }
-  }
   kotv_lock();
   const int rc = kotv_mpv_loaded() ? kotv_mpv_set_prop_string(key, val) : -1;
   kotv_unlock();
