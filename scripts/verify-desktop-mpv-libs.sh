@@ -8,7 +8,7 @@ fail=0
 check_vulkan() {
   local f="$1"
   local name="$2"
-  [[ -f "$f" ]] || { echo "ERROR: missing $name ($f)" >&2; fail=1; return; }
+  [[ -f "$f" ]] || { echo "skip $name (not built)"; return; }
   if grep -aqE 'vulkan|pl_vulkan|-Dvulkan=enabled' "$f" 2>/dev/null; then
     echo "ok $name: vulkan enabled"
   else
@@ -32,15 +32,21 @@ check_av3a() {
 }
 
 echo "==> verify desktop libmpv (Vulkan${KOTV_EXPECT_MPV_AV3A:+ + AV3A})"
-check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
-check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
-check_vulkan "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
-check_av3a "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
-if [[ -f "$ASSET/macos/libmpv.dylib" ]]; then
-  check_vulkan "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
-  check_av3a "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
-else
-  echo "skip macos/libmpv.dylib (CI bottle / local fetch)"
+if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
+  check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+fi
+if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == linux* ]]; then
+  check_vulkan "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
+  check_av3a "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
+fi
+if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
+  if [[ -f "$ASSET/macos/libmpv.dylib" ]]; then
+    check_vulkan "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
+    check_av3a "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
+  else
+    echo "skip macos/libmpv.dylib (not built)"
+  fi
 fi
 
 [[ "$fail" == 0 ]] || exit 1

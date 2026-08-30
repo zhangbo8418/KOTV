@@ -28,7 +28,7 @@ jobs:
   build-win-amd64:
     runs-on: windows-2022
     needs: [set-tag, build-updater]
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
@@ -76,10 +76,22 @@ jobs:
           name: updater-windows-amd64
           path: cmd/updater
 
-      - name: Fetch desktop libmpv (prebuilt bundle)
+      - name: Install desktop MPV source deps
+        shell: bash
+        run: |
+          choco install nasm -y --no-progress
+          pip install meson ninja
+          export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
+          gcc --version
+          nasm -v
+          meson --version
+
+      - name: Build desktop libmpv (Vulkan + AV3A source)
         shell: bash
         env:
-          KOTV_BUILD_MPV_FROM_SOURCE: "1"
+          KOTV_FETCH_DESKTOP_PLAT: windows
+          KOTV_BUILD_MPV_AV3A: "1"
+          KOTV_MPV_JOBS: "4"
         run: |
           chmod +x scripts/*.sh
           ./scripts/fetch-desktop-mpv-libs.sh
@@ -128,7 +140,7 @@ jobs:
   build-flutter-win7:
     runs-on: windows-2022
     needs: [set-tag, build-updater]
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
@@ -175,6 +187,25 @@ jobs:
         with:
           name: updater-windows-amd64
           path: cmd/updater
+
+      - name: Install desktop MPV source deps
+        shell: bash
+        run: |
+          choco install nasm -y --no-progress
+          pip install meson ninja
+          export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
+          gcc --version
+          nasm -v
+
+      - name: Build desktop libmpv (Vulkan + AV3A source)
+        shell: bash
+        env:
+          KOTV_FETCH_DESKTOP_PLAT: windows
+          KOTV_BUILD_MPV_AV3A: "1"
+          KOTV_MPV_JOBS: "4"
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/fetch-desktop-mpv-libs.sh
 
       - name: Adapt SDK + package Win7
         shell: bash

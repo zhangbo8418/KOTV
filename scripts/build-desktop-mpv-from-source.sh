@@ -93,6 +93,55 @@ build_mpv_macos() {
   echo "built macOS/libmpv.dylib (+ AV3A=$AV3A)"
 }
 
+build_mpv_windows() {
+  need meson
+  need ninja
+  need git
+  need pkg-config
+  if [[ -d "/c/mingw-msvcrt/mingw64/bin" ]]; then
+    export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
+  fi
+  export CC="${CC:-gcc}"
+  export CXX="${CXX:-g++}"
+  if [[ "$AV3A" == "1" ]]; then
+    "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
+  fi
+  mkdir -p "$BUILD_DIR"
+  cd "$BUILD_DIR"
+  if [[ ! -d mpv/.git ]]; then
+    git clone --filter=blob:none --depth 1 "$MPV_REPO" mpv
+    git -C mpv fetch --depth 1 origin "$MPV_COMMIT"
+    git -C mpv checkout -q "$MPV_COMMIT"
+  else
+    git -C mpv fetch --depth 1 origin "$MPV_COMMIT" 2>/dev/null || true
+    git -C mpv checkout -q "$MPV_COMMIT"
+  fi
+  cd mpv
+  rm -rf build
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  meson setup build \
+    -Ddefault_library=shared \
+    -Dlibmpv=true \
+    -Dcplayer=false \
+    -Dmanpage-build=disabled \
+    -Dvulkan=enabled \
+    -Dlua=enabled
+  meson compile -C build -j"$JOBS"
+  local out="$ASSET/windows/mpv-2.dll"
+  local dll=""
+  for cand in build/mpv-2.dll build/libmpv-2.dll build/libmpv.dll; do
+    [[ -f "$cand" ]] && dll="$cand" && break
+  done
+  [[ -n "$dll" ]] || dll="$(find build -maxdepth 2 -name 'mpv-2.dll' -o -name 'libmpv-2.dll' 2>/dev/null | head -1 || true)"
+  [[ -n "$dll" && -f "$dll" ]] || { echo "ERROR: mpv dll not found under build/" >&2; exit 1; }
+  cp -f "$dll" "$out"
+  if [[ "$AV3A" == "1" ]]; then
+    grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" \
+      || { echo "ERROR: mpv-2.dll missing AV3A symbols" >&2; exit 1; }
+  fi
+  echo "built windows/mpv-2.dll (+ AV3A=$AV3A) from $dll"
+}
+
 case "$PLAT" in
   linux)
     build_mpv_linux
@@ -101,9 +150,7 @@ case "$PLAT" in
     build_mpv_macos
     ;;
   windows|win)
-    echo "Windows desktop AV3A source build: use Linux/macOS CI artifacts or set KOTV_MPV_WIN_URL." >&2
-    echo "  MinGW cross-compile of FongMi FFmpeg+mpv is not wired yet." >&2
-    exit 1
+    build_mpv_windows
     ;;
   *)
     echo "usage: $0 {linux|macos|windows}" >&2
@@ -112,4 +159,4 @@ case "$PLAT" in
 esac
 
 chmod +x "$ROOT/scripts/verify-desktop-mpv-libs.sh" 2>/dev/null || true
-KOTV_EXPECT_MPV_AV3A="${AV3A}" "$ROOT/scripts/verify-desktop-mpv-libs.sh"
+KOTV_VERIFY_PLAT="$PLAT" KOTV_EXPECT_MPV_AV3A="${AV3A}" "$ROOT/scripts/verify-desktop-mpv-libs.sh"

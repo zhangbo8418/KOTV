@@ -48,6 +48,15 @@ marker_ok() {
 
 fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
+  if [[ "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
+    if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null; then
+      echo "ok windows/mpv-2.dll (cached AV3A)"
+      return
+    fi
+    echo "==> windows libmpv: source build with AV3A (FongMi FFmpeg + MinGW)"
+    "$ROOT/scripts/build-desktop-mpv-from-source.sh" windows
+    return
+  fi
   marker_ok "$out" 500000 && { echo "ok windows/mpv-2.dll (cached)"; return; }
 
   local url="${KOTV_MPV_WIN_URL:-}"
@@ -86,6 +95,10 @@ fetch_windows() {
 fetch_linux() {
   local out="$ASSET/linux/libmpv.so.2"
   if [[ "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
+    if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null; then
+      echo "ok linux/libmpv.so.2 (cached AV3A)"
+      return
+    fi
     echo "==> linux libmpv: source build with AV3A (FongMi FFmpeg + libarcdav3a)"
     "$ROOT/scripts/build-desktop-mpv-from-source.sh" linux
     return
@@ -124,6 +137,10 @@ fetch_linux() {
 fetch_macos() {
   local out="$ASSET/macos/libmpv.dylib"
   if [[ "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
+    if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null; then
+      echo "ok macOS/libmpv.dylib (cached AV3A)"
+      return
+    fi
     echo "==> macOS libmpv: source build with AV3A (FongMi FFmpeg + libarcdav3a)"
     if [[ "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}" == "x86_64" && "$(uname -m)" == "arm64" ]]; then
       arch -x86_64 "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
@@ -192,9 +209,20 @@ fetch_with_fallback() {
 }
 
 echo "==> fetch desktop libmpv (prebuilt, no local compile) → $ASSET"
-fetch_with_fallback windows fetch_windows
-fetch_with_fallback linux fetch_linux
-fetch_with_fallback macos fetch_macos
+if [[ -n "${KOTV_FETCH_DESKTOP_PLAT:-}" ]]; then
+  case "${KOTV_FETCH_DESKTOP_PLAT}" in
+    windows|win) fetch_with_fallback windows fetch_windows ;;
+    linux) fetch_with_fallback linux fetch_linux ;;
+    macos|darwin) fetch_with_fallback macos fetch_macos ;;
+    *) echo "unknown KOTV_FETCH_DESKTOP_PLAT=${KOTV_FETCH_DESKTOP_PLAT}" >&2; exit 1 ;;
+  esac
+else
+  fetch_with_fallback windows fetch_windows
+  fetch_with_fallback linux fetch_linux
+  fetch_with_fallback macos fetch_macos
+fi
+KOTV_VERIFY_PLAT="${KOTV_VERIFY_PLAT:-${KOTV_FETCH_DESKTOP_PLAT:-}}" \
+KOTV_EXPECT_MPV_AV3A="${KOTV_EXPECT_MPV_AV3A:-${KOTV_BUILD_MPV_AV3A:-}}" \
 "$ROOT/scripts/verify-desktop-mpv-libs.sh" || {
   if [[ "${KOTV_BUILD_MPV_FROM_SOURCE:-}" == "1" || "${KOTV_BUILD_MPV_AV3A:-}" == "1" ]]; then
     echo "WARN: verify failed after fetch; check source build logs"
