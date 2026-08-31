@@ -13,25 +13,73 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 typedef HMODULE mpv_lib_t;
-/* Go 传入 UTF-8 路径；LoadLibraryA 在中文 Windows 上会把路径解成系统 ANSI 而失败。 */
-static HMODULE kotv_load_library_utf8(const char *utf8) {
+static DWORD g_load_last_error;
+static wchar_t *kotv_win_to_wide(const char *s, UINT cp) {
     int n;
     wchar_t *w;
-    HMODULE h;
-    if (!utf8 || !utf8[0])
+    DWORD flags = (cp == CP_UTF8) ? MB_ERR_INVALID_CHARS : 0;
+    if (!s || !s[0])
         return NULL;
-    n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+    n = MultiByteToWideChar(cp, flags, s, -1, NULL, 0);
     if (n <= 0)
         return NULL;
     w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
     if (!w)
         return NULL;
-    if (MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, n) <= 0) {
+    if (MultiByteToWideChar(cp, flags, s, -1, w, n) <= 0) {
         free(w);
         return NULL;
     }
-    h = LoadLibraryW(w);
-    free(w);
+    return w;
+}
+static void kotv_win_set_dll_dir(const wchar_t *wlib) {
+    wchar_t *dir;
+    wchar_t *slash;
+    wchar_t *slash2;
+    if (!wlib)
+        return;
+    {
+        size_t n = wcslen(wlib) + 1;
+        dir = (wchar_t *)malloc(n * sizeof(wchar_t));
+        if (!dir)
+            return;
+        memcpy(dir, wlib, n * sizeof(wchar_t));
+    }
+    slash = wcsrchr(dir, L'\\');
+    slash2 = wcsrchr(dir, L'/');
+    if (slash2 && (!slash || slash2 > slash))
+        slash = slash2;
+    if (slash) {
+        *slash = L'\0';
+        SetDllDirectoryW(dir);
+    }
+    free(dir);
+}
+/* 路径可能是 UTF-8（正确）或系统 ANSI（旧查找）。中文目录下只按 UTF-8 转会 LoadLibrary 失败。 */
+static HMODULE kotv_load_library_utf8(const char *path) {
+    static const UINT cps[] = {CP_UTF8, CP_ACP};
+    HMODULE h = NULL;
+    UINT prev;
+    size_t i;
+    g_load_last_error = 0;
+    if (!path || !path[0])
+        return NULL;
+    prev = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+    for (i = 0; i < sizeof(cps) / sizeof(cps[0]); ++i) {
+        wchar_t *w = kotv_win_to_wide(path, cps[i]);
+        if (!w)
+            continue;
+        kotv_win_set_dll_dir(w);
+        h = LoadLibraryExW(w, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (!h)
+            h = LoadLibraryW(w);
+        if (!h)
+            g_load_last_error = GetLastError();
+        free(w);
+        if (h)
+            break;
+    }
+    SetErrorMode(prev);
     return h;
 }
 #define MPV_OPEN(path) kotv_load_library_utf8(path)
@@ -362,26 +410,6 @@ int kotv_mpv_load(const char *lib_path) {
         return 0;
     if (!lib_path || !lib_path[0])
         return -1;
-#if defined(_WIN32)
-    /* 依赖 DLL 与 libmpv 同目录；中文安装路径需用宽字符 DLL 搜索目录。 */
-    {
-        int n = MultiByteToWideChar(CP_UTF8, 0, lib_path, -1, NULL, 0);
-        if (n > 0) {
-            wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
-            if (w && MultiByteToWideChar(CP_UTF8, 0, lib_path, -1, w, n) > 0) {
-                wchar_t *slash = wcsrchr(w, L'\\');
-                wchar_t *slash2 = wcsrchr(w, L'/');
-                if (slash2 && (!slash || slash2 > slash))
-                    slash = slash2;
-                if (slash) {
-                    *slash = L'\0';
-                    SetDllDirectoryW(w);
-                }
-            }
-            free(w);
-        }
-    }
-#endif
     if (!g_lib) {
         g_lib = MPV_OPEN(lib_path);
         if (!g_lib)
@@ -408,6 +436,14 @@ void kotv_mpv_unload(void) {
 
 int kotv_mpv_loaded(void) {
     return g_mpv && g_lib && (g_hard || (g_render && g_pixels));
+}
+
+unsigned long kotv_mpv_last_load_error(void) {
+#if defined(_WIN32)
+    return (unsigned long)g_load_last_error;
+#else
+    return 0;
+#endif
 }
 
 int kotv_mpv_hard_active(void) {

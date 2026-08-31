@@ -11,6 +11,8 @@ extern "C" {
 int kotv_mpv_load(const char *lib_path);
 void kotv_mpv_unload(void);
 int kotv_mpv_loaded(void);
+/* Windows：最近一次 LoadLibraryW 的 GetLastError；其它平台为 0。 */
+unsigned long kotv_mpv_last_load_error(void);
 /* 须在 mpv_initialize 前设置；变更后 kotv_mpv_reinit_player() 重建实例。 */
 int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec);
 int kotv_mpv_reinit_player(void);

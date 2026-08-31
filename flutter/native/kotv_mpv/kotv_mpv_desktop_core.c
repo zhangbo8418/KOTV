@@ -70,6 +70,13 @@ int kotv_mpv_desktop_init(const char* lib_path) {
   return rc;
 }
 
+void kotv_mpv_desktop_note_opts(int gpu_next, int vulkan) {
+  kotv_lock();
+  g_gpu_next = gpu_next ? 1 : 0;
+  g_vulkan = vulkan ? 1 : 0;
+  kotv_unlock();
+}
+
 /* dispose 只停播：保留 DLL/实例，避免异步 dispose 与下一次 create/open 抢跑卸库。 */
 void kotv_mpv_desktop_release(void) {
   kotv_lock();
@@ -124,7 +131,7 @@ int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
   if (!url || !url[0]) return -21;
   kotv_lock();
 
-  /* 被异步 dispose/shutdown 卸掉时，按缓存路径或重新查找 DLL 自愈。 */
+  /* 被卸掉时按缓存路径自愈；失败返回真实 load rc（不再一律 -20）。 */
   if (!kotv_mpv_loaded()) {
     char path[1024];
     snprintf(path, sizeof(path), "%s", g_lib_path);
@@ -140,30 +147,40 @@ int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
       }
     }
     kotv_mpv_set_preinit_options(gpu_next ? 1 : 0, vulkan ? 1 : 0, hwdec);
-    if (kotv_mpv_load(path) != 0) {
+    int load_rc = kotv_mpv_load(path);
+    if (load_rc != 0 && (gpu_next || vulkan)) {
       kotv_mpv_set_preinit_options(0, 0, hwdec);
-      if (kotv_mpv_load(path) != 0) {
-        kotv_unlock();
-        return -20;
+      load_rc = kotv_mpv_load(path);
+      if (load_rc == 0) {
+        gpu_next = 0;
+        vulkan = 0;
       }
-      gpu_next = 0;
-      vulkan = 0;
     }
+    if (load_rc != 0) {
+      kotv_unlock();
+      return load_rc < 0 ? load_rc : -20;
+    }
+    g_gpu_next = gpu_next ? 1 : 0;
+    g_vulkan = vulkan ? 1 : 0;
   }
 
-  const int opts_changed = (g_gpu_next != (gpu_next ? 1 : 0)) || (g_vulkan != (vulkan ? 1 : 0));
-  g_gpu_next = gpu_next ? 1 : 0;
-  g_vulkan = vulkan ? 1 : 0;
+  const int want_gn = gpu_next ? 1 : 0;
+  const int want_vk = vulkan ? 1 : 0;
+  const int opts_changed = (g_gpu_next != want_gn) || (g_vulkan != want_vk);
+  g_gpu_next = want_gn;
+  g_vulkan = want_vk;
 
   kotv_mpv_set_preinit_options(g_gpu_next, g_vulkan, hwdec);
   if (opts_changed) {
-    if (kotv_mpv_reinit_player() < 0) {
+    int rr = kotv_mpv_reinit_player();
+    if (rr < 0) {
       g_gpu_next = 0;
       g_vulkan = 0;
       kotv_mpv_set_preinit_options(0, 0, hwdec);
-      if (kotv_mpv_reinit_player() < 0) {
+      rr = kotv_mpv_reinit_player();
+      if (rr < 0) {
         kotv_unlock();
-        return -2;
+        return rr;
       }
     }
   } else if (hwdec && hwdec[0]) {

@@ -45,18 +45,42 @@ static void join_path(char* out, size_t cap, const char* dir, const char* rel) {
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+static int utf8_from_wide(const wchar_t* w, char* out, size_t cap) {
+  if (!w || !out || cap == 0) return 0;
+  int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, out, (int)cap, NULL, NULL);
+  return n > 0;
+}
+static int wide_from_utf8(const char* u, wchar_t* out, int cap) {
+  if (!u || !out || cap <= 0) return 0;
+  int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, u, -1, out, cap);
+  return n > 0;
+}
 static int file_exists(const char* p) {
+  wchar_t w[KOTV_PATH_MAX];
   if (!p || !p[0]) return 0;
-  DWORD attr = GetFileAttributesA(p);
-  return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+  if (wide_from_utf8(p, w, KOTV_PATH_MAX)) {
+    DWORD attr = GetFileAttributesW(w);
+    if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) return 1;
+  }
+  /* 兼容误把 ANSI 路径当 UTF-8 传入。 */
+  if (MultiByteToWideChar(CP_ACP, 0, p, -1, w, KOTV_PATH_MAX) > 0) {
+    DWORD attr = GetFileAttributesW(w);
+    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+  }
+  return 0;
 }
 static int exe_dir(char* out, size_t cap) {
-  if (!GetModuleFileNameA(NULL, out, (DWORD)cap)) return 0;
+  wchar_t w[KOTV_PATH_MAX];
+  DWORD n = GetModuleFileNameW(NULL, w, KOTV_PATH_MAX);
+  if (!n || n >= KOTV_PATH_MAX) return 0;
+  if (!utf8_from_wide(w, out, cap)) return 0;
   return dirname_inplace(out);
 }
 static int cwd_dir(char* out, size_t cap) {
-  DWORD n = GetCurrentDirectoryA((DWORD)cap, out);
-  return n > 0 && n < cap;
+  wchar_t w[KOTV_PATH_MAX];
+  DWORD n = GetCurrentDirectoryW(KOTV_PATH_MAX, w);
+  if (!n || n >= KOTV_PATH_MAX) return 0;
+  return utf8_from_wide(w, out, cap);
 }
 static const char* kLeaves[] = {
     "mpv-2.dll",

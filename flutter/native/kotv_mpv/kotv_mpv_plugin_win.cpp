@@ -202,17 +202,25 @@ class KotvMpvPluginWin {
       }
       kotv_mpv_set_preinit_options(gpu_next, vulkan, hwdec.c_str());
       int rc = kotv_mpv_desktop_init(lib);
+      int used_gn = gpu_next;
+      int used_vk = vulkan;
       if (rc != 0 && (gpu_next || vulkan)) {
         kotv_mpv_set_preinit_options(0, 0, hwdec.c_str());
         rc = kotv_mpv_desktop_init(lib);
+        used_gn = 0;
+        used_vk = 0;
       }
-      free(lib);
       if (rc != 0) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "libmpv load failed (rc=%d)", rc);
+        char msg[448];
+        const unsigned long winerr = kotv_mpv_last_load_error();
+        snprintf(msg, sizeof(msg), "libmpv load failed (rc=%d winerr=%lu path=%s)", rc, winerr,
+                 lib ? lib : "");
+        free(lib);
         result->Error("CREATE_FAILED", msg, nullptr);
         return;
       }
+      free(lib);
+      kotv_mpv_desktop_note_opts(used_gn, used_vk);
       StartTick();
       flutter::EncodableMap out;
       out[flutter::EncodableValue("ok")] = flutter::EncodableValue(true);
@@ -259,11 +267,23 @@ class KotvMpvPluginWin {
       }
       const int rc = kotv_mpv_desktop_open(url.c_str(), headers.c_str(), hwdec.c_str(), gpu_next, vulkan, live);
       if (rc < 0) {
-        char msg[96];
+        char msg[160];
         if (rc == -21) {
           snprintf(msg, sizeof(msg), "mpv open failed (empty url)");
         } else if (rc == -20) {
           snprintf(msg, sizeof(msg), "mpv open failed (not loaded)");
+        } else if (rc == -2) {
+          const unsigned long winerr = kotv_mpv_last_load_error();
+          if (winerr != 0) {
+            snprintf(msg, sizeof(msg),
+                     "mpv open failed (LoadLibrary winerr=%lu)", winerr);
+          } else {
+            snprintf(msg, sizeof(msg), "mpv open failed (rc=-2, DLL/bind)");
+          }
+        } else if (rc == -5) {
+          snprintf(msg, sizeof(msg), "mpv open failed (initialize rc=-5)");
+        } else if (rc == -6) {
+          snprintf(msg, sizeof(msg), "mpv open failed (sw render rc=-6)");
         } else if (rc == -1) {
           snprintf(msg, sizeof(msg), "mpv open failed (event queue full)");
         } else {
