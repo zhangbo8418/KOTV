@@ -161,32 +161,56 @@ if (-not (Test-Path -LiteralPath $mpv)) {
 }
 
 Write-Host "==> check mpv deps in: $dir"
+Write-Host "(带 SYS 的是 Windows 系统 DLL，在 System32，不用复制到安装目录)"
 Write-Host ""
 
 $imports = @(Get-PeImports $mpv)
-if ($imports.Count -eq 0) {
-    Write-Warning "PE import parse returned empty (unexpected); still checking closure + vulkan-1.dll"
+$sysImports = @()
+$bundleImports = @()
+$otherImports = @()
+foreach ($dll in ($imports | Where-Object { -not (Test-SystemDll $_) } | Sort-Object)) {
+    if (Test-Win7IncompatibleImport $dll) { $win7Bad += $dll; continue }
+    if (Test-MustBundleDll $dll) { $bundleImports += $dll; continue }
+    if (Test-Path -LiteralPath (Join-Path $dir $dll)) { $otherImports += $dll }
+    else { $sysImports += $dll }
 }
 
-Write-Host "mpv-2.dll direct imports (non-system):"
+Write-Host "=== 需要处理（安装目录） ==="
 $directMissing = @()
-$win7Bad = @()
-foreach ($dll in ($imports | Where-Object { -not (Test-SystemDll $_) } | Sort-Object)) {
-    if (Test-Win7IncompatibleImport $dll) {
-        $win7Bad += $dll
-        Write-Host ("  [WIN7-BLOCK] {0} (Win7 has no SHCORE.dll)" -f $dll)
-        continue
+foreach ($dll in $bundleImports) {
+    if (Test-Path -LiteralPath (Join-Path $dir $dll)) {
+        Write-Host ("  [OK] {0} (随安装包)" -f $dll)
+    } else {
+        Write-Host ("  [缺] {0} (须与 mpv-2.dll 同目录)" -f $dll)
+        $directMissing += $dll
     }
-    if (Test-MustBundleDll $dll) {
-        $mark = if (Test-Path -LiteralPath (Join-Path $dir $dll)) { "OK" } else { "MISSING"; $directMissing += $dll }
-        Write-Host ("  [{0}] {1} (must bundle next to exe)" -f $mark, $dll)
-        continue
-    }
-    $inDir = Test-Path -LiteralPath (Join-Path $dir $dll)
-    $mark = if ($inDir) { "OK" } else { "SYS?" }
-    Write-Host ("  [{0}] {1}" -f $mark, $dll)
 }
-if ($imports.Count -eq 0) { Write-Host "  (none parsed)" }
+foreach ($dll in $win7Bad) {
+    Write-Host ("  [Win7阻断] {0} (Win7 无此系统库，需重编 mpv)" -f $dll)
+}
+if ($bundleImports.Count -eq 0 -and $win7Bad.Count -eq 0) {
+    Write-Host "  (无必须捆绑项；看下方传递依赖)"
+}
+
+if ($sysImports.Count -gt 0) {
+    Write-Host ""
+    Write-Host "=== 系统 DLL（正常，不用管） ==="
+    $sysImports | ForEach-Object { Write-Host ("  [SYS] {0}" -f $_) }
+}
+if ($otherImports.Count -gt 0) {
+    Write-Host ""
+    Write-Host "=== 已在目录的非系统 DLL ==="
+    $otherImports | ForEach-Object { Write-Host ("  [OK] {0}" -f $_) }
+}
+
+# 旧版详细列表（调试用）
+if ($env:KOTV_MPV_DEPS_VERBOSE -eq "1") {
+    Write-Host ""
+    Write-Host "mpv-2.dll direct imports (verbose):"
+    foreach ($dll in ($imports | Where-Object { -not (Test-SystemDll $_) } | Sort-Object)) {
+        Write-Host ("  {0}" -f $dll)
+    }
+}
 
 $placeboImports = $imports | Where-Object { $_ -like "libplacebo*" }
 $placeboFiles = Get-ChildItem -LiteralPath $dir -Filter "libplacebo*.dll" -ErrorAction SilentlyContinue

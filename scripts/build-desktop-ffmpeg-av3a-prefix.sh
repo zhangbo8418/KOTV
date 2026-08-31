@@ -269,7 +269,8 @@ FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
 if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
-  FFMPEG_EXTRA+=(--extra-cflags="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000")
+  # 勿对 FFmpeg 全局 -D_WIN32_WINNT=0x0601：mf_utils 会缺 Win8+ 符号而编不过。
+  FFMPEG_EXTRA+=(--disable-mediafoundation)
 fi
 
 if ! ./configure \

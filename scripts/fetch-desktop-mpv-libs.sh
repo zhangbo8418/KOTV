@@ -24,7 +24,7 @@ fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
-    && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a-win7-v3" ]] \
+    && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a-win7-v4" ]] \
     && windows_siblings_ok; then
     echo "ok windows/mpv-2.dll (cached AV3A + sibling dlls)"
     return
