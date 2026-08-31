@@ -334,7 +334,6 @@ ensure_libplacebo() {
       --libdir=lib \
       -Ddefault_library="$placebo_lib" \
       -Dvulkan="$vk_flag" \
-      -Dd3d11=enabled \
       -Dopengl=disabled \
       -Ddemos=false \
       -Dtests=false \

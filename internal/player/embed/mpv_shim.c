@@ -427,6 +427,7 @@ static int g_vulkan;
 static char g_hwdec_opt[64];
 
 static int init_sw(void);
+static int init_wid(long long win);
 
 static void update_cb(void *ctx) {
     (void)ctx;
