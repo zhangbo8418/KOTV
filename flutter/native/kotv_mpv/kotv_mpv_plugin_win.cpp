@@ -57,9 +57,15 @@ const T* MapGet(const flutter::EncodableMap& m, const char* key) {
 
 #if defined(_WIN32)
 bool KotvIsWindows7() {
+  // 不用 GetVersionExW（MSVC C4996 当错误）；RtlGetVersion 不受清单兼容层影响。
+  using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOW*);
+  HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+  if (!ntdll) return false;
+  auto rtl = reinterpret_cast<RtlGetVersionFn>(GetProcAddress(ntdll, "RtlGetVersion"));
+  if (!rtl) return false;
   OSVERSIONINFOW vi{};
   vi.dwOSVersionInfoSize = sizeof(vi);
-  if (!GetVersionExW(&vi)) return false;
+  if (rtl(&vi) != 0) return false;
   return vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1;
 }
 
