@@ -554,11 +554,20 @@ static void apply_common_opts(mpv_handle *mpv) {
 #if defined(_WIN32)
 /* Win7：现代 vulkan-1.dll / ICD 探测易把 talloc 堆打坏（ta.c canary assert）。 */
 static int kotv_is_windows7(void) {
+    typedef LONG(WINAPI *RtlGetVersionFn)(OSVERSIONINFOW *);
+    HMODULE ntdll;
+    RtlGetVersionFn rtl;
     OSVERSIONINFOW vi;
+    ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (!ntdll)
+        return 0;
+    rtl = (RtlGetVersionFn)(void *)GetProcAddress(ntdll, "RtlGetVersion");
+    if (!rtl)
+        return 0;
     memset(&vi, 0, sizeof(vi));
     vi.dwOSVersionInfoSize = sizeof(vi);
-    /* GetVersionExW：本进程子系统为 6.01 时，在真 Win7 上返回 6.1。 */
-    if (!GetVersionExW(&vi))
+    /* RtlGetVersion：不受清单兼容层影响；真 Win7 为 6.1。 */
+    if (rtl(&vi) != 0)
         return 0;
     return vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1;
 }
