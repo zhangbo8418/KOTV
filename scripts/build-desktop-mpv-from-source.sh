@@ -178,7 +178,8 @@ _harvest_is_system_dll() {
     ws2_32.dll|wsock32.dll|winmm.dll|dwmapi.dll|d3d9.dll|d3d11.dll|d3d12.dll|dxgi.dll|dxva2.dll| \
     opengl32.dll|ntdll.dll|msvcrt.dll|ucrtbase.dll|sechost.dll|rpcrt4.dll|comdlg32.dll|comctl32.dll| \
     imm32.dll|setupapi.dll|cfgmgr32.dll|version.dll|shlwapi.dll|crypt32.dll|bcrypt.dll|iphlpapi.dll| \
-    dnsapi.dll|normaliz.dll|winhttp.dll|wininet.dll|avrt.dll|mfplat.dll|mf.dll|mfreadwrite.dll| \
+    dnsapi.dll|normaliz.dll|winhttp.dll|wininet.dll|avrt.dll|avicap32.dll|ncrypt.dll|secur32.dll| \
+    uxtheme.dll|mfplat.dll|mf.dll|mfreadwrite.dll| \
     msvcp*.dll|vcruntime*.dll|concrt*.dll|api-ms-*|ext-ms-*|kernelbase.dll|userenv.dll| \
     powrprof.dll|wtsapi32.dll|dbghelp.dll|psapi.dll|oleacc.dll) return 0 ;;
   esac
@@ -557,7 +558,7 @@ build_mpv_macos() {
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
     -Dlua=disabled
-  kotv_meson_compile build "libplacebo"
+  kotv_meson_compile build "mpv-macos"
   cp -f build/libmpv.dylib "$ASSET/macos/libmpv.dylib"
   if [[ "$AV3A" == "1" ]]; then
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$ASSET/macos/libmpv.dylib" \
