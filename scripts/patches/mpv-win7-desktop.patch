@@ -1,0 +1,165 @@
+diff -ruN meson.build meson.build
+--- meson.build	2026-08-10 08:02:09
++++ meson.build	2026-08-31 12:23:48
+@@ -331,7 +331,7 @@
+ features += {'posix': posix}
+ features += {'dos-paths': win32, 'win32': win32}
+ 
+-mswin_flags = ['-D_WIN32_WINNT=0x0A00', '-DWINVER=0x0A00', '-DUNICODE',
++mswin_flags = ['-D_WIN32_WINNT=0x0601', '-DWINVER=0x0601', '-DUNICODE',
+                '-DCOBJMACROS', '-DINITGUID', '-DNOMINMAX',
+                '-D_USE_MATH_DEFINES', '-DWIN32_LEAN_AND_MEAN',
+                '-D_CRT_DECLARE_NONSTDC_NAMES', '-D_CRT_NONSTDC_NO_WARNINGS',
+@@ -525,8 +525,6 @@
+                           cc.find_library('imm32'),
+                           cc.find_library('ntdll'),
+                           cc.find_library('ole32'),
+-                          cc.find_library('pathcch'),
+-                          cc.find_library('shcore'),
+                           cc.find_library('user32'),
+                           cc.find_library('uuid'),
+                           cc.find_library('uxtheme'),
+diff -ruN misc/path_utils.c misc/path_utils.c
+--- misc/path_utils.c	2026-08-10 08:02:09
++++ misc/path_utils.c	2026-08-31 12:23:48
+@@ -36,8 +36,10 @@
+ 
+ #if HAVE_DOS_PATHS
+ #include <windows.h>
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+ #include <pathcch.h>
+ #endif
++#endif
+ 
+ bstr mp_basename_bstr(bstr path)
+ {
+@@ -225,8 +227,12 @@
+     *write = '\0';
+     size_t max_size = wcslen(pathw) + 1;
+     wchar_t *pathc = talloc_array(tmp, wchar_t, max_size);
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+     HRESULT hr = PathCchCanonicalizeEx(pathc, max_size, pathw, PATHCCH_ALLOW_LONG_PATHS);
+     result = SUCCEEDED(hr) ? mp_to_utf8(talloc_ctx, pathc) : talloc_strdup(talloc_ctx, path);
++#else
++    result = mp_to_utf8(talloc_ctx, pathw);
++#endif
+ #else
+     result = talloc_strdup(tmp, "");
+     const char *next;
+diff -ruN osdep/io.c osdep/io.c
+--- osdep/io.c	2026-08-10 08:02:09
++++ osdep/io.c	2026-08-31 12:23:48
+@@ -236,6 +236,7 @@
+     return wintime / hns_per_second - win_to_unix_epoch;
+ }
+ 
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+ static bool get_file_ids_win8(HANDLE h, dev_t *dev, ino_t *ino)
+ {
+     FILE_ID_INFO ii;
+@@ -250,6 +251,7 @@
+     memcpy(ino, &ii.FileId, sizeof(*ino));
+     return true;
+ }
++#endif
+ 
+ #if HAVE_UWP
+ static bool get_file_ids(HANDLE h, dev_t *dev, ino_t *ino)
+@@ -313,12 +315,13 @@
+         st.st_size = si.EndOfFile.QuadPart;
+     }
+ 
+-    if (!get_file_ids_win8(h, &st.st_dev, &st.st_ino)) {
+-        // Fall back to the Windows 7 method (also used for FAT in Win8)
+-        if (!get_file_ids(h, &st.st_dev, &st.st_ino)) {
+-            errno = EBADF;
+-            return -1;
+-        }
++    bool ok = false;
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
++    ok = get_file_ids_win8(h, &st.st_dev, &st.st_ino);
++#endif
++    if (!ok && !get_file_ids(h, &st.st_dev, &st.st_ino)) {
++        errno = EBADF;
++        return -1;
+     }
+ 
+     *buf = st;
+diff -ruN osdep/w32_register.c osdep/w32_register.c
+--- osdep/w32_register.c	2026-08-10 08:02:09
++++ osdep/w32_register.c	2026-08-31 12:23:48
+@@ -19,7 +19,9 @@
+ 
+ #include <windows.h>
+ #include <knownfolders.h>
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+ #include <pathcch.h>
++#endif
+ #include <shlobj.h>
+ #include <shlwapi.h>
+ 
+@@ -417,7 +419,18 @@
+     if (size)
+         reg_add_dwr(log, root, KEY_MPV_UNINSTALL, L"EstimatedSize", size / 1024);
+ 
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+     if (SUCCEEDED(PathCchRemoveFileSpec(mpv_path, MP_PATH_MAX)))
++#else
++    {
++        wchar_t *slash = wcsrchr(mpv_path, L'\\');
++        if (!slash)
++            slash = wcsrchr(mpv_path, L'/');
++        if (slash)
++            *slash = L'\0';
++    }
++    if (1)
++#endif
+         reg_add_str(log, root, KEY_MPV_UNINSTALL, L"InstallLocation", mpv_path);
+ 
+     mp_msg(log, MSGL_INFO, "mpv has been successfully registered.\n");
+diff -ruN video/out/w32_common.c video/out/w32_common.c
+--- video/out/w32_common.c	2026-08-10 08:02:09
++++ video/out/w32_common.c	2026-08-31 12:23:48
+@@ -193,7 +193,12 @@
+ 
+ static inline int get_system_metrics(struct vo_w32_state *w32, int metric)
+ {
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN10
+     return GetSystemMetricsForDpi(metric, w32->dpi);
++#else
++    (void)w32;
++    return GetSystemMetrics(metric);
++#endif
+ }
+ 
+ static void adjust_window_rect(struct vo_w32_state *w32, HWND hwnd, RECT *rc)
+@@ -201,8 +206,14 @@
+     if (!w32->opts->border && !IsMaximized(w32->window))
+         return;
+ 
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN10
+     AdjustWindowRectExForDpi(rc, GetWindowLongPtrW(hwnd, GWL_STYLE), 0,
+                              GetWindowLongPtrW(hwnd, GWL_EXSTYLE), w32->dpi);
++#else
++    AdjustWindowRectEx(rc, GetWindowLongPtrW(hwnd, GWL_STYLE), FALSE,
++                       GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
++    (void)w32;
++#endif
+ }
+ 
+ static bool check_windows10_build(DWORD build)
+@@ -648,10 +659,13 @@
+     HDC hdc = NULL;
+     int dpi = 0;
+ 
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+     if (GetDpiForMonitor(w32->monitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY) == S_OK) {
+         dpi = (int)dpiX;
+         MP_VERBOSE(w32, "DPI detected from the new API: %d\n", dpi);
+-    } else if ((hdc = GetDC(NULL))) {
++    } else
++#endif
++    if ((hdc = GetDC(NULL))) {
+         dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+         ReleaseDC(NULL, hdc);
+         MP_VERBOSE(w32, "DPI detected from the old API: %d\n", dpi);

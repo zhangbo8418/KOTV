@@ -43,6 +43,19 @@ verify_mpv_win7_imports() {
   fi
 }
 
+apply_mpv_win7_patches() {
+  local patch="$ROOT/scripts/patches/mpv-win7-desktop.patch"
+  [[ -f "$patch" ]] || { echo "ERROR: missing $patch" >&2; exit 1; }
+  if patch -p0 --forward --batch -d . <"$patch" >/dev/null 2>&1; then
+    echo "ok applied mpv Win7 patches"
+  elif patch -p0 -R --dry-run -d . <"$patch" >/dev/null 2>&1; then
+    echo "ok mpv Win7 patches already applied"
+  else
+    echo "ERROR: failed to apply mpv Win7 patches" >&2
+    exit 1
+  fi
+}
+
 if ! command -v meson >/dev/null 2>&1; then
   for d in \
     "/c/hostedtoolcache/windows/Python/"*"/Scripts" \
@@ -554,12 +567,13 @@ EOF
     git -C mpv checkout -q "$MPV_COMMIT"
   fi
   cd mpv
-  rm -rf build
   if kotv_is_windows_build; then
+    apply_mpv_win7_patches
     export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"
     export CXXFLAGS="${CXXFLAGS:-} $(kotv_windows_mpv_cflags)"
     export LDFLAGS="${LDFLAGS:-} -Wl,--subsystem,windows:6.01"
   fi
+  rm -rf build
   cat >"$BUILD_DIR/meson-native-kotv.ini" <<EOF
 [binaries]
 pkg-config = '$pc_win'
