@@ -173,7 +173,7 @@ class NativeMpvPlayback extends KotvPlayback {
         ],
       );
     }
-    if (kotvIsDesktop() && _textureId != null) {
+    if ((kotvIsDesktop() || kotvIsIOS()) && _textureId != null) {
       return Stack(
         key: ValueKey('kotv_mpv_texture_$_surfaceGeneration'),
         fit: StackFit.expand,

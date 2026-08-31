@@ -8,9 +8,10 @@ import UIKit
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     GeneratedPluginRegistrant.register(with: self)
+    let ok = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     if let controller = window?.rootViewController as? FlutterViewController {
       kotv_mpv_plugin_register_ios(controller.engine)
     }
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    return ok
   }
 }
