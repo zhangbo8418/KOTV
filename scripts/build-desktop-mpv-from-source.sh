@@ -115,7 +115,7 @@ _harvest_copy_tree_dlls() {
   while IFS= read -r f; do
     base="$(basename "$f")"
     case "$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')" in
-      mpv-2.dll|libmpv-2.dll|vulkan-1.dll) continue ;;
+      mpv-2.dll|libmpv-2.dll) continue ;;
     esac
     _harvest_copy_dll "$f" "$dest/$base"
   done < <(find "$src" -maxdepth "$depth" -type f -iname '*.dll' 2>/dev/null)
@@ -135,24 +135,14 @@ harvest_windows_mpv_dlls() {
   done
   _harvest_copy_tree_dlls "$PREFIX" "$dest" 8
 
-  # Win7 桌面包：固定 Vulkan Loader 1.2.x，勿用 CI Vulkan SDK 1.4 的 vulkan-1.dll
-  chmod +x "$ROOT/scripts/ensure-windows-vulkan-loader.sh"
-  eval "$("$ROOT/scripts/ensure-windows-vulkan-loader.sh")"
-  [[ -n "${KOTV_WINDOWS_VULKAN_DLL:-}" && -f "${KOTV_WINDOWS_VULKAN_DLL}" ]] \
-    || { echo "ERROR: Win7 vulkan loader build failed" >&2; exit 1; }
-  _harvest_copy_dll "$KOTV_WINDOWS_VULKAN_DLL" "$dest/vulkan-1.dll"
-
   local vk
   for vk in \
     "${VULKAN_SDK:-}/Bin/vulkan-1.dll" \
     "${VULKAN_SDK:-}/Bin32/vulkan-1.dll"; do
-    [[ -f "$dest/vulkan-1.dll" ]] && break
     [[ -f "$vk" ]] && _harvest_copy_dll "$vk" "$dest/vulkan-1.dll"
   done
-  if [[ ! -f "$dest/vulkan-1.dll" ]]; then
-    vk="$(ls /c/VulkanSDK/*/Bin/vulkan-1.dll 2>/dev/null | tail -1 || true)"
-    [[ -n "$vk" && -f "$vk" ]] && cp -f "$vk" "$dest/vulkan-1.dll"
-  fi
+  vk="$(ls /c/VulkanSDK/*/Bin/vulkan-1.dll 2>/dev/null | tail -1 || true)"
+  [[ -n "$vk" && -f "$vk" && ! -f "$dest/vulkan-1.dll" ]] && cp -f "$vk" "$dest/vulkan-1.dll"
 
   local gcc_bin=""
   local -a search_dirs=()

@@ -241,12 +241,6 @@ $vulkan = Join-Path $dir "vulkan-1.dll"
 Write-Host ""
 if (Test-Path -LiteralPath $vulkan) {
     Write-Host "[OK] vulkan-1.dll"
-    try {
-        $vi = (Get-Item -LiteralPath $vulkan).VersionInfo
-        if ($vi.FileVersion) {
-            Write-Host ("  file version: {0}" -f $vi.FileVersion)
-        }
-    } catch {}
 } else {
     Write-Host "[MISSING] vulkan-1.dll  <-- libplacebo usually needs this (winerr=126)"
 }
