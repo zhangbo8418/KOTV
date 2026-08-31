@@ -56,6 +56,81 @@ apply_mpv_win7_patches() {
   fi
 }
 
+kotv_windows_path() {
+  local p="${1:-}"
+  [[ -n "$p" ]] || return 1
+  p="${p//\\//}"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "$p" 2>/dev/null || printf '%s' "$p"
+  else
+    printf '%s' "$p"
+  fi
+}
+
+# SDK 1.4.313+ 的 Bin/ 常无 vulkan-1.dll（Runtime 单独安装到 System32 或 Helpers）。
+kotv_extract_vulkan_loader_from_exe() {
+  local exe="$1"
+  local tmp="${BUILD_DIR}/vulkan-rt-extract"
+  local cand=""
+  [[ -f "$exe" ]] || return 1
+  rm -rf "$tmp"
+  mkdir -p "$tmp"
+  if command -v 7z >/dev/null 2>&1; then
+    7z x -y "-o$tmp" "$exe" >/dev/null 2>&1 || true
+  elif command -v 7za >/dev/null 2>&1; then
+    7za x -y "-o$tmp" "$exe" >/dev/null 2>&1 || true
+  else
+    return 1
+  fi
+  cand="$(find "$tmp" -name 'vulkan-1.dll' 2>/dev/null | head -1 || true)"
+  [[ -n "$cand" && -f "$cand" ]] || return 1
+  printf '%s' "$cand"
+}
+
+kotv_find_vulkan_loader_dll() {
+  local sdk cand dir rt cache url
+  for sdk in \
+    "$(kotv_windows_path "${VULKAN_SDK:-}" 2>/dev/null || true)" \
+    "$(ls -d /c/VulkanSDK/*/ 2>/dev/null | tail -1 || true)"; do
+    [[ -n "$sdk" ]] || continue
+    sdk="${sdk%/}"
+    for cand in "$sdk/Bin/vulkan-1.dll" "$sdk/Bin32/vulkan-1.dll"; do
+      [[ -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
+    done
+    for dir in "$sdk/Helpers" "$sdk/helpers"; do
+      [[ -d "$dir" ]] || continue
+      for rt in "$dir"/*.exe; do
+        [[ -f "$rt" ]] || continue
+        case "$(basename "$rt" | tr '[:upper:]' '[:lower:]')" in
+          vulkanrt*.exe|*vulkan*runtime*.exe)
+            cand="$(kotv_extract_vulkan_loader_from_exe "$rt" || true)"
+            [[ -n "$cand" && -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
+            if "$rt" /S >/dev/null 2>&1; then
+              [[ -f /c/Windows/System32/vulkan-1.dll ]] && {
+                printf '%s' "/c/Windows/System32/vulkan-1.dll"
+                return 0
+              }
+            fi
+            ;;
+        esac
+      done
+    done
+  done
+  for cand in /c/Windows/System32/vulkan-1.dll /c/WINDOWS/System32/vulkan-1.dll; do
+    [[ -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
+  done
+  cache="${BUILD_DIR}/vulkan-runtime.exe"
+  url="${KOTV_VULKAN_RUNTIME_URL:-https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe}"
+  mkdir -p "$BUILD_DIR"
+  if [[ ! -f "$cache" ]]; then
+    echo "==> fetch vulkan-runtime.exe (SDK Bin has no vulkan-1.dll)" >&2
+    curl -fsSL -o "$cache" "$url" || return 1
+  fi
+  cand="$(kotv_extract_vulkan_loader_from_exe "$cache" || true)"
+  [[ -n "$cand" && -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
+  return 1
+}
+
 if ! command -v meson >/dev/null 2>&1; then
   for d in \
     "/c/hostedtoolcache/windows/Python/"*"/Scripts" \
@@ -136,13 +211,11 @@ harvest_windows_mpv_dlls() {
   _harvest_copy_tree_dlls "$PREFIX" "$dest" 8
 
   local vk
-  for vk in \
-    "${VULKAN_SDK:-}/Bin/vulkan-1.dll" \
-    "${VULKAN_SDK:-}/Bin32/vulkan-1.dll"; do
-    [[ -f "$vk" ]] && _harvest_copy_dll "$vk" "$dest/vulkan-1.dll"
-  done
-  vk="$(ls /c/VulkanSDK/*/Bin/vulkan-1.dll 2>/dev/null | tail -1 || true)"
-  [[ -n "$vk" && -f "$vk" && ! -f "$dest/vulkan-1.dll" ]] && cp -f "$vk" "$dest/vulkan-1.dll"
+  vk="$(kotv_find_vulkan_loader_dll || true)"
+  if [[ -n "$vk" && -f "$vk" ]]; then
+    echo "ok vulkan-1.dll ← $vk"
+    _harvest_copy_dll "$vk" "$dest/vulkan-1.dll"
+  fi
 
   local gcc_bin=""
   local -a search_dirs=()
@@ -165,11 +238,7 @@ harvest_windows_mpv_dlls() {
   search_dirs+=(
     "$PREFIX/bin" "$PREFIX/lib"
     "$BUILD_DIR/libplacebo/build" "$BUILD_DIR/libplacebo/build/src"
-    "${VULKAN_SDK:-}/Bin" "${VULKAN_SDK:-}/Bin32"
   )
-  for vkdir in "${VULKAN_SDK:-}/Bin" "${VULKAN_SDK:-}/Bin32"; do
-    [[ -d "$vkdir" ]] && _harvest_copy_tree_dlls "$vkdir" "$dest" 1
-  done
 
   if command -v objdump >/dev/null 2>&1; then
     local round=0 changed=1 name dllpath
@@ -199,7 +268,8 @@ harvest_windows_mpv_dlls() {
   find "$dest" -maxdepth 1 -type f -iname '*.dll' -printf '  %f\n' 2>/dev/null \
     || find "$dest" -maxdepth 1 -type f -iname '*.dll' | sed 's|.*/||;s|^|  |'
   if [[ ! -f "$dest/vulkan-1.dll" ]]; then
-    echo "ERROR: harvested windows dlls missing vulkan-1.dll (libplacebo/mpv need it on Win7)" >&2
+    echo "ERROR: harvested windows dlls missing vulkan-1.dll (tried SDK Bin, System32, vulkan-runtime.exe)" >&2
+    ls -la /c/VulkanSDK/*/Bin/vulkan-1.dll /c/Windows/System32/vulkan-1.dll 2>/dev/null || true
     exit 1
   fi
   chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
