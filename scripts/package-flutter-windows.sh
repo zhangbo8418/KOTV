@@ -113,7 +113,8 @@ fi
 chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
 "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$RELEASE_DIR"
 if [[ ! -f "$RELEASE_DIR/vulkan-1.dll" ]]; then
-  echo "WARN: vulkan-1.dll 未打进 exe 旁（可依赖系统显卡驱动的 loader）" >&2
+  echo "ERROR: vulkan-1.dll missing next to kotv.exe (required for libplacebo on Win7)" >&2
+  exit 1
 fi
 echo "ok mpv-2.dll + $asset_n sibling dlls staged from assets"
 

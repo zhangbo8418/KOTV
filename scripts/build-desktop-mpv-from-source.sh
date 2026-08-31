@@ -169,6 +169,10 @@ harvest_windows_mpv_dlls() {
   echo "harvested $n dlls → $dest"
   find "$dest" -maxdepth 1 -type f -iname '*.dll' -printf '  %f\n' 2>/dev/null \
     || find "$dest" -maxdepth 1 -type f -iname '*.dll' | sed 's|.*/||;s|^|  |'
+  if [[ ! -f "$dest/vulkan-1.dll" ]]; then
+    echo "ERROR: harvested windows dlls missing vulkan-1.dll (libplacebo/mpv need it on Win7)" >&2
+    exit 1
+  fi
   chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
   "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$dest"
 }

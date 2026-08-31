@@ -2,6 +2,7 @@
 
 #include "mpv_shim.h"
 
+#include <ctype.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -93,25 +94,6 @@ static int kotv_win_file_in_dir(const wchar_t *dir, const wchar_t *name) {
     attr = GetFileAttributesW(path);
     return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
 }
-static int kotv_win_dll_count(const wchar_t *dir) {
-    wchar_t pattern[MAX_PATH];
-    WIN32_FIND_DATAW fd;
-    HANDLE h;
-    int n = 0;
-    if (!dir)
-        return 0;
-    if (_snwprintf(pattern, MAX_PATH, L"%s\\*.dll", dir) <= 0)
-        return 0;
-    h = FindFirstFileW(pattern, &fd);
-    if (h == INVALID_HANDLE_VALUE)
-        return 0;
-    do {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
-            n++;
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    return n;
-}
 static void kotv_win_append_detail(const char *part) {
     size_t n;
     if (!part || !part[0])
@@ -124,18 +106,208 @@ static void kotv_win_append_detail(const char *part) {
     }
     strncat(g_load_detail, part, sizeof(g_load_detail) - strlen(g_load_detail) - 1);
 }
-static void kotv_win_preflight(const char *lib_path) {
-    static const wchar_t *deps[] = {
-        L"libgcc_s_seh-1.dll",
-        L"libstdc++-6.dll",
-        L"libwinpthread-1.dll",
+static int kotv_win_is_system_dll_a(const char *name) {
+    char lower[128];
+    size_t i, n;
+    if (!name || !name[0])
+        return 1;
+    n = strlen(name);
+    if (n >= sizeof(lower))
+        n = sizeof(lower) - 1;
+    for (i = 0; i < n; ++i)
+        lower[i] = (char)tolower((unsigned char)name[i]);
+    lower[n] = '\0';
+    if (strncmp(lower, "api-ms-", 7) == 0 || strncmp(lower, "ext-ms-", 7) == 0)
+        return 1;
+    if (strcmp(lower, "kernel32.dll") == 0 || strcmp(lower, "user32.dll") == 0 ||
+        strcmp(lower, "gdi32.dll") == 0 || strcmp(lower, "advapi32.dll") == 0 ||
+        strcmp(lower, "shell32.dll") == 0 || strcmp(lower, "ole32.dll") == 0 ||
+        strcmp(lower, "oleaut32.dll") == 0 || strcmp(lower, "ws2_32.dll") == 0 ||
+        strcmp(lower, "ntdll.dll") == 0 || strcmp(lower, "msvcrt.dll") == 0 ||
+        strcmp(lower, "ucrtbase.dll") == 0 || strcmp(lower, "vcruntime140.dll") == 0 ||
+        strcmp(lower, "d3d11.dll") == 0 || strcmp(lower, "dxgi.dll") == 0 ||
+        strcmp(lower, "opengl32.dll") == 0)
+        return 1;
+    return 0;
+}
+static int kotv_win_file_exists_ci(const wchar_t *dir, const char *name_a) {
+    wchar_t wname[MAX_PATH];
+    if (!dir || !name_a || !name_a[0])
+        return 0;
+    if (MultiByteToWideChar(CP_ACP, 0, name_a, -1, wname, (int)(sizeof(wname) / sizeof(wname[0]))) <= 0)
+        return 0;
+    return kotv_win_file_in_dir(dir, wname);
+}
+static const BYTE *kotv_win_rva_to_ptr(const IMAGE_NT_HEADERS *nt, const BYTE *base, DWORD rva) {
+    PIMAGE_SECTION_HEADER sec;
+    WORD i;
+    if (!nt || !base || !rva)
+        return NULL;
+    sec = IMAGE_FIRST_SECTION(nt);
+    for (i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++sec) {
+        DWORD va = sec->VirtualAddress;
+        DWORD vs = sec->Misc.VirtualSize;
+        if (rva >= va && rva < va + vs)
+            return base + (rva - va) + sec->PointerToRawData;
+    }
+    return NULL;
+}
+static int kotv_win_try_load_path(const wchar_t *path, DWORD *err) {
+    HMODULE h;
+    UINT prev;
+    if (!path)
+        return 0;
+    prev = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+    h = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!h)
+        h = LoadLibraryW(path);
+    if (!h && err)
+        *err = GetLastError();
+    if (h)
+        FreeLibrary(h);
+    SetErrorMode(prev);
+    return h != NULL;
+}
+static void kotv_win_check_import_table(const IMAGE_NT_HEADERS *nt, const BYTE *base,
+                                        const wchar_t *dir, DWORD rva) {
+    const IMAGE_IMPORT_DESCRIPTOR *imp;
+    if (!rva)
+        return;
+    imp = (const IMAGE_IMPORT_DESCRIPTOR *)kotv_win_rva_to_ptr(nt, base, rva);
+    if (!imp)
+        return;
+    for (; imp->Name; ++imp) {
+        const char *dllname = (const char *)kotv_win_rva_to_ptr(nt, base, imp->Name);
+        char note[160];
+        if (!dllname || kotv_win_is_system_dll_a(dllname))
+            continue;
+        if (kotv_win_file_exists_ci(dir, dllname))
+            continue;
+        snprintf(note, sizeof(note), "import missing: %s", dllname);
+        kotv_win_append_detail(note);
+        if (_strnicmp(dllname, "libplacebo", 10) == 0) {
+            WIN32_FIND_DATAW fd;
+            wchar_t pattern[MAX_PATH];
+            HANDLE fh;
+            if (_snwprintf(pattern, MAX_PATH, L"%s\\libplacebo*.dll", dir) > 0) {
+                fh = FindFirstFileW(pattern, &fd);
+                if (fh != INVALID_HANDLE_VALUE) {
+                    char have[96];
+                    WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, have, (int)sizeof(have), NULL, NULL);
+                    snprintf(note, sizeof(note), "have %s but mpv needs %s", have, dllname);
+                    kotv_win_append_detail(note);
+                    FindClose(fh);
+                }
+            }
+        }
+    }
+}
+static void kotv_win_check_delay_imports(const IMAGE_NT_HEADERS *nt, const BYTE *base,
+                                         const wchar_t *dir, DWORD rva) {
+    const IMAGE_DELAYLOAD_DESCRIPTOR *d;
+    if (!rva)
+        return;
+    d = (const IMAGE_DELAYLOAD_DESCRIPTOR *)kotv_win_rva_to_ptr(nt, base, rva);
+    if (!d)
+        return;
+    for (; d->DllNameRVA; ++d) {
+        const char *dllname = (const char *)kotv_win_rva_to_ptr(nt, base, d->DllNameRVA);
+        char note[160];
+        if (!dllname || kotv_win_is_system_dll_a(dllname))
+            continue;
+        if (kotv_win_file_exists_ci(dir, dllname))
+            continue;
+        snprintf(note, sizeof(note), "delay-import missing: %s", dllname);
+        kotv_win_append_detail(note);
+    }
+}
+static void kotv_win_scan_pe_imports(const wchar_t *pe_path, const wchar_t *dir) {
+    HANDLE hf = INVALID_HANDLE_VALUE;
+    HANDLE hm = NULL;
+    BYTE *view = NULL;
+    IMAGE_DOS_HEADER *dos;
+    IMAGE_NT_HEADERS *nt;
+    if (!pe_path || !dir)
+        return;
+    hf = CreateFileW(pe_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                     FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hf == INVALID_HANDLE_VALUE)
+        return;
+    hm = CreateFileMappingW(hf, NULL, PAGE_READONLY, 0, 0, NULL);
+    if (!hm)
+        goto done;
+    view = (BYTE *)MapViewOfFile(hm, FILE_MAP_READ, 0, 0, 0);
+    if (!view)
+        goto done;
+    dos = (IMAGE_DOS_HEADER *)view;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+        goto done;
+    nt = (IMAGE_NT_HEADERS *)(view + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE)
+        goto done;
+    kotv_win_check_import_table(nt, view, dir,
+                                nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    kotv_win_check_delay_imports(nt, view, dir,
+                                 nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT].VirtualAddress);
+done:
+    if (view)
+        UnmapViewOfFile(view);
+    if (hm)
+        CloseHandle(hm);
+    if (hf != INVALID_HANDLE_VALUE)
+        CloseHandle(hf);
+}
+static void kotv_win_probe_load_chain(const wchar_t *dir) {
+    static const wchar_t *candidates[] = {
+        L"vulkan-1.dll",
+        L"shaderc_shared.dll",
+        L"libshaderc_shared.dll",
+        L"SPIRV-Tools-shared.dll",
         NULL,
     };
+    size_t i;
+    wchar_t path[MAX_PATH];
+    DWORD err;
+    char note[128];
+    SetDllDirectoryW(dir);
+    for (i = 0; candidates[i]; ++i) {
+        if (!kotv_win_file_in_dir(dir, candidates[i])) {
+            if (wcscmp(candidates[i], L"vulkan-1.dll") == 0)
+                kotv_win_append_detail("vulkan-1.dll missing (libplacebo needs it)");
+            continue;
+        }
+        if (_snwprintf(path, MAX_PATH, L"%s\\%s", dir, candidates[i]) <= 0)
+            continue;
+        if (kotv_win_try_load_path(path, &err))
+            continue;
+        WideCharToMultiByte(CP_UTF8, 0, candidates[i], -1, note, (int)sizeof(note), NULL, NULL);
+        snprintf(note + strlen(note), sizeof(note) - strlen(note), " load failed winerr=%lu", (unsigned long)err);
+        kotv_win_append_detail(note);
+    }
+    {
+        WIN32_FIND_DATAW fd;
+        wchar_t pattern[MAX_PATH];
+        HANDLE fh;
+        if (_snwprintf(pattern, MAX_PATH, L"%s\\libplacebo*.dll", dir) > 0) {
+            fh = FindFirstFileW(pattern, &fd);
+            if (fh != INVALID_HANDLE_VALUE) {
+                wchar_t ppath[MAX_PATH];
+                if (_snwprintf(ppath, MAX_PATH, L"%s\\%s", dir, fd.cFileName) > 0 &&
+                    !kotv_win_try_load_path(ppath, &err)) {
+                    char ascii[96];
+                    WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, ascii, (int)sizeof(ascii), NULL, NULL);
+                    snprintf(note, sizeof(note), "%s load failed winerr=%lu", ascii, (unsigned long)err);
+                    kotv_win_append_detail(note);
+                }
+                FindClose(fh);
+            }
+        }
+    }
+}
+static void kotv_win_diagnose(const char *lib_path) {
     wchar_t *wlib;
     wchar_t dir[MAX_PATH];
     wchar_t *slash;
-    size_t i;
-    int dll_n;
     g_load_detail[0] = '\0';
     wlib = kotv_win_to_wide(lib_path, CP_UTF8);
     if (!wlib)
@@ -152,17 +324,12 @@ static void kotv_win_preflight(const char *lib_path) {
         return;
     }
     *slash = L'\0';
-    dll_n = kotv_win_dll_count(dir);
-    for (i = 0; deps[i]; ++i) {
-        char ascii[64];
-        if (kotv_win_file_in_dir(dir, deps[i]))
-            continue;
-        WideCharToMultiByte(CP_UTF8, 0, deps[i], -1, ascii, (int)sizeof(ascii), NULL, NULL);
-        kotv_win_append_detail(ascii);
-    }
-    if (dll_n <= 2)
-        kotv_win_append_detail("install incomplete (only mpv-2.dll? need full package)");
+    kotv_win_scan_pe_imports(wlib, dir);
+    kotv_win_probe_load_chain(dir);
     free(wlib);
+}
+static void kotv_win_preflight(const char *lib_path) {
+    (void)lib_path;
 }
 #define MPV_OPEN(path) kotv_load_library_utf8(path)
 #define MPV_SYM(lib, name) (void *)GetProcAddress(lib, name)
@@ -499,9 +666,10 @@ int kotv_mpv_load(const char *lib_path) {
         g_lib = MPV_OPEN(lib_path);
         if (!g_lib) {
 #if defined(_WIN32)
+            kotv_win_diagnose(lib_path);
             if (!g_load_detail[0] && g_load_last_error == 126)
                 snprintf(g_load_detail, sizeof(g_load_detail),
-                         "dependency DLL missing (winerr=126); reinstall full Win package");
+                         "dependency DLL missing (winerr=126); check vulkan-1.dll / libplacebo version");
 #endif
             return -2;
         }
