@@ -11,7 +11,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#include <flutter/flutter_windows.h>
+#include <flutter_windows.h>
 #endif
 
 #include <flutter/event_channel.h>
@@ -159,8 +159,13 @@ class KotvMpvPluginWin {
     if (FlutterDesktopViewRef view = FlutterDesktopPluginRegistrarGetView(native)) {
       parent_hwnd_ = FlutterDesktopViewGetHWND(view);
     }
-    dpi_scale_ = FlutterDesktopGetDpiScaleFactor(native);
-    if (dpi_scale_ <= 0.0) dpi_scale_ = 1.0;
+    // 与 runner 一致：用 monitor DPI（Flutter 3.19 / Win7 可用）。
+    dpi_scale_ = 1.0;
+    if (parent_hwnd_) {
+      HMONITOR monitor = MonitorFromWindow(parent_hwnd_, MONITOR_DEFAULTTONEAREST);
+      const UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+      if (dpi > 0) dpi_scale_ = static_cast<double>(dpi) / 96.0;
+    }
 #endif
     auto* messenger = engine->messenger();
     method_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
