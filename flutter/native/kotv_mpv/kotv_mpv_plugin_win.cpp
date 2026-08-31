@@ -211,10 +211,17 @@ class KotvMpvPluginWin {
         used_vk = 0;
       }
       if (rc != 0) {
-        char msg[448];
+        char msg[512];
         const unsigned long winerr = kotv_mpv_last_load_error();
-        snprintf(msg, sizeof(msg), "libmpv load failed (rc=%d winerr=%lu path=%s)", rc, winerr,
-                 lib ? lib : "");
+        const char *detail = kotv_mpv_last_load_detail();
+        if (detail && detail[0]) {
+          snprintf(msg, sizeof(msg),
+                   "libmpv load failed (rc=%d winerr=%lu path=%s; %s)",
+                   rc, winerr, lib ? lib : "", detail);
+        } else {
+          snprintf(msg, sizeof(msg), "libmpv load failed (rc=%d winerr=%lu path=%s)",
+                   rc, winerr, lib ? lib : "");
+        }
         free(lib);
         result->Error("CREATE_FAILED", msg, nullptr);
         return;

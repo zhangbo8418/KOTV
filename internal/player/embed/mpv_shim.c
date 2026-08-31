@@ -14,6 +14,7 @@
 #include <windows.h>
 typedef HMODULE mpv_lib_t;
 static DWORD g_load_last_error;
+static char g_load_detail[512];
 static wchar_t *kotv_win_to_wide(const char *s, UINT cp) {
     int n;
     wchar_t *w;
@@ -81,6 +82,87 @@ static HMODULE kotv_load_library_utf8(const char *path) {
     }
     SetErrorMode(prev);
     return h;
+}
+static int kotv_win_file_in_dir(const wchar_t *dir, const wchar_t *name) {
+    wchar_t path[MAX_PATH];
+    DWORD attr;
+    if (!dir || !name || !name[0])
+        return 0;
+    if (_snwprintf(path, MAX_PATH, L"%s\\%s", dir, name) <= 0)
+        return 0;
+    attr = GetFileAttributesW(path);
+    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+static int kotv_win_dll_count(const wchar_t *dir) {
+    wchar_t pattern[MAX_PATH];
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    int n = 0;
+    if (!dir)
+        return 0;
+    if (_snwprintf(pattern, MAX_PATH, L"%s\\*.dll", dir) <= 0)
+        return 0;
+    h = FindFirstFileW(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+            n++;
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return n;
+}
+static void kotv_win_append_detail(const char *part) {
+    size_t n;
+    if (!part || !part[0])
+        return;
+    n = strlen(g_load_detail);
+    if (n > 0 && n < sizeof(g_load_detail) - 2) {
+        g_load_detail[n++] = ',';
+        g_load_detail[n++] = ' ';
+        g_load_detail[n] = '\0';
+    }
+    strncat(g_load_detail, part, sizeof(g_load_detail) - strlen(g_load_detail) - 1);
+}
+static void kotv_win_preflight(const char *lib_path) {
+    static const wchar_t *deps[] = {
+        L"libgcc_s_seh-1.dll",
+        L"libstdc++-6.dll",
+        L"libwinpthread-1.dll",
+        NULL,
+    };
+    wchar_t *wlib;
+    wchar_t dir[MAX_PATH];
+    wchar_t *slash;
+    size_t i;
+    int dll_n;
+    g_load_detail[0] = '\0';
+    wlib = kotv_win_to_wide(lib_path, CP_UTF8);
+    if (!wlib)
+        wlib = kotv_win_to_wide(lib_path, CP_ACP);
+    if (!wlib)
+        return;
+    wcsncpy(dir, wlib, MAX_PATH - 1);
+    dir[MAX_PATH - 1] = L'\0';
+    slash = wcsrchr(dir, L'\\');
+    if (!slash)
+        slash = wcsrchr(dir, L'/');
+    if (!slash) {
+        free(wlib);
+        return;
+    }
+    *slash = L'\0';
+    dll_n = kotv_win_dll_count(dir);
+    for (i = 0; deps[i]; ++i) {
+        char ascii[64];
+        if (kotv_win_file_in_dir(dir, deps[i]))
+            continue;
+        WideCharToMultiByte(CP_UTF8, 0, deps[i], -1, ascii, (int)sizeof(ascii), NULL, NULL);
+        kotv_win_append_detail(ascii);
+    }
+    if (dll_n <= 2)
+        kotv_win_append_detail("install incomplete (only mpv-2.dll? need full package)");
+    free(wlib);
 }
 #define MPV_OPEN(path) kotv_load_library_utf8(path)
 #define MPV_SYM(lib, name) (void *)GetProcAddress(lib, name)
@@ -410,10 +492,19 @@ int kotv_mpv_load(const char *lib_path) {
         return 0;
     if (!lib_path || !lib_path[0])
         return -1;
+#if defined(_WIN32)
+    kotv_win_preflight(lib_path);
+#endif
     if (!g_lib) {
         g_lib = MPV_OPEN(lib_path);
-        if (!g_lib)
+        if (!g_lib) {
+#if defined(_WIN32)
+            if (!g_load_detail[0] && g_load_last_error == 126)
+                snprintf(g_load_detail, sizeof(g_load_detail),
+                         "dependency DLL missing (winerr=126); reinstall full Win package");
+#endif
             return -2;
+        }
         if (bind_symbols() != 0) {
             MPV_CLOSE(g_lib);
             g_lib = NULL;
@@ -443,6 +534,14 @@ unsigned long kotv_mpv_last_load_error(void) {
     return (unsigned long)g_load_last_error;
 #else
     return 0;
+#endif
+}
+
+const char *kotv_mpv_last_load_detail(void) {
+#if defined(_WIN32)
+    return g_load_detail[0] ? g_load_detail : "";
+#else
+    return "";
 #endif
 }
 

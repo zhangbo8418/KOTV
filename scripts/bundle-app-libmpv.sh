@@ -51,10 +51,7 @@ case "$(uname -s)" in
     if [[ -d "$SRC" ]]; then
       while IFS= read -r -d '' f; do
         base="$(basename "$f")"
-        case "$base" in
-          mpv-2.dll|libmpv-2.dll) cp -f "$f" "$DEST/$base" ;;
-          *) [[ -e "$DEST/$base" ]] || cp -f "$f" "$DEST/$base" ;;
-        esac
+        cp -f "$f" "$DEST/$base"
       done < <(find "$SRC" -maxdepth 1 -type f \( -iname '*.dll' -o -iname '*.pdb' \) -print0)
     fi
     if [[ -f "$SRC/mpv-2.dll" ]]; then

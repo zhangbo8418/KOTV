@@ -20,6 +20,13 @@ mkdir -p "$ASSET/windows" "$ASSET/linux" "$ASSET/macos"
 
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 
+kotv_is_windows_build() {
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+  esac
+  [[ "${OS:-}" == "Windows_NT" ]]
+}
+
 if ! command -v meson >/dev/null 2>&1; then
   for d in \
     "/c/hostedtoolcache/windows/Python/"*"/Scripts" \
@@ -128,8 +135,12 @@ harvest_windows_mpv_dlls() {
 
   search_dirs+=(
     "$PREFIX/bin" "$PREFIX/lib"
+    "$BUILD_DIR/libplacebo/build" "$BUILD_DIR/libplacebo/build/src"
     "${VULKAN_SDK:-}/Bin" "${VULKAN_SDK:-}/Bin32"
   )
+  for vkdir in "${VULKAN_SDK:-}/Bin" "${VULKAN_SDK:-}/Bin32"; do
+    [[ -d "$vkdir" ]] && _harvest_copy_tree_dlls "$vkdir" "$dest" 1
+  done
 
   if command -v objdump >/dev/null 2>&1; then
     local round=0 changed=1 name dllpath
@@ -158,10 +169,8 @@ harvest_windows_mpv_dlls() {
   echo "harvested $n dlls → $dest"
   find "$dest" -maxdepth 1 -type f -iname '*.dll' -printf '  %f\n' 2>/dev/null \
     || find "$dest" -maxdepth 1 -type f -iname '*.dll' | sed 's|.*/||;s|^|  |'
-  if ! find "$dest" -maxdepth 1 -iname 'libplacebo*.dll' | grep -q .; then
-    echo "ERROR: harvested windows dlls missing libplacebo*.dll (mpv is linked shared)" >&2
-    exit 1
-  fi
+  chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
+  "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$dest"
 }
 LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.360.1}"
 LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.360.1}"
@@ -185,10 +194,15 @@ ensure_libplacebo() {
   fi
   cd libplacebo
   rm -rf build
+  local placebo_lib=shared
+  if kotv_is_windows_build; then
+    placebo_lib=static
+    echo "==> windows: static libplacebo (fewer sibling DLLs next to mpv-2.dll)"
+  fi
   meson setup build \
     --prefix="$PREFIX" \
     --libdir=lib \
-    -Ddefault_library=shared \
+    -Ddefault_library="$placebo_lib" \
     -Dvulkan=enabled \
     -Dopengl=disabled \
     -Ddemos=false \

@@ -15,21 +15,23 @@ marker_ok() {
 }
 
 windows_siblings_ok() {
-  find "$ASSET/windows" -maxdepth 1 -iname 'libplacebo*.dll' 2>/dev/null | grep -q .
+  [[ -f "$ASSET/windows/mpv-2.dll" ]] || return 1
+  chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
+  "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$ASSET/windows"
 }
 
 fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
-    && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a" ]] \
+    && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a-static-v1" ]] \
     && windows_siblings_ok; then
     echo "ok windows/mpv-2.dll (cached AV3A + sibling dlls)"
     return
   fi
   echo "==> windows libmpv: source build with AV3A (FongMi FFmpeg + MinGW)"
   "$ROOT/scripts/build-desktop-mpv-from-source.sh" windows
-  echo av3a > "$kind_file"
+  echo av3a-static-v1 > "$kind_file"
 }
 
 fetch_linux() {

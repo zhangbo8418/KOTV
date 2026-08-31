@@ -13,6 +13,8 @@ void kotv_mpv_unload(void);
 int kotv_mpv_loaded(void);
 /* Windows：最近一次 LoadLibraryW 的 GetLastError；其它平台为 0。 */
 unsigned long kotv_mpv_last_load_error(void);
+/* Windows：预检/加载失败时的可读说明（线程内静态缓冲）。 */
+const char *kotv_mpv_last_load_detail(void);
 /* 须在 mpv_initialize 前设置；变更后 kotv_mpv_reinit_player() 重建实例。 */
 int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec);
 int kotv_mpv_reinit_player(void);
