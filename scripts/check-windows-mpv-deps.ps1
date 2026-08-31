@@ -1,7 +1,6 @@
-# 检查 mpv-2.dll 依赖（无需 dumpbin / VS）。
+# 检查 mpv-2.dll 及传递依赖（无需 dumpbin / VS）。
 # 用法:
-#   pwsh -File scripts/check-windows-mpv-deps.ps1
-#   pwsh -File scripts/check-windows-mpv-deps.ps1 -Dir "F:\Program Files\KO影视"
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows-mpv-deps.ps1 -Dir "F:\Program Files\KO影视"
 param(
     [string]$Dir = ""
 )
@@ -30,9 +29,11 @@ function Test-SystemDll([string]$Name) {
     $n = $Name.ToLowerInvariant()
     if ($n.StartsWith("api-ms-") -or $n.StartsWith("ext-ms-")) { return $true }
     $sys = @(
-        "kernel32.dll","user32.dll","gdi32.dll","advapi32.dll","shell32.dll","ole32.dll","oleaut32.dll",
-        "ws2_32.dll","ntdll.dll","msvcrt.dll","ucrtbase.dll","vcruntime140.dll","d3d11.dll","dxgi.dll",
-        "opengl32.dll","sechost.dll","rpcrt4.dll","comdlg32.dll","comctl32.dll","shlwapi.dll","crypt32.dll"
+        "kernel32.dll","user32.dll","gdi32.dll","gdiplus.dll","advapi32.dll","shell32.dll","ole32.dll","oleaut32.dll",
+        "ws2_32.dll","winmm.dll","dwmapi.dll","d3d9.dll","d3d11.dll","d3d12.dll","dxgi.dll","dxva2.dll",
+        "opengl32.dll","ntdll.dll","msvcrt.dll","ucrtbase.dll","vcruntime140.dll","vcruntime140_1.dll",
+        "sechost.dll","rpcrt4.dll","comdlg32.dll","comctl32.dll","shlwapi.dll","crypt32.dll","bcrypt.dll",
+        "iphlpapi.dll","setupapi.dll","version.dll","imm32.dll","oleacc.dll","psapi.dll","dbghelp.dll"
     )
     return $sys -contains $n
 }
@@ -47,8 +48,10 @@ function Get-PeImports([string]$Path) {
     $numSections = [BitConverter]::ToUInt16($bytes, $e + 6)
     $optSize = [BitConverter]::ToUInt16($bytes, $e + 20)
     $secOff = $e + 24 + $optSize
-    $importRva = [BitConverter]::ToUInt32($bytes, $e + 24 + 112)
-    $delayRva = [BitConverter]::ToUInt32($bytes, $e + 24 + 192)
+    $opt = $e + 24
+    # DataDirectory[1]=IMPORT @112+8, [13]=DELAY_IMPORT @112+104
+    $importRva = [BitConverter]::ToUInt32($bytes, $opt + 120)
+    $delayRva = [BitConverter]::ToUInt32($bytes, $opt + 216)
 
     function RvaToOffset([uint32]$Rva) {
         for ($i = 0; $i -lt $numSections; $i++) {
@@ -70,7 +73,7 @@ function Get-PeImports([string]$Path) {
         if ($off -lt 0) { return $names }
         $idx = $off
         while ($true) {
-            $nameRva = [BitConverter]::ToUInt32($bytes, $idx)
+            $nameRva = [BitConverter]::ToUInt32($bytes, $idx + 12)
             if ($nameRva -eq 0) { break }
             $no = RvaToOffset $nameRva
             if ($no -ge 0) {
@@ -111,6 +114,32 @@ function Get-PeImports([string]$Path) {
     return ($all | Select-Object -Unique)
 }
 
+function Get-ClosureMissing([string]$RootDir, [string]$StartDll) {
+    $missing = New-Object System.Collections.Generic.List[string]
+    $seen = @{}
+    $queue = @($StartDll)
+    while ($queue.Count -gt 0) {
+        $name = $queue[0]
+        $queue = $queue[1..($queue.Count - 1)]
+        if (-not $name) { continue }
+        $key = $name.ToLowerInvariant()
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+        if (Test-SystemDll $name) { continue }
+        $path = Join-Path $RootDir $name
+        if (-not (Test-Path -LiteralPath $path)) {
+            $missing.Add($name) | Out-Null
+            continue
+        }
+        foreach ($dep in (Get-PeImports $path)) {
+            if (Test-SystemDll $dep) { continue }
+            $dk = $dep.ToLowerInvariant()
+            if (-not $seen.ContainsKey($dk)) { $queue += $dep }
+        }
+    }
+    return ($missing | Select-Object -Unique)
+}
+
 $dir = Get-ExeDir $Dir
 $mpv = Join-Path $dir "mpv-2.dll"
 if (-not (Test-Path -LiteralPath $mpv)) {
@@ -120,25 +149,18 @@ if (-not (Test-Path -LiteralPath $mpv)) {
 Write-Host "==> check mpv deps in: $dir"
 Write-Host ""
 
-$imports = Get-PeImports $mpv
-$missing = @()
-$present = @()
-
-foreach ($dll in ($imports | Sort-Object)) {
-    if (Test-SystemDll $dll) { continue }
-    $path = Join-Path $dir $dll
-    if (Test-Path -LiteralPath $path) {
-        $present += $dll
-    } else {
-        $missing += $dll
-    }
+$imports = @(Get-PeImports $mpv)
+if ($imports.Count -eq 0) {
+    Write-Warning "PE import parse returned empty (unexpected); still checking closure + vulkan-1.dll"
 }
 
-Write-Host "mpv-2.dll imports (non-system):"
+Write-Host "mpv-2.dll direct imports (non-system):"
+$directMissing = @()
 foreach ($dll in ($imports | Where-Object { -not (Test-SystemDll $_) } | Sort-Object)) {
-    $mark = if (Test-Path -LiteralPath (Join-Path $dir $dll)) { "OK" } else { "MISSING" }
+    $mark = if (Test-Path -LiteralPath (Join-Path $dir $dll)) { "OK" } else { "MISSING"; $directMissing += $dll }
     Write-Host ("  [{0}] {1}" -f $mark, $dll)
 }
+if ($imports.Count -eq 0) { Write-Host "  (none parsed)" }
 
 $placeboImports = $imports | Where-Object { $_ -like "libplacebo*" }
 $placeboFiles = Get-ChildItem -LiteralPath $dir -Filter "libplacebo*.dll" -ErrorAction SilentlyContinue
@@ -146,7 +168,7 @@ if ($placeboImports -and $placeboFiles) {
     foreach ($imp in $placeboImports) {
         if (-not (Test-Path -LiteralPath (Join-Path $dir $imp))) {
             Write-Host ""
-            Write-Host "WARN: version name mismatch?"
+            Write-Host "WARN: libplacebo name mismatch"
             Write-Host "  mpv imports : $imp"
             Write-Host "  dir has     : $($placeboFiles.Name -join ', ')"
         }
@@ -154,16 +176,41 @@ if ($placeboImports -and $placeboFiles) {
 }
 
 Write-Host ""
+Write-Host "transitive closure (mpv chain):"
+$closureMissing = @(Get-ClosureMissing $dir "mpv-2.dll")
+if ($closureMissing.Count -eq 0) {
+    Write-Host "  all non-system deps present in folder"
+} else {
+    foreach ($m in ($closureMissing | Sort-Object)) {
+        Write-Host ("  [MISSING] {0}" -f $m)
+    }
+}
+
+$vulkan = Join-Path $dir "vulkan-1.dll"
+Write-Host ""
+if (Test-Path -LiteralPath $vulkan) {
+    Write-Host "[OK] vulkan-1.dll"
+} else {
+    Write-Host "[MISSING] vulkan-1.dll  <-- libplacebo usually needs this (winerr=126)"
+}
+
+Write-Host ""
 Write-Host "dll files in folder:"
 Get-ChildItem -LiteralPath $dir -Filter "*.dll" | ForEach-Object { Write-Host ("  {0}" -f $_.Name) }
 
-if ($missing.Count -gt 0) {
+$allMissing = @($directMissing + $closureMissing) | Select-Object -Unique
+if (-not (Test-Path -LiteralPath $vulkan)) {
+    $allMissing += "vulkan-1.dll"
+}
+$allMissing = $allMissing | Select-Object -Unique
+
+if ($allMissing.Count -gt 0) {
     Write-Host ""
-    Write-Host "MISSING next to mpv-2.dll (likely winerr=126):"
-    $missing | Sort-Object -Unique | ForEach-Object { Write-Host "  $_" }
+    Write-Host "SUMMARY - fix these (likely winerr=126):"
+    $allMissing | Sort-Object | ForEach-Object { Write-Host "  $_" }
     exit 1
 }
 
 Write-Host ""
-Write-Host "==> all non-system imports present in folder"
+Write-Host "==> dependency closure looks complete"
 exit 0
