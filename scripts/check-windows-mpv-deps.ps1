@@ -1,0 +1,169 @@
+# 检查 mpv-2.dll 依赖（无需 dumpbin / VS）。
+# 用法:
+#   pwsh -File scripts/check-windows-mpv-deps.ps1
+#   pwsh -File scripts/check-windows-mpv-deps.ps1 -Dir "F:\Program Files\KO影视"
+param(
+    [string]$Dir = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+function Get-ExeDir {
+    param([string]$Hint)
+    if ($Hint -and (Test-Path -LiteralPath $Hint)) {
+        if ((Get-Item -LiteralPath $Hint).PSIsContainer) { return (Resolve-Path -LiteralPath $Hint).Path }
+        return (Split-Path -Parent (Resolve-Path -LiteralPath $Hint).Path)
+    }
+    $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $candidates = @(
+        (Join-Path $here "..\flutter\build\windows\x64\runner\Release"),
+        (Join-Path $here "..")
+    )
+    foreach ($c in $candidates) {
+        $p = (Resolve-Path -LiteralPath $c -ErrorAction SilentlyContinue)
+        if ($p -and (Test-Path -LiteralPath (Join-Path $p "mpv-2.dll"))) { return $p.Path }
+    }
+    return (Get-Location).Path
+}
+
+function Test-SystemDll([string]$Name) {
+    $n = $Name.ToLowerInvariant()
+    if ($n.StartsWith("api-ms-") -or $n.StartsWith("ext-ms-")) { return $true }
+    $sys = @(
+        "kernel32.dll","user32.dll","gdi32.dll","advapi32.dll","shell32.dll","ole32.dll","oleaut32.dll",
+        "ws2_32.dll","ntdll.dll","msvcrt.dll","ucrtbase.dll","vcruntime140.dll","d3d11.dll","dxgi.dll",
+        "opengl32.dll","sechost.dll","rpcrt4.dll","comdlg32.dll","comctl32.dll","shlwapi.dll","crypt32.dll"
+    )
+    return $sys -contains $n
+}
+
+function Get-PeImports([string]$Path) {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 64) { throw "file too small: $Path" }
+    $e = [BitConverter]::ToInt32($bytes, 0x3c)
+    if ($bytes[$e] -ne 0x50 -or $bytes[$e + 1] -ne 0x45) { throw "not a PE file: $Path" }
+    $magic = [BitConverter]::ToUInt16($bytes, $e + 24)
+    if ($magic -ne 0x20b) { throw "only PE32+ supported (need x64 mpv-2.dll)" }
+    $numSections = [BitConverter]::ToUInt16($bytes, $e + 6)
+    $optSize = [BitConverter]::ToUInt16($bytes, $e + 20)
+    $secOff = $e + 24 + $optSize
+    $importRva = [BitConverter]::ToUInt32($bytes, $e + 24 + 112)
+    $delayRva = [BitConverter]::ToUInt32($bytes, $e + 24 + 192)
+
+    function RvaToOffset([uint32]$Rva) {
+        for ($i = 0; $i -lt $numSections; $i++) {
+            $so = $secOff + ($i * 40)
+            $va = [BitConverter]::ToUInt32($bytes, $so + 12)
+            $vs = [BitConverter]::ToUInt32($bytes, $so + 8)
+            $raw = [BitConverter]::ToUInt32($bytes, $so + 20)
+            if ($Rva -ge $va -and $Rva -lt ($va + $vs)) {
+                return [int]($Rva - $va + $raw)
+            }
+        }
+        return -1
+    }
+
+    function ReadDllNames([uint32]$Rva) {
+        $names = New-Object System.Collections.Generic.List[string]
+        if ($Rva -eq 0) { return $names }
+        $off = RvaToOffset $Rva
+        if ($off -lt 0) { return $names }
+        $idx = $off
+        while ($true) {
+            $nameRva = [BitConverter]::ToUInt32($bytes, $idx)
+            if ($nameRva -eq 0) { break }
+            $no = RvaToOffset $nameRva
+            if ($no -ge 0) {
+                $end = $no
+                while ($end -lt $bytes.Length -and $bytes[$end] -ne 0) { $end++ }
+                $s = [System.Text.Encoding]::ASCII.GetString($bytes, $no, $end - $no)
+                if ($s) { $names.Add($s) | Out-Null }
+            }
+            $idx += 20
+        }
+        return $names
+    }
+
+    function ReadDelayNames([uint32]$Rva) {
+        $names = New-Object System.Collections.Generic.List[string]
+        if ($Rva -eq 0) { return $names }
+        $off = RvaToOffset $Rva
+        if ($off -lt 0) { return $names }
+        $idx = $off
+        while ($true) {
+            $nameRva = [BitConverter]::ToUInt32($bytes, $idx + 4)
+            if ($nameRva -eq 0) { break }
+            $no = RvaToOffset $nameRva
+            if ($no -ge 0) {
+                $end = $no
+                while ($end -lt $bytes.Length -and $bytes[$end] -ne 0) { $end++ }
+                $s = [System.Text.Encoding]::ASCII.GetString($bytes, $no, $end - $no)
+                if ($s) { $names.Add($s) | Out-Null }
+            }
+            $idx += 32
+        }
+        return $names
+    }
+
+    $all = New-Object System.Collections.Generic.List[string]
+    foreach ($n in (ReadDllNames $importRva)) { $all.Add($n) | Out-Null }
+    foreach ($n in (ReadDelayNames $delayRva)) { $all.Add($n) | Out-Null }
+    return ($all | Select-Object -Unique)
+}
+
+$dir = Get-ExeDir $Dir
+$mpv = Join-Path $dir "mpv-2.dll"
+if (-not (Test-Path -LiteralPath $mpv)) {
+    Write-Error "mpv-2.dll not found in: $dir"
+}
+
+Write-Host "==> check mpv deps in: $dir"
+Write-Host ""
+
+$imports = Get-PeImports $mpv
+$missing = @()
+$present = @()
+
+foreach ($dll in ($imports | Sort-Object)) {
+    if (Test-SystemDll $dll) { continue }
+    $path = Join-Path $dir $dll
+    if (Test-Path -LiteralPath $path) {
+        $present += $dll
+    } else {
+        $missing += $dll
+    }
+}
+
+Write-Host "mpv-2.dll imports (non-system):"
+foreach ($dll in ($imports | Where-Object { -not (Test-SystemDll $_) } | Sort-Object)) {
+    $mark = if (Test-Path -LiteralPath (Join-Path $dir $dll)) { "OK" } else { "MISSING" }
+    Write-Host ("  [{0}] {1}" -f $mark, $dll)
+}
+
+$placeboImports = $imports | Where-Object { $_ -like "libplacebo*" }
+$placeboFiles = Get-ChildItem -LiteralPath $dir -Filter "libplacebo*.dll" -ErrorAction SilentlyContinue
+if ($placeboImports -and $placeboFiles) {
+    foreach ($imp in $placeboImports) {
+        if (-not (Test-Path -LiteralPath (Join-Path $dir $imp))) {
+            Write-Host ""
+            Write-Host "WARN: version name mismatch?"
+            Write-Host "  mpv imports : $imp"
+            Write-Host "  dir has     : $($placeboFiles.Name -join ', ')"
+        }
+    }
+}
+
+Write-Host ""
+Write-Host "dll files in folder:"
+Get-ChildItem -LiteralPath $dir -Filter "*.dll" | ForEach-Object { Write-Host ("  {0}" -f $_.Name) }
+
+if ($missing.Count -gt 0) {
+    Write-Host ""
+    Write-Host "MISSING next to mpv-2.dll (likely winerr=126):"
+    $missing | Sort-Object -Unique | ForEach-Object { Write-Host "  $_" }
+    exit 1
+}
+
+Write-Host ""
+Write-Host "==> all non-system imports present in folder"
+exit 0
