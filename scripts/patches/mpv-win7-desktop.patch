@@ -1,6 +1,6 @@
 diff -ruN meson.build meson.build
 --- meson.build	2026-08-10 08:02:09
-+++ meson.build	2026-08-31 12:23:48
++++ meson.build	2026-08-31 13:12:46
 @@ -331,7 +331,7 @@
  features += {'posix': posix}
  features += {'dos-paths': win32, 'win32': win32}
@@ -21,7 +21,7 @@ diff -ruN meson.build meson.build
                            cc.find_library('uxtheme'),
 diff -ruN misc/path_utils.c misc/path_utils.c
 --- misc/path_utils.c	2026-08-10 08:02:09
-+++ misc/path_utils.c	2026-08-31 12:23:48
++++ misc/path_utils.c	2026-08-31 13:12:46
 @@ -36,8 +36,10 @@
  
  #if HAVE_DOS_PATHS
@@ -48,7 +48,7 @@ diff -ruN misc/path_utils.c misc/path_utils.c
      const char *next;
 diff -ruN osdep/io.c osdep/io.c
 --- osdep/io.c	2026-08-10 08:02:09
-+++ osdep/io.c	2026-08-31 12:23:48
++++ osdep/io.c	2026-08-31 13:12:46
 @@ -236,6 +236,7 @@
      return wintime / hns_per_second - win_to_unix_epoch;
  }
@@ -87,7 +87,7 @@ diff -ruN osdep/io.c osdep/io.c
      *buf = st;
 diff -ruN osdep/w32_register.c osdep/w32_register.c
 --- osdep/w32_register.c	2026-08-10 08:02:09
-+++ osdep/w32_register.c	2026-08-31 12:23:48
++++ osdep/w32_register.c	2026-08-31 13:12:46
 @@ -19,7 +19,9 @@
  
  #include <windows.h>
@@ -98,7 +98,31 @@ diff -ruN osdep/w32_register.c osdep/w32_register.c
  #include <shlobj.h>
  #include <shlwapi.h>
  
-@@ -417,7 +419,18 @@
+@@ -205,8 +207,23 @@
+     LPWSTR shortcut_path = NULL;
+     LPWSTR programs_path = NULL;
+     if (SUCCEEDED(SHGetKnownFolderPath(&FOLDERID_Programs, 0, NULL, &programs_path))) {
++#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+         PathAllocCombine(programs_path, MPV_NAME L".lnk",
+                          PATHCCH_ALLOW_LONG_PATHS, &shortcut_path);
++#else
++        {
++            const wchar_t *leaf = MPV_NAME L".lnk";
++            size_t need = wcslen(programs_path) + wcslen(leaf) + 2;
++            shortcut_path = CoTaskMemAlloc(need * sizeof(wchar_t));
++            if (shortcut_path) {
++                int n = _snwprintf(shortcut_path, need, L"%s\%s", programs_path, leaf);
++                if (n < 0 || (size_t)n >= need) {
++                    CoTaskMemFree(shortcut_path);
++                    shortcut_path = NULL;
++                }
++            }
++        }
++#endif
+     } else {
+         mp_msg(log, MSGL_ERR, "Failed to get Programs folder path.\n");
+     }
+@@ -417,7 +434,18 @@
      if (size)
          reg_add_dwr(log, root, KEY_MPV_UNINSTALL, L"EstimatedSize", size / 1024);
  
@@ -119,7 +143,7 @@ diff -ruN osdep/w32_register.c osdep/w32_register.c
      mp_msg(log, MSGL_INFO, "mpv has been successfully registered.\n");
 diff -ruN video/out/w32_common.c video/out/w32_common.c
 --- video/out/w32_common.c	2026-08-10 08:02:09
-+++ video/out/w32_common.c	2026-08-31 12:23:48
++++ video/out/w32_common.c	2026-08-31 13:12:46
 @@ -193,7 +193,12 @@
  
  static inline int get_system_metrics(struct vo_w32_state *w32, int metric)
