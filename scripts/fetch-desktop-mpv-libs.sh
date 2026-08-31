@@ -24,14 +24,14 @@ fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
-    && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a-static-v2" ]] \
+    && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a-win7-v3" ]] \
     && windows_siblings_ok; then
     echo "ok windows/mpv-2.dll (cached AV3A + sibling dlls)"
     return
   fi
   echo "==> windows libmpv: source build with AV3A (FongMi FFmpeg + MinGW)"
   "$ROOT/scripts/build-desktop-mpv-from-source.sh" windows
-  echo av3a-static-v1 > "$kind_file"
+  echo av3a-win7-v3 > "$kind_file"
 }
 
 fetch_linux() {

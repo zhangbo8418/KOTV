@@ -33,9 +33,23 @@ function Test-SystemDll([string]$Name) {
         "ws2_32.dll","winmm.dll","dwmapi.dll","d3d9.dll","d3d11.dll","d3d12.dll","dxgi.dll","dxva2.dll",
         "opengl32.dll","ntdll.dll","msvcrt.dll","ucrtbase.dll","vcruntime140.dll","vcruntime140_1.dll",
         "sechost.dll","rpcrt4.dll","comdlg32.dll","comctl32.dll","shlwapi.dll","crypt32.dll","bcrypt.dll",
-        "iphlpapi.dll","setupapi.dll","version.dll","imm32.dll","oleacc.dll","psapi.dll","dbghelp.dll"
+        "iphlpapi.dll","setupapi.dll","version.dll","imm32.dll","oleacc.dll","psapi.dll","dbghelp.dll",
+        "avicap32.dll","avrt.dll","ncrypt.dll","secur32.dll","uxtheme.dll","dnsapi.dll","normaliz.dll",
+        "winhttp.dll","wininet.dll","mfplat.dll","mf.dll","mfreadwrite.dll","powrprof.dll","wtsapi.dll",
+        "cfgmgr32.dll","userenv.dll","kernelbase.dll"
     )
     return $sys -contains $n
+}
+
+function Test-MustBundleDll([string]$Name) {
+    $n = $Name.ToLowerInvariant()
+    return ($n -eq "vulkan-1.dll")
+}
+
+function Test-Win7IncompatibleImport([string]$Name) {
+    $n = $Name.ToLowerInvariant()
+    # Win7 无 SHCORE.dll（Win8+）；mpv 若 import 它会在 Win7 上 winerr=126
+    return ($n -eq "shcore.dll")
 }
 
 function Get-PeImports([string]$Path) {
@@ -156,8 +170,20 @@ if ($imports.Count -eq 0) {
 
 Write-Host "mpv-2.dll direct imports (non-system):"
 $directMissing = @()
+$win7Bad = @()
 foreach ($dll in ($imports | Where-Object { -not (Test-SystemDll $_) } | Sort-Object)) {
-    $mark = if (Test-Path -LiteralPath (Join-Path $dir $dll)) { "OK" } else { "MISSING"; $directMissing += $dll }
+    if (Test-Win7IncompatibleImport $dll) {
+        $win7Bad += $dll
+        Write-Host ("  [WIN7-BLOCK] {0} (Win7 has no SHCORE.dll)" -f $dll)
+        continue
+    }
+    if (Test-MustBundleDll $dll) {
+        $mark = if (Test-Path -LiteralPath (Join-Path $dir $dll)) { "OK" } else { "MISSING"; $directMissing += $dll }
+        Write-Host ("  [{0}] {1} (must bundle next to exe)" -f $mark, $dll)
+        continue
+    }
+    $inDir = Test-Path -LiteralPath (Join-Path $dir $dll)
+    $mark = if ($inDir) { "OK" } else { "SYS?" }
     Write-Host ("  [{0}] {1}" -f $mark, $dll)
 }
 if ($imports.Count -eq 0) { Write-Host "  (none parsed)" }
@@ -199,10 +225,13 @@ Write-Host "dll files in folder:"
 Get-ChildItem -LiteralPath $dir -Filter "*.dll" | ForEach-Object { Write-Host ("  {0}" -f $_.Name) }
 
 $allMissing = @($directMissing + $closureMissing) | Select-Object -Unique
-if (-not (Test-Path -LiteralPath $vulkan)) {
-    $allMissing += "vulkan-1.dll"
+if ($win7Bad.Count -gt 0) {
+    Write-Host ""
+    Write-Host "WIN7 BLOCKER: mpv-2.dll imports SHCORE.dll (Windows 8+ only)."
+    Write-Host "  On Win7 LoadLibrary fails with winerr=126 even if vulkan-1.dll is present."
+    Write-Host "  Need a Win7-targeted mpv rebuild (_WIN32_WINNT=0x0601)."
+    exit 2
 }
-$allMissing = $allMissing | Select-Object -Unique
 
 if ($allMissing.Count -gt 0) {
     Write-Host ""

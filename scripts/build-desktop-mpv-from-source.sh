@@ -27,6 +27,22 @@ kotv_is_windows_build() {
   [[ "${OS:-}" == "Windows_NT" ]]
 }
 
+# 桌面 libmpv 须能在 Win7 加载：目标子系统 6.01，避免 import SHCORE.dll（Win8+）。
+kotv_windows_mpv_cflags() {
+  printf '%s' "-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000"
+}
+
+verify_mpv_win7_imports() {
+  local dll="$1"
+  [[ -f "$dll" ]] || return 0
+  if command -v objdump >/dev/null 2>&1; then
+    if objdump -p "$dll" 2>/dev/null | awk '/DLL Name:/{print $3}' | tr '[:upper:]' '[:lower:]' | grep -qx 'shcore.dll'; then
+      echo "ERROR: $dll imports SHCORE.dll (Win7 incompatible; rebuild with kotv_windows_mpv_cflags)" >&2
+      exit 1
+    fi
+  fi
+}
+
 if ! command -v meson >/dev/null 2>&1; then
   for d in \
     "/c/hostedtoolcache/windows/Python/"*"/Scripts" \
@@ -182,8 +198,12 @@ LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.360.1}"
 ensure_libplacebo() {
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   if pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo 2>/dev/null; then
-    echo "ok libplacebo $(pkg-config --modversion libplacebo)"
-    return
+    if kotv_is_windows_build && [[ ! -f "$PREFIX/lib/libplacebo.a" ]]; then
+      echo "==> windows: prefix libplacebo is not static; rebuilding for Win7 mpv"
+    else
+      echo "ok libplacebo $(pkg-config --modversion libplacebo)"
+      return
+    fi
   fi
   echo "==> build libplacebo $LIBPLACEBO_TAG (need >= $LIBPLACEBO_MIN)"
   need meson
@@ -202,15 +222,28 @@ ensure_libplacebo() {
   if kotv_is_windows_build; then
     placebo_lib=static
     echo "==> windows: static libplacebo (fewer sibling DLLs next to mpv-2.dll)"
+    export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"
+    export CXXFLAGS="${CXXFLAGS:-} $(kotv_windows_mpv_cflags)"
+    meson setup build \
+      --prefix="$PREFIX" \
+      --libdir=lib \
+      -Ddefault_library="$placebo_lib" \
+      -Dvulkan=enabled \
+      -Dopengl=disabled \
+      -Ddemos=false \
+      -Dtests=false \
+      -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
+      -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
+  else
+    meson setup build \
+      --prefix="$PREFIX" \
+      --libdir=lib \
+      -Ddefault_library="$placebo_lib" \
+      -Dvulkan=enabled \
+      -Dopengl=disabled \
+      -Ddemos=false \
+      -Dtests=false
   fi
-  meson setup build \
-    --prefix="$PREFIX" \
-    --libdir=lib \
-    -Ddefault_library="$placebo_lib" \
-    -Dvulkan=enabled \
-    -Dopengl=disabled \
-    -Ddemos=false \
-    -Dtests=false
   meson compile -C build -j"$JOBS"
   meson install -C build
   # 某些平台仍会装到 lib/<triplet>/pkgconfig；一并加入 PATH
@@ -282,23 +315,47 @@ dependency_names = harfbuzz
 EOF
   cd libass
   rm -rf build
-  meson setup build \
-    --prefix="$PREFIX" \
-    --libdir=lib \
-    -Ddefault_library=static \
-    -Dfontconfig=disabled \
-    -Dlibunibreak=disabled \
-    -Dasm=disabled \
-    --force-fallback-for=freetype2,fribidi,harfbuzz \
-    -Dfreetype2:harfbuzz=disabled \
-    -Dharfbuzz:tests=disabled \
-    -Dharfbuzz:cairo=disabled \
-    -Dharfbuzz:gobject=disabled \
-    -Dharfbuzz:glib=disabled \
-    -Dharfbuzz:freetype=disabled \
-    -Dfribidi:docs=false \
-    -Dfribidi:bin=false \
-    -Dfribidi:tests=false
+  if kotv_is_windows_build; then
+    export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"
+    export CXXFLAGS="${CXXFLAGS:-} $(kotv_windows_mpv_cflags)"
+    meson setup build \
+      --prefix="$PREFIX" \
+      --libdir=lib \
+      -Ddefault_library=static \
+      -Dfontconfig=disabled \
+      -Dlibunibreak=disabled \
+      -Dasm=disabled \
+      --force-fallback-for=freetype2,fribidi,harfbuzz \
+      -Dfreetype2:harfbuzz=disabled \
+      -Dharfbuzz:tests=disabled \
+      -Dharfbuzz:cairo=disabled \
+      -Dharfbuzz:gobject=disabled \
+      -Dharfbuzz:glib=disabled \
+      -Dharfbuzz:freetype=disabled \
+      -Dfribidi:docs=false \
+      -Dfribidi:bin=false \
+      -Dfribidi:tests=false \
+      -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
+      -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
+  else
+    meson setup build \
+      --prefix="$PREFIX" \
+      --libdir=lib \
+      -Ddefault_library=static \
+      -Dfontconfig=disabled \
+      -Dlibunibreak=disabled \
+      -Dasm=disabled \
+      --force-fallback-for=freetype2,fribidi,harfbuzz \
+      -Dfreetype2:harfbuzz=disabled \
+      -Dharfbuzz:tests=disabled \
+      -Dharfbuzz:cairo=disabled \
+      -Dharfbuzz:gobject=disabled \
+      -Dharfbuzz:glib=disabled \
+      -Dharfbuzz:freetype=disabled \
+      -Dfribidi:docs=false \
+      -Dfribidi:bin=false \
+      -Dfribidi:tests=false
+  fi
   meson compile -C build -j"$JOBS"
   meson install -C build
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
@@ -498,6 +555,11 @@ EOF
   fi
   cd mpv
   rm -rf build
+  if kotv_is_windows_build; then
+    export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"
+    export CXXFLAGS="${CXXFLAGS:-} $(kotv_windows_mpv_cflags)"
+    export LDFLAGS="${LDFLAGS:-} -Wl,--subsystem,windows:6.01"
+  fi
   cat >"$BUILD_DIR/meson-native-kotv.ini" <<EOF
 [binaries]
 pkg-config = '$pc_win'
@@ -506,14 +568,27 @@ pkgconfig = '$pc_win'
 [built-in options]
 pkg_config_path = '$pkg_win'
 EOF
-  meson setup build \
-    --native-file "$BUILD_DIR/meson-native-kotv.ini" \
-    -Ddefault_library=shared \
-    -Dlibmpv=true \
-    -Dcplayer=false \
-    -Dmanpage-build=disabled \
-    -Dvulkan=enabled \
-    -Dlua=disabled
+  if kotv_is_windows_build; then
+    meson setup build \
+      --native-file "$BUILD_DIR/meson-native-kotv.ini" \
+      -Ddefault_library=shared \
+      -Dlibmpv=true \
+      -Dcplayer=false \
+      -Dmanpage-build=disabled \
+      -Dvulkan=enabled \
+      -Dlua=disabled \
+      -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
+      -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
+  else
+    meson setup build \
+      --native-file "$BUILD_DIR/meson-native-kotv.ini" \
+      -Ddefault_library=shared \
+      -Dlibmpv=true \
+      -Dcplayer=false \
+      -Dmanpage-build=disabled \
+      -Dvulkan=enabled \
+      -Dlua=disabled
+  fi
   meson compile -C build -j"$JOBS"
   local out="$ASSET/windows/mpv-2.dll"
   local dll=""
@@ -523,6 +598,7 @@ EOF
   [[ -n "$dll" ]] || dll="$(find build -maxdepth 2 -name 'mpv-2.dll' -o -name 'libmpv-2.dll' 2>/dev/null | head -1 || true)"
   [[ -n "$dll" && -f "$dll" ]] || { echo "ERROR: mpv dll not found under build/" >&2; exit 1; }
   cp -f "$dll" "$out"
+  verify_mpv_win7_imports "$out"
   harvest_windows_mpv_dlls
   if [[ "$AV3A" == "1" ]]; then
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" \
