@@ -61,8 +61,8 @@ clone_ffmpeg() {
   git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
 }
 
-# v2: libarcdav3a 必须 -fPIC（链进 libmpv.so）
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v2"
+# v3: macOS 禁 x86asm（Xcode 15+ ld 拒 nasm 无 platform 目标：unknown platform）
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v3"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -271,6 +271,9 @@ if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
   # 勿对 FFmpeg 全局 -D_WIN32_WINNT=0x0601：mf_utils 会缺 Win8+ 符号而编不过。
   FFMPEG_EXTRA+=(--disable-mediafoundation)
+elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+  # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
+  FFMPEG_EXTRA+=(--disable-x86asm)
 fi
 
 if ! ./configure \
