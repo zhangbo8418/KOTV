@@ -269,9 +269,17 @@ int kotv_mpv_desktop_take_frame(uint8_t* rgba, int cap, int* w, int* h) {
 }
 
 static int rgba_probe(int* w, int* h) {
+  /* 只探测尺寸：用完整帧缓冲容量路径，避免先 render 再因 out_cap 过小丢弃。 */
   if (!w || !h) return 0;
-  uint8_t tmp[16 * 16 * 4];
-  return kotv_mpv_take_frame(tmp, (int)sizeof(tmp), w, h);
+  *w = 0;
+  *h = 0;
+  {
+    int64_t vw = 0;
+    int64_t vh = 0;
+    if (kotv_mpv_get_prop_int64("dwidth", &vw) >= 0 && vw > 0) *w = (int)vw;
+    if (kotv_mpv_get_prop_int64("dheight", &vh) >= 0 && vh > 0) *h = (int)vh;
+  }
+  return (*w > 0 && *h > 0) ? 1 : 0;
 }
 
 void kotv_mpv_desktop_set_event_cb(kotv_mpv_desktop_event_cb cb, void* user) {

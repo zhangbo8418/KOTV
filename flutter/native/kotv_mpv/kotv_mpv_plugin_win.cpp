@@ -195,6 +195,16 @@ class KotvMpvPluginWin {
         if (auto* v = MapGet<bool>(*args, "gpuNext")) gpu_next = *v ? 1 : 0;
         if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
       }
+      // Win7：禁止 vulkan/gpu-next（与 mpv_shim 一致，避免 talloc canary）
+      {
+        OSVERSIONINFOW vi{};
+        vi.dwOSVersionInfoSize = sizeof(vi);
+        if (GetVersionExW(&vi) && vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1) {
+          gpu_next = 0;
+          vulkan = 0;
+          if (hwdec == "d3d11va") hwdec = "dxva2";
+        }
+      }
       char* lib = kotv_find_libmpv_path();
       if (!lib) {
         result->Error("NO_LIBMPV", "libmpv not found; put mpv-2.dll next to kotv.exe", nullptr);
@@ -270,6 +280,15 @@ class KotvMpvPluginWin {
         if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
         if (auto* h = MapGet<flutter::EncodableMap>(*args, "headers")) {
           headers = HeadersToMultiline(h);
+        }
+      }
+      {
+        OSVERSIONINFOW vi{};
+        vi.dwOSVersionInfoSize = sizeof(vi);
+        if (GetVersionExW(&vi) && vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1) {
+          gpu_next = 0;
+          vulkan = 0;
+          if (hwdec == "d3d11va") hwdec = "dxva2";
         }
       }
       const int rc = kotv_mpv_desktop_open(url.c_str(), headers.c_str(), hwdec.c_str(), gpu_next, vulkan, live);

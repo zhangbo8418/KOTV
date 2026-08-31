@@ -520,15 +520,32 @@ static void apply_common_opts(mpv_handle *mpv) {
     p_set_option_string(mpv, "osc", "no");
 }
 
+#if defined(_WIN32)
+/* Win7：现代 vulkan-1.dll / ICD 探测易把 talloc 堆打坏（ta.c canary assert）。 */
+static int kotv_is_windows7(void) {
+    OSVERSIONINFOW vi;
+    memset(&vi, 0, sizeof(vi));
+    vi.dwOSVersionInfoSize = sizeof(vi);
+    /* GetVersionExW：本进程子系统为 6.01 时，在真 Win7 上返回 6.1。 */
+    if (!GetVersionExW(&vi))
+        return 0;
+    return vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1;
+}
+#else
+static int kotv_is_windows7(void) { return 0; }
+#endif
+
 static void apply_gpu_render_opts(mpv_handle *mpv, int sw_vo) {
     if (g_hwdec_opt[0])
         p_set_option_string(mpv, "hwdec", g_hwdec_opt);
     if (sw_vo) {
+        /* 桌面 Texture 软渲：只走 vo=libmpv，切勿设 gpu-api=vulkan。
+         * 否则 libplacebo 会在 initialize 时拉 Vulkan，Win7 上常见 talloc canary。 */
         p_set_option_string(mpv, "vo", "libmpv");
-    } else {
-        p_set_option_string(mpv, "vo", g_gpu_next ? "gpu-next" : "gpu");
-        p_set_option_string(mpv, "gpu-context", "auto");
+        return;
     }
+    p_set_option_string(mpv, "vo", g_gpu_next ? "gpu-next" : "gpu");
+    p_set_option_string(mpv, "gpu-context", "auto");
     if (g_vulkan)
         p_set_option_string(mpv, "gpu-api", "vulkan");
     else
@@ -536,6 +553,10 @@ static void apply_gpu_render_opts(mpv_handle *mpv, int sw_vo) {
 }
 
 int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec) {
+    if (kotv_is_windows7()) {
+        gpu_next = 0;
+        vulkan = 0;
+    }
     g_gpu_next = gpu_next ? 1 : 0;
     g_vulkan = vulkan ? 1 : 0;
     g_hwdec_opt[0] = '\0';
@@ -545,10 +566,12 @@ int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec) {
 }
 
 int kotv_mpv_reinit_player(void) {
+    int was_hard;
     if (!g_lib || !p_create)
         return -1;
+    was_hard = g_hard;
     destroy_player();
-    if (g_hard)
+    if (was_hard)
         return -2;
     return init_sw();
 }

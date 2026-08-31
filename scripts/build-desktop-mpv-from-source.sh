@@ -666,14 +666,16 @@ EOF
   if kotv_is_windows_build; then
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \
+      --buildtype=release \
+      -Db_ndebug=true \
       -Ddefault_library=shared \
       -Dlibmpv=true \
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan=enabled \
       -Dlua=disabled \
-      -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
-      -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
+      -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']" \
+      -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']"
   else
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \

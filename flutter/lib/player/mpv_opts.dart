@@ -29,10 +29,17 @@ class KotvMpvOpts {
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
+    var gpuNext = '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true';
+    var vulkan = '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true';
+    // Win7：Vulkan/gpu-next 易在 libmpv 初始化时触发 talloc canary 断言。
+    if (kotvIsWindows7()) {
+      gpuNext = false;
+      vulkan = false;
+    }
     return KotvMpvOpts(
       decodeMode: decode.isEmpty ? 'auto' : decode,
-      gpuNext: '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true',
-      vulkan: '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true',
+      gpuNext: gpuNext,
+      vulkan: vulkan,
       conf: '${settings['mpvConf'] ?? ''}',
     );
   }
@@ -86,7 +93,8 @@ class KotvMpvOpts {
     if (gpuNext) {
       out['vo'] = 'gpu-next';
     }
-    if (vulkan && !kotvIsAndroid()) {
+    // 桌面 Texture 软渲由原生固定 vo=libmpv；Win7 禁止强制 vulkan。
+    if (vulkan && !kotvIsAndroid() && !kotvIsWindows7()) {
       out['gpu-api'] = 'vulkan';
     }
     if (!live) {
