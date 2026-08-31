@@ -59,7 +59,7 @@ verify_mpv_win7_imports() {
 apply_mpv_win7_patches() {
   local patch="$ROOT/scripts/patches/mpv-win7-desktop.patch"
   [[ -f "$patch" ]] || { echo "ERROR: missing $patch" >&2; exit 1; }
-  if patch -p0 --forward --batch -d . <"$patch" >/dev/null 2>&1; then
+  if patch -p0 --forward --batch -d . <"$patch"; then
     echo "ok applied mpv Win7 patches"
   elif patch -p0 -R --dry-run -d . <"$patch" >/dev/null 2>&1; then
     echo "ok mpv Win7 patches already applied"
