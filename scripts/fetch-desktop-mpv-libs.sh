@@ -25,7 +25,7 @@ fetch_windows() {
   local kind_file="$ASSET/windows/.kind"
   local want_kind="av3a-vulkan-v11"
   if [[ "${KOTV_WIN7:-}" == "1" || "${KOTV_MPV_WIN7:-}" == "1" ]]; then
-    want_kind="av3a-win7-d3d11-v14"
+    want_kind="av3a-win7-novk-v15"
     export KOTV_MPV_WIN7=1
   fi
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \

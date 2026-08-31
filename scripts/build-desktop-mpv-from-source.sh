@@ -708,12 +708,8 @@ EOF
   if kotv_is_windows_build; then
     local mpv_vk=enabled
     kotv_is_mpv_win7_build && mpv_vk=disabled
-        if kotv_is_mpv_win7_build; then
-      echo "==> mpv Win7 build: vulkan=disabled (D3D11 vo=gpu + dxva2 only)"
-    fi
-    local -a mpv_extra=()
-    if kotv_is_mpv_win7_build; then
-      mpv_extra+=(-Dd3d11=enabled -Dshaderc=enabled -Dspirv-cross=enabled)
+            if kotv_is_mpv_win7_build; then
+      echo "==> mpv Win7 build: vulkan=disabled (d3d11_helpers always on; vo=gpu may use gl)"
     fi
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \
@@ -724,7 +720,6 @@ EOF
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan="$mpv_vk" \
-      "${mpv_extra[@]}" \
       -Dlua=disabled \
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']" \
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']"
