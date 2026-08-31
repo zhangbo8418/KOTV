@@ -89,6 +89,10 @@ kotv_extract_vulkan_loader_from_exe() {
 
 kotv_find_vulkan_loader_dll() {
   local sdk cand dir rt cache url
+  # choco vulkan-sdk 通常已把 Runtime 装进 System32（优先，避免 Helpers 安装器卡死）
+  for cand in /c/Windows/System32/vulkan-1.dll /c/WINDOWS/System32/vulkan-1.dll; do
+    [[ -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
+  done
   for sdk in \
     "$(kotv_windows_path "${VULKAN_SDK:-}" 2>/dev/null || true)" \
     "$(ls -d /c/VulkanSDK/*/ 2>/dev/null | tail -1 || true)"; do
@@ -103,32 +107,38 @@ kotv_find_vulkan_loader_dll() {
         [[ -f "$rt" ]] || continue
         case "$(basename "$rt" | tr '[:upper:]' '[:lower:]')" in
           vulkanrt*.exe|*vulkan*runtime*.exe)
+            echo "==> extract vulkan-1.dll from $(basename "$rt")" >&2
             cand="$(kotv_extract_vulkan_loader_from_exe "$rt" || true)"
             [[ -n "$cand" && -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
-            if "$rt" /S >/dev/null 2>&1; then
-              [[ -f /c/Windows/System32/vulkan-1.dll ]] && {
-                printf '%s' "/c/Windows/System32/vulkan-1.dll"
-                return 0
-              }
-            fi
             ;;
         esac
       done
     done
-  done
-  for cand in /c/Windows/System32/vulkan-1.dll /c/WINDOWS/System32/vulkan-1.dll; do
-    [[ -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
   done
   cache="${BUILD_DIR}/vulkan-runtime.exe"
   url="${KOTV_VULKAN_RUNTIME_URL:-https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-runtime.exe}"
   mkdir -p "$BUILD_DIR"
   if [[ ! -f "$cache" ]]; then
     echo "==> fetch vulkan-runtime.exe (SDK Bin has no vulkan-1.dll)" >&2
-    curl -fsSL -o "$cache" "$url" || return 1
+    curl -fsSL --connect-timeout 30 --max-time 600 -o "$cache" "$url" || return 1
   fi
+  echo "==> extract vulkan-1.dll from vulkan-runtime.exe" >&2
   cand="$(kotv_extract_vulkan_loader_from_exe "$cache" || true)"
   [[ -n "$cand" && -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
   return 1
+}
+
+kotv_meson_compile() {
+  local dir="$1"
+  local label="${2:-meson compile}"
+  echo "==> $label started $(date -u +%Y-%m-%dT%H:%M:%SZ) -j$JOBS"
+  if kotv_is_windows_build; then
+    # Git Bash + CI：ninja 默认缓冲输出，长时间像卡死；--verbose 刷进度
+    meson compile -C "$dir" -j"$JOBS" --verbose
+  else
+    meson compile -C "$dir" -j"$JOBS"
+  fi
+  echo "==> $label finished $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 
 if ! command -v meson >/dev/null 2>&1; then
@@ -327,7 +337,7 @@ ensure_libplacebo() {
       -Ddemos=false \
       -Dtests=false
   fi
-  meson compile -C build -j"$JOBS"
+  kotv_meson_compile build "libplacebo"
   meson install -C build
   # 某些平台仍会装到 lib/<triplet>/pkgconfig；一并加入 PATH
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
@@ -439,7 +449,7 @@ EOF
       -Dfribidi:bin=false \
       -Dfribidi:tests=false
   fi
-  meson compile -C build -j"$JOBS"
+  kotv_meson_compile build "libass"
   meson install -C build
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   pkg-config --exists libass \
@@ -510,7 +520,7 @@ build_mpv_linux() {
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
     -Dlua=disabled
-  meson compile -C build -j"$JOBS"
+  kotv_meson_compile build "mpv-linux"
   cp -f build/libmpv.so.2 "$ASSET/linux/libmpv.so.2"
   if [[ "$AV3A" == "1" ]]; then
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$ASSET/linux/libmpv.so.2" \
@@ -547,7 +557,7 @@ build_mpv_macos() {
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
     -Dlua=disabled
-  meson compile -C build -j"$JOBS"
+  kotv_meson_compile build "libplacebo"
   cp -f build/libmpv.dylib "$ASSET/macos/libmpv.dylib"
   if [[ "$AV3A" == "1" ]]; then
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$ASSET/macos/libmpv.dylib" \
@@ -673,7 +683,7 @@ EOF
       -Dvulkan=enabled \
       -Dlua=disabled
   fi
-  meson compile -C build -j"$JOBS"
+  kotv_meson_compile build "mpv-windows"
   local out="$ASSET/windows/mpv-2.dll"
   local dll=""
   for cand in build/mpv-2.dll build/libmpv-2.dll build/libmpv.dll; do
