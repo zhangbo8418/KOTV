@@ -20,13 +20,28 @@ check_vulkan() {
 check_no_vulkan() {
   local f="$1"
   local name="$2"
+  local dir
   [[ -f "$f" ]] || { echo "skip $name (not built)"; return; }
-  if grep -aqE 'vulkan|pl_vulkan|-Dvulkan=enabled' "$f" 2>/dev/null; then
-    echo "ERROR: $name still contains vulkan (Win7 build must use KOTV_MPV_WIN7=1)" >&2
+  dir="$(dirname "$f")"
+  # 不能用 grep 'vulkan'：禁用 Vulkan 后 DLL 里仍有 gpu-api=vulkan 等选项字符串。
+  if [[ -f "$dir/vulkan-1.dll" ]]; then
+    echo "ERROR: $dir/vulkan-1.dll present (Win7 must not ship Vulkan loader)" >&2
     fail=1
-  else
-    echo "ok $name: vulkan disabled (Win7 D3D11-only)"
+    return
   fi
+  if command -v objdump >/dev/null 2>&1; then
+    if objdump -p "$f" 2>/dev/null | awk '/DLL Name:/{print tolower($3)}' | grep -qx 'vulkan-1.dll'; then
+      echo "ERROR: $name imports vulkan-1.dll" >&2
+      fail=1
+      return
+    fi
+  fi
+  if grep -aqE 'pl_vulkan_create|vkCreateInstance' "$f" 2>/dev/null; then
+    echo "ERROR: $name still contains Vulkan API entry symbols" >&2
+    fail=1
+    return
+  fi
+  echo "ok $name: no vulkan-1.dll import/sibling (Win7)"
 }
 
 check_av3a() {
