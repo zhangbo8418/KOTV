@@ -132,6 +132,18 @@ static std::string HeadersToMultiline(FlValue* headers) {
   return out;
 }
 
+static void ApplyPropsMap(FlValue* props) {
+  if (!props || fl_value_get_type(props) != FL_VALUE_TYPE_MAP) return;
+  const size_t n = fl_value_get_length(props);
+  for (size_t i = 0; i < n; ++i) {
+    FlValue* k = fl_value_get_map_key(props, i);
+    FlValue* v = fl_value_get_map_value(props, i);
+    if (!k || !v) continue;
+    if (fl_value_get_type(k) != FL_VALUE_TYPE_STRING || fl_value_get_type(v) != FL_VALUE_TYPE_STRING) continue;
+    kotv_mpv_desktop_set_prop(fl_value_get_string(k), fl_value_get_string(v));
+  }
+}
+
 static void EnsureTexture(FlTextureRegistrar* registrar) {
   if (g_tex.texture) return;
   g_tex.registrar = registrar;
@@ -196,8 +208,22 @@ static void kotv_mpv_method_call(FlMethodChannel* /*channel*/, FlMethodCall* met
                                          gpu_next ? 1 : 0, vulkan ? 1 : 0, live ? 1 : 0);
     char msg[64];
     snprintf(msg, sizeof(msg), "mpv open failed (rc=%d)", rc);
+    if (rc >= 0) ApplyPropsMap(map_get(args, "props"));
     response = rc < 0 ? FL_METHOD_RESPONSE(fl_method_error_response_new("OPEN_FAILED", msg, nullptr))
                       : FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (strcmp(method, "setOpts") == 0) {
+    FlValue* gpu_next_val = map_get(args, "gpuNext");
+    FlValue* vulkan_val = map_get(args, "vulkan");
+    const bool gpu_next = gpu_next_val && fl_value_get_type(gpu_next_val) == FL_VALUE_TYPE_BOOL &&
+                          fl_value_get_bool(gpu_next_val);
+    const bool vulkan = vulkan_val && fl_value_get_type(vulkan_val) == FL_VALUE_TYPE_BOOL &&
+                        fl_value_get_bool(vulkan_val);
+    const char* hwdec = map_str(args, "decode");
+    kotv_mpv_set_preinit_options(gpu_next ? 1 : 0, vulkan ? 1 : 0, hwdec ? hwdec : "auto");
+    kotv_mpv_desktop_note_opts(gpu_next ? 1 : 0, vulkan ? 1 : 0);
+    ApplyPropsMap(map_get(args, "props"));
+    if (hwdec) kotv_mpv_desktop_set_prop("hwdec", hwdec);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (strcmp(method, "play") == 0) {
     kotv_mpv_desktop_pause(0);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
@@ -248,6 +274,19 @@ static void kotv_mpv_method_call(FlMethodChannel* /*channel*/, FlMethodCall* met
       kotv_mpv_desktop_set_prop("hwdec", hwdec);
     }
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (strcmp(method, "setAudioTrack") == 0) {
+    const char* id = map_str(args, "id");
+    kotv_mpv_desktop_set_audio_track(id ? id : "");
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (strcmp(method, "setSubtitleTrack") == 0) {
+    const char* id = map_str(args, "id");
+    kotv_mpv_desktop_set_subtitle_track(id ? id : "");
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (strcmp(method, "retryVideo") == 0) {
+    const int rc = kotv_mpv_desktop_retry_video();
+    response = rc < 0
+                   ? FL_METHOD_RESPONSE(fl_method_error_response_new("RETRY_FAILED", "mpv retry failed", nullptr))
+                   : FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (strcmp(method, "dispose") == 0) {
     kotv_mpv_desktop_release();
     StopTick();

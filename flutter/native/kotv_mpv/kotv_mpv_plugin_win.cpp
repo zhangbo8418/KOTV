@@ -324,6 +324,86 @@ class KotvMpvPluginWin {
         }
         result->Error("OPEN_FAILED", msg, nullptr);
       } else {
+        if (args) {
+          if (auto* props = MapGet<flutter::EncodableMap>(*args, "props")) {
+            for (const auto& e : *props) {
+              const auto* k = std::get_if<std::string>(&e.first);
+              const auto* v = std::get_if<std::string>(&e.second);
+              if (k && v) kotv_mpv_desktop_set_prop(k->c_str(), v->c_str());
+            }
+          }
+        }
+        result->Success();
+      }
+      return;
+    }
+
+    if (method == "setOpts") {
+      int gpu_next = 0;
+      int vulkan = 0;
+      std::string hwdec = "auto";
+      if (args) {
+        if (auto* v = MapGet<bool>(*args, "gpuNext")) gpu_next = *v ? 1 : 0;
+        if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
+        if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
+        {
+          OSVERSIONINFOW vi{};
+          vi.dwOSVersionInfoSize = sizeof(vi);
+          if (GetVersionExW(&vi) && vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1) {
+            gpu_next = 0;
+            vulkan = 0;
+          }
+        }
+        kotv_mpv_set_preinit_options(gpu_next, vulkan, hwdec.c_str());
+        kotv_mpv_desktop_note_opts(gpu_next, vulkan);
+        if (auto* props = MapGet<flutter::EncodableMap>(*args, "props")) {
+          for (const auto& e : *props) {
+            const auto* k = std::get_if<std::string>(&e.first);
+            const auto* v = std::get_if<std::string>(&e.second);
+            if (k && v) kotv_mpv_desktop_set_prop(k->c_str(), v->c_str());
+          }
+        }
+      }
+      if (hwdec.size()) kotv_mpv_desktop_set_prop("hwdec", hwdec.c_str());
+      result->Success();
+      return;
+    }
+
+    if (method == "setDecode") {
+      std::string hwdec = "auto";
+      if (args) {
+        if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
+      }
+      kotv_mpv_desktop_set_prop("hwdec", hwdec.c_str());
+      result->Success();
+      return;
+    }
+
+    if (method == "setAudioTrack") {
+      std::string id;
+      if (args) {
+        if (auto* v = MapGet<std::string>(*args, "id")) id = *v;
+      }
+      kotv_mpv_desktop_set_audio_track(id.c_str());
+      result->Success();
+      return;
+    }
+
+    if (method == "setSubtitleTrack") {
+      std::string id;
+      if (args) {
+        if (auto* v = MapGet<std::string>(*args, "id")) id = *v;
+      }
+      kotv_mpv_desktop_set_subtitle_track(id.c_str());
+      result->Success();
+      return;
+    }
+
+    if (method == "retryVideo") {
+      const int rc = kotv_mpv_desktop_retry_video();
+      if (rc < 0) {
+        result->Error("RETRY_FAILED", "mpv retry failed", nullptr);
+      } else {
         result->Success();
       }
       return;

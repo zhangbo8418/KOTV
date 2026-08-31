@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'buffer_budget.dart';
 import 'kotv_platform.dart';
 
-/// 原生 MPV 选项：解码 / gpu-next / conf（对齐 TV mpvplayer，不再走 media_kit Texture）。
+/// 原生 MPV 选项：解码 / gpu-next / conf（对齐 TV mpvplayer）。
 ///
 /// ## 平台能力（目标）
 /// | 选项 | Android | 桌面 |

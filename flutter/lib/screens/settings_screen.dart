@@ -767,7 +767,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final mpvVulkan = g('mpvVulkan', 'false') == 'true';
     final mpvConfPreview = g('mpvConf').trim();
     // MPV conf / gpu-next / Vulkan：Android + 桌面
-    final showMpvOpts = kotvIsAndroid() || kotvIsDesktop();
+    final showMpvOpts = kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS();
+    final showMpvGpuOpts = showMpvOpts && !kotvIsWindows7();
 
     return Column(
       children: [
@@ -940,7 +941,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         value: g('ua').isEmpty ? '默认' : _ellipsize(g('ua'), 22),
                         onTap: _editUa,
                       ),
-                      if (showMpvOpts)
+                      if (showMpvGpuOpts)
                         KotvSettingsGrid(children: [
                           KotvSettingsCell(
                             label: 'MPV gpu-next',

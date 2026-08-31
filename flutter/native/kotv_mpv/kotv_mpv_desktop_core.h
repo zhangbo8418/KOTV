@@ -29,6 +29,13 @@ int kotv_mpv_desktop_set_volume(int vol);
 int kotv_mpv_desktop_set_rate(double rate);
 int kotv_mpv_desktop_set_prop(const char* key, const char* val);
 
+/* 应用 Dart propertyMap；keys/vals 等长，跳过 vo/wid 等引擎自管键。 */
+int kotv_mpv_desktop_apply_props(const char* const* keys, const char* const* vals, int n);
+int kotv_mpv_desktop_set_audio_track(const char* id);
+int kotv_mpv_desktop_set_subtitle_track(const char* id);
+/* 对最近一次 open 的 URL 重新 loadfile（对齐 Android retryVideo）。 */
+int kotv_mpv_desktop_retry_video(void);
+
 int kotv_mpv_desktop_take_frame(uint8_t* rgba, int cap, int* w, int* h);
 
 void kotv_mpv_desktop_set_event_cb(kotv_mpv_desktop_event_cb cb, void* user);

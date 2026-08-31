@@ -44,6 +44,7 @@ static double g_rate = 1.0;
 static int g_gpu_next;
 static int g_vulkan;
 static char g_lib_path[1024];
+static char g_last_url[2048];
 
 static void emit(const char* json) {
   if (g_event_cb && json) {
@@ -95,6 +96,7 @@ void kotv_mpv_desktop_shutdown(void) {
   g_last_h = 0;
   g_gpu_next = 0;
   g_vulkan = 0;
+  g_last_url[0] = '\0';
   /* 保留 g_lib_path，便于下次 ensure 重载 */
   kotv_unlock();
 }
@@ -205,6 +207,10 @@ int kotv_mpv_desktop_open(const char* url, const char* headers_multiline,
 
   const int rc = kotv_mpv_play(url);
   if (rc >= 0) {
+    size_t n = strlen(url);
+    if (n >= sizeof(g_last_url)) n = sizeof(g_last_url) - 1;
+    memcpy(g_last_url, url, n);
+    g_last_url[n] = '\0';
     char buf[128];
     snprintf(buf, sizeof(buf), "{\"event\":\"ready\",\"width\":%d,\"height\":%d}", g_last_w, g_last_h);
     emit(buf);
@@ -254,8 +260,61 @@ int kotv_mpv_desktop_set_rate(double rate) {
 int kotv_mpv_desktop_set_prop(const char* key, const char* val) {
   if (!key || !val) return -1;
   if (strcmp(key, "wid") == 0 || strcmp(key, "android-surface-size") == 0) return 0;
+  /* 桌面/iOS Texture 软渲固定 vo=libmpv，忽略外部 vo/gpu-next。 */
+  if (strcmp(key, "vo") == 0) return 0;
   kotv_lock();
   const int rc = kotv_mpv_loaded() ? kotv_mpv_set_prop_string(key, val) : -1;
+  kotv_unlock();
+  return rc;
+}
+
+int kotv_mpv_desktop_apply_props(const char* const* keys, const char* const* vals, int n) {
+  if (!keys || !vals || n <= 0) return 0;
+  int ok = 0;
+  for (int i = 0; i < n; ++i) {
+    if (!keys[i] || !vals[i]) continue;
+    if (kotv_mpv_desktop_set_prop(keys[i], vals[i]) >= 0) ok++;
+  }
+  return ok;
+}
+
+int kotv_mpv_desktop_set_audio_track(const char* id) {
+  kotv_lock();
+  int rc = -1;
+  if (kotv_mpv_loaded()) {
+    if (id && id[0] && strcmp(id, "auto") != 0) {
+      rc = kotv_mpv_set_prop_string("aid", id);
+    } else {
+      rc = kotv_mpv_set_prop_string("aid", "auto");
+    }
+  }
+  kotv_unlock();
+  return rc;
+}
+
+int kotv_mpv_desktop_set_subtitle_track(const char* id) {
+  kotv_lock();
+  int rc = -1;
+  if (kotv_mpv_loaded()) {
+    if (!id || !id[0] || strcmp(id, "no") == 0 || strcmp(id, "off") == 0) {
+      rc = kotv_mpv_set_prop_string("sid", "no");
+    } else if (strcmp(id, "auto") == 0) {
+      rc = kotv_mpv_set_prop_string("sid", "auto");
+    } else {
+      rc = kotv_mpv_set_prop_string("sid", id);
+    }
+  }
+  kotv_unlock();
+  return rc;
+}
+
+int kotv_mpv_desktop_retry_video(void) {
+  kotv_lock();
+  int rc = -1;
+  if (kotv_mpv_loaded() && g_last_url[0]) {
+    rc = kotv_mpv_play(g_last_url);
+    if (rc >= 0) kotv_mpv_pause(0);
+  }
   kotv_unlock();
   return rc;
 }

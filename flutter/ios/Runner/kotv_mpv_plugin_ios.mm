@@ -222,6 +222,55 @@ static void HandleMethod(FlutterMethodCall* call, FlutterResult result) {
                                  message:[NSString stringWithFormat:@"mpv open failed (rc=%d)", rc]
                                  details:nil]);
     } else {
+      NSDictionary* props = [args[@"props"] isKindOfClass:[NSDictionary class]] ? args[@"props"] : nil;
+      for (NSString* k in props) {
+        id v = props[k];
+        if (![k isKindOfClass:[NSString class]] || ![v isKindOfClass:[NSString class]]) continue;
+        kotv_mpv_desktop_set_prop(k.UTF8String, ((NSString*)v).UTF8String);
+      }
+      result(nil);
+    }
+    return;
+  }
+  if ([method isEqualToString:@"setOpts"]) {
+    BOOL gpuNext = [args[@"gpuNext"] boolValue];
+    BOOL vulkan = [args[@"vulkan"] boolValue];
+    NSString* hwdec = args[@"decode"] ?: @"auto";
+    kotv_mpv_set_preinit_options(gpuNext ? 1 : 0, vulkan ? 1 : 0, hwdec.UTF8String);
+    kotv_mpv_desktop_note_opts(gpuNext ? 1 : 0, vulkan ? 1 : 0);
+    NSDictionary* props = [args[@"props"] isKindOfClass:[NSDictionary class]] ? args[@"props"] : nil;
+    for (NSString* k in props) {
+      id v = props[k];
+      if (![k isKindOfClass:[NSString class]] || ![v isKindOfClass:[NSString class]]) continue;
+      kotv_mpv_desktop_set_prop(k.UTF8String, ((NSString*)v).UTF8String);
+    }
+    kotv_mpv_desktop_set_prop("hwdec", hwdec.UTF8String);
+    result(nil);
+    return;
+  }
+  if ([method isEqualToString:@"setDecode"]) {
+    NSString* hwdec = args[@"decode"] ?: @"auto";
+    kotv_mpv_desktop_set_prop("hwdec", hwdec.UTF8String);
+    result(nil);
+    return;
+  }
+  if ([method isEqualToString:@"setAudioTrack"]) {
+    NSString* tid = args[@"id"] ?: @"";
+    kotv_mpv_desktop_set_audio_track(tid.UTF8String);
+    result(nil);
+    return;
+  }
+  if ([method isEqualToString:@"setSubtitleTrack"]) {
+    NSString* tid = args[@"id"] ?: @"";
+    kotv_mpv_desktop_set_subtitle_track(tid.UTF8String);
+    result(nil);
+    return;
+  }
+  if ([method isEqualToString:@"retryVideo"]) {
+    int rc = kotv_mpv_desktop_retry_video();
+    if (rc < 0) {
+      result([FlutterError errorWithCode:@"RETRY_FAILED" message:@"mpv retry failed" details:nil]);
+    } else {
       result(nil);
     }
     return;
