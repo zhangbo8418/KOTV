@@ -160,6 +160,7 @@ if (-not (Test-Path -LiteralPath $mpv)) {
     Write-Error "mpv-2.dll not found in: $dir"
 }
 
+$win7Bad = @()
 Write-Host "==> check mpv deps in: $dir"
 Write-Host "(带 SYS 的是 Windows 系统 DLL，在 System32，不用复制到安装目录)"
 Write-Host ""
