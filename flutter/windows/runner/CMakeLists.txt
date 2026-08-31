@@ -17,6 +17,7 @@ add_executable(${BINARY_NAME} WIN32
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "${KOTV_MPV_NATIVE}/kotv_mpv_plugin_win.cpp"
+  "${KOTV_MPV_NATIVE}/kotv_mpv_win_surface.cpp"
   "${KOTV_MPV_NATIVE}/kotv_mpv_desktop_core.c"
   "${KOTV_MPV_NATIVE}/kotv_mpv_lib_path.cpp"
   "${KOTV_MPV_SHIM}"

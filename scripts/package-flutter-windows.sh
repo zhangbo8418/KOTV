@@ -34,6 +34,9 @@ if [[ "${KOTV_WIN7:-}" == "1" ]]; then
   "$ROOT/scripts/fetch-flutter-fonts.sh"
 fi
 
+if [[ "${KOTV_WIN7:-}" == "1" ]]; then
+  export KOTV_MPV_WIN7=1
+fi
 echo "==> fetch desktop libmpv (AV3A source)"
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 echo "==> prepare runtime"
@@ -112,9 +115,12 @@ if [[ "${asset_n:-0}" -lt 2 ]]; then
 fi
 chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
 "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$RELEASE_DIR"
-if [[ ! -f "$RELEASE_DIR/vulkan-1.dll" ]]; then
-  echo "ERROR: vulkan-1.dll missing next to kotv.exe (required for libplacebo on Win7)" >&2
+if [[ "${KOTV_WIN7:-}" != "1" && ! -f "$RELEASE_DIR/vulkan-1.dll" ]]; then
+  echo "ERROR: vulkan-1.dll missing next to kotv.exe (required for Win10+ libplacebo Vulkan)" >&2
   exit 1
+fi
+if [[ "${KOTV_WIN7:-}" == "1" && -f "$RELEASE_DIR/vulkan-1.dll" ]]; then
+  echo "WARN: Win7 package ships vulkan-1.dll (expected D3D11-only build)" >&2
 fi
 echo "ok mpv-2.dll + $asset_n sibling dlls staged from assets"
 

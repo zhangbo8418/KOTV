@@ -23,15 +23,20 @@ windows_siblings_ok() {
 fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
+  local want_kind="av3a-vulkan-v11"
+  if [[ "${KOTV_WIN7:-}" == "1" || "${KOTV_MPV_WIN7:-}" == "1" ]]; then
+    want_kind="av3a-win7-d3d11-v11"
+    export KOTV_MPV_WIN7=1
+  fi
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
-    && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "av3a-win7-v10" ]] \
+    && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want_kind" ]] \
     && windows_siblings_ok; then
-    echo "ok windows/mpv-2.dll (cached AV3A + sibling dlls)"
+    echo "ok windows/mpv-2.dll (cached AV3A + sibling dlls, kind=$want_kind)"
     return
   fi
-  echo "==> windows libmpv: source build with AV3A (FongMi FFmpeg + MinGW)"
+  echo "==> windows libmpv: source build with AV3A (FongMi FFmpeg + MinGW, kind=$want_kind)"
   "$ROOT/scripts/build-desktop-mpv-from-source.sh" windows
-  echo av3a-win7-v10 > "$kind_file"
+  echo "$want_kind" > "$kind_file"
 }
 
 fetch_linux() {
@@ -88,6 +93,9 @@ if [[ -z "${KOTV_FETCH_DESKTOP_PLAT:-}" ]]; then
   fi
 fi
 
+if [[ "${KOTV_WIN7:-}" == "1" ]]; then
+  export KOTV_MPV_WIN7=1
+fi
 echo "==> fetch desktop libmpv (AV3A source) → $ASSET"
 if [[ -n "${KOTV_FETCH_DESKTOP_PLAT:-}" ]]; then
   run_fetch "${KOTV_FETCH_DESKTOP_PLAT}"
@@ -98,6 +106,7 @@ else
 fi
 KOTV_VERIFY_PLAT="${KOTV_VERIFY_PLAT:-${KOTV_FETCH_DESKTOP_PLAT:-}}" \
 KOTV_EXPECT_MPV_AV3A="${KOTV_EXPECT_MPV_AV3A:-1}" \
+KOTV_MPV_WIN7="${KOTV_MPV_WIN7:-${KOTV_WIN7:-0}}" \
 "$ROOT/scripts/verify-desktop-mpv-libs.sh"
 du -sh "$ASSET"/* 2>/dev/null || true
 echo "==> done"

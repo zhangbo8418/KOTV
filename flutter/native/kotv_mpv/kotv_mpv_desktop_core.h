@@ -10,6 +10,10 @@ extern "C" {
 typedef void (*kotv_mpv_desktop_event_cb)(const char* event_json, void* user);
 
 int kotv_mpv_desktop_init(const char* lib_path);
+/* 仅绑定 libmpv DLL，不 init 播放器（Windows HWND 硬渲 attach 前）。 */
+int kotv_mpv_desktop_ensure_lib(const char* lib_path);
+int kotv_mpv_desktop_set_hard_win(long long win);
+int kotv_mpv_desktop_hard_active(void);
 /* create 成功后同步渲染选项，避免 open 误判变更而强制 reinit。 */
 void kotv_mpv_desktop_note_opts(int gpu_next, int vulkan);
 /* 停播但保留已加载的 libmpv（供 dispose 用，避免与下一次 create 抢卸库）。 */

@@ -9,6 +9,9 @@ extern "C" {
 #endif
 
 int kotv_mpv_load(const char *lib_path);
+/* 仅 LoadLibrary + 符号绑定，不创建 mpv 实例（HWND 硬渲就绪前用）。 */
+int kotv_mpv_ensure_lib(const char *lib_path);
+int kotv_mpv_lib_bound(void);
 void kotv_mpv_unload(void);
 int kotv_mpv_loaded(void);
 /* Windows：最近一次 LoadLibraryW 的 GetLastError；其它平台为 0。 */

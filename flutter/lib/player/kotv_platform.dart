@@ -28,6 +28,7 @@ bool kotvIsWindows7() {
 
 bool kotvIsAndroid() => !kIsWeb && Platform.isAndroid;
 bool kotvIsIOS() => !kIsWeb && Platform.isIOS;
+bool kotvIsWindows() => !kIsWeb && Platform.isWindows;
 
 /// 对齐 TV `select_render`：Surface=0（默认 HDR），Texture=1。
 String kotvNormalizePlayerRender(String raw) {
@@ -44,9 +45,9 @@ String kotvNormalizePlayerRender(String raw) {
 String kotvPlayerRenderLabel(String raw) =>
     kotvNormalizePlayerRender(raw) == 'texture' ? 'Texture' : 'Surface';
 
-/// Surface/Texture 对齐 TV `PlayerView.setRender`：Android 内置 Exo 与 MPV 共用。
+/// Surface/Texture 对齐 TV `PlayerView.setRender`：Android / Windows 内置 MPV 共用。
 bool kotvPlayerRenderApplies(String playerVal) {
-  if (!kotvIsAndroid()) return false;
+  if (!kotvIsAndroid() && !kotvIsWindows()) return false;
   final b = kotvEmbedBackend(playerVal);
   return b == KotvEmbedBackend.exo || b == KotvEmbedBackend.mpv;
 }

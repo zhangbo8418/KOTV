@@ -2,6 +2,7 @@
 
 #include "kotv_mpv_desktop_core.h"
 #include "kotv_mpv_lib_path.h"
+#include "kotv_mpv_win_surface.h"
 
 #include "../../../internal/player/embed/mpv_shim.h"
 
@@ -10,6 +11,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <flutter/flutter_windows.h>
 #endif
 
 #include <flutter/event_channel.h>
@@ -52,6 +54,22 @@ const T* MapGet(const flutter::EncodableMap& m, const char* key) {
   if (it == m.end()) return nullptr;
   return std::get_if<T>(&it->second);
 }
+
+#if defined(_WIN32)
+bool KotvIsWindows7() {
+  OSVERSIONINFOW vi{};
+  vi.dwOSVersionInfoSize = sizeof(vi);
+  if (!GetVersionExW(&vi)) return false;
+  return vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1;
+}
+
+void ApplyWin7MpvOpts(std::string* hwdec, int* gpu_next, int* vulkan) {
+  if (!KotvIsWindows7()) return;
+  if (gpu_next) *gpu_next = 0;
+  if (vulkan) *vulkan = 0;
+  if (hwdec && *hwdec == "d3d11va") *hwdec = "dxva2";
+}
+#endif
 
 class KotvMpvPixelBuffer {
  public:
@@ -115,6 +133,17 @@ class KotvMpvPixelBuffer {
   int frame_h_ = 0;
 };
 
+struct PendingOpen {
+  bool active = false;
+  std::string url;
+  std::string headers;
+  std::string hwdec = "auto";
+  int gpu_next = 0;
+  int vulkan = 0;
+  int live = 0;
+  flutter::EncodableMap props;
+};
+
 class KotvMpvPluginWin {
  public:
   static KotvMpvPluginWin& Instance() {
@@ -124,7 +153,15 @@ class KotvMpvPluginWin {
 
   void Register(flutter::FlutterEngine* engine) {
     FlutterDesktopPluginRegistrarRef native = engine->GetRegistrarForPlugin("kotv_mpv");
+    registrar_ = native;
     tex_reg_ = FlutterDesktopRegistrarGetTextureRegistrar(native);
+#if defined(_WIN32)
+    if (FlutterDesktopViewRef view = FlutterDesktopPluginRegistrarGetView(native)) {
+      parent_hwnd_ = FlutterDesktopViewGetHWND(view);
+    }
+    dpi_scale_ = FlutterDesktopGetDpiScaleFactor(native);
+    if (dpi_scale_ <= 0.0) dpi_scale_ = 1.0;
+#endif
     auto* messenger = engine->messenger();
     method_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
         messenger, "kotv_mpv", &flutter::StandardMethodCodec::GetInstance());
@@ -157,7 +194,11 @@ class KotvMpvPluginWin {
         this);
   }
 
-  ~KotvMpvPluginWin() { StopTick(); kotv_mpv_desktop_shutdown(); }
+  ~KotvMpvPluginWin() {
+    StopTick();
+    surface_.Destroy();
+    kotv_mpv_desktop_shutdown();
+  }
 
   void StartTick() {
     if (tick_running_.exchange(true)) return;
@@ -165,7 +206,7 @@ class KotvMpvPluginWin {
       std::vector<uint8_t> frame(1920 * 1080 * 4);
       while (tick_running_) {
         kotv_mpv_desktop_tick();
-        if (kotv_mpv_desktop_is_ready()) {
+        if (!hard_render_ && kotv_mpv_desktop_is_ready()) {
           int w = 0;
           int h = 0;
           if (kotv_mpv_desktop_take_frame(frame.data(), static_cast<int>(frame.size()), &w, &h)) {
@@ -175,7 +216,7 @@ class KotvMpvPluginWin {
             }
           }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        std::this_thread::sleep_for(std::chrono::milliseconds(hard_render_ ? 200 : 300));
       }
     });
   }
@@ -185,59 +226,108 @@ class KotvMpvPluginWin {
     if (tick_thread_.joinable()) tick_thread_.join();
   }
 
+#if defined(_WIN32)
+  bool AttachHardSurface(int x, int y, int w, int h) {
+    if (!parent_hwnd_) return false;
+    POINT origin{0, 0};
+    ClientToScreen(parent_hwnd_, &origin);
+    const int rx = x - static_cast<int>(origin.x);
+    const int ry = y - static_cast<int>(origin.y);
+    if (!surface_.Ensure(parent_hwnd_)) return false;
+    surface_.SetBounds(rx, ry, w, h);
+    if (kotv_mpv_desktop_hard_active()) return true;
+    const int rc = kotv_mpv_desktop_set_hard_win(static_cast<long long>(reinterpret_cast<intptr_t>(surface_.Hwnd())));
+    if (rc != 0) return false;
+    StartTick();
+    return true;
+  }
+
+  void ProcessPendingOpen() {
+    if (!pending_.active) return;
+    if (hard_render_ && !kotv_mpv_desktop_hard_active()) return;
+    PendingOpen p = pending_;
+    pending_.active = false;
+    const int rc = kotv_mpv_desktop_open(p.url.c_str(), p.headers.c_str(), p.hwdec.c_str(), p.gpu_next,
+                                         p.vulkan, p.live);
+    if (rc >= 0) {
+      for (const auto& e : p.props) {
+        const auto* k = std::get_if<std::string>(&e.first);
+        const auto* v = std::get_if<std::string>(&e.second);
+        if (k && v) kotv_mpv_desktop_set_prop(k->c_str(), v->c_str());
+      }
+    }
+  }
+
+  int ScalePx(double v) const {
+    if (v <= 0.0) return 0;
+    return static_cast<int>(v * dpi_scale_ + 0.5);
+  }
+#endif
+
   void HandleMethod(const flutter::MethodCall<flutter::EncodableValue>& call,
                     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
     const std::string& method = call.method_name();
     const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
 
     if (method == "create") {
-      if (!pixel_buffer_ && tex_reg_) {
-        pixel_buffer_ = std::make_unique<KotvMpvPixelBuffer>(tex_reg_);
-      }
+      std::string render = "surface";
       std::string hwdec = "auto";
       int gpu_next = 0;
       int vulkan = 0;
       if (args) {
+        if (auto* v = MapGet<std::string>(*args, "render")) render = *v;
         if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
         if (auto* v = MapGet<bool>(*args, "gpuNext")) gpu_next = *v ? 1 : 0;
         if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
       }
-      // Win7：禁止 vulkan/gpu-next（与 mpv_shim 一致，避免 talloc canary）
-      {
-        OSVERSIONINFOW vi{};
-        vi.dwOSVersionInfoSize = sizeof(vi);
-        if (GetVersionExW(&vi) && vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1) {
-          gpu_next = 0;
-          vulkan = 0;
-          if (hwdec == "d3d11va") hwdec = "dxva2";
-        }
-      }
+#if defined(_WIN32)
+      ApplyWin7MpvOpts(&hwdec, &gpu_next, &vulkan);
+      hard_render_ = (render != "texture");
+#endif
       char* lib = kotv_find_libmpv_path();
       if (!lib) {
         result->Error("NO_LIBMPV", "libmpv not found; put mpv-2.dll next to kotv.exe", nullptr);
         return;
       }
       kotv_mpv_set_preinit_options(gpu_next, vulkan, hwdec.c_str());
-      int rc = kotv_mpv_desktop_init(lib);
+      int rc = 0;
       int used_gn = gpu_next;
       int used_vk = vulkan;
+#if defined(_WIN32)
+      if (hard_render_) {
+        rc = kotv_mpv_desktop_ensure_lib(lib);
+      } else {
+        if (!pixel_buffer_ && tex_reg_) {
+          pixel_buffer_ = std::make_unique<KotvMpvPixelBuffer>(tex_reg_);
+        }
+        rc = kotv_mpv_desktop_init(lib);
+      }
+#else
+      if (!pixel_buffer_ && tex_reg_) {
+        pixel_buffer_ = std::make_unique<KotvMpvPixelBuffer>(tex_reg_);
+      }
+      rc = kotv_mpv_desktop_init(lib);
+#endif
       if (rc != 0 && (gpu_next || vulkan)) {
         kotv_mpv_set_preinit_options(0, 0, hwdec.c_str());
+#if defined(_WIN32)
+        rc = hard_render_ ? kotv_mpv_desktop_ensure_lib(lib) : kotv_mpv_desktop_init(lib);
+#else
         rc = kotv_mpv_desktop_init(lib);
+#endif
         used_gn = 0;
         used_vk = 0;
       }
       if (rc != 0) {
         char msg[512];
         const unsigned long winerr = kotv_mpv_last_load_error();
-        const char *detail = kotv_mpv_last_load_detail();
+        const char* detail = kotv_mpv_last_load_detail();
         if (detail && detail[0]) {
-          snprintf(msg, sizeof(msg),
-                   "libmpv load failed (rc=%d winerr=%lu path=%s; %s)",
-                   rc, winerr, lib ? lib : "", detail);
+          snprintf(msg, sizeof(msg), "libmpv load failed (rc=%d winerr=%lu path=%s; %s)", rc, winerr,
+                   lib ? lib : "", detail);
         } else {
-          snprintf(msg, sizeof(msg), "libmpv load failed (rc=%d winerr=%lu path=%s)",
-                   rc, winerr, lib ? lib : "");
+          snprintf(msg, sizeof(msg), "libmpv load failed (rc=%d winerr=%lu path=%s)", rc, winerr,
+                   lib ? lib : "");
         }
         free(lib);
         result->Error("CREATE_FAILED", msg, nullptr);
@@ -245,10 +335,19 @@ class KotvMpvPluginWin {
       }
       free(lib);
       kotv_mpv_desktop_note_opts(used_gn, used_vk);
+#if defined(_WIN32)
+      if (!hard_render_) {
+        StartTick();
+      }
+#else
       StartTick();
+#endif
       flutter::EncodableMap out;
       out[flutter::EncodableValue("ok")] = flutter::EncodableValue(true);
       out[flutter::EncodableValue("ready")] = flutter::EncodableValue(true);
+#if defined(_WIN32)
+      out[flutter::EncodableValue("hardRender")] = flutter::EncodableValue(hard_render_);
+#endif
       if (pixel_buffer_) {
         out[flutter::EncodableValue("textureId")] = flutter::EncodableValue(pixel_buffer_->texture_id());
       }
@@ -256,7 +355,47 @@ class KotvMpvPluginWin {
       return;
     }
 
+#if defined(_WIN32)
+    if (method == "updateSurfaceBounds") {
+      double x = 0;
+      double y = 0;
+      double w = 0;
+      double h = 0;
+      if (args) {
+        if (auto* v = MapGet<double>(*args, "x")) x = *v;
+        if (auto* v = MapGet<int32_t>(*args, "x")) x = static_cast<double>(*v);
+        if (auto* v = MapGet<double>(*args, "y")) y = *v;
+        if (auto* v = MapGet<int32_t>(*args, "y")) y = static_cast<double>(*v);
+        if (auto* v = MapGet<double>(*args, "width")) w = *v;
+        if (auto* v = MapGet<int32_t>(*args, "width")) w = static_cast<double>(*v);
+        if (auto* v = MapGet<double>(*args, "height")) h = *v;
+        if (auto* v = MapGet<int32_t>(*args, "height")) h = static_cast<double>(*v);
+      }
+      if (!hard_render_) {
+        result->Success();
+        return;
+      }
+      if (w <= 0 || h <= 0) {
+        result->Success();
+        return;
+      }
+      if (!AttachHardSurface(ScalePx(x), ScalePx(y), ScalePx(w), ScalePx(h))) {
+        result->Error("SURFACE_FAILED", "HWND hard render attach failed", nullptr);
+        return;
+      }
+      ProcessPendingOpen();
+      result->Success();
+      return;
+    }
+#endif
+
     if (method == "isVulkanAvailable") {
+#if defined(_WIN32)
+      if (KotvIsWindows7()) {
+        result->Success(flutter::EncodableValue(false));
+        return;
+      }
+#endif
       result->Success(flutter::EncodableValue(kotv_mpv_desktop_is_vulkan_available()));
       return;
     }
@@ -289,15 +428,26 @@ class KotvMpvPluginWin {
           headers = HeadersToMultiline(h);
         }
       }
-      {
-        OSVERSIONINFOW vi{};
-        vi.dwOSVersionInfoSize = sizeof(vi);
-        if (GetVersionExW(&vi) && vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1) {
-          gpu_next = 0;
-          vulkan = 0;
-          if (hwdec == "d3d11va") hwdec = "dxva2";
+#if defined(_WIN32)
+      ApplyWin7MpvOpts(&hwdec, &gpu_next, &vulkan);
+      if (hard_render_ && !kotv_mpv_desktop_hard_active()) {
+        pending_.active = true;
+        pending_.url = url;
+        pending_.headers = headers;
+        pending_.hwdec = hwdec;
+        pending_.gpu_next = gpu_next;
+        pending_.vulkan = vulkan;
+        pending_.live = live;
+        pending_.props = flutter::EncodableMap{};
+        if (args) {
+          if (auto* props = MapGet<flutter::EncodableMap>(*args, "props")) {
+            pending_.props = *props;
+          }
         }
+        result->Success();
+        return;
       }
+#endif
       const int rc = kotv_mpv_desktop_open(url.c_str(), headers.c_str(), hwdec.c_str(), gpu_next, vulkan, live);
       if (rc < 0) {
         char msg[160];
@@ -308,8 +458,7 @@ class KotvMpvPluginWin {
         } else if (rc == -2) {
           const unsigned long winerr = kotv_mpv_last_load_error();
           if (winerr != 0) {
-            snprintf(msg, sizeof(msg),
-                     "mpv open failed (LoadLibrary winerr=%lu)", winerr);
+            snprintf(msg, sizeof(msg), "mpv open failed (LoadLibrary winerr=%lu)", winerr);
           } else {
             snprintf(msg, sizeof(msg), "mpv open failed (rc=-2, DLL/bind)");
           }
@@ -338,6 +487,37 @@ class KotvMpvPluginWin {
       return;
     }
 
+    if (method == "setRenderMode") {
+      std::string mode = "surface";
+      if (args) {
+        if (auto* v = MapGet<std::string>(*args, "mode")) mode = *v;
+      }
+#if defined(_WIN32)
+      const bool want_hard = (mode != "texture");
+      if (want_hard != hard_render_) {
+        hard_render_ = want_hard;
+        pending_.active = false;
+        if (hard_render_) {
+          if (pixel_buffer_) pixel_buffer_.reset();
+          if (surface_.Hwnd()) {
+            kotv_mpv_desktop_set_hard_win(static_cast<long long>(reinterpret_cast<intptr_t>(surface_.Hwnd())));
+          } else {
+            kotv_mpv_desktop_set_hard_win(0);
+          }
+        } else {
+          surface_.Destroy();
+          kotv_mpv_desktop_set_hard_win(0);
+          if (!pixel_buffer_ && tex_reg_) {
+            pixel_buffer_ = std::make_unique<KotvMpvPixelBuffer>(tex_reg_);
+          }
+          StartTick();
+        }
+      }
+#endif
+      result->Success();
+      return;
+    }
+
     if (method == "setOpts") {
       int gpu_next = 0;
       int vulkan = 0;
@@ -346,14 +526,9 @@ class KotvMpvPluginWin {
         if (auto* v = MapGet<bool>(*args, "gpuNext")) gpu_next = *v ? 1 : 0;
         if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
         if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
-        {
-          OSVERSIONINFOW vi{};
-          vi.dwOSVersionInfoSize = sizeof(vi);
-          if (GetVersionExW(&vi) && vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1) {
-            gpu_next = 0;
-            vulkan = 0;
-          }
-        }
+#if defined(_WIN32)
+        ApplyWin7MpvOpts(&hwdec, &gpu_next, &vulkan);
+#endif
         kotv_mpv_set_preinit_options(gpu_next, vulkan, hwdec.c_str());
         kotv_mpv_desktop_note_opts(gpu_next, vulkan);
         if (auto* props = MapGet<flutter::EncodableMap>(*args, "props")) {
@@ -374,6 +549,9 @@ class KotvMpvPluginWin {
       if (args) {
         if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
       }
+#if defined(_WIN32)
+      ApplyWin7MpvOpts(&hwdec, nullptr, nullptr);
+#endif
       kotv_mpv_desktop_set_prop("hwdec", hwdec.c_str());
       result->Success();
       return;
@@ -467,9 +645,12 @@ class KotvMpvPluginWin {
       return;
     }
     if (method == "dispose") {
-      // 只停播，不 FreeLibrary：Dart dispose 是异步的，卸库会与下一次 create/open 抢跑。
+      pending_.active = false;
       kotv_mpv_desktop_release();
       StopTick();
+#if defined(_WIN32)
+      surface_.Destroy();
+#endif
       result->Success();
       return;
     }
@@ -477,6 +658,7 @@ class KotvMpvPluginWin {
     result->NotImplemented();
   }
 
+  FlutterDesktopPluginRegistrarRef registrar_ = nullptr;
   FlutterDesktopTextureRegistrarRef tex_reg_ = nullptr;
   std::unique_ptr<KotvMpvPixelBuffer> pixel_buffer_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> method_channel_;
@@ -484,6 +666,13 @@ class KotvMpvPluginWin {
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
   std::thread tick_thread_;
   std::atomic<bool> tick_running_{false};
+#if defined(_WIN32)
+  HWND parent_hwnd_ = nullptr;
+  double dpi_scale_ = 1.0;
+  bool hard_render_ = true;
+  KotvMpvWinSurface surface_;
+  PendingOpen pending_;
+#endif
 };
 
 }  // namespace

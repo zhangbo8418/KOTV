@@ -421,6 +421,7 @@ static int g_width = 1280;
 static int g_height = 720;
 static int g_capacity;
 static int g_hard; /* 1 = wid 硬渲，无 software render context */
+static long long g_hard_win; /* 最近一次 wid 硬渲 HWND，供 reinit 复用 */
 static int g_gpu_next;
 static int g_vulkan;
 static char g_hwdec_opt[64];
@@ -457,6 +458,34 @@ static char *dup_cstr(const char *s) {
     if (p)
         memcpy(p, s, n);
     return p;
+}
+
+static int bind_symbols(void);
+
+static int ensure_lib_loaded(const char *lib_path) {
+    if (g_lib)
+        return 0;
+    if (!lib_path || !lib_path[0])
+        return -1;
+#if defined(_WIN32)
+    kotv_win_preflight(lib_path);
+#endif
+    g_lib = MPV_OPEN(lib_path);
+    if (!g_lib) {
+#if defined(_WIN32)
+        kotv_win_diagnose(lib_path);
+        if (!g_load_detail[0] && g_load_last_error == 126)
+            snprintf(g_load_detail, sizeof(g_load_detail),
+                     "dependency DLL missing (winerr=126); check vulkan-1.dll / libplacebo version");
+#endif
+        return -2;
+    }
+    if (bind_symbols() != 0) {
+        MPV_CLOSE(g_lib);
+        g_lib = NULL;
+        return -3;
+    }
+    return 0;
 }
 
 static int bind_symbols(void) {
@@ -508,6 +537,7 @@ static void destroy_player(void) {
         g_mpv = NULL;
     }
     g_hard = 0;
+    g_hard_win = 0;
     g_has_file = 0;
 }
 
@@ -567,12 +597,14 @@ int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec) {
 
 int kotv_mpv_reinit_player(void) {
     int was_hard;
+    long long win;
     if (!g_lib || !p_create)
         return -1;
     was_hard = g_hard;
+    win = g_hard_win;
     destroy_player();
-    if (was_hard)
-        return -2;
+    if (was_hard && win)
+        return init_wid(win);
     return init_sw();
 }
 
@@ -673,34 +705,26 @@ static int init_wid(long long win) {
     }
     drain_events();
     g_hard = 1;
+    g_hard_win = win;
     g_dirty = 0;
     return 0;
+}
+
+int kotv_mpv_ensure_lib(const char *lib_path) {
+    return ensure_lib_loaded(lib_path);
+}
+
+int kotv_mpv_lib_bound(void) {
+    return g_lib ? 1 : 0;
 }
 
 int kotv_mpv_load(const char *lib_path) {
     if (g_mpv && (g_hard || (g_render && g_pixels)))
         return 0;
-    if (!lib_path || !lib_path[0])
-        return -1;
-#if defined(_WIN32)
-    kotv_win_preflight(lib_path);
-#endif
-    if (!g_lib) {
-        g_lib = MPV_OPEN(lib_path);
-        if (!g_lib) {
-#if defined(_WIN32)
-            kotv_win_diagnose(lib_path);
-            if (!g_load_detail[0] && g_load_last_error == 126)
-                snprintf(g_load_detail, sizeof(g_load_detail),
-                         "dependency DLL missing (winerr=126); check vulkan-1.dll / libplacebo version");
-#endif
-            return -2;
-        }
-        if (bind_symbols() != 0) {
-            MPV_CLOSE(g_lib);
-            g_lib = NULL;
-            return -3;
-        }
+    {
+        int rc = ensure_lib_loaded(lib_path);
+        if (rc != 0)
+            return rc;
     }
     return init_sw();
 }

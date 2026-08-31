@@ -17,6 +17,18 @@ check_vulkan() {
   fi
 }
 
+check_no_vulkan() {
+  local f="$1"
+  local name="$2"
+  [[ -f "$f" ]] || { echo "skip $name (not built)"; return; }
+  if grep -aqE 'vulkan|pl_vulkan|-Dvulkan=enabled' "$f" 2>/dev/null; then
+    echo "ERROR: $name still contains vulkan (Win7 build must use KOTV_MPV_WIN7=1)" >&2
+    fail=1
+  else
+    echo "ok $name: vulkan disabled (Win7 D3D11-only)"
+  fi
+}
+
 check_av3a() {
   local f="$1"
   local name="$2"
@@ -31,7 +43,11 @@ check_av3a() {
 
 echo "==> verify desktop libmpv (Vulkan${KOTV_EXPECT_MPV_AV3A:+ + AV3A})"
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
-  check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  if [[ "${KOTV_MPV_WIN7:-${KOTV_WIN7:-0}}" == "1" ]]; then
+    check_no_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  else
+    check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  fi
   check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   if [[ -f "$ASSET/windows/mpv-2.dll" ]]; then
     chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"

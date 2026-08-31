@@ -12,7 +12,7 @@ import 'kotv_platform.dart';
 /// |------|---------|------|
 /// | hwdec | mediacodec / auto-safe | d3d11va / dxva2 / videotoolbox |
 /// | mpv.conf | setProperty | 同上 |
-/// | gpu-next | vo=gpu-next（Surface） | vo=libmpv + gpu-api=vulkan（预编译 libmpv 需含 Vulkan） |
+/// | gpu-next | vo=gpu-next（Surface） | Win10+ HWND：`vo=gpu-next`；Win7：`vo=gpu` + D3D11 |
 /// | AV3A | libmvcodec/libarcdav3a（webhtv） | 源码：FongMi FFmpeg+avs3a（CI: KOTV_BUILD_MPV_AV3A=1） |
 class KotvMpvOpts {
   const KotvMpvOpts({
@@ -95,7 +95,7 @@ class KotvMpvOpts {
     if (gpuNext) {
       out['vo'] = 'gpu-next';
     }
-    // 桌面 Texture 软渲由原生固定 vo=libmpv；Win7 禁止强制 vulkan。
+    // Windows HWND 硬渲由原生固定 vo=gpu/gpu-next；Win7 禁止 vulkan/gpu-next。
     if (vulkan && !kotvIsAndroid() && !kotvIsWindows7()) {
       out['gpu-api'] = 'vulkan';
     }

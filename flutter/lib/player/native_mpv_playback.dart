@@ -8,13 +8,15 @@ import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
+import 'mpv_win_surface.dart' if (dart.library.html) 'mpv_win_surface_stub.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
 /// 原生 libmpv 播放后端（对齐 TV `androidx.media3.mpvplayer`）。
 ///
 /// - Android：MethodChannel `kotv_mpv` + PlatformView（Surface / Texture）
-/// - 桌面 / iOS：同通道 + Flutter Texture（`vo=libmpv` 软渲）
+/// - Windows：HWND 硬渲（`vo=gpu` + wid，对齐 Android Surface）
+/// - macOS / Linux / iOS：Flutter Texture（`vo=libmpv` 软渲）
 class NativeMpvPlayback extends KotvPlayback {
   NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
 
@@ -42,6 +44,7 @@ class NativeMpvPlayback extends KotvPlayback {
   String? _lastError;
   int? _textureId;
   String _renderMode = 'surface';
+  bool _winHardRender = false;
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -147,7 +150,8 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   /// Android：Hybrid Composition SurfaceView / TextureView（对齐 TV setRender）。
-  /// 桌面 / iOS：原生 libmpv 软件渲染 → Flutter Texture。
+  /// Windows：HWND 硬渲 child window（默认 Surface）；Texture 为软渲回退。
+  /// macOS / Linux / iOS：原生 libmpv 软件渲染 → Flutter Texture。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     if (kotvIsAndroid()) {
       return Stack(
@@ -159,6 +163,27 @@ class NativeMpvPlayback extends KotvPlayback {
             viewType: 'kotv_mpv/surface',
             hybrid: true,
           ),
+          if (_lastError != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  _lastError!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+    if (kotvIsWindows() && (_winHardRender || _renderMode != 'texture')) {
+      return Stack(
+        key: ValueKey('kotv_mpv_surface_$_surfaceGeneration'),
+        fit: StackFit.expand,
+        children: [
+          const ColoredBox(color: Colors.black),
+          const KotvMpvWinSurfaceHost(),
           if (_lastError != null)
             Center(
               child: Padding(
@@ -232,6 +257,7 @@ class NativeMpvPlayback extends KotvPlayback {
         final tid = res['textureId'];
         if (tid is int) _textureId = tid;
         if (tid is num) _textureId = tid.toInt();
+        _winHardRender = res['hardRender'] == true;
       }
       await _sub?.cancel();
       _sub = _ev.receiveBroadcastStream().listen(_onEvent, onError: (e) {
@@ -463,6 +489,7 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       if (_nativeReady) {
         await _ch.invokeMethod('setRenderMode', {'mode': _renderMode});
+        _winHardRender = kotvIsWindows() && _renderMode != 'texture';
       }
     } catch (_) {}
     notifyListeners();

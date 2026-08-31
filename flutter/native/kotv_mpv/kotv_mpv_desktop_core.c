@@ -71,6 +71,35 @@ int kotv_mpv_desktop_init(const char* lib_path) {
   return rc;
 }
 
+int kotv_mpv_desktop_ensure_lib(const char* lib_path) {
+  if (!lib_path || !lib_path[0]) return -1;
+  kotv_lock();
+  {
+    size_t n = strlen(lib_path);
+    if (n >= sizeof(g_lib_path)) n = sizeof(g_lib_path) - 1;
+    memcpy(g_lib_path, lib_path, n);
+    g_lib_path[n] = '\0';
+  }
+  const int rc = kotv_mpv_ensure_lib(lib_path);
+  kotv_unlock();
+  return rc;
+}
+
+int kotv_mpv_desktop_set_hard_win(long long win) {
+  kotv_lock();
+  const int rc = kotv_mpv_set_hard_win(win);
+  if (rc == 0) kotv_mpv_set_volume(g_volume);
+  kotv_unlock();
+  return rc;
+}
+
+int kotv_mpv_desktop_hard_active(void) {
+  kotv_lock();
+  const int ok = kotv_mpv_hard_active();
+  kotv_unlock();
+  return ok;
+}
+
 void kotv_mpv_desktop_note_opts(int gpu_next, int vulkan) {
   kotv_lock();
   g_gpu_next = gpu_next ? 1 : 0;
@@ -259,9 +288,11 @@ int kotv_mpv_desktop_set_rate(double rate) {
 
 int kotv_mpv_desktop_set_prop(const char* key, const char* val) {
   if (!key || !val) return -1;
-  if (strcmp(key, "wid") == 0 || strcmp(key, "android-surface-size") == 0) return 0;
-  /* 桌面/iOS Texture 软渲固定 vo=libmpv，忽略外部 vo/gpu-next。 */
-  if (strcmp(key, "vo") == 0) return 0;
+  /* 桌面/iOS Texture 软渲固定 vo=libmpv；跳过引擎自管键。 */
+  if (strcmp(key, "vo") == 0 || strcmp(key, "wid") == 0 ||
+      strcmp(key, "android-surface-size") == 0 || strcmp(key, "gpu-api") == 0) {
+    return 0;
+  }
   kotv_lock();
   const int rc = kotv_mpv_loaded() ? kotv_mpv_set_prop_string(key, val) : -1;
   kotv_unlock();
