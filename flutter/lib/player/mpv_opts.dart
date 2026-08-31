@@ -76,7 +76,9 @@ class KotvMpvOpts {
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
         return kotvIsWindows7() ? 'dxva2' : 'd3d11va';
       }
-      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
+      if (!kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.macOS ||
+              defaultTargetPlatform == TargetPlatform.iOS)) {
         return 'videotoolbox';
       }
     }

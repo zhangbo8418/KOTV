@@ -13,8 +13,8 @@ import 'silent_video_guard.dart';
 
 /// 原生 libmpv 播放后端（对齐 TV `androidx.media3.mpvplayer`）。
 ///
-/// - Android：MethodChannel `kotv_mpv` + PlatformView（Surface / Texture，对齐 TV PlayerView.setRender）
-/// - 桌面/iOS：同通道，P2 接 FFI/插件
+/// - Android：MethodChannel `kotv_mpv` + PlatformView（Surface / Texture）
+/// - 桌面 / iOS：同通道 + Flutter Texture（`vo=libmpv` 软渲）
 class NativeMpvPlayback extends KotvPlayback {
   NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
 
@@ -147,7 +147,7 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   /// Android：Hybrid Composition SurfaceView / TextureView（对齐 TV setRender）。
-  /// 桌面：原生 libmpv 软件渲染 → Flutter Texture（P2）。
+  /// 桌面 / iOS：原生 libmpv 软件渲染 → Flutter Texture。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     if (kotvIsAndroid()) {
       return Stack(
@@ -207,7 +207,9 @@ class NativeMpvPlayback extends KotvPlayback {
             err ??
                 (kotvIsDesktop()
                     ? '桌面 MPV 未就绪\n请将 libmpv 与应用放在同目录\n（Windows: mpv-2.dll 与 mdk.dll 一起）'
-                    : 'iOS 原生 MPV（P2）接入中…\n请暂用内置 FVP'),
+                    : (kotvIsIOS()
+                        ? 'iOS MPV 未就绪\n请将 libmpv.dylib 放入 App Frameworks'
+                        : '原生 MPV 未就绪')),
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
           ),
@@ -342,7 +344,9 @@ class NativeMpvPlayback extends KotvPlayback {
           ? '原生 MPV 插件未注册'
           : (kotvIsDesktop()
               ? '桌面 MPV 插件未注册（需重新编译 runner）'
-              : 'iOS 原生 MPV（P2）尚未接入，请暂用 FVP');
+              : (kotvIsIOS()
+                  ? 'iOS MPV 插件未注册（需重新编译 Runner）'
+                  : '原生 MPV 插件未注册'));
       _buffering = false;
       notifyListeners();
       throw StateError(_lastError!);

@@ -95,6 +95,7 @@ static const char* kSystem[] = {NULL};
 static int file_exists(const char* p) { return p && p[0] && access(p, F_OK) == 0; }
 static int cwd_dir(char* out, size_t cap) { return getcwd(out, cap) != NULL; }
 #if defined(__APPLE__)
+#include <TargetConditionals.h>
 #include <mach-o/dyld.h>
 static int exe_dir(char* out, size_t cap) {
   uint32_t size = (uint32_t)cap;
@@ -105,6 +106,16 @@ static int exe_dir(char* out, size_t cap) {
   }
   return dirname_inplace(out);
 }
+#if TARGET_OS_IPHONE
+static const char* kLeaves[] = {
+    "Frameworks/libmpv.dylib",
+    "../Frameworks/libmpv.dylib",
+    "libmpv.dylib",
+    "flutter/assets/mpv-libs/ios/libmpv.dylib",
+    "assets/mpv-libs/ios/libmpv.dylib",
+};
+static const char* kSystem[] = {NULL};
+#else
 static const char* kLeaves[] = {
     "../Frameworks/libmpv.dylib",
     "libmpv.dylib",
@@ -118,6 +129,7 @@ static const char* kSystem[] = {
     "/usr/local/opt/mpv/lib/libmpv.dylib",
     NULL,
 };
+#endif
 #else
 static int exe_dir(char* out, size_t cap) {
   ssize_t n = readlink("/proc/self/exe", out, cap - 1);
