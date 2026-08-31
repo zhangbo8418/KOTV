@@ -32,6 +32,14 @@ kotv_is_mpv_win7_build() {
   [[ "${KOTV_MPV_WIN7:-${KOTV_WIN7:-0}}" == "1" ]]
 }
 
+kotv_libplacebo_profile() {
+  if kotv_is_mpv_win7_build; then
+    echo "win7-d3d11"
+  else
+    echo "vulkan"
+  fi
+}
+
 # 桌面 libmpv 须能在 Win7 加载：目标子系统 6.01，避免 import SHCORE.dll（Win8+）。
 kotv_windows_mpv_cflags() {
   printf '%s' "-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000"
@@ -299,16 +307,24 @@ LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.360.1}"
 LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.360.1}"
 
 ensure_libplacebo() {
+  local want_profile cached_profile
+  want_profile="$(kotv_libplacebo_profile)"
+  cached_profile="$(cat "$BUILD_DIR/.libplacebo-profile" 2>/dev/null || true)"
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   if pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo 2>/dev/null; then
-    if kotv_is_windows_build && [[ ! -f "$PREFIX/lib/libplacebo.a" ]]; then
-      echo "==> windows: prefix libplacebo is not static; rebuilding for Win7 mpv"
+    if [[ "$cached_profile" == "$want_profile" ]]; then
+      if kotv_is_windows_build && [[ ! -f "$PREFIX/lib/libplacebo.a" ]]; then
+        echo "==> windows: prefix libplacebo is not static; rebuilding ($want_profile)"
+      else
+        echo "ok libplacebo $(pkg-config --modversion libplacebo) (profile=$want_profile)"
+        return
+      fi
     else
-      echo "ok libplacebo $(pkg-config --modversion libplacebo)"
-      return
+      echo "==> libplacebo profile ${cached_profile:-<none>} -> $want_profile, rebuilding"
+      rm -f "$PREFIX/lib/libplacebo.a" "$PREFIX/lib/pkgconfig/libplacebo.pc" 2>/dev/null || true
     fi
   fi
-  echo "==> build libplacebo $LIBPLACEBO_TAG (need >= $LIBPLACEBO_MIN)"
+  echo "==> build libplacebo $LIBPLACEBO_TAG (profile=$want_profile, need >= $LIBPLACEBO_MIN)"
   need meson
   need ninja
   mkdir -p "$BUILD_DIR"
@@ -326,7 +342,7 @@ ensure_libplacebo() {
   kotv_is_mpv_win7_build && vk_flag=disabled
   if kotv_is_windows_build; then
     placebo_lib=static
-    echo "==> windows: static libplacebo (fewer sibling DLLs next to mpv-2.dll)"
+    echo "==> windows: static libplacebo (profile=$want_profile, vulkan=$vk_flag)"
     export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"
     export CXXFLAGS="${CXXFLAGS:-} $(kotv_windows_mpv_cflags)"
     meson setup build \
@@ -351,6 +367,7 @@ ensure_libplacebo() {
   fi
   kotv_meson_compile build "libplacebo"
   meson install -C build
+  echo "$want_profile" > "$BUILD_DIR/.libplacebo-profile"
   # 某些平台仍会装到 lib/<triplet>/pkgconfig；一并加入 PATH
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   if ! pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo; then
@@ -681,6 +698,9 @@ EOF
   if kotv_is_windows_build; then
     local mpv_vk=enabled
     kotv_is_mpv_win7_build && mpv_vk=disabled
+    if kotv_is_mpv_win7_build; then
+      echo "==> mpv Win7 build: vulkan=disabled (D3D11 vo=gpu + dxva2 only)"
+    fi
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \
       --buildtype=release \
