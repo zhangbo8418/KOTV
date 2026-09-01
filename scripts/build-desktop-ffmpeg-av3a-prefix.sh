@@ -280,6 +280,9 @@ elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   FFMPEG_EXTRA+=(--disable-avdevice)
 fi
 
+# 旧前缀可能残留 libavdevice.pc（无 .a）；meson 会回退到 Homebrew 共享库。
+rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
+
 if ! ./configure \
   --prefix="$PREFIX" \
   --enable-static \

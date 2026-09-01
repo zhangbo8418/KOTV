@@ -691,15 +691,23 @@ build_mpv_macos() {
   cd mpv
   rm -rf build
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  # 禁止 meson 回退到 Homebrew libavdevice（会再次引入 AVFFrameReceiver）。
+  rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
   meson setup build \
     -Ddefault_library=shared \
     -Dlibmpv=true \
     -Dcplayer=false \
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
-    -Dlua=disabled
+    -Dlua=disabled \
+    -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-macos"
   cp -f build/libmpv.dylib "$ASSET/macos/libmpv.dylib"
+  if otool -L "$ASSET/macos/libmpv.dylib" | grep -qE '/usr/local/|/opt/homebrew/.*ffmpeg|libavdevice'; then
+    echo "ERROR: libmpv still links Homebrew ffmpeg / libavdevice" >&2
+    otool -L "$ASSET/macos/libmpv.dylib" | head -40 >&2
+    exit 1
+  fi
   if strings "$ASSET/macos/libmpv.dylib" | grep -q 'AVFFrameReceiver'; then
     echo "ERROR: libmpv still contains AVFFrameReceiver (rebuild FFmpeg with --disable-avdevice)" >&2
     exit 1
