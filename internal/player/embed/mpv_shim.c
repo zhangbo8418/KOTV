@@ -10,12 +10,14 @@
 #include <string.h>
 #include <wchar.h>
 
+/* 全平台：dlopen/LoadLibrary 失败详情（勿放进 _WIN32 块，否则 mac/linux/android 编译失败）。 */
+static char g_load_detail[512];
+
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 typedef HMODULE mpv_lib_t;
 static DWORD g_load_last_error;
-static char g_load_detail[512];
 static wchar_t *kotv_win_to_wide(const char *s, UINT cp) {
     int n;
     wchar_t *w;
@@ -798,11 +800,7 @@ unsigned long kotv_mpv_last_load_error(void) {
 }
 
 const char *kotv_mpv_last_load_detail(void) {
-#if defined(_WIN32)
     return g_load_detail[0] ? g_load_detail : "";
-#else
-    return "";
-#endif
 }
 
 int kotv_mpv_hard_active(void) {

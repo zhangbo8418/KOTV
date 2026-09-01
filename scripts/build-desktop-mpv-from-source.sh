@@ -342,16 +342,27 @@ ensure_libplacebo() {
   kotv_is_mpv_win7_build && vk_flag=disabled
   if kotv_is_windows_build; then
     placebo_lib=static
-            echo "==> windows: static libplacebo (profile=$want_profile, vulkan=$vk_flag)"
+    echo "==> windows: static libplacebo (profile=$want_profile, vulkan=$vk_flag)"
     export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"
     export CXXFLAGS="${CXXFLAGS:-} $(kotv_windows_mpv_cflags)"
     local -a placebo_extra=()
+    local -a native_args=()
+    local native_ini="$BUILD_DIR/meson-native-kotv.ini"
+    # Win7 D3D11 需要 shaderc；meson 必须用我们注入的 pkg-config（.cmd），
+    # 否则报 “Pkg-config for machine host machine not found”。
+    if [[ -f "$native_ini" ]]; then
+      native_args+=(--native-file="$native_ini")
+      echo "  using meson native-file: $native_ini"
+    elif [[ -n "${PKG_CONFIG:-}" ]]; then
+      echo "WARN: meson-native-kotv.ini missing; relying on PKG_CONFIG=$PKG_CONFIG" >&2
+    fi
     if kotv_is_mpv_win7_build; then
       placebo_extra+=(-Dd3d11=enabled -Dshaderc=enabled)
     fi
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
+      "${native_args[@]}" \
       -Ddefault_library="$placebo_lib" \
       -Dvulkan="$vk_flag" \
       "${placebo_extra[@]}" \
@@ -765,9 +776,18 @@ EOF
     pc_win="$pkg_bin/pkg-config.cmd"
     pkg_win="$PREFIX/lib/pkgconfig"
   fi
+  # libplacebo / mpv 的 meson 都要能找到 pkg-config；必须在 ensure_libplacebo 之前写好。
+  mkdir -p "$BUILD_DIR"
+  cat >"$BUILD_DIR/meson-native-kotv.ini" <<EOF
+[binaries]
+pkg-config = '$pc_win'
+pkgconfig = '$pc_win'
+
+[built-in options]
+pkg_config_path = '$pkg_win'
+EOF
   ensure_libplacebo
 
-  mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d mpv/.git ]]; then
     git clone --filter=blob:none --depth 1 "$MPV_REPO" mpv
@@ -785,14 +805,7 @@ EOF
     export LDFLAGS="${LDFLAGS:-} -Wl,--subsystem,windows:6.01"
   fi
   rm -rf build
-  cat >"$BUILD_DIR/meson-native-kotv.ini" <<EOF
-[binaries]
-pkg-config = '$pc_win'
-pkgconfig = '$pc_win'
-
-[built-in options]
-pkg_config_path = '$pkg_win'
-EOF
+  # meson-native-kotv.ini 已在 ensure_libplacebo 前写入
   if kotv_is_windows_build; then
     local mpv_vk=enabled
     kotv_is_mpv_win7_build && mpv_vk=disabled
