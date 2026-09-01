@@ -106,10 +106,23 @@ test -e "$OUT_APP/Contents/Resources/runtime/bridge/spider-bridge.jar" \
 test -x "$OUT_APP/Contents/MacOS/kotv-engine" \
   || test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"
 test -f "$OUT_APP/Contents/Frameworks/libmpv.dylib"
-# 发行包不得再链 Homebrew 绝对路径，否则无 brew 的机器 CREATE_FAILED。
+# 发行包不得再链 Homebrew 绝对路径，且 LC_RPATH 不得指向 Cellar（否则会混载两套库 SIGABRT）。
 if otool -L "$OUT_APP/Contents/Frameworks/libmpv.dylib" | awk 'NR>1 {print $1}' | grep -E '^(/usr/local/|/opt/homebrew/)'; then
   echo "ERROR: Frameworks/libmpv.dylib still has Homebrew absolute deps" >&2
   otool -L "$OUT_APP/Contents/Frameworks/libmpv.dylib" | head -40 >&2
+  exit 1
+fi
+if otool -l "$OUT_APP/Contents/Frameworks/libmpv.dylib" | awk '
+  $1 == "cmd" && $2 == "LC_RPATH" { want = 1; next }
+  want && $1 == "cmdsize" { next }
+  want && $1 == "path" { print $2; want = 0 }
+' | grep -E '^(/usr/local/|/opt/homebrew/|/Users/|/Applications/Xcode)'; then
+  echo "ERROR: Frameworks/libmpv.dylib still has absolute LC_RPATH (Homebrew/Xcode)" >&2
+  otool -l "$OUT_APP/Contents/Frameworks/libmpv.dylib" | awk '
+    $1 == "cmd" && $2 == "LC_RPATH" { want = 1; next }
+    want && $1 == "cmdsize" { next }
+    want && $1 == "path" { print $2; want = 0 }
+  ' >&2
   exit 1
 fi
 test -f "$OUT_APP/Contents/Frameworks/libplacebo.360.dylib" \

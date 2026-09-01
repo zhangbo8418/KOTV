@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 将 libmpv 打进桌面应用包，位置与 fvp/mdk 相同（不进 runtime、不单独建 libmpv/ 目录）。
-#   Windows：与 kotv.exe / mdk.dll 同目录
-#   Linux：bundle/lib/（与 libmdk.so 相同，$ORIGIN/lib）
-#   macOS：Contents/Frameworks/（与 mdk.xcframework 相同）+ 非系统 dylib 依赖
+#   Windows：与 kotv.exe / mdk.dll 同目录（整包 DLL + verify-windows-mpv-bundle 闭包）
+#   Linux：bundle/lib/ + 非 OS .so 依赖，RUNPATH=$ORIGIN（避免缺库 / 与系统混载）
+#   macOS：Contents/Frameworks/ + 非系统 dylib，清掉 Homebrew/Xcode LC_RPATH
 # 用法: bundle-app-libmpv.sh <KO影视.app | linux/win install dir>
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,6 +21,8 @@ strip_runtime_libmpv() {
 
 # macOS：把 libmpv 及其 Homebrew/前缀依赖收进 Frameworks，并改成 @rpath。
 # 否则发行包在无 Homebrew 的机器上会 CREATE_FAILED（缺 _pl_* / libplacebo）。
+# 还必须删掉 Homebrew/Xcode 的 LC_RPATH：否则 @rpath 会先解析到 Cellar，
+# 与 Frameworks 内拷贝混载两套同名 dylib → SIGABRT（本机起播崩溃即此因）。
 kotv_macos_is_system_dylib() {
   case "$1" in
     /System/*|/usr/lib/*|/usr/lib/swift/*) return 0 ;;
@@ -29,17 +31,47 @@ kotv_macos_is_system_dylib() {
   return 1
 }
 
+kotv_macos_list_rpaths() {
+  otool -l "$1" 2>/dev/null | awk '
+    $1 == "cmd" && $2 == "LC_RPATH" { want = 1; next }
+    want && $1 == "cmdsize" { next }
+    want && $1 == "path" { print $2; want = 0 }
+  '
+}
+
+kotv_macos_strip_abs_rpaths() {
+  local lib="$1"
+  local path has_loader=0
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    case "$path" in
+      @loader_path)
+        has_loader=1
+        ;;
+      @executable_path|@rpath)
+        ;;
+      /*)
+        echo "  - rpath $path ($(basename "$lib"))"
+        install_name_tool -delete_rpath "$path" "$lib" 2>/dev/null || true
+        ;;
+    esac
+  done < <(kotv_macos_list_rpaths "$lib")
+  if [[ "$has_loader" != 1 ]]; then
+    install_name_tool -add_rpath "@loader_path" "$lib" 2>/dev/null || true
+  fi
+}
+
 kotv_macos_bundle_dylib_deps() {
   local fw="$1"
   local root_lib="$2"
   local -a queue=()
-  local lib dep base dest_lib old_id
+  local lib dep base dest_lib old_id f
   [[ -f "$root_lib" ]] || return 1
   command -v otool >/dev/null || return 1
   command -v install_name_tool >/dev/null || return 1
 
   install_name_tool -id "@rpath/$(basename "$root_lib")" "$root_lib" 2>/dev/null || true
-  install_name_tool -add_rpath "@loader_path" "$root_lib" 2>/dev/null || true
+  kotv_macos_strip_abs_rpaths "$root_lib"
   queue+=("$root_lib")
 
   while ((${#queue[@]} > 0)); do
@@ -53,30 +85,44 @@ kotv_macos_bundle_dylib_deps() {
         continue
       }
       base="$(basename "$dep")"
-      # libplacebo.360.dylib → 也保留真实文件名
       dest_lib="$fw/$base"
       if [[ ! -f "$dest_lib" ]]; then
         cp -f "$dep" "$dest_lib"
         chmod u+w "$dest_lib" 2>/dev/null || true
         install_name_tool -id "@rpath/$base" "$dest_lib" 2>/dev/null || true
-        install_name_tool -add_rpath "@loader_path" "$dest_lib" 2>/dev/null || true
+        kotv_macos_strip_abs_rpaths "$dest_lib"
         queue+=("$dest_lib")
         echo "  + Frameworks/$base"
       fi
       install_name_tool -change "$dep" "@rpath/$base" "$lib" 2>/dev/null || true
-      # 兼容已是 @rpath/旧名 的情况
       old_id="$(otool -D "$dest_lib" 2>/dev/null | tail -1 | tr -d '[:space:]' || true)"
       if [[ -n "$old_id" && "$old_id" != "@rpath/$base" ]]; then
         install_name_tool -change "$old_id" "@rpath/$base" "$lib" 2>/dev/null || true
       fi
     done < <(otool -L "$lib" 2>/dev/null | awk 'NR>1 {print $1}')
   done
+
+  # 已存在的拷贝也清掉 Homebrew/Xcode rpath，并把残留绝对依赖改成 @rpath
+  for f in "$fw"/libmpv.dylib "$fw"/lib*.dylib; do
+    [[ -f "$f" ]] || continue
+    chmod u+w "$f" 2>/dev/null || true
+    kotv_macos_strip_abs_rpaths "$f"
+    while IFS= read -r dep; do
+      [[ -n "$dep" ]] || continue
+      kotv_macos_is_system_dylib "$dep" && continue
+      [[ -f "$dep" ]] || continue
+      base="$(basename "$dep")"
+      [[ -f "$fw/$base" ]] || continue
+      install_name_tool -change "$dep" "@rpath/$base" "$f" 2>/dev/null || true
+    done < <(otool -L "$f" 2>/dev/null | awk 'NR>1 {print $1}')
+  done
 }
 
 kotv_macos_verify_libmpv_self_contained() {
-  local lib="$1"
+  local fw lib="$1"
   local bad=0
-  local dep
+  local dep path f
+  fw="$(dirname "$lib")"
   while IFS= read -r dep; do
     [[ -n "$dep" ]] || continue
     case "$dep" in
@@ -86,12 +132,38 @@ kotv_macos_verify_libmpv_self_contained() {
         ;;
     esac
   done < <(otool -L "$lib" 2>/dev/null | awk 'NR>1 {print $1}')
+  for f in "$fw"/libmpv.dylib "$fw"/libass*.dylib "$fw"/libplacebo*.dylib \
+           "$fw"/libvulkan*.dylib "$fw"/libfreetype*.dylib "$fw"/libharfbuzz*.dylib \
+           "$fw"/libglib*.dylib "$fw"/libpng*.dylib "$fw"/libintl*.dylib \
+           "$fw"/libfribidi*.dylib "$fw"/libunibreak*.dylib "$fw"/libgraphite*.dylib \
+           "$fw"/libpcre*.dylib; do
+    [[ -f "$f" ]] || continue
+    while IFS= read -r path; do
+      case "$path" in
+        /usr/local/*|/opt/homebrew/*|/Users/*|/Applications/Xcode.app/*)
+          echo "ERROR: $(basename "$f") still has absolute rpath: $path" >&2
+          bad=1
+          ;;
+      esac
+    done < <(kotv_macos_list_rpaths "$f")
+    while IFS= read -r dep; do
+      case "$dep" in
+        /usr/local/*|/opt/homebrew/*|/Users/*)
+          echo "ERROR: $(basename "$f") still links absolute path: $dep" >&2
+          bad=1
+          ;;
+      esac
+    done < <(otool -L "$f" 2>/dev/null | awk 'NR>1 {print $1}')
+  done
   [[ "$bad" == 0 ]] || return 1
   # 无 Homebrew 路径时也应能 dlopen（依赖已在同目录 @rpath）
   if command -v python3 >/dev/null; then
     (cd "$(dirname "$lib")" && python3 - <<PY
 import ctypes, os, sys
 os.chdir(r"""$(dirname "$lib")""")
+# 阻断 fallback 到 /usr/local，确认只靠 Frameworks
+os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = "/usr/lib"
+os.environ.pop("DYLD_LIBRARY_PATH", None)
 try:
     ctypes.CDLL(r"""$lib""")
 except OSError as e:
@@ -101,6 +173,91 @@ print("ok dlopen Frameworks/libmpv.dylib")
 PY
 )
   fi
+}
+
+# Linux：只拷 libmpv.so.2 会在干净机器上缺 libplacebo/ffmpeg/libass；
+# 或与系统同名 .so 混载（类 macOS Homebrew rpath 问题）。收齐依赖并设 $ORIGIN。
+kotv_linux_is_os_so() {
+  local base
+  base="$(basename "$1")"
+  case "$base" in
+    ld-linux*.so*|libc.so*|libm.so*|libdl.so*|libpthread.so*|librt.so*|libresolv.so*| \
+    libgcc_s.so*|libstdc++.so*|libgomp.so*) return 0 ;;
+    libX*.so*|libxcb*.so*|libwayland*.so*|libxkbcommon*.so*|libEGL.so*|libGL.so*|libGLESv*| \
+    libGLdispatch*|libGLX*|libOpenGL*|libvulkan.so*|libdrm.so*|libgbm.so*|libasound.so*| \
+    libpulse*.so*|libpipewire*.so*|libjack.so*|libva*.so*|libvdpau.so*|libSDL2*.so*| \
+    libcaca.so*|libsixel.so*|libudev.so*|libffi.so*|libbsd.so*|libmd.so*|libdbus*.so*| \
+    libsystemd.so*|libselinux.so*|libcap.so*|libz.so*|liblzma.so*|libbz2.so*|liblz4.so*| \
+    libgpg-error.so*|libgcrypt.so*|libnss*.so*|libnspr*.so*|libpcre*.so*) return 0 ;;
+  esac
+  return 1
+}
+
+kotv_linux_set_origin_rpath() {
+  local so="$1"
+  if command -v patchelf >/dev/null 2>&1; then
+    patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true
+  fi
+}
+
+kotv_linux_bundle_so_deps() {
+  local libdir="$1"
+  local root_so="$2"
+  local -a queue=()
+  local so line path base dest
+  [[ -f "$root_so" ]] || return 1
+  kotv_linux_set_origin_rpath "$root_so"
+  queue+=("$root_so")
+
+  while ((${#queue[@]} > 0)); do
+    so="${queue[0]}"
+    queue=("${queue[@]:1}")
+    if ! command -v ldd >/dev/null 2>&1; then
+      echo "WARN: ldd missing; cannot harvest linux libmpv deps" >&2
+      return 0
+    fi
+    while IFS= read -r line; do
+      # "libfoo.so.1 => /path/libfoo.so.1 (0x...)" or "libfoo.so.1 => not found"
+      path="$(printf '%s\n' "$line" | awk '/=>/{print $3}')"
+      [[ -n "$path" && "$path" != "not" ]] || continue
+      [[ -f "$path" ]] || continue
+      kotv_linux_is_os_so "$path" && continue
+      base="$(basename "$path")"
+      dest="$libdir/$base"
+      if [[ ! -f "$dest" ]]; then
+        cp -f "$path" "$dest"
+        chmod u+w "$dest" 2>/dev/null || true
+        kotv_linux_set_origin_rpath "$dest"
+        queue+=("$dest")
+        echo "  + lib/$base"
+      fi
+    done < <(ldd "$so" 2>/dev/null || true)
+  done
+}
+
+kotv_linux_verify_libmpv_self_contained() {
+  local libdir="$1"
+  local so="$libdir/libmpv.so.2"
+  local bad=0 line path
+  [[ -f "$so" ]] || return 1
+  # 至少要有 placebo / ass（发行包硬依赖）
+  if ! find "$libdir" -maxdepth 1 -name 'libplacebo.so*' | grep -q .; then
+    echo "ERROR: missing libplacebo next to libmpv (linux bundle incomplete)" >&2
+    bad=1
+  fi
+  if ! find "$libdir" -maxdepth 1 -name 'libass.so*' | grep -q .; then
+    echo "ERROR: missing libass next to libmpv (linux bundle incomplete)" >&2
+    bad=1
+  fi
+  if command -v ldd >/dev/null 2>&1; then
+    while IFS= read -r line; do
+      if printf '%s\n' "$line" | grep -q 'not found'; then
+        echo "ERROR: unresolved dep: $line" >&2
+        bad=1
+      fi
+    done < <(ldd "$so" 2>/dev/null || true)
+  fi
+  [[ "$bad" == 0 ]] || return 1
 }
 
 case "$(uname -s)" in
@@ -122,8 +279,12 @@ case "$(uname -s)" in
     [[ -f "$MPV" ]] || { echo "ERROR: missing $MPV" >&2; exit 1; }
     mkdir -p "$DEST/lib"
     cp -f "$MPV" "$DEST/lib/libmpv.so.2"
+    chmod u+w "$DEST/lib/libmpv.so.2" 2>/dev/null || true
+    echo "==> bundle linux libmpv + .so deps into lib/ (\$ORIGIN)"
+    kotv_linux_bundle_so_deps "$DEST/lib" "$DEST/lib/libmpv.so.2"
+    kotv_linux_verify_libmpv_self_contained "$DEST/lib"
     strip_runtime_libmpv
-    echo "bundled linux lib/libmpv.so.2"
+    echo "bundled linux lib/libmpv.so.2 (+ deps)"
     ;;
   MINGW*|MSYS*|CYGWIN*)
     SRC="$ROOT/flutter/assets/mpv-libs/windows"
@@ -132,7 +293,7 @@ case "$(uname -s)" in
       exit 1
     }
     mkdir -p "$DEST"
-    # 与 mdk.dll 同目录；已有的 Flutter/fvp DLL 不覆盖。
+    # 与 mdk.dll 同目录；已有的 Flutter/fvp DLL 不覆盖。闭包由 verify-windows-mpv-bundle 门禁。
     if [[ -d "$SRC" ]]; then
       while IFS= read -r -d '' f; do
         base="$(basename "$f")"

@@ -49,6 +49,11 @@ chmod +x "$BUNDLE/kotv-engine"
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
 "$ROOT/scripts/bundle-app-libmpv.sh" "$BUNDLE"
 [[ -f "$BUNDLE/lib/libmpv.so.2" ]] || { echo "missing $BUNDLE/lib/libmpv.so.2" >&2; exit 1; }
+# 与 macOS 同理：依赖须在 lib/ 旁，避免只靠系统 .so 或混载
+find "$BUNDLE/lib" -maxdepth 1 -name 'libplacebo.so*' | grep -q . \
+  || { echo "ERROR: missing libplacebo next to libmpv.so.2" >&2; exit 1; }
+find "$BUNDLE/lib" -maxdepth 1 -name 'libass.so*' | grep -q . \
+  || { echo "ERROR: missing libass next to libmpv.so.2" >&2; exit 1; }
 [[ -d "$BUNDLE/runtime" ]] || { echo "missing $BUNDLE/runtime" >&2; exit 1; }
 if [[ -f "$ROOT/cmd/updater/updater" ]]; then
   cp -f "$ROOT/cmd/updater/updater" "$BUNDLE/updater"
