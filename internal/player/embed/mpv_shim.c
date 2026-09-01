@@ -468,6 +468,7 @@ static int ensure_lib_loaded(const char *lib_path) {
         return 0;
     if (!lib_path || !lib_path[0])
         return -1;
+    g_load_detail[0] = '\0';
 #if defined(_WIN32)
     kotv_win_preflight(lib_path);
 #endif
@@ -478,6 +479,14 @@ static int ensure_lib_loaded(const char *lib_path) {
         if (!g_load_detail[0] && g_load_last_error == 126)
             snprintf(g_load_detail, sizeof(g_load_detail),
                      "dependency DLL missing (winerr=126); check vulkan-1.dll / libplacebo version");
+#else
+        {
+            const char *err = dlerror();
+            if (err && err[0])
+                snprintf(g_load_detail, sizeof(g_load_detail), "%s", err);
+            else
+                snprintf(g_load_detail, sizeof(g_load_detail), "dlopen failed: %s", lib_path);
+        }
 #endif
         return -2;
     }
@@ -588,6 +597,9 @@ static void apply_gpu_render_opts(mpv_handle *mpv, int sw_vo) {
     p_set_option_string(mpv, "gpu-context", "auto");
     if (g_vulkan)
         p_set_option_string(mpv, "gpu-api", "vulkan");
+    else if (kotv_is_windows7())
+        /* Win7 发行 libmpv 未编 d3d11（缺 shaderc）；auto 易卡住，固定 OpenGL。 */
+        p_set_option_string(mpv, "gpu-api", "opengl");
     else
         p_set_option_string(mpv, "gpu-api", "auto");
 }

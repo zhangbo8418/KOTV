@@ -176,7 +176,11 @@ static void HandleMethod(FlutterMethodCall* call, FlutterResult result) {
     int rc = kotv_mpv_desktop_init(lib);
     free(lib);
     if (rc != 0) {
-      result([FlutterError errorWithCode:@"CREATE_FAILED" message:@"load failed" details:nil]);
+      const char* detail = kotv_mpv_last_load_detail();
+      NSString* msg = detail && detail[0]
+                          ? [NSString stringWithFormat:@"load failed (rc=%d): %s", rc, detail]
+                          : [NSString stringWithFormat:@"load failed (rc=%d)", rc];
+      result([FlutterError errorWithCode:@"CREATE_FAILED" message:msg details:nil]);
       return;
     }
     StartTick();
