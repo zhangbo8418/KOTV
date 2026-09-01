@@ -175,6 +175,25 @@ PY
   fi
 }
 
+# mdk/fvp 自带 /usr/local/lib、/opt/homebrew/lib rpath 时，会优先加载 Cellar FFmpeg，
+# 与 libmpv 内嵌 FFmpeg 的同名 ObjC 类（AVFFrameReceiver）冲突 → talloc canary SIGABRT。
+kotv_macos_strip_homebrew_rpaths_tree() {
+  local fw="$1"
+  local f path
+  [[ -d "$fw" ]] || return 0
+  while IFS= read -r -d '' f; do
+    chmod u+w "$f" 2>/dev/null || true
+    while IFS= read -r path; do
+      case "$path" in
+        /usr/local/*|/opt/homebrew/*|/Users/*)
+          echo "  - rpath $path ($(basename "$f"))"
+          install_name_tool -delete_rpath "$path" "$f" 2>/dev/null || true
+          ;;
+      esac
+    done < <(kotv_macos_list_rpaths "$f")
+  done < <(find "$fw" \( -name '*.dylib' -o -name 'mdk' -o -name 'fvp' \) -type f -print0 2>/dev/null)
+}
+
 # Linux：只拷 libmpv.so.2 会在干净机器上缺 libplacebo/ffmpeg/libass；
 # 或与系统同名 .so 混载（类 macOS Homebrew rpath 问题）。收齐依赖并设 $ORIGIN。
 kotv_linux_is_os_so() {
@@ -270,6 +289,8 @@ case "$(uname -s)" in
     chmod u+w "$FW/libmpv.dylib" 2>/dev/null || true
     echo "==> bundle macOS libmpv + dylib deps into Frameworks"
     kotv_macos_bundle_dylib_deps "$FW" "$FW/libmpv.dylib"
+    echo "==> strip Homebrew rpaths from Frameworks (mdk/fvp/libmpv)"
+    kotv_macos_strip_homebrew_rpaths_tree "$FW"
     kotv_macos_verify_libmpv_self_contained "$FW/libmpv.dylib"
     strip_runtime_libmpv
     echo "bundled macOS Frameworks/libmpv.dylib (+ deps)"

@@ -43,6 +43,15 @@ class KotvMpvOpts {
       vulkan = false;
       if (gpuApi == 'vulkan') gpuApi = 'auto';
     }
+    // macOS/iOS：Texture 软渲；勿开 Vulkan。且同进程 fvp/mdk 若再拉系统 FFmpeg，
+    // 会与 libmpv 内嵌 FFmpeg 的 ObjC 类冲突导致 SIGABRT。
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      gpuNext = false;
+      vulkan = false;
+      if (gpuApi == 'vulkan') gpuApi = 'auto';
+    }
     if (gpuApi == 'vulkan') vulkan = true;
     if (vulkan && gpuApi == 'auto' && !kotvIsWindows7()) gpuApi = 'vulkan';
     return KotvMpvOpts(
@@ -108,13 +117,14 @@ class KotvMpvOpts {
       out['vo'] = 'gpu-next';
     }
     // Windows HWND 硬渲由原生固定 vo=gpu/gpu-next；gpu-api 按设置/能力。
+    // macOS/iOS Texture 软渲固定 vo=libmpv，不要写 gpu-api=vulkan。
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       if (gpuApi == 'd3d11' || gpuApi == 'opengl' || gpuApi == 'vulkan') {
         if (!(kotvIsWindows7() && gpuApi == 'vulkan')) {
           out['gpu-api'] = gpuApi;
         }
       }
-    } else if (vulkan && !kotvIsAndroid() && !kotvIsWindows7()) {
+    } else if (vulkan && kotvIsAndroid()) {
       out['gpu-api'] = 'vulkan';
     }
     if (!live) {

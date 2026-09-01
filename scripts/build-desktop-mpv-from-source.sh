@@ -700,11 +700,15 @@ build_mpv_macos() {
     -Dlua=disabled
   kotv_meson_compile build "mpv-macos"
   cp -f build/libmpv.dylib "$ASSET/macos/libmpv.dylib"
+  if strings "$ASSET/macos/libmpv.dylib" | grep -q 'AVFFrameReceiver'; then
+    echo "ERROR: libmpv still contains AVFFrameReceiver (rebuild FFmpeg with --disable-avdevice)" >&2
+    exit 1
+  fi
   if [[ "$AV3A" == "1" ]]; then
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$ASSET/macos/libmpv.dylib" \
       || { echo "ERROR: libmpv.dylib missing AV3A symbols" >&2; exit 1; }
   fi
-  echo "built macOS/libmpv.dylib (+ AV3A=$AV3A)"
+  echo "built macOS/libmpv.dylib (+ AV3A=$AV3A, no avdevice)"
 }
 
 build_mpv_windows() {

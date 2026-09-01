@@ -61,8 +61,8 @@ clone_ffmpeg() {
   git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
 }
 
-# v3: macOS 禁 x86asm（Xcode 15+ ld 拒 nasm 无 platform 目标：unknown platform）
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v3"
+# v4: macOS 禁用 avdevice，避免与 fvp/mdk 的 libffmpeg 重复注册 AVFFrameReceiver → SIGABRT
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v4"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -274,6 +274,10 @@ if kotv_is_windows_build; then
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
+  # 与 mdk.framework/libffmpeg.9.dylib 同进程时，两边都会注册 AVFFrameReceiver /
+  # AVFAudioReceiver，ObjC 运行时警告后极易 talloc canary 崩（起播 SIGABRT）。
+  # 播放不需要 avfoundation 采集设备，禁掉 libavdevice 即可。
+  FFMPEG_EXTRA+=(--disable-avdevice)
 fi
 
 if ! ./configure \
