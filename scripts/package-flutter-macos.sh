@@ -106,7 +106,16 @@ test -e "$OUT_APP/Contents/Resources/runtime/bridge/spider-bridge.jar" \
 test -x "$OUT_APP/Contents/MacOS/kotv-engine" \
   || test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"
 test -f "$OUT_APP/Contents/Frameworks/libmpv.dylib"
-echo "  java ok, engine ok, libmpv ok"
+# 发行包不得再链 Homebrew 绝对路径，否则无 brew 的机器 CREATE_FAILED。
+if otool -L "$OUT_APP/Contents/Frameworks/libmpv.dylib" | awk 'NR>1 {print $1}' | grep -E '^(/usr/local/|/opt/homebrew/)'; then
+  echo "ERROR: Frameworks/libmpv.dylib still has Homebrew absolute deps" >&2
+  otool -L "$OUT_APP/Contents/Frameworks/libmpv.dylib" | head -40 >&2
+  exit 1
+fi
+test -f "$OUT_APP/Contents/Frameworks/libplacebo.360.dylib" \
+  || test -f "$OUT_APP/Contents/Frameworks/libplacebo.dylib" \
+  || { echo "ERROR: missing bundled libplacebo in Frameworks" >&2; exit 1; }
+echo "  java ok, engine ok, libmpv ok (self-contained)"
 
 echo "==> ad-hoc sign"
 codesign --force --deep --sign - "$OUT_APP" 2>/dev/null || true
