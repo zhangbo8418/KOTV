@@ -34,8 +34,7 @@ kotv_is_mpv_win7_build() {
 
 kotv_libplacebo_profile() {
   if kotv_is_mpv_win7_build; then
-    # 无 Vulkan；d3d11 VO 暂不强制（MinGW 源码编 shaderc/glslang 易挂），vo=gpu 可走 gl。
-    echo "win7-novk"
+    echo "win7-d3d11"
   else
     echo "vulkan"
   fi
@@ -346,11 +345,16 @@ ensure_libplacebo() {
             echo "==> windows: static libplacebo (profile=$want_profile, vulkan=$vk_flag)"
     export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"
     export CXXFLAGS="${CXXFLAGS:-} $(kotv_windows_mpv_cflags)"
+    local -a placebo_extra=()
+    if kotv_is_mpv_win7_build; then
+      placebo_extra+=(-Dd3d11=enabled -Dshaderc=enabled)
+    fi
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
       -Ddefault_library="$placebo_lib" \
       -Dvulkan="$vk_flag" \
+      "${placebo_extra[@]}" \
       -Dopengl=disabled \
       -Ddemos=false \
       -Dtests=false \
@@ -487,12 +491,96 @@ EOF
   echo "ok libass $(pkg-config --modversion libass) (built)"
 }
 
-# Win7：不装 Vulkan SDK。曾尝试源码编 shaderc 以开 d3d11，但 glslang+GCC15 易挂；
-# 链接靠 mpv-win7-desktop.patch（win32 始终编 d3d11_helpers）。vo=gpu 可走 gl-win32。
+# Win7：不装 Vulkan SDK，但 mpv/libplacebo 的 d3d11 必须有 shaderc + spirv-cross。
 ensure_windows_d3d11_shader_deps() {
   kotv_is_mpv_win7_build || return 0
-  echo "skip shaderc/spirv-cross source build (Win7: d3d11_helpers patch + gl VO; no Vulkan)"
-  return 0
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  local need_shaderc=0 need_spirv=0
+  pkg-config --exists shaderc 2>/dev/null || need_shaderc=1
+  pkg-config --exists spirv-cross-c-shared 2>/dev/null || need_spirv=1
+  if [[ "$need_shaderc" == 0 && "$need_spirv" == 0 ]]; then
+    echo "ok shaderc $(pkg-config --modversion shaderc 2>/dev/null || echo found) + spirv-cross (Win7 D3D11)"
+    return 0
+  fi
+  need git
+  need cmake
+  need ninja
+  mkdir -p "$BUILD_DIR" "$PREFIX"
+  local w7cflags
+  w7cflags="$(kotv_windows_mpv_cflags)"
+
+  if [[ "$need_spirv" == 1 ]]; then
+    local tag="${KOTV_SPIRV_CROSS_TAG:-vulkan-sdk-1.3.296.0}"
+    echo "==> build SPIRV-Cross $tag (shared, Win7 D3D11)"
+    cd "$BUILD_DIR"
+    if [[ ! -d SPIRV-Cross/.git ]]; then
+      git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Cross.git SPIRV-Cross \
+        || git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Cross.git SPIRV-Cross
+    fi
+    rm -rf SPIRV-Cross/build
+    cmake -S SPIRV-Cross -B SPIRV-Cross/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+      -DCMAKE_C_FLAGS="$w7cflags" \
+      -DCMAKE_CXX_FLAGS="$w7cflags" \
+      -DSPIRV_CROSS_SHARED=ON \
+      -DSPIRV_CROSS_STATIC=OFF \
+      -DSPIRV_CROSS_CLI=OFF \
+      -DSPIRV_CROSS_ENABLE_TESTS=OFF
+    cmake --build SPIRV-Cross/build -j"$JOBS"
+    cmake --install SPIRV-Cross/build
+  fi
+
+  if [[ "$need_shaderc" == 1 ]]; then
+    local stag="${KOTV_SHADERC_TAG:-v2024.1}"
+    echo "==> build shaderc $stag (static, Win7 D3D11)"
+    cd "$BUILD_DIR"
+    if [[ ! -d shaderc/.git ]]; then
+      git clone --depth 1 --branch "$stag" https://github.com/google/shaderc.git shaderc \
+        || git clone --depth 1 https://github.com/google/shaderc.git shaderc
+    fi
+    if [[ ! -f shaderc/third_party/glslang/CMakeLists.txt ]]; then
+      (cd shaderc && python3 ./utils/git-sync-deps) \
+        || (cd shaderc && python ./utils/git-sync-deps)
+    fi
+    # GCC15：glslang SpvBuilder.h 用 uint32_t 却未 include cstdint
+    local hdr="shaderc/third_party/glslang/SPIRV/SpvBuilder.h"
+    if [[ -f "$hdr" ]] && ! grep -q '#include <cstdint>' "$hdr"; then
+      if command -v python3 >/dev/null; then
+        python3 - "$hdr" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p, encoding='utf-8', errors='replace').read()
+if '#include <cstdint>' not in t:
+    t = t.replace('#include <algorithm>', '#include <cstdint>\n#include <algorithm>', 1)
+    if '#include <cstdint>' not in t:
+        t = '#include <cstdint>\n' + t
+    open(p, 'w', encoding='utf-8').write(t)
+print('patched', p, 'for cstdint')
+PY
+      fi
+    fi
+    rm -rf shaderc/build
+    # -include cstdint：兜底 MinGW/GCC15 对第三方头的严格性
+    cmake -S shaderc -B shaderc/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+      -DCMAKE_C_FLAGS="$w7cflags" \
+      -DCMAKE_CXX_FLAGS="$w7cflags -include cstdint" \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DSHADERC_SKIP_TESTS=ON \
+      -DSHADERC_SKIP_EXAMPLES=ON \
+      -DSHADERC_SKIP_COPYRIGHT_CHECK=ON
+    cmake --build shaderc/build -j"$JOBS"
+    cmake --install shaderc/build
+  fi
+
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  pkg-config --exists spirv-cross-c-shared \
+    || { echo "ERROR: spirv-cross-c-shared not visible to pkg-config after build" >&2; exit 1; }
+  pkg-config --exists shaderc \
+    || { echo "ERROR: shaderc not visible to pkg-config after build" >&2; ls -la "$PREFIX/lib/pkgconfig" >&2; exit 1; }
+  echo "ok Win7 D3D11 deps: shaderc=$(pkg-config --modversion shaderc) spirv-cross=$(pkg-config --modversion spirv-cross-c-shared 2>/dev/null || echo ok)"
 }
 
 ensure_windows_vulkan() {
@@ -708,8 +796,12 @@ EOF
   if kotv_is_windows_build; then
     local mpv_vk=enabled
     kotv_is_mpv_win7_build && mpv_vk=disabled
-            if kotv_is_mpv_win7_build; then
-      echo "==> mpv Win7 build: vulkan=disabled (d3d11_helpers always on; vo=gpu may use gl)"
+    if kotv_is_mpv_win7_build; then
+      echo "==> mpv Win7 build: vulkan=disabled, d3d11=enabled (vo=gpu + D3D11/OpenGL/auto)"
+    fi
+    local -a mpv_extra=()
+    if kotv_is_mpv_win7_build; then
+      mpv_extra+=(-Dd3d11=enabled -Dshaderc=enabled -Dspirv-cross=enabled)
     fi
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \
@@ -720,6 +812,7 @@ EOF
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan="$mpv_vk" \
+      "${mpv_extra[@]}" \
       -Dlua=disabled \
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']" \
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']"
@@ -749,6 +842,15 @@ EOF
       || { echo "ERROR: mpv-2.dll missing AV3A symbols" >&2; exit 1; }
   fi
   echo "built windows/mpv-2.dll (+ AV3A=$AV3A) from $dll"
+  if kotv_is_mpv_win7_build; then
+    # meson configure 摘要里 d3d11 应为 YES（依赖 shaderc+spirv-cross）
+    if ! meson configure build 2>/dev/null | grep -Eiq '^[[:space:]]*d3d11[[:space:]]+(YES|true|enabled)'; then
+      echo "ERROR: Win7 libmpv built without d3d11 (need shaderc+spirv-cross)" >&2
+      meson configure build 2>/dev/null | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
+      exit 1
+    fi
+    echo "ok Win7 mpv features include d3d11"
+  fi
 }
 
 case "$PLAT" in

@@ -283,11 +283,13 @@ class KotvMpvPluginWin {
     if (method == "create") {
       std::string render = "surface";
       std::string hwdec = "auto";
+      std::string gpu_api = "auto";
       int gpu_next = 0;
       int vulkan = 0;
       if (args) {
         if (auto* v = MapGet<std::string>(*args, "render")) render = *v;
         if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
+        if (auto* v = MapGet<std::string>(*args, "gpuApi")) gpu_api = *v;
         if (auto* v = MapGet<bool>(*args, "gpuNext")) gpu_next = *v ? 1 : 0;
         if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
       }
@@ -300,6 +302,7 @@ class KotvMpvPluginWin {
         result->Error("NO_LIBMPV", "libmpv not found; put mpv-2.dll next to kotv.exe", nullptr);
         return;
       }
+      kotv_mpv_set_gpu_api(gpu_api.c_str());
       kotv_mpv_set_preinit_options(gpu_next, vulkan, hwdec.c_str());
       int rc = 0;
       int used_gn = gpu_next;
@@ -425,6 +428,7 @@ class KotvMpvPluginWin {
     if (method == "open") {
       std::string url;
       std::string hwdec = "auto";
+      std::string gpu_api = "auto";
       int live = 0;
       int gpu_next = 0;
       int vulkan = 0;
@@ -432,6 +436,7 @@ class KotvMpvPluginWin {
       if (args) {
         if (auto* v = MapGet<std::string>(*args, "url")) url = *v;
         if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
+        if (auto* v = MapGet<std::string>(*args, "gpuApi")) gpu_api = *v;
         if (auto* v = MapGet<bool>(*args, "live")) live = *v ? 1 : 0;
         if (auto* v = MapGet<bool>(*args, "gpuNext")) gpu_next = *v ? 1 : 0;
         if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
@@ -441,6 +446,7 @@ class KotvMpvPluginWin {
       }
 #if defined(_WIN32)
       ApplyWin7MpvOpts(&hwdec, &gpu_next, &vulkan);
+      kotv_mpv_set_gpu_api(gpu_api.c_str());
       if (hard_render_ && !kotv_mpv_desktop_hard_active()) {
         pending_.active = true;
         pending_.url = url;
@@ -459,6 +465,7 @@ class KotvMpvPluginWin {
         return;
       }
 #endif
+      kotv_mpv_set_gpu_api(gpu_api.c_str());
       const int rc = kotv_mpv_desktop_open(url.c_str(), headers.c_str(), hwdec.c_str(), gpu_next, vulkan, live);
       if (rc < 0) {
         char msg[160];
@@ -533,13 +540,16 @@ class KotvMpvPluginWin {
       int gpu_next = 0;
       int vulkan = 0;
       std::string hwdec = "auto";
+      std::string gpu_api = "auto";
       if (args) {
         if (auto* v = MapGet<bool>(*args, "gpuNext")) gpu_next = *v ? 1 : 0;
         if (auto* v = MapGet<bool>(*args, "vulkan")) vulkan = *v ? 1 : 0;
         if (auto* v = MapGet<std::string>(*args, "decode")) hwdec = *v;
+        if (auto* v = MapGet<std::string>(*args, "gpuApi")) gpu_api = *v;
 #if defined(_WIN32)
         ApplyWin7MpvOpts(&hwdec, &gpu_next, &vulkan);
 #endif
+        kotv_mpv_set_gpu_api(gpu_api.c_str());
         kotv_mpv_set_preinit_options(gpu_next, vulkan, hwdec.c_str());
         kotv_mpv_desktop_note_opts(gpu_next, vulkan);
         if (auto* props = MapGet<flutter::EncodableMap>(*args, "props")) {

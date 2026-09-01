@@ -20,6 +20,10 @@ unsigned long kotv_mpv_last_load_error(void);
 const char *kotv_mpv_last_load_detail(void);
 /* 须在 mpv_initialize 前设置；变更后 kotv_mpv_reinit_player() 重建实例。 */
 int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec);
+/* gpu_api: NULL/空/"auto" → 清除显式 API（仍可由 vulkan 标志推导）；d3d11/opengl/vulkan。 */
+int kotv_mpv_set_gpu_api(const char *gpu_api);
+int kotv_mpv_set_preinit_options2(int gpu_next, int vulkan, const char *hwdec,
+                                  const char *gpu_api);
 int kotv_mpv_reinit_player(void);
 /* 扫描 libmpv 二进制是否含 vulkan 特性（无需完整初始化）。 */
 int kotv_mpv_lib_has_vulkan(const char *lib_path);

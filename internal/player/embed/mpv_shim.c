@@ -424,6 +424,7 @@ static int g_hard; /* 1 = wid 硬渲，无 software render context */
 static long long g_hard_win; /* 最近一次 wid 硬渲 HWND，供 reinit 复用 */
 static int g_gpu_next;
 static int g_vulkan;
+static char g_gpu_api[32]; /* 空=auto；可为 d3d11/opengl/vulkan */
 static char g_hwdec_opt[64];
 
 static int init_sw(void);
@@ -595,11 +596,10 @@ static void apply_gpu_render_opts(mpv_handle *mpv, int sw_vo) {
     }
     p_set_option_string(mpv, "vo", g_gpu_next ? "gpu-next" : "gpu");
     p_set_option_string(mpv, "gpu-context", "auto");
-    if (g_vulkan)
+    if (g_gpu_api[0])
+        p_set_option_string(mpv, "gpu-api", g_gpu_api);
+    else if (g_vulkan)
         p_set_option_string(mpv, "gpu-api", "vulkan");
-    else if (kotv_is_windows7())
-        /* Win7 发行 libmpv 未编 d3d11（缺 shaderc）；auto 易卡住，固定 OpenGL。 */
-        p_set_option_string(mpv, "gpu-api", "opengl");
     else
         p_set_option_string(mpv, "gpu-api", "auto");
 }
@@ -608,13 +608,36 @@ int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec) {
     if (kotv_is_windows7()) {
         gpu_next = 0;
         vulkan = 0;
+        if (strcmp(g_gpu_api, "vulkan") == 0)
+            g_gpu_api[0] = '\0';
     }
     g_gpu_next = gpu_next ? 1 : 0;
     g_vulkan = vulkan ? 1 : 0;
+    /* 不在这里清 g_gpu_api：由 kotv_mpv_set_gpu_api / set_preinit_options2 设置。 */
+    if (g_vulkan && !g_gpu_api[0])
+        copy_cstr(g_gpu_api, sizeof(g_gpu_api), "vulkan");
     g_hwdec_opt[0] = '\0';
     if (hwdec && hwdec[0])
         copy_cstr(g_hwdec_opt, sizeof(g_hwdec_opt), hwdec);
     return 0;
+}
+
+int kotv_mpv_set_gpu_api(const char *gpu_api) {
+    g_gpu_api[0] = '\0';
+    if (!gpu_api || !gpu_api[0] || strcmp(gpu_api, "auto") == 0)
+        return 0;
+    if (kotv_is_windows7() && strcmp(gpu_api, "vulkan") == 0)
+        return 0;
+    copy_cstr(g_gpu_api, sizeof(g_gpu_api), gpu_api);
+    if (strcmp(g_gpu_api, "vulkan") == 0)
+        g_vulkan = 1;
+    return 0;
+}
+
+int kotv_mpv_set_preinit_options2(int gpu_next, int vulkan, const char *hwdec,
+                                  const char *gpu_api) {
+    kotv_mpv_set_gpu_api(gpu_api);
+    return kotv_mpv_set_preinit_options(gpu_next, vulkan, hwdec);
 }
 
 int kotv_mpv_reinit_player(void) {

@@ -250,6 +250,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
+        'gpuApi': _opts.gpuApi,
         'conf': _opts.conf,
         'render': _renderMode,
       });
@@ -361,6 +362,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'decode': _opts.hwdecValue(),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
+        'gpuApi': _opts.gpuApi,
         'conf': _opts.conf,
         'render': _renderMode,
         'props': _opts.propertyMap(live: live),
@@ -502,6 +504,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'decode': opts.hwdecValue(),
         'gpuNext': opts.gpuNext,
         'vulkan': opts.vulkan,
+        'gpuApi': opts.gpuApi,
         'conf': opts.conf,
         'props': opts.propertyMap(live: _live),
       });

@@ -12,34 +12,44 @@ import 'kotv_platform.dart';
 /// |------|---------|------|
 /// | hwdec | mediacodec / auto-safe | d3d11va / dxva2 / videotoolbox |
 /// | mpv.conf | setProperty | 同上 |
-/// | gpu-next | vo=gpu-next（Surface） | Win10+ HWND：`vo=gpu-next`；Win7：`vo=gpu` + D3D11 |
+/// | gpu-api | vulkan / opengl（按设备） | Win7：auto/d3d11/opengl；Win10+：+vulkan |
+/// | gpu-next | vo=gpu-next（Surface） | Win10+ HWND：`vo=gpu-next`；Win7：强制 `vo=gpu` |
 /// | AV3A | libmvcodec/libarcdav3a（webhtv） | 源码：FongMi FFmpeg+avs3a（CI: KOTV_BUILD_MPV_AV3A=1） |
 class KotvMpvOpts {
   const KotvMpvOpts({
     this.decodeMode = 'auto',
     this.gpuNext = false,
     this.vulkan = false,
+    this.gpuApi = 'auto',
     this.conf = '',
   });
 
   final String decodeMode;
   final bool gpuNext;
   final bool vulkan;
+  /// Windows：`auto` / `d3d11` / `opengl` / `vulkan`（Win7 忽略 vulkan）。
+  final String gpuApi;
   final String conf;
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
     var gpuNext = '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true';
     var vulkan = '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true';
+    var gpuApi = '${settings['mpvGpuApi'] ?? 'auto'}'.trim().toLowerCase();
+    if (gpuApi.isEmpty) gpuApi = 'auto';
     // Win7：Vulkan/gpu-next 易在 libmpv 初始化时触发 talloc canary 断言。
     if (kotvIsWindows7()) {
       gpuNext = false;
       vulkan = false;
+      if (gpuApi == 'vulkan') gpuApi = 'auto';
     }
+    if (gpuApi == 'vulkan') vulkan = true;
+    if (vulkan && gpuApi == 'auto' && !kotvIsWindows7()) gpuApi = 'vulkan';
     return KotvMpvOpts(
       decodeMode: decode.isEmpty ? 'auto' : decode,
       gpuNext: gpuNext,
       vulkan: vulkan,
+      gpuApi: gpuApi,
       conf: '${settings['mpvConf'] ?? ''}',
     );
   }
@@ -48,12 +58,14 @@ class KotvMpvOpts {
     String? decodeMode,
     bool? gpuNext,
     bool? vulkan,
+    String? gpuApi,
     String? conf,
   }) {
     return KotvMpvOpts(
       decodeMode: decodeMode ?? this.decodeMode,
       gpuNext: gpuNext ?? this.gpuNext,
       vulkan: vulkan ?? this.vulkan,
+      gpuApi: gpuApi ?? this.gpuApi,
       conf: conf ?? this.conf,
     );
   }
@@ -95,8 +107,14 @@ class KotvMpvOpts {
     if (gpuNext) {
       out['vo'] = 'gpu-next';
     }
-    // Windows HWND 硬渲由原生固定 vo=gpu/gpu-next；Win7 禁止 vulkan/gpu-next。
-    if (vulkan && !kotvIsAndroid() && !kotvIsWindows7()) {
+    // Windows HWND 硬渲由原生固定 vo=gpu/gpu-next；gpu-api 按设置/能力。
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      if (gpuApi == 'd3d11' || gpuApi == 'opengl' || gpuApi == 'vulkan') {
+        if (!(kotvIsWindows7() && gpuApi == 'vulkan')) {
+          out['gpu-api'] = gpuApi;
+        }
+      }
+    } else if (vulkan && !kotvIsAndroid() && !kotvIsWindows7()) {
       out['gpu-api'] = 'vulkan';
     }
     if (!live) {
