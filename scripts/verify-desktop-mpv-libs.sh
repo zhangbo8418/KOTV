@@ -17,6 +17,19 @@ check_vulkan() {
   fi
 }
 
+# macOS：不要求 Vulkan（走 VideoToolbox / Cocoa）；确认硬解/平台路径在。
+check_macos_render() {
+  local f="$1"
+  local name="$2"
+  [[ -f "$f" ]] || { echo "skip $name (not built)"; return; }
+  if grep -aqE 'videotoolbox|avfoundation|macos-cocoa|gl-cocoa' "$f" 2>/dev/null; then
+    echo "ok $name: macOS render path (VideoToolbox/Cocoa)"
+  else
+    echo "ERROR: $name lacks macOS VideoToolbox/Cocoa markers" >&2
+    fail=1
+  fi
+}
+
 check_av3a() {
   local f="$1"
   local name="$2"
@@ -46,7 +59,7 @@ check_no_avdevice() {
   echo "ok $name: no libavdevice / AVFFrameReceiver"
 }
 
-echo "==> verify desktop libmpv (Vulkan${KOTV_EXPECT_MPV_AV3A:+ + AV3A})"
+echo "==> verify desktop libmpv (Win/Linux: Vulkan; macOS: VideoToolbox; + AV3A when expected)"
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
   check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
@@ -63,7 +76,7 @@ if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == linux* ]]; then
 fi
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
   if [[ -f "$ASSET/macos/libmpv.dylib" ]]; then
-    check_vulkan "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
+    check_macos_render "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_av3a "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_no_avdevice "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
   else
@@ -72,4 +85,4 @@ if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
 fi
 
 [[ "$fail" == 0 ]] || exit 1
-echo "==> ok: desktop libmpv Vulkan checks passed"
+echo "==> ok: desktop libmpv checks passed"

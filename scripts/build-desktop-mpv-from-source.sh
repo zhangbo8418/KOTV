@@ -36,9 +36,9 @@ kotv_libplacebo_profile() {
   if kotv_is_mpv_win7_build; then
     echo "win7-vulkan"
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    # macOS 自前缀编，关掉 Homebrew 可选依赖（shaderc/lcms/vulkan-loader），
-    # 避免 arm64 bottle 链进 x86_64，以及发行包仍带绝对路径。
-    echo "macos-minimal-v1"
+    # macOS：无 Vulkan（MoltenVK/Homebrew 架构易踩坑）；播放射频走 VideoToolbox/Cocoa。
+    # 同时关掉 shaderc/lcms，避免发行包残留 Homebrew 绝对路径。
+    echo "macos-novk-v2"
   else
     echo "vulkan"
   fi
@@ -376,8 +376,8 @@ ensure_libplacebo() {
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    echo "==> macOS: libplacebo without Homebrew shaderc/vulkan/lcms ($want_profile)"
-    # meson 仍可能通过 cmake 找到 Homebrew；显式关掉可选依赖。
+    echo "==> macOS: libplacebo no-vulkan / no-Homebrew-optional ($want_profile)"
+    # mpv 也必须 -Dvulkan=disabled，否则报「libplacebo compiled without vulkan」。
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
@@ -718,12 +718,14 @@ build_mpv_macos() {
   fi
   # 禁止 meson 回退到 Homebrew libavdevice（会再次引入 AVFFrameReceiver）。
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
+  # macOS 主路径是 VideoToolbox/Cocoa；Vulkan 需 MoltenVK 且与自编 libplacebo 对齐困难。
+  # libass 等仍可由系统/Homebrew pkg-config 默认路径提供。
   meson setup build \
     -Ddefault_library=shared \
     -Dlibmpv=true \
     -Dcplayer=false \
     -Dmanpage-build=disabled \
-    -Dvulkan=enabled \
+    -Dvulkan=disabled \
     -Dlua=disabled \
     -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-macos"
