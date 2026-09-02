@@ -58,10 +58,12 @@ class DetailScreen extends ConsumerStatefulWidget {
   /// 详情是否在栈上（含播放中 PopScope.canPop=false）。
   static bool get isOpen => _DetailScreenState._active != null;
 
-  /// 换源等场景：在 pop 详情栈前先硬停播（await），避免后台继续出声。
+  /// 换源等场景：在 pop 详情栈前硬停播（await），避免后台继续出声。
   static Future<void> prepareLeave() async {
     final active = _DetailScreenState._active;
     if (active == null) return;
+    // 先摘画面/清沉浸，避免 Texture/HWND 挡住底栏与首页点击。
+    await active._detachPlaybackUi();
     await active._stopHard();
     if (!active.mounted) return;
     // 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
@@ -449,24 +451,50 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _stoppedHard = true;
   }
 
+  /// 离开前先卸 Video/沉浸标记：Windows media_kit Texture 若在 stop 期间仍盖在栈上，
+  /// 出栈后 HWND 可能继续吃点击，导致首页「设置/直播/搜索」点不动。
+  Future<void> _detachPlaybackUi() async {
+    try {
+      ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+    } catch (_) {}
+    _immersiveFullscreen = false;
+    if (_playUrl.isNotEmpty || _miniDesktop) {
+      _playUrl = '';
+      _unwirePlaybackNotify();
+      if (mounted) setState(() {});
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
   Future<void> _leavePage({VoidCallback? afterPop}) async {
     if (_immersiveFullscreen) {
       await _exitImmersiveFullscreen();
+    } else {
+      try {
+        ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+      } catch (_) {}
     }
     if (_miniDesktop) {
       try {
         await _exitMini();
       } catch (_) {}
     }
-    /* 对齐 PopScope / prepareLeave：先 await 硬停，缓冲中退回首页勿后台出声。 */
-    await _stopHard();
-    if (!mounted) return;
+    // 先摘画面 → 出栈 → 再 await 硬停：首页立刻可点，且仍能停掉后台声音。
+    await _detachPlaybackUi();
+    if (!mounted) {
+      await _stopHard();
+      return;
+    }
     _allowPop = true;
     setState(() {});
     await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
+    if (!mounted) {
+      await _stopHard();
+      return;
+    }
     Navigator.of(context).pop();
     afterPop?.call();
+    await _stopHard();
   }
 
   void _wireEnded(KotvPlayback p) {
