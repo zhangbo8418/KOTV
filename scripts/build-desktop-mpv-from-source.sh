@@ -35,6 +35,10 @@ kotv_is_mpv_win7_build() {
 kotv_libplacebo_profile() {
   if kotv_is_mpv_win7_build; then
     echo "win7-vulkan"
+  elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    # macOS 自前缀编，关掉 Homebrew 可选依赖（shaderc/lcms/vulkan-loader），
+    # 避免 arm64 bottle 链进 x86_64，以及发行包仍带绝对路径。
+    echo "macos-minimal-v1"
   else
     echo "vulkan"
   fi
@@ -371,6 +375,19 @@ ensure_libplacebo() {
       -Dtests=false \
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
+  elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    echo "==> macOS: libplacebo without Homebrew shaderc/vulkan/lcms ($want_profile)"
+    # meson 仍可能通过 cmake 找到 Homebrew；显式关掉可选依赖。
+    meson setup build \
+      --prefix="$PREFIX" \
+      --libdir=lib \
+      -Ddefault_library="$placebo_lib" \
+      -Dvulkan=disabled \
+      -Dshaderc=disabled \
+      -Dlcms=disabled \
+      -Dopengl=disabled \
+      -Ddemos=false \
+      -Dtests=false
   else
     meson setup build \
       --prefix="$PREFIX" \
@@ -385,7 +402,11 @@ ensure_libplacebo() {
   meson install -C build
   echo "$want_profile" > "$BUILD_DIR/.libplacebo-profile"
   # 某些平台仍会装到 lib/<triplet>/pkgconfig；一并加入 PATH
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+  else
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  fi
   if ! pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo; then
     echo "ERROR: libplacebo install not visible to pkg-config (>= $LIBPLACEBO_MIN)" >&2
     pkg-config --modversion libplacebo 2>&1 || true

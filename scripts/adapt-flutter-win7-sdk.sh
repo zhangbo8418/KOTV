@@ -57,7 +57,9 @@ dependency_overrides:
   fvp: 0.37.3
   web: 0.5.1
   wakelock_plus: 1.2.8
+  # 1.3.x 用 onPopInvokedWithResult，Flutter 3.19 只有 onPopInvoked。
+  media_kit_video: 1.2.5
 OVERRIDES
 
 echo "adapted pubspec for Flutter 3.19 / Dart 3.3:"
-grep -nE 'sdk:|video_player|dependency_overrides' "$APP" | head -50
+grep -nE 'sdk:|video_player|media_kit_video|dependency_overrides' "$APP" | head -50

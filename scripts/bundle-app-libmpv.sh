@@ -168,18 +168,21 @@ kotv_macos_bundle_dylib_deps() {
 kotv_macos_copy_prefix_libplacebo() {
   local fw="$1"
   local prefix="${KOTV_MPV_PREFIX:-$ROOT/.build/desktop-mpv/prefix}"
-  local f base
+  local f base resolved
   shopt -s nullglob
   for f in "$prefix/lib"/libplacebo*.dylib; do
-    [[ -f "$f" ]] || continue
+    [[ -e "$f" ]] || continue
+    # 跟随 symlink，避免把指向 Cellar 的链接原样拷进 Frameworks。
+    resolved="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$f" 2>/dev/null || echo "$f")"
+    [[ -f "$resolved" ]] || continue
     base="$(basename "$f")"
-    if [[ ! -f "$fw/$base" ]]; then
-      cp -f "$f" "$fw/$base"
-      chmod u+w "$fw/$base" 2>/dev/null || true
-      install_name_tool -id "@rpath/$base" "$fw/$base" 2>/dev/null || true
-      kotv_macos_strip_abs_rpaths "$fw/$base"
-      echo "  + Frameworks/$base (prefix)"
-    fi
+    cp -f "$resolved" "$fw/$base"
+    chmod u+w "$fw/$base" 2>/dev/null || true
+    install_name_tool -id "@rpath/$base" "$fw/$base" 2>/dev/null || true
+    kotv_macos_strip_abs_rpaths "$fw/$base"
+    echo "  + Frameworks/$base (prefix)"
+    # 收齐其非系统依赖并改成 @rpath（防御仍链到 Homebrew 的旧拷贝）。
+    kotv_macos_bundle_dylib_deps "$fw" "$fw/$base"
   done
   shopt -u nullglob
 }
