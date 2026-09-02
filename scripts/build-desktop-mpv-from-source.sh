@@ -48,6 +48,44 @@ kotv_macos_target_arch() {
   echo "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
 }
 
+# Rosetta/arm64 宿主上 meson 常把 host 误判成 aarch64，导致 libpng 编进 ARM NEON。
+# 写 native-file 强制目标 arch。
+kotv_macos_write_meson_native() {
+  local arch cpu_family ini
+  arch="$(kotv_macos_target_arch)"
+  cpu_family="$arch"
+  [[ "$arch" == "arm64" ]] && cpu_family="aarch64"
+  mkdir -p "$BUILD_DIR"
+  ini="$BUILD_DIR/meson-native-macos-${arch}.ini"
+  cat >"$ini" <<EOF
+[binaries]
+c = ['clang', '-arch', '$arch']
+cpp = ['clang++', '-arch', '$arch']
+objc = ['clang', '-arch', '$arch']
+objcpp = ['clang++', '-arch', '$arch']
+ar = 'ar'
+strip = 'strip'
+pkg-config = 'pkg-config'
+pkgconfig = 'pkg-config'
+
+[built-in options]
+c_args = ['-arch', '$arch']
+cpp_args = ['-arch', '$arch']
+objc_args = ['-arch', '$arch']
+objcpp_args = ['-arch', '$arch']
+c_link_args = ['-arch', '$arch']
+cpp_link_args = ['-arch', '$arch']
+pkg_config_path = '$PREFIX/lib/pkgconfig'
+
+[host_machine]
+system = 'darwin'
+cpu_family = '$cpu_family'
+cpu = '$arch'
+endian = 'little'
+EOF
+  printf '%s\n' "$ini"
+}
+
 # 把匹配目标 arch 的 Vulkan headers/loader（+ MoltenVK）装进 PREFIX，供 libplacebo/mpv 链接。
 # 禁止直接链 /opt/homebrew 的 arm64 bottle 进 x86_64 包。
 ensure_macos_vulkan() {
@@ -518,11 +556,15 @@ ensure_libplacebo() {
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     ensure_macos_vulkan
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+    export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+    local native_ini
+    native_ini="$(kotv_macos_write_meson_native)"
     echo "==> macOS: libplacebo vulkan=enabled via prefix ($want_profile, arch=$(kotv_macos_target_arch))"
     # shaderc/lcms 仍关：可选，且 Homebrew 版易带错架构绝对路径。
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
+      --native-file="$native_ini" \
       -Ddefault_library="$placebo_lib" \
       -Dvulkan=enabled \
       -Dshaderc=disabled \
@@ -638,6 +680,32 @@ EOF
       -Dfribidi:tests=false \
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
+  elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    local native_ini
+    native_ini="$(kotv_macos_write_meson_native)"
+    echo "==> build libass $tag (macOS static, native-file=$(basename "$native_ini"))"
+    # 关 freetype png：避免 libpng 在 arm 宿主上误开 NEON 汇编。
+    meson setup build \
+      --prefix="$PREFIX" \
+      --libdir=lib \
+      --native-file="$native_ini" \
+      -Ddefault_library=static \
+      -Dfontconfig=disabled \
+      -Dlibunibreak=disabled \
+      -Dasm=disabled \
+      --force-fallback-for=freetype2,fribidi,harfbuzz \
+      -Dfreetype2:harfbuzz=disabled \
+      -Dfreetype2:png=disabled \
+      -Dfreetype2:bzip2=disabled \
+      -Dfreetype2:brotli=disabled \
+      -Dharfbuzz:tests=disabled \
+      -Dharfbuzz:cairo=disabled \
+      -Dharfbuzz:gobject=disabled \
+      -Dharfbuzz:glib=disabled \
+      -Dharfbuzz:freetype=disabled \
+      -Dfribidi:docs=false \
+      -Dfribidi:bin=false \
+      -Dfribidi:tests=false
   else
     meson setup build \
       --prefix="$PREFIX" \
