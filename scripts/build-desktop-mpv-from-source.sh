@@ -306,7 +306,12 @@ ensure_libplacebo() {
   local want_profile cached_profile
   want_profile="$(kotv_libplacebo_profile)"
   cached_profile="$(cat "$BUILD_DIR/.libplacebo-profile" 2>/dev/null || true)"
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  # macOS：只用自前缀 libplacebo，禁止 pkg-config 命中 Homebrew（arm64 runner 编 x86_64 会链错架构）。
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+  else
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  fi
   if pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo 2>/dev/null; then
     if [[ "$cached_profile" == "$want_profile" ]]; then
       if kotv_is_windows_build && [[ ! -f "$PREFIX/lib/libplacebo.a" ]]; then
@@ -671,6 +676,8 @@ build_mpv_macos() {
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
   fi
   ensure_lua_pkg
+  # 与 linux/windows 一致：自前缀编 libplacebo，避免 arm64 runner 上 x86_64 链到 Homebrew arm64。
+  ensure_libplacebo
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d mpv/.git ]]; then
@@ -683,7 +690,11 @@ build_mpv_macos() {
   fi
   cd mpv
   rm -rf build
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+  else
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  fi
   # 禁止 meson 回退到 Homebrew libavdevice（会再次引入 AVFFrameReceiver）。
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
   meson setup build \

@@ -165,6 +165,25 @@ kotv_macos_bundle_dylib_deps() {
   done
 }
 
+kotv_macos_copy_prefix_libplacebo() {
+  local fw="$1"
+  local prefix="${KOTV_MPV_PREFIX:-$ROOT/.build/desktop-mpv/prefix}"
+  local f base
+  shopt -s nullglob
+  for f in "$prefix/lib"/libplacebo*.dylib; do
+    [[ -f "$f" ]] || continue
+    base="$(basename "$f")"
+    if [[ ! -f "$fw/$base" ]]; then
+      cp -f "$f" "$fw/$base"
+      chmod u+w "$fw/$base" 2>/dev/null || true
+      install_name_tool -id "@rpath/$base" "$fw/$base" 2>/dev/null || true
+      kotv_macos_strip_abs_rpaths "$fw/$base"
+      echo "  + Frameworks/$base (prefix)"
+    fi
+  done
+  shopt -u nullglob
+}
+
 kotv_macos_verify_libmpv_self_contained() {
   local fw lib="$1"
   local bad=0
@@ -381,6 +400,7 @@ case "$(uname -s)" in
     chmod u+w "$FW/libmpv.dylib" 2>/dev/null || true
     echo "==> bundle macOS libmpv + dylib deps into Frameworks"
     kotv_macos_bundle_dylib_deps "$FW" "$FW/libmpv.dylib"
+    kotv_macos_copy_prefix_libplacebo "$FW"
     echo "==> strip Homebrew rpaths from Frameworks (mdk/fvp/libmpv)"
     kotv_macos_strip_homebrew_rpaths_tree "$FW"
     kotv_macos_verify_libmpv_self_contained "$FW/libmpv.dylib"

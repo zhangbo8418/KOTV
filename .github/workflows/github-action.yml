@@ -193,16 +193,20 @@ jobs:
           name: updater-windows-amd64
           path: cmd/updater
 
-      - name: Install desktop MPV source deps (Win7, no Vulkan SDK)
+      - name: Install desktop MPV source deps (Win7)
         shell: bash
         run: |
-          choco install nasm -y --no-progress
+          choco install nasm vulkan-sdk -y --no-progress
           python -m pip install meson ninja
           export PATH="/c/mingw-msvcrt/mingw64/bin:/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
           export PATH="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"
           gcc --version
           nasm -v
           meson --version
+          if [[ -z "${VULKAN_SDK:-}" ]]; then
+            sdk="$(ls -d /c/VulkanSDK/*/ 2>/dev/null | tail -1 || true)"
+            [[ -n "$sdk" ]] && echo "VULKAN_SDK=$(cygpath -w "$sdk")" >> "$GITHUB_ENV"
+          fi
 
       - name: Adapt SDK + package Win7
         shell: bash
@@ -275,6 +279,7 @@ jobs:
             libgtk-3-dev liblzma-dev libgl1-mesa-dev xorg-dev libxkbcommon-dev \
             libass-dev libarchive-dev libbluray-dev liblua5.2-dev libluajit-5.1-dev \
             libplacebo-dev libvulkan-dev libshaderc-dev liblcms2-dev \
+            libasound2-dev libmpv-dev mpv \
             p7zip-full unzip curl zip
 
       - uses: subosito/flutter-action@v2
