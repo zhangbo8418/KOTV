@@ -1,5 +1,3 @@
-import 'dart:math' show max;
-
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -156,16 +154,10 @@ class KotvMpvOpts {
       if (!live) {
         try {
           await KotvBufferBudget.warm(force: true);
-          final budget = KotvBufferBudget.bytes();
-          final forward = KotvBufferBudget.mpvMiB(budget);
-          final back = KotvBufferBudget.mpvMiB(max(16 * 1024 * 1024, budget ~/ 8));
-          await set('cache', 'yes');
-          await set('cache-on-disk', 'no');
-          await set('demuxer-max-bytes', forward);
-          await set('demuxer-max-back-bytes', back);
-          await set('demuxer-readahead-secs', '120');
-          await set('cache-secs', '90');
-          await set('framedrop', 'vo');
+          final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
+          for (final e in props.entries) {
+            await set(e.key, e.value);
+          }
         } catch (_) {}
       }
 
@@ -202,26 +194,8 @@ class KotvMpvOpts {
       out['gpu-api'] = 'vulkan';
     }
     if (!live) {
-      if (kotvIsAndroid()) {
-        out['cache'] = 'yes';
-        out['cache-on-disk'] = 'no';
-        out['demuxer-max-bytes'] = '48MiB';
-        out['demuxer-max-back-bytes'] = '8MiB';
-        out['demuxer-readahead-secs'] = '20';
-        out['cache-secs'] = '30';
-        out['framedrop'] = 'vo';
-      } else {
-        final budget = KotvBufferBudget.bytes();
-        final forward = KotvBufferBudget.mpvMiB(budget);
-        final back = KotvBufferBudget.mpvMiB(max(16 * 1024 * 1024, budget ~/ 8));
-        out['cache'] = 'yes';
-        out['cache-on-disk'] = 'no';
-        out['demuxer-max-bytes'] = forward;
-        out['demuxer-max-back-bytes'] = back;
-        out['demuxer-readahead-secs'] = '120';
-        out['cache-secs'] = '90';
-        out['framedrop'] = 'vo';
-      }
+      final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
+      out.addAll(props);
     }
     for (final e in parseConfLines(conf)) {
       out[e.$1] = e.$2;

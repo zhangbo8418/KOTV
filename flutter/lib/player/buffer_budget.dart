@@ -1,3 +1,5 @@
+import 'dart:math' show max;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -8,8 +10,7 @@ import 'kotv_platform.dart';
 /// 策略（Exo / MPV / 外部 VLC prefetch 对齐）：
 /// 1. **按内存上限**囤前向缓冲，不用「剩余播放秒数」当预读目标；
 /// 2. 播出去的数据应释放，allocated 降到预算以下后**继续补满**到上限；
-/// 3. 短时长参数只用于「能否起播 / 卡顿后重开」，不控制囤多少
-///   （外部 VLC 的 network-caching 属第 3 类；字节囤靠 prefetch-buffer-size）。
+/// 3. 不设 mpv `cache-secs` / `demuxer-readahead-secs` 等**固定秒数**预读目标。
 ///
 /// Web / HTML5：由浏览器自己管缓冲，不走本预算。
 ///
@@ -18,24 +19,45 @@ class KotvBufferBudget {
   KotvBufferBudget._();
 
   static const _android = MethodChannel('kotv_android');
+  static const _host = MethodChannel('kotv_host');
   static int? _cached;
+
+  /// mpv 点播缓冲：仅字节预算，不设 cache-secs / demuxer-readahead-secs。
+  static Map<String, String> mpvCacheProps(int budgetBytes) {
+    final forward = mpvMiB(budgetBytes);
+    final back = mpvMiB(max(16 * 1024 * 1024, budgetBytes ~/ 8));
+    return {
+      'cache': 'yes',
+      'cache-on-disk': 'no',
+      'demuxer-max-bytes': forward,
+      'demuxer-max-back-bytes': back,
+      'framedrop': 'vo',
+    };
+  }
 
   /// 同步读取（未 [warm] 时用平台启发式）。
   static int bytes() => _cached ?? _fallback();
 
-  /// 读取/刷新预算。Android 读真实 total/avail；[force] 时按当前可用内存重算。
+  /// 读取/刷新预算。各平台读真实 total/avail；[force] 时按当前可用内存重算。
   static Future<int> warm({bool force = false}) async {
     if (!force && _cached != null) return _cached!;
     try {
+      Map<dynamic, dynamic>? raw;
       if (kotvIsAndroid()) {
-        final raw = await _android.invokeMethod<dynamic>('getMemoryInfo');
-        if (raw is Map) {
-          final total = (raw['totalBytes'] as num?)?.toInt() ?? 0;
-          final avail = (raw['availBytes'] as num?)?.toInt() ?? 0;
+        final v = await _android.invokeMethod<dynamic>('getMemoryInfo');
+        if (v is Map) raw = v;
+      } else if (kotvIsDesktop()) {
+        final v = await _host.invokeMethod<dynamic>('getMemoryInfo');
+        if (v is Map) raw = v;
+      }
+      if (raw != null) {
+        final total = (raw['totalBytes'] as num?)?.toInt() ?? 0;
+        final avail = (raw['availBytes'] as num?)?.toInt() ?? 0;
+        if (total > 0) {
           _cached = fromDevice(
             totalBytes: total,
             availBytes: avail,
-            desktop: false,
+            desktop: kotvIsDesktop(),
           );
           return _cached!;
         }
@@ -83,14 +105,12 @@ class KotvBufferBudget {
     return '${mib}MiB';
   }
 
-  /// mdk [setBufferRange] 只有时间上限、无 `demuxer-max-bytes`。
-  /// 用同一套内存预算 ÷ 参考码率（默认 4Mbps）换成 maxMs，精神对齐 MPV。
+  /// mdk [setBufferRange] 只有毫秒 API；用内存预算 ÷ 参考码率换算，不用固定秒数。
   static int fvpMaxBufferMs(int budgetBytes, {int refBitsPerSec = 4 * 1000 * 1000}) {
     final bps = refBitsPerSec <= 0 ? 4 * 1000 * 1000 : refBitsPerSec;
     final bytesPerSec = bps / 8.0;
     final ms = (budgetBytes / bytesPerSec * 1000.0).round();
-    // 至少约 1 分钟可见预读；上限 2 小时，避免极端预算拖垮内存
-    if (ms < 60 * 1000) return 60 * 1000;
+    if (ms < 1000) return 1000;
     if (ms > 2 * 3600 * 1000) return 2 * 3600 * 1000;
     return ms;
   }

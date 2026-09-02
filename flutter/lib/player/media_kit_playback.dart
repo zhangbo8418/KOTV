@@ -55,11 +55,15 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.duration.listen((_) => notifyListeners()));
     _subs.add(player.stream.buffer.listen((_) => notifyListeners()));
     _subs.add(player.stream.buffering.listen((v) {
+      final wasBuffering = _buffering;
       _buffering = v;
       if (v) {
         unawaited(_pollCacheSpeed());
       } else {
         _speedBps = 0;
+        if (wasBuffering && _url.isNotEmpty && !player.state.completed) {
+          unawaited(_kickAfterBufferReady());
+        }
       }
       notifyListeners();
     }));
@@ -89,7 +93,37 @@ class MediaKitPlayback extends KotvPlayback {
   bool _speedBusy = false;
   int _lastCacheBytes = -1;
   DateTime? _lastCacheAt;
+  int _resumeKickGen = 0;
   late Future<void> _optsReady;
+
+  /// mpv `paused-for-cache` 结束时常出现：缓冲条已满、浮层消失，但 time-pos 仍不走，
+  /// 须用户点播停或 seek 才动。缓冲结束且前方已有数据时补一次 play/seek。
+  Future<void> _kickAfterBufferReady() async {
+    if (_live || _url.isEmpty) return;
+    final gen = _resumeKickGen;
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (gen != _resumeKickGen || _url.isEmpty) return;
+
+    final pos = position;
+    final buf = buffered;
+    if (buf <= pos + const Duration(milliseconds: 500)) return;
+
+    if (!playing) {
+      try {
+        await player.play();
+      } catch (_) {}
+      return;
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (gen != _resumeKickGen || _url.isEmpty || !playing) return;
+    if (position <= pos + const Duration(milliseconds: 250)) {
+      try {
+        await player.seek(pos);
+        await player.play();
+      } catch (_) {}
+    }
+  }
 
   Future<void> _prepareOpts() async {
     try {
@@ -239,6 +273,7 @@ class MediaKitPlayback extends KotvPlayback {
   }) async {
     _url = url;
     _live = live;
+    _resumeKickGen++;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     if (drm != null && drm.isNotEmpty) {
       throw StateError('MPV 不支持 DRM，请用内置 ExoPlayer');
@@ -249,10 +284,6 @@ class MediaKitPlayback extends KotvPlayback {
     }
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
     await player.open(media);
-    // open 末尾虽会 unpause，缓冲期 mpv 常回到 paused-for-cache；尽早 play 避免须 seek 才动。
-    try {
-      await player.play();
-    } catch (_) {}
     await kotvGuardSilentVideo(
       hasVideoSize: () => width > 0 && height > 0,
       isBuffering: () => buffering,
@@ -265,11 +296,13 @@ class MediaKitPlayback extends KotvPlayback {
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,
     );
-    if (!playing) {
-      try {
-        await player.play();
-      } catch (_) {}
-    }
+  }
+
+  @override
+  Future<void> stop() async {
+    _resumeKickGen++;
+    _url = '';
+    return player.stop();
   }
 
   @override
@@ -280,9 +313,6 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> pause() => player.pause();
-
-  @override
-  Future<void> stop() => player.stop();
 
   @override
   Future<void> seek(Duration d) => player.seek(d);

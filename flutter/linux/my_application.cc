@@ -51,6 +51,54 @@ static gint64 kotv_interface_rx_bytes() {
   return static_cast<gint64>(total);
 }
 
+static gint64 kotv_memory_total_bytes() {
+  FILE* f = fopen("/proc/meminfo", "r");
+  if (f == nullptr) {
+    return 0;
+  }
+  char key[64];
+  unsigned long long val = 0;
+  char unit[16];
+  while (fscanf(f, "%63s %llu %15s", key, &val, unit) == 3) {
+    if (strcmp(key, "MemTotal:") == 0) {
+      fclose(f);
+      return static_cast<gint64>(val * 1024ULL);
+    }
+  }
+  fclose(f);
+  return 0;
+}
+
+static gint64 kotv_memory_avail_bytes() {
+  FILE* f = fopen("/proc/meminfo", "r");
+  if (f == nullptr) {
+    return 0;
+  }
+  char key[64];
+  unsigned long long val = 0;
+  char unit[16];
+  gint64 avail = 0;
+  gint64 total = 0;
+  gint64 free = 0;
+  while (fscanf(f, "%63s %llu %15s", key, &val, unit) == 3) {
+    if (strcmp(key, "MemTotal:") == 0) {
+      total = static_cast<gint64>(val * 1024ULL);
+    } else if (strcmp(key, "MemAvailable:") == 0) {
+      avail = static_cast<gint64>(val * 1024ULL);
+    } else if (strcmp(key, "MemFree:") == 0) {
+      free = static_cast<gint64>(val * 1024ULL);
+    }
+  }
+  fclose(f);
+  if (avail > 0) {
+    return avail;
+  }
+  if (free > 0) {
+    return free;
+  }
+  return total;
+}
+
 static void kotv_host_method_call(FlMethodChannel* /*channel*/,
                                   FlMethodCall* method_call,
                                   gpointer /*user_data*/) {
@@ -60,6 +108,13 @@ static void kotv_host_method_call(FlMethodChannel* /*channel*/,
     g_autoptr(FlValue) result =
         fl_value_new_int(kotv_interface_rx_bytes());
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else if (strcmp(method, "getMemoryInfo") == 0) {
+    g_autoptr(FlValue) map = fl_value_new_map();
+    fl_value_set_string_take(map, "totalBytes",
+                             fl_value_new_int(kotv_memory_total_bytes()));
+    fl_value_set_string_take(map, "availBytes",
+                             fl_value_new_int(kotv_memory_avail_bytes()));
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(map));
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }

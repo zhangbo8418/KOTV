@@ -52,6 +52,20 @@ void FlutterWindow::RegisterHostChannel() {
          std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
         if (call.method_name() == "getInterfaceRxBytes") {
           result->Success(flutter::EncodableValue(KotvInterfaceRxBytes()));
+        } else if (call.method_name() == "getMemoryInfo") {
+          MEMORYSTATUSEX st;
+          st.dwLength = sizeof(st);
+          flutter::EncodableMap mem;
+          if (GlobalMemoryStatusEx(&st)) {
+            mem[flutter::EncodableValue("totalBytes")] =
+                flutter::EncodableValue(static_cast<int64_t>(st.ullTotalPhys));
+            mem[flutter::EncodableValue("availBytes")] =
+                flutter::EncodableValue(static_cast<int64_t>(st.ullAvailPhys));
+          } else {
+            mem[flutter::EncodableValue("totalBytes")] = flutter::EncodableValue(0);
+            mem[flutter::EncodableValue("availBytes")] = flutter::EncodableValue(0);
+          }
+          result->Success(flutter::EncodableValue(mem));
         } else {
           result->NotImplemented();
         }

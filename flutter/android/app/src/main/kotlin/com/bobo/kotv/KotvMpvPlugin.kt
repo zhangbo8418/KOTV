@@ -1,5 +1,6 @@
 package com.bobo.kotv
 
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Color
 import android.graphics.SurfaceTexture
@@ -23,6 +24,8 @@ import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import `is`.xyz.mpv.MPVLib
 import java.io.File
+import kotlin.math.max
+import kotlin.math.min
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -536,8 +539,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("idle", "yes")
       MPVLib.setOptionString("keep-open", "yes")
       if (!livePlayback) {
+        val budget = bufferBudgetBytes()
+        val back = max(16 * 1024 * 1024, budget / 8)
         MPVLib.setOptionString("cache", "yes")
-        MPVLib.setOptionString("demuxer-max-bytes", "48MiB")
+        MPVLib.setOptionString("cache-on-disk", "no")
+        MPVLib.setOptionString("demuxer-max-bytes", demuxerMiB(budget))
+        MPVLib.setOptionString("demuxer-max-back-bytes", demuxerMiB(back))
       }
       applyConfOptions(conf)
       MPVLib.init()
@@ -573,6 +580,31 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     } catch (_: Throwable) {
     }
+  }
+
+  /** 与 Dart [KotvBufferBudget] 对齐：约 15% avail 且 ≤ 总内存 5%；钳到 24–96MiB。 */
+  private fun bufferBudgetBytes(): Int {
+    val ctx = appContext ?: return 48 * 1024 * 1024
+    return try {
+      val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+      val mi = ActivityManager.MemoryInfo()
+      am.getMemoryInfo(mi)
+      var budget = (mi.totalMem * 0.05).toLong()
+      if (mi.availMem > 0) {
+        val byAvail = (mi.availMem * 0.15).toLong()
+        if (byAvail in 1 until budget) budget = byAvail
+      }
+      val minB = 24L * 1024 * 1024
+      val maxB = 96L * 1024 * 1024
+      max(minB, min(maxB, budget)).toInt()
+    } catch (_: Throwable) {
+      48 * 1024 * 1024
+    }
+  }
+
+  private fun demuxerMiB(bytes: Int): String {
+    val mib = (bytes / (1024 * 1024)).coerceIn(16, 4096)
+    return "${mib}MiB"
   }
 
   /** 音轨列表（含 AV3A 等 FFmpeg/libarcdav3a 解码轨），对齐 TV mpvplayer。 */
