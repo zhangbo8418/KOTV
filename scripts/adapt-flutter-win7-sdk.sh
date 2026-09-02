@@ -17,6 +17,7 @@ perl -i -pe 's/web:\s*\^1\.1\.0/web: 0.5.1/' "$APP"
 perl -i -pe 's/wakelock_plus:\s*[^\n]+/wakelock_plus: 1.2.8/' "$APP"
 perl -i -pe 's/video_player:\s*\^[^\n]+/video_player: 2.9.2/' "$APP"
 perl -i -pe 's/fvp:\s*[^\n]+/fvp: 0.37.3/' "$APP"
+perl -i -pe 's/media_kit_video:\s*[^\n]+/media_kit_video: 1.2.5/' "$APP"
 
 THEME="$ROOT/flutter/lib/theme/kotv_theme.dart"
 if [[ -f "$THEME" ]]; then
