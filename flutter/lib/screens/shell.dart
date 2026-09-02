@@ -218,10 +218,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       if (prev == null || prev == next) return;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
-        // prepareLeave 已改为尽快返回；再加短超时，防止偶发硬停拖死切 Tab。
-        try {
-          await DetailScreen.prepareLeave().timeout(const Duration(milliseconds: 600));
-        } catch (_) {}
+        await DetailScreen.prepareLeave();
         if (!mounted) return;
         final nav = _shellNavKey.currentState;
         if (nav == null) return;

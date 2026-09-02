@@ -77,10 +77,9 @@ class DetailScreen extends ConsumerStatefulWidget {
     try {
       active.ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
     } catch (_) {}
-    // 画面先摘；硬停不阻塞切 Tab（Shell 会 await 本方法）。
-    unawaited(active._detachPlaybackUi());
     unawaited(active._stopHard());
     if (!active.mounted) return;
+    // 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
     active._allowPop = true;
     active.setState(() {});
     await WidgetsBinding.instance.endOfFrame;
@@ -467,39 +466,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _stoppedHard = true;
   }
 
-  /// 离开前先卸 Video/沉浸标记，避免 Texture 残留；切 Tab 点不动另见 [prepareLeave]。
-  Future<void> _detachPlaybackUi() async {
-    try {
-      ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
-    } catch (_) {}
-    _immersiveFullscreen = false;
-    if (_playUrl.isNotEmpty || _miniDesktop) {
-      _playUrl = '';
-      _unwirePlaybackNotify();
-      if (mounted) setState(() {});
-      await WidgetsBinding.instance.endOfFrame;
-    }
-  }
-
   Future<void> _leavePage({VoidCallback? afterPop}) async {
     if (_leaving) return;
     _leaving = true;
-    // 立刻摘掉「活跃详情」标记：首页点设置/直播/搜索走 goKotvPage→prepareLeave，
-    // 若仍 await 本页 _stopHard，Shell 换 Tab 会卡住，表现为「点了没反应」。
+    // 立刻清 _active：否则 goKotvPage→prepareLeave 仍会 await 本页硬停，切 Tab 像点不动。
     if (_active == this) _active = null;
     if (_immersiveFullscreen) {
       await _exitImmersiveFullscreen();
-    } else {
-      try {
-        ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
-      } catch (_) {}
     }
     if (_miniDesktop) {
       try {
         await _exitMini();
       } catch (_) {}
     }
-    await _detachPlaybackUi();
     if (!mounted) {
       await _stopHard();
       return;
