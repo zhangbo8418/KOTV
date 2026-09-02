@@ -404,6 +404,30 @@ case "$(uname -s)" in
     echo "==> bundle macOS libmpv + dylib deps into Frameworks"
     kotv_macos_bundle_dylib_deps "$FW" "$FW/libmpv.dylib"
     kotv_macos_copy_prefix_libplacebo "$FW"
+    # Vulkan loader + MoltenVK ICD（与 libmpv 同目录 @rpath）
+    ASSET_MAC="$ROOT/flutter/assets/mpv-libs/macos"
+    for f in libvulkan.1.dylib libvulkan.dylib libMoltenVK.dylib; do
+      [[ -f "$ASSET_MAC/$f" ]] || continue
+      cp -f "$ASSET_MAC/$f" "$FW/$f"
+      chmod u+w "$FW/$f" 2>/dev/null || true
+      install_name_tool -id "@rpath/$f" "$FW/$f" 2>/dev/null || true
+      kotv_macos_strip_abs_rpaths "$FW/$f"
+      echo "  + Frameworks/$f (vulkan)"
+    done
+    if [[ -f "$ASSET_MAC/vulkan/icd.d/MoltenVK_icd.json" ]]; then
+      mkdir -p "$DEST/Contents/Resources/vulkan/icd.d"
+      # ICD 里 library_path 用绝对 @rpath 旁的文件名；运行时由 VK_ICD_FILENAMES 指向此 json
+      cat >"$DEST/Contents/Resources/vulkan/icd.d/MoltenVK_icd.json" <<EOF
+{
+  "file_format_version": "1.0.0",
+  "ICD": {
+    "library_path": "$FW/libMoltenVK.dylib",
+    "api_version": "1.3.0"
+  }
+}
+EOF
+      echo "  + Resources/vulkan/icd.d/MoltenVK_icd.json"
+    fi
     echo "==> strip Homebrew rpaths from Frameworks (mdk/fvp/libmpv)"
     kotv_macos_strip_homebrew_rpaths_tree "$FW"
     kotv_macos_verify_libmpv_self_contained "$FW/libmpv.dylib"

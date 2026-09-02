@@ -103,6 +103,11 @@ DIR="\$(cd "\$(dirname "\$0")" && pwd)"
 if [[ -z "\${KOTV_RUNTIME:-}" && -d "\$DIR/../Resources/runtime" ]]; then
   export KOTV_RUNTIME="\$DIR/../Resources/runtime"
 fi
+# 自带 MoltenVK ICD（与 Frameworks/libMoltenVK.dylib 配套）
+ICD="\$DIR/../Resources/vulkan/icd.d/MoltenVK_icd.json"
+if [[ -f "\$ICD" ]]; then
+  export VK_ICD_FILENAMES="\$ICD\${VK_ICD_FILENAMES:+:\$VK_ICD_FILENAMES}"
+fi
 exec "\$DIR/$MAIN_BIN" "\$@"
 EOF
 chmod +x "$WRAP"

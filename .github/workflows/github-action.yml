@@ -349,7 +349,7 @@ jobs:
 
       - name: Install desktop MPV source deps
         run: |
-          brew install meson ninja pkg-config libass libplacebo nasm
+          brew install meson ninja pkg-config libass nasm molten-vk
 
       - name: Build desktop libmpv (Vulkan + AV3A source)
         env:
@@ -415,7 +415,7 @@ jobs:
 
       - name: Install desktop MPV source deps
         run: |
-          brew install meson ninja pkg-config libass libplacebo nasm
+          brew install meson ninja pkg-config libass nasm molten-vk
 
       - name: Build desktop libmpv x86_64 (Vulkan + AV3A source)
         env:

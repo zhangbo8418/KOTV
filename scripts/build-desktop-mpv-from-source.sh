@@ -36,12 +36,152 @@ kotv_libplacebo_profile() {
   if kotv_is_mpv_win7_build; then
     echo "win7-vulkan"
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    # macOS：无 Vulkan（MoltenVK/Homebrew 架构易踩坑）；播放射频走 VideoToolbox/Cocoa。
-    # 同时关掉 shaderc/lcms，避免发行包残留 Homebrew 绝对路径。
-    echo "macos-novk-v2"
+    # 自前缀 Vulkan（按目标 arch），禁 Homebrew shaderc/lcms，避免错架构 / 绝对路径。
+    echo "macos-vulkan-prefix-v1"
   else
     echo "vulkan"
   fi
+}
+
+# macOS 目标架构：交叉编 x86_64 时由 KOTV_MPV_MACOS_ARCH 指定，否则本机。
+kotv_macos_target_arch() {
+  echo "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
+}
+
+# 把匹配目标 arch 的 Vulkan headers/loader（+ MoltenVK）装进 PREFIX，供 libplacebo/mpv 链接。
+# 禁止直接链 /opt/homebrew 的 arm64 bottle 进 x86_64 包。
+ensure_macos_vulkan() {
+  [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || return 0
+  need cmake
+  need ninja
+  need git
+  local arch
+  arch="$(kotv_macos_target_arch)"
+  mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib" "$PREFIX/share/vulkan/icd.d"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+
+  local loader=""
+  for loader in "$PREFIX/lib/libvulkan.1.dylib" "$PREFIX/lib/libvulkan.dylib"; do
+    [[ -f "$loader" ]] || continue
+    if lipo -archs "$loader" 2>/dev/null | tr ' ' '\n' | grep -qx "$arch" \
+      && pkg-config --exists vulkan 2>/dev/null; then
+      echo "ok prefix vulkan ($arch) $(pkg-config --modversion vulkan 2>/dev/null || echo ok)"
+      return 0
+    fi
+  done
+
+  echo "==> macOS Vulkan into prefix (arch=$arch)"
+  local cmake_arch=(-DCMAKE_OSX_ARCHITECTURES="$arch" -DCMAKE_INSTALL_PREFIX="$PREFIX")
+  cd "$BUILD_DIR"
+
+  # 1) headers
+  local vh_tag="${KOTV_VULKAN_HEADERS_TAG:-vulkan-sdk-1.3.296.0}"
+  if [[ ! -d vulkan-headers/.git ]]; then
+    git clone --depth 1 --branch "$vh_tag" https://github.com/KhronosGroup/Vulkan-Headers.git vulkan-headers \
+      || git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git vulkan-headers
+  fi
+  rm -rf vulkan-headers/build
+  cmake -S vulkan-headers -B vulkan-headers/build -G Ninja "${cmake_arch[@]}"
+  cmake --install vulkan-headers/build
+
+  # 2) loader（只链进 PREFIX，不碰 Homebrew）
+  local vl_tag="${KOTV_VULKAN_LOADER_TAG:-vulkan-sdk-1.3.296.0}"
+  if [[ ! -d vulkan-loader/.git ]]; then
+    git clone --depth 1 --branch "$vl_tag" https://github.com/KhronosGroup/Vulkan-Loader.git vulkan-loader \
+      || git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Loader.git vulkan-loader
+  fi
+  rm -rf vulkan-loader/build
+  cmake -S vulkan-loader -B vulkan-loader/build -G Ninja \
+    "${cmake_arch[@]}" \
+    -DCMAKE_PREFIX_PATH="$PREFIX" \
+    -DUPDATE_DEPS=OFF \
+    -DBUILD_WSI_XCB_SUPPORT=OFF \
+    -DBUILD_WSI_XLIB_SUPPORT=OFF \
+    -DBUILD_WSI_WAYLAND_SUPPORT=OFF \
+    -DBUILD_TESTS=OFF
+  cmake --build vulkan-loader/build -j"$JOBS"
+  cmake --install vulkan-loader/build
+
+  # 规范化 soname，方便 @rpath 打包
+  if [[ -f "$PREFIX/lib/libvulkan.1.dylib" ]]; then
+    install_name_tool -id "@rpath/libvulkan.1.dylib" "$PREFIX/lib/libvulkan.1.dylib" 2>/dev/null || true
+    ln -sfn libvulkan.1.dylib "$PREFIX/lib/libvulkan.dylib"
+  elif [[ -f "$PREFIX/lib/libvulkan.dylib" ]]; then
+    install_name_tool -id "@rpath/libvulkan.dylib" "$PREFIX/lib/libvulkan.dylib" 2>/dev/null || true
+  fi
+
+  # 3) MoltenVK ICD：同架构优先从 Homebrew 拷进 PREFIX；交叉则下预编译包。
+  local mvk="" brew_mvk=""
+  if [[ "$arch" == "$(uname -m)" ]]; then
+    for brew_mvk in \
+      "$(brew --prefix molten-vk 2>/dev/null)/lib/libMoltenVK.dylib" \
+      /opt/homebrew/opt/molten-vk/lib/libMoltenVK.dylib \
+      /usr/local/opt/molten-vk/lib/libMoltenVK.dylib; do
+      [[ -f "$brew_mvk" ]] || continue
+      if lipo -archs "$brew_mvk" 2>/dev/null | tr ' ' '\n' | grep -qx "$arch"; then
+        mvk="$brew_mvk"
+        break
+      fi
+    done
+  fi
+  if [[ -z "$mvk" ]]; then
+    local mvk_ver="${KOTV_MOLTENVK_VERSION:-1.2.11}"
+    local mvk_extract="$BUILD_DIR/MoltenVK-extract"
+    local url cand
+    rm -rf "$mvk_extract"
+    mkdir -p "$mvk_extract"
+    for url in \
+      "https://github.com/KhronosGroup/MoltenVK/releases/download/v${mvk_ver}/MoltenVK-macos.tar" \
+      "https://github.com/KhronosGroup/MoltenVK/releases/download/v${mvk_ver}/MoltenVK.tar" \
+      "https://github.com/KhronosGroup/MoltenVK/releases/download/v${mvk_ver}/MoltenVK.xcframework.zip"; do
+      cand="$BUILD_DIR/MoltenVK-dl-${mvk_ver}-$(basename "$url")"
+      echo "  try MoltenVK: $url"
+      if curl -fsSL -o "$cand" "$url"; then
+        case "$cand" in
+          *.zip) unzip -qo "$cand" -d "$mvk_extract" ;;
+          *) tar -xf "$cand" -C "$mvk_extract" 2>/dev/null || true ;;
+        esac
+        # 优先取对应 arch 的 dylib
+        mvk="$(find "$mvk_extract" \( -path "*${arch}*" -o -path '*macos-x86_64*' -o -path '*macos-arm64*' -o -path '*macos*' \) -name 'libMoltenVK.dylib' 2>/dev/null | head -1 || true)"
+        [[ -n "$mvk" ]] || mvk="$(find "$mvk_extract" -name 'libMoltenVK.dylib' 2>/dev/null | head -1 || true)"
+        [[ -n "$mvk" && -f "$mvk" ]] && break
+      fi
+    done
+  fi
+  if [[ -n "$mvk" && -f "$mvk" ]]; then
+    cp -f "$mvk" "$PREFIX/lib/libMoltenVK.dylib"
+    chmod u+w "$PREFIX/lib/libMoltenVK.dylib" 2>/dev/null || true
+    install_name_tool -id "@rpath/libMoltenVK.dylib" "$PREFIX/lib/libMoltenVK.dylib" 2>/dev/null || true
+    cat >"$PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" <<'EOF'
+{
+  "file_format_version": "1.0.0",
+  "ICD": {
+    "library_path": "libMoltenVK.dylib",
+    "api_version": "1.3.0"
+  }
+}
+EOF
+    echo "  + MoltenVK → $PREFIX/lib/libMoltenVK.dylib"
+  else
+    echo "WARN: MoltenVK dylib not found; Vulkan build will link loader only (runtime ICD may be missing)" >&2
+  fi
+
+  cat >"$PREFIX/lib/pkgconfig/vulkan.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: Vulkan-Loader
+Description: Vulkan Loader
+Version: 1.3.296
+Libs: -L\${libdir} -lvulkan
+Cflags: -I\${includedir}
+EOF
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+  pkg-config --exists vulkan \
+    || { echo "ERROR: vulkan.pc not visible after ensure_macos_vulkan" >&2; exit 1; }
+  echo "ok macOS vulkan ($arch) via prefix"
 }
 
 # 桌面 libmpv 须能在 Win7 加载：目标子系统 6.01，避免 import SHCORE.dll（Win8+）。
@@ -376,13 +516,15 @@ ensure_libplacebo() {
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    echo "==> macOS: libplacebo no-vulkan / no-Homebrew-optional ($want_profile)"
-    # mpv 也必须 -Dvulkan=disabled，否则报「libplacebo compiled without vulkan」。
+    ensure_macos_vulkan
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+    echo "==> macOS: libplacebo vulkan=enabled via prefix ($want_profile, arch=$(kotv_macos_target_arch))"
+    # shaderc/lcms 仍关：可选，且 Homebrew 版易带错架构绝对路径。
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
       -Ddefault_library="$placebo_lib" \
-      -Dvulkan=disabled \
+      -Dvulkan=enabled \
       -Dshaderc=disabled \
       -Dlcms=disabled \
       -Dopengl=disabled \
@@ -696,8 +838,12 @@ build_mpv_macos() {
   if [[ "$AV3A" == "1" ]]; then
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
   fi
-  ensure_lua_pkg
-  # 与 linux/windows 一致：自前缀编 libplacebo，避免 arm64 runner 上 x86_64 链到 Homebrew arm64。
+  # 严格只用 PREFIX 的 pkg-config，杜绝 Homebrew 错架构依赖。
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+  ensure_macos_vulkan
+  # libass：PREFIX 没有则源码编进前缀（交叉 x86_64 不能用 arm64 bottle）。
+  ensure_windows_libass
   ensure_libplacebo
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
@@ -711,27 +857,27 @@ build_mpv_macos() {
   fi
   cd mpv
   rm -rf build
-  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
-  else
-    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  fi
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
   # 禁止 meson 回退到 Homebrew libavdevice（会再次引入 AVFFrameReceiver）。
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
-  # macOS 主路径是 VideoToolbox/Cocoa；Vulkan 需 MoltenVK 且与自编 libplacebo 对齐困难。
-  # libass 等仍可由系统/Homebrew pkg-config 默认路径提供。
   meson setup build \
     -Ddefault_library=shared \
     -Dlibmpv=true \
     -Dcplayer=false \
     -Dmanpage-build=disabled \
-    -Dvulkan=disabled \
+    -Dvulkan=enabled \
     -Dlua=disabled \
     -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-macos"
   cp -f build/libmpv.dylib "$ASSET/macos/libmpv.dylib"
   if otool -L "$ASSET/macos/libmpv.dylib" | grep -qE '/usr/local/|/opt/homebrew/.*ffmpeg|libavdevice'; then
     echo "ERROR: libmpv still links Homebrew ffmpeg / libavdevice" >&2
+    otool -L "$ASSET/macos/libmpv.dylib" | head -40 >&2
+    exit 1
+  fi
+  if otool -L "$ASSET/macos/libmpv.dylib" | grep -qE '/opt/homebrew/.*(vulkan|MoltenVK|libplacebo|libass)'; then
+    echo "ERROR: libmpv still links Homebrew vulkan/placebo/ass" >&2
     otool -L "$ASSET/macos/libmpv.dylib" | head -40 >&2
     exit 1
   fi
@@ -743,7 +889,20 @@ build_mpv_macos() {
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$ASSET/macos/libmpv.dylib" \
       || { echo "ERROR: libmpv.dylib missing AV3A symbols" >&2; exit 1; }
   fi
-  echo "built macOS/libmpv.dylib (+ AV3A=$AV3A, no avdevice)"
+  if ! grep -aqE 'vulkan|pl_vulkan' "$ASSET/macos/libmpv.dylib" 2>/dev/null; then
+    echo "ERROR: libmpv.dylib built without vulkan" >&2
+    exit 1
+  fi
+  mkdir -p "$ASSET/macos"
+  for f in libvulkan.1.dylib libvulkan.dylib libMoltenVK.dylib; do
+    [[ -f "$PREFIX/lib/$f" ]] || continue
+    cp -f "$PREFIX/lib/$f" "$ASSET/macos/$f"
+  done
+  if [[ -f "$PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" ]]; then
+    mkdir -p "$ASSET/macos/vulkan/icd.d"
+    cp -f "$PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" "$ASSET/macos/vulkan/icd.d/"
+  fi
+  echo "built macOS/libmpv.dylib (+ AV3A=$AV3A, vulkan=enabled, no avdevice)"
 }
 
 build_mpv_windows() {
