@@ -1,20 +1,24 @@
 import 'dart:math' show max;
 
 import 'package:flutter/foundation.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
 import 'kotv_platform.dart';
 
-/// 原生 MPV 选项：解码 / gpu-next / conf（对齐 TV mpvplayer）。
+/// MPV 选项：Android 走原生插件；桌面/Windows/macOS 走 media_kit + 自带 libmpv。
 ///
-/// ## 平台能力（目标）
-/// | 选项 | Android | 桌面 |
-/// |------|---------|------|
-/// | hwdec | mediacodec / auto-safe | d3d11va / dxva2 / videotoolbox |
-/// | mpv.conf | setProperty | 同上 |
-/// | gpu-api | vulkan / opengl（按设备） | Win7：auto/d3d11/opengl；Win10+：+vulkan |
-/// | gpu-next | vo=gpu-next（Surface） | Win10+ HWND：`vo=gpu-next`；Win7：强制 `vo=gpu` |
-/// | AV3A | libmvcodec/libarcdav3a（webhtv） | 源码：FongMi FFmpeg+avs3a（CI: KOTV_BUILD_MPV_AV3A=1） |
+/// 自带 libmpv 由 scripts 编译（Vulkan 硬解、AV3A 等）；Flutter 侧不挂 wid/Surface。
+/// FVP 为独立内置播放器，与 MPV 并列可选。
+///
+/// ## 平台能力
+/// | 选项 | Android 原生 | 桌面 media_kit |
+/// |------|-------------|----------------|
+/// | hwdec | mediacodec / auto-safe | Win7: dxva2/auto-safe；Win8+: d3d11va/auto |
+/// | gpu-next | vo=gpu-next（Surface） | ❌（Texture/libmpv） |
+/// | gpu-api / Vulkan | 原生 Surface | setProperty（含 Win7） |
+/// | AV3A | libmvcodec | 自带 FFmpeg+avs3a |
 class KotvMpvOpts {
   const KotvMpvOpts({
     this.decodeMode = 'auto',
@@ -27,33 +31,26 @@ class KotvMpvOpts {
   final String decodeMode;
   final bool gpuNext;
   final bool vulkan;
-  /// Windows：`auto` / `d3d11` / `opengl` / `vulkan`（Win7 忽略 vulkan）。
+  /// Windows：`auto` / `d3d11` / `opengl` / `vulkan`。
   final String gpuApi;
   final String conf;
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
+    // Android 原生：gpu-next 仅 Surface 路径。
     var gpuNext = '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true';
+    if (!kotvIsAndroid()) gpuNext = false;
     var vulkan = '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true';
     var gpuApi = '${settings['mpvGpuApi'] ?? 'auto'}'.trim().toLowerCase();
     if (gpuApi.isEmpty) gpuApi = 'auto';
-    // Win7：Vulkan/gpu-next 易在 libmpv 初始化时触发 talloc canary 断言。
-    if (kotvIsWindows7()) {
-      gpuNext = false;
-      vulkan = false;
-      if (gpuApi == 'vulkan') gpuApi = 'auto';
-    }
-    // macOS/iOS：Texture 软渲；勿开 Vulkan。且同进程 fvp/mdk 若再拉系统 FFmpeg，
-    // 会与 libmpv 内嵌 FFmpeg 的 ObjC 类冲突导致 SIGABRT。
-    if (!kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.iOS)) {
+    // iOS Texture 软渲勿开 Vulkan。
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       gpuNext = false;
       vulkan = false;
       if (gpuApi == 'vulkan') gpuApi = 'auto';
     }
     if (gpuApi == 'vulkan') vulkan = true;
-    if (vulkan && gpuApi == 'auto' && !kotvIsWindows7()) gpuApi = 'vulkan';
+    if (vulkan && gpuApi == 'auto') gpuApi = 'vulkan';
     return KotvMpvOpts(
       decodeMode: decode.isEmpty ? 'auto' : decode,
       gpuNext: gpuNext,
@@ -84,19 +81,24 @@ class KotvMpvOpts {
   bool get hard =>
       decodeMode == 'hard' || decodeMode == 'hardware' || decodeMode == 'hw';
 
-  /// 供原生 setProperty 使用的 hwdec 值。
+  /// 供 setProperty / VideoController 使用的 hwdec 值。
   ///
-  /// Android：auto → `auto-safe`（RK3399 等盒在原生层改 mediacodec 直出 Surface）；hard → `mediacodec`；soft → `no`。
+  /// Windows Win7：硬解走 dxva2（D3D11 Video 解码 API 为 Win8+；与 gpu-api Vulkan 无关）。
+  /// Windows Win8+ 硬解：d3d11va。自动模式 Win7 用 auto-safe，避免 mpv 误选 d3d11va。
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
       if (hard) return 'mediacodec';
       return 'auto-safe';
     }
-    if (hard) {
-      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-        return kotvIsWindows7() ? 'dxva2' : 'd3d11va';
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      if (kotvIsWindows7()) {
+        if (hard) return 'dxva2';
+        return 'auto-safe';
       }
+      if (hard) return 'd3d11va';
+    }
+    if (hard) {
       if (!kIsWeb &&
           (defaultTargetPlatform == TargetPlatform.macOS ||
               defaultTargetPlatform == TargetPlatform.iOS)) {
@@ -106,6 +108,73 @@ class KotvMpvOpts {
     return 'auto';
   }
 
+  /// Android 可切 gpu/gpu-next；桌面 media_kit 必须 libmpv（Flutter Texture）。
+  VideoControllerConfiguration videoControllerConfiguration() {
+    final hw = hwdecValue();
+    if (kotvIsAndroid()) {
+      return VideoControllerConfiguration(
+        vo: gpuNext ? 'gpu-next' : 'gpu',
+        hwdec: hw,
+        enableHardwareAcceleration: !soft,
+      );
+    }
+    return VideoControllerConfiguration(
+      hwdec: hw,
+      enableHardwareAcceleration: !soft,
+    );
+  }
+
+  /// 在 VideoController 已附着之后调用：缓冲预算 + conf（media_kit 路径）。
+  Future<void> applyAfterAttach(Player player, {bool live = false}) async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return;
+      Future<void> set(String k, String v) async {
+        await (platform as dynamic).setProperty(k, v);
+      }
+
+      try {
+        await set('hwdec', hwdecValue());
+      } catch (_) {}
+
+      // 桌面 media_kit：gpu-api 走 bundled libmpv（Vulkan 等）。
+      if (!kotvIsAndroid()) {
+        try {
+          if (gpuApi != 'auto') {
+            if (gpuApi == 'd3d11' ||
+                gpuApi == 'opengl' ||
+                gpuApi == 'vulkan' ||
+                gpuApi == 'metal') {
+              await set('gpu-api', gpuApi);
+            }
+          } else if (vulkan) {
+            await set('gpu-api', 'vulkan');
+          }
+        } catch (_) {}
+      }
+
+      if (!live) {
+        try {
+          await KotvBufferBudget.warm(force: true);
+          final budget = KotvBufferBudget.bytes();
+          final forward = KotvBufferBudget.mpvMiB(budget);
+          final back = KotvBufferBudget.mpvMiB(max(16 * 1024 * 1024, budget ~/ 8));
+          await set('cache', 'yes');
+          await set('cache-on-disk', 'no');
+          await set('demuxer-max-bytes', forward);
+          await set('demuxer-max-back-bytes', back);
+          await set('demuxer-readahead-secs', '120');
+          await set('cache-secs', '90');
+          await set('framedrop', 'vo');
+        } catch (_) {}
+      }
+
+      for (final e in parseConfLines(conf)) {
+        await set(e.$1, e.$2);
+      }
+    } catch (_) {}
+  }
+
   /// 交给原生通道的属性表（P1/P2 open / setOpts）。
   ///
   /// [live]=true 时不写点播 demuxer 预读（对齐 TV 直播默认缓冲）。
@@ -113,16 +182,21 @@ class KotvMpvOpts {
     final out = <String, String>{
       'hwdec': hwdecValue(),
     };
-    if (gpuNext) {
+    if (gpuNext && kotvIsAndroid()) {
       out['vo'] = 'gpu-next';
     }
-    // Windows HWND 硬渲由原生固定 vo=gpu/gpu-next；gpu-api 按设置/能力。
-    // macOS/iOS Texture 软渲固定 vo=libmpv，不要写 gpu-api=vulkan。
+    // Windows / macOS：gpu-api 供 Android 原生 Surface 与桌面 media_kit 共用。
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       if (gpuApi == 'd3d11' || gpuApi == 'opengl' || gpuApi == 'vulkan') {
-        if (!(kotvIsWindows7() && gpuApi == 'vulkan')) {
-          out['gpu-api'] = gpuApi;
-        }
+        out['gpu-api'] = gpuApi;
+      } else if (vulkan) {
+        out['gpu-api'] = 'vulkan';
+      }
+    } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
+      if (gpuApi == 'opengl' || gpuApi == 'vulkan' || gpuApi == 'metal') {
+        out['gpu-api'] = gpuApi;
+      } else if (vulkan) {
+        out['gpu-api'] = 'vulkan';
       }
     } else if (vulkan && kotvIsAndroid()) {
       out['gpu-api'] = 'vulkan';
@@ -144,8 +218,8 @@ class KotvMpvOpts {
         out['cache-on-disk'] = 'no';
         out['demuxer-max-bytes'] = forward;
         out['demuxer-max-back-bytes'] = back;
-        out['demuxer-readahead-secs'] = '1000000';
-        out['cache-secs'] = '1000000';
+        out['demuxer-readahead-secs'] = '120';
+        out['cache-secs'] = '90';
         out['framedrop'] = 'vo';
       }
     }

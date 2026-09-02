@@ -32,7 +32,7 @@ target 'Runner' do
 
   # 可选：本地 mdk，避免 CocoaPods 从 SourceForge 拉 nightly（慢/易卡）。
   # 例：KOTV_MDK_POD_PATH=/tmp/mdk-sdk-local ./scripts/package-flutter-macos.sh
-  if ENV['KOTV_MDK_POD_PATH'] && !ENV['KOTV_MDK_POD_PATH'].empty?
+  if ENV['KOTV_MDK_POD_PATH'] && !ENV['KOTV_MDK_POD_PATH'].empty? && ENV['KOTV_MACOS_NO_FVP'] != '1'
     pod 'mdk', :path => ENV['KOTV_MDK_POD_PATH']
   end
 
@@ -45,5 +45,50 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
+  end
+
+  next unless ENV['KOTV_MACOS_NO_FVP'] == '1'
+
+  sandbox = installer.sandbox.root
+  Dir.glob(File.join(sandbox, 'Target Support Files/Pods-Runner/Pods-Runner*.xcconfig')).each do |cfg|
+    text = File.read(cfg)
+    orig = text.dup
+    text.gsub!(/-framework "fvp"\s*/, '')
+    text.gsub!(/-framework "mdk"\s*/, '')
+    text.gsub!(/"-F\$\{PODS_CONFIGURATION_BUILD_DIR\}\/fvp"\s*/, '')
+    text.gsub!(/"-F\$\{PODS_CONFIGURATION_BUILD_DIR\}\/mdk"\s*/, '')
+    text.gsub!(/"\$\{PODS_CONFIGURATION_BUILD_DIR\}\/fvp"\s*/, '')
+    text.gsub!(/"\$\{PODS_XCFRAMEWORKS_BUILD_DIR\}\/mdk"\s*/, '')
+    text.gsub!(/"\$\{PODS_CONFIGURATION_BUILD_DIR\}\/fvp\/[^"]+"\s*/, '')
+    text.gsub!(/"\$\{PODS_ROOT\}\/mdk\/[^"]+"\s*/, '')
+    text.gsub!(/(FRAMEWORK_SEARCH_PATHS =[^\n]*?)GCC_PREPROCESSOR_DEFINITIONS/m, "\\1\nGCC_PREPROCESSOR_DEFINITIONS")
+    File.write(cfg, text) if text != orig
+    puts "KOTV: stripped fvp/mdk link flags from #{File.basename(cfg)}"
+  end
+
+  fw_sh = File.join(sandbox, 'Target Support Files/Pods-Runner/Pods-Runner-frameworks.sh')
+  if File.exist?(fw_sh)
+    lines = File.readlines(fw_sh).reject { |l| l =~ /install_framework.*fvp|install_framework.*mdk/ }
+    File.write(fw_sh, lines.join)
+    puts 'KOTV: stripped fvp/mdk from Pods-Runner-frameworks.sh'
+  end
+
+  %w[Debug Release Profile].each do |conf|
+    %w[input output].each do |io|
+      path = File.join(sandbox, "Target Support Files/Pods-Runner/Pods-Runner-frameworks-#{conf}-#{io}-files.xcfilelist")
+      next unless File.exist?(path)
+      lines = File.readlines(path).reject { |l| l =~ /fvp|mdk/i }
+      File.write(path, lines.join)
+    end
+  end
+
+  reg = File.expand_path('Flutter/GeneratedPluginRegistrant.swift', __dir__)
+  if File.exist?(reg)
+    text = File.read(reg)
+    orig = text.dup
+    text.gsub!(/^import fvp\n/, '')
+    text.gsub!(/^\s*FvpPlugin\.register\(.*\)\n/, '')
+    File.write(reg, text) if text != orig
+    puts 'KOTV: patched GeneratedPluginRegistrant.swift (no fvp/mdk)'
   end
 end

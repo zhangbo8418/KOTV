@@ -7,13 +7,14 @@ import 'package:video_player/video_player.dart';
 
 import 'buffer_budget.dart';
 import 'fvp_decoders.dart';
+import 'fvp_register.dart';
 import 'kotv_playback.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
 /// 页内 FVP（libmdk）：经 [video_player] + fvp 插件。
 ///
-/// 须在 [main] 里先 `registerWith`（见 [kotvRegisterFvp]）。
+/// 须在首次使用 FVP 前调用 [kotvEnsureFvpRegistered]（见 [kotvRegisterFvp]）。
 ///
 /// 起播顺序：先挂 [VideoPlayer]（建立 Texture/Surface），再 `initialize`/`play`。
 class FvpPlayback extends KotvPlayback {
@@ -152,6 +153,7 @@ class FvpPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
   }) async {
+    kotvEnsureFvpRegistered();
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }

@@ -61,6 +61,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// Android Exo：Surface / Texture，对齐 TV 渲染方式。其它后端忽略。
   Future<void> setRenderMode(String mode) async {}
 
+  /// 音量归一（loudnorm / dynaudnorm）；不支持的引擎忽略。
+  Future<void> setStableVolume(bool on) async {}
+
   /// 是否认为已挂上可用视频源（轨/元数据）。无法判断时返回 true。
   bool get hasVideoSourceHint => true;
 

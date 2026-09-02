@@ -429,54 +429,25 @@ jobs:
           KOTV_JAVA_TOOLCHAIN: "21"
           LANG: en_US.UTF-8
           LC_ALL: en_US.UTF-8
+          KOTV_MACOS_NO_FVP: "0"
         run: |
           chmod +x bridge/build.sh scripts/*.sh
-          # package-flutter-macos.sh 按本机 arch 选 plat；在 arm runner 上强制走 x64 需 Rosetta
+          # arm64 runner：Rosetta 下走完整 package 脚本（含 libmpv 校验 / kotv-launch / DMG）
           if [[ "$(uname -m)" == "arm64" ]]; then
-            echo "==> cross-ish: build under arch -x86_64"
             arch -x86_64 bash -lc '
               export PATH="/usr/local/bin:$PATH"
-              source ./scripts/kotv-fvp-deps.sh
-              kotv_export_fvp_deps
-              ./scripts/prepare-runtime.sh macos-x64
-              (cd internal/spider && go run gen_qjsinc.go)
-              CGO_ENABLED=1 GOARCH=amd64 go build -o flutter/assets/engine/kotv-engine ./cmd/engine
-              ./scripts/flutter-pub-get.sh
-              kotv_ensure_mdk_apple_pod
-              cd flutter && flutter config --enable-macos-desktop && flutter config --no-enable-swift-package-manager || true
-              flutter build macos --release
+              export KOTV_MACOS_NO_FVP=0
+              ./scripts/package-flutter-macos.sh
             '
-            # 复用 package 脚本后半段：从已构建 app 打 dmg
-            source ./scripts/kotv-release-name.sh
-            VERSION="$(kotv_release_version flutter/pubspec.yaml)"
-            APP_SRC=""
-            for cand in \
-              flutter/build/macos/Build/Products/Release/KO影视.app \
-              flutter/build/macos/Build/Products/Release/kotv.app; do
-              [[ -d "$cand" ]] && APP_SRC="$cand" && break
-            done
-            [[ -n "$APP_SRC" ]] || { echo "missing macos Release .app" >&2; exit 1; }
-            OUT_APP="dist/KO影视.app"
-            DMG="dist/KO影视-${VERSION}-x86_64.dmg"
-            STAGE="dist/_macos_dmg_stage"
-            rm -rf "$OUT_APP" "$DMG" "$STAGE"
-            mkdir -p dist "$STAGE"
-            ditto "$APP_SRC" "$OUT_APP"
-            KOTV_BUNDLE_ENGINE_TO_MACOS=1 ./scripts/bundle-flutter-runtime.sh "$OUT_APP"
-            ./scripts/bundle-app-libmpv.sh "$OUT_APP"
-            if [[ -f dist/updater-mac/updater ]]; then
-              cp -f dist/updater-mac/updater "$OUT_APP/Contents/MacOS/updater"
-              chmod +x "$OUT_APP/Contents/MacOS/updater"
-            fi
-            ditto "$OUT_APP" "$STAGE/KO影视.app"
-            ln -sf /Applications "$STAGE/Applications"
-            hdiutil create -volname "KO影视" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-            cp -f "$DMG" "./KO影视-${VERSION}-x86_64.dmg"
           else
             ./scripts/package-flutter-macos.sh
-            ver="${KOTV_VERSION#v}"
-            cp -f "dist/KO影视-${ver}-x86_64.dmg" "./KO影视-${ver}-x86_64.dmg"
           fi
+          ver="${KOTV_VERSION#v}"
+          if [[ -f dist/updater-mac/updater && -d "dist/KO影视.app" ]]; then
+            cp -f dist/updater-mac/updater "dist/KO影视.app/Contents/MacOS/updater"
+            chmod +x "dist/KO影视.app/Contents/MacOS/updater"
+          fi
+          cp -f "dist/KO影视-${ver}-x86_64.dmg" "./KO影视-${ver}-x86_64.dmg"
 
       - uses: actions/upload-artifact@v4
         with:

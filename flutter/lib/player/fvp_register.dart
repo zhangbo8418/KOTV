@@ -5,6 +5,17 @@ import 'kotv_platform.dart';
 
 /// 注册 libmdk 为 [video_player] 实现（非 Web）。
 ///
+/// 延迟到首次使用 FVP 时再注册，避免启动时加载 mdk/libffmpeg 与 libmpv 同进程冲突。
+bool _kotvFvpRegistered = false;
+
+void kotvEnsureFvpRegistered() {
+  if (_kotvFvpRegistered || kIsWeb) return;
+  _kotvFvpRegistered = true;
+  kotvRegisterFvp();
+}
+
+/// 注册 libmdk（由 [kotvEnsureFvpRegistered] 在需要时调用，勿在 main 里无条件注册）。
+///
 /// 此处**不**绑死 `video.decoders`：开播时由 [FvpPlayback.setDecodeMode] /
 /// [kotvFvpVideoDecoders] 按「自动 / 硬解 / 软解」写入。
 /// 自动 = 硬解优先 + 软解回退（mdk 协商）；硬/软解才锁死列表。

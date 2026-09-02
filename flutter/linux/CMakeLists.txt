@@ -60,16 +60,9 @@ add_definitions(-DAPPLICATION_ID="${APPLICATION_ID}")
 # not the value here, or `flutter run` will no longer work.
 #
 # Any new source files that you add to the application should be added here.
-set(KOTV_MPV_NATIVE "${CMAKE_CURRENT_SOURCE_DIR}/../native/kotv_mpv")
-set(KOTV_MPV_SHIM "${CMAKE_CURRENT_SOURCE_DIR}/../../internal/player/embed/mpv_shim.c")
-
 add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
-  "kotv_mpv_plugin_linux.cc"
-  "${KOTV_MPV_NATIVE}/kotv_mpv_desktop_core.c"
-  "${KOTV_MPV_NATIVE}/kotv_mpv_lib_path.cpp"
-  "${KOTV_MPV_SHIM}"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
 
@@ -82,7 +75,6 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 find_package(Threads REQUIRED)
 target_link_libraries(${BINARY_NAME} PRIVATE Threads::Threads)
-target_include_directories(${BINARY_NAME} PRIVATE "${KOTV_MPV_NATIVE}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
-import '../player/native_mpv_playback.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
@@ -354,8 +353,8 @@ const _decodeModes = <(String key, String label)>[
 ];
 
 const _renderModes = <(String key, String label)>[
-  ('surface', 'Surface'),
-  ('texture', 'Texture'),
+  ('surface', 'GPU 硬渲染'),
+  ('texture', 'CPU 软渲染'),
 ];
 
 /// 全屏点播控制层状态（vodFullscreen 底栏）。
@@ -1293,10 +1292,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   }
 
   Future<void> _applyStableVolume(bool on) async {
-    final p = widget.player;
-    if (p is NativeMpvPlayback) {
-      await p.setStableVolume(on);
-    }
+    await widget.player.setStableVolume(on);
   }
 
   Future<void> _pickSleepTimer(BuildContext sheetCtx, StateSetter setSheet) async {

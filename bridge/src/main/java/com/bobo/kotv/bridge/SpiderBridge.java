@@ -445,20 +445,20 @@ public class SpiderBridge {
             String jar = req.get("jar").getAsString();
             String spiderMethod = method;
             try {
-                Spider spider = getSpider(key, api, ext, jar);
+            Spider spider = getSpider(key, api, ext, jar);
                 // recent 只由 parseJar(recent=true)/setRecent/Site.recent 更新，
-                // 不在每次 spider 方法调用时覆盖（避免并行多 jar 时 Mix/Json 抖 recent）。
+            // 不在每次 spider 方法调用时覆盖（避免并行多 jar 时 Mix/Json 抖 recent）。
                 return nonempty(invoke(spider, spiderMethod, argsObj, jar));
-            } catch (Throwable t) {
-                t.printStackTrace(System.err);
+        } catch (Throwable t) {
+            t.printStackTrace(System.err);
                 // 对齐 TV SiteViewModel：内容接口失败回空结果，不把 Java 异常弹到首页。
                 if (isSoftFailContentMethod(spiderMethod)) {
                     return "{}";
                 }
-                JsonObject err = new JsonObject();
-                err.addProperty("error", t.toString());
-                return GSON.toJson(err);
-            }
+            JsonObject err = new JsonObject();
+            err.addProperty("error", t.toString());
+            return GSON.toJson(err);
+        }
         } catch (Throwable t) {
             t.printStackTrace(System.err);
             JsonObject err = new JsonObject();
@@ -570,12 +570,12 @@ public class SpiderBridge {
             return cached;
         }
         // 勿永久缓存 SpiderNull：Android 上首次因 Writable dex 失败后会一直空响应。
-        try {
-            parseJar(jarPath);
-            ClassLoader loader = loaders.get(jarPath);
-            if (loader == null) {
-                throw new IllegalStateException("No jar loaded: " + jarPath);
-            }
+            try {
+                parseJar(jarPath);
+                ClassLoader loader = loaders.get(jarPath);
+                if (loader == null) {
+                    throw new IllegalStateException("No jar loaded: " + jarPath);
+                }
             refreshSpiderJarUi(loader);
             String className = spiderClassName(api);
             ClassLoader prev = Thread.currentThread().getContextClassLoader();
@@ -609,16 +609,16 @@ public class SpiderBridge {
             } finally {
                 Thread.currentThread().setContextClassLoader(prev);
             }
-        } catch (Exception e) {
+            } catch (Exception e) {
             System.err.println(
                     "getSpider failed key=" + key + " api=" + api + " jar=" + jarPath + ": " + e);
-            e.printStackTrace(System.err);
+                e.printStackTrace(System.err);
             // 对齐 TV JarLoader.getSpider：加载失败（含 jar 缺该 csp 类）静默降级为
             // SpiderNull，站点显示空列表而不是把异常弹到首页。
-            SpiderNull nullSpider = new SpiderNull();
-            nullSpider.siteKey = key;
-            return nullSpider;
-        }
+                SpiderNull nullSpider = new SpiderNull();
+                nullSpider.siteKey = key;
+                return nullSpider;
+            }
     }
 
     /** {@code csp_Nostr} → {@code com.github.catvod.spider.Nostr}，与 TV {@code api.split("csp_")[1]} 一致。 */
@@ -659,8 +659,8 @@ public class SpiderBridge {
                 ClassLoader prev = Thread.currentThread().getContextClassLoader();
                 try {
                     Thread.currentThread().setContextClassLoader(loader);
-                    initializeHost();
-                    initializeSpiderJar(jarPath, loader);
+                initializeHost();
+                initializeSpiderJar(jarPath, loader);
                 } finally {
                     Thread.currentThread().setContextClassLoader(prev);
                 }
@@ -882,7 +882,7 @@ public class SpiderBridge {
                                 android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
                                 h.postDelayed(() -> setSpoofFongmiPackage(false), 45000L);
                                 startMergeLyGuard(45000L);
-                            } catch (Throwable ignored) {
+                    } catch (Throwable ignored) {
                                 setSpoofFongmiPackage(false);
                             }
                         }
@@ -912,7 +912,7 @@ public class SpiderBridge {
             hookSpiderInitHandler(loader);
             purgeMergeLyFromMainQueue();
         } catch (ClassNotFoundException ignored) {
-            // Init is not part of the original spider ABI.
+ // Init is not part of the original spider ABI.
         } catch (Throwable error) {
             System.err.println("optional spider Init skipped: " + error);
         }
@@ -1592,7 +1592,7 @@ public class SpiderBridge {
                 File jf = new File(jar);
                 // 仅加载真实本地路径；相对 spider.jar;md5;… 勿当文件名（Go 应先 cacheJar）。
                 if (jf.isFile() && jf.length() > 0L) {
-                    parseJar(jar);
+                parseJar(jar);
                 } else {
                     System.err.println("jsParse skip unresolved jar key: " + jar);
                 }

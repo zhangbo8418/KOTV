@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../api/kotv_api.dart';
 import '../api/kotv_engine_url.dart';
 import '../desktop/mini_player_window.dart';
 import '../models/models.dart';
@@ -21,6 +23,7 @@ import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
+import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
@@ -118,7 +121,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   double? _prefSpeed;
   double? _prefVolume;
 
-  NativeMpvPlayback? _mk;
+  Player? _mkPlayer;
+  KotvPlayback? _mk;
   ExoPlayback? _exo;
   FvpPlayback? _fvp;
   HtmlPlayback? _html;
@@ -131,6 +135,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   StreamSubscription? _bufferingSub;
   KotvPlayback? _wiredNotifyTarget;
   VoidCallback? _playbackNotify;
+  int? _boundMpvTextureId;
   bool _openingSeekDone = false;
   bool _stoppedHard = false;
   /// 硬停完成后再允许真正出栈（配合 [PopScope]）。
@@ -144,8 +149,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _playbackLive = false;
   bool _advanceBusy = false;
   DateTime? _sessionStartedAt;
+  KotvApi? _api;
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
+
+  bool get _useMpv => _backend == KotvEmbedBackend.mpv;
 
   /// 当前页内后端：按设置选择 Exo / MPV / FVP / HTML。
   KotvPlayback get _playback {
@@ -197,6 +205,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 按真实播放器状态刷新文案，避免「播放中」但 00:00/00:00。
   void _syncPlayStatus() {
     if (!mounted || _playUrl.isEmpty) return;
+    // 换集/解析中由 _playAt 写入固定文案，勿被 stop 后的 stream 回调盖掉。
+    if (_status.contains('换集中') ||
+        _status.contains('解析中') ||
+        _status.contains('磁力解析') ||
+        _status.contains('嗅探')) {
+      return;
+    }
     final p = _playback;
     final prefix = _enginePrefix;
     final magnet = _magnetPlay || _playUrl.contains('/proxy/bt/');
@@ -236,8 +251,35 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     setState(() => _status = next);
   }
 
-  NativeMpvPlayback _ensureMpv() {
-    _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
+  KotvPlayback _ensureMpv() {
+    if (kotvIsAndroid()) {
+      _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
+      return _mk!;
+    }
+    if (_mk != null) {
+      _playingSub ??= _mkPlayer!.stream.playing.listen((_) {
+        if (!mounted || _playUrl.isEmpty || !_useMpv) return;
+        _markPlaybackLiveIfNeeded();
+        _syncPlayStatus();
+      });
+      _bufferingSub ??= _mkPlayer!.stream.buffering.listen((_) {
+        if (!mounted || _playUrl.isEmpty || !_useMpv) return;
+        _syncPlayStatus();
+      });
+      return _mk!;
+    }
+    final player = kotvCreateMpvPlayer();
+    _mkPlayer = player;
+    _mk = MediaKitPlayback(player, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
+    _playingSub = player.stream.playing.listen((_) {
+      if (!mounted || _playUrl.isEmpty || !_useMpv) return;
+      _markPlaybackLiveIfNeeded();
+      _syncPlayStatus();
+    });
+    _bufferingSub = player.stream.buffering.listen((_) {
+      if (!mounted || _playUrl.isEmpty || !_useMpv) return;
+      _syncPlayStatus();
+    });
     return _mk!;
   }
 
@@ -335,6 +377,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   @override
   void initState() {
     super.initState();
+    _api = ref.read(apiProvider);
     _active = this;
     kotvRegisterQuitHook(_prepareQuit);
     MiniPlayerWindow.onAndroidPipChanged = (inPip) {
@@ -352,10 +395,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     try {
       await _stopHard();
     } catch (_) {}
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
     try {
       _mk?.dispose();
     } catch (_) {}
     _mk = null;
+    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
@@ -399,7 +445,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       hardStop(_art),
       hardStop(_xg),
       hardStop(_zw),
-    ]);
+    ]).timeout(const Duration(seconds: 4), onTimeout: () => <void>[]);
     _stoppedHard = true;
   }
 
@@ -412,7 +458,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await _exitMini();
       } catch (_) {}
     }
-    await _stopHard();
+    /* 先出栈再后台 stop：避免 dispose→StopTick.join 与 open 抢锁卡主线程。 */
     if (!mounted) return;
     _allowPop = true;
     setState(() {});
@@ -420,6 +466,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (!mounted) return;
     Navigator.of(context).pop();
     afterPop?.call();
+    unawaited(_stopHard());
   }
 
   void _wireEnded(KotvPlayback p) {
@@ -452,9 +499,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playbackNotify = () {
       if (!mounted || _playUrl.isEmpty) return;
       _syncPlayStatus();
+      // 详情页 Video 区未包 ListenableBuilder：Texture 绑定后须主动 rebuild 一次。
+      if (p is NativeMpvPlayback) {
+        final tid = p.textureId;
+        if (tid != null && tid != _boundMpvTextureId) {
+          _boundMpvTextureId = tid;
+          setState(() {});
+        }
+      }
     };
     _wiredNotifyTarget = p;
     p.addListener(_playbackNotify!);
+    _playbackNotify!();
   }
 
   /// STATE_READY：本集真正开播后才允许片尾/completed 自动连播。
@@ -544,14 +600,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   @override
   void dispose() {
+    ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
     kotvUnregisterQuitHook(_prepareQuit);
     if (_active == this) _active = null;
     MiniPlayerWindow.onAndroidPipChanged = null;
     unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, false));
     // 离开详情：回传扫码取消并打断 JAR；不要再 nav.pop（本页正在出栈）。
-    final api = ref.read(apiProvider);
-    unawaited(PostMsgHost.instance?.cancelAll(reply: true, popDialog: false) ?? Future<void>.value());
-    unawaited(api.cancelPending(hard: true, thunder: true));
+    final api = _api;
+    if (api != null) {
+      unawaited(PostMsgHost.instance?.cancelAll(reply: true, popDialog: false) ?? Future<void>.value());
+      unawaited(api.cancelPending(hard: true, thunder: true));
+    }
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
     }
@@ -580,7 +639,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _art?.dispose();
     _xg?.dispose();
     _zw?.dispose();
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
     _mk = null;
+    unawaited(kotvDisposeMpvPlayer(mkPlayer));
     super.dispose();
   }
 
@@ -834,9 +896,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   Future<void> _applyStableVolume(KotvPlayback p, bool on) async {
-    if (p is NativeMpvPlayback) {
-      await p.setStableVolume(on);
-    }
+    await p.setStableVolume(on);
   }
 
   Future<void> _loadDanmakuForEpisode({
@@ -874,6 +934,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final serial = ++_playAtSerial;
     _playbackLive = false;
     _sessionStartedAt = null;
+    _boundMpvTextureId = null;
     _openingSeekDone = false;
     _endedSub?.cancel();
     _endedSub = null;
@@ -907,7 +968,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (serial != _playAtSerial || !mounted) return;
     if (mounted) {
       setState(() {
-        _playUrl = '';
         _magnetPlay = epLooksMagnet;
       });
     }
@@ -1044,6 +1104,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _syncFullscreen();
         await WidgetsBinding.instance.endOfFrame;
         if (serial != _playAtSerial || !mounted) return;
+        _wirePlaybackNotify(pb);
         try {
           // 起播缓冲由守卫无限等待；仅黑屏/视源失败抛 SilentVideo 才 failover。
           // 勿再套墙钟 timeout：慢源会被误切播放器。
@@ -1202,7 +1263,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   /// 全屏/详情共用同一块原生输出（GlobalKey 在两种布局间 reparent）。
   Widget _buildSharedVideo({BoxFit fit = BoxFit.contain}) {
-    return KeyedSubtree(
+    Widget inner = KeyedSubtree(
       key: _videoHostKey,
       child: kotvPlaybackView(
         playerVal: _playerVal,
@@ -1211,6 +1272,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         fit: fit,
       ),
     );
+    final ratio = _aspect.ratio;
+    if (ratio != null && ratio > 0) {
+      inner = LayoutBuilder(
+        builder: (context, c) {
+          var w = c.maxWidth;
+          var h = w / ratio;
+          if (h > c.maxHeight) {
+            h = c.maxHeight;
+            w = h * ratio;
+          }
+          return Center(child: SizedBox(width: w, height: h, child: inner));
+        },
+      );
+    }
+    if (_backend == KotvEmbedBackend.mpv && kotvIsAndroid() && _mk is NativeMpvPlayback) {
+      final m = _mk! as NativeMpvPlayback;
+      return ValueListenableBuilder<int>(
+        valueListenable: m.surfaceRev,
+        builder: (context, _, __) => inner,
+      );
+    }
+    return inner;
   }
 
   /// 全屏在 rootNavigator，详情 setState 到不了，靠 revision 把当前播放器/集数推上去。
@@ -1375,6 +1458,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await kotvLockPortrait();
       } catch (_) {}
     }
+    ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
     setState(() {
       _desktopFs = desktopFs;
       _immersiveFullscreen = true;
@@ -1384,6 +1468,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   Future<void> _exitImmersiveFullscreen() async {
     if (!_immersiveFullscreen) return;
+    ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
     if (mounted) setState(() => _immersiveFullscreen = false);
     if (!kotvIsDesktop()) {
       try {
@@ -1517,7 +1602,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 enabled: !_status.contains('解析') && !_status.contains('嗅探'),
               ),
             ),
-          if (_status.contains('解析') || _status.contains('嗅探'))
+          if (_status.contains('解析') || _status.contains('嗅探') || _status.contains('换集中'))
             const ColoredBox(
               color: Color(0x66000000),
               child: Center(

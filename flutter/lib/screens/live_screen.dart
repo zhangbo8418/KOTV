@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -20,6 +21,7 @@ import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
+import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
@@ -49,7 +51,8 @@ class LiveScreen extends ConsumerStatefulWidget {
 }
 
 class _LiveScreenState extends ConsumerState<LiveScreen> {
-  NativeMpvPlayback? _mk;
+  Player? _mkPlayer;
+  KotvPlayback? _mk;
   ExoPlayback? _exo;
   FvpPlayback? _fvp;
   HtmlPlayback? _html;
@@ -79,9 +82,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
-  
-  NativeMpvPlayback _ensureMpv() {
-    _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
+  KotvPlayback _ensureMpv() {
+    if (kotvIsAndroid()) {
+      _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
+      return _mk!;
+    }
+    _mkPlayer ??= kotvCreateMpvPlayer();
+    _mk ??= MediaKitPlayback(_mkPlayer!, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
     return _mk!;
   }
 
@@ -242,15 +249,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, _playUrl.isNotEmpty));
   }
 
-  /// 关窗前硬停：先停各后端，再释放原生播放器，避免与 FlutterEngine 销毁竞态。
   Future<void> _prepareQuit() async {
     try {
       await _stopAllBackends();
     } catch (_) {}
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
     try {
       _mk?.dispose();
     } catch (_) {}
     _mk = null;
+    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   @override
@@ -285,7 +294,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _art?.dispose();
     _xg?.dispose();
     _zw?.dispose();
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
     _mk = null;
+    unawaited(kotvDisposeMpvPlayer(mkPlayer));
     super.dispose();
   }
 

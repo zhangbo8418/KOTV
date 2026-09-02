@@ -27,14 +27,14 @@ kotv_is_windows_build() {
   [[ "${OS:-}" == "Windows_NT" ]]
 }
 
-# Win7 发行包：libmpv 仅 D3D11（不编 vulkan/gpu-next 依赖链）。
+# Win7 发行包：与 Win10+ 相同编 Vulkan + D3D11（子系统仍钉 6.01）。
 kotv_is_mpv_win7_build() {
   [[ "${KOTV_MPV_WIN7:-${KOTV_WIN7:-0}}" == "1" ]]
 }
 
 kotv_libplacebo_profile() {
   if kotv_is_mpv_win7_build; then
-    echo "win7-d3d11"
+    echo "win7-vulkan"
   else
     echo "vulkan"
   fi
@@ -235,14 +235,10 @@ harvest_windows_mpv_dlls() {
   _harvest_copy_tree_dlls "$PREFIX" "$dest" 8
 
   local vk
-  if ! kotv_is_mpv_win7_build; then
-    vk="$(kotv_find_vulkan_loader_dll || true)"
-    if [[ -n "$vk" && -f "$vk" ]]; then
-      echo "ok vulkan-1.dll ← $vk"
-      _harvest_copy_dll "$vk" "$dest/vulkan-1.dll"
-    fi
-  else
-    echo "skip vulkan-1.dll (Win7 D3D11-only libmpv build)"
+  vk="$(kotv_find_vulkan_loader_dll || true)"
+  if [[ -n "$vk" && -f "$vk" ]]; then
+    echo "ok vulkan-1.dll ← $vk"
+    _harvest_copy_dll "$vk" "$dest/vulkan-1.dll"
   fi
 
   local gcc_bin=""
@@ -295,7 +291,7 @@ harvest_windows_mpv_dlls() {
   echo "harvested $n dlls → $dest"
   find "$dest" -maxdepth 1 -type f -iname '*.dll' -printf '  %f\n' 2>/dev/null \
     || find "$dest" -maxdepth 1 -type f -iname '*.dll' | sed 's|.*/||;s|^|  |'
-  if ! kotv_is_mpv_win7_build && [[ ! -f "$dest/vulkan-1.dll" ]]; then
+  if [[ ! -f "$dest/vulkan-1.dll" ]]; then
     echo "ERROR: harvested windows dlls missing vulkan-1.dll (tried SDK Bin, System32, vulkan-runtime.exe)" >&2
     ls -la /c/VulkanSDK/*/Bin/vulkan-1.dll /c/Windows/System32/vulkan-1.dll 2>/dev/null || true
     exit 1
@@ -339,7 +335,6 @@ ensure_libplacebo() {
   rm -rf build
   local placebo_lib=shared
   local vk_flag=enabled
-  kotv_is_mpv_win7_build && vk_flag=disabled
   if kotv_is_windows_build; then
     placebo_lib=static
     echo "==> windows: static libplacebo (profile=$want_profile, vulkan=$vk_flag)"
@@ -595,11 +590,7 @@ PY
 }
 
 ensure_windows_vulkan() {
-  if kotv_is_mpv_win7_build; then
-    echo "skip VULKAN_SDK (Win7 D3D11-only libmpv build)"
-    return 0
-  fi
-  # libplacebo / mpv 需要 Vulkan 头与 vulkan-1
+  # libplacebo / mpv 需要 Vulkan 头与 vulkan-1（Win7 同 Win10+）。
   if [[ -n "${VULKAN_SDK:-}" && -f "${VULKAN_SDK}/Include/vulkan/vulkan.h" ]]; then
     echo "ok VULKAN_SDK=$VULKAN_SDK"
   elif [[ -f "/c/VulkanSDK" ]] || ls /c/VulkanSDK/*/Include/vulkan/vulkan.h >/dev/null 2>&1; then
@@ -654,13 +645,15 @@ build_mpv_linux() {
   cd mpv
   rm -rf build
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
   meson setup build \
     -Ddefault_library=shared \
     -Dlibmpv=true \
     -Dcplayer=false \
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
-    -Dlua=disabled
+    -Dlua=disabled \
+    -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-linux"
   cp -f build/libmpv.so.2 "$ASSET/linux/libmpv.so.2"
   if [[ "$AV3A" == "1" ]]; then
@@ -817,12 +810,12 @@ EOF
     export LDFLAGS="${LDFLAGS:-} -Wl,--subsystem,windows:6.01"
   fi
   rm -rf build
-  # meson-native-kotv.ini 已在 ensure_libplacebo 前写入
+  # 禁止 meson 回退到系统 libavdevice（与 mdk 同进程时易堆损坏）。
+  rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
   if kotv_is_windows_build; then
     local mpv_vk=enabled
-    kotv_is_mpv_win7_build && mpv_vk=disabled
     if kotv_is_mpv_win7_build; then
-      echo "==> mpv Win7 build: vulkan=disabled, d3d11=enabled (vo=gpu + D3D11/OpenGL/auto)"
+      echo "==> mpv Win7 build: vulkan=enabled, d3d11=enabled"
     fi
     local -a mpv_extra=()
     if kotv_is_mpv_win7_build; then
@@ -839,6 +832,7 @@ EOF
       -Dvulkan="$mpv_vk" \
       "${mpv_extra[@]}" \
       -Dlua=disabled \
+      -Dlibavdevice=disabled \
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']" \
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']"
   else
@@ -849,7 +843,8 @@ EOF
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan=enabled \
-      -Dlua=disabled
+      -Dlua=disabled \
+      -Dlibavdevice=disabled
   fi
   kotv_meson_compile build "mpv-windows"
   local out="$ASSET/windows/mpv-2.dll"
@@ -868,13 +863,17 @@ EOF
   fi
   echo "built windows/mpv-2.dll (+ AV3A=$AV3A) from $dll"
   if kotv_is_mpv_win7_build; then
-    # meson configure 摘要里 d3d11 应为 YES（依赖 shaderc+spirv-cross）
     if ! meson configure build 2>/dev/null | grep -Eiq '^[[:space:]]*d3d11[[:space:]]+(YES|true|enabled)'; then
       echo "ERROR: Win7 libmpv built without d3d11 (need shaderc+spirv-cross)" >&2
       meson configure build 2>/dev/null | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
       exit 1
     fi
-    echo "ok Win7 mpv features include d3d11"
+    if ! meson configure build 2>/dev/null | grep -Eiq '^[[:space:]]*vulkan[[:space:]]+(YES|true|enabled)'; then
+      echo "ERROR: Win7 libmpv built without vulkan" >&2
+      meson configure build 2>/dev/null | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
+      exit 1
+    fi
+    echo "ok Win7 mpv features include d3d11 + vulkan"
   fi
 }
 

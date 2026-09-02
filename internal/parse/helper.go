@@ -196,7 +196,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	// （TV 不在该层做额外 rules/isVideo 校验；KOTV 这里收敛到同样的成功判定）
 	if len(parsed) <= 40 {
 		parseLog("[parse] invalid result via=%s out=%s", via, parsePreview(parsed, 160))
-		return r, fmt.Errorf("解析结果无效")
+			return r, fmt.Errorf("解析结果无效")
 	}
 	// checkResult(needParse)→startWeb / CustomWebView：非直链播放页再嗅一次。
 	mergedHdr := mergeHeaders(hdr, sniffHdr)
@@ -293,10 +293,10 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 			return out, nil
 		}
 	}
-	if sniffed, _ := PlayPageSniff(raw, headers); sniffed != "" {
-		return sniffed, nil
-	}
-	return "", fmt.Errorf("直播地址需要解析但无可用解析器")
+		if sniffed, _ := PlayPageSniff(raw, headers); sniffed != "" {
+			return sniffed, nil
+		}
+		return "", fmt.Errorf("直播地址需要解析但无可用解析器")
 }
 
 func resolveParse(r model.Result, parses []model.Parse, useParse bool, prefer string) *model.Parse {

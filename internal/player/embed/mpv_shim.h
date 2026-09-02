@@ -45,6 +45,10 @@ int kotv_mpv_set_volume(int volume);
 
 /* 有新画面时把 libmpv SW renderer 的 rgb0 转成 RGBA，返回 1。 */
 int kotv_mpv_take_frame(uint8_t *out, int out_cap, int *out_w, int *out_h);
+int kotv_mpv_vo_configured(void);
+void kotv_mpv_pump_events(void);
+typedef void (*kotv_mpv_wakeup_fn)(void *user);
+void kotv_mpv_set_wakeup_handler(kotv_mpv_wakeup_fn fn, void *user);
 
 /* 通用属性访问：支撑倍速/画面比例/解码/音轨字幕等扩展控制。 */
 int kotv_mpv_set_prop_string(const char *name, const char *value);

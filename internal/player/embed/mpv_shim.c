@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 #include <wchar.h>
 
 /* 全平台：dlopen/LoadLibrary 失败详情（勿放进 _WIN32 块，否则 mac/linux/android 编译失败）。 */
@@ -415,8 +416,15 @@ static fn_mpv_render_context_update p_render_update;
 static fn_mpv_render_context_render p_render;
 static fn_mpv_free p_mpv_free;
 static fn_mpv_wait_event p_wait_event;
+typedef void (*fn_mpv_wakeup)(mpv_handle *ctx);
+typedef void (*fn_mpv_set_wakeup_callback)(mpv_handle *ctx, void (*cb)(void *d), void *d);
+static fn_mpv_wakeup p_wakeup;
+static fn_mpv_set_wakeup_callback p_set_wakeup_callback;
 
 static volatile int g_dirty;
+static atomic_int g_render_pending;
+static kotv_mpv_wakeup_fn g_wakeup_fn;
+static void *g_wakeup_user;
 static int g_has_file;
 static uint8_t *g_pixels;
 static int g_width = 1280;
@@ -432,9 +440,64 @@ static char g_hwdec_opt[64];
 static int init_sw(void);
 static int init_wid(long long win);
 
+static void mpv_wakeup_dispatch(void *ctx) {
+    (void)ctx;
+    if (g_wakeup_fn)
+        g_wakeup_fn(g_wakeup_user);
+}
+
 static void update_cb(void *ctx) {
     (void)ctx;
     g_dirty = 1;
+    atomic_store(&g_render_pending, 1);
+    if (p_wakeup && g_mpv)
+        p_wakeup(g_mpv);
+}
+
+void kotv_mpv_set_wakeup_handler(kotv_mpv_wakeup_fn fn, void *user) {
+    g_wakeup_fn = fn;
+    g_wakeup_user = user;
+}
+
+/* 按视频 dwidth/dheight 调整软渲缓冲；固定 1280x720 时 1080p 片源 render 会失败。 */
+static int ensure_sw_buffer(void) {
+    int64_t dw = 0;
+    int64_t dh = 0;
+    int nw;
+    int nh;
+    int need;
+    if (!g_mpv || !p_get_property)
+        return g_pixels && g_capacity > 0;
+    /* 无有效视频尺寸时不渲：loadfile 后 demux 未就绪时 render 会 SIGABRT。 */
+    if (p_get_property(g_mpv, "dwidth", MPV_FORMAT_INT64, &dw) < 0 || dw <= 0)
+        return 0;
+    if (p_get_property(g_mpv, "dheight", MPV_FORMAT_INT64, &dh) < 0 || dh <= 0)
+        return 0;
+    nw = (int)dw;
+    nh = (int)dh;
+    if (nw <= 0 || nh <= 0)
+        return g_pixels && g_capacity > 0;
+    if (nw > 3840)
+        nw = 3840;
+    if (nh > 2160)
+        nh = 2160;
+    need = nw * nh * 4;
+    if (g_pixels && g_width == nw && g_height == nh && g_capacity >= need)
+        return 1;
+    free(g_pixels);
+    g_pixels = (uint8_t *)malloc((size_t)need);
+    if (!g_pixels) {
+        g_capacity = 0;
+        g_width = 1280;
+        g_height = 720;
+        return 0;
+    }
+    g_width = nw;
+    g_height = nh;
+    g_capacity = need;
+    memset(g_pixels, 0, (size_t)need);
+    g_dirty = 1;
+    return 1;
 }
 
 static void copy_cstr(char *dst, size_t cap, const char *src) {
@@ -524,6 +587,13 @@ static int bind_symbols(void) {
     BIND(p_mpv_free, "mpv_free");
     BIND(p_wait_event, "mpv_wait_event");
 #undef BIND
+#define BIND_OPT(dst, name) do { \
+        void *_sym = (void *)MPV_SYM(g_lib, name); \
+        if (_sym) memcpy(&(dst), &_sym, sizeof(dst)); \
+    } while (0)
+    BIND_OPT(p_wakeup, "mpv_wakeup");
+    BIND_OPT(p_set_wakeup_callback, "mpv_set_wakeup_callback");
+#undef BIND_OPT
     return 0;
 }
 
@@ -539,6 +609,17 @@ static void drain_events(void) {
     }
 }
 
+static void pump_events_timed(double timeout_sec) {
+    int n;
+    if (!g_mpv || !p_wait_event)
+        return;
+    for (n = 0; n < 64; ++n) {
+        mpv_event *ev = p_wait_event(g_mpv, timeout_sec);
+        if (!ev || ev->event_id == KOTV_MPV_EVENT_NONE)
+            break;
+    }
+}
+
 static void destroy_player(void) {
     if (g_render) {
         p_render_set_update(g_render, NULL, NULL);
@@ -546,6 +627,8 @@ static void destroy_player(void) {
         g_render = NULL;
     }
     if (g_mpv) {
+        if (p_set_wakeup_callback)
+            p_set_wakeup_callback(g_mpv, NULL, NULL);
         p_destroy(g_mpv);
         g_mpv = NULL;
     }
@@ -563,37 +646,14 @@ static void apply_common_opts(mpv_handle *mpv) {
     p_set_option_string(mpv, "osc", "no");
 }
 
-#if defined(_WIN32)
-/* Win7：现代 vulkan-1.dll / ICD 探测易把 talloc 堆打坏（ta.c canary assert）。 */
-static int kotv_is_windows7(void) {
-    typedef LONG(WINAPI *RtlGetVersionFn)(OSVERSIONINFOW *);
-    HMODULE ntdll;
-    RtlGetVersionFn rtl;
-    OSVERSIONINFOW vi;
-    ntdll = GetModuleHandleW(L"ntdll.dll");
-    if (!ntdll)
-        return 0;
-    rtl = (RtlGetVersionFn)(void *)GetProcAddress(ntdll, "RtlGetVersion");
-    if (!rtl)
-        return 0;
-    memset(&vi, 0, sizeof(vi));
-    vi.dwOSVersionInfoSize = sizeof(vi);
-    /* RtlGetVersion：不受清单兼容层影响；真 Win7 为 6.1。 */
-    if (rtl(&vi) != 0)
-        return 0;
-    return vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1;
-}
-#else
-static int kotv_is_windows7(void) { return 0; }
-#endif
-
 static void apply_gpu_render_opts(mpv_handle *mpv, int sw_vo) {
     if (g_hwdec_opt[0])
         p_set_option_string(mpv, "hwdec", g_hwdec_opt);
     if (sw_vo) {
-        /* 桌面 Texture 软渲：只走 vo=libmpv，切勿设 gpu-api=vulkan。
-         * 否则 libplacebo 会在 initialize 时拉 Vulkan，Win7 上常见 talloc canary。 */
+        /* 桌面 Texture 软渲：只走 vo=libmpv，勿设 gpu-api=vulkan（libplacebo 会在 init 时拉 Vulkan）。 */
         p_set_option_string(mpv, "vo", "libmpv");
+        if (!g_hwdec_opt[0])
+            p_set_option_string(mpv, "hwdec", "auto");
         return;
     }
     p_set_option_string(mpv, "vo", g_gpu_next ? "gpu-next" : "gpu");
@@ -607,12 +667,6 @@ static void apply_gpu_render_opts(mpv_handle *mpv, int sw_vo) {
 }
 
 int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec) {
-    if (kotv_is_windows7()) {
-        gpu_next = 0;
-        vulkan = 0;
-        if (strcmp(g_gpu_api, "vulkan") == 0)
-            g_gpu_api[0] = '\0';
-    }
     g_gpu_next = gpu_next ? 1 : 0;
     g_vulkan = vulkan ? 1 : 0;
     /* 不在这里清 g_gpu_api：由 kotv_mpv_set_gpu_api / set_preinit_options2 设置。 */
@@ -627,8 +681,6 @@ int kotv_mpv_set_preinit_options(int gpu_next, int vulkan, const char *hwdec) {
 int kotv_mpv_set_gpu_api(const char *gpu_api) {
     g_gpu_api[0] = '\0';
     if (!gpu_api || !gpu_api[0] || strcmp(gpu_api, "auto") == 0)
-        return 0;
-    if (kotv_is_windows7() && strcmp(gpu_api, "vulkan") == 0)
         return 0;
     copy_cstr(g_gpu_api, sizeof(g_gpu_api), gpu_api);
     if (strcmp(g_gpu_api, "vulkan") == 0)
@@ -700,6 +752,8 @@ static int init_sw(void) {
             return -5;
         }
         drain_events();
+        if (p_set_wakeup_callback)
+            p_set_wakeup_callback(g_mpv, mpv_wakeup_dispatch, NULL);
         break;
     }
 
@@ -745,6 +799,9 @@ static int init_wid(long long win) {
     apply_gpu_render_opts(g_mpv, 0);
     if (!g_hwdec_opt[0])
         p_set_option_string(g_mpv, "hwdec", "auto");
+#if defined(__APPLE__)
+    p_set_option_string(g_mpv, "force-window", "yes");
+#endif
     apply_common_opts(g_mpv);
     if (p_initialize(g_mpv) < 0) {
         destroy_player();
@@ -833,22 +890,40 @@ int kotv_mpv_play(const char *url) {
         rc = p_command(g_mpv, cmd);
     }
     if (rc >= 0) {
-        g_dirty = 1;
         g_has_file = 1;
     }
     return rc;
 }
 
 void kotv_mpv_stop(void) {
+    int idle;
+    int n;
     if (!g_mpv)
         return;
     {
         const char *cmd[] = {"stop", NULL};
         drain_events();
         p_command(g_mpv, cmd);
+        drain_events();
+    }
+    /* 用户 stop/dispose：短等 core-idle 即可；长等会拖死返回。 */
+    if (p_wait_event && p_get_property) {
+        for (n = 0; n < 20; ++n) {
+            idle = 0;
+            p_get_property(g_mpv, "core-idle", MPV_FORMAT_FLAG, &idle);
+            if (idle)
+                break;
+            {
+                mpv_event *ev = p_wait_event(g_mpv, 0.05);
+                if (ev && (ev->event_id == 1 || ev->event_id == 11)) /* SHUTDOWN / IDLE */
+                    break;
+            }
+        }
+        drain_events();
     }
     g_dirty = 0;
     g_has_file = 0;
+    atomic_store(&g_render_pending, 0);
 }
 
 void kotv_mpv_pause(int pause) {
@@ -970,12 +1045,43 @@ int kotv_mpv_cmd2(const char *a, const char *b) {
     return p_command(g_mpv, cmd);
 }
 
-int kotv_mpv_take_frame(uint8_t *out, int out_cap, int *out_w, int *out_h) {
-    if (g_hard || !g_has_file || !g_render || !g_pixels || !out || !out_w || !out_h)
+static int mpv_vo_configured(void) {
+    int ok = 0;
+    if (!g_mpv || !p_get_property)
         return 0;
-    drain_events();
+    if (p_get_property(g_mpv, "vo-configured", MPV_FORMAT_FLAG, &ok) < 0)
+        return 0;
+    return ok ? 1 : 0;
+}
+
+int kotv_mpv_vo_configured(void) {
+    return mpv_vo_configured();
+}
+
+void kotv_mpv_pump_events(void) {
+    pump_events_timed(0.01);
+}
+
+int kotv_mpv_take_frame(uint8_t *out, int out_cap, int *out_w, int *out_h) {
+    if (g_hard || !g_has_file || !g_render || !out || !out_w || !out_h)
+        return 0;
+    /* 仅 render update_cb 置位后尝试；避免 tick 轮询与 demux/decode 线程竞态 SIGABRT。 */
+    if (!atomic_exchange(&g_render_pending, 0))
+        return 0;
+    pump_events_timed(0.0);
+    if (!mpv_vo_configured())
+        return 0;
+    {
+        double pt = -1.0;
+        if (p_get_property && p_get_property(g_mpv, "playback-time", MPV_FORMAT_DOUBLE, &pt) >= 0 &&
+            pt <= 0.0)
+            return 0;
+    }
+    pump_events_timed(0.0);
+    if (!ensure_sw_buffer())
+        return 0;
     uint64_t update = p_render_update(g_render);
-    if (!(update & MPV_RENDER_UPDATE_FRAME) && !g_dirty)
+    if (!(update & MPV_RENDER_UPDATE_FRAME))
         return 0;
 
     int size[2] = {g_width, g_height};
@@ -1024,7 +1130,14 @@ char *kotv_mpv_get_audio_tracks_json(void) {
     const size_t cap = 16384;
     int64_t count = 0;
     int i;
+#if defined(__APPLE__)
+    /* macOS 软渲：demux/解码活跃期查 track-list 会触发 libmpv SIGABRT。 */
+    return dup_cstr("[]");
+#endif
     if (!g_mpv)
+        return dup_cstr("[]");
+    pump_events_timed(0.0);
+    if (!mpv_vo_configured())
         return dup_cstr("[]");
     out = (char *)malloc(cap);
     if (!out)

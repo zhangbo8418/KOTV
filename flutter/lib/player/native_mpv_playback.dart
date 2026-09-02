@@ -8,15 +8,11 @@ import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
-import 'mpv_win_surface.dart' if (dart.library.html) 'mpv_win_surface_stub.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
-/// 原生 libmpv 播放后端（对齐 TV `androidx.media3.mpvplayer`）。
-///
-/// - Android：MethodChannel `kotv_mpv` + PlatformView（Surface / Texture）
-/// - Windows：HWND 硬渲（`vo=gpu` + wid，对齐 Android Surface）
-/// - macOS / Linux / iOS：Flutter Texture（`vo=libmpv` 软渲）
+/// Android 原生 libmpv（MethodChannel `kotv_mpv` + PlatformView Surface/Texture）。
+/// 桌面 / iOS 请用 [MediaKitPlayback]。
 class NativeMpvPlayback extends KotvPlayback {
   NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
 
@@ -44,17 +40,26 @@ class NativeMpvPlayback extends KotvPlayback {
   String? _lastError;
   int? _textureId;
   String _renderMode = 'surface';
-  bool _winHardRender = false;
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
   final _endedCtrl = StreamController<bool>.broadcast();
 
+  /// 仅随 Texture/错误/就绪变化递增；供详情页 ValueListenableBuilder 重建画面（勿绑 position）。
+  final ValueNotifier<int> surfaceRev = ValueNotifier(0);
+
   /// 原位全屏由页面 GlobalKey reparent 同一 PlatformView/Texture，不再 bump 代际。
   int _surfaceGeneration = 0;
   void bumpSurfaceView() {}
 
+  void _bumpSurface() {
+    surfaceRev.value++;
+  }
+
   bool get isReady => _ready;
+
+  /// Android Texture 模式（Surface 模式无 textureId）。
+  int? get textureId => _textureId;
 
   KotvMpvOpts get opts => _opts;
 
@@ -131,6 +136,7 @@ class NativeMpvPlayback extends KotvPlayback {
   String? get currentSubtitleId => null;
 
   Future<void> _refreshAudioTracks() async {
+    if (!_ready || _w <= 0 || _h <= 0) return;
     try {
       final raw = await _ch.invokeMethod<String>('getAudioTracks');
       if (raw == null || raw.isEmpty) return;
@@ -150,96 +156,31 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   /// Android：Hybrid Composition SurfaceView / TextureView（对齐 TV setRender）。
-  /// Windows：HWND 硬渲 child window（默认 Surface）；Texture 为软渲回退。
-  /// macOS / Linux / iOS：原生 libmpv 软件渲染 → Flutter Texture。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
-    if (kotvIsAndroid()) {
-      return Stack(
-        key: ValueKey('kotv_mpv_surface_$_surfaceGeneration'),
-        fit: StackFit.expand,
-        children: [
-          const ColoredBox(color: Colors.black),
-          kotvMpvSurfaceView(
-            viewType: 'kotv_mpv/surface',
-            hybrid: true,
-          ),
-          if (_lastError != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  _lastError!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
-                ),
-              ),
-            ),
-        ],
-      );
+    if (!kotvIsAndroid()) {
+      return const ColoredBox(color: Colors.black);
     }
-    if (kotvIsWindows() && (_winHardRender || _renderMode != 'texture')) {
-      return Stack(
-        key: ValueKey('kotv_mpv_surface_$_surfaceGeneration'),
-        fit: StackFit.expand,
-        children: [
-          const ColoredBox(color: Colors.black),
-          const KotvMpvWinSurfaceHost(),
-          if (_lastError != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  _lastError!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
-                ),
-              ),
-            ),
-        ],
-      );
-    }
-    if ((kotvIsDesktop() || kotvIsIOS()) && _textureId != null) {
-      return Stack(
-        key: ValueKey('kotv_mpv_texture_$_surfaceGeneration'),
-        fit: StackFit.expand,
-        children: [
-          const ColoredBox(color: Colors.black),
-          Center(
-            child: Texture(textureId: _textureId!),
-          ),
-          if (_lastError != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  _lastError!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
-                ),
-              ),
-            ),
-        ],
-      );
-    }
-    final err = _lastError;
-    return ColoredBox(
+    return Stack(
       key: ValueKey('kotv_mpv_surface_$_surfaceGeneration'),
-      color: Colors.black,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            err ??
-                (kotvIsDesktop()
-                    ? '桌面 MPV 未就绪\n请将 libmpv 与应用放在同目录\n（Windows: mpv-2.dll 与 mdk.dll 一起）'
-                    : (kotvIsIOS()
-                        ? 'iOS MPV 未就绪\n请将 libmpv.dylib 放入 App Frameworks'
-                        : '原生 MPV 未就绪')),
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
-          ),
+      fit: StackFit.expand,
+      children: [
+        const ColoredBox(color: Colors.black),
+        kotvMpvSurfaceView(
+          viewType: 'kotv_mpv/surface',
+          hybrid: true,
         ),
-      ),
+        if (_lastError != null)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                _lastError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -258,7 +199,10 @@ class NativeMpvPlayback extends KotvPlayback {
         final tid = res['textureId'];
         if (tid is int) _textureId = tid;
         if (tid is num) _textureId = tid.toInt();
-        _winHardRender = res['hardRender'] == true;
+        if (_textureId == null && tid != null) {
+          final parsed = int.tryParse('$tid');
+          if (parsed != null) _textureId = parsed;
+        }
       }
       await _sub?.cancel();
       _sub = _ev.receiveBroadcastStream().listen(_onEvent, onError: (e) {
@@ -266,9 +210,12 @@ class NativeMpvPlayback extends KotvPlayback {
         notifyListeners();
       });
       _nativeReady = true;
+      _bumpSurface();
+      notifyListeners();
     } catch (e) {
       _nativeReady = false;
       _lastError = '原生 MPV 通道未就绪: $e';
+      _bumpSurface();
       notifyListeners();
       rethrow;
     }
@@ -295,16 +242,27 @@ class NativeMpvPlayback extends KotvPlayback {
         _speedBps = (m['speedBps'] as num?)?.toInt() ?? 0;
         if (!_posCtrl.isClosed) _posCtrl.add(_position);
         if (!_bufCtrl.isClosed) _bufCtrl.add(_buffered);
-        notifyListeners();
         break;
       case 'ready':
-      case 'size':
-        _w = (m['width'] as num?)?.toInt() ?? _w;
-        _h = (m['height'] as num?)?.toInt() ?? _h;
+        final nw = (m['width'] as num?)?.toInt() ?? _w;
+        final nh = (m['height'] as num?)?.toInt() ?? _h;
+        if (nw > 0) _w = nw;
+        if (nh > 0) _h = nh;
         _ready = true;
         _lastError = null;
         if (_w > 0 && _h > 0) _buffering = false;
         unawaited(_refreshAudioTracks());
+        _bumpSurface();
+        notifyListeners();
+        break;
+      case 'size':
+        final nw = (m['width'] as num?)?.toInt() ?? _w;
+        final nh = (m['height'] as num?)?.toInt() ?? _h;
+        final sizeChanged = nw != _w || nh != _h;
+        if (nw > 0) _w = nw;
+        if (nh > 0) _h = nh;
+        if (_w > 0 && _h > 0) _buffering = false;
+        if (sizeChanged) _bumpSurface();
         notifyListeners();
         break;
       case 'completed':
@@ -316,6 +274,7 @@ class NativeMpvPlayback extends KotvPlayback {
       case 'error':
         _lastError = '${m['message'] ?? 'MPV error'}';
         _playing = false;
+        _bumpSurface();
         notifyListeners();
         break;
     }
@@ -339,6 +298,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _h = 0;
     _position = Duration.zero;
     _duration = Duration.zero;
+    _bumpSurface();
     notifyListeners();
 
     if (drm != null && drm.isNotEmpty) {
@@ -368,13 +328,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'props': _opts.propertyMap(live: live),
       });
     } on MissingPluginException {
-      _lastError = kotvIsAndroid()
-          ? '原生 MPV 插件未注册'
-          : (kotvIsDesktop()
-              ? '桌面 MPV 插件未注册（需重新编译 runner）'
-              : (kotvIsIOS()
-                  ? 'iOS MPV 插件未注册（需重新编译 Runner）'
-                  : '原生 MPV 插件未注册'));
+      _lastError = '原生 MPV 插件未注册';
       _buffering = false;
       notifyListeners();
       throw StateError(_lastError!);
@@ -491,9 +445,9 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       if (_nativeReady) {
         await _ch.invokeMethod('setRenderMode', {'mode': _renderMode});
-        _winHardRender = kotvIsWindows() && _renderMode != 'texture';
       }
     } catch (_) {}
+    _bumpSurface();
     notifyListeners();
   }
 
@@ -511,6 +465,7 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
+  @override
   Future<void> setStableVolume(bool on) async {
     try {
       await _ch.invokeMethod('setProperty', {
@@ -556,6 +511,7 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   void dispose() {
     _nativeReady = false;
+    surfaceRev.dispose();
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _sub = null;
     unawaited(() async {

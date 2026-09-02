@@ -3,6 +3,4 @@
 
 #import <FlutterMacOS/FlutterMacOS.h>
 
-void kotv_mpv_plugin_register_macos(FlutterEngine* engine);
-
 #endif

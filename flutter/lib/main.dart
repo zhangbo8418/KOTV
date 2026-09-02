@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -13,7 +14,6 @@ import 'desktop/mini_player_window.dart';
 import 'api/kotv_engine_url.dart';
 import 'engine/engine_launcher.dart';
 import 'player/buffer_budget.dart';
-import 'player/fvp_register.dart';
 import 'player/kotv_playback.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
@@ -119,7 +119,7 @@ Future<void> main() async {
     return true;
   };
   if (!kIsWeb) {
-    kotvRegisterFvp();
+    MediaKit.ensureInitialized();
     if (Platform.isAndroid) {
       unawaited(_ensureAndroidStoragePermission());
     }

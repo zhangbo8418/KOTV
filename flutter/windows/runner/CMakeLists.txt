@@ -6,9 +6,6 @@ project(runner LANGUAGES C CXX)
 # work.
 #
 # Any new source files that you add to the application should be added here.
-set(KOTV_MPV_NATIVE "${CMAKE_SOURCE_DIR}/../native/kotv_mpv")
-set(KOTV_MPV_SHIM "${CMAKE_SOURCE_DIR}/../../internal/player/embed/mpv_shim.c")
-
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "kotv_iface_rx.cpp"
@@ -16,11 +13,6 @@ add_executable(${BINARY_NAME} WIN32
   "utils.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
-  "${KOTV_MPV_NATIVE}/kotv_mpv_plugin_win.cpp"
-  "${KOTV_MPV_NATIVE}/kotv_mpv_win_surface.cpp"
-  "${KOTV_MPV_NATIVE}/kotv_mpv_desktop_core.c"
-  "${KOTV_MPV_NATIVE}/kotv_mpv_lib_path.cpp"
-  "${KOTV_MPV_SHIM}"
   "Runner.rc"
   "runner.exe.manifest"
 )
@@ -53,7 +45,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "iphlpapi.lib")
-target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}" "${KOTV_MPV_NATIVE}")
+target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

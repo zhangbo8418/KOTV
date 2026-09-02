@@ -16,10 +16,6 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		9EC5C3723F2B31C78845C836 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3CED8356EF19B4F46277FB29 /* Pods_Runner.framework */; };
-		BB0000010000000000000001 /* kotv_mpv_plugin_ios.mm in Sources */ = {isa = PBXBuildFile; fileRef = BB0000110000000000000001 /* kotv_mpv_plugin_ios.mm */; };
-		BB0000020000000000000001 /* kotv_mpv_desktop_core.c in Sources */ = {isa = PBXBuildFile; fileRef = BB0000120000000000000001 /* kotv_mpv_desktop_core.c */; };
-		BB0000030000000000000001 /* kotv_mpv_lib_path.cpp in Sources */ = {isa = PBXBuildFile; fileRef = BB0000130000000000000001 /* kotv_mpv_lib_path.cpp */; };
-		BB0000040000000000000001 /* mpv_shim.c in Sources */ = {isa = PBXBuildFile; fileRef = BB0000140000000000000001 /* mpv_shim.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,10 +54,6 @@
 		7476D8BA579FB7DBB67B7E34 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
 		74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		BB0000110000000000000001 /* kotv_mpv_plugin_ios.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = kotv_mpv_plugin_ios.mm; sourceTree = "<group>"; };
-		BB0000120000000000000001 /* kotv_mpv_desktop_core.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = kotv_mpv_desktop_core.c; path = ../../native/kotv_mpv/kotv_mpv_desktop_core.c; sourceTree = "<group>"; };
-		BB0000130000000000000001 /* kotv_mpv_lib_path.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = kotv_mpv_lib_path.cpp; path = ../../native/kotv_mpv/kotv_mpv_lib_path.cpp; sourceTree = "<group>"; };
-		BB0000140000000000000001 /* mpv_shim.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = mpv_shim.c; path = ../../../internal/player/embed/mpv_shim.c; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Debug.xcconfig; path = Flutter/Debug.xcconfig; sourceTree = "<group>"; };
 		9740EEB31CF90195004384FC /* Generated.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Flutter/Generated.xcconfig; sourceTree = "<group>"; };
@@ -146,10 +138,6 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
-				BB0000110000000000000001 /* kotv_mpv_plugin_ios.mm */,
-				BB0000120000000000000001 /* kotv_mpv_desktop_core.c */,
-				BB0000130000000000000001 /* kotv_mpv_lib_path.cpp */,
-				BB0000140000000000000001 /* mpv_shim.c */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -210,7 +198,6 @@
 				97C146EC1CF9000F007C117D /* Resources */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
-				BB0000200000000000000001 /* Bundle libmpv */,
 				E328CD4B7F353AA2B336E14F /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
@@ -321,23 +308,6 @@
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
 		};
-		BB0000200000000000000001 /* Bundle libmpv */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"${SRCROOT}/../assets/mpv-libs/ios/libmpv.dylib",
-			);
-			name = "Bundle libmpv";
-			outputPaths = (
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libmpv.dylib",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "SRC=\"${SRCROOT}/../assets/mpv-libs/ios/libmpv.dylib\"\nDEST_DIR=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nif [ ! -f \"$SRC\" ]; then\n  echo \"note: ios libmpv.dylib missing (run scripts/fetch-ios-mpv-libs.sh); MPV will report NO_LIBMPV\"\n  exit 0\nfi\nmkdir -p \"$DEST_DIR\"\ncp -f \"$SRC\" \"$DEST_DIR/libmpv.dylib\"\nif command -v install_name_tool >/dev/null; then\n  install_name_tool -id \"@rpath/libmpv.dylib\" \"$DEST_DIR/libmpv.dylib\" 2>/dev/null || true\nfi\necho \"bundled Frameworks/libmpv.dylib\"\n";
-		};
 		9037DF421D573A02996715C2 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -409,10 +379,6 @@
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
-				BB0000010000000000000001 /* kotv_mpv_plugin_ios.mm in Sources */,
-				BB0000020000000000000001 /* kotv_mpv_desktop_core.c in Sources */,
-				BB0000030000000000000001 /* kotv_mpv_lib_path.cpp in Sources */,
-				BB0000040000000000000001 /* mpv_shim.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

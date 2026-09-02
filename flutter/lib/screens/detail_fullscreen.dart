@@ -850,7 +850,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         align: Alignment.topCenter,
                       ),
                     ),
-                  // 当前集跟手：Positioned 改布局，手势层不搬走。
+                  // 当前集跟手：视频 + 全屏观看 + 播停控件同一层位移（抖音式）。
                   Positioned(
                     left: 0,
                     right: 0,
@@ -858,6 +858,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                     height: c.maxHeight,
                     child: Stack(
                       fit: StackFit.expand,
+                      clipBehavior: Clip.hardEdge,
                       children: [
                         _buildVideo(),
                         DanmakuOverlay(
@@ -867,20 +868,21 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         ),
                         if (widget.playUrl.isNotEmpty)
                           KotvBufferingOverlay(player: widget.playback),
+                        // 手势在控件下层：滑动跟手；播停/全屏观看仍在上层可点。
+                        Positioned.fill(
+                          child: Listener(
+                            behavior: HitTestBehavior.translucent,
+                            onPointerDown: _onSwipePointerDown,
+                            onPointerMove: _onSwipePointerMove,
+                            onPointerUp: _onSwipePointerUp,
+                            onPointerCancel: _onSwipePointerCancel,
+                          ),
+                        ),
+                        if (_showForceLandscape) _forceLandscapeChip(c),
+                        _fullscreenChrome(),
                       ],
                     ),
                   ),
-                  Positioned.fill(
-                    child: Listener(
-                      behavior: HitTestBehavior.opaque,
-                      onPointerDown: _onSwipePointerDown,
-                      onPointerMove: _onSwipePointerMove,
-                      onPointerUp: _onSwipePointerUp,
-                      onPointerCancel: _onSwipePointerCancel,
-                    ),
-                  ),
-                  if (_showForceLandscape) _forceLandscapeChip(c),
-                  _fullscreenChrome(),
                   if (_swipeHint != null)
                     IgnorePointer(
                       child: Center(

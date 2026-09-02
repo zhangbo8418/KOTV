@@ -82,3 +82,6 @@ final remoteBridgeProvider = StateProvider<RemoteBridge?>((ref) => null);
 
 /// 全局忙碌遮罩文案；非空时 shell 显示加载层（loadingHolder）。
 final uiBusyProvider = StateProvider<String?>((ref) => null);
+
+/// 点播竖屏沉浸全屏：隐藏 shell 底栏，避免原位全屏时露出「首页/直播/搜索/我的」。
+final detailImmersiveFullscreenProvider = StateProvider<bool>((ref) => false);

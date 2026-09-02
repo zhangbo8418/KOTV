@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 将 libmpv 打进桌面应用包，位置与 fvp/mdk 相同（不进 runtime、不单独建 libmpv/ 目录）。
+# 将自带 libmpv 打进桌面应用包，供 media_kit 加载；位置与 fvp/mdk 相同（不进 runtime、不单独建 libmpv/ 目录）。
 #   Windows：与 kotv.exe / mdk.dll 同目录（整包 DLL + verify-windows-mpv-bundle 闭包）
 #   Linux：bundle/lib/ + 非 OS .so 依赖，RUNPATH=$ORIGIN（避免缺库 / 与系统混载）
 #   macOS：Contents/Frameworks/ + 非系统 dylib，清掉 Homebrew/Xcode LC_RPATH
@@ -28,6 +28,44 @@ kotv_macos_is_system_dylib() {
     /System/*|/usr/lib/*|/usr/lib/swift/*) return 0 ;;
     @rpath/*|@loader_path/*|@executable_path/*) return 0 ;;
   esac
+  return 1
+}
+
+# brew 升级后旧 soname 会消失（如 libbluray.3 → libbluray.4）；尽量解析到现装 dylib。
+kotv_macos_resolve_dylib_path() {
+  local dep="$1"
+  [[ -n "$dep" ]] || return 1
+  [[ -f "$dep" ]] && { printf '%s\n' "$dep"; return 0; }
+
+  local base="${dep##*/}"
+  local pkg=""
+  case "$dep" in
+    /usr/local/opt/*)
+      pkg="${dep#/usr/local/opt/}"
+      pkg="${pkg%%/*}"
+      ;;
+    /opt/homebrew/opt/*)
+      pkg="${dep#/opt/homebrew/opt/}"
+      pkg="${pkg%%/*}"
+      ;;
+  esac
+  if [[ -n "$pkg" ]] && command -v brew >/dev/null; then
+    local brew_lib
+    brew_lib="$(brew --prefix "$pkg" 2>/dev/null)/lib"
+    if [[ -f "$brew_lib/$base" ]]; then
+      printf '%s\n' "$brew_lib/$base"
+      return 0
+    fi
+    if [[ "$base" =~ ^(.+\.)[0-9]+\.dylib$ ]]; then
+      local stem="${BASH_REMATCH[1]}"
+      local cand
+      for cand in "$brew_lib/${stem}"*.dylib; do
+        [[ -f "$cand" ]] || continue
+        printf '%s\n' "$cand"
+        return 0
+      done
+    fi
+  fi
   return 1
 }
 
@@ -65,7 +103,7 @@ kotv_macos_bundle_dylib_deps() {
   local fw="$1"
   local root_lib="$2"
   local -a queue=()
-  local lib dep base dest_lib old_id f
+  local lib dep base dest_lib old_id f resolved r
   [[ -f "$root_lib" ]] || return 1
   command -v otool >/dev/null || return 1
   command -v install_name_tool >/dev/null || return 1
@@ -80,14 +118,23 @@ kotv_macos_bundle_dylib_deps() {
     while IFS= read -r dep; do
       [[ -n "$dep" ]] || continue
       kotv_macos_is_system_dylib "$dep" && continue
-      [[ -f "$dep" ]] || {
-        echo "WARN: missing dylib dep: $dep (from $(basename "$lib"))" >&2
-        continue
-      }
       base="$(basename "$dep")"
+      resolved="$dep"
+      if [[ ! -f "$resolved" ]]; then
+        if r="$(kotv_macos_resolve_dylib_path "$dep" 2>/dev/null)" && [[ -f "$r" ]]; then
+          resolved="$r"
+          base="$(basename "$resolved")"
+        elif [[ -f "$fw/$base" ]]; then
+          install_name_tool -change "$dep" "@rpath/$base" "$lib" 2>/dev/null || true
+          continue
+        else
+          echo "WARN: missing dylib dep: $dep (from $(basename "$lib"))" >&2
+          continue
+        fi
+      fi
       dest_lib="$fw/$base"
       if [[ ! -f "$dest_lib" ]]; then
-        cp -f "$dep" "$dest_lib"
+        cp -f "$resolved" "$dest_lib"
         chmod u+w "$dest_lib" 2>/dev/null || true
         install_name_tool -id "@rpath/$base" "$dest_lib" 2>/dev/null || true
         kotv_macos_strip_abs_rpaths "$dest_lib"
@@ -123,6 +170,14 @@ kotv_macos_verify_libmpv_self_contained() {
   local bad=0
   local dep path f
   fw="$(dirname "$lib")"
+  if strings "$lib" 2>/dev/null | grep -q 'AVFFrameReceiver'; then
+    echo "ERROR: libmpv still contains AVFFrameReceiver (rebuild with -Dlibavdevice=disabled)" >&2
+    bad=1
+  fi
+  if strings "$lib" 2>/dev/null | grep -q 'libavdevice license'; then
+    echo "ERROR: libmpv still embeds libavdevice (conflicts with mdk libffmpeg in-process)" >&2
+    bad=1
+  fi
   while IFS= read -r dep; do
     [[ -n "$dep" ]] || continue
     case "$dep" in
@@ -132,11 +187,7 @@ kotv_macos_verify_libmpv_self_contained() {
         ;;
     esac
   done < <(otool -L "$lib" 2>/dev/null | awk 'NR>1 {print $1}')
-  for f in "$fw"/libmpv.dylib "$fw"/libass*.dylib "$fw"/libplacebo*.dylib \
-           "$fw"/libvulkan*.dylib "$fw"/libfreetype*.dylib "$fw"/libharfbuzz*.dylib \
-           "$fw"/libglib*.dylib "$fw"/libpng*.dylib "$fw"/libintl*.dylib \
-           "$fw"/libfribidi*.dylib "$fw"/libunibreak*.dylib "$fw"/libgraphite*.dylib \
-           "$fw"/libpcre*.dylib; do
+  for f in "$fw"/libmpv.dylib "$fw"/lib*.dylib; do
     [[ -f "$f" ]] || continue
     while IFS= read -r path; do
       case "$path" in
@@ -194,6 +245,30 @@ kotv_macos_strip_homebrew_rpaths_tree() {
   done < <(find "$fw" \( -name '*.dylib' -o -name 'mdk' -o -name 'fvp' \) -type f -print0 2>/dev/null)
 }
 
+# install_name_tool / cp 会清掉 dylib 签名；macOS 15+ dlopen 未签名库 → Code Signature Invalid (SIGKILL)。
+kotv_macos_adhoc_sign_app() {
+  local app="$1"
+  local fw="$app/Contents/Frameworks"
+  local f
+  command -v codesign >/dev/null || {
+    echo "WARN: codesign missing; bundled dylibs may fail dlopen on macOS 15+" >&2
+    return 0
+  }
+  [[ -d "$fw" ]] || return 0
+  echo "==> ad-hoc sign bundled Frameworks (libmpv + deps)"
+  while IFS= read -r -d '' f; do
+    codesign --force --sign - "$f" 2>/dev/null || true
+  done < <(find "$fw" -name '*.dylib' -type f -print0 2>/dev/null)
+  while IFS= read -r -d '' f; do
+    codesign --force --sign - "$f" 2>/dev/null || true
+  done < <(find "$fw" -name '*.framework' -type d -print0 2>/dev/null)
+  codesign --force --deep --sign - "$app" 2>/dev/null || true
+  if ! codesign -vv "$fw/libmpv.dylib" >/dev/null 2>&1; then
+    echo "ERROR: libmpv.dylib still unsigned after codesign" >&2
+    return 1
+  fi
+}
+
 # Linux：只拷 libmpv.so.2 会在干净机器上缺 libplacebo/ffmpeg/libass；
 # 或与系统同名 .so 混载（类 macOS Homebrew rpath 问题）。收齐依赖并设 $ORIGIN。
 kotv_linux_is_os_so() {
@@ -219,11 +294,24 @@ kotv_linux_set_origin_rpath() {
   fi
 }
 
+kotv_linux_resolve_soname() {
+  local soname="$1"
+  local dir
+  for dir in \
+    "${KOTV_MPV_PREFIX:-$ROOT/.build/desktop-mpv/prefix}/lib" \
+    "/usr/local/lib" \
+    "/usr/lib/x86_64-linux-gnu" \
+    "/lib/x86_64-linux-gnu"; do
+    [[ -f "$dir/$soname" ]] && { printf '%s\n' "$dir/$soname"; return 0; }
+  done
+  return 1
+}
+
 kotv_linux_bundle_so_deps() {
   local libdir="$1"
   local root_so="$2"
   local -a queue=()
-  local so line path base dest
+  local so line path base dest soname
   [[ -f "$root_so" ]] || return 1
   kotv_linux_set_origin_rpath "$root_so"
   queue+=("$root_so")
@@ -237,8 +325,12 @@ kotv_linux_bundle_so_deps() {
     fi
     while IFS= read -r line; do
       # "libfoo.so.1 => /path/libfoo.so.1 (0x...)" or "libfoo.so.1 => not found"
+      soname="$(printf '%s\n' "$line" | awk '{print $1}')"
       path="$(printf '%s\n' "$line" | awk '/=>/{print $3}')"
-      [[ -n "$path" && "$path" != "not" ]] || continue
+      if [[ -z "$path" || "$path" == "not" ]]; then
+        path="$(kotv_linux_resolve_soname "$soname" || true)"
+        [[ -n "$path" ]] || continue
+      fi
       [[ -f "$path" ]] || continue
       kotv_linux_is_os_so "$path" && continue
       base="$(basename "$path")"
@@ -292,6 +384,11 @@ case "$(uname -s)" in
     echo "==> strip Homebrew rpaths from Frameworks (mdk/fvp/libmpv)"
     kotv_macos_strip_homebrew_rpaths_tree "$FW"
     kotv_macos_verify_libmpv_self_contained "$FW/libmpv.dylib"
+    if [[ "${KOTV_MACOS_NO_FVP:-0}" == "1" ]]; then
+      rm -rf "$FW/fvp.framework" "$FW/mdk.framework" 2>/dev/null || true
+      echo "  - removed fvp/mdk.framework (MPV-only macOS)"
+    fi
+    kotv_macos_adhoc_sign_app "$DEST"
     strip_runtime_libmpv
     echo "bundled macOS Frameworks/libmpv.dylib (+ deps)"
     ;;

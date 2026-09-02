@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import '../util/kotv_io.dart';
 import 'kotv_platform.dart';
 
 /// 开播黑屏/超时后的会话内回退（各平台同一套，不写死某一引擎）：
@@ -137,6 +138,10 @@ class KotvPlaybackFailover {
     }
     if (kotvIsIOS()) {
       return const ['innie#mpv', 'innie#fvp', 'innie#html'];
+    }
+    // 桌面（含 Windows）：media_kit MPV + FVP；macOS 可用 KOTV_MACOS_NO_FVP=1 打纯 MPV 包。
+    if (Platform.isMacOS && kotvMacosNoFvp) {
+      return const ['innie#mpv'];
     }
     return const ['innie#mpv', 'innie#fvp'];
   }

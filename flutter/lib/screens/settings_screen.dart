@@ -765,19 +765,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
     final mpvVulkan = g('mpvVulkan', 'false') == 'true';
-    final mpvGpuApi = g('mpvGpuApi', 'auto').toLowerCase();
-    final mpvGpuApiLabel = {
-          'auto': '自动',
-          'd3d11': 'D3D11',
-          'opengl': 'OpenGL',
-          'vulkan': 'Vulkan',
-        }[mpvGpuApi] ??
-        mpvGpuApi;
     final mpvConfPreview = g('mpvConf').trim();
-    // MPV conf / gpu-next / Vulkan：Android + 桌面
+    // MPV conf / Vulkan：Android 原生 + 桌面/iOS media_kit
     final showMpvOpts = kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS();
-    final showMpvGpuOpts = showMpvOpts && !kotvIsWindows7();
-    final showWinGpuApi = kotvIsDesktop() && !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+    final showMpvVulkan = showMpvOpts && !kotvIsAndroid();
 
     return Column(
       children: [
@@ -932,10 +923,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsWideTile(
                           label: '渲染方式',
                           value: renderLabel,
-                          onTap: () => _pick('渲染方式', 'playerRender', const [
+                          onTap: () => _pick('渲染方式（仅 Exo）', 'playerRender', const [
                             ('Surface（推荐，HDR）', 'surface'),
                             ('Texture', 'texture'),
-                          ]),
+                          ], msg: '仅内置 Exo 生效，已保存'),
                         ),
                       KotvSettingsWideTile(
                         label: '自动切换播放器',
@@ -950,22 +941,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         value: g('ua').isEmpty ? '默认' : _ellipsize(g('ua'), 22),
                         onTap: _editUa,
                       ),
-                      if (showWinGpuApi)
-                        KotvSettingsWideTile(
-                          label: 'MPV 图形 API',
-                          value: mpvGpuApiLabel,
-                          onTap: () => _pick(
-                            'MPV 图形 API',
-                            'mpvGpuApi',
-                            [
-                              ('自动（推荐）', 'auto'),
-                              ('D3D11', 'd3d11'),
-                              ('OpenGL', 'opengl'),
-                              if (!kotvIsWindows7()) ('Vulkan', 'vulkan'),
-                            ],
-                          ),
-                        ),
-                      if (showMpvGpuOpts)
+                      if (kotvIsAndroid())
                         KotvSettingsGrid(children: [
                           KotvSettingsCell(
                             label: 'MPV gpu-next',
@@ -978,18 +954,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   : '已开启 vo=gpu-next（重启播放生效）',
                             )),
                           ),
-                          if (!showWinGpuApi)
-                            KotvSettingsCell(
-                              label: 'MPV Vulkan',
-                              value: mpvVulkan ? '开启' : '关闭',
-                              onTap: () => unawaited(_set(
-                                'mpvVulkan',
-                                mpvVulkan ? 'false' : 'true',
-                                msg: mpvVulkan
-                                    ? '已关闭 Vulkan（重启播放生效）'
-                                    : '已开启 gpu-api=vulkan（重启播放生效）',
-                              )),
-                            ),
+                        ]),
+                      if (showMpvVulkan)
+                        KotvSettingsGrid(children: [
+                          KotvSettingsCell(
+                            label: 'MPV Vulkan',
+                            value: mpvVulkan ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'mpvVulkan',
+                              mpvVulkan ? 'false' : 'true',
+                              msg: mpvVulkan
+                                  ? '已关闭 Vulkan（重启播放生效）'
+                                  : '已开启 gpu-api=vulkan（media_kit 内置 MPV，重启播放）',
+                            )),
+                          ),
                         ]),
                       if (showMpvOpts)
                         KotvSettingsWideTile(

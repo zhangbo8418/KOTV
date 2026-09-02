@@ -61,8 +61,8 @@ clone_ffmpeg() {
   git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
 }
 
-# v4: macOS 禁用 avdevice，避免与 fvp/mdk 的 libffmpeg 重复注册 AVFFrameReceiver → SIGABRT
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v4"
+# v5: 全平台禁用 avdevice，避免与 fvp/mdk 的 libffmpeg 同进程冲突（mac ObjC / Win talloc）
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v5"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -266,6 +266,8 @@ fi
 FFMPEG_EXTRA=(--extra-cflags="-I${PREF_NATIVE}/include")
 FFMPEG_EXTRA+=(--extra-ldflags="-L${PREF_NATIVE}/lib")
 FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
+# 播放不需要 avdevice；与 fvp/mdk 同进程时 libavdevice 易引入重复注册/堆损坏（mac ObjC 类，Win Vulkan 路径 talloc）。
+FFMPEG_EXTRA+=(--disable-avdevice)
 if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
@@ -274,10 +276,6 @@ if kotv_is_windows_build; then
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
-  # 与 mdk.framework/libffmpeg.9.dylib 同进程时，两边都会注册 AVFFrameReceiver /
-  # AVFAudioReceiver，ObjC 运行时警告后极易 talloc canary 崩（起播 SIGABRT）。
-  # 播放不需要 avfoundation 采集设备，禁掉 libavdevice 即可。
-  FFMPEG_EXTRA+=(--disable-avdevice)
 fi
 
 # 旧前缀可能残留 libavdevice.pc（无 .a）；meson 会回退到 Homebrew 共享库。

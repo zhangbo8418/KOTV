@@ -18,6 +18,9 @@ echo "==> version=$VERSION arch=$REL_ARCH ($PLAT)"
 
 chmod +x "$ROOT/scripts/"*.sh
 
+export KOTV_MACOS_NO_FVP="${KOTV_MACOS_NO_FVP:-0}"
+echo "==> KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP"
+
 echo "==> fetch desktop libmpv (AV3A source)"
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 
@@ -41,7 +44,7 @@ ENG_SHA="$(shasum -a 256 "$ROOT/flutter/assets/engine/kotv-engine" | awk '{print
 echo "  ok: engine -> $ROOT/flutter/assets/engine/kotv-engine ($ENG_SZ bytes, sha256=$ENG_SHA)"
 file "$ROOT/flutter/assets/engine/kotv-engine"
 
-echo "==> flutter build macos --release"
+echo "==> flutter build macos --release (KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP)"
 cd "$ROOT/flutter"
 rm -rf \
   "$ROOT/flutter/build/macos/Build/Products/Release/KO影视.app" \
@@ -54,8 +57,16 @@ flutter config --no-enable-swift-package-manager || true
 source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
 "$ROOT/scripts/flutter-pub-get.sh"
-kotv_ensure_mdk_apple_pod
-flutter build macos --release
+if [[ "$KOTV_MACOS_NO_FVP" == "1" ]]; then
+  "$ROOT/scripts/kotv-macos-exclude-fvp.sh"
+  rm -rf "$ROOT/flutter/macos/Pods" "$ROOT/flutter/macos/Podfile.lock"
+  (cd "$ROOT/flutter/macos" && KOTV_MACOS_NO_FVP=1 pod install)
+  "$ROOT/scripts/kotv-macos-exclude-fvp.sh"
+else
+  kotv_ensure_mdk_apple_pod
+fi
+flutter build macos --release \
+  --dart-define=KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP
 
 APP_SRC=""
 for cand in \
@@ -128,6 +139,10 @@ fi
 test -f "$OUT_APP/Contents/Frameworks/libplacebo.360.dylib" \
   || test -f "$OUT_APP/Contents/Frameworks/libplacebo.dylib" \
   || { echo "ERROR: missing bundled libplacebo in Frameworks" >&2; exit 1; }
+if strings "$OUT_APP/Contents/Frameworks/libmpv.dylib" | grep -q 'AVFFrameReceiver'; then
+  echo "ERROR: bundled libmpv still contains AVFFrameReceiver" >&2
+  exit 1
+fi
 echo "  java ok, engine ok, libmpv ok (self-contained)"
 
 echo "==> ad-hoc sign"
