@@ -20,6 +20,7 @@ function Get-ExeDir {
     )
     foreach ($c in $candidates) {
         $p = (Resolve-Path -LiteralPath $c -ErrorAction SilentlyContinue)
+        if ($p -and (Test-Path -LiteralPath (Join-Path $p "libmpv-2.dll"))) { return $p.Path }
         if ($p -and (Test-Path -LiteralPath (Join-Path $p "mpv-2.dll"))) { return $p.Path }
     }
     return (Get-Location).Path
@@ -155,9 +156,12 @@ function Get-ClosureMissing([string]$RootDir, [string]$StartDll) {
 }
 
 $dir = Get-ExeDir $Dir
-$mpv = Join-Path $dir "mpv-2.dll"
+$mpv = Join-Path $dir "libmpv-2.dll"
 if (-not (Test-Path -LiteralPath $mpv)) {
-    Write-Error "mpv-2.dll not found in: $dir"
+    $mpv = Join-Path $dir "mpv-2.dll"
+}
+if (-not (Test-Path -LiteralPath $mpv)) {
+    Write-Error "libmpv-2.dll not found in: $dir"
 }
 
 $win7Bad = @()
@@ -182,7 +186,7 @@ foreach ($dll in $bundleImports) {
     if (Test-Path -LiteralPath (Join-Path $dir $dll)) {
         Write-Host ("  [OK] {0} (随安装包)" -f $dll)
     } else {
-        Write-Host ("  [缺] {0} (须与 mpv-2.dll 同目录)" -f $dll)
+        Write-Host ("  [缺] {0} (须与 libmpv-2.dll 同目录)" -f $dll)
         $directMissing += $dll
     }
 }
@@ -228,7 +232,7 @@ if ($placeboImports -and $placeboFiles) {
 
 Write-Host ""
 Write-Host "transitive closure (mpv chain):"
-$closureMissing = @(Get-ClosureMissing $dir "mpv-2.dll")
+$closureMissing = @(Get-ClosureMissing $dir (Split-Path -Leaf $mpv))
 if ($closureMissing.Count -eq 0) {
     Write-Host "  all non-system deps present in folder"
 } else {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 校验目录内 mpv-2.dll 的非系统依赖是否都在同目录（LoadLibrary winerr=126 门禁）。
-# 用法: verify-windows-mpv-bundle.sh <dir-with-mpv-2.dll>
+# 校验目录内 libmpv-2.dll 的非系统依赖是否都在同目录（LoadLibrary winerr=126 门禁）。
+# 用法: verify-windows-mpv-bundle.sh <dir-with-libmpv-2.dll>
 set -euo pipefail
 
 DIR="${1:-}"
@@ -9,9 +9,9 @@ if [[ -z "$DIR" ]]; then
   exit 1
 fi
 
-MPV="$DIR/mpv-2.dll"
-[[ -f "$MPV" ]] || MPV="$DIR/libmpv-2.dll"
-[[ -f "$MPV" ]] || { echo "ERROR: missing mpv-2.dll in $DIR" >&2; exit 1; }
+MPV="$DIR/libmpv-2.dll"
+[[ -f "$MPV" ]] || MPV="$DIR/mpv-2.dll"
+[[ -f "$MPV" ]] || { echo "ERROR: missing libmpv-2.dll in $DIR" >&2; exit 1; }
 
 _is_system_dll() {
   local lower

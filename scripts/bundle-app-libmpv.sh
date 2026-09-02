@@ -458,25 +458,30 @@ EOF
       exit 1
     }
     mkdir -p "$DEST"
-    # 与 mdk.dll 同目录；已有的 Flutter/fvp DLL 不覆盖。闭包由 verify-windows-mpv-bundle 门禁。
+    # 与 mdk.dll 同目录；闭包由 verify-windows-mpv-bundle 门禁。
+    # libmpv 单独以 libmpv-2.dll 安装（覆盖 media_kit_libs 预编译），勿再留 mpv-2.dll。
     if [[ -d "$SRC" ]]; then
       while IFS= read -r -d '' f; do
         base="$(basename "$f")"
+        case "$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')" in
+          mpv-2.dll|libmpv-2.dll) continue ;;
+        esac
         cp -f "$f" "$DEST/$base"
       done < <(find "$SRC" -maxdepth 1 -type f \( -iname '*.dll' -o -iname '*.pdb' \) -print0)
     fi
     if [[ -f "$SRC/mpv-2.dll" ]]; then
-      cp -f "$SRC/mpv-2.dll" "$DEST/mpv-2.dll"
+      cp -f "$SRC/mpv-2.dll" "$DEST/libmpv-2.dll"
     elif [[ -f "$SRC/libmpv-2.dll" ]]; then
-      cp -f "$SRC/libmpv-2.dll" "$DEST/mpv-2.dll"
+      cp -f "$SRC/libmpv-2.dll" "$DEST/libmpv-2.dll"
     fi
+    rm -f "$DEST/mpv-2.dll"
     strip_runtime_libmpv
-    [[ -f "$DEST/mpv-2.dll" || -f "$DEST/libmpv-2.dll" ]] || {
-      echo "ERROR: mpv-2.dll not next to exe" >&2
+    [[ -f "$DEST/libmpv-2.dll" ]] || {
+      echo "ERROR: libmpv-2.dll not next to exe" >&2
       exit 1
     }
     staged="$(find "$SRC" -maxdepth 1 -type f -iname '*.dll' | wc -l | tr -d ' ')"
-    echo "bundled windows mpv-2.dll next to exe (assets dlls=$staged)"
+    echo "bundled windows libmpv-2.dll next to exe (assets dlls=$staged)"
     find "$SRC" -maxdepth 1 -type f -iname '*.dll' -printf '  asset %f\n' 2>/dev/null \
       || find "$SRC" -maxdepth 1 -type f -iname '*.dll' | sed 's|.*/||;s|^|  asset |'
     ;;

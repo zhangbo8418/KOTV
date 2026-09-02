@@ -458,7 +458,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await _exitMini();
       } catch (_) {}
     }
-    /* 先出栈再后台 stop：避免 dispose→StopTick.join 与 open 抢锁卡主线程。 */
+    /* 对齐 PopScope / prepareLeave：先 await 硬停，缓冲中退回首页勿后台出声。 */
+    await _stopHard();
     if (!mounted) return;
     _allowPop = true;
     setState(() {});
@@ -466,7 +467,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (!mounted) return;
     Navigator.of(context).pop();
     afterPop?.call();
-    unawaited(_stopHard());
   }
 
   void _wireEnded(KotvPlayback p) {

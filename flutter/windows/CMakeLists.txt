@@ -81,7 +81,11 @@ install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 if(PLUGIN_BUNDLED_LIBRARIES)
-  install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
+  # media_kit_libs 自带旧 libmpv-2.dll；发行包只用自编译 libmpv（见下方 KOTV_MPV_WIN_DIR）。
+  set(KOTV_PLUGIN_BUNDLED_LIBRARIES "${PLUGIN_BUNDLED_LIBRARIES}")
+  list(FILTER KOTV_PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "[/\\\\]libmpv-2\\.dll$")
+  list(FILTER KOTV_PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "[/\\\\]mpv-2\\.dll$")
+  install(FILES "${KOTV_PLUGIN_BUNDLED_LIBRARIES}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
@@ -130,14 +134,23 @@ set(KOTV_MPV_WIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../assets/mpv-libs/windows")
 file(GLOB KOTV_MPV_WIN_DLLS "${KOTV_MPV_WIN_DIR}/*.dll")
 foreach(_kotv_mpv_dll IN LISTS KOTV_MPV_WIN_DLLS)
   get_filename_component(_kotv_mpv_name "${_kotv_mpv_dll}" NAME)
-  if(_kotv_mpv_name STREQUAL "libmpv-2.dll")
-    if(NOT EXISTS "${KOTV_MPV_WIN_DIR}/mpv-2.dll")
-      install(FILES "${_kotv_mpv_dll}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" RENAME "mpv-2.dll" COMPONENT Runtime)
-    endif()
-  else()
-    install(FILES "${_kotv_mpv_dll}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+  string(TOLOWER "${_kotv_mpv_name}" _kotv_mpv_name_lc)
+  if(_kotv_mpv_name_lc STREQUAL "libmpv-2.dll" OR _kotv_mpv_name_lc STREQUAL "mpv-2.dll")
+    continue()
   endif()
+  install(FILES "${_kotv_mpv_dll}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 endforeach()
+# media_kit 优先 LoadLibrary("libmpv-2.dll")；自编译产物在 assets 为 mpv-2.dll，安装时统一命名。
+if(EXISTS "${KOTV_MPV_WIN_DIR}/mpv-2.dll")
+  install(FILES "${KOTV_MPV_WIN_DIR}/mpv-2.dll"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" RENAME "libmpv-2.dll" COMPONENT Runtime)
+elseif(EXISTS "${KOTV_MPV_WIN_DIR}/libmpv-2.dll")
+  install(FILES "${KOTV_MPV_WIN_DIR}/libmpv-2.dll"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
+install(CODE "
+  file(REMOVE \"${CMAKE_INSTALL_PREFIX}/mpv-2.dll\")
+" COMPONENT Runtime)
 # Engine binary from Flutter assets if present (Windows: only .exe).
 set(KOTV_ENGINE_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../assets/engine/kotv-engine.exe")
 if(EXISTS "${KOTV_ENGINE_BIN}")

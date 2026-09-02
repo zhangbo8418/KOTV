@@ -103,8 +103,12 @@ fi
 
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
 "$ROOT/scripts/bundle-app-libmpv.sh" "$RELEASE_DIR"
-[[ -f "$RELEASE_DIR/mpv-2.dll" || -f "$RELEASE_DIR/libmpv-2.dll" ]] || {
-  echo "missing mpv-2.dll next to kotv.exe" >&2
+[[ -f "$RELEASE_DIR/libmpv-2.dll" ]] || {
+  echo "missing libmpv-2.dll next to kotv.exe" >&2
+  exit 1
+}
+[[ ! -f "$RELEASE_DIR/mpv-2.dll" ]] || {
+  echo "ERROR: stale mpv-2.dll must not ship beside libmpv-2.dll" >&2
   exit 1
 }
 asset_n="$(find "$ROOT/flutter/assets/mpv-libs/windows" -maxdepth 1 -type f -iname '*.dll' 2>/dev/null | wc -l | tr -d ' ')"
@@ -119,7 +123,7 @@ if [[ ! -f "$RELEASE_DIR/vulkan-1.dll" ]]; then
   echo "ERROR: vulkan-1.dll missing next to kotv.exe (required for libplacebo Vulkan)" >&2
   exit 1
 fi
-echo "ok mpv-2.dll + $asset_n sibling dlls staged from assets"
+echo "ok libmpv-2.dll + $asset_n sibling dlls staged from assets"
 
 echo "==> zip $OUT_ZIP"
 rm -f "$OUT_ZIP"

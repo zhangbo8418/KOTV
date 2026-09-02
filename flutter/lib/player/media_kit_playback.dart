@@ -249,6 +249,10 @@ class MediaKitPlayback extends KotvPlayback {
     }
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
     await player.open(media);
+    // open 末尾虽会 unpause，缓冲期 mpv 常回到 paused-for-cache；尽早 play 避免须 seek 才动。
+    try {
+      await player.play();
+    } catch (_) {}
     await kotvGuardSilentVideo(
       hasVideoSize: () => width > 0 && height > 0,
       isBuffering: () => buffering,
@@ -261,6 +265,11 @@ class MediaKitPlayback extends KotvPlayback {
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,
     );
+    if (!playing) {
+      try {
+        await player.play();
+      } catch (_) {}
+    }
   }
 
   @override

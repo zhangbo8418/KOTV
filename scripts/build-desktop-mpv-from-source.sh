@@ -929,7 +929,10 @@ build_mpv_macos() {
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
   # 禁止 meson 回退到 Homebrew libavdevice（会再次引入 AVFFrameReceiver）。
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
+  local native_ini
+  native_ini="$(kotv_macos_write_meson_native)"
   meson setup build \
+    --native-file="$native_ini" \
     -Ddefault_library=shared \
     -Dlibmpv=true \
     -Dcplayer=false \
