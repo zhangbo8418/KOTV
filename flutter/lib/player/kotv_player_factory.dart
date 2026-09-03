@@ -70,6 +70,8 @@ Widget kotvPlaybackView({
           controls: NoVideoControls,
           fit: fit,
           wakelock: false,
+          // 桌面窗失焦/最小化也会进 paused；默认 true 会 pause 掉 libmpv，易黑屏。
+          pauseUponEnteringBackgroundMode: kotvIsAndroid(),
         );
       }
       return const ColoredBox(color: Colors.black);

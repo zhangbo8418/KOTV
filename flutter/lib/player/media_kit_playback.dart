@@ -248,12 +248,11 @@ class MediaKitPlayback extends KotvPlayback {
       await _opts.applyAfterAttach(player, live: true);
     }
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
-    // 根因：media_kit open(play:true) 会在 playlist-pos 之前 pause=false，并乐观
-    // 把 Flutter playing=true。文件真正 load 后 mpv 常仍 pause=yes，于是 demuxer
-    // 缓冲条涨满、UI 以为在播，时间却不动；点「暂停」= cycle pause 反而开播。
-    // Android 原生是 loadfile 后再 pause=false。这里对齐：先 paused 加载，再 play。
+    // media_kit open(play:true) 在 playlist-pos 前就乐观 unpause，易 pause 不同步。
+    // 先 paused 加载（对齐 Android loadfile→再 play）；但立刻 play 会在无首帧时只跑时钟、VO 黑屏。
+    // 以前「缓冲满后点暂停才有画面」：其实是 paused 囤够数据/出首帧再 unpause。这里自动等到就绪再 play。
     await player.open(media, play: false);
-    await play();
+    await _waitReadyThenPlay();
     await kotvGuardSilentVideo(
       hasVideoSize: () => width > 0 && height > 0,
       isBuffering: () => buffering,
@@ -266,6 +265,22 @@ class MediaKitPlayback extends KotvPlayback {
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,
     );
+  }
+
+  /// paused 加载到有画面尺寸、音轨或一点前向缓冲后再 unpause（避免只有时间在跑）。
+  Future<void> _waitReadyThenPlay() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    while (DateTime.now().isBefore(deadline) && _url.isNotEmpty) {
+      if (width > 0 && height > 0) break;
+      if (isAudioOnlyContent) break;
+      if (buffered > const Duration(milliseconds: 400)) break;
+      if (hasVideoSourceHint && !buffering && buffered > Duration.zero) break;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (_url.isEmpty) return;
+    try {
+      await player.play();
+    } catch (_) {}
   }
 
   @override

@@ -692,12 +692,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     throw const KotvSilentVideoException();
   }
 
-  /// 全屏/竖屏/横屏共用同一块原生输出（GlobalKey 在布局间 reparent）。
+  /// 全屏/竖屏/横屏共用画面。Android PlatformView 才用 GlobalKey reparent。
   Widget _buildSharedLiveVideo() {
-    return KeyedSubtree(
-      key: _videoHostKey,
-      child: _liveVideoInner(),
-    );
+    final inner = _liveVideoInner();
+    if (kotvIsAndroid() && _mk is NativeMpvPlayback) {
+      return KeyedSubtree(key: _videoHostKey, child: inner);
+    }
+    return inner;
   }
 
   Widget _liveVideoInner() {

@@ -43,8 +43,11 @@ void _kotvLogUiError(Object error, StackTrace? stack, {String where = 'build'}) 
 
 Widget _kotvErrorWidget(FlutterErrorDetails details) {
   final msg = '${details.exception}';
-  // 已知框架竞态：勿整页「页面渲染出错」，保留黑底以免打断播放/导航。
-  if (msg.contains('_owner != null') || msg.contains('notifyClients')) {
+  // 已知框架竞态 / 卸树环：勿整页「页面渲染出错」，保留黑底以免盖住播放区。
+  if (msg.contains('_owner != null') ||
+      msg.contains('notifyClients') ||
+      msg.contains('Stack Overflow') ||
+      details.exception is StackOverflowError) {
     _kotvLogUiError(details.exception, details.stack, where: 'ErrorWidget-soft');
     return const ColoredBox(color: Color(0xFF14161B));
   }
@@ -104,10 +107,13 @@ Future<void> main() async {
     final msg = '${details.exception}';
     // InheritedElement.notifyClients：Theme/MediaQuery 与路由竞态。
     // RenderObject.detach `_owner != null`：PlatformView 卸树竞态（异常文案常无 detach 字样）。
+    // Stack Overflow：GlobalKey/RawView 卸树成环；presentError 会用 ErrorWidget 盖住画面。
     // presentError 会整页 ErrorWidget；只记日志，勿毁树。
     if (msg.contains('notifyClients') ||
         (msg.contains('Failed assertion') && msg.contains('dependents')) ||
-        msg.contains('_owner != null')) {
+        msg.contains('_owner != null') ||
+        msg.contains('Stack Overflow') ||
+        details.exception is StackOverflowError) {
       _kotvLogUiError(details.exception, details.stack, where: 'FlutterError-soft');
       return;
     }

@@ -1287,19 +1287,22 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         s.contains('Broken pipe');
   }
 
-  /// 全屏/详情共用同一块原生输出（GlobalKey 在两种布局间 reparent）。
+  /// 全屏/详情共用画面。Android PlatformView 须 GlobalKey reparent 保 Surface；
+  /// 桌面 media_kit Texture 用 GlobalKey 在 LayoutBuilder/RawView 卸树时易把元素链成环 → Stack Overflow，画面区被 ErrorWidget 盖住（时间仍走）。
   Widget _buildSharedVideo({BoxFit fit = BoxFit.contain}) {
-    Widget inner = KeyedSubtree(
-      key: _videoHostKey,
-      child: kotvPlaybackView(
-        playerVal: _playerVal,
-        playback: _playback,
-        mpv: _mk,
-        fit: fit,
-      ),
+    Widget inner = kotvPlaybackView(
+      playerVal: _playerVal,
+      playback: _playback,
+      mpv: _mk,
+      fit: fit,
     );
+    // 仅 Android 原生 MPV Surface 需要跨布局保活同一 PlatformView。
+    if (kotvIsAndroid() && _mk is NativeMpvPlayback) {
+      inner = KeyedSubtree(key: _videoHostKey, child: inner);
+    }
     final ratio = _aspect.ratio;
     if (ratio != null && ratio > 0) {
+      final child = inner;
       inner = LayoutBuilder(
         builder: (context, c) {
           var w = c.maxWidth;
@@ -1308,7 +1311,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             h = c.maxHeight;
             w = h * ratio;
           }
-          return Center(child: SizedBox(width: w, height: h, child: inner));
+          return Center(child: SizedBox(width: w, height: h, child: child));
         },
       );
     }
