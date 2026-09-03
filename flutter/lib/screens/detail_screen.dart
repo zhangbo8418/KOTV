@@ -472,6 +472,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       unawaited(api.cancelPending(hard: true, thunder: true));
     }
 
+    // 所有后端先静音，降低 stop/dispose 竞态时的漏音（MPV/FVP/Exo/HTML 共用）。
+    Future<void> mute(KotvPlayback? p) async {
+      if (p == null) return;
+      try {
+        await p.setVolume(0);
+      } catch (_) {}
+    }
+
     Future<void> hardStop(KotvPlayback? p) async {
       if (p == null) return;
       try {
@@ -479,6 +487,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       } catch (_) {}
     }
 
+    await Future.wait<void>([
+      mute(_fvp),
+      mute(_mk),
+      mute(_exo),
+      mute(_html),
+      mute(_art),
+      mute(_xg),
+      mute(_zw),
+    ]);
     await Future.wait<void>([
       hardStop(_fvp),
       hardStop(_mk),

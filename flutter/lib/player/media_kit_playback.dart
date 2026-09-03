@@ -13,6 +13,9 @@ import 'silent_video_guard.dart';
 Future<void> kotvDisposeMpvPlayer(Player? player) async {
   if (player == null) return;
   try {
+    await player.setVolume(0);
+  } catch (_) {}
+  try {
     await player.pause();
   } catch (_) {}
   try {
