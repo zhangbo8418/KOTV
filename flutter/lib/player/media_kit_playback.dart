@@ -88,7 +88,7 @@ class MediaKitPlayback extends KotvPlayback {
   String _url = '';
   Map<String, String> _headers = const {};
   bool _buffering = false;
-  bool _live = false;
+  bool _live;
   int _speedBps = 0;
   Timer? _speedTimer;
   bool _speedBusy = false;
@@ -252,11 +252,11 @@ class MediaKitPlayback extends KotvPlayback {
     // 直播：再次盖掉点播 demuxer（防构造竞态）；点播预算只在 !live 时由 _prepareOpts/此处写入。
     await _opts.applyAfterAttach(player, live: live);
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
-    // media_kit open(play:true) 在 playlist-pos 前就乐观 unpause，易 pause 不同步。
+    // media_kit open(play:true) 会在 playlist-pos 前乐观 unpause，Windows 上易出现 pause 同步异常。
     // 点播：paused 等到首帧/一点缓冲再 play（避免只跑时钟黑屏）。
-    // 直播/时移回看：立刻 play + 强制 pause=no（对齐 TV prepareAndPlay；修 media_kit 乐观 playing）。
+    // 直播：对齐 TV 的 prepare+play 顺序：先 open(play:false)，再 pause=no + play。
     if (live) {
-      await player.open(media, play: true);
+      await player.open(media, play: false);
       try {
         await (player.platform as dynamic).setProperty('pause', 'no');
       } catch (_) {}
