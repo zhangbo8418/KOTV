@@ -390,6 +390,12 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   Future<void> stop() async {
     try {
+      await _ch.invokeMethod('setVolume', {'volume': 0});
+    } catch (_) {}
+    try {
+      await _ch.invokeMethod('pause');
+    } catch (_) {}
+    try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
     _playing = false;

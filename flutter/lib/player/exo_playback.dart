@@ -474,7 +474,15 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> stop() async {
-    await _ch.invokeMethod('stop');
+    try {
+      await _ch.invokeMethod('setVolume', {'volume': 0.0});
+    } catch (_) {}
+    try {
+      await _ch.invokeMethod('pause');
+    } catch (_) {}
+    try {
+      await _ch.invokeMethod('stop');
+    } catch (_) {}
     _playing = false;
     _position = Duration.zero;
     notifyListeners();
