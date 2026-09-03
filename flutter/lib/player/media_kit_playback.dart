@@ -286,6 +286,9 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> stop() async {
     _url = '';
+    try {
+      await player.pause();
+    } catch (_) {}
     return player.stop();
   }
 

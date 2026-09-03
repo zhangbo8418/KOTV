@@ -72,7 +72,7 @@ class DetailScreen extends ConsumerStatefulWidget {
     await active._exitImmersiveFullscreen();
   }
 
-  /// 换源/切 Tab：尽快放开 PopScope；硬停后台做，勿卡住「设置/直播/搜索」。
+  /// 换源/切 Tab：尽快放开 PopScope；并 await 硬停，避免卸树后 FVP/HTML 后台出声。
   static Future<void> prepareLeave() async {
     final active = _DetailScreenState._active;
     if (active == null) return;
@@ -92,7 +92,9 @@ class DetailScreen extends ConsumerStatefulWidget {
       active.ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
     } catch (_) {}
     active._immersiveFullscreen = false;
-    unawaited(active._stopHard());
+    try {
+      await active._stopHard().timeout(const Duration(seconds: 4));
+    } catch (_) {}
     if (!active.mounted) return;
     // 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
     active._allowPop = true;

@@ -233,6 +233,15 @@ class HtmlPlayback extends KotvPlayback {
     _opening = false;
     final c = _c;
     final l = _listener;
+    // 与 FVP 相同：先静音暂停再 dispose，避免控制器异步释放期间漏音。
+    if (c != null) {
+      try {
+        await c.setVolume(0);
+      } catch (_) {}
+      try {
+        await c.pause();
+      } catch (_) {}
+    }
     _c = null;
     _listener = null;
     if (c != null && l != null) c.removeListener(l);

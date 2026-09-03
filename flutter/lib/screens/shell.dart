@@ -225,6 +225,8 @@ class _AppShellState extends ConsumerState<AppShell> {
         if (!mounted) return;
         await DetailScreen.prepareLeave();
         if (!mounted) return;
+        await LiveScreen.prepareLeave();
+        if (!mounted) return;
         final nav = _shellNavKey.currentState;
         if (nav == null) return;
         nav.pushAndRemoveUntil(
@@ -399,8 +401,9 @@ void goKotvPage(WidgetRef ref, KotvPage page, {bool recordHistory = true}) {
     }
     ref.read(kotvPageStackProvider.notifier).state = stack;
   }
-  // 切主页面前硬停详情播放，避免后台出声。
+  // 切主页面前硬停详情/直播播放，避免后台出声。
   unawaited(DetailScreen.prepareLeave());
+  unawaited(LiveScreen.prepareLeave());
   // 切 Tab 时若有声明式弹窗则关掉，避免遮罩残留挡后续详情
   if (cur != page) {
     final post = PostMsgHost.instance;

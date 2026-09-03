@@ -46,11 +46,29 @@ const _liveKeepPrefKey = 'kotv_live_keep';
 class LiveScreen extends ConsumerStatefulWidget {
   const LiveScreen({super.key});
 
+  /// 切 Tab：await 停掉直播页内全部后端，避免 FVP/HTML 卸树后后台出声。
+  static Future<void> prepareLeave() => _LiveScreenState.prepareLeave();
+
   @override
   ConsumerState<LiveScreen> createState() => _LiveScreenState();
 }
 
 class _LiveScreenState extends ConsumerState<LiveScreen> {
+  static _LiveScreenState? _active;
+
+  static Future<void> prepareLeave() async {
+    final active = _active;
+    if (active == null) return;
+    try {
+      if (active._immersive) {
+        try {
+          await active._exitImmersive();
+        } catch (_) {}
+      }
+      await active._stopAllBackends().timeout(const Duration(seconds: 4));
+    } catch (_) {}
+  }
+
   Player? _mkPlayer;
   KotvPlayback? _mk;
   ExoPlayback? _exo;
@@ -233,6 +251,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   @override
   void initState() {
     super.initState();
+    _active = this;
     liveScreenHandleBack = _handleLiveBack;
     kotvRegisterQuitHook(_prepareQuit);
     MiniPlayerWindow.onAndroidPipChanged = (inPip) {
@@ -264,6 +283,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   @override
   void dispose() {
+    if (_active == this) _active = null;
     kotvUnregisterQuitHook(_prepareQuit);
     liveScreenHandleBack = null;
     MiniPlayerWindow.onAndroidPipChanged = null;
