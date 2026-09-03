@@ -18,7 +18,6 @@ import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/tv_remote_keys.dart';
-import '../nav/kotv_page.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
 
@@ -423,7 +422,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _onSwipePointerDown(PointerDownEvent e) {
     if (e.buttons == kSecondaryMouseButton) {
-      kotvHandleAppBack?.call();
+      // 只退全屏，勿走全局 kotvHandleAppBack（会与 Listener 叠一次，偶发直接出详情且停播不完整）。
+      unawaited(_exitFullscreen());
       return;
     }
     if (e.buttons != kPrimaryButton) return;

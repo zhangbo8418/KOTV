@@ -156,6 +156,13 @@ class _AppShellState extends ConsumerState<AppShell> {
     }
     final page = ref.read(kotvPageProvider);
     final nav = _shellNavKey.currentState;
+    // 详情沉浸全屏：maybePop 只退全屏（PopScope），不要与其它路径叠成一次出详情。
+    if (ref.read(detailImmersiveFullscreenProvider)) {
+      if (DetailScreen.isOpen && nav != null) {
+        unawaited(nav.maybePop());
+      }
+      return;
+    }
     if (nav != null && nav.canPop()) {
       nav.pop();
       return;

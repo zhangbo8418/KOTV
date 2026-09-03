@@ -22,7 +22,7 @@ class KotvBufferBudget {
   static const _host = MethodChannel('kotv_host');
   static int? _cached;
 
-  /// mpv 点播缓冲：仅字节预算，不设 cache-secs / demuxer-readahead-secs。
+  /// mpv 点播缓冲：仅字节预算；cache-pause-initial=no 避免「囤满才开」、也不因 cache 停住不醒。
   static Map<String, String> mpvCacheProps(int budgetBytes) {
     final forward = mpvMiB(budgetBytes);
     final back = mpvMiB(max(16 * 1024 * 1024, budgetBytes ~/ 8));
@@ -31,6 +31,7 @@ class KotvBufferBudget {
       'cache-on-disk': 'no',
       'demuxer-max-bytes': forward,
       'demuxer-max-back-bytes': back,
+      'cache-pause-initial': 'no',
       'framedrop': 'vo',
     };
   }

@@ -16,5 +16,6 @@ void main() {
     expect(props.containsKey('demuxer-max-bytes'), isTrue);
     expect(props.containsKey('cache-secs'), isFalse);
     expect(props.containsKey('demuxer-readahead-secs'), isFalse);
+    expect(props['cache-pause-initial'], 'no');
   });
 }
