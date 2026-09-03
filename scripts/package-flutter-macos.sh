@@ -12,9 +12,19 @@ export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flu
 ARCH="$(uname -m)"
 PLAT="macos-x64"
 [[ "$ARCH" == "arm64" ]] && PLAT="macos-arm64"
+# 显式钉死 Go 引擎架构，避免 Rosetta/交叉环境下编出与包名不符的二进制。
+if [[ "$PLAT" == "macos-arm64" ]]; then
+  export GOARCH=arm64
+  export GOOS=darwin
+  WANT_ENGINE_ARCH=arm64
+else
+  export GOARCH=amd64
+  export GOOS=darwin
+  WANT_ENGINE_ARCH=x86_64
+fi
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 REL_ARCH="$(kotv_release_arch "$PLAT")"
-echo "==> version=$VERSION arch=$REL_ARCH ($PLAT)"
+echo "==> version=$VERSION arch=$REL_ARCH ($PLAT) GOARCH=$GOARCH"
 
 chmod +x "$ROOT/scripts/"*.sh
 
@@ -36,13 +46,18 @@ chmod +x "$ROOT/bridge/build.sh"
 mkdir -p "$ROOT/runtime/bridge"
 cp -f "$ROOT/bridge/spider-bridge.jar" "$ROOT/runtime/bridge/spider-bridge.jar"
 
-echo "==> build Go engine"
-(cd "$ROOT" && CGO_ENABLED=1 go generate ./internal/spider/ && CGO_ENABLED=1 go build -o "$ROOT/flutter/assets/engine/kotv-engine" ./cmd/engine)
+echo "==> build Go engine (GOARCH=$GOARCH)"
+(cd "$ROOT" && CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go generate ./internal/spider/ && CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go build -o "$ROOT/flutter/assets/engine/kotv-engine" ./cmd/engine)
 chmod +x "$ROOT/flutter/assets/engine/kotv-engine"
 ENG_SZ="$(wc -c < "$ROOT/flutter/assets/engine/kotv-engine" | tr -d ' ')"
 ENG_SHA="$(shasum -a 256 "$ROOT/flutter/assets/engine/kotv-engine" | awk '{print $1}')"
 echo "  ok: engine -> $ROOT/flutter/assets/engine/kotv-engine ($ENG_SZ bytes, sha256=$ENG_SHA)"
 file "$ROOT/flutter/assets/engine/kotv-engine"
+ENG_FILE_ARCH="$(file -b "$ROOT/flutter/assets/engine/kotv-engine")"
+if ! echo "$ENG_FILE_ARCH" | grep -q "$WANT_ENGINE_ARCH"; then
+  echo "ERROR: kotv-engine arch mismatch: want $WANT_ENGINE_ARCH, got: $ENG_FILE_ARCH" >&2
+  exit 1
+fi
 
 echo "==> flutter build macos --release (KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP)"
 cd "$ROOT/flutter"
@@ -92,7 +107,10 @@ ditto "$APP_SRC" "$OUT_APP"
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
 "$ROOT/scripts/bundle-app-libmpv.sh" "$OUT_APP"
 
-KOTV_BUNDLE_ENGINE_TO_MACOS=1 "$ROOT/scripts/bundle-flutter-runtime.sh" "$OUT_APP"
+# 引擎只放 Resources/engine（launcher 优先找这里）。勿再拷进 MacOS，避免双份且易装错架构难查。
+"$ROOT/scripts/bundle-flutter-runtime.sh" "$OUT_APP"
+# 清理历史残留的 MacOS/kotv-engine
+rm -f "$OUT_APP/Contents/MacOS/kotv-engine" "$OUT_APP/Contents/MacOS/kotv-engine.exe" 2>/dev/null || true
 
 WRAP="$OUT_APP/Contents/MacOS/kotv-launch"
 MAIN_BIN="KO影视"
@@ -119,8 +137,17 @@ echo "==> verify package"
 test -x "$OUT_APP/Contents/Resources/runtime/jre/bin/java"
 test -e "$OUT_APP/Contents/Resources/runtime/bridge/spider-bridge.jar" \
   || test -e "$OUT_APP/Contents/Resources/runtime/bridge"
-test -x "$OUT_APP/Contents/MacOS/kotv-engine" \
-  || test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"
+test -x "$OUT_APP/Contents/Resources/engine/kotv-engine"
+# 禁止再出现双引擎；MacOS 下不应有 kotv-engine
+if [[ -e "$OUT_APP/Contents/MacOS/kotv-engine" || -e "$OUT_APP/Contents/MacOS/kotv-engine.exe" ]]; then
+  echo "ERROR: duplicate engine under Contents/MacOS (keep only Resources/engine)" >&2
+  exit 1
+fi
+PACK_ENG_ARCH="$(file -b "$OUT_APP/Contents/Resources/engine/kotv-engine")"
+if ! echo "$PACK_ENG_ARCH" | grep -q "$WANT_ENGINE_ARCH"; then
+  echo "ERROR: packaged kotv-engine arch mismatch: want $WANT_ENGINE_ARCH, got: $PACK_ENG_ARCH" >&2
+  exit 1
+fi
 test -f "$OUT_APP/Contents/Frameworks/libmpv.dylib"
 # 发行包不得再链 Homebrew 绝对路径，且 LC_RPATH 不得指向 Cellar（否则会混载两套库 SIGABRT）。
 if otool -L "$OUT_APP/Contents/Frameworks/libmpv.dylib" | awk 'NR>1 {print $1}' | grep -E '^(/usr/local/|/opt/homebrew/)'; then
