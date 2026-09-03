@@ -151,7 +151,16 @@ class KotvMpvOpts {
         } catch (_) {}
       }
 
-      if (!live) {
+      if (live) {
+        // 直播必须覆盖 PlayerConfiguration.bufferSize 写入的大 demuxer-max-bytes，
+        // 并关掉 cache-pause，否则 Windows 上 play:false 等画面会一直「缓冲中」。
+        try {
+          final props = KotvBufferBudget.mpvLiveCacheProps();
+          for (final e in props.entries) {
+            await set(e.key, e.value);
+          }
+        } catch (_) {}
+      } else {
         try {
           await KotvBufferBudget.warm(force: true);
           final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
@@ -169,7 +178,7 @@ class KotvMpvOpts {
 
   /// 交给原生通道的属性表（P1/P2 open / setOpts）。
   ///
-  /// [live]=true 时不写点播 demuxer 预读（对齐 TV 直播默认缓冲）。
+  /// [live]=true 时写入小 demuxer + 关 cache-pause（覆盖 media_kit 创建时的大 bufferSize）。
   Map<String, String> propertyMap({bool live = false}) {
     final out = <String, String>{
       'hwdec': hwdecValue(),
@@ -196,6 +205,8 @@ class KotvMpvOpts {
     if (!live) {
       final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
       out.addAll(props);
+    } else {
+      out.addAll(KotvBufferBudget.mpvLiveCacheProps());
     }
     for (final e in parseConfLines(conf)) {
       out[e.$1] = e.$2;

@@ -36,6 +36,20 @@ class KotvBufferBudget {
     };
   }
 
+  /// 直播：覆盖 media_kit 创建时写入的大 demuxer 预算，否则 Win/ANGLE 易一直 buffering。
+  /// 对齐「低延迟起播」：小 demuxer + 禁止 cache-pause 起播门槛。
+  static Map<String, String> mpvLiveCacheProps() {
+    return {
+      'cache': 'yes',
+      'cache-on-disk': 'no',
+      'demuxer-max-bytes': '24MiB',
+      'demuxer-max-back-bytes': '4MiB',
+      'cache-pause': 'no',
+      'cache-pause-initial': 'no',
+      'framedrop': 'vo',
+    };
+  }
+
   /// 同步读取（未 [warm] 时用平台启发式）。
   static int bytes() => _cached ?? _fallback();
 

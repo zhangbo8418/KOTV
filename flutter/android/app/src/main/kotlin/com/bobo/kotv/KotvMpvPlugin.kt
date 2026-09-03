@@ -539,6 +539,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         MPVLib.setOptionString("cache-on-disk", "no")
         MPVLib.setOptionString("demuxer-max-bytes", demuxerMiB(budget))
         MPVLib.setOptionString("demuxer-max-back-bytes", demuxerMiB(back))
+        MPVLib.setOptionString("cache-pause-initial", "no")
+      } else {
+        // 对齐 Dart KotvBufferBudget.mpvLiveCacheProps：小 demuxer，禁止起播 cache-pause。
+        MPVLib.setOptionString("cache", "yes")
+        MPVLib.setOptionString("cache-on-disk", "no")
+        MPVLib.setOptionString("demuxer-max-bytes", "24MiB")
+        MPVLib.setOptionString("demuxer-max-back-bytes", "4MiB")
+        MPVLib.setOptionString("cache-pause", "no")
+        MPVLib.setOptionString("cache-pause-initial", "no")
       }
       applyConfOptions(conf)
       MPVLib.init()

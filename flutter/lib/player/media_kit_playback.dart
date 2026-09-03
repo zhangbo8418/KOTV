@@ -246,10 +246,14 @@ class MediaKitPlayback extends KotvPlayback {
     }
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
     // media_kit open(play:true) 在 playlist-pos 前就乐观 unpause，易 pause 不同步。
-    // 先 paused 加载（对齐 Android loadfile→再 play）；但立刻 play 会在无首帧时只跑时钟、VO 黑屏。
-    // 以前「缓冲满后点暂停才有画面」：其实是 paused 囤够数据/出首帧再 unpause。这里自动等到就绪再 play。
-    await player.open(media, play: false);
-    await _waitReadyThenPlay();
+    // 点播：paused 等到首帧/一点缓冲再 play（避免只跑时钟黑屏）。
+    // 直播：立刻 play。Windows ANGLE 上 play:false 等尺寸/缓冲常永远不满足 → 一直「缓冲中」。
+    if (live) {
+      await player.open(media, play: true);
+    } else {
+      await player.open(media, play: false);
+      await _waitReadyThenPlay();
+    }
     await kotvGuardSilentVideo(
       hasVideoSize: () => width > 0 && height > 0,
       isBuffering: () => buffering,
