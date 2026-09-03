@@ -739,7 +739,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       await pb.setRenderMode(_renderMode);
       try {
         // 起播缓冲由守卫等待；仅 SilentVideo（黑屏/视源）才 failover，勿墙钟误切。
-        // 直播页显式 live：跳过点播 KotvBufferBudget（对齐 TV 默认缓冲；回看 live:false）。
+        // 直播页 live=true：立刻 play + 小 demuxer（对齐 TV prepareAndPlay；含 EPG 回看时移流）。
         await pb.open(url, headers: headers, live: live);
         if (_backend != KotvEmbedBackend.mpv) {
           try {
@@ -856,6 +856,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _playCatchup(int progIdx) async {
+    // 对齐 TV LivePlaybackController.selectEpg → Catchup.format → startPlayback：
+    // 回看是带 playseek 的时移流，与直播同一套立刻 play，不走点播 play:false 等缓冲。
+    if (_chIdx < 0) return;
+    final serial = ++_playSerial;
     try {
       setState(() => _status = '加载回看…');
       final data = await ref.read(apiProvider).liveCatchup(
@@ -864,13 +868,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
             day: _dayIdx,
             prog: progIdx,
           );
+      if (!mounted || serial != _playSerial) return;
       final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
       if (url.isEmpty) throw Exception('空回看地址');
       final headers = <String, String>{
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
       };
-      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, live: false);
+      await _stopAllBackends();
+      if (!mounted || serial != _playSerial) return;
+      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, live: true);
+      if (!mounted || serial != _playSerial) return;
       setState(() {
         _title = '${data['name'] ?? _title}';
         _status = '回看中 · $_title';
@@ -883,6 +891,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _pulseCatchupChrome();
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: _title, url: url);
     } catch (e) {
+      if (!mounted || serial != _playSerial) return;
       setState(() => _status = '回看失败: $e');
     }
   }
@@ -1131,7 +1140,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     } catch (_) {}
     if (_playUrl.isNotEmpty) {
       final pos = _playback.position;
-      await _openLiveUrl(_playUrl, headers: _playHeaders, live: !_catchup);
+      // 直播/回看均 live 起播（对齐 TV）；回看再 seek 回原进度。
+      await _openLiveUrl(_playUrl, headers: _playHeaders, live: true);
       if (pos > Duration.zero) await _playback.seek(pos);
     }
   }
@@ -1175,7 +1185,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
     if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
       final pos = _playback.position;
-      await _openLiveUrl(_playUrl, headers: _playHeaders, live: !_catchup);
+      await _openLiveUrl(_playUrl, headers: _playHeaders, live: true);
       if (pos > Duration.zero) await _playback.seek(pos);
       if (mounted) setState(() {});
     }

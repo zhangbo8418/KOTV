@@ -247,7 +247,7 @@ class MediaKitPlayback extends KotvPlayback {
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
     // media_kit open(play:true) 在 playlist-pos 前就乐观 unpause，易 pause 不同步。
     // 点播：paused 等到首帧/一点缓冲再 play（避免只跑时钟黑屏）。
-    // 直播：立刻 play。Windows ANGLE 上 play:false 等尺寸/缓冲常永远不满足 → 一直「缓冲中」。
+    // 直播/时移回看：立刻 play。Windows ANGLE 上 play:false 等尺寸/缓冲常永远不满足 → 一直「缓冲中」。
     if (live) {
       await player.open(media, play: true);
     } else {
