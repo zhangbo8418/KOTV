@@ -413,6 +413,16 @@ class FvpPlayback extends KotvPlayback {
   Future<void> stop() async {
     _opening = false;
     _lastError = null;
+    final c = _c;
+    // 先静音+暂停，避免 dispose 异步未完成时后台继续出声（mixWithOthers: true）。
+    if (c != null) {
+      try {
+        await c.setVolume(0);
+      } catch (_) {}
+      try {
+        await c.pause();
+      } catch (_) {}
+    }
     await _disposeController();
     notifyListeners();
   }

@@ -61,7 +61,14 @@ class DetailScreen extends ConsumerStatefulWidget {
   /// 沉浸全屏时系统返回 / 右键：只退出全屏，不出详情。
   static Future<void> exitImmersiveIfOpen() async {
     final active = _DetailScreenState._active;
-    if (active == null || !active._immersiveFullscreen) return;
+    if (active == null) return;
+    if (!active._immersiveFullscreen) {
+      // provider 与本地状态偶发不一致时，仍清掉壳层全屏标志。
+      try {
+        active.ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+      } catch (_) {}
+      return;
+    }
     await active._exitImmersiveFullscreen();
   }
 
@@ -435,6 +442,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
   /// 不要 pause：pause 会粘在播放器上，下次 open 只出一帧。
+  /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
   Future<void> _stopHard() async {
     _playbackLive = false;
     _advanceBusy = false;
@@ -456,8 +464,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _magnetPlay = false;
     _stopBtProgressPoll();
     _syncAndroidAutoPip();
-    // Source.stop：离开详情硬杀运行时 + 停磁力
-    unawaited(ref.read(apiProvider).cancelPending(hard: true, thunder: true));
+    // Source.stop：离开详情硬杀运行时 + 停磁力（用缓存 api，避免 dispose 后 ref 不可用）
+    final api = _api;
+    if (api != null) {
+      unawaited(api.cancelPending(hard: true, thunder: true));
+    }
 
     Future<void> hardStop(KotvPlayback? p) async {
       if (p == null) return;
@@ -483,8 +494,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _leaving = true;
     // 立刻清 _active：否则 goKotvPage→prepareLeave 仍会 await 本页硬停，切 Tab 像点不动。
     if (_active == this) _active = null;
+    // 先硬停再出栈：否则 Navigator.pop → dispose 里 ref 抛错时 FVP 会继续后台出声。
+    try {
+      await _stopHard();
+    } catch (_) {}
     if (_immersiveFullscreen) {
-      await _exitImmersiveFullscreen();
+      try {
+        await _exitImmersiveFullscreen();
+      } catch (_) {}
     }
     if (_miniDesktop) {
       try {
@@ -492,19 +509,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       } catch (_) {}
     }
     if (!mounted) {
-      await _stopHard();
+      afterPop?.call();
       return;
     }
     _allowPop = true;
     setState(() {});
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) {
-      await _stopHard();
+      afterPop?.call();
       return;
     }
     Navigator.of(context).pop();
     afterPop?.call();
-    await _stopHard();
   }
 
   void _wireEnded(KotvPlayback p) {
@@ -637,8 +653,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   @override
+  void deactivate() {
+    // dispose 阶段不能用 ref；在 deactivate 清沉浸标志，避免壳层误判仍全屏。
+    try {
+      ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+    } catch (_) {}
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
-    ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+    // 勿在此处 ref.read：会抛 Bad state，打断后面的 FVP/播放器 stop。
     kotvUnregisterQuitHook(_prepareQuit);
     if (_active == this) _active = null;
     MiniPlayerWindow.onAndroidPipChanged = null;

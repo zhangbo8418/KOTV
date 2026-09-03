@@ -156,19 +156,19 @@ class _AppShellState extends ConsumerState<AppShell> {
     }
     final page = ref.read(kotvPageProvider);
     final nav = _shellNavKey.currentState;
-    // 详情沉浸全屏：只退全屏，勿 maybePop（与 PopScope/_leavePage 叠一次会直接出详情回首页）。
-    if (ref.read(detailImmersiveFullscreenProvider)) {
-      unawaited(DetailScreen.exitImmersiveIfOpen());
+    // 详情优先：沉浸只退全屏；否则 maybePop→硬停出栈。绝勿 raw nav.pop（会跳过停播）。
+    if (DetailScreen.isOpen) {
+      if (ref.read(detailImmersiveFullscreenProvider)) {
+        unawaited(DetailScreen.exitImmersiveIfOpen());
+        return;
+      }
+      if (nav != null) {
+        unawaited(nav.maybePop());
+      }
       return;
     }
     if (nav != null && nav.canPop()) {
       nav.pop();
-      return;
-    }
-    // 详情播放中 PopScope.canPop=false → Navigator.canPop 也是 false，
-    // 但仍须 maybePop 触发详情 onPopInvoked→_leavePage，不能误走退桌面。
-    if (DetailScreen.isOpen && nav != null) {
-      unawaited(nav.maybePop());
       return;
     }
     // 直播：先关侧栏/退出沉浸全屏。
