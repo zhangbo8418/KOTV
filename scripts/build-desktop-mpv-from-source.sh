@@ -32,6 +32,31 @@ kotv_is_mpv_win7_build() {
   [[ "${KOTV_MPV_WIN7:-${KOTV_WIN7:-0}}" == "1" ]]
 }
 
+# meson configure 表格：选项名 + 当前值。Windows CI 上 grep ^ 锚点常误杀（CRLF/列宽），用 awk 更稳。
+kotv_meson_feature_enabled() {
+  local feat="$1"
+  local dir="${2:-build}"
+  meson configure "$dir" 2>&1 | awk -v f="$feat" '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i != f) continue
+        for (j = i + 1; j <= NF; j++) {
+          v = toupper($j)
+          if (v == "YES" || v == "TRUE" || v == "ENABLED") { exit 0 }
+        }
+      }
+    }
+    END { exit 1 }
+  '
+}
+
+# 二进制侧再确认 mpv 链了 D3D11（比 meson 文本解析更可靠）。
+kotv_mpv_dll_has_d3d11() {
+  local dll="$1"
+  [[ -f "$dll" ]] || return 1
+  strings "$dll" 2>/dev/null | grep -Eiq 'direct3d.?11|vo_direct3d|d3d11_context|gpu/d3d11|d3d11_helpers'
+}
+
 kotv_libplacebo_profile() {
   if kotv_is_mpv_win7_build; then
     echo "win7-vulkan"
@@ -1127,14 +1152,14 @@ EOF
   fi
   echo "built windows/mpv-2.dll (+ AV3A=$AV3A) from $dll"
   if kotv_is_mpv_win7_build; then
-    if ! meson configure build 2>/dev/null | grep -Eiq '^[[:space:]]*d3d11[[:space:]]+(YES|true|enabled)'; then
+    if ! kotv_meson_feature_enabled d3d11 build && ! kotv_mpv_dll_has_d3d11 "$out"; then
       echo "ERROR: Win7 libmpv built without d3d11 (need shaderc+spirv-cross)" >&2
-      meson configure build 2>/dev/null | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
+      meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
       exit 1
     fi
-    if ! meson configure build 2>/dev/null | grep -Eiq '^[[:space:]]*vulkan[[:space:]]+(YES|true|enabled)'; then
+    if ! kotv_meson_feature_enabled vulkan build; then
       echo "ERROR: Win7 libmpv built without vulkan" >&2
-      meson configure build 2>/dev/null | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
+      meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
       exit 1
     fi
     echo "ok Win7 mpv features include d3d11 + vulkan"
