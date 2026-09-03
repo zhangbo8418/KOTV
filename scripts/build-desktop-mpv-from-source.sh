@@ -57,6 +57,13 @@ kotv_mpv_dll_has_d3d11() {
   strings "$dll" 2>/dev/null | grep -Eiq 'direct3d.?11|vo_direct3d|d3d11_context|gpu/d3d11|d3d11_helpers'
 }
 
+# 二进制侧再确认 mpv 链了 Vulkan（比 meson 文本更可靠）。
+kotv_mpv_dll_has_vulkan() {
+  local dll="$1"
+  [[ -f "$dll" ]] || return 1
+  strings "$dll" 2>/dev/null | grep -Eiq 'vulkan-1\.dll|vkCreateInstance|VkInstance|/vulkan/|gpu/vulkan|libvulkan'
+}
+
 kotv_libplacebo_profile() {
   if kotv_is_mpv_win7_build; then
     echo "win7-vulkan"
@@ -1157,7 +1164,7 @@ EOF
       meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
       exit 1
     fi
-    if ! kotv_meson_feature_enabled vulkan build; then
+    if ! kotv_meson_feature_enabled vulkan build && ! kotv_mpv_dll_has_vulkan "$out"; then
       echo "ERROR: Win7 libmpv built without vulkan" >&2
       meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
       exit 1
