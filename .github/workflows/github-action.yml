@@ -367,6 +367,9 @@ jobs:
           KOTV_JAVA_TOOLCHAIN: "21"
           LANG: en_US.UTF-8
           LC_ALL: en_US.UTF-8
+          KOTV_MACOS_FORCE_ARCH: arm64
+          GOARCH: arm64
+          GOOS: darwin
         run: |
           chmod +x bridge/build.sh scripts/*.sh
           ./scripts/package-flutter-macos.sh
@@ -435,6 +438,9 @@ jobs:
           LANG: en_US.UTF-8
           LC_ALL: en_US.UTF-8
           KOTV_MACOS_NO_FVP: "0"
+          KOTV_MACOS_FORCE_ARCH: x86_64
+          GOARCH: amd64
+          GOOS: darwin
         run: |
           chmod +x bridge/build.sh scripts/*.sh
           # arm64 runner：Rosetta 下走完整 package 脚本（含 libmpv 校验 / kotv-launch / DMG）
@@ -442,6 +448,9 @@ jobs:
             arch -x86_64 bash -lc '
               export PATH="/usr/local/bin:$PATH"
               export KOTV_MACOS_NO_FVP=0
+              export KOTV_MACOS_FORCE_ARCH=x86_64
+              export GOARCH=amd64
+              export GOOS=darwin
               ./scripts/package-flutter-macos.sh
             '
           else

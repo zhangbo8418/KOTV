@@ -10,6 +10,12 @@ export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.flutter-io.cn}"
 export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flutter-io.cn}"
 
 ARCH="$(uname -m)"
+# CI 可钉死：KOTV_MACOS_FORCE_ARCH=x86_64|arm64（避免 Rosetta 下 uname 偶发仍报 arm64）
+if [[ "${KOTV_MACOS_FORCE_ARCH:-}" == "x86_64" || "${KOTV_MACOS_FORCE_ARCH:-}" == "amd64" ]]; then
+  ARCH=x86_64
+elif [[ "${KOTV_MACOS_FORCE_ARCH:-}" == "arm64" || "${KOTV_MACOS_FORCE_ARCH:-}" == "aarch64" ]]; then
+  ARCH=arm64
+fi
 PLAT="macos-x64"
 [[ "$ARCH" == "arm64" ]] && PLAT="macos-arm64"
 # 显式钉死 Go 引擎架构，避免 Rosetta/交叉环境下编出与包名不符的二进制。
@@ -24,7 +30,7 @@ else
 fi
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 REL_ARCH="$(kotv_release_arch "$PLAT")"
-echo "==> version=$VERSION arch=$REL_ARCH ($PLAT) GOARCH=$GOARCH"
+echo "==> version=$VERSION arch=$REL_ARCH ($PLAT) GOARCH=$GOARCH (uname=$(uname -m) force=${KOTV_MACOS_FORCE_ARCH:-})"
 
 chmod +x "$ROOT/scripts/"*.sh
 
