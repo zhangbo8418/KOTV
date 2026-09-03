@@ -49,6 +49,8 @@ class LiveScreen extends ConsumerStatefulWidget {
   /// 切 Tab：await 停掉直播页内全部后端，避免 FVP/HTML 卸树后后台出声。
   static Future<void> prepareLeave() => _LiveScreenState.prepareLeave();
 
+  static bool get isImmersive => _LiveScreenState._active?._immersive == true;
+
   @override
   ConsumerState<LiveScreen> createState() => _LiveScreenState();
 }
@@ -65,7 +67,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           await active._exitImmersive();
         } catch (_) {}
       }
-      await active._stopAllBackends().timeout(const Duration(seconds: 4));
+      await active._releaseAllBackends().timeout(const Duration(seconds: 4));
     } catch (_) {}
   }
 
@@ -158,7 +160,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
-  /// 切台/换线：解析前先停，避免上一路在后台出声。
+  /// 切台/换线：只 stop，保留引擎（对齐 TV 换台）。
   Future<void> _stopAllBackends() async {
     await Future.wait<void>([
       () async {
@@ -197,6 +199,70 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         } catch (_) {}
       }(),
     ]);
+  }
+
+  /// 切 Tab / 离开直播：对齐 TV finish → stop + release，避免后台漏音。
+  Future<void> _releaseAllBackends() async {
+    final fvp = _fvp;
+    final mk = _mk;
+    final exo = _exo;
+    final html = _html;
+    final art = _art;
+    final xg = _xg;
+    final zw = _zw;
+    final mkPlayer = _mkPlayer;
+    _fvp = null;
+    _mk = null;
+    _exo = null;
+    _html = null;
+    _art = null;
+    _xg = null;
+    _zw = null;
+    _mkPlayer = null;
+    _playUrl = '';
+
+    Future<void> hardRelease(KotvPlayback? p) async {
+      if (p == null) return;
+      try {
+        await p.release();
+      } catch (_) {
+        try {
+          await p.stop();
+        } catch (_) {}
+      }
+    }
+
+    await Future.wait<void>([
+      hardRelease(fvp),
+      hardRelease(mk),
+      hardRelease(exo),
+      hardRelease(html),
+      hardRelease(art),
+      hardRelease(xg),
+      hardRelease(zw),
+    ]);
+    await kotvDisposeMpvPlayer(mkPlayer);
+    try {
+      fvp?.dispose();
+    } catch (_) {}
+    try {
+      mk?.dispose();
+    } catch (_) {}
+    try {
+      exo?.dispose();
+    } catch (_) {}
+    try {
+      html?.dispose();
+    } catch (_) {}
+    try {
+      art?.dispose();
+    } catch (_) {}
+    try {
+      xg?.dispose();
+    } catch (_) {}
+    try {
+      zw?.dispose();
+    } catch (_) {}
   }
 
   bool _loading = true;
@@ -270,15 +336,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   Future<void> _prepareQuit() async {
     try {
-      await _stopAllBackends();
+      await _releaseAllBackends();
     } catch (_) {}
-    final mkPlayer = _mkPlayer;
-    _mkPlayer = null;
-    try {
-      _mk?.dispose();
-    } catch (_) {}
-    _mk = null;
-    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   @override

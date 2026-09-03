@@ -58,6 +58,9 @@ class DetailScreen extends ConsumerStatefulWidget {
   /// 详情是否在栈上（含播放中 PopScope.canPop=false）。
   static bool get isOpen => _DetailScreenState._active != null;
 
+  /// 全窗口 / 系统全屏（以页面本地状态为准，不依赖 provider 时序）。
+  static bool get isImmersive => _DetailScreenState._active?._immersiveFullscreen == true;
+
   /// 沉浸全屏时系统返回 / 右键：只退出全屏，不出详情。
   static Future<void> exitImmersiveIfOpen() async {
     final active = _DetailScreenState._active;
@@ -443,7 +446,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
-  /// 不要 pause：pause 会粘在播放器上，下次 open 只出一帧。
+  /// 对齐 TV finish：先卸画面，再 stop + release，避免 AO 残留漏音。
   /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
   Future<void> _stopHard() async {
     _playbackLive = false;
@@ -472,39 +475,75 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       unawaited(api.cancelPending(hard: true, thunder: true));
     }
 
-    // 所有后端先静音，降低 stop/dispose 竞态时的漏音（MPV/FVP/Exo/HTML 共用）。
-    Future<void> mute(KotvPlayback? p) async {
-      if (p == null) return;
-      try {
-        await p.setVolume(0);
-      } catch (_) {}
+    // 先卸掉 Video/PlatformView，再拆引擎（对齐 TV Activity 销毁顺序）。
+    if (mounted) {
+      setState(() {});
+      await WidgetsBinding.instance.endOfFrame;
     }
 
-    Future<void> hardStop(KotvPlayback? p) async {
+    final fvp = _fvp;
+    final mk = _mk;
+    final exo = _exo;
+    final html = _html;
+    final art = _art;
+    final xg = _xg;
+    final zw = _zw;
+    final mkPlayer = _mkPlayer;
+    _fvp = null;
+    _mk = null;
+    _exo = null;
+    _html = null;
+    _art = null;
+    _xg = null;
+    _zw = null;
+    _mkPlayer = null;
+
+    Future<void> hardRelease(KotvPlayback? p) async {
       if (p == null) return;
       try {
-        await p.stop();
-      } catch (_) {}
+        await p.release();
+      } catch (_) {
+        try {
+          await p.stop();
+        } catch (_) {}
+      }
     }
 
     await Future.wait<void>([
-      mute(_fvp),
-      mute(_mk),
-      mute(_exo),
-      mute(_html),
-      mute(_art),
-      mute(_xg),
-      mute(_zw),
-    ]);
-    await Future.wait<void>([
-      hardStop(_fvp),
-      hardStop(_mk),
-      hardStop(_exo),
-      hardStop(_html),
-      hardStop(_art),
-      hardStop(_xg),
-      hardStop(_zw),
+      hardRelease(fvp),
+      hardRelease(mk),
+      hardRelease(exo),
+      hardRelease(html),
+      hardRelease(art),
+      hardRelease(xg),
+      hardRelease(zw),
     ]).timeout(const Duration(seconds: 4), onTimeout: () => <void>[]);
+
+    // media_kit Player 由页面持有：对齐 TV engine.release()。
+    await kotvDisposeMpvPlayer(mkPlayer);
+
+    try {
+      fvp?.dispose();
+    } catch (_) {}
+    try {
+      mk?.dispose();
+    } catch (_) {}
+    try {
+      exo?.dispose();
+    } catch (_) {}
+    try {
+      html?.dispose();
+    } catch (_) {}
+    try {
+      art?.dispose();
+    } catch (_) {}
+    try {
+      xg?.dispose();
+    } catch (_) {}
+    try {
+      zw?.dispose();
+    } catch (_) {}
+
     _stoppedHard = true;
   }
 
@@ -703,15 +742,32 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _unwirePlaybackNotify();
     _stopBtProgressPoll();
     _danmakuItems.dispose();
-    // 正常路径已在 [_stopHard] 里 await pause/stop；此处兜底再停一次再释放。
+    // 正常路径已在 [_stopHard] 里 await release；引擎引用已清空。
+    // 异常路径（未走 _leavePage）仍兜底停+释放，避免漏音。
     if (!_stoppedHard) {
-      unawaited(_mk?.stop() ?? Future<void>.value());
-      unawaited(_fvp?.stop() ?? Future<void>.value());
-      unawaited(_exo?.stop() ?? Future<void>.value());
-      unawaited(_html?.stop() ?? Future<void>.value());
-      unawaited(_art?.stop() ?? Future<void>.value());
-      unawaited(_xg?.stop() ?? Future<void>.value());
-      unawaited(_zw?.stop() ?? Future<void>.value());
+      unawaited(() async {
+        try {
+          await _fvp?.release();
+        } catch (_) {}
+        try {
+          await _mk?.release();
+        } catch (_) {}
+        try {
+          await _exo?.release();
+        } catch (_) {}
+        try {
+          await _html?.release();
+        } catch (_) {}
+        try {
+          await _art?.release();
+        } catch (_) {}
+        try {
+          await _xg?.release();
+        } catch (_) {}
+        try {
+          await _zw?.release();
+        } catch (_) {}
+      }());
     }
     _fvp?.dispose();
     _mk?.dispose();
@@ -723,6 +779,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final mkPlayer = _mkPlayer;
     _mkPlayer = null;
     _mk = null;
+    _fvp = null;
+    _exo = null;
+    _html = null;
+    _art = null;
+    _xg = null;
+    _zw = null;
     unawaited(kotvDisposeMpvPlayer(mkPlayer));
     super.dispose();
   }

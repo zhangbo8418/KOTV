@@ -324,8 +324,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "stop" -> {
         main.post {
           player?.apply {
-            pause()
-            volume = 0f
             try {
               clearVideoSurface()
             } catch (_: Throwable) {

@@ -309,7 +309,30 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _showForceLandscape = false;
     });
     await kotvForceLandscape();
+    _bumpChrome();
   }
+
+  Future<void> _lockPortraitMode() async {
+    setState(() {
+      _forcedLandscape = false;
+    });
+    await kotvLockPortrait();
+    if (!mounted) return;
+    _refreshForceLandscapeBtn();
+    _bumpChrome();
+  }
+
+  void _toggleMobileOrientation() {
+    if (_forcedLandscape) {
+      unawaited(_lockPortraitMode());
+    } else {
+      unawaited(_forceLandscape());
+    }
+  }
+
+  bool get _mobileOrientationControls => !kotvIsDesktop() && !kIsWeb;
+
+  String get _rotateLabel => _forcedLandscape ? '竖屏' : '横屏';
 
   Future<void> _restoreChrome() async {
     await kotvExitSystemFullscreen(
@@ -425,11 +448,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   void _onSwipePointerDown(PointerDownEvent e) {
-    if (e.buttons == kSecondaryMouseButton) {
-      // 只退全屏，勿走全局 kotvHandleAppBack（会与 Listener 叠一次，偶发直接出详情且停播不完整）。
-      unawaited(_exitFullscreen());
-      return;
-    }
+    // 右键由全局 kotvHandleAppBack 统一处理（TV：全屏只退全屏）。
+    // 此处再调 _exitFullscreen 会先清沉浸，全局 Listener 接着 maybePop 详情 → 回首页。
     if (e.buttons != kPrimaryButton) return;
     if (_swipePointer != null) return;
     _swipePointer = e.pointer;
@@ -786,6 +806,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       onRefresh: widget.onRefresh,
       onCast: widget.onCast,
       onMini: widget.onMini,
+      onRotate: _mobileOrientationControls ? _toggleMobileOrientation : null,
+      rotateLabel: _mobileOrientationControls ? _rotateLabel : null,
       danmakuOn: _danmakuOn,
       onDanmakuChanged: (v) {
         setState(() => _danmakuOn = v);

@@ -389,6 +389,8 @@ class VodFullscreenChrome extends StatefulWidget {
     this.onRefresh,
     this.onCast,
     this.onMini,
+    this.onRotate,
+    this.rotateLabel,
     this.danmakuOn = false,
     this.onDanmakuChanged,
     this.ambientOn = false,
@@ -407,6 +409,9 @@ class VodFullscreenChrome extends StatefulWidget {
   final VoidCallback onToggleVisible;
   final VoidCallback onExit;
   final VoidCallback onBump;
+  /// 手机抖音式：竖屏 ↔ 横屏全屏切换。
+  final VoidCallback? onRotate;
+  final String? rotateLabel;
   final List<String> episodes;
   final int epIdx;
   final void Function(int idx)? onSelectEp;
@@ -1176,6 +1181,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               widget.onMini!();
                             },
                           ),
+                        if (widget.onRotate != null)
+                          linkRow(
+                            icon: Icons.screen_rotation_rounded,
+                            label: widget.rotateLabel ?? '旋转屏幕',
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              widget.onRotate!();
+                            },
+                          ),
                         if (widget.episodes.isNotEmpty)
                           linkRow(
                             icon: Icons.playlist_play,
@@ -1430,6 +1444,13 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                       ],
                     ),
                   ),
+                  if (widget.onRotate != null) ...[
+                    _TextAct(
+                      label: widget.rotateLabel ?? '旋转',
+                      onTap: widget.onRotate!,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   _TextAct(label: '退出', onTap: widget.onExit),
                 ],
               ),

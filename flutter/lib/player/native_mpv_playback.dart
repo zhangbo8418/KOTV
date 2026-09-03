@@ -390,18 +390,31 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   Future<void> stop() async {
     try {
-      await _ch.invokeMethod('setVolume', {'volume': 0});
-    } catch (_) {}
-    try {
-      await _ch.invokeMethod('pause');
-    } catch (_) {}
-    try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
     _playing = false;
     _buffering = false;
     _ready = false;
     _url = '';
+    notifyListeners();
+  }
+
+  @override
+  Future<void> release() async {
+    try {
+      await _ch.invokeMethod('stop');
+    } catch (_) {}
+    try {
+      await _ch.invokeMethod('dispose');
+    } catch (_) {}
+    _nativeReady = false;
+    _playing = false;
+    _buffering = false;
+    _ready = false;
+    _url = '';
+    _textureId = null;
+    await _sub?.cancel();
+    _sub = null;
     notifyListeners();
   }
 
@@ -516,18 +529,21 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   void dispose() {
-    _nativeReady = false;
     surfaceRev.dispose();
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _sub = null;
-    unawaited(() async {
-      try {
-        await _ch.invokeMethod('stop');
-      } catch (_) {}
-      try {
-        await _ch.invokeMethod('dispose');
-      } catch (_) {}
-    }());
+    // 正常路径已在 [release] 里 await dispose；此处仅兜底。
+    if (_nativeReady) {
+      _nativeReady = false;
+      unawaited(() async {
+        try {
+          await _ch.invokeMethod('stop');
+        } catch (_) {}
+        try {
+          await _ch.invokeMethod('dispose');
+        } catch (_) {}
+      }());
+    }
     unawaited(_posCtrl.close());
     unawaited(_bufCtrl.close());
     unawaited(_endedCtrl.close());

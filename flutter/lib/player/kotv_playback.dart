@@ -82,6 +82,10 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setAudioTrack(String id);
   Future<void> setSubtitleTrack(String id); // ''=关, 'auto'=自动
 
+  /// 离开详情/切 Tab：对齐 TV `stop` + `release`，拆掉原生 AO，避免后台漏音。
+  /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
+  Future<void> release() => stop();
+
   /// Web 浏览器画中画；其它平台默认不支持。
   bool get supportsPictureInPicture => false;
   bool get pictureInPictureActive => false;

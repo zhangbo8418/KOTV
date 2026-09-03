@@ -143,8 +143,19 @@ class _AppShellState extends ConsumerState<AppShell> {
       _handlingBack = false;
     });
 
+    // 对齐 TV VideoActivity.onBack：isFullscreen() → exitFullscreen()，否则 finish()。
+    // 必须先于 root.pop / maybePop：全屏页若先退沉浸，全局右键再进来会当成「出详情」直接回首页。
+    if (DetailScreen.isImmersive) {
+      unawaited(DetailScreen.exitImmersiveIfOpen());
+      return;
+    }
+    if (LiveScreen.isImmersive) {
+      liveScreenHandleBack?.call();
+      return;
+    }
+
     final root = rootNavigatorKey.currentState;
-    // 扫码等 useRootNavigator 弹窗 / 点播全屏在根栈顶：先 pop。
+    // 扫码等 useRootNavigator 弹窗：先 pop。
     if (root != null && root.canPop()) {
       root.pop();
       return;
@@ -156,12 +167,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     }
     final page = ref.read(kotvPageProvider);
     final nav = _shellNavKey.currentState;
-    // 详情优先：沉浸只退全屏；否则 maybePop→硬停出栈。绝勿 raw nav.pop（会跳过停播）。
+    // 详情：maybePop→硬停出栈。绝勿 raw nav.pop（会跳过停播）。
     if (DetailScreen.isOpen) {
-      if (ref.read(detailImmersiveFullscreenProvider)) {
-        unawaited(DetailScreen.exitImmersiveIfOpen());
-        return;
-      }
       if (nav != null) {
         unawaited(nav.maybePop());
       }
@@ -171,7 +178,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       nav.pop();
       return;
     }
-    // 直播：先关侧栏/退出沉浸全屏。
+    // 直播：先关侧栏/退出回看。
     if (page == KotvPage.live) {
       if (liveScreenHandleBack?.call() == true) return;
     }

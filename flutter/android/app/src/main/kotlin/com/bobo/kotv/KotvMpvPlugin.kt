@@ -282,12 +282,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           try {
             pendingUrl = null
             if (created.get()) {
-              // 对齐 TV Source.stop：先静音再 stop，避免详情 pop 后 AO 残留。
-              try {
-                MPVLib.setPropertyDouble("volume", 0.0)
-                MPVLib.setPropertyBoolean("pause", true)
-              } catch (_: Throwable) {
-              }
               MPVLib.command(arrayOf("stop"))
             }
             playing = false

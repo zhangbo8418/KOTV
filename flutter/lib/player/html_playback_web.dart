@@ -380,7 +380,6 @@ class HtmlPlayback extends KotvPlayback {
     _height = 0;
     try {
       _video.pause();
-      _video.volume = 0;
     } catch (_) {}
     try {
       await exitPictureInPicture();

@@ -13,12 +13,6 @@ import 'silent_video_guard.dart';
 Future<void> kotvDisposeMpvPlayer(Player? player) async {
   if (player == null) return;
   try {
-    await player.setVolume(0);
-  } catch (_) {}
-  try {
-    await player.pause();
-  } catch (_) {}
-  try {
     await player.stop();
   } catch (_) {}
   await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -289,16 +283,15 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> stop() async {
     _url = '';
-    // 先静音再 pause/stop：离开详情若随后 dispose 竞态，也不要继续出声。
-    try {
-      await player.setVolume(0);
-    } catch (_) {}
-    try {
-      await player.pause();
-    } catch (_) {}
     try {
       await player.stop();
     } catch (_) {}
+  }
+
+  @override
+  Future<void> release() async {
+    // Player 由页面 kotvDisposeMpvPlayer 释放（对齐 TV engine.release）。
+    await stop();
   }
 
   @override
