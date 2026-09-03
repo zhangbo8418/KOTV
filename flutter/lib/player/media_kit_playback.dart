@@ -55,15 +55,11 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.duration.listen((_) => notifyListeners()));
     _subs.add(player.stream.buffer.listen((_) => notifyListeners()));
     _subs.add(player.stream.buffering.listen((v) {
-      final wasBuffering = _buffering;
       _buffering = v;
       if (v) {
         unawaited(_pollCacheSpeed());
       } else {
         _speedBps = 0;
-        if (wasBuffering && _url.isNotEmpty && !player.state.completed) {
-          unawaited(_forceResume(reason: 'buffering-end'));
-        }
       }
       notifyListeners();
     }));
@@ -76,10 +72,6 @@ class MediaKitPlayback extends KotvPlayback {
       if (_buffering || player.state.buffering || player.state.playing) {
         unawaited(_pollCacheSpeed());
       }
-    });
-    // 缓冲条已满 / Flutter 以为在播，但 time-pos 不动：周期踢醒（不依赖 buffering 边沿）。
-    _stallTimer = Timer.periodic(const Duration(milliseconds: 700), (_) {
-      unawaited(_watchStall());
     });
     _optsReady = _prepareOpts();
   }
@@ -94,72 +86,10 @@ class MediaKitPlayback extends KotvPlayback {
   bool _live = false;
   int _speedBps = 0;
   Timer? _speedTimer;
-  Timer? _stallTimer;
   bool _speedBusy = false;
   int _lastCacheBytes = -1;
   DateTime? _lastCacheAt;
-  int _resumeKickGen = 0;
-  Duration? _stallPos;
-  DateTime? _stallSince;
-  bool _resumeBusy = false;
   late Future<void> _optsReady;
-
-  /// 强制解除 pause（勿信 state.playing：open 时常乐观置 true，mpv 仍 pause=yes）。
-  Future<void> _forceResume({String reason = ''}) async {
-    if (_live || _url.isEmpty || _resumeBusy) return;
-    final gen = _resumeKickGen;
-    _resumeBusy = true;
-    try {
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      if (gen != _resumeKickGen || _url.isEmpty) return;
-      try {
-        await (player.platform as dynamic).setProperty('pause', 'no');
-      } catch (_) {}
-      try {
-        await player.play();
-      } catch (_) {}
-      // 仍不动则 seek 当前点再 play（等同用户拖进度条）。
-      final pos = position;
-      await Future<void>.delayed(const Duration(milliseconds: 350));
-      if (gen != _resumeKickGen || _url.isEmpty) return;
-      if (position <= pos + const Duration(milliseconds: 200)) {
-        try {
-          await player.seek(pos);
-          await (player.platform as dynamic).setProperty('pause', 'no');
-          await player.play();
-        } catch (_) {}
-      }
-    } finally {
-      _resumeBusy = false;
-    }
-  }
-
-  Future<void> _watchStall() async {
-    if (_live || _url.isEmpty || completed || buffering) {
-      _stallPos = null;
-      _stallSince = null;
-      return;
-    }
-    // 前方几乎无缓冲且无画面：还在起播，别瞎踢。
-    final hasPic = width > 0 && height > 0;
-    final ahead = buffered > position + const Duration(milliseconds: 800);
-    if (!hasPic && !ahead) {
-      _stallPos = null;
-      _stallSince = null;
-      return;
-    }
-    final pos = position;
-    final now = DateTime.now();
-    if (_stallPos == null || (pos - _stallPos!).inMilliseconds.abs() > 300) {
-      _stallPos = pos;
-      _stallSince = now;
-      return;
-    }
-    if (_stallSince != null && now.difference(_stallSince!) >= const Duration(milliseconds: 900)) {
-      _stallSince = now;
-      await _forceResume(reason: 'stall');
-    }
-  }
 
   Future<void> _prepareOpts() async {
     try {
@@ -309,9 +239,6 @@ class MediaKitPlayback extends KotvPlayback {
   }) async {
     _url = url;
     _live = live;
-    _resumeKickGen++;
-    _stallPos = null;
-    _stallSince = null;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     if (drm != null && drm.isNotEmpty) {
       throw StateError('MPV 不支持 DRM，请用内置 ExoPlayer');
@@ -321,7 +248,12 @@ class MediaKitPlayback extends KotvPlayback {
       await _opts.applyAfterAttach(player, live: true);
     }
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
-    await player.open(media);
+    // 根因：media_kit open(play:true) 会在 playlist-pos 之前 pause=false，并乐观
+    // 把 Flutter playing=true。文件真正 load 后 mpv 常仍 pause=yes，于是 demuxer
+    // 缓冲条涨满、UI 以为在播，时间却不动；点「暂停」= cycle pause 反而开播。
+    // Android 原生是 loadfile 后再 pause=false。这里对齐：先 paused 加载，再 play。
+    await player.open(media, play: false);
+    await play();
     await kotvGuardSilentVideo(
       hasVideoSize: () => width > 0 && height > 0,
       isBuffering: () => buffering,
@@ -338,35 +270,15 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> stop() async {
-    _resumeKickGen++;
     _url = '';
     return player.stop();
   }
 
   @override
-  Future<void> playOrPause() async {
-    // media_kit 的 playOrPause 会乐观翻转 playing 再 cycle pause。
-    // 卡死时常 playing=true 而 mpv pause=yes：点「暂停」反而会 cycle 成开播。
-    if (_url.isNotEmpty && !completed) {
-      final pos = position;
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      final stuck = position <= pos + const Duration(milliseconds: 120);
-      final ahead = buffered > pos + const Duration(milliseconds: 500);
-      if (stuck && (ahead || width > 0)) {
-        await _forceResume(reason: 'playOrPause');
-        return;
-      }
-    }
-    await player.playOrPause();
-  }
+  Future<void> playOrPause() => player.playOrPause();
 
   @override
-  Future<void> play() async {
-    try {
-      await (player.platform as dynamic).setProperty('pause', 'no');
-    } catch (_) {}
-    await player.play();
-  }
+  Future<void> play() => player.play();
 
   @override
   Future<void> pause() => player.pause();
@@ -404,8 +316,8 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> tryFixVideoSource() async {
+    // 勿 seek(0)：起播阶段与 load 竞态。open 已 play:false→play，这里只再确保 unpause。
     try {
-      await player.seek(Duration.zero);
       await player.play();
     } catch (_) {}
   }
@@ -445,8 +357,6 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   void dispose() {
     _speedTimer?.cancel();
-    _stallTimer?.cancel();
-    _resumeKickGen++;
     for (final s in _subs) {
       s.cancel();
     }
