@@ -152,8 +152,7 @@ class KotvMpvOpts {
       }
 
       if (live) {
-        // 直播必须覆盖 PlayerConfiguration.bufferSize 写入的大 demuxer-max-bytes，
-        // 并关掉 cache-pause，否则 Windows 上 play:false 等画面会一直「缓冲中」。
+        // 980a0e3：直播跳过点播 KotvBufferBudget。此处只清掉误写入的大 demuxer，并关 cache-pause。
         try {
           final props = KotvBufferBudget.mpvLiveCacheProps();
           for (final e in props.entries) {
@@ -178,7 +177,7 @@ class KotvMpvOpts {
 
   /// 交给原生通道的属性表（P1/P2 open / setOpts）。
   ///
-  /// [live]=true 时写入小 demuxer + 关 cache-pause（覆盖 media_kit 创建时的大 bufferSize）。
+  /// [live]=true：直播小 demuxer + 关 cache-pause（980a0e3，勿套点播预算）。
   Map<String, String> propertyMap({bool live = false}) {
     final out = <String, String>{
       'hwdec': hwdecValue(),

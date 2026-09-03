@@ -22,8 +22,10 @@ Future<void> kotvDisposeMpvPlayer(Player? player) async {
 }
 
 /// 按缓冲预算创建 [Player]，避免 media_kit 默认 32MiB 再被事后猛改造成起播抖动。
-Player kotvCreateMpvPlayer() {
-  final budget = KotvBufferBudget.bytes();
+///
+/// [live]=true：用直播小 buffer（980a0e3），勿把点播 KotvBufferBudget 写进 demuxer。
+Player kotvCreateMpvPlayer({bool live = false}) {
+  final budget = live ? KotvBufferBudget.liveBufferSizeBytes : KotvBufferBudget.bytes();
   return Player(
     configuration: PlayerConfiguration(
       bufferSize: budget,
@@ -40,8 +42,14 @@ String _trackLabel(dynamic t) {
 
 /// media_kit / libmpv（桌面 / iOS 等非 Android 原生插件路径）。
 class MediaKitPlayback extends KotvPlayback {
-  MediaKitPlayback(this.player, {VideoController? controller, KotvMpvOpts? opts})
-      : _opts = opts ?? const KotvMpvOpts(),
+  /// [live]=true：构造期 [_prepareOpts] 就跳过点播 demuxer（直播页必须传，避免先写入点播预算）。
+  MediaKitPlayback(
+    this.player, {
+    VideoController? controller,
+    KotvMpvOpts? opts,
+    bool live = false,
+  })  : _opts = opts ?? const KotvMpvOpts(),
+        _live = live,
         controller = controller ??
             VideoController(
               player,
@@ -241,15 +249,20 @@ class MediaKitPlayback extends KotvPlayback {
       throw StateError('MPV 不支持 DRM，请用内置 ExoPlayer');
     }
     await _optsReady;
-    if (live) {
-      await _opts.applyAfterAttach(player, live: true);
-    }
+    // 直播：再次盖掉点播 demuxer（防构造竞态）；点播预算只在 !live 时由 _prepareOpts/此处写入。
+    await _opts.applyAfterAttach(player, live: live);
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
     // media_kit open(play:true) 在 playlist-pos 前就乐观 unpause，易 pause 不同步。
     // 点播：paused 等到首帧/一点缓冲再 play（避免只跑时钟黑屏）。
-    // 直播/时移回看：立刻 play。Windows ANGLE 上 play:false 等尺寸/缓冲常永远不满足 → 一直「缓冲中」。
+    // 直播/时移回看：立刻 play + 强制 pause=no（对齐 TV prepareAndPlay；修 media_kit 乐观 playing）。
     if (live) {
       await player.open(media, play: true);
+      try {
+        await (player.platform as dynamic).setProperty('pause', 'no');
+      } catch (_) {}
+      try {
+        await player.play();
+      } catch (_) {}
     } else {
       await player.open(media, play: false);
       await _waitReadyThenPlay();

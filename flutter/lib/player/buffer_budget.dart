@@ -36,8 +36,14 @@ class KotvBufferBudget {
     };
   }
 
-  /// 直播：覆盖 media_kit 创建时写入的大 demuxer 预算，否则 Win/ANGLE 易一直 buffering。
-  /// 对齐「低延迟起播」：小 demuxer + 禁止 cache-pause 起播门槛。
+  /// 直播 PlayerConfiguration.bufferSize（对齐 TV：不用点播 KotvBufferBudget）。
+  ///
+  /// media_kit 创建时会把该值写进 demuxer-max-bytes；直播必须与点播预算分开，
+  /// 否则会回到「猛囤」——见历史修复 980a0e3。
+  static const int liveBufferSizeBytes = 24 * 1024 * 1024;
+
+  /// 直播 demuxer：盖掉误用的点播预算 + 禁止 cache-pause 起播门槛。
+  /// 对齐 980a0e3「直播跳过点播预读」；仅保留起播必需的小上限与关 pause。
   static Map<String, String> mpvLiveCacheProps() {
     return {
       'cache': 'yes',
