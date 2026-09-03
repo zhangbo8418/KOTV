@@ -58,6 +58,13 @@ class DetailScreen extends ConsumerStatefulWidget {
   /// 详情是否在栈上（含播放中 PopScope.canPop=false）。
   static bool get isOpen => _DetailScreenState._active != null;
 
+  /// 沉浸全屏时系统返回 / 右键：只退出全屏，不出详情。
+  static Future<void> exitImmersiveIfOpen() async {
+    final active = _DetailScreenState._active;
+    if (active == null || !active._immersiveFullscreen) return;
+    await active._exitImmersiveFullscreen();
+  }
+
   /// 换源/切 Tab：尽快放开 PopScope；硬停后台做，勿卡住「设置/直播/搜索」。
   static Future<void> prepareLeave() async {
     final active = _DetailScreenState._active;
@@ -77,6 +84,7 @@ class DetailScreen extends ConsumerStatefulWidget {
     try {
       active.ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
     } catch (_) {}
+    active._immersiveFullscreen = false;
     unawaited(active._stopHard());
     if (!active.mounted) return;
     // 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
@@ -96,11 +104,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _loading = true;
   int _flagIdx = 0;
   int _epIdx = -1;
-  /// 全屏页在 rootNavigator，父 setState 到不了；revision 驱动画面/集数/播放器重建。
-  final ValueNotifier<int> _fsRev = ValueNotifier(0);
+  /// 全屏页在父 setState 下更新；保留 GlobalKey 仅供自动切集动画。
+  final GlobalKey<DetailFullscreenPageState> _fsPageKey = GlobalKey<DetailFullscreenPageState>();
   /// 详情内嵌：菜单键弹出后播停键自动获焦。
   bool _chromeRemoteFocus = false;
-  final GlobalKey<DetailFullscreenPageState> _fsPageKey = GlobalKey<DetailFullscreenPageState>();
   int _epPage = 0;
   bool _reversed = false;
   bool _kept = false;
@@ -129,6 +136,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _immersiveFullscreen = false;
   KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
   final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_detail_video');
+  /// 桌面：量测详情页播控槽，供稳定 Positioned Texture 宿主对齐。
+  final GlobalKey _videoSlotKey = GlobalKey(debugLabel: 'kotv_detail_video_slot');
+  final GlobalKey _detailStackKey = GlobalKey(debugLabel: 'kotv_detail_stack');
+  Rect? _videoLayerRect;
+  bool _videoSlotSyncScheduled = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
   Timer? _btProgressTimer;
@@ -647,7 +659,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _unwirePlaybackNotify();
     _stopBtProgressPoll();
     _danmakuItems.dispose();
-    _fsRev.dispose();
     // 正常路径已在 [_stopHard] 里 await pause/stop；此处兜底再停一次再释放。
     if (!_stoppedHard) {
       unawaited(_mk?.stop() ?? Future<void>.value());
@@ -1119,7 +1130,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           openUrl = resolved.url;
           openHeaders = resolved.headers;
         }
-        // 先挂播放器视图再 open（Texture / 平台视图需进树；全屏也靠 _fsRev 挂上）。
+        // 先挂播放器视图再 open（Texture / 平台视图需进树；全屏靠原位 Positioned）。
         setState(() {
           _playUrl = playUrl;
           _playerVal = failover.playerVal;
@@ -1287,8 +1298,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         s.contains('Broken pipe');
   }
 
-  /// 全屏/详情共用画面。Android PlatformView 须 GlobalKey reparent 保 Surface；
-  /// 桌面 media_kit Texture 用 GlobalKey 在 LayoutBuilder/RawView 卸树时易把元素链成环 → Stack Overflow，画面区被 ErrorWidget 盖住（时间仍走）。
+  /// 全屏/详情共用画面。原位全屏时 Element 不挪树；Android 原生 Surface 另加 KeyedSubtree。
+  /// 固定画幅用 [AspectRatio]，勿用 LayoutBuilder+Center+SizedBox（易与 Video/FittedBox 叠出无限 layout）。
   Widget _buildSharedVideo({BoxFit fit = BoxFit.contain}) {
     Widget inner = kotvPlaybackView(
       playerVal: _playerVal,
@@ -1302,17 +1313,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
     final ratio = _aspect.ratio;
     if (ratio != null && ratio > 0) {
-      final child = inner;
-      inner = LayoutBuilder(
-        builder: (context, c) {
-          var w = c.maxWidth;
-          var h = w / ratio;
-          if (h > c.maxHeight) {
-            h = c.maxHeight;
-            w = h * ratio;
-          }
-          return Center(child: SizedBox(width: w, height: h, child: child));
-        },
+      inner = ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: AspectRatio(aspectRatio: ratio, child: inner),
+        ),
       );
     }
     if (_backend == KotvEmbedBackend.mpv && kotvIsAndroid() && _mk is NativeMpvPlayback) {
@@ -1325,13 +1330,112 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     return inner;
   }
 
-  /// 全屏在 rootNavigator，详情 setState 到不了，靠 revision 把当前播放器/集数推上去。
-  void _syncFullscreen() {
-    if (!mounted) return;
-    _fsRev.value++;
+  /// 全平台：Texture/PlatformView 留在同一 Positioned 宿主，全屏只改几何。
+  bool get _useStableVideoLayer => !_miniDesktop;
+
+  void _scheduleSyncVideoSlot() {
+    if (_videoSlotSyncScheduled || !_useStableVideoLayer) return;
+    _videoSlotSyncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _videoSlotSyncScheduled = false;
+      _syncVideoSlotRect();
+    });
   }
 
-  Widget _buildImmersiveFullscreenPage() {
+  void _syncVideoSlotRect() {
+    if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
+    final slotBox = _videoSlotKey.currentContext?.findRenderObject() as RenderBox?;
+    final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (slotBox == null || stackBox == null || !slotBox.hasSize || !stackBox.hasSize) {
+      return;
+    }
+    final offset = slotBox.localToGlobal(Offset.zero, ancestor: stackBox);
+    final next = offset & slotBox.size;
+    if (next.width < 1 || next.height < 1) return;
+    final prev = _videoLayerRect;
+    if (prev != null &&
+        (prev.left - next.left).abs() < 0.5 &&
+        (prev.top - next.top).abs() < 0.5 &&
+        (prev.width - next.width).abs() < 0.5 &&
+        (prev.height - next.height).abs() < 0.5) {
+      return;
+    }
+    setState(() => _videoLayerRect = next);
+  }
+
+  Rect _stableVideoRect(BuildContext context) {
+    if (_immersiveFullscreen) {
+      return Offset.zero & MediaQuery.sizeOf(context);
+    }
+    return _videoLayerRect ?? Rect.zero;
+  }
+
+  Widget _buildStableVideoLayer(BuildContext context) {
+    final rect = _stableVideoRect(context);
+    if (rect.width < 1 || rect.height < 1) return const SizedBox.shrink();
+    return Positioned(
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (_playUrl.isEmpty || _immersiveFullscreen) return;
+          unawaited(_playback.playOrPause());
+          setState(() {});
+        },
+        onSecondaryTap: _immersiveFullscreen ? null : () => kotvHandleAppBack?.call(),
+        onDoubleTap: _immersiveFullscreen
+            ? null
+            : () {
+                if (_playUrl.isNotEmpty) {
+                  unawaited(_enterFullscreen());
+                } else if (_eps.isNotEmpty) {
+                  unawaited(_playAt(_epIdx >= 0 ? _epIdx : 0, fullscreen: true));
+                }
+              },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
+            if (!_immersiveFullscreen) ...[
+              KotvBufferingOverlay(player: _playback),
+              ExcludeFocus(
+                child: CenterPlayPauseButton(
+                  player: _playback,
+                  hideWhenBuffering: true,
+                  enabled: !_status.contains('解析') && !_status.contains('嗅探'),
+                ),
+              ),
+              if (_status.contains('解析') || _status.contains('嗅探') || _status.contains('换集中'))
+                const ColoredBox(
+                  color: Color(0x66000000),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(color: Color(0xFFE53955), strokeWidth: 3),
+                        SizedBox(height: 14),
+                        Text('正在解析播放地址', style: TextStyle(color: Colors.white, fontSize: 15)),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 全屏控件跟详情 setState；勿再用 ValueNotifier 整页重建（GlobalKey 易卸树成环）。
+  void _syncFullscreen() {
+    if (!mounted || !_immersiveFullscreen) return;
+    setState(() {});
+  }
+
+  Widget _buildImmersiveFullscreenPage({bool externalVideo = false}) {
     final d = _detail!;
     final api = ref.read(apiProvider);
     final id = d.id.isNotEmpty ? d.id : widget.id;
@@ -1339,140 +1443,122 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     final eps = _eps;
     final epIdx = _epIdx;
     final title = '${d.name}${epIdx >= 0 && epIdx < eps.length ? ' · ${eps[epIdx].name}' : ''}';
-    return ValueListenableBuilder<int>(
-      valueListenable: _fsRev,
-      builder: (context, _, __) {
-        return ValueListenableBuilder<List<DanmakuItem>>(
-          valueListenable: _danmakuItems,
-          builder: (context, danmakuItems, _) => DetailFullscreenPage(
-            key: _fsPageKey,
-            embedded: true,
-            videoChild: _buildSharedVideo(fit: _aspect.fit),
-            playback: _playback,
-            vodName: d.name,
-            title: title,
-            episodes: eps.map((e) => e.name).toList(),
-            epIdx: epIdx,
-            playUrl: _playUrl,
-            decodeMode: _decodeMode,
-            renderMode: _renderMode,
-            aspect: _aspect,
-            danmakuOn: _danmakuOn,
-            danmakuItems: danmakuItems,
-            ambientOn: _ambientOn,
-            stableVolumeOn: _stableVolumeOn,
-            keepLabel: _kept ? '取消收藏' : '收藏',
-            offsetId: id,
-            offsetSite: site,
-            openingSec: _openingSec,
-            endingSec: _endingSec,
-            desktopFullscreen: _desktopFs,
-            onExitEmbedded: () => unawaited(_exitImmersiveFullscreen()),
-            onOffsetsChanged: (open, end) {
-              if (!mounted) return;
-              setState(() {
-                _openingSec = open;
-                _endingSec = end;
-              });
-            },
-            onSelectEp: (i) => _playAt(i),
-            onNext: () => _playAt(_epIdx + 1),
-            onPrev: () => _playAt(_epIdx - 1),
-            onDecodeChanged: (mode) {
-              if (mounted) {
-                setState(() {
-                  _decodeMode = mode;
-                  _prefDecodeMode = mode;
-                });
-                _syncFullscreen();
-              }
-            },
-            onPersistSetting: (k, v) async {
-              await api.setSetting(k, v);
-              if (!mounted) return;
-              if (k == 'playerScale') {
-                setState(() => _aspect = _aspectFromScale(v));
-                _syncFullscreen();
-              }
-              if (k == 'playerAmbient') {
-                setState(() => _ambientOn = v.toLowerCase() == 'true');
-                _syncFullscreen();
-              }
-              if (k == 'playerStableVolume') {
-                final on = v.toLowerCase() == 'true';
-                setState(() => _stableVolumeOn = on);
-                unawaited(_applyStableVolume(_playback, on));
-                _syncFullscreen();
-              }
-              if (k == 'danmaku') {
-                setState(() => _danmakuOn = v.toLowerCase() == 'true');
-                _syncFullscreen();
-              }
-              if (k == 'danmakuApi') setState(() => _danmakuApi = v);
-              if (k == 'playerDecode') {
-                final next = v.trim().isEmpty ? 'auto' : v.trim();
-                setState(() {
-                  _decodeMode = next;
-                  _prefDecodeMode = next;
-                });
-                _syncFullscreen();
-              }
-              if (k == 'playerRender') {
-                final next = kotvNormalizePlayerRender(v);
-                setState(() => _renderMode = next);
-                unawaited(_playback.setRenderMode(next));
-                _syncFullscreen();
-              }
-              if (k == 'player') {
-                final prev = _playerVal;
-                final next = kotvClampPlayerVal(v, live: false);
-                setState(() {
-                  _playerVal = next;
-                  _prefPlayerVal = next;
-                });
-                if (next != prev && _epIdx >= 0) {
-                  unawaited(_playAt(_epIdx));
-                } else {
-                  _syncFullscreen();
-                }
-              }
-            },
-            onPlayerStatus: api.playerStatus,
-            onExternalPlayer: (player) => api.playerExternal(url: _playUrl, player: player),
-            onToggleKeep: () async {
-              final item = VodItem(id: id, name: d.name, pic: d.pic, site: site, remarks: d.remarks);
-              final kept = await LocalCollect.toggle(item);
-              if (mounted) {
-                setState(() => _kept = kept);
-                _syncFullscreen();
-              }
-              return kept ? '取消收藏' : '收藏';
-            },
-            onDanmakuChanged: (v) {
-              if (mounted) {
-                setState(() => _danmakuOn = v);
-                _syncFullscreen();
-              }
-            },
-            onAmbientChanged: (v) {
-              if (mounted) {
-                setState(() => _ambientOn = v);
-                _syncFullscreen();
-              }
-            },
-            onParse: () => unawaited(_pickParse()),
-            onRefresh: () {
-              if (_epIdx >= 0) unawaited(_playAt(_epIdx));
-            },
-            onCast: () => unawaited(_cast()),
-            onMini: () {
-              unawaited(_exitImmersiveFullscreen().then((_) {
-                if (mounted) unawaited(_enterMini());
-              }));
-            },
-          ),
-        );
-      },
+    return ValueListenableBuilder<List<DanmakuItem>>(
+      valueListenable: _danmakuItems,
+      builder: (context, danmakuItems, _) => DetailFullscreenPage(
+        key: _fsPageKey,
+        embedded: true,
+        externalVideo: externalVideo,
+        videoChild: externalVideo
+            ? const SizedBox.shrink()
+            : _buildSharedVideo(fit: _aspect.fit),
+        playback: _playback,
+        vodName: d.name,
+        title: title,
+        episodes: eps.map((e) => e.name).toList(),
+        epIdx: epIdx,
+        playUrl: _playUrl,
+        decodeMode: _decodeMode,
+        renderMode: _renderMode,
+        aspect: _aspect,
+        danmakuOn: _danmakuOn,
+        danmakuItems: danmakuItems,
+        ambientOn: _ambientOn,
+        stableVolumeOn: _stableVolumeOn,
+        keepLabel: _kept ? '取消收藏' : '收藏',
+        offsetId: id,
+        offsetSite: site,
+        openingSec: _openingSec,
+        endingSec: _endingSec,
+        desktopFullscreen: _desktopFs,
+        onExitEmbedded: () => unawaited(_exitImmersiveFullscreen()),
+        onOffsetsChanged: (open, end) {
+          if (!mounted) return;
+          setState(() {
+            _openingSec = open;
+            _endingSec = end;
+          });
+        },
+        onSelectEp: (i) => _playAt(i),
+        onNext: () => _playAt(_epIdx + 1),
+        onPrev: () => _playAt(_epIdx - 1),
+        onDecodeChanged: (mode) {
+          if (mounted) {
+            setState(() {
+              _decodeMode = mode;
+              _prefDecodeMode = mode;
+            });
+          }
+        },
+        onPersistSetting: (k, v) async {
+          await api.setSetting(k, v);
+          if (!mounted) return;
+          if (k == 'playerScale') {
+            setState(() => _aspect = _aspectFromScale(v));
+          }
+          if (k == 'playerAmbient') {
+            setState(() => _ambientOn = v.toLowerCase() == 'true');
+          }
+          if (k == 'playerStableVolume') {
+            final on = v.toLowerCase() == 'true';
+            setState(() => _stableVolumeOn = on);
+            unawaited(_applyStableVolume(_playback, on));
+          }
+          if (k == 'danmaku') {
+            setState(() => _danmakuOn = v.toLowerCase() == 'true');
+          }
+          if (k == 'danmakuApi') setState(() => _danmakuApi = v);
+          if (k == 'playerDecode') {
+            final next = v.trim().isEmpty ? 'auto' : v.trim();
+            setState(() {
+              _decodeMode = next;
+              _prefDecodeMode = next;
+            });
+          }
+          if (k == 'playerRender') {
+            final next = kotvNormalizePlayerRender(v);
+            setState(() => _renderMode = next);
+            unawaited(_playback.setRenderMode(next));
+          }
+          if (k == 'player') {
+            final prev = _playerVal;
+            final next = kotvClampPlayerVal(v, live: false);
+            setState(() {
+              _playerVal = next;
+              _prefPlayerVal = next;
+            });
+            if (next != prev && _epIdx >= 0) {
+              unawaited(_playAt(_epIdx));
+            }
+          }
+        },
+        onPlayerStatus: api.playerStatus,
+        onExternalPlayer: (player) => api.playerExternal(url: _playUrl, player: player),
+        onToggleKeep: () async {
+          final item = VodItem(id: id, name: d.name, pic: d.pic, site: site, remarks: d.remarks);
+          final kept = await LocalCollect.toggle(item);
+          if (mounted) {
+            setState(() => _kept = kept);
+          }
+          return kept ? '取消收藏' : '收藏';
+        },
+        onDanmakuChanged: (v) {
+          if (mounted) setState(() => _danmakuOn = v);
+        },
+        onAmbientChanged: (v) {
+          if (mounted) setState(() => _ambientOn = v);
+        },
+        onParse: () => unawaited(_pickParse()),
+        onRefresh: () {
+          if (_epIdx >= 0) unawaited(_playAt(_epIdx));
+        },
+        onCast: () => unawaited(_cast()),
+        onMini: () {
+          unawaited(_exitImmersiveFullscreen().then((_) {
+            if (mounted) unawaited(_enterMini());
+          }));
+        },
+      ),
     );
   }
 
@@ -1488,17 +1574,27 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       } catch (_) {}
     }
     ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
+    final full = MediaQuery.sizeOf(context);
     setState(() {
       _desktopFs = desktopFs;
       _immersiveFullscreen = true;
+      // 立刻铺满，避免先卸树再重建；外层 Positioned 只改几何。
+      if (_useStableVideoLayer) {
+        _videoLayerRect = Offset.zero & full;
+      }
     });
     _syncFullscreen();
   }
 
   Future<void> _exitImmersiveFullscreen() async {
     if (!_immersiveFullscreen) return;
+    final wasDisplay = _desktopFs == KotvDesktopFullscreenKind.display;
     ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
-    if (mounted) setState(() => _immersiveFullscreen = false);
+    if (mounted) {
+      setState(() => _immersiveFullscreen = false);
+      _scheduleSyncVideoSlot();
+    }
+    await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
     if (!kotvIsDesktop()) {
       try {
         await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
@@ -1577,15 +1673,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   Widget _videoStage({required bool interactive}) {
     final d = _detail;
+    final stableSlot = _useStableVideoLayer && _playUrl.isNotEmpty;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () {
-        if (_playUrl.isEmpty) return;
-        unawaited(_playback.playOrPause());
-        setState(() {});
-      },
+      onTap: stableSlot
+          ? null
+          : () {
+              if (_playUrl.isEmpty) return;
+              unawaited(_playback.playOrPause());
+              setState(() {});
+            },
       onSecondaryTap: () => kotvHandleAppBack?.call(),
-      onDoubleTap: interactive
+      onDoubleTap: interactive && !stableSlot
           ? () {
               if (_playUrl.isNotEmpty) {
                 unawaited(_enterFullscreen());
@@ -1615,14 +1714,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                       ),
                     ),
                   ))
+          else if (stableSlot)
+            // 桌面：仅占位量测；真正 Texture 在 [_buildStableVideoLayer]。
+            ColoredBox(key: _videoSlotKey, color: Colors.black)
           else
             // 勿包 ListenableBuilder：position/playing 高频 notify 会重建 Video。
             ExcludeFocus(
               child: _buildSharedVideo(fit: _aspect.fit),
             ),
-          if (_playUrl.isNotEmpty)
+          if (_playUrl.isNotEmpty && !stableSlot)
             KotvBufferingOverlay(player: _playback),
-          if (_playUrl.isNotEmpty)
+          if (_playUrl.isNotEmpty && !stableSlot)
             // 中心播停留给触控；遥控器走底栏 TvFocus，避免焦点停在画面正中出不去。
             ExcludeFocus(
               child: CenterPlayPauseButton(
@@ -1631,7 +1733,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 enabled: !_status.contains('解析') && !_status.contains('嗅探'),
               ),
             ),
-          if (_status.contains('解析') || _status.contains('嗅探') || _status.contains('换集中'))
+          if (!stableSlot &&
+              (_status.contains('解析') || _status.contains('嗅探') || _status.contains('换集中')))
             const ColoredBox(
               color: Color(0x66000000),
               child: Center(
@@ -1691,59 +1794,111 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final body = (_miniDesktop && _detail != null)
-        // 主界面已收起：仅桌面悬浮播放层；控件半透明，鼠标移入显示
-        ? Scaffold(
-            backgroundColor: Colors.transparent,
-            body: DragToMoveArea(
-              child: MiniHoverShell(
-                player: _playback,
-                video: _videoStage(interactive: true),
-                chrome: VodInlineControls(
-                  player: _playback,
-                  miniActive: true,
-                  translucent: true,
-                  onCast: () => unawaited(_cast()),
-                  onMini: () => unawaited(_exitMini()),
-                  onExpand: (kind) => unawaited(_enterFullscreen(kind)),
-                  onStop: () async {
-                    await _stopHard();
-                    if (_miniDesktop) await _exitMini();
-                    if (mounted) {
-                      setState(() {
-                        _status = '已停止';
-                      });
-                    }
-                  },
-                ),
-              ),
+    if (_useStableVideoLayer && _playUrl.isNotEmpty && !_immersiveFullscreen) {
+      _scheduleSyncVideoSlot();
+    }
+
+    final Widget body;
+    if (_miniDesktop && _detail != null) {
+      // 主界面已收起：仅桌面悬浮播放层；控件半透明，鼠标移入显示
+      body = Scaffold(
+        backgroundColor: Colors.transparent,
+        body: DragToMoveArea(
+          child: MiniHoverShell(
+            player: _playback,
+            video: _videoStage(interactive: true),
+            chrome: VodInlineControls(
+              player: _playback,
+              miniActive: true,
+              translucent: true,
+              onCast: () => unawaited(_cast()),
+              onMini: () => unawaited(_exitMini()),
+              onExpand: (kind) => unawaited(_enterFullscreen(kind)),
+              onStop: () async {
+                await _stopHard();
+                if (_miniDesktop) await _exitMini();
+                if (mounted) {
+                  setState(() {
+                    _status = '已停止';
+                  });
+                }
+              },
             ),
-          )
-        : (_immersiveFullscreen && _detail != null && _playUrl.isNotEmpty)
-            ? _buildImmersiveFullscreenPage()
-            : Scaffold(
-            backgroundColor: Colors.transparent,
-            body: AppBackdrop(
-              child: Column(
-                children: [
-                  LibraryTopBar(
-                    onBack: () => unawaited(_leavePage()),
-                    onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
-                    onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
-                    onNews: () => showAppNews(context, remoteHint(ref)),
-                    title: widget.title.isNotEmpty ? widget.title : '详情',
-                  ),
-                  Expanded(
-                    child: _loading
-                        ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                        : _error != null
-                            ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+          ),
+        ),
+      );
+    } else if (_useStableVideoLayer) {
+      // 桌面：Scaffold 与全屏控件切换时，Texture 始终挂在同一 Positioned 上。
+      final detailScaffold = Scaffold(
+        backgroundColor: Colors.transparent,
+        body: AppBackdrop(
+          child: Column(
+            children: [
+              LibraryTopBar(
+                onBack: () => unawaited(_leavePage()),
+                onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
+                onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
+                onNews: () => showAppNews(context, remoteHint(ref)),
+                title: widget.title.isNotEmpty ? widget.title : '详情',
+              ),
+              Expanded(
+                child: _loading
+                    ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                    : _error != null
+                        ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                        : _detail == null
+                            ? const SizedBox.shrink()
                             : _buildBody(),
-                  ),
-                ],
               ),
+            ],
+          ),
+        ),
+      );
+      body = Stack(
+        key: _detailStackKey,
+        fit: StackFit.expand,
+        children: [
+          if (_immersiveFullscreen) const ColoredBox(color: Colors.black),
+          Offstage(
+            offstage: _immersiveFullscreen,
+            child: TickerMode(
+              enabled: !_immersiveFullscreen,
+              child: detailScaffold,
             ),
-          );
+          ),
+          if (_playUrl.isNotEmpty) _buildStableVideoLayer(context),
+          // 切集/换播放器时 playUrl 可能短暂变化：全屏页勿随 playUrl 卸树。
+          if (_immersiveFullscreen && _detail != null)
+            _buildImmersiveFullscreenPage(externalVideo: true),
+        ],
+      );
+    } else if (_immersiveFullscreen && _detail != null) {
+      body = _buildImmersiveFullscreenPage();
+    } else {
+      body = Scaffold(
+        backgroundColor: Colors.transparent,
+        body: AppBackdrop(
+          child: Column(
+            children: [
+              LibraryTopBar(
+                onBack: () => unawaited(_leavePage()),
+                onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
+                onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
+                onNews: () => showAppNews(context, remoteHint(ref)),
+                title: widget.title.isNotEmpty ? widget.title : '详情',
+              ),
+              Expanded(
+                child: _loading
+                    ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                    : _error != null
+                        ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                        : _buildBody(),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return PopScope(
       // 对齐 TV：返回必须先 await 硬停，禁止 canPop 抢跑（所有播放器共用 _stopHard）。

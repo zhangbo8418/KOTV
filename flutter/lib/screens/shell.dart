@@ -156,11 +156,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     }
     final page = ref.read(kotvPageProvider);
     final nav = _shellNavKey.currentState;
-    // 详情沉浸全屏：maybePop 只退全屏（PopScope），不要与其它路径叠成一次出详情。
+    // 详情沉浸全屏：只退全屏，勿 maybePop（与 PopScope/_leavePage 叠一次会直接出详情回首页）。
     if (ref.read(detailImmersiveFullscreenProvider)) {
-      if (DetailScreen.isOpen && nav != null) {
-        unawaited(nav.maybePop());
-      }
+      unawaited(DetailScreen.exitImmersiveIfOpen());
       return;
     }
     if (nav != null && nav.canPop()) {

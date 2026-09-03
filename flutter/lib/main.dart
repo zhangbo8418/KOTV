@@ -41,13 +41,19 @@ void _kotvLogUiError(Object error, StackTrace? stack, {String where = 'build'}) 
   } catch (_) {}
 }
 
+bool _kotvIsSoftUiException(Object error) {
+  if (error is StackOverflowError) return true;
+  final msg = '$error'.toLowerCase();
+  return msg.contains('notifyclients') ||
+      msg.contains('_owner != null') ||
+      msg.contains('stack overflow') ||
+      msg.contains('maximum call stack') ||
+      (msg.contains('failed assertion') && msg.contains('dependents'));
+}
+
 Widget _kotvErrorWidget(FlutterErrorDetails details) {
-  final msg = '${details.exception}';
   // 已知框架竞态 / 卸树环：勿整页「页面渲染出错」，保留黑底以免盖住播放区。
-  if (msg.contains('_owner != null') ||
-      msg.contains('notifyClients') ||
-      msg.contains('Stack Overflow') ||
-      details.exception is StackOverflowError) {
+  if (_kotvIsSoftUiException(details.exception)) {
     _kotvLogUiError(details.exception, details.stack, where: 'ErrorWidget-soft');
     return const ColoredBox(color: Color(0xFF14161B));
   }
@@ -104,16 +110,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ErrorWidget.builder = _kotvErrorWidget;
   FlutterError.onError = (details) {
-    final msg = '${details.exception}';
     // InheritedElement.notifyClients：Theme/MediaQuery 与路由竞态。
-    // RenderObject.detach `_owner != null`：PlatformView 卸树竞态（异常文案常无 detach 字样）。
-    // Stack Overflow：GlobalKey/RawView 卸树成环；presentError 会用 ErrorWidget 盖住画面。
-    // presentError 会整页 ErrorWidget；只记日志，勿毁树。
-    if (msg.contains('notifyClients') ||
-        (msg.contains('Failed assertion') && msg.contains('dependents')) ||
-        msg.contains('_owner != null') ||
-        msg.contains('Stack Overflow') ||
-        details.exception is StackOverflowError) {
+    // RenderObject.detach `_owner != null`：PlatformView 卸树竞态。
+    // Stack Overflow / 卸树环：presentError 会用 ErrorWidget 盖住画面，只记日志。
+    if (_kotvIsSoftUiException(details.exception)) {
       _kotvLogUiError(details.exception, details.stack, where: 'FlutterError-soft');
       return;
     }

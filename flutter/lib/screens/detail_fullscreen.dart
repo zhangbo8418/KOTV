@@ -62,11 +62,14 @@ class DetailFullscreenPage extends StatefulWidget {
     this.endingSec = 0,
     this.onOffsetsChanged,
     this.desktopFullscreen = KotvDesktopFullscreenKind.window,
+    this.externalVideo = false,
   });
 
   final KotvPlayback playback;
   /// 详情页传入的同一块 PlatformView/Texture（对齐 TV 原位全屏，不重绑 Surface）。
   final Widget videoChild;
+  /// 桌面：画面由外层 Positioned 宿主绘制，本页只叠控件，避免卸树重建 Texture。
+  final bool externalVideo;
   final String vodName;
   final String title;
   /// true：嵌在详情页内切换布局；false：独立路由（遗留）。
@@ -315,11 +318,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Future<void> _exitFullscreen() async {
-    await _restoreChrome();
+    // 嵌入模式：父页负责退沉浸 + 恢复系统全屏；此处勿再 maybePop，避免叠成出详情。
     if (widget.embedded) {
       widget.onExitEmbedded?.call();
       return;
     }
+    await _restoreChrome();
     if (mounted) Navigator.of(context).maybePop();
   }
 
@@ -650,19 +654,19 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Widget _buildVideo() {
+    if (widget.externalVideo) {
+      // 画面在父级 Stack；此处留空透出下层 Texture。
+      return const SizedBox.expand();
+    }
     Widget video = widget.videoChild;
     final ratio = _aspect.ratio;
     if (ratio != null && ratio > 0) {
-      video = LayoutBuilder(
-        builder: (context, c) {
-          var w = c.maxWidth;
-          var h = w / ratio;
-          if (h > c.maxHeight) {
-            h = c.maxHeight;
-            w = h * ratio;
-          }
-          return Center(child: SizedBox(width: w, height: h, child: video));
-        },
+      // 勿用 LayoutBuilder+Center+SizedBox，易与 Video 叠出无限 layout。
+      video = ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: AspectRatio(aspectRatio: ratio, child: video),
+        ),
       );
     }
 
@@ -814,7 +818,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       autofocus: true,
       onKeyEvent: _onKey,
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: widget.externalVideo ? Colors.transparent : Colors.black,
         body: LayoutBuilder(
           builder: (context, c) {
             WidgetsBinding.instance.addPostFrameCallback((_) {

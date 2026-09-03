@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'fullscreen_sys.dart' if (dart.library.html) 'fullscreen_sys_web.dart' as sys;
@@ -25,11 +26,21 @@ Future<void> kotvEnterSystemFullscreen(KotvDesktopFullscreenKind kind) async {
     await sys.kotvEnterDisplayFullscreen();
     return;
   }
-  if (kotvIsDesktop()) {
+  if (!kotvIsDesktop()) return;
+  // Windows：系统全屏会重建 HWND/交换链，若与 media_kit ANGLE Texture 同帧放大易黑屏/卡死。
+  // 先让应用内沉浸布局落稳，再延后 setFullScreen。
+  if (kotvIsWindows()) {
     try {
-      await windowManager.setFullScreen(true);
+      if (await windowManager.isFullScreen()) return;
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    try {
+      await WidgetsBinding.instance.endOfFrame;
     } catch (_) {}
   }
+  try {
+    await windowManager.setFullScreen(true);
+  } catch (_) {}
 }
 
 Future<void> kotvExitSystemFullscreen({required bool wasDisplayFullscreen}) async {

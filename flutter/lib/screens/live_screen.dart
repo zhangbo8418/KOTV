@@ -1003,8 +1003,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         ]);
       } catch (_) {}
     }
-    await kotvEnterSystemFullscreen(desktopFs);
-    if (!mounted) return;
+    // 先落沉浸布局（Texture 几何），再系统全屏；Windows 上 setFullScreen 会重建 HWND。
     setState(() {
       _desktopFs = desktopFs;
       _immersive = true;
@@ -1012,6 +1011,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _rightOpen = false;
       _chromeVisible = false;
     });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await kotvEnterSystemFullscreen(desktopFs);
+    if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focus.requestFocus();
     });
