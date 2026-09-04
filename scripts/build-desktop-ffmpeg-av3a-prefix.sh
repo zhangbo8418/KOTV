@@ -61,8 +61,8 @@ clone_ffmpeg() {
   git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
 }
 
-# v7: Win 用 Schannel（不编 OpenSSL）；mac 放宽 curl 探测；强制 HTTPS
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v7"
+# v8: TLS + 显式 RTSP/RTMP + libnghttp2(HTTP/2)
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v8"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -264,14 +264,20 @@ PROBE
 fi
 
 # HTTPS/302：Win=Schannel；Linux=OpenSSL；macOS=SecureTransport。
+# HTTP/2：libnghttp2。RTSP/RTMP：FFmpeg 内置协议（与 curl 无关，勿关）。
 chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
+chmod +x "$ROOT/scripts/ensure-desktop-nghttp2.sh"
 "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
+"$ROOT/scripts/ensure-desktop-nghttp2.sh"
 setup_pkg_config
 
 FFMPEG_EXTRA=(--extra-cflags="-I${PREF_NATIVE}/include")
 FFMPEG_EXTRA+=(--extra-ldflags="-L${PREF_NATIVE}/lib")
 # 播放不需要 avdevice；与 fvp/mdk 同进程时 libavdevice 易引入重复注册/堆损坏（mac ObjC 类，Win Vulkan 路径 talloc）。
 FFMPEG_EXTRA+=(--disable-avdevice)
+# 网络协议：HTTPS + 直播常用 RTSP/RTMP + HTTP/2（nghttp2）。
+FFMPEG_EXTRA+=(--enable-libnghttp2)
+FFMPEG_EXTRA+=(--enable-network)
 if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
@@ -279,15 +285,15 @@ if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--disable-mediafoundation)
   # 原生 Schannel，避免 MinGW 编 OpenSSL（MSYS perl 缺 Locale::Maketext）。
   FFMPEG_EXTRA+=(--enable-schannel)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lcrypt32 -lsecur32 -lws2_32")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lnghttp2 -lcrypt32 -lsecur32 -lws2_32")
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
   FFMPEG_EXTRA+=(--enable-securetransport)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lnghttp2")
 else
   FFMPEG_EXTRA+=(--enable-openssl)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lnghttp2")
 fi
 
 # 旧前缀可能残留 libavdevice.pc（无 .a）；meson 会回退到 Homebrew 共享库。
@@ -320,16 +326,37 @@ if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$lib" 2>/dev/null; then
   echo "ERROR: $lib built without AV3A/libarcdav3a" >&2
   exit 1
 fi
-# lavf 必须带 HTTPS，否则 Win 上 http→https 302 会一直缓冲。
+# lavf 必须带 HTTPS + 直播常用协议；HTTP/2 靠 libnghttp2。
 if [[ -f ffbuild/config.h ]]; then
+  fail_proto=0
   if ! grep -qE '^#define CONFIG_HTTPS_PROTOCOL 1$' ffbuild/config.h; then
-    echo "ERROR: FFmpeg built without HTTPS protocol (need openssl/schannel/securetransport)" >&2
-    grep -E 'CONFIG_(HTTPS|OPENSSL|SCHANNEL|SECURETRANSPORT|TLS)' ffbuild/config.h | head -20 >&2 || true
+    echo "ERROR: FFmpeg missing CONFIG_HTTPS_PROTOCOL=1" >&2
+    fail_proto=1
+  fi
+  if ! grep -qE '^#define CONFIG_HTTP_PROTOCOL 1$' ffbuild/config.h; then
+    echo "ERROR: FFmpeg missing CONFIG_HTTP_PROTOCOL=1" >&2
+    fail_proto=1
+  fi
+  if ! grep -qE '^#define CONFIG_RTSP_(DEMUXER|PROTOCOL) 1$' ffbuild/config.h; then
+    echo "ERROR: FFmpeg missing RTSP demuxer/protocol" >&2
+    fail_proto=1
+  fi
+  if ! grep -qE '^#define CONFIG_RTMP(_PROTOCOL|_DEMUXER)? 1$' ffbuild/config.h \
+    && ! grep -qE '^#define CONFIG_RTMP[A-Z_]*PROTOCOL 1$' ffbuild/config.h; then
+    echo "ERROR: FFmpeg missing RTMP protocol" >&2
+    fail_proto=1
+  fi
+  if ! grep -qE '^#define CONFIG_LIBNGHTTP2 1$' ffbuild/config.h; then
+    echo "ERROR: FFmpeg built without libnghttp2 (HTTP/2)" >&2
+    fail_proto=1
+  fi
+  if [[ "$fail_proto" != 0 ]]; then
+    grep -E 'CONFIG_(HTTPS|HTTP_PROTOCOL|RTSP|RTMP|LIBNGHTTP2|OPENSSL|SCHANNEL|SECURETRANSPORT)' ffbuild/config.h | head -50 >&2 || true
     exit 1
   fi
-  echo "ok FFmpeg HTTPS protocol enabled"
+  echo "ok FFmpeg protocols: HTTPS + HTTP + RTSP + RTMP + HTTP/2(nghttp2)"
 fi
 mkdir -p "$PREFIX"
 promote_arcdav3a_in_avcodec_pc
-echo "pic+av3a+tls $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
-echo "ok FFmpeg+AV3A+TLS prefix: $PREFIX"
+echo "pic+av3a+tls+http2 $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
+echo "ok FFmpeg+AV3A+TLS+HTTP2 prefix: $PREFIX"
