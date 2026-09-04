@@ -41,18 +41,61 @@ sys.exit(0 if tuple(parts[:3]) >= (3, 5, 0) else 1)
 PY
 }
 
-# OpenSSL Configure 需要 Locale::Maketext。
-# Git Bash/MinGW 下必须用 Unix 路径风格的 perl；Strawberry 会报
-# "doesn't produce Unix like paths" 并以 exit 255 失败。
+openssl_has_quic_api() {
+  # ngtcp2 OpenSSL backend 需要 SSL_set_quic_tls_cbs（OpenSSL ≥3.5 + enable-quic）
+  local lib h
+  for lib in \
+    "$PREFIX/lib/libssl.dylib" "$PREFIX/lib/libssl.so" "$PREFIX/lib/libssl.so.3" \
+    "$PREFIX/lib/libssl.dll.a" "$PREFIX/bin/libssl-3-x64.dll" "$PREFIX/bin/libssl-3.dll" \
+    "$PREFIX/lib/libssl-3.dll"; do
+    [[ -e "$lib" ]] || continue
+    if nm -gU "$lib" 2>/dev/null | grep -q 'SSL_set_quic_tls_cbs' \
+      || nm -D "$lib" 2>/dev/null | grep -q 'SSL_set_quic_tls_cbs' \
+      || strings "$lib" 2>/dev/null | grep -q 'SSL_set_quic_tls_cbs'; then
+      return 0
+    fi
+  done
+  for h in "$PREFIX/include/openssl/ssl.h"; do
+    [[ -f "$h" ]] && grep -q 'SSL_set_quic_tls_cbs' "$h" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+# OpenSSL Configure 需要 Locale::Maketext + ExtUtils::MakeMaker。
+# Git Bash/MinGW 下必须用 Unix 路径风格的 perl；Strawberry 整库 PERL5LIB 会污染 Config.pm。
+kotv_vendor_cpan_lib() {
+  local local_lib="$1" dist="$2" url="$3"
+  local tmp="$BUILD_DIR/_cpan-$dist"
+  mkdir -p "$local_lib"
+  [[ -d "$local_lib/$(echo "$dist" | awk -F- '{print $1}')" ]] && return 0
+  rm -rf "$tmp"
+  mkdir -p "$tmp"
+  curl -fsSL -o "$tmp/$dist.tar.gz" "$url" || return 1
+  tar -xzf "$tmp/$dist.tar.gz" -C "$tmp"
+  local found
+  found="$(find "$tmp" -maxdepth 1 -mindepth 1 -type d -name "${dist}-*" | head -1 || true)"
+  [[ -n "$found" && -d "$found/lib" ]] || return 1
+  cp -R "$found/lib/." "$local_lib/"
+  rm -rf "$tmp"
+  return 0
+}
+
 ensure_openssl_perl() {
   local p candidates=() local_lib="$BUILD_DIR/perl5"
+  mkdir -p "$local_lib"
   if kotv_is_windows_build; then
     candidates+=(/usr/bin/perl /bin/perl)
-    # 清掉可能残留的 Strawberry PERL5LIB（整库会污染 Config.pm）
     unset PERL5LIB || true
-    # 勿把整个 Strawberry lib 塞进 PERL5LIB（会带入 Config.pm，与 MSYS perl 版本冲突）。
-    # 只镜像 Locale::Maketext 相关纯 Perl 模块。
-    mkdir -p "$local_lib"
+  fi
+  candidates+=("$(command -v perl 2>/dev/null || true)")
+
+  # 纯 Perl 模块进本地 lib（不含 Config.pm）
+  kotv_vendor_cpan_lib "$local_lib" Locale-Maketext \
+    "https://cpan.metacpan.org/authors/id/T/TO/TODDR/Locale-Maketext-1.33.tar.gz" || true
+  kotv_vendor_cpan_lib "$local_lib" ExtUtils-MakeMaker \
+    "https://cpan.metacpan.org/authors/id/B/BI/BINGOS/ExtUtils-MakeMaker-7.70.tar.gz" || true
+  # Strawberry 仅作 Locale/I18N 兜底（仍不引入 Config.pm）
+  if kotv_is_windows_build && [[ ! -f "$local_lib/Locale/Maketext.pm" ]]; then
     local src
     for src in /c/Strawberry/perl/lib /c/strawberry/perl/lib; do
       [[ -d "$src/Locale" ]] || continue
@@ -60,56 +103,35 @@ ensure_openssl_perl() {
       [[ -d "$src/I18N" ]] && cp -R "$src/I18N" "$local_lib/" 2>/dev/null || true
       break
     done
-    if [[ -f "$local_lib/Locale/Maketext.pm" ]]; then
-      export PERL5LIB="$local_lib"
-    fi
   fi
-  candidates+=("$(command -v perl 2>/dev/null || true)")
+  export PERL5LIB="$local_lib"
+
   for p in "${candidates[@]}"; do
     [[ -n "$p" && -x "$p" ]] || continue
     case "$p" in *[Ss]trawberry*) continue ;; esac
-    if "$p" -MLocale::Maketext -e "1" 2>/dev/null; then
+    if "$p" -MLocale::Maketext -e "1" 2>/dev/null \
+      && "$p" -MExtUtils::MakeMaker -e "1" 2>/dev/null; then
       export PERL="$p"
-      echo "ok perl for OpenSSL: $PERL (PERL5LIB=${PERL5LIB:-})"
+      echo "ok perl for OpenSSL: $PERL (PERL5LIB=$PERL5LIB)"
       return 0
     fi
   done
-  for p in "${candidates[@]}"; do
-    [[ -n "$p" && -x "$p" ]] || continue
-    case "$p" in *[Ss]trawberry*) continue ;; esac
-    echo "==> install Locale::Maketext for $p into $local_lib"
-    mkdir -p "$local_lib"
-    # 从 CPAN 拉纯源码进本地 lib（不碰系统/Strawberry Config.pm）
-    (
-      cd "$BUILD_DIR"
-      curl -fsSL -o Locale-Maketext.tar.gz \
-        "https://cpan.metacpan.org/authors/id/T/TO/TODDR/Locale-Maketext-1.33.tar.gz" \
-        || curl -fsSL -o Locale-Maketext.tar.gz \
-          "https://www.cpan.org/modules/by-module/Locale/Locale-Maketext-1.33.tar.gz"
-      rm -rf Locale-Maketext-1.33
-      tar -xzf Locale-Maketext.tar.gz
-      cp -R Locale-Maketext-1.33/lib/Locale "$local_lib/" 2>/dev/null || true
-    ) 2>&1 | tail -20 || true
-    export PERL5LIB="$local_lib${PERL5LIB:+:$PERL5LIB}"
-    if "$p" -MLocale::Maketext -e "1" 2>/dev/null; then
-      export PERL="$p"
-      echo "ok perl for OpenSSL after local Locale::Maketext: $PERL"
-      return 0
-    fi
-  done
-  echo "ERROR: need MSYS/Git perl + Locale::Maketext (no Strawberry Config.pm in PERL5LIB)" >&2
+  echo "ERROR: need MSYS/Git perl + Locale::Maketext + ExtUtils::MakeMaker" >&2
+  "$PERL" -MLocale::Maketext -e 1 2>&1 || true
+  ls -la "$local_lib" >&2 || true
   exit 1
 }
 
 mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib" "$PREFIX/bin" "$BUILD_DIR"
 export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
-if openssl_ver_ok && { [[ -f "$PREFIX/lib/libssl.a" || -f "$PREFIX/lib/libssl.dll.a" || -f "$PREFIX/lib/libssl.so" || -f "$PREFIX/lib/libssl.dylib" || -f "$PREFIX/bin/libssl-3-x64.dll" || -f "$PREFIX/bin/libssl-3.dll" ]]; }; then
-  echo "ok cached OpenSSL $(pkg-config --modversion openssl 2>/dev/null || pkg-config --modversion libssl)"
+if openssl_ver_ok && openssl_has_quic_api \
+  && { [[ -f "$PREFIX/lib/libssl.a" || -f "$PREFIX/lib/libssl.dll.a" || -f "$PREFIX/lib/libssl.so" || -f "$PREFIX/lib/libssl.dylib" || -f "$PREFIX/bin/libssl-3-x64.dll" || -f "$PREFIX/bin/libssl-3.dll" ]]; }; then
+  echo "ok cached OpenSSL $(pkg-config --modversion openssl 2>/dev/null || pkg-config --modversion libssl) (QUIC)"
   exit 0
 fi
 
-# ---------- macOS：brew（非 Win7 问题）----------
+# ---------- macOS：brew 仅当带 QUIC API；否则源码编 3.5.x ----------
 if ! kotv_is_windows_build && [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
   for f in openssl@3.5 openssl@3 openssl; do
     bp="$(brew --prefix "$f" 2>/dev/null || true)"
@@ -130,13 +152,17 @@ if ! kotv_is_windows_build && [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] && com
       done
       shopt -u nullglob
       export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-      echo "ok macOS OpenSSL $ver ← brew $f"
-      exit 0
+      if openssl_has_quic_api; then
+        echo "ok macOS OpenSSL $ver ← brew $f (QUIC)"
+        exit 0
+      fi
+      echo "WARN: brew $f $ver lacks SSL_set_quic_tls_cbs; will source-build OpenSSL $OPENSSL_VER" >&2
+      rm -f "$PREFIX/lib/pkgconfig/openssl.pc" "$PREFIX/lib/pkgconfig/libssl.pc" "$PREFIX/lib/pkgconfig/libcrypto.pc" 2>/dev/null || true
     fi
   done
 fi
 
-# ---------- Linux：系统 ≥3.5 ----------
+# ---------- Linux：系统 ≥3.5 且带 QUIC ----------
 if ! kotv_is_windows_build && openssl_ver_ok; then
   ver="$(pkg-config --modversion openssl 2>/dev/null || pkg-config --modversion libssl)"
   libs="$(pkg-config --libs openssl 2>/dev/null || pkg-config --libs libssl)"
@@ -148,8 +174,13 @@ Version: $ver
 Libs: $libs
 Cflags: $cflags
 EOF
-  echo "ok system OpenSSL $ver"
-  exit 0
+  # 把头/库指到系统，便于 openssl_has_quic_api 探测
+  if openssl_has_quic_api || { command -v pkg-config >/dev/null && nm -D "$(pkg-config --variable=libdir libssl 2>/dev/null)/libssl.so" 2>/dev/null | grep -q SSL_set_quic_tls_cbs; }; then
+    echo "ok system OpenSSL $ver (QUIC)"
+    exit 0
+  fi
+  echo "WARN: system OpenSSL $ver lacks QUIC API; will source-build" >&2
+  rm -f "$PREFIX/lib/pkgconfig/openssl.pc"
 fi
 
 # ---------- 全平台源码 Configure（含 Windows MinGW + Win7）----------
@@ -184,12 +215,12 @@ cd "$src"
 # 清掉半成品，避免 target 混用
 [[ -f Makefile ]] && $MAKE distclean 2>/dev/null || true
 
-cfg_args=(--prefix="$pref" --libdir=lib shared no-docs no-tests)
+cfg_args=(--prefix="$pref" --libdir=lib shared no-docs no-tests enable-quic)
 if kotv_is_windows_build; then
   # Win7 宏必须走 CFLAGS，不能当 Configure 位置参数（否则 exit 255）
   export CFLAGS="${WIN7_CFLAGS} ${CFLAGS:-}"
   export CXXFLAGS="${WIN7_CFLAGS} ${CXXFLAGS:-}"
-  # mingw64；OpenSSL 3.5 默认带 QUIC（供 ngtcp2/HTTP3）
+  # mingw64 + QUIC（供 ngtcp2/HTTP3）
   "$PERL" ./Configure mingw64 "${cfg_args[@]}"
 else
   "$PERL" ./Configure "${cfg_args[@]}"
@@ -210,4 +241,5 @@ if kotv_is_windows_build; then
   shopt -u nullglob
 fi
 openssl_ver_ok || { echo "ERROR: OpenSSL build unusable" >&2; ls -la "$PREFIX/lib" "$PREFIX/lib/pkgconfig" >&2; exit 1; }
-echo "ok OpenSSL $(pkg-config --modversion openssl 2>/dev/null || pkg-config --modversion libssl) (source build)"
+openssl_has_quic_api || { echo "ERROR: OpenSSL built without SSL_set_quic_tls_cbs (HTTP/3)" >&2; exit 1; }
+echo "ok OpenSSL $(pkg-config --modversion openssl 2>/dev/null || pkg-config --modversion libssl) (source build, QUIC)"

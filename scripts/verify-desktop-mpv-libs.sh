@@ -52,6 +52,12 @@ check_libcurl() {
   [[ -f "$f" ]] || return
   if strings "$f" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
     echo "ok $name: libcurl enabled"
+  elif command -v otool >/dev/null 2>&1 && otool -L "$f" 2>/dev/null | grep -Eiq 'libcurl'; then
+    echo "ok $name: libcurl linked (otool)"
+  elif nm -g "$f" 2>/dev/null | grep -Eiq 'curl_easy_init'; then
+    echo "ok $name: libcurl symbols (nm)"
+  elif command -v dumpbin >/dev/null 2>&1 && dumpbin /DEPENDENTS "$f" 2>/dev/null | grep -Eiq 'libcurl|curl'; then
+    echo "ok $name: libcurl linked (dumpbin)"
   else
     echo "ERROR: $name lacks libcurl (rebuild with -Dlibcurl=enabled + ensure-desktop-curl-openssl.sh)" >&2
     fail=1
