@@ -47,35 +47,52 @@ kotv_macos_file_has_arch() {
 }
 
 # 在清理 PATH 前记下 cmake/ninja 绝对路径，写无空格包装器到 $1/bin。
+# 注意：必须始终解析「真实」cmake.exe。若 PATH 已含 $bindir/cmake，
+# command -v 会命中自有包装器，再写成 exec 自身 → 无限递归（CI 卡数小时无输出）。
 kotv_ensure_win_cmake_wrappers() {
   local bindir="${1:?bindir}"
   kotv_is_windows_build || return 0
   mkdir -p "$bindir"
-  local cmake_bin c
-  cmake_bin="$(command -v cmake 2>/dev/null || true)"
-  if [[ -z "$cmake_bin" || "$cmake_bin" == *[\ ]* ]]; then
-    for c in \
-      "/c/Program Files/CMake/bin/cmake.exe" \
-      "/c/Program Files (x86)/CMake/bin/cmake.exe" \
-      "/c/Program Files/Microsoft Visual Studio/2022/Enterprise/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"; do
-      [[ -x "$c" ]] && cmake_bin="$c" && break
-    done
-  fi
-  if [[ -n "$cmake_bin" && -x "$cmake_bin" ]]; then
-    # 用 cmd 风格路径写进包装器，避免 bash 再解析空格
-    local cmake_win="$cmake_bin"
-    if command -v cygpath >/dev/null 2>&1; then
-      cmake_win="$(cygpath -m "$cmake_bin")"
+  local cmake_bin="" c
+
+  # 1) 永远优先 Program Files 真实 cmake（勿信任 PATH 上的自有 wrapper）
+  for c in \
+    "/c/Program Files/CMake/bin/cmake.exe" \
+    "/c/Program Files (x86)/CMake/bin/cmake.exe" \
+    "/c/Program Files/Microsoft Visual Studio/2022/Enterprise/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"; do
+    [[ -x "$c" ]] && cmake_bin="$c" && break
+  done
+
+  # 2) 回退 command -v，但拒绝 bindir 内入口 / shebang 脚本
+  if [[ -z "$cmake_bin" ]]; then
+    c="$(command -v cmake 2>/dev/null || true)"
+    case "$c" in
+      "$bindir"/cmake|"$bindir"/cmake.exe) c="" ;;
+    esac
+    if [[ -n "$c" && -f "$c" ]] && head -n1 "$c" 2>/dev/null | grep -q '^#!'; then
+      c=""
     fi
-    cat >"$bindir/cmake" <<EOF
+    [[ -n "$c" && -x "$c" ]] && cmake_bin="$c"
+  fi
+
+  if [[ -z "$cmake_bin" || ! -x "$cmake_bin" ]]; then
+    echo "ERROR: real cmake.exe not found for wrapper" >&2
+    return 1
+  fi
+
+  local cmake_win="$cmake_bin"
+  if command -v cygpath >/dev/null 2>&1; then
+    cmake_win="$(cygpath -m "$cmake_bin")"
+  fi
+  cat >"$bindir/cmake" <<EOF
 #!/bin/bash
 exec "$cmake_bin" "\$@"
 EOF
-    chmod +x "$bindir/cmake"
-    # 同步 .exe 名给偶发调用
-    cp -f "$bindir/cmake" "$bindir/cmake.exe" 2>/dev/null || true
-    echo "ok cmake wrapper → $bindir/cmake ($cmake_win)"
-  fi
+  chmod +x "$bindir/cmake"
+  # 勿把 bash 脚本伪装成 cmake.exe（CreateProcess 会踩坑；也可能自指递归）
+  rm -f "$bindir/cmake.exe"
+  echo "ok cmake wrapper → $bindir/cmake ($cmake_win)"
+
   # 不在无空格 PATH 里包一层 ninja：MinGW CMake + 包装器常报 unknown error。
   # Windows 构建统一用 MinGW Makefiles。
   rm -f "$bindir/ninja" "$bindir/ninja.exe" 2>/dev/null || true

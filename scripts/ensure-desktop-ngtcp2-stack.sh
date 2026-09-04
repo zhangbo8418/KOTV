@@ -101,7 +101,7 @@ build_cmake_lib() {
   shift 2
   rm -rf "$build"
   mkdir -p "$build"
-  echo "==> build $name → $pref"
+  echo "==> build $name → $pref (generator=$gen cmake=$(command -v cmake))"
   [[ -f "$src/CMakeLists.txt" ]] || {
     echo "ERROR: $src has no CMakeLists.txt" >&2
     ls -la "$src" >&2 || true
@@ -127,8 +127,11 @@ build_cmake_lib() {
     [[ -n "$a" ]] && cmake_cmd+=("$a")
   done < <(kotv_cmake_macos_arch_args)
   # 勿用空数组 "${winflags[@]}"：macOS bash 3.2 + set -u 会 unbound
+  echo "==> cmake configure $name"
   "${cmake_cmd[@]}" "$@"
+  echo "==> cmake build $name -j$JOBS"
   cmake --build "$build" -j"$JOBS"
+  echo "==> cmake install $name"
   cmake --install "$build"
 }
 
