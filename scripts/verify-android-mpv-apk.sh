@@ -37,7 +37,8 @@ fi
 
 missing=0
 for p in "${need[@]}"; do
-  if ! printf '%s\n' "$listing" | grep -qx "$p"; then
+  # 勿 printf|grep -q：命中时 grep 提前关管，pipefail 下 printf SIGPIPE 会误失败
+  if ! grep -qxF "$p" <<<"$listing"; then
     echo "MISSING in APK: $p" >&2
     missing=1
   fi

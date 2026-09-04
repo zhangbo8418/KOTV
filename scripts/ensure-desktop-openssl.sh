@@ -45,9 +45,18 @@ PY
 # Git Bash/MinGW 下必须用 Unix 路径风格的 perl；Strawberry 会报
 # "doesn't produce Unix like paths" 并以 exit 255 失败。
 ensure_openssl_perl() {
-  local p candidates=()
+  local p candidates=() berry_lib=""
   if kotv_is_windows_build; then
     candidates+=(/usr/bin/perl /bin/perl)
+    # 解释器用 MSYS（Unix 路径）；模块可借 Strawberry 的 Locale::Maketext
+    for berry_lib in \
+      /c/Strawberry/perl/lib \
+      /c/strawberry/perl/lib \
+      /c/Strawberry/perl/site/lib \
+      /c/strawberry/perl/site/lib; do
+      [[ -d "$berry_lib" ]] || continue
+      export PERL5LIB="${berry_lib}${PERL5LIB:+:$PERL5LIB}"
+    done
   fi
   candidates+=("$(command -v perl 2>/dev/null || true)")
   for p in "${candidates[@]}"; do
@@ -55,11 +64,10 @@ ensure_openssl_perl() {
     case "$p" in *[Ss]trawberry*) continue ;; esac
     if "$p" -MLocale::Maketext -e "1" 2>/dev/null; then
       export PERL="$p"
-      echo "ok perl for OpenSSL: $PERL"
+      echo "ok perl for OpenSSL: $PERL (PERL5LIB=${PERL5LIB:-})"
       return 0
     fi
   done
-  # 给 MSYS/Git perl 补 Locale::Maketext（勿改用 Strawberry）
   for p in "${candidates[@]}"; do
     [[ -n "$p" && -x "$p" ]] || continue
     case "$p" in *[Ss]trawberry*) continue ;; esac
@@ -71,7 +79,7 @@ ensure_openssl_perl() {
       return 0
     fi
   done
-  echo "ERROR: need MSYS/Git perl with Locale::Maketext (not Strawberry under bash)" >&2
+  echo "ERROR: need MSYS/Git perl with Locale::Maketext (PERL5LIB from Strawberry OK; not Strawberry as \$PERL)" >&2
   exit 1
 }
 

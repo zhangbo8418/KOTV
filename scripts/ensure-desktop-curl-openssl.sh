@@ -46,10 +46,20 @@ write_simple_curl_pc() {
   } >"$PREFIX/lib/pkgconfig/libcurl.pc"
 }
 
+curl_probe_env() {
+  export PATH="$PREFIX/bin:${PATH:-}"
+  export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
+  export DYLD_LIBRARY_PATH="$PREFIX/lib:${DYLD_LIBRARY_PATH:-}"
+  # macOS 偶发清掉 DYLD_*；用 loader path 兜底
+  export DYLD_FALLBACK_LIBRARY_PATH="$PREFIX/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}"
+}
+
 curl_features_have_http3() {
-  local bin="$1"
+  local bin="$1" out
   [[ -x "$bin" ]] || return 1
-  "$bin" -V 2>/dev/null | grep -Eiq 'HTTP3|nghttp3|ngtcp2'
+  curl_probe_env
+  out="$("$bin" -V 2>&1 || true)"
+  printf '%s\n' "$out" | grep -Eiq 'HTTP3|nghttp3|ngtcp2'
 }
 
 # 已缓存且带 HTTP3
@@ -158,14 +168,16 @@ for c in "$PREFIX/bin/curl.exe" "$PREFIX/bin/curl"; do
   [[ -x "$c" ]] && bin="$c" && break
 done
 if [[ -n "$bin" ]]; then
+  curl_probe_env
   echo "==> curl -V:"
-  "$bin" -V || true
+  "$bin" -V 2>&1 || true
   if ! curl_features_have_http3 "$bin"; then
-    echo "ERROR: built curl missing HTTP3 in -V output" >&2
-    "$bin" -V >&2 || true
+    echo "ERROR: built curl missing HTTP3 in -V output (LD/DYLD=$PREFIX/lib)" >&2
+    "$bin" -V 2>&1 >&2 || true
+    otool -L "$bin" 2>/dev/null | head -40 >&2 || ldd "$bin" 2>/dev/null | head -40 >&2 || true
     exit 1
   fi
-  if ! "$bin" -V 2>/dev/null | grep -Eiq 'HTTP2|nghttp2'; then
+  if ! "$bin" -V 2>&1 | grep -Eiq 'HTTP2|nghttp2'; then
     echo "ERROR: built curl missing HTTP2 in -V output" >&2
     exit 1
   fi

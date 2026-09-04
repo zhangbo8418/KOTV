@@ -22,7 +22,10 @@ kotv_native_path() {
 mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib" "$BUILD_DIR"
 export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
-if pkg-config --exists libnghttp2 2>/dev/null && [[ -f "$PREFIX/lib/libnghttp2.a" || -f "$PREFIX/lib/libnghttp2.dll.a" ]]; then
+# v2：静态库须带 PIC，才能链进共享 libcurl（否则 Linux R_X86_64_PC32）
+STAMP="$PREFIX/.kotv-nghttp2-pic-v2"
+if [[ -f "$STAMP" ]] && pkg-config --exists libnghttp2 2>/dev/null \
+  && [[ -f "$PREFIX/lib/libnghttp2.a" || -f "$PREFIX/lib/libnghttp2.dll.a" || -f "$PREFIX/lib/libnghttp2.so" || -f "$PREFIX/lib/libnghttp2.dylib" ]]; then
   echo "ok cached libnghttp2 $(pkg-config --modversion libnghttp2)"
   exit 0
 fi
@@ -61,6 +64,7 @@ echo "==> build libnghttp2 $NGHTTP2_VER → $pref (generator=$gen)"
 nghttp2_cmake=(
   -DCMAKE_INSTALL_PREFIX="$pref"
   -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON
   -DENABLE_LIB_ONLY=ON
   -DBUILD_SHARED_LIBS=OFF
   -DBUILD_STATIC_LIBS=ON
@@ -72,12 +76,15 @@ if kotv_is_windows_build; then
     -DCMAKE_C_COMPILER=gcc
     -DCMAKE_CXX_COMPILER=g++
     -DCMAKE_MAKE_PROGRAM=mingw32-make
-    -DCMAKE_C_FLAGS="$(kotv_win7_cflags)"
+    -DCMAKE_C_FLAGS="$(kotv_win7_cflags) -fPIC"
   )
+else
+  nghttp2_cmake+=(-DCMAKE_C_FLAGS="-fPIC")
 fi
 cmake -S "$src" -B "$build" -G "$gen" "${nghttp2_cmake[@]}"
 cmake --build "$build" -j"$JOBS"
 cmake --install "$build"
+echo "pic $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP"
 
 if [[ -f "$PREFIX/lib/libnghttp2_static.a" && ! -f "$PREFIX/lib/libnghttp2.a" ]]; then
   cp -f "$PREFIX/lib/libnghttp2_static.a" "$PREFIX/lib/libnghttp2.a"
