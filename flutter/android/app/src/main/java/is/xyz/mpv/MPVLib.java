@@ -1,7 +1,6 @@
 package is.xyz.mpv;
 
 import android.content.Context;
-import android.content.pm.FeatureInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
@@ -67,8 +66,10 @@ public final class MPVLib {
     private static boolean loaded;
     private static Throwable loadError;
     private static String loadedAbi;
+    /** Align TV MpvUtil: FEATURE_VULKAN_HARDWARE_VERSION Vulkan 1.2. */
+    private static final int VULKAN_1_2 = 0x00402000;
     private static Boolean bundledVulkanEnabled;
-    private static Boolean deviceVulkan13Capable;
+    private static Boolean deviceVulkanCapable;
     private static final long CONTEXT_RECREATE_COOLDOWN_MS = 350;
     private static final long CONTEXT_SHUTDOWN_TIMEOUT_MS = 2000;
     private static long lastContextDestroyedAtMs;
@@ -185,38 +186,22 @@ public final class MPVLib {
         return bundledVulkanEnabled;
     }
 
-    public static synchronized boolean isDeviceVulkan13Capable(Context context) {
-        if (deviceVulkan13Capable != null) return deviceVulkan13Capable;
+    /** Device reports Vulkan ≥1.2（与 TV MpvUtil.isVulkanSupported 同门槛）. */
+    public static synchronized boolean isDeviceVulkanCapable(Context context) {
+        if (deviceVulkanCapable != null) return deviceVulkanCapable;
         try {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                deviceVulkan13Capable = false;
-                return false;
-            }
             PackageManager pm = context.getApplicationContext().getPackageManager();
-            int glesVersion = 0;
-            FeatureInfo[] features = pm.getSystemAvailableFeatures();
-            if (features != null) {
-                for (FeatureInfo feature : features) {
-                    if (feature != null && feature.name == null) {
-                        glesVersion = feature.reqGlEsVersion;
-                        break;
-                    }
-                }
-            }
-            if (glesVersion < 0x00030001) {
-                deviceVulkan13Capable = false;
-                return false;
-            }
-            deviceVulkan13Capable = pm.hasSystemFeature(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, 0x00403000);
+            deviceVulkanCapable = pm.hasSystemFeature(
+                    PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, VULKAN_1_2);
         } catch (Throwable e) {
-            deviceVulkan13Capable = false;
+            deviceVulkanCapable = false;
             Log.w(TAG, "Unable to detect device Vulkan support", e);
         }
-        return deviceVulkan13Capable;
+        return deviceVulkanCapable;
     }
 
     public static boolean isVulkanRendererAvailable(Context context) {
-        return isBundledVulkanEnabled(context) && isDeviceVulkan13Capable(context);
+        return isBundledVulkanEnabled(context) && isDeviceVulkanCapable(context);
     }
 
     private static String chooseAbi(AssetManager assets) {

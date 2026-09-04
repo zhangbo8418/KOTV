@@ -13,6 +13,7 @@ import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
+import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
@@ -45,6 +46,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _liveDesc = '';
   bool _loading = true;
   bool _busy = false;
+  /// 安卓：设备支持 Vulkan≥1.2 时才显示开关（对齐 TV）。
+  bool _androidVulkanOk = false;
   final _engineCtrl = TextEditingController();
 
   @override
@@ -82,6 +85,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _liveDesc = '${data['liveDesc'] ?? ''}';
       await LocalHistory.setIncognito(g('incognito', 'false') == 'true');
       kotvApplyPlayUaSetting(g('ua'));
+      if (kotvIsAndroid()) {
+        _androidVulkanOk = await NativeMpvPlayback.isVulkanAvailable();
+      }
     } catch (e) {
       _status = '$e';
     }
@@ -768,7 +774,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final mpvConfPreview = g('mpvConf').trim();
     // MPV conf / Vulkan：Android 原生 + 桌面/iOS media_kit
     final showMpvOpts = kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS();
-    final showMpvVulkan = showMpvOpts && !kotvIsAndroid();
+    // 安卓仅在设备 Vulkan≥1.2 时露出（对齐 TV）；桌面/iOS 始终可配
+    final showMpvVulkan =
+        (kotvIsDesktop() || kotvIsIOS()) || (kotvIsAndroid() && _androidVulkanOk);
 
     return Column(
       children: [
@@ -954,8 +962,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   : '已开启 vo=gpu-next（重启播放生效）',
                             )),
                           ),
+                          if (showMpvVulkan)
+                            KotvSettingsCell(
+                              label: 'MPV Vulkan',
+                              value: mpvVulkan ? '开启' : '关闭',
+                              onTap: () => unawaited(_set(
+                                'mpvVulkan',
+                                mpvVulkan ? 'false' : 'true',
+                                msg: mpvVulkan
+                                    ? '已关闭 Vulkan（重启播放生效）'
+                                    : '已开启 gpu-api=vulkan（解码仍为 mediacodec，重启播放生效）',
+                              )),
+                            ),
                         ]),
-                      if (showMpvVulkan)
+                      if (showMpvVulkan && !kotvIsAndroid())
                         KotvSettingsGrid(children: [
                           KotvSettingsCell(
                             label: 'MPV Vulkan',

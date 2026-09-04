@@ -554,7 +554,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** API33+ 且 bundled/device 支持 Vulkan 时设 gpu-api=vulkan（对齐 TV mpvVulkan）。 */
+  /** bundled libmpv + 设备 Vulkan≥1.2 且用户开启时设 gpu-api=vulkan（对齐 TV mpvVulkan）。 */
   private fun applyGpuApiOptions() {
     val ctx = appContext
     if (vulkanEnabled && ctx != null && MPVLib.isVulkanRendererAvailable(ctx)) {

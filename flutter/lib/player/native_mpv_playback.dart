@@ -19,6 +19,16 @@ class NativeMpvPlayback extends KotvPlayback {
   static const _ch = MethodChannel('kotv_mpv');
   static const _ev = EventChannel('kotv_mpv/events');
 
+  /// 与 TV 一致：bundled vulkan + 设备 Vulkan≥1.2。
+  static Future<bool> isVulkanAvailable() async {
+    if (!kotvIsAndroid()) return false;
+    try {
+      return await _ch.invokeMethod<bool>('isVulkanAvailable') == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   KotvMpvOpts _opts;
   StreamSubscription? _sub;
   bool _nativeReady = false;
