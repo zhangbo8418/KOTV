@@ -743,8 +743,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       await pb.setDecodeMode(failover.decodeMode);
       await pb.setRenderMode(_renderMode);
       try {
-        // 起播缓冲由守卫等待；仅 SilentVideo（黑屏/视源）才 failover，勿墙钟误切。
-        // 直播页 live=true：立刻 play + 小 demuxer（对齐 TV prepareAndPlay；含 EPG 回看时移流）。
+        // 直播页 live=true：直链立刻 play（对齐 TV prepareAndPlay；含 EPG 回看时移流）。
+        // 不写 demuxer-max-bytes / cache-secs；无 Flutter play:false 等缓冲。
         await pb.open(url, headers: headers, live: live);
         if (_backend != KotvEmbedBackend.mpv) {
           try {
@@ -862,7 +862,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   Future<void> _playCatchup(int progIdx) async {
     // 对齐 TV LivePlaybackController.selectEpg → Catchup.format → startPlayback：
-    // 回看是带 playseek 的时移流，与直播同一套立刻 play，不走点播 play:false 等缓冲。
+    // 回看 URL 由引擎 LiveApi.getUrl + Catchup.format；与直播同一套立刻 play。
     if (_chIdx < 0) return;
     final serial = ++_playSerial;
     try {

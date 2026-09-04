@@ -61,7 +61,6 @@ command -v ninja >/dev/null 2>&1 || gen="Unix Makefiles"
 if kotv_is_windows_build; then
   gen="MinGW Makefiles"
   export PATH="/c/mingw-msvcrt/mingw64/bin:/usr/bin:/bin:${PATH:-}"
-  # 去掉带空格 PATH，避免工具链踩坑
   cleaned=""
   IFS=':' read -ra _p <<<"$PATH"
   for part in "${_p[@]}"; do
@@ -70,20 +69,26 @@ if kotv_is_windows_build; then
   done
   export PATH="$cleaned"
   export CC=gcc CXX=g++
+  export CFLAGS="${CFLAGS:-} -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000"
 fi
 
 echo "==> build libnghttp2 $NGHTTP2_VER → $pref (generator=$gen)"
-cmake -S "$src" -B "$build" -G "$gen" \
-  -DCMAKE_INSTALL_PREFIX="$pref" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_LIB_ONLY=ON \
-  -DENABLE_STATIC_LIB=ON \
-  -DENABLE_SHARED_LIB=OFF \
-  -DBUILD_SHARED_LIBS=OFF \
-  -DENABLE_APP=OFF \
-  -DENABLE_DOC=OFF \
-  -DENABLE_EXAMPLES=OFF \
+nghttp2_cmake=(
+  -DCMAKE_INSTALL_PREFIX="$pref"
+  -DCMAKE_BUILD_TYPE=Release
+  -DENABLE_LIB_ONLY=ON
+  -DENABLE_STATIC_LIB=ON
+  -DENABLE_SHARED_LIB=OFF
+  -DBUILD_SHARED_LIBS=OFF
+  -DENABLE_APP=OFF
+  -DENABLE_DOC=OFF
+  -DENABLE_EXAMPLES=OFF
   -DBUILD_TESTING=OFF
+)
+if kotv_is_windows_build; then
+  nghttp2_cmake+=(-DCMAKE_C_FLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000")
+fi
+cmake -S "$src" -B "$build" -G "$gen" "${nghttp2_cmake[@]}"
 cmake --build "$build" -j"$JOBS"
 cmake --install "$build"
 

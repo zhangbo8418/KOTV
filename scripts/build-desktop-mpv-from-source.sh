@@ -75,14 +75,10 @@ kotv_libplacebo_profile() {
   fi
 }
 
-# 网络依赖：mac/linux 保证 PREFIX 有简单 libcurl.pc；Windows 跳过（走 FFmpeg Schannel）。
+# 全平台：mpv 链 PREFIX libcurl（HTTP/2 + HTTP/3）。播流 HTTPS/HTTP2/RTSP/RTMP 仍走 FFmpeg。
 ensure_mpv_libcurl_deps() {
   chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
   "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
-  if kotv_is_windows_build; then
-    echo "ok mpv network deps: Windows uses FFmpeg schannel (libcurl disabled)"
-    return 0
-  fi
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
   if [[ ! -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]]; then
@@ -97,29 +93,22 @@ ensure_mpv_libcurl_deps() {
   echo "ok libcurl for mpv: $(pkg-config --modversion libcurl)"
 }
 
-# Windows 不强制 libcurl；有则更好。mac/linux 必须有。
 verify_mpv_network() {
   local bin="$1"
   [[ -f "$bin" ]] || return 1
+  if ! strings "$bin" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
+    echo "ERROR: $(basename "$bin") built without libcurl" >&2
+    return 1
+  fi
+  echo "ok $(basename "$bin"): libcurl enabled"
   if kotv_is_windows_build; then
-    if strings "$bin" 2>/dev/null | grep -Eiq 'schannel|HTTPS protocol|tls_schannel|CONFIG_SCHANNEL'; then
-      echo "ok $(basename "$bin"): HTTPS/schannel present"
-      return 0
+    if strings "$bin" 2>/dev/null | grep -Eiq 'schannel|https protocol|tls_|HTTPS'; then
+      echo "ok $(basename "$bin"): FFmpeg TLS/HTTPS markers present"
+    else
+      echo "WARN: $(basename "$bin") FFmpeg HTTPS markers weak" >&2
     fi
-    # libavformat 静态链进 mpv 时字符串不一定带 schannel 字样；有 https 即可。
-    if strings "$bin" 2>/dev/null | grep -Eiq 'https://|https protocol|tls_'; then
-      echo "ok $(basename "$bin"): TLS/HTTPS strings present"
-      return 0
-    fi
-    echo "WARN: $(basename "$bin") HTTPS markers weak; check FFmpeg --enable-schannel" >&2
-    return 0
   fi
-  if strings "$bin" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
-    echo "ok $(basename "$bin"): libcurl enabled"
-    return 0
-  fi
-  echo "ERROR: $(basename "$bin") built without libcurl" >&2
-  return 1
+  return 0
 }
 
 verify_mpv_has_libcurl() {
@@ -1187,7 +1176,7 @@ EOF
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan="$mpv_vk" \
-      -Dlibcurl=disabled \
+      -Dlibcurl=enabled \
       "${mpv_extra[@]}" \
       -Dlua=disabled \
       -Dlibavdevice=disabled \
@@ -1201,7 +1190,7 @@ EOF
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan=enabled \
-      -Dlibcurl=disabled \
+      -Dlibcurl=enabled \
       -Dlua=disabled \
       -Dlibavdevice=disabled
   fi

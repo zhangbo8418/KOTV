@@ -18,4 +18,11 @@ void main() {
     expect(props.containsKey('demuxer-readahead-secs'), isFalse);
     expect(props['cache-pause-initial'], 'no');
   });
+
+  test('mpvLiveCacheProps is empty (align TV: no demuxer-max-bytes/cache-secs)', () {
+    final props = KotvBufferBudget.mpvLiveCacheProps();
+    expect(props, isEmpty);
+    expect(props.containsKey('demuxer-max-bytes'), isFalse);
+    expect(props.containsKey('cache-secs'), isFalse);
+  });
 }

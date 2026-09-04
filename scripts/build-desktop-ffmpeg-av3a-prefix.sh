@@ -61,8 +61,8 @@ clone_ffmpeg() {
   git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
 }
 
-# v8: TLS + 显式 RTSP/RTMP + libnghttp2(HTTP/2)
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v8"
+# v9: TLS + RTSP/RTMP + HTTP/2(nghttp2)；HTTP/3 由 mpv libcurl 栈提供（见 ensure-desktop-curl）
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v9"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -264,10 +264,8 @@ PROBE
 fi
 
 # HTTPS/302：Win=Schannel；Linux=OpenSSL；macOS=SecureTransport。
-# HTTP/2：libnghttp2。RTSP/RTMP：FFmpeg 内置协议（与 curl 无关，勿关）。
-chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
+# HTTP/2：libnghttp2。RTSP/RTMP：FFmpeg 内置。HTTP/3：上游 lavf 尚未合入，由 mpv libcurl 栈覆盖。
 chmod +x "$ROOT/scripts/ensure-desktop-nghttp2.sh"
-"$ROOT/scripts/ensure-desktop-curl-openssl.sh"
 "$ROOT/scripts/ensure-desktop-nghttp2.sh"
 setup_pkg_config
 
@@ -358,5 +356,5 @@ if [[ -f ffbuild/config.h ]]; then
 fi
 mkdir -p "$PREFIX"
 promote_arcdav3a_in_avcodec_pc
-echo "pic+av3a+tls+http2 $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
-echo "ok FFmpeg+AV3A+TLS+HTTP2 prefix: $PREFIX"
+echo "pic+av3a+tls+http2+rtsp+rtmp $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
+echo "ok FFmpeg+AV3A+TLS+HTTP2+RTSP/RTMP prefix: $PREFIX"

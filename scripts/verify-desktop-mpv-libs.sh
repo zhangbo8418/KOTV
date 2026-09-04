@@ -58,7 +58,7 @@ check_libcurl() {
   fi
 }
 
-# Windows：不强制 mpv libcurl；FFmpeg Schannel 负责 HTTPS。
+# Windows：FFmpeg Schannel 负责播流 HTTPS；mpv 也要有 libcurl（HTTP/2+3）。
 check_win_https() {
   local f="$1"
   local name="$2"
@@ -74,6 +74,7 @@ echo "==> verify desktop libmpv (Vulkan + AV3A + network)"
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
   check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  check_libcurl "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_win_https "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   if [[ -f "$ASSET/windows/mpv-2.dll" ]]; then
     chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"

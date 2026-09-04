@@ -36,25 +36,10 @@ class KotvBufferBudget {
     };
   }
 
-  /// 直播 PlayerConfiguration.bufferSize（对齐 TV：不用点播 KotvBufferBudget）。
+  /// 直播：对齐 TV——不写 `demuxer-max-bytes` / `cache-secs`（mpv 默认即可）。
   ///
-  /// media_kit 创建时会把该值写进 demuxer-max-bytes；直播必须与点播预算分开，
-  /// 否则会回到「猛囤」——见历史修复 980a0e3。
-  static const int liveBufferSizeBytes = 24 * 1024 * 1024;
-
-  /// 直播 demuxer：盖掉误用的点播预算 + 禁止 cache-pause 起播门槛。
-  /// 对齐 980a0e3「直播跳过点播预读」；仅保留起播必需的小上限与关 pause。
-  static Map<String, String> mpvLiveCacheProps() {
-    return {
-      'cache': 'yes',
-      'cache-on-disk': 'no',
-      'demuxer-max-bytes': '24MiB',
-      'demuxer-max-back-bytes': '4MiB',
-      'cache-pause': 'no',
-      'cache-pause-initial': 'no',
-      'framedrop': 'vo',
-    };
-  }
+  /// 点播才用 [mpvCacheProps]；直播页勿再套小 demuxer 或 cache-pause 门槛。
+  static Map<String, String> mpvLiveCacheProps() => const {};
 
   /// 同步读取（未 [warm] 时用平台启发式）。
   static int bytes() => _cached ?? _fallback();

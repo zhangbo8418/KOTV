@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# 桌面 libmpv 网络栈（HTTPS/302）：
-#   Windows — 不编 libcurl（MinGW+autotools 易被 PATH 空格打爆）；FFmpeg --enable-schannel 即可
-#   macOS   — PREFIX 内写无 Requires.private 的 libcurl.pc（链系统/brew 的 -lcurl）
-#   Linux   — 系统 libcurl/openssl；可选把 .pc 镜像进 PREFIX 供 LIBDIR=PREFIX 的 meson
+# 桌面网络栈（全平台源码对齐，Win7 可用）：
+#   FFmpeg 播流：HTTPS / HTTP/2(nghttp2) / RTSP / RTMP
+#   mpv libcurl：HTTP/1.1 + HTTP/2 + HTTP/3（OpenSSL + nghttp2 + ngtcp2 + nghttp3，CMake）
+#
+# 不用 MSYS2 预编译包（不支持 Win7）。Windows 用 CMake 编 curl，避开 autotools+PATH 空格。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
+JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
+CURL_VER="${KOTV_CURL_VER:-8.14.1}"
+WIN7_CFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000"
 
 kotv_is_windows_build() {
   case "$(uname -s 2>/dev/null)" in
@@ -16,55 +20,172 @@ kotv_is_windows_build() {
   [[ "${OS:-}" == "Windows_NT" ]]
 }
 
-mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib" "$BUILD_DIR"
-
-have_curl_pc() {
-  pkg-config --exists libcurl 2>/dev/null
+kotv_native_path() {
+  local p="$1"
+  if kotv_is_windows_build && command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$p"
+  else
+    printf '%s' "$p"
+  fi
 }
 
-# Windows：只依赖 FFmpeg Schannel HTTPS；不在此编 curl。
-if kotv_is_windows_build; then
-  echo "ok Windows network: skip libcurl build (use FFmpeg --enable-schannel for HTTPS/302)"
-  exit 0
-fi
+kotv_clean_win_path() {
+  kotv_is_windows_build || return 0
+  export PATH="/c/mingw-msvcrt/mingw64/bin:/usr/bin:/bin:${PATH:-}"
+  local cleaned="" part
+  IFS=':' read -ra _p <<<"$PATH"
+  for part in "${_p[@]}"; do
+    case "$part" in *[\ ]*|*[Pp]rogram*[Ff]iles*) continue ;; esac
+    [[ -z "$cleaned" ]] && cleaned="$part" || cleaned="$cleaned:$part"
+  done
+  export PATH="$cleaned"
+  export CC="${CC:-gcc}" CXX="${CXX:-g++}"
+  export CFLAGS="${CFLAGS:-} ${WIN7_CFLAGS}"
+  export CXXFLAGS="${CXXFLAGS:-} ${WIN7_CFLAGS}"
+}
 
-# 写一份「无 Requires.private」的 pc，避免 PKG_CONFIG_LIBDIR=PREFIX 时解析 brew 私有依赖失败。
+mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib" "$PREFIX/bin" "$BUILD_DIR"
+export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
 write_simple_curl_pc() {
   local libs="$1"
   local cflags="${2:-}"
+  local ver="${3:-$CURL_VER}"
+  local pref
+  pref="$(kotv_native_path "$PREFIX")"
   {
+    echo "prefix=$pref"
+    echo "exec_prefix=\${prefix}"
+    echo "libdir=\${prefix}/lib"
+    echo "includedir=\${prefix}/include"
     echo "Name: libcurl"
-    echo "Description: KOTV simple libcurl pc (no Requires.private)"
-    echo "Version: 8.0.0"
+    echo "Description: KOTV libcurl (HTTP/2+HTTP/3, Win7-safe source build)"
+    echo "Version: $ver"
     echo "Libs: $libs"
     [[ -n "$cflags" ]] && echo "Cflags: $cflags"
   } >"$PREFIX/lib/pkgconfig/libcurl.pc"
 }
 
-if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  brew_curl=""
-  if command -v brew >/dev/null 2>&1; then
-    brew_curl="$(brew --prefix curl 2>/dev/null || true)"
-  fi
-  if [[ -n "$brew_curl" && -f "$brew_curl/lib/libcurl.dylib" ]]; then
-    write_simple_curl_pc "-L${brew_curl}/lib -lcurl" "-I${brew_curl}/include"
-    echo "ok macOS network: simple pc → ${brew_curl} (+ FFmpeg SecureTransport)"
+curl_features_have_http3() {
+  local bin="$1"
+  [[ -x "$bin" ]] || return 1
+  "$bin" -V 2>/dev/null | grep -Eiq 'HTTP3|nghttp3|ngtcp2'
+}
+
+# 已缓存且带 HTTP3
+if [[ -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]] \
+  && { [[ -f "$PREFIX/lib/libcurl.a" || -f "$PREFIX/lib/libcurl.dll.a" || -f "$PREFIX/bin/libcurl-4.dll" || -f "$PREFIX/bin/libcurl.dll" \
+      || -f "$PREFIX/lib/libcurl.dylib" || -f "$PREFIX/lib/libcurl.so" ]]; }; then
+  bin=""
+  for c in "$PREFIX/bin/curl.exe" "$PREFIX/bin/curl"; do
+    [[ -x "$c" ]] && bin="$c" && break
+  done
+  if [[ -n "$bin" ]] && curl_features_have_http3 "$bin"; then
+    echo "ok cached libcurl $(pkg-config --modversion libcurl 2>/dev/null || echo present) (HTTP3)"
     exit 0
   fi
-  write_simple_curl_pc "-lcurl" ""
-  echo "ok macOS network: simple pc → -lcurl (+ FFmpeg SecureTransport)"
-  exit 0
+  if [[ -z "$bin" ]]; then
+    echo "ok cached libcurl pc (no curl binary to probe)"
+    exit 0
+  fi
+  echo "WARN: cached curl lacks HTTP3; rebuilding" >&2
 fi
 
-# Linux：系统包；把 .pc 拷到 PREFIX（去掉/忽略私有依赖问题：直接写 simple）。
-if have_curl_pc; then
-  ver="$(pkg-config --modversion libcurl 2>/dev/null || echo 8.0.0)"
-  libs="$(pkg-config --libs libcurl 2>/dev/null || echo '-lcurl')"
-  cflags="$(pkg-config --cflags libcurl 2>/dev/null || true)"
-  write_simple_curl_pc "$libs" "$cflags"
-  echo "ok Linux network: simple pc from system curl=$ver (+ openssl for FFmpeg)"
-  exit 0
+chmod +x "$ROOT/scripts/ensure-desktop-nghttp2.sh"
+chmod +x "$ROOT/scripts/ensure-desktop-ngtcp2-stack.sh"
+"$ROOT/scripts/ensure-desktop-nghttp2.sh"
+"$ROOT/scripts/ensure-desktop-ngtcp2-stack.sh"
+export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
+need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
+need cmake
+need curl
+need tar
+kotv_clean_win_path
+
+src="$BUILD_DIR/curl-$CURL_VER"
+tarball="$BUILD_DIR/curl-$CURL_VER.tar.gz"
+if [[ ! -f "$src/CMakeLists.txt" ]]; then
+  curl -fsSL -o "$tarball" \
+    "https://curl.se/download/curl-${CURL_VER}.tar.gz" \
+    || curl -fsSL -o "$tarball" \
+      "https://github.com/curl/curl/releases/download/curl-$(echo "$CURL_VER" | tr . _)/curl-${CURL_VER}.tar.gz"
+  rm -rf "$src"
+  tar -xzf "$tarball" -C "$BUILD_DIR"
 fi
 
-echo "ERROR: Linux missing libcurl (apt: libcurl4-openssl-dev)" >&2
-exit 1
+pref="$(kotv_native_path "$PREFIX")"
+build="$BUILD_DIR/curl-build"
+rm -rf "$build"
+mkdir -p "$build"
+
+gen=Ninja
+command -v ninja >/dev/null 2>&1 || gen="Unix Makefiles"
+if kotv_is_windows_build; then
+  gen="MinGW Makefiles"
+fi
+
+echo "==> build libcurl $CURL_VER (OpenSSL + nghttp2 + ngtcp2/nghttp3) → $pref"
+cmake_args=(
+  -DCMAKE_INSTALL_PREFIX="$pref"
+  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_PREFIX_PATH="$pref"
+  -DBUILD_SHARED_LIBS=ON
+  -DBUILD_CURL_EXE=ON
+  -DBUILD_TESTING=OFF
+  -DCURL_USE_OPENSSL=ON
+  -DCURL_USE_SCHANNEL=OFF
+  -DCURL_DISABLE_LDAP=ON
+  -DCURL_DISABLE_LDAPS=ON
+  -DUSE_NGHTTP2=ON
+  -DUSE_NGTCP2=ON
+  -DCURL_BROTLI=OFF
+  -DCURL_ZSTD=OFF
+  -DCURL_USE_LIBPSL=OFF
+  -DCURL_USE_LIBSSH2=OFF
+)
+if kotv_is_windows_build; then
+  cmake_args+=(
+    -DCMAKE_C_FLAGS="${WIN7_CFLAGS} -DNGHTTP2_STATICLIB"
+    -DCMAKE_CXX_FLAGS="${WIN7_CFLAGS}"
+    -DCURL_CA_BUNDLE=none
+    -DCURL_CA_PATH=none
+  )
+fi
+
+cmake -S "$src" -B "$build" -G "$gen" "${cmake_args[@]}"
+cmake --build "$build" -j"$JOBS"
+cmake --install "$build"
+
+export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
+libs="-L${pref}/lib -lcurl"
+if kotv_is_windows_build; then
+  libs="-L${pref}/lib -lcurl -lws2_32 -lbcrypt -lcrypt32"
+fi
+write_simple_curl_pc "$libs" "-I${pref}/include" "$CURL_VER"
+
+if ! pkg-config --exists libcurl; then
+  echo "ERROR: libcurl.pc missing" >&2
+  exit 1
+fi
+
+bin=""
+for c in "$PREFIX/bin/curl.exe" "$PREFIX/bin/curl"; do
+  [[ -x "$c" ]] && bin="$c" && break
+done
+if [[ -n "$bin" ]]; then
+  echo "==> curl -V:"
+  "$bin" -V || true
+  if ! curl_features_have_http3 "$bin"; then
+    echo "ERROR: built curl missing HTTP3 in -V output" >&2
+    "$bin" -V >&2 || true
+    exit 1
+  fi
+  if ! "$bin" -V 2>/dev/null | grep -Eiq 'HTTP2|nghttp2'; then
+    echo "ERROR: built curl missing HTTP2 in -V output" >&2
+    exit 1
+  fi
+fi
+
+echo "ok libcurl $(pkg-config --modversion libcurl) (HTTP/2 + HTTP/3, source)"

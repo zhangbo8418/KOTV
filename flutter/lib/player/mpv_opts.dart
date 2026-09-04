@@ -152,13 +152,7 @@ class KotvMpvOpts {
       }
 
       if (live) {
-        // 980a0e3：直播跳过点播 KotvBufferBudget。此处只清掉误写入的大 demuxer，并关 cache-pause。
-        try {
-          final props = KotvBufferBudget.mpvLiveCacheProps();
-          for (final e in props.entries) {
-            await set(e.key, e.value);
-          }
-        } catch (_) {}
+        // 对齐 TV：直播不写 demuxer-max-bytes / cache-secs（点播预算也不套）。
       } else {
         try {
           await KotvBufferBudget.warm(force: true);
@@ -177,7 +171,7 @@ class KotvMpvOpts {
 
   /// 交给原生通道的属性表（P1/P2 open / setOpts）。
   ///
-  /// [live]=true：直播小 demuxer + 关 cache-pause（980a0e3，勿套点播预算）。
+  /// [live]=true：对齐 TV，不写 demuxer-max-bytes / cache-secs。
   Map<String, String> propertyMap({bool live = false}) {
     final out = <String, String>{
       'hwdec': hwdecValue(),
@@ -204,8 +198,6 @@ class KotvMpvOpts {
     if (!live) {
       final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
       out.addAll(props);
-    } else {
-      out.addAll(KotvBufferBudget.mpvLiveCacheProps());
     }
     for (final e in parseConfLines(conf)) {
       out[e.$1] = e.$2;

@@ -21,11 +21,19 @@ Future<void> kotvDisposeMpvPlayer(Player? player) async {
   } catch (_) {}
 }
 
-/// 按缓冲预算创建 [Player]，避免 media_kit 默认 32MiB 再被事后猛改造成起播抖动。
+/// 按缓冲预算创建 [Player]。
 ///
-/// [live]=true：用直播小 buffer（980a0e3），勿把点播 KotvBufferBudget 写进 demuxer。
+/// [live]=true：对齐 TV，不套点播 KotvBufferBudget；media_kit 仅用库默认 bufferSize
+///（其内部会写 demuxer-max-bytes，应用层不再二次改写）。
 Player kotvCreateMpvPlayer({bool live = false}) {
-  final budget = live ? KotvBufferBudget.liveBufferSizeBytes : KotvBufferBudget.bytes();
+  if (live) {
+    return Player(
+      configuration: const PlayerConfiguration(
+        logLevel: MPVLogLevel.error,
+      ),
+    );
+  }
+  final budget = KotvBufferBudget.bytes();
   return Player(
     configuration: PlayerConfiguration(
       bufferSize: budget,
@@ -249,20 +257,13 @@ class MediaKitPlayback extends KotvPlayback {
       throw StateError('MPV 不支持 DRM，请用内置 ExoPlayer');
     }
     await _optsReady;
-    // 直播：再次盖掉点播 demuxer（防构造竞态）；点播预算只在 !live 时由 _prepareOpts/此处写入。
+    // 直播：对齐 TV，不写 demuxer-max-bytes/cache-secs；点播才写入 KotvBufferBudget。
     await _opts.applyAfterAttach(player, live: live);
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
-    // media_kit open(play:true) 会在 playlist-pos 前乐观 unpause，Windows 上易出现 pause 同步异常。
-    // 点播：paused 等到首帧/一点缓冲再 play（避免只跑时钟黑屏）。
-    // 直播：对齐 TV 的 prepare+play 顺序：先 open(play:false)，再 pause=no + play。
+    // 点播：play:false 等到首帧/一点缓冲再 play。
+    // 直播：对齐 TV prepareAndPlay——立刻 play，无 Flutter 层 play:false 等缓冲。
     if (live) {
-      await player.open(media, play: false);
-      try {
-        await (player.platform as dynamic).setProperty('pause', 'no');
-      } catch (_) {}
-      try {
-        await player.play();
-      } catch (_) {}
+      await player.open(media, play: true);
     } else {
       await player.open(media, play: false);
       await _waitReadyThenPlay();
