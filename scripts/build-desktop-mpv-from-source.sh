@@ -79,17 +79,18 @@ kotv_libplacebo_profile() {
 ensure_mpv_libcurl_deps() {
   chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
   "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
+  # 只认 PREFIX：macOS 父脚本 PKG_CONFIG_LIBDIR=PREFIX，brew 路径会被挡，须把 .pc 拷进 PREFIX。
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    if command -v brew >/dev/null 2>&1; then
-      brew_curl="$(brew --prefix curl 2>/dev/null || true)"
-      if [[ -n "$brew_curl" && -d "$brew_curl/lib/pkgconfig" ]]; then
-        export PKG_CONFIG_PATH="$brew_curl/lib/pkgconfig:$PKG_CONFIG_PATH"
-      fi
-    fi
+    export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+  fi
+  if [[ ! -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]]; then
+    echo "ERROR: missing $PREFIX/lib/pkgconfig/libcurl.pc" >&2
+    exit 1
   fi
   if ! pkg-config --exists libcurl 2>/dev/null; then
-    echo "ERROR: libcurl pkg-config missing (need ensure-desktop-curl-openssl.sh)" >&2
+    echo "ERROR: pkg-config cannot see libcurl (pc=$PREFIX/lib/pkgconfig/libcurl.pc LIBDIR=${PKG_CONFIG_LIBDIR:-} PATH=${PKG_CONFIG_PATH:-})" >&2
+    cat "$PREFIX/lib/pkgconfig/libcurl.pc" >&2 || true
     exit 1
   fi
   echo "ok libcurl for mpv: $(pkg-config --modversion libcurl)"
@@ -972,7 +973,7 @@ build_mpv_macos() {
   if [[ "$AV3A" == "1" ]]; then
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
   fi
-  # 严格只用 PREFIX 的 pkg-config，杜绝 Homebrew 错架构依赖。
+  # 严格 PREFIX pkg-config；curl.pc 由 ensure 拷进 PREFIX（勿只靠 brew PATH）。
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
   ensure_macos_vulkan
@@ -980,6 +981,9 @@ build_mpv_macos() {
   ensure_windows_libass
   ensure_libplacebo
   ensure_mpv_libcurl_deps
+  # ensure 可能改过 LIBDIR/PATH；编 mpv 前再钉回 PREFIX（curl.pc 已在内）。
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d mpv/.git ]]; then

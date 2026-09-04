@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 桌面 libmpv 网络栈：
-#   macOS  — 系统 libcurl + FFmpeg SecureTransport（dyld 共享缓存里可能没有 /usr/lib/libcurl*.dylib）
-#   Windows — 前缀静态 libcurl（Schannel），FFmpeg --enable-schannel（勿编 OpenSSL：MSYS perl 缺模块）
+#   macOS  — brew/stub libcurl.pc + FFmpeg SecureTransport
+#   Windows — 前缀静态 libcurl（Schannel）+ FFmpeg --enable-schannel
 #   Linux  — 系统 openssl+curl，否则编进 PREFIX
 set -euo pipefail
 
@@ -31,61 +31,89 @@ kotv_native_path() {
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 
 mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib" "$BUILD_DIR"
-export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-
-if kotv_is_windows_build; then
-  if [[ -x "$BUILD_DIR/bin/pkg-config" ]]; then
-    export PATH="$BUILD_DIR/bin:$PATH"
-    export PKG_CONFIG="$BUILD_DIR/bin/pkg-config"
-  fi
-fi
-
-have_openssl_pc() {
-  pkg-config --exists openssl 2>/dev/null || pkg-config --exists libssl 2>/dev/null
-}
 
 have_curl_pc() {
   pkg-config --exists libcurl 2>/dev/null
 }
 
-# macOS：SDK/系统自带 curl；新系统 dyld 共享缓存可能没有 /usr/lib/libcurl*.dylib。
-# meson -Dlibcurl=enabled 需要 libcurl.pc —— 优先 Homebrew curl，否则写一份链 -lcurl 的桩 .pc。
+have_openssl_pc() {
+  pkg-config --exists openssl 2>/dev/null || pkg-config --exists libssl 2>/dev/null
+}
+
+# macOS：把可用的 libcurl.pc 落进 PREFIX（父脚本常设 PKG_CONFIG_LIBDIR=PREFIX，会挡住 brew）。
 if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  if ! have_curl_pc && command -v brew >/dev/null 2>&1; then
-    brew_curl="$(brew --prefix curl 2>/dev/null || true)"
-    if [[ -n "$brew_curl" && -d "$brew_curl/lib/pkgconfig" ]]; then
-      export PKG_CONFIG_PATH="$brew_curl/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-    fi
-  fi
-  if have_curl_pc; then
-    echo "ok macOS network: libcurl=$(pkg-config --modversion libcurl) (+ FFmpeg SecureTransport)"
+  if [[ -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]] && have_curl_pc; then
+    echo "ok macOS network: prefix libcurl.pc ($(pkg-config --modversion libcurl)) (+ SecureTransport)"
     exit 0
   fi
-  cat >"$PREFIX/lib/pkgconfig/libcurl.pc" <<EOF
-prefix=/usr
-exec_prefix=\${prefix}
-libdir=\${exec_prefix}/lib
-includedir=\${prefix}/include
-
+  brew_curl=""
+  if command -v brew >/dev/null 2>&1; then
+    brew_curl="$(brew --prefix curl 2>/dev/null || true)"
+  fi
+  if [[ -n "$brew_curl" && -f "$brew_curl/lib/pkgconfig/libcurl.pc" ]]; then
+    cp -f "$brew_curl/lib/pkgconfig/libcurl.pc" "$PREFIX/lib/pkgconfig/libcurl.pc"
+    # 若 pc 含 brew 绝对路径，原样可用；meson 只从 PREFIX LIBDIR 找得到。
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    # 临时去掉 LIBDIR 限制以便校验；调用方会再设回 PREFIX。
+    old_libdir="${PKG_CONFIG_LIBDIR:-}"
+    unset PKG_CONFIG_LIBDIR || true
+    if have_curl_pc; then
+      [[ -n "$old_libdir" ]] && export PKG_CONFIG_LIBDIR="$old_libdir"
+      echo "ok macOS network: copied brew libcurl.pc ($(pkg-config --modversion libcurl)) → PREFIX"
+      exit 0
+    fi
+    [[ -n "$old_libdir" ]] && export PKG_CONFIG_LIBDIR="$old_libdir"
+  fi
+  cat >"$PREFIX/lib/pkgconfig/libcurl.pc" <<'EOF'
 Name: libcurl
-Description: macOS SDK / system libcurl (KOTV stub pc)
+Description: macOS SDK / system libcurl (KOTV stub)
 Version: 8.0.0
 Libs: -lcurl
 Cflags:
 EOF
-  export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  have_curl_pc || { echo "ERROR: failed to install stub libcurl.pc" >&2; exit 1; }
-  echo "ok macOS network: stub libcurl.pc → -lcurl (+ FFmpeg SecureTransport)"
+  echo "ok macOS network: stub libcurl.pc → -lcurl (+ SecureTransport)"
   exit 0
 fi
 
+# Windows：去掉 PATH 里带空格的条目（VS/Git「C:/Program Files/…」会让 libtool Error 127）。
+kotv_win_sanitize_path() {
+  local cleaned="" part
+  local gcc_bin=""
+  if command -v gcc >/dev/null 2>&1; then
+    gcc_bin="$(cd "$(dirname "$(command -v gcc)")" && pwd)"
+  fi
+  IFS=':' read -ra _parts <<<"$PATH"
+  for part in "${_parts[@]}"; do
+    [[ -z "$part" ]] && continue
+    case "$part" in
+      *[\ ]*|*[Pp]rogram*[Ff]iles*) continue ;;
+    esac
+    if [[ -z "$cleaned" ]]; then cleaned="$part"; else cleaned="$cleaned:$part"; fi
+  done
+  if [[ -n "$gcc_bin" ]]; then
+    export PATH="$gcc_bin:/usr/bin:/bin:$cleaned"
+  else
+    export PATH="/usr/bin:/bin:$cleaned"
+  fi
+  export CC=gcc CXX=g++ AR=ar RANLIB=ranlib NM=nm STRIP=strip LD=ld
+  unset CCC COMPILER_PATH INCLUDE LIB LIBPATH VCINSTALLDIR VSINSTALLDIR WindowsSdkDir 2>/dev/null || true
+}
+
 build_curl_schannel() {
-  if [[ -f "$PREFIX/lib/libcurl.a" ]] && have_curl_pc; then
+  if [[ -f "$PREFIX/lib/libcurl.a" ]] && [[ -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]]; then
     echo "ok cached libcurl (schannel) in PREFIX"
     return 0
   fi
   need curl
   need tar
+  need gcc
+  kotv_win_sanitize_path
+  if kotv_is_windows_build; then
+    if [[ -x "$BUILD_DIR/bin/pkg-config" ]]; then
+      export PATH="$BUILD_DIR/bin:$PATH"
+      export PKG_CONFIG="$BUILD_DIR/bin/pkg-config"
+    fi
+  fi
   local src="$BUILD_DIR/curl-$CURL_VER"
   local tarball="$BUILD_DIR/curl-$CURL_VER.tar.gz"
   if [[ ! -f "$src/configure" ]]; then
@@ -94,11 +122,13 @@ build_curl_schannel() {
     tar -xzf "$tarball" -C "$BUILD_DIR"
   fi
   cd "$src"
+  # 旧失败配置残留；强制重配。
+  [[ -f Makefile ]] && make distclean >/dev/null 2>&1 || true
   local pref
   pref="$(kotv_native_path "$PREFIX")"
-  echo "==> build libcurl $CURL_VER (Windows Schannel, no OpenSSL) → $pref"
+  echo "==> build libcurl $CURL_VER (Windows Schannel) CC=$(command -v gcc) → $pref"
   export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")"
-  # 不可同时 --without-ssl 与 --with-schannel（curl configure 会直接报错）。
+  # 不可同时 --without-ssl 与 --with-schannel。
   ./configure \
     --prefix="$pref" \
     --host=x86_64-w64-mingw32 \
@@ -113,23 +143,27 @@ build_curl_schannel() {
     --without-nghttp2 \
     --disable-ldap \
     --disable-rtsp \
-    --disable-manual
+    --disable-manual \
+    CC=gcc \
+    CXX=g++
   local MAKE="${KOTV_MAKE:-mingw32-make}"
   command -v "$MAKE" >/dev/null || MAKE=make
-  "$MAKE" -j"$JOBS"
+  # 单线程更易定位；仍用 JOBS，但 CC 显式无空格。
+  "$MAKE" -j"$JOBS" CC=gcc CXX=g++
   "$MAKE" install
-  have_curl_pc || { echo "ERROR: libcurl pkg-config missing after schannel build" >&2; exit 1; }
-  echo "ok libcurl $(pkg-config --modversion libcurl) (schannel)"
+  [[ -f "$PREFIX/lib/libcurl.a" ]] || { echo "ERROR: libcurl.a missing after install" >&2; exit 1; }
+  [[ -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]] || { echo "ERROR: libcurl.pc missing after install" >&2; exit 1; }
+  echo "ok libcurl installed (schannel)"
 }
 
-# Windows：只编 Schannel curl，不碰 OpenSSL（避免 MSYS perl Locale::Maketext）。
 if kotv_is_windows_build; then
   build_curl_schannel
   echo "ok Windows network: libcurl+Schannel (FFmpeg uses --enable-schannel)"
   exit 0
 fi
 
-# Linux：优先系统开发包。
+# Linux
+export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 if have_openssl_pc && have_curl_pc; then
   echo "ok Linux network: system openssl=$(pkg-config --modversion openssl 2>/dev/null || echo ?) curl=$(pkg-config --modversion libcurl 2>/dev/null || echo ?)"
   exit 0
@@ -137,7 +171,7 @@ fi
 echo "==> Linux: system openssl/curl missing; building into PREFIX"
 
 build_openssl() {
-  if [[ -f "$PREFIX/lib/libssl.a" ]] && [[ -f "$PREFIX/include/openssl/ssl.h" ]] && have_openssl_pc; then
+  if [[ -f "$PREFIX/lib/libssl.a" ]] && [[ -f "$PREFIX/include/openssl/ssl.h" ]]; then
     echo "ok cached OpenSSL in PREFIX"
     return 0
   fi
@@ -146,7 +180,7 @@ build_openssl() {
   need tar
   local src="$BUILD_DIR/openssl-$OPENSSL_VER"
   local tarball="$BUILD_DIR/openssl-$OPENSSL_VER.tar.gz"
-  if [[ ! -d "$src" ]] || [[ ! -f "$src/Configure" ]]; then
+  if [[ ! -f "$src/Configure" ]]; then
     curl -fsSL -o "$tarball" "https://www.openssl.org/source/openssl-$OPENSSL_VER.tar.gz" \
       || curl -fsSL -o "$tarball" "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VER/openssl-$OPENSSL_VER.tar.gz"
     rm -rf "$src"
@@ -162,12 +196,11 @@ build_openssl() {
   if [[ ! -f "$PREFIX/lib/pkgconfig/openssl.pc" ]] && [[ -f "$PREFIX/lib/pkgconfig/libssl.pc" ]]; then
     cp -f "$PREFIX/lib/pkgconfig/libssl.pc" "$PREFIX/lib/pkgconfig/openssl.pc"
   fi
-  have_openssl_pc || { echo "ERROR: OpenSSL pkg-config missing after install" >&2; exit 1; }
-  echo "ok OpenSSL $(pkg-config --modversion openssl 2>/dev/null || true)"
+  echo "ok OpenSSL"
 }
 
 build_curl_openssl() {
-  if [[ -f "$PREFIX/lib/libcurl.a" ]] && have_curl_pc; then
+  if [[ -f "$PREFIX/lib/libcurl.a" ]] && [[ -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]]; then
     echo "ok cached libcurl in PREFIX"
     return 0
   fi
@@ -201,8 +234,7 @@ build_curl_openssl() {
     --disable-manual
   make -j"$JOBS"
   make install
-  have_curl_pc || { echo "ERROR: libcurl pkg-config missing after install" >&2; exit 1; }
-  echo "ok libcurl $(pkg-config --modversion libcurl)"
+  echo "ok libcurl"
 }
 
 build_openssl
