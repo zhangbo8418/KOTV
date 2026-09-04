@@ -13,7 +13,7 @@ import 'kotv_platform.dart';
 /// ## 平台能力
 /// | 选项 | Android 原生 | 桌面 media_kit |
 /// |------|-------------|----------------|
-/// | hwdec | mediacodec / auto-safe | Win7: dxva2/auto-safe；Win8+: d3d11va/auto |
+/// | hwdec | 硬=直出；自动=直出硬解优先再软解（全平台禁用 auto-safe/copy） |
 /// | gpu-next | vo=gpu-next（Surface） | ❌（Texture/libmpv） |
 /// | gpu-api / Vulkan | 原生 Surface | setProperty（含 Win7） |
 /// | AV3A | libmvcodec | 自带 FFmpeg+avs3a |
@@ -81,29 +81,28 @@ class KotvMpvOpts {
 
   /// 供 setProperty / VideoController 使用的 hwdec 值。
   ///
-  /// Windows Win7：硬解走 dxva2（D3D11 Video 解码 API 为 Win8+；与 gpu-api Vulkan 无关）。
-  /// Windows Win8+ 硬解：d3d11va。自动模式 Win7 用 auto-safe，避免 mpv 误选 d3d11va。
+  /// 「自动」= 优先**直出**硬解，失败再软解；UI 仍显示自动。
+  /// 全平台不用 `auto` / `auto-safe`（常选 *-copy，Texture/嵌入路径会卡顿掉帧）。
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
-      if (hard) return 'mediacodec';
-      return 'auto-safe';
+      // 硬解锁 mediacodec；自动 = 直出硬解，不行再软解（原生 RK 也会覆盖为 mediacodec）
+      return hard ? 'mediacodec' : 'mediacodec,no';
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       if (kotvIsWindows7()) {
-        if (hard) return 'dxva2';
-        return 'auto-safe';
+        return hard ? 'dxva2' : 'dxva2,no';
       }
-      if (hard) return 'd3d11va';
+      return hard ? 'd3d11va' : 'd3d11va,dxva2,no';
     }
-    if (hard) {
-      if (!kIsWeb &&
-          (defaultTargetPlatform == TargetPlatform.macOS ||
-              defaultTargetPlatform == TargetPlatform.iOS)) {
-        return 'videotoolbox';
-      }
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      return hard ? 'videotoolbox' : 'videotoolbox,no';
     }
-    return 'auto';
+    // Linux 等：直出硬解链，自动再兜底软解
+    const linuxHw = 'vaapi,vulkan,nvdec,cuda,vdpau';
+    return hard ? linuxHw : '$linuxHw,no';
   }
 
   /// Android 可切 gpu/gpu-next；桌面 media_kit 必须 libmpv（Flutter Texture）。

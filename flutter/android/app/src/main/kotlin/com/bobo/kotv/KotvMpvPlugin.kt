@@ -636,17 +636,23 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         product.contains("rk3399_box")
   }
 
-  /** 映射 Dart decode 字符串；RK 盒 auto → mediacodec（直出 Surface，勿 copy）。 */
+  /** 映射 Dart decode 字符串；自动 = 直出 mediacodec 优先再软解，勿 auto-safe/copy。 */
   private fun resolveHwdec(raw: String?): String {
     val mode = raw?.trim().orEmpty()
     if (mode == "no" || mode == "soft" || mode == "software" || mode == "sw") return "no"
     if (mode == "mediacodec" || mode == "hard" || mode == "hardware" || mode == "hw") {
       return "mediacodec"
     }
-    if ((mode.isBlank() || mode == "auto") && isRockchipMpp()) {
-      return "mediacodec"
+    // 已是逗号列表（如 mediacodec,no）交给 mpv；RK Surface 仍锁直出 mediacodec
+    if (mode.contains(",")) {
+      if (isRockchipMpp() && mode.startsWith("mediacodec")) return "mediacodec"
+      return mode
     }
-    return mode.ifBlank { "auto-safe" }
+    if (mode.isBlank() || mode == "auto" || mode == "auto-safe") {
+      // RK 直出 Surface 锁 mediacodec；其它机型允许软解兜底
+      return if (isRockchipMpp()) "mediacodec" else "mediacodec,no"
+    }
+    return mode
   }
 
   private fun applyConfOptions(text: String) {

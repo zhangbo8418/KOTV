@@ -4,7 +4,7 @@ import '../util/kotv_io.dart';
 import 'kotv_platform.dart';
 
 /// 开播黑屏/超时后的会话内回退（各平台同一套，不写死某一引擎）：
-/// 1. hard↔soft 翻转；**auto 先改软解重试**（引擎 auto-safe 在 API25 等盒子上常卡 mediacodec-copy）
+/// 1. hard↔soft 翻转；**auto 先改软解重试**（直出硬解失败时的会话内回退）
 /// 2. 再按 [innieRing] 换下一个内置播放器，并恢复用户设置的解码
 /// 不写回设置里的 `player` / `playerLive` / `playerDecode`。
 class KotvPlaybackFailover {
