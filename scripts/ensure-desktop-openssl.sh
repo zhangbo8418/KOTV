@@ -81,10 +81,10 @@ kotv_clear_prefix_openssl() {
   rm -rf "$PREFIX/include/openssl" 2>/dev/null || true
 }
 
-# OpenSSL Configure：MSYS/Git perl + 本地纯 Perl vendor（禁止 Strawberry 整库 PERL5LIB 污染 Config.pm）。
-# 静态链：Configure → OpenSSL::config → IPC::Cmd → Params::Check → Locale::Maketext::Simple
-#         Locale::Maketext → I18N::LangTags(+Detect)
-#         Makefile 生成 → ExtUtils::MakeMaker
+# OpenSSL Configure/make：MSYS/Git perl + 本地纯 Perl vendor（禁止 Strawberry 整库 PERL5LIB 污染 Config.pm）。
+# 静态链（Configure）：OpenSSL::config → IPC::Cmd → Params::Check → Locale::Maketext::Simple
+#                      Locale::Maketext → I18N::LangTags；Makefile → ExtUtils::MakeMaker
+# 静态链（make）：configdata.pm → Pod::Usage → Pod::Text(podlators) → Pod::Simple
 kotv_vendor_cpan_lib() {
   local local_lib="$1" dist="$2" url="$3" marker="${4:-}"
   local tmp="$BUILD_DIR/_cpan-$dist"
@@ -97,7 +97,7 @@ kotv_vendor_cpan_lib() {
   curl -fsSL -o "$tmp/$dist.tar.gz" "$url" || return 1
   tar -xzf "$tmp/$dist.tar.gz" -C "$tmp"
   local found
-  found="$(find "$tmp" -maxdepth 1 -mindepth 1 -type d -name "${dist}-*" | head -1 || true)"
+  found="$(find "$tmp" -maxdepth 1 -mindepth 1 -type d \( -name "${dist}-*" -o -name "${dist}-v*" \) | head -1 || true)"
   [[ -n "$found" && -d "$found/lib" ]] || return 1
   cp -R "$found/lib/." "$local_lib/"
   rm -rf "$tmp"
@@ -108,7 +108,8 @@ kotv_copy_strawberry_pm() {
   local local_lib="$1" rel="$2"
   local src
   for src in /c/Strawberry/perl/lib /c/strawberry/perl/lib \
-             /c/Strawberry/perl/vendor/lib /c/strawberry/perl/vendor/lib; do
+             /c/Strawberry/perl/vendor/lib /c/strawberry/perl/vendor/lib \
+             /c/Strawberry/perl/site/lib /c/strawberry/perl/site/lib; do
     if [[ -f "$src/$rel" ]]; then
       mkdir -p "$local_lib/$(dirname "$rel")"
       cp -f "$src/$rel" "$local_lib/$rel"
@@ -123,6 +124,34 @@ kotv_copy_strawberry_pm() {
   return 1
 }
 
+# 一次性从 Strawberry 拷纯 Perl 目录树（不含 Config.pm，避免污染）。
+kotv_vendor_strawberry_pureperl_trees() {
+  local local_lib="$1" d
+  for d in Pod Locale I18N ExtUtils Module Params Text Encode Getopt HTTP File Carp \
+           IPC AutoLoader base parent version; do
+    kotv_copy_strawberry_pm "$local_lib" "$d" || true
+  done
+  for f in parent.pm version.pm base.pm; do
+    kotv_copy_strawberry_pm "$local_lib" "$f" || true
+  done
+}
+
+# 从 "Can't locate Foo/Bar.pm" 错误里 vendor 缺失模块。
+kotv_vendor_cant_locate() {
+  local err="$1" mod dest
+  mod="$(printf '%s\n' "$err" | sed -n 's/.*Can'\''t locate \([^ ]*\) in @INC.*/\1/p' | head -1)"
+  [[ -n "$mod" ]] || return 1
+  echo "WARN: perl missing $mod; vendoring" >&2
+  if kotv_copy_strawberry_pm "$BUILD_DIR/perl5" "$mod"; then
+    return 0
+  fi
+  dest="$(dirname "$mod")"
+  if [[ "$dest" != "." ]] && kotv_copy_strawberry_pm "$BUILD_DIR/perl5" "$dest"; then
+    return 0
+  fi
+  return 1
+}
+
 ensure_openssl_perl() {
   local p candidates=() local_lib="$BUILD_DIR/perl5"
   mkdir -p "$local_lib"
@@ -132,6 +161,7 @@ ensure_openssl_perl() {
   fi
   candidates+=("$(command -v perl 2>/dev/null || true)")
 
+  # CPAN：Configure + make(configdata→Pod::Usage) 全链一次到位
   kotv_vendor_cpan_lib "$local_lib" Locale-Maketext \
     "https://cpan.metacpan.org/authors/id/T/TO/TODDR/Locale-Maketext-1.33.tar.gz" \
     "Locale/Maketext.pm" || true
@@ -153,10 +183,18 @@ ensure_openssl_perl() {
   kotv_vendor_cpan_lib "$local_lib" Module-Load-Conditional \
     "https://cpan.metacpan.org/authors/id/B/BI/BINGOS/Module-Load-Conditional-0.74.tar.gz" \
     "Module/Load/Conditional.pm" || true
+  kotv_vendor_cpan_lib "$local_lib" Pod-Simple \
+    "https://cpan.metacpan.org/authors/id/K/KH/KHW/Pod-Simple-3.48.tar.gz" \
+    "Pod/Simple.pm" || true
+  kotv_vendor_cpan_lib "$local_lib" podlators \
+    "https://cpan.metacpan.org/authors/id/R/RR/RRA/podlators-v6.1.0.tar.gz" \
+    "Pod/Text.pm" || true
+  kotv_vendor_cpan_lib "$local_lib" Pod-Usage \
+    "https://cpan.metacpan.org/authors/id/M/MA/MAREKR/Pod-Usage-2.05.tar.gz" \
+    "Pod/Usage.pm" || true
 
   if kotv_is_windows_build; then
-    kotv_copy_strawberry_pm "$local_lib" "I18N" || true
-    kotv_copy_strawberry_pm "$local_lib" "Locale" || true
+    kotv_vendor_strawberry_pureperl_trees "$local_lib"
   fi
   export PERL5LIB="$local_lib"
 
@@ -167,33 +205,32 @@ ensure_openssl_perl() {
       && "$p" -MI18N::LangTags -e "1" 2>/dev/null \
       && "$p" -MLocale::Maketext::Simple -e "1" 2>/dev/null \
       && "$p" -MExtUtils::MakeMaker -e "1" 2>/dev/null \
-      && "$p" -MIPC::Cmd -e "1" 2>/dev/null; then
+      && "$p" -MIPC::Cmd -e "1" 2>/dev/null \
+      && "$p" -MPod::Usage -e "1" 2>/dev/null; then
       export PERL="$p"
       echo "ok perl for OpenSSL: $PERL (PERL5LIB=$PERL5LIB)"
       return 0
     fi
   done
-  echo "ERROR: need MSYS/Git perl + Locale/I18N/MakeMaker/IPC::Cmd chain" >&2
-  ls -laR "$local_lib" 2>/dev/null | head -100 >&2 || true
+  echo "ERROR: need MSYS/Git perl + Configure/make perl module chain" >&2
+  ls -laR "$local_lib" 2>/dev/null | head -120 >&2 || true
   for p in "${candidates[@]}"; do
     [[ -n "$p" && -x "$p" ]] || continue
     case "$p" in *[Ss]trawberry*) continue ;; esac
     echo "probe $p:" >&2
-    "$p" -MLocale::Maketext -e "print qq(  Locale::Maketext ok\n)" 2>&1 || true
-    "$p" -MI18N::LangTags -e "print qq(  I18N::LangTags ok\n)" 2>&1 || true
-    "$p" -MLocale::Maketext::Simple -e "print qq(  Locale::Maketext::Simple ok\n)" 2>&1 || true
-    "$p" -MExtUtils::MakeMaker -e "print qq(  ExtUtils::MakeMaker ok\n)" 2>&1 || true
-    "$p" -MIPC::Cmd -e "print qq(  IPC::Cmd ok\n)" 2>&1 || true
+    for m in Locale::Maketext I18N::LangTags Locale::Maketext::Simple ExtUtils::MakeMaker IPC::Cmd Pod::Usage Pod::Text Pod::Simple; do
+      "$p" -M"$m" -e "print qq(  $m ok\n)" 2>&1 || true
+    done
   done
   exit 1
 }
 
-# Configure 前再探一次 OpenSSL::config；缺模块则从 Strawberry 补，避免 CI 打地鼠。
+# Configure 前探 OpenSSL::config；缺模块自动补。
 ensure_openssl_perl_can_configure() {
-  local src="$1" i=0 err mod dest
+  local src="$1" i=0 err
   [[ -n "${PERL:-}" && -f "$src/util/perl/OpenSSL/config.pm" ]] || return 0
   export PERL5LIB="${BUILD_DIR}/perl5${PERL5LIB:+:$PERL5LIB}"
-  while [[ "$i" -lt 20 ]]; do
+  while [[ "$i" -lt 25 ]]; do
     i=$((i + 1))
     if "$PERL" -I"$src/util/perl" -I"$src/external/perl/Text-Template-1.56/lib" \
       -MOpenSSL::config -e "1" 2>/dev/null; then
@@ -202,28 +239,63 @@ ensure_openssl_perl_can_configure() {
     fi
     err="$("$PERL" -I"$src/util/perl" -I"$src/external/perl/Text-Template-1.56/lib" \
       -MOpenSSL::config -e "1" 2>&1 || true)"
-    mod="$(printf '%s\n' "$err" | sed -n 's/.*Can'\''t locate \([^ ]*\) in @INC.*/\1/p' | head -1)"
-    if [[ -z "$mod" ]]; then
-      echo "ERROR: OpenSSL::config probe failed (not a missing-module error):" >&2
-      printf '%s\n' "$err" >&2
-      return 1
-    fi
-    echo "WARN: perl missing $mod; vendoring from Strawberry/CPAN" >&2
-    if kotv_copy_strawberry_pm "$BUILD_DIR/perl5" "$mod"; then
+    if kotv_vendor_cant_locate "$err"; then
       continue
     fi
-    # 目录模块（如 I18N/LangTags.pm 的父目录已 vendor 仍缺 Detect.pm）
-    dest="$(dirname "$mod")"
-    if [[ "$dest" != "." ]] && kotv_copy_strawberry_pm "$BUILD_DIR/perl5" "$dest"; then
-      continue
-    fi
-    echo "ERROR: cannot vendor $mod" >&2
+    echo "ERROR: OpenSSL::config probe failed:" >&2
     printf '%s\n' "$err" >&2
     return 1
   done
   echo "ERROR: too many missing perl modules for OpenSSL::config" >&2
   return 1
 }
+
+# Configure 后探 configdata.pm（make 会用到 Pod::Usage）。
+ensure_openssl_perl_can_make() {
+  local src="$1" i=0 err
+  [[ -n "${PERL:-}" && -f "$src/configdata.pm" ]] || return 0
+  export PERL5LIB="${BUILD_DIR}/perl5${PERL5LIB:+:$PERL5LIB}"
+  cd "$src"
+  while [[ "$i" -lt 25 ]]; do
+    i=$((i + 1))
+    if "$PERL" -e 'do "./configdata.pm" or die $@; 1' 2>/dev/null; then
+      echo "ok perl configdata.pm probe"
+      return 0
+    fi
+    err="$("$PERL" -e 'do "./configdata.pm" or die $@; 1' 2>&1 || true)"
+    if kotv_vendor_cant_locate "$err"; then
+      continue
+    fi
+    echo "ERROR: configdata.pm probe failed:" >&2
+    printf '%s\n' "$err" >&2
+    return 1
+  done
+  echo "ERROR: too many missing perl modules for configdata.pm" >&2
+  return 1
+}
+
+# make：若仍报 Can't locate，补模块后重试（最多 10 次）。
+kotv_openssl_make() {
+  local log="$BUILD_DIR/openssl-make.log" i=0
+  export PERL5LIB="${BUILD_DIR}/perl5${PERL5LIB:+:$PERL5LIB}"
+  while [[ "$i" -lt 10 ]]; do
+    i=$((i + 1))
+    if $MAKE -j"$JOBS" 2>"$log"; then
+      cat "$log" 2>/dev/null || true
+      return 0
+    fi
+    cat "$log" >&2 || true
+    if rg -q "Can't locate " "$log" 2>/dev/null || grep -q "Can't locate " "$log" 2>/dev/null; then
+      if kotv_vendor_cant_locate "$(cat "$log")"; then
+        echo "WARN: openssl make missing perl module; retry $i" >&2
+        continue
+      fi
+    fi
+    return 1
+  done
+  return 1
+}
+
 
 mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib" "$PREFIX/bin" "$BUILD_DIR"
 export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
@@ -367,7 +439,12 @@ else
   "$PERL" ./Configure "${cfg_args[@]}"
 fi
 
-$MAKE -j"$JOBS"
+if kotv_is_windows_build; then
+  ensure_openssl_perl_can_make "$src" || exit 1
+  kotv_openssl_make || exit 1
+else
+  $MAKE -j"$JOBS"
+fi
 $MAKE install_sw
 
 export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
