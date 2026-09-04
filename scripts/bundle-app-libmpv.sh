@@ -450,8 +450,13 @@ case "$(uname -s)" in
       echo "  + Frameworks/$base (network)"
     done
     shopt -u nullglob
-    # 再次收依赖：把 Frameworks 内拷贝的绝对路径改成 @rpath
+    # 再次收依赖：从 libmpv 和 libcurl 两边走闭包（curl→ngtcp2.16 等 soname）
     kotv_macos_bundle_dylib_deps "$FW" "$FW/libmpv.dylib"
+    if [[ -f "$FW/libcurl.4.dylib" ]]; then
+      kotv_macos_bundle_dylib_deps "$FW" "$FW/libcurl.4.dylib"
+    elif [[ -f "$FW/libcurl.dylib" ]]; then
+      kotv_macos_bundle_dylib_deps "$FW" "$FW/libcurl.dylib"
+    fi
     if [[ -f "$ASSET_MAC/vulkan/icd.d/MoltenVK_icd.json" ]]; then
       mkdir -p "$DEST/Contents/Resources/vulkan/icd.d"
       # ICD 里 library_path 用绝对 @rpath 旁的文件名；运行时由 VK_ICD_FILENAMES 指向此 json

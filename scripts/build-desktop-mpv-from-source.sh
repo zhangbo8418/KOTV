@@ -131,9 +131,37 @@ verify_mpv_has_libcurl() {
 }
 
 # macOS：把 PREFIX 里的 curl/OpenSSL/ng* 拷进 assets，并把 libmpv 依赖改成 @rpath。
+# 关键：必须同时保留 soname（libngtcp2.16.dylib），不能只留 realpath 长名，
+# 否则 libcurl 的 @rpath/libngtcp2.16.dylib 在 Frameworks 里找不到。
+kotv_macos_stage_one_dylib() {
+  local src="$1" dest="$2" link_name real real_base id_name
+  [[ -e "$src" ]] || return 0
+  link_name="$(basename "$src")"
+  real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$src" 2>/dev/null || echo "$src")"
+  [[ -f "$real" ]] || return 0
+  real_base="$(basename "$real")"
+  cp -f "$real" "$dest/$real_base"
+  chmod u+w "$dest/$real_base" 2>/dev/null || true
+  install_name_tool -id "@rpath/$real_base" "$dest/$real_base" 2>/dev/null || true
+  if [[ "$link_name" != "$real_base" ]]; then
+    cp -f "$real" "$dest/$link_name"
+    chmod u+w "$dest/$link_name" 2>/dev/null || true
+    install_name_tool -id "@rpath/$link_name" "$dest/$link_name" 2>/dev/null || true
+  fi
+  # otool -D 安装名也可能是另一套 soname
+  id_name="$(otool -D "$real" 2>/dev/null | tail -1 | tr -d '[:space:]' || true)"
+  id_name="${id_name##*/}"
+  if [[ -n "$id_name" && "$id_name" != "$real_base" && "$id_name" != "$link_name" && "$id_name" == *.dylib ]]; then
+    cp -f "$real" "$dest/$id_name"
+    chmod u+w "$dest/$id_name" 2>/dev/null || true
+    install_name_tool -id "@rpath/$id_name" "$dest/$id_name" 2>/dev/null || true
+  fi
+  echo "  + assets/macos/$link_name (→ $real_base)"
+}
+
 kotv_macos_stage_network_dylibs() {
   local dest="$ASSET/macos" mpv="$ASSET/macos/libmpv.dylib"
-  local f real base dep lib
+  local f base dep lib missing=0
   mkdir -p "$dest"
   [[ -f "$mpv" ]] || return 0
   shopt -s nullglob
@@ -144,32 +172,36 @@ kotv_macos_stage_network_dylibs() {
     "$PREFIX/lib"/libnghttp2*.dylib \
     "$PREFIX/lib"/libnghttp3*.dylib \
     "$PREFIX/lib"/libngtcp2*.dylib; do
-    [[ -f "$f" ]] || continue
-    real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$f")"
-    [[ -f "$real" ]] || continue
-    base="$(basename "$real")"
-    cp -f "$real" "$dest/$base"
-    chmod u+w "$dest/$base" 2>/dev/null || true
-    install_name_tool -id "@rpath/$base" "$dest/$base" 2>/dev/null || true
-    # 常见 soname 别名（libcurl.4.dylib 等）
-    case "$base" in
-      libcurl.*.dylib) cp -f "$dest/$base" "$dest/libcurl.4.dylib" 2>/dev/null || true
-        install_name_tool -id "@rpath/libcurl.4.dylib" "$dest/libcurl.4.dylib" 2>/dev/null || true
-        cp -f "$dest/$base" "$dest/libcurl.dylib" 2>/dev/null || true
-        install_name_tool -id "@rpath/libcurl.dylib" "$dest/libcurl.dylib" 2>/dev/null || true
-        ;;
-      libssl.*.dylib) cp -f "$dest/$base" "$dest/libssl.3.dylib" 2>/dev/null || true
-        install_name_tool -id "@rpath/libssl.3.dylib" "$dest/libssl.3.dylib" 2>/dev/null || true
-        ;;
-      libcrypto.*.dylib) cp -f "$dest/$base" "$dest/libcrypto.3.dylib" 2>/dev/null || true
-        install_name_tool -id "@rpath/libcrypto.3.dylib" "$dest/libcrypto.3.dylib" 2>/dev/null || true
-        ;;
-    esac
-    echo "  + assets/macos/$base (network)"
+    [[ -e "$f" ]] || continue
+    kotv_macos_stage_one_dylib "$f" "$dest"
   done
   shopt -u nullglob
 
-  # staged 库互相依赖也改成 @rpath（否则干净机仍找 PREFIX 绝对路径）
+  # 兼容别名（部分工具只找无版本号名）
+  shopt -s nullglob
+  for f in "$dest"/libcurl.*.dylib; do
+    [[ -f "$f" ]] || continue
+    cp -f "$f" "$dest/libcurl.4.dylib" 2>/dev/null || true
+    install_name_tool -id "@rpath/libcurl.4.dylib" "$dest/libcurl.4.dylib" 2>/dev/null || true
+    cp -f "$f" "$dest/libcurl.dylib" 2>/dev/null || true
+    install_name_tool -id "@rpath/libcurl.dylib" "$dest/libcurl.dylib" 2>/dev/null || true
+    break
+  done
+  for f in "$dest"/libssl.*.dylib; do
+    [[ -f "$f" ]] || continue
+    cp -f "$f" "$dest/libssl.3.dylib" 2>/dev/null || true
+    install_name_tool -id "@rpath/libssl.3.dylib" "$dest/libssl.3.dylib" 2>/dev/null || true
+    break
+  done
+  for f in "$dest"/libcrypto.*.dylib; do
+    [[ -f "$f" ]] || continue
+    cp -f "$f" "$dest/libcrypto.3.dylib" 2>/dev/null || true
+    install_name_tool -id "@rpath/libcrypto.3.dylib" "$dest/libcrypto.3.dylib" 2>/dev/null || true
+    break
+  done
+  shopt -u nullglob
+
+  # staged 库互相依赖改成 @rpath；缺文件则从 PREFIX 再补一轮
   shopt -s nullglob
   for lib in "$dest"/libcurl*.dylib "$dest"/libssl*.dylib "$dest"/libcrypto*.dylib \
              "$dest"/libnghttp*.dylib "$dest"/libngtcp2*.dylib; do
@@ -179,14 +211,19 @@ kotv_macos_stage_network_dylibs() {
       [[ -n "$dep" ]] || continue
       case "$dep" in /System/*|/usr/lib/*) continue ;; esac
       base="$(basename "$dep")"
+      case "$base" in
+        libcurl*|libssl*|libcrypto*|libnghttp*|libngtcp2*) ;;
+        *) continue ;;
+      esac
+      if [[ ! -f "$dest/$base" ]]; then
+        if [[ -e "$PREFIX/lib/$base" ]]; then
+          kotv_macos_stage_one_dylib "$PREFIX/lib/$base" "$dest"
+        elif [[ -f "$dep" ]]; then
+          kotv_macos_stage_one_dylib "$dep" "$dest"
+        fi
+      fi
       if [[ -f "$dest/$base" ]]; then
         install_name_tool -change "$dep" "@rpath/$base" "$lib" 2>/dev/null || true
-      elif [[ "$base" == libcurl* && -f "$dest/libcurl.4.dylib" ]]; then
-        install_name_tool -change "$dep" "@rpath/libcurl.4.dylib" "$lib" 2>/dev/null || true
-      elif [[ "$base" == libssl* && -f "$dest/libssl.3.dylib" ]]; then
-        install_name_tool -change "$dep" "@rpath/libssl.3.dylib" "$lib" 2>/dev/null || true
-      elif [[ "$base" == libcrypto* && -f "$dest/libcrypto.3.dylib" ]]; then
-        install_name_tool -change "$dep" "@rpath/libcrypto.3.dylib" "$lib" 2>/dev/null || true
       fi
     done < <(otool -L "$lib" 2>/dev/null | awk 'NR>1 {print $1}')
   done
@@ -210,6 +247,24 @@ kotv_macos_stage_network_dylibs() {
     ls -la "$PREFIX/lib"/libcurl* 2>/dev/null || true
     exit 1
   fi
+  # 门禁：libcurl 的每个 ng*/ssl 依赖文件名必须已在 assets
+  for lib in "$dest"/libcurl*.dylib; do
+    [[ -f "$lib" ]] || continue
+    while read -r dep; do
+      case "$dep" in
+        *libngtcp2*|*libnghttp*|*libssl*|*libcrypto*)
+          base="$(basename "$dep")"
+          if [[ ! -f "$dest/$base" ]]; then
+            echo "ERROR: staged curl needs $base but assets/macos lacks it" >&2
+            otool -L "$lib" >&2 || true
+            ls -la "$dest"/libng* "$dest"/libssl* "$dest"/libcrypto* 2>/dev/null || true
+            missing=1
+          fi
+          ;;
+      esac
+    done < <(otool -L "$lib" 2>/dev/null | awk 'NR>1 {print $1}')
+  done
+  [[ "$missing" == 0 ]] || exit 1
 }
 
 # macOS 目标架构：交叉编 x86_64 时由 KOTV_MPV_MACOS_ARCH 指定，否则本机。

@@ -125,6 +125,28 @@ if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
     else
       echo "ok macos: libssl dylib staged"
     fi
+    if ! ls "$ASSET/macos"/libngtcp2*.dylib >/dev/null 2>&1; then
+      echo "ERROR: macos assets missing libngtcp2*.dylib (HTTP/3)" >&2
+      fail=1
+    else
+      echo "ok macos: libngtcp2 dylib staged"
+    fi
+    # curl 引用的 soname 必须实际存在（避免只有 libngtcp2.16.3.0 却缺 libngtcp2.16）
+    if [[ -f "$ASSET/macos/libcurl.4.dylib" ]] || [[ -f "$ASSET/macos/libcurl.dylib" ]]; then
+      curl_lib="$ASSET/macos/libcurl.4.dylib"
+      [[ -f "$curl_lib" ]] || curl_lib="$ASSET/macos/libcurl.dylib"
+      while read -r dep; do
+        case "$dep" in
+          *libngtcp2*|*libnghttp3*|*libnghttp2*)
+            base="$(basename "$dep")"
+            if [[ ! -f "$ASSET/macos/$base" ]]; then
+              echo "ERROR: macos curl needs $base but assets lack it" >&2
+              fail=1
+            fi
+            ;;
+        esac
+      done < <(otool -L "$curl_lib" 2>/dev/null | awk 'NR>1 {print $1}')
+    fi
   else
     echo "skip macos/libmpv.dylib (not built)"
   fi
