@@ -323,8 +323,8 @@ fi
 # lavf 必须带 HTTPS，否则 Win 上 http→https 302 会一直缓冲。
 if [[ -f ffbuild/config.h ]]; then
   if ! grep -qE '^#define CONFIG_HTTPS_PROTOCOL 1$' ffbuild/config.h; then
-    echo "ERROR: FFmpeg built without HTTPS protocol (need openssl/securetransport)" >&2
-    grep -E 'CONFIG_(HTTPS|OPENSSL|SECURETRANSPORT|TLS)' ffbuild/config.h | head -20 >&2 || true
+    echo "ERROR: FFmpeg built without HTTPS protocol (need openssl/schannel/securetransport)" >&2
+    grep -E 'CONFIG_(HTTPS|OPENSSL|SCHANNEL|SECURETRANSPORT|TLS)' ffbuild/config.h | head -20 >&2 || true
     exit 1
   fi
   echo "ok FFmpeg HTTPS protocol enabled"
