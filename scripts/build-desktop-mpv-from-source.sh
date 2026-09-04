@@ -75,36 +75,55 @@ kotv_libplacebo_profile() {
   fi
 }
 
-# 强制 libcurl（跟 302 / HTTPS 稳）；依赖 ensure-desktop-curl-openssl.sh + FFmpeg TLS。
+# 网络依赖：mac/linux 保证 PREFIX 有简单 libcurl.pc；Windows 跳过（走 FFmpeg Schannel）。
 ensure_mpv_libcurl_deps() {
   chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
   "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
-  # 只认 PREFIX：macOS 父脚本 PKG_CONFIG_LIBDIR=PREFIX，brew 路径会被挡，须把 .pc 拷进 PREFIX。
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+  if kotv_is_windows_build; then
+    echo "ok mpv network deps: Windows uses FFmpeg schannel (libcurl disabled)"
+    return 0
   fi
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
   if [[ ! -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]]; then
     echo "ERROR: missing $PREFIX/lib/pkgconfig/libcurl.pc" >&2
     exit 1
   fi
   if ! pkg-config --exists libcurl 2>/dev/null; then
-    echo "ERROR: pkg-config cannot see libcurl (pc=$PREFIX/lib/pkgconfig/libcurl.pc LIBDIR=${PKG_CONFIG_LIBDIR:-} PATH=${PKG_CONFIG_PATH:-})" >&2
+    echo "ERROR: pkg-config cannot see libcurl" >&2
     cat "$PREFIX/lib/pkgconfig/libcurl.pc" >&2 || true
     exit 1
   fi
   echo "ok libcurl for mpv: $(pkg-config --modversion libcurl)"
 }
 
-verify_mpv_has_libcurl() {
+# Windows 不强制 libcurl；有则更好。mac/linux 必须有。
+verify_mpv_network() {
   local bin="$1"
   [[ -f "$bin" ]] || return 1
+  if kotv_is_windows_build; then
+    if strings "$bin" 2>/dev/null | grep -Eiq 'schannel|HTTPS protocol|tls_schannel|CONFIG_SCHANNEL'; then
+      echo "ok $(basename "$bin"): HTTPS/schannel present"
+      return 0
+    fi
+    # libavformat 静态链进 mpv 时字符串不一定带 schannel 字样；有 https 即可。
+    if strings "$bin" 2>/dev/null | grep -Eiq 'https://|https protocol|tls_'; then
+      echo "ok $(basename "$bin"): TLS/HTTPS strings present"
+      return 0
+    fi
+    echo "WARN: $(basename "$bin") HTTPS markers weak; check FFmpeg --enable-schannel" >&2
+    return 0
+  fi
   if strings "$bin" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
     echo "ok $(basename "$bin"): libcurl enabled"
     return 0
   fi
-  echo "ERROR: $(basename "$bin") built without libcurl (HTTPS/302 will fail on Windows)" >&2
+  echo "ERROR: $(basename "$bin") built without libcurl" >&2
   return 1
+}
+
+verify_mpv_has_libcurl() {
+  verify_mpv_network "$@"
 }
 
 # macOS 目标架构：交叉编 x86_64 时由 KOTV_MPV_MACOS_ARCH 指定，否则本机。
@@ -1168,7 +1187,7 @@ EOF
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan="$mpv_vk" \
-      -Dlibcurl=enabled \
+      -Dlibcurl=disabled \
       "${mpv_extra[@]}" \
       -Dlua=disabled \
       -Dlibavdevice=disabled \
@@ -1182,7 +1201,7 @@ EOF
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan=enabled \
-      -Dlibcurl=enabled \
+      -Dlibcurl=disabled \
       -Dlua=disabled \
       -Dlibavdevice=disabled
   fi

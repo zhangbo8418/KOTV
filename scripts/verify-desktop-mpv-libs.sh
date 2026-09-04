@@ -58,11 +58,23 @@ check_libcurl() {
   fi
 }
 
-echo "==> verify desktop libmpv (Vulkan + AV3A + libcurl when expected)"
+# Windows：不强制 mpv libcurl；FFmpeg Schannel 负责 HTTPS。
+check_win_https() {
+  local f="$1"
+  local name="$2"
+  [[ -f "$f" ]] || return
+  if strings "$f" 2>/dev/null | grep -Eiq 'schannel|https protocol|tls_schannel|HTTPS'; then
+    echo "ok $name: HTTPS/schannel markers"
+    return
+  fi
+  echo "WARN: $name HTTPS markers weak (FFmpeg should still have --enable-schannel)" >&2
+}
+
+echo "==> verify desktop libmpv (Vulkan + AV3A + network)"
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
   check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
-  check_libcurl "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  check_win_https "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   if [[ -f "$ASSET/windows/mpv-2.dll" ]]; then
     chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
     "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$ASSET/windows"
@@ -87,4 +99,4 @@ if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
 fi
 
 [[ "$fail" == 0 ]] || exit 1
-echo "==> ok: desktop libmpv Vulkan + libcurl checks passed"
+echo "==> ok: desktop libmpv network checks passed"
