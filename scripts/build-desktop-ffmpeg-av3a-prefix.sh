@@ -61,8 +61,8 @@ clone_ffmpeg() {
   git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
 }
 
-# v5: 全平台禁用 avdevice，避免与 fvp/mdk 的 libffmpeg 同进程冲突（mac ObjC / Win talloc）
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v5"
+# v6: v5 + 强制 TLS（Win/Linux OpenSSL，macOS SecureTransport），供 HTTPS/302
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v6"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -263,9 +263,13 @@ PROBE
   grep -n 'libarcdav3a' configure | head -8
 fi
 
+# HTTPS/302：Win/Linux 用前缀 OpenSSL；macOS 用 SecureTransport（系统证书）。
+chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
+"$ROOT/scripts/ensure-desktop-curl-openssl.sh"
+setup_pkg_config
+
 FFMPEG_EXTRA=(--extra-cflags="-I${PREF_NATIVE}/include")
 FFMPEG_EXTRA+=(--extra-ldflags="-L${PREF_NATIVE}/lib")
-FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
 # 播放不需要 avdevice；与 fvp/mdk 同进程时 libavdevice 易引入重复注册/堆损坏（mac ObjC 类，Win Vulkan 路径 talloc）。
 FFMPEG_EXTRA+=(--disable-avdevice)
 if kotv_is_windows_build; then
@@ -273,9 +277,17 @@ if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
   # 勿对 FFmpeg 全局 -D_WIN32_WINNT=0x0601：mf_utils 会缺 Win8+ 符号而编不过。
   FFMPEG_EXTRA+=(--disable-mediafoundation)
+  FFMPEG_EXTRA+=(--enable-openssl)
+  # 静态 OpenSSL 额外系统库（pkg-config Libs.private 偶发丢）。
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32 -lbcrypt")
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
+  FFMPEG_EXTRA+=(--enable-securetransport)
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
+else
+  FFMPEG_EXTRA+=(--enable-openssl)
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
 fi
 
 # 旧前缀可能残留 libavdevice.pc（无 .a）；meson 会回退到 Homebrew 共享库。
@@ -308,7 +320,16 @@ if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$lib" 2>/dev/null; then
   echo "ERROR: $lib built without AV3A/libarcdav3a" >&2
   exit 1
 fi
+# lavf 必须带 HTTPS，否则 Win 上 http→https 302 会一直缓冲。
+if [[ -f ffbuild/config.h ]]; then
+  if ! grep -qE '^#define CONFIG_HTTPS_PROTOCOL 1$' ffbuild/config.h; then
+    echo "ERROR: FFmpeg built without HTTPS protocol (need openssl/securetransport)" >&2
+    grep -E 'CONFIG_(HTTPS|OPENSSL|SECURETRANSPORT|TLS)' ffbuild/config.h | head -20 >&2 || true
+    exit 1
+  fi
+  echo "ok FFmpeg HTTPS protocol enabled"
+fi
 mkdir -p "$PREFIX"
 promote_arcdav3a_in_avcodec_pc
-echo "pic+av3a $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
-echo "ok FFmpeg+AV3A prefix: $PREFIX"
+echo "pic+av3a+tls $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
+echo "ok FFmpeg+AV3A+TLS prefix: $PREFIX"

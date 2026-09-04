@@ -75,6 +75,33 @@ kotv_libplacebo_profile() {
   fi
 }
 
+# 强制 libcurl（跟 302 / HTTPS 稳）；依赖 ensure-desktop-curl-openssl.sh + FFmpeg TLS。
+ensure_mpv_libcurl_deps() {
+  chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
+  "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    # 系统 libcurl 常无 .pc；meson 仍能探测。
+    return 0
+  fi
+  if ! pkg-config --exists libcurl 2>/dev/null; then
+    echo "ERROR: libcurl pkg-config missing (need ensure-desktop-curl-openssl.sh)" >&2
+    exit 1
+  fi
+  echo "ok libcurl for mpv: $(pkg-config --modversion libcurl)"
+}
+
+verify_mpv_has_libcurl() {
+  local bin="$1"
+  [[ -f "$bin" ]] || return 1
+  if strings "$bin" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
+    echo "ok $(basename "$bin"): libcurl enabled"
+    return 0
+  fi
+  echo "ERROR: $(basename "$bin") built without libcurl (HTTPS/302 will fail on Windows)" >&2
+  return 1
+}
+
 # macOS 目标架构：交叉编 x86_64 时由 KOTV_MPV_MACOS_ARCH 指定，否则本机。
 kotv_macos_target_arch() {
   echo "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
@@ -900,6 +927,7 @@ build_mpv_linux() {
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
   fi
   ensure_libplacebo
+  ensure_mpv_libcurl_deps
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d mpv/.git ]]; then
@@ -920,6 +948,7 @@ build_mpv_linux() {
     -Dcplayer=false \
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
+    -Dlibcurl=enabled \
     -Dlua=disabled \
     -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-linux"
@@ -928,6 +957,7 @@ build_mpv_linux() {
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$ASSET/linux/libmpv.so.2" \
       || { echo "ERROR: libmpv.so.2 missing AV3A symbols" >&2; exit 1; }
   fi
+  verify_mpv_has_libcurl "$ASSET/linux/libmpv.so.2" || exit 1
   echo "built linux/libmpv.so.2 (+ AV3A=$AV3A)"
 }
 
@@ -945,6 +975,7 @@ build_mpv_macos() {
   # libass：PREFIX 没有则源码编进前缀（交叉 x86_64 不能用 arm64 bottle）。
   ensure_windows_libass
   ensure_libplacebo
+  ensure_mpv_libcurl_deps
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d mpv/.git ]]; then
@@ -970,6 +1001,7 @@ build_mpv_macos() {
     -Dcplayer=false \
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
+    -Dlibcurl=enabled \
     -Dlua=disabled \
     -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-macos"
@@ -996,6 +1028,7 @@ build_mpv_macos() {
     echo "ERROR: libmpv.dylib built without vulkan" >&2
     exit 1
   fi
+  verify_mpv_has_libcurl "$ASSET/macos/libmpv.dylib" || exit 1
   mkdir -p "$ASSET/macos"
   for f in libvulkan.1.dylib libvulkan.dylib libMoltenVK.dylib; do
     [[ -f "$PREFIX/lib/$f" ]] || continue
@@ -1108,6 +1141,7 @@ EOF
   rm -rf build
   # 禁止 meson 回退到系统 libavdevice（与 mdk 同进程时易堆损坏）。
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
+  ensure_mpv_libcurl_deps
   if kotv_is_windows_build; then
     local mpv_vk=enabled
     if kotv_is_mpv_win7_build; then
@@ -1126,6 +1160,7 @@ EOF
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan="$mpv_vk" \
+      -Dlibcurl=enabled \
       "${mpv_extra[@]}" \
       -Dlua=disabled \
       -Dlibavdevice=disabled \
@@ -1139,6 +1174,7 @@ EOF
       -Dcplayer=false \
       -Dmanpage-build=disabled \
       -Dvulkan=enabled \
+      -Dlibcurl=enabled \
       -Dlua=disabled \
       -Dlibavdevice=disabled
   fi
@@ -1157,6 +1193,7 @@ EOF
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" \
       || { echo "ERROR: mpv-2.dll missing AV3A symbols" >&2; exit 1; }
   fi
+  verify_mpv_has_libcurl "$out" || exit 1
   echo "built windows/mpv-2.dll (+ AV3A=$AV3A) from $dll"
   if kotv_is_mpv_win7_build; then
     if ! kotv_meson_feature_enabled d3d11 build && ! kotv_mpv_dll_has_d3d11 "$out"; then

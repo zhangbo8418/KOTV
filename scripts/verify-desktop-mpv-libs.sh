@@ -46,10 +46,23 @@ check_no_avdevice() {
   echo "ok $name: no libavdevice / AVFFrameReceiver"
 }
 
-echo "==> verify desktop libmpv (Vulkan + AV3A when expected)"
+check_libcurl() {
+  local f="$1"
+  local name="$2"
+  [[ -f "$f" ]] || return
+  if strings "$f" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
+    echo "ok $name: libcurl enabled"
+  else
+    echo "ERROR: $name lacks libcurl (rebuild with -Dlibcurl=enabled + ensure-desktop-curl-openssl.sh)" >&2
+    fail=1
+  fi
+}
+
+echo "==> verify desktop libmpv (Vulkan + AV3A + libcurl when expected)"
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
   check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  check_libcurl "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   if [[ -f "$ASSET/windows/mpv-2.dll" ]]; then
     chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
     "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$ASSET/windows"
@@ -60,11 +73,13 @@ fi
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == linux* ]]; then
   check_vulkan "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
   check_av3a "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
+  check_libcurl "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
 fi
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
   if [[ -f "$ASSET/macos/libmpv.dylib" ]]; then
     check_vulkan "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_av3a "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
+    check_libcurl "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_no_avdevice "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
   else
     echo "skip macos/libmpv.dylib (not built)"
@@ -72,4 +87,4 @@ if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
 fi
 
 [[ "$fail" == 0 ]] || exit 1
-echo "==> ok: desktop libmpv Vulkan checks passed"
+echo "==> ok: desktop libmpv Vulkan + libcurl checks passed"

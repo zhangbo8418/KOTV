@@ -279,6 +279,7 @@ jobs:
             libgtk-3-dev liblzma-dev libgl1-mesa-dev xorg-dev libxkbcommon-dev \
             libass-dev libarchive-dev libbluray-dev liblua5.2-dev libluajit-5.1-dev \
             libplacebo-dev libvulkan-dev libshaderc-dev liblcms2-dev \
+            libssl-dev libcurl4-openssl-dev \
             libasound2-dev libmpv-dev mpv \
             p7zip-full unzip curl zip
 
