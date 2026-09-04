@@ -154,8 +154,11 @@ cd "$src"
 
 cfg_args=(--prefix="$pref" --libdir=lib shared no-docs no-tests)
 if kotv_is_windows_build; then
-  # mingw64 + Win7 API 下限；enable-quic 在 3.5 默认可用
-  "$PERL" ./Configure mingw64 "${cfg_args[@]}" ${WIN7_CFLAGS}
+  # Win7 宏必须走 CFLAGS，不能当 Configure 位置参数（否则 exit 255）
+  export CFLAGS="${WIN7_CFLAGS} ${CFLAGS:-}"
+  export CXXFLAGS="${WIN7_CFLAGS} ${CXXFLAGS:-}"
+  # mingw64；OpenSSL 3.5 默认带 QUIC（供 ngtcp2/HTTP3）
+  "$PERL" ./Configure mingw64 "${cfg_args[@]}"
 else
   "$PERL" ./Configure "${cfg_args[@]}"
 fi

@@ -53,18 +53,30 @@ fetch_extract() {
   local name="$1" ver="$2" repo="$3"
   local src="$BUILD_DIR/$name-$ver"
   local tarball="$BUILD_DIR/$name-$ver.tar.gz"
+  # tmp 名勿匹配 ${name}-*，否则 find 会命中 tmp 自身（无顶层 CMakeLists）
+  local tmp="$BUILD_DIR/_extract-${name}-${ver}"
   if [[ -f "$src/CMakeLists.txt" ]]; then
     return 0
   fi
+  rm -rf "$src" "$tmp"
   curl -fsSL -o "$tarball" "https://github.com/${repo}/archive/refs/tags/v${ver}.tar.gz"
-  rm -rf "$src" "$BUILD_DIR/$name-$ver-tmp"
-  mkdir -p "$BUILD_DIR/$name-$ver-tmp"
-  tar -xzf "$tarball" -C "$BUILD_DIR/$name-$ver-tmp"
+  mkdir -p "$tmp"
+  tar -xzf "$tarball" -C "$tmp"
   local found
-  found="$(find "$BUILD_DIR/$name-$ver-tmp" -maxdepth 1 -type d -name "${name}-*" | head -1 || true)"
-  [[ -n "$found" ]] || { echo "ERROR: extract $name failed" >&2; exit 1; }
+  found="$(find "$tmp" -maxdepth 1 -mindepth 1 -type d -name "${name}-*" | head -1 || true)"
+  if [[ -z "$found" || ! -f "$found/CMakeLists.txt" ]]; then
+    echo "ERROR: extract $name v$ver missing CMakeLists.txt" >&2
+    ls -la "$tmp" >&2 || true
+    [[ -n "$found" ]] && ls -la "$found" >&2 || true
+    exit 1
+  fi
   mv "$found" "$src"
-  rm -rf "$BUILD_DIR/$name-$ver-tmp"
+  rm -rf "$tmp"
+  [[ -f "$src/CMakeLists.txt" ]] || {
+    echo "ERROR: $src still missing CMakeLists.txt after move" >&2
+    ls -la "$src" >&2 || true
+    exit 1
+  }
 }
 
 build_cmake_lib() {
@@ -75,9 +87,20 @@ build_cmake_lib() {
   rm -rf "$build"
   mkdir -p "$build"
   echo "==> build $name → $pref"
-  local -a winflags=()
+  [[ -f "$src/CMakeLists.txt" ]] || {
+    echo "ERROR: $src has no CMakeLists.txt" >&2
+    ls -la "$src" >&2 || true
+    exit 1
+  }
+  local -a cmake_cmd=(
+    cmake -S "$src" -B "$build" -G "$gen"
+    -DCMAKE_INSTALL_PREFIX="$pref"
+    -DCMAKE_BUILD_TYPE=Release
+    -DBUILD_SHARED_LIBS=ON
+    -DCMAKE_PREFIX_PATH="$pref"
+  )
   if kotv_is_windows_build; then
-    winflags+=(
+    cmake_cmd+=(
       -DCMAKE_C_COMPILER=gcc
       -DCMAKE_CXX_COMPILER=g++
       -DCMAKE_MAKE_PROGRAM=mingw32-make
@@ -85,13 +108,8 @@ build_cmake_lib() {
       -DCMAKE_CXX_FLAGS="${WIN7_CFLAGS}"
     )
   fi
-  cmake -S "$src" -B "$build" -G "$gen" \
-    -DCMAKE_INSTALL_PREFIX="$pref" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_SHARED_LIBS=ON \
-    -DCMAKE_PREFIX_PATH="$pref" \
-    "${winflags[@]}" \
-    "$@"
+  # 勿用空数组 "${winflags[@]}"：macOS bash 3.2 + set -u 会 unbound
+  "${cmake_cmd[@]}" "$@"
   cmake --build "$build" -j"$JOBS"
   cmake --install "$build"
 }

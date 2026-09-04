@@ -861,12 +861,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _playCatchup(int progIdx) async {
-    // 对齐 TV LivePlaybackController.selectEpg → Catchup.format → startPlayback：
-    // 回看 URL 由引擎 LiveApi.getUrl + Catchup.format；与直播同一套立刻 play。
+    // 对齐 TV：stop → LiveApi.getUrl+Catchup.format → 立刻 play（与 _playChannel 同序）。
     if (_chIdx < 0) return;
     final serial = ++_playSerial;
     try {
       setState(() => _status = '加载回看…');
+      await _stopAllBackends();
+      if (!mounted || serial != _playSerial) return;
       final data = await ref.read(apiProvider).liveCatchup(
             group: _groupIdx,
             channel: _chIdx,
@@ -880,8 +881,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
       };
-      await _stopAllBackends();
-      if (!mounted || serial != _playSerial) return;
       await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, live: true);
       if (!mounted || serial != _playSerial) return;
       setState(() {
