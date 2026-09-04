@@ -5,18 +5,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 OPENSSL_VER="${KOTV_OPENSSL_VER:-3.5.2}"
-WIN7_CFLAGS="-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000"
-
-kotv_is_windows_build() {
-  case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-  [[ "${OS:-}" == "Windows_NT" ]]
-}
+WIN7_CFLAGS="$(kotv_win7_cflags)"
 
 kotv_native_path() {
   local p="$1"
@@ -25,21 +20,6 @@ kotv_native_path() {
   else
     printf '%s' "$p"
   fi
-}
-
-kotv_clean_win_path() {
-  kotv_is_windows_build || return 0
-  export PATH="/c/mingw-msvcrt/mingw64/bin:/usr/bin:/bin:${PATH:-}"
-  local cleaned="" part
-  IFS=':' read -ra _p <<<"$PATH"
-  for part in "${_p[@]}"; do
-    case "$part" in *[\ ]*|*[Pp]rogram*[Ff]iles*) continue ;; esac
-    [[ -z "$cleaned" ]] && cleaned="$part" || cleaned="$cleaned:$part"
-  done
-  export PATH="$cleaned"
-  export CC="${CC:-gcc}" CXX="${CXX:-g++}"
-  export CFLAGS="${CFLAGS:-} ${WIN7_CFLAGS}"
-  export CXXFLAGS="${CXXFLAGS:-} ${WIN7_CFLAGS}"
 }
 
 openssl_ver_ok() {
@@ -146,7 +126,7 @@ need curl
 need tar
 need make
 if kotv_is_windows_build; then
-  kotv_clean_win_path
+  kotv_clean_win_path "$BUILD_DIR/bin"
   need gcc
   MAKE="${KOTV_MAKE:-mingw32-make}"
   command -v "$MAKE" >/dev/null || MAKE=make
