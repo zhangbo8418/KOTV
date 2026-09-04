@@ -150,7 +150,24 @@ if kotv_is_windows_build; then
     -DCMAKE_CXX_FLAGS="${WIN7_CFLAGS}"
     -DCURL_CA_BUNDLE=none
     -DCURL_CA_PATH=none
+    -DUSE_LIBIDN2=OFF
+    -DUSE_WIN32_IDN=ON
   )
+elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+  # 禁用 brew libidn2：交叉编 x86_64 时 /opt/homebrew 是 arm64，链上会直接挂。
+  # 改用系统 Apple IDN（双架构可用）。
+  cmake_args+=(
+    -DUSE_LIBIDN2=OFF
+    -DUSE_APPLE_IDN=ON
+  )
+  if [[ "$(kotv_macos_hw_arch)" != "$(kotv_macos_target_arch)" ]]; then
+    export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")"
+    export PKG_CONFIG_LIBDIR="$(kotv_native_path "$PREFIX/lib/pkgconfig")"
+    cmake_args+=(
+      "-DCMAKE_IGNORE_PATH=/opt/homebrew;/usr/local/Homebrew;/usr/local"
+      -DCMAKE_PREFIX_PATH="$pref"
+    )
+  fi
 fi
 while IFS= read -r a; do
   [[ -n "$a" ]] && cmake_args+=("$a")

@@ -124,16 +124,16 @@ kotv_copy_strawberry_pm() {
   return 1
 }
 
-# 一次性从 Strawberry 拷纯 Perl 目录树（不含 Config.pm，避免污染）。
+# 一次性从 Strawberry 拷纯 Perl 目录（严禁拷 File/Encode 等带 XS 的模块：
+# 否则会出现 File::Glob object version 1.42 does not match … 1.33）。
 kotv_vendor_strawberry_pureperl_trees() {
   local local_lib="$1" d
-  for d in Pod Locale I18N ExtUtils Module Params Text Encode Getopt HTTP File Carp \
-           IPC AutoLoader base parent version; do
+  for d in Pod Locale I18N ExtUtils Module Params Text Getopt HTTP; do
     kotv_copy_strawberry_pm "$local_lib" "$d" || true
   done
-  for f in parent.pm version.pm base.pm; do
-    kotv_copy_strawberry_pm "$local_lib" "$f" || true
-  done
+  # 清掉误拷的 XS 包装，强制用 Git perl 自带的 File::Glob 等
+  rm -rf "$local_lib/File" "$local_lib/Encode" "$local_lib/Carp" \
+    "$local_lib/IPC" "$local_lib/AutoLoader" "$local_lib/DynaLoader.pm" 2>/dev/null || true
 }
 
 # 从 "Can't locate Foo/Bar.pm" 错误里 vendor 缺失模块。
@@ -141,6 +141,13 @@ kotv_vendor_cant_locate() {
   local err="$1" mod dest
   mod="$(printf '%s\n' "$err" | sed -n 's/.*Can'\''t locate \([^ ]*\) in @INC.*/\1/p' | head -1)"
   [[ -n "$mod" ]] || return 1
+  # 禁止 vendor XS 核心模块（会与 Git perl .so 版本冲突）
+  case "$mod" in
+    File/*|Encode*|Carp*|IPC/*|DynaLoader*|XSLoader*|Config*)
+      echo "ERROR: refusing to vendor XS/core module $mod into PERL5LIB" >&2
+      return 1
+      ;;
+  esac
   echo "WARN: perl missing $mod; vendoring" >&2
   if kotv_copy_strawberry_pm "$BUILD_DIR/perl5" "$mod"; then
     return 0
@@ -196,6 +203,9 @@ ensure_openssl_perl() {
   if kotv_is_windows_build; then
     kotv_vendor_strawberry_pureperl_trees "$local_lib"
   fi
+  # 无论从哪拷的，都清掉会撞 XS 的 File::Glob 等
+  rm -rf "$local_lib/File" "$local_lib/Encode" "$local_lib/Carp" \
+    "$local_lib/IPC" "$local_lib/AutoLoader" "$local_lib/DynaLoader.pm" 2>/dev/null || true
   export PERL5LIB="$local_lib"
 
   for p in "${candidates[@]}"; do
