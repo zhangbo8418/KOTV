@@ -75,12 +75,18 @@ kotv_libplacebo_profile() {
   fi
 }
 
-# 全平台：mpv 链 PREFIX libcurl（HTTP/2 + HTTP/3）。播流 HTTPS/HTTP2/RTSP/RTMP 仍走 FFmpeg。
+# 全平台：mpv 链 PREFIX libcurl（HTTP/2 + HTTP/3）。播流 HTTPS/RTSP/RTMP 仍走 FFmpeg。
 ensure_mpv_libcurl_deps() {
   chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
   "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+  # Linux：勿把 PKG_CONFIG_LIBDIR 锁成仅 PREFIX，否则丢系统 shaderc/vulkan/lcms2。
+  # macOS/Windows：锁前缀，避免 Homebrew / Program Files 窜进来。
+  if kotv_is_windows_build || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+  else
+    unset PKG_CONFIG_LIBDIR || true
+  fi
   if [[ ! -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]]; then
     echo "ERROR: missing $PREFIX/lib/pkgconfig/libcurl.pc" >&2
     exit 1
@@ -96,11 +102,20 @@ ensure_mpv_libcurl_deps() {
 verify_mpv_network() {
   local bin="$1"
   [[ -f "$bin" ]] || return 1
-  if ! strings "$bin" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
+  if strings "$bin" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
+    echo "ok $(basename "$bin"): libcurl enabled"
+  elif command -v otool >/dev/null 2>&1 && otool -L "$bin" 2>/dev/null | grep -Eiq 'libcurl'; then
+    echo "ok $(basename "$bin"): libcurl linked (otool)"
+  elif nm -g "$bin" 2>/dev/null | grep -Eiq 'curl_easy_init'; then
+    echo "ok $(basename "$bin"): libcurl symbols (nm)"
+  elif command -v dumpbin >/dev/null 2>&1 && dumpbin /DEPENDENTS "$bin" 2>/dev/null | grep -Eiq 'libcurl|curl'; then
+    echo "ok $(basename "$bin"): libcurl linked (dumpbin)"
+  else
     echo "ERROR: $(basename "$bin") built without libcurl" >&2
+    strings "$bin" 2>/dev/null | grep -i 'libcurl\|enabled features' | head -5 >&2 || true
+    otool -L "$bin" 2>/dev/null | head -30 >&2 || true
     return 1
   fi
-  echo "ok $(basename "$bin"): libcurl enabled"
   if kotv_is_windows_build; then
     if strings "$bin" 2>/dev/null | grep -Eiq 'schannel|https protocol|tls_|HTTPS'; then
       echo "ok $(basename "$bin"): FFmpeg TLS/HTTPS markers present"

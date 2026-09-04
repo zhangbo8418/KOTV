@@ -45,18 +45,24 @@ PY
 # Git Bash/MinGW 下必须用 Unix 路径风格的 perl；Strawberry 会报
 # "doesn't produce Unix like paths" 并以 exit 255 失败。
 ensure_openssl_perl() {
-  local p candidates=() berry_lib=""
+  local p candidates=() local_lib="$BUILD_DIR/perl5"
   if kotv_is_windows_build; then
     candidates+=(/usr/bin/perl /bin/perl)
-    # 解释器用 MSYS（Unix 路径）；模块可借 Strawberry 的 Locale::Maketext
-    for berry_lib in \
-      /c/Strawberry/perl/lib \
-      /c/strawberry/perl/lib \
-      /c/Strawberry/perl/site/lib \
-      /c/strawberry/perl/site/lib; do
-      [[ -d "$berry_lib" ]] || continue
-      export PERL5LIB="${berry_lib}${PERL5LIB:+:$PERL5LIB}"
+    # 清掉可能残留的 Strawberry PERL5LIB（整库会污染 Config.pm）
+    unset PERL5LIB || true
+    # 勿把整个 Strawberry lib 塞进 PERL5LIB（会带入 Config.pm，与 MSYS perl 版本冲突）。
+    # 只镜像 Locale::Maketext 相关纯 Perl 模块。
+    mkdir -p "$local_lib"
+    local src
+    for src in /c/Strawberry/perl/lib /c/strawberry/perl/lib; do
+      [[ -d "$src/Locale" ]] || continue
+      cp -R "$src/Locale" "$local_lib/" 2>/dev/null || true
+      [[ -d "$src/I18N" ]] && cp -R "$src/I18N" "$local_lib/" 2>/dev/null || true
+      break
     done
+    if [[ -f "$local_lib/Locale/Maketext.pm" ]]; then
+      export PERL5LIB="$local_lib"
+    fi
   fi
   candidates+=("$(command -v perl 2>/dev/null || true)")
   for p in "${candidates[@]}"; do
@@ -71,15 +77,27 @@ ensure_openssl_perl() {
   for p in "${candidates[@]}"; do
     [[ -n "$p" && -x "$p" ]] || continue
     case "$p" in *[Ss]trawberry*) continue ;; esac
-    echo "==> install Locale::Maketext for $p"
-    PERL_MM_USE_DEFAULT=1 "$p" -MCPAN -e "CPAN::Shell->notest('install','Locale::Maketext')" 2>&1 | tail -30 || true
+    echo "==> install Locale::Maketext for $p into $local_lib"
+    mkdir -p "$local_lib"
+    # 从 CPAN 拉纯源码进本地 lib（不碰系统/Strawberry Config.pm）
+    (
+      cd "$BUILD_DIR"
+      curl -fsSL -o Locale-Maketext.tar.gz \
+        "https://cpan.metacpan.org/authors/id/T/TO/TODDR/Locale-Maketext-1.33.tar.gz" \
+        || curl -fsSL -o Locale-Maketext.tar.gz \
+          "https://www.cpan.org/modules/by-module/Locale/Locale-Maketext-1.33.tar.gz"
+      rm -rf Locale-Maketext-1.33
+      tar -xzf Locale-Maketext.tar.gz
+      cp -R Locale-Maketext-1.33/lib/Locale "$local_lib/" 2>/dev/null || true
+    ) 2>&1 | tail -20 || true
+    export PERL5LIB="$local_lib${PERL5LIB:+:$PERL5LIB}"
     if "$p" -MLocale::Maketext -e "1" 2>/dev/null; then
       export PERL="$p"
-      echo "ok perl for OpenSSL after CPAN: $PERL"
+      echo "ok perl for OpenSSL after local Locale::Maketext: $PERL"
       return 0
     fi
   done
-  echo "ERROR: need MSYS/Git perl with Locale::Maketext (PERL5LIB from Strawberry OK; not Strawberry as \$PERL)" >&2
+  echo "ERROR: need MSYS/Git perl + Locale::Maketext (no Strawberry Config.pm in PERL5LIB)" >&2
   exit 1
 }
 
