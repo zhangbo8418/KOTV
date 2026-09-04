@@ -48,18 +48,34 @@ have_curl_pc() {
   pkg-config --exists libcurl 2>/dev/null
 }
 
-# macOS：SDK/系统自带 curl；文件探针在新系统常失败（共享缓存）。
+# macOS：SDK/系统自带 curl；新系统 dyld 共享缓存可能没有 /usr/lib/libcurl*.dylib。
+# meson -Dlibcurl=enabled 需要 libcurl.pc —— 优先 Homebrew curl，否则写一份链 -lcurl 的桩 .pc。
 if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  if have_curl_pc \
-    || command -v curl-config >/dev/null 2>&1 \
-    || [[ -f /usr/lib/libcurl.4.dylib ]] \
-    || [[ -f /usr/lib/libcurl.dylib ]] \
-    || clang -Wl,-lcurl -o /dev/null -x c - <<<'int main(){return 0;}' 2>/dev/null; then
-    echo "ok macOS network: system/SDK libcurl (+ FFmpeg SecureTransport)"
+  if ! have_curl_pc && command -v brew >/dev/null 2>&1; then
+    brew_curl="$(brew --prefix curl 2>/dev/null || true)"
+    if [[ -n "$brew_curl" && -d "$brew_curl/lib/pkgconfig" ]]; then
+      export PKG_CONFIG_PATH="$brew_curl/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    fi
+  fi
+  if have_curl_pc; then
+    echo "ok macOS network: libcurl=$(pkg-config --modversion libcurl) (+ FFmpeg SecureTransport)"
     exit 0
   fi
-  # CI runner 仍应有 curl；放行并让 meson -Dlibcurl=enabled 自己失败更清晰。
-  echo "ok macOS network: assume SDK libcurl (dyld cache; meson will verify)"
+  cat >"$PREFIX/lib/pkgconfig/libcurl.pc" <<EOF
+prefix=/usr
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: libcurl
+Description: macOS SDK / system libcurl (KOTV stub pc)
+Version: 8.0.0
+Libs: -lcurl
+Cflags:
+EOF
+  export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  have_curl_pc || { echo "ERROR: failed to install stub libcurl.pc" >&2; exit 1; }
+  echo "ok macOS network: stub libcurl.pc → -lcurl (+ FFmpeg SecureTransport)"
   exit 0
 fi
 
@@ -82,13 +98,13 @@ build_curl_schannel() {
   pref="$(kotv_native_path "$PREFIX")"
   echo "==> build libcurl $CURL_VER (Windows Schannel, no OpenSSL) → $pref"
   export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")"
+  # 不可同时 --without-ssl 与 --with-schannel（curl configure 会直接报错）。
   ./configure \
     --prefix="$pref" \
     --host=x86_64-w64-mingw32 \
     --disable-shared \
     --enable-static \
     --with-schannel \
-    --without-ssl \
     --without-zlib \
     --without-libpsl \
     --without-brotli \

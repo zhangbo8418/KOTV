@@ -81,8 +81,12 @@ ensure_mpv_libcurl_deps() {
   "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    # 系统 libcurl 常无 .pc；meson 仍能探测。
-    return 0
+    if command -v brew >/dev/null 2>&1; then
+      brew_curl="$(brew --prefix curl 2>/dev/null || true)"
+      if [[ -n "$brew_curl" && -d "$brew_curl/lib/pkgconfig" ]]; then
+        export PKG_CONFIG_PATH="$brew_curl/lib/pkgconfig:$PKG_CONFIG_PATH"
+      fi
+    fi
   fi
   if ! pkg-config --exists libcurl 2>/dev/null; then
     echo "ERROR: libcurl pkg-config missing (need ensure-desktop-curl-openssl.sh)" >&2
