@@ -61,8 +61,8 @@ clone_ffmpeg() {
   git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
 }
 
-# v9: TLS + RTSP/RTMP + HTTP/2(nghttp2)；HTTP/3 由 mpv libcurl 栈提供（见 ensure-desktop-curl）
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v9"
+# v10: TLS + RTSP/RTMP；HTTP/2+3 不走 FFmpeg（FongMi 无 libnghttp2），由 mpv libcurl
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v10"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -264,17 +264,13 @@ PROBE
 fi
 
 # HTTPS/302：Win=Schannel；Linux=OpenSSL；macOS=SecureTransport。
-# HTTP/2：libnghttp2。RTSP/RTMP：FFmpeg 内置。HTTP/3：上游 lavf 尚未合入，由 mpv libcurl 栈覆盖。
-chmod +x "$ROOT/scripts/ensure-desktop-nghttp2.sh"
-"$ROOT/scripts/ensure-desktop-nghttp2.sh"
+# RTSP/RTMP：FFmpeg 内置。HTTP/2·HTTP/3：FongMi FFmpeg 无 --enable-libnghttp2，由 mpv libcurl 栈提供。
 setup_pkg_config
 
 FFMPEG_EXTRA=(--extra-cflags="-I${PREF_NATIVE}/include")
 FFMPEG_EXTRA+=(--extra-ldflags="-L${PREF_NATIVE}/lib")
 # 播放不需要 avdevice；与 fvp/mdk 同进程时 libavdevice 易引入重复注册/堆损坏（mac ObjC 类，Win Vulkan 路径 talloc）。
 FFMPEG_EXTRA+=(--disable-avdevice)
-# 网络协议：HTTPS + 直播常用 RTSP/RTMP + HTTP/2（nghttp2）。
-FFMPEG_EXTRA+=(--enable-libnghttp2)
 FFMPEG_EXTRA+=(--enable-network)
 if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
@@ -283,15 +279,15 @@ if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--disable-mediafoundation)
   # 原生 Schannel，避免 MinGW 编 OpenSSL（MSYS perl 缺 Locale::Maketext）。
   FFMPEG_EXTRA+=(--enable-schannel)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lnghttp2 -lcrypt32 -lsecur32 -lws2_32")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lcrypt32 -lsecur32 -lws2_32")
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
   FFMPEG_EXTRA+=(--enable-securetransport)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lnghttp2")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
 else
   FFMPEG_EXTRA+=(--enable-openssl)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lnghttp2")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
 fi
 
 # 旧前缀可能残留 libavdevice.pc（无 .a）；meson 会回退到 Homebrew 共享库。
@@ -324,7 +320,7 @@ if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$lib" 2>/dev/null; then
   echo "ERROR: $lib built without AV3A/libarcdav3a" >&2
   exit 1
 fi
-# lavf 必须带 HTTPS + 直播常用协议；HTTP/2 靠 libnghttp2。
+# lavf：HTTPS + 直播常用 RTSP/RTMP（FongMi 无 libnghttp2 选项；HTTP/2+3 走 mpv libcurl）。
 if [[ -f ffbuild/config.h ]]; then
   fail_proto=0
   if ! grep -qE '^#define CONFIG_HTTPS_PROTOCOL 1$' ffbuild/config.h; then
@@ -344,17 +340,13 @@ if [[ -f ffbuild/config.h ]]; then
     echo "ERROR: FFmpeg missing RTMP protocol" >&2
     fail_proto=1
   fi
-  if ! grep -qE '^#define CONFIG_LIBNGHTTP2 1$' ffbuild/config.h; then
-    echo "ERROR: FFmpeg built without libnghttp2 (HTTP/2)" >&2
-    fail_proto=1
-  fi
   if [[ "$fail_proto" != 0 ]]; then
-    grep -E 'CONFIG_(HTTPS|HTTP_PROTOCOL|RTSP|RTMP|LIBNGHTTP2|OPENSSL|SCHANNEL|SECURETRANSPORT)' ffbuild/config.h | head -50 >&2 || true
+    grep -E 'CONFIG_(HTTPS|HTTP_PROTOCOL|RTSP|RTMP|OPENSSL|SCHANNEL|SECURETRANSPORT)' ffbuild/config.h | head -50 >&2 || true
     exit 1
   fi
-  echo "ok FFmpeg protocols: HTTPS + HTTP + RTSP + RTMP + HTTP/2(nghttp2)"
+  echo "ok FFmpeg protocols: HTTPS + HTTP + RTSP + RTMP"
 fi
 mkdir -p "$PREFIX"
 promote_arcdav3a_in_avcodec_pc
-echo "pic+av3a+tls+http2+rtsp+rtmp $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
-echo "ok FFmpeg+AV3A+TLS+HTTP2+RTSP/RTMP prefix: $PREFIX"
+echo "pic+av3a+tls+rtsp+rtmp $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
+echo "ok FFmpeg+AV3A+TLS+RTSP/RTMP prefix: $PREFIX"

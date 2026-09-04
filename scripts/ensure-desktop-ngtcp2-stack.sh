@@ -77,7 +77,13 @@ build_cmake_lib() {
   echo "==> build $name → $pref"
   local -a winflags=()
   if kotv_is_windows_build; then
-    winflags+=(-DCMAKE_C_FLAGS="${WIN7_CFLAGS}" -DCMAKE_CXX_FLAGS="${WIN7_CFLAGS}")
+    winflags+=(
+      -DCMAKE_C_COMPILER=gcc
+      -DCMAKE_CXX_COMPILER=g++
+      -DCMAKE_MAKE_PROGRAM=mingw32-make
+      -DCMAKE_C_FLAGS="${WIN7_CFLAGS}"
+      -DCMAKE_CXX_FLAGS="${WIN7_CFLAGS}"
+    )
   fi
   cmake -S "$src" -B "$build" -G "$gen" \
     -DCMAKE_INSTALL_PREFIX="$pref" \

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 把静态 libnghttp2 装进 PREFIX，供 FFmpeg --enable-libnghttp2（HTTP/2）。
+# 把静态 libnghttp2 装进 PREFIX，供 libcurl HTTP/2（mpv 网络栈；FFmpeg 不用）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -51,13 +51,9 @@ mkdir -p "$build"
 
 gen=Ninja
 command -v ninja >/dev/null 2>&1 || gen="Unix Makefiles"
+# Windows：强制 MinGW Makefiles。Ninja 包装器在 MinGW cmake 下易报 unknown error。
 if kotv_is_windows_build; then
-  # MinGW Makefiles 更稳；有 ninja wrapper 再用 Ninja
-  if command -v ninja >/dev/null 2>&1; then
-    gen=Ninja
-  else
-    gen="MinGW Makefiles"
-  fi
+  gen="MinGW Makefiles"
 fi
 
 echo "==> build libnghttp2 $NGHTTP2_VER → $pref (generator=$gen)"
@@ -72,7 +68,12 @@ nghttp2_cmake=(
   -DBUILD_TESTING=OFF
 )
 if kotv_is_windows_build; then
-  nghttp2_cmake+=(-DCMAKE_C_FLAGS="$(kotv_win7_cflags)")
+  nghttp2_cmake+=(
+    -DCMAKE_C_COMPILER=gcc
+    -DCMAKE_CXX_COMPILER=g++
+    -DCMAKE_MAKE_PROGRAM=mingw32-make
+    -DCMAKE_C_FLAGS="$(kotv_win7_cflags)"
+  )
 fi
 cmake -S "$src" -B "$build" -G "$gen" "${nghttp2_cmake[@]}"
 cmake --build "$build" -j"$JOBS"

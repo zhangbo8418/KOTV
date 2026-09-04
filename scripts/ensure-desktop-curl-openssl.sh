@@ -126,6 +126,9 @@ cmake_args=(
 )
 if kotv_is_windows_build; then
   cmake_args+=(
+    -DCMAKE_C_COMPILER=gcc
+    -DCMAKE_CXX_COMPILER=g++
+    -DCMAKE_MAKE_PROGRAM=mingw32-make
     -DCMAKE_C_FLAGS="${WIN7_CFLAGS} -DNGHTTP2_STATICLIB"
     -DCMAKE_CXX_FLAGS="${WIN7_CFLAGS}"
     -DCURL_CA_BUNDLE=none

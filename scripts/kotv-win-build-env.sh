@@ -19,7 +19,7 @@ kotv_ensure_win_cmake_wrappers() {
   local bindir="${1:?bindir}"
   kotv_is_windows_build || return 0
   mkdir -p "$bindir"
-  local cmake_bin ninja_bin c
+  local cmake_bin c
   cmake_bin="$(command -v cmake 2>/dev/null || true)"
   if [[ -z "$cmake_bin" || "$cmake_bin" == *[\ ]* ]]; then
     for c in \
@@ -44,21 +44,9 @@ EOF
     cp -f "$bindir/cmake" "$bindir/cmake.exe" 2>/dev/null || true
     echo "ok cmake wrapper → $bindir/cmake ($cmake_win)"
   fi
-  ninja_bin="$(command -v ninja 2>/dev/null || true)"
-  if [[ -z "$ninja_bin" || "$ninja_bin" == *[\ ]* ]]; then
-    for c in \
-      "/c/Program Files/Microsoft Visual Studio/2022/Enterprise/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" \
-      "/c/ProgramData/chocolatey/bin/ninja.exe"; do
-      [[ -x "$c" ]] && ninja_bin="$c" && break
-    done
-  fi
-  if [[ -n "$ninja_bin" && -x "$ninja_bin" ]]; then
-    cat >"$bindir/ninja" <<EOF
-#!/bin/bash
-exec "$ninja_bin" "\$@"
-EOF
-    chmod +x "$bindir/ninja"
-  fi
+  # 不在无空格 PATH 里包一层 ninja：MinGW CMake + 包装器常报 unknown error。
+  # Windows 构建统一用 MinGW Makefiles。
+  rm -f "$bindir/ninja" "$bindir/ninja.exe" 2>/dev/null || true
 }
 
 kotv_clean_win_path() {
