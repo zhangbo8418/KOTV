@@ -61,8 +61,8 @@ clone_ffmpeg() {
   git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
 }
 
-# v6: v5 + 强制 TLS（Win/Linux OpenSSL，macOS SecureTransport），供 HTTPS/302
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v6"
+# v7: Win 用 Schannel（不编 OpenSSL）；mac 放宽 curl 探测；强制 HTTPS
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v7"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -263,7 +263,7 @@ PROBE
   grep -n 'libarcdav3a' configure | head -8
 fi
 
-# HTTPS/302：Win/Linux 用前缀 OpenSSL；macOS 用 SecureTransport（系统证书）。
+# HTTPS/302：Win=Schannel；Linux=OpenSSL；macOS=SecureTransport。
 chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
 "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
 setup_pkg_config
@@ -277,9 +277,9 @@ if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
   # 勿对 FFmpeg 全局 -D_WIN32_WINNT=0x0601：mf_utils 会缺 Win8+ 符号而编不过。
   FFMPEG_EXTRA+=(--disable-mediafoundation)
-  FFMPEG_EXTRA+=(--enable-openssl)
-  # 静态 OpenSSL 额外系统库（pkg-config Libs.private 偶发丢）。
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32 -lbcrypt")
+  # 原生 Schannel，避免 MinGW 编 OpenSSL（MSYS perl 缺 Locale::Maketext）。
+  FFMPEG_EXTRA+=(--enable-schannel)
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lcrypt32 -lsecur32 -lws2_32")
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
