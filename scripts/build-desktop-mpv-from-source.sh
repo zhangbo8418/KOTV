@@ -133,7 +133,7 @@ verify_mpv_has_libcurl() {
 # macOS：把 PREFIX 里的 curl/OpenSSL/ng* 拷进 assets，并把 libmpv 依赖改成 @rpath。
 kotv_macos_stage_network_dylibs() {
   local dest="$ASSET/macos" mpv="$ASSET/macos/libmpv.dylib"
-  local f real base dep
+  local f real base dep lib
   mkdir -p "$dest"
   [[ -f "$mpv" ]] || return 0
   shopt -s nullglob
@@ -168,6 +168,30 @@ kotv_macos_stage_network_dylibs() {
     echo "  + assets/macos/$base (network)"
   done
   shopt -u nullglob
+
+  # staged 库互相依赖也改成 @rpath（否则干净机仍找 PREFIX 绝对路径）
+  shopt -s nullglob
+  for lib in "$dest"/libcurl*.dylib "$dest"/libssl*.dylib "$dest"/libcrypto*.dylib \
+             "$dest"/libnghttp*.dylib "$dest"/libngtcp2*.dylib; do
+    [[ -f "$lib" ]] || continue
+    chmod u+w "$lib" 2>/dev/null || true
+    while read -r dep; do
+      [[ -n "$dep" ]] || continue
+      case "$dep" in /System/*|/usr/lib/*) continue ;; esac
+      base="$(basename "$dep")"
+      if [[ -f "$dest/$base" ]]; then
+        install_name_tool -change "$dep" "@rpath/$base" "$lib" 2>/dev/null || true
+      elif [[ "$base" == libcurl* && -f "$dest/libcurl.4.dylib" ]]; then
+        install_name_tool -change "$dep" "@rpath/libcurl.4.dylib" "$lib" 2>/dev/null || true
+      elif [[ "$base" == libssl* && -f "$dest/libssl.3.dylib" ]]; then
+        install_name_tool -change "$dep" "@rpath/libssl.3.dylib" "$lib" 2>/dev/null || true
+      elif [[ "$base" == libcrypto* && -f "$dest/libcrypto.3.dylib" ]]; then
+        install_name_tool -change "$dep" "@rpath/libcrypto.3.dylib" "$lib" 2>/dev/null || true
+      fi
+    done < <(otool -L "$lib" 2>/dev/null | awk 'NR>1 {print $1}')
+  done
+  shopt -u nullglob
+
   while read -r dep; do
     case "$dep" in
       *libcurl*|*libssl*|*libcrypto*|*libnghttp*|*libngtcp2*)
@@ -180,6 +204,12 @@ kotv_macos_stage_network_dylibs() {
         ;;
     esac
   done < <(otool -L "$mpv" 2>/dev/null | awk 'NR>1 {print $1}')
+
+  if [[ ! -f "$dest/libcurl.4.dylib" && ! -f "$dest/libcurl.dylib" ]]; then
+    echo "ERROR: staged macOS network dylibs missing libcurl (PREFIX=$PREFIX/lib)" >&2
+    ls -la "$PREFIX/lib"/libcurl* 2>/dev/null || true
+    exit 1
+  fi
 }
 
 # macOS 目标架构：交叉编 x86_64 时由 KOTV_MPV_MACOS_ARCH 指定，否则本机。
@@ -615,6 +645,17 @@ harvest_windows_mpv_dlls() {
   if [[ ! -f "$dest/vulkan-1.dll" ]]; then
     echo "ERROR: harvested windows dlls missing vulkan-1.dll (tried SDK Bin, System32, vulkan-runtime.exe)" >&2
     ls -la /c/VulkanSDK/*/Bin/vulkan-1.dll /c/Windows/System32/vulkan-1.dll 2>/dev/null || true
+    exit 1
+  fi
+  # HTTP/2+3 栈：显式要求 curl + OpenSSL（objdump 闭包偶发漏拷时尽早失败）
+  if ! ls "$dest"/libcurl*.dll >/dev/null 2>&1 && ! ls "$dest"/curl*.dll >/dev/null 2>&1; then
+    echo "ERROR: harvested windows dlls missing libcurl*.dll (HTTP/2+3)" >&2
+    ls -la "$PREFIX/bin"/libcurl* "$PREFIX/bin"/curl* 2>/dev/null || true
+    exit 1
+  fi
+  if ! ls "$dest"/libssl*.dll >/dev/null 2>&1; then
+    echo "ERROR: harvested windows dlls missing libssl*.dll" >&2
+    ls -la "$PREFIX/bin"/libssl* "$PREFIX/lib"/libssl* 2>/dev/null || true
     exit 1
   fi
   chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"

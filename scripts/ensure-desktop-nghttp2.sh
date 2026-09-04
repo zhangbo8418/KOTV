@@ -81,6 +81,10 @@ if kotv_is_windows_build; then
 else
   nghttp2_cmake+=(-DCMAKE_C_FLAGS="-fPIC")
 fi
+# macOS 交叉/Rosetta：显式目标 arch，避免混进 arm64 bottle 产物
+while IFS= read -r a; do
+  [[ -n "$a" ]] && nghttp2_cmake+=("$a")
+done < <(kotv_cmake_macos_arch_args)
 cmake -S "$src" -B "$build" -G "$gen" "${nghttp2_cmake[@]}"
 cmake --build "$build" -j"$JOBS"
 cmake --install "$build"

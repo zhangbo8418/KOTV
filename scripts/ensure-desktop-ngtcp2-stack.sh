@@ -123,6 +123,9 @@ build_cmake_lib() {
       -DCMAKE_CXX_FLAGS="${WIN7_CFLAGS}"
     )
   fi
+  while IFS= read -r a; do
+    [[ -n "$a" ]] && cmake_cmd+=("$a")
+  done < <(kotv_cmake_macos_arch_args)
   # 勿用空数组 "${winflags[@]}"：macOS bash 3.2 + set -u 会 unbound
   "${cmake_cmd[@]}" "$@"
   cmake --build "$build" -j"$JOBS"

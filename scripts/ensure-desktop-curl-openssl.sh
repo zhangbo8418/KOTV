@@ -62,7 +62,7 @@ curl_features_have_http3() {
   printf '%s\n' "$out" | grep -Eiq 'HTTP3|nghttp3|ngtcp2'
 }
 
-# 已缓存且带 HTTP3
+# 已缓存且带 HTTP3（必须有 curl 二进制可探；禁止无校验直接放行）
 if [[ -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]] \
   && { [[ -f "$PREFIX/lib/libcurl.a" || -f "$PREFIX/lib/libcurl.dll.a" || -f "$PREFIX/bin/libcurl-4.dll" || -f "$PREFIX/bin/libcurl.dll" \
       || -f "$PREFIX/lib/libcurl.dylib" || -f "$PREFIX/lib/libcurl.so" ]]; }; then
@@ -70,15 +70,22 @@ if [[ -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]] \
   for c in "$PREFIX/bin/curl.exe" "$PREFIX/bin/curl"; do
     [[ -x "$c" ]] && bin="$c" && break
   done
+  cache_ok=0
   if [[ -n "$bin" ]] && curl_features_have_http3 "$bin"; then
+    cache_ok=1
+  fi
+  # macOS：缓存库 arch 须匹配目标（Rosetta 任务勿复用 arm64 curl）
+  if [[ "$cache_ok" == 1 && "$(uname -s 2>/dev/null)" == "Darwin" && -f "$PREFIX/lib/libcurl.dylib" ]]; then
+    if ! kotv_macos_file_has_arch "$PREFIX/lib/libcurl.dylib" "$(kotv_macos_target_arch)"; then
+      echo "WARN: cached libcurl arch mismatch for $(kotv_macos_target_arch); rebuilding" >&2
+      cache_ok=0
+    fi
+  fi
+  if [[ "$cache_ok" == 1 ]]; then
     echo "ok cached libcurl $(pkg-config --modversion libcurl 2>/dev/null || echo present) (HTTP3)"
     exit 0
   fi
-  if [[ -z "$bin" ]]; then
-    echo "ok cached libcurl pc (no curl binary to probe)"
-    exit 0
-  fi
-  echo "WARN: cached curl lacks HTTP3; rebuilding" >&2
+  echo "WARN: cached curl lacks HTTP3/arch; rebuilding" >&2
 fi
 
 chmod +x "$ROOT/scripts/ensure-desktop-nghttp2.sh"
@@ -145,6 +152,9 @@ if kotv_is_windows_build; then
     -DCURL_CA_PATH=none
   )
 fi
+while IFS= read -r a; do
+  [[ -n "$a" ]] && cmake_args+=("$a")
+done < <(kotv_cmake_macos_arch_args)
 
 cmake -S "$src" -B "$build" -G "$gen" "${cmake_args[@]}"
 cmake --build "$build" -j"$JOBS"

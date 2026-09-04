@@ -83,6 +83,18 @@ if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
   check_libcurl "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_win_https "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   if [[ -f "$ASSET/windows/mpv-2.dll" ]]; then
+    if ! ls "$ASSET/windows"/libcurl*.dll >/dev/null 2>&1; then
+      echo "ERROR: windows assets missing libcurl*.dll (HTTP/2+3)" >&2
+      fail=1
+    else
+      echo "ok windows: libcurl dll present"
+    fi
+    if ! ls "$ASSET/windows"/libssl*.dll >/dev/null 2>&1; then
+      echo "ERROR: windows assets missing libssl*.dll" >&2
+      fail=1
+    else
+      echo "ok windows: libssl dll present"
+    fi
     chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
     "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$ASSET/windows"
     win_n="$(find "$ASSET/windows" -maxdepth 1 -type f -iname '*.dll' | wc -l | tr -d ' ')"
@@ -100,6 +112,19 @@ if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
     check_av3a "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_libcurl "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_no_avdevice "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
+    # libmpv 常以 @rpath/libcurl 链接；打包前 assets 必须已有 curl 栈
+    if [[ ! -f "$ASSET/macos/libcurl.4.dylib" && ! -f "$ASSET/macos/libcurl.dylib" ]]; then
+      echo "ERROR: macos assets missing libcurl*.dylib (stage network stack)" >&2
+      fail=1
+    else
+      echo "ok macos: libcurl dylib staged"
+    fi
+    if ! ls "$ASSET/macos"/libssl*.dylib >/dev/null 2>&1; then
+      echo "ERROR: macos assets missing libssl*.dylib" >&2
+      fail=1
+    else
+      echo "ok macos: libssl dylib staged"
+    fi
   else
     echo "skip macos/libmpv.dylib (not built)"
   fi

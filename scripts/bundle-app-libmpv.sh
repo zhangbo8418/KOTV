@@ -103,7 +103,7 @@ kotv_macos_bundle_dylib_deps() {
   local fw="$1"
   local root_lib="$2"
   local -a queue=()
-  local lib dep base dest_lib old_id f resolved r
+  local lib dep base dest_lib old_id f resolved r seen_blob=$'\n'
   [[ -f "$root_lib" ]] || return 1
   command -v otool >/dev/null || return 1
   command -v install_name_tool >/dev/null || return 1
@@ -111,14 +111,26 @@ kotv_macos_bundle_dylib_deps() {
   install_name_tool -id "@rpath/$(basename "$root_lib")" "$root_lib" 2>/dev/null || true
   kotv_macos_strip_abs_rpaths "$root_lib"
   queue+=("$root_lib")
+  seen_blob="${seen_blob}${root_lib}"$'\n'
 
   while ((${#queue[@]} > 0)); do
     lib="${queue[0]}"
     queue=("${queue[@]:1}")
     while IFS= read -r dep; do
       [[ -n "$dep" ]] || continue
-      kotv_macos_is_system_dylib "$dep" && continue
       base="$(basename "$dep")"
+      # @rpath 已在 Frameworks：改写后仍要继续走依赖（否则 curl→ssl 闭包断）
+      if [[ "$dep" == @rpath/* || "$dep" == @loader_path/* || "$dep" == @executable_path/* ]]; then
+        if [[ -f "$fw/$base" ]]; then
+          install_name_tool -change "$dep" "@rpath/$base" "$lib" 2>/dev/null || true
+          if [[ "$seen_blob" != *$'\n'"$fw/$base"$'\n'* ]]; then
+            seen_blob="${seen_blob}${fw}/${base}"$'\n'
+            queue+=("$fw/$base")
+          fi
+        fi
+        continue
+      fi
+      kotv_macos_is_system_dylib "$dep" && continue
       resolved="$dep"
       if [[ ! -f "$resolved" ]]; then
         if r="$(kotv_macos_resolve_dylib_path "$dep" 2>/dev/null)" && [[ -f "$r" ]]; then
@@ -126,6 +138,10 @@ kotv_macos_bundle_dylib_deps() {
           base="$(basename "$resolved")"
         elif [[ -f "$fw/$base" ]]; then
           install_name_tool -change "$dep" "@rpath/$base" "$lib" 2>/dev/null || true
+          if [[ "$seen_blob" != *$'\n'"$fw/$base"$'\n'* ]]; then
+            seen_blob="${seen_blob}${fw}/${base}"$'\n'
+            queue+=("$fw/$base")
+          fi
           continue
         else
           echo "WARN: missing dylib dep: $dep (from $(basename "$lib"))" >&2
@@ -139,7 +155,11 @@ kotv_macos_bundle_dylib_deps() {
         install_name_tool -id "@rpath/$base" "$dest_lib" 2>/dev/null || true
         kotv_macos_strip_abs_rpaths "$dest_lib"
         queue+=("$dest_lib")
+        seen_blob="${seen_blob}${dest_lib}"$'\n'
         echo "  + Frameworks/$base"
+      elif [[ "$seen_blob" != *$'\n'"$dest_lib"$'\n'* ]]; then
+        seen_blob="${seen_blob}${dest_lib}"$'\n'
+        queue+=("$dest_lib")
       fi
       install_name_tool -change "$dep" "@rpath/$base" "$lib" 2>/dev/null || true
       old_id="$(otool -D "$dest_lib" 2>/dev/null | tail -1 | tr -d '[:space:]' || true)"
