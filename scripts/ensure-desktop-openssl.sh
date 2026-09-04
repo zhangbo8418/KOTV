@@ -41,31 +41,37 @@ sys.exit(0 if tuple(parts[:3]) >= (3, 5, 0) else 1)
 PY
 }
 
-# OpenSSL Configure 需要 Locale::Maketext；MSYS perl 常缺，优先 Strawberry / 补装。
+# OpenSSL Configure 需要 Locale::Maketext。
+# Git Bash/MinGW 下必须用 Unix 路径风格的 perl；Strawberry 会报
+# "doesn't produce Unix like paths" 并以 exit 255 失败。
 ensure_openssl_perl() {
-  local p
-  for p in \
-    /c/Strawberry/perl/bin/perl \
-    /c/strawberry/perl/bin/perl \
-    "$(command -v perl 2>/dev/null || true)"; do
+  local p candidates=()
+  if kotv_is_windows_build; then
+    candidates+=(/usr/bin/perl /bin/perl)
+  fi
+  candidates+=("$(command -v perl 2>/dev/null || true)")
+  for p in "${candidates[@]}"; do
     [[ -n "$p" && -x "$p" ]] || continue
+    case "$p" in *[Ss]trawberry*) continue ;; esac
     if "$p" -MLocale::Maketext -e "1" 2>/dev/null; then
       export PERL="$p"
       echo "ok perl for OpenSSL: $PERL"
       return 0
     fi
   done
-  # 尝试用当前 perl 非交互装 Locale::Maketext
-  if command -v perl >/dev/null 2>&1; then
-    echo "==> install Locale::Maketext for $(command -v perl)"
-    PERL_MM_USE_DEFAULT=1 perl -MCPAN -e "CPAN::Shell->notest('install','Locale::Maketext')" 2>&1 | tail -20 || true
-    if perl -MLocale::Maketext -e "1" 2>/dev/null; then
-      export PERL="$(command -v perl)"
+  # 给 MSYS/Git perl 补 Locale::Maketext（勿改用 Strawberry）
+  for p in "${candidates[@]}"; do
+    [[ -n "$p" && -x "$p" ]] || continue
+    case "$p" in *[Ss]trawberry*) continue ;; esac
+    echo "==> install Locale::Maketext for $p"
+    PERL_MM_USE_DEFAULT=1 "$p" -MCPAN -e "CPAN::Shell->notest('install','Locale::Maketext')" 2>&1 | tail -30 || true
+    if "$p" -MLocale::Maketext -e "1" 2>/dev/null; then
+      export PERL="$p"
       echo "ok perl for OpenSSL after CPAN: $PERL"
       return 0
     fi
-  fi
-  echo "ERROR: need perl with Locale::Maketext (Strawberry Perl, or cpan Locale::Maketext)" >&2
+  done
+  echo "ERROR: need MSYS/Git perl with Locale::Maketext (not Strawberry under bash)" >&2
   exit 1
 }
 

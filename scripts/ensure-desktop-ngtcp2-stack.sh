@@ -55,11 +55,21 @@ fetch_extract() {
   local tarball="$BUILD_DIR/$name-$ver.tar.gz"
   # tmp 名勿匹配 ${name}-*，否则 find 会命中 tmp 自身（无顶层 CMakeLists）
   local tmp="$BUILD_DIR/_extract-${name}-${ver}"
+  # 发行包含 git submodule（nghttp3→sfparse；ngtcp2→urlparse）。GitHub archive 不含。
+  local need_extra=""
+  case "$name" in
+    nghttp3) need_extra="lib/sfparse/sfparse.c" ;;
+    ngtcp2) need_extra="crypto/includes/ngtcp2/ngtcp2_crypto.h" ;;
+  esac
   if [[ -f "$src/CMakeLists.txt" ]]; then
-    return 0
+    if [[ -z "$need_extra" || -f "$src/$need_extra" ]]; then
+      return 0
+    fi
+    echo "WARN: $src incomplete (missing $need_extra); re-fetch release tarball" >&2
   fi
   rm -rf "$src" "$tmp"
-  curl -fsSL -o "$tarball" "https://github.com/${repo}/archive/refs/tags/v${ver}.tar.gz"
+  curl -fsSL -o "$tarball" \
+    "https://github.com/${repo}/releases/download/v${ver}/${name}-${ver}.tar.gz"
   mkdir -p "$tmp"
   tar -xzf "$tarball" -C "$tmp"
   local found
@@ -68,6 +78,11 @@ fetch_extract() {
     echo "ERROR: extract $name v$ver missing CMakeLists.txt" >&2
     ls -la "$tmp" >&2 || true
     [[ -n "$found" ]] && ls -la "$found" >&2 || true
+    exit 1
+  fi
+  if [[ -n "$need_extra" && ! -f "$found/$need_extra" ]]; then
+    echo "ERROR: $name release tarball missing $need_extra (submodule)" >&2
+    ls -la "$found/$(dirname "$need_extra")" >&2 || true
     exit 1
   fi
   mv "$found" "$src"
@@ -116,13 +131,13 @@ build_cmake_lib() {
 
 fetch_extract nghttp3 "$NGHTTP3_VER" ngtcp2/nghttp3
 build_cmake_lib nghttp3 "$BUILD_DIR/nghttp3-$NGHTTP3_VER" \
-  -DENABLE_LIB_ONLY=ON -DBUILD_TESTING=OFF
+  -DENABLE_LIB_ONLY=ON -DENABLE_SHARED_LIB=ON -DENABLE_STATIC_LIB=ON -DBUILD_TESTING=OFF
 
 export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
 fetch_extract ngtcp2 "$NGTCP2_VER" ngtcp2/ngtcp2
 build_cmake_lib ngtcp2 "$BUILD_DIR/ngtcp2-$NGTCP2_VER" \
-  -DENABLE_OPENSSL=ON -DENABLE_LIB_ONLY=ON -DBUILD_TESTING=OFF
+  -DENABLE_OPENSSL=ON -DENABLE_LIB_ONLY=ON -DENABLE_SHARED_LIB=ON -DENABLE_STATIC_LIB=ON -DBUILD_TESTING=OFF
 
 export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 pkg-config --exists libnghttp3 || { echo "ERROR: libnghttp3.pc missing" >&2; ls "$PREFIX/lib/pkgconfig" >&2; exit 1; }
