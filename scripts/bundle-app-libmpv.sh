@@ -404,16 +404,34 @@ case "$(uname -s)" in
     echo "==> bundle macOS libmpv + dylib deps into Frameworks"
     kotv_macos_bundle_dylib_deps "$FW" "$FW/libmpv.dylib"
     kotv_macos_copy_prefix_libplacebo "$FW"
-    # Vulkan loader + MoltenVK ICD（与 libmpv 同目录 @rpath）
+    # Vulkan loader + MoltenVK ICD + curl/OpenSSL/ng*（与 libmpv 同目录 @rpath）
     ASSET_MAC="$ROOT/flutter/assets/mpv-libs/macos"
-    for f in libvulkan.1.dylib libvulkan.dylib libMoltenVK.dylib; do
+    for f in libvulkan.1.dylib libvulkan.dylib libMoltenVK.dylib \
+             libcurl.4.dylib libcurl.dylib \
+             libssl.3.dylib libcrypto.3.dylib \
+             libnghttp2.dylib libnghttp3.dylib libngtcp2.dylib; do
       [[ -f "$ASSET_MAC/$f" ]] || continue
       cp -f "$ASSET_MAC/$f" "$FW/$f"
       chmod u+w "$FW/$f" 2>/dev/null || true
       install_name_tool -id "@rpath/$f" "$FW/$f" 2>/dev/null || true
       kotv_macos_strip_abs_rpaths "$FW/$f"
-      echo "  + Frameworks/$f (vulkan)"
+      echo "  + Frameworks/$f (asset)"
     done
+    # 再扫一遍 assets 里其余 network dylib（版本化 soname）
+    shopt -s nullglob
+    for f in "$ASSET_MAC"/libcurl*.dylib "$ASSET_MAC"/libssl*.dylib "$ASSET_MAC"/libcrypto*.dylib \
+             "$ASSET_MAC"/libnghttp*.dylib "$ASSET_MAC"/libngtcp2*.dylib; do
+      base="$(basename "$f")"
+      [[ -f "$FW/$base" ]] && continue
+      cp -f "$f" "$FW/$base"
+      chmod u+w "$FW/$base" 2>/dev/null || true
+      install_name_tool -id "@rpath/$base" "$FW/$base" 2>/dev/null || true
+      kotv_macos_strip_abs_rpaths "$FW/$base"
+      echo "  + Frameworks/$base (network)"
+    done
+    shopt -u nullglob
+    # 再次收依赖：把 Frameworks 内拷贝的绝对路径改成 @rpath
+    kotv_macos_bundle_dylib_deps "$FW" "$FW/libmpv.dylib"
     if [[ -f "$ASSET_MAC/vulkan/icd.d/MoltenVK_icd.json" ]]; then
       mkdir -p "$DEST/Contents/Resources/vulkan/icd.d"
       # ICD 里 library_path 用绝对 @rpath 旁的文件名；运行时由 VK_ICD_FILENAMES 指向此 json

@@ -64,10 +64,12 @@ openssl_has_quic_api() {
 # OpenSSL Configure 需要 Locale::Maketext + ExtUtils::MakeMaker。
 # Git Bash/MinGW 下必须用 Unix 路径风格的 perl；Strawberry 整库 PERL5LIB 会污染 Config.pm。
 kotv_vendor_cpan_lib() {
-  local local_lib="$1" dist="$2" url="$3"
+  local local_lib="$1" dist="$2" url="$3" marker="${4:-}"
   local tmp="$BUILD_DIR/_cpan-$dist"
   mkdir -p "$local_lib"
-  [[ -d "$local_lib/$(echo "$dist" | awk -F- '{print $1}')" ]] && return 0
+  if [[ -n "$marker" && -f "$local_lib/$marker" ]]; then
+    return 0
+  fi
   rm -rf "$tmp"
   mkdir -p "$tmp"
   curl -fsSL -o "$tmp/$dist.tar.gz" "$url" || return 1
@@ -89,12 +91,16 @@ ensure_openssl_perl() {
   fi
   candidates+=("$(command -v perl 2>/dev/null || true)")
 
-  # 纯 Perl 模块进本地 lib（不含 Config.pm）
+  # 纯 Perl 模块进本地 lib（不含 Config.pm）；OpenSSL Configure 还要 Simple + MakeMaker
   kotv_vendor_cpan_lib "$local_lib" Locale-Maketext \
-    "https://cpan.metacpan.org/authors/id/T/TO/TODDR/Locale-Maketext-1.33.tar.gz" || true
+    "https://cpan.metacpan.org/authors/id/T/TO/TODDR/Locale-Maketext-1.33.tar.gz" \
+    "Locale/Maketext.pm" || true
+  kotv_vendor_cpan_lib "$local_lib" Locale-Maketext-Simple \
+    "https://cpan.metacpan.org/authors/id/J/JE/JESSE/Locale-Maketext-Simple-0.21.tar.gz" \
+    "Locale/Maketext/Simple.pm" || true
   kotv_vendor_cpan_lib "$local_lib" ExtUtils-MakeMaker \
-    "https://cpan.metacpan.org/authors/id/B/BI/BINGOS/ExtUtils-MakeMaker-7.70.tar.gz" || true
-  # Strawberry 仅作 Locale/I18N 兜底（仍不引入 Config.pm）
+    "https://cpan.metacpan.org/authors/id/B/BI/BINGOS/ExtUtils-MakeMaker-7.70.tar.gz" \
+    "ExtUtils/MakeMaker.pm" || true
   if kotv_is_windows_build && [[ ! -f "$local_lib/Locale/Maketext.pm" ]]; then
     local src
     for src in /c/Strawberry/perl/lib /c/strawberry/perl/lib; do
@@ -110,15 +116,23 @@ ensure_openssl_perl() {
     [[ -n "$p" && -x "$p" ]] || continue
     case "$p" in *[Ss]trawberry*) continue ;; esac
     if "$p" -MLocale::Maketext -e "1" 2>/dev/null \
+      && "$p" -MLocale::Maketext::Simple -e "1" 2>/dev/null \
       && "$p" -MExtUtils::MakeMaker -e "1" 2>/dev/null; then
       export PERL="$p"
       echo "ok perl for OpenSSL: $PERL (PERL5LIB=$PERL5LIB)"
       return 0
     fi
   done
-  echo "ERROR: need MSYS/Git perl + Locale::Maketext + ExtUtils::MakeMaker" >&2
-  "$PERL" -MLocale::Maketext -e 1 2>&1 || true
-  ls -la "$local_lib" >&2 || true
+  echo "ERROR: need MSYS/Git perl + Locale::Maketext(+Simple) + ExtUtils::MakeMaker" >&2
+  ls -laR "$local_lib" 2>/dev/null | head -80 >&2 || true
+  for p in "${candidates[@]}"; do
+    [[ -n "$p" && -x "$p" ]] || continue
+    case "$p" in *[Ss]trawberry*) continue ;; esac
+    echo "probe $p:" >&2
+    "$p" -MLocale::Maketext -e "print qq(  Locale::Maketext ok\n)" 2>&1 || true
+    "$p" -MLocale::Maketext::Simple -e "print qq(  Locale::Maketext::Simple ok\n)" 2>&1 || true
+    "$p" -MExtUtils::MakeMaker -e "print qq(  ExtUtils::MakeMaker ok\n)" 2>&1 || true
+  done
   exit 1
 }
 

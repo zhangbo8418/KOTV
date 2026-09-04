@@ -130,6 +130,58 @@ verify_mpv_has_libcurl() {
   verify_mpv_network "$@"
 }
 
+# macOS：把 PREFIX 里的 curl/OpenSSL/ng* 拷进 assets，并把 libmpv 依赖改成 @rpath。
+kotv_macos_stage_network_dylibs() {
+  local dest="$ASSET/macos" mpv="$ASSET/macos/libmpv.dylib"
+  local f real base dep
+  mkdir -p "$dest"
+  [[ -f "$mpv" ]] || return 0
+  shopt -s nullglob
+  for f in \
+    "$PREFIX/lib"/libcurl*.dylib \
+    "$PREFIX/lib"/libssl*.dylib \
+    "$PREFIX/lib"/libcrypto*.dylib \
+    "$PREFIX/lib"/libnghttp2*.dylib \
+    "$PREFIX/lib"/libnghttp3*.dylib \
+    "$PREFIX/lib"/libngtcp2*.dylib; do
+    [[ -f "$f" ]] || continue
+    real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$f")"
+    [[ -f "$real" ]] || continue
+    base="$(basename "$real")"
+    cp -f "$real" "$dest/$base"
+    chmod u+w "$dest/$base" 2>/dev/null || true
+    install_name_tool -id "@rpath/$base" "$dest/$base" 2>/dev/null || true
+    # 常见 soname 别名（libcurl.4.dylib 等）
+    case "$base" in
+      libcurl.*.dylib) cp -f "$dest/$base" "$dest/libcurl.4.dylib" 2>/dev/null || true
+        install_name_tool -id "@rpath/libcurl.4.dylib" "$dest/libcurl.4.dylib" 2>/dev/null || true
+        cp -f "$dest/$base" "$dest/libcurl.dylib" 2>/dev/null || true
+        install_name_tool -id "@rpath/libcurl.dylib" "$dest/libcurl.dylib" 2>/dev/null || true
+        ;;
+      libssl.*.dylib) cp -f "$dest/$base" "$dest/libssl.3.dylib" 2>/dev/null || true
+        install_name_tool -id "@rpath/libssl.3.dylib" "$dest/libssl.3.dylib" 2>/dev/null || true
+        ;;
+      libcrypto.*.dylib) cp -f "$dest/$base" "$dest/libcrypto.3.dylib" 2>/dev/null || true
+        install_name_tool -id "@rpath/libcrypto.3.dylib" "$dest/libcrypto.3.dylib" 2>/dev/null || true
+        ;;
+    esac
+    echo "  + assets/macos/$base (network)"
+  done
+  shopt -u nullglob
+  while read -r dep; do
+    case "$dep" in
+      *libcurl*|*libssl*|*libcrypto*|*libnghttp*|*libngtcp2*)
+        base="$(basename "$dep")"
+        if [[ -f "$dest/$base" ]]; then
+          install_name_tool -change "$dep" "@rpath/$base" "$mpv" 2>/dev/null || true
+        elif [[ "$base" == libcurl* && -f "$dest/libcurl.4.dylib" ]]; then
+          install_name_tool -change "$dep" "@rpath/libcurl.4.dylib" "$mpv" 2>/dev/null || true
+        fi
+        ;;
+    esac
+  done < <(otool -L "$mpv" 2>/dev/null | awk 'NR>1 {print $1}')
+}
+
 # macOS 目标架构：交叉编 x86_64 时由 KOTV_MPV_MACOS_ARCH 指定，否则本机。
 kotv_macos_target_arch() {
   echo "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
@@ -1065,11 +1117,13 @@ build_mpv_macos() {
     [[ -f "$PREFIX/lib/$f" ]] || continue
     cp -f "$PREFIX/lib/$f" "$ASSET/macos/$f"
   done
+  # HTTP/2+3 栈：libmpv 常以 @rpath/libcurl 链接；bundler 不会自动收 @rpath，须先落到 assets。
+  kotv_macos_stage_network_dylibs
   if [[ -f "$PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" ]]; then
     mkdir -p "$ASSET/macos/vulkan/icd.d"
     cp -f "$PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" "$ASSET/macos/vulkan/icd.d/"
   fi
-  echo "built macOS/libmpv.dylib (+ AV3A=$AV3A, vulkan=enabled, no avdevice)"
+  echo "built macOS/libmpv.dylib (+ AV3A=$AV3A, vulkan=enabled, no avdevice, curl stack staged)"
 }
 
 build_mpv_windows() {
