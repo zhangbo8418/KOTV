@@ -67,13 +67,7 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.buffer.listen((_) => notifyListeners()));
     _subs.add(player.stream.buffering.listen((v) {
       _buffering = v;
-      if (v) {
-        // 直播换台期间勿轮询 demuxer-cache-state（易与重建 demuxer 争锁→卡音）；
-        // 网速浮层走 KotvTraffic。
-        if (!_live) unawaited(_pollCacheSpeed());
-      } else {
-        _speedBps = 0;
-      }
+      if (!v) _speedBps = 0;
       notifyListeners();
     }));
     _subs.add(player.stream.width.listen((w) {
@@ -89,12 +83,7 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
-    _speedTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
-      if (_live) return;
-      if (_buffering || player.state.buffering || player.state.playing) {
-        unawaited(_pollCacheSpeed());
-      }
-    });
+    // 网速浮层走 KotvTraffic；勿轮询 demuxer-cache-state（换集/换台重建 demuxer 时易卡音）。
     _optsReady = _prepareOpts();
   }
 
@@ -107,10 +96,6 @@ class MediaKitPlayback extends KotvPlayback {
   bool _buffering = false;
   bool _live;
   int _speedBps = 0;
-  Timer? _speedTimer;
-  bool _speedBusy = false;
-  int _lastCacheBytes = -1;
-  DateTime? _lastCacheAt;
   late Future<void> _optsReady;
   /// 对齐 Exo/原生 MPV：换源时本地尺寸清零；未 [_acceptSize] 前不采信 libmpv 残留宽高。
   int _w = 0;
@@ -151,34 +136,6 @@ class MediaKitPlayback extends KotvPlayback {
     _opts = opts;
     await _opts.applyAfterAttach(player, live: _live);
     notifyListeners();
-  }
-
-  Future<void> _pollCacheSpeed() async {
-    if (_speedBusy) return;
-    _speedBusy = true;
-    try {
-      final platform = player.platform;
-      if (platform == null) return;
-      final cache = await (platform as dynamic).getProperty('demuxer-cache-state');
-      if (cache is! Map) return;
-      final fwd = cache['forward-bytes'];
-      if (fwd is! num) return;
-      final bytes = fwd.toInt();
-      final now = DateTime.now();
-      if (_lastCacheBytes >= 0 && _lastCacheAt != null) {
-        final dt = now.difference(_lastCacheAt!).inMilliseconds;
-        if (dt > 200) {
-          final delta = bytes - _lastCacheBytes;
-          if (delta > 0) _speedBps = (delta * 1000 / dt).round();
-        }
-      }
-      _lastCacheBytes = bytes;
-      _lastCacheAt = now;
-      notifyListeners();
-    } catch (_) {
-    } finally {
-      _speedBusy = false;
-    }
   }
 
   @override
@@ -288,16 +245,13 @@ class MediaKitPlayback extends KotvPlayback {
     // 直播：对齐 TV，不写 demuxer-max-bytes/cache-secs；点播才写入 KotvBufferBudget。
     await _opts.applyAfterAttach(player, live: live);
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
-    // 点播：play:false 等到首帧/一点缓冲再 play。
-    // 直播：对齐 TV prepareAndPlay——立刻 play，无 Flutter 层 play:false 等缓冲。
-    if (live) {
-      await player.open(media, play: true);
-      _adoptPlayerSize();
-      notifyListeners();
-    } else {
-      await player.open(media, play: false);
-      await _waitReadyThenPlay();
-    }
+    // 对齐 TV MpvPlayerEngine.prepareAndPlay：setMediaItem 后立刻 prepare+play，
+    // 不等 Flutter 层缓冲门槛（play:false→等尺寸易卡音/偶发不起播）。
+    await player.open(media, play: true);
+    // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
+    _acceptSize = true;
+    _adoptPlayerSize();
+    notifyListeners();
     await kotvGuardSilentVideo(
       hasVideoSize: () => width > 0 && height > 0,
       isBuffering: () => buffering,
@@ -312,34 +266,12 @@ class MediaKitPlayback extends KotvPlayback {
     );
   }
 
-  /// paused 加载到有画面尺寸、音轨或一点前向缓冲后再 unpause（避免只有时间在跑）。
-  Future<void> _waitReadyThenPlay() async {
-    final url = _url;
-    final deadline = DateTime.now().add(const Duration(seconds: 20));
-    while (DateTime.now().isBefore(deadline) && _url == url) {
-      // 本集已开始缓冲/出轨后再采信 libmpv 尺寸（open/stop 已清本地）。
-      final loading = buffering || buffered > Duration.zero || position > Duration.zero;
-      if (loading || isAudioOnlyContent) {
-        _adoptPlayerSize();
-      }
-      if (_w > 0 && _h > 0) break;
-      if (isAudioOnlyContent) break;
-      if (buffered > const Duration(milliseconds: 400)) break;
-      if (hasVideoSourceHint && !buffering && buffered > Duration.zero) break;
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    if (_url != url) return;
-    if (!_acceptSize) _adoptPlayerSize();
-    try {
-      await player.play();
-    } catch (_) {}
-  }
-
   @override
   Future<void> stop() async {
     // 对齐 TV：换集只停播，不 dispose Player（离开页走 kotvDisposeMpvPlayer）。
     _url = '';
     _clearVideoSize();
+    _speedBps = 0;
     try {
       await player.stop();
     } catch (_) {}
@@ -394,7 +326,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> tryFixVideoSource() async {
-    // 勿 seek(0)：起播阶段与 load 竞态。open 已 play:false→play，这里只再确保 unpause。
+    // 对齐 TV：open 已 prepare+play；这里只再确保 unpause，勿 seek(0)。
     try {
       await player.play();
     } catch (_) {}
@@ -434,7 +366,6 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   void dispose() {
-    _speedTimer?.cancel();
     for (final s in _subs) {
       s.cancel();
     }
