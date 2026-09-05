@@ -16,8 +16,8 @@ void kotvEnsureFvpRegistered() {
 
 /// 注册 libmdk（由 [kotvEnsureFvpRegistered] 在需要时调用，勿在 main 里无条件注册）。
 ///
-/// [FvpPlayback] 现直接握 `package:fvp/mdk.dart` [Player] 换集复用；仍须 registerWith
-/// 以注入 MDK_KEY / 全局 player 选项。解码器列表在开播时由 [kotvFvpVideoDecoders] 写入。
+/// [FvpPlayback] 经 video_player + fvp 插件起播；registerWith 注入 MDK_KEY /
+/// 全局 player 选项。解码器列表在开播时由 [kotvFvpVideoDecoders] 写入。
 /// Android 仅关 tunnel（Surface 未就绪时隧道模式易黑屏有声）。
 ///
 /// 302 跟跳交给 mdk 默认 IO（未改 `io.avio`；有效性未在多系统验证）。

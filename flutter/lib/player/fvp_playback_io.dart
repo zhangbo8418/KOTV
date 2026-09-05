@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:fvp/mdk.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:fvp/fvp.dart' show FVPControllerExtensions;
+import 'package:video_player/video_player.dart';
 
 import 'buffer_budget.dart';
 import 'fvp_decoders.dart';
@@ -10,146 +12,55 @@ import 'kotv_playback.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
-/// 页内 FVP（libmdk）：会话级复用同一 [Player]（对齐 TV MPV/Exo 换集不重建）。
+/// 页内 FVP（libmdk）：经 [video_player] + fvp 插件。
 ///
-/// 换集：`media = url` → `prepare` → `state = playing`；离开页才 [dispose]。
-/// 须在首次使用前调用 [kotvEnsureFvpRegistered]。
+/// 须在首次使用 FVP 前调用 [kotvEnsureFvpRegistered]（见 [kotvRegisterFvp]）。
+///
+/// 起播顺序：先挂 [VideoPlayer]（建立 Texture/Surface），再 `initialize`/`play`。
 class FvpPlayback extends KotvPlayback {
-  Player? _player;
+  VideoPlayerController? _c;
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
   final _doneCtrl = StreamController<bool>.broadcast();
-  final List<StreamSubscription> _subs = [];
-  Timer? _tick;
+  VoidCallback? _listener;
   bool _completed = false;
   bool _opening = false;
   bool _live = false;
-  bool _buffering = false;
-  bool _acceptSize = false;
-  int _w = 0;
-  int _h = 0;
   String? _lastError;
-  String _url = '';
   double _volume = 100;
   double _rate = 1;
   String _decodeMode = 'auto';
 
+  VideoPlayerController? get controller => _c;
+
   String? get lastError => _lastError;
 
-  void _clearVideoSize() {
-    _acceptSize = false;
-    _w = 0;
-    _h = 0;
-  }
-
-  void _adoptSize(int w, int h) {
-    if (w <= 0 || h <= 0) return;
-    _acceptSize = true;
-    _w = w;
-    _h = h;
-  }
-
-  Player _ensurePlayer() {
-    final existing = _player;
-    if (existing != null) return existing;
-    kotvEnsureFvpRegistered();
-    final p = Player();
-    _player = p;
-    _applyDecodeMode(p);
-    p.volume = (_volume / 100).clamp(0.0, 1.0);
-    p.playbackRate = _rate;
-    _subs.add(p.onMediaStatus.listen((ev) {
-      final n = ev.newValue;
-      _buffering = n.test(MediaStatus.buffering) || n.test(MediaStatus.loading);
-      if (n.test(MediaStatus.loaded) || n.test(MediaStatus.prepared)) {
-        unawaited(_syncSizeFromPlayer());
-      }
-      if (n.test(MediaStatus.end) && !_completed) {
-        _completed = true;
-        if (!_doneCtrl.isClosed) _doneCtrl.add(true);
-      }
-      if (n.test(MediaStatus.invalid)) {
-        _lastError = 'FVP 媒体无效';
-      }
-      notifyListeners();
-    }));
-    _subs.add(p.onStateChanged.listen((_) => notifyListeners()));
-    _subs.add(p.onEvent.listen((ev) {
-      if (ev.error != 0) {
-        _lastError = ev.detail.isNotEmpty ? ev.detail : ev.category;
-        notifyListeners();
-      }
-    }));
-    _tick = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      final pl = _player;
-      if (pl == null || _url.isEmpty) return;
-      final pos = Duration(milliseconds: pl.position.clamp(0, 1 << 30));
-      if (!_posCtrl.isClosed) _posCtrl.add(pos);
-      final bufMs = pl.buffered().clamp(0, 1 << 30);
-      if (!_bufCtrl.isClosed) {
-        _bufCtrl.add(Duration(milliseconds: bufMs));
-      }
-      if (_opening &&
-          (pl.state == PlaybackState.playing ||
-              pos > Duration.zero ||
-              (_acceptSize && _w > 0))) {
-        _opening = false;
-        notifyListeners();
-      }
-    });
-    return p;
-  }
-
-  Future<void> _syncSizeFromPlayer() async {
-    final p = _player;
-    if (p == null || _url.isEmpty) return;
-    try {
-      final size = await p.textureSize.timeout(const Duration(seconds: 2));
-      if (size != null && size.width > 0 && size.height > 0) {
-        _adoptSize(size.width.toInt(), size.height.toInt());
-        notifyListeners();
-      }
-    } catch (_) {
-      try {
-        final info = p.mediaInfo;
-        final vids = info.video;
-        if (vids != null && vids.isNotEmpty) {
-          final c = vids.first.codec;
-          _adoptSize(c.width, c.height);
-          notifyListeners();
-        }
-      } catch (_) {}
-    }
-  }
-
   @override
-  bool get playing =>
-      _opening ? false : (_player?.state == PlaybackState.playing);
+  bool get playing => _opening ? false : (_c?.value.isPlaying ?? false);
 
   @override
   bool get completed => _completed;
 
   @override
-  Duration get position {
-    final ms = _player?.position ?? 0;
-    return Duration(milliseconds: ms.clamp(0, 1 << 30));
-  }
+  Duration get position => _c?.value.position ?? Duration.zero;
 
   @override
-  Duration get duration {
-    final ms = _player?.mediaInfo.duration ?? 0;
-    if (ms <= 0 || ms >= 0x7fffffff) return Duration.zero;
-    return Duration(milliseconds: ms);
-  }
+  Duration get duration => _c?.value.duration ?? Duration.zero;
 
   @override
   Duration get buffered {
-    final ms = _player?.buffered() ?? 0;
-    return Duration(milliseconds: ms.clamp(0, 1 << 30));
+    final ranges = _c?.value.buffered;
+    if (ranges == null || ranges.isEmpty) return Duration.zero;
+    var end = Duration.zero;
+    for (final r in ranges) {
+      if (r.end > end) end = r.end;
+    }
+    return end;
   }
 
+  /// 起播整段（含 initialize）视为缓冲，避免 `stop()` 清掉标记后浮层消失。
   @override
-  bool get buffering => _opening || _buffering;
+  bool get buffering => _opening || (_c?.value.isBuffering ?? false);
 
   @override
   double get volume => _volume;
@@ -158,10 +69,10 @@ class FvpPlayback extends KotvPlayback {
   double get rate => _rate;
 
   @override
-  int get width => _w;
+  int get width => _c?.value.size.width.toInt() ?? 0;
 
   @override
-  int get height => _h;
+  int get height => _c?.value.size.height.toInt() ?? 0;
 
   @override
   String get engineLabel => '内置 FVP';
@@ -188,12 +99,12 @@ class FvpPlayback extends KotvPlayback {
   String? get currentSubtitleId => null;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
-    final p = _player;
-    if (p == null) {
+    final c = _c;
+    if (c == null) {
       return const ColoredBox(color: Colors.black);
     }
-    final err = _lastError;
-    if (err != null && err.isNotEmpty && _w <= 0 && !_opening) {
+    final err = c.value.errorDescription ?? _lastError;
+    if (err != null && err.isNotEmpty && !c.value.isInitialized) {
       return ColoredBox(
         color: Colors.black,
         child: Center(
@@ -208,29 +119,31 @@ class FvpPlayback extends KotvPlayback {
         ),
       );
     }
-    return ValueListenableBuilder<int?>(
-      valueListenable: p.textureId,
-      builder: (context, tid, _) {
-        final tex = tid ?? -1;
-        if (tex < 0) {
-          return const ColoredBox(color: Colors.black);
-        }
-        if (_w <= 0 || _h <= 0) {
-          return ColoredBox(
-            color: Colors.black,
-            child: SizedBox.expand(child: Texture(textureId: tex)),
-          );
-        }
-        return FittedBox(
-          fit: fit,
-          child: SizedBox(
-            width: _w.toDouble(),
-            height: _h.toDouble(),
-            child: Texture(textureId: tex),
-          ),
-        );
-      },
+    // 未出尺寸前占满父级，保证 Windows Texture 有非零面积（FittedBox+0x0 会一直黑）。
+    final sz = c.value.size;
+    if (!c.value.isInitialized || sz.width <= 0 || sz.height <= 0) {
+      return ColoredBox(
+        color: Colors.black,
+        child: SizedBox.expand(child: VideoPlayer(c)),
+      );
+    }
+    return FittedBox(
+      fit: fit,
+      child: SizedBox(
+        width: sz.width,
+        height: sz.height,
+        child: VideoPlayer(c),
+      ),
     );
+  }
+
+  Future<void> _disposeController() async {
+    final c = _c;
+    final l = _listener;
+    _c = null;
+    _listener = null;
+    if (c != null && l != null) c.removeListener(l);
+    await c?.dispose();
   }
 
   @override
@@ -240,6 +153,7 @@ class FvpPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
   }) async {
+    kotvEnsureFvpRegistered();
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
@@ -247,52 +161,85 @@ class FvpPlayback extends KotvPlayback {
     _live = live;
     _lastError = null;
     _completed = false;
-    _url = url;
-    // 换源清尺寸（对齐 Exo / media_kit MPV）。
-    _clearVideoSize();
     notifyListeners();
     try {
-      final p = _ensurePlayer();
-      // 停播旧片，不 dispose Player（对齐 TV setMediaItem）。
-      try {
-        p.state = PlaybackState.stopped;
-      } catch (_) {}
+      // 勿调用 stop()：它会把 _opening 清掉，缓冲浮层会立刻消失。
+      await _disposeController();
+      notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
-      if (h.isNotEmpty) {
-        final line = StringBuffer();
-        h.forEach((k, v) => line.write('$k: $v\r\n'));
-        p.setProperty('avio.headers', line.toString());
-      } else {
-        p.setProperty('avio.headers', '');
+      // 302 交给 mdk 默认 IO 跟跳（未强制 io.avio）。
+      final c = VideoPlayerController.networkUrl(
+        Uri.parse(url),
+        httpHeaders: h,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+      );
+      _c = c;
+      _listener = () {
+        if (_c != c) return;
+        final v = c.value;
+        if (v.hasError) {
+          _lastError = v.errorDescription ?? 'FVP 播放错误';
+        }
+        if (_opening &&
+            (v.isPlaying ||
+                v.isBuffering ||
+                v.position > Duration.zero ||
+                (v.isInitialized && v.size.width > 0) ||
+                v.isCompleted)) {
+          _opening = false;
+        }
+        _posCtrl.add(v.position);
+        if (v.buffered.isNotEmpty) {
+          var end = Duration.zero;
+          for (final r in v.buffered) {
+            if (r.end > end) end = r.end;
+          }
+          _bufCtrl.add(end);
+        }
+        if (v.isCompleted && !_completed) {
+          _completed = true;
+          _doneCtrl.add(true);
+        }
+        notifyListeners();
+      };
+      c.addListener(_listener!);
+      // initialize 前写入解码器列表（硬/软锁死；自动=硬解优先+软解回退）。
+      _applyDecodeMode(c);
+      // 先让父级 rebuild 挂上 VideoPlayer，再 initialize。
+      notifyListeners();
+      await SchedulerBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 32));
+      await c.initialize();
+      if (c.value.hasError) {
+        _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
+        throw StateError(_lastError!);
       }
-      _applyDecodeMode(p);
+      // 点播才套 KotvBufferBudget；直播（页面 live 或 isLive）勿猛囤——TV 无 FVP，此处只是跳过点播预读。
       try {
-        if (live) {
-          p.setBufferRange(min: 0, max: 4000, drop: true);
+        final engineLive = () {
+          try {
+            return c.isLive();
+          } catch (_) {
+            return false;
+          }
+        }();
+        if (live || engineLive) {
+          c.setBufferRange(min: 0, max: 4000, drop: true);
         } else {
           await KotvBufferBudget.warm();
           final maxMs = KotvBufferBudget.fvpMaxBufferMs(KotvBufferBudget.bytes());
-          p.setBufferRange(min: 1000, max: maxMs);
+          c.setBufferRange(min: 1000, max: maxMs);
         }
       } catch (_) {}
-      p.media = url;
-      _acceptSize = true;
-      notifyListeners();
-      final ret = await p.prepare();
-      if (ret < 0 && ret != -1) {
-        _lastError = 'FVP prepare 失败 ($ret)';
-        throw StateError(_lastError!);
-      }
-      await p.updateTexture();
-      await _syncSizeFromPlayer();
-      p.volume = (_volume / 100).clamp(0.0, 1.0);
-      p.playbackRate = _rate;
-      p.state = PlaybackState.playing;
-      if (p.state == PlaybackState.playing && _w > 0) {
+      await c.setVolume((_volume / 100).clamp(0, 1));
+      await c.setPlaybackSpeed(_rate);
+      await c.play();
+      // 直播可能长时间 size=0：保持 _opening 直到首帧/出尺寸，浮层继续显示。
+      if (c.value.isPlaying && c.value.size.width > 0) {
         _opening = false;
       }
       notifyListeners();
-      await _guardSilentVideo();
+      await _guardSilentVideo(c);
     } catch (e) {
       _lastError = '$e';
       _opening = false;
@@ -301,62 +248,95 @@ class FvpPlayback extends KotvPlayback {
     }
   }
 
-  Future<void> _guardSilentVideo() async {
-    final p = _player;
-    if (p == null) return;
+  /// 开播后短等出尺寸；仍无画面且会话存活则抛 [KotvSilentVideoException]。
+  Future<void> _guardSilentVideo(VideoPlayerController c) async {
     await kotvGuardSilentVideo(
-      hasVideoSize: () => _w > 0 && _h > 0,
-      isBuffering: () => buffering,
-      sessionAlive: () {
-        if (_url.isEmpty) return false;
-        if (_lastError != null) return false;
-        return playing || position > Duration.zero;
+      hasVideoSize: () {
+        if (!identical(_c, c)) return true;
+        final v = c.value;
+        return v.isInitialized && v.size.width > 0 && v.size.height > 0;
       },
-      isPlaying: () => playing,
-      position: () => position,
-      duration: () => duration,
-      isLiveContent: () => _live || p.isLive || (duration <= Duration.zero && playing),
-      hasVideoSource: () => hasVideoSourceHint,
+      isBuffering: () {
+        if (!identical(_c, c)) return false;
+        return _opening || c.value.isBuffering;
+      },
+      sessionAlive: () {
+        if (!identical(_c, c)) return false;
+        final v = c.value;
+        if (v.hasError) return false;
+        return v.isPlaying || v.position > Duration.zero;
+      },
+      isPlaying: () {
+        if (!identical(_c, c)) return false;
+        return c.value.isPlaying;
+      },
+      position: () => c.value.position,
+      duration: () => c.value.duration,
+      isLiveContent: () {
+        if (_live) return true;
+        try {
+          return identical(_c, c) && c.isLive();
+        } catch (_) {
+          return false;
+        }
+      },
+      hasVideoSource: () {
+        if (!identical(_c, c)) return true;
+        return hasVideoSourceHint;
+      },
       isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
     );
-    if (_lastError != null) {
-      throw StateError(_lastError!);
+    if (identical(_c, c) && c.value.hasError) {
+      throw StateError(c.value.errorDescription ?? _lastError ?? 'FVP 播放错误');
     }
-    _opening = false;
-    notifyListeners();
-    if (_w <= 0 && _h <= 0 && !isAudioOnlyContent) {
-      throw const KotvSilentVideoException();
+    if (identical(_c, c)) {
+      _opening = false;
+      notifyListeners();
+      final v = c.value;
+      final hasSize = v.isInitialized && v.size.width > 0 && v.size.height > 0;
+      if (!hasSize && !isAudioOnlyContent) {
+        throw const KotvSilentVideoException();
+      }
     }
   }
 
   @override
   bool get hasVideoSourceHint {
-    final p = _player;
-    if (p == null) return false;
-    if (_lastError != null) return false;
+    final c = _c;
+    if (c == null) return false;
+    final v = c.value;
+    if (v.hasError) return false;
     if (isAudioOnlyContent) return true;
+    // Web 上 fvp 的 MediaInfo 是 dummy（无 video/audio）；用 dynamic 避免 dart2js 编译失败。
     try {
-      final vids = p.mediaInfo.video;
-      if (vids != null && vids.isNotEmpty) {
-        final active = p.activeVideoTracks;
+      final info = c.getMediaInfo() as dynamic;
+      final videos = info?.video as List?;
+      if (videos != null && videos.isNotEmpty) {
+        final active = c.getActiveVideoTracks() ?? const <int>[];
+        // 有视频流但未激活任何轨 → 视源异常，触发重选。
         return active.isNotEmpty;
       }
     } catch (_) {}
-    return _opening || _w > 0;
+    return v.isInitialized || _opening;
   }
 
   @override
   bool get isAudioOnlyContent {
-    final p = _player;
-    if (p == null || _opening || buffering) return false;
-    if (_w > 0 && _h > 0) return false;
+    final c = _c;
+    if (c == null) return false;
+    final v = c.value;
+    if (!v.isInitialized || v.isBuffering || _opening) return false;
+    if (v.size.width > 0 && v.size.height > 0) return false;
+    // 仅在 demux 确认「无视轨 + 有音轨」时放行；禁止用「在播+无尺寸」瞎猜。
     try {
-      final info = p.mediaInfo;
-      final hasVideo = info.video?.isNotEmpty == true;
-      final hasAudio = info.audio?.isNotEmpty == true;
-      if (!hasVideo && hasAudio) {
-        return playing || position > const Duration(milliseconds: 500);
+      final info = c.getMediaInfo() as dynamic;
+      if (info != null) {
+        final hasVideo = (info.video as List?)?.isNotEmpty == true;
+        final hasAudio = (info.audio as List?)?.isNotEmpty == true;
+        if (!hasVideo && hasAudio) {
+          return v.isPlaying || v.position > const Duration(milliseconds: 500);
+        }
       }
     } catch (_) {}
     return false;
@@ -364,54 +344,68 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Future<void> tryFixVideoSource() async {
-    final p = _player;
-    if (p == null) return;
+    final c = _c;
+    if (c == null) return;
     try {
-      final videos = List<VideoStreamInfo>.from(p.mediaInfo.video ?? const []);
+      final info = c.getMediaInfo() as dynamic;
+      final videos = List<dynamic>.from((info?.video as List?) ?? const []);
       if (videos.isNotEmpty) {
         videos.sort((a, b) {
-          final aa = a.codec.width * a.codec.height;
-          final bb = b.codec.width * b.codec.height;
+          final aa = (a.codec.width as int) * (a.codec.height as int);
+          final bb = (b.codec.width as int) * (b.codec.height as int);
           return bb.compareTo(aa);
         });
         for (final stream in videos) {
           try {
-            p.activeVideoTracks = [stream.index];
+            c.setVideoTracks([stream.index as int]);
             await Future<void>.delayed(const Duration(milliseconds: 350));
-            await _syncSizeFromPlayer();
-            if (_w > 0 && _h > 0) return;
+            if (!identical(_c, c)) return;
+            final sz = c.value.size;
+            if (sz.width > 0 && sz.height > 0) return;
           } catch (_) {}
         }
       }
-      p.state = PlaybackState.playing;
+      final programs = info?.programs as List?;
+      if (programs != null && programs.length > 1) {
+        for (var i = 0; i < programs.length; i++) {
+          try {
+            c.setProgram(i);
+            await Future<void>.delayed(const Duration(milliseconds: 350));
+            if (!identical(_c, c)) return;
+            final sz = c.value.size;
+            if (sz.width > 0 && sz.height > 0) return;
+          } catch (_) {}
+        }
+      }
+      await c.play();
     } catch (_) {
       try {
-        p.state = PlaybackState.playing;
+        await c.play();
       } catch (_) {}
     }
   }
 
   @override
   Future<void> playOrPause() async {
-    final p = _player;
-    if (p == null) return;
-    if (p.state == PlaybackState.playing) {
-      p.state = PlaybackState.paused;
+    final c = _c;
+    if (c == null) return;
+    if (c.value.isPlaying) {
+      await c.pause();
     } else {
-      p.state = PlaybackState.playing;
+      await c.play();
     }
     notifyListeners();
   }
 
   @override
   Future<void> play() async {
-    _player?.state = PlaybackState.playing;
+    await _c?.play();
     notifyListeners();
   }
 
   @override
   Future<void> pause() async {
-    _player?.state = PlaybackState.paused;
+    await _c?.pause();
     notifyListeners();
   }
 
@@ -419,82 +413,42 @@ class FvpPlayback extends KotvPlayback {
   Future<void> stop() async {
     _opening = false;
     _lastError = null;
-    _url = '';
-    _clearVideoSize();
-    final p = _player;
-    if (p != null) {
+    final c = _c;
+    if (c != null) {
       try {
-        p.state = PlaybackState.stopped;
-      } catch (_) {}
-      try {
-        p.media = '';
+        await c.pause();
       } catch (_) {}
     }
-    _buffering = false;
+    await _disposeController();
     notifyListeners();
   }
 
-  /// 离开详情：停播并销毁 mdk 实例（对齐 TV engine.release）。
   @override
-  Future<void> release() async {
-    await stop();
-    await _disposePlayer();
-  }
-
-  Future<void> _disposePlayer() async {
-    _tick?.cancel();
-    _tick = null;
-    for (final s in _subs) {
-      await s.cancel();
-    }
-    _subs.clear();
-    final p = _player;
-    _player = null;
-    if (p == null) return;
-    await kotvTeardownPlayback(
-      stop: () async {
-        try {
-          p.state = PlaybackState.stopped;
-        } catch (_) {}
-      },
-      dispose: () async {
-        // mdk Player.dispose 是 async void；包一层避免用 await void。
-        try {
-          p.dispose();
-        } catch (_) {}
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      },
-      disposeTimeout: const Duration(milliseconds: 600),
-    );
-  }
+  Future<void> release() => stop();
 
   @override
   Future<void> seek(Duration d) async {
-    final p = _player;
-    if (p == null) return;
-    await p.seek(position: d.inMilliseconds);
+    await _c?.seekTo(d);
     notifyListeners();
   }
 
   @override
   Future<void> setVolume(double v) async {
     _volume = v.clamp(0, 100);
-    _player?.volume = (_volume / 100).clamp(0.0, 1.0);
+    await _c?.setVolume((_volume / 100).clamp(0, 1));
     notifyListeners();
   }
 
   @override
   Future<void> setRate(double r) async {
     _rate = r.clamp(0.25, 4.0);
-    _player?.playbackRate = _rate;
+    await _c?.setPlaybackSpeed(_rate);
     notifyListeners();
   }
 
   @override
   Future<void> setRepeatOne(bool on) async {
-    try {
-      _player?.setProperty('loop', on ? '1' : '0');
-    } catch (_) {}
+    await _c?.setLooping(on);
   }
 
   @override
@@ -504,14 +458,18 @@ class FvpPlayback extends KotvPlayback {
       'hard' || 'hardware' || 'hw' => 'hard',
       _ => 'auto',
     };
+    if (next == _decodeMode) {
+      _applyDecodeMode(_c);
+      return;
+    }
     _decodeMode = next;
-    _applyDecodeMode(_player);
+    _applyDecodeMode(_c);
   }
 
-  void _applyDecodeMode(Player? p) {
-    if (p == null) return;
+  void _applyDecodeMode(VideoPlayerController? c) {
+    if (c == null) return;
     try {
-      p.videoDecoders = kotvFvpVideoDecoders(_decodeMode);
+      c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
     } catch (_) {}
   }
 
@@ -523,10 +481,10 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   void dispose() {
-    unawaited(release());
-    unawaited(_posCtrl.close());
-    unawaited(_bufCtrl.close());
-    unawaited(_doneCtrl.close());
+    unawaited(stop());
+    _posCtrl.close();
+    _bufCtrl.close();
+    _doneCtrl.close();
     super.dispose();
   }
 }

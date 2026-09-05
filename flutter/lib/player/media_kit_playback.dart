@@ -68,7 +68,9 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.buffering.listen((v) {
       _buffering = v;
       if (v) {
-        unawaited(_pollCacheSpeed());
+        // 直播换台期间勿轮询 demuxer-cache-state（易与重建 demuxer 争锁→卡音）；
+        // 网速浮层走 KotvTraffic。
+        if (!_live) unawaited(_pollCacheSpeed());
       } else {
         _speedBps = 0;
       }
@@ -88,6 +90,7 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
     _speedTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      if (_live) return;
       if (_buffering || player.state.buffering || player.state.playing) {
         unawaited(_pollCacheSpeed());
       }
