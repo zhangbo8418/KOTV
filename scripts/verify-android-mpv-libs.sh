@@ -15,7 +15,9 @@ check_abi() {
   local cxx_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libc++_shared.so"
 
   [[ -f "$mpv" ]] || { echo "ERROR: missing $mpv" >&2; fail=1; return; }
+  local codec_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libmvcodec.so"
   [[ -f "$codec" ]] || { echo "ERROR: missing $codec" >&2; fail=1; return; }
+  [[ -f "$codec_jni" ]] || { echo "ERROR: missing $codec_jni (sync assets→jniLibs)" >&2; fail=1; return; }
   [[ -f "$cxx" ]] || { echo "ERROR: missing $cxx" >&2; fail=1; return; }
   [[ -f "$cxx_jni" ]] || { echo "ERROR: missing $cxx_jni" >&2; fail=1; return; }
   [[ -f "$vulkan_jni" ]] || { echo "ERROR: missing $vulkan_jni" >&2; fail=1; return; }
