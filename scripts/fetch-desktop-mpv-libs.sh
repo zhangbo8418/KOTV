@@ -23,9 +23,9 @@ windows_siblings_ok() {
 fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
-  local want_kind="av3a-vulkan-v18"
+  local want_kind="av3a-vulkan-d3d11-v19"
   if [[ "${KOTV_WIN7:-}" == "1" || "${KOTV_MPV_WIN7:-}" == "1" ]]; then
-    want_kind="av3a-vulkan-win7-v18"
+    want_kind="av3a-vulkan-d3d11-win7-v19"
     export KOTV_MPV_WIN7=1
   fi
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \

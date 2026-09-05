@@ -27,7 +27,7 @@ kotv_is_windows_build() {
   [[ "${OS:-}" == "Windows_NT" ]]
 }
 
-# Win7 发行包：与 Win10+ 相同编 Vulkan + D3D11（子系统仍钉 6.01）。
+# Win7 发行包：子系统钉 6.01；与 Win10+ 同编 Vulkan + D3D11。
 kotv_is_mpv_win7_build() {
   [[ "${KOTV_MPV_WIN7:-${KOTV_WIN7:-0}}" == "1" ]]
 }
@@ -65,8 +65,13 @@ kotv_mpv_dll_has_vulkan() {
 }
 
 kotv_libplacebo_profile() {
-  if kotv_is_mpv_win7_build; then
-    echo "win7-vulkan"
+  if kotv_is_windows_build; then
+    # 默认偏 Vulkan，但 D3D11 也要编进（用户可切 gpu-api=d3d11）
+    if kotv_is_mpv_win7_build; then
+      echo "win7-vulkan-d3d11-v2"
+    else
+      echo "win-vulkan-d3d11-v1"
+    fi
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     # 自前缀 Vulkan（按目标 arch），禁 Homebrew shaderc/lcms，避免错架构 / 绝对路径。
     echo "macos-vulkan-prefix-v1"
@@ -765,7 +770,7 @@ ensure_libplacebo() {
     local -a placebo_extra=()
     local -a native_args=()
     local native_ini="$BUILD_DIR/meson-native-kotv.ini"
-    # Win7 D3D11 需要 shaderc；meson 必须用我们注入的 pkg-config（.cmd），
+    # D3D11 需要 shaderc；meson 必须用我们注入的 pkg-config（.cmd），
     # 否则报 “Pkg-config for machine host machine not found”。
     if [[ -f "$native_ini" ]]; then
       native_args+=(--native-file="$native_ini")
@@ -773,9 +778,8 @@ ensure_libplacebo() {
     elif [[ -n "${PKG_CONFIG:-}" ]]; then
       echo "WARN: meson-native-kotv.ini missing; relying on PKG_CONFIG=$PKG_CONFIG" >&2
     fi
-    if kotv_is_mpv_win7_build; then
-      placebo_extra+=(-Dd3d11=enabled -Dshaderc=enabled)
-    fi
+    # Win 一律编 D3D11（默认仍可偏 Vulkan）；依赖 ensure_windows_d3d11_shader_deps
+    placebo_extra+=(-Dd3d11=enabled -Dshaderc=enabled)
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
@@ -968,15 +972,15 @@ EOF
   echo "ok libass $(pkg-config --modversion libass) (built)"
 }
 
-# Win7：不装 Vulkan SDK，但 mpv/libplacebo 的 d3d11 必须有 shaderc + spirv-cross。
+# Windows：mpv/libplacebo 的 d3d11 需要 shaderc + spirv-cross（Win7 / Win10+ 都要）。
 ensure_windows_d3d11_shader_deps() {
-  kotv_is_mpv_win7_build || return 0
+  kotv_is_windows_build || return 0
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   local need_shaderc=0 need_spirv=0
   pkg-config --exists shaderc 2>/dev/null || need_shaderc=1
   pkg-config --exists spirv-cross-c-shared 2>/dev/null || need_spirv=1
   if [[ "$need_shaderc" == 0 && "$need_spirv" == 0 ]]; then
-    echo "ok shaderc $(pkg-config --modversion shaderc 2>/dev/null || echo found) + spirv-cross (Win7 D3D11)"
+    echo "ok shaderc $(pkg-config --modversion shaderc 2>/dev/null || echo found) + spirv-cross (Win D3D11)"
     return 0
   fi
   need git
@@ -988,7 +992,7 @@ ensure_windows_d3d11_shader_deps() {
 
   if [[ "$need_spirv" == 1 ]]; then
     local tag="${KOTV_SPIRV_CROSS_TAG:-vulkan-sdk-1.3.296.0}"
-    echo "==> build SPIRV-Cross $tag (shared, Win7 D3D11)"
+    echo "==> build SPIRV-Cross $tag (shared, Win D3D11)"
     cd "$BUILD_DIR"
     if [[ ! -d SPIRV-Cross/.git ]]; then
       git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Cross.git SPIRV-Cross \
@@ -1010,7 +1014,7 @@ ensure_windows_d3d11_shader_deps() {
 
   if [[ "$need_shaderc" == 1 ]]; then
     local stag="${KOTV_SHADERC_TAG:-v2024.1}"
-    echo "==> build shaderc $stag (static, Win7 D3D11)"
+    echo "==> build shaderc $stag (static, Win D3D11)"
     cd "$BUILD_DIR"
     if [[ ! -d shaderc/.git ]]; then
       git clone --depth 1 --branch "$stag" https://github.com/google/shaderc.git shaderc \
@@ -1057,7 +1061,7 @@ PY
     || { echo "ERROR: spirv-cross-c-shared not visible to pkg-config after build" >&2; exit 1; }
   pkg-config --exists shaderc \
     || { echo "ERROR: shaderc not visible to pkg-config after build" >&2; ls -la "$PREFIX/lib/pkgconfig" >&2; exit 1; }
-  echo "ok Win7 D3D11 deps: shaderc=$(pkg-config --modversion shaderc) spirv-cross=$(pkg-config --modversion spirv-cross-c-shared 2>/dev/null || echo ok)"
+  echo "ok Win D3D11 deps: shaderc=$(pkg-config --modversion shaderc) spirv-cross=$(pkg-config --modversion spirv-cross-c-shared 2>/dev/null || echo ok)"
 }
 
 ensure_windows_vulkan() {
@@ -1325,13 +1329,12 @@ EOF
   ensure_mpv_libcurl_deps
   if kotv_is_windows_build; then
     local mpv_vk=enabled
-    if kotv_is_mpv_win7_build; then
-      echo "==> mpv Win7 build: vulkan=enabled, d3d11=enabled"
-    fi
-    local -a mpv_extra=()
-    if kotv_is_mpv_win7_build; then
-      mpv_extra+=(-Dd3d11=enabled -Dshaderc=enabled -Dspirv-cross=enabled)
-    fi
+    echo "==> mpv Windows build: vulkan=enabled, d3d11=enabled (win7=$(kotv_is_mpv_win7_build && echo 1 || echo 0))"
+    local -a mpv_extra=(
+      -Dd3d11=enabled
+      -Dshaderc=enabled
+      -Dspirv-cross=enabled
+    )
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \
       --buildtype=release \
@@ -1376,19 +1379,17 @@ EOF
   fi
   verify_mpv_has_libcurl "$out" || exit 1
   echo "built windows/mpv-2.dll (+ AV3A=$AV3A) from $dll"
-  if kotv_is_mpv_win7_build; then
-    if ! kotv_meson_feature_enabled d3d11 build && ! kotv_mpv_dll_has_d3d11 "$out"; then
-      echo "ERROR: Win7 libmpv built without d3d11 (need shaderc+spirv-cross)" >&2
-      meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
-      exit 1
-    fi
-    if ! kotv_meson_feature_enabled vulkan build && ! kotv_mpv_dll_has_vulkan "$out"; then
-      echo "ERROR: Win7 libmpv built without vulkan" >&2
-      meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
-      exit 1
-    fi
-    echo "ok Win7 mpv features include d3d11 + vulkan"
+  if ! kotv_meson_feature_enabled d3d11 build && ! kotv_mpv_dll_has_d3d11 "$out"; then
+    echo "ERROR: Windows libmpv built without d3d11 (need shaderc+spirv-cross)" >&2
+    meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
+    exit 1
   fi
+  if ! kotv_meson_feature_enabled vulkan build && ! kotv_mpv_dll_has_vulkan "$out"; then
+    echo "ERROR: Windows libmpv built without vulkan" >&2
+    meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
+    exit 1
+  fi
+  echo "ok Windows mpv features include d3d11 + vulkan"
 }
 
 case "$PLAT" in
