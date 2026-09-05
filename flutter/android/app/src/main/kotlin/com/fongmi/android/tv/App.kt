@@ -46,6 +46,15 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
 
   private fun preloadLibcxx() {
     // 必须在 Flutter/fvp 之前加载我们的 libc++。fvp 的旧 libc++ 缺 from_chars，libmpv dlopen 会挂。
+    // Android 15/16：优先 System.loadLibrary（APK jniLibs），避免 System.load(绝对路径)
+    // 把 libc++ 绑到 app_mpv-libs 命名空间，随后 libmvcodec 构造期崩在 libc++。
+    try {
+      System.loadLibrary("c++_shared")
+      android.util.Log.i(TAG, "preload libc++_shared via loadLibrary(jniLibs)")
+      return
+    } catch (t: Throwable) {
+      android.util.Log.w(TAG, "preload libc++_shared loadLibrary failed, try assets extract", t)
+    }
     try {
       val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull { candidate ->
         try {
@@ -56,8 +65,7 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
         }
       }
       if (abi.isNullOrEmpty()) {
-        System.loadLibrary("c++_shared")
-        android.util.Log.i(TAG, "preload libc++_shared from nativeLibraryDir")
+        android.util.Log.w(TAG, "preload libc++_shared: no abi in assets")
         return
       }
       val dest = java.io.File(java.io.File(getDir("mpv-libs", MODE_PRIVATE), abi), "libc++_shared.so")
@@ -67,13 +75,8 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
       }
       System.load(dest.absolutePath)
       android.util.Log.i(TAG, "preload libc++_shared from assets/$abi ${dest.absolutePath}")
-    } catch (t: Throwable) {
-      try {
-        System.loadLibrary("c++_shared")
-        android.util.Log.w(TAG, "preload libc++_shared fallback jniLibs", t)
-      } catch (t2: Throwable) {
-        android.util.Log.w(TAG, "preload libc++_shared failed", t2)
-      }
+    } catch (t2: Throwable) {
+      android.util.Log.w(TAG, "preload libc++_shared failed", t2)
     }
   }
 

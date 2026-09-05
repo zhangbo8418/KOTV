@@ -101,16 +101,18 @@ public final class MPVLib {
             String bundleId = getBundleId(app, abi);
             boolean refreshBundle = !bundleId.equals(readMarker(marker));
             for (String lib : COPY_ORDER) copyLibrary(app.getAssets(), abi, lib, dir, refreshBundle);
-            // App-local libvulkan.so must win over /system/lib64/libvulkan.so (same soname).
-            // System Vulkan on API 25 lacks 1.1 symbols; load ours via absolute path +
-            // RTLD_GLOBAL/FORCE_LOAD before libmpv relocates DT_NEEDED libvulkan.so.
-            File bundledCxx = new File(dir, "libc++_shared.so");
-            if (bundledCxx.isFile()) {
-                try {
+            // Prefer APK jniLibs (loadLibrary). Absolute System.load under app_mpv-libs has
+            // crashed in libmvcodec call_constructors → libc++ on Android 15/16 (e.g. Redmi).
+            try {
+                System.loadLibrary("c++_shared");
+                Log.i(TAG, "libc++_shared via loadLibrary");
+            } catch (UnsatisfiedLinkError e) {
+                File bundledCxx = new File(dir, "libc++_shared.so");
+                if (bundledCxx.isFile()) {
                     System.load(bundledCxx.getAbsolutePath());
-                    Log.i(TAG, "libc++_shared loaded from " + bundledCxx.getAbsolutePath());
-                } catch (UnsatisfiedLinkError e) {
-                    Log.w(TAG, "libc++_shared already loaded or failed: " + bundledCxx.getAbsolutePath(), e);
+                    Log.w(TAG, "libc++_shared via extracted path " + bundledCxx.getAbsolutePath(), e);
+                } else {
+                    throw e;
                 }
             }
             System.loadLibrary("kotv_dl");
@@ -123,19 +125,20 @@ public final class MPVLib {
             } else {
                 Log.i(TAG, "MPV libvulkan stub loaded globally from " + vulkanSo.getAbsolutePath());
             }
+            final String[] ffmpegAndMpv = {
+                    "mvutil",
+                    "mwresample",
+                    "mwscale",
+                    "mvcodec",
+                    "mvformat",
+                    "mvfilter",
+                    "mvdevice",
+                    "mpv",
+                    "player"
+            };
             boolean usedJniLibs = false;
             try {
-                for (String lib : new String[] {
-                        "mvutil",
-                        "mwresample",
-                        "mwscale",
-                        "mvcodec",
-                        "mvformat",
-                        "mvfilter",
-                        "mvdevice",
-                        "mpv",
-                        "player"
-                }) {
+                for (String lib : ffmpegAndMpv) {
                     System.loadLibrary(lib);
                 }
                 usedJniLibs = true;
@@ -147,8 +150,12 @@ public final class MPVLib {
                 for (String lib : LOAD_ORDER) {
                     if ("c++_shared".equals(lib) || "kotv_dl".equals(lib) || "vulkan".equals(lib)) continue;
                     File so = new File(dir, System.mapLibraryName(lib));
+                    Log.i(TAG, "System.load " + so.getAbsolutePath());
                     System.load(so.getAbsolutePath());
                 }
+            }
+            if (!usedJniLibs) {
+                Log.w(TAG, "MPV loaded from app_mpv-libs extract path (prefer rebuilding with jniLibs sync)");
             }
             loadedAbi = abi;
             loaded = true;
