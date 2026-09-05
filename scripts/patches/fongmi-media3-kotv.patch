@@ -1,0 +1,193 @@
+diff --git a/build-logic/src/main/kotlin/androidx/media3/buildlogic/aarTypeWorkaround.kt b/build-logic/src/main/kotlin/androidx/media3/buildlogic/aarTypeWorkaround.kt
+index c5c5c13..dd1be01 100644
+--- a/build-logic/src/main/kotlin/androidx/media3/buildlogic/aarTypeWorkaround.kt
++++ b/build-logic/src/main/kotlin/androidx/media3/buildlogic/aarTypeWorkaround.kt
+@@ -31,6 +31,7 @@ fun addMissingAarTypeToXml(xml: XmlProvider) {
+       "androidx.concurrent:concurrent-futures",
+       "com.github.philburk:jsyn",
+       "com.google.guava:guava",
++      "com.hierynomus:smbj",
+       "com.google.truth:truth",
+       "com.squareup.okhttp3:mockwebserver",
+       "com.squareup.okhttp3:okhttp",
+@@ -46,6 +47,7 @@ fun addMissingAarTypeToXml(xml: XmlProvider) {
+       "org.jetbrains.kotlinx:kotlinx-coroutines-test",
+       "org.mockito:mockito-core",
+       "org.robolectric:robolectric",
++      "com.googlecode.juniversalchardet:juniversalchardet",
+       // go/keep-sorted end
+     )
+   // Dependencies that have AAR files.
+diff --git a/libraries/common/build.gradle.kts b/libraries/common/build.gradle.kts
+index c283d72..73ed631 100644
+--- a/libraries/common/build.gradle.kts
++++ b/libraries/common/build.gradle.kts
+@@ -53,9 +53,6 @@ dependencies {
+   testImplementation(libs.test.parameter.injector)
+   testImplementation(libs.truth)
+   testImplementation(libs.robolectric)
+-  testImplementation(project(":lib-exoplayer"))
+-  testImplementation(project(":test-utils"))
+ 
+   androidTestImplementation(libs.androidx.test.runner)
+-  androidTestImplementation(project(":test-utils"))
+ }
+diff --git a/libraries/container/build.gradle.kts b/libraries/container/build.gradle.kts
+index ffec103..113bdc8 100644
+--- a/libraries/container/build.gradle.kts
++++ b/libraries/container/build.gradle.kts
+@@ -33,5 +33,4 @@ dependencies {
+   testImplementation(libs.truth)
+   testImplementation(libs.junit)
+   testImplementation(libs.robolectric)
+-  testImplementation(project(":test-utils"))
+ }
+diff --git a/libraries/database/build.gradle.kts b/libraries/database/build.gradle.kts
+index dbc79cd..8f2f075 100644
+--- a/libraries/database/build.gradle.kts
++++ b/libraries/database/build.gradle.kts
+@@ -25,5 +25,4 @@ dependencies {
+   testImplementation(libs.androidx.test.ext.junit)
+   testImplementation(libs.truth)
+   testImplementation(libs.robolectric)
+-  testImplementation(project(":test-utils"))
+ }
+diff --git a/libraries/datasource/build.gradle.kts b/libraries/datasource/build.gradle.kts
+index a9fa11d..6ddd8db 100644
+--- a/libraries/datasource/build.gradle.kts
++++ b/libraries/datasource/build.gradle.kts
+@@ -34,12 +34,10 @@ dependencies {
+   androidTestRuntimeOnly(libs.dexmaker.mockito)
+   androidTestImplementation(libs.androidx.test.runner)
+   androidTestImplementation(libs.okhttp.mockwebserver)
+-  androidTestImplementation(project(":test-utils"))
+   testImplementation(libs.mockito.core)
+   testImplementation(libs.androidx.test.core)
+   testImplementation(libs.androidx.test.ext.junit)
+   testImplementation(libs.truth)
+   testImplementation(libs.okhttp.mockwebserver)
+   testImplementation(libs.robolectric)
+-  testImplementation(project(":test-utils"))
+ }
+diff --git a/libraries/datasource_okhttp/build.gradle.kts b/libraries/datasource_okhttp/build.gradle.kts
+index 9e7561a..53eeedf 100644
+--- a/libraries/datasource_okhttp/build.gradle.kts
++++ b/libraries/datasource_okhttp/build.gradle.kts
+@@ -23,7 +23,6 @@ dependencies {
+   api(project(":lib-datasource"))
+   implementation(libs.androidx.annotation)
+   androidTestRuntimeOnly(libs.dexmaker.mockito)
+-  androidTestImplementation(project(":test-utils"))
+   androidTestImplementation(libs.androidx.test.runner)
+   androidTestImplementation(libs.okhttp.mockwebserver)
+   androidTestImplementation(libs.okhttp.urlconnection)
+diff --git a/libraries/exoplayer/build.gradle.kts b/libraries/exoplayer/build.gradle.kts
+index 82d224d..ec9fc37 100644
+--- a/libraries/exoplayer/build.gradle.kts
++++ b/libraries/exoplayer/build.gradle.kts
+@@ -40,12 +40,9 @@ dependencies {
+   implementation(libs.juniversalchardet)
+   androidTestRuntimeOnly(libs.dexmaker.mockito)
+   androidTestImplementation(libs.androidx.test.runner)
+-  androidTestImplementation(project(":test-utils"))
+   androidTestImplementation(libs.kotlinx.coroutines.android)
+   androidTestImplementation(libs.okhttp.mockwebserver)
+   testImplementation(libs.test.parameter.injector)
+   testImplementation(libs.okhttp.mockwebserver)
+   testImplementation(libs.robolectric)
+-  testImplementation(project(":test-utils"))
+-  testImplementation(project(":test-utils-robolectric"))
+ }
+diff --git a/libraries/exoplayer_dash/build.gradle.kts b/libraries/exoplayer_dash/build.gradle.kts
+index eb528e1..731d5d7 100644
+--- a/libraries/exoplayer_dash/build.gradle.kts
++++ b/libraries/exoplayer_dash/build.gradle.kts
+@@ -25,9 +25,6 @@ android {
+ dependencies {
+   api(project(":lib-exoplayer"))
+   implementation(libs.androidx.annotation)
+-  testImplementation(project(":lib-inspector"))
+-  testImplementation(project(":test-utils-robolectric"))
+-  testImplementation(project(":test-utils"))
+   testImplementation(libs.test.parameter.injector)
+   testImplementation(libs.robolectric)
+ }
+diff --git a/libraries/exoplayer_hls/build.gradle.kts b/libraries/exoplayer_hls/build.gradle.kts
+index 340a837..5fa5e19 100644
+--- a/libraries/exoplayer_hls/build.gradle.kts
++++ b/libraries/exoplayer_hls/build.gradle.kts
+@@ -26,12 +26,8 @@ dependencies {
+   implementation(libs.androidx.annotation)
+   implementation(libs.androidx.concurrent.futures)
+   api(project(":lib-exoplayer"))
+-  testImplementation(project(":test-utils-robolectric"))
+-  testImplementation(project(":test-utils"))
+-  testImplementation(project(":test-data"))
+   testImplementation(libs.test.parameter.injector)
+   testImplementation(libs.okhttp.mockwebserver)
+   testImplementation(libs.robolectric)
+-  androidTestImplementation(project(":test-utils"))
+   androidTestImplementation(libs.androidx.test.runner)
+ }
+diff --git a/libraries/extractor/build.gradle.kts b/libraries/extractor/build.gradle.kts
+index 385e1e1..c66181e 100644
+--- a/libraries/extractor/build.gradle.kts
++++ b/libraries/extractor/build.gradle.kts
+@@ -32,11 +32,7 @@ dependencies {
+   api(project(":lib-container"))
+   // TODO(b/203752187): Remove this dependency.
+   implementation(project(":lib-decoder"))
+-  testImplementation(project(":lib-exoplayer"))
+-  testImplementation(project(":test-utils"))
+-  testImplementation(project(":test-data"))
+   testImplementation(libs.test.parameter.injector)
+   testImplementation(libs.robolectric)
+   androidTestImplementation(libs.androidx.test.runner)
+-  androidTestImplementation(project(":test-utils"))
+ }
+diff --git a/libraries/ui/build.gradle.kts b/libraries/ui/build.gradle.kts
+index 4e6b59e..28e4d98 100644
+--- a/libraries/ui/build.gradle.kts
++++ b/libraries/ui/build.gradle.kts
+@@ -32,8 +32,5 @@ dependencies {
+   api(project(":lib-ui-danmaku"))
+   implementation(libs.androidx.annotation)
+   implementation(libs.androidx.recyclerview)
+-  testImplementation(project(":lib-exoplayer"))
+-  testImplementation(project(":test-utils-robolectric"))
+-  testImplementation(project(":test-utils"))
+   testImplementation(libs.robolectric)
+ }
+diff --git a/settings.gradle.kts b/settings.gradle.kts
+index fc62b6a..f951b30 100644
+--- a/settings.gradle.kts
++++ b/settings.gradle.kts
+@@ -27,7 +27,28 @@ plugins { id("gradlebuild.media3-settings-logic") }
+ 
+ rootProject.name = "androidx.media3"
+ 
++// KOTV: only the Media3 modules we publish into maven-webhtv.
++val kotvModules =
++  setOf(
++    "lib-common",
++    "lib-container",
++    "lib-database",
++    "lib-datasource",
++    "lib-datasource-okhttp",
++    "lib-decoder",
++    "lib-exoplayer",
++    "lib-exoplayer-dash",
++    "lib-exoplayer-hls",
++    "lib-extractor",
++  )
++
+ Media3Modules.EXTERNAL_MODULES.forEach { (gradleName, moduleInfo) ->
++  if (gradleName !in kotvModules) {
++    return@forEach
++  }
++  if (!file(moduleInfo.directory).isDirectory) {
++    return@forEach
++  }
+   if (moduleInfo.includeInCompositeBuild || gradle.parent == null) {
+     include(":$gradleName")
+     project(":$gradleName").projectDir = file(moduleInfo.directory)
