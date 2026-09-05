@@ -509,6 +509,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }
     }
 
+    // FVP dispose 已在引擎内限时；整段硬停再封顶，避免任一后端拖死返回。
     await Future.wait<void>([
       hardRelease(fvp),
       hardRelease(mk),
@@ -517,7 +518,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       hardRelease(art),
       hardRelease(xg),
       hardRelease(zw),
-    ]).timeout(const Duration(seconds: 4), onTimeout: () => <void>[]);
+    ]).timeout(const Duration(seconds: 2), onTimeout: () => <void>[]);
 
     // media_kit Player 由页面持有：对齐 TV engine.release()。
     await kotvDisposeMpvPlayer(mkPlayer);
@@ -1488,6 +1489,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         behavior: HitTestBehavior.opaque,
         onTap: () {
           if (_playUrl.isEmpty || _immersiveFullscreen) return;
+          // 换集/解析中勿 toggle：布局抖动时 pointer-up 易落到画面上，造成隔集暂停。
+          if (_status.contains('换集中') ||
+              _status.contains('解析') ||
+              _status.contains('嗅探') ||
+              _status.contains('加载中')) {
+            return;
+          }
           unawaited(_playback.playOrPause());
           setState(() {});
         },
@@ -1511,7 +1519,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 child: CenterPlayPauseButton(
                   player: _playback,
                   hideWhenBuffering: true,
-                  enabled: !_status.contains('解析') && !_status.contains('嗅探'),
+                  enabled: !_status.contains('解析') &&
+                      !_status.contains('嗅探') &&
+                      !_status.contains('换集中'),
                 ),
               ),
               if (_status.contains('解析') || _status.contains('嗅探') || _status.contains('换集中'))
@@ -1786,6 +1796,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           ? null
           : () {
               if (_playUrl.isEmpty) return;
+              if (_status.contains('换集中') ||
+                  _status.contains('解析') ||
+                  _status.contains('嗅探') ||
+                  _status.contains('加载中')) {
+                return;
+              }
               unawaited(_playback.playOrPause());
               setState(() {});
             },
@@ -1836,7 +1852,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               child: CenterPlayPauseButton(
                 player: _playback,
                 hideWhenBuffering: true,
-                enabled: !_status.contains('解析') && !_status.contains('嗅探'),
+                enabled: !_status.contains('解析') &&
+                    !_status.contains('嗅探') &&
+                    !_status.contains('换集中'),
               ),
             ),
           if (!stableSlot &&

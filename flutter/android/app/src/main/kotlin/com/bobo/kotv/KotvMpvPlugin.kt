@@ -223,6 +223,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             surfaceHost?.setRender(renderTexture)
+            // 会话内复用 libmpv 上下文（对齐 TV MpvPlayerEngine）；仅 loadfile replace。
             ensurePlayer()
             applyRuntimeOpts(props)
             applyGpuApiIfNeeded()

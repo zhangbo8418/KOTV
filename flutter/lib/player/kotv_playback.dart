@@ -117,6 +117,33 @@ abstract class KotvPlayback extends ChangeNotifier {
   }
 }
 
+/// 离开播放统一拆机：stop → 短等排空 AO/事件线程 → dispose。无静音。
+///
+/// 对齐 Windows media_kit [kotvDisposeMpvPlayer]；各平台 MPV / FVP 共用。
+/// [disposeTimeout] 非空时（如 FVP/mdk），dispose 超时后把同一 Future 丢后台，不二次调用。
+Future<void> kotvTeardownPlayback({
+  required Future<void> Function() stop,
+  required Future<void> Function() dispose,
+  Duration drain = const Duration(milliseconds: 400),
+  Duration? disposeTimeout,
+}) async {
+  try {
+    await stop();
+  } catch (_) {}
+  await Future<void>.delayed(drain);
+  final fut = dispose();
+  try {
+    if (disposeTimeout != null) {
+      await fut.timeout(disposeTimeout);
+    } else {
+      await fut;
+    }
+  } on TimeoutException {
+    // dispose 仍在跑；挂上 catch，避免未处理异步错误。
+    unawaited(fut.catchError((_) {}));
+  } catch (_) {}
+}
+
 /// 网速文案：统一两位小数，如 `0.00 KB/s` / `12.34 KB/s` / `100.00 MB/s`。
 /// [showZero] 为 true 时，0 也显示（缓冲界面用来判断是否卡死）。
 String kotvFormatSpeed(int bytesPerSec, {bool showZero = false}) {

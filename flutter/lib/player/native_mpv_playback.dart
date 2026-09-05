@@ -411,12 +411,10 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Future<void> release() async {
-    try {
-      await _ch.invokeMethod('stop');
-    } catch (_) {}
-    try {
-      await _ch.invokeMethod('dispose');
-    } catch (_) {}
+    await kotvTeardownPlayback(
+      stop: () => _ch.invokeMethod('stop'),
+      dispose: () => _ch.invokeMethod('dispose'),
+    );
     _nativeReady = false;
     _playing = false;
     _buffering = false;
@@ -542,17 +540,15 @@ class NativeMpvPlayback extends KotvPlayback {
     surfaceRev.dispose();
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _sub = null;
-    // 正常路径已在 [release] 里 await dispose；此处仅兜底。
+    // 正常路径已在 [release] 里 await dispose；此处仅兜底（含排空）。
     if (_nativeReady) {
       _nativeReady = false;
-      unawaited(() async {
-        try {
-          await _ch.invokeMethod('stop');
-        } catch (_) {}
-        try {
-          await _ch.invokeMethod('dispose');
-        } catch (_) {}
-      }());
+      unawaited(
+        kotvTeardownPlayback(
+          stop: () => _ch.invokeMethod('stop'),
+          dispose: () => _ch.invokeMethod('dispose'),
+        ),
+      );
     }
     unawaited(_posCtrl.close());
     unawaited(_bufCtrl.close());

@@ -10,15 +10,13 @@ import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
 /// 安全释放 libmpv [Player]：先停播、给事件线程留出排空时间，再 dispose。
+/// 各桌面平台（Win / macOS / Linux）共用 [kotvTeardownPlayback]。
 Future<void> kotvDisposeMpvPlayer(Player? player) async {
   if (player == null) return;
-  try {
-    await player.stop();
-  } catch (_) {}
-  await Future<void>.delayed(const Duration(milliseconds: 400));
-  try {
-    await player.dispose();
-  } catch (_) {}
+  await kotvTeardownPlayback(
+    stop: () => player.stop(),
+    dispose: () => player.dispose(),
+  );
 }
 
 /// 按缓冲预算创建 [Player]。
@@ -76,8 +74,16 @@ class MediaKitPlayback extends KotvPlayback {
       }
       notifyListeners();
     }));
-    _subs.add(player.stream.width.listen((_) => notifyListeners()));
-    _subs.add(player.stream.height.listen((_) => notifyListeners()));
+    _subs.add(player.stream.width.listen((w) {
+      if (!_acceptSize) return;
+      _w = w ?? 0;
+      notifyListeners();
+    }));
+    _subs.add(player.stream.height.listen((h) {
+      if (!_acceptSize) return;
+      _h = h ?? 0;
+      notifyListeners();
+    }));
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
@@ -103,6 +109,22 @@ class MediaKitPlayback extends KotvPlayback {
   int _lastCacheBytes = -1;
   DateTime? _lastCacheAt;
   late Future<void> _optsReady;
+  /// 对齐 Exo/原生 MPV：换源时本地尺寸清零；未 [_acceptSize] 前不采信 libmpv 残留宽高。
+  int _w = 0;
+  int _h = 0;
+  bool _acceptSize = false;
+
+  void _clearVideoSize() {
+    _acceptSize = false;
+    _w = 0;
+    _h = 0;
+  }
+
+  void _adoptPlayerSize() {
+    _acceptSize = true;
+    _w = player.state.width ?? 0;
+    _h = player.state.height ?? 0;
+  }
 
   Future<void> _prepareOpts() async {
     try {
@@ -187,10 +209,10 @@ class MediaKitPlayback extends KotvPlayback {
   double get rate => player.state.rate;
 
   @override
-  int get width => player.state.width ?? 0;
+  int get width => _w;
 
   @override
-  int get height => player.state.height ?? 0;
+  int get height => _h;
 
   @override
   Stream<Duration> get positionStream => player.stream.position;
@@ -253,6 +275,9 @@ class MediaKitPlayback extends KotvPlayback {
     _url = url;
     _live = live;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
+    // 换源清尺寸（对齐 Exo / 原生 MPV）；避免 libmpv 残留宽高误判就绪。
+    _clearVideoSize();
+    notifyListeners();
     if (drm != null && drm.isNotEmpty) {
       throw StateError('MPV 不支持 DRM，请用内置 ExoPlayer');
     }
@@ -264,6 +289,8 @@ class MediaKitPlayback extends KotvPlayback {
     // 直播：对齐 TV prepareAndPlay——立刻 play，无 Flutter 层 play:false 等缓冲。
     if (live) {
       await player.open(media, play: true);
+      _adoptPlayerSize();
+      notifyListeners();
     } else {
       await player.open(media, play: false);
       await _waitReadyThenPlay();
@@ -284,15 +311,22 @@ class MediaKitPlayback extends KotvPlayback {
 
   /// paused 加载到有画面尺寸、音轨或一点前向缓冲后再 unpause（避免只有时间在跑）。
   Future<void> _waitReadyThenPlay() async {
+    final url = _url;
     final deadline = DateTime.now().add(const Duration(seconds: 20));
-    while (DateTime.now().isBefore(deadline) && _url.isNotEmpty) {
-      if (width > 0 && height > 0) break;
+    while (DateTime.now().isBefore(deadline) && _url == url) {
+      // 本集已开始缓冲/出轨后再采信 libmpv 尺寸（open/stop 已清本地）。
+      final loading = buffering || buffered > Duration.zero || position > Duration.zero;
+      if (loading || isAudioOnlyContent) {
+        _adoptPlayerSize();
+      }
+      if (_w > 0 && _h > 0) break;
       if (isAudioOnlyContent) break;
       if (buffered > const Duration(milliseconds: 400)) break;
       if (hasVideoSourceHint && !buffering && buffered > Duration.zero) break;
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
-    if (_url.isEmpty) return;
+    if (_url != url) return;
+    if (!_acceptSize) _adoptPlayerSize();
     try {
       await player.play();
     } catch (_) {}
@@ -300,10 +334,13 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> stop() async {
+    // 对齐 TV：换集只停播，不 dispose Player（离开页走 kotvDisposeMpvPlayer）。
     _url = '';
+    _clearVideoSize();
     try {
       await player.stop();
     } catch (_) {}
+    notifyListeners();
   }
 
   @override

@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.graphics.SurfaceTexture
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -16,6 +17,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import io.flutter.view.TextureRegistry
+import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -23,6 +25,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -36,7 +39,7 @@ import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.trackselection.DecodeTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.TsExtractor
@@ -64,11 +67,12 @@ import kotlin.math.min
  * - Texture（兼容）：Flutter [TextureRegistry]（部分 HDR/10bit 会花屏，仅作回退）
  * 勿再因 API&lt;26 强制 Texture：RK 盒上 Flutter Texture + HDR 呈绿条花屏。
  *
- * 软硬解：
- * - hard：仅 MediaCodec，优先 hardwareAccelerated；扩展 FFmpeg 不参与视频
- * - auto：MediaCodec 硬解优先，扩展可作回退；解码失败再整实例软解重建一次
- * - soft：EXTENSION PREFER + 软件 MediaCodec 优先
+ * 软硬解（对齐 TV DecodeTrackSelector + ExoUtil）：
+ * - hard：视频 MediaCodec 硬解优先；音轨 MediaCodec 优先、FFmpeg（AV3A）可回退
+ * - auto：同 hard；解码失败再整实例软解重建一次
+ * - soft：音轨强制 FFmpeg；视频仍走 MediaCodec（KOTV 无 FfmpegVideoRenderer）+ 软件解码器优先
  */
+@OptIn(UnstableApi::class)
 class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
   private var channel: MethodChannel? = null
@@ -83,7 +87,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var useFlutterTexture: Boolean = false
   private var surfaceHost: KotvExoSurfaceHost? = null
   private var player: ExoPlayer? = null
-  private var trackSelector: DefaultTrackSelector? = null
+  private var trackSelector: DecodeTrackSelector? = null
+  /** 可热更新默认请求头；换集复用 Player 时改这里，对齐 TV RequestMetadata+工厂头。 */
+  private var httpFactory: OkHttpDataSource.Factory? = null
+  private var playerListener: Player.Listener? = null
+  /** 当前实例创建时的直播/解码配置；变化才整机重建（对齐 TV ensureEngine）。 */
+  private var playerBuiltLive: Boolean? = null
+  private var playerBuiltDecode: String? = null
+  private var playerBuiltDrmKey: String? = null
   private var currentUrl: String = ""
   private var currentHeaders: Map<String, String> = emptyMap()
   private var currentMime: String? = null
@@ -323,13 +334,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "stop" -> {
         main.post {
+          // 对齐 TV engine.stop：只停播，不拆 Surface（换集复用要接着 setMediaItem）。
           player?.apply {
-            try {
-              clearVideoSurface()
-            } catch (_: Throwable) {
-            }
             stop()
-            seekTo(0)
+            clearMediaItems()
           }
           result.success(true)
         }
@@ -525,6 +533,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     player?.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
   }
 
+  /** DRM 指纹：变了才重建（Widevine session 等不宜热切）。 */
+  private fun drmKey(drm: Map<String, Any?>?): String {
+    if (drm == null) return ""
+    val type = drm["type"]?.toString()?.trim().orEmpty()
+    val key = drm["key"]?.toString()?.trim().orEmpty()
+    return "$type|$key"
+  }
+
   private fun openInternal(
     url: String,
     headers: Map<String, String>,
@@ -532,7 +548,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     drm: Map<String, Any?>?,
     live: Boolean = false,
   ) {
-    val ctx = appContext ?: error("no context")
     formatRetried = false
     livePlayback = live
     currentUrl = url
@@ -544,34 +559,53 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     speedLastAtMs = 0
     transferredBytes.set(0)
 
-    val old = player
-    player = null
-    trackSelector = null
-    old?.release()
+    val effective = effectiveDecodeMode()
+    val nextDrmKey = drmKey(drm)
+    val needRebuild =
+      player == null ||
+        playerBuiltLive != live ||
+        playerBuiltDecode != effective ||
+        playerBuiltDrmKey != nextDrmKey
 
-    val httpFactory = OkHttpDataSource.Factory(httpClient)
+    if (needRebuild) {
+      rebuildPlayer(live, effective, nextDrmKey)
+    } else {
+      httpFactory
+        ?.setUserAgent(currentHeaders["User-Agent"] ?: defaultUserAgent())
+        ?.setDefaultRequestProperties(currentHeaders)
+      bindPlayerSurface()
+    }
+
+    val p = player ?: error("exo player missing")
+    // 对齐 TV startInternal：同实例 setMediaItem → prepare → play。
+    p.setMediaItem(buildMediaItem(url, currentMime, currentDrm, currentHeaders), true)
+    p.prepare()
+    p.play()
+    main.removeCallbacks(tick)
+    main.post(tick)
+  }
+
+  /** 首次或配置变化时创建；换集复用路径不走这里。 */
+  private fun rebuildPlayer(live: Boolean, effective: String, nextDrmKey: String) {
+    val ctx = appContext ?: error("no context")
+    releasePlayerInstance()
+
+    val factory = OkHttpDataSource.Factory(httpClient)
       .setUserAgent(currentHeaders["User-Agent"] ?: defaultUserAgent())
       .setDefaultRequestProperties(currentHeaders)
       .setTransferListener(netTransferListener)
-    val dataSourceFactory = DefaultDataSource.Factory(ctx, httpFactory)
+    httpFactory = factory
+    val dataSourceFactory = DefaultDataSource.Factory(ctx, factory)
     val extractors = DefaultExtractorsFactory()
       .setTsExtractorTimestampSearchBytes(TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES * 10)
     val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, extractors)
-    val effective = effectiveDecodeMode()
     val renderers = buildRenderersFactory(ctx, effective)
-    val selector = DefaultTrackSelector(ctx)
+    val selector = buildTrackSelector(ctx, effective)
     trackSelector = selector
-    // 直播：对齐 TV，不自定义 LoadControl（点播才套 KotvBufferBudget 猛囤）。
     val loadControl: LoadControl? = if (live) {
       null
     } else {
       val budget = bufferBudgetBytes(ctx)
-      // 内存水位缓冲（与 Dart KotvBufferBudget 一致）：
-      // - 只按 targetBufferBytes 刹车/续拉；播出去的样本释放后 allocated 下降即继续拉
-      // - minBufferMs 刻意极大：让 DefaultLoadControl 在「未满字节预算」时始终走续拉分支，
-      //   避免按剩余秒数播到快空才再缓冲
-      // - 起播门槛仍用 bufferForPlayback*（短时长），与预读策略无关
-      // - backBuffer=0：已播数据尽快释放，不囤回看内存
       DefaultLoadControl.Builder()
         .setBufferDurationsMs(
           /* minBufferMs */ 3_600_000,
@@ -584,9 +618,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         .setBackBuffer(/* backBufferDurationMs */ 0, /* retainFromKeyframe */ false)
         .build()
     }
-    // 每播放器独立 BandwidthMeter，避免 getSingletonInstance 的历史码率黏住 UI
     val bandwidthMeter = DefaultBandwidthMeter.Builder(ctx).build()
-
     val builder = ExoPlayer.Builder(ctx)
       .setMediaSourceFactory(mediaSourceFactory)
       .setRenderersFactory(renderers)
@@ -597,87 +629,114 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     val p = builder.build()
     player = p
+    playerBuiltLive = live
+    playerBuiltDecode = effective
+    playerBuiltDrmKey = nextDrmKey
     bindPlayerSurface()
-    p.addListener(object : Player.Listener {
-      override fun onPlaybackStateChanged(playbackState: Int) {
-        if (playbackState == Player.STATE_ENDED) {
-          emit(mapOf("event" to "completed"))
+    val listener =
+      object : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+          val cur = player ?: return
+          if (playbackState == Player.STATE_ENDED) {
+            emit(mapOf("event" to "completed"))
+          }
+          if (playbackState == Player.STATE_READY) {
+            val f = cur.videoSize
+            if (f.width > 0 && f.height > 0) {
+              resizeFlutterTexture(f.width, f.height)
+            }
+            emit(
+              mapOf(
+                "event" to "ready",
+                "width" to f.width,
+                "height" to f.height,
+                "pixelRatio" to f.pixelWidthHeightRatio,
+                "durationMs" to cur.duration.coerceAtLeast(0),
+                "decodeMode" to (playerBuiltDecode ?: effectiveDecodeMode()),
+                "videoTrackCount" to videoTrackCandidates().size,
+                "audioTrackCount" to audioTrackCount(),
+              ),
+            )
+          }
         }
-        if (playbackState == Player.STATE_READY) {
-          val f = p.videoSize
-          if (f.width > 0 && f.height > 0) {
-            resizeFlutterTexture(f.width, f.height)
+
+        override fun onPlayerError(error: PlaybackException) {
+          val mode = playerBuiltDecode ?: effectiveDecodeMode()
+          Log.e(TAG, "exo error code=${error.errorCode} mode=$mode ${error.message}", error)
+          if (!formatRetried) {
+            val retryMime = mimeForError(error.errorCode)
+            if (retryMime != null && retryMime != currentMime) {
+              formatRetried = true
+              currentMime = retryMime
+              try {
+                val cur = player ?: return
+                cur.setMediaItem(buildMediaItem(currentUrl, currentMime, currentDrm, currentHeaders), true)
+                cur.prepare()
+                cur.play()
+                return
+              } catch (t: Throwable) {
+                Log.e(TAG, "exo retry failed", t)
+              }
+            }
+          }
+          if (decodeMode == "auto" && !decodeFallbackTried && isDecoderError(error.errorCode)) {
+            decodeFallbackTried = true
+            Log.w(TAG, "exo decoder failed → soft rebuild")
+            try {
+              openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback)
+              return
+            } catch (t: Throwable) {
+              Log.e(TAG, "exo soft rebuild failed", t)
+            }
+          }
+          emit(mapOf("event" to "error", "message" to (error.message ?: error.errorCodeName)))
+        }
+
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+          if (videoSize.width > 0 && videoSize.height > 0) {
+            resizeFlutterTexture(videoSize.width, videoSize.height)
           }
           emit(
             mapOf(
-              "event" to "ready",
-              "width" to f.width,
-              "height" to f.height,
-              "pixelRatio" to f.pixelWidthHeightRatio,
-              "durationMs" to p.duration.coerceAtLeast(0),
-              "decodeMode" to effective,
-              "videoTrackCount" to videoTrackCandidates().size,
-              "audioTrackCount" to audioTrackCount(),
+              "event" to "size",
+              "width" to videoSize.width,
+              "height" to videoSize.height,
+              "pixelRatio" to videoSize.pixelWidthHeightRatio,
             ),
           )
         }
       }
-
-      override fun onPlayerError(error: PlaybackException) {
-        Log.e(TAG, "exo error code=${error.errorCode} mode=$effective ${error.message}", error)
-        if (!formatRetried) {
-          val retryMime = mimeForError(error.errorCode)
-          if (retryMime != null && retryMime != currentMime) {
-            formatRetried = true
-            currentMime = retryMime
-            try {
-              p.setMediaItem(buildMediaItem(currentUrl, currentMime, currentDrm), true)
-              p.prepare()
-              p.play()
-              return
-            } catch (t: Throwable) {
-              Log.e(TAG, "exo retry failed", t)
-            }
-          }
-        }
-        // 硬解失败时用扩展/软解重建一次
-        if (decodeMode == "auto" && !decodeFallbackTried && isDecoderError(error.errorCode)) {
-          decodeFallbackTried = true
-          Log.w(TAG, "exo decoder failed → soft rebuild")
-          try {
-              openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback)
-            return
-          } catch (t: Throwable) {
-            Log.e(TAG, "exo soft rebuild failed", t)
-          }
-        }
-        emit(mapOf("event" to "error", "message" to (error.message ?: error.errorCodeName)))
-      }
-
-      override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-        if (videoSize.width > 0 && videoSize.height > 0) {
-          resizeFlutterTexture(videoSize.width, videoSize.height)
-        }
-        emit(
-          mapOf(
-            "event" to "size",
-            "width" to videoSize.width,
-            "height" to videoSize.height,
-            "pixelRatio" to videoSize.pixelWidthHeightRatio,
-          ),
-        )
-      }
-    })
-    p.setMediaItem(buildMediaItem(url, currentMime, currentDrm), true)
-    p.prepare()
-    p.play()
-    main.removeCallbacks(tick)
-    main.post(tick)
+    playerListener = listener
+    p.addListener(listener)
   }
 
   private fun effectiveDecodeMode(): String {
     if (decodeMode == "auto" && decodeFallbackTried) return "soft"
     return decodeMode
+  }
+
+  /**
+   * 对齐 TV [ExoUtil.buildTrackSelector]：
+   * DecodeTrackSelector + forceHighestSupportedBitrate；
+   * tunnel 仅 Surface（TV 默认关 tunnel，KOTV 同样默认 false）。
+   */
+  private fun buildTrackSelector(ctx: Context, mode: String): DecodeTrackSelector {
+    val trackSelector = DecodeTrackSelector(ctx)
+    val builder = trackSelector.buildUponParameters()
+    builder.setForceHighestSupportedBitrate(true)
+    // TV：tunnel 仅 Surface；Texture 必须关。KOTV 默认不开启 tunnel（与 TV Prefers 默认一致）。
+    builder.setTunnelingEnabled(false)
+    trackSelector.setParameters(builder.build())
+    applyDecodePreferences(trackSelector, mode)
+    return trackSelector
+  }
+
+  /** 对齐 TV [ExoUtil.setDecodePreferences]；无 FfmpegVideoRenderer 时视频保持 HARDWARE。 */
+  private fun applyDecodePreferences(trackSelector: DecodeTrackSelector, mode: String) {
+    val audioDecode =
+      if (mode == "soft") C.DECODE_SOFTWARE else C.DECODE_HARDWARE
+    val videoDecode = C.DECODE_HARDWARE
+    trackSelector.setRendererDecodePreferences(audioDecode, videoDecode)
   }
 
   private fun buildRenderersFactory(ctx: Context, mode: String): DefaultRenderersFactory {
@@ -689,11 +748,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
       }
       "hard" -> {
-        // 硬解视频 MediaCodec；音轨仍走 FFmpeg（AV3A），对齐 TV
+        // 硬解视频 MediaCodec；音轨仍走 FFmpeg（AV3A），对齐 TV EXTENSION_ON
         videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
       else -> {
+        // 对齐 TV：EXTENSION_RENDERER_MODE_ON
         videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
@@ -706,12 +766,27 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return factory
   }
 
-  private fun buildMediaItem(url: String, mime: String?, drm: Map<String, Any?>?): MediaItem {
+  private fun buildMediaItem(
+    url: String,
+    mime: String?,
+    drm: Map<String, Any?>?,
+    headers: Map<String, String> = emptyMap(),
+  ): MediaItem {
     val b = MediaItem.Builder().setUri(playUri(url))
     val local = isLocalPlayUrl(url)
     if (!local && !mime.isNullOrBlank()) b.setMimeType(mime)
     if (local && (mime == MimeTypes.APPLICATION_M3U8 || mime == MimeTypes.APPLICATION_MPD)) {
       b.setMimeType(mime)
+    }
+    if (headers.isNotEmpty()) {
+      val extras = Bundle()
+      headers.forEach { (k, v) -> extras.putString(k, v) }
+      b.setRequestMetadata(
+        MediaItem.RequestMetadata.Builder()
+          .setMediaUri(playUri(url))
+          .setExtras(extras)
+          .build(),
+      )
     }
     buildDrmConfig(drm)?.let { b.setDrmConfiguration(it) }
     return b.build()
@@ -748,16 +823,32 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return builder.build()
   }
 
-  private fun releasePlayer() {
+  private fun releasePlayerInstance() {
     main.removeCallbacks(tick)
     surfaceHost?.setBufferingUi(false, "")
     try {
       player?.clearVideoSurface()
     } catch (_: Throwable) {
     }
+    val listener = playerListener
+    if (listener != null) {
+      try {
+        player?.removeListener(listener)
+      } catch (_: Throwable) {
+      }
+    }
+    playerListener = null
     player?.release()
     player = null
     trackSelector = null
+    httpFactory = null
+    playerBuiltLive = null
+    playerBuiltDecode = null
+    playerBuiltDrmKey = null
+  }
+
+  private fun releasePlayer() {
+    releasePlayerInstance()
     currentUrl = ""
     currentHeaders = emptyMap()
     currentMime = null
