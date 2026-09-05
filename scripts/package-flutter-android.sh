@@ -59,6 +59,9 @@ chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 echo "==> fetch Exo AV3A stack (webhtv nextlib + Media3 fongmi)"
 chmod +x "$ROOT/scripts/fetch-android-exo-av3a.sh"
 "$ROOT/scripts/fetch-android-exo-av3a.sh"
+# webhtv 二进制缺 DecodeTrackSelector / DolbyVisionOutputPolicy；用 FongMi/media 覆盖（本地/CI 同路径）。
+chmod +x "$ROOT/scripts/build-fongmi-media3.sh"
+"$ROOT/scripts/build-fongmi-media3.sh"
 chmod +x "$ROOT/scripts/prepare-android-mpv-native.sh"
 "$ROOT/scripts/prepare-android-mpv-native.sh"
 

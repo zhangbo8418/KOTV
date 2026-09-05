@@ -71,6 +71,8 @@ import kotlin.math.min
  * - hard：视频 MediaCodec 硬解优先；音轨 MediaCodec 优先、FFmpeg（AV3A）可回退
  * - auto：同 hard；解码失败再整实例软解重建一次
  * - soft：音轨强制 FFmpeg；视频仍走 MediaCodec（KOTV 无 FfmpegVideoRenderer）+ 软件解码器优先
+ *
+ * Media3 须为 FongMi 完整产物（scripts/build-fongmi-media3.sh 覆盖 webhtv 残缺 AAR）。
  */
 @OptIn(UnstableApi::class)
 class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {

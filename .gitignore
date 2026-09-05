@@ -15,6 +15,7 @@ fail
 .DS_Store
 .tmp-*.png
 .tmp-*.jpg
+.tmp/
 *.swp
 *~
 __pycache__/

@@ -3,6 +3,7 @@ package com.bobo.kotv
 import android.content.Context
 import android.os.Handler
 import androidx.annotation.OptIn
+import androidx.media3.common.DolbyVisionOutputPolicy
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.Renderer
@@ -14,6 +15,9 @@ import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegLibrary
 
 /**
  * Exo 渲染工厂：视频走 MediaCodec，音轨走 nextlib FFmpeg（含 AV3A/libarcdav3a，对齐 TV）。
+ *
+ * DV / 扩展渲染策略对齐 TV [ExoUtil.ExoRenderersFactory]：
+ * decoder fallback + DolbyVisionOutputPolicy.AUTO。
  */
 @OptIn(UnstableApi::class)
 class KotvFfmpegRenderersFactory(
@@ -25,6 +29,7 @@ class KotvFfmpegRenderersFactory(
   init {
     setEnableDecoderFallback(true)
     setExtensionRendererMode(maxOf(videoExtensionMode, audioExtensionMode))
+    setDolbyVisionOutputPolicy(DolbyVisionOutputPolicy.AUTO)
   }
 
   override fun buildAudioRenderers(

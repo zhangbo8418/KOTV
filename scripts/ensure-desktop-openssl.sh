@@ -44,6 +44,7 @@ PY
 }
 
 # 只认库里的 SSL_set_quic_tls_cbs（头文件声明不足；brew bottle 常无 enable-quic）。
+# macOS 交叉 arch（arm64 宿主编 x86_64）时 nm -gU / strings 可能对异架构 Mach-O 静默失败。
 openssl_lib_has_quic() {
   local lib="$1"
   [[ -e "$lib" ]] || return 1
@@ -52,17 +53,38 @@ openssl_lib_has_quic() {
     || strings "$lib" 2>/dev/null | grep -q 'SSL_set_quic_tls_cbs'; then
     return 0
   fi
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    local arch
+    for arch in x86_64 arm64; do
+      if nm -arch "$arch" -gU "$lib" 2>/dev/null | grep -q 'SSL_set_quic_tls_cbs'; then
+        return 0
+      fi
+    done
+    # 静态库：ar 成员名含 quic_tls_api 即表示该 API 已编进 libssl
+    if [[ "$lib" == *.a ]] && ar t "$lib" 2>/dev/null | grep -q 'quic_tls_api'; then
+      return 0
+    fi
+  fi
   return 1
 }
 
 openssl_has_quic_api() {
   local lib
   for lib in \
-    "$PREFIX/lib/libssl.dylib" "$PREFIX/lib/libssl.so" "$PREFIX/lib/libssl.so.3" \
+    "$PREFIX/lib/libssl.dylib" "$PREFIX/lib/libssl.3.dylib" \
+    "$PREFIX/lib/libssl.a" \
+    "$PREFIX/lib/libssl.so" "$PREFIX/lib/libssl.so.3" \
     "$PREFIX/lib/libssl.dll.a" "$PREFIX/bin/libssl-3-x64.dll" "$PREFIX/bin/libssl-3.dll" \
     "$PREFIX/lib/libssl-3.dll"; do
     openssl_lib_has_quic "$lib" && return 0
   done
+  # 兜底：头文件有 API 且静态库含 quic_tls_api 对象（交叉 arch 探测失败时）
+  if [[ -f "$PREFIX/include/openssl/ssl.h" ]] \
+    && grep -q 'SSL_set_quic_tls_cbs' "$PREFIX/include/openssl/ssl.h" \
+    && [[ -f "$PREFIX/lib/libssl.a" ]] \
+    && ar t "$PREFIX/lib/libssl.a" 2>/dev/null | grep -q 'quic_tls_api'; then
+    return 0
+  fi
   return 1
 }
 

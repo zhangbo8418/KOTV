@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # 拉取 TV/webhtv 定制 Media3 + nextlib AV3A Maven 产物（对齐 TV Exo FFmpeg 音轨/AV3A）。
+#
+# 注意：webhtv 的 media3-*-1.11.0-alpha01-fongmi 二进制缺 DecodeTrackSelector /
+# DolbyVisionOutputPolicy。package-flutter-android.sh 会接着跑：
+#   ./scripts/build-fongmi-media3.sh
+# 用 FongMi/media release-1.11.0-fongmi 覆盖同版本 AAR（本地与 GitHub CI 相同）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/flutter/android/third_party/maven-webhtv"
