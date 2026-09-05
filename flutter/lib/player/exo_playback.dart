@@ -474,25 +474,41 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> stop() async {
+    // 对齐 TV：换集/停播只 stop，会话内复用 Exo 实例（离开页走 [release]）。
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
     _playing = false;
     _position = Duration.zero;
+    _ready = false;
+    _w = 0;
+    _h = 0;
     notifyListeners();
   }
 
   @override
   Future<void> release() async {
-    try {
-      await _ch.invokeMethod('stop');
-    } catch (_) {}
-    try {
-      await _ch.invokeMethod('dispose');
-    } catch (_) {}
+    // 对齐 TV 离开页：stop → 短排空 → dispose（超时丢后台，避免卡死返回）。
+    await kotvTeardownPlayback(
+      stop: () async {
+        try {
+          await _ch.invokeMethod('stop');
+        } catch (_) {}
+      },
+      dispose: () async {
+        try {
+          await _ch.invokeMethod('dispose');
+        } catch (_) {}
+      },
+      drain: const Duration(milliseconds: 400),
+      disposeTimeout: const Duration(milliseconds: 600),
+    );
     _nativeReady = false;
     _playing = false;
     _position = Duration.zero;
+    _ready = false;
+    _w = 0;
+    _h = 0;
     _textureId = null;
     _useFlutterTexture = false;
     await _sub?.cancel();
@@ -573,13 +589,28 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   void dispose() {
-    unawaited(_sub?.cancel() ?? Future<void>.value());
-    _sub = null;
-    // 正常路径已在 [release] 里 await dispose；此处仅兜底。
+    // 正常路径已在 [release] 里 await 拆机；此处仅兜底（同样带超时）。
     if (_nativeReady) {
       _nativeReady = false;
-      unawaited(_ch.invokeMethod('dispose').catchError((_) {}));
+      unawaited(
+        kotvTeardownPlayback(
+          stop: () async {
+            try {
+              await _ch.invokeMethod('stop');
+            } catch (_) {}
+          },
+          dispose: () async {
+            try {
+              await _ch.invokeMethod('dispose');
+            } catch (_) {}
+          },
+          drain: const Duration(milliseconds: 400),
+          disposeTimeout: const Duration(milliseconds: 600),
+        ),
+      );
     }
+    unawaited(_sub?.cancel() ?? Future<void>.value());
+    _sub = null;
     _useFlutterTexture = false;
     _textureId = null;
     _posCtrl.close();

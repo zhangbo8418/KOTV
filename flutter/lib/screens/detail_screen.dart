@@ -343,9 +343,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.exo) {
-      // 必须 dispose：仅 stop 不释放 Rockchip MediaCodec，切 MPV 会占满硬解卡死。
+      // 必须 release：仅 stop 不释放 Rockchip MediaCodec，切 MPV 会占满硬解卡死。
       try {
-        await _exo?.stop();
+        await _exo?.release();
       } catch (_) {}
       try {
         _exo?.dispose();

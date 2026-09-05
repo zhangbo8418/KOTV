@@ -336,10 +336,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "stop" -> {
         main.post {
-          // 对齐 TV engine.stop：只停播，不拆 Surface（换集复用要接着 setMediaItem）。
-          player?.apply {
-            stop()
-            clearMediaItems()
+          // 对齐 TV ExoPlayerEngine.stop：只 player.stop()，不清 MediaItems / 不拆 Surface。
+          // 换集复用走 setMediaItem → prepare → play；clearMediaItems 仅服务挂起场景，不在此。
+          try {
+            player?.stop()
+          } catch (_: Throwable) {
           }
           result.success(true)
         }

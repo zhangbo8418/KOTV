@@ -137,13 +137,30 @@ class FvpPlayback extends KotvPlayback {
     );
   }
 
+  /// 摘掉 listener 后走统一拆机：pause → 排空 → dispose（超时丢后台，避免卡死 open）。
   Future<void> _disposeController() async {
     final c = _c;
     final l = _listener;
     _c = null;
     _listener = null;
-    if (c != null && l != null) c.removeListener(l);
-    await c?.dispose();
+    if (c == null) return;
+    if (l != null) {
+      try {
+        c.removeListener(l);
+      } catch (_) {}
+    }
+    await kotvTeardownPlayback(
+      stop: () async {
+        try {
+          await c.pause();
+        } catch (_) {}
+      },
+      dispose: () async {
+        await c.dispose();
+      },
+      drain: const Duration(milliseconds: 400),
+      disposeTimeout: const Duration(milliseconds: 600),
+    );
   }
 
   @override
@@ -413,12 +430,6 @@ class FvpPlayback extends KotvPlayback {
   Future<void> stop() async {
     _opening = false;
     _lastError = null;
-    final c = _c;
-    if (c != null) {
-      try {
-        await c.pause();
-      } catch (_) {}
-    }
     await _disposeController();
     notifyListeners();
   }
@@ -481,10 +492,20 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   void dispose() {
-    unawaited(stop());
-    _posCtrl.close();
-    _bufCtrl.close();
-    _doneCtrl.close();
+    unawaited(() async {
+      try {
+        await stop();
+      } catch (_) {}
+      try {
+        await _posCtrl.close();
+      } catch (_) {}
+      try {
+        await _bufCtrl.close();
+      } catch (_) {}
+      try {
+        await _doneCtrl.close();
+      } catch (_) {}
+    }());
     super.dispose();
   }
 }
