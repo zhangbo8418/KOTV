@@ -4,6 +4,9 @@
 #
 # 本地与 CI：package-flutter-android.sh 在 fetch-android-exo-av3a.sh 之后调用本脚本。
 # 已含完整 API 时跳过（可用 KOTV_FORCE_FONGMI_MEDIA3=1 强制重编）。
+#
+# 上游缺 smbj 等 POM 类型声明、且全量模块依赖 test-utils；须先打
+# scripts/patches/fongmi-media3-kotv.patch（与本地成功 publish 时一致）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${KOTV_FONGMI_MEDIA:-$ROOT/.tmp/fongmi-media}"
@@ -11,6 +14,7 @@ DEST="$ROOT/flutter/android/third_party/maven-webhtv"
 VER="1.11.0-alpha01-fongmi"
 BRANCH="${KOTV_FONGMI_MEDIA_BRANCH:-release-1.11.0-fongmi}"
 REPO_URL="${KOTV_FONGMI_MEDIA_URL:-https://github.com/FongMi/media.git}"
+PATCH="$ROOT/scripts/patches/fongmi-media3-kotv.patch"
 
 exo_aar="$DEST/androidx/media3/media3-exoplayer/$VER/media3-exoplayer-$VER.aar"
 common_aar="$DEST/androidx/media3/media3-common/$VER/media3-common-$VER.aar"
@@ -35,19 +39,35 @@ if [[ "${KOTV_FORCE_FONGMI_MEDIA3:-0}" != "1" ]] && media3_has_tv_apis; then
   exit 0
 fi
 
-if [[ ! -d "$SRC/.git" ]]; then
-  echo "==> clone FongMi/media ($BRANCH) → $SRC"
-  mkdir -p "$(dirname "$SRC")"
-  rm -rf "$SRC"
-  git clone --filter=blob:none --depth 1 -b "$BRANCH" "$REPO_URL" "$SRC"
-fi
+[[ -f "$PATCH" ]] || { echo "ERROR: missing $PATCH" >&2; exit 1; }
+
+prepare_fongmi_src() {
+  if [[ ! -d "$SRC/.git" ]]; then
+    echo "==> clone FongMi/media ($BRANCH) → $SRC"
+    mkdir -p "$(dirname "$SRC")"
+    rm -rf "$SRC"
+    git clone --filter=blob:none --depth 1 -b "$BRANCH" "$REPO_URL" "$SRC"
+  else
+    echo "==> refresh FongMi/media ($BRANCH) → $SRC"
+    git -C "$SRC" fetch --depth 1 origin "$BRANCH"
+    git -C "$SRC" reset --hard FETCH_HEAD
+    git -C "$SRC" clean -fd
+  fi
+  echo "==> apply KOTV patch (smbj POM + module subset)"
+  git -C "$SRC" apply "$PATCH"
+  # Ensure version coordinate matches KOTV
+  if ! grep -q "releaseVersion = \"$VER\"" "$SRC/gradle/libs.versions.toml" 2>/dev/null; then
+    perl -i -pe "s/^releaseVersion = \".*\"/releaseVersion = \"$VER\"/" "$SRC/gradle/libs.versions.toml"
+  fi
+}
+
+prepare_fongmi_src
 
 # JDK：macOS 优先 17；CI / Linux 用 JAVA_HOME 或 PATH 里的 java。
 if [[ -z "${JAVA_HOME:-}" ]]; then
   if [[ "$(uname -s)" == "Darwin" ]] && command -v /usr/libexec/java_home >/dev/null 2>&1; then
     export JAVA_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home 2>/dev/null || true)"
   elif command -v java >/dev/null 2>&1; then
-    # 从 java 二进制推 JAVA_HOME（Ubuntu temurin 等）
     _java="$(readlink -f "$(command -v java)" 2>/dev/null || command -v java)"
     export JAVA_HOME="$(cd "$(dirname "$_java")/.." && pwd)"
   fi
@@ -56,18 +76,10 @@ export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/s
 [[ -n "${JAVA_HOME:-}" ]] || { echo "ERROR: JAVA_HOME (JDK 17+) required" >&2; exit 1; }
 [[ -d "$ANDROID_HOME" ]] || { echo "ERROR: ANDROID_HOME missing ($ANDROID_HOME)" >&2; exit 1; }
 
-# Gradle 需要 sdk.dir；无则写入 local.properties
-if [[ ! -f "$SRC/local.properties" ]] || ! grep -q '^sdk.dir=' "$SRC/local.properties" 2>/dev/null; then
-  # Escape for properties file (Windows paths use \\; Unix fine)
-  printf 'sdk.dir=%s\n' "$ANDROID_HOME" >"$SRC/local.properties"
-fi
+# Gradle 需要 sdk.dir
+printf 'sdk.dir=%s\n' "$ANDROID_HOME" >"$SRC/local.properties"
 
 cd "$SRC"
-# Ensure version coordinate matches KOTV
-if ! grep -q "releaseVersion = \"$VER\"" gradle/libs.versions.toml 2>/dev/null; then
-  perl -i -pe "s/^releaseVersion = \".*\"/releaseVersion = \"$VER\"/" gradle/libs.versions.toml
-fi
-
 echo "==> publish FongMi Media3 $VER → $DEST"
 ./gradlew \
   :lib-common:publishReleasePublicationToMavenRepository \
