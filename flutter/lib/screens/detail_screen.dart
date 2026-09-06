@@ -192,6 +192,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _playbackLive = false;
   bool _advanceBusy = false;
   DateTime? _sessionStartedAt;
+  /// 起播后短时内忽略「暂停」半边的 playOrPause（布局抖动/残留 pointer-up 易误触）。
+  DateTime? _playToggleArmedUntil;
   KotvApi? _api;
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
@@ -221,6 +223,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   String get _enginePrefix => flutterPlayerLabel(_playerVal);
 
   bool get _isBuffering => _playUrl.isNotEmpty && _playback.stalling;
+
+  void _armPlayToggleGuard([Duration d = const Duration(milliseconds: 1500)]) {
+    _playToggleArmedUntil = DateTime.now().add(d);
+  }
+
+  /// 起播保护窗内：已在播则忽略；已暂停则只 play，避免误触变成「一起播就停」。
+  Future<void> _safePlayOrPause() async {
+    final until = _playToggleArmedUntil;
+    if (until != null && DateTime.now().isBefore(until)) {
+      if (_playback.playing) return;
+      try {
+        await _playback.play();
+      } catch (_) {}
+      return;
+    }
+    await _playback.playOrPause();
+  }
 
   /// 换集/解析时 [_playUrl] 可能已清空但原生仍在播，不能单靠它判断可否 pop。
   bool get _playbackSessionActive {
@@ -1259,6 +1278,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           try {
             await _playback.play();
           } catch (_) {}
+          _armPlayToggleGuard();
           opened = true;
           break;
         } on KotvSilentVideoException catch (e) {
@@ -1506,7 +1526,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               _status.contains('加载中')) {
             return;
           }
-          unawaited(_playback.playOrPause());
+          unawaited(_safePlayOrPause());
           setState(() {});
         },
         onSecondaryTap: _immersiveFullscreen ? null : () => kotvHandleAppBack?.call(),
@@ -1815,7 +1835,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                   _status.contains('加载中')) {
                 return;
               }
-              unawaited(_playback.playOrPause());
+              unawaited(_safePlayOrPause());
               setState(() {});
             },
       onSecondaryTap: () => kotvHandleAppBack?.call(),
@@ -1920,7 +1940,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
       final primary = FocusManager.instance.primaryFocus;
       if (primary == null || primary == node) {
-        unawaited(_playback.playOrPause());
+        unawaited(_safePlayOrPause());
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
