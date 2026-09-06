@@ -101,13 +101,20 @@ public final class MPVLib {
             String bundleId = getBundleId(app, abi);
             boolean refreshBundle = !bundleId.equals(readMarker(marker));
             for (String lib : COPY_ORDER) copyLibrary(app.getAssets(), abi, lib, dir, refreshBundle);
-            // Prefer APK jniLibs (loadLibrary). Absolute System.load of libc++ under
-            // app_mpv-libs is RTLD_LOCAL on API 25 and later crashes in
-            // setOptionString → jstring_to_utf8 (tombstone pc in that cxx).
-            // Absolute System.load of libmvcodec also crashed constructors on Android 15/16.
-            System.loadLibrary("c++_shared");
-            Log.i(TAG, "libc++_shared via loadLibrary");
+            // 必须与 App.preloadLibcxx 一致：assets 的 libc++ + RTLD_GLOBAL。
+            // 勿 System.loadLibrary("c++_shared")：jniLibs 里是 webhtv 覆盖的 cxx，
+            // 与 libplayer（assets 套件）ABI 不一致 → setOptionString/jstring_to_utf8
+            // SIGSEGV（tombstone pc 0x1423c0，API25 CR19 已复现）。
+            // 亦勿对 assets 路径 System.load（API25 默认 RTLD_LOCAL，同样会崩）。
             System.loadLibrary("kotv_dl");
+            File assetsCxx = new File(dir, "libc++_shared.so");
+            if (!assetsCxx.isFile()) {
+                throw new UnsatisfiedLinkError("assets libc++_shared.so missing: " + assetsCxx);
+            }
+            if (!nativeLoadGlobal(assetsCxx.getAbsolutePath())) {
+                throw new UnsatisfiedLinkError("nativeLoadGlobal(libc++_shared) failed: " + assetsCxx);
+            }
+            Log.i(TAG, "libc++_shared RTLD_GLOBAL from assets " + assetsCxx.getAbsolutePath());
             File appVulkan = new File(app.getApplicationInfo().nativeLibraryDir, "libvulkan.so");
             File extractedVulkan = new File(dir, "libvulkan.so");
             File vulkanSo = appVulkan.isFile() ? appVulkan : extractedVulkan;
