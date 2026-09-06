@@ -762,7 +762,9 @@ prepare_ffmpeg() {
   local url name
   case "$plat" in
     macos-arm64)
-      url="https://www.osxexperts.net/ffmpeg71arm.zip"; name="ffmpeg71arm.zip" ;;
+      # 勿用 osxexperts.net：CI runner 常 DNS 失败。改 GitHub 托管静态包。
+      url="https://github.com/charlienovember/videobot-ffmpeg/releases/download/ffmpeg-n8.1.2/ffmpeg-n8.1.2-macos-arm64.zip"
+      name="ffmpeg-n8.1.2-macos-arm64.zip" ;;
     macos-x64)
       url="https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v6.1/ffmpeg-6.1-macos-64.zip"
       name="ffmpeg-6.1-macos-64.zip" ;;
