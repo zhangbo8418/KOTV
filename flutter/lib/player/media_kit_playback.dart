@@ -101,17 +101,6 @@ class MediaKitPlayback extends KotvPlayback {
   int _w = 0;
   int _h = 0;
   bool _acceptSize = false;
-  /// open 后短时忽略 pause / 误触 playOrPause（Windows 上 playlist-pos 后易回 pause）。
-  DateTime? _forcePlayUntil;
-
-  void _armForcePlay([Duration d = const Duration(milliseconds: 1600)]) {
-    _forcePlayUntil = DateTime.now().add(d);
-  }
-
-  bool get _inForcePlayWindow {
-    final u = _forcePlayUntil;
-    return u != null && DateTime.now().isBefore(u);
-  }
 
   void _clearVideoSize() {
     _acceptSize = false;
@@ -123,6 +112,37 @@ class MediaKitPlayback extends KotvPlayback {
     _acceptSize = true;
     _w = player.state.width ?? 0;
     _h = player.state.height ?? 0;
+  }
+
+  /// 对齐 TV [MpvPlayerEngine] / Android [KotvMpvPlugin]：`loadfile replace` + unpause。
+  ///
+  /// 勿用 [Player.open]：media_kit 内部是 pause→loadlist→unpause→playlist-pos，
+  /// 桌面端设 playlist-pos 后常又回到 pause（一起播就停）。
+  Future<void> _openLoadfileReplace(Media media) async {
+    final platform = player.platform;
+    if (platform == null) {
+      await player.open(media, play: true);
+      return;
+    }
+    try {
+      await player.stop();
+    } catch (_) {}
+    if (_headers.isNotEmpty) {
+      // 与原生 MPV 一致：load 前写 http-header-fields（on_load 钩子也认 Media 表）。
+      final hline =
+          '${_headers.entries.map((e) => '${e.key}: ${e.value}').join('\r\n')}\r\n';
+      try {
+        await (platform as dynamic).setProperty('http-header-fields', hline);
+      } catch (_) {}
+    }
+    try {
+      await (platform as dynamic).command(<String>['loadfile', media.uri, 'replace']);
+    } catch (_) {
+      // 极端环境无 command 时再回落；正常桌面/iOS NativePlayer 都有。
+      await player.open(media, play: true);
+      return;
+    }
+    await player.play();
   }
 
   Future<void> _prepareOpts() async {
@@ -256,15 +276,8 @@ class MediaKitPlayback extends KotvPlayback {
     // 直播：对齐 TV，不写 demuxer-max-bytes/cache-secs；点播才写入 KotvBufferBudget。
     await _opts.applyAfterAttach(player, live: live);
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
-    // 对齐 TV MpvPlayerEngine.prepareAndPlay：setMediaItem 后立刻 prepare+play，
-    // 不等 Flutter 层缓冲门槛（play:false→等尺寸易卡音/偶发不起播）。
-    await player.open(media, play: true);
-    // media_kit open 内部顺序是 pause→loadlist→unpause→playlist-pos；
-    // 桌面（尤其 Windows）设 playlist-pos 后常又回到 pause，必须再强制 play。
-    try {
-      await player.play();
-    } catch (_) {}
-    _armForcePlay();
+    // 对齐 TV prepareAndPlay：loadfile replace 后立刻 play（非 media_kit Player.open）。
+    await _openLoadfileReplace(media);
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
     _acceptSize = true;
     _adoptPlayerSize();
@@ -281,19 +294,11 @@ class MediaKitPlayback extends KotvPlayback {
       isAudioOnly: () => isAudioOnlyContent,
       hasVideoSource: () => hasVideoSourceHint,
     );
-    // 守卫等待期间 Texture 附着/布局抖动可能把 mpv 又 pause；起播结束再确保一次。
-    if (!player.state.playing) {
-      try {
-        await player.play();
-      } catch (_) {}
-    }
-    _armForcePlay();
   }
 
   @override
   Future<void> stop() async {
     // 对齐 TV：换集只停播，不 dispose Player（离开页走 kotvDisposeMpvPlayer）。
-    _forcePlayUntil = null;
     _url = '';
     _clearVideoSize();
     _speedBps = 0;
@@ -310,24 +315,13 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> playOrPause() async {
-    if (_inForcePlayWindow) {
-      if (player.state.playing) return;
-      await player.play();
-      return;
-    }
-    await player.playOrPause();
-  }
+  Future<void> playOrPause() => player.playOrPause();
 
   @override
   Future<void> play() => player.play();
 
   @override
-  Future<void> pause() async {
-    // 起播保护窗内忽略 pause，避免误触/竞态把刚起播掐掉。
-    if (_inForcePlayWindow) return;
-    await player.pause();
-  }
+  Future<void> pause() => player.pause();
 
   @override
   Future<void> seek(Duration d) => player.seek(d);
