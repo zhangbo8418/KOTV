@@ -107,11 +107,15 @@ class KotvGlideImageView(
     if (model == null) {
       imageView.setImageDrawable(null)
     } else {
-      val req = Glide.with(imageView).load(model).dontAnimate()
-      if (fitCover) {
-        req.centerCrop().into(imageView)
-      } else {
-        req.fitCenter().into(imageView)
+      try {
+        val req = Glide.with(imageView).load(model).dontAnimate()
+        if (fitCover) {
+          req.centerCrop().into(imageView)
+        } else {
+          req.fitCenter().into(imageView)
+        }
+      } catch (t: Throwable) {
+        android.util.Log.w("KotvGlide", "load failed: $url", t)
       }
     }
   }

@@ -63,6 +63,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.onOffsetsChanged,
     this.desktopFullscreen = KotvDesktopFullscreenKind.window,
     this.externalVideo = false,
+    this.swipeOffset,
   });
 
   final KotvPlayback playback;
@@ -70,6 +71,8 @@ class DetailFullscreenPage extends StatefulWidget {
   final Widget videoChild;
   /// 桌面：画面由外层 Positioned 宿主绘制，本页只叠控件，避免卸树重建 Texture。
   final bool externalVideo;
+  /// 外层稳定视频层跟手位移（抖音式上下滑）；为 null 时仅本页控件位移。
+  final ValueNotifier<double>? swipeOffset;
   final String vodName;
   final String title;
   /// true：嵌在详情页内切换布局；false：独立路由（遗留）。
@@ -159,7 +162,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       ..addListener(() {
         final t = _swipeTween;
         if (t == null || !mounted) return;
-        setState(() => _dragDy = t.value);
+        setState(() => _setDragDy(t.value));
       });
     _pos = widget.playback.position;
     _posSub = widget.playback.positionStream.listen((d) {
@@ -398,7 +401,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _swipeTween = null;
     setState(() {
       _dragging = true;
-      _dragDy = 0;
+      _setDragDy(0);
     });
     await _animateSwipeTo(-h);
     return mounted;
@@ -425,12 +428,18 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   bool get _canSwipeEps => !_epOpen && widget.episodes.length > 1;
 
+  void _setDragDy(double dy) {
+    _dragDy = dy;
+    final n = widget.swipeOffset;
+    if (n != null && n.value != dy) n.value = dy;
+  }
+
   void _beginSwipe() {
     _swipeAnim.stop();
     _swipeTween = null;
     setState(() {
       _dragging = true;
-      _dragDy = 0;
+      _setDragDy(0);
     });
   }
 
@@ -444,7 +453,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       next = _dragDy + dy * 0.35;
     }
     next = next.clamp(-h * 0.92, h * 0.92);
-    setState(() => _dragDy = next);
+    setState(() => _setDragDy(next));
   }
 
   void _onSwipePointerDown(PointerDownEvent e) {
@@ -514,7 +523,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (!mounted) return;
     // 切集时直接落到新页 offset=0，避免黑帧闪一下
     setState(() {
-      _dragDy = 0;
+      _setDragDy(0);
       _dragging = false;
     });
     onDone?.call();
@@ -523,7 +532,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   void _commitSwipe(double velocityDy) {
     if (!_canSwipeEps) {
       setState(() {
-        _dragDy = 0;
+        _setDragDy(0);
         _dragging = false;
       });
       return;

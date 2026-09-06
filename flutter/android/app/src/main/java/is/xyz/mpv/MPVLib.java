@@ -101,20 +101,12 @@ public final class MPVLib {
             String bundleId = getBundleId(app, abi);
             boolean refreshBundle = !bundleId.equals(readMarker(marker));
             for (String lib : COPY_ORDER) copyLibrary(app.getAssets(), abi, lib, dir, refreshBundle);
-            // Prefer APK jniLibs (loadLibrary). Absolute System.load under app_mpv-libs has
-            // crashed in libmvcodec call_constructors → libc++ on Android 15/16 (e.g. Redmi).
-            try {
-                System.loadLibrary("c++_shared");
-                Log.i(TAG, "libc++_shared via loadLibrary");
-            } catch (UnsatisfiedLinkError e) {
-                File bundledCxx = new File(dir, "libc++_shared.so");
-                if (bundledCxx.isFile()) {
-                    System.load(bundledCxx.getAbsolutePath());
-                    Log.w(TAG, "libc++_shared via extracted path " + bundledCxx.getAbsolutePath(), e);
-                } else {
-                    throw e;
-                }
-            }
+            // Prefer APK jniLibs (loadLibrary). Absolute System.load of libc++ under
+            // app_mpv-libs is RTLD_LOCAL on API 25 and later crashes in
+            // setOptionString → jstring_to_utf8 (tombstone pc in that cxx).
+            // Absolute System.load of libmvcodec also crashed constructors on Android 15/16.
+            System.loadLibrary("c++_shared");
+            Log.i(TAG, "libc++_shared via loadLibrary");
             System.loadLibrary("kotv_dl");
             File appVulkan = new File(app.getApplicationInfo().nativeLibraryDir, "libvulkan.so");
             File extractedVulkan = new File(dir, "libvulkan.so");

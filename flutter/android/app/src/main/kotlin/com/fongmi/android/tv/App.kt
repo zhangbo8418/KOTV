@@ -45,9 +45,14 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun preloadLibcxx() {
-    // 必须在 Flutter/fvp 之前加载「我们」的 libc++（assets 里 NDK overlay）。
-    // 勿先 loadLibrary：APK 合并后的 c++_shared 可能与 Flutter/Impeller 不兼容 → 开屏黑屏。
-    // MPV 的 FFmpeg 仍走 jniLibs loadLibrary（见 MPVLib.ensureLoaded）。
+    // 开屏黑屏根因：APK 合并后的 webhtv libc++ 与 Flutter/Skia 不兼容 → 勿直接 loadLibrary。
+    // API25：System.load(绝对路径) 默认 RTLD_LOCAL，随后 loadLibrary(libplayer) 会 SIGSEGV。
+    // 正确：assets 里 Flutter 兼容的 libc++ + kotv_dl 的 RTLD_GLOBAL dlopen。
+    try {
+      System.loadLibrary("kotv_dl")
+    } catch (t: Throwable) {
+      android.util.Log.w(TAG, "preload kotv_dl before libc++ failed", t)
+    }
     try {
       val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull { candidate ->
         try {
@@ -67,8 +72,17 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
       assets.open("mpv-libs/$abi/libc++_shared.so").use { input ->
         java.io.FileOutputStream(dest).use { output -> input.copyTo(output) }
       }
+      val globalOk = try {
+        `is`.xyz.mpv.MPVLib.nativeLoadGlobalPublic(dest.absolutePath)
+      } catch (_: Throwable) {
+        false
+      }
+      if (globalOk) {
+        android.util.Log.i(TAG, "preload libc++_shared RTLD_GLOBAL from assets/$abi ${dest.absolutePath}")
+        return
+      }
       System.load(dest.absolutePath)
-      android.util.Log.i(TAG, "preload libc++_shared from assets/$abi ${dest.absolutePath}")
+      android.util.Log.i(TAG, "preload libc++_shared System.load from assets/$abi ${dest.absolutePath}")
     } catch (t: Throwable) {
       try {
         System.loadLibrary("c++_shared")

@@ -118,6 +118,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   int _epIdx = -1;
   /// 全屏页在父 setState 下更新；保留 GlobalKey 仅供自动切集动画。
   final GlobalKey<DetailFullscreenPageState> _fsPageKey = GlobalKey<DetailFullscreenPageState>();
+  /// 抖音式上下滑：稳定视频层与全屏控件共用位移。
+  final ValueNotifier<double> _fsSwipeDy = ValueNotifier<double>(0);
   /// 详情内嵌：菜单键弹出后播停键自动获焦。
   bool _chromeRemoteFocus = false;
   int _epPage = 0;
@@ -743,6 +745,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _unwirePlaybackNotify();
     _stopBtProgressPoll();
     _danmakuItems.dispose();
+    _fsSwipeDy.dispose();
     // 正常路径已在 [_stopHard] 里 await release；引擎引用已清空。
     // 异常路径（未走 _leavePage）仍兜底停+释放，避免漏音。
     if (!_stoppedHard) {
@@ -1480,11 +1483,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   Widget _buildStableVideoLayer(BuildContext context) {
     final rect = _stableVideoRect(context);
     if (rect.width < 1 || rect.height < 1) return const SizedBox.shrink();
-    return Positioned(
-      left: rect.left,
-      top: rect.top,
-      width: rect.width,
-      height: rect.height,
+    return ValueListenableBuilder<double>(
+      valueListenable: _fsSwipeDy,
+      builder: (context, swipeDy, child) {
+        final dy = _immersiveFullscreen ? swipeDy : 0.0;
+        return Positioned(
+          left: rect.left,
+          top: rect.top + dy,
+          width: rect.width,
+          height: rect.height,
+          child: child!,
+        );
+      },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
@@ -1565,6 +1575,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         key: _fsPageKey,
         embedded: true,
         externalVideo: externalVideo,
+        swipeOffset: _fsSwipeDy,
         videoChild: externalVideo
             ? const SizedBox.shrink()
             : _buildSharedVideo(fit: _aspect.fit),
@@ -1694,6 +1705,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     setState(() {
       _desktopFs = desktopFs;
       _immersiveFullscreen = true;
+      _fsSwipeDy.value = 0;
       // 立刻铺满，避免先卸树再重建；外层 Positioned 只改几何。
       if (_useStableVideoLayer) {
         _videoLayerRect = Offset.zero & full;
@@ -1704,6 +1716,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   Future<void> _exitImmersiveFullscreen() async {
     if (!_immersiveFullscreen) return;
+    _fsSwipeDy.value = 0;
     final wasDisplay = _desktopFs == KotvDesktopFullscreenKind.display;
     ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
     if (mounted) {

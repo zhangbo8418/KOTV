@@ -1,6 +1,7 @@
 plugins {
     id "com.android.application"
     id "kotlin-android"
+    id "kotlin-kapt"
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
     id "com.chaquo.python"
@@ -192,6 +193,7 @@ dependencies {
     implementation "com.squareup.okhttp3:okhttp:5.4.0"
     // 对齐 TV ImgUtil：海报用 Glide + @Headers=
     implementation "com.github.bumptech.glide:glide:4.16.0"
+    kapt "com.github.bumptech.glide:compiler:4.16.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load
     implementation "wang.harlon.quickjs:wrapper-android:3.2.3"
     implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
@@ -255,7 +257,8 @@ tasks.named("preBuild") {
 afterEvaluate {
     android.defaultConfig.targetSdk = kotvTargetSdk
     println "[android] pinned targetSdk=${android.defaultConfig.targetSdk} (KOTV_TARGET_SDK=${System.getenv("KOTV_TARGET_SDK") ?: "28"})"
-    // fvp/mdk 的 libc++ 往往更旧；合并后再盖一层我们 overlay 的 NDK 副本，保证 libmpv from_chars。
+    // fvp/mdk 的 libc++ 往往更旧；合并后再盖一层 jniLibs 里的 webhtv 配套 libc++（含 from_chars）。
+    // 勿用 NDK28（缺符号）/NDK29（无法 exec 外部二进制）覆盖。
     android.applicationVariants.configureEach { variant ->
         def mergeName = "merge${variant.name.capitalize()}NativeLibs"
         tasks.matching { it.name == mergeName }.configureEach { task ->
@@ -270,11 +273,11 @@ afterEvaluate {
                         def dest = file("${project.buildDir}/intermediates/merged_native_libs/${variant.dirName}/merge${variant.name.capitalize()}NativeLibs/out/lib/${abi}/libc++_shared.so")
                         dest.parentFile.mkdirs()
                         ant.copy(file: src, tofile: dest, overwrite: true)
-                        println "[android] overlay libc++_shared.so → ${dest}"
+                        println "[android] overlay webhtv libc++_shared.so → ${dest}"
                     } else {
                         matches.each { dest ->
                             ant.copy(file: src, tofile: dest, overwrite: true)
-                            println "[android] overlay libc++_shared.so → ${dest}"
+                            println "[android] overlay webhtv libc++_shared.so → ${dest}"
                         }
                     }
                 }

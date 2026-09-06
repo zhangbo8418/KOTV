@@ -916,41 +916,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           value: ':$_port',
                           onTap: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
                         ),
-                      ]),
-                      KotvSettingsWideTile(
-                        label: '解码方式',
-                        value: decodeLabel,
-                        onTap: () => _pick('解码方式', 'playerDecode', const [
-                          ('自动（推荐）', 'auto'),
-                          ('软解码', 'soft'),
-                          ('硬解码', 'hard'),
-                        ]),
-                      ),
-                      if (kotvIsAndroid() &&
-                          (kotvPlayerRenderApplies(playerVal) || kotvPlayerRenderApplies(livePlayerVal)))
-                        KotvSettingsWideTile(
-                          label: '渲染方式',
-                          value: renderLabel,
-                          onTap: () => _pick('渲染方式（仅 Exo）', 'playerRender', const [
-                            ('Surface（推荐，HDR）', 'surface'),
-                            ('Texture', 'texture'),
-                          ], msg: '仅内置 Exo 生效，已保存'),
+                        KotvSettingsCell(
+                          label: '解码方式',
+                          value: decodeLabel,
+                          onTap: () => _pick('解码方式', 'playerDecode', const [
+                            ('自动（推荐）', 'auto'),
+                            ('软解码', 'soft'),
+                            ('硬解码', 'hard'),
+                          ]),
                         ),
-                      KotvSettingsWideTile(
-                        label: '自动切换播放器',
-                        value: failoverLabel,
-                        onTap: () => _pick('自动切换播放器', 'playerFailover', const [
-                          ('自动（黑屏/停滞时换播放器）', 'auto'),
-                          ('关闭（只用所选播放器）', 'off'),
-                        ]),
-                      ),
-                      KotvSettingsWideTile(
-                        label: 'User-Agent',
-                        value: g('ua').isEmpty ? '默认' : _ellipsize(g('ua'), 22),
-                        onTap: _editUa,
-                      ),
-                      if (kotvIsAndroid())
-                        KotvSettingsGrid(children: [
+                        if (kotvIsAndroid() &&
+                            (kotvPlayerRenderApplies(playerVal) || kotvPlayerRenderApplies(livePlayerVal)))
+                          KotvSettingsCell(
+                            label: '渲染方式',
+                            value: renderLabel,
+                            onTap: () => _pick('渲染方式（仅 Exo）', 'playerRender', const [
+                              ('Surface（推荐，HDR）', 'surface'),
+                              ('Texture', 'texture'),
+                            ], msg: '仅内置 Exo 生效，已保存'),
+                          ),
+                        KotvSettingsCell(
+                          label: '自动切换播放器',
+                          value: failoverLabel,
+                          onTap: () => _pick('自动切换播放器', 'playerFailover', const [
+                            ('自动（黑屏/停滞时换播放器）', 'auto'),
+                            ('关闭（只用所选播放器）', 'off'),
+                          ]),
+                        ),
+                        KotvSettingsCell(
+                          label: 'User-Agent',
+                          value: g('ua').isEmpty ? '默认' : _ellipsize(g('ua'), 22),
+                          onTap: _editUa,
+                        ),
+                        if (kotvIsAndroid())
                           KotvSettingsCell(
                             label: 'MPV gpu-next',
                             value: mpvGpuNext ? '开启' : '关闭',
@@ -962,21 +960,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   : '已开启 vo=gpu-next（重启播放生效）',
                             )),
                           ),
-                          if (showMpvVulkan)
-                            KotvSettingsCell(
-                              label: 'MPV Vulkan',
-                              value: mpvVulkan ? '开启' : '关闭',
-                              onTap: () => unawaited(_set(
-                                'mpvVulkan',
-                                mpvVulkan ? 'false' : 'true',
-                                msg: mpvVulkan
-                                    ? '已关闭 Vulkan（重启播放生效）'
-                                    : '已开启 gpu-api=vulkan（解码仍为 mediacodec，重启播放生效）',
-                              )),
-                            ),
-                        ]),
-                      if (showMpvVulkan && !kotvIsAndroid())
-                        KotvSettingsGrid(children: [
+                        if (showMpvVulkan)
                           KotvSettingsCell(
                             label: 'MPV Vulkan',
                             value: mpvVulkan ? '开启' : '关闭',
@@ -985,22 +969,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               mpvVulkan ? 'false' : 'true',
                               msg: mpvVulkan
                                   ? '已关闭 Vulkan（重启播放生效）'
-                                  : '已开启 gpu-api=vulkan（media_kit 内置 MPV，重启播放）',
+                                  : (kotvIsAndroid()
+                                      ? '已开启 gpu-api=vulkan（解码仍为 mediacodec，重启播放生效）'
+                                      : '已开启 gpu-api=vulkan（media_kit 内置 MPV，重启播放）'),
                             )),
                           ),
-                        ]),
-                      if (showMpvOpts)
-                        KotvSettingsWideTile(
-                          label: 'MPV 配置',
-                          value: mpvConfPreview.isEmpty ? '默认' : _ellipsize(mpvConfPreview.replaceAll('\n', ' '), 18),
-                          onTap: () => _prompt(
-                            'MPV 配置（mpv.conf）',
-                            '每行 key=value，# 注释。可写 hwdec=no 等。重启播放后生效。',
-                            g('mpvConf'),
-                            (v) => _set('mpvConf', v, msg: 'MPV 配置已保存'),
-                            maxLines: 12,
+                        if (showMpvOpts)
+                          KotvSettingsCell(
+                            label: 'MPV 配置',
+                            value: mpvConfPreview.isEmpty
+                                ? '默认'
+                                : _ellipsize(mpvConfPreview.replaceAll('\n', ' '), 18),
+                            onTap: () => _prompt(
+                              'MPV 配置（mpv.conf）',
+                              '每行 key=value，# 注释。可写 hwdec=no 等。重启播放后生效。',
+                              g('mpvConf'),
+                              (v) => _set('mpvConf', v, msg: 'MPV 配置已保存'),
+                              maxLines: 12,
+                            ),
                           ),
-                        ),
+                      ]),
                     ]),
                     const KotvSettingsSectionTitle('UI设置'),
                     KotvSettingsCard(children: [
