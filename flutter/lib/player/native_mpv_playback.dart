@@ -130,11 +130,16 @@ class NativeMpvPlayback extends KotvPlayback {
   Stream<bool> get completedStream => _endedCtrl.stream;
 
   List<KotvTrack> _audioTracks = const [];
+  List<KotvTrack> _videoTracks = const [];
   List<KotvTrack> _subtitleTracks = const [];
   String? _currentAudioId;
+  String? _currentVideoId;
 
   @override
   List<KotvTrack> get audioTracks => _audioTracks;
+
+  @override
+  List<KotvTrack> get videoTracks => _videoTracks;
 
   @override
   List<KotvTrack> get subtitleTracks => _subtitleTracks;
@@ -143,26 +148,44 @@ class NativeMpvPlayback extends KotvPlayback {
   String? get currentAudioId => _currentAudioId;
 
   @override
+  String? get currentVideoId => _currentVideoId;
+
+  @override
   String? get currentSubtitleId => null;
 
   Future<void> _refreshAudioTracks() async {
+    await _refreshTracks();
+  }
+
+  Future<void> _refreshTracks() async {
     if (!_ready || _w <= 0 || _h <= 0) return;
     try {
-      final raw = await _ch.invokeMethod<String>('getAudioTracks');
-      if (raw == null || raw.isEmpty) return;
-      final list = jsonDecode(raw) as List<dynamic>;
-      _audioTracks = list.map((e) {
-        final m = Map<String, dynamic>.from(e as Map);
-        final id = '${m['id'] ?? ''}'.trim();
-        final title = '${m['title'] ?? ''}'.trim();
-        final lang = '${m['lang'] ?? ''}'.trim();
-        final codec = '${m['codec'] ?? ''}'.trim();
-        var label = title.isNotEmpty ? title : (lang.isNotEmpty ? lang : id);
-        if (codec.isNotEmpty) label = '$label ($codec)';
-        return KotvTrack(id: id.isEmpty ? 'auto' : id, label: label);
-      }).toList();
+      final rawA = await _ch.invokeMethod<String>('getAudioTracks');
+      final rawV = await _ch.invokeMethod<String>('getVideoTracks');
+      if (rawA != null && rawA.isNotEmpty) {
+        final list = jsonDecode(rawA) as List<dynamic>;
+        _audioTracks = list.map(_mapMpvTrack).toList();
+      }
+      if (rawV != null && rawV.isNotEmpty) {
+        final list = jsonDecode(rawV) as List<dynamic>;
+        _videoTracks = list.map(_mapMpvTrack).toList();
+      }
       notifyListeners();
     } catch (_) {}
+  }
+
+  KotvTrack _mapMpvTrack(dynamic e) {
+    final m = Map<String, dynamic>.from(e as Map);
+    final id = '${m['id'] ?? ''}'.trim();
+    final title = '${m['title'] ?? ''}'.trim();
+    final lang = '${m['lang'] ?? ''}'.trim();
+    final codec = '${m['codec'] ?? ''}'.trim();
+    final w = (m['width'] as num?)?.toInt() ?? 0;
+    final h = (m['height'] as num?)?.toInt() ?? 0;
+    var label = title.isNotEmpty ? title : (lang.isNotEmpty ? lang : id);
+    if (codec.isNotEmpty) label = '$label ($codec)';
+    if (w > 0 && h > 0) label = '$label ${w}x$h';
+    return KotvTrack(id: id.isEmpty ? 'auto' : id, label: label);
   }
 
   /// Android：Hybrid Composition SurfaceView / TextureView（对齐 TV setRender）。
@@ -514,6 +537,15 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await _ch.invokeMethod('setAudioTrack', {'id': id});
       _currentAudioId = id.isEmpty || id == 'auto' ? null : id;
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setVideoTrack(String id) async {
+    try {
+      await _ch.invokeMethod('setVideoTrack', {'id': id});
+      _currentVideoId = id.isEmpty || id == 'auto' ? null : id;
       notifyListeners();
     } catch (_) {}
   }

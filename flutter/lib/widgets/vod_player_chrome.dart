@@ -796,13 +796,52 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     );
   }
 
-  Future<void> _showTrackSheet({required bool audio}) async {
+  Future<void> _showTrackSheet({required String kind}) async {
     widget.onBump();
+    final audio = kind == 'audio';
+    final video = kind == 'video';
     final audioTracks = widget.player.audioTracks;
+    final videoTracks = widget.player.videoTracks;
     final subTracks = widget.player.subtitleTracks;
     final currentAudio = widget.player.currentAudioId;
+    final currentVideo = widget.player.currentVideoId;
     final currentSub = widget.player.currentSubtitleId;
     final rows = <Widget>[];
+    if (video) {
+      rows.add(
+        _chromeSelectRow(
+          icon: Icons.auto_awesome,
+          label: '自动',
+          selected: currentVideo == null || currentVideo == 'auto' || currentVideo.isEmpty,
+          onTap: () async {
+            await widget.player.setVideoTrack('auto');
+            if (context.mounted) Navigator.pop(context);
+          },
+        ),
+      );
+      for (final t in videoTracks) {
+        rows.add(
+          _chromeSelectRow(
+            label: t.label,
+            selected: t.id == currentVideo,
+            onTap: () async {
+              await widget.player.setVideoTrack(t.id);
+              if (context.mounted) Navigator.pop(context);
+            },
+          ),
+        );
+      }
+      if (videoTracks.isEmpty) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Text('暂无可用视频轨', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 15)),
+          ),
+        );
+      }
+      await _showChromeListSheet(title: '视频轨', children: rows);
+      return;
+    }
     if (!audio) {
       rows.addAll([
         _chromeSelectRow(
@@ -1266,7 +1305,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           label: '字幕',
                           onTap: () {
                             Navigator.pop(ctx);
-                            _showTrackSheet(audio: false);
+                            _showTrackSheet(kind: 'subtitle');
                           },
                         ),
                         linkRow(
@@ -1274,7 +1313,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           label: '音轨',
                           onTap: () {
                             Navigator.pop(ctx);
-                            _showTrackSheet(audio: true);
+                            _showTrackSheet(kind: 'audio');
+                          },
+                        ),
+                        linkRow(
+                          icon: Icons.videocam_outlined,
+                          label: '视频轨',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _showTrackSheet(kind: 'video');
                           },
                         ),
                         linkRow(
@@ -1571,13 +1618,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       icon: Icons.closed_caption,
                                       tip: '字幕',
                                       size: land ? 32.0 : 40.0,
-                                      onTap: () => _showTrackSheet(audio: false),
+                                      onTap: () => _showTrackSheet(kind: 'subtitle'),
                                     ),
                                     _IconAct(
                                       icon: Icons.audiotrack,
                                       tip: '音轨',
                                       size: land ? 32.0 : 40.0,
-                                      onTap: () => _showTrackSheet(audio: true),
+                                      onTap: () => _showTrackSheet(kind: 'audio'),
+                                    ),
+                                    _IconAct(
+                                      icon: Icons.videocam_outlined,
+                                      tip: '视频轨',
+                                      size: land ? 32.0 : 40.0,
+                                      onTap: () => _showTrackSheet(kind: 'video'),
                                     ),
                                     if (kotvCanSwitchPlayer(live: false))
                                       _IconAct(

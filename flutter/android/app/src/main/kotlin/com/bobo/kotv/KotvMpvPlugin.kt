@@ -57,6 +57,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var pendingUrl: String? = null
   private var pendingHeaders: Map<String, String> = emptyMap()
   private var surfaceReady = false
+  /** 对齐 TV MpvPlayer.attachedSurface：同一 Surface 只更新尺寸。 */
+  private var attachedSurface: Surface? = null
+  private var surfaceAttached = false
+  private var appliedSurfaceSize: String? = null
   private var decodeMode = "auto"
   private var gpuNext = false
   private var vulkanEnabled = false
@@ -143,13 +147,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         tryAttachSurface()
         maybeLoadPending()
       } else if (created.get()) {
-        // Temporary surface loss: only park VO — do not destroy MPV context.
-        try {
-          MPVLib.setPropertyString("vo", "null")
-          MPVLib.setPropertyString("force-window", "no")
-          MPVLib.detachSurface()
-        } catch (_: Throwable) {
-        }
+        // 对齐 TV MpvPlayer.surfaceDestroyed → detachMpvSurface(false)：
+        // 短暂丢 Surface（全屏改 LayoutParams）只 detach，保留 VO，勿 vo=null。
+        parkSurfaceTransient()
       }
     }
     host.setRender(renderTexture)
@@ -165,16 +165,44 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (surfaceHost === host) {
       surfaceHost = null
       surfaceReady = false
-      // PlatformView dispose: detach surface only; Dart dispose() destroys player.
-      try {
-        if (created.get()) {
-          MPVLib.setPropertyString("vo", "null")
-          MPVLib.setPropertyString("force-window", "no")
-          MPVLib.detachSurface()
-        }
-      } catch (_: Throwable) {
-      }
+      // PlatformView 真正卸树：对齐 TV clearVideoOutput，vo=null。
+      parkSurfaceTerminal()
     }
+  }
+
+  /** TV detachMpvSurface(resetVideoOutput=false)：仅松 Surface。 */
+  private fun parkSurfaceTransient() {
+    if (!created.get() || !surfaceAttached) {
+      attachedSurface = null
+      surfaceAttached = false
+      return
+    }
+    try {
+      MPVLib.detachSurface()
+    } catch (_: Throwable) {
+    }
+    attachedSurface = null
+    surfaceAttached = false
+    appliedSurfaceSize = null
+  }
+
+  /** TV clearVideoOutput / detachMpvSurface(true)。 */
+  private fun parkSurfaceTerminal() {
+    if (!created.get()) {
+      attachedSurface = null
+      surfaceAttached = false
+      appliedSurfaceSize = null
+      return
+    }
+    try {
+      MPVLib.setPropertyString("vo", "null")
+      MPVLib.setPropertyString("force-window", "no")
+      MPVLib.detachSurface()
+    } catch (_: Throwable) {
+    }
+    attachedSurface = null
+    surfaceAttached = false
+    appliedSurfaceSize = null
   }
 
   override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -434,6 +462,32 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
+      "getVideoTracks" -> {
+        main.post {
+          try {
+            result.success(buildVideoTracksJson())
+          } catch (e: Throwable) {
+            result.error("TRACKS_FAILED", e.message, null)
+          }
+        }
+      }
+      "setVideoTrack" -> {
+        val id = call.argument<String>("id") ?: ""
+        main.post {
+          try {
+            if (created.get()) {
+              if (id.isNotEmpty() && id != "auto") {
+                MPVLib.command(arrayOf("set", "vid", id))
+              } else {
+                MPVLib.command(arrayOf("set", "vid", "auto"))
+              }
+            }
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("VIDEO_FAILED", e.message, null)
+          }
+        }
+      }
       "setSubtitleTrack" -> {
         val id = call.argument<String>("id") ?: ""
         main.post {
@@ -606,17 +660,32 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   /** 音轨列表（含 AV3A 等 FFmpeg/libarcdav3a 解码轨），对齐 TV mpvplayer。 */
   private fun buildAudioTracksJson(): String {
+    return buildTracksJson("audio")
+  }
+
+  /** 视频轨列表，对齐 TV TrackDialog VIDEO。 */
+  private fun buildVideoTracksJson(): String {
+    return buildTracksJson("video")
+  }
+
+  private fun buildTracksJson(typeFilter: String): String {
     if (!created.get()) return "[]"
     val count = MPVLib.getPropertyInt("track-list/count") ?: 0
     val arr = JSONArray()
     for (i in 0 until count) {
       val type = MPVLib.getPropertyString("track-list/$i/type") ?: continue
-      if (type != "audio") continue
+      if (type != typeFilter) continue
       val obj = JSONObject()
       obj.put("id", MPVLib.getPropertyString("track-list/$i/id") ?: "auto")
       obj.put("title", MPVLib.getPropertyString("track-list/$i/title") ?: "")
       obj.put("lang", MPVLib.getPropertyString("track-list/$i/lang") ?: "")
       obj.put("codec", MPVLib.getPropertyString("track-list/$i/codec") ?: "")
+      val w = MPVLib.getPropertyInt("track-list/$i/demux-w") ?: 0
+      val h = MPVLib.getPropertyInt("track-list/$i/demux-h") ?: 0
+      if (w > 0 && h > 0) {
+        obj.put("width", w)
+        obj.put("height", h)
+      }
       arr.put(obj)
     }
     return arr.toString()
@@ -723,24 +792,46 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return m == "texture" || m == "textureview" || m == "1"
   }
 
+  /**
+   * 对齐 TV [MpvPlayer.bindVideoOutput]：
+   * - 同一 Surface：只更新 android-surface-size
+   * - 新 Surface：attach + 设 vo，不 loadfile / 不 playlist-play-index
+   */
   private fun tryAttachSurface() {
     if (!created.get()) return
     val surface = surfaceHost?.currentSurface() ?: return
     if (!surface.isValid) return
     try {
-      MPVLib.attachSurface(surface)
-      MPVLib.setOptionString("force-window", "yes")
       val vo = if (gpuNext) "gpu-next" else "gpu"
-      MPVLib.setPropertyString("vo", vo)
       val w = surfaceHost?.width ?: 0
       val h = surfaceHost?.height ?: 0
-      if (w > 0 && h > 0) {
-        MPVLib.setPropertyString("android-surface-size", "${w}x${h}")
+      val size = if (w > 0 && h > 0) "${w}x${h}" else null
+      if (surfaceAttached && attachedSurface === surface) {
+        if (size != null && size != appliedSurfaceSize) {
+          MPVLib.setPropertyString("android-surface-size", size)
+          appliedSurfaceSize = size
+        }
+        return
       }
-      // 详情↔全屏换 Surface 后恢复输出（vo 曾被置 null）。
+      if (surfaceAttached) {
+        try {
+          MPVLib.detachSurface()
+        } catch (_: Throwable) {
+        }
+        surfaceAttached = false
+        attachedSurface = null
+      }
+      MPVLib.attachSurface(surface)
+      surfaceAttached = true
+      attachedSurface = surface
+      if (size != null) {
+        MPVLib.setPropertyString("android-surface-size", size)
+        appliedSurfaceSize = size
+      }
+      MPVLib.setPropertyString("vo", vo)
+      // 对齐 TV：绑定输出时不强制 force-window / 不重播；保持 pause 与 time-pos。
       if (pendingUrl == null) {
-        MPVLib.setPropertyBoolean("pause", false)
-        MPVLib.command(arrayOf("playlist-play-index", "current"))
+        MPVLib.setPropertyBoolean("pause", paused)
       }
     } catch (e: Throwable) {
       Log.e(TAG, "attachSurface", e)
@@ -777,12 +868,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.removeObserver(this)
     } catch (_: Throwable) {
     }
-    try {
-      MPVLib.setPropertyString("vo", "null")
-      MPVLib.setPropertyString("force-window", "no")
-      MPVLib.detachSurface()
-    } catch (_: Throwable) {
-    }
+    parkSurfaceTerminal()
     try {
       MPVLib.destroyCreatedContext()
     } catch (_: Throwable) {
@@ -1027,8 +1113,8 @@ internal class KotvMpvSurfaceHost(context: Context) :
   }
 
   override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+    // 只更新尺寸；勿再 onSurface(true)——全屏缩放会反复触发，旧逻辑会重播。
     applySurfaceSize(width, height)
-    onSurface?.invoke(true)
   }
 
   override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -1041,7 +1127,6 @@ internal class KotvMpvSurfaceHost(context: Context) :
 
   override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
     applySurfaceSize(width, height)
-    onSurface?.invoke(true)
   }
 
   override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {

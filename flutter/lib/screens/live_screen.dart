@@ -310,6 +310,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _playerVal = kotvDefaultLivePlayer();
   String _prefPlayerVal = kotvDefaultLivePlayer();
   String _prefPlayerFailover = 'auto';
+  /// 对齐 TV LiveSetting.isChange：播失败自动切下一线路（默认开）。
+  bool _liveAutoChange = true;
   int _playSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
@@ -435,6 +437,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _prefPlayerVal = _playerVal;
         final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
         _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
+        final liveChange = '${settings['liveAutoChange'] ?? 'true'}'.trim().toLowerCase();
+        _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
         final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
         if (vol != null) {
           await _playback.setVolume(vol.clamp(0, 100));
@@ -714,6 +718,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       if (fo.isNotEmpty) {
         _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
       }
+      final liveChange = '${settings['liveAutoChange'] ?? 'true'}'.trim().toLowerCase();
+      _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
     } catch (_) {}
     final failover = KotvPlaybackFailover(
       playerVal: _prefPlayerVal,
@@ -856,6 +862,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: _title, url: url);
     } catch (e) {
       if (!mounted || serial != _playSerial) return;
+      // 对齐 TV fallbackAfterError：isChange 且非末线路 → nextLine。
+      final curLine = _line;
+      if (_liveAutoChange && _lines > 1 && curLine < _lines - 1) {
+        final next = curLine + 1;
+        setState(() => _status = '线路失败，自动换线 ${next + 1}/$_lines…');
+        await _playChannel(chIdx, line: next);
+        return;
+      }
       setState(() => _status = '播放失败: $e');
     }
   }

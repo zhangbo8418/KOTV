@@ -75,11 +75,15 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// 当前片源可切换的真实音轨（不含引擎注入的 `auto` / `no` 控制项）。
   List<KotvTrack> get audioTracks;
+  /// 当前片源可切换的真实视频轨（不含 `auto`）；无法枚举时为空。
+  List<KotvTrack> get videoTracks => const [];
   /// 当前片源可切换的真实字幕轨（同上；关闭/自动请用 [setSubtitleTrack]）。
   List<KotvTrack> get subtitleTracks;
   String? get currentAudioId;
+  String? get currentVideoId => null;
   String? get currentSubtitleId;
   Future<void> setAudioTrack(String id);
+  Future<void> setVideoTrack(String id) async {}
   Future<void> setSubtitleTrack(String id); // ''=关, 'auto'=自动
 
   /// 离开详情/切 Tab：对齐 TV `stop` + `release`，拆掉原生 AO，避免后台漏音。

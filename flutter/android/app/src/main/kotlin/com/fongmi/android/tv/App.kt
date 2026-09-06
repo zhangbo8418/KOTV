@@ -45,51 +45,14 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun preloadLibcxx() {
-    // 开屏黑屏根因：APK 合并后的 webhtv libc++ 与 Flutter/Skia 不兼容 → 勿直接 loadLibrary。
-    // API25：System.load(绝对路径) 默认 RTLD_LOCAL，随后 loadLibrary(libplayer) 会 SIGSEGV。
-    // 正确：assets 里 Flutter 兼容的 libc++ + kotv_dl 的 RTLD_GLOBAL dlopen。
+    // jniLibs 已同步 webhtv libc++（与 libmpv/libplayer 配套）。必须走 Java
+    // System.loadLibrary（ClassLoader namespace）。kotv_dl 的 dlopen 会绕过 namespace，
+    // API25 上 libc++ 内部 _Znwm@plt GOT 不重定位 → setOptionString SIGSEGV(0x1423c0)。
     try {
-      System.loadLibrary("kotv_dl")
+      System.loadLibrary("c++_shared")
+      android.util.Log.i(TAG, "preload libc++_shared via System.loadLibrary(jniLibs)")
     } catch (t: Throwable) {
-      android.util.Log.w(TAG, "preload kotv_dl before libc++ failed", t)
-    }
-    try {
-      val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull { candidate ->
-        try {
-          assets.open("mpv-libs/$candidate/libc++_shared.so").close()
-          true
-        } catch (_: Throwable) {
-          false
-        }
-      }
-      if (abi.isNullOrEmpty()) {
-        System.loadLibrary("c++_shared")
-        android.util.Log.i(TAG, "preload libc++_shared from nativeLibraryDir")
-        return
-      }
-      val dest = java.io.File(java.io.File(getDir("mpv-libs", MODE_PRIVATE), abi), "libc++_shared.so")
-      dest.parentFile?.mkdirs()
-      assets.open("mpv-libs/$abi/libc++_shared.so").use { input ->
-        java.io.FileOutputStream(dest).use { output -> input.copyTo(output) }
-      }
-      val globalOk = try {
-        `is`.xyz.mpv.MPVLib.nativeLoadGlobalPublic(dest.absolutePath)
-      } catch (_: Throwable) {
-        false
-      }
-      if (globalOk) {
-        android.util.Log.i(TAG, "preload libc++_shared RTLD_GLOBAL from assets/$abi ${dest.absolutePath}")
-        return
-      }
-      System.load(dest.absolutePath)
-      android.util.Log.i(TAG, "preload libc++_shared System.load from assets/$abi ${dest.absolutePath}")
-    } catch (t: Throwable) {
-      try {
-        System.loadLibrary("c++_shared")
-        android.util.Log.w(TAG, "preload libc++_shared fallback jniLibs", t)
-      } catch (t2: Throwable) {
-        android.util.Log.w(TAG, "preload libc++_shared failed", t2)
-      }
+      android.util.Log.w(TAG, "preload libc++_shared failed", t)
     }
   }
 

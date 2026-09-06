@@ -18,7 +18,7 @@ dependencies:
   video_player: ^2.9.2
   web: ^1.1.0
   # 主线不写死小版本；flutter-pub-get.sh 会解析 pub.dev 最新版（Win7 钉 0.37.3）。
-  fvp: any
+  fvp: 0.38.1
   path_provider: ^2.1.5
   path: ^1.9.0
   shared_preferences: ^2.3.3

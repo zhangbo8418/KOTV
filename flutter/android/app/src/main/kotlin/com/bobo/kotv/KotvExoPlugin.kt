@@ -19,6 +19,7 @@ import android.widget.FrameLayout
 import io.flutter.view.TextureRegistry
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -88,6 +89,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** true：Dart 用 Texture()（兼容模式）。默认 false=SurfaceView HDR。 */
   private var useFlutterTexture: Boolean = false
   private var surfaceHost: KotvExoSurfaceHost? = null
+  /** 已绑定的 SurfaceView；全屏改尺寸时复用，避免反复 setVideoSurfaceView。 */
+  private var boundSurfaceView: SurfaceView? = null
   private var player: ExoPlayer? = null
   private var trackSelector: DecodeTrackSelector? = null
   /** 可热更新默认请求头；换集复用 Player 时改这里，对齐 TV RequestMetadata+工厂头。 */
@@ -387,7 +390,40 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           result.success(audioTrackCount())
         }
       }
+      "getAudioTracks" -> {
+        main.post {
+          result.success(buildTracksJson(C.TRACK_TYPE_AUDIO))
+        }
+      }
+      "getVideoTracks" -> {
+        main.post {
+          result.success(buildTracksJson(C.TRACK_TYPE_VIDEO))
+        }
+      }
+      "selectAudioTrack" -> {
+        val id = call.argument<String>("id") ?: "auto"
+        main.post {
+          try {
+            selectTrackById(C.TRACK_TYPE_AUDIO, id)
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_audio_track", t.message, null)
+          }
+        }
+      }
       "selectVideoTrack" -> {
+        val id = call.argument<String>("id")
+        if (!id.isNullOrBlank() && id != "auto" && !id.startsWith("idx:")) {
+          main.post {
+            try {
+              selectTrackById(C.TRACK_TYPE_VIDEO, id)
+              result.success(true)
+            } catch (t: Throwable) {
+              result.error("exo_video_track", t.message, null)
+            }
+          }
+          return
+        }
         val index = call.argument<Number>("index")?.toInt() ?: 0
         main.post {
           try {
@@ -497,12 +533,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     bindPlayerSurface()
   }
 
-  private fun unbindPlayerOutput(host: KotvExoSurfaceHost) {
-    val p = player ?: return
-    host.surfaceView?.let { p.clearVideoSurfaceView(it) }
-    host.textureView?.let { p.clearVideoTextureView(it) }
-  }
-
   private fun bindPlayerSurface() {
     val p = player ?: return
     if (useFlutterTexture) {
@@ -517,8 +547,21 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val host = surfaceHost ?: return
     val sv = host.surfaceView ?: return
     if (!canBindSurface(sv)) return
+    // 已绑同一 SurfaceView：尺寸变化由系统处理，勿重复 setVideoSurfaceView。
+    if (boundSurfaceView === sv) {
+      applyVideoFit()
+      return
+    }
     p.setVideoSurfaceView(sv)
+    boundSurfaceView = sv
     applyVideoFit()
+  }
+
+  private fun unbindPlayerOutput(host: KotvExoSurfaceHost) {
+    val p = player ?: return
+    host.surfaceView?.let { p.clearVideoSurfaceView(it) }
+    host.textureView?.let { p.clearVideoTextureView(it) }
+    if (boundSurfaceView === host.surfaceView) boundSurfaceView = null
   }
 
   private fun canBindSurface(sv: SurfaceView): Boolean {
@@ -734,11 +777,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return trackSelector
   }
 
-  /** 对齐 TV [ExoUtil.setDecodePreferences]；无 FfmpegVideoRenderer 时视频保持 HARDWARE。 */
+  /** 对齐 TV [ExoUtil.setDecodePreferences]。
+   * TV 用 DecodeSetting.isAudioPrefer/isVideoPrefer；KOTV 无独立开关，
+   * soft = 音视频都走 SOFTWARE（用户点「软解」的预期）。 */
   private fun applyDecodePreferences(trackSelector: DecodeTrackSelector, mode: String) {
-    val audioDecode =
-      if (mode == "soft") C.DECODE_SOFTWARE else C.DECODE_HARDWARE
-    val videoDecode = C.DECODE_HARDWARE
+    val soft = mode == "soft"
+    val audioDecode = if (soft) C.DECODE_SOFTWARE else C.DECODE_HARDWARE
+    val videoDecode = if (soft) C.DECODE_SOFTWARE else C.DECODE_HARDWARE
     trackSelector.setRendererDecodePreferences(audioDecode, videoDecode)
   }
 
@@ -843,6 +888,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     playerListener = null
     player?.release()
     player = null
+    boundSurfaceView = null
     trackSelector = null
     httpFactory = null
     playerBuiltLive = null
@@ -892,8 +938,85 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return n
   }
 
-  private fun selectVideoTrackAt(index: Int) {
+  /** 对齐 TV TrackDialog：枚举可切换轨，id=g{group}:t{index}。 */
+  private fun buildTracksJson(type: Int): List<Map<String, Any?>> {
+    val p = player ?: return emptyList()
+    val out = ArrayList<Map<String, Any?>>()
+    val groups = p.currentTracks.groups
+    for (gi in groups.indices) {
+      val g = groups[gi]
+      if (g.type != type) continue
+      for (i in 0 until g.length) {
+        if (!g.isTrackSupported(i)) continue
+        val f = g.getTrackFormat(i)
+        val id = "g$gi:t$i"
+        val label = describeTrack(f, type)
+        out.add(
+          mapOf(
+            "id" to id,
+            "label" to label,
+            "selected" to g.isTrackSelected(i),
+            "lang" to (f.language ?: ""),
+            "codecs" to (f.codecs ?: ""),
+            "width" to f.width,
+            "height" to f.height,
+          ),
+        )
+      }
+    }
+    return out
+  }
+
+  private fun describeTrack(f: Format, type: Int): String {
+    val parts = ArrayList<String>()
+    f.label?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+    f.language?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+    f.codecs?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+    if (type == C.TRACK_TYPE_VIDEO) {
+      if (f.width > 0 && f.height > 0) parts.add("${f.width}x${f.height}")
+      val br = f.bitrate
+      if (br != Format.NO_VALUE && br > 0) parts.add("${br / 1000}kbps")
+    } else if (type == C.TRACK_TYPE_AUDIO) {
+      if (f.channelCount > 0) parts.add("${f.channelCount}ch")
+      if (f.sampleRate > 0) parts.add("${f.sampleRate}Hz")
+    }
+    if (parts.isEmpty()) {
+      f.sampleMimeType?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+    }
+    return if (parts.isEmpty()) "轨道" else parts.joinToString(" · ")
+  }
+
+  /** 对齐 TV TrackUtil.setTrackSelection：按 id 覆盖该类型轨。auto=清 override。 */
+  private fun selectTrackById(type: Int, id: String) {
     val sel = trackSelector ?: return
+    val p = player ?: return
+    if (id.isEmpty() || id == "auto") {
+      sel.setParameters(
+        sel.buildUponParameters()
+          .clearOverridesOfType(type)
+          .setTrackTypeDisabled(type, false)
+          .build(),
+      )
+      p.play()
+      return
+    }
+    val m = Regex("""^g(\d+):t(\d+)$""").matchEntire(id) ?: return
+    val gi = m.groupValues[1].toInt()
+    val ti = m.groupValues[2].toInt()
+    val groups = p.currentTracks.groups
+    if (gi !in groups.indices) return
+    val g = groups[gi]
+    if (g.type != type || ti !in 0 until g.length || !g.isTrackSupported(ti)) return
+    sel.setParameters(
+      sel.buildUponParameters()
+        .clearOverridesOfType(type)
+        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, ti))
+        .build(),
+    )
+    p.play()
+  }
+
+  private fun selectVideoTrackAt(index: Int) {
     val candidates = videoTrackCandidates()
     if (candidates.isEmpty()) {
       player?.play()
@@ -901,13 +1024,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     val i = index.coerceIn(0, candidates.lastIndex)
     val (g, trackIndex) = candidates[i]
-    sel.setParameters(
-      sel.buildUponParameters()
-        .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
-        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, trackIndex))
-        .build(),
-    )
-    player?.play()
+    // 用 group 在 currentTracks 中的下标拼 id，走统一 selectTrackById。
+    val groups = player?.currentTracks?.groups ?: return
+    val gi = groups.indexOf(g)
+    if (gi < 0) return
+    selectTrackById(C.TRACK_TYPE_VIDEO, "g$gi:t$trackIndex")
   }
 
   private fun emit(payload: Map<String, Any?>) {
@@ -1224,7 +1345,7 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
         }
 
         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-          onReady()
+          // 对齐 TV PlayerView：尺寸变化不重绑播放器，避免全屏进出闪断。
         }
 
         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
@@ -1250,7 +1371,7 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
         }
 
         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-          onReady()
+          // 对齐 TV：全屏只改 LayoutParams 时 Surface 尺寸会变，勿反复 setVideoSurfaceView。
         }
 
         override fun surfaceDestroyed(holder: SurfaceHolder) {}

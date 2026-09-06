@@ -748,6 +748,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final decode = g('playerDecode', 'auto');
     final render = kotvNormalizePlayerRender(g('playerRender', 'surface'));
     final playerFailover = g('playerFailover', 'auto');
+    final liveAutoChange = g('liveAutoChange', 'true');
     final danOn = g('danmaku', 'false') == 'true';
     final incognito = g('incognito', 'false') == 'true';
     final dmr = g('dlnaRenderer', 'false') == 'true';
@@ -767,6 +768,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final decodeLabel = {'auto': '自动', 'soft': '软解码', 'hard': '硬解码'}[decode] ?? decode;
     final renderLabel = kotvPlayerRenderLabel(render);
     final failoverLabel = (playerFailover == 'off' || playerFailover == 'false') ? '关闭' : '自动';
+    final liveChangeLabel = (liveAutoChange == 'false' || liveAutoChange == 'off') ? '关闭' : '开启';
     final adLabel = {'off': '关闭', 'smart': '智能', 'mild': '温和', 'on': '智能'}[ad] ?? ad;
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
@@ -941,6 +943,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           onTap: () => _pick('自动切换播放器', 'playerFailover', const [
                             ('自动（黑屏/停滞时换播放器）', 'auto'),
                             ('关闭（只用所选播放器）', 'off'),
+                          ]),
+                        ),
+                        KotvSettingsCell(
+                          label: '直播失败换线',
+                          value: liveChangeLabel,
+                          onTap: () => _pick('直播失败换线', 'liveAutoChange', const [
+                            ('开启（对齐 TV：失败自动下一线路）', 'true'),
+                            ('关闭', 'false'),
                           ]),
                         ),
                         KotvSettingsCell(

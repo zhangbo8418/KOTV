@@ -235,6 +235,14 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   @override
+  List<KotvTrack> get videoTracks {
+    return player.state.tracks.video
+        .where((t) => !kotvIsPseudoMediaTrack('${t.id}'))
+        .map((t) => KotvTrack(id: '${t.id}', label: _trackLabel(t)))
+        .toList();
+  }
+
+  @override
   List<KotvTrack> get subtitleTracks {
     return player.state.tracks.subtitle
         .where((t) => !kotvIsPseudoMediaTrack('${t.id}'))
@@ -245,6 +253,13 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   String? get currentAudioId {
     final t = player.state.track.audio;
+    if (t == null) return 'auto';
+    return '${t.id}';
+  }
+
+  @override
+  String? get currentVideoId {
+    final t = player.state.track.video;
     if (t == null) return 'auto';
     return '${t.id}';
   }
@@ -371,6 +386,20 @@ class MediaKitPlayback extends KotvPlayback {
     for (final t in player.state.tracks.audio) {
       if ('${t.id}' == id) {
         await player.setAudioTrack(t);
+        return;
+      }
+    }
+  }
+
+  @override
+  Future<void> setVideoTrack(String id) async {
+    if (kotvAudioIsAuto(id) || id.isEmpty) {
+      await player.setVideoTrack(VideoTrack.auto());
+      return;
+    }
+    for (final t in player.state.tracks.video) {
+      if ('${t.id}' == id) {
+        await player.setVideoTrack(t);
         return;
       }
     }

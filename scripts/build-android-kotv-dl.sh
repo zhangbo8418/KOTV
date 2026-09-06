@@ -5,8 +5,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${KOTV_DL_SRC:-$ROOT/flutter/android/native/kotv_dl/kotv_dl.c}"
 OUT_ABI="${1:-arm64-v8a}"
 NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK:-}}"
+# Prefer ≤28：NDK29+ 链出的产物在部分盒子上无法 exec 外部二进制。
 if [[ -z "$NDK" || ! -d "$NDK" ]]; then
-  NDK="$(ls -d "$HOME"/Library/Android/sdk/ndk/* 2>/dev/null | sort -V | tail -1 || true)"
+  NDK="$(ls -d "$HOME"/Library/Android/sdk/ndk/28.* 2>/dev/null | sort -V | tail -1 || true)"
+fi
+if [[ -z "$NDK" || ! -d "$NDK" ]]; then
+  NDK="$(ls -d "$HOME"/Library/Android/sdk/ndk/* 2>/dev/null | sort -V | grep -v '/ndk/29\.' | tail -1 || true)"
 fi
 [[ -n "$NDK" && -d "$NDK" ]] || { echo "NDK not found" >&2; exit 1; }
 case "$OUT_ABI" in

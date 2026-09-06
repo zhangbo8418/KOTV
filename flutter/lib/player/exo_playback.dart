@@ -297,6 +297,7 @@ class ExoPlayback extends KotvPlayback {
         _ready = true;
         _lastError = null;
         notifyListeners();
+        unawaited(_refreshTracks());
         break;
       case 'completed':
         _completed = true;
@@ -338,6 +339,10 @@ class ExoPlayback extends KotvPlayback {
     _lastError = null;
     _videoTrackCount = -1;
     _audioTrackCount = -1;
+    _audioTracks = const [];
+    _videoTracks = const [];
+    _currentAudioId = null;
+    _currentVideoId = null;
     _w = 0;
     _h = 0;
     _pixelRatio = 1;
@@ -574,16 +579,84 @@ class ExoPlayback extends KotvPlayback {
     notifyListeners();
   }
 
+  List<KotvTrack> _audioTracks = const [];
+  List<KotvTrack> _videoTracks = const [];
+  String? _currentAudioId;
+  String? _currentVideoId;
+
   @override
-  List<KotvTrack> get audioTracks => const [];
+  List<KotvTrack> get audioTracks => _audioTracks;
+  @override
+  List<KotvTrack> get videoTracks => _videoTracks;
   @override
   List<KotvTrack> get subtitleTracks => const [];
   @override
-  String? get currentAudioId => null;
+  String? get currentAudioId => _currentAudioId;
+  @override
+  String? get currentVideoId => _currentVideoId;
   @override
   String? get currentSubtitleId => null;
+
+  Future<void> _refreshTracks() async {
+    if (!_nativeReady) return;
+    try {
+      final a = await _ch.invokeMethod<dynamic>('getAudioTracks');
+      final v = await _ch.invokeMethod<dynamic>('getVideoTracks');
+      _audioTracks = _parseTrackList(a);
+      _videoTracks = _parseTrackList(v);
+      _currentAudioId = null;
+      _currentVideoId = null;
+      if (a is List) {
+        for (final e in a) {
+          if (e is Map && e['selected'] == true) {
+            _currentAudioId = '${e['id'] ?? ''}';
+            break;
+          }
+        }
+      }
+      if (v is List) {
+        for (final e in v) {
+          if (e is Map && e['selected'] == true) {
+            _currentVideoId = '${e['id'] ?? ''}';
+            break;
+          }
+        }
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  List<KotvTrack> _parseTrackList(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw.map((e) {
+      if (e is! Map) return null;
+      final id = '${e['id'] ?? ''}'.trim();
+      if (id.isEmpty) return null;
+      final label = '${e['label'] ?? id}'.trim();
+      return KotvTrack(id: id, label: label.isEmpty ? id : label);
+    }).whereType<KotvTrack>().toList();
+  }
+
   @override
-  Future<void> setAudioTrack(String id) async {}
+  Future<void> setAudioTrack(String id) async {
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('selectAudioTrack', {'id': id});
+      _currentAudioId = id;
+      await _refreshTracks();
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setVideoTrack(String id) async {
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('selectVideoTrack', {'id': id});
+      _currentVideoId = id;
+      await _refreshTracks();
+    } catch (_) {}
+  }
+
   @override
   Future<void> setSubtitleTrack(String id) async {}
 

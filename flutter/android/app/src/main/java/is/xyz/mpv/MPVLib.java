@@ -79,9 +79,25 @@ public final class MPVLib {
 
     private static native boolean nativeLoadGlobal(String absolutePath);
 
+    /** Idempotent RTLD_GLOBAL (no FORCE_LOAD). Kept for tooling; libc++ must use System.load. */
+    private static native boolean nativeLoadGlobalSoft(String absolutePath);
+
     /** Public wrapper for early Application preload of app-local libvulkan.so. */
     public static boolean nativeLoadGlobalPublic(String absolutePath) {
         return nativeLoadGlobal(absolutePath);
+    }
+
+    private static void loadVulkanStubGlobal(File vulkanSo) {
+        if (vulkanSo == null || !vulkanSo.isFile()) {
+            Log.w(TAG, "libvulkan stub missing; libmpv may fail on API25");
+            return;
+        }
+        if (!nativeLoadGlobal(vulkanSo.getAbsolutePath())) {
+            Log.w(TAG, "nativeLoadGlobal(libvulkan) failed; trying System.load " + vulkanSo);
+            System.load(vulkanSo.getAbsolutePath());
+        } else {
+            Log.i(TAG, "MPV libvulkan stub loaded globally from " + vulkanSo.getAbsolutePath());
+        }
     }
 
     private MPVLib() {
@@ -101,60 +117,36 @@ public final class MPVLib {
             String bundleId = getBundleId(app, abi);
             boolean refreshBundle = !bundleId.equals(readMarker(marker));
             for (String lib : COPY_ORDER) copyLibrary(app.getAssets(), abi, lib, dir, refreshBundle);
-            // 必须与 App.preloadLibcxx 一致：assets 的 libc++ + RTLD_GLOBAL。
-            // 勿 System.loadLibrary("c++_shared")：jniLibs 里是 webhtv 覆盖的 cxx，
-            // 与 libplayer（assets 套件）ABI 不一致 → setOptionString/jstring_to_utf8
-            // SIGSEGV（tombstone pc 0x1423c0，API25 CR19 已复现）。
-            // 亦勿对 assets 路径 System.load（API25 默认 RTLD_LOCAL，同样会崩）。
+            // 对齐 webhtv：全部用 Java System.load(extract)。勿用 kotv_dl dlopen 加载 libc++——
+            // 会绕过 ClassLoader linker namespace，API25 上 _Znwm@plt 落到未重定位地址 0x1423c0。
+            // libvulkan stub 例外：必须 FORCE_LOAD 覆盖系统 Vulkan 1.0。
             System.loadLibrary("kotv_dl");
-            File assetsCxx = new File(dir, "libc++_shared.so");
-            if (!assetsCxx.isFile()) {
-                throw new UnsatisfiedLinkError("assets libc++_shared.so missing: " + assetsCxx);
-            }
-            if (!nativeLoadGlobal(assetsCxx.getAbsolutePath())) {
-                throw new UnsatisfiedLinkError("nativeLoadGlobal(libc++_shared) failed: " + assetsCxx);
-            }
-            Log.i(TAG, "libc++_shared RTLD_GLOBAL from assets " + assetsCxx.getAbsolutePath());
             File appVulkan = new File(app.getApplicationInfo().nativeLibraryDir, "libvulkan.so");
             File extractedVulkan = new File(dir, "libvulkan.so");
             File vulkanSo = appVulkan.isFile() ? appVulkan : extractedVulkan;
-            if (!nativeLoadGlobal(vulkanSo.getAbsolutePath())) {
-                Log.w(TAG, "nativeLoadGlobal(libvulkan) failed; trying System.load " + vulkanSo);
-                System.load(vulkanSo.getAbsolutePath());
-            } else {
-                Log.i(TAG, "MPV libvulkan stub loaded globally from " + vulkanSo.getAbsolutePath());
-            }
-            final String[] ffmpegAndMpv = {
-                    "mvutil",
-                    "mwresample",
-                    "mwscale",
-                    "mvcodec",
-                    "mvformat",
-                    "mvfilter",
-                    "mvdevice",
-                    "mpv",
-                    "player"
-            };
-            boolean usedJniLibs = false;
-            try {
-                for (String lib : ffmpegAndMpv) {
-                    System.loadLibrary(lib);
-                }
-                usedJniLibs = true;
-                Log.i(TAG, "MPV natives loaded via System.loadLibrary (jniLibs)");
-            } catch (UnsatisfiedLinkError jniErr) {
-                Log.w(TAG, "jniLibs loadLibrary failed, falling back to extracted System.load", jniErr);
-                // Ensure stub is global again before absolute-loading libmpv.
-                nativeLoadGlobal(vulkanSo.getAbsolutePath());
+            final boolean useExtractLoad = Build.VERSION.SDK_INT < 31;
+            if (useExtractLoad) {
                 for (String lib : LOAD_ORDER) {
-                    if ("c++_shared".equals(lib) || "kotv_dl".equals(lib) || "vulkan".equals(lib)) continue;
+                    if ("mpv".equals(lib)) {
+                        loadVulkanStubGlobal(vulkanSo);
+                    }
                     File so = new File(dir, System.mapLibraryName(lib));
                     Log.i(TAG, "System.load " + so.getAbsolutePath());
                     System.load(so.getAbsolutePath());
                 }
-            }
-            if (!usedJniLibs) {
-                Log.w(TAG, "MPV loaded from app_mpv-libs extract path (prefer rebuilding with jniLibs sync)");
+                Log.i(TAG, "MPV natives loaded via System.load (extract, webhtv-style)");
+            } else {
+                try {
+                    System.loadLibrary("c++_shared");
+                } catch (UnsatisfiedLinkError ignored) {
+                    System.load(new File(dir, "libc++_shared.so").getAbsolutePath());
+                }
+                loadVulkanStubGlobal(vulkanSo);
+                for (String lib : LOAD_ORDER) {
+                    if ("c++_shared".equals(lib)) continue;
+                    System.loadLibrary(lib);
+                }
+                Log.i(TAG, "MPV natives loaded via System.loadLibrary (jniLibs)");
             }
             loadedAbi = abi;
             loaded = true;
