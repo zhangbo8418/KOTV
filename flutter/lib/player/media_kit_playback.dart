@@ -114,39 +114,17 @@ class MediaKitPlayback extends KotvPlayback {
     _h = player.state.height ?? 0;
   }
 
-  /// 对齐 TV / Android 原生：`loadfile replace` + 一次 `pause=no`。
+  /// 桌面起播：先 paused 完成 media_kit 内部 `playlist-pos`，再 unpause 一次。
   ///
-  /// **根因（勿再绕过踢 play）：** media_kit [Player.open] 顺序是
-  /// `pause → loadlist → unpause → playlist-pos`；桌面在设 `playlist-pos` 后
-  /// libmpv 常再次 `pause=yes`，而 Dart 已乐观 `playing=true`，表现为
-  /// 「播放中、缓冲在涨，要点暂停/seek 才动」。
+  /// **根因：** [Player.open](`play: true`) 顺序是
+  /// `pause → loadlist → unpause → playlist-pos`。桌面在 `playlist-pos` 后
+  /// libmpv 常再次 `pause=yes`，而 Dart 已乐观 `playing=true`，于是
+  /// 「播放中、缓冲在涨，要点暂停（cycle pause）/seek 才动」。
   ///
-  /// 因此不用 [Player.open]，与 [KotvMpvPlugin.maybeLoadPending] 相同只 loadfile。
-  Future<void> _openLoadfileReplace(Media media) async {
-    final platform = player.platform;
-    if (platform == null) {
-      await player.open(media, play: true);
-      return;
-    }
-    if (_headers.isNotEmpty) {
-      // 与原生 MPV 一致：load 前写 http-header-fields（on_load 钩子也认 Media 表）。
-      final hline =
-          '${_headers.entries.map((e) => '${e.key}: ${e.value}').join('\r\n')}\r\n';
-      try {
-        await (platform as dynamic).setProperty('http-header-fields', hline);
-      } catch (_) {}
-    }
-    try {
-      await (platform as dynamic).command(<String>['loadfile', media.uri, 'replace']);
-    } catch (_) {
-      // 极端环境无 command 时再回落；正常桌面/iOS NativePlayer 都有。
-      await player.open(media, play: true);
-      return;
-    }
-    // 与 Android 相同：只写一次 pause=no，再 play() 同步 media_kit 状态（无重试踢醒）。
-    try {
-      await (platform as dynamic).setProperty('pause', 'no');
-    } catch (_) {}
+  /// 修法：`open(play: false)` 让 `playlist-pos` 在暂停态做完，再 [Player.play]
+  /// 一次（其内部即 `pause=no`）。不做轮询踢醒。
+  Future<void> _openThenUnpause(Media media) async {
+    await player.open(media, play: false);
     await player.play();
   }
 
@@ -296,7 +274,7 @@ class MediaKitPlayback extends KotvPlayback {
     // 直播：对齐 TV，不写 demuxer-max-bytes/cache-secs；点播才写入 KotvBufferBudget。
     await _opts.applyAfterAttach(player, live: live);
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
-    await _openLoadfileReplace(media);
+    await _openThenUnpause(media);
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
     _acceptSize = true;
     _adoptPlayerSize();
