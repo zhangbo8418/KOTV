@@ -98,6 +98,7 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   bool _diag = false;
+  int _openSerial = 0;
 
   final Player player;
   final VideoController controller;
@@ -220,17 +221,33 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Stream<bool> get completedStream => player.stream.completed;
 
+  /// media_kit 的 `Tracks` 永远带 `auto` / `no` 两个伪轨（未加载时也在），
+  /// 所以不能用 `isNotEmpty` 判有无轨；只数真实轨。
+  bool get _hasRealVideoTrack =>
+      player.state.tracks.video.any((t) => !kotvIsPseudoMediaTrack('${t.id}'));
+
+  bool get _hasRealAudioTrack =>
+      player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack('${t.id}'));
+
+  /// 文件已 loaded（对齐原生 MPV 的 `_ready`）：track-list 已到、或已知时长、
+  /// 或已出画/进度已走。之前没有这一层，守卫 open 当刻就把 media_kit
+  /// 当成「已在播却黑屏」——立刻踢 play、起 8s 黑屏窗口，慢源加载 >16s 就被误切播放器。
+  bool get _loaded =>
+      _hasRealVideoTrack ||
+      _hasRealAudioTrack ||
+      player.state.duration > Duration.zero ||
+      player.state.position > Duration.zero ||
+      (width > 0 && height > 0);
+
   @override
   bool get hasVideoSourceHint {
-    final tracks = player.state.tracks;
-    return tracks.video.isNotEmpty;
+    // 轨表未知时不判「无视频源」，交给黑屏窗口。
+    if (!_hasRealVideoTrack && !_hasRealAudioTrack) return true;
+    return _hasRealVideoTrack;
   }
 
   @override
-  bool get isAudioOnlyContent {
-    final tracks = player.state.tracks;
-    return tracks.video.isEmpty && tracks.audio.isNotEmpty;
-  }
+  bool get isAudioOnlyContent => _hasRealAudioTrack && !_hasRealVideoTrack;
 
   @override
   List<KotvTrack> get audioTracks {
@@ -310,10 +327,15 @@ class MediaKitPlayback extends KotvPlayback {
     _acceptSize = true;
     _adoptPlayerSize();
     notifyListeners();
+    // 对齐原生 MPV / Exo：未 loaded 视作「未在播的缓冲」只等；loaded 后才进黑屏判定。
+    // stop()/换集会重置 media_kit 状态（_loaded 回 false），必须用会话号让旧守卫
+    // 看到「不缓冲且已死」而退出，否则 open() 永远不返回。
+    final session = ++_openSerial;
+    bool sameSession() => _openSerial == session && _url.isNotEmpty;
     await kotvGuardSilentVideo(
       hasVideoSize: () => width > 0 && height > 0,
-      isBuffering: () => buffering,
-      sessionAlive: () => !completed && (_url.isNotEmpty),
+      isBuffering: () => sameSession() && (!_loaded || buffering),
+      sessionAlive: () => sameSession() && !completed && _loaded,
       isPlaying: () => playing,
       position: () => position,
       duration: () => duration,
