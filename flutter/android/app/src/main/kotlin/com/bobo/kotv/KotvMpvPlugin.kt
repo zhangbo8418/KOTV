@@ -1058,7 +1058,8 @@ internal class KotvMpvSurfaceHost(context: Context) :
         layoutParams = lp
         isFocusable = false
         isFocusableInTouchMode = false
-        setZOrderMediaOverlay(true)
+        // 勿 setZOrderMediaOverlay：详情页画面在 Stack Positioned 里跟槽滚动时，
+        // media overlay 层常钉在首次位置，不随 PlatformView 布局移动。
         holder.addCallback(this@KotvMpvSurfaceHost)
       }
       surfaceView = sv

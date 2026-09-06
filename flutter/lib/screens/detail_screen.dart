@@ -150,7 +150,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _immersiveFullscreen = false;
   KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
   final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_detail_video');
-  /// 桌面：量测详情页播控槽，供稳定 Positioned Texture 宿主对齐。
+  /// 量测详情页播控槽，供稳定 Positioned（Texture/PlatformView）宿主对齐。
+  /// 画面在 Stack 上层、不在 ListView 子树；滚动时必须同步槽位，否则钉死在首次位置。
   final GlobalKey _videoSlotKey = GlobalKey(debugLabel: 'kotv_detail_video_slot');
   final GlobalKey _detailStackKey = GlobalKey(debugLabel: 'kotv_detail_stack');
   Rect? _videoLayerRect;
@@ -1452,6 +1453,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     });
   }
 
+  /// ListView 滚动不会 rebuild，需主动把 Positioned 画面跟到黑槽。
+  Widget _syncVideoOnScroll(Widget child) {
+    if (!_useStableVideoLayer) return child;
+    return NotificationListener<ScrollNotification>(
+      onNotification: (n) {
+        if (_playUrl.isEmpty || _immersiveFullscreen) return false;
+        _scheduleSyncVideoSlot();
+        return false;
+      },
+      child: child,
+    );
+  }
+
   void _syncVideoSlotRect() {
     if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
     final slotBox = _videoSlotKey.currentContext?.findRenderObject() as RenderBox?;
@@ -2293,37 +2307,39 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       return Focus(
         canRequestFocus: false,
         onKeyEvent: _onInlinePlayerKey,
-        child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
-        children: [
-          videoPane(expand: false),
-          const SizedBox(height: 12),
-          Text(
-            d.name,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: fg, fontSize: 22, fontWeight: FontWeight.w700, height: 1.25),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 16,
-            runSpacing: 6,
+        child: _syncVideoOnScroll(
+          ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
             children: [
-              _meta('更新：${d.remarks.isEmpty ? '暂无' : d.remarks}'),
-              _meta('来源：${d.site.isEmpty ? '未知' : d.site}'),
-              _meta('年份：${d.year.isEmpty ? '暂无' : d.year}'),
-              if (d.area.isNotEmpty) _meta('地区：${d.area}'),
+              videoPane(expand: false),
+              const SizedBox(height: 12),
+              Text(
+                d.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: fg, fontSize: 22, fontWeight: FontWeight.w700, height: 1.25),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 16,
+                runSpacing: 6,
+                children: [
+                  _meta('更新：${d.remarks.isEmpty ? '暂无' : d.remarks}'),
+                  _meta('来源：${d.site.isEmpty ? '未知' : d.site}'),
+                  _meta('年份：${d.year.isEmpty ? '暂无' : d.year}'),
+                  if (d.area.isNotEmpty) _meta('地区：${d.area}'),
+                ],
+              ),
+              const SizedBox(height: 8),
+              metaBlock(),
+              const SizedBox(height: 4),
+              Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: muted.withOpacity(0.85), fontSize: 12)),
+              const SizedBox(height: 6),
+              actionRow(),
+              lower(),
             ],
           ),
-          const SizedBox(height: 8),
-          metaBlock(),
-          const SizedBox(height: 4),
-          Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: muted.withOpacity(0.85), fontSize: 12)),
-          const SizedBox(height: 6),
-          actionRow(),
-          lower(),
-        ],
-      ),
+        ),
       );
     }
 
@@ -2334,7 +2350,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         builder: (context, constraints) {
           // 略压缩上半区，避免简介区与「视频来源」之间大块空档
           final upperH = (constraints.maxHeight * 0.44).clamp(320.0, 440.0);
-          return ListView(
+          return _syncVideoOnScroll(
+            ListView(
             padding: const EdgeInsets.fromLTRB(48, 8, 48, 36),
             children: [
               SizedBox(
@@ -2394,8 +2411,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             ),
             lower(),
           ],
-        );
-      },
+            ),
+          );
+        },
       ),
     );
   }
