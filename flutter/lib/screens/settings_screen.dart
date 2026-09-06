@@ -992,7 +992,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 : _ellipsize(mpvConfPreview.replaceAll('\n', ' '), 18),
                             onTap: () => _prompt(
                               'MPV 配置（mpv.conf）',
-                              '每行 key=value，# 注释。可写 hwdec=no 等。重启播放后生效。',
+                              '每行 key=value，# 注释。可写 hwdec=no 等。重启播放后生效。\n'
+                              '桌面诊断：kotv-log=debug 加深 libmpv 日志（写入应用数据目录 kotv-mpv.log，与 kotv-engine-spawn.log 同目录）；kotv-log=no 关闭。',
                               g('mpvConf'),
                               (v) => _set('mpvConf', v, msg: 'MPV 配置已保存'),
                               maxLines: 12,

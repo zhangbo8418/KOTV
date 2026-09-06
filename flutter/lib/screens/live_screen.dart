@@ -108,7 +108,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       return _mk!;
     }
     // 直播 Player 必须 live 创建/初始化，否则 _prepareOpts 会先写入点播 demuxer（回归 980a0e3）。
-    _mkPlayer ??= kotvCreateMpvPlayer(live: true);
+    _mkPlayer ??= kotvCreateMpvPlayer(live: true, conf: _mpvOpts.conf);
     _mk ??= MediaKitPlayback(
       _mkPlayer!,
       opts: _mpvOpts.copyWith(decodeMode: _decodeMode),

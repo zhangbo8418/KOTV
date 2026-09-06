@@ -5,6 +5,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
+import 'mpv_diag.dart';
 import 'mpv_opts.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
@@ -23,11 +24,15 @@ Future<void> kotvDisposeMpvPlayer(Player? player) async {
 ///
 /// [live]=true：对齐 TV，不套点播 KotvBufferBudget；media_kit 仅用库默认 bufferSize
 ///（其内部会写 demuxer-max-bytes，应用层不再二次改写）。
-Player kotvCreateMpvPlayer({bool live = false}) {
+///
+/// [conf]：用户「MPV 配置」文本，仅用于取 `kotv-log=` 决定 libmpv 日志级别
+///（默认 info，落盘到 [KotvMpvDiag.fileName]）。
+Player kotvCreateMpvPlayer({bool live = false, String conf = ''}) {
+  final logLevel = KotvMpvDiag.logLevelFromConf(conf);
   if (live) {
     return Player(
-      configuration: const PlayerConfiguration(
-        logLevel: MPVLogLevel.error,
+      configuration: PlayerConfiguration(
+        logLevel: logLevel,
       ),
     );
   }
@@ -35,7 +40,7 @@ Player kotvCreateMpvPlayer({bool live = false}) {
   return Player(
     configuration: PlayerConfiguration(
       bufferSize: budget,
-      logLevel: MPVLogLevel.error,
+      logLevel: logLevel,
     ),
   );
 }
@@ -83,9 +88,16 @@ class MediaKitPlayback extends KotvPlayback {
     _subs.add(player.stream.volume.listen((_) => notifyListeners()));
     _subs.add(player.stream.rate.listen((_) => notifyListeners()));
     _subs.add(player.stream.completed.listen((_) => notifyListeners()));
+    // libmpv 日志落盘（AO/VO 初始化、pause 写入等），定位桌面起播停滞。
+    _diag = KotvMpvDiag.enabledFromConf(_opts.conf);
+    if (_diag) {
+      _subs.add(KotvMpvDiag.attach(player, tag: live ? 'live' : 'vod'));
+    }
     // 网速浮层走 KotvTraffic；勿轮询 demuxer-cache-state（换集/换台重建 demuxer 时易卡音）。
     _optsReady = _prepareOpts();
   }
+
+  bool _diag = false;
 
   final Player player;
   final VideoController controller;
@@ -114,15 +126,13 @@ class MediaKitPlayback extends KotvPlayback {
     _h = player.state.height ?? 0;
   }
 
-  /// 桌面起播：先 paused 完成 media_kit 内部 `playlist-pos`，再 unpause 一次。
+  /// 桌面起播：`open(play: false)` 让 media_kit 内部 `playlist-pos` 在暂停态做完，
+  /// 再 [Player.play] 一次（即 `pause=no`）。不做轮询踢醒。
   ///
-  /// **根因：** [Player.open](`play: true`) 顺序是
-  /// `pause → loadlist → unpause → playlist-pos`。桌面在 `playlist-pos` 后
-  /// libmpv 常再次 `pause=yes`，而 Dart 已乐观 `playing=true`，于是
-  /// 「播放中、缓冲在涨，要点暂停（cycle pause）/seek 才动」。
-  ///
-  /// 修法：`open(play: false)` 让 `playlist-pos` 在暂停态做完，再 [Player.play]
-  /// 一次（其内部即 `pause=no`）。不做轮询踢醒。
+  /// 注意：Win7「播放中但 time-pos 不动，点暂停/seek 才起播」时 Dart 侧
+  /// `pause=no` 与 mpv 一致，问题不在 pause 顺序，而在 AO/VO/解码是否真的启动；
+  /// 由 [KotvMpvDiag] 日志 + 快照定位（AO `IAudioClient_Start` 失败、
+  /// `paused-for-cache` 卡住、VO 无 render 回调等都会体现在日志里）。
   Future<void> _openThenUnpause(Media media) async {
     await player.open(media, play: false);
     await player.play();
@@ -274,7 +284,15 @@ class MediaKitPlayback extends KotvPlayback {
     // 直播：对齐 TV，不写 demuxer-max-bytes/cache-secs；点播才写入 KotvBufferBudget。
     await _opts.applyAfterAttach(player, live: live);
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
+    if (_diag) {
+      KotvMpvDiag.note('open live=$live hwdec=${_opts.hwdecValue()} '
+          'gpu-api=${_opts.gpuApi} ${KotvMpvDiag.hostOf(url)}');
+    }
     await _openThenUnpause(media);
+    if (_diag) {
+      KotvMpvDiag.note('open done (play sent) dart.playing=${player.state.playing}');
+      KotvMpvDiag.scheduleOpenSnapshots(player);
+    }
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
     _acceptSize = true;
     _adoptPlayerSize();
@@ -299,6 +317,7 @@ class MediaKitPlayback extends KotvPlayback {
     _url = '';
     _clearVideoSize();
     _speedBps = 0;
+    if (_diag) KotvMpvDiag.note('stop');
     try {
       await player.stop();
     } catch (_) {}
@@ -311,17 +330,28 @@ class MediaKitPlayback extends KotvPlayback {
     await stop();
   }
 
-  @override
-  Future<void> playOrPause() => player.playOrPause();
+  /// 用户操作前后各拍一次快照：正是「点暂停/拖进度条才起播」的关键瞬间。
+  Future<void> _traced(String what, Future<void> Function() action) async {
+    if (!_diag) return action();
+    KotvMpvDiag.note('$what dart.playing=${player.state.playing} pos=${player.state.position}');
+    await KotvMpvDiag.snapshot(player, reason: 'before-$what');
+    await action();
+    Timer(const Duration(milliseconds: 1500), () {
+      unawaited(KotvMpvDiag.snapshot(player, reason: 'after-$what+1.5s'));
+    });
+  }
 
   @override
-  Future<void> play() => player.play();
+  Future<void> playOrPause() => _traced('playOrPause', player.playOrPause);
 
   @override
-  Future<void> pause() => player.pause();
+  Future<void> play() => _traced('play', player.play);
 
   @override
-  Future<void> seek(Duration d) => player.seek(d);
+  Future<void> pause() => _traced('pause', player.pause);
+
+  @override
+  Future<void> seek(Duration d) => _traced('seek(${d.inMilliseconds}ms)', () => player.seek(d));
 
   @override
   Future<void> setVolume(double v) => player.setVolume(v.clamp(0, 100));
@@ -354,6 +384,7 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> tryFixVideoSource() async {
     // 对齐 TV：open 已 prepare+play；这里只再确保 unpause，勿 seek(0)。
+    if (_diag) KotvMpvDiag.note('tryFixVideoSource (silent-video guard) -> play');
     try {
       await player.play();
     } catch (_) {}

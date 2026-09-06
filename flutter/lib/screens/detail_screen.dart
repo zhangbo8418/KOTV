@@ -312,7 +312,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       });
       return _mk!;
     }
-    final player = kotvCreateMpvPlayer();
+    final player = kotvCreateMpvPlayer(conf: _mpvOpts.conf);
     _mkPlayer = player;
     _mk = MediaKitPlayback(player, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
     _playingSub = player.stream.playing.listen((_) {

@@ -228,6 +228,8 @@ class KotvMpvOpts {
       if (key.isEmpty) continue;
       // 跳过会破坏原生 Surface 绑定的选项（由引擎自己设 vo/wid）
       if (key == 'vo' || key == 'wid' || key == 'android-surface-size') continue;
+      // `kotv-*` 是应用自用开关（如 kotv-log=debug），不是 mpv 属性。
+      if (key.startsWith('kotv-')) continue;
       out.add((key, value.isEmpty ? 'yes' : value));
     }
     return out;
