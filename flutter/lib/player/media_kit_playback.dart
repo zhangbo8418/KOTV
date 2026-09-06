@@ -128,28 +128,20 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   /// 桌面起播：`open(play: false)` 让 media_kit 内部 `playlist-pos` 在暂停态做完，
-  /// 再 [_unpause] 一次。不做轮询踢醒。
+  /// 再 [Player.play] 一次（`pause=no`）。不做轮询踢醒、不做二次兜底。
+  ///
+  /// **历史根因（Win7 kotv-mpv.log 实锤）：** media_kit `play()` 内部
+  /// `_setPropertyFlag('pause', false)` 用 `calloc<Bool>(1)`（1 字节）承载
+  /// `MPV_FORMAT_FLAG`，mpv 按 `int`（4 字节）读、`!!flag` 取值；高 3 字节是堆上
+  /// 脏数据，Windows（CoTaskMemAlloc）常非零 → Dart 写 false，mpv 收到
+  /// `Set property: pause=true`，于是「播放中、缓冲在涨、time-pos 不动，点一下暂停
+  /// （cycle pause，无数据参数）才起播」。pub.dev 1.2.6 与上游 main 都未修，
+  /// 由 `scripts/patch-media-kit.sh` 在 `flutter pub get` 后把 pub-cache 里的
+  /// `calloc<Bool>(1)` 改为 `calloc<Int32>(1)`（主线 / Win7 线同版本同补丁，
+  /// 打不上即中止打包）。应用层不再兜底。
   Future<void> _openThenUnpause(Media media) async {
     await player.open(media, play: false);
-    await _unpause();
-  }
-
-  /// 起播 / 恢复：先走 [Player.play]（同步 Dart `playing` 状态与
-  /// `isPlayingStateChangeAllowed`），再用**字符串属性**把 `pause=no` 落实一次。
-  ///
-  /// **根因（Win7 kotv-mpv.log 实锤）：** media_kit `play()` 内部
-  /// `_setPropertyFlag('pause', false)` 用 `calloc<Bool>(1)`（1 字节）承载
-  /// `MPV_FORMAT_FLAG`，而 mpv 按 `int`（4 字节）读、`!!flag` 取值。高 3 字节是
-  /// 堆上脏数据，Windows（CoTaskMemAlloc）常非零 → Dart 明明写 false，mpv 日志却是
-  /// `Set property: pause=true`，AO `Thread Pause`，于是「播放中、缓冲在涨、
-  /// time-pos 不动，点一下暂停（cycle pause，无数据参数）才起播」。macOS/Linux
-  /// 的 calloc 通常整块清零所以不复现。`mpv_set_property_string("pause","no")`
-  /// 不经过该指针，无歧义。`pause()` 写 true 不受影响（非零即真）。
-  Future<void> _unpause() async {
     await player.play();
-    try {
-      await (player.platform as dynamic).setProperty('pause', 'no');
-    } catch (_) {}
   }
 
   Future<void> _prepareOpts() async {
@@ -380,7 +372,7 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> playOrPause() => _traced('playOrPause', player.playOrPause);
 
   @override
-  Future<void> play() => _traced('play', _unpause);
+  Future<void> play() => _traced('play', player.play);
 
   @override
   Future<void> pause() => _traced('pause', player.pause);
@@ -421,7 +413,7 @@ class MediaKitPlayback extends KotvPlayback {
     // 对齐 TV：open 已 prepare+play；这里只再确保 unpause，勿 seek(0)。
     if (_diag) KotvMpvDiag.note('tryFixVideoSource (silent-video guard) -> play');
     try {
-      await _unpause();
+      await player.play();
     } catch (_) {}
   }
 

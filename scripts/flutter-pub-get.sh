@@ -49,3 +49,7 @@ if [[ "$win7" != "1" ]]; then
   # 避免 committed pubspec.lock 把 any 钉在旧版；已写成精确版本时这步是 no-op。
   flutter pub upgrade fvp
 fi
+# media_kit _setPropertyFlag 1 字节 Bool 传 MPV_FORMAT_FLAG(int)：Windows 上 play() 变 pause。
+# 两条线（主线 / Win7）media_kit 都是 1.2.6，同一补丁；失败即中止，禁止带 bug 出包。
+chmod +x "$ROOT/scripts/patch-media-kit.sh"
+"$ROOT/scripts/patch-media-kit.sh"
