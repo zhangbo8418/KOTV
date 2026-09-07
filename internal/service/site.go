@@ -141,7 +141,7 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 	var result model.Result
 	var err error
 
-	// TV SiteApi 也会因空 URL 失败；这里早拒，避免 Go 甩出 Get "" unsupported protocol。
+	// 空 API 早拒，避免甩出 Get "" unsupported protocol。
 	if strings.TrimSpace(site.API) == "" {
 		name := strings.TrimSpace(site.Name)
 		if name == "" {

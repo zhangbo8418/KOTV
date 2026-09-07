@@ -397,7 +397,7 @@ func (a *App) applyRemoteSetting(name, value string) {
 func (a *App) ReloadConfig() error {
 	util.SetProxy(settings.Get(settings.Proxy))
 	spider.SetUserProxy(settings.Get(settings.Proxy))
-	// 对齐 TV VodConfig.load：换仓前先不可用，避免 Clear 窗口内仍 Ready 去 Get ""。
+	// 换仓前先不可用，避免 Clear 窗口内仍 Ready 去 Get ""。
 	a.Ready = false
 	a.ErrMsg = ""
 	a.Config.Clear()
@@ -430,8 +430,7 @@ func (a *App) LoadVodSource(source string) error {
 	return nil
 }
 
-// syncSessionsFromGlobal 全局换源成功后，会话侧跟 TV 一样「整图」换到新配置，
-// 避免 Cfg/Sites 仍钉旧 CloneEphemeral。
+// syncSessionsFromGlobal 全局换源成功后，会话侧整图换到新配置，避免 Cfg/Sites 仍钉旧实例。
 func (a *App) syncSessionsFromGlobal() {
 	if a == nil || a.sessions == nil || !a.Ready {
 		return
