@@ -154,6 +154,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 画面在 Stack 上层、不在 ListView 子树；滚动时必须同步槽位，否则钉死在首次位置。
   final GlobalKey _videoSlotKey = GlobalKey(debugLabel: 'kotv_detail_video_slot');
   final GlobalKey _detailStackKey = GlobalKey(debugLabel: 'kotv_detail_stack');
+  /// 画面层的位置由 [CompositedTransformFollower] 在合成期直接跟随黑槽
+  /// （[CompositedTransformTarget]），滚动 / 窗口缩放 / 顶栏高度变化都不会错位；
+  /// [_videoLayerRect] 只提供尺寸（非全屏）或整屏矩形（全屏）。
+  final LayerLink _videoLink = LayerLink();
   Rect? _videoLayerRect;
   bool _videoSlotSyncScheduled = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
@@ -1453,38 +1457,43 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     });
   }
 
-  /// ListView 滚动不会 rebuild，需主动把 Positioned 画面跟到黑槽。
-  Widget _syncVideoOnScroll(Widget child) {
-    if (!_useStableVideoLayer) return child;
-    return NotificationListener<ScrollNotification>(
-      onNotification: (n) {
-        if (_playUrl.isEmpty || _immersiveFullscreen) return false;
-        _scheduleSyncVideoSlot();
-        return false;
-      },
-      child: child,
-    );
-  }
-
+  /// 非全屏只需黑槽**尺寸**（位置由 LayerLink 跟随），仅尺寸变化才 setState。
   void _syncVideoSlotRect() {
     if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
     final slotBox = _videoSlotKey.currentContext?.findRenderObject() as RenderBox?;
-    final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
-    if (slotBox == null || stackBox == null || !slotBox.hasSize || !stackBox.hasSize) {
-      return;
-    }
-    final offset = slotBox.localToGlobal(Offset.zero, ancestor: stackBox);
-    final next = offset & slotBox.size;
-    if (next.width < 1 || next.height < 1) return;
+    if (slotBox == null || !slotBox.hasSize) return;
+    final size = slotBox.size;
+    if (size.width < 1 || size.height < 1) return;
     final prev = _videoLayerRect;
     if (prev != null &&
-        (prev.left - next.left).abs() < 0.5 &&
-        (prev.top - next.top).abs() < 0.5 &&
-        (prev.width - next.width).abs() < 0.5 &&
-        (prev.height - next.height).abs() < 0.5) {
+        (prev.width - size.width).abs() < 0.5 &&
+        (prev.height - size.height).abs() < 0.5) {
       return;
     }
-    setState(() => _videoLayerRect = next);
+    setState(() => _videoLayerRect = Offset.zero & size);
+  }
+
+  /// 黑槽占位：[CompositedTransformTarget] 供画面层跟随；LayoutBuilder 捕获
+  /// 不经 rebuild 的布局变化（窗口缩放、顶栏高度变化）刷新尺寸。
+  Widget _buildVideoSlot() {
+    return CompositedTransformTarget(
+      link: _videoLink,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = constraints.biggest;
+          final prev = _videoLayerRect;
+          if (!_immersiveFullscreen &&
+              size.width >= 1 &&
+              size.height >= 1 &&
+              (prev == null ||
+                  (prev.width - size.width).abs() >= 0.5 ||
+                  (prev.height - size.height).abs() >= 0.5)) {
+            _scheduleSyncVideoSlot();
+          }
+          return ColoredBox(key: _videoSlotKey, color: Colors.black);
+        },
+      ),
+    );
   }
 
   Rect _stableVideoRect(BuildContext context) {
@@ -1500,13 +1509,26 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     return ValueListenableBuilder<double>(
       valueListenable: _fsSwipeDy,
       builder: (context, swipeDy, child) {
-        final dy = _immersiveFullscreen ? swipeDy : 0.0;
+        if (_immersiveFullscreen) {
+          return Positioned(
+            left: rect.left,
+            top: rect.top + swipeDy,
+            width: rect.width,
+            height: rect.height,
+            child: child!,
+          );
+        }
+        // 非全屏：合成期跟随黑槽，不靠 post-frame 量测（量测滞后一帧就会盖到顶栏上）。
         return Positioned(
-          left: rect.left,
-          top: rect.top + dy,
+          left: 0,
+          top: 0,
           width: rect.width,
           height: rect.height,
-          child: child!,
+          child: CompositedTransformFollower(
+            link: _videoLink,
+            showWhenUnlinked: false,
+            child: child!,
+          ),
         );
       },
       child: GestureDetector(
@@ -1735,6 +1757,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
     if (mounted) {
       setState(() => _immersiveFullscreen = false);
+      // 黑槽在 Offstage 里仍有布局尺寸：同帧取回槽尺寸，避免整屏矩形多画一帧。
+      _syncVideoSlotRect();
       _scheduleSyncVideoSlot();
     }
     await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
@@ -1864,8 +1888,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                     ),
                   ))
           else if (stableSlot)
-            // 桌面：仅占位量测；真正 Texture 在 [_buildStableVideoLayer]。
-            ColoredBox(key: _videoSlotKey, color: Colors.black)
+            // 桌面：仅占位 + LayerLink 目标；真正 Texture 在 [_buildStableVideoLayer]。
+            _buildVideoSlot()
           else
             // 勿包 ListenableBuilder：position/playing 高频 notify 会重建 Video。
             ExcludeFocus(
@@ -2307,8 +2331,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       return Focus(
         canRequestFocus: false,
         onKeyEvent: _onInlinePlayerKey,
-        child: _syncVideoOnScroll(
-          ListView(
+        child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
             children: [
               videoPane(expand: false),
@@ -2338,7 +2361,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               actionRow(),
               lower(),
             ],
-          ),
         ),
       );
     }
@@ -2350,8 +2372,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         builder: (context, constraints) {
           // 略压缩上半区，避免简介区与「视频来源」之间大块空档
           final upperH = (constraints.maxHeight * 0.44).clamp(320.0, 440.0);
-          return _syncVideoOnScroll(
-            ListView(
+          return ListView(
             padding: const EdgeInsets.fromLTRB(48, 8, 48, 36),
             children: [
               SizedBox(
@@ -2411,7 +2432,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             ),
             lower(),
           ],
-            ),
           );
         },
       ),
