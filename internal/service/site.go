@@ -55,6 +55,14 @@ func NewSiteService(cfg *config.Manager) *SiteService {
 	}
 }
 
+// Config 当前绑定的配置管理器（须与会话 Cfg 同一指针）。
+func (s *SiteService) Config() *config.Manager {
+	if s == nil {
+		return nil
+	}
+	return s.cfg
+}
+
 // InvalidateLoads 换源：作废缓存，并立刻硬杀当前所属 JVM/Py/JS（本机共享池或远端该用户）。
 // 不删脚本磁盘缓存；慢站靠单次调用超时，不在换源外层死等。
 func (s *SiteService) InvalidateLoads() {

@@ -124,8 +124,16 @@ func New() (*App, error) {
 		return remote.SnapshotMedia()
 	})
 
-	// 开 HTTP 前同步 DB 最新源到 settings。
+	// 先加载点播配置再开 HTTP，避免首请求建出会话时 Cfg 仍为空、
+	// 随后只换 Cfg 不换 Sites 导致长期 Get ""。
 	cfg.EnsureVodFromHistory()
+	if err := cfg.InitFromSettings(); err != nil {
+		a.ErrMsg = err.Error()
+		log.Printf("配置加载: %v", err)
+	} else {
+		a.Ready = true
+	}
+	liveSvc.SyncFromConfig()
 
 	if err := a.Server.Start(); err != nil {
 		log.Printf("HTTP 服务启动失败: %v", err)
@@ -135,14 +143,6 @@ func New() (*App, error) {
 	}))
 
 	go a.listenEvents()
-
-	if err := cfg.InitFromSettings(); err != nil {
-		a.ErrMsg = err.Error()
-		log.Printf("配置加载: %v", err)
-	} else {
-		a.Ready = true
-	}
-	liveSvc.SyncFromConfig()
 
 	if settings.IsDLNARenderer() {
 		a.startDLNARenderer()
@@ -184,8 +184,26 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 			ErrMsg:   a.ErrMsg,
 		}
 	})
+	// 自愈：Cfg 被换成新 Manager 后 Sites 仍钉旧指针时，换源/换站会一直 Get ""。
+	if sess.Sites == nil || sess.Sites.Config() != sess.Cfg {
+		log.Printf("session %s: rebound Sites to Cfg", cid)
+		bindSessionConfig(sess, sess.Cfg)
+	}
 	a.bootstrapSession(sess)
 	return sess.Cfg, sess.Sites, sess
+}
+
+// bindSessionConfig 替换会话配置时必须同步 Sites/Live，否则换源/换站只改 Cfg，
+// 内容请求仍打旧空 Manager，表现为长期 Get "": unsupported protocol scheme ""。
+func bindSessionConfig(sess *clientsession.Session, cfg *config.Manager) {
+	if sess == nil || cfg == nil {
+		return
+	}
+	sess.Cfg = cfg
+	sess.Sites = service.NewSiteService(cfg)
+	liveSvc := live.NewService(cfg)
+	liveSvc.SyncFromConfig()
+	sess.Live = liveSvc
 }
 
 // bootstrapSession 首次进入时从磁盘恢复该 Scope 上次选中的点播源。
@@ -198,7 +216,7 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 		if !a.Ready {
 			return
 		}
-		sess.Cfg = a.Config.CloneEphemeral()
+		bindSessionConfig(sess, a.Config.CloneEphemeral())
 		sess.Ready = true
 		sess.ErrMsg = ""
 		sess.Source = settings.Get(settings.VOD)
@@ -207,10 +225,6 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 			if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
 				sess.Cfg.SetHome(alt)
 			}
-		}
-		if sess.Live != nil {
-			sess.Live = live.NewService(sess.Cfg)
-			sess.Live.SyncFromConfig()
 		}
 	}
 	src, homeKey := clientsession.LoadSource(sess.ClientID)

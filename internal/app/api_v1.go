@@ -70,7 +70,7 @@ func (a *App) APIGetConfig() map[string]any {
 		ready, errMsg = sess.Ready, sess.ErrMsg
 		source = sess.Source
 		if !ready && a.Ready && len(cfg.Sites()) == 0 {
-			sess.Cfg = a.Config.CloneEphemeral()
+			bindSessionConfig(sess, a.Config.CloneEphemeral())
 			sess.Ready = true
 			sess.ErrMsg = ""
 			if src := strings.TrimSpace(settings.Get(settings.VOD)); src != "" {
@@ -80,10 +80,6 @@ func (a *App) APIGetConfig() map[string]any {
 				if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
 					sess.Cfg.SetHome(alt)
 				}
-			}
-			if sess.Live != nil {
-				sess.Live = live.NewService(sess.Cfg)
-				sess.Live.SyncFromConfig()
 			}
 			cfg = sess.Cfg
 			ready, errMsg = sess.Ready, sess.ErrMsg
