@@ -703,6 +703,15 @@ class EngineLauncher {
     if (Platform.isWindows) {
       try {
         final support = await getApplicationSupportDirectory();
+        // 旧引擎残留的看门狗脚本会堆一堆；开新看门狗前清掉。
+        await for (final f in support.list(followLinks: false)) {
+          final name = p.basename(f.path).toLowerCase();
+          if (name.startsWith('kotv-orphan-') && name.endsWith('.vbs')) {
+            try {
+              await f.delete();
+            } catch (_) {}
+          }
+        }
         final vbsPath = p.join(support.path, 'kotv-orphan-$enginePid.vbs');
         await File(vbsPath).writeAsString(
           'On Error Resume Next\n'

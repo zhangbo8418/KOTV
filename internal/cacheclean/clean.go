@@ -1,4 +1,5 @@
 // Package cacheclean 清理爬虫/磁力/日志等用户缓存（不删设置与数据库）。
+// 「全部」时还会扫数据根，去掉 setting.ini / db 以外的残留。
 package cacheclean
 
 import (
@@ -123,8 +124,53 @@ func Run(opt Options) Result {
 		}
 	}
 
+	// 全选：再扫一遍数据根，删掉 setting.ini / db 以外的可再生目录与文件。
+	if opt.Script && opt.Jar && opt.Magnet && opt.Logs && opt.Other {
+		n, err := sweepRootKeepConfigAndDB(paths.Root())
+		if n > 0 || err != nil {
+			add("数据根残留", paths.Root(), n, err)
+		}
+	}
+
 	res.FreedHuman = humanBytes(res.FreedBytes)
 	return res
+}
+
+// sweepRootKeepConfigAndDB 保留配置与数据库，其余一律清掉。
+func sweepRootKeepConfigAndDB(root string) (int64, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var freed int64
+	for _, e := range entries {
+		name := e.Name()
+		low := strings.ToLower(name)
+		if low == "setting.ini" || low == "db" {
+			continue
+		}
+		p := filepath.Join(root, name)
+		if e.IsDir() {
+			n, err := wipeDirRemove(p)
+			freed += n
+			if err != nil {
+				return freed, err
+			}
+			continue
+		}
+		info, err := e.Info()
+		sz := int64(0)
+		if err == nil {
+			sz = info.Size()
+		}
+		if err := os.Remove(p); err == nil {
+			freed += sz
+		}
+	}
+	return freed, nil
 }
 
 func clearLogs(dir string) (int64, error) {

@@ -18,6 +18,7 @@ import '../player/play_headers.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
+import '../util/kotv_clear_ephemeral.dart';
 import '../util/runtime_info.dart';
 import '../widgets/auth_gate.dart';
 import '../widgets/cast_flow.dart';
@@ -46,7 +47,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _liveDesc = '';
   bool _loading = true;
   bool _busy = false;
-  /// 安卓：设备支持 Vulkan≥1.2 时才显示开关（对齐 TV）。
+  /// 安卓：设备支持 Vulkan≥1.2 时才显示开关。
   bool _androidVulkanOk = false;
   final _engineCtrl = TextEditingController();
 
@@ -369,7 +370,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: const Text('确认清理？', style: TextStyle(color: Colors.white)),
         content: Text(
           choice == 'all'
-              ? '将清理 JS/PY、JAR、磁力下载、日志与杂项缓存。\n不会删除设置与观看历史。\n清理爬虫包后会自动重载点播源。'
+              ? '将清理爬虫包、磁力缓冲、日志、HTTP/封面等，以及 UI 侧临时文件。\n保留设置与数据库（观看历史等）。\n清理爬虫包后会自动重载点播源。'
               : (choice == 'script' || choice == 'jar')
                   ? '将清理所选爬虫缓存，不会删除设置与观看历史。\n清理后会自动重载点播源。'
                   : '将清理所选缓存，不会删除设置与观看历史。',
@@ -397,19 +398,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       'other': choice == 'all' || choice == 'other',
     };
     final data = await _runTool('正在清理缓存', () => ref.read(apiProvider).tools('clearCache', params));
-    // 顺带清 Flutter 侧引擎启动日志
+    // 引擎清 %APPDATA%/KOTV；UI 另清 com.bobo/KO Yingshi 与临时目录。
     try {
-      final dir = await getApplicationSupportDirectory();
-      final spawn = File('${dir.path}/kotv-engine-spawn.log');
-      if (await spawn.exists()) await spawn.writeAsString('');
-      await for (final f in dir.list()) {
-        final name = f.path.split(Platform.pathSeparator).last;
-        if (name.startsWith('kotv-orphan-') || name.startsWith('kotv-hide-') || name.startsWith('kotv-kill-rt-')) {
-          try {
-            await f.delete();
-          } catch (_) {}
-        }
-      }
+      await kotvClearFlutterEphemeral();
     } catch (_) {}
     if (data == null || !mounted) return;
     final msg = '${data['message'] ?? '清理完成'}';
@@ -776,7 +767,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final mpvConfPreview = g('mpvConf').trim();
     // MPV conf / Vulkan：Android 原生 + 桌面/iOS media_kit
     final showMpvOpts = kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS();
-    // 安卓仅在设备 Vulkan≥1.2 时露出（对齐 TV）；桌面/iOS 始终可配
+    // 安卓仅在设备 Vulkan≥1.2 时露出；桌面/iOS 始终可配
     final showMpvVulkan =
         (kotvIsDesktop() || kotvIsIOS()) || (kotvIsAndroid() && _androidVulkanOk);
 
@@ -909,7 +900,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             value: _engineCtrl.text.isNotEmpty ? _engineCtrl.text : launcher.baseUrl,
                             onTap: () => _prompt(
                               '引擎地址（http / https）',
-                              'http://192.168.1.8:9978 或 https://tv.example.com',
+                              'http://192.168.1.8:9978 或 https://engine.example.com',
                               _engineCtrl.text.isEmpty ? launcher.baseUrl : _engineCtrl.text,
                               _applyEngineUrl,
                             ),
@@ -1006,7 +997,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           label: '直播失败换线',
                           value: liveChangeLabel,
                           onTap: () => _pick('直播失败换线', 'liveAutoChange', const [
-                            ('开启（对齐 TV：失败自动下一线路）', 'true'),
+                            ('开启（失败自动下一线路）', 'true'),
                             ('关闭', 'false'),
                           ]),
                         ),
@@ -1079,7 +1070,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             'backendProxyPlay',
                             backendProxyPlay ? 'false' : 'true',
                             msg: backendProxyPlay
-                                ? '已关闭：远端优先直连 CDN（本机仍按 TV 走本地代理）'
+                                ? '已关闭：远端优先直连 CDN（本机仍走本地代理）'
                                 : '已开启：远端也走引擎 /proxy（原生库/go/Java 多线程）',
                           ),
                         ),
