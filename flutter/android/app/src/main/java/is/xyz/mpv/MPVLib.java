@@ -66,7 +66,7 @@ public final class MPVLib {
     private static boolean loaded;
     private static Throwable loadError;
     private static String loadedAbi;
-    /** Align TV MpvUtil: FEATURE_VULKAN_HARDWARE_VERSION Vulkan 1.2. */
+    /** FEATURE_VULKAN_HARDWARE_VERSION：Vulkan 1.2 特性位。 */
     private static final int VULKAN_1_2 = 0x00402000;
     private static Boolean bundledVulkanEnabled;
     private static Boolean deviceVulkanCapable;
@@ -129,17 +129,18 @@ public final class MPVLib {
             String bundleId = getBundleId(app, abi);
             boolean refreshBundle = !bundleId.equals(readMarker(marker));
             for (String lib : COPY_ORDER) copyLibrary(app.getAssets(), abi, lib, dir, refreshBundle);
-            // libvulkan stub 仅给无 Vulkan1.2 的机子（API25）；真机用系统 libvulkan。
+            // stub 只从 assets 抽出目录加载（勿用 jniLibs，真机会抢系统 Vulkan）。
             System.loadLibrary("kotv_dl");
-            File appVulkan = new File(app.getApplicationInfo().nativeLibraryDir, "libvulkan.so");
             File extractedVulkan = new File(dir, "libvulkan.so");
-            File vulkanSo = appVulkan.isFile() ? appVulkan : extractedVulkan;
             final boolean needStub = shouldLoadVulkanStub(app);
             final boolean useExtractLoad = Build.VERSION.SDK_INT < 31;
+            if (!needStub) {
+                removeAppVulkanStubIfPresent(app);
+            }
             if (useExtractLoad) {
                 for (String lib : LOAD_ORDER) {
                     if ("mpv".equals(lib) && needStub) {
-                        loadVulkanStubGlobal(vulkanSo);
+                        loadVulkanStubGlobal(extractedVulkan);
                     }
                     File so = new File(dir, System.mapLibraryName(lib));
                     Log.i(TAG, "System.load " + so.getAbsolutePath());
@@ -153,7 +154,7 @@ public final class MPVLib {
                     System.load(new File(dir, "libc++_shared.so").getAbsolutePath());
                 }
                 if (needStub) {
-                    loadVulkanStubGlobal(vulkanSo);
+                    loadVulkanStubGlobal(extractedVulkan);
                 } else {
                     Log.i(TAG, "skip libvulkan stub; use system Vulkan for gpu-api");
                 }
@@ -199,7 +200,7 @@ public final class MPVLib {
         return bundledVulkanEnabled;
     }
 
-    /** Device reports Vulkan ≥1.2（与 TV MpvUtil.isVulkanSupported 同门槛）. */
+    /** Device reports Vulkan ≥1.2（与 MpvUtil.isVulkanSupported 同门槛）. */
     public static synchronized boolean isDeviceVulkanCapable(Context context) {
         if (deviceVulkanCapable != null) return deviceVulkanCapable;
         try {
@@ -217,6 +218,28 @@ public final class MPVLib {
         // stub 已占位时不能开 gpu-api=vulkan（符号是空壳）。
         if (vulkanStubLoaded) return false;
         return isBundledVulkanEnabled(context) && isDeviceVulkanCapable(context);
+    }
+
+    /**
+     * 真机有系统 Vulkan 时删掉 APK 抽出的 stub（旧包 jniLibs 残留），
+     * 否则 libmpv DT_NEEDED 仍优先绑到空壳。
+     */
+    public static synchronized void removeAppVulkanStubIfPresent(Context context) {
+        try {
+            Context app = context.getApplicationContext();
+            File stub = new File(app.getApplicationInfo().nativeLibraryDir, "libvulkan.so");
+            if (stub.isFile()) {
+                long len = stub.length();
+                // 我们的 stub 很小；误删真 loader 的风险极低。
+                if (len > 0 && len < 2_000_000L && stub.delete()) {
+                    Log.i(TAG, "removed app libvulkan stub from " + stub.getAbsolutePath() + " (" + len + " bytes)");
+                } else {
+                    Log.w(TAG, "could not remove app libvulkan stub " + stub.getAbsolutePath() + " len=" + len);
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "removeAppVulkanStubIfPresent failed", t);
+        }
     }
 
     private static String chooseAbi(AssetManager assets) {

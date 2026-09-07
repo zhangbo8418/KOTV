@@ -13,7 +13,7 @@ import com.bobo.kotv.host.UiContext
 import com.github.catvod.Init
 
 /**
- * 对齐 TV [com.fongmi.android.tv.App]：DexNative 用 **Application 类名** 识别 Fongmi 宿主，
+ * DexNative 用 **Application 类名** 识别安卓宿主，
  * 不能只是包名 shim。Manifest 必须指向本类，Init.init(Application) 传入的也是本类实例。
  */
 class App : Application(), Application.ActivityLifecycleCallbacks {
@@ -57,27 +57,18 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun preloadAppLibvulkan() {
-    // 仅 API25 / 无 Vulkan1.2 的设备需要 stub 满足 libmpv DT_NEEDED。
-    // 真机 Vulkan≥1.2 若仍 FORCE_LOAD stub，gpu-api=vulkan 会绑到空实现 → 卡死（TV 无 stub，故正常）。
+    // 真机 Vulkan≥1.2：清掉旧包抽出的 jniLibs stub，走系统 libvulkan（对齐 FongMi/TV）。
+    // API25：stub 只在 assets，由 MPVLib.ensureLoaded 再加载。
     try {
       if (`is`.xyz.mpv.MPVLib.isDeviceVulkanCapable(this)) {
-        android.util.Log.i(TAG, "skip libvulkan stub preload (device Vulkan≥1.2)")
+        `is`.xyz.mpv.MPVLib.removeAppVulkanStubIfPresent(this)
+        android.util.Log.i(TAG, "skip libvulkan stub; use system Vulkan (device ≥1.2)")
         return
       }
-    } catch (_: Throwable) {
-    }
-    try {
-      System.loadLibrary("kotv_dl")
-      val so = java.io.File(applicationInfo.nativeLibraryDir, "libvulkan.so")
-      if (so.isFile) {
-        val loaded = `is`.xyz.mpv.MPVLib.nativeLoadGlobalPublic(so.absolutePath)
-        android.util.Log.i(TAG, "preload libvulkan stub ok=" + loaded + " path=" + so.absolutePath)
-      } else {
-        android.util.Log.w(TAG, "preload libvulkan stub missing at " + so.absolutePath)
-      }
     } catch (t: Throwable) {
-      android.util.Log.w(TAG, "preload libvulkan stub failed", t)
+      android.util.Log.w(TAG, "Vulkan capability probe failed", t)
     }
+    android.util.Log.i(TAG, "device lacks Vulkan 1.2; stub will load from assets when MPV starts")
   }
 
   override fun onCreate() {
@@ -346,7 +337,7 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
     @JvmStatic
     fun post(runnable: Runnable) {
       if (isJarHostConfigRunnable(runnable)) {
-        android.util.Log.i(TAG, "skip jar host-config WebView runnable (TV HomeActivity path)")
+        android.util.Log.i(TAG, "skip jar host-config WebView runnable (宿主首页路径)")
         return
       }
       instance?.mainHandler?.post(runnable)

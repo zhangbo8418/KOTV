@@ -25,7 +25,6 @@ while IFS= read -r abi; do
     "assets/mpv-libs/${abi}/libplayer.so"
     "assets/mpv-libs/${abi}/libvulkan.so"
     "assets/mpv-libs/${abi}/libkotv_dl.so"
-    "lib/${abi}/libvulkan.so"
     "lib/${abi}/libkotv_dl.so"
   )
 done <<<"$abis"
@@ -46,5 +45,15 @@ done
 if [[ "$missing" != 0 ]]; then
   exit 1
 fi
-echo "ok: APK contains bundled MPV + Vulkan native libs (abis: $(echo "$abis" | tr '\n' ' '))"
+# stub 不得出现在 lib/<abi>/，否则真机 DT_NEEDED 绑空壳。
+while IFS= read -r abi; do
+  [[ -n "$abi" ]] || continue
+  case "$abi" in arm64-v8a|armeabi-v7a) ;; *) continue ;; esac
+  bad="lib/${abi}/libvulkan.so"
+  if grep -qxF "$bad" <<<"$listing"; then
+    echo "ERROR: APK must not contain $bad (stub steals system Vulkan)" >&2
+    exit 1
+  fi
+done <<<"$abis"
+echo "ok: APK contains bundled MPV + Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
 unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so/ {print $1, $4}' | head -20

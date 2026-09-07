@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校验 Android MPV 原生库：Vulkan libmpv + AV3A（libarcdav3a in libmvcodec，对齐 TV/webhtv）。
+# 校验 Android MPV 原生库：Vulkan libmpv + AV3A（libarcdav3a in libmvcodec，与移动端一致）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ASSET="$ROOT/flutter/android/app/src/main/assets/mpv-libs"
@@ -10,6 +10,7 @@ check_abi() {
   local dir="$ASSET/$abi"
   local mpv="$dir/libmpv.so"
   local codec="$dir/libmvcodec.so"
+  local vulkan_asset="$dir/libvulkan.so"
   local vulkan_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libvulkan.so"
   local cxx="$dir/libc++_shared.so"
   local cxx_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libc++_shared.so"
@@ -20,7 +21,13 @@ check_abi() {
   [[ -f "$codec_jni" ]] || { echo "ERROR: missing $codec_jni (sync assets→jniLibs)" >&2; fail=1; return; }
   [[ -f "$cxx" ]] || { echo "ERROR: missing $cxx" >&2; fail=1; return; }
   [[ -f "$cxx_jni" ]] || { echo "ERROR: missing $cxx_jni" >&2; fail=1; return; }
-  [[ -f "$vulkan_jni" ]] || { echo "ERROR: missing $vulkan_jni" >&2; fail=1; return; }
+  [[ -f "$vulkan_asset" ]] || { echo "ERROR: missing $vulkan_asset (API25 stub in assets)" >&2; fail=1; return; }
+  if [[ -f "$vulkan_jni" ]]; then
+    echo "ERROR: $vulkan_jni must not exist (stub in jniLibs steals system Vulkan)" >&2
+    fail=1
+    return
+  fi
+  echo "ok $abi: libvulkan stub in assets only"
 
   if grep -aqE 'vulkan|androidvk|-Dvulkan=enabled' "$mpv" 2>/dev/null; then
     echo "ok $abi/libmpv.so: vulkan"

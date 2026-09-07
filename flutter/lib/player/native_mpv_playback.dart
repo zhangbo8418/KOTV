@@ -19,7 +19,7 @@ class NativeMpvPlayback extends KotvPlayback {
   static const _ch = MethodChannel('kotv_mpv');
   static const _ev = EventChannel('kotv_mpv/events');
 
-  /// 与 TV 一致：bundled vulkan + 设备 Vulkan≥1.2。
+  /// 对齐 TV：设备宣称 Vulkan≥1.2 即露出开关（不管 stub / bundled 探测）。
   static Future<bool> isVulkanAvailable() async {
     if (!kotvIsAndroid()) return false;
     try {
@@ -188,7 +188,7 @@ class NativeMpvPlayback extends KotvPlayback {
     return KotvTrack(id: id.isEmpty ? 'auto' : id, label: label);
   }
 
-  /// Android：Hybrid Composition SurfaceView / TextureView（对齐 TV setRender）。
+  /// Android：Hybrid Composition SurfaceView / TextureView（对应 setRender）。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     if (!kotvIsAndroid()) {
       return const ColoredBox(color: Colors.black);

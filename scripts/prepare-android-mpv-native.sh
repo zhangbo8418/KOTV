@@ -70,7 +70,12 @@ verify_abi() {
       missing=1
     fi
   done
-  for lib in libmpv.so libplayer.so libmvcodec.so libmvutil.so libvulkan.so libkotv_dl.so libc++_shared.so; do
+  # stub 只在 assets；jniLibs 有 libvulkan.so 会抢系统 Vulkan。
+  if [[ -s "$jni/libvulkan.so" ]]; then
+    echo "WARN: removing jniLibs/$abi/libvulkan.so (must not ship stub in APK lib/)" >&2
+    rm -f "$jni/libvulkan.so"
+  fi
+  for lib in libmpv.so libplayer.so libmvcodec.so libmvutil.so libkotv_dl.so libc++_shared.so; do
     if [[ ! -s "$jni/$lib" ]]; then
       echo "ERROR: missing jniLibs/$abi/$lib" >&2
       missing=1
@@ -79,7 +84,7 @@ verify_abi() {
   if [[ "$missing" != 0 ]]; then
     exit 1
   fi
-  echo "  ok $abi: mpv + vulkan + kotv_dl ready (assets + jniLibs)"
+  echo "  ok $abi: mpv + vulkan(stub in assets) + kotv_dl ready"
 }
 
 verify_abi arm64-v8a
