@@ -34,7 +34,7 @@ const _configFileTypes = XTypeGroup(
   extensions: ['json', 'txt', 'xml', 'conf', 'yaml', 'yml'],
 );
 
-/// 对齐 TV ConfigDialog + FileChooser：
+/// 支持 URL / 粘贴 JSON / 选择本地文件：
 /// - Android：解析 Document URI 为真实磁盘路径（不拷贝整目录）
 /// - 桌面：系统文件对话框
 /// 相对 jar/js/py 由引擎相对配置文件目录解析（任意子目录名）。
@@ -42,7 +42,7 @@ Future<String?> _pickConfigFile(BuildContext context) async {
   if (!kIsWeb && Platform.isAndroid) {
     try {
       const ch = MethodChannel('kotv_android');
-      // 本地仓需读同目录相对脚本，先尽量申请存储权限（对齐 TV MANAGE_EXTERNAL_STORAGE）
+      // 本地仓需读同目录相对脚本，先尽量申请存储权限（MANAGE_EXTERNAL_STORAGE）
       try {
         await ch.invokeMethod<bool>('ensureStoragePermission');
       } catch (_) {}
@@ -423,7 +423,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
   return ok == true;
 }
 
-/// 编辑当前点播源名称/地址（对齐 TV 设置页长按 ConfigDialog.edit）。
+/// 编辑当前点播源名称/地址（设置页长按编辑）。
 /// 返回保存后的地址/名称；取消则为 null。
 Future<({String url, String name})?> showEditVodDialog(BuildContext context, WidgetRef ref, {String? url, String? title}) async {
   final api = ref.read(apiProvider);

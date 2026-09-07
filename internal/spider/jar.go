@@ -31,7 +31,7 @@ var (
 	jarSpiders = map[string]*jarSpider{}
 )
 
-// 无 md5 的 jar 缓存有效期；过期后冷加载重新下载（对齐 TV 每次都拉新包的语义）。
+// 无 md5 的 jar 缓存有效期；过期后冷加载重新下载（每次都拉新包）。
 const jarRefreshTTL = 30 * time.Minute
 
 // 多用户：按 ScopeID 隔离配置基址，避免 A 换源覆盖 B 的相对路径解析。
@@ -372,7 +372,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	}
 	if allowOverride {
 		// 仅 spider-override.jar 可劫持配置里的 spider。
-		// data/spider.jar 若也劫持，会把 TV dex 换成过期的 PC 瘦包（缺 Nostr 等类）。
+		// data/spider.jar 若也劫持，会换成过期的 PC 瘦包（缺 Nostr 等类）。
 		if override := filepath.Join(paths.Data(), "spider-override.jar"); fileExistsNonEmpty(override) {
 			log.Printf("spider.jar 使用本地覆盖: %s", override)
 			return override, nil
@@ -405,7 +405,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	if !strings.HasPrefix(downloadURL, "http://") && !strings.HasPrefix(downloadURL, "https://") && !strings.HasPrefix(strings.ToLower(downloadURL), "file:") && !filepath.IsAbs(downloadURL) {
 		return "", fmt.Errorf("无法解析相对 spider 路径 %q（配置基址为空或无效: %q）", path, base)
 	}
-	// 对齐 TV JarLoader：file:// / 本地路径直接加载，不经 HTTP、不强制拷进缓存。
+	// file:// / 本地路径直接加载，不经 HTTP、不强制拷进缓存。
 	if localPath, ok := localFilePath(downloadURL); ok {
 		if st, err := os.Stat(localPath); err == nil && !st.IsDir() && st.Size() > 0 {
 			if expectMD5 != "" {
@@ -421,14 +421,14 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	dest := paths.JarPath(util.MD5(downloadURL))
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
 		if expectMD5 == "" && time.Since(st.ModTime()) >= jarRefreshTTL {
-			// 对齐 TV：无 md5 的包冷加载时总是重新下载（TV 不做磁盘命中）。
+			// 无 md5 的包冷加载时总是重新下载（不走磁盘命中）。
 			// 这里用 TTL 折中；刷新失败沿用旧包，不因网络抖动把可用站点打挂。
 			oldSum := fileMD5(dest)
 			if err := downloadBinary(downloadURL, dest); err != nil {
 				log.Printf("spider.jar 刷新失败，沿用旧缓存 (%s): %v", downloadURL, err)
 			} else if newSum := fileMD5(dest); newSum != oldSum {
 				// 磁盘包变了必须让 JVM/Dex 侧丢弃旧 ClassLoader+爬虫实例，
-				// 否则 parseJar 命中内存缓存、跑的仍是旧类（TV 靠整包 clear 达成）。
+				// 否则 parseJar 命中内存缓存、跑的仍是旧类（需整包 clear）。
 				if err := reloadBridgeJar(dest); err != nil {
 					log.Printf("spider.jar 内存重载失败，沿用已加载类 (%s): %v", dest, err)
 				}

@@ -510,7 +510,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		if len(rules) == 0 {
 			rules = api.Rules
 		}
-		// 对齐 TV：仅 needParse / useParse 时才进 ParseJob；直链跳过。
+		// 仅 needParse / useParse 时才进 ParseJob；直链跳过。
 		didParse = parse.NeedParse(result) || parse.IsUseParse(result, api.Flags, api.Parses)
 		parsed, perr := parse.ResolveWithParses(result, parse.Options{
 			Parses:    api.Parses,
@@ -556,7 +556,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	if playURL == "" {
 		return nil, fmt.Errorf("未获取到播放地址")
 	}
-	// TV UrlUtil.convert：须在可播判断之前，否则 proxy:// 会被当成不可播。
+	// convert：须在可播判断之前，否则 proxy:// 会被当成不可播。
 	playURL = localproxy.ConvertScheme(playURL)
 	if apiLooksUnplayable(playURL) {
 		return nil, fmt.Errorf("未解析到可播放地址")
@@ -589,7 +589,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 				playURL = a.PreparePlaybackURL(playURL, headers)
 			}
 		} else {
-			// 本机(=TV) 或远端开加速：保留 /proxy。
+			// 本机或远端开加速：保留 /proxy。
 			playURL = a.PreparePlaybackURL(playURL, headers)
 		}
 	}
@@ -674,7 +674,7 @@ func vodsDTO(list []model.Vod, siteKey string) []map[string]any {
 	return out
 }
 
-// vodLooksLikeFolder 对齐 TV Vod.isFolder，并兜底：vod_id 若是本机已存在目录则不当片播。
+// vodLooksLikeFolder 判断是否为目录项，并兜底：vod_id 若是本机已存在目录则不当片播。
 func vodLooksLikeFolder(v model.Vod) bool {
 	if v.IsFolder() {
 		return true
@@ -878,7 +878,7 @@ func (a *App) APIDeleteRepo(url string) error {
 	return a.DB.DeleteConfigByURL(url, int64(database.ConfigTypeSite))
 }
 
-// APIEditRepo 编辑点播源名称/地址（对齐 TV 设置页长按 ConfigDialog.edit）。
+// APIEditRepo 编辑点播源名称/地址（设置页长按编辑）。
 func (a *App) APIEditRepo(oldURL, newURL, name string) error {
 	return a.editConfig(database.ConfigTypeSite, oldURL, newURL, name)
 }
@@ -1440,7 +1440,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	if line >= 0 && line < len(ch.URLs) {
 		ch.URLIndex = line
 	}
-	// 对齐 TV：普通频道直取线路 URL；仅 parse/json/video 前缀才二次解析。
+	// 普通频道直取线路 URL；仅 parse/json/video 前缀才二次解析。
 	playURL, headers, err := lv.ResolvePlayURLParsed(ch)
 	if err != nil && playURL == "" {
 		return nil, err

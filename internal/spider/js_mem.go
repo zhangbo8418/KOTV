@@ -83,7 +83,7 @@ func assetLibs() map[string]string {
 		"similarity.js":  jsSimilarity,
 		"http.js":        jsHTTP,
 		"spider.js":      jsSpiderLib,
-		"parser.js":      jsParser, // KOTV 补 pdfh（TV 走 jar Function）
+		"parser.js":      jsParser, // KOTV 补 pdfh（jar 走 Function）
 	}
 }
 
@@ -241,7 +241,7 @@ func moduleNormalize(base, name string) string {
 
 // createSpiderObj Spider.createObj：
 // createFun(pdfh) → evaluateModule(api) → evaluateModule(spider.js % api)。
-// 依赖由 installTVModuleLoader 按需 Module.fetch（同 TV BytecodeModuleLoader）。
+// 依赖由 installTVModuleLoader 按需 Module.fetch（同 BytecodeModuleLoader）。
 func createSpiderObj(ctx *qjs.Context, api string) (isCat bool, err error) {
 	content := moduleFetch(api)
 	if content == "" || looksLikeNonJS(content) {

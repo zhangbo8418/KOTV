@@ -294,7 +294,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _tid = tid;
       _extend.clear();
       _filters = filters;
-      // 对齐 TV FolderFragment：仅写入非空 init，不回退到首个 value。
+      // 仅写入非空 init，不回退到首个 value。
       for (final f in _filters) {
         if (f.init.isNotEmpty) _extend[f.key] = f.init;
       }
@@ -375,7 +375,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               }
             }
           }
-          // 对齐 TV：仅用 init 作缺省，禁止用首项（会把 AppDrama 等源筛空）。
+          // 仅用 init 作缺省，禁止用首项（会把 AppDrama 等源筛空）。
           for (final f in _filters) {
             if (f.init.isNotEmpty) _extend.putIfAbsent(f.key, () => f.init);
           }

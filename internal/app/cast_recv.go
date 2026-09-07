@@ -12,7 +12,7 @@ import (
 	"github.com/bobo/KOTV/internal/settings"
 )
 
-// ApplyRemoteCast 处理局域网 /action?do=cast（TV 手机端投到桌面）。
+// ApplyRemoteCast 处理局域网 /action?do=cast（手机端投到桌面）。
 func (a *App) ApplyRemoteCast(configJSON, historyJSON string) {
 	if strings.TrimSpace(historyJSON) == "" {
 		return
@@ -126,7 +126,7 @@ func parseCastHistory(raw string) (database.History, bool) {
 	}, true
 }
 
-// normalizeHistoryKey TV 用 siteKey$$$vodId，KOTV 用 vodId@siteKey。
+// normalizeHistoryKey 把外部 siteKey$$$vodId 归一成 KOTV 的 vodId@siteKey。
 func normalizeHistoryKey(key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {

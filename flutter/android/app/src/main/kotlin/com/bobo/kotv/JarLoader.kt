@@ -7,13 +7,13 @@ import com.bobo.kotv.bridge.SpiderBridge
 import com.fongmi.android.tv.App
 
 /**
- * 安卓宿主在 `:kotv-bridge` 模块（对齐 TV `:catvod`），不再 d8 桌面 spider-bridge.jar。
+ * 安卓宿主在 `:kotv-bridge` 模块，不再 d8 桌面 spider-bridge.jar。
  *
  * 站点 jar（JarDexer / SpiderBridge）：
- * - CatVodSpider / TV dex：原文件只读 + DexClassLoader，父 = App
+ * - CatVodSpider dex：原文件只读 + DexClassLoader，父 = App
  * - PC JVM 瘦包：D8 后再同样加载
  *
- * QuickJS JNI 在 App CL 预加载，供 TV dex jar 的 jar 内 JS；缺库不挡 PC 瘦包。
+ * QuickJS JNI 在 App CL 预加载，供站点 dex jar 的 jar 内 JS；缺库不挡 PC 瘦包。
  */
 object JarLoader {
   private const val TAG = "KotvJarLoader"
@@ -29,7 +29,7 @@ object JarLoader {
 
   fun isLoaded(): Boolean = loaded
 
-  /** TV dex jar 的 jar 内 JS 是否已能调 QuickJS JNI。缺库不影响通用 JVM 瘦包。 */
+  /** 站点 dex jar 的 jar 内 JS 是否已能调 QuickJS JNI。缺库不影响通用 JVM 瘦包。 */
   fun isQuickJsNativeLoaded(): Boolean = quickJsNative
 
   private fun syncSpiderUiContext(context: Context) {
@@ -82,7 +82,7 @@ object JarLoader {
       Log.i(TAG, "QuickJSLoader.init ok")
     } catch (t: Throwable) {
       quickJsNative = false
-      Log.w(TAG, "QuickJSLoader.init skipped (TV jar JS helpers disabled)", t)
+      Log.w(TAG, "QuickJSLoader.init skipped (jar JS helpers disabled)", t)
     }
   }
 

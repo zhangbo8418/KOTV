@@ -201,7 +201,7 @@ func (s *jsSpider) runWorker() (err error) {
 		return fmt.Errorf("QuickJS runtime 创建失败")
 	}
 	defer rt.Close()
-	// 不设 MaxStackSize：与 TV 一致（0=不限）。1MB 对深层爬虫源偏紧，易误杀。
+	// 不设 MaxStackSize（0=不限）。1MB 对深层爬虫源偏紧，易误杀。
 	// 模块加载路径的 CGO panic 已在 kotvModuleNormalize/Loader 里 recover。
 	installTVModuleLoader(rt)
 	rt.SetInterruptHandler(func() int {

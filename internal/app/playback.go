@@ -22,7 +22,7 @@ var localMediaExt = map[string]struct{}{
 	".m3u8": {}, ".mpd": {},
 }
 
-// IsLocalMediaURL 是否为本地文件/内容 URI，应对齐 TV 直喂播放器，不要包 HTTP 代理。
+// IsLocalMediaURL 是否为本地文件/内容 URI；是则直喂播放器，不要包 HTTP 代理。
 func IsLocalMediaURL(u string) bool {
 	u = strings.TrimSpace(u)
 	if u == "" {
@@ -57,9 +57,9 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	if raw == "" || IsEphemeralPlayURL(raw) || IsLocalMediaURL(raw) {
 		return raw
 	}
-	// TV UrlUtil.convert：proxy:// → http://127.0.0.1/proxy?...
+	// convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
-	// 本机对齐 TV：不展开 CDN，保留 /proxy 给 jar 加速；远端仅开关开启时同样保留。
+	// 本机不展开 CDN，保留 /proxy 给 jar 加速；远端仅开关开启时同样保留。
 	if !settings.PreferSpiderProxyPlay() {
 		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
 			raw = media

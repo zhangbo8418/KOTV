@@ -50,7 +50,7 @@ func (v *Vod) IsFolder() bool {
 	if tag == "folder" {
 		return true
 	}
-	// 对齐 TV Vod.isFolder：`cate` 对象存在即当目录。
+	// `cate` 对象存在即当目录。
 	return strings.TrimSpace(v.Cate.String()) != ""
 }
 

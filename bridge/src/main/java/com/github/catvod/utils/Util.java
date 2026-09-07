@@ -852,7 +852,7 @@ public class Util {
         }
     }
 
-    // --- host / TV ABI (bridge 原有，站点瘦包后父优先落到这里) ---
+    // --- host ABI（bridge 原有，站点瘦包后父优先落到这里）---
 
     public static final String OKHTTP = "okhttp/" + okhttp3.OkHttp.VERSION;
     public static final int URL_SAFE = android.util.Base64.DEFAULT | android.util.Base64.URL_SAFE | android.util.Base64.NO_WRAP;

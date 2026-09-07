@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 
-/// 对齐 FongMi TV [KeyUtil] 的遥控键判定（点播/直播共用）。
+/// 遥控键判定（点播/直播共用）。
 bool kotvIsEnterKey(LogicalKeyboardKey key) =>
     key == LogicalKeyboardKey.select ||
     key == LogicalKeyboardKey.enter ||

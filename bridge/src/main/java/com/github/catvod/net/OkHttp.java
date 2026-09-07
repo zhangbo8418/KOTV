@@ -222,7 +222,7 @@ public class OkHttp {
         return client.newCall(req(url).post(body).build());
     }
 
-    /** OkHttp 5 的 Builder.url 是 Kotlin non-null；空/非法 URL 不抛 NPE，交给拦截器立刻失败（对齐站点 OkRequest 空结果）。 */
+    /** OkHttp 5 的 Builder.url 是 Kotlin non-null；空/非法 URL 不抛 NPE，交给拦截器立刻失败（同 OkRequest 的空结果语义）。 */
     private static Request.Builder req(String url) {
         HttpUrl parsed = parseHttpUrl(url);
         if (parsed == null) {

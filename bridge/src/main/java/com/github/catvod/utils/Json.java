@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * TV catvod Json + CatVodSpider 站点常用扩展（官方 app 源里在 utils，R8 后进 spider.merge；
+ * catvod Json + CatVodSpider 站点常用扩展（官方 app 源里在 utils，R8 后进 spider.merge；
  * KOTV 父优先由 bridge 提供同名 API）。
  */
 public class Json {

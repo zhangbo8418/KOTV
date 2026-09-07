@@ -124,7 +124,7 @@ func New() (*App, error) {
 		return remote.SnapshotMedia()
 	})
 
-	// 开 HTTP 前同步 DB 最新源到 settings（对齐 TV Config.vod）。
+	// 开 HTTP 前同步 DB 最新源到 settings。
 	cfg.EnsureVodFromHistory()
 
 	if err := a.Server.Start(); err != nil {
@@ -676,7 +676,7 @@ func PlayExternal(url string) error {
 	return PlayURL(url)
 }
 
-// setupFileLog 同时写 stderr 与 ~/Library/Caches/KOTV/data/log/kotv.log，方便排障。
+// setupFileLog 同时写 stderr 与 {Root}/data/log/kotv.log，方便排障。
 func setupFileLog() {
 	dir := paths.LogDir()
 	f, err := os.OpenFile(filepath.Join(dir, "kotv.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)

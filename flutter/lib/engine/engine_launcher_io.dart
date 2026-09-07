@@ -4,12 +4,12 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../api/kotv_api.dart';
 import '../api/kotv_client_id.dart';
 import '../api/kotv_engine_url.dart';
 import '../player/kotv_traffic.dart';
+import '../util/kotv_app_dirs.dart';
 
 /// 探测并拉起本机 Go 引擎；随 UI 进程生命周期托管（窗口关闭即退出）。
 class EngineLauncher {
@@ -503,7 +503,7 @@ class EngineLauncher {
   Future<void> _winHiddenRun(String commandLine) async {
     Directory dir;
     try {
-      dir = await getApplicationSupportDirectory();
+      dir = await kotvUiDir();
     } catch (_) {
       dir = Directory.systemTemp;
     }
@@ -554,7 +554,7 @@ class EngineLauncher {
   Future<void> _winKillStrayRuntimes() async {
     Directory dir;
     try {
-      dir = await getApplicationSupportDirectory();
+      dir = await kotvUiDir();
     } catch (_) {
       dir = Directory.systemTemp;
     }
@@ -634,8 +634,8 @@ class EngineLauncher {
   }
 
   Future<void> _spawn(String path, Map<String, String> env) async {
-    final support = await getApplicationSupportDirectory();
-    final logFile = File(p.join(support.path, 'kotv-engine-spawn.log'));
+    final ui = await kotvUiDir();
+    final logFile = File(p.join(ui.path, 'kotv-engine-spawn.log'));
     final sink = logFile.openWrite(mode: FileMode.append);
     sink.writeln('${DateTime.now().toIso8601String()} spawn $path');
 
@@ -702,9 +702,9 @@ class EngineLauncher {
     }
     if (Platform.isWindows) {
       try {
-        final support = await getApplicationSupportDirectory();
+        final ui = await kotvUiDir();
         // 旧引擎残留的看门狗脚本会堆一堆；开新看门狗前清掉。
-        await for (final f in support.list(followLinks: false)) {
+        await for (final f in ui.list(followLinks: false)) {
           final name = p.basename(f.path).toLowerCase();
           if (name.startsWith('kotv-orphan-') && name.endsWith('.vbs')) {
             try {
@@ -712,7 +712,7 @@ class EngineLauncher {
             } catch (_) {}
           }
         }
-        final vbsPath = p.join(support.path, 'kotv-orphan-$enginePid.vbs');
+        final vbsPath = p.join(ui.path, 'kotv-orphan-$enginePid.vbs');
         await File(vbsPath).writeAsString(
           'On Error Resume Next\n'
           'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")\n'

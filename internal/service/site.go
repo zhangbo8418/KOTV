@@ -167,7 +167,7 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		}
 		applyTypes(site, &result)
 	case 0, 1, 2:
-		// type2 与 TV 一致：非 spider 分支，JSON 解析（FromType≠0→JSON）。
+		// type2：非 spider 分支，JSON 解析（FromType≠0→JSON）。
 		var body string
 		body, err = util.HTTPGet(site.API, map[string]string(site.Header))
 		if err != nil {
@@ -197,7 +197,7 @@ func (s *SiteService) CategoryContent(tid, pg string, extend map[string]string) 
 }
 
 // CategoryContentForSite 按站点拉分类；siteKey 空则用首页源。
-// 对齐 TV TypeFragment.getKey()：进目录用条目所属站，而不是强制首页。
+// 进目录用条目所属站，而不是强制首页。
 func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map[string]string) (model.Result, error) {
 	site := s.cfg.Home()
 	if k := strings.TrimSpace(siteKey); k != "" {
@@ -363,7 +363,7 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 		switch site.TypeID() {
 		case 3:
 			// type=3 spider（JS/PY）传参阶段不强制把剧集 id 补成绝对 URL，
-			// 让 spider 自己按 TV 的输入形态拼接/解析。
+			// 让 spider 自己按其输入形态拼接/解析。
 			sp := s.cfg.Spider(site)
 			vipFlags := s.cfg.API().Flags
 			var raw string
@@ -496,7 +496,7 @@ func resolvePlayAbsolute(id string, bases ...string) string {
 
 // applySourceFetch Source.fetch：特殊 scheme / .strm 预处理后再二次解析/起播。
 // - video:// → 剥前缀 + parse=1（逼宿主嗅探）
-// - push://  → 剥前缀 + parse=0（桌面直接播内层 URL；TV 会新开 VideoActivity）
+// - push://  → 剥前缀 + parse=0（桌面直接播内层 URL）
 // - *.strm  → 读文本首行真实地址 + parse=0
 // Force / JianPian / TVBus / Youtube 依赖 Android/Native，桌面暂不支持。
 func applySourceFetch(r *model.Result) {
@@ -632,7 +632,7 @@ func (s *SiteService) Search(keyword string, siteKeys []string) ([]model.Collect
 
 // SearchParallel 多站并发搜索，maxConcurrent 为并发上限（<=0 时默认 4）。
 func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcurrent int) ([]model.Collect, error) {
-	// 宿主统一繁→简，提高繁体关键词在简体源上的命中率（与 TV SearchTask 一致）。
+	// 宿主统一繁→简，提高繁体关键词在简体源上的命中率。
 	keyword = spider.T2S(strings.TrimSpace(keyword))
 	sites := s.cfg.Sites()
 	if len(siteKeys) > 0 {

@@ -64,11 +64,11 @@ import kotlin.math.min
  * OkHttpDataSource + Media3：headers / mime / DRM / 软硬解。
  *
  * 画面路径：
- * - Surface（默认）：Hybrid Composition [SurfaceView]，硬解 HDR 直出，对齐 TV
+ * - Surface（默认）：Hybrid Composition [SurfaceView]，硬解 HDR 直出
  * - Texture（兼容）：Flutter [TextureRegistry]（部分 HDR/10bit 会花屏，仅作回退）
  * 勿再因 API&lt;26 强制 Texture：RK 盒上 Flutter Texture + HDR 呈绿条花屏。
  *
- * 软硬解（对齐 TV DecodeTrackSelector + ExoUtil）：
+ * 软硬解（DecodeTrackSelector + ExoUtil）：
  * - hard：视频 MediaCodec 硬解优先；音轨 MediaCodec 优先、FFmpeg（AV3A）可回退
  * - auto：同 hard；解码失败再整实例软解重建一次
  * - soft：音轨强制 FFmpeg；视频仍走 MediaCodec（KOTV 无 FfmpegVideoRenderer）+ 软件解码器优先
@@ -93,10 +93,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var boundSurfaceView: SurfaceView? = null
   private var player: ExoPlayer? = null
   private var trackSelector: DecodeTrackSelector? = null
-  /** 可热更新默认请求头；换集复用 Player 时改这里，对齐 TV RequestMetadata+工厂头。 */
+  /** 可热更新默认请求头；换集复用 Player 时改这里，可热更新默认请求头，含 RequestMetadata 与工厂头。 */
   private var httpFactory: OkHttpDataSource.Factory? = null
   private var playerListener: Player.Listener? = null
-  /** 当前实例创建时的直播/解码配置；变化才整机重建（对齐 TV ensureEngine）。 */
+  /** 当前实例创建时的直播/解码配置；变化才整机重建（仅在配置变化时重建）。 */
   private var playerBuiltLive: Boolean? = null
   private var playerBuiltDecode: String? = null
   private var playerBuiltDrmKey: String? = null
@@ -107,11 +107,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var formatRetried = false
   /** auto | soft | hard；硬/自动优先 MediaCodec 硬解直出。 */
   private var decodeMode: String = "auto"
-  /** false=SurfaceView（TV/HDR 默认），true=Flutter Texture 兼容模式。 */
+  /** false=SurfaceView（HDR 默认），true=Flutter Texture 兼容模式。 */
   private var renderTexture: Boolean = false
-  /** contain | cover；对齐 TV PlayerView resizeMode。 */
+  /** contain | cover。 */
   private var videoFit: String = "contain"
-  /** 直播：跳过点播 KotvBufferBudget（对齐 TV：Exo 用默认 LoadControl）。 */
+  /** 直播：跳过点播 KotvBufferBudget（Exo 用默认 LoadControl）。 */
   private var livePlayback: Boolean = false
   /** auto 下硬解失败后仅软解重建一次。 */
   private var decodeFallbackTried = false
@@ -339,7 +339,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "stop" -> {
         main.post {
-          // 对齐 TV ExoPlayerEngine.stop：只 player.stop()，不清 MediaItems / 不拆 Surface。
+          // 只 player.stop()，不清 MediaItems / 不拆 Surface。
           // 换集复用走 setMediaItem → prepare → play；clearMediaItems 仅服务挂起场景，不在此。
           try {
             player?.stop()
@@ -623,7 +623,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
 
     val p = player ?: error("exo player missing")
-    // 对齐 TV startInternal：同实例 setMediaItem → prepare → play。
+    // 同实例 setMediaItem → prepare → play。
     p.setMediaItem(buildMediaItem(url, currentMime, currentDrm, currentHeaders), true)
     p.prepare()
     p.play()
@@ -762,23 +762,23 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 对齐 TV [ExoUtil.buildTrackSelector]：
+   * 
    * DecodeTrackSelector + forceHighestSupportedBitrate；
-   * tunnel 仅 Surface（TV 默认关 tunnel，KOTV 同样默认 false）。
+   * tunnel 仅 Surface（默认关，KOTV 同样默认 false）。
    */
   private fun buildTrackSelector(ctx: Context, mode: String): DecodeTrackSelector {
     val trackSelector = DecodeTrackSelector(ctx)
     val builder = trackSelector.buildUponParameters()
     builder.setForceHighestSupportedBitrate(true)
-    // TV：tunnel 仅 Surface；Texture 必须关。KOTV 默认不开启 tunnel（与 TV Prefers 默认一致）。
+    // tunnel 仅 Surface；Texture 必须关。KOTV 默认不开启 tunnel。
     builder.setTunnelingEnabled(false)
     trackSelector.setParameters(builder.build())
     applyDecodePreferences(trackSelector, mode)
     return trackSelector
   }
 
-  /** 对齐 TV [ExoUtil.setDecodePreferences]。
-   * TV 用 DecodeSetting.isAudioPrefer/isVideoPrefer；KOTV 无独立开关，
+  /** 设置解码偏好。
+   * 解码偏好用 DecodeSetting.isAudioPrefer/isVideoPrefer；KOTV 无独立开关，
    * soft = 音视频都走 SOFTWARE（用户点「软解」的预期）。 */
   private fun applyDecodePreferences(trackSelector: DecodeTrackSelector, mode: String) {
     val soft = mode == "soft"
@@ -796,12 +796,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
       }
       "hard" -> {
-        // 硬解视频 MediaCodec；音轨仍走 FFmpeg（AV3A），对齐 TV EXTENSION_ON
+        // 硬解视频 MediaCodec；音轨仍走 FFmpeg（AV3A）
         videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
       else -> {
-        // 对齐 TV：EXTENSION_RENDERER_MODE_ON
+        // EXTENSION_RENDERER_MODE_ON
         videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
@@ -938,7 +938,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return n
   }
 
-  /** 对齐 TV TrackDialog：枚举可切换轨，id=g{group}:t{index}。 */
+  /** 枚举可切换轨，id=g{group}:t{index}。 */
   private fun buildTracksJson(type: Int): List<Map<String, Any?>> {
     val p = player ?: return emptyList()
     val out = ArrayList<Map<String, Any?>>()
@@ -986,7 +986,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return if (parts.isEmpty()) "轨道" else parts.joinToString(" · ")
   }
 
-  /** 对齐 TV TrackUtil.setTrackSelection：按 id 覆盖该类型轨。auto=清 override。 */
+  /** 按 id 覆盖该类型轨。auto=清 override。 */
   private fun selectTrackById(type: Int, id: String) {
     val sel = trackSelector ?: return
     val p = player ?: return
@@ -1040,7 +1040,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** 与 Dart [KotvBufferBudget] 对齐：约 15% avail 且 ≤ 总内存 5%；钳到 24–96MiB。 */
+  /** 与 Dart [KotvBufferBudget] 一致：约 15% avail 且 ≤ 总内存 5%；钳到 24–96MiB。 */
   private fun bufferBudgetBytes(ctx: Context): Int {
     return try {
       val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -1233,7 +1233,7 @@ internal class KotvExoSurfaceFactory(
   }
 }
 
-/** 对齐 TV PlayerView.setRender：SurfaceView（HDR）或 TextureView。 */
+/** 按渲染方式选择 SurfaceView（HDR）或 TextureView。 */
 internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
   var surfaceView: SurfaceView? = null
     private set
@@ -1345,7 +1345,7 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
         }
 
         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-          // 对齐 TV PlayerView：尺寸变化不重绑播放器，避免全屏进出闪断。
+          // 尺寸变化不重绑播放器，避免全屏进出闪断。
         }
 
         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
@@ -1371,7 +1371,7 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
         }
 
         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-          // 对齐 TV：全屏只改 LayoutParams 时 Surface 尺寸会变，勿反复 setVideoSurfaceView。
+          // 全屏只改 LayoutParams 时 Surface 尺寸会变，勿反复 setVideoSurfaceView。
         }
 
         override fun surfaceDestroyed(holder: SurfaceHolder) {}

@@ -52,7 +52,7 @@ class OkRequest {
                 if (key != null && value != null) builder.addHeader(key, value);
             }
         }
-        // OkHttp 5 的 Builder.url 是 Kotlin non-null；TV 站点常传入空串/相对路径。
+        // OkHttp 5 的 Builder.url 是 Kotlin non-null；站点常传入空串/相对路径。
         String u = url == null ? "" : url.trim();
         if (u.isEmpty() || HttpUrl.parse(u) == null) {
             request = null;

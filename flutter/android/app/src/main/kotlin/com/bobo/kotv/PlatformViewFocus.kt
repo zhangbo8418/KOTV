@@ -6,7 +6,7 @@ import android.view.ViewGroup
 
 /**
  * Flutter Hybrid / VD 的 PlatformView 外包一层 [io.flutter.plugin.platform.PlatformViewWrapper]
- * 默认 `focusable=true`，在 TV 盒上会吃掉 DPAD，焦点进得去出不来。
+ * 默认 `focusable=true`，在安卓盒子上会吃掉 DPAD，焦点进得去出不来。
  * 宿主视图与向上若干层父布局一律关掉焦点。
  */
 internal fun View.stripPlatformViewFocus(maxParents: Int = 8) {

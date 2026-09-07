@@ -19,9 +19,16 @@ class NativeMpvPlayback extends KotvPlayback {
   static const _ch = MethodChannel('kotv_mpv');
   static const _ev = EventChannel('kotv_mpv/events');
 
-  /// 设备宣称 Vulkan≥1.2 即露出开关（不管 stub / bundled 探测）。
+  /// 设备宣称 Vulkan≥1.2 时设置页可露出开关。
   static Future<bool> isVulkanAvailable() async {
     if (!kotvIsAndroid()) return false;
+    // 优先 MainActivity 通道（不依赖 MPV 插件 attach）。
+    try {
+      const android = MethodChannel('kotv_android');
+      if (await android.invokeMethod<bool>('isVulkanAvailable') == true) {
+        return true;
+      }
+    } catch (_) {}
     try {
       return await _ch.invokeMethod<bool>('isVulkanAvailable') == true;
     } catch (_) {

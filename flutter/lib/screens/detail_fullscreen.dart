@@ -67,7 +67,7 @@ class DetailFullscreenPage extends StatefulWidget {
   });
 
   final KotvPlayback playback;
-  /// 详情页传入的同一块 PlatformView/Texture（对齐 TV 原位全屏，不重绑 Surface）。
+  /// 详情页传入的同一块 PlatformView/Texture（原位全屏，不重绑 Surface）。
   final Widget videoChild;
   /// 桌面：画面由外层 Positioned 宿主绘制，本页只叠控件，避免卸树重建 Texture。
   final bool externalVideo;
@@ -457,7 +457,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   void _onSwipePointerDown(PointerDownEvent e) {
-    // 右键由全局 kotvHandleAppBack 统一处理（TV：全屏只退全屏）。
+    // 右键由全局 kotvHandleAppBack 统一处理（全屏时只退出全屏）。
     // 此处再调 _exitFullscreen 会先清沉浸，全局 Listener 接着 maybePop 详情 → 回首页。
     if (e.buttons != kPrimaryButton) return;
     if (_swipePointer != null) return;
@@ -601,7 +601,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       unawaited(_exitFullscreen());
       return KeyEventResult.handled;
     }
-    // 菜单：对齐 TV VideoActivity → onToggle 显隐控件，便于遥控选按钮。
+    // 菜单：切换控件显隐，便于遥控选按钮。
     if (kotvIsMenuKey(key)) {
       if (_epOpen) {
         _chromeKey.currentState?.closeEpisodes();
@@ -655,7 +655,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _bumpChrome();
       return KeyEventResult.handled;
     }
-    // 控件隐藏时：上下切集（KOTV 扩展；TV 是亮控件）
+    // 控件隐藏时：上下切集（KOTV 扩展）
     if (kotvIsUpKey(key)) {
       _goPrev();
       return KeyEventResult.handled;

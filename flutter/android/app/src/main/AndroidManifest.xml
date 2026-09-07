@@ -18,14 +18,14 @@
         android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"
         android:maxSdkVersion="32"/>
-    <!-- 对齐 TV：本地配置 / 相对 jar·js·py 需读外部存储真实路径 -->
+    <!-- 本地配置 / 相对 jar·js·py 需读外部存储真实路径 -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
     <!-- Android 13+：分区存储下读视频/音频（未开「所有文件访问」时的回退） -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
-    <!-- 安卓盒子 / TV：允许无触摸屏，靠遥控器 -->
+    <!-- 安卓盒子：允许无触摸屏，靠遥控器 -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.software.picture_in_picture" android:required="false"/>

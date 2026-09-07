@@ -12,7 +12,7 @@ import (
 
 // Filter 按 #EXT-X-DISCONTINUITY 分段过滤插播广告。
 // 不依赖切片文件名序号连续（哈希名 / 非数字名同样适用）。
-// 规则思路对齐 greasyfork「HLS(m3u8) Ad Remover」(463326)，独立实现，非抄袭其 AGPL 源码。
+// 规则思路参考 HLS(m3u8) 广告移除脚本，本实现为独立编写。
 type Filter struct {
 	cfg FilterConfig
 
@@ -68,7 +68,7 @@ func (f *Filter) Apply(content string, lastModifieds ...time.Time) string {
 }
 
 // StripDiscontinuityMarkers 只删除 #EXT-X-DISCONTINUITY（保留紧跟 PLAYLIST-TYPE 的那一行）。
-// 对齐 ltxlong「暴力拆解」：不删媒体切片，避免误杀正片。
+// 不删媒体切片，避免误杀正片。
 func StripDiscontinuityMarkers(content string) string {
 	normalized := strings.ReplaceAll(strings.ReplaceAll(content, "\r\n", "\n"), "\r", "")
 	if !strings.Contains(normalized, "#EXT-X-DISCONTINUITY") {

@@ -34,7 +34,7 @@ done
 
 AAR="$ROOT/flutter/android/app/libs/thunder-release.aar"
 if [[ ! -f "$AAR" ]]; then
-  echo "==> thunder-release.aar missing; copy from TV if available"
+  echo "==> thunder-release.aar missing; copy from sibling repo if available"
   if [[ -f "$ROOT/../TV/app/libs/thunder-release.aar" ]]; then
     cp -f "$ROOT/../TV/app/libs/thunder-release.aar" "$AAR"
   elif [[ -f "$HOME/Documents/GitHub/TV/app/libs/thunder-release.aar" ]]; then

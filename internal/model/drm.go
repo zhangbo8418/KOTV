@@ -62,7 +62,7 @@ func (d *Drm) DesktopError() error {
 		if d.IsHTTPLicense() {
 			return fmt.Errorf("桌面端暂不支持 ClearKey 在线 license")
 		}
-		return fmt.Errorf("ClearKey 已识别，但桌面播放器暂无法解密（可用 TV/手机端）")
+		return fmt.Errorf("ClearKey 已识别，但桌面播放器暂无法解密（可用其它端播放）")
 	default:
 		return fmt.Errorf("桌面端不支持 DRM：%s", d.Type)
 	}

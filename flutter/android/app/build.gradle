@@ -178,11 +178,11 @@ chaquopy {
 
 dependencies {
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs_nio:2.1.5"
-    // 安卓宿主：按 Android SDK 编进 App CL（对齐 TV :catvod）。桌面仍走 bridge/spider-bridge.jar。
+    // 安卓宿主：按 Android SDK 编进 App CL。桌面仍走 bridge/spider-bridge.jar。
     implementation project(":kotv-bridge")
     implementation "org.nanohttpd:nanohttpd:2.3.1"
     // 站点 PC 瘦包（.class）运行时 D8 → dex，须打进 APK。
-    // TV 也带 NewPipe→protobuf-javalite；站点冲突由 JarDexer 过滤父 CL，不靠去掉 protobuf。
+    // 同样带 NewPipe→protobuf-javalite；站点冲突由 JarDexer 过滤父 CL，不靠去掉 protobuf。
     implementation "com.android.tools:r8:8.9.35"
     def media3 = "1.11.0-alpha01-fongmi"
     implementation "androidx.media3:media3-exoplayer:$media3"
@@ -191,7 +191,7 @@ dependencies {
     implementation "androidx.media3:media3-datasource-okhttp:$media3"
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
     implementation "com.squareup.okhttp3:okhttp:5.4.0"
-    // 对齐 TV ImgUtil：海报用 Glide + @Headers=
+    // 海报用 Glide + @Headers=
     implementation "com.github.bumptech.glide:glide:4.16.0"
     kapt "com.github.bumptech.glide:compiler:4.16.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load

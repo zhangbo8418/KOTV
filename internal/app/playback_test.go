@@ -61,7 +61,7 @@ func TestPreparePlaybackURLSkipsLocal(t *testing.T) {
 }
 
 func TestPreparePlaybackURLLocalKeepsSpiderProxyLikeTV(t *testing.T) {
-	// 本机无 PublicBase：对齐 TV，保留 /proxy，不展开成 /proxy/play。
+	// 本机无 PublicBase：保留 /proxy，不展开成 /proxy/play。
 	a := &App{}
 	cdn := "https://cdn-quark.example/01.mkv"
 	hdrJSON := `{"Cookie":"qk=1","User-Agent":"Quark"}`

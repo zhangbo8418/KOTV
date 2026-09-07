@@ -25,7 +25,7 @@ class VodItem {
 
   bool get hasAction => action.trim().isNotEmpty;
 
-  /// 对齐 TV Vod.isFolder：显式 `vod_tag=file` 不当目录；`folder` 或 cate 才进文件夹。
+  /// 显式 `vod_tag=file` 不当目录；`folder` 或 cate 才进文件夹。
   bool get isFolder {
     final tag = vodTag.trim().toLowerCase();
     if (tag == 'file') return false;
@@ -80,7 +80,7 @@ class CategoryType {
   final String typeFlag;
   final List<CategoryFilter> filters;
 
-  /// 对齐 TV Class.isFolder：`type_flag=1` 的分类用列表，并可嵌套进目录。
+  /// `type_flag=1` 的分类用列表，并可嵌套进目录。
   bool get isFolder => typeFlag.trim() == '1';
 
   factory CategoryType.fromJson(Map<String, dynamic> j) => CategoryType(
@@ -198,7 +198,7 @@ class SiteInfo {
   final bool home;
   final bool searchable;
   final bool changeable;
-  /// 对齐 TV Site.indexs：豆瓣等索引站，点条目去全网搜索而不是本站详情。
+  /// 豆瓣等索引站，点条目去全网搜索而不是本站详情。
   final bool indexs;
 
   factory SiteInfo.fromJson(Map<String, dynamic> j) => SiteInfo(

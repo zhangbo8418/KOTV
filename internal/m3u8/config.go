@@ -6,13 +6,13 @@ type FilterMode string
 const (
 	// ModeSmart：结构过滤（DISCONTINUITY 段组）；无改动或回滚时再温和去断点。
 	ModeSmart FilterMode = "smart"
-	// ModeMild：只删 #EXT-X-DISCONTINUITY 标记，不删切片（对齐 ltxlong「暴力」语义，实为最保守兜底）。
+	// ModeMild：只删 #EXT-X-DISCONTINUITY 标记，不删切片（最保守兜底）。
 	ModeMild FilterMode = "mild"
 )
 
 // FilterConfig 广告过滤参数。
-// 主路径思路对齐 greasyfork 463326（按 DISCONTINUITY 分段，不靠序号）；
-// 温和档对齐 ltxlong「暴力拆解」：只去断点标记。
+// 主路径思路按（按 DISCONTINUITY 分段，不靠序号）；
+// 温和档只去断点标记。
 type FilterConfig struct {
 	Mode FilterMode `json:"mode"`
 

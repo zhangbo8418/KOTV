@@ -141,7 +141,7 @@ def kotv_py_dispatch(req_json):
             _KOTV_PY_SESSIONS[sess_key] = sess
 
         mod = sess["mod"]
-        # 非 init：确保先 init 一次（对齐桌面常驻进程）
+        # 非 init：确保先 init 一次（与桌面常驻进程一致）
         if method != "init" and not sess.get("inited"):
             mod.invoke("init", {"extend": ext})
             sess["inited"] = True

@@ -1,4 +1,5 @@
-import '../util/kotv_io.dart';
+import 'kotv_app_dirs.dart';
+import 'kotv_io.dart';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -11,11 +12,7 @@ bool _isFlutterEphemeralName(String name) {
   return false;
 }
 
-/// 清理 Flutter / path_provider 侧可再生文件（不含 SharedPreferences 与用户文档）。
-///
-/// Windows 上引擎数据在 `%APPDATA%/KOTV`，UI 支持目录在
-/// `%APPDATA%/com.bobo/KO Yingshi`（公司名+产品名），两套互不覆盖；
-/// 设置页「清理缓存」需两边都清。
+/// 清理 Flutter / 引擎旁可再生文件（不含 setting.ini、数据库、SharedPreferences）。
 Future<int> kotvClearFlutterEphemeral() async {
   var n = 0;
   Future<void> wipeEntry(FileSystemEntity e) async {
@@ -39,8 +36,17 @@ Future<int> kotvClearFlutterEphemeral() async {
   }
 
   try {
-    final support = await getApplicationSupportDirectory();
-    await scrubDir(Directory(support.path), match: _isFlutterEphemeralName);
+    await scrubDir(await kotvUiDir(), match: (_) => true);
+  } catch (_) {}
+
+  try {
+    await scrubDir(await kotvLogDir(), match: (name) {
+      final low = name.toLowerCase();
+      return low.startsWith('kotv-') ||
+          low.startsWith('flutter') ||
+          low == 'kotv-mpv.log' ||
+          low.endsWith('.err.log');
+    });
   } catch (_) {}
 
   try {

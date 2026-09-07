@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.bobo" "\0"
-            VALUE "FileDescription", "KO Yingshi" "\0"
+            VALUE "CompanyName", "" "\0"
+            VALUE "FileDescription", "KOTV" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "kotv" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.bobo. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 KOTV. All rights reserved." "\0"
             VALUE "OriginalFilename", "kotv.exe" "\0"
-            VALUE "ProductName", "KO Yingshi" "\0"
+            VALUE "ProductName", "KOTV" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

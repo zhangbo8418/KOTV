@@ -2,7 +2,7 @@ package com.p2p;
 
 import com.github.catvod.utils.Path;
 
-/** 对齐 TV {@code :jianpian}：{@code System.loadLibrary("jpa")}。 */
+/** {@code :jianpian}：{@code System.loadLibrary("jpa")}。 */
 public class P2PClass {
 
     public int port;

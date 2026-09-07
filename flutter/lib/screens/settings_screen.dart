@@ -398,7 +398,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       'other': choice == 'all' || choice == 'other',
     };
     final data = await _runTool('正在清理缓存', () => ref.read(apiProvider).tools('clearCache', params));
-    // 引擎清 %APPDATA%/KOTV；UI 另清 com.bobo/KO Yingshi 与临时目录。
+    // 引擎与 UI 均在同一数据根（如 %APPDATA%/KOTV）；另扫系统临时目录残留。
     try {
       await kotvClearFlutterEphemeral();
     } catch (_) {}
@@ -765,11 +765,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
     final mpvVulkan = g('mpvVulkan', 'false') == 'true';
     final mpvConfPreview = g('mpvConf').trim();
-    // MPV conf / Vulkan：Android 原生 + 桌面/iOS media_kit
-    final showMpvOpts = kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS();
-    // 安卓仅在设备 Vulkan≥1.2 时露出；桌面/iOS 始终可配
-    final showMpvVulkan =
-        (kotvIsDesktop() || kotvIsIOS()) || (kotvIsAndroid() && _androidVulkanOk);
+    // 全平台：点播/直播任一选了内置 MPV 才露出 MPV 相关项
+    final usesMpv = kotvEmbedBackend(playerVal) == KotvEmbedBackend.mpv ||
+        kotvEmbedBackend(livePlayerVal) == KotvEmbedBackend.mpv;
+    final showMpvOpts = usesMpv && (kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS());
+    final showMpvVulkan = usesMpv &&
+        ((kotvIsDesktop() || kotvIsIOS()) || (kotvIsAndroid() && _androidVulkanOk));
+    final showMpvGpuNext = usesMpv && kotvIsAndroid();
 
     return Column(
       children: [
@@ -1001,7 +1003,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ('关闭', 'false'),
                           ]),
                         ),
-                        if (kotvIsAndroid())
+                        if (showMpvGpuNext)
                           KotvSettingsCell(
                             label: 'MPV gpu-next',
                             value: mpvGpuNext ? '开启' : '关闭',
@@ -1036,7 +1038,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             onTap: () => _prompt(
                               'MPV 配置（mpv.conf）',
                               '每行 key=value，# 注释。可写 hwdec=no 等。重启播放后生效。\n'
-                              '桌面诊断：kotv-log=debug 加深 libmpv 日志（写入应用数据目录 kotv-mpv.log，与 kotv-engine-spawn.log 同目录）；kotv-log=no 关闭。',
+                              '桌面诊断：kotv-log=debug 加深 libmpv 日志（写入数据目录 data/log/kotv-mpv.log）；kotv-log=no 关闭。',
                               g('mpvConf'),
                               (v) => _set('mpvConf', v, msg: 'MPV 配置已保存'),
                               maxLines: 12,

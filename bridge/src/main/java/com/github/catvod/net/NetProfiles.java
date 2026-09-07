@@ -27,8 +27,8 @@ public final class NetProfiles {
 
     /**
      * 最近活跃的非空 Scope。jar 常自起线程/线程池发请求，ThreadLocal clientId 丢失后
-     * 若落到空默认桶会把 headers/hosts/doh 全丢（TV 是全局一份不存在此问题）；
-     * 单前端场景用最近活跃桶兜底即等价 TV 语义。
+     * 若落到空默认桶会把 headers/hosts/doh 全丢（全局一份配置时不存在此问题）；
+     * 单前端场景用最近活跃桶兜底即等价。
      */
     private static volatile String lastActive = "";
 

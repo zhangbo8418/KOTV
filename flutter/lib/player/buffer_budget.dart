@@ -7,7 +7,7 @@ import 'kotv_platform.dart';
 
 /// 各播放器共用的「前向缓冲」内存预算（字节）。
 ///
-/// 策略（Exo / MPV / 外部 VLC prefetch 对齐）：
+/// 策略（Exo / MPV / 外部 VLC prefetch 一致）：
 /// 1. **按内存上限**囤前向缓冲，不用「剩余播放秒数」当预读目标；
 /// 2. 播出去的数据应释放，allocated 降到预算以下后**继续补满**到上限；
 /// 3. 不设 mpv `cache-secs` / `demuxer-readahead-secs` 等**固定秒数**预读目标。
@@ -36,7 +36,7 @@ class KotvBufferBudget {
     };
   }
 
-  /// 直播：对齐 TV——不写 `demuxer-max-bytes` / `cache-secs`（mpv 默认即可）。
+  /// 直播：不写 `demuxer-max-bytes` / `cache-secs`（mpv 默认即可）。
   ///
   /// 点播才用 [mpvCacheProps]；直播页勿再套小 demuxer 或 cache-pause 门槛。
   static Map<String, String> mpvLiveCacheProps() => const {};

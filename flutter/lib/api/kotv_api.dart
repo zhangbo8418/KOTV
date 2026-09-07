@@ -395,7 +395,7 @@ class KotvApi {
         if (values != null && values.isNotEmpty) 'values': values,
       });
 
-  /// TV 式站点 action（Market 下载等）：vod 带 action 字段时调用。
+  /// 站点 action（Market 下载等）：vod 带 action 字段时调用。
   Future<Map<String, dynamic>> siteAction({required String site, required String action}) =>
       _post('/api/v1/action', {'site': site, 'action': action});
 

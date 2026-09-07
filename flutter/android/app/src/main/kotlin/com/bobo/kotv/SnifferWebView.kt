@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.regex.Pattern
 
 /**
- * 对齐 TV CustomWebView 的网页嗅探：ads 阻断、rules.script/click、嵌套 player、isVideoFormat。
+ * ads 阻断、rules.script/click、嵌套 player、isVideoFormat。
  */
 object SnifferWebView {
   private const val TAG = "KotvSnifferWebView"
@@ -66,7 +66,7 @@ object SnifferWebView {
     appContext = context.applicationContext
   }
 
-  /** 对齐 TV ParseJob / WebViewUtil：不可用时不建 WebView，避免主线程 FATAL。 */
+  /** WebView 不可用时不建实例，避免主线程 FATAL。 */
   private fun webViewSupported(context: Context): Boolean {
     return try {
       CookieManager.getInstance()
@@ -361,7 +361,7 @@ object SnifferWebView {
     return Rule(emptyList(), emptyList(), emptyList(), emptyList())
   }
 
-  /** 对齐 TV：主 host + ?url= 内层 host，逗号拼接。 */
+  /** 主 host + ?url= 内层 host，逗号拼接。 */
   private fun sniffHosts(raw: String): String {
     val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return ""
     val host = uri.host.orEmpty()
@@ -389,7 +389,7 @@ object SnifferWebView {
     return host.isNotEmpty() && isAd(host, ads)
   }
 
-  /** 对齐 Java Util.containOrMatch：contains 或整串 matches。 */
+  /** contains 或整串 matches。 */
   private fun containOrMatch(text: String, pattern: String): Boolean {
     if (text.isEmpty() || pattern.isEmpty()) return false
     if (text.contains(pattern)) return true

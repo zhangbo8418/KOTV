@@ -85,13 +85,13 @@ Go Engine（单进程，:9978）
 
 | | 桌面 / 其他平台 | Android |
 |--|------|---------|
-| 怎么编 | `bridge/build.sh` → `spider-bridge.jar`（含 `android/` stub） | Gradle 模块 `:kotv-bridge`（真实 Android SDK，对齐 TV `:catvod`） |
+| 怎么编 | `bridge/build.sh` → `spider-bridge.jar`（含 `android/` stub） | Gradle 模块 `:kotv-bridge`（真实 Android SDK） |
 | 加载宿主 | 捆绑 JRE + `URLClassLoader` 父优先；`--serve` HTTP `:9979` | 编进 **App ClassLoader**；`JarLoader` 直调 `SpiderBridge` |
-| 站点 jar | 只吃 PC JVM `.class` 瘦包 | **同时**吃 TV/CatVodSpider dex jar（`DexClassLoader(file, Path.jar(), Path.jar(), App)`）和 PC 瘦包（先 D8） |
+| 站点 jar | 只吃 PC JVM `.class` 瘦包 | **同时**吃 CatVodSpider dex jar（`DexClassLoader(file, Path.jar(), Path.jar(), App)`）和 PC 瘦包（先 D8） |
 | OkHttp | bridge **5.4.0**；请求自动 tag `clientId` | App `force` **5.4.0** |
 
-- **TV dex**（`custom_spider.jar`）：jar 内仅 `com.github.catvod.{js,spider}` + `classes.dex`；外部符号须落在 CatVodSpider `jar/checkJar.ps1` 的 `$allowed`（如 `crawler/`、`android/`、`okhttp3/`、`com/whl/quickjs/`），由宿主 `:catvod`/`:kotv-bridge` 提供。R8 可能把站点依赖 merge 进 `spider.merge.*`，**不是**「jar 里完全没有 okhttp 字节码」。
-- **PC JVM 瘦包**（`FongMi-CatVodSpider/pc` 等）：在同一宿主契约下，打包时 **额外** exclude bridge 宿主同名类 + 不打 okhttp/sardine fat（父 CL 用 bridge）；Android 侧再 D8。验收见 `verifyUniversalJar`，**不能**用 TV dex 的 exclude 文案描述 PC 线。
+- **dex 包**（`custom_spider.jar`）：jar 内仅 `com.github.catvod.{js,spider}` + `classes.dex`；外部符号须落在 CatVodSpider `jar/checkJar.ps1` 的 `$allowed`（如 `crawler/`、`android/`、`okhttp3/`、`com/whl/quickjs/`），由宿主 `:catvod`/`:kotv-bridge` 提供。R8 可能把站点依赖 merge 进 `spider.merge.*`，**不是**「jar 里完全没有 okhttp 字节码」。
+- **PC JVM 瘦包**（CatVodSpider 的 pc 线等）：在同一宿主契约下，打包时 **额外** exclude bridge 宿主同名类 + 不打 okhttp/sardine fat（父 CL 用 bridge）；Android 侧再 D8。验收见 `verifyUniversalJar`，**不能**用 dex 包的 exclude 文案描述 PC 线。
 - 站点约定 `com.github.catvod.spider.*`；配置 `csp_ClassName`。
 - `libquickjs-android-wrapper.so` 仅进 APK，桌面 JRE 不绑这套 JNI。
 
@@ -113,7 +113,7 @@ Go Engine（单进程，:9978）
 
 | 引擎 | 平台 | 说明 |
 |------|------|------|
-| **MPV** | Android：原生插件（Surface/Texture，对齐 TV `media3.mpvplayer`）；桌面 / Windows / iOS：`media_kit` + 自带 libmpv（`scripts/fetch-desktop-mpv-libs.sh` 捆绑） | 选项 `mpv.conf` / hwdec；Android 可开 gpu-next；桌面 / iOS 走 `vo=libmpv` Texture；Vulkan / gpu-api 桌面与 Win7 均可配（Win7 硬解用 dxva2，与 Vulkan 渲染无关） |
+| **MPV** | Android：原生插件（Surface/Texture）；桌面 / Windows / iOS：`media_kit` + 自带 libmpv（`scripts/fetch-desktop-mpv-libs.sh` 捆绑） | 选项 `mpv.conf` / hwdec；Android 可开 gpu-next；桌面 / iOS 走 `vo=libmpv` Texture；Vulkan / gpu-api 桌面与 Win7 均可配（Win7 硬解用 dxva2，与 Vulkan 渲染无关） |
 | **FVP**（libmdk） | Android + 桌面 | 备选页内引擎，硬/软/自动解码列表由设置下发 |
 | 外部 VLC / MPV | 桌面 | 旁路播放，使用系统安装或 PATH |
 
@@ -136,7 +136,7 @@ CI 在 **KOTV Build**（`github-action.yml`）统一构建：
 
 > **Web / Win7 是主 CI 内的 job**，并非独立 workflow。
 > **iOS**：`flutter/ios/` 开发目录存在，但**尚未完全实现、未纳入 CI 构建**，不在已发布平台内。设计上 iOS 只做 UI 与播放：iOS 无法像 Android 那样动态加载 JAR/DEX，也不能在端侧跑 JVM/Python/QuickJS 爬虫运行时，本地抓取不可行，内容解析统一走远端 Go 引擎（共用 `/api/v1`）。
-> **Android TV / leanback**：无独立 TV 构建；当前 Android 为手机/平板 APK。
+> **大屏（leanback）**：当前无独立大屏构建，Android 仅手机/平板 APK。
 
 打包脚本（`scripts/`）：
 
@@ -169,7 +169,7 @@ KOTV/
     update/        自更新逻辑
     ...（config/auth/settings/model/player/subtitle/thunder/...）
   bridge/          Java 项目 → 桌面 spider-bridge.jar（PC JVM 瘦包宿主）
-  flutter/android/kotv-bridge/  安卓宿主（TV dex + PC 瘦包，编进 App CL）
+  flutter/android/kotv-bridge/  安卓宿主（dex 包 + PC 瘦包，编进 App CL）
   flutter/         Flutter UI（lib/ 业务，ios/android/macos/linux/windows/web 平台目录）
   scripts/         运行时准备 / 打包 / 安装
   runtime/         捆绑运行时（开发态；发行时随包）

@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers.dart';
 
-/// 壁纸主题中文名（与引擎 wallMode 对齐）。
+/// 壁纸主题中文名（与引擎 wallMode 一致）。
 const kotvWallModeNames = <String, String>{
   'gradient': '极光紫',
   'config': '配置墙纸',

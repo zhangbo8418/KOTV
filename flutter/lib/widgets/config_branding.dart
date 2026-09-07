@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-/// 配置根 `logo`：圆形图；失败回落默认图标。点击行为由调用方决定（TV：打开历史）。
+/// 配置根 `logo`：圆形图；失败回落默认图标。点击行为由调用方决定（点击打开历史）。
 class ConfigLogoAvatar extends StatelessWidget {
   const ConfigLogoAvatar({
     super.key,

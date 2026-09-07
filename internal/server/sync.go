@@ -22,9 +22,9 @@ type SyncHandler struct {
 	ValidatePair func(code string) bool
 	Export       func(typ string) (json.RawMessage, error)
 	Import       func(typ string, mode int, body []byte) error
-	// ImportTVTargets 导入 TV FormBody 的 targets JSON（已做 key 归一）。
+	// ImportTVTargets 导入 FormBody 的 targets JSON（已做 key 归一）。
 	ImportTVTargets func(typ string, force bool, targetsJSON string) error
-	// ExportTVForm 导出 TV 兼容的 form 字段（config/targets 或 targets/configs）。
+	// ExportTVForm 导出兼容的 form 字段（config/targets 或 targets/configs）。
 	ExportTVForm func(typ string) (url.Values, error)
 }
 
@@ -59,7 +59,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, q map[string
 	isTV := targets != "" || deviceJSON != "" ||
 		strings.TrimSpace(q["config"]) != "" || strings.TrimSpace(q["configs"]) != ""
 
-	// —— TV 协议（FormBody：device/config/targets，无 pair）——
+	// —— FormBody 协议（device/config/targets，无 pair）——
 	if isTV && pair == "" {
 		if err := s.handleTVSync(h, typ, mode, force, targets, deviceJSON); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -114,7 +114,7 @@ func (s *Server) handleTVSync(h *SyncHandler, typ string, mode int, force bool, 
 	// mode 0/1：导入对方 targets；mode 0/2：把本机数据推回 device。
 	if (mode == 0 || mode == 1) && targets != "" {
 		if h.ImportTVTargets == nil {
-			return fmt.Errorf("tv import not available")
+			return fmt.Errorf("外部导入暂不可用")
 		}
 		if err := h.ImportTVTargets(typ, force, targets); err != nil {
 			return err
@@ -122,7 +122,7 @@ func (s *Server) handleTVSync(h *SyncHandler, typ string, mode int, force bool, 
 	}
 	if (mode == 0 || mode == 2) && deviceJSON != "" {
 		if h.ExportTVForm == nil {
-			return fmt.Errorf("tv export not available")
+			return fmt.Errorf("外部导出暂不可用")
 		}
 		form, err := h.ExportTVForm(typ)
 		if err != nil {
@@ -156,7 +156,7 @@ func pushTVSync(deviceJSON, typ string, form url.Values) {
 	}
 }
 
-// NewAppSyncHandler 构造默认同步处理器（兼容 KOTV pair + TV FormBody）。
+// NewAppSyncHandler 构造默认同步处理器（兼容 KOTV pair + FormBody）。
 func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHandler {
 	return &SyncHandler{
 		ValidatePair: validatePair,
@@ -275,7 +275,7 @@ func normalizeHistoryKeys(items []database.History) {
 	}
 }
 
-// historyKeyFromTV TV: site$$$vodId → KOTV: vodId@site
+// historyKeyFromTV：外部 site$$$vodId → KOTV vodId@site
 func historyKeyFromTV(key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {

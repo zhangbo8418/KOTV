@@ -14,9 +14,9 @@ import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegAudioRenderer
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.FfmpegLibrary
 
 /**
- * Exo 渲染工厂：视频走 MediaCodec，音轨走 nextlib FFmpeg（含 AV3A/libarcdav3a，对齐 TV）。
+ * Exo 渲染工厂：视频走 MediaCodec，音轨走 nextlib FFmpeg（含 AV3A/libarcdav3a）。
  *
- * DV / 扩展渲染策略对齐 TV [ExoUtil.ExoRenderersFactory]：
+ * DV / 扩展渲染策略：
  * decoder fallback + DolbyVisionOutputPolicy.AUTO。
  */
 @OptIn(UnstableApi::class)

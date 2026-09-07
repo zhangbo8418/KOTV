@@ -135,7 +135,7 @@ func decodeJSContentEncoding(encoding string, body []byte) []byte {
 			return out
 		}
 	case "deflate":
-		// TV：new Inflater(true) → raw deflate（无 zlib 头）
+		// new Inflater(true) → raw deflate（无 zlib 头）
 		if out, err := inflateRaw(body); err == nil {
 			return out
 		}

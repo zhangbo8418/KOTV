@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 对齐 TV Source.Extractor：荐片 P2P（libjpa）与 TVBus（运行时下载 so）。
+ * 荐片 P2P（libjpa）与 TVBus（运行时下载 so）两个提取器。
  * Go 起播前 POST /source/fetch，把专用 scheme 转成本地 HTTP。
  */
 object SourceExtractors {

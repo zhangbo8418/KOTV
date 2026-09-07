@@ -8,7 +8,7 @@ import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../vod/vod_open.dart';
 
-/// 对齐 TV FolderActivity：`vod_tag=folder` 用 categoryContent(tid=vod_id) 进目录。
+/// `vod_tag=folder` 用 categoryContent(tid=vod_id) 进目录。
 class FolderScreen extends ConsumerStatefulWidget {
   const FolderScreen({
     super.key,

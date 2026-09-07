@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// MediaRoots 本机 /file 优先查找的根（对齐 TV Path.root + 应用数据目录）。
+// MediaRoots 本机 /file 优先查找的根（外部存储根 + 应用数据目录）。
 func MediaRoots() []string {
 	roots := []string{Downloads(), Data(), Root()}
 	if ext := externalStorageRoot(); ext != "" {
@@ -20,7 +20,7 @@ func MediaRoots() []string {
 }
 
 func externalStorageRoot() string {
-	// Android：常见外部存储；TV Path.root() = Environment.getExternalStorageDirectory()
+	// Android：常见外部存储（Environment.getExternalStorageDirectory()）
 	if runtime.GOOS == "android" {
 		for _, p := range []string{"/storage/emulated/0", "/sdcard"} {
 			if st, err := os.Stat(p); err == nil && st.IsDir() {
@@ -49,7 +49,7 @@ func UnderMediaRoot(p string) bool {
 	return false
 }
 
-// ResolveMediaPath 对齐 TV Path.local：
+// ResolveMediaPath 
 // 1) 相对路径拼到 MediaRoots；
 // 2) 绝对路径若存在则直接允许（本地仓 / jar / py / js 同目录相对脚本依赖此回退）；
 // 3) /file/ 代理经 URL 清洗后常丢掉绝对路径前导 /（/file//storage/... → storage/...），此处还原。

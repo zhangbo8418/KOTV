@@ -140,7 +140,7 @@ class MainActivity : FlutterActivity() {
             result.error("mem", t.message ?: t.toString(), null)
           }
         }
-        // 对齐 TV Traffic：UID 下行（含同 UID 引擎子进程），缓冲浮层测速用。
+        // UID 下行流量（含同 UID 引擎子进程），缓冲浮层测速用。
         "getUidRxBytes" -> {
           try {
             val uid = applicationInfo.uid
@@ -150,12 +150,21 @@ class MainActivity : FlutterActivity() {
             result.error("traffic", t.message ?: t.toString(), null)
           }
         }
+        // FEATURE_VULKAN_HARDWARE_VERSION ≥ 1.2
+        "isVulkanAvailable" -> {
+          result.success(
+            packageManager.hasSystemFeature(
+              PackageManager.FEATURE_VULKAN_HARDWARE_VERSION,
+              0x00402000,
+            ),
+          )
+        }
         else -> result.notImplemented()
       }
     }
   }
 
-  /** 对齐 TV ConfigDialog：ACTION_OPEN_DOCUMENT → 真实路径 file:// */
+  /** ACTION_OPEN_DOCUMENT → 真实路径 file:// */
   private fun pickConfigFile(result: MethodChannel.Result) {
     if (pickConfigResult != null) {
       result.error("busy", "picker already open", null)
@@ -205,7 +214,7 @@ class MainActivity : FlutterActivity() {
     ActivityCompat.requestPermissions(this, need.toTypedArray(), REQ_STORAGE)
   }
 
-  /** 对齐 TV PermissionUtil：部分 TV/盒子没有「所有文件访问」设置页，改走运行时读权限。 */
+  /** 部分安卓盒子没有「所有文件访问」设置页，改走运行时读权限。 */
   private fun canRequestAllFilesAccess(): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
     val app = Intent(
@@ -237,7 +246,7 @@ class MainActivity : FlutterActivity() {
     }
   }
 
-  /** 首启对齐 TV HomeActivity：尽早申请本地文件访问。 */
+  /** 首启尽早申请本地文件访问。 */
   private fun promptStoragePermissionIfNeeded() {
     if (storagePromptStarted || KotvFileChooser.hasStoragePermission(this)) return
     storagePromptStarted = true
@@ -278,7 +287,7 @@ class MainActivity : FlutterActivity() {
           pending.success(null)
           return
         }
-        // 对齐 TV：真实磁盘路径 → file://（绝对路径，相对 jar/js/py 相对该文件目录解析）
+        // 真实磁盘路径 → file://（绝对路径，相对 jar/js/py 相对该文件目录解析）
         pending.success(Uri.fromFile(File(path)).toString())
       }
       REQ_MANAGE_STORAGE -> {

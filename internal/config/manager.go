@@ -248,14 +248,14 @@ func (m *Manager) Clear() {
 	}
 }
 
-// EnsureVodFromHistory 对齐 TV Config.vod()：开 HTTP 前用 DB 最新源同步 settings.VOD。
+// EnsureVodFromHistory 开 HTTP 前用 DB 最新源同步 settings.VOD。
 func (m *Manager) EnsureVodFromHistory() {
 	if u := m.syncVodPointerFromDB(); u != "" {
 		log.Printf("boot: 当前点播源指针 <- DB: %s", u)
 	}
 }
 
-// InitFromSettings 对齐 TV VodConfig.init().load()：当前源 = config 表 time DESC 最新一条。
+// InitFromSettings 当前源 = config 表 time DESC 最新一条。
 func (m *Manager) InitFromSettings() error {
 	if c := m.latestSiteConfig(); c != nil {
 		_ = m.syncVodPointerFromDB()
@@ -456,8 +456,8 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	spider.SetConfigBase(cfg.URL)
 
 	// headers/proxy/hosts 按当前 hostclient 下发；ephemeral 也写（按 clientId 隔离，不覆盖他人）。
-	// 配置里的 doh 数组对齐 TV 语义：仅是设置页候选列表，默认不启用（TV Startup 只用
-	// 用户手选的 Setting.getDoh()，默认空=系统 DNS）。此前自动启用第一个（常为 Google
+	// 配置里的 doh 数组仅是设置页候选列表，默认不启用（仅按用户手选的
+	// DoH 设置启用，默认空=系统 DNS）。此前自动启用第一个（常为 Google
 	// DoH，国内不可达）会拖死 jar 内所有 DNS 解析，站点整页变空。
 	spider.SetNetConfig(api.Headers, api.Proxy, api.Hosts, nil)
 	if !m.ephemeral {
@@ -592,7 +592,7 @@ func (m *Manager) fetchData(source string, isJSON bool, inline string) (string, 
 	if strings.HasPrefix(source, "file://") || strings.HasPrefix(source, "file:/") {
 		local, ok := util.FileURLPath(source)
 		if !ok {
-			// 兼容 file:/rel 相对外部存储根（TV ConfigDialog 写法）
+			// 兼容 file:/rel 相对外部存储根（外部配置写法）
 			raw := strings.TrimPrefix(strings.TrimPrefix(source, "file://"), "file:/")
 			if u, err := url.PathUnescape(raw); err == nil {
 				raw = u
@@ -756,7 +756,7 @@ func resolveSiteField(base, value string) string {
 	if value == "" {
 		return value
 	}
-	// 对齐 TV UrlUtil.convert：assets / proxy / file → 本机 HTTP
+	// assets / proxy / file → 本机 HTTP
 	if converted := convertLocalScheme(value); converted != value {
 		return converted
 	}
@@ -773,7 +773,7 @@ func resolveSiteField(base, value string) string {
 	if looksLikeBase64Payload(value) {
 		return value
 	}
-	// 对齐 TV UrlUtil.convert：只改 assets/proxy/file；纯 token（Hgdh/Guazi/woWogg）
+	// 只改 assets/proxy/file；纯 token（Hgdh/Guazi/woWogg）
 	// 必须原样交给 spider.init。此前把它们拼成「配置根/Hgdh」后 Amns 查不到站点配置，
 	// host 为空 → OkHttp「Expected URL scheme」/ NPE（嗷呜短剧/夏天/玩偶/瓜子等）。
 	if !looksLikeRelativePath(value) {
@@ -783,7 +783,7 @@ func resolveSiteField(base, value string) string {
 		return value
 	}
 	if resolved := util.ResolveRelativeURL(base, value); resolved != "" {
-		// 相对路径解析后若是 file://，再走 convert（对齐 TV：先 resolve 再 convert）
+		// 相对路径解析后若是 file://，再走 convert（先 resolve 再 convert）
 		return convertLocalScheme(resolved)
 	}
 	return value
@@ -794,7 +794,7 @@ func looksLikeRelativePath(s string) bool {
 	return strings.ContainsAny(s, "/\\") || strings.HasPrefix(s, ".")
 }
 
-// convertLocalScheme 对齐 TV UrlUtil.convert。
+// convertLocalScheme 把 assets / proxy / file 转成本机 HTTP 地址。
 func convertLocalScheme(value string) string {
 	return localproxy.ConvertScheme(value)
 }
@@ -895,7 +895,7 @@ func (m *Manager) initLiveFromVod(cfg *database.Config, api *model.Api) {
 	}
 	liveURL := strings.TrimSpace(settings.Get(settings.LIVE))
 	oldVodURL := strings.TrimSpace(m.API().URL)
-	// TV LiveConfig.needSync(url): sync || live 为空 || live URL == 新点播 URL。
+	// needSync(url): sync || live 为空 || live URL == 新点播 URL。
 	// sync 表示直播当前跟点播同一地址（换源前 live == 旧点播），换点播后仍要跟着切。
 	if liveURL != "" && liveURL != oldVodURL && liveURL != vodURL {
 		return

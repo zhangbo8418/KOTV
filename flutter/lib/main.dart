@@ -20,6 +20,7 @@ import 'screens/shell.dart';
 import 'theme/layout_scale.dart';
 import 'theme/kotv_palette.dart';
 import 'theme/kotv_theme.dart';
+import 'util/kotv_app_dirs.dart';
 import 'widgets/chrome.dart';
 import 'widgets/h_scroll.dart';
 
@@ -30,9 +31,8 @@ void _kotvLogUiError(Object error, StackTrace? stack, {String where = 'build'}) 
   if (stack != null) debugPrint('$stack');
   if (kIsWeb) return;
   try {
-    final dir = Directory('${Platform.environment['HOME'] ?? ''}/Library/Caches/KOTV/data/log');
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    final f = File('${dir.path}/flutter-ui.err.log');
+    final dir = kotvLogDirSync();
+    final f = File('${dir.path}${Platform.pathSeparator}flutter-ui.err.log');
     f.writeAsStringSync(
       '${DateTime.now().toIso8601String()} [$where]\n$error\n${stack ?? StackTrace.current}\n\n',
       mode: FileMode.append,

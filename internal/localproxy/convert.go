@@ -9,7 +9,7 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// ConvertScheme 对齐 TV UrlUtil.convert：assets / proxy / file → 本机 HTTP。
+// ConvertScheme assets / proxy / file → 本机 HTTP。
 func ConvertScheme(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

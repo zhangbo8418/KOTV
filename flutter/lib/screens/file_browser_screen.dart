@@ -14,7 +14,7 @@ class _FsItem {
   final bool isDir;
 }
 
-/// 对齐 TV FileActivity：点目录进入，点文件才返回路径。
+/// 点目录进入，点文件才返回路径。
 class FileBrowserScreen extends StatefulWidget {
   const FileBrowserScreen({super.key, required this.root, this.title = '选择文件'});
 

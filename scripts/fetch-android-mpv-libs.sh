@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 拉取 Android 原生 MPV（对齐 TV：libmpv + libplayer JNI），放入 assets/mpv-libs。
+# 拉取 Android 原生 MPV（libmpv + libplayer JNI），放入 assets/mpv-libs。
 # 来源：fish2018/webhtv 随 APK 打包的预编译库（与 is.xyz.mpv.MPVLib 配套）。
 set -euo pipefail
 

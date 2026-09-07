@@ -37,7 +37,7 @@ const (
 	PlayerSpeed        Type = "playerSpeed"
 	PlayerScale        Type = "playerScale"
 	PlayerDecode       Type = "playerDecode"
-	PlayerRender       Type = "playerRender"   // 渲染方式：surface | texture（对齐 TV PlayerSetting.render）
+	PlayerRender       Type = "playerRender"   // 渲染方式：surface | texture
 	PlayerFailover     Type = "playerFailover" // 黑屏/停滞自动切换播放器：auto | off
 	PlayerVolume       Type = "playerVolume"
 	PlayerAmbient      Type = "playerAmbient"
@@ -63,7 +63,7 @@ const (
 	RemoteAuth    Type = "remoteAuth"    // 远端强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
 	// BackendProxyPlay 远端前端连入时，网盘是否经引擎 /proxy（jar 原生库/go/Java 多线程）。
-	// 本机播放始终对齐 TV（走本地 /proxy，不展开 CDN），不受此开关影响。
+	// 本机播放始终走本地 /proxy、不展开 CDN，不受此开关影响。
 	// 默认 false：远端优先直连 CDN；true：远端也走引擎代理加速。
 	BackendProxyPlay Type = "backendProxyPlay"
 )
@@ -270,11 +270,11 @@ func IsLiveChange() bool { return boolSetting(LiveChange, true) }
 // IsLiveInvert 反转上下换台方向（默认关）。
 func IsLiveInvert() bool { return boolSetting(LiveInvert, false) }
 
-// IsBackendProxyPlay 远端是否经 /proxy 加速（默认关）。本机恒按 TV 走本地代理。
+// IsBackendProxyPlay 远端是否经 /proxy 加速（默认关）。本机恒走本地代理。
 func IsBackendProxyPlay() bool { return boolSetting(BackendProxyPlay, false) }
 
 // PreferSpiderProxyPlay 是否保留 jar /proxy、不展开 CDN。
-// 本机（无 PublicBase）对齐 TV；远端仅当 BackendProxyPlay 开启。
+// 本机（无 PublicBase）走本地代理；远端仅当 BackendProxyPlay 开启。
 func PreferSpiderProxyPlay() bool {
 	if hostclient.PublicBase() == "" {
 		return true

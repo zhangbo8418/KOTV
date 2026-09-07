@@ -125,7 +125,7 @@ class Jsoup {
 
   pdfa(html, parse) {
     if (!html || !parse) return [];
-    // 对齐 jar Function：以 / 开头走 xpath
+    // 以 / 开头走 xpath
     if (parse.startsWith("/") && typeof globalThis.__xpathList === "function") {
       const list = globalThis.__xpathList(html, parse);
       return Array.isArray(list) ? list : [];
@@ -151,7 +151,7 @@ class Jsoup {
 
   pdfl(html, parse, listText, listUrl, urlKey) {
     if (!html || !parse) return [];
-    // 对齐 jar Parser.parseDomForList：第 5 参 urlKey 才是拼接基址（drpy 传 MY_URL）。
+    // 第 5 参 urlKey 才是拼接基址（drpy 传 MY_URL）。
     const base = urlKey || this.MY_URL || globalThis.MY_URL || "";
     if (parse.startsWith("/") && typeof globalThis.__xpathList === "function") {
       const nodes = globalThis.__xpathList(html, parse);
@@ -259,7 +259,7 @@ class Jsoup {
   }
 
   pd(html, parse, baseUrl = "") {
-    // 对齐 jar Function.pd：pdfh 后再 joinUrl(base, result)
+    // pdfh 后再 joinUrl(base, result)
     if (!baseUrl) baseUrl = this.MY_URL;
     const result = this.pdfh(html, parse, "");
     if (!result) return "";

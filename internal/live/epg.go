@@ -105,7 +105,7 @@ func ChannelEPGSource(ch *model.LiveChannel) string {
 	return ""
 }
 
-// LoadChannelDays 按 TV 策略拉节目单：先模板 API，再 XMLTV。
+// LoadChannelDays 拉节目单：先模板 API，再 XMLTV。
 func LoadChannelDays(ch *model.LiveChannel) []Epg {
 	if ch == nil {
 		return nil

@@ -231,7 +231,7 @@ class FvpPlayback extends KotvPlayback {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
       }
-      // 点播才套 KotvBufferBudget；直播（页面 live 或 isLive）勿猛囤——TV 无 FVP，此处只是跳过点播预读。
+      // 点播才套 KotvBufferBudget；直播（页面 live 或 isLive）勿猛囤——直播此处只是跳过点播预读。
       try {
         final engineLive = () {
           try {

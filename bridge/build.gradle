@@ -11,7 +11,7 @@ repositories {
     maven { url = uri("https://jitpack.io") }
 }
 
-// 默认 Java 21（与捆绑 Liberica 21 对齐）；可用 KOTV_JAVA_TOOLCHAIN 覆盖
+// 默认 Java 21（与捆绑 Liberica 21 一致）；可用 KOTV_JAVA_TOOLCHAIN 覆盖
 def kotvJavaToolchain = Integer.parseInt(System.getenv().getOrDefault("KOTV_JAVA_TOOLCHAIN", "21"))
 
 java {

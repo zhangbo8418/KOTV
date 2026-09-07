@@ -99,7 +99,7 @@ class LocalHistory {
     if (item.id.isEmpty) return;
     try {
       final p = await SharedPreferences.getInstance();
-      // 无痕：不写本地历史；与引擎 settings.incognito 对齐（启动后改设置需重启或走引擎）。
+      // 无痕：不写本地历史；与引擎 settings.incognito 一致（启动后改设置需重启或走引擎）。
       final eng = p.getString('kotv_incognito');
       if (eng == 'true') return;
     } catch (_) {}

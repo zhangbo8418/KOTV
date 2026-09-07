@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 从 FongMi/media (release-1.11.0-fongmi) 编译 Media3，覆盖 maven-webhtv 残缺产物。
-# 补齐 DecodeTrackSelector / DolbyVisionOutputPolicy 等 TV 对齐 API。
+# 补齐 DecodeTrackSelector / DolbyVisionOutputPolicy 等 API。
 #
 # 本地与 CI：package-flutter-android.sh 在 fetch-android-exo-av3a.sh 之后调用本脚本。
 # 已含完整 API 时跳过（可用 KOTV_FORCE_FONGMI_MEDIA3=1 强制重编）。

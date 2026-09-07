@@ -1,5 +1,5 @@
 // Package lenientjson 把站点/爬虫返回的「脏 JSON」规范化为标准 JSON。
-// 对齐 TV：Gson 默认 lenient，容忍单引号、无引号 key、尾逗号、)]}' 前缀等；
+// Gson 默认 lenient，容忍单引号、无引号 key、尾逗号、)]}' 前缀等；
 // KOTV 用 encoding/json（严格），一处不合法就整包解析失败变空页。
 // 这里只做字符级修复，不做语义推断；已合法的输入保持字节不变（快路径）。
 package lenientjson

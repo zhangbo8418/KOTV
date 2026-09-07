@@ -33,7 +33,7 @@ import java.util.zip.ZipOutputStream;
  * 安卓同时吃两种站点 jar，互不影响桌面通用包：
  *
  * <ul>
- *   <li>TV / CatVodSpider：已含 {@code classes.dex} → 原文件只读，不跑 D8</li>
+ *   <li>CatVodSpider dex：已含 {@code classes.dex} → 原文件只读，不跑 D8</li>
  *   <li>其它平台 JVM 瘦包：只有 {@code .class} → D8 转成含 dex 的 sealed jar</li>
  * </ul>
  *
@@ -73,7 +73,7 @@ public final class JarDexer {
     }
 
     if (jarHasDex(src)) {
-      // 对齐 TV JarLoader.load：原文件 setReadOnly 后直接 DexClassLoader，不拷贝不重打包。
+      // 原文件 setReadOnly 后直接 DexClassLoader，不拷贝不重打包。
       if (!src.setReadOnly()) {
         markReadonly(src);
       }
@@ -139,7 +139,7 @@ public final class JarDexer {
         D8.run(builder.build());
       } catch (NoClassDefFoundError | ExceptionInInitializerError e) {
         throw new IllegalStateException(
-            "安卓仅支持含 classes.dex 的站点包（对齐 TV）；当前 jar 需 PC 侧预转 dex: " + src.getName(),
+            "安卓仅支持含 classes.dex 的站点包；当前 jar 需 PC 侧预转 dex: " + src.getName(),
             e);
       }
     } catch (Throwable t) {
@@ -177,10 +177,10 @@ public final class JarDexer {
   }
 
   /**
-   * 对齐 TV {@code new DexClassLoader(file, Path.jar(), Path.jar(), App.get().getClassLoader())}。
+   * 使用 {@code new DexClassLoader(file, Path.jar(), Path.jar(), App.get().getClassLoader())}。
    *
    * <ul>
-   *   <li>已有 {@code classes.dex}（TV / CatVodSpider）：只读直通，不 D8
+   *   <li>已有 {@code classes.dex}（CatVodSpider dex）：只读直通，不 D8
    *   <li>PC JVM 瘦包：先 {@link #ensureSiteDexJar} D8，再同样加载
    * </ul>
    */
@@ -221,8 +221,8 @@ public final class JarDexer {
             + (appParent == null ? "null" : appParent.getClass().getName())
             + " spiders="
             + listSpiderClasses(hasDex ? src.getAbsolutePath() : load.getAbsolutePath()));
-    // 对齐 TV：普通 DexClassLoader(parent=App)。
-    // TV 同样经 NewPipeExtractor 带 protobuf-javalite；并非「不带 protobuf」。
+    // 普通 DexClassLoader(parent=App)。
+    // 同样经 NewPipeExtractor 带 protobuf-javalite；并非「不带 protobuf」。
     // KOTV 若再叠 R8 工具链/其它 protobuf 变体，站点 jar（如 AppDrama）易 NPE。
     // 过滤父加载器对 protobuf/com.base.model 抛 CNFE，让 DexClassLoader 回落到站点 dex。
     return new DexClassLoader(
@@ -231,7 +231,7 @@ public final class JarDexer {
 
   /**
    * 对站点私有 API（protobuf / AppDrama 模型）假装父 ClassLoader 没有，逼 DexClassLoader
-   * 从站点 dex 加载——效果对齐「TV 宿主 classpath 不提供这套类」。
+   * 从站点 dex 加载——效果等同于「宿主 classpath 不提供这套类」。
    */
   private static ClassLoader hideSpiderPrivateApis(ClassLoader appParent) {
     if (appParent == null) return null;

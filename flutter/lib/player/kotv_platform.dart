@@ -33,7 +33,7 @@ bool kotvIsWindows() => !kIsWeb && Platform.isWindows;
 /// 设为 true 时 macOS 发行包不链 FVP/mdk（仅 MPV/media_kit）；默认 false，MPV+FVP 全功能。
 const bool kotvMacosNoFvp = bool.fromEnvironment('KOTV_MACOS_NO_FVP', defaultValue: false);
 
-/// 对齐 TV `select_render`：Surface=0（默认 HDR），Texture=1。
+/// Surface=0（默认 HDR），Texture=1。
 String kotvNormalizePlayerRender(String raw) {
   switch (raw.trim().toLowerCase()) {
     case 'texture':
@@ -48,7 +48,7 @@ String kotvNormalizePlayerRender(String raw) {
 String kotvPlayerRenderLabel(String raw) =>
     kotvNormalizePlayerRender(raw) == 'texture' ? 'Texture' : 'Surface';
 
-/// Surface/Texture 只作用在 Android 内置 Exo（对齐 TV PlayerView.setRender）。
+/// Surface/Texture 只作用在 Android 内置 Exo（对应 Exo 渲染设置）。
 /// MPV/FVP/Web 走各自的 Texture/vo，不能套这套选项。
 bool kotvPlayerRenderApplies(String playerVal) =>
     kotvIsAndroid() && kotvEmbedBackend(playerVal) == KotvEmbedBackend.exo;

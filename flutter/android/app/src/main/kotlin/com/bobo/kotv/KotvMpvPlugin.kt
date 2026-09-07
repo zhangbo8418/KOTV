@@ -208,7 +208,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
     when (call.method) {
       "isVulkanAvailable" -> {
-        // 只看设备 Vulkan≥1.2，用于设置页露出开关。
+        // 设备 Vulkan≥1.2：设置页是否露出开关。
         val ctx = appContext
         result.success(ctx != null && MPVLib.isDeviceVulkanCapable(ctx))
       }

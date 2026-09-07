@@ -49,7 +49,7 @@ bool kotvIsLocalProxyUrl(String url) {
   return u.contains('127.0.0.1:') && u.contains('/proxy');
 }
 
-/// 展开网盘「/proxy?url=&header=」为直链+请求头（对齐后端 ExpandSpiderMediaProxy）。
+/// 展开网盘「/proxy?url=&header=」为直链+请求头（对应后端 ExpandSpiderMediaProxy）。
 /// m3u8 不展开。失败返回 null。
 ({String url, Map<String, String> headers})? kotvExpandSpiderMediaProxy(
   String raw, {

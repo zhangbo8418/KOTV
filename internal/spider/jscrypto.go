@@ -38,7 +38,7 @@ func aesX(mode string, encrypt bool, input string, inBase64 bool, key string, iv
 	}
 
 	upper := strings.ToUpper(mode)
-	// TV: Cipher.getInstance(mode + "Padding") → …/NoPadding 或 …/PKCS7Padding
+	// Cipher.getInstance(mode + "Padding") → …/NoPadding 或 …/PKCS7Padding
 	noPadding := strings.Contains(upper+"PADDING", "NOPADDING")
 	useCBC := strings.Contains(upper, "CBC")
 
@@ -58,7 +58,7 @@ func aesX(mode string, encrypt bool, input string, inBase64 bool, key string, iv
 	var out []byte
 	if useCBC {
 		if ivb == nil {
-			// TV CBC + null IV → Cipher.init 无 IV 失败
+			// CBC + null IV → Cipher.init 无 IV 失败
 			return ""
 		}
 		if encrypt {
@@ -80,7 +80,7 @@ func aesX(mode string, encrypt bool, input string, inBase64 bool, key string, iv
 			}
 		}
 	} else {
-		// ECB（及 TV 无 IV 初始化路径）：忽略 iv
+		// ECB（及无 IV 初始化路径）：忽略 iv
 		if encrypt {
 			if !noPadding {
 				data = pkcs7Pad(data, aes.BlockSize)
@@ -132,7 +132,7 @@ func decodeJSBase64(text string) ([]byte, error) {
 
 // rsaX Crypto.rsa。
 // 标准 pub+encrypt / priv+decrypt 走 Go crypto/rsa；
-// 反向（priv 加密 / pub 解密）无标准 API，用原始 RSA 模幂尽力对齐（尤其 NoPadding）。
+// 反向（priv 加密 / pub 解密）无标准 API，用原始 RSA 模幂尽力实现（尤其 NoPadding）。
 func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key string, outBase64 bool) string {
 	data := []byte(input)
 	if inBase64 {
@@ -177,7 +177,7 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 			out, err = rsa.DecryptPKCS1v15(rand.Reader, priv, data)
 		}
 	} else if !pub && encrypt {
-		// TV 允许私钥加密；Go 标准库无对应 API，NoPadding 用原始模幂，PKCS1 尽力 raw
+		// 允许私钥加密；Go 标准库无对应 API，NoPadding 用原始模幂，PKCS1 尽力 raw
 		rpk, parseErr := x509.ParsePKCS8PrivateKey(keyBytes)
 		if parseErr != nil {
 			return ""

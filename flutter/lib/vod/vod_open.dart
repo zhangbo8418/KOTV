@@ -9,7 +9,7 @@ import '../remote/remote_bridge.dart';
 import '../screens/detail_screen.dart';
 import '../screens/folder_screen.dart';
 
-/// 对齐 TV TypeFragment 长按 / 索引站：用片名去全网搜索。
+/// 用片名去全网搜索。
 void searchByName(WidgetRef ref, String name) {
   final q = name.trim();
   if (q.isEmpty) return;
@@ -42,7 +42,7 @@ bool siteIsIndex(WidgetRef ref, String siteKey) {
 }
 
 /// 打开列表项：action → 站点 action；folder → 进目录；索引站 → 搜索；否则进详情。
-/// [fromFolder] 对齐 TV TypeFragment.isFolder()：带 mark 以便详情按文件名选中那一集。
+/// [fromFolder] 带 mark 以便详情按文件名选中那一集。
 Future<void> openVodItem(
   BuildContext context,
   WidgetRef ref,

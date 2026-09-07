@@ -2,7 +2,7 @@ import 'dart:js_interop';
 
 import 'package:web/web.dart' as web;
 
-/// Web：浏览器 Fullscreen API（对齐桌面 windowManager 真全屏）。
+/// Web：浏览器 Fullscreen API（对应桌面 windowManager 真全屏）。
 Future<void> kotvEnterDisplayFullscreen() async {
   final el = web.document.documentElement;
   if (el == null) return;

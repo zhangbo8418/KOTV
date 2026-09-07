@@ -69,7 +69,7 @@ public class SpiderBridge {
         disableHutoolBouncyCastle();
     }
 
-    /** Android：注入当前前台 Activity，供 TV dex jar 内 AlertDialog 拿 window token。 */
+    /** Android：注入当前前台 Activity，供 dex jar 内 AlertDialog 拿 window token。 */
     public static void setAndroidActivity(Activity activity) {
         UiContext.setActivity(activity);
     }
@@ -396,7 +396,7 @@ public class SpiderBridge {
                 return "{}";
             }
             // 缓存刷新后按路径重载：丢弃该 jar 的爬虫/ClassLoader 再重新 parseJar，
-            // 否则磁盘换了新包、内存里仍是旧类（TV 靠整包 clear 达成同样效果）。
+            // 否则磁盘换了新包、内存里仍是旧类（需整包 clear 才生效）。
             if ("reloadJar".equals(method)) {
                 String jar = "";
                 if (argsObj.has("jar") && !argsObj.get("jar").isJsonNull()) {
@@ -451,7 +451,7 @@ public class SpiderBridge {
                 return nonempty(invoke(spider, spiderMethod, argsObj, jar));
         } catch (Throwable t) {
             t.printStackTrace(System.err);
-                // 对齐 TV SiteViewModel：内容接口失败回空结果，不把 Java 异常弹到首页。
+                // 内容接口失败回空结果，不把 Java 异常弹到首页。
                 if (isSoftFailContentMethod(spiderMethod)) {
                     return "{}";
                 }
@@ -472,7 +472,7 @@ public class SpiderBridge {
         }
     }
 
-    /** home/category/search 等：失败时 TV 发 Result.empty()，不展示堆栈。 */
+    /** home/category/search 等：失败时返回 Result.empty()，不展示堆栈。 */
     private static boolean isSoftFailContentMethod(String method) {
         if (method == null) return false;
         switch (method) {
@@ -613,7 +613,7 @@ public class SpiderBridge {
             System.err.println(
                     "getSpider failed key=" + key + " api=" + api + " jar=" + jarPath + ": " + e);
                 e.printStackTrace(System.err);
-            // 对齐 TV JarLoader.getSpider：加载失败（含 jar 缺该 csp 类）静默降级为
+            // 加载失败（含 jar 缺该 csp 类）静默降级为
             // SpiderNull，站点显示空列表而不是把异常弹到首页。
                 SpiderNull nullSpider = new SpiderNull();
                 nullSpider.siteKey = key;
@@ -621,7 +621,7 @@ public class SpiderBridge {
             }
     }
 
-    /** {@code csp_Nostr} → {@code com.github.catvod.spider.Nostr}，与 TV {@code api.split("csp_")[1]} 一致。 */
+    /** {@code csp_Nostr} → {@code com.github.catvod.spider.Nostr}，按 {@code api.split("csp_")[1]} 取类名。 */
     private static String spiderClassName(String api) {
         String name = api == null ? "" : api.trim();
         String[] parts = name.split("csp_");
@@ -666,7 +666,7 @@ public class SpiderBridge {
                 }
                 loaders.put(jarPath, loader);
             } catch (Exception e) {
-                // 对齐 TV JarLoader.load：加载失败静默记日志；getSpider 侧因 loader 缺失
+                // 加载失败静默记日志；getSpider 侧因 loader 缺失
                 // 落到 SpiderNull（空列表），不把异常弹到界面。
                 System.err.println("parseJar failed: " + jarPath + ": " + e);
                 e.printStackTrace(System.err);
@@ -718,7 +718,7 @@ public class SpiderBridge {
     /**
      * Desktop site ClassLoader（URLClassLoader，父 = bridge CL）。
      * PC JVM 瘦包按 FongMi `pc/` 的 exclude + verifyUniversalJar 打包；运行时 Util/OkHttp 等由 bridge 提供。
-     * TV dex jar 不走此路径（Android 见 {@link #createDexLoader}）。
+     * dex jar 不走此路径（Android 见 {@link #createDexLoader}）。
      */
     private static final class SpiderClassLoader extends URLClassLoader {
         SpiderClassLoader(URL[] urls, ClassLoader parent) {
@@ -761,7 +761,7 @@ public class SpiderBridge {
             throw new IOException("site jar missing: " + jarFile);
         }
         Context c = ctx();
-        // 对齐 TV：parent = App.get().getClassLoader()。宿主 Spider 必须在 App CL。
+        // parent = App.get().getClassLoader()。宿主 Spider 必须在 App CL。
         ClassLoader parent = c != null ? c.getClassLoader() : SpiderBridge.class.getClassLoader();
         if (parent == null) {
             parent = SpiderBridge.class.getClassLoader();
@@ -863,7 +863,7 @@ public class SpiderBridge {
             Method init = clz.getMethod("init", Context.class);
             Context app = ctx();
             boolean initialized = false;
-            // 对齐 TV JarLoader.invokeInit：只传 Application，不传 Activity、不 inject Activity。
+            // 只传 Application，不传 Activity、不 inject Activity。
             // 社区 jar 拿到 Activity 会在主线程立刻 new WebView 弹配置页，WebView 不可用时会 FATAL。
             if (app != null) {
                 try {

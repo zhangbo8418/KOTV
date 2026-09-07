@@ -9,7 +9,7 @@ import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
-/// Android ExoPlayer：Media3 + OkHttp，DRM；硬解直出到 SurfaceView（对齐 TV HDR）。
+/// Android ExoPlayer：Media3 + OkHttp，DRM；硬解直出到 SurfaceView（HDR 直出）。
 class ExoPlayback extends KotvPlayback {
   ExoPlayback() {
     if (!kotvIsAndroid()) {
@@ -48,7 +48,7 @@ class ExoPlayback extends KotvPlayback {
   bool _repeatOne = false;
   String _decodeMode = 'auto';
   int _surfaceGeneration = 0;
-  /// 默认 Surface：Hybrid SurfaceView，对齐 TV HDR；Texture 为兼容回退（HDR 可能花屏）。
+  /// 默认 Surface：Hybrid SurfaceView，HDR 直出；Texture 为兼容回退（HDR 可能花屏）。
   String _renderMode = 'surface';
   bool _live = false;
   String? _lastError;
@@ -82,7 +82,7 @@ class ExoPlayback extends KotvPlayback {
     return true;
   }
 
-  /// 原位全屏不再 bump PlatformView（对齐 TV）。
+  /// 原位全屏不再 bump PlatformView。
   void bumpSurfaceView() {}
 
   @override
@@ -157,7 +157,7 @@ class ExoPlayback extends KotvPlayback {
       );
     }
     final name = _fitName(fit);
-    // Surface：Hybrid Composition + SurfaceView（HDR 对齐 TV）。
+    // Surface：Hybrid Composition + SurfaceView（HDR 直出）。
     final surface = kotvExoSurfaceView(
       key: ValueKey('kotv_exo_surface_$_surfaceGeneration'),
       // 勿用 GlobalKey：全屏进出会挪 PlatformView，易触发 RenderObject.detach 断言。
@@ -427,7 +427,7 @@ class ExoPlayback extends KotvPlayback {
     return _playing || _position > Duration.zero;
   }
 
-  /// 与 MPV 对齐：按分辨率优先轮询全部视频轨；无轨则 play 软重试。
+  /// 与 MPV 保持一致：按分辨率优先轮询全部视频轨；无轨则 play 软重试。
   @override
   Future<void> tryFixVideoSource() async {
     try {
@@ -479,7 +479,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> stop() async {
-    // 对齐 TV：换集/停播只 stop，会话内复用 Exo 实例（离开页走 [release]）。
+    // 换集/停播只 stop，会话内复用 Exo 实例（离开页走 [release]）。
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
@@ -493,7 +493,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> release() async {
-    // 对齐 TV 离开页：stop → 短排空 → dispose（超时丢后台，避免卡死返回）。
+    // stop → 短排空 → dispose（超时丢后台，避免卡死返回）。
     await kotvTeardownPlayback(
       stop: () async {
         try {

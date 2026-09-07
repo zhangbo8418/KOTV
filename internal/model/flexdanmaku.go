@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// FlexDanmaku 对齐 TV DanmakuAdapter：可为 URL 字符串、对象 {url}、或对象数组。
+// FlexDanmaku 可为 URL 字符串、对象 {url}、或对象数组。
 // 整字段若用 string 接数组会导致整个 Result 反序列化失败 → 首页/分类变空。
 type FlexDanmaku string
 

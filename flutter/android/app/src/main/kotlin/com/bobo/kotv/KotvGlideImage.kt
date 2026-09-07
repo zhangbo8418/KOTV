@@ -13,7 +13,7 @@ import io.flutter.plugin.platform.PlatformViewFactory
 import org.json.JSONObject
 
 /**
- * 对齐 TV [com.fongmi.android.tv.utils.ImgUtil]：
+ * 海报加载：
  * 解析 `url@Headers=` / `@Referer=` 等，用 Glide 拉海报。
  */
 object KotvImgUtil {
@@ -71,7 +71,7 @@ object KotvImgUtil {
     }
   }
 
-  /** 对齐 TV UrlUtil.convert 的常用分支（海报多为 http(s)）。 */
+  /** 海报地址常用转换分支（多为 http(s)）。 */
   private fun convertLocal(url: String): String {
     val lower = url.lowercase()
     return when {

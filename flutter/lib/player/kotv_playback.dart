@@ -41,7 +41,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 本集自然播完（非手动 stop）时发出 true。
   Stream<bool> get completedStream;
 
-  /// [live]=true：直播页语境（对齐 TV LiveActivity），跳过点播 KotvBufferBudget 预读。
+  /// [live]=true：直播页语境，跳过点播 KotvBufferBudget 预读。
   Future<void> open(
     String url, {
     Map<String, String>? headers,
@@ -58,7 +58,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setRepeatOne(bool on);
   Future<void> setDecodeMode(String mode);
 
-  /// Android Exo：Surface / Texture，对齐 TV 渲染方式。其它后端忽略。
+  /// Android Exo：Surface / Texture，其它后端忽略。
   Future<void> setRenderMode(String mode) async {}
 
   /// 音量归一（loudnorm / dynaudnorm）；不支持的引擎忽略。
@@ -86,7 +86,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setVideoTrack(String id) async {}
   Future<void> setSubtitleTrack(String id); // ''=关, 'auto'=自动
 
-  /// 离开详情/切 Tab：对齐 TV `stop` + `release`，拆掉原生 AO，避免后台漏音。
+  /// 离开详情/切 Tab：stop + release，拆掉原生 AO，避免后台漏音。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
   Future<void> release() => stop();
 
@@ -123,7 +123,7 @@ abstract class KotvPlayback extends ChangeNotifier {
 
 /// 离开播放统一拆机：stop → 短等排空 AO/事件线程 → dispose。无静音。
 ///
-/// 对齐 Windows media_kit [kotvDisposeMpvPlayer]；各平台 MPV / FVP 共用。
+/// 对应 Windows media_kit [kotvDisposeMpvPlayer]；各平台 MPV / FVP 共用。
 /// [disposeTimeout] 非空时（如 FVP/mdk），dispose 超时后把同一 Future 丢后台，不二次调用。
 Future<void> kotvTeardownPlayback({
   required Future<void> Function() stop,

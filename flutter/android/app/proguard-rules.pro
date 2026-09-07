@@ -11,7 +11,7 @@
 -keep class com.bobo.kotv.bridge.SpiderBridge { *; }
 -keep class com.github.catvod.** { *; }
 -keep class com.orhanobut.logger.** { *; }
-# TV dex jar 从 App CL 按原名解析 OkHttp（DexClassLoader 父优先）。
+# 站点 dex jar 从 App CL 按原名解析 OkHttp（DexClassLoader 父优先）。
 # Flutter Release 默认开 R8：未 keep 时 OkHttpClient 会被改成 p3.z，ConnectionPool 直接被删掉。
 -dontwarn okhttp3.**
 -dontwarn okio.**
@@ -30,10 +30,10 @@
 -keep class org.jsoup.** { *; }
 -keep class com.google.gson.** { *; }
 -keep class org.json.** { *; }
-# TV dex Config.s / merge 编二维码：EncodeHintType 必须在 App CL 原名可见
+# 站点 dex Config.s / merge 编二维码：EncodeHintType 必须在 App CL 原名可见
 -keep class com.google.zxing.** { *; }
 -dontwarn com.google.zxing.**
-# 对齐 TV：SimpleXML 注解/接口会被 sardine-android 反射访问
+# SimpleXML 注解/接口会被 sardine-android 反射访问
 -keep interface org.simpleframework.xml.core.Label { public *; }
 -keep class * implements org.simpleframework.xml.core.Label { public *; }
 -keep interface org.simpleframework.xml.core.Parameter { public *; }
@@ -46,15 +46,15 @@
 -keepclassmembers,allowobfuscation class * { @org.simpleframework.xml.Element <fields>; }
 -keepclassmembers,allowobfuscation class * { @org.simpleframework.xml.Attribute <fields>; }
 -keepclassmembers,allowobfuscation class * { @org.simpleframework.xml.ElementList <fields>; }
-# 桥接自检和站点运行期都会碰到这些宿主 API，按 TV 规则保留原名
+# 桥接自检和站点运行期都会碰到这些宿主 API，按站点 dex 规则保留原名
 -keeppackagenames org.slf4j.**
 -keep class org.slf4j.** { *; }
 -keep class com.thegrizzlylabs.sardineandroid.** { *; }
-# 对齐 TV：若后续站点 jar / 宿主能力接入 DLNA，需要 JUPnP 原名可见
+# 若后续站点 jar / 宿主能力接入 DLNA，需要 JUPnP 原名可见
 -dontwarn org.jupnp.**
 -keep class org.jupnp.** { *; }
 -keep class javax.xml.** { *; }
-# 对齐 TV：NewPipeExtractor / Rhino 相关类由宿主提供时，外部 dex jar 可能按原名链接
+# NewPipeExtractor / Rhino 相关类由宿主提供时，外部 dex jar 可能按原名链接
 -keep class javax.script.** { *; }
 -keep class jdk.dynalink.** { *; }
 -keep class org.mozilla.javascript.* { *; }
@@ -86,7 +86,7 @@
 -keep class com.android.tools.r8.** { *; }
 -dontwarn com.android.tools.r8.**
 -dontwarn com.android.tools.r8.internal.**
-# 迅雷 SDK（对齐 TV）：JNI / 反射不可 shrink
+# 迅雷 SDK：JNI / 反射不可 shrink
 -keep class com.xunlei.downloadlib.** { *; }
 -dontwarn com.xunlei.downloadlib.**
 # 原生 MPV（is.xyz.mpv.MPVLib ↔ libplayer.so）
@@ -101,7 +101,7 @@
 -dontwarn com.tvbus.engine.**
 -keep class com.p2p.** { *; }
 -dontwarn com.p2p.**
-# TV dex jar 的 jar 内 JS：QuickJS JNI 类名 / native 不可 shrink
+# 站点 dex jar 的 jar 内 JS：QuickJS JNI 类名 / native 不可 shrink
 -keep class com.whl.quickjs.** { *; }
 -keep class com.whl.quickjs.android.** { *; }
 -dontwarn com.whl.quickjs.**

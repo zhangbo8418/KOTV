@@ -113,7 +113,7 @@ runtime/（JRE/Python 等）外置，不编进引擎。
 EOF
 
 OUT_ZIP="$ROOT/dist/KO影视-${VERSION}-web-${PLAT}.zip"
-# 发行名与其它包对齐：linux-x64 → linux-x86_64
+# 发行名与其它包保持一致：linux-x64 → linux-x86_64
 case "$PLAT" in
   linux-x64) OUT_ZIP="$ROOT/dist/KO影视-${VERSION}-web-linux-x86_64.zip" ;;
   linux-arm64) OUT_ZIP="$ROOT/dist/KO影视-${VERSION}-web-linux-aarch64.zip" ;;

@@ -22,7 +22,7 @@ Future<void> kotvDisposeMpvPlayer(Player? player) async {
 
 /// 按缓冲预算创建 [Player]。
 ///
-/// [live]=true：对齐 TV，不套点播 KotvBufferBudget；media_kit 仅用库默认 bufferSize
+/// [live]=true：不套点播 KotvBufferBudget；media_kit 仅用库默认 bufferSize
 ///（其内部会写 demuxer-max-bytes，应用层不再二次改写）。
 ///
 /// [conf]：用户「MPV 配置」文本，仅用于取 `kotv-log=` 决定 libmpv 日志级别
@@ -110,7 +110,7 @@ class MediaKitPlayback extends KotvPlayback {
   bool _live;
   int _speedBps = 0;
   late Future<void> _optsReady;
-  /// 对齐 Exo/原生 MPV：换源时本地尺寸清零；未 [_acceptSize] 前不采信 libmpv 残留宽高。
+  /// 与 Exo / 原生 MPV 一致：换源时本地尺寸清零；未 [_acceptSize] 前不采信 libmpv 残留宽高。
   int _w = 0;
   int _h = 0;
   bool _acceptSize = false;
@@ -221,7 +221,7 @@ class MediaKitPlayback extends KotvPlayback {
   bool get _hasRealAudioTrack =>
       player.state.tracks.audio.any((t) => !kotvIsPseudoMediaTrack('${t.id}'));
 
-  /// 文件已 loaded（对齐原生 MPV 的 `_ready`）：track-list 已到、或已知时长、
+  /// 文件已 loaded（对应原生 MPV 的 `_ready`）：track-list 已到、或已知时长、
   /// 或已出画/进度已走。之前没有这一层，守卫 open 当刻就把 media_kit
   /// 当成「已在播却黑屏」——立刻踢 play、起 8s 黑屏窗口，慢源加载 >16s 就被误切播放器。
   bool get _loaded =>
@@ -296,14 +296,14 @@ class MediaKitPlayback extends KotvPlayback {
     _url = url;
     _live = live;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
-    // 换源清尺寸（对齐 Exo / 原生 MPV）；避免 libmpv 残留宽高误判就绪。
+    // 换源清尺寸（与 Exo / 原生 MPV 一致）；避免 libmpv 残留宽高误判就绪。
     _clearVideoSize();
     notifyListeners();
     if (drm != null && drm.isNotEmpty) {
       throw StateError('MPV 不支持 DRM，请用内置 ExoPlayer');
     }
     await _optsReady;
-    // 直播：对齐 TV，不写 demuxer-max-bytes/cache-secs；点播才写入 KotvBufferBudget。
+    // 直播：不写 demuxer-max-bytes/cache-secs；点播才写入 KotvBufferBudget。
     await _opts.applyAfterAttach(player, live: live);
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
     if (_diag) {
@@ -319,7 +319,7 @@ class MediaKitPlayback extends KotvPlayback {
     _acceptSize = true;
     _adoptPlayerSize();
     notifyListeners();
-    // 对齐原生 MPV / Exo：未 loaded 视作「未在播的缓冲」只等；loaded 后才进黑屏判定。
+    // 与原生 MPV / Exo 一致：未 loaded 视作「未在播的缓冲」只等；loaded 后才进黑屏判定。
     // stop()/换集会重置 media_kit 状态（_loaded 回 false），必须用会话号让旧守卫
     // 看到「不缓冲且已死」而退出，否则 open() 永远不返回。
     final session = ++_openSerial;
@@ -340,7 +340,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> stop() async {
-    // 对齐 TV：换集只停播，不 dispose Player（离开页走 kotvDisposeMpvPlayer）。
+    // 换集只停播，不 dispose Player（离开页走 kotvDisposeMpvPlayer）。
     _url = '';
     _clearVideoSize();
     _speedBps = 0;
@@ -353,7 +353,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> release() async {
-    // Player 由页面 kotvDisposeMpvPlayer 释放（对齐 TV engine.release）。
+    // Player 由页面 kotvDisposeMpvPlayer 释放（走 engine.release）。
     await stop();
   }
 
@@ -410,7 +410,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> tryFixVideoSource() async {
-    // 对齐 TV：open 已 prepare+play；这里只再确保 unpause，勿 seek(0)。
+    // open 已 prepare+play；这里只再确保 unpause，勿 seek(0)。
     if (_diag) KotvMpvDiag.note('tryFixVideoSource (silent-video guard) -> play');
     try {
       await player.play();

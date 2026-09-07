@@ -173,7 +173,7 @@ func Cast(d Device, mediaURL, title string) error {
 	return err
 }
 
-// CastWith 投送；headers 写入 DIDL（兼容 TV），positionMs 起播续看。
+// CastWith 投送；headers 写入 DIDL（兼容遥控端），positionMs 起播续看。
 // Chromecast 失败时，若同 IP 存在 DLNA 设备则自动回退；used 为实际成功的协议设备。
 func CastWith(d Device, mediaURL, title string, headers map[string]string, positionMs int64) (Device, error) {
 	mediaURL = dlna.RewriteLocalURL(mediaURL)

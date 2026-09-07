@@ -27,7 +27,7 @@ class EngineLauncher {
 
   Future<bool> ensureReady({Duration timeout = const Duration(seconds: 30)}) async {
     await kotvClientId();
-    // 每次就绪探测前对齐页面 origin（避免仍停在默认 127.0.0.1）
+    // 每次就绪探测前同步页面 origin（避免仍停在默认 127.0.0.1）
     applyBaseUrl('');
     if (_shuttingDown) return false;
     final deadline = DateTime.now().add(timeout);

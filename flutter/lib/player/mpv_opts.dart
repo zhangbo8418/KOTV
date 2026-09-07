@@ -151,7 +151,7 @@ class KotvMpvOpts {
       }
 
       if (live) {
-        // 对齐 TV：直播不写 demuxer-max-bytes / cache-secs（点播预算也不套）。
+        // 直播不写 demuxer-max-bytes / cache-secs（点播预算也不套）。
       } else {
         try {
           await KotvBufferBudget.warm(force: true);
@@ -170,7 +170,7 @@ class KotvMpvOpts {
 
   /// 交给原生通道的属性表（P1/P2 open / setOpts）。
   ///
-  /// [live]=true：对齐 TV，不写 demuxer-max-bytes / cache-secs。
+  /// [live]=true：不写 demuxer-max-bytes / cache-secs。
   Map<String, String> propertyMap({bool live = false}) {
     final out = <String, String>{
       'hwdec': hwdecValue(),

@@ -40,7 +40,7 @@ type Type struct {
 	Selected bool       `json:"-"`
 }
 
-// UnmarshalJSON 对齐 TV Class：type_id/id、type_name/name 互为别名。
+// UnmarshalJSON type_id/id、type_name/name 互为别名。
 func (t *Type) UnmarshalJSON(data []byte) error {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 || string(data) == "null" {
@@ -188,7 +188,7 @@ func looksLikePlayURL(s string) bool {
 }
 
 // DecodeResultJSON 反序列化 JSON Result。
-// 先走 lenientjson（对齐 TV Gson lenient：单引号/无引号 key/尾逗号等），再严格 Unmarshal。
+// 先走 lenientjson（单引号/无引号 key/尾逗号等），再严格 Unmarshal。
 func DecodeResultJSON(raw string) (Result, error) {
 	var result Result
 	if err := lenientjson.Unmarshal([]byte(raw), &result); err != nil {

@@ -11,7 +11,7 @@ import (
 	"github.com/bobo/KOTV/internal/paths"
 )
 
-// localDirCategory 对齐 csp_Local.categoryContent：列目录 + 媒体文件。
+// localDirCategory 列目录 + 媒体文件。
 // tid 为绝对路径（或 file://）且目录可读时返回 true；不依赖 jar 内 Util.isMedia。
 func localDirCategory(tid string) (model.Result, bool) {
 	dir := resolveLocalBrowseDir(tid)

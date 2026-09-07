@@ -165,7 +165,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
-  /// 切台/换线：只 stop，保留引擎（对齐 TV 换台）。
+  /// 切台/换线：只 stop，保留引擎。
   Future<void> _stopAllBackends() async {
     await Future.wait<void>([
       () async {
@@ -206,7 +206,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     ]);
   }
 
-  /// 切 Tab / 离开直播：对齐 TV finish → stop + release，避免后台漏音。
+  /// 切 Tab / 离开直播：stop + release，避免后台漏音。
   Future<void> _releaseAllBackends() async {
     final fvp = _fvp;
     final mk = _mk;
@@ -295,7 +295,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   /// 沉浸全屏：复用 PC 左右菜单交互（不再推另一套点播式全屏页）。
   bool _immersive = false;
   KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
-  /// 竖屏/横屏/沉浸全屏共用同一块 PlatformView/Texture（对齐 TV 原位全屏）。
+  /// 竖屏/横屏/沉浸全屏共用同一块 PlatformView/Texture。
   final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_live_video');
   /// 竖屏面板：0=频道 1=EPG
   int _portraitTab = 0;
@@ -310,7 +310,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _playerVal = kotvDefaultLivePlayer();
   String _prefPlayerVal = kotvDefaultLivePlayer();
   String _prefPlayerFailover = 'auto';
-  /// 对齐 TV LiveSetting.isChange：播失败自动切下一线路（默认开）。
+  /// 播失败自动切下一线路（默认开）。
   bool _liveAutoChange = true;
   int _playSerial = 0;
   String _playUrl = '';
@@ -749,7 +749,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       await pb.setDecodeMode(failover.decodeMode);
       await pb.setRenderMode(_renderMode);
       try {
-        // 直播页 live=true：直链立刻 play（对齐 TV prepareAndPlay；含 EPG 回看时移流）。
+        // 直播页 live=true：直链立刻 play（含 EPG 回看时移流）。
         // 不写 demuxer-max-bytes / cache-secs；无 Flutter play:false 等缓冲。
         await pb.open(url, headers: headers, live: live);
         if (_backend != KotvEmbedBackend.mpv) {
@@ -827,7 +827,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     setState(() {
       _chIdx = chIdx;
       _line = useLine;
-      // 直播对齐 TV：频道 URL 直链开播，不走点播「解析」文案。
+      // 直播频道 URL 直链开播，不走点播「解析」文案。
       _status = '换台中…';
       _title = '${ch['name'] ?? ''}';
       _leftOpen = true;
@@ -862,7 +862,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: _title, url: url);
     } catch (e) {
       if (!mounted || serial != _playSerial) return;
-      // 对齐 TV fallbackAfterError：isChange 且非末线路 → nextLine。
+      // isChange 且非末线路 → nextLine。
       final curLine = _line;
       if (_liveAutoChange && _lines > 1 && curLine < _lines - 1) {
         final next = curLine + 1;
@@ -875,7 +875,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   }
 
   Future<void> _playCatchup(int progIdx) async {
-    // 对齐 TV：stop → LiveApi.getUrl+Catchup.format → 立刻 play（与 _playChannel 同序）。
+    // stop → LiveApi.getUrl+Catchup.format → 立刻 play（与 _playChannel 同序）。
     if (_chIdx < 0) return;
     final serial = ++_playSerial;
     try {
@@ -1158,7 +1158,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     } catch (_) {}
     if (_playUrl.isNotEmpty) {
       final pos = _playback.position;
-      // 直播/回看均 live 起播（对齐 TV）；回看再 seek 回原进度。
+      // 直播/回看均 live 起播；回看再 seek 回原进度。
       await _openLiveUrl(_playUrl, headers: _playHeaders, live: true);
       if (pos > Duration.zero) await _playback.seek(pos);
     }
@@ -1418,7 +1418,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   String get _lineLabel => _chIdx < 0 || _lines <= 1 ? '' : '线路 ${_line + 1}/$_lines';
 
-  /// 对齐 TV LiveActivity.CustomKeyDownLive.dispatch：
   /// 频道列表 / 设置面板 / 底栏控件打开时，方向键与确定交给焦点遍历，不换台。
   bool get _liveUiOpen =>
       _leftOpen || _rightOpen || _chromeVisible || _catchupChrome;
@@ -1433,7 +1432,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       return KeyEventResult.ignored;
     }
 
-    // 菜单：对齐 TV onMenu → 显示底栏控件（可遥控选按钮）。
+    // 菜单：显示底栏控件（可遥控选按钮）。
     if (kotvIsMenuKey(key)) {
       if (_leftOpen || _rightOpen) {
         setState(() {
@@ -1453,7 +1452,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
         final primary = FocusManager.instance.primaryFocus;
         if (primary == null || primary == node) {
-          // 焦点仍在根 Focus：确定 = 频道列表（对齐 TV onKeyCenter → showUI）
+          // 焦点仍在根 Focus：确定 = 频道列表（焦点在列表时确认进入频道）
           _openLeft();
           return KeyEventResult.handled;
         }
@@ -1468,7 +1467,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       return KeyEventResult.ignored;
     }
 
-    // 沉浸播放：上下换台、左右换线（对齐 TV + KeyUtil CHANNEL_UP/DOWN）。
+    // 沉浸播放：上下换台、左右换线。
     if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
       _openLeft();
       return KeyEventResult.handled;
@@ -2167,7 +2166,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         ),
                       ),
                     ),
-                  // 对齐 TV onMenu：底栏控件可 TvFocus 遥控选择
+                  // 底栏控件可 TvFocus 遥控选择
                   if ((_chromeVisible || (_catchup && _catchupChrome)) && !_leftOpen && !_rightOpen)
                     Positioned(
                       left: 0,

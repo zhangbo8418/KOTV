@@ -1,4 +1,4 @@
-# 与 TV/chaquo/requirements.txt 对齐（桌面额外加 certifi 补 CA）
+# 与移动端 requirements 保持一致（桌面额外加 certifi 补 CA）
 lxml
 ujson
 pyquery

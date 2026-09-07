@@ -30,9 +30,9 @@ func filtersForHomeTid(home model.Result, tid string) []model.Filter {
 	return nil
 }
 
-// mergeFilterDefaults ：对齐 TV FolderFragment：仅当 filter.init 非空时写入 extend。
+// mergeFilterDefaults ：仅当 filter.init 非空时写入 extend。
 // 不得回退到首个 value——AppDrama 等源无 init、首项常为具体标签（古装/2026…），
-// 误填后 category 被过度收窄，整页「暂无内容」（TV 则空 extend 正常出片）。
+// 误填后 category 被过度收窄，整页「暂无内容」（空 extend 时正常出片）。
 func mergeFilterDefaults(extend map[string]string, filters []model.Filter) {
 	if extend == nil || len(filters) == 0 {
 		return

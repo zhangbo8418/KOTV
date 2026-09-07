@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 桌面网络栈（全平台源码对齐，Win7 可用）：
+# 桌面网络栈（全平台源码构建，Win7 可用）：
 #   FFmpeg 播流：HTTPS / HTTP/2(nghttp2) / RTSP / RTMP
 #   mpv libcurl：HTTP/1.1 + HTTP/2 + HTTP/3（OpenSSL + nghttp2 + ngtcp2 + nghttp3，CMake）
 #

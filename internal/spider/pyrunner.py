@@ -171,7 +171,7 @@ def _is_blocked_dep_name(name):
 
 
 def _local_package_dir(name):
-    """cache/<name>/ 已是包（如 TV/Chaquopy 的 base.spider）时返回目录。"""
+    """cache/<name>/ 已是包（如 Chaquopy 的 base.spider）时返回目录。"""
     top = os.path.basename(str(name)).replace(".py", "").strip().split(".")[0]
     if not top:
         return ""
@@ -239,12 +239,12 @@ for _shadow in list(os.listdir(cache)) if os.path.isdir(cache) else []:
 def _download_dep(name):
     """从爬虫 api 同目录拉取依赖 py 到 cache（失败忽略，由后续 import 报错）。
 
-    对齐 TV：依赖来自 getDependence()；内置 base.spider 包不从仓拉 base.py。
+    依赖来自 getDependence()；内置 base.spider 包不从仓拉 base.py。
     """
     name = name if str(name).endswith(".py") else str(name) + ".py"
     if _is_blocked_dep_name(name):
         return
-    # TV Chaquopy 自带 base/spider.py；KOTV 写入 cache/base/。勿再拉同名 .py 以免盖包。
+    # Chaquopy 自带 base/spider.py；KOTV 写入 cache/base/。勿再拉同名 .py 以免盖包。
     if _local_package_dir(name):
         return
     target = os.path.join(cache, os.path.basename(name))
@@ -278,7 +278,7 @@ def _download_dep(name):
 def _preload_imports_from_source():
     """顶层 import t4 等发生在 init/getDependence 之前，需按源码预拉。
 
-    不把 from base.spider 里的 base 当成要下载的 base.py（TV 用内置包）。
+    不把 from base.spider 里的 base 当成要下载的 base.py（走内置包）。
     """
     try:
         with open(script, "r", encoding="utf-8", errors="ignore") as f:

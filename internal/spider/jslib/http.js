@@ -1,6 +1,6 @@
 let req = (url, options) => {
     options = options || {};
-    // 与 drpy request() 对齐：在调用宿主前规范化，并写回调用方对象（withHeaders 等）。
+    // 在调用宿主前规范化，并写回调用方对象（withHeaders 等）。
     if (options.redirect === false) {
         options.redirect = 0;
     }
@@ -53,6 +53,6 @@ function defineGlobalAlias(name) {
 
 ['global', 'window', 'self'].forEach(defineGlobalAlias);
 
-// 暴露 http，供 spider.js / 严格模块作用域使用（TV 用 let req + 自由变量 http）。
+// 暴露 http，供 spider.js / 严格模块作用域使用。
 globalThis.http = http;
 globalThis.req = req;

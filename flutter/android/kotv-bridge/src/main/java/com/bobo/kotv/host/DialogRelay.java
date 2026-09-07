@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 安卓当后端、其它端连过来用 TV dex jar 时：AlertDialog 会弹在手机 Activity 上，远端看不见。
+ * 安卓当后端、其它端连过来用站点 dex jar 时：AlertDialog 会弹在手机 Activity 上，远端看不见。
  * 拦截 FLAG_DIM_BEHIND / 附着对话框的 addView，扫控件拼成 {@link UiBridge} 文档发到对应 client。
  */
 public final class DialogRelay {

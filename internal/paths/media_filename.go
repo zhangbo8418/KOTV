@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// 对齐 bridge Util.MEDIA / csp_Local.categoryContent。
+// 与 bridge Util.MEDIA / csp_Local.categoryContent 一致。
 var mediaExt = map[string]struct{}{
 	".mp4": {}, ".mkv": {}, ".mov": {}, ".m4v": {}, ".webm": {}, ".wmv": {}, ".flv": {},
 	".avi": {}, ".iso": {}, ".mpg": {}, ".mpeg": {}, ".ts": {}, ".m2ts": {},

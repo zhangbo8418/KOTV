@@ -19,7 +19,7 @@ void main() {
     expect(props['cache-pause-initial'], 'no');
   });
 
-  test('mpvLiveCacheProps is empty (align TV: no demuxer-max-bytes/cache-secs)', () {
+  test('mpvLiveCacheProps is empty (直播不写 demuxer-max-bytes/cache-secs)', () {
     final props = KotvBufferBudget.mpvLiveCacheProps();
     expect(props, isEmpty);
     expect(props.containsKey('demuxer-max-bytes'), isFalse);

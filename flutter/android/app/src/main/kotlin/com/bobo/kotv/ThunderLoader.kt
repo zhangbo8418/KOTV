@@ -18,9 +18,9 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.regex.Pattern
 
 /**
- * 安卓迅雷：对齐 TV Thunder（magnet / thunder / ed2k / torrent / ftp 等），不走 anacrolix。
+ * 安卓迅雷：支持 magnet / thunder / ed2k / torrent / ftp 等，不走 anacrolix。
  *
- * TV 安全点：
+ * 安全点：
  * - Init 在 Application.attachBaseContext 已 set
  * - 首次 parse/fetch 才 XLTaskHelper.get() → loadLibrary（不预热）
  * - clear/stop 只 deleteTask + release，**不** Path.clear 整目录（易与 native 抢文件闪退）
@@ -94,7 +94,7 @@ object ThunderXunleiLoader : ThunderLoader {
     return String.format("[%.1f%s]", s, units[i])
   }
 
-  /** 对齐 TV：首次调用才触达 native；失败后永久 stub，避免反复 UnsatisfiedLinkError 崩进程。 */
+  /** 首次调用才触达 native；失败后永久 stub，避免反复 UnsatisfiedLinkError 崩进程。 */
   private fun xl(): XLTaskHelper {
     if (nativeBroken.get()) throw IllegalStateException("thunder native unavailable")
     if (Init.context() == null) throw IllegalStateException("Init.context null")
@@ -134,7 +134,7 @@ object ThunderXunleiLoader : ThunderLoader {
       val torrent = isTorrent(raw)
       val dir = Path.thunder(md5(raw))
       val taskId = xl().parse(raw, dir)
-      // 对齐 TV：非种子且解码后不是 magnet → 单集直链（ed2k / thunder 解码后的 http/ftp/ed2k 等）
+      // 非种子且解码后不是 magnet → 单集直链（ed2k / thunder 解码后的 http/ftp/ed2k 等）
       val real = taskId.realUrl?.trim().orEmpty()
       if (!torrent && !real.startsWith("magnet")) {
         val play = real.ifBlank { raw }
@@ -188,7 +188,7 @@ object ThunderXunleiLoader : ThunderLoader {
   }
 
   /**
-   * 对齐 TV Thunder.fetch：
+   * 
    * - magnet://path?name&index → BT 子任务边下边播
    * - magnet:? / .torrent → 先 parse 再播
    * - ed2k / thunder（解码后）/ ftp 等 → addThunderTask
@@ -242,7 +242,7 @@ object ThunderXunleiLoader : ThunderLoader {
     currentTask.set(taskId)
     currentIndex.set(index)
     for (i in 0 until 100) {
-      // clear()/Stop 会把 currentTask 置空：立即退出等待，对齐 TV Thunder.stop 可打断
+      // clear()/Stop 会把 currentTask 置空：立即退出等待，Thunder.stop 可打断
       if (currentTask.get() != taskId) {
         throw IllegalStateException("已取消")
       }
@@ -315,7 +315,7 @@ object ThunderXunleiLoader : ThunderLoader {
   override fun clear(): JSONObject {
     if (!classAvailable || nativeBroken.get()) return ThunderStubLoader.clear()
     return try {
-      // 对齐 TV Thunder.stop/exit：只停任务 + release，不删整棵 thunder 目录
+      // 只停任务 + release，不删整棵 thunder 目录
       val task = currentTask.getAndSet(null)
       currentIndex.set(-1)
       lastError.set("")
@@ -349,7 +349,7 @@ object ThunderBridge {
   @Volatile
   private var loader: ThunderLoader = ThunderStubLoader
 
-  /** 只注入 Init + 选择 loader；不触达 XLTaskHelper（对齐 TV 懒加载）。 */
+  /** 只注入 Init + 选择 loader；不触达 XLTaskHelper（懒加载）。 */
   fun start(context: android.content.Context) {
     Init.set(context)
     if (Init.context() == null) {

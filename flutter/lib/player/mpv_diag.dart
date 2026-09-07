@@ -3,14 +3,15 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:path_provider/path_provider.dart';
+
+import '../util/kotv_app_dirs.dart';
 
 /// 桌面 libmpv 诊断：mpv 日志落盘 + 起播状态快照。
 ///
 /// 用途：Win7 等机器「播放中、缓冲在涨、time-pos 不动，点暂停/seek 才起播」
 /// 这类问题，Dart 侧只能看到 `pause=no`，看不到 AO/VO/解码是否真的启动。
 /// 这里把 libmpv 自己的日志（AO/VO 初始化、`IAudioClient_Start` 失败、
-/// `Set property: pause` 等）写到应用支持目录 `kotv-mpv.log`，
+/// `Set property: pause` 等）写到 `{Root}/data/log/kotv-mpv.log`，
 /// 并在 open 后定点读取 `pause / paused-for-cache / core-idle / time-pos /
 /// current-ao / current-vo / hwdec-current` 等属性，配合用户操作（暂停 / seek）
 /// 前后的快照，精确定位卡在哪一层。
@@ -182,7 +183,7 @@ class KotvMpvDiag {
     if (_file != null) return Future.value(_file);
     return _opening ??= () async {
       try {
-        final dir = await getApplicationSupportDirectory();
+        final dir = await kotvLogDir();
         final f = File('${dir.path}${Platform.pathSeparator}$fileName');
         // 每次进程启动截断重写，避免无限增长。
         await f.writeAsString(

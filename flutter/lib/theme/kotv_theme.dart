@@ -181,7 +181,7 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
   );
 }
 
-/// TV 遥控器焦点框。
+/// 遥控器焦点框。
 class TvFocus extends StatefulWidget {
   const TvFocus({
     super.key,

@@ -193,7 +193,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		return r, fmt.Errorf("解析失败: 无可用解析器")
 	}
 	// checkResult：仅用 url.length() > 40 判断成功。
-	// （TV 不在该层做额外 rules/isVideo 校验；KOTV 这里收敛到同样的成功判定）
+	// （该层不做额外 rules/isVideo 校验；KOTV 收敛到统一的成功判定）
 	if len(parsed) <= 40 {
 		parseLog("[parse] invalid result via=%s out=%s", via, parsePreview(parsed, 160))
 			return r, fmt.Errorf("解析结果无效")
@@ -278,7 +278,7 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 	if IsVideoFormat(raw) {
 		return raw, nil
 	}
-	// 与 TV LiveApi.getUrl 一致：未标记 parse 的频道直链直接播，
+	// 未标记 parse 的频道直链直接播，
 	// 不要拿全局 type=1 解析器去撞直播 URL（否则普通 m3u8 也会「解析中」）。
 	if !needParse {
 		return raw, nil

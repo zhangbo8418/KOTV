@@ -334,7 +334,7 @@ install_python_packages() {
 
   [[ -d "$target/requests" && -d "$target/lxml" && -d "$target/Crypto" && -d "$target/urllib3" ]] || {
     echo "ERROR: Python dependencies incomplete under $target" >&2
-    echo "  need: requests lxml Crypto urllib3 (same as TV/chaquo)" >&2
+    echo "  need: requests lxml Crypto urllib3 (与移动端一致)" >&2
     ls -la "$target" 2>&1 | head -40 >&2 || true
     return 1
   }

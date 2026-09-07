@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 桌面 FFmpeg 前缀：FongMi FFmpeg 9 + dependency/avs3a（libarcdav3a / AV3A，对齐 TV/webhtv）。
+# 桌面 FFmpeg 前缀：FongMi FFmpeg 9 + dependency/avs3a（libarcdav3a / AV3A，与移动端一致）。
 # 支持 Linux / macOS / Windows(GitHub Actions MinGW)。
 set -euo pipefail
 

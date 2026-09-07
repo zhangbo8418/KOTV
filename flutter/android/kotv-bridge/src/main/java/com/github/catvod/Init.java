@@ -10,8 +10,8 @@ import com.github.catvod.utils.Util;
 
 /**
  * App CL 宿主 Init（迅雷 AAR + 站点父优先都会命中本类）。
- * 与 TV catvod Init ABI 一致；须在任何 Path/Thunder 调用前 {@link #set(Context)}。
- * {@link #uiContext()} 供宿主侧 AlertDialog 等优先拿当前 Activity（对齐 TV {@code App.activity()}）。
+ * 与 catvod Init ABI 一致；须在任何 Path/Thunder 调用前 {@link #set(Context)}。
+ * {@link #uiContext()} 供宿主侧 AlertDialog 等优先拿当前 Activity（同 {@code App.activity()}）。
  *
  * <p>Application 用强引用：WeakReference 在 attachBaseContext 阶段若只拿到短暂 Context，
  * 会被回收，站点 jar 随后 {@code Init.context().getPackageName()} NPE。
@@ -51,7 +51,7 @@ public class Init {
         return null;
     }
 
-    /** 当前前台 Activity。对齐 TV App.activity()。 */
+    /** 当前前台 Activity。 */
     public static Activity activity() {
         return UiContext.activity();
     }

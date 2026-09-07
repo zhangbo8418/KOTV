@@ -1,6 +1,6 @@
 package com.tvbus.engine;
 
-/** 对齐 TV {@code :tvbus}：native so 回调。 */
+/** {@code :tvbus}：native so 回调。 */
 public interface Listener {
 
     void onInited(String result);

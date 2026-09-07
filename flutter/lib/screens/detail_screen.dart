@@ -52,7 +52,7 @@ class DetailScreen extends ConsumerStatefulWidget {
   final String id;
   final String site;
   final String title;
-  /// 对齐 TV VideoActivity.mark：从目录点文件时按集名匹配并起播。
+  /// 从目录点文件时按集名匹配并起播。
   final String mark;
 
   /// 详情是否在栈上（含播放中 PopScope.canPop=false）。
@@ -146,7 +146,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 设置「自动切换播放器」：auto=开，off=关。
   String _prefPlayerFailover = 'auto';
   bool _miniDesktop = false;
-  /// 对齐 TV / 直播页：原位全屏，同一 PlatformView/Texture 放大，不 push 第二块 Surface。
+  /// 与直播页一致：原位全屏，同一 PlatformView/Texture 放大，不 push 第二块 Surface。
   bool _immersiveFullscreen = false;
   KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
   final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_detail_video');
@@ -197,7 +197,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   int _playAtSerial = 0;
   /// 本代是否已消费过「播完→下一集」（completed / 片尾共用，防连跳）。
   int _endConsumedGen = -1;
-  /// ≈ TV 在 STATE_READY 后才挂 Clock；开播/解析中为 false。
+  /// ≈ 在 STATE_READY 后才挂 Clock；开播/解析中为 false。
   bool _playbackLive = false;
   bool _advanceBusy = false;
   DateTime? _sessionStartedAt;
@@ -457,7 +457,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
-  /// 对齐 TV finish：先卸画面，再 stop + release，避免 AO 残留漏音。
+  /// 先卸画面，再 stop + release，避免 AO 残留漏音。
   /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
   Future<void> _stopHard() async {
     _playbackLive = false;
@@ -486,7 +486,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       unawaited(api.cancelPending(hard: true, thunder: true));
     }
 
-    // 先卸掉 Video/PlatformView，再拆引擎（对齐 TV Activity 销毁顺序）。
+    // 先卸掉 Video/PlatformView，再拆引擎（按播放器销毁顺序）。
     if (mounted) {
       setState(() {});
       await WidgetsBinding.instance.endOfFrame;
@@ -531,7 +531,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       hardRelease(zw),
     ]).timeout(const Duration(seconds: 2), onTimeout: () => <void>[]);
 
-    // media_kit Player 由页面持有：对齐 TV engine.release()。
+    // media_kit Player 由页面持有：走 engine.release()。
     await kotvDisposeMpvPlayer(mkPlayer);
 
     try {
@@ -967,7 +967,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     return null;
   }
 
-  /// 对齐 TV Flag.find：按集名 / 集号匹配，不按「第 N 个」。
+  /// 按集名 / 集号匹配，不按「第 N 个」。
   int _matchEpisodeIndex(List<EpisodeItem> eps, String remarks) {
     if (eps.isEmpty) return -1;
     if (eps.length == 1) return 0;
@@ -998,7 +998,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     return -1;
   }
 
-  /// 从目录点文件：按 mark 匹配集名并自动起播（对齐 TV VodHistoryPolicy + mark）。
+  /// 从目录点文件：按 mark 匹配集名并自动起播。
   void _applyFolderMark() {
     final mark = widget.mark.trim();
     if (mark.isEmpty) return;
@@ -1017,7 +1017,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     return int.tryParse(m.group(1) ?? '') ?? -1;
   }
 
-  /// 换线路：立刻切列表并按集名保留当前集（对齐 TV seamless）。
+  /// 换线路：立刻切列表并按集名保留当前集。
   void _selectFlag(int i, {bool autoPlay = true}) {
     final d = _detail;
     if (d == null || d.flags.isEmpty) return;
@@ -1100,7 +1100,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         ep.url.toLowerCase().contains('.torrent') ||
         ep.url.contains('/proxy/bt/') ||
         ep.url.toLowerCase().startsWith('magnet://local');
-    // 立刻高亮（对齐 TV）：不要等停播/解析，否则 PC 要点 1–2 秒按钮才变色。
+    // 立刻高亮：不要等停播/解析，否则 PC 要点 1–2 秒按钮才变色。
     if (mounted) {
       setState(() {
         _epIdx = epIdx;
@@ -1202,7 +1202,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         }
       } catch (_) {}
       final remoteEngine = !kotvIsLocalEngineBaseUrl(ref.read(apiProvider).baseUrl);
-      // 本机对齐 TV；远端看开关。优先用引擎 play 接口算好的 preferSpiderProxy。
+      // 本机走本地代理；远端看开关。优先用引擎 play 接口算好的 preferSpiderProxy。
       final preferSpiderProxy = data.containsKey('preferSpiderProxy')
           ? data['preferSpiderProxy'] == true
           : (!remoteEngine || backendProxyPlay);
@@ -1228,7 +1228,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final pb = _playback;
         await pb.setDecodeMode(failover.decodeMode);
         await pb.setRenderMode(_renderMode);
-        // 本机(=TV)/远端开加速：走 playUrl（/proxy）；远端默认才直连 CDN。
+        // 本机/远端开加速：走 playUrl（/proxy）；远端默认才直连 CDN。
         final localMedia = mediaUrl.startsWith('file:') ||
             mediaUrl.startsWith('content:') ||
             (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
@@ -1367,7 +1367,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
   }
 
-  /// 对齐 TV Sniffer.isVideoFormat 的常见直链：这类换集不显示「解析」浮层。
+  /// 以下常见直链这类换集不显示「解析」浮层。
   bool _epLooksDirectPlayUrl(String raw) {
     final u = raw.trim().toLowerCase();
     if (u.isEmpty) return false;
@@ -2122,7 +2122,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
 
     return PopScope(
-      // 对齐 TV：返回必须先 await 硬停，禁止 canPop 抢跑（所有播放器共用 _stopHard）。
+      // 返回必须先 await 硬停，禁止 canPop 抢跑（所有播放器共用 _stopHard）。
       canPop: _allowPop,
       onPopInvoked: (didPop) {
         if (didPop) return;

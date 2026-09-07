@@ -126,7 +126,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		saved++
 	}
-	// 兼容 TV 遥控：files-0 / files-1 …
+	// 兼容遥控端：files-0 / files-1 …
 	if r.MultipartForm != nil {
 		for name, fhs := range r.MultipartForm.File {
 			if name == "file" || !strings.HasPrefix(name, "files") {

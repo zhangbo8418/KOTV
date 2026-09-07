@@ -10,7 +10,7 @@ import 'package:flutter/services.dart';
 const kotvDefaultImageUa =
     'Mozilla/5.0 (Linux; Android 7.1.2; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Safari/537.36';
 
-/// 解析站源海报地址：支持 CatVod `url@Headers={...}` / `url@Referer=...`（对齐 TV ImgUtil）。
+/// 解析站源海报地址：支持 CatVod `url@Headers={...}` / `url@Referer=...`（海报地址解析规则）。
 ({String url, Map<String, String> headers}) kotvParseImageUrl(String raw) {
   var s = raw.trim();
   final headers = <String, String>{};
@@ -93,7 +93,7 @@ String _canonImageHeader(String key) {
 }
 
 /// 统一网络海报。
-/// Android：对齐 TV [ImgUtil] —— PlatformView + Glide 解析 `@Headers=`。
+/// Android：PlatformView + Glide 解析 `@Headers=`。
 /// 其它平台：Image.network + 解析后的 headers。
 class KotvNetworkImage extends StatelessWidget {
   const KotvNetworkImage(

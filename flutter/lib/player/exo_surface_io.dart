@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 
 /// Exo 画面平台视图。
 ///
-/// - [hybrid]=true：Hybrid Composition + SurfaceView（对齐 TV，HDR 直出）
+/// - [hybrid]=true：Hybrid Composition + SurfaceView（HDR 直出）
 /// - [hybrid]=false：Virtual Display（兼容路径；HDR/10bit 可能异常）
 Widget kotvExoSurfaceView({
   Key? key,

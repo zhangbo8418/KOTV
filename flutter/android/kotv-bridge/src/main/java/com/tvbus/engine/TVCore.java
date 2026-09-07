@@ -7,7 +7,7 @@ import com.github.catvod.Init;
 
 import java.util.List;
 
-/** 对齐 TV {@code :tvbus}：运行时 {@code System.load} 直播配置里的 so。 */
+/** {@code :tvbus}：运行时 {@code System.load} 直播配置里的 so。 */
 public class TVCore implements Runnable {
 
     private final Thread thread;

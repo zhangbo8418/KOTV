@@ -567,7 +567,7 @@ class PostMsgHost {
     );
   }
 
-  /// 对齐 TV leanback [AndroidAutoSize]：设计稿 960×540，整窗（含弹窗）按屏等比缩放。
+  /// 设计稿 960×540，整窗（含弹窗）按屏等比缩放。
   /// 桌面仍用 [LayoutScale]（1280×720）。
   static double hostUiScale(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
@@ -579,7 +579,7 @@ class PostMsgHost {
     return LayoutScale.layoutOf(context);
   }
 
-  /// 对齐 TV / 换源大卡片：半透明 dialogBg + 18 圆角描边；尺寸随 [hostUiScale] 自动缩放。
+  /// 换源大卡片：半透明 dialogBg + 18 圆角描边；尺寸随 [hostUiScale] 自动缩放。
   Widget _hostUiCard({
     required BuildContext context,
     required Map<String, dynamic> doc,
@@ -600,7 +600,7 @@ class PostMsgHost {
     final maxH = screen.height * 0.9;
     final rawW = _num(doc['width']);
     final rawH = _num(doc['height']);
-    // 脚本给的 width/font 按 TV 设计稿 dp；未给时默认卡宽也按 s 缩放。
+    // 脚本给的 width/font 按设计稿 dp；未给时默认卡宽也按 s 缩放。
     var cardW = rawW > 0 ? rawW * s : (desktop ? 560.0 : 420.0) * s;
     if (desktop && cardW < 520 * s) cardW = 520 * s;
     cardW = cardW.clamp(280.0 * s, maxW);

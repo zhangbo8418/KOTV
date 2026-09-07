@@ -31,7 +31,7 @@ class KotvTraffic {
     _speedBps = 0;
   }
 
-  /// 采样一次，返回 bytes/s。各累计源首拍建基线时为 0（同 TV）。
+  /// 采样一次，返回 bytes/s。各累计源首拍建基线时为 0。
   static Future<int> sampleBps({int playerFallbackBps = 0}) async {
     final speeds = <int>[];
 

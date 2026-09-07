@@ -18,7 +18,7 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 /**
- * 对齐 TV [com.fongmi.android.tv.utils.FileChooser]：
+ * 本地文件选择：
  * 把 SAF Document URI 解析成磁盘真实路径，避免只拷单个 JSON 到 cache/UUID。
  *
  * 注意：Downloads 文档提供者常只给 DISPLAY_NAME；若直接拼 `/Download/文件名`
@@ -243,7 +243,7 @@ object KotvFileChooser {
     }
   }
 
-  /** SAF 无法解析真实路径时：仅拷贝单文件（与 TV 相同回退，相对脚本仍可能缺失）。 */
+  /** SAF 无法解析真实路径时：仅拷贝单文件（相对脚本仍可能缺失）。 */
   private fun createFileFromUri(context: Context, uri: Uri): String? {
     val projection = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME)
     return try {
@@ -324,7 +324,7 @@ object KotvFileChooser {
 
   fun storageRoot(): String = Environment.getExternalStorageDirectory().absolutePath
 
-  /** 对齐 TV FileActivity：Java listFiles 同时列出目录和文件（Dart Directory.list 在无完整存储权限时常见只出目录）。 */
+  /** Java listFiles 同时列出目录和文件（Dart Directory.list 在无完整存储权限时常见只出目录）。 */
   fun listDir(path: String): List<Map<String, Any>> {
     val dir = File(path)
     val kids = dir.listFiles() ?: return emptyList()
@@ -345,7 +345,7 @@ object KotvFileChooser {
   }
 
   /**
-   * 对齐 TV FileChooser.show：电视 / 无可用文档选择器时走应用内 FileActivity，
+   * 电视 / 无可用文档选择器时走应用内 FileActivity，
    * 才能进目录；系统桩选择器常把目录当文件返回。
    */
   fun shouldUseFileBrowser(context: Context): Boolean {

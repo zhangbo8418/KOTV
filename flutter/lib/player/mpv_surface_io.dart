@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
-/// 原生 MPV Surface PlatformView（对齐 TV / Exo Hybrid Composition）。
+/// 原生 MPV Surface PlatformView（与 Exo Hybrid Composition 一致）。
 Widget kotvMpvSurfaceView({
   Key? key,
   required String viewType,

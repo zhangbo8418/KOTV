@@ -20,7 +20,7 @@ import java.util.List;
 /**
  * App CL 上的宿主 Path。
  *
- * <p>迅雷 AAR 与站点 jar（父优先）都会解析到本类，因此必须覆盖 TV/bridge 的完整 ABI；
+ * <p>迅雷 AAR 与站点 jar（父优先）都会解析到本类，因此必须覆盖完整 ABI；
  * 不可只留 thunder 瘦接口，否则会盖住 bridge 里的 fat Path，导致
  * {@code Path.tv}/{@code read}/{@code write} 等 NoSuchMethodError。
  */
@@ -109,9 +109,9 @@ public class Path {
     }
 
     /**
-     * 对齐 TV {@code files/so}：摸鱼儿等仓的 .so 多线程走 {@link System#load(String)}，
+     * {@code files/so}：摸鱼儿等仓的 .so 多线程走 {@link System#load(String)}，
      * 不要求 exec 位，高 targetSdk 也能用。
-     * 潇洒哥等同目录落盘的 go 程序则需 {@code chmod+exec}；TV targetSdk 过高无法 exec，
+     * 潇洒哥等同目录落盘的 go 程序则需 {@code chmod+exec}；targetSdk 过高无法 exec，
      * KOTV 默认 targetSdk=28 专为此保留（见 app/build.gradle）。
      */
     public static File so() {
@@ -317,7 +317,7 @@ public class Path {
             file.setWritable(true);
             //noinspection ResultOfMethodCallIgnored
             file.setExecutable(true);
-            // go 多线程：chmod+exec（TV 同逻辑；KOTV 另靠 targetSdk≤28 才能 exec）。
+            // go 多线程：chmod+exec（同上逻辑；KOTV 另靠 targetSdk≤28 才能 exec）。
             try {
                 int code = Runtime.getRuntime()
                         .exec(new String[]{"chmod", "777", file.getAbsolutePath()})

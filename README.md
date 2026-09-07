@@ -41,7 +41,7 @@ CI 统一在 **KOTV Build** 工作流里构建：
 | Web | linux-x64 引擎 + `webapp/` ZIP | 引擎同端口放出页面 |
 
 > **iOS**：仓库含 `flutter/ios/` 开发目录，但当前**未纳入 CI 构建**，属于后续嵌入目标（详见架构文档），不计入已发布平台。
-> **Android TV / leanback**：当前 Android 构建为手机/平板 APK，无独立 TV 构建。文档/UI 中出现的「TV」指 DLNA 投屏目标设备，非 Android TV 应用。
+> **大屏（leanback）**：当前 Android 构建为手机/平板 APK，无独立大屏构建。文档/UI 中出现的「电视」指 DLNA 投屏目标设备。
 
 ## 架构总览
 
@@ -122,7 +122,7 @@ README.txt
 
 **Java / Python 仅使用捆绑路径**，不读 `JAVA_HOME` 或系统 PATH。JAR 爬虫通过捆绑 JRE 启动常驻 `spider-bridge --serve` 进程（JVM 只初始化一次，崩溃可自动拉起），不嵌入主进程。
 
-**播放**：Android 默认 Exo；桌面默认 FVP；内置 MPV 对齐 TV 原生 Surface（接入中）。外部 VLC/MPV 使用系统安装。
+**播放**：Android 默认 Exo；桌面默认 FVP；内置 MPV 走原生 Surface（接入中）。外部 VLC/MPV 使用系统安装。
 
 ## 浏览器 Web 包
 

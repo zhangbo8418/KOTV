@@ -35,7 +35,7 @@ class MainFlutterWindow: NSWindow {
     super.awakeFromNib()
   }
 
-  /// 网卡累计下行字节（跳过 lo0）。缓冲期差分即网速（对齐 TV TrafficStats 思路）。
+  /// 网卡累计下行字节（跳过 lo0）。缓冲期差分即网速。
   private static func interfaceRxBytes() -> Int64 {
     var ifaddr: UnsafeMutablePointer<ifaddrs>?
     guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return -1 }

@@ -277,7 +277,7 @@ func (db *DB) SetConfigName(url string, typ int64, name string) error {
 	return err
 }
 
-// UpdateConfigURLName 编辑源：改地址和/或名称（对齐 TV ConfigDialog.edit）。
+// UpdateConfigURLName 编辑源：改地址和/或名称（编辑源信息）。
 func (db *DB) UpdateConfigURLName(oldURL string, typ int64, newURL, name string) error {
 	oldURL = strings.TrimSpace(oldURL)
 	newURL = strings.TrimSpace(newURL)

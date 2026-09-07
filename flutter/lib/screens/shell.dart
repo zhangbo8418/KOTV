@@ -143,7 +143,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       _handlingBack = false;
     });
 
-    // 对齐 TV VideoActivity.onBack：isFullscreen() → exitFullscreen()，否则 finish()。
+    // isFullscreen() → exitFullscreen()，否则 finish()。
     // 必须先于 root.pop / maybePop：全屏页若先退沉浸，全局右键再进来会当成「出详情」直接回首页。
     if (DetailScreen.isImmersive) {
       unawaited(DetailScreen.exitImmersiveIfOpen());

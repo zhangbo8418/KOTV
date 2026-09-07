@@ -9,7 +9,7 @@ import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import 'h_scroll.dart';
 
-/// Legacy TV 背景：按 settings.backdrop（wallMode）切换渐变/壁纸/内置主题。
+/// Legacy 背景：按 settings.backdrop（wallMode）切换渐变/壁纸/内置主题。
 class AppBackdrop extends ConsumerStatefulWidget {
   const AppBackdrop({super.key, required this.child});
   final Widget child;
