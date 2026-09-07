@@ -1,6 +1,7 @@
 import 'kotv_app_dirs.dart';
 import 'kotv_io.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -14,6 +15,8 @@ bool _isFlutterEphemeralName(String name) {
 
 /// 清理 Flutter / 引擎旁可再生文件（不含 setting.ini、数据库、SharedPreferences）。
 Future<int> kotvClearFlutterEphemeral() async {
+  if (kIsWeb) return 0;
+
   var n = 0;
   Future<void> wipeEntry(FileSystemEntity e) async {
     try {

@@ -204,22 +204,26 @@ class VodInlineControls extends StatelessWidget {
                           const SizedBox(width: 4),
                         SizedBox(
                           width: volW,
-                          child: SliderTheme(
-                            data: _sliderTheme(context),
-                            child: Slider(
-                              value: vol,
-                              max: 100,
-                              onChanged: (v) => player.setVolume(v),
+                          child: ExcludeFocus(
+                            child: SliderTheme(
+                              data: _sliderTheme(context),
+                              child: Slider(
+                                value: vol,
+                                max: 100,
+                                onChanged: (v) => player.setVolume(v),
+                              ),
                             ),
                           ),
                         ),
                       ],
                     ),
-                    KotvSeekSlider(
-                      player: player,
-                      maxMs: total,
-                      secondaryMs: _sliderBuffered(player, total),
-                      theme: _sliderTheme(context),
+                    ExcludeFocus(
+                      child: KotvSeekSlider(
+                        player: player,
+                        maxMs: total,
+                        secondaryMs: _sliderBuffered(player, total),
+                        theme: _sliderTheme(context),
+                      ),
                     ),
                   ],
                 ),
@@ -1456,13 +1460,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       fit: StackFit.expand,
       children: [
         if (widget.visible && !_epOpen)
-          CenterPlayPauseButton(
-            player: widget.player,
-            enabled: widget.playUrl.isNotEmpty,
-            showWhilePlaying: true,
-            hideWhenBuffering: true,
-            autofocus: true,
-            onPressed: widget.onBump,
+          // 中心播停给触控；遥控器走底栏按钮，避免焦点停在画面正中出不去。
+          ExcludeFocus(
+            child: CenterPlayPauseButton(
+              player: widget.player,
+              enabled: widget.playUrl.isNotEmpty,
+              showWhilePlaying: true,
+              hideWhenBuffering: true,
+              autofocus: false,
+              onPressed: widget.onBump,
+            ),
           ),
         if (widget.visible && !_epOpen) ...[
           // 顶栏
@@ -1544,12 +1551,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               child: Text(fmtClockHms(pos), style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13)),
                             ),
                             Expanded(
-                              child: KotvSeekSlider(
-                                player: widget.player,
-                                maxMs: total,
-                                secondaryMs: _sliderBuffered(widget.player, total),
-                                theme: _sliderTheme(context),
-                                onInteraction: widget.onBump,
+                              child: ExcludeFocus(
+                                child: KotvSeekSlider(
+                                  player: widget.player,
+                                  maxMs: total,
+                                  secondaryMs: _sliderBuffered(widget.player, total),
+                                  theme: _sliderTheme(context),
+                                  onInteraction: widget.onBump,
+                                ),
                               ),
                             ),
                             SizedBox(
@@ -1578,6 +1587,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       icon: widget.player.playing ? Icons.pause : Icons.play_arrow,
                                       tip: widget.player.playing ? '暂停' : '播放',
                                       size: land ? 32.0 : 40.0,
+                                      autofocus: true,
                                       onTap: () {
                                         widget.player.playOrPause();
                                         widget.onBump();
@@ -1693,16 +1703,18 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12)),
                             SizedBox(
                               width: 140,
-                              child: SliderTheme(
-                                data: _sliderTheme(context),
-                                child: Slider(
-                                  value: vol,
-                                  max: 100,
-                                  onChanged: (v) {
-                                    widget.player.setVolume(v);
-                                    unawaited(_persist('playerVolume', '${v.round()}'));
-                                    widget.onBump();
-                                  },
+                              child: ExcludeFocus(
+                                child: SliderTheme(
+                                  data: _sliderTheme(context),
+                                  child: Slider(
+                                    value: vol,
+                                    max: 100,
+                                    onChanged: (v) {
+                                      widget.player.setVolume(v);
+                                      unawaited(_persist('playerVolume', '${v.round()}'));
+                                      widget.onBump();
+                                    },
+                                  ),
                                 ),
                               ),
                             ),
