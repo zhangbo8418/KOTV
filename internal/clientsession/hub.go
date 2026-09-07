@@ -38,6 +38,22 @@ func NewHub() *Hub {
 	return &Hub{byID: map[string]*Session{}}
 }
 
+// ForEach 遍历当前会话（回调内勿再调 GetOrCreate，避免死锁）。
+func (h *Hub) ForEach(fn func(*Session)) {
+	if h == nil || fn == nil {
+		return
+	}
+	h.mu.Lock()
+	list := make([]*Session, 0, len(h.byID))
+	for _, s := range h.byID {
+		list = append(list, s)
+	}
+	h.mu.Unlock()
+	for _, s := range list {
+		fn(s)
+	}
+}
+
 // GetOrCreate 返回已有会话，或用 factory 新建并登记。
 func (h *Hub) GetOrCreate(id string, factory func() *Session) *Session {
 	h.mu.Lock()

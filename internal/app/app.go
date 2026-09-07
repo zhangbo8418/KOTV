@@ -397,15 +397,18 @@ func (a *App) applyRemoteSetting(name, value string) {
 func (a *App) ReloadConfig() error {
 	util.SetProxy(settings.Get(settings.Proxy))
 	spider.SetUserProxy(settings.Get(settings.Proxy))
+	// 对齐 TV VodConfig.load：换仓前先不可用，避免 Clear 窗口内仍 Ready 去 Get ""。
+	a.Ready = false
+	a.ErrMsg = ""
 	a.Config.Clear()
 	if err := a.Config.InitFromSettings(); err != nil {
-		a.Ready = false
 		a.ErrMsg = err.Error()
 		return err
 	}
 	a.Ready = true
 	a.ErrMsg = ""
 	a.Live.SyncFromConfig()
+	a.syncSessionsFromGlobal()
 	return nil
 }
 
@@ -413,16 +416,40 @@ func (a *App) ReloadConfig() error {
 func (a *App) LoadVodSource(source string) error {
 	util.SetProxy(settings.Get(settings.Proxy))
 	spider.SetUserProxy(settings.Get(settings.Proxy))
+	a.Ready = false
+	a.ErrMsg = ""
 	a.Config.Clear()
 	if err := a.Config.LoadFromSource(source); err != nil {
-		a.Ready = false
 		a.ErrMsg = err.Error()
 		return err
 	}
 	a.Ready = true
 	a.ErrMsg = ""
 	a.Live.SyncFromConfig()
+	a.syncSessionsFromGlobal()
 	return nil
+}
+
+// syncSessionsFromGlobal 全局换源成功后，会话侧跟 TV 一样「整图」换到新配置，
+// 避免 Cfg/Sites 仍钉旧 CloneEphemeral。
+func (a *App) syncSessionsFromGlobal() {
+	if a == nil || a.sessions == nil || !a.Ready {
+		return
+	}
+	a.sessions.ForEach(func(sess *clientsession.Session) {
+		if sess == nil {
+			return
+		}
+		bindSessionConfig(sess, a.Config.CloneEphemeral())
+		sess.Ready = true
+		sess.ErrMsg = ""
+		sess.Source = settings.Get(settings.VOD)
+		if home := sess.Cfg.Home(); home.Key == "" || home.API == "" || config.IsMetaSite(home) {
+			if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
+				sess.Cfg.SetHome(alt)
+			}
+		}
+	})
 }
 
 func (a *App) OpenPushURL(url string) {

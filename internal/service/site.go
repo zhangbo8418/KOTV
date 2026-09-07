@@ -141,6 +141,18 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 	var result model.Result
 	var err error
 
+	// TV SiteApi 也会因空 URL 失败；这里早拒，避免 Go 甩出 Get "" unsupported protocol。
+	if strings.TrimSpace(site.API) == "" {
+		name := strings.TrimSpace(site.Name)
+		if name == "" {
+			name = strings.TrimSpace(site.Key)
+		}
+		if name == "" {
+			name = "未选站"
+		}
+		return model.Result{Success: false}, fmt.Errorf("站点「%s」无接口地址，请换源或换站", name)
+	}
+
 	switch site.TypeID() {
 	case 3: // Spider
 		sp := s.cfg.Spider(site)
