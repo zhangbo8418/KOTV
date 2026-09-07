@@ -70,6 +70,8 @@ public final class MPVLib {
     private static final int VULKAN_1_2 = 0x00402000;
     private static Boolean bundledVulkanEnabled;
     private static Boolean deviceVulkanCapable;
+    /** true = 已 FORCE_LOAD 空 stub；此时不可开 gpu-api=vulkan（会卡死）。 */
+    private static boolean vulkanStubLoaded;
     private static final long CONTEXT_RECREATE_COOLDOWN_MS = 350;
     private static final long CONTEXT_SHUTDOWN_TIMEOUT_MS = 2000;
     private static long lastContextDestroyedAtMs;
@@ -98,6 +100,16 @@ public final class MPVLib {
         } else {
             Log.i(TAG, "MPV libvulkan stub loaded globally from " + vulkanSo.getAbsolutePath());
         }
+        vulkanStubLoaded = true;
+    }
+
+    /** 设备有 Vulkan≥1.2 时用系统 loader，勿装 stub（否则渲染 Vulkan 卡死）。 */
+    private static boolean shouldLoadVulkanStub(Context app) {
+        try {
+            return !isDeviceVulkanCapable(app);
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     private MPVLib() {
@@ -117,36 +129,39 @@ public final class MPVLib {
             String bundleId = getBundleId(app, abi);
             boolean refreshBundle = !bundleId.equals(readMarker(marker));
             for (String lib : COPY_ORDER) copyLibrary(app.getAssets(), abi, lib, dir, refreshBundle);
-            // 对齐 webhtv：全部用 Java System.load(extract)。勿用 kotv_dl dlopen 加载 libc++——
-            // 会绕过 ClassLoader linker namespace，API25 上 _Znwm@plt 落到未重定位地址 0x1423c0。
-            // libvulkan stub 例外：必须 FORCE_LOAD 覆盖系统 Vulkan 1.0。
+            // libvulkan stub 仅给无 Vulkan1.2 的机子（API25）；真机用系统 libvulkan。
             System.loadLibrary("kotv_dl");
             File appVulkan = new File(app.getApplicationInfo().nativeLibraryDir, "libvulkan.so");
             File extractedVulkan = new File(dir, "libvulkan.so");
             File vulkanSo = appVulkan.isFile() ? appVulkan : extractedVulkan;
+            final boolean needStub = shouldLoadVulkanStub(app);
             final boolean useExtractLoad = Build.VERSION.SDK_INT < 31;
             if (useExtractLoad) {
                 for (String lib : LOAD_ORDER) {
-                    if ("mpv".equals(lib)) {
+                    if ("mpv".equals(lib) && needStub) {
                         loadVulkanStubGlobal(vulkanSo);
                     }
                     File so = new File(dir, System.mapLibraryName(lib));
                     Log.i(TAG, "System.load " + so.getAbsolutePath());
                     System.load(so.getAbsolutePath());
                 }
-                Log.i(TAG, "MPV natives loaded via System.load (extract, webhtv-style)");
+                Log.i(TAG, "MPV natives loaded via System.load (extract, webhtv-style) stub=" + needStub);
             } else {
                 try {
                     System.loadLibrary("c++_shared");
                 } catch (UnsatisfiedLinkError ignored) {
                     System.load(new File(dir, "libc++_shared.so").getAbsolutePath());
                 }
-                loadVulkanStubGlobal(vulkanSo);
+                if (needStub) {
+                    loadVulkanStubGlobal(vulkanSo);
+                } else {
+                    Log.i(TAG, "skip libvulkan stub; use system Vulkan for gpu-api");
+                }
                 for (String lib : LOAD_ORDER) {
                     if ("c++_shared".equals(lib)) continue;
                     System.loadLibrary(lib);
                 }
-                Log.i(TAG, "MPV natives loaded via System.loadLibrary (jniLibs)");
+                Log.i(TAG, "MPV natives loaded via System.loadLibrary (jniLibs) stub=" + needStub);
             }
             loadedAbi = abi;
             loaded = true;
@@ -199,6 +214,8 @@ public final class MPVLib {
     }
 
     public static boolean isVulkanRendererAvailable(Context context) {
+        // stub 已占位时不能开 gpu-api=vulkan（符号是空壳）。
+        if (vulkanStubLoaded) return false;
         return isBundledVulkanEnabled(context) && isDeviceVulkanCapable(context);
     }
 

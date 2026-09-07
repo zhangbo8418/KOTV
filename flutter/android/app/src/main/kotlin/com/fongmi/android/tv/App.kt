@@ -57,6 +57,15 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun preloadAppLibvulkan() {
+    // 仅 API25 / 无 Vulkan1.2 的设备需要 stub 满足 libmpv DT_NEEDED。
+    // 真机 Vulkan≥1.2 若仍 FORCE_LOAD stub，gpu-api=vulkan 会绑到空实现 → 卡死（TV 无 stub，故正常）。
+    try {
+      if (`is`.xyz.mpv.MPVLib.isDeviceVulkanCapable(this)) {
+        android.util.Log.i(TAG, "skip libvulkan stub preload (device Vulkan≥1.2)")
+        return
+      }
+    } catch (_: Throwable) {
+    }
     try {
       System.loadLibrary("kotv_dl")
       val so = java.io.File(applicationInfo.nativeLibraryDir, "libvulkan.so")

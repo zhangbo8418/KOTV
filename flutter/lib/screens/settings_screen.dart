@@ -825,200 +825,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(24, 14, 24, 40),
                   children: [
+                    const KotvSettingsSectionTitle('数据源'),
                     KotvSettingsCard(children: [
                       KotvSettingsWideTile(label: '首页数据源', value: homeName, onTap: () => _pickHome(sites)),
-                      KotvSettingsGrid(children: [
-                        KotvSettingsCell(
-                          label: '点播播放器',
-                          value: playerLabel,
-                          onTap: kotvCanSwitchPlayer(live: false)
-                              ? () => _pick('点播播放器', 'player', kotvVodPlayerOptions(), msg: '点播播放器已切换')
-                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/FVP）'),
-                        ),
-                        KotvSettingsCell(
-                          label: '直播播放器',
-                          value: livePlayerLabel,
-                          onTap: kotvCanSwitchPlayer(live: true)
-                              ? () => _pick(
-                                    '直播播放器',
-                                    'playerLive',
-                                    kotvLivePlayerOptions(),
-                                    msg: '直播播放器已切换',
-                                  )
-                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/FVP）'),
-                        ),
-                        KotvSettingsCell(
-                          label: '默认倍速',
-                          value: '$speed 倍',
-                          onTap: () => _pick('默认倍速', 'playerSpeed', const [
-                            ('0.5 倍', '0.5'),
-                            ('0.75 倍', '0.75'),
-                            ('1.0 倍', '1.0'),
-                            ('1.25 倍', '1.25'),
-                            ('1.5 倍', '1.5'),
-                            ('2.0 倍', '2.0'),
-                          ]),
-                        ),
-                        KotvSettingsCell(
-                          label: '画面比例',
-                          value: scaleLabel,
-                          onTap: () => _pick('画面比例', 'playerScale', const [
-                            ('适应', 'default'),
-                            ('拉伸', 'fill'),
-                            ('Zoom', 'zoom'),
-                            ('16:9', '16:9'),
-                            ('4:3', '4:3'),
-                          ]),
-                        ),
-                        KotvSettingsCell(
-                          label: '默认解析器',
-                          value: parseName,
-                          onTap: () async {
-                            final opts = <(String, String)>[('自动（默认）', '')];
-                            for (final p in _parses) {
-                              final n = '${p['name'] ?? ''}';
-                              if (n.isNotEmpty) opts.add((n, n));
-                            }
-                            if (opts.length <= 1) {
-                              showAppNews(context, '当前配置无解析器列表');
-                              return;
-                            }
-                            await _pick('默认解析器', 'preferredParse', opts);
-                          },
-                        ),
-                        KotvSettingsCell(label: '广告过滤', value: adLabel, onTap: _pickAd),
-                        KotvSettingsCell(
-                          label: '弹幕',
-                          value: danOn ? '开启' : '关闭',
-                          onTap: () => _set('danmaku', danOn ? 'false' : 'true', msg: danOn ? '弹幕已关闭' : '弹幕已开启'),
-                        ),
-                        KotvSettingsCell(
-                          label: '无痕模式',
-                          value: incognito ? '开启' : '关闭',
-                          onTap: () => _set('incognito', incognito ? 'false' : 'true', msg: incognito ? '无痕已关闭' : '无痕已开启'),
-                        ),
-                        KotvSettingsCell(
-                          label: '远端网盘经后端加速',
-                          value: backendProxyPlay ? '开启' : '关闭',
-                          onTap: () => _set(
-                            'backendProxyPlay',
-                            backendProxyPlay ? 'false' : 'true',
-                            msg: backendProxyPlay
-                                ? '已关闭：远端优先直连 CDN（本机仍按 TV 走本地代理）'
-                                : '已开启：远端也走引擎 /proxy（原生库/go/Java 多线程）',
-                          ),
-                        ),
-                        KotvSettingsCell(
-                          label: '投屏接收',
-                          value: dmr ? '开启' : '关闭',
-                          onTap: () => _set('dlnaRenderer', dmr ? 'false' : 'true', msg: dmr ? '已关闭 DLNA 被投端' : '已开启 DLNA 被投端'),
-                        ),
-                        KotvSettingsCell(
-                          label: 'Web / 遥控',
-                          value: ':$_port',
-                          onTap: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
-                        ),
-                        KotvSettingsCell(
-                          label: '解码方式',
-                          value: decodeLabel,
-                          onTap: () => _pick('解码方式', 'playerDecode', const [
-                            ('自动（推荐）', 'auto'),
-                            ('软解码', 'soft'),
-                            ('硬解码', 'hard'),
-                          ]),
-                        ),
-                        if (kotvIsAndroid() &&
-                            (kotvPlayerRenderApplies(playerVal) || kotvPlayerRenderApplies(livePlayerVal)))
-                          KotvSettingsCell(
-                            label: '渲染方式',
-                            value: renderLabel,
-                            onTap: () => _pick('渲染方式（仅 Exo）', 'playerRender', const [
-                              ('Surface（推荐，HDR）', 'surface'),
-                              ('Texture', 'texture'),
-                            ], msg: '仅内置 Exo 生效，已保存'),
-                          ),
-                        KotvSettingsCell(
-                          label: '自动切换播放器',
-                          value: failoverLabel,
-                          onTap: () => _pick('自动切换播放器', 'playerFailover', const [
-                            ('自动（黑屏/停滞时换播放器）', 'auto'),
-                            ('关闭（只用所选播放器）', 'off'),
-                          ]),
-                        ),
-                        KotvSettingsCell(
-                          label: '直播失败换线',
-                          value: liveChangeLabel,
-                          onTap: () => _pick('直播失败换线', 'liveAutoChange', const [
-                            ('开启（对齐 TV：失败自动下一线路）', 'true'),
-                            ('关闭', 'false'),
-                          ]),
-                        ),
-                        KotvSettingsCell(
-                          label: 'User-Agent',
-                          value: g('ua').isEmpty ? '默认' : _ellipsize(g('ua'), 22),
-                          onTap: _editUa,
-                        ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: 'MPV gpu-next',
-                            value: mpvGpuNext ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'mpvGpuNext',
-                              mpvGpuNext ? 'false' : 'true',
-                              msg: mpvGpuNext
-                                  ? '已关闭 gpu-next（重启播放生效）'
-                                  : '已开启 vo=gpu-next（重启播放生效）',
-                            )),
-                          ),
-                        if (showMpvVulkan)
-                          KotvSettingsCell(
-                            label: 'MPV Vulkan',
-                            value: mpvVulkan ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'mpvVulkan',
-                              mpvVulkan ? 'false' : 'true',
-                              msg: mpvVulkan
-                                  ? '已关闭 Vulkan（重启播放生效）'
-                                  : (kotvIsAndroid()
-                                      ? '已开启 gpu-api=vulkan（解码仍为 mediacodec，重启播放生效）'
-                                      : '已开启 gpu-api=vulkan（media_kit 内置 MPV，重启播放）'),
-                            )),
-                          ),
-                        if (showMpvOpts)
-                          KotvSettingsCell(
-                            label: 'MPV 配置',
-                            value: mpvConfPreview.isEmpty
-                                ? '默认'
-                                : _ellipsize(mpvConfPreview.replaceAll('\n', ' '), 18),
-                            onTap: () => _prompt(
-                              'MPV 配置（mpv.conf）',
-                              '每行 key=value，# 注释。可写 hwdec=no 等。重启播放后生效。\n'
-                              '桌面诊断：kotv-log=debug 加深 libmpv 日志（写入应用数据目录 kotv-mpv.log，与 kotv-engine-spawn.log 同目录）；kotv-log=no 关闭。',
-                              g('mpvConf'),
-                              (v) => _set('mpvConf', v, msg: 'MPV 配置已保存'),
-                              maxLines: 12,
-                            ),
-                          ),
-                      ]),
-                    ]),
-                    const KotvSettingsSectionTitle('UI设置'),
-                    KotvSettingsCard(children: [
-                      KotvSettingsGrid(children: [
-                        KotvSettingsCell(
-                          label: '选择主题',
-                          value: themeLabel,
-                          onTap: () => _pick('主题', 'theme', const [
-                            ('深色', 'dark'),
-                            ('浅色', 'light'),
-                            ('跟随系统', 'system'),
-                          ], msg: '主题已保存'),
-                        ),
-                        KotvSettingsCell(label: '换张壁纸', value: _wallLabel(wall), onTap: _pickWall),
-                        KotvSettingsCell(label: '重置壁纸', onTap: _resetWall),
-                      ]),
-                    ]),
-                    const KotvSettingsSectionTitle('播放设置'),
-                    KotvSettingsCard(children: [
                       KotvSettingsGrid(children: [
                         KotvSettingsCell(
                           label: '点播源',
@@ -1054,27 +863,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           },
                         ),
                         KotvSettingsCell(
-                          label: '代理',
-                          value: g('proxy').isEmpty ? '未配置' : g('proxy'),
-                          onTap: () => _prompt('代理', 'false# 或 true#http://127.0.0.1:7890', g('proxy'), (v) => _set('proxy', v, msg: '代理已更新')),
-                        ),
-                        KotvSettingsCell(
-                          label: '弹幕 API',
-                          value: g('danmakuApi').isEmpty ? '未配置' : '已配置',
-                          onTap: () => _prompt('弹幕 API', 'https://...', g('danmakuApi'), (v) => _set('danmakuApi', v)),
-                        ),
-                        KotvSettingsCell(
-                          label: 'Assrt Token',
-                          value: g('assrtToken').isEmpty ? '未配置' : '已配置',
-                          onTap: () => _prompt('Assrt Token', 'token', g('assrtToken'), (v) => _set('assrtToken', v)),
-                        ),
-                        KotvSettingsCell(
-                          label: '更新地址',
-                          value: g('updateUrl').isEmpty ? '未配置' : g('updateUrl'),
-                          onTap: () => _prompt('更新地址', 'version.json URL', g('updateUrl'), (v) => _set('updateUrl', v)),
-                        ),
-                        KotvSettingsCell(label: '投屏', value: 'DLNA', onTap: _cast),
-                        KotvSettingsCell(
                           label: '线路选择',
                           value: '多仓',
                           onTap: () async {
@@ -1094,7 +882,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             setState(() => _status = '直播源已切换');
                           },
                         ),
-                        // Web 固定同源后端，不提供改引擎地址。
+                        KotvSettingsCell(
+                          label: '默认解析器',
+                          value: parseName,
+                          onTap: () async {
+                            final opts = <(String, String)>[('自动（默认）', '')];
+                            for (final p in _parses) {
+                              final n = '${p['name'] ?? ''}';
+                              if (n.isNotEmpty) opts.add((n, n));
+                            }
+                            if (opts.length <= 1) {
+                              showAppNews(context, '当前配置无解析器列表');
+                              return;
+                            }
+                            await _pick('默认解析器', 'preferredParse', opts);
+                          },
+                        ),
+                        KotvSettingsCell(
+                          label: '代理',
+                          value: g('proxy').isEmpty ? '未配置' : g('proxy'),
+                          onTap: () => _prompt('代理', 'false# 或 true#http://127.0.0.1:7890', g('proxy'), (v) => _set('proxy', v, msg: '代理已更新')),
+                        ),
                         if (!kIsWeb)
                           KotvSettingsCell(
                             label: '引擎地址',
@@ -1106,7 +914,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               _applyEngineUrl,
                             ),
                           ),
-                        // 远端登录态 / 入口（Web 打开页登录）
                         if (!kIsWeb)
                           KotvSettingsCell(
                             label: kotvIsLocalEngineBaseUrl(launcher.baseUrl) ? '远端登录' : '远端账号',
@@ -1121,6 +928,182 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               await _engineLogin();
                             },
                           ),
+                      ]),
+                    ]),
+                    const KotvSettingsSectionTitle('播放器'),
+                    KotvSettingsCard(children: [
+                      KotvSettingsGrid(children: [
+                        KotvSettingsCell(
+                          label: '点播播放器',
+                          value: playerLabel,
+                          onTap: kotvCanSwitchPlayer(live: false)
+                              ? () => _pick('点播播放器', 'player', kotvVodPlayerOptions(), msg: '点播播放器已切换')
+                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/FVP）'),
+                        ),
+                        KotvSettingsCell(
+                          label: '直播播放器',
+                          value: livePlayerLabel,
+                          onTap: kotvCanSwitchPlayer(live: true)
+                              ? () => _pick(
+                                    '直播播放器',
+                                    'playerLive',
+                                    kotvLivePlayerOptions(),
+                                    msg: '直播播放器已切换',
+                                  )
+                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/FVP）'),
+                        ),
+                        KotvSettingsCell(
+                          label: '解码方式',
+                          value: decodeLabel,
+                          onTap: () => _pick('解码方式', 'playerDecode', const [
+                            ('自动（推荐）', 'auto'),
+                            ('软解码', 'soft'),
+                            ('硬解码', 'hard'),
+                          ]),
+                        ),
+                        if (kotvIsAndroid() &&
+                            (kotvPlayerRenderApplies(playerVal) || kotvPlayerRenderApplies(livePlayerVal)))
+                          KotvSettingsCell(
+                            label: '渲染方式',
+                            value: renderLabel,
+                            onTap: () => _pick('渲染方式（仅 Exo）', 'playerRender', const [
+                              ('Surface（推荐，HDR）', 'surface'),
+                              ('Texture', 'texture'),
+                            ], msg: '仅内置 Exo 生效，已保存'),
+                          ),
+                        KotvSettingsCell(
+                          label: '默认倍速',
+                          value: '$speed 倍',
+                          onTap: () => _pick('默认倍速', 'playerSpeed', const [
+                            ('0.5 倍', '0.5'),
+                            ('0.75 倍', '0.75'),
+                            ('1.0 倍', '1.0'),
+                            ('1.25 倍', '1.25'),
+                            ('1.5 倍', '1.5'),
+                            ('2.0 倍', '2.0'),
+                          ]),
+                        ),
+                        KotvSettingsCell(
+                          label: '画面比例',
+                          value: scaleLabel,
+                          onTap: () => _pick('画面比例', 'playerScale', const [
+                            ('适应', 'default'),
+                            ('拉伸', 'fill'),
+                            ('Zoom', 'zoom'),
+                            ('16:9', '16:9'),
+                            ('4:3', '4:3'),
+                          ]),
+                        ),
+                        KotvSettingsCell(
+                          label: '自动切换播放器',
+                          value: failoverLabel,
+                          onTap: () => _pick('自动切换播放器', 'playerFailover', const [
+                            ('自动（黑屏/停滞时换播放器）', 'auto'),
+                            ('关闭（只用所选播放器）', 'off'),
+                          ]),
+                        ),
+                        KotvSettingsCell(
+                          label: '直播失败换线',
+                          value: liveChangeLabel,
+                          onTap: () => _pick('直播失败换线', 'liveAutoChange', const [
+                            ('开启（对齐 TV：失败自动下一线路）', 'true'),
+                            ('关闭', 'false'),
+                          ]),
+                        ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: 'MPV gpu-next',
+                            value: mpvGpuNext ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'mpvGpuNext',
+                              mpvGpuNext ? 'false' : 'true',
+                              msg: mpvGpuNext
+                                  ? '已关闭 gpu-next（重启播放生效）'
+                                  : '已开启 vo=gpu-next（重启播放生效）',
+                            )),
+                          ),
+                        if (showMpvVulkan)
+                          KotvSettingsCell(
+                            label: 'MPV Vulkan',
+                            value: mpvVulkan ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'mpvVulkan',
+                              mpvVulkan ? 'false' : 'true',
+                              msg: mpvVulkan
+                                  ? '已关闭 Vulkan（重启播放生效）'
+                                  : (kotvIsAndroid()
+                                      ? '已开启 gpu-api=vulkan（解码仍为 mediacodec，重启 App 后生效）'
+                                      : '已开启 gpu-api=vulkan（media_kit 内置 MPV，重启播放）'),
+                            )),
+                          ),
+                        if (showMpvOpts)
+                          KotvSettingsCell(
+                            label: 'MPV 配置',
+                            value: mpvConfPreview.isEmpty
+                                ? '默认'
+                                : _ellipsize(mpvConfPreview.replaceAll('\n', ' '), 18),
+                            onTap: () => _prompt(
+                              'MPV 配置（mpv.conf）',
+                              '每行 key=value，# 注释。可写 hwdec=no 等。重启播放后生效。\n'
+                              '桌面诊断：kotv-log=debug 加深 libmpv 日志（写入应用数据目录 kotv-mpv.log，与 kotv-engine-spawn.log 同目录）；kotv-log=no 关闭。',
+                              g('mpvConf'),
+                              (v) => _set('mpvConf', v, msg: 'MPV 配置已保存'),
+                              maxLines: 12,
+                            ),
+                          ),
+                      ]),
+                    ]),
+                    const KotvSettingsSectionTitle('功能'),
+                    KotvSettingsCard(children: [
+                      KotvSettingsGrid(children: [
+                        KotvSettingsCell(label: '广告过滤', value: adLabel, onTap: _pickAd),
+                        KotvSettingsCell(
+                          label: '弹幕',
+                          value: danOn ? '开启' : '关闭',
+                          onTap: () => _set('danmaku', danOn ? 'false' : 'true', msg: danOn ? '弹幕已关闭' : '弹幕已开启'),
+                        ),
+                        KotvSettingsCell(
+                          label: '弹幕 API',
+                          value: g('danmakuApi').isEmpty ? '未配置' : '已配置',
+                          onTap: () => _prompt('弹幕 API', 'https://...', g('danmakuApi'), (v) => _set('danmakuApi', v)),
+                        ),
+                        KotvSettingsCell(
+                          label: '无痕模式',
+                          value: incognito ? '开启' : '关闭',
+                          onTap: () => _set('incognito', incognito ? 'false' : 'true', msg: incognito ? '无痕已关闭' : '无痕已开启'),
+                        ),
+                        KotvSettingsCell(
+                          label: '远端网盘经后端加速',
+                          value: backendProxyPlay ? '开启' : '关闭',
+                          onTap: () => _set(
+                            'backendProxyPlay',
+                            backendProxyPlay ? 'false' : 'true',
+                            msg: backendProxyPlay
+                                ? '已关闭：远端优先直连 CDN（本机仍按 TV 走本地代理）'
+                                : '已开启：远端也走引擎 /proxy（原生库/go/Java 多线程）',
+                          ),
+                        ),
+                        KotvSettingsCell(
+                          label: '投屏接收',
+                          value: dmr ? '开启' : '关闭',
+                          onTap: () => _set('dlnaRenderer', dmr ? 'false' : 'true', msg: dmr ? '已关闭 DLNA 被投端' : '已开启 DLNA 被投端'),
+                        ),
+                        KotvSettingsCell(label: '投屏', value: 'DLNA', onTap: _cast),
+                        KotvSettingsCell(
+                          label: 'User-Agent',
+                          value: g('ua').isEmpty ? '默认' : _ellipsize(g('ua'), 22),
+                          onTap: _editUa,
+                        ),
+                        KotvSettingsCell(
+                          label: 'Assrt Token',
+                          value: g('assrtToken').isEmpty ? '未配置' : '已配置',
+                          onTap: () => _prompt('Assrt Token', 'token', g('assrtToken'), (v) => _set('assrtToken', v)),
+                        ),
+                        KotvSettingsCell(
+                          label: 'Web / 遥控',
+                          value: ':$_port',
+                          onTap: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
+                        ),
                         KotvSettingsCell(
                           label: '用户管理',
                           value: '管理员',
@@ -1132,6 +1115,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                       ]),
                     ]),
+                    const KotvSettingsSectionTitle('界面'),
+                    KotvSettingsCard(children: [
+                      KotvSettingsGrid(children: [
+                        KotvSettingsCell(
+                          label: '选择主题',
+                          value: themeLabel,
+                          onTap: () => _pick('主题', 'theme', const [
+                            ('深色', 'dark'),
+                            ('浅色', 'light'),
+                            ('跟随系统', 'system'),
+                          ], msg: '主题已保存'),
+                        ),
+                        KotvSettingsCell(label: '换张壁纸', value: _wallLabel(wall), onTap: _pickWall),
+                        KotvSettingsCell(label: '重置壁纸', onTap: _resetWall),
+                      ]),
+                    ]),
                     const KotvSettingsSectionTitle('隐私与同步'),
                     KotvSettingsCard(children: [
                       KotvSettingsGrid(columns: 4, children: [
@@ -1141,9 +1140,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(label: '发送收藏', onTap: () => _syncSend('keep')),
                       ]),
                     ]),
-                    const KotvSettingsSectionTitle('更多设置'),
+                    const KotvSettingsSectionTitle('更多'),
                     KotvSettingsCard(children: [
                       KotvSettingsGrid(columns: 4, children: [
+                        KotvSettingsCell(
+                          label: '更新地址',
+                          value: g('updateUrl').isEmpty ? '未配置' : g('updateUrl'),
+                          onTap: () => _prompt('更新地址', 'version.json URL', g('updateUrl'), (v) => _set('updateUrl', v)),
+                        ),
                         KotvSettingsCell(label: '数据备份', onTap: _backupExport),
                         KotvSettingsCell(label: '恢复备份', onTap: _backupImport),
                         KotvSettingsCell(label: '清理缓存', onTap: _clearCache),
