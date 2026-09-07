@@ -129,7 +129,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           key == 'adFilter' ||
           key == 'm3u8FilterConfig' ||
           key == 'danmaku' ||
-          key == 'danmakuApi') {
+          key == 'danmakuApi' ||
+          key == 'danmakuSize' ||
+          key == 'danmakuOpacity' ||
+          key == 'danmakuRows') {
         ref.invalidate(configProvider);
         ref.invalidate(homeProvider);
       }
@@ -1058,7 +1061,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '弹幕 API',
                           value: g('danmakuApi').isEmpty ? '未配置' : '已配置',
-                          onTap: () => _prompt('弹幕 API', 'https://...', g('danmakuApi'), (v) => _set('danmakuApi', v)),
+                          onTap: () => _prompt('弹幕 API', 'https://…?n={name}&e={episode}', g('danmakuApi'), (v) => _set('danmakuApi', v)),
+                        ),
+                        KotvSettingsCell(
+                          label: '弹幕字号',
+                          value: g('danmakuSize', '18'),
+                          onTap: () => _prompt('弹幕字号', '12–48', g('danmakuSize', '18'), (v) => _set('danmakuSize', v)),
+                        ),
+                        KotvSettingsCell(
+                          label: '弹幕透明度',
+                          value: g('danmakuOpacity', '85'),
+                          onTap: () => _prompt('弹幕透明度', '0–100', g('danmakuOpacity', '85'), (v) => _set('danmakuOpacity', v)),
+                        ),
+                        KotvSettingsCell(
+                          label: '弹幕行数',
+                          value: g('danmakuRows', '6'),
+                          onTap: () => _prompt('弹幕行数', '1–16', g('danmakuRows', '6'), (v) => _set('danmakuRows', v)),
                         ),
                         KotvSettingsCell(
                           label: '无痕模式',

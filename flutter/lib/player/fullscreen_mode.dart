@@ -79,20 +79,18 @@ Future<void> kotvForceLandscape() async {
   } catch (_) {}
 }
 
-/// 竖屏设备 + 横屏画面时，显示「全屏观看」强制横屏。
+/// 仅「手机竖屏握持 + 横屏片源」时显示「全屏观看」。
+/// 竖屏片、方片、尺寸未出（加载中）都不显示。
 bool kotvShouldShowForceLandscape({
   required Size screen,
   required int videoWidth,
   required int videoHeight,
 }) {
   if (kotvIsDesktop()) return false;
-  final portrait = screen.height > screen.width;
-  if (!portrait) return false;
-  if (videoWidth > 0 && videoHeight > 0) {
-    return videoWidth >= videoHeight;
-  }
-  // 未知尺寸时按横屏片处理（点播多数如此）。
-  return true;
+  final phonePortrait = screen.height > screen.width;
+  if (!phonePortrait) return false;
+  if (videoWidth <= 0 || videoHeight <= 0) return false;
+  return videoWidth > videoHeight;
 }
 
 /// BoxFit.contain 下视频实际绘制区域（用于把控件放到 letterbox 黑边）。

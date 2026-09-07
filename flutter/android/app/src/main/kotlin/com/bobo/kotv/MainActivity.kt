@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.TrafficStats
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.provider.Settings
 import android.util.Rational
@@ -25,6 +26,7 @@ class MainActivity : FlutterActivity() {
   private var spiderKickStarted = false
   private var androidChannel: MethodChannel? = null
   private var castPermResult: MethodChannel.Result? = null
+  private var castMulticastLock: WifiManager.MulticastLock? = null
   private var pickConfigResult: MethodChannel.Result? = null
   private var storagePermResult: MethodChannel.Result? = null
   private var storagePromptStarted = false
@@ -351,6 +353,20 @@ class MainActivity : FlutterActivity() {
   }
 
   private fun ensureCastPermissions(result: MethodChannel.Result) {
+    try {
+      KotvEngineService.start(this)
+    } catch (_: Throwable) {
+    }
+    try {
+      if (castMulticastLock?.isHeld != true) {
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        castMulticastLock = wm.createMulticastLock("kotv:cast").apply {
+          setReferenceCounted(false)
+          acquire()
+        }
+      }
+    } catch (_: Throwable) {
+    }
     val need = mutableListOf<String>()
     if (Build.VERSION.SDK_INT >= 33) {
       if (ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES)

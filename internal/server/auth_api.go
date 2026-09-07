@@ -126,13 +126,18 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requestPublicBase 用请求 Host 作为对外根；Host 为 127/localhost 时不改写。
-// 不以 RemoteAddr 是否 loopback 为准（本机浏览器打开局域网 IP 时 RemoteAddr 也可能是回环）。
+// requestPublicBase 用请求 Host（或反代转发头）作为对外根；Host 为 127/localhost 时不改写。
 func requestPublicBase(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	host := strings.TrimSpace(r.Host)
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host != "" {
+		host = strings.TrimSpace(strings.Split(host, ",")[0])
+	}
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
 	if host == "" {
 		return ""
 	}

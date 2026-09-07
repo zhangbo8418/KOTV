@@ -37,6 +37,7 @@ class KotvEngineService : Service() {
   private val starting = AtomicBoolean(false)
   private var cpuWakeLock: PowerManager.WakeLock? = null
   private var wifiLock: WifiManager.WifiLock? = null
+  private var multicastLock: WifiManager.MulticastLock? = null
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -109,6 +110,17 @@ class KotvEngineService : Service() {
     } catch (t: Throwable) {
       Log.w(TAG, "wifi lock failed", t)
     }
+    try {
+      if (multicastLock?.isHeld != true) {
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        multicastLock = wm.createMulticastLock("kotv:ssdp").apply {
+          setReferenceCounted(false)
+          acquire()
+        }
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "multicast lock failed", t)
+    }
   }
 
   private fun releaseStayLocks() {
@@ -122,6 +134,11 @@ class KotvEngineService : Service() {
     } catch (_: Throwable) {
     }
     wifiLock = null
+    try {
+      if (multicastLock?.isHeld == true) multicastLock?.release()
+    } catch (_: Throwable) {
+    }
+    multicastLock = null
   }
 
   private fun startAsForeground() {

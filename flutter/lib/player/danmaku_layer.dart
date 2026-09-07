@@ -80,19 +80,79 @@ class DanmakuParser {
 }
 
 class DanmakuLoader {
-  static Future<List<DanmakuItem>> loadUrl(String url) async {
+  static Future<List<DanmakuItem>> loadUrl(String url, {bool followSources = true}) async {
     if (url.trim().isEmpty) return const [];
     final resp = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 12));
     if (resp.statusCode < 200 || resp.statusCode >= 300) return const [];
     final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
+    return _parseBodyOrSources(body, followSources: followSources);
+  }
+
+  /// 模板 GET：`https://…?n={name}&e={episode}`；无占位符时 POST name/episode。
+  /// 响应可为弹幕正文，或 `[{name,url},…]` 源列表（再拉首条 url）。
+  static Future<List<DanmakuItem>> loadApi(String api, {required String name, required String episode}) async {
+    final base = api.trim();
+    if (base.isEmpty) return const [];
+    final hasTpl = base.contains('{name}') || base.contains('{episode}');
+    late final http.Response resp;
+    if (hasTpl) {
+      final u = base
+          .replaceAll('{name}', Uri.encodeComponent(name))
+          .replaceAll('{episode}', Uri.encodeComponent(episode));
+      resp = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 12));
+    } else {
+      resp = await http
+          .post(
+            Uri.parse(base),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'name': name, 'episode': episode},
+          )
+          .timeout(const Duration(seconds: 12));
+    }
+    if (resp.statusCode < 200 || resp.statusCode >= 300) return const [];
+    final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
+    return _parseBodyOrSources(body, followSources: true);
+  }
+
+  static Future<List<DanmakuItem>> _parseBodyOrSources(String body, {required bool followSources}) async {
+    if (followSources) {
+      final src = _firstSourceUrl(body);
+      if (src != null && src.isNotEmpty) {
+        return loadUrl(src, followSources: false);
+      }
+    }
     return DanmakuParser.parse(body);
   }
 
-  /// 模板如 `https://…?n={name}&e={episode}`
-  static Future<List<DanmakuItem>> loadApi(String api, {required String name, required String episode}) async {
-    if (api.trim().isEmpty) return const [];
-    final u = api.replaceAll('{name}', Uri.encodeComponent(name)).replaceAll('{episode}', Uri.encodeComponent(episode));
-    return loadUrl(u);
+  /// 弹幕搜索 API 常见返回：`[{"name":"…","url":"https://…xml"},…]`
+  static String? _firstSourceUrl(String body) {
+    final t = body.trim();
+    if (t.isEmpty || (t[0] != '[' && t[0] != '{')) return null;
+    try {
+      final decoded = jsonDecode(t);
+      if (decoded is List) {
+        for (final item in decoded) {
+          final u = _urlFromSource(item);
+          if (u != null) return u;
+        }
+        return null;
+      }
+      return _urlFromSource(decoded);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _urlFromSource(dynamic item) {
+    if (item is String) {
+      final s = item.trim();
+      return s.startsWith('http') ? s : null;
+    }
+    if (item is Map) {
+      final u = '${item['url'] ?? ''}'.trim();
+      if (u.startsWith('http')) return u;
+    }
+    return null;
   }
 }
 
@@ -103,11 +163,17 @@ class DanmakuOverlay extends StatefulWidget {
     required this.enabled,
     required this.position,
     required this.items,
+    this.fontSize = 18,
+    this.opacity = 0.85,
+    this.rows = 6,
   });
 
   final bool enabled;
   final Duration position;
   final List<DanmakuItem> items;
+  final double fontSize;
+  final double opacity;
+  final int rows;
 
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
@@ -152,10 +218,11 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     final to = sec + 0.35;
     for (final it in widget.items) {
       if (it.time >= from && it.time < to) {
+        final lanes = widget.rows.clamp(1, 16);
         _flying.add(_Flying(
           item: it,
           born: DateTime.now(),
-          lane: math.Random(it.content.hashCode ^ sec.toInt()).nextInt(8),
+          lane: math.Random(it.content.hashCode ^ sec.toInt()).nextInt(lanes),
           durationMs: 6500 + (it.content.length * 80).clamp(0, 4000),
         ));
       }
@@ -181,7 +248,13 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
               _spawn(widget.position, Size(c.maxWidth, c.maxHeight));
               return CustomPaint(
                 size: Size(c.maxWidth, c.maxHeight),
-                painter: _DanmakuPainter(flying: List.of(_flying), now: DateTime.now()),
+                painter: _DanmakuPainter(
+                  flying: List.of(_flying),
+                  now: DateTime.now(),
+                  fontSize: widget.fontSize,
+                  opacity: widget.opacity,
+                  rows: widget.rows,
+                ),
               );
             },
           );
@@ -205,21 +278,33 @@ class _Flying {
 }
 
 class _DanmakuPainter extends CustomPainter {
-  _DanmakuPainter({required this.flying, required this.now});
+  _DanmakuPainter({
+    required this.flying,
+    required this.now,
+    required this.fontSize,
+    required this.opacity,
+    required this.rows,
+  });
   final List<_Flying> flying;
   final DateTime now;
+  final double fontSize;
+  final double opacity;
+  final int rows;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final lanes = rows.clamp(1, 16);
+    final laneH = (size.height * 0.7 / lanes).clamp(20.0, 48.0);
     for (final f in flying) {
       final t = now.difference(f.born).inMilliseconds / f.durationMs;
       if (t < 0 || t > 1) continue;
+      final fs = fontSize.clamp(12.0, 48.0);
       final tp = TextPainter(
         text: TextSpan(
           text: f.item.content,
           style: TextStyle(
-            color: Color(0xFF000000 | (f.item.color & 0xFFFFFF)).withOpacity(0.92),
-            fontSize: (f.item.size.clamp(16, 36)).toDouble(),
+            color: Color(0xFF000000 | (f.item.color & 0xFFFFFF)).withOpacity(opacity.clamp(0.15, 1.0)),
+            fontSize: fs,
             fontWeight: FontWeight.w600,
             shadows: const [Shadow(blurRadius: 2, color: Colors.black87)],
           ),
@@ -227,7 +312,7 @@ class _DanmakuPainter extends CustomPainter {
         textDirection: ui.TextDirection.ltr,
         maxLines: 1,
       )..layout();
-      final y = 12.0 + f.lane * (size.height * 0.08).clamp(22.0, 40.0);
+      final y = 12.0 + (f.lane % lanes) * laneH;
       final x = size.width - t * (size.width + tp.width);
       tp.paint(canvas, Offset(x, y));
     }

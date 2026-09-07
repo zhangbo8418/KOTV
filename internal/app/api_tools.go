@@ -301,6 +301,12 @@ func (a *App) toolCast(index int) (map[string]any, error) {
 	if castURL == "" {
 		castURL = mediaURL
 	}
+	// 需要自定义 Header 时：投本机/对外代理地址，由引擎代拉（Chromecast 无法带 Header）。
+	if len(headers) > 0 {
+		castURL = mediaURL
+		headers = nil
+	}
+	castURL = playproxy.PublicizeURL(castURL)
 	used, err := cast.CastWith(devs[index], castURL, a.MediaTitle(), headers, posMs)
 	if err != nil {
 		return nil, err

@@ -1224,24 +1224,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               widget.onMini!();
                             },
                           ),
-                        if (widget.onRotate != null)
-                          linkRow(
-                            icon: Icons.screen_rotation_rounded,
-                            label: widget.rotateLabel ?? '旋转屏幕',
-                            onTap: () {
-                              Navigator.pop(ctx);
-                              widget.onRotate!();
-                            },
-                          ),
-                        if (widget.episodes.isNotEmpty)
-                          linkRow(
-                            icon: Icons.playlist_play,
-                            label: '选集',
-                            onTap: () {
-                              Navigator.pop(ctx);
-                              openEpisodes();
-                            },
-                          ),
                         if (widget.onParse != null)
                           linkRow(
                             icon: Icons.auto_awesome,
@@ -1275,25 +1257,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               if (mounted && label.isNotEmpty) setState(() => _keepLabel = label);
                             },
                           ),
-                        if (kotvCanSwitchPlayer(live: false))
-                          linkRow(
-                            icon: Icons.smart_display_outlined,
-                            label: '播放器',
-                            trailing: _playerLabel,
-                            onTap: () {
-                              Navigator.pop(ctx);
-                              _showPlayerDialog();
-                            },
-                          ),
-                        linkRow(
-                          icon: Icons.memory,
-                          label: '解码',
-                          trailing: _decodeModes[_decodeIdx].$2,
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            _cycleDecode();
-                          },
-                        ),
                         if (kotvPlayerRenderApplies(_playerVal))
                           linkRow(
                             icon: Icons.layers_outlined,
@@ -1304,30 +1267,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               _cycleRender();
                             },
                           ),
-                        linkRow(
-                          icon: Icons.closed_caption_outlined,
-                          label: '字幕',
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            _showTrackSheet(kind: 'subtitle');
-                          },
-                        ),
-                        linkRow(
-                          icon: Icons.audiotrack,
-                          label: '音轨',
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            _showTrackSheet(kind: 'audio');
-                          },
-                        ),
-                        linkRow(
-                          icon: Icons.videocam_outlined,
-                          label: '视频轨',
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            _showTrackSheet(kind: 'video');
-                          },
-                        ),
                         linkRow(
                           icon: Icons.info_outline,
                           label: '播放信息',

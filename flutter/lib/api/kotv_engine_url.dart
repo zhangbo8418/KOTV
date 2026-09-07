@@ -42,9 +42,31 @@ String kotvNormalizeEngineBaseUrl(String raw) {
   return v;
 }
 
-/// 将引擎回环地址改写为客户端可达根。
-/// - 原生：用 [engineBaseUrl]（远端引擎）
-/// - Web：优先用当前页面 [Uri.base.origin]（打开网址），避免仍是 127.0.0.1
+bool _isLoopbackHost(String host) {
+  final h = host.toLowerCase();
+  return h == '127.0.0.1' || h == 'localhost' || h == '::1' || h == '[::1]';
+}
+
+bool _isPrivateOrLinkLocalIPv4(String host) {
+  final parts = host.split('.');
+  if (parts.length != 4) return false;
+  final nums = <int>[];
+  for (final p in parts) {
+    final n = int.tryParse(p);
+    if (n == null || n < 0 || n > 255) return false;
+    nums.add(n);
+  }
+  final a = nums[0], b = nums[1];
+  if (a == 10) return true;
+  if (a == 172 && b >= 16 && b <= 31) return true;
+  if (a == 192 && b == 168) return true;
+  if (a == 169 && b == 254) return true;
+  return false;
+}
+
+/// 将引擎回环/内网代理地址改写为客户端配置的引擎根。
+/// - 原生：用 [engineBaseUrl]（远端或域名映射）
+/// - Web：优先用当前页面 [Uri.base.origin]
 String kotvRewriteEngineLocalUrl(String mediaUrl, String engineBaseUrl) {
   final media = mediaUrl.trim();
   if (media.isEmpty) return media;
@@ -68,9 +90,16 @@ String kotvRewriteEngineLocalUrl(String mediaUrl, String engineBaseUrl) {
   }
   if (b.host.isEmpty) return media;
   final host = m.host.toLowerCase();
-  if (host != '127.0.0.1' && host != 'localhost' && host != '::1') {
+  if (host.isEmpty) return media;
+  final baseHost = b.host.toLowerCase();
+  if (host == baseHost) {
+    if (b.scheme.isNotEmpty && m.scheme != b.scheme) {
+      return m.replace(scheme: b.scheme, host: b.host, port: b.hasPort ? b.port : null).toString();
+    }
     return media;
   }
+  final rewrite = _isLoopbackHost(host) || _isPrivateOrLinkLocalIPv4(host);
+  if (!rewrite) return media;
   return Uri(
     scheme: b.scheme.isEmpty ? 'http' : b.scheme,
     userInfo: m.userInfo.isEmpty ? null : m.userInfo,

@@ -40,4 +40,14 @@ void main() {
       'http://127.0.0.1:9978/proxy/cached_m3u8?id=1',
     );
   });
+
+  test('rewrite private LAN proxy to configured server host', () {
+    expect(
+      kotvRewriteEngineLocalUrl(
+        'http://192.168.1.8:9978/proxy/play?id=abc',
+        'https://tv.example.com',
+      ),
+      'https://tv.example.com/proxy/play?id=abc',
+    );
+  });
 }

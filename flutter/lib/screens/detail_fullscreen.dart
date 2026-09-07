@@ -53,6 +53,9 @@ class DetailFullscreenPage extends StatefulWidget {
     this.danmakuOn = false,
     this.onDanmakuChanged,
     this.danmakuItems = const [],
+    this.danmakuSize = 18,
+    this.danmakuOpacity = 0.85,
+    this.danmakuRows = 6,
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
@@ -100,6 +103,9 @@ class DetailFullscreenPage extends StatefulWidget {
   final bool danmakuOn;
   final ValueChanged<bool>? onDanmakuChanged;
   final List<DanmakuItem> danmakuItems;
+  final double danmakuSize;
+  final double danmakuOpacity;
+  final int danmakuRows;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
@@ -178,13 +184,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       unawaited(kotvLockPortrait());
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _refreshForceLandscapeBtn();
-        if (widget.playback.playing) {
-          _schedulePlayingHide();
-        } else {
-          _setChrome(show: true, hideCursor: false);
-        }
+      if (!mounted) return;
+      _refreshForceLandscapeBtn();
+      if (widget.playback.playing) {
+        _schedulePlayingHide();
+      } else {
+        _setChrome(show: true, hideCursor: false);
       }
     });
   }
@@ -316,26 +321,15 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Future<void> _lockPortraitMode() async {
-    setState(() {
-      _forcedLandscape = false;
-    });
+    setState(() => _forcedLandscape = false);
     await kotvLockPortrait();
     if (!mounted) return;
     _refreshForceLandscapeBtn();
     _bumpChrome();
   }
 
-  void _toggleMobileOrientation() {
-    if (_forcedLandscape) {
-      unawaited(_lockPortraitMode());
-    } else {
-      unawaited(_forceLandscape());
-    }
-  }
-
-  bool get _mobileOrientationControls => !kotvIsDesktop() && !kIsWeb;
-
-  String get _rotateLabel => _forcedLandscape ? '竖屏' : '横屏';
+  /// 横屏后顶栏用「竖屏」切回；竖屏时不显示顶栏「横屏」（改走「全屏观看」）。
+  bool get _showTopPortraitRotate => !kotvIsDesktop() && !kIsWeb && _forcedLandscape;
 
   Future<void> _restoreChrome() async {
     await kotvExitSystemFullscreen(
@@ -601,7 +595,14 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       unawaited(_exitFullscreen());
       return KeyEventResult.handled;
     }
-    // 菜单：切换控件显隐，便于遥控选按钮。
+    // 菜单 / 上下键：控件隐藏时先亮出控件，便于遥控选按钮。
+    if (!_showChrome && (kotvIsMenuKey(key) || kotvIsUpKey(key) || kotvIsDownKey(key))) {
+      if (_epOpen) {
+        _chromeKey.currentState?.closeEpisodes();
+      }
+      _setChrome(show: true, hideCursor: false);
+      return KeyEventResult.handled;
+    }
     if (kotvIsMenuKey(key)) {
       if (_epOpen) {
         _chromeKey.currentState?.closeEpisodes();
@@ -744,11 +745,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       videoWidth: widget.playback.width,
       videoHeight: widget.playback.height,
     );
-    final top = videoRect.bottom + 12;
+    final top = (videoRect.bottom + 12).clamp(0.0, (c.maxHeight - 52).clamp(0.0, c.maxHeight));
     return Positioned(
       left: 0,
       right: 0,
-      top: top.clamp(0.0, (c.maxHeight - 52).clamp(0.0, c.maxHeight)),
+      top: top,
       child: Align(
         alignment: Alignment.topCenter,
         child: Material(
@@ -815,8 +816,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       onRefresh: widget.onRefresh,
       onCast: widget.onCast,
       onMini: widget.onMini,
-      onRotate: _mobileOrientationControls ? _toggleMobileOrientation : null,
-      rotateLabel: _mobileOrientationControls ? _rotateLabel : null,
+      // 竖屏用「全屏观看」；仅锁横屏后顶栏出「竖屏」以便切回。
+      onRotate: _showTopPortraitRotate ? () => unawaited(_lockPortraitMode()) : null,
+      rotateLabel: _showTopPortraitRotate ? '竖屏' : null,
       danmakuOn: _danmakuOn,
       onDanmakuChanged: (v) {
         setState(() => _danmakuOn = v);
@@ -885,7 +887,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         align: Alignment.topCenter,
                       ),
                     ),
-                  // 当前集跟手：视频 + 全屏观看 + 播停控件同一层位移（抖音式）。
+                  // 画面跟手；网速/全屏按钮/控件在外层，避免与 PlatformView 同栈叠影。
                   Positioned(
                     left: 0,
                     right: 0,
@@ -900,24 +902,27 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                           enabled: _danmakuOn,
                           position: _pos,
                           items: widget.danmakuItems,
+                          fontSize: widget.danmakuSize,
+                          opacity: widget.danmakuOpacity,
+                          rows: widget.danmakuRows,
                         ),
-                        if (widget.playUrl.isNotEmpty)
-                          KotvBufferingOverlay(player: widget.playback),
-                        // 手势在控件下层：滑动跟手；播停/全屏观看仍在上层可点。
-                        Positioned.fill(
-                          child: Listener(
-                            behavior: HitTestBehavior.translucent,
-                            onPointerDown: _onSwipePointerDown,
-                            onPointerMove: _onSwipePointerMove,
-                            onPointerUp: _onSwipePointerUp,
-                            onPointerCancel: _onSwipePointerCancel,
-                          ),
-                        ),
-                        if (_showForceLandscape) _forceLandscapeChip(c),
-                        _fullscreenChrome(),
                       ],
                     ),
                   ),
+                  Positioned.fill(
+                    child: Listener(
+                      behavior: HitTestBehavior.translucent,
+                      onPointerDown: _onSwipePointerDown,
+                      onPointerMove: _onSwipePointerMove,
+                      onPointerUp: _onSwipePointerUp,
+                      onPointerCancel: _onSwipePointerCancel,
+                    ),
+                  ),
+                  if (widget.playUrl.isNotEmpty)
+                    KotvBufferingOverlay(player: widget.playback),
+                  if (_showForceLandscape && !_dragging && _dragDy.abs() < 4)
+                    _forceLandscapeChip(c),
+                  _fullscreenChrome(),
                   if (_swipeHint != null)
                     IgnorePointer(
                       child: Center(

@@ -4,8 +4,10 @@ package localproxy
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"sync/atomic"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/util"
 )
 
@@ -32,14 +34,16 @@ func Port() int {
 }
 
 func BaseURL(local bool) string {
-	host := "127.0.0.1"
 	if !local {
-		// Proxy.getUrl(false)：局域网 IP，供外设回调
+		// 远端请求：优先当前对外根（域名/反代），避免把局域网 IP 交给客户端。
+		if b := strings.TrimRight(strings.TrimSpace(hostclient.PublicBase()), "/"); b != "" {
+			return b + "/proxy"
+		}
 		if ip := util.LanIP(); ip != "" {
-			host = ip
+			return fmt.Sprintf("http://%s:%d/proxy", ip, Port())
 		}
 	}
-	return fmt.Sprintf("http://%s:%d/proxy", host, Port())
+	return fmt.Sprintf("http://127.0.0.1:%d/proxy", Port())
 }
 
 func URL(do, siteKey string, local bool) string {

@@ -136,6 +136,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _ambientOn = false;
   bool _stableVolumeOn = false;
   String _danmakuApi = '';
+  double _danmakuSize = 18;
+  double _danmakuOpacity = 0.85;
+  int _danmakuRows = 6;
   final ValueNotifier<List<DanmakuItem>> _danmakuItems = ValueNotifier(const []);
   AspectSpec _aspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
   int _openingSec = 0;
@@ -828,6 +831,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
         _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
         _danmakuApi = '${settings['danmakuApi'] ?? ''}';
+        _danmakuSize = double.tryParse('${settings['danmakuSize'] ?? ''}') ?? 18;
+        final op = double.tryParse('${settings['danmakuOpacity'] ?? ''}');
+        _danmakuOpacity = op == null ? 0.85 : (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0);
+        _danmakuRows = int.tryParse('${settings['danmakuRows'] ?? ''}') ?? 6;
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
         var playerVal = '${settings['player'] ?? kotvDefaultVodPlayer()}'.trim();
@@ -1061,11 +1068,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     required String episode,
   }) async {
     _danmakuItems.value = const [];
-    if (playDanmaku.trim().isEmpty && _danmakuApi.trim().isEmpty) return;
+    final engineBase = ref.read(apiProvider).baseUrl;
+    final src = kotvRewriteEngineLocalUrl(playDanmaku.trim(), engineBase);
+    if (src.isEmpty && _danmakuApi.trim().isEmpty) return;
     try {
       List<DanmakuItem> items = const [];
-      if (playDanmaku.trim().isNotEmpty) {
-        items = await DanmakuLoader.loadUrl(playDanmaku);
+      if (src.isNotEmpty) {
+        items = await DanmakuLoader.loadUrl(src);
       }
       if (items.isEmpty && _danmakuApi.trim().isNotEmpty) {
         items = await DanmakuLoader.loadApi(_danmakuApi, name: name, episode: episode);
@@ -1601,7 +1610,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           fit: StackFit.expand,
           children: [
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
+            // 全屏加载/缓冲时盖住 PlatformView，避免 Hybrid Composition 与 Flutter 控件叠影。
+            if (_immersiveFullscreen)
+              ListenableBuilder(
+                listenable: _playback,
+                builder: (context, _) {
+                  final cover = _playback.stalling || (_playback.width <= 0 && _playback.height <= 0);
+                  if (!cover) return const SizedBox.shrink();
+                  return const ColoredBox(color: Colors.black);
+                },
+              ),
             if (!_immersiveFullscreen) ...[
+              ValueListenableBuilder<List<DanmakuItem>>(
+                valueListenable: _danmakuItems,
+                builder: (context, items, _) => DanmakuOverlay(
+                  enabled: _danmakuOn,
+                  position: _playback.position,
+                  items: items,
+                  fontSize: _danmakuSize,
+                  opacity: _danmakuOpacity,
+                  rows: _danmakuRows,
+                ),
+              ),
               KotvBufferingOverlay(player: _playback),
               ExcludeFocus(
                 child: CenterPlayPauseButton(
@@ -1668,6 +1698,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         aspect: _aspect,
         danmakuOn: _danmakuOn,
         danmakuItems: danmakuItems,
+        danmakuSize: _danmakuSize,
+        danmakuOpacity: _danmakuOpacity,
+        danmakuRows: _danmakuRows,
         ambientOn: _ambientOn,
         stableVolumeOn: _stableVolumeOn,
         keepLabel: _kept ? '取消收藏' : '收藏',
@@ -1712,7 +1745,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           if (k == 'danmaku') {
             setState(() => _danmakuOn = v.toLowerCase() == 'true');
           }
-          if (k == 'danmakuApi') setState(() => _danmakuApi = v);
+          if (k == 'danmakuApi') {
+            setState(() => _danmakuApi = v);
+            if (_detail != null && _eps.isNotEmpty && _epIdx >= 0 && _epIdx < _eps.length) {
+              unawaited(_loadDanmakuForEpisode(
+                playDanmaku: '',
+                name: _detail!.name,
+                episode: _eps[_epIdx].name,
+              ));
+            }
+          }
+          if (k == 'danmakuSize') {
+            setState(() => _danmakuSize = double.tryParse(v) ?? _danmakuSize);
+          }
+          if (k == 'danmakuOpacity') {
+            final op = double.tryParse(v);
+            if (op != null) {
+              setState(() => _danmakuOpacity = (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0));
+            }
+          }
+          if (k == 'danmakuRows') {
+            setState(() => _danmakuRows = int.tryParse(v) ?? _danmakuRows);
+          }
           if (k == 'playerDecode') {
             final next = v.trim().isEmpty ? 'auto' : v.trim();
             setState(() {
@@ -1994,6 +2048,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (event is! KeyDownEvent || _playUrl.isEmpty) return KeyEventResult.ignored;
     final key = event.logicalKey;
     if (kotvIsMenuKey(key)) {
+      setState(() => _chromeRemoteFocus = true);
+      return KeyEventResult.handled;
+    }
+    // 起播后方向键也可把焦点落到底栏，避免只能靠菜单键。
+    if (_playUrl.isNotEmpty &&
+        !_chromeRemoteFocus &&
+        (kotvIsUpKey(key) || kotvIsDownKey(key) || kotvIsLeftKey(key) || kotvIsRightKey(key))) {
       setState(() => _chromeRemoteFocus = true);
       return KeyEventResult.handled;
     }

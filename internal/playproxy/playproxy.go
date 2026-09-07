@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -72,7 +73,8 @@ func LocalHTTPBase() string {
 	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
-// PublicizeURL 将 127.0.0.1 / localhost 换成对外可达根（保留 path/query）。
+// PublicizeURL 将回环或内网地址换成当前请求的对外根（保留 path/query）。
+// 远端经域名/反代访问时，避免把 127.0.0.1 或局域网 IP 原样交给客户端。
 func PublicizeURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	base := hostclient.PublicBase()
@@ -84,16 +86,41 @@ func PublicizeURL(raw string) string {
 		return raw
 	}
 	host := strings.ToLower(u.Hostname())
-	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+	if host == "" {
 		return raw
 	}
 	pb, err := url.Parse(base)
 	if err != nil || pb.Host == "" {
 		return raw
 	}
+	pubHost := strings.ToLower(pb.Hostname())
+	if host == pubHost {
+		// 已是对外主机，仅统一 scheme（https 反代）。
+		if pb.Scheme != "" && u.Scheme != pb.Scheme {
+			u.Scheme = pb.Scheme
+			u.Host = pb.Host
+			return u.String()
+		}
+		return raw
+	}
+	if !isRewriteableProxyHost(host) {
+		return raw
+	}
 	u.Scheme = pb.Scheme
 	u.Host = pb.Host
 	return u.String()
+}
+
+func isRewriteableProxyHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || host == "127.0.0.1" || host == "localhost" || host == "::1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 func newID() string {
