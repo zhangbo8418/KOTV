@@ -208,7 +208,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
     when (call.method) {
       "isVulkanAvailable" -> {
-        // 对齐 TV MpvUtil.isVulkanSupported：只看设备 Vulkan≥1.2，用于设置页露出开关。
+        // 只看设备 Vulkan≥1.2，用于设置页露出开关。
         val ctx = appContext
         result.success(ctx != null && MPVLib.isDeviceVulkanCapable(ctx))
       }
@@ -610,7 +610,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** bundled libmpv + 设备 Vulkan≥1.2 且用户开启时设 gpu-api=vulkan（对齐 TV mpvVulkan）。 */
+  /** bundled libmpv + 设备 Vulkan≥1.2 且用户开启时设 gpu-api=vulkan。 */
   private fun applyGpuApiOptions() {
     val ctx = appContext
     if (vulkanEnabled && ctx != null && MPVLib.isVulkanRendererAvailable(ctx)) {

@@ -200,7 +200,7 @@ public final class MPVLib {
         return bundledVulkanEnabled;
     }
 
-    /** Device reports Vulkan ≥1.2（与 MpvUtil.isVulkanSupported 同门槛）. */
+    /** Device reports Vulkan ≥1.2. */
     public static synchronized boolean isDeviceVulkanCapable(Context context) {
         if (deviceVulkanCapable != null) return deviceVulkanCapable;
         try {

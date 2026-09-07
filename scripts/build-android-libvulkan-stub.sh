@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build app-local libvulkan.so (Vulkan 1.1 symbol stub) for Android API 25.
 # 只进 assets/mpv-libs：真机 Vulkan≥1.2 走系统 libvulkan；若 stub 放进 jniLibs，
-# DT_NEEDED 会优先绑到空壳 → 开 gpu-api=vulkan 卡死，且与 FongMi/TV 行为不一致。
+# DT_NEEDED 会优先绑到空壳 → 开 gpu-api=vulkan 卡死。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${KOTV_VULKAN_STUB_SRC:-$ROOT/flutter/android/native/vkcompat/vkcompat.c}"

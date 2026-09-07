@@ -57,7 +57,7 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun preloadAppLibvulkan() {
-    // 真机 Vulkan≥1.2：清掉旧包抽出的 jniLibs stub，走系统 libvulkan（对齐 FongMi/TV）。
+    // 真机 Vulkan≥1.2：清掉旧包抽出的 jniLibs stub，走系统 libvulkan。
     // API25：stub 只在 assets，由 MPVLib.ensureLoaded 再加载。
     try {
       if (`is`.xyz.mpv.MPVLib.isDeviceVulkanCapable(this)) {
