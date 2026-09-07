@@ -157,8 +157,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   /// 画面层的位置由 [CompositedTransformFollower] 在合成期直接跟随黑槽
   /// （[CompositedTransformTarget]），滚动 / 窗口缩放 / 顶栏高度变化都不会错位；
   /// [_videoLayerRect] 只提供尺寸（非全屏）或整屏矩形（全屏）。
+  /// 画面叠在 Scaffold 之上，必须裁到 [_bodyClipRect]（顶栏下 Expanded），
+  /// 否则下滑时画面跟槽上移会盖住顶栏按钮。
   final LayerLink _videoLink = LayerLink();
+  final GlobalKey _bodyClipKey = GlobalKey(debugLabel: 'kotv_detail_body_clip');
   Rect? _videoLayerRect;
+  Rect? _bodyClipRect;
   bool _videoSlotSyncScheduled = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
@@ -1457,20 +1461,43 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     });
   }
 
-  /// 非全屏只需黑槽**尺寸**（位置由 LayerLink 跟随），仅尺寸变化才 setState。
+  /// 非全屏：黑槽尺寸（LayerLink 管位置）+ 内容区裁剪矩形（防盖顶栏）。
   void _syncVideoSlotRect() {
     if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
     final slotBox = _videoSlotKey.currentContext?.findRenderObject() as RenderBox?;
-    if (slotBox == null || !slotBox.hasSize) return;
-    final size = slotBox.size;
-    if (size.width < 1 || size.height < 1) return;
-    final prev = _videoLayerRect;
-    if (prev != null &&
-        (prev.width - size.width).abs() < 0.5 &&
-        (prev.height - size.height).abs() < 0.5) {
-      return;
+    final bodyBox = _bodyClipKey.currentContext?.findRenderObject() as RenderBox?;
+    final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
+
+    Size? nextSlot;
+    if (slotBox != null && slotBox.hasSize) {
+      final s = slotBox.size;
+      if (s.width >= 1 && s.height >= 1) nextSlot = s;
     }
-    setState(() => _videoLayerRect = Offset.zero & size);
+
+    Rect? nextClip;
+    if (bodyBox != null && stackBox != null && bodyBox.hasSize && stackBox.hasSize) {
+      final o = bodyBox.localToGlobal(Offset.zero, ancestor: stackBox);
+      final r = o & bodyBox.size;
+      if (r.width >= 1 && r.height >= 1) nextClip = r;
+    }
+
+    final prevSlot = _videoLayerRect;
+    final prevClip = _bodyClipRect;
+    final slotSame = nextSlot == null ||
+        (prevSlot != null &&
+            (prevSlot.width - nextSlot.width).abs() < 0.5 &&
+            (prevSlot.height - nextSlot.height).abs() < 0.5);
+    final clipSame = nextClip == null ||
+        (prevClip != null &&
+            (prevClip.left - nextClip.left).abs() < 0.5 &&
+            (prevClip.top - nextClip.top).abs() < 0.5 &&
+            (prevClip.width - nextClip.width).abs() < 0.5 &&
+            (prevClip.height - nextClip.height).abs() < 0.5);
+    if (slotSame && clipSame) return;
+    setState(() {
+      if (nextSlot != null) _videoLayerRect = Offset.zero & nextSlot;
+      if (nextClip != null) _bodyClipRect = nextClip;
+    });
   }
 
   /// 黑槽占位：[CompositedTransformTarget] 供画面层跟随；LayoutBuilder 捕获
@@ -1518,16 +1545,31 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             child: child!,
           );
         }
-        // 非全屏：合成期跟随黑槽，不靠 post-frame 量测（量测滞后一帧就会盖到顶栏上）。
+        // 非全屏：Follower 跟黑槽；外层裁到 Expanded（顶栏下），下滑不会盖住顶栏。
+        final clip = _bodyClipRect;
+        if (clip == null || clip.width < 1 || clip.height < 1) {
+          return const SizedBox.shrink();
+        }
         return Positioned(
-          left: 0,
-          top: 0,
-          width: rect.width,
-          height: rect.height,
-          child: CompositedTransformFollower(
-            link: _videoLink,
-            showWhenUnlinked: false,
-            child: child!,
+          left: clip.left,
+          top: clip.top,
+          width: clip.width,
+          height: clip.height,
+          child: ClipRect(
+            child: Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                CompositedTransformFollower(
+                  link: _videoLink,
+                  showWhenUnlinked: false,
+                  child: SizedBox(
+                    width: rect.width,
+                    height: rect.height,
+                    child: child,
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -2017,13 +2059,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 title: widget.title.isNotEmpty ? widget.title : '详情',
               ),
               Expanded(
-                child: _loading
-                    ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                    : _error != null
-                        ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
-                        : _detail == null
-                            ? const SizedBox.shrink()
-                            : _buildBody(),
+                child: KeyedSubtree(
+                  key: _bodyClipKey,
+                  child: _loading
+                      ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                      : _error != null
+                          ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                          : _detail == null
+                              ? const SizedBox.shrink()
+                              : _buildBody(),
+                ),
               ),
             ],
           ),
@@ -2041,6 +2086,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               child: detailScaffold,
             ),
           ),
+          // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏由 [_bodyClipRect] 裁切，不盖顶栏。
           if (_playUrl.isNotEmpty) _buildStableVideoLayer(context),
           // 切集/换播放器时 playUrl 可能短暂变化：全屏页勿随 playUrl 卸树。
           if (_immersiveFullscreen && _detail != null)
