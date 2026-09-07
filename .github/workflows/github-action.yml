@@ -35,7 +35,7 @@ jobs:
       - name: Install go-legacy-win7
         shell: pwsh
         run: |
-          $ver = "1.26.5-1"
+          $ver = "1.27.1-1"
           $zip = "go-legacy-win7-$ver.windows_amd64.zip"
           $url = "https://github.com/thongtech/go-legacy-win7/releases/download/v$ver/$zip"
           curl.exe -sSL -o "$env:RUNNER_TEMP\$zip" $url
@@ -127,7 +127,7 @@ jobs:
       - name: Install go-legacy-win7
         shell: pwsh
         run: |
-          $ver = "1.26.5-1"
+          $ver = "1.27.1-1"
           $zip = "go-legacy-win7-$ver.windows_amd64.zip"
           $url = "https://github.com/thongtech/go-legacy-win7/releases/download/v$ver/$zip"
           curl.exe -sSL -o "$env:RUNNER_TEMP\$zip" $url
