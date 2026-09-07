@@ -89,9 +89,9 @@ class ExoPlayback extends KotvPlayback {
   /// 浮层网速：跟 Exo 真实缓冲态（含拖动后补缓存）；[buffering] 仍收紧以免误切播放器。
   bool get stalling => _buffering;
   @override
-  /// SurfaceView：缓冲/解析文案走原生宿主（勿 Flutter 叠字）。
-  /// 已去掉 setZOrderMediaOverlay，原生浮层可完整显示。
-  bool get preferNativeBufferingOverlay => _renderMode != 'texture';
+  /// SurfaceView + MediaOverlay：原生叠字会被盖住；缓冲/解析走 Flutter 层。
+  /// 加载滑动叠影由详情页黑底遮罩处理，勿为此关掉 MediaOverlay（关了易黑屏）。
+  bool get preferNativeBufferingOverlay => false;
   @override
   Future<void> setNativeBufferingOverlay({required bool visible, required String text}) async {
     if (!preferNativeBufferingOverlay) return;

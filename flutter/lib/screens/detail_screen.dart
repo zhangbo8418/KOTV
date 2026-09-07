@@ -1610,19 +1610,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           fit: StackFit.expand,
           children: [
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
-            // 加载/无帧时盖住 PlatformView，避免与 Flutter 控件叠影（原生缓冲层时仅盖无帧）。
-            if (_immersiveFullscreen)
-              ListenableBuilder(
-                listenable: _playback,
-                builder: (context, _) {
-                  final noFrame = _playback.width <= 0 && _playback.height <= 0;
-                  final cover = noFrame ||
-                      (!_playback.preferNativeBufferingOverlay && _playback.stalling);
-                  if (!cover) return const SizedBox.shrink();
-                  return const ColoredBox(color: Colors.black);
-                },
-              ),
-            if (!_immersiveFullscreen) ...[
+            // 解析/无帧/缓冲：黑底盖住 PlatformView。加载阶段滑动时 Hybrid Composition
+            // 易把 Flutter 控件与 Surface 叠成双影（Exo/MPV 都有），与是否 MediaOverlay 无关。
+            ListenableBuilder(
+              listenable: _playback,
+              builder: (context, _) {
+                final parsing = _status.contains('解析') ||
+                    _status.contains('嗅探') ||
+                    _status.contains('换集中');
+                final noFrame = _playback.width <= 0 && _playback.height <= 0;
+                final cover = parsing || noFrame || _playback.stalling;
+                if (!cover) return const SizedBox.shrink();
+                return const ColoredBox(color: Colors.black);
+              },
+            ),
+            if (_immersiveFullscreen) ...[
+              // 全屏控件在外层；此处不叠内嵌解析/中心钮。
+            ] else ...[
               ValueListenableBuilder<List<DanmakuItem>>(
                 valueListenable: _danmakuItems,
                 builder: (context, items, _) => DanmakuOverlay(

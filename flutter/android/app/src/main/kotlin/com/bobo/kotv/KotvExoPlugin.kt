@@ -1367,7 +1367,9 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
     } else {
       val sv = SurfaceView(context).apply {
         layoutParams = lp
-        // Hybrid Composition 勿 media overlay：否则 Flutter 控件会叠影，且跟槽滚动时画面钉死。
+        // Hybrid Composition 需要媒体层叠出；关了部分机型会黑屏。
+        // 加载中滑动叠影不靠关 overlay，改由详情页黑底盖住 PlatformView。
+        setZOrderMediaOverlay(true)
         isFocusable = false
         isFocusableInTouchMode = false
       }
