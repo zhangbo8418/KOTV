@@ -260,9 +260,14 @@ class _AppShellState extends ConsumerState<AppShell> {
           backgroundColor: Colors.transparent,
           // Android edge-to-edge：顶栏按钮若画进状态栏区域会被系统吃掉点击
           // 不 extendBody：列表不画进底栏下面，避免海报透出来。
-          extendBody: false,
+          // 详情沉浸全屏：铺满含刘海/手势条，否则画面缩在 SafeArea 里不像全屏。
+          extendBody: immersiveDetail,
           body: SafeArea(
-            bottom: !bottomNav,
+            top: !immersiveDetail,
+            left: !immersiveDetail,
+            right: !immersiveDetail,
+            // 有底栏时由 Scaffold 占位；沉浸全屏不留底边；平板无底栏时仍避让手势条。
+            bottom: !immersiveDetail && !bottomNav,
             child: ScaledLayoutBox(
               child: Stack(
                 fit: StackFit.expand,

@@ -687,9 +687,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   void _cycleRender() {
     setState(() => _renderIdx = (_renderIdx + 1) % _renderModes.length);
     final mode = _renderModes[_renderIdx].$1;
-    unawaited(widget.player.setRenderMode(mode));
-    widget.onRenderChanged?.call(mode);
-    unawaited(_persist('playerRender', mode));
+    // 先切原生输出，再通知父页重建画面层（勿在 persist 里再 setRenderMode）。
+    unawaited(() async {
+      await widget.player.setRenderMode(mode);
+      widget.onRenderChanged?.call(mode);
+      await _persist('playerRender', mode);
+    }());
     widget.onBump();
   }
 
@@ -1384,7 +1387,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
   @override
   Widget build(BuildContext context) {
-    final padTop = MediaQuery.paddingOf(context).top;
+    // 沉浸全屏：外层已取消 SafeArea，控件用 viewPadding 避刘海/手势条，画面仍铺满。
+    final viewTop = MediaQuery.viewPaddingOf(context).top;
+    final viewBot = MediaQuery.viewPaddingOf(context).bottom;
     final w = widget.player.width;
     final h = widget.player.height;
     final res = '[ $w x $h ]';
@@ -1393,7 +1398,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final clockSize = land ? 20.0 : 32.0;
     final padH = land ? 14.0 : 28.0;
     final padTopBar = land ? 6.0 : 12.0;
-    final padBot = land ? 10.0 : 22.0;
+    final padBot = (land ? 10.0 : 22.0) + viewBot;
 
     return Stack(
       fit: StackFit.expand,
@@ -1418,7 +1423,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             top: 0,
             child: Container(
               color: const Color(0x66000000),
-              padding: EdgeInsets.fromLTRB(padH, padTop + padTopBar, padH, land ? 8 : 14),
+              padding: EdgeInsets.fromLTRB(padH, viewTop + padTopBar, padH, land ? 8 : 14),
               child: Row(
                 children: [
                   Container(width: 4, height: land ? 28 : 42, color: const Color(0xFFE52D27)),
@@ -1691,7 +1696,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(
-                        padding: EdgeInsets.fromLTRB(16, padTop + (KotvLayout.isLandscapeCompact(context) ? 8 : 14), 8, 10),
+                        padding: EdgeInsets.fromLTRB(16, viewTop + (KotvLayout.isLandscapeCompact(context) ? 8 : 14), 8, 10),
                         child: Row(
                           children: [
                             Expanded(

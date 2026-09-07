@@ -110,17 +110,19 @@ func Discover(timeout time.Duration) ([]Device, error) {
 }
 
 func discoverChromecast(timeout time.Duration) ([]Device, error) {
-	// Android 16+ 常无可用组播网卡（interfaces: []），zeroconf 会失败；软跳过只保留 DLNA。
+	// Android：Go net.Interfaces 常因 netlinkrib 失败；无组播网卡时软跳过，只保留 DLNA。
 	if runtime.GOOS == "android" {
 		ifaces, err := net.Interfaces()
 		usable := 0
-		if err == nil {
-			for _, iface := range ifaces {
-				if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 || iface.Flags&net.FlagLoopback != 0 {
-					continue
-				}
-				usable++
+		if err != nil {
+			log.Printf("cast: skip Chromecast on Android (interfaces: %v)", err)
+			return nil, nil
+		}
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
 			}
+			usable++
 		}
 		if usable == 0 {
 			log.Printf("cast: skip Chromecast on Android (no multicast interfaces)")

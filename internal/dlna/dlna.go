@@ -7,11 +7,15 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/bobo/KOTV/internal/util"
 	"github.com/huin/goupnp/dcps/av1"
+	"github.com/huin/goupnp/httpu"
+	"github.com/huin/goupnp/ssdp"
 )
 
 // Device 可投屏的 MediaRenderer。
@@ -41,8 +45,19 @@ func Discover(timeout time.Duration) ([]Device, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// Android 11+：Go net.Interfaces 会 netlinkrib；有注入 IP 时直接绑地址发 SSDP。
+	if runtime.GOOS == "android" {
+		if ip := util.LanIP(); ip != "" {
+			return discoverWithHostIP(ctx, ip)
+		}
+	}
+
 	clients, errs, err := av1.NewAVTransport1ClientsCtx(ctx)
 	if err != nil {
+		if ip := util.LanIP(); ip != "" {
+			log.Printf("DLNA: default discover failed (%v); retry via %s", err, ip)
+			return discoverWithHostIP(ctx, ip)
+		}
 		return nil, err
 	}
 	for _, e := range errs {
@@ -60,6 +75,57 @@ func Discover(timeout time.Duration) ([]Device, error) {
 		out = append(out, Device{
 			Name:     name,
 			Location: c.ServiceClient.Location.String(),
+			client:   c,
+		})
+	}
+	mu.Lock()
+	devices = out
+	mu.Unlock()
+	return out, nil
+}
+
+// discoverWithHostIP 在指定 IPv4 上发 SSDP（不调用 net.Interfaces）。
+func discoverWithHostIP(ctx context.Context, hostIP string) ([]Device, error) {
+	hc, err := httpu.NewHTTPUClientAddr(hostIP)
+	if err != nil {
+		return nil, fmt.Errorf("HTTPU %s: %w", hostIP, err)
+	}
+	defer hc.Close()
+
+	searchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	responses, err := ssdp.RawSearch(searchCtx, hc, av1.URN_AVTransport_1, 3)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]Device, 0, len(responses))
+	seen := map[string]bool{}
+	for _, response := range responses {
+		loc, err := response.Location()
+		if err != nil || loc == nil {
+			continue
+		}
+		key := loc.String()
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		clients, err := av1.NewAVTransport1ClientsByURLCtx(ctx, loc)
+		if err != nil || len(clients) == 0 {
+			if err != nil {
+				log.Printf("DLNA probe %s: %v", key, err)
+			}
+			continue
+		}
+		c := clients[0]
+		name := c.ServiceClient.RootDevice.Device.FriendlyName
+		if name == "" {
+			name = key
+		}
+		out = append(out, Device{
+			Name:     name,
+			Location: key,
 			client:   c,
 		})
 	}

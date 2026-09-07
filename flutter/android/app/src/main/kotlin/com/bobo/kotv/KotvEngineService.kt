@@ -205,6 +205,7 @@ class KotvEngineService : Service() {
       env["KOTV_CACHE_DIR"] = cacheDir.absolutePath
       env["KOTV_DATA_DIR"] = File(cacheDir, "KOTV").absolutePath
       env["HOME"] = filesDir.absolutePath
+      resolveLanIpv4()?.let { env["KOTV_LAN_IP"] = it }
       // 与 Flutter 同 UID；降低被杀概率时仍可能写日志
       val proc = pb.start()
       engineProcess = proc
@@ -269,6 +270,44 @@ class KotvEngineService : Service() {
       }
     } catch (_: Throwable) {
     }
+  }
+
+  private fun resolveLanIpv4(): String? {
+    try {
+      val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+      @Suppress("DEPRECATION")
+      val ipInt = wm.connectionInfo?.ipAddress ?: 0
+      if (ipInt != 0) {
+        return String.format(
+          java.util.Locale.US,
+          "%d.%d.%d.%d",
+          ipInt and 0xff,
+          ipInt shr 8 and 0xff,
+          ipInt shr 16 and 0xff,
+          ipInt shr 24 and 0xff,
+        )
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "wifi ip failed", t)
+    }
+    // Java NetworkInterface 在 Android 11+ 仍可用；Go net.Interfaces 会 netlinkrib。
+    try {
+      val en = java.net.NetworkInterface.getNetworkInterfaces() ?: return null
+      while (en.hasMoreElements()) {
+        val iface = en.nextElement()
+        if (!iface.isUp || iface.isLoopback) continue
+        val addrs = iface.inetAddresses
+        while (addrs.hasMoreElements()) {
+          val a = addrs.nextElement()
+          if (a is java.net.Inet4Address && !a.isLoopbackAddress) {
+            return a.hostAddress
+          }
+        }
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "enum ifaces failed", t)
+    }
+    return null
   }
 
   private fun resolveEngineSo(): String? {

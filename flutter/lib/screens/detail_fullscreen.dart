@@ -41,6 +41,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.renderMode = 'surface',
     this.aspect = const AspectSpec(key: 'default', fit: BoxFit.contain),
     this.onDecodeChanged,
+    this.onRenderChanged,
     this.onPersistSetting,
     this.onPlayerStatus,
     this.onExternalPlayer,
@@ -91,6 +92,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final String renderMode;
   final AspectSpec aspect;
   final ValueChanged<String>? onDecodeChanged;
+  final ValueChanged<String>? onRenderChanged;
   final Future<void> Function(String key, String value)? onPersistSetting;
   final Future<Map<String, dynamic>> Function()? onPlayerStatus;
   final Future<void> Function(String playerVal)? onExternalPlayer;
@@ -364,8 +366,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Future<void> _onRender(String mode) async {
+    // setRenderMode 已由控件栏调用；此处只同步 UI，并让父页立刻重建 Stable 画面层。
+    if (!mounted) return;
     setState(() => _renderMode = mode);
-    await widget.playback.setRenderMode(mode);
+    widget.onRenderChanged?.call(mode);
   }
 
   void _goNext() {

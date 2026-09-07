@@ -110,7 +110,8 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   @override
-  bool get stalling => buffering;
+  /// 浮层网速跟真实缓冲；[buffering] 收紧以免误切。
+  bool get stalling => _buffering;
 
   @override
   int get networkSpeedBps => _speedBps;

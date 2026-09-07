@@ -1610,12 +1610,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           fit: StackFit.expand,
           children: [
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
-            // 全屏加载/缓冲时盖住 PlatformView，避免 Hybrid Composition 与 Flutter 控件叠影。
+            // 加载/无帧时盖住 PlatformView，避免与 Flutter 控件叠影（原生缓冲层时仅盖无帧）。
             if (_immersiveFullscreen)
               ListenableBuilder(
                 listenable: _playback,
                 builder: (context, _) {
-                  final cover = _playback.stalling || (_playback.width <= 0 && _playback.height <= 0);
+                  final noFrame = _playback.width <= 0 && _playback.height <= 0;
+                  final cover = noFrame ||
+                      (!_playback.preferNativeBufferingOverlay && _playback.stalling);
                   if (!cover) return const SizedBox.shrink();
                   return const ColoredBox(color: Colors.black);
                 },
@@ -1632,7 +1634,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                   rows: _danmakuRows,
                 ),
               ),
-              KotvBufferingOverlay(player: _playback),
+              KotvBufferingOverlay(
+                player: _playback,
+                force: _status.contains('解析') ||
+                    _status.contains('嗅探') ||
+                    _status.contains('换集中'),
+                forceText: (_status.contains('解析') ||
+                        _status.contains('嗅探') ||
+                        _status.contains('换集中'))
+                    ? '正在解析播放地址'
+                    : null,
+              ),
               ExcludeFocus(
                 child: CenterPlayPauseButton(
                   player: _playback,
@@ -1642,20 +1654,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                       !_status.contains('换集中'),
                 ),
               ),
-              if (_status.contains('解析') || _status.contains('嗅探') || _status.contains('换集中'))
-                const ColoredBox(
-                  color: Color(0x66000000),
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(color: Color(0xFFE53955), strokeWidth: 3),
-                        SizedBox(height: 14),
-                        Text('正在解析播放地址', style: TextStyle(color: Colors.white, fontSize: 15)),
-                      ],
-                    ),
-                  ),
-                ),
             ],
           ],
         ),
@@ -1728,6 +1726,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             });
           }
         },
+        onRenderChanged: (mode) {
+          // 须在 persist/setSetting 完成前重建画面，否则 Texture↔Surface 会音画分离定格。
+          if (mounted) {
+            setState(() => _renderMode = kotvNormalizePlayerRender(mode));
+          }
+        },
         onPersistSetting: (k, v) async {
           await api.setSetting(k, v);
           if (!mounted) return;
@@ -1776,8 +1780,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           }
           if (k == 'playerRender') {
             final next = kotvNormalizePlayerRender(v);
-            setState(() => _renderMode = next);
-            unawaited(_playback.setRenderMode(next));
+            if (_renderMode != next) setState(() => _renderMode = next);
           }
           if (k == 'player') {
             final prev = _playerVal;
@@ -1992,7 +1995,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               child: _buildSharedVideo(fit: _aspect.fit),
             ),
           if (_playUrl.isNotEmpty && !stableSlot)
-            KotvBufferingOverlay(player: _playback),
+            KotvBufferingOverlay(
+              player: _playback,
+              force: _status.contains('解析') ||
+                  _status.contains('嗅探') ||
+                  _status.contains('换集中'),
+              forceText: (_status.contains('解析') ||
+                      _status.contains('嗅探') ||
+                      _status.contains('换集中'))
+                  ? '正在解析播放地址'
+                  : null,
+            ),
           if (_playUrl.isNotEmpty && !stableSlot)
             // 中心播停留给触控；遥控器走底栏 TvFocus，避免焦点停在画面正中出不去。
             ExcludeFocus(
@@ -2002,21 +2015,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                 enabled: !_status.contains('解析') &&
                     !_status.contains('嗅探') &&
                     !_status.contains('换集中'),
-              ),
-            ),
-          if (!stableSlot &&
-              (_status.contains('解析') || _status.contains('嗅探') || _status.contains('换集中')))
-            const ColoredBox(
-              color: Color(0x66000000),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Color(0xFFE53955), strokeWidth: 3),
-                    SizedBox(height: 14),
-                    Text('正在解析播放地址', style: TextStyle(color: Colors.white, fontSize: 15)),
-                  ],
-                ),
               ),
             ),
         ],

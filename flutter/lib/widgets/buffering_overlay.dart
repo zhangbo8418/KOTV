@@ -15,10 +15,13 @@ class KotvBufferingOverlay extends StatefulWidget {
     super.key,
     required this.player,
     this.force = false,
+    this.forceText,
   });
 
   final KotvPlayback player;
   final bool force;
+  /// [force] 为 true 时覆盖默认「缓冲中」文案（如「正在解析播放地址」）。
+  final String? forceText;
 
   @override
   State<KotvBufferingOverlay> createState() => _KotvBufferingOverlayState();
@@ -46,7 +49,7 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
       oldWidget.player.removeListener(_onPlayer);
       widget.player.addListener(_onPlayer);
       _sync(fromPlayer: true);
-    } else if (oldWidget.force != widget.force) {
+    } else if (oldWidget.force != widget.force || oldWidget.forceText != widget.forceText) {
       _sync(fromPlayer: true);
     }
   }
@@ -126,7 +129,10 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
   @override
   Widget build(BuildContext context) {
     final speed = kotvFormatSpeed(_speedBps, showZero: true);
-    final label = '缓冲中  $speed';
+    final forced = widget.forceText?.trim();
+    final label = (forced != null && forced.isNotEmpty)
+        ? forced
+        : '缓冲中  $speed';
     // Exo Surface：缓冲 UI 画在原生宿主，避免 Hybrid Composition 叠字重影。
     if (widget.player.preferNativeBufferingOverlay) {
       _syncNative(_visible, label);

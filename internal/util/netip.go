@@ -2,11 +2,18 @@ package util
 
 import (
 	"net"
+	"os"
 	"strings"
 )
 
-// LanIP Util.getIp：优先非回环 IPv4（wlan/eth 名优先）。
+// LanIP 优先环境变量 KOTV_LAN_IP（安卓由 Java 注入，规避 netlinkrib）；
+// 再回退 net.Interfaces（桌面正常；安卓 11+ 常失败）。
 func LanIP() string {
+	if v := strings.TrimSpace(os.Getenv("KOTV_LAN_IP")); v != "" {
+		if ip := net.ParseIP(v); ip != nil && ip.To4() != nil && !ip.IsLoopback() {
+			return ip.To4().String()
+		}
+	}
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return ""

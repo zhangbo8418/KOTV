@@ -315,6 +315,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             renderTexture = resolveRenderTexture(mode)
+            // 强制下次 bind 重挂输出，避免全屏切渲染后仍认旧 Surface 导致定格有声。
+            boundSurfaceView = null
             syncOutputPath()
             val tid = if (useFlutterTexture) ensureFlutterTexture() else -1L
             result.success(
@@ -452,6 +454,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return
     }
     surfaceHost = host
+    boundSurfaceView = null
     host.setRender(false, ::onSurfaceReady)
     onSurfaceReady()
   }
@@ -479,6 +482,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       ensureFlutterTexture()
       bindPlayerSurface()
     } else {
+      // 先清掉 Texture 输出；若 PlatformView 尚未进树，等 attachSurfaceHost 再绑。
+      try {
+        player?.clearVideoSurface()
+      } catch (_: Throwable) {
+      }
       releaseFlutterTexture()
       applyRenderToHost()
     }
@@ -1359,8 +1367,7 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
     } else {
       val sv = SurfaceView(context).apply {
         layoutParams = lp
-        // Hybrid Composition 需要媒体层叠出；关了会黑屏。缓冲文案改走 Flutter 层。
-        setZOrderMediaOverlay(true)
+        // Hybrid Composition 勿 media overlay：否则 Flutter 控件会叠影，且跟槽滚动时画面钉死。
         isFocusable = false
         isFocusableInTouchMode = false
       }

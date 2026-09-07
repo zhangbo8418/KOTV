@@ -86,12 +86,12 @@ class ExoPlayback extends KotvPlayback {
   void bumpSurfaceView() {}
 
   @override
-  /// 浮层「缓冲中」与 [buffering] 一致：已出画/已在播时的补缓存不再盖网速。
-  bool get stalling => buffering;
+  /// 浮层网速：跟 Exo 真实缓冲态（含拖动后补缓存）；[buffering] 仍收紧以免误切播放器。
+  bool get stalling => _buffering;
   @override
-  /// SurfaceView Hybrid Composition：原生叠字会被 MediaOverlay 盖住只剩残字；
-  /// 改回 Flutter 缓冲层（可能轻微重影，但可完整显示「缓冲中」且不挡画面）。
-  bool get preferNativeBufferingOverlay => false;
+  /// SurfaceView：缓冲/解析文案走原生宿主（勿 Flutter 叠字）。
+  /// 已去掉 setZOrderMediaOverlay，原生浮层可完整显示。
+  bool get preferNativeBufferingOverlay => _renderMode != 'texture';
   @override
   Future<void> setNativeBufferingOverlay({required bool visible, required String text}) async {
     if (!preferNativeBufferingOverlay) return;
@@ -575,6 +575,8 @@ class ExoPlayback extends KotvPlayback {
         if (render == 'texture' || render == 'surface') _renderMode = render;
         _applyNativePath(path: path, textureId: tid);
       }
+      // 强制换 PlatformView / Texture 子树，避免全屏 Stable 层仍挂旧面导致定格。
+      _surfaceGeneration++;
     } catch (_) {}
     notifyListeners();
   }
