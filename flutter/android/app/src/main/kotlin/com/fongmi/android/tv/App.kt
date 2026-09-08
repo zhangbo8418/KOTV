@@ -57,8 +57,8 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   }
 
   private fun preloadAppLibvulkan() {
-    // 真机 Vulkan≥1.2：清掉旧包抽出的 jniLibs stub，走系统 libvulkan。
-    // API25：stub 只在 assets，由 MPVLib.ensureLoaded 再加载。
+    // API25：自编 libmpv（jniLibs/assets）依赖 Vulkan 1.1 符号；须在首次
+    // System.loadLibrary("mpv") / ensureLoaded 前 FORCE_LOAD stub（与设置「MPV Vulkan」无关）。
     try {
       if (`is`.xyz.mpv.MPVLib.isDeviceVulkanCapable(this)) {
         `is`.xyz.mpv.MPVLib.removeAppVulkanStubIfPresent(this)
@@ -68,7 +68,15 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
     } catch (t: Throwable) {
       android.util.Log.w(TAG, "Vulkan capability probe failed", t)
     }
-    android.util.Log.i(TAG, "device lacks Vulkan 1.2; stub will load from assets when MPV starts")
+    try {
+      if (`is`.xyz.mpv.MPVLib.preloadVulkanStubEarly(this)) {
+        android.util.Log.i(TAG, "libvulkan stub preloaded for bundled libmpv")
+      } else {
+        android.util.Log.i(TAG, "device lacks Vulkan 1.2; stub deferred to MPV ensureLoaded")
+      }
+    } catch (t: Throwable) {
+      android.util.Log.w(TAG, "early libvulkan stub preload failed", t)
+    }
   }
 
   override fun onCreate() {

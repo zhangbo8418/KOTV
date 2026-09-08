@@ -125,8 +125,7 @@ Future<void> main() async {
     return true;
   };
   if (!kIsWeb) {
-    // Android 播放走原生 Exo/MPV；media_kit_libs 自带的 libmpv 在旧机（API25 /
-    // Vulkan 1.0）上 dlopen 失败，ensureInitialized 抛错会卡在 runApp 之前白屏。
+    // Android 播放走原生 Exo/MPV，不初始化 media_kit（亦未依赖 media_kit_libs）。
     if (!Platform.isAndroid) {
       MediaKit.ensureInitialized();
     } else {

@@ -204,14 +204,65 @@ public final class MPVLib {
     public static synchronized boolean isDeviceVulkanCapable(Context context) {
         if (deviceVulkanCapable != null) return deviceVulkanCapable;
         try {
-            PackageManager pm = context.getApplicationContext().getPackageManager();
+            // attachBaseContext 阶段 getApplicationContext() 常为 null，勿 NPE 后永久缓存 false。
+            Context c = resolveContext(context);
+            PackageManager pm = c != null ? c.getPackageManager() : null;
+            if (pm == null) {
+                Log.w(TAG, "PackageManager unavailable; defer Vulkan capability probe");
+                return false;
+            }
             deviceVulkanCapable = pm.hasSystemFeature(
                     PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, VULKAN_1_2);
         } catch (Throwable e) {
-            deviceVulkanCapable = false;
             Log.w(TAG, "Unable to detect device Vulkan support", e);
+            return false;
         }
         return deviceVulkanCapable;
+    }
+
+    private static Context resolveContext(Context context) {
+        if (context == null) return null;
+        try {
+            Context app = context.getApplicationContext();
+            if (app != null) return app;
+        } catch (Throwable ignored) {
+        }
+        return context;
+    }
+
+    /**
+     * API25 等机型：在 Flutter/media_kit 的 {@code System.loadLibrary("mpv")} 之前
+     * FORCE_LOAD 应用内 Vulkan 1.1 符号桩，避免 DT_NEEDED 绑到系统 Vulkan 1.0 缺符号报错。
+     * 与「设置里开 MPV Vulkan / gpu-api=vulkan」无关；桩只满足链接，不启真正 Vulkan 渲染。
+     */
+    public static synchronized boolean preloadVulkanStubEarly(Context context) {
+        if (vulkanStubLoaded) return true;
+        try {
+            if (isDeviceVulkanCapable(context)) return false;
+            Context app = resolveContext(context);
+            if (app == null) return false;
+            String abi = chooseAbi(app.getAssets());
+            if (abi == null) return false;
+            File root = app.getDir("mpv-libs", Context.MODE_PRIVATE);
+            File dir = new File(root, abi);
+            if (!dir.exists() && !dir.mkdirs()) {
+                Log.w(TAG, "Unable to create " + dir);
+                return false;
+            }
+            copyLibrary(app.getAssets(), abi, "vulkan", dir, false);
+            try {
+                System.loadLibrary("kotv_dl");
+            } catch (UnsatisfiedLinkError e) {
+                copyLibrary(app.getAssets(), abi, "kotv_dl", dir, false);
+                System.load(new File(dir, System.mapLibraryName("kotv_dl")).getAbsolutePath());
+            }
+            File extractedVulkan = new File(dir, System.mapLibraryName("vulkan"));
+            loadVulkanStubGlobal(extractedVulkan);
+            return vulkanStubLoaded;
+        } catch (Throwable t) {
+            Log.w(TAG, "preloadVulkanStubEarly failed", t);
+            return false;
+        }
     }
 
     public static boolean isVulkanRendererAvailable(Context context) {

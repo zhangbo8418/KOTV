@@ -13,7 +13,9 @@ dependencies:
   http: ^1.2.2
   media_kit: ^1.2.6
   media_kit_video: ^1.3.1
-  media_kit_libs_video: ^1.0.7
+  # 不用 media_kit_libs_*：各平台页内 libmpv 均为自编（Vulkan/AV3A）。
+  # Android 走原生 KotvMpv；桌面/iOS 由 assets + bundle-app-libmpv 提供。
+  # 若再引入 libs，旧机 API25 会在插件 <clinit> 里 System.loadLibrary("mpv") 缺 Vulkan 1.1 符号。
   # 主线拉最新兼容版；Win7 线由 adapt-flutter-win7-sdk.sh 尽量钉到同档新版本。
   video_player: ^2.9.2
   web: ^1.1.0
