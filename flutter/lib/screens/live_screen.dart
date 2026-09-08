@@ -30,6 +30,7 @@ import '../player/tv_remote_keys.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
+import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
@@ -82,7 +83,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   final FocusNode _focus = FocusNode();
   final FocusNode _playFocus = FocusNode(debugLabel: 'live_play');
   final FocusNode _rightFocus = FocusNode(debugLabel: 'live_right');
-  final KotvMenuKeyGate _menuGate = KotvMenuKeyGate();
+  final FocusNode _leftFocus = FocusNode(debugLabel: 'live_ch');
+  String _zapDigits = '';
+  Timer? _zapTimer;
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
@@ -371,6 +374,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _focus.dispose();
     _playFocus.dispose();
     _rightFocus.dispose();
+    _leftFocus.dispose();
+    _zapTimer?.cancel();
     unawaited(_fvp?.stop() ?? Future<void>.value());
     unawaited(_mk?.stop() ?? Future<void>.value());
     unawaited(_exo?.stop() ?? Future<void>.value());
@@ -822,7 +827,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     );
   }
 
-  Future<void> _playChannel(int chIdx, {int? line}) async {
+  Future<void> _playChannel(int chIdx, {int? line, bool showList = true}) async {
     if (!await _ensureUnlocked(_groupIdx)) return;
     final chs = _channels;
     if (chIdx < 0 || chIdx >= chs.length) return;
@@ -835,8 +840,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       // 直播频道 URL 直链开播，不走点播「解析」文案。
       _status = '换台中…';
       _title = '${ch['name'] ?? ''}';
-      _leftOpen = true;
-      _epgOpen = false;
+      if (showList) {
+        _leftOpen = true;
+        _epgOpen = false;
+      }
       _catchup = false;
       _catchupChrome = false;
     });
@@ -1257,6 +1264,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _cancelHideOverlays();
     });
     if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _leftOpen) _leftFocus.requestFocus();
+    });
   }
 
   void _openRight() {
@@ -1271,17 +1281,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     });
   }
 
-  void _toggleLeft() => setState(() {
-        _leftOpen = !_leftOpen;
-        if (_leftOpen) {
-          _rightOpen = false;
-          _epgOpen = false;
-          _chromeVisible = false;
-          _cancelHideOverlays();
-        } else {
-          _epgOpen = false;
-        }
+  void _toggleLeft() {
+    if (_leftOpen) {
+      setState(() {
+        _leftOpen = false;
+        _epgOpen = false;
       });
+      return;
+    }
+    _openLeft();
+  }
 
   void _toggleRight() {
     if (_rightOpen) {
@@ -1289,6 +1298,33 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       return;
     }
     _openRight();
+  }
+
+  void _onZapDigit(int d) {
+    if (_zapDigits.length >= 4) return;
+    _zapTimer?.cancel();
+    final next = '$_zapDigits$d';
+    setState(() => _zapDigits = next);
+    _zapTimer = Timer(const Duration(seconds: 2), () {
+      final raw = _zapDigits;
+      if (mounted) setState(() => _zapDigits = '');
+      if (raw.isEmpty) return;
+      unawaited(_findChannelByNumber(raw));
+    });
+  }
+
+  Future<void> _findChannelByNumber(String raw) async {
+    final n = int.tryParse(raw);
+    if (n == null || n <= 0) return;
+    final chs = _channels;
+    // 优先匹配频道自带 number，否则按当前分组 1-based 序号。
+    var idx = chs.indexWhere((c) {
+      final cn = int.tryParse('${c['number'] ?? ''}'.trim());
+      return cn != null && cn == n;
+    });
+    if (idx < 0 && n >= 1 && n <= chs.length) idx = n - 1;
+    if (idx < 0) return;
+    await _playChannel(idx, showList: false);
   }
 
   void _showLiveChromeAndFocusPlay() {
@@ -1454,109 +1490,115 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _leftOpen || _rightOpen || _chromeVisible || _catchupChrome;
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
     final chs = _channels;
-
-    // 菜单短按=底栏；长按=右侧设置。
-    if (_menuGate.onEvent(
-      event,
-      onShort: () {
-        if (_leftOpen || _rightOpen) {
-          _showLiveChromeAndFocusPlay();
-        } else if (_chromeVisible || (_catchup && _catchupChrome)) {
-          setState(() {
-            _chromeVisible = false;
-            _catchupChrome = false;
-          });
-          _cancelHideOverlays();
-        } else {
-          _showLiveChromeAndFocusPlay();
-        }
-      },
-      onLong: () {
-        if (_rightOpen) {
-          setState(() => _rightOpen = false);
-        } else {
-          _openRight();
-        }
-      },
-    )) {
-      return KeyEventResult.handled;
-    }
-
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     if (kotvIsBackKey(key)) {
       if (_handleLiveBack()) return KeyEventResult.handled;
       return KeyEventResult.ignored;
     }
 
-    // 设置键：右侧直播设置面板。
-    if (kotvIsSettingsKey(key)) {
-      if (_rightOpen) {
-        setState(() => _rightOpen = false);
-      } else {
-        _openRight();
-      }
+    // 数字切台：控件开着也可用（常见盒子习惯）。
+    final digit = kotvDigitFromKey(key);
+    if (digit != null) {
+      _onZapDigit(digit);
       return KeyEventResult.handled;
     }
 
-    // 面板/控件已开：方向键与确定留给 TvFocus。
+    // 有面板/底栏：交给 TvFocus；菜单只关显隐。
     if (_liveUiOpen) {
-      if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+      if (kotvIsMenuKey(key)) {
+        if (_leftOpen || _rightOpen) {
+          setState(() {
+            _leftOpen = false;
+            _rightOpen = false;
+          });
+          _showLiveChromeAndFocusPlay();
+        } else {
+          setState(() {
+            _chromeVisible = false;
+            _catchupChrome = false;
+          });
+          _cancelHideOverlays();
+        }
+        return KeyEventResult.handled;
+      }
+      if (kotvIsSettingsKey(key)) {
+        _openRight();
+        return KeyEventResult.handled;
+      }
+      if (kotvIsEnterKey(key) ||
+          kotvIsMediaPlayPause(key) ||
+          kotvIsUpKey(key) ||
+          kotvIsDownKey(key) ||
+          kotvIsLeftKey(key) ||
+          kotvIsRightKey(key)) {
         final primary = FocusManager.instance.primaryFocus;
-        if (primary == null || primary == node) {
-          if (_leftOpen || _rightOpen) {
-            return KeyEventResult.ignored;
-          }
+        if ((kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) &&
+            (primary == null || primary == node) &&
+            !_leftOpen &&
+            !_rightOpen) {
           _showLiveChromeAndFocusPlay();
           return KeyEventResult.handled;
         }
         _bumpLiveChrome();
         return KeyEventResult.ignored;
       }
-      if (kotvIsUpKey(key) ||
-          kotvIsDownKey(key) ||
-          kotvIsLeftKey(key) ||
-          kotvIsRightKey(key)) {
-        _bumpLiveChrome();
-        return KeyEventResult.ignored;
-      }
       return KeyEventResult.ignored;
     }
 
-    // 沉浸播放：OK 开左侧频道；上下换台；左右换线。
-    if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+    // —— 控件全隐 ——
+    if (kotvIsMenuKey(key)) {
+      _showLiveChromeAndFocusPlay();
+      return KeyEventResult.handled;
+    }
+    if (kotvIsSettingsKey(key) || kotvIsRightKey(key)) {
+      if (_catchup && kotvIsRightKey(key)) {
+        unawaited(_playback.seek(_playback.position + const Duration(seconds: 15)));
+        _pulseCatchupChrome();
+        return KeyEventResult.handled;
+      }
+      _openRight();
+      return KeyEventResult.handled;
+    }
+    if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key) || kotvIsLeftKey(key)) {
+      if (_catchup && kotvIsLeftKey(key)) {
+        final next = _playback.position - const Duration(seconds: 15);
+        unawaited(_playback.seek(next < Duration.zero ? Duration.zero : next));
+        _pulseCatchupChrome();
+        return KeyEventResult.handled;
+      }
       _openLeft();
       return KeyEventResult.handled;
     }
     if (kotvIsUpKey(key)) {
       if (chs.isEmpty) return KeyEventResult.handled;
       final next = _chIdx <= 0 ? chs.length - 1 : _chIdx - 1;
-      _playChannel(next);
+      unawaited(_playChannel(next));
       return KeyEventResult.handled;
     }
     if (kotvIsDownKey(key)) {
       if (chs.isEmpty) return KeyEventResult.handled;
-      _playChannel((_chIdx + 1) % chs.length);
+      unawaited(_playChannel((_chIdx + 1) % chs.length));
       return KeyEventResult.handled;
     }
-    if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
+    if (kotvIsMediaRewind(key)) {
       if (_catchup) {
         final next = _playback.position - const Duration(seconds: 15);
         unawaited(_playback.seek(next < Duration.zero ? Duration.zero : next));
         _pulseCatchupChrome();
       } else if (_chIdx >= 0 && _lines > 1) {
-        _playChannel(_chIdx, line: (_line - 1 + _lines) % _lines);
+        unawaited(_playChannel(_chIdx, line: (_line - 1 + _lines) % _lines));
       }
       return KeyEventResult.handled;
     }
-    if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
+    if (kotvIsMediaFastForward(key)) {
       if (_catchup) {
         unawaited(_playback.seek(_playback.position + const Duration(seconds: 15)));
         _pulseCatchupChrome();
       } else if (_chIdx >= 0 && _lines > 1) {
-        _playChannel(_chIdx, line: (_line + 1) % _lines);
+        unawaited(_playChannel(_chIdx, line: (_line + 1) % _lines));
       }
       return KeyEventResult.handled;
     }
@@ -1652,6 +1694,23 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         _status.contains('缓冲') ||
                         _loading,
                   ),
+                  if (_zapDigits.isNotEmpty)
+                    Positioned(
+                      right: 36,
+                      top: 48,
+                      child: IgnorePointer(
+                        child: Text(
+                          _zapDigits,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.92),
+                            fontSize: 56,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 2,
+                            shadows: const [Shadow(color: Colors.black54, blurRadius: 8)],
+                          ),
+                        ),
+                      ),
+                    ),
                   if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
                   // 点击分区：左 28% 频道 / 右 28% 设置 / 中 点画面播停（抖音式）
                   Positioned.fill(
@@ -1812,17 +1871,20 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                         final name = '${ch['name'] ?? ''}';
                                         final logo = '${ch['logo'] ?? ''}';
                                         final sel = i == _chIdx;
+                                        final focusHere = sel || (_chIdx < 0 && i == 0);
                                         return Padding(
                                           padding: EdgeInsets.only(bottom: land ? 2 : 4),
-                                          child: Material(
-                                            color: sel ? const Color(0x2EFFFFFF) : Colors.transparent,
-                                            borderRadius: BorderRadius.circular(8),
-                                            child: InkWell(
+                                          child: TvFocus(
+                                            autofocus: focusHere,
+                                            focusNode: focusHere ? _leftFocus : null,
+                                            borderRadius: 8,
+                                            onPressed: () {
+                                              _cancelHideOverlays();
+                                              unawaited(_playChannel(i));
+                                            },
+                                            child: Material(
+                                              color: sel ? const Color(0x2EFFFFFF) : Colors.transparent,
                                               borderRadius: BorderRadius.circular(8),
-                                              onTap: () {
-                                                _cancelHideOverlays();
-                                                _playChannel(i);
-                                              },
                                               child: SizedBox(
                                                 height: chH,
                                                 child: Padding(

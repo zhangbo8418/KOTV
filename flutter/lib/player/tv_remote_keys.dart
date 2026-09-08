@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/services.dart';
 
 /// 遥控键判定（点播/直播共用）。
@@ -28,7 +26,6 @@ bool kotvIsRightKey(LogicalKeyboardKey key) => key == LogicalKeyboardKey.arrowRi
 bool kotvIsMenuKey(LogicalKeyboardKey key) =>
     key == LogicalKeyboardKey.contextMenu || key == LogicalKeyboardKey.keyM;
 
-/// 设置键 / 菜单长按：点播右侧选集、直播右侧设置。
 bool kotvIsSettingsKey(LogicalKeyboardKey key) =>
     key == LogicalKeyboardKey.settings || key == LogicalKeyboardKey.keyS;
 
@@ -45,47 +42,34 @@ bool kotvIsMediaRewind(LogicalKeyboardKey key) => key == LogicalKeyboardKey.medi
 bool kotvIsMediaFastForward(LogicalKeyboardKey key) =>
     key == LogicalKeyboardKey.mediaFastForward;
 
-/// 菜单短按 / 长按（≥400ms）：短按底栏，长按右侧面板。
-class KotvMenuKeyGate {
-  Timer? _longTimer;
-  bool _armed = false;
-  bool _longFired = false;
-  static const longPress = Duration(milliseconds: 400);
-
-  /// 返回 true 表示已消费。
-  bool onEvent(
-    KeyEvent event, {
-    required void Function() onShort,
-    required void Function() onLong,
-  }) {
-    final key = event.logicalKey;
-    if (!kotvIsMenuKey(key)) return false;
-    if (event is KeyDownEvent) {
-      if (_armed) return true; // 忽略长按连发
-      _armed = true;
-      _longFired = false;
-      _longTimer?.cancel();
-      _longTimer = Timer(longPress, () {
-        _longFired = true;
-        onLong();
-      });
-      return true;
-    }
-    if (event is KeyUpEvent) {
-      _longTimer?.cancel();
-      _longTimer = null;
-      if (_armed && !_longFired) onShort();
-      _armed = false;
-      _longFired = false;
-      return true;
-    }
-    return false;
+/// 0–9；遥控器数字键 / 键盘主区与小键盘。找不到返回 null。
+int? kotvDigitFromKey(LogicalKeyboardKey key) {
+  const main = <LogicalKeyboardKey>[
+    LogicalKeyboardKey.digit0,
+    LogicalKeyboardKey.digit1,
+    LogicalKeyboardKey.digit2,
+    LogicalKeyboardKey.digit3,
+    LogicalKeyboardKey.digit4,
+    LogicalKeyboardKey.digit5,
+    LogicalKeyboardKey.digit6,
+    LogicalKeyboardKey.digit7,
+    LogicalKeyboardKey.digit8,
+    LogicalKeyboardKey.digit9,
+  ];
+  const pad = <LogicalKeyboardKey>[
+    LogicalKeyboardKey.numpad0,
+    LogicalKeyboardKey.numpad1,
+    LogicalKeyboardKey.numpad2,
+    LogicalKeyboardKey.numpad3,
+    LogicalKeyboardKey.numpad4,
+    LogicalKeyboardKey.numpad5,
+    LogicalKeyboardKey.numpad6,
+    LogicalKeyboardKey.numpad7,
+    LogicalKeyboardKey.numpad8,
+    LogicalKeyboardKey.numpad9,
+  ];
+  for (var i = 0; i < 10; i++) {
+    if (key == main[i] || key == pad[i]) return i;
   }
-
-  void reset() {
-    _longTimer?.cancel();
-    _longTimer = null;
-    _armed = false;
-    _longFired = false;
-  }
+  return null;
 }

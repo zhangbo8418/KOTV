@@ -155,7 +155,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   DateTime? _lastSwipeAt;
   bool _forcedLandscape = false;
   bool _showForceLandscape = false;
-  final KotvMenuKeyGate _menuGate = KotvMenuKeyGate();
 
   String get _title {
     if (_epIdx >= 0 && _epIdx < widget.episodes.length) {
@@ -592,36 +591,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    final key = event.logicalKey;
-
-    // 菜单短按=底栏；长按=右侧选集（盒子常无独立设置键）。
-    if (_menuGate.onEvent(
-      event,
-      onShort: () {
-        if (_epOpen) {
-          _chromeKey.currentState?.closeEpisodes();
-          setState(() {});
-        }
-        if (_showChrome) {
-          _setChrome(show: false, hideCursor: true);
-        } else {
-          _showChromeAndFocusPlay();
-        }
-      },
-      onLong: () {
-        if (widget.episodes.isEmpty) {
-          _showChromeAndFocusPlay();
-          return;
-        }
-        _bumpChrome();
-        _chromeKey.currentState?.openEpisodes();
-        setState(() {});
-      },
-    )) {
-      return KeyEventResult.handled;
-    }
-
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
 
     if (kotvIsBackKey(key)) {
       if (_epOpen) {
@@ -638,8 +609,51 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       unawaited(_exitFullscreen());
       return KeyEventResult.handled;
     }
-    // 设置键 / E：右侧选集。
-    if (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE) {
+
+    // 有底栏/选集：方向与确定交给 TvFocus。
+    if (_showChrome || _epOpen) {
+      if (kotvIsMenuKey(key)) {
+        if (_epOpen) {
+          _chromeKey.currentState?.closeEpisodes();
+          setState(() {});
+        }
+        _setChrome(show: false, hideCursor: true);
+        return KeyEventResult.handled;
+      }
+      if (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE) {
+        if (widget.episodes.isEmpty) return KeyEventResult.handled;
+        _bumpChrome();
+        _chromeKey.currentState?.openEpisodes();
+        setState(() {});
+        return KeyEventResult.handled;
+      }
+      if (kotvIsEnterKey(key) ||
+          kotvIsMediaPlayPause(key) ||
+          kotvIsLeftKey(key) ||
+          kotvIsRightKey(key) ||
+          kotvIsUpKey(key) ||
+          kotvIsDownKey(key) ||
+          kotvIsMediaRewind(key) ||
+          kotvIsMediaFastForward(key)) {
+        final primary = FocusManager.instance.primaryFocus;
+        if ((kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) &&
+            (primary == null || primary == node)) {
+          _chromeKey.currentState?.focusPlayControl();
+          _bumpChrome();
+          return KeyEventResult.handled;
+        }
+        _bumpChrome();
+        return KeyEventResult.ignored;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    // —— 控件全隐 ——
+    if (kotvIsMenuKey(key)) {
+      _showChromeAndFocusPlay();
+      return KeyEventResult.handled;
+    }
+    if (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE || kotvIsRightKey(key)) {
       if (widget.episodes.isEmpty) {
         _showChromeAndFocusPlay();
         return KeyEventResult.handled;
@@ -649,49 +663,19 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       setState(() {});
       return KeyEventResult.handled;
     }
-    final activate = kotvIsEnterKey(key) || kotvIsMediaPlayPause(key);
-    if (activate) {
-      // OK：隐藏→亮底栏并聚焦；已亮→交给焦点按钮。
-      if (!_showChrome) {
-        if (_epOpen) {
-          _chromeKey.currentState?.closeEpisodes();
-          setState(() {});
-        }
-        _showChromeAndFocusPlay();
-        return KeyEventResult.handled;
-      }
-      final primary = FocusManager.instance.primaryFocus;
-      if (primary == null || primary == node) {
-        _chromeKey.currentState?.focusPlayControl();
-        _bumpChrome();
-        return KeyEventResult.handled;
-      }
-      _bumpChrome();
-      return KeyEventResult.ignored;
-    }
-    final arrow = kotvIsLeftKey(key) ||
-        kotvIsRightKey(key) ||
-        kotvIsUpKey(key) ||
-        kotvIsDownKey(key) ||
-        kotvIsMediaRewind(key) ||
-        kotvIsMediaFastForward(key);
-    // 控件/选集面板打开时：方向键交给焦点遍历。
-    if (arrow && (_showChrome || _epOpen)) {
-      _bumpChrome();
-      return KeyEventResult.ignored;
+    if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+      _showChromeAndFocusPlay();
+      return KeyEventResult.handled;
     }
     if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
       final p = widget.playback.position - const Duration(seconds: 10);
       widget.playback.seek(p.isNegative ? Duration.zero : p);
-      _bumpChrome();
       return KeyEventResult.handled;
     }
-    if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
+    if (kotvIsMediaFastForward(key)) {
       widget.playback.seek(widget.playback.position + const Duration(seconds: 10));
-      _bumpChrome();
       return KeyEventResult.handled;
     }
-    // 控件隐藏：上下切集（不再误当成「亮控件」）。
     if (kotvIsUpKey(key)) {
       _goPrev();
       return KeyEventResult.handled;
