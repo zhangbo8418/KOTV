@@ -610,7 +610,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return KeyEventResult.handled;
     }
 
-    // 有底栏/选集：方向与确定交给 TvFocus。
+    // 有底栏/选集：上下+确定走焦点；左右调进度（遥控控进度条）。
     if (_showChrome || _epOpen) {
       if (kotvIsMenuKey(key)) {
         if (_epOpen) {
@@ -627,14 +627,23 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         setState(() {});
         return KeyEventResult.handled;
       }
+      if (!_epOpen && (kotvIsLeftKey(key) || kotvIsMediaRewind(key))) {
+        final p = widget.playback.position - const Duration(seconds: 10);
+        widget.playback.seek(p.isNegative ? Duration.zero : p);
+        _bumpChrome();
+        return KeyEventResult.handled;
+      }
+      if (!_epOpen && (kotvIsRightKey(key) || kotvIsMediaFastForward(key))) {
+        widget.playback.seek(widget.playback.position + const Duration(seconds: 10));
+        _bumpChrome();
+        return KeyEventResult.handled;
+      }
       if (kotvIsEnterKey(key) ||
           kotvIsMediaPlayPause(key) ||
-          kotvIsLeftKey(key) ||
-          kotvIsRightKey(key) ||
           kotvIsUpKey(key) ||
           kotvIsDownKey(key) ||
-          kotvIsMediaRewind(key) ||
-          kotvIsMediaFastForward(key)) {
+          kotvIsLeftKey(key) ||
+          kotvIsRightKey(key)) {
         final primary = FocusManager.instance.primaryFocus;
         if ((kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) &&
             (primary == null || primary == node)) {

@@ -84,6 +84,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   final FocusNode _playFocus = FocusNode(debugLabel: 'live_play');
   final FocusNode _rightFocus = FocusNode(debugLabel: 'live_right');
   final FocusNode _leftFocus = FocusNode(debugLabel: 'live_ch');
+  final FocusNode _epgFocus = FocusNode(debugLabel: 'live_epg');
   String _zapDigits = '';
   Timer? _zapTimer;
 
@@ -297,6 +298,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   bool _chromeVisible = false;
   bool _catchup = false;
   bool _catchupChrome = false;
+  /// 当前回看的节目下标；-1 表示未在回看。
+  int _catchupProgIdx = -1;
   bool _miniDesktop = false;
   /// 沉浸全屏：复用 PC 左右菜单交互（不再推另一套点播式全屏页）。
   bool _immersive = false;
@@ -375,6 +378,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _playFocus.dispose();
     _rightFocus.dispose();
     _leftFocus.dispose();
+    _epgFocus.dispose();
     _zapTimer?.cancel();
     unawaited(_fvp?.stop() ?? Future<void>.value());
     unawaited(_mk?.stop() ?? Future<void>.value());
@@ -521,6 +525,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _programs = [];
       _catchup = false;
       _catchupChrome = false;
+      _catchupProgIdx = -1;
     });
     try {
       final data = await ref.read(apiProvider).liveLoad(index: index);
@@ -846,6 +851,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }
       _catchup = false;
       _catchupChrome = false;
+      _catchupProgIdx = -1;
     });
     // EPG 与开播解耦：勿等 open 成功（FVP/MPV 卡住时节目单也出不来）。
     unawaited(_loadEpg());
@@ -913,12 +919,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _title = '${data['name'] ?? _title}';
         _status = '回看中 · $_title';
         _catchup = true;
+        _catchupProgIdx = progIdx;
         _catchupChrome = true;
         _leftOpen = false;
         _rightOpen = false;
         _epgOpen = false;
       });
       _pulseCatchupChrome();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _catchupChrome) _playFocus.requestFocus();
+      });
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: _title, url: url);
     } catch (e) {
       if (!mounted || serial != _playSerial) return;
@@ -948,6 +958,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     setState(() {
       _catchup = false;
       _catchupChrome = false;
+      _catchupProgIdx = -1;
     });
   }
 
@@ -1467,6 +1478,125 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _scheduleHideMouse();
   }
 
+  Widget _epgProgramTile(
+    int i, {
+    required bool land,
+    required double wScale,
+    bool portrait = false,
+  }) {
+    final prog = _programs[i];
+    final now = prog['now'] == true;
+    final canCatchup = prog['catchup'] == true;
+    final playing = _catchup && i == _catchupProgIdx;
+    final sel = playing || now;
+    final start = '${prog['start'] ?? ''}'.trim();
+    final title = '${prog['title'] ?? ''}'.trim();
+    final fallback = '${prog['label'] ?? ''}'.trim();
+    final label = title.isNotEmpty ? title : fallback;
+    final focusHere = playing || (!_catchup && now);
+    // 无「正在播出」且无可回看：仍可聚焦浏览，确定无动作。
+    void activate() {
+      _cancelHideOverlays();
+      if (canCatchup) unawaited(_playCatchup(i));
+    }
+
+    if (portrait) {
+      final p = KotvPalette.of(context);
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: TvFocus(
+          autofocus: focusHere,
+          focusNode: focusHere ? _epgFocus : null,
+          borderRadius: 8,
+          onPressed: canCatchup ? activate : null,
+          child: Material(
+            color: playing
+                ? p.selected.withOpacity(0.95)
+                : (now ? p.selected.withOpacity(0.75) : p.pillBg.withOpacity(0.7)),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: sel ? Colors.white : p.fg,
+                        fontSize: 13,
+                        fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  if (playing)
+                    Text('回看中', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))
+                  else if (canCatchup)
+                    Text('回看', style: TextStyle(color: p.primary, fontSize: 12, fontWeight: FontWeight.w700))
+                  else if (now)
+                    const Text('正在播出', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: land ? 2 : 4),
+      child: TvFocus(
+        autofocus: focusHere,
+        focusNode: focusHere ? _epgFocus : null,
+        borderRadius: 6,
+        onPressed: canCatchup ? activate : null,
+        child: Material(
+          color: playing
+              ? const Color(0xE0C73C62)
+              : (now ? const Color(0xB0C73C62) : const Color(0x9918161E)),
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: land ? 6 : 8,
+              vertical: land ? 5 : 8,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (start.isNotEmpty)
+                  SizedBox(
+                    width: land ? 38 : 44,
+                    child: Text(
+                      start,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(sel ? 1 : 0.75),
+                        fontSize: land ? 11 : 12,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: Text(
+                    '$label${playing ? ' · 回看中' : (canCatchup ? ' · 回看' : '')}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(sel ? 1 : 0.85),
+                      fontSize: land ? 12 : (12.0 * wScale.clamp(1.0, 1.2)),
+                      height: 1.2,
+                      fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   String get _currentLogo {
     final chs = _channels;
     if (_chIdx < 0 || _chIdx >= chs.length) return '';
@@ -1489,6 +1619,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   bool get _liveUiOpen =>
       _leftOpen || _rightOpen || _chromeVisible || _catchupChrome;
 
+  void _seekByRemote(Duration delta) {
+    final next = _playback.position + delta;
+    unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
+    if (_catchup) {
+      _pulseCatchupChrome();
+    } else {
+      _bumpLiveChrome();
+    }
+  }
+
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
@@ -1506,7 +1646,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       return KeyEventResult.handled;
     }
 
-    // 有面板/底栏：交给 TvFocus；菜单只关显隐。
+    // 有面板/底栏：上下+确定走焦点；左右在底栏/时移时调进度。
     if (_liveUiOpen) {
       if (kotvIsMenuKey(key)) {
         if (_leftOpen || _rightOpen) {
@@ -1526,6 +1666,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }
       if (kotvIsSettingsKey(key)) {
         _openRight();
+        return KeyEventResult.handled;
+      }
+      final chromeBar = (_chromeVisible || _catchupChrome) && !_leftOpen && !_rightOpen;
+      if (chromeBar && (kotvIsLeftKey(key) || kotvIsMediaRewind(key))) {
+        _seekByRemote(const Duration(seconds: -15));
+        return KeyEventResult.handled;
+      }
+      if (chromeBar && (kotvIsRightKey(key) || kotvIsMediaFastForward(key))) {
+        _seekByRemote(const Duration(seconds: 15));
         return KeyEventResult.handled;
       }
       if (kotvIsEnterKey(key) ||
@@ -1553,22 +1702,30 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _showLiveChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
-    if (kotvIsSettingsKey(key) || kotvIsRightKey(key)) {
-      if (_catchup && kotvIsRightKey(key)) {
-        unawaited(_playback.seek(_playback.position + const Duration(seconds: 15)));
-        _pulseCatchupChrome();
+    // 时移中：OK/菜单已亮底栏；左右 seek 并亮进度条；勿再开频道侧栏抢进度。
+    if (_catchup) {
+      if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+        _showLiveChromeAndFocusPlay();
         return KeyEventResult.handled;
       }
+      if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
+        _seekByRemote(const Duration(seconds: -15));
+        return KeyEventResult.handled;
+      }
+      if (kotvIsRightKey(key) || kotvIsMediaFastForward(key) || kotvIsSettingsKey(key)) {
+        if (kotvIsSettingsKey(key)) {
+          _openRight();
+        } else {
+          _seekByRemote(const Duration(seconds: 15));
+        }
+        return KeyEventResult.handled;
+      }
+    }
+    if (kotvIsSettingsKey(key) || kotvIsRightKey(key)) {
       _openRight();
       return KeyEventResult.handled;
     }
     if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key) || kotvIsLeftKey(key)) {
-      if (_catchup && kotvIsLeftKey(key)) {
-        final next = _playback.position - const Duration(seconds: 15);
-        unawaited(_playback.seek(next < Duration.zero ? Duration.zero : next));
-        _pulseCatchupChrome();
-        return KeyEventResult.handled;
-      }
       _openLeft();
       return KeyEventResult.handled;
     }
@@ -1584,20 +1741,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       return KeyEventResult.handled;
     }
     if (kotvIsMediaRewind(key)) {
-      if (_catchup) {
-        final next = _playback.position - const Duration(seconds: 15);
-        unawaited(_playback.seek(next < Duration.zero ? Duration.zero : next));
-        _pulseCatchupChrome();
-      } else if (_chIdx >= 0 && _lines > 1) {
+      if (_chIdx >= 0 && _lines > 1) {
         unawaited(_playChannel(_chIdx, line: (_line - 1 + _lines) % _lines));
       }
       return KeyEventResult.handled;
     }
     if (kotvIsMediaFastForward(key)) {
-      if (_catchup) {
-        unawaited(_playback.seek(_playback.position + const Duration(seconds: 15)));
-        _pulseCatchupChrome();
-      } else if (_chIdx >= 0 && _lines > 1) {
+      if (_chIdx >= 0 && _lines > 1) {
         unawaited(_playChannel(_chIdx, line: (_line + 1) % _lines));
       }
       return KeyEventResult.handled;
@@ -1940,6 +2090,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                           if (_epgOpen && _programs.isEmpty && _chIdx >= 0) {
                                             unawaited(_loadEpg());
                                           }
+                                          if (_epgOpen) {
+                                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                                              if (mounted && _epgOpen) _epgFocus.requestFocus();
+                                            });
+                                          }
                                         },
                                         child: Center(
                                           child: Text(
@@ -2016,65 +2171,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                                 )
                                               : ListView.builder(
                                                   itemCount: _programs.length,
-                                                  itemBuilder: (_, i) {
-                                                    final p = _programs[i];
-                                                    final now = p['now'] == true;
-                                                    final catchup = p['catchup'] == true;
-                                                    final start = '${p['start'] ?? ''}'.trim();
-                                                    final title = '${p['title'] ?? ''}'.trim();
-                                                    final fallback = '${p['label'] ?? ''}'.trim();
-                                                    return Padding(
-                                                      padding: EdgeInsets.only(bottom: land ? 2 : 4),
-                                                      child: Material(
-                                                        color: now ? const Color(0xD0C73C62) : const Color(0x9918161E),
-                                                        borderRadius: BorderRadius.circular(6),
-                                                        child: InkWell(
-                                                          borderRadius: BorderRadius.circular(6),
-                                                          onTap: () {
-                                                            _cancelHideOverlays();
-                                                            if (catchup) unawaited(_playCatchup(i));
-                                                          },
-                                                          child: Padding(
-                                                            padding: EdgeInsets.symmetric(
-                                                              horizontal: land ? 6 : 8,
-                                                              vertical: land ? 5 : 8,
-                                                            ),
-                                                            child: Row(
-                                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                                              children: [
-                                                                if (start.isNotEmpty)
-                                                                  SizedBox(
-                                                                    width: land ? 38 : 44,
-                                                                    child: Text(
-                                                                      start,
-                                                                      style: TextStyle(
-                                                                        color: Colors.white.withOpacity(now ? 1 : 0.75),
-                                                                        fontSize: land ? 11 : 12,
-                                                                        fontFeatures: const [FontFeature.tabularFigures()],
-                                                                      ),
-                                                                    ),
-                                                                  ),
-                                                                Expanded(
-                                                                  child: Text(
-                                                                    title.isNotEmpty
-                                                                        ? '$title${catchup ? ' · 回看' : ''}'
-                                                                        : '$fallback${catchup ? ' · 回看' : ''}',
-                                                                    maxLines: 2,
-                                                                    overflow: TextOverflow.ellipsis,
-                                                                    style: TextStyle(
-                                                                      color: Colors.white.withOpacity(now ? 1 : 0.85),
-                                                                      fontSize: land ? 12 : (12.0 * wScale.clamp(1.0, 1.2)),
-                                                                      height: 1.2,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    );
-                                                  },
+                                                  itemBuilder: (_, i) => _epgProgramTile(
+                                                    i,
+                                                    land: land,
+                                                    wScale: wScale,
+                                                  ),
                                                 ),
                                         ),
                                       ],
@@ -2726,45 +2827,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
                   itemCount: _programs.length,
-                  itemBuilder: (_, i) {
-                    final prog = _programs[i];
-                    final now = prog['now'] == true;
-                    final catchup = prog['catchup'] == true;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Material(
-                        color: now ? p.selected.withOpacity(0.9) : p.pillBg.withOpacity(0.7),
-                        borderRadius: BorderRadius.circular(8),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(8),
-                          onTap: catchup ? () => _playCatchup(i) : null,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    '${prog['label'] ?? prog['title'] ?? ''}',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: now ? Colors.white : p.fg,
-                                      fontSize: 13,
-                                      fontWeight: now ? FontWeight.w700 : FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                                if (catchup)
-                                  Text('回看', style: TextStyle(color: p.primary, fontSize: 12, fontWeight: FontWeight.w700)),
-                                if (now && !catchup)
-                                  const Text('正在播出', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+                  itemBuilder: (_, i) => _epgProgramTile(i, land: false, wScale: 1, portrait: true),
                 ),
         ),
       ],

@@ -2068,6 +2068,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       setState(() => _chromeRemoteFocus = true);
       return KeyEventResult.handled;
     }
+    // 底栏已获焦：左右调进度，上下留给 TvFocus。
+    if (_chromeRemoteFocus && (kotvIsLeftKey(key) || kotvIsMediaRewind(key))) {
+      final p = _playback.position - const Duration(seconds: 10);
+      unawaited(_playback.seek(p.isNegative ? Duration.zero : p));
+      return KeyEventResult.handled;
+    }
+    if (_chromeRemoteFocus && (kotvIsRightKey(key) || kotvIsMediaFastForward(key))) {
+      unawaited(_playback.seek(_playback.position + const Duration(seconds: 10)));
+      return KeyEventResult.handled;
+    }
     // 起播后方向键也可把焦点落到底栏，避免只能靠菜单键。
     if (_playUrl.isNotEmpty &&
         !_chromeRemoteFocus &&
@@ -2083,7 +2093,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }
       return KeyEventResult.ignored;
     }
-    // 方向键：交给底栏 TvFocus / 剧集等全局遍历
+    // 上下：交给底栏 TvFocus / 剧集等全局遍历
     return KeyEventResult.ignored;
   }
 
