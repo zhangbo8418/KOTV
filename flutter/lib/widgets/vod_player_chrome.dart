@@ -265,6 +265,7 @@ class _IconAct extends StatelessWidget {
     this.badge,
     this.size = 40,
     this.autofocus = false,
+    this.focusNode,
   });
 
   final IconData icon;
@@ -273,6 +274,7 @@ class _IconAct extends StatelessWidget {
   final String? badge;
   final double size;
   final bool autofocus;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -281,6 +283,7 @@ class _IconAct extends StatelessWidget {
       message: tip,
       child: TvFocus(
         autofocus: autofocus,
+        focusNode: focusNode,
         onPressed: onTap,
         borderRadius: 8,
         child: SizedBox(
@@ -478,6 +481,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   StreamSubscription<Duration>? _skipSub;
   DateTime _now = DateTime.now();
   final ScrollController _epScroll = ScrollController();
+  final FocusNode _playFocus = FocusNode(debugLabel: 'vod_fs_play');
+  final FocusNode _epFocus = FocusNode(debugLabel: 'vod_fs_ep');
   static const double _epItemExtent = 52;
 
   @override
@@ -568,15 +573,36 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     _sleepTimer?.cancel();
     _skipSub?.cancel();
     _epScroll.dispose();
+    _playFocus.dispose();
+    _epFocus.dispose();
     super.dispose();
   }
 
   bool get epOpen => _epOpen;
 
+  /// 亮底栏后强制焦点落到播停（盒子上 autofocus 常输给根 Focus）。
+  void focusPlayControl() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _epOpen) return;
+      _playFocus.requestFocus();
+    });
+  }
+
+  /// 右侧选集打开后焦点落到当前集。
+  void focusEpisodes() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_epOpen) return;
+      _epFocus.requestFocus();
+    });
+  }
+
   void openEpisodes() {
     _epHideTimer?.cancel();
     setState(() => _epOpen = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollEpIntoView());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollEpIntoView();
+      if (mounted) _epFocus.requestFocus();
+    });
   }
 
   void closeEpisodes() {
@@ -1532,6 +1558,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       tip: widget.player.playing ? '暂停' : '播放',
                                       size: land ? 32.0 : 40.0,
                                       autofocus: true,
+                                      focusNode: _playFocus,
                                       onTap: () {
                                         widget.player.playOrPause();
                                         widget.onBump();
@@ -1734,21 +1761,25 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             itemCount: widget.episodes.length,
                             itemBuilder: (_, i) {
                               final sel = i == widget.epIdx;
+                              final focusHere = sel || (widget.epIdx < 0 && i == 0);
                               return Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 4),
-                                child: Material(
-                                  color: sel ? const Color(0x2EFFFFFF) : const Color(0x3318161E),
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: InkWell(
+                                child: TvFocus(
+                                  autofocus: focusHere,
+                                  focusNode: focusHere ? _epFocus : null,
+                                  borderRadius: 8,
+                                  onPressed: () {
+                                    widget.onSelectEp?.call(i);
+                                    widget.onBump();
+                                    closeEpisodes();
+                                  },
+                                  child: Material(
+                                    color: sel ? const Color(0x2EFFFFFF) : const Color(0x3318161E),
                                     borderRadius: BorderRadius.circular(8),
-                                    onTap: () {
-                                      widget.onSelectEp?.call(i);
-                                      closeEpisodes();
-                                    },
                                     child: Align(
                                       alignment: Alignment.centerLeft,
                                       child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                         child: Text(
                                           widget.episodes[i],
                                           maxLines: 1,

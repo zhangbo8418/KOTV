@@ -30,6 +30,9 @@ class LiveCatchupChrome extends StatelessWidget {
     this.fullscreenActive = false,
     /// 遥控菜单弹出时，自动焦点到播停键。
     this.autofocusPlay = false,
+    this.playFocusNode,
+    /// 任意控件操作后回调（重排隐藏计时）。
+    this.onBump,
   });
 
   final KotvPlayback player;
@@ -46,6 +49,13 @@ class LiveCatchupChrome extends StatelessWidget {
   final bool? offerFullscreenChoice;
   final bool fullscreenActive;
   final bool autofocusPlay;
+  final FocusNode? playFocusNode;
+  final VoidCallback? onBump;
+
+  void _tap(VoidCallback? action) {
+    action?.call();
+    onBump?.call();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,17 +86,24 @@ class LiveCatchupChrome extends StatelessWidget {
                       compact: compact,
                       size: iconSize,
                       autofocus: autofocusPlay,
-                      onTap: () => player.playOrPause(),
+                      focusNode: playFocusNode,
+                      onTap: () => _tap(() => player.playOrPause()),
                     ),
                     if (onCast != null)
-                      _act(icon: Icons.cast, tip: '投屏', compact: compact, size: iconSize, onTap: onCast!),
+                      _act(
+                        icon: Icons.cast,
+                        tip: '投屏',
+                        compact: compact,
+                        size: iconSize,
+                        onTap: () => _tap(onCast),
+                      ),
                     if (onMini != null)
                       _act(
                         icon: miniActive ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
                         tip: miniActive ? '还原窗口' : '迷你桌面播放',
                         compact: compact,
                         size: iconSize,
-                        onTap: onMini!,
+                        onTap: () => _tap(onMini),
                       ),
                     if (onExpand != null && !miniActive)
                       (offerFullscreenChoice == false)
@@ -95,18 +112,18 @@ class LiveCatchupChrome extends StatelessWidget {
                               tip: fullscreenActive ? '退出全屏' : '全屏',
                               compact: compact,
                               size: iconSize,
-                              onTap: () => onExpand!(KotvDesktopFullscreenKind.display),
+                              onTap: () => _tap(() => onExpand!(KotvDesktopFullscreenKind.display)),
                             )
                           : KotvFullscreenExpandButton(
                               size: iconSize,
                               iconSize: iconSize <= 32 ? 16 : 22,
                               offerDisplayChoice: offerFullscreenChoice,
-                              onSelect: onExpand!,
+                              onSelect: (kind) => _tap(() => onExpand!(kind)),
                             ),
                     if (!compact && onPlayer != null)
-                      _textAct(resolvedPlayerLabel, onPlayer!),
+                      _textAct(resolvedPlayerLabel, () => _tap(onPlayer)),
                     if (!compact && onDecode != null)
-                      _textAct(decodeLabel, onDecode!),
+                      _textAct(decodeLabel, () => _tap(onDecode)),
                     const SizedBox(width: 6),
                     Text(
                       compact ? fmtPlayerTime(pos) : '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',
@@ -129,7 +146,10 @@ class LiveCatchupChrome extends StatelessWidget {
                         child: Slider(
                           value: vol,
                           max: 100,
-                          onChanged: (v) => player.setVolume(v),
+                          onChanged: (v) {
+                            player.setVolume(v);
+                            onBump?.call();
+                          },
                         ),
                       ),
                     ),
@@ -145,6 +165,7 @@ class LiveCatchupChrome extends StatelessWidget {
                     return b < p ? p : b;
                   }(),
                   enabled: dur.inMilliseconds > 0,
+                  onInteraction: onBump,
                   theme: SliderTheme.of(context).copyWith(
                     trackHeight: land ? 2 : 3,
                     thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
@@ -170,12 +191,14 @@ class LiveCatchupChrome extends StatelessWidget {
     required VoidCallback onTap,
     double? size,
     bool autofocus = false,
+    FocusNode? focusNode,
   }) {
     final sz = size ?? (compact ? 32.0 : 40.0);
     return Tooltip(
       message: tip,
       child: TvFocus(
         autofocus: autofocus,
+        focusNode: focusNode,
         onPressed: onTap,
         borderRadius: 8,
         child: SizedBox(

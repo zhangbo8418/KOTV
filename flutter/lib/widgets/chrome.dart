@@ -183,6 +183,7 @@ class AppPill extends StatelessWidget {
     this.height = 40,
     this.fontSize = 15,
     this.autofocus = false,
+    this.focusNode,
     this.suffix,
   });
 
@@ -196,6 +197,7 @@ class AppPill extends StatelessWidget {
   final double height;
   final double fontSize;
   final bool autofocus;
+  final FocusNode? focusNode;
   /// 固定显示在文案后的标记（如「（当前）」），不参与省略，避免长 URL 把标记裁掉。
   final String? suffix;
 
@@ -236,6 +238,7 @@ class AppPill extends StatelessWidget {
         : labelText;
     return TvFocus(
       autofocus: autofocus,
+      focusNode: focusNode,
       onPressed: onTap,
       borderRadius: 8 * s,
       child: Material(

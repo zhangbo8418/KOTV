@@ -1,8 +1,8 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'fullscreen_sys.dart' if (dart.library.html) 'fullscreen_sys_web.dart' as sys;
@@ -20,6 +20,17 @@ enum KotvDesktopFullscreenKind {
 Future<void> kotvEnterSystemFullscreen(KotvDesktopFullscreenKind kind) async {
   try {
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  } catch (_) {}
+  try {
+    // 沉浸时去掉状态栏/导航栏对比色占位，避免仍像「顶上一条」。
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        systemNavigationBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
+    );
   } catch (_) {}
   if (kind != KotvDesktopFullscreenKind.display) return;
   if (kIsWeb) {

@@ -151,7 +151,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           "positionMs" to p.currentPosition,
           "durationMs" to p.duration.coerceAtLeast(0),
           "bufferedMs" to p.bufferedPosition,
-          "playing" to p.isPlaying,
+          "playing" to (p.playWhenReady && p.playbackState != Player.STATE_ENDED),
           "buffering" to (p.playbackState == Player.STATE_BUFFERING),
           "speedBps" to speedBps,
         ),

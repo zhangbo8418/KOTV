@@ -399,11 +399,15 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> setStableVolume(bool on) async {
+    // 优先 dynaudnorm：loudnorm 起播后热插易卡一下并把响度猛压。
     try {
-      await (player.platform as dynamic).setProperty('af', on ? 'loudnorm' : '');
+      await (player.platform as dynamic).setProperty(
+        'af',
+        on ? 'dynaudnorm=f=75:g=15:p=0.55' : '',
+      );
     } catch (_) {
       try {
-        await (player.platform as dynamic).setProperty('af', on ? 'dynaudnorm' : '');
+        await (player.platform as dynamic).setProperty('af', on ? 'loudnorm' : '');
       } catch (_) {}
     }
   }

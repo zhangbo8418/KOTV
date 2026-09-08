@@ -528,13 +528,13 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await _ch.invokeMethod('setProperty', {
         'key': 'af',
-        'value': on ? 'loudnorm' : '',
+        'value': on ? 'dynaudnorm=f=75:g=15:p=0.55' : '',
       });
     } catch (_) {
       try {
         await _ch.invokeMethod('setProperty', {
           'key': 'af',
-          'value': on ? 'dynaudnorm' : '',
+          'value': on ? 'loudnorm' : '',
         });
       } catch (_) {}
     }

@@ -80,6 +80,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   XgPlayback? _xg;
   ZwPlayback? _zw;
   final FocusNode _focus = FocusNode();
+  final FocusNode _playFocus = FocusNode(debugLabel: 'live_play');
+  final FocusNode _rightFocus = FocusNode(debugLabel: 'live_right');
+  final KotvMenuKeyGate _menuGate = KotvMenuKeyGate();
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
@@ -366,6 +369,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _portraitHideTimer?.cancel();
     _cursorHideTimer?.cancel();
     _focus.dispose();
+    _playFocus.dispose();
+    _rightFocus.dispose();
     unawaited(_fvp?.stop() ?? Future<void>.value());
     unawaited(_mk?.stop() ?? Future<void>.value());
     unawaited(_exo?.stop() ?? Future<void>.value());
@@ -1254,12 +1259,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
   }
 
-  void _openRight() => setState(() {
-        _rightOpen = true;
-        _leftOpen = false;
-        _chromeVisible = false;
-        _cancelHideOverlays();
-      });
+  void _openRight() {
+    setState(() {
+      _rightOpen = true;
+      _leftOpen = false;
+      _chromeVisible = false;
+      _cancelHideOverlays();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _rightOpen) _rightFocus.requestFocus();
+    });
+  }
 
   void _toggleLeft() => setState(() {
         _leftOpen = !_leftOpen;
@@ -1273,14 +1283,35 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         }
       });
 
-  void _toggleRight() => setState(() {
-        _rightOpen = !_rightOpen;
-        if (_rightOpen) {
-          _leftOpen = false;
-          _chromeVisible = false;
-          _cancelHideOverlays();
-        }
-      });
+  void _toggleRight() {
+    if (_rightOpen) {
+      setState(() => _rightOpen = false);
+      return;
+    }
+    _openRight();
+  }
+
+  void _showLiveChromeAndFocusPlay() {
+    setState(() {
+      _leftOpen = false;
+      _rightOpen = false;
+      _chromeVisible = true;
+      if (_catchup) _catchupChrome = true;
+    });
+    _scheduleHideOverlays();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_chromeVisible || _catchupChrome) _playFocus.requestFocus();
+    });
+  }
+
+  void _bumpLiveChrome() {
+    if (_catchup) {
+      _pulseCatchupChrome();
+    } else if (_chromeVisible) {
+      _scheduleHideOverlays();
+    }
+  }
 
   /// 点中间：关菜单，或像抖音一样点画面播/停（左右仍是频道/设置）。
   void _onCenterTap() {
@@ -1423,51 +1454,78 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _leftOpen || _rightOpen || _chromeVisible || _catchupChrome;
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
     final chs = _channels;
+
+    // 菜单短按=底栏；长按=右侧设置。
+    if (_menuGate.onEvent(
+      event,
+      onShort: () {
+        if (_leftOpen || _rightOpen) {
+          _showLiveChromeAndFocusPlay();
+        } else if (_chromeVisible || (_catchup && _catchupChrome)) {
+          setState(() {
+            _chromeVisible = false;
+            _catchupChrome = false;
+          });
+          _cancelHideOverlays();
+        } else {
+          _showLiveChromeAndFocusPlay();
+        }
+      },
+      onLong: () {
+        if (_rightOpen) {
+          setState(() => _rightOpen = false);
+        } else {
+          _openRight();
+        }
+      },
+    )) {
+      return KeyEventResult.handled;
+    }
+
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     if (kotvIsBackKey(key)) {
       if (_handleLiveBack()) return KeyEventResult.handled;
       return KeyEventResult.ignored;
     }
 
-    // 菜单：显示底栏控件（可遥控选按钮）。
-    if (kotvIsMenuKey(key)) {
-      if (_leftOpen || _rightOpen) {
-        setState(() {
-          _leftOpen = false;
-          _rightOpen = false;
-          _chromeVisible = true;
-        });
+    // 设置键：右侧直播设置面板。
+    if (kotvIsSettingsKey(key)) {
+      if (_rightOpen) {
+        setState(() => _rightOpen = false);
       } else {
-        setState(() => _chromeVisible = !_chromeVisible);
+        _openRight();
       }
-      if (_chromeVisible) _scheduleHideOverlays();
       return KeyEventResult.handled;
     }
 
-    // 面板/控件已开：方向键与确定留给 TvFocus（选控件 / 频道列表）。
+    // 面板/控件已开：方向键与确定留给 TvFocus。
     if (_liveUiOpen) {
       if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
         final primary = FocusManager.instance.primaryFocus;
         if (primary == null || primary == node) {
-          // 焦点仍在根 Focus：确定 = 频道列表（焦点在列表时确认进入频道）
-          _openLeft();
+          if (_leftOpen || _rightOpen) {
+            return KeyEventResult.ignored;
+          }
+          _showLiveChromeAndFocusPlay();
           return KeyEventResult.handled;
         }
+        _bumpLiveChrome();
         return KeyEventResult.ignored;
       }
       if (kotvIsUpKey(key) ||
           kotvIsDownKey(key) ||
           kotvIsLeftKey(key) ||
           kotvIsRightKey(key)) {
+        _bumpLiveChrome();
         return KeyEventResult.ignored;
       }
       return KeyEventResult.ignored;
     }
 
-    // 沉浸播放：上下换台、左右换线。
+    // 沉浸播放：OK 开左侧频道；上下换台；左右换线。
     if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
       _openLeft();
       return KeyEventResult.handled;
@@ -2007,6 +2065,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   label: '上一频道',
                                   height: pillH,
                                   fontSize: land ? 12 : 14,
+                                  autofocus: true,
+                                  focusNode: _rightFocus,
                                   onTap: () {
                                     final chs = _channels;
                                     if (chs.isEmpty) return;
@@ -2191,6 +2251,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                         child: LiveCatchupChrome(
                           player: _playback,
                           autofocusPlay: true,
+                          playFocusNode: _playFocus,
+                          onBump: _bumpLiveChrome,
                           playerLabel: flutterPlayerLabel(_playerVal),
                           decodeLabel: _decodeLabel,
                           offerFullscreenChoice: false,
@@ -2282,30 +2344,28 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                     bottom: 0,
                     child: LiveCatchupChrome(
                       player: _playback,
+                      autofocusPlay: true,
+                      playFocusNode: _playFocus,
+                      onBump: _pulsePortraitChrome,
                       playerLabel: flutterPlayerLabel(_playerVal),
                       decodeLabel: _decodeLabel,
                       offerFullscreenChoice: false,
                       fullscreenActive: _immersive,
                       onCast: () {
-                        _pulsePortraitChrome();
                         unawaited(_cast());
                       },
                       onMini: () {
-                        _pulsePortraitChrome();
                         unawaited(_enterMini());
                       },
                       onExpand: (_) {
-                        _pulsePortraitChrome();
                         unawaited(_toggleLiveFullscreen());
                       },
                       onPlayer: kotvCanSwitchPlayer(live: true)
                           ? () {
-                              _pulsePortraitChrome();
                               unawaited(_pickPlayer());
                             }
                           : null,
                       onDecode: () {
-                        _pulsePortraitChrome();
                         unawaited(_pickDecode());
                       },
                     ),

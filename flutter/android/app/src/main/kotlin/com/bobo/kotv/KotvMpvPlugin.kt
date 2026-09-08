@@ -854,6 +854,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setPropertyDouble("speed", rate)
       MPVLib.command(arrayOf("loadfile", url, "replace"))
       MPVLib.setPropertyBoolean("pause", false)
+      paused = false
+      playing = true
       buffering = true
       eof = false
     } catch (e: Throwable) {

@@ -727,10 +727,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   @override
   void deactivate() {
-    // dispose 阶段不能用 ref；在 deactivate 清沉浸标志，避免壳层误判仍全屏。
-    try {
-      ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
-    } catch (_) {}
+    // dispose 不能用 ref。仅在「本地已退出沉浸」时清壳层标志。
+    // 若仍 _immersiveFullscreen 却在这里清 provider，底栏/SafeArea 会立刻回来，
+    // 竖屏全屏画面按 MediaQuery 整屏高居中就会偏下，也不像沉浸。
+    if (!_immersiveFullscreen) {
+      try {
+        ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+      } catch (_) {}
+    }
     super.deactivate();
   }
 
@@ -1271,6 +1275,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (serial != _playAtSerial || !mounted) return;
         _wirePlaybackNotify(pb);
         try {
+          // 起播前定音量/倍速，避免先以默认 100 出声再被偏好压小。
+          final speed = _prefSpeed;
+          if (speed != null && speed > 0) {
+            try {
+              await pb.setRate(speed);
+            } catch (_) {}
+          }
+          final vol = _prefVolume;
+          if (vol != null) {
+            try {
+              await pb.setVolume(vol.clamp(0, 100));
+            } catch (_) {}
+          }
           // 起播缓冲由守卫无限等待；仅黑屏/视源失败抛 SilentVideo 才 failover。
           // 勿再套墙钟 timeout：慢源会被误切播放器。
           await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
@@ -1304,27 +1321,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         throw lastOpenError ?? const KotvSilentVideoException();
       }
       if (serial != _playAtSerial || !mounted) return;
-      // 起播后再套偏好：loudnorm 在 open 前同步套极易卡死主线程。
-      final speed = _prefSpeed;
-      if (speed != null && speed > 0) {
-        try {
-          await _playback.setRate(speed);
-        } catch (_) {}
-      }
-      final vol = _prefVolume;
-      if (vol != null) {
-        try {
-          await _playback.setVolume(vol.clamp(0, 100));
-        } catch (_) {}
-      }
+      // 音量/倍速已在 open 前套好；稳定音量用轻量 dynaudnorm，起播后立刻挂，勿再拖 800ms。
       if (_stableVolumeOn) {
-        // 推迟到首帧后，避免与 demuxer/硬解初始化抢同一条 native 路径。
-        unawaited(Future<void>.delayed(const Duration(milliseconds: 800), () async {
-          if (!mounted || serial != _playAtSerial) return;
-          try {
-            await _applyStableVolume(_playback, true);
-          } catch (_) {}
-        }));
+        try {
+          await _applyStableVolume(_playback, true);
+        } catch (_) {}
       }
       if (!mounted) return;
       unawaited(_loadDanmakuForEpisode(
@@ -1532,15 +1533,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     );
   }
 
-  Rect _stableVideoRect(BuildContext context) {
+  /// [stackSize]：详情 Stack 实测约束。沉浸全屏勿用 MediaQuery 整窗尺寸——
+  /// 若底栏/SafeArea 仍占位，整窗高会比可见区大，contain 居中会明显偏下。
+  Rect _stableVideoRect(BuildContext context, {Size? stackSize}) {
     if (_immersiveFullscreen) {
-      return Offset.zero & MediaQuery.sizeOf(context);
+      final s = stackSize;
+      if (s != null && s.width >= 1 && s.height >= 1) {
+        return Offset.zero & s;
+      }
+      return _videoLayerRect ?? (Offset.zero & MediaQuery.sizeOf(context));
     }
     return _videoLayerRect ?? Rect.zero;
   }
 
-  Widget _buildStableVideoLayer(BuildContext context) {
-    final rect = _stableVideoRect(context);
+  Widget _buildStableVideoLayer(BuildContext context, {Size? stackSize}) {
+    final rect = _stableVideoRect(context, stackSize: stackSize);
     if (rect.width < 1 || rect.height < 1) return const SizedBox.shrink();
     return ValueListenableBuilder<double>(
       valueListenable: _fsSwipeDy,
@@ -1839,6 +1846,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         await kotvLockPortrait();
       } catch (_) {}
     }
+    // 先藏系统栏：锁竖屏后系统 UI 可能被 OS 拉回，后面再补一次。
+    await kotvEnterSystemFullscreen(desktopFs);
+    if (!mounted) return;
     ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
     final full = MediaQuery.sizeOf(context);
     setState(() {
@@ -1851,6 +1861,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }
     });
     _syncFullscreen();
+    // 壳层 SafeArea/底栏撤掉后再补一次沉浸，避免状态栏占位。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_immersiveFullscreen) return;
+      unawaited(kotvEnterSystemFullscreen(_desktopFs));
+    });
   }
 
   Future<void> _exitImmersiveFullscreen() async {
@@ -2137,24 +2152,47 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           ),
         ),
       );
-      body = Stack(
-        key: _detailStackKey,
-        fit: StackFit.expand,
-        children: [
-          if (_immersiveFullscreen) const ColoredBox(color: Colors.black),
-          Offstage(
-            offstage: _immersiveFullscreen,
-            child: TickerMode(
-              enabled: !_immersiveFullscreen,
-              child: detailScaffold,
-            ),
-          ),
-          // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏由 [_bodyClipRect] 裁切，不盖顶栏。
-          if (_playUrl.isNotEmpty) _buildStableVideoLayer(context),
-          // 切集/换播放器时 playUrl 可能短暂变化：全屏页勿随 playUrl 卸树。
-          if (_immersiveFullscreen && _detail != null)
-            _buildImmersiveFullscreenPage(externalVideo: true),
-        ],
+      body = LayoutBuilder(
+        builder: (context, constraints) {
+          final stackSize = constraints.biggest;
+          // 沉浸中若壳层 provider 被误清，同帧自愈，避免底栏/SafeArea 吃掉高度。
+          if (_immersiveFullscreen && !ref.read(detailImmersiveFullscreenProvider)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || !_immersiveFullscreen) return;
+              ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
+            });
+          }
+          if (_immersiveFullscreen &&
+              stackSize.width >= 1 &&
+              stackSize.height >= 1 &&
+              (_videoLayerRect == null ||
+                  (_videoLayerRect!.width - stackSize.width).abs() >= 0.5 ||
+                  (_videoLayerRect!.height - stackSize.height).abs() >= 0.5)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || !_immersiveFullscreen) return;
+              setState(() => _videoLayerRect = Offset.zero & stackSize);
+            });
+          }
+          return Stack(
+            key: _detailStackKey,
+            fit: StackFit.expand,
+            children: [
+              if (_immersiveFullscreen) const ColoredBox(color: Colors.black),
+              Offstage(
+                offstage: _immersiveFullscreen,
+                child: TickerMode(
+                  enabled: !_immersiveFullscreen,
+                  child: detailScaffold,
+                ),
+              ),
+              // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏由 [_bodyClipRect] 裁切，不盖顶栏。
+              if (_playUrl.isNotEmpty) _buildStableVideoLayer(context, stackSize: stackSize),
+              // 切集/换播放器时 playUrl 可能短暂变化：全屏页勿随 playUrl 卸树。
+              if (_immersiveFullscreen && _detail != null)
+                _buildImmersiveFullscreenPage(externalVideo: true),
+            ],
+          );
+        },
       );
     } else if (_immersiveFullscreen && _detail != null) {
       body = _buildImmersiveFullscreenPage();

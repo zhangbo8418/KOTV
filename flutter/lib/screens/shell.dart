@@ -222,7 +222,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     }
     final page = ref.watch(kotvPageProvider);
     final busy = ref.watch(uiBusyProvider);
-    final immersiveDetail = ref.watch(detailImmersiveFullscreenProvider);
+    final immersiveDetail =
+        ref.watch(detailImmersiveFullscreenProvider) || DetailScreen.isImmersive;
     final bottomNav = KotvLayout.useBottomNav(context) && !immersiveDetail;
 
     // 切主 Tab：原地换根路由，Navigator 元素不卸树，避免 GlobalKey reactivate 崩溃。

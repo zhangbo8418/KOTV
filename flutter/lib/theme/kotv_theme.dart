@@ -189,6 +189,7 @@ class TvFocus extends StatefulWidget {
     this.onPressed,
     this.onLongPress,
     this.autofocus = false,
+    this.focusNode,
     this.borderRadius = 12,
   });
 
@@ -196,6 +197,8 @@ class TvFocus extends StatefulWidget {
   final VoidCallback? onPressed;
   final VoidCallback? onLongPress;
   final bool autofocus;
+  /// 外部持有时可 [FocusNode.requestFocus]（全屏亮控件后强制落到播停）。
+  final FocusNode? focusNode;
   final double borderRadius;
 
   @override
@@ -209,6 +212,7 @@ class _TvFocusState extends State<TvFocus> {
   Widget build(BuildContext context) {
     final focus = KotvPalette.of(context).focus;
     return FocusableActionDetector(
+      focusNode: widget.focusNode,
       autofocus: widget.autofocus,
       onShowFocusHighlight: (v) => setState(() => _focused = v),
       actions: <Type, Action<Intent>>{

@@ -125,8 +125,11 @@ Future<void> main() async {
     return true;
   };
   if (!kIsWeb) {
-    MediaKit.ensureInitialized();
-    if (Platform.isAndroid) {
+    // Android 播放走原生 Exo/MPV；media_kit_libs 自带的 libmpv 在旧机（API25 /
+    // Vulkan 1.0）上 dlopen 失败，ensureInitialized 抛错会卡在 runApp 之前白屏。
+    if (!Platform.isAndroid) {
+      MediaKit.ensureInitialized();
+    } else {
       unawaited(_ensureAndroidStoragePermission());
     }
   }

@@ -155,6 +155,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   DateTime? _lastSwipeAt;
   bool _forcedLandscape = false;
   bool _showForceLandscape = false;
+  final KotvMenuKeyGate _menuGate = KotvMenuKeyGate();
 
   String get _title {
     if (_epIdx >= 0 && _epIdx < widget.episodes.length) {
@@ -181,9 +182,14 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     });
     widget.playback.addListener(_onPlaybackChanged);
     // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
-    unawaited(kotvEnterSystemFullscreen(widget.desktopFullscreen));
     if (!kotvIsDesktop() && !kIsWeb) {
-      unawaited(kotvLockPortrait());
+      // 先锁竖屏再进沉浸：锁方向常会把系统栏拉回来。
+      unawaited(() async {
+        await kotvLockPortrait();
+        await kotvEnterSystemFullscreen(widget.desktopFullscreen);
+      }());
+    } else {
+      unawaited(kotvEnterSystemFullscreen(widget.desktopFullscreen));
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -319,12 +325,14 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _showForceLandscape = false;
     });
     await kotvForceLandscape();
+    await kotvEnterSystemFullscreen(widget.desktopFullscreen);
     _bumpChrome();
   }
 
   Future<void> _lockPortraitMode() async {
     setState(() => _forcedLandscape = false);
     await kotvLockPortrait();
+    await kotvEnterSystemFullscreen(widget.desktopFullscreen);
     if (!mounted) return;
     _refreshForceLandscapeBtn();
     _bumpChrome();
@@ -584,12 +592,43 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
+
+    // 菜单短按=底栏；长按=右侧选集（盒子常无独立设置键）。
+    if (_menuGate.onEvent(
+      event,
+      onShort: () {
+        if (_epOpen) {
+          _chromeKey.currentState?.closeEpisodes();
+          setState(() {});
+        }
+        if (_showChrome) {
+          _setChrome(show: false, hideCursor: true);
+        } else {
+          _showChromeAndFocusPlay();
+        }
+      },
+      onLong: () {
+        if (widget.episodes.isEmpty) {
+          _showChromeAndFocusPlay();
+          return;
+        }
+        _bumpChrome();
+        _chromeKey.currentState?.openEpisodes();
+        setState(() {});
+      },
+    )) {
+      return KeyEventResult.handled;
+    }
+
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
     if (kotvIsBackKey(key)) {
       if (_epOpen) {
         _chromeKey.currentState?.closeEpisodes();
         setState(() {});
+        _bumpChrome();
+        _chromeKey.currentState?.focusPlayControl();
         return KeyEventResult.handled;
       }
       if (_showChrome) {
@@ -599,39 +638,31 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       unawaited(_exitFullscreen());
       return KeyEventResult.handled;
     }
-    // 菜单 / 上下键：控件隐藏时先亮出控件，便于遥控选按钮。
-    if (!_showChrome && (kotvIsMenuKey(key) || kotvIsUpKey(key) || kotvIsDownKey(key))) {
-      if (_epOpen) {
-        _chromeKey.currentState?.closeEpisodes();
+    // 设置键 / E：右侧选集。
+    if (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE) {
+      if (widget.episodes.isEmpty) {
+        _showChromeAndFocusPlay();
+        return KeyEventResult.handled;
       }
-      _setChrome(show: true, hideCursor: false);
-      return KeyEventResult.handled;
-    }
-    if (kotvIsMenuKey(key)) {
-      if (_epOpen) {
-        _chromeKey.currentState?.closeEpisodes();
-        setState(() {});
-      }
-      _setChrome(show: !_showChrome, hideCursor: _showChrome);
-      return KeyEventResult.handled;
-    }
-    // E：选集面板（保留，菜单键留给控件）
-    if (key == LogicalKeyboardKey.keyE) {
+      _bumpChrome();
       _chromeKey.currentState?.openEpisodes();
       setState(() {});
       return KeyEventResult.handled;
     }
     final activate = kotvIsEnterKey(key) || kotvIsMediaPlayPause(key);
     if (activate) {
-      // 控件隐藏：先亮出控件并播停；控件已亮且焦点在具体按钮上：交给 ActivateIntent。
+      // OK：隐藏→亮底栏并聚焦；已亮→交给焦点按钮。
       if (!_showChrome) {
-        widget.playback.playOrPause();
-        _bumpChrome();
+        if (_epOpen) {
+          _chromeKey.currentState?.closeEpisodes();
+          setState(() {});
+        }
+        _showChromeAndFocusPlay();
         return KeyEventResult.handled;
       }
       final primary = FocusManager.instance.primaryFocus;
       if (primary == null || primary == node) {
-        widget.playback.playOrPause();
+        _chromeKey.currentState?.focusPlayControl();
         _bumpChrome();
         return KeyEventResult.handled;
       }
@@ -644,7 +675,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         kotvIsDownKey(key) ||
         kotvIsMediaRewind(key) ||
         kotvIsMediaFastForward(key);
-    // 控件/选集面板打开时：方向键交给焦点遍历（遥控器选按钮），勿截获成快进/切集。
+    // 控件/选集面板打开时：方向键交给焦点遍历。
     if (arrow && (_showChrome || _epOpen)) {
       _bumpChrome();
       return KeyEventResult.ignored;
@@ -660,7 +691,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _bumpChrome();
       return KeyEventResult.handled;
     }
-    // 控件隐藏时：上下切集（KOTV 扩展）
+    // 控件隐藏：上下切集（不再误当成「亮控件」）。
     if (kotvIsUpKey(key)) {
       _goPrev();
       return KeyEventResult.handled;
@@ -670,6 +701,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  void _showChromeAndFocusPlay() {
+    _bumpChrome();
+    _chromeKey.currentState?.focusPlayControl();
   }
 
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
