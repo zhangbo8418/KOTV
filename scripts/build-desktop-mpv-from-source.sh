@@ -66,17 +66,17 @@ kotv_mpv_dll_has_vulkan() {
 
 kotv_libplacebo_profile() {
   if kotv_is_windows_build; then
-    # 默认偏 Vulkan，但 D3D11 也要编进（用户可切 gpu-api=d3d11）
+    # Vulkan + D3D11 + OpenGL（libmpv plain-gl / gpu-api=opengl）；用户默认仍可 auto→d3d11。
     if kotv_is_mpv_win7_build; then
-      echo "win7-vulkan-d3d11-v2"
+      echo "win7-vulkan-d3d11-opengl-v1"
     else
-      echo "win-vulkan-d3d11-v1"
+      echo "win-vulkan-d3d11-opengl-v1"
     fi
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     # 自前缀 Vulkan（按目标 arch），禁 Homebrew shaderc/lcms，避免错架构 / 绝对路径。
-    echo "macos-vulkan-prefix-v1"
+    echo "macos-vulkan-prefix-opengl-v1"
   else
-    echo "vulkan"
+    echo "vulkan-opengl-v1"
   fi
 }
 
@@ -778,8 +778,8 @@ ensure_libplacebo() {
     elif [[ -n "${PKG_CONFIG:-}" ]]; then
       echo "WARN: meson-native-kotv.ini missing; relying on PKG_CONFIG=$PKG_CONFIG" >&2
     fi
-    # Win 一律编 D3D11（默认仍可偏 Vulkan）；依赖 ensure_windows_d3d11_shader_deps
-    placebo_extra+=(-Dd3d11=enabled -Dshaderc=enabled)
+    # Win：D3D11 + OpenGL（shaderc 给 d3d11）；默认 gpu-api=auto 仍可落到 d3d11。
+    placebo_extra+=(-Dd3d11=enabled -Dshaderc=enabled -Dopengl=enabled)
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
@@ -787,7 +787,6 @@ ensure_libplacebo() {
       -Ddefault_library="$placebo_lib" \
       -Dvulkan="$vk_flag" \
       "${placebo_extra[@]}" \
-      -Dopengl=disabled \
       -Ddemos=false \
       -Dtests=false \
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
@@ -798,7 +797,7 @@ ensure_libplacebo() {
     export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
     local native_ini
     native_ini="$(kotv_macos_write_meson_native)"
-    echo "==> macOS: libplacebo vulkan=enabled via prefix ($want_profile, arch=$(kotv_macos_target_arch))"
+    echo "==> macOS: libplacebo vulkan+opengl ($want_profile, arch=$(kotv_macos_target_arch))"
     # shaderc/lcms 仍关：可选，且 Homebrew 版易带错架构绝对路径。
     meson setup build \
       --prefix="$PREFIX" \
@@ -808,7 +807,7 @@ ensure_libplacebo() {
       -Dvulkan=enabled \
       -Dshaderc=disabled \
       -Dlcms=disabled \
-      -Dopengl=disabled \
+      -Dopengl=enabled \
       -Ddemos=false \
       -Dtests=false
   else
@@ -817,7 +816,7 @@ ensure_libplacebo() {
       --libdir=lib \
       -Ddefault_library="$placebo_lib" \
       -Dvulkan=enabled \
-      -Dopengl=disabled \
+      -Dopengl=enabled \
       -Ddemos=false \
       -Dtests=false
   fi
@@ -840,11 +839,63 @@ ensure_libplacebo() {
 }
 
 ensure_lua_pkg() {
-  [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || return
-  for lua_prefix in /opt/homebrew/opt/lua@5.2 /usr/local/opt/lua@5.2; do
-    [[ -d "$lua_prefix/lib/pkgconfig" ]] || continue
-    export PKG_CONFIG_PATH="$lua_prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
-  done
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    for lua_prefix in /opt/homebrew/opt/lua@5.2 /usr/local/opt/lua@5.2; do
+      [[ -d "$lua_prefix/lib/pkgconfig" ]] || continue
+      export PKG_CONFIG_PATH="$lua_prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
+    done
+    return
+  fi
+  if kotv_is_windows_build; then
+    ensure_windows_lua
+  fi
+}
+
+# Windows：OSC 需要 lua（osc.lua 编进 libmpv）；优先系统/前缀，否则源码编 lua52.dll。
+ensure_windows_lua() {
+  kotv_is_windows_build || return 0
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  if pkg-config --exists lua 2>/dev/null || pkg-config --exists lua5.2 2>/dev/null || pkg-config --exists lua-5.2 2>/dev/null || pkg-config --exists lua52 2>/dev/null; then
+    echo "ok lua $(pkg-config --modversion lua 2>/dev/null || pkg-config --modversion lua5.2 2>/dev/null || pkg-config --modversion lua52 2>/dev/null || echo found)"
+    return
+  fi
+  need curl
+  local ver="${KOTV_LUA_VERSION:-5.2.4}"
+  local src="lua-${ver}"
+  local url="https://www.lua.org/ftp/${src}.tar.gz"
+  echo "==> build lua $ver (MinGW dll → PREFIX, for mpv OSC)"
+  mkdir -p "$BUILD_DIR"
+  cd "$BUILD_DIR"
+  if [[ ! -d "$src" ]]; then
+    curl -fsSL "$url" -o "${src}.tar.gz"
+    tar xzf "${src}.tar.gz"
+  fi
+  cd "$src/src"
+  # 5.2 mingw：产出 lua52.dll + 可执行文件。
+  make mingw "MYCFLAGS=$(kotv_windows_mpv_cflags)" -j"${KOTV_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+  [[ -f lua52.dll ]] || { echo "ERROR: lua52.dll not built" >&2; ls -la >&2; exit 1; }
+  mkdir -p "$PREFIX/bin" "$PREFIX/include" "$PREFIX/lib/pkgconfig"
+  cp -f lua52.dll "$PREFIX/bin/"
+  cp -f lua52.dll "$PREFIX/lib/"
+  cp -f lua.h luaconf.h lualib.h lauxlib.h "$PREFIX/include/"
+  # 无 .dll.a 时 MinGW 可直接链同目录的 lua52.dll。
+  cat >"$PREFIX/lib/pkgconfig/lua.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: Lua
+Description: Lua ${ver}
+Version: ${ver}
+Libs: -L\${libdir} -llua52
+Cflags: -I\${includedir}
+EOF
+  cp -f "$PREFIX/lib/pkgconfig/lua.pc" "$PREFIX/lib/pkgconfig/lua5.2.pc"
+  cp -f "$PREFIX/lib/pkgconfig/lua.pc" "$PREFIX/lib/pkgconfig/lua52.pc"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  pkg-config --exists lua || { echo "ERROR: lua.pc not visible after build" >&2; exit 1; }
+  echo "ok lua $ver (PREFIX lua52.dll)"
 }
 
 # Windows：用同一套 MinGW 源码编 libass（mpv-dev 包只有 libmpv 头，没有 libass）。
@@ -1108,6 +1159,7 @@ build_mpv_linux() {
   fi
   ensure_libplacebo
   ensure_mpv_libcurl_deps
+  ensure_lua_pkg
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d mpv/.git ]]; then
@@ -1129,7 +1181,9 @@ build_mpv_linux() {
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
     -Dlibcurl=enabled \
-    -Dlua=disabled \
+    -Dgl=enabled \
+    -Dplain-gl=enabled \
+    -Dlua=enabled \
     -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-linux"
   cp -f build/libmpv.so.2 "$ASSET/linux/libmpv.so.2"
@@ -1156,6 +1210,7 @@ build_mpv_macos() {
   ensure_windows_libass
   ensure_libplacebo
   ensure_mpv_libcurl_deps
+  ensure_lua_pkg
   # ensure 可能改过 LIBDIR/PATH；编 mpv 前再钉回 PREFIX（curl.pc 已在内）。
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
@@ -1185,7 +1240,9 @@ build_mpv_macos() {
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
     -Dlibcurl=enabled \
-    -Dlua=disabled \
+    -Dgl=enabled \
+    -Dplain-gl=enabled \
+    -Dlua=enabled \
     -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-macos"
   cp -f build/libmpv.dylib "$ASSET/macos/libmpv.dylib"
@@ -1327,13 +1384,18 @@ EOF
   # 禁止 meson 回退到系统 libavdevice（与 mdk 同进程时易堆损坏）。
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
   ensure_mpv_libcurl_deps
+  ensure_lua_pkg
   if kotv_is_windows_build; then
     local mpv_vk=enabled
-    echo "==> mpv Windows build: vulkan=enabled, d3d11=enabled (win7=$(kotv_is_mpv_win7_build && echo 1 || echo 0))"
+    echo "==> mpv Windows: vulkan+d3d11+opengl(+plain-gl)+lua/osc (win7=$(kotv_is_mpv_win7_build && echo 1 || echo 0))"
     local -a mpv_extra=(
       -Dd3d11=enabled
       -Dshaderc=enabled
       -Dspirv-cross=enabled
+      -Dgl=enabled
+      -Dgl-win32=enabled
+      -Dplain-gl=enabled
+      -Dlua=enabled
     )
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \
@@ -1346,7 +1408,6 @@ EOF
       -Dvulkan="$mpv_vk" \
       -Dlibcurl=enabled \
       "${mpv_extra[@]}" \
-      -Dlua=disabled \
       -Dlibavdevice=disabled \
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']" \
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']"
@@ -1359,7 +1420,9 @@ EOF
       -Dmanpage-build=disabled \
       -Dvulkan=enabled \
       -Dlibcurl=enabled \
-      -Dlua=disabled \
+      -Dgl=enabled \
+      -Dplain-gl=enabled \
+      -Dlua=enabled \
       -Dlibavdevice=disabled
   fi
   kotv_meson_compile build "mpv-windows"
@@ -1381,15 +1444,28 @@ EOF
   echo "built windows/mpv-2.dll (+ AV3A=$AV3A) from $dll"
   if ! kotv_meson_feature_enabled d3d11 build && ! kotv_mpv_dll_has_d3d11 "$out"; then
     echo "ERROR: Windows libmpv built without d3d11 (need shaderc+spirv-cross)" >&2
-    meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
+    meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan|gl|lua' || true
     exit 1
   fi
   if ! kotv_meson_feature_enabled vulkan build && ! kotv_mpv_dll_has_vulkan "$out"; then
     echo "ERROR: Windows libmpv built without vulkan" >&2
-    meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan' || true
+    meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan|gl|lua' || true
     exit 1
   fi
-  echo "ok Windows mpv features include d3d11 + vulkan"
+  if ! kotv_meson_feature_enabled gl build && ! kotv_meson_feature_enabled plain-gl build; then
+    echo "ERROR: Windows libmpv built without OpenGL (gl/plain-gl)" >&2
+    meson configure build 2>&1 | grep -Ei 'd3d11|gl|plain|lua' || true
+    exit 1
+  fi
+  if ! kotv_meson_feature_enabled lua build; then
+    echo "ERROR: Windows libmpv built without lua (OSC needs lua)" >&2
+    meson configure build 2>&1 | grep -Ei 'lua' || true
+    exit 1
+  fi
+  if ! strings "$out" 2>/dev/null | grep -Fq 'osc.lua'; then
+    echo "WARN: mpv-2.dll strings lack osc.lua (OSC may be incomplete)" >&2
+  fi
+  echo "ok Windows mpv features include d3d11 + vulkan + opengl + lua/osc"
 }
 
 case "$PLAT" in

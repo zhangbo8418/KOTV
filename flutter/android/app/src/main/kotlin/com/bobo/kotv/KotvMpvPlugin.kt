@@ -956,10 +956,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     pendingUrl = null
     val headers = pendingHeaders
     try {
-      if (headers.isNotEmpty()) {
-        val hline = headers.entries.joinToString("\r\n") { "${it.key}: ${it.value}" } + "\r\n"
-        MPVLib.setOptionString("http-header-fields", hline)
+      // 清空/覆盖 http-header-fields，避免上一台点播/旧 Referer 影响直播直链。
+      val hline = if (headers.isNotEmpty()) {
+        headers.entries.joinToString("\r\n") { "${it.key}: ${it.value}" } + "\r\n"
+      } else {
+        ""
       }
+      MPVLib.setOptionString("http-header-fields", hline)
       MPVLib.setPropertyDouble("volume", volume)
       MPVLib.setPropertyDouble("speed", rate)
       MPVLib.command(arrayOf("loadfile", url, "replace"))

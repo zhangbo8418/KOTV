@@ -52,6 +52,10 @@ class NativeMpvPlayback extends KotvPlayback {
   Duration _buffered = Duration.zero;
   int _speedBps = 0;
   bool _live = false;
+  /// Native MPV 上下文创建时的 live 模式。
+  /// 目的：避免先因 setVideoScale/_setSurfaceLayerEnabled 创建了 VOD 上下文，
+  /// 再 open(live:true) 时因为 `_nativeReady` 直接 return 导致没重建。
+  bool _nativeLive = false;
   String _url = '';
   Map<String, String> _headers = const {};
   String? _lastError;
@@ -235,13 +239,14 @@ class NativeMpvPlayback extends KotvPlayback {
     final m = mode.trim().isEmpty ? 'default' : mode.trim();
     _videoScale = m;
     try {
-      await _ensureNative();
+      await _ensureNative(live: _live);
       await _ch.invokeMethod('setAspect', {'mode': m});
     } catch (_) {}
   }
 
   Future<void> _ensureNative({bool live = false}) async {
-    if (_nativeReady) return;
+    // live 切换必须允许重建；否则 createdAsLive 不会更新。
+    if (_nativeReady && _nativeLive == live) return;
     try {
       final res = await _ch.invokeMethod<dynamic>('create', {
         'decode': _opts.hwdecValue(),
@@ -267,6 +272,7 @@ class NativeMpvPlayback extends KotvPlayback {
         _lastError = '$e';
         notifyListeners();
       });
+      _nativeLive = live;
       _nativeReady = true;
       _bumpSurface();
       notifyListeners();
@@ -570,7 +576,7 @@ class NativeMpvPlayback extends KotvPlayback {
       if (enabled) {
         // 同态再唤一次：PlatformView 晚进树时补挂。
         try {
-          await _ensureNative();
+          await _ensureNative(live: _live);
           await _ch.invokeMethod('setSurfaceLayerEnabled', {'enabled': true});
         } catch (_) {}
       }
@@ -578,7 +584,7 @@ class NativeMpvPlayback extends KotvPlayback {
     }
     _surfaceLayerEnabled = enabled;
     try {
-      await _ensureNative();
+      await _ensureNative(live: _live);
       await _ch.invokeMethod('setSurfaceLayerEnabled', {'enabled': enabled});
     } catch (_) {}
   }
