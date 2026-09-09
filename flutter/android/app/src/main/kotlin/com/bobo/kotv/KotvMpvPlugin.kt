@@ -73,6 +73,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var surfaceLayerEnabled = false
   /** default|fill|zoom|16:9|4:3 — Surface 不吃 Flutter BoxFit，用 keepaspect/panscan/override。 */
   private var aspectMode: String = "default"
+  /** ensurePlayer 时是否按直播初始化（点播会写 demuxer-max-bytes；模式变了须重建）。 */
+  private var createdAsLive: Boolean? = null
 
   private val tick = object : Runnable {
     override fun run() {
@@ -224,6 +226,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         gpuNext = call.argument<Boolean>("gpuNext") == true
         vulkanEnabled = call.argument<Boolean>("vulkan") == true
         conf = call.argument<String>("conf") ?: conf
+        // 直播须在 ensurePlayer 前写入，否则会套上点播 demuxer 预算。
+        call.argument<Boolean>("live")?.let { livePlayback = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           renderTexture = resolveRenderTexture(it)
         }
@@ -580,6 +584,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       throw IllegalStateException(hint, err)
     }
+    // 点播↔直播 demuxer/cache 选项在 init 时写入；模式变了必须重建上下文。
+    if (created.get() && createdAsLive != null && createdAsLive != livePlayback) {
+      Log.i(TAG, "recreate MPV context: live $createdAsLive -> $livePlayback")
+      destroyPlayer()
+    }
     if (created.get()) return
     synchronized(this) {
       if (created.get()) return
@@ -641,10 +650,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.addObserver(this)
       observeProps()
       created.set(true)
+      createdAsLive = livePlayback
       applyAspectMode()
       main.removeCallbacks(tick)
       main.post(tick)
-      Log.i(TAG, "MPV context ready abi=${MPVLib.getLoadedAbi()}")
+      Log.i(TAG, "MPV context ready abi=${MPVLib.getLoadedAbi()} live=$livePlayback")
     }
   }
 
@@ -991,6 +1001,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private fun destroyPlayer() {
     main.removeCallbacks(tick)
     pendingUrl = null
+    createdAsLive = null
     if (!created.getAndSet(false)) return
     try {
       MPVLib.removeObserver(this)

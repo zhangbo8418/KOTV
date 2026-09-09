@@ -626,22 +626,26 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playbackNotify = () {
       if (!mounted || _playUrl.isEmpty) return;
       _syncPlayStatus();
-      // 详情页 Video 区未包 ListenableBuilder：出尺寸后须 rebuild 才能按比例定 PlatformView。
       final w = p.width;
       final h = p.height;
-      if (w != _lastVideoW || h != _lastVideoH) {
+      final sizeChanged = w != _lastVideoW || h != _lastVideoH;
+      if (sizeChanged) {
         _lastVideoW = w;
         _lastVideoH = h;
-        // 新集出尺寸：撤掉全屏换集黑盖。
-        if (_immersiveEpCover && w > 0 && h > 0) {
-          setState(() => _immersiveEpCover = false);
-          return;
-        }
-        setState(() {});
+      }
+      // 全屏换集黑盖：出尺寸/开播后撤掉（各平台）。
+      if (_immersiveEpCover &&
+          w > 0 &&
+          h > 0 &&
+          (sizeChanged || (p.playing && !p.stalling))) {
+        setState(() => _immersiveEpCover = false);
         return;
       }
-      if (_immersiveEpCover && w > 0 && h > 0 && p.playing && !p.stalling) {
-        setState(() => _immersiveEpCover = false);
+      // 仅 Android 原生 MPV：出尺寸后须 rebuild 才能按比例定 PlatformView。
+      // 桌面 media_kit 的 Video 若在 open 中途因宽高 setState 整树重建，
+      // 易丢 libmpv render context → 有声黑屏（此前只因 textureId 才 rebuild）。
+      if (sizeChanged && p is NativeMpvPlayback) {
+        setState(() {});
         return;
       }
       if (p is NativeMpvPlayback) {
@@ -2217,10 +2221,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             key: _detailStackKey,
             fit: StackFit.expand,
             children: [
-              // 沉浸全屏底：必须不透明。Surface 镂空时若仍挂着 Offstage 详情，会透出「闪一下详情页」。
-              if (_immersiveFullscreen) const ColoredBox(color: Colors.black),
-              // 沉浸时勿 Offstage 保活详情树：Android Hybrid Surface 仍可能透出底层 UI。
-              if (!_immersiveFullscreen) detailScaffold,
+              // Android Hybrid Surface：沉浸时卸详情树 + 黑底，避免镂空透出底层。
+              // 桌面仍用 Offstage 保活（LayerLink / media_kit Texture 不宜整树卸装）。
+              if (kotvIsAndroid()) ...[
+                if (_immersiveFullscreen) const ColoredBox(color: Colors.black),
+                if (!_immersiveFullscreen) detailScaffold,
+              ] else
+                Offstage(
+                  offstage: _immersiveFullscreen,
+                  child: TickerMode(
+                    enabled: !_immersiveFullscreen,
+                    child: detailScaffold,
+                  ),
+                ),
               // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏由 [_bodyClipRect] 裁切，不盖顶栏。
               if (_playUrl.isNotEmpty) _buildStableVideoLayer(context, stackSize: stackSize),
               // 换集/解析：盖在画面上（Texture 路径有效；Surface 镂空时靠上面黑底 + 不挂详情）。

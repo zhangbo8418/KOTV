@@ -240,7 +240,7 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  Future<void> _ensureNative() async {
+  Future<void> _ensureNative({bool live = false}) async {
     if (_nativeReady) return;
     try {
       final res = await _ch.invokeMethod<dynamic>('create', {
@@ -250,6 +250,8 @@ class NativeMpvPlayback extends KotvPlayback {
         'gpuApi': _opts.gpuApi,
         'conf': _opts.conf,
         'render': _renderMode,
+        // 直播须在 create/ensurePlayer 时写入，避免套上点播 demuxer 预算。
+        'live': live,
       });
       if (res is Map) {
         final tid = res['textureId'];
@@ -375,13 +377,13 @@ class NativeMpvPlayback extends KotvPlayback {
       throw StateError(_lastError!);
     }
 
-    await _ensureNative();
+    await _ensureNative(live: live);
     if (!_nativeReady) {
       _buffering = false;
       notifyListeners();
       throw StateError(_lastError ?? '原生 MPV 未就绪');
     }
-    // 点播即挂 Surface（详情已先 setState 播控进树并 endOfFrame），再 loadfile。
+    // 点播/直播均先挂 Surface（页面已 setState 播控进树并 endOfFrame），再 loadfile。
     await _setSurfaceLayerEnabled(true);
     try {
       await _ch.invokeMethod('open', {

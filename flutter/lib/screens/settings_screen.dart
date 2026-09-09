@@ -962,10 +962,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           KotvSettingsCell(
                             label: '渲染方式',
                             value: renderLabel,
-                            onTap: () => _pick('渲染方式（仅 Exo）', 'playerRender', const [
+                            onTap: () => _pick('渲染方式（Exo / 原生 MPV）', 'playerRender', const [
                               ('Surface（推荐，HDR）', 'surface'),
                               ('Texture', 'texture'),
-                            ], msg: '仅内置 Exo 生效，已保存'),
+                            ], msg: '仅 Android 内置 Exo / 原生 MPV 生效，已保存'),
                           ),
                         KotvSettingsCell(
                           label: '默认倍速',

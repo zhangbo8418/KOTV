@@ -60,7 +60,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setRepeatOne(bool on);
   Future<void> setDecodeMode(String mode);
 
-  /// Android Exo：Surface / Texture，其它后端忽略。
+  /// Android Exo / 原生 MPV：Surface / Texture；其它后端忽略。
   Future<void> setRenderMode(String mode) async {}
 
   /// 画面比例：`default` 适应 / `fill` 拉伸 / `zoom` 裁切 / `16:9` / `4:3`。
