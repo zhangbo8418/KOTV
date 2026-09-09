@@ -81,7 +81,8 @@ install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 if(PLUGIN_BUNDLED_LIBRARIES)
-  # 兜底：若某插件仍塞进 libmpv，发行包只用自编译（见下方 KOTV_MPV_WIN_DIR）。
+  # media_kit_libs_windows_video 会带旧 libmpv-2.dll + ANGLE；ANGLE 保留，
+  # libmpv 排除后由下方 KOTV_MPV_WIN_DIR 自编译覆盖。
   set(KOTV_PLUGIN_BUNDLED_LIBRARIES "${PLUGIN_BUNDLED_LIBRARIES}")
   list(FILTER KOTV_PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "[/\\\\]libmpv-2\\.dll$")
   list(FILTER KOTV_PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "[/\\\\]mpv-2\\.dll$")
