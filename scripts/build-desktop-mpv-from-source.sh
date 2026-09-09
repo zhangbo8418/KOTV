@@ -36,17 +36,19 @@ kotv_is_mpv_win7_build() {
 kotv_meson_feature_enabled() {
   local feat="$1"
   local dir="${2:-build}"
+  # awk 的 exit 仍会跑 END；用 found 标志，避免 exit 0 被 END{exit 1} 覆盖成假失败。
   meson configure "$dir" 2>&1 | awk -v f="$feat" '
+    BEGIN { found = 0 }
     {
       for (i = 1; i <= NF; i++) {
         if ($i != f) continue
         for (j = i + 1; j <= NF; j++) {
           v = toupper($j)
-          if (v == "YES" || v == "TRUE" || v == "ENABLED") { exit 0 }
+          if (v == "YES" || v == "TRUE" || v == "ENABLED") { found = 1; exit }
         }
       }
     }
-    END { exit 1 }
+    END { exit(found ? 0 : 1) }
   '
 }
 
@@ -62,6 +64,13 @@ kotv_mpv_dll_has_vulkan() {
   local dll="$1"
   [[ -f "$dll" ]] || return 1
   strings "$dll" 2>/dev/null | grep -Eiq 'vulkan-1\.dll|vkCreateInstance|VkInstance|/vulkan/|gpu/vulkan|libvulkan'
+}
+
+# 二进制侧再确认 OpenGL / plain-gl（libmpv render）。
+kotv_mpv_dll_has_opengl() {
+  local dll="$1"
+  [[ -f "$dll" ]] || return 1
+  strings "$dll" 2>/dev/null | grep -Eiq 'libmpv_gl|mpv_render_context|opengl|wglCreateContext|video_out_opengl|plain.gl|GL_VENDOR'
 }
 
 kotv_libplacebo_profile() {
@@ -1513,12 +1522,15 @@ EOF
     meson configure build 2>&1 | grep -Ei 'd3d11|shaderc|spirv|vulkan|gl|lua' || true
     exit 1
   fi
-  if ! kotv_meson_feature_enabled gl build && ! kotv_meson_feature_enabled plain-gl build; then
+  if ! kotv_meson_feature_enabled gl build \
+    && ! kotv_meson_feature_enabled plain-gl build \
+    && ! kotv_mpv_dll_has_opengl "$out"; then
     echo "ERROR: Windows libmpv built without OpenGL (gl/plain-gl)" >&2
     meson configure build 2>&1 | grep -Ei 'd3d11|gl|plain|lua' || true
     exit 1
   fi
-  if ! kotv_meson_feature_enabled lua build; then
+  if ! kotv_meson_feature_enabled lua build \
+    && ! strings "$out" 2>/dev/null | grep -Eiq 'luaL_|lua_open|osc\.lua|player/lua'; then
     echo "ERROR: Windows libmpv built without lua (OSC needs lua)" >&2
     meson configure build 2>&1 | grep -Ei 'lua' || true
     exit 1
