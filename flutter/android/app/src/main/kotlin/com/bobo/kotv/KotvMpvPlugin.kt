@@ -69,6 +69,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var volume = 80.0
   private var rate = 1.0
   private var renderTexture = false
+  /** 点播挂 Surface；停播卸下（未点播不建，避免详情滑动重影）。 */
+  private var surfaceLayerEnabled = false
+  /** default|fill|zoom|16:9|4:3 — Surface 不吃 Flutter BoxFit，用 keepaspect/panscan/override。 */
+  private var aspectMode: String = "default"
 
   private val tick = object : Runnable {
     override fun run() {
@@ -147,17 +151,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         tryAttachSurface()
         maybeLoadPending()
       } else if (created.get()) {
-        // 对齐 TV MpvPlayer.surfaceDestroyed → detachMpvSurface(false)：
         // 短暂丢 Surface（全屏改 LayoutParams）只 detach，保留 VO，勿 vo=null。
         parkSurfaceTransient()
       }
     }
-    host.setRender(renderTexture)
-    // Surface 可能早于 callback 就绪（详情↔全屏挪 PlatformView）。
-    if (host.currentSurface() != null) {
-      surfaceReady = true
-      tryAttachSurface()
-      maybeLoadPending()
+    if (surfaceLayerEnabled) {
+      host.setRender(renderTexture)
+      if (host.currentSurface() != null) {
+        surfaceReady = true
+        tryAttachSurface()
+        maybeLoadPending()
+      }
+    } else {
+      host.clearVideoLayer()
+      surfaceReady = false
     }
   }
 
@@ -222,7 +229,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
         main.post {
           try {
-            surfaceHost?.setRender(renderTexture)
+            if (surfaceLayerEnabled) {
+              surfaceHost?.setRender(renderTexture)
+            } else {
+              surfaceHost?.clearVideoLayer()
+            }
             ensurePlayer()
             result.success(mapOf("ok" to true, "ready" to created.get()))
           } catch (e: Throwable) {
@@ -251,11 +262,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           .associate { "${it.key}" to "${it.value}" }
         main.post {
           try {
-            surfaceHost?.setRender(renderTexture)
-            // 会话内复用 libmpv 上下文（对齐 TV MpvPlayerEngine）；仅 loadfile replace。
+            surfaceHost?.let { host ->
+              if (surfaceLayerEnabled) host.setRender(renderTexture) else host.clearVideoLayer()
+            }
+            // 会话内复用 libmpv 上下文；仅 loadfile replace。
             ensurePlayer()
             applyRuntimeOpts(props)
             applyGpuApiIfNeeded()
+            applyAspectMode()
             eof = false
             buffering = true
             playing = false
@@ -265,9 +279,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             height = 0
             pendingUrl = url
             pendingHeaders = headers
-            if (surfaceReady) {
-              maybeLoadPending()
-            }
+            // 有 Surface 再 loadfile，避免 android VO「Missing surface pointer」有声无画。
+            maybeLoadPending()
             result.success(null)
           } catch (e: Throwable) {
             emitLoadFailure(e)
@@ -393,7 +406,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             renderTexture = resolveRenderTexture(mode)
-            surfaceHost?.setRender(renderTexture)
+            if (surfaceLayerEnabled) {
+              surfaceHost?.setRender(renderTexture)
+            }
             result.success(
               mapOf(
                 "ok" to true,
@@ -403,6 +418,17 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             )
           } catch (e: Throwable) {
             result.error("RENDER_FAILED", e.message, null)
+          }
+        }
+      }
+      "setSurfaceLayerEnabled" -> {
+        val enabled = call.argument<Boolean>("enabled") == true
+        main.post {
+          try {
+            setSurfaceLayerEnabled(enabled)
+            result.success(true)
+          } catch (e: Throwable) {
+            result.error("SURFACE_LAYER_FAILED", e.message, null)
           }
         }
       }
@@ -434,6 +460,18 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             result.success(null)
           } catch (e: Throwable) {
             result.error("PROP_FAILED", e.message, null)
+          }
+        }
+      }
+      "setAspect" -> {
+        val mode = call.argument<String>("mode")?.trim().orEmpty()
+        main.post {
+          try {
+            aspectMode = normalizeAspectMode(mode)
+            applyAspectMode()
+            result.success(true)
+          } catch (e: Throwable) {
+            result.error("ASPECT_FAILED", e.message, null)
           }
         }
       }
@@ -577,7 +615,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       MPVLib.setOptionString("vo", if (gpuNext) "gpu-next" else "gpu")
-      MPVLib.setOptionString("gpu-context", "android")
       applyGpuApiOptions()
       // TV boxes often fail scraped HTTPS CA checks; disable verify for now.
       MPVLib.setOptionString("tls-verify", "no")
@@ -604,19 +641,24 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.addObserver(this)
       observeProps()
       created.set(true)
+      applyAspectMode()
       main.removeCallbacks(tick)
       main.post(tick)
       Log.i(TAG, "MPV context ready abi=${MPVLib.getLoadedAbi()}")
     }
   }
 
-  /** bundled libmpv + 设备 Vulkan≥1.2 且用户开启时设 gpu-api=vulkan。 */
+  /** 设备 Vulkan≥1.2 且用户开启：gpu-api=vulkan + gpu-context=androidvk；否则 opengl + android。 */
   private fun applyGpuApiOptions() {
     val ctx = appContext
-    if (vulkanEnabled && ctx != null && MPVLib.isVulkanRendererAvailable(ctx)) {
+    val useVulkan =
+      vulkanEnabled && ctx != null && MPVLib.isVulkanRendererAvailable(ctx)
+    if (useVulkan) {
       MPVLib.setOptionString("gpu-api", "vulkan")
+      MPVLib.setOptionString("gpu-context", "androidvk")
     } else {
       MPVLib.setOptionString("gpu-api", "opengl")
+      MPVLib.setOptionString("gpu-context", "android")
       MPVLib.setOptionString("opengl-es", "yes")
     }
   }
@@ -626,8 +668,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val ctx = appContext ?: return
     val useVulkan = vulkanEnabled && MPVLib.isVulkanRendererAvailable(ctx)
     try {
-      MPVLib.setPropertyString("gpu-api", if (useVulkan) "vulkan" else "opengl")
-      if (!useVulkan) {
+      if (useVulkan) {
+        MPVLib.setPropertyString("gpu-api", "vulkan")
+        MPVLib.setPropertyString("gpu-context", "androidvk")
+      } else {
+        MPVLib.setPropertyString("gpu-api", "opengl")
+        MPVLib.setPropertyString("gpu-context", "android")
         MPVLib.setPropertyString("opengl-es", "yes")
       }
     } catch (_: Throwable) {
@@ -775,6 +821,58 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
+  private fun normalizeAspectMode(raw: String): String {
+    return when (raw.trim().lowercase()) {
+      "fill", "stretch" -> "fill"
+      "zoom", "cover", "crop" -> "zoom"
+      "16:9", "16/9" -> "16:9"
+      "4:3", "4/3" -> "4:3"
+      else -> "default"
+    }
+  }
+
+  /**
+   * 画面比例（对齐设置/播控「适应·拉伸·Zoom·16:9·4:3」）：
+   * - 适应：keepaspect，不裁切
+   * - 拉伸：铺满窗口（可变形）
+   * - Zoom：keepaspect + panscan 裁切铺满
+   * - 16:9 / 4:3：强制片源画幅（如 4:3 片源选 16:9 会横向拉满）
+   */
+  private fun applyAspectMode() {
+    if (!created.get()) return
+    try {
+      when (aspectMode) {
+        "fill" -> {
+          MPVLib.setPropertyBoolean("keepaspect", false)
+          MPVLib.setPropertyDouble("panscan", 0.0)
+          MPVLib.setPropertyString("video-aspect-override", "no")
+        }
+        "zoom" -> {
+          MPVLib.setPropertyBoolean("keepaspect", true)
+          MPVLib.setPropertyDouble("panscan", 1.0)
+          MPVLib.setPropertyString("video-aspect-override", "no")
+        }
+        "16:9" -> {
+          MPVLib.setPropertyBoolean("keepaspect", true)
+          MPVLib.setPropertyDouble("panscan", 0.0)
+          MPVLib.setPropertyString("video-aspect-override", "16:9")
+        }
+        "4:3" -> {
+          MPVLib.setPropertyBoolean("keepaspect", true)
+          MPVLib.setPropertyDouble("panscan", 0.0)
+          MPVLib.setPropertyString("video-aspect-override", "4:3")
+        }
+        else -> {
+          MPVLib.setPropertyBoolean("keepaspect", true)
+          MPVLib.setPropertyDouble("panscan", 0.0)
+          MPVLib.setPropertyString("video-aspect-override", "no")
+        }
+      }
+    } catch (e: Throwable) {
+      Log.w(TAG, "applyAspectMode $aspectMode", e)
+    }
+  }
+
   private fun observeProps() {
     MPVLib.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
     MPVLib.observeProperty("duration", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
@@ -799,7 +897,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
    * - 新 Surface：attach + 设 vo，不 loadfile / 不 playlist-play-index
    */
   private fun tryAttachSurface() {
-    if (!created.get()) return
+    if (!surfaceLayerEnabled || !created.get()) return
     val surface = surfaceHost?.currentSurface() ?: return
     if (!surface.isValid) return
     try {
@@ -841,11 +939,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun maybeLoadPending() {
     val url = pendingUrl ?: return
-    if (!created.get() || !surfaceReady) return
+    if (!created.get()) return
+    tryAttachSurface()
+    // Surface 模式必须先挂上 wid；未就绪则保留 pending，等 onSurface/setSurfaceLayer。
+    if (surfaceLayerEnabled && !surfaceAttached) return
     pendingUrl = null
     val headers = pendingHeaders
     try {
-      tryAttachSurface()
       if (headers.isNotEmpty()) {
         val hline = headers.entries.joinToString("\r\n") { "${it.key}: ${it.value}" } + "\r\n"
         MPVLib.setOptionString("http-header-fields", hline)
@@ -860,6 +960,31 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       eof = false
     } catch (e: Throwable) {
       emit(mapOf("event" to "error", "message" to (e.message ?: "load failed")))
+    }
+  }
+
+  private fun setSurfaceLayerEnabled(enabled: Boolean) {
+    if (surfaceLayerEnabled == enabled) {
+      if (enabled) {
+        tryAttachSurface()
+        maybeLoadPending()
+      }
+      return
+    }
+    surfaceLayerEnabled = enabled
+    val host = surfaceHost
+    if (!enabled) {
+      parkSurfaceTransient()
+      host?.clearVideoLayer()
+      surfaceReady = false
+      return
+    }
+    if (host == null) return
+    host.setRender(renderTexture)
+    if (host.currentSurface() != null) {
+      surfaceReady = true
+      tryAttachSurface()
+      maybeLoadPending()
     }
   }
 
@@ -931,7 +1056,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   override fun eventProperty(property: String, value: Double) {
     when (property) {
-      "time-pos" -> positionSec = value
+      "time-pos", "playback-time" -> positionSec = value
       "duration" -> durationSec = value
     }
   }
@@ -940,6 +1065,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     when (eventId) {
       MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED, MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
         buffering = false
+        // 属性观察可能晚于 restart；主动读一次，避免 Dart 侧一直 width=0 盖黑。
+        try {
+          width = MPVLib.getPropertyInt("width") ?: width
+          height = MPVLib.getPropertyInt("height") ?: height
+          if (width <= 0) width = MPVLib.getPropertyInt("video-params/w") ?: width
+          if (height <= 0) height = MPVLib.getPropertyInt("video-params/h") ?: height
+        } catch (_: Throwable) {
+        }
         emitSize()
         emit(mapOf("event" to "ready", "width" to width, "height" to height))
       }
@@ -1061,14 +1194,26 @@ internal class KotvMpvSurfaceHost(context: Context) :
         layoutParams = lp
         isFocusable = false
         isFocusableInTouchMode = false
-        // 勿 setZOrderMediaOverlay：详情页画面在 Stack Positioned 里跟槽滚动时，
-        // media overlay 层常钉在首次位置，不随 PlatformView 布局移动。
+        // 与 Exo 一致：MediaOverlay 才能压过 Flutter 叠层，否则 Hybrid 下常见有声黑屏。
+        // 滚动重影靠详情 Positioned 跟槽；勿再靠关 overlay「藏」画面。
+        setZOrderMediaOverlay(true)
         holder.addCallback(this@KotvMpvSurfaceHost)
       }
       surfaceView = sv
       addView(sv)
     }
     stripPlatformViewFocus()
+  }
+
+  /** 出画前去掉 Surface，只留黑底宿主。 */
+  fun clearVideoLayer() {
+    if (surfaceView == null && textureView == null) return
+    onSurface?.invoke(false)
+    unbindViews()
+    listOfNotNull(surfaceView, textureView).forEach { removeView(it) }
+    surfaceView = null
+    textureView = null
+    releaseTextureSurface()
   }
 
   fun release() {

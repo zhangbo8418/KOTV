@@ -50,6 +50,9 @@ class ExoPlayback extends KotvPlayback {
   int _surfaceGeneration = 0;
   /// 默认 Surface：Hybrid SurfaceView，HDR 直出；Texture 为兼容回退（HDR 可能花屏）。
   String _renderMode = 'surface';
+  /// 点播挂 SurfaceView / 停播卸下；未点播不建，避免详情滑动重影。
+  bool _surfaceLayerEnabled = false;
+  String _videoScale = 'default';
   bool _live = false;
   String? _lastError;
 
@@ -90,7 +93,6 @@ class ExoPlayback extends KotvPlayback {
   bool get stalling => _buffering;
   @override
   /// SurfaceView + MediaOverlay：原生叠字会被盖住；缓冲/解析走 Flutter 层。
-  /// 加载滑动叠影由详情页黑底遮罩处理，勿为此关掉 MediaOverlay（关了易黑屏）。
   bool get preferNativeBufferingOverlay => false;
   @override
   Future<void> setNativeBufferingOverlay({required bool visible, required String text}) async {
@@ -121,6 +123,8 @@ class ExoPlayback extends KotvPlayback {
   Stream<bool> get completedStream => _endedCtrl.stream;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
+    // 播控/设置的比例优先于传入 fit（Surface 路径靠布局 + 原生 setFit）。
+    final effective = _fitFromScale(_videoScale, fit);
     final tid = _textureId;
     if (_useFlutterTexture) {
       // Texture 兼容模式：create 完成前 tid 可能为空。
@@ -135,20 +139,20 @@ class ExoPlayback extends KotvPlayback {
             if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
               return Texture(textureId: tid);
             }
-            if (fit == BoxFit.fill || _w <= 0 || _h <= 0) {
+            if (effective == BoxFit.fill || _w <= 0 || _h <= 0) {
               return SizedBox(
                 width: max.width,
                 height: max.height,
                 child: Texture(textureId: tid),
               );
             }
-            final box = _boxFitSize(max, _displaySize, fit);
+            final box = _boxFitSize(max, _displaySize, effective);
             final child = SizedBox(
               width: box.width,
               height: box.height,
               child: Texture(textureId: tid),
             );
-            if (fit == BoxFit.cover) {
+            if (effective == BoxFit.cover) {
               return ClipRect(child: Center(child: child));
             }
             return Center(child: child);
@@ -156,7 +160,7 @@ class ExoPlayback extends KotvPlayback {
         ),
       );
     }
-    final name = _fitName(fit);
+    final name = _fitName(effective);
     // Surface：Hybrid Composition + SurfaceView（HDR 直出）。
     final surface = kotvExoSurfaceView(
       key: ValueKey('kotv_exo_surface_$_surfaceGeneration'),
@@ -177,18 +181,44 @@ class ExoPlayback extends KotvPlayback {
           if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
             return surface;
           }
-          if (fit == BoxFit.fill || _w <= 0 || _h <= 0) {
+          if (effective == BoxFit.fill || _w <= 0 || _h <= 0) {
             return SizedBox(width: max.width, height: max.height, child: surface);
           }
-          final box = _boxFitSize(max, _displaySize, fit);
+          final box = _boxFitSize(max, _displaySize, effective);
           final child = SizedBox(width: box.width, height: box.height, child: surface);
-          if (fit == BoxFit.cover) {
+          if (effective == BoxFit.cover) {
             return ClipRect(child: Center(child: child));
           }
           return Center(child: child);
         },
       ),
     );
+  }
+
+  static BoxFit _fitFromScale(String scale, BoxFit fallback) {
+    switch (scale) {
+      case 'fill':
+      case '16:9':
+      case '4:3':
+        return BoxFit.fill;
+      case 'zoom':
+        return BoxFit.cover;
+      case 'default':
+        return BoxFit.contain;
+      default:
+        return fallback;
+    }
+  }
+
+  @override
+  Future<void> setVideoScale(String mode) async {
+    final m = mode.trim().isEmpty ? 'default' : mode.trim();
+    _videoScale = m;
+    final f = _fitFromScale(m, BoxFit.contain);
+    try {
+      await _ch.invokeMethod('setFit', {'fit': _fitName(f)});
+    } catch (_) {}
+    notifyListeners();
   }
 
   Size get _displaySize {
@@ -213,6 +243,8 @@ class ExoPlayback extends KotvPlayback {
     switch (fit) {
       case BoxFit.cover:
         return 'cover';
+      case BoxFit.fill:
+        return 'fill';
       default:
         return 'contain';
     }
@@ -350,6 +382,8 @@ class ExoPlayback extends KotvPlayback {
     _duration = Duration.zero;
     _buffered = Duration.zero;
     await _ensureNative();
+    // 点播即挂（详情已先挂播控进树）；Texture 模式无 SurfaceView 重影问题。
+    await _setSurfaceLayerEnabled(true);
     try {
       await _ch.invokeMethod('open', {
         'url': url,
@@ -486,8 +520,25 @@ class ExoPlayback extends KotvPlayback {
     _playing = false;
     _position = Duration.zero;
     _ready = false;
+    _url = '';
     _w = 0;
     _h = 0;
+    await _setSurfaceLayerEnabled(false);
+    notifyListeners();
+  }
+
+  @override
+  Future<void> stopForEpisodeSwitch() async {
+    try {
+      await _ch.invokeMethod('stop');
+    } catch (_) {}
+    _playing = false;
+    _position = Duration.zero;
+    _ready = false;
+    _url = '';
+    _w = 0;
+    _h = 0;
+    // 全屏换集保留 SurfaceView，避免闪出底层详情。
     notifyListeners();
   }
 
@@ -512,10 +563,12 @@ class ExoPlayback extends KotvPlayback {
     _playing = false;
     _position = Duration.zero;
     _ready = false;
+    _url = '';
     _w = 0;
     _h = 0;
     _textureId = null;
     _useFlutterTexture = false;
+    _surfaceLayerEnabled = false;
     await _sub?.cancel();
     _sub = null;
     notifyListeners();
@@ -577,8 +630,35 @@ class ExoPlayback extends KotvPlayback {
       }
       // 强制换 PlatformView / Texture 子树，避免全屏 Stable 层仍挂旧面导致定格。
       _surfaceGeneration++;
+      await _syncSurfaceLayer();
     } catch (_) {}
     notifyListeners();
+  }
+
+  Future<void> _syncSurfaceLayer() async {
+    // 有点播 URL 就挂；不跟视频尺寸绑。Texture 无独立 SurfaceView。
+    await _setSurfaceLayerEnabled(_url.isNotEmpty);
+  }
+
+  Future<void> _setSurfaceLayerEnabled(bool enabled) async {
+    if (_useFlutterTexture) {
+      _surfaceLayerEnabled = enabled;
+      return;
+    }
+    if (_surfaceLayerEnabled == enabled) {
+      if (enabled) {
+        try {
+          await _ensureNative();
+          await _ch.invokeMethod('setSurfaceLayerEnabled', {'enabled': true});
+        } catch (_) {}
+      }
+      return;
+    }
+    _surfaceLayerEnabled = enabled;
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('setSurfaceLayerEnabled', {'enabled': enabled});
+    } catch (_) {}
   }
 
   List<KotvTrack> _audioTracks = const [];

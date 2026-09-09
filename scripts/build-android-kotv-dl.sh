@@ -21,10 +21,8 @@ esac
 PREBUILT="$(echo "$NDK"/toolchains/llvm/prebuilt/*)"
 CC="$PREBUILT/bin/${TRIPLE}${API}-clang"
 OUT_DIR="$ROOT/flutter/android/app/src/main/jniLibs/$OUT_ABI"
-ASSET_DIR="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$OUT_ABI"
-mkdir -p "$OUT_DIR" "$ASSET_DIR"
+mkdir -p "$OUT_DIR"
 OUT="$OUT_DIR/libkotv_dl.so"
 "$CC" -shared -fPIC -O2 -Wl,-soname,libkotv_dl.so \
   -o "$OUT" "$SRC" -llog -ldl
-cp -f "$OUT" "$ASSET_DIR/libkotv_dl.so"
-echo "built $OUT (+ assets copy)"
+echo "built $OUT"

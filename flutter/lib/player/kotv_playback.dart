@@ -52,6 +52,8 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> play();
   Future<void> pause();
   Future<void> stop();
+  /// 换集停播：尽量保留视频层（Surface），避免全屏闪一下底层详情。
+  Future<void> stopForEpisodeSwitch() => stop();
   Future<void> seek(Duration d);
   Future<void> setVolume(double v);
   Future<void> setRate(double r);
@@ -60,6 +62,10 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// Android Exo：Surface / Texture，其它后端忽略。
   Future<void> setRenderMode(String mode) async {}
+
+  /// 画面比例：`default` 适应 / `fill` 拉伸 / `zoom` 裁切 / `16:9` / `4:3`。
+  /// 原生 Surface 吃不到 Flutter BoxFit，需引擎侧落实；默认空实现。
+  Future<void> setVideoScale(String mode) async {}
 
   /// 音量归一（loudnorm / dynaudnorm）；不支持的引擎忽略。
   Future<void> setStableVolume(bool on) async {}

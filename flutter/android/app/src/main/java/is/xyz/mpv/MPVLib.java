@@ -34,18 +34,8 @@ public final class MPVLib {
     // so DT_NEEDED libvulkan.so resolves to our stub. Android 7 also does not
     // search the absolute-load directory for DT_NEEDED.
     private static final String[] COPY_ORDER = {
-            "c++_shared",
-            "kotv_dl",
-            "mvutil",
-            "mwresample",
-            "mwscale",
-            "mvcodec",
-            "mvformat",
-            "mvfilter",
-            "mvdevice",
+            // assets 仅保留 vulkan stub；套件在 jniLibs，由 LOAD_ORDER / loadLibrary 加载。
             "vulkan",
-            "mpv",
-            "player"
     };
     private static final String[] LOAD_ORDER = {
             "c++_shared",
@@ -128,42 +118,30 @@ public final class MPVLib {
             File marker = new File(root, BUNDLE_MARKER);
             String bundleId = getBundleId(app, abi);
             boolean refreshBundle = !bundleId.equals(readMarker(marker));
+            // 仅抽出 assets 里的 Vulkan stub；套件只在 jniLibs，避免 APK 双份。
             for (String lib : COPY_ORDER) copyLibrary(app.getAssets(), abi, lib, dir, refreshBundle);
-            // stub 只从 assets 抽出目录加载（勿用 jniLibs，真机会抢系统 Vulkan）。
             System.loadLibrary("kotv_dl");
             File extractedVulkan = new File(dir, "libvulkan.so");
             final boolean needStub = shouldLoadVulkanStub(app);
-            final boolean useExtractLoad = Build.VERSION.SDK_INT < 31;
             if (!needStub) {
                 removeAppVulkanStubIfPresent(app);
             }
-            if (useExtractLoad) {
-                for (String lib : LOAD_ORDER) {
-                    if ("mpv".equals(lib) && needStub) {
-                        loadVulkanStubGlobal(extractedVulkan);
-                    }
-                    File so = new File(dir, System.mapLibraryName(lib));
-                    Log.i(TAG, "System.load " + so.getAbsolutePath());
-                    System.load(so.getAbsolutePath());
-                }
-                Log.i(TAG, "MPV natives loaded via System.load (extract, webhtv-style) stub=" + needStub);
+            if (needStub) {
+                loadVulkanStubGlobal(extractedVulkan);
             } else {
-                try {
-                    System.loadLibrary("c++_shared");
-                } catch (UnsatisfiedLinkError ignored) {
-                    System.load(new File(dir, "libc++_shared.so").getAbsolutePath());
-                }
-                if (needStub) {
-                    loadVulkanStubGlobal(extractedVulkan);
-                } else {
-                    Log.i(TAG, "skip libvulkan stub; use system Vulkan for gpu-api");
-                }
-                for (String lib : LOAD_ORDER) {
-                    if ("c++_shared".equals(lib)) continue;
-                    System.loadLibrary(lib);
-                }
-                Log.i(TAG, "MPV natives loaded via System.loadLibrary (jniLibs) stub=" + needStub);
+                Log.i(TAG, "skip libvulkan stub; use system Vulkan for gpu-api");
             }
+            try {
+                System.loadLibrary("c++_shared");
+            } catch (UnsatisfiedLinkError ignored) {
+                // 极端缺 libc++ 时不应再依赖 assets 解压（已不打包）；直接失败。
+                throw ignored;
+            }
+            for (String lib : LOAD_ORDER) {
+                if ("c++_shared".equals(lib) || "kotv_dl".equals(lib)) continue;
+                System.loadLibrary(lib);
+            }
+            Log.i(TAG, "MPV natives loaded via System.loadLibrary (jniLibs) stub=" + needStub);
             loadedAbi = abi;
             loaded = true;
             try {
@@ -253,8 +231,8 @@ public final class MPVLib {
             try {
                 System.loadLibrary("kotv_dl");
             } catch (UnsatisfiedLinkError e) {
-                copyLibrary(app.getAssets(), abi, "kotv_dl", dir, false);
-                System.load(new File(dir, System.mapLibraryName("kotv_dl")).getAbsolutePath());
+                Log.w(TAG, "loadLibrary(kotv_dl) failed during stub preload", e);
+                return false;
             }
             File extractedVulkan = new File(dir, System.mapLibraryName("vulkan"));
             loadVulkanStubGlobal(extractedVulkan);
@@ -294,10 +272,11 @@ public final class MPVLib {
     }
 
     private static String chooseAbi(AssetManager assets) {
+        // assets 仅有 vulkan stub；用 stub 判断本包支持的 ABI。
         for (String abi : Build.SUPPORTED_ABIS) {
-            if (assetExists(assets, abi, "mpv")) return abi;
+            if (assetExists(assets, abi, "vulkan")) return abi;
         }
-        return assetExists(assets, "armeabi-v7a", "mpv") ? "armeabi-v7a" : null;
+        return assetExists(assets, "armeabi-v7a", "vulkan") ? "armeabi-v7a" : null;
     }
 
     private static boolean assetExists(AssetManager assets, String abi, String lib) {

@@ -701,6 +701,21 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     widget.onBump();
   }
 
+  static String _aspectBadge(String key) {
+    switch (key) {
+      case 'fill':
+        return '拉';
+      case 'zoom':
+        return 'Z';
+      case '16:9':
+        return '16';
+      case '4:3':
+        return '4';
+      default:
+        return '适';
+    }
+  }
+
   void _cycleDecode() {
     setState(() => _decodeIdx = (_decodeIdx + 1) % _decodeModes.length);
     final mode = _decodeModes[_decodeIdx].$1;
@@ -1584,7 +1599,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                     }),
                                     _IconAct(
                                       icon: Icons.aspect_ratio,
-                                      tip: _aspects[_aspectIdx].$2,
+                                      tip: '比例：${_aspects[_aspectIdx].$2}',
+                                      badge: _aspectBadge(_aspects[_aspectIdx].$1),
                                       size: land ? 32.0 : 40.0,
                                       onTap: _cycleAspect,
                                     ),

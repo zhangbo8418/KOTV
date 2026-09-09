@@ -91,6 +91,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var surfaceHost: KotvExoSurfaceHost? = null
   /** 已绑定的 SurfaceView；全屏改尺寸时复用，避免反复 setVideoSurfaceView。 */
   private var boundSurfaceView: SurfaceView? = null
+  /** 出画前不建 SurfaceView，避免详情页滑动 Hybrid 重影；有尺寸后再挂。 */
+  private var surfaceLayerEnabled = false
   private var player: ExoPlayer? = null
   private var trackSelector: DecodeTrackSelector? = null
   /** 可热更新默认请求头；换集复用 Player 时改这里，可热更新默认请求头，含 RequestMetadata 与工厂头。 */
@@ -109,8 +111,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var decodeMode: String = "auto"
   /** false=SurfaceView（HDR 默认），true=Flutter Texture 兼容模式。 */
   private var renderTexture: Boolean = false
-  /** contain | cover。 */
+  /** contain | cover | fill。 */
   private var videoFit: String = "contain"
+  private var videoWidth: Int = 0
+  private var videoHeight: Int = 0
   /** 直播：跳过点播 KotvBufferBudget（Exo 用默认 LoadControl）。 */
   private var livePlayback: Boolean = false
   /** auto 下硬解失败后仅软解重建一次。 */
@@ -333,6 +337,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
+      "setSurfaceLayerEnabled" -> {
+        val enabled = call.argument<Boolean>("enabled") == true
+        main.post {
+          try {
+            setSurfaceLayerEnabled(enabled)
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_surface_layer", t.message, null)
+          }
+        }
+      }
       "play" -> {
         main.post { player?.play(); result.success(true) }
       }
@@ -455,8 +470,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     surfaceHost = host
     boundSurfaceView = null
-    host.setRender(false, ::onSurfaceReady)
-    onSurfaceReady()
+    // 出画前只留黑底宿主；有尺寸后再 setRender 建 SurfaceView。
+    if (surfaceLayerEnabled) {
+      host.setRender(false, ::onSurfaceReady)
+      onSurfaceReady()
+    } else {
+      host.clearVideoLayer()
+    }
   }
 
   internal fun detachSurfaceHost(host: KotvExoSurfaceHost) {
@@ -469,7 +489,35 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   /** PlatformView 进树后 surface 才可用；晚于 open() 时必须在此重绑。 */
   internal fun onSurfaceReady() {
+    if (!surfaceLayerEnabled) return
     main.post { bindPlayerSurface() }
+  }
+
+  /** 点播挂 SurfaceView；停播卸下（未点播不建，避免详情滑动重影）。 */
+  private fun setSurfaceLayerEnabled(enabled: Boolean) {
+    if (useFlutterTexture) {
+      surfaceLayerEnabled = enabled
+      return
+    }
+    if (surfaceLayerEnabled == enabled) {
+      if (enabled) bindPlayerSurface()
+      return
+    }
+    surfaceLayerEnabled = enabled
+    val host = surfaceHost
+    if (!enabled) {
+      host?.let { unbindPlayerOutput(it) }
+      boundSurfaceView = null
+      try {
+        player?.clearVideoSurface()
+      } catch (_: Throwable) {
+      }
+      host?.clearVideoLayer()
+      return
+    }
+    if (host == null) return
+    host.setRender(false, ::onSurfaceReady)
+    bindPlayerSurface()
   }
 
   /** Texture → Flutter Texture（兼容）；Surface → Hybrid SurfaceView（HDR）。 */
@@ -488,7 +536,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       } catch (_: Throwable) {
       }
       releaseFlutterTexture()
-      applyRenderToHost()
+      if (surfaceLayerEnabled) {
+        applyRenderToHost()
+      } else {
+        surfaceHost?.clearVideoLayer()
+      }
     }
   }
 
@@ -533,7 +585,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun applyRenderToHost() {
-    if (useFlutterTexture) return
+    if (useFlutterTexture || !surfaceLayerEnabled) return
     val host = surfaceHost ?: return
     unbindPlayerOutput(host)
     // PlatformView 路径仅 SurfaceView（Texture 已改走 Flutter Texture）。
@@ -552,6 +604,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       applyVideoFit()
       return
     }
+    if (!surfaceLayerEnabled) return
     val host = surfaceHost ?: return
     val sv = host.surfaceView ?: return
     if (!canBindSurface(sv)) return
@@ -582,9 +635,34 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun applyVideoFit() {
-    // 画幅由 Flutter 按视频比例给 Surface 定尺寸（SurfaceView 不吃 FittedBox 变换）。
-    // 画面在 Surface 内铺满即可，避免再 SCALE 裁切把比例弄丢。
-    player?.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+    val sv = boundSurfaceView
+    when (videoFit) {
+      "fill", "stretch" -> {
+        // SurfaceView 无原生拉伸；固定 buffer 为片源尺寸，由系统把 buffer 拉满 View → 变形铺满。
+        player?.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+        if (sv != null && videoWidth > 0 && videoHeight > 0) {
+          try {
+            sv.holder.setFixedSize(videoWidth, videoHeight)
+          } catch (_: Throwable) {
+          }
+        }
+      }
+      "cover", "zoom", "crop" -> {
+        player?.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+        try {
+          sv?.holder?.setSizeFromLayout()
+        } catch (_: Throwable) {
+        }
+      }
+      else -> {
+        // 画幅由 Flutter 按视频比例给 Surface 定尺寸；Surface 内铺满即可。
+        player?.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+        try {
+          sv?.holder?.setSizeFromLayout()
+        } catch (_: Throwable) {
+        }
+      }
+    }
   }
 
   /** DRM 指纹：变了才重建（Widevine session 等不宜热切）。 */
@@ -748,7 +826,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
           if (videoSize.width > 0 && videoSize.height > 0) {
+            videoWidth = videoSize.width
+            videoHeight = videoSize.height
             resizeFlutterTexture(videoSize.width, videoSize.height)
+            applyVideoFit()
           }
           emit(
             mapOf(
@@ -1123,6 +1204,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     fun normalizeFit(raw: String): String {
       return when (raw.lowercase()) {
         "cover", "zoom", "crop" -> "cover"
+        "fill", "stretch" -> "fill"
         else -> "contain"
       }
     }
@@ -1321,6 +1403,15 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
     if (show) {
       bufferingPanel.bringToFront()
     }
+  }
+
+  /** 去掉 SurfaceView/TextureView，只留黑底（出画前滑动无独立 Surface 图层）。 */
+  fun clearVideoLayer() {
+    unbind()
+    listOfNotNull(surfaceView, textureView).forEach { removeView(it) }
+    surfaceView = null
+    textureView = null
+    bufferingPanel.bringToFront()
   }
 
   fun setRender(texture: Boolean, onReady: () -> Unit) {

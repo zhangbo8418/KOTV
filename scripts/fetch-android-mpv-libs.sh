@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 拉取 Android 原生 MPV（libmpv + libplayer JNI），放入 assets/mpv-libs。
-# 来源：fish2018/webhtv 随 APK 打包的预编译库（与 is.xyz.mpv.MPVLib 配套）。
+# 拉取 Android 原生 MPV（libmpv + libplayer JNI）到 assets/mpv-libs 作为 staging。
+# prepare-android-mpv-native.sh 会同步到 jniLibs，并清空 assets 中除 libvulkan stub 外的 .so。
+# 来源：fish2018/webhtv 预编译库（与 is.xyz.mpv.MPVLib 配套）。
 set -euo pipefail
 
 # App-local libvulkan.so (Vulkan 1.1 symbol stub) is NOT fetched from upstream.
-# Keep flutter/android/app/src/main/jniLibs/<abi>/libvulkan.so (+ assets sync) and
-# ensure libmpv DT_NEEDED is libvulkan.so (not libvkcompat.so):
+# Stub 只进 assets；jniLibs 禁止放 libvulkan.so（会抢系统 Vulkan）。
 #   patchelf --replace-needed libvkcompat.so libvulkan.so libmpv.so
 # Rebuild stub from .tmp/vkcompat/vkcompat.c as libvulkan.so (-soname libvulkan.so).
 

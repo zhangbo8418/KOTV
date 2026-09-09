@@ -40,6 +40,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.decodeMode = 'auto',
     this.renderMode = 'surface',
     this.aspect = const AspectSpec(key: 'default', fit: BoxFit.contain),
+    this.onAspectChanged,
     this.onDecodeChanged,
     this.onRenderChanged,
     this.onPersistSetting,
@@ -91,6 +92,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final String decodeMode;
   final String renderMode;
   final AspectSpec aspect;
+  final ValueChanged<AspectSpec>? onAspectChanged;
   final ValueChanged<String>? onDecodeChanged;
   final ValueChanged<String>? onRenderChanged;
   final Future<void> Function(String key, String value)? onPersistSetting;
@@ -723,7 +725,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
     Widget video = widget.videoChild;
     final ratio = _aspect.ratio;
-    if (ratio != null && ratio > 0) {
+    // Android MPV：比例在原生 setAspect，勿再套 AspectRatio。
+    final skipFlutterRatio = kotvIsAndroid() && widget.playback is NativeMpvPlayback;
+    if (!skipFlutterRatio && ratio != null && ratio > 0) {
       // 勿用 LayoutBuilder+Center+SizedBox，易与 Video 叠出无限 layout。
       video = ColoredBox(
         color: Colors.black,
@@ -834,7 +838,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       episodes: widget.episodes,
       epIdx: _epIdx,
       aspect: _aspect,
-      onAspectChanged: (a) => setState(() => _aspect = a),
+      onAspectChanged: (a) {
+        setState(() => _aspect = a);
+        unawaited(widget.playback.setVideoScale(a.key));
+        widget.onAspectChanged?.call(a);
+        _flashSwipeHint('比例：${a.key == 'default' ? '适应' : a.key == 'fill' ? '拉伸' : a.key == 'zoom' ? 'Zoom' : a.key}');
+      },
       playUrl: widget.playUrl,
       decodeMode: _decodeMode,
       renderMode: _renderMode,
@@ -884,6 +893,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       autofocus: true,
       onKeyEvent: _onKey,
       child: Scaffold(
+        // externalVideo：画面在详情 Stack 下层 Positioned；此处必须透明，否则盖成全黑。
+        // 换集闪底层已由 stopForEpisodeSwitch 保留 Surface + 详情 Stack 黑底兜住。
         backgroundColor: widget.externalVideo ? Colors.transparent : Colors.black,
         body: LayoutBuilder(
           builder: (context, c) {

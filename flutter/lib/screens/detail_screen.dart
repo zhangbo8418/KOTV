@@ -75,6 +75,15 @@ class DetailScreen extends ConsumerStatefulWidget {
     await active._exitImmersiveFullscreen();
   }
 
+  /// 刚退出全屏的短窗口内：忽略紧随其后的第二次返回（否则会出详情回首页）。
+  /// Android 遥控/系统返回常同时打到 Focus 与 PopScope。
+  static bool get suppressBackAfterImmersiveExit {
+    final active = _DetailScreenState._active;
+    if (active == null) return false;
+    final until = active._suppressDetailPopUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
   /// 换源/切 Tab：尽快放开 PopScope；并 await 硬停，避免卸树后 FVP/HTML 后台出声。
   static Future<void> prepareLeave() async {
     final active = _DetailScreenState._active;
@@ -151,6 +160,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _miniDesktop = false;
   /// 与直播页一致：原位全屏，同一 PlatformView/Texture 放大，不 push 第二块 Surface。
   bool _immersiveFullscreen = false;
+  /// 全屏换集/解析中：盖住画面，避免 Surface 镂空透出底层。
+  bool _immersiveEpCover = false;
+  /// 退出全屏后短时挡住「再 pop 详情」，避免双通道返回直接回首页。
+  DateTime? _suppressDetailPopUntil;
   KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
   final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_detail_video');
   /// 量测详情页播控槽，供稳定 Positioned（Texture/PlatformView）宿主对齐。
@@ -189,6 +202,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   KotvPlayback? _wiredNotifyTarget;
   VoidCallback? _playbackNotify;
   int? _boundMpvTextureId;
+  int _lastVideoW = 0;
+  int _lastVideoH = 0;
   bool _openingSeekDone = false;
   bool _stoppedHard = false;
   /// 正在离开详情（返回/切 Tab）；期间 [_active] 已清空，避免 goKotvPage 再卡硬停。
@@ -390,42 +405,27 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   /// 换集/换源：解析可能要数秒，必须先停当前播放，否则上一集继续出声。
   Future<void> _stopAllBackends() async {
+    // 沉浸全屏换集：保留 Surface，避免 PlatformView 卸掉后闪出底层详情。
+    final keepSurface = _immersiveFullscreen;
+    Future<void> stopOne(KotvPlayback? p) async {
+      if (p == null) return;
+      try {
+        if (keepSurface) {
+          await p.stopForEpisodeSwitch();
+        } else {
+          await p.stop();
+        }
+      } catch (_) {}
+    }
+
     await Future.wait<void>([
-      () async {
-        try {
-          await _mk?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _fvp?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _exo?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _html?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _art?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _xg?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _zw?.stop();
-        } catch (_) {}
-      }(),
+      stopOne(_mk),
+      stopOne(_fvp),
+      stopOne(_exo),
+      stopOne(_html),
+      stopOne(_art),
+      stopOne(_xg),
+      stopOne(_zw),
     ]);
   }
 
@@ -626,7 +626,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playbackNotify = () {
       if (!mounted || _playUrl.isEmpty) return;
       _syncPlayStatus();
-      // 详情页 Video 区未包 ListenableBuilder：Texture 绑定后须主动 rebuild 一次。
+      // 详情页 Video 区未包 ListenableBuilder：出尺寸后须 rebuild 才能按比例定 PlatformView。
+      final w = p.width;
+      final h = p.height;
+      if (w != _lastVideoW || h != _lastVideoH) {
+        _lastVideoW = w;
+        _lastVideoH = h;
+        // 新集出尺寸：撤掉全屏换集黑盖。
+        if (_immersiveEpCover && w > 0 && h > 0) {
+          setState(() => _immersiveEpCover = false);
+          return;
+        }
+        setState(() {});
+        return;
+      }
+      if (_immersiveEpCover && w > 0 && h > 0 && p.playing && !p.stalling) {
+        setState(() => _immersiveEpCover = false);
+        return;
+      }
       if (p is NativeMpvPlayback) {
         final tid = p.textureId;
         if (tid != null && tid != _boundMpvTextureId) {
@@ -841,6 +858,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _danmakuRows = int.tryParse('${settings['danmakuRows'] ?? ''}') ?? 6;
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
+        unawaited(_playback.setVideoScale(_aspect.key));
         var playerVal = '${settings['player'] ?? kotvDefaultVodPlayer()}'.trim();
         if (playerVal.isEmpty) {
           playerVal = kotvDefaultVodPlayer();
@@ -1104,6 +1122,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     _playbackLive = false;
     _sessionStartedAt = null;
     _boundMpvTextureId = null;
+    _lastVideoW = 0;
+    _lastVideoH = 0;
     _openingSeekDone = false;
     _endedSub?.cancel();
     _endedSub = null;
@@ -1119,6 +1139,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _epIdx = epIdx;
         _epPage = epIdx ~/ _epSize;
         _magnetPlay = epLooksMagnet;
+        // 全屏换集先盖黑：Surface stop/load 镂空时勿透出详情。
+        if (_immersiveFullscreen) _immersiveEpCover = true;
         _status = epLooksMagnet
             ? '磁力解析中…'
             : (_epLooksDirectPlayUrl(ep.url) ? '换集中…' : '解析中…');
@@ -1355,6 +1377,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       _sessionStartedAt = null;
       setState(() {
         _playUrl = '';
+        _immersiveEpCover = false;
         _status = _friendlyPlayError(
           e,
           triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
@@ -1428,7 +1451,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   /// 全屏/详情共用画面。原位全屏时 Element 不挪树；Android 原生 Surface 另加 KeyedSubtree。
-  /// 固定画幅用 [AspectRatio]，勿用 LayoutBuilder+Center+SizedBox（易与 Video/FittedBox 叠出无限 layout）。
+  /// 固定画幅：Exo/其它用 [AspectRatio]；Android MPV 走原生 video-aspect-override，勿再套一层。
   Widget _buildSharedVideo({BoxFit fit = BoxFit.contain}) {
     Widget inner = kotvPlaybackView(
       playerVal: _playerVal,
@@ -1441,7 +1464,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       inner = KeyedSubtree(key: _videoHostKey, child: inner);
     }
     final ratio = _aspect.ratio;
-    if (ratio != null && ratio > 0) {
+    final mpvNativeScale = kotvIsAndroid() && _mk is NativeMpvPlayback;
+    if (!mpvNativeScale && ratio != null && ratio > 0) {
       inner = ColoredBox(
         color: Colors.black,
         child: Center(
@@ -1470,7 +1494,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       _syncVideoSlotRect();
     });
   }
-
   /// 非全屏：黑槽尺寸（LayerLink 管位置）+ 内容区裁剪矩形（防盖顶栏）。
   void _syncVideoSlotRect() {
     if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
@@ -1509,7 +1532,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       if (nextClip != null) _bodyClipRect = nextClip;
     });
   }
-
   /// 黑槽占位：[CompositedTransformTarget] 供画面层跟随；LayoutBuilder 捕获
   /// 不经 rebuild 的布局变化（窗口缩放、顶栏高度变化）刷新尺寸。
   Widget _buildVideoSlot() {
@@ -1532,7 +1554,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       ),
     );
   }
-
   /// [stackSize]：详情 Stack 实测约束。沉浸全屏勿用 MediaQuery 整窗尺寸——
   /// 若底栏/SafeArea 仍占位，整窗高会比可见区大，contain 居中会明显偏下。
   Rect _stableVideoRect(BuildContext context, {Size? stackSize}) {
@@ -1545,7 +1566,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     }
     return _videoLayerRect ?? Rect.zero;
   }
-
   Widget _buildStableVideoLayer(BuildContext context, {Size? stackSize}) {
     final rect = _stableVideoRect(context, stackSize: stackSize);
     if (rect.width < 1 || rect.height < 1) return const SizedBox.shrink();
@@ -1705,6 +1725,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         decodeMode: _decodeMode,
         renderMode: _renderMode,
         aspect: _aspect,
+        onAspectChanged: (a) {
+          setState(() => _aspect = a);
+          unawaited(_playback.setVideoScale(a.key));
+        },
         danmakuOn: _danmakuOn,
         danmakuItems: danmakuItems,
         danmakuSize: _danmakuSize,
@@ -1748,6 +1772,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           if (!mounted) return;
           if (k == 'playerScale') {
             setState(() => _aspect = _aspectFromScale(v));
+            unawaited(_playback.setVideoScale(v));
           }
           if (k == 'playerAmbient') {
             setState(() => _ambientOn = v.toLowerCase() == 'true');
@@ -1870,12 +1895,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
 
   Future<void> _exitImmersiveFullscreen() async {
     if (!_immersiveFullscreen) return;
+    // 先挡二次返回：Focus 与 PopScope/壳层常在同一按键上各走一遍。
+    _suppressDetailPopUntil = DateTime.now().add(const Duration(milliseconds: 800));
     _fsSwipeDy.value = 0;
     final wasDisplay = _desktopFs == KotvDesktopFullscreenKind.display;
     ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
     if (mounted) {
-      setState(() => _immersiveFullscreen = false);
-      // 黑槽在 Offstage 里仍有布局尺寸：同帧取回槽尺寸，避免整屏矩形多画一帧。
+      setState(() {
+        _immersiveFullscreen = false;
+        _immersiveEpCover = false;
+      });
+      // 黑槽需重新进树后量测：同帧可能仍为空，再排一次。
       _syncVideoSlotRect();
       _scheduleSyncVideoSlot();
     }
@@ -2187,16 +2217,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             key: _detailStackKey,
             fit: StackFit.expand,
             children: [
+              // 沉浸全屏底：必须不透明。Surface 镂空时若仍挂着 Offstage 详情，会透出「闪一下详情页」。
               if (_immersiveFullscreen) const ColoredBox(color: Colors.black),
-              Offstage(
-                offstage: _immersiveFullscreen,
-                child: TickerMode(
-                  enabled: !_immersiveFullscreen,
-                  child: detailScaffold,
-                ),
-              ),
+              // 沉浸时勿 Offstage 保活详情树：Android Hybrid Surface 仍可能透出底层 UI。
+              if (!_immersiveFullscreen) detailScaffold,
               // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏由 [_bodyClipRect] 裁切，不盖顶栏。
               if (_playUrl.isNotEmpty) _buildStableVideoLayer(context, stackSize: stackSize),
+              // 换集/解析：盖在画面上（Texture 路径有效；Surface 镂空时靠上面黑底 + 不挂详情）。
+              if (_immersiveFullscreen && _immersiveEpCover)
+                const Positioned.fill(
+                  child: IgnorePointer(child: ColoredBox(color: Colors.black)),
+                ),
               // 切集/换播放器时 playUrl 可能短暂变化：全屏页勿随 playUrl 卸树。
               if (_immersiveFullscreen && _detail != null)
                 _buildImmersiveFullscreenPage(externalVideo: true),
@@ -2239,6 +2270,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (didPop) return;
         if (_immersiveFullscreen) {
           unawaited(_exitImmersiveFullscreen());
+          return;
+        }
+        // 刚退全屏：同一次返回不要再出详情（对齐 PC：全屏返回只上一层）。
+        final until = _suppressDetailPopUntil;
+        if (until != null && DateTime.now().isBefore(until)) {
           return;
         }
         unawaited(_leavePage());
@@ -2518,7 +2554,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               actionRow(),
               lower(),
             ],
-        ),
+          )
       );
     }
 

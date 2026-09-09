@@ -149,6 +149,9 @@ class _AppShellState extends ConsumerState<AppShell> {
       unawaited(DetailScreen.exitImmersiveIfOpen());
       return;
     }
+    if (DetailScreen.suppressBackAfterImmersiveExit) {
+      return;
+    }
     if (LiveScreen.isImmersive) {
       liveScreenHandleBack?.call();
       return;

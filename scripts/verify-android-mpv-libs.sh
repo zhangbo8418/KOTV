@@ -1,25 +1,23 @@
 #!/usr/bin/env bash
-# 校验 Android MPV 原生库：Vulkan libmpv + AV3A（libarcdav3a in libmvcodec，与移动端一致）。
+# 校验 Android MPV：套件在 jniLibs；Vulkan stub 仅在 assets（勿双份）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ASSET="$ROOT/flutter/android/app/src/main/assets/mpv-libs"
+JNI_ROOT="$ROOT/flutter/android/app/src/main/jniLibs"
 fail=0
 
 check_abi() {
   local abi="$1"
-  local dir="$ASSET/$abi"
-  local mpv="$dir/libmpv.so"
-  local codec="$dir/libmvcodec.so"
-  local vulkan_asset="$dir/libvulkan.so"
-  local vulkan_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libvulkan.so"
-  local cxx="$dir/libc++_shared.so"
-  local cxx_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libc++_shared.so"
+  local asset_dir="$ASSET/$abi"
+  local jni="$JNI_ROOT/$abi"
+  local mpv="$jni/libmpv.so"
+  local codec="$jni/libmvcodec.so"
+  local vulkan_asset="$asset_dir/libvulkan.so"
+  local vulkan_jni="$jni/libvulkan.so"
+  local cxx_jni="$jni/libc++_shared.so"
 
   [[ -f "$mpv" ]] || { echo "ERROR: missing $mpv" >&2; fail=1; return; }
-  local codec_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libmvcodec.so"
   [[ -f "$codec" ]] || { echo "ERROR: missing $codec" >&2; fail=1; return; }
-  [[ -f "$codec_jni" ]] || { echo "ERROR: missing $codec_jni (sync assets→jniLibs)" >&2; fail=1; return; }
-  [[ -f "$cxx" ]] || { echo "ERROR: missing $cxx" >&2; fail=1; return; }
   [[ -f "$cxx_jni" ]] || { echo "ERROR: missing $cxx_jni" >&2; fail=1; return; }
   [[ -f "$vulkan_asset" ]] || { echo "ERROR: missing $vulkan_asset (API25 stub in assets)" >&2; fail=1; return; }
   if [[ -f "$vulkan_jni" ]]; then
@@ -27,7 +25,15 @@ check_abi() {
     fail=1
     return
   fi
-  echo "ok $abi: libvulkan stub in assets only"
+  # 套件不得再出现在 assets（与 lib/ 重复打包）。
+  local dup
+  for dup in libmpv.so libplayer.so libmvcodec.so libc++_shared.so libkotv_dl.so; do
+    if [[ -f "$asset_dir/$dup" ]]; then
+      echo "ERROR: duplicate $asset_dir/$dup (must live only in jniLibs)" >&2
+      fail=1
+    fi
+  done
+  echo "ok $abi: libvulkan stub in assets only; suite in jniLibs"
 
   if grep -aqE 'vulkan|androidvk|-Dvulkan=enabled' "$mpv" 2>/dev/null; then
     echo "ok $abi/libmpv.so: vulkan"
@@ -44,7 +50,7 @@ check_abi() {
   fi
 }
 
-echo "==> verify Android MPV native (Vulkan + AV3A)"
+echo "==> verify Android MPV native (Vulkan + AV3A; no assets/jni duplicate)"
 check_abi arm64-v8a
 check_abi armeabi-v7a
 [[ "$fail" == 0 ]] || exit 1

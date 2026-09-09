@@ -57,6 +57,10 @@ class NativeMpvPlayback extends KotvPlayback {
   String? _lastError;
   int? _textureId;
   String _renderMode = 'surface';
+  /// 点播挂 Surface / 停播卸下；未点播不建，避免详情滑动重影。
+  bool _surfaceLayerEnabled = false;
+  /// 适应/拉伸/Zoom/16:9/4:3（原生 setAspect）。
+  String _videoScale = 'default';
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -196,7 +200,8 @@ class NativeMpvPlayback extends KotvPlayback {
     return KotvTrack(id: id.isEmpty ? 'auto' : id, label: label);
   }
 
-  /// Android：Hybrid Composition SurfaceView / TextureView（对应 setRender）。
+  /// Android：Hybrid Composition PlatformView（对应 setRender）。
+  /// 比例由 [setVideoScale] 写 mpv keepaspect/panscan/video-aspect-override；此处铺满槽位。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     if (!kotvIsAndroid()) {
       return const ColoredBox(color: Colors.black);
@@ -223,6 +228,16 @@ class NativeMpvPlayback extends KotvPlayback {
           ),
       ],
     );
+  }
+
+  @override
+  Future<void> setVideoScale(String mode) async {
+    final m = mode.trim().isEmpty ? 'default' : mode.trim();
+    _videoScale = m;
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('setAspect', {'mode': m});
+    } catch (_) {}
   }
 
   Future<void> _ensureNative() async {
@@ -275,14 +290,28 @@ class NativeMpvPlayback extends KotvPlayback {
     final event = '${m['event'] ?? ''}';
     switch (event) {
       case 'position':
-        _position = Duration(milliseconds: (m['positionMs'] as num?)?.toInt() ?? 0);
-        _duration = Duration(milliseconds: (m['durationMs'] as num?)?.toInt() ?? 0);
-        _buffered = Duration(milliseconds: (m['bufferedMs'] as num?)?.toInt() ?? _buffered.inMilliseconds);
-        _playing = m['playing'] == true;
-        _buffering = m['buffering'] == true;
-        _speedBps = (m['speedBps'] as num?)?.toInt() ?? 0;
+        final nextPos = Duration(milliseconds: (m['positionMs'] as num?)?.toInt() ?? 0);
+        final nextDur = Duration(milliseconds: (m['durationMs'] as num?)?.toInt() ?? 0);
+        final nextBuf = Duration(milliseconds: (m['bufferedMs'] as num?)?.toInt() ?? _buffered.inMilliseconds);
+        final nextPlaying = m['playing'] == true;
+        final nextBuffering = m['buffering'] == true;
+        final nextSpeed = (m['speedBps'] as num?)?.toInt() ?? 0;
+        // 与 Exo 一致：进度变化要 notify，否则 VodInlineControls 的 ListenableBuilder 不刷新。
+        final changed = nextPlaying != _playing ||
+            nextBuffering != _buffering ||
+            nextSpeed != _speedBps ||
+            (nextPos - _position).inMilliseconds.abs() >= 200 ||
+            (nextBuf - _buffered).inMilliseconds.abs() >= 500 ||
+            nextDur != _duration;
+        _position = nextPos;
+        _duration = nextDur;
+        _buffered = nextBuf;
+        _playing = nextPlaying;
+        _buffering = nextBuffering;
+        _speedBps = nextSpeed;
         if (!_posCtrl.isClosed) _posCtrl.add(_position);
         if (!_bufCtrl.isClosed) _bufCtrl.add(_buffered);
+        if (changed) notifyListeners();
         break;
       case 'ready':
         final nw = (m['width'] as num?)?.toInt() ?? _w;
@@ -293,17 +322,15 @@ class NativeMpvPlayback extends KotvPlayback {
         _lastError = null;
         if (_w > 0 && _h > 0) _buffering = false;
         unawaited(_refreshAudioTracks());
-        _bumpSurface();
+        // 出尺寸只 notify；勿 _bumpSurface，否则易卸掉已挂的 PlatformView。
         notifyListeners();
         break;
       case 'size':
         final nw = (m['width'] as num?)?.toInt() ?? _w;
         final nh = (m['height'] as num?)?.toInt() ?? _h;
-        final sizeChanged = nw != _w || nh != _h;
         if (nw > 0) _w = nw;
         if (nh > 0) _h = nh;
         if (_w > 0 && _h > 0) _buffering = false;
-        if (sizeChanged) _bumpSurface();
         notifyListeners();
         break;
       case 'completed':
@@ -339,7 +366,6 @@ class NativeMpvPlayback extends KotvPlayback {
     _h = 0;
     _position = Duration.zero;
     _duration = Duration.zero;
-    _bumpSurface();
     notifyListeners();
 
     if (drm != null && drm.isNotEmpty) {
@@ -355,6 +381,8 @@ class NativeMpvPlayback extends KotvPlayback {
       notifyListeners();
       throw StateError(_lastError ?? '原生 MPV 未就绪');
     }
+    // 点播即挂 Surface（详情已先 setState 播控进树并 endOfFrame），再 loadfile。
+    await _setSurfaceLayerEnabled(true);
     try {
       await _ch.invokeMethod('open', {
         'url': url,
@@ -368,6 +396,8 @@ class NativeMpvPlayback extends KotvPlayback {
         'render': _renderMode,
         'props': _opts.propertyMap(live: live),
       });
+      // open 会 recreate 属性；再刷一次比例。
+      await _ch.invokeMethod('setAspect', {'mode': _videoScale});
     } on MissingPluginException {
       _lastError = '原生 MPV 插件未注册';
       _buffering = false;
@@ -437,6 +467,24 @@ class NativeMpvPlayback extends KotvPlayback {
     _buffering = false;
     _ready = false;
     _url = '';
+    _w = 0;
+    _h = 0;
+    await _setSurfaceLayerEnabled(false);
+    notifyListeners();
+  }
+
+  @override
+  Future<void> stopForEpisodeSwitch() async {
+    try {
+      await _ch.invokeMethod('stop');
+    } catch (_) {}
+    _playing = false;
+    _buffering = false;
+    _ready = false;
+    _url = '';
+    _w = 0;
+    _h = 0;
+    // 全屏换集保留 PlatformView，避免卸 Surface 闪出底层详情。
     notifyListeners();
   }
 
@@ -503,10 +551,34 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       if (_nativeReady) {
         await _ch.invokeMethod('setRenderMode', {'mode': _renderMode});
+        await _syncSurfaceLayer();
       }
     } catch (_) {}
     _bumpSurface();
     notifyListeners();
+  }
+
+  Future<void> _syncSurfaceLayer() async {
+    // 有点播 URL 就挂；停播清空 URL 后卸下。不跟视频尺寸绑。
+    await _setSurfaceLayerEnabled(_url.isNotEmpty);
+  }
+
+  Future<void> _setSurfaceLayerEnabled(bool enabled) async {
+    if (_surfaceLayerEnabled == enabled) {
+      if (enabled) {
+        // 同态再唤一次：PlatformView 晚进树时补挂。
+        try {
+          await _ensureNative();
+          await _ch.invokeMethod('setSurfaceLayerEnabled', {'enabled': true});
+        } catch (_) {}
+      }
+      return;
+    }
+    _surfaceLayerEnabled = enabled;
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('setSurfaceLayerEnabled', {'enabled': enabled});
+    } catch (_) {}
   }
 
   Future<void> applyOpts(KotvMpvOpts opts) async {
