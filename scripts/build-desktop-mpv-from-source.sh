@@ -839,24 +839,79 @@ ensure_libplacebo() {
 }
 
 ensure_lua_pkg() {
+  # macOS/Windows 把 PKG_CONFIG_LIBDIR 锁在 PREFIX：lua 必须进前缀，brew 路径无效。
   if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    for lua_prefix in /opt/homebrew/opt/lua@5.2 /usr/local/opt/lua@5.2; do
-      [[ -d "$lua_prefix/lib/pkgconfig" ]] || continue
-      export PKG_CONFIG_PATH="$lua_prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
-    done
+    ensure_prefix_lua plat=macosx
     return
   fi
   if kotv_is_windows_build; then
     ensure_windows_lua
+    return
+  fi
+  # Linux：可用系统 lua；没有也不强制（-Dlua=enabled 会再探测）。
+  if pkg-config --exists lua 2>/dev/null || pkg-config --exists lua5.2 2>/dev/null || pkg-config --exists lua-5.2 2>/dev/null; then
+    echo "ok lua $(pkg-config --modversion lua 2>/dev/null || pkg-config --modversion lua5.2 2>/dev/null || echo found)"
   fi
 }
 
-# Windows：OSC 需要 lua（osc.lua 编进 libmpv）；优先系统/前缀，否则源码编 lua52.dll。
+# 源码编 lua 进 PREFIX（供 macOS；INSTALL_TOP + 手写 .pc）。
+# 用法：ensure_prefix_lua plat=macosx|generic
+ensure_prefix_lua() {
+  local plat="${1#plat=}"
+  [[ -n "$plat" ]] || plat=generic
+  mkdir -p "$PREFIX/lib/pkgconfig"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  # 与 ensure_mpv_libcurl_deps 一致：Darwin 只看 PREFIX。
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || kotv_is_windows_build; then
+    export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+  fi
+  if pkg-config --exists lua 2>/dev/null || pkg-config --exists lua5.2 2>/dev/null || pkg-config --exists lua-5.2 2>/dev/null; then
+    echo "ok lua $(pkg-config --modversion lua 2>/dev/null || pkg-config --modversion lua5.2 2>/dev/null || echo found) (PREFIX)"
+    return
+  fi
+  need curl
+  local ver="${KOTV_LUA_VERSION:-5.2.4}"
+  local src="lua-${ver}"
+  local url="https://www.lua.org/ftp/${src}.tar.gz"
+  local _cwd="$PWD"
+  echo "==> build lua $ver ($plat → PREFIX, for mpv OSC)"
+  mkdir -p "$BUILD_DIR"
+  cd "$BUILD_DIR"
+  if [[ ! -d "$src" ]]; then
+    curl -fsSL "$url" -o "${src}.tar.gz"
+    tar xzf "${src}.tar.gz"
+  fi
+  cd "$src"
+  make "$plat" -j"${KOTV_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
+  make install INSTALL_TOP="$PREFIX"
+  cat >"$PREFIX/lib/pkgconfig/lua.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: Lua
+Description: Lua ${ver}
+Version: ${ver}
+Libs: -L\${libdir} -llua
+Cflags: -I\${includedir}
+EOF
+  cp -f "$PREFIX/lib/pkgconfig/lua.pc" "$PREFIX/lib/pkgconfig/lua5.2.pc"
+  cp -f "$PREFIX/lib/pkgconfig/lua.pc" "$PREFIX/lib/pkgconfig/lua52.pc"
+  cd "$_cwd"
+  pkg-config --exists lua || { echo "ERROR: lua.pc not visible after PREFIX install" >&2; exit 1; }
+  echo "ok lua $ver (PREFIX static)"
+}
+
+# Windows：OSC 需要 lua；优先 PREFIX，否则源码编 lua52.dll。务必恢复调用方 cwd。
 ensure_windows_lua() {
   kotv_is_windows_build || return 0
+  local _cwd="$PWD"
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
   if pkg-config --exists lua 2>/dev/null || pkg-config --exists lua5.2 2>/dev/null || pkg-config --exists lua-5.2 2>/dev/null || pkg-config --exists lua52 2>/dev/null; then
     echo "ok lua $(pkg-config --modversion lua 2>/dev/null || pkg-config --modversion lua5.2 2>/dev/null || pkg-config --modversion lua52 2>/dev/null || echo found)"
+    cd "$_cwd"
     return
   fi
   need curl
@@ -871,14 +926,19 @@ ensure_windows_lua() {
     tar xzf "${src}.tar.gz"
   fi
   cd "$src/src"
-  # 5.2 mingw：产出 lua52.dll + 可执行文件。
+  # 5.2 mingw：产出 lua52.dll；顺带留下 liblua.a（luac 目标）。
   make mingw "MYCFLAGS=$(kotv_windows_mpv_cflags)" -j"${KOTV_JOBS:-$(nproc 2>/dev/null || echo 4)}"
-  [[ -f lua52.dll ]] || { echo "ERROR: lua52.dll not built" >&2; ls -la >&2; exit 1; }
+  [[ -f lua52.dll ]] || { echo "ERROR: lua52.dll not built" >&2; ls -la >&2; cd "$_cwd"; exit 1; }
   mkdir -p "$PREFIX/bin" "$PREFIX/include" "$PREFIX/lib/pkgconfig"
   cp -f lua52.dll "$PREFIX/bin/"
   cp -f lua52.dll "$PREFIX/lib/"
+  # 优先静态 .a，避免运行时再找 lua52.dll；没有则退回 -llua52。
+  local libs_line="-L\${libdir} -llua52"
+  if [[ -f liblua.a ]]; then
+    cp -f liblua.a "$PREFIX/lib/liblua.a"
+    libs_line="-L\${libdir} -llua"
+  fi
   cp -f lua.h luaconf.h lualib.h lauxlib.h "$PREFIX/include/"
-  # 无 .dll.a 时 MinGW 可直接链同目录的 lua52.dll。
   cat >"$PREFIX/lib/pkgconfig/lua.pc" <<EOF
 prefix=$PREFIX
 exec_prefix=\${prefix}
@@ -888,14 +948,15 @@ includedir=\${prefix}/include
 Name: Lua
 Description: Lua ${ver}
 Version: ${ver}
-Libs: -L\${libdir} -llua52
+Libs: ${libs_line}
 Cflags: -I\${includedir}
 EOF
   cp -f "$PREFIX/lib/pkgconfig/lua.pc" "$PREFIX/lib/pkgconfig/lua5.2.pc"
   cp -f "$PREFIX/lib/pkgconfig/lua.pc" "$PREFIX/lib/pkgconfig/lua52.pc"
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  cd "$_cwd"
   pkg-config --exists lua || { echo "ERROR: lua.pc not visible after build" >&2; exit 1; }
-  echo "ok lua $ver (PREFIX lua52.dll)"
+  echo "ok lua $ver (PREFIX)"
 }
 
 # Windows：用同一套 MinGW 源码编 libass（mpv-dev 包只有 libmpv 头，没有 libass）。
