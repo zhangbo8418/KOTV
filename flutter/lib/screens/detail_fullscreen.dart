@@ -138,6 +138,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   late bool _ambientOn = widget.ambientOn;
   Timer? _hideTimer;
   Timer? _hintTimer;
+  /// 指针/焦点停在顶底栏：暂停自动隐藏。
+  bool _chromeHold = false;
   DateTime? _lastTapAt;
   bool? _playingForChrome;
   StreamSubscription<Duration>? _posSub;
@@ -266,9 +268,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _schedulePlayingHide() {
     _hideTimer?.cancel();
-    if (!widget.playback.playing) return;
-    _hideTimer = Timer(const Duration(seconds: 2), () {
-      if (!mounted || !widget.playback.playing || _epOpen) return;
+    if (!widget.playback.playing || _chromeHold || _epOpen) return;
+    // 遥控选按钮 / 手指滑进度需要更长窗口；操作中由 onHold / onBump 续命。
+    _hideTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted || !widget.playback.playing || _epOpen || _chromeHold) return;
       _setChrome(show: false, hideCursor: _hideCursorWhenIdle);
     });
   }
@@ -276,6 +279,17 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   void _bumpChrome() {
     _setChrome(show: true, hideCursor: false);
     _schedulePlayingHide();
+  }
+
+  void _onChromeHoldChanged(bool hold) {
+    if (_chromeHold == hold) return;
+    _chromeHold = hold;
+    if (hold) {
+      _hideTimer?.cancel();
+      _setChrome(show: true, hideCursor: false);
+    } else {
+      _schedulePlayingHide();
+    }
   }
 
   /// 点画面：只显隐控件，不播停。控件已显示则再点一次收起。双击退出全屏。
@@ -592,6 +606,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     );
   }
 
+  void _seekByRemote(Duration delta) {
+    final next = widget.playback.position + delta;
+    widget.playback.seek(next.isNegative ? Duration.zero : next);
+  }
+
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
@@ -612,7 +631,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return KeyEventResult.handled;
     }
 
-    // 有底栏/选集：上下+确定走焦点；左右调进度（遥控控进度条）。
+    // 有底栏/选集：方向键交给 TvFocus；快退/快进才 seek（勿抢横移）。
     if (_showChrome || _epOpen) {
       if (kotvIsMenuKey(key)) {
         if (_epOpen) {
@@ -629,14 +648,13 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         setState(() {});
         return KeyEventResult.handled;
       }
-      if (!_epOpen && (kotvIsLeftKey(key) || kotvIsMediaRewind(key))) {
-        final p = widget.playback.position - const Duration(seconds: 10);
-        widget.playback.seek(p.isNegative ? Duration.zero : p);
+      if (!_epOpen && kotvIsMediaRewind(key)) {
+        _seekByRemote(const Duration(seconds: -10));
         _bumpChrome();
         return KeyEventResult.handled;
       }
-      if (!_epOpen && (kotvIsRightKey(key) || kotvIsMediaFastForward(key))) {
-        widget.playback.seek(widget.playback.position + const Duration(seconds: 10));
+      if (!_epOpen && kotvIsMediaFastForward(key)) {
+        _seekByRemote(const Duration(seconds: 10));
         _bumpChrome();
         return KeyEventResult.handled;
       }
@@ -659,12 +677,13 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return KeyEventResult.ignored;
     }
 
-    // —— 控件全隐 ——
-    if (kotvIsMenuKey(key)) {
+    // —— 控件全隐：一键一义 ——
+    // 菜单/OK → 亮底栏；设置/E → 选集；左右 → seek；上下 → 切集。
+    if (kotvIsMenuKey(key) || kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
       _showChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
-    if (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE || kotvIsRightKey(key)) {
+    if (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE) {
       if (widget.episodes.isEmpty) {
         _showChromeAndFocusPlay();
         return KeyEventResult.handled;
@@ -674,17 +693,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       setState(() {});
       return KeyEventResult.handled;
     }
-    if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
-      _showChromeAndFocusPlay();
-      return KeyEventResult.handled;
-    }
     if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
-      final p = widget.playback.position - const Duration(seconds: 10);
-      widget.playback.seek(p.isNegative ? Duration.zero : p);
+      _seekByRemote(const Duration(seconds: -10));
       return KeyEventResult.handled;
     }
-    if (kotvIsMediaFastForward(key)) {
-      widget.playback.seek(widget.playback.position + const Duration(seconds: 10));
+    if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
+      _seekByRemote(const Duration(seconds: 10));
       return KeyEventResult.handled;
     }
     if (kotvIsUpKey(key)) {
@@ -835,6 +849,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       onToggleVisible: _bumpChrome,
       onExit: () => unawaited(_exitFullscreen()),
       onBump: _bumpChrome,
+      onHoldChanged: _onChromeHoldChanged,
       episodes: widget.episodes,
       epIdx: _epIdx,
       aspect: _aspect,

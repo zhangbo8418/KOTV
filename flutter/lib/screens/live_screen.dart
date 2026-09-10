@@ -85,6 +85,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   final FocusNode _rightFocus = FocusNode(debugLabel: 'live_right');
   final FocusNode _leftFocus = FocusNode(debugLabel: 'live_ch');
   final FocusNode _epgFocus = FocusNode(debugLabel: 'live_epg');
+  final FocusNode _epgTabFocus = FocusNode(debugLabel: 'live_epg_tab');
   String _zapDigits = '';
   Timer? _zapTimer;
 
@@ -379,6 +380,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _rightFocus.dispose();
     _leftFocus.dispose();
     _epgFocus.dispose();
+    _epgTabFocus.dispose();
     _zapTimer?.cancel();
     unawaited(_fvp?.stop() ?? Future<void>.value());
     unawaited(_mk?.stop() ?? Future<void>.value());
@@ -1646,7 +1648,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       return KeyEventResult.handled;
     }
 
-    // 有面板/底栏：上下+确定走焦点；左右在底栏/时移时调进度。
+    // 有面板/底栏：方向键交给 TvFocus；快退/快进才 seek（勿抢选台横移）。
     if (_liveUiOpen) {
       if (kotvIsMenuKey(key)) {
         if (_leftOpen || _rightOpen) {
@@ -1668,12 +1670,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _openRight();
         return KeyEventResult.handled;
       }
-      final chromeBar = (_chromeVisible || _catchupChrome) && !_leftOpen && !_rightOpen;
-      if (chromeBar && (kotvIsLeftKey(key) || kotvIsMediaRewind(key))) {
+      if (_catchup && kotvIsMediaRewind(key)) {
         _seekByRemote(const Duration(seconds: -15));
         return KeyEventResult.handled;
       }
-      if (chromeBar && (kotvIsRightKey(key) || kotvIsMediaFastForward(key))) {
+      if (_catchup && kotvIsMediaFastForward(key)) {
         _seekByRemote(const Duration(seconds: 15));
         return KeyEventResult.handled;
       }
@@ -1697,29 +1698,30 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       return KeyEventResult.ignored;
     }
 
-    // —— 控件全隐 ——
+    // —— 控件全隐：一键一义 ——
+    // 菜单 → 底栏；OK/左 → 频道；右/设置 → 设置栏；上下换台；时移时左右 seek。
     if (kotvIsMenuKey(key)) {
       _showLiveChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
-    // 时移中：OK/菜单已亮底栏；左右 seek 并亮进度条；勿再开频道侧栏抢进度。
     if (_catchup) {
       if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
-        _showLiveChromeAndFocusPlay();
+        _openLeft();
         return KeyEventResult.handled;
       }
       if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
         _seekByRemote(const Duration(seconds: -15));
         return KeyEventResult.handled;
       }
-      if (kotvIsRightKey(key) || kotvIsMediaFastForward(key) || kotvIsSettingsKey(key)) {
-        if (kotvIsSettingsKey(key)) {
-          _openRight();
-        } else {
-          _seekByRemote(const Duration(seconds: 15));
-        }
+      if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
+        _seekByRemote(const Duration(seconds: 15));
         return KeyEventResult.handled;
       }
+      if (kotvIsSettingsKey(key)) {
+        _openRight();
+        return KeyEventResult.handled;
+      }
+      // 时移中上下仍可换台
     }
     if (kotvIsSettingsKey(key) || kotvIsRightKey(key)) {
       _openRight();
@@ -2079,29 +2081,34 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                   SizedBox(width: gapTab),
                                   SizedBox(
                                     width: epgTabW,
-                                    child: Material(
-                                      color: _epgOpen ? const Color(0x40C73C62) : const Color(0x3318161E),
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: InkWell(
+                                    child: TvFocus(
+                                      focusNode: _epgTabFocus,
+                                      borderRadius: 8,
+                                      onPressed: () {
+                                        _cancelHideOverlays();
+                                        setState(() => _epgOpen = !_epgOpen);
+                                        if (_epgOpen && _programs.isEmpty && _chIdx >= 0) {
+                                          unawaited(_loadEpg());
+                                        }
+                                        if (_epgOpen) {
+                                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                                            if (mounted && _epgOpen) _epgFocus.requestFocus();
+                                          });
+                                        } else {
+                                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                                            if (mounted && _leftOpen) _leftFocus.requestFocus();
+                                          });
+                                        }
+                                      },
+                                      child: Material(
+                                        color: _epgOpen ? const Color(0x40C73C62) : const Color(0xFF1C1826),
                                         borderRadius: BorderRadius.circular(8),
-                                        onTap: () {
-                                          _cancelHideOverlays();
-                                          setState(() => _epgOpen = !_epgOpen);
-                                          if (_epgOpen && _programs.isEmpty && _chIdx >= 0) {
-                                            unawaited(_loadEpg());
-                                          }
-                                          if (_epgOpen) {
-                                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                                              if (mounted && _epgOpen) _epgFocus.requestFocus();
-                                            });
-                                          }
-                                        },
                                         child: Center(
                                           child: Text(
                                             (_epgOpen ? '收起' : '节目单').split('').join('\n'),
                                             textAlign: TextAlign.center,
                                             style: TextStyle(
-                                              color: Colors.white.withOpacity(_epgOpen ? 1 : 0.85),
+                                              color: Colors.white.withOpacity(_epgOpen ? 1 : 0.9),
                                               fontSize: land ? 11 : 12,
                                               height: 1.25,
                                               fontWeight: FontWeight.w600,

@@ -374,6 +374,7 @@ class VodFullscreenChrome extends StatefulWidget {
     required this.onToggleVisible,
     required this.onExit,
     required this.onBump,
+    this.onHoldChanged,
     this.episodes = const [],
     this.epIdx = -1,
     this.onSelectEp,
@@ -416,6 +417,8 @@ class VodFullscreenChrome extends StatefulWidget {
   final VoidCallback onToggleVisible;
   final VoidCallback onExit;
   final VoidCallback onBump;
+  /// 指针停在顶/底栏或焦点在控件上：父级应暂停自动隐藏。
+  final ValueChanged<bool>? onHoldChanged;
   /// 手机抖音式：竖屏 ↔ 横屏全屏切换。
   final VoidCallback? onRotate;
   final String? rotateLabel;
@@ -483,11 +486,61 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   final ScrollController _epScroll = ScrollController();
   final FocusNode _playFocus = FocusNode(debugLabel: 'vod_fs_play');
   final FocusNode _epFocus = FocusNode(debugLabel: 'vod_fs_ep');
-  static const double _epItemExtent = 52;
+  static const double _epItemExtent = 48;
+  bool _pointerHoldingChrome = false;
+  bool _focusHoldingChrome = false;
+
+  void _emitHold() {
+    widget.onHoldChanged?.call(_pointerHoldingChrome || _focusHoldingChrome);
+  }
+
+  void _setPointerHold(bool hold) {
+    if (_pointerHoldingChrome == hold) return;
+    _pointerHoldingChrome = hold;
+    _emitHold();
+  }
+
+  void _onGlobalFocus() {
+    if (!mounted || !widget.visible) return;
+    final primary = FocusManager.instance.primaryFocus;
+    final ctx = primary?.context;
+    final hold = ctx != null && ctx.findAncestorStateOfType<VodFullscreenChromeState>() == this;
+    if (_focusHoldingChrome == hold) {
+      if (hold) widget.onBump();
+      return;
+    }
+    _focusHoldingChrome = hold;
+    _emitHold();
+    if (hold) widget.onBump();
+  }
+
+  /// 顶/底栏：滑动、悬停都重新计时；进入时暂停自动隐藏。
+  Widget _chromeEngage({required Widget child}) {
+    return MouseRegion(
+      onEnter: (_) {
+        _setPointerHold(true);
+        widget.onBump();
+      },
+      onHover: (_) => widget.onBump(),
+      onExit: (_) => _setPointerHold(false),
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (_) {
+          _setPointerHold(true);
+          widget.onBump();
+        },
+        onPointerMove: (_) => widget.onBump(),
+        onPointerUp: (_) => widget.onBump(),
+        onPointerCancel: (_) => _setPointerHold(false),
+        child: child,
+      ),
+    );
+  }
 
   @override
   void initState() {
     super.initState();
+    FocusManager.instance.addListener(_onGlobalFocus);
     _danmakuOn = widget.danmakuOn;
     _ambientOn = widget.ambientOn;
     _stableVolume = widget.stableVolumeOn;
@@ -514,6 +567,11 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   @override
   void didUpdateWidget(covariant VodFullscreenChrome oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.visible && !widget.visible) {
+      _pointerHoldingChrome = false;
+      _focusHoldingChrome = false;
+      widget.onHoldChanged?.call(false);
+    }
     if (oldWidget.decodeMode != widget.decodeMode) {
       final di = _decodeModes.indexWhere((e) => e.$1 == widget.decodeMode);
       if (di >= 0) _decodeIdx = di;
@@ -568,6 +626,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_onGlobalFocus);
+    if (_pointerHoldingChrome || _focusHoldingChrome) {
+      _pointerHoldingChrome = false;
+      _focusHoldingChrome = false;
+      widget.onHoldChanged?.call(false);
+    }
     _clockTimer?.cancel();
     _epHideTimer?.cancel();
     _sleepTimer?.cancel();
@@ -1462,36 +1526,38 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             left: 0,
             right: 0,
             top: 0,
-            child: Container(
-              color: const Color(0x66000000),
-              padding: EdgeInsets.fromLTRB(padH, viewTop + padTopBar, padH, land ? 8 : 14),
-              child: Row(
-                children: [
-                  Container(width: 4, height: land ? 28 : 42, color: const Color(0xFFE52D27)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: Colors.white, fontSize: titleSize, fontWeight: FontWeight.w700),
-                        ),
-                        Text(res, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: land ? 11 : 14)),
-                      ],
+            child: _chromeEngage(
+              child: Container(
+                color: const Color(0x66000000),
+                padding: EdgeInsets.fromLTRB(padH, viewTop + padTopBar, padH, land ? 8 : 14),
+                child: Row(
+                  children: [
+                    Container(width: 4, height: land ? 28 : 42, color: const Color(0xFFE52D27)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: Colors.white, fontSize: titleSize, fontWeight: FontWeight.w700),
+                          ),
+                          Text(res, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: land ? 11 : 14)),
+                        ],
+                      ),
                     ),
-                  ),
-                  if (widget.onRotate != null) ...[
-                    _TextAct(
-                      label: widget.rotateLabel ?? '旋转',
-                      onTap: widget.onRotate!,
-                    ),
-                    const SizedBox(width: 8),
+                    if (widget.onRotate != null) ...[
+                      _TextAct(
+                        label: widget.rotateLabel ?? '旋转',
+                        onTap: widget.onRotate!,
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    _TextAct(label: '退出', onTap: widget.onExit),
                   ],
-                  _TextAct(label: '退出', onTap: widget.onExit),
-                ],
+                ),
               ),
             ),
           ),
@@ -1500,18 +1566,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: Material(
-              color: const Color(0x99000000),
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(padH, land ? 6 : 12, padH, padBot),
-                child: StreamBuilder(
-                  stream: widget.player.positionStream,
-                  builder: (context, _) {
-                    final pos = widget.player.position;
-                    final dur = widget.player.duration;
-                    final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
-                    final vol = widget.player.volume.clamp(0, 100).toDouble();
-                    return Column(
+            child: _chromeEngage(
+              child: Material(
+                color: const Color(0x99000000),
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(padH, land ? 6 : 12, padH, padBot),
+                  child: StreamBuilder(
+                    stream: widget.player.positionStream,
+                    builder: (context, _) {
+                      final pos = widget.player.position;
+                      final dur = widget.player.duration;
+                      final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
+                      final vol = widget.player.volume.clamp(0, 100).toDouble();
+                      return Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -1713,6 +1780,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                 ),
               ),
             ),
+            ),
           ),
         ],
         if (_epOpen)
@@ -1732,9 +1800,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                 });
               },
               child: Material(
-                color: const Color(0x990A0814),
+                // PC 全屏视频很亮时 0x99 半透明会把字「吃」成细条，加不透明底。
+                color: const Color(0xF0120A1C),
                 child: SizedBox(
-                  width: KotvLayout.isLandscapeCompact(context) ? 220.0 : 300.0,
+                  width: kotvIsDesktop()
+                      ? 280.0
+                      : (KotvLayout.isLandscapeCompact(context) ? 220.0 : 300.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -1773,13 +1844,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           child: ListView.builder(
                             controller: _epScroll,
                             itemExtent: _epItemExtent,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                             itemCount: widget.episodes.length,
                             itemBuilder: (_, i) {
                               final sel = i == widget.epIdx;
                               final focusHere = sel || (widget.epIdx < 0 && i == 0);
+                              // itemExtent 内勿再叠垂直 Padding，否则字被压成细条。
                               return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                padding: const EdgeInsets.symmetric(vertical: 3),
                                 child: TvFocus(
                                   autofocus: focusHere,
                                   focusNode: focusHere ? _epFocus : null,
@@ -1790,20 +1862,23 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                     closeEpisodes();
                                   },
                                   child: Material(
-                                    color: sel ? const Color(0x2EFFFFFF) : const Color(0x3318161E),
+                                    color: sel ? const Color(0x3DFFFFFF) : const Color(0xFF1C1826),
                                     borderRadius: BorderRadius.circular(8),
-                                    child: Align(
-                                      alignment: Alignment.centerLeft,
+                                    child: SizedBox.expand(
                                       child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                        child: Text(
-                                          widget.episodes[i],
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: Colors.white.withOpacity(sel ? 1 : 0.85),
-                                            fontSize: 14,
-                                            fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Text(
+                                            widget.episodes[i],
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(sel ? 1 : 0.9),
+                                              fontSize: kotvIsDesktop() ? 15 : 14,
+                                              fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                                              height: 1.2,
+                                            ),
                                           ),
                                         ),
                                       ),

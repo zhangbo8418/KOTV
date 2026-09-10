@@ -2108,25 +2108,50 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   KeyEventResult _onInlinePlayerKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent || _playUrl.isEmpty) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    if (kotvIsMenuKey(key)) {
+
+    void seekBy(Duration delta) {
+      final next = _playback.position + delta;
+      unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
+    }
+
+    // 底栏已获焦：方向键交给 TvFocus；快退/快进才 seek。
+    if (_chromeRemoteFocus) {
+      if (kotvIsMenuKey(key)) {
+        setState(() => _chromeRemoteFocus = false);
+        return KeyEventResult.handled;
+      }
+      if (kotvIsMediaRewind(key)) {
+        seekBy(const Duration(seconds: -10));
+        return KeyEventResult.handled;
+      }
+      if (kotvIsMediaFastForward(key)) {
+        seekBy(const Duration(seconds: 10));
+        return KeyEventResult.handled;
+      }
+      if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+        final primary = FocusManager.instance.primaryFocus;
+        if (primary == null || primary == node) {
+          unawaited(_playback.playOrPause());
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      }
+      // 上下左右：底栏 / 剧集 TvFocus 横移纵移
+      return KeyEventResult.ignored;
+    }
+
+    // —— 底栏未获焦 ——
+    // 菜单/上下 → 亮底栏；左右 → seek（勿再用左右「调菜单」）。
+    if (kotvIsMenuKey(key) || kotvIsUpKey(key) || kotvIsDownKey(key)) {
       setState(() => _chromeRemoteFocus = true);
       return KeyEventResult.handled;
     }
-    // 底栏已获焦：左右调进度，上下留给 TvFocus。
-    if (_chromeRemoteFocus && (kotvIsLeftKey(key) || kotvIsMediaRewind(key))) {
-      final p = _playback.position - const Duration(seconds: 10);
-      unawaited(_playback.seek(p.isNegative ? Duration.zero : p));
+    if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
+      seekBy(const Duration(seconds: -10));
       return KeyEventResult.handled;
     }
-    if (_chromeRemoteFocus && (kotvIsRightKey(key) || kotvIsMediaFastForward(key))) {
-      unawaited(_playback.seek(_playback.position + const Duration(seconds: 10)));
-      return KeyEventResult.handled;
-    }
-    // 起播后方向键也可把焦点落到底栏，避免只能靠菜单键。
-    if (_playUrl.isNotEmpty &&
-        !_chromeRemoteFocus &&
-        (kotvIsUpKey(key) || kotvIsDownKey(key) || kotvIsLeftKey(key) || kotvIsRightKey(key))) {
-      setState(() => _chromeRemoteFocus = true);
+    if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
+      seekBy(const Duration(seconds: 10));
       return KeyEventResult.handled;
     }
     if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
@@ -2137,7 +2162,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       }
       return KeyEventResult.ignored;
     }
-    // 上下：交给底栏 TvFocus / 剧集等全局遍历
     return KeyEventResult.ignored;
   }
 

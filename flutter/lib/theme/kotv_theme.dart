@@ -206,15 +206,26 @@ class TvFocus extends StatefulWidget {
 }
 
 class _TvFocusState extends State<TvFocus> {
-  bool _focused = false;
+  bool _highlight = false;
+
+  /// 深色面板上过暗的 focus 色会「看不见」；抬亮一档做描边。
+  Color _ringColor(Color focus) {
+    if (focus.computeLuminance() >= 0.4) return focus;
+    return Color.lerp(focus, Colors.white, 0.55) ?? focus;
+  }
 
   @override
   Widget build(BuildContext context) {
     final focus = KotvPalette.of(context).focus;
+    final ring = _ringColor(focus);
     return FocusableActionDetector(
       focusNode: widget.focusNode,
       autofocus: widget.autofocus,
-      onShowFocusHighlight: (v) => setState(() => _focused = v),
+      // 只用系统「是否该画焦点」：遥控/键盘会亮，鼠标点击不会留下常亮框。
+      onShowFocusHighlight: (v) {
+        if (_highlight == v) return;
+        setState(() => _highlight = v);
+      },
       actions: <Type, Action<Intent>>{
         ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
           widget.onPressed?.call();
@@ -230,15 +241,16 @@ class _TvFocusState extends State<TvFocus> {
           duration: const Duration(milliseconds: 120),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(widget.borderRadius),
+            color: _highlight ? ring.withOpacity(0.22) : null,
             border: Border.all(
-              color: _focused ? focus : Colors.transparent,
-              width: 3,
+              color: _highlight ? ring : Colors.transparent,
+              width: _highlight ? 3 : 0,
             ),
-            boxShadow: _focused
+            boxShadow: _highlight
                 ? [
                     BoxShadow(
-                      color: focus.withOpacity(0.35),
-                      blurRadius: 12,
+                      color: ring.withOpacity(0.55),
+                      blurRadius: 14,
                       spreadRadius: 1,
                     ),
                   ]
