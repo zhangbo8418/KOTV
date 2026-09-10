@@ -1563,10 +1563,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   Rect _stableVideoRect(BuildContext context, {Size? stackSize}) {
     if (_immersiveFullscreen) {
       final s = stackSize;
+      Rect r;
       if (s != null && s.width >= 1 && s.height >= 1) {
-        return Offset.zero & s;
+        r = Offset.zero & s;
+      } else {
+        r = _videoLayerRect ?? (Offset.zero & MediaQuery.sizeOf(context));
       }
-      return _videoLayerRect ?? (Offset.zero & MediaQuery.sizeOf(context));
+      // 氛围模式：画面略内缩，四周透出壳层壁纸（默认适应仍是黑边）。
+      if (_ambientOn && r.width > 80 && r.height > 96) {
+        return Rect.fromLTRB(r.left + 28, r.top + 36, r.right - 28, r.bottom - 36);
+      }
+      return r;
     }
     return _videoLayerRect ?? Rect.zero;
   }
@@ -1640,6 +1647,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // Texture/Surface 镂空时 letterbox 会透出壳壁纸；默认黑底与常见播放器一致。
+            // 氛围模式由外层沉浸 Stack 去掉全屏黑底，四周才透壁纸。
+            const ColoredBox(color: Colors.black),
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
             // 解析/无帧/缓冲：黑底盖住 PlatformView。加载阶段滑动时 Hybrid Composition
             // 易把 Flutter 控件与 Surface 叠成双影（Exo/MPV 都有），与是否 MediaOverlay 无关。
@@ -2221,12 +2231,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
             key: _detailStackKey,
             fit: StackFit.expand,
             children: [
-              // Android Hybrid Surface：沉浸时卸详情树 + 黑底，避免镂空透出底层。
-              // 桌面仍用 Offstage 保活（LayerLink / media_kit Texture 不宜整树卸装）。
+              // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
+              // 仅氛围模式去掉黑底，四周才透 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影。
+              // 桌面 Offstage 保活（LayerLink / media_kit Texture 不宜整树卸装）。
               if (kotvIsAndroid()) ...[
-                if (_immersiveFullscreen) const ColoredBox(color: Colors.black),
+                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
                 if (!_immersiveFullscreen) detailScaffold,
-              ] else
+              ] else ...[
+                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
                 Offstage(
                   offstage: _immersiveFullscreen,
                   child: TickerMode(
@@ -2234,6 +2246,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                     child: detailScaffold,
                   ),
                 ),
+              ],
               // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏由 [_bodyClipRect] 裁切，不盖顶栏。
               if (_playUrl.isNotEmpty) _buildStableVideoLayer(context, stackSize: stackSize),
               // 换集/解析：盖在画面上（Texture 路径有效；Surface 镂空时靠上面黑底 + 不挂详情）。
