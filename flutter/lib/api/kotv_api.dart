@@ -335,7 +335,7 @@ class KotvApi {
         'line': line,
       });
 
-  /// 安卓 MPV：把 path 上的真 HLS 包成本地代理。假后缀原样返回。
+  /// 已停用，原样返回。播放交给播放器。
   Future<Map<String, dynamic>> liveWrapHls({
     required String url,
     Map<String, String>? headers,

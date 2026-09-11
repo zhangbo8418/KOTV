@@ -283,7 +283,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build meson pkg-config nasm yasm \
             libgtk-3-dev liblzma-dev libgl1-mesa-dev xorg-dev libxkbcommon-dev \
-            libass-dev libarchive-dev libbluray-dev liblua5.2-dev libluajit-5.1-dev \
+            libass-dev libarchive-dev libuchardet-dev librubberband-dev libdvbv5-dev \
+            libbluray-dev libdvdread-dev libdvdnav-dev \
+            liblua5.2-dev libluajit-5.1-dev \
             libplacebo-dev libvulkan-dev libshaderc-dev liblcms2-dev \
             libssl-dev libcurl4-openssl-dev libnghttp2-dev \
             libasound2-dev libmpv-dev mpv \
@@ -479,7 +481,7 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     needs: [set-tag]
-    timeout-minutes: 150
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
@@ -517,8 +519,20 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;35.0.0" >/dev/null
           sdkmanager --list_installed 2>/dev/null | grep -E 'platforms;android-36|build-tools' || true
 
-      - name: Install Android build tools (patchelf for libmpv DT_NEEDED)
-        run: sudo apt-get update && sudo apt-get install -y patchelf
+      - name: Install Android native build tools
+        run: sudo apt-get update && sudo apt-get install -y patchelf gperf autoconf automake libtool nasm yasm pkg-config meson ninja-build
+
+      - name: Cache Android MPV source build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/android-mpv-src
+            flutter/android/app/src/main/assets/mpv-libs
+            flutter/android/app/src/main/jniLibs/arm64-v8a
+            flutter/android/app/src/main/jniLibs/armeabi-v7a
+          key: android-mpv-src-${{ hashFiles('scripts/build-android-mpv-from-source.sh', 'scripts/ffmpeg-mpegts-skip-image-prefix.py') }}
+          restore-keys: |
+            android-mpv-src-
 
       - name: Cache FongMi Media3 maven + checkout
         uses: actions/cache@v4
@@ -584,7 +598,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build meson pkg-config nasm yasm \
             libgtk-3-dev liblzma-dev libgl1-mesa-dev xorg-dev libxkbcommon-dev \
-            libass-dev libarchive-dev libbluray-dev liblua5.2-dev libluajit-5.1-dev \
+            libass-dev libarchive-dev libuchardet-dev librubberband-dev libdvbv5-dev \
+            libbluray-dev libdvdread-dev libdvdnav-dev \
+            liblua5.2-dev libluajit-5.1-dev \
             p7zip-full unzip curl zip
 
       - uses: subosito/flutter-action@v2

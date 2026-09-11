@@ -90,6 +90,18 @@ kotv_libplacebo_profile() {
 }
 
 # 全平台：mpv 链 PREFIX libcurl（HTTP/2 + HTTP/3）。播流 HTTPS/RTSP/RTMP 仍走 FFmpeg。
+ensure_iso_libs() {
+  chmod +x "$ROOT/scripts/ensure-desktop-iso-libs.sh"
+  KOTV_MPV_BUILD_DIR="$BUILD_DIR" KOTV_DESKTOP_FFMPEG_PREFIX="$PREFIX" \
+    "$ROOT/scripts/ensure-desktop-iso-libs.sh"
+}
+
+ensure_parity_libs() {
+  chmod +x "$ROOT/scripts/ensure-desktop-parity-libs.sh"
+  KOTV_MPV_BUILD_DIR="$BUILD_DIR" KOTV_DESKTOP_FFMPEG_PREFIX="$PREFIX" \
+    "$ROOT/scripts/ensure-desktop-parity-libs.sh"
+}
+
 ensure_mpv_libcurl_deps() {
   chmod +x "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
   "$ROOT/scripts/ensure-desktop-curl-openssl.sh"
@@ -1229,6 +1241,9 @@ build_mpv_linux() {
   fi
   ensure_libplacebo
   ensure_mpv_libcurl_deps
+  ensure_iso_libs
+  ensure_parity_libs
+  ensure_windows_libass
   ensure_lua_pkg
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
@@ -1251,6 +1266,15 @@ build_mpv_linux() {
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
     -Dlibcurl=enabled \
+    -Dlibbluray=enabled \
+    -Ddvdnav=enabled \
+    -Diconv=enabled \
+    -Duchardet=enabled \
+    -Dlibarchive=enabled \
+    -Drubberband=enabled \
+    -Dlibass=enabled \
+    -Dcplugins=enabled \
+    -Ddvbin=enabled \
     -Dgl=enabled \
     -Dplain-gl=enabled \
     -Dlua=enabled \
@@ -1280,6 +1304,8 @@ build_mpv_macos() {
   ensure_windows_libass
   ensure_libplacebo
   ensure_mpv_libcurl_deps
+  ensure_iso_libs
+  ensure_parity_libs
   ensure_lua_pkg
   # ensure 可能改过 LIBDIR/PATH；编 mpv 前再钉回 PREFIX（curl.pc 已在内）。
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
@@ -1310,6 +1336,14 @@ build_mpv_macos() {
     -Dmanpage-build=disabled \
     -Dvulkan=enabled \
     -Dlibcurl=enabled \
+    -Dlibbluray=enabled \
+    -Ddvdnav=enabled \
+    -Diconv=enabled \
+    -Duchardet=enabled \
+    -Dlibarchive=enabled \
+    -Drubberband=enabled \
+    -Dlibass=enabled \
+    -Dcplugins=enabled \
     -Dgl=enabled \
     -Dplain-gl=enabled \
     -Dlua=enabled \
@@ -1454,6 +1488,8 @@ EOF
   # 禁止 meson 回退到系统 libavdevice（与 mdk 同进程时易堆损坏）。
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
   ensure_mpv_libcurl_deps
+  ensure_iso_libs
+  ensure_parity_libs
   ensure_lua_pkg
   if kotv_is_windows_build; then
     local mpv_vk=enabled
@@ -1477,6 +1513,14 @@ EOF
       -Dmanpage-build=disabled \
       -Dvulkan="$mpv_vk" \
       -Dlibcurl=enabled \
+    -Dlibbluray=enabled \
+    -Ddvdnav=enabled \
+    -Diconv=enabled \
+    -Duchardet=enabled \
+    -Dlibarchive=enabled \
+    -Drubberband=enabled \
+    -Dlibass=enabled \
+    -Dcplugins=enabled \
       "${mpv_extra[@]}" \
       -Dlibavdevice=disabled \
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000','-DNDEBUG']" \
@@ -1490,6 +1534,14 @@ EOF
       -Dmanpage-build=disabled \
       -Dvulkan=enabled \
       -Dlibcurl=enabled \
+    -Dlibbluray=enabled \
+    -Ddvdnav=enabled \
+    -Diconv=enabled \
+    -Duchardet=enabled \
+    -Dlibarchive=enabled \
+    -Drubberband=enabled \
+    -Dlibass=enabled \
+    -Dcplugins=enabled \
       -Dgl=enabled \
       -Dplain-gl=enabled \
       -Dlua=enabled \

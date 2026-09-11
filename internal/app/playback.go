@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/bobo/KOTV/internal/database"
-	"github.com/bobo/KOTV/internal/hlsproxy"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/playproxy"
@@ -79,11 +78,6 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 		// 仍须走 jar 的本地代理（如 m3u8 分片改写 / so 多线程）时，只改写对外可达根。
 		if localproxy.IsSpiderProxyURL(playURL) {
 			return playproxy.PublicizeURL(playURL)
-		}
-		// 真 HLS（path .m3u8/.m3u）走改写代理：分片带头，并剥掉 png/jpg/gif 壳。
-		// 查询串里的假 m3u8 不进这里，避免凤凰秀这类 FLV 被当成播放列表。
-		if hlsproxy.LikelyHLS(playURL, "") {
-			return playproxy.PublicizeURL(hlsproxy.Open(playURL, headers))
 		}
 		if resolved, err := m3u8.ResolveForPlayback(playURL, headers, port); err == nil && resolved != "" {
 			playURL = resolved

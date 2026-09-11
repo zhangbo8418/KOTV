@@ -24,6 +24,11 @@ import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import `is`.xyz.mpv.MPVLib
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URL
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 import kotlin.math.min
 import java.util.concurrent.atomic.AtomicBoolean
@@ -45,6 +50,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var surfaceHost: KotvMpvSurfaceHost? = null
 
   private val main = Handler(Looper.getMainLooper())
+  private val net = Executors.newSingleThreadExecutor()
+  private val loadGen = AtomicInteger(0)
   private val created = AtomicBoolean(false)
   private var playing = false
   private var buffering = false
@@ -627,10 +634,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       applyGpuApiOptions()
       // TV boxes often fail scraped HTTPS CA checks; disable verify for now.
       MPVLib.setOptionString("tls-verify", "no")
-      // https 网关 302 到 http（凤秀等）时，默认白名单不含 http，会跟跳失败。
+      // https 网关 302 到 http 时，默认白名单不含 http，嵌套列表也会被拒。
+      val lavfNet = "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data,allowed_extensions=ALL"
+      MPVLib.setOptionString("demuxer-lavf-o", lavfNet)
       MPVLib.setOptionString(
-        "demuxer-lavf-o",
-        "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data,allowed_extensions=ALL"
+        "stream-lavf-o",
+        "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data"
       )
       // ytdl_hook aborts load on devices without youtube-dl; disable.
       MPVLib.setOptionString("ytdl", "no")
@@ -959,7 +968,19 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     // Surface 模式必须先挂上 wid；未就绪则保留 pending，等 onSurface/setSurfaceLayer。
     if (surfaceLayerEnabled && !surfaceAttached) return
     pendingUrl = null
-    val headers = pendingHeaders
+    val headers = LinkedHashMap(pendingHeaders)
+    val gen = loadGen.incrementAndGet()
+    // 不在主线程跟跳。安卓 libmpv 没有 PC 的 libcurl，302 后仍用网关地址拼相对列表。
+    net.execute {
+      val resolved = followPlayUrl(url, headers)
+      main.post {
+        if (!created.get() || gen != loadGen.get()) return@post
+        startLoad(resolved, headers)
+      }
+    }
+  }
+
+  private fun startLoad(url: String, headers: Map<String, String>) {
     try {
       applyPlayHttpHeaders(headers)
       MPVLib.setPropertyDouble("volume", volume)
@@ -972,6 +993,104 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       eof = false
     } catch (e: Throwable) {
       emit(mapOf("event" to "error", "message" to (e.message ?: "load failed")))
+    }
+  }
+
+  /**
+   * PC libmpv 用 libcurl 跟跳，最终地址才是播放列表的基准。
+   * 安卓这套是 FFmpeg，跟完 302 仍拿原始网关去拼 01.m3u8，咪咕就失败。
+   * 这里只换成跳转后的地址再交给播放器，不改协议、不走代理。
+   */
+  private fun followPlayUrl(raw: String, headers: MutableMap<String, String>): String {
+    var current = raw.trim()
+    if (!current.startsWith("http://") && !current.startsWith("https://")) return current
+    val cookies = LinkedHashMap<String, String>()
+    repeat(5) {
+      val conn = (URL(current).openConnection() as HttpURLConnection)
+      try {
+        conn.instanceFollowRedirects = false
+        conn.connectTimeout = 8000
+        conn.readTimeout = 8000
+        conn.requestMethod = "GET"
+        applyProbeHeaders(conn, headers)
+        if (cookies.isNotEmpty()) {
+          conn.setRequestProperty(
+            "Cookie",
+            cookies.entries.joinToString("; ") { "${it.key}=${it.value}" },
+          )
+        }
+        val code = conn.responseCode
+        collectCookies(conn, cookies)
+        if (code in 300..399) {
+          val loc = conn.getHeaderField("Location")?.trim().orEmpty()
+          if (loc.isEmpty()) return finishFollow(raw, current, cookies, headers)
+          val next = resolveRedirect(current, loc)
+          if (!next.startsWith("http://") && !next.startsWith("https://")) {
+            return finishFollow(raw, current, cookies, headers)
+          }
+          if (next == current) return finishFollow(raw, current, cookies, headers)
+          current = next
+          return@repeat
+        }
+        return finishFollow(raw, current, cookies, headers)
+      } catch (e: Throwable) {
+        Log.w(TAG, "follow redirect failed, play original", e)
+        return if (current != raw) finishFollow(raw, current, cookies, headers) else raw
+      } finally {
+        conn.disconnect()
+      }
+    }
+    return finishFollow(raw, current, cookies, headers)
+  }
+
+  private fun finishFollow(
+    raw: String,
+    current: String,
+    cookies: Map<String, String>,
+    headers: MutableMap<String, String>,
+  ): String {
+    if (cookies.isNotEmpty() && headers.keys.none { it.equals("Cookie", ignoreCase = true) }) {
+      headers["Cookie"] = cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    }
+    if (current != raw) Log.i(TAG, "play redirected url")
+    return current
+  }
+
+  private fun applyProbeHeaders(conn: HttpURLConnection, headers: Map<String, String>) {
+    var ua = ""
+    for ((rawKey, rawValue) in headers) {
+      val key = rawKey.trim()
+      val value = rawValue.trim()
+      if (key.isEmpty() || value.isEmpty()) continue
+      if (key.equals("Range", ignoreCase = true) || key.equals("Host", ignoreCase = true)) continue
+      if (key.equals("User-Agent", ignoreCase = true) || key.equals("ua", ignoreCase = true)) {
+        ua = value
+        continue
+      }
+      conn.setRequestProperty(key, value)
+    }
+    if (ua.isEmpty()) ua = FALLBACK_PLAY_UA
+    conn.setRequestProperty("User-Agent", ua)
+  }
+
+  private fun collectCookies(conn: HttpURLConnection, out: MutableMap<String, String>) {
+    val values = conn.headerFields.entries
+      .firstOrNull { it.key != null && it.key.equals("Set-Cookie", ignoreCase = true) }
+      ?.value
+      ?: return
+    for (raw in values) {
+      val pair = raw.substringBefore(";").trim()
+      val eq = pair.indexOf('=')
+      if (eq <= 0) continue
+      out[pair.substring(0, eq).trim()] = pair.substring(eq + 1).trim()
+    }
+  }
+
+  private fun resolveRedirect(current: String, location: String): String {
+    return try {
+      URI(current).resolve(location).toString()
+    } catch (_: Throwable) {
+      location
     }
   }
 
@@ -1000,6 +1119,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.setPropertyString("user-agent", ua)
     MPVLib.setPropertyString("referrer", referer)
     MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
+    // 嵌套列表/分片不走 mpv 的 http-header-fields，要把 UA 写进 lavf，否则子请求是 Lavf 默认头。
+    val lavf = buildString {
+      append("protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data,allowed_extensions=ALL")
+      append(",user_agent=").append(escapeListValue(ua))
+      if (referer.isNotEmpty()) append(",referer=").append(escapeListValue(referer))
+    }
+    try {
+      MPVLib.setPropertyString("demuxer-lavf-o", lavf)
+    } catch (_: Throwable) {
+    }
   }
 
   private fun escapeListValue(value: String): String =
@@ -1033,6 +1162,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private fun destroyPlayer() {
     main.removeCallbacks(tick)
     pendingUrl = null
+    loadGen.incrementAndGet()
     createdAsLive = null
     if (!created.getAndSet(false)) return
     try {

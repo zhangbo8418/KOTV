@@ -11,7 +11,7 @@ env:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
@@ -48,8 +48,20 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;35.0.0" >/dev/null
           sdkmanager --list_installed 2>/dev/null | grep -E 'platforms;android-36|build-tools' || true
 
-      - name: Install patchelf (libmpv DT_NEEDED)
-        run: sudo apt-get update && sudo apt-get install -y patchelf
+      - name: Install Android native build tools
+        run: sudo apt-get update && sudo apt-get install -y patchelf gperf autoconf automake libtool nasm yasm pkg-config meson ninja-build
+
+      - name: Cache Android MPV source build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/android-mpv-src
+            flutter/android/app/src/main/assets/mpv-libs
+            flutter/android/app/src/main/jniLibs/arm64-v8a
+            flutter/android/app/src/main/jniLibs/armeabi-v7a
+          key: android-mpv-src-${{ hashFiles('scripts/build-android-mpv-from-source.sh', 'scripts/ffmpeg-mpegts-skip-image-prefix.py') }}
+          restore-keys: |
+            android-mpv-src-
 
       - name: Cache FongMi Media3 maven + checkout
         uses: actions/cache@v4

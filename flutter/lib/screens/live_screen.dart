@@ -727,15 +727,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
-  bool _livePathLooksLikeHls(String url) {
-    try {
-      final path = Uri.parse(url).path.toLowerCase();
-      return path.contains('.m3u8') || path.endsWith('.m3u');
-    } catch (_) {
-      return false;
-    }
-  }
-
   Future<void> _openLiveUrl(String url, {Map<String, String>? headers, bool live = true}) async {
     try {
       final st = await ref.read(apiProvider).getSettings();
@@ -758,24 +749,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _playerVal = failover.playerVal;
       _decodeMode = failover.decodeMode;
       await _stopInactiveBackends(_backend);
-      var openUrl = url;
-      var openHeaders = headers;
-      // 安卓 MPV 播真 HLS（咪咕）时由引擎代理：分片带头、剥图片壳。凤凰秀假后缀不包。
-      if (kotvIsAndroid() &&
-          kotvEmbedBackend(failover.playerVal) == KotvEmbedBackend.mpv &&
-          _livePathLooksLikeHls(url)) {
-        try {
-          final wrapped = await ref.read(apiProvider).liveWrapHls(url: url, headers: headers);
-          final next = kotvRewriteEngineLocalUrl(
-            '${wrapped['url'] ?? ''}',
-            ref.read(apiProvider).baseUrl,
-          );
-          if (next.isNotEmpty && wrapped['proxied'] == true) {
-            openUrl = next;
-            openHeaders = null;
-          }
-        } catch (_) {}
-      }
+      final openUrl = url;
+      final openHeaders = headers;
       if (mounted) {
         setState(() {
           _playUrl = openUrl;

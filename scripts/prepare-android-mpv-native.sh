@@ -4,12 +4,12 @@
 # 勿再把整套 .so 同时打进 assets 与 lib/（APK 会多约 80MB+）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-chmod +x "$ROOT/scripts/fetch-android-mpv-libs.sh" \
+chmod +x "$ROOT/scripts/build-android-mpv-from-source.sh" \
   "$ROOT/scripts/build-android-libvulkan-stub.sh" \
   "$ROOT/scripts/build-android-kotv-dl.sh"
 
-echo "==> prepare Android MPV native (libmpv → jniLibs; vulkan stub → assets only)"
-"$ROOT/scripts/fetch-android-mpv-libs.sh"
+echo "==> prepare Android MPV native (source FFmpeg+mpv → jniLibs; vulkan stub → assets only)"
+"$ROOT/scripts/build-android-mpv-from-source.sh"
 
 # webhtv 自带的 libc++ 与 libmpv 配套（含 __from_chars_floating_point）。
 # 勿用本机 NDK28 覆盖：缺该符号 → dlopen(libmpv) 失败；NDK29 也不用（无法 exec 外部二进制）。

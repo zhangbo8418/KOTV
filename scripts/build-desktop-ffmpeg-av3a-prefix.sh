@@ -54,15 +54,16 @@ clone_ffmpeg() {
   if [[ -d ffmpeg/.git ]]; then
     git -C ffmpeg fetch --depth 1 origin "$FFMPEG_COMMIT" 2>/dev/null || true
     git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
-    return
+  else
+    git clone --filter=blob:none --depth 1 "$FFMPEG_REPO" ffmpeg
+    git -C ffmpeg fetch --depth 1 origin "$FFMPEG_COMMIT"
+    git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
   fi
-  git clone --filter=blob:none --depth 1 "$FFMPEG_REPO" ffmpeg
-  git -C ffmpeg fetch --depth 1 origin "$FFMPEG_COMMIT"
-  git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
+  python3 "$ROOT/scripts/ffmpeg-mpegts-skip-image-prefix.py" "$BUILD_DIR/ffmpeg"
 }
 
-# v10: TLS + RTSP/RTMP；HTTP/2+3 不走 FFmpeg（FongMi 无 libnghttp2），由 mpv libcurl
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v10"
+# v11: mpegts 跳过图片壳（不再靠 hlsproxy）。HTTP/2+3 仍走 mpv libcurl。
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v11"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
