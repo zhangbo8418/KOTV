@@ -44,7 +44,30 @@ PY
 fi
 
 cd "$ROOT/flutter"
-flutter pub get "$@"
+# pubspec.lock 里的 hosted.url 会盖过 PUB_HOSTED_URL；CI/回退官方源时改写。
+if [[ "${PUB_HOSTED_URL:-}" == "https://pub.dev" && -f pubspec.lock ]]; then
+  if grep -q 'pub.flutter-io.cn' pubspec.lock 2>/dev/null; then
+    echo "==> rewrite pubspec.lock hosted url → pub.dev"
+    tmp="$(mktemp)"
+    sed 's|https://pub.flutter-io.cn|https://pub.dev|g' pubspec.lock >"$tmp"
+    mv "$tmp" pubspec.lock
+  fi
+fi
+if ! flutter pub get "$@"; then
+  if [[ "${PUB_HOSTED_URL:-}" == *"flutter-io.cn"* ]]; then
+    echo "WARN: pub get failed on $PUB_HOSTED_URL; retry pub.dev" >&2
+    export PUB_HOSTED_URL=https://pub.dev
+    export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.googleapis.com}"
+    if [[ -f pubspec.lock ]] && grep -q 'pub.flutter-io.cn' pubspec.lock 2>/dev/null; then
+      tmp="$(mktemp)"
+      sed 's|https://pub.flutter-io.cn|https://pub.dev|g' pubspec.lock >"$tmp"
+      mv "$tmp" pubspec.lock
+    fi
+    flutter pub get "$@"
+  else
+    exit 1
+  fi
+fi
 if [[ "$win7" != "1" ]]; then
   # 避免 committed pubspec.lock 把 any 钉在旧版；已写成精确版本时这步是 no-op。
   flutter pub upgrade fvp

@@ -6,8 +6,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=kotv-release-name.sh
 source "$ROOT/scripts/kotv-release-name.sh"
 export PATH="${HOME}/flutter/bin:${PATH}"
-export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.flutter-io.cn}"
-export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flutter-io.cn}"
+# 本地默认国内镜像；GitHub Actions 用官方源（镜像偶发 content-hash 失败）。
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.dev}"
+  export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.googleapis.com}"
+else
+  export PUB_HOSTED_URL="${PUB_HOSTED_URL:-https://pub.flutter-io.cn}"
+  export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flutter-io.cn}"
+fi
 
 ARCH="$(uname -m)"
 # CI 可钉死：KOTV_MACOS_FORCE_ARCH=x86_64|arm64（避免 Rosetta 下 uname 偶发仍报 arm64）
