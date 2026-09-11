@@ -1272,7 +1272,6 @@ build_mpv_linux() {
     -Duchardet=enabled \
     -Dlibarchive=enabled \
     -Drubberband=enabled \
-    -Dlibass=enabled \
     -Dcplugins=enabled \
     -Ddvbin=enabled \
     -Dgl=enabled \
@@ -1342,7 +1341,6 @@ build_mpv_macos() {
     -Duchardet=enabled \
     -Dlibarchive=enabled \
     -Drubberband=enabled \
-    -Dlibass=enabled \
     -Dcplugins=enabled \
     -Dgl=enabled \
     -Dplain-gl=enabled \
@@ -1519,7 +1517,6 @@ EOF
     -Duchardet=enabled \
     -Dlibarchive=enabled \
     -Drubberband=enabled \
-    -Dlibass=enabled \
     -Dcplugins=enabled \
       "${mpv_extra[@]}" \
       -Dlibavdevice=disabled \
@@ -1540,7 +1537,6 @@ EOF
     -Duchardet=enabled \
     -Dlibarchive=enabled \
     -Drubberband=enabled \
-    -Dlibass=enabled \
     -Dcplugins=enabled \
       -Dgl=enabled \
       -Dplain-gl=enabled \

@@ -19,8 +19,13 @@ sync_webhtv_libcxx_to_jni() {
   local dest_asset="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi/libc++_shared.so"
   local dest_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libc++_shared.so"
   mkdir -p "$(dirname "$dest_jni")"
+  # Gradle :prepareKotvMpvNative 会再跑一遍：此时 assets 已 strip，套件只在 jniLibs。
+  if [[ -s "$dest_jni" ]] && grep -a -q 'from_chars_floating' "$dest_jni" 2>/dev/null; then
+    echo "  ok $abi: libc++_shared.so already in jniLibs ($(wc -c <"$dest_jni" | tr -d ' ') bytes)"
+    return 0
+  fi
   if [[ ! -s "$dest_asset" ]]; then
-    echo "ERROR: missing $dest_asset (run fetch-android-mpv-libs first)" >&2
+    echo "ERROR: missing $dest_asset (and jniLibs has no valid libc++; re-run source build)" >&2
     return 1
   fi
   if ! grep -a -q 'from_chars_floating' "$dest_asset" 2>/dev/null; then

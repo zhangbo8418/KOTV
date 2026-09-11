@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-iso-libs-v2"
+STAMP="$PREFIX/.kotv-iso-libs-v3"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 DVDREAD_VER=7.0.1
@@ -22,7 +22,6 @@ need curl
 need tar
 need meson
 need ninja
-need pkg-config
 
 is_windows() {
   case "$(uname -s 2>/dev/null)" in
@@ -34,10 +33,13 @@ is_windows() {
 fetch() {
   local url="$1" dest="$2" sha="$3"
   if [[ -f "$dest" ]]; then
-    return
+    return 0
   fi
   mkdir -p "$(dirname "$dest")"
-  curl -fL --retry 5 --retry-delay 2 -o "$dest.partial" "$url"
+  if ! curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$dest.partial" "$url"; then
+    rm -f "$dest.partial"
+    return 1
+  fi
   mv "$dest.partial" "$dest"
   if command -v shasum >/dev/null; then
     echo "$sha  $dest" | shasum -a 256 -c -
@@ -46,10 +48,64 @@ fetch() {
   fi
 }
 
-export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+# Windows：meson 不会跑无扩展名的 bash pkg-config，必须用 .cmd + kotv-pkg-config.py。
+MESON_NATIVE=()
+ensure_pkg_config() {
+  mkdir -p "$PREFIX/lib/pkgconfig"
+  if is_windows; then
+    local pkg_bin="$BUILD_DIR/bin" pc_win pkg_win
+    mkdir -p "$pkg_bin"
+    cp -f "$ROOT/scripts/kotv-pkg-config.py" "$pkg_bin/kotv-pkg-config.py"
+    cat >"$pkg_bin/pkg-config" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "$here/kotv-pkg-config.py" "$@"
 fi
+exec python "$here/kotv-pkg-config.py" "$@"
+EOF
+    chmod +x "$pkg_bin/pkg-config"
+    cat >"$pkg_bin/pkg-config.cmd" <<'EOF'
+@echo off
+setlocal
+set "HERE=%~dp0"
+python "%HERE%kotv-pkg-config.py" %*
+exit /b %ERRORLEVEL%
+EOF
+    export PATH="$pkg_bin:$PATH"
+    export PKG_CONFIG="$pkg_bin/pkg-config"
+    if command -v cygpath >/dev/null 2>&1; then
+      export PKG_CONFIG_PATH="$(cygpath -m "$PREFIX/lib/pkgconfig")"
+      export PKG_CONFIG_LIBDIR="$(cygpath -m "$PREFIX/lib/pkgconfig")"
+      pc_win="$(cygpath -m "$pkg_bin/pkg-config.cmd")"
+      pkg_win="$(cygpath -m "$PREFIX/lib/pkgconfig")"
+    else
+      export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+      export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+      pc_win="$pkg_bin/pkg-config.cmd"
+      pkg_win="$PREFIX/lib/pkgconfig"
+    fi
+    cat >"$BUILD_DIR/meson-native-iso.ini" <<EOF
+[binaries]
+pkg-config = '$pc_win'
+pkgconfig = '$pc_win'
+
+[built-in options]
+pkg_config_path = '$pkg_win'
+EOF
+    MESON_NATIVE=(--native-file "$BUILD_DIR/meson-native-iso.ini")
+    echo "ok ISO pkg-config → $pc_win"
+  else
+    need pkg-config
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+      export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+    fi
+  fi
+}
+
+ensure_pkg_config
 
 if [[ -f "$STAMP" && -f "$PREFIX/lib/pkgconfig/libbluray.pc" && -f "$PREFIX/lib/pkgconfig/dvdnav.pc" && -f "$PREFIX/lib/pkgconfig/dvdread.pc" ]]; then
   echo "ok cached ISO libs (libbluray $BLURAY_VER, dvdnav $DVDNAV_VER)"
@@ -72,10 +128,12 @@ build_meson_lib() {
   mkdir -p "$BUILD_DIR/$name"
   tar -xf "$tar" -C "$BUILD_DIR/$name" --strip-components=1
   meson setup "$BUILD_DIR/${name}-build" "$BUILD_DIR/$name" \
+    "${MESON_NATIVE[@]}" \
     --prefix="$PREFIX" \
     --libdir=lib \
     --buildtype=release \
     -Ddefault_library=static \
+    --pkg-config-path="$PREFIX/lib/pkgconfig" \
     "${extra_cflags[@]}" \
     "$@"
   meson compile -C "$BUILD_DIR/${name}-build" -j "$JOBS"
@@ -95,6 +153,13 @@ if is_windows; then
   dvdread_opts+=(-Ddlfcn=builtin)
 fi
 build_meson_lib dvdread "$src/libdvdread-${DVDREAD_VER}.tar.xz" "${dvdread_opts[@]}"
+# dvdnav 依赖已装好的 dvdread.pc（Windows 必须走上面的 .cmd pkg-config）。
+if ! { [[ -n "${PKG_CONFIG:-}" ]] && "$PKG_CONFIG" --exists dvdread; } \
+  && ! pkg-config --exists dvdread 2>/dev/null; then
+  echo "ERROR: dvdread.pc not visible after install" >&2
+  ls -la "$PREFIX/lib/pkgconfig" >&2 || true
+  exit 1
+fi
 build_meson_lib dvdnav "$src/libdvdnav-${DVDNAV_VER}.tar.xz" -Denable_docs=false -Denable_examples=false
 build_meson_lib libbluray "$src/libbluray-${BLURAY_VER}.tar.xz" \
   -Denable_tools=false \
@@ -103,8 +168,15 @@ build_meson_lib libbluray "$src/libbluray-${BLURAY_VER}.tar.xz" \
   -Dfreetype=disabled \
   -Dlibxml2=disabled
 
-pkg-config --exists dvdread
-pkg-config --exists dvdnav
-pkg-config --exists libbluray
+pc() {
+  if [[ -n "${PKG_CONFIG:-}" && -x "${PKG_CONFIG:-}" ]]; then
+    "$PKG_CONFIG" "$@"
+  else
+    pkg-config "$@"
+  fi
+}
+pc --exists dvdread
+pc --exists dvdnav
+pc --exists libbluray
 echo "iso-libs ${DVDREAD_VER}/${DVDNAV_VER}/${BLURAY_VER}" >"$STAMP"
-echo "ok ISO libs: dvdread $(pkg-config --modversion dvdread) dvdnav $(pkg-config --modversion dvdnav) libbluray $(pkg-config --modversion libbluray)"
+echo "ok ISO libs: dvdread $(pc --modversion dvdread) dvdnav $(pc --modversion dvdnav) libbluray $(pc --modversion libbluray)"
