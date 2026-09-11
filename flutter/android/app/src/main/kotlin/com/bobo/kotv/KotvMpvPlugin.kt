@@ -634,8 +634,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       applyGpuApiOptions()
       // TV boxes often fail scraped HTTPS CA checks; disable verify for now.
       MPVLib.setOptionString("tls-verify", "no")
-      // https 网关 302 到 http 时，默认白名单不含 http，嵌套列表也会被拒。
-      val lavfNet = "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data,allowed_extensions=ALL"
+      // https→http、以及 HLS 分片伪装成 .png/.jpg：须放行扩展名。
+      // FFmpeg 9 默认 extension_picky=1，只认常见后缀；点播常首片 .ts、后面 .png（内容仍是 TS）。
+      val lavfNet =
+        "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data," +
+          "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0"
       MPVLib.setOptionString("demuxer-lavf-o", lavfNet)
       MPVLib.setOptionString(
         "stream-lavf-o",
@@ -1121,7 +1124,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
     // 嵌套列表/分片不走 mpv 的 http-header-fields，要把 UA 写进 lavf，否则子请求是 Lavf 默认头。
     val lavf = buildString {
-      append("protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data,allowed_extensions=ALL")
+      append(
+        "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data," +
+          "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0",
+      )
       append(",user_agent=").append(escapeListValue(ua))
       if (referer.isNotEmpty()) append(",referer=").append(escapeListValue(referer))
     }

@@ -59,7 +59,7 @@ jobs:
             flutter/android/app/src/main/assets/mpv-libs
             flutter/android/app/src/main/jniLibs/arm64-v8a
             flutter/android/app/src/main/jniLibs/armeabi-v7a
-          key: android-mpv-src-${{ hashFiles('scripts/build-android-mpv-from-source.sh', 'scripts/ffmpeg-mpegts-skip-image-prefix.py') }}
+          key: android-mpv-src-${{ hashFiles('scripts/build-android-mpv-from-source.sh') }}
           restore-keys: |
             android-mpv-src-
 

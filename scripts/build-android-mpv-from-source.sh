@@ -1,25 +1,21 @@
 #!/usr/bin/env bash
-# 安卓 libmpv / FFmpeg 从源码编进 assets/mpv-libs，不再下载 webhtv 预编译包。
+# 安卓 libmpv / FFmpeg / libplayer JNI 从源码编。
+# webhtv 只提供交叉编译脚本、补丁与 JNI 源码；FFmpeg 跟 FongMi release-9.0-fongmi tip（RELEASE=9.0.1）。
+# CI 不下载预编译 .so，也不提交 .so。
 #
-# 现有预编译已经开了这些功能（libmpv 里的 enabled features）：
-#   aaudio android android-media-ndk audiotrack egl-android ffmpeg gl
+# 现网功能：aaudio android android-media-ndk audiotrack egl-android ffmpeg gl
 #   iconv libarchive libass libavdevice libbluray dvdnav libcurl libplacebo lua
-#   opensles rubberband uchardet vulkan
-# 以及 curl 8.21.0（nghttp2，HTTP/2；二进制里有 HTTP/3 相关路径）。
-# PC 自编多出来、这份也要有的：同一 FongMi mpv 提交、libcurl、Vulkan、lua、
-# FFmpeg 网络（http/https/rtsp/rtmp）+ AV3A。libavdevice 安卓预编译是开的，保留。
-# 另外打上 mpegts 图片壳探测，对齐 Exo，不再用 Go 代理剥切片。
-#
-# 构建器与锁定版本来自 webhtv（与现网 .so 同一套功能）。
-# CI 自己编 FFmpeg、libmpv 和 libplayer JNI，不下载预编译包，也不提交 .so。
+#   opensles rubberband uchardet vulkan + AV3A。
+# 伪装成 .png/.jpg 的 HLS 分片由播放器 demuxer-lavf-o（extension_picky=0）处理。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PIN="${KOTV_WEBHTV_MPV_PIN:-784b90420d646eb6c7ddcc63ad622a92c65b02b4}"
+WEBHTV_REF="${KOTV_WEBHTV_MPV_PIN:-${KOTV_WEBHTV_MPV_REF:-main}}"
+FFMPEG_REPO="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
+FFMPEG_REF="${KOTV_FFMPEG_REF:-release-9.0-fongmi}"
 WORK="${KOTV_ANDROID_MPV_SRC:-$ROOT/.build/android-mpv-src}"
 ASSET="$ROOT/flutter/android/app/src/main/assets/mpv-libs"
 STAMP="$ASSET/.kotv-source-build"
-PATCH="$ROOT/scripts/ffmpeg-mpegts-skip-image-prefix.py"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
@@ -27,12 +23,19 @@ for cmd in git curl python3 pkg-config perl cmake gperf make; do
   need "$cmd"
 done
 
-patch_hash="$(python3 - "$PATCH" <<'PY'
-import hashlib, pathlib, sys
-print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest()[:16])
-PY
-)"
-want="webhtv=${PIN} patch=${patch_hash}"
+resolve_ffmpeg_sha() {
+  if [[ -n "${KOTV_FFMPEG_COMMIT:-}" ]]; then
+    printf '%s\n' "$KOTV_FFMPEG_COMMIT"
+    return
+  fi
+  local sha
+  sha="$(git ls-remote "$FFMPEG_REPO" "refs/heads/${FFMPEG_REF}" | awk '{print $1; exit}')"
+  [[ -n "$sha" ]] || { echo "ERROR: cannot resolve $FFMPEG_REPO $FFMPEG_REF" >&2; exit 1; }
+  printf '%s\n' "$sha"
+}
+
+FFMPEG_COMMIT="$(resolve_ffmpeg_sha)"
+want="webhtv=${WEBHTV_REF} ffmpeg=${FFMPEG_COMMIT:0:12}"
 jni="$ROOT/flutter/android/app/src/main/jniLibs"
 has_suite() {
   local abi="$1" dir="$2"
@@ -47,30 +50,30 @@ if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$want" ]] && has_suite arm64-v8a "$jn
   exit 0
 fi
 
-echo "==> clone webhtv $PIN (build scripts + patches only used as the Android native builder)"
+echo "==> clone webhtv $WEBHTV_REF (builder only; FFmpeg → ${FFMPEG_REF} ${FFMPEG_COMMIT:0:12})"
 mkdir -p "$WORK"
 if [[ ! -d "$WORK/webhtv/.git" ]]; then
   git clone --filter=blob:none --depth 1 https://github.com/fish2018/webhtv.git "$WORK/webhtv"
 fi
-git -C "$WORK/webhtv" fetch --depth 1 origin "$PIN"
-git -C "$WORK/webhtv" checkout -q "$PIN"
+git -C "$WORK/webhtv" fetch --depth 1 origin "$WEBHTV_REF"
+git -C "$WORK/webhtv" checkout -q FETCH_HEAD 2>/dev/null \
+  || git -C "$WORK/webhtv" checkout -q "$WEBHTV_REF"
 
-cp -f "$PATCH" "$WORK/webhtv/third_party/patches/ffmpeg-mpegts-skip-image-prefix.py"
-build_sh="$WORK/webhtv/scripts/build_mpv_native.sh"
-if ! grep -q 'ffmpeg-mpegts-skip-image-prefix.py' "$build_sh"; then
-  python3 - "$build_sh" <<'PY'
-import pathlib, sys
-p = pathlib.Path(sys.argv[1])
-text = p.read_text(encoding="utf-8")
-needle = 'git -C "$deps/ffmpeg" apply "$FFMPEG_AUDIO_MEDIACODEC_HARDWARE_PATCH"\n'
-insert = needle + '  python3 "$ROOT/third_party/patches/ffmpeg-mpegts-skip-image-prefix.py" "$deps/ffmpeg"\n'
-if needle not in text:
-    raise SystemExit("webhtv ffmpeg patch hook not found")
-p.write_text(text.replace(needle, insert, 1), encoding="utf-8")
-print("ok hooked mpegts probe patch into webhtv build script")
+# 覆盖 webhtv 锁里的 FFmpeg：跟 FongMi 9.0.1 分支 tip，不跟它仓库里钉死的旧提交。
+python3 - "$WORK/webhtv/third_party/mpv-native-lock.json" "$FFMPEG_REPO" "$FFMPEG_COMMIT" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+ff = data.setdefault("sources", {}).setdefault("ffmpeg", {})
+ff["repo"] = sys.argv[2]
+ff["commit"] = sys.argv[3]
+ff["version"] = "9.0.1-fongmi-tip"
+path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+print(f"ok lock ffmpeg → {sys.argv[3][:12]}")
 PY
-fi
-chmod +x "$build_sh" "$PATCH"
+
+build_sh="$WORK/webhtv/scripts/build_mpv_native.sh"
+chmod +x "$build_sh"
 
 # webhtv 锁的是 NDK r29。CI 给 kotv_dl 用的 r28c 不能拿来编这套。
 ensure_ndk29() {

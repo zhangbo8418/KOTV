@@ -7,9 +7,24 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 FFMPEG_REPO="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
-FFMPEG_COMMIT="${KOTV_FFMPEG_COMMIT:-04482c8d13ac27b2a9fe93f5d388929eef8af5f4}"
+# 跟 FongMi 的 FFmpeg 9 分支 tip；要钉死某次提交再设 KOTV_FFMPEG_COMMIT。
+FFMPEG_REF="${KOTV_FFMPEG_REF:-release-9.0-fongmi}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 PKG_BIN="$BUILD_DIR/bin"
+
+resolve_ffmpeg_sha() {
+  if [[ -n "${KOTV_FFMPEG_COMMIT:-}" ]]; then
+    printf '%s\n' "$KOTV_FFMPEG_COMMIT"
+    return
+  fi
+  local sha
+  sha="$(git ls-remote "$FFMPEG_REPO" "refs/heads/${FFMPEG_REF}" | awk '{print $1; exit}')"
+  [[ -n "$sha" ]] || { echo "ERROR: cannot resolve $FFMPEG_REPO $FFMPEG_REF" >&2; exit 1; }
+  printf '%s\n' "$sha"
+}
+
+FFMPEG_COMMIT="$(resolve_ffmpeg_sha)"
+echo "ok FFmpeg ${FFMPEG_REF} → ${FFMPEG_COMMIT:0:12}"
 
 kotv_is_windows_build() {
   case "$(uname -s 2>/dev/null)" in
@@ -51,19 +66,24 @@ mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 clone_ffmpeg() {
-  if [[ -d ffmpeg/.git ]]; then
-    git -C ffmpeg fetch --depth 1 origin "$FFMPEG_COMMIT" 2>/dev/null || true
-    git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
-  else
-    git clone --filter=blob:none --depth 1 "$FFMPEG_REPO" ffmpeg
+  mkdir -p "$BUILD_DIR"
+  if [[ ! -d ffmpeg/.git ]]; then
+    git clone --filter=blob:none "$FFMPEG_REPO" ffmpeg
+  fi
+  git -C ffmpeg fetch --depth 1 origin "$FFMPEG_COMMIT" \
+    || git -C ffmpeg fetch --depth 1 origin "$FFMPEG_REF"
+  git -C ffmpeg checkout -q "$FFMPEG_COMMIT" \
+    || git -C ffmpeg checkout -q FETCH_HEAD
+  # 确保落到 resolve 出来的 tip（分支 tip 可能比 FETCH_HEAD 更新）。
+  if [[ "$(git -C ffmpeg rev-parse HEAD)" != "$FFMPEG_COMMIT" ]]; then
     git -C ffmpeg fetch --depth 1 origin "$FFMPEG_COMMIT"
     git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
   fi
-  python3 "$ROOT/scripts/ffmpeg-mpegts-skip-image-prefix.py" "$BUILD_DIR/ffmpeg"
 }
 
-# v11: mpegts 跳过图片壳（不再靠 hlsproxy）。HTTP/2+3 仍走 mpv libcurl。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v11"
+# v13: 跟 FongMi release-9.0-fongmi tip（RELEASE=9.0.1）。HTTP/2+3 仍走 mpv libcurl。
+# 伪装扩展名分片靠播放器 extension_picky=0，不再打 mpegts 文件头补丁。
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v13-${FFMPEG_COMMIT:0:12}"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1

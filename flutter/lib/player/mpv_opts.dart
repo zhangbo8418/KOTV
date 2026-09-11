@@ -134,6 +134,15 @@ class KotvMpvOpts {
         await set('hwdec', hwdecValue());
       } catch (_) {}
 
+      // HLS 分片常伪装成 .png/.jpg；FFmpeg 9 默认 extension_picky 会跳过，点播只剩几秒。
+      try {
+        await set(
+          'demuxer-lavf-o',
+          r'protocol_whitelist=file\,http\,https\,tcp\,tls\,crypto\,data,'
+          r'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0',
+        );
+      } catch (_) {}
+
       // 桌面 media_kit：gpu-api 走 bundled libmpv（Vulkan 等）。
       if (!kotvIsAndroid()) {
         try {
