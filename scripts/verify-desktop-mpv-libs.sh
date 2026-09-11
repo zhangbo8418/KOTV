@@ -59,8 +59,11 @@ check_android_parity() {
   local name="$2"
   [[ -f "$f" ]] || return
   local missing=""
-  # uchardet：charset_conv.c
-  has_str "$f" "libuchardet detected charset" || missing="$missing uchardet"
+  # uchardet：静态链进 libmpv 的符号（verbose 格式串在 mac 上偶发扫不到）
+  if ! has_str "$f" "uchardet_new" && ! has_str "$f" "uchardet_handle_data" \
+    && ! has_str "$f" "libuchardet detected"; then
+    missing="$missing uchardet"
+  fi
   # libarchive：stream_libarchive.c
   has_str "$f" "libarchive" || missing="$missing libarchive"
   # rubberband：af_rubberband.c

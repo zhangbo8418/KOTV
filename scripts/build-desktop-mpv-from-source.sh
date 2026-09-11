@@ -363,7 +363,7 @@ ensure_macos_vulkan() {
   cd "$BUILD_DIR"
 
   # 1) headers
-  local vh_tag="${KOTV_VULKAN_HEADERS_TAG:-vulkan-sdk-1.3.296.0}"
+  local vh_tag="${KOTV_VULKAN_HEADERS_TAG:-vulkan-sdk-1.4.321.0}"
   if [[ ! -d vulkan-headers/.git ]]; then
     git clone --depth 1 --branch "$vh_tag" https://github.com/KhronosGroup/Vulkan-Headers.git vulkan-headers \
       || git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git vulkan-headers
@@ -373,7 +373,7 @@ ensure_macos_vulkan() {
   cmake --install vulkan-headers/build
 
   # 2) loader（只链进 PREFIX，不碰 Homebrew）
-  local vl_tag="${KOTV_VULKAN_LOADER_TAG:-vulkan-sdk-1.3.296.0}"
+  local vl_tag="${KOTV_VULKAN_LOADER_TAG:-vulkan-sdk-1.4.321.0}"
   if [[ ! -d vulkan-loader/.git ]]; then
     git clone --depth 1 --branch "$vl_tag" https://github.com/KhronosGroup/Vulkan-Loader.git vulkan-loader \
       || git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Loader.git vulkan-loader
@@ -445,11 +445,11 @@ ensure_macos_vulkan() {
   "file_format_version": "1.0.0",
   "ICD": {
     "library_path": "libMoltenVK.dylib",
-    "api_version": "1.3.0"
+    "api_version": "1.4.0"
   }
 }
 EOF
-    echo "  + MoltenVK → $PREFIX/lib/libMoltenVK.dylib"
+    echo "  + MoltenVK -> $PREFIX/lib/libMoltenVK.dylib"
   else
     echo "WARN: MoltenVK dylib not found; Vulkan build will link loader only (runtime ICD may be missing)" >&2
   fi
@@ -462,7 +462,7 @@ includedir=\${prefix}/include
 
 Name: Vulkan-Loader
 Description: Vulkan Loader
-Version: 1.3.296
+Version: 1.4.321
 Libs: -L\${libdir} -lvulkan
 Cflags: -I\${includedir}
 EOF
@@ -1124,7 +1124,7 @@ ensure_windows_d3d11_shader_deps() {
   w7cflags="$(kotv_windows_mpv_cflags)"
 
   if [[ "$need_spirv" == 1 ]]; then
-    local tag="${KOTV_SPIRV_CROSS_TAG:-vulkan-sdk-1.3.296.0}"
+    local tag="${KOTV_SPIRV_CROSS_TAG:-vulkan-sdk-1.4.321.0}"
     echo "==> build SPIRV-Cross $tag (shared, Win D3D11)"
     cd "$BUILD_DIR"
     if [[ ! -d SPIRV-Cross/.git ]]; then
@@ -1222,12 +1222,12 @@ libdir=$lib
 
 Name: Vulkan-Loader
 Description: Vulkan Loader
-Version: 1.3.0
+Version: 1.4.0
 Libs: -L\${libdir} -lvulkan-1
 Cflags: -I\${includedir}
 EOF
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-    echo "ok vulkan.pc → $PREFIX/lib/pkgconfig/vulkan.pc"
+    echo "ok vulkan.pc -> $PREFIX/lib/pkgconfig/vulkan.pc"
   fi
 }
 

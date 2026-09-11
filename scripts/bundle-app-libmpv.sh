@@ -465,7 +465,7 @@ case "$(uname -s)" in
   "file_format_version": "1.0.0",
   "ICD": {
     "library_path": "$FW/libMoltenVK.dylib",
-    "api_version": "1.3.0"
+    "api_version": "1.4.0"
   }
 }
 EOF

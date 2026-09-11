@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-parity-libs-v2"
+STAMP="$PREFIX/.kotv-parity-libs-v3"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 ICONV_VER=1.19
@@ -81,7 +81,7 @@ if is_windows; then
   cmake_gen=(MinGW Makefiles)
 fi
 
-echo "==> parity libs → $PREFIX"
+echo "==> parity libs -> $PREFIX"
 if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   fetch "https://ftp.gnu.org/pub/gnu/libiconv/libiconv-${ICONV_VER}.tar.gz" \
     "$src/libiconv-${ICONV_VER}.tar.gz" "$ICONV_SHA"
@@ -90,7 +90,23 @@ if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   tar -xf "$src/libiconv-${ICONV_VER}.tar.gz" -C "$BUILD_DIR/libiconv" --strip-components=1
   (
     cd "$BUILD_DIR/libiconv"
+    # Git Bash 的 sh 在「C:/Program Files/...」路径下，Makefile 反引号调用
+    # windres-options 会被空格拆坏，导致 libiconv.rc 语法错。静态库不需要 .rc。
+    if is_windows; then
+      export CONFIG_SHELL=/usr/bin/sh
+      export SHELL=/usr/bin/sh
+    fi
     ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-nls
+    if is_windows; then
+      # 去掉 Windows 版本资源目标，避免 windres 路径空格问题
+      find . -name Makefile -type f -print0 | while IFS= read -r -d '' mf; do
+        sed -i \
+          -e 's/[[:space:]]*libiconv\.res\.lo//g' \
+          -e 's/[[:space:]]*iconv\.res\.lo//g' \
+          -e 's/[[:space:]]*libicrt\.res\.lo//g' \
+          "$mf"
+      done
+    fi
     make -j"$JOBS"
     make install
   )
