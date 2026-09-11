@@ -46,22 +46,42 @@ check_no_avdevice() {
   echo "ok $name: no libavdevice / AVFFrameReceiver"
 }
 
+# libmpv 构建为 -Dcplayer=false；FULLCONFIG「List of enabled features: …」只在
+# player/main.c 的 verbose 路径里用到。macOS 链接可能 dead-strip 掉该串，且 BSD
+# grep 对超长行（FULLCONFIG）也不稳定。因此用实际编进 libmpv 的符号/字面量检测。
+has_str() {
+  local f="$1"
+  local pat="$2"
+  # -a：扫整个文件（Mach-O/PE 都需要）；不支持时回退
+  if strings -a "$f" 2>/dev/null | grep -Fq -- "$pat"; then
+    return 0
+  fi
+  strings "$f" 2>/dev/null | grep -Fq -- "$pat"
+}
+
 check_android_parity() {
   local f="$1"
   local name="$2"
   [[ -f "$f" ]] || return
-  local feat
-  feat="$(strings "$f" 2>/dev/null | grep -E 'List of enabled features:' | head -1 || true)"
   local missing=""
-  local key
-  for key in uchardet libarchive rubberband libass iconv cplugins; do
-    if ! grep -Eq "(^| )${key}( |$)" <<<"$feat"; then
-      missing="$missing $key"
-    fi
-  done
+  # uchardet：charset_conv.c
+  has_str "$f" "libuchardet detected charset" || missing="$missing uchardet"
+  # libarchive：stream_libarchive.c
+  has_str "$f" "libarchive" || missing="$missing libarchive"
+  # rubberband：af_rubberband.c
+  has_str "$f" "librubberband initialization failed" || missing="$missing rubberband"
+  # libass：常见符号/串（静态链或动态依赖名）
+  if ! has_str "$f" "ass_library_init" && ! has_str "$f" "libass"; then
+    missing="$missing libass"
+  fi
+  # iconv：charset_conv.c
+  has_str "$f" "not supported by iconv" || has_str "$f" "Error opening iconv" \
+    || missing="$missing iconv"
+  # cplugins：scripting.c
+  has_str "$f" "mpv_open_cplugin" || has_str "$f" "cplugin" \
+    || missing="$missing cplugins"
   if [[ -n "$missing" ]]; then
     echo "ERROR: $name missing portable features:$missing" >&2
-    echo "  features: $feat" >&2
     fail=1
     return
   fi
@@ -72,12 +92,21 @@ check_iso() {
   local f="$1"
   local name="$2"
   [[ -f "$f" ]] || return
-  if strings "$f" 2>/dev/null | grep -Eiq 'List of enabled features:.*dvdnav' \
-    && strings "$f" 2>/dev/null | grep -Eiq 'List of enabled features:.*libbluray'; then
+  local ok_dvd=0 ok_bd=0
+  # stream_dvdnav.c 编入后必有 ifo_dvdnav / dvdnav_open（静态链 libdvdnav 时亦有）
+  if has_str "$f" "dvdnav_open" || has_str "$f" "ifo_dvdnav"; then
+    ok_dvd=1
+  fi
+  # stream_bluray.c
+  if has_str "$f" "bd_open" || has_str "$f" "bdmv/bluray"; then
+    ok_bd=1
+  fi
+  if [[ "$ok_dvd" == 1 && "$ok_bd" == 1 ]]; then
     echo "ok $name: ISO (dvdnav + libbluray)"
     return
   fi
   echo "ERROR: $name lacks DVD/Blu-ray ISO (rebuild with -Ddvdnav=enabled -Dlibbluray=enabled)" >&2
+  echo "  markers: dvd=$ok_dvd bluray=$ok_bd" >&2
   fail=1
 }
 
@@ -85,7 +114,7 @@ check_libcurl() {
   local f="$1"
   local name="$2"
   [[ -f "$f" ]] || return
-  if strings "$f" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
+  if has_str "$f" "curl_easy_init" || has_str "$f" "libcurl" || has_str "$f" "mpv_curl"; then
     echo "ok $name: libcurl enabled"
   elif command -v otool >/dev/null 2>&1 && otool -L "$f" 2>/dev/null | grep -Eiq 'libcurl'; then
     echo "ok $name: libcurl linked (otool)"
