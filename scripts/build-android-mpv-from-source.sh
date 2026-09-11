@@ -75,6 +75,38 @@ PY
 build_sh="$WORK/webhtv/scripts/build_mpv_native.sh"
 chmod +x "$build_sh"
 
+# webhtv 对 mpv 先 depth=1 再 deepen，CI 上会撞 "shallow file has changed since we read it"。
+python3 - "$build_sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''  if [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_DESCRIBE_TAG" HEAD 2>/dev/null || true)" != "v$MPV_VERSION" ]; then
+    # Fetch the upstream tag first. A depth-1 tag fetch marks the tag commit as
+    # a shallow boundary; expanding the selected FongMi commit afterwards
+    # reconnects that commit and keeps git-describe deterministic.
+    git -C "$deps/mpv" fetch --depth=1 "$MPV_TAG_REPO" \\
+      "refs/tags/$MPV_DESCRIBE_TAG:refs/tags/$MPV_DESCRIBE_TAG"
+    git -C "$deps/mpv" fetch --depth="$MPV_HISTORY_DEPTH" origin "$MPV_COMMIT"
+  fi'''
+new = '''  if [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_DESCRIBE_TAG" HEAD 2>/dev/null || true)" != "v$MPV_VERSION" ]; then
+    # Sequential shallow fetches race on .git/shallow ("shallow file has changed").
+    # Deepen ancestry first, then fetch the upstream release tag without depth=1.
+    if [ -f "$deps/mpv/.git/shallow" ]; then
+      git -C "$deps/mpv" fetch --deepen="$MPV_HISTORY_DEPTH" origin || \\
+        git -C "$deps/mpv" fetch --unshallow origin || true
+    fi
+    git -C "$deps/mpv" fetch --no-tags "$MPV_TAG_REPO" \\
+      "refs/tags/$MPV_DESCRIBE_TAG:refs/tags/$MPV_DESCRIBE_TAG"
+    git -C "$deps/mpv" fetch origin "$MPV_COMMIT" || true
+  fi'''
+if old not in text:
+    raise SystemExit("ERROR: webhtv mpv shallow-fetch block changed; update KOTV patch")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+print("ok patched webhtv mpv shallow fetch")
+PY
+
 # webhtv 锁的是 NDK r29。CI 给 kotv_dl 用的 r28c 不能拿来编这套。
 ensure_ndk29() {
   local want="29.0.14206865"
