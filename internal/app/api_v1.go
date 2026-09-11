@@ -16,6 +16,7 @@ import (
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/hlsproxy"
 	"github.com/bobo/KOTV/internal/live"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
@@ -1462,6 +1463,20 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		"lines":   len(ch.URLs),
 		"error":   errString(err),
 	}, nil
+}
+
+// APILiveHLSWrap 安卓 MPV 真 HLS（咪咕等）改成本地代理，由引擎带头发分片并剥图片壳。
+// 假 m3u8（query 才有后缀）原样返回，避免凤凰秀被误判。
+func (a *App) APILiveHLSWrap(raw string, headers map[string]string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || hlsproxy.IsProxyURL(raw) || !hlsproxy.LikelyHLS(raw, "") {
+		return map[string]any{"ok": true, "url": raw, "proxied": false}
+	}
+	return map[string]any{
+		"ok":      true,
+		"url":     playproxy.PublicizeURL(hlsproxy.Open(raw, headers)),
+		"proxied": true,
+	}
 }
 
 func (a *App) APILiveUnlock(group int, password string) error {

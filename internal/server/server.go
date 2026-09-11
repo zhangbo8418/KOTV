@@ -18,6 +18,7 @@ import (
 
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/hlsproxy"
 	"github.com/bobo/KOTV/internal/localproxy"
 	m3u8cache "github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/paths"
@@ -98,6 +99,8 @@ func (s *Server) Start() error {
 	mountWebOrRemote(mux, remote)
 	mux.HandleFunc("/proxy/cached_m3u8", s.handleCachedM3U8)
 	mux.HandleFunc("/proxy/play", playproxy.Handle)
+	mux.HandleFunc("/proxy/hls/index.m3u8", hlsproxy.HandleIndex)
+	mux.HandleFunc("/proxy/hls/item", hlsproxy.HandleItem)
 	mux.HandleFunc("/proxy/bt/", thunder.Handle)
 	mux.HandleFunc("/proxy", s.handleSpiderProxy)
 	mux.HandleFunc("/parse", s.handleParsePage)

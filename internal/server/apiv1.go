@@ -40,6 +40,7 @@ type ContentAPI interface {
 	APILiveSources() map[string]any
 	APILiveLoad(index int, url string) (map[string]any, error)
 	APILivePlay(group, channel, line int) (map[string]any, error)
+	APILiveHLSWrap(raw string, headers map[string]string) map[string]any
 	APILiveUnlock(group int, password string) error
 	APILiveEPG(group, channel int) (map[string]any, error)
 	APILiveCatchup(group, channel, day, prog int) (map[string]any, error)
@@ -727,8 +728,9 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		Channel  int    `json:"channel"`
 		Line     int    `json:"line"`
 		Password string `json:"password"`
-		Day      int    `json:"day"`
-		Prog     int    `json:"prog"`
+		Day      int               `json:"day"`
+		Prog     int               `json:"prog"`
+		Headers  map[string]string `json:"headers"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
 	switch strings.ToLower(strings.TrimSpace(body.Action)) {
@@ -748,6 +750,8 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
+	case "hls":
+		writeJSON(w, http.StatusOK, api.APILiveHLSWrap(body.URL, body.Headers))
 	case "unlock":
 		if err := api.APILiveUnlock(body.Group, body.Password); err != nil {
 			writeAPIError(w, http.StatusForbidden, err.Error())
