@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-parity-libs-v4"
+STAMP="$PREFIX/.kotv-parity-libs-v5"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 ICONV_VER=1.19
@@ -91,11 +91,45 @@ if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   (
     cd "$BUILD_DIR/libiconv"
     # Git Bash「C:/Program Files/.../sh」空格会拆坏 Makefile 里 windres-options 反引号，
-    # libiconv.rc / iconv.rc 均会 syntax error。静态链只需要 lib/，不编 src/iconv.exe。
+    # lib/*.rc 与 src/*.rc 均 syntax error。静态链不需要版本资源。
     if is_windows; then
       export CONFIG_SHELL=/usr/bin/sh
       export SHELL=/usr/bin/sh
-      ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-nls
+      mkdir -p "$BUILD_DIR/bin"
+      stub="$BUILD_DIR/bin/kotv-windres-stub"
+      cat >"$stub" <<'EOF'
+#!/usr/bin/env bash
+# 产出可被 ld 接受的空 .o，跳过损坏的 .rc / windres-options。
+out=""
+prev=""
+for a in "$@"; do
+  [[ "$prev" == "-o" ]] && out="$a"
+  prev="$a"
+done
+[[ -z "$out" ]] && exit 0
+tmp="${out}.kotvempty.c"
+echo 'unsigned char kotv_iconv_res_stub;' >"$tmp"
+gcc -c -o "$out" "$tmp" 2>/dev/null || : >"$out"
+rm -f "$tmp"
+exit 0
+EOF
+      chmod +x "$stub"
+      # libtool 常直接调 PATH 里的 windres，不看 WINDRES
+      ln -sfn "$(basename "$stub")" "$BUILD_DIR/bin/windres"
+      export PATH="$BUILD_DIR/bin:$PATH"
+      export WINDRES="$stub"
+      export RC="$stub"
+      ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-nls \
+        WINDRES="$stub" RC="$stub"
+      # 再保险：Makefile 里去掉 .rc 依赖
+      find . -name Makefile -type f -print0 | while IFS= read -r -d '' mf; do
+        sed -i \
+          -e 's/[[:space:]]*libiconv\.res\.lo//g' \
+          -e 's/[[:space:]]*iconv\.res\.lo//g' \
+          -e 's/[[:space:]]*libiconv\.res\.o//g' \
+          -e 's/[[:space:]]*iconv\.res\.o//g' \
+          "$mf" 2>/dev/null || true
+      done
       make -j"$JOBS" -C libcharset
       make -j"$JOBS" -C lib
       make -C libcharset install
@@ -110,7 +144,7 @@ if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
         exit 1
       fi
       [[ -f "$PREFIX/lib/libiconv.a" ]] || { echo "ERROR: libiconv.a missing" >&2; exit 1; }
-      echo "ok libiconv $ICONV_VER (static lib only, skip windres/exe)"
+      echo "ok libiconv $ICONV_VER (static lib, stub windres)"
     else
       ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-nls
       make -j"$JOBS"
