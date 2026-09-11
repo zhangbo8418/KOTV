@@ -95,7 +95,7 @@ pkgconfig = '$pc_win'
 pkg_config_path = '$pkg_win'
 EOF
     MESON_NATIVE=(--native-file "$BUILD_DIR/meson-native-iso.ini")
-    echo "ok ISO pkg-config → $pc_win"
+    echo "ok ISO pkg-config -> $pc_win"
   else
     need pkg-config
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
@@ -148,7 +148,7 @@ build_meson_lib() {
   meson install -C "$BUILD_DIR/${name}-build"
 }
 
-echo "==> ISO libs → $PREFIX"
+echo "==> ISO libs -> $PREFIX"
 fetch "https://downloads.videolan.org/pub/videolan/libdvdread/${DVDREAD_VER}/libdvdread-${DVDREAD_VER}.tar.xz" \
   "$src/libdvdread-${DVDREAD_VER}.tar.xz" "$DVDREAD_SHA"
 fetch "https://downloads.videolan.org/pub/videolan/libdvdnav/${DVDNAV_VER}/libdvdnav-${DVDNAV_VER}.tar.xz" \
@@ -186,7 +186,7 @@ new = "extra_dependencies += cc.find_library('ssp', required: false)"
 if old not in t:
     raise SystemExit("libbluray ssp line changed; update patch")
 p.write_text(t.replace(old, new, 1), encoding="utf-8")
-print("ok patched libbluray ssp → required: false")
+print("ok patched libbluray ssp -> required: false")
 PY
   bluray_setup=(
     "$BUILD_DIR/libbluray-build" "$BUILD_DIR/libbluray"

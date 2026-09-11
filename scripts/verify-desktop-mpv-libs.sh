@@ -33,12 +33,12 @@ check_no_avdevice() {
   local f="$1"
   local name="$2"
   [[ -f "$f" ]] || return
-  if strings "$f" 2>/dev/null | grep -q 'AVFFrameReceiver'; then
+  if has_str "$f" "AVFFrameReceiver"; then
     echo "ERROR: $name still contains AVFFrameReceiver (rebuild FFmpeg/mpv with avdevice disabled)" >&2
     fail=1
     return
   fi
-  if strings "$f" 2>/dev/null | grep -q 'libavdevice license'; then
+  if has_str "$f" "libavdevice license"; then
     echo "ERROR: $name still embeds libavdevice" >&2
     fail=1
     return
@@ -46,17 +46,12 @@ check_no_avdevice() {
   echo "ok $name: no libavdevice / AVFFrameReceiver"
 }
 
-# libmpv 构建为 -Dcplayer=false；FULLCONFIG「List of enabled features: …」只在
-# player/main.c 的 verbose 路径里用到。macOS 链接可能 dead-strip 掉该串，且 BSD
-# grep 对超长行（FULLCONFIG）也不稳定。因此用实际编进 libmpv 的符号/字面量检测。
+# libmpv（-Dcplayer=false）里 FULLCONFIG 串不可靠；用实际编进二进制的字面量检测。
+# 必须用 grep -a 直接扫文件：macOS 自带 strings 对 dylib 经常扫不到（CI 已证实）。
 has_str() {
   local f="$1"
   local pat="$2"
-  # -a：扫整个文件（Mach-O/PE 都需要）；不支持时回退
-  if strings -a "$f" 2>/dev/null | grep -Fq -- "$pat"; then
-    return 0
-  fi
-  strings "$f" 2>/dev/null | grep -Fq -- "$pat"
+  grep -aFq -- "$pat" "$f" 2>/dev/null
 }
 
 check_android_parity() {
@@ -133,7 +128,7 @@ check_win_https() {
   local f="$1"
   local name="$2"
   [[ -f "$f" ]] || return
-  if strings "$f" 2>/dev/null | grep -Eiq 'schannel|https protocol|tls_schannel|HTTPS'; then
+  if has_str "$f" "schannel" || has_str "$f" "tls_schannel" || has_str "$f" "https protocol"; then
     echo "ok $name: HTTPS/schannel markers"
     return
   fi
