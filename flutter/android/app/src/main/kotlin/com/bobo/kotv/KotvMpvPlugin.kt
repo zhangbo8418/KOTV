@@ -627,6 +627,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       applyGpuApiOptions()
       // TV boxes often fail scraped HTTPS CA checks; disable verify for now.
       MPVLib.setOptionString("tls-verify", "no")
+      // https 网关 302 到 http（凤秀等）时，默认白名单不含 http，会跟跳失败。
+      MPVLib.setOptionString(
+        "demuxer-lavf-o",
+        "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data,allowed_extensions=ALL"
+      )
       // ytdl_hook aborts load on devices without youtube-dl; disable.
       MPVLib.setOptionString("ytdl", "no")
       // Do not force gpu-api=vulkan on API 25: GLES path for picture;
@@ -956,13 +961,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     pendingUrl = null
     val headers = pendingHeaders
     try {
-      // 清空/覆盖 http-header-fields，避免上一台点播/旧 Referer 影响直播直链。
-      val hline = if (headers.isNotEmpty()) {
-        headers.entries.joinToString("\r\n") { "${it.key}: ${it.value}" } + "\r\n"
-      } else {
-        ""
-      }
-      MPVLib.setOptionString("http-header-fields", hline)
+      applyPlayHttpHeaders(headers)
       MPVLib.setPropertyDouble("volume", volume)
       MPVLib.setPropertyDouble("speed", rate)
       MPVLib.command(arrayOf("loadfile", url, "replace"))
@@ -975,6 +974,36 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       emit(mapOf("event" to "error", "message" to (e.message ?: "load failed")))
     }
   }
+
+  /**
+   * 对齐桌面 media_kit：user-agent / referrer 走独立属性，
+   * 其余头写成 mpv 的逗号列表。setOptionString 在 init 之后无效，必须 setPropertyString。
+   */
+  private fun applyPlayHttpHeaders(headers: Map<String, String>) {
+    var ua = ""
+    var referer = ""
+    val fields = ArrayList<String>()
+    for ((rawKey, rawValue) in headers) {
+      val key = rawKey.trim()
+      val value = rawValue.trim()
+      if (key.isEmpty() || value.isEmpty()) continue
+      when {
+        key.equals("User-Agent", ignoreCase = true) || key.equals("ua", ignoreCase = true) ->
+          ua = value
+        key.equals("Referer", ignoreCase = true) || key.equals("Referrer", ignoreCase = true) ->
+          referer = value
+        key.equals("Range", ignoreCase = true) -> Unit
+        else -> fields.add("$key: ${escapeListValue(value)}")
+      }
+    }
+    if (ua.isEmpty()) ua = FALLBACK_PLAY_UA
+    MPVLib.setPropertyString("user-agent", ua)
+    MPVLib.setPropertyString("referrer", referer)
+    MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
+  }
+
+  private fun escapeListValue(value: String): String =
+    value.replace("\\", "\\\\").replace(",", "\\,")
 
   private fun setSurfaceLayerEnabled(enabled: Boolean) {
     if (surfaceLayerEnabled == enabled) {
@@ -1122,6 +1151,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   companion object {
     private const val TAG = "KotvMpv"
+    private const val FALLBACK_PLAY_UA =
+      "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
     const val VIEW_TYPE = "kotv_mpv/surface"
   }
 }
