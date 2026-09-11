@@ -47,11 +47,17 @@ check_no_avdevice() {
 }
 
 # libmpv（-Dcplayer=false）里 FULLCONFIG 串不可靠；用实际编进二进制的字面量检测。
-# 必须用 grep -a 直接扫文件：macOS 自带 strings 对 dylib 经常扫不到（CI 已证实）。
+# 不用 grep/strings：macOS BSD grep 对无换行大块二进制会漏匹配（CI 上 uchardet 已证实）。
 has_str() {
   local f="$1"
   local pat="$2"
-  grep -aFq -- "$pat" "$f" 2>/dev/null
+  python3 - "$f" "$pat" <<'PY'
+import sys
+path, pat = sys.argv[1], sys.argv[2].encode("utf-8", "surrogateescape")
+with open(path, "rb") as fh:
+    data = fh.read()
+sys.exit(0 if pat in data else 1)
+PY
 }
 
 check_android_parity() {

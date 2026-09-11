@@ -22,7 +22,18 @@ echo "==> fetch desktop libmpv (AV3A source)"
 
 echo "==> build Go engine"
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)
-(cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w" -o "$ENGINE_OUT" ./cmd/engine)
+# proxy.golang.org 偶发 INTERNAL_ERROR；多源 + 重试
+export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
+ok_eng=0
+for attempt in 1 2 3; do
+  if (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w" -o "$ENGINE_OUT" ./cmd/engine); then
+    ok_eng=1
+    break
+  fi
+  echo "WARN: go build engine failed (attempt $attempt); retry..." >&2
+  sleep $((attempt * 5))
+done
+[[ "$ok_eng" == 1 ]] || { echo "ERROR: go build engine failed after retries" >&2; exit 1; }
 chmod +x "$ENGINE_OUT"
 
 echo "==> flutter build linux --release"

@@ -1325,6 +1325,10 @@ build_mpv_macos() {
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
   # 禁止 meson 回退到 Homebrew libavdevice（会再次引入 AVFFrameReceiver）。
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
+  # 避免 dead_strip 丢掉静态 uchardet（校验与字幕探测都依赖）
+  if [[ -f "$PREFIX/lib/libuchardet.a" ]]; then
+    export LDFLAGS="${LDFLAGS:-} -Wl,-u,_uchardet_new -Wl,-force_load,$PREFIX/lib/libuchardet.a"
+  fi
   local native_ini
   native_ini="$(kotv_macos_write_meson_native)"
   meson setup build \

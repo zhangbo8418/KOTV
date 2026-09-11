@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-parity-libs-v3"
+STAMP="$PREFIX/.kotv-parity-libs-v4"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 ICONV_VER=1.19
@@ -90,25 +90,32 @@ if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   tar -xf "$src/libiconv-${ICONV_VER}.tar.gz" -C "$BUILD_DIR/libiconv" --strip-components=1
   (
     cd "$BUILD_DIR/libiconv"
-    # Git Bash 的 sh 在「C:/Program Files/...」路径下，Makefile 反引号调用
-    # windres-options 会被空格拆坏，导致 libiconv.rc 语法错。静态库不需要 .rc。
+    # Git Bash「C:/Program Files/.../sh」空格会拆坏 Makefile 里 windres-options 反引号，
+    # libiconv.rc / iconv.rc 均会 syntax error。静态链只需要 lib/，不编 src/iconv.exe。
     if is_windows; then
       export CONFIG_SHELL=/usr/bin/sh
       export SHELL=/usr/bin/sh
+      ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-nls
+      make -j"$JOBS" -C libcharset
+      make -j"$JOBS" -C lib
+      make -C libcharset install
+      make -C lib install
+      mkdir -p "$PREFIX/include"
+      if [[ -f include/iconv.h.inst ]]; then
+        cp -f include/iconv.h.inst "$PREFIX/include/iconv.h"
+      elif [[ -f include/iconv.h ]]; then
+        cp -f include/iconv.h "$PREFIX/include/iconv.h"
+      else
+        echo "ERROR: libiconv.h not found after build" >&2
+        exit 1
+      fi
+      [[ -f "$PREFIX/lib/libiconv.a" ]] || { echo "ERROR: libiconv.a missing" >&2; exit 1; }
+      echo "ok libiconv $ICONV_VER (static lib only, skip windres/exe)"
+    else
+      ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-nls
+      make -j"$JOBS"
+      make install
     fi
-    ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-nls
-    if is_windows; then
-      # 去掉 Windows 版本资源目标，避免 windres 路径空格问题
-      find . -name Makefile -type f -print0 | while IFS= read -r -d '' mf; do
-        sed -i \
-          -e 's/[[:space:]]*libiconv\.res\.lo//g' \
-          -e 's/[[:space:]]*iconv\.res\.lo//g' \
-          -e 's/[[:space:]]*libicrt\.res\.lo//g' \
-          "$mf"
-      done
-    fi
-    make -j"$JOBS"
-    make install
   )
 fi
 
