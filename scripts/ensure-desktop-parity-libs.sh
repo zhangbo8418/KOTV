@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-parity-libs-v1"
+STAMP="$PREFIX/.kotv-parity-libs-v2"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 ICONV_VER=1.19
@@ -37,10 +37,14 @@ is_windows() {
 fetch() {
   local url="$1" dest="$2" sha="$3"
   if [[ -f "$dest" ]]; then
-    return
+    return 0
   fi
   mkdir -p "$(dirname "$dest")"
-  curl -fL --retry 5 --retry-delay 2 -o "$dest.partial" "$url"
+  # 在 `fetch A || fetch B` 里 bash 会关掉 set -e，必须显式检查 curl。
+  if ! curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$dest.partial" "$url"; then
+    rm -f "$dest.partial"
+    return 1
+  fi
   mv "$dest.partial" "$dest"
   if command -v shasum >/dev/null; then
     echo "$sha  $dest" | shasum -a 256 -c -
@@ -93,7 +97,8 @@ if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
 fi
 
 if [[ ! -f "$PREFIX/lib/libz.a" && ! -f "$PREFIX/lib/libzlibstatic.a" ]]; then
-  fetch "https://zlib.net/zlib-${ZLIB_VER}.tar.gz" "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA" \
+  # zlib.net 根路径常 404；fossils / GitHub release 更稳。
+  fetch "https://www.zlib.net/fossils/zlib-${ZLIB_VER}.tar.gz" "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA" \
     || fetch "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz" \
       "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA"
   rm -rf "$BUILD_DIR/zlib"
@@ -102,6 +107,7 @@ if [[ ! -f "$PREFIX/lib/libz.a" && ! -f "$PREFIX/lib/libzlibstatic.a" ]]; then
   cmake -S "$BUILD_DIR/zlib" -B "$BUILD_DIR/zlib-build" -G "${cmake_gen[0]}" \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DBUILD_SHARED_LIBS=OFF
   cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS"
   cmake --install "$BUILD_DIR/zlib-build"
@@ -116,6 +122,7 @@ cmake -S "$BUILD_DIR/uchardet" -B "$BUILD_DIR/uchardet-build" -G "${cmake_gen[0]
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DCMAKE_PREFIX_PATH="$PREFIX" \
   -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DBUILD_SHARED_LIBS=OFF \
   -DBUILD_BINARY=OFF
 cmake --build "$BUILD_DIR/uchardet-build" -j"$JOBS"
@@ -130,6 +137,7 @@ cmake -S "$BUILD_DIR/libarchive" -B "$BUILD_DIR/libarchive-build" -G "${cmake_ge
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DCMAKE_PREFIX_PATH="$PREFIX" \
   -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DBUILD_SHARED_LIBS=OFF \
   -DENABLE_TEST=OFF \
   -DENABLE_TAR=OFF \

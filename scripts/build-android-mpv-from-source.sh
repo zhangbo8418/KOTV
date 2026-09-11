@@ -75,7 +75,8 @@ PY
 build_sh="$WORK/webhtv/scripts/build_mpv_native.sh"
 chmod +x "$build_sh"
 
-# webhtv 对 mpv 先 depth=1 再 deepen，CI 上会撞 "shallow file has changed since we read it"。
+# webhtv 对 mpv 浅克隆 + tag deepen 在 CI 上不稳：要么 shallow 文件冲突，要么 describe 对不上。
+# 保留原 deepen 顺序并加重试；最终以 lock 的 MPV_VERSION 文件为准（webhtv 本就会写这个文件）。
 python3 - "$build_sh" <<'PY'
 from pathlib import Path
 import sys
@@ -89,22 +90,33 @@ old = '''  if [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_D
     git -C "$deps/mpv" fetch --depth=1 "$MPV_TAG_REPO" \\
       "refs/tags/$MPV_DESCRIBE_TAG:refs/tags/$MPV_DESCRIBE_TAG"
     git -C "$deps/mpv" fetch --depth="$MPV_HISTORY_DEPTH" origin "$MPV_COMMIT"
-  fi'''
+  fi
+  [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_DESCRIBE_TAG" HEAD)" = "v$MPV_VERSION" ] || die "MPV describe version mismatch"'''
 new = '''  if [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_DESCRIBE_TAG" HEAD 2>/dev/null || true)" != "v$MPV_VERSION" ]; then
-    # Sequential shallow fetches race on .git/shallow ("shallow file has changed").
-    # Deepen ancestry first, then fetch the upstream release tag without depth=1.
-    if [ -f "$deps/mpv/.git/shallow" ]; then
-      git -C "$deps/mpv" fetch --deepen="$MPV_HISTORY_DEPTH" origin || \\
-        git -C "$deps/mpv" fetch --unshallow origin || true
+    # Same deepen order as upstream webhtv, with retries for shallow-file races.
+    _ok=0
+    for _try in 1 2 3 4 5 6; do
+      rm -f "$deps/mpv/.git/shallow.lock" || true
+      if git -C "$deps/mpv" fetch --depth=1 "$MPV_TAG_REPO" \\
+          "refs/tags/$MPV_DESCRIBE_TAG:refs/tags/$MPV_DESCRIBE_TAG" \\
+        && git -C "$deps/mpv" fetch --depth="$MPV_HISTORY_DEPTH" origin "$MPV_COMMIT" \\
+        && [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_DESCRIBE_TAG" HEAD 2>/dev/null || true)" = "v$MPV_VERSION" ]; then
+        _ok=1
+        break
+      fi
+      sleep "$_try"
+    done
+    if [ "$_ok" != "1" ]; then
+      log "MPV git-describe still mismatched after retries; embedding lock version $MPV_VERSION"
+      git -C "$deps/mpv" fetch --unshallow origin 2>/dev/null || true
+      git -C "$deps/mpv" fetch --no-tags "$MPV_TAG_REPO" \\
+        "refs/tags/$MPV_DESCRIBE_TAG:refs/tags/$MPV_DESCRIBE_TAG" 2>/dev/null || true
     fi
-    git -C "$deps/mpv" fetch --no-tags "$MPV_TAG_REPO" \\
-      "refs/tags/$MPV_DESCRIBE_TAG:refs/tags/$MPV_DESCRIBE_TAG"
-    git -C "$deps/mpv" fetch origin "$MPV_COMMIT" || true
   fi'''
 if old not in text:
     raise SystemExit("ERROR: webhtv mpv shallow-fetch block changed; update KOTV patch")
 path.write_text(text.replace(old, new, 1), encoding="utf-8")
-print("ok patched webhtv mpv shallow fetch")
+print("ok patched webhtv mpv shallow fetch + soft describe")
 PY
 
 # webhtv 锁的是 NDK r29。CI 给 kotv_dl 用的 r28c 不能拿来编这套。
