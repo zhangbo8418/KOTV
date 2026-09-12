@@ -295,7 +295,7 @@ PROBE
     # dav1d / libxml2 / libaribcaption：Windows pkg-config 探测不稳（Requires.private / 头路径）。
     # libxml：FongMi 探测头 libxml2/libxml/... + 源码 libxml/...，两个 -I 都要。
     perl -i -pe "s#enabled libdav1d\\s+&& require_pkg_config libdav1d .*#enabled libdav1d \&\& enable libdav1d \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -ldav1d#" configure
-    perl -i -pe "s#enabled libxml2\\s+&& require_pkg_config libxml2 .*#enabled libxml2 \&\& enable libxml2 \&\& add_cflags -I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2 \&\& add_extralibs -L${PREF_NATIVE}/lib -lxml2#" configure
+    perl -i -pe "s#enabled libxml2\\s+&& require_pkg_config libxml2 .*#enabled libxml2 \&\& enable libxml2 \&\& add_cflags -I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2 \&\& add_extralibs -L${PREF_NATIVE}/lib -lxml2 -lz -llzma#" configure
     perl -i -pe "s#enabled libaribcaption\\s+&& require_pkg_config libaribcaption .*#enabled libaribcaption \&\& enable libaribcaption \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -laribcaption -lstdc++ -ldwrite -lole32 -luuid#" configure
   else
     sed -i.bak "s#require_pkg_config libarcdav3a arcdav3a decoder.h avs3_create_decoder#enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm#" configure
@@ -324,17 +324,17 @@ if kotv_is_windows_build; then
   # 原生 Schannel，避免 MinGW 编 OpenSSL（MSYS perl 缺 Locale::Maketext）。
   FFMPEG_EXTRA+=(--enable-schannel)
   FFMPEG_EXTRA+=(--enable-d3d11va)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lm -lcrypt32 -lsecur32 -lws2_32 -ldwrite -lole32 -luuid")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lcrypt32 -lsecur32 -lws2_32 -ldwrite -lole32 -luuid")
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
   FFMPEG_EXTRA+=(--enable-securetransport)
   FFMPEG_EXTRA+=(--enable-videotoolbox)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lm")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm")
 else
   FFMPEG_EXTRA+=(--enable-openssl)
   FFMPEG_EXTRA+=(--enable-vaapi)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lm")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm")
 fi
 
 # 旧前缀可能残留 libavdevice.pc（无 .a）；meson 会回退到 Homebrew 共享库。

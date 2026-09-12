@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-ffmpeg-codecs-v4"
+STAMP="$PREFIX/.kotv-ffmpeg-codecs-v5"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 DAV1D_VER=1.5.4
@@ -16,6 +16,12 @@ DAV1D_REPO=https://github.com/videolan/dav1d.git
 XML2_VER=2.15.3
 XML2_URL="https://gitlab.gnome.org/GNOME/libxml2/-/archive/v${XML2_VER}/libxml2-v${XML2_VER}.tar.gz"
 XML2_SHA=0da50c1415f4ec0364569d2119b1436ba837b31df44af28569d234272c23cf1f
+
+# libxml2 完整压缩：gzip（zlib）+ xz（liblzma），静态进 PREFIX，避免 Windows 缺 .pc。
+ZLIB_VER=1.3.1
+ZLIB_SHA=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
+XZ_VER=5.6.4
+XZ_SHA=269e3f2e512cbd3314849982014dc199a7b2148cf5c91cedc6db629acdf5e09b
 
 ARIB_VER=1.1.1
 ARIB_URL="https://github.com/xqq/libaribcaption/archive/refs/tags/v${ARIB_VER}.tar.gz"
@@ -37,6 +43,8 @@ pc_ready() {
   [[ -f "$pc" ]] || return 1
   case "$name" in
     dav1d) [[ -f "$PREFIX/lib/libdav1d.a" || -f "$PREFIX/lib/libdav1d.dll.a" ]] || return 1 ;;
+    zlib) [[ -f "$PREFIX/lib/libz.a" || -f "$PREFIX/lib/libzlibstatic.a" ]] || return 1 ;;
+    liblzma) [[ -f "$PREFIX/lib/liblzma.a" || -f "$PREFIX/lib/liblzma.dll.a" ]] || return 1 ;;
     libxml-2.0) [[ -f "$PREFIX/lib/libxml2.a" || -f "$PREFIX/lib/libxml2.dll.a" ]] || return 1 ;;
     libaribcaption) [[ -f "$PREFIX/lib/libaribcaption.a" || -f "$PREFIX/lib/libaribcaption.dll.a" ]] || return 1 ;;
   esac
@@ -78,8 +86,9 @@ if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 fi
 
-if [[ -f "$STAMP" ]] && pc_ready dav1d && pc_ready libxml-2.0 && pc_ready libaribcaption; then
-  echo "ok cached ffmpeg codecs (dav1d+xml2+arib in PREFIX)"
+if [[ -f "$STAMP" ]] && pc_ready dav1d && pc_ready zlib && pc_ready liblzma \
+  && pc_ready libxml-2.0 && pc_ready libaribcaption; then
+  echo "ok cached ffmpeg codecs (dav1d+zlib+lzma+xml2+arib in PREFIX)"
   exit 0
 fi
 
@@ -176,9 +185,116 @@ else
   echo "ok dav1d (cached in PREFIX)"
 fi
 
-# --- libxml2 ---
+# --- zlib（libxml2 gzip）---
+if ! pc_ready zlib; then
+  echo "==> build zlib $ZLIB_VER (for libxml2)"
+  fetch "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz" \
+    "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA" \
+    || fetch "https://www.zlib.net/fossils/zlib-${ZLIB_VER}.tar.gz" \
+      "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA"
+  rm -rf "$BUILD_DIR/zlib" "$BUILD_DIR/zlib-build"
+  mkdir -p "$BUILD_DIR/zlib"
+  tar -xf "$src/zlib-${ZLIB_VER}.tar.gz" -C "$BUILD_DIR/zlib" --strip-components=1
+  z_cmake=(cmake -S "$BUILD_DIR/zlib" -B "$BUILD_DIR/zlib-build" -G "$cmake_gen"
+    -DCMAKE_INSTALL_PREFIX="$PREFIX"
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    -DBUILD_SHARED_LIBS=OFF)
+  if ((${#cmake_osx[@]})); then
+    z_cmake+=("${cmake_osx[@]}")
+  fi
+  if [[ -n "${CFLAGS:-}" ]]; then
+    z_cmake+=(-DCMAKE_C_FLAGS="$CFLAGS")
+  fi
+  "${z_cmake[@]}"
+  if is_windows; then
+    cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS" --target zlibstatic
+    mkdir -p "$PREFIX/lib" "$PREFIX/include" "$PREFIX/lib/pkgconfig"
+    zstat=""
+    for cand in \
+      "$BUILD_DIR/zlib-build/libzlibstatic.a" \
+      "$BUILD_DIR/zlib-build/zlibstatic.lib" \
+      "$BUILD_DIR/zlib-build/libz.a"; do
+      [[ -f "$cand" ]] && { zstat="$cand"; break; }
+    done
+    [[ -n "$zstat" ]] || { echo "ERROR: zlibstatic not built" >&2; exit 1; }
+    cp -f "$zstat" "$PREFIX/lib/libz.a"
+    cp -f "$BUILD_DIR/zlib/zlib.h" "$PREFIX/include/zlib.h"
+    if [[ -f "$BUILD_DIR/zlib-build/zconf.h" ]]; then
+      cp -f "$BUILD_DIR/zlib-build/zconf.h" "$PREFIX/include/zconf.h"
+    else
+      cp -f "$BUILD_DIR/zlib/zconf.h" "$PREFIX/include/zconf.h"
+    fi
+  else
+    cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS"
+    cmake --install "$BUILD_DIR/zlib-build"
+  fi
+  cat >"$PREFIX/lib/pkgconfig/zlib.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: zlib
+Description: zlib compression library
+Version: $ZLIB_VER
+Libs: -L\${libdir} -lz
+Cflags: -I\${includedir}
+EOF
+  pc_ready zlib || { echo "ERROR: zlib not installed under $PREFIX" >&2; exit 1; }
+  echo "ok zlib $ZLIB_VER"
+else
+  echo "ok zlib (cached in PREFIX)"
+fi
+
+# --- liblzma / xz（libxml2 xz 压缩 XML）---
+if ! pc_ready liblzma; then
+  echo "==> build liblzma $XZ_VER (for libxml2)"
+  fetch "https://github.com/tukaani-project/xz/releases/download/v${XZ_VER}/xz-${XZ_VER}.tar.gz" \
+    "$src/xz-${XZ_VER}.tar.gz" "$XZ_SHA"
+  rm -rf "$BUILD_DIR/xz" "$BUILD_DIR/xz-build"
+  mkdir -p "$BUILD_DIR/xz"
+  tar -xf "$src/xz-${XZ_VER}.tar.gz" -C "$BUILD_DIR/xz" --strip-components=1
+  xz_cmake=(cmake -S "$BUILD_DIR/xz" -B "$BUILD_DIR/xz-build" -G "$cmake_gen"
+    -DCMAKE_INSTALL_PREFIX="$PREFIX"
+    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_BUILD_TYPE=Release
+    -DBUILD_SHARED_LIBS=OFF
+    -DBUILD_TESTING=OFF
+    -DCREATE_XZ_SYMLINKS=OFF
+    -DCREATE_LZMA_SYMLINKS=OFF)
+  if ((${#cmake_osx[@]})); then
+    xz_cmake+=("${cmake_osx[@]}")
+  fi
+  if [[ -n "${CFLAGS:-}" ]]; then
+    xz_cmake+=(-DCMAKE_C_FLAGS="$CFLAGS")
+  fi
+  "${xz_cmake[@]}"
+  cmake --build "$BUILD_DIR/xz-build" -j"$JOBS"
+  cmake --install "$BUILD_DIR/xz-build"
+  if [[ ! -f "$PREFIX/lib/pkgconfig/liblzma.pc" ]]; then
+    cat >"$PREFIX/lib/pkgconfig/liblzma.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: liblzma
+Description: LZMA / XZ compression
+Version: $XZ_VER
+Libs: -L\${libdir} -llzma
+Cflags: -I\${includedir}
+EOF
+  fi
+  pc_ready liblzma || { echo "ERROR: liblzma not installed under $PREFIX" >&2; exit 1; }
+  echo "ok liblzma $XZ_VER"
+else
+  echo "ok liblzma (cached in PREFIX)"
+fi
+
+# --- libxml2（完整：zlib + lzma）---
 if ! pc_ready libxml-2.0; then
-  echo "==> build libxml2 $XML2_VER"
+  echo "==> build libxml2 $XML2_VER (zlib+lzma)"
   fetch "$XML2_URL" "$src/libxml2-${XML2_VER}.tar.gz" "$XML2_SHA"
   rm -rf "$BUILD_DIR/libxml2"
   mkdir -p "$BUILD_DIR/libxml2"
@@ -190,11 +306,12 @@ if ! pc_ready libxml-2.0; then
       -DCMAKE_BUILD_TYPE=Release
       -DCMAKE_INSTALL_PREFIX="$PREFIX"
       -DCMAKE_INSTALL_LIBDIR=lib
+      -DCMAKE_PREFIX_PATH="$PREFIX"
       -DBUILD_SHARED_LIBS=OFF
       -DLIBXML2_WITH_PYTHON=OFF
       -DLIBXML2_WITH_ICONV=OFF
-      -DLIBXML2_WITH_ZLIB=OFF
-      -DLIBXML2_WITH_LZMA=OFF
+      -DLIBXML2_WITH_ZLIB=ON
+      -DLIBXML2_WITH_LZMA=ON
       -DLIBXML2_WITH_PROGRAMS=OFF
       -DLIBXML2_WITH_TESTS=OFF
       -DLIBXML2_WITH_MODULES=OFF)
@@ -209,7 +326,8 @@ if ! pc_ready libxml-2.0; then
     cmake --install build
   )
   pc_ready libxml-2.0 || { echo "ERROR: libxml2 not installed under $PREFIX" >&2; exit 1; }
-  # 无 zlib/lzma 依赖；双 -I：FongMi 探测用 libxml2/libxml/...，源码用 libxml/...。
+  # 把 -lz/-llzma 写进 Libs（勿只靠 Requires.private），Windows/FFmpeg 探测才能链上。
+  # 双 -I：FongMi 探测头 libxml2/libxml/... + 源码 libxml/...。
   cat >"$PREFIX/lib/pkgconfig/libxml-2.0.pc" <<EOF
 prefix=$PREFIX
 exec_prefix=\${prefix}
@@ -217,12 +335,13 @@ libdir=\${prefix}/lib
 includedir=\${prefix}/include
 
 Name: libXML
-Description: libxml2 (KOTV static, no zlib/lzma)
+Description: libxml2 (KOTV static, zlib+lzma)
 Version: $XML2_VER
-Libs: -L\${libdir} -lxml2
+Requires.private: zlib liblzma
+Libs: -L\${libdir} -lxml2 -lz -llzma
 Cflags: -I\${includedir} -I\${includedir}/libxml2
 EOF
-  echo "ok libxml2 $XML2_VER"
+  echo "ok libxml2 $XML2_VER (zlib+lzma)"
 else
   echo "ok libxml2 (cached in PREFIX)"
 fi
@@ -297,5 +416,5 @@ else
   echo "ok libaribcaption (cached in PREFIX)"
 fi
 
-printf '%s\n' "dav1d=${DAV1D_VER} xml2=${XML2_VER} arib=${ARIB_VER}" >"$STAMP"
+printf '%s\n' "dav1d=${DAV1D_VER} zlib=${ZLIB_VER} lzma=${XZ_VER} xml2=${XML2_VER} arib=${ARIB_VER}" >"$STAMP"
 echo "ok ffmpeg codecs ready"
