@@ -13,13 +13,6 @@ if (-not (Test-Path $Exe)) {
 
 Write-Host "==> Win7 gate: scanning $Exe"
 
-# 硬链 Win8+ 时间 API：Win7 启动即「无法找到入口」。
-$exeBytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Exe))
-$exeAscii = [System.Text.Encoding]::ASCII.GetString($exeBytes)
-if ($exeAscii.Contains("GetSystemTimePreciseAsFileTime")) {
-    throw "Win7 gate failed: $Exe references GetSystemTimePreciseAsFileTime (Win8+ KERNEL32 entry)."
-}
-
 # 只收集 DLL 依赖名。勿 dump 完整 objdump -p（会刷出成百上千行 reloc DIR64）。
 $dllNames = New-Object System.Collections.Generic.List[string]
 

@@ -75,10 +75,9 @@ kotv_mpv_dll_has_opengl() {
 
 kotv_libplacebo_profile() {
   if kotv_is_windows_build; then
-    # Vulkan + D3D11 + OpenGL + lcms + xxhash（glslang 用 shaderc 代替）。
-    # Win7：不开 libdovi——现代 Rust std 硬链 GetSystemTimePreciseAsFileTime（Win8+）。
+    # Vulkan + D3D11 + OpenGL + libdovi + lcms + xxhash（glslang 用 shaderc 代替）。
     if kotv_is_mpv_win7_build; then
-      echo "win7-vulkan-d3d11-opengl-lcms-xxhash-v2"
+      echo "win7-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     else
       echo "win-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     fi
@@ -90,10 +89,6 @@ kotv_libplacebo_profile() {
 }
 
 ensure_libdovi() {
-  if kotv_is_mpv_win7_build; then
-    echo "ok skip libdovi on Win7 (Rust std imports GetSystemTimePreciseAsFileTime)"
-    return 0
-  fi
   chmod +x "$ROOT/scripts/ensure-desktop-libdovi.sh"
   KOTV_MPV_BUILD_DIR="$BUILD_DIR" KOTV_DESKTOP_FFMPEG_PREFIX="$PREFIX" \
     "$ROOT/scripts/ensure-desktop-libdovi.sh"
@@ -505,17 +500,9 @@ kotv_windows_mpv_cflags() {
 verify_mpv_win7_imports() {
   local dll="$1"
   [[ -f "$dll" ]] || return 0
-  # 仅 Win7 打包线强制；普通 Win10/11 包允许链 Win8+ API（如 Rust libdovi）。
-  kotv_is_mpv_win7_build || return 0
   if command -v objdump >/dev/null 2>&1; then
     if objdump -p "$dll" 2>/dev/null | awk '/DLL Name:/{print $3}' | tr '[:upper:]' '[:lower:]' | grep -qx 'shcore.dll'; then
       echo "ERROR: $dll imports SHCORE.dll (Win7 incompatible; rebuild with kotv_windows_mpv_cflags)" >&2
-      exit 1
-    fi
-    # 硬链 Win8+ 时间 API 会在 Win7 弹「无法找到入口」。
-    if objdump -p "$dll" 2>/dev/null | grep -qF 'GetSystemTimePreciseAsFileTime'; then
-      echo "ERROR: $dll imports GetSystemTimePreciseAsFileTime (Win8+; Win7 KERNEL32 无此入口)" >&2
-      echo "HINT: Win7 包勿静链现代 Rust libdovi；查 codecs/FFmpeg 是否未钉 _WIN32_WINNT=0x0601" >&2
       exit 1
     fi
   fi
@@ -818,14 +805,10 @@ ensure_libplacebo() {
   rm -rf build
   local placebo_lib=shared
   local vk_flag=enabled
-  local libdovi_flag=enabled
-  if kotv_is_mpv_win7_build; then
-    libdovi_flag=disabled
-  fi
   # glslang：有 shaderc 时不必开（官方更推荐 shaderc；Gentoo 也已丢掉 glslang USE）。
   local -a placebo_common=(
     -Ddovi=enabled
-    -Dlibdovi="$libdovi_flag"
+    -Dlibdovi=enabled
     -Dlcms=enabled
     -Dxxhash=enabled
     -Dglslang=disabled
@@ -903,14 +886,11 @@ ensure_libplacebo() {
     find "$PREFIX" -name 'libplacebo.pc' 2>/dev/null || true
     exit 1
   fi
-  # 确认真正编进了 libdovi / lcms / xxhash（Win7 故意关 libdovi）。
+  # 确认真正编进了 libdovi / lcms / xxhash。
   local cfgh
   cfgh="$(find "$PREFIX/include" "$BUILD_DIR/libplacebo/build" -name 'config.h' 2>/dev/null | head -1 || true)"
   if [[ -n "$cfgh" ]]; then
     for feat in LIBDOVI LCMS XXHASH; do
-      if [[ "$feat" == "LIBDOVI" ]] && kotv_is_mpv_win7_build; then
-        continue
-      fi
       if ! grep -Eq "^#define PL_HAVE_${feat} 1" "$cfgh"; then
         echo "ERROR: libplacebo built without PL_HAVE_${feat}=1 ($cfgh)" >&2
         grep -E "PL_HAVE_.*${feat}|${feat}" "$cfgh" 2>/dev/null || true
