@@ -81,12 +81,13 @@ clone_ffmpeg() {
   fi
 }
 
+# v18: arib PIC；Windows libavcodec/arib 补 d2d1。
 # v17: zlib PIC；xz 只装 liblzma；FFmpeg/libxml 用 LIBXML_STATIC。
 # v16: codecs 静态 zlib/lzma；mac 探测链 -lc++；清 DYLD 防 Abort。
 # v15: libxml2 完整启用 zlib+lzma（PREFIX 自带依赖）。
 # v14: +dav1d +libxml2 +libaribcaption + 平台硬解（d3d11va/videotoolbox/vaapi）。
 # HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v17-${FFMPEG_COMMIT:0:12}"
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v18-${FFMPEG_COMMIT:0:12}"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -126,12 +127,17 @@ EOF
 promote_static_libs_in_avcodec_pc() {
   local pc="$PREFIX/lib/pkgconfig/libavcodec.pc"
   [[ -f "$pc" ]] || return 0
-  python3 - "$pc" <<'PY'
+  local win=0
+  kotv_is_windows_build && win=1
+  python3 - "$pc" "$win" <<'PY'
 import sys
 from pathlib import Path
 p = Path(sys.argv[1])
+win = sys.argv[2] == "1"
 lines = p.read_text(encoding="utf-8", errors="replace").splitlines(True)
 need = ["-larcdav3a", "-ldav1d", "-laribcaption", "-lxml2", "-lz", "-llzma"]
+if win:
+    need += ["-lstdc++", "-ld2d1", "-ldwrite", "-lole32", "-luuid"]
 out = []
 for line in lines:
     if line.startswith("Libs:"):
@@ -146,7 +152,7 @@ for line in lines:
     out.append(line)
 p.write_text("".join(out), encoding="utf-8")
 PY
-  echo "ok patched $pc (+ arcdav3a/dav1d/aribcaption/xml2/zlib/lzma on Libs)"
+  echo "ok patched $pc (+ arcdav3a/dav1d/aribcaption/xml2/zlib/lzma${win:+/d2d1} on Libs)"
 }
 
 promote_arcdav3a_in_avcodec_pc() {
@@ -299,7 +305,7 @@ PROBE
     # libxml：FongMi 探测头 libxml2/libxml/... + 源码 libxml/...，两个 -I 都要。
     perl -i -pe "s#enabled libdav1d\\s+&& require_pkg_config libdav1d .*#enabled libdav1d \&\& enable libdav1d \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -ldav1d#" configure
     perl -i -pe "s#enabled libxml2\\s+&& require_pkg_config libxml2 .*#enabled libxml2 \&\& enable libxml2 \&\& add_cflags -I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2 -DLIBXML_STATIC \&\& add_extralibs -L${PREF_NATIVE}/lib -lxml2 -lz -llzma#" configure
-    perl -i -pe "s#enabled libaribcaption\\s+&& require_pkg_config libaribcaption .*#enabled libaribcaption \&\& enable libaribcaption \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -laribcaption -lstdc++ -ldwrite -lole32 -luuid#" configure
+    perl -i -pe "s#enabled libaribcaption\\s+&& require_pkg_config libaribcaption .*#enabled libaribcaption \&\& enable libaribcaption \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -laribcaption -lstdc++ -ld2d1 -ldwrite -lole32 -luuid#" configure
   else
     sed -i.bak "s#require_pkg_config libarcdav3a arcdav3a decoder.h avs3_create_decoder#enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm#" configure
   fi
@@ -332,7 +338,7 @@ if kotv_is_windows_build; then
   # 原生 Schannel，避免 MinGW 编 OpenSSL（MSYS perl 缺 Locale::Maketext）。
   FFMPEG_EXTRA+=(--enable-schannel)
   FFMPEG_EXTRA+=(--enable-d3d11va)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lcrypt32 -lsecur32 -lws2_32 -ldwrite -lole32 -luuid")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lcrypt32 -lsecur32 -lws2_32 -lstdc++ -ld2d1 -ldwrite -lole32 -luuid")
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
@@ -359,7 +365,7 @@ if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
 int main(void) { return 0; }
 PROBE
   probe_cc="${CC:-clang}"
-  if ! "$probe_cc" -O0 -I"$PREF_NATIVE/include" -I"$PREF_NATIVE/include/libxml2" \
+  if ! "$probe_cc" -O0 -I"$PREF_NATIVE/include" -I"$PREF_NATIVE/include/libxml2" -DLIBXML_STATIC \
       -L"$PREF_NATIVE/lib" -o "$probe_bin" "$probe_src" \
       -larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lc++ \
       2>"$BUILD_DIR/ffmpeg_cc_probe.log"; then

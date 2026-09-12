@@ -6,8 +6,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-# v7: zlib -fPIC；xz 5.6 用 ENABLE_NLS + 只编 liblzma；libxml Cflags 带 LIBXML_STATIC。
-STAMP="$PREFIX/.kotv-ffmpeg-codecs-v7"
+# v8: arib PIC；Windows arib Libs 带 d2d1/dwrite（链进 libmpv）。
+STAMP="$PREFIX/.kotv-ffmpeg-codecs-v8"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 DAV1D_VER=1.5.4
@@ -105,10 +105,11 @@ fi
 if [[ -e "$PREFIX/lib/libz.dylib" ]] || [[ -e "$PREFIX/share/pkgconfig/zlib.pc" && ! -f "$PREFIX/lib/libz.a" ]]; then
   rm -f "$PREFIX/lib/pkgconfig/zlib.pc" "$PREFIX/share/pkgconfig/zlib.pc"
 fi
-# stamp 升级：强制重装 zlib/lzma/xml2（PIC、lib-only、LIBXML_STATIC）。
+# stamp 升级：强制重装 zlib/lzma/xml2/arib（PIC、lib-only、LIBXML_STATIC、d2d1）。
 if [[ ! -f "$STAMP" ]]; then
   rm -f "$PREFIX/lib/pkgconfig/zlib.pc" "$PREFIX/share/pkgconfig/zlib.pc" \
-    "$PREFIX/lib/pkgconfig/liblzma.pc" "$PREFIX/lib/pkgconfig/libxml-2.0.pc"
+    "$PREFIX/lib/pkgconfig/liblzma.pc" "$PREFIX/lib/pkgconfig/libxml-2.0.pc" \
+    "$PREFIX/lib/pkgconfig/libaribcaption.pc"
 fi
 
 cflags=""
@@ -354,9 +355,7 @@ if ! pc_ready libxml-2.0; then
     if ((${#cmake_osx[@]})); then
       xml_cmake+=("${cmake_osx[@]}")
     fi
-    if [[ -n "${CFLAGS:-}" ]]; then
-      xml_cmake+=(-DCMAKE_C_FLAGS="$CFLAGS")
-    fi
+    xml_cmake+=(-DCMAKE_C_FLAGS="-fPIC ${CFLAGS:-}")
     "${xml_cmake[@]}"
     cmake --build build -j"$JOBS"
     cmake --install build
@@ -405,6 +404,7 @@ if ! pc_ready libaribcaption; then
       -DCMAKE_BUILD_TYPE=Release
       -DCMAKE_INSTALL_PREFIX="$PREFIX"
       -DCMAKE_INSTALL_LIBDIR=lib
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON
       -DBUILD_SHARED_LIBS=OFF
       -DARIBCC_SHARED_LIBRARY=OFF
       -DARIBCC_BUILD_TESTS=OFF
@@ -412,27 +412,22 @@ if ! pc_ready libaribcaption; then
     if ((${#cmake_osx[@]})); then
       arib_cmake+=("${cmake_osx[@]}")
     fi
-    if [[ -n "${CFLAGS:-}" ]]; then
-      arib_cmake+=(-DCMAKE_C_FLAGS="$CFLAGS")
-    fi
-    if [[ -n "${CXXFLAGS:-}" ]]; then
-      arib_cmake+=(-DCMAKE_CXX_FLAGS="$CXXFLAGS")
-    fi
+    # Linux libmpv.so 会链静态 arib，必须 PIC。
+    arib_cmake+=(-DCMAKE_C_FLAGS="-fPIC ${CFLAGS:-}" -DCMAKE_CXX_FLAGS="-fPIC ${CXXFLAGS:-}")
     "${arib_cmake[@]}"
     cmake --build build -j"$JOBS"
     cmake --install build
   )
-  if [[ ! -f "$PREFIX/lib/pkgconfig/libaribcaption.pc" ]] || is_windows; then
-    # Windows：FFmpeg require_pkg_config 链接探测需要 C++/DirectWrite。
-    private_libs=""
-    if is_windows; then
-      private_libs=" -lstdc++ -ldwrite -lole32 -luuid"
-    elif [[ "$(uname -s)" != "Darwin" ]]; then
-      private_libs=" -lstdc++ -lfontconfig -lfreetype"
-    else
-      private_libs=" -lc++ -framework CoreText -framework CoreFoundation"
-    fi
-    cat >"$PREFIX/lib/pkgconfig/libaribcaption.pc" <<EOF
+  # 始终重写 .pc：Windows DirectWrite 依赖放进 Libs（meson 不吃 Libs.private）。
+  arib_libs="-laribcaption"
+  if is_windows; then
+    arib_libs="-laribcaption -lstdc++ -ld2d1 -ldwrite -lole32 -luuid"
+  elif [[ "$(uname -s)" != "Darwin" ]]; then
+    arib_libs="-laribcaption -lstdc++"
+  else
+    arib_libs="-laribcaption -lc++ -framework CoreText -framework CoreFoundation"
+  fi
+  cat >"$PREFIX/lib/pkgconfig/libaribcaption.pc" <<EOF
 prefix=$PREFIX
 exec_prefix=\${prefix}
 libdir=\${prefix}/lib
@@ -441,13 +436,11 @@ includedir=\${prefix}/include
 Name: libaribcaption
 Description: ARIB STD-B24 caption decoder
 Version: $ARIB_VER
-Libs: -L\${libdir} -laribcaption
-Libs.private:${private_libs}
+Libs: -L\${libdir} ${arib_libs}
 Cflags: -I\${includedir}
 EOF
-  fi
   pc_ready libaribcaption || { echo "ERROR: libaribcaption not installed under $PREFIX" >&2; exit 1; }
-  echo "ok libaribcaption $ARIB_VER"
+  echo "ok libaribcaption $ARIB_VER (PIC)"
 else
   echo "ok libaribcaption (cached in PREFIX)"
 fi
