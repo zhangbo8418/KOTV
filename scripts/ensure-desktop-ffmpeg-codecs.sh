@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-ffmpeg-codecs-v1"
+STAMP="$PREFIX/.kotv-ffmpeg-codecs-v2"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 DAV1D_VER=1.5.4
@@ -28,6 +28,19 @@ is_windows() {
     MINGW*|MSYS*|CYGWIN*) return 0 ;;
   esac
   [[ "${OS:-}" == "Windows_NT" ]]
+}
+
+# Windows 上系统 pkg-config 常是坏掉的 Strawberry；以 PREFIX 里 .pc/.a 为准。
+pc_ready() {
+  local name="$1"
+  local pc="$PREFIX/lib/pkgconfig/${name}.pc"
+  [[ -f "$pc" ]] || return 1
+  case "$name" in
+    dav1d) [[ -f "$PREFIX/lib/libdav1d.a" || -f "$PREFIX/lib/libdav1d.dll.a" ]] || return 1 ;;
+    libxml-2.0) [[ -f "$PREFIX/lib/libxml2.a" || -f "$PREFIX/lib/libxml2.dll.a" ]] || return 1 ;;
+    libaribcaption) [[ -f "$PREFIX/lib/libaribcaption.a" || -f "$PREFIX/lib/libaribcaption.dll.a" ]] || return 1 ;;
+  esac
+  return 0
 }
 
 fetch() {
@@ -59,38 +72,38 @@ need git
 need cmake
 need meson
 need ninja
-need pkg-config
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 fi
 
-if [[ -f "$STAMP" ]] \
-  && pkg-config --exists dav1d 2>/dev/null \
-  && pkg-config --exists libxml-2.0 2>/dev/null \
-  && pkg-config --exists libaribcaption 2>/dev/null; then
-  echo "ok cached ffmpeg codecs (dav1d=$(pkg-config --modversion dav1d) xml2=$(pkg-config --modversion libxml-2.0) arib=$(pkg-config --modversion libaribcaption))"
+if [[ -f "$STAMP" ]] && pc_ready dav1d && pc_ready libxml-2.0 && pc_ready libaribcaption; then
+  echo "ok cached ffmpeg codecs (dav1d+xml2+arib in PREFIX)"
   exit 0
 fi
 
 cflags=""
 cmake_osx=()
-meson_native=()
+# meson 额外参数（交叉用 cross-file；勿对空数组用 [@] + set -u）
+dav1d_meson_extra=()
 if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   arch="${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
+  host_arch="$(uname -m)"
   cflags="-arch $arch"
   cmake_osx=(-DCMAKE_OSX_ARCHITECTURES="$arch")
-  # dav1d meson：交叉 arch 时写 native-file
-  if [[ "$arch" != "$(uname -m)" ]] || [[ -n "${KOTV_MPV_MACOS_ARCH:-}" ]]; then
-    ini="$BUILD_DIR/meson-native-dav1d-${arch}.ini"
+  if [[ "$arch" != "$host_arch" ]]; then
+    # arm64 runner 编 x86_64：必须用 cross-file，native-file 改不了 host cpu_family（仍会编 ARM asm）。
+    ini="$BUILD_DIR/meson-cross-dav1d-${arch}.ini"
     cpu_family="$arch"
     [[ "$arch" == "arm64" ]] && cpu_family="aarch64"
+    [[ "$arch" == "x86_64" ]] && cpu_family="x86_64"
     cat >"$ini" <<EOF
 [binaries]
 c = ['clang', '-arch', '$arch']
 cpp = ['clang++', '-arch', '$arch']
 ar = 'ar'
+strip = 'strip'
 pkg-config = 'pkg-config'
 [built-in options]
 c_args = ['-arch', '$arch']
@@ -101,7 +114,10 @@ cpu_family = '$cpu_family'
 cpu = '$arch'
 endian = 'little'
 EOF
-    meson_native=(--native-file="$ini")
+    dav1d_meson_extra+=(--cross-file="$ini")
+    # 交叉时关 asm 更稳（clang -arch 与汇编器目标偶发不一致）
+    dav1d_meson_extra+=(-Denable_asm=false)
+    echo "==> dav1d macOS cross $host_arch -> $arch (cross-file, asm=off)"
   fi
 fi
 export CFLAGS="${CFLAGS:-} $cflags"
@@ -124,7 +140,7 @@ fi
 echo "==> ffmpeg codecs (dav1d + libxml2 + libaribcaption) -> $PREFIX"
 
 # --- dav1d ---
-if ! pkg-config --exists dav1d 2>/dev/null || [[ ! -f "$PREFIX/lib/libdav1d.a" && ! -f "$PREFIX/lib/libdav1d.dll.a" ]]; then
+if ! pc_ready dav1d; then
   echo "==> build dav1d $DAV1D_VER ($DAV1D_SHA)"
   cd "$BUILD_DIR"
   if [[ ! -d dav1d/.git ]]; then
@@ -138,24 +154,27 @@ if ! pkg-config --exists dav1d 2>/dev/null || [[ ! -f "$PREFIX/lib/libdav1d.a" &
     || git -C dav1d checkout -q "$DAV1D_VER" \
     || { echo "ERROR: cannot checkout dav1d $DAV1D_VER / $DAV1D_SHA" >&2; exit 1; }
   rm -rf dav1d/build
-  meson setup dav1d/build dav1d \
-    --prefix="$PREFIX" \
-    --libdir=lib \
-    "${meson_native[@]}" \
-    -Ddefault_library=static \
-    -Denable_tools=false \
-    -Denable_tests=false \
-    -Denable_examples=false
+  meson_cmd=(meson setup dav1d/build dav1d
+    --prefix="$PREFIX"
+    --libdir=lib
+    -Ddefault_library=static
+    -Denable_tools=false
+    -Denable_tests=false
+    -Denable_examples=false)
+  if ((${#dav1d_meson_extra[@]})); then
+    meson_cmd+=("${dav1d_meson_extra[@]}")
+  fi
+  "${meson_cmd[@]}"
   meson compile -C dav1d/build -j "$JOBS"
   meson install -C dav1d/build
-  pkg-config --exists dav1d || { echo "ERROR: dav1d.pc missing" >&2; exit 1; }
-  echo "ok dav1d $(pkg-config --modversion dav1d)"
+  pc_ready dav1d || { echo "ERROR: dav1d not installed under $PREFIX" >&2; ls -la "$PREFIX/lib" "$PREFIX/lib/pkgconfig" 2>/dev/null || true; exit 1; }
+  echo "ok dav1d $DAV1D_VER"
 else
-  echo "ok dav1d $(pkg-config --modversion dav1d) (cached)"
+  echo "ok dav1d (cached in PREFIX)"
 fi
 
 # --- libxml2 ---
-if ! pkg-config --exists libxml-2.0 2>/dev/null || [[ ! -f "$PREFIX/lib/libxml2.a" && ! -f "$PREFIX/lib/libxml2.dll.a" ]]; then
+if ! pc_ready libxml-2.0; then
   echo "==> build libxml2 $XML2_VER"
   fetch "$XML2_URL" "$src/libxml2-${XML2_VER}.tar.gz" "$XML2_SHA"
   rm -rf "$BUILD_DIR/libxml2"
@@ -164,29 +183,34 @@ if ! pkg-config --exists libxml-2.0 2>/dev/null || [[ ! -f "$PREFIX/lib/libxml2.
   (
     cd "$BUILD_DIR/libxml2"
     rm -rf build
-    cmake -S . -B build -G "$cmake_gen" \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-      -DCMAKE_INSTALL_LIBDIR=lib \
-      "${cmake_osx[@]}" \
-      -DBUILD_SHARED_LIBS=OFF \
-      -DLIBXML2_WITH_PYTHON=OFF \
-      -DLIBXML2_WITH_ICONV=OFF \
-      -DLIBXML2_WITH_PROGRAMS=OFF \
-      -DLIBXML2_WITH_TESTS=OFF \
-      -DLIBXML2_WITH_MODULES=OFF \
-      ${CFLAGS:+-DCMAKE_C_FLAGS="$CFLAGS"}
+    xml_cmake=(cmake -S . -B build -G "$cmake_gen"
+      -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_INSTALL_PREFIX="$PREFIX"
+      -DCMAKE_INSTALL_LIBDIR=lib
+      -DBUILD_SHARED_LIBS=OFF
+      -DLIBXML2_WITH_PYTHON=OFF
+      -DLIBXML2_WITH_ICONV=OFF
+      -DLIBXML2_WITH_PROGRAMS=OFF
+      -DLIBXML2_WITH_TESTS=OFF
+      -DLIBXML2_WITH_MODULES=OFF)
+    if ((${#cmake_osx[@]})); then
+      xml_cmake+=("${cmake_osx[@]}")
+    fi
+    if [[ -n "${CFLAGS:-}" ]]; then
+      xml_cmake+=(-DCMAKE_C_FLAGS="$CFLAGS")
+    fi
+    "${xml_cmake[@]}"
     cmake --build build -j"$JOBS"
     cmake --install build
   )
-  pkg-config --exists libxml-2.0 || { echo "ERROR: libxml-2.0.pc missing" >&2; exit 1; }
-  echo "ok libxml2 $(pkg-config --modversion libxml-2.0)"
+  pc_ready libxml-2.0 || { echo "ERROR: libxml2 not installed under $PREFIX" >&2; exit 1; }
+  echo "ok libxml2 $XML2_VER"
 else
-  echo "ok libxml2 $(pkg-config --modversion libxml-2.0) (cached)"
+  echo "ok libxml2 (cached in PREFIX)"
 fi
 
 # --- libaribcaption ---
-if ! pkg-config --exists libaribcaption 2>/dev/null || [[ ! -f "$PREFIX/lib/libaribcaption.a" && ! -f "$PREFIX/lib/libaribcaption.dll.a" ]]; then
+if ! pc_ready libaribcaption; then
   echo "==> build libaribcaption $ARIB_VER"
   fetch "$ARIB_URL" "$src/libaribcaption-${ARIB_VER}.tar.gz" "$ARIB_SHA"
   rm -rf "$BUILD_DIR/libaribcaption"
@@ -198,27 +222,33 @@ if ! pkg-config --exists libaribcaption 2>/dev/null || [[ ! -f "$PREFIX/lib/liba
   elif [[ "$(uname -s)" == "Darwin" ]]; then
     arib_extra+=(-DARIBCC_USE_CORETEXT=ON -DARIBCC_USE_DIRECTWRITE=OFF -DARIBCC_USE_FREETYPE=OFF -DARIBCC_USE_FONTCONFIG=OFF)
   else
-    # Linux：嵌入 FreeType，不依赖系统 fontconfig（PREFIX 锁包时更稳）。
-    arib_extra+=(-DARIBCC_USE_FREETYPE=ON -DARIBCC_USE_EMBEDDED_FREETYPE=ON -DARIBCC_USE_FONTCONFIG=OFF -DARIBCC_USE_CORETEXT=OFF -DARIBCC_USE_DIRECTWRITE=OFF)
+    # Linux auto FontProvider 需要 Fontconfig；FreeType 仍用嵌入式。
+    arib_extra+=(-DARIBCC_USE_FREETYPE=ON -DARIBCC_USE_EMBEDDED_FREETYPE=ON -DARIBCC_USE_FONTCONFIG=ON -DARIBCC_USE_CORETEXT=OFF -DARIBCC_USE_DIRECTWRITE=OFF)
   fi
   (
     cd "$BUILD_DIR/libaribcaption"
     rm -rf build
-    cmake -S . -B build -G "$cmake_gen" \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-      -DCMAKE_INSTALL_LIBDIR=lib \
-      "${cmake_osx[@]}" \
-      -DBUILD_SHARED_LIBS=OFF \
-      -DARIBCC_SHARED_LIBRARY=OFF \
-      -DARIBCC_BUILD_TESTS=OFF \
-      "${arib_extra[@]}" \
-      ${CFLAGS:+-DCMAKE_C_FLAGS="$CFLAGS"} \
-      ${CXXFLAGS:+-DCMAKE_CXX_FLAGS="$CXXFLAGS"}
+    arib_cmake=(cmake -S . -B build -G "$cmake_gen"
+      -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_INSTALL_PREFIX="$PREFIX"
+      -DCMAKE_INSTALL_LIBDIR=lib
+      -DBUILD_SHARED_LIBS=OFF
+      -DARIBCC_SHARED_LIBRARY=OFF
+      -DARIBCC_BUILD_TESTS=OFF
+      "${arib_extra[@]}")
+    if ((${#cmake_osx[@]})); then
+      arib_cmake+=("${cmake_osx[@]}")
+    fi
+    if [[ -n "${CFLAGS:-}" ]]; then
+      arib_cmake+=(-DCMAKE_C_FLAGS="$CFLAGS")
+    fi
+    if [[ -n "${CXXFLAGS:-}" ]]; then
+      arib_cmake+=(-DCMAKE_CXX_FLAGS="$CXXFLAGS")
+    fi
+    "${arib_cmake[@]}"
     cmake --build build -j"$JOBS"
     cmake --install build
   )
-  # 个别安装不写 .pc
   if [[ ! -f "$PREFIX/lib/pkgconfig/libaribcaption.pc" ]]; then
     cat >"$PREFIX/lib/pkgconfig/libaribcaption.pc" <<EOF
 prefix=$PREFIX
@@ -233,10 +263,10 @@ Libs: -L\${libdir} -laribcaption
 Cflags: -I\${includedir}
 EOF
   fi
-  pkg-config --exists libaribcaption || { echo "ERROR: libaribcaption.pc missing" >&2; exit 1; }
-  echo "ok libaribcaption $(pkg-config --modversion libaribcaption)"
+  pc_ready libaribcaption || { echo "ERROR: libaribcaption not installed under $PREFIX" >&2; exit 1; }
+  echo "ok libaribcaption $ARIB_VER"
 else
-  echo "ok libaribcaption $(pkg-config --modversion libaribcaption) (cached)"
+  echo "ok libaribcaption (cached in PREFIX)"
 fi
 
 printf '%s\n' "dav1d=${DAV1D_VER} xml2=${XML2_VER} arib=${ARIB_VER}" >"$STAMP"

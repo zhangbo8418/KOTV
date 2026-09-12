@@ -278,33 +278,26 @@ cat >"$OVERRIDES/xxhash.sh" <<'EOF'
 #!/bin/bash -e
 . ../../include/path.sh
 . ../../include/depinfo.sh
-build=_build$ndk_suffix
 if [ "$1" == "build" ]; then
 	true
 elif [ "$1" == "clean" ]; then
-	rm -rf "$build"
+	rm -f libxxhash.a xxhash.o libxxhash.pc
 	exit 0
 else
 	exit 255
 fi
-# path.sh 会 unset ANDROID_NDK_ROOT；直接用 buildall 注入的 NDK clang。
-rm -rf "$build"
-cmake -S cmake_unofficial -B "$build" \
-	-DCMAKE_SYSTEM_NAME=Android \
-	-DCMAKE_C_COMPILER="$CC" \
-	-DCMAKE_CXX_COMPILER="$CXX" \
-	-DCMAKE_AR="$AR" \
-	-DCMAKE_RANLIB="$RANLIB" \
-	-DCMAKE_BUILD_TYPE=Release \
-	-DCMAKE_INSTALL_PREFIX="$prefix_dir" \
-	-DCMAKE_INSTALL_LIBDIR=lib \
-	-DBUILD_SHARED_LIBS=OFF \
-	-DXXHASH_BUILD_XXHSUM=OFF
-cmake --build "$build" -j"$cores"
-cmake --install "$build"
-mkdir -p "$prefix_dir/lib/pkgconfig"
-if [ ! -f "$prefix_dir/lib/pkgconfig/libxxhash.pc" ]; then
-	cat >"$prefix_dir/lib/pkgconfig/libxxhash.pc" <<'PC'
+# CMake+NDK 在此环境链静态库会报 “Error running link command: no such file”；改用官方 Makefile。
+make -f Makefile clean >/dev/null 2>&1 || true
+make -f Makefile libxxhash.a \
+	CC="$CC" \
+	AR="$AR" \
+	CFLAGS="${CFLAGS:--O3 -fPIC} -fPIC" \
+	-j"$cores"
+mkdir -p "$prefix_dir/lib" "$prefix_dir/include" "$prefix_dir/lib/pkgconfig"
+cp -f libxxhash.a "$prefix_dir/lib/libxxhash.a"
+cp -f xxhash.h "$prefix_dir/include/xxhash.h"
+[ -f xxh3.h ] && cp -f xxh3.h "$prefix_dir/include/xxh3.h" || true
+cat >"$prefix_dir/lib/pkgconfig/libxxhash.pc" <<'PC'
 prefix=/usr/local
 exec_prefix=${prefix}
 libdir=${prefix}/lib
@@ -315,7 +308,6 @@ Version: 0.8.3
 Libs: -L${libdir} -lxxhash
 Cflags: -I${includedir}
 PC
-fi
 [ -f "$prefix_dir/lib/libxxhash.a" ] || { echo "ERROR: libxxhash.a missing" >&2; exit 1; }
 EOF
 chmod +x "$OVERRIDES/xxhash.sh"
