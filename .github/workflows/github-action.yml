@@ -414,6 +414,17 @@ jobs:
           architecture: x64
 
       - uses: subosito/flutter-action@v2
+        id: flutter_mac_amd64
+        continue-on-error: true
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          architecture: x64
+
+      # storage.googleapis.com 偶发 curl 56；失败再装一次
+      - uses: subosito/flutter-action@v2
+        if: steps.flutter_mac_amd64.outcome == 'failure'
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
