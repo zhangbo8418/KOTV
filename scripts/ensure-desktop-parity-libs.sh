@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-parity-libs-v6"
+STAMP="$PREFIX/.kotv-parity-libs-v7"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 ICONV_VER=1.19
@@ -132,9 +132,8 @@ rm -f "$tmp"
 exit 0
 EOF
       chmod +x "$stub"
-      # libtool 常直接调 PATH 里的 windres，不看 WINDRES
-      ln -sfn "$(basename "$stub")" "$BUILD_DIR/bin/windres"
-      export PATH="$BUILD_DIR/bin:$PATH"
+      # 不要在 BUILD_DIR/bin 放名为 windres 的 symlink：该目录在 Windows 全局 PATH
+      #（pkg-config），CMake 会缓存绝对路径，cmd.exe 无法执行 Unix symlink。
       export WINDRES="$stub"
       export RC="$stub"
       ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-nls \
@@ -163,6 +162,7 @@ EOF
       fi
       [[ -f "$PREFIX/lib/libiconv.a" ]] || { echo "ERROR: libiconv.a missing" >&2; exit 1; }
       echo "ok libiconv $ICONV_VER (static lib, stub windres)"
+      unset WINDRES RC
     else
       ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-nls
       make -j"$JOBS"
@@ -171,13 +171,16 @@ EOF
   )
 fi
 
+# 清掉历史跑留下的假 windres，避免 CMake/Ninja 经 cmd.exe 调用失败
+rm -f "$BUILD_DIR/bin/windres" 2>/dev/null || true
+
 if [[ ! -f "$PREFIX/lib/libz.a" && ! -f "$PREFIX/lib/libzlibstatic.a" ]]; then
   # fossils 偶发返回 HTML；优先 GitHub release，sha 失败会删坏文件再试下一源。
   fetch "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz" \
     "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA" \
     || fetch "https://www.zlib.net/fossils/zlib-${ZLIB_VER}.tar.gz" \
       "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA"
-  rm -rf "$BUILD_DIR/zlib"
+  rm -rf "$BUILD_DIR/zlib" "$BUILD_DIR/zlib-build"
   mkdir -p "$BUILD_DIR/zlib"
   tar -xf "$src/zlib-${ZLIB_VER}.tar.gz" -C "$BUILD_DIR/zlib" --strip-components=1
   cmake -S "$BUILD_DIR/zlib" -B "$BUILD_DIR/zlib-build" -G "$cmake_gen" \
@@ -185,8 +188,43 @@ if [[ ! -f "$PREFIX/lib/libz.a" && ! -f "$PREFIX/lib/libzlibstatic.a" ]]; then
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DBUILD_SHARED_LIBS=OFF
-  cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS"
-  cmake --install "$BUILD_DIR/zlib-build"
+  # zlib 的 Windows CMake 仍会编 shared+zlib1.rc；只编静态并手动安装。
+  if is_windows; then
+    cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS" --target zlibstatic
+    mkdir -p "$PREFIX/lib" "$PREFIX/include"
+    zstat=""
+    for cand in \
+      "$BUILD_DIR/zlib-build/libzlibstatic.a" \
+      "$BUILD_DIR/zlib-build/zlibstatic.lib" \
+      "$BUILD_DIR/zlib-build/libz.a"; do
+      [[ -f "$cand" ]] && { zstat="$cand"; break; }
+    done
+    [[ -n "$zstat" ]] || { echo "ERROR: zlibstatic not built" >&2; exit 1; }
+    cp -f "$zstat" "$PREFIX/lib/libz.a"
+    cp -f "$BUILD_DIR/zlib/zlib.h" "$PREFIX/include/zlib.h"
+    if [[ -f "$BUILD_DIR/zlib-build/zconf.h" ]]; then
+      cp -f "$BUILD_DIR/zlib-build/zconf.h" "$PREFIX/include/zconf.h"
+    else
+      cp -f "$BUILD_DIR/zlib/zconf.h" "$PREFIX/include/zconf.h"
+    fi
+    mkdir -p "$PREFIX/lib/pkgconfig"
+    cat >"$PREFIX/lib/pkgconfig/zlib.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: zlib
+Description: zlib compression library
+Version: $ZLIB_VER
+Libs: -L\${libdir} -lz
+Cflags: -I\${includedir}
+EOF
+    echo "ok zlib $ZLIB_VER (static only)"
+  else
+    cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS"
+    cmake --install "$BUILD_DIR/zlib-build"
+  fi
 fi
 
 fetch "https://gitlab.freedesktop.org/uchardet/uchardet/-/archive/v${UCHARDET_VER}/uchardet-v${UCHARDET_VER}.tar.gz" \
