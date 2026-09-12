@@ -6,7 +6,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-ffmpeg-codecs-v5"
+# v6: zlib/xz 只装静态库；xz 关 CLI/NLS（交叉 mac 不链 Homebrew libintl）。
+STAMP="$PREFIX/.kotv-ffmpeg-codecs-v6"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 DAV1D_VER=1.5.4
@@ -87,9 +88,26 @@ if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
 fi
 
 if [[ -f "$STAMP" ]] && pc_ready dav1d && pc_ready zlib && pc_ready liblzma \
-  && pc_ready libxml-2.0 && pc_ready libaribcaption; then
+  && pc_ready libxml-2.0 && pc_ready libaribcaption \
+  && [[ ! -e "$PREFIX/lib/libz.dylib" && ! -e "$PREFIX/lib/libz.1.dylib" ]]; then
   echo "ok cached ffmpeg codecs (dav1d+zlib+lzma+xml2+arib in PREFIX)"
   exit 0
+fi
+
+# 旧缓存可能留下 zlib/lzma dylib，会让 FFmpeg configure 探测可执行文件 Abort。
+rm -f "$PREFIX/lib"/libz*.dylib "$PREFIX/lib"/libz.so* \
+  "$PREFIX/lib"/liblzma*.dylib "$PREFIX/lib"/liblzma.so* 2>/dev/null || true
+# 有共享 zlib 时强制重装静态（pc 仍在会跳过 build）。
+if [[ -f "$PREFIX/lib/pkgconfig/zlib.pc" ]] && [[ ! -f "$PREFIX/lib/libz.a" ]]; then
+  rm -f "$PREFIX/lib/pkgconfig/zlib.pc"
+fi
+# stamp 升级后若仍有旧 dylib 痕迹或缺静态库，清掉 zlib.pc 逼重建。
+if [[ -e "$PREFIX/lib/libz.dylib" ]] || [[ -e "$PREFIX/share/pkgconfig/zlib.pc" && ! -f "$PREFIX/lib/libz.a" ]]; then
+  rm -f "$PREFIX/lib/pkgconfig/zlib.pc" "$PREFIX/share/pkgconfig/zlib.pc"
+fi
+# 显式：若曾装过共享 zlib，无条件重建静态（本脚本开头已 rm dylib，用 stamp 缺失触发）。
+if [[ ! -f "$STAMP" ]]; then
+  rm -f "$PREFIX/lib/pkgconfig/zlib.pc" "$PREFIX/share/pkgconfig/zlib.pc"
 fi
 
 cflags=""
@@ -207,28 +225,28 @@ if ! pc_ready zlib; then
     z_cmake+=(-DCMAKE_C_FLAGS="$CFLAGS")
   fi
   "${z_cmake[@]}"
-  if is_windows; then
-    cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS" --target zlibstatic
-    mkdir -p "$PREFIX/lib" "$PREFIX/include" "$PREFIX/lib/pkgconfig"
-    zstat=""
-    for cand in \
-      "$BUILD_DIR/zlib-build/libzlibstatic.a" \
-      "$BUILD_DIR/zlib-build/zlibstatic.lib" \
-      "$BUILD_DIR/zlib-build/libz.a"; do
-      [[ -f "$cand" ]] && { zstat="$cand"; break; }
-    done
-    [[ -n "$zstat" ]] || { echo "ERROR: zlibstatic not built" >&2; exit 1; }
-    cp -f "$zstat" "$PREFIX/lib/libz.a"
-    cp -f "$BUILD_DIR/zlib/zlib.h" "$PREFIX/include/zlib.h"
-    if [[ -f "$BUILD_DIR/zlib-build/zconf.h" ]]; then
-      cp -f "$BUILD_DIR/zlib-build/zconf.h" "$PREFIX/include/zconf.h"
-    else
-      cp -f "$BUILD_DIR/zlib/zconf.h" "$PREFIX/include/zconf.h"
-    fi
+  # zlib 的 CMake 即使 BUILD_SHARED_LIBS=OFF 仍常编出 dylib；只装静态，避免 FFmpeg
+  # configure 早期 -L$PREFIX/lib 链到坏共享库后 Abort trap。
+  cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS" --target zlibstatic
+  mkdir -p "$PREFIX/lib" "$PREFIX/include" "$PREFIX/lib/pkgconfig"
+  zstat=""
+  for cand in \
+    "$BUILD_DIR/zlib-build/libzlibstatic.a" \
+    "$BUILD_DIR/zlib-build/zlibstatic.lib" \
+    "$BUILD_DIR/zlib-build/libz.a" \
+    "$BUILD_DIR/zlib-build/lib/libz.a"; do
+    [[ -f "$cand" ]] && { zstat="$cand"; break; }
+  done
+  [[ -n "$zstat" ]] || { echo "ERROR: zlibstatic not built" >&2; ls -laR "$BUILD_DIR/zlib-build" | head -80 >&2; exit 1; }
+  cp -f "$zstat" "$PREFIX/lib/libz.a"
+  cp -f "$BUILD_DIR/zlib/zlib.h" "$PREFIX/include/zlib.h"
+  if [[ -f "$BUILD_DIR/zlib-build/zconf.h" ]]; then
+    cp -f "$BUILD_DIR/zlib-build/zconf.h" "$PREFIX/include/zconf.h"
   else
-    cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS"
-    cmake --install "$BUILD_DIR/zlib-build"
+    cp -f "$BUILD_DIR/zlib/zconf.h" "$PREFIX/include/zconf.h"
   fi
+  rm -f "$PREFIX/lib"/libz*.dylib "$PREFIX/lib"/libz.so* "$PREFIX/lib"/zlib.dll* \
+    "$PREFIX/share/pkgconfig/zlib.pc" 2>/dev/null || true
   cat >"$PREFIX/lib/pkgconfig/zlib.pc" <<EOF
 prefix=$PREFIX
 exec_prefix=\${prefix}
@@ -242,7 +260,7 @@ Libs: -L\${libdir} -lz
 Cflags: -I\${includedir}
 EOF
   pc_ready zlib || { echo "ERROR: zlib not installed under $PREFIX" >&2; exit 1; }
-  echo "ok zlib $ZLIB_VER"
+  echo "ok zlib $ZLIB_VER (static)"
 else
   echo "ok zlib (cached in PREFIX)"
 fi
@@ -261,6 +279,15 @@ if ! pc_ready liblzma; then
     -DCMAKE_BUILD_TYPE=Release
     -DBUILD_SHARED_LIBS=OFF
     -DBUILD_TESTING=OFF
+    -DXZ_TOOL_XZ=OFF
+    -DXZ_TOOL_XZDEC=OFF
+    -DXZ_TOOL_LZMADEC=OFF
+    -DXZ_TOOL_LZMAINFO=OFF
+    -DXZ_TOOL_XZDIFF=OFF
+    -DXZ_TOOL_XZGREP=OFF
+    -DXZ_TOOL_XZMORE=OFF
+    -DXZ_TOOL_XZLESS=OFF
+    -DXZ_NLS=OFF
     -DCREATE_XZ_SYMLINKS=OFF
     -DCREATE_LZMA_SYMLINKS=OFF)
   if ((${#cmake_osx[@]})); then
@@ -286,8 +313,13 @@ Libs: -L\${libdir} -llzma
 Cflags: -I\${includedir}
 EOF
   fi
+  # 只要静态 liblzma；清掉共享库与 CLI，避免交叉链接 Homebrew / 污染 FFmpeg。
+  rm -f "$PREFIX/lib"/liblzma*.dylib "$PREFIX/lib"/liblzma.so* \
+    "$PREFIX/bin"/xz "$PREFIX/bin"/xzdec "$PREFIX/bin"/lzmadec \
+    "$PREFIX/bin"/lzmainfo "$PREFIX/bin"/xzdiff "$PREFIX/bin"/xzgrep \
+    "$PREFIX/bin"/xzmore "$PREFIX/bin"/xzless 2>/dev/null || true
   pc_ready liblzma || { echo "ERROR: liblzma not installed under $PREFIX" >&2; exit 1; }
-  echo "ok liblzma $XZ_VER"
+  echo "ok liblzma $XZ_VER (static, tools off)"
 else
   echo "ok liblzma (cached in PREFIX)"
 fi

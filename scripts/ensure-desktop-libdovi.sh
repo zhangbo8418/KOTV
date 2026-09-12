@@ -129,8 +129,22 @@ rust_target() {
     esac
     return
   fi
-  # 本机 triple
-  rustc -vV | awk '/^host:/{print $2; exit}'
+  # 勿对 rustc 做管道：pipefail 下下游提前关 fd → rustc SIGPIPE → exit 141。
+  local vv host="" line
+  vv="$(rustc -vV 2>/dev/null || true)"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      host:*) host="${line#host: }"; host="${host#"${host%%[![:space:]]*}"}"; break ;;
+    esac
+  done <<< "$vv"
+  if [[ -z "$host" ]]; then
+    case "$(uname -m)" in
+      x86_64|amd64) host="x86_64-unknown-linux-gnu" ;;
+      aarch64|arm64) host="aarch64-unknown-linux-gnu" ;;
+      *) host="$(uname -m)-unknown-linux-gnu" ;;
+    esac
+  fi
+  printf '%s\n' "$host"
 }
 
 ensure_rust
@@ -141,17 +155,39 @@ echo "==> build libdovi $DOVI_REF (target=$TARGET → $PREFIX)"
 rustup target add "$TARGET" >/dev/null 2>&1 || true
 
 if is_windows; then
-  # MinGW：cc/crates 必须走同一套 gcc，否则 asm/链接炸。
-  export CC_x86_64_pc_windows_gnu="${CC:-x86_64-w64-mingw32-gcc}"
-  export CXX_x86_64_pc_windows_gnu="${CXX:-x86_64-w64-mingw32-g++}"
-  export AR_x86_64_pc_windows_gnu="${AR:-x86_64-w64-mingw32-ar}"
-  export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CC:-x86_64-w64-mingw32-gcc}"
-  if ! command -v "${CC:-gcc}" >/dev/null 2>&1 && command -v gcc >/dev/null 2>&1; then
-    export CC_x86_64_pc_windows_gnu=gcc
-    export CXX_x86_64_pc_windows_gnu=g++
-    export AR_x86_64_pc_windows_gnu=ar
-    export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=gcc
+  # MinGW：host/build-script 也必须走 gnu，否则默认 MSVC host 会找 link.exe，
+  # 却命中 Git 的 /usr/bin/link（Unix link）而炸。
+  rustup toolchain install stable-x86_64-pc-windows-gnu >/dev/null 2>&1 || true
+  rustup default stable-x86_64-pc-windows-gnu >/dev/null 2>&1 || true
+  export RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-gnu
+  # 从 PATH 去掉 Git usr/bin，避免再 shadow MinGW/MSVC link。
+  cleaned=""
+  old_ifs="$IFS"
+  IFS=':'
+  # shellcheck disable=SC2086
+  for part in $PATH; do
+    case "$part" in
+      *Git*/usr/bin*|*git*/usr/bin*) continue ;;
+    esac
+    if [[ -z "$cleaned" ]]; then cleaned="$part"; else cleaned="$cleaned:$part"; fi
+  done
+  IFS="$old_ifs"
+  export PATH="$cleaned"
+  # 优先 MinGW gcc
+  if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
+    export CC=x86_64-w64-mingw32-gcc
+    export CXX=x86_64-w64-mingw32-g++
+    export AR=x86_64-w64-mingw32-ar
+  elif command -v gcc >/dev/null 2>&1; then
+    export CC=gcc
+    export CXX=g++
+    export AR=ar
   fi
+  export CC_x86_64_pc_windows_gnu="${CC}"
+  export CXX_x86_64_pc_windows_gnu="${CXX}"
+  export AR_x86_64_pc_windows_gnu="${AR}"
+  export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CC}"
+  export CARGO_BUILD_TARGET=x86_64-pc-windows-gnu
 elif [[ "$(uname -s)" == "Darwin" ]]; then
   local_arch="$(uname -m)"
   want_arch="${KOTV_MPV_MACOS_ARCH:-$local_arch}"

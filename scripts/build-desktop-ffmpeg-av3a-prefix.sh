@@ -81,10 +81,11 @@ clone_ffmpeg() {
   fi
 }
 
+# v16: codecs 静态 zlib/lzma；mac 探测链 -lc++；清 DYLD 防 Abort。
 # v15: libxml2 完整启用 zlib+lzma（PREFIX 自带依赖）。
 # v14: +dav1d +libxml2 +libaribcaption + 平台硬解（d3d11va/videotoolbox/vaapi）。
 # HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v15-${FFMPEG_COMMIT:0:12}"
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v16-${FFMPEG_COMMIT:0:12}"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -129,7 +130,7 @@ import sys
 from pathlib import Path
 p = Path(sys.argv[1])
 lines = p.read_text(encoding="utf-8", errors="replace").splitlines(True)
-need = ["-larcdav3a", "-ldav1d", "-laribcaption"]
+need = ["-larcdav3a", "-ldav1d", "-laribcaption", "-lxml2", "-lz", "-llzma"]
 out = []
 for line in lines:
     if line.startswith("Libs:"):
@@ -144,7 +145,7 @@ for line in lines:
     out.append(line)
 p.write_text("".join(out), encoding="utf-8")
 PY
-  echo "ok patched $pc (+ arcdav3a/dav1d/aribcaption on Libs)"
+  echo "ok patched $pc (+ arcdav3a/dav1d/aribcaption/xml2/zlib/lzma on Libs)"
 }
 
 promote_arcdav3a_in_avcodec_pc() {
@@ -308,6 +309,11 @@ fi
 # RTSP/RTMP：FFmpeg 内置。HTTP/2·HTTP/3：FongMi FFmpeg 无 --enable-libnghttp2，由 mpv libcurl 栈提供。
 setup_pkg_config
 
+# FFmpeg configure 会把 --extra-ldflags/--extra-libs 用在最早的 cc 探测上；
+# 清掉可能污染运行探测的动态库搜索路径（mac Abort trap: 6）。
+unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH LD_LIBRARY_PATH LIBRARY_PATH 2>/dev/null || true
+rm -f "$PREFIX/lib"/libz*.dylib "$PREFIX/lib"/liblzma*.dylib 2>/dev/null || true
+
 FFMPEG_EXTRA=(--extra-cflags="-I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2")
 FFMPEG_EXTRA+=(--extra-ldflags="-L${PREF_NATIVE}/lib")
 # 播放不需要 avdevice；与 fvp/mdk 同进程时 libavdevice 易引入重复注册/堆损坏（mac ObjC 类，Win Vulkan 路径 talloc）。
@@ -331,15 +337,45 @@ elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   FFMPEG_EXTRA+=(--disable-x86asm)
   FFMPEG_EXTRA+=(--enable-securetransport)
   FFMPEG_EXTRA+=(--enable-videotoolbox)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm")
+  # arib 是 C++；探测阶段也会链 extra-libs。
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lc++")
+  export CC="${CC:-clang}"
+  export CXX="${CXX:-clang++}"
 else
   FFMPEG_EXTRA+=(--enable-openssl)
   FFMPEG_EXTRA+=(--enable-vaapi)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lstdc++")
 fi
 
 # 旧前缀可能残留 libavdevice.pc（无 .a）；meson 会回退到 Homebrew 共享库。
 rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
+
+# mac：configure 早期会链 extra-libs 并执行探测；先自测，避免只见 Abort trap。
+if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+  probe_src="$BUILD_DIR/ffmpeg_cc_probe.c"
+  probe_bin="$BUILD_DIR/ffmpeg_cc_probe"
+  cat >"$probe_src" <<'PROBE'
+int main(void) { return 0; }
+PROBE
+  probe_cc="${CC:-clang}"
+  if ! "$probe_cc" -O0 -I"$PREF_NATIVE/include" -I"$PREF_NATIVE/include/libxml2" \
+      -L"$PREF_NATIVE/lib" -o "$probe_bin" "$probe_src" \
+      -larcdav3a -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lc++ \
+      2>"$BUILD_DIR/ffmpeg_cc_probe.log"; then
+    echo "ERROR: pre-configure link probe failed ($probe_cc):" >&2
+    cat "$BUILD_DIR/ffmpeg_cc_probe.log" >&2
+    ls -la "$PREFIX/lib"/libz* "$PREFIX/lib"/liblzma* "$PREFIX/lib"/libxml* "$PREFIX/lib"/libarib* 2>/dev/null || true
+    exit 1
+  fi
+  if ! "$probe_bin" >/dev/null 2>"$BUILD_DIR/ffmpeg_cc_probe_run.log"; then
+    echo "ERROR: pre-configure run probe aborted (often bad dylib under PREFIX/lib):" >&2
+    cat "$BUILD_DIR/ffmpeg_cc_probe_run.log" >&2 || true
+    ls -la "$PREFIX/lib"/libz* "$PREFIX/lib"/liblzma* "$PREFIX/lib"/libxml* 2>/dev/null || true
+    file "$probe_bin" 2>/dev/null || true
+    exit 1
+  fi
+  echo "ok FFmpeg cc link+run probe"
+fi
 
 if ! ./configure \
   --prefix="$PREFIX" \
@@ -355,7 +391,12 @@ if ! ./configure \
   "${FFMPEG_EXTRA[@]}" \
   ${KOTV_FFMPEG_CONFIGURE_EXTRA:-}; then
   echo "ERROR: FFmpeg configure failed; last 80 lines of ffbuild/config.log:" >&2
-  tail -80 ffbuild/config.log 2>/dev/null >&2 || true
+  if [[ -f ffbuild/config.log ]]; then
+    tail -80 ffbuild/config.log >&2
+  else
+    echo "(ffbuild/config.log missing)" >&2
+    ls -la ffbuild 2>/dev/null >&2 || true
+  fi
   exit 1
 fi
 
