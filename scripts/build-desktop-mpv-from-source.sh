@@ -75,18 +75,29 @@ kotv_mpv_dll_has_opengl() {
 
 kotv_libplacebo_profile() {
   if kotv_is_windows_build; then
-    # Vulkan + D3D11 + OpenGL（libmpv plain-gl / gpu-api=opengl）；用户默认仍可 auto→d3d11。
+    # Vulkan + D3D11 + OpenGL + libdovi + lcms + xxhash（glslang 用 shaderc 代替）。
     if kotv_is_mpv_win7_build; then
-      echo "win7-vulkan-d3d11-opengl-v1"
+      echo "win7-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     else
-      echo "win-vulkan-d3d11-opengl-v1"
+      echo "win-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     fi
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    # 自前缀 Vulkan（按目标 arch），禁 Homebrew shaderc/lcms，避免错架构 / 绝对路径。
-    echo "macos-vulkan-prefix-opengl-v1"
+    echo "macos-vulkan-prefix-opengl-dovi-lcms-xxhash-v1"
   else
-    echo "vulkan-opengl-v1"
+    echo "vulkan-opengl-dovi-lcms-xxhash-v1"
   fi
+}
+
+ensure_libdovi() {
+  chmod +x "$ROOT/scripts/ensure-desktop-libdovi.sh"
+  KOTV_MPV_BUILD_DIR="$BUILD_DIR" KOTV_DESKTOP_FFMPEG_PREFIX="$PREFIX" \
+    "$ROOT/scripts/ensure-desktop-libdovi.sh"
+}
+
+ensure_placebo_extras() {
+  chmod +x "$ROOT/scripts/ensure-desktop-placebo-extras.sh"
+  KOTV_MPV_BUILD_DIR="$BUILD_DIR" KOTV_DESKTOP_FFMPEG_PREFIX="$PREFIX" \
+    "$ROOT/scripts/ensure-desktop-placebo-extras.sh"
 }
 
 # 全平台：mpv 链 PREFIX libcurl（HTTP/2 + HTTP/3）。播流 HTTPS/RTSP/RTMP 仍走 FFmpeg。
@@ -768,6 +779,8 @@ ensure_libplacebo() {
       rm -f "$PREFIX/lib/libplacebo.a" "$PREFIX/lib/pkgconfig/libplacebo.pc" 2>/dev/null || true
     fi
   fi
+  ensure_libdovi
+  ensure_placebo_extras
   echo "==> build libplacebo $LIBPLACEBO_TAG (profile=$want_profile, need >= $LIBPLACEBO_MIN)"
   need meson
   need ninja
@@ -783,6 +796,16 @@ ensure_libplacebo() {
   rm -rf build
   local placebo_lib=shared
   local vk_flag=enabled
+  # glslang：有 shaderc 时不必开（官方更推荐 shaderc；Gentoo 也已丢掉 glslang USE）。
+  local -a placebo_common=(
+    -Ddovi=enabled
+    -Dlibdovi=enabled
+    -Dlcms=enabled
+    -Dxxhash=enabled
+    -Dglslang=disabled
+    -Ddemos=false
+    -Dtests=false
+  )
   if kotv_is_windows_build; then
     placebo_lib=static
     echo "==> windows: static libplacebo (profile=$want_profile, vulkan=$vk_flag)"
@@ -799,7 +822,7 @@ ensure_libplacebo() {
     elif [[ -n "${PKG_CONFIG:-}" ]]; then
       echo "WARN: meson-native-kotv.ini missing; relying on PKG_CONFIG=$PKG_CONFIG" >&2
     fi
-    # Win：D3D11 + OpenGL（shaderc 给 d3d11）；默认 gpu-api=auto 仍可落到 d3d11。
+    # Win：D3D11 + OpenGL（shaderc 给 d3d11）+ libdovi/lcms/xxhash。
     placebo_extra+=(-Dd3d11=enabled -Dshaderc=enabled -Dopengl=enabled)
     meson setup build \
       --prefix="$PREFIX" \
@@ -808,8 +831,7 @@ ensure_libplacebo() {
       -Ddefault_library="$placebo_lib" \
       -Dvulkan="$vk_flag" \
       "${placebo_extra[@]}" \
-      -Ddemos=false \
-      -Dtests=false \
+      "${placebo_common[@]}" \
       -Dc_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']" \
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
@@ -818,8 +840,9 @@ ensure_libplacebo() {
     export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
     local native_ini
     native_ini="$(kotv_macos_write_meson_native)"
-    echo "==> macOS: libplacebo vulkan+opengl ($want_profile, arch=$(kotv_macos_target_arch))"
-    # shaderc/lcms 仍关：可选，且 Homebrew 版易带错架构绝对路径。
+    echo "==> macOS: libplacebo vulkan+opengl+dovi+lcms+xxhash ($want_profile, arch=$(kotv_macos_target_arch))"
+    # shaderc 仍关：可选，且 Homebrew 版易带错架构绝对路径；Vulkan 在 mac 上可走无 SPIR-V 编译器路径受限功能，
+    # 若后续要完整 gpu-next 再自前缀编 shaderc。
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
@@ -827,10 +850,8 @@ ensure_libplacebo() {
       -Ddefault_library="$placebo_lib" \
       -Dvulkan=enabled \
       -Dshaderc=disabled \
-      -Dlcms=disabled \
       -Dopengl=enabled \
-      -Ddemos=false \
-      -Dtests=false
+      "${placebo_common[@]}"
   else
     meson setup build \
       --prefix="$PREFIX" \
@@ -838,8 +859,8 @@ ensure_libplacebo() {
       -Ddefault_library="$placebo_lib" \
       -Dvulkan=enabled \
       -Dopengl=enabled \
-      -Ddemos=false \
-      -Dtests=false
+      -Dshaderc=enabled \
+      "${placebo_common[@]}"
   fi
   kotv_meson_compile build "libplacebo"
   meson install -C build
@@ -856,7 +877,19 @@ ensure_libplacebo() {
     find "$PREFIX" -name 'libplacebo.pc' 2>/dev/null || true
     exit 1
   fi
-  echo "ok libplacebo $(pkg-config --modversion libplacebo) (built)"
+  # 确认真正编进了 libdovi / lcms / xxhash。
+  local cfgh
+  cfgh="$(find "$PREFIX/include" "$BUILD_DIR/libplacebo/build" -name 'config.h' 2>/dev/null | head -1 || true)"
+  if [[ -n "$cfgh" ]]; then
+    for feat in LIBDOVI LCMS XXHASH; do
+      if ! grep -Eq "^#define PL_HAVE_${feat} 1" "$cfgh"; then
+        echo "ERROR: libplacebo built without PL_HAVE_${feat}=1 ($cfgh)" >&2
+        grep -E "PL_HAVE_.*${feat}|${feat}" "$cfgh" 2>/dev/null || true
+        exit 1
+      fi
+    done
+  fi
+  echo "ok libplacebo $(pkg-config --modversion libplacebo) (built, libdovi+lcms+xxhash)"
 }
 
 ensure_lua_pkg() {

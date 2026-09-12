@@ -81,9 +81,9 @@ clone_ffmpeg() {
   fi
 }
 
-# v13: 跟 FongMi release-9.0-fongmi tip（RELEASE=9.0.1）。HTTP/2+3 仍走 mpv libcurl。
-# 伪装扩展名分片靠播放器 extension_picky=0，不再打 mpegts 文件头补丁。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v13-${FFMPEG_COMMIT:0:12}"
+# v14: +dav1d +libxml2 +libaribcaption + 平台硬解（d3d11va/videotoolbox/vaapi）。
+# HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v14-${FFMPEG_COMMIT:0:12}"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -119,27 +119,35 @@ Cflags: -I$pref/include
 EOF
 }
 
-# meson 链 libmpv 时若不带 --static，Libs.private 会被丢掉；把 -larcdav3a 提到 Libs。
-promote_arcdav3a_in_avcodec_pc() {
+# meson 链 libmpv 时若不带 --static，Libs.private 会被丢掉；把关键静态库提到 Libs。
+promote_static_libs_in_avcodec_pc() {
   local pc="$PREFIX/lib/pkgconfig/libavcodec.pc"
   [[ -f "$pc" ]] || return 0
-  if grep -E '^Libs:' "$pc" | grep -q -- '-larcdav3a'; then
-    return 0
-  fi
   python3 - "$pc" <<'PY'
 import sys
 from pathlib import Path
 p = Path(sys.argv[1])
 lines = p.read_text(encoding="utf-8", errors="replace").splitlines(True)
+need = ["-larcdav3a", "-ldav1d", "-laribcaption"]
 out = []
 for line in lines:
-    if line.startswith("Libs:") and "-larcdav3a" not in line:
+    if line.startswith("Libs:"):
         nl = "\n" if line.endswith("\n") else ""
-        line = line.rstrip("\r\n") + " -larcdav3a -lm" + nl
+        body = line.rstrip("\r\n")
+        for lib in need:
+            if lib not in body:
+                body += f" {lib}"
+        if "-lm" not in body:
+            body += " -lm"
+        line = body + nl
     out.append(line)
 p.write_text("".join(out), encoding="utf-8")
 PY
-  echo "ok patched $pc (+ -larcdav3a on Libs)"
+  echo "ok patched $pc (+ arcdav3a/dav1d/aribcaption on Libs)"
+}
+
+promote_arcdav3a_in_avcodec_pc() {
+  promote_static_libs_in_avcodec_pc
 }
 
 # 自包含 pkg-config：读 PREFIX/.pc；Windows 另写 .cmd 供 meson(Python) 找到。
@@ -221,6 +229,12 @@ fi
 echo "==> build desktop FFmpeg+AV3A prefix → $PREFIX ($(uname -s))"
 clone_ffmpeg
 
+# dav1d / libxml2 / libaribcaption（与安卓对齐）
+chmod +x "$ROOT/scripts/ensure-desktop-ffmpeg-codecs.sh"
+KOTV_MPV_BUILD_DIR="$BUILD_DIR" KOTV_DESKTOP_FFMPEG_PREFIX="$PREFIX" \
+  "$ROOT/scripts/ensure-desktop-ffmpeg-codecs.sh"
+export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
 [[ -f ffmpeg/dependency/avs3a/CMakeLists.txt ]] \
   || { echo "ERROR: missing ffmpeg/dependency/avs3a (wrong FongMi/FFmpeg commit?)" >&2; exit 1; }
 grep -q -- '--enable-libarcdav3a' ffmpeg/configure \
@@ -293,6 +307,10 @@ FFMPEG_EXTRA+=(--extra-ldflags="-L${PREF_NATIVE}/lib")
 # 播放不需要 avdevice；与 fvp/mdk 同进程时 libavdevice 易引入重复注册/堆损坏（mac ObjC 类，Win Vulkan 路径 talloc）。
 FFMPEG_EXTRA+=(--disable-avdevice)
 FFMPEG_EXTRA+=(--enable-network)
+# 与安卓对齐的外置解码/解析库。
+FFMPEG_EXTRA+=(--enable-libdav1d)
+FFMPEG_EXTRA+=(--enable-libxml2)
+FFMPEG_EXTRA+=(--enable-libaribcaption)
 if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
@@ -300,15 +318,18 @@ if kotv_is_windows_build; then
   FFMPEG_EXTRA+=(--disable-mediafoundation)
   # 原生 Schannel，避免 MinGW 编 OpenSSL（MSYS perl 缺 Locale::Maketext）。
   FFMPEG_EXTRA+=(--enable-schannel)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm -lcrypt32 -lsecur32 -lws2_32")
+  FFMPEG_EXTRA+=(--enable-d3d11va)
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lm -lcrypt32 -lsecur32 -lws2_32 -ldwrite -lole32 -luuid")
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # Apple ld（Xcode 15+/26）对 nasm 产物报 unknown platform；经典链接器已移除。
   FFMPEG_EXTRA+=(--disable-x86asm)
   FFMPEG_EXTRA+=(--enable-securetransport)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
+  FFMPEG_EXTRA+=(--enable-videotoolbox)
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lm")
 else
   FFMPEG_EXTRA+=(--enable-openssl)
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lm")
+  FFMPEG_EXTRA+=(--enable-vaapi)
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -ldav1d -laribcaption -lxml2 -lm")
 fi
 
 # 旧前缀可能残留 libavdevice.pc（无 .a）；meson 会回退到 Homebrew 共享库。
@@ -341,6 +362,11 @@ if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$lib" 2>/dev/null; then
   echo "ERROR: $lib built without AV3A/libarcdav3a" >&2
   exit 1
 fi
+if ! grep -aqE 'libdav1d|dav1d_data_props' "$lib" 2>/dev/null \
+  && ! grep -aq 'dav1d' "$PREFIX/lib/pkgconfig/libavcodec.pc" 2>/dev/null; then
+  echo "ERROR: $lib built without libdav1d" >&2
+  exit 1
+fi
 # lavf：HTTPS + 直播常用 RTSP/RTMP（FongMi 无 libnghttp2 选项；HTTP/2+3 走 mpv libcurl）。
 if [[ -f ffbuild/config.h ]]; then
   fail_proto=0
@@ -361,13 +387,35 @@ if [[ -f ffbuild/config.h ]]; then
     echo "ERROR: FFmpeg missing RTMP protocol" >&2
     fail_proto=1
   fi
+  for feat in LIBDAV1D LIBXML2 LIBARIBCAPTION; do
+    if ! grep -qE "^#define CONFIG_${feat} 1\$" ffbuild/config.h; then
+      echo "ERROR: FFmpeg missing CONFIG_${feat}=1" >&2
+      fail_proto=1
+    fi
+  done
+  if kotv_is_windows_build; then
+    if ! grep -qE '^#define CONFIG_D3D11VA 1$' ffbuild/config.h; then
+      echo "ERROR: FFmpeg missing CONFIG_D3D11VA=1" >&2
+      fail_proto=1
+    fi
+  elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    if ! grep -qE '^#define CONFIG_VIDEOTOOLBOX 1$' ffbuild/config.h; then
+      echo "ERROR: FFmpeg missing CONFIG_VIDEOTOOLBOX=1" >&2
+      fail_proto=1
+    fi
+  else
+    if ! grep -qE '^#define CONFIG_VAAPI 1$' ffbuild/config.h; then
+      echo "ERROR: FFmpeg missing CONFIG_VAAPI=1" >&2
+      fail_proto=1
+    fi
+  fi
   if [[ "$fail_proto" != 0 ]]; then
-    grep -E 'CONFIG_(HTTPS|HTTP_PROTOCOL|RTSP|RTMP|OPENSSL|SCHANNEL|SECURETRANSPORT)' ffbuild/config.h | head -50 >&2 || true
+    grep -E 'CONFIG_(HTTPS|HTTP_PROTOCOL|RTSP|RTMP|OPENSSL|SCHANNEL|SECURETRANSPORT|LIBDAV1D|LIBXML2|LIBARIBCAPTION|D3D11VA|VIDEOTOOLBOX|VAAPI)' ffbuild/config.h | head -80 >&2 || true
     exit 1
   fi
-  echo "ok FFmpeg protocols: HTTPS + HTTP + RTSP + RTMP"
+  echo "ok FFmpeg: HTTPS/RTSP/RTMP + dav1d/xml2/arib + hwaccel"
 fi
 mkdir -p "$PREFIX"
 promote_arcdav3a_in_avcodec_pc
-echo "pic+av3a+tls+rtsp+rtmp $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
-echo "ok FFmpeg+AV3A+TLS+RTSP/RTMP prefix: $PREFIX"
+echo "pic+av3a+dav1d+xml2+arib+hw+tls+rtsp+rtmp $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
+echo "ok FFmpeg+AV3A+dav1d+xml2+arib+hwaccel prefix: $PREFIX"

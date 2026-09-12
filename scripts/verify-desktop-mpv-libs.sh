@@ -29,6 +29,18 @@ check_av3a() {
   fi
 }
 
+check_dav1d() {
+  local f="$1"
+  local name="$2"
+  [[ -f "$f" ]] || return
+  if has_str "$f" "dav1d_data_props" || has_str "$f" "libdav1d" || has_str "$f" "dav1d_get_picture"; then
+    echo "ok $name: libdav1d (AV1)"
+    return
+  fi
+  echo "ERROR: $name lacks libdav1d markers (rebuild FFmpeg with --enable-libdav1d)" >&2
+  fail=1
+}
+
 check_no_avdevice() {
   local f="$1"
   local name="$2"
@@ -132,6 +144,21 @@ check_libcurl() {
   fi
 }
 
+# libplacebo + libdovi：杜比视界 RPU / tone-map。
+check_dovi() {
+  local f="$1"
+  local name="$2"
+  [[ -f "$f" ]] || return
+  if has_str "$f" "dovi_parse_unspec62_nalu" \
+    || has_str "$f" "pl_hdr_metadata_from_dovi_rpu" \
+    || has_str "$f" "dovi_rpu_get_header"; then
+    echo "ok $name: libdovi (Dolby Vision)"
+    return
+  fi
+  echo "ERROR: $name lacks libdovi markers (rebuild libplacebo with -Dlibdovi=enabled)" >&2
+  fail=1
+}
+
 # Windows：FFmpeg Schannel 负责播流 HTTPS；mpv 也要有 libcurl（HTTP/2+3）。
 check_win_https() {
   local f="$1"
@@ -144,13 +171,15 @@ check_win_https() {
   echo "WARN: $name HTTPS markers weak (FFmpeg should still have --enable-schannel)" >&2
 }
 
-echo "==> verify desktop libmpv (Vulkan + AV3A + network)"
+echo "==> verify desktop libmpv (Vulkan + AV3A + dav1d + network + dovi)"
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == windows* ]]; then
   check_vulkan "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_av3a "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  check_dav1d "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_libcurl "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_iso "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_android_parity "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
+  check_dovi "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   check_win_https "$ASSET/windows/mpv-2.dll" "windows/mpv-2.dll"
   if [[ -f "$ASSET/windows/mpv-2.dll" ]]; then
     if ! ls "$ASSET/windows"/libcurl*.dll >/dev/null 2>&1; then
@@ -174,17 +203,21 @@ fi
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == linux* ]]; then
   check_vulkan "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
   check_av3a "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
+  check_dav1d "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
   check_libcurl "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
   check_iso "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
   check_android_parity "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
+  check_dovi "$ASSET/linux/libmpv.so.2" "linux/libmpv.so.2"
 fi
 if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
   if [[ -f "$ASSET/macos/libmpv.dylib" ]]; then
     check_vulkan "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_av3a "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
+    check_dav1d "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_libcurl "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_iso "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_android_parity "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
+    check_dovi "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_no_avdevice "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     # libmpv 常以 @rpath/libcurl 链接；打包前 assets 必须已有 curl 栈
     if [[ ! -f "$ASSET/macos/libcurl.4.dylib" && ! -f "$ASSET/macos/libcurl.dylib" ]]; then

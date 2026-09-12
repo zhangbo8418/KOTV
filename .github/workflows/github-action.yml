@@ -286,7 +286,8 @@ jobs:
             libass-dev libarchive-dev libuchardet-dev librubberband-dev libdvbv5-dev \
             libbluray-dev libdvdread-dev libdvdnav-dev \
             liblua5.2-dev libluajit-5.1-dev \
-            libplacebo-dev libvulkan-dev libshaderc-dev liblcms2-dev \
+            libplacebo-dev libvulkan-dev libshaderc-dev liblcms2-dev libxxhash-dev \
+            libva-dev libdrm-dev \
             libssl-dev libcurl4-openssl-dev libnghttp2-dev \
             libasound2-dev libmpv-dev mpv \
             p7zip-full unzip curl zip

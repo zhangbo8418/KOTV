@@ -23,39 +23,45 @@ windows_siblings_ok() {
 fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
-  local want_kind="av3a-vulkan-d3d11-opengl-osc-v20"
+  local want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-v23"
   if [[ "${KOTV_WIN7:-}" == "1" || "${KOTV_MPV_WIN7:-}" == "1" ]]; then
-    want_kind="av3a-vulkan-d3d11-opengl-osc-win7-v20"
+    want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-win7-v23"
     export KOTV_MPV_WIN7=1
   fi
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
+    && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
+    && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null \
     && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want_kind" ]] \
     && windows_siblings_ok; then
-    echo "ok windows/mpv-2.dll (cached AV3A + sibling dlls, kind=$want_kind)"
+    echo "ok windows/mpv-2.dll (cached AV3A + dovi + dav1d + sibling dlls, kind=$want_kind)"
     return
   fi
-  echo "==> windows libmpv: source build with AV3A (FongMi FFmpeg + MinGW, kind=$want_kind)"
+  echo "==> windows libmpv: source build with AV3A + libdovi + dav1d (FongMi FFmpeg + MinGW, kind=$want_kind)"
   "$ROOT/scripts/build-desktop-mpv-from-source.sh" windows
   echo "$want_kind" > "$kind_file"
 }
 
 fetch_linux() {
   local out="$ASSET/linux/libmpv.so.2"
-  if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null; then
-    echo "ok linux/libmpv.so.2 (cached AV3A)"
+  if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
+    && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
+    && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null; then
+    echo "ok linux/libmpv.so.2 (cached AV3A + libdovi + dav1d)"
     return
   fi
-  echo "==> linux libmpv: source build with AV3A (FongMi FFmpeg + libarcdav3a)"
+  echo "==> linux libmpv: source build with AV3A + libdovi + dav1d"
   "$ROOT/scripts/build-desktop-mpv-from-source.sh" linux
 }
 
 fetch_macos() {
   local out="$ASSET/macos/libmpv.dylib"
-  if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null; then
-    echo "ok macOS/libmpv.dylib (cached AV3A)"
+  if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
+    && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
+    && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null; then
+    echo "ok macOS/libmpv.dylib (cached AV3A + libdovi + dav1d)"
     return
   fi
-  echo "==> macOS libmpv: source build with AV3A (FongMi FFmpeg + libarcdav3a)"
+  echo "==> macOS libmpv: source build with AV3A + libdovi + dav1d"
   if [[ "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}" == "x86_64" && "$(uname -m)" == "arm64" ]]; then
     arch -x86_64 "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
   else
