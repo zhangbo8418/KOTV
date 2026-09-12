@@ -81,11 +81,12 @@ clone_ffmpeg() {
   fi
 }
 
+# v17: zlib PIC；xz 只装 liblzma；FFmpeg/libxml 用 LIBXML_STATIC。
 # v16: codecs 静态 zlib/lzma；mac 探测链 -lc++；清 DYLD 防 Abort。
 # v15: libxml2 完整启用 zlib+lzma（PREFIX 自带依赖）。
 # v14: +dav1d +libxml2 +libaribcaption + 平台硬解（d3d11va/videotoolbox/vaapi）。
 # HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v16-${FFMPEG_COMMIT:0:12}"
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v17-${FFMPEG_COMMIT:0:12}"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
@@ -297,7 +298,7 @@ PROBE
     # dav1d / libxml2 / libaribcaption：Windows pkg-config 探测不稳（Requires.private / 头路径）。
     # libxml：FongMi 探测头 libxml2/libxml/... + 源码 libxml/...，两个 -I 都要。
     perl -i -pe "s#enabled libdav1d\\s+&& require_pkg_config libdav1d .*#enabled libdav1d \&\& enable libdav1d \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -ldav1d#" configure
-    perl -i -pe "s#enabled libxml2\\s+&& require_pkg_config libxml2 .*#enabled libxml2 \&\& enable libxml2 \&\& add_cflags -I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2 \&\& add_extralibs -L${PREF_NATIVE}/lib -lxml2 -lz -llzma#" configure
+    perl -i -pe "s#enabled libxml2\\s+&& require_pkg_config libxml2 .*#enabled libxml2 \&\& enable libxml2 \&\& add_cflags -I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2 -DLIBXML_STATIC \&\& add_extralibs -L${PREF_NATIVE}/lib -lxml2 -lz -llzma#" configure
     perl -i -pe "s#enabled libaribcaption\\s+&& require_pkg_config libaribcaption .*#enabled libaribcaption \&\& enable libaribcaption \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -laribcaption -lstdc++ -ldwrite -lole32 -luuid#" configure
   else
     sed -i.bak "s#require_pkg_config libarcdav3a arcdav3a decoder.h avs3_create_decoder#enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm#" configure
@@ -314,7 +315,7 @@ setup_pkg_config
 unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH LD_LIBRARY_PATH LIBRARY_PATH 2>/dev/null || true
 rm -f "$PREFIX/lib"/libz*.dylib "$PREFIX/lib"/liblzma*.dylib 2>/dev/null || true
 
-FFMPEG_EXTRA=(--extra-cflags="-I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2")
+FFMPEG_EXTRA=(--extra-cflags="-I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2 -DLIBXML_STATIC")
 FFMPEG_EXTRA+=(--extra-ldflags="-L${PREF_NATIVE}/lib")
 # 播放不需要 avdevice；与 fvp/mdk 同进程时 libavdevice 易引入重复注册/堆损坏（mac ObjC 类，Win Vulkan 路径 talloc）。
 FFMPEG_EXTRA+=(--disable-avdevice)

@@ -6,8 +6,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-# v6: zlib/xz 只装静态库；xz 关 CLI/NLS（交叉 mac 不链 Homebrew libintl）。
-STAMP="$PREFIX/.kotv-ffmpeg-codecs-v6"
+# v7: zlib -fPIC；xz 5.6 用 ENABLE_NLS + 只编 liblzma；libxml Cflags 带 LIBXML_STATIC。
+STAMP="$PREFIX/.kotv-ffmpeg-codecs-v7"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 DAV1D_VER=1.5.4
@@ -105,9 +105,10 @@ fi
 if [[ -e "$PREFIX/lib/libz.dylib" ]] || [[ -e "$PREFIX/share/pkgconfig/zlib.pc" && ! -f "$PREFIX/lib/libz.a" ]]; then
   rm -f "$PREFIX/lib/pkgconfig/zlib.pc" "$PREFIX/share/pkgconfig/zlib.pc"
 fi
-# 显式：若曾装过共享 zlib，无条件重建静态（本脚本开头已 rm dylib，用 stamp 缺失触发）。
+# stamp 升级：强制重装 zlib/lzma/xml2（PIC、lib-only、LIBXML_STATIC）。
 if [[ ! -f "$STAMP" ]]; then
-  rm -f "$PREFIX/lib/pkgconfig/zlib.pc" "$PREFIX/share/pkgconfig/zlib.pc"
+  rm -f "$PREFIX/lib/pkgconfig/zlib.pc" "$PREFIX/share/pkgconfig/zlib.pc" \
+    "$PREFIX/lib/pkgconfig/liblzma.pc" "$PREFIX/lib/pkgconfig/libxml-2.0.pc"
 fi
 
 cflags=""
@@ -217,13 +218,14 @@ if ! pc_ready zlib; then
     -DCMAKE_INSTALL_PREFIX="$PREFIX"
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-    -DBUILD_SHARED_LIBS=OFF)
+    -DBUILD_SHARED_LIBS=OFF
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON)
   if ((${#cmake_osx[@]})); then
     z_cmake+=("${cmake_osx[@]}")
   fi
-  if [[ -n "${CFLAGS:-}" ]]; then
-    z_cmake+=(-DCMAKE_C_FLAGS="$CFLAGS")
-  fi
+  # Linux 上 libcurl.so 会链进 libz.a，必须 -fPIC。
+  zcflags="-fPIC ${CFLAGS:-}"
+  z_cmake+=(-DCMAKE_C_FLAGS="$zcflags")
   "${z_cmake[@]}"
   # zlib 的 CMake 即使 BUILD_SHARED_LIBS=OFF 仍常编出 dylib；只装静态，避免 FFmpeg
   # configure 早期 -L$PREFIX/lib 链到坏共享库后 Abort trap。
@@ -260,7 +262,7 @@ Libs: -L\${libdir} -lz
 Cflags: -I\${includedir}
 EOF
   pc_ready zlib || { echo "ERROR: zlib not installed under $PREFIX" >&2; exit 1; }
-  echo "ok zlib $ZLIB_VER (static)"
+  echo "ok zlib $ZLIB_VER (static, PIC)"
 else
   echo "ok zlib (cached in PREFIX)"
 fi
@@ -279,26 +281,21 @@ if ! pc_ready liblzma; then
     -DCMAKE_BUILD_TYPE=Release
     -DBUILD_SHARED_LIBS=OFF
     -DBUILD_TESTING=OFF
-    -DXZ_TOOL_XZ=OFF
-    -DXZ_TOOL_XZDEC=OFF
-    -DXZ_TOOL_LZMADEC=OFF
-    -DXZ_TOOL_LZMAINFO=OFF
-    -DXZ_TOOL_XZDIFF=OFF
-    -DXZ_TOOL_XZGREP=OFF
-    -DXZ_TOOL_XZMORE=OFF
-    -DXZ_TOOL_XZLESS=OFF
-    -DXZ_NLS=OFF
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    -DENABLE_NLS=OFF
     -DCREATE_XZ_SYMLINKS=OFF
     -DCREATE_LZMA_SYMLINKS=OFF)
   if ((${#cmake_osx[@]})); then
     xz_cmake+=("${cmake_osx[@]}")
   fi
-  if [[ -n "${CFLAGS:-}" ]]; then
-    xz_cmake+=(-DCMAKE_C_FLAGS="$CFLAGS")
-  fi
+  # xz 5.6.x 无 XZ_TOOL_*；交叉 mac 上 CLI 会链 Homebrew arm64 libintl。
+  # 只编/装 liblzma，彻底跳过 xz/lzmainfo。
+  xzcflags="-fPIC ${CFLAGS:-}"
+  xz_cmake+=(-DCMAKE_C_FLAGS="$xzcflags")
   "${xz_cmake[@]}"
-  cmake --build "$BUILD_DIR/xz-build" -j"$JOBS"
-  cmake --install "$BUILD_DIR/xz-build"
+  cmake --build "$BUILD_DIR/xz-build" -j"$JOBS" --target liblzma
+  cmake --install "$BUILD_DIR/xz-build" --component liblzma_Development
+  cmake --install "$BUILD_DIR/xz-build" --component liblzma_Runtime 2>/dev/null || true
   if [[ ! -f "$PREFIX/lib/pkgconfig/liblzma.pc" ]]; then
     cat >"$PREFIX/lib/pkgconfig/liblzma.pc" <<EOF
 prefix=$PREFIX
@@ -318,8 +315,14 @@ EOF
     "$PREFIX/bin"/xz "$PREFIX/bin"/xzdec "$PREFIX/bin"/lzmadec \
     "$PREFIX/bin"/lzmainfo "$PREFIX/bin"/xzdiff "$PREFIX/bin"/xzgrep \
     "$PREFIX/bin"/xzmore "$PREFIX/bin"/xzless 2>/dev/null || true
-  pc_ready liblzma || { echo "ERROR: liblzma not installed under $PREFIX" >&2; exit 1; }
-  echo "ok liblzma $XZ_VER (static, tools off)"
+  # 确认装到了 archive（有的 generator 把 .a 放 lib/）
+  if [[ ! -f "$PREFIX/lib/liblzma.a" ]]; then
+    for cand in "$BUILD_DIR/xz-build/liblzma.a" "$BUILD_DIR/xz-build/libliblzma.a"; do
+      [[ -f "$cand" ]] && cp -f "$cand" "$PREFIX/lib/liblzma.a" && break
+    done
+  fi
+  pc_ready liblzma || { echo "ERROR: liblzma not installed under $PREFIX" >&2; ls -la "$PREFIX/lib" "$PREFIX/lib/pkgconfig" 2>/dev/null || true; exit 1; }
+  echo "ok liblzma $XZ_VER (static PIC, lib-only)"
 else
   echo "ok liblzma (cached in PREFIX)"
 fi
@@ -339,6 +342,7 @@ if ! pc_ready libxml-2.0; then
       -DCMAKE_INSTALL_PREFIX="$PREFIX"
       -DCMAKE_INSTALL_LIBDIR=lib
       -DCMAKE_PREFIX_PATH="$PREFIX"
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON
       -DBUILD_SHARED_LIBS=OFF
       -DLIBXML2_WITH_PYTHON=OFF
       -DLIBXML2_WITH_ICONV=OFF
@@ -371,9 +375,9 @@ Description: libxml2 (KOTV static, zlib+lzma)
 Version: $XML2_VER
 Requires.private: zlib liblzma
 Libs: -L\${libdir} -lxml2 -lz -llzma
-Cflags: -I\${includedir} -I\${includedir}/libxml2
+Cflags: -I\${includedir} -I\${includedir}/libxml2 -DLIBXML_STATIC
 EOF
-  echo "ok libxml2 $XML2_VER (zlib+lzma)"
+  echo "ok libxml2 $XML2_VER (zlib+lzma, LIBXML_STATIC)"
 else
   echo "ok libxml2 (cached in PREFIX)"
 fi
