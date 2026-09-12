@@ -20,9 +20,9 @@ _is_system_dll() {
     kernel32.dll|user32.dll|gdi32.dll|gdiplus.dll|advapi32.dll|shell32.dll|ole32.dll|oleaut32.dll| \
     ws2_32.dll|wsock32.dll|winmm.dll|dwmapi.dll|d3d9.dll|d3d11.dll|d3d12.dll|dxgi.dll|dxva2.dll| \
     opengl32.dll|ntdll.dll|msvcrt.dll|ucrtbase.dll|sechost.dll|rpcrt4.dll|comdlg32.dll|comctl32.dll| \
-    imm32.dll|setupapi.dll|cfgmgr32.dll|version.dll|shlwapi.dll|crypt32.dll|bcrypt.dll|iphlpapi.dll| \
+    imm32.dll|setupapi.dll|cfgmgr32.dll|version.dll|shlwapi.dll|crypt32.dll|bcrypt.dll|bcryptprimitives.dll|iphlpapi.dll| \
     dnsapi.dll|normaliz.dll|winhttp.dll|wininet.dll|avrt.dll|avicap32.dll|ncrypt.dll|secur32.dll| \
-    uxtheme.dll|mfplat.dll|mf.dll|mfreadwrite.dll| \
+    uxtheme.dll|mfplat.dll|mf.dll|mfreadwrite.dll|d2d1.dll|dwrite.dll| \
     msvcp*.dll|vcruntime*.dll|concrt*.dll|api-ms-*|ext-ms-*|kernelbase.dll|userenv.dll| \
     powrprof.dll|wtsapi32.dll|dbghelp.dll|psapi.dll|oleacc.dll) return 0 ;;
   esac
