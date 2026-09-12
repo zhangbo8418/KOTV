@@ -38,7 +38,11 @@ need git
 ensure_rust() {
   if ! command -v rustc >/dev/null 2>&1 || ! command -v cargo >/dev/null 2>&1; then
     echo "==> install rustup (for libdovi)"
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    # 勿用 curl|sh：set -o pipefail 下 rustup 关掉 stdin 后 curl 得 SIGPIPE → exit 141。
+    mkdir -p "$BUILD_DIR"
+    local rs="$BUILD_DIR/rustup-init.sh"
+    curl --proto '=https' --tlsv1.2 -fsSL -o "$rs" https://sh.rustup.rs
+    sh "$rs" -y --default-toolchain stable
     # shellcheck disable=SC1091
     source "$HOME/.cargo/env" 2>/dev/null || true
     export PATH="$HOME/.cargo/bin:$PATH"

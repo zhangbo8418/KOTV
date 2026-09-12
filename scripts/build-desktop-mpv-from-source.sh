@@ -374,20 +374,29 @@ ensure_macos_vulkan() {
   cd "$BUILD_DIR"
 
   # 1) headers
-  local vh_tag="${KOTV_VULKAN_HEADERS_TAG:-vulkan-sdk-1.4.321.0}"
+  # 须 ≥ libplacebo 所带 Vulkan-Headers（utils_gen）；1.4.321 缺 KOSMICKRISP / ASTC 3D 等枚举。
+  local vh_tag="${KOTV_VULKAN_HEADERS_TAG:-vulkan-sdk-1.4.357.0}"
   if [[ ! -d vulkan-headers/.git ]]; then
     git clone --depth 1 --branch "$vh_tag" https://github.com/KhronosGroup/Vulkan-Headers.git vulkan-headers \
       || git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git vulkan-headers
+  else
+    git -C vulkan-headers fetch --depth 1 origin "refs/tags/${vh_tag}:refs/tags/${vh_tag}" 2>/dev/null || true
+    git -C vulkan-headers checkout -q "$vh_tag" 2>/dev/null \
+      || git -C vulkan-headers checkout -q "tags/$vh_tag" 2>/dev/null || true
   fi
   rm -rf vulkan-headers/build
   cmake -S vulkan-headers -B vulkan-headers/build -G Ninja "${cmake_arch[@]}"
   cmake --install vulkan-headers/build
 
   # 2) loader（只链进 PREFIX，不碰 Homebrew）
-  local vl_tag="${KOTV_VULKAN_LOADER_TAG:-vulkan-sdk-1.4.321.0}"
+  local vl_tag="${KOTV_VULKAN_LOADER_TAG:-vulkan-sdk-1.4.357.0}"
   if [[ ! -d vulkan-loader/.git ]]; then
     git clone --depth 1 --branch "$vl_tag" https://github.com/KhronosGroup/Vulkan-Loader.git vulkan-loader \
       || git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Loader.git vulkan-loader
+  else
+    git -C vulkan-loader fetch --depth 1 origin "refs/tags/${vl_tag}:refs/tags/${vl_tag}" 2>/dev/null || true
+    git -C vulkan-loader checkout -q "$vl_tag" 2>/dev/null \
+      || git -C vulkan-loader checkout -q "tags/$vl_tag" 2>/dev/null || true
   fi
   rm -rf vulkan-loader/build
   cmake -S vulkan-loader -B vulkan-loader/build -G Ninja \
@@ -473,7 +482,7 @@ includedir=\${prefix}/include
 
 Name: Vulkan-Loader
 Description: Vulkan Loader
-Version: 1.4.321
+Version: 1.4.357
 Libs: -L\${libdir} -lvulkan
 Cflags: -I\${includedir}
 EOF

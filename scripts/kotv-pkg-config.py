@@ -85,16 +85,73 @@ def load(name: str) -> tuple[dict[str, str], dict[str, str]]:
     return parse_pc(path)
 
 
+_OPS = (">=", "<=", "!=", "=", ">", "<")
+_MOD_VER_RE = re.compile(
+    r"^([A-Za-z0-9_+./-]+)\s*(>=|<=|!=|=|>|<)\s*(\S+)\s*$"
+)
+
+
 def split_mods(s: str) -> list[str]:
     out: list[str] = []
     for tok in s.replace(",", " ").split():
         # strip version constraints: libfoo >= 1.0
-        if tok in (">=", "<=", "!=", "=", ">", "<"):
+        if tok in _OPS:
             continue
         if tok[0:1] in "0123456789":
             continue
         out.append(tok)
     return out
+
+
+def parse_module_spec(spec: str) -> tuple[str, str | None, str | None]:
+    """Parse 'libfoo' or 'libfoo >= 1.2' → (name, op|None, version|None)."""
+    spec = spec.strip()
+    m = _MOD_VER_RE.match(spec)
+    if m:
+        return m.group(1), m.group(2), m.group(3)
+    parts = spec.split()
+    return (parts[0] if parts else spec), None, None
+
+
+def normalize_module_args(
+    raw: list[str],
+) -> list[tuple[str, str | None, str | None]]:
+    """FFmpeg may pass 'libaribcaption >= 1.1.1' as one argv or three."""
+    out: list[tuple[str, str | None, str | None]] = []
+    i = 0
+    while i < len(raw):
+        if i + 2 < len(raw) and raw[i + 1] in _OPS:
+            out.append((raw[i], raw[i + 1], raw[i + 2]))
+            i += 3
+            continue
+        out.append(parse_module_spec(raw[i]))
+        i += 1
+    return out
+
+
+def ver_tuple(s: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for p in s.replace("-", ".").split("."):
+        digits = "".join(ch for ch in p if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def ver_compare(got: str, op: str, want: str) -> bool:
+    g, w = ver_tuple(got), ver_tuple(want)
+    if op == ">=":
+        return g >= w
+    if op == "<=":
+        return g <= w
+    if op == ">":
+        return g > w
+    if op == "<":
+        return g < w
+    if op in ("=", "=="):
+        return g == w
+    if op == "!=":
+        return g != w
+    return False
 
 
 def collect(
@@ -197,36 +254,46 @@ def main(argv: list[str]) -> int:
         print("kotv-pkg-config: no modules", file=sys.stderr)
         return 1
 
-    def ver_tuple(s: str) -> tuple[int, ...]:
-        parts: list[int] = []
-        for p in s.replace("-", ".").split("."):
-            digits = "".join(ch for ch in p if ch.isdigit())
-            parts.append(int(digits) if digits else 0)
-        return tuple(parts)
+    specs = normalize_module_args(modules)
+    names = [n for n, _, _ in specs]
 
     try:
-        if exists or atleast is not None:
-            for m in modules:
-                _v, fields = load(m)
+        if exists or atleast is not None or any(op for _, op, _ in specs):
+            for name, op, want in specs:
+                _v, fields = load(name)
+                got = fields.get("Version", "0")
                 if atleast is not None:
-                    got = fields.get("Version", "0")
                     if ver_tuple(got) < ver_tuple(atleast):
                         print(
-                            f"Requested '{m}' version '{atleast}' but version of {m} is '{got}'",
+                            f"Requested '{name}' version '{atleast}' but version of {name} is '{got}'",
                             file=sys.stderr,
                         )
                         return 1
-            return 0
+                if op and want and not ver_compare(got, op, want):
+                    print(
+                        f"Requested '{name} {op} {want}' but version of {name} is '{got}'",
+                        file=sys.stderr,
+                    )
+                    return 1
+            # --exists / 纯版本探测到此结束；若同时要 cflags/libs 则继续。
+            if exists or (
+                atleast is not None and not (cflags or libs or modversion or variable)
+            ):
+                return 0
+            if any(op for _, op, _ in specs) and not (
+                cflags or libs or modversion or variable or exists
+            ):
+                return 0
         if modversion:
-            _v, fields = load(modules[0])
+            _v, fields = load(names[0])
             print(fields.get("Version", "0"))
             return 0
         if variable is not None:
-            variables, _fields = load(modules[0])
+            variables, _fields = load(names[0])
             print(variables.get(variable, ""))
             return 0
         cf, lf = collect(
-            modules, static=static, want_cflags=cflags, want_libs=libs
+            names, static=static, want_cflags=cflags, want_libs=libs
         )
         parts: list[str] = []
         if cflags:

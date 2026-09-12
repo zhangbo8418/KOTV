@@ -88,12 +88,15 @@ cmake_osx=()
 # meson 额外参数（交叉用 cross-file；勿对空数组用 [@] + set -u）
 dav1d_meson_extra=()
 if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  arch="${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
-  host_arch="$(uname -m)"
+  # shellcheck source=scripts/kotv-win-build-env.sh
+  source "$ROOT/scripts/kotv-win-build-env.sh"
+  # 用真实硬件 arch：Rosetta 下 uname -m 会谎报 x86_64，导致漏写 cross-file 仍编 ARM asm。
+  hw_arch="$(kotv_macos_hw_arch)"
+  arch="${KOTV_MPV_MACOS_ARCH:-$hw_arch}"
   cflags="-arch $arch"
   cmake_osx=(-DCMAKE_OSX_ARCHITECTURES="$arch")
-  if [[ "$arch" != "$host_arch" ]]; then
-    # arm64 runner 编 x86_64：必须用 cross-file，native-file 改不了 host cpu_family（仍会编 ARM asm）。
+  if [[ "$arch" != "$hw_arch" ]]; then
+    # Apple Silicon 编 x86_64：必须用 cross-file；native-file 改不了 host cpu_family。
     ini="$BUILD_DIR/meson-cross-dav1d-${arch}.ini"
     cpu_family="$arch"
     [[ "$arch" == "arm64" ]] && cpu_family="aarch64"
@@ -117,7 +120,7 @@ EOF
     dav1d_meson_extra+=(--cross-file="$ini")
     # 交叉时关 asm 更稳（clang -arch 与汇编器目标偶发不一致）
     dav1d_meson_extra+=(-Denable_asm=false)
-    echo "==> dav1d macOS cross $host_arch -> $arch (cross-file, asm=off)"
+    echo "==> dav1d macOS cross hw=$hw_arch uname=$(uname -m) -> $arch (cross-file, asm=off)"
   fi
 fi
 export CFLAGS="${CFLAGS:-} $cflags"
@@ -249,7 +252,16 @@ if ! pc_ready libaribcaption; then
     cmake --build build -j"$JOBS"
     cmake --install build
   )
-  if [[ ! -f "$PREFIX/lib/pkgconfig/libaribcaption.pc" ]]; then
+  if [[ ! -f "$PREFIX/lib/pkgconfig/libaribcaption.pc" ]] || is_windows; then
+    # Windows：FFmpeg require_pkg_config 链接探测需要 C++/DirectWrite。
+    private_libs=""
+    if is_windows; then
+      private_libs=" -lstdc++ -ldwrite -lole32 -luuid"
+    elif [[ "$(uname -s)" != "Darwin" ]]; then
+      private_libs=" -lstdc++ -lfontconfig -lfreetype"
+    else
+      private_libs=" -lc++ -framework CoreText -framework CoreFoundation"
+    fi
     cat >"$PREFIX/lib/pkgconfig/libaribcaption.pc" <<EOF
 prefix=$PREFIX
 exec_prefix=\${prefix}
@@ -260,6 +272,7 @@ Name: libaribcaption
 Description: ARIB STD-B24 caption decoder
 Version: $ARIB_VER
 Libs: -L\${libdir} -laribcaption
+Libs.private:${private_libs}
 Cflags: -I\${includedir}
 EOF
   fi
