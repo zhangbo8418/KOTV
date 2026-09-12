@@ -423,7 +423,7 @@ if ! pc_ready libaribcaption; then
   if is_windows; then
     arib_libs="-laribcaption -lstdc++ -ld2d1 -ldwrite -lole32 -luuid"
   elif [[ "$(uname -s)" != "Darwin" ]]; then
-    arib_libs="-laribcaption -lstdc++"
+    arib_libs="-laribcaption -lstdc++ -lfontconfig"
   else
     arib_libs="-laribcaption -lc++ -framework CoreText -framework CoreFoundation"
   fi

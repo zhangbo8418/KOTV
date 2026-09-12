@@ -33,11 +33,11 @@ function Test-SystemDll([string]$Name) {
         "kernel32.dll","user32.dll","gdi32.dll","gdiplus.dll","advapi32.dll","shell32.dll","ole32.dll","oleaut32.dll",
         "ws2_32.dll","winmm.dll","dwmapi.dll","d3d9.dll","d3d11.dll","d3d12.dll","dxgi.dll","dxva2.dll",
         "opengl32.dll","ntdll.dll","msvcrt.dll","ucrtbase.dll","vcruntime140.dll","vcruntime140_1.dll",
-        "sechost.dll","rpcrt4.dll","comdlg32.dll","comctl32.dll","shlwapi.dll","crypt32.dll","bcrypt.dll",
+        "sechost.dll","rpcrt4.dll","comdlg32.dll","comctl32.dll","shlwapi.dll","crypt32.dll","bcrypt.dll","bcryptprimitives.dll",
         "iphlpapi.dll","setupapi.dll","version.dll","imm32.dll","oleacc.dll","psapi.dll","dbghelp.dll",
         "avicap32.dll","avrt.dll","ncrypt.dll","secur32.dll","uxtheme.dll","dnsapi.dll","normaliz.dll",
         "winhttp.dll","wininet.dll","mfplat.dll","mf.dll","mfreadwrite.dll","powrprof.dll","wtsapi.dll",
-        "cfgmgr32.dll","userenv.dll","kernelbase.dll"
+        "cfgmgr32.dll","userenv.dll","kernelbase.dll","d2d1.dll","dwrite.dll"
     )
     return $sys -contains $n
 }
