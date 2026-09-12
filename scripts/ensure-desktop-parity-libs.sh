@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-parity-libs-v5"
+STAMP="$PREFIX/.kotv-parity-libs-v6"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 ICONV_VER=1.19
@@ -36,8 +36,22 @@ is_windows() {
 
 fetch() {
   local url="$1" dest="$2" sha="$3"
+  verify_sha() {
+    local f="$1" expect="$2"
+    if command -v shasum >/dev/null; then
+      echo "$expect  $f" | shasum -a 256 -c -
+    elif command -v sha256sum >/dev/null; then
+      echo "$expect  $f" | sha256sum -c -
+    else
+      return 0
+    fi
+  }
   if [[ -f "$dest" ]]; then
-    return 0
+    if verify_sha "$dest" "$sha" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "WARN: remove corrupt $dest (sha mismatch)" >&2
+    rm -f "$dest"
   fi
   mkdir -p "$(dirname "$dest")"
   # 在 `fetch A || fetch B` 里 bash 会关掉 set -e，必须显式检查 curl。
@@ -45,11 +59,10 @@ fetch() {
     rm -f "$dest.partial"
     return 1
   fi
-  mv "$dest.partial" "$dest"
-  if command -v shasum >/dev/null; then
-    echo "$sha  $dest" | shasum -a 256 -c -
-  elif command -v sha256sum >/dev/null; then
-    echo "$sha  $dest" | sha256sum -c -
+  mv -f "$dest.partial" "$dest"
+  if ! verify_sha "$dest" "$sha"; then
+    rm -f "$dest"
+    return 1
   fi
 }
 
@@ -75,10 +88,15 @@ export LDFLAGS="${LDFLAGS:-} $cflags"
 src="$BUILD_DIR/src"
 mkdir -p "$src" "$PREFIX"
 
-cmake_gen=(Ninja)
-command -v ninja >/dev/null || cmake_gen=(Unix Makefiles)
+# 注意：带空格的 generator 必须是单个字符串；用数组 [0] 会变成只传 MinGW/Unix。
+cmake_gen="Ninja"
+command -v ninja >/dev/null || cmake_gen="Unix Makefiles"
 if is_windows; then
-  cmake_gen=(MinGW Makefiles)
+  if command -v ninja >/dev/null; then
+    cmake_gen="Ninja"
+  else
+    cmake_gen="MinGW Makefiles"
+  fi
 fi
 
 echo "==> parity libs -> $PREFIX"
@@ -154,14 +172,15 @@ EOF
 fi
 
 if [[ ! -f "$PREFIX/lib/libz.a" && ! -f "$PREFIX/lib/libzlibstatic.a" ]]; then
-  # zlib.net 根路径常 404；fossils / GitHub release 更稳。
-  fetch "https://www.zlib.net/fossils/zlib-${ZLIB_VER}.tar.gz" "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA" \
-    || fetch "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz" \
+  # fossils 偶发返回 HTML；优先 GitHub release，sha 失败会删坏文件再试下一源。
+  fetch "https://github.com/madler/zlib/releases/download/v${ZLIB_VER}/zlib-${ZLIB_VER}.tar.gz" \
+    "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA" \
+    || fetch "https://www.zlib.net/fossils/zlib-${ZLIB_VER}.tar.gz" \
       "$src/zlib-${ZLIB_VER}.tar.gz" "$ZLIB_SHA"
   rm -rf "$BUILD_DIR/zlib"
   mkdir -p "$BUILD_DIR/zlib"
   tar -xf "$src/zlib-${ZLIB_VER}.tar.gz" -C "$BUILD_DIR/zlib" --strip-components=1
-  cmake -S "$BUILD_DIR/zlib" -B "$BUILD_DIR/zlib-build" -G "${cmake_gen[0]}" \
+  cmake -S "$BUILD_DIR/zlib" -B "$BUILD_DIR/zlib-build" -G "$cmake_gen" \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
@@ -175,7 +194,7 @@ fetch "https://gitlab.freedesktop.org/uchardet/uchardet/-/archive/v${UCHARDET_VE
 rm -rf "$BUILD_DIR/uchardet"
 mkdir -p "$BUILD_DIR/uchardet"
 tar -xf "$src/uchardet-${UCHARDET_VER}.tar.gz" -C "$BUILD_DIR/uchardet" --strip-components=1
-cmake -S "$BUILD_DIR/uchardet" -B "$BUILD_DIR/uchardet-build" -G "${cmake_gen[0]}" \
+cmake -S "$BUILD_DIR/uchardet" -B "$BUILD_DIR/uchardet-build" -G "$cmake_gen" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DCMAKE_PREFIX_PATH="$PREFIX" \
   -DCMAKE_BUILD_TYPE=Release \
@@ -190,7 +209,7 @@ fetch "https://github.com/libarchive/libarchive/releases/download/v${ARCHIVE_VER
 rm -rf "$BUILD_DIR/libarchive"
 mkdir -p "$BUILD_DIR/libarchive"
 tar -xf "$src/libarchive-${ARCHIVE_VER}.tar.xz" -C "$BUILD_DIR/libarchive" --strip-components=1
-cmake -S "$BUILD_DIR/libarchive" -B "$BUILD_DIR/libarchive-build" -G "${cmake_gen[0]}" \
+cmake -S "$BUILD_DIR/libarchive" -B "$BUILD_DIR/libarchive-build" -G "$cmake_gen" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DCMAKE_PREFIX_PATH="$PREFIX" \
   -DCMAKE_BUILD_TYPE=Release \
