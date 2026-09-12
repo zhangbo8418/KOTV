@@ -39,10 +39,15 @@ ensure_rust() {
   if ! command -v rustc >/dev/null 2>&1 || ! command -v cargo >/dev/null 2>&1; then
     echo "==> install rustup (for libdovi)"
     # 勿用 curl|sh：set -o pipefail 下 rustup 关掉 stdin 后 curl 得 SIGPIPE → exit 141。
+    # rustup-init 自身偶发以 141 退出但已装好；以 rustc 是否可用为准。
     mkdir -p "$BUILD_DIR"
     local rs="$BUILD_DIR/rustup-init.sh"
     curl --proto '=https' --tlsv1.2 -fsSL -o "$rs" https://sh.rustup.rs
+    set +e
+    set +o pipefail
     sh "$rs" -y --default-toolchain stable
+    set -o pipefail
+    set -e
     # shellcheck disable=SC1091
     source "$HOME/.cargo/env" 2>/dev/null || true
     export PATH="$HOME/.cargo/bin:$PATH"
@@ -62,13 +67,14 @@ ensure_cargo_c() {
   if is_windows; then
     url="https://github.com/lu-zero/cargo-c/releases/download/v${CARGO_C_VER}/cargo-c-windows-gnu.zip"
     dest="$BUILD_DIR/cargo-c-windows-gnu.zip"
-    curl -fL --retry 5 --retry-delay 2 -o "$dest" "$url"
+    # -sS：避免进度条写 stderr 遇 SIGPIPE → exit 141（set -e）。
+    curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
     need unzip
     unzip -o "$dest" -d "$BUILD_DIR/bin"
   elif [[ "$(uname -s)" == "Darwin" ]]; then
     url="https://github.com/lu-zero/cargo-c/releases/download/v${CARGO_C_VER}/cargo-c-macos.zip"
     dest="$BUILD_DIR/cargo-c-macos.zip"
-    curl -fL --retry 5 --retry-delay 2 -o "$dest" "$url"
+    curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
     need unzip
     unzip -o "$dest" -d "$BUILD_DIR/bin"
   else
@@ -89,12 +95,24 @@ ensure_cargo_c() {
         ;;
     esac
     dest="$BUILD_DIR/cargo-c-linux.tgz"
-    curl -fL --retry 5 --retry-delay 2 -o "$dest" "$url"
+    echo "==> fetch cargo-c $CARGO_C_VER ($arch)"
+    curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
     tar -xzf "$dest" -C "$BUILD_DIR/bin"
   fi
   chmod +x "$BUILD_DIR/bin"/cargo-c* 2>/dev/null || true
+  # 预编译包有时解压到子目录
+  if ! command -v cargo-cinstall >/dev/null 2>&1; then
+    local f
+    f="$(find "$BUILD_DIR/bin" -type f -name 'cargo-cinstall' 2>/dev/null | head -1 || true)"
+    if [[ -n "$f" ]]; then
+      ln -sfn "$f" "$BUILD_DIR/bin/cargo-cinstall"
+      ln -sfn "$(dirname "$f")"/cargo-capi "$BUILD_DIR/bin/cargo-capi" 2>/dev/null || true
+      ln -sfn "$(dirname "$f")"/cargo-cbuild "$BUILD_DIR/bin/cargo-cbuild" 2>/dev/null || true
+    fi
+  fi
   export PATH="$BUILD_DIR/bin:$HOME/.cargo/bin:$PATH"
-  command -v cargo-cinstall >/dev/null || { echo "ERROR: cargo-cinstall missing after extract" >&2; exit 1; }
+  command -v cargo-cinstall >/dev/null || { echo "ERROR: cargo-cinstall missing after extract" >&2; ls -laR "$BUILD_DIR/bin" >&2; exit 1; }
+  echo "ok cargo-cinstall=$(command -v cargo-cinstall)"
 }
 
 rust_target() {

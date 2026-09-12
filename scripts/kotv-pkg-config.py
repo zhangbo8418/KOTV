@@ -180,7 +180,11 @@ def collect(
                 libs.extend(fields["Libs.private"].split())
         req = f"{fields.get('Requires', '')} {fields.get('Requires.private', '')}"
         for dep in split_mods(req):
-            walk(dep)
+            try:
+                walk(dep)
+            except FileNotFoundError:
+                # Windows PREFIX 常缺 zlib.pc 等 Requires.private；静态链接已由调用方补 -l。
+                continue
 
     _ = static  # 保留参数：调用方仍传 static=
 

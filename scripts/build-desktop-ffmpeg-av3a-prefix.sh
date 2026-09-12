@@ -271,7 +271,7 @@ PREF_NATIVE="$(kotv_native_path "$PREFIX")"
 
 # Windows MinGW：pkg-config 的编译链接探测经常误报；直接 enable + 注入路径。
 if kotv_is_windows_build; then
-  echo "==> Windows: bypass arcdav3a pkg-config link probe"
+  echo "==> Windows: bypass arcdav3a/dav1d/xml2/arib pkg-config probes"
   # 先自测一次，失败则打出真实 gcc 错误
   cat >"$BUILD_DIR/avs3_link_probe.c" <<'PROBE'
 #include <decoder.h>
@@ -292,10 +292,15 @@ PROBE
   cfg_line="enabled libarcdav3a       \&\& enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm"
   if command -v perl >/dev/null 2>&1; then
     perl -i.bak -pe "s#enabled libarcdav3a\\s+&& require_pkg_config libarcdav3a arcdav3a decoder\\.h avs3_create_decoder#${cfg_line}#" configure
+    # dav1d / libxml2 / libaribcaption：Windows pkg-config 探测不稳（Requires.private / 头路径）。
+    # FongMi：libxml 头是 libxml2/libxml/...，cflags 只能 -I$prefix/include。
+    perl -i -pe "s#enabled libdav1d\\s+&& require_pkg_config libdav1d .*#enabled libdav1d \&\& enable libdav1d \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -ldav1d#" configure
+    perl -i -pe "s#enabled libxml2\\s+&& require_pkg_config libxml2 .*#enabled libxml2 \&\& enable libxml2 \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -lxml2#" configure
+    perl -i -pe "s#enabled libaribcaption\\s+&& require_pkg_config libaribcaption .*#enabled libaribcaption \&\& enable libaribcaption \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -laribcaption -lstdc++ -ldwrite -lole32 -luuid#" configure
   else
     sed -i.bak "s#require_pkg_config libarcdav3a arcdav3a decoder.h avs3_create_decoder#enable libarcdav3a \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -larcdav3a -lm#" configure
   fi
-  grep -n 'libarcdav3a' configure | head -8
+  grep -nE 'libarcdav3a|libdav1d|libxml2|libaribcaption' configure | head -20
 fi
 
 # HTTPS/302：Win=Schannel；Linux=OpenSSL；macOS=SecureTransport。

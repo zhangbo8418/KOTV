@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-ffmpeg-codecs-v2"
+STAMP="$PREFIX/.kotv-ffmpeg-codecs-v3"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 DAV1D_VER=1.5.4
@@ -207,6 +207,19 @@ if ! pc_ready libxml-2.0; then
     cmake --install build
   )
   pc_ready libxml-2.0 || { echo "ERROR: libxml2 not installed under $PREFIX" >&2; exit 1; }
+  # CMake 生成的 .pc 常 Requires.private: zlib；Windows PREFIX 无 zlib.pc 会让 FFmpeg 探测失败。
+  cat >"$PREFIX/lib/pkgconfig/libxml-2.0.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: libXML
+Description: libxml2 (KOTV static, no private deps)
+Version: $XML2_VER
+Libs: -L\${libdir} -lxml2
+Cflags: -I\${includedir}
+EOF
   echo "ok libxml2 $XML2_VER"
 else
   echo "ok libxml2 (cached in PREFIX)"
