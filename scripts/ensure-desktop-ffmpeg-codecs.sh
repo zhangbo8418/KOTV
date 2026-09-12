@@ -6,8 +6,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
+# v9: Windows 注入 _WIN32_WINNT=0x0601，避免链进 Win8+ API。
 # v8: arib PIC；Windows arib Libs 带 d2d1/dwrite（链进 libmpv）。
-STAMP="$PREFIX/.kotv-ffmpeg-codecs-v8"
+STAMP="$PREFIX/.kotv-ffmpeg-codecs-v9"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 DAV1D_VER=1.5.4
@@ -116,9 +117,13 @@ cflags=""
 cmake_osx=()
 # meson 额外参数（交叉用 cross-file；勿对空数组用 [@] + set -u）
 dav1d_meson_extra=()
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
+if is_windows; then
+  # 编进 PREFIX 的静态库也要 Win7 宏，否则链进 mpv 后可能硬链 Win8+ API。
+  cflags="$(kotv_win7_cflags)"
+fi
 if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  # shellcheck source=scripts/kotv-win-build-env.sh
-  source "$ROOT/scripts/kotv-win-build-env.sh"
   # 用真实硬件 arch：Rosetta 下 uname -m 会谎报 x86_64，导致漏写 cross-file 仍编 ARM asm。
   hw_arch="$(kotv_macos_hw_arch)"
   arch="${KOTV_MPV_MACOS_ARCH:-$hw_arch}"

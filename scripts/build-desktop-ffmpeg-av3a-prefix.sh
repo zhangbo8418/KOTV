@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 FFMPEG_REPO="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
-# 跟 FongMi 的 FFmpeg 9 分支 tip；要钉死某次提交再设 KOTV_FFMPEG_COMMIT。
+# 默认钉死 e02d612 可用的 FongMi commit；要跟 tip 设 KOTV_FFMPEG_FOLLOW_TIP=1（可再配 KOTV_FFMPEG_REF）。
 FFMPEG_REF="${KOTV_FFMPEG_REF:-release-9.0-fongmi}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 PKG_BIN="$BUILD_DIR/bin"
@@ -17,14 +17,19 @@ resolve_ffmpeg_sha() {
     printf '%s\n' "$KOTV_FFMPEG_COMMIT"
     return
   fi
-  local sha
-  sha="$(git ls-remote "$FFMPEG_REPO" "refs/heads/${FFMPEG_REF}" | awk '{print $1; exit}')"
-  [[ -n "$sha" ]] || { echo "ERROR: cannot resolve $FFMPEG_REPO $FFMPEG_REF" >&2; exit 1; }
-  printf '%s\n' "$sha"
+  if [[ "${KOTV_FFMPEG_FOLLOW_TIP:-}" == "1" ]]; then
+    local sha
+    sha="$(git ls-remote "$FFMPEG_REPO" "refs/heads/${FFMPEG_REF}" | awk '{print $1; exit}')"
+    [[ -n "$sha" ]] || { echo "ERROR: cannot resolve $FFMPEG_REPO $FFMPEG_REF" >&2; exit 1; }
+    printf '%s\n' "$sha"
+    return
+  fi
+  # e02d612 基线：avcodec/mediacodec Dolby Vision profile 5 GPU mapping
+  printf '%s\n' "04482c8d13ac27b2a9fe93f5d388929eef8af5f4"
 }
 
 FFMPEG_COMMIT="$(resolve_ffmpeg_sha)"
-echo "ok FFmpeg ${FFMPEG_REF} → ${FFMPEG_COMMIT:0:12}"
+echo "ok FFmpeg ${FFMPEG_COMMIT:0:12} (ref=${FFMPEG_REF})"
 
 kotv_is_windows_build() {
   case "$(uname -s 2>/dev/null)" in
@@ -81,13 +86,14 @@ clone_ffmpeg() {
   fi
 }
 
+# v19: 钉回 FFmpeg 04482c8（e02d612 直播基线）；默认不再跟 tip。
 # v18: arib PIC；Windows libavcodec/arib 补 d2d1。
 # v17: zlib PIC；xz 只装 liblzma；FFmpeg/libxml 用 LIBXML_STATIC。
 # v16: codecs 静态 zlib/lzma；mac 探测链 -lc++；清 DYLD 防 Abort。
 # v15: libxml2 完整启用 zlib+lzma（PREFIX 自带依赖）。
 # v14: +dav1d +libxml2 +libaribcaption + 平台硬解（d3d11va/videotoolbox/vaapi）。
 # HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v18-${FFMPEG_COMMIT:0:12}"
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v19-${FFMPEG_COMMIT:0:12}"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 安卓 libmpv / FFmpeg / libplayer JNI 从源码编。
-# webhtv 只提供交叉编译脚本、补丁与 JNI 源码；FFmpeg 跟 FongMi release-9.0-fongmi tip（RELEASE=9.0.1）。
+# webhtv 只提供交叉编译脚本、补丁与 JNI 源码。
+# FFmpeg 默认钉死 e02d612 基线 commit；要跟 tip 设 KOTV_FFMPEG_FOLLOW_TIP=1。
 # CI 不下载预编译 .so，也不提交 .so。
 #
 # 现网功能：aaudio android android-media-ndk audiotrack egl-android ffmpeg gl
@@ -28,10 +29,14 @@ resolve_ffmpeg_sha() {
     printf '%s\n' "$KOTV_FFMPEG_COMMIT"
     return
   fi
-  local sha
-  sha="$(git ls-remote "$FFMPEG_REPO" "refs/heads/${FFMPEG_REF}" | awk '{print $1; exit}')"
-  [[ -n "$sha" ]] || { echo "ERROR: cannot resolve $FFMPEG_REPO $FFMPEG_REF" >&2; exit 1; }
-  printf '%s\n' "$sha"
+  if [[ "${KOTV_FFMPEG_FOLLOW_TIP:-}" == "1" ]]; then
+    local sha
+    sha="$(git ls-remote "$FFMPEG_REPO" "refs/heads/${FFMPEG_REF}" | awk '{print $1; exit}')"
+    [[ -n "$sha" ]] || { echo "ERROR: cannot resolve $FFMPEG_REPO $FFMPEG_REF" >&2; exit 1; }
+    printf '%s\n' "$sha"
+    return
+  fi
+  printf '%s\n' "04482c8d13ac27b2a9fe93f5d388929eef8af5f4"
 }
 
 FFMPEG_COMMIT="$(resolve_ffmpeg_sha)"

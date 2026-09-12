@@ -1,8 +1,10 @@
 # 检查 mpv-2.dll 及传递依赖（无需 dumpbin / VS）。
 # 用法:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows-mpv-deps.ps1 -Dir "F:\Program Files\KO影视"
+#   -StrictWin7 或环境变量 KOTV_WIN7=1：额外拒绝 GetSystemTimePreciseAsFileTime / SHCORE
 param(
-    [string]$Dir = ""
+    [string]$Dir = "",
+    [switch]$StrictWin7
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +53,13 @@ function Test-Win7IncompatibleImport([string]$Name) {
     $n = $Name.ToLowerInvariant()
     # Win7 无 SHCORE.dll（Win8+）；mpv 若 import 它会在 Win7 上 winerr=126
     return ($n -eq "shcore.dll")
+}
+
+function Test-Win7IncompatibleApi([string]$Path) {
+    # 硬链该入口时 PE 导入表会带此 ASCII 名；Win7 KERNEL32 无此导出。
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+    return $ascii.Contains("GetSystemTimePreciseAsFileTime")
 }
 
 function Get-PeImports([string]$Path) {
@@ -165,16 +174,22 @@ if (-not (Test-Path -LiteralPath $mpv)) {
 }
 
 $win7Bad = @()
+$win7BadApi = $false
+$strictWin7 = $StrictWin7 -or ($env:KOTV_WIN7 -eq "1") -or ($env:KOTV_MPV_WIN7 -eq "1")
 Write-Host "==> check mpv deps in: $dir"
 Write-Host "(带 SYS 的是 Windows 系统 DLL，在 System32，不用复制到安装目录)"
 Write-Host ""
+
+if ($strictWin7 -and (Test-Win7IncompatibleApi $mpv)) {
+    $win7BadApi = $true
+}
 
 $imports = @(Get-PeImports $mpv)
 $sysImports = @()
 $bundleImports = @()
 $otherImports = @()
 foreach ($dll in ($imports | Where-Object { -not (Test-SystemDll $_) } | Sort-Object)) {
-    if (Test-Win7IncompatibleImport $dll) { $win7Bad += $dll; continue }
+    if ($strictWin7 -and (Test-Win7IncompatibleImport $dll)) { $win7Bad += $dll; continue }
     if (Test-MustBundleDll $dll) { $bundleImports += $dll; continue }
     if (Test-Path -LiteralPath (Join-Path $dir $dll)) { $otherImports += $dll }
     else { $sysImports += $dll }
@@ -193,7 +208,10 @@ foreach ($dll in $bundleImports) {
 foreach ($dll in $win7Bad) {
     Write-Host ("  [Win7阻断] {0} (Win7 无此系统库，需重编 mpv)" -f $dll)
 }
-if ($bundleImports.Count -eq 0 -and $win7Bad.Count -eq 0) {
+if ($win7BadApi) {
+    Write-Host "  [Win7阻断] GetSystemTimePreciseAsFileTime (Win8+ KERNEL32 入口；勿静链现代 Rust libdovi)"
+}
+if ($bundleImports.Count -eq 0 -and $win7Bad.Count -eq 0 -and -not $win7BadApi) {
     Write-Host "  (无必须捆绑项；看下方传递依赖)"
 }
 
@@ -254,11 +272,18 @@ Write-Host "dll files in folder:"
 Get-ChildItem -LiteralPath $dir -Filter "*.dll" | ForEach-Object { Write-Host ("  {0}" -f $_.Name) }
 
 $allMissing = @($directMissing + $closureMissing) | Select-Object -Unique
-if ($win7Bad.Count -gt 0) {
+if ($win7Bad.Count -gt 0 -or $win7BadApi) {
     Write-Host ""
-    Write-Host "WIN7 BLOCKER: mpv-2.dll imports SHCORE.dll (Windows 8+ only)."
-    Write-Host "  On Win7 LoadLibrary fails with winerr=126 even if vulkan-1.dll is present."
-    Write-Host "  Need a Win7-targeted mpv rebuild (_WIN32_WINNT=0x0601)."
+    if ($win7Bad.Count -gt 0) {
+        Write-Host "WIN7 BLOCKER: mpv-2.dll imports SHCORE.dll (Windows 8+ only)."
+        Write-Host "  On Win7 LoadLibrary fails with winerr=126 even if vulkan-1.dll is present."
+        Write-Host "  Need a Win7-targeted mpv rebuild (_WIN32_WINNT=0x0601)."
+    }
+    if ($win7BadApi) {
+        Write-Host "WIN7 BLOCKER: mpv-2.dll references GetSystemTimePreciseAsFileTime (Windows 8+)."
+        Write-Host "  On Win7 startup fails with entry-point-not-found in KERNEL32.dll."
+        Write-Host "  Win7 builds must not statically link modern Rust libdovi."
+    }
     exit 2
 }
 
