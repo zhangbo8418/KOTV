@@ -493,6 +493,26 @@ EOF
   echo "ok macOS vulkan ($arch) via prefix"
 }
 
+# Lua 官方站偶发 DNS 失败；多镜像回退。
+kotv_fetch_lua_tarball() {
+  local ver="$1" dest="$2"
+  local src="lua-${ver}"
+  local u
+  for u in \
+    "https://www.lua.org/ftp/${src}.tar.gz" \
+    "https://github.com/lua/lua/archive/refs/tags/v${ver}.tar.gz" \
+    "https://mirror.ghproxy.com/https://www.lua.org/ftp/${src}.tar.gz" \
+    "https://gitmirror.com/https://www.lua.org/ftp/${src}.tar.gz"; do
+    echo "  try lua: $u"
+    if curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 2 -o "$dest" "$u"; then
+      return 0
+    fi
+    rm -f "$dest"
+  done
+  echo "ERROR: failed to download lua ${ver} from all mirrors" >&2
+  return 1
+}
+
 # 桌面 libmpv 须能在 Win7 加载：目标子系统 6.01，避免 import SHCORE.dll（Win8+）。
 kotv_windows_mpv_cflags() {
   printf '%s' "-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000"
