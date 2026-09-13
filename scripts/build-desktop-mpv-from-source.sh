@@ -77,7 +77,8 @@ kotv_libplacebo_profile() {
   if kotv_is_windows_build; then
     # Vulkan + D3D11 + OpenGL + libdovi + lcms + xxhash（glslang 用 shaderc 代替）。
     if kotv_is_mpv_win7_build; then
-      echo "win7-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
+      # rust177：Win7 libdovi 钉 Rust 1.77，避免硬链 GetSystemTimePreciseAsFileTime。
+      echo "win7-vulkan-d3d11-opengl-dovi-lcms-xxhash-rust177-v1"
     else
       echo "win-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     fi

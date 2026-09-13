@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # 桌面 libdovi（quietvoid/dovi_tool）→ PREFIX，供 libplacebo -Dlibdovi=enabled。
 # pkg-config 名：dovi。默认静态库，避免再多带一份 libdovi 动态库。
+#
+# Win7（KOTV_MPV_WIN7=1 / KOTV_WIN7=1）：钉 Rust 1.77.x。
+# 1.78+ 的 Windows std 硬链 GetSystemTimePreciseAsFileTime（Win8+），静链进 mpv 后 Win7 无法启动。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-libdovi-v1"
 DOVI_REF="${KOTV_LIBDOVI_REF:-libdovi-3.3.2}"
 CARGO_C_VER="${KOTV_CARGO_C_VER:-0.10.25}"
+# 最后一版「默认 Windows target 仍能在 Win7 跑」的 Rust（1.78 起抬高）。
+WIN7_RUST_VER="${KOTV_LIBDOVI_WIN7_RUST:-1.77.2}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
@@ -20,14 +24,30 @@ is_windows() {
   [[ "${OS:-}" == "Windows_NT" ]]
 }
 
+is_win7_build() {
+  [[ "${KOTV_MPV_WIN7:-${KOTV_WIN7:-0}}" == "1" ]]
+}
+
+# stamp 带工具链标签，避免 Win7 / 普通 Windows 共用 PREFIX 缓存串味。
+if is_windows && is_win7_build; then
+  RUST_PIN="$WIN7_RUST_VER"
+  STAMP_TAG="win7-rust${WIN7_RUST_VER}"
+else
+  RUST_PIN="stable"
+  STAMP_TAG="stable"
+fi
+STAMP="$PREFIX/.kotv-libdovi-v2-${STAMP_TAG}"
+WANT_STAMP="${DOVI_REF} rust=${RUST_PIN} target=gnu"
+
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 fi
 
-if [[ -f "$STAMP" ]] && pkg-config --exists dovi 2>/dev/null \
-  && { [[ -f "$PREFIX/lib/libdovi.a" ]] || [[ -f "$PREFIX/lib/dovi.lib" ]]; }; then
-  echo "ok cached libdovi $(pkg-config --modversion dovi 2>/dev/null || echo present)"
+if [[ -f "$STAMP" && "$(cat "$STAMP" 2>/dev/null || true)" == "$WANT_STAMP" ]] \
+  && pkg-config --exists dovi 2>/dev/null \
+  && { [[ -f "$PREFIX/lib/libdovi.a" ]] || [[ -f "$PREFIX/lib/dovi.lib" ]] || [[ -f "$PREFIX/lib/libdovi.dll.a" ]]; }; then
+  echo "ok cached libdovi $(pkg-config --modversion dovi 2>/dev/null || echo present) ($STAMP_TAG)"
   exit 0
 fi
 
@@ -54,6 +74,7 @@ ensure_rust() {
   fi
   need rustc
   need cargo
+  # 勿把全局 default 钉成 1.77（同机其它步骤可能要 stable）；用 RUSTUP_TOOLCHAIN。
   rustup default stable >/dev/null 2>&1 || true
 }
 
@@ -151,15 +172,21 @@ ensure_rust
 ensure_cargo_c
 
 TARGET="$(rust_target)"
-echo "==> build libdovi $DOVI_REF (target=$TARGET → $PREFIX)"
-rustup target add "$TARGET" >/dev/null 2>&1 || true
+echo "==> build libdovi $DOVI_REF (target=$TARGET rust=$RUST_PIN → $PREFIX)"
 
 if is_windows; then
   # MinGW：host/build-script 也必须走 gnu，否则默认 MSVC host 会找 link.exe，
   # 却命中 Git 的 /usr/bin/link（Unix link）而炸。
-  rustup toolchain install stable-x86_64-pc-windows-gnu >/dev/null 2>&1 || true
-  rustup default stable-x86_64-pc-windows-gnu >/dev/null 2>&1 || true
-  export RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-gnu
+  if is_win7_build; then
+    local_tc="${WIN7_RUST_VER}-x86_64-pc-windows-gnu"
+    echo "==> Win7 libdovi: rustup toolchain $local_tc (avoid GetSystemTimePreciseAsFileTime)"
+    rustup toolchain install "$local_tc" >/dev/null
+    rustup target add x86_64-pc-windows-gnu --toolchain "$local_tc" >/dev/null 2>&1 || true
+    export RUSTUP_TOOLCHAIN="$local_tc"
+  else
+    rustup toolchain install stable-x86_64-pc-windows-gnu >/dev/null 2>&1 || true
+    export RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-gnu
+  fi
   # 从 PATH 去掉 Git usr/bin，避免再 shadow MinGW/MSVC link。
   cleaned=""
   old_ifs="$IFS"
@@ -189,6 +216,7 @@ if is_windows; then
   export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CC}"
   export CARGO_BUILD_TARGET=x86_64-pc-windows-gnu
 elif [[ "$(uname -s)" == "Darwin" ]]; then
+  rustup target add "$TARGET" >/dev/null 2>&1 || true
   local_arch="$(uname -m)"
   want_arch="${KOTV_MPV_MACOS_ARCH:-$local_arch}"
   if [[ "$want_arch" == "x86_64" && "$local_arch" == "arm64" ]]; then
@@ -199,7 +227,11 @@ elif [[ "$(uname -s)" == "Darwin" ]]; then
     export CFLAGS="${CFLAGS:-} -arch arm64"
     export CXXFLAGS="${CXXFLAGS:-} -arch arm64"
   fi
+else
+  rustup target add "$TARGET" >/dev/null 2>&1 || true
 fi
+
+echo "ok rustc=$(rustc --version 2>/dev/null || true) toolchain=${RUSTUP_TOOLCHAIN:-default}"
 
 mkdir -p "$BUILD_DIR" "$PREFIX/lib/pkgconfig" "$PREFIX/include"
 cd "$BUILD_DIR"
@@ -211,6 +243,10 @@ else
   git -C dovi_tool checkout -q "$DOVI_REF" 2>/dev/null \
     || git -C dovi_tool checkout -q "tags/$DOVI_REF"
 fi
+
+# stamp 升级或工具链切换时清掉旧库，避免 cargo-c 认为已安装而跳过。
+rm -f "$PREFIX/lib/libdovi.a" "$PREFIX/lib/libdovi.dll.a" "$PREFIX/lib/dovi.lib" \
+  "$PREFIX/lib/pkgconfig/dovi.pc" 2>/dev/null || true
 
 # 静态库：桌面 libplacebo/mpv 直接吃进产物，少一份运行时 DLL/so。
 (
@@ -237,5 +273,20 @@ if [[ ! -f "$PREFIX/lib/libdovi.a" && ! -f "$PREFIX/lib/dovi.lib" && ! -f "$PREF
   exit 1
 fi
 
-printf '%s\n' "$DOVI_REF" >"$STAMP"
-echo "ok libdovi $(pkg-config --modversion dovi) (static, $DOVI_REF)"
+# Win7：静态库对象里若仍出现该导入名，说明钉错了工具链。
+if is_windows && is_win7_build; then
+  lib=""
+  for cand in "$PREFIX/lib/libdovi.a" "$PREFIX/lib/libdovi.dll.a"; do
+    [[ -f "$cand" ]] && lib="$cand" && break
+  done
+  if [[ -n "$lib" ]] && command -v nm >/dev/null 2>&1; then
+    if nm "$lib" 2>/dev/null | grep -qF 'GetSystemTimePreciseAsFileTime'; then
+      echo "ERROR: $lib still references GetSystemTimePreciseAsFileTime (Rust $RUST_PIN too new?)" >&2
+      rustc --version >&2 || true
+      exit 1
+    fi
+  fi
+fi
+
+printf '%s\n' "$WANT_STAMP" >"$STAMP"
+echo "ok libdovi $(pkg-config --modversion dovi) (static, $DOVI_REF, rust=$RUST_PIN)"
