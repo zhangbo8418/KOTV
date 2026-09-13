@@ -108,10 +108,51 @@ chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
   exit 1
 }
 
-# Win7：k7ws2.dll 代理 GetHostNameW，并把硬链 Win8+ 时间 API 改写掉。
+# Win7：只改写时间 API（不再用 k7ws2 整 DLL 代理，避免序数导入崩溃）。
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
-  chmod +x "$ROOT/scripts/build-win7-k7ws2-proxy.sh"
-  "$ROOT/scripts/build-win7-k7ws2-proxy.sh" "$RELEASE_DIR"
+  _win7_pes=()
+  while IFS= read -r _pe; do
+    [[ -n "$_pe" ]] && _win7_pes+=("$_pe")
+  done < <(find "$RELEASE_DIR" -maxdepth 1 \( -iname '*.dll' -o -iname '*.exe' \) -print | sort)
+  if ((${#_win7_pes[@]})); then
+    python3 "$ROOT/scripts/patch-win7-pe-imports.py" "${_win7_pes[@]}"
+  fi
+  bad=0
+  for pe in "${_win7_pes[@]}"; do
+    base="$(basename "$pe")"
+    # 全量扫时间 API；GetHostNameW 重点盯 libmpv/应用（引擎若误报再收窄）。
+    check_host=0
+    case "$base" in
+      libmpv*.dll|mpv*.dll|kotv.exe|*.dll)
+        check_host=1
+        ;;
+    esac
+    if command -v objdump >/dev/null 2>&1; then
+      dump="$(objdump -p "$pe" 2>/dev/null || true)"
+      if printf '%s\n' "$dump" | grep -qF 'GetSystemTimePreciseAsFileTime'; then
+        echo "ERROR: $pe still imports GetSystemTimePreciseAsFileTime" >&2
+        bad=1
+      fi
+      if [[ "$check_host" == "1" ]] && printf '%s\n' "$dump" | grep -qF 'GetHostNameW'; then
+        echo "ERROR: $pe imports GetHostNameW (Win8+); find importer — do not revive k7ws2" >&2
+        bad=1
+      fi
+    else
+      if grep -aobF 'GetSystemTimePreciseAsFileTime' "$pe" >/dev/null 2>&1; then
+        echo "ERROR: $pe still references GetSystemTimePreciseAsFileTime" >&2
+        bad=1
+      fi
+      if [[ "$check_host" == "1" ]] && grep -aobF 'GetHostNameW' "$pe" >/dev/null 2>&1; then
+        echo "ERROR: $pe references GetHostNameW (Win8+); find importer — do not revive k7ws2" >&2
+        bad=1
+      fi
+    fi
+  done
+  [[ -f "$RELEASE_DIR/k7ws2.dll" ]] && {
+    echo "ERROR: stale k7ws2.dll must not ship (ordinal proxy abandoned)" >&2
+    bad=1
+  }
+  [[ "$bad" == "0" ]] || exit 1
 fi
 [[ ! -f "$RELEASE_DIR/mpv-2.dll" ]] || {
   echo "ERROR: stale mpv-2.dll must not ship beside libmpv-2.dll" >&2

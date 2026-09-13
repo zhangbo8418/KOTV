@@ -77,8 +77,8 @@ kotv_libplacebo_profile() {
   if kotv_is_windows_build; then
     # Vulkan + D3D11 + OpenGL + libdovi + lcms + xxhash（glslang 用 shaderc 代替）。
     if kotv_is_mpv_win7_build; then
-      # pepatch：现代 Rust libdovi 硬链 Win8 时间 API，编完后改写 PE 导入名。
-      echo "win7-vulkan-d3d11-opengl-dovi-lcms-xxhash-pepatch-v1"
+      # Rust 1.77 + 钉死 lock 编 libdovi；PE 仅双保险改写时间 API（已废弃 k7ws2）。
+      echo "win7-vulkan-d3d11-opengl-dovi-lcms-xxhash-rust177-v1"
     else
       echo "win-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     fi
@@ -522,8 +522,8 @@ verify_mpv_win7_imports() {
   local dll="$1"
   [[ -f "$dll" ]] || return 0
   kotv_is_mpv_win7_build || return 0
-  # 编 mpv 时只改时间 API；WS2_32→k7ws2 要等打包生成代理 DLL 之后。
-  python3 "$ROOT/scripts/patch-win7-pe-imports.py" --mode=time "$dll"
+  # 双保险：即便 libdovi 已钉 Rust 1.77，仍改写残留的时间 API 导入名。
+  python3 "$ROOT/scripts/patch-win7-pe-imports.py" "$dll"
   if command -v objdump >/dev/null 2>&1; then
     if objdump -p "$dll" 2>/dev/null | awk '/DLL Name:/{print $3}' | tr '[:upper:]' '[:lower:]' | grep -qx 'shcore.dll'; then
       echo "ERROR: $dll imports SHCORE.dll (Win7 incompatible; rebuild with kotv_windows_mpv_cflags)" >&2
@@ -531,6 +531,10 @@ verify_mpv_win7_imports() {
     fi
     if objdump -p "$dll" 2>/dev/null | grep -qF 'GetSystemTimePreciseAsFileTime'; then
       echo "ERROR: $dll still imports GetSystemTimePreciseAsFileTime after PE patch" >&2
+      exit 1
+    fi
+    if objdump -p "$dll" 2>/dev/null | grep -qF 'GetHostNameW'; then
+      echo "ERROR: $dll imports GetHostNameW (Win8+); do not revive k7ws2 — find the importer" >&2
       exit 1
     fi
   fi

@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """Rewrite Win8+ PE imports for Windows 7 (in-place).
 
-1) KERNEL32!GetSystemTimePreciseAsFileTime → GetSystemTimeAsFileTime
-   (same signature; present on Win7).
-
-2) WS2_32.dll → k7ws2.dll
-   Real system WS2_32 is a KnownDLL (local override ignored). We redirect
-   imports to our proxy DLL which implements GetHostNameW and forwards the rest.
+KERNEL32!GetSystemTimePreciseAsFileTime → GetSystemTimeAsFileTime
+(same signature; present on Win7).
 
 Usage:
-  patch-win7-pe-imports.py path/to/mpv-2.dll [more.pe ...]
+  patch-win7-pe-imports.py path/to/libmpv-2.dll [more.pe ...]
 """
 from __future__ import annotations
 
@@ -20,15 +16,6 @@ from pathlib import Path
 
 TIME_OLD = b"GetSystemTimePreciseAsFileTime"
 TIME_NEW = b"GetSystemTimeAsFileTime"
-
-# WS2_32.dll (10) → k7ws2.dll (9); must not grow.
-WS2_NAMES = {
-    b"WS2_32.dll",
-    b"ws2_32.dll",
-    b"Ws2_32.dll",
-    b"WS2_32.DLL",
-}
-WS2_NEW = b"k7ws2.dll"
 
 
 def _u16(data: bytes, off: int) -> int:
@@ -60,7 +47,7 @@ def rva_to_off(data: bytes, rva: int) -> int | None:
     return None
 
 
-def patch_file(path: Path, mode: str = "all") -> int:
+def patch_file(path: Path) -> int:
     data = bytearray(path.read_bytes())
     if len(data) < 0x40 or data[0:2] != b"MZ":
         raise SystemExit(f"not a PE: {path}")
@@ -99,15 +86,6 @@ def patch_file(path: Path, mode: str = "all") -> int:
         if dll_off is not None:
             end = data.index(b"\0", dll_off)
             dll = bytes(data[dll_off:end])
-            if mode == "all" and dll in WS2_NAMES:
-                if len(WS2_NEW) > len(dll):
-                    raise SystemExit(f"k7ws2.dll longer than {dll!r}")
-                data[dll_off : dll_off + len(dll) + 1] = WS2_NEW + b"\0" * (
-                    len(dll) - len(WS2_NEW) + 1
-                )
-                patched += 1
-                print(f"  patched {path.name}: DLL {dll.decode()} -> {WS2_NEW.decode()}")
-                dll = WS2_NEW
 
         thunk_rva = oft_rva or ft_rva
         thunk = rva_to_off(data, thunk_rva) if thunk_rva else None
@@ -156,25 +134,19 @@ def patch_file(path: Path, mode: str = "all") -> int:
 
     if patched:
         path.write_bytes(data)
-    print(f"ok {path.name}: rewrote {patched} import(s) (mode={mode})")
+    print(f"ok {path.name}: rewrote {patched} import(s)")
     return patched
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument(
-        "--mode",
-        choices=("time", "all"),
-        default="all",
-        help="time=only GetSystemTimePreciseAsFileTime; all=also WS2_32→k7ws2",
-    )
     ap.add_argument("pe", nargs="+", type=Path)
     args = ap.parse_args()
     for p in args.pe:
         if not p.is_file():
             print(f"ERROR: missing {p}", file=sys.stderr)
             return 1
-        patch_file(p, mode=args.mode)
+        patch_file(p)
     return 0
 
 

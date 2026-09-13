@@ -25,7 +25,7 @@ fetch_windows() {
   local kind_file="$ASSET/windows/.kind"
   local want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-v23"
   if [[ "${KOTV_WIN7:-}" == "1" || "${KOTV_MPV_WIN7:-}" == "1" ]]; then
-    want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-win7-v23"
+    want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-win7-v24"
     export KOTV_MPV_WIN7=1
   fi
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
