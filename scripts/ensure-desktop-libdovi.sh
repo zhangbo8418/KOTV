@@ -39,8 +39,8 @@ else
   RUST_PIN="stable"
   STAMP_TAG="stable-${DOVI_REF}"
 fi
-STAMP="$PREFIX/.kotv-libdovi-v3-${STAMP_TAG}"
-WANT_STAMP="${DOVI_REF} rust=${RUST_PIN} target=gnu"
+STAMP="$PREFIX/.kotv-libdovi-v4-${STAMP_TAG}"
+WANT_STAMP="${DOVI_REF} rust=${RUST_PIN} target=gnu crc=3.0.1"
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
@@ -238,6 +238,10 @@ echo "ok rustc=$(rustc --version 2>/dev/null || true) toolchain=${RUSTUP_TOOLCHA
 
 mkdir -p "$BUILD_DIR" "$PREFIX/lib/pkgconfig" "$PREFIX/include"
 cd "$BUILD_DIR"
+# Win7 换 tag/工具链时 shallow 仓库可能不含目标 tag，直接重建。
+if is_windows && is_win7_build && { [[ ! -f "$STAMP" ]] || [[ "$(cat "$STAMP" 2>/dev/null || true)" != "$WANT_STAMP" ]]; }; then
+  rm -rf dovi_tool
+fi
 if [[ ! -d dovi_tool/.git ]]; then
   rm -rf dovi_tool
   git clone --depth 1 --branch "$DOVI_REF" https://github.com/quietvoid/dovi_tool.git dovi_tool
@@ -245,51 +249,76 @@ else
   git -C dovi_tool fetch --depth 1 origin "refs/tags/${DOVI_REF}:refs/tags/${DOVI_REF}" 2>/dev/null || true
   git -C dovi_tool checkout -q "$DOVI_REF" 2>/dev/null \
     || git -C dovi_tool checkout -q "tags/$DOVI_REF"
+  git -C dovi_tool reset --hard -q HEAD 2>/dev/null || true
 fi
 
 # stamp 升级或工具链切换时清掉旧库，避免 cargo-c 认为已安装而跳过。
 rm -f "$PREFIX/lib/libdovi.a" "$PREFIX/lib/libdovi.dll.a" "$PREFIX/lib/dovi.lib" \
   "$PREFIX/lib/pkgconfig/dovi.pc" 2>/dev/null || true
 
-# Win7：钉死依赖版本，防止 cargo 解析到要求 rustc≥1.79 的 bitvec_helpers/bitstream-io。
+# Win7：按上游 libdovi-3.3.0 的 Cargo.lock 钉死直接依赖，避免浮到高 MSRV 的小版本。
 if is_windows && is_win7_build; then
   echo "==> Win7: pin dolby_vision deps for rustc ${WIN7_RUST_VER}"
   python3 - "$BUILD_DIR/dovi_tool/dolby_vision/Cargo.toml" <<'PY'
-import pathlib, sys
+import pathlib, re, sys
 p = pathlib.Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-old = 'bitvec_helpers = { version = "3.1.3", default-features = false, features = ["bitstream-io"] }'
-new = 'bitvec_helpers = { version = "=3.1.3", default-features = false, features = ["bitstream-io"] }'
-if old not in t and '=3.1.3' not in t:
-    # 兼容其它小版本写法
-    import re
+# 与 quietvoid/dovi_tool@libdovi-3.3.0 Cargo.lock 对齐
+pins = {
+    "bitvec_helpers": '=3.1.3',
+    "anyhow": '=1.0.81',
+    "bitvec": '=1.0.1',
+    "crc": '=3.0.1',
+}
+for name, ver in pins.items():
     t2, n = re.subn(
-        r'bitvec_helpers\s*=\s*\{\s*version\s*=\s*"[^"]+"',
-        'bitvec_helpers = { version = "=3.1.3"',
+        rf'(?m)^({re.escape(name)}\s*=\s*\{{\s*version\s*=\s*")[^"]+(")',
+        rf'\g<1>{ver}\2',
+        t,
+        count=1,
+    )
+    if n:
+        t = t2
+        continue
+    t2, n = re.subn(
+        rf'(?m)^({re.escape(name)}\s*=\s*")[^"]+(")',
+        rf'\g<1>{ver}\2',
         t,
         count=1,
     )
     if n != 1:
-        raise SystemExit(f"ERROR: cannot pin bitvec_helpers in {p}")
+        raise SystemExit(f"ERROR: cannot pin {name} in {p}")
     t = t2
-elif old in t:
-    t = t.replace(old, new)
-# 直接依赖 bitstream-io 以统一到 lock 里的 2.2.0（避免浮到 2.6 / rustc 1.79）
-if "bitstream-io" not in t:
+if re.search(r'(?m)^bitstream-io\s*=', t) is None:
     t = t.replace(
         "[dependencies]\n",
         '[dependencies]\nbitstream-io = "=2.2.0"\n',
         1,
+    )
+else:
+    t, _ = re.subn(
+        r'(?m)^(bitstream-io\s*=\s*")[^"]+(")',
+        r'\g<1>=2.2.0\2',
+        t,
+        count=1,
     )
 p.write_text(t, encoding="utf-8")
 print(f"ok pinned {p}")
 PY
   (
     cd "$BUILD_DIR/dovi_tool/dolby_vision"
-    # 先按钉死版本生成 lock，再强制 precise（双保险）。
     cargo generate-lockfile
-    cargo update -p bitvec_helpers --precise 3.1.3
-    cargo update -p bitstream-io --precise 2.2.0
+    # 再 precise 一遍，压住传递依赖里会漂的包。
+    for spec in \
+      bitvec_helpers:3.1.3 \
+      bitstream-io:2.2.0 \
+      crc:3.0.1 \
+      anyhow:1.0.81 \
+      bitvec:1.0.1; do
+      name="${spec%%:*}"
+      ver="${spec##*:}"
+      cargo update -p "$name" --precise "$ver"
+    done
   )
 fi
 
@@ -300,13 +329,26 @@ fi
   if [[ -f Cargo.lock ]]; then
     locked=(--locked)
   fi
-  cargo cinstall --release \
+  # cargo-c 可能不认 --locked；失败则去掉再试。
+  if ! cargo cinstall --release \
     --prefix="$PREFIX" \
     --libdir="$PREFIX/lib" \
     --library-type staticlib \
     --target "$TARGET" \
     "${locked[@]}" \
-    -j "$JOBS"
+    -j "$JOBS"; then
+    if ((${#locked[@]})); then
+      echo "WARN: cargo cinstall --locked failed; retry without --locked" >&2
+      cargo cinstall --release \
+        --prefix="$PREFIX" \
+        --libdir="$PREFIX/lib" \
+        --library-type staticlib \
+        --target "$TARGET" \
+        -j "$JOBS"
+    else
+      exit 1
+    fi
+  fi
 )
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"

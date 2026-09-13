@@ -78,7 +78,7 @@ kotv_libplacebo_profile() {
     # Vulkan + D3D11 + OpenGL + libdovi + lcms + xxhash（glslang 用 shaderc 代替）。
     if kotv_is_mpv_win7_build; then
       # rust177 + libdovi 3.3.0：避开 1.78+ 硬链 Win8 API，且 3.3.2 要 rustc 1.85。
-      echo "win7-vulkan-d3d11-opengl-dovi330-lcms-xxhash-rust177-v1"
+      echo "win7-vulkan-d3d11-opengl-dovi330-lcms-xxhash-rust177-v2"
     else
       echo "win-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     fi
