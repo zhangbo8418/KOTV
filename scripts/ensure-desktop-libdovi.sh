@@ -328,22 +328,27 @@ if [[ ! -f "$PREFIX/lib/libdovi.a" && ! -f "$PREFIX/lib/dovi.lib" && ! -f "$PREF
   exit 1
 fi
 
-# Win7：静态库对象里若仍出现该导入名，说明钉错了工具链。
+# Win7：静态库若硬链（undefined）Win8+ 导入，说明钉错了工具链。
+# 仅匹配 nm 的 U/u 未定义符号；.rdata 里 GetProcAddress 用的名字字符串不算失败。
 if is_windows && is_win7_build; then
   lib=""
   for cand in "$PREFIX/lib/libdovi.a" "$PREFIX/lib/libdovi.dll.a"; do
     [[ -f "$cand" ]] && lib="$cand" && break
   done
   if [[ -n "$lib" ]] && command -v nm >/dev/null 2>&1; then
-    if nm "$lib" 2>/dev/null | grep -qF 'GetSystemTimePreciseAsFileTime'; then
-      echo "ERROR: $lib still references GetSystemTimePreciseAsFileTime (Rust $RUST_PIN too new?)" >&2
+    undef="$(nm "$lib" 2>/dev/null || true)"
+    if printf '%s\n' "$undef" | grep -E '^[0-9a-fA-F[:space:]]*[Uu][[:space:]]+GetSystemTimePreciseAsFileTime([[:space:]]|$)' >/dev/null; then
+      echo "ERROR: $lib hard-imports GetSystemTimePreciseAsFileTime (Rust $RUST_PIN too new?)" >&2
       rustc --version >&2 || true
+      printf '%s\n' "$undef" | grep -E 'GetSystemTimePreciseAsFileTime' | head -20 >&2 || true
       exit 1
     fi
-    if nm "$lib" 2>/dev/null | grep -qF 'GetHostNameW'; then
-      echo "ERROR: $lib references GetHostNameW (Win8+); unexpected with Rust $RUST_PIN" >&2
+    if printf '%s\n' "$undef" | grep -E '^[0-9a-fA-F[:space:]]*[Uu][[:space:]]+GetHostNameW([[:space:]]|$)' >/dev/null; then
+      echo "ERROR: $lib hard-imports GetHostNameW (Win8+); unexpected with Rust $RUST_PIN" >&2
+      printf '%s\n' "$undef" | grep -E 'GetHostNameW' | head -20 >&2 || true
       exit 1
     fi
+    echo "ok libdovi nm: no hard Win8+ imports (strings may still appear for GetProcAddress)"
   fi
 fi
 
