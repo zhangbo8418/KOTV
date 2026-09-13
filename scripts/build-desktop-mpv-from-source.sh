@@ -78,7 +78,7 @@ kotv_libplacebo_profile() {
     # Vulkan + D3D11 + OpenGL + libdovi + lcms + xxhash（glslang 用 shaderc 代替）。
     if kotv_is_mpv_win7_build; then
       # rust177 + libdovi 3.3.0：避开 1.78+ 硬链 Win8 API，且 3.3.2 要 rustc 1.85。
-      echo "win7-vulkan-d3d11-opengl-dovi330-lcms-xxhash-rust177-v3"
+      echo "win7-vulkan-d3d11-opengl-dovi330-lcms-xxhash-rust177-v4"
     else
       echo "win-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     fi
@@ -942,14 +942,17 @@ ensure_prefix_lua() {
   need curl
   local ver="${KOTV_LUA_VERSION:-5.2.4}"
   local src="lua-${ver}"
-  local url="https://www.lua.org/ftp/${src}.tar.gz"
   local _cwd="$PWD"
   echo "==> build lua $ver ($plat → PREFIX, for mpv OSC)"
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d "$src" ]]; then
-    curl -fsSL "$url" -o "${src}.tar.gz"
+    kotv_fetch_lua_tarball "$ver" "${src}.tar.gz"
     tar xzf "${src}.tar.gz"
+    # GitHub archive 目录名可能是 lua-v5.2.4
+    if [[ ! -d "$src" && -d "lua-v${ver}" ]]; then
+      mv "lua-v${ver}" "$src"
+    fi
   fi
   cd "$src"
   make "$plat" -j"${KOTV_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
@@ -987,13 +990,15 @@ ensure_windows_lua() {
   need curl
   local ver="${KOTV_LUA_VERSION:-5.2.4}"
   local src="lua-${ver}"
-  local url="https://www.lua.org/ftp/${src}.tar.gz"
   echo "==> build lua $ver (MinGW dll → PREFIX, for mpv OSC)"
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
   if [[ ! -d "$src" ]]; then
-    curl -fsSL "$url" -o "${src}.tar.gz"
+    kotv_fetch_lua_tarball "$ver" "${src}.tar.gz"
     tar xzf "${src}.tar.gz"
+    if [[ ! -d "$src" && -d "lua-v${ver}" ]]; then
+      mv "lua-v${ver}" "$src"
+    fi
   fi
   cd "$src/src"
   # 5.2 mingw：产出 lua52.dll；顺带留下 liblua.a（luac 目标）。

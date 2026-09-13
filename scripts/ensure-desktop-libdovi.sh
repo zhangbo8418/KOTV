@@ -42,8 +42,8 @@ else
   RUST_PIN="stable"
   STAMP_TAG="stable-${DOVI_REF}"
 fi
-STAMP="$PREFIX/.kotv-libdovi-v5-${STAMP_TAG}"
-WANT_STAMP="${DOVI_REF} rust=${RUST_PIN} cargo-c=${CARGO_C_VER} target=gnu"
+STAMP="$PREFIX/.kotv-libdovi-v6-${STAMP_TAG}"
+WANT_STAMP="${DOVI_REF} rust=${RUST_PIN} cargo-c=${CARGO_C_VER} nodev=1 target=gnu"
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
@@ -268,24 +268,28 @@ fi
 rm -f "$PREFIX/lib/libdovi.a" "$PREFIX/lib/libdovi.dll.a" "$PREFIX/lib/dovi.lib" \
   "$PREFIX/lib/pkgconfig/dovi.pc" 2>/dev/null || true
 
-# Win7：按上游 libdovi-3.3.0 的 Cargo.lock 钉死直接依赖，避免浮到高 MSRV 的小版本。
+# Win7：去掉 bench/dev-deps（criterion→clap edition2024，Cargo 1.77 解析不了），
+# 再按上游 3.3.0 lock 钉死直接依赖。
 if is_windows && is_win7_build; then
   echo "==> Win7: pin dolby_vision deps for rustc ${WIN7_RUST_VER}"
   python3 - "$BUILD_DIR/dovi_tool/dolby_vision/Cargo.toml" <<'PY'
 import pathlib, re, sys
 p = pathlib.Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
+# 去掉会拉进 clap_builder(edition2024) 的开发依赖与 bench。
+t = re.sub(r"(?ms)^\[dev-dependencies\]\s*.*?(?=^\[|\Z)", "", t)
+t = re.sub(r"(?ms)^\[\[bench\]\]\s*.*?(?=^\[|\Z)", "", t)
 # 与 quietvoid/dovi_tool@libdovi-3.3.0 Cargo.lock 对齐
 pins = {
-    "bitvec_helpers": '=3.1.3',
-    "anyhow": '=1.0.81',
-    "bitvec": '=1.0.1',
-    "crc": '=3.0.1',
+    "bitvec_helpers": "=3.1.3",
+    "anyhow": "=1.0.81",
+    "bitvec": "=1.0.1",
+    "crc": "=3.0.1",
 }
 for name, ver in pins.items():
     t2, n = re.subn(
         rf'(?m)^({re.escape(name)}\s*=\s*\{{\s*version\s*=\s*")[^"]+(")',
-        rf'\g<1>{ver}\2',
+        rf"\g<1>{ver}\2",
         t,
         count=1,
     )
@@ -294,14 +298,14 @@ for name, ver in pins.items():
         continue
     t2, n = re.subn(
         rf'(?m)^({re.escape(name)}\s*=\s*")[^"]+(")',
-        rf'\g<1>{ver}\2',
+        rf"\g<1>{ver}\2",
         t,
         count=1,
     )
     if n != 1:
         raise SystemExit(f"ERROR: cannot pin {name} in {p}")
     t = t2
-if re.search(r'(?m)^bitstream-io\s*=', t) is None:
+if re.search(r"(?m)^bitstream-io\s*=", t) is None:
     t = t.replace(
         "[dependencies]\n",
         '[dependencies]\nbitstream-io = "=2.2.0"\n',
@@ -310,17 +314,17 @@ if re.search(r'(?m)^bitstream-io\s*=', t) is None:
 else:
     t, _ = re.subn(
         r'(?m)^(bitstream-io\s*=\s*")[^"]+(")',
-        r'\g<1>=2.2.0\2',
+        r"\g<1>=2.2.0\2",
         t,
         count=1,
     )
 p.write_text(t, encoding="utf-8")
-print(f"ok pinned {p}")
+print(f"ok pinned {p} (dev-deps stripped)")
 PY
+  rm -f "$BUILD_DIR/dovi_tool/dolby_vision/Cargo.lock"
   (
     cd "$BUILD_DIR/dovi_tool/dolby_vision"
     cargo generate-lockfile
-    # 再 precise 一遍，压住传递依赖里会漂的包。
     for spec in \
       bitvec_helpers:3.1.3 \
       bitstream-io:2.2.0 \
