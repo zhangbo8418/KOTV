@@ -85,25 +85,28 @@ ensure_rust() {
 }
 
 ensure_cargo_c() {
-  if command -v cargo-cinstall >/dev/null 2>&1; then
+  # 按版本装到独立目录，Win7 的 0.9.32 不能被 PATH 上残留的 0.10.x 抢走。
+  local bindir="$BUILD_DIR/cargo-c-v${CARGO_C_VER}"
+  mkdir -p "$bindir" "$HOME/.cargo/bin"
+  if [[ -x "$bindir/cargo-cinstall" || -x "$bindir/cargo-cinstall.exe" ]]; then
+    export PATH="$bindir:$PATH"
+    echo "ok cargo-cinstall=$(command -v cargo-cinstall) (cached v${CARGO_C_VER})"
     return 0
   fi
-  mkdir -p "$BUILD_DIR/bin" "$HOME/.cargo/bin"
-  export PATH="$BUILD_DIR/bin:$HOME/.cargo/bin:$PATH"
+  echo "==> fetch cargo-c v${CARGO_C_VER}"
   local url dest
   if is_windows; then
     url="https://github.com/lu-zero/cargo-c/releases/download/v${CARGO_C_VER}/cargo-c-windows-gnu.zip"
-    dest="$BUILD_DIR/cargo-c-windows-gnu.zip"
-    # -sS：避免进度条写 stderr 遇 SIGPIPE → exit 141（set -e）。
+    dest="$BUILD_DIR/cargo-c-v${CARGO_C_VER}-windows-gnu.zip"
     curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
     need unzip
-    unzip -o "$dest" -d "$BUILD_DIR/bin"
+    unzip -o "$dest" -d "$bindir"
   elif [[ "$(uname -s)" == "Darwin" ]]; then
     url="https://github.com/lu-zero/cargo-c/releases/download/v${CARGO_C_VER}/cargo-c-macos.zip"
-    dest="$BUILD_DIR/cargo-c-macos.zip"
+    dest="$BUILD_DIR/cargo-c-v${CARGO_C_VER}-macos.zip"
     curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
     need unzip
-    unzip -o "$dest" -d "$BUILD_DIR/bin"
+    unzip -o "$dest" -d "$bindir"
   else
     local arch
     arch="$(uname -m)"
@@ -115,31 +118,37 @@ ensure_cargo_c() {
         url="https://github.com/lu-zero/cargo-c/releases/download/v${CARGO_C_VER}/cargo-c-aarch64-unknown-linux-musl.tar.gz"
         ;;
       *)
-        echo "==> cargo-c: no prebuilt for $arch; cargo install"
-        cargo install cargo-c --locked --version "$CARGO_C_VER"
+        echo "==> cargo-c: no prebuilt for $arch; cargo install v${CARGO_C_VER}"
+        cargo install cargo-c --locked --version "$CARGO_C_VER" --root "$bindir"
+        export PATH="$bindir/bin:$PATH"
         command -v cargo-cinstall >/dev/null || { echo "ERROR: cargo-cinstall missing" >&2; exit 1; }
+        echo "ok cargo-cinstall=$(command -v cargo-cinstall)"
         return 0
         ;;
     esac
-    dest="$BUILD_DIR/cargo-c-linux.tgz"
-    echo "==> fetch cargo-c $CARGO_C_VER ($arch)"
+    dest="$BUILD_DIR/cargo-c-v${CARGO_C_VER}-linux.tgz"
     curl -fsSL --retry 5 --retry-delay 2 -o "$dest" "$url"
-    tar -xzf "$dest" -C "$BUILD_DIR/bin"
+    tar -xzf "$dest" -C "$bindir"
   fi
-  chmod +x "$BUILD_DIR/bin"/cargo-c* 2>/dev/null || true
+  chmod +x "$bindir"/cargo-c* 2>/dev/null || true
   # 预编译包有时解压到子目录
-  if ! command -v cargo-cinstall >/dev/null 2>&1; then
+  if [[ ! -x "$bindir/cargo-cinstall" && ! -x "$bindir/cargo-cinstall.exe" ]]; then
     local f
-    f="$(find "$BUILD_DIR/bin" -type f -name 'cargo-cinstall' 2>/dev/null | head -1 || true)"
+    f="$(find "$bindir" -type f \( -name 'cargo-cinstall' -o -name 'cargo-cinstall.exe' \) 2>/dev/null | head -1 || true)"
     if [[ -n "$f" ]]; then
-      ln -sfn "$f" "$BUILD_DIR/bin/cargo-cinstall"
-      ln -sfn "$(dirname "$f")"/cargo-capi "$BUILD_DIR/bin/cargo-capi" 2>/dev/null || true
-      ln -sfn "$(dirname "$f")"/cargo-cbuild "$BUILD_DIR/bin/cargo-cbuild" 2>/dev/null || true
+      ln -sfn "$f" "$bindir/cargo-cinstall"
+      ln -sfn "$(dirname "$f")"/cargo-capi "$bindir/cargo-capi" 2>/dev/null || true
+      ln -sfn "$(dirname "$f")"/cargo-cbuild "$bindir/cargo-cbuild" 2>/dev/null || true
+      # Windows: also link .exe names if present
+      if [[ -f "$(dirname "$f")/cargo-cinstall.exe" ]]; then
+        ln -sfn "$(dirname "$f")/cargo-cinstall.exe" "$bindir/cargo-cinstall.exe" 2>/dev/null || \
+          cp -f "$(dirname "$f")/cargo-cinstall.exe" "$bindir/cargo-cinstall.exe"
+      fi
     fi
   fi
-  export PATH="$BUILD_DIR/bin:$HOME/.cargo/bin:$PATH"
-  command -v cargo-cinstall >/dev/null || { echo "ERROR: cargo-cinstall missing after extract" >&2; ls -laR "$BUILD_DIR/bin" >&2; exit 1; }
-  echo "ok cargo-cinstall=$(command -v cargo-cinstall)"
+  export PATH="$bindir:$PATH"
+  command -v cargo-cinstall >/dev/null || { echo "ERROR: cargo-cinstall missing after extract v${CARGO_C_VER}" >&2; ls -laR "$bindir" >&2; exit 1; }
+  echo "ok cargo-cinstall=$(command -v cargo-cinstall) (v${CARGO_C_VER})"
 }
 
 rust_target() {
