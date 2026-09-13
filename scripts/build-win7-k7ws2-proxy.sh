@@ -29,7 +29,7 @@ cp -f "$BUILD/k7ws2.dll" "$DIR/k7ws2.dll"
 echo "ok installed $DIR/k7ws2.dll"
 
 echo "==> PE-patch Win7 imports (time API + WS2_32→k7ws2)"
-python3 "$ROOT/scripts/patch-win7-pe-imports.py" "${PES[@]}"
+python3 "$ROOT/scripts/patch-win7-pe-imports.py" --mode=all "${PES[@]}"
 
 # Gate: no PE should still hard-import GetSystemTimePreciseAsFileTime, or WS2_32 by name.
 if command -v objdump >/dev/null 2>&1; then
@@ -40,13 +40,9 @@ if command -v objdump >/dev/null 2>&1; then
       echo "ERROR: $pe still references GetSystemTimePreciseAsFileTime" >&2
       bad=1
     fi
-    if printf '%s\n' "$dump" | awk 'BEGIN{IGNORECASE=1} /DLL Name:/{dll=$3} /DLL Name:/ && dll ~ /ws2_32/ { bad=1 } END{exit bad?2:0}'; then
-      :
-    else
-      if [[ $? -eq 2 ]]; then
-        echo "ERROR: $pe still imports WS2_32.dll (expected k7ws2.dll)" >&2
-        bad=1
-      fi
+    if printf '%s\n' "$dump" | grep -i 'DLL Name:' | grep -iq 'ws2_32'; then
+      echo "ERROR: $pe still imports WS2_32.dll (expected k7ws2.dll)" >&2
+      bad=1
     fi
   done
   [[ -f "$DIR/k7ws2.dll" ]] || { echo "ERROR: missing $DIR/k7ws2.dll" >&2; bad=1; }

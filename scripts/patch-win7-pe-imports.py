@@ -162,13 +162,19 @@ def patch_file(path: Path) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--mode",
+        choices=("time", "all"),
+        default="all",
+        help="time=only GetSystemTimePreciseAsFileTime; all=also WS2_32→k7ws2",
+    )
     ap.add_argument("pe", nargs="+", type=Path)
     args = ap.parse_args()
     for p in args.pe:
         if not p.is_file():
             print(f"ERROR: missing {p}", file=sys.stderr)
             return 1
-        patch_file(p)
+        patch_file(p, mode=args.mode)
     return 0
 
 
