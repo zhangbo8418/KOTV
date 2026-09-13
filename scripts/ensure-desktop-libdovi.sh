@@ -15,6 +15,8 @@ CARGO_C_VER="${KOTV_CARGO_C_VER:-0.10.25}"
 WIN7_RUST_VER="${KOTV_LIBDOVI_WIN7_RUST:-1.77.2}"
 # 3.3.2 要求 rustc 1.85；Win7 钉 1.77 时用 3.3.0（MSRV 1.62）+ 锁住依赖，避免解析到 1.79+ 的 crates。
 WIN7_DOVI_REF="${KOTV_LIBDOVI_WIN7_REF:-libdovi-3.3.0}"
+# 新 cargo-c 会给 rustc 传 --check-cfg；1.77 stable 不认，必须配同期旧 cargo-c。
+WIN7_CARGO_C_VER="${KOTV_LIBDOVI_WIN7_CARGO_C:-0.9.32}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
@@ -34,13 +36,14 @@ is_win7_build() {
 if is_windows && is_win7_build; then
   RUST_PIN="$WIN7_RUST_VER"
   DOVI_REF="${KOTV_LIBDOVI_REF:-$WIN7_DOVI_REF}"
-  STAMP_TAG="win7-rust${WIN7_RUST_VER}-${DOVI_REF}"
+  CARGO_C_VER="$WIN7_CARGO_C_VER"
+  STAMP_TAG="win7-rust${WIN7_RUST_VER}-${DOVI_REF}-cargoc${CARGO_C_VER}"
 else
   RUST_PIN="stable"
   STAMP_TAG="stable-${DOVI_REF}"
 fi
-STAMP="$PREFIX/.kotv-libdovi-v4-${STAMP_TAG}"
-WANT_STAMP="${DOVI_REF} rust=${RUST_PIN} target=gnu crc=3.0.1"
+STAMP="$PREFIX/.kotv-libdovi-v5-${STAMP_TAG}"
+WANT_STAMP="${DOVI_REF} rust=${RUST_PIN} cargo-c=${CARGO_C_VER} target=gnu"
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
