@@ -77,8 +77,8 @@ kotv_libplacebo_profile() {
   if kotv_is_windows_build; then
     # Vulkan + D3D11 + OpenGL + libdovi + lcms + xxhash（glslang 用 shaderc 代替）。
     if kotv_is_mpv_win7_build; then
-      # rust177：Win7 libdovi 钉 Rust 1.77，避免硬链 GetSystemTimePreciseAsFileTime。
-      echo "win7-vulkan-d3d11-opengl-dovi-lcms-xxhash-rust177-v1"
+      # rust177 + libdovi 3.3.0：避开 1.78+ 硬链 Win8 API，且 3.3.2 要 rustc 1.85。
+      echo "win7-vulkan-d3d11-opengl-dovi330-lcms-xxhash-rust177-v1"
     else
       echo "win-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     fi
@@ -501,9 +501,15 @@ kotv_windows_mpv_cflags() {
 verify_mpv_win7_imports() {
   local dll="$1"
   [[ -f "$dll" ]] || return 0
+  kotv_is_mpv_win7_build || return 0
   if command -v objdump >/dev/null 2>&1; then
     if objdump -p "$dll" 2>/dev/null | awk '/DLL Name:/{print $3}' | tr '[:upper:]' '[:lower:]' | grep -qx 'shcore.dll'; then
       echo "ERROR: $dll imports SHCORE.dll (Win7 incompatible; rebuild with kotv_windows_mpv_cflags)" >&2
+      exit 1
+    fi
+    # Rust≥1.78 std 硬链此入口；Win7 libdovi 须用 1.77（见 ensure-desktop-libdovi.sh）。
+    if objdump -p "$dll" 2>/dev/null | grep -qF 'GetSystemTimePreciseAsFileTime'; then
+      echo "ERROR: $dll imports GetSystemTimePreciseAsFileTime (Win8+; check Win7 Rust pin for libdovi)" >&2
       exit 1
     fi
   fi

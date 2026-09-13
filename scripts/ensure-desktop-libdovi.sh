@@ -13,6 +13,8 @@ DOVI_REF="${KOTV_LIBDOVI_REF:-libdovi-3.3.2}"
 CARGO_C_VER="${KOTV_CARGO_C_VER:-0.10.25}"
 # 最后一版「默认 Windows target 仍能在 Win7 跑」的 Rust（1.78 起抬高）。
 WIN7_RUST_VER="${KOTV_LIBDOVI_WIN7_RUST:-1.77.2}"
+# 3.3.2 要求 rustc 1.85；Win7 钉 1.77 时用 3.3.0（MSRV 1.62）+ 锁住依赖，避免解析到 1.79+ 的 crates。
+WIN7_DOVI_REF="${KOTV_LIBDOVI_WIN7_REF:-libdovi-3.3.0}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
@@ -31,12 +33,13 @@ is_win7_build() {
 # stamp 带工具链标签，避免 Win7 / 普通 Windows 共用 PREFIX 缓存串味。
 if is_windows && is_win7_build; then
   RUST_PIN="$WIN7_RUST_VER"
-  STAMP_TAG="win7-rust${WIN7_RUST_VER}"
+  DOVI_REF="${KOTV_LIBDOVI_REF:-$WIN7_DOVI_REF}"
+  STAMP_TAG="win7-rust${WIN7_RUST_VER}-${DOVI_REF}"
 else
   RUST_PIN="stable"
-  STAMP_TAG="stable"
+  STAMP_TAG="stable-${DOVI_REF}"
 fi
-STAMP="$PREFIX/.kotv-libdovi-v2-${STAMP_TAG}"
+STAMP="$PREFIX/.kotv-libdovi-v3-${STAMP_TAG}"
 WANT_STAMP="${DOVI_REF} rust=${RUST_PIN} target=gnu"
 
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
@@ -248,14 +251,61 @@ fi
 rm -f "$PREFIX/lib/libdovi.a" "$PREFIX/lib/libdovi.dll.a" "$PREFIX/lib/dovi.lib" \
   "$PREFIX/lib/pkgconfig/dovi.pc" 2>/dev/null || true
 
+# Win7：钉死依赖版本，防止 cargo 解析到要求 rustc≥1.79 的 bitvec_helpers/bitstream-io。
+if is_windows && is_win7_build; then
+  echo "==> Win7: pin dolby_vision deps for rustc ${WIN7_RUST_VER}"
+  python3 - "$BUILD_DIR/dovi_tool/dolby_vision/Cargo.toml" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+t = p.read_text(encoding="utf-8")
+old = 'bitvec_helpers = { version = "3.1.3", default-features = false, features = ["bitstream-io"] }'
+new = 'bitvec_helpers = { version = "=3.1.3", default-features = false, features = ["bitstream-io"] }'
+if old not in t and '=3.1.3' not in t:
+    # 兼容其它小版本写法
+    import re
+    t2, n = re.subn(
+        r'bitvec_helpers\s*=\s*\{\s*version\s*=\s*"[^"]+"',
+        'bitvec_helpers = { version = "=3.1.3"',
+        t,
+        count=1,
+    )
+    if n != 1:
+        raise SystemExit(f"ERROR: cannot pin bitvec_helpers in {p}")
+    t = t2
+elif old in t:
+    t = t.replace(old, new)
+# 直接依赖 bitstream-io 以统一到 lock 里的 2.2.0（避免浮到 2.6 / rustc 1.79）
+if "bitstream-io" not in t:
+    t = t.replace(
+        "[dependencies]\n",
+        '[dependencies]\nbitstream-io = "=2.2.0"\n',
+        1,
+    )
+p.write_text(t, encoding="utf-8")
+print(f"ok pinned {p}")
+PY
+  (
+    cd "$BUILD_DIR/dovi_tool/dolby_vision"
+    # 先按钉死版本生成 lock，再强制 precise（双保险）。
+    cargo generate-lockfile
+    cargo update -p bitvec_helpers --precise 3.1.3
+    cargo update -p bitstream-io --precise 2.2.0
+  )
+fi
+
 # 静态库：桌面 libplacebo/mpv 直接吃进产物，少一份运行时 DLL/so。
 (
   cd dovi_tool/dolby_vision
+  locked=()
+  if [[ -f Cargo.lock ]]; then
+    locked=(--locked)
+  fi
   cargo cinstall --release \
     --prefix="$PREFIX" \
     --libdir="$PREFIX/lib" \
     --library-type staticlib \
     --target "$TARGET" \
+    "${locked[@]}" \
     -j "$JOBS"
 )
 
