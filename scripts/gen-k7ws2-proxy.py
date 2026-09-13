@@ -118,10 +118,11 @@ def pe_ws2_imports(path: Path) -> set[str]:
     return found
 
 
-C_SRC = r"""/* Auto-generated Win7 ws2_32 proxy: GetHostNameW + forwards. */
+C_SRC_HEAD = r"""/* Auto-generated Win7 ws2_32 proxy: GetHostNameW + forwards. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock2.h>
+#include <ws2tcpip.h>
 
 /* Win8+ API missing on Win7: implement via ANSI gethostname. */
 __declspec(dllexport) int WSAAPI GetHostNameW(wchar_t *name, int namelen)
@@ -163,17 +164,29 @@ def main() -> int:
     names.add("GetHostNameW")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    (args.out_dir / "k7ws2.c").write_text(C_SRC, encoding="utf-8")
+
+    c_parts = [C_SRC_HEAD]
+    for s in sorted((names & WIN8_PLUS) - LOCAL_IMPL):
+        print(f"  stub Win8+ API for Win7: {s}")
+        if s.startswith("FreeAddrInfoEx"):
+            c_parts.append(
+                f"\n__declspec(dllexport) void WSAAPI {s}(void *p)\n"
+                f"{{\n    (void)p;\n}}\n"
+            )
+        else:
+            c_parts.append(
+                f"\n__declspec(dllexport) int WSAAPI {s}(void)\n"
+                f"{{\n    WSASetLastError(WSAEOPNOTSUPP);\n    return SOCKET_ERROR;\n}}\n"
+            )
+    (args.out_dir / "k7ws2.c").write_text("".join(c_parts), encoding="utf-8")
 
     lines = ['LIBRARY "k7ws2.dll"', "EXPORTS"]
     for n in sorted(names):
-        if n in LOCAL_IMPL:
+        if n in LOCAL_IMPL or n in WIN8_PLUS:
             lines.append(f"  {n}")
         else:
-            # Forward to the real system DLL (KnownDLL path via LoadLibrary name).
             lines.append(f"  {n} = ws2_32.{n}")
-    def_text = "\n".join(lines) + "\n"
-    (args.out_dir / "k7ws2.def").write_text(def_text, encoding="utf-8")
+    (args.out_dir / "k7ws2.def").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"ok wrote {args.out_dir}/k7ws2.{{c,def}} ({len(names)} exports)")
     return 0
 

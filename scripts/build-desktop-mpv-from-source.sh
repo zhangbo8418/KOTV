@@ -522,8 +522,8 @@ verify_mpv_win7_imports() {
   local dll="$1"
   [[ -f "$dll" ]] || return 0
   kotv_is_mpv_win7_build || return 0
-  # 时间 API 可当场改写；GetHostNameW 要等打包时生成 k7ws2.dll 代理。
-  python3 "$ROOT/scripts/patch-win7-pe-imports.py" "$dll"
+  # 编 mpv 时只改时间 API；WS2_32→k7ws2 要等打包生成代理 DLL 之后。
+  python3 "$ROOT/scripts/patch-win7-pe-imports.py" --mode=time "$dll"
   if command -v objdump >/dev/null 2>&1; then
     if objdump -p "$dll" 2>/dev/null | awk '/DLL Name:/{print $3}' | tr '[:upper:]' '[:lower:]' | grep -qx 'shcore.dll'; then
       echo "ERROR: $dll imports SHCORE.dll (Win7 incompatible; rebuild with kotv_windows_mpv_cflags)" >&2

@@ -60,7 +60,7 @@ def rva_to_off(data: bytes, rva: int) -> int | None:
     return None
 
 
-def patch_file(path: Path) -> int:
+def patch_file(path: Path, mode: str = "all") -> int:
     data = bytearray(path.read_bytes())
     if len(data) < 0x40 or data[0:2] != b"MZ":
         raise SystemExit(f"not a PE: {path}")
@@ -99,7 +99,7 @@ def patch_file(path: Path) -> int:
         if dll_off is not None:
             end = data.index(b"\0", dll_off)
             dll = bytes(data[dll_off:end])
-            if dll in WS2_NAMES:
+            if mode == "all" and dll in WS2_NAMES:
                 if len(WS2_NEW) > len(dll):
                     raise SystemExit(f"k7ws2.dll longer than {dll!r}")
                 data[dll_off : dll_off + len(dll) + 1] = WS2_NEW + b"\0" * (
@@ -156,7 +156,7 @@ def patch_file(path: Path) -> int:
 
     if patched:
         path.write_bytes(data)
-    print(f"ok {path.name}: rewrote {patched} import(s)")
+    print(f"ok {path.name}: rewrote {patched} import(s) (mode={mode})")
     return patched
 
 
