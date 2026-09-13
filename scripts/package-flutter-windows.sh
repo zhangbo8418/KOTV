@@ -107,6 +107,14 @@ chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
   echo "missing libmpv-2.dll next to kotv.exe" >&2
   exit 1
 }
+
+# Win7：把硬链的 GetSystemTimePreciseAsFileTime 改写成同签名的 GetSystemTimeAsFileTime。
+if [[ "${KOTV_WIN7:-}" == "1" ]]; then
+  echo "==> Win7 PE import patch (GetSystemTimePreciseAsFileTime → GetSystemTimeAsFileTime)"
+  # shellcheck disable=SC2046
+  python3 "$ROOT/scripts/patch-win7-pe-imports.py" \
+    $(find "$RELEASE_DIR" -maxdepth 1 \( -iname '*.dll' -o -iname '*.exe' \) -print)
+fi
 [[ ! -f "$RELEASE_DIR/mpv-2.dll" ]] || {
   echo "ERROR: stale mpv-2.dll must not ship beside libmpv-2.dll" >&2
   exit 1
