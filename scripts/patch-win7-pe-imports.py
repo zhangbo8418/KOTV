@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Rewrite Win8+ PE imports to Win7-compatible equivalents (in-place).
+"""Rewrite Win8+ PE imports for Windows 7 (in-place).
 
-Rust ≥1.78 std hard-imports GetSystemTimePreciseAsFileTime from KERNEL32.
-That export does not exist on Windows 7, so LoadLibrary/startup fails with
-"entry point not found". The Win7 API GetSystemTimeAsFileTime has the same
-signature; rewriting the import name string is enough for a working fallback.
+1) KERNEL32!GetSystemTimePreciseAsFileTime → GetSystemTimeAsFileTime
+   (same signature; present on Win7).
+
+2) WS2_32.dll → k7ws2.dll
+   Real system WS2_32 is a KnownDLL (local override ignored). We redirect
+   imports to our proxy DLL which implements GetHostNameW and forwards the rest.
 
 Usage:
   patch-win7-pe-imports.py path/to/mpv-2.dll [more.pe ...]
@@ -16,8 +18,17 @@ import struct
 import sys
 from pathlib import Path
 
-OLD = b"GetSystemTimePreciseAsFileTime"
-NEW = b"GetSystemTimeAsFileTime"
+TIME_OLD = b"GetSystemTimePreciseAsFileTime"
+TIME_NEW = b"GetSystemTimeAsFileTime"
+
+# WS2_32.dll (10) → k7ws2.dll (9); must not grow.
+WS2_NAMES = {
+    b"WS2_32.dll",
+    b"ws2_32.dll",
+    b"Ws2_32.dll",
+    b"WS2_32.DLL",
+}
+WS2_NEW = b"k7ws2.dll"
 
 
 def _u16(data: bytes, off: int) -> int:
@@ -59,8 +70,12 @@ def patch_file(path: Path) -> int:
     magic = _u16(data, e + 24)
     if magic == 0x20B:  # PE32+
         import_rva = _u32(data, e + 24 + 112 + 8)
+        entry_size = 8
+        ord_flag = 1 << 63
     elif magic == 0x10B:  # PE32
         import_rva = _u32(data, e + 24 + 96 + 8)
+        entry_size = 4
+        ord_flag = 1 << 31
     else:
         raise SystemExit(f"unsupported PE magic {magic:#x}: {path}")
     if import_rva == 0:
@@ -72,32 +87,42 @@ def patch_file(path: Path) -> int:
     if desc is None:
         raise SystemExit(f"cannot map import RVA: {path}")
 
-    # IMAGE_IMPORT_DESCRIPTOR is 20 bytes; last is all-zero.
     while True:
         oft_rva = _u32(data, desc + 0)
         name_rva = _u32(data, desc + 12)
         ft_rva = _u32(data, desc + 16)
         if oft_rva == 0 and name_rva == 0 and ft_rva == 0:
             break
+
         dll_off = rva_to_off(data, name_rva) if name_rva else None
         dll = b""
         if dll_off is not None:
             end = data.index(b"\0", dll_off)
             dll = bytes(data[dll_off:end])
+            if dll in WS2_NAMES:
+                if len(WS2_NEW) > len(dll):
+                    raise SystemExit(f"k7ws2.dll longer than {dll!r}")
+                data[dll_off : dll_off + len(dll) + 1] = WS2_NEW + b"\0" * (
+                    len(dll) - len(WS2_NEW) + 1
+                )
+                patched += 1
+                print(f"  patched {path.name}: DLL {dll.decode()} -> {WS2_NEW.decode()}")
+                dll = WS2_NEW
+
         thunk_rva = oft_rva or ft_rva
         thunk = rva_to_off(data, thunk_rva) if thunk_rva else None
         if thunk is None:
             desc += 20
             continue
-        entry_size = 8 if magic == 0x20B else 4
-        ord_flag = 1 << (63 if magic == 0x20B else 31)
+
         i = 0
         while True:
             entry_off = thunk + i * entry_size
-            if magic == 0x20B:
-                val = struct.unpack_from("<Q", data, entry_off)[0]
-            else:
-                val = _u32(data, entry_off)
+            val = (
+                struct.unpack_from("<Q", data, entry_off)[0]
+                if entry_size == 8
+                else _u32(data, entry_off)
+            )
             if val == 0:
                 break
             if val & ord_flag:
@@ -109,20 +134,23 @@ def patch_file(path: Path) -> int:
                 i += 1
                 continue
             name_off = hint_off + 2
-            # Read existing import name
             try:
                 z = data.index(b"\0", name_off)
             except ValueError:
                 i += 1
                 continue
             name = bytes(data[name_off:z])
-            if name == OLD:
-                if len(NEW) > len(OLD):
+            if name == TIME_OLD:
+                if len(TIME_NEW) > len(TIME_OLD):
                     raise SystemExit("replacement longer than original")
-                data[name_off : name_off + len(OLD) + 1] = NEW + b"\0" * (len(OLD) - len(NEW) + 1)
+                data[name_off : name_off + len(TIME_OLD) + 1] = TIME_NEW + b"\0" * (
+                    len(TIME_OLD) - len(TIME_NEW) + 1
+                )
                 patched += 1
                 dll_s = dll.decode("ascii", "replace")
-                print(f"  patched {path.name}: {dll_s}!{OLD.decode()} -> {NEW.decode()}")
+                print(
+                    f"  patched {path.name}: {dll_s}!{TIME_OLD.decode()} -> {TIME_NEW.decode()}"
+                )
             i += 1
         desc += 20
 
@@ -136,12 +164,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("pe", nargs="+", type=Path)
     args = ap.parse_args()
-    total = 0
     for p in args.pe:
         if not p.is_file():
             print(f"ERROR: missing {p}", file=sys.stderr)
             return 1
-        total += patch_file(p)
+        patch_file(p)
     return 0
 
 

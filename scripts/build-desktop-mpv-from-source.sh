@@ -522,7 +522,7 @@ verify_mpv_win7_imports() {
   local dll="$1"
   [[ -f "$dll" ]] || return 0
   kotv_is_mpv_win7_build || return 0
-  # 现代 Rust std 硬链 GetSystemTimePreciseAsFileTime；改写成同签名的 Win7 API。
+  # 时间 API 可当场改写；GetHostNameW 要等打包时生成 k7ws2.dll 代理。
   python3 "$ROOT/scripts/patch-win7-pe-imports.py" "$dll"
   if command -v objdump >/dev/null 2>&1; then
     if objdump -p "$dll" 2>/dev/null | awk '/DLL Name:/{print $3}' | tr '[:upper:]' '[:lower:]' | grep -qx 'shcore.dll'; then

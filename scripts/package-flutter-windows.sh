@@ -108,12 +108,10 @@ chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
   exit 1
 }
 
-# Win7：把硬链的 GetSystemTimePreciseAsFileTime 改写成同签名的 GetSystemTimeAsFileTime。
+# Win7：k7ws2.dll 代理 GetHostNameW，并把硬链 Win8+ 时间 API 改写掉。
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
-  echo "==> Win7 PE import patch (GetSystemTimePreciseAsFileTime → GetSystemTimeAsFileTime)"
-  # shellcheck disable=SC2046
-  python3 "$ROOT/scripts/patch-win7-pe-imports.py" \
-    $(find "$RELEASE_DIR" -maxdepth 1 \( -iname '*.dll' -o -iname '*.exe' \) -print)
+  chmod +x "$ROOT/scripts/build-win7-k7ws2-proxy.sh"
+  "$ROOT/scripts/build-win7-k7ws2-proxy.sh" "$RELEASE_DIR"
 fi
 [[ ! -f "$RELEASE_DIR/mpv-2.dll" ]] || {
   echo "ERROR: stale mpv-2.dll must not ship beside libmpv-2.dll" >&2
