@@ -635,15 +635,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // TV boxes often fail scraped HTTPS CA checks; disable verify for now.
       MPVLib.setOptionString("tls-verify", "no")
       // https→http、以及 HLS 分片伪装成 .png/.jpg：须放行扩展名。
+      // whitelist 用 [a,b,c]，避免 set_property 把 file\,http 拆成 file\。
       // FFmpeg 9 默认 extension_picky=1，只认常见后缀；点播常首片 .ts、后面 .png（内容仍是 TS）。
-      val lavfNet =
-        "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data," +
-          "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0"
-      MPVLib.setOptionString("demuxer-lavf-o", lavfNet)
-      MPVLib.setOptionString(
-        "stream-lavf-o",
-        "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data"
-      )
+      MPVLib.setOptionString("demuxer-lavf-o", LAVF_DEMUXER_O)
       // ytdl_hook aborts load on devices without youtube-dl; disable.
       MPVLib.setOptionString("ytdl", "no")
       // Do not force gpu-api=vulkan on API 25: GLES path for picture;
@@ -1124,10 +1118,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
     // 嵌套列表/分片不走 mpv 的 http-header-fields，要把 UA 写进 lavf，否则子请求是 Lavf 默认头。
     val lavf = buildString {
-      append(
-        "protocol_whitelist=file\\,http\\,https\\,tcp\\,tls\\,crypto\\,data," +
-          "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0",
-      )
+      append(LAVF_DEMUXER_O)
       append(",user_agent=").append(escapeListValue(ua))
       if (referer.isNotEmpty()) append(",referer=").append(escapeListValue(referer))
     }
@@ -1289,6 +1280,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     private const val TAG = "KotvMpv"
     private const val FALLBACK_PLAY_UA =
       "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
+    // 与 flutter/lib/player/mpv_opts.dart kotvDemuxerLavfO 对齐；[] 避免 \, 被拆。
+    private const val LAVF_DEMUXER_O =
+      "seg_max_retry=5,strict=experimental," +
+        "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0," +
+        "protocol_whitelist=[file,http,https,tcp,tls,crypto,data]"
     const val VIEW_TYPE = "kotv_mpv/surface"
   }
 }

@@ -5,6 +5,15 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'buffer_budget.dart';
 import 'kotv_platform.dart';
 
+/// 交给 lavf 的 demuxer 选项。302 / HLS 子列表由播放器自己跟，不要在 Dart 里预跳。
+///
+/// `protocol_whitelist` 必须写成 `[a,b,c]`：`setProperty` 不按 `\,` 转义拆项，
+/// 旧写法 `file\,http\,https` 会变成 whitelist=`file\`。
+const kotvDemuxerLavfO =
+    'seg_max_retry=5,strict=experimental,'
+    'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,'
+    'protocol_whitelist=[file,http,https,tcp,tls,crypto,data]';
+
 /// MPV 选项：Android 走原生插件；桌面/Windows/macOS 走 media_kit + 自带 libmpv。
 ///
 /// 自带 libmpv 由 scripts 编译（Vulkan 硬解、AV3A 等）；Flutter 侧不挂 wid/Surface。
@@ -134,13 +143,14 @@ class KotvMpvOpts {
         await set('hwdec', hwdecValue());
       } catch (_) {}
 
-      // HLS 分片常伪装成 .png/.jpg；FFmpeg 9 默认 extension_picky 会跳过，点播只剩几秒。
+      // HLS 伪装扩展名 + 嵌套 http(s)（302 后 lavf 再开子列表）。
+      // whitelist 必须用 [a,b,c]：setProperty 不认 \,，写成 file\,http 会被拆成
+      // protocol_whitelist=file\ → 日志 Protocol 'https' not on whitelist 'file\'。
       try {
-        await set(
-          'demuxer-lavf-o',
-          r'protocol_whitelist=file\,http\,https\,tcp\,tls\,crypto\,data,'
-          r'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0',
-        );
+        await set('demuxer-lavf-o', kotvDemuxerLavfO);
+      } catch (_) {}
+      try {
+        await set('ytdl', 'no');
       } catch (_) {}
 
       // 桌面 media_kit：gpu-api 走 bundled libmpv（Vulkan 等）。
@@ -183,6 +193,8 @@ class KotvMpvOpts {
   Map<String, String> propertyMap({bool live = false}) {
     final out = <String, String>{
       'hwdec': hwdecValue(),
+      'demuxer-lavf-o': kotvDemuxerLavfO,
+      'ytdl': 'no',
     };
     if (gpuNext && kotvIsAndroid()) {
       out['vo'] = 'gpu-next';
