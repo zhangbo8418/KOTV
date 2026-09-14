@@ -9,6 +9,7 @@ import 'buffer_budget.dart';
 import 'fvp_decoders.dart';
 import 'fvp_register.dart';
 import 'kotv_playback.dart';
+import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
@@ -241,7 +242,9 @@ class FvpPlayback extends KotvPlayback {
           }
         }();
         if (live || engineLive) {
-          c.setBufferRange(min: 0, max: 4000, drop: true);
+          // 桌面直播：4s 太容易欠载停住；drop 保持追直播沿，类似 MPV cache-pause=no。
+          final liveMax = kotvIsDesktop() ? 8000 : 4000;
+          c.setBufferRange(min: 0, max: liveMax, drop: true);
         } else {
           await KotvBufferBudget.warm();
           final maxMs = KotvBufferBudget.fvpMaxBufferMs(KotvBufferBudget.bytes());

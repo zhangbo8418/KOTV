@@ -635,7 +635,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // TV boxes often fail scraped HTTPS CA checks; disable verify for now.
       MPVLib.setOptionString("tls-verify", "no")
       // https→http、以及 HLS 分片伪装成 .png/.jpg：须放行扩展名。
-      // whitelist 用 [a,b,c]，避免 set_property 把 file\,http 拆成 file\。
+      // 不设 protocol_whitelist，避免挡掉 RTSP/RTMP/RTP。
       // FFmpeg 9 默认 extension_picky=1，只认常见后缀；点播常首片 .ts、后面 .png（内容仍是 TS）。
       MPVLib.setOptionString("demuxer-lavf-o", LAVF_DEMUXER_O)
       // 不按后缀当播放列表/图片（.m3u8 可能是 FLV，.png 可能是 TS）；lavf 按内容探测。
@@ -1286,12 +1286,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     private const val TAG = "KotvMpv"
     private const val FALLBACK_PLAY_UA =
       "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
-    // 与 flutter/lib/player/mpv_opts.dart kotvDemuxerLavfO 对齐；[] 避免 \, 被拆。
+    // 与 flutter/lib/player/mpv_opts.dart kotvDemuxerLavfO 对齐；不设 protocol_whitelist。
     private const val LAVF_DEMUXER_O =
       "seg_max_retry=5,strict=experimental," +
         "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0," +
-        "probesize=8000000,analyzeduration=8000000," +
-        "protocol_whitelist=[file,http,https,tcp,tls,crypto,data]"
+        "probesize=8000000,analyzeduration=8000000"
     const val VIEW_TYPE = "kotv_mpv/surface"
   }
 }

@@ -7,13 +7,13 @@ import 'kotv_platform.dart';
 
 /// 交给 lavf 的 demuxer 选项。302 / HLS 子列表由播放器自己跟，不要在 Dart 里预跳。
 ///
-/// `protocol_whitelist` 必须写成 `[a,b,c]`：`setProperty` 不按 `\,` 转义拆项，
-/// 旧写法 `file\,http\,https` 会变成 whitelist=`file\`。
+/// **不要写 protocol_whitelist**：一旦写了就是拒绝名单外的协议。
+/// 旧写法 `file\,http` 还会被拆成 `file\`，HLS 嵌套 https 也挂。
+/// 不设则 lavf 默认放行 RTSP/RTMP/RTP/MMS/HTTP/HLS 等。
 const kotvDemuxerLavfO =
     'seg_max_retry=5,strict=experimental,'
     'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,'
-    'probesize=8000000,analyzeduration=8000000,'
-    'protocol_whitelist=[file,http,https,tcp,tls,crypto,data]';
+    'probesize=8000000,analyzeduration=8000000';
 
 /// 空列表：不要按后缀把 URL 当播放列表 / 图片。
 /// 网关常把 FLV/TS 写成 .m3u8、把 TS 分片写成 .png；交给 lavf 按内容探测。
@@ -149,9 +149,7 @@ class KotvMpvOpts {
         await set('hwdec', hwdecValue());
       } catch (_) {}
 
-      // HLS 伪装扩展名 + 嵌套 http(s)（302 后 lavf 再开子列表）。
-      // whitelist 必须用 [a,b,c]：setProperty 不认 \,，写成 file\,http 会被拆成
-      // protocol_whitelist=file\ → 日志 Protocol 'https' not on whitelist 'file\'。
+      // HLS 伪装扩展名；不设 protocol_whitelist（名单外的 RTSP/RTMP 会被拒）。
       try {
         await set('demuxer-lavf-o', kotvDemuxerLavfO);
       } catch (_) {}

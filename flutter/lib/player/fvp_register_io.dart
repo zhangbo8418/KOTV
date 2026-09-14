@@ -20,7 +20,8 @@ void kotvEnsureFvpRegistered() {
 /// 全局 player 选项。解码器列表在开播时由 [kotvFvpVideoDecoders] 写入。
 /// Android 仅关 tunnel（Surface 未就绪时隧道模式易黑屏有声）。
 ///
-/// 302 跟跳交给 mdk 默认 IO（未改 `io.avio`；有效性未在多系统验证）。
+/// 302 跟跳交给 mdk 默认 IO（勿在 Dart 里预跳，CDN 签名会过期）。
+/// 不设 `avformat.input`：URL 后缀常是假的（.m3u8 实为 FLV，.png 实为 TS）。
 void kotvRegisterFvp() {
   if (kIsWeb) return;
   const platforms = ['windows', 'macos', 'linux', 'android', 'ios'];
@@ -28,6 +29,12 @@ void kotvRegisterFvp() {
     // 直播 / 伪扩展名：给足探测窗口（勿用 lowLatency 的极小 analyzeduration，易 prepare 失败）
     'avformat.probesize': '8000000',
     'avformat.analyzeduration': '8000000',
+    // 与 MPV 一样：伪装扩展名靠探测，不设 protocol_whitelist（否则 RTSP/RTMP/RTP 会被挡）。
+    'avformat.extension_picky': '0',
+    'avformat.allowed_extensions': 'ALL',
+    'avformat.allowed_segment_extensions': 'ALL',
+    'avio.reconnect': '1',
+    'avio.reconnect_delay_max': '7',
     // 点播进度条：demux 包缓存报已下载区间（默认解码队列仅 ~4s）。
     // 预读上限仍由开播后 setBufferRange + KotvBufferBudget 换算（mdk 无字节帽 API）。
     'demux.buffer.ranges': '16',
