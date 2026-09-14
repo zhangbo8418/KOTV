@@ -12,7 +12,13 @@ import 'kotv_platform.dart';
 const kotvDemuxerLavfO =
     'seg_max_retry=5,strict=experimental,'
     'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,'
+    'probesize=8000000,analyzeduration=8000000,'
     'protocol_whitelist=[file,http,https,tcp,tls,crypto,data]';
+
+/// 空列表：不要按后缀把 URL 当播放列表 / 图片。
+/// 网关常把 FLV/TS 写成 .m3u8、把 TS 分片写成 .png；交给 lavf 按内容探测。
+const kotvPlaylistExts = '';
+const kotvImageExts = '';
 
 /// MPV 选项：Android 走原生插件；桌面/Windows/macOS 走 media_kit + 自带 libmpv。
 ///
@@ -152,6 +158,12 @@ class KotvMpvOpts {
       try {
         await set('ytdl', 'no');
       } catch (_) {}
+      try {
+        await set('playlist-exts', kotvPlaylistExts);
+      } catch (_) {}
+      try {
+        await set('image-exts', kotvImageExts);
+      } catch (_) {}
 
       // 桌面 media_kit：gpu-api 走 bundled libmpv（Vulkan 等）。
       if (!kotvIsAndroid()) {
@@ -170,7 +182,10 @@ class KotvMpvOpts {
       }
 
       if (live) {
-        // 直播不写 demuxer-max-bytes / cache-secs（点播预算也不套）。
+        // 直播不写 demuxer-max-bytes / cache-secs；关掉 cache-pause 避免播一段停一段。
+        try {
+          await set('cache-pause', 'no');
+        } catch (_) {}
       } else {
         try {
           await KotvBufferBudget.warm(force: true);
@@ -195,7 +210,12 @@ class KotvMpvOpts {
       'hwdec': hwdecValue(),
       'demuxer-lavf-o': kotvDemuxerLavfO,
       'ytdl': 'no',
+      'playlist-exts': kotvPlaylistExts,
+      'image-exts': kotvImageExts,
     };
+    if (live) {
+      out['cache-pause'] = 'no';
+    }
     if (gpuNext && kotvIsAndroid()) {
       out['vo'] = 'gpu-next';
     }

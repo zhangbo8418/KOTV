@@ -638,8 +638,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // whitelist 用 [a,b,c]，避免 set_property 把 file\,http 拆成 file\。
       // FFmpeg 9 默认 extension_picky=1，只认常见后缀；点播常首片 .ts、后面 .png（内容仍是 TS）。
       MPVLib.setOptionString("demuxer-lavf-o", LAVF_DEMUXER_O)
+      // 不按后缀当播放列表/图片（.m3u8 可能是 FLV，.png 可能是 TS）；lavf 按内容探测。
+      MPVLib.setOptionString("playlist-exts", "")
+      MPVLib.setOptionString("image-exts", "")
       // ytdl_hook aborts load on devices without youtube-dl; disable.
       MPVLib.setOptionString("ytdl", "no")
+      if (livePlayback) {
+        MPVLib.setOptionString("cache-pause", "no")
+      }
       // Do not force gpu-api=vulkan on API 25: GLES path for picture;
       // libvulkan.so is only to satisfy libmpv DT_NEEDED.
       MPVLib.setOptionString("force-window", "no")
@@ -1284,6 +1290,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     private const val LAVF_DEMUXER_O =
       "seg_max_retry=5,strict=experimental," +
         "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0," +
+        "probesize=8000000,analyzeduration=8000000," +
         "protocol_whitelist=[file,http,https,tcp,tls,crypto,data]"
     const val VIEW_TYPE = "kotv_mpv/surface"
   }
