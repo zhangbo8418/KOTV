@@ -417,6 +417,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           result.success(buildTracksJson(C.TRACK_TYPE_VIDEO))
         }
       }
+      "getSubtitleTracks" -> {
+        main.post {
+          result.success(buildTracksJson(C.TRACK_TYPE_TEXT))
+        }
+      }
       "selectAudioTrack" -> {
         val id = call.argument<String>("id") ?: "auto"
         main.post {
@@ -448,6 +453,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_track", t.message, null)
+          }
+        }
+      }
+      "selectSubtitleTrack" -> {
+        val id = call.argument<String>("id") ?: ""
+        main.post {
+          try {
+            selectSubtitleTrackById(id)
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_subtitle_track", t.message, null)
           }
         }
       }
@@ -795,6 +811,18 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         override fun onPlayerError(error: PlaybackException) {
           val mode = playerBuiltDecode ?: effectiveDecodeMode()
           Log.e(TAG, "exo error code=${error.errorCode} mode=$mode ${error.message}", error)
+          // 对齐 FongMi：直播窗口落后则追到默认直播点，不上报 error。
+          if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+            try {
+              val cur = player ?: return
+              cur.seekToDefaultPosition()
+              cur.prepare()
+              cur.play()
+              return
+            } catch (t: Throwable) {
+              Log.e(TAG, "exo behind-live recover failed", t)
+            }
+          }
           if (!formatRetried) {
             val retryMime = mimeForError(error.errorCode)
             if (retryMime != null && retryMime != currentMime) {
@@ -1099,10 +1127,29 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     sel.setParameters(
       sel.buildUponParameters()
         .clearOverridesOfType(type)
+        .setTrackTypeDisabled(type, false)
         .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, ti))
         .build(),
     )
     p.play()
+  }
+
+  /** ''/no/off=关字幕；auto=清 override；其余按 gN:tM 选轨。 */
+  private fun selectSubtitleTrackById(id: String) {
+    val sel = trackSelector ?: return
+    val p = player ?: return
+    val key = id.trim().lowercase()
+    if (key.isEmpty() || key == "no" || key == "off") {
+      sel.setParameters(
+        sel.buildUponParameters()
+          .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+          .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+          .build(),
+      )
+      p.play()
+      return
+    }
+    selectTrackById(C.TRACK_TYPE_TEXT, id.trim())
   }
 
   private fun selectVideoTrackAt(index: Int) {

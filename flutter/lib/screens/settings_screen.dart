@@ -767,6 +767,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
     final mpvVulkan = g('mpvVulkan', 'false') == 'true';
+    final mpvTlsRaw = g('mpvTlsVerify', 'true').trim().toLowerCase();
+    final mpvTlsVerify = mpvTlsRaw != 'false' && mpvTlsRaw != 'off' && mpvTlsRaw != '0' && mpvTlsRaw != 'no';
     final mpvConfPreview = g('mpvConf').trim();
     // 全平台：点播/直播任一选了内置 MPV 才露出 MPV 相关项
     final usesMpv = kotvEmbedBackend(playerVal) == KotvEmbedBackend.mpv ||
@@ -775,6 +777,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final showMpvVulkan = usesMpv &&
         ((kotvIsDesktop() || kotvIsIOS()) || (kotvIsAndroid() && _androidVulkanOk));
     final showMpvGpuNext = usesMpv && kotvIsAndroid();
+    final showMpvTls = usesMpv && kotvIsAndroid();
 
     return Column(
       children: [
@@ -1030,6 +1033,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   : (kotvIsAndroid()
                                       ? '已开启 gpu-api=vulkan（解码仍为 mediacodec，重启 App 后生效）'
                                       : '已开启 gpu-api=vulkan（media_kit 内置 MPV，重启播放）'),
+                            )),
+                          ),
+                        if (showMpvTls)
+                          KotvSettingsCell(
+                            label: 'MPV 校验证书',
+                            value: mpvTlsVerify ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'mpvTlsVerify',
+                              mpvTlsVerify ? 'false' : 'true',
+                              msg: mpvTlsVerify
+                                  ? '已关闭 TLS 校验（坏 CA 盒子可用；重启播放生效）'
+                                  : '已开启 TLS 校验（cacert；重启播放生效）',
                             )),
                           ),
                         if (showMpvOpts)

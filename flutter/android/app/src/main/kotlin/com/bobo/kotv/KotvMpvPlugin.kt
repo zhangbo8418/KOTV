@@ -72,6 +72,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var gpuNext = false
   private var vulkanEnabled = false
   private var conf = ""
+  /** 默认校验证书；坏 CA 盒子可关（设置 mpvTlsVerify=false）。 */
+  private var tlsVerify = true
   private var livePlayback = false
   private var volume = 80.0
   private var rate = 1.0
@@ -82,6 +84,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var aspectMode: String = "default"
   /** ensurePlayer 时是否按直播初始化（点播会写 demuxer-max-bytes；模式变了须重建）。 */
   private var createdAsLive: Boolean? = null
+  /** ensurePlayer 时写入的 tls-verify；变更须重建上下文。 */
+  private var createdTlsVerify: Boolean? = null
 
   private val tick = object : Runnable {
     override fun run() {
@@ -233,6 +237,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         gpuNext = call.argument<Boolean>("gpuNext") == true
         vulkanEnabled = call.argument<Boolean>("vulkan") == true
         conf = call.argument<String>("conf") ?: conf
+        call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
         // 直播须在 ensurePlayer 前写入，否则会套上点播 demuxer 预算。
         call.argument<Boolean>("live")?.let { livePlayback = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
@@ -264,6 +269,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         gpuNext = call.argument<Boolean>("gpuNext") == true
         vulkanEnabled = call.argument<Boolean>("vulkan") == true
         conf = call.argument<String>("conf") ?: conf
+        call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           renderTexture = resolveRenderTexture(it)
         }
@@ -448,12 +454,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         vulkanEnabled = call.argument<Boolean>("vulkan") == true
         conf = call.argument<String>("conf") ?: conf
         decodeMode = call.argument<String>("decode") ?: decodeMode
+        call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
         @Suppress("UNCHECKED_CAST")
         val props = (call.argument<Map<*, *>>("props") ?: emptyMap<Any, Any>())
           .entries
           .associate { "${it.key}" to "${it.value}" }
         main.post {
           try {
+            // tls-verify 在 init 写入，变更须重建。
+            ensurePlayer()
             applyRuntimeOpts(props)
             applyGpuApiIfNeeded()
             result.success(null)
@@ -516,6 +525,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             result.success(buildVideoTracksJson())
+          } catch (e: Throwable) {
+            result.error("TRACKS_FAILED", e.message, null)
+          }
+        }
+      }
+      "getSubtitleTracks" -> {
+        main.post {
+          try {
+            result.success(buildSubtitleTracksJson())
           } catch (e: Throwable) {
             result.error("TRACKS_FAILED", e.message, null)
           }
@@ -596,6 +614,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       Log.i(TAG, "recreate MPV context: live $createdAsLive -> $livePlayback")
       destroyPlayer()
     }
+    if (created.get() && createdTlsVerify != null && createdTlsVerify != tlsVerify) {
+      Log.i(TAG, "recreate MPV context: tlsVerify $createdTlsVerify -> $tlsVerify")
+      destroyPlayer()
+    }
     if (created.get()) return
     synchronized(this) {
       if (created.get()) return
@@ -632,8 +654,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       MPVLib.setOptionString("vo", if (gpuNext) "gpu-next" else "gpu")
       applyGpuApiOptions()
-      // TV boxes often fail scraped HTTPS CA checks; disable verify for now.
-      MPVLib.setOptionString("tls-verify", "no")
+      // 对齐 FongMi：默认 cacert 校验；坏 CA 可关。
+      applyTlsOptions(ctx)
       // https→http、以及 HLS 分片伪装成 .png/.jpg：须放行扩展名。
       // 不设 protocol_whitelist，避免挡掉 RTSP/RTMP/RTP。
       // FFmpeg 9 默认 extension_picky=1，只认常见后缀；点播常首片 .ts、后面 .png（内容仍是 TS）。
@@ -668,10 +690,42 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       observeProps()
       created.set(true)
       createdAsLive = livePlayback
+      createdTlsVerify = tlsVerify
       applyAspectMode()
       main.removeCallbacks(tick)
       main.post(tick)
-      Log.i(TAG, "MPV context ready abi=${MPVLib.getLoadedAbi()} live=$livePlayback")
+      Log.i(TAG, "MPV context ready abi=${MPVLib.getLoadedAbi()} live=$livePlayback tlsVerify=$tlsVerify")
+    }
+  }
+
+  /** 从 assets 拷 cacert.pem，设 tls-ca-file；关闭校验时 tls-verify=no。 */
+  private fun applyTlsOptions(ctx: Context) {
+    if (!tlsVerify) {
+      MPVLib.setOptionString("tls-verify", "no")
+      return
+    }
+    val ca = ensureCacertFile(ctx)
+    if (ca != null) {
+      MPVLib.setOptionString("tls-ca-file", ca.absolutePath)
+      MPVLib.setOptionString("tls-verify", "yes")
+    } else {
+      Log.w(TAG, "cacert.pem missing → tls-verify=no")
+      MPVLib.setOptionString("tls-verify", "no")
+    }
+  }
+
+  private fun ensureCacertFile(ctx: Context): File? {
+    return try {
+      val out = File(ctx.filesDir, "cacert.pem")
+      if (!out.exists() || out.length() < 1024) {
+        ctx.assets.open("cacert.pem").use { input ->
+          out.outputStream().use { output -> input.copyTo(output) }
+        }
+      }
+      if (out.exists() && out.length() > 1024) out else null
+    } catch (t: Throwable) {
+      Log.w(TAG, "ensure cacert failed", t)
+      null
     }
   }
 
@@ -740,6 +794,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** 视频轨列表，对齐 TV TrackDialog VIDEO。 */
   private fun buildVideoTracksJson(): String {
     return buildTracksJson("video")
+  }
+
+  /** 字幕轨列表（内嵌 sub）。 */
+  private fun buildSubtitleTracksJson(): String {
+    return buildTracksJson("sub")
   }
 
   private fun buildTracksJson(typeFilter: String): String {
@@ -1167,6 +1226,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     pendingUrl = null
     loadGen.incrementAndGet()
     createdAsLive = null
+    createdTlsVerify = null
     if (!created.getAndSet(false)) return
     try {
       MPVLib.removeObserver(this)

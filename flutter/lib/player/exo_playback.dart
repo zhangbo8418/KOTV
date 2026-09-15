@@ -373,8 +373,10 @@ class ExoPlayback extends KotvPlayback {
     _audioTrackCount = -1;
     _audioTracks = const [];
     _videoTracks = const [];
+    _subtitleTracks = const [];
     _currentAudioId = null;
     _currentVideoId = null;
+    _currentSubtitleId = null;
     _w = 0;
     _h = 0;
     _pixelRatio = 1;
@@ -663,31 +665,36 @@ class ExoPlayback extends KotvPlayback {
 
   List<KotvTrack> _audioTracks = const [];
   List<KotvTrack> _videoTracks = const [];
+  List<KotvTrack> _subtitleTracks = const [];
   String? _currentAudioId;
   String? _currentVideoId;
+  String? _currentSubtitleId;
 
   @override
   List<KotvTrack> get audioTracks => _audioTracks;
   @override
   List<KotvTrack> get videoTracks => _videoTracks;
   @override
-  List<KotvTrack> get subtitleTracks => const [];
+  List<KotvTrack> get subtitleTracks => _subtitleTracks;
   @override
   String? get currentAudioId => _currentAudioId;
   @override
   String? get currentVideoId => _currentVideoId;
   @override
-  String? get currentSubtitleId => null;
+  String? get currentSubtitleId => _currentSubtitleId;
 
   Future<void> _refreshTracks() async {
     if (!_nativeReady) return;
     try {
       final a = await _ch.invokeMethod<dynamic>('getAudioTracks');
       final v = await _ch.invokeMethod<dynamic>('getVideoTracks');
+      final s = await _ch.invokeMethod<dynamic>('getSubtitleTracks');
       _audioTracks = _parseTrackList(a);
       _videoTracks = _parseTrackList(v);
+      _subtitleTracks = _parseTrackList(s);
       _currentAudioId = null;
       _currentVideoId = null;
+      _currentSubtitleId = null;
       if (a is List) {
         for (final e in a) {
           if (e is Map && e['selected'] == true) {
@@ -700,6 +707,14 @@ class ExoPlayback extends KotvPlayback {
         for (final e in v) {
           if (e is Map && e['selected'] == true) {
             _currentVideoId = '${e['id'] ?? ''}';
+            break;
+          }
+        }
+      }
+      if (s is List) {
+        for (final e in s) {
+          if (e is Map && e['selected'] == true) {
+            _currentSubtitleId = '${e['id'] ?? ''}';
             break;
           }
         }
@@ -740,7 +755,15 @@ class ExoPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> setSubtitleTrack(String id) async {}
+  Future<void> setSubtitleTrack(String id) async {
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('selectSubtitleTrack', {'id': id});
+      final key = id.trim().toLowerCase();
+      _currentSubtitleId = (key.isEmpty || key == 'no' || key == 'off' || key == 'auto') ? null : id;
+      await _refreshTracks();
+    } catch (_) {}
+  }
 
   @override
   void dispose() {

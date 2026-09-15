@@ -150,6 +150,7 @@ class NativeMpvPlayback extends KotvPlayback {
   List<KotvTrack> _subtitleTracks = const [];
   String? _currentAudioId;
   String? _currentVideoId;
+  String? _currentSubtitleId;
 
   @override
   List<KotvTrack> get audioTracks => _audioTracks;
@@ -167,7 +168,7 @@ class NativeMpvPlayback extends KotvPlayback {
   String? get currentVideoId => _currentVideoId;
 
   @override
-  String? get currentSubtitleId => null;
+  String? get currentSubtitleId => _currentSubtitleId;
 
   Future<void> _refreshAudioTracks() async {
     await _refreshTracks();
@@ -178,6 +179,7 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       final rawA = await _ch.invokeMethod<String>('getAudioTracks');
       final rawV = await _ch.invokeMethod<String>('getVideoTracks');
+      final rawS = await _ch.invokeMethod<String>('getSubtitleTracks');
       if (rawA != null && rawA.isNotEmpty) {
         final list = jsonDecode(rawA) as List<dynamic>;
         _audioTracks = list.map(_mapMpvTrack).toList();
@@ -185,6 +187,10 @@ class NativeMpvPlayback extends KotvPlayback {
       if (rawV != null && rawV.isNotEmpty) {
         final list = jsonDecode(rawV) as List<dynamic>;
         _videoTracks = list.map(_mapMpvTrack).toList();
+      }
+      if (rawS != null && rawS.isNotEmpty) {
+        final list = jsonDecode(rawS) as List<dynamic>;
+        _subtitleTracks = list.map(_mapMpvTrack).toList();
       }
       notifyListeners();
     } catch (_) {}
@@ -254,6 +260,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'vulkan': _opts.vulkan,
         'gpuApi': _opts.gpuApi,
         'conf': _opts.conf,
+        'tlsVerify': _opts.tlsVerify,
         'render': _renderMode,
         // 直播须在 create/ensurePlayer 时写入，避免套上点播 demuxer 预算。
         'live': live,
@@ -401,6 +408,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'vulkan': _opts.vulkan,
         'gpuApi': _opts.gpuApi,
         'conf': _opts.conf,
+        'tlsVerify': _opts.tlsVerify,
         'render': _renderMode,
         'props': _opts.propertyMap(live: live),
       });
@@ -598,6 +606,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'vulkan': opts.vulkan,
         'gpuApi': opts.gpuApi,
         'conf': opts.conf,
+        'tlsVerify': opts.tlsVerify,
         'props': opts.propertyMap(live: _live),
       });
     } catch (_) {}
@@ -642,6 +651,9 @@ class NativeMpvPlayback extends KotvPlayback {
   Future<void> setSubtitleTrack(String id) async {
     try {
       await _ch.invokeMethod('setSubtitleTrack', {'id': id});
+      final key = id.trim().toLowerCase();
+      _currentSubtitleId = (key.isEmpty || key == 'no' || key == 'off' || key == 'auto') ? null : id;
+      notifyListeners();
     } catch (_) {}
   }
 

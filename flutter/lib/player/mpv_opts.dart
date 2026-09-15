@@ -39,6 +39,7 @@ class KotvMpvOpts {
     this.vulkan = false,
     this.gpuApi = 'auto',
     this.conf = '',
+    this.tlsVerify = true,
   });
 
   final String decodeMode;
@@ -47,6 +48,8 @@ class KotvMpvOpts {
   /// Windows：`auto` / `d3d11` / `opengl` / `vulkan`。
   final String gpuApi;
   final String conf;
+  /// Android 原生：HTTPS 校验证书（cacert.pem）；坏 CA 可关。
+  final bool tlsVerify;
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
@@ -64,12 +67,16 @@ class KotvMpvOpts {
     }
     if (gpuApi == 'vulkan') vulkan = true;
     if (vulkan && gpuApi == 'auto') gpuApi = 'vulkan';
+    // 默认开；显式 false/off/0/no 才关。
+    final tlsRaw = '${settings['mpvTlsVerify'] ?? 'true'}'.trim().toLowerCase();
+    final tlsVerify = tlsRaw != 'false' && tlsRaw != 'off' && tlsRaw != '0' && tlsRaw != 'no';
     return KotvMpvOpts(
       decodeMode: decode.isEmpty ? 'auto' : decode,
       gpuNext: gpuNext,
       vulkan: vulkan,
       gpuApi: gpuApi,
       conf: '${settings['mpvConf'] ?? ''}',
+      tlsVerify: tlsVerify,
     );
   }
 
@@ -79,6 +86,7 @@ class KotvMpvOpts {
     bool? vulkan,
     String? gpuApi,
     String? conf,
+    bool? tlsVerify,
   }) {
     return KotvMpvOpts(
       decodeMode: decodeMode ?? this.decodeMode,
@@ -86,6 +94,7 @@ class KotvMpvOpts {
       vulkan: vulkan ?? this.vulkan,
       gpuApi: gpuApi ?? this.gpuApi,
       conf: conf ?? this.conf,
+      tlsVerify: tlsVerify ?? this.tlsVerify,
     );
   }
 
