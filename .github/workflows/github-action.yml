@@ -137,6 +137,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: win-x86_64
           path: |
             KO影视-*-x86_64.zip
@@ -255,6 +256,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: win-x86_64-flutter-win7
           path: |
             KO影视-*-x86_64-win7.zip
@@ -325,6 +327,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: linux-x86_64
           path: KO影视-*-linux-x86_64.zip
           if-no-files-found: error
@@ -392,6 +395,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: mac-aarch64
           path: KO影视-*-aarch64.dmg
           if-no-files-found: error
@@ -486,6 +490,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: mac-x86_64
           path: KO影视-*-x86_64.dmg
           if-no-files-found: error
@@ -514,6 +519,9 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Google 已下架旧 SDK `tools` 包；默认 packages 含 tools 会失败。
+          packages: platform-tools
 
       - name: Setup NDK
         uses: nttld/setup-ndk@v1
@@ -581,6 +589,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: android
           path: |
             dist/KO影视-*-aarch64.apk
@@ -641,6 +650,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 3
           name: flutter-web
           path: |
             dist/KO影视-*-web-linux-x86_64.zip
