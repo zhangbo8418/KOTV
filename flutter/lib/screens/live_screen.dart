@@ -836,6 +836,25 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     );
   }
 
+  /// 对齐点播：起播前/换台无帧时黑底盖住 PlatformView，避免 Hybrid 与频道菜单重影。
+  Widget _buildLiveSurfaceCover() {
+    return ListenableBuilder(
+      listenable: _playback,
+      builder: (context, _) {
+        final swapping = _loading ||
+            _status.contains('换台') ||
+            _status.contains('解析') ||
+            _status.contains('加载') ||
+            _status.contains('缓冲') ||
+            _status.contains('嗅探');
+        final noFrame = _playback.width <= 0 && _playback.height <= 0;
+        final cover = swapping || noFrame || _playback.stalling;
+        if (!cover) return const SizedBox.shrink();
+        return const IgnorePointer(child: ColoredBox(color: Colors.black));
+      },
+    );
+  }
+
   Future<void> _playChannel(int chIdx, {int? line, bool showList = true}) async {
     if (!await _ensureUnlocked(_groupIdx)) return;
     final chs = _channels;
@@ -1840,6 +1859,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                 fit: StackFit.expand,
                 children: [
                   _buildSharedLiveVideo(),
+                  // 起播/换台无帧：黑盖压住 Surface，避免频道菜单等控件 Hybrid 重影。
+                  _buildLiveSurfaceCover(),
                   KotvBufferingOverlay(
                     player: _playback,
                     force: _status.contains('换台') ||
@@ -2484,6 +2505,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                   onDoubleTap: _onLiveDoubleTap,
                   child: _buildSharedLiveVideo(),
                 ),
+                // 起播/换台无帧：黑盖压住 Surface，避免底栏等控件 Hybrid 重影。
+                _buildLiveSurfaceCover(),
                 KotvBufferingOverlay(
                   player: _playback,
                   force: _status.contains('换台') ||
