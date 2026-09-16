@@ -10,11 +10,12 @@ index c5c5c13..dd1be01 100644
        "com.google.truth:truth",
        "com.squareup.okhttp3:mockwebserver",
        "com.squareup.okhttp3:okhttp",
-@@ -46,6 +47,7 @@ fun addMissingAarTypeToXml(xml: XmlProvider) {
+@@ -46,6 +47,8 @@ fun addMissingAarTypeToXml(xml: XmlProvider) {
        "org.jetbrains.kotlinx:kotlinx-coroutines-test",
        "org.mockito:mockito-core",
        "org.robolectric:robolectric",
 +      "com.googlecode.juniversalchardet:juniversalchardet",
++      "org.brotli:dec",
        // go/keep-sorted end
      )
    // Dependencies that have AAR files.
