@@ -89,6 +89,8 @@ android {
             keepDebugSymbols.add("**/libkotv_dl.so")
             // fvp/mdk 也会带 libc++_shared；优先用我们 overlay 的 NDK 副本（libmpv from_chars）。
             pickFirsts += "**/libc++_shared.so"
+            // fvp 与 ass-kt 都带 libass.so；Exo ASS 用 peerless2012，取其一即可。
+            pickFirsts += "**/libass.so"
             useLegacyPackaging = true
             for (abi in kotvAllAbis) {
                 if (!kotvAbiFilters.contains(abi)) {
