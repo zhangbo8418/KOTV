@@ -158,11 +158,20 @@ index 4e6b59e..28e4d98 100644
 -  testImplementation(project(":test-utils"))
    testImplementation(libs.robolectric)
  }
+diff --git a/libraries/ui_danmaku/build.gradle.kts b/libraries/ui_danmaku/build.gradle.kts
+index 1111111..2222222 100644
+--- a/libraries/ui_danmaku/build.gradle.kts
++++ b/libraries/ui_danmaku/build.gradle.kts
+@@ -34,4 +34,2 @@ dependencies {
+   testImplementation(libs.robolectric)
+-  testImplementation(project(":test-utils"))
+-  testImplementation(project(":test-utils-robolectric"))
+ }
 diff --git a/settings.gradle.kts b/settings.gradle.kts
 index fc62b6a..f951b30 100644
 --- a/settings.gradle.kts
 +++ b/settings.gradle.kts
-@@ -27,7 +27,29 @@ plugins { id("gradlebuild.media3-settings-logic") }
+@@ -27,7 +27,30 @@ plugins { id("gradlebuild.media3-settings-logic") }
  
  rootProject.name = "androidx.media3"
  
@@ -180,6 +189,7 @@ index fc62b6a..f951b30 100644
 +    "lib-exoplayer-hls",
 +    "lib-extractor",
 +    "lib-ui",
++    "lib-ui-danmaku",
 +  )
 +
  Media3Modules.EXTERNAL_MODULES.forEach { (gradleName, moduleInfo) ->

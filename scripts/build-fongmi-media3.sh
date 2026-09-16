@@ -95,6 +95,7 @@ echo "==> publish FongMi Media3 $VER → $DEST"
   :lib-exoplayer:publishReleasePublicationToMavenRepository \
   :lib-exoplayer-hls:publishReleasePublicationToMavenRepository \
   :lib-exoplayer-dash:publishReleasePublicationToMavenRepository \
+  :lib-ui-danmaku:publishReleasePublicationToMavenRepository \
   :lib-ui:publishReleasePublicationToMavenRepository \
   -PmavenRepo="$DEST" \
   -x test -x lint \
