@@ -1,7 +1,8 @@
 package com.bobo.kotv
 
-import android.app.ActivityManager
 import android.content.Context
+import android.media.audiofx.BassBoost
+import android.media.audiofx.Equalizer
 import android.net.Uri
 import android.graphics.SurfaceTexture
 import android.os.Build
@@ -60,8 +61,6 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.math.max
-import kotlin.math.min
 
 /**
  * OkHttpDataSource + Media3：headers / mime / DRM / 软硬解。
@@ -138,6 +137,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var preferAac = false
   /** 跳过静音段。 */
   private var skipSilence = false
+  /** 软解时是否优先软解音轨（对齐 FongMi DecodeSetting.isAudioPrefer）。 */
+  private var softAudioPrefer = true
+  /** 软解时是否优先软解视轨。 */
+  private var softVideoPrefer = true
+  /** 点播缓冲倍率 1–10（对齐 FongMi PlayerSetting.getBuffer）。 */
+  private var bufferFactor = 1
   /** 首选字幕语言（BCP-47，逗号分隔）；空则跟系统 Locale。 */
   private var preferredTextLangs: String = ""
   /** 点播磁盘预读时长（毫秒）；仅 diskCache 开启时生效。 */
@@ -155,6 +160,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var playerBuiltSecondary: Boolean? = null
   private var subtitleOverlay: KotvSubtitleOverlay? = null
   private var subtitleFontScale = 1.0f
+  /** 音频 EQ：off | bass | voice（BassBoost / Equalizer；直通时跳过）。 */
+  private var audioEqMode: String = "off"
+  private var bassBoost: BassBoost? = null
+  private var equalizer: Equalizer? = null
   /** 实时下载速度：TransferListener 累计网络字节，tick 里差分；无增长则归零（避免黏第一帧）。 */
   @Volatile private var speedBps: Long = 0
   private var speedLastBytes: Long = -1
@@ -329,6 +338,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
         call.argument<Boolean>("preferAac")?.let { preferAac = it }
         call.argument<Boolean>("skipSilence")?.let { skipSilence = it }
+        call.argument<Boolean>("softAudioPrefer")?.let { softAudioPrefer = it }
+        call.argument<Boolean>("softVideoPrefer")?.let { softVideoPrefer = it }
+        call.argument<Number>("bufferFactor")?.toInt()?.let {
+          bufferFactor = it.coerceIn(1, 10)
+        }
         call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
         call.argument<Number>("diskPreloadMs")?.toLong()?.let {
           diskPreloadMs = it.coerceIn(0L, 120_000L)
@@ -339,6 +353,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Number>("subtitleFontScale")?.toFloat()?.let {
           subtitleFontScale = it.coerceIn(0.5f, 2.5f)
         }
+        call.argument<String>("audioEq")?.let { audioEqMode = normalizeAudioEq(it) }
         @Suppress("UNCHECKED_CAST")
         currentSubs = (call.argument<List<Map<String, Any?>>>("subs") ?: emptyList())
         main.post {
@@ -353,9 +368,22 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             }
             decodeFallbackTried = false
             openInternal(url, headers, mime, drm, live)
+            applyAudioEq()
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_open", t.message, null)
+          }
+        }
+      }
+      "setEqualizer" -> {
+        call.argument<String>("audioEq")?.let { audioEqMode = normalizeAudioEq(it) }
+        call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
+        main.post {
+          try {
+            applyAudioEq()
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_eq", t.message, null)
           }
         }
       }
@@ -821,6 +849,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     p.prepare()
     p.play()
     maybeStartDiskPreload(p, mediaItem)
+    applyAudioEq()
     main.removeCallbacks(tick)
     main.post(tick)
   }
@@ -880,15 +909,16 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       .setDefaultRequestProperties(currentHeaders)
       .setTransferListener(netTransferListener)
     httpFactory = factory
-    val upstream = DefaultDataSource.Factory(ctx, factory)
+    val baseUpstream = DefaultDataSource.Factory(ctx, factory)
+    val smbAware = KotvSchemeDataSourceFactory(baseUpstream, KotvSmbDataSource.Factory().setTransferListener(netTransferListener))
     val dataSourceFactory: DataSource.Factory =
       if (!live && diskCacheEnabled) {
         androidx.media3.datasource.cache.CacheDataSource.Factory()
           .setCache(KotvExoCache.get(ctx))
-          .setUpstreamDataSourceFactory(upstream)
+          .setUpstreamDataSourceFactory(smbAware)
           .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
       } else {
-        upstream
+        smbAware
       }
     val extractorsBase =
       DefaultExtractorsFactory()
@@ -929,13 +959,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val loadControl: LoadControl? = if (live) {
       null
     } else {
-      val budget = bufferBudgetBytes(ctx)
+      val budget = KotvMemBudget.bytes(ctx)
+      val factor = bufferFactor.coerceIn(1, 10)
       DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-          /* minBufferMs */ 3_600_000,
-          /* maxBufferMs */ 3_600_000,
-          /* bufferForPlaybackMs */ 1_200,
-          /* bufferForPlaybackAfterRebufferMs */ 2_500,
+          DefaultLoadControl.DEFAULT_MIN_BUFFER_MS * factor,
+          DefaultLoadControl.DEFAULT_MAX_BUFFER_MS * factor,
+          DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+          DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
         )
         .setTargetBufferBytes(budget)
         .setPrioritizeTimeOverSizeThresholds(false)
@@ -964,6 +995,18 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       p.setSkipSilenceEnabled(skipSilence)
     } catch (_: Throwable) {
     }
+    val debugBuild =
+      try {
+        (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+      } catch (_: Throwable) {
+        false
+      }
+    if (debugBuild) {
+      try {
+        p.addAnalyticsListener(androidx.media3.exoplayer.util.EventLogger("KotvExo"))
+      } catch (_: Throwable) {
+      }
+    }
     try {
       assHandler?.init(p)
     } catch (t: Throwable) {
@@ -975,11 +1018,15 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     playerBuiltDrmKey = nextDrmKey
     playerBuiltLibass = libassEnabled
     playerBuiltSecondary = secondarySubtitleMode != "off"
-    preloadUpstream = upstream
+    preloadUpstream = smbAware
     preloadRenderers = renderers
     bindPlayerSurface()
     val listener =
       object : Player.Listener {
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+          applyAudioEq()
+        }
+
         override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
           subtitleOverlay?.onPrimaryPlayerCues(cueGroup)
         }
@@ -1116,12 +1163,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /** 设置解码偏好。
-   * 解码偏好用 DecodeSetting.isAudioPrefer/isVideoPrefer；KOTV 无独立开关，
-   * soft = 音视频都走 SOFTWARE（用户点「软解」的预期）。 */
+   * 软解时可按音/视分别 prefer（对齐 FongMi DecodeSetting）；硬解/自动均为硬件偏好。 */
   private fun applyDecodePreferences(trackSelector: DecodeTrackSelector, mode: String) {
     val soft = mode == "soft"
-    val audioDecode = if (soft) C.DECODE_SOFTWARE else C.DECODE_HARDWARE
-    val videoDecode = if (soft) C.DECODE_SOFTWARE else C.DECODE_HARDWARE
+    val audioDecode = if (soft && softAudioPrefer) C.DECODE_SOFTWARE else C.DECODE_HARDWARE
+    val videoDecode = if (soft && softVideoPrefer) C.DECODE_SOFTWARE else C.DECODE_HARDWARE
     trackSelector.setRendererDecodePreferences(audioDecode, videoDecode)
   }
 
@@ -1130,8 +1176,19 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val audioMode: Int
     when (mode) {
       "soft" -> {
-        videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
-        audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+        // 软解 prefer：扩展渲染优先；不 prefer 的一侧走硬解（与 hard 侧一致）
+        videoMode =
+          if (softVideoPrefer) {
+            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+          } else {
+            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+          }
+        audioMode =
+          if (softAudioPrefer) {
+            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+          } else {
+            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+          }
       }
       "hard" -> {
         // 硬解视频 MediaCodec；音轨仍走 FFmpeg（AV3A）
@@ -1139,7 +1196,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
       else -> {
-        // EXTENSION_RENDERER_MODE_ON
         videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
@@ -1173,6 +1229,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     headers: Map<String, String> = emptyMap(),
   ): MediaItem {
     val b = MediaItem.Builder().setUri(playUri(url))
+    try {
+      b.setImageDurationMs(15_000)
+    } catch (_: Throwable) {
+    }
     val local = isLocalPlayUrl(url)
     if (!local && !mime.isNullOrBlank()) b.setMimeType(mime)
     if (local && (mime == MimeTypes.APPLICATION_M3U8 || mime == MimeTypes.APPLICATION_MPD)) {
@@ -1247,10 +1307,89 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return builder.build()
   }
 
+  private fun releaseAudioEq() {
+    try {
+      bassBoost?.enabled = false
+    } catch (_: Throwable) {
+    }
+    try {
+      bassBoost?.release()
+    } catch (_: Throwable) {
+    }
+    bassBoost = null
+    try {
+      equalizer?.enabled = false
+    } catch (_: Throwable) {
+    }
+    try {
+      equalizer?.release()
+    } catch (_: Throwable) {
+    }
+    equalizer = null
+  }
+
+  private fun normalizeAudioEq(raw: String): String {
+    return when (raw.trim().lowercase()) {
+      "bass" -> "bass"
+      "voice" -> "voice"
+      else -> "off"
+    }
+  }
+
+  /** BassBoost / Equalizer 挂到 Exo audioSession；直通时跳过以免破 SPDIF。 */
+  private fun applyAudioEq() {
+    releaseAudioEq()
+    if (audioPassThrough) return
+    val mode = audioEqMode
+    if (mode == "off") return
+    val p = player ?: return
+    val session =
+      try {
+        p.audioSessionId
+      } catch (_: Throwable) {
+        0
+      }
+    if (session <= 0) return
+    try {
+      when (mode) {
+        "bass" -> {
+          val bb = BassBoost(0, session)
+          bb.enabled = true
+          bb.setStrength(800.toShort())
+          bassBoost = bb
+        }
+        "voice" -> {
+          val eq = Equalizer(0, session)
+          eq.enabled = true
+          val range = eq.bandLevelRange
+          val hi = range[1].toInt().coerceAtMost(800)
+          val mid = (hi * 0.55).toInt().toShort()
+          val lowMid = (hi * 0.35).toInt().toShort()
+          for (i in 0 until eq.numberOfBands) {
+            val band = i.toShort()
+            val hz = eq.getCenterFreq(band) / 1000
+            val level =
+              when {
+                hz in 800..4500 -> mid
+                hz in 300..799 -> lowMid
+                else -> 0
+              }
+            eq.setBandLevel(band, level)
+          }
+          equalizer = eq
+        }
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "applyAudioEq mode=$mode", t)
+      releaseAudioEq()
+    }
+  }
+
   private fun releasePlayerInstance() {
     main.removeCallbacks(tick)
     surfaceHost?.setBufferingUi(false, "")
     diskPreload.stop()
+    releaseAudioEq()
     try {
       player?.clearVideoSurface()
     } catch (_: Throwable) {
@@ -1496,24 +1635,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** 与 Dart [KotvBufferBudget] 一致：约 15% avail 且 ≤ 总内存 5%；钳到 24–96MiB。 */
-  private fun bufferBudgetBytes(ctx: Context): Int {
-    return try {
-      val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-      val mi = ActivityManager.MemoryInfo()
-      am.getMemoryInfo(mi)
-      var budget = (mi.totalMem * 0.05).toLong()
-      if (mi.availMem > 0) {
-        val byAvail = (mi.availMem * 0.15).toLong()
-        if (byAvail in 1 until budget) budget = byAvail
-      }
-      val minB = 24L * 1024 * 1024
-      val maxB = 96L * 1024 * 1024
-      max(minB, min(maxB, budget)).toInt()
-    } catch (_: Throwable) {
-      48 * 1024 * 1024
-    }
-  }
+  private fun bufferBudgetBytes(ctx: Context): Int = KotvMemBudget.bytes(ctx)
 
   private fun defaultUserAgent(): String {
     val ctx = appContext ?: return FALLBACK_PLAY_UA

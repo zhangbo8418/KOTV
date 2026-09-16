@@ -392,6 +392,19 @@ class KotvApi {
         if (params != null && params.isNotEmpty) 'params': params,
       });
 
+  Future<Map<String, dynamic>> assrtSearch(String q, {int limit = 15}) =>
+      tools('assrtSearch', {'q': q, 'limit': limit});
+
+  Future<Map<String, dynamic>> assrtDetail(int id) =>
+      tools('assrtDetail', {'id': id});
+
+  Future<Map<String, dynamic>> assrtDownload({
+    required String url,
+    String name = '',
+    String size = '',
+  }) =>
+      tools('assrtDownload', {'url': url, 'name': name, 'size': size});
+
   /// 轮询爬虫 UiBridge / Util.notify 声明式弹窗消息。
   Future<Map<String, dynamic>> uiPoll() => _get('/api/v1/ui/poll');
 

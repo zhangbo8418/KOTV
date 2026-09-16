@@ -1,6 +1,5 @@
 package com.bobo.kotv
 
-import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Color
 import android.graphics.SurfaceTexture
@@ -30,7 +29,6 @@ import java.net.URL
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
-import kotlin.math.min
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -78,14 +76,28 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var audioPassThrough = true
   /** 点播磁盘缓存。 */
   private var diskCache = false
+  /** 对齐 Exo exoDolbyVision：0=AUTO 1=假定支持 2=假定不支持。 */
+  private var dolbyVisionPolicy = 0
+  /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
+  private var preferredTextLangs = ""
   private var livePlayback = false
   /** IO/探测失败后强制 lavf=hls 再试一次。 */
   private var ioHlsRetried = false
   private var forceLavfHls = false
+  /** auto 下硬解失败后仅软解重载一次（对齐 Exo decodeFallback）。 */
+  private var decodeFallbackTried = false
   private var loadedUrl: String = ""
   private var loadedHeaders: Map<String, String> = emptyMap()
   private var volume = 80.0
   private var rate = 1.0
+  /** 画面调色（mpv brightness/contrast/… ∈ [-100,100]）。 */
+  private var eqBrightness = 0
+  private var eqContrast = 0
+  private var eqSaturation = 0
+  private var eqGamma = 0
+  private var eqHue = 0
+  /** 音频 af；空=不套。 */
+  private var audioAf = ""
   private var renderTexture = false
   /** 点播挂 Surface；停播卸下（未点播不建，避免详情滑动重影）。 */
   private var surfaceLayerEnabled = false
@@ -251,6 +263,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
         call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
         call.argument<Boolean>("diskCache")?.let { diskCache = it }
+        call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
+        call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
         // 直播须在 ensurePlayer 前写入，否则会套上点播 demuxer 预算。
         call.argument<Boolean>("live")?.let { livePlayback = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
@@ -285,6 +299,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
         call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
         call.argument<Boolean>("diskCache")?.let { diskCache = it }
+        call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
+        call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
+        ingestEqualizerArgs(call)
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           renderTexture = resolveRenderTexture(it)
         }
@@ -301,6 +318,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             ensurePlayer()
             applyRuntimeOpts(props)
             applyGpuApiIfNeeded()
+            applyDolbyVisionOptions()
+            applyPreferredSubtitleLangs()
+            applyEqualizer()
             applyAspectMode()
             eof = false
             buffering = true
@@ -311,6 +331,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             height = 0
             ioHlsRetried = false
             forceLavfHls = false
+            decodeFallbackTried = false
             pendingUrl = url
             pendingHeaders = headers
             loadedUrl = ""
@@ -476,6 +497,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
         call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
         call.argument<Boolean>("diskCache")?.let { diskCache = it }
+        call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
+        call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
+        ingestEqualizerArgs(call)
         @Suppress("UNCHECKED_CAST")
         val props = (call.argument<Map<*, *>>("props") ?: emptyMap<Any, Any>())
           .entries
@@ -486,9 +510,23 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             ensurePlayer()
             applyRuntimeOpts(props)
             applyGpuApiIfNeeded()
+            applyDolbyVisionOptions()
+            applyPreferredSubtitleLangs()
+            applyEqualizer()
             result.success(null)
           } catch (e: Throwable) {
             result.error("OPTS_FAILED", e.message, null)
+          }
+        }
+      }
+      "setEqualizer" -> {
+        ingestEqualizerArgs(call)
+        main.post {
+          try {
+            applyEqualizer()
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("EQ_FAILED", e.message, null)
           }
         }
       }
@@ -792,6 +830,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       } else {
         MPVLib.setOptionString("audio-spdif", "")
       }
+      applyDolbyVisionOptions()
+      applyPreferredSubtitleLangs()
       // 字幕基础：内嵌字体 + ASS 按比例缩放（细项仍可走 mpv.conf / setSubtitleStyle）。
       MPVLib.setOptionString("embeddedfonts", "yes")
       MPVLib.setOptionString("sub-ass-override", "scale")
@@ -880,23 +920,43 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** 与 Dart [KotvBufferBudget] 对齐：约 15% avail 且 ≤ 总内存 5%；钳到 24–96MiB。 */
-  private fun bufferBudgetBytes(): Int {
-    val ctx = appContext ?: return 48 * 1024 * 1024
-    return try {
-      val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-      val mi = ActivityManager.MemoryInfo()
-      am.getMemoryInfo(mi)
-      var budget = (mi.totalMem * 0.05).toLong()
-      if (mi.availMem > 0) {
-        val byAvail = (mi.availMem * 0.15).toLong()
-        if (byAvail in 1 until budget) budget = byAvail
+  /** 与 Dart [KotvBufferBudget] / Exo 共用 [KotvMemBudget]。 */
+  private fun bufferBudgetBytes(): Int = KotvMemBudget.bytes(appContext)
+
+  /** DV 输出策略（Android mpv 专有选项）。 */
+  private fun applyDolbyVisionOptions() {
+    try {
+      val set: (String, String) -> Unit = { k, v ->
+        if (created.get()) MPVLib.setPropertyString(k, v) else MPVLib.setOptionString(k, v)
       }
-      val minB = 24L * 1024 * 1024
-      val maxB = 96L * 1024 * 1024
-      max(minB, min(maxB, budget)).toInt()
-    } catch (_: Throwable) {
-      48 * 1024 * 1024
+      when (dolbyVisionPolicy) {
+        1 -> {
+          set("android-dolby-vision-output", "yes")
+          set("demuxer-dovi-profile7", "yes")
+        }
+        2 -> {
+          set("android-dolby-vision-output", "no")
+          set("demuxer-dovi-profile7", "no")
+        }
+        else -> Unit
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "dolby vision opts", t)
+    }
+  }
+
+  private fun applyPreferredSubtitleLangs() {
+    val langs = preferredTextLangs.trim()
+    if (langs.isEmpty()) return
+    try {
+      val normalized = langs.replace(';', ',').replace(Regex("\\s+"), "")
+      if (created.get()) {
+        MPVLib.setPropertyString("slang", normalized)
+      } else {
+        MPVLib.setOptionString("slang", normalized)
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "slang", t)
     }
   }
 
@@ -995,11 +1055,54 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         key = line.substring(0, sp.range.first).trim()
         value = line.substring(sp.range.last + 1).trim()
       }
-      if (key.isEmpty() || key == "vo" || key == "wid" || key == "android-surface-size") continue
+      if (key.isEmpty()) continue
+      val base = if (key.startsWith("no-")) key.substring(3) else key
+      if (MANAGED_CONF_OPTIONS.contains(key) || MANAGED_CONF_OPTIONS.contains(base)) {
+        Log.i(TAG, "skip conf option managed by UI/engine: $key")
+        continue
+      }
       try {
         MPVLib.setOptionString(key, value.ifEmpty { "yes" })
       } catch (_: Throwable) {
       }
+    }
+  }
+
+  private fun ingestEqualizerArgs(call: MethodCall) {
+    call.argument<Number>("eqBrightness")?.toInt()?.let { eqBrightness = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqContrast")?.toInt()?.let { eqContrast = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqSaturation")?.toInt()?.let { eqSaturation = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqGamma")?.toInt()?.let { eqGamma = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqHue")?.toInt()?.let { eqHue = it.coerceIn(-100, 100) }
+    call.argument<String>("audioAf")?.let { audioAf = it.trim() }
+    call.argument<Number>("subtitleFontScale")?.toDouble()?.let {
+      try {
+        MPVLib.setPropertyDouble("sub-scale", it.coerceIn(0.5, 2.5))
+      } catch (_: Throwable) {
+      }
+    }
+  }
+
+  private fun applyEqualizer() {
+    if (!created.get()) return
+    try {
+      MPVLib.setPropertyInt("brightness", eqBrightness)
+      MPVLib.setPropertyInt("contrast", eqContrast)
+      MPVLib.setPropertyInt("saturation", eqSaturation)
+      MPVLib.setPropertyInt("gamma", eqGamma)
+      MPVLib.setPropertyInt("hue", eqHue)
+    } catch (t: Throwable) {
+      Log.w(TAG, "apply video eq", t)
+    }
+    try {
+      // 直通时不强塞 af，避免破 SPDIF。
+      if (audioPassThrough && audioAf.isNotEmpty()) {
+        Log.i(TAG, "skip audio af while passthrough enabled")
+      } else {
+        MPVLib.setPropertyString("af", audioAf)
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "apply audio af", t)
     }
   }
 
@@ -1018,7 +1121,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     }
     for ((k, v) in props) {
-      if (k == "hwdec" || k == "vo" || k == "wid" || k == "android-surface-size") continue
+      // cache-on-disk / demuxer-cache-dir 由 ensurePlayer(diskCache) 独占，勿被 props 盖掉。
+      if (k == "hwdec" || k == "vo" || k == "wid" || k == "android-surface-size" ||
+        k == "cache-on-disk" || k == "demuxer-cache-dir"
+      ) continue
       try {
         MPVLib.setPropertyString(k, v)
       } catch (_: Throwable) {
@@ -1487,11 +1593,46 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             return
           }
         }
+        if (shouldDecodeFallback(error, errorText) && !decodeFallbackTried) {
+          decodeFallbackTried = true
+          decodeMode = "soft"
+          Log.w(TAG, "mpv decode error → soft hwdec retry err=$error text=$errorText")
+          val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
+          val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
+          if (url.isNotBlank()) {
+            buffering = true
+            playing = false
+            main.post {
+              try {
+                if (created.get()) {
+                  MPVLib.setPropertyString("hwdec", "no")
+                }
+                startLoad(url, headers)
+              } catch (t: Throwable) {
+                emit(mapOf("event" to "error", "message" to (t.message ?: "decode fallback failed")))
+              }
+            }
+            return
+          }
+        }
         val msg = errorText?.takeIf { it.isNotBlank() } ?: "MPV error $error"
         emit(mapOf("event" to "error", "message" to msg))
       }
       else -> {}
     }
+  }
+
+  /** auto 下硬解失败：翻软解再 load 一次（对齐 Exo decodeFallback）。 */
+  private fun shouldDecodeFallback(error: Int, errorText: String?): Boolean {
+    val mode = decodeMode.trim().lowercase()
+    if (mode.isNotEmpty() && mode != "auto" && mode != "auto-safe") return false
+    val t = errorText?.lowercase().orEmpty()
+    if (t.contains("decode") || t.contains("decoder") || t.contains("hwdec") ||
+      t.contains("mediacodec") || t.contains("codec") || t.contains("vd:")
+    ) {
+      return true
+    }
+    return error == MPVLib.MpvError.MPV_ERROR_UNSUPPORTED
   }
 
   /** LOADING_FAILED / UNKNOWN_FORMAT / GENERIC，或文案像 IO。 */
@@ -1518,6 +1659,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   companion object {
+    /** UI/引擎托管：mpv.conf 写入这些键会被跳过。 */
+    private val MANAGED_CONF_OPTIONS = setOf(
+      "vo", "wid", "android-surface-size", "gpu-api", "gpu-context", "hwdec",
+      "audio-spdif", "android-dolby-vision-output", "demuxer-dovi-profile7",
+      "cache", "cache-on-disk", "demuxer-cache-dir", "cache-secs",
+      "demuxer-max-bytes", "demuxer-max-back-bytes", "cache-pause", "cache-pause-initial",
+      "tls-verify", "tls-ca-file", "slang",
+      "brightness", "contrast", "saturation", "gamma", "hue",
+    )
     private const val TAG = "KotvMpv"
     private const val FALLBACK_PLAY_UA =
       "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"

@@ -24,6 +24,7 @@ import (
 	"github.com/bobo/KOTV/internal/playproxy"
 	remotectl "github.com/bobo/KOTV/internal/remote"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/smbproxy"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
 )
@@ -99,6 +100,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/proxy/cached_m3u8", s.handleCachedM3U8)
 	mux.HandleFunc("/proxy/play", playproxy.Handle)
 	mux.HandleFunc("/proxy/bt/", thunder.Handle)
+	mux.HandleFunc("/proxy/smb/", smbproxy.Handle)
 	mux.HandleFunc("/proxy", s.handleSpiderProxy)
 	mux.HandleFunc("/parse", s.handleParsePage)
 	mux.HandleFunc("/file/", s.handleFile)

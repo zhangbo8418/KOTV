@@ -7,11 +7,13 @@ import 'package:video_player/video_player.dart';
 
 import 'buffer_budget.dart';
 import 'fvp_decoders.dart';
+import 'drm_opts.dart';
 import 'fvp_register.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
+import 'video_eq.dart';
 
 /// 页内 FVP（libmdk）：经 [video_player] + fvp 插件。
 ///
@@ -43,8 +45,9 @@ class FvpPlayback extends KotvPlayback {
   bool _subtitleManualAuto = false;
   String _secondarySubtitleMode = 'off';
   double _subtitleFontScale = 1.0;
-  bool _diskCache = false;
   String _preferredTextLangs = '';
+  KotvVideoEq _videoEq = KotvVideoEq.off;
+  KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
 
   VideoPlayerController? get controller => _c;
 
@@ -192,7 +195,8 @@ class FvpPlayback extends KotvPlayback {
     bool live = false,
   }) async {
     kotvEnsureFvpRegistered();
-    if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty) {
+    final clearKeyHex = kotvIsLocalClearKey(drm) ? kotvClearKeyHex(drm) : null;
+    if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty && clearKeyHex == null) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
     _opening = true;
@@ -255,6 +259,15 @@ class FvpPlayback extends KotvPlayback {
       c.addListener(_listener!);
       // initialize 前写入解码器列表（硬/软锁死；自动=硬解优先+软解回退）。
       _applyDecodeMode(c);
+      if (clearKeyHex != null) {
+        try {
+          c.setProperty('demux.lavf.o', kotvLavfOWithClearKey(clearKeyHex));
+        } catch (_) {
+          try {
+            c.setProperty('avio.dict', 'decryption_key=$clearKeyHex');
+          } catch (_) {}
+        }
+      }
       // 先让父级 rebuild 挂上 VideoPlayer，再 initialize。
       notifyListeners();
       await SchedulerBinding.instance.endOfFrame;
@@ -526,18 +539,13 @@ class FvpPlayback extends KotvPlayback {
   }
 
   void applyPlayerOptions(Map<String, dynamic> settings) {
-    bool flag(String key, {bool def = false}) {
-      final raw = '${settings[key] ?? def}'.trim().toLowerCase();
-      if (raw.isEmpty) return def;
-      return raw != 'false' && raw != 'off' && raw != '0' && raw != 'no';
-    }
-
-    _diskCache = flag('mpvDiskCache', def: false);
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
     _subtitleFontScale = _subtitleFontScale.clamp(0.5, 2.5);
     final sec = '${settings['exoSecondarySubtitle'] ?? 'off'}'.trim().toLowerCase();
     _secondarySubtitleMode = (sec == 'auto' || sec == 'on' || sec == 'manual') ? sec : 'off';
     _preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
+    _videoEq = KotvVideoEq.fromSettings(settings);
+    _audioEq = kotvAudioEqFromSettings(settings);
     _applyRuntimeOptions(_c);
     _applySecondaryAutoIfNeeded();
     notifyListeners();
@@ -550,10 +558,14 @@ class FvpPlayback extends KotvPlayback {
       if (_preferredTextLangs.isNotEmpty) {
         c.setProperty('subtitle.language', _preferredTextLangs);
       }
-      if (_diskCache && !_live) {
-        c.setProperty('demux.buffer.ranges', '16');
-        c.setProperty('demux.buffer.protocols', 'http,https');
+      final vf = _videoEq.fvpAvfilter();
+      c.setProperty('video.avfilter', vf);
+      final af = kotvAudioEqFvpFilter(_audioEq);
+      // 与稳定音量共用 audio.avfilter；有 EQ 预设时优先 EQ。
+      if (af.isNotEmpty) {
+        c.setProperty('audio.avfilter', af);
       }
+      // demux.buffer.ranges / protocols 已在 [kotvRegisterFvp] 全局写入，勿再跟 mpvDiskCache 重复套。
       _syncSubtitleTracks(c);
     } catch (_) {}
   }
@@ -584,9 +596,9 @@ class FvpPlayback extends KotvPlayback {
     try {
       final info = c.getMediaInfo() as dynamic;
       if (info == null) return;
-      _audioTracks = _mapStreamTracks(info.audio, isVideo: false, isSubtitle: false);
-      _videoTracks = _mapStreamTracks(info.video, isVideo: true, isSubtitle: false);
-      _subtitleTracks = _mapStreamTracks(info.subtitle, isVideo: false, isSubtitle: true);
+      _audioTracks = _mapStreamTracks(info.audio, isVideo: false);
+      _videoTracks = _mapStreamTracks(info.video, isVideo: true);
+      _subtitleTracks = _mapStreamTracks(info.subtitle, isVideo: false);
 
       final actA = c.getActiveAudioTracks() ?? const <int>[];
       _currentAudioId = actA.isEmpty ? null : '${actA.first}';
@@ -605,11 +617,7 @@ class FvpPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  List<KotvTrack> _mapStreamTracks(
-    dynamic streams, {
-    required bool isVideo,
-    required bool isSubtitle,
-  }) {
+  List<KotvTrack> _mapStreamTracks(dynamic streams, {required bool isVideo}) {
     if (streams is! List || streams.isEmpty) return const [];
     final out = <KotvTrack>[];
     for (final s in streams) {

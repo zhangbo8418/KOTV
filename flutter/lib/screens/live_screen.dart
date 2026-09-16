@@ -445,6 +445,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         }
         _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+        final mk = _mk;
+        if (mk is NativeMpvPlayback) {
+          unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+        } else if (mk is MediaKitPlayback) {
+          unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+        }
         _exo?.applyPlayerOptions(settings);
         _fvp?.applyPlayerOptions(settings);
         var playerVal = '${settings['playerLive'] ?? ''}'.trim();
@@ -729,7 +735,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
   }
 
-  Future<void> _openLiveUrl(String url, {Map<String, String>? headers, bool live = true}) async {
+  Future<void> _openLiveUrl(
+    String url, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? drm,
+    bool live = true,
+  }) async {
     try {
       final st = await ref.read(apiProvider).getSettings();
       final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
@@ -737,13 +748,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       if (fo.isNotEmpty) {
         _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
       }
-      final liveChange = '${settings['liveAutoChange'] ?? 'true'}'.trim().toLowerCase();
+      final liveChange = '${settings['liveChange'] ?? 'true'}'.trim().toLowerCase();
       _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
     } catch (_) {}
+    final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
+    final startPlayer = (hasDrm && kotvIsAndroid()) ? 'innie#exo' : _prefPlayerVal;
     final failover = KotvPlaybackFailover(
-      playerVal: _prefPlayerVal,
+      playerVal: startPlayer,
       decodeMode: _prefDecodeMode,
-      enabled: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
+      lockExoForDrm: hasDrm && kotvIsAndroid(),
+      enabled: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover) && !hasDrm,
     );
     Object? lastError;
     for (var attempt = 0; attempt < 8; attempt++) {
@@ -772,7 +786,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       try {
         // 直播页 live=true：直链立刻 play（含 EPG 回看时移流）。
         // 不写 demuxer-max-bytes / cache-secs；无 Flutter play:false 等缓冲。
-        await pb.open(openUrl, headers: openHeaders, live: live);
+        await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null, live: live);
         if (_backend != KotvEmbedBackend.mpv) {
           try {
             await pb.play();
@@ -891,9 +905,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
       };
+      final drmRaw = data['drm'];
+      final drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
       _lines = (data['lines'] as int?) ?? 1;
       _line = (data['line'] as int?) ?? useLine;
-      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers);
+      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, drm: drm);
       if (!mounted || serial != _playSerial) return;
       setState(() => _status = '播放中 · $_title');
       _scheduleHideOverlays();

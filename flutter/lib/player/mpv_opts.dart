@@ -3,7 +3,9 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
+import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'video_eq.dart';
 
 /// 交给 lavf 的 demuxer 选项。302 / HLS 子列表由播放器自己跟，不要在 Dart 里预跳。
 ///
@@ -42,6 +44,11 @@ class KotvMpvOpts {
     this.tlsVerify = true,
     this.audioPassThrough = true,
     this.diskCache = false,
+    this.dolbyVisionPolicy = 0,
+    this.preferredTextLangs = '',
+    this.videoEq = KotvVideoEq.off,
+    this.audioEq = KotvAudioEqPreset.off,
+    this.subtitleFontScale = 1.0,
   });
 
   final String decodeMode;
@@ -54,6 +61,14 @@ class KotvMpvOpts {
   final bool tlsVerify;
   final bool audioPassThrough;
   final bool diskCache;
+  /// 对齐 exoDolbyVision：0=AUTO 1=假定支持 2=假定不支持。
+  final int dolbyVisionPolicy;
+  /// 首选字幕语言 → mpv slang。
+  final String preferredTextLangs;
+  final KotvVideoEq videoEq;
+  final KotvAudioEqPreset audioEq;
+  /// mpv `sub-scale`（0.5–2.5）。
+  final double subtitleFontScale;
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
@@ -72,12 +87,14 @@ class KotvMpvOpts {
     if (gpuApi == 'vulkan') vulkan = true;
     if (vulkan && gpuApi == 'auto') gpuApi = 'vulkan';
     // 默认开；显式 false/off/0/no 才关。
-    final tlsRaw = '${settings['mpvTlsVerify'] ?? 'true'}'.trim().toLowerCase();
-    final tlsVerify = tlsRaw != 'false' && tlsRaw != 'off' && tlsRaw != '0' && tlsRaw != 'no';
-    final passRaw = '${settings['audioPassThrough'] ?? 'true'}'.trim().toLowerCase();
-    final audioPassThrough = passRaw != 'false' && passRaw != 'off' && passRaw != '0' && passRaw != 'no';
-    final diskRaw = '${settings['mpvDiskCache'] ?? 'false'}'.trim().toLowerCase();
-    final diskCache = diskRaw == 'true' || diskRaw == 'on' || diskRaw == '1' || diskRaw == 'yes';
+    final tlsVerify = kotvSettingsFlag(settings['mpvTlsVerify'] ?? 'true', def: true);
+    final audioPassThrough = kotvSettingsFlag(settings['audioPassThrough'] ?? 'true', def: true);
+    final diskCache = kotvSettingsFlag(settings['mpvDiskCache'] ?? 'false', def: false);
+    var dolby = int.tryParse('${settings['exoDolbyVision'] ?? '0'}') ?? 0;
+    if (dolby < 0 || dolby > 2) dolby = 0;
+    final preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
+    var fontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
+    fontScale = fontScale.clamp(0.5, 2.5);
     return KotvMpvOpts(
       decodeMode: decode.isEmpty ? 'auto' : decode,
       gpuNext: gpuNext,
@@ -87,6 +104,11 @@ class KotvMpvOpts {
       tlsVerify: tlsVerify,
       audioPassThrough: audioPassThrough,
       diskCache: diskCache,
+      dolbyVisionPolicy: dolby,
+      preferredTextLangs: preferredTextLangs,
+      videoEq: KotvVideoEq.fromSettings(settings),
+      audioEq: kotvAudioEqFromSettings(settings),
+      subtitleFontScale: fontScale,
     );
   }
 
@@ -99,6 +121,11 @@ class KotvMpvOpts {
     bool? tlsVerify,
     bool? audioPassThrough,
     bool? diskCache,
+    int? dolbyVisionPolicy,
+    String? preferredTextLangs,
+    KotvVideoEq? videoEq,
+    KotvAudioEqPreset? audioEq,
+    double? subtitleFontScale,
   }) {
     return KotvMpvOpts(
       decodeMode: decodeMode ?? this.decodeMode,
@@ -109,6 +136,11 @@ class KotvMpvOpts {
       tlsVerify: tlsVerify ?? this.tlsVerify,
       audioPassThrough: audioPassThrough ?? this.audioPassThrough,
       diskCache: diskCache ?? this.diskCache,
+      dolbyVisionPolicy: dolbyVisionPolicy ?? this.dolbyVisionPolicy,
+      preferredTextLangs: preferredTextLangs ?? this.preferredTextLangs,
+      videoEq: videoEq ?? this.videoEq,
+      audioEq: audioEq ?? this.audioEq,
+      subtitleFontScale: subtitleFontScale ?? this.subtitleFontScale,
     );
   }
 
@@ -214,12 +246,32 @@ class KotvMpvOpts {
           for (final e in props.entries) {
             await set(e.key, e.value);
           }
+          await set('cache-on-disk', diskCache ? 'yes' : 'no');
+          if (preferredTextLangs.trim().isNotEmpty) {
+            final slang = preferredTextLangs.replaceAll(';', ',').replaceAll(RegExp(r'\s+'), '');
+            await set('slang', slang);
+          }
         } catch (_) {}
       }
 
       for (final e in parseConfLines(conf)) {
         await set(e.$1, e.$2);
       }
+
+      // 画面/音频 EQ 放在 conf 之后，避免被托管外的 af 盖掉；直通时不写 af。
+      for (final e in videoEq.mpvProps().entries) {
+        try {
+          await set(e.key, e.value);
+        } catch (_) {}
+      }
+      if (!audioPassThrough) {
+        try {
+          await set('af', kotvAudioEqMpvAf(audioEq));
+        } catch (_) {}
+      }
+      try {
+        await set('sub-scale', subtitleFontScale.clamp(0.5, 2.5).toStringAsFixed(2));
+      } catch (_) {}
     } catch (_) {}
   }
 
@@ -259,15 +311,75 @@ class KotvMpvOpts {
     if (!live) {
       final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
       out.addAll(props);
+      // Android 原生另有 diskCache 参数写 cache-on-disk + demuxer-cache-dir；
+      // 桌面 media_kit 走 [applyAfterAttach]。此处不塞 cache-on-disk，避免盖掉原生磁盘缓存。
     }
     for (final e in parseConfLines(conf)) {
       out[e.$1] = e.$2;
     }
+    out.addAll(videoEq.mpvProps());
+    out['sub-scale'] = subtitleFontScale.clamp(0.5, 2.5).toStringAsFixed(2);
+    return out;
+  }
+
+  /// 原生通道 open/setOpts 附加的 EQ 参数。
+  Map<String, dynamic> equalizerChannelArgs() => {
+        'eqBrightness': videoEq.enabled ? videoEq.brightness : 0,
+        'eqContrast': videoEq.enabled ? videoEq.contrast : 0,
+        'eqSaturation': videoEq.enabled ? videoEq.saturation : 0,
+        'eqGamma': videoEq.enabled ? videoEq.gamma : 0,
+        'eqHue': videoEq.enabled ? videoEq.hue : 0,
+        'audioAf': audioPassThrough ? '' : kotvAudioEqMpvAf(audioEq),
+        'subtitleFontScale': subtitleFontScale.clamp(0.5, 2.5),
+      };
+
+  /// UI / 引擎托管、写入 mpv.conf 会被忽略的选项（对齐 FongMi `MpvUtil.PLAYER_OPTIONS` 等）。
+  static const managedOptionNames = <String>{
+    'vo',
+    'wid',
+    'android-surface-size',
+    'gpu-api',
+    'gpu-context',
+    'hwdec',
+    'audio-spdif',
+    'android-dolby-vision-output',
+    'demuxer-dovi-profile7',
+    'cache',
+    'cache-on-disk',
+    'demuxer-cache-dir',
+    'cache-secs',
+    'demuxer-max-bytes',
+    'demuxer-max-back-bytes',
+    'cache-pause',
+    'cache-pause-initial',
+    'tls-verify',
+    'tls-ca-file',
+    'slang',
+    'brightness',
+    'contrast',
+    'saturation',
+    'gamma',
+    'hue',
+  };
+
+  /// conf 里与 UI 托管冲突的键名（用于设置页提示）。
+  static List<String> findConfConflicts(String text) {
+    final hit = <String>{};
+    for (final e in parseConfLines(text, skipManaged: false)) {
+      final k = e.$1;
+      final base = k.startsWith('no-') ? k.substring(3) : k;
+      if (managedOptionNames.contains(base) || managedOptionNames.contains(k)) {
+        hit.add(base);
+      }
+    }
+    final out = hit.toList()..sort();
     return out;
   }
 
   /// 解析 mpv.conf 风格：`key=value` / `key value`；忽略空行与 `#` 注释。
-  static List<(String, String)> parseConfLines(String text) {
+  ///
+  /// [skipManaged]=true（默认）：跳过 UI 托管键，避免 conf 盖掉设置页/引擎策略。
+  static List<(String, String)> parseConfLines(String text, {bool skipManaged = true}) {
     final out = <(String, String)>[];
     for (final raw in text.split(RegExp(r'[\r\n]+'))) {
       var line = raw.trim();
@@ -288,10 +400,14 @@ class KotvMpvOpts {
         value = line.substring(m.end).trim();
       }
       if (key.isEmpty) continue;
-      // 跳过会破坏原生 Surface 绑定的选项（由引擎自己设 vo/wid）
-      if (key == 'vo' || key == 'wid' || key == 'android-surface-size') continue;
       // `kotv-*` 是应用自用开关（如 kotv-log=debug），不是 mpv 属性。
       if (key.startsWith('kotv-')) continue;
+      if (skipManaged) {
+        final base = key.startsWith('no-') ? key.substring(3) : key;
+        if (managedOptionNames.contains(key) || managedOptionNames.contains(base)) {
+          continue;
+        }
+      }
       out.add((key, value.isEmpty ? 'yes' : value));
     }
     return out;

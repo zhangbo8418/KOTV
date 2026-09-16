@@ -8,9 +8,11 @@ import 'kotv_platform.dart';
 /// 各播放器共用的「前向缓冲」内存预算（字节）。
 ///
 /// 策略（Exo / MPV / 外部 VLC prefetch 一致）：
-/// 1. **按内存上限**囤前向缓冲，不用「剩余播放秒数」当预读目标；
-/// 2. 播出去的数据应释放，allocated 降到预算以下后**继续补满**到上限；
-/// 3. 不设 mpv `cache-secs` / `demuxer-readahead-secs` 等**固定秒数**预读目标。
+/// 1. **默认用内存**囤前向缓冲（[KotvMemBudget] / demuxer-max-bytes），起播与卡顿恢复快、无磁盘抖动；
+/// 2. **磁盘缓存是可选增强**：仅点播、设置开启时生效（Exo SimpleCache / MPV cache-on-disk），
+///    用来跨会话复用与弱网预读，不是直播主路径；
+/// 3. 播出去的数据应释放，allocated 降到预算以下后**继续补满**到上限；
+/// 4. 不设 mpv `cache-secs` / `demuxer-readahead-secs` 等**固定秒数**预读目标。
 ///
 /// Web / HTML5：由浏览器自己管缓冲，不走本预算。
 ///
@@ -23,12 +25,14 @@ class KotvBufferBudget {
   static int? _cached;
 
   /// mpv 点播缓冲：仅字节预算；`demuxer-max-bytes` 是上限不是起播门槛。
+  ///
+  /// 不含 `cache-on-disk`：由 [KotvMpvOpts.diskCache] / 原生 `diskCache` 单独控制，
+  /// 避免预算表把磁盘缓存开关盖掉。
   static Map<String, String> mpvCacheProps(int budgetBytes) {
     final forward = mpvMiB(budgetBytes);
     final back = mpvMiB(max(16 * 1024 * 1024, budgetBytes ~/ 8));
     return {
       'cache': 'yes',
-      'cache-on-disk': 'no',
       'demuxer-max-bytes': forward,
       'demuxer-max-back-bytes': back,
       'cache-pause-initial': 'no',

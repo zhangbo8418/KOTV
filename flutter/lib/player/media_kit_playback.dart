@@ -4,6 +4,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'buffer_budget.dart';
+import 'drm_opts.dart';
 import 'kotv_playback.dart';
 import 'mpv_diag.dart';
 import 'mpv_opts.dart';
@@ -114,6 +115,11 @@ class MediaKitPlayback extends KotvPlayback {
   int _w = 0;
   int _h = 0;
   bool _acceptSize = false;
+  Map<String, String> _extraOpenProps = const {};
+
+  void setExtraOpenProps(Map<String, String> props) {
+    _extraOpenProps = Map<String, String>.from(props);
+  }
 
   void _clearVideoSize() {
     _acceptSize = false;
@@ -299,12 +305,32 @@ class MediaKitPlayback extends KotvPlayback {
     // 换源清尺寸（与 Exo / 原生 MPV 一致）；避免 libmpv 残留宽高误判就绪。
     _clearVideoSize();
     notifyListeners();
-    if (drm != null && drm.isNotEmpty) {
-      throw StateError('MPV 不支持 DRM，请用内置 ExoPlayer');
+    final clearKeyHex = kotvIsLocalClearKey(drm) ? kotvClearKeyHex(drm) : null;
+    if (drm != null && drm.isNotEmpty && clearKeyHex == null) {
+      throw StateError('MPV 不支持该 DRM，请用内置 ExoPlayer');
     }
     await _optsReady;
     // 直播：不写 demuxer-max-bytes/cache-secs；点播才写入 KotvBufferBudget。
     await _opts.applyAfterAttach(player, live: live);
+    if (clearKeyHex != null) {
+      try {
+        final platform = player.platform;
+        if (platform != null) {
+          await (platform as dynamic).setProperty('demuxer-lavf-o', kotvLavfOWithClearKey(clearKeyHex));
+        }
+      } catch (_) {}
+    }
+    if (_extraOpenProps.isNotEmpty) {
+      try {
+        final platform = player.platform;
+        if (platform != null) {
+          for (final e in _extraOpenProps.entries) {
+            await (platform as dynamic).setProperty(e.key, e.value);
+          }
+        }
+      } catch (_) {}
+      _extraOpenProps = const {};
+    }
     final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
     if (_diag) {
       KotvMpvDiag.note('open live=$live hwdec=${_opts.hwdecValue()} '
@@ -465,6 +491,46 @@ class MediaKitPlayback extends KotvPlayback {
         return;
       }
     }
+  }
+
+  @override
+  Future<void> addSubtitleFile(String path, {String? title}) async {
+    final p = path.trim();
+    if (p.isEmpty) return;
+    try {
+      var uri = p;
+      if (!p.contains('://')) {
+        uri = Uri.file(p).toString();
+      }
+      await player.setSubtitleTrack(
+        SubtitleTrack.uri(uri, title: (title ?? '').trim().isEmpty ? null : title),
+      );
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setSubtitleStyle({
+    double? scale,
+    double? pos,
+    double? secondaryPos,
+    bool forceStyle = false,
+  }) async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return;
+      if (scale != null) {
+        await (platform as dynamic).setProperty(
+          'sub-scale',
+          scale.clamp(0.5, 2.5).toStringAsFixed(2),
+        );
+      }
+      if (pos != null) {
+        await (platform as dynamic).setProperty('sub-pos', pos.toStringAsFixed(1));
+      }
+      if (forceStyle) {
+        await (platform as dynamic).setProperty('sub-ass-override', 'force');
+      }
+    } catch (_) {}
   }
 
   @override

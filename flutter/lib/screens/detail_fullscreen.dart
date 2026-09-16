@@ -61,6 +61,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
+    this.onAssrtSearch,
     this.offsetId = '',
     this.offsetSite = '',
     this.openingSec = 0,
@@ -113,6 +114,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
+  final Future<void> Function()? onAssrtSearch;
   final String offsetId;
   final String offsetSite;
   final int openingSec;
@@ -887,6 +889,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         widget.onAmbientChanged?.call(v);
       },
       stableVolumeOn: widget.stableVolumeOn,
+      onAssrtSearch: widget.onAssrtSearch,
       offsetId: widget.offsetId,
       offsetSite: widget.offsetSite,
       openingSec: widget.openingSec,

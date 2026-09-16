@@ -12,7 +12,9 @@ import '../api/kotv_auth_token.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
+import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
+import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
 import '../providers.dart';
@@ -742,7 +744,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final decode = g('playerDecode', 'auto');
     final render = kotvNormalizePlayerRender(g('playerRender', 'surface'));
     final playerFailover = g('playerFailover', 'auto');
-    final liveAutoChange = g('liveAutoChange', 'true');
+    final liveAutoChange = g('liveChange', 'true');
     final danOn = g('danmaku', 'false') == 'true';
     final incognito = g('incognito', 'false') == 'true';
     final dmr = g('dlnaRenderer', 'false') == 'true';
@@ -767,22 +769,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
     final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
     final mpvVulkan = g('mpvVulkan', 'false') == 'true';
-    final mpvTlsRaw = g('mpvTlsVerify', 'true').trim().toLowerCase();
-    final mpvTlsVerify = mpvTlsRaw != 'false' && mpvTlsRaw != 'off' && mpvTlsRaw != '0' && mpvTlsRaw != 'no';
-    final passRaw = g('audioPassThrough', 'true').trim().toLowerCase();
-    final audioPassThrough = passRaw != 'false' && passRaw != 'off' && passRaw != '0' && passRaw != 'no';
-    final exoDiskCache = g('exoDiskCache', 'false').toLowerCase() == 'true';
-    final exoAdblockRaw = g('exoAdblock', 'true').trim().toLowerCase();
-    final exoAdblock = exoAdblockRaw != 'false' && exoAdblockRaw != 'off' && exoAdblockRaw != '0' && exoAdblockRaw != 'no';
-    final exoTunneling = g('exoTunneling', 'false').toLowerCase() == 'true';
-    final exoPreferAac = g('exoPreferAac', 'false').toLowerCase() == 'true';
-    final exoSkipSilence = g('exoSkipSilence', 'false').toLowerCase() == 'true';
-    final exoLibassRaw = g('exoLibass', 'true').trim().toLowerCase();
-    final exoLibass = exoLibassRaw != 'false' && exoLibassRaw != 'off' && exoLibassRaw != '0' && exoLibassRaw != 'no';
+    final mpvTlsVerify = kotvSettingsFlag(g('mpvTlsVerify', 'true'), def: true);
+    final audioPassThrough = kotvSettingsFlag(g('audioPassThrough', 'true'), def: true);
+    final exoDiskCache = kotvSettingsFlag(g('exoDiskCache', 'false'), def: false);
+    final exoAdblock = kotvSettingsFlag(g('exoAdblock', 'true'), def: true);
+    final exoTunneling = kotvSettingsFlag(g('exoTunneling', 'false'), def: false);
+    final exoPreferAac = kotvSettingsFlag(g('exoPreferAac', 'false'), def: false);
+    final exoSkipSilence = kotvSettingsFlag(g('exoSkipSilence', 'false'), def: false);
+    final exoSoftAudioPrefer = kotvSettingsFlag(g('exoSoftAudioPrefer', 'true'), def: true);
+    final exoSoftVideoPrefer = kotvSettingsFlag(g('exoSoftVideoPrefer', 'true'), def: true);
+    final exoBuffer = (int.tryParse(g('exoBuffer', '1')) ?? 1).clamp(1, 10);
+    final exoLibass = kotvSettingsFlag(g('exoLibass', 'true'), def: true);
     final exoSecondary = g('exoSecondarySubtitle', 'off').trim().toLowerCase();
     final exoSecondaryLabel = {'off': '关闭', 'auto': '自动', 'on': '自动', 'manual': '手动'}[exoSecondary] ?? '关闭';
-    final mpvDiskCache = g('mpvDiskCache', 'false').toLowerCase() == 'true';
+    final exoDolby = int.tryParse(g('exoDolbyVision', '0')) ?? 0;
+    final exoDolbyLabel = switch (exoDolby) {
+      1 => '假定支持',
+      2 => '假定不支持',
+      _ => '自动',
+    };
+    final exoPreferredTextLangs = g('exoPreferredTextLangs').trim();
+    final mpvDiskCache = kotvSettingsFlag(g('mpvDiskCache', 'false'), def: false);
     final mpvConfPreview = g('mpvConf').trim();
+    final videoEq = g('videoEq', 'off').trim().toLowerCase();
+    final videoEqLabel = switch (videoEq) {
+      'soft' => '柔和',
+      'vivid' => '鲜艳',
+      'custom' || 'on' => '自定义',
+      _ => '关闭',
+    };
+    final audioEq = g('audioEq', 'off').trim().toLowerCase();
+    final audioEqLabel = switch (audioEq) {
+      'bass' => '低音',
+      'voice' => '人声',
+      _ => '关闭',
+    };
     // 全平台：点播/直播任一选了内置 MPV 才露出 MPV 相关项
     final usesMpv = kotvEmbedBackend(playerVal) == KotvEmbedBackend.mpv ||
         kotvEmbedBackend(livePlayerVal) == KotvEmbedBackend.mpv;
@@ -1017,7 +1038,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '直播失败换线',
                           value: liveChangeLabel,
-                          onTap: () => _pick('直播失败换线', 'liveAutoChange', const [
+                          onTap: () => _pick('直播失败换线', 'liveChange', const [
                             ('开启（失败自动下一线路）', 'true'),
                             ('关闭', 'false'),
                           ]),
@@ -1080,8 +1101,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               'exoDiskCache',
                               exoDiskCache ? 'false' : 'true',
                               msg: exoDiskCache
-                                  ? '已关闭 Exo 磁盘缓存（重启播放生效）'
-                                  : '已开启 Exo 点播磁盘缓存（重启播放生效）',
+                                  ? '已关闭 Exo 磁盘缓存（前向缓冲仍用内存）'
+                                  : '已开启 Exo 点播磁盘缓存（内存缓冲仍为主；重启播放生效）',
                             )),
                           ),
                         if (kotvIsAndroid())
@@ -1130,6 +1151,132 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   : '已开启跳过静音段（重启播放生效）',
                             )),
                           ),
+                        KotvSettingsCell(
+                          label: '画面调色',
+                          value: videoEqLabel,
+                          onTap: () {
+                            final order = ['off', 'soft', 'vivid', 'custom'];
+                            final i = order.indexOf(videoEq);
+                            final next = order[(i < 0 ? 0 : i + 1) % order.length];
+                            unawaited(_set(
+                              'videoEq',
+                              next,
+                              msg: switch (next) {
+                                'soft' => '画面调色：柔和（MPV/FVP；Exo 仅 Texture 渲染）',
+                                'vivid' => '画面调色：鲜艳（MPV/FVP；Exo 仅 Texture 渲染）',
+                                'custom' => '画面调色：自定义（可调下方亮度等）',
+                                _ => '已关闭画面调色',
+                              },
+                            ));
+                          },
+                        ),
+                        if (videoEq == 'custom' || videoEq == 'on') ...[
+                          KotvSettingsCell(
+                            label: '亮度',
+                            value: g('videoBrightness', '0'),
+                            onTap: () => _prompt(
+                              '亮度 (-100~100)',
+                              '0',
+                              g('videoBrightness', '0'),
+                              (v) => _set('videoBrightness', v, msg: '亮度已保存'),
+                            ),
+                          ),
+                          KotvSettingsCell(
+                            label: '对比度',
+                            value: g('videoContrast', '0'),
+                            onTap: () => _prompt(
+                              '对比度 (-100~100)',
+                              '0',
+                              g('videoContrast', '0'),
+                              (v) => _set('videoContrast', v, msg: '对比度已保存'),
+                            ),
+                          ),
+                          KotvSettingsCell(
+                            label: '饱和度',
+                            value: g('videoSaturation', '0'),
+                            onTap: () => _prompt(
+                              '饱和度 (-100~100)',
+                              '0',
+                              g('videoSaturation', '0'),
+                              (v) => _set('videoSaturation', v, msg: '饱和度已保存'),
+                            ),
+                          ),
+                          KotvSettingsCell(
+                            label: '伽马',
+                            value: g('videoGamma', '0'),
+                            onTap: () => _prompt(
+                              '伽马 (-100~100)',
+                              '0',
+                              g('videoGamma', '0'),
+                              (v) => _set('videoGamma', v, msg: '伽马已保存'),
+                            ),
+                          ),
+                          KotvSettingsCell(
+                            label: '色相',
+                            value: g('videoHue', '0'),
+                            onTap: () => _prompt(
+                              '色相 (-100~100)',
+                              '0',
+                              g('videoHue', '0'),
+                              (v) => _set('videoHue', v, msg: '色相已保存'),
+                            ),
+                          ),
+                        ],
+                        KotvSettingsCell(
+                          label: '音频均衡',
+                          value: audioEqLabel,
+                          onTap: () {
+                            final order = ['off', 'bass', 'voice'];
+                            final i = order.indexOf(audioEq);
+                            final next = order[(i < 0 ? 0 : i + 1) % order.length];
+                            unawaited(_set(
+                              'audioEq',
+                              next,
+                              msg: switch (next) {
+                                'bass' => '音频均衡：低音增强（MPV/FVP/Exo；直通时无效）',
+                                'voice' => '音频均衡：人声增强（MPV/FVP/Exo；直通时无效）',
+                                _ => '已关闭音频均衡',
+                              },
+                            ));
+                          },
+                        ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '缓冲倍率',
+                            value: '${exoBuffer}×',
+                            onTap: () {
+                              final next = exoBuffer >= 10 ? 1 : exoBuffer + 1;
+                              unawaited(_set(
+                                'exoBuffer',
+                                '$next',
+                                msg: 'Exo 内存缓冲倍率已设为 ${next}×（重启播放生效）',
+                              ));
+                            },
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '软解优先音轨',
+                            value: exoSoftAudioPrefer ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'exoSoftAudioPrefer',
+                              exoSoftAudioPrefer ? 'false' : 'true',
+                              msg: exoSoftAudioPrefer
+                                  ? '软解模式下音轨改走硬解（重启播放生效）'
+                                  : '软解模式下音轨优先软解（重启播放生效）',
+                            )),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '软解优先视轨',
+                            value: exoSoftVideoPrefer ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'exoSoftVideoPrefer',
+                              exoSoftVideoPrefer ? 'false' : 'true',
+                              msg: exoSoftVideoPrefer
+                                  ? '软解模式下视轨改走硬解（重启播放生效）'
+                                  : '软解模式下视轨优先软解（重启播放生效）',
+                            )),
+                          ),
                         if (kotvIsAndroid())
                           KotvSettingsCell(
                             label: '字幕特效',
@@ -1154,6 +1301,73 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   : '已关闭双字幕（重启播放生效）',
                             )),
                           ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '杜比视界',
+                            value: exoDolbyLabel,
+                            onTap: () {
+                              final next = (exoDolby + 1) % 3;
+                              unawaited(_set(
+                                'exoDolbyVision',
+                                '$next',
+                                msg: '杜比视界策略已设为${switch (next) {
+                                  1 => '假定支持',
+                                  2 => '假定不支持',
+                                  _ => '自动',
+                                }}（重启播放生效）',
+                              ));
+                            },
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '首选字幕语言',
+                            value: exoPreferredTextLangs.isEmpty
+                                ? '默认'
+                                : _ellipsize(exoPreferredTextLangs, 18),
+                            onTap: () => _prompt(
+                              '首选字幕语言',
+                              '逗号分隔 IETF 语言码，如 zh,zh-CN,en。空=默认。',
+                              exoPreferredTextLangs,
+                              (v) => _set(
+                                'exoPreferredTextLangs',
+                                v.trim(),
+                                msg: '首选字幕语言已更新（重启播放生效）',
+                              ),
+                            ),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '下一集预解析',
+                            value: kotvSettingsFlag(g('preloadNextEpisode', 'true'), def: true) ? '开启' : '关闭',
+                            onTap: () {
+                              final on = kotvSettingsFlag(g('preloadNextEpisode', 'true'), def: true);
+                              unawaited(_set(
+                                'preloadNextEpisode',
+                                on ? 'false' : 'true',
+                                msg: on ? '已关闭下一集预解析' : '已开启下一集后台预解析',
+                              ));
+                            },
+                          ),
+                        KotvSettingsCell(
+                          label: '字幕字号',
+                          value: g('subtitleFontScale', '1.0'),
+                          onTap: () => _prompt(
+                            '字幕字号倍率',
+                            '0.5–2.5，默认 1.0',
+                            g('subtitleFontScale', '1.0'),
+                            (v) => _set('subtitleFontScale', v, msg: '字幕字号已更新（重启播放生效）'),
+                          ),
+                        ),
+                        KotvSettingsCell(
+                          label: '弹幕时轴偏移',
+                          value: '${g('danmakuOffsetMs', '0')} ms',
+                          onTap: () => _prompt(
+                            '弹幕时轴偏移（毫秒）',
+                            '正数延后，负数提前，如 500 / -1000',
+                            g('danmakuOffsetMs', '0'),
+                            (v) => _set('danmakuOffsetMs', v, msg: '弹幕偏移已保存'),
+                          ),
+                        ),
                         if (showMpvOpts && kotvIsAndroid())
                           KotvSettingsCell(
                             label: 'MPV 磁盘缓存',
@@ -1162,8 +1376,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               'mpvDiskCache',
                               mpvDiskCache ? 'false' : 'true',
                               msg: mpvDiskCache
-                                  ? '已关闭 MPV 磁盘缓存（重启播放生效）'
-                                  : '已开启 MPV 点播磁盘缓存（重启播放生效）',
+                                  ? '已关闭 MPV 磁盘缓存（前向缓冲仍用内存）'
+                                  : '已开启 MPV 点播磁盘缓存（内存 demuxer 预算仍为主；重启播放生效）',
                             )),
                           ),
                         if (showMpvOpts)
@@ -1174,10 +1388,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 : _ellipsize(mpvConfPreview.replaceAll('\n', ' '), 18),
                             onTap: () => _prompt(
                               'MPV 配置（mpv.conf）',
-                              '每行 key=value，# 注释。可写 hwdec=no 等。重启播放后生效。\n'
-                              '桌面诊断：kotv-log=debug 加深 libmpv 日志（写入数据目录 data/log/kotv-mpv.log）；kotv-log=no 关闭。',
+                              '每行 key=value，# 注释。重启播放后生效。\n'
+                              '与设置页冲突的键（hwdec/vo/cache/tls 等）会被忽略。\n'
+                              '桌面诊断：kotv-log=debug 加深 libmpv 日志；kotv-log=no 关闭。',
                               g('mpvConf'),
-                              (v) => _set('mpvConf', v, msg: 'MPV 配置已保存'),
+                              (v) async {
+                                final conflicts = KotvMpvOpts.findConfConflicts(v);
+                                final msg = conflicts.isEmpty
+                                    ? 'MPV 配置已保存'
+                                    : '已保存；下列键由设置/引擎托管将被忽略：${conflicts.join(', ')}';
+                                await _set('mpvConf', v, msg: msg);
+                              },
                               maxLines: 12,
                             ),
                           ),

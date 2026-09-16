@@ -18,6 +18,7 @@ import (
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/subtitle"
 	"github.com/bobo/KOTV/internal/update"
 )
 
@@ -51,9 +52,63 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 		return a.toolCast(idx)
 	case "clearcache":
 		return a.toolClearCache(params)
+	case "assrtsearch":
+		return a.toolAssrtSearch(strParam(params, "q"), intParam(params, "limit", 15))
+	case "assrtdetail":
+		id := int64(intParam(params, "id", 0))
+		return a.toolAssrtDetail(id)
+	case "assrtdownload":
+		return a.toolAssrtDownload(strParam(params, "url"), strParam(params, "name"), strParam(params, "size"))
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
 	}
+}
+
+func (a *App) toolAssrtSearch(q string, limit int) (map[string]any, error) {
+	items, err := subtitle.Search(q, limit)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		list = append(list, map[string]any{
+			"id":         it.ID,
+			"title":      it.DisplayTitle(),
+			"nativeName": it.NativeName,
+			"videoName":  it.VideoName,
+			"subtype":    it.Subtype,
+			"lang":       it.LangDesc,
+			"site":       it.Site,
+		})
+	}
+	return map[string]any{"ok": true, "items": list, "count": len(list)}, nil
+}
+
+func (a *App) toolAssrtDetail(id int64) (map[string]any, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("无效字幕 ID")
+	}
+	files, err := subtitle.DetailFiles(id)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]map[string]any, 0, len(files))
+	for _, f := range files {
+		list = append(list, map[string]any{
+			"name": f.Name,
+			"url":  f.URL,
+			"size": f.Size,
+		})
+	}
+	return map[string]any{"ok": true, "files": list}, nil
+}
+
+func (a *App) toolAssrtDownload(url, name, size string) (map[string]any, error) {
+	path, err := subtitle.DownloadToCache(subtitle.FileEntry{URL: url, Name: name, Size: size})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "path": path, "message": "字幕已下载"}, nil
 }
 
 func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {

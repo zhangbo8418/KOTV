@@ -8,6 +8,7 @@ import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
+import 'video_eq.dart';
 
 /// Android ExoPlayer：Media3 + OkHttp，DRM；硬解直出到 SurfaceView（HDR 直出）。
 class ExoPlayback extends KotvPlayback {
@@ -62,6 +63,9 @@ class ExoPlayback extends KotvPlayback {
   int _dolbyVisionPolicy = 0;
   bool _preferAac = false;
   bool _skipSilence = false;
+  bool _softAudioPrefer = true;
+  bool _softVideoPrefer = true;
+  int _bufferFactor = 1;
   String _preferredTextLangs = '';
   int _diskPreloadMs = 10000;
   bool _libass = true;
@@ -69,6 +73,8 @@ class ExoPlayback extends KotvPlayback {
   String? _currentSecondarySubtitleId;
   double _subtitleFontScale = 1.0;
   List<Map<String, dynamic>> _subs = const [];
+  KotvVideoEq _videoEq = KotvVideoEq.off;
+  KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -140,6 +146,11 @@ class ExoPlayback extends KotvPlayback {
     // 播控/设置的比例优先于传入 fit（Surface 路径靠布局 + 原生 setFit）。
     final effective = _fitFromScale(_videoScale, fit);
     final tid = _textureId;
+    final eqFilter = _videoEq.exoTextureColorFilter();
+    Widget wrapEq(Widget child) {
+      if (eqFilter == null) return child;
+      return ColorFiltered(colorFilter: eqFilter, child: child);
+    }
     if (_useFlutterTexture) {
       // Texture 兼容模式：create 完成前 tid 可能为空。
       if (tid == null || tid < 0) {
@@ -151,20 +162,20 @@ class ExoPlayback extends KotvPlayback {
           builder: (context, c) {
             final max = c.biggest;
             if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
-              return Texture(textureId: tid);
+              return wrapEq(Texture(textureId: tid));
             }
             if (effective == BoxFit.fill || _w <= 0 || _h <= 0) {
               return SizedBox(
                 width: max.width,
                 height: max.height,
-                child: Texture(textureId: tid),
+                child: wrapEq(Texture(textureId: tid)),
               );
             }
             final box = _boxFitSize(max, _displaySize, effective);
             final child = SizedBox(
               width: box.width,
               height: box.height,
-              child: Texture(textureId: tid),
+              child: wrapEq(Texture(textureId: tid)),
             );
             if (effective == BoxFit.cover) {
               return ClipRect(child: Center(child: child));
@@ -416,6 +427,9 @@ class ExoPlayback extends KotvPlayback {
         'dolbyVisionPolicy': _dolbyVisionPolicy,
         'preferAac': _preferAac,
         'skipSilence': _skipSilence,
+        'softAudioPrefer': _softAudioPrefer,
+        'softVideoPrefer': _softVideoPrefer,
+        'bufferFactor': _bufferFactor,
         'preferredTextLangs': _preferredTextLangs,
         'diskPreloadMs': (_diskCache && !live) ? _diskPreloadMs : 0,
         'libass': _libass,
@@ -423,6 +437,10 @@ class ExoPlayback extends KotvPlayback {
         'secondarySubtitleId': _currentSecondarySubtitleId ?? '',
         'subtitleFontScale': _subtitleFontScale,
         'subs': _subs,
+        'audioEq': kotvAudioEqExoMode(_audioEq),
+        'eqBrightness': _videoEq.enabled ? _videoEq.brightness : 0,
+        'eqContrast': _videoEq.enabled ? _videoEq.contrast : 0,
+        'eqSaturation': _videoEq.enabled ? _videoEq.saturation : 0,
       });
       await _ch.invokeMethod('setVolume', {'volume': (_volume / 100).clamp(0.0, 1.0)});
       await _ch.invokeMethod('setRate', {'rate': _rate});
@@ -795,18 +813,18 @@ class ExoPlayback extends KotvPlayback {
 
   /// 从设置页写入：隧道 / 去广告 / 磁盘缓存 / 直通 / DV / AAC / 跳过静音。
   void applyPlayerOptions(Map<String, dynamic> settings) {
-    bool flag(String key, {bool def = false}) {
-      final raw = '${settings[key] ?? def}'.trim().toLowerCase();
-      if (raw.isEmpty) return def;
-      return raw != 'false' && raw != 'off' && raw != '0' && raw != 'no';
-    }
-    _tunneling = flag('exoTunneling', def: false);
-    _adblock = flag('exoAdblock', def: true);
-    _diskCache = flag('exoDiskCache', def: false);
-    _audioPassThrough = flag('audioPassThrough', def: true);
-    _preferAac = flag('exoPreferAac', def: false);
-    _skipSilence = flag('exoSkipSilence', def: false);
-    _libass = flag('exoLibass', def: true);
+    _tunneling = kotvSettingsMapFlag(settings, 'exoTunneling', def: false);
+    _adblock = kotvSettingsMapFlag(settings, 'exoAdblock', def: true);
+    _diskCache = kotvSettingsMapFlag(settings, 'exoDiskCache', def: false);
+    _audioPassThrough = kotvSettingsMapFlag(settings, 'audioPassThrough', def: true);
+    _preferAac = kotvSettingsMapFlag(settings, 'exoPreferAac', def: false);
+    _skipSilence = kotvSettingsMapFlag(settings, 'exoSkipSilence', def: false);
+    _softAudioPrefer = kotvSettingsMapFlag(settings, 'exoSoftAudioPrefer', def: true);
+    _softVideoPrefer = kotvSettingsMapFlag(settings, 'exoSoftVideoPrefer', def: true);
+    _bufferFactor = int.tryParse('${settings['exoBuffer'] ?? '1'}') ?? 1;
+    if (_bufferFactor < 1) _bufferFactor = 1;
+    if (_bufferFactor > 10) _bufferFactor = 10;
+    _libass = kotvSettingsMapFlag(settings, 'exoLibass', def: true);
     _dolbyVisionPolicy = int.tryParse('${settings['exoDolbyVision'] ?? '0'}') ?? 0;
     _preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
     _diskPreloadMs = int.tryParse('${settings['exoDiskPreloadMs'] ?? '10000'}') ?? 10000;
@@ -815,6 +833,25 @@ class ExoPlayback extends KotvPlayback {
     final sec = '${settings['exoSecondarySubtitle'] ?? 'off'}'.trim().toLowerCase();
     _secondarySubtitle = (sec == 'auto' || sec == 'on' || sec == 'manual') ? sec : 'off';
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
+    _videoEq = KotvVideoEq.fromSettings(settings);
+    _audioEq = kotvAudioEqFromSettings(settings);
+    if (_url.isNotEmpty) {
+      unawaited(_pushEqualizer());
+    }
+  }
+
+  Future<void> _pushEqualizer() async {
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('setEqualizer', {
+        'audioEq': kotvAudioEqExoMode(_audioEq),
+        'eqBrightness': _videoEq.enabled ? _videoEq.brightness : 0,
+        'eqContrast': _videoEq.enabled ? _videoEq.contrast : 0,
+        'eqSaturation': _videoEq.enabled ? _videoEq.saturation : 0,
+        'audioPassThrough': _audioPassThrough,
+      });
+      notifyListeners();
+    } catch (_) {}
   }
 
   /// 选择副字幕轨（off/auto/gN:tM）。

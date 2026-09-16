@@ -66,6 +66,35 @@ const (
 	// 本机播放始终走本地 /proxy、不展开 CDN，不受此开关影响。
 	// 默认 false：远端优先直连 CDN；true：远端也走引擎代理加速。
 	BackendProxyPlay Type = "backendProxyPlay"
+
+	// 播放细项（须进 APIGetSettings 白名单，否则冷启动丢设置）。
+	AudioPassThrough      Type = "audioPassThrough"
+	ExoDiskCache          Type = "exoDiskCache"
+	ExoAdblock            Type = "exoAdblock"
+	ExoTunneling          Type = "exoTunneling"
+	ExoPreferAac          Type = "exoPreferAac"
+	ExoSkipSilence        Type = "exoSkipSilence"
+	ExoSoftAudioPrefer    Type = "exoSoftAudioPrefer"
+	ExoSoftVideoPrefer    Type = "exoSoftVideoPrefer"
+	ExoBuffer             Type = "exoBuffer"
+	ExoLibass             Type = "exoLibass"
+	ExoSecondarySubtitle  Type = "exoSecondarySubtitle"
+	ExoDolbyVision        Type = "exoDolbyVision"
+	ExoPreferredTextLangs Type = "exoPreferredTextLangs"
+	ExoDiskPreloadMs      Type = "exoDiskPreloadMs"
+	MpvTlsVerify          Type = "mpvTlsVerify"
+	MpvDiskCache          Type = "mpvDiskCache"
+	MpvGpuApi             Type = "mpvGpuApi"
+	VideoEq               Type = "videoEq"
+	AudioEq               Type = "audioEq"
+	VideoBrightness       Type = "videoBrightness"
+	VideoContrast         Type = "videoContrast"
+	VideoSaturation       Type = "videoSaturation"
+	VideoGamma            Type = "videoGamma"
+	VideoHue              Type = "videoHue"
+	PreloadNextEpisode    Type = "preloadNextEpisode"
+	SubtitleFontScale     Type = "subtitleFontScale"
+	DanmakuOffsetMs       Type = "danmakuOffsetMs"
 )
 
 type item struct {
@@ -130,6 +159,33 @@ func defaultFile() file {
 			{ID: "remoteAuth", Label: "远端鉴权", Value: "false"},
 			{ID: "allowRegister", Label: "开放注册", Value: "false"},
 			{ID: "backendProxyPlay", Label: "远端网盘经后端加速", Value: "false"},
+			{ID: "audioPassThrough", Label: "音频直通", Value: "true"},
+			{ID: "exoDiskCache", Label: "Exo磁盘缓存", Value: "false"},
+			{ID: "exoAdblock", Label: "Exo去广告", Value: "true"},
+			{ID: "exoTunneling", Label: "Exo隧道", Value: "false"},
+			{ID: "exoPreferAac", Label: "Exo优先AAC", Value: "false"},
+			{ID: "exoSkipSilence", Label: "Exo跳过静音", Value: "false"},
+			{ID: "exoSoftAudioPrefer", Label: "Exo软解音频优先", Value: "true"},
+			{ID: "exoSoftVideoPrefer", Label: "Exo软解视频优先", Value: "true"},
+			{ID: "exoBuffer", Label: "Exo缓冲倍率", Value: "1"},
+			{ID: "exoLibass", Label: "Exo libass", Value: "true"},
+			{ID: "exoSecondarySubtitle", Label: "Exo副字幕", Value: "off"},
+			{ID: "exoDolbyVision", Label: "Exo杜比视界", Value: "0"},
+			{ID: "exoPreferredTextLangs", Label: "Exo首选字幕语言", Value: ""},
+			{ID: "exoDiskPreloadMs", Label: "Exo磁盘预读毫秒", Value: "10000"},
+			{ID: "mpvTlsVerify", Label: "MPV TLS校验", Value: "true"},
+			{ID: "mpvDiskCache", Label: "MPV磁盘缓存", Value: "false"},
+			{ID: "mpvGpuApi", Label: "MPV gpu-api", Value: "auto"},
+			{ID: "videoEq", Label: "画面调色", Value: "off"},
+			{ID: "audioEq", Label: "音频均衡", Value: "off"},
+			{ID: "videoBrightness", Label: "画面亮度", Value: "0"},
+			{ID: "videoContrast", Label: "画面对比度", Value: "0"},
+			{ID: "videoSaturation", Label: "画面饱和度", Value: "0"},
+			{ID: "videoGamma", Label: "画面伽马", Value: "0"},
+			{ID: "videoHue", Label: "画面色相", Value: "0"},
+			{ID: "preloadNextEpisode", Label: "预解析下一集", Value: "true"},
+			{ID: "subtitleFontScale", Label: "字幕字号", Value: "1.0"},
+			{ID: "danmakuOffsetMs", Label: "弹幕偏移毫秒", Value: "0"},
 		},
 		Cache: make(map[string]json.RawMessage),
 	}
@@ -190,6 +246,33 @@ func Load() error {
 	ensureSettingLocked(RemoteAuth, "远端鉴权", "false")
 	ensureSettingLocked(AllowRegister, "开放注册", "false")
 	ensureSettingLocked(BackendProxyPlay, "远端网盘经后端加速", "false")
+	ensureSettingLocked(AudioPassThrough, "音频直通", "true")
+	ensureSettingLocked(ExoDiskCache, "Exo磁盘缓存", "false")
+	ensureSettingLocked(ExoAdblock, "Exo去广告", "true")
+	ensureSettingLocked(ExoTunneling, "Exo隧道", "false")
+	ensureSettingLocked(ExoPreferAac, "Exo优先AAC", "false")
+	ensureSettingLocked(ExoSkipSilence, "Exo跳过静音", "false")
+	ensureSettingLocked(ExoSoftAudioPrefer, "Exo软解音频优先", "true")
+	ensureSettingLocked(ExoSoftVideoPrefer, "Exo软解视频优先", "true")
+	ensureSettingLocked(ExoBuffer, "Exo缓冲倍率", "1")
+	ensureSettingLocked(ExoLibass, "Exo libass", "true")
+	ensureSettingLocked(ExoSecondarySubtitle, "Exo副字幕", "off")
+	ensureSettingLocked(ExoDolbyVision, "Exo杜比视界", "0")
+	ensureSettingLocked(ExoPreferredTextLangs, "Exo首选字幕语言", "")
+	ensureSettingLocked(ExoDiskPreloadMs, "Exo磁盘预读毫秒", "10000")
+	ensureSettingLocked(MpvTlsVerify, "MPV TLS校验", "true")
+	ensureSettingLocked(MpvDiskCache, "MPV磁盘缓存", "false")
+	ensureSettingLocked(MpvGpuApi, "MPV gpu-api", "auto")
+	ensureSettingLocked(VideoEq, "画面调色", "off")
+	ensureSettingLocked(AudioEq, "音频均衡", "off")
+	ensureSettingLocked(VideoBrightness, "画面亮度", "0")
+	ensureSettingLocked(VideoContrast, "画面对比度", "0")
+	ensureSettingLocked(VideoSaturation, "画面饱和度", "0")
+	ensureSettingLocked(VideoGamma, "画面伽马", "0")
+	ensureSettingLocked(VideoHue, "画面色相", "0")
+	ensureSettingLocked(PreloadNextEpisode, "预解析下一集", "true")
+	ensureSettingLocked(SubtitleFontScale, "字幕字号", "1.0")
+	ensureSettingLocked(DanmakuOffsetMs, "弹幕偏移毫秒", "0")
 	return nil
 }
 

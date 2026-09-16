@@ -27,6 +27,7 @@ import (
 	appruntime "github.com/bobo/KOTV/internal/runtime"
 	"github.com/bobo/KOTV/internal/service"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/smbproxy"
 	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
@@ -591,6 +592,11 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	}
 	isMagnetPlay := magnet || thunder.IsLocalStream(playURL)
 
+	if runtime.GOOS != "android" {
+		playURL = smbproxy.Rewrite(playURL)
+		mediaURL = smbproxy.Rewrite(mediaURL)
+	}
+
 	title := vodID
 	a.SetMediaPlaying(title, playURL)
 
@@ -957,6 +963,17 @@ func (a *App) APIGetSettings() map[string]any {
 		settings.WallFile, settings.Incognito, settings.LiveAcross, settings.LiveChange,
 		settings.LiveInvert, settings.DLNARenderer, settings.SyncPairCode, settings.LiveKeep,
 		settings.RemoteAuth, settings.AllowRegister, settings.BackendProxyPlay,
+		settings.AudioPassThrough,
+		settings.ExoDiskCache, settings.ExoAdblock, settings.ExoTunneling,
+		settings.ExoPreferAac, settings.ExoSkipSilence,
+		settings.ExoSoftAudioPrefer, settings.ExoSoftVideoPrefer,
+		settings.ExoBuffer, settings.ExoLibass, settings.ExoSecondarySubtitle,
+		settings.ExoDolbyVision, settings.ExoPreferredTextLangs, settings.ExoDiskPreloadMs,
+		settings.MpvTlsVerify, settings.MpvDiskCache, settings.MpvGpuApi,
+		settings.VideoEq, settings.AudioEq,
+		settings.VideoBrightness, settings.VideoContrast, settings.VideoSaturation,
+		settings.VideoGamma, settings.VideoHue,
+		settings.PreloadNextEpisode, settings.SubtitleFontScale, settings.DanmakuOffsetMs,
 	}
 	out := map[string]any{"ok": true, "port": a.Server.ProxyPort()}
 	vals := map[string]string{}
@@ -1452,6 +1469,11 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		}
 		playURL = rewritten
 	}
+	if runtime.GOOS != "android" {
+		if err := ch.Drm.DesktopError(); err != nil {
+			return nil, err
+		}
+	}
 	return map[string]any{
 		"ok":      true,
 		"url":     playproxy.PublicizeURL(playURL),
@@ -1460,6 +1482,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		"group":   g.Name,
 		"line":    ch.URLIndex,
 		"lines":   len(ch.URLs),
+		"drm":     ch.Drm,
 		"error":   errString(err),
 	}, nil
 }

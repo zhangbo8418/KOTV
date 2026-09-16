@@ -26,7 +26,9 @@ func Match(raw string) bool {
 	return strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be")
 }
 
-// Fetch 把专用 scheme / YouTube 转成可播 HTTP。桌面荐片/TVBus/YouTube 仍走平台实现（桌面可能报错）。
+// Fetch 把专用 scheme / YouTube 转成可播 HTTP。
+// Android：荐片 / TVBus / Force / NewPipe YouTube。
+// 桌面：YouTube 走 yt-dlp；荐片 / TVBus / Force 仅安卓。
 func Fetch(playURL string, core json.RawMessage) (string, error) {
 	return fetchPlatform(strings.TrimSpace(playURL), core)
 }

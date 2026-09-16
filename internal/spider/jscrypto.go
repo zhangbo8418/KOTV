@@ -6,6 +6,7 @@ import (
 	"crypto/des"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -16,13 +17,9 @@ import (
 // aesX Crypto.aes：mode+"Padding" 交给 JCE；短 key/iv 零填充。
 // iv == nil 表示 JS null（ECB 场景）；非 nil 则按 CBC 等需 IV 的算法传入。
 func aesX(mode string, encrypt bool, input string, inBase64 bool, key string, iv *string, outBase64 bool) string {
-	data := []byte(input)
-	if inBase64 {
-		var err error
-		data, err = decodeJSBase64(input)
-		if err != nil {
-			return ""
-		}
+	data, ok := decodeCipherInput(input, inBase64)
+	if !ok {
+		return ""
 	}
 	keyBuf := []byte(key)
 	if len(keyBuf) < 16 {
@@ -37,89 +34,21 @@ func aesX(mode string, encrypt bool, input string, inBase64 bool, key string, iv
 	if err != nil {
 		return ""
 	}
-
-	upper := strings.ToUpper(mode)
-	// Cipher.getInstance(mode + "Padding") → …/NoPadding 或 …/PKCS7Padding
-	noPadding := strings.Contains(upper+"PADDING", "NOPADDING")
-	useCBC := strings.Contains(upper, "CBC")
-
 	var ivb []byte
 	if iv != nil {
-		ivb = []byte(*iv)
-		if len(ivb) < 16 {
-			padded := make([]byte, 16)
-			copy(padded, ivb)
-			ivb = padded
-		}
-		if len(ivb) != 16 {
+		ivb = padToMin([]byte(*iv), aes.BlockSize)
+		if len(ivb) != aes.BlockSize {
 			return ""
 		}
 	}
-
-	var out []byte
-	if useCBC {
-		if ivb == nil {
-			// CBC + null IV → Cipher.init 无 IV 失败
-			return ""
-		}
-		if encrypt {
-			if !noPadding {
-				data = pkcs7Pad(data, aes.BlockSize)
-			} else if len(data)%aes.BlockSize != 0 {
-				return ""
-			}
-			out = make([]byte, len(data))
-			cipher.NewCBCEncrypter(block, ivb).CryptBlocks(out, data)
-		} else {
-			if len(data) == 0 || len(data)%aes.BlockSize != 0 {
-				return ""
-			}
-			out = make([]byte, len(data))
-			cipher.NewCBCDecrypter(block, ivb).CryptBlocks(out, data)
-			if !noPadding {
-				out = pkcs7Unpad(out)
-			}
-		}
-	} else {
-		// ECB（及无 IV 初始化路径）：忽略 iv
-		if encrypt {
-			if !noPadding {
-				data = pkcs7Pad(data, aes.BlockSize)
-			} else if len(data)%aes.BlockSize != 0 {
-				return ""
-			}
-			out = make([]byte, len(data))
-			for i := 0; i < len(data); i += aes.BlockSize {
-				block.Encrypt(out[i:], data[i:])
-			}
-		} else {
-			if len(data) == 0 || len(data)%aes.BlockSize != 0 {
-				return ""
-			}
-			out = make([]byte, len(data))
-			for i := 0; i < len(data); i += aes.BlockSize {
-				block.Decrypt(out[i:], data[i:])
-			}
-			if !noPadding {
-				out = pkcs7Unpad(out)
-			}
-		}
-	}
-	if outBase64 {
-		return base64Std(out)
-	}
-	return string(out)
+	return blockCipherX(block, aes.BlockSize, mode, encrypt, data, ivb, outBase64)
 }
 
 // desX Crypto.des：DESede（3DES）。两段 key（16B）扩成三段（24B）；CBC IV 8 字节。
 func desX(mode string, encrypt bool, input string, inBase64 bool, key string, iv *string, outBase64 bool) string {
-	data := []byte(input)
-	if inBase64 {
-		var err error
-		data, err = decodeJSBase64(input)
-		if err != nil {
-			return ""
-		}
+	data, ok := decodeCipherInput(input, inBase64)
+	if !ok {
+		return ""
 	}
 	keyBuf := desEdeKey([]byte(key))
 	if len(keyBuf) != 24 {
@@ -130,10 +59,6 @@ func desX(mode string, encrypt bool, input string, inBase64 bool, key string, iv
 		return ""
 	}
 	const blockSize = 8
-	upper := strings.ToUpper(mode)
-	noPadding := strings.Contains(upper+"PADDING", "NOPADDING")
-	useCBC := strings.Contains(upper, "CBC")
-
 	var ivb []byte
 	if iv != nil {
 		ivb = padToMin([]byte(*iv), blockSize)
@@ -141,6 +66,25 @@ func desX(mode string, encrypt bool, input string, inBase64 bool, key string, iv
 			return ""
 		}
 	}
+	return blockCipherX(block, blockSize, mode, encrypt, data, ivb, outBase64)
+}
+
+func decodeCipherInput(input string, inBase64 bool) ([]byte, bool) {
+	if !inBase64 {
+		return []byte(input), true
+	}
+	data, err := decodeJSBase64(input)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// blockCipherX：aesX / desX 共用的 CBC/ECB + PKCS7 路径。
+func blockCipherX(block cipher.Block, blockSize int, mode string, encrypt bool, data, ivb []byte, outBase64 bool) string {
+	upper := strings.ToUpper(mode)
+	noPadding := strings.Contains(upper+"PADDING", "NOPADDING")
+	useCBC := strings.Contains(upper, "CBC")
 
 	var out []byte
 	if useCBC {
@@ -267,6 +211,8 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 	}
 	var out []byte
 	noPadding := strings.EqualFold(mode, "RSA/None/NoPadding")
+	oaep := strings.EqualFold(mode, "RSA/None/OAEPPadding") ||
+		strings.Contains(strings.ToUpper(mode), "OAEP")
 	if pub && encrypt {
 		k, parseErr := x509.ParsePKIXPublicKey(keyBytes)
 		if parseErr != nil {
@@ -278,6 +224,8 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 		}
 		if noPadding {
 			out, err = rsaRawPublic(rpk, data)
+		} else if oaep {
+			out, err = rsa.EncryptOAEP(sha1.New(), rand.Reader, rpk, data, nil)
 		} else {
 			out, err = rsa.EncryptPKCS1v15(rand.Reader, rpk, data)
 		}
@@ -292,6 +240,8 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 		}
 		if noPadding {
 			out, err = rsaRawPrivate(priv, data)
+		} else if oaep {
+			out, err = rsa.DecryptOAEP(sha1.New(), rand.Reader, priv, data, nil)
 		} else {
 			out, err = rsa.DecryptPKCS1v15(rand.Reader, priv, data)
 		}

@@ -19,6 +19,7 @@ import '../player/art_playback.dart';
 import '../player/xg_playback.dart';
 import '../player/zw_playback.dart';
 import '../player/buffer_budget.dart';
+import '../player/disc_play.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
@@ -148,6 +149,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   double _danmakuSize = 18;
   double _danmakuOpacity = 0.85;
   int _danmakuRows = 6;
+  double _danmakuOffsetSec = 0;
   final ValueNotifier<List<DanmakuItem>> _danmakuItems = ValueNotifier(const []);
   AspectSpec _aspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
   int _openingSec = 0;
@@ -220,6 +222,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _advanceBusy = false;
   DateTime? _sessionStartedAt;
   KotvApi? _api;
+  /// 下一集 play 预解析缓存（ep.url → 引擎 play 返回）。
+  final Map<String, Map<String, dynamic>> _nextPlayCache = {};
+  int _nextPreloadSerial = 0;
+  bool _preloadNextEpisode = true;
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
@@ -852,8 +858,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         }
         _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+        final mk = _mk;
+        if (mk is NativeMpvPlayback) {
+          unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+        } else if (mk is MediaKitPlayback) {
+          unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+        }
         _exo?.applyPlayerOptions(settings);
         _fvp?.applyPlayerOptions(settings);
+        final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.5);
+        unawaited(_playback.setSubtitleStyle(scale: fontScale));
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
         _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
@@ -862,6 +876,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final op = double.tryParse('${settings['danmakuOpacity'] ?? ''}');
         _danmakuOpacity = op == null ? 0.85 : (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0);
         _danmakuRows = int.tryParse('${settings['danmakuRows'] ?? ''}') ?? 6;
+        _danmakuOffsetSec = ((int.tryParse('${settings['danmakuOffsetMs'] ?? '0'}') ?? 0) / 1000.0);
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
         unawaited(_playback.setVideoScale(_aspect.key));
@@ -1090,6 +1105,152 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     await p.setStableVolume(on);
   }
 
+  Future<void> _searchAssrtSubtitle() async {
+    final d = _detail;
+    final initial = (d?.name ?? '').trim();
+    final qCtrl = TextEditingController(text: initial);
+    final p = KotvPalette.of(context);
+    final query = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: p.dialogBg,
+        title: Text('Assrt 搜索字幕', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
+        content: TextField(
+          controller: qCtrl,
+          autofocus: true,
+          style: TextStyle(color: p.fg),
+          decoration: InputDecoration(
+            hintText: '片名 / 关键词',
+            hintStyle: TextStyle(color: p.muted),
+            filled: true,
+            fillColor: p.input,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, qCtrl.text.trim()), child: const Text('搜索')),
+        ],
+      ),
+    );
+    qCtrl.dispose();
+    if (query == null || query.length < 2 || !mounted) return;
+    try {
+      final res = await ref.read(apiProvider).assrtSearch(query);
+      final items = (res['items'] as List?) ?? const [];
+      if (!mounted) return;
+      if (items.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未找到字幕')));
+        return;
+      }
+      final picked = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        backgroundColor: Colors.black87,
+        builder: (ctx) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final raw in items)
+                if (raw is Map)
+                  ListTile(
+                    title: Text('${raw['title'] ?? ''}', style: const TextStyle(color: Colors.white)),
+                    onTap: () => Navigator.pop(ctx, Map<String, dynamic>.from(raw)),
+                  ),
+            ],
+          ),
+        ),
+      );
+      if (picked == null || !mounted) return;
+      final id = (picked['id'] as num?)?.toInt() ?? 0;
+      if (id <= 0) return;
+      final detail = await ref.read(apiProvider).assrtDetail(id);
+      final files = (detail['files'] as List?) ?? const [];
+      if (!mounted) return;
+      if (files.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('该条目无可下载字幕')));
+        return;
+      }
+      Map<String, dynamic> file = Map<String, dynamic>.from(files.first as Map);
+      if (files.length > 1) {
+        final f = await showModalBottomSheet<Map<String, dynamic>>(
+          context: context,
+          backgroundColor: Colors.black87,
+          builder: (ctx) => SafeArea(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final raw in files)
+                  if (raw is Map)
+                    ListTile(
+                      title: Text('${raw['name'] ?? raw['url']}', style: const TextStyle(color: Colors.white)),
+                      onTap: () => Navigator.pop(ctx, Map<String, dynamic>.from(raw)),
+                    ),
+              ],
+            ),
+          ),
+        );
+        if (f == null || !mounted) return;
+        file = f;
+      }
+      final dl = await ref.read(apiProvider).assrtDownload(
+            url: '${file['url'] ?? ''}',
+            name: '${file['name'] ?? ''}',
+            size: '${file['size'] ?? ''}',
+          );
+      final path = '${dl['path'] ?? ''}'.trim();
+      if (path.isEmpty || !mounted) return;
+      await _playback.addSubtitleFile(path, title: '${file['name'] ?? 'Assrt'}');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已加载字幕：${file['name'] ?? path}')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  void _scheduleNextEpisodePreload({
+    required String site,
+    required String id,
+    required String flag,
+    required List<EpisodeItem> eps,
+    required int currentIdx,
+    required int serial,
+  }) {
+    if (!_preloadNextEpisode) return;
+    final nextIdx = currentIdx + 1;
+    if (nextIdx < 0 || nextIdx >= eps.length) return;
+    final nextUrl = eps[nextIdx].url.trim();
+    if (nextUrl.isEmpty) return;
+    if (_nextPlayCache.containsKey(nextUrl)) return;
+    final token = ++_nextPreloadSerial;
+    unawaited(() async {
+      try {
+        final data = await ref.read(apiProvider).play(
+              url: nextUrl,
+              site: site,
+              id: id,
+              flag: flag,
+            );
+        if (token != _nextPreloadSerial || serial != _playAtSerial) return;
+        if ('${data['url'] ?? ''}'.trim().isEmpty) return;
+        // 不缓存需二次嗅探/磁力的条目，避免脏结果。
+        final magnet = data['magnet'] == true ||
+            nextUrl.toLowerCase().startsWith('magnet') ||
+            '${data['url']}'.contains('/proxy/bt/');
+        if (magnet) return;
+        _nextPlayCache[nextUrl] = Map<String, dynamic>.from(data);
+        // 只保留最近一条，避免内存膨胀。
+        if (_nextPlayCache.length > 2) {
+          final keys = _nextPlayCache.keys.toList();
+          for (final k in keys.take(_nextPlayCache.length - 2)) {
+            _nextPlayCache.remove(k);
+          }
+        }
+      } catch (_) {}
+    }());
+  }
+
   Future<void> _loadDanmakuForEpisode({
     required String playDanmaku,
     required String name,
@@ -1108,6 +1269,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         items = await DanmakuLoader.loadApi(_danmakuApi, name: name, episode: episode);
       }
       if (!mounted) return;
+      if (_danmakuOffsetSec.abs() > 0.0001) {
+        items = [
+          for (final it in items)
+            DanmakuItem(
+              time: it.time + _danmakuOffsetSec,
+              content: it.content,
+              mode: it.mode,
+              size: it.size,
+              color: it.color,
+            ),
+        ];
+      }
       _danmakuItems.value = items;
     } catch (_) {
       if (mounted) _danmakuItems.value = const [];
@@ -1173,13 +1346,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     if (epLooksMagnet) _startBtProgressPoll();
     try {
       Map<String, dynamic> data;
+      final cached = _nextPlayCache.remove(ep.url);
       try {
-        data = await ref.read(apiProvider).play(
-              url: ep.url,
-              site: d.site.isNotEmpty ? d.site : widget.site,
-              id: widget.id,
-              flag: flag.flag,
-            );
+        if (cached != null && '${cached['url'] ?? ''}'.trim().isNotEmpty) {
+          data = cached;
+        } else {
+          data = await ref.read(apiProvider).play(
+                url: ep.url,
+                site: d.site.isNotEmpty ? d.site : widget.site,
+                id: widget.id,
+                flag: flag.flag,
+              );
+        }
       } catch (e) {
         // 从后台回来常见引擎僵死：Connection closed / refused。先拉起再重试一次。
         if (!_isLocalEngineConnError(e)) rethrow;
@@ -1241,21 +1419,32 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (bp.isNotEmpty) {
           backendProxyPlay = bp == 'true' || bp == '1' || bp == 'on';
         }
+        _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'true', def: true);
       } catch (_) {}
       final remoteEngine = !kotvIsLocalEngineBaseUrl(ref.read(apiProvider).baseUrl);
       // 本机走本地代理；远端看开关。优先用引擎 play 接口算好的 preferSpiderProxy。
       final preferSpiderProxy = data.containsKey('preferSpiderProxy')
           ? data['preferSpiderProxy'] == true
           : (!remoteEngine || backendProxyPlay);
-      // 有 DRM 强制 Exo（MPV/FVP 不解 Widevine）
-      final startPlayer = (hasDrm && kotvIsAndroid())
-          ? 'innie#exo'
-          : _prefPlayerVal;
+      // 有 DRM 或 SMB 强制 Exo；本地碟片/ISO 强制 MPV（自编译 dvdnav/libbluray）。
+      final smb = mediaUrl.trim().toLowerCase().startsWith('smb://') ||
+          playUrl.trim().toLowerCase().startsWith('smb://');
+      final discHint = KotvDiscPlay.looksLike(mediaUrl) ||
+          KotvDiscPlay.looksLike(playUrl) ||
+          KotvDiscPlay.looksLike(ep.url);
+      final String startPlayer;
+      if ((hasDrm || smb) && kotvIsAndroid()) {
+        startPlayer = 'innie#exo';
+      } else if (discHint) {
+        startPlayer = 'innie#mpv';
+      } else {
+        startPlayer = _prefPlayerVal;
+      }
       final failover = KotvPlaybackFailover(
         playerVal: startPlayer,
         decodeMode: _prefDecodeMode,
         lockExoForDrm: hasDrm && kotvIsAndroid(),
-        enabled: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
+        enabled: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover) && !discHint,
       );
       Object? lastOpenError;
       var opened = false;
@@ -1273,7 +1462,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final localMedia = mediaUrl.startsWith('file:') ||
             mediaUrl.startsWith('content:') ||
             (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
-        late final String openUrl;
+        late String openUrl;
         late final Map<String, String>? openHeaders;
         if (!magnet && localMedia) {
           openUrl = mediaUrl;
@@ -1290,6 +1479,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           openUrl = resolved.url;
           openHeaders = resolved.headers;
         }
+        var discProps = <String, String>{};
+        if (KotvDiscPlay.looksLike(openUrl) || KotvDiscPlay.looksLike(ep.url)) {
+          final disc = KotvDiscPlay.rewrite(
+            KotvDiscPlay.looksLike(openUrl) ? openUrl : ep.url,
+          );
+          openUrl = disc.url;
+          discProps = disc.props;
+        }
         // 先挂播放器视图再 open（Texture / 平台视图需进树；全屏靠原位 Positioned）。
         setState(() {
           _playUrl = playUrl;
@@ -1303,6 +1500,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         if (serial != _playAtSerial || !mounted) return;
         _wirePlaybackNotify(pb);
         try {
+          if (discProps.isNotEmpty) {
+            final mk = _mk;
+            if (mk is NativeMpvPlayback) {
+              mk.setExtraOpenProps(discProps);
+            } else if (mk is MediaKitPlayback) {
+              mk.setExtraOpenProps(discProps);
+            }
+          }
           // 起播前定音量/倍速，避免先以默认 100 出声再被偏好压小。
           final speed = _prefSpeed;
           if (speed != null && speed > 0) {
@@ -1361,6 +1566,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         name: d.name,
         episode: ep.name,
       ));
+      _scheduleNextEpisodePreload(
+        site: d.site.isNotEmpty ? d.site : widget.site,
+        id: widget.id,
+        flag: flag.flag,
+        eps: eps,
+        currentIdx: epIdx,
+        serial: serial,
+      );
       // 仍未 READY：等进度回调 _markPlaybackLiveIfNeeded（STATE_READY 才挂 Clock）
       _playbackLive = false;
       _sessionStartedAt = DateTime.now();
@@ -1752,6 +1965,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         danmakuRows: _danmakuRows,
         ambientOn: _ambientOn,
         stableVolumeOn: _stableVolumeOn,
+        onAssrtSearch: _searchAssrtSubtitle,
         keepLabel: _kept ? '取消收藏' : '收藏',
         offsetId: id,
         offsetSite: site,

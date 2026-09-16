@@ -404,6 +404,7 @@ class VodFullscreenChrome extends StatefulWidget {
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
+    this.onAssrtSearch,
     this.offsetId = '',
     this.offsetSite = '',
     this.openingSec = 0,
@@ -449,6 +450,8 @@ class VodFullscreenChrome extends StatefulWidget {
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
+  /// Assrt 在线搜字幕；空则隐藏入口。
+  final Future<void> Function()? onAssrtSearch;
   final String offsetId;
   final String offsetSite;
   final int openingSec;
@@ -974,6 +977,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             if (context.mounted) Navigator.pop(context);
           },
         ),
+        if (widget.onAssrtSearch != null)
+          _chromeSelectRow(
+            icon: Icons.search,
+            label: 'Assrt 搜索字幕',
+            selected: false,
+            onTap: () async {
+              if (context.mounted) Navigator.pop(context);
+              await widget.onAssrtSearch?.call();
+            },
+          ),
         for (final t in subTracks)
           _chromeSelectRow(
             label: t.label,

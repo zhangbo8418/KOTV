@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'drm_opts.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'mpv_opts.dart';
@@ -65,6 +66,8 @@ class NativeMpvPlayback extends KotvPlayback {
   bool _surfaceLayerEnabled = false;
   /// 适应/拉伸/Zoom/16:9/4:3（原生 setAspect）。
   String _videoScale = 'default';
+  /// 开播额外属性（dvd-device / bluray-device 等）。
+  Map<String, String> _extraOpenProps = const {};
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -87,6 +90,10 @@ class NativeMpvPlayback extends KotvPlayback {
   int? get textureId => _textureId;
 
   KotvMpvOpts get opts => _opts;
+
+  void setExtraOpenProps(Map<String, String> props) {
+    _extraOpenProps = Map<String, String>.from(props);
+  }
 
   String? get lastError => _lastError;
 
@@ -169,10 +176,6 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   String? get currentSubtitleId => _currentSubtitleId;
-
-  Future<void> _refreshAudioTracks() async {
-    await _refreshTracks();
-  }
 
   Future<void> _refreshTracks() async {
     if (!_ready || _w <= 0 || _h <= 0) return;
@@ -338,7 +341,7 @@ class NativeMpvPlayback extends KotvPlayback {
         _ready = true;
         _lastError = null;
         if (_w > 0 && _h > 0) _buffering = false;
-        unawaited(_refreshAudioTracks());
+        unawaited(_refreshTracks());
         // 出尺寸只 notify；勿 _bumpSurface，否则易卸掉已挂的 PlatformView。
         notifyListeners();
         break;
@@ -386,10 +389,12 @@ class NativeMpvPlayback extends KotvPlayback {
     notifyListeners();
 
     if (drm != null && drm.isNotEmpty) {
-      _lastError = 'MPV 不支持 DRM，请用内置 ExoPlayer';
-      _buffering = false;
-      notifyListeners();
-      throw StateError(_lastError!);
+      if (!kotvIsLocalClearKey(drm)) {
+        _lastError = 'MPV 不支持该 DRM，请用内置 ExoPlayer';
+        _buffering = false;
+        notifyListeners();
+        throw StateError(_lastError!);
+      }
     }
 
     await _ensureNative(live: live);
@@ -401,6 +406,14 @@ class NativeMpvPlayback extends KotvPlayback {
     // 点播/直播均先挂 Surface（页面已 setState 播控进树并 endOfFrame），再 loadfile。
     await _setSurfaceLayerEnabled(true);
     try {
+      final props = <String, String>{
+        ..._opts.propertyMap(live: live),
+        ..._extraOpenProps,
+      };
+      final ck = kotvClearKeyHex(drm);
+      if (ck != null) {
+        props['demuxer-lavf-o'] = kotvLavfOWithClearKey(ck);
+      }
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
@@ -413,9 +426,13 @@ class NativeMpvPlayback extends KotvPlayback {
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
         'diskCache': _opts.diskCache && !live,
+        'dolbyVisionPolicy': _opts.dolbyVisionPolicy,
+        'preferredTextLangs': _opts.preferredTextLangs,
         'render': _renderMode,
-        'props': _opts.propertyMap(live: live),
+        'props': props,
+        ..._opts.equalizerChannelArgs(),
       });
+      _extraOpenProps = const {};
       // open 会 recreate 属性；再刷一次比例。
       await _ch.invokeMethod('setAspect', {'mode': _videoScale});
     } on MissingPluginException {
@@ -613,7 +630,10 @@ class NativeMpvPlayback extends KotvPlayback {
         'tlsVerify': opts.tlsVerify,
         'audioPassThrough': opts.audioPassThrough,
         'diskCache': opts.diskCache && !_live,
+        'dolbyVisionPolicy': opts.dolbyVisionPolicy,
+        'preferredTextLangs': opts.preferredTextLangs,
         'props': opts.propertyMap(live: _live),
+        ...opts.equalizerChannelArgs(),
       });
     } catch (_) {}
   }

@@ -95,6 +95,14 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 外挂字幕文件（本地路径或 URL）；不支持的引擎忽略。
   Future<void> addSubtitleFile(String path, {String? title}) async {}
 
+  /// 字幕样式（字号等）；不支持的引擎忽略。
+  Future<void> setSubtitleStyle({
+    double? scale,
+    double? pos,
+    double? secondaryPos,
+    bool forceStyle = false,
+  }) async {}
+
   /// 离开详情/切 Tab：stop + release，拆掉原生 AO，避免后台漏音。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
   Future<void> release() => stop();
@@ -228,6 +236,18 @@ bool kotvSubtitleIsAuto(String? id) => (id ?? '').toLowerCase().trim() == 'auto'
 bool kotvAudioIsAuto(String? id) {
   if (id == null || id.trim().isEmpty) return true;
   return id.toLowerCase().trim() == 'auto';
+}
+
+/// 设置项布尔：空串用 [def]；显式 false/off/0/no 为关，其余为开。
+bool kotvSettingsFlag(Object? raw, {bool def = false}) {
+  final t = '$raw'.trim().toLowerCase();
+  if (t.isEmpty) return def;
+  return t != 'false' && t != 'off' && t != '0' && t != 'no';
+}
+
+bool kotvSettingsMapFlag(Map<String, dynamic> settings, String key, {bool def = false}) {
+  if (!settings.containsKey(key) || settings[key] == null) return def;
+  return kotvSettingsFlag(settings[key], def: def);
 }
 
 /// MPV / FVP / Exo 开播后长时间无视频尺寸（有声无画或 Texture 0×0）。
