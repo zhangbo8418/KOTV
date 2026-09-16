@@ -67,4 +67,7 @@ class FvpPlayback extends KotvPlayback {
   Future<void> setAudioTrack(String id) async {}
   @override
   Future<void> setSubtitleTrack(String id) async {}
+
+  /// Web 无 FVP：与 IO 侧同名，避免 dart2js 因条件导入缺方法失败。
+  void applyPlayerOptions(Map<String, dynamic> settings) {}
 }
