@@ -518,7 +518,7 @@ func resolvePlayAbsolute(id string, bases ...string) string {
 // - video:// → 剥前缀 + parse=1（逼宿主嗅探）
 // - push://  → 剥前缀 + parse=0（桌面直接播内层 URL）
 // - *.strm  → 读文本首行真实地址 + parse=0
-// Force / JianPian / TVBus / Youtube 依赖 Android/Native，桌面暂不支持。
+// Force / JianPian / TVBus / Youtube 依赖 Android Native 预处理。
 func applySourceFetch(r *model.Result) {
 	if r == nil || len(r.URL.URLs) == 0 {
 		return

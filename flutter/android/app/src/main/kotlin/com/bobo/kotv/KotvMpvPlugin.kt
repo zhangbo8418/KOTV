@@ -74,7 +74,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var conf = ""
   /** 默认校验证书；坏 CA 盒子可关（设置 mpvTlsVerify=false）。 */
   private var tlsVerify = true
+  /** 音频直通（audio-spdif）。 */
+  private var audioPassThrough = true
+  /** 点播磁盘缓存。 */
+  private var diskCache = false
   private var livePlayback = false
+  /** IO/探测失败后强制 lavf=hls 再试一次。 */
+  private var ioHlsRetried = false
+  private var forceLavfHls = false
+  private var loadedUrl: String = ""
+  private var loadedHeaders: Map<String, String> = emptyMap()
   private var volume = 80.0
   private var rate = 1.0
   private var renderTexture = false
@@ -86,6 +95,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var createdAsLive: Boolean? = null
   /** ensurePlayer 时写入的 tls-verify；变更须重建上下文。 */
   private var createdTlsVerify: Boolean? = null
+  private var createdDiskCache: Boolean? = null
+  private var createdPassThrough: Boolean? = null
 
   private val tick = object : Runnable {
     override fun run() {
@@ -238,6 +249,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         vulkanEnabled = call.argument<Boolean>("vulkan") == true
         conf = call.argument<String>("conf") ?: conf
         call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
+        call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
+        call.argument<Boolean>("diskCache")?.let { diskCache = it }
         // 直播须在 ensurePlayer 前写入，否则会套上点播 demuxer 预算。
         call.argument<Boolean>("live")?.let { livePlayback = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
@@ -270,6 +283,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         vulkanEnabled = call.argument<Boolean>("vulkan") == true
         conf = call.argument<String>("conf") ?: conf
         call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
+        call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
+        call.argument<Boolean>("diskCache")?.let { diskCache = it }
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           renderTexture = resolveRenderTexture(it)
         }
@@ -294,8 +309,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             durationSec = 0.0
             width = 0
             height = 0
+            ioHlsRetried = false
+            forceLavfHls = false
             pendingUrl = url
             pendingHeaders = headers
+            loadedUrl = ""
+            loadedHeaders = emptyMap()
             // 有 Surface 再 loadfile，避免 android VO「Missing surface pointer」有声无画。
             maybeLoadPending()
             result.success(null)
@@ -455,13 +474,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         conf = call.argument<String>("conf") ?: conf
         decodeMode = call.argument<String>("decode") ?: decodeMode
         call.argument<Boolean>("tlsVerify")?.let { tlsVerify = it }
+        call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
+        call.argument<Boolean>("diskCache")?.let { diskCache = it }
         @Suppress("UNCHECKED_CAST")
         val props = (call.argument<Map<*, *>>("props") ?: emptyMap<Any, Any>())
           .entries
           .associate { "${it.key}" to "${it.value}" }
         main.post {
           try {
-            // tls-verify 在 init 写入，变更须重建。
+            // tls / disk / spdif 在 init 写入，变更须重建。
             ensurePlayer()
             applyRuntimeOpts(props)
             applyGpuApiIfNeeded()
@@ -573,6 +594,76 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
+      "setSecondarySubtitleTrack" -> {
+        val id = call.argument<String>("id") ?: "no"
+        main.post {
+          try {
+            if (created.get()) {
+              when {
+                id.isEmpty() || id == "no" || id == "off" ->
+                  MPVLib.command(arrayOf("set", "secondary-sid", "no"))
+                id == "auto" ->
+                  MPVLib.command(arrayOf("set", "secondary-sid", "auto"))
+                else -> MPVLib.command(arrayOf("set", "secondary-sid", id))
+              }
+            }
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("SECONDARY_SUB_FAILED", e.message, null)
+          }
+        }
+      }
+      "setSubtitleStyle" -> {
+        val scale = call.argument<Number>("scale")?.toDouble()
+        val pos = call.argument<Number>("pos")?.toDouble()
+        val secondaryPos = call.argument<Number>("secondaryPos")?.toDouble()
+        val forceStyle = call.argument<Boolean>("forceStyle") == true
+        main.post {
+          try {
+            if (created.get()) {
+              if (scale != null) {
+                MPVLib.setPropertyDouble("sub-scale", scale.coerceIn(0.5, 2.5))
+              }
+              if (pos != null) {
+                MPVLib.setPropertyDouble("sub-pos", pos.coerceIn(0.0, 150.0))
+              }
+              if (secondaryPos != null) {
+                MPVLib.setPropertyDouble("secondary-sub-pos", secondaryPos.coerceIn(0.0, 150.0))
+              }
+              MPVLib.setPropertyString(
+                "secondary-sub-ass-override",
+                if (forceStyle) "force" else "yes",
+              )
+              MPVLib.setPropertyString("sub-ass-override", if (forceStyle) "force" else "scale")
+            }
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("SUB_STYLE_FAILED", e.message, null)
+          }
+        }
+      }
+      "addSubtitle" -> {
+        val path = call.argument<String>("path")?.trim().orEmpty()
+        val title = call.argument<String>("title")?.trim().orEmpty()
+        val select = call.argument<Boolean>("select") != false
+        main.post {
+          try {
+            if (!created.get() || path.isEmpty()) {
+              result.error("SUB_FAILED", "empty path or not ready", null)
+              return@post
+            }
+            val flags = if (select) "select" else "auto"
+            if (title.isNotEmpty()) {
+              MPVLib.command(arrayOf("sub-add", path, flags, title))
+            } else {
+              MPVLib.command(arrayOf("sub-add", path, flags))
+            }
+            result.success(true)
+          } catch (e: Throwable) {
+            result.error("SUB_FAILED", e.message, null)
+          }
+        }
+      }
       "retryVideo" -> {
         main.post {
           try {
@@ -616,6 +707,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     if (created.get() && createdTlsVerify != null && createdTlsVerify != tlsVerify) {
       Log.i(TAG, "recreate MPV context: tlsVerify $createdTlsVerify -> $tlsVerify")
+      destroyPlayer()
+    }
+    if (created.get() && createdDiskCache != null && createdDiskCache != diskCache) {
+      Log.i(TAG, "recreate MPV context: diskCache $createdDiskCache -> $diskCache")
+      destroyPlayer()
+    }
+    if (created.get() && createdPassThrough != null && createdPassThrough != audioPassThrough) {
+      Log.i(TAG, "recreate MPV context: audioPassThrough $createdPassThrough -> $audioPassThrough")
       destroyPlayer()
     }
     if (created.get()) return
@@ -677,12 +776,30 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val budget = bufferBudgetBytes()
         val back = max(16 * 1024 * 1024, budget / 8)
         MPVLib.setOptionString("cache", "yes")
-        MPVLib.setOptionString("cache-on-disk", "no")
+        if (diskCache) {
+          val dir = File(ctx.cacheDir, "mpv-cache").apply { mkdirs() }
+          MPVLib.setOptionString("cache-on-disk", "yes")
+          MPVLib.setOptionString("demuxer-cache-dir", dir.absolutePath)
+        } else {
+          MPVLib.setOptionString("cache-on-disk", "no")
+        }
         MPVLib.setOptionString("demuxer-max-bytes", demuxerMiB(budget))
         MPVLib.setOptionString("demuxer-max-back-bytes", demuxerMiB(back))
         MPVLib.setOptionString("cache-pause-initial", "no")
       }
-      // 直播：对齐 TV，不写 demuxer-max-bytes / cache-secs（mpv 默认）。
+      if (audioPassThrough) {
+        MPVLib.setOptionString("audio-spdif", "ac3,eac3,truehd,dts,dtshd")
+      } else {
+        MPVLib.setOptionString("audio-spdif", "")
+      }
+      // 字幕基础：内嵌字体 + ASS 按比例缩放（细项仍可走 mpv.conf / setSubtitleStyle）。
+      MPVLib.setOptionString("embeddedfonts", "yes")
+      MPVLib.setOptionString("sub-ass-override", "scale")
+      MPVLib.setOptionString("sub-scale", "1.0")
+      MPVLib.setOptionString("sub-scale-signs", "yes")
+      MPVLib.setOptionString("secondary-sub-ass-override", "yes")
+      MPVLib.setOptionString("secondary-sid", "no")
+      // 直播：不写 demuxer-max-bytes / cache-secs（mpv 默认）。
       applyConfOptions(conf)
       MPVLib.init()
       MPVLib.setOptionString("force-window", "no")
@@ -691,6 +808,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       created.set(true)
       createdAsLive = livePlayback
       createdTlsVerify = tlsVerify
+      createdDiskCache = diskCache
+      createdPassThrough = audioPassThrough
       applyAspectMode()
       main.removeCallbacks(tick)
       main.post(tick)
@@ -1044,7 +1163,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun startLoad(url: String, headers: Map<String, String>) {
     try {
+      loadedUrl = url
+      loadedHeaders = headers
       applyPlayHttpHeaders(headers)
+      applyForcedHlsFormat()
       MPVLib.setPropertyDouble("volume", volume)
       MPVLib.setPropertyDouble("speed", rate)
       MPVLib.command(arrayOf("loadfile", url, "replace"))
@@ -1055,6 +1177,21 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       eof = false
     } catch (e: Throwable) {
       emit(mapOf("event" to "error", "message" to (e.message ?: "load failed")))
+    }
+  }
+
+  private fun applyForcedHlsFormat() {
+    try {
+      if (forceLavfHls) {
+        MPVLib.setPropertyString("demuxer-lavf-format", "hls")
+      } else {
+        try {
+          MPVLib.setPropertyString("demuxer-lavf-format", "")
+        } catch (_: Throwable) {
+        }
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "applyForcedHlsFormat", t)
     }
   }
 
@@ -1227,6 +1364,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     loadGen.incrementAndGet()
     createdAsLive = null
     createdTlsVerify = null
+    createdDiskCache = null
+    createdPassThrough = null
     if (!created.getAndSet(false)) return
     try {
       MPVLib.removeObserver(this)
@@ -1329,11 +1468,47 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         emit(mapOf("event" to "completed"))
       }
       MPVLib.MpvEndFileReason.MPV_END_FILE_REASON_ERROR -> {
+        if (shouldRetryHls(error, errorText) && !ioHlsRetried) {
+          ioHlsRetried = true
+          forceLavfHls = true
+          Log.w(TAG, "mpv io/format error → force HLS retry err=$error text=$errorText")
+          val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
+          val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
+          if (url.isNotBlank()) {
+            buffering = true
+            playing = false
+            main.post {
+              try {
+                startLoad(url, headers)
+              } catch (t: Throwable) {
+                emit(mapOf("event" to "error", "message" to (t.message ?: "HLS retry failed")))
+              }
+            }
+            return
+          }
+        }
         val msg = errorText?.takeIf { it.isNotBlank() } ?: "MPV error $error"
         emit(mapOf("event" to "error", "message" to msg))
       }
       else -> {}
     }
+  }
+
+  /** LOADING_FAILED / UNKNOWN_FORMAT / GENERIC，或文案像 IO。 */
+  private fun shouldRetryHls(error: Int, errorText: String?): Boolean {
+    when (error) {
+      MPVLib.MpvError.MPV_ERROR_LOADING_FAILED,
+      MPVLib.MpvError.MPV_ERROR_UNKNOWN_FORMAT,
+      MPVLib.MpvError.MPV_ERROR_GENERIC,
+      MPVLib.MpvError.MPV_ERROR_NOTHING_TO_PLAY,
+      -> return true
+    }
+    val t = errorText?.lowercase().orEmpty()
+    return t.contains("i/o") ||
+      t.contains("io error") ||
+      t.contains("failed to open") ||
+      t.contains("http error") ||
+      t.contains("unable to open")
   }
 
   private fun emitSize() {

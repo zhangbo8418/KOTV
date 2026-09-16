@@ -31,6 +31,20 @@ class FvpPlayback extends KotvPlayback {
   double _volume = 100;
   double _rate = 1;
   String _decodeMode = 'auto';
+  String _videoScale = 'default';
+  List<KotvTrack> _audioTracks = const [];
+  List<KotvTrack> _videoTracks = const [];
+  List<KotvTrack> _subtitleTracks = const [];
+  String? _currentAudioId;
+  String? _currentVideoId;
+  String? _currentSubtitleId;
+  String? _currentSecondarySubtitleId;
+  bool _subtitleManualOff = false;
+  bool _subtitleManualAuto = false;
+  String _secondarySubtitleMode = 'off';
+  double _subtitleFontScale = 1.0;
+  bool _diskCache = false;
+  String _preferredTextLangs = '';
 
   VideoPlayerController? get controller => _c;
 
@@ -88,16 +102,22 @@ class FvpPlayback extends KotvPlayback {
   Stream<bool> get completedStream => _doneCtrl.stream;
 
   @override
-  List<KotvTrack> get audioTracks => const [];
+  List<KotvTrack> get audioTracks => _audioTracks;
 
   @override
-  List<KotvTrack> get subtitleTracks => const [];
+  List<KotvTrack> get videoTracks => _videoTracks;
 
   @override
-  String? get currentAudioId => null;
+  List<KotvTrack> get subtitleTracks => _subtitleTracks;
 
   @override
-  String? get currentSubtitleId => null;
+  String? get currentAudioId => _currentAudioId;
+
+  @override
+  String? get currentVideoId => _currentVideoId;
+
+  @override
+  String? get currentSubtitleId => _currentSubtitleId;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     final c = _c;
@@ -179,6 +199,15 @@ class FvpPlayback extends KotvPlayback {
     _live = live;
     _lastError = null;
     _completed = false;
+    _audioTracks = const [];
+    _videoTracks = const [];
+    _subtitleTracks = const [];
+    _currentAudioId = null;
+    _currentVideoId = null;
+    _currentSubtitleId = null;
+    _currentSecondarySubtitleId = null;
+    _subtitleManualOff = false;
+    _subtitleManualAuto = false;
     notifyListeners();
     try {
       // 勿调用 stop()：它会把 _opening 清掉，缓冲浮层会立刻消失。
@@ -218,6 +247,9 @@ class FvpPlayback extends KotvPlayback {
           _completed = true;
           _doneCtrl.add(true);
         }
+        if (v.isInitialized && !_opening) {
+          _refreshTracksQuiet();
+        }
         notifyListeners();
       };
       c.addListener(_listener!);
@@ -254,12 +286,18 @@ class FvpPlayback extends KotvPlayback {
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
       await c.play();
+      _applyRuntimeOptions(c);
+      _refreshTracksQuiet();
+      _applySecondaryAutoIfNeeded();
+      unawaited(setVideoScale(_videoScale));
       // 直播可能长时间 size=0：保持 _opening 直到首帧/出尺寸，浮层继续显示。
       if (c.value.isPlaying && c.value.size.width > 0) {
         _opening = false;
       }
       notifyListeners();
       await _guardSilentVideo(c);
+      _refreshTracksQuiet();
+      _applySecondaryAutoIfNeeded();
     } catch (e) {
       _lastError = '$e';
       _opening = false;
@@ -487,11 +525,330 @@ class FvpPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  @override
-  Future<void> setAudioTrack(String id) async {}
+  void applyPlayerOptions(Map<String, dynamic> settings) {
+    bool flag(String key, {bool def = false}) {
+      final raw = '${settings[key] ?? def}'.trim().toLowerCase();
+      if (raw.isEmpty) return def;
+      return raw != 'false' && raw != 'off' && raw != '0' && raw != 'no';
+    }
+
+    _diskCache = flag('mpvDiskCache', def: false);
+    _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
+    _subtitleFontScale = _subtitleFontScale.clamp(0.5, 2.5);
+    final sec = '${settings['exoSecondarySubtitle'] ?? 'off'}'.trim().toLowerCase();
+    _secondarySubtitleMode = (sec == 'auto' || sec == 'on' || sec == 'manual') ? sec : 'off';
+    _preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
+    _applyRuntimeOptions(_c);
+    _applySecondaryAutoIfNeeded();
+    notifyListeners();
+  }
+
+  void _applyRuntimeOptions(VideoPlayerController? c) {
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      c.setProperty('subtitle.scale', _subtitleFontScale.toStringAsFixed(2));
+      if (_preferredTextLangs.isNotEmpty) {
+        c.setProperty('subtitle.language', _preferredTextLangs);
+      }
+      if (_diskCache && !_live) {
+        c.setProperty('demux.buffer.ranges', '16');
+        c.setProperty('demux.buffer.protocols', 'http,https');
+      }
+      _syncSubtitleTracks(c);
+    } catch (_) {}
+  }
+
+  String _metaLabel(Map<String, String> metadata, {String? codec, int w = 0, int h = 0}) {
+    var label = (metadata['title'] ?? metadata['language'] ?? metadata['lang'] ?? '').trim();
+    if (label.isEmpty) label = (metadata['handler_name'] ?? '').trim();
+    if (codec != null && codec.isNotEmpty) {
+      label = label.isEmpty ? codec : '$label ($codec)';
+    }
+    if (w > 0 && h > 0) label = '$label ${w}x$h';
+    return label.isEmpty ? '?' : label;
+  }
+
+  int? _parseTrackIndex(String id) {
+    final t = id.trim();
+    if (t.isEmpty || kotvIsPseudoMediaTrack(t)) return null;
+    if (t.contains(':')) {
+      final tail = t.split(':').last;
+      return int.tryParse(tail.replaceFirst(RegExp(r'^[tg]'), ''));
+    }
+    return int.tryParse(t.replaceFirst(RegExp(r'^[tg]'), ''));
+  }
+
+  void _refreshTracksQuiet() {
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      final info = c.getMediaInfo() as dynamic;
+      if (info == null) return;
+      _audioTracks = _mapStreamTracks(info.audio, isVideo: false, isSubtitle: false);
+      _videoTracks = _mapStreamTracks(info.video, isVideo: true, isSubtitle: false);
+      _subtitleTracks = _mapStreamTracks(info.subtitle, isVideo: false, isSubtitle: true);
+
+      final actA = c.getActiveAudioTracks() ?? const <int>[];
+      _currentAudioId = actA.isEmpty ? null : '${actA.first}';
+      final actV = c.getActiveVideoTracks() ?? const <int>[];
+      _currentVideoId = actV.isEmpty ? null : '${actV.first}';
+      final actS = c.getActiveSubtitleTracks() ?? const <int>[];
+      if (actS.isEmpty) {
+        _currentSubtitleId = _subtitleManualOff || _subtitleManualAuto ? null : _currentSubtitleId;
+        if (!_subtitleManualOff && !_subtitleManualAuto) {
+          _currentSecondarySubtitleId = null;
+        }
+      } else {
+        _currentSubtitleId = '${actS.first}';
+        _currentSecondarySubtitleId = actS.length > 1 ? '${actS[1]}' : null;
+      }
+    } catch (_) {}
+  }
+
+  List<KotvTrack> _mapStreamTracks(
+    dynamic streams, {
+    required bool isVideo,
+    required bool isSubtitle,
+  }) {
+    if (streams is! List || streams.isEmpty) return const [];
+    final out = <KotvTrack>[];
+    for (final s in streams) {
+      try {
+        final index = s.index as int;
+        final meta = Map<String, String>.from((s.metadata as Map?)?.map(
+              (k, v) => MapEntry('$k', '$v'),
+            ) ??
+            const {});
+        final codec = '${s.codec.codec ?? ''}'.trim();
+        var w = 0;
+        var h = 0;
+        if (isVideo) {
+          w = (s.codec.width as num?)?.toInt() ?? 0;
+          h = (s.codec.height as num?)?.toInt() ?? 0;
+        }
+        out.add(
+          KotvTrack(
+            id: '$index',
+            label: _metaLabel(meta, codec: codec, w: w, h: h),
+          ),
+        );
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  void _syncSubtitleTracks(VideoPlayerController c) {
+    try {
+      if (_subtitleManualOff) {
+        c.setProperty('subtitle', '0');
+        c.setSubtitleTracks(const []);
+        return;
+      }
+      c.setProperty('subtitle', '1');
+      if (_subtitleManualAuto && _currentSecondarySubtitleId == null) {
+        return;
+      }
+      final tracks = <int>[];
+      final primary = _parseTrackIndex(_currentSubtitleId ?? '');
+      if (primary != null) tracks.add(primary);
+      final secondary = _parseTrackIndex(_currentSecondarySubtitleId ?? '');
+      if (secondary != null && !tracks.contains(secondary)) tracks.add(secondary);
+      if (tracks.isEmpty) return;
+      c.setSubtitleTracks(tracks);
+    } catch (_) {}
+  }
+
+  void _applySecondaryAutoIfNeeded() {
+    if (_secondarySubtitleMode == 'off' || _subtitleManualOff) return;
+    if (_currentSecondarySubtitleId != null && _currentSecondarySubtitleId!.isNotEmpty) {
+      return;
+    }
+    final c = _c;
+    if (c == null || _subtitleTracks.length < 2) return;
+    final primary = _parseTrackIndex(_currentSubtitleId ?? '') ??
+        _parseTrackIndex(_subtitleTracks.first.id);
+    for (final t in _subtitleTracks) {
+      final idx = _parseTrackIndex(t.id);
+      if (idx != null && idx != primary) {
+        _currentSecondarySubtitleId = t.id;
+        _syncSubtitleTracks(c);
+        return;
+      }
+    }
+  }
 
   @override
-  Future<void> setSubtitleTrack(String id) async {}
+  Future<void> setStableVolume(bool on) async {
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      c.setProperty('audio.avfilter', on ? 'dynaudnorm=f=75:g=15:p=0.55' : '');
+    } catch (_) {
+      try {
+        c.setProperty('audio.avfilter', on ? 'loudnorm' : '');
+      } catch (_) {}
+    }
+  }
+
+  @override
+  Future<void> setVideoScale(String mode) async {
+    final m = mode.trim().isEmpty ? 'default' : mode.trim();
+    _videoScale = m;
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      switch (m.toLowerCase()) {
+        case '16:9':
+          c.setProperty('video.aspect', '16/9');
+        case '4:3':
+          c.setProperty('video.aspect', '4/3');
+        case 'fill':
+        case 'zoom':
+          c.setProperty('video.aspect', '-1');
+        default:
+          c.setProperty('video.aspect', '0');
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setVideoTrack(String id) async {
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      if (kotvAudioIsAuto(id) || id.trim().isEmpty) {
+        final info = c.getMediaInfo() as dynamic;
+        final videos = (info?.video as List?) ?? const [];
+        if (videos.isEmpty) return;
+        final idx = videos.first.index as int;
+        c.setVideoTracks([idx]);
+        _currentVideoId = '$idx';
+      } else {
+        final idx = _parseTrackIndex(id);
+        if (idx == null) return;
+        c.setVideoTracks([idx]);
+        _currentVideoId = '$idx';
+      }
+      _refreshTracksQuiet();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> setSecondarySubtitleTrack(String id) async {
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      final key = id.trim().toLowerCase();
+      if (key.isEmpty || key == 'no' || key == 'off') {
+        _currentSecondarySubtitleId = null;
+        _syncSubtitleTracks(c);
+      } else if (key == 'auto') {
+        _currentSecondarySubtitleId = null;
+        _applySecondaryAutoIfNeeded();
+      } else {
+        final idx = _parseTrackIndex(id);
+        if (idx == null) return;
+        _currentSecondarySubtitleId = '$idx';
+        _syncSubtitleTracks(c);
+      }
+      _refreshTracksQuiet();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> setSubtitleStyle({
+    double? scale,
+    double? pos,
+    double? secondaryPos,
+    bool forceStyle = false,
+  }) async {
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      if (scale != null) {
+        _subtitleFontScale = scale.clamp(0.5, 2.5);
+        c.setProperty('subtitle.scale', _subtitleFontScale.toStringAsFixed(2));
+      }
+      if (pos != null) {
+        c.setProperty('subtitle.margin', pos.clamp(0.0, 150.0).toStringAsFixed(1));
+      }
+      if (secondaryPos != null) {
+        c.setProperty('subtitle2.margin', secondaryPos.clamp(0.0, 150.0).toStringAsFixed(1));
+      }
+      if (forceStyle) {
+        c.setProperty('subtitle.force', '1');
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> addSubtitleFile(String path, {String? title}) async {
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    final uri = path.trim();
+    if (uri.isEmpty) return;
+    try {
+      c.setExternalSubtitle(uri);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      if (!identical(_c, c)) return;
+      _refreshTracksQuiet();
+      if (_subtitleTracks.isNotEmpty) {
+        await setSubtitleTrack(_subtitleTracks.last.id);
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setAudioTrack(String id) async {
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      if (kotvAudioIsAuto(id)) {
+        _currentAudioId = null;
+        notifyListeners();
+        return;
+      }
+      final idx = _parseTrackIndex(id);
+      if (idx == null) return;
+      c.setAudioTracks([idx]);
+      _currentAudioId = '$idx';
+      _refreshTracksQuiet();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setSubtitleTrack(String id) async {
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      if (id.trim().isEmpty || kotvSubtitleIsOff(id)) {
+        _subtitleManualOff = true;
+        _subtitleManualAuto = false;
+        _currentSubtitleId = null;
+        _currentSecondarySubtitleId = null;
+        c.setProperty('subtitle', '0');
+        c.setSubtitleTracks(const []);
+      } else if (kotvSubtitleIsAuto(id)) {
+        _subtitleManualOff = false;
+        _subtitleManualAuto = true;
+        _currentSubtitleId = null;
+        c.setProperty('subtitle', '1');
+        c.setSubtitleTracks(const []);
+        _applySecondaryAutoIfNeeded();
+      } else {
+        _subtitleManualOff = false;
+        _subtitleManualAuto = false;
+        final idx = _parseTrackIndex(id);
+        if (idx == null) return;
+        _currentSubtitleId = '$idx';
+        _syncSubtitleTracks(c);
+      }
+      _refreshTracksQuiet();
+      notifyListeners();
+    } catch (_) {}
+  }
 
   @override
   void dispose() {

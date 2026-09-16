@@ -179,6 +179,7 @@ index fc62b6a..f951b30 100644
 +    "lib-exoplayer-dash",
 +    "lib-exoplayer-hls",
 +    "lib-extractor",
++    "lib-ui",
 +  )
 +
  Media3Modules.EXTERNAL_MODULES.forEach { (gradleName, moduleInfo) ->

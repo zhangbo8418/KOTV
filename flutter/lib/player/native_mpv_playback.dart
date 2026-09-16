@@ -261,6 +261,8 @@ class NativeMpvPlayback extends KotvPlayback {
         'gpuApi': _opts.gpuApi,
         'conf': _opts.conf,
         'tlsVerify': _opts.tlsVerify,
+        'audioPassThrough': _opts.audioPassThrough,
+        'diskCache': _opts.diskCache,
         'render': _renderMode,
         // 直播须在 create/ensurePlayer 时写入，避免套上点播 demuxer 预算。
         'live': live,
@@ -409,6 +411,8 @@ class NativeMpvPlayback extends KotvPlayback {
         'gpuApi': _opts.gpuApi,
         'conf': _opts.conf,
         'tlsVerify': _opts.tlsVerify,
+        'audioPassThrough': _opts.audioPassThrough,
+        'diskCache': _opts.diskCache && !live,
         'render': _renderMode,
         'props': _opts.propertyMap(live: live),
       });
@@ -607,6 +611,8 @@ class NativeMpvPlayback extends KotvPlayback {
         'gpuApi': opts.gpuApi,
         'conf': opts.conf,
         'tlsVerify': opts.tlsVerify,
+        'audioPassThrough': opts.audioPassThrough,
+        'diskCache': opts.diskCache && !_live,
         'props': opts.propertyMap(live: _live),
       });
     } catch (_) {}
@@ -654,6 +660,40 @@ class NativeMpvPlayback extends KotvPlayback {
       final key = id.trim().toLowerCase();
       _currentSubtitleId = (key.isEmpty || key == 'no' || key == 'off' || key == 'auto') ? null : id;
       notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> setSecondarySubtitleTrack(String id) async {
+    try {
+      await _ch.invokeMethod('setSecondarySubtitleTrack', {'id': id});
+    } catch (_) {}
+  }
+
+  Future<void> setSubtitleStyle({
+    double? scale,
+    double? pos,
+    double? secondaryPos,
+    bool forceStyle = false,
+  }) async {
+    try {
+      await _ch.invokeMethod('setSubtitleStyle', {
+        if (scale != null) 'scale': scale,
+        if (pos != null) 'pos': pos,
+        if (secondaryPos != null) 'secondaryPos': secondaryPos,
+        'forceStyle': forceStyle,
+      });
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> addSubtitleFile(String path, {String? title}) async {
+    try {
+      await _ch.invokeMethod('addSubtitle', {
+        'path': path,
+        if (title != null && title.isNotEmpty) 'title': title,
+        'select': true,
+      });
+      await _refreshTracks();
     } catch (_) {}
   }
 

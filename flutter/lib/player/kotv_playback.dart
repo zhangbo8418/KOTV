@@ -92,6 +92,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setVideoTrack(String id) async {}
   Future<void> setSubtitleTrack(String id); // ''=关, 'auto'=自动
 
+  /// 外挂字幕文件（本地路径或 URL）；不支持的引擎忽略。
+  Future<void> addSubtitleFile(String path, {String? title}) async {}
+
   /// 离开详情/切 Tab：stop + release，拆掉原生 AO，避免后台漏音。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
   Future<void> release() => stop();

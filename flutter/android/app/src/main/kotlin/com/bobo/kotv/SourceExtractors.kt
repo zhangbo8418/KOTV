@@ -2,6 +2,8 @@ package com.bobo.kotv
 
 import android.net.Uri
 import android.util.Log
+import com.bobo.kotv.extractor.ForceExtractor
+import com.bobo.kotv.extractor.YouTubeExtractor
 import com.github.catvod.net.OkHttp
 import com.github.catvod.utils.Path
 import com.p2p.P2PClass
@@ -17,8 +19,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 荐片 P2P（libjpa）与 TVBus（运行时下载 so）两个提取器。
- * Go 起播前 POST /source/fetch，把专用 scheme 转成本地 HTTP。
+ * 专用 scheme / 站点 URL 提取：荐片 P2P、TVBus、YouTube、ForceTech。
+ * Go 起播前 POST /source/fetch，转成本地 HTTP 或可播直链。
  */
 object SourceExtractors {
   private const val TAG = "KotvSource"
@@ -42,6 +44,8 @@ object SourceExtractors {
       val out = when (schemeOf(url)) {
         Scheme.JianPian -> fetchJianPian(url)
         Scheme.TVBus -> fetchTVBus(url, body.optJSONObject("core"))
+        Scheme.YouTube -> YouTubeExtractor.fetch(url)
+        Scheme.Force -> ForceExtractor.fetch(url)
         Scheme.None -> url
       }
       if (out.isBlank()) {
@@ -50,8 +54,8 @@ object SourceExtractors {
         JSONObject().put("ok", true).put("url", out)
       }
     } catch (t: Throwable) {
-      Log.e(TAG, "fetch failed url=$url", t)
-      JSONObject().put("ok", false).put("error", t.message ?: t.toString())
+      Log.e(TAG, "fetch failed: $url", t)
+      JSONObject().put("ok", false).put("error", t.message ?: "extract failed")
     }
   }
 
@@ -70,11 +74,14 @@ object SourceExtractors {
       tvcore?.stop()
     } catch (_: Throwable) {
     }
+    ForceExtractor.stop()
   }
 
-  private enum class Scheme { None, JianPian, TVBus }
+  private enum class Scheme { None, JianPian, TVBus, YouTube, Force }
 
   private fun schemeOf(raw: String): Scheme {
+    if (YouTubeExtractor.match(raw)) return Scheme.YouTube
+    if (ForceExtractor.match(raw)) return Scheme.Force
     val s = Uri.parse(raw.trim()).scheme?.lowercase().orEmpty()
     return when (s) {
       "tvbus" -> Scheme.TVBus

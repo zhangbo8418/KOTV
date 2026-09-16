@@ -82,7 +82,7 @@ class Spider(metaclass=ABCMeta):
         path = os.path.join(_cache_root(), f"{name}.py")
         return SourceFileLoader(name, path).load_module()
 
-    def fetch(self, url, params=None, cookies=None, headers=None, timeout=10, verify=False,
+    def fetch(self, url, params=None, cookies=None, headers=None, timeout=5, verify=True,
               stream=False, allow_redirects=True):
         response = requests.get(
             url, params=params, cookies=cookies, headers=headers, timeout=timeout,
@@ -92,7 +92,7 @@ class Spider(metaclass=ABCMeta):
         return response
 
     def post(self, url, params=None, data=None, json=None, cookies=None, headers=None,
-             timeout=10, verify=False, stream=False, allow_redirects=True):
+             timeout=5, verify=True, stream=False, allow_redirects=True):
         response = requests.post(
             url, params=params, data=data, json=json, cookies=cookies, headers=headers,
             timeout=timeout, verify=verify, stream=stream, allow_redirects=allow_redirects,

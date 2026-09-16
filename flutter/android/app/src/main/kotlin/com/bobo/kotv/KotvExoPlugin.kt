@@ -44,6 +44,9 @@ import androidx.media3.exoplayer.trackselection.DecodeTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.TsExtractor
+import io.github.peerless2012.ass.media.factory.AssRenderersFactory
+import io.github.peerless2012.ass.media.kt.withAssMkvSupport
+import io.github.peerless2012.ass.media.parser.AssSubtitleParserFactory
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -119,6 +122,39 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var livePlayback: Boolean = false
   /** auto 下硬解失败后仅软解重建一次。 */
   private var decodeFallbackTried = false
+  /** Surface 隧道模式；Texture 强制关闭。 */
+  private var tunnelingEnabled = false
+  /** HLS 广告过滤（MediaItem.setAdblock）。 */
+  private var adblockEnabled = true
+  /** 点播 SimpleCache。 */
+  private var diskCacheEnabled = false
+  /** 音频直通；关则走普通 AudioTrack。 */
+  private var audioPassThrough = true
+  /** DolbyVisionOutputPolicy：0=AUTO … */
+  private var dolbyVisionPolicy = 0
+  /** 外挂字幕配置（url/name/lang/mime）。 */
+  private var currentSubs: List<Map<String, Any?>> = emptyList()
+  /** 优先 AAC。 */
+  private var preferAac = false
+  /** 跳过静音段。 */
+  private var skipSilence = false
+  /** 首选字幕语言（BCP-47，逗号分隔）；空则跟系统 Locale。 */
+  private var preferredTextLangs: String = ""
+  /** 点播磁盘预读时长（毫秒）；仅 diskCache 开启时生效。 */
+  private var diskPreloadMs: Long = 10_000L
+  private val diskPreload = KotvExoDiskPreload()
+  /** rebuildPlayer 留下的上游/渲染工厂，供 DiskPreload 复用。 */
+  private var preloadUpstream: DataSource.Factory? = null
+  private var preloadRenderers: androidx.media3.exoplayer.RenderersFactory? = null
+  /** ASS / libass 特效字幕。 */
+  private var libassEnabled = false
+  /** 副字幕：off | auto | 轨 id（gN:tM）。 */
+  private var secondarySubtitleMode: String = "off"
+  private var secondarySubtitleId: String = ""
+  private var playerBuiltLibass: Boolean? = null
+  private var playerBuiltSecondary: Boolean? = null
+  private var subtitleOverlay: KotvSubtitleOverlay? = null
+  private var subtitleFontScale = 1.0f
   /** 实时下载速度：TransferListener 累计网络字节，tick 里差分；无增长则归零（避免黏第一帧）。 */
   @Volatile private var speedBps: Long = 0
   private var speedLastBytes: Long = -1
@@ -185,13 +221,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private val httpClient: OkHttpClient by lazy {
-    OkHttpClient.Builder()
-      .followRedirects(true)
-      .followSslRedirects(true)
-      .connectTimeout(15, TimeUnit.SECONDS)
-      .readTimeout(20, TimeUnit.SECONDS)
-      .writeTimeout(20, TimeUnit.SECONDS)
-      .build()
+    try {
+      com.github.catvod.net.OkHttp.player()
+    } catch (_: Throwable) {
+      OkHttpClient.Builder()
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
+        .build()
+    }
   }
 
   override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -282,6 +322,25 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val mode = call.argument<String>("decodeMode")?.trim()?.lowercase().orEmpty()
         val live = call.argument<Boolean>("live") == true
         val render = call.argument<String>("render")?.trim().orEmpty()
+        call.argument<Boolean>("tunneling")?.let { tunnelingEnabled = it }
+        call.argument<Boolean>("adblock")?.let { adblockEnabled = it }
+        call.argument<Boolean>("diskCache")?.let { diskCacheEnabled = it }
+        call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
+        call.argument<Number>("dolbyVisionPolicy")?.toInt()?.let { dolbyVisionPolicy = it }
+        call.argument<Boolean>("preferAac")?.let { preferAac = it }
+        call.argument<Boolean>("skipSilence")?.let { skipSilence = it }
+        call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
+        call.argument<Number>("diskPreloadMs")?.toLong()?.let {
+          diskPreloadMs = it.coerceIn(0L, 120_000L)
+        }
+        call.argument<Boolean>("libass")?.let { libassEnabled = it }
+        call.argument<String>("secondarySubtitle")?.let { secondarySubtitleMode = it.trim().lowercase() }
+        call.argument<String>("secondarySubtitleId")?.let { secondarySubtitleId = it.trim() }
+        call.argument<Number>("subtitleFontScale")?.toFloat()?.let {
+          subtitleFontScale = it.coerceIn(0.5f, 2.5f)
+        }
+        @Suppress("UNCHECKED_CAST")
+        currentSubs = (call.argument<List<Map<String, Any?>>>("subs") ?: emptyList())
         main.post {
           try {
             if (mode.isNotEmpty()) {
@@ -289,6 +348,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             }
             if (render.isNotEmpty()) {
               renderTexture = resolveRenderTexture(render)
+              if (renderTexture) tunnelingEnabled = false
               syncOutputPath()
             }
             decodeFallbackTried = false
@@ -467,6 +527,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
+      "selectSecondarySubtitleTrack" -> {
+        val id = call.argument<String>("id") ?: "off"
+        main.post {
+          try {
+            selectSecondarySubtitleTrackById(id)
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_secondary_subtitle", t.message, null)
+          }
+        }
+      }
       "dispose" -> {
         main.post {
           releasePlayer()
@@ -486,6 +557,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     surfaceHost = host
     boundSurfaceView = null
+    ensureSubtitleOverlay(host)
     // 出画前只留黑底宿主；有尺寸后再 setRender 建 SurfaceView。
     if (surfaceLayerEnabled) {
       host.setRender(false, ::onSurfaceReady)
@@ -493,6 +565,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     } else {
       host.clearVideoLayer()
     }
+  }
+
+  private fun ensureSubtitleOverlay(host: KotvExoSurfaceHost) {
+    val overlay = subtitleOverlay ?: KotvSubtitleOverlay(host.context).also { subtitleOverlay = it }
+    overlay.setLibassEnabled(libassEnabled)
+    overlay.setSecondaryEnabled(secondarySubtitleMode != "off")
+    overlay.setStyle(subtitleFontScale, 0.08f, 0.08f)
+    overlay.attachTo(host)
   }
 
   internal fun detachSurfaceHost(host: KotvExoSurfaceHost) {
@@ -709,11 +789,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
     val effective = effectiveDecodeMode()
     val nextDrmKey = drmKey(drm)
+    val wantSecondary = secondarySubtitleMode != "off"
     val needRebuild =
       player == null ||
         playerBuiltLive != live ||
         playerBuiltDecode != effective ||
-        playerBuiltDrmKey != nextDrmKey
+        playerBuiltDrmKey != nextDrmKey ||
+        playerBuiltLibass != libassEnabled ||
+        playerBuiltSecondary != wantSecondary
 
     if (needRebuild) {
       rebuildPlayer(live, effective, nextDrmKey)
@@ -723,14 +806,68 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         ?.setDefaultRequestProperties(currentHeaders)
       bindPlayerSurface()
     }
+    surfaceHost?.let { ensureSubtitleOverlay(it) }
+    applySecondarySubtitleSelection()
 
     val p = player ?: error("exo player missing")
+    applyTrackSelectionPrefs()
+    try {
+      p.setSkipSilenceEnabled(skipSilence)
+    } catch (_: Throwable) {
+    }
+    val mediaItem = buildMediaItem(url, currentMime, currentDrm, currentHeaders)
     // 同实例 setMediaItem → prepare → play。
-    p.setMediaItem(buildMediaItem(url, currentMime, currentDrm, currentHeaders), true)
+    p.setMediaItem(mediaItem, true)
     p.prepare()
     p.play()
+    maybeStartDiskPreload(p, mediaItem)
     main.removeCallbacks(tick)
     main.post(tick)
+  }
+
+  /** open 时刷新 PreferAAC / 首选字幕语言（无需整机重建）。 */
+  private fun applyTrackSelectionPrefs() {
+    val selector = trackSelector ?: return
+    try {
+      val builder = selector.buildUponParameters()
+      builder.setForceHighestSupportedBitrate(true)
+      builder.setTunnelingEnabled(tunnelingEnabled && !renderTexture)
+      if (preferAac) {
+        builder.setPreferredAudioMimeType(MimeTypes.AUDIO_AAC)
+      } else {
+        builder.setPreferredAudioMimeTypes()
+      }
+      val langs = preferredTextLanguageArray()
+      if (langs.isNotEmpty()) {
+        builder.setPreferredTextLanguages(*langs)
+      }
+      selector.setParameters(builder.build())
+    } catch (t: Throwable) {
+      Log.w(TAG, "applyTrackSelectionPrefs", t)
+    }
+  }
+
+  private fun maybeStartDiskPreload(p: ExoPlayer, mediaItem: MediaItem) {
+    val ctx = appContext ?: return
+    val upstream = preloadUpstream
+    val renderers = preloadRenderers
+    if (livePlayback || !diskCacheEnabled || diskPreloadMs <= 0L || upstream == null || renderers == null) {
+      diskPreload.stop()
+      return
+    }
+    try {
+      diskPreload.start(
+        ctx,
+        p,
+        mediaItem,
+        upstream,
+        renderers,
+        durationMs = diskPreloadMs,
+      )
+    } catch (t: Throwable) {
+      Log.w(TAG, "disk preload start failed", t)
+      diskPreload.stop()
+    }
   }
 
   /** 首次或配置变化时创建；换集复用路径不走这里。 */
@@ -743,11 +880,50 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       .setDefaultRequestProperties(currentHeaders)
       .setTransferListener(netTransferListener)
     httpFactory = factory
-    val dataSourceFactory = DefaultDataSource.Factory(ctx, factory)
-    val extractors = DefaultExtractorsFactory()
-      .setTsExtractorTimestampSearchBytes(TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES * 10)
+    val upstream = DefaultDataSource.Factory(ctx, factory)
+    val dataSourceFactory: DataSource.Factory =
+      if (!live && diskCacheEnabled) {
+        androidx.media3.datasource.cache.CacheDataSource.Factory()
+          .setCache(KotvExoCache.get(ctx))
+          .setUpstreamDataSourceFactory(upstream)
+          .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+      } else {
+        upstream
+      }
+    val extractorsBase =
+      DefaultExtractorsFactory()
+        .setTsExtractorTimestampSearchBytes(TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES * 10)
+    val overlay = subtitleOverlay ?: KotvSubtitleOverlay(ctx).also { subtitleOverlay = it }
+    overlay.setLibassEnabled(libassEnabled)
+    overlay.setSecondaryEnabled(secondarySubtitleMode != "off")
+    overlay.setStyle(subtitleFontScale, 0.08f, 0.08f)
+    surfaceHost?.let { overlay.attachTo(it) }
+    val assHandler = if (libassEnabled) overlay.assHandlerOrNull() else null
+    val extractors: androidx.media3.extractor.ExtractorsFactory =
+      if (assHandler != null) {
+        try {
+          val parserFactory = AssSubtitleParserFactory(assHandler)
+          extractorsBase.withAssMkvSupport(parserFactory, assHandler)
+        } catch (t: Throwable) {
+          Log.w(TAG, "ass mkv support failed", t)
+          extractorsBase
+        }
+      } else {
+        extractorsBase
+      }
     val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, extractors)
-    val renderers = buildRenderersFactory(ctx, effective)
+    val baseRenderers = buildRenderersFactory(ctx, effective)
+    val renderers: androidx.media3.exoplayer.RenderersFactory =
+      if (assHandler != null) {
+        try {
+          AssRenderersFactory(assHandler, baseRenderers)
+        } catch (t: Throwable) {
+          Log.w(TAG, "ass renderers wrap failed", t)
+          baseRenderers
+        }
+      } else {
+        baseRenderers
+      }
     val selector = buildTrackSelector(ctx, effective)
     trackSelector = selector
     val loadControl: LoadControl? = if (live) {
@@ -776,13 +952,38 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       builder.setLoadControl(loadControl)
     }
     val p = builder.build()
+    p.setAudioAttributes(
+      androidx.media3.common.AudioAttributes.Builder()
+        .setUsage(C.USAGE_MEDIA)
+        .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+        .build(),
+      true,
+    )
+    p.setHandleAudioBecomingNoisy(true)
+    try {
+      p.setSkipSilenceEnabled(skipSilence)
+    } catch (_: Throwable) {
+    }
+    try {
+      assHandler?.init(p)
+    } catch (t: Throwable) {
+      Log.w(TAG, "ass handler init failed", t)
+    }
     player = p
     playerBuiltLive = live
     playerBuiltDecode = effective
     playerBuiltDrmKey = nextDrmKey
+    playerBuiltLibass = libassEnabled
+    playerBuiltSecondary = secondarySubtitleMode != "off"
+    preloadUpstream = upstream
+    preloadRenderers = renderers
     bindPlayerSurface()
     val listener =
       object : Player.Listener {
+        override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+          subtitleOverlay?.onPrimaryPlayerCues(cueGroup)
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
           val cur = player ?: return
           if (playbackState == Player.STATE_ENDED) {
@@ -811,7 +1012,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         override fun onPlayerError(error: PlaybackException) {
           val mode = playerBuiltDecode ?: effectiveDecodeMode()
           Log.e(TAG, "exo error code=${error.errorCode} mode=$mode ${error.message}", error)
-          // 对齐 FongMi：直播窗口落后则追到默认直播点，不上报 error。
+          // 直播窗口落后：追到默认直播点，不上报 error。
           if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
             try {
               val cur = player ?: return
@@ -830,9 +1031,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               currentMime = retryMime
               try {
                 val cur = player ?: return
-                cur.setMediaItem(buildMediaItem(currentUrl, currentMime, currentDrm, currentHeaders), true)
+                val item = buildMediaItem(currentUrl, currentMime, currentDrm, currentHeaders)
+                cur.setMediaItem(item, true)
                 cur.prepare()
                 cur.play()
+                maybeStartDiskPreload(cur, item)
                 return
               } catch (t: Throwable) {
                 Log.e(TAG, "exo retry failed", t)
@@ -879,19 +1082,37 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 
    * DecodeTrackSelector + forceHighestSupportedBitrate；
-   * tunnel 仅 Surface（默认关，KOTV 同样默认 false）。
+   * tunnel 仅 Surface（Texture 必须关）。
    */
   private fun buildTrackSelector(ctx: Context, mode: String): DecodeTrackSelector {
     val trackSelector = DecodeTrackSelector(ctx)
     val builder = trackSelector.buildUponParameters()
     builder.setForceHighestSupportedBitrate(true)
-    // tunnel 仅 Surface；Texture 必须关。KOTV 默认不开启 tunnel。
-    builder.setTunnelingEnabled(false)
+    builder.setTunnelingEnabled(tunnelingEnabled && !renderTexture)
+    if (preferAac) {
+      builder.setPreferredAudioMimeType(MimeTypes.AUDIO_AAC)
+    }
+    val langs = preferredTextLanguageArray()
+    if (langs.isNotEmpty()) {
+      builder.setPreferredTextLanguages(*langs)
+    }
     trackSelector.setParameters(builder.build())
     applyDecodePreferences(trackSelector, mode)
     return trackSelector
+  }
+
+  private fun preferredTextLanguageArray(): Array<String> {
+    val raw = preferredTextLangs.trim()
+    if (raw.isNotEmpty()) {
+      return raw.split(',', ';', ' ', '|')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+        .toTypedArray()
+    }
+    val lang = java.util.Locale.getDefault().language
+    return if (lang.isNullOrBlank()) emptyArray() else arrayOf(lang)
   }
 
   /** 设置解码偏好。
@@ -904,7 +1125,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     trackSelector.setRendererDecodePreferences(audioDecode, videoDecode)
   }
 
-  private fun buildRenderersFactory(ctx: Context, mode: String): DefaultRenderersFactory {
+  private fun buildRenderersFactory(ctx: Context, mode: String): KotvFfmpegRenderersFactory {
     val videoMode: Int
     val audioMode: Int
     when (mode) {
@@ -923,7 +1144,21 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
     }
-    val factory = KotvFfmpegRenderersFactory(ctx, videoMode, audioMode)
+    val secondaryOut =
+      if (secondarySubtitleMode != "off") {
+        (subtitleOverlay ?: KotvSubtitleOverlay(ctx).also { subtitleOverlay = it }).secondaryTextOutput
+      } else {
+        null
+      }
+    val factory =
+      KotvFfmpegRenderersFactory(
+        ctx,
+        videoMode,
+        audioMode,
+        dolbyVisionPolicy,
+        audioPassThrough,
+        secondaryOut,
+      )
     when (mode) {
       "soft" -> factory.setMediaCodecSelector(SOFT_PREFER_SELECTOR)
       else -> factory.setMediaCodecSelector(HARD_PREFER_SELECTOR)
@@ -943,6 +1178,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (local && (mime == MimeTypes.APPLICATION_M3U8 || mime == MimeTypes.APPLICATION_MPD)) {
       b.setMimeType(mime)
     }
+    b.setAdblock(adblockEnabled)
     if (headers.isNotEmpty()) {
       val extras = Bundle()
       headers.forEach { (k, v) -> extras.putString(k, v) }
@@ -954,7 +1190,30 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       )
     }
     buildDrmConfig(drm)?.let { b.setDrmConfiguration(it) }
+    val subs = buildSubtitleConfigs(currentSubs)
+    if (subs.isNotEmpty()) {
+      b.setSubtitleConfigurations(subs)
+    }
     return b.build()
+  }
+
+  private fun buildSubtitleConfigs(raw: List<Map<String, Any?>>): List<MediaItem.SubtitleConfiguration> {
+    if (raw.isEmpty()) return emptyList()
+    val out = ArrayList<MediaItem.SubtitleConfiguration>()
+    for (m in raw) {
+      val u = m["url"]?.toString()?.trim().orEmpty()
+      if (u.isEmpty()) continue
+      val label = m["name"]?.toString()?.trim().orEmpty()
+      val lang = m["lang"]?.toString()?.trim().orEmpty()
+      val mime = m["mime"]?.toString()?.trim()?.ifEmpty { null }
+        ?: m["format"]?.toString()?.trim()?.ifEmpty { null }
+      val builder = MediaItem.SubtitleConfiguration.Builder(Uri.parse(u))
+      if (label.isNotEmpty()) builder.setLabel(label)
+      if (lang.isNotEmpty()) builder.setLanguage(lang)
+      if (!mime.isNullOrBlank()) builder.setMimeType(mime)
+      out.add(builder.build())
+    }
+    return out
   }
 
   /** MediaItem DRM 配置。 */
@@ -991,6 +1250,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private fun releasePlayerInstance() {
     main.removeCallbacks(tick)
     surfaceHost?.setBufferingUi(false, "")
+    diskPreload.stop()
     try {
       player?.clearVideoSurface()
     } catch (_: Throwable) {
@@ -1008,9 +1268,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     boundSurfaceView = null
     trackSelector = null
     httpFactory = null
+    preloadUpstream = null
+    preloadRenderers = null
     playerBuiltLive = null
     playerBuiltDecode = null
     playerBuiltDrmKey = null
+    playerBuiltLibass = null
+    playerBuiltSecondary = null
+    try {
+      subtitleOverlay?.setLibassEnabled(false)
+    } catch (_: Throwable) {
+    }
   }
 
   private fun releasePlayer() {
@@ -1150,6 +1418,58 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return
     }
     selectTrackById(C.TRACK_TYPE_TEXT, id.trim())
+    applySecondarySubtitleSelection()
+  }
+
+  /** off=关副字幕；auto=第二 TextRenderer 自选；其余 gN:tM。 */
+  private fun selectSecondarySubtitleTrackById(id: String) {
+    val key = id.trim().lowercase()
+    secondarySubtitleId = id.trim()
+    secondarySubtitleMode =
+      when {
+        key.isEmpty() || key == "no" || key == "off" -> "off"
+        key == "auto" -> "auto"
+        else -> "manual"
+      }
+    subtitleOverlay?.setSecondaryEnabled(secondarySubtitleMode != "off")
+    // off↔on 需重建 TextRenderer 路数
+    val wantSecondary = secondarySubtitleMode != "off"
+    if (playerBuiltSecondary != wantSecondary && currentUrl.isNotEmpty()) {
+      openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback)
+      return
+    }
+    applySecondarySubtitleSelection()
+  }
+
+  private fun applySecondarySubtitleSelection() {
+    val sel = trackSelector ?: return
+    val p = player ?: return
+    if (secondarySubtitleMode == "off") {
+      subtitleOverlay?.setSecondaryEnabled(false)
+      return
+    }
+    subtitleOverlay?.setSecondaryEnabled(true)
+    if (secondarySubtitleMode != "manual") return
+    val id = secondarySubtitleId.trim()
+    if (id.isEmpty() || id.equals("auto", true)) return
+    val m = Regex("""^g(\d+):t(\d+)$""", RegexOption.IGNORE_CASE).matchEntire(id) ?: return
+    val gi = m.groupValues[1].toInt()
+    val ti = m.groupValues[2].toInt()
+    val groups = p.currentTracks.groups
+    if (gi !in groups.indices) return
+    val g = groups[gi]
+    if (g.type != C.TRACK_TYPE_TEXT || ti !in 0 until g.length || !g.isTrackSupported(ti)) return
+    // 保留主字幕 override，再叠加副字幕 override。
+    val builder = sel.buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+    val primaryOverride =
+      sel.parameters.overrides.values.firstOrNull { it.type == C.TRACK_TYPE_TEXT }
+    builder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+    if (primaryOverride != null && primaryOverride.mediaTrackGroup != g.mediaTrackGroup) {
+      builder.addOverride(primaryOverride)
+    }
+    builder.addOverride(TrackSelectionOverride(g.mediaTrackGroup, ti))
+    sel.setParameters(builder.build())
+    p.play()
   }
 
   private fun selectVideoTrackAt(index: Int) {

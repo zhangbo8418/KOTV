@@ -3,6 +3,7 @@ package spider
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/des"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -108,6 +109,124 @@ func aesX(mode string, encrypt bool, input string, inBase64 bool, key string, iv
 		return base64Std(out)
 	}
 	return string(out)
+}
+
+// desX Crypto.des：DESede（3DES）。两段 key（16B）扩成三段（24B）；CBC IV 8 字节。
+func desX(mode string, encrypt bool, input string, inBase64 bool, key string, iv *string, outBase64 bool) string {
+	data := []byte(input)
+	if inBase64 {
+		var err error
+		data, err = decodeJSBase64(input)
+		if err != nil {
+			return ""
+		}
+	}
+	keyBuf := desEdeKey([]byte(key))
+	if len(keyBuf) != 24 {
+		return ""
+	}
+	block, err := des.NewTripleDESCipher(keyBuf)
+	if err != nil {
+		return ""
+	}
+	const blockSize = 8
+	upper := strings.ToUpper(mode)
+	noPadding := strings.Contains(upper+"PADDING", "NOPADDING")
+	useCBC := strings.Contains(upper, "CBC")
+
+	var ivb []byte
+	if iv != nil {
+		ivb = padToMin([]byte(*iv), blockSize)
+		if len(ivb) != blockSize {
+			return ""
+		}
+	}
+
+	var out []byte
+	if useCBC {
+		if ivb == nil {
+			return ""
+		}
+		if encrypt {
+			if !noPadding {
+				data = pkcs7Pad(data, blockSize)
+			} else if len(data)%blockSize != 0 {
+				return ""
+			}
+			out = make([]byte, len(data))
+			cipher.NewCBCEncrypter(block, ivb).CryptBlocks(out, data)
+		} else {
+			if len(data) == 0 || len(data)%blockSize != 0 {
+				return ""
+			}
+			out = make([]byte, len(data))
+			cipher.NewCBCDecrypter(block, ivb).CryptBlocks(out, data)
+			if !noPadding {
+				out = pkcs7Unpad(out)
+			}
+		}
+	} else {
+		if encrypt {
+			if !noPadding {
+				data = pkcs7Pad(data, blockSize)
+			} else if len(data)%blockSize != 0 {
+				return ""
+			}
+			out = make([]byte, len(data))
+			for i := 0; i < len(data); i += blockSize {
+				block.Encrypt(out[i:], data[i:])
+			}
+		} else {
+			if len(data) == 0 || len(data)%blockSize != 0 {
+				return ""
+			}
+			out = make([]byte, len(data))
+			for i := 0; i < len(data); i += blockSize {
+				block.Decrypt(out[i:], data[i:])
+			}
+			if !noPadding {
+				out = pkcs7Unpad(out)
+			}
+		}
+	}
+	if outBase64 {
+		return base64Std(out)
+	}
+	return string(out)
+}
+
+// desEdeKey：不足 16 零填；恰 16 时复制前 8 字节扩成 24（两密钥 EDE）。
+func desEdeKey(key []byte) []byte {
+	const two, three, block = 16, 24, 8
+	if len(key) < two {
+		padded := make([]byte, two)
+		copy(padded, key)
+		key = padded
+	}
+	if len(key) == two {
+		expanded := make([]byte, three)
+		copy(expanded, key)
+		copy(expanded[two:], key[:block])
+		return expanded
+	}
+	if len(key) > three {
+		return key[:three]
+	}
+	if len(key) < three {
+		padded := make([]byte, three)
+		copy(padded, key)
+		return padded
+	}
+	return key
+}
+
+func padToMin(value []byte, minLen int) []byte {
+	if len(value) >= minLen {
+		return value
+	}
+	out := make([]byte, minLen)
+	copy(out, value)
+	return out
 }
 
 func base64Std(data []byte) string {

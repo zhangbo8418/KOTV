@@ -445,6 +445,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         }
         _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+        _exo?.applyPlayerOptions(settings);
+        _fvp?.applyPlayerOptions(settings);
         var playerVal = '${settings['playerLive'] ?? ''}'.trim();
         if (playerVal.isEmpty) {
           playerVal = kotvDefaultLivePlayer();

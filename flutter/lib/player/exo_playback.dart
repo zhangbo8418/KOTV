@@ -55,6 +55,20 @@ class ExoPlayback extends KotvPlayback {
   String _videoScale = 'default';
   bool _live = false;
   String? _lastError;
+  bool _tunneling = false;
+  bool _adblock = true;
+  bool _diskCache = false;
+  bool _audioPassThrough = true;
+  int _dolbyVisionPolicy = 0;
+  bool _preferAac = false;
+  bool _skipSilence = false;
+  String _preferredTextLangs = '';
+  int _diskPreloadMs = 10000;
+  bool _libass = true;
+  String _secondarySubtitle = 'off';
+  String? _currentSecondarySubtitleId;
+  double _subtitleFontScale = 1.0;
+  List<Map<String, dynamic>> _subs = const [];
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -395,6 +409,20 @@ class ExoPlayback extends KotvPlayback {
         'decodeMode': _decodeMode,
         'render': _renderMode,
         'live': live,
+        'tunneling': _tunneling && _renderMode != 'texture',
+        'adblock': _adblock,
+        'diskCache': _diskCache && !live,
+        'audioPassThrough': _audioPassThrough,
+        'dolbyVisionPolicy': _dolbyVisionPolicy,
+        'preferAac': _preferAac,
+        'skipSilence': _skipSilence,
+        'preferredTextLangs': _preferredTextLangs,
+        'diskPreloadMs': (_diskCache && !live) ? _diskPreloadMs : 0,
+        'libass': _libass,
+        'secondarySubtitle': _secondarySubtitle,
+        'secondarySubtitleId': _currentSecondarySubtitleId ?? '',
+        'subtitleFontScale': _subtitleFontScale,
+        'subs': _subs,
       });
       await _ch.invokeMethod('setVolume', {'volume': (_volume / 100).clamp(0.0, 1.0)});
       await _ch.invokeMethod('setRate', {'rate': _rate});
@@ -763,6 +791,67 @@ class ExoPlayback extends KotvPlayback {
       _currentSubtitleId = (key.isEmpty || key == 'no' || key == 'off' || key == 'auto') ? null : id;
       await _refreshTracks();
     } catch (_) {}
+  }
+
+  /// 从设置页写入：隧道 / 去广告 / 磁盘缓存 / 直通 / DV / AAC / 跳过静音。
+  void applyPlayerOptions(Map<String, dynamic> settings) {
+    bool flag(String key, {bool def = false}) {
+      final raw = '${settings[key] ?? def}'.trim().toLowerCase();
+      if (raw.isEmpty) return def;
+      return raw != 'false' && raw != 'off' && raw != '0' && raw != 'no';
+    }
+    _tunneling = flag('exoTunneling', def: false);
+    _adblock = flag('exoAdblock', def: true);
+    _diskCache = flag('exoDiskCache', def: false);
+    _audioPassThrough = flag('audioPassThrough', def: true);
+    _preferAac = flag('exoPreferAac', def: false);
+    _skipSilence = flag('exoSkipSilence', def: false);
+    _libass = flag('exoLibass', def: true);
+    _dolbyVisionPolicy = int.tryParse('${settings['exoDolbyVision'] ?? '0'}') ?? 0;
+    _preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
+    _diskPreloadMs = int.tryParse('${settings['exoDiskPreloadMs'] ?? '10000'}') ?? 10000;
+    if (_diskPreloadMs < 0) _diskPreloadMs = 0;
+    if (_diskPreloadMs > 120000) _diskPreloadMs = 120000;
+    final sec = '${settings['exoSecondarySubtitle'] ?? 'off'}'.trim().toLowerCase();
+    _secondarySubtitle = (sec == 'auto' || sec == 'on' || sec == 'manual') ? sec : 'off';
+    _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
+  }
+
+  /// 选择副字幕轨（off/auto/gN:tM）。
+  Future<void> setSecondarySubtitleTrack(String id) async {
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('selectSecondarySubtitleTrack', {'id': id});
+      final key = id.trim().toLowerCase();
+      if (key.isEmpty || key == 'no' || key == 'off') {
+        _secondarySubtitle = 'off';
+        _currentSecondarySubtitleId = null;
+      } else if (key == 'auto') {
+        _secondarySubtitle = 'auto';
+        _currentSecondarySubtitleId = null;
+      } else {
+        _secondarySubtitle = 'manual';
+        _currentSecondarySubtitleId = id;
+      }
+    } catch (_) {}
+  }
+
+  /// 外挂字幕列表（open 时写入 MediaItem）。
+  void setExternalSubs(List<Map<String, dynamic>> subs) {
+    _subs = List<Map<String, dynamic>>.from(subs);
+  }
+
+  @override
+  Future<void> addSubtitleFile(String path, {String? title}) async {
+    // Exo：下次 open 时带上；当前会话追加需重建 MediaItem，先写入列表。
+    final next = List<Map<String, dynamic>>.from(_subs)
+      ..add({'url': path, if (title != null && title.isNotEmpty) 'name': title});
+    _subs = next;
+    if (_url.isNotEmpty) {
+      try {
+        await open(_url, headers: _headers, drm: _drm, live: _live);
+      } catch (_) {}
+    }
   }
 
   @override

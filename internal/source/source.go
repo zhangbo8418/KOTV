@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Match 是否为荐片 / TVBus 专用播放地址（需 Native 转 HTTP）。
+// Match 是否为荐片 / TVBus / YouTube 等需预处理的播放地址。
 func Match(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -19,12 +19,14 @@ func Match(raw string) bool {
 	switch strings.ToLower(u.Scheme) {
 	case "tvbus", "jianpian", "tvbox-xg", "xg", "xgplay":
 		return true
-	default:
-		return false
+	case "p2p", "p3p", "p4p", "p5p", "p6p", "p7p", "p8p", "p9p", "mitv":
+		return true
 	}
+	host := strings.ToLower(u.Hostname())
+	return strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be")
 }
 
-// Fetch 把专用 scheme 转成可播 HTTP。桌面返回错误；Android 走 127.0.0.1:9979。
+// Fetch 把专用 scheme / YouTube 转成可播 HTTP。桌面荐片/TVBus/YouTube 仍走平台实现（桌面可能报错）。
 func Fetch(playURL string, core json.RawMessage) (string, error) {
 	return fetchPlatform(strings.TrimSpace(playURL), core)
 }

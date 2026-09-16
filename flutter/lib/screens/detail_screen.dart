@@ -852,6 +852,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         }
         _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+        _exo?.applyPlayerOptions(settings);
+        _fvp?.applyPlayerOptions(settings);
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
         _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';

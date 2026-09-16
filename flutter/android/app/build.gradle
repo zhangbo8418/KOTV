@@ -189,6 +189,7 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer-hls:$media3"
     implementation "androidx.media3:media3-exoplayer-dash:$media3"
     implementation "androidx.media3:media3-datasource-okhttp:$media3"
+    implementation "androidx.media3:media3-database:$media3"
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
     implementation "com.squareup.okhttp3:okhttp:5.4.0"
     // 海报用 Glide + @Headers=
@@ -196,6 +197,14 @@ dependencies {
     kapt "com.github.bumptech.glide:compiler:4.16.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load
     implementation "wang.harlon.quickjs:wrapper-android:3.2.3"
+    // YouTube 提取（NewPipeExtractor）
+    implementation "com.github.TeamNewPipe:NewPipeExtractor:v0.26.5"
+    // Exo ASS / libass（排除其自带 Media3，统一用 FongMi 产物）
+    implementation("io.github.peerless2012:ass-media:0.5.1") {
+      exclude group: "androidx.media3"
+    }
+    implementation "io.github.peerless2012:ass-kt:0.5.1"
+    implementation "io.github.peerless2012:ass:0.5.1"
     implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
 }
 

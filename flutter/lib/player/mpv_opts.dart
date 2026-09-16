@@ -40,6 +40,8 @@ class KotvMpvOpts {
     this.gpuApi = 'auto',
     this.conf = '',
     this.tlsVerify = true,
+    this.audioPassThrough = true,
+    this.diskCache = false,
   });
 
   final String decodeMode;
@@ -50,6 +52,8 @@ class KotvMpvOpts {
   final String conf;
   /// Android 原生：HTTPS 校验证书（cacert.pem）；坏 CA 可关。
   final bool tlsVerify;
+  final bool audioPassThrough;
+  final bool diskCache;
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
@@ -70,6 +74,10 @@ class KotvMpvOpts {
     // 默认开；显式 false/off/0/no 才关。
     final tlsRaw = '${settings['mpvTlsVerify'] ?? 'true'}'.trim().toLowerCase();
     final tlsVerify = tlsRaw != 'false' && tlsRaw != 'off' && tlsRaw != '0' && tlsRaw != 'no';
+    final passRaw = '${settings['audioPassThrough'] ?? 'true'}'.trim().toLowerCase();
+    final audioPassThrough = passRaw != 'false' && passRaw != 'off' && passRaw != '0' && passRaw != 'no';
+    final diskRaw = '${settings['mpvDiskCache'] ?? 'false'}'.trim().toLowerCase();
+    final diskCache = diskRaw == 'true' || diskRaw == 'on' || diskRaw == '1' || diskRaw == 'yes';
     return KotvMpvOpts(
       decodeMode: decode.isEmpty ? 'auto' : decode,
       gpuNext: gpuNext,
@@ -77,6 +85,8 @@ class KotvMpvOpts {
       gpuApi: gpuApi,
       conf: '${settings['mpvConf'] ?? ''}',
       tlsVerify: tlsVerify,
+      audioPassThrough: audioPassThrough,
+      diskCache: diskCache,
     );
   }
 
@@ -87,6 +97,8 @@ class KotvMpvOpts {
     String? gpuApi,
     String? conf,
     bool? tlsVerify,
+    bool? audioPassThrough,
+    bool? diskCache,
   }) {
     return KotvMpvOpts(
       decodeMode: decodeMode ?? this.decodeMode,
@@ -95,6 +107,8 @@ class KotvMpvOpts {
       gpuApi: gpuApi ?? this.gpuApi,
       conf: conf ?? this.conf,
       tlsVerify: tlsVerify ?? this.tlsVerify,
+      audioPassThrough: audioPassThrough ?? this.audioPassThrough,
+      diskCache: diskCache ?? this.diskCache,
     );
   }
 

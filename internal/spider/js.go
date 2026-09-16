@@ -552,6 +552,34 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		}
 		return c.NewString(aesX(mode, encrypt, input, inB64, key, iv, outB64))
 	}))
+	g.Set("desX", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
+		mode, input, key := "", "", ""
+		encrypt, inB64, outB64 := true, false, false
+		var iv *string
+		if len(args) > 0 {
+			mode = args[0].String()
+		}
+		if len(args) > 1 {
+			encrypt = args[1].ToBool()
+		}
+		if len(args) > 2 {
+			input = args[2].String()
+		}
+		if len(args) > 3 {
+			inB64 = args[3].ToBool()
+		}
+		if len(args) > 4 {
+			key = args[4].String()
+		}
+		if len(args) > 5 && args[5] != nil && !args[5].IsNull() && !args[5].IsUndefined() {
+			s := args[5].String()
+			iv = &s
+		}
+		if len(args) > 6 {
+			outB64 = args[6].ToBool()
+		}
+		return c.NewString(desX(mode, encrypt, input, inB64, key, iv, outB64))
+	}))
 	g.Set("rsaX", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		mode, input, key := "", "", ""
 		pub, encrypt, inB64, outB64 := false, true, false, false

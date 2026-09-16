@@ -1,2 +1,2 @@
-# Place Xunlei/Thunder AAR here (from the sibling repo: app/libs/thunder-release.aar).
-# Currently: thunder-release.aar
+# Place Thunder / ForceTech AARs here (from sibling TV app/libs).
+# Currently: thunder-release.aar, forcetech-release.aar

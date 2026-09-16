@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 从 FongMi/media (release-1.11.0-fongmi) 编译 Media3，覆盖 maven-webhtv 残缺产物。
-# 补齐 DecodeTrackSelector / DolbyVisionOutputPolicy 等 API。
+# 补齐 DecodeTrackSelector / DolbyVisionOutputPolicy / media3-ui（字幕）等 API。
 #
 # 本地与 CI：package-flutter-android.sh 在 fetch-android-exo-av3a.sh 之后调用本脚本。
 # 已含完整 API 时跳过（可用 KOTV_FORCE_FONGMI_MEDIA3=1 强制重编）。
@@ -18,16 +18,19 @@ PATCH="$ROOT/scripts/patches/fongmi-media3-kotv.patch"
 
 exo_aar="$DEST/androidx/media3/media3-exoplayer/$VER/media3-exoplayer-$VER.aar"
 common_aar="$DEST/androidx/media3/media3-common/$VER/media3-common-$VER.aar"
+ui_aar="$DEST/androidx/media3/media3-ui/$VER/media3-ui-$VER.aar"
 
 media3_has_tv_apis() {
-  [[ -f "$exo_aar" && -f "$common_aar" ]] || return 1
+  [[ -f "$exo_aar" && -f "$common_aar" && -f "$ui_aar" ]] || return 1
   local tmp rc=1
   tmp="$(mktemp -d)"
   set +e
   unzip -q -o "$exo_aar" classes.jar -d "$tmp/exo" \
     && unzip -q -o "$common_aar" classes.jar -d "$tmp/common" \
+    && unzip -q -o "$ui_aar" classes.jar -d "$tmp/ui" \
     && jar tf "$tmp/exo/classes.jar" | grep -q DecodeTrackSelector \
-    && jar tf "$tmp/common/classes.jar" | grep -q DolbyVisionOutputPolicy
+    && jar tf "$tmp/common/classes.jar" | grep -q DolbyVisionOutputPolicy \
+    && jar tf "$tmp/ui/classes.jar" | grep -q SubtitleView
   rc=$?
   set -e
   rm -rf "$tmp"
@@ -35,7 +38,7 @@ media3_has_tv_apis() {
 }
 
 if [[ "${KOTV_FORCE_FONGMI_MEDIA3:-0}" != "1" ]] && media3_has_tv_apis; then
-  echo "ok FongMi Media3 $VER already has DecodeTrackSelector + DolbyVisionOutputPolicy"
+  echo "ok FongMi Media3 $VER already has DecodeTrackSelector + DolbyVisionOutputPolicy + SubtitleView"
   exit 0
 fi
 
@@ -85,19 +88,20 @@ echo "==> publish FongMi Media3 $VER → $DEST"
   :lib-common:publishReleasePublicationToMavenRepository \
   :lib-container:publishReleasePublicationToMavenRepository \
   :lib-database:publishReleasePublicationToMavenRepository \
-  :lib-decoder:publishReleasePublicationToMavenRepository \
   :lib-datasource:publishReleasePublicationToMavenRepository \
   :lib-datasource-okhttp:publishReleasePublicationToMavenRepository \
+  :lib-decoder:publishReleasePublicationToMavenRepository \
   :lib-extractor:publishReleasePublicationToMavenRepository \
   :lib-exoplayer:publishReleasePublicationToMavenRepository \
   :lib-exoplayer-hls:publishReleasePublicationToMavenRepository \
   :lib-exoplayer-dash:publishReleasePublicationToMavenRepository \
+  :lib-ui:publishReleasePublicationToMavenRepository \
   -PmavenRepo="$DEST" \
   -x test -x lint \
   --no-daemon
 
 media3_has_tv_apis || {
-  echo "ERROR: published Media3 missing DecodeTrackSelector / DolbyVisionOutputPolicy" >&2
+  echo "ERROR: published Media3 missing DecodeTrackSelector / DolbyVisionOutputPolicy / SubtitleView" >&2
   exit 1
 }
-echo "==> ok: DecodeTrackSelector + DolbyVisionOutputPolicy present"
+echo "==> ok: DecodeTrackSelector + DolbyVisionOutputPolicy + SubtitleView present"

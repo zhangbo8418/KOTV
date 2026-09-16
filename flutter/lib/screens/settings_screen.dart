@@ -769,6 +769,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final mpvVulkan = g('mpvVulkan', 'false') == 'true';
     final mpvTlsRaw = g('mpvTlsVerify', 'true').trim().toLowerCase();
     final mpvTlsVerify = mpvTlsRaw != 'false' && mpvTlsRaw != 'off' && mpvTlsRaw != '0' && mpvTlsRaw != 'no';
+    final passRaw = g('audioPassThrough', 'true').trim().toLowerCase();
+    final audioPassThrough = passRaw != 'false' && passRaw != 'off' && passRaw != '0' && passRaw != 'no';
+    final exoDiskCache = g('exoDiskCache', 'false').toLowerCase() == 'true';
+    final exoAdblockRaw = g('exoAdblock', 'true').trim().toLowerCase();
+    final exoAdblock = exoAdblockRaw != 'false' && exoAdblockRaw != 'off' && exoAdblockRaw != '0' && exoAdblockRaw != 'no';
+    final exoTunneling = g('exoTunneling', 'false').toLowerCase() == 'true';
+    final exoPreferAac = g('exoPreferAac', 'false').toLowerCase() == 'true';
+    final exoSkipSilence = g('exoSkipSilence', 'false').toLowerCase() == 'true';
+    final exoLibassRaw = g('exoLibass', 'true').trim().toLowerCase();
+    final exoLibass = exoLibassRaw != 'false' && exoLibassRaw != 'off' && exoLibassRaw != '0' && exoLibassRaw != 'no';
+    final exoSecondary = g('exoSecondarySubtitle', 'off').trim().toLowerCase();
+    final exoSecondaryLabel = {'off': '关闭', 'auto': '自动', 'on': '自动', 'manual': '手动'}[exoSecondary] ?? '关闭';
+    final mpvDiskCache = g('mpvDiskCache', 'false').toLowerCase() == 'true';
     final mpvConfPreview = g('mpvConf').trim();
     // 全平台：点播/直播任一选了内置 MPV 才露出 MPV 相关项
     final usesMpv = kotvEmbedBackend(playerVal) == KotvEmbedBackend.mpv ||
@@ -1045,6 +1058,112 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               msg: mpvTlsVerify
                                   ? '已关闭 TLS 校验（坏 CA 盒子可用；重启播放生效）'
                                   : '已开启 TLS 校验（cacert；重启播放生效）',
+                            )),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '音频直通',
+                            value: audioPassThrough ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'audioPassThrough',
+                              audioPassThrough ? 'false' : 'true',
+                              msg: audioPassThrough
+                                  ? '已关闭音频直通（重启播放生效）'
+                                  : '已开启音频直通（重启播放生效）',
+                            )),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: 'Exo 磁盘缓存',
+                            value: exoDiskCache ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'exoDiskCache',
+                              exoDiskCache ? 'false' : 'true',
+                              msg: exoDiskCache
+                                  ? '已关闭 Exo 磁盘缓存（重启播放生效）'
+                                  : '已开启 Exo 点播磁盘缓存（重启播放生效）',
+                            )),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: 'Exo 去广告',
+                            value: exoAdblock ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'exoAdblock',
+                              exoAdblock ? 'false' : 'true',
+                              msg: exoAdblock ? '已关闭 Exo HLS 去广告' : '已开启 Exo HLS 去广告',
+                            )),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: 'Exo 隧道',
+                            value: exoTunneling ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'exoTunneling',
+                              exoTunneling ? 'false' : 'true',
+                              msg: exoTunneling
+                                  ? '已关闭隧道模式（重启播放生效）'
+                                  : '已开启隧道模式（仅 Surface；重启播放生效）',
+                            )),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '优先 AAC',
+                            value: exoPreferAac ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'exoPreferAac',
+                              exoPreferAac ? 'false' : 'true',
+                              msg: exoPreferAac
+                                  ? '已关闭优先 AAC（重启播放生效）'
+                                  : '已开启优先 AAC 音轨（重启播放生效）',
+                            )),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '跳过静音',
+                            value: exoSkipSilence ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'exoSkipSilence',
+                              exoSkipSilence ? 'false' : 'true',
+                              msg: exoSkipSilence
+                                  ? '已关闭跳过静音（重启播放生效）'
+                                  : '已开启跳过静音段（重启播放生效）',
+                            )),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '字幕特效',
+                            value: exoLibass ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'exoLibass',
+                              exoLibass ? 'false' : 'true',
+                              msg: exoLibass
+                                  ? '已关闭 ASS 特效字幕（重启播放生效）'
+                                  : '已开启 ASS/libass 特效字幕（重启播放生效）',
+                            )),
+                          ),
+                        if (kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: '双字幕',
+                            value: exoSecondaryLabel,
+                            onTap: () => unawaited(_set(
+                              'exoSecondarySubtitle',
+                              (exoSecondary == 'off') ? 'auto' : 'off',
+                              msg: (exoSecondary == 'off')
+                                  ? '已开启双字幕自动（重启播放生效）'
+                                  : '已关闭双字幕（重启播放生效）',
+                            )),
+                          ),
+                        if (showMpvOpts && kotvIsAndroid())
+                          KotvSettingsCell(
+                            label: 'MPV 磁盘缓存',
+                            value: mpvDiskCache ? '开启' : '关闭',
+                            onTap: () => unawaited(_set(
+                              'mpvDiskCache',
+                              mpvDiskCache ? 'false' : 'true',
+                              msg: mpvDiskCache
+                                  ? '已关闭 MPV 磁盘缓存（重启播放生效）'
+                                  : '已开启 MPV 点播磁盘缓存（重启播放生效）',
                             )),
                           ),
                         if (showMpvOpts)
