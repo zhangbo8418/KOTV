@@ -20,6 +20,17 @@ func TestClearKeyHexKidKey(t *testing.T) {
 func TestClearKeyHexRejectsHTTP(t *testing.T) {
 	d := &Drm{Type: "clearkey", Key: "https://license.example/ck"}
 	if d.DesktopSupported() {
-		t.Fatal("http license should not be DesktopSupported")
+		t.Fatal("http license should not be DesktopSupported without prepare")
+	}
+}
+
+func TestPrepareForDesktopLocal(t *testing.T) {
+	d := &Drm{Type: "clearkey", Key: "00112233445566778899aabbccddeeff:ffeeddccbbaa99887766554433221100"}
+	got, err := PrepareForDesktop(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.ClearKeyHex() == "" {
+		t.Fatal("expected resolved local clearkey")
 	}
 }

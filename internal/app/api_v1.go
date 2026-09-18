@@ -493,9 +493,11 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			return nil, err
 		}
 		if runtime.GOOS != "android" {
-			if err := result.Drm.DesktopError(); err != nil {
-				return nil, err
+			prepared, derr := model.PrepareForDesktop(result.Drm)
+			if derr != nil {
+				return nil, derr
 			}
+			result.Drm = prepared
 		}
 		playDrm = result.Drm
 		headers = map[string]string(result.Header)
@@ -533,9 +535,11 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		} else {
 			result = parsed
 			if runtime.GOOS != "android" {
-				if err := result.Drm.DesktopError(); err != nil {
-					return nil, err
+				prepared, derr := model.PrepareForDesktop(result.Drm)
+				if derr != nil {
+					return nil, derr
 				}
+				result.Drm = prepared
 			}
 			if result.Drm != nil {
 				playDrm = result.Drm
@@ -827,15 +831,21 @@ func mergeStringMaps(a, b map[string]string) map[string]string {
 }
 
 func (a *App) APIRemotePoll() map[string]any {
-	ctrls, searches := remote.DefaultQueue.Drain(hostclient.ScopeID())
+	ctrls, searches, refreshes, liveDm := remote.DefaultQueue.Drain(hostclient.ScopeID())
 	outCtrl := make([]map[string]any, 0, len(ctrls))
 	for _, c := range ctrls {
 		outCtrl = append(outCtrl, map[string]any{"type": c.Type, "seekMs": c.SeekMs})
 	}
+	outRef := make([]map[string]any, 0, len(refreshes))
+	for _, r := range refreshes {
+		outRef = append(outRef, map[string]any{"type": r.Type, "path": r.Path})
+	}
 	return map[string]any{
-		"ok":       true,
-		"controls": outCtrl,
-		"searches": searches,
+		"ok":          true,
+		"controls":    outCtrl,
+		"searches":    searches,
+		"refreshes":   outRef,
+		"danmakuLive": liveDm,
 	}
 }
 
@@ -973,7 +983,10 @@ func (a *App) APIGetSettings() map[string]any {
 		settings.VideoEq, settings.AudioEq,
 		settings.VideoBrightness, settings.VideoContrast, settings.VideoSaturation,
 		settings.VideoGamma, settings.VideoHue,
+		settings.VideoTemperature, settings.VideoSharpness, settings.VideoShadow,
 		settings.PreloadNextEpisode, settings.SubtitleFontScale, settings.DanmakuOffsetMs,
+		settings.SubtitlePos, settings.SubtitleColor, settings.SubtitleBorderColor,
+		settings.SubtitleBorderSize, settings.AudioEqBands,
 	}
 	out := map[string]any{"ok": true, "port": a.Server.ProxyPort()}
 	vals := map[string]string{}
@@ -1470,9 +1483,11 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		playURL = rewritten
 	}
 	if runtime.GOOS != "android" {
-		if err := ch.Drm.DesktopError(); err != nil {
-			return nil, err
+		prepared, derr := model.PrepareForDesktop(ch.Drm)
+		if derr != nil {
+			return nil, derr
 		}
+		ch.Drm = prepared
 	}
 	return map[string]any{
 		"ok":      true,
@@ -1568,6 +1583,16 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
+	var playDrm *model.Drm
+	if runtime.GOOS != "android" {
+		prepared, derr := model.PrepareForDesktop(ch.Drm)
+		if derr != nil {
+			return nil, derr
+		}
+		playDrm = prepared
+	} else {
+		playDrm = ch.Drm
+	}
 	return map[string]any{
 		"ok":      true,
 		"url":     playproxy.PublicizeURL(url),
@@ -1575,6 +1600,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 		"name":    list[prog].Title,
 		"group":   g.Name,
 		"channel": ch.Name,
+		"drm":     playDrm,
 	}, nil
 }
 

@@ -48,6 +48,7 @@ class KotvMpvOpts {
     this.preferredTextLangs = '',
     this.videoEq = KotvVideoEq.off,
     this.audioEq = KotvAudioEqPreset.off,
+    this.audioEqBands = '',
     this.subtitleFontScale = 1.0,
   });
 
@@ -67,6 +68,8 @@ class KotvMpvOpts {
   final String preferredTextLangs;
   final KotvVideoEq videoEq;
   final KotvAudioEqPreset audioEq;
+  /// 自定义频段 `freq:gain,…`。
+  final String audioEqBands;
   /// mpv `sub-scale`（0.5–2.5）。
   final double subtitleFontScale;
 
@@ -108,6 +111,7 @@ class KotvMpvOpts {
       preferredTextLangs: preferredTextLangs,
       videoEq: KotvVideoEq.fromSettings(settings),
       audioEq: kotvAudioEqFromSettings(settings),
+      audioEqBands: kotvAudioEqBandsFromSettings(settings),
       subtitleFontScale: fontScale,
     );
   }
@@ -125,6 +129,7 @@ class KotvMpvOpts {
     String? preferredTextLangs,
     KotvVideoEq? videoEq,
     KotvAudioEqPreset? audioEq,
+    String? audioEqBands,
     double? subtitleFontScale,
   }) {
     return KotvMpvOpts(
@@ -140,6 +145,7 @@ class KotvMpvOpts {
       preferredTextLangs: preferredTextLangs ?? this.preferredTextLangs,
       videoEq: videoEq ?? this.videoEq,
       audioEq: audioEq ?? this.audioEq,
+      audioEqBands: audioEqBands ?? this.audioEqBands,
       subtitleFontScale: subtitleFontScale ?? this.subtitleFontScale,
     );
   }
@@ -264,9 +270,13 @@ class KotvMpvOpts {
           await set(e.key, e.value);
         } catch (_) {}
       }
+      final vf = videoEq.mpvVf();
+      try {
+        await set('vf', vf);
+      } catch (_) {}
       if (!audioPassThrough) {
         try {
-          await set('af', kotvAudioEqMpvAf(audioEq));
+          await set('af', kotvAudioEqMpvAf(audioEq, bands: audioEqBands));
         } catch (_) {}
       }
       try {
@@ -329,7 +339,8 @@ class KotvMpvOpts {
         'eqSaturation': videoEq.enabled ? videoEq.saturation : 0,
         'eqGamma': videoEq.enabled ? videoEq.gamma : 0,
         'eqHue': videoEq.enabled ? videoEq.hue : 0,
-        'audioAf': audioPassThrough ? '' : kotvAudioEqMpvAf(audioEq),
+        'audioAf': audioPassThrough ? '' : kotvAudioEqMpvAf(audioEq, bands: audioEqBands),
+        'videoVf': videoEq.mpvVf(),
         'subtitleFontScale': subtitleFontScale.clamp(0.5, 2.5),
       };
 

@@ -158,6 +158,7 @@ class NativeMpvPlayback extends KotvPlayback {
   String? _currentAudioId;
   String? _currentVideoId;
   String? _currentSubtitleId;
+  String? _currentSecondarySubtitleId;
 
   @override
   List<KotvTrack> get audioTracks => _audioTracks;
@@ -176,6 +177,9 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   String? get currentSubtitleId => _currentSubtitleId;
+
+  @override
+  String? get currentSecondarySubtitleId => _currentSecondarySubtitleId;
 
   Future<void> _refreshTracks() async {
     if (!_ready || _w <= 0 || _h <= 0) return;
@@ -683,17 +687,31 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
+  @override
   Future<void> setSecondarySubtitleTrack(String id) async {
     try {
       await _ch.invokeMethod('setSecondarySubtitleTrack', {'id': id});
+      final key = id.trim().toLowerCase();
+      if (key.isEmpty || key == 'no' || key == 'off' || key == 'none') {
+        _currentSecondarySubtitleId = null;
+      } else if (key == 'auto') {
+        _currentSecondarySubtitleId = null;
+      } else {
+        _currentSecondarySubtitleId = id.trim();
+      }
+      notifyListeners();
     } catch (_) {}
   }
 
+  @override
   Future<void> setSubtitleStyle({
     double? scale,
     double? pos,
     double? secondaryPos,
     bool forceStyle = false,
+    String? color,
+    String? borderColor,
+    double? borderSize,
   }) async {
     try {
       await _ch.invokeMethod('setSubtitleStyle', {
@@ -701,6 +719,9 @@ class NativeMpvPlayback extends KotvPlayback {
         if (pos != null) 'pos': pos,
         if (secondaryPos != null) 'secondaryPos': secondaryPos,
         'forceStyle': forceStyle,
+        if (color != null) 'color': color,
+        if (borderColor != null) 'borderColor': borderColor,
+        if (borderSize != null) 'borderSize': borderSize,
       });
     } catch (_) {}
   }
@@ -714,6 +735,52 @@ class NativeMpvPlayback extends KotvPlayback {
         'select': true,
       });
       await _refreshTracks();
+    } catch (_) {}
+  }
+
+  @override
+  bool get supportsDiscNav => true;
+
+  @override
+  Future<List<KotvTrack>> discTitles() async {
+    try {
+      final n = await _ch.invokeMethod<int>('discTitleCount') ?? 0;
+      if (n <= 0) return const [];
+      return [for (var i = 1; i <= n; i++) KotvTrack(id: '$i', label: '标题 $i')];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Future<List<KotvTrack>> discChapters() async {
+    try {
+      final n = await _ch.invokeMethod<int>('discChapterCount') ?? 0;
+      if (n <= 0) return const [];
+      return [for (var i = 0; i < n; i++) KotvTrack(id: '$i', label: '章节 ${i + 1}')];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Future<void> setDiscTitle(int index) async {
+    try {
+      await _ch.invokeMethod('setDiscTitle', {'index': index});
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setDiscChapter(int index) async {
+    try {
+      await _ch.invokeMethod('setDiscChapter', {'index': index});
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> openDiscMenu() async {
+    try {
+      await _ch.invokeMethod('openDiscMenu');
     } catch (_) {}
   }
 

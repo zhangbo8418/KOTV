@@ -92,8 +92,16 @@ const (
 	VideoSaturation       Type = "videoSaturation"
 	VideoGamma            Type = "videoGamma"
 	VideoHue              Type = "videoHue"
+	VideoTemperature      Type = "videoTemperature"
+	VideoSharpness        Type = "videoSharpness"
+	VideoShadow           Type = "videoShadow"
 	PreloadNextEpisode    Type = "preloadNextEpisode"
 	SubtitleFontScale     Type = "subtitleFontScale"
+	SubtitlePos           Type = "subtitlePos"
+	SubtitleColor         Type = "subtitleColor"
+	SubtitleBorderColor   Type = "subtitleBorderColor"
+	SubtitleBorderSize    Type = "subtitleBorderSize"
+	AudioEqBands          Type = "audioEqBands"
 	DanmakuOffsetMs       Type = "danmakuOffsetMs"
 )
 
@@ -183,8 +191,16 @@ func defaultFile() file {
 			{ID: "videoSaturation", Label: "画面饱和度", Value: "0"},
 			{ID: "videoGamma", Label: "画面伽马", Value: "0"},
 			{ID: "videoHue", Label: "画面色相", Value: "0"},
+			{ID: "videoTemperature", Label: "画面色温", Value: "0"},
+			{ID: "videoSharpness", Label: "画面锐度", Value: "0"},
+			{ID: "videoShadow", Label: "画面阴影", Value: "0"},
 			{ID: "preloadNextEpisode", Label: "预解析下一集", Value: "true"},
 			{ID: "subtitleFontScale", Label: "字幕字号", Value: "1.0"},
+			{ID: "subtitlePos", Label: "字幕位置", Value: "100"},
+			{ID: "subtitleColor", Label: "字幕颜色", Value: "#FFFFFF"},
+			{ID: "subtitleBorderColor", Label: "字幕描边色", Value: "#000000"},
+			{ID: "subtitleBorderSize", Label: "字幕描边", Value: "2"},
+			{ID: "audioEqBands", Label: "音频均衡频段", Value: ""},
 			{ID: "danmakuOffsetMs", Label: "弹幕偏移毫秒", Value: "0"},
 		},
 		Cache: make(map[string]json.RawMessage),
@@ -270,8 +286,16 @@ func Load() error {
 	ensureSettingLocked(VideoSaturation, "画面饱和度", "0")
 	ensureSettingLocked(VideoGamma, "画面伽马", "0")
 	ensureSettingLocked(VideoHue, "画面色相", "0")
+	ensureSettingLocked(VideoTemperature, "画面色温", "0")
+	ensureSettingLocked(VideoSharpness, "画面锐度", "0")
+	ensureSettingLocked(VideoShadow, "画面阴影", "0")
 	ensureSettingLocked(PreloadNextEpisode, "预解析下一集", "true")
 	ensureSettingLocked(SubtitleFontScale, "字幕字号", "1.0")
+	ensureSettingLocked(SubtitlePos, "字幕位置", "100")
+	ensureSettingLocked(SubtitleColor, "字幕颜色", "#FFFFFF")
+	ensureSettingLocked(SubtitleBorderColor, "字幕描边色", "#000000")
+	ensureSettingLocked(SubtitleBorderSize, "字幕描边", "2")
+	ensureSettingLocked(AudioEqBands, "音频均衡频段", "")
 	ensureSettingLocked(DanmakuOffsetMs, "弹幕偏移毫秒", "0")
 	return nil
 }

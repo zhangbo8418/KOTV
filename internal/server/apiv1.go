@@ -568,7 +568,7 @@ func (s *Server) handleAPIv1RemotePoll(w http.ResponseWriter, r *http.Request) {
 	}
 	api := s.content()
 	if api == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "controls": []any{}, "searches": []any{}})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "controls": []any{}, "searches": []any{}, "refreshes": []any{}, "danmakuLive": []any{}})
 		return
 	}
 	writeJSON(w, http.StatusOK, api.APIRemotePoll())

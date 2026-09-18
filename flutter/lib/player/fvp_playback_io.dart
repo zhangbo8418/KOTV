@@ -48,6 +48,7 @@ class FvpPlayback extends KotvPlayback {
   String _preferredTextLangs = '';
   KotvVideoEq _videoEq = KotvVideoEq.off;
   KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
+  String _audioEqBands = '';
 
   VideoPlayerController? get controller => _c;
 
@@ -121,6 +122,9 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   String? get currentSubtitleId => _currentSubtitleId;
+
+  @override
+  String? get currentSecondarySubtitleId => _currentSecondarySubtitleId;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     final c = _c;
@@ -546,6 +550,7 @@ class FvpPlayback extends KotvPlayback {
     _preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
     _videoEq = KotvVideoEq.fromSettings(settings);
     _audioEq = kotvAudioEqFromSettings(settings);
+    _audioEqBands = kotvAudioEqBandsFromSettings(settings);
     _applyRuntimeOptions(_c);
     _applySecondaryAutoIfNeeded();
     notifyListeners();
@@ -560,7 +565,7 @@ class FvpPlayback extends KotvPlayback {
       }
       final vf = _videoEq.fvpAvfilter();
       c.setProperty('video.avfilter', vf);
-      final af = kotvAudioEqFvpFilter(_audioEq);
+      final af = kotvAudioEqFvpFilter(_audioEq, bands: _audioEqBands);
       // 与稳定音量共用 audio.avfilter；有 EQ 预设时优先 EQ。
       if (af.isNotEmpty) {
         c.setProperty('audio.avfilter', af);
@@ -742,6 +747,7 @@ class FvpPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
+  @override
   Future<void> setSecondarySubtitleTrack(String id) async {
     final c = _c;
     if (c == null || !c.value.isInitialized) return;
@@ -764,11 +770,15 @@ class FvpPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
+  @override
   Future<void> setSubtitleStyle({
     double? scale,
     double? pos,
     double? secondaryPos,
     bool forceStyle = false,
+    String? color,
+    String? borderColor,
+    double? borderSize,
   }) async {
     final c = _c;
     if (c == null || !c.value.isInitialized) return;
@@ -783,7 +793,16 @@ class FvpPlayback extends KotvPlayback {
       if (secondaryPos != null) {
         c.setProperty('subtitle2.margin', secondaryPos.clamp(0.0, 150.0).toStringAsFixed(1));
       }
-      if (forceStyle) {
+      if (color != null && color.trim().isNotEmpty) {
+        c.setProperty('subtitle.color', color.trim());
+      }
+      if (borderColor != null && borderColor.trim().isNotEmpty) {
+        c.setProperty('subtitle.outline_color', borderColor.trim());
+      }
+      if (borderSize != null) {
+        c.setProperty('subtitle.outline', borderSize.clamp(0.0, 8.0).toStringAsFixed(1));
+      }
+      if (forceStyle || color != null || borderColor != null || borderSize != null) {
         c.setProperty('subtitle.force', '1');
       }
     } catch (_) {}

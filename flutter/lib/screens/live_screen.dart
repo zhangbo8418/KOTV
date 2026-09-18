@@ -325,6 +325,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   int _playSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
+  Map<String, dynamic>? _playDrm;
   Timer? _catchupHideTimer;
   Timer? _portraitHideTimer;
   Timer? _cursorHideTimer;
@@ -771,6 +772,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         setState(() {
           _playUrl = openUrl;
           _playHeaders = openHeaders;
+          _playDrm = hasDrm ? drm : null;
           _playerVal = failover.playerVal;
           _decodeMode = failover.decodeMode;
         });
@@ -778,6 +780,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       } else {
         _playUrl = openUrl;
         _playHeaders = openHeaders;
+        _playDrm = hasDrm ? drm : null;
       }
       _syncAndroidAutoPip();
       final pb = _playback;
@@ -954,7 +957,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
       };
-      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, live: true);
+      final drmRaw = data['drm'];
+      final drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
+      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, drm: drm, live: true);
       if (!mounted || serial != _playSerial) return;
       setState(() {
         _title = '${data['name'] ?? _title}';
@@ -1223,7 +1228,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     if (_playUrl.isNotEmpty) {
       final pos = _playback.position;
       // 直播/回看均 live 起播；回看再 seek 回原进度。
-      await _openLiveUrl(_playUrl, headers: _playHeaders, live: true);
+      await _openLiveUrl(_playUrl, headers: _playHeaders, drm: _playDrm, live: true);
       if (pos > Duration.zero) await _playback.seek(pos);
     }
   }
@@ -1267,7 +1272,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
     if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
       final pos = _playback.position;
-      await _openLiveUrl(_playUrl, headers: _playHeaders, live: true);
+      await _openLiveUrl(_playUrl, headers: _playHeaders, drm: _playDrm, live: true);
       if (pos > Duration.zero) await _playback.seek(pos);
       if (mounted) setState(() {});
     }

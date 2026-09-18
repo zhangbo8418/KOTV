@@ -6,6 +6,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'danmaku_file_read.dart';
+
 /// 单条弹幕（internal/danmaku.Item）。
 class DanmakuItem {
   const DanmakuItem({
@@ -86,6 +88,12 @@ class DanmakuLoader {
     if (resp.statusCode < 200 || resp.statusCode >= 300) return const [];
     final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
     return _parseBodyOrSources(body, followSources: followSources);
+  }
+
+  static Future<List<DanmakuItem>> loadFile(String path) async {
+    final body = await readDanmakuFileText(path);
+    if (body == null || body.isEmpty) return const [];
+    return DanmakuParser.parse(body);
   }
 
   /// 模板 GET：`https://…?n={name}&e={episode}`；无占位符时 POST name/episode。

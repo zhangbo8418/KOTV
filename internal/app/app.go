@@ -346,6 +346,7 @@ func (a *App) listenEvents() {
 		for text := range a.Server.Events().SubscribeDanmaku() {
 			danmaku.PushLive(text)
 			a.DanmakuToast = danmaku.FormatLive(text)
+			remote.DefaultQueue.PushLiveDanmaku(text, "")
 		}
 	}()
 	go func() {
@@ -354,6 +355,9 @@ func (a *App) listenEvents() {
 			case "subtitle":
 				if enh, ok := embed.ActiveEnhanced(); ok && ev.Path != "" {
 					_ = enh.AddSubtitleFile(ev.Path)
+				}
+				if ev.Path != "" {
+					remote.DefaultQueue.PushRefresh("subtitle", ev.Path, "")
 				}
 			case "danmaku":
 				path := ev.Path
@@ -365,6 +369,7 @@ func (a *App) listenEvents() {
 				} else {
 					_ = danmaku.LoadFile(path)
 				}
+				remote.DefaultQueue.PushRefresh("danmaku", path, "")
 			}
 		}
 	}()

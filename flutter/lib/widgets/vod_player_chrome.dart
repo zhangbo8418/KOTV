@@ -4,12 +4,14 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../player/disc_play.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
+import '../util/pick_subtitle_file.dart';
 import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
 
@@ -915,6 +917,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     widget.onBump();
     final audio = kind == 'audio';
     final video = kind == 'video';
+    final disc = kind == 'disc';
     final audioTracks = widget.player.audioTracks;
     final videoTracks = widget.player.videoTracks;
     final subTracks = widget.player.subtitleTracks;
@@ -922,6 +925,73 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final currentVideo = widget.player.currentVideoId;
     final currentSub = widget.player.currentSubtitleId;
     final rows = <Widget>[];
+    if (disc) {
+      rows.add(
+        _chromeSelectRow(
+          icon: Icons.menu_open,
+          label: '碟片菜单',
+          selected: false,
+          onTap: () async {
+            await widget.player.openDiscMenu();
+            if (context.mounted) Navigator.pop(context);
+          },
+        ),
+      );
+      final titles = await widget.player.discTitles();
+      if (titles.isNotEmpty) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text('标题', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13)),
+          ),
+        );
+        for (final t in titles) {
+          rows.add(
+            _chromeSelectRow(
+              label: t.label,
+              selected: false,
+              onTap: () async {
+                final idx = int.tryParse(t.id) ?? 0;
+                await widget.player.setDiscTitle(idx);
+                if (context.mounted) Navigator.pop(context);
+              },
+            ),
+          );
+        }
+      }
+      final chapters = await widget.player.discChapters();
+      if (chapters.isNotEmpty) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text('章节', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13)),
+          ),
+        );
+        for (final t in chapters) {
+          rows.add(
+            _chromeSelectRow(
+              label: t.label,
+              selected: false,
+              onTap: () async {
+                final idx = int.tryParse(t.id) ?? 0;
+                await widget.player.setDiscChapter(idx);
+                if (context.mounted) Navigator.pop(context);
+              },
+            ),
+          );
+        }
+      }
+      if (titles.isEmpty && chapters.isEmpty) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Text('暂无标题/章节信息', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 15)),
+          ),
+        );
+      }
+      await _showChromeListSheet(title: '碟片导航', children: rows);
+      return;
+    }
     if (video) {
       rows.add(
         _chromeSelectRow(
@@ -977,6 +1047,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             if (context.mounted) Navigator.pop(context);
           },
         ),
+        if (!kIsWeb)
+          _chromeSelectRow(
+            icon: Icons.folder_open_outlined,
+            label: '本地字幕文件',
+            selected: false,
+            onTap: () async {
+              if (context.mounted) Navigator.pop(context);
+              final path = await kotvPickSubtitleFile(context);
+              if (path == null || path.isEmpty) return;
+              final name = path.split(RegExp(r'[/\\]')).last;
+              await widget.player.addSubtitleFile(path, title: name);
+            },
+          ),
         if (widget.onAssrtSearch != null)
           _chromeSelectRow(
             icon: Icons.search,
@@ -1004,6 +1087,50 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             child: Text('暂无可用字幕轨', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 15)),
           ),
         );
+      }
+      // 副字幕：有至少两条轨时才有意义。
+      if (subTracks.length >= 2) {
+        final currentSec = widget.player.currentSecondarySubtitleId;
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Text('副字幕', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13)),
+          ),
+        );
+        rows.add(
+          _chromeSelectRow(
+            icon: Icons.closed_caption_off_outlined,
+            label: '关闭副字幕',
+            selected: currentSec == null || currentSec.isEmpty,
+            onTap: () async {
+              await widget.player.setSecondarySubtitleTrack('off');
+              if (context.mounted) Navigator.pop(context);
+            },
+          ),
+        );
+        rows.add(
+          _chromeSelectRow(
+            icon: Icons.auto_awesome,
+            label: '副字幕自动',
+            selected: false,
+            onTap: () async {
+              await widget.player.setSecondarySubtitleTrack('auto');
+              if (context.mounted) Navigator.pop(context);
+            },
+          ),
+        );
+        for (final t in subTracks) {
+          rows.add(
+            _chromeSelectRow(
+              label: '副：${t.label}',
+              selected: t.id == currentSec,
+              onTap: () async {
+                await widget.player.setSecondarySubtitleTrack(t.id);
+                if (context.mounted) Navigator.pop(context);
+              },
+            ),
+          );
+        }
       }
     } else {
       rows.add(
@@ -1697,6 +1824,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       size: land ? 32.0 : 40.0,
                                       onTap: () => _showTrackSheet(kind: 'subtitle'),
                                     ),
+                                    if (widget.player.supportsDiscNav &&
+                                        KotvDiscPlay.looksLike(widget.playUrl))
+                                      _IconAct(
+                                        icon: Icons.album_outlined,
+                                        tip: '碟片导航',
+                                        size: land ? 32.0 : 40.0,
+                                        onTap: () => _showTrackSheet(kind: 'disc'),
+                                      ),
                                     _IconAct(
                                       icon: Icons.audiotrack,
                                       tip: '音轨',

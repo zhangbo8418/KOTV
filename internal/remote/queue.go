@@ -14,13 +14,21 @@ type Queue struct {
 }
 
 type clientBucket struct {
-	ctrl []ControlCmd
-	srch []string
+	ctrl     []ControlCmd
+	srch     []string
+	refresh  []RefreshCmd
+	danmaku  []string
 }
 
 type ControlCmd struct {
 	Type   string `json:"type"`
 	SeekMs int64  `json:"seekMs"`
+}
+
+// RefreshCmd 遥控推字幕/弹幕文件：Type=subtitle|danmaku，Path 为本地路径或 URL。
+type RefreshCmd struct {
+	Type string `json:"type"`
+	Path string `json:"path"`
 }
 
 var DefaultQueue = &Queue{
@@ -83,20 +91,57 @@ func (q *Queue) PushSearch(keyword, clientID string) {
 	}
 }
 
+func (q *Queue) PushRefresh(typ, path, clientID string) {
+	typ = strings.ToLower(strings.TrimSpace(typ))
+	path = strings.TrimSpace(path)
+	if typ == "" || path == "" {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, id := range q.targetsLocked(clientID) {
+		b := q.bucketLocked(id)
+		b.refresh = append(b.refresh, RefreshCmd{Type: typ, Path: path})
+		if len(b.refresh) > 16 {
+			b.refresh = b.refresh[len(b.refresh)-16:]
+		}
+	}
+}
+
+func (q *Queue) PushLiveDanmaku(text, clientID string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, id := range q.targetsLocked(clientID) {
+		b := q.bucketLocked(id)
+		b.danmaku = append(b.danmaku, text)
+		if len(b.danmaku) > 64 {
+			b.danmaku = b.danmaku[len(b.danmaku)-64:]
+		}
+	}
+}
+
 // Drain 取出并清空指定客户端缓冲；同时登记为已知客户端以便后续广播。
-func (q *Queue) Drain(clientID string) (controls []ControlCmd, searches []string) {
+func (q *Queue) Drain(clientID string) (controls []ControlCmd, searches []string, refreshes []RefreshCmd, danmaku []string) {
 	clientID = strings.TrimSpace(clientID)
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.rememberLocked(clientID)
 	b := q.byClient[clientID]
 	if b == nil {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	controls = b.ctrl
 	searches = b.srch
+	refreshes = b.refresh
+	danmaku = b.danmaku
 	b.ctrl = nil
 	b.srch = nil
+	b.refresh = nil
+	b.danmaku = nil
 	return
 }
 

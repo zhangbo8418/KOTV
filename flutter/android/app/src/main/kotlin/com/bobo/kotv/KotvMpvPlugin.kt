@@ -98,6 +98,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var eqHue = 0
   /** 音频 af；空=不套。 */
   private var audioAf = ""
+  /** 画面 vf（锐度等）；空=清掉。 */
+  private var videoVf = ""
   private var renderTexture = false
   /** 点播挂 Surface；停播卸下（未点播不建，避免详情滑动重影）。 */
   private var surfaceLayerEnabled = false
@@ -656,6 +658,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val pos = call.argument<Number>("pos")?.toDouble()
         val secondaryPos = call.argument<Number>("secondaryPos")?.toDouble()
         val forceStyle = call.argument<Boolean>("forceStyle") == true
+        val color = call.argument<String>("color")?.trim().orEmpty()
+        val borderColor = call.argument<String>("borderColor")?.trim().orEmpty()
+        val borderSize = call.argument<Number>("borderSize")?.toDouble()
         main.post {
           try {
             if (created.get()) {
@@ -668,15 +673,83 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               if (secondaryPos != null) {
                 MPVLib.setPropertyDouble("secondary-sub-pos", secondaryPos.coerceIn(0.0, 150.0))
               }
+              if (color.isNotEmpty()) {
+                MPVLib.setPropertyString("sub-color", color)
+              }
+              if (borderColor.isNotEmpty()) {
+                MPVLib.setPropertyString("sub-border-color", borderColor)
+              }
+              if (borderSize != null) {
+                MPVLib.setPropertyDouble("sub-border-size", borderSize.coerceIn(0.0, 8.0))
+              }
+              val force = forceStyle || color.isNotEmpty() || borderColor.isNotEmpty() || borderSize != null
               MPVLib.setPropertyString(
                 "secondary-sub-ass-override",
-                if (forceStyle) "force" else "yes",
+                if (force) "force" else "yes",
               )
-              MPVLib.setPropertyString("sub-ass-override", if (forceStyle) "force" else "scale")
+              MPVLib.setPropertyString("sub-ass-override", if (force) "force" else "scale")
             }
             result.success(null)
           } catch (e: Throwable) {
             result.error("SUB_STYLE_FAILED", e.message, null)
+          }
+        }
+      }
+      "discTitleCount" -> {
+        main.post {
+          try {
+            val n = if (created.get()) (MPVLib.getPropertyInt("disc-titles") ?: 0) else 0
+            result.success(n)
+          } catch (e: Throwable) {
+            result.error("DISC_FAILED", e.message, null)
+          }
+        }
+      }
+      "discChapterCount" -> {
+        main.post {
+          try {
+            val n = if (created.get()) (MPVLib.getPropertyInt("chapters") ?: 0) else 0
+            result.success(n)
+          } catch (e: Throwable) {
+            result.error("DISC_FAILED", e.message, null)
+          }
+        }
+      }
+      "setDiscTitle" -> {
+        val index = call.argument<Number>("index")?.toInt() ?: 0
+        main.post {
+          try {
+            if (created.get() && index >= 1) {
+              MPVLib.setPropertyInt("disc-title", index)
+            }
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("DISC_FAILED", e.message, null)
+          }
+        }
+      }
+      "setDiscChapter" -> {
+        val index = call.argument<Number>("index")?.toInt() ?: -1
+        main.post {
+          try {
+            if (created.get() && index >= 0) {
+              MPVLib.setPropertyInt("chapter", index)
+            }
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("DISC_FAILED", e.message, null)
+          }
+        }
+      }
+      "openDiscMenu" -> {
+        main.post {
+          try {
+            if (created.get()) {
+              MPVLib.command(arrayOf("discnav", "menu"))
+            }
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("DISC_FAILED", e.message, null)
           }
         }
       }
@@ -1075,6 +1148,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     call.argument<Number>("eqGamma")?.toInt()?.let { eqGamma = it.coerceIn(-100, 100) }
     call.argument<Number>("eqHue")?.toInt()?.let { eqHue = it.coerceIn(-100, 100) }
     call.argument<String>("audioAf")?.let { audioAf = it.trim() }
+    call.argument<String>("videoVf")?.let { videoVf = it.trim() }
     call.argument<Number>("subtitleFontScale")?.toDouble()?.let {
       try {
         MPVLib.setPropertyDouble("sub-scale", it.coerceIn(0.5, 2.5))
@@ -1093,6 +1167,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setPropertyInt("hue", eqHue)
     } catch (t: Throwable) {
       Log.w(TAG, "apply video eq", t)
+    }
+    try {
+      MPVLib.setPropertyString("vf", videoVf)
+    } catch (t: Throwable) {
+      Log.w(TAG, "apply video vf", t)
     }
     try {
       // 直通时不强塞 af，避免破 SPDIF。

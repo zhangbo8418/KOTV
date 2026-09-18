@@ -226,6 +226,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   final Map<String, Map<String, dynamic>> _nextPlayCache = {};
   int _nextPreloadSerial = 0;
   bool _preloadNextEpisode = true;
+  RemoteBridge? _boundRemote;
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
@@ -446,6 +447,108 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       setState(() => _miniDesktop = inPip);
     };
     _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _attachRemoteHandlers());
+  }
+
+  void _attachRemoteHandlers() {
+    final bridge = ref.read(remoteBridgeProvider);
+    if (bridge == null) return;
+    _boundRemote = bridge;
+    bridge.onControl = _onRemoteControl;
+    bridge.onSubtitleFile = _onRemoteSubtitle;
+    bridge.onDanmakuFile = _onRemoteDanmakuFile;
+    bridge.onLiveDanmaku = _onRemoteLiveDanmaku;
+  }
+
+  void _detachRemoteHandlers() {
+    final bridge = _boundRemote;
+    _boundRemote = null;
+    if (bridge == null) return;
+    if (identical(bridge.onControl, _onRemoteControl)) bridge.onControl = null;
+    if (identical(bridge.onSubtitleFile, _onRemoteSubtitle)) bridge.onSubtitleFile = null;
+    if (identical(bridge.onDanmakuFile, _onRemoteDanmakuFile)) bridge.onDanmakuFile = null;
+    if (identical(bridge.onLiveDanmaku, _onRemoteLiveDanmaku)) bridge.onLiveDanmaku = null;
+  }
+
+  void _onRemoteControl(String type, int seekMs) {
+    if (!mounted || _playUrl.isEmpty) return;
+    final t = type.trim().toLowerCase();
+    switch (t) {
+      case 'play':
+        unawaited(_playback.play());
+        break;
+      case 'pause':
+        unawaited(_playback.pause());
+        break;
+      case 'toggle':
+      case 'playpause':
+      case 'play_pause':
+        unawaited(_playback.playOrPause());
+        break;
+      case 'seek':
+        if (seekMs > 0) {
+          unawaited(_playback.seek(Duration(milliseconds: seekMs)));
+        }
+        break;
+      case 'forward':
+        final ms = seekMs > 0 ? seekMs : 10000;
+        unawaited(_playback.seek(_playback.position + Duration(milliseconds: ms)));
+        break;
+      case 'backward':
+      case 'rewind':
+        final ms = seekMs > 0 ? seekMs : 10000;
+        final next = _playback.position - Duration(milliseconds: ms);
+        unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
+        break;
+      case 'stop':
+        unawaited(_stopHard());
+        break;
+    }
+  }
+
+  void _onRemoteSubtitle(String path) {
+    if (!mounted || path.trim().isEmpty) return;
+    final name = path.split(RegExp(r'[/\\]')).last;
+    unawaited(_playback.addSubtitleFile(path.trim(), title: name));
+  }
+
+  void _onRemoteDanmakuFile(String path) {
+    if (!mounted || path.trim().isEmpty) return;
+    unawaited(() async {
+      try {
+        List<DanmakuItem> items;
+        final p = path.trim();
+        if (p.startsWith('http://') || p.startsWith('https://')) {
+          items = await DanmakuLoader.loadUrl(p);
+        } else {
+          items = await DanmakuLoader.loadFile(p);
+        }
+        if (!mounted) return;
+        if (_danmakuOffsetSec.abs() > 0.0001) {
+          items = [
+            for (final it in items)
+              DanmakuItem(
+                time: it.time + _danmakuOffsetSec,
+                content: it.content,
+                mode: it.mode,
+                size: it.size,
+                color: it.color,
+              ),
+          ];
+        }
+        _danmakuItems.value = items;
+        if (!_danmakuOn) setState(() => _danmakuOn = true);
+      } catch (_) {}
+    }());
+  }
+
+  void _onRemoteLiveDanmaku(String text) {
+    if (!mounted || text.trim().isEmpty) return;
+    final sec = _playback.position.inMilliseconds / 1000.0;
+    final next = List<DanmakuItem>.of(_danmakuItems.value)
+      ..add(DanmakuItem(time: sec, content: text.trim()));
+    _danmakuItems.value = next;
+    if (!_danmakuOn) setState(() => _danmakuOn = true);
   }
 
   void _syncAndroidAutoPip() {
@@ -768,6 +871,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   @override
   void dispose() {
     // 勿在此处 ref.read：会抛 Bad state，打断后面的 FVP/播放器 stop。
+    _detachRemoteHandlers();
     kotvUnregisterQuitHook(_prepareQuit);
     if (_active == this) _active = null;
     MiniPlayerWindow.onAndroidPipChanged = null;
@@ -867,7 +971,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _exo?.applyPlayerOptions(settings);
         _fvp?.applyPlayerOptions(settings);
         final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.5);
-        unawaited(_playback.setSubtitleStyle(scale: fontScale));
+        final subPos = double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100.0;
+        final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
+        final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
+        final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
+        unawaited(_playback.setSubtitleStyle(
+          scale: fontScale,
+          pos: subPos.clamp(0, 150),
+          color: subColor.isEmpty ? null : subColor,
+          borderColor: subBorder.isEmpty ? null : subBorder,
+          borderSize: subBorderSize.clamp(0, 8),
+          forceStyle: subColor.isNotEmpty || subBorder.isNotEmpty || subBorderSize > 0,
+        ));
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
         _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';

@@ -207,6 +207,766 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (v != null) await _set(key, v, msg: msg);
   }
 
+  /// 播放器二级设置：底部弹层，内嵌开关 / 滑块 / 入口。
+  Future<void> _showPlayerSubSheet({
+    required String title,
+    required List<Widget> Function(StateSetter setSheet) buildChildren,
+  }) async {
+    final p = KotvPalette.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            final h = MediaQuery.sizeOf(ctx).height * 0.72;
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: Material(
+                  color: p.dialogBg,
+                  borderRadius: BorderRadius.circular(16),
+                  clipBehavior: Clip.antiAlias,
+                  child: SizedBox(
+                    height: h,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  title,
+                                  style: TextStyle(color: p.fg, fontSize: 17, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                icon: Icon(Icons.close, color: p.muted),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Divider(height: 1, color: p.fg.withOpacity(0.08)),
+                        Expanded(
+                          child: ListView(
+                            padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+                            children: buildChildren(setSheet),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (mounted) setState(() {});
+  }
+
+  Widget _sheetToggle({
+    required String label,
+    required bool value,
+    required Future<void> Function(bool next) onChanged,
+    String? subtitle,
+  }) {
+    final p = KotvPalette.of(context);
+    return ListTile(
+      title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
+      subtitle: subtitle == null
+          ? null
+          : Text(subtitle, style: TextStyle(color: p.muted, fontSize: 12)),
+      trailing: Switch.adaptive(
+        value: value,
+        onChanged: (v) => unawaited(onChanged(v)),
+      ),
+    );
+  }
+
+  Widget _sheetNav({
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+  }) {
+    final p = KotvPalette.of(context);
+    return ListTile(
+      title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 140),
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: p.muted, fontSize: 14),
+            ),
+          ),
+          Icon(Icons.chevron_right, color: p.muted.withOpacity(0.7)),
+        ],
+      ),
+      onTap: onTap,
+    );
+  }
+
+  Widget _sheetSlider({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    int divisions = 20,
+    String Function(double)? format,
+    required Future<void> Function(double) onCommit,
+    void Function(double)? onChanging,
+  }) {
+    final p = KotvPalette.of(context);
+    final fmt = format ?? ((v) => v.toStringAsFixed(v == v.roundToDouble() ? 0 : 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(label, style: TextStyle(color: p.fg, fontSize: 14, fontWeight: FontWeight.w500)),
+              ),
+              Text(fmt(value), style: TextStyle(color: p.muted, fontSize: 13)),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
+            child: Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              divisions: divisions,
+              label: fmt(value),
+              onChanged: onChanging,
+              onChangeEnd: (v) => unawaited(onCommit(v)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openExoSheet() async {
+    await _showPlayerSubSheet(
+      title: 'Exo 设置',
+      buildChildren: (setSheet) {
+        final exoDiskCache = kotvSettingsFlag(g('exoDiskCache', 'false'), def: false);
+        final exoAdblock = kotvSettingsFlag(g('exoAdblock', 'true'), def: true);
+        final exoTunneling = kotvSettingsFlag(g('exoTunneling', 'false'), def: false);
+        final exoPreferAac = kotvSettingsFlag(g('exoPreferAac', 'false'), def: false);
+        final exoSkipSilence = kotvSettingsFlag(g('exoSkipSilence', 'false'), def: false);
+        final exoSoftAudioPrefer = kotvSettingsFlag(g('exoSoftAudioPrefer', 'true'), def: true);
+        final exoSoftVideoPrefer = kotvSettingsFlag(g('exoSoftVideoPrefer', 'true'), def: true);
+        final exoBuffer = (int.tryParse(g('exoBuffer', '1')) ?? 1).clamp(1, 10).toDouble();
+        final exoPreload = (int.tryParse(g('exoDiskPreloadMs', '10000')) ?? 10000).clamp(0, 120000).toDouble();
+        final exoLibass = kotvSettingsFlag(g('exoLibass', 'true'), def: true);
+        final exoSecondary = g('exoSecondarySubtitle', 'off').trim().toLowerCase();
+        final exoSecondaryOn = exoSecondary != 'off';
+        final exoDolby = int.tryParse(g('exoDolbyVision', '0')) ?? 0;
+        final exoDolbyLabel = switch (exoDolby) {
+          1 => '假定支持',
+          2 => '假定不支持',
+          _ => '自动',
+        };
+        final langs = g('exoPreferredTextLangs').trim();
+        return [
+          _sheetToggle(
+            label: '磁盘缓存',
+            value: exoDiskCache,
+            onChanged: (v) async {
+              await _set('exoDiskCache', v ? 'true' : 'false', msg: v ? '已开启 Exo 磁盘缓存' : '已关闭 Exo 磁盘缓存');
+              setSheet(() {});
+            },
+          ),
+          _sheetSlider(
+            label: '磁盘预读',
+            value: exoPreload,
+            min: 0,
+            max: 60000,
+            divisions: 60,
+            format: (v) => '${v.round()} ms',
+            onChanging: (v) => setSheet(() => _s['exoDiskPreloadMs'] = '${v.round()}'),
+            onCommit: (v) => _set('exoDiskPreloadMs', '${v.round()}', msg: 'Exo 磁盘预读已更新'),
+          ),
+          _sheetSlider(
+            label: '内存缓冲倍率',
+            value: exoBuffer,
+            min: 1,
+            max: 10,
+            divisions: 9,
+            format: (v) => '${v.round()}×',
+            onChanging: (v) => setSheet(() => _s['exoBuffer'] = '${v.round()}'),
+            onCommit: (v) => _set('exoBuffer', '${v.round()}', msg: 'Exo 缓冲倍率已更新'),
+          ),
+          _sheetToggle(
+            label: 'HLS 去广告',
+            value: exoAdblock,
+            onChanged: (v) async {
+              await _set('exoAdblock', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '隧道模式',
+            subtitle: '仅 Surface 渲染',
+            value: exoTunneling,
+            onChanged: (v) async {
+              await _set('exoTunneling', v ? 'true' : 'false', msg: '重启播放生效');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '优先 AAC',
+            value: exoPreferAac,
+            onChanged: (v) async {
+              await _set('exoPreferAac', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '跳过静音段',
+            value: exoSkipSilence,
+            onChanged: (v) async {
+              await _set('exoSkipSilence', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '软解优先音轨',
+            value: exoSoftAudioPrefer,
+            onChanged: (v) async {
+              await _set('exoSoftAudioPrefer', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '软解优先视轨',
+            value: exoSoftVideoPrefer,
+            onChanged: (v) async {
+              await _set('exoSoftVideoPrefer', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: 'ASS 特效字幕',
+            value: exoLibass,
+            onChanged: (v) async {
+              await _set('exoLibass', v ? 'true' : 'false', msg: '重启播放生效');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '双字幕（自动）',
+            value: exoSecondaryOn,
+            onChanged: (v) async {
+              await _set('exoSecondarySubtitle', v ? 'auto' : 'off', msg: '重启播放生效');
+              setSheet(() {});
+            },
+          ),
+          _sheetNav(
+            label: '杜比视界',
+            value: exoDolbyLabel,
+            onTap: () async {
+              final next = (exoDolby + 1) % 3;
+              await _set('exoDolbyVision', '$next', msg: '杜比视界策略已更新');
+              setSheet(() {});
+            },
+          ),
+          _sheetNav(
+            label: '首选字幕语言',
+            value: langs.isEmpty ? '默认' : langs,
+            onTap: () async {
+              await _prompt(
+                '首选字幕语言',
+                '逗号分隔，如 zh,zh-CN,en。空=默认。',
+                langs,
+                (v) => _set('exoPreferredTextLangs', v.trim(), msg: '首选字幕语言已更新'),
+              );
+              setSheet(() {});
+            },
+          ),
+        ];
+      },
+    );
+  }
+
+  Future<void> _openMpvSheet({
+    required bool showGpuNext,
+    required bool showVulkan,
+    required bool showTls,
+  }) async {
+    await _showPlayerSubSheet(
+      title: 'MPV 设置',
+      buildChildren: (setSheet) {
+        final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
+        final mpvVulkan = g('mpvVulkan', 'false') == 'true';
+        final mpvTlsVerify = kotvSettingsFlag(g('mpvTlsVerify', 'true'), def: true);
+        final mpvDiskCache = kotvSettingsFlag(g('mpvDiskCache', 'false'), def: false);
+        final conf = g('mpvConf').trim();
+        return [
+          if (showGpuNext)
+            _sheetToggle(
+              label: 'gpu-next',
+              value: mpvGpuNext,
+              onChanged: (v) async {
+                await _set('mpvGpuNext', v ? 'true' : 'false', msg: '重启播放生效');
+                setSheet(() {});
+              },
+            ),
+          if (showVulkan)
+            _sheetToggle(
+              label: 'Vulkan',
+              value: mpvVulkan,
+              onChanged: (v) async {
+                await _set('mpvVulkan', v ? 'true' : 'false', msg: '重启播放生效');
+                setSheet(() {});
+              },
+            ),
+          if (showTls)
+            _sheetToggle(
+              label: '校验证书 (TLS)',
+              value: mpvTlsVerify,
+              onChanged: (v) async {
+                await _set('mpvTlsVerify', v ? 'true' : 'false', msg: '重启播放生效');
+                setSheet(() {});
+              },
+            ),
+          _sheetToggle(
+            label: '磁盘缓存',
+            value: mpvDiskCache,
+            onChanged: (v) async {
+              await _set('mpvDiskCache', v ? 'true' : 'false', msg: '重启播放生效');
+              setSheet(() {});
+            },
+          ),
+          _sheetNav(
+            label: 'mpv.conf',
+            value: conf.isEmpty ? '未配置' : _ellipsize(conf.replaceAll('\n', ' '), 18),
+            onTap: () async {
+              await _prompt(
+                'MPV 配置（mpv.conf）',
+                '桌面诊断：kotv-log=debug 加深 libmpv 日志；kotv-log=no 关闭。',
+                g('mpvConf'),
+                (v) async {
+                  final conflicts = KotvMpvOpts.findConfConflicts(v);
+                  final msg = conflicts.isEmpty
+                      ? 'MPV 配置已保存'
+                      : '已保存；下列键由设置/引擎托管将被忽略：${conflicts.join(', ')}';
+                  await _set('mpvConf', v, msg: msg);
+                },
+                maxLines: 12,
+              );
+              setSheet(() {});
+            },
+          ),
+        ];
+      },
+    );
+  }
+
+  Future<void> _openVideoEqSheet() async {
+    await _showPlayerSubSheet(
+      title: '画面调色',
+      buildChildren: (setSheet) {
+        var videoEq = g('videoEq', 'off').trim().toLowerCase();
+        if (videoEq == 'on') videoEq = 'custom';
+        final custom = videoEq == 'custom';
+        double num(String key, [double def = 0]) => double.tryParse(g(key, '$def')) ?? def;
+        Future<void> savePreset(String next) async {
+          await _set('videoEq', next, msg: switch (next) {
+            'soft' => '画面调色：柔和',
+            'vivid' => '画面调色：鲜艳',
+            'custom' => '画面调色：自定义',
+            _ => '已关闭画面调色',
+          });
+          setSheet(() {});
+        }
+        Widget chip(String id, String label) {
+          final p = KotvPalette.of(context);
+          final on = videoEq == id || (id == 'off' && (videoEq.isEmpty || videoEq == 'off'));
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              label: Text(label),
+              selected: on,
+              onSelected: (_) => unawaited(savePreset(id)),
+              selectedColor: p.primary.withOpacity(0.35),
+              labelStyle: TextStyle(color: p.fg, fontSize: 13),
+            ),
+          );
+        }
+        return [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: Wrap(
+              children: [
+                chip('off', '关闭'),
+                chip('soft', '柔和'),
+                chip('vivid', '鲜艳'),
+                chip('custom', '自定义'),
+              ],
+            ),
+          ),
+          if (custom) ...[
+            _sheetSlider(
+              label: '亮度',
+              value: num('videoBrightness'),
+              min: -100,
+              max: 100,
+              divisions: 40,
+              format: (v) => '${v.round()}',
+              onChanging: (v) => setSheet(() => _s['videoBrightness'] = '${v.round()}'),
+              onCommit: (v) => _set('videoBrightness', '${v.round()}'),
+            ),
+            _sheetSlider(
+              label: '对比度',
+              value: num('videoContrast'),
+              min: -100,
+              max: 100,
+              divisions: 40,
+              format: (v) => '${v.round()}',
+              onChanging: (v) => setSheet(() => _s['videoContrast'] = '${v.round()}'),
+              onCommit: (v) => _set('videoContrast', '${v.round()}'),
+            ),
+            _sheetSlider(
+              label: '饱和度',
+              value: num('videoSaturation'),
+              min: -100,
+              max: 100,
+              divisions: 40,
+              format: (v) => '${v.round()}',
+              onChanging: (v) => setSheet(() => _s['videoSaturation'] = '${v.round()}'),
+              onCommit: (v) => _set('videoSaturation', '${v.round()}'),
+            ),
+            _sheetSlider(
+              label: '伽马',
+              value: num('videoGamma'),
+              min: -100,
+              max: 100,
+              divisions: 40,
+              format: (v) => '${v.round()}',
+              onChanging: (v) => setSheet(() => _s['videoGamma'] = '${v.round()}'),
+              onCommit: (v) => _set('videoGamma', '${v.round()}'),
+            ),
+            _sheetSlider(
+              label: '色相',
+              value: num('videoHue'),
+              min: -100,
+              max: 100,
+              divisions: 40,
+              format: (v) => '${v.round()}',
+              onChanging: (v) => setSheet(() => _s['videoHue'] = '${v.round()}'),
+              onCommit: (v) => _set('videoHue', '${v.round()}'),
+            ),
+            _sheetSlider(
+              label: '色温',
+              value: num('videoTemperature'),
+              min: -100,
+              max: 100,
+              divisions: 40,
+              format: (v) => '${v.round()}',
+              onChanging: (v) => setSheet(() => _s['videoTemperature'] = '${v.round()}'),
+              onCommit: (v) => _set('videoTemperature', '${v.round()}'),
+            ),
+            _sheetSlider(
+              label: '锐度',
+              value: num('videoSharpness').clamp(0, 100),
+              min: 0,
+              max: 100,
+              divisions: 20,
+              format: (v) => '${v.round()}',
+              onChanging: (v) => setSheet(() => _s['videoSharpness'] = '${v.round()}'),
+              onCommit: (v) => _set('videoSharpness', '${v.round()}'),
+            ),
+            _sheetSlider(
+              label: '阴影抬升',
+              value: num('videoShadow'),
+              min: -100,
+              max: 100,
+              divisions: 40,
+              format: (v) => '${v.round()}',
+              onChanging: (v) => setSheet(() => _s['videoShadow'] = '${v.round()}'),
+              onCommit: (v) => _set('videoShadow', '${v.round()}'),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                'Exo 默认 Surface 时画面滤镜不生效，可改渲染为 Texture；锐度/阴影主要作用于 MPV/FVP。',
+                style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
+              ),
+            ),
+          ],
+        ];
+      },
+    );
+  }
+
+  Future<void> _openAudioEqSheet() async {
+    await _showPlayerSubSheet(
+      title: '音频均衡',
+      buildChildren: (setSheet) {
+        final audioEq = g('audioEq', 'off').trim().toLowerCase();
+        final bands = g('audioEqBands');
+        double bandGain(String freq, [double def = 0]) {
+          for (final part in bands.split(',')) {
+            final kv = part.trim().split(':');
+            if (kv.length == 2 && kv[0].trim() == freq) {
+              return double.tryParse(kv[1].trim()) ?? def;
+            }
+          }
+          return def;
+        }
+        Future<void> writeBands(Map<String, double> map) async {
+          final s = map.entries.map((e) => '${e.key}:${e.value.round()}').join(',');
+          await _set('audioEqBands', s);
+          setSheet(() {});
+        }
+        final freqs = <String, double>{
+          '80': bandGain('80'),
+          '300': bandGain('300'),
+          '1000': bandGain('1000'),
+          '3000': bandGain('3000'),
+          '8000': bandGain('8000'),
+        };
+        Widget chip(String id, String label) {
+          final p = KotvPalette.of(context);
+          final on = audioEq == id;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              label: Text(label),
+              selected: on,
+              onSelected: (_) async {
+                await _set('audioEq', id, msg: switch (id) {
+                  'bass' => '音频均衡：低音',
+                  'voice' => '音频均衡：人声',
+                  'custom' => '音频均衡：自定义',
+                  _ => '已关闭音频均衡',
+                });
+                setSheet(() {});
+              },
+              selectedColor: p.primary.withOpacity(0.35),
+              labelStyle: TextStyle(color: p.fg, fontSize: 13),
+            ),
+          );
+        }
+        return [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: Wrap(
+              children: [
+                chip('off', '关闭'),
+                chip('bass', '低音'),
+                chip('voice', '人声'),
+                chip('custom', '自定义'),
+              ],
+            ),
+          ),
+          if (audioEq == 'custom') ...[
+            for (final e in freqs.entries)
+              _sheetSlider(
+                label: '${e.key} Hz',
+                value: e.value.clamp(-12, 12),
+                min: -12,
+                max: 12,
+                divisions: 24,
+                format: (v) => '${v.round()} dB',
+                onChanging: (v) {
+                  freqs[e.key] = v;
+                  setSheet(() {
+                    _s['audioEqBands'] =
+                        freqs.entries.map((x) => '${x.key}:${x.value.round()}').join(',');
+                  });
+                },
+                onCommit: (v) {
+                  freqs[e.key] = v;
+                  return writeBands(freqs);
+                },
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '直通开启时均衡不生效。Exo 自定义频段目前仅 MPV/FVP 完整支持。',
+                style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
+              ),
+            ),
+          ],
+        ];
+      },
+    );
+  }
+
+  Future<void> _openSubtitleSheet() async {
+    await _showPlayerSubSheet(
+      title: '字幕样式',
+      buildChildren: (setSheet) {
+        final scale = (double.tryParse(g('subtitleFontScale', '1.0')) ?? 1.0).clamp(0.5, 2.5);
+        final pos = (double.tryParse(g('subtitlePos', '100')) ?? 100).clamp(0.0, 150.0);
+        final border = (double.tryParse(g('subtitleBorderSize', '2')) ?? 2).clamp(0.0, 8.0);
+        final color = g('subtitleColor', '#FFFFFF');
+        final borderColor = g('subtitleBorderColor', '#000000');
+        return [
+          _sheetSlider(
+            label: '字号倍率',
+            value: scale,
+            min: 0.5,
+            max: 2.5,
+            divisions: 20,
+            format: (v) => v.toStringAsFixed(2),
+            onChanging: (v) => setSheet(() => _s['subtitleFontScale'] = v.toStringAsFixed(2)),
+            onCommit: (v) => _set('subtitleFontScale', v.toStringAsFixed(2), msg: '字幕字号已更新'),
+          ),
+          _sheetSlider(
+            label: '垂直位置',
+            value: pos,
+            min: 0,
+            max: 150,
+            divisions: 30,
+            format: (v) => '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['subtitlePos'] = '${v.round()}'),
+            onCommit: (v) => _set('subtitlePos', '${v.round()}', msg: '字幕位置已更新'),
+          ),
+          _sheetSlider(
+            label: '描边宽度',
+            value: border,
+            min: 0,
+            max: 8,
+            divisions: 16,
+            format: (v) => v.toStringAsFixed(1),
+            onChanging: (v) => setSheet(() => _s['subtitleBorderSize'] = v.toStringAsFixed(1)),
+            onCommit: (v) => _set('subtitleBorderSize', v.toStringAsFixed(1), msg: '字幕描边已更新'),
+          ),
+          _sheetNav(
+            label: '字幕颜色',
+            value: color,
+            onTap: () async {
+              final picked = await pickChoice(context, title: '字幕颜色', current: color, options: const [
+                ('白色', '#FFFFFF'),
+                ('黄色', '#FFFF00'),
+                ('青色', '#00FFFF'),
+                ('绿色', '#00FF00'),
+                ('自定义…', '__custom__'),
+              ]);
+              if (picked == null) return;
+              if (picked == '__custom__') {
+                await _prompt('字幕颜色', '#FFFFFF', color, (v) => _set('subtitleColor', v.trim()));
+              } else {
+                await _set('subtitleColor', picked);
+              }
+              setSheet(() {});
+            },
+          ),
+          _sheetNav(
+            label: '描边颜色',
+            value: borderColor,
+            onTap: () async {
+              final picked = await pickChoice(context, title: '描边颜色', current: borderColor, options: const [
+                ('黑色', '#000000'),
+                ('深灰', '#333333'),
+                ('无描边色', '#00000000'),
+                ('自定义…', '__custom__'),
+              ]);
+              if (picked == null) return;
+              if (picked == '__custom__') {
+                await _prompt('描边颜色', '#000000', borderColor, (v) => _set('subtitleBorderColor', v.trim()));
+              } else {
+                await _set('subtitleBorderColor', picked);
+              }
+              setSheet(() {});
+            },
+          ),
+        ];
+      },
+    );
+  }
+
+  Future<void> _openDanmakuSheet() async {
+    await _showPlayerSubSheet(
+      title: '弹幕设置',
+      buildChildren: (setSheet) {
+        final on = g('danmaku', 'false').toLowerCase() == 'true';
+        final size = (double.tryParse(g('danmakuSize', '18')) ?? 18).clamp(12.0, 48.0);
+        final opacity = (double.tryParse(g('danmakuOpacity', '85')) ?? 85).clamp(0.0, 100.0);
+        final rows = (double.tryParse(g('danmakuRows', '6')) ?? 6).clamp(1.0, 16.0);
+        final offset = (double.tryParse(g('danmakuOffsetMs', '0')) ?? 0).clamp(-10000.0, 10000.0);
+        return [
+          _sheetToggle(
+            label: '开启弹幕',
+            value: on,
+            onChanged: (v) async {
+              await _set('danmaku', v ? 'true' : 'false', msg: v ? '弹幕已开启' : '弹幕已关闭');
+              setSheet(() {});
+            },
+          ),
+          _sheetNav(
+            label: '弹幕 API',
+            value: g('danmakuApi').isEmpty ? '未配置' : '已配置',
+            onTap: () async {
+              await _prompt('弹幕 API', 'https://…?n={name}&e={episode}', g('danmakuApi'), (v) => _set('danmakuApi', v));
+              setSheet(() {});
+            },
+          ),
+          _sheetSlider(
+            label: '字号',
+            value: size,
+            min: 12,
+            max: 48,
+            divisions: 36,
+            format: (v) => '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['danmakuSize'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuSize', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '透明度',
+            value: opacity,
+            min: 15,
+            max: 100,
+            divisions: 17,
+            format: (v) => '${v.round()}%',
+            onChanging: (v) => setSheet(() => _s['danmakuOpacity'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuOpacity', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '行数',
+            value: rows,
+            min: 1,
+            max: 16,
+            divisions: 15,
+            format: (v) => '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['danmakuRows'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuRows', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '时轴偏移',
+            value: offset,
+            min: -5000,
+            max: 5000,
+            divisions: 100,
+            format: (v) => '${v.round()} ms',
+            onChanging: (v) => setSheet(() => _s['danmakuOffsetMs'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuOffsetMs', '${v.round()}'),
+          ),
+        ];
+      },
+    );
+  }
+
   /// 播放 User-Agent：空=默认；输入 `c`/`o` 快捷填 Chrome / OkHttp。
   Future<void> _editUa() async {
     final c = TextEditingController(text: g('ua'));
@@ -767,30 +1527,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final liveChangeLabel = (liveAutoChange == 'false' || liveAutoChange == 'off') ? '关闭' : '开启';
     final adLabel = {'off': '关闭', 'smart': '智能', 'mild': '温和', 'on': '智能'}[ad] ?? ad;
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
-    final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
-    final mpvVulkan = g('mpvVulkan', 'false') == 'true';
-    final mpvTlsVerify = kotvSettingsFlag(g('mpvTlsVerify', 'true'), def: true);
     final audioPassThrough = kotvSettingsFlag(g('audioPassThrough', 'true'), def: true);
-    final exoDiskCache = kotvSettingsFlag(g('exoDiskCache', 'false'), def: false);
-    final exoAdblock = kotvSettingsFlag(g('exoAdblock', 'true'), def: true);
-    final exoTunneling = kotvSettingsFlag(g('exoTunneling', 'false'), def: false);
-    final exoPreferAac = kotvSettingsFlag(g('exoPreferAac', 'false'), def: false);
-    final exoSkipSilence = kotvSettingsFlag(g('exoSkipSilence', 'false'), def: false);
-    final exoSoftAudioPrefer = kotvSettingsFlag(g('exoSoftAudioPrefer', 'true'), def: true);
-    final exoSoftVideoPrefer = kotvSettingsFlag(g('exoSoftVideoPrefer', 'true'), def: true);
-    final exoBuffer = (int.tryParse(g('exoBuffer', '1')) ?? 1).clamp(1, 10);
-    final exoLibass = kotvSettingsFlag(g('exoLibass', 'true'), def: true);
-    final exoSecondary = g('exoSecondarySubtitle', 'off').trim().toLowerCase();
-    final exoSecondaryLabel = {'off': '关闭', 'auto': '自动', 'on': '自动', 'manual': '手动'}[exoSecondary] ?? '关闭';
-    final exoDolby = int.tryParse(g('exoDolbyVision', '0')) ?? 0;
-    final exoDolbyLabel = switch (exoDolby) {
-      1 => '假定支持',
-      2 => '假定不支持',
-      _ => '自动',
-    };
-    final exoPreferredTextLangs = g('exoPreferredTextLangs').trim();
-    final mpvDiskCache = kotvSettingsFlag(g('mpvDiskCache', 'false'), def: false);
-    final mpvConfPreview = g('mpvConf').trim();
     final videoEq = g('videoEq', 'off').trim().toLowerCase();
     final videoEqLabel = switch (videoEq) {
       'soft' => '柔和',
@@ -802,6 +1539,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final audioEqLabel = switch (audioEq) {
       'bass' => '低音',
       'voice' => '人声',
+      'custom' => '自定义',
       _ => '关闭',
     };
     // 全平台：点播/直播任一选了内置 MPV 才露出 MPV 相关项
@@ -1043,44 +1781,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ('关闭', 'false'),
                           ]),
                         ),
-                        if (showMpvGpuNext)
-                          KotvSettingsCell(
-                            label: 'MPV gpu-next',
-                            value: mpvGpuNext ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'mpvGpuNext',
-                              mpvGpuNext ? 'false' : 'true',
-                              msg: mpvGpuNext
-                                  ? '已关闭 gpu-next（重启播放生效）'
-                                  : '已开启 vo=gpu-next（重启播放生效）',
-                            )),
-                          ),
-                        if (showMpvVulkan)
-                          KotvSettingsCell(
-                            label: 'MPV Vulkan',
-                            value: mpvVulkan ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'mpvVulkan',
-                              mpvVulkan ? 'false' : 'true',
-                              msg: mpvVulkan
-                                  ? '已关闭 Vulkan（重启播放生效）'
-                                  : (kotvIsAndroid()
-                                      ? '已开启 gpu-api=vulkan（解码仍为 mediacodec，重启 App 后生效）'
-                                      : '已开启 gpu-api=vulkan（media_kit 内置 MPV，重启播放）'),
-                            )),
-                          ),
-                        if (showMpvTls)
-                          KotvSettingsCell(
-                            label: 'MPV 校验证书',
-                            value: mpvTlsVerify ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'mpvTlsVerify',
-                              mpvTlsVerify ? 'false' : 'true',
-                              msg: mpvTlsVerify
-                                  ? '已关闭 TLS 校验（坏 CA 盒子可用；重启播放生效）'
-                                  : '已开启 TLS 校验（cacert；重启播放生效）',
-                            )),
-                          ),
                         if (kotvIsAndroid())
                           KotvSettingsCell(
                             label: '音频直通',
@@ -1095,313 +1795,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ),
                         if (kotvIsAndroid())
                           KotvSettingsCell(
-                            label: 'Exo 磁盘缓存',
-                            value: exoDiskCache ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'exoDiskCache',
-                              exoDiskCache ? 'false' : 'true',
-                              msg: exoDiskCache
-                                  ? '已关闭 Exo 磁盘缓存（前向缓冲仍用内存）'
-                                  : '已开启 Exo 点播磁盘缓存（内存缓冲仍为主；重启播放生效）',
-                            )),
+                            label: 'Exo 设置',
+                            value: '缓存 / 缓冲 / 隧道…',
+                            onTap: () => unawaited(_openExoSheet()),
                           ),
-                        if (kotvIsAndroid())
+                        if (showMpvOpts)
                           KotvSettingsCell(
-                            label: 'Exo 去广告',
-                            value: exoAdblock ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'exoAdblock',
-                              exoAdblock ? 'false' : 'true',
-                              msg: exoAdblock ? '已关闭 Exo HLS 去广告' : '已开启 Exo HLS 去广告',
-                            )),
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: 'Exo 隧道',
-                            value: exoTunneling ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'exoTunneling',
-                              exoTunneling ? 'false' : 'true',
-                              msg: exoTunneling
-                                  ? '已关闭隧道模式（重启播放生效）'
-                                  : '已开启隧道模式（仅 Surface；重启播放生效）',
-                            )),
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '优先 AAC',
-                            value: exoPreferAac ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'exoPreferAac',
-                              exoPreferAac ? 'false' : 'true',
-                              msg: exoPreferAac
-                                  ? '已关闭优先 AAC（重启播放生效）'
-                                  : '已开启优先 AAC 音轨（重启播放生效）',
-                            )),
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '跳过静音',
-                            value: exoSkipSilence ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'exoSkipSilence',
-                              exoSkipSilence ? 'false' : 'true',
-                              msg: exoSkipSilence
-                                  ? '已关闭跳过静音（重启播放生效）'
-                                  : '已开启跳过静音段（重启播放生效）',
+                            label: 'MPV 设置',
+                            value: 'Vulkan / 配置…',
+                            onTap: () => unawaited(_openMpvSheet(
+                              showGpuNext: showMpvGpuNext,
+                              showVulkan: showMpvVulkan,
+                              showTls: showMpvTls,
                             )),
                           ),
                         KotvSettingsCell(
                           label: '画面调色',
                           value: videoEqLabel,
-                          onTap: () {
-                            final order = ['off', 'soft', 'vivid', 'custom'];
-                            final i = order.indexOf(videoEq);
-                            final next = order[(i < 0 ? 0 : i + 1) % order.length];
-                            unawaited(_set(
-                              'videoEq',
-                              next,
-                              msg: switch (next) {
-                                'soft' => '画面调色：柔和（MPV/FVP；Exo 仅 Texture 渲染）',
-                                'vivid' => '画面调色：鲜艳（MPV/FVP；Exo 仅 Texture 渲染）',
-                                'custom' => '画面调色：自定义（可调下方亮度等）',
-                                _ => '已关闭画面调色',
-                              },
-                            ));
-                          },
+                          onTap: () => unawaited(_openVideoEqSheet()),
                         ),
-                        if (videoEq == 'custom' || videoEq == 'on') ...[
-                          KotvSettingsCell(
-                            label: '亮度',
-                            value: g('videoBrightness', '0'),
-                            onTap: () => _prompt(
-                              '亮度 (-100~100)',
-                              '0',
-                              g('videoBrightness', '0'),
-                              (v) => _set('videoBrightness', v, msg: '亮度已保存'),
-                            ),
-                          ),
-                          KotvSettingsCell(
-                            label: '对比度',
-                            value: g('videoContrast', '0'),
-                            onTap: () => _prompt(
-                              '对比度 (-100~100)',
-                              '0',
-                              g('videoContrast', '0'),
-                              (v) => _set('videoContrast', v, msg: '对比度已保存'),
-                            ),
-                          ),
-                          KotvSettingsCell(
-                            label: '饱和度',
-                            value: g('videoSaturation', '0'),
-                            onTap: () => _prompt(
-                              '饱和度 (-100~100)',
-                              '0',
-                              g('videoSaturation', '0'),
-                              (v) => _set('videoSaturation', v, msg: '饱和度已保存'),
-                            ),
-                          ),
-                          KotvSettingsCell(
-                            label: '伽马',
-                            value: g('videoGamma', '0'),
-                            onTap: () => _prompt(
-                              '伽马 (-100~100)',
-                              '0',
-                              g('videoGamma', '0'),
-                              (v) => _set('videoGamma', v, msg: '伽马已保存'),
-                            ),
-                          ),
-                          KotvSettingsCell(
-                            label: '色相',
-                            value: g('videoHue', '0'),
-                            onTap: () => _prompt(
-                              '色相 (-100~100)',
-                              '0',
-                              g('videoHue', '0'),
-                              (v) => _set('videoHue', v, msg: '色相已保存'),
-                            ),
-                          ),
-                        ],
                         KotvSettingsCell(
                           label: '音频均衡',
                           value: audioEqLabel,
-                          onTap: () {
-                            final order = ['off', 'bass', 'voice'];
-                            final i = order.indexOf(audioEq);
-                            final next = order[(i < 0 ? 0 : i + 1) % order.length];
-                            unawaited(_set(
-                              'audioEq',
-                              next,
-                              msg: switch (next) {
-                                'bass' => '音频均衡：低音增强（MPV/FVP/Exo；直通时无效）',
-                                'voice' => '音频均衡：人声增强（MPV/FVP/Exo；直通时无效）',
-                                _ => '已关闭音频均衡',
-                              },
-                            ));
-                          },
-                        ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '缓冲倍率',
-                            value: '${exoBuffer}×',
-                            onTap: () {
-                              final next = exoBuffer >= 10 ? 1 : exoBuffer + 1;
-                              unawaited(_set(
-                                'exoBuffer',
-                                '$next',
-                                msg: 'Exo 内存缓冲倍率已设为 ${next}×（重启播放生效）',
-                              ));
-                            },
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '软解优先音轨',
-                            value: exoSoftAudioPrefer ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'exoSoftAudioPrefer',
-                              exoSoftAudioPrefer ? 'false' : 'true',
-                              msg: exoSoftAudioPrefer
-                                  ? '软解模式下音轨改走硬解（重启播放生效）'
-                                  : '软解模式下音轨优先软解（重启播放生效）',
-                            )),
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '软解优先视轨',
-                            value: exoSoftVideoPrefer ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'exoSoftVideoPrefer',
-                              exoSoftVideoPrefer ? 'false' : 'true',
-                              msg: exoSoftVideoPrefer
-                                  ? '软解模式下视轨改走硬解（重启播放生效）'
-                                  : '软解模式下视轨优先软解（重启播放生效）',
-                            )),
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '字幕特效',
-                            value: exoLibass ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'exoLibass',
-                              exoLibass ? 'false' : 'true',
-                              msg: exoLibass
-                                  ? '已关闭 ASS 特效字幕（重启播放生效）'
-                                  : '已开启 ASS/libass 特效字幕（重启播放生效）',
-                            )),
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '双字幕',
-                            value: exoSecondaryLabel,
-                            onTap: () => unawaited(_set(
-                              'exoSecondarySubtitle',
-                              (exoSecondary == 'off') ? 'auto' : 'off',
-                              msg: (exoSecondary == 'off')
-                                  ? '已开启双字幕自动（重启播放生效）'
-                                  : '已关闭双字幕（重启播放生效）',
-                            )),
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '杜比视界',
-                            value: exoDolbyLabel,
-                            onTap: () {
-                              final next = (exoDolby + 1) % 3;
-                              unawaited(_set(
-                                'exoDolbyVision',
-                                '$next',
-                                msg: '杜比视界策略已设为${switch (next) {
-                                  1 => '假定支持',
-                                  2 => '假定不支持',
-                                  _ => '自动',
-                                }}（重启播放生效）',
-                              ));
-                            },
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '首选字幕语言',
-                            value: exoPreferredTextLangs.isEmpty
-                                ? '默认'
-                                : _ellipsize(exoPreferredTextLangs, 18),
-                            onTap: () => _prompt(
-                              '首选字幕语言',
-                              '逗号分隔 IETF 语言码，如 zh,zh-CN,en。空=默认。',
-                              exoPreferredTextLangs,
-                              (v) => _set(
-                                'exoPreferredTextLangs',
-                                v.trim(),
-                                msg: '首选字幕语言已更新（重启播放生效）',
-                              ),
-                            ),
-                          ),
-                        if (kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: '下一集预解析',
-                            value: kotvSettingsFlag(g('preloadNextEpisode', 'true'), def: true) ? '开启' : '关闭',
-                            onTap: () {
-                              final on = kotvSettingsFlag(g('preloadNextEpisode', 'true'), def: true);
-                              unawaited(_set(
-                                'preloadNextEpisode',
-                                on ? 'false' : 'true',
-                                msg: on ? '已关闭下一集预解析' : '已开启下一集后台预解析',
-                              ));
-                            },
-                          ),
-                        KotvSettingsCell(
-                          label: '字幕字号',
-                          value: g('subtitleFontScale', '1.0'),
-                          onTap: () => _prompt(
-                            '字幕字号倍率',
-                            '0.5–2.5，默认 1.0',
-                            g('subtitleFontScale', '1.0'),
-                            (v) => _set('subtitleFontScale', v, msg: '字幕字号已更新（重启播放生效）'),
-                          ),
+                          onTap: () => unawaited(_openAudioEqSheet()),
                         ),
                         KotvSettingsCell(
-                          label: '弹幕时轴偏移',
-                          value: '${g('danmakuOffsetMs', '0')} ms',
-                          onTap: () => _prompt(
-                            '弹幕时轴偏移（毫秒）',
-                            '正数延后，负数提前，如 500 / -1000',
-                            g('danmakuOffsetMs', '0'),
-                            (v) => _set('danmakuOffsetMs', v, msg: '弹幕偏移已保存'),
-                          ),
+                          label: '字幕样式',
+                          value: '字号 ${g("subtitleFontScale", "1.0")}',
+                          onTap: () => unawaited(_openSubtitleSheet()),
                         ),
-                        if (showMpvOpts && kotvIsAndroid())
-                          KotvSettingsCell(
-                            label: 'MPV 磁盘缓存',
-                            value: mpvDiskCache ? '开启' : '关闭',
-                            onTap: () => unawaited(_set(
-                              'mpvDiskCache',
-                              mpvDiskCache ? 'false' : 'true',
-                              msg: mpvDiskCache
-                                  ? '已关闭 MPV 磁盘缓存（前向缓冲仍用内存）'
-                                  : '已开启 MPV 点播磁盘缓存（内存 demuxer 预算仍为主；重启播放生效）',
-                            )),
-                          ),
-                        if (showMpvOpts)
-                          KotvSettingsCell(
-                            label: 'MPV 配置',
-                            value: mpvConfPreview.isEmpty
-                                ? '默认'
-                                : _ellipsize(mpvConfPreview.replaceAll('\n', ' '), 18),
-                            onTap: () => _prompt(
-                              'MPV 配置（mpv.conf）',
-                              '每行 key=value，# 注释。重启播放后生效。\n'
-                              '与设置页冲突的键（hwdec/vo/cache/tls 等）会被忽略。\n'
-                              '桌面诊断：kotv-log=debug 加深 libmpv 日志；kotv-log=no 关闭。',
-                              g('mpvConf'),
-                              (v) async {
-                                final conflicts = KotvMpvOpts.findConfConflicts(v);
-                                final msg = conflicts.isEmpty
-                                    ? 'MPV 配置已保存'
-                                    : '已保存；下列键由设置/引擎托管将被忽略：${conflicts.join(', ')}';
-                                await _set('mpvConf', v, msg: msg);
-                              },
-                              maxLines: 12,
-                            ),
-                          ),
                       ]),
                     ]),
                     const KotvSettingsSectionTitle('功能'),
@@ -1411,27 +1833,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '弹幕',
                           value: danOn ? '开启' : '关闭',
-                          onTap: () => _set('danmaku', danOn ? 'false' : 'true', msg: danOn ? '弹幕已关闭' : '弹幕已开启'),
-                        ),
-                        KotvSettingsCell(
-                          label: '弹幕 API',
-                          value: g('danmakuApi').isEmpty ? '未配置' : '已配置',
-                          onTap: () => _prompt('弹幕 API', 'https://…?n={name}&e={episode}', g('danmakuApi'), (v) => _set('danmakuApi', v)),
-                        ),
-                        KotvSettingsCell(
-                          label: '弹幕字号',
-                          value: g('danmakuSize', '18'),
-                          onTap: () => _prompt('弹幕字号', '12–48', g('danmakuSize', '18'), (v) => _set('danmakuSize', v)),
-                        ),
-                        KotvSettingsCell(
-                          label: '弹幕透明度',
-                          value: g('danmakuOpacity', '85'),
-                          onTap: () => _prompt('弹幕透明度', '0–100', g('danmakuOpacity', '85'), (v) => _set('danmakuOpacity', v)),
-                        ),
-                        KotvSettingsCell(
-                          label: '弹幕行数',
-                          value: g('danmakuRows', '6'),
-                          onTap: () => _prompt('弹幕行数', '1–16', g('danmakuRows', '6'), (v) => _set('danmakuRows', v)),
+                          onTap: () => unawaited(_openDanmakuSheet()),
                         ),
                         KotvSettingsCell(
                           label: '无痕模式',

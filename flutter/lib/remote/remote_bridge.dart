@@ -17,6 +17,12 @@ class RemoteBridge {
   Timer? _pingTimer;
   void Function(String type, int seekMs)? onControl;
   void Function(String keyword)? onSearch;
+  /// 遥控推送的本地/URL 字幕文件。
+  void Function(String path)? onSubtitleFile;
+  /// 遥控推送的弹幕文件（本地路径或 URL）。
+  void Function(String path)? onDanmakuFile;
+  /// 遥控即时弹幕文本。
+  void Function(String text)? onLiveDanmaku;
 
   void start() {
     _timer?.cancel();
@@ -50,6 +56,23 @@ class RemoteBridge {
       for (final s in searches) {
         final kw = '$s'.trim();
         if (kw.isNotEmpty) onSearch?.call(kw);
+      }
+      final refreshes = (data['refreshes'] as List?) ?? const [];
+      for (final r in refreshes) {
+        if (r is! Map) continue;
+        final typ = '${r['type'] ?? ''}'.trim().toLowerCase();
+        final path = '${r['path'] ?? ''}'.trim();
+        if (path.isEmpty) continue;
+        if (typ == 'subtitle') {
+          onSubtitleFile?.call(path);
+        } else if (typ == 'danmaku') {
+          onDanmakuFile?.call(path);
+        }
+      }
+      final live = (data['danmakuLive'] as List?) ?? const [];
+      for (final t in live) {
+        final text = '$t'.trim();
+        if (text.isNotEmpty) onLiveDanmaku?.call(text);
       }
     } catch (e) {
       debugPrint('remote poll: $e');

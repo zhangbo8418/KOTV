@@ -729,6 +729,9 @@ class ExoPlayback extends KotvPlayback {
   @override
   String? get currentSubtitleId => _currentSubtitleId;
 
+  @override
+  String? get currentSecondarySubtitleId => _currentSecondarySubtitleId;
+
   Future<void> _refreshTracks() async {
     if (!_nativeReady) return;
     try {
@@ -855,6 +858,7 @@ class ExoPlayback extends KotvPlayback {
   }
 
   /// 选择副字幕轨（off/auto/gN:tM）。
+  @override
   Future<void> setSecondarySubtitleTrack(String id) async {
     try {
       await _ensureNative();

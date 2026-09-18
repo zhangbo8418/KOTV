@@ -5,7 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
+	"time"
 )
 
 // Drm 播放 DRM 描述（bean.Drm / #KODIPROP）。
@@ -44,6 +47,7 @@ func (d *Drm) IsHTTPLicense() bool {
 }
 
 // DesktopSupported 桌面仅支持本地 ClearKey（kid:key / JWK → lavf decryption_key）。
+// HTTP license 需先 [PrepareForDesktop] 拉成本地密钥。
 func (d *Drm) DesktopSupported() bool {
 	if d == nil || strings.TrimSpace(d.Type) == "" {
 		return false
@@ -55,6 +59,7 @@ func (d *Drm) DesktopSupported() bool {
 }
 
 // ClearKeyHex 取出首个密钥的 hex（供 ffmpeg/mpv demuxer-lavf-o=decryption_key=）。
+// 多 key 片源目前 lavf 只吃一把，取 keys[0]。
 func (d *Drm) ClearKeyHex() string {
 	if d == nil {
 		return ""
@@ -118,6 +123,7 @@ func b64URLToHex(raw string) string {
 }
 
 // DesktopError 返回桌面端播放前的明确错误；无 DRM 或本地 ClearKey 返回 nil。
+// HTTP ClearKey 请先调用 [PrepareForDesktop]。
 func (d *Drm) DesktopError() error {
 	if d == nil || strings.TrimSpace(d.Type) == "" {
 		return nil
@@ -138,6 +144,73 @@ func (d *Drm) DesktopError() error {
 	default:
 		return fmt.Errorf("桌面端不支持 DRM：%s", d.Type)
 	}
+}
+
+// PrepareForDesktop 桌面开播前：拉取 ClearKey HTTP license，其余类型走 DesktopError。
+// 返回值可直接交给播放器；无 DRM 时返回 (nil, nil)。
+func PrepareForDesktop(d *Drm) (*Drm, error) {
+	if d == nil || strings.TrimSpace(d.Type) == "" {
+		return nil, nil
+	}
+	if d.DesktopSupported() {
+		return d, nil
+	}
+	if d.Scheme() == "clearkey" && d.IsHTTPLicense() {
+		body, err := fetchClearKeyLicense(d)
+		if err != nil {
+			return nil, fmt.Errorf("ClearKey 在线 license 获取失败: %w", err)
+		}
+		resolved := &Drm{
+			Type:     "clearkey",
+			Key:      body,
+			ForceKey: d.ForceKey,
+			Header:   d.Header,
+		}
+		// 可能是 kid:key 明文或 JWK JSON。
+		if !strings.HasPrefix(strings.TrimSpace(body), "{") {
+			resolved.Key = NormalizeClearKey(body)
+		}
+		if resolved.ClearKeyHex() == "" {
+			return nil, fmt.Errorf("ClearKey 在线 license 无可用密钥（多 key 时仅用首个）")
+		}
+		return resolved, nil
+	}
+	return nil, d.DesktopError()
+}
+
+func fetchClearKeyLicense(d *Drm) (string, error) {
+	url := strings.TrimSpace(d.Key)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	for k, v := range d.Header {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			continue
+		}
+		req.Header.Set(k, v)
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "KOTV")
+	}
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	body := strings.TrimSpace(string(b))
+	if body == "" {
+		return "", fmt.Errorf("空响应")
+	}
+	return body, nil
 }
 
 // NormalizeClearKey 将 kid:key 或已有 JSON 规范为 ClearKey JWK JSON。

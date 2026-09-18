@@ -88,19 +88,35 @@ abstract class KotvPlayback extends ChangeNotifier {
   String? get currentAudioId;
   String? get currentVideoId => null;
   String? get currentSubtitleId;
+  /// 副字幕轨 id；无副字幕时为 null / off。
+  String? get currentSecondarySubtitleId => null;
   Future<void> setAudioTrack(String id);
   Future<void> setVideoTrack(String id) async {}
   Future<void> setSubtitleTrack(String id); // ''=关, 'auto'=自动
 
+  /// 副字幕轨：''/off=关，'auto'=自动，其余为轨 id；不支持的引擎忽略。
+  Future<void> setSecondarySubtitleTrack(String id) async {}
+
+  /// 碟片导航（DVD/BD）；不支持时 [supportsDiscNav] 为 false。
+  bool get supportsDiscNav => false;
+  Future<List<KotvTrack>> discTitles() async => const [];
+  Future<List<KotvTrack>> discChapters() async => const [];
+  Future<void> setDiscTitle(int index) async {}
+  Future<void> setDiscChapter(int index) async {}
+  Future<void> openDiscMenu() async {}
+
   /// 外挂字幕文件（本地路径或 URL）；不支持的引擎忽略。
   Future<void> addSubtitleFile(String path, {String? title}) async {}
 
-  /// 字幕样式（字号等）；不支持的引擎忽略。
+  /// 字幕样式（字号/位置/颜色等）；不支持的引擎忽略。
   Future<void> setSubtitleStyle({
     double? scale,
     double? pos,
     double? secondaryPos,
     bool forceStyle = false,
+    String? color,
+    String? borderColor,
+    double? borderSize,
   }) async {}
 
   /// 离开详情/切 Tab：stop + release，拆掉原生 AO，避免后台漏音。

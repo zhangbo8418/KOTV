@@ -14,7 +14,7 @@ external KotvHlsApi get _kotvHls;
 
 /// index.html 注入的 hls.js 胶水。
 extension type KotvHlsApi._(JSObject _) implements JSObject {
-  external String attach(web.HTMLVideoElement video, String url, JSAny? headers);
+  external String attach(web.HTMLVideoElement video, String url, JSAny? headers, [JSAny? drm]);
   external void destroy(web.HTMLVideoElement video);
   external bool get ready;
 }
@@ -198,8 +198,9 @@ class HtmlPlayback extends KotvPlayback {
     _opened = true;
     final h = kotvNormalizePlayHeaders(headers, url: url);
     final hdrJs = h.isEmpty ? null : h.jsify();
+    final drmJs = (drm == null || drm.isEmpty) ? null : drm.jsify();
     try {
-      final mode = _kotvHls.attach(_video, url, hdrJs);
+      final mode = _kotvHls.attach(_video, url, hdrJs, drmJs);
       _engine = switch (mode) {
         'hls' => 'hls.js',
         'native' => 'HTML5·HLS',

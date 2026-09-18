@@ -293,6 +293,11 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   @override
+  String? get currentSecondarySubtitleId => _currentSecondarySubtitleId;
+
+  String? _currentSecondarySubtitleId;
+
+  @override
   Future<void> open(
     String url, {
     Map<String, String>? headers,
@@ -494,6 +499,72 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   @override
+  bool get supportsDiscNav => true;
+
+  Future<dynamic> _mpvProp(String name) async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return null;
+      return await (platform as dynamic).getProperty(name);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _mpvSet(String name, String value) async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return;
+      await (platform as dynamic).setProperty(name, value);
+    } catch (_) {}
+  }
+
+  Future<void> _mpvCmd(List<String> args) async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return;
+      await (platform as dynamic).command(args);
+    } catch (_) {}
+  }
+
+  @override
+  Future<List<KotvTrack>> discTitles() async {
+    final raw = await _mpvProp('disc-titles');
+    final n = int.tryParse('$raw') ?? 0;
+    if (n <= 0) return const [];
+    return [
+      for (var i = 1; i <= n; i++) KotvTrack(id: '$i', label: '标题 $i'),
+    ];
+  }
+
+  @override
+  Future<List<KotvTrack>> discChapters() async {
+    final raw = await _mpvProp('chapters');
+    final n = int.tryParse('$raw') ?? 0;
+    if (n <= 0) return const [];
+    return [
+      for (var i = 0; i < n; i++) KotvTrack(id: '$i', label: '章节 ${i + 1}'),
+    ];
+  }
+
+  @override
+  Future<void> setDiscTitle(int index) async {
+    if (index < 1) return;
+    await _mpvSet('disc-title', '$index');
+  }
+
+  @override
+  Future<void> setDiscChapter(int index) async {
+    if (index < 0) return;
+    await _mpvSet('chapter', '$index');
+  }
+
+  @override
+  Future<void> openDiscMenu() async {
+    await _mpvCmd(const ['discnav', 'menu']);
+  }
+
+  @override
   Future<void> addSubtitleFile(String path, {String? title}) async {
     final p = path.trim();
     if (p.isEmpty) return;
@@ -509,11 +580,43 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   @override
+  Future<void> setSecondarySubtitleTrack(String id) async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return;
+      final key = id.trim().toLowerCase();
+      if (key.isEmpty || key == 'no' || key == 'off' || key == 'none') {
+        await (platform as dynamic).setProperty('secondary-sid', 'no');
+        _currentSecondarySubtitleId = null;
+      } else if (key == 'auto') {
+        // 自动：选主轨以外的第一条字幕。
+        final subs = subtitleTracks;
+        final primary = currentSubtitleId;
+        final alt = subs.where((t) => t.id != primary).toList();
+        if (alt.isEmpty) {
+          await (platform as dynamic).setProperty('secondary-sid', 'no');
+          _currentSecondarySubtitleId = null;
+        } else {
+          await (platform as dynamic).setProperty('secondary-sid', alt.first.id);
+          _currentSecondarySubtitleId = alt.first.id;
+        }
+      } else {
+        await (platform as dynamic).setProperty('secondary-sid', id.trim());
+        _currentSecondarySubtitleId = id.trim();
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  @override
   Future<void> setSubtitleStyle({
     double? scale,
     double? pos,
     double? secondaryPos,
     bool forceStyle = false,
+    String? color,
+    String? borderColor,
+    double? borderSize,
   }) async {
     try {
       final platform = player.platform;
@@ -527,7 +630,28 @@ class MediaKitPlayback extends KotvPlayback {
       if (pos != null) {
         await (platform as dynamic).setProperty('sub-pos', pos.toStringAsFixed(1));
       }
-      if (forceStyle) {
+      if (secondaryPos != null) {
+        await (platform as dynamic).setProperty(
+          'secondary-sub-pos',
+          secondaryPos.toStringAsFixed(1),
+        );
+      }
+      if (color != null && color.trim().isNotEmpty) {
+        await (platform as dynamic).setProperty('sub-color', color.trim());
+      }
+      if (borderColor != null && borderColor.trim().isNotEmpty) {
+        await (platform as dynamic).setProperty('sub-border-color', borderColor.trim());
+      }
+      if (borderSize != null) {
+        await (platform as dynamic).setProperty(
+          'sub-border-size',
+          borderSize.clamp(0.0, 8.0).toStringAsFixed(1),
+        );
+      }
+      if (forceStyle ||
+          color != null ||
+          borderColor != null ||
+          borderSize != null) {
         await (platform as dynamic).setProperty('sub-ass-override', 'force');
       }
     } catch (_) {}
