@@ -49,6 +49,8 @@ class KotvMpvOpts {
     this.videoEq = KotvVideoEq.off,
     this.audioEq = KotvAudioEqPreset.off,
     this.audioEqBands = '',
+    this.audioDialogue = false,
+    this.audioBalance = 0,
     this.subtitleFontScale = 1.0,
   });
 
@@ -70,6 +72,10 @@ class KotvMpvOpts {
   final KotvAudioEqPreset audioEq;
   /// 自定义频段 `freq:gain,…`。
   final String audioEqBands;
+  /// 对白增强（人声频段 + 轻压缩）。
+  final bool audioDialogue;
+  /// 声道平衡 ∈ [-100, 100]。
+  final int audioBalance;
   /// mpv `sub-scale`（0.5–2.5）。
   final double subtitleFontScale;
 
@@ -112,6 +118,8 @@ class KotvMpvOpts {
       videoEq: KotvVideoEq.fromSettings(settings),
       audioEq: kotvAudioEqFromSettings(settings),
       audioEqBands: kotvAudioEqBandsFromSettings(settings),
+      audioDialogue: kotvAudioDialogueFromSettings(settings),
+      audioBalance: kotvAudioBalanceFromSettings(settings),
       subtitleFontScale: fontScale,
     );
   }
@@ -130,6 +138,8 @@ class KotvMpvOpts {
     KotvVideoEq? videoEq,
     KotvAudioEqPreset? audioEq,
     String? audioEqBands,
+    bool? audioDialogue,
+    int? audioBalance,
     double? subtitleFontScale,
   }) {
     return KotvMpvOpts(
@@ -146,6 +156,8 @@ class KotvMpvOpts {
       videoEq: videoEq ?? this.videoEq,
       audioEq: audioEq ?? this.audioEq,
       audioEqBands: audioEqBands ?? this.audioEqBands,
+      audioDialogue: audioDialogue ?? this.audioDialogue,
+      audioBalance: audioBalance ?? this.audioBalance,
       subtitleFontScale: subtitleFontScale ?? this.subtitleFontScale,
     );
   }
@@ -276,7 +288,15 @@ class KotvMpvOpts {
       } catch (_) {}
       if (!audioPassThrough) {
         try {
-          await set('af', kotvAudioEqMpvAf(audioEq, bands: audioEqBands));
+          await set(
+            'af',
+            kotvComposeMpvAf(
+              eq: audioEq,
+              bands: audioEqBands,
+              dialogue: audioDialogue,
+              balance: audioBalance,
+            ),
+          );
         } catch (_) {}
       }
       try {
@@ -339,7 +359,14 @@ class KotvMpvOpts {
         'eqSaturation': videoEq.enabled ? videoEq.saturation : 0,
         'eqGamma': videoEq.enabled ? videoEq.gamma : 0,
         'eqHue': videoEq.enabled ? videoEq.hue : 0,
-        'audioAf': audioPassThrough ? '' : kotvAudioEqMpvAf(audioEq, bands: audioEqBands),
+        'audioAf': audioPassThrough
+            ? ''
+            : kotvComposeMpvAf(
+                eq: audioEq,
+                bands: audioEqBands,
+                dialogue: audioDialogue,
+                balance: audioBalance,
+              ),
         'videoVf': videoEq.mpvVf(),
         'subtitleFontScale': subtitleFontScale.clamp(0.5, 2.5),
       };

@@ -707,7 +707,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                'Exo 默认 Surface 时画面滤镜不生效，可改渲染为 Texture；锐度/阴影主要作用于 MPV/FVP。',
+                'Exo Surface/Texture 均走原生调色（隧道/HDR 下不可用）；锐度/阴影在 Exo 为近似实现，MPV/FVP 更完整。',
                 style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
               ),
             ),
@@ -778,6 +778,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ],
             ),
           ),
+          _sheetToggle(
+            label: '对白增强',
+            value: g('audioDialogue', 'false').toLowerCase() == 'true',
+            onChanged: (v) async {
+              await _set('audioDialogue', v ? 'true' : 'false',
+                  msg: v ? '对白增强已开启' : '对白增强已关闭');
+              setSheet(() {});
+            },
+          ),
+          _sheetSlider(
+            label: '声道平衡',
+            value: (double.tryParse(g('audioBalance', '0')) ?? 0).clamp(-100.0, 100.0),
+            min: -100,
+            max: 100,
+            divisions: 40,
+            format: (v) {
+              final n = v.round();
+              if (n == 0) return '居中';
+              return n < 0 ? '左 ${-n}' : '右 $n';
+            },
+            onChanging: (v) => setSheet(() => _s['audioBalance'] = '${v.round()}'),
+            onCommit: (v) => _set('audioBalance', '${v.round()}', msg: '声道平衡已更新'),
+          ),
           if (audioEq == 'custom') ...[
             for (final e in freqs.entries)
               _sheetSlider(
@@ -799,14 +822,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   return writeBands(freqs);
                 },
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                '直通开启时均衡不生效。Exo 自定义频段目前仅 MPV/FVP 完整支持。',
-                style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
-              ),
-            ),
           ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              '直通开启时均衡/对白/平衡不生效。Exo 对白走 LoudnessEnhancer+人声 EQ，平衡走声道混合。',
+              style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
+            ),
+          ),
         ];
       },
     );
@@ -852,6 +875,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onChanging: (v) => setSheet(() => _s['subtitleBorderSize'] = v.toStringAsFixed(1)),
             onCommit: (v) => _set('subtitleBorderSize', v.toStringAsFixed(1), msg: '字幕描边已更新'),
           ),
+          _sheetSlider(
+            label: '副字幕位置',
+            value: (double.tryParse(g('subtitleSecondaryPos', '0')) ?? 0).clamp(0.0, 150.0),
+            min: 0,
+            max: 150,
+            divisions: 30,
+            format: (v) => '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['subtitleSecondaryPos'] = '${v.round()}'),
+            onCommit: (v) => _set('subtitleSecondaryPos', '${v.round()}', msg: '副字幕位置已更新'),
+          ),
           _sheetNav(
             label: '字幕颜色',
             value: color,
@@ -887,6 +920,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 await _prompt('描边颜色', '#000000', borderColor, (v) => _set('subtitleBorderColor', v.trim()));
               } else {
                 await _set('subtitleBorderColor', picked);
+              }
+              setSheet(() {});
+            },
+          ),
+          _sheetNav(
+            label: '字幕背景',
+            value: g('subtitleBgColor', '#00000000'),
+            onTap: () async {
+              final cur = g('subtitleBgColor', '#00000000');
+              final picked = await pickChoice(context, title: '字幕背景', current: cur, options: const [
+                ('透明', '#00000000'),
+                ('半透明黑', '#80000000'),
+                ('深黑', '#CC000000'),
+                ('自定义…', '__custom__'),
+              ]);
+              if (picked == null) return;
+              if (picked == '__custom__') {
+                await _prompt('字幕背景色', '#80000000', cur, (v) => _set('subtitleBgColor', v.trim()));
+              } else {
+                await _set('subtitleBgColor', picked);
               }
               setSheet(() {});
             },

@@ -1,9 +1,9 @@
 import 'package:flutter/painting.dart';
 
-/// 画面调色（MPV / media_kit / FVP 全量；Exo：Texture 渲染用 ColorMatrix，SurfaceView 忽略画面）。
+/// 画面调色（MPV / media_kit / FVP 全量；Exo：Surface/Texture 均走 Media3 setVideoEffects）。
 ///
 /// 数值：brightness/contrast/saturation/gamma/hue/temperature/shadow ∈ [-100, 100]，0 为中性；
-/// sharpness ∈ [0, 100]。色温/锐度/阴影主要走 MPV 滤镜；Exo Texture 仅近似色温。
+/// sharpness ∈ [0, 100]。隧道模式 / HDR 下 Exo 效果不可用。
 class KotvVideoEq {
   const KotvVideoEq({
     this.enabled = false,
@@ -119,7 +119,7 @@ class KotvVideoEq {
     return parts.join(',');
   }
 
-  /// Exo Flutter Texture 路径的画面滤镜；关闭或全 0 时返回 null。
+  /// Exo Flutter Texture 兜底滤镜（隧道等原生 effects 不可用时）；关闭或全 0 时返回 null。
   ColorFilter? exoTextureColorFilter() {
     if (!enabled) return null;
     final b = brightness.clamp(-100, 100) / 100.0;
@@ -175,6 +175,17 @@ String kotvAudioEqBandsFromSettings(Map<String, dynamic> settings) {
   return '${settings['audioEqBands'] ?? ''}'.trim();
 }
 
+bool kotvAudioDialogueFromSettings(Map<String, dynamic> settings) {
+  final v = '${settings['audioDialogue'] ?? ''}'.trim().toLowerCase();
+  return v == 'true' || v == '1' || v == 'on' || v == 'yes';
+}
+
+/// 声道平衡 ∈ [-100, 100]；负偏左、正偏右、0 居中。
+int kotvAudioBalanceFromSettings(Map<String, dynamic> settings) {
+  final n = int.tryParse('${settings['audioBalance'] ?? '0'}') ?? 0;
+  return n.clamp(-100, 100);
+}
+
 String _bandsToLavfi(String bands) {
   final parts = <String>[];
   for (final raw in bands.split(',')) {
@@ -204,8 +215,53 @@ String kotvAudioEqMpvAf(KotvAudioEqPreset p, {String bands = ''}) {
   }
 }
 
-String kotvAudioEqFvpFilter(KotvAudioEqPreset p, {String bands = ''}) {
-  final af = kotvAudioEqMpvAf(p, bands: bands);
+/// 组合 EQ + 对白增强 + 声道平衡为一条 mpv `af`（直通时应传空）。
+String kotvComposeMpvAf({
+  KotvAudioEqPreset eq = KotvAudioEqPreset.off,
+  String bands = '',
+  bool dialogue = false,
+  int balance = 0,
+}) {
+  final inners = <String>[];
+  void addLavfi(String lavfi) {
+    final s = lavfi.trim();
+    if (s.isEmpty) return;
+    if (s.startsWith('lavfi=[') && s.endsWith(']')) {
+      final inner = s.substring(7, s.length - 1).trim();
+      if (inner.isNotEmpty) inners.add(inner);
+    } else {
+      inners.add(s);
+    }
+  }
+
+  addLavfi(kotvAudioEqMpvAf(eq, bands: bands));
+  if (dialogue) {
+    // 人声频段抬升 + 轻压缩，避免 dialoguenhance 输出 3.0 声道。
+    inners.add(
+      'equalizer=f=1200:t=h:width=900:g=5,'
+      'equalizer=f=2800:t=h:width=1400:g=3,'
+      'acompressor=threshold=-22dB:ratio=2.2:attack=12:release=180:makeup=2.5',
+    );
+  }
+  final b = balance.clamp(-100, 100);
+  if (b != 0) {
+    final left = b <= 0 ? 1.0 : (1.0 - b / 100.0);
+    final right = b >= 0 ? 1.0 : (1.0 + b / 100.0);
+    inners.add(
+      'pan=stereo|c0=${left.toStringAsFixed(3)}*c0|c1=${right.toStringAsFixed(3)}*c1',
+    );
+  }
+  if (inners.isEmpty) return '';
+  return 'lavfi=[${inners.join(',')}]';
+}
+
+String kotvAudioEqFvpFilter(
+  KotvAudioEqPreset p, {
+  String bands = '',
+  bool dialogue = false,
+  int balance = 0,
+}) {
+  final af = kotvComposeMpvAf(eq: p, bands: bands, dialogue: dialogue, balance: balance);
   if (af.startsWith('lavfi=[') && af.endsWith(']')) {
     return af.substring(7, af.length - 1);
   }

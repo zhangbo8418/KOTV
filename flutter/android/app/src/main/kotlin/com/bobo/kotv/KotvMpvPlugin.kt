@@ -682,6 +682,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               if (borderSize != null) {
                 MPVLib.setPropertyDouble("sub-border-size", borderSize.coerceIn(0.0, 8.0))
               }
+              val bgColor = call.argument<String>("bgColor")?.trim().orEmpty()
+              if (bgColor.isNotEmpty()) {
+                MPVLib.setPropertyString("sub-back-color", bgColor)
+              }
               val force = forceStyle || color.isNotEmpty() || borderColor.isNotEmpty() || borderSize != null
               MPVLib.setPropertyString(
                 "secondary-sub-ass-override",

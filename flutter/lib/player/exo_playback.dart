@@ -72,9 +72,18 @@ class ExoPlayback extends KotvPlayback {
   String _secondarySubtitle = 'off';
   String? _currentSecondarySubtitleId;
   double _subtitleFontScale = 1.0;
+  double _subtitlePos = 100;
+  double _subtitleSecondaryPos = 0;
+  String _subtitleColor = '#FFFFFF';
+  String _subtitleBorderColor = '#000000';
+  double _subtitleBorderSize = 2;
+  String _subtitleBgColor = '#00000000';
   List<Map<String, dynamic>> _subs = const [];
   KotvVideoEq _videoEq = KotvVideoEq.off;
   KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
+  String _audioEqBands = '';
+  bool _audioDialogue = false;
+  int _audioBalance = 0;
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -144,13 +153,9 @@ class ExoPlayback extends KotvPlayback {
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     // 播控/设置的比例优先于传入 fit（Surface 路径靠布局 + 原生 setFit）。
+    // 画面调色走原生 setVideoEffects（Surface/Texture 共用）；隧道模式不可用。
     final effective = _fitFromScale(_videoScale, fit);
     final tid = _textureId;
-    final eqFilter = _videoEq.exoTextureColorFilter();
-    Widget wrapEq(Widget child) {
-      if (eqFilter == null) return child;
-      return ColorFiltered(colorFilter: eqFilter, child: child);
-    }
     if (_useFlutterTexture) {
       // Texture 兼容模式：create 完成前 tid 可能为空。
       if (tid == null || tid < 0) {
@@ -162,20 +167,20 @@ class ExoPlayback extends KotvPlayback {
           builder: (context, c) {
             final max = c.biggest;
             if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
-              return wrapEq(Texture(textureId: tid));
+              return Texture(textureId: tid);
             }
             if (effective == BoxFit.fill || _w <= 0 || _h <= 0) {
               return SizedBox(
                 width: max.width,
                 height: max.height,
-                child: wrapEq(Texture(textureId: tid)),
+                child: Texture(textureId: tid),
               );
             }
             final box = _boxFitSize(max, _displaySize, effective);
             final child = SizedBox(
               width: box.width,
               height: box.height,
-              child: wrapEq(Texture(textureId: tid)),
+              child: Texture(textureId: tid),
             );
             if (effective == BoxFit.cover) {
               return ClipRect(child: Center(child: child));
@@ -436,11 +441,25 @@ class ExoPlayback extends KotvPlayback {
         'secondarySubtitle': _secondarySubtitle,
         'secondarySubtitleId': _currentSecondarySubtitleId ?? '',
         'subtitleFontScale': _subtitleFontScale,
+        'subtitlePos': _subtitlePos,
+        'subtitleSecondaryPos': _subtitleSecondaryPos,
+        'subtitleColor': _subtitleColor,
+        'subtitleBorderColor': _subtitleBorderColor,
+        'subtitleBorderSize': _subtitleBorderSize,
+        'subtitleBgColor': _subtitleBgColor,
         'subs': _subs,
         'audioEq': kotvAudioEqExoMode(_audioEq),
+        'audioEqBands': _audioEqBands,
+        'audioDialogue': _audioDialogue,
+        'audioBalance': _audioBalance,
         'eqBrightness': _videoEq.enabled ? _videoEq.brightness : 0,
         'eqContrast': _videoEq.enabled ? _videoEq.contrast : 0,
         'eqSaturation': _videoEq.enabled ? _videoEq.saturation : 0,
+        'eqGamma': _videoEq.enabled ? _videoEq.gamma : 0,
+        'eqHue': _videoEq.enabled ? _videoEq.hue : 0,
+        'eqTemperature': _videoEq.enabled ? _videoEq.temperature : 0,
+        'eqSharpness': _videoEq.enabled ? _videoEq.sharpness : 0,
+        'eqShadow': _videoEq.enabled ? _videoEq.shadow : 0,
       });
       await _ch.invokeMethod('setVolume', {'volume': (_volume / 100).clamp(0.0, 1.0)});
       await _ch.invokeMethod('setRate', {'rate': _rate});
@@ -836,10 +855,33 @@ class ExoPlayback extends KotvPlayback {
     final sec = '${settings['exoSecondarySubtitle'] ?? 'off'}'.trim().toLowerCase();
     _secondarySubtitle = (sec == 'auto' || sec == 'on' || sec == 'manual') ? sec : 'off';
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
+    _subtitlePos = (double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100).clamp(0, 150);
+    _subtitleSecondaryPos =
+        (double.tryParse('${settings['subtitleSecondaryPos'] ?? '0'}') ?? 0).clamp(0, 150);
+    _subtitleColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
+    if (_subtitleColor.isEmpty) _subtitleColor = '#FFFFFF';
+    _subtitleBorderColor = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
+    if (_subtitleBorderColor.isEmpty) _subtitleBorderColor = '#000000';
+    _subtitleBorderSize =
+        (double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2).clamp(0, 8);
+    _subtitleBgColor = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
+    if (_subtitleBgColor.isEmpty) _subtitleBgColor = '#00000000';
     _videoEq = KotvVideoEq.fromSettings(settings);
     _audioEq = kotvAudioEqFromSettings(settings);
+    _audioEqBands = kotvAudioEqBandsFromSettings(settings);
+    _audioDialogue = kotvAudioDialogueFromSettings(settings);
+    _audioBalance = kotvAudioBalanceFromSettings(settings);
     if (_url.isNotEmpty) {
       unawaited(_pushEqualizer());
+      unawaited(setSubtitleStyle(
+        scale: _subtitleFontScale,
+        pos: _subtitlePos,
+        secondaryPos: _subtitleSecondaryPos,
+        color: _subtitleColor,
+        borderColor: _subtitleBorderColor,
+        borderSize: _subtitleBorderSize,
+        forceStyle: true,
+      ));
     }
   }
 
@@ -848,12 +890,55 @@ class ExoPlayback extends KotvPlayback {
       await _ensureNative();
       await _ch.invokeMethod('setEqualizer', {
         'audioEq': kotvAudioEqExoMode(_audioEq),
+        'audioEqBands': _audioEqBands,
+        'audioDialogue': _audioDialogue,
+        'audioBalance': _audioBalance,
         'eqBrightness': _videoEq.enabled ? _videoEq.brightness : 0,
         'eqContrast': _videoEq.enabled ? _videoEq.contrast : 0,
         'eqSaturation': _videoEq.enabled ? _videoEq.saturation : 0,
+        'eqGamma': _videoEq.enabled ? _videoEq.gamma : 0,
+        'eqHue': _videoEq.enabled ? _videoEq.hue : 0,
+        'eqTemperature': _videoEq.enabled ? _videoEq.temperature : 0,
+        'eqSharpness': _videoEq.enabled ? _videoEq.sharpness : 0,
+        'eqShadow': _videoEq.enabled ? _videoEq.shadow : 0,
         'audioPassThrough': _audioPassThrough,
       });
       notifyListeners();
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setSubtitleStyle({
+    double? scale,
+    double? pos,
+    double? secondaryPos,
+    bool forceStyle = false,
+    String? color,
+    String? borderColor,
+    double? borderSize,
+    String? bgColor,
+  }) async {
+    if (scale != null) _subtitleFontScale = scale.clamp(0.5, 2.5);
+    if (pos != null) _subtitlePos = pos.clamp(0, 150);
+    if (secondaryPos != null) _subtitleSecondaryPos = secondaryPos.clamp(0, 150);
+    if (color != null && color.trim().isNotEmpty) _subtitleColor = color.trim();
+    if (borderColor != null && borderColor.trim().isNotEmpty) {
+      _subtitleBorderColor = borderColor.trim();
+    }
+    if (borderSize != null) _subtitleBorderSize = borderSize.clamp(0, 8);
+    if (bgColor != null && bgColor.trim().isNotEmpty) _subtitleBgColor = bgColor.trim();
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('setSubtitleStyle', {
+        'scale': _subtitleFontScale,
+        'pos': _subtitlePos,
+        'secondaryPos': _subtitleSecondaryPos,
+        'forceStyle': forceStyle,
+        'color': _subtitleColor,
+        'borderColor': _subtitleBorderColor,
+        'borderSize': _subtitleBorderSize,
+        'bgColor': _subtitleBgColor,
+      });
     } catch (_) {}
   }
 

@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.DolbyVisionOutputPolicy
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.Renderer
@@ -30,6 +32,7 @@ class KotvFfmpegRenderersFactory(
   dolbyVisionPolicy: Int = DolbyVisionOutputPolicy.AUTO,
   private val audioPassThrough: Boolean = true,
   private val secondaryTextOutput: TextOutput? = null,
+  private val channelMixing: ChannelMixingAudioProcessor? = null,
 ) : DefaultRenderersFactory(context) {
 
   init {
@@ -56,6 +59,10 @@ class KotvFfmpegRenderersFactory(
         .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
     if (!audioPassThrough) {
       builder.setAudioOutputProvider(AudioTrackAudioOutputProvider.Builder(null).build())
+      val mix = channelMixing
+      if (mix != null) {
+        builder.setAudioProcessors(arrayOf<AudioProcessor>(mix))
+      }
     }
     return builder.build()
   }

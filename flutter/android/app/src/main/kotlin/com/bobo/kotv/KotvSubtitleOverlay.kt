@@ -3,6 +3,7 @@ package com.bobo.kotv
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.util.TypedValue
@@ -53,6 +54,8 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
   private var primaryBottomFraction = 0.08f
   private var secondaryTopFraction = 0.08f
   private var fontScale = 1.0f
+  private var primaryPos = 100.0
+  private var secondaryPos = 0.0
 
   val secondaryTextOutput =
     TextOutput { group: CueGroup ->
@@ -111,12 +114,44 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     if (!enabled) secondaryView.text = ""
   }
 
-  fun setStyle(fontScale: Float, primaryBottomFraction: Float, secondaryTopFraction: Float) {
+  /**
+   * @param primaryPos mpv 风格 0–150（100=底部默认）
+   * @param secondaryPos 副字幕：0=顶部默认；>0 时按同刻度换算 topMargin
+   */
+  fun setStyle(
+    fontScale: Float,
+    primaryPos: Double = 100.0,
+    secondaryPos: Double = 0.0,
+    color: String = "#FFFFFF",
+    borderColor: String = "#000000",
+    borderSize: Double = 2.0,
+    bgColor: String = "#00000000",
+  ) {
     this.fontScale = fontScale.coerceIn(0.5f, 2.5f)
-    this.primaryBottomFraction = primaryBottomFraction.coerceIn(0f, 0.4f)
-    this.secondaryTopFraction = secondaryTopFraction.coerceIn(0f, 0.4f)
+    this.primaryPos = primaryPos.coerceIn(0.0, 150.0)
+    this.secondaryPos = secondaryPos.coerceIn(0.0, 150.0)
+    // pos100 → 约 8% 底边距；pos0 → 更大底边距（字幕上移）
+    primaryBottomFraction = posToBottomFraction(this.primaryPos)
+    secondaryTopFraction = posToTopFraction(this.secondaryPos)
     primaryView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f * this.fontScale)
     secondaryView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f * this.fontScale)
+    val fg = parseColorSafe(color, Color.WHITE)
+    val edge = parseColorSafe(borderColor, Color.BLACK)
+    val radius = (borderSize.coerceIn(0.0, 8.0).toFloat() * resources.displayMetrics.density).coerceAtLeast(0f)
+    primaryView.setTextColor(fg)
+    if (radius > 0.1f && Color.alpha(edge) > 0) {
+      primaryView.setShadowLayer(radius, 0f, 0f, edge)
+    } else {
+      primaryView.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+    }
+    applyBg(primaryView, bgColor)
+    // 副字幕保持偏黄可读，仅同步描边/背景强度
+    if (radius > 0.1f && Color.alpha(edge) > 0) {
+      secondaryView.setShadowLayer(radius, 0f, 0f, edge)
+    } else {
+      secondaryView.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+    }
+    applyBg(secondaryView, bgColor)
     requestLayout()
   }
 
@@ -198,6 +233,48 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
       }
     }
     target.text = sb
+  }
+
+  private fun applyBg(view: TextView, raw: String) {
+    val c = parseColorSafe(raw, Color.TRANSPARENT)
+    if (Color.alpha(c) <= 0) {
+      view.background = null
+      view.setPadding(0, 0, 0, 0)
+      return
+    }
+    val d =
+      GradientDrawable().apply {
+        setColor(c)
+        cornerRadius = dp(6).toFloat()
+      }
+    view.background = d
+    val padH = dp(10)
+    val padV = dp(4)
+    view.setPadding(padH, padV, padH, padV)
+  }
+
+  private fun posToBottomFraction(pos: Double): Float {
+    val p = pos.coerceIn(0.0, 150.0)
+    return when {
+      p >= 100.0 -> ((150.0 - p) / 50.0 * 0.04 + 0.04).toFloat().coerceIn(0.02f, 0.12f)
+      else -> ((100.0 - p) / 100.0 * 0.35 + 0.08).toFloat().coerceIn(0.08f, 0.45f)
+    }
+  }
+
+  private fun posToTopFraction(pos: Double): Float {
+    // 0=顶部默认；增大 pos 则下移（增大 topMargin）
+    val p = pos.coerceIn(0.0, 150.0)
+    return (0.04 + p / 150.0 * 0.4).toFloat().coerceIn(0.04f, 0.45f)
+  }
+
+  private fun parseColorSafe(raw: String, fallback: Int): Int {
+    val s = raw.trim()
+    if (s.isEmpty()) return fallback
+    return try {
+      Color.parseColor(if (s.startsWith("#")) s else "#$s")
+    } catch (_: Throwable) {
+      fallback
+    }
   }
 
   private fun dp(v: Int): Int =

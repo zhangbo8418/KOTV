@@ -972,15 +972,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _fvp?.applyPlayerOptions(settings);
         final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.5);
         final subPos = double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100.0;
+        final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '0'}') ?? 0.0;
         final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
         final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
         final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
+        final subBg = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
         unawaited(_playback.setSubtitleStyle(
           scale: fontScale,
           pos: subPos.clamp(0, 150),
+          secondaryPos: subSecPos.clamp(0, 150),
           color: subColor.isEmpty ? null : subColor,
           borderColor: subBorder.isEmpty ? null : subBorder,
           borderSize: subBorderSize.clamp(0, 8),
+          bgColor: subBg.isEmpty ? null : subBg,
           forceStyle: subColor.isNotEmpty || subBorder.isNotEmpty || subBorderSize > 0,
         ));
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';

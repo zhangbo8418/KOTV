@@ -331,6 +331,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   Timer? _cursorHideTimer;
   MouseCursor _mouseCursor = SystemMouseCursors.basic;
   bool _pointerAtBottom = false;
+  RemoteBridge? _boundRemote;
 
   @override
   void initState() {
@@ -346,6 +347,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       });
     };
     _bootstrap();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _attachRemoteHandlers());
   }
 
   void _syncAndroidAutoPip() {
@@ -360,6 +362,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   @override
   void dispose() {
+    _detachRemoteHandlers();
     if (_active == this) _active = null;
     kotvUnregisterQuitHook(_prepareQuit);
     liveScreenHandleBack = null;
@@ -402,6 +405,64 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     _mk = null;
     unawaited(kotvDisposeMpvPlayer(mkPlayer));
     super.dispose();
+  }
+
+  void _attachRemoteHandlers() {
+    final bridge = ref.read(remoteBridgeProvider);
+    if (bridge == null) return;
+    _boundRemote = bridge;
+    bridge.onControl = _onRemoteControl;
+    bridge.onSubtitleFile = _onRemoteSubtitle;
+  }
+
+  void _detachRemoteHandlers() {
+    final bridge = _boundRemote;
+    _boundRemote = null;
+    if (bridge == null) return;
+    if (identical(bridge.onControl, _onRemoteControl)) bridge.onControl = null;
+    if (identical(bridge.onSubtitleFile, _onRemoteSubtitle)) bridge.onSubtitleFile = null;
+  }
+
+  void _onRemoteControl(String type, int seekMs) {
+    if (!mounted || _playUrl.isEmpty) return;
+    final t = type.trim().toLowerCase();
+    switch (t) {
+      case 'play':
+        unawaited(_playback.play());
+        break;
+      case 'pause':
+        unawaited(_playback.pause());
+        break;
+      case 'toggle':
+      case 'playpause':
+      case 'play_pause':
+        unawaited(_playback.playOrPause());
+        break;
+      case 'seek':
+        if (seekMs > 0) {
+          unawaited(_playback.seek(Duration(milliseconds: seekMs)));
+        }
+        break;
+      case 'forward':
+        final ms = seekMs > 0 ? seekMs : 10000;
+        unawaited(_playback.seek(_playback.position + Duration(milliseconds: ms)));
+        break;
+      case 'backward':
+      case 'rewind':
+        final ms = seekMs > 0 ? seekMs : 10000;
+        final next = _playback.position - Duration(milliseconds: ms);
+        unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
+        break;
+      case 'stop':
+        unawaited(_releaseAllBackends());
+        break;
+    }
+  }
+
+  void _onRemoteSubtitle(String path) {
+    if (!mounted || path.trim().isEmpty) return;
+    final name = path.split(RegExp(r'[/\\]')).last;
+    unawaited(_playback.addSubtitleFile(path.trim(), title: name));
   }
 
   /// 返回：沉浸全屏 → 退出回看 → 关侧栏/控件 → 未消费（交给外壳双返退桌面）。

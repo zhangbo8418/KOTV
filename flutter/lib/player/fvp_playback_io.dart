@@ -49,6 +49,8 @@ class FvpPlayback extends KotvPlayback {
   KotvVideoEq _videoEq = KotvVideoEq.off;
   KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
   String _audioEqBands = '';
+  bool _audioDialogue = false;
+  int _audioBalance = 0;
 
   VideoPlayerController? get controller => _c;
 
@@ -551,6 +553,8 @@ class FvpPlayback extends KotvPlayback {
     _videoEq = KotvVideoEq.fromSettings(settings);
     _audioEq = kotvAudioEqFromSettings(settings);
     _audioEqBands = kotvAudioEqBandsFromSettings(settings);
+    _audioDialogue = kotvAudioDialogueFromSettings(settings);
+    _audioBalance = kotvAudioBalanceFromSettings(settings);
     _applyRuntimeOptions(_c);
     _applySecondaryAutoIfNeeded();
     notifyListeners();
@@ -565,11 +569,14 @@ class FvpPlayback extends KotvPlayback {
       }
       final vf = _videoEq.fvpAvfilter();
       c.setProperty('video.avfilter', vf);
-      final af = kotvAudioEqFvpFilter(_audioEq, bands: _audioEqBands);
-      // 与稳定音量共用 audio.avfilter；有 EQ 预设时优先 EQ。
-      if (af.isNotEmpty) {
-        c.setProperty('audio.avfilter', af);
-      }
+      final af = kotvAudioEqFvpFilter(
+        _audioEq,
+        bands: _audioEqBands,
+        dialogue: _audioDialogue,
+        balance: _audioBalance,
+      );
+      // 与稳定音量共用 audio.avfilter；有 EQ/对白/平衡时写入。
+      c.setProperty('audio.avfilter', af);
       // demux.buffer.ranges / protocols 已在 [kotvRegisterFvp] 全局写入，勿再跟 mpvDiskCache 重复套。
       _syncSubtitleTracks(c);
     } catch (_) {}
@@ -779,6 +786,7 @@ class FvpPlayback extends KotvPlayback {
     String? color,
     String? borderColor,
     double? borderSize,
+    String? bgColor,
   }) async {
     final c = _c;
     if (c == null || !c.value.isInitialized) return;
@@ -801,6 +809,9 @@ class FvpPlayback extends KotvPlayback {
       }
       if (borderSize != null) {
         c.setProperty('subtitle.outline', borderSize.clamp(0.0, 8.0).toStringAsFixed(1));
+      }
+      if (bgColor != null && bgColor.trim().isNotEmpty) {
+        c.setProperty('subtitle.background_color', bgColor.trim());
       }
       if (forceStyle || color != null || borderColor != null || borderSize != null) {
         c.setProperty('subtitle.force', '1');

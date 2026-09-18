@@ -91,6 +91,7 @@ echo "==> publish FongMi Media3 $VER → $DEST"
   :lib-datasource:publishReleasePublicationToMavenRepository \
   :lib-datasource-okhttp:publishReleasePublicationToMavenRepository \
   :lib-decoder:publishReleasePublicationToMavenRepository \
+  :lib-effect:publishReleasePublicationToMavenRepository \
   :lib-extractor:publishReleasePublicationToMavenRepository \
   :lib-exoplayer:publishReleasePublicationToMavenRepository \
   :lib-exoplayer-hls:publishReleasePublicationToMavenRepository \

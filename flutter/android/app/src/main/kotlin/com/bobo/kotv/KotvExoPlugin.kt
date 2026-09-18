@@ -3,6 +3,7 @@ package com.bobo.kotv
 import android.content.Context
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
+import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.graphics.SurfaceTexture
 import android.os.Build
@@ -27,7 +28,10 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.audio.ChannelMixingAudioProcessor
+import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.UnstableApi
+import com.bobo.kotv.exo.KotvExoVideoEqController
 import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -160,10 +164,32 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var playerBuiltSecondary: Boolean? = null
   private var subtitleOverlay: KotvSubtitleOverlay? = null
   private var subtitleFontScale = 1.0f
-  /** 音频 EQ：off | bass | voice（BassBoost / Equalizer；直通时跳过）。 */
+  private var subtitlePos = 100.0
+  private var subtitleSecondaryPos = 0.0
+  private var subtitleColor = "#FFFFFF"
+  private var subtitleBorderColor = "#000000"
+  private var subtitleBorderSize = 2.0
+  private var subtitleBgColor = "#00000000"
+  /** 音频 EQ：off | bass | voice | custom（BassBoost / Equalizer；直通时跳过）。 */
   private var audioEqMode: String = "off"
+  /** custom 频段：`freq:gain,freq:gain…`（gain 单位 dB）。 */
+  private var audioEqBands: String = ""
+  private var audioDialogue = false
+  /** 声道平衡 ∈ [-100,100]；负偏左、正偏右。 */
+  private var audioBalance = 0
   private var bassBoost: BassBoost? = null
   private var equalizer: Equalizer? = null
+  private var loudnessEnhancer: LoudnessEnhancer? = null
+  private val channelMixing = ChannelMixingAudioProcessor()
+  private val videoEqCtrl = KotvExoVideoEqController()
+  private var eqBrightness = 0
+  private var eqContrast = 0
+  private var eqSaturation = 0
+  private var eqGamma = 0
+  private var eqHue = 0
+  private var eqTemperature = 0
+  private var eqSharpness = 0
+  private var eqShadow = 0
   /** 实时下载速度：TransferListener 累计网络字节，tick 里差分；无增长则归零（避免黏第一帧）。 */
   @Volatile private var speedBps: Long = 0
   private var speedLastBytes: Long = -1
@@ -353,7 +379,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Number>("subtitleFontScale")?.toFloat()?.let {
           subtitleFontScale = it.coerceIn(0.5f, 2.5f)
         }
+        ingestSubtitleStyleArgs(call)
         call.argument<String>("audioEq")?.let { audioEqMode = normalizeAudioEq(it) }
+        call.argument<String>("audioEqBands")?.let { audioEqBands = it.trim() }
+        call.argument<Boolean>("audioDialogue")?.let { audioDialogue = it }
+        call.argument<Number>("audioBalance")?.toInt()?.let { audioBalance = it.coerceIn(-100, 100) }
+        ingestVideoEqArgs(call)
         @Suppress("UNCHECKED_CAST")
         currentSubs = (call.argument<List<Map<String, Any?>>>("subs") ?: emptyList())
         main.post {
@@ -369,6 +400,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             decodeFallbackTried = false
             openInternal(url, headers, mime, drm, live)
             applyAudioEq()
+            applyVideoEq()
+            applySubtitleStyle()
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_open", t.message, null)
@@ -377,13 +410,46 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "setEqualizer" -> {
         call.argument<String>("audioEq")?.let { audioEqMode = normalizeAudioEq(it) }
+        call.argument<String>("audioEqBands")?.let { audioEqBands = it.trim() }
+        call.argument<Boolean>("audioDialogue")?.let { audioDialogue = it }
+        call.argument<Number>("audioBalance")?.toInt()?.let { audioBalance = it.coerceIn(-100, 100) }
         call.argument<Boolean>("audioPassThrough")?.let { audioPassThrough = it }
+        ingestVideoEqArgs(call)
         main.post {
           try {
             applyAudioEq()
+            applyVideoEq()
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_eq", t.message, null)
+          }
+        }
+      }
+      "setSubtitleStyle" -> {
+        ingestSubtitleStyleArgs(call)
+        call.argument<Number>("scale")?.toFloat()?.let {
+          subtitleFontScale = it.coerceIn(0.5f, 2.5f)
+        }
+        call.argument<Number>("pos")?.toDouble()?.let { subtitlePos = it.coerceIn(0.0, 150.0) }
+        call.argument<Number>("secondaryPos")?.toDouble()?.let {
+          subtitleSecondaryPos = it.coerceIn(0.0, 150.0)
+        }
+        call.argument<String>("color")?.trim()?.takeIf { it.isNotEmpty() }?.let { subtitleColor = it }
+        call.argument<String>("borderColor")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+          subtitleBorderColor = it
+        }
+        call.argument<Number>("borderSize")?.toDouble()?.let {
+          subtitleBorderSize = it.coerceIn(0.0, 8.0)
+        }
+        call.argument<String>("bgColor")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+          subtitleBgColor = it
+        }
+        main.post {
+          try {
+            applySubtitleStyle()
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_sub_style", t.message, null)
           }
         }
       }
@@ -599,7 +665,15 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val overlay = subtitleOverlay ?: KotvSubtitleOverlay(host.context).also { subtitleOverlay = it }
     overlay.setLibassEnabled(libassEnabled)
     overlay.setSecondaryEnabled(secondarySubtitleMode != "off")
-    overlay.setStyle(subtitleFontScale, 0.08f, 0.08f)
+    overlay.setStyle(
+      fontScale = subtitleFontScale,
+      primaryPos = subtitlePos,
+      secondaryPos = subtitleSecondaryPos,
+      color = subtitleColor,
+      borderColor = subtitleBorderColor,
+      borderSize = subtitleBorderSize,
+      bgColor = subtitleBgColor,
+    )
     overlay.attachTo(host)
   }
 
@@ -839,6 +913,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
     val p = player ?: error("exo player missing")
     applyTrackSelectionPrefs()
+    // setVideoEffects 须在首次 prepare 前至少调用一次以建管线；之后可热更。
+    applyVideoEq()
+    applySubtitleStyle()
     try {
       p.setSkipSilenceEnabled(skipSilence)
     } catch (_: Throwable) {
@@ -926,7 +1003,15 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val overlay = subtitleOverlay ?: KotvSubtitleOverlay(ctx).also { subtitleOverlay = it }
     overlay.setLibassEnabled(libassEnabled)
     overlay.setSecondaryEnabled(secondarySubtitleMode != "off")
-    overlay.setStyle(subtitleFontScale, 0.08f, 0.08f)
+    overlay.setStyle(
+      fontScale = subtitleFontScale,
+      primaryPos = subtitlePos,
+      secondaryPos = subtitleSecondaryPos,
+      color = subtitleColor,
+      borderColor = subtitleBorderColor,
+      borderSize = subtitleBorderSize,
+      bgColor = subtitleBgColor,
+    )
     surfaceHost?.let { overlay.attachTo(it) }
     val assHandler = if (libassEnabled) overlay.assHandlerOrNull() else null
     val extractors: androidx.media3.extractor.ExtractorsFactory =
@@ -1021,6 +1106,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     preloadUpstream = smbAware
     preloadRenderers = renderers
     bindPlayerSurface()
+    updateChannelBalance()
+    applyVideoEq()
+    applySubtitleStyle()
     val listener =
       object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
@@ -1214,6 +1302,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         dolbyVisionPolicy,
         audioPassThrough,
         secondaryOut,
+        if (audioPassThrough) null else channelMixing,
       )
     when (mode) {
       "soft" -> factory.setMediaCodecSelector(SOFT_PREFER_SELECTOR)
@@ -1326,22 +1415,93 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     } catch (_: Throwable) {
     }
     equalizer = null
+    try {
+      loudnessEnhancer?.enabled = false
+    } catch (_: Throwable) {
+    }
+    try {
+      loudnessEnhancer?.release()
+    } catch (_: Throwable) {
+    }
+    loudnessEnhancer = null
   }
 
   private fun normalizeAudioEq(raw: String): String {
     return when (raw.trim().lowercase()) {
       "bass" -> "bass"
       "voice" -> "voice"
+      "custom" -> "custom"
       else -> "off"
     }
   }
 
-  /** BassBoost / Equalizer 挂到 Exo audioSession；直通时跳过以免破 SPDIF。 */
+  private fun ingestVideoEqArgs(call: MethodCall) {
+    call.argument<Number>("eqBrightness")?.toInt()?.let { eqBrightness = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqContrast")?.toInt()?.let { eqContrast = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqSaturation")?.toInt()?.let { eqSaturation = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqGamma")?.toInt()?.let { eqGamma = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqHue")?.toInt()?.let { eqHue = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqTemperature")?.toInt()?.let { eqTemperature = it.coerceIn(-100, 100) }
+    call.argument<Number>("eqSharpness")?.toInt()?.let { eqSharpness = it.coerceIn(0, 100) }
+    call.argument<Number>("eqShadow")?.toInt()?.let { eqShadow = it.coerceIn(-100, 100) }
+  }
+
+  private fun ingestSubtitleStyleArgs(call: MethodCall) {
+    call.argument<Number>("subtitleFontScale")?.toFloat()?.let {
+      subtitleFontScale = it.coerceIn(0.5f, 2.5f)
+    }
+    call.argument<Number>("subtitlePos")?.toDouble()?.let { subtitlePos = it.coerceIn(0.0, 150.0) }
+    call.argument<Number>("subtitleSecondaryPos")?.toDouble()?.let {
+      subtitleSecondaryPos = it.coerceIn(0.0, 150.0)
+    }
+    call.argument<String>("subtitleColor")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      subtitleColor = it
+    }
+    call.argument<String>("subtitleBorderColor")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      subtitleBorderColor = it
+    }
+    call.argument<Number>("subtitleBorderSize")?.toDouble()?.let {
+      subtitleBorderSize = it.coerceIn(0.0, 8.0)
+    }
+    call.argument<String>("subtitleBgColor")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      subtitleBgColor = it
+    }
+  }
+
+  private fun applyVideoEq() {
+    videoEqCtrl.apply(
+      player,
+      KotvExoVideoEqController.Params(
+        brightness = eqBrightness,
+        contrast = eqContrast,
+        saturation = eqSaturation,
+        gamma = eqGamma,
+        hue = eqHue,
+        temperature = eqTemperature,
+        sharpness = eqSharpness,
+        shadow = eqShadow,
+      ),
+      tunneling = tunnelingEnabled && !renderTexture,
+    )
+  }
+
+  private fun applySubtitleStyle() {
+    subtitleOverlay?.setStyle(
+      fontScale = subtitleFontScale,
+      primaryPos = subtitlePos,
+      secondaryPos = subtitleSecondaryPos,
+      color = subtitleColor,
+      borderColor = subtitleBorderColor,
+      borderSize = subtitleBorderSize,
+      bgColor = subtitleBgColor,
+    )
+  }
+
+  /** BassBoost / Equalizer / Loudness / 声道混合；直通时跳过以免破 SPDIF。 */
   private fun applyAudioEq() {
     releaseAudioEq()
+    updateChannelBalance()
     if (audioPassThrough) return
-    val mode = audioEqMode
-    if (mode == "off") return
     val p = player ?: return
     val session =
       try {
@@ -1351,38 +1511,127 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     if (session <= 0) return
     try {
-      when (mode) {
+      when (audioEqMode) {
         "bass" -> {
           val bb = BassBoost(0, session)
           bb.enabled = true
           bb.setStrength(800.toShort())
           bassBoost = bb
         }
-        "voice" -> {
-          val eq = Equalizer(0, session)
-          eq.enabled = true
-          val range = eq.bandLevelRange
-          val hi = range[1].toInt().coerceAtMost(800)
-          val mid = (hi * 0.55).toInt().toShort()
-          val lowMid = (hi * 0.35).toInt().toShort()
-          for (i in 0 until eq.numberOfBands) {
-            val band = i.toShort()
-            val hz = eq.getCenterFreq(band) / 1000
-            val level =
-              when {
-                hz in 800..4500 -> mid
-                hz in 300..799 -> lowMid
-                else -> 0
-              }
-            eq.setBandLevel(band, level)
-          }
-          equalizer = eq
-        }
+        "voice" -> applyVoiceBands(session, strength = 1.0)
+        "custom" -> applyCustomAudioBands(session)
+      }
+      if (audioDialogue) {
+        applyDialogueEnhance(session)
       }
     } catch (t: Throwable) {
-      Log.w(TAG, "applyAudioEq mode=$mode", t)
+      Log.w(TAG, "applyAudioEq mode=$audioEqMode dialogue=$audioDialogue", t)
       releaseAudioEq()
     }
+  }
+
+  private fun applyVoiceBands(session: Int, strength: Double) {
+    val eq = Equalizer(0, session)
+    eq.enabled = true
+    val range = eq.bandLevelRange
+    val hi = (range[1].toInt().coerceAtMost(800) * strength).toInt()
+    val mid = (hi * 0.55).toInt().toShort()
+    val lowMid = (hi * 0.35).toInt().toShort()
+    for (i in 0 until eq.numberOfBands) {
+      val band = i.toShort()
+      val hz = eq.getCenterFreq(band) / 1000
+      val level =
+        when {
+          hz in 800..4500 -> mid
+          hz in 300..799 -> lowMid
+          else -> 0
+        }
+      eq.setBandLevel(band, level)
+    }
+    equalizer = eq
+  }
+
+  private fun applyDialogueEnhance(session: Int) {
+    // 若已有 EQ，叠 Loudness；否则先用人声 EQ 再叠 Loudness。
+    if (equalizer == null && audioEqMode == "off") {
+      applyVoiceBands(session, strength = 0.85)
+    }
+    try {
+      val le = LoudnessEnhancer(session)
+      le.setTargetGain(900) // mB ≈ +9dB
+      le.enabled = true
+      loudnessEnhancer = le
+    } catch (t: Throwable) {
+      Log.w(TAG, "LoudnessEnhancer unavailable", t)
+    }
+  }
+
+  /** 更新声道平衡矩阵（0.999 居中以避免 isIdentity 导致处理器休眠）。 */
+  private fun updateChannelBalance() {
+    val b = audioBalance.coerceIn(-100, 100)
+    val left = if (b <= 0) 1f else (1f - b / 100f)
+    val right = if (b >= 0) 1f else (1f + b / 100f)
+    val l = if (kotlin.math.abs(left - 1f) < 0.001f && kotlin.math.abs(right - 1f) < 0.001f) 0.999f else left
+    val r = if (kotlin.math.abs(left - 1f) < 0.001f && kotlin.math.abs(right - 1f) < 0.001f) 0.999f else right
+    for (ch in 1..6) {
+      try {
+        channelMixing.putChannelMixingMatrix(balanceMatrix(ch, l, r))
+      } catch (_: Throwable) {
+      }
+    }
+  }
+
+  private fun balanceMatrix(channels: Int, left: Float, right: Float): ChannelMixingMatrix {
+    val coeffs = FloatArray(channels * channels)
+    for (i in 0 until channels) {
+      coeffs[i * channels + i] =
+        when (i) {
+          0 -> left
+          1 -> if (channels >= 2) right else left
+          else -> 1f
+        }
+    }
+    return ChannelMixingMatrix(channels, channels, coeffs)
+  }
+
+  private fun applyCustomAudioBands(session: Int) {
+    val targets = parseAudioBands(audioEqBands)
+    if (targets.isEmpty()) return
+    val eq = Equalizer(0, session)
+    eq.enabled = true
+    val range = eq.bandLevelRange
+    val minMb = range[0].toInt()
+    val maxMb = range[1].toInt()
+    for (i in 0 until eq.numberOfBands) {
+      val band = i.toShort()
+      val centerHz = eq.getCenterFreq(band) / 1000.0
+      var bestGain = 0.0
+      var bestDist = Double.MAX_VALUE
+      for ((freq, gainDb) in targets) {
+        val dist = kotlin.math.abs(kotlin.math.ln((centerHz + 1) / (freq + 1)))
+        if (dist < bestDist) {
+          bestDist = dist
+          bestGain = gainDb
+        }
+      }
+      // Equalizer bandLevel 单位 mB（1dB = 100mB）
+      val mb = (bestGain * 100.0).toInt().coerceIn(minMb, maxMb).toShort()
+      eq.setBandLevel(band, mb)
+    }
+    equalizer = eq
+  }
+
+  private fun parseAudioBands(raw: String): List<Pair<Double, Double>> {
+    val out = ArrayList<Pair<Double, Double>>()
+    for (part in raw.split(',')) {
+      val kv = part.trim().split(':')
+      if (kv.size != 2) continue
+      val f = kv[0].trim().toDoubleOrNull() ?: continue
+      val g = kv[1].trim().toDoubleOrNull() ?: continue
+      if (f <= 0) continue
+      out.add(f to g.coerceIn(-15.0, 15.0))
+    }
+    return out
   }
 
   private fun releasePlayerInstance() {
@@ -1390,6 +1639,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     surfaceHost?.setBufferingUi(false, "")
     diskPreload.stop()
     releaseAudioEq()
+    try {
+      videoEqCtrl.clear(player)
+    } catch (_: Throwable) {
+    }
     try {
       player?.clearVideoSurface()
     } catch (_: Throwable) {

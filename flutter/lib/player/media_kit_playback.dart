@@ -617,6 +617,7 @@ class MediaKitPlayback extends KotvPlayback {
     String? color,
     String? borderColor,
     double? borderSize,
+    String? bgColor,
   }) async {
     try {
       final platform = player.platform;
@@ -647,6 +648,9 @@ class MediaKitPlayback extends KotvPlayback {
           'sub-border-size',
           borderSize.clamp(0.0, 8.0).toStringAsFixed(1),
         );
+      }
+      if (bgColor != null && bgColor.trim().isNotEmpty) {
+        await (platform as dynamic).setProperty('sub-back-color', bgColor.trim());
       }
       if (forceStyle ||
           color != null ||

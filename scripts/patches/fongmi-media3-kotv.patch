@@ -185,6 +185,7 @@ index fc62b6a..f951b30 100644
 +    "lib-datasource",
 +    "lib-datasource-okhttp",
 +    "lib-decoder",
++    "lib-effect",
 +    "lib-exoplayer",
 +    "lib-exoplayer-dash",
 +    "lib-exoplayer-hls",
