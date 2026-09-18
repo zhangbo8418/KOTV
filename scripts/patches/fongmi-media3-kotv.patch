@@ -168,6 +168,29 @@ index 1111111..2222222 100644
 -  testImplementation(project(":test-utils"))
 -  testImplementation(project(":test-utils-robolectric"))
  }
+diff --git a/libraries/effect/build.gradle.kts b/libraries/effect/build.gradle.kts
+index aaaaaaa..bbbbbbb 100644
+--- a/libraries/effect/build.gradle.kts
++++ b/libraries/effect/build.gradle.kts
+@@ -32,18 +32,12 @@ dependencies {
+   implementation(project(":lib-datasource"))
+   implementation(libs.kotlinx.coroutines.guava)
+-  testImplementation(project(":test-utils-robolectric"))
+-  testImplementation(project(":test-utils"))
+-  testImplementation(project(":test-data"))
+   testImplementation(libs.robolectric)
+   testImplementation(libs.truth)
+   testImplementation(libs.kotlinx.coroutines.test)
+   testImplementation(libs.androidx.runner)
+-  androidTestImplementation(project(":lib-exoplayer"))
+-  androidTestImplementation(project(":lib-effect-ndk"))
+   androidTestImplementation(libs.kotlinx.coroutines.android)
+   androidTestImplementation(libs.test.parameter.injector)
+   androidTestImplementation(libs.junit)
+   androidTestImplementation(libs.androidx.test.runner)
+   androidTestImplementation(libs.truth)
+-  androidTestImplementation(project(":test-utils"))
+ }
 diff --git a/settings.gradle.kts b/settings.gradle.kts
 index fc62b6a..f951b30 100644
 --- a/settings.gradle.kts
