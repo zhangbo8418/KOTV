@@ -322,6 +322,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   String _prefPlayerFailover = 'auto';
   /// 播失败自动切下一线路（默认开）。
   bool _liveAutoChange = true;
+  bool _liveAcross = true;
+  bool _liveInvert = false;
   int _playSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
@@ -525,6 +527,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
         final liveChange = '${settings['liveAutoChange'] ?? 'true'}'.trim().toLowerCase();
         _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
+        final across = '${settings['liveAcross'] ?? 'true'}'.trim().toLowerCase();
+        _liveAcross = across != 'false' && across != 'off' && across != '0';
+        final invert = '${settings['liveInvert'] ?? 'false'}'.trim().toLowerCase();
+        _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
         final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
         if (vol != null) {
           await _playback.setVolume(vol.clamp(0, 100));
@@ -812,6 +818,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       }
       final liveChange = '${settings['liveChange'] ?? 'true'}'.trim().toLowerCase();
       _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
+      final across = '${settings['liveAcross'] ?? 'true'}'.trim().toLowerCase();
+      _liveAcross = across != 'false' && across != 'off' && across != '0';
+      final invert = '${settings['liveInvert'] ?? 'false'}'.trim().toLowerCase();
+      _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
     } catch (_) {}
     final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
     final startPlayer = (hasDrm && kotvIsAndroid()) ? 'innie#exo' : _prefPlayerVal;
@@ -933,6 +943,35 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         return const IgnorePointer(child: ColoredBox(color: Colors.black));
       },
     );
+  }
+
+  /// 上下换台；[_liveAcross] 为真时到组边界跨组，[_liveInvert] 由调用方决定方向。
+  Future<void> _stepChannel({required int delta}) async {
+    if (_groups.isEmpty) return;
+    final chs = _channels;
+    if (chs.isEmpty) {
+      if (!_liveAcross || _groups.length < 2) return;
+      final gNext = (_groupIdx + (delta > 0 ? 1 : -1) + _groups.length) % _groups.length;
+      setState(() => _groupIdx = gNext);
+      final n = _channels;
+      if (n.isEmpty) return;
+      await _playChannel(delta > 0 ? 0 : n.length - 1);
+      return;
+    }
+    final next = _chIdx + delta;
+    if (next >= 0 && next < chs.length) {
+      await _playChannel(next);
+      return;
+    }
+    if (!_liveAcross || _groups.length < 2) {
+      await _playChannel(((next % chs.length) + chs.length) % chs.length);
+      return;
+    }
+    final gNext = (_groupIdx + (delta > 0 ? 1 : -1) + _groups.length) % _groups.length;
+    setState(() => _groupIdx = gNext);
+    final n = _channels;
+    if (n.isEmpty) return;
+    await _playChannel(delta > 0 ? 0 : n.length - 1);
   }
 
   Future<void> _playChannel(int chIdx, {int? line, bool showList = true}) async {
@@ -1838,13 +1877,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     }
     if (kotvIsUpKey(key)) {
       if (chs.isEmpty) return KeyEventResult.handled;
-      final next = _chIdx <= 0 ? chs.length - 1 : _chIdx - 1;
-      unawaited(_playChannel(next));
+      unawaited(_stepChannel(delta: _liveInvert ? 1 : -1));
       return KeyEventResult.handled;
     }
     if (kotvIsDownKey(key)) {
       if (chs.isEmpty) return KeyEventResult.handled;
-      unawaited(_playChannel((_chIdx + 1) % chs.length));
+      unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
       return KeyEventResult.handled;
     }
     if (kotvIsMediaRewind(key)) {

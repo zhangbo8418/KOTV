@@ -87,6 +87,10 @@ class _AppShellState extends ConsumerState<AppShell> {
       final map = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
       final inc = '${map['incognito'] ?? ''}'.toLowerCase() == 'true';
       kotvApplyPlayUaSetting('${map['ua'] ?? ''}');
+      final bootLive = '${map['bootLive'] ?? ''}'.toLowerCase();
+      if (bootLive == 'true' || bootLive == '1' || bootLive == 'on') {
+        if (mounted) goKotvPage(ref, KotvPage.live);
+      }
       return LocalHistory.setIncognito(inc);
     }).catchError((_) {});
   }

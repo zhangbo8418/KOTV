@@ -49,8 +49,15 @@ class FvpPlayback extends KotvPlayback {
   KotvVideoEq _videoEq = KotvVideoEq.off;
   KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
   String _audioEqBands = '';
-  bool _audioDialogue = false;
+  int _audioDialogue = 0;
   int _audioBalance = 0;
+  int _audioStability = 0;
+  int _audioBoost = 0;
+  int _audioPreamp = 0;
+  bool _audioLoudness = false;
+  int _audioCenterGain = 0;
+  String _audioChannelMode = 'auto';
+  int _audioOffsetMs = 0;
 
   VideoPlayerController? get controller => _c;
 
@@ -555,6 +562,13 @@ class FvpPlayback extends KotvPlayback {
     _audioEqBands = kotvAudioEqBandsFromSettings(settings);
     _audioDialogue = kotvAudioDialogueFromSettings(settings);
     _audioBalance = kotvAudioBalanceFromSettings(settings);
+    _audioStability = kotvAudioStabilityFromSettings(settings);
+    _audioBoost = kotvAudioBoostFromSettings(settings);
+    _audioPreamp = kotvAudioPreampFromSettings(settings);
+    _audioLoudness = kotvAudioLoudnessFromSettings(settings);
+    _audioCenterGain = kotvAudioCenterGainFromSettings(settings);
+    _audioChannelMode = kotvAudioChannelModeFromSettings(settings);
+    _audioOffsetMs = kotvAudioOffsetMsFromSettings(settings);
     _applyRuntimeOptions(_c);
     _applySecondaryAutoIfNeeded();
     notifyListeners();
@@ -574,10 +588,15 @@ class FvpPlayback extends KotvPlayback {
         bands: _audioEqBands,
         dialogue: _audioDialogue,
         balance: _audioBalance,
+        channelMode: _audioChannelMode,
+        stability: _audioStability,
+        boost: _audioBoost,
+        preamp: _audioPreamp,
+        loudness: _audioLoudness,
+        centerGain: _audioCenterGain,
       );
-      // 与稳定音量共用 audio.avfilter；有 EQ/对白/平衡时写入。
       c.setProperty('audio.avfilter', af);
-      // demux.buffer.ranges / protocols 已在 [kotvRegisterFvp] 全局写入，勿再跟 mpvDiskCache 重复套。
+      c.setProperty('audio.delay', (_audioOffsetMs / 1000.0).toStringAsFixed(3));
       _syncSubtitleTracks(c);
     } catch (_) {}
   }

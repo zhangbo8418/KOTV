@@ -26,10 +26,30 @@ sub-font=Noto
     final soft = KotvVideoEq.fromSettings({'videoEq': 'soft'});
     expect(soft.enabled, isTrue);
     expect(soft.mpvProps()['saturation'], isNot('0'));
+    final natural = KotvVideoEq.fromSettings({'videoEq': 'natural'});
+    expect(natural.enabled, isTrue);
+    final cinema = KotvVideoEq.fromSettings({'videoEq': 'cinema'});
+    expect(cinema.temperature, 26);
     final custom = KotvVideoEq.fromSettings({
       'videoEq': 'custom',
       'videoBrightness': '12',
     });
     expect(custom.brightness, 12);
+  });
+
+  test('audio dialogue strength and compose', () {
+    expect(kotvAudioDialogueFromSettings({'audioDialogue': 'true'}), 100);
+    expect(kotvAudioDialogueFromSettings({'audioDialogue': '40'}), 40);
+    expect(kotvAudioDialogueFromSettings({'audioDialogue': 'false'}), 0);
+    final af = kotvComposeMpvAf(
+      eq: KotvAudioEqPreset.bass,
+      dialogue: 50,
+      balance: -20,
+      stability: 30,
+      boost: 200,
+    );
+    expect(af, contains('lavfi=['));
+    expect(af, contains('equalizer'));
+    expect(af, contains('pan=stereo'));
   });
 }

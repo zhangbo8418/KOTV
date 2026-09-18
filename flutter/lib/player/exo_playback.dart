@@ -82,8 +82,15 @@ class ExoPlayback extends KotvPlayback {
   KotvVideoEq _videoEq = KotvVideoEq.off;
   KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
   String _audioEqBands = '';
-  bool _audioDialogue = false;
+  int _audioDialogue = 0;
   int _audioBalance = 0;
+  int _audioStability = 0;
+  int _audioBoost = 0;
+  int _audioPreamp = 0;
+  bool _audioLoudness = false;
+  int _audioCenterGain = 0;
+  String _audioChannelMode = 'auto';
+  int _audioOffsetMs = 0;
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -449,9 +456,20 @@ class ExoPlayback extends KotvPlayback {
         'subtitleBgColor': _subtitleBgColor,
         'subs': _subs,
         'audioEq': kotvAudioEqExoMode(_audioEq),
-        'audioEqBands': _audioEqBands,
+        'audioEqBands': kotvAudioEqExoBandsPayload(
+          eq: _audioEq,
+          bands: _audioEqBands,
+          dialogue: _audioDialogue,
+        ),
         'audioDialogue': _audioDialogue,
         'audioBalance': _audioBalance,
+        'audioStability': _audioStability,
+        'audioBoost': _audioBoost,
+        'audioPreamp': _audioPreamp,
+        'audioLoudness': _audioLoudness,
+        'audioCenterGain': _audioCenterGain,
+        'audioChannelMode': _audioChannelMode,
+        'audioOffsetMs': _audioOffsetMs,
         'eqBrightness': _videoEq.enabled ? _videoEq.brightness : 0,
         'eqContrast': _videoEq.enabled ? _videoEq.contrast : 0,
         'eqSaturation': _videoEq.enabled ? _videoEq.saturation : 0,
@@ -871,6 +889,13 @@ class ExoPlayback extends KotvPlayback {
     _audioEqBands = kotvAudioEqBandsFromSettings(settings);
     _audioDialogue = kotvAudioDialogueFromSettings(settings);
     _audioBalance = kotvAudioBalanceFromSettings(settings);
+    _audioStability = kotvAudioStabilityFromSettings(settings);
+    _audioBoost = kotvAudioBoostFromSettings(settings);
+    _audioPreamp = kotvAudioPreampFromSettings(settings);
+    _audioLoudness = kotvAudioLoudnessFromSettings(settings);
+    _audioCenterGain = kotvAudioCenterGainFromSettings(settings);
+    _audioChannelMode = kotvAudioChannelModeFromSettings(settings);
+    _audioOffsetMs = kotvAudioOffsetMsFromSettings(settings);
     if (_url.isNotEmpty) {
       unawaited(_pushEqualizer());
       unawaited(setSubtitleStyle(
@@ -890,9 +915,20 @@ class ExoPlayback extends KotvPlayback {
       await _ensureNative();
       await _ch.invokeMethod('setEqualizer', {
         'audioEq': kotvAudioEqExoMode(_audioEq),
-        'audioEqBands': _audioEqBands,
+        'audioEqBands': kotvAudioEqExoBandsPayload(
+          eq: _audioEq,
+          bands: _audioEqBands,
+          dialogue: _audioDialogue,
+        ),
         'audioDialogue': _audioDialogue,
         'audioBalance': _audioBalance,
+        'audioStability': _audioStability,
+        'audioBoost': _audioBoost,
+        'audioPreamp': _audioPreamp,
+        'audioLoudness': _audioLoudness,
+        'audioCenterGain': _audioCenterGain,
+        'audioChannelMode': _audioChannelMode,
+        'audioOffsetMs': _audioOffsetMs,
         'eqBrightness': _videoEq.enabled ? _videoEq.brightness : 0,
         'eqContrast': _videoEq.enabled ? _videoEq.contrast : 0,
         'eqSaturation': _videoEq.enabled ? _videoEq.saturation : 0,

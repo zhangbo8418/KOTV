@@ -58,6 +58,12 @@ class DetailFullscreenPage extends StatefulWidget {
     this.danmakuSize = 18,
     this.danmakuOpacity = 0.85,
     this.danmakuRows = 6,
+    this.danmakuMaxOnScreen = 150,
+    this.danmakuScrollArea = 0.5,
+    this.danmakuShowScroll = true,
+    this.danmakuShowTop = true,
+    this.danmakuShowBottom = true,
+    this.danmakuShowReverse = true,
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
@@ -111,6 +117,12 @@ class DetailFullscreenPage extends StatefulWidget {
   final double danmakuSize;
   final double danmakuOpacity;
   final int danmakuRows;
+  final int danmakuMaxOnScreen;
+  final double danmakuScrollArea;
+  final bool danmakuShowScroll;
+  final bool danmakuShowTop;
+  final bool danmakuShowBottom;
+  final bool danmakuShowReverse;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
@@ -967,6 +979,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                           fontSize: widget.danmakuSize,
                           opacity: widget.danmakuOpacity,
                           rows: widget.danmakuRows,
+                          maxOnScreen: widget.danmakuMaxOnScreen,
+                          scrollAreaRatio: widget.danmakuScrollArea,
+                          showScroll: widget.danmakuShowScroll,
+                          showTop: widget.danmakuShowTop,
+                          showBottom: widget.danmakuShowBottom,
+                          showReverse: widget.danmakuShowReverse,
                         ),
                       ],
                     ),

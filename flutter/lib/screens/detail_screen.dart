@@ -149,6 +149,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   double _danmakuSize = 18;
   double _danmakuOpacity = 0.85;
   int _danmakuRows = 6;
+  int _danmakuMaxOnScreen = 150;
+  double _danmakuScrollArea = 0.5;
+  bool _danmakuShowScroll = true;
+  bool _danmakuShowTop = true;
+  bool _danmakuShowBottom = true;
+  bool _danmakuShowReverse = true;
   double _danmakuOffsetSec = 0;
   final ValueNotifier<List<DanmakuItem>> _danmakuItems = ValueNotifier(const []);
   AspectSpec _aspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
@@ -995,6 +1001,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final op = double.tryParse('${settings['danmakuOpacity'] ?? ''}');
         _danmakuOpacity = op == null ? 0.85 : (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0);
         _danmakuRows = int.tryParse('${settings['danmakuRows'] ?? ''}') ?? 6;
+        _danmakuMaxOnScreen = int.tryParse('${settings['danmakuMaxOnScreen'] ?? '150'}') ?? 150;
+        final sa = double.tryParse('${settings['danmakuScrollArea'] ?? '50'}');
+        _danmakuScrollArea = sa == null ? 0.5 : (sa > 1 ? sa / 100.0 : sa).clamp(0.1, 1.0);
+        bool dFlag(String k, [bool def = true]) {
+          final v = '${settings[k] ?? ''}'.trim().toLowerCase();
+          if (v.isEmpty) return def;
+          return v != 'false' && v != '0' && v != 'off';
+        }
+        _danmakuShowScroll = dFlag('danmakuShowScroll');
+        _danmakuShowTop = dFlag('danmakuShowTop');
+        _danmakuShowBottom = dFlag('danmakuShowBottom');
+        _danmakuShowReverse = dFlag('danmakuShowReverse');
         _danmakuOffsetSec = ((int.tryParse('${settings['danmakuOffsetMs'] ?? '0'}') ?? 0) / 1000.0);
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
@@ -2011,6 +2029,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                   fontSize: _danmakuSize,
                   opacity: _danmakuOpacity,
                   rows: _danmakuRows,
+                  maxOnScreen: _danmakuMaxOnScreen,
+                  scrollAreaRatio: _danmakuScrollArea,
+                  showScroll: _danmakuShowScroll,
+                  showTop: _danmakuShowTop,
+                  showBottom: _danmakuShowBottom,
+                  showReverse: _danmakuShowReverse,
                 ),
               ),
               KotvBufferingOverlay(
@@ -2082,6 +2106,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         danmakuSize: _danmakuSize,
         danmakuOpacity: _danmakuOpacity,
         danmakuRows: _danmakuRows,
+        danmakuMaxOnScreen: _danmakuMaxOnScreen,
+        danmakuScrollArea: _danmakuScrollArea,
+        danmakuShowScroll: _danmakuShowScroll,
+        danmakuShowTop: _danmakuShowTop,
+        danmakuShowBottom: _danmakuShowBottom,
+        danmakuShowReverse: _danmakuShowReverse,
         ambientOn: _ambientOn,
         stableVolumeOn: _stableVolumeOn,
         onAssrtSearch: _searchAssrtSubtitle,

@@ -17,6 +17,7 @@ import '../player/kotv_platform.dart';
 import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
+import '../player/video_eq.dart';
 import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
@@ -589,19 +590,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final custom = videoEq == 'custom';
         double num(String key, [double def = 0]) => double.tryParse(g(key, '$def')) ?? def;
         Future<void> savePreset(String next) async {
-          await _set('videoEq', next, msg: switch (next) {
-            'soft' => '画面调色：柔和',
-            'vivid' => '画面调色：鲜艳',
-            'custom' => '画面调色：自定义',
-            _ => '已关闭画面调色',
-          });
+          final label = KotvVideoEq.presetLabels[next] ?? next;
+          await _set('videoEq', next, msg: next == 'off' ? '已关闭画面调色' : '画面调色：$label');
           setSheet(() {});
         }
         Widget chip(String id, String label) {
           final p = KotvPalette.of(context);
           final on = videoEq == id || (id == 'off' && (videoEq.isEmpty || videoEq == 'off'));
           return Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.only(right: 8, bottom: 8),
             child: ChoiceChip(
               label: Text(label),
               selected: on,
@@ -616,10 +613,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: Wrap(
               children: [
-                chip('off', '关闭'),
-                chip('soft', '柔和'),
-                chip('vivid', '鲜艳'),
-                chip('custom', '自定义'),
+                for (final e in KotvVideoEq.presetLabels.entries) chip(e.key, e.value),
               ],
             ),
           ),
@@ -737,6 +731,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           await _set('audioEqBands', s);
           setSheet(() {});
         }
+        const presetChips = <(String, String)>[
+          ('off', '关闭'),
+          ('natural', '自然'),
+          ('voice', '人声'),
+          ('cinema', '影院'),
+          ('bass', '低音'),
+          ('treble', '高音'),
+          ('pop', '流行'),
+          ('rock', '摇滚'),
+          ('dance', '舞曲'),
+          ('electronic', '电子'),
+          ('hiphop', '嘻哈'),
+          ('jazz', '爵士'),
+          ('classical', '古典'),
+          ('custom', '自定义'),
+        ];
         final freqs = <String, double>{
           '80': bandGain('80'),
           '300': bandGain('300'),
@@ -748,17 +758,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           final p = KotvPalette.of(context);
           final on = audioEq == id;
           return Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.only(right: 8, bottom: 8),
             child: ChoiceChip(
               label: Text(label),
               selected: on,
               onSelected: (_) async {
-                await _set('audioEq', id, msg: switch (id) {
-                  'bass' => '音频均衡：低音',
-                  'voice' => '音频均衡：人声',
-                  'custom' => '音频均衡：自定义',
-                  _ => '已关闭音频均衡',
-                });
+                await _set('audioEq', id, msg: id == 'off' ? '已关闭音频均衡' : '音频均衡：$label');
                 setSheet(() {});
               },
               selectedColor: p.primary.withOpacity(0.35),
@@ -766,26 +771,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           );
         }
+        final dialogue = kotvAudioDialogueFromSettings({'audioDialogue': g('audioDialogue', '0')}).toDouble();
+        final channelMode = kotvAudioChannelModeFromSettings({'audioChannelMode': g('audioChannelMode', 'auto')});
+        final channelLabel = switch (channelMode) {
+          'stereo' => '立体声',
+          'mono' => '单声道',
+          'reverse' => '左右反转',
+          _ => '自动',
+        };
         return [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child: Wrap(
-              children: [
-                chip('off', '关闭'),
-                chip('bass', '低音'),
-                chip('voice', '人声'),
-                chip('custom', '自定义'),
-              ],
-            ),
+            child: Wrap(children: [for (final e in presetChips) chip(e.$1, e.$2)]),
           ),
-          _sheetToggle(
+          _sheetSlider(
             label: '对白增强',
-            value: g('audioDialogue', 'false').toLowerCase() == 'true',
-            onChanged: (v) async {
-              await _set('audioDialogue', v ? 'true' : 'false',
-                  msg: v ? '对白增强已开启' : '对白增强已关闭');
-              setSheet(() {});
-            },
+            value: dialogue,
+            min: 0,
+            max: 100,
+            divisions: 20,
+            format: (v) => v <= 0 ? '关' : '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['audioDialogue'] = '${v.round()}'),
+            onCommit: (v) => _set('audioDialogue', '${v.round()}', msg: '对白增强已更新'),
           ),
           _sheetSlider(
             label: '声道平衡',
@@ -800,6 +807,83 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
             onChanging: (v) => setSheet(() => _s['audioBalance'] = '${v.round()}'),
             onCommit: (v) => _set('audioBalance', '${v.round()}', msg: '声道平衡已更新'),
+          ),
+          _sheetNav(
+            label: '声道模式',
+            value: channelLabel,
+            onTap: () async {
+              final picked = await pickChoice(context, title: '声道模式', current: channelMode, options: const [
+                ('自动', 'auto'),
+                ('立体声', 'stereo'),
+                ('单声道', 'mono'),
+                ('左右反转', 'reverse'),
+              ]);
+              if (picked == null) return;
+              await _set('audioChannelMode', picked, msg: '声道模式已更新');
+              setSheet(() {});
+            },
+          ),
+          _sheetSlider(
+            label: '音量稳定',
+            value: (double.tryParse(g('audioStability', '0')) ?? 0).clamp(0, 100),
+            min: 0,
+            max: 100,
+            divisions: 20,
+            format: (v) => v <= 0 ? '关' : '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['audioStability'] = '${v.round()}'),
+            onCommit: (v) => _set('audioStability', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '音量提升',
+            value: (double.tryParse(g('audioBoost', '0')) ?? 0).clamp(0, 1200),
+            min: 0,
+            max: 1200,
+            divisions: 24,
+            format: (v) => v <= 0 ? '0' : '+${(v / 100).toStringAsFixed(1)} dB',
+            onChanging: (v) => setSheet(() => _s['audioBoost'] = '${v.round()}'),
+            onCommit: (v) => _set('audioBoost', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '前置衰减',
+            value: (double.tryParse(g('audioPreamp', '0')) ?? 0).clamp(-1200, 0),
+            min: -1200,
+            max: 0,
+            divisions: 24,
+            format: (v) => v >= 0 ? '0' : '${(v / 100).toStringAsFixed(1)} dB',
+            onChanging: (v) => setSheet(() => _s['audioPreamp'] = '${v.round()}'),
+            onCommit: (v) => _set('audioPreamp', '${v.round()}'),
+          ),
+          _sheetToggle(
+            label: '响度归一',
+            value: kotvAudioLoudnessFromSettings({'audioLoudness': g('audioLoudness', 'false')}),
+            onChanged: (v) async {
+              await _set('audioLoudness', v ? 'true' : 'false', msg: v ? '响度归一已开启' : '响度归一已关闭');
+              setSheet(() {});
+            },
+          ),
+          _sheetSlider(
+            label: '中置增益',
+            value: (double.tryParse(g('audioCenterGain', '0')) ?? 0).clamp(0, 1200),
+            min: 0,
+            max: 1200,
+            divisions: 24,
+            format: (v) => v <= 0 ? '0' : '+${(v / 100).toStringAsFixed(1)} dB',
+            onChanging: (v) => setSheet(() => _s['audioCenterGain'] = '${v.round()}'),
+            onCommit: (v) => _set('audioCenterGain', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '音画偏移',
+            value: (double.tryParse(g('audioOffsetMs', '0')) ?? 0).clamp(-10000, 10000),
+            min: -10000,
+            max: 10000,
+            divisions: 200,
+            format: (v) {
+              final n = v.round();
+              if (n == 0) return '0 ms';
+              return n > 0 ? '声滞后 ${n} ms' : '声超前 ${-n} ms';
+            },
+            onChanging: (v) => setSheet(() => _s['audioOffsetMs'] = '${v.round()}'),
+            onCommit: (v) => _set('audioOffsetMs', '${v.round()}', msg: '音画偏移已更新'),
           ),
           if (audioEq == 'custom') ...[
             for (final e in freqs.entries)
@@ -826,7 +910,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
-              '直通开启时均衡/对白/平衡不生效。Exo 对白走 LoudnessEnhancer+人声 EQ，平衡走声道混合。',
+              '直通开启时均衡/对白/声道效果不生效。中置增益仅多声道有效；音画偏移各引擎均支持。',
               style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
             ),
           ),
@@ -874,6 +958,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             format: (v) => v.toStringAsFixed(1),
             onChanging: (v) => setSheet(() => _s['subtitleBorderSize'] = v.toStringAsFixed(1)),
             onCommit: (v) => _set('subtitleBorderSize', v.toStringAsFixed(1), msg: '字幕描边已更新'),
+          ),
+          _sheetSlider(
+            label: '正文透明度',
+            value: (double.tryParse(g('subtitleTextOpacity', '100')) ?? 100).clamp(0, 100),
+            min: 0,
+            max: 100,
+            divisions: 20,
+            format: (v) => '${v.round()}%',
+            onChanging: (v) => setSheet(() => _s['subtitleTextOpacity'] = '${v.round()}'),
+            onCommit: (v) => _set('subtitleTextOpacity', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '背景透明度',
+            value: (double.tryParse(g('subtitleBgOpacity', '100')) ?? 100).clamp(0, 100),
+            min: 0,
+            max: 100,
+            divisions: 20,
+            format: (v) => '${v.round()}%',
+            onChanging: (v) => setSheet(() => _s['subtitleBgOpacity'] = '${v.round()}'),
+            onCommit: (v) => _set('subtitleBgOpacity', '${v.round()}'),
           ),
           _sheetSlider(
             label: '副字幕位置',
@@ -958,6 +1062,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final opacity = (double.tryParse(g('danmakuOpacity', '85')) ?? 85).clamp(0.0, 100.0);
         final rows = (double.tryParse(g('danmakuRows', '6')) ?? 6).clamp(1.0, 16.0);
         final offset = (double.tryParse(g('danmakuOffsetMs', '0')) ?? 0).clamp(-10000.0, 10000.0);
+        final maxOnScreen = (double.tryParse(g('danmakuMaxOnScreen', '150')) ?? 150).clamp(10.0, 500.0);
+        final scrollArea = (double.tryParse(g('danmakuScrollArea', '50')) ?? 50).clamp(10.0, 100.0);
+        bool flag(String key, [bool def = true]) {
+          final v = g(key, def ? 'true' : 'false').toLowerCase();
+          if (v == 'false' || v == '0' || v == 'off') return false;
+          if (v == 'true' || v == '1' || v == 'on') return true;
+          return def;
+        }
         return [
           _sheetToggle(
             label: '开启弹幕',
@@ -1006,6 +1118,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onCommit: (v) => _set('danmakuRows', '${v.round()}'),
           ),
           _sheetSlider(
+            label: '同屏上限',
+            value: maxOnScreen,
+            min: 10,
+            max: 500,
+            divisions: 49,
+            format: (v) => '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['danmakuMaxOnScreen'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuMaxOnScreen', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '滚动区域',
+            value: scrollArea,
+            min: 10,
+            max: 100,
+            divisions: 18,
+            format: (v) => '${v.round()}%',
+            onChanging: (v) => setSheet(() => _s['danmakuScrollArea'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuScrollArea', '${v.round()}'),
+          ),
+          _sheetSlider(
             label: '时轴偏移',
             value: offset,
             min: -5000,
@@ -1014,6 +1146,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             format: (v) => '${v.round()} ms',
             onChanging: (v) => setSheet(() => _s['danmakuOffsetMs'] = '${v.round()}'),
             onCommit: (v) => _set('danmakuOffsetMs', '${v.round()}'),
+          ),
+          _sheetToggle(
+            label: '滚动弹幕',
+            value: flag('danmakuShowScroll'),
+            onChanged: (v) async {
+              await _set('danmakuShowScroll', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '顶部弹幕',
+            value: flag('danmakuShowTop'),
+            onChanged: (v) async {
+              await _set('danmakuShowTop', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '底部弹幕',
+            value: flag('danmakuShowBottom'),
+            onChanged: (v) async {
+              await _set('danmakuShowBottom', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '逆向弹幕',
+            value: flag('danmakuShowReverse'),
+            onChanged: (v) async {
+              await _set('danmakuShowReverse', v ? 'true' : 'false');
+              setSheet(() {});
+            },
           ),
         ];
       },
@@ -1582,16 +1746,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
     final audioPassThrough = kotvSettingsFlag(g('audioPassThrough', 'true'), def: true);
     final videoEq = g('videoEq', 'off').trim().toLowerCase();
-    final videoEqLabel = switch (videoEq) {
-      'soft' => '柔和',
-      'vivid' => '鲜艳',
-      'custom' || 'on' => '自定义',
-      _ => '关闭',
-    };
+    final videoEqLabel = KotvVideoEq.presetLabels[videoEq == 'on' ? 'custom' : videoEq] ?? '关闭';
     final audioEq = g('audioEq', 'off').trim().toLowerCase();
     final audioEqLabel = switch (audioEq) {
+      'natural' => '自然',
+      'voice' || 'vocal' => '人声',
+      'cinema' => '影院',
       'bass' => '低音',
-      'voice' => '人声',
+      'treble' => '高音',
+      'pop' => '流行',
+      'rock' => '摇滚',
+      'dance' => '舞曲',
+      'electronic' => '电子',
+      'hiphop' => '嘻哈',
+      'jazz' => '爵士',
+      'classical' => '古典',
       'custom' => '自定义',
       _ => '关闭',
     };
@@ -1833,6 +2002,42 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ('开启（失败自动下一线路）', 'true'),
                             ('关闭', 'false'),
                           ]),
+                        ),
+                        KotvSettingsCell(
+                          label: '跨分组换台',
+                          value: (g('liveAcross', 'true') == 'false') ? '关闭' : '开启',
+                          onTap: () => unawaited(_set(
+                            'liveAcross',
+                            g('liveAcross', 'true') == 'false' ? 'true' : 'false',
+                            msg: '跨分组换台已更新',
+                          )),
+                        ),
+                        KotvSettingsCell(
+                          label: '换台方向反转',
+                          value: (g('liveInvert', 'false') == 'true') ? '开启' : '关闭',
+                          onTap: () => unawaited(_set(
+                            'liveInvert',
+                            g('liveInvert', 'false') == 'true' ? 'false' : 'true',
+                            msg: '换台方向已更新',
+                          )),
+                        ),
+                        KotvSettingsCell(
+                          label: '开机进直播',
+                          value: (g('bootLive', 'false') == 'true') ? '开启' : '关闭',
+                          onTap: () => unawaited(_set(
+                            'bootLive',
+                            g('bootLive', 'false') == 'true' ? 'false' : 'true',
+                            msg: '开机进直播已更新',
+                          )),
+                        ),
+                        KotvSettingsCell(
+                          label: '预加载下一集',
+                          value: (g('preloadNextEpisode', 'true') == 'false') ? '关闭' : '开启',
+                          onTap: () => unawaited(_set(
+                            'preloadNextEpisode',
+                            g('preloadNextEpisode', 'true') == 'false' ? 'true' : 'false',
+                            msg: '预加载下一集已更新',
+                          )),
                         ),
                         if (kotvIsAndroid())
                           KotvSettingsCell(

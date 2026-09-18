@@ -49,8 +49,15 @@ class KotvMpvOpts {
     this.videoEq = KotvVideoEq.off,
     this.audioEq = KotvAudioEqPreset.off,
     this.audioEqBands = '',
-    this.audioDialogue = false,
+    this.audioDialogue = 0,
     this.audioBalance = 0,
+    this.audioStability = 0,
+    this.audioBoost = 0,
+    this.audioPreamp = 0,
+    this.audioLoudness = false,
+    this.audioCenterGain = 0,
+    this.audioChannelMode = 'auto',
+    this.audioOffsetMs = 0,
     this.subtitleFontScale = 1.0,
   });
 
@@ -72,10 +79,18 @@ class KotvMpvOpts {
   final KotvAudioEqPreset audioEq;
   /// 自定义频段 `freq:gain,…`。
   final String audioEqBands;
-  /// 对白增强（人声频段 + 轻压缩）。
-  final bool audioDialogue;
+  /// 对白增强 0–100。
+  final int audioDialogue;
   /// 声道平衡 ∈ [-100, 100]。
   final int audioBalance;
+  final int audioStability;
+  final int audioBoost;
+  final int audioPreamp;
+  final bool audioLoudness;
+  final int audioCenterGain;
+  final String audioChannelMode;
+  /// 音画偏移毫秒（正值声音滞后）。
+  final int audioOffsetMs;
   /// mpv `sub-scale`（0.5–2.5）。
   final double subtitleFontScale;
 
@@ -120,6 +135,13 @@ class KotvMpvOpts {
       audioEqBands: kotvAudioEqBandsFromSettings(settings),
       audioDialogue: kotvAudioDialogueFromSettings(settings),
       audioBalance: kotvAudioBalanceFromSettings(settings),
+      audioStability: kotvAudioStabilityFromSettings(settings),
+      audioBoost: kotvAudioBoostFromSettings(settings),
+      audioPreamp: kotvAudioPreampFromSettings(settings),
+      audioLoudness: kotvAudioLoudnessFromSettings(settings),
+      audioCenterGain: kotvAudioCenterGainFromSettings(settings),
+      audioChannelMode: kotvAudioChannelModeFromSettings(settings),
+      audioOffsetMs: kotvAudioOffsetMsFromSettings(settings),
       subtitleFontScale: fontScale,
     );
   }
@@ -138,8 +160,15 @@ class KotvMpvOpts {
     KotvVideoEq? videoEq,
     KotvAudioEqPreset? audioEq,
     String? audioEqBands,
-    bool? audioDialogue,
+    int? audioDialogue,
     int? audioBalance,
+    int? audioStability,
+    int? audioBoost,
+    int? audioPreamp,
+    bool? audioLoudness,
+    int? audioCenterGain,
+    String? audioChannelMode,
+    int? audioOffsetMs,
     double? subtitleFontScale,
   }) {
     return KotvMpvOpts(
@@ -158,9 +187,29 @@ class KotvMpvOpts {
       audioEqBands: audioEqBands ?? this.audioEqBands,
       audioDialogue: audioDialogue ?? this.audioDialogue,
       audioBalance: audioBalance ?? this.audioBalance,
+      audioStability: audioStability ?? this.audioStability,
+      audioBoost: audioBoost ?? this.audioBoost,
+      audioPreamp: audioPreamp ?? this.audioPreamp,
+      audioLoudness: audioLoudness ?? this.audioLoudness,
+      audioCenterGain: audioCenterGain ?? this.audioCenterGain,
+      audioChannelMode: audioChannelMode ?? this.audioChannelMode,
+      audioOffsetMs: audioOffsetMs ?? this.audioOffsetMs,
       subtitleFontScale: subtitleFontScale ?? this.subtitleFontScale,
     );
   }
+
+  String _composedAf() => kotvComposeMpvAf(
+        eq: audioEq,
+        bands: audioEqBands,
+        dialogue: audioDialogue,
+        balance: audioBalance,
+        channelMode: audioChannelMode,
+        stability: audioStability,
+        boost: audioBoost,
+        preamp: audioPreamp,
+        loudness: audioLoudness,
+        centerGain: audioCenterGain,
+      );
 
   bool get soft => decodeMode == 'soft' || decodeMode == 'software' || decodeMode == 'sw';
 
@@ -288,17 +337,12 @@ class KotvMpvOpts {
       } catch (_) {}
       if (!audioPassThrough) {
         try {
-          await set(
-            'af',
-            kotvComposeMpvAf(
-              eq: audioEq,
-              bands: audioEqBands,
-              dialogue: audioDialogue,
-              balance: audioBalance,
-            ),
-          );
+          await set('af', _composedAf());
         } catch (_) {}
       }
+      try {
+        await set('audio-delay', (audioOffsetMs / 1000.0).toStringAsFixed(3));
+      } catch (_) {}
       try {
         await set('sub-scale', subtitleFontScale.clamp(0.5, 2.5).toStringAsFixed(2));
       } catch (_) {}
@@ -349,6 +393,7 @@ class KotvMpvOpts {
     }
     out.addAll(videoEq.mpvProps());
     out['sub-scale'] = subtitleFontScale.clamp(0.5, 2.5).toStringAsFixed(2);
+    out['audio-delay'] = (audioOffsetMs / 1000.0).toStringAsFixed(3);
     return out;
   }
 
@@ -359,14 +404,7 @@ class KotvMpvOpts {
         'eqSaturation': videoEq.enabled ? videoEq.saturation : 0,
         'eqGamma': videoEq.enabled ? videoEq.gamma : 0,
         'eqHue': videoEq.enabled ? videoEq.hue : 0,
-        'audioAf': audioPassThrough
-            ? ''
-            : kotvComposeMpvAf(
-                eq: audioEq,
-                bands: audioEqBands,
-                dialogue: audioDialogue,
-                balance: audioBalance,
-              ),
+        'audioAf': audioPassThrough ? '' : _composedAf(),
         'videoVf': videoEq.mpvVf(),
         'subtitleFontScale': subtitleFontScale.clamp(0.5, 2.5),
       };

@@ -174,6 +174,12 @@ class DanmakuOverlay extends StatefulWidget {
     this.fontSize = 18,
     this.opacity = 0.85,
     this.rows = 6,
+    this.maxOnScreen = 150,
+    this.scrollAreaRatio = 0.5,
+    this.showScroll = true,
+    this.showTop = true,
+    this.showBottom = true,
+    this.showReverse = true,
   });
 
   final bool enabled;
@@ -182,6 +188,13 @@ class DanmakuOverlay extends StatefulWidget {
   final double fontSize;
   final double opacity;
   final int rows;
+  final int maxOnScreen;
+  /// 滚动弹幕占用的画面高度比例（顶部起算）。
+  final double scrollAreaRatio;
+  final bool showScroll;
+  final bool showTop;
+  final bool showBottom;
+  final bool showReverse;
 
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
@@ -213,6 +226,14 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     }
   }
 
+  bool _allowMode(int mode) {
+    // bilibili / 常见 XML：1–3 滚动，4 底，5 顶，6 逆向。
+    if (mode == 4) return widget.showBottom;
+    if (mode == 5) return widget.showTop;
+    if (mode == 6) return widget.showReverse;
+    return widget.showScroll;
+  }
+
   void _spawn(Duration pos, Size size) {
     if (!widget.enabled || widget.items.isEmpty) return;
     final sec = pos.inMilliseconds / 1000.0;
@@ -224,8 +245,9 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     }
     final from = _lastSec;
     final to = sec + 0.35;
+    final maxOn = widget.maxOnScreen.clamp(10, 500);
     for (final it in widget.items) {
-      if (it.time >= from && it.time < to) {
+      if (it.time >= from && it.time < to && _allowMode(it.mode)) {
         final lanes = widget.rows.clamp(1, 16);
         _flying.add(_Flying(
           item: it,
@@ -239,8 +261,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     // 回收过期
     final now = DateTime.now();
     _flying.removeWhere((f) => now.difference(f.born).inMilliseconds > f.durationMs + 200);
-    if (_flying.length > 80) {
-      _flying.removeRange(0, _flying.length - 80);
+    if (_flying.length > maxOn) {
+      _flying.removeRange(0, _flying.length - maxOn);
     }
   }
 
@@ -262,6 +284,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
                   fontSize: widget.fontSize,
                   opacity: widget.opacity,
                   rows: widget.rows,
+                  scrollAreaRatio: widget.scrollAreaRatio,
                 ),
               );
             },
@@ -292,17 +315,20 @@ class _DanmakuPainter extends CustomPainter {
     required this.fontSize,
     required this.opacity,
     required this.rows,
+    this.scrollAreaRatio = 0.5,
   });
   final List<_Flying> flying;
   final DateTime now;
   final double fontSize;
   final double opacity;
   final int rows;
+  final double scrollAreaRatio;
 
   @override
   void paint(Canvas canvas, Size size) {
     final lanes = rows.clamp(1, 16);
-    final laneH = (size.height * 0.7 / lanes).clamp(20.0, 48.0);
+    final areaH = (size.height * scrollAreaRatio.clamp(0.1, 1.0)).clamp(40.0, size.height);
+    final laneH = (areaH / lanes).clamp(20.0, 48.0);
     for (final f in flying) {
       final t = now.difference(f.born).inMilliseconds / f.durationMs;
       if (t < 0 || t > 1) continue;
@@ -320,12 +346,29 @@ class _DanmakuPainter extends CustomPainter {
         textDirection: ui.TextDirection.ltr,
         maxLines: 1,
       )..layout();
-      final y = 12.0 + (f.lane % lanes) * laneH;
-      final x = size.width - t * (size.width + tp.width);
+      final mode = f.item.mode;
+      late final double x;
+      late final double y;
+      if (mode == 4) {
+        // 底部固定
+        x = (size.width - tp.width) / 2;
+        y = size.height - 12.0 - tp.height - (f.lane % 3) * (tp.height + 4);
+      } else if (mode == 5) {
+        // 顶部固定
+        x = (size.width - tp.width) / 2;
+        y = 12.0 + (f.lane % 3) * (tp.height + 4);
+      } else if (mode == 6) {
+        // 逆向滚动
+        y = 12.0 + (f.lane % lanes) * laneH;
+        x = -tp.width + t * (size.width + tp.width);
+      } else {
+        y = 12.0 + (f.lane % lanes) * laneH;
+        x = size.width - t * (size.width + tp.width);
+      }
       tp.paint(canvas, Offset(x, y));
     }
   }
 
   @override
-  bool shouldRepaint(covariant _DanmakuPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _DanmakuPainter old) => true;
 }
