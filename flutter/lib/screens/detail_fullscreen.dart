@@ -44,6 +44,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.onDecodeChanged,
     this.onRenderChanged,
     this.onPersistSetting,
+    this.onLoadSettings,
     this.onPlayerStatus,
     this.onExternalPlayer,
     this.onToggleKeep,
@@ -64,6 +65,9 @@ class DetailFullscreenPage extends StatefulWidget {
     this.danmakuShowTop = true,
     this.danmakuShowBottom = true,
     this.danmakuShowReverse = true,
+    this.danmakuBold = false,
+    this.danmakuDurationMs = 8000,
+    this.danmakuLineSpacing = 1.4,
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
@@ -103,6 +107,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final ValueChanged<String>? onDecodeChanged;
   final ValueChanged<String>? onRenderChanged;
   final Future<void> Function(String key, String value)? onPersistSetting;
+  final Future<Map<String, String>> Function()? onLoadSettings;
   final Future<Map<String, dynamic>> Function()? onPlayerStatus;
   final Future<void> Function(String playerVal)? onExternalPlayer;
   final Future<String> Function()? onToggleKeep;
@@ -123,6 +128,9 @@ class DetailFullscreenPage extends StatefulWidget {
   final bool danmakuShowTop;
   final bool danmakuShowBottom;
   final bool danmakuShowReverse;
+  final bool danmakuBold;
+  final int danmakuDurationMs;
+  final double danmakuLineSpacing;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
@@ -879,6 +887,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       onDecodeChanged: (m) => unawaited(_onDecode(m)),
       onRenderChanged: (m) => unawaited(_onRender(m)),
       onPersistSetting: widget.onPersistSetting,
+      onLoadSettings: widget.onLoadSettings,
       onPlayerStatus: widget.onPlayerStatus,
       onExternalPlayer: widget.onExternalPlayer,
       onToggleKeep: widget.onToggleKeep,
@@ -985,6 +994,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                           showTop: widget.danmakuShowTop,
                           showBottom: widget.danmakuShowBottom,
                           showReverse: widget.danmakuShowReverse,
+                          bold: widget.danmakuBold,
+                          durationMs: widget.danmakuDurationMs,
+                          lineSpacing: widget.danmakuLineSpacing,
                         ),
                       ],
                     ),

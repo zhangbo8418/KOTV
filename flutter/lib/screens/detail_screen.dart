@@ -155,6 +155,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _danmakuShowTop = true;
   bool _danmakuShowBottom = true;
   bool _danmakuShowReverse = true;
+  bool _danmakuBold = false;
+  int _danmakuDurationMs = 8000;
+  double _danmakuLineSpacing = 1.4;
   double _danmakuOffsetSec = 0;
   final ValueNotifier<List<DanmakuItem>> _danmakuItems = ValueNotifier(const []);
   AspectSpec _aspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
@@ -983,15 +986,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
         final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
         final subBg = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
+        final styleMode = '${settings['subtitleStyleMode'] ?? 'custom'}'.trim().toLowerCase();
+        final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
+        final forceStyle = styleMode == 'custom';
+        final useSystem = styleMode == 'system';
         unawaited(_playback.setSubtitleStyle(
           scale: fontScale,
           pos: subPos.clamp(0, 150),
           secondaryPos: subSecPos.clamp(0, 150),
-          color: subColor.isEmpty ? null : subColor,
-          borderColor: subBorder.isEmpty ? null : subBorder,
-          borderSize: subBorderSize.clamp(0, 8),
-          bgColor: subBg.isEmpty ? null : subBg,
-          forceStyle: subColor.isNotEmpty || subBorder.isNotEmpty || subBorderSize > 0,
+          color: forceStyle && subColor.isNotEmpty ? subColor : null,
+          borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
+          borderSize: forceStyle ? subBorderSize.clamp(0, 8) : null,
+          bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
+          edgeType: edgeType,
+          useSystemStyle: useSystem,
+          forceStyle: forceStyle,
         ));
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
@@ -1013,6 +1022,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _danmakuShowTop = dFlag('danmakuShowTop');
         _danmakuShowBottom = dFlag('danmakuShowBottom');
         _danmakuShowReverse = dFlag('danmakuShowReverse');
+        _danmakuBold = dFlag('danmakuBold', false);
+        _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
+        _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
         _danmakuOffsetSec = ((int.tryParse('${settings['danmakuOffsetMs'] ?? '0'}') ?? 0) / 1000.0);
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
@@ -2035,6 +2047,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
                   showTop: _danmakuShowTop,
                   showBottom: _danmakuShowBottom,
                   showReverse: _danmakuShowReverse,
+                  bold: _danmakuBold,
+                  durationMs: _danmakuDurationMs,
+                  lineSpacing: _danmakuLineSpacing,
                 ),
               ),
               KotvBufferingOverlay(
@@ -2068,6 +2083,71 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   void _syncFullscreen() {
     if (!mounted || !_immersiveFullscreen) return;
     setState(() {});
+  }
+
+  Future<void> _reapplyPlayerFxSettings() async {
+    try {
+      final st = await ref.read(apiProvider).getSettings();
+      final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      if (!mounted) return;
+      _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+      final mk = _mk;
+      if (mk is NativeMpvPlayback) {
+        unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+      } else if (mk is MediaKitPlayback) {
+        unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+      }
+      _exo?.applyPlayerOptions(settings);
+      _fvp?.applyPlayerOptions(settings);
+      final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.5);
+      final subPos = double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100.0;
+      final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '0'}') ?? 0.0;
+      final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
+      final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
+      final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
+      final subBg = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
+      final styleMode = '${settings['subtitleStyleMode'] ?? 'custom'}'.trim().toLowerCase();
+      final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
+      final forceStyle = styleMode == 'custom';
+      final useSystem = styleMode == 'system';
+      unawaited(_playback.setSubtitleStyle(
+        scale: fontScale,
+        pos: subPos.clamp(0, 150),
+        secondaryPos: subSecPos.clamp(0, 150),
+        color: forceStyle && subColor.isNotEmpty ? subColor : null,
+        borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
+        borderSize: forceStyle ? subBorderSize.clamp(0, 8) : null,
+        bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
+        edgeType: edgeType,
+        useSystemStyle: useSystem,
+        forceStyle: forceStyle,
+      ));
+    } catch (_) {}
+  }
+
+  Future<void> _refreshDanmakuPrefs() async {
+    try {
+      final st = await ref.read(apiProvider).getSettings();
+      final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      if (!mounted) return;
+      setState(() {
+        _danmakuMaxOnScreen = int.tryParse('${settings['danmakuMaxOnScreen'] ?? '150'}') ?? 150;
+        final sa = double.tryParse('${settings['danmakuScrollArea'] ?? '50'}');
+        _danmakuScrollArea = sa == null ? 0.5 : (sa > 1 ? sa / 100.0 : sa).clamp(0.1, 1.0);
+        bool dFlag(String k, [bool def = true]) {
+          final v = '${settings[k] ?? ''}'.trim().toLowerCase();
+          if (v.isEmpty) return def;
+          return v != 'false' && v != '0' && v != 'off';
+        }
+        _danmakuShowScroll = dFlag('danmakuShowScroll');
+        _danmakuShowTop = dFlag('danmakuShowTop');
+        _danmakuShowBottom = dFlag('danmakuShowBottom');
+        _danmakuShowReverse = dFlag('danmakuShowReverse');
+        _danmakuBold = dFlag('danmakuBold', false);
+        _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
+        _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
+      });
+    } catch (_) {}
   }
 
   Widget _buildImmersiveFullscreenPage({bool externalVideo = false}) {
@@ -2112,6 +2192,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         danmakuShowTop: _danmakuShowTop,
         danmakuShowBottom: _danmakuShowBottom,
         danmakuShowReverse: _danmakuShowReverse,
+        danmakuBold: _danmakuBold,
+        danmakuDurationMs: _danmakuDurationMs,
+        danmakuLineSpacing: _danmakuLineSpacing,
         ambientOn: _ambientOn,
         stableVolumeOn: _stableVolumeOn,
         onAssrtSearch: _searchAssrtSubtitle,
@@ -2186,6 +2269,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           if (k == 'danmakuRows') {
             setState(() => _danmakuRows = int.tryParse(v) ?? _danmakuRows);
           }
+          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuLineSpacing') {
+            unawaited(_refreshDanmakuPrefs());
+          }
           if (k == 'playerDecode') {
             final next = v.trim().isEmpty ? 'auto' : v.trim();
             setState(() {
@@ -2208,6 +2294,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               unawaited(_playAt(_epIdx));
             }
           }
+          // 画面/音频/字幕热更新
+          if (k.startsWith('video') ||
+              k.startsWith('audio') ||
+              k.startsWith('subtitle') ||
+              k.startsWith('exo') ||
+              k == 'audioPassThrough') {
+            unawaited(_reapplyPlayerFxSettings());
+          }
+        },
+        onLoadSettings: () async {
+          final st = await api.getSettings();
+          final map = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+          return {for (final e in map.entries) e.key: '${e.value}'};
         },
         onPlayerStatus: api.playerStatus,
         onExternalPlayer: (player) => api.playerExternal(url: _playUrl, player: player),

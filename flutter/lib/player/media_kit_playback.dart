@@ -618,6 +618,8 @@ class MediaKitPlayback extends KotvPlayback {
     String? borderColor,
     double? borderSize,
     String? bgColor,
+    String? edgeType,
+    bool useSystemStyle = false,
   }) async {
     try {
       final platform = player.platform;
@@ -652,10 +654,20 @@ class MediaKitPlayback extends KotvPlayback {
       if (bgColor != null && bgColor.trim().isNotEmpty) {
         await (platform as dynamic).setProperty('sub-back-color', bgColor.trim());
       }
+      final edge = (edgeType ?? '').trim().toLowerCase();
+      if (edge == 'none') {
+        await (platform as dynamic).setProperty('sub-border-size', '0');
+        await (platform as dynamic).setProperty('sub-shadow-offset', '0');
+      } else if (edge == 'shadow') {
+        await (platform as dynamic).setProperty('sub-shadow-offset', '2');
+      } else if (edge == 'raised' || edge == 'depressed') {
+        await (platform as dynamic).setProperty('sub-shadow-offset', '1.5');
+      }
       if (forceStyle ||
           color != null ||
           borderColor != null ||
-          borderSize != null) {
+          borderSize != null ||
+          edge.isNotEmpty) {
         await (platform as dynamic).setProperty('sub-ass-override', 'force');
       }
     } catch (_) {}

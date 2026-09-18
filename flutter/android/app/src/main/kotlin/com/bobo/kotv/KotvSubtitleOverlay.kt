@@ -126,6 +126,7 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     borderColor: String = "#000000",
     borderSize: Double = 2.0,
     bgColor: String = "#00000000",
+    edgeType: String = "outline",
   ) {
     this.fontScale = fontScale.coerceIn(0.5f, 2.5f)
     this.primaryPos = primaryPos.coerceIn(0.0, 150.0)
@@ -139,20 +140,27 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     val edge = parseColorSafe(borderColor, Color.BLACK)
     val radius = (borderSize.coerceIn(0.0, 8.0).toFloat() * resources.displayMetrics.density).coerceAtLeast(0f)
     primaryView.setTextColor(fg)
-    if (radius > 0.1f && Color.alpha(edge) > 0) {
-      primaryView.setShadowLayer(radius, 0f, 0f, edge)
-    } else {
-      primaryView.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
-    }
+    applyEdge(primaryView, edgeType, edge, radius)
     applyBg(primaryView, bgColor)
     // 副字幕保持偏黄可读，仅同步描边/背景强度
-    if (radius > 0.1f && Color.alpha(edge) > 0) {
-      secondaryView.setShadowLayer(radius, 0f, 0f, edge)
-    } else {
-      secondaryView.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
-    }
+    applyEdge(secondaryView, edgeType, edge, radius)
     applyBg(secondaryView, bgColor)
     requestLayout()
+  }
+
+  private fun applyEdge(view: TextView, edgeType: String, edge: Int, radius: Float) {
+    val type = edgeType.trim().lowercase()
+    if (type == "none" || radius <= 0.1f || Color.alpha(edge) <= 0) {
+      view.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+      return
+    }
+    val r = radius.coerceAtLeast(1f)
+    when (type) {
+      "shadow" -> view.setShadowLayer(r * 1.4f, r * 0.35f, r * 0.35f, edge)
+      "raised" -> view.setShadowLayer(r * 0.9f, -r * 0.25f, -r * 0.25f, edge)
+      "depressed" -> view.setShadowLayer(r * 0.9f, r * 0.25f, r * 0.25f, edge)
+      else -> view.setShadowLayer(r, 0f, 0f, edge) // outline
+    }
   }
 
   fun setLibassEnabled(enabled: Boolean) {

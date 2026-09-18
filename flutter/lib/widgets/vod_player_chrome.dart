@@ -391,6 +391,7 @@ class VodFullscreenChrome extends StatefulWidget {
     this.renderMode = 'surface',
     this.onRenderChanged,
     this.onPersistSetting,
+    this.onLoadSettings,
     this.onPlayerStatus,
     this.onExternalPlayer,
     this.onToggleKeep,
@@ -439,6 +440,8 @@ class VodFullscreenChrome extends StatefulWidget {
   final String renderMode;
   final ValueChanged<String>? onRenderChanged;
   final Future<void> Function(String key, String value)? onPersistSetting;
+  /// 播控内调色/音效读取当前设置。
+  final Future<Map<String, String>> Function()? onLoadSettings;
   final Future<Map<String, dynamic>> Function()? onPlayerStatus;
   final Future<void> Function(String playerVal)? onExternalPlayer;
   final Future<String> Function()? onToggleKeep;
@@ -753,6 +756,236 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
   Future<void> _persist(String key, String value) async {
     await widget.onPersistSetting?.call(key, value);
+  }
+
+  Future<Map<String, String>> _loadSettings() async {
+    try {
+      final m = await widget.onLoadSettings?.call();
+      if (m != null) return m;
+    } catch (_) {}
+    return const {};
+  }
+
+  Future<void> _showVideoEqSheet(BuildContext moreCtx) async {
+    Navigator.pop(moreCtx);
+    final s = Map<String, String>.from(await _loadSettings());
+    if (!mounted) return;
+    var preset = (s['videoEq'] ?? 'off').trim().toLowerCase();
+    if (preset == 'on') preset = 'custom';
+    double numOf(String k, [double d = 0]) => double.tryParse(s[k] ?? '$d') ?? d;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black38,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            final custom = preset == 'custom';
+            Widget chip(String id, String label) {
+              final on = preset == id || (id == 'off' && (preset.isEmpty || preset == 'off'));
+              return Padding(
+                padding: const EdgeInsets.only(right: 8, bottom: 8),
+                child: ChoiceChip(
+                  label: Text(label),
+                  selected: on,
+                  onSelected: (_) async {
+                    preset = id;
+                    setSheet(() {});
+                    await _persist('videoEq', id);
+                  },
+                  selectedColor: Colors.white24,
+                  labelStyle: const TextStyle(color: Colors.white, fontSize: 13),
+                  backgroundColor: const Color(0x33FFFFFF),
+                ),
+              );
+            }
+            Widget slider(String label, String key, double min, double max, {int divisions = 40}) {
+              final v = numOf(key).clamp(min, max);
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                child: Row(
+                  children: [
+                    SizedBox(width: 72, child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13))),
+                    Expanded(
+                      child: Slider(
+                        value: v,
+                        min: min,
+                        max: max,
+                        divisions: divisions,
+                        label: '${v.round()}',
+                        onChanged: (nv) {
+                          s[key] = '${nv.round()}';
+                          setSheet(() {});
+                        },
+                        onChangeEnd: (nv) => unawaited(_persist(key, '${nv.round()}')),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return _chromeSheetFrame(
+              ctx,
+              title: '画面调色',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                  child: Wrap(
+                    children: [
+                      for (final e in const [
+                        ('off', '关闭'),
+                        ('natural', '自然'),
+                        ('vivid', '鲜艳'),
+                        ('soft', '柔和'),
+                        ('cinema', '影院'),
+                        ('warm', '暖色'),
+                        ('cool', '冷色'),
+                        ('anime', '动漫'),
+                        ('custom', '自定义'),
+                      ])
+                        chip(e.$1, e.$2),
+                    ],
+                  ),
+                ),
+                if (custom) ...[
+                  slider('亮度', 'videoBrightness', -100, 100),
+                  slider('对比度', 'videoContrast', -100, 100),
+                  slider('饱和度', 'videoSaturation', -100, 100),
+                  slider('锐度', 'videoSharpness', 0, 100, divisions: 20),
+                  slider('色温', 'videoTemperature', -100, 100),
+                ],
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _showAudioFxSheet(BuildContext moreCtx) async {
+    Navigator.pop(moreCtx);
+    final s = Map<String, String>.from(await _loadSettings());
+    if (!mounted) return;
+    var eq = (s['audioEq'] ?? 'off').trim().toLowerCase();
+    var dialogue = double.tryParse(s['audioDialogue'] ?? '0') ?? 0;
+    if ((s['audioDialogue'] ?? '').toLowerCase() == 'true') dialogue = 100;
+    var balance = (double.tryParse(s['audioBalance'] ?? '0') ?? 0).clamp(-100.0, 100.0);
+    var offset = (double.tryParse(s['audioOffsetMs'] ?? '0') ?? 0).clamp(-5000.0, 5000.0);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black38,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            Widget chip(String id, String label) {
+              return Padding(
+                padding: const EdgeInsets.only(right: 8, bottom: 8),
+                child: ChoiceChip(
+                  label: Text(label),
+                  selected: eq == id,
+                  onSelected: (_) async {
+                    eq = id;
+                    setSheet(() {});
+                    await _persist('audioEq', id);
+                  },
+                  selectedColor: Colors.white24,
+                  labelStyle: const TextStyle(color: Colors.white, fontSize: 13),
+                  backgroundColor: const Color(0x33FFFFFF),
+                ),
+              );
+            }
+            return _chromeSheetFrame(
+              ctx,
+              title: '音频效果',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                  child: Wrap(
+                    children: [
+                      chip('off', '关闭'),
+                      chip('natural', '自然'),
+                      chip('voice', '人声'),
+                      chip('bass', '低音'),
+                      chip('cinema', '影院'),
+                      chip('custom', '自定义'),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 72, child: Text('对白', style: TextStyle(color: Colors.white70, fontSize: 13))),
+                      Expanded(
+                        child: Slider(
+                          value: dialogue.clamp(0, 100),
+                          min: 0,
+                          max: 100,
+                          divisions: 20,
+                          label: dialogue <= 0 ? '关' : '${dialogue.round()}',
+                          onChanged: (v) {
+                            dialogue = v;
+                            setSheet(() {});
+                          },
+                          onChangeEnd: (v) => unawaited(_persist('audioDialogue', '${v.round()}')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 72, child: Text('平衡', style: TextStyle(color: Colors.white70, fontSize: 13))),
+                      Expanded(
+                        child: Slider(
+                          value: balance,
+                          min: -100,
+                          max: 100,
+                          divisions: 40,
+                          label: balance.round() == 0 ? '居中' : '${balance.round()}',
+                          onChanged: (v) {
+                            balance = v;
+                            setSheet(() {});
+                          },
+                          onChangeEnd: (v) => unawaited(_persist('audioBalance', '${v.round()}')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 72, child: Text('音画', style: TextStyle(color: Colors.white70, fontSize: 13))),
+                      Expanded(
+                        child: Slider(
+                          value: offset,
+                          min: -5000,
+                          max: 5000,
+                          divisions: 100,
+                          label: '${offset.round()} ms',
+                          onChanged: (v) {
+                            offset = v;
+                            setSheet(() {});
+                          },
+                          onChangeEnd: (v) => unawaited(_persist('audioOffsetMs', '${v.round()}')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _cycleSpeed() {
@@ -1396,6 +1629,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           ),
                         ),
                         const SizedBox(height: 10),
+                        linkRow(
+                          icon: Icons.tune,
+                          label: '画面调色',
+                          onTap: () => unawaited(_showVideoEqSheet(ctx)),
+                        ),
+                        linkRow(
+                          icon: Icons.equalizer,
+                          label: '音频效果',
+                          onTap: () => unawaited(_showAudioFxSheet(ctx)),
+                        ),
                         toggleRow(
                           icon: Icons.repeat,
                           label: '循环播放视频',

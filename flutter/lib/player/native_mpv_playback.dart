@@ -713,6 +713,8 @@ class NativeMpvPlayback extends KotvPlayback {
     String? borderColor,
     double? borderSize,
     String? bgColor,
+    String? edgeType,
+    bool useSystemStyle = false,
   }) async {
     try {
       await _ch.invokeMethod('setSubtitleStyle', {
@@ -724,6 +726,8 @@ class NativeMpvPlayback extends KotvPlayback {
         if (borderColor != null) 'borderColor': borderColor,
         if (borderSize != null) 'borderSize': borderSize,
         if (bgColor != null) 'bgColor': bgColor,
+        if (edgeType != null) 'edgeType': edgeType,
+        'useSystemStyle': useSystemStyle,
       });
     } catch (_) {}
   }

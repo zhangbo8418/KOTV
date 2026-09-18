@@ -68,6 +68,8 @@ class ExoPlayback extends KotvPlayback {
   int _bufferFactor = 1;
   String _preferredTextLangs = '';
   int _diskPreloadMs = 10000;
+  int _diskPreloadThreads = 2;
+  int _diskPreloadSizeMb = 256;
   bool _libass = true;
   String _secondarySubtitle = 'off';
   String? _currentSecondarySubtitleId;
@@ -78,6 +80,8 @@ class ExoPlayback extends KotvPlayback {
   String _subtitleBorderColor = '#000000';
   double _subtitleBorderSize = 2;
   String _subtitleBgColor = '#00000000';
+  String _subtitleEdgeType = 'outline';
+  bool _subtitleUseSystemStyle = false;
   List<Map<String, dynamic>> _subs = const [];
   KotvVideoEq _videoEq = KotvVideoEq.off;
   KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
@@ -444,6 +448,8 @@ class ExoPlayback extends KotvPlayback {
         'bufferFactor': _bufferFactor,
         'preferredTextLangs': _preferredTextLangs,
         'diskPreloadMs': (_diskCache && !live) ? _diskPreloadMs : 0,
+        'diskPreloadThreads': _diskPreloadThreads,
+        'diskPreloadSizeMb': _diskPreloadSizeMb,
         'libass': _libass,
         'secondarySubtitle': _secondarySubtitle,
         'secondarySubtitleId': _currentSecondarySubtitleId ?? '',
@@ -454,6 +460,8 @@ class ExoPlayback extends KotvPlayback {
         'subtitleBorderColor': _subtitleBorderColor,
         'subtitleBorderSize': _subtitleBorderSize,
         'subtitleBgColor': _subtitleBgColor,
+        'subtitleEdgeType': _subtitleEdgeType,
+        'subtitleUseSystemStyle': _subtitleUseSystemStyle,
         'subs': _subs,
         'audioEq': kotvAudioEqExoMode(_audioEq),
         'audioEqBands': kotvAudioEqExoBandsPayload(
@@ -870,6 +878,12 @@ class ExoPlayback extends KotvPlayback {
     _diskPreloadMs = int.tryParse('${settings['exoDiskPreloadMs'] ?? '10000'}') ?? 10000;
     if (_diskPreloadMs < 0) _diskPreloadMs = 0;
     if (_diskPreloadMs > 120000) _diskPreloadMs = 120000;
+    _diskPreloadThreads = int.tryParse('${settings['exoDiskPreloadThreads'] ?? '2'}') ?? 2;
+    if (_diskPreloadThreads < 1) _diskPreloadThreads = 1;
+    if (_diskPreloadThreads > 8) _diskPreloadThreads = 8;
+    _diskPreloadSizeMb = int.tryParse('${settings['exoDiskPreloadSizeMb'] ?? '256'}') ?? 256;
+    if (_diskPreloadSizeMb < 128) _diskPreloadSizeMb = 128;
+    if (_diskPreloadSizeMb > 4096) _diskPreloadSizeMb = 4096;
     final sec = '${settings['exoSecondarySubtitle'] ?? 'off'}'.trim().toLowerCase();
     _secondarySubtitle = (sec == 'auto' || sec == 'on' || sec == 'manual') ? sec : 'off';
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
@@ -884,6 +898,13 @@ class ExoPlayback extends KotvPlayback {
         (double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2).clamp(0, 8);
     _subtitleBgColor = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
     if (_subtitleBgColor.isEmpty) _subtitleBgColor = '#00000000';
+    final edge = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
+    _subtitleEdgeType = switch (edge) {
+      'none' || 'shadow' || 'raised' || 'depressed' => edge,
+      _ => 'outline',
+    };
+    final styleMode = '${settings['subtitleStyleMode'] ?? 'custom'}'.trim().toLowerCase();
+    _subtitleUseSystemStyle = styleMode == 'system';
     _videoEq = KotvVideoEq.fromSettings(settings);
     _audioEq = kotvAudioEqFromSettings(settings);
     _audioEqBands = kotvAudioEqBandsFromSettings(settings);
@@ -902,10 +923,13 @@ class ExoPlayback extends KotvPlayback {
         scale: _subtitleFontScale,
         pos: _subtitlePos,
         secondaryPos: _subtitleSecondaryPos,
-        color: _subtitleColor,
-        borderColor: _subtitleBorderColor,
-        borderSize: _subtitleBorderSize,
-        forceStyle: true,
+        color: _subtitleUseSystemStyle ? null : _subtitleColor,
+        borderColor: _subtitleUseSystemStyle ? null : _subtitleBorderColor,
+        borderSize: _subtitleUseSystemStyle ? null : _subtitleBorderSize,
+        bgColor: _subtitleUseSystemStyle ? null : _subtitleBgColor,
+        edgeType: _subtitleEdgeType,
+        useSystemStyle: _subtitleUseSystemStyle,
+        forceStyle: !_subtitleUseSystemStyle,
       ));
     }
   }
@@ -953,6 +977,8 @@ class ExoPlayback extends KotvPlayback {
     String? borderColor,
     double? borderSize,
     String? bgColor,
+    String? edgeType,
+    bool useSystemStyle = false,
   }) async {
     if (scale != null) _subtitleFontScale = scale.clamp(0.5, 2.5);
     if (pos != null) _subtitlePos = pos.clamp(0, 150);
@@ -963,6 +989,14 @@ class ExoPlayback extends KotvPlayback {
     }
     if (borderSize != null) _subtitleBorderSize = borderSize.clamp(0, 8);
     if (bgColor != null && bgColor.trim().isNotEmpty) _subtitleBgColor = bgColor.trim();
+    if (edgeType != null && edgeType.trim().isNotEmpty) {
+      final e = edgeType.trim().toLowerCase();
+      _subtitleEdgeType = switch (e) {
+        'none' || 'shadow' || 'raised' || 'depressed' => e,
+        _ => 'outline',
+      };
+    }
+    _subtitleUseSystemStyle = useSystemStyle;
     try {
       await _ensureNative();
       await _ch.invokeMethod('setSubtitleStyle', {
@@ -974,6 +1008,8 @@ class ExoPlayback extends KotvPlayback {
         'borderColor': _subtitleBorderColor,
         'borderSize': _subtitleBorderSize,
         'bgColor': _subtitleBgColor,
+        'edgeType': _subtitleEdgeType,
+        'useSystemStyle': _subtitleUseSystemStyle,
       });
     } catch (_) {}
   }

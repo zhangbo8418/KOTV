@@ -14,16 +14,29 @@ import java.io.File
 object KotvExoCache {
   @Volatile
   private var cache: Cache? = null
+  @Volatile
+  private var preferredMaxBytes: Long = 0L
 
-  fun get(ctx: Context, maxBytes: Long = defaultMaxBytes(ctx)): Cache {
+  /** 在首次创建缓存前生效；已创建后保留偏好供下次冷启动。 */
+  fun preferMaxBytes(bytes: Long) {
+    preferredMaxBytes = bytes.coerceIn(128L * 1024 * 1024, 4L * 1024 * 1024 * 1024)
+  }
+
+  fun get(ctx: Context, maxBytes: Long = 0L): Cache {
     cache?.let { return it }
     synchronized(this) {
       cache?.let { return it }
+      val limit =
+        when {
+          maxBytes > 0L -> maxBytes
+          preferredMaxBytes > 0L -> preferredMaxBytes
+          else -> defaultMaxBytes(ctx)
+        }.coerceAtLeast(32L * 1024 * 1024)
       val dir = File(ctx.cacheDir, "exo").apply { mkdirs() }
       val created =
         SimpleCache(
           dir,
-          LeastRecentlyUsedCacheEvictor(maxBytes.coerceAtLeast(32L * 1024 * 1024)),
+          LeastRecentlyUsedCacheEvictor(limit),
           StandaloneDatabaseProvider(ctx),
         )
       cache = created

@@ -806,6 +806,8 @@ class FvpPlayback extends KotvPlayback {
     String? borderColor,
     double? borderSize,
     String? bgColor,
+    String? edgeType,
+    bool useSystemStyle = false,
   }) async {
     final c = _c;
     if (c == null || !c.value.isInitialized) return;
@@ -832,7 +834,13 @@ class FvpPlayback extends KotvPlayback {
       if (bgColor != null && bgColor.trim().isNotEmpty) {
         c.setProperty('subtitle.background_color', bgColor.trim());
       }
-      if (forceStyle || color != null || borderColor != null || borderSize != null) {
+      final edge = (edgeType ?? '').trim().toLowerCase();
+      if (edge == 'none') {
+        c.setProperty('subtitle.outline', '0');
+      } else if (edge == 'shadow') {
+        c.setProperty('subtitle.shadow', '2');
+      }
+      if (forceStyle || color != null || borderColor != null || borderSize != null || edge.isNotEmpty) {
         c.setProperty('subtitle.force', '1');
       }
     } catch (_) {}

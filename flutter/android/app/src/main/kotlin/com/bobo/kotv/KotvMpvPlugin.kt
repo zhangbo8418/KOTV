@@ -661,6 +661,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val color = call.argument<String>("color")?.trim().orEmpty()
         val borderColor = call.argument<String>("borderColor")?.trim().orEmpty()
         val borderSize = call.argument<Number>("borderSize")?.toDouble()
+        val edgeType = call.argument<String>("edgeType")?.trim()?.lowercase().orEmpty()
         main.post {
           try {
             if (created.get()) {
@@ -686,7 +687,26 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               if (bgColor.isNotEmpty()) {
                 MPVLib.setPropertyString("sub-back-color", bgColor)
               }
-              val force = forceStyle || color.isNotEmpty() || borderColor.isNotEmpty() || borderSize != null
+              when (edgeType) {
+                "none" -> {
+                  MPVLib.setPropertyDouble("sub-border-size", 0.0)
+                  MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
+                }
+                "shadow" -> MPVLib.setPropertyDouble("sub-shadow-offset", 2.0)
+                "raised", "depressed" -> MPVLib.setPropertyDouble("sub-shadow-offset", 1.5)
+                "outline" -> {
+                  if (borderSize == null) {
+                    MPVLib.setPropertyDouble("sub-border-size", 2.0)
+                  }
+                  MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
+                }
+              }
+              val force =
+                forceStyle ||
+                  color.isNotEmpty() ||
+                  borderColor.isNotEmpty() ||
+                  borderSize != null ||
+                  edgeType.isNotEmpty()
               MPVLib.setPropertyString(
                 "secondary-sub-ass-override",
                 if (force) "force" else "yes",

@@ -180,6 +180,9 @@ class DanmakuOverlay extends StatefulWidget {
     this.showTop = true,
     this.showBottom = true,
     this.showReverse = true,
+    this.bold = false,
+    this.durationMs = 8000,
+    this.lineSpacing = 1.4,
   });
 
   final bool enabled;
@@ -195,6 +198,9 @@ class DanmakuOverlay extends StatefulWidget {
   final bool showTop;
   final bool showBottom;
   final bool showReverse;
+  final bool bold;
+  final int durationMs;
+  final double lineSpacing;
 
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
@@ -253,7 +259,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
           item: it,
           born: DateTime.now(),
           lane: math.Random(it.content.hashCode ^ sec.toInt()).nextInt(lanes),
-          durationMs: 6500 + (it.content.length * 80).clamp(0, 4000),
+          durationMs: widget.durationMs.clamp(3000, 15000) + (it.content.length * 40).clamp(0, 3000),
         ));
       }
     }
@@ -285,6 +291,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
                   opacity: widget.opacity,
                   rows: widget.rows,
                   scrollAreaRatio: widget.scrollAreaRatio,
+                  bold: widget.bold,
+                  lineSpacing: widget.lineSpacing,
                 ),
               );
             },
@@ -316,6 +324,8 @@ class _DanmakuPainter extends CustomPainter {
     required this.opacity,
     required this.rows,
     this.scrollAreaRatio = 0.5,
+    this.bold = false,
+    this.lineSpacing = 1.4,
   });
   final List<_Flying> flying;
   final DateTime now;
@@ -323,12 +333,14 @@ class _DanmakuPainter extends CustomPainter {
   final double opacity;
   final int rows;
   final double scrollAreaRatio;
+  final bool bold;
+  final double lineSpacing;
 
   @override
   void paint(Canvas canvas, Size size) {
     final lanes = rows.clamp(1, 16);
     final areaH = (size.height * scrollAreaRatio.clamp(0.1, 1.0)).clamp(40.0, size.height);
-    final laneH = (areaH / lanes).clamp(20.0, 48.0);
+    final laneH = (areaH / lanes * lineSpacing.clamp(1.0, 2.0)).clamp(20.0, 64.0);
     for (final f in flying) {
       final t = now.difference(f.born).inMilliseconds / f.durationMs;
       if (t < 0 || t > 1) continue;
@@ -339,7 +351,7 @@ class _DanmakuPainter extends CustomPainter {
           style: TextStyle(
             color: Color(0xFF000000 | (f.item.color & 0xFFFFFF)).withOpacity(opacity.clamp(0.15, 1.0)),
             fontSize: fs,
-            fontWeight: FontWeight.w600,
+            fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
             shadows: const [Shadow(blurRadius: 2, color: Colors.black87)],
           ),
         ),
@@ -350,15 +362,12 @@ class _DanmakuPainter extends CustomPainter {
       late final double x;
       late final double y;
       if (mode == 4) {
-        // 底部固定
         x = (size.width - tp.width) / 2;
         y = size.height - 12.0 - tp.height - (f.lane % 3) * (tp.height + 4);
       } else if (mode == 5) {
-        // 顶部固定
         x = (size.width - tp.width) / 2;
         y = 12.0 + (f.lane % 3) * (tp.height + 4);
       } else if (mode == 6) {
-        // 逆向滚动
         y = 12.0 + (f.lane % lanes) * laneH;
         x = -tp.width + t * (size.width + tp.width);
       } else {

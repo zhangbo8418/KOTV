@@ -151,6 +151,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var preferredTextLangs: String = ""
   /** 点播磁盘预读时长（毫秒）；仅 diskCache 开启时生效。 */
   private var diskPreloadMs: Long = 10_000L
+  private var diskPreloadThreads: Int = 2
+  private var diskPreloadSizeMb: Int = 256
   private val diskPreload = KotvExoDiskPreload()
   /** rebuildPlayer 留下的上游/渲染工厂，供 DiskPreload 复用。 */
   private var preloadUpstream: DataSource.Factory? = null
@@ -170,6 +172,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var subtitleBorderColor = "#000000"
   private var subtitleBorderSize = 2.0
   private var subtitleBgColor = "#00000000"
+  /** none | outline | shadow | raised | depressed */
+  private var subtitleEdgeType = "outline"
+  private var subtitleUseSystemStyle = false
   /** 音频 EQ：off | bass | voice | custom | natural…（Equalizer；直通时跳过）。 */
   private var audioEqMode: String = "off"
   /** 频段：`freq:gain,freq:gain…`（gain 单位 dB；可含对白叠加）。 */
@@ -381,6 +386,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Number>("diskPreloadMs")?.toLong()?.let {
           diskPreloadMs = it.coerceIn(0L, 120_000L)
         }
+        call.argument<Number>("diskPreloadThreads")?.toInt()?.let {
+          diskPreloadThreads = it.coerceIn(1, 8)
+        }
+        call.argument<Number>("diskPreloadSizeMb")?.toInt()?.let {
+          diskPreloadSizeMb = it.coerceIn(128, 4096)
+          KotvExoCache.preferMaxBytes(diskPreloadSizeMb.toLong() * 1024L * 1024L)
+        }
         call.argument<Boolean>("libass")?.let { libassEnabled = it }
         call.argument<String>("secondarySubtitle")?.let { secondarySubtitleMode = it.trim().lowercase() }
         call.argument<String>("secondarySubtitleId")?.let { secondarySubtitleId = it.trim() }
@@ -452,6 +464,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<String>("bgColor")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           subtitleBgColor = it
         }
+        call.argument<String>("edgeType")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+          subtitleEdgeType = normalizeEdgeType(it)
+        }
+        call.argument<Boolean>("useSystemStyle")?.let { subtitleUseSystemStyle = it }
         main.post {
           try {
             applySubtitleStyle()
@@ -673,15 +689,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val overlay = subtitleOverlay ?: KotvSubtitleOverlay(host.context).also { subtitleOverlay = it }
     overlay.setLibassEnabled(libassEnabled)
     overlay.setSecondaryEnabled(secondarySubtitleMode != "off")
-    overlay.setStyle(
-      fontScale = subtitleFontScale,
-      primaryPos = subtitlePos,
-      secondaryPos = subtitleSecondaryPos,
-      color = subtitleColor,
-      borderColor = subtitleBorderColor,
-      borderSize = subtitleBorderSize,
-      bgColor = subtitleBgColor,
-    )
+    applySubtitleStyleTo(overlay)
     overlay.attachTo(host)
   }
 
@@ -977,6 +985,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         upstream,
         renderers,
         durationMs = diskPreloadMs,
+        maxThreads = diskPreloadThreads,
       )
     } catch (t: Throwable) {
       Log.w(TAG, "disk preload start failed", t)
@@ -1011,15 +1020,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val overlay = subtitleOverlay ?: KotvSubtitleOverlay(ctx).also { subtitleOverlay = it }
     overlay.setLibassEnabled(libassEnabled)
     overlay.setSecondaryEnabled(secondarySubtitleMode != "off")
-    overlay.setStyle(
-      fontScale = subtitleFontScale,
-      primaryPos = subtitlePos,
-      secondaryPos = subtitleSecondaryPos,
-      color = subtitleColor,
-      borderColor = subtitleBorderColor,
-      borderSize = subtitleBorderSize,
-      bgColor = subtitleBgColor,
-    )
+    applySubtitleStyleTo(overlay)
     surfaceHost?.let { overlay.attachTo(it) }
     val assHandler = if (libassEnabled) overlay.assHandlerOrNull() else null
     val extractors: androidx.media3.extractor.ExtractorsFactory =
@@ -1484,7 +1485,20 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     call.argument<String>("subtitleBgColor")?.trim()?.takeIf { it.isNotEmpty() }?.let {
       subtitleBgColor = it
     }
+    call.argument<String>("subtitleEdgeType")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      subtitleEdgeType = normalizeEdgeType(it)
+    }
+    call.argument<Boolean>("subtitleUseSystemStyle")?.let { subtitleUseSystemStyle = it }
   }
+
+  private fun normalizeEdgeType(raw: String): String =
+    when (raw.trim().lowercase()) {
+      "none", "0" -> "none"
+      "shadow", "drop_shadow", "2" -> "shadow"
+      "raised", "3" -> "raised"
+      "depressed", "4" -> "depressed"
+      else -> "outline"
+    }
 
   private fun applyVideoEq() {
     videoEqCtrl.apply(
@@ -1504,14 +1518,56 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun applySubtitleStyle() {
-    subtitleOverlay?.setStyle(
-      fontScale = subtitleFontScale,
+    subtitleOverlay?.let { applySubtitleStyleTo(it) }
+  }
+
+  private fun applySubtitleStyleTo(overlay: KotvSubtitleOverlay) {
+    var color = subtitleColor
+    var borderColor = subtitleBorderColor
+    var borderSize = subtitleBorderSize
+    var bgColor = subtitleBgColor
+    var edgeType = subtitleEdgeType
+    var scale = subtitleFontScale
+    if (subtitleUseSystemStyle) {
+      try {
+        val cm =
+          appContext?.getSystemService(android.view.accessibility.CaptioningManager::class.java)
+        if (cm != null) {
+          scale = (subtitleFontScale * cm.fontScale).coerceIn(0.5f, 2.5f)
+          val style = cm.userStyle
+          if (style.hasForegroundColor()) {
+            color = String.format("#%08X", style.foregroundColor)
+          }
+          if (style.hasBackgroundColor()) {
+            bgColor = String.format("#%08X", style.backgroundColor)
+          }
+          if (style.hasEdgeColor()) {
+            borderColor = String.format("#%08X", style.edgeColor)
+          }
+          edgeType =
+            when (style.edgeType) {
+              android.view.accessibility.CaptioningManager.CaptionStyle.EDGE_TYPE_NONE -> "none"
+              android.view.accessibility.CaptioningManager.CaptionStyle.EDGE_TYPE_DROP_SHADOW ->
+                "shadow"
+              android.view.accessibility.CaptioningManager.CaptionStyle.EDGE_TYPE_RAISED -> "raised"
+              android.view.accessibility.CaptioningManager.CaptionStyle.EDGE_TYPE_DEPRESSED ->
+                "depressed"
+              else -> "outline"
+            }
+          if (edgeType != "none" && borderSize < 1.0) borderSize = 2.0
+        }
+      } catch (_: Throwable) {
+      }
+    }
+    overlay.setStyle(
+      fontScale = scale,
       primaryPos = subtitlePos,
       secondaryPos = subtitleSecondaryPos,
-      color = subtitleColor,
-      borderColor = subtitleBorderColor,
-      borderSize = subtitleBorderSize,
-      bgColor = subtitleBgColor,
+      color = color,
+      borderColor = borderColor,
+      borderSize = borderSize,
+      bgColor = bgColor,
+      edgeType = edgeType,
     )
   }
 

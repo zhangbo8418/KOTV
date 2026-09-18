@@ -376,6 +376,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final exoSoftVideoPrefer = kotvSettingsFlag(g('exoSoftVideoPrefer', 'true'), def: true);
         final exoBuffer = (int.tryParse(g('exoBuffer', '1')) ?? 1).clamp(1, 10).toDouble();
         final exoPreload = (int.tryParse(g('exoDiskPreloadMs', '10000')) ?? 10000).clamp(0, 120000).toDouble();
+        final exoPreloadThreads = (int.tryParse(g('exoDiskPreloadThreads', '2')) ?? 2).clamp(1, 8).toDouble();
+        final exoPreloadSizeMb = (int.tryParse(g('exoDiskPreloadSizeMb', '256')) ?? 256).clamp(128, 4096).toDouble();
         final exoLibass = kotvSettingsFlag(g('exoLibass', 'true'), def: true);
         final exoSecondary = g('exoSecondarySubtitle', 'off').trim().toLowerCase();
         final exoSecondaryOn = exoSecondary != 'off';
@@ -404,6 +406,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             format: (v) => '${v.round()} ms',
             onChanging: (v) => setSheet(() => _s['exoDiskPreloadMs'] = '${v.round()}'),
             onCommit: (v) => _set('exoDiskPreloadMs', '${v.round()}', msg: 'Exo 磁盘预读已更新'),
+          ),
+          _sheetSlider(
+            label: '预读线程',
+            value: exoPreloadThreads,
+            min: 1,
+            max: 8,
+            divisions: 7,
+            format: (v) => '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['exoDiskPreloadThreads'] = '${v.round()}'),
+            onCommit: (v) => _set('exoDiskPreloadThreads', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '预读容量',
+            value: exoPreloadSizeMb,
+            min: 128,
+            max: 2048,
+            divisions: 15,
+            format: (v) => '${v.round()} MB',
+            onChanging: (v) => setSheet(() => _s['exoDiskPreloadSizeMb'] = '${v.round()}'),
+            onCommit: (v) => _set('exoDiskPreloadSizeMb', '${v.round()}'),
           ),
           _sheetSlider(
             label: '内存缓冲倍率',
@@ -928,7 +950,51 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final border = (double.tryParse(g('subtitleBorderSize', '2')) ?? 2).clamp(0.0, 8.0);
         final color = g('subtitleColor', '#FFFFFF');
         final borderColor = g('subtitleBorderColor', '#000000');
+        final styleMode = g('subtitleStyleMode', 'custom').trim().toLowerCase();
+        final styleLabel = switch (styleMode) {
+          'original' => '原样',
+          'system' => '系统',
+          _ => '自定义',
+        };
+        final edgeType = g('subtitleEdgeType', 'outline').trim().toLowerCase();
+        final edgeLabel = switch (edgeType) {
+          'none' => '无',
+          'shadow' => '阴影',
+          'raised' => '凸起',
+          'depressed' => '凹陷',
+          _ => '描边',
+        };
         return [
+          _sheetNav(
+            label: '样式模式',
+            value: styleLabel,
+            onTap: () async {
+              final picked = await pickChoice(context, title: '字幕样式模式', current: styleMode, options: const [
+                ('原样（保留片源样式）', 'original'),
+                ('系统字幕样式', 'system'),
+                ('自定义', 'custom'),
+              ]);
+              if (picked == null) return;
+              await _set('subtitleStyleMode', picked, msg: '字幕样式模式已更新');
+              setSheet(() {});
+            },
+          ),
+          _sheetNav(
+            label: '描边类型',
+            value: edgeLabel,
+            onTap: () async {
+              final picked = await pickChoice(context, title: '字幕描边类型', current: edgeType, options: const [
+                ('无', 'none'),
+                ('描边', 'outline'),
+                ('阴影', 'shadow'),
+                ('凸起', 'raised'),
+                ('凹陷', 'depressed'),
+              ]);
+              if (picked == null) return;
+              await _set('subtitleEdgeType', picked);
+              setSheet(() {});
+            },
+          ),
           _sheetSlider(
             label: '字号倍率',
             value: scale,
@@ -1178,6 +1244,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               await _set('danmakuShowReverse', v ? 'true' : 'false');
               setSheet(() {});
             },
+          ),
+          _sheetToggle(
+            label: '粗体',
+            value: flag('danmakuBold', false),
+            onChanged: (v) async {
+              await _set('danmakuBold', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetSlider(
+            label: '滚动时长',
+            value: (double.tryParse(g('danmakuDurationMs', '8000')) ?? 8000).clamp(3000, 15000),
+            min: 3000,
+            max: 15000,
+            divisions: 24,
+            format: (v) => '${(v / 1000).toStringAsFixed(1)} s',
+            onChanging: (v) => setSheet(() => _s['danmakuDurationMs'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuDurationMs', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '行距',
+            value: (double.tryParse(g('danmakuLineSpacing', '1.4')) ?? 1.4).clamp(1.0, 2.0),
+            min: 1.0,
+            max: 2.0,
+            divisions: 10,
+            format: (v) => v.toStringAsFixed(1),
+            onChanging: (v) => setSheet(() => _s['danmakuLineSpacing'] = v.toStringAsFixed(1)),
+            onCommit: (v) => _set('danmakuLineSpacing', v.toStringAsFixed(1)),
           ),
         ];
       },

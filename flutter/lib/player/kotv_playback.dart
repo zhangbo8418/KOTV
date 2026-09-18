@@ -118,6 +118,8 @@ abstract class KotvPlayback extends ChangeNotifier {
     String? borderColor,
     double? borderSize,
     String? bgColor,
+    String? edgeType,
+    bool useSystemStyle = false,
   }) async {}
 
   /// 离开详情/切 Tab：stop + release，拆掉原生 AO，避免后台漏音。
