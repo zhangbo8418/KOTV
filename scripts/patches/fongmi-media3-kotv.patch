@@ -172,7 +172,7 @@ diff --git a/settings.gradle.kts b/settings.gradle.kts
 index fc62b6a..f951b30 100644
 --- a/settings.gradle.kts
 +++ b/settings.gradle.kts
-@@ -27,7 +27,30 @@ plugins { id("gradlebuild.media3-settings-logic") }
+@@ -27,7 +27,31 @@ plugins { id("gradlebuild.media3-settings-logic") }
  
  rootProject.name = "androidx.media3"
  

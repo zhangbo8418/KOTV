@@ -17,7 +17,8 @@ if [[ "${KOTV_WIN7:-}" != "1" ]]; then
 fi
 
 NOTO_SC_ZIP_URL="${NOTO_SC_ZIP_URL:-https://github.com/notofonts/noto-cjk/releases/download/Sans2.004/18_NotoSansSC.zip}"
-EMOJI_COLOR_URL="${NOTO_EMOJI_URL:-https://raw.githubusercontent.com/googlefonts/noto-emoji/main/fonts/NotoColorEmoji_WindowsCompatible.ttf}"
+# 钉死 tag：main 上大字体常走 LFS / 404，CI 不可靠。
+EMOJI_COLOR_URL="${NOTO_EMOJI_URL:-https://raw.githubusercontent.com/googlefonts/noto-emoji/v2.051/fonts/NotoColorEmoji_WindowsCompatible.ttf}"
 EMOJI_MONO_URL="${NOTO_EMOJI_MONO_URL:-https://raw.githubusercontent.com/google/fonts/main/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf}"
 
 need_sc=
