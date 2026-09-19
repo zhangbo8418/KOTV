@@ -380,7 +380,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final exoPreloadSizeMb = (int.tryParse(g('exoDiskPreloadSizeMb', '256')) ?? 256).clamp(128, 4096).toDouble();
         final exoLibass = kotvSettingsFlag(g('exoLibass', 'true'), def: true);
         final exoSecondary = g('exoSecondarySubtitle', 'off').trim().toLowerCase();
-        final exoSecondaryOn = exoSecondary != 'off';
         final exoDolby = int.tryParse(g('exoDolbyVision', '0')) ?? 0;
         final exoDolbyLabel = switch (exoDolby) {
           1 => '假定支持',
@@ -494,11 +493,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               setSheet(() {});
             },
           ),
-          _sheetToggle(
-            label: '双字幕（自动）',
-            value: exoSecondaryOn,
-            onChanged: (v) async {
-              await _set('exoSecondarySubtitle', v ? 'auto' : 'off', msg: '重启播放生效');
+          _sheetNav(
+            label: '双字幕',
+            value: switch (exoSecondary) {
+              'auto' || 'on' => '自动',
+              'default' || 'player' => '跟随默认',
+              _ => '关闭',
+            },
+            onTap: () async {
+              final picked = await pickChoice(context, title: '双字幕', current: exoSecondary == 'on' ? 'auto' : exoSecondary, options: const [
+                ('关闭', 'off'),
+                ('自动（选另一语言轨）', 'auto'),
+                ('跟随播放器默认', 'default'),
+              ]);
+              if (picked == null) return;
+              await _set('exoSecondarySubtitle', picked, msg: '重启播放生效');
               setSheet(() {});
             },
           ),
@@ -1151,7 +1160,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final size = (double.tryParse(g('danmakuSize', '18')) ?? 18).clamp(12.0, 48.0);
         final opacity = (double.tryParse(g('danmakuOpacity', '85')) ?? 85).clamp(0.0, 100.0);
         final rows = (double.tryParse(g('danmakuRows', '6')) ?? 6).clamp(1.0, 16.0);
-        final offset = (double.tryParse(g('danmakuOffsetMs', '0')) ?? 0).clamp(-10000.0, 10000.0);
+        final offset = (double.tryParse(g('danmakuOffsetMs', '0')) ?? 0).clamp(-300000.0, 300000.0);
         final maxOnScreen = (double.tryParse(g('danmakuMaxOnScreen', '150')) ?? 150).clamp(10.0, 500.0);
         final scrollArea = (double.tryParse(g('danmakuScrollArea', '50')) ?? 50).clamp(10.0, 100.0);
         bool flag(String key, [bool def = true]) {
@@ -1254,10 +1263,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _sheetSlider(
             label: '时轴偏移',
             value: offset,
-            min: -5000,
-            max: 5000,
-            divisions: 100,
-            format: (v) => '${v.round()} ms',
+            min: -300000,
+            max: 300000,
+            divisions: 120,
+            format: (v) {
+              final s = (v / 1000).round();
+              if (s == 0) return '0 s';
+              return s > 0 ? '+$s s' : '$s s';
+            },
             onChanging: (v) => setSheet(() => _s['danmakuOffsetMs'] = '${v.round()}'),
             onCommit: (v) => _set('danmakuOffsetMs', '${v.round()}'),
           ),
@@ -1294,6 +1307,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
           ),
           _sheetToggle(
+            label: '定位弹幕',
+            value: flag('danmakuShowPositioned'),
+            onChanged: (v) async {
+              await _set('danmakuShowPositioned', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '特殊弹幕',
+            value: flag('danmakuShowSpecial'),
+            onChanged: (v) async {
+              await _set('danmakuShowSpecial', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
             label: '粗体',
             value: flag('danmakuBold', false),
             onChanged: (v) async {
@@ -1310,6 +1339,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             format: (v) => '${(v / 1000).toStringAsFixed(1)} s',
             onChanging: (v) => setSheet(() => _s['danmakuDurationMs'] = '${v.round()}'),
             onCommit: (v) => _set('danmakuDurationMs', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '固定时长',
+            value: (double.tryParse(g('danmakuFixedDurationMs', '5000')) ?? 5000).clamp(2000, 10000),
+            min: 2000,
+            max: 10000,
+            divisions: 16,
+            format: (v) => '${(v / 1000).toStringAsFixed(1)} s',
+            onChanging: (v) => setSheet(() => _s['danmakuFixedDurationMs'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuFixedDurationMs', '${v.round()}'),
           ),
           _sheetSlider(
             label: '行距',

@@ -65,8 +65,11 @@ class DetailFullscreenPage extends StatefulWidget {
     this.danmakuShowTop = true,
     this.danmakuShowBottom = true,
     this.danmakuShowReverse = true,
+    this.danmakuShowSpecial = true,
+    this.danmakuShowPositioned = true,
     this.danmakuBold = false,
     this.danmakuDurationMs = 8000,
+    this.danmakuFixedDurationMs = 5000,
     this.danmakuLineSpacing = 1.4,
     this.ambientOn = false,
     this.onAmbientChanged,
@@ -129,8 +132,11 @@ class DetailFullscreenPage extends StatefulWidget {
   final bool danmakuShowTop;
   final bool danmakuShowBottom;
   final bool danmakuShowReverse;
+  final bool danmakuShowSpecial;
+  final bool danmakuShowPositioned;
   final bool danmakuBold;
   final int danmakuDurationMs;
+  final int danmakuFixedDurationMs;
   final double danmakuLineSpacing;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
@@ -1019,8 +1025,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                           showTop: widget.danmakuShowTop,
                           showBottom: widget.danmakuShowBottom,
                           showReverse: widget.danmakuShowReverse,
+                          showSpecial: widget.danmakuShowSpecial,
+                          showPositioned: widget.danmakuShowPositioned,
                           bold: widget.danmakuBold,
                           durationMs: widget.danmakuDurationMs,
+                          fixedDurationMs: widget.danmakuFixedDurationMs,
                           lineSpacing: widget.danmakuLineSpacing,
                         ),
                       ],

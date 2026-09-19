@@ -116,11 +116,18 @@ const (
 	PlayerScaleLive       Type = "playerScaleLive"
 	PlayerBackground      Type = "playerBackground"
 	PlayerSpeedLongPress  Type = "playerSpeedLongPress"
-	DanmakuLoad           Type = "danmakuLoad"
-	DanmakuAuto           Type = "danmakuAuto"
-	DanmakuSpiderFirst    Type = "danmakuSpiderFirst"
-	ExoDiskPreloadThreads Type = "exoDiskPreloadThreads"
-	ExoDiskPreloadSizeMb  Type = "exoDiskPreloadSizeMb"
+	DanmakuLoad              Type = "danmakuLoad"
+	DanmakuAuto              Type = "danmakuAuto"
+	DanmakuSpiderFirst       Type = "danmakuSpiderFirst"
+	DanmakuShowScroll        Type = "danmakuShowScroll"
+	DanmakuShowTop           Type = "danmakuShowTop"
+	DanmakuShowBottom        Type = "danmakuShowBottom"
+	DanmakuShowReverse       Type = "danmakuShowReverse"
+	DanmakuShowSpecial       Type = "danmakuShowSpecial"
+	DanmakuShowPositioned    Type = "danmakuShowPositioned"
+	DanmakuFixedDurationMs   Type = "danmakuFixedDurationMs"
+	ExoDiskPreloadThreads    Type = "exoDiskPreloadThreads"
+	ExoDiskPreloadSizeMb     Type = "exoDiskPreloadSizeMb"
 )
 
 type item struct {
@@ -236,6 +243,13 @@ func defaultFile() file {
 			{ID: "danmakuLoad", Label: "加载弹幕", Value: "true"},
 			{ID: "danmakuAuto", Label: "自动搜索弹幕", Value: "true"},
 			{ID: "danmakuSpiderFirst", Label: "片源弹幕优先", Value: "true"},
+			{ID: "danmakuShowScroll", Label: "滚动弹幕", Value: "true"},
+			{ID: "danmakuShowTop", Label: "顶部弹幕", Value: "true"},
+			{ID: "danmakuShowBottom", Label: "底部弹幕", Value: "true"},
+			{ID: "danmakuShowReverse", Label: "逆向弹幕", Value: "true"},
+			{ID: "danmakuShowSpecial", Label: "特殊弹幕", Value: "true"},
+			{ID: "danmakuShowPositioned", Label: "定位弹幕", Value: "true"},
+			{ID: "danmakuFixedDurationMs", Label: "固定弹幕时长", Value: "5000"},
 			{ID: "exoDiskPreloadThreads", Label: "Exo预读线程", Value: "2"},
 			{ID: "exoDiskPreloadSizeMb", Label: "Exo预读容量MB", Value: "256"},
 		},

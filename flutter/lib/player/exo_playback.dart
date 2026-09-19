@@ -101,6 +101,7 @@ class ExoPlayback extends KotvPlayback {
   int _audioCenterGain = 0;
   String _audioChannelMode = 'auto';
   int _audioOffsetMs = 0;
+  bool _stableVolumeOn = false;
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -482,10 +483,10 @@ class ExoPlayback extends KotvPlayback {
         ),
         'audioDialogue': _audioDialogue,
         'audioBalance': _audioBalance,
-        'audioStability': _audioStability,
+        'audioStability': _effectiveAudioStability(),
         'audioBoost': _audioBoost,
         'audioPreamp': _audioPreamp,
-        'audioLoudness': _audioLoudness,
+        'audioLoudness': _effectiveAudioLoudness(),
         'audioCenterGain': _audioCenterGain,
         'audioChannelMode': _audioChannelMode,
         'audioOffsetMs': _audioOffsetMs,
@@ -896,7 +897,9 @@ class ExoPlayback extends KotvPlayback {
     if (_diskPreloadSizeMb < 128) _diskPreloadSizeMb = 128;
     if (_diskPreloadSizeMb > 4096) _diskPreloadSizeMb = 4096;
     final sec = '${settings['exoSecondarySubtitle'] ?? 'off'}'.trim().toLowerCase();
-    _secondarySubtitle = (sec == 'auto' || sec == 'on' || sec == 'manual') ? sec : 'off';
+    _secondarySubtitle = (sec == 'auto' || sec == 'on' || sec == 'manual' || sec == 'default' || sec == 'player')
+        ? (sec == 'on' ? 'auto' : (sec == 'player' ? 'default' : sec))
+        : 'off';
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
     _subtitlePos = (double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100).clamp(0, 150);
     _subtitleSecondaryPos =
@@ -932,6 +935,7 @@ class ExoPlayback extends KotvPlayback {
     _audioBoost = kotvAudioBoostFromSettings(settings);
     _audioPreamp = kotvAudioPreampFromSettings(settings);
     _audioLoudness = kotvAudioLoudnessFromSettings(settings);
+    _stableVolumeOn = kotvSettingsMapFlag(settings, 'playerStableVolume', def: false);
     _audioCenterGain = kotvAudioCenterGainFromSettings(settings);
     _audioChannelMode = kotvAudioChannelModeFromSettings(settings);
     _audioOffsetMs = kotvAudioOffsetMsFromSettings(settings);
@@ -957,6 +961,20 @@ class ExoPlayback extends KotvPlayback {
     }
   }
 
+  int _effectiveAudioStability() =>
+      _stableVolumeOn ? (_audioStability > 0 ? _audioStability : 55) : _audioStability;
+
+  bool _effectiveAudioLoudness() => _stableVolumeOn || _audioLoudness;
+
+  @override
+  Future<void> setStableVolume(bool on) async {
+    _stableVolumeOn = on;
+    // 起播前可能尚未 open，仍记下偏好；已就绪则立刻推效果。
+    if (_nativeReady && _url.isNotEmpty) {
+      await _pushEqualizer();
+    }
+  }
+
   Future<void> _pushEqualizer() async {
     try {
       await _ensureNative();
@@ -969,10 +987,10 @@ class ExoPlayback extends KotvPlayback {
         ),
         'audioDialogue': _audioDialogue,
         'audioBalance': _audioBalance,
-        'audioStability': _audioStability,
+        'audioStability': _effectiveAudioStability(),
         'audioBoost': _audioBoost,
         'audioPreamp': _audioPreamp,
-        'audioLoudness': _audioLoudness,
+        'audioLoudness': _effectiveAudioLoudness(),
         'audioCenterGain': _audioCenterGain,
         'audioChannelMode': _audioChannelMode,
         'audioOffsetMs': _audioOffsetMs,
@@ -1061,7 +1079,7 @@ class ExoPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  /// 选择副字幕轨（off/auto/gN:tM）。
+  /// 选择副字幕轨（off/auto/default/gN:tM）。
   @override
   Future<void> setSecondarySubtitleTrack(String id) async {
     try {
@@ -1071,8 +1089,11 @@ class ExoPlayback extends KotvPlayback {
       if (key.isEmpty || key == 'no' || key == 'off') {
         _secondarySubtitle = 'off';
         _currentSecondarySubtitleId = null;
-      } else if (key == 'auto') {
+      } else if (key == 'auto' || key == 'on') {
         _secondarySubtitle = 'auto';
+        _currentSecondarySubtitleId = null;
+      } else if (key == 'default' || key == 'player') {
+        _secondarySubtitle = 'default';
         _currentSecondarySubtitleId = null;
       } else {
         _secondarySubtitle = 'manual';

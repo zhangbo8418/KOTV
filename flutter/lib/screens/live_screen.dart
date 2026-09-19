@@ -540,7 +540,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _prefPlayerVal = _playerVal;
         final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
         _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
-        final liveChange = '${settings['liveAutoChange'] ?? 'true'}'.trim().toLowerCase();
+        final liveChange = '${settings['liveChange'] ?? settings['liveAutoChange'] ?? 'true'}'.trim().toLowerCase();
         _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
         final across = '${settings['liveAcross'] ?? 'true'}'.trim().toLowerCase();
         _liveAcross = across != 'false' && across != 'off' && across != '0';
@@ -1018,6 +1018,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     unawaited(_playback.setVideoScale(next));
     try {
       await ref.read(apiProvider).setSetting('playerScaleLive', next);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleLiveFlag(String key, bool next) async {
+    setState(() {
+      if (key == 'liveAcross') _liveAcross = next;
+      if (key == 'liveInvert') _liveInvert = next;
+      if (key == 'liveChange') _liveAutoChange = next;
+    });
+    try {
+      await ref.read(apiProvider).setSetting(key, next ? 'true' : 'false');
     } catch (_) {}
   }
 
@@ -2492,6 +2503,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   label: '画面比例 · ${_liveScaleLabel(_liveScale)}',
                                   height: 40,
                                   onTap: () => unawaited(_cycleLiveScale()),
+                                ),
+                                const SizedBox(height: 8),
+                                AppPill(
+                                  label: '跨组换台 · ${_liveAcross ? '开' : '关'}',
+                                  height: 40,
+                                  onTap: () => unawaited(_toggleLiveFlag('liveAcross', !_liveAcross)),
+                                ),
+                                const SizedBox(height: 8),
+                                AppPill(
+                                  label: '反转换台 · ${_liveInvert ? '开' : '关'}',
+                                  height: 40,
+                                  onTap: () => unawaited(_toggleLiveFlag('liveInvert', !_liveInvert)),
+                                ),
+                                const SizedBox(height: 8),
+                                AppPill(
+                                  label: '失败换线 · ${_liveAutoChange ? '开' : '关'}',
+                                  height: 40,
+                                  onTap: () => unawaited(_toggleLiveFlag('liveChange', !_liveAutoChange)),
                                 ),
                                 const SizedBox(height: 8),
                                 AppPill(label: '迷你桌面播放', height: 40, onTap: () => unawaited(_enterMini())),

@@ -161,8 +161,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _danmakuShowTop = true;
   bool _danmakuShowBottom = true;
   bool _danmakuShowReverse = true;
+  bool _danmakuShowSpecial = true;
+  bool _danmakuShowPositioned = true;
   bool _danmakuBold = false;
   int _danmakuDurationMs = 8000;
+  int _danmakuFixedDurationMs = 5000;
   double _danmakuLineSpacing = 1.4;
   double _danmakuOffsetSec = 0;
   final ValueNotifier<List<DanmakuItem>> _danmakuItems = ValueNotifier(const []);
@@ -1055,8 +1058,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _danmakuShowTop = dFlag('danmakuShowTop');
         _danmakuShowBottom = dFlag('danmakuShowBottom');
         _danmakuShowReverse = dFlag('danmakuShowReverse');
+        _danmakuShowSpecial = dFlag('danmakuShowSpecial');
+        _danmakuShowPositioned = dFlag('danmakuShowPositioned');
         _danmakuBold = dFlag('danmakuBold', false);
         _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
+        _danmakuFixedDurationMs = int.tryParse('${settings['danmakuFixedDurationMs'] ?? '5000'}') ?? 5000;
         _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
         _danmakuOffsetSec = ((int.tryParse('${settings['danmakuOffsetMs'] ?? '0'}') ?? 0) / 1000.0);
         final scale = '${settings['playerScale'] ?? 'default'}';
@@ -2100,8 +2106,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                   showTop: _danmakuShowTop,
                   showBottom: _danmakuShowBottom,
                   showReverse: _danmakuShowReverse,
+                  showSpecial: _danmakuShowSpecial,
+                  showPositioned: _danmakuShowPositioned,
                   bold: _danmakuBold,
                   durationMs: _danmakuDurationMs,
+                  fixedDurationMs: _danmakuFixedDurationMs,
                   lineSpacing: _danmakuLineSpacing,
                 ),
               ),
@@ -2210,8 +2219,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _danmakuShowTop = dFlag('danmakuShowTop');
         _danmakuShowBottom = dFlag('danmakuShowBottom');
         _danmakuShowReverse = dFlag('danmakuShowReverse');
+        _danmakuShowSpecial = dFlag('danmakuShowSpecial');
+        _danmakuShowPositioned = dFlag('danmakuShowPositioned');
         _danmakuBold = dFlag('danmakuBold', false);
         _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
+        _danmakuFixedDurationMs = int.tryParse('${settings['danmakuFixedDurationMs'] ?? '5000'}') ?? 5000;
         _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
       });
     } catch (_) {}
@@ -2259,8 +2271,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         danmakuShowTop: _danmakuShowTop,
         danmakuShowBottom: _danmakuShowBottom,
         danmakuShowReverse: _danmakuShowReverse,
+        danmakuShowSpecial: _danmakuShowSpecial,
+        danmakuShowPositioned: _danmakuShowPositioned,
         danmakuBold: _danmakuBold,
         danmakuDurationMs: _danmakuDurationMs,
+        danmakuFixedDurationMs: _danmakuFixedDurationMs,
         danmakuLineSpacing: _danmakuLineSpacing,
         ambientOn: _ambientOn,
         stableVolumeOn: _stableVolumeOn,
@@ -2367,7 +2382,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'danmakuRows') {
             setState(() => _danmakuRows = int.tryParse(v) ?? _danmakuRows);
           }
-          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuLineSpacing') {
+          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuFixedDurationMs' || k == 'danmakuLineSpacing') {
             unawaited(_refreshDanmakuPrefs());
           }
           if (k == 'playerDecode') {

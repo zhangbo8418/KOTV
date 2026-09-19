@@ -180,8 +180,11 @@ class DanmakuOverlay extends StatefulWidget {
     this.showTop = true,
     this.showBottom = true,
     this.showReverse = true,
+    this.showSpecial = true,
+    this.showPositioned = true,
     this.bold = false,
     this.durationMs = 8000,
+    this.fixedDurationMs = 5000,
     this.lineSpacing = 1.4,
   });
 
@@ -198,8 +201,11 @@ class DanmakuOverlay extends StatefulWidget {
   final bool showTop;
   final bool showBottom;
   final bool showReverse;
+  final bool showSpecial;
+  final bool showPositioned;
   final bool bold;
   final int durationMs;
+  final int fixedDurationMs;
   final double lineSpacing;
 
   @override
@@ -233,10 +239,12 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
   }
 
   bool _allowMode(int mode) {
-    // bilibili / 常见 XML：1–3 滚动，4 底，5 顶，6 逆向。
+    // bilibili / 常见 XML：1–3 滚动，4 底，5 顶，6 逆向，7 定位/高级，≥8 特殊。
     if (mode == 4) return widget.showBottom;
     if (mode == 5) return widget.showTop;
     if (mode == 6) return widget.showReverse;
+    if (mode == 7) return widget.showPositioned;
+    if (mode >= 8) return widget.showSpecial;
     return widget.showScroll;
   }
 
@@ -252,14 +260,19 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     final from = _lastSec;
     final to = sec + 0.35;
     final maxOn = widget.maxOnScreen.clamp(10, 500);
+    final scrollDur = widget.durationMs.clamp(3000, 15000);
+    final fixedDur = widget.fixedDurationMs.clamp(2000, 10000);
     for (final it in widget.items) {
       if (it.time >= from && it.time < to && _allowMode(it.mode)) {
         final lanes = widget.rows.clamp(1, 16);
+        final fixed = it.mode == 4 || it.mode == 5 || it.mode == 7;
         _flying.add(_Flying(
           item: it,
           born: DateTime.now(),
           lane: math.Random(it.content.hashCode ^ sec.toInt()).nextInt(lanes),
-          durationMs: widget.durationMs.clamp(3000, 15000) + (it.content.length * 40).clamp(0, 3000),
+          durationMs: fixed
+              ? fixedDur
+              : scrollDur + (it.content.length * 40).clamp(0, 3000),
         ));
       }
     }
@@ -367,9 +380,17 @@ class _DanmakuPainter extends CustomPainter {
       } else if (mode == 5) {
         x = (size.width - tp.width) / 2;
         y = 12.0 + (f.lane % 3) * (tp.height + 4);
+      } else if (mode == 7) {
+        // 定位弹幕：按内容哈希落在画面中部附近。
+        x = (size.width * 0.15) + (f.item.content.hashCode.abs() % 70) / 100.0 * size.width * 0.7 - tp.width / 2;
+        y = (size.height * 0.2) + (f.lane % 5) / 5.0 * size.height * 0.5;
       } else if (mode == 6) {
         y = 12.0 + (f.lane % lanes) * laneH;
         x = -tp.width + t * (size.width + tp.width);
+      } else if (mode >= 8) {
+        // 特殊弹幕：居中短暂停留。
+        x = (size.width - tp.width) / 2;
+        y = size.height * 0.4 + (f.lane % 3) * (tp.height + 6);
       } else {
         y = 12.0 + (f.lane % lanes) * laneH;
         x = size.width - t * (size.width + tp.width);

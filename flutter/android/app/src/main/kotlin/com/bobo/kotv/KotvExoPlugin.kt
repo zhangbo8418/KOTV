@@ -399,7 +399,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           KotvExoCache.preferMaxBytes(diskPreloadSizeMb.toLong() * 1024L * 1024L)
         }
         call.argument<Boolean>("libass")?.let { libassEnabled = it }
-        call.argument<String>("secondarySubtitle")?.let { secondarySubtitleMode = it.trim().lowercase() }
+        call.argument<String>("secondarySubtitle")?.let {
+          secondarySubtitleMode = normalizeSecondarySubtitleMode(it)
+        }
         call.argument<String>("secondarySubtitleId")?.let { secondarySubtitleId = it.trim() }
         call.argument<Number>("subtitleFontScale")?.toFloat()?.let {
           subtitleFontScale = it.coerceIn(0.5f, 2.5f)
@@ -2105,14 +2107,27 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     applySecondarySubtitleSelection()
   }
 
-  /** off=关副字幕；auto=第二 TextRenderer 自选；其余 gN:tM。 */
+  /** off / auto / default / manual(gN:tM)。 */
+  private fun normalizeSecondarySubtitleMode(raw: String): String {
+    val key = raw.trim().lowercase()
+    return when {
+      key.isEmpty() || key == "no" || key == "off" || key == "false" || key == "0" -> "off"
+      key == "auto" || key == "on" -> "auto"
+      key == "default" || key == "player" -> "default"
+      key == "manual" -> "manual"
+      else -> "manual"
+    }
+  }
+
+  /** off=关；auto=第二路自选；default=开第二路跟播放器默认；其余 gN:tM。 */
   private fun selectSecondarySubtitleTrackById(id: String) {
     val key = id.trim().lowercase()
     secondarySubtitleId = id.trim()
     secondarySubtitleMode =
       when {
         key.isEmpty() || key == "no" || key == "off" -> "off"
-        key == "auto" -> "auto"
+        key == "auto" || key == "on" -> "auto"
+        key == "default" || key == "player" -> "default"
         else -> "manual"
       }
     subtitleOverlay?.setSecondaryEnabled(secondarySubtitleMode != "off")
@@ -2133,9 +2148,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       return
     }
     subtitleOverlay?.setSecondaryEnabled(true)
+    // auto/default：保留第二 TextRenderer，由选择器自选，不强制 override。
     if (secondarySubtitleMode != "manual") return
     val id = secondarySubtitleId.trim()
-    if (id.isEmpty() || id.equals("auto", true)) return
+    if (id.isEmpty() || id.equals("auto", true) || id.equals("default", true) || id.equals("player", true)) return
     val m = Regex("""^g(\d+):t(\d+)$""", RegexOption.IGNORE_CASE).matchEntire(id) ?: return
     val gi = m.groupValues[1].toInt()
     val ti = m.groupValues[2].toInt()
