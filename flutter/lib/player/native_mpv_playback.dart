@@ -720,6 +720,7 @@ class NativeMpvPlayback extends KotvPlayback {
     double? edgeOpacity,
     double? shadowStrength,
     String? font,
+    String? fontPath,
   }) async {
     try {
       await _ch.invokeMethod('setSubtitleStyle', {
@@ -738,6 +739,7 @@ class NativeMpvPlayback extends KotvPlayback {
         if (edgeOpacity != null) 'edgeOpacity': edgeOpacity,
         if (shadowStrength != null) 'shadowStrength': shadowStrength,
         if (font != null) 'font': font,
+        if (fontPath != null) 'fontPath': fontPath,
       });
     } catch (_) {}
   }

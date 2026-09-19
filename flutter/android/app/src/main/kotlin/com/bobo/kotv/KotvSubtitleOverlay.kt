@@ -129,6 +129,7 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     edgeType: String = "outline",
     shadowStrength: Double = 50.0,
     fontName: String = "default",
+    fontPath: String = "",
   ) {
     this.fontScale = fontScale.coerceIn(0.5f, 2.5f)
     this.primaryPos = primaryPos.coerceIn(0.0, 150.0)
@@ -138,7 +139,7 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     secondaryTopFraction = posToTopFraction(this.secondaryPos)
     primaryView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f * this.fontScale)
     secondaryView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f * this.fontScale)
-    val tf = resolveTypeface(fontName)
+    val tf = resolveTypeface(fontName, fontPath)
     primaryView.typeface = Typeface.create(tf, Typeface.BOLD)
     secondaryView.typeface = Typeface.create(tf, Typeface.BOLD)
     val fg = parseColorSafe(color, Color.WHITE)
@@ -153,7 +154,17 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     requestLayout()
   }
 
-  private fun resolveTypeface(name: String): Typeface {
+  private fun resolveTypeface(name: String, path: String = ""): Typeface {
+    val filePath = path.trim()
+    if (filePath.isNotEmpty()) {
+      try {
+        val f = java.io.File(filePath)
+        if (f.isFile && f.canRead()) {
+          return Typeface.createFromFile(f)
+        }
+      } catch (_: Throwable) {
+      }
+    }
     return when (name.trim().lowercase()) {
       "sans", "sans-serif" -> Typeface.SANS_SERIF
       "serif" -> Typeface.SERIF

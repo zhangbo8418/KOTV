@@ -625,6 +625,7 @@ class MediaKitPlayback extends KotvPlayback {
     double? edgeOpacity,
     double? shadowStrength,
     String? font,
+    String? fontPath,
   }) async {
     try {
       final platform = player.platform;

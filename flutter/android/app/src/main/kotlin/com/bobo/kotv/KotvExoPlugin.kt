@@ -184,6 +184,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var subtitleShadowStrength = 50.0
   /** default | sans | serif | mono */
   private var subtitleFont = "default"
+  private var subtitleFontPath = ""
   /** 音频 EQ：off | bass | voice | custom | natural…（Equalizer；直通时跳过）。 */
   private var audioEqMode: String = "off"
   /** 频段：`freq:gain,freq:gain…`（gain 单位 dB；可含对白叠加）。 */
@@ -495,6 +496,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<String>("font")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           subtitleFont = normalizeSubtitleFont(it)
         }
+        call.argument<String>("fontPath")?.let { subtitleFontPath = it.trim() }
         main.post {
           try {
             applySubtitleStyle()
@@ -1592,6 +1594,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     call.argument<String>("subtitleFont")?.trim()?.takeIf { it.isNotEmpty() }?.let {
       subtitleFont = normalizeSubtitleFont(it)
     }
+    call.argument<String>("subtitleFontPath")?.let { subtitleFontPath = it.trim() }
   }
 
   private fun normalizeEdgeType(raw: String): String =
@@ -1706,6 +1709,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       edgeType = edgeType,
       shadowStrength = if (force || useSystem) subtitleShadowStrength else 0.0,
       fontName = if (force || useSystem) subtitleFont else "default",
+      fontPath = if (force || useSystem) subtitleFontPath else "",
     )
   }
 

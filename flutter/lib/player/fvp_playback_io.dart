@@ -815,6 +815,7 @@ class FvpPlayback extends KotvPlayback {
     double? edgeOpacity,
     double? shadowStrength,
     String? font,
+    String? fontPath,
   }) async {
     final c = _c;
     if (c == null || !c.value.isInitialized) return;

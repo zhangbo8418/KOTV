@@ -134,34 +134,78 @@ class DanmakuLoader {
 
   /// 弹幕搜索 API 常见返回：`[{"name":"…","url":"https://…xml"},…]`
   static String? _firstSourceUrl(String body) {
+    final all = listSources(body);
+    return all.isEmpty ? null : all.first.url;
+  }
+
+  static List<DanmakuSource> listSources(String body) {
     final t = body.trim();
-    if (t.isEmpty || (t[0] != '[' && t[0] != '{')) return null;
+    if (t.isEmpty || (t[0] != '[' && t[0] != '{')) return const [];
     try {
       final decoded = jsonDecode(t);
+      final out = <DanmakuSource>[];
       if (decoded is List) {
-        for (final item in decoded) {
-          final u = _urlFromSource(item);
-          if (u != null) return u;
+        for (var i = 0; i < decoded.length; i++) {
+          final s = _sourceFrom(decoded[i], i);
+          if (s != null) out.add(s);
         }
-        return null;
+        return out;
       }
-      return _urlFromSource(decoded);
+      final one = _sourceFrom(decoded, 0);
+      return one == null ? const [] : [one];
     } catch (_) {
-      return null;
+      return const [];
     }
   }
 
-  static String? _urlFromSource(dynamic item) {
+  static DanmakuSource? _sourceFrom(dynamic item, int index) {
     if (item is String) {
       final s = item.trim();
-      return s.startsWith('http') ? s : null;
+      if (!s.startsWith('http')) return null;
+      return DanmakuSource(name: '源 ${index + 1}', url: s);
     }
     if (item is Map) {
       final u = '${item['url'] ?? ''}'.trim();
-      if (u.startsWith('http')) return u;
+      if (!u.startsWith('http')) return null;
+      final n = '${item['name'] ?? item['title'] ?? ''}'.trim();
+      return DanmakuSource(name: n.isEmpty ? '源 ${index + 1}' : n, url: u);
     }
     return null;
   }
+
+  /// 拉搜索接口正文（不跟进源），便于列出多源。
+  static Future<String> fetchApiBody(String api, {required String name, required String episode}) async {
+    final base = api.trim();
+    if (base.isEmpty) return '';
+    final hasTpl = base.contains('{name}') || base.contains('{episode}');
+    late final http.Response resp;
+    if (hasTpl) {
+      final u = base
+          .replaceAll('{name}', Uri.encodeComponent(name))
+          .replaceAll('{episode}', Uri.encodeComponent(episode));
+      resp = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 12));
+    } else {
+      resp = await http
+          .post(
+            Uri.parse(base),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'name': name, 'episode': episode},
+          )
+          .timeout(const Duration(seconds: 12));
+    }
+    if (resp.statusCode < 200 || resp.statusCode >= 300) return '';
+    return utf8.decode(resp.bodyBytes, allowMalformed: true);
+  }
+
+  static String? _urlFromSource(dynamic item) {
+    return _sourceFrom(item, 0)?.url;
+  }
+}
+
+class DanmakuSource {
+  const DanmakuSource({required this.name, required this.url});
+  final String name;
+  final String url;
 }
 
 /// 全屏弹幕层：按播放进度滚动显示。
@@ -190,6 +234,7 @@ class DanmakuOverlay extends StatefulWidget {
     this.colorMode = 'original',
     this.rowsTop = 3,
     this.rowsBottom = 3,
+    this.fontFamily = 'default',
   });
 
   final bool enabled;
@@ -215,6 +260,7 @@ class DanmakuOverlay extends StatefulWidget {
   final String colorMode;
   final int rowsTop;
   final int rowsBottom;
+  final String fontFamily;
 
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
@@ -318,6 +364,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
                   colorMode: widget.colorMode,
                   rowsTop: widget.rowsTop,
                   rowsBottom: widget.rowsBottom,
+                  fontFamily: widget.fontFamily,
                 ),
               );
             },
@@ -355,6 +402,7 @@ class _DanmakuPainter extends CustomPainter {
     this.colorMode = 'original',
     this.rowsTop = 3,
     this.rowsBottom = 3,
+    this.fontFamily = 'default',
   });
   final List<_Flying> flying;
   final DateTime now;
@@ -368,6 +416,7 @@ class _DanmakuPainter extends CustomPainter {
   final String colorMode;
   final int rowsTop;
   final int rowsBottom;
+  final String fontFamily;
 
   Color _resolveColor(int raw) {
     final op = opacity.clamp(0.15, 1.0);
@@ -409,12 +458,19 @@ class _DanmakuPainter extends CustomPainter {
       final t = now.difference(f.born).inMilliseconds / f.durationMs;
       if (t < 0 || t > 1) continue;
       final fs = fontSize.clamp(12.0, 48.0);
+      final family = switch (fontFamily.trim().toLowerCase()) {
+        'sans' || 'sans-serif' => 'sans-serif',
+        'serif' => 'serif',
+        'mono' || 'monospace' => 'monospace',
+        _ => null,
+      };
       final tp = TextPainter(
         text: TextSpan(
           text: f.item.content,
           style: TextStyle(
             color: _resolveColor(f.item.color),
             fontSize: fs,
+            fontFamily: family,
             fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
             shadows: shadows,
           ),

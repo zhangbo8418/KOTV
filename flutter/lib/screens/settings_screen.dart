@@ -23,6 +23,7 @@ import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
 import '../util/kotv_clear_ephemeral.dart';
+import '../util/pick_font_file.dart';
 import '../util/runtime_info.dart';
 import '../widgets/auth_gate.dart';
 import '../widgets/cast_flow.dart';
@@ -1116,6 +1117,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               setSheet(() {});
             },
           ),
+          _sheetNav(
+            label: '字体文件',
+            value: () {
+              final p = g('subtitleFontPath').trim();
+              if (p.isEmpty) return '未选择';
+              final slash = p.replaceAll('\\', '/').split('/');
+              return slash.isEmpty ? p : slash.last;
+            }(),
+            onTap: () async {
+              final picked = await pickChoice(context, title: '字幕字体文件', current: g('subtitleFontPath').isEmpty ? 'none' : 'file', options: const [
+                ('不使用外挂字体', 'none'),
+                ('选择字体文件…', 'file'),
+              ]);
+              if (picked == null) return;
+              if (picked == 'none') {
+                await _set('subtitleFontPath', '');
+              } else {
+                final path = await kotvPickFontFile(context);
+                if (path == null || path.isEmpty) return;
+                await _set('subtitleFontPath', path);
+              }
+              setSheet(() {});
+            },
+          ),
           _sheetSlider(
             label: '正文透明度',
             value: (double.tryParse(g('subtitleTextOpacity', '100')) ?? 100).clamp(0, 100),
@@ -1489,6 +1514,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ]);
               if (picked == null) return;
               await _set('danmakuColorMode', picked);
+              setSheet(() {});
+            },
+          ),
+          _sheetNav(
+            label: '弹幕字体',
+            value: switch (g('danmakuFont', 'default').trim().toLowerCase()) {
+              'sans' || 'sans-serif' => '无衬线',
+              'serif' => '衬线',
+              'mono' || 'monospace' => '等宽',
+              _ => '默认',
+            },
+            onTap: () async {
+              final cur = g('danmakuFont', 'default').trim().toLowerCase();
+              final picked = await pickChoice(context, title: '弹幕字体', current: cur == 'sans-serif' ? 'sans' : (cur == 'monospace' ? 'mono' : cur), options: const [
+                ('默认', 'default'),
+                ('无衬线', 'sans'),
+                ('衬线', 'serif'),
+                ('等宽', 'mono'),
+              ]);
+              if (picked == null) return;
+              await _set('danmakuFont', picked);
               setSheet(() {});
             },
           ),

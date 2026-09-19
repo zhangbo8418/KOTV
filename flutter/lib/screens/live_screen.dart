@@ -567,6 +567,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
         final shadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
         final subFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
+        final subFontPath = '${settings['subtitleFontPath'] ?? ''}'.trim();
         unawaited(_playback.setSubtitleStyle(
           scale: fontScale.toDouble(),
           pos: subPos.clamp(0, 150).toDouble(),
@@ -582,6 +583,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           edgeOpacity: forceStyle || useSystem ? edgeOp : null,
           shadowStrength: forceStyle || useSystem ? shadowStrength : null,
           font: forceStyle || useSystem ? subFont : null,
+          fontPath: forceStyle || useSystem ? (subFontPath.isEmpty ? null : subFontPath) : null,
           forceStyle: forceStyle,
         ));
         unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));

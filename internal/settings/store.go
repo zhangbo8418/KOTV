@@ -115,6 +115,7 @@ const (
 	SubtitleOffsetMs       Type = "subtitleOffsetMs"
 	SubtitleShadowStrength Type = "subtitleShadowStrength"
 	SubtitleFont           Type = "subtitleFont"
+	SubtitleFontPath       Type = "subtitleFontPath"
 	PlayerScaleLive        Type = "playerScaleLive"
 	PlayerBackground       Type = "playerBackground"
 	PlayerSpeedLongPress   Type = "playerSpeedLongPress"
@@ -130,6 +131,7 @@ const (
 	DanmakuFixedDurationMs Type = "danmakuFixedDurationMs"
 	DanmakuStrokeMode      Type = "danmakuStrokeMode"
 	DanmakuColorMode       Type = "danmakuColorMode"
+	DanmakuFont            Type = "danmakuFont"
 	DanmakuRowsTop         Type = "danmakuRowsTop"
 	DanmakuRowsBottom      Type = "danmakuRowsBottom"
 	ExoDiskPreloadThreads  Type = "exoDiskPreloadThreads"
@@ -245,6 +247,7 @@ func defaultFile() file {
 			{ID: "subtitleOffsetMs", Label: "字幕时间偏移", Value: "0"},
 			{ID: "subtitleShadowStrength", Label: "字幕阴影强度", Value: "50"},
 			{ID: "subtitleFont", Label: "字幕字体", Value: "default"},
+			{ID: "subtitleFontPath", Label: "字幕字体文件", Value: ""},
 			{ID: "playerScaleLive", Label: "直播画面比例", Value: "default"},
 			{ID: "playerBackground", Label: "后台播放", Value: "pip"},
 			{ID: "playerSpeedLongPress", Label: "长按倍速", Value: "2.0"},
@@ -260,6 +263,7 @@ func defaultFile() file {
 			{ID: "danmakuFixedDurationMs", Label: "固定弹幕时长", Value: "5000"},
 			{ID: "danmakuStrokeMode", Label: "弹幕描边", Value: "shadow"},
 			{ID: "danmakuColorMode", Label: "弹幕颜色", Value: "original"},
+			{ID: "danmakuFont", Label: "弹幕字体", Value: "default"},
 			{ID: "danmakuRowsTop", Label: "顶部弹幕行数", Value: "3"},
 			{ID: "danmakuRowsBottom", Label: "底部弹幕行数", Value: "3"},
 			{ID: "exoDiskPreloadThreads", Label: "Exo预读线程", Value: "2"},

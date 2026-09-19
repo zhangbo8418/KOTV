@@ -668,6 +668,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val edgeOpacity = call.argument<Number>("edgeOpacity")?.toDouble()
         val shadowStrength = call.argument<Number>("shadowStrength")?.toDouble()
         val fontName = call.argument<String>("font")?.trim()?.lowercase().orEmpty()
+        val fontPath = call.argument<String>("fontPath")?.trim().orEmpty()
         main.post {
           try {
             if (created.get()) {
@@ -710,7 +711,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
                     MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
                   }
                 }
-                if (fontName.isNotEmpty() && fontName != "default") {
+                if (fontPath.isNotEmpty()) {
+                  val parent = java.io.File(fontPath).parent
+                  if (!parent.isNullOrBlank()) {
+                    MPVLib.setPropertyString("sub-fonts-dir", parent)
+                  }
+                  val base = java.io.File(fontPath).nameWithoutExtension
+                  if (base.isNotBlank()) {
+                    MPVLib.setPropertyString("sub-font", base)
+                  }
+                } else if (fontName.isNotEmpty() && fontName != "default") {
                   val mpvFont =
                     when (fontName) {
                       "sans", "sans-serif" -> "sans-serif"

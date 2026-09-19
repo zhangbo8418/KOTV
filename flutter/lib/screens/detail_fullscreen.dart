@@ -73,8 +73,12 @@ class DetailFullscreenPage extends StatefulWidget {
     this.danmakuLineSpacing = 1.4,
     this.danmakuStrokeMode = 'shadow',
     this.danmakuColorMode = 'original',
+    this.danmakuFontFamily = 'default',
     this.danmakuRowsTop = 3,
     this.danmakuRowsBottom = 3,
+    this.danmakuSources = const [],
+    this.danmakuSourceIdx = 0,
+    this.onDanmakuSourceChanged,
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
@@ -144,8 +148,12 @@ class DetailFullscreenPage extends StatefulWidget {
   final double danmakuLineSpacing;
   final String danmakuStrokeMode;
   final String danmakuColorMode;
+  final String danmakuFontFamily;
   final int danmakuRowsTop;
   final int danmakuRowsBottom;
+  final List<DanmakuSource> danmakuSources;
+  final int danmakuSourceIdx;
+  final ValueChanged<int>? onDanmakuSourceChanged;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
@@ -943,6 +951,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         setState(() => _danmakuOn = v);
         widget.onDanmakuChanged?.call(v);
       },
+      danmakuSources: widget.danmakuSources,
+      danmakuSourceIdx: widget.danmakuSourceIdx,
+      onDanmakuSourceChanged: widget.onDanmakuSourceChanged,
       ambientOn: _ambientOn,
       onAmbientChanged: (v) {
         setState(() => _ambientOn = v);
@@ -1043,6 +1054,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                           colorMode: widget.danmakuColorMode,
                           rowsTop: widget.danmakuRowsTop,
                           rowsBottom: widget.danmakuRowsBottom,
+                          fontFamily: widget.danmakuFontFamily,
                         ),
                       ],
                     ),

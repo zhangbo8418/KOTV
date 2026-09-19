@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../player/danmaku_layer.dart';
 import '../player/disc_play.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_playback.dart';
@@ -264,6 +265,7 @@ class _IconAct extends StatelessWidget {
     required this.icon,
     required this.tip,
     required this.onTap,
+    this.onLongPress,
     this.badge,
     this.size = 40,
     this.autofocus = false,
@@ -273,6 +275,7 @@ class _IconAct extends StatelessWidget {
   final IconData icon;
   final String tip;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final String? badge;
   final double size;
   final bool autofocus;
@@ -287,6 +290,7 @@ class _IconAct extends StatelessWidget {
         autofocus: autofocus,
         focusNode: focusNode,
         onPressed: onTap,
+        onLongPress: onLongPress,
         borderRadius: 8,
         child: SizedBox(
           width: size,
@@ -404,6 +408,9 @@ class VodFullscreenChrome extends StatefulWidget {
     this.rotateLabel,
     this.danmakuOn = false,
     this.onDanmakuChanged,
+    this.danmakuSources = const [],
+    this.danmakuSourceIdx = 0,
+    this.onDanmakuSourceChanged,
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
@@ -452,6 +459,9 @@ class VodFullscreenChrome extends StatefulWidget {
   final VoidCallback? onMini;
   final bool danmakuOn;
   final ValueChanged<bool>? onDanmakuChanged;
+  final List<DanmakuSource> danmakuSources;
+  final int danmakuSourceIdx;
+  final ValueChanged<int>? onDanmakuSourceChanged;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
@@ -482,6 +492,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   bool _danmakuOn = false;
   bool _ambientOn = false;
   bool _stableVolume = false;
+  bool _debugHud = false;
   int _sleepMinutes = 0;
   Timer? _sleepTimer;
   String _keepLabel = '收藏';
@@ -1053,6 +1064,78 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     widget.player.setRate(_speeds[_speedIdx]);
     unawaited(_persist('playerSpeed', '${_speeds[_speedIdx]}'));
     widget.onBump();
+  }
+
+  Future<void> _showSpeedSheet() async {
+    var rate = widget.player.rate.clamp(0.1, 5.0);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black38,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            return _chromeSheetFrame(
+              ctx,
+              title: '播放倍速',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Text(
+                    '×${rate.toStringAsFixed(1)}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                Slider(
+                  value: rate,
+                  min: 0.1,
+                  max: 5.0,
+                  divisions: 49,
+                  label: '×${rate.toStringAsFixed(1)}',
+                  onChanged: (v) {
+                    rate = v;
+                    setSheet(() {});
+                    widget.player.setRate(v);
+                  },
+                  onChangeEnd: (v) {
+                    final i = _speeds.indexWhere((s) => (s - v).abs() < 0.05);
+                    setState(() {
+                      if (i >= 0) _speedIdx = i;
+                    });
+                    unawaited(_persist('playerSpeed', v.toStringAsFixed(1)));
+                    widget.onBump();
+                  },
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final s in _speeds)
+                        ActionChip(
+                          label: Text('×${s == s.roundToDouble() ? s.toStringAsFixed(0) : s}'),
+                          onPressed: () {
+                            rate = s;
+                            setSheet(() {});
+                            widget.player.setRate(s);
+                            setState(() => _speedIdx = _speeds.indexOf(s));
+                            unawaited(_persist('playerSpeed', '$s'));
+                            Navigator.pop(ctx);
+                            widget.onBump();
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _cycleAspect() {
@@ -1751,6 +1834,37 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             unawaited(_persist('danmaku', v ? 'true' : 'false'));
                           },
                         ),
+                        if (widget.danmakuSources.length > 1)
+                          linkRow(
+                            icon: Icons.playlist_play,
+                            label: '弹幕源',
+                            trailing: widget.danmakuSources[widget.danmakuSourceIdx.clamp(0, widget.danmakuSources.length - 1)].name,
+                            onTap: () async {
+                              Navigator.pop(ctx);
+                              final sources = widget.danmakuSources;
+                              final picked = await showModalBottomSheet<int>(
+                                context: context,
+                                backgroundColor: Colors.transparent,
+                                barrierColor: Colors.black38,
+                                builder: (c) {
+                                  return _chromeSheetFrame(
+                                    c,
+                                    title: '选择弹幕源',
+                                    children: [
+                                      for (var i = 0; i < sources.length; i++)
+                                        _chromeSelectRow(
+                                          icon: Icons.subtitles_outlined,
+                                          label: sources[i].name,
+                                          selected: i == widget.danmakuSourceIdx,
+                                          onTap: () => Navigator.pop(c, i),
+                                        ),
+                                    ],
+                                  );
+                                },
+                              );
+                              if (picked != null) widget.onDanmakuSourceChanged?.call(picked);
+                            },
+                          ),
                         linkRow(
                           icon: Icons.bedtime_outlined,
                           label: '休眠定时器',
@@ -1899,22 +2013,41 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final h = widget.player.height;
     final pos = widget.player.position;
     final dur = widget.player.duration;
+    final buf = widget.player.buffered;
+    final bps = widget.player.networkSpeedBps;
+    final speedLabel = bps <= 0
+        ? '—'
+        : (bps >= 1024 * 1024
+            ? '${(bps / (1024 * 1024)).toStringAsFixed(1)} MB/s'
+            : '${(bps / 1024).toStringAsFixed(0)} KB/s');
     unawaited(
       _showChromeListSheet(
         title: '播放信息',
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Text(
               '标题：${widget.title}\n'
               '分辨率：$w x $h\n'
               '进度：${fmtClockHms(pos)} / ${fmtClockHms(dur)}\n'
-              '倍速：x${_speeds[_speedIdx]}\n'
+              '缓冲至：${fmtClockHms(buf)}\n'
+              '网速：$speedLabel\n'
+              '倍速：x${widget.player.rate.toStringAsFixed(2)}\n'
               '比例：${_aspects[_aspectIdx].$2}\n'
               '解码：${_decodeModes[_decodeIdx].$2}\n'
               '播放器：${widget.player.engineLabel}',
               style: TextStyle(color: Colors.white.withOpacity(0.75), height: 1.55, fontSize: 15),
             ),
+          ),
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            title: const Text('角落实时信息', style: TextStyle(color: Colors.white)),
+            value: _debugHud,
+            activeThumbColor: const Color(0xFFE52D27),
+            onChanged: (v) {
+              setState(() => _debugHud = v);
+              Navigator.pop(context);
+            },
           ),
         ],
       ),
@@ -1951,6 +2084,40 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     return Stack(
       fit: StackFit.expand,
       children: [
+        if (_debugHud)
+          Positioned(
+            left: 12,
+            top: viewTop + 8,
+            child: IgnorePointer(
+              child: ListenableBuilder(
+                listenable: widget.player,
+                builder: (_, __) {
+                  final bps = widget.player.networkSpeedBps;
+                  final speed = bps <= 0
+                      ? '—'
+                      : (bps >= 1024 * 1024
+                          ? '${(bps / (1024 * 1024)).toStringAsFixed(1)}MB/s'
+                          : '${(bps / 1024).toStringAsFixed(0)}KB/s');
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${widget.player.width}x${widget.player.height}  '
+                      '${fmtClockHms(widget.player.position)}  '
+                      'buf ${fmtClockHms(widget.player.buffered)}  '
+                      '$speed  '
+                      'x${widget.player.rate.toStringAsFixed(2)}\n'
+                      '${widget.player.engineLabel}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.35, fontFamily: 'monospace'),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
         if (widget.visible && !_epOpen)
           // 中心播停给触控；遥控器走底栏按钮，避免焦点停在画面正中出不去。
           ExcludeFocus(
@@ -2096,10 +2263,11 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                     }),
                                     _IconAct(
                                       icon: Icons.fast_forward,
-                                      tip: '倍速',
-                                      badge: 'x${_speeds[_speedIdx]}',
+                                      tip: '倍速（长按细调）',
+                                      badge: 'x${widget.player.rate.toStringAsFixed(widget.player.rate == widget.player.rate.roundToDouble() ? 0 : 1)}',
                                       size: land ? 32.0 : 40.0,
                                       onTap: _cycleSpeed,
+                                      onLongPress: () => unawaited(_showSpeedSheet()),
                                     ),
                                     _IconAct(icon: Icons.replay, tip: '重播', size: land ? 32.0 : 40.0, onTap: () {
                                       widget.onReplay?.call();
