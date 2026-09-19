@@ -819,17 +819,37 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               final on = preset == id || (id == 'off' && (preset.isEmpty || preset == 'off'));
               return Padding(
                 padding: const EdgeInsets.only(right: 8, bottom: 8),
-                child: ChoiceChip(
-                  label: Text(label),
-                  selected: on,
-                  onSelected: (_) async {
-                    preset = id;
-                    setSheet(() {});
-                    await _persist('videoEq', id);
-                  },
-                  selectedColor: Colors.white24,
-                  labelStyle: const TextStyle(color: Colors.white, fontSize: 13),
-                  backgroundColor: const Color(0x33FFFFFF),
+                child: Material(
+                  color: on ? Colors.white : const Color(0xFF3A3A42),
+                  borderRadius: BorderRadius.circular(20),
+                  child: InkWell(
+                    onTap: () async {
+                      preset = id;
+                      setSheet(() {});
+                      await _persist('videoEq', id);
+                    },
+                    borderRadius: BorderRadius.circular(20),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (on) ...[
+                            const Icon(Icons.check, size: 16, color: Colors.black87),
+                            const SizedBox(width: 4),
+                          ],
+                          Text(
+                            label,
+                            style: TextStyle(
+                              color: on ? Colors.black87 : Colors.white.withOpacity(0.92),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               );
             }
@@ -956,19 +976,40 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         return StatefulBuilder(
           builder: (ctx, setSheet) {
             Widget chip(String id, String label) {
+              final on = eq == id;
               return Padding(
                 padding: const EdgeInsets.only(right: 8, bottom: 8),
-                child: ChoiceChip(
-                  label: Text(label),
-                  selected: eq == id,
-                  onSelected: (_) async {
-                    eq = id;
-                    setSheet(() {});
-                    await _persist('audioEq', id);
-                  },
-                  selectedColor: Colors.white24,
-                  labelStyle: const TextStyle(color: Colors.white, fontSize: 13),
-                  backgroundColor: const Color(0x33FFFFFF),
+                child: Material(
+                  color: on ? Colors.white : const Color(0xFF3A3A42),
+                  borderRadius: BorderRadius.circular(20),
+                  child: InkWell(
+                    onTap: () async {
+                      eq = id;
+                      setSheet(() {});
+                      await _persist('audioEq', id);
+                    },
+                    borderRadius: BorderRadius.circular(20),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (on) ...[
+                            const Icon(Icons.check, size: 16, color: Colors.black87),
+                            const SizedBox(width: 4),
+                          ],
+                          Text(
+                            label,
+                            style: TextStyle(
+                              color: on ? Colors.black87 : Colors.white.withOpacity(0.92),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               );
             }
@@ -2404,7 +2445,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       widget.onBump();
                                     }),
                                     _TinyBtn(
-                                      label: '头=',
+                                      label: '片头',
                                       onTap: () {
                                         final sec = (widget.player.position.inMilliseconds / 1000).round().clamp(0, 3600);
                                         unawaited(_setOffsets(sec, _endingSec));
@@ -2425,7 +2466,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       widget.onBump();
                                     }),
                                     _TinyBtn(
-                                      label: '尾=',
+                                      label: '片尾',
                                       onTap: () {
                                         final dur = widget.player.duration.inMilliseconds;
                                         final pos = widget.player.position.inMilliseconds;

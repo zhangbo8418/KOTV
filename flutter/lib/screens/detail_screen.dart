@@ -32,6 +32,7 @@ import '../player/subtitle_style_util.dart';
 import '../player/playback_failover.dart';
 import '../player/tv_remote_keys.dart';
 import '../providers.dart';
+import '../nav/kotv_page.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
@@ -3011,6 +3012,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       canPop: _allowPop,
       onPopInvoked: (didPop) {
         if (didPop) return;
+        // 调色 / 更多等 BottomSheet：先关弹层。
+        if (kotvPopTopPopup(rootNavigatorKey.currentState)) return;
+        if (kotvPopTopPopup(Navigator.of(context, rootNavigator: false))) return;
         if (_immersiveFullscreen) {
           unawaited(_exitImmersiveFullscreen());
           return;

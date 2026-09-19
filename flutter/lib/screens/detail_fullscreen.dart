@@ -18,8 +18,10 @@ import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/tv_remote_keys.dart';
+import '../nav/kotv_page.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
+import 'shell.dart';
 
 /// 详情页全屏：MPV / FVP / Exo 共用同一套顶底控件。
 class DetailFullscreenPage extends StatefulWidget {
@@ -685,6 +687,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     final key = event.logicalKey;
 
     if (kotvIsBackKey(key)) {
+      if (kotvPopTopPopup(rootNavigatorKey.currentState)) {
+        return KeyEventResult.handled;
+      }
+      if (kotvPopTopPopup(Navigator.of(context, rootNavigator: false))) {
+        return KeyEventResult.handled;
+      }
       if (_epOpen) {
         _chromeKey.currentState?.closeEpisodes();
         setState(() {});

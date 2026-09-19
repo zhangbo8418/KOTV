@@ -147,6 +147,10 @@ class _AppShellState extends ConsumerState<AppShell> {
       _handlingBack = false;
     });
 
+    // 先关弹层 / BottomSheet，再退全屏或出详情。
+    if (kotvPopTopPopup(rootNavigatorKey.currentState)) return;
+    if (kotvPopTopPopup(_shellNavKey.currentState)) return;
+
     // isFullscreen() → exitFullscreen()，否则 finish()。
     // 必须先于 root.pop / maybePop：全屏页若先退沉浸，全局右键再进来会当成「出详情」直接回首页。
     if (DetailScreen.isImmersive) {
