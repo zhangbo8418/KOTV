@@ -54,6 +54,8 @@ class ExoPlayback extends KotvPlayback {
   String _renderMode = 'surface';
   /// 点播挂 SurfaceView / 停播卸下；未点播不建，避免详情滑动重影。
   bool _surfaceLayerEnabled = false;
+  /// 后台仅音频：暂时抑制画面层，不改 URL。
+  bool _videoOutputSuppressed = false;
   String _videoScale = 'default';
   bool _live = false;
   String? _lastError;
@@ -76,7 +78,7 @@ class ExoPlayback extends KotvPlayback {
   String? _currentSecondarySubtitleId;
   double _subtitleFontScale = 1.0;
   double _subtitlePos = 100;
-  double _subtitleSecondaryPos = 0;
+  double _subtitleSecondaryPos = 10;
   String _subtitleColor = '#FFFFFF';
   String _subtitleBorderColor = '#000000';
   double _subtitleBorderSize = 2;
@@ -441,8 +443,8 @@ class ExoPlayback extends KotvPlayback {
     _duration = Duration.zero;
     _buffered = Duration.zero;
     await _ensureNative();
-    // 点播即挂（详情已先挂播控进树）；Texture 模式无 SurfaceView 重影问题。
-    await _setSurfaceLayerEnabled(true);
+    // 点播即挂（详情已先挂播控进树）；后台仅音频抑制时不挂。
+    await _syncSurfaceLayer();
     try {
       await _ch.invokeMethod('open', {
         'url': url,
@@ -546,6 +548,7 @@ class ExoPlayback extends KotvPlayback {
     if (!(_w > 0 && _h > 0) && !isAudioOnlyContent) {
       throw const KotvSilentVideoException();
     }
+    _appliedColdPlayerOptsKey = _coldPlayerOptsKey();
     notifyListeners();
   }
 
@@ -755,8 +758,14 @@ class ExoPlayback extends KotvPlayback {
   }
 
   Future<void> _syncSurfaceLayer() async {
-    // 有点播 URL 就挂；不跟视频尺寸绑。Texture 无独立 SurfaceView。
-    await _setSurfaceLayerEnabled(_url.isNotEmpty);
+    // 有点播 URL 就挂；后台仅音频时可暂时抑制。
+    await _setSurfaceLayerEnabled(_url.isNotEmpty && !_videoOutputSuppressed);
+  }
+
+  @override
+  Future<void> setVideoOutputEnabled(bool enabled) async {
+    _videoOutputSuppressed = !enabled;
+    await _syncSurfaceLayer();
   }
 
   Future<void> _setSurfaceLayerEnabled(bool enabled) async {
@@ -917,7 +926,7 @@ class ExoPlayback extends KotvPlayback {
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
     _subtitlePos = (double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100).clamp(0, 150);
     _subtitleSecondaryPos =
-        (double.tryParse('${settings['subtitleSecondaryPos'] ?? '0'}') ?? 0).clamp(0, 150);
+        (double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10).clamp(0, 150);
     _subtitleColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
     if (_subtitleColor.isEmpty) _subtitleColor = '#FFFFFF';
     _subtitleBorderColor = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
@@ -978,7 +987,35 @@ class ExoPlayback extends KotvPlayback {
         forceStyle: custom,
       ));
       unawaited(setSubtitleOffsetMs(_subtitleOffsetMs));
+      unawaited(_syncRuntimePlayerOptions());
     }
+  }
+
+  String _coldPlayerOptsKey() =>
+      '$_tunneling|$_adblock|$_diskCache|$_audioPassThrough|'
+      '$_softAudioPrefer|$_softVideoPrefer|$_bufferFactor|$_libass|'
+      '$_dolbyVisionPolicy|$_secondarySubtitle|$_diskPreloadMs|'
+      '$_diskPreloadThreads|$_diskPreloadSizeMb';
+
+  String? _appliedColdPlayerOptsKey;
+
+  /// 跳静音可热设；缓冲/隧道/libass 等冷选项变化则同 URL 重开。
+  Future<void> _syncRuntimePlayerOptions() async {
+    try {
+      await _ensureNative();
+      try {
+        await _ch.invokeMethod('setSkipSilence', {'enabled': _skipSilence});
+      } catch (_) {}
+      try {
+        await _ch.invokeMethod('setPreferAac', {'enabled': _preferAac});
+      } catch (_) {}
+      final cold = _coldPlayerOptsKey();
+      if (_appliedColdPlayerOptsKey != null && cold != _appliedColdPlayerOptsKey) {
+        if (_url.isNotEmpty) {
+          await open(_url, headers: _headers, drm: _drm, live: _live);
+        }
+      }
+    } catch (_) {}
   }
 
   int _effectiveAudioStability() =>

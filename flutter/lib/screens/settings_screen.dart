@@ -1187,7 +1187,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           _sheetSlider(
             label: '副字幕位置',
-            value: (double.tryParse(g('subtitleSecondaryPos', '0')) ?? 0).clamp(0.0, 150.0),
+            value: (double.tryParse(g('subtitleSecondaryPos', '10')) ?? 10).clamp(0.0, 150.0),
             min: 0,
             max: 150,
             divisions: 30,
@@ -2401,7 +2401,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           },
                           onTap: () => _pick('后台播放', 'playerBackground', const [
                             ('离开暂停', 'off'),
-                            ('后台续播（不进画中画）', 'audio'),
+                            ('后台续播（卸画面留声音）', 'audio'),
                             ('自动画中画', 'pip'),
                           ]),
                         ),

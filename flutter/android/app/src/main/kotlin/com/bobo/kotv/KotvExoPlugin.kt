@@ -167,7 +167,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var subtitleOverlay: KotvSubtitleOverlay? = null
   private var subtitleFontScale = 1.0f
   private var subtitlePos = 100.0
-  private var subtitleSecondaryPos = 0.0
+  private var subtitleSecondaryPos = 10.0
   private var subtitleColor = "#FFFFFF"
   private var subtitleBorderColor = "#000000"
   private var subtitleBorderSize = 2.0
@@ -605,6 +605,30 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_surface_layer", t.message, null)
+          }
+        }
+      }
+      "setSkipSilence" -> {
+        val enabled = call.argument<Boolean>("enabled") == true
+        skipSilence = enabled
+        main.post {
+          try {
+            player?.setSkipSilenceEnabled(enabled)
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_skip_silence", t.message, null)
+          }
+        }
+      }
+      "setPreferAac" -> {
+        val enabled = call.argument<Boolean>("enabled") == true
+        preferAac = enabled
+        main.post {
+          try {
+            applyTrackSelectionPrefs()
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_prefer_aac", t.message, null)
           }
         }
       }

@@ -373,6 +373,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       if (_playerBackground == 'off' && _playback.playing) {
         unawaited(_playback.pause());
+      } else if (_playerBackground == 'audio' && _playUrl.isNotEmpty) {
+        unawaited(_playback.setVideoOutputEnabled(false));
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (_playerBackground == 'audio' && _playUrl.isNotEmpty) {
+        unawaited(_playback.setVideoOutputEnabled(true));
       }
     }
   }
@@ -563,7 +569,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         unawaited(_playback.setVideoScale(_liveScale));
         final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.5);
         final subPos = double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100.0;
-        final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '0'}') ?? 0.0;
+        final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
         final styleMode = '${settings['subtitleStyleMode'] ?? 'custom'}'.trim().toLowerCase();
         final forceStyle = styleMode == 'custom';
         final useSystem = styleMode == 'system';

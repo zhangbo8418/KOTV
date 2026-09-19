@@ -233,7 +233,7 @@ func defaultFile() file {
 			{ID: "subtitleColor", Label: "字幕颜色", Value: "#FFFFFF"},
 			{ID: "subtitleBorderColor", Label: "字幕描边色", Value: "#000000"},
 			{ID: "subtitleBorderSize", Label: "字幕描边", Value: "2"},
-			{ID: "subtitleSecondaryPos", Label: "副字幕位置", Value: "0"},
+			{ID: "subtitleSecondaryPos", Label: "副字幕位置", Value: "10"},
 			{ID: "subtitleBgColor", Label: "字幕背景", Value: "#00000000"},
 			{ID: "audioEqBands", Label: "音频均衡频段", Value: ""},
 			{ID: "audioDialogue", Label: "对白增强", Value: "false"},
@@ -361,7 +361,7 @@ func Load() error {
 	ensureSettingLocked(SubtitleColor, "字幕颜色", "#FFFFFF")
 	ensureSettingLocked(SubtitleBorderColor, "字幕描边色", "#000000")
 	ensureSettingLocked(SubtitleBorderSize, "字幕描边", "2")
-	ensureSettingLocked(SubtitleSecondaryPos, "副字幕位置", "0")
+	ensureSettingLocked(SubtitleSecondaryPos, "副字幕位置", "10")
 	ensureSettingLocked(SubtitleBgColor, "字幕背景", "#00000000")
 	ensureSettingLocked(AudioEqBands, "音频均衡频段", "")
 	ensureSettingLocked(AudioDialogue, "对白增强", "false")

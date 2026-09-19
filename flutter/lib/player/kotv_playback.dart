@@ -65,6 +65,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// Android Exo / 原生 MPV：Surface / Texture；其它后端忽略。
   Future<void> setRenderMode(String mode) async {}
 
+  /// 后台「仅音频」时卸掉画面输出（音继续）；回前台再挂上。其它后端默认空实现。
+  Future<void> setVideoOutputEnabled(bool enabled) async {}
+
   /// 画面比例：`default` 适应 / `fill` 拉伸 / `zoom` 裁切 / `16:9` / `4:3`。
   /// 原生 Surface 吃不到 Flutter BoxFit，需引擎侧落实；默认空实现。
   Future<void> setVideoScale(String mode) async {}

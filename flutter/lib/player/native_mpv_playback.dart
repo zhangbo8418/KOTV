@@ -64,6 +64,8 @@ class NativeMpvPlayback extends KotvPlayback {
   String _renderMode = 'surface';
   /// 点播挂 Surface / 停播卸下；未点播不建，避免详情滑动重影。
   bool _surfaceLayerEnabled = false;
+  /// 后台仅音频：暂时抑制画面层，不改 URL。
+  bool _videoOutputSuppressed = false;
   /// 适应/拉伸/Zoom/16:9/4:3（原生 setAspect）。
   String _videoScale = 'default';
   /// 开播额外属性（dvd-device / bluray-device 等）。
@@ -600,8 +602,13 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   Future<void> _syncSurfaceLayer() async {
-    // 有点播 URL 就挂；停播清空 URL 后卸下。不跟视频尺寸绑。
-    await _setSurfaceLayerEnabled(_url.isNotEmpty);
+    await _setSurfaceLayerEnabled(_url.isNotEmpty && !_videoOutputSuppressed);
+  }
+
+  @override
+  Future<void> setVideoOutputEnabled(bool enabled) async {
+    _videoOutputSuppressed = !enabled;
+    await _syncSurfaceLayer();
   }
 
   Future<void> _setSurfaceLayerEnabled(bool enabled) async {
