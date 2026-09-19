@@ -195,16 +195,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     ]);
   }
 
-  /// 切 Tab / 离开直播：先静音再 stop + release，避免后台漏音与 Win7 卡音。
+  /// 切 Tab / 离开直播：先 pause 停声，再 stop + release（不改音量）。
   Future<void> _releaseAllBackends() async {
     try {
-      await _mk?.setVolume(0);
-    } catch (_) {}
-    try {
       await _mk?.pause();
-    } catch (_) {}
-    try {
-      await _fvp?.setVolume(0);
     } catch (_) {}
     try {
       await _fvp?.pause();
