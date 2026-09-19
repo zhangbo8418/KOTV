@@ -226,10 +226,10 @@ class FvpPlayback extends KotvPlayback {
     _subtitleManualOff = false;
     _subtitleManualAuto = false;
     notifyListeners();
-    // 换台：先挂新 Controller，再卸旧面——中间勿把 _c 置空，避免 Texture 卸载卡音。
-    final previous = _c;
-    final previousListener = _listener;
     try {
+      // 换台软停已保留旧面；此处再换源时才 dispose。勿先走 stop()（会清 _opening）。
+      await _disposeController();
+      notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
       // 302 交给 mdk 默认 IO 跟跳（未强制 io.avio）。
       final c = VideoPlayerController.networkUrl(
@@ -237,7 +237,8 @@ class FvpPlayback extends KotvPlayback {
         httpHeaders: h,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );
-      void listener() {
+      _c = c;
+      _listener = () {
         if (_c != c) return;
         final v = c.value;
         if (v.hasError) {
@@ -267,15 +268,8 @@ class FvpPlayback extends KotvPlayback {
           _refreshTracksQuiet();
         }
         notifyListeners();
-      }
-      c.addListener(listener);
-      _c = c;
-      _listener = listener;
-      if (previousListener != null && previous != null && !identical(previous, c)) {
-        try {
-          previous.removeListener(previousListener);
-        } catch (_) {}
-      }
+      };
+      c.addListener(_listener!);
       // initialize 前写入解码器列表（硬/软锁死；自动=硬解优先+软解回退）。
       _applyDecodeMode(c);
       if (clearKeyHex != null) {
@@ -287,7 +281,7 @@ class FvpPlayback extends KotvPlayback {
           } catch (_) {}
         }
       }
-      // 先让父级 rebuild 挂上 VideoPlayer，再 initialize（Windows Texture 需要非零面积）。
+      // 先让父级 rebuild 挂上 VideoPlayer，再 initialize。
       notifyListeners();
       await SchedulerBinding.instance.endOfFrame;
       await Future<void>.delayed(const Duration(milliseconds: 32));
@@ -318,23 +312,6 @@ class FvpPlayback extends KotvPlayback {
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
       await c.play();
-      // 新面已起播后再卸旧 Controller，避免双开音频设备抢占。
-      if (previous != null && !identical(previous, c)) {
-        unawaited(
-          kotvTeardownPlayback(
-            stop: () async {
-              try {
-                await previous.pause();
-              } catch (_) {}
-            },
-            dispose: () async {
-              await previous.dispose();
-            },
-            drain: const Duration(milliseconds: 200),
-            disposeTimeout: const Duration(milliseconds: 600),
-          ),
-        );
-      }
       _applyRuntimeOptions(c);
       _refreshTracksQuiet();
       _applySecondaryAutoIfNeeded();
