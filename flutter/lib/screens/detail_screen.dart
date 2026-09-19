@@ -603,7 +603,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
-  /// 先静音停声，再卸画面 / release，避免 WASAPI 边播边拆卡音。
+  /// 先 pause 停声，再卸画面 / release，避免 WASAPI 边播边拆卡音（不改音量）。
   /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
   Future<void> _stopHard() async {
     _playbackLive = false;
@@ -631,15 +631,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(api.cancelPending(hard: true, thunder: true));
     }
 
-    // 先静音/暂停（尤其桌面 MPV），再清 URL 卸 Video。
-    try {
-      await _mk?.setVolume(0);
-    } catch (_) {}
+    // 硬拆前先软停：pause 即停声，勿 setVolume(0)（会脏包装类音量）。
     try {
       await _mk?.pause();
-    } catch (_) {}
-    try {
-      await _fvp?.setVolume(0);
     } catch (_) {}
     try {
       await _fvp?.pause();
