@@ -766,7 +766,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
     // 片尾：`ending + position >= duration` → 下一集（无需额外开关）
     if (endMs > 0 && pos.inMilliseconds + endMs >= dur.inMilliseconds) {
-      if (!_endingSkipFired && widget.onNext != null) {
+      if (!_endingSkipFired && widget.onNext != null && !widget.player.repeatOne) {
         _endingSkipFired = true;
         _openingSeekDone = false;
         widget.onNext!();
