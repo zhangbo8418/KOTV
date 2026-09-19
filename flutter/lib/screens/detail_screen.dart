@@ -191,7 +191,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _miniDesktop = false;
   /// 与直播页一致：原位全屏，同一 PlatformView/Texture 放大，不 push 第二块 Surface。
   bool _immersiveFullscreen = false;
-  /// 全屏换集/解析中：盖住画面，避免 Surface 镂空透出底层。
+  /// Android 全屏换集过渡盖：仅 Hybrid Surface 防镂空透底；桌面不用。
   bool _immersiveEpCover = false;
   /// 退出全屏后短时挡住「再 pop 详情」，避免双通道返回直接回首页。
   DateTime? _suppressDetailPopUntil;
