@@ -43,7 +43,7 @@ class FvpPlayback extends KotvPlayback {
   String? _currentSecondarySubtitleId;
   bool _subtitleManualOff = false;
   bool _subtitleManualAuto = false;
-  String _secondarySubtitleMode = 'off';
+  String _secondarySubtitleMode = 'default';
   double _subtitleFontScale = 1.0;
   String _preferredTextLangs = '';
   KotvVideoEq _videoEq = KotvVideoEq.off;
