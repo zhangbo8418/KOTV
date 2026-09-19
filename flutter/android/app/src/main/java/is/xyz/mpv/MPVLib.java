@@ -513,6 +513,13 @@ public final class MPVLib {
         }
     }
 
+    /** libplayer 对 MPV_FORMAT_NODE 回调：JSON 字符串。 */
+    public static void eventPropertyNode(String property, String json) {
+        synchronized (OBSERVERS) {
+            for (EventObserver observer : OBSERVERS) observer.eventPropertyNode(property, json);
+        }
+    }
+
     public static void event(int eventId) {
         if (eventId == MpvEvent.MPV_EVENT_SHUTDOWN) {
             synchronized (MPVLib.class) {
@@ -563,6 +570,9 @@ public final class MPVLib {
     }
 
     public interface EventObserver {
+        default void eventPropertyNode(String property, String json) {
+        }
+
         void eventProperty(String property);
 
         void eventProperty(String property, long value);

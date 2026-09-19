@@ -24,6 +24,14 @@ class LiveCatchupChrome extends StatelessWidget {
     this.onDecode,
     this.playerLabel = '',
     this.decodeLabel = '自动',
+    this.onScale,
+    this.scaleLabel = '',
+    this.onAcross,
+    this.acrossOn = false,
+    this.onInvert,
+    this.invertOn = false,
+    this.onFailSwitch,
+    this.failSwitchOn = false,
     /// 竖屏/直播传 false：一键进沉浸全屏，不弹「铺满窗口」。
     this.offerFullscreenChoice,
     /// 已在真全屏时显示退出图标（回看底栏用）。
@@ -46,6 +54,14 @@ class LiveCatchupChrome extends StatelessWidget {
   final VoidCallback? onDecode;
   final String playerLabel;
   final String decodeLabel;
+  final VoidCallback? onScale;
+  final String scaleLabel;
+  final VoidCallback? onAcross;
+  final bool acrossOn;
+  final VoidCallback? onInvert;
+  final bool invertOn;
+  final VoidCallback? onFailSwitch;
+  final bool failSwitchOn;
   final bool? offerFullscreenChoice;
   final bool fullscreenActive;
   final bool autofocusPlay;
@@ -124,6 +140,17 @@ class LiveCatchupChrome extends StatelessWidget {
                       _textAct(resolvedPlayerLabel, () => _tap(onPlayer)),
                     if (!compact && onDecode != null)
                       _textAct(decodeLabel, () => _tap(onDecode)),
+                    if (onScale != null)
+                      _textAct(
+                        scaleLabel.trim().isEmpty ? '比例' : scaleLabel,
+                        () => _tap(onScale),
+                      ),
+                    if (onAcross != null)
+                      _textAct(acrossOn ? '跨组开' : '跨组关', () => _tap(onAcross)),
+                    if (onInvert != null)
+                      _textAct(invertOn ? '反转开' : '反转关', () => _tap(onInvert)),
+                    if (onFailSwitch != null)
+                      _textAct(failSwitchOn ? '换线开' : '换线关', () => _tap(onFailSwitch)),
                     const SizedBox(width: 6),
                     Text(
                       compact ? fmtPlayerTime(pos) : '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',

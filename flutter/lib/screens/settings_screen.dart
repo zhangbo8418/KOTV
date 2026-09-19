@@ -472,18 +472,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
           ),
           _sheetToggle(
-            label: '软解优先音轨',
+            label: '软解优先音轨（仅软解·重开生效）',
             value: exoSoftAudioPrefer,
             onChanged: (v) async {
-              await _set('exoSoftAudioPrefer', v ? 'true' : 'false');
+              await _set('exoSoftAudioPrefer', v ? 'true' : 'false', msg: '仅软解码模式生效，重开播放后应用');
               setSheet(() {});
             },
           ),
           _sheetToggle(
-            label: '软解优先视轨',
+            label: '软解优先视轨（仅软解·重开生效）',
             value: exoSoftVideoPrefer,
             onChanged: (v) async {
-              await _set('exoSoftVideoPrefer', v ? 'true' : 'false');
+              await _set('exoSoftVideoPrefer', v ? 'true' : 'false', msg: '仅软解码模式生效，重开播放后应用');
               setSheet(() {});
             },
           ),
@@ -1309,7 +1309,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final size = (double.tryParse(g('danmakuSize', '18')) ?? 18).clamp(12.0, 48.0);
         final opacity = (double.tryParse(g('danmakuOpacity', '85')) ?? 85).clamp(0.0, 100.0);
         final rows = (double.tryParse(g('danmakuRows', '6')) ?? 6).clamp(1.0, 16.0);
-        final offset = (double.tryParse(g('danmakuOffsetMs', '0')) ?? 0).clamp(-300000.0, 300000.0);
+        final offset = (double.tryParse(g('danmakuOffsetMs', '0')) ?? 0).clamp(-60000.0, 60000.0);
         final maxOnScreen = (double.tryParse(g('danmakuMaxOnScreen', '150')) ?? 150).clamp(10.0, 500.0);
         final scrollArea = (double.tryParse(g('danmakuScrollArea', '50')) ?? 50).clamp(10.0, 100.0);
         bool flag(String key, [bool def = true]) {
@@ -1412,8 +1412,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _sheetSlider(
             label: '时轴偏移',
             value: offset,
-            min: -300000,
-            max: 300000,
+            min: -60000,
+            max: 60000,
             divisions: 120,
             format: (v) {
               final s = (v / 1000).round();

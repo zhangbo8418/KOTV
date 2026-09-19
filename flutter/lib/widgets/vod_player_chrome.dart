@@ -493,6 +493,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   bool _ambientOn = false;
   bool _stableVolume = false;
   bool _debugHud = false;
+  int _danmakuOffsetSec = 0;
   int _sleepMinutes = 0;
   Timer? _sleepTimer;
   String _keepLabel = '收藏';
@@ -581,6 +582,22 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     unawaited(_refreshPlayerLabel());
     if (_stableVolume) unawaited(_applyStableVolume(true));
     _skipSub = widget.player.positionStream.listen(_onPositionTick);
+    unawaited(_loadDanmakuOffset());
+  }
+
+  Future<void> _loadDanmakuOffset() async {
+    try {
+      final m = await _loadSettings();
+      final ms = int.tryParse(m['danmakuOffsetMs'] ?? '0') ?? 0;
+      if (!mounted) return;
+      setState(() => _danmakuOffsetSec = (ms / 1000).round().clamp(-60, 60));
+    } catch (_) {}
+  }
+
+  Future<void> _bumpDanmakuOffset(int deltaSec) async {
+    final next = (_danmakuOffsetSec + deltaSec).clamp(-60, 60);
+    setState(() => _danmakuOffsetSec = next);
+    await _persist('danmakuOffsetMs', '${next * 1000}');
   }
 
   @override
@@ -1834,6 +1851,46 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             unawaited(_persist('danmaku', v ? 'true' : 'false'));
                           },
                         ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          child: SizedBox(
+                            height: 52,
+                            child: Row(
+                              children: [
+                                const SizedBox(width: 8),
+                                const Icon(Icons.av_timer, color: Colors.white, size: 24),
+                                const SizedBox(width: 16),
+                                const Expanded(
+                                  child: Text('弹幕时轴', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
+                                ),
+                                _TinyBtn(
+                                  label: '-',
+                                  onTap: () {
+                                    unawaited(_bumpDanmakuOffset(-1));
+                                    setSheet(() {});
+                                  },
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  child: Text(
+                                    _danmakuOffsetSec == 0
+                                        ? '0 s'
+                                        : (_danmakuOffsetSec > 0 ? '+$_danmakuOffsetSec s' : '$_danmakuOffsetSec s'),
+                                    style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                _TinyBtn(
+                                  label: '+',
+                                  onTap: () {
+                                    unawaited(_bumpDanmakuOffset(1));
+                                    setSheet(() {});
+                                  },
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                            ),
+                          ),
+                        ),
                         if (widget.danmakuSources.length > 1)
                           linkRow(
                             icon: Icons.playlist_play,
@@ -2338,6 +2395,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       unawaited(_setOffsets(_openingSec + 5, _endingSec));
                                       widget.onBump();
                                     }),
+                                    _TinyBtn(
+                                      label: '头=',
+                                      onTap: () {
+                                        final sec = (widget.player.position.inMilliseconds / 1000).round().clamp(0, 3600);
+                                        unawaited(_setOffsets(sec, _endingSec));
+                                        widget.onBump();
+                                      },
+                                    ),
                                     const SizedBox(width: 8),
                                     _TinyBtn(label: '-', onTap: () {
                                       unawaited(_setOffsets(_openingSec, _endingSec - 5));
@@ -2351,6 +2416,18 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       unawaited(_setOffsets(_openingSec, _endingSec + 5));
                                       widget.onBump();
                                     }),
+                                    _TinyBtn(
+                                      label: '尾=',
+                                      onTap: () {
+                                        final dur = widget.player.duration.inMilliseconds;
+                                        final pos = widget.player.position.inMilliseconds;
+                                        final endSec = dur > 0
+                                            ? ((dur - pos) / 1000).round().clamp(0, 3600)
+                                            : 0;
+                                        unawaited(_setOffsets(_openingSec, endSec));
+                                        widget.onBump();
+                                      },
+                                    ),
                                     const SizedBox(width: 8),
                                     _TinyBtn(
                                       label: '重置',

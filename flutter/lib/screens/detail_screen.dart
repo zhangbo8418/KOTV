@@ -2420,6 +2420,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'danmaku') {
             setState(() => _danmakuOn = v.toLowerCase() == 'true');
           }
+          if (k == 'danmakuOffsetMs') {
+            final next = ((int.tryParse(v) ?? 0) / 1000.0);
+            final delta = next - _danmakuOffsetSec;
+            _danmakuOffsetSec = next;
+            if (delta.abs() > 0.0001 && _danmakuItems.value.isNotEmpty) {
+              _danmakuItems.value = [
+                for (final it in _danmakuItems.value)
+                  DanmakuItem(
+                    time: it.time + delta,
+                    content: it.content,
+                    mode: it.mode,
+                    size: it.size,
+                    color: it.color,
+                  ),
+              ];
+            }
+            if (mounted) setState(() {});
+          }
           if (k == 'danmakuLoad' || k == 'danmakuAuto' || k == 'danmakuSpiderFirst') {
             setState(() {
               if (k == 'danmakuLoad') {
