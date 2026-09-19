@@ -374,14 +374,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final exoTunneling = kotvSettingsFlag(g('exoTunneling', 'false'), def: false);
         final exoPreferAac = kotvSettingsFlag(g('exoPreferAac', 'false'), def: false);
         final exoSkipSilence = kotvSettingsFlag(g('exoSkipSilence', 'false'), def: false);
-        final exoSoftAudioPrefer = kotvSettingsFlag(g('exoSoftAudioPrefer', 'true'), def: true);
-        final exoSoftVideoPrefer = kotvSettingsFlag(g('exoSoftVideoPrefer', 'true'), def: true);
+        final exoSoftAudioPrefer = kotvSettingsFlag(g('exoSoftAudioPrefer', 'false'), def: false);
+        final exoSoftVideoPrefer = kotvSettingsFlag(g('exoSoftVideoPrefer', 'false'), def: false);
         final exoBuffer = (int.tryParse(g('exoBuffer', '1')) ?? 1).clamp(1, 10).toDouble();
         final exoPreload = (int.tryParse(g('exoDiskPreloadMs', '10000')) ?? 10000).clamp(0, 120000).toDouble();
         final exoPreloadThreads = (int.tryParse(g('exoDiskPreloadThreads', '2')) ?? 2).clamp(1, 10).toDouble();
         final exoPreloadSizeMb = (int.tryParse(g('exoDiskPreloadSizeMb', '256')) ?? 256).clamp(128, 4096).toDouble();
         final exoLibass = kotvSettingsFlag(g('exoLibass', 'true'), def: true);
-        final exoSecondary = g('exoSecondarySubtitle', 'off').trim().toLowerCase();
+        final exoSecondary = g('exoSecondarySubtitle', 'default').trim().toLowerCase();
         final exoDolby = int.tryParse(g('exoDolbyVision', '0')) ?? 0;
         final exoDolbyLabel = switch (exoDolby) {
           1 => '假定支持',

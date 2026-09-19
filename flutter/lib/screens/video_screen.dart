@@ -783,7 +783,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     );
   }
 
-  /// 对齐参考图：四列等宽网格。
+  /// 四列等宽网格。
   /// 左上两卡与下方四卡完全同宽同高；轮播 = 右三列 × 两行高。
   /// 有接口 banner 时只替换轮播内容，功能卡布局不变。
   Widget _buildHomeFeatureGrid() {

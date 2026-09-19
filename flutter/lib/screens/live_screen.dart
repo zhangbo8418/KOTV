@@ -999,21 +999,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     );
   }
 
-  /// 仅 Android Hybrid Surface 需要：换台/无帧时盖住，避免与频道菜单叠影。
-  /// 桌面 Texture 无此问题，且换台不卸画面，故不盖黑。
+  /// 仅 Android Hybrid：无帧/缓冲时盖住防叠影。
+  /// 换台不盖黑，保留上一台最后一帧；桌面 Texture 不盖。
   Widget _buildLiveSurfaceCover() {
     if (kotvIsDesktop()) return const SizedBox.shrink();
     return ListenableBuilder(
       listenable: _playback,
       builder: (context, _) {
-        final swapping = _loading ||
-            _status.contains('换台') ||
+        final loading = _loading ||
             _status.contains('解析') ||
             _status.contains('加载') ||
             _status.contains('缓冲') ||
             _status.contains('嗅探');
         final noFrame = _playback.width <= 0 && _playback.height <= 0;
-        final cover = swapping || noFrame || _playback.stalling;
+        // 换台中若仍有上一帧尺寸，不盖黑。
+        final cover = loading || (noFrame && !_status.contains('换台')) || _playback.stalling;
         if (!cover) return const SizedBox.shrink();
         return const IgnorePointer(child: ColoredBox(color: Colors.black));
       },

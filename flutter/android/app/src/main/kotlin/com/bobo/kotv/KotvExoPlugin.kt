@@ -141,11 +141,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var preferAac = false
   /** 跳过静音段。 */
   private var skipSilence = false
-  /** 软解时是否优先软解音轨（对齐 FongMi DecodeSetting.isAudioPrefer）。 */
-  private var softAudioPrefer = true
-  /** 软解时是否优先软解视轨。 */
-  private var softVideoPrefer = true
-  /** 点播缓冲倍率 1–10（对齐 FongMi PlayerSetting.getBuffer）。 */
+  /** 软解时是否优先软解音轨（仅 mode=soft 生效；默认关）。 */
+  private var softAudioPrefer = false
+  /** 软解时是否优先软解视轨（仅 mode=soft 生效；默认关）。 */
+  private var softVideoPrefer = false
+  /** 点播缓冲倍率 1–10。 */
   private var bufferFactor = 1
   /** 首选字幕语言（BCP-47，逗号分隔）；空则跟系统 Locale。 */
   private var preferredTextLangs: String = ""
@@ -159,8 +159,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var preloadRenderers: androidx.media3.exoplayer.RenderersFactory? = null
   /** ASS / libass 特效字幕。 */
   private var libassEnabled = false
-  /** 副字幕：off | auto | 轨 id（gN:tM）。 */
-  private var secondarySubtitleMode: String = "off"
+  /** 副字幕：off | auto | default | manual。 */
+  private var secondarySubtitleMode: String = "default"
   private var secondarySubtitleId: String = ""
   private var playerBuiltLibass: Boolean? = null
   private var playerBuiltSecondary: Boolean? = null
@@ -1346,7 +1346,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /** 设置解码偏好。
-   * 软解时可按音/视分别 prefer（对齐 FongMi DecodeSetting）；硬解/自动均为硬件偏好。 */
+   * 软解时可按音/视分别 prefer；硬解/自动均为硬件偏好。 */
   private fun applyDecodePreferences(trackSelector: DecodeTrackSelector, mode: String) {
     val soft = mode == "soft"
     val audioDecode = if (soft && softAudioPrefer) C.DECODE_SOFTWARE else C.DECODE_HARDWARE

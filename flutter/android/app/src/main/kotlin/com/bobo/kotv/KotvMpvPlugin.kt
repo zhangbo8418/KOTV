@@ -34,9 +34,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 原生 MPV（对齐 TV）：[MPVLib] + SurfaceView/TextureView（PlayerView.setRender）。
+ * 原生 MPV：[MPVLib] + SurfaceView/TextureView（PlayerView.setRender）。
  *
- * native 库从 assets/mpv-libs/{abi}/ 解压加载（与 TV/webhtv 同路径约定）。
+ * native 库从 assets/mpv-libs/{abi}/ 解压加载。
  */
 class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler,
   MPVLib.EventObserver {
@@ -62,7 +62,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var pendingUrl: String? = null
   private var pendingHeaders: Map<String, String> = emptyMap()
   private var surfaceReady = false
-  /** 对齐 TV MpvPlayer.attachedSurface：同一 Surface 只更新尺寸。 */
+  /** 同一 Surface 只更新尺寸（attachedSurface）。 */
   private var attachedSurface: Surface? = null
   private var surfaceAttached = false
   private var appliedSurfaceSize: String? = null
@@ -76,7 +76,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var audioPassThrough = true
   /** 点播磁盘缓存。 */
   private var diskCache = false
-  /** 对齐 Exo exoDolbyVision：0=AUTO 1=假定支持 2=假定不支持。 */
+  /** 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。 */
   private var dolbyVisionPolicy = 0
   /** 首选字幕语言（BCP-47，逗号分隔）→ mpv slang。 */
   private var preferredTextLangs = ""
@@ -84,7 +84,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** IO/探测失败后强制 lavf=hls 再试一次。 */
   private var ioHlsRetried = false
   private var forceLavfHls = false
-  /** auto 下硬解失败后仅软解重载一次（对齐 Exo decodeFallback）。 */
+  /** auto 下硬解失败后仅软解重载一次。 */
   private var decodeFallbackTried = false
   private var loadedUrl: String = ""
   private var loadedHeaders: Map<String, String> = emptyMap()
@@ -210,7 +210,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (surfaceHost === host) {
       surfaceHost = null
       surfaceReady = false
-      // PlatformView 真正卸树：对齐 TV clearVideoOutput，vo=null。
+      // PlatformView 真正卸树：clearVideoOutput，vo=null。
       parkSurfaceTerminal()
     }
   }
@@ -925,7 +925,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       MPVLib.setOptionString("vo", if (gpuNext) "gpu-next" else "gpu")
       applyGpuApiOptions()
-      // 对齐 FongMi：默认 cacert 校验；坏 CA 可关。
+      // 默认 cacert 校验；坏 CA 可关。
       applyTlsOptions(ctx)
       // https→http、以及 HLS 分片伪装成 .png/.jpg：须放行扩展名。
       // 不设 protocol_whitelist，避免挡掉 RTSP/RTMP/RTP。
@@ -1099,12 +1099,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return "${mib}MiB"
   }
 
-  /** 音轨列表（含 AV3A 等 FFmpeg/libarcdav3a 解码轨），对齐 TV mpvplayer。 */
+  /** 音轨列表（含 AV3A 等 FFmpeg/libarcdav3a 解码轨）。 */
   private fun buildAudioTracksJson(): String {
     return buildTracksJson("audio")
   }
 
-  /** 视频轨列表，对齐 TV TrackDialog VIDEO。 */
+  /** 视频轨列表。 */
   private fun buildVideoTracksJson(): String {
     return buildTracksJson("video")
   }
@@ -1283,7 +1283,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 画面比例（对齐设置/播控「适应·拉伸·Zoom·16:9·4:3」）：
+   * 画面比例（适应·拉伸·Zoom·16:9·4:3）：
    * - 适应：keepaspect，不裁切
    * - 拉伸：铺满窗口（可变形）
    * - Zoom：keepaspect + panscan 裁切铺满
@@ -1343,7 +1343,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 对齐 TV [MpvPlayer.bindVideoOutput]：
+   * 绑定视频输出：
    * - 同一 Surface：只更新 android-surface-size
    * - 新 Surface：attach + 设 vo，不 loadfile / 不 playlist-play-index
    */
@@ -1379,7 +1379,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         appliedSurfaceSize = size
       }
       MPVLib.setPropertyString("vo", vo)
-      // 对齐 TV：绑定输出时不强制 force-window / 不重播；保持 pause 与 time-pos。
+      // 绑定输出时不强制 force-window / 不重播；保持 pause 与 time-pos。
       if (pendingUrl == null) {
         MPVLib.setPropertyBoolean("pause", paused)
       }
@@ -1540,7 +1540,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 对齐桌面 media_kit：user-agent / referrer 走独立属性，
+   * user-agent / referrer 走独立属性，
    * 其余头写成 mpv 的逗号列表。setOptionString 在 init 之后无效，必须 setPropertyString。
    */
   private fun applyPlayHttpHeaders(headers: Map<String, String>) {
@@ -1762,7 +1762,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** auto 下硬解失败：翻软解再 load 一次（对齐 Exo decodeFallback）。 */
+  /** auto 下硬解失败：翻软解再 load 一次。 */
   private fun shouldDecodeFallback(error: Int, errorText: String?): Boolean {
     val mode = decodeMode.trim().lowercase()
     if (mode.isNotEmpty() && mode != "auto" && mode != "auto-safe") return false
@@ -1825,7 +1825,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     private const val TAG = "KotvMpv"
     private const val FALLBACK_PLAY_UA =
       "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
-    // 与 flutter/lib/player/mpv_opts.dart kotvDemuxerLavfO 对齐；不设 protocol_whitelist。
+    // 与 flutter/lib/player/mpv_opts.dart kotvDemuxerLavfO 一致；不设 protocol_whitelist。
     private const val LAVF_DEMUXER_O =
       "seg_max_retry=5,strict=experimental," +
         "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0," +
@@ -1852,7 +1852,7 @@ internal class KotvMpvSurfaceFactory(
   }
 }
 
-/** SurfaceView / TextureView 宿主：对齐 TV PlayerView.setRender。 */
+/** SurfaceView / TextureView 宿主（PlayerView.setRender）。 */
 internal class KotvMpvSurfaceHost(context: Context) :
   FrameLayout(context),
   SurfaceHolder.Callback,

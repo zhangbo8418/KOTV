@@ -64,15 +64,15 @@ class ExoPlayback extends KotvPlayback {
   int _dolbyVisionPolicy = 0;
   bool _preferAac = false;
   bool _skipSilence = false;
-  bool _softAudioPrefer = true;
-  bool _softVideoPrefer = true;
+  bool _softAudioPrefer = false;
+  bool _softVideoPrefer = false;
   int _bufferFactor = 1;
   String _preferredTextLangs = '';
   int _diskPreloadMs = 10000;
   int _diskPreloadThreads = 2;
   int _diskPreloadSizeMb = 256;
   bool _libass = true;
-  String _secondarySubtitle = 'off';
+  String _secondarySubtitle = 'default';
   String? _currentSecondarySubtitleId;
   double _subtitleFontScale = 1.0;
   double _subtitlePos = 100;
@@ -893,8 +893,8 @@ class ExoPlayback extends KotvPlayback {
     _audioPassThrough = kotvSettingsMapFlag(settings, 'audioPassThrough', def: true);
     _preferAac = kotvSettingsMapFlag(settings, 'exoPreferAac', def: false);
     _skipSilence = kotvSettingsMapFlag(settings, 'exoSkipSilence', def: false);
-    _softAudioPrefer = kotvSettingsMapFlag(settings, 'exoSoftAudioPrefer', def: true);
-    _softVideoPrefer = kotvSettingsMapFlag(settings, 'exoSoftVideoPrefer', def: true);
+    _softAudioPrefer = kotvSettingsMapFlag(settings, 'exoSoftAudioPrefer', def: false);
+    _softVideoPrefer = kotvSettingsMapFlag(settings, 'exoSoftVideoPrefer', def: false);
     _bufferFactor = int.tryParse('${settings['exoBuffer'] ?? '1'}') ?? 1;
     if (_bufferFactor < 1) _bufferFactor = 1;
     if (_bufferFactor > 10) _bufferFactor = 10;
@@ -910,10 +910,10 @@ class ExoPlayback extends KotvPlayback {
     _diskPreloadSizeMb = int.tryParse('${settings['exoDiskPreloadSizeMb'] ?? '256'}') ?? 256;
     if (_diskPreloadSizeMb < 128) _diskPreloadSizeMb = 128;
     if (_diskPreloadSizeMb > 4096) _diskPreloadSizeMb = 4096;
-    final sec = '${settings['exoSecondarySubtitle'] ?? 'off'}'.trim().toLowerCase();
+    final sec = '${settings['exoSecondarySubtitle'] ?? 'default'}'.trim().toLowerCase();
     _secondarySubtitle = (sec == 'auto' || sec == 'on' || sec == 'manual' || sec == 'default' || sec == 'player')
         ? (sec == 'on' ? 'auto' : (sec == 'player' ? 'default' : sec))
-        : 'off';
+        : 'default';
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
     _subtitlePos = (double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100).clamp(0, 150);
     _subtitleSecondaryPos =

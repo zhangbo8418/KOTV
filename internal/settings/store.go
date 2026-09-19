@@ -206,11 +206,11 @@ func defaultFile() file {
 			{ID: "exoTunneling", Label: "Exo隧道", Value: "false"},
 			{ID: "exoPreferAac", Label: "Exo优先AAC", Value: "false"},
 			{ID: "exoSkipSilence", Label: "Exo跳过静音", Value: "false"},
-			{ID: "exoSoftAudioPrefer", Label: "Exo软解音频优先", Value: "true"},
-			{ID: "exoSoftVideoPrefer", Label: "Exo软解视频优先", Value: "true"},
+			{ID: "exoSoftAudioPrefer", Label: "Exo软解音频优先", Value: "false"},
+			{ID: "exoSoftVideoPrefer", Label: "Exo软解视频优先", Value: "false"},
 			{ID: "exoBuffer", Label: "Exo缓冲倍率", Value: "1"},
 			{ID: "exoLibass", Label: "Exo libass", Value: "true"},
-			{ID: "exoSecondarySubtitle", Label: "Exo副字幕", Value: "off"},
+			{ID: "exoSecondarySubtitle", Label: "Exo副字幕", Value: "default"},
 			{ID: "exoDolbyVision", Label: "Exo杜比视界", Value: "0"},
 			{ID: "exoPreferredTextLangs", Label: "Exo首选字幕语言", Value: ""},
 			{ID: "exoDiskPreloadMs", Label: "Exo磁盘预读毫秒", Value: "10000"},
@@ -334,11 +334,11 @@ func Load() error {
 	ensureSettingLocked(ExoTunneling, "Exo隧道", "false")
 	ensureSettingLocked(ExoPreferAac, "Exo优先AAC", "false")
 	ensureSettingLocked(ExoSkipSilence, "Exo跳过静音", "false")
-	ensureSettingLocked(ExoSoftAudioPrefer, "Exo软解音频优先", "true")
-	ensureSettingLocked(ExoSoftVideoPrefer, "Exo软解视频优先", "true")
+	ensureSettingLocked(ExoSoftAudioPrefer, "Exo软解音频优先", "false")
+	ensureSettingLocked(ExoSoftVideoPrefer, "Exo软解视频优先", "false")
 	ensureSettingLocked(ExoBuffer, "Exo缓冲倍率", "1")
 	ensureSettingLocked(ExoLibass, "Exo libass", "true")
-	ensureSettingLocked(ExoSecondarySubtitle, "Exo副字幕", "off")
+	ensureSettingLocked(ExoSecondarySubtitle, "Exo副字幕", "default")
 	ensureSettingLocked(ExoDolbyVision, "Exo杜比视界", "0")
 	ensureSettingLocked(ExoPreferredTextLangs, "Exo首选字幕语言", "")
 	ensureSettingLocked(ExoDiskPreloadMs, "Exo磁盘预读毫秒", "10000")

@@ -3043,7 +3043,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           unawaited(_exitImmersiveFullscreen());
           return;
         }
-        // 刚退全屏：同一次返回不要再出详情（对齐 PC：全屏返回只上一层）。
+        // 刚退全屏：同一次返回不要再出详情（全屏返回只上一层）。
         final until = _suppressDetailPopUntil;
         if (until != null && DateTime.now().isBefore(until)) {
           return;

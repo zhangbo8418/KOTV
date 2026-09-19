@@ -23,7 +23,7 @@ import java.util.EnumSet
 
 /**
  * smb://[domain;]user[:pass]@host[:port]/share/path → Exo DataSource（smbj）。
- * 对齐 FongMi：SMB 走 Exo。
+ * SMB 网盘走 Exo DataSource。
  */
 @OptIn(UnstableApi::class)
 class KotvSmbDataSource : BaseDataSource(/* isNetwork= */ true) {

@@ -19,7 +19,8 @@ import androidx.media3.exoplayer.ExoPlayer
  * 数值约定与 Dart [KotvVideoEq] 一致：brightness/contrast/… ∈ [-100,100]，0 中性；
  * sharpness ∈ [0,100]；gamma 在引擎内映射为约 0.5–1.5。
  *
- * 限制：隧道模式、HDR 下效果不可用（与 FongMi 同）。
+ * 限制：隧道模式、HDR 下效果不可用。
+ * 锐度/阴影为近似实现。
  */
 @OptIn(UnstableApi::class)
 class KotvExoVideoEqController {
@@ -154,7 +155,7 @@ private class ColorToneEffect : GlEffect {
     val con = 1f + p.contrast.coerceIn(-100, 100) / 100f
     val bri = p.brightness.coerceIn(-100, 100) / 100f
     val temp = p.temperature.coerceIn(-100, 100).toFloat()
-    // 色温：正偏暖（红↑蓝↓），与 FongMi redGain/blueGain 同量级缩放。
+    // 色温：正偏暖（红↑蓝↓），按 redGain/blueGain 量级缩放。
     val redGain = if (temp >= 0f) 1f + temp * 0.0015f else 1f + temp * 0.0012f
     val blueGain = if (temp >= 0f) 1f - temp * 0.0012f else 1f - temp * 0.0015f
     val invSat = 1f - sat
@@ -164,7 +165,7 @@ private class ColorToneEffect : GlEffect {
     val lb = 0.0722f
     matrix =
       floatArrayOf(
-        // column-major，对齐 FongMi ColorToneAdjustEffect
+        // column-major，ColorToneAdjustEffect 矩阵约定
         (lr * invSat + sat) * con * redGain,
         (lr * invSat) * con,
         (lr * invSat) * con * blueGain,

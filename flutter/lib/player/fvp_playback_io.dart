@@ -556,10 +556,10 @@ class FvpPlayback extends KotvPlayback {
   void applyPlayerOptions(Map<String, dynamic> settings) {
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
     _subtitleFontScale = _subtitleFontScale.clamp(0.5, 2.5);
-    final sec = '${settings['exoSecondarySubtitle'] ?? 'off'}'.trim().toLowerCase();
+    final sec = '${settings['exoSecondarySubtitle'] ?? 'default'}'.trim().toLowerCase();
     _secondarySubtitleMode = (sec == 'auto' || sec == 'on' || sec == 'manual' || sec == 'default' || sec == 'player')
         ? (sec == 'on' ? 'auto' : (sec == 'player' ? 'default' : sec))
-        : 'off';
+        : 'default';
     _preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
     _videoEq = KotvVideoEq.fromSettings(settings);
     _audioEq = kotvAudioEqFromSettings(settings);

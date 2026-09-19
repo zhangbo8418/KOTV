@@ -71,7 +71,7 @@ class KotvMpvOpts {
   final bool tlsVerify;
   final bool audioPassThrough;
   final bool diskCache;
-  /// 对齐 exoDolbyVision：0=AUTO 1=假定支持 2=假定不支持。
+  /// 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。
   final int dolbyVisionPolicy;
   /// 首选字幕语言 → mpv slang。
   final String preferredTextLangs;
@@ -409,7 +409,7 @@ class KotvMpvOpts {
         'subtitleFontScale': subtitleFontScale.clamp(0.5, 2.5),
       };
 
-  /// UI / 引擎托管、写入 mpv.conf 会被忽略的选项（对齐 FongMi `MpvUtil.PLAYER_OPTIONS` 等）。
+  /// UI / 引擎托管、写入 mpv.conf 会被忽略的选项。
   static const managedOptionNames = <String>{
     'vo',
     'wid',
