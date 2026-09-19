@@ -422,11 +422,11 @@ class _DanmakuPainter extends CustomPainter {
     final op = opacity.clamp(0.15, 1.0);
     switch (colorMode.trim().toLowerCase()) {
       case 'white':
-        return Colors.white.withValues(alpha: op);
+        return Colors.white.withOpacity(op);
       case 'yellow':
-        return const Color(0xFFFFFF00).withValues(alpha: op);
+        return const Color(0xFFFFFF00).withOpacity(op);
       default:
-        return Color(0xFF000000 | (raw & 0xFFFFFF)).withValues(alpha: op);
+        return Color(0xFF000000 | (raw & 0xFFFFFF)).withOpacity(op);
     }
   }
 

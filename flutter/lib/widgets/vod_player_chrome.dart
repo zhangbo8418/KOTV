@@ -2108,7 +2108,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             contentPadding: const EdgeInsets.symmetric(horizontal: 12),
             title: const Text('角落实时信息', style: TextStyle(color: Colors.white)),
             value: _debugHud,
-            activeThumbColor: const Color(0xFFE52D27),
+            activeColor: const Color(0xFFE52D27),
             onChanged: (v) {
               setState(() => _debugHud = v);
               Navigator.pop(context);
