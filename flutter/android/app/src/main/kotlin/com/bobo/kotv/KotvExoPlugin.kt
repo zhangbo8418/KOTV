@@ -1719,7 +1719,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return try {
       val parsed = android.graphics.Color.parseColor(if (s.startsWith("#")) s else "#$s")
       val rgb = parsed and 0x00FFFFFF
-      val a = ((opacityPct.coerceIn(0.0, 100.0) / 100.0) * 255).toInt().coerceIn(0, 255)
+      val origA = android.graphics.Color.alpha(parsed)
+      // 乘在原 alpha 上：透明底 × 任意透明度仍透明，避免 #00000000→实心黑。
+      val a =
+        ((origA * opacityPct.coerceIn(0.0, 100.0) / 100.0).toInt()).coerceIn(0, 255)
       String.format("#%02X%06X", a, rgb)
     } catch (_: Throwable) {
       s

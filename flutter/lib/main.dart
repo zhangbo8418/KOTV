@@ -108,6 +108,21 @@ Future<void> _ensureAndroidStoragePermission() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Android 冷启动即 edge-to-edge，状态栏透明（与 MainActivity / styles 一致）。
+  if (!kIsWeb && Platform.isAndroid) {
+    try {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setSystemUIOverlayStyle(
+        const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          systemNavigationBarColor: Colors.transparent,
+          systemNavigationBarContrastEnforced: false,
+          statusBarIconBrightness: Brightness.light,
+          systemNavigationBarIconBrightness: Brightness.light,
+        ),
+      );
+    } catch (_) {}
+  }
   ErrorWidget.builder = _kotvErrorWidget;
   FlutterError.onError = (details) {
     // InheritedElement.notifyClients：Theme/MediaQuery 与路由竞态。

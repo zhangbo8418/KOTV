@@ -1,10 +1,15 @@
 /// 字幕颜色 / 透明度工具。
+///
+/// [opacityPct] 乘在**原色 alpha**上，而不是整段替换：
+/// `#00000000`×100% 仍透明；`#80000000`×50% → `#40000000`。
 String kotvHexWithOpacity(String hex, double opacityPct) {
   final raw = hex.trim();
   if (raw.isEmpty) return raw;
   final h = raw.startsWith('#') ? raw.substring(1) : raw;
   int rgb;
+  int origA = 0xFF;
   if (h.length == 8) {
+    origA = int.tryParse(h.substring(0, 2), radix: 16) ?? 0xFF;
     rgb = int.tryParse(h.substring(2), radix: 16) ?? 0xFFFFFF;
   } else if (h.length == 6) {
     rgb = int.tryParse(h, radix: 16) ?? 0xFFFFFF;
@@ -14,7 +19,7 @@ String kotvHexWithOpacity(String hex, double opacityPct) {
   } else {
     return raw.startsWith('#') ? raw : '#$raw';
   }
-  final a = ((opacityPct.clamp(0, 100) / 100.0) * 255).round().clamp(0, 255);
+  final a = ((origA * opacityPct.clamp(0, 100) / 100.0).round()).clamp(0, 255);
   final out = ((a << 24) | (rgb & 0xFFFFFF)).toRadixString(16).padLeft(8, '0').toUpperCase();
   return '#$out';
 }

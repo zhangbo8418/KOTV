@@ -1092,15 +1092,7 @@ class ExoPlayback extends KotvPlayback {
     if (fontPath != null) _subtitleFontPath = fontPath.trim();
     _subtitleUseSystemStyle = useSystemStyle;
     _subtitleForceStyle = forceStyle;
-    final outColor = forceStyle || useSystemStyle
-        ? kotvHexWithOpacity(_subtitleColor, _subtitleTextOpacity)
-        : _subtitleColor;
-    final outBorder = forceStyle || useSystemStyle
-        ? kotvHexWithOpacity(_subtitleBorderColor, _subtitleEdgeOpacity)
-        : _subtitleBorderColor;
-    final outBg = forceStyle || useSystemStyle
-        ? kotvHexWithOpacity(_subtitleBgColor, _subtitleBgOpacity)
-        : _subtitleBgColor;
+    // 颜色原样下发，透明度由原生 applyOpacityHex 按原 alpha 相乘（避免 Dart/Kotlin 双算）。
     try {
       await _ensureNative();
       await _ch.invokeMethod('setSubtitleStyle', {
@@ -1108,10 +1100,10 @@ class ExoPlayback extends KotvPlayback {
         'pos': _subtitlePos,
         'secondaryPos': _subtitleSecondaryPos,
         'forceStyle': forceStyle,
-        'color': outColor,
-        'borderColor': outBorder,
+        'color': _subtitleColor,
+        'borderColor': _subtitleBorderColor,
         'borderSize': forceStyle || useSystemStyle ? _subtitleBorderSize : 0,
-        'bgColor': outBg,
+        'bgColor': _subtitleBgColor,
         'edgeType': forceStyle || useSystemStyle ? _subtitleEdgeType : 'none',
         'useSystemStyle': _subtitleUseSystemStyle,
         'textOpacity': _subtitleTextOpacity,

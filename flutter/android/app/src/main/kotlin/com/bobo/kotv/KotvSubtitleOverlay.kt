@@ -35,6 +35,7 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
       gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
       isFocusable = false
+      visibility = View.GONE
     }
   private val secondaryView =
     TextView(context).apply {
@@ -67,7 +68,7 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     addView(
       primaryView,
-      LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+      LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
         gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
         bottomMargin = dp(24)
         leftMargin = dp(16)
@@ -76,7 +77,7 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     )
     addView(
       secondaryView,
-      LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+      LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
         gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         topMargin = dp(24)
         leftMargin = dp(16)
@@ -110,8 +111,15 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
 
   fun setSecondaryEnabled(enabled: Boolean) {
     secondaryEnabled = enabled
-    secondaryView.visibility = if (enabled) View.VISIBLE else View.GONE
-    if (!enabled) secondaryView.text = ""
+    if (!enabled) {
+      secondaryView.text = ""
+      secondaryView.visibility = View.GONE
+      return
+    }
+    // 开启副字幕但不强制显示空条：有内容时由 applyCues 再 VISIBLE。
+    if (secondaryView.text.isNullOrBlank()) {
+      secondaryView.visibility = View.GONE
+    }
   }
 
   /**
@@ -257,8 +265,14 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
   }
 
   private fun applyCues(target: TextView, cues: List<Cue>) {
+    if (target === secondaryView && !secondaryEnabled) {
+      target.text = ""
+      target.visibility = View.GONE
+      return
+    }
     if (cues.isEmpty()) {
       target.text = ""
+      target.visibility = View.GONE
       return
     }
     val sb = SpannableStringBuilder()
@@ -272,6 +286,12 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
         sb.append(text)
       }
     }
+    if (sb.isEmpty()) {
+      target.text = ""
+      target.visibility = View.GONE
+      return
+    }
+    target.visibility = View.VISIBLE
     target.text = sb
   }
 
