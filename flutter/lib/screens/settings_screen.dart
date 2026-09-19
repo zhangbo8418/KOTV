@@ -3,6 +3,7 @@ import '../util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -730,9 +731,37 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onCommit: (v) => _set('videoShadow', '${v.round()}'),
             ),
             Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        for (final k in const [
+                          'videoBrightness',
+                          'videoContrast',
+                          'videoSaturation',
+                          'videoGamma',
+                          'videoHue',
+                          'videoTemperature',
+                          'videoSharpness',
+                          'videoShadow',
+                        ]) {
+                          _s[k] = '0';
+                          await _set(k, '0');
+                        }
+                        setSheet(() {});
+                      },
+                      child: const Text('复位参数'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                'Exo Surface/Texture 均走原生调色（隧道/HDR 下不可用）；锐度/阴影在 Exo 为近似实现，MPV/FVP 更完整。',
+                'Exo Surface/Texture 均走原生调色（隧道/HDR 下不可用）；锐度/阴影在 Exo 为近似实现，MPV/FVP 更完整。播控内可按住预览原画。',
                 style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
               ),
             ),
@@ -743,6 +772,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _openAudioEqSheet() async {
+    List<int> centerHz = const [60, 230, 910, 3600, 14000];
+    if (kotvIsAndroid()) {
+      try {
+        final raw = await const MethodChannel('kotv_exo').invokeMethod<dynamic>('getEqualizerCenters');
+        if (raw is List && raw.isNotEmpty) {
+          centerHz = raw.map((e) => (e as num).toInt()).where((hz) => hz > 0).toList();
+        }
+      } catch (_) {}
+    }
     await _showPlayerSubSheet(
       title: '音频均衡',
       buildChildren: (setSheet) {
@@ -779,12 +817,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ('custom', '自定义'),
         ];
         final freqs = <String, double>{
-          '80': bandGain('80'),
-          '300': bandGain('300'),
-          '1000': bandGain('1000'),
-          '3000': bandGain('3000'),
-          '8000': bandGain('8000'),
+          for (final hz in centerHz) '$hz': bandGain('$hz'),
         };
+        if (freqs.isEmpty) {
+          for (final hz in const [80, 300, 1000, 3000, 8000]) {
+            freqs['$hz'] = bandGain('$hz');
+          }
+        }
         Widget chip(String id, String label) {
           final p = KotvPalette.of(context);
           final on = audioEq == id;
@@ -937,11 +976,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   return writeBands(freqs);
                 },
               ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+              child: OutlinedButton(
+                onPressed: () async {
+                  for (final k in freqs.keys) {
+                    freqs[k] = 0;
+                  }
+                  await writeBands(freqs);
+                },
+                child: const Text('复位频段'),
+              ),
+            ),
           ],
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
-              '直通开启时均衡/对白/声道效果不生效。中置增益仅多声道有效；音画偏移各引擎均支持。',
+              '自定义频段优先使用本机 Equalizer 中心频率。直通开启时均衡/对白/声道效果不生效；播控内可按住试听原音。',
               style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
             ),
           ),

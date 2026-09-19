@@ -104,6 +104,8 @@ class ExoPlayback extends KotvPlayback {
   String _audioChannelMode = 'auto';
   int _audioOffsetMs = 0;
   bool _stableVolumeOn = false;
+  bool _previewVideoOriginal = false;
+  bool _previewAudioOriginal = false;
 
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
@@ -479,29 +481,31 @@ class ExoPlayback extends KotvPlayback {
         'subtitleShadowStrength': _subtitleShadowStrength,
         'subtitleFont': _subtitleFont,
         'subs': _subs,
-        'audioEq': kotvAudioEqExoMode(_audioEq),
-        'audioEqBands': kotvAudioEqExoBandsPayload(
-          eq: _audioEq,
-          bands: _audioEqBands,
-          dialogue: _audioDialogue,
-        ),
-        'audioDialogue': _audioDialogue,
-        'audioBalance': _audioBalance,
-        'audioStability': _effectiveAudioStability(),
-        'audioBoost': _audioBoost,
-        'audioPreamp': _audioPreamp,
-        'audioLoudness': _effectiveAudioLoudness(),
-        'audioCenterGain': _audioCenterGain,
-        'audioChannelMode': _audioChannelMode,
+        'audioEq': _previewAudioOriginal ? 'off' : kotvAudioEqExoMode(_audioEq),
+        'audioEqBands': _previewAudioOriginal
+            ? ''
+            : kotvAudioEqExoBandsPayload(
+                eq: _audioEq,
+                bands: _audioEqBands,
+                dialogue: _audioDialogue,
+              ),
+        'audioDialogue': _previewAudioOriginal ? 0 : _audioDialogue,
+        'audioBalance': _previewAudioOriginal ? 0 : _audioBalance,
+        'audioStability': _previewAudioOriginal ? 0 : _effectiveAudioStability(),
+        'audioBoost': _previewAudioOriginal ? 0 : _audioBoost,
+        'audioPreamp': _previewAudioOriginal ? 0 : _audioPreamp,
+        'audioLoudness': _previewAudioOriginal ? false : _effectiveAudioLoudness(),
+        'audioCenterGain': _previewAudioOriginal ? 0 : _audioCenterGain,
+        'audioChannelMode': _previewAudioOriginal ? 'auto' : _audioChannelMode,
         'audioOffsetMs': _audioOffsetMs,
-        'eqBrightness': _videoEq.enabled ? _videoEq.brightness : 0,
-        'eqContrast': _videoEq.enabled ? _videoEq.contrast : 0,
-        'eqSaturation': _videoEq.enabled ? _videoEq.saturation : 0,
-        'eqGamma': _videoEq.enabled ? _videoEq.gamma : 0,
-        'eqHue': _videoEq.enabled ? _videoEq.hue : 0,
-        'eqTemperature': _videoEq.enabled ? _videoEq.temperature : 0,
-        'eqSharpness': _videoEq.enabled ? _videoEq.sharpness : 0,
-        'eqShadow': _videoEq.enabled ? _videoEq.shadow : 0,
+        'eqBrightness': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.brightness : 0,
+        'eqContrast': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.contrast : 0,
+        'eqSaturation': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.saturation : 0,
+        'eqGamma': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.gamma : 0,
+        'eqHue': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.hue : 0,
+        'eqTemperature': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.temperature : 0,
+        'eqSharpness': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.sharpness : 0,
+        'eqShadow': (_videoEq.enabled && !_previewVideoOriginal) ? _videoEq.shadow : 0,
       });
       await _ch.invokeMethod('setVolume', {'volume': (_volume / 100).clamp(0.0, 1.0)});
       await _ch.invokeMethod('setRate', {'rate': _rate});
@@ -986,34 +990,59 @@ class ExoPlayback extends KotvPlayback {
   Future<void> _pushEqualizer() async {
     try {
       await _ensureNative();
+      final videoOn = _videoEq.enabled && !_previewVideoOriginal;
+      final audioPass = _audioPassThrough;
       await _ch.invokeMethod('setEqualizer', {
-        'audioEq': kotvAudioEqExoMode(_audioEq),
-        'audioEqBands': kotvAudioEqExoBandsPayload(
-          eq: _audioEq,
-          bands: _audioEqBands,
-          dialogue: _audioDialogue,
-        ),
-        'audioDialogue': _audioDialogue,
-        'audioBalance': _audioBalance,
-        'audioStability': _effectiveAudioStability(),
-        'audioBoost': _audioBoost,
-        'audioPreamp': _audioPreamp,
-        'audioLoudness': _effectiveAudioLoudness(),
-        'audioCenterGain': _audioCenterGain,
-        'audioChannelMode': _audioChannelMode,
+        'audioEq': _previewAudioOriginal ? 'off' : kotvAudioEqExoMode(_audioEq),
+        'audioEqBands': _previewAudioOriginal
+            ? ''
+            : kotvAudioEqExoBandsPayload(
+                eq: _audioEq,
+                bands: _audioEqBands,
+                dialogue: _audioDialogue,
+              ),
+        'audioDialogue': _previewAudioOriginal ? 0 : _audioDialogue,
+        'audioBalance': _previewAudioOriginal ? 0 : _audioBalance,
+        'audioStability': _previewAudioOriginal ? 0 : _effectiveAudioStability(),
+        'audioBoost': _previewAudioOriginal ? 0 : _audioBoost,
+        'audioPreamp': _previewAudioOriginal ? 0 : _audioPreamp,
+        'audioLoudness': _previewAudioOriginal ? false : _effectiveAudioLoudness(),
+        'audioCenterGain': _previewAudioOriginal ? 0 : _audioCenterGain,
+        'audioChannelMode': _previewAudioOriginal ? 'auto' : _audioChannelMode,
         'audioOffsetMs': _audioOffsetMs,
-        'eqBrightness': _videoEq.enabled ? _videoEq.brightness : 0,
-        'eqContrast': _videoEq.enabled ? _videoEq.contrast : 0,
-        'eqSaturation': _videoEq.enabled ? _videoEq.saturation : 0,
-        'eqGamma': _videoEq.enabled ? _videoEq.gamma : 0,
-        'eqHue': _videoEq.enabled ? _videoEq.hue : 0,
-        'eqTemperature': _videoEq.enabled ? _videoEq.temperature : 0,
-        'eqSharpness': _videoEq.enabled ? _videoEq.sharpness : 0,
-        'eqShadow': _videoEq.enabled ? _videoEq.shadow : 0,
-        'audioPassThrough': _audioPassThrough,
+        'eqBrightness': videoOn ? _videoEq.brightness : 0,
+        'eqContrast': videoOn ? _videoEq.contrast : 0,
+        'eqSaturation': videoOn ? _videoEq.saturation : 0,
+        'eqGamma': videoOn ? _videoEq.gamma : 0,
+        'eqHue': videoOn ? _videoEq.hue : 0,
+        'eqTemperature': videoOn ? _videoEq.temperature : 0,
+        'eqSharpness': videoOn ? _videoEq.sharpness : 0,
+        'eqShadow': videoOn ? _videoEq.shadow : 0,
+        'audioPassThrough': audioPass,
       });
       notifyListeners();
     } catch (_) {}
+  }
+
+  @override
+  Future<void> setFxPreview({bool? videoOriginal, bool? audioOriginal}) async {
+    if (videoOriginal != null) _previewVideoOriginal = videoOriginal;
+    if (audioOriginal != null) _previewAudioOriginal = audioOriginal;
+    if (_nativeReady && _url.isNotEmpty) {
+      await _pushEqualizer();
+    }
+  }
+
+  @override
+  Future<List<int>> queryAudioEqCenters() async {
+    try {
+      await _ensureNative();
+      final raw = await _ch.invokeMethod<dynamic>('getEqualizerCenters');
+      if (raw is List) {
+        return raw.map((e) => (e as num).toInt()).where((hz) => hz > 0).toList();
+      }
+    } catch (_) {}
+    return const [60, 230, 910, 3600, 14000];
   }
 
   @override

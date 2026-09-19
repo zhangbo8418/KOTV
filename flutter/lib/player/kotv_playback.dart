@@ -130,6 +130,12 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 字幕时间偏移（毫秒）；正值字幕延后。不支持的引擎忽略。
   Future<void> setSubtitleOffsetMs(int offsetMs) async {}
 
+  /// 临时旁路画面/音频效果（按住看原画 / 试听原音）；松手后恢复。
+  Future<void> setFxPreview({bool? videoOriginal, bool? audioOriginal}) async {}
+
+  /// 查询设备 Equalizer 中心频率（Hz）；失败返回空。
+  Future<List<int>> queryAudioEqCenters() async => const [];
+
   /// 离开详情/切 Tab：stop + release，拆掉原生 AO，避免后台漏音。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
   Future<void> release() => stop();

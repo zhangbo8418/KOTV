@@ -854,6 +854,48 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                   slider('饱和度', 'videoSaturation', -100, 100),
                   slider('锐度', 'videoSharpness', 0, 100, divisions: 20),
                   slider('色温', 'videoTemperature', -100, 100),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Listener(
+                            onPointerDown: (_) => unawaited(widget.player.setFxPreview(videoOriginal: true)),
+                            onPointerUp: (_) => unawaited(widget.player.setFxPreview(videoOriginal: false)),
+                            onPointerCancel: (_) => unawaited(widget.player.setFxPreview(videoOriginal: false)),
+                            child: Container(
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.white38),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text('按住看原画', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () async {
+                              for (final k in const [
+                                'videoBrightness',
+                                'videoContrast',
+                                'videoSaturation',
+                                'videoSharpness',
+                                'videoTemperature',
+                              ]) {
+                                s[k] = '0';
+                                await _persist(k, '0');
+                              }
+                              setSheet(() {});
+                            },
+                            child: const Text('复位', style: TextStyle(color: Colors.white70)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ],
             );
@@ -978,6 +1020,24 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                         ),
                       ),
                     ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                  child: Listener(
+                    onPointerDown: (_) => unawaited(widget.player.setFxPreview(audioOriginal: true)),
+                    onPointerUp: (_) => unawaited(widget.player.setFxPreview(audioOriginal: false)),
+                    onPointerCancel: (_) => unawaited(widget.player.setFxPreview(audioOriginal: false)),
+                    child: Container(
+                      width: double.infinity,
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white38),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text('按住试听原音', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                    ),
                   ),
                 ),
               ],

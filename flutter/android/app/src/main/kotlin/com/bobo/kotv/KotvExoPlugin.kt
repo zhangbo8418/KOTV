@@ -548,6 +548,15 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         KotvExoCacheWarmer.cancel()
         result.success(true)
       }
+      "getEqualizerCenters" -> {
+        main.post {
+          try {
+            result.success(queryEqualizerCentersHz())
+          } catch (t: Throwable) {
+            result.error("exo_eq_centers", t.message, null)
+          }
+        }
+      }
       "setDecodeMode" -> {
         val mode = normalizeDecodeMode(call.argument<String>("mode")?.trim().orEmpty())
         main.post {
@@ -1938,6 +1947,48 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       eq.setBandLevel(band, mb.toShort())
     }
     equalizer = eq
+  }
+
+  /** 设备 Equalizer 中心频率（Hz）；无会话时回落常见 5 段。 */
+  private fun queryEqualizerCentersHz(): List<Int> {
+    fun from(eq: Equalizer): List<Int> =
+      (0 until eq.numberOfBands).map { eq.getCenterFreq(it.toShort()) / 1000 }
+    try {
+      equalizer?.let { eq ->
+        val out = from(eq)
+        if (out.isNotEmpty()) return out
+      }
+    } catch (_: Throwable) {
+    }
+    val session =
+      try {
+        player?.audioSessionId ?: 0
+      } catch (_: Throwable) {
+        0
+      }
+    if (session > 0) {
+      try {
+        val eq = Equalizer(0, session)
+        val out = from(eq)
+        try {
+          eq.release()
+        } catch (_: Throwable) {
+        }
+        if (out.isNotEmpty()) return out
+      } catch (_: Throwable) {
+      }
+    }
+    try {
+      val eq = Equalizer(0, 0)
+      val out = from(eq)
+      try {
+        eq.release()
+      } catch (_: Throwable) {
+      }
+      if (out.isNotEmpty()) return out
+    } catch (_: Throwable) {
+    }
+    return listOf(60, 230, 910, 3600, 14000)
   }
 
   private fun parseAudioBands(raw: String): List<Pair<Double, Double>> {
