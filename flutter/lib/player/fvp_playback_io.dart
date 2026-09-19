@@ -227,7 +227,7 @@ class FvpPlayback extends KotvPlayback {
     _subtitleManualAuto = false;
     notifyListeners();
     try {
-      // 换台软停已保留旧面；此处再换源时才 dispose。勿先走 stop()（会清 _opening）。
+      // 换源须 dispose 再建；勿先走 stop()（会清 _opening，缓冲浮层立刻消失）。
       await _disposeController();
       notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
