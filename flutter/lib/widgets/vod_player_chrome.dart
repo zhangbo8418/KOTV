@@ -594,12 +594,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     } catch (_) {}
   }
 
-  Future<void> _bumpDanmakuOffset(int deltaSec) async {
-    final next = (_danmakuOffsetSec + deltaSec).clamp(-60, 60);
-    setState(() => _danmakuOffsetSec = next);
-    await _persist('danmakuOffsetMs', '${next * 1000}');
-  }
-
   @override
   void didUpdateWidget(covariant VodFullscreenChrome oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -1866,8 +1860,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                 _TinyBtn(
                                   label: '-',
                                   onTap: () {
-                                    unawaited(_bumpDanmakuOffset(-1));
-                                    setSheet(() {});
+                                    final next = (_danmakuOffsetSec - 1).clamp(-60, 60);
+                                    sync(() => _danmakuOffsetSec = next);
+                                    unawaited(_persist('danmakuOffsetMs', '${next * 1000}'));
                                   },
                                 ),
                                 Padding(
@@ -1882,8 +1877,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                 _TinyBtn(
                                   label: '+',
                                   onTap: () {
-                                    unawaited(_bumpDanmakuOffset(1));
-                                    setSheet(() {});
+                                    final next = (_danmakuOffsetSec + 1).clamp(-60, 60);
+                                    sync(() => _danmakuOffsetSec = next);
+                                    unawaited(_persist('danmakuOffsetMs', '${next * 1000}'));
                                   },
                                 ),
                                 const SizedBox(width: 8),
