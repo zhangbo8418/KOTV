@@ -439,18 +439,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 换集/换源：解析可能要数秒，必须先停当前播放，否则上一集继续出声。
+  /// 换集/换源：软停并保留画面层；解析可能要数秒，须先停声以免上一集继续出声。
   Future<void> _stopAllBackends() async {
-    // 沉浸全屏换集：保留 Surface，避免 PlatformView 卸掉后闪出底层详情。
-    final keepSurface = _immersiveFullscreen;
     Future<void> stopOne(KotvPlayback? p) async {
       if (p == null) return;
       try {
-        if (keepSurface) {
-          await p.stopForEpisodeSwitch();
-        } else {
-          await p.stop();
-        }
+        await p.stopForEpisodeSwitch();
       } catch (_) {}
     }
 
@@ -782,7 +776,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _lastVideoW = w;
         _lastVideoH = h;
       }
-      // 全屏换集黑盖：出尺寸/开播后撤掉（各平台）。
+      // Android 全屏换集黑盖：出尺寸/开播后撤掉。
       if (_immersiveEpCover &&
           w > 0 &&
           h > 0 &&
@@ -1578,8 +1572,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _epIdx = epIdx;
         _epPage = epIdx ~/ _epSize;
         _magnetPlay = epLooksMagnet;
-        // 全屏换集先盖黑：Surface stop/load 镂空时勿透出详情。
-        if (_immersiveFullscreen) _immersiveEpCover = true;
+        // Android Hybrid：全屏换集先盖黑，避免 Surface 镂空透出详情；桌面 Texture 不盖。
+        if (kotvIsAndroid() && _immersiveFullscreen) _immersiveEpCover = true;
         _status = epLooksMagnet
             ? '磁力解析中…'
             : (_epLooksDirectPlayUrl(ep.url) ? '换集中…' : '解析中…');
@@ -2122,24 +2116,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Texture/Surface 镂空时 letterbox 会透出壳壁纸；默认黑底与常见播放器一致。
-            // 氛围模式由外层沉浸 Stack 去掉全屏黑底，四周才透壁纸。
+            // letterbox 默认黑底，避免镂空透出壳壁纸；氛围模式由外层沉浸 Stack 去掉四周黑底。
             const ColoredBox(color: Colors.black),
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
-            // 解析/无帧/缓冲：黑底盖住 PlatformView。加载阶段滑动时 Hybrid Composition
-            // 易把 Flutter 控件与 Surface 叠成双影（Exo/MPV 都有），与是否 MediaOverlay 无关。
-            ListenableBuilder(
-              listenable: _playback,
-              builder: (context, _) {
-                final parsing = _status.contains('解析') ||
-                    _status.contains('嗅探') ||
-                    _status.contains('换集中');
-                final noFrame = _playback.width <= 0 && _playback.height <= 0;
-                final cover = parsing || noFrame || _playback.stalling;
-                if (!cover) return const SizedBox.shrink();
-                return const ColoredBox(color: Colors.black);
-              },
-            ),
+            // 仅 Android：解析/无帧/缓冲盖住 Hybrid Surface，防止与控件叠影。
+            // 桌面 Texture 无重影，换集也不卸面，故不盖。
+            if (kotvIsAndroid())
+              ListenableBuilder(
+                listenable: _playback,
+                builder: (context, _) {
+                  final parsing = _status.contains('解析') ||
+                      _status.contains('嗅探') ||
+                      _status.contains('换集中');
+                  final noFrame = _playback.width <= 0 && _playback.height <= 0;
+                  final cover = parsing || noFrame || _playback.stalling;
+                  if (!cover) return const SizedBox.shrink();
+                  return const ColoredBox(color: Colors.black);
+                },
+              ),
             if (_immersiveFullscreen) ...[
               // 全屏控件在外层；此处不叠内嵌解析/中心钮。
             ] else ...[
@@ -2967,8 +2961,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               ],
               // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏由 [_bodyClipRect] 裁切，不盖顶栏。
               if (_playUrl.isNotEmpty) _buildStableVideoLayer(context, stackSize: stackSize),
-              // 换集/解析：盖在画面上（Texture 路径有效；Surface 镂空时靠上面黑底 + 不挂详情）。
-              if (_immersiveFullscreen && _immersiveEpCover)
+              // 换集过渡黑盖：仅 Android Hybrid；桌面 Texture 不盖。
+              if (kotvIsAndroid() && _immersiveFullscreen && _immersiveEpCover)
                 const Positioned.fill(
                   child: IgnorePointer(child: ColoredBox(color: Colors.black)),
                 ),

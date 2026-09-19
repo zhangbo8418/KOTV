@@ -54,7 +54,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> play();
   Future<void> pause();
   Future<void> stop();
-  /// 换集停播：尽量保留视频层（Surface），避免全屏闪一下底层详情。
+  /// 换集停播：保留视频层（Surface/Texture），避免卸面闪烁与桌面卡音。
   Future<void> stopForEpisodeSwitch() => stop();
   Future<void> seek(Duration d);
   Future<void> setVolume(double v);

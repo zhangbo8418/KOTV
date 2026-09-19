@@ -174,44 +174,23 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
-  /// 切台/换线：只 stop，保留引擎。
+  /// 切台/换线：软停并保留画面层（勿 dispose Texture），减少 Windows 换台卡音。
   Future<void> _stopAllBackends() async {
+    Future<void> softStop(KotvPlayback? p) async {
+      if (p == null) return;
+      try {
+        await p.stopForEpisodeSwitch();
+      } catch (_) {}
+    }
+
     await Future.wait<void>([
-      () async {
-        try {
-          await _mk?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _fvp?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _exo?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _html?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _art?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _xg?.stop();
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          await _zw?.stop();
-        } catch (_) {}
-      }(),
+      softStop(_mk),
+      softStop(_fvp),
+      softStop(_exo),
+      softStop(_html),
+      softStop(_art),
+      softStop(_xg),
+      softStop(_zw),
     ]);
   }
 
@@ -988,8 +967,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     );
   }
 
-  /// 对齐点播：起播前/换台无帧时黑底盖住 PlatformView，避免 Hybrid 与频道菜单重影。
+  /// 仅 Android Hybrid Surface 需要：换台/无帧时盖住，避免与频道菜单叠影。
+  /// 桌面 Texture 无此问题，且换台不卸画面，故不盖黑。
   Widget _buildLiveSurfaceCover() {
+    if (kotvIsDesktop()) return const SizedBox.shrink();
     return ListenableBuilder(
       listenable: _playback,
       builder: (context, _) {
@@ -2083,7 +2064,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 fit: StackFit.expand,
                 children: [
                   _buildSharedLiveVideo(),
-                  // 起播/换台无帧：黑盖压住 Surface，避免频道菜单等控件 Hybrid 重影。
+                  // Android Hybrid：起播/换台无帧时盖黑防叠影；桌面 Texture 不挂此层。
                   _buildLiveSurfaceCover(),
                   KotvBufferingOverlay(
                     player: _playback,
@@ -2761,7 +2742,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   onDoubleTap: _onLiveDoubleTap,
                   child: _buildSharedLiveVideo(),
                 ),
-                // 起播/换台无帧：黑盖压住 Surface，避免底栏等控件 Hybrid 重影。
+                // Android Hybrid：起播/换台无帧时盖黑防叠影；桌面 Texture 不挂此层。
                 _buildLiveSurfaceCover(),
                 KotvBufferingOverlay(
                   player: _playback,

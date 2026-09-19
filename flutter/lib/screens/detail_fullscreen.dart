@@ -991,7 +991,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       onKeyEvent: _onKey,
       child: Scaffold(
         // externalVideo：画面在详情 Stack 下层 Positioned；此处必须透明，否则盖成全黑。
-        // 换集闪底层已由 stopForEpisodeSwitch 保留 Surface + 详情 Stack 黑底兜住。
+        // 换集由 stopForEpisodeSwitch 保留画面层；Android 另有过渡黑盖。
         backgroundColor: widget.externalVideo ? Colors.transparent : Colors.black,
         body: LayoutBuilder(
           builder: (context, c) {

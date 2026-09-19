@@ -386,6 +386,16 @@ class MediaKitPlayback extends KotvPlayback {
     notifyListeners();
   }
 
+  /// 换台：只暂停，保留 libmpv / Texture，等 open 换源，减轻卡音。
+  @override
+  Future<void> stopForEpisodeSwitch() async {
+    if (_diag) KotvMpvDiag.note('stopForEpisodeSwitch');
+    try {
+      await player.pause();
+    } catch (_) {}
+    notifyListeners();
+  }
+
   @override
   Future<void> release() async {
     // Player 由页面 kotvDisposeMpvPlayer 释放（走 engine.release）。

@@ -657,7 +657,7 @@ class ExoPlayback extends KotvPlayback {
     _url = '';
     _w = 0;
     _h = 0;
-    // 全屏换集保留 SurfaceView，避免闪出底层详情。
+    // 换集保留 SurfaceView，避免卸面闪底层。
     notifyListeners();
   }
 

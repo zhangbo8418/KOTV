@@ -2432,6 +2432,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                     const SizedBox(width: 6),
                                     Container(width: 1, height: 26, color: const Color(0x4DFFFFFF)),
                                     const SizedBox(width: 8),
+                                    _TinyBtn(
+                                      label: '片头',
+                                      onTap: () {
+                                        final sec = (widget.player.position.inMilliseconds / 1000).round().clamp(0, 3600);
+                                        unawaited(_setOffsets(sec, _endingSec));
+                                        widget.onBump();
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
                                     _TinyBtn(label: '-', onTap: () {
                                       unawaited(_setOffsets(_openingSec - 5, _endingSec));
                                       widget.onBump();
@@ -2444,11 +2453,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       unawaited(_setOffsets(_openingSec + 5, _endingSec));
                                       widget.onBump();
                                     }),
+                                    const SizedBox(width: 8),
                                     _TinyBtn(
-                                      label: '片头',
+                                      label: '片尾',
                                       onTap: () {
-                                        final sec = (widget.player.position.inMilliseconds / 1000).round().clamp(0, 3600);
-                                        unawaited(_setOffsets(sec, _endingSec));
+                                        final dur = widget.player.duration.inMilliseconds;
+                                        final pos = widget.player.position.inMilliseconds;
+                                        final endSec = dur > 0
+                                            ? ((dur - pos) / 1000).round().clamp(0, 3600)
+                                            : 0;
+                                        unawaited(_setOffsets(_openingSec, endSec));
                                         widget.onBump();
                                       },
                                     ),
@@ -2465,18 +2479,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       unawaited(_setOffsets(_openingSec, _endingSec + 5));
                                       widget.onBump();
                                     }),
-                                    _TinyBtn(
-                                      label: '片尾',
-                                      onTap: () {
-                                        final dur = widget.player.duration.inMilliseconds;
-                                        final pos = widget.player.position.inMilliseconds;
-                                        final endSec = dur > 0
-                                            ? ((dur - pos) / 1000).round().clamp(0, 3600)
-                                            : 0;
-                                        unawaited(_setOffsets(_openingSec, endSec));
-                                        widget.onBump();
-                                      },
-                                    ),
                                     const SizedBox(width: 8),
                                     _TinyBtn(
                                       label: '重置',
