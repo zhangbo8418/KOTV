@@ -180,6 +180,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var subtitleBgOpacity = 100.0
   private var subtitleEdgeOpacity = 100.0
   private var subtitleOffsetMs = 0L
+  /** 0–100，阴影/凸起类 edge 的偏移倍率。 */
+  private var subtitleShadowStrength = 50.0
+  /** default | sans | serif | mono */
+  private var subtitleFont = "default"
   /** 音频 EQ：off | bass | voice | custom | natural…（Equalizer；直通时跳过）。 */
   private var audioEqMode: String = "off"
   /** 频段：`freq:gain,freq:gain…`（gain 单位 dB；可含对白叠加）。 */
@@ -484,6 +488,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
         call.argument<Number>("edgeOpacity")?.toDouble()?.let {
           subtitleEdgeOpacity = it.coerceIn(0.0, 100.0)
+        }
+        call.argument<Number>("shadowStrength")?.toDouble()?.let {
+          subtitleShadowStrength = it.coerceIn(0.0, 100.0)
+        }
+        call.argument<String>("font")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+          subtitleFont = normalizeSubtitleFont(it)
         }
         main.post {
           try {
@@ -1567,6 +1577,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     call.argument<Number>("subtitleOffsetMs")?.toLong()?.let {
       subtitleOffsetMs = it.coerceIn(-300_000L, 300_000L)
     }
+    call.argument<Number>("subtitleShadowStrength")?.toDouble()?.let {
+      subtitleShadowStrength = it.coerceIn(0.0, 100.0)
+    }
+    call.argument<String>("subtitleFont")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      subtitleFont = normalizeSubtitleFont(it)
+    }
   }
 
   private fun normalizeEdgeType(raw: String): String =
@@ -1576,6 +1592,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "raised", "3" -> "raised"
       "depressed", "4" -> "depressed"
       else -> "outline"
+    }
+
+  private fun normalizeSubtitleFont(raw: String): String =
+    when (raw.trim().lowercase()) {
+      "sans", "sans-serif" -> "sans"
+      "serif" -> "serif"
+      "mono", "monospace" -> "mono"
+      else -> "default"
     }
 
   private fun applyVideoEq() {
@@ -1671,6 +1695,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       borderSize = borderSize,
       bgColor = bgColor,
       edgeType = edgeType,
+      shadowStrength = if (force || useSystem) subtitleShadowStrength else 0.0,
+      fontName = if (force || useSystem) subtitleFont else "default",
     )
   }
 

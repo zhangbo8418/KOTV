@@ -25,6 +25,7 @@ import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
+import '../player/subtitle_style_util.dart';
 import '../player/playback_failover.dart';
 import '../player/tv_remote_keys.dart';
 import '../providers.dart';
@@ -564,6 +565,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
         final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
         final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
+        final shadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
+        final subFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
         unawaited(_playback.setSubtitleStyle(
           scale: fontScale.toDouble(),
           pos: subPos.clamp(0, 150).toDouble(),
@@ -577,6 +580,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           textOpacity: forceStyle || useSystem ? textOp : null,
           bgOpacity: forceStyle || useSystem ? bgOp : null,
           edgeOpacity: forceStyle || useSystem ? edgeOp : null,
+          shadowStrength: forceStyle || useSystem ? shadowStrength : null,
+          font: forceStyle || useSystem ? subFont : null,
           forceStyle: forceStyle,
         ));
         unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));

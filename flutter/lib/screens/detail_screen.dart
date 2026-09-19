@@ -28,6 +28,7 @@ import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
+import '../player/subtitle_style_util.dart';
 import '../player/playback_failover.dart';
 import '../player/tv_remote_keys.dart';
 import '../providers.dart';
@@ -167,6 +168,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   int _danmakuDurationMs = 8000;
   int _danmakuFixedDurationMs = 5000;
   double _danmakuLineSpacing = 1.4;
+  String _danmakuStrokeMode = 'shadow';
+  String _danmakuColorMode = 'original';
+  int _danmakuRowsTop = 3;
+  int _danmakuRowsBottom = 3;
   double _danmakuOffsetSec = 0;
   final ValueNotifier<List<DanmakuItem>> _danmakuItems = ValueNotifier(const []);
   AspectSpec _aspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
@@ -1015,6 +1020,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
         final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
         final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
+        final shadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
+        final subFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
         unawaited(_playback.setSubtitleStyle(
           scale: fontScale,
           pos: subPos.clamp(0, 150),
@@ -1028,6 +1035,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           textOpacity: forceStyle || useSystem ? textOp : null,
           bgOpacity: forceStyle || useSystem ? bgOp : null,
           edgeOpacity: forceStyle || useSystem ? edgeOp : null,
+          shadowStrength: forceStyle || useSystem ? shadowStrength : null,
+          font: forceStyle || useSystem ? subFont : null,
           forceStyle: forceStyle,
         ));
         unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
@@ -1064,6 +1073,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
         _danmakuFixedDurationMs = int.tryParse('${settings['danmakuFixedDurationMs'] ?? '5000'}') ?? 5000;
         _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
+        _danmakuStrokeMode = kotvNormalizeDanmakuStroke('${settings['danmakuStrokeMode'] ?? 'shadow'}');
+        _danmakuColorMode = kotvNormalizeDanmakuColorMode('${settings['danmakuColorMode'] ?? 'original'}');
+        _danmakuRowsTop = (int.tryParse('${settings['danmakuRowsTop'] ?? '3'}') ?? 3).clamp(1, 8);
+        _danmakuRowsBottom = (int.tryParse('${settings['danmakuRowsBottom'] ?? '3'}') ?? 3).clamp(1, 8);
         _danmakuOffsetSec = ((int.tryParse('${settings['danmakuOffsetMs'] ?? '0'}') ?? 0) / 1000.0);
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
@@ -2112,6 +2125,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                   durationMs: _danmakuDurationMs,
                   fixedDurationMs: _danmakuFixedDurationMs,
                   lineSpacing: _danmakuLineSpacing,
+                  strokeMode: _danmakuStrokeMode,
+                  colorMode: _danmakuColorMode,
+                  rowsTop: _danmakuRowsTop,
+                  rowsBottom: _danmakuRowsBottom,
                 ),
               ),
               KotvBufferingOverlay(
@@ -2176,6 +2193,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
       final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
       final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
+      final shadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
+      final subFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
       unawaited(_playback.setSubtitleStyle(
         scale: fontScale,
         pos: subPos.clamp(0, 150),
@@ -2189,6 +2208,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         textOpacity: forceStyle || useSystem ? textOp : null,
         bgOpacity: forceStyle || useSystem ? bgOp : null,
         edgeOpacity: forceStyle || useSystem ? edgeOp : null,
+        shadowStrength: forceStyle || useSystem ? shadowStrength : null,
+        font: forceStyle || useSystem ? subFont : null,
         forceStyle: forceStyle,
       ));
       unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
@@ -2225,6 +2246,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
         _danmakuFixedDurationMs = int.tryParse('${settings['danmakuFixedDurationMs'] ?? '5000'}') ?? 5000;
         _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
+        _danmakuStrokeMode = kotvNormalizeDanmakuStroke('${settings['danmakuStrokeMode'] ?? 'shadow'}');
+        _danmakuColorMode = kotvNormalizeDanmakuColorMode('${settings['danmakuColorMode'] ?? 'original'}');
+        _danmakuRowsTop = (int.tryParse('${settings['danmakuRowsTop'] ?? '3'}') ?? 3).clamp(1, 8);
+        _danmakuRowsBottom = (int.tryParse('${settings['danmakuRowsBottom'] ?? '3'}') ?? 3).clamp(1, 8);
       });
     } catch (_) {}
   }
@@ -2277,6 +2302,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         danmakuDurationMs: _danmakuDurationMs,
         danmakuFixedDurationMs: _danmakuFixedDurationMs,
         danmakuLineSpacing: _danmakuLineSpacing,
+        danmakuStrokeMode: _danmakuStrokeMode,
+        danmakuColorMode: _danmakuColorMode,
+        danmakuRowsTop: _danmakuRowsTop,
+        danmakuRowsBottom: _danmakuRowsBottom,
         ambientOn: _ambientOn,
         stableVolumeOn: _stableVolumeOn,
         holdSpeed: _holdSpeed,
@@ -2382,7 +2411,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'danmakuRows') {
             setState(() => _danmakuRows = int.tryParse(v) ?? _danmakuRows);
           }
-          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuFixedDurationMs' || k == 'danmakuLineSpacing') {
+          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuFixedDurationMs' || k == 'danmakuLineSpacing' || k == 'danmakuStrokeMode' || k == 'danmakuColorMode' || k == 'danmakuRowsTop' || k == 'danmakuRowsBottom') {
             unawaited(_refreshDanmakuPrefs());
           }
           if (k == 'playerDecode') {

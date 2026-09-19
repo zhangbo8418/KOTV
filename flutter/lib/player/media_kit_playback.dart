@@ -623,6 +623,8 @@ class MediaKitPlayback extends KotvPlayback {
     double? textOpacity,
     double? bgOpacity,
     double? edgeOpacity,
+    double? shadowStrength,
+    String? font,
   }) async {
     try {
       final platform = player.platform;
@@ -659,13 +661,24 @@ class MediaKitPlayback extends KotvPlayback {
         await (platform as dynamic).setProperty('sub-back-color', bgColor.trim());
       }
       final edge = (edgeType ?? '').trim().toLowerCase();
+      final strength = ((shadowStrength ?? 50).clamp(0, 100) / 50.0).clamp(0.0, 2.5);
       if (applyLooks && edge == 'none') {
         await (platform as dynamic).setProperty('sub-border-size', '0');
         await (platform as dynamic).setProperty('sub-shadow-offset', '0');
       } else if (applyLooks && edge == 'shadow') {
-        await (platform as dynamic).setProperty('sub-shadow-offset', '2');
+        await (platform as dynamic).setProperty('sub-shadow-offset', (2.0 * strength).toStringAsFixed(2));
       } else if (applyLooks && (edge == 'raised' || edge == 'depressed')) {
-        await (platform as dynamic).setProperty('sub-shadow-offset', '1.5');
+        await (platform as dynamic).setProperty('sub-shadow-offset', (1.5 * strength).toStringAsFixed(2));
+      }
+      if (applyLooks && font != null && font.trim().isNotEmpty && font.trim().toLowerCase() != 'default') {
+        final f = font.trim().toLowerCase();
+        final mpvFont = switch (f) {
+          'sans' || 'sans-serif' => 'sans-serif',
+          'serif' => 'serif',
+          'mono' || 'monospace' => 'monospace',
+          _ => font.trim(),
+        };
+        await (platform as dynamic).setProperty('sub-font', mpvFont);
       }
       await (platform as dynamic).setProperty('sub-ass-override', forceStyle ? 'force' : 'scale');
     } catch (_) {}

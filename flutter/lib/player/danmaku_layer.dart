@@ -186,6 +186,10 @@ class DanmakuOverlay extends StatefulWidget {
     this.durationMs = 8000,
     this.fixedDurationMs = 5000,
     this.lineSpacing = 1.4,
+    this.strokeMode = 'shadow',
+    this.colorMode = 'original',
+    this.rowsTop = 3,
+    this.rowsBottom = 3,
   });
 
   final bool enabled;
@@ -207,6 +211,10 @@ class DanmakuOverlay extends StatefulWidget {
   final int durationMs;
   final int fixedDurationMs;
   final double lineSpacing;
+  final String strokeMode;
+  final String colorMode;
+  final int rowsTop;
+  final int rowsBottom;
 
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
@@ -306,6 +314,10 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
                   scrollAreaRatio: widget.scrollAreaRatio,
                   bold: widget.bold,
                   lineSpacing: widget.lineSpacing,
+                  strokeMode: widget.strokeMode,
+                  colorMode: widget.colorMode,
+                  rowsTop: widget.rowsTop,
+                  rowsBottom: widget.rowsBottom,
                 ),
               );
             },
@@ -339,6 +351,10 @@ class _DanmakuPainter extends CustomPainter {
     this.scrollAreaRatio = 0.5,
     this.bold = false,
     this.lineSpacing = 1.4,
+    this.strokeMode = 'shadow',
+    this.colorMode = 'original',
+    this.rowsTop = 3,
+    this.rowsBottom = 3,
   });
   final List<_Flying> flying;
   final DateTime now;
@@ -348,12 +364,47 @@ class _DanmakuPainter extends CustomPainter {
   final double scrollAreaRatio;
   final bool bold;
   final double lineSpacing;
+  final String strokeMode;
+  final String colorMode;
+  final int rowsTop;
+  final int rowsBottom;
+
+  Color _resolveColor(int raw) {
+    final op = opacity.clamp(0.15, 1.0);
+    switch (colorMode.trim().toLowerCase()) {
+      case 'white':
+        return Colors.white.withValues(alpha: op);
+      case 'yellow':
+        return const Color(0xFFFFFF00).withValues(alpha: op);
+      default:
+        return Color(0xFF000000 | (raw & 0xFFFFFF)).withValues(alpha: op);
+    }
+  }
+
+  List<Shadow> _shadows() {
+    switch (strokeMode.trim().toLowerCase()) {
+      case 'none':
+        return const [];
+      case 'outline':
+        return const [
+          Shadow(offset: Offset(-1, 0), color: Colors.black87),
+          Shadow(offset: Offset(1, 0), color: Colors.black87),
+          Shadow(offset: Offset(0, -1), color: Colors.black87),
+          Shadow(offset: Offset(0, 1), color: Colors.black87),
+        ];
+      default:
+        return const [Shadow(blurRadius: 2, color: Colors.black87)];
+    }
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
     final lanes = rows.clamp(1, 16);
+    final topLanes = rowsTop.clamp(1, 8);
+    final bottomLanes = rowsBottom.clamp(1, 8);
     final areaH = (size.height * scrollAreaRatio.clamp(0.1, 1.0)).clamp(40.0, size.height);
     final laneH = (areaH / lanes * lineSpacing.clamp(1.0, 2.0)).clamp(20.0, 64.0);
+    final shadows = _shadows();
     for (final f in flying) {
       final t = now.difference(f.born).inMilliseconds / f.durationMs;
       if (t < 0 || t > 1) continue;
@@ -362,10 +413,10 @@ class _DanmakuPainter extends CustomPainter {
         text: TextSpan(
           text: f.item.content,
           style: TextStyle(
-            color: Color(0xFF000000 | (f.item.color & 0xFFFFFF)).withOpacity(opacity.clamp(0.15, 1.0)),
+            color: _resolveColor(f.item.color),
             fontSize: fs,
             fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
-            shadows: const [Shadow(blurRadius: 2, color: Colors.black87)],
+            shadows: shadows,
           ),
         ),
         textDirection: ui.TextDirection.ltr,
@@ -376,10 +427,10 @@ class _DanmakuPainter extends CustomPainter {
       late final double y;
       if (mode == 4) {
         x = (size.width - tp.width) / 2;
-        y = size.height - 12.0 - tp.height - (f.lane % 3) * (tp.height + 4);
+        y = size.height - 12.0 - tp.height - (f.lane % bottomLanes) * (tp.height + 4);
       } else if (mode == 5) {
         x = (size.width - tp.width) / 2;
-        y = 12.0 + (f.lane % 3) * (tp.height + 4);
+        y = 12.0 + (f.lane % topLanes) * (tp.height + 4);
       } else if (mode == 7) {
         // 定位弹幕：按内容哈希落在画面中部附近。
         x = (size.width * 0.15) + (f.item.content.hashCode.abs() % 70) / 100.0 * size.width * 0.7 - tp.width / 2;

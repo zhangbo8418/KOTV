@@ -1035,6 +1035,37 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onCommit: (v) => _set('subtitleBorderSize', v.toStringAsFixed(1), msg: '字幕描边已更新'),
           ),
           _sheetSlider(
+            label: '阴影强度',
+            value: (double.tryParse(g('subtitleShadowStrength', '50')) ?? 50).clamp(0, 100),
+            min: 0,
+            max: 100,
+            divisions: 20,
+            format: (v) => '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['subtitleShadowStrength'] = '${v.round()}'),
+            onCommit: (v) => _set('subtitleShadowStrength', '${v.round()}'),
+          ),
+          _sheetNav(
+            label: '字体',
+            value: switch (g('subtitleFont', 'default').trim().toLowerCase()) {
+              'sans' || 'sans-serif' => '无衬线',
+              'serif' => '衬线',
+              'mono' || 'monospace' => '等宽',
+              _ => '默认',
+            },
+            onTap: () async {
+              final cur = g('subtitleFont', 'default').trim().toLowerCase();
+              final picked = await pickChoice(context, title: '字幕字体', current: cur == 'sans-serif' ? 'sans' : (cur == 'monospace' ? 'mono' : cur), options: const [
+                ('默认', 'default'),
+                ('无衬线', 'sans'),
+                ('衬线', 'serif'),
+                ('等宽', 'mono'),
+              ]);
+              if (picked == null) return;
+              await _set('subtitleFont', picked);
+              setSheet(() {});
+            },
+          ),
+          _sheetSlider(
             label: '正文透明度',
             value: (double.tryParse(g('subtitleTextOpacity', '100')) ?? 100).clamp(0, 100),
             min: 0,
@@ -1146,6 +1177,48 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               }
               setSheet(() {});
             },
+          ),
+        ];
+      },
+    );
+  }
+
+  Future<void> _openSpeedSheet() async {
+    await _showPlayerSubSheet(
+      title: '默认倍速',
+      buildChildren: (setSheet) {
+        final v = (double.tryParse(g('playerSpeed', '1.0')) ?? 1.0).clamp(0.1, 5.0);
+        return [
+          _sheetSlider(
+            label: '倍速',
+            value: v,
+            min: 0.1,
+            max: 5.0,
+            divisions: 49,
+            format: (x) => '${x.toStringAsFixed(1)}×',
+            onChanging: (x) => setSheet(() => _s['playerSpeed'] = x.toStringAsFixed(1)),
+            onCommit: (x) => _set('playerSpeed', x.toStringAsFixed(1), msg: '默认倍速已更新'),
+          ),
+        ];
+      },
+    );
+  }
+
+  Future<void> _openHoldSpeedSheet() async {
+    await _showPlayerSubSheet(
+      title: '长按临时倍速',
+      buildChildren: (setSheet) {
+        final v = (double.tryParse(g('playerSpeedLongPress', '2.0')) ?? 2.0).clamp(2.0, 5.0);
+        return [
+          _sheetSlider(
+            label: '倍速',
+            value: v,
+            min: 2.0,
+            max: 5.0,
+            divisions: 30,
+            format: (x) => '${x.toStringAsFixed(1)}×',
+            onChanging: (x) => setSheet(() => _s['playerSpeedLongPress'] = x.toStringAsFixed(1)),
+            onCommit: (x) => _set('playerSpeedLongPress', x.toStringAsFixed(1), msg: '长按倍速已更新'),
           ),
         ];
       },
@@ -1329,6 +1402,64 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               await _set('danmakuBold', v ? 'true' : 'false');
               setSheet(() {});
             },
+          ),
+          _sheetNav(
+            label: '描边样式',
+            value: switch (g('danmakuStrokeMode', 'shadow').trim().toLowerCase()) {
+              'none' => '无',
+              'outline' => '描边',
+              _ => '阴影',
+            },
+            onTap: () async {
+              final cur = g('danmakuStrokeMode', 'shadow').trim().toLowerCase();
+              final picked = await pickChoice(context, title: '弹幕描边', current: cur, options: const [
+                ('无', 'none'),
+                ('描边', 'outline'),
+                ('阴影', 'shadow'),
+              ]);
+              if (picked == null) return;
+              await _set('danmakuStrokeMode', picked);
+              setSheet(() {});
+            },
+          ),
+          _sheetNav(
+            label: '颜色策略',
+            value: switch (g('danmakuColorMode', 'original').trim().toLowerCase()) {
+              'white' => '白色',
+              'yellow' => '黄色',
+              _ => '原色',
+            },
+            onTap: () async {
+              final cur = g('danmakuColorMode', 'original').trim().toLowerCase();
+              final picked = await pickChoice(context, title: '弹幕颜色', current: cur, options: const [
+                ('保留原色', 'original'),
+                ('白色', 'white'),
+                ('黄色', 'yellow'),
+              ]);
+              if (picked == null) return;
+              await _set('danmakuColorMode', picked);
+              setSheet(() {});
+            },
+          ),
+          _sheetSlider(
+            label: '顶部行数',
+            value: (double.tryParse(g('danmakuRowsTop', '3')) ?? 3).clamp(1, 8),
+            min: 1,
+            max: 8,
+            divisions: 7,
+            format: (v) => '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['danmakuRowsTop'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuRowsTop', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '底部行数',
+            value: (double.tryParse(g('danmakuRowsBottom', '3')) ?? 3).clamp(1, 8),
+            min: 1,
+            max: 8,
+            divisions: 7,
+            format: (v) => '${v.round()}',
+            onChanging: (v) => setSheet(() => _s['danmakuRowsBottom'] = '${v.round()}'),
+            onCommit: (v) => _set('danmakuRowsBottom', '${v.round()}'),
           ),
           _sheetSlider(
             label: '滚动时长',
@@ -2157,27 +2288,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '默认倍速',
                           value: '$speed 倍',
-                          onTap: () => _pick('默认倍速', 'playerSpeed', const [
-                            ('0.5 倍', '0.5'),
-                            ('0.75 倍', '0.75'),
-                            ('1.0 倍', '1.0'),
-                            ('1.25 倍', '1.25'),
-                            ('1.5 倍', '1.5'),
-                            ('2.0 倍', '2.0'),
-                            ('3.0 倍', '3.0'),
-                            ('5.0 倍', '5.0'),
-                          ]),
+                          onTap: () => _openSpeedSheet(),
                         ),
                         KotvSettingsCell(
                           label: '长按倍速',
                           value: '${g('playerSpeedLongPress', '2.0')} 倍',
-                          onTap: () => _pick('长按临时倍速', 'playerSpeedLongPress', const [
-                            ('2.0 倍', '2.0'),
-                            ('2.5 倍', '2.5'),
-                            ('3.0 倍', '3.0'),
-                            ('4.0 倍', '4.0'),
-                            ('5.0 倍', '5.0'),
-                          ]),
+                          onTap: () => _openHoldSpeedSheet(),
                         ),
                         KotvSettingsCell(
                           label: '后台播放',

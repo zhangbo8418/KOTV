@@ -123,6 +123,8 @@ abstract class KotvPlayback extends ChangeNotifier {
     double? textOpacity,
     double? bgOpacity,
     double? edgeOpacity,
+    double? shadowStrength,
+    String? font,
   }) async {}
 
   /// 字幕时间偏移（毫秒）；正值字幕延后。不支持的引擎忽略。

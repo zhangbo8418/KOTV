@@ -666,6 +666,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val textOpacity = call.argument<Number>("textOpacity")?.toDouble()
         val bgOpacity = call.argument<Number>("bgOpacity")?.toDouble()
         val edgeOpacity = call.argument<Number>("edgeOpacity")?.toDouble()
+        val shadowStrength = call.argument<Number>("shadowStrength")?.toDouble()
+        val fontName = call.argument<String>("font")?.trim()?.lowercase().orEmpty()
         main.post {
           try {
             if (created.get()) {
@@ -693,19 +695,30 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
                 MPVLib.setPropertyString("sub-back-color", withOpacity(bgColor, bgOpacity))
               }
               if (applyLooks) {
+                val strength = ((shadowStrength ?: 50.0).coerceIn(0.0, 100.0) / 50.0).coerceIn(0.0, 2.5)
                 when (edgeType) {
                   "none" -> {
                     MPVLib.setPropertyDouble("sub-border-size", 0.0)
                     MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
                   }
-                  "shadow" -> MPVLib.setPropertyDouble("sub-shadow-offset", 2.0)
-                  "raised", "depressed" -> MPVLib.setPropertyDouble("sub-shadow-offset", 1.5)
+                  "shadow" -> MPVLib.setPropertyDouble("sub-shadow-offset", 2.0 * strength)
+                  "raised", "depressed" -> MPVLib.setPropertyDouble("sub-shadow-offset", 1.5 * strength)
                   "outline" -> {
                     if (borderSize == null) {
                       MPVLib.setPropertyDouble("sub-border-size", 2.0)
                     }
                     MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
                   }
+                }
+                if (fontName.isNotEmpty() && fontName != "default") {
+                  val mpvFont =
+                    when (fontName) {
+                      "sans", "sans-serif" -> "sans-serif"
+                      "serif" -> "serif"
+                      "mono", "monospace" -> "monospace"
+                      else -> fontName
+                    }
+                  MPVLib.setPropertyString("sub-font", mpvFont)
                 }
               }
               MPVLib.setPropertyString(

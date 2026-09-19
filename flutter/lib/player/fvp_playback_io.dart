@@ -813,6 +813,8 @@ class FvpPlayback extends KotvPlayback {
     double? textOpacity,
     double? bgOpacity,
     double? edgeOpacity,
+    double? shadowStrength,
+    String? font,
   }) async {
     final c = _c;
     if (c == null || !c.value.isInitialized) return;
@@ -841,10 +843,14 @@ class FvpPlayback extends KotvPlayback {
         c.setProperty('subtitle.background_color', bgColor.trim());
       }
       final edge = (edgeType ?? '').trim().toLowerCase();
+      final strength = ((shadowStrength ?? 50).clamp(0, 100) / 50.0).clamp(0.0, 2.5);
       if (applyLooks && edge == 'none') {
         c.setProperty('subtitle.outline', '0');
       } else if (applyLooks && edge == 'shadow') {
-        c.setProperty('subtitle.shadow', '2');
+        c.setProperty('subtitle.shadow', (2.0 * strength).toStringAsFixed(2));
+      }
+      if (applyLooks && font != null && font.trim().isNotEmpty && font.trim().toLowerCase() != 'default') {
+        c.setProperty('subtitle.font', font.trim());
       }
       if (forceStyle) {
         c.setProperty('subtitle.force', '1');

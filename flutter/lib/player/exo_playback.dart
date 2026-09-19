@@ -88,6 +88,8 @@ class ExoPlayback extends KotvPlayback {
   double _subtitleBgOpacity = 100;
   double _subtitleEdgeOpacity = 100;
   int _subtitleOffsetMs = 0;
+  double _subtitleShadowStrength = 50;
+  String _subtitleFont = 'default';
   List<Map<String, dynamic>> _subs = const [];
   KotvVideoEq _videoEq = KotvVideoEq.off;
   KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
@@ -474,6 +476,8 @@ class ExoPlayback extends KotvPlayback {
         'subtitleBgOpacity': _subtitleBgOpacity,
         'subtitleEdgeOpacity': _subtitleEdgeOpacity,
         'subtitleOffsetMs': _subtitleOffsetMs,
+        'subtitleShadowStrength': _subtitleShadowStrength,
+        'subtitleFont': _subtitleFont,
         'subs': _subs,
         'audioEq': kotvAudioEqExoMode(_audioEq),
         'audioEqBands': kotvAudioEqExoBandsPayload(
@@ -926,6 +930,8 @@ class ExoPlayback extends KotvPlayback {
     _subtitleOffsetMs = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
     if (_subtitleOffsetMs < -300000) _subtitleOffsetMs = -300000;
     if (_subtitleOffsetMs > 300000) _subtitleOffsetMs = 300000;
+    _subtitleShadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
+    _subtitleFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
     _videoEq = KotvVideoEq.fromSettings(settings);
     _audioEq = kotvAudioEqFromSettings(settings);
     _audioEqBands = kotvAudioEqBandsFromSettings(settings);
@@ -955,6 +961,8 @@ class ExoPlayback extends KotvPlayback {
         textOpacity: custom || _subtitleUseSystemStyle ? _subtitleTextOpacity : null,
         bgOpacity: custom || _subtitleUseSystemStyle ? _subtitleBgOpacity : null,
         edgeOpacity: custom || _subtitleUseSystemStyle ? _subtitleEdgeOpacity : null,
+        shadowStrength: custom || _subtitleUseSystemStyle ? _subtitleShadowStrength : null,
+        font: custom || _subtitleUseSystemStyle ? _subtitleFont : null,
         forceStyle: custom,
       ));
       unawaited(setSubtitleOffsetMs(_subtitleOffsetMs));
@@ -1023,6 +1031,8 @@ class ExoPlayback extends KotvPlayback {
     double? textOpacity,
     double? bgOpacity,
     double? edgeOpacity,
+    double? shadowStrength,
+    String? font,
   }) async {
     if (scale != null) _subtitleFontScale = scale.clamp(0.5, 2.5);
     if (pos != null) _subtitlePos = pos.clamp(0, 150);
@@ -1039,6 +1049,8 @@ class ExoPlayback extends KotvPlayback {
     if (textOpacity != null) _subtitleTextOpacity = textOpacity.clamp(0, 100);
     if (bgOpacity != null) _subtitleBgOpacity = bgOpacity.clamp(0, 100);
     if (edgeOpacity != null) _subtitleEdgeOpacity = edgeOpacity.clamp(0, 100);
+    if (shadowStrength != null) _subtitleShadowStrength = shadowStrength.clamp(0, 100);
+    if (font != null) _subtitleFont = kotvNormalizeSubtitleFont(font);
     _subtitleUseSystemStyle = useSystemStyle;
     _subtitleForceStyle = forceStyle;
     final outColor = forceStyle || useSystemStyle
@@ -1066,6 +1078,8 @@ class ExoPlayback extends KotvPlayback {
         'textOpacity': _subtitleTextOpacity,
         'bgOpacity': _subtitleBgOpacity,
         'edgeOpacity': _subtitleEdgeOpacity,
+        'shadowStrength': forceStyle || useSystemStyle ? _subtitleShadowStrength : 0,
+        'font': forceStyle || useSystemStyle ? _subtitleFont : 'default',
       });
     } catch (_) {}
   }
