@@ -439,7 +439,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 换集/换源：软停并保留画面层；解析可能要数秒，须先停声以免上一集继续出声。
+  /// 换集/换源：先停声。MPV 软停保 Texture；FVP 等默认硬停（须 dispose 再建）。
   Future<void> _stopAllBackends() async {
     Future<void> stopOne(KotvPlayback? p) async {
       if (p == null) return;

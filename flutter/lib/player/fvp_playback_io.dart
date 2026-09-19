@@ -501,16 +501,7 @@ class FvpPlayback extends KotvPlayback {
     notifyListeners();
   }
 
-  /// 换台/换集：只暂停，保留 VideoPlayer Texture，避免 Windows 卸面卡音。
-  @override
-  Future<void> stopForEpisodeSwitch() async {
-    _opening = false;
-    _lastError = null;
-    try {
-      await _c?.pause();
-    } catch (_) {}
-    notifyListeners();
-  }
+  // 换源必须新建 VideoPlayerController，故不覆写 stopForEpisodeSwitch（默认走 stop/dispose）。
 
   @override
   Future<void> release() => stop();

@@ -174,7 +174,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
-  /// 切台/换线：软停并保留画面层（勿 dispose Texture），减少 Windows 换台卡音。
+  /// 切台/换线：走各后端 stopForEpisodeSwitch。
+  /// MPV（media_kit）软停保 Texture 减卡音；FVP 等须 dispose 再建，默认即硬停。
   Future<void> _stopAllBackends() async {
     Future<void> softStop(KotvPlayback? p) async {
       if (p == null) return;

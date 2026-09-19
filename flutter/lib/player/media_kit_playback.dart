@@ -386,7 +386,7 @@ class MediaKitPlayback extends KotvPlayback {
     notifyListeners();
   }
 
-  /// 换台：只暂停，保留 libmpv / Texture，等 open 换源，减轻卡音。
+  /// 换台：只暂停，保留同一 libmpv Player / Texture，等 open 换源，减轻桌面卡音。
   @override
   Future<void> stopForEpisodeSwitch() async {
     if (_diag) KotvMpvDiag.note('stopForEpisodeSwitch');
