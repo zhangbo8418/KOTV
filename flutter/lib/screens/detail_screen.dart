@@ -181,6 +181,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   AspectSpec _aspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
   int _openingSec = 0;
   int _endingSec = 0;
+  bool _skipOpeningEnding = true;
   String _playerVal = kotvDefaultVodPlayer();
   /// 设置/用户所选播放器；failover 临时切换只改 [_playerVal]。
   String _prefPlayerVal = kotvDefaultVodPlayer();
@@ -859,6 +860,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _syncPlayStatus();
     _markPlaybackLiveIfNeeded();
     if (!_playbackLive || _endConsumedGen == _playGen) return;
+    if (!_skipOpeningEnding) return;
+    if (_playback.repeatOne) return;
     final dur = _playback.duration;
     if (dur.inMilliseconds <= 0) return;
     final openMs = _openingSec * 1000;
@@ -880,6 +883,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _onPlaybackEnded() async {
     if (!mounted) return;
+    if (_playback.repeatOne) return;
     _markPlaybackLiveIfNeeded();
     if (!_playbackLive || _endConsumedGen == _playGen) return;
     final pos = _playback.position.inMilliseconds;
@@ -1099,6 +1103,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         // 绝不在进详情时创建原生播放器：初始化会卡死 UI / 手机闪退。
         // 音量/倍速等偏好先记下，真正 [_playAt] open 后再套。
         _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
+        final skipRaw = '${settings['playerSkipOpeningEnding'] ?? 'true'}'.toLowerCase();
+        _skipOpeningEnding = skipRaw != 'false' && skipRaw != '0' && skipRaw != 'off';
         _prefVolume = double.tryParse('${settings['playerVolume'] ?? ''}');
         kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
         unawaited(KotvBufferBudget.warm());
@@ -2410,6 +2416,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'playerSpeedLongPress') {
             setState(() {
               _holdSpeed = (double.tryParse(v) ?? _holdSpeed).clamp(2.0, 5.0).toDouble();
+            });
+          }
+          if (k == 'playerSpeed') {
+            final s = double.tryParse(v);
+            if (s != null && s > 0) {
+              setState(() => _prefSpeed = s.clamp(0.1, 5.0));
+              unawaited(_playback.setRate(_prefSpeed!));
+            }
+          }
+          if (k == 'playerSkipOpeningEnding') {
+            setState(() {
+              _skipOpeningEnding = v.toLowerCase() != 'false' && v != '0' && v.toLowerCase() != 'off';
             });
           }
           if (k == 'playerStableVolume') {

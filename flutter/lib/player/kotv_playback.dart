@@ -11,6 +11,8 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   bool get playing;
   bool get completed;
+  /// 单集循环开启时，播完不应自动切下一集。
+  bool get repeatOne => false;
   Duration get position;
   Duration get duration;
   /// 已缓冲到的位置（用于进度条 secondary track）；未知时为 zero。

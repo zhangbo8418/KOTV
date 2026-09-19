@@ -77,8 +77,66 @@ path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 print(f"ok lock ffmpeg → {sys.argv[3][:12]}")
 PY
 
+# GHA 上 downloads.videolan.org 经常超时；ISO 三件套改走公共镜像（sha256 不变）。
+python3 - "$WORK/webhtv/third_party/mpv-native-lock.json" <<'PY'
+import json
+from pathlib import Path
+
+path = Path(__import__("sys").argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+sources = data.setdefault("sources", {})
+primary = "https://mirrors.ocf.berkeley.edu/videolan-ftp/"
+old_prefixes = (
+    "https://downloads.videolan.org/pub/videolan/",
+    "https://download.videolan.org/pub/videolan/",
+    "https://ftp.videolan.org/pub/videolan/",
+    "https://mirror.aarnet.edu.au/pub/videolan/",
+)
+changed = []
+for key in ("libbluray", "libdvdread", "libdvdnav"):
+    src = sources.get(key)
+    if not isinstance(src, dict):
+        continue
+    url = str(src.get("url") or "")
+    rel = ""
+    for old in old_prefixes:
+        if url.startswith(old):
+            rel = url[len(old) :]
+            break
+    if not rel and "/libbluray/" in url:
+        # 已是镜像路径时不改
+        continue
+    if not rel:
+        continue
+    src["url"] = primary + rel
+    changed.append(f"{key}→{src['url']}")
+path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+print("ok lock videolan mirrors: " + (", ".join(changed) if changed else "none"))
+PY
+
 build_sh="$WORK/webhtv/scripts/build_mpv_native.sh"
 chmod +x "$build_sh"
+
+# extract_archive 加短连接超时，避免卡死在坏 CDN。
+python3 - "$build_sh" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '    curl --location --fail --retry 3 --output "$archive" "$url"\n'
+new = (
+    '    curl --location --fail --connect-timeout 20 --max-time 300 '
+    '--retry 3 --retry-delay 2 --retry-all-errors --output "$archive" "$url"\n'
+)
+if old not in text:
+    if "--connect-timeout 20" in text:
+        print("ok extract_archive curl already has connect-timeout")
+    else:
+        raise SystemExit("ERROR: extract_archive curl line changed")
+else:
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    print("ok patched extract_archive curl timeouts")
+PY
 
 # webhtv 对 mpv 浅克隆 + tag deepen 在 CI 上不稳：要么 shallow 文件冲突，要么 describe 对不上。
 # 保留原 deepen 顺序并加重试；最终以 lock 的 MPV_VERSION 文件为准（webhtv 本就会写这个文件）。

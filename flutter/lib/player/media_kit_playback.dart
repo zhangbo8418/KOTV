@@ -108,6 +108,7 @@ class MediaKitPlayback extends KotvPlayback {
   String _url = '';
   Map<String, String> _headers = const {};
   bool _buffering = false;
+  bool _repeatOne = false;
   bool _live;
   int _speedBps = 0;
   late Future<void> _optsReady;
@@ -182,6 +183,9 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   bool get completed => player.state.completed;
+
+  @override
+  bool get repeatOne => _repeatOne;
 
   @override
   Duration get position => player.state.position;
@@ -419,6 +423,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> setRepeatOne(bool on) async {
+    _repeatOne = on;
     await player.setPlaylistMode(on ? PlaylistMode.single : PlaylistMode.none);
   }
 

@@ -583,6 +583,17 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     if (_stableVolume) unawaited(_applyStableVolume(true));
     _skipSub = widget.player.positionStream.listen(_onPositionTick);
     unawaited(_loadDanmakuOffset());
+    unawaited(_loadSkipOpeningEnding());
+  }
+
+  Future<void> _loadSkipOpeningEnding() async {
+    try {
+      final m = await _loadSettings();
+      final raw = (m['playerSkipOpeningEnding'] ?? 'true').toLowerCase();
+      final on = raw != 'false' && raw != '0' && raw != 'off';
+      if (!mounted) return;
+      setState(() => _loopSkip = on);
+    } catch (_) {}
   }
 
   Future<void> _loadDanmakuOffset() async {
@@ -1832,6 +1843,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               _endingSkipFired = false;
                               _openingSeekDone = false;
                             });
+                            unawaited(_persist('playerSkipOpeningEnding', v ? 'true' : 'false'));
                             if (v) _onPositionTick(widget.player.position);
                           },
                         ),

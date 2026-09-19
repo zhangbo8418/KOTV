@@ -119,6 +119,8 @@ class ExoPlayback extends KotvPlayback {
   @override
   bool get completed => _completed;
   @override
+  bool get repeatOne => _repeatOne;
+  @override
   Duration get position => _position;
   @override
   Duration get duration => _duration;
@@ -387,9 +389,11 @@ class ExoPlayback extends KotvPlayback {
       case 'completed':
         _completed = true;
         _playing = false;
-        if (!_endedCtrl.isClosed) _endedCtrl.add(true);
         if (_repeatOne && _url.isNotEmpty) {
-          unawaited(open(_url, headers: _headers, drm: _drm));
+          // 单集循环：不通知上层切下一集
+          unawaited(open(_url, headers: _headers, drm: _drm, live: _live));
+        } else if (!_endedCtrl.isClosed) {
+          _endedCtrl.add(true);
         }
         notifyListeners();
         break;

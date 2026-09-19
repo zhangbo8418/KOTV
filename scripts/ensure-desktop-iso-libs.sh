@@ -36,7 +36,9 @@ fetch() {
     return 0
   fi
   mkdir -p "$(dirname "$dest")"
-  if ! curl -fL --retry 5 --retry-delay 2 --retry-all-errors -o "$dest.partial" "$url"; then
+  # GHA 上 downloads.videolan.org 经常连不上；短超时逐个试镜像。
+  if ! curl -fL --connect-timeout 20 --max-time 300 --retry 2 --retry-delay 2 \
+      -o "$dest.partial" "$url"; then
     rm -f "$dest.partial"
     return 1
   fi
@@ -46,6 +48,33 @@ fetch() {
   elif command -v sha256sum >/dev/null; then
     echo "$sha  $dest" | sha256sum -c -
   fi
+}
+
+# VideoLAN 发布包：优先公共镜像，再回落官方 CDN。
+fetch_videolan() {
+  local rel="$1" dest="$2" sha="$3"
+  local bases=(
+    "https://mirrors.ocf.berkeley.edu/videolan-ftp"
+    "https://mirror.aarnet.edu.au/pub/videolan"
+    "https://download.videolan.org/pub/videolan"
+    "https://downloads.videolan.org/pub/videolan"
+    "https://ftp.videolan.org/pub/videolan"
+  )
+  local base url
+  if [[ -f "$dest" ]]; then
+    return 0
+  fi
+  for base in "${bases[@]}"; do
+    url="$base/$rel"
+    echo "==> try $url"
+    if fetch "$url" "$dest" "$sha"; then
+      echo "ok fetched $rel from $base"
+      return 0
+    fi
+    rm -f "$dest" "$dest.partial"
+  done
+  echo "ERROR: cannot fetch videolan/$rel from any mirror" >&2
+  return 1
 }
 
 # Windows：meson 不会跑无扩展名的 bash pkg-config，必须用 .cmd + kotv-pkg-config.py。
@@ -149,11 +178,11 @@ build_meson_lib() {
 }
 
 echo "==> ISO libs -> $PREFIX"
-fetch "https://downloads.videolan.org/pub/videolan/libdvdread/${DVDREAD_VER}/libdvdread-${DVDREAD_VER}.tar.xz" \
+fetch_videolan "libdvdread/${DVDREAD_VER}/libdvdread-${DVDREAD_VER}.tar.xz" \
   "$src/libdvdread-${DVDREAD_VER}.tar.xz" "$DVDREAD_SHA"
-fetch "https://downloads.videolan.org/pub/videolan/libdvdnav/${DVDNAV_VER}/libdvdnav-${DVDNAV_VER}.tar.xz" \
+fetch_videolan "libdvdnav/${DVDNAV_VER}/libdvdnav-${DVDNAV_VER}.tar.xz" \
   "$src/libdvdnav-${DVDNAV_VER}.tar.xz" "$DVDNAV_SHA"
-fetch "https://downloads.videolan.org/pub/videolan/libbluray/${BLURAY_VER}/libbluray-${BLURAY_VER}.tar.xz" \
+fetch_videolan "libbluray/${BLURAY_VER}/libbluray-${BLURAY_VER}.tar.xz" \
   "$src/libbluray-${BLURAY_VER}.tar.xz" "$BLURAY_SHA"
 
 dvdread_opts=(-Denable_docs=false -Dlibdvdcss=disabled)
