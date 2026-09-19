@@ -126,26 +126,38 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return _mk!;
   }
 
+  /// 切到其它内置后端时停掉闲置引擎。
+  /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
   Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
     if (keep != KotvEmbedBackend.mpv) {
       try {
+        await _mk?.pause();
+      } catch (_) {}
+      try {
         await _mk?.stop();
       } catch (_) {}
-      if (kotvIsAndroid() && _mk != null) {
-        try {
-          _mk?.dispose();
-        } catch (_) {}
-        _mk = null;
-      }
+      final mkPlayer = _mkPlayer;
+      _mkPlayer = null;
+      try {
+        _mk?.dispose();
+      } catch (_) {}
+      _mk = null;
+      await kotvDisposeMpvPlayer(mkPlayer);
     }
     if (keep != KotvEmbedBackend.fvp) {
+      try {
+        await _fvp?.pause();
+      } catch (_) {}
       try {
         await _fvp?.stop();
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.exo) {
       try {
-        await _exo?.stop();
+        await _exo?.pause();
+      } catch (_) {}
+      try {
+        await _exo?.release();
       } catch (_) {}
       try {
         _exo?.dispose();
@@ -154,20 +166,32 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
     if (keep != KotvEmbedBackend.html) {
       try {
+        await _html?.pause();
+      } catch (_) {}
+      try {
         await _html?.stop();
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.art) {
+      try {
+        await _art?.pause();
+      } catch (_) {}
       try {
         await _art?.stop();
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.xg) {
       try {
+        await _xg?.pause();
+      } catch (_) {}
+      try {
         await _xg?.stop();
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.zw) {
+      try {
+        await _zw?.pause();
+      } catch (_) {}
       try {
         await _zw?.stop();
       } catch (_) {}
