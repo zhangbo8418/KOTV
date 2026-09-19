@@ -174,10 +174,11 @@ abstract class KotvPlayback extends ChangeNotifier {
   }
 }
 
-/// 离开播放统一拆机：stop → 短等排空 AO/事件线程 → dispose。无静音。
+/// 离开播放统一拆机：stop → 短等排空 AO/事件线程 → dispose。
 ///
 /// 对应 Windows media_kit [kotvDisposeMpvPlayer]；各平台 MPV / FVP 共用。
 /// [disposeTimeout] 非空时（如 FVP/mdk），dispose 超时后把同一 Future 丢后台，不二次调用。
+/// 调用方应先静音（尤其 Win7 MPV），本函数本身不再改音量。
 Future<void> kotvTeardownPlayback({
   required Future<void> Function() stop,
   required Future<void> Function() dispose,

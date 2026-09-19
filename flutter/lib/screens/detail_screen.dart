@@ -603,7 +603,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
-  /// 先卸画面，再 stop + release，避免 AO 残留漏音。
+  /// 先静音停声，再卸画面 / release，避免 WASAPI 边播边拆卡音。
   /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
   Future<void> _stopHard() async {
     _playbackLive = false;
@@ -622,7 +622,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _endedSub = null;
     _posSub = null;
     _bufferingSub = null;
-    _playUrl = '';
     _magnetPlay = false;
     _stopBtProgressPoll();
     _syncAndroidAutoPip();
@@ -632,7 +631,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(api.cancelPending(hard: true, thunder: true));
     }
 
-    // 先卸掉 Video/PlatformView，再拆引擎（按播放器销毁顺序）。
+    // 先静音/暂停（尤其桌面 MPV），再清 URL 卸 Video。
+    try {
+      await _mk?.setVolume(0);
+    } catch (_) {}
+    try {
+      await _mk?.pause();
+    } catch (_) {}
+    try {
+      await _fvp?.setVolume(0);
+    } catch (_) {}
+    try {
+      await _fvp?.pause();
+    } catch (_) {}
+
+    _playUrl = '';
     if (mounted) {
       setState(() {});
       await WidgetsBinding.instance.endOfFrame;

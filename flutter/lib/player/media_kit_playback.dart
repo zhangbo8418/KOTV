@@ -11,13 +11,21 @@ import 'mpv_opts.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
 
-/// 安全释放 libmpv [Player]：先停播、给事件线程留出排空时间，再 dispose。
+/// 安全释放 libmpv [Player]：先静音再停播，给 AO 排空后再 dispose。
 /// 各桌面平台（Win / macOS / Linux）共用 [kotvTeardownPlayback]。
+/// Win7 上若边播边卸 Texture / 直接 dispose，WASAPI 易撕裂卡音。
 Future<void> kotvDisposeMpvPlayer(Player? player) async {
   if (player == null) return;
+  try {
+    await player.setVolume(0);
+  } catch (_) {}
+  try {
+    await player.pause();
+  } catch (_) {}
   await kotvTeardownPlayback(
     stop: () => player.stop(),
     dispose: () => player.dispose(),
+    drain: const Duration(milliseconds: 250),
   );
 }
 
@@ -398,7 +406,13 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> release() async {
-    // Player 由页面 kotvDisposeMpvPlayer 释放（走 engine.release）。
+    // 离开页：先静音再停；真正 dispose 由页面 kotvDisposeMpvPlayer 完成。
+    try {
+      await player.setVolume(0);
+    } catch (_) {}
+    try {
+      await player.pause();
+    } catch (_) {}
     await stop();
   }
 
