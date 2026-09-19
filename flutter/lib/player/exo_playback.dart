@@ -8,6 +8,7 @@ import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
+import 'subtitle_style_util.dart';
 import 'video_eq.dart';
 
 /// Android ExoPlayer：Media3 + OkHttp，DRM；硬解直出到 SurfaceView（HDR 直出）。
@@ -82,6 +83,11 @@ class ExoPlayback extends KotvPlayback {
   String _subtitleBgColor = '#00000000';
   String _subtitleEdgeType = 'outline';
   bool _subtitleUseSystemStyle = false;
+  bool _subtitleForceStyle = true;
+  double _subtitleTextOpacity = 100;
+  double _subtitleBgOpacity = 100;
+  double _subtitleEdgeOpacity = 100;
+  int _subtitleOffsetMs = 0;
   List<Map<String, dynamic>> _subs = const [];
   KotvVideoEq _videoEq = KotvVideoEq.off;
   KotvAudioEqPreset _audioEq = KotvAudioEqPreset.off;
@@ -462,6 +468,11 @@ class ExoPlayback extends KotvPlayback {
         'subtitleBgColor': _subtitleBgColor,
         'subtitleEdgeType': _subtitleEdgeType,
         'subtitleUseSystemStyle': _subtitleUseSystemStyle,
+        'subtitleForceStyle': _subtitleForceStyle,
+        'subtitleTextOpacity': _subtitleTextOpacity,
+        'subtitleBgOpacity': _subtitleBgOpacity,
+        'subtitleEdgeOpacity': _subtitleEdgeOpacity,
+        'subtitleOffsetMs': _subtitleOffsetMs,
         'subs': _subs,
         'audioEq': kotvAudioEqExoMode(_audioEq),
         'audioEqBands': kotvAudioEqExoBandsPayload(
@@ -880,7 +891,7 @@ class ExoPlayback extends KotvPlayback {
     if (_diskPreloadMs > 120000) _diskPreloadMs = 120000;
     _diskPreloadThreads = int.tryParse('${settings['exoDiskPreloadThreads'] ?? '2'}') ?? 2;
     if (_diskPreloadThreads < 1) _diskPreloadThreads = 1;
-    if (_diskPreloadThreads > 8) _diskPreloadThreads = 8;
+    if (_diskPreloadThreads > 10) _diskPreloadThreads = 10;
     _diskPreloadSizeMb = int.tryParse('${settings['exoDiskPreloadSizeMb'] ?? '256'}') ?? 256;
     if (_diskPreloadSizeMb < 128) _diskPreloadSizeMb = 128;
     if (_diskPreloadSizeMb > 4096) _diskPreloadSizeMb = 4096;
@@ -899,12 +910,19 @@ class ExoPlayback extends KotvPlayback {
     _subtitleBgColor = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
     if (_subtitleBgColor.isEmpty) _subtitleBgColor = '#00000000';
     final edge = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
-    _subtitleEdgeType = switch (edge) {
-      'none' || 'shadow' || 'raised' || 'depressed' => edge,
-      _ => 'outline',
-    };
+    _subtitleEdgeType = kotvNormalizeSubtitleEdgeType(edge);
     final styleMode = '${settings['subtitleStyleMode'] ?? 'custom'}'.trim().toLowerCase();
     _subtitleUseSystemStyle = styleMode == 'system';
+    _subtitleForceStyle = styleMode == 'custom';
+    _subtitleTextOpacity =
+        (double.tryParse('${settings['subtitleTextOpacity'] ?? '100'}') ?? 100).clamp(0, 100);
+    _subtitleBgOpacity =
+        (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100).clamp(0, 100);
+    _subtitleEdgeOpacity =
+        (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100).clamp(0, 100);
+    _subtitleOffsetMs = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
+    if (_subtitleOffsetMs < -300000) _subtitleOffsetMs = -300000;
+    if (_subtitleOffsetMs > 300000) _subtitleOffsetMs = 300000;
     _videoEq = KotvVideoEq.fromSettings(settings);
     _audioEq = kotvAudioEqFromSettings(settings);
     _audioEqBands = kotvAudioEqBandsFromSettings(settings);
@@ -919,18 +937,23 @@ class ExoPlayback extends KotvPlayback {
     _audioOffsetMs = kotvAudioOffsetMsFromSettings(settings);
     if (_url.isNotEmpty) {
       unawaited(_pushEqualizer());
+      final custom = _subtitleForceStyle;
       unawaited(setSubtitleStyle(
         scale: _subtitleFontScale,
         pos: _subtitlePos,
         secondaryPos: _subtitleSecondaryPos,
-        color: _subtitleUseSystemStyle ? null : _subtitleColor,
-        borderColor: _subtitleUseSystemStyle ? null : _subtitleBorderColor,
-        borderSize: _subtitleUseSystemStyle ? null : _subtitleBorderSize,
-        bgColor: _subtitleUseSystemStyle ? null : _subtitleBgColor,
-        edgeType: _subtitleEdgeType,
+        color: custom ? _subtitleColor : null,
+        borderColor: custom ? _subtitleBorderColor : null,
+        borderSize: custom ? _subtitleBorderSize : null,
+        bgColor: custom ? _subtitleBgColor : null,
+        edgeType: custom ? _subtitleEdgeType : null,
         useSystemStyle: _subtitleUseSystemStyle,
-        forceStyle: !_subtitleUseSystemStyle,
+        textOpacity: custom || _subtitleUseSystemStyle ? _subtitleTextOpacity : null,
+        bgOpacity: custom || _subtitleUseSystemStyle ? _subtitleBgOpacity : null,
+        edgeOpacity: custom || _subtitleUseSystemStyle ? _subtitleEdgeOpacity : null,
+        forceStyle: custom,
       ));
+      unawaited(setSubtitleOffsetMs(_subtitleOffsetMs));
     }
   }
 
@@ -979,6 +1002,9 @@ class ExoPlayback extends KotvPlayback {
     String? bgColor,
     String? edgeType,
     bool useSystemStyle = false,
+    double? textOpacity,
+    double? bgOpacity,
+    double? edgeOpacity,
   }) async {
     if (scale != null) _subtitleFontScale = scale.clamp(0.5, 2.5);
     if (pos != null) _subtitlePos = pos.clamp(0, 150);
@@ -990,13 +1016,22 @@ class ExoPlayback extends KotvPlayback {
     if (borderSize != null) _subtitleBorderSize = borderSize.clamp(0, 8);
     if (bgColor != null && bgColor.trim().isNotEmpty) _subtitleBgColor = bgColor.trim();
     if (edgeType != null && edgeType.trim().isNotEmpty) {
-      final e = edgeType.trim().toLowerCase();
-      _subtitleEdgeType = switch (e) {
-        'none' || 'shadow' || 'raised' || 'depressed' => e,
-        _ => 'outline',
-      };
+      _subtitleEdgeType = kotvNormalizeSubtitleEdgeType(edgeType);
     }
+    if (textOpacity != null) _subtitleTextOpacity = textOpacity.clamp(0, 100);
+    if (bgOpacity != null) _subtitleBgOpacity = bgOpacity.clamp(0, 100);
+    if (edgeOpacity != null) _subtitleEdgeOpacity = edgeOpacity.clamp(0, 100);
     _subtitleUseSystemStyle = useSystemStyle;
+    _subtitleForceStyle = forceStyle;
+    final outColor = forceStyle || useSystemStyle
+        ? kotvHexWithOpacity(_subtitleColor, _subtitleTextOpacity)
+        : _subtitleColor;
+    final outBorder = forceStyle || useSystemStyle
+        ? kotvHexWithOpacity(_subtitleBorderColor, _subtitleEdgeOpacity)
+        : _subtitleBorderColor;
+    final outBg = forceStyle || useSystemStyle
+        ? kotvHexWithOpacity(_subtitleBgColor, _subtitleBgOpacity)
+        : _subtitleBgColor;
     try {
       await _ensureNative();
       await _ch.invokeMethod('setSubtitleStyle', {
@@ -1004,13 +1039,25 @@ class ExoPlayback extends KotvPlayback {
         'pos': _subtitlePos,
         'secondaryPos': _subtitleSecondaryPos,
         'forceStyle': forceStyle,
-        'color': _subtitleColor,
-        'borderColor': _subtitleBorderColor,
-        'borderSize': _subtitleBorderSize,
-        'bgColor': _subtitleBgColor,
-        'edgeType': _subtitleEdgeType,
+        'color': outColor,
+        'borderColor': outBorder,
+        'borderSize': forceStyle || useSystemStyle ? _subtitleBorderSize : 0,
+        'bgColor': outBg,
+        'edgeType': forceStyle || useSystemStyle ? _subtitleEdgeType : 'none',
         'useSystemStyle': _subtitleUseSystemStyle,
+        'textOpacity': _subtitleTextOpacity,
+        'bgOpacity': _subtitleBgOpacity,
+        'edgeOpacity': _subtitleEdgeOpacity,
       });
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setSubtitleOffsetMs(int offsetMs) async {
+    _subtitleOffsetMs = offsetMs.clamp(-300000, 300000);
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('setSubtitleOffsetMs', {'ms': _subtitleOffsetMs});
     } catch (_) {}
   }
 

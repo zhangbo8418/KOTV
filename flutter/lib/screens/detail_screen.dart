@@ -143,6 +143,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   String _renderMode = 'surface';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   bool _danmakuOn = false;
+  bool _danmakuLoad = true;
+  bool _danmakuAuto = true;
+  bool _danmakuSpiderFirst = true;
   bool _ambientOn = false;
   bool _stableVolumeOn = false;
   String _danmakuApi = '';
@@ -990,19 +993,30 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
         final forceStyle = styleMode == 'custom';
         final useSystem = styleMode == 'system';
+        final double textOp = (double.tryParse('${settings['subtitleTextOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+        final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+        final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+        final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
         unawaited(_playback.setSubtitleStyle(
           scale: fontScale,
           pos: subPos.clamp(0, 150),
           secondaryPos: subSecPos.clamp(0, 150),
           color: forceStyle && subColor.isNotEmpty ? subColor : null,
           borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
-          borderSize: forceStyle ? subBorderSize.clamp(0, 8) : null,
+          borderSize: forceStyle ? subBorderSize.clamp(0, 8).toDouble() : null,
           bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
-          edgeType: edgeType,
+          edgeType: forceStyle ? edgeType : null,
           useSystemStyle: useSystem,
+          textOpacity: forceStyle || useSystem ? textOp : null,
+          bgOpacity: forceStyle || useSystem ? bgOp : null,
+          edgeOpacity: forceStyle || useSystem ? edgeOp : null,
           forceStyle: forceStyle,
         ));
+        unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
         _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
+        _danmakuLoad = _flagFromSettings(settings, 'danmakuLoad', true);
+        _danmakuAuto = _flagFromSettings(settings, 'danmakuAuto', true);
+        _danmakuSpiderFirst = _flagFromSettings(settings, 'danmakuSpiderFirst', true);
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
         _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
         _danmakuApi = '${settings['danmakuApi'] ?? ''}';
@@ -1406,16 +1420,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     required String episode,
   }) async {
     _danmakuItems.value = const [];
+    if (!_danmakuLoad) return;
     final engineBase = ref.read(apiProvider).baseUrl;
     final src = kotvRewriteEngineLocalUrl(playDanmaku.trim(), engineBase);
-    if (src.isEmpty && _danmakuApi.trim().isEmpty) return;
+    final api = _danmakuApi.trim();
+    final canSpider = src.isNotEmpty;
+    final canApi = api.isNotEmpty && _danmakuAuto;
+    if (!canSpider && !canApi) return;
     try {
       List<DanmakuItem> items = const [];
-      if (src.isNotEmpty) {
-        items = await DanmakuLoader.loadUrl(src);
-      }
-      if (items.isEmpty && _danmakuApi.trim().isNotEmpty) {
-        items = await DanmakuLoader.loadApi(_danmakuApi, name: name, episode: episode);
+      if (_danmakuSpiderFirst) {
+        if (canSpider) items = await DanmakuLoader.loadUrl(src);
+        if (items.isEmpty && canApi) {
+          items = await DanmakuLoader.loadApi(api, name: name, episode: episode);
+        }
+      } else {
+        if (canApi) items = await DanmakuLoader.loadApi(api, name: name, episode: episode);
+        if (items.isEmpty && canSpider) items = await DanmakuLoader.loadUrl(src);
       }
       if (!mounted) return;
       if (_danmakuOffsetSec.abs() > 0.0001) {
@@ -2110,19 +2131,33 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
       final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
       final forceStyle = styleMode == 'custom';
       final useSystem = styleMode == 'system';
+      final double textOp = (double.tryParse('${settings['subtitleTextOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+      final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+      final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+      final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
       unawaited(_playback.setSubtitleStyle(
         scale: fontScale,
         pos: subPos.clamp(0, 150),
         secondaryPos: subSecPos.clamp(0, 150),
         color: forceStyle && subColor.isNotEmpty ? subColor : null,
         borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
-        borderSize: forceStyle ? subBorderSize.clamp(0, 8) : null,
+        borderSize: forceStyle ? subBorderSize.clamp(0, 8).toDouble() : null,
         bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
-        edgeType: edgeType,
+        edgeType: forceStyle ? edgeType : null,
         useSystemStyle: useSystem,
+        textOpacity: forceStyle || useSystem ? textOp : null,
+        bgOpacity: forceStyle || useSystem ? bgOp : null,
+        edgeOpacity: forceStyle || useSystem ? edgeOp : null,
         forceStyle: forceStyle,
       ));
+      unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
     } catch (_) {}
+  }
+
+  bool _flagFromSettings(Map<String, dynamic> settings, String key, [bool def = true]) {
+    final v = '${settings[key] ?? ''}'.trim().toLowerCase();
+    if (v.isEmpty) return def;
+    return v != 'false' && v != '0' && v != 'off';
   }
 
   Future<void> _refreshDanmakuPrefs() async {
@@ -2246,6 +2281,26 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           }
           if (k == 'danmaku') {
             setState(() => _danmakuOn = v.toLowerCase() == 'true');
+          }
+          if (k == 'danmakuLoad' || k == 'danmakuAuto' || k == 'danmakuSpiderFirst') {
+            setState(() {
+              if (k == 'danmakuLoad') {
+                _danmakuLoad = v.toLowerCase() != 'false' && v != '0' && v.toLowerCase() != 'off';
+              }
+              if (k == 'danmakuAuto') {
+                _danmakuAuto = v.toLowerCase() != 'false' && v != '0' && v.toLowerCase() != 'off';
+              }
+              if (k == 'danmakuSpiderFirst') {
+                _danmakuSpiderFirst = v.toLowerCase() != 'false' && v != '0' && v.toLowerCase() != 'off';
+              }
+            });
+            if (_detail != null && _eps.isNotEmpty && _epIdx >= 0 && _epIdx < _eps.length) {
+              unawaited(_loadDanmakuForEpisode(
+                playDanmaku: '',
+                name: _detail!.name,
+                episode: _eps[_epIdx].name,
+              ));
+            }
           }
           if (k == 'danmakuApi') {
             setState(() => _danmakuApi = v);

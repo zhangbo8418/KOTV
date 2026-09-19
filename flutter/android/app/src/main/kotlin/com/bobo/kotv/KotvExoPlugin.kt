@@ -175,6 +175,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** none | outline | shadow | raised | depressed */
   private var subtitleEdgeType = "outline"
   private var subtitleUseSystemStyle = false
+  private var subtitleForceStyle = false
+  private var subtitleTextOpacity = 100.0
+  private var subtitleBgOpacity = 100.0
+  private var subtitleEdgeOpacity = 100.0
+  private var subtitleOffsetMs = 0L
   /** 音频 EQ：off | bass | voice | custom | natural…（Equalizer；直通时跳过）。 */
   private var audioEqMode: String = "off"
   /** 频段：`freq:gain,freq:gain…`（gain 单位 dB；可含对白叠加）。 */
@@ -387,7 +392,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           diskPreloadMs = it.coerceIn(0L, 120_000L)
         }
         call.argument<Number>("diskPreloadThreads")?.toInt()?.let {
-          diskPreloadThreads = it.coerceIn(1, 8)
+          diskPreloadThreads = it.coerceIn(1, 10)
         }
         call.argument<Number>("diskPreloadSizeMb")?.toInt()?.let {
           diskPreloadSizeMb = it.coerceIn(128, 4096)
@@ -420,6 +425,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             openInternal(url, headers, mime, drm, live)
             applyAudioEq()
             applyAudioOffset()
+            applySubtitleOffset()
             applyVideoEq()
             applySubtitleStyle()
             result.success(true)
@@ -446,7 +452,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "setSubtitleStyle" -> {
-        ingestSubtitleStyleArgs(call)
         call.argument<Number>("scale")?.toFloat()?.let {
           subtitleFontScale = it.coerceIn(0.5f, 2.5f)
         }
@@ -468,12 +473,34 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           subtitleEdgeType = normalizeEdgeType(it)
         }
         call.argument<Boolean>("useSystemStyle")?.let { subtitleUseSystemStyle = it }
+        call.argument<Boolean>("forceStyle")?.let { subtitleForceStyle = it }
+        call.argument<Number>("textOpacity")?.toDouble()?.let {
+          subtitleTextOpacity = it.coerceIn(0.0, 100.0)
+        }
+        call.argument<Number>("bgOpacity")?.toDouble()?.let {
+          subtitleBgOpacity = it.coerceIn(0.0, 100.0)
+        }
+        call.argument<Number>("edgeOpacity")?.toDouble()?.let {
+          subtitleEdgeOpacity = it.coerceIn(0.0, 100.0)
+        }
         main.post {
           try {
             applySubtitleStyle()
             result.success(true)
           } catch (t: Throwable) {
             result.error("exo_sub_style", t.message, null)
+          }
+        }
+      }
+      "setSubtitleOffsetMs" -> {
+        val ms = call.argument<Number>("ms")?.toLong() ?: 0L
+        subtitleOffsetMs = ms.coerceIn(-300_000L, 300_000L)
+        main.post {
+          try {
+            applySubtitleOffset()
+            result.success(true)
+          } catch (t: Throwable) {
+            result.error("exo_sub_offset", t.message, null)
           }
         }
       }
@@ -932,6 +959,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     // setVideoEffects 须在首次 prepare 前至少调用一次以建管线；之后可热更。
     applyVideoEq()
     applySubtitleStyle()
+    applyAudioOffset()
+    applySubtitleOffset()
     try {
       p.setSkipSilenceEnabled(skipSilence)
     } catch (_: Throwable) {
@@ -1118,6 +1147,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     updateChannelMix()
     applyVideoEq()
     applySubtitleStyle()
+    applyAudioOffset()
+    applySubtitleOffset()
     val listener =
       object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
@@ -1489,6 +1520,19 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       subtitleEdgeType = normalizeEdgeType(it)
     }
     call.argument<Boolean>("subtitleUseSystemStyle")?.let { subtitleUseSystemStyle = it }
+    call.argument<Boolean>("subtitleForceStyle")?.let { subtitleForceStyle = it }
+    call.argument<Number>("subtitleTextOpacity")?.toDouble()?.let {
+      subtitleTextOpacity = it.coerceIn(0.0, 100.0)
+    }
+    call.argument<Number>("subtitleBgOpacity")?.toDouble()?.let {
+      subtitleBgOpacity = it.coerceIn(0.0, 100.0)
+    }
+    call.argument<Number>("subtitleEdgeOpacity")?.toDouble()?.let {
+      subtitleEdgeOpacity = it.coerceIn(0.0, 100.0)
+    }
+    call.argument<Number>("subtitleOffsetMs")?.toLong()?.let {
+      subtitleOffsetMs = it.coerceIn(-300_000L, 300_000L)
+    }
   }
 
   private fun normalizeEdgeType(raw: String): String =
@@ -1521,6 +1565,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     subtitleOverlay?.let { applySubtitleStyleTo(it) }
   }
 
+  private fun applySubtitleOffset() {
+    val p = player ?: return
+    try {
+      if (p.isCommandAvailable(androidx.media3.common.Player.COMMAND_SET_TEXT_OFFSET)) {
+        p.setTextOffsetMs(subtitleOffsetMs)
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "setTextOffsetMs failed", t)
+    }
+  }
+
   private fun applySubtitleStyleTo(overlay: KotvSubtitleOverlay) {
     var color = subtitleColor
     var borderColor = subtitleBorderColor
@@ -1528,7 +1583,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     var bgColor = subtitleBgColor
     var edgeType = subtitleEdgeType
     var scale = subtitleFontScale
-    if (subtitleUseSystemStyle) {
+    val force = subtitleForceStyle
+    val useSystem = subtitleUseSystemStyle
+    if (useSystem) {
       try {
         val cm =
           appContext?.getSystemService(android.view.accessibility.CaptioningManager::class.java)
@@ -1558,6 +1615,18 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       } catch (_: Throwable) {
       }
+    } else if (!force) {
+      // 原样：仅保留字号/位置，不覆盖片源颜色与描边。
+      color = "#FFFFFF"
+      borderColor = "#00000000"
+      borderSize = 0.0
+      bgColor = "#00000000"
+      edgeType = "none"
+    }
+    if (force || useSystem) {
+      color = applyOpacityHex(color, subtitleTextOpacity)
+      borderColor = applyOpacityHex(borderColor, subtitleEdgeOpacity)
+      bgColor = applyOpacityHex(bgColor, subtitleBgOpacity)
     }
     overlay.setStyle(
       fontScale = scale,
@@ -1569,6 +1638,19 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       bgColor = bgColor,
       edgeType = edgeType,
     )
+  }
+
+  private fun applyOpacityHex(raw: String, opacityPct: Double): String {
+    val s = raw.trim()
+    if (s.isEmpty()) return s
+    return try {
+      val parsed = android.graphics.Color.parseColor(if (s.startsWith("#")) s else "#$s")
+      val rgb = parsed and 0x00FFFFFF
+      val a = ((opacityPct.coerceIn(0.0, 100.0) / 100.0) * 255).toInt().coerceIn(0, 255)
+      String.format("#%02X%06X", a, rgb)
+    } catch (_: Throwable) {
+      s
+    }
   }
 
   /** BassBoost / Equalizer / Loudness / 声道混合；直通时跳过以免破 SPDIF。 */

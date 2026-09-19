@@ -658,10 +658,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val pos = call.argument<Number>("pos")?.toDouble()
         val secondaryPos = call.argument<Number>("secondaryPos")?.toDouble()
         val forceStyle = call.argument<Boolean>("forceStyle") == true
+        val useSystemStyle = call.argument<Boolean>("useSystemStyle") == true
         val color = call.argument<String>("color")?.trim().orEmpty()
         val borderColor = call.argument<String>("borderColor")?.trim().orEmpty()
         val borderSize = call.argument<Number>("borderSize")?.toDouble()
         val edgeType = call.argument<String>("edgeType")?.trim()?.lowercase().orEmpty()
+        val textOpacity = call.argument<Number>("textOpacity")?.toDouble()
+        val bgOpacity = call.argument<Number>("bgOpacity")?.toDouble()
+        val edgeOpacity = call.argument<Number>("edgeOpacity")?.toDouble()
         main.post {
           try {
             if (created.get()) {
@@ -674,48 +678,58 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               if (secondaryPos != null) {
                 MPVLib.setPropertyDouble("secondary-sub-pos", secondaryPos.coerceIn(0.0, 150.0))
               }
-              if (color.isNotEmpty()) {
-                MPVLib.setPropertyString("sub-color", color)
+              val applyLooks = forceStyle || useSystemStyle
+              if (applyLooks && color.isNotEmpty()) {
+                MPVLib.setPropertyString("sub-color", withOpacity(color, textOpacity))
               }
-              if (borderColor.isNotEmpty()) {
-                MPVLib.setPropertyString("sub-border-color", borderColor)
+              if (applyLooks && borderColor.isNotEmpty()) {
+                MPVLib.setPropertyString("sub-border-color", withOpacity(borderColor, edgeOpacity))
               }
-              if (borderSize != null) {
+              if (applyLooks && borderSize != null) {
                 MPVLib.setPropertyDouble("sub-border-size", borderSize.coerceIn(0.0, 8.0))
               }
               val bgColor = call.argument<String>("bgColor")?.trim().orEmpty()
-              if (bgColor.isNotEmpty()) {
-                MPVLib.setPropertyString("sub-back-color", bgColor)
+              if (applyLooks && bgColor.isNotEmpty()) {
+                MPVLib.setPropertyString("sub-back-color", withOpacity(bgColor, bgOpacity))
               }
-              when (edgeType) {
-                "none" -> {
-                  MPVLib.setPropertyDouble("sub-border-size", 0.0)
-                  MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
-                }
-                "shadow" -> MPVLib.setPropertyDouble("sub-shadow-offset", 2.0)
-                "raised", "depressed" -> MPVLib.setPropertyDouble("sub-shadow-offset", 1.5)
-                "outline" -> {
-                  if (borderSize == null) {
-                    MPVLib.setPropertyDouble("sub-border-size", 2.0)
+              if (applyLooks) {
+                when (edgeType) {
+                  "none" -> {
+                    MPVLib.setPropertyDouble("sub-border-size", 0.0)
+                    MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
                   }
-                  MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
+                  "shadow" -> MPVLib.setPropertyDouble("sub-shadow-offset", 2.0)
+                  "raised", "depressed" -> MPVLib.setPropertyDouble("sub-shadow-offset", 1.5)
+                  "outline" -> {
+                    if (borderSize == null) {
+                      MPVLib.setPropertyDouble("sub-border-size", 2.0)
+                    }
+                    MPVLib.setPropertyDouble("sub-shadow-offset", 0.0)
+                  }
                 }
               }
-              val force =
-                forceStyle ||
-                  color.isNotEmpty() ||
-                  borderColor.isNotEmpty() ||
-                  borderSize != null ||
-                  edgeType.isNotEmpty()
               MPVLib.setPropertyString(
                 "secondary-sub-ass-override",
-                if (force) "force" else "yes",
+                if (forceStyle) "force" else "yes",
               )
-              MPVLib.setPropertyString("sub-ass-override", if (force) "force" else "scale")
+              MPVLib.setPropertyString("sub-ass-override", if (forceStyle) "force" else "scale")
             }
             result.success(null)
           } catch (e: Throwable) {
             result.error("SUB_STYLE_FAILED", e.message, null)
+          }
+        }
+      }
+      "setSubtitleOffsetMs" -> {
+        val ms = call.argument<Number>("ms")?.toDouble() ?: 0.0
+        main.post {
+          try {
+            if (created.get()) {
+              MPVLib.setPropertyDouble("sub-delay", (ms / 1000.0).coerceIn(-300.0, 300.0))
+            }
+            result.success(null)
+          } catch (e: Throwable) {
+            result.error("SUB_OFFSET_FAILED", e.message, null)
           }
         }
       }
@@ -1758,6 +1772,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private fun emitSize() {
     if (width > 0 && height > 0) {
       emit(mapOf("event" to "size", "width" to width, "height" to height))
+    }
+  }
+
+  private fun withOpacity(raw: String, opacityPct: Double?): String {
+    if (opacityPct == null) return raw
+    val s = raw.trim()
+    if (s.isEmpty()) return s
+    return try {
+      val parsed = android.graphics.Color.parseColor(if (s.startsWith("#")) s else "#$s")
+      val rgb = parsed and 0x00FFFFFF
+      val a = ((opacityPct.coerceIn(0.0, 100.0) / 100.0) * 255).toInt().coerceIn(0, 255)
+      String.format("#%02X%06X", a, rgb)
+    } catch (_: Throwable) {
+      s
     }
   }
 

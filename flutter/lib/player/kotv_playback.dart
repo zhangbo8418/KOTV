@@ -120,7 +120,13 @@ abstract class KotvPlayback extends ChangeNotifier {
     String? bgColor,
     String? edgeType,
     bool useSystemStyle = false,
+    double? textOpacity,
+    double? bgOpacity,
+    double? edgeOpacity,
   }) async {}
+
+  /// 字幕时间偏移（毫秒）；正值字幕延后。不支持的引擎忽略。
+  Future<void> setSubtitleOffsetMs(int offsetMs) async {}
 
   /// 离开详情/切 Tab：stop + release，拆掉原生 AO，避免后台漏音。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。

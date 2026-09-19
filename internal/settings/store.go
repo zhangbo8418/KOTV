@@ -107,6 +107,18 @@ const (
 	AudioDialogue         Type = "audioDialogue"
 	AudioBalance          Type = "audioBalance"
 	DanmakuOffsetMs       Type = "danmakuOffsetMs"
+	SubtitleStyleMode     Type = "subtitleStyleMode"
+	SubtitleEdgeType      Type = "subtitleEdgeType"
+	SubtitleTextOpacity   Type = "subtitleTextOpacity"
+	SubtitleBgOpacity     Type = "subtitleBgOpacity"
+	SubtitleEdgeOpacity   Type = "subtitleEdgeOpacity"
+	SubtitleOffsetMs      Type = "subtitleOffsetMs"
+	PlayerScaleLive       Type = "playerScaleLive"
+	DanmakuLoad           Type = "danmakuLoad"
+	DanmakuAuto           Type = "danmakuAuto"
+	DanmakuSpiderFirst    Type = "danmakuSpiderFirst"
+	ExoDiskPreloadThreads Type = "exoDiskPreloadThreads"
+	ExoDiskPreloadSizeMb  Type = "exoDiskPreloadSizeMb"
 )
 
 type item struct {
@@ -210,6 +222,18 @@ func defaultFile() file {
 			{ID: "audioDialogue", Label: "对白增强", Value: "false"},
 			{ID: "audioBalance", Label: "声道平衡", Value: "0"},
 			{ID: "danmakuOffsetMs", Label: "弹幕偏移毫秒", Value: "0"},
+			{ID: "subtitleStyleMode", Label: "字幕样式模式", Value: "custom"},
+			{ID: "subtitleEdgeType", Label: "字幕描边类型", Value: "outline"},
+			{ID: "subtitleTextOpacity", Label: "字幕正文透明度", Value: "100"},
+			{ID: "subtitleBgOpacity", Label: "字幕背景透明度", Value: "100"},
+			{ID: "subtitleEdgeOpacity", Label: "字幕描边透明度", Value: "100"},
+			{ID: "subtitleOffsetMs", Label: "字幕时间偏移", Value: "0"},
+			{ID: "playerScaleLive", Label: "直播画面比例", Value: "default"},
+			{ID: "danmakuLoad", Label: "加载弹幕", Value: "true"},
+			{ID: "danmakuAuto", Label: "自动搜索弹幕", Value: "true"},
+			{ID: "danmakuSpiderFirst", Label: "片源弹幕优先", Value: "true"},
+			{ID: "exoDiskPreloadThreads", Label: "Exo预读线程", Value: "2"},
+			{ID: "exoDiskPreloadSizeMb", Label: "Exo预读容量MB", Value: "256"},
 		},
 		Cache: make(map[string]json.RawMessage),
 	}
@@ -309,6 +333,18 @@ func Load() error {
 	ensureSettingLocked(AudioDialogue, "对白增强", "false")
 	ensureSettingLocked(AudioBalance, "声道平衡", "0")
 	ensureSettingLocked(DanmakuOffsetMs, "弹幕偏移毫秒", "0")
+	ensureSettingLocked(SubtitleStyleMode, "字幕样式模式", "custom")
+	ensureSettingLocked(SubtitleEdgeType, "字幕描边类型", "outline")
+	ensureSettingLocked(SubtitleTextOpacity, "字幕正文透明度", "100")
+	ensureSettingLocked(SubtitleBgOpacity, "字幕背景透明度", "100")
+	ensureSettingLocked(SubtitleEdgeOpacity, "字幕描边透明度", "100")
+	ensureSettingLocked(SubtitleOffsetMs, "字幕时间偏移", "0")
+	ensureSettingLocked(PlayerScaleLive, "直播画面比例", "default")
+	ensureSettingLocked(DanmakuLoad, "加载弹幕", "true")
+	ensureSettingLocked(DanmakuAuto, "自动搜索弹幕", "true")
+	ensureSettingLocked(DanmakuSpiderFirst, "片源弹幕优先", "true")
+	ensureSettingLocked(ExoDiskPreloadThreads, "Exo预读线程", "2")
+	ensureSettingLocked(ExoDiskPreloadSizeMb, "Exo预读容量MB", "256")
 	return nil
 }
 

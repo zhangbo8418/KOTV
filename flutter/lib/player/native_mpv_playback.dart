@@ -715,6 +715,9 @@ class NativeMpvPlayback extends KotvPlayback {
     String? bgColor,
     String? edgeType,
     bool useSystemStyle = false,
+    double? textOpacity,
+    double? bgOpacity,
+    double? edgeOpacity,
   }) async {
     try {
       await _ch.invokeMethod('setSubtitleStyle', {
@@ -728,6 +731,18 @@ class NativeMpvPlayback extends KotvPlayback {
         if (bgColor != null) 'bgColor': bgColor,
         if (edgeType != null) 'edgeType': edgeType,
         'useSystemStyle': useSystemStyle,
+        if (textOpacity != null) 'textOpacity': textOpacity,
+        if (bgOpacity != null) 'bgOpacity': bgOpacity,
+        if (edgeOpacity != null) 'edgeOpacity': edgeOpacity,
+      });
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setSubtitleOffsetMs(int offsetMs) async {
+    try {
+      await _ch.invokeMethod('setSubtitleOffsetMs', {
+        'ms': offsetMs.clamp(-300000, 300000),
       });
     } catch (_) {}
   }

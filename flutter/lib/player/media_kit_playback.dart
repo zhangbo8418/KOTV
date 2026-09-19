@@ -620,6 +620,9 @@ class MediaKitPlayback extends KotvPlayback {
     String? bgColor,
     String? edgeType,
     bool useSystemStyle = false,
+    double? textOpacity,
+    double? bgOpacity,
+    double? edgeOpacity,
   }) async {
     try {
       final platform = player.platform;
@@ -639,37 +642,42 @@ class MediaKitPlayback extends KotvPlayback {
           secondaryPos.toStringAsFixed(1),
         );
       }
-      if (color != null && color.trim().isNotEmpty) {
+      final applyLooks = forceStyle || useSystemStyle;
+      if (applyLooks && color != null && color.trim().isNotEmpty) {
         await (platform as dynamic).setProperty('sub-color', color.trim());
       }
-      if (borderColor != null && borderColor.trim().isNotEmpty) {
+      if (applyLooks && borderColor != null && borderColor.trim().isNotEmpty) {
         await (platform as dynamic).setProperty('sub-border-color', borderColor.trim());
       }
-      if (borderSize != null) {
+      if (applyLooks && borderSize != null) {
         await (platform as dynamic).setProperty(
           'sub-border-size',
           borderSize.clamp(0.0, 8.0).toStringAsFixed(1),
         );
       }
-      if (bgColor != null && bgColor.trim().isNotEmpty) {
+      if (applyLooks && bgColor != null && bgColor.trim().isNotEmpty) {
         await (platform as dynamic).setProperty('sub-back-color', bgColor.trim());
       }
       final edge = (edgeType ?? '').trim().toLowerCase();
-      if (edge == 'none') {
+      if (applyLooks && edge == 'none') {
         await (platform as dynamic).setProperty('sub-border-size', '0');
         await (platform as dynamic).setProperty('sub-shadow-offset', '0');
-      } else if (edge == 'shadow') {
+      } else if (applyLooks && edge == 'shadow') {
         await (platform as dynamic).setProperty('sub-shadow-offset', '2');
-      } else if (edge == 'raised' || edge == 'depressed') {
+      } else if (applyLooks && (edge == 'raised' || edge == 'depressed')) {
         await (platform as dynamic).setProperty('sub-shadow-offset', '1.5');
       }
-      if (forceStyle ||
-          color != null ||
-          borderColor != null ||
-          borderSize != null ||
-          edge.isNotEmpty) {
-        await (platform as dynamic).setProperty('sub-ass-override', 'force');
-      }
+      await (platform as dynamic).setProperty('sub-ass-override', forceStyle ? 'force' : 'scale');
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setSubtitleOffsetMs(int offsetMs) async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return;
+      final sec = (offsetMs.clamp(-300000, 300000) / 1000.0);
+      await (platform as dynamic).setProperty('sub-delay', sec.toStringAsFixed(3));
     } catch (_) {}
   }
 

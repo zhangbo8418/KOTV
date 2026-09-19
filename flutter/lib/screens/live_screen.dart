@@ -324,6 +324,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   bool _liveAutoChange = true;
   bool _liveAcross = true;
   bool _liveInvert = false;
+  String _liveScale = 'default';
   int _playSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
@@ -531,6 +532,40 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         _liveAcross = across != 'false' && across != 'off' && across != '0';
         final invert = '${settings['liveInvert'] ?? 'false'}'.trim().toLowerCase();
         _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
+        final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
+        _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
+        unawaited(_playback.setVideoScale(_liveScale));
+        final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.5);
+        final subPos = double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100.0;
+        final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '0'}') ?? 0.0;
+        final styleMode = '${settings['subtitleStyleMode'] ?? 'custom'}'.trim().toLowerCase();
+        final forceStyle = styleMode == 'custom';
+        final useSystem = styleMode == 'system';
+        final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
+        final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
+        final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
+        final subBg = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
+        final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
+        final double textOp = (double.tryParse('${settings['subtitleTextOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+        final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+        final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+        final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
+        unawaited(_playback.setSubtitleStyle(
+          scale: fontScale.toDouble(),
+          pos: subPos.clamp(0, 150).toDouble(),
+          secondaryPos: subSecPos.clamp(0, 150).toDouble(),
+          color: forceStyle && subColor.isNotEmpty ? subColor : null,
+          borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
+          borderSize: forceStyle ? subBorderSize.clamp(0, 8).toDouble() : null,
+          bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
+          edgeType: forceStyle ? edgeType : null,
+          useSystemStyle: useSystem,
+          textOpacity: forceStyle || useSystem ? textOp : null,
+          bgOpacity: forceStyle || useSystem ? bgOp : null,
+          edgeOpacity: forceStyle || useSystem ? edgeOp : null,
+          forceStyle: forceStyle,
+        ));
+        unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
         final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
         if (vol != null) {
           await _playback.setVolume(vol.clamp(0, 100));
@@ -822,6 +857,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
       _liveAcross = across != 'false' && across != 'off' && across != '0';
       final invert = '${settings['liveInvert'] ?? 'false'}'.trim().toLowerCase();
       _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
+      final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
+      _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
+      unawaited(_playback.setVideoScale(_liveScale));
     } catch (_) {}
     final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
     final startPlayer = (hasDrm && kotvIsAndroid()) ? 'innie#exo' : _prefPlayerVal;
@@ -943,6 +981,27 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         return const IgnorePointer(child: ColoredBox(color: Colors.black));
       },
     );
+  }
+
+  String _liveScaleLabel(String key) {
+    return switch (key) {
+      'fill' => '拉伸',
+      'zoom' => 'Zoom',
+      '16:9' => '16:9',
+      '4:3' => '4:3',
+      _ => '适应',
+    };
+  }
+
+  Future<void> _cycleLiveScale() async {
+    const keys = ['default', 'fill', 'zoom', '16:9', '4:3'];
+    final i = keys.indexOf(_liveScale);
+    final next = keys[(i < 0 ? 0 : i + 1) % keys.length];
+    setState(() => _liveScale = next);
+    unawaited(_playback.setVideoScale(next));
+    try {
+      await ref.read(apiProvider).setSetting('playerScaleLive', next);
+    } catch (_) {}
   }
 
   /// 上下换台；[_liveAcross] 为真时到组边界跨组，[_liveInvert] 由调用方决定方向。
@@ -2411,6 +2470,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
                                 AppPill(label: '刷新 EPG', height: 40, onTap: _loadEpg),
                                 const SizedBox(height: 8),
                                 AppPill(label: '投屏', height: 40, onTap: () => unawaited(_cast())),
+                                const SizedBox(height: 8),
+                                AppPill(
+                                  label: '画面比例 · ${_liveScaleLabel(_liveScale)}',
+                                  height: 40,
+                                  onTap: () => unawaited(_cycleLiveScale()),
+                                ),
                                 const SizedBox(height: 8),
                                 AppPill(label: '迷你桌面播放', height: 40, onTap: () => unawaited(_enterMini())),
                                 const SizedBox(height: 8),

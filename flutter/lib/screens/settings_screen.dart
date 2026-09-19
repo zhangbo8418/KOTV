@@ -376,7 +376,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final exoSoftVideoPrefer = kotvSettingsFlag(g('exoSoftVideoPrefer', 'true'), def: true);
         final exoBuffer = (int.tryParse(g('exoBuffer', '1')) ?? 1).clamp(1, 10).toDouble();
         final exoPreload = (int.tryParse(g('exoDiskPreloadMs', '10000')) ?? 10000).clamp(0, 120000).toDouble();
-        final exoPreloadThreads = (int.tryParse(g('exoDiskPreloadThreads', '2')) ?? 2).clamp(1, 8).toDouble();
+        final exoPreloadThreads = (int.tryParse(g('exoDiskPreloadThreads', '2')) ?? 2).clamp(1, 10).toDouble();
         final exoPreloadSizeMb = (int.tryParse(g('exoDiskPreloadSizeMb', '256')) ?? 256).clamp(128, 4096).toDouble();
         final exoLibass = kotvSettingsFlag(g('exoLibass', 'true'), def: true);
         final exoSecondary = g('exoSecondarySubtitle', 'off').trim().toLowerCase();
@@ -401,7 +401,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '磁盘预读',
             value: exoPreload,
             min: 0,
-            max: 60000,
+            max: 120000,
             divisions: 60,
             format: (v) => '${v.round()} ms',
             onChanging: (v) => setSheet(() => _s['exoDiskPreloadMs'] = '${v.round()}'),
@@ -411,8 +411,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '预读线程',
             value: exoPreloadThreads,
             min: 1,
-            max: 8,
-            divisions: 7,
+            max: 10,
+            divisions: 9,
             format: (v) => '${v.round()}',
             onChanging: (v) => setSheet(() => _s['exoDiskPreloadThreads'] = '${v.round()}'),
             onCommit: (v) => _set('exoDiskPreloadThreads', '${v.round()}'),
@@ -421,8 +421,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '预读容量',
             value: exoPreloadSizeMb,
             min: 128,
-            max: 2048,
-            divisions: 15,
+            max: 4096,
+            divisions: 31,
             format: (v) => '${v.round()} MB',
             onChanging: (v) => setSheet(() => _s['exoDiskPreloadSizeMb'] = '${v.round()}'),
             onCommit: (v) => _set('exoDiskPreloadSizeMb', '${v.round()}'),
@@ -1046,6 +1046,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onCommit: (v) => _set('subtitleBgOpacity', '${v.round()}'),
           ),
           _sheetSlider(
+            label: '描边透明度',
+            value: (double.tryParse(g('subtitleEdgeOpacity', '100')) ?? 100).clamp(0, 100),
+            min: 0,
+            max: 100,
+            divisions: 20,
+            format: (v) => '${v.round()}%',
+            onChanging: (v) => setSheet(() => _s['subtitleEdgeOpacity'] = '${v.round()}'),
+            onCommit: (v) => _set('subtitleEdgeOpacity', '${v.round()}'),
+          ),
+          _sheetSlider(
+            label: '时间偏移',
+            value: (double.tryParse(g('subtitleOffsetMs', '0')) ?? 0).clamp(-300000, 300000),
+            min: -300000,
+            max: 300000,
+            divisions: 120,
+            format: (v) {
+              final s = (v / 1000).round();
+              if (s == 0) return '0 s';
+              return s > 0 ? '+$s s' : '$s s';
+            },
+            onChanging: (v) => setSheet(() => _s['subtitleOffsetMs'] = '${v.round()}'),
+            onCommit: (v) => _set('subtitleOffsetMs', '${v.round()}', msg: '字幕偏移已更新'),
+          ),
+          _sheetSlider(
             label: '副字幕位置',
             value: (double.tryParse(g('subtitleSecondaryPos', '0')) ?? 0).clamp(0.0, 150.0),
             min: 0,
@@ -1142,6 +1166,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             value: on,
             onChanged: (v) async {
               await _set('danmaku', v ? 'true' : 'false', msg: v ? '弹幕已开启' : '弹幕已关闭');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '加载弹幕',
+            value: flag('danmakuLoad'),
+            onChanged: (v) async {
+              await _set('danmakuLoad', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '自动搜索弹幕',
+            value: flag('danmakuAuto'),
+            onChanged: (v) async {
+              await _set('danmakuAuto', v ? 'true' : 'false');
+              setSheet(() {});
+            },
+          ),
+          _sheetToggle(
+            label: '片源弹幕优先',
+            value: flag('danmakuSpiderFirst'),
+            onChanged: (v) async {
+              await _set('danmakuSpiderFirst', v ? 'true' : 'false');
               setSheet(() {});
             },
           ),
@@ -1812,6 +1860,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final livePlayerLabel = flutterPlayerLabel(livePlayerVal);
     final speed = g('playerSpeed', '1.0');
     final scale = g('playerScale', 'default');
+    final scaleLive = g('playerScaleLive', scale);
     final decode = g('playerDecode', 'auto');
     final render = kotvNormalizePlayerRender(g('playerRender', 'surface'));
     final playerFailover = g('playerFailover', 'auto');
@@ -1832,6 +1881,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           '4:3': '4:3',
         }[scale] ??
         scale;
+    final scaleLiveLabel = {
+          'default': '适应',
+          'fill': '拉伸',
+          'zoom': 'Zoom',
+          '16:9': '16:9',
+          '4:3': '4:3',
+        }[scaleLive] ??
+        scaleLive;
     final decodeLabel = {'auto': '自动', 'soft': '软解码', 'hard': '硬解码'}[decode] ?? decode;
     final renderLabel = kotvPlayerRenderLabel(render);
     final failoverLabel = (playerFailover == 'off' || playerFailover == 'false') ? '关闭' : '自动';
@@ -2074,6 +2131,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           label: '画面比例',
                           value: scaleLabel,
                           onTap: () => _pick('画面比例', 'playerScale', const [
+                            ('适应', 'default'),
+                            ('拉伸', 'fill'),
+                            ('Zoom', 'zoom'),
+                            ('16:9', '16:9'),
+                            ('4:3', '4:3'),
+                          ]),
+                        ),
+                        KotvSettingsCell(
+                          label: '直播画面比例',
+                          value: scaleLiveLabel,
+                          onTap: () => _pick('直播画面比例', 'playerScaleLive', const [
                             ('适应', 'default'),
                             ('拉伸', 'fill'),
                             ('Zoom', 'zoom'),

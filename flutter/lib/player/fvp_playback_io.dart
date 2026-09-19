@@ -808,6 +808,9 @@ class FvpPlayback extends KotvPlayback {
     String? bgColor,
     String? edgeType,
     bool useSystemStyle = false,
+    double? textOpacity,
+    double? bgOpacity,
+    double? edgeOpacity,
   }) async {
     final c = _c;
     if (c == null || !c.value.isInitialized) return;
@@ -822,27 +825,39 @@ class FvpPlayback extends KotvPlayback {
       if (secondaryPos != null) {
         c.setProperty('subtitle2.margin', secondaryPos.clamp(0.0, 150.0).toStringAsFixed(1));
       }
-      if (color != null && color.trim().isNotEmpty) {
+      final applyLooks = forceStyle || useSystemStyle;
+      if (applyLooks && color != null && color.trim().isNotEmpty) {
         c.setProperty('subtitle.color', color.trim());
       }
-      if (borderColor != null && borderColor.trim().isNotEmpty) {
+      if (applyLooks && borderColor != null && borderColor.trim().isNotEmpty) {
         c.setProperty('subtitle.outline_color', borderColor.trim());
       }
-      if (borderSize != null) {
+      if (applyLooks && borderSize != null) {
         c.setProperty('subtitle.outline', borderSize.clamp(0.0, 8.0).toStringAsFixed(1));
       }
-      if (bgColor != null && bgColor.trim().isNotEmpty) {
+      if (applyLooks && bgColor != null && bgColor.trim().isNotEmpty) {
         c.setProperty('subtitle.background_color', bgColor.trim());
       }
       final edge = (edgeType ?? '').trim().toLowerCase();
-      if (edge == 'none') {
+      if (applyLooks && edge == 'none') {
         c.setProperty('subtitle.outline', '0');
-      } else if (edge == 'shadow') {
+      } else if (applyLooks && edge == 'shadow') {
         c.setProperty('subtitle.shadow', '2');
       }
-      if (forceStyle || color != null || borderColor != null || borderSize != null || edge.isNotEmpty) {
+      if (forceStyle) {
         c.setProperty('subtitle.force', '1');
       }
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> setSubtitleOffsetMs(int offsetMs) async {
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      // mpv 风格：秒
+      final sec = offsetMs.clamp(-300000, 300000) / 1000.0;
+      c.setProperty('subtitle.delay', sec.toStringAsFixed(3));
     } catch (_) {}
   }
 
