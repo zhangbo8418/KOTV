@@ -2462,7 +2462,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'danmakuRows') {
             setState(() => _danmakuRows = int.tryParse(v) ?? _danmakuRows);
           }
-          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuFixedDurationMs' || k == 'danmakuLineSpacing' || k == 'danmakuStrokeMode' || k == 'danmakuColorMode' || k == 'danmakuRowsTop' || k == 'danmakuRowsBottom') {
+          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuFixedDurationMs' || k == 'danmakuLineSpacing' || k == 'danmakuStrokeMode' || k == 'danmakuColorMode' || k == 'danmakuFont' || k == 'danmakuRowsTop' || k == 'danmakuRowsBottom') {
             unawaited(_refreshDanmakuPrefs());
           }
           if (k == 'playerDecode') {
