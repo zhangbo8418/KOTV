@@ -436,7 +436,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             divisions: 9,
             format: (v) => '${v.round()}×',
             onChanging: (v) => setSheet(() => _s['exoBuffer'] = '${v.round()}'),
-            onCommit: (v) => _set('exoBuffer', '${v.round()}', msg: 'Exo 缓冲倍率已更新'),
+            onCommit: (v) => _set('exoBuffer', '${v.round()}', msg: '缓冲倍率已更新（播放中会重开）'),
           ),
           _sheetToggle(
             label: 'HLS 去广告',

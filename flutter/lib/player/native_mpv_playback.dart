@@ -410,7 +410,8 @@ class NativeMpvPlayback extends KotvPlayback {
       throw StateError(_lastError ?? '原生 MPV 未就绪');
     }
     // 点播/直播均先挂 Surface（页面已 setState 播控进树并 endOfFrame），再 loadfile。
-    await _setSurfaceLayerEnabled(true);
+    // 后台仅音频抑制时不挂。
+    await _syncSurfaceLayer();
     try {
       final props = <String, String>{
         ..._opts.propertyMap(live: live),
