@@ -119,7 +119,7 @@ class DetailScreen extends ConsumerStatefulWidget {
   ConsumerState<DetailScreen> createState() => _DetailScreenState();
 }
 
-class _DetailScreenState extends ConsumerState<DetailScreen> {
+class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBindingObserver {
   static _DetailScreenState? _active;
   VodDetail? _detail;
   String? _error;
@@ -147,6 +147,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   bool _danmakuAuto = true;
   bool _danmakuSpiderFirst = true;
   bool _ambientOn = false;
+  /// off | audio | pip
+  String _playerBackground = 'pip';
+  double _holdSpeed = 2.0;
   bool _stableVolumeOn = false;
   String _danmakuApi = '';
   double _danmakuSize = 18;
@@ -451,6 +454,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _api = ref.read(apiProvider);
     _active = this;
     kotvRegisterQuitHook(_prepareQuit);
@@ -460,6 +464,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
     };
     _load();
     WidgetsBinding.instance.addPostFrameCallback((_) => _attachRemoteHandlers());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      if (_playerBackground == 'off' && _playback.playing) {
+        unawaited(_playback.pause());
+      }
+    }
   }
 
   void _attachRemoteHandlers() {
@@ -564,7 +577,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   }
 
   void _syncAndroidAutoPip() {
-    unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, _playUrl.isNotEmpty));
+    final wantPip = _playerBackground == 'pip' && _playUrl.isNotEmpty;
+    unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, wantPip));
   }
 
   Future<void> _prepareQuit() async {
@@ -883,6 +897,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
   @override
   void dispose() {
     // 勿在此处 ref.read：会抛 Bad state，打断后面的 FVP/播放器 stop。
+    WidgetsBinding.instance.removeObserver(this);
     _detachRemoteHandlers();
     kotvUnregisterQuitHook(_prepareQuit);
     if (_active == this) _active = null;
@@ -1017,8 +1032,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         _danmakuLoad = _flagFromSettings(settings, 'danmakuLoad', true);
         _danmakuAuto = _flagFromSettings(settings, 'danmakuAuto', true);
         _danmakuSpiderFirst = _flagFromSettings(settings, 'danmakuSpiderFirst', true);
+        final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
+        _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
+        _holdSpeed = (double.tryParse('${settings['playerSpeedLongPress'] ?? '2.0'}') ?? 2.0).clamp(2.0, 5.0).toDouble();
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
         _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
+        _syncAndroidAutoPip();
         _danmakuApi = '${settings['danmakuApi'] ?? ''}';
         _danmakuSize = double.tryParse('${settings['danmakuSize'] ?? ''}') ?? 18;
         final op = double.tryParse('${settings['danmakuOpacity'] ?? ''}');
@@ -1408,6 +1427,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           final keys = _nextPlayCache.keys.toList();
           for (final k in keys.take(_nextPlayCache.length - 2)) {
             _nextPlayCache.remove(k);
+          }
+        }
+        // Exo 磁盘缓存开启时，把下一集媒体前段写入缓存。
+        final exo = _exo;
+        if (exo != null && token == _nextPreloadSerial) {
+          final engineBase = ref.read(apiProvider).baseUrl;
+          final playUrl = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', engineBase);
+          if (playUrl.isNotEmpty) {
+            final headers = <String, String>{
+              for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
+                if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
+            };
+            unawaited(exo.warmCacheUrl(playUrl, headers: headers));
           }
         }
       } catch (_) {}
@@ -2232,6 +2264,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
         danmakuLineSpacing: _danmakuLineSpacing,
         ambientOn: _ambientOn,
         stableVolumeOn: _stableVolumeOn,
+        holdSpeed: _holdSpeed,
         onAssrtSearch: _searchAssrtSubtitle,
         keepLabel: _kept ? '取消收藏' : '收藏',
         offsetId: id,
@@ -2273,6 +2306,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
           }
           if (k == 'playerAmbient') {
             setState(() => _ambientOn = v.toLowerCase() == 'true');
+          }
+          if (k == 'playerBackground') {
+            final bg = v.trim().toLowerCase();
+            setState(() => _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip');
+            _syncAndroidAutoPip();
+          }
+          if (k == 'playerSpeedLongPress') {
+            setState(() {
+              _holdSpeed = (double.tryParse(v) ?? _holdSpeed).clamp(2.0, 5.0).toDouble();
+            });
           }
           if (k == 'playerStableVolume') {
             final on = v.toLowerCase() == 'true';

@@ -1081,6 +1081,26 @@ class ExoPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
+  /// 预热下一集媒体到磁盘缓存（需已开磁盘缓存）。
+  Future<void> warmCacheUrl(String url, {Map<String, String>? headers, int? maxBytes}) async {
+    final u = url.trim();
+    if (u.isEmpty || !_diskCache) return;
+    try {
+      await _ensureNative();
+      await _ch.invokeMethod('warmCacheUrl', {
+        'url': u,
+        'headers': headers ?? const <String, String>{},
+        if (maxBytes != null) 'maxBytes': maxBytes,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> cancelWarmCache() async {
+    try {
+      await _ch.invokeMethod('cancelWarmCache');
+    } catch (_) {}
+  }
+
   /// 外挂字幕列表（open 时写入 MediaItem）。
   void setExternalSubs(List<Map<String, dynamic>> subs) {
     _subs = List<Map<String, dynamic>>.from(subs);

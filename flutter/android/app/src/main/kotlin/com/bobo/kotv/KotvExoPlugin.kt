@@ -504,6 +504,38 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
+      "warmCacheUrl" -> {
+        val url = call.argument<String>("url")?.trim().orEmpty()
+        @Suppress("UNCHECKED_CAST")
+        val headers =
+          (call.argument<Map<String, Any?>>("headers") ?: emptyMap())
+            .mapNotNull { (k, v) ->
+              val key = k.trim()
+              val value = v?.toString()?.trim().orEmpty()
+              if (key.isEmpty() || value.isEmpty()) null else key to value
+            }
+            .toMap()
+        val maxBytes =
+          call.argument<Number>("maxBytes")?.toLong()
+            ?: (diskPreloadMs.coerceAtLeast(5_000L) * 250L) // ~2Mbps 估算
+        val ctx = appContext
+        if (ctx == null || url.isEmpty() || !diskCacheEnabled) {
+          result.success(false)
+        } else {
+          KotvExoCacheWarmer.warm(
+            ctx,
+            httpClient,
+            url,
+            headers,
+            maxBytes.coerceIn(256L * 1024L, diskPreloadSizeMb.toLong() * 1024L * 1024L / 2),
+          )
+          result.success(true)
+        }
+      }
+      "cancelWarmCache" -> {
+        KotvExoCacheWarmer.cancel()
+        result.success(true)
+      }
       "setDecodeMode" -> {
         val mode = normalizeDecodeMode(call.argument<String>("mode")?.trim().orEmpty())
         main.post {
@@ -1897,6 +1929,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     main.removeCallbacks(tick)
     surfaceHost?.setBufferingUi(false, "")
     diskPreload.stop()
+    KotvExoCacheWarmer.cancel()
     releaseAudioEq()
     try {
       videoEqCtrl.clear(player)

@@ -114,6 +114,8 @@ const (
 	SubtitleEdgeOpacity   Type = "subtitleEdgeOpacity"
 	SubtitleOffsetMs      Type = "subtitleOffsetMs"
 	PlayerScaleLive       Type = "playerScaleLive"
+	PlayerBackground      Type = "playerBackground"
+	PlayerSpeedLongPress  Type = "playerSpeedLongPress"
 	DanmakuLoad           Type = "danmakuLoad"
 	DanmakuAuto           Type = "danmakuAuto"
 	DanmakuSpiderFirst    Type = "danmakuSpiderFirst"
@@ -229,6 +231,8 @@ func defaultFile() file {
 			{ID: "subtitleEdgeOpacity", Label: "字幕描边透明度", Value: "100"},
 			{ID: "subtitleOffsetMs", Label: "字幕时间偏移", Value: "0"},
 			{ID: "playerScaleLive", Label: "直播画面比例", Value: "default"},
+			{ID: "playerBackground", Label: "后台播放", Value: "pip"},
+			{ID: "playerSpeedLongPress", Label: "长按倍速", Value: "2.0"},
 			{ID: "danmakuLoad", Label: "加载弹幕", Value: "true"},
 			{ID: "danmakuAuto", Label: "自动搜索弹幕", Value: "true"},
 			{ID: "danmakuSpiderFirst", Label: "片源弹幕优先", Value: "true"},
@@ -340,6 +344,8 @@ func Load() error {
 	ensureSettingLocked(SubtitleEdgeOpacity, "字幕描边透明度", "100")
 	ensureSettingLocked(SubtitleOffsetMs, "字幕时间偏移", "0")
 	ensureSettingLocked(PlayerScaleLive, "直播画面比例", "default")
+	ensureSettingLocked(PlayerBackground, "后台播放", "pip")
+	ensureSettingLocked(PlayerSpeedLongPress, "长按倍速", "2.0")
 	ensureSettingLocked(DanmakuLoad, "加载弹幕", "true")
 	ensureSettingLocked(DanmakuAuto, "自动搜索弹幕", "true")
 	ensureSettingLocked(DanmakuSpiderFirst, "片源弹幕优先", "true")

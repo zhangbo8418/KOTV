@@ -56,7 +56,7 @@ class LiveScreen extends ConsumerStatefulWidget {
   ConsumerState<LiveScreen> createState() => _LiveScreenState();
 }
 
-class _LiveScreenState extends ConsumerState<LiveScreen> {
+class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObserver {
   static _LiveScreenState? _active;
 
   static Future<void> prepareLeave() async {
@@ -325,6 +325,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   bool _liveAcross = true;
   bool _liveInvert = false;
   String _liveScale = 'default';
+  /// off | audio | pip
+  String _playerBackground = 'pip';
   int _playSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
@@ -339,6 +341,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _active = this;
     liveScreenHandleBack = _handleLiveBack;
     kotvRegisterQuitHook(_prepareQuit);
@@ -353,8 +356,18 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _attachRemoteHandlers());
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      if (_playerBackground == 'off' && _playback.playing) {
+        unawaited(_playback.pause());
+      }
+    }
+  }
+
   void _syncAndroidAutoPip() {
-    unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, _playUrl.isNotEmpty));
+    final wantPip = _playerBackground == 'pip' && _playUrl.isNotEmpty;
+    unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, wantPip));
   }
 
   Future<void> _prepareQuit() async {
@@ -365,6 +378,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _detachRemoteHandlers();
     if (_active == this) _active = null;
     kotvUnregisterQuitHook(_prepareQuit);
@@ -566,6 +580,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
           forceStyle: forceStyle,
         ));
         unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
+        final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
+        _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
         final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
         if (vol != null) {
           await _playback.setVolume(vol.clamp(0, 100));
@@ -574,6 +590,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> {
         if (!mounted) return;
         await _playback.setDecodeMode(_decodeMode);
         await _playback.setRenderMode(_renderMode);
+        _syncAndroidAutoPip();
       } catch (_) {}
       if (!mounted) return;
       final data = await ref.read(apiProvider).liveSources();

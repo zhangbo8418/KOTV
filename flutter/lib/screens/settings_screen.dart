@@ -2125,6 +2125,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ('1.25 倍', '1.25'),
                             ('1.5 倍', '1.5'),
                             ('2.0 倍', '2.0'),
+                            ('3.0 倍', '3.0'),
+                            ('5.0 倍', '5.0'),
+                          ]),
+                        ),
+                        KotvSettingsCell(
+                          label: '长按倍速',
+                          value: '${g('playerSpeedLongPress', '2.0')} 倍',
+                          onTap: () => _pick('长按临时倍速', 'playerSpeedLongPress', const [
+                            ('2.0 倍', '2.0'),
+                            ('2.5 倍', '2.5'),
+                            ('3.0 倍', '3.0'),
+                            ('4.0 倍', '4.0'),
+                            ('5.0 倍', '5.0'),
+                          ]),
+                        ),
+                        KotvSettingsCell(
+                          label: '后台播放',
+                          value: switch (g('playerBackground', 'pip')) {
+                            'off' => '离开暂停',
+                            'audio' => '后台续播',
+                            _ => '画中画',
+                          },
+                          onTap: () => _pick('后台播放', 'playerBackground', const [
+                            ('离开暂停', 'off'),
+                            ('后台续播（不进画中画）', 'audio'),
+                            ('自动画中画', 'pip'),
                           ]),
                         ),
                         KotvSettingsCell(

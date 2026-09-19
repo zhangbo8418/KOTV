@@ -71,6 +71,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
+    this.holdSpeed = 2.0,
     this.onAssrtSearch,
     this.offsetId = '',
     this.offsetSite = '',
@@ -134,6 +135,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
+  final double holdSpeed;
   final Future<void> Function()? onAssrtSearch;
   final String offsetId;
   final String offsetSite;
@@ -159,6 +161,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   late bool _danmakuOn = widget.danmakuOn;
   late bool _ambientOn = widget.ambientOn;
   Timer? _hideTimer;
+  double? _rateBeforeHold;
+  bool _holdingSpeed = false;
+  String? _holdSpeedHint;
   Timer? _hintTimer;
   /// 指针/焦点停在顶底栏：暂停自动隐藏。
   bool _chromeHold = false;
@@ -296,6 +301,26 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       if (!mounted || !widget.playback.playing || _epOpen || _chromeHold) return;
       _setChrome(show: false, hideCursor: _hideCursorWhenIdle);
     });
+  }
+
+  void _startHoldSpeed() {
+    if (_holdingSpeed) return;
+    final cur = widget.playback.rate;
+    final target = widget.holdSpeed.clamp(2.0, 5.0);
+    if ((cur - target).abs() < 0.05) return;
+    _rateBeforeHold = cur;
+    _holdingSpeed = true;
+    unawaited(widget.playback.setRate(target));
+    setState(() => _holdSpeedHint = '×${target.toStringAsFixed(target == target.roundToDouble() ? 0 : 1)}');
+  }
+
+  void _stopHoldSpeed() {
+    if (!_holdingSpeed) return;
+    final restore = _rateBeforeHold ?? 1.0;
+    _holdingSpeed = false;
+    _rateBeforeHold = null;
+    unawaited(widget.playback.setRate(restore));
+    if (mounted) setState(() => _holdSpeedHint = null);
   }
 
   void _bumpChrome() {
@@ -1002,14 +1027,40 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                     ),
                   ),
                   Positioned.fill(
-                    child: Listener(
+                    child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
-                      onPointerDown: _onSwipePointerDown,
-                      onPointerMove: _onSwipePointerMove,
-                      onPointerUp: _onSwipePointerUp,
-                      onPointerCancel: _onSwipePointerCancel,
+                      onLongPressStart: (_) => _startHoldSpeed(),
+                      onLongPressEnd: (_) => _stopHoldSpeed(),
+                      onLongPressCancel: _stopHoldSpeed,
+                      child: Listener(
+                        behavior: HitTestBehavior.translucent,
+                        onPointerDown: _onSwipePointerDown,
+                        onPointerMove: _onSwipePointerMove,
+                        onPointerUp: _onSwipePointerUp,
+                        onPointerCancel: _onSwipePointerCancel,
+                      ),
                     ),
                   ),
+                  if (_holdSpeedHint != null)
+                    IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.62),
+                            borderRadius: BorderRadius.circular(22),
+                          ),
+                          child: Text(
+                            _holdSpeedHint!,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   if (widget.playUrl.isNotEmpty)
                     KotvBufferingOverlay(player: widget.playback),
                   if (_showForceLandscape && !_dragging && _dragDy.abs() < 4)

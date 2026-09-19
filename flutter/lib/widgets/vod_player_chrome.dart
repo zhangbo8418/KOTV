@@ -15,7 +15,7 @@ import '../util/pick_subtitle_file.dart';
 import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
 
-const _speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+const _speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
 
 /// key / 标签 / BoxFit / 固定画幅比（16:9、4:3 时非空）。
 const _aspects = <(String key, String label, BoxFit fit, double? ratio)>[
