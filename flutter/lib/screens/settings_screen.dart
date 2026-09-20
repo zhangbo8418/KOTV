@@ -457,9 +457,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final exoSoftAudioPrefer = kotvSettingsFlag(g('exoSoftAudioPrefer', 'false'), def: false);
         final exoSoftVideoPrefer = kotvSettingsFlag(g('exoSoftVideoPrefer', 'false'), def: false);
         final exoBuffer = (int.tryParse(g('exoBuffer', '1')) ?? 1).clamp(1, 10).toDouble();
-        final exoPreload = (int.tryParse(g('exoDiskPreloadMs', '10000')) ?? 10000).clamp(0, 120000).toDouble();
-        final exoPreloadThreads = (int.tryParse(g('exoDiskPreloadThreads', '2')) ?? 2).clamp(1, 10).toDouble();
-        final exoPreloadSizeMb = (int.tryParse(g('exoDiskPreloadSizeMb', '256')) ?? 256).clamp(128, 4096).toDouble();
+        final exoPreload = (int.tryParse(g('exoDiskPreloadMs', '120000')) ?? 120000).clamp(20000, 120000).toDouble();
+        final exoPreloadThreads = (int.tryParse(g('exoDiskPreloadThreads', '1')) ?? 1).clamp(1, 10).toDouble();
+        final exoPreloadSizeMb = (int.tryParse(g('exoDiskPreloadSizeMb', '128')) ?? 128).clamp(128, 4096).toDouble();
         final exoLibass = kotvSettingsFlag(g('exoLibass', 'true'), def: true);
         final exoSecondary = g('exoSecondarySubtitle', 'default').trim().toLowerCase();
         final exoDolby = int.tryParse(g('exoDolbyVision', '0')) ?? 0;
@@ -481,10 +481,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _sheetSlider(
             label: '磁盘预读',
             value: exoPreload,
-            min: 0,
+            min: 20000,
             max: 120000,
-            divisions: 60,
-            format: (v) => '${v.round()} ms',
+            divisions: 10,
+            format: (v) => '${(v / 1000).round()} s',
             onChanging: (v) => setSheet(() => _s['exoDiskPreloadMs'] = '${v.round()}'),
             onCommit: (v) => _set('exoDiskPreloadMs', '${v.round()}', msg: 'Exo 磁盘预读已更新'),
           ),
@@ -1115,7 +1115,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _showPlayerSubSheet(
       title: '字幕样式',
       buildChildren: (setSheet) {
-        final scale = (double.tryParse(g('subtitleFontScale', '1.0')) ?? 1.0).clamp(0.5, 2.5);
+        final scale = (double.tryParse(g('subtitleFontScale', '1.0')) ?? 1.0).clamp(0.5, 2.0);
         final pos = kotvSubtitlePosFromSettings(g('subtitlePos', '0'));
         final border = (double.tryParse(g('subtitleBorderSize', '2')) ?? 2).clamp(0.0, 8.0);
         final color = g('subtitleColor', '#FFFFFF');
@@ -1169,8 +1169,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '字号倍率',
             value: scale,
             min: 0.5,
-            max: 2.5,
-            divisions: 20,
+            max: 2.0,
+            divisions: 15,
             format: (v) => v.toStringAsFixed(2),
             onChanging: (v) => setSheet(() => _s['subtitleFontScale'] = v.toStringAsFixed(2)),
             onCommit: (v) => _set('subtitleFontScale', v.toStringAsFixed(2), msg: '字幕字号已更新'),
@@ -2595,10 +2595,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: '预加载下一集',
-                          value: (g('preloadNextEpisode', 'true') == 'false') ? '关闭' : '开启',
+                          value: (g('preloadNextEpisode', 'false') == 'true') ? '开启' : '关闭',
                           onTap: () => unawaited(_set(
                             'preloadNextEpisode',
-                            g('preloadNextEpisode', 'true') == 'false' ? 'true' : 'false',
+                            g('preloadNextEpisode', 'false') == 'true' ? 'false' : 'true',
                             msg: '预加载下一集已更新',
                           )),
                         ),

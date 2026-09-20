@@ -568,7 +568,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
         _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
         unawaited(_playback.setVideoScale(_liveScale));
-        final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.5);
+        final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
         final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
         final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
         final styleMode = '${settings['subtitleStyleMode'] ?? 'original'}'.trim().toLowerCase();

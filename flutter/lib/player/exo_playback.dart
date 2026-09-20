@@ -70,9 +70,9 @@ class ExoPlayback extends KotvPlayback {
   bool _softVideoPrefer = false;
   int _bufferFactor = 1;
   String _preferredTextLangs = '';
-  int _diskPreloadMs = 10000;
-  int _diskPreloadThreads = 2;
-  int _diskPreloadSizeMb = 256;
+  int _diskPreloadMs = 120000;
+  int _diskPreloadThreads = 1;
+  int _diskPreloadSizeMb = 128;
   bool _libass = true;
   String _secondarySubtitle = 'default';
   String? _currentSecondarySubtitleId;
@@ -910,20 +910,20 @@ class ExoPlayback extends KotvPlayback {
     _libass = kotvSettingsMapFlag(settings, 'exoLibass', def: true);
     _dolbyVisionPolicy = int.tryParse('${settings['exoDolbyVision'] ?? '0'}') ?? 0;
     _preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
-    _diskPreloadMs = int.tryParse('${settings['exoDiskPreloadMs'] ?? '10000'}') ?? 10000;
-    if (_diskPreloadMs < 0) _diskPreloadMs = 0;
+    _diskPreloadMs = int.tryParse('${settings['exoDiskPreloadMs'] ?? '120000'}') ?? 120000;
+    if (_diskPreloadMs < 20000) _diskPreloadMs = 20000;
     if (_diskPreloadMs > 120000) _diskPreloadMs = 120000;
-    _diskPreloadThreads = int.tryParse('${settings['exoDiskPreloadThreads'] ?? '2'}') ?? 2;
+    _diskPreloadThreads = int.tryParse('${settings['exoDiskPreloadThreads'] ?? '1'}') ?? 1;
     if (_diskPreloadThreads < 1) _diskPreloadThreads = 1;
     if (_diskPreloadThreads > 10) _diskPreloadThreads = 10;
-    _diskPreloadSizeMb = int.tryParse('${settings['exoDiskPreloadSizeMb'] ?? '256'}') ?? 256;
+    _diskPreloadSizeMb = int.tryParse('${settings['exoDiskPreloadSizeMb'] ?? '128'}') ?? 128;
     if (_diskPreloadSizeMb < 128) _diskPreloadSizeMb = 128;
     if (_diskPreloadSizeMb > 4096) _diskPreloadSizeMb = 4096;
     final sec = '${settings['exoSecondarySubtitle'] ?? 'default'}'.trim().toLowerCase();
     _secondarySubtitle = (sec == 'auto' || sec == 'on' || sec == 'manual' || sec == 'default' || sec == 'player')
         ? (sec == 'on' ? 'auto' : (sec == 'player' ? 'default' : sec))
         : 'default';
-    _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
+    _subtitleFontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
     _subtitlePos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
     _subtitleSecondaryPos =
         (double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10).clamp(0, 150);
@@ -1109,7 +1109,7 @@ class ExoPlayback extends KotvPlayback {
     String? font,
     String? fontPath,
   }) async {
-    if (scale != null) _subtitleFontScale = scale.clamp(0.5, 2.5);
+    if (scale != null) _subtitleFontScale = scale.clamp(0.5, 2.0);
     if (pos != null) _subtitlePos = pos.clamp(-20, 30);
     if (secondaryPos != null) _subtitleSecondaryPos = secondaryPos.clamp(0, 150);
     if (color != null && color.trim().isNotEmpty) _subtitleColor = color.trim();

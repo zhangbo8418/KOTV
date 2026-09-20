@@ -255,7 +255,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 下一集 play 预解析缓存（ep.url → 引擎 play 返回）。
   final Map<String, Map<String, dynamic>> _nextPlayCache = {};
   int _nextPreloadSerial = 0;
-  bool _preloadNextEpisode = true;
+  bool _preloadNextEpisode = false;
+  bool _exoDiskCache = false;
   RemoteBridge? _boundRemote;
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
@@ -1046,7 +1047,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }
         _exo?.applyPlayerOptions(settings);
         _fvp?.applyPlayerOptions(settings);
-        final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.5);
+        final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
         final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
         final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
         final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
@@ -1464,7 +1465,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     required int currentIdx,
     required int serial,
   }) {
-    if (!_preloadNextEpisode) return;
+    if (!_preloadNextEpisode || !_exoDiskCache) return;
     final nextIdx = currentIdx + 1;
     if (nextIdx < 0 || nextIdx >= eps.length) return;
     final nextUrl = eps[nextIdx].url.trim();
@@ -1711,7 +1712,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (bp.isNotEmpty) {
           backendProxyPlay = bp == 'true' || bp == '1' || bp == 'on';
         }
-        _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'true', def: true);
+        _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
+        _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
       } catch (_) {}
       final remoteEngine = !kotvIsLocalEngineBaseUrl(ref.read(apiProvider).baseUrl);
       // 本机走本地代理；远端看开关。优先用引擎 play 接口算好的 preferSpiderProxy。
@@ -2250,7 +2252,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       }
       _exo?.applyPlayerOptions(settings);
       _fvp?.applyPlayerOptions(settings);
-      final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.5);
+      final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
       final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
       final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
       final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();

@@ -673,7 +673,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           try {
             if (created.get()) {
               if (scale != null) {
-                MPVLib.setPropertyDouble("sub-scale", scale.coerceIn(0.5, 2.5))
+                MPVLib.setPropertyDouble("sub-scale", scale.coerceIn(0.5, 2.0))
               }
               if (pos != null) {
                 MPVLib.setPropertyDouble("sub-pos", (100.0 - pos).coerceIn(0.0, 150.0))
@@ -1214,7 +1214,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     call.argument<String>("videoVf")?.let { videoVf = it.trim() }
     call.argument<Number>("subtitleFontScale")?.toDouble()?.let {
       try {
-        MPVLib.setPropertyDouble("sub-scale", it.coerceIn(0.5, 2.5))
+        MPVLib.setPropertyDouble("sub-scale", it.coerceIn(0.5, 2.0))
       } catch (_: Throwable) {
       }
     }

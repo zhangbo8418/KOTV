@@ -147,9 +147,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** 首选字幕语言（BCP-47，逗号分隔）；空则跟系统 Locale。 */
   private var preferredTextLangs: String = ""
   /** 点播磁盘预读时长（毫秒）；仅 diskCache 开启时生效。 */
-  private var diskPreloadMs: Long = 10_000L
-  private var diskPreloadThreads: Int = 2
-  private var diskPreloadSizeMb: Int = 256
+  private var diskPreloadMs: Long = 120_000L
+  private var diskPreloadThreads: Int = 1
+  private var diskPreloadSizeMb: Int = 128
   private val diskPreload = KotvExoDiskPreload()
   /** rebuildPlayer 留下的上游/渲染工厂，供 DiskPreload 复用。 */
   private var preloadUpstream: DataSource.Factory? = null
@@ -391,7 +391,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
         call.argument<String>("preferredTextLangs")?.let { preferredTextLangs = it.trim() }
         call.argument<Number>("diskPreloadMs")?.toLong()?.let {
-          diskPreloadMs = it.coerceIn(0L, 120_000L)
+          diskPreloadMs = it.coerceIn(20_000L, 120_000L)
         }
         call.argument<Number>("diskPreloadThreads")?.toInt()?.let {
           diskPreloadThreads = it.coerceIn(1, 10)
@@ -406,7 +406,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
         call.argument<String>("secondarySubtitleId")?.let { secondarySubtitleId = it.trim() }
         call.argument<Number>("subtitleFontScale")?.toFloat()?.let {
-          subtitleFontScale = it.coerceIn(0.5f, 2.5f)
+          subtitleFontScale = it.coerceIn(0.5f, 2.0f)
         }
         ingestSubtitleStyleArgs(call)
         call.argument<String>("audioEq")?.let { audioEqMode = normalizeAudioEq(it) }
@@ -457,7 +457,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "setSubtitleStyle" -> {
         call.argument<Number>("scale")?.toFloat()?.let {
-          subtitleFontScale = it.coerceIn(0.5f, 2.5f)
+          subtitleFontScale = it.coerceIn(0.5f, 2.0f)
         }
         call.argument<Number>("pos")?.toDouble()?.let { subtitlePos = it.coerceIn(-20.0, 30.0) }
         call.argument<Number>("secondaryPos")?.toDouble()?.let {
@@ -1464,7 +1464,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun buildSubtitleConfigs(raw: List<Map<String, Any?>>): List<MediaItem.SubtitleConfiguration> {
     if (raw.isEmpty()) return emptyList()
-    val out = ArrayList<MediaItem.SubtitleConfiguration>()
+    data class Entry(val url: String, val label: String, val lang: String, val mime: String?, val rawFlag: Int)
+    val entries = ArrayList<Entry>()
     for (m in raw) {
       val u = m["url"]?.toString()?.trim().orEmpty()
       if (u.isEmpty()) continue
@@ -1472,10 +1473,45 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       val lang = m["lang"]?.toString()?.trim().orEmpty()
       val mime = m["mime"]?.toString()?.trim()?.ifEmpty { null }
         ?: m["format"]?.toString()?.trim()?.ifEmpty { null }
-      val builder = MediaItem.SubtitleConfiguration.Builder(Uri.parse(u))
-      if (label.isNotEmpty()) builder.setLabel(label)
-      if (lang.isNotEmpty()) builder.setLanguage(lang)
-      if (!mime.isNullOrBlank()) builder.setMimeType(mime)
+      val rawFlag =
+        when (val f = m["flag"] ?: m["selectionFlags"] ?: m["selectionFlag"]) {
+          is Number -> f.toInt()
+          is String -> f.trim().toIntOrNull() ?: 0
+          else -> 0
+        }
+      entries.add(Entry(u, label, lang, mime, rawFlag))
+    }
+    if (entries.isEmpty()) return emptyList()
+    val hasExplicitFlags = entries.any { it.rawFlag != 0 }
+    var defaultIndex = -1
+    if (!hasExplicitFlags && entries.size > 1) {
+      var bestScore = 0
+      for (i in entries.indices) {
+        val score = KotvLangUtil.preferredTextLanguageScore(entries[i].lang)
+        if (score > bestScore) {
+          bestScore = score
+          defaultIndex = i
+        }
+      }
+      if (defaultIndex < 0) defaultIndex = 0
+    }
+    val out = ArrayList<MediaItem.SubtitleConfiguration>(entries.size)
+    for (i in entries.indices) {
+      val e = entries[i]
+      val builder = MediaItem.SubtitleConfiguration.Builder(Uri.parse(e.url))
+      if (e.label.isNotEmpty()) builder.setLabel(e.label)
+      if (e.lang.isNotEmpty()) builder.setLanguage(e.lang)
+      if (!e.mime.isNullOrBlank()) builder.setMimeType(e.mime)
+      val flags =
+        when {
+          e.rawFlag != 0 -> e.rawFlag
+          hasExplicitFlags -> C.SELECTION_FLAG_AUTOSELECT
+          entries.size == 1 -> 0
+          defaultIndex < 0 -> 0
+          i == defaultIndex -> C.SELECTION_FLAG_DEFAULT
+          else -> C.SELECTION_FLAG_AUTOSELECT
+        }
+      if (flags != 0) builder.setSelectionFlags(flags)
       out.add(builder.build())
     }
     return out
@@ -1579,7 +1615,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun ingestSubtitleStyleArgs(call: MethodCall) {
     call.argument<Number>("subtitleFontScale")?.toFloat()?.let {
-      subtitleFontScale = it.coerceIn(0.5f, 2.5f)
+      subtitleFontScale = it.coerceIn(0.5f, 2.0f)
     }
     call.argument<Number>("subtitlePos")?.toDouble()?.let { subtitlePos = it.coerceIn(-20.0, 30.0) }
     call.argument<Number>("subtitleSecondaryPos")?.toDouble()?.let {
@@ -1686,7 +1722,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val cm =
           appContext?.getSystemService(android.view.accessibility.CaptioningManager::class.java)
         if (cm != null) {
-          scale = (subtitleFontScale * cm.fontScale).coerceIn(0.5f, 2.5f)
+          scale = (subtitleFontScale * cm.fontScale).coerceIn(0.5f, 2.0f)
           val style = cm.userStyle
           if (style.hasForegroundColor()) {
             color = String.format("#%08X", style.foregroundColor)

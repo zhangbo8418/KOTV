@@ -91,7 +91,7 @@ class KotvMpvOpts {
   final String audioChannelMode;
   /// 音画偏移毫秒（正值声音滞后）。
   final int audioOffsetMs;
-  /// mpv `sub-scale`（0.5–2.5）。
+  /// mpv `sub-scale`（0.5–2.0）。
   final double subtitleFontScale;
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
@@ -118,7 +118,7 @@ class KotvMpvOpts {
     if (dolby < 0 || dolby > 2) dolby = 0;
     final preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
     var fontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
-    fontScale = fontScale.clamp(0.5, 2.5);
+    fontScale = fontScale.clamp(0.5, 2.0);
     return KotvMpvOpts(
       decodeMode: decode.isEmpty ? 'auto' : decode,
       gpuNext: gpuNext,
@@ -347,7 +347,7 @@ class KotvMpvOpts {
         await set('audio-delay', (audioOffsetMs / 1000.0).toStringAsFixed(3));
       } catch (_) {}
       try {
-        await set('sub-scale', subtitleFontScale.clamp(0.5, 2.5).toStringAsFixed(2));
+        await set('sub-scale', subtitleFontScale.clamp(0.5, 2.0).toStringAsFixed(2));
       } catch (_) {}
     } catch (_) {}
   }
@@ -395,7 +395,7 @@ class KotvMpvOpts {
       out[e.$1] = e.$2;
     }
     out.addAll(videoEq.mpvProps());
-    out['sub-scale'] = subtitleFontScale.clamp(0.5, 2.5).toStringAsFixed(2);
+    out['sub-scale'] = subtitleFontScale.clamp(0.5, 2.0).toStringAsFixed(2);
     out['audio-delay'] = (audioOffsetMs / 1000.0).toStringAsFixed(3);
     return out;
   }
@@ -409,7 +409,7 @@ class KotvMpvOpts {
         'eqHue': videoEq.enabled ? videoEq.hue : 0,
         'audioAf': audioPassThrough ? '' : _composedAf(),
         'videoVf': videoEq.mpvVf(),
-        'subtitleFontScale': subtitleFontScale.clamp(0.5, 2.5),
+        'subtitleFontScale': subtitleFontScale.clamp(0.5, 2.0),
       };
 
   /// UI / 引擎托管、写入 mpv.conf 会被忽略的选项。

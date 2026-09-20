@@ -139,7 +139,7 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     fontName: String = "default",
     fontPath: String = "",
   ) {
-    this.fontScale = fontScale.coerceIn(0.5f, 2.5f)
+    this.fontScale = fontScale.coerceIn(0.5f, 2.0f)
     this.primaryPos = primaryPos.coerceIn(-20.0, 30.0)
     this.secondaryPos = secondaryPos.coerceIn(0.0, 150.0)
     primaryBottomFraction = posToBottomFraction(this.primaryPos)

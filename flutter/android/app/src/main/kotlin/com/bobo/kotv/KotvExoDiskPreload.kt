@@ -22,8 +22,8 @@ class KotvExoDiskPreload {
     mediaItem: MediaItem,
     upstream: DataSource.Factory,
     renderers: RenderersFactory,
-    durationMs: Long = 10_000L,
-    maxThreads: Int = 2,
+    durationMs: Long = 120_000L,
+    maxThreads: Int = 1,
   ) {
     stop()
     val m =
@@ -34,7 +34,7 @@ class KotvExoDiskPreload {
     player.setPriorityTaskManager(priorityTaskManager)
     val options =
       DiskPreloadManager.Options.builder()
-        .setDurationMs(durationMs.coerceIn(5_000L, 120_000L))
+        .setDurationMs(durationMs.coerceIn(20_000L, 120_000L))
         .setMaxThreads(maxThreads.coerceIn(1, 10))
         .build()
     m.start(player, mediaItem, options)

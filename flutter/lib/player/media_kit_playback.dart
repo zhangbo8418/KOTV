@@ -657,7 +657,7 @@ class MediaKitPlayback extends KotvPlayback {
       if (scale != null) {
         await (platform as dynamic).setProperty(
           'sub-scale',
-          scale.clamp(0.5, 2.5).toStringAsFixed(2),
+          scale.clamp(0.5, 2.0).toStringAsFixed(2),
         );
       }
       if (pos != null) {

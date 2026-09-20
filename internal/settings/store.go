@@ -213,7 +213,7 @@ func defaultFile() file {
 			{ID: "exoSecondarySubtitle", Label: "Exo副字幕", Value: "default"},
 			{ID: "exoDolbyVision", Label: "Exo杜比视界", Value: "0"},
 			{ID: "exoPreferredTextLangs", Label: "Exo首选字幕语言", Value: ""},
-			{ID: "exoDiskPreloadMs", Label: "Exo磁盘预读毫秒", Value: "10000"},
+			{ID: "exoDiskPreloadMs", Label: "Exo磁盘预读毫秒", Value: "120000"},
 			{ID: "mpvTlsVerify", Label: "MPV TLS校验", Value: "true"},
 			{ID: "mpvDiskCache", Label: "MPV磁盘缓存", Value: "false"},
 			{ID: "mpvGpuApi", Label: "MPV gpu-api", Value: "auto"},
@@ -227,7 +227,7 @@ func defaultFile() file {
 			{ID: "videoTemperature", Label: "画面色温", Value: "0"},
 			{ID: "videoSharpness", Label: "画面锐度", Value: "0"},
 			{ID: "videoShadow", Label: "画面阴影", Value: "0"},
-			{ID: "preloadNextEpisode", Label: "预解析下一集", Value: "true"},
+			{ID: "preloadNextEpisode", Label: "预解析下一集", Value: "false"},
 			{ID: "subtitleFontScale", Label: "字幕字号", Value: "1.0"},
 			{ID: "subtitlePos", Label: "字幕位置", Value: "0"},
 			{ID: "subtitleColor", Label: "字幕颜色", Value: "#FFFFFF"},
@@ -236,7 +236,7 @@ func defaultFile() file {
 			{ID: "subtitleSecondaryPos", Label: "副字幕位置", Value: "10"},
 			{ID: "subtitleBgColor", Label: "字幕背景", Value: "#00000000"},
 			{ID: "audioEqBands", Label: "音频均衡频段", Value: ""},
-			{ID: "audioDialogue", Label: "对白增强", Value: "false"},
+			{ID: "audioDialogue", Label: "对白增强", Value: "0"},
 			{ID: "audioBalance", Label: "声道平衡", Value: "0"},
 			{ID: "danmakuOffsetMs", Label: "弹幕偏移毫秒", Value: "0"},
 			{ID: "subtitleStyleMode", Label: "字幕样式模式", Value: "original"},
@@ -266,8 +266,8 @@ func defaultFile() file {
 			{ID: "danmakuFont", Label: "弹幕字体", Value: "default"},
 			{ID: "danmakuRowsTop", Label: "顶部弹幕行数", Value: "3"},
 			{ID: "danmakuRowsBottom", Label: "底部弹幕行数", Value: "3"},
-			{ID: "exoDiskPreloadThreads", Label: "Exo预读线程", Value: "2"},
-			{ID: "exoDiskPreloadSizeMb", Label: "Exo预读容量MB", Value: "256"},
+			{ID: "exoDiskPreloadThreads", Label: "Exo预读线程", Value: "1"},
+			{ID: "exoDiskPreloadSizeMb", Label: "Exo预读容量MB", Value: "128"},
 		},
 		Cache: make(map[string]json.RawMessage),
 	}
@@ -341,7 +341,7 @@ func Load() error {
 	ensureSettingLocked(ExoSecondarySubtitle, "Exo副字幕", "default")
 	ensureSettingLocked(ExoDolbyVision, "Exo杜比视界", "0")
 	ensureSettingLocked(ExoPreferredTextLangs, "Exo首选字幕语言", "")
-	ensureSettingLocked(ExoDiskPreloadMs, "Exo磁盘预读毫秒", "10000")
+	ensureSettingLocked(ExoDiskPreloadMs, "Exo磁盘预读毫秒", "120000")
 	ensureSettingLocked(MpvTlsVerify, "MPV TLS校验", "true")
 	ensureSettingLocked(MpvDiskCache, "MPV磁盘缓存", "false")
 	ensureSettingLocked(MpvGpuApi, "MPV gpu-api", "auto")
@@ -355,7 +355,7 @@ func Load() error {
 	ensureSettingLocked(VideoTemperature, "画面色温", "0")
 	ensureSettingLocked(VideoSharpness, "画面锐度", "0")
 	ensureSettingLocked(VideoShadow, "画面阴影", "0")
-	ensureSettingLocked(PreloadNextEpisode, "预解析下一集", "true")
+	ensureSettingLocked(PreloadNextEpisode, "预解析下一集", "false")
 	ensureSettingLocked(SubtitleFontScale, "字幕字号", "1.0")
 	ensureSettingLocked(SubtitlePos, "字幕位置", "0")
 	ensureSettingLocked(SubtitleColor, "字幕颜色", "#FFFFFF")
@@ -364,7 +364,7 @@ func Load() error {
 	ensureSettingLocked(SubtitleSecondaryPos, "副字幕位置", "10")
 	ensureSettingLocked(SubtitleBgColor, "字幕背景", "#00000000")
 	ensureSettingLocked(AudioEqBands, "音频均衡频段", "")
-	ensureSettingLocked(AudioDialogue, "对白增强", "false")
+	ensureSettingLocked(AudioDialogue, "对白增强", "0")
 	ensureSettingLocked(AudioBalance, "声道平衡", "0")
 	ensureSettingLocked(DanmakuOffsetMs, "弹幕偏移毫秒", "0")
 	ensureSettingLocked(SubtitleStyleMode, "字幕样式模式", "original")
@@ -379,8 +379,8 @@ func Load() error {
 	ensureSettingLocked(DanmakuLoad, "加载弹幕", "true")
 	ensureSettingLocked(DanmakuAuto, "自动搜索弹幕", "true")
 	ensureSettingLocked(DanmakuSpiderFirst, "片源弹幕优先", "true")
-	ensureSettingLocked(ExoDiskPreloadThreads, "Exo预读线程", "2")
-	ensureSettingLocked(ExoDiskPreloadSizeMb, "Exo预读容量MB", "256")
+	ensureSettingLocked(ExoDiskPreloadThreads, "Exo预读线程", "1")
+	ensureSettingLocked(ExoDiskPreloadSizeMb, "Exo预读容量MB", "128")
 	return nil
 }
 
