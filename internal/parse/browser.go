@@ -16,6 +16,7 @@ import (
 
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
+	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
@@ -323,6 +324,27 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 
 	chromedp.ListenTarget(ctx, func(ev any) {
 		switch e := ev.(type) {
+		case *fetch.EventRequestPaused:
+			reqURL := ""
+			if e.Request != nil {
+				reqURL = e.Request.URL
+			}
+			reqID := e.RequestID
+			go func() {
+				c := chromedp.FromContext(ctx)
+				if c == nil || c.Target == nil {
+					return
+				}
+				exec := cdp.WithExecutor(context.Background(), c.Target)
+				if IsAdURL(reqURL) {
+					_ = fetch.FailRequest(reqID, network.ErrorReasonBlockedByClient).Do(exec)
+					return
+				}
+				if strings.Contains(reqURL, "/cdn-cgi/challenge-platform/") {
+					parseLog("[sniff] cloudflare challenge depth=%d url=%s", depth, parsePreview(reqURL, 160))
+				}
+				_ = fetch.ContinueRequest(reqID).Do(exec)
+			}()
 		case *network.EventRequestWillBeSent:
 			if e.Request == nil {
 				return
@@ -331,6 +353,9 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			reqHdr := headerFromNetwork(e.Request.Headers)
 			if IsAdURL(u) {
 				return
+			}
+			if strings.Contains(u, "/cdn-cgi/challenge-platform/") {
+				parseLog("[sniff] cloudflare challenge depth=%d url=%s", depth, parsePreview(u, 160))
 			}
 			// 已是媒体直链时直接收，勿当嵌套页跟进。
 			if videoOK(u) {
@@ -371,6 +396,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	parseLog("[sniff] chromium run depth=%d", depth)
 	actions := []chromedp.Action{
 		network.Enable(),
+		fetch.Enable(),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			prof := resolveSniffProfile(headers)
 			parseLog("[sniff] client depth=%d mobile=%v platform=%s ua=%s", depth, prof.mobile, prof.platform, parsePreview(prof.ua, 80))

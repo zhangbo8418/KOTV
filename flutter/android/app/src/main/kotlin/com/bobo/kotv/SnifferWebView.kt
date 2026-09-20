@@ -1,18 +1,22 @@
 package com.bobo.kotv
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.Context
+import android.content.DialogInterface
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.fongmi.android.tv.App
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -60,6 +64,9 @@ object SnifferWebView {
     val timeoutMs: Long,
   ) {
     val nestedUrls = LinkedHashSet<String>()
+    @Volatile var challengeShown = false
+    var timeoutRunnable: Runnable? = null
+    var destroyRunnable: Runnable? = null
   }
 
   fun start(context: Context) {
@@ -196,13 +203,16 @@ object SnifferWebView {
         }
       }
     }
-    handler.postDelayed({
+    // 可取消：Cloudflare 弹窗期间暂停总超时。
+    val timeoutRunnable = Runnable {
       if (done.compareAndSet(false, true)) {
         latch.countDown()
       }
-    }, timeoutMs)
+    }
+    session.timeoutRunnable = timeoutRunnable
+    handler.postDelayed(timeoutRunnable, timeoutMs)
 
-    latch.await(timeoutMs + 1500, TimeUnit.MILLISECONDS)
+    latch.await(timeoutMs + 5 * 60 * 1000L, TimeUnit.MILLISECONDS)
     return found.get()?.let { trimUrl(it) }.orEmpty()
   }
 
@@ -251,6 +261,9 @@ object SnifferWebView {
         if (host.isEmpty() || isAd(host, session.ads)) {
           return empty
         }
+        if (url.contains("/cdn-cgi/challenge-platform/")) {
+          handler.post { showChallengeDialog(webView, session, handler) }
+        }
         val reqHeaders = request.requestHeaders
         if (detect && playerRe.matcher(url).find() && addNested(session, url)) {
           handler.post {
@@ -280,7 +293,7 @@ object SnifferWebView {
       if (extra.isEmpty()) webView.loadUrl(pageUrl) else webView.loadUrl(pageUrl, extra)
     }
 
-    handler.postDelayed({
+    val destroy = Runnable {
       try {
         webView.stopLoading()
         webView.loadUrl("about:blank")
@@ -288,7 +301,38 @@ object SnifferWebView {
       } catch (_: Throwable) {
         // ignore
       }
-    }, session.timeoutMs)
+    }
+    session.destroyRunnable = destroy
+    handler.postDelayed(destroy, session.timeoutMs)
+  }
+
+  /** Cloudflare challenge：有前台 Activity 时把嗅探 WebView 弹到对话框，用户完成后关窗继续。 */
+  private fun showChallengeDialog(webView: WebView, session: Session, handler: Handler) {
+    if (session.challengeShown || session.done.get()) return
+    val act = App.activity() ?: return
+    session.challengeShown = true
+    session.timeoutRunnable?.let { handler.removeCallbacks(it) }
+    session.destroyRunnable?.let { handler.removeCallbacks(it) }
+    try {
+      (webView.parent as? ViewGroup)?.removeView(webView)
+    } catch (_: Throwable) {
+    }
+    val dialog = AlertDialog.Builder(act).setView(webView).create()
+    dialog.setOnDismissListener(
+      DialogInterface.OnDismissListener {
+        if (session.done.get()) return@OnDismissListener
+        session.timeoutRunnable?.let { handler.postDelayed(it, session.timeoutMs) }
+        session.destroyRunnable?.let { handler.postDelayed(it, session.timeoutMs) }
+      },
+    )
+    try {
+      dialog.show()
+    } catch (t: Throwable) {
+      Log.w(TAG, "challenge dialog failed", t)
+      session.challengeShown = false
+      session.timeoutRunnable?.let { handler.postDelayed(it, session.timeoutMs) }
+      session.destroyRunnable?.let { handler.postDelayed(it, session.timeoutMs) }
+    }
   }
 
   private fun addNested(session: Session, url: String): Boolean {

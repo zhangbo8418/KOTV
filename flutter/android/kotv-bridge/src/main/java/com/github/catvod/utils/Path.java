@@ -1,6 +1,7 @@
 package com.github.catvod.utils;
 
 import android.os.Environment;
+import android.os.StatFs;
 import android.util.Log;
 
 import com.github.catvod.Init;
@@ -73,6 +74,22 @@ public class Path {
 
     public static File tv() {
         return tvRoot(clientScope());
+    }
+
+    public static File backup() {
+        return mkdir(new File(tv(), "backup"));
+    }
+
+    public static File font() {
+        return mkdir(new File(tv(), "fonts"));
+    }
+
+    public static File wall(int index) {
+        return files("wallpaper_" + index);
+    }
+
+    public static File wallCache() {
+        return files("wallpaper_cache");
     }
 
     /** 站点凭证等：TV[/scope]/.name */
@@ -277,6 +294,26 @@ public class Path {
             byte[] buffer = new byte[16384];
             while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
         } catch (IOException ignored) {
+        }
+    }
+
+    public static long size(File file) {
+        long total = 0;
+        if (file == null) return total;
+        if (file.isDirectory()) {
+            for (File child : list(file)) total += size(child);
+        } else {
+            total = file.length();
+        }
+        return total;
+    }
+
+    public static long available(File file) {
+        try {
+            StatFs stat = new StatFs(file.getAbsolutePath());
+            return stat.getAvailableBlocksLong() * stat.getBlockSizeLong();
+        } catch (Exception e) {
+            return 0;
         }
     }
 
