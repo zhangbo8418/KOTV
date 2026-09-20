@@ -5,12 +5,15 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
+	"context"
 	"crypto/tls"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bobo/KOTV/internal/util"
 )
@@ -106,27 +109,47 @@ func drainBody(resp *http.Response) []byte {
 	return b
 }
 
-// jsRequestTransport 关闭自动解压；TLS 不校验（OkHttp trust-all）。
+// jsRequestTransport 关闭自动解压；TLS 不校验（OkHttp trust-all）；hosts 表改写 dial 主机名。
 func jsRequestTransport() http.RoundTripper {
 	base := util.GetClient().Transport
 	if base == nil {
 		base = http.DefaultTransport
 	}
+	var cl *http.Transport
 	if t, ok := base.(*http.Transport); ok {
-		cl := t.Clone()
-		cl.DisableCompression = true
-		if cl.TLSClientConfig == nil {
-			cl.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
-		} else {
-			cl.TLSClientConfig = cl.TLSClientConfig.Clone()
-			cl.TLSClientConfig.InsecureSkipVerify = true
+		cl = t.Clone()
+	} else {
+		cl = &http.Transport{}
+	}
+	cl.DisableCompression = true
+	if cl.TLSClientConfig == nil {
+		cl.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+	} else {
+		cl.TLSClientConfig = cl.TLSClientConfig.Clone()
+		cl.TLSClientConfig.InsecureSkipVerify = true
+	}
+	baseDial := cl.DialContext
+	if baseDial == nil {
+		d := &net.Dialer{Timeout: 30 * time.Second}
+		baseDial = d.DialContext
+	}
+	cl.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			host = addr
+			port = ""
 		}
-		return cl
+		mapped := ResolveVodHost(host)
+		if mapped != host && mapped != "" {
+			if port != "" {
+				addr = net.JoinHostPort(mapped, port)
+			} else {
+				addr = mapped
+			}
+		}
+		return baseDial(ctx, network, addr)
 	}
-	return &http.Transport{
-		DisableCompression: true,
-		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-	}
+	return cl
 }
 
 // decodeJSContentEncoding ResponseInterceptor：gzip + Inflater(nowrap) deflate。

@@ -491,6 +491,7 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	}
 
 	resolveSitePaths(&api)
+	transSites(&api)
 	resolveParsePaths(&api)
 	resolveApiAssets(&api)
 	// VodConfig.setParses：非空时在首位插入超级解析（type=4）。
@@ -700,6 +701,19 @@ func injectGodParse(api *model.Api) {
 		Type: model.FlexInt{Valid: true, Value: 4},
 	}
 	api.Parses = append([]model.Parse{god}, api.Parses...)
+}
+
+// transSites Site.trans：繁体环境下对站点 name/categories 做 s2t。
+func transSites(api *model.Api) {
+	if api == nil || !spider.TransEnabled() {
+		return
+	}
+	for i := range api.Sites {
+		api.Sites[i].Name = spider.S2T(api.Sites[i].Name)
+		for j := range api.Sites[i].Categories {
+			api.Sites[i].Categories[j] = spider.S2T(api.Sites[i].Categories[j])
+		}
+	}
 }
 
 // resolveSitePaths 将站点 api/ext/jar 相对路径解析为绝对 URL（站点路径解析）。

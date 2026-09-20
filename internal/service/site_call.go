@@ -52,7 +52,7 @@ func siteCall(cfg *config.Manager, site model.Site, params map[string]string) (s
 // fetchExt Site.fetchExt：ext 以 http 开头则先下载正文写回。
 func fetchExt(site model.Site) (model.Site, error) {
 	ext := strings.TrimSpace(site.Ext.String())
-	if !strings.HasPrefix(ext, "http://") && !strings.HasPrefix(ext, "https://") {
+	if !strings.HasPrefix(ext, "http") {
 		return site, nil
 	}
 	body, err := util.HTTPGetParamsInsecure(ext, nil, nil)

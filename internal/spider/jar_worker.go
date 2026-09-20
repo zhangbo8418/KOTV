@@ -29,13 +29,10 @@ import (
 var ErrJavaBridgeInterrupted = errors.New("JAR 调用已中断")
 
 // 桌面：独立 java -jar --serve（HTTP 多路）；超时后 Kill 并允许重建。
+// 整次 jar 调用墙钟（含多次 OkHttp）；Android/桌面同为 120s。
 const javaBridgeCallTimeout = 120 * time.Second
-const javaBridgeCallTimeoutAndroid = 45 * time.Second
 
 func jarBridgeCallTimeout() time.Duration {
-	if runtime.GOOS == "android" {
-		return javaBridgeCallTimeoutAndroid
-	}
 	return javaBridgeCallTimeout
 }
 
@@ -178,6 +175,7 @@ func cancelJarCalls(clientID string) {
 // SetNetConfig 把点播配置里的 headers/proxy/hosts/doh 下发到 bridge OkHttp（按当前 ScopeID）。
 // 各用户当前源可不同，故 net 按 Scope 分桶；空 Scope 写默认桶。
 func SetNetConfig(headers, proxy, hosts, doh []byte) {
+	setGoNetConfig(headers, hosts)
 	cid := hostclient.ScopeID()
 	args := map[string]json.RawMessage{}
 	add := func(name string, raw []byte) {

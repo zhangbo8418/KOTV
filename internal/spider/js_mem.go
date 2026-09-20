@@ -110,7 +110,7 @@ func moduleFetch(name string) string {
 	var via string
 	switch {
 	case strings.HasPrefix(name, "http://") || strings.HasPrefix(name, "https://"):
-		data, err := util.HTTPGet(name, nil)
+		data, err := util.HTTPGetParamsInsecure(name, nil, nil)
 		if err != nil {
 			jsLog("[js-mod] http fail name=%s err=%v", name, err)
 		} else if data == "" {

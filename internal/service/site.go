@@ -294,15 +294,15 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 	return result, nil
 }
 
-func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
+func (s *SiteService) DetailContent(reqKey string, vod model.Vod) (model.Vod, error) {
 	site := vod.Site
 	if site == nil {
 		h := s.cfg.Home()
 		site = &h
 	}
 
-	// SiteApi.detailContent：push_agent 把 id 当播放地址。
-	if site.Key == PushAgentKey {
+	// SiteApi.detailContent：site.isEmpty() && PUSH.equals(key) 时把 id 当播放地址。
+	if site.IsEmpty() && reqKey == PushAgentKey {
 		id := vod.VodID.String()
 		detail := model.Vod{
 			VodID:       model.FlexString(id),
@@ -310,7 +310,7 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 			VodPic:      PushAgentPic,
 			VodPlayURL:  id,
 			VodPlayFrom: "推送",
-			Site:        site,
+			Site:        &model.Site{Key: PushAgentKey, Name: "推送"},
 		}
 		detail.SetVodFlags()
 		result := model.Result{Success: true, List: []model.Vod{detail}}
@@ -381,7 +381,7 @@ func (s *SiteService) CachedDetail(vodID string) (model.Vod, bool) {
 	return v, true
 }
 
-func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Result, error) {
+func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id string) (model.Result, error) {
 	var result model.Result
 	var err error
 
@@ -389,8 +389,8 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 	source.Stop()
 	thunder.Stop()
 
-	// push_agent 直接把 id 当 url，再走 Source.fetch。
-	if site.Key == PushAgentKey {
+	// site.isEmpty() && push_agent：直接把 id 当 url，再走 Source.fetch。
+	if site.IsEmpty() && reqKey == PushAgentKey {
 		id = normalizePlayID(site, id)
 		result = model.Result{
 			Success: true,
@@ -417,8 +417,6 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 				return model.Result{Success: false}, err
 			}
 			result.Key = site.Key
-			// 先合并站点头，再补相对 URL（很多 JS 源 play 不带回 Referer，相对 path 依赖站点头）。
-			result.Header = mergeHeaders(site.Header, result.Header)
 			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 4:
@@ -436,7 +434,6 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 				return model.Result{Success: false}, err
 			}
 			result.Key = site.Key
-			result.Header = mergeHeaders(site.Header, result.Header)
 			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 0, 1, 2:
@@ -616,7 +613,7 @@ func fetchStrmHTTP(rawURL string) string {
 	if err != nil {
 		return rawURL
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 KOTV/1.0")
+	req.Header.Set("User-Agent", "okhttp/4.12.0")
 	resp, err := client.Do(req)
 	if err != nil {
 		return rawURL

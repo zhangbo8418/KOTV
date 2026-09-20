@@ -16,6 +16,12 @@ func init() {
 		}
 		return s2t(name)
 	})
+	model.SetEpisodeS2T(func(text string) string {
+		if !TransEnabled() {
+			return text
+		}
+		return s2t(text)
+	})
 }
 
 // UTF8T/UTF8S 完整catvod Trans.java（按 UTF-16 code unit / BMP 一对一）。

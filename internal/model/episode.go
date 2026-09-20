@@ -12,11 +12,21 @@ type Episode struct {
 }
 
 func CreateEpisode(name, url string) Episode {
+	if s2tEpisode != nil {
+		name = s2tEpisode(name)
+	}
 	return Episode{
 		Name:   name,
 		URL:    url,
 		Number: GetDigit(name),
 	}
+}
+
+// SetEpisodeS2T Episode.trans：由 spider 注册。
+var s2tEpisode func(string) string
+
+func SetEpisodeS2T(fn func(string) string) {
+	s2tEpisode = fn
 }
 
 func (e Episode) Rule1(name string) bool {

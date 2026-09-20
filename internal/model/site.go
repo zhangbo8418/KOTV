@@ -54,6 +54,11 @@ func (s Site) IsHide() bool {
 	return s.Hide.Valid && s.Hide.Value == 1
 }
 
+// IsEmpty Site.isEmpty：key 与 name 皆空。
+func (s Site) IsEmpty() bool {
+	return strings.TrimSpace(s.Key) == "" && strings.TrimSpace(s.Name) == ""
+}
+
 // IsIndex 索引站（如豆瓣）点进条目应去搜索，而非本站详情。
 func (s Site) IsIndex() bool {
 	return s.Indexs.Valid && s.Indexs.Value == 1

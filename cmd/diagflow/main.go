@@ -55,7 +55,7 @@ func main() {
 		fmt.Printf("%s HOME OK (%s) list=%d\n", site.Key, elapsed, len(home.List))
 		vod := home.List[0]
 		start = time.Now()
-		detail, err := sitesSvc.DetailContent(vod)
+		detail, err := sitesSvc.DetailContent(site.Key, vod)
 		elapsed = time.Since(start).Round(time.Millisecond)
 		if err != nil {
 			fmt.Printf("  detail ERR (%s): %v id=%s\n", elapsed, brief(err), vod.VodID)
@@ -71,7 +71,7 @@ func main() {
 		}
 		ep := detail.VodFlags[0].Episodes[0]
 		start = time.Now()
-		pr, err := sitesSvc.PlayerContent(site, detail.VodFlags[0].Flag, ep.URL)
+		pr, err := sitesSvc.PlayerContent(site.Key, site, detail.VodFlags[0].Flag, ep.URL)
 		elapsed = time.Since(start).Round(time.Millisecond)
 		if err != nil {
 			fmt.Printf("  player ERR (%s): %v\n", elapsed, brief(err))

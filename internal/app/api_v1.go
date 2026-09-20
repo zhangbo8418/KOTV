@@ -263,18 +263,18 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 	}
 	cfg, sites, _ := a.scope()
 	vod := model.Vod{VodID: model.FlexString(vodID)}
-	if siteKey == service.PushAgentKey {
-		vod.Site = &model.Site{Key: service.PushAgentKey, Name: "推送"}
-	} else if siteKey != "" {
+	if siteKey != "" {
 		if site := cfg.GetSite(siteKey); site != nil {
 			vod.Site = site
+		} else if siteKey == service.PushAgentKey {
+			vod.Site = &model.Site{} // 空站 → DetailContent stub
 		}
 	}
 	if vod.Site == nil {
 		h := cfg.Home()
 		vod.Site = &h
 	}
-	detail, err := sites.DetailContent(vod)
+	detail, err := sites.DetailContent(siteKey, vod)
 	if err != nil {
 		return nil, err
 	}
@@ -473,11 +473,14 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	if siteKey != "" {
 		if s := cfg.GetSite(siteKey); s != nil {
 			site = *s
-		} else if siteKey == service.PushAgentKey {
-			site = model.Site{Key: service.PushAgentKey, Name: "推送"}
+		} else if siteKey != service.PushAgentKey {
+			site = cfg.Home()
 		}
+		// push_agent 且配置无此站：保持 IsEmpty，走 PlayerContent stub
+	} else {
+		site = cfg.Home()
 	}
-	if site.Key == "" {
+	if site.Key == "" && siteKey != service.PushAgentKey {
 		site = cfg.Home()
 	}
 	epURL := strings.TrimSpace(episodeURL)
@@ -504,7 +507,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	if thunder.Match(epURL) {
 		playURL = epURL
 	} else {
-		result, err := sites.PlayerContent(site, flag, epURL)
+		result, err := sites.PlayerContent(siteKey, site, flag, epURL)
 		if err != nil {
 			return nil, err
 		}

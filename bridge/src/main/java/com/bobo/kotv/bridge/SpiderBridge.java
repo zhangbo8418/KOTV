@@ -453,10 +453,6 @@ public class SpiderBridge {
                 return nonempty(invoke(spider, spiderMethod, argsObj, jar));
         } catch (Throwable t) {
             t.printStackTrace(System.err);
-                // 内容接口失败回空结果，不把 Java 异常弹到首页。
-                if (isSoftFailContentMethod(spiderMethod)) {
-                    return "{}";
-                }
             JsonObject err = new JsonObject();
             err.addProperty("error", t.toString());
             return GSON.toJson(err);
@@ -471,22 +467,6 @@ public class SpiderBridge {
                 com.github.catvod.utils.Util.leaveRemoteUi();
             }
             com.github.catvod.utils.Util.clearScope();
-        }
-    }
-
-    /** home/category/search 等：失败时返回 Result.empty()，不展示堆栈。 */
-    private static boolean isSoftFailContentMethod(String method) {
-        if (method == null) return false;
-        switch (method) {
-            case "homeContent":
-            case "homeVideoContent":
-            case "categoryContent":
-            case "detailContent":
-            case "searchContent":
-            case "liveContent":
-                return true;
-            default:
-                return false;
         }
     }
 

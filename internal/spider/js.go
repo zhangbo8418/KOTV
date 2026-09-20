@@ -1105,6 +1105,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	} else if options.Body != "" && headerValue(options.Headers, "Content-Type") != "" {
 		body = options.Body
 	}
+	options.Headers = InjectVodHeaders(u, options.Headers)
 	req, err := http.NewRequest(options.Method, u, strings.NewReader(body))
 	if err != nil {
 		return jsError()

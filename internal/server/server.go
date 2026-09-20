@@ -361,7 +361,7 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 			params[key] = values[0]
 		}
 	}
-	// 合并请求头与表单
+	// Proxy.java：getParms 后 putAll(headers)，头覆盖同名 query；Nano 头名为小写。
 	for key, values := range r.Header {
 		if len(values) == 0 {
 			continue
@@ -370,9 +370,7 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		if lk == "host" || lk == "connection" || lk == "content-length" {
 			continue
 		}
-		if _, exists := params[key]; !exists {
-			params[key] = values[0]
-		}
+		params[lk] = values[0]
 	}
 	if r.Method == http.MethodPost {
 		ct := r.Header.Get("Content-Type")

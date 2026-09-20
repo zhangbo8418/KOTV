@@ -146,6 +146,29 @@ func applyHeaders(req *http.Request, headers map[string]string) {
 	}
 }
 
+// VodNet hooks：spider 注册，给 CMS insecure / 其它入口注入配置 headers·hosts。
+var (
+	vodRewriteHost func(string) string
+	vodInjectHdrs  func(string, map[string]string) map[string]string
+)
+
+// SetVodNetHooks 由 spider 在 init 注册，避免 util↔spider 循环依赖。
+func SetVodNetHooks(rewriteHost func(string) string, injectHeaders func(string, map[string]string) map[string]string) {
+	vodRewriteHost = rewriteHost
+	vodInjectHdrs = injectHeaders
+}
+
+func applyVodNet(rawURL string, headers map[string]string) (string, map[string]string) {
+	// 先按原始 host 注入头，再改写 URL host（OkDns 只影响解析，URL host 在拦截器侧仍是原名）。
+	if vodInjectHdrs != nil {
+		headers = vodInjectHdrs(rawURL, headers)
+	}
+	if vodRewriteHost != nil {
+		rawURL = vodRewriteHost(rawURL)
+	}
+	return rawURL, headers
+}
+
 func doRequest(req *http.Request) ([]byte, error) {
 	return doRequestWith(client, req)
 }
@@ -244,6 +267,7 @@ func httpGetParamsBytesInsecure(rawURL string, headers map[string]string, params
 		u.RawQuery = q.Encode()
 		rawURL = u.String()
 	}
+	rawURL, headers = applyVodNet(rawURL, headers)
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -258,6 +282,7 @@ func httpGetParamsBytesInsecure(rawURL string, headers map[string]string, params
 // HTTPPostFormInsecure 同 HTTPPostForm，但不校验证书；读 body 不看 status（CMS）。
 func HTTPPostFormInsecure(rawURL string, headers map[string]string, params map[string]string) (string, error) {
 	rawURL = EncodeURL(rawURL)
+	rawURL, headers = applyVodNet(rawURL, headers)
 	form := url.Values{}
 	for k, v := range params {
 		form.Set(k, v)
