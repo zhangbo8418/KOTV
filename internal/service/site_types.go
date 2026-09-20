@@ -61,7 +61,7 @@ func fetchPic(site model.Site, r model.Result) (model.Result, error) {
 	if err != nil {
 		return r, err
 	}
-	detail, err := model.FromType(site.TypeID(), body)
+	detail, err := fromType(site.TypeID(), body)
 	if err != nil {
 		return r, err
 	}

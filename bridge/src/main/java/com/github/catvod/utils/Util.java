@@ -927,8 +927,29 @@ public class Util {
             if (!ip.isEmpty()) return ip;
             ip = getHostAddress("eth");
             if (!ip.isEmpty()) return ip;
+            ip = getWifiAddress();
+            if (!ip.isEmpty()) return ip;
             return getHostAddress("");
         } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** Android WifiManager 回落；桌面无该类则返回空。 */
+    private static String getWifiAddress() {
+        try {
+            Object ctx = Init.context();
+            if (ctx == null) return "";
+            Class<?> ctxClz = Class.forName("android.content.Context");
+            Object app = ctxClz.getMethod("getApplicationContext").invoke(ctx);
+            Object manager = ctxClz.getMethod("getSystemService", String.class).invoke(app, "wifi");
+            if (manager == null) return "";
+            Object info = manager.getClass().getMethod("getConnectionInfo").invoke(manager);
+            int ip = ((Integer) info.getClass().getMethod("getIpAddress").invoke(info)).intValue();
+            if (ip == 0) return "";
+            return String.format(java.util.Locale.getDefault(), "%d.%d.%d.%d",
+                    ip & 0xFF, (ip >> 8) & 0xFF, (ip >> 16) & 0xFF, (ip >> 24) & 0xFF);
+        } catch (Throwable ignored) {
             return "";
         }
     }

@@ -3,6 +3,8 @@ package com.github.catvod.utils;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import androidx.preference.PreferenceManager;
+
 import com.github.catvod.Init;
 
 /**
@@ -11,12 +13,43 @@ import com.github.catvod.Init;
  */
 public class Prefers {
 
+    private static volatile boolean migrated;
+
     public static SharedPreferences getPrefers() {
         Context ctx = Init.context();
         if (ctx == null) {
             throw new IllegalStateException("Init.context is null; KotvApplication must call Init.set");
         }
-        return ctx.getSharedPreferences("catvod_prefers", Context.MODE_PRIVATE);
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ctx);
+        migrateLegacy(ctx, prefs);
+        return prefs;
+    }
+
+    /** 旧版写 catvod_prefers；一次性迁入默认 prefs 后清空旧文件。 */
+    private static void migrateLegacy(Context ctx, SharedPreferences prefs) {
+        if (migrated) return;
+        synchronized (Prefers.class) {
+            if (migrated) return;
+            migrated = true;
+            try {
+                SharedPreferences legacy = ctx.getSharedPreferences("catvod_prefers", Context.MODE_PRIVATE);
+                if (legacy.getAll().isEmpty()) return;
+                SharedPreferences.Editor ed = prefs.edit();
+                for (java.util.Map.Entry<String, ?> e : legacy.getAll().entrySet()) {
+                    if (e.getKey() == null || e.getValue() == null) continue;
+                    if (prefs.contains(e.getKey())) continue;
+                    Object v = e.getValue();
+                    if (v instanceof String) ed.putString(e.getKey(), (String) v);
+                    else if (v instanceof Boolean) ed.putBoolean(e.getKey(), (Boolean) v);
+                    else if (v instanceof Float) ed.putFloat(e.getKey(), (Float) v);
+                    else if (v instanceof Integer) ed.putInt(e.getKey(), (Integer) v);
+                    else if (v instanceof Long) ed.putLong(e.getKey(), (Long) v);
+                }
+                ed.apply();
+                legacy.edit().clear().apply();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     public static String getString(String key) {

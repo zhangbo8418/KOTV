@@ -180,12 +180,8 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		}
 		applyTypes(site, &result)
 	case 4:
-		site, err = fetchExt(site)
-		if err != nil {
-			return model.Result{Success: false}, err
-		}
 		var body string
-		body, err = siteCall(site, map[string]string{"filter": "true"})
+		body, err = siteCall(s.cfg, site, map[string]string{"filter": "true"})
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
@@ -272,7 +268,7 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 			params["ext"] = base64URLSafe(string(b))
 		}
 		var body string
-		body, err = siteCall(site, params)
+		body, err = siteCall(s.cfg, site, params)
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
@@ -334,7 +330,7 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 			"ids": vod.VodID.String(),
 		}
 		var body string
-		body, err = siteCall(*site, params)
+		body, err = siteCall(s.cfg, *site, params)
 		if err != nil {
 			return vod, err
 		}
@@ -346,7 +342,12 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 		return vod, err
 	}
 	if len(result.List) == 0 {
-		return vod, fmt.Errorf("详情为空")
+		empty := model.Vod{Site: site}
+		empty.SetVodFlags()
+		s.mu.Lock()
+		s.DetailResult = result
+		s.mu.Unlock()
+		return empty, nil
 	}
 	detail := result.List[0]
 	detail.Site = site
@@ -415,7 +416,7 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 				"flag": flag,
 			}
 			var body string
-			body, err = siteCall(site, params)
+			body, err = siteCall(s.cfg, site, params)
 			if err != nil {
 				return model.Result{Success: false}, err
 			}
@@ -423,21 +424,23 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 			if err != nil {
 				return model.Result{Success: false}, err
 			}
+			result.Key = site.Key
 			result.Header = mergeHeaders(site.Header, result.Header)
 			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 0, 1, 2:
+			rawID := id
 			id = normalizePlayID(site, id)
-			// 本地拼 Result，不请求 API。相对路径按站源 api 补成绝对地址再解析。
-			playID := id
+			// 本地拼 Result，不请求 API。parse 用原始 id；播放 URL 用绝对化后的 id。
 			parseVal := 1
-			if s.IsVideoFormat(site, playID) && strings.TrimSpace(site.PlayURL) == "" {
+			if s.IsVideoFormat(site, rawID) && strings.TrimSpace(site.PlayURL) == "" {
 				parseVal = 0
 			}
 			result = model.Result{
 				Success: true,
-				URL:     model.URL{URLs: []string{playID}},
+				URL:     model.URL{URLs: []string{id}},
 				Flag:    flag,
+				Key:     site.Key,
 				Header:  site.Header,
 				PlayURL: site.PlayURL,
 				Parse:   model.FlexInt{Valid: true, Value: parseVal},
@@ -761,7 +764,7 @@ func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, pa
 		if page != "" && page != "1" {
 			params["pg"] = page
 		}
-		body, err := siteCall(site, params)
+		body, err := siteCall(s.cfg, site, params)
 		if err != nil {
 			return nil, err
 		}
@@ -797,7 +800,7 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 		if action == "" {
 			return "{}", nil
 		}
-		return util.HTTPGet(action, map[string]string(site.Header))
+		return util.HTTPGet(action, nil)
 	default:
 		return "{}", nil
 	}

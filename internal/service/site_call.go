@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"strings"
 
+	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/util"
 )
@@ -21,12 +22,23 @@ func base64URLSafe(s string) string {
 	return base64.URLEncoding.EncodeToString([]byte(s))
 }
 
-// siteCall 有 ext 时附加 extend；≤1000 GET query，>1000 POST form。
-func siteCall(site model.Site, params map[string]string) (string, error) {
+// siteCall 先 fetchExt；有 ext 时附加 extend；≤1000 GET query，>1000 POST form。
+// cfg 非空时把下载后的 Ext 写回内存站点，避免后续请求仍带 http URL。
+func siteCall(cfg *config.Manager, site model.Site, params map[string]string) (string, error) {
+	var err error
+	before := strings.TrimSpace(site.Ext.String())
+	site, err = fetchExt(site)
+	if err != nil {
+		return "", err
+	}
+	after := strings.TrimSpace(site.Ext.String())
+	if cfg != nil && after != "" && after != before {
+		cfg.SetSiteExt(site.Key, site.Ext)
+	}
 	if params == nil {
 		params = map[string]string{}
 	}
-	ext := strings.TrimSpace(site.Ext.String())
+	ext := after
 	if ext != "" {
 		params["extend"] = ext
 	}

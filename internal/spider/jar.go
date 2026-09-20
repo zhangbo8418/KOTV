@@ -31,9 +31,6 @@ var (
 	jarSpiders = map[string]*jarSpider{}
 )
 
-// 无 md5 的 jar 缓存有效期；过期后冷加载重新下载（每次都拉新包）。
-const jarRefreshTTL = 30 * time.Minute
-
 // 多用户：按 ScopeID 隔离配置基址，避免 A 换源覆盖 B 的相对路径解析。
 var configBaseByClient sync.Map // ScopeID -> base URL
 
@@ -420,9 +417,9 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	// 按 jar 地址哈希缓存，不用配置里的 md5 当文件名。
 	dest := paths.JarPath(util.MD5(downloadURL))
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
-		if expectMD5 == "" && time.Since(st.ModTime()) >= jarRefreshTTL {
-			// 无 md5 的包冷加载时总是重新下载（不走磁盘命中）。
-			// 这里用 TTL 折中；刷新失败沿用旧包，不因网络抖动把可用站点打挂。
+		if expectMD5 == "" {
+			// 无 md5：冷加载始终重新下载（JarLoader 无 md5 时每次 Download）；
+			// 刷新失败沿用旧包，不因网络抖动把可用站点打挂。
 			oldSum := fileMD5(dest)
 			if err := downloadBinary(downloadURL, dest); err != nil {
 				log.Printf("spider.jar 刷新失败，沿用旧缓存 (%s): %v", downloadURL, err)
@@ -435,7 +432,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 			}
 			return dest, nil
 		}
-		if expectMD5 == "" || fileMD5(dest) == expectMD5 {
+		if fileMD5(dest) == expectMD5 {
 			return dest, nil
 		}
 		// 有 md5 但缓存不一致 → 当作过期，重新下载
@@ -524,7 +521,11 @@ func (s *jarSpider) DetailContent(ids []string) (string, error) {
 }
 
 func (s *jarSpider) SearchContent(key string, quick bool, pg string) (string, error) {
-	return s.call("searchContent", map[string]interface{}{"key": key, "quick": quick, "pg": pg})
+	args := map[string]interface{}{"key": key, "quick": quick}
+	if pg != "" && pg != "1" {
+		args["pg"] = pg
+	}
+	return s.call("searchContent", args)
 }
 
 func (s *jarSpider) PlayerContent(flag, id string, vipFlags []string) (string, error) {

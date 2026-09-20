@@ -2,6 +2,7 @@ package spider
 
 import (
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/bobo/KOTV/internal/model"
@@ -83,9 +84,19 @@ func S2TResult(result *model.Result) {
 		v.VodName = s2t(v.VodName)
 		v.VodArea = s2t(v.VodArea)
 		v.TypeName = s2t(v.TypeName)
-		v.VodActor = s2t(v.VodActor)
-		v.VodRemarks = s2t(v.VodRemarks)
-		v.VodContent = s2t(v.VodContent)
-		v.VodDirector = s2t(v.VodDirector)
+		v.VodActor = s2tUnlessClicker(v.VodActor)
+		v.VodRemarks = s2tUnlessClicker(v.VodRemarks)
+		v.VodContent = s2tUnlessClicker(v.VodContent)
+		v.VodDirector = s2tUnlessClicker(v.VodDirector)
 	}
+}
+
+// Sniffer.CLICKER：含可点链接标记时不做 s2t，避免破坏 [a=cr:{…}/]…[/a]。
+var clickerRe = regexp.MustCompile(`\[a=cr:\{.*?\}\/](.*?)\[\/a]`)
+
+func s2tUnlessClicker(text string) string {
+	if clickerRe.MatchString(text) {
+		return text
+	}
+	return s2t(text)
 }

@@ -132,6 +132,25 @@ func (m *Manager) GetSite(key string) *model.Site {
 	return nil
 }
 
+// SetSiteExt 将 fetchExt 下载后的正文写回内存配置（后续 siteCall 不再带 URL）。
+func (m *Manager) SetSiteExt(key string, ext model.FlexString) {
+	if m == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.api.Sites {
+		if m.api.Sites[i].Key != key {
+			continue
+		}
+		m.api.Sites[i].Ext = ext
+		if m.home.Key == key {
+			m.home.Ext = ext
+		}
+		return
+	}
+}
+
 // GetLive LiveConfig.getLive：按直播源 name 查找（proxy siteKey 用）。
 func (m *Manager) GetLive(name string) *model.Live {
 	m.mu.RLock()

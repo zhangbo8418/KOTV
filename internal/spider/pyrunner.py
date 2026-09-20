@@ -391,7 +391,10 @@ def invoke(method, args):
     if method == "detailContent":
         return encode_result(fn(args.get("ids") or []))
     if method == "searchContent":
-        return encode_result(fn(args.get("key", ""), args.get("quick", False), args.get("pg", "1")))
+        pg = args.get("pg", None)
+        if pg is None or str(pg) in ("", "1"):
+            return encode_result(fn(args.get("key", ""), args.get("quick", False)))
+        return encode_result(fn(args.get("key", ""), args.get("quick", False), pg))
     if method == "playerContent":
         return encode_result(fn(args.get("flag", ""), args.get("id", ""), args.get("vipFlags") or []))
     if method == "liveContent":

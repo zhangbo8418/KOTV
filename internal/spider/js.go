@@ -445,10 +445,12 @@ func parseAesDesArgs(args []*qjs.Value) (mode string, encrypt bool, input string
 	if len(args) > 4 {
 		key = args[4].String()
 	}
-	// iv == null 时 Cipher.init 不带 IvParameterSpec（ECB）
+	// iv == null 或空串时 Cipher.init 不带 IvParameterSpec（Crypto.getIv）
 	if len(args) > 5 && args[5] != nil && !args[5].IsNull() && !args[5].IsUndefined() {
 		s := args[5].String()
-		iv = &s
+		if s != "" {
+			iv = &s
+		}
 	}
 	if len(args) > 6 {
 		outB64 = args[6].ToBool()
@@ -465,6 +467,9 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		text := ""
 		if len(args) > 0 {
 			text = args[0].String()
+		}
+		if text == "" {
+			return c.NewString("")
 		}
 		sum := md5.Sum([]byte(text))
 		return c.NewString(hex.EncodeToString(sum[:]))
@@ -978,7 +983,8 @@ func parseJSRequest(args []*qjs.Value) (string, jsHTTPRequest) {
 		} else {
 			options.Body = string(opts.Body)
 		}
-	} else if len(opts.Data) > 0 && string(opts.Data) != "null" {
+	}
+	if len(opts.Data) > 0 && string(opts.Data) != "null" {
 		var s string
 		if json.Unmarshal(opts.Data, &s) == nil {
 			options.Data = s
@@ -1038,7 +1044,8 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 			}
 		}
 	}
-	body := options.Body
+	// Connect.getPostBody：data+postType 优先；body 须同时有 Content-Type，否则空 body。
+	body := ""
 	if options.Data != "" {
 		switch options.PostType {
 		case "form":
@@ -1049,7 +1056,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 					form.Set(k, fmt.Sprint(v))
 				}
 				body = form.Encode()
-				if options.Headers["Content-Type"] == "" {
+				if headerValue(options.Headers, "Content-Type") == "" {
 					options.Headers["Content-Type"] = "application/x-www-form-urlencoded"
 				}
 			}
@@ -1064,16 +1071,18 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 				}
 				fmt.Fprintf(&buf, "--%s--\r\n", boundary)
 				body = buf.String()
-				if options.Headers["Content-Type"] == "" {
+				if headerValue(options.Headers, "Content-Type") == "" {
 					options.Headers["Content-Type"] = "multipart/form-data; boundary=" + boundary
 				}
 			}
 		default:
 			body = options.Data
-			if options.Headers["Content-Type"] == "" {
+			if headerValue(options.Headers, "Content-Type") == "" {
 				options.Headers["Content-Type"] = "application/json; charset=utf-8"
 			}
 		}
+	} else if options.Body != "" && headerValue(options.Headers, "Content-Type") != "" {
+		body = options.Body
 	}
 	req, err := http.NewRequest(options.Method, u, strings.NewReader(body))
 	if err != nil {
@@ -1172,9 +1181,35 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	return result
 }
 
-// javaURLEncode：Android Uri.encode 风格，空格为 %20（非 URLEncoder 的 +）。
+// javaURLEncode：Android Uri.encode 白名单（保留 A-Za-z0-9_-!.~'()*），空格 %20。
 func javaURLEncode(s string) string {
-	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
+	var b strings.Builder
+	b.Grow(len(s) * 3)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '_' || c == '-' || c == '!' || c == '.' || c == '~' || c == '\'' || c == '(' || c == ')' || c == '*' {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
+}
+
+func headerValue(headers map[string]string, name string) string {
+	if headers == nil {
+		return ""
+	}
+	if v := headers[name]; v != "" {
+		return v
+	}
+	for k, v := range headers {
+		if strings.EqualFold(k, name) {
+			return v
+		}
+	}
+	return ""
 }
 
 func charsetFromHeaders(headers map[string]string) string {
@@ -1259,6 +1294,9 @@ func (s *jsSpider) DetailContent(ids []string) (string, error) {
 	return s.invoke("detail", id)
 }
 func (s *jsSpider) SearchContent(key string, quick bool, pg string) (string, error) {
+	if pg == "" || pg == "1" {
+		return s.invoke("search", key, quick)
+	}
 	return s.invoke("search", key, quick, pg)
 }
 func (s *jsSpider) PlayerContent(flag, id string, vipFlags []string) (string, error) {

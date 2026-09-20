@@ -45,6 +45,8 @@ public class SpiderBridge {
     private static final Map<String, Spider> spiders = new ConcurrentHashMap<>();
     private static final Map<String, ClassLoader> loaders = new ConcurrentHashMap<>();
     private static final Map<String, Method> proxyMethods = new ConcurrentHashMap<>();
+    /** 按 jarPath 锁，避免一个 jar Init 卡住阻塞其它 jar 加载。 */
+    private static final ConcurrentHashMap<String, Object> jarLocks = new ConcurrentHashMap<>();
     private static volatile String recentJar;
 
     static {
@@ -652,15 +654,16 @@ public class SpiderBridge {
     private static void parseJar(String jarPath) {
         if (jarPath == null || jarPath.isEmpty()) return;
         if (loaders.containsKey(jarPath)) return;
-        synchronized (SpiderBridge.class) {
+        Object lock = jarLocks.computeIfAbsent(jarPath, k -> new Object());
+        synchronized (lock) {
             if (loaders.containsKey(jarPath)) return;
             try {
                 ClassLoader loader = createLoader(jarPath);
                 ClassLoader prev = Thread.currentThread().getContextClassLoader();
                 try {
                     Thread.currentThread().setContextClassLoader(loader);
-                initializeHost();
-                initializeSpiderJar(jarPath, loader);
+                    initializeHost();
+                    initializeSpiderJar(jarPath, loader);
                 } finally {
                     Thread.currentThread().setContextClassLoader(prev);
                 }
@@ -1257,6 +1260,7 @@ public class SpiderBridge {
             }
         }
         loaders.clear();
+        jarLocks.clear();
     }
 
     /** 按路径卸载单个 jar：destroy 其爬虫、关闭 loader 并移除缓存，供磁盘包刷新后重载。 */
@@ -1510,12 +1514,19 @@ public class SpiderBridge {
                 List<String> ids = GSON.fromJson(args.get("ids"), List.class);
                 return emptyToObject(spider.detailContent(ids));
             }
-            case "searchContent":
-                return emptyToObject(spider.searchContent(
-                        args.get("key").getAsString(),
-                        args.has("quick") && args.get("quick").getAsBoolean(),
-                        args.has("pg") ? args.get("pg").getAsString() : "1"
-                ));
+            case "searchContent": {
+                String key = args.get("key").getAsString();
+                boolean quick = args.has("quick") && args.get("quick").getAsBoolean();
+                // page 空或 "1" 走两参重载（SiteApi.hasPage）
+                if (!args.has("pg") || args.get("pg").isJsonNull()) {
+                    return emptyToObject(spider.searchContent(key, quick));
+                }
+                String pg = args.get("pg").getAsString();
+                if (pg == null || pg.isEmpty() || "1".equals(pg)) {
+                    return emptyToObject(spider.searchContent(key, quick));
+                }
+                return emptyToObject(spider.searchContent(key, quick, pg));
+            }
             case "playerContent": {
                 List<String> vip = args.has("vipFlags")
                         ? GSON.fromJson(args.get("vipFlags"), List.class) : null;
