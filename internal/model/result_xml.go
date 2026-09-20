@@ -56,7 +56,8 @@ func FromXML(raw string) (Result, error) {
 	}
 	var rss rssXML
 	if err := xml.Unmarshal([]byte(raw), &rss); err != nil {
-		return Result{Success: false}, err
+		// 解析失败返回空结果（与 DecodeResultJSON / TV fromXml empty 一致）。
+		return Result{Success: true}, nil
 	}
 	result := Result{Success: true}
 	for _, ty := range rss.Class.Ty {

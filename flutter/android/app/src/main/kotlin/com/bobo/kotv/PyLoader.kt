@@ -80,10 +80,17 @@ import importlib.util, json, os, sys, traceback, types
 _KOTV_PY_SESSIONS = {}
 
 def kotv_py_clear():
+    for sess in list(_KOTV_PY_SESSIONS.values()):
+        try:
+            if sess.get("inited"):
+                sess["mod"].invoke("destroy", {})
+        except Exception:
+            pass
     _KOTV_PY_SESSIONS.clear()
 
-def _kotv_load_session(runner_path, script_path, key, ext, api, cache_root, proxy_port):
+def _kotv_load_session(runner_path, script_path, key, ext, api, cache_root, proxy_port, proxy_host):
     os.environ["KOTV_PROXY_PORT"] = str(proxy_port)
+    os.environ["KOTV_PROXY_HOST"] = str(proxy_host or "127.0.0.1")
     os.environ["KOTV_PY_CACHE"] = str(cache_root)
     for p in (os.path.dirname(runner_path), os.path.dirname(script_path), cache_root):
         if p and p not in sys.path:
@@ -123,6 +130,7 @@ def kotv_py_dispatch(req_json):
         api = req["api"]
         cache_root = req["cacheRoot"]
         proxy_port = int(req.get("proxyPort") or 9978)
+        proxy_host = str(req.get("proxyHost") or "").strip() or "127.0.0.1"
         method = req["method"]
         args = req.get("args") or {}
 
@@ -137,8 +145,11 @@ def kotv_py_dispatch(req_json):
             or sess.get("ext") != ext
             or sess.get("cache") != cache_root
         ):
-            sess = _kotv_load_session(runner_path, script_path, key, ext, api, cache_root, proxy_port)
+            sess = _kotv_load_session(runner_path, script_path, key, ext, api, cache_root, proxy_port, proxy_host)
             _KOTV_PY_SESSIONS[sess_key] = sess
+        else:
+            os.environ["KOTV_PROXY_HOST"] = proxy_host
+            os.environ["KOTV_PROXY_PORT"] = str(proxy_port)
 
         mod = sess["mod"]
         # 非 init：确保先 init 一次（与桌面常驻进程一致）

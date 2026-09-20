@@ -136,6 +136,10 @@ const (
 	DanmakuRowsBottom      Type = "danmakuRowsBottom"
 	ExoDiskPreloadThreads  Type = "exoDiskPreloadThreads"
 	ExoDiskPreloadSizeMb   Type = "exoDiskPreloadSizeMb"
+	// Crash：UI 崩溃后跳过一次 spider homeContent（SiteApi Prefers crash）。
+	Crash Type = "crash"
+	// Language：UI/系统语言提示（如 zh-Hant）；TransEnabled 用。
+	Language Type = "language"
 )
 
 type item struct {
@@ -268,6 +272,8 @@ func defaultFile() file {
 			{ID: "danmakuRowsBottom", Label: "底部弹幕行数", Value: "3"},
 			{ID: "exoDiskPreloadThreads", Label: "Exo预读线程", Value: "1"},
 			{ID: "exoDiskPreloadSizeMb", Label: "Exo预读容量MB", Value: "128"},
+			{ID: "crash", Label: "首页崩溃跳过", Value: "false"},
+			{ID: "language", Label: "界面语言", Value: ""},
 		},
 		Cache: make(map[string]json.RawMessage),
 	}
@@ -523,6 +529,22 @@ func IsIncognito() bool { return boolSetting(Incognito, false) }
 
 // IsDLNARenderer 是否作为局域网 DLNA 被投端。
 func IsDLNARenderer() bool { return boolSetting(DLNARenderer, false) }
+
+// ConsumeCrash 若 crash 为 true 则清 false 并返回 true（跳过一次 spider home）。
+func ConsumeCrash() bool {
+	if !boolSetting(Crash, false) {
+		return false
+	}
+	SetBool(Crash, false)
+	_ = Save()
+	return true
+}
+
+// MarkCrash 崩溃入口写入 crash=true。
+func MarkCrash() {
+	SetBool(Crash, true)
+	_ = Save()
+}
 
 // Entry 设置项快照（备份/恢复）。
 type Entry struct {

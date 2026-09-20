@@ -91,6 +91,7 @@ func Clear() {
 // ResetScriptSpiders 换源时销毁 JS/Python 爬虫，避免旧进程状态污染新站。
 func ResetScriptSpiders() {
 	clearJsPy()
+	clearJSMemoryCaches()
 }
 
 // clearScriptCaches 清空 JS 内存缓存，并清理本地 js/py 目录（含历史落盘残留）。

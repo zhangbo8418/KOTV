@@ -442,6 +442,7 @@ func (s *pySpider) startLocked(python, runner, script string) error {
 		"PYTHONPATH="+strings.Join(pyPathParts, string(os.PathListSeparator)),
 		"KOTV_PY_CACHE="+paths.PyCache(),
 		fmt.Sprintf("KOTV_PROXY_PORT=%d", localproxy.Port()),
+		"KOTV_PROXY_HOST="+pyProxyHost(),
 	)
 	setChildProcAttrs(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -564,6 +565,7 @@ func (s *pySpider) androidCallPythonLocked(method string, args map[string]interf
 		"api":        s.api,
 		"cacheRoot":  paths.PyCache(),
 		"proxyPort":  localproxy.Port(),
+		"proxyHost":  pyProxyHost(),
 		"method":     method,
 		"args":       args,
 		"clientId":   hostclient.ScopeID(),
@@ -670,4 +672,12 @@ func (s *pySpider) Destroy() {
 	s.stopLocked()
 	s.mu.Unlock()
 	s.interrupt()
+}
+
+// pyProxyHost getProxyUrl(local=false) 用本机可达 IP；空则 127.0.0.1。
+func pyProxyHost() string {
+	if ip := util.LanIP(); ip != "" {
+		return ip
+	}
+	return "127.0.0.1"
 }

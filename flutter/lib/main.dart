@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
@@ -49,6 +51,50 @@ bool _kotvIsSoftUiException(Object error) {
       msg.contains('stack overflow') ||
       msg.contains('maximum call stack') ||
       (msg.contains('failed assertion') && msg.contains('dependents'));
+}
+
+/// 崩溃入口写 Prefers crash，下次 spider homeContent 跳过一次。
+void _kotvMarkHomeCrash() {
+  if (kIsWeb) return;
+  unawaited(() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      var base = (prefs.getString('engine_base_url') ?? '').trim();
+      if (base.isEmpty || !kotvIsLocalEngineBaseUrl(base)) {
+        base = 'http://127.0.0.1:9978';
+      }
+      await http
+          .post(
+            Uri.parse('$base/api/v1/settings'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'key': 'crash', 'value': 'true'}),
+          )
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }());
+}
+
+Future<void> _kotvSyncLanguageSetting() async {
+  if (kIsWeb) return;
+  try {
+    final locale = PlatformDispatcher.instance.locale;
+    final traditional = locale.scriptCode == 'Hant' ||
+        locale.countryCode == 'TW' ||
+        locale.countryCode == 'HK' ||
+        locale.countryCode == 'MO';
+    final lang = traditional ? 'zh-Hant' : '';
+    if (lang.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    var base = (prefs.getString('engine_base_url') ?? '').trim();
+    if (base.isEmpty) base = 'http://127.0.0.1:9978';
+    await http
+        .post(
+          Uri.parse('$base/api/v1/settings'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'key': 'language', 'value': lang}),
+        )
+        .timeout(const Duration(seconds: 3));
+  } catch (_) {}
 }
 
 Widget _kotvErrorWidget(FlutterErrorDetails details) {
@@ -134,9 +180,13 @@ Future<void> main() async {
     }
     FlutterError.presentError(details);
     _kotvLogUiError(details.exception, details.stack, where: 'FlutterError');
+    _kotvMarkHomeCrash();
   };
   PlatformDispatcher.instance.onError = (error, stack) {
     _kotvLogUiError(error, stack, where: 'PlatformDispatcher');
+    if (!_kotvIsSoftUiException(error)) {
+      _kotvMarkHomeCrash();
+    }
     return true;
   };
   if (!kIsWeb) {
@@ -148,6 +198,7 @@ Future<void> main() async {
     }
   }
   unawaited(KotvBufferBudget.warm());
+  unawaited(_kotvSyncLanguageSetting());
   final prefs = await SharedPreferences.getInstance();
   if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
     await windowManager.ensureInitialized();

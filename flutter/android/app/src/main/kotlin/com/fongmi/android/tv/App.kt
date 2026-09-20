@@ -133,16 +133,38 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
             try {
               Looper.loop()
             } catch (t2: Throwable) {
+              markHomeCrash()
               prev?.uncaughtException(thread, t2)
             }
           } else {
+            markHomeCrash()
             prev?.uncaughtException(thread, t)
           }
         }
         return@setDefaultUncaughtExceptionHandler
       }
+      markHomeCrash()
       prev?.uncaughtException(thread, ex)
     }
+  }
+
+  /** SiteApi Prefers crash：下次 spider homeContent 跳过一次。 */
+  private fun markHomeCrash() {
+    Thread {
+      try {
+        val url = java.net.URL("http://127.0.0.1:9978/api/v1/settings")
+        val conn = url.openConnection() as java.net.HttpURLConnection
+        conn.connectTimeout = 1500
+        conn.readTimeout = 1500
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.outputStream.use { it.write("""{"key":"crash","value":"true"}""".toByteArray()) }
+        conn.responseCode
+        conn.disconnect()
+      } catch (_: Throwable) {
+      }
+    }.apply { isDaemon = true; name = "kotv-mark-crash"; start() }
   }
 
   private fun isSpiderInitNoise(ex: Throwable?): Boolean {

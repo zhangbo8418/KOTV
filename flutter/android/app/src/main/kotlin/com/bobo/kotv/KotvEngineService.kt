@@ -206,6 +206,10 @@ class KotvEngineService : Service() {
       env["KOTV_DATA_DIR"] = File(cacheDir, "KOTV").absolutePath
       env["HOME"] = filesDir.absolutePath
       resolveLanIpv4()?.let { env["KOTV_LAN_IP"] = it }
+      try {
+        env["KOTV_LOCALE_COUNTRY"] = java.util.Locale.getDefault().country ?: ""
+      } catch (_: Throwable) {
+      }
       // 与 Flutter 同 UID；降低被杀概率时仍可能写日志
       val proc = pb.start()
       engineProcess = proc

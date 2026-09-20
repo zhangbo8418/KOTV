@@ -367,14 +367,6 @@ func looksLikeESModule(source string) bool {
 		strings.Contains(source, "export var")
 }
 
-func (s *jsSpider) fetchScript() (string, error) {
-	content := moduleFetch(s.api)
-	if content == "" {
-		return "", fmt.Errorf("JS api 内容为空: %s", s.api)
-	}
-	return content, nil
-}
-
 func (s *jsSpider) callOn(ctx *qjs.Context, spider *qjs.Value, method string, args ...interface{}) (string, error) {
 	if spider == nil {
 		return "{}", fmt.Errorf("spider 未初始化")
@@ -588,23 +580,6 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 	}))
 	g.Set("req", ctx.NewFunction(s.jsReq))
 	g.Set("_http", ctx.NewFunction(s.jsReq))
-	g.Set("_httpAsync", ctx.NewFunction(s.jsReqAsync))
-	g.Set("_sleep", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
-		delay := 0
-		if len(args) > 0 {
-			delay = int(args[0].Int32())
-		}
-		return c.NewPromise(func(resolve, reject func(*qjs.Value)) {
-			go func() {
-				time.Sleep(time.Duration(max(delay, 0)) * time.Millisecond)
-				c.Schedule(func(inner *qjs.Context) {
-					value := inner.NewUndefined()
-					resolve(value)
-					value.Free()
-				})
-			}()
-		})
-	}))
 	// Global.setTimeout：宿主 Timer，Destroy 时全部取消
 	g.Set("setTimeout", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		if len(args) == 0 || !args[0].IsFunction() {
@@ -909,20 +884,6 @@ func (s *jsSpider) jsReq(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qj
 	return jsConnectResult(c, result)
 }
 
-func (s *jsSpider) jsReqAsync(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
-	u, options := parseJSRequest(args)
-	return c.NewPromise(func(resolve, reject func(*qjs.Value)) {
-		go func() {
-			result := doJSRequest(u, options)
-			c.Schedule(func(inner *qjs.Context) {
-				value := jsConnectResult(inner, result)
-				resolve(value)
-				value.Free()
-			})
-		}()
-	})
-}
-
 // jsConnectResult 建可写 JSObject（Connect.success / createNewJSObject），避免 Marshal 只读。
 func jsConnectResult(c *qjs.Context, result map[string]interface{}) *qjs.Value {
 	obj := c.NewObject()
@@ -1211,9 +1172,9 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	return result
 }
 
-// javaURLEncode：与 Java URLEncoder.encode(…, UTF-8) 一致，空格为 +。
+// javaURLEncode：Android Uri.encode 风格，空格为 %20（非 URLEncoder 的 +）。
 func javaURLEncode(s string) string {
-	return strings.ReplaceAll(url.QueryEscape(s), "%20", "+")
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
 func charsetFromHeaders(headers map[string]string) string {

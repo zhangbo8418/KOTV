@@ -125,9 +125,12 @@ class Spider(metaclass=ABCMeta):
         )
 
     def getProxyUrl(self, local=True):
- # getProxyUrl；附加 siteKey 以便桌面端精确路由。
-        host = "127.0.0.1" if local else "0.0.0.0"
+        # getProxyUrl；附加 siteKey 以便桌面端精确路由。
         port = os.environ.get("KOTV_PROXY_PORT", "9978")
+        if local:
+            host = "127.0.0.1"
+        else:
+            host = (os.environ.get("KOTV_PROXY_HOST") or "").strip() or "127.0.0.1"
         key = getattr(self, "siteKey", "") or ""
         if key:
             return f"http://{host}:{port}/proxy?do=py&siteKey={key}"
@@ -138,40 +141,53 @@ class Spider(metaclass=ABCMeta):
             message = json.dumps(message, ensure_ascii=False)
         print(message, file=sys.stderr, flush=True)
 
-    def _cache_file(self, key):
-        directory = os.path.join(_cache_root(), "kv")
-        os.makedirs(directory, exist_ok=True)
-        safe = re.sub(r"[^a-zA-Z0-9._-]", "_", key)
-        return os.path.join(directory, safe + ".json")
+    def _cache_base(self):
+        port = os.environ.get("KOTV_PROXY_PORT", "9978")
+        return f"http://127.0.0.1:{port}/cache"
 
     def getCache(self, key):
-        path = self._cache_file(key)
-        if not os.path.isfile(path):
-            return None
-        with open(path, "r", encoding="utf-8") as source:
-            raw = source.read()
-        if not raw:
-            return None
+        # TV：GET /cache?do=get&key= → Prefers/LocalGet（rule 空 → cache_{key}）
         try:
-            value = json.loads(raw)
-            if isinstance(value, dict) and "expiresAt" in value:
-                if value["expiresAt"] < int(time.time()):
+            value = self.fetch(
+                f"{self._cache_base()}?do=get&key={key}", timeout=5
+            ).text
+        except Exception:
+            return None
+        if len(value) > 0:
+            if (value.startswith("{") and value.endswith("}")) or (
+                value.startswith("[") and value.endswith("]")
+            ):
+                try:
+                    value = json.loads(value)
+                except Exception:
+                    return value
+                if isinstance(value, dict):
+                    if "expiresAt" not in value or value["expiresAt"] >= int(time.time()):
+                        return value
                     self.delCache(key)
                     return None
             return value
-        except Exception:
-            return raw
+        return None
 
     def setCache(self, key, value):
-        with open(self._cache_file(key), "w", encoding="utf-8") as output:
+        if isinstance(value, (int, float)):
+            value = str(value)
+        if value is not None and len(str(value)) > 0:
             if isinstance(value, (dict, list)):
-                json.dump(value, output, ensure_ascii=False)
-            else:
-                output.write("" if value is None else str(value))
-        return "succeed"
+                value = json.dumps(value, ensure_ascii=False)
+        try:
+            r = self.post(
+                f"{self._cache_base()}?do=set&key={key}",
+                data={"value": value},
+                timeout=5,
+            )
+            return "succeed" if r.status_code == 200 else "failed"
+        except Exception:
+            return "failed"
 
     def delCache(self, key):
-        path = self._cache_file(key)
-        if os.path.exists(path):
-            os.remove(path)
-        return "succeed"
+        try:
+            r = self.fetch(f"{self._cache_base()}?do=del&key={key}", timeout=5)
+            return "succeed" if r.status_code == 200 else "failed"
+        except Exception:
+            return "failed"

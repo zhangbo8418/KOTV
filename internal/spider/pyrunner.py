@@ -239,7 +239,8 @@ for _shadow in list(os.listdir(cache)) if os.path.isdir(cache) else []:
 def _download_dep(name):
     """从爬虫 api 同目录拉取依赖 py 到 cache（失败忽略，由后续 import 报错）。
 
-    依赖来自 getDependence()；内置 base.spider 包不从仓拉 base.py。
+    依赖来自 getDependence()；始终覆盖写入（Chaquopy download/writeFile 同）。
+    内置 base.spider 包不从仓拉 base.py。
     """
     name = name if str(name).endswith(".py") else str(name) + ".py"
     if _is_blocked_dep_name(name):
@@ -248,15 +249,6 @@ def _download_dep(name):
     if _local_package_dir(name):
         return
     target = os.path.join(cache, os.path.basename(name))
-    if os.path.isfile(target) and os.path.getsize(target) > 0:
-        try:
-            with open(target, "rb") as f:
-                existing = f.read(800)
-            if _looks_like_python_source(existing):
-                return
-            os.remove(target)
-        except Exception:
-            return
     if not str(api).startswith("http"):
         return
     # api 常是 …/foo.py，urljoin 会落到同级 …/t4.py

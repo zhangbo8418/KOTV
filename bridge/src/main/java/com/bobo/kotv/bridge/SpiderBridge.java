@@ -1476,16 +1476,6 @@ public class SpiderBridge {
         return dir;
     }
 
-    private static File spillStream(InputStream is) throws IOException {
-        File file = File.createTempFile("proxy-", ".bin", proxySpillDir());
-        try (InputStream in = is; OutputStream out = new FileOutputStream(file)) {
-            byte[] buf = new byte[64 * 1024];
-            int n;
-            while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
-        }
-        return file;
-    }
-
     private static File spillBytes(byte[] bytes) throws IOException {
         File file = File.createTempFile("proxy-", ".bin", proxySpillDir());
         try (OutputStream out = new FileOutputStream(file)) {

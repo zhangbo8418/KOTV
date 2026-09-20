@@ -18,6 +18,7 @@ import (
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/parse"
+	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
 	"github.com/bobo/KOTV/internal/util"
@@ -156,18 +157,25 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 	switch site.TypeID() {
 	case 3: // Spider
 		sp := s.cfg.Spider(site)
-		home, herr := sp.HomeContent(true)
-		if herr != nil {
-			return model.Result{Success: false}, herr
+		skipHome := settings.ConsumeCrash()
+		var home string
+		if !skipHome {
+			var herr error
+			home, herr = sp.HomeContent(true)
+			if herr != nil {
+				return model.Result{Success: false}, herr
+			}
 		}
 		result, err = decodeResult(home)
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
-		if hv, herr := sp.HomeVideoContent(); herr == nil {
-			extra, _ := decodeResult(hv)
-			if len(extra.List) > 0 {
-				result.List = extra.List
+		if !skipHome {
+			if hv, herr := sp.HomeVideoContent(); herr == nil {
+				extra, _ := decodeResult(hv)
+				if len(extra.List) > 0 {
+					result.List = extra.List
+				}
 			}
 		}
 		applyTypes(site, &result)
@@ -181,7 +189,7 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
-		result, err = model.FromType(4, body)
+		result, err = fromType(4, body)
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
@@ -193,7 +201,7 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
-		result, err = model.FromType(site.TypeID(), body)
+		result, err = fromType(site.TypeID(), body)
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
@@ -268,7 +276,7 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
-		result, err = model.FromType(site.TypeID(), body)
+		result, err = fromType(site.TypeID(), body)
 	default:
 		return model.Result{Success: false}, fmt.Errorf("不支持的站源类型: %d", site.TypeID())
 	}
@@ -330,7 +338,7 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 		if err != nil {
 			return vod, err
 		}
-		result, err = model.FromType(site.TypeID(), body)
+		result, err = fromType(site.TypeID(), body)
 	default:
 		return vod, fmt.Errorf("不支持的站源类型: %d", site.TypeID())
 	}
@@ -344,7 +352,7 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 	detail.Site = site
 	detail.SetVodFlags()
 	// 磁力展开（DHT 等元数据）可能数十秒，不在详情关键路径同步执行；
-	// UI 进详情后异步 ExpandVod，失败时仍保留原 magnet 链、起播再试。
+	// UI 进详情后异步 POST /api/v1/detail/expand → thunder.ParseVodContext，失败时仍保留原 magnet 链、起播再试。
 	s.mu.Lock()
 	s.DetailResult = result
 	s.mu.Unlock()
@@ -411,7 +419,7 @@ func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Res
 			if err != nil {
 				return model.Result{Success: false}, err
 			}
-			result, err = model.FromType(4, body)
+			result, err = fromType(4, body)
 			if err != nil {
 				return model.Result{Success: false}, err
 			}
@@ -757,7 +765,7 @@ func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, pa
 		if err != nil {
 			return nil, err
 		}
-		result, err := model.FromType(site.TypeID(), body)
+		result, err := fromType(site.TypeID(), body)
 		if err != nil {
 			return nil, err
 		}
@@ -819,5 +827,14 @@ func (s *SiteService) IsVideoFormat(site model.Site, u string) bool {
 }
 
 func decodeResult(raw string) (model.Result, error) {
-	return model.FromType(1, raw)
+	return fromType(1, raw)
+}
+
+func fromType(typeID int, raw string) (model.Result, error) {
+	result, err := model.FromType(typeID, raw)
+	if err != nil {
+		return result, err
+	}
+	spider.S2TResult(&result)
+	return result, nil
 }
