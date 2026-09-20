@@ -55,8 +55,8 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
   private var primaryBottomFraction = 0.08f
   private var secondaryTopFraction = 0.08f
   private var fontScale = 1.0f
-  private var primaryPos = 100.0
-  private var secondaryPos = 0.0
+  private var primaryPos = 0.0
+  private var secondaryPos = 10.0
 
   val secondaryTextOutput =
     TextOutput { group: CueGroup ->
@@ -123,13 +123,13 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
   }
 
   /**
-   * @param primaryPos mpv 风格 0–150（100=底部默认）
-   * @param secondaryPos 副字幕：0=顶部默认；>0 时按主字幕刻度换算 topMargin
+   * @param primaryPos 设置刻度 -20‥30（0=底部默认）→ bottomMargin 比例
+   * @param secondaryPos 副字幕 0‥150（默认 10）→ topMargin ≈ pos/100
    */
   fun setStyle(
     fontScale: Float,
-    primaryPos: Double = 100.0,
-    secondaryPos: Double = 0.0,
+    primaryPos: Double = 0.0,
+    secondaryPos: Double = 10.0,
     color: String = "#FFFFFF",
     borderColor: String = "#000000",
     borderSize: Double = 2.0,
@@ -140,9 +140,8 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     fontPath: String = "",
   ) {
     this.fontScale = fontScale.coerceIn(0.5f, 2.5f)
-    this.primaryPos = primaryPos.coerceIn(0.0, 150.0)
+    this.primaryPos = primaryPos.coerceIn(-20.0, 30.0)
     this.secondaryPos = secondaryPos.coerceIn(0.0, 150.0)
-    // pos100 → 约 8% 底边距；pos0 → 更大底边距（字幕上移）
     primaryBottomFraction = posToBottomFraction(this.primaryPos)
     secondaryTopFraction = posToTopFraction(this.secondaryPos)
     primaryView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f * this.fontScale)
@@ -314,17 +313,13 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
   }
 
   private fun posToBottomFraction(pos: Double): Float {
-    val p = pos.coerceIn(0.0, 150.0)
-    return when {
-      p >= 100.0 -> ((150.0 - p) / 50.0 * 0.04 + 0.04).toFloat().coerceIn(0.02f, 0.12f)
-      else -> ((100.0 - p) / 100.0 * 0.35 + 0.08).toFloat().coerceIn(0.08f, 0.45f)
-    }
+    // 设置刻度：0=底；正值上移（增大 bottomMargin 比例）
+    return (0.04 + pos / 100.0).toFloat().coerceIn(0.02f, 0.35f)
   }
 
   private fun posToTopFraction(pos: Double): Float {
-    // 0=顶部默认；增大 pos 则下移（增大 topMargin）
-    val p = pos.coerceIn(0.0, 150.0)
-    return (0.04 + p / 150.0 * 0.4).toFloat().coerceIn(0.04f, 0.45f)
+    // 副字幕：默认 10 → 约 10% 顶边距；(100-pos)/100 底边距的互补
+    return (pos / 100.0).toFloat().coerceIn(0.04f, 0.95f)
   }
 
   private fun parseColorSafe(raw: String, fallback: Int): Int {

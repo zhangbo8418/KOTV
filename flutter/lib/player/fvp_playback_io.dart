@@ -582,8 +582,11 @@ class FvpPlayback extends KotvPlayback {
     if (c == null || !c.value.isInitialized) return;
     try {
       c.setProperty('subtitle.scale', _subtitleFontScale.toStringAsFixed(2));
-      if (_preferredTextLangs.isNotEmpty) {
-        c.setProperty('subtitle.language', _preferredTextLangs);
+      final langs = _preferredTextLangs.isNotEmpty
+          ? _preferredTextLangs
+          : kotvPreferredTextLanguagesFromLocale().join(',');
+      if (langs.isNotEmpty) {
+        c.setProperty('subtitle.language', langs);
       }
       final vf = _videoEq.fvpAvfilter();
       c.setProperty('video.avfilter', vf);
@@ -827,7 +830,7 @@ class FvpPlayback extends KotvPlayback {
         c.setProperty('subtitle.scale', _subtitleFontScale.toStringAsFixed(2));
       }
       if (pos != null) {
-        c.setProperty('subtitle.margin', pos.clamp(0.0, 150.0).toStringAsFixed(1));
+        c.setProperty('subtitle.margin', kotvSubtitlePosToMpv(pos).toStringAsFixed(1));
       }
       if (secondaryPos != null) {
         c.setProperty('subtitle2.margin', secondaryPos.clamp(0.0, 150.0).toStringAsFixed(1));

@@ -676,7 +676,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
                 MPVLib.setPropertyDouble("sub-scale", scale.coerceIn(0.5, 2.5))
               }
               if (pos != null) {
-                MPVLib.setPropertyDouble("sub-pos", pos.coerceIn(0.0, 150.0))
+                MPVLib.setPropertyDouble("sub-pos", (100.0 - pos).coerceIn(0.0, 150.0))
               }
               if (secondaryPos != null) {
                 MPVLib.setPropertyDouble("secondary-sub-pos", secondaryPos.coerceIn(0.0, 150.0))
@@ -1080,7 +1080,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun applyPreferredSubtitleLangs() {
-    val langs = preferredTextLangs.trim()
+    val langs = preferredTextLangs.trim().ifEmpty {
+      KotvLangUtil.preferredTextLanguages().joinToString(",")
+    }
     if (langs.isEmpty()) return
     try {
       val normalized = langs.replace(';', ',').replace(Regex("\\s+"), "")

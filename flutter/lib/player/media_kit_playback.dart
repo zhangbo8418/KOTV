@@ -10,6 +10,7 @@ import 'mpv_diag.dart';
 import 'mpv_opts.dart';
 import 'play_headers.dart';
 import 'silent_video_guard.dart';
+import 'video_eq.dart';
 
 /// 安全释放 libmpv [Player]：先 pause 停声，再 stop → 短排空 → dispose。
 /// 各桌面平台（Win / macOS / Linux）共用 [kotvTeardownPlayback]。
@@ -660,7 +661,8 @@ class MediaKitPlayback extends KotvPlayback {
         );
       }
       if (pos != null) {
-        await (platform as dynamic).setProperty('sub-pos', pos.toStringAsFixed(1));
+        final mpvPos = kotvSubtitlePosToMpv(pos);
+        await (platform as dynamic).setProperty('sub-pos', mpvPos.toStringAsFixed(1));
       }
       if (secondaryPos != null) {
         await (platform as dynamic).setProperty(

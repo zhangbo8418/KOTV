@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/painting.dart';
 
@@ -321,6 +322,35 @@ KotvAudioEqPreset kotvAudioEqFromSettings(Map<String, dynamic> settings) {
 /// 自定义频段：`freq:gain,freq:gain…`（如 `80:6,1000:3,3000:2`），gain 单位 dB。
 String kotvAudioEqBandsFromSettings(Map<String, dynamic> settings) {
   return '${settings['audioEqBands'] ?? ''}'.trim();
+}
+
+/// 字幕垂直位置：设置值 -20‥30（0=底部默认）。旧存 mpv 0‥150（100=底）时换算。
+double kotvSubtitlePosFromSettings(dynamic raw) {
+  final v = double.tryParse('${raw ?? '0'}') ?? 0;
+  if (v > 30 || v < -20) {
+    return (100 - v).clamp(-20.0, 30.0);
+  }
+  return v.clamp(-20.0, 30.0);
+}
+
+/// 设置位置 → mpv `sub-pos`（默认 100）。
+double kotvSubtitlePosToMpv(double settingPos) => (100 - settingPos).clamp(0.0, 150.0);
+
+/// 系统 Locale → 首选字幕语言（空设置时用）。
+List<String> kotvPreferredTextLanguagesFromLocale() {
+  final locale = PlatformDispatcher.instance.locale;
+  final tag = locale.toLanguageTag();
+  final language = locale.languageCode;
+  if (language != 'zh') {
+    return tag == language ? [language] : [tag, language];
+  }
+  final script = locale.scriptCode;
+  final country = locale.countryCode ?? '';
+  final traditional = script == 'Hant' ||
+      (script != 'Hans' && (country == 'TW' || country == 'HK' || country == 'MO'));
+  final chineseScript = traditional ? 'zh-Hant' : 'zh-Hans';
+  if (tag == language) return [chineseScript, language];
+  return [tag, chineseScript, language];
 }
 
 /// 对白增强 0–100；兼容旧布尔 `true`→100。

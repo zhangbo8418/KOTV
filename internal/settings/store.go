@@ -229,7 +229,7 @@ func defaultFile() file {
 			{ID: "videoShadow", Label: "画面阴影", Value: "0"},
 			{ID: "preloadNextEpisode", Label: "预解析下一集", Value: "true"},
 			{ID: "subtitleFontScale", Label: "字幕字号", Value: "1.0"},
-			{ID: "subtitlePos", Label: "字幕位置", Value: "100"},
+			{ID: "subtitlePos", Label: "字幕位置", Value: "0"},
 			{ID: "subtitleColor", Label: "字幕颜色", Value: "#FFFFFF"},
 			{ID: "subtitleBorderColor", Label: "字幕描边色", Value: "#000000"},
 			{ID: "subtitleBorderSize", Label: "字幕描边", Value: "2"},
@@ -239,7 +239,7 @@ func defaultFile() file {
 			{ID: "audioDialogue", Label: "对白增强", Value: "false"},
 			{ID: "audioBalance", Label: "声道平衡", Value: "0"},
 			{ID: "danmakuOffsetMs", Label: "弹幕偏移毫秒", Value: "0"},
-			{ID: "subtitleStyleMode", Label: "字幕样式模式", Value: "custom"},
+			{ID: "subtitleStyleMode", Label: "字幕样式模式", Value: "original"},
 			{ID: "subtitleEdgeType", Label: "字幕描边类型", Value: "outline"},
 			{ID: "subtitleTextOpacity", Label: "字幕正文透明度", Value: "100"},
 			{ID: "subtitleBgOpacity", Label: "字幕背景透明度", Value: "100"},
@@ -357,7 +357,7 @@ func Load() error {
 	ensureSettingLocked(VideoShadow, "画面阴影", "0")
 	ensureSettingLocked(PreloadNextEpisode, "预解析下一集", "true")
 	ensureSettingLocked(SubtitleFontScale, "字幕字号", "1.0")
-	ensureSettingLocked(SubtitlePos, "字幕位置", "100")
+	ensureSettingLocked(SubtitlePos, "字幕位置", "0")
 	ensureSettingLocked(SubtitleColor, "字幕颜色", "#FFFFFF")
 	ensureSettingLocked(SubtitleBorderColor, "字幕描边色", "#000000")
 	ensureSettingLocked(SubtitleBorderSize, "字幕描边", "2")
@@ -367,7 +367,7 @@ func Load() error {
 	ensureSettingLocked(AudioDialogue, "对白增强", "false")
 	ensureSettingLocked(AudioBalance, "声道平衡", "0")
 	ensureSettingLocked(DanmakuOffsetMs, "弹幕偏移毫秒", "0")
-	ensureSettingLocked(SubtitleStyleMode, "字幕样式模式", "custom")
+	ensureSettingLocked(SubtitleStyleMode, "字幕样式模式", "original")
 	ensureSettingLocked(SubtitleEdgeType, "字幕描边类型", "outline")
 	ensureSettingLocked(SubtitleTextOpacity, "字幕正文透明度", "100")
 	ensureSettingLocked(SubtitleBgOpacity, "字幕背景透明度", "100")

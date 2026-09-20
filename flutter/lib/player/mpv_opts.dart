@@ -317,6 +317,9 @@ class KotvMpvOpts {
           if (preferredTextLangs.trim().isNotEmpty) {
             final slang = preferredTextLangs.replaceAll(';', ',').replaceAll(RegExp(r'\s+'), '');
             await set('slang', slang);
+          } else {
+            final auto = kotvPreferredTextLanguagesFromLocale().join(',');
+            if (auto.isNotEmpty) await set('slang', auto);
           }
         } catch (_) {}
       }

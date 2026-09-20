@@ -3,7 +3,6 @@ package com.bobo.kotv
 import android.content.Context
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
-import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.graphics.SurfaceTexture
 import android.os.Build
@@ -28,8 +27,6 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
-import androidx.media3.common.audio.ChannelMixingAudioProcessor
-import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.UnstableApi
 import com.bobo.kotv.exo.KotvExoVideoEqController
 import androidx.media3.common.util.Util
@@ -166,7 +163,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var playerBuiltSecondary: Boolean? = null
   private var subtitleOverlay: KotvSubtitleOverlay? = null
   private var subtitleFontScale = 1.0f
-  private var subtitlePos = 100.0
+  private var subtitlePos = 0.0
   private var subtitleSecondaryPos = 10.0
   private var subtitleColor = "#FFFFFF"
   private var subtitleBorderColor = "#000000"
@@ -202,8 +199,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var audioOffsetMs = 0L
   private var bassBoost: BassBoost? = null
   private var equalizer: Equalizer? = null
-  private var loudnessEnhancer: LoudnessEnhancer? = null
-  private val channelMixing = ChannelMixingAudioProcessor()
+  private var dynamicsProcessing: android.media.audiofx.DynamicsProcessing? = null
   private val audioEffectProcessor = KotvAudioEffectProcessor()
   private val videoEqCtrl = KotvExoVideoEqController()
   private var eqBrightness = 0
@@ -463,7 +459,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<Number>("scale")?.toFloat()?.let {
           subtitleFontScale = it.coerceIn(0.5f, 2.5f)
         }
-        call.argument<Number>("pos")?.toDouble()?.let { subtitlePos = it.coerceIn(0.0, 150.0) }
+        call.argument<Number>("pos")?.toDouble()?.let { subtitlePos = it.coerceIn(-20.0, 30.0) }
         call.argument<Number>("secondaryPos")?.toDouble()?.let {
           subtitleSecondaryPos = it.coerceIn(0.0, 150.0)
         }
@@ -1162,7 +1158,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val loadControl: LoadControl? = if (live) {
       null
     } else {
-      val budget = KotvMemBudget.bytes(ctx)
       val factor = bufferFactor.coerceIn(1, 10)
       DefaultLoadControl.Builder()
         .setBufferDurationsMs(
@@ -1171,9 +1166,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
         )
-        .setTargetBufferBytes(budget)
-        .setPrioritizeTimeOverSizeThresholds(false)
-        .setBackBuffer(/* backBufferDurationMs */ 0, /* retainFromKeyframe */ false)
+        .setPlayerTargetBufferBytes(
+          androidx.media3.exoplayer.analytics.PlayerId.PRELOAD.name,
+          64 * 1024 * 1024,
+        )
         .build()
     }
     val bandwidthMeter = DefaultBandwidthMeter.Builder(ctx).build()
@@ -1224,11 +1220,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     preloadUpstream = smbAware
     preloadRenderers = renderers
     bindPlayerSurface()
-    updateChannelMix()
     applyVideoEq()
     applySubtitleStyle()
     applyAudioOffset()
     applySubtitleOffset()
+    applyAudioEq()
     val listener =
       object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
@@ -1366,8 +1362,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         .distinct()
         .toTypedArray()
     }
-    val lang = java.util.Locale.getDefault().language
-    return if (lang.isNullOrBlank()) emptyArray() else arrayOf(lang)
+    return KotvLangUtil.preferredTextLanguages()
   }
 
   /** 设置解码偏好。
@@ -1422,7 +1417,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         dolbyVisionPolicy,
         audioPassThrough,
         secondaryOut,
-        if (audioPassThrough) null else channelMixing,
+        null, // 声道模式/平衡/中置由 audioEffectProcessor 处理
         if (audioPassThrough) null else audioEffectProcessor,
       )
     when (mode) {
@@ -1537,14 +1532,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     equalizer = null
     try {
-      loudnessEnhancer?.enabled = false
+      dynamicsProcessing?.enabled = false
     } catch (_: Throwable) {
     }
     try {
-      loudnessEnhancer?.release()
+      dynamicsProcessing?.release()
     } catch (_: Throwable) {
     }
-    loudnessEnhancer = null
+    dynamicsProcessing = null
   }
 
   private fun releaseAudioEffects() {
@@ -1586,7 +1581,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     call.argument<Number>("subtitleFontScale")?.toFloat()?.let {
       subtitleFontScale = it.coerceIn(0.5f, 2.5f)
     }
-    call.argument<Number>("subtitlePos")?.toDouble()?.let { subtitlePos = it.coerceIn(0.0, 150.0) }
+    call.argument<Number>("subtitlePos")?.toDouble()?.let { subtitlePos = it.coerceIn(-20.0, 30.0) }
     call.argument<Number>("subtitleSecondaryPos")?.toDouble()?.let {
       subtitleSecondaryPos = it.coerceIn(0.0, 150.0)
     }
@@ -1760,15 +1755,19 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** BassBoost / Equalizer / 响度处理 / 声道混合；直通时跳过以免破 SPDIF。 */
+  /** BassBoost / Equalizer / PCM 音效；直通时跳过以免破 SPDIF。 */
   private fun applyAudioEq() {
     releaseAudioEq()
-    updateChannelMix()
     if (audioPassThrough) {
       audioEffectProcessor.resetSettings()
       return
     }
-    syncAudioEffectProcessor()
+    val levels = buildAppliedEqLevelsMb()
+    val useSoftwareEq = levels.isNotEmpty() && Build.VERSION.SDK_INT < Build.VERSION_CODES.P
+    syncAudioEffectProcessor(
+      softwareEqualizer = useSoftwareEq,
+      eqLevelsMb = if (useSoftwareEq) levels else ShortArray(0),
+    )
     val p = player ?: return
     val session =
       try {
@@ -1779,17 +1778,18 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (session <= 0) return
     try {
       when {
-        audioEqBands.isNotBlank() -> applyCustomAudioBands(session)
+        useSoftwareEq -> Unit
+        levels.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ->
+          applyDynamicsEq(session, levels)
+        levels.isNotEmpty() -> applySystemEqualizerBands(session, levels)
         audioEqMode == "bass" -> {
           val bb = BassBoost(0, session)
           bb.enabled = true
           bb.setStrength(800.toShort())
           bassBoost = bb
         }
-        audioEqMode == "voice" -> applyVoiceBands(session, strength = 1.0)
-        audioEqMode != "off" -> applyCustomAudioBands(session)
+        else -> Unit
       }
-      applyDialogueLoudness(session)
     } catch (t: Throwable) {
       Log.w(TAG, "applyAudioEq mode=$audioEqMode dialogue=$audioDialogue", t)
       releaseAudioEq()
@@ -1844,137 +1844,143 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  private fun applyVoiceBands(session: Int, strength: Double) {
-    val eq = Equalizer(0, session)
-    eq.enabled = true
-    val range = eq.bandLevelRange
-    val hi = (range[1].toInt().coerceAtMost(800) * strength).toInt()
-    val mid = (hi * 0.55).toInt().toShort()
-    val lowMid = (hi * 0.35).toInt().toShort()
-    for (i in 0 until eq.numberOfBands) {
-      val band = i.toShort()
-      val hz = eq.getCenterFreq(band) / 1000
-      val level =
-        when {
-          hz in 800..4500 -> mid
-          hz in 300..799 -> lowMid
-          else -> 0
-        }
-      eq.setBandLevel(band, level)
-    }
-    equalizer = eq
-  }
-
-  /** 响度 / 稳定量 / boost / preamp → PCM 处理器（无需 audioSession）。 */
-  private fun syncAudioEffectProcessor() {
+  /** 响度 / 稳定量 / boost / preamp / 声道 → PCM 处理器。 */
+  private fun syncAudioEffectProcessor(
+    softwareEqualizer: Boolean = false,
+    eqLevelsMb: ShortArray = ShortArray(0),
+  ) {
     audioEffectProcessor.setConfig(
       KotvAudioEffectProcessor.Config(
         loudness = audioLoudness,
         stability = audioStability.coerceIn(0, 100),
         boost = audioBoost.coerceIn(0, 1200),
         preamp = audioPreamp.coerceIn(-1200, 0),
+        centerGain = audioCenterGain.coerceIn(0, 1200),
+        balance = if (audioChannelMode == "mono") 0 else audioBalance.coerceIn(-100, 100),
+        channelMode = audioChannelMode,
+        softwareEqualizer = softwareEqualizer,
+        eqLevelsMb = eqLevelsMb,
       ),
     )
   }
 
-  /** 对白增益仍用系统 LoudnessEnhancer（并可能叠 voice 频段）。 */
-  private fun applyDialogueLoudness(session: Int) {
-    var dialogueMb = 0
-    if (audioDialogue > 0 && audioEqBands.isBlank()) {
-      dialogueMb += (900.0 * audioDialogue / 100.0).toInt()
-      if (equalizer == null && audioEqMode == "off") {
-        applyVoiceBands(session, strength = 0.85 * audioDialogue / 100.0)
-      }
-    } else if (audioDialogue > 0) {
-      dialogueMb += (400.0 * audioDialogue / 100.0).toInt()
-    }
-    if (dialogueMb == 0) return
-    try {
-      val le = LoudnessEnhancer(session)
-      le.setTargetGain(dialogueMb.coerceIn(-1200, 2000))
-      le.enabled = true
-      loudnessEnhancer = le
-    } catch (t: Throwable) {
-      Log.w(TAG, "LoudnessEnhancer unavailable", t)
-    }
-  }
-
-  /** 声道模式 + 平衡 + 中置增益。 */
-  private fun updateChannelMix() {
-    val mode = audioChannelMode
-    val bal = if (mode == "mono") 0 else audioBalance.coerceIn(-100, 100)
-    val left = if (bal <= 0) 1f else (1f - bal / 100f)
-    val right = if (bal >= 0) 1f else (1f + bal / 100f)
-    val centerGain =
-      if (audioCenterGain > 0) {
-        Math.pow(10.0, audioCenterGain / 2000.0).toFloat()
-      } else {
-        1f
-      }
-    for (ch in 1..8) {
-      try {
-        channelMixing.putChannelMixingMatrix(channelMatrix(ch, mode, left, right, centerGain))
-      } catch (_: Throwable) {
-      }
-    }
-  }
-
-  private fun channelMatrix(
-    channels: Int,
-    mode: String,
-    left: Float,
-    right: Float,
-    centerGain: Float,
-  ): ChannelMixingMatrix {
-    val n = channels
-    val coeffs = FloatArray(n * n)
-    fun set(out: Int, inp: Int, v: Float) {
-      if (out in 0 until n && inp in 0 until n) coeffs[out * n + inp] = v
-    }
-    when {
-      mode == "mono" && n >= 2 -> {
-        val a = 0.5f * left
-        val b = 0.5f * right
-        set(0, 0, a)
-        set(0, 1, b)
-        set(1, 0, a)
-        set(1, 1, b)
-        for (i in 2 until n) set(i, i, 1f)
-      }
-      mode == "reverse" && n >= 2 -> {
-        set(0, 1, left)
-        set(1, 0, right)
-        for (i in 2 until n) set(i, i, 1f)
-      }
-      mode == "stereo" && n > 2 -> {
-        // 前左/前右保留，其余并入。
-        set(0, 0, left)
-        set(1, 1, right)
-        for (i in 2 until n) {
-          set(0, i, 0.3f * left / (n - 1))
-          set(1, i, 0.3f * right / (n - 1))
-        }
-      }
-      else -> {
-        val l = if (kotlin.math.abs(left - 1f) < 0.001f && kotlin.math.abs(right - 1f) < 0.001f) 0.999f else left
-        val r = if (kotlin.math.abs(left - 1f) < 0.001f && kotlin.math.abs(right - 1f) < 0.001f) 0.999f else right
-        for (i in 0 until n) {
-          coeffs[i * n + i] =
-            when (i) {
-              0 -> l
-              1 -> if (n >= 2) r else l
-              2 -> if ((n == 6 || n == 8) && centerGain != 1f) centerGain else 1f
-              else -> 1f
-            }
-        }
-      }
-    }
-    return ChannelMixingMatrix(n, n, coeffs)
-  }
-
-  private fun applyCustomAudioBands(session: Int) {
+  /** 均衡频段（含对白增强），单位 mB。 */
+  private fun buildAppliedEqLevelsMb(): ShortArray {
+    val centers = STANDARD_EQ_CENTERS_MILLIHZ
+    val base = ShortArray(centers.size)
     val targets = parseAudioBands(audioEqBands)
-    if (targets.isEmpty()) return
+    when {
+      targets.isNotEmpty() -> {
+        for (i in centers.indices) {
+          val centerHz = centers[i] / 1000.0
+          var bestGain = 0.0
+          var bestDist = Double.MAX_VALUE
+          for ((freq, gainDb) in targets) {
+            val dist = kotlin.math.abs(kotlin.math.ln((centerHz + 1) / (freq + 1)))
+            if (dist < bestDist) {
+              bestDist = dist
+              bestGain = gainDb
+            }
+          }
+          base[i] = (bestGain * 100).toInt().coerceIn(-1200, 1200).toShort()
+        }
+      }
+      audioEqMode == "bass" -> {
+        for (i in centers.indices) {
+          val hz = centers[i] / 1000
+          base[i] =
+            when {
+              hz <= 125 -> 600
+              hz <= 250 -> 300
+              else -> 0
+            }.toShort()
+        }
+      }
+      audioEqMode == "voice" -> {
+        for (i in centers.indices) {
+          val hz = centers[i] / 1000
+          base[i] =
+            when {
+              hz in 800..4500 -> 550
+              hz in 300..799 -> 350
+              else -> 0
+            }.toShort()
+        }
+      }
+    }
+    if (audioDialogue <= 0) return if (base.any { it.toInt() != 0 }) base else ShortArray(0)
+    val out = ShortArray(centers.size)
+    for (i in centers.indices) {
+      val add = KotvAudioEffectProcessor.dialogueLevelMb(centers[i], audioDialogue)
+      out[i] = (base[i] + add).toInt().coerceIn(-1200, 1200).toShort()
+    }
+    return out
+  }
+
+  @androidx.annotation.RequiresApi(Build.VERSION_CODES.P)
+  private fun applyDynamicsEq(session: Int, levels: ShortArray) {
+    try {
+      val channelCount =
+        try {
+          player?.audioFormat?.channelCount ?: 2
+        } catch (_: Throwable) {
+          2
+        }.coerceAtLeast(1)
+      val bandCount = levels.size.coerceAtLeast(1)
+      val cfg =
+        android.media.audiofx.DynamicsProcessing.Config.Builder(
+            android.media.audiofx.DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
+            channelCount,
+            false,
+            0,
+            false,
+            0,
+            true,
+            bandCount,
+            true,
+          )
+          .setPostEqAllChannelsTo(dynamicsEq(levels))
+          .setLimiterAllChannelsTo(dynamicsLimiter(enabled = levels.any { it > 0 }))
+          .build()
+      val dp = android.media.audiofx.DynamicsProcessing(0, session, cfg)
+      dp.enabled = true
+      dynamicsProcessing = dp
+    } catch (t: Throwable) {
+      Log.w(TAG, "DynamicsProcessing unavailable, fallback Equalizer", t)
+      applySystemEqualizerBands(session, levels)
+    }
+  }
+
+  @androidx.annotation.RequiresApi(Build.VERSION_CODES.P)
+  private fun dynamicsEq(levels: ShortArray): android.media.audiofx.DynamicsProcessing.Eq {
+    val eq = android.media.audiofx.DynamicsProcessing.Eq(true, true, levels.size)
+    for (i in levels.indices) {
+      eq.setBand(i, dynamicsBand(i, levels[i]))
+    }
+    return eq
+  }
+
+  @androidx.annotation.RequiresApi(Build.VERSION_CODES.P)
+  private fun dynamicsBand(
+    index: Int,
+    levelMb: Short,
+  ): android.media.audiofx.DynamicsProcessing.EqBand {
+    val cutoff =
+      if (index >= STANDARD_EQ_CENTERS_MILLIHZ.lastIndex) {
+        20_000f
+      } else {
+        val a = STANDARD_EQ_CENTERS_MILLIHZ[index] / 1000.0
+        val b = STANDARD_EQ_CENTERS_MILLIHZ[index + 1] / 1000.0
+        kotlin.math.sqrt(a * b).toFloat()
+      }
+    return android.media.audiofx.DynamicsProcessing.EqBand(true, cutoff, levelMb / 100f)
+  }
+
+  @androidx.annotation.RequiresApi(Build.VERSION_CODES.P)
+  private fun dynamicsLimiter(enabled: Boolean): android.media.audiofx.DynamicsProcessing.Limiter =
+    android.media.audiofx.DynamicsProcessing.Limiter(true, enabled, 0, 1.0f, 60.0f, 20.0f, -0.2f, 0.0f)
+
+  private fun applySystemEqualizerBands(session: Int, levels: ShortArray) {
     val eq = Equalizer(0, session)
     eq.enabled = true
     val range = eq.bandLevelRange
@@ -1982,21 +1988,21 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val maxMb = range[1].toInt()
     for (i in 0 until eq.numberOfBands) {
       val band = i.toShort()
-      val centerHz = eq.getCenterFreq(band) / 1000.0
-      var bestGain = 0.0
+      val centerMilli = eq.getCenterFreq(band)
+      var best = 0
       var bestDist = Double.MAX_VALUE
-      for ((freq, gainDb) in targets) {
-        val dist = kotlin.math.abs(kotlin.math.ln((centerHz + 1) / (freq + 1)))
+      for (j in STANDARD_EQ_CENTERS_MILLIHZ.indices) {
+        val dist = kotlin.math.abs(centerMilli - STANDARD_EQ_CENTERS_MILLIHZ[j].toDouble())
         if (dist < bestDist) {
           bestDist = dist
-          bestGain = gainDb
+          best = levels.getOrElse(j) { 0 }.toInt()
         }
       }
-      val mb = (bestGain * 100).toInt().coerceIn(minMb, maxMb)
-      eq.setBandLevel(band, mb.toShort())
+      eq.setBandLevel(band, best.coerceIn(minMb, maxMb).toShort())
     }
     equalizer = eq
   }
+
 
   /** 设备 Equalizer 中心频率（Hz）；无会话时回落常见 5 段。 */
   private fun queryEqualizerCentersHz(): List<Int> {
@@ -2352,6 +2358,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   companion object {
     private const val TAG = "KotvExo"
     const val VIEW_TYPE = "kotv_exo/surface"
+    private val STANDARD_EQ_CENTERS_MILLIHZ =
+      intArrayOf(32_000, 64_000, 125_000, 250_000, 500_000, 1_000_000, 2_000_000, 4_000_000, 8_000_000, 16_000_000)
     private const val FALLBACK_PLAY_UA =
       "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
 

@@ -77,7 +77,7 @@ class ExoPlayback extends KotvPlayback {
   String _secondarySubtitle = 'default';
   String? _currentSecondarySubtitleId;
   double _subtitleFontScale = 1.0;
-  double _subtitlePos = 100;
+  double _subtitlePos = 0;
   double _subtitleSecondaryPos = 10;
   String _subtitleColor = '#FFFFFF';
   String _subtitleBorderColor = '#000000';
@@ -924,7 +924,7 @@ class ExoPlayback extends KotvPlayback {
         ? (sec == 'on' ? 'auto' : (sec == 'player' ? 'default' : sec))
         : 'default';
     _subtitleFontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
-    _subtitlePos = (double.tryParse('${settings['subtitlePos'] ?? '100'}') ?? 100).clamp(0, 150);
+    _subtitlePos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
     _subtitleSecondaryPos =
         (double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10).clamp(0, 150);
     _subtitleColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
@@ -1110,7 +1110,7 @@ class ExoPlayback extends KotvPlayback {
     String? fontPath,
   }) async {
     if (scale != null) _subtitleFontScale = scale.clamp(0.5, 2.5);
-    if (pos != null) _subtitlePos = pos.clamp(0, 150);
+    if (pos != null) _subtitlePos = pos.clamp(-20, 30);
     if (secondaryPos != null) _subtitleSecondaryPos = secondaryPos.clamp(0, 150);
     if (color != null && color.trim().isNotEmpty) _subtitleColor = color.trim();
     if (borderColor != null && borderColor.trim().isNotEmpty) {

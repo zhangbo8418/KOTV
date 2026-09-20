@@ -531,7 +531,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             subtitle: '仅 Surface 渲染',
             value: exoTunneling,
             onChanged: (v) async {
-              await _set('exoTunneling', v ? 'true' : 'false', msg: '重启播放生效');
+              if (v) {
+                await _set('exoTunneling', 'true');
+                await _set('playerRender', 'surface', msg: '隧道已开，渲染改为 Surface');
+              } else {
+                await _set('exoTunneling', 'false', msg: '隧道已关');
+              }
               setSheet(() {});
             },
           ),
@@ -1111,11 +1116,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       title: '字幕样式',
       buildChildren: (setSheet) {
         final scale = (double.tryParse(g('subtitleFontScale', '1.0')) ?? 1.0).clamp(0.5, 2.5);
-        final pos = (double.tryParse(g('subtitlePos', '100')) ?? 100).clamp(0.0, 150.0);
+        final pos = kotvSubtitlePosFromSettings(g('subtitlePos', '0'));
         final border = (double.tryParse(g('subtitleBorderSize', '2')) ?? 2).clamp(0.0, 8.0);
         final color = g('subtitleColor', '#FFFFFF');
         final borderColor = g('subtitleBorderColor', '#000000');
-        final styleMode = g('subtitleStyleMode', 'custom').trim().toLowerCase();
+        final styleMode = g('subtitleStyleMode', 'original').trim().toLowerCase();
         final styleLabel = switch (styleMode) {
           'original' => '原样',
           'system' => '系统',
@@ -1173,9 +1178,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _sheetSlider(
             label: '垂直位置',
             value: pos,
-            min: 0,
-            max: 150,
-            divisions: 30,
+            min: -20,
+            max: 30,
+            divisions: 50,
             format: (v) => '${v.round()}',
             onChanging: (v) => setSheet(() => _s['subtitlePos'] = '${v.round()}'),
             onCommit: (v) => _set('subtitlePos', '${v.round()}', msg: '字幕位置已更新'),
@@ -2481,10 +2486,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           KotvSettingsCell(
                             label: '渲染方式',
                             value: renderLabel,
-                            onTap: () => _pick('渲染方式（Exo / 原生 MPV）', 'playerRender', const [
-                              ('Surface（推荐，HDR）', 'surface'),
-                              ('Texture', 'texture'),
-                            ], msg: '仅 Android 内置 Exo / 原生 MPV 生效，已保存'),
+                            onTap: () async {
+                              final v = await pickChoice(
+                                context,
+                                title: '渲染方式（Exo / 原生 MPV）',
+                                current: g('playerRender', 'surface'),
+                                options: const [
+                                  ('Surface（推荐，HDR）', 'surface'),
+                                  ('Texture', 'texture'),
+                                ],
+                              );
+                              if (v == null) return;
+                              await _set('playerRender', v);
+                              if (v == 'texture' && g('exoTunneling') == 'true') {
+                                await _set('exoTunneling', 'false', msg: 'Texture 已关隧道');
+                              } else {
+                                setState(() => _status = '仅 Android 内置 Exo / 原生 MPV 生效，已保存');
+                              }
+                            },
                           ),
                         KotvSettingsCell(
                           label: '默认倍速',
