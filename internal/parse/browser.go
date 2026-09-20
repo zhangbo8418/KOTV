@@ -154,7 +154,7 @@ func BrowserSniff(pageURL string, headers map[string]string, timeout time.Durati
 
 // BrowserSniffWithClick 嗅探媒体地址，可选执行 click / 规则脚本，并应用请求头。
 func BrowserSniffWithClick(pageURL string, headers map[string]string, click string, rules []model.Rule, timeout time.Duration) (string, error) {
-	u, _, err := browserSniff(pageURL, headers, click, rules, timeout, true, nil, 0)
+	u, _, err := browserSniff(pageURL, headers, click, rules, timeout, true, nil, false, 0)
 	return u, err
 }
 
@@ -163,13 +163,13 @@ type sniffHit struct {
 	headers map[string]string
 }
 
-func browserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, timeout time.Duration, detect bool, isVideo func(string) bool, depth int) (outURL string, outHdr map[string]string, err error) {
+func browserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, timeout time.Duration, detect bool, isVideo func(string) bool, manualVideo bool, depth int) (outURL string, outHdr map[string]string, err error) {
 	pageURL = strings.TrimSpace(pageURL)
 	if pageURL == "" {
 		return "", nil, nil
 	}
 	start := time.Now()
-	parseLog("[sniff] start depth=%d detect=%v timeout=%s click=%q url=%s", depth, detect, timeout, click, parsePreview(pageURL, 160))
+	parseLog("[sniff] start depth=%d detect=%v manualVideo=%v timeout=%s click=%q url=%s", depth, detect, manualVideo, timeout, click, parsePreview(pageURL, 160))
 	defer func() {
 		cost := time.Since(start).Truncate(time.Millisecond)
 		if outURL != "" {
@@ -195,7 +195,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 
 	// Android：不用 Chromium / chromedp；改走本地 Native Service(WebView)嗅探。
 	if runtime.GOOS == "android" {
-		u, h, e := androidBrowserSniff(pageURL, headers, click, rules, GetAds(), timeout, detect, videoOK)
+		u, h, e := androidBrowserSniff(pageURL, headers, click, rules, GetAds(), timeout, detect, videoOK, manualVideo)
 		return u, h, e
 	}
 
@@ -273,7 +273,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 					remain = nestedSniffMinTimeout
 				}
 				// 嵌套页自带超时；父页须有足够总时长等它（见 defaultParseWebTimeout）。
-				nested, nh, nerr := browserSniff(target, mergeHeaders(headers, h), click, rules, remain, false, isVideo, depth+1)
+				nested, nh, nerr := browserSniff(target, mergeHeaders(headers, h), click, rules, remain, false, isVideo, manualVideo, depth+1)
 				if nerr == nil && nested != "" {
 					emit(nested, nh)
 				} else if nerr != nil {
@@ -578,7 +578,7 @@ func logSniffPageDiag(ctx context.Context, depth int) {
 	}
 }
 
-func androidBrowserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, ads []string, timeout time.Duration, detect bool, isVideo func(string) bool) (string, map[string]string, error) {
+func androidBrowserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, ads []string, timeout time.Duration, detect bool, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
 	const base = "http://127.0.0.1:9979/sniff"
 	if len(rules) == 0 {
 		rules = GetRules()
@@ -594,7 +594,7 @@ func androidBrowserSniff(pageURL string, headers map[string]string, click string
 		"rules":         rules,
 		"ads":           ads,
 		"detect":        detect,
-		"hasVideoCheck": isVideo != nil,
+		"hasVideoCheck": manualVideo, // CustomWebView：仅 manualVideoCheck 时禁用默认 snifferRe
 	}
 	b, err := json.Marshal(reqBody)
 	if err != nil {

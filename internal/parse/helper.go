@@ -18,15 +18,16 @@ import (
 
 // Options 二次解析上下文。
 type Options struct {
-	Parses    []model.Parse
-	Flags     []string
-	Rules     []model.Rule
-	Jar       string
-	Flag      string
-	Click     string // 结果自带 click
-	SiteClick string // ParseJob.getClick：站点 click 优先
-	Prefer    string // 用户指定解析器名称（空=自动）
-	IsVideo   func(string) bool // CustomWebView：站点自定义 isVideo
+	Parses      []model.Parse
+	Flags       []string
+	Rules       []model.Rule
+	Jar         string
+	Flag        string
+	Click       string // 结果自带 click
+	SiteClick   string // ParseJob.getClick：站点 click 优先
+	Prefer      string // 用户指定解析器名称（空=自动）
+	IsVideo     func(string) bool // CustomWebView：站点自定义 isVideo
+	ManualVideo bool              // spider.manualVideoCheck()：拦截点禁用默认 snifferRe
 }
 
 // AnnotateParseErr 避免「解析失败: 解析失败: …」重复包装。
@@ -176,7 +177,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	var via string
 	if p != nil {
 		parseLog("[parse] selected name=%q type=%d url=%s", p.Name, p.TypeID(), parsePreview(p.URL, 120))
-		parsed, sniffHdr, err = executeParse(*p, webURL, flag, hdr, parses, opts.Rules, click, opts.IsVideo)
+		parsed, sniffHdr, err = executeParse(*p, webURL, flag, hdr, parses, opts.Rules, click, opts.IsVideo, opts.ManualVideo)
 		if parsed != "" && err == nil {
 			via = fmt.Sprintf("parse:%s/type%d", p.Name, p.TypeID())
 		} else {
@@ -200,7 +201,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	}
 	// checkResult(needParse)→startWeb / CustomWebView：非直链播放页再嗅一次。
 	mergedHdr := mergeHeaders(hdr, sniffHdr)
-	if reParsed, reHdr, reErr := resniffIfNeeded(parsed, mergedHdr, click, opts.Rules, opts.IsVideo); reErr != nil {
+	if reParsed, reHdr, reErr := resniffIfNeeded(parsed, mergedHdr, click, opts.Rules, opts.IsVideo, opts.ManualVideo); reErr != nil {
 		parseLog("[parse] re-sniff fail via=%s err=%v", via, reErr)
 		return r, reErr
 	} else if reParsed != parsed {
@@ -270,7 +271,7 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 		name := strings.TrimPrefix(raw, "parse:")
 		for _, p := range parses {
 			if p.Name == name {
-				u, _, err := executeParse(p, "", "", headers, parses, nil, "", nil)
+				u, _, err := executeParse(p, "", "", headers, parses, nil, "", nil, false)
 				return u, err
 			}
 		}
@@ -343,7 +344,7 @@ func selectedEmpty(p *model.Parse) bool {
 	return strings.TrimSpace(p.Name) == "" && strings.TrimSpace(p.URL) == ""
 }
 
-func executeParse(p model.Parse, webURL, flag string, headers map[string]string, parses []model.Parse, rules []model.Rule, click string, isVideo func(string) bool) (string, map[string]string, error) {
+func executeParse(p model.Parse, webURL, flag string, headers map[string]string, parses []model.Parse, rules []model.Rule, click string, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
 	headers = mergeHeaders(headers, parseExtHeaders(p.Ext.String()))
 	start := time.Now()
 	parseLog("[parse] execute name=%q type=%d web=%s", p.Name, p.TypeID(), parsePreview(webURL, 120))
@@ -373,7 +374,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 			return out, nil, nil
 		}
 		detect := !strings.Contains(strings.ToLower(target), "player/?url=")
-		u, h, err := browserSniff(target, headers, click, rules, defaultParseWebTimeout, detect, isVideo, 0)
+		u, h, err := browserSniff(target, headers, click, rules, defaultParseWebTimeout, detect, isVideo, manualVideo, 0)
 		if err != nil {
 			parseLog("[parse] type0 browser fail err=%v cost=%s", err, time.Since(start).Truncate(time.Millisecond))
 		} else {
@@ -388,7 +389,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		}
 		parseLog("[parse] type2 ok name=%q needWeb=%v out=%s cost=%s", p.Name, needWeb, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 		if needWeb {
-			return sniffParsedWeb(u, mergeHeaders(headers, h), click, rules, isVideo)
+			return sniffParsedWeb(u, mergeHeaders(headers, h), click, rules, isVideo, manualVideo)
 		}
 		return u, pickPlayHeaders(h), nil
 	case 3:
@@ -399,20 +400,20 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		}
 		parseLog("[parse] type3 ok name=%q needWeb=%v out=%s cost=%s", p.Name, needWeb, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 		if needWeb {
-			return sniffParsedWeb(u, mergeHeaders(headers, h), click, rules, isVideo)
+			return sniffParsedWeb(u, mergeHeaders(headers, h), click, rules, isVideo, manualVideo)
 		}
 		return u, pickPlayHeaders(h), nil
 	case 4:
 		// ParseJob.superParse：type1（按 flag 筛）竞速 + type0 Web 嗅探。
 		parseLog("[parse] type4 superParse flag=%q", flag)
-		return superParse(webURL, flag, headers, parses, rules, click, isVideo)
+		return superParse(webURL, flag, headers, parses, rules, click, isVideo, manualVideo)
 	default:
 		return "", nil, fmt.Errorf("未知解析类型: %d", p.TypeID())
 	}
 }
 
 // sniffParsedWeb checkResult：jar 返回 needParse 时再走 Web 嗅探。
-func sniffParsedWeb(pageURL string, headers map[string]string, click string, rules []model.Rule, isVideo func(string) bool) (string, map[string]string, error) {
+func sniffParsedWeb(pageURL string, headers map[string]string, click string, rules []model.Rule, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
 	pageURL = strings.TrimSpace(pageURL)
 	if pageURL == "" {
 		return "", nil, fmt.Errorf("jar 解析需二次嗅探但无地址")
@@ -421,18 +422,18 @@ func sniffParsedWeb(pageURL string, headers map[string]string, click string, rul
 		return out, nil, nil
 	}
 	detect := !strings.Contains(strings.ToLower(pageURL), "player/?url=")
-	return browserSniff(pageURL, headers, click, rules, defaultParseWebTimeout, detect, isVideo, 0)
+	return browserSniff(pageURL, headers, click, rules, defaultParseWebTimeout, detect, isVideo, manualVideo, 0)
 }
 
 // resniffIfNeeded checkResult(Result.needParse)→startWeb：
 // 解析器返回的若是播放页/非直链，再走 http-sniff + Chromium（detect 同 CustomWebView）。
-func resniffIfNeeded(pageURL string, headers map[string]string, click string, rules []model.Rule, isVideo func(string) bool) (string, map[string]string, error) {
+func resniffIfNeeded(pageURL string, headers map[string]string, click string, rules []model.Rule, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
 	pageURL = strings.TrimSpace(pageURL)
 	if pageURL == "" || matchVideo(pageURL, rules, isVideo) {
 		return pageURL, nil, nil
 	}
 	parseLog("[parse] re-sniff start page=%s", parsePreview(pageURL, 160))
-	u, h, err := sniffParsedWeb(pageURL, headers, click, rules, isVideo)
+	u, h, err := sniffParsedWeb(pageURL, headers, click, rules, isVideo, manualVideo)
 	if err != nil {
 		return "", nil, AnnotateParseErr(err)
 	}
@@ -443,7 +444,7 @@ func resniffIfNeeded(pageURL string, headers map[string]string, click string, ru
 }
 
 // superParse ParseJob.superParse / getParses(type, flag)。
-func superParse(webURL, flag string, headers map[string]string, parses []model.Parse, rules []model.Rule, click string, isVideo func(string) bool) (string, map[string]string, error) {
+func superParse(webURL, flag string, headers map[string]string, parses []model.Parse, rules []model.Rule, click string, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
 	jsons := getParses(parses, 1, flag)
 	webs := getParses(parses, 0, flag)
 	parseLog("[parse] superParse flag=%q json=%d web=%d", flag, len(jsons), len(webs))
@@ -491,7 +492,7 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 					return
 				}
 				detect := !strings.Contains(strings.ToLower(parsePage), "player/?url=")
-				if u, h, err := browserSniff(parsePage, headers, click, rules, defaultParseWebTimeout, detect, isVideo, 0); err == nil && u != "" {
+				if u, h, err := browserSniff(parsePage, headers, click, rules, defaultParseWebTimeout, detect, isVideo, manualVideo, 0); err == nil && u != "" {
 					ch <- result{url: u, hdr: h}
 				}
 			}

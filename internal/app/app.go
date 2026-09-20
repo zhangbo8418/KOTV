@@ -123,6 +123,13 @@ func New() (*App, error) {
 	a.Server.SetMediaProvider(func() map[string]string {
 		return remote.SnapshotMedia()
 	})
+	a.Server.SetTvbusProvider(func() string {
+		lv := a.scopeLive()
+		if lv == nil {
+			return server.ResolveCoreResp(config.Default().API().Lives, nil)
+		}
+		return server.ResolveCoreResp(append([]model.Live(nil), lv.Sources()...), lv.Current())
+	})
 
 	// 先加载点播配置再开 HTTP，避免首请求建出会话时 Cfg 仍为空、
 	// 随后只换 Cfg 不换 Sites 导致长期 Get ""。

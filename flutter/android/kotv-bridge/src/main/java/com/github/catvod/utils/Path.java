@@ -280,13 +280,17 @@ public class Path {
             Class<?> os = Class.forName("android.system.Os");
             os.getMethod("rename", String.class, String.class)
                     .invoke(null, source.getAbsolutePath(), target.getAbsolutePath());
+            return;
         } catch (ClassNotFoundException | NoClassDefFoundError e) {
-            if (!source.renameTo(target)) {
-                throw new IOException("Unable to move file");
-            }
+            // 桌面 JVM 无 android.system.Os
         } catch (ReflectiveOperationException e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             throw new IOException("Unable to move file", cause);
+        }
+        try {
+            java.nio.file.Files.move(source.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException ioe) {
+            throw new IOException("Unable to move file", ioe);
         }
     }
 
@@ -394,17 +398,13 @@ public class Path {
 
     private static String cryptoMd5(String src) {
         if (src == null || src.isEmpty()) return "";
-        return md5(src);
-    }
-
-    private static String md5(String src) {
         try {
             byte[] dig = MessageDigest.getInstance("MD5").digest(src.getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder(dig.length * 2);
             for (byte b : dig) sb.append(String.format("%02x", b));
             return sb.toString();
         } catch (Exception e) {
-            return Integer.toHexString(src.hashCode());
+            throw new IllegalStateException(e);
         }
     }
 }

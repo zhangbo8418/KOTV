@@ -523,6 +523,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			IsVideo: func(u string) bool {
 				return sites.IsVideoFormat(site, u)
 			},
+			ManualVideo: sites.ManualVideoCheck(site),
 		})
 		if perr != nil {
 			cand := apiResolvePlayURL("", result.PlayURL, result.URL.URLs, qualIdx)

@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/bobo/KOTV/internal/config"
+	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/util"
 )
 
@@ -138,16 +139,54 @@ func itoaLen(n int) string {
 func (s *Server) handleTvbus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(tvbusResp()))
+	_, _ = w.Write([]byte(s.tvbusResp()))
 }
 
-// tvbusResp LiveConfig.getResp：首页直播源 core.resp（http 则拉取）。
-func tvbusResp() string {
-	lives := config.Default().API().Lives
-	if len(lives) == 0 {
-		return ""
+// tvbusResp LiveConfig.getResp：当前直播源 core.resp（http 则拉取）。
+func (s *Server) tvbusResp() string {
+	s.mu.RLock()
+	fn := s.tvbusRespFn
+	s.mu.RUnlock()
+	if fn != nil {
+		if out := fn(); out != "" {
+			return out
+		}
 	}
-	coreRaw := lives[0].Core
+	return resolveCoreResp(config.Default().API().Lives, nil)
+}
+
+// ResolveCoreResp 从 live 列表解析 core.resp；prefer 非空时优先匹配同名项。
+func ResolveCoreResp(lives []model.Live, prefer *model.Live) string {
+	return resolveCoreResp(lives, prefer)
+}
+
+func resolveCoreResp(lives []model.Live, prefer *model.Live) string {
+	var candidates []model.Live
+	if prefer != nil {
+		candidates = append(candidates, *prefer)
+		name := strings.TrimSpace(prefer.Name)
+		url := strings.TrimSpace(prefer.URL)
+		for _, l := range lives {
+			if name != "" && strings.TrimSpace(l.Name) == name {
+				candidates = append(candidates, l)
+				break
+			}
+			if url != "" && strings.TrimSpace(l.URL) == url {
+				candidates = append(candidates, l)
+				break
+			}
+		}
+	}
+	candidates = append(candidates, lives...)
+	for _, live := range candidates {
+		if out := coreRespString(live.Core); out != "" {
+			return out
+		}
+	}
+	return ""
+}
+
+func coreRespString(coreRaw json.RawMessage) string {
 	if len(coreRaw) == 0 {
 		return ""
 	}

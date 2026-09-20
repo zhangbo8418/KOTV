@@ -64,7 +64,7 @@ object SnifferWebView {
     val rules: List<Rule>,
     val click: String,
     val timeoutMs: Long,
-    /** 上层有站点 isVideo 时为 true：拦截点不走默认 snifferRe 回落（CustomWebView 优先 spider）。 */
+    /** spider.manualVideoCheck() 为真时禁用默认 snifferRe（CustomWebView 优先 spider.isVideoFormat）。 */
     val hasVideoCheck: Boolean,
   ) {
     val nestedUrls = LinkedHashSet<String>()
@@ -72,6 +72,7 @@ object SnifferWebView {
     var timeoutRunnable: Runnable? = null
     var destroyRunnable: Runnable? = null
     var webView: WebView? = null
+    var dialog: AlertDialog? = null
   }
 
   fun start(context: Context) {
@@ -330,8 +331,11 @@ object SnifferWebView {
     } catch (_: Throwable) {
     }
     val dialog = AlertDialog.Builder(act).setView(webView).create()
+    session.dialog = dialog
     dialog.setOnDismissListener(
       DialogInterface.OnDismissListener {
+        session.dialog = null
+        if (session.done.get()) return@OnDismissListener
         stopSession(session, handler, error = true)
       },
     )
@@ -340,6 +344,7 @@ object SnifferWebView {
     } catch (t: Throwable) {
       Log.w(TAG, "challenge dialog failed", t)
       session.challengeShown = false
+      session.dialog = null
       stopSession(session, handler, error = true)
     }
   }
@@ -347,6 +352,15 @@ object SnifferWebView {
   private fun stopSession(session: Session, handler: Handler, error: Boolean) {
     session.timeoutRunnable?.let { handler.removeCallbacks(it) }
     session.destroyRunnable?.let { handler.removeCallbacks(it) }
+    val dlg = session.dialog
+    session.dialog = null
+    if (dlg != null) {
+      try {
+        dlg.setOnDismissListener(null)
+        if (dlg.isShowing) dlg.dismiss()
+      } catch (_: Throwable) {
+      }
+    }
     if (error) {
       session.found.compareAndSet(null, null)
     }
@@ -375,8 +389,10 @@ object SnifferWebView {
   private fun emit(session: Session, url: String, request: WebResourceRequest?) {
     if (!session.found.compareAndSet(null, url)) return
     copyRequestHeaders(request, session.outHeaders)
-    if (session.done.compareAndSet(false, true)) {
-      session.latch.countDown()
+    // onParseSuccess → stop(false) → hideDialog
+    val handler = Handler(Looper.getMainLooper())
+    handler.post {
+      stopSession(session, handler, error = false)
     }
   }
 

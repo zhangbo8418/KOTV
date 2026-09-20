@@ -44,6 +44,7 @@ type Server struct {
 	onAction      func(Action)
 	uiReply       *uiReplyStore
 	mediaProvider func() map[string]string
+	tvbusRespFn   func() string
 	syncHandler   *SyncHandler
 	contentAPI    ContentAPI
 	onShutdown    func()
@@ -88,6 +89,13 @@ func (s *Server) Events() *Events { return s.events }
 func (s *Server) SetMediaProvider(fn func() map[string]string) {
 	s.mu.Lock()
 	s.mediaProvider = fn
+	s.mu.Unlock()
+}
+
+// SetTvbusProvider LiveConfig.getResp：返回当前直播 home 的 core.resp 正文。
+func (s *Server) SetTvbusProvider(fn func() string) {
+	s.mu.Lock()
+	s.tvbusRespFn = fn
 	s.mu.Unlock()
 }
 

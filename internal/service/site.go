@@ -795,6 +795,13 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	}
 }
 
+// ManualVideoCheck CustomWebView：spider.manualVideoCheck()。
+func (s *SiteService) ManualVideoCheck(site model.Site) bool {
+	sp := s.cfg.Spider(site)
+	ok, err := sp.ManualVideoCheck()
+	return err == nil && ok
+}
+
 // IsVideoFormat CustomWebView.isVideoFormat：
 // sniffer() 为真 → 爬虫 isVideo；否则 Sniffer.isVideoFormat（含配置 rules.regex/exclude）。
 func (s *SiteService) IsVideoFormat(site model.Site, u string) bool {
