@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/bobo/KOTV/internal/paths"
+	"github.com/bobo/KOTV/internal/spider"
 )
 
 type fileEntry struct {
@@ -29,7 +29,16 @@ type folderResp struct {
 }
 
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
-	raw := strings.TrimPrefix(r.URL.Path, "/file/")
+	var raw string
+	switch {
+	case r.URL.Path == "/file":
+		raw = ""
+	case strings.HasPrefix(r.URL.Path, "/file/"):
+		raw = strings.TrimPrefix(r.URL.Path, "/file/")
+	default:
+		http.NotFound(w, r)
+		return
+	}
 	decoded, err := url.PathUnescape(raw)
 	if err != nil {
 		http.Error(w, "invalid file path", http.StatusBadRequest)
@@ -209,55 +218,31 @@ func (s *Server) handleCache(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	_ = r.ParseForm()
 	do := first(q.Get("do"), r.Form.Get("do"))
+	rule := first(q.Get("rule"), r.Form.Get("rule"))
 	key := first(q.Get("key"), r.Form.Get("key"))
-	if key == "" {
-		http.Error(w, "missing key", http.StatusBadRequest)
-		return
-	}
-	dir := paths.HttpCache()
-	file := filepath.Join(dir, sanitizeCacheKey(key))
+	// Cache.java：缺 key 时仍用 getKey(rule,key)（可能 cache_）；get 返回 Prefers 空串。
 	switch do {
 	case "get":
-		b, err := os.ReadFile(file)
-		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		_, _ = w.Write(b)
+		val := spider.LocalGet(rule, key)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(val))
 	case "set":
 		val := first(q.Get("value"), r.Form.Get("value"))
 		if val == "" && r.Body != nil {
 			b, _ := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 			val = string(b)
 		}
-		if err := os.WriteFile(file, []byte(val), 0o644); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		spider.LocalSet(rule, key, val)
+		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, "OK")
 	case "del":
-		_ = os.Remove(file)
+		spider.LocalDelete(rule, key)
+		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, "OK")
 	default:
-		http.Error(w, "unknown do", http.StatusBadRequest)
+		// 无 do 时 TV 仍 Nano.ok()
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "OK")
 	}
-}
-
-func sanitizeCacheKey(key string) string {
-	key = strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			return r
-		default:
-			return '_'
-		}
-	}, key)
-	if len(key) > 120 {
-		key = key[:120]
-	}
-	if key == "" {
-		key = fmt.Sprintf("k_%d", time.Now().UnixNano())
-	}
-	return key
 }

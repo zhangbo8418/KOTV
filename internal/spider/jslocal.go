@@ -12,18 +12,34 @@ import (
 // Local：Prefers key = cache_{rule}_{key}（rule 空则 cache_{key}），全局共享、无 siteKey。
 var jsLocalMu sync.Mutex
 
-// jsLocalPrefersKey Local.getKey。
-func jsLocalPrefersKey(rule, key string) string {
+// LocalPrefersKey — Cache.getKey / Local.getKey。
+func LocalPrefersKey(rule, key string) string {
 	if rule == "" {
 		return "cache_" + key
 	}
 	return "cache_" + rule + "_" + key
 }
 
+func jsLocalPrefersKey(rule, key string) string {
+	return LocalPrefersKey(rule, key)
+}
+
 func jsLocalPath(rule, key string) string {
 	// Prefers 键名按原文语义；落盘用 base64url，避免非法文件名且不碰撞。
 	enc := base64.RawURLEncoding.EncodeToString([]byte(jsLocalPrefersKey(rule, key)))
 	return filepath.Join(paths.JsCache(), "local", enc+".dat")
+}
+
+func LocalGet(rule, key string) string {
+	return jsLocalGet(rule, key)
+}
+
+func LocalSet(rule, key, value string) {
+	jsLocalSet(rule, key, value)
+}
+
+func LocalDelete(rule, key string) {
+	jsLocalDelete(rule, key)
 }
 
 func jsLocalGet(rule, key string) string {

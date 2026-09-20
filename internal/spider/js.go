@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
@@ -893,10 +894,7 @@ func (s *jsSpider) jsReq(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qj
 		go func() {
 			result := doJSRequest(u, options)
 			c.Schedule(func(inner *qjs.Context) {
-				value, err := inner.Marshal(result)
-				if err != nil {
-					value = inner.NewObject()
-				}
+				value := jsConnectResult(inner, result)
 				ret := complete.Execute(inner.NewUndefined(), value)
 				if ret != nil {
 					ret.Free()
@@ -908,8 +906,7 @@ func (s *jsSpider) jsReq(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qj
 		return c.NewUndefined()
 	}
 	result := doJSRequest(u, options)
-	v, _ := c.Marshal(result)
-	return v
+	return jsConnectResult(c, result)
 }
 
 func (s *jsSpider) jsReqAsync(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
@@ -918,15 +915,44 @@ func (s *jsSpider) jsReqAsync(c *qjs.Context, this *qjs.Value, args []*qjs.Value
 		go func() {
 			result := doJSRequest(u, options)
 			c.Schedule(func(inner *qjs.Context) {
-				value, err := inner.Marshal(result)
-				if err != nil {
-					value = inner.NewObject()
-				}
+				value := jsConnectResult(inner, result)
 				resolve(value)
 				value.Free()
 			})
 		}()
 	})
+}
+
+// jsConnectResult 建可写 JSObject（Connect.success / createNewJSObject），避免 Marshal 只读。
+func jsConnectResult(c *qjs.Context, result map[string]interface{}) *qjs.Value {
+	obj := c.NewObject()
+	switch code := result["code"].(type) {
+	case int:
+		obj.Set("code", c.NewInt32(int32(code)))
+	case string:
+		obj.Set("code", c.NewString(code))
+	default:
+		if v, err := c.Marshal(result["code"]); err == nil {
+			obj.Set("code", v)
+		} else {
+			obj.Set("code", c.NewString(""))
+		}
+	}
+	jsHdr := c.NewObject()
+	if hdrs, ok := result["headers"].(map[string]interface{}); ok {
+		for k, v := range hdrs {
+			if mv, err := c.Marshal(v); err == nil {
+				jsHdr.Set(k, mv)
+			}
+		}
+	}
+	obj.Set("headers", jsHdr)
+	if content, err := c.Marshal(result["content"]); err == nil {
+		obj.Set("content", content)
+	} else {
+		obj.Set("content", c.NewString(""))
+	}
+	return obj
 }
 
 type jsHTTPRequest struct {
@@ -1070,7 +1096,8 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 			var values map[string]interface{}
 			if json.Unmarshal([]byte(options.Data), &values) == nil {
 				var buf strings.Builder
-				boundary := "----kotv-form-boundary"
+				// Connect.getFormDataBody：--dio-boundary- + SecureRandom.nextInt(42949)+nextInt(67296)
+				boundary := fmt.Sprintf("--dio-boundary-%d%d", rand.Intn(42949), rand.Intn(67296))
 				for k, v := range values {
 					fmt.Fprintf(&buf, "--%s\r\nContent-Disposition: form-data; name=%q\r\n\r\n%v\r\n", boundary, k, v)
 				}
@@ -1134,12 +1161,11 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	}
 	hdrs := map[string]interface{}{}
 	for k, vv := range hdrSrc {
-		// 头名小写，供 headers['content-type'] 等读取
-		lk := strings.ToLower(k)
+		// Connect.setHeader：OkHttp multimap 原始键名（Go Header 为规范 MIME 键）
 		if len(vv) == 1 {
-			hdrs[lk] = vv[0]
+			hdrs[k] = vv[0]
 		} else if len(vv) > 1 {
-			hdrs[lk] = vv
+			hdrs[k] = vv
 		}
 	}
 	result["headers"] = hdrs
@@ -1165,12 +1191,15 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 		result["content"] = decodeJSResponse(b, charset, "")
 	}
 	// drpy onlyHeaders：request() 最终应返回 JSON.stringify(headers)（含 url=Location）。
-	// Marshal 出的 headers 可能不可扩展，JS 侧 withHeaders 分支赋值失败时会退回 HTML content，
-	// 导致 JSON.parse 报 unexpected token '<'。此处把 headers JSON 直接放进 content 兜底。
 	if options.OnlyHeaders {
-		if loc, _ := hdrs["location"].(string); strings.TrimSpace(loc) != "" {
-			hdrs["url"] = strings.ReplaceAll(loc, " ", "+")
-		} else if loc, _ := hdrs["Location"].(string); strings.TrimSpace(loc) != "" {
+		loc := ""
+		for _, k := range []string{"Location", "location"} {
+			if v, _ := hdrs[k].(string); strings.TrimSpace(v) != "" {
+				loc = v
+				break
+			}
+		}
+		if loc != "" {
 			hdrs["url"] = strings.ReplaceAll(loc, " ", "+")
 		}
 		result["headers"] = hdrs

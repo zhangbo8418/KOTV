@@ -6,11 +6,13 @@ import android.content.Context
 import android.content.DialogInterface
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.SslErrorHandler
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -62,11 +64,14 @@ object SnifferWebView {
     val rules: List<Rule>,
     val click: String,
     val timeoutMs: Long,
+    /** 上层有站点 isVideo 时为 true：拦截点不走默认 snifferRe 回落（CustomWebView 优先 spider）。 */
+    val hasVideoCheck: Boolean,
   ) {
     val nestedUrls = LinkedHashSet<String>()
     @Volatile var challengeShown = false
     var timeoutRunnable: Runnable? = null
     var destroyRunnable: Runnable? = null
+    var webView: WebView? = null
   }
 
   fun start(context: Context) {
@@ -90,6 +95,7 @@ object SnifferWebView {
     val timeoutMs = req.optLong("timeoutMs", 15000L).coerceAtLeast(1000L)
     val click = req.optString("click", "").trim()
     val detect = req.optBoolean("detect", true)
+    val hasVideoCheck = req.optBoolean("hasVideoCheck", false)
     val ads = jsonStringList(req.optJSONArray("ads"))
     val rules = jsonRules(req.optJSONArray("rules"))
 
@@ -107,7 +113,7 @@ object SnifferWebView {
       } else {
         val ctx = appContext
         val fromWv = if (ctx != null) {
-          webViewSniff(ctx, pageUrl, headers, timeoutMs, click, rules, ads, detect, foundHeaders)
+          webViewSniff(ctx, pageUrl, headers, timeoutMs, click, rules, ads, detect, hasVideoCheck, foundHeaders)
         } else {
           ""
         }
@@ -179,12 +185,13 @@ object SnifferWebView {
     rules: List<Rule>,
     ads: List<String>,
     detect: Boolean,
+    hasVideoCheck: Boolean,
     outHeaders: JSONObject,
   ): String {
     val latch = CountDownLatch(1)
     val found = AtomicReference<String?>(null)
     val done = AtomicBoolean(false)
-    val session = Session(found, outHeaders, done, latch, ads, rules, click, timeoutMs)
+    val session = Session(found, outHeaders, done, latch, ads, rules, click, timeoutMs, hasVideoCheck)
     val handler = Handler(Looper.getMainLooper())
 
     if (!webViewSupported(context)) {
@@ -226,6 +233,7 @@ object SnifferWebView {
     detect: Boolean,
   ) {
     val webView = WebView(context)
+    session.webView = webView
     val empty = WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
     val headerMap = HashMap<String, String>()
     headers?.let {
@@ -269,10 +277,14 @@ object SnifferWebView {
           handler.post {
             startWebView(context, handler, session, url, headersFromMap(reqHeaders), false)
           }
-        } else if (isVideoFormat(url, pageUrl, detect, session.rules) && !isAdURL(url, session.ads)) {
+        } else if (isVideoFormat(url, pageUrl, detect, session.rules, session.hasVideoCheck) && !isAdURL(url, session.ads)) {
           emit(session, url, request)
         }
         return super.shouldInterceptRequest(view, request)
+      }
+
+      override fun onReceivedSslError(view: WebView?, handlerSsl: SslErrorHandler?, error: SslError?) {
+        handlerSsl?.proceed()
       }
 
       override fun onPageFinished(view: WebView?, url: String?) {
@@ -306,7 +318,7 @@ object SnifferWebView {
     handler.postDelayed(destroy, session.timeoutMs)
   }
 
-  /** Cloudflare challenge：有前台 Activity 时把嗅探 WebView 弹到对话框，用户完成后关窗继续。 */
+  /** Cloudflare challenge：有前台 Activity 时把嗅探 WebView 弹到对话框；关闭则结束会话（CustomWebView.onDismiss→stop(true)）。 */
   private fun showChallengeDialog(webView: WebView, session: Session, handler: Handler) {
     if (session.challengeShown || session.done.get()) return
     val act = App.activity() ?: return
@@ -320,9 +332,7 @@ object SnifferWebView {
     val dialog = AlertDialog.Builder(act).setView(webView).create()
     dialog.setOnDismissListener(
       DialogInterface.OnDismissListener {
-        if (session.done.get()) return@OnDismissListener
-        session.timeoutRunnable?.let { handler.postDelayed(it, session.timeoutMs) }
-        session.destroyRunnable?.let { handler.postDelayed(it, session.timeoutMs) }
+        stopSession(session, handler, error = true)
       },
     )
     try {
@@ -330,14 +340,34 @@ object SnifferWebView {
     } catch (t: Throwable) {
       Log.w(TAG, "challenge dialog failed", t)
       session.challengeShown = false
-      session.timeoutRunnable?.let { handler.postDelayed(it, session.timeoutMs) }
-      session.destroyRunnable?.let { handler.postDelayed(it, session.timeoutMs) }
+      stopSession(session, handler, error = true)
+    }
+  }
+
+  private fun stopSession(session: Session, handler: Handler, error: Boolean) {
+    session.timeoutRunnable?.let { handler.removeCallbacks(it) }
+    session.destroyRunnable?.let { handler.removeCallbacks(it) }
+    if (error) {
+      session.found.compareAndSet(null, null)
+    }
+    try {
+      session.webView?.let { wv ->
+        wv.stopLoading()
+        wv.loadUrl("about:blank")
+        wv.destroy()
+      }
+    } catch (_: Throwable) {
+    }
+    session.webView = null
+    if (session.done.compareAndSet(false, true)) {
+      session.latch.countDown()
     }
   }
 
   private fun addNested(session: Session, url: String): Boolean {
     synchronized(session.nestedUrls) {
-      if (session.nestedUrls.size >= MAX_NESTED) return false
+      // CustomWebView.addUrl：size > MAX 时 clear 再 add
+      if (session.nestedUrls.size > MAX_NESTED) session.nestedUrls.clear()
       return session.nestedUrls.add(url)
     }
   }
@@ -374,7 +404,7 @@ object SnifferWebView {
     return out
   }
 
-  private fun isVideoFormat(url: String, pageUrl: String, detect: Boolean, rules: List<Rule>): Boolean {
+  private fun isVideoFormat(url: String, pageUrl: String, detect: Boolean, rules: List<Rule>, hasVideoCheck: Boolean): Boolean {
     if (!detect && url == pageUrl) return false
     val rule = matchRule(url, rules)
     for (ex in rule.exclude) {
@@ -389,6 +419,8 @@ object SnifferWebView {
       if (url.contains(r)) return true
       runCatching { if (Pattern.compile(r).matcher(url).find()) return true }
     }
+    // 有站点 isVideo 时：拦截点不采纳默认 snifferRe（由 Go 侧 isVideo 终审）；仅 rules 命中可提前发出。
+    if (hasVideoCheck) return false
     if (url.contains("url=http") || url.contains("v=http") || url.contains(".html")) return false
     return snifferRe.containsMatchIn(url)
   }

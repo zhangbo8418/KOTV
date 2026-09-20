@@ -12,6 +12,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -174,7 +176,7 @@ public class Path {
     }
 
     public static File jar(String name) {
-        return new File(jar(), Util.md5(name).concat(".jar"));
+        return new File(jar(), Crypto.md5(name).concat(".jar"));
     }
 
     public static File thunder(String name) {
@@ -245,24 +247,35 @@ public class Path {
         }
     }
 
-    public static void move(File in, File out) {
-        if (in.renameTo(out)) return;
-        copy(in, out);
-        clear(in);
+    public static void move(File source, File target) throws IOException {
+        try {
+            Class<?> os = Class.forName("android.system.Os");
+            os.getMethod("rename", String.class, String.class)
+                    .invoke(null, source.getAbsolutePath(), target.getAbsolutePath());
+            return;
+        } catch (ClassNotFoundException | NoClassDefFoundError e) {
+            // 桌面 JVM 无 android.system.Os
+        } catch (ReflectiveOperationException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new IOException("Unable to move file", cause);
+        }
+        try {
+            Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException ioe) {
+            throw new IOException("Unable to move file", ioe);
+        }
     }
 
     public static void copy(File in, File out) {
         try {
-            copy(new FileInputStream(in), out);
+            copyOrThrow(in, out);
         } catch (IOException ignored) {
         }
     }
 
     public static void copy(InputStream in, File out) {
-        try (InputStream input = in; FileOutputStream output = new FileOutputStream(create(out))) {
-            int read;
-            byte[] buffer = new byte[16384];
-            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+        try {
+            copyOrThrow(in, out);
         } catch (IOException ignored) {
         }
     }
@@ -277,12 +290,34 @@ public class Path {
 
     public static long available(File file) {
         try {
-            if (file == null) return 0;
-            File path = file.isDirectory() ? file : file.getParentFile();
-            if (path == null) path = file;
-            return path.getUsableSpace();
+            Class<?> statFs = Class.forName("android.os.StatFs");
+            Object stat = statFs.getConstructor(String.class).newInstance(file.getAbsolutePath());
+            long blocks = (Long) statFs.getMethod("getAvailableBlocksLong").invoke(stat);
+            long size = (Long) statFs.getMethod("getBlockSizeLong").invoke(stat);
+            return blocks * size;
+        } catch (ClassNotFoundException | NoClassDefFoundError e) {
+            try {
+                if (file == null) return 0;
+                File path = file.isDirectory() ? file : file.getParentFile();
+                if (path == null) path = file;
+                return path.getUsableSpace();
+            } catch (Exception ex) {
+                return 0;
+            }
         } catch (Exception e) {
             return 0;
+        }
+    }
+
+    private static void copyOrThrow(File in, File out) throws IOException {
+        if (!in.getCanonicalFile().equals(out.getCanonicalFile())) copyOrThrow(new FileInputStream(in), out);
+    }
+
+    private static void copyOrThrow(InputStream in, File out) throws IOException {
+        try (InputStream input = in; FileOutputStream output = new FileOutputStream(create(out))) {
+            int read;
+            byte[] buffer = new byte[16384];
+            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
         }
     }
 

@@ -204,7 +204,7 @@ public class Path {
     }
 
     public static File jar(String name) {
-        return new File(jar(), md5(name).concat(".jar"));
+        return new File(jar(), cryptoMd5(name).concat(".jar"));
     }
 
     public static File thunder(String name) {
@@ -275,25 +275,46 @@ public class Path {
         }
     }
 
-    public static void move(File in, File out) {
-        if (in.renameTo(out)) return;
-        copy(in, out);
-        clear(in);
+    public static void move(File source, File target) throws IOException {
+        try {
+            Class<?> os = Class.forName("android.system.Os");
+            os.getMethod("rename", String.class, String.class)
+                    .invoke(null, source.getAbsolutePath(), target.getAbsolutePath());
+        } catch (ClassNotFoundException | NoClassDefFoundError e) {
+            if (!source.renameTo(target)) {
+                throw new IOException("Unable to move file");
+            }
+        } catch (ReflectiveOperationException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new IOException("Unable to move file", cause);
+        }
     }
 
     public static void copy(File in, File out) {
         try {
-            copy(new FileInputStream(in), out);
+            copyOrThrow(in, out);
         } catch (IOException ignored) {
         }
     }
 
     public static void copy(InputStream in, File out) {
+        try {
+            copyOrThrow(in, out);
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static void copyOrThrow(File in, File out) throws IOException {
+        if (!in.getCanonicalFile().equals(out.getCanonicalFile())) {
+            copyOrThrow(new FileInputStream(in), out);
+        }
+    }
+
+    private static void copyOrThrow(InputStream in, File out) throws IOException {
         try (InputStream input = in; FileOutputStream output = new FileOutputStream(create(out))) {
             int read;
             byte[] buffer = new byte[16384];
             while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
-        } catch (IOException ignored) {
         }
     }
 
@@ -369,6 +390,11 @@ public class Path {
         } catch (IOException e) {
             return file;
         }
+    }
+
+    private static String cryptoMd5(String src) {
+        if (src == null || src.isEmpty()) return "";
+        return md5(src);
     }
 
     private static String md5(String src) {

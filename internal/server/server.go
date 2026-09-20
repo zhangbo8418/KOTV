@@ -103,7 +103,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/proxy/smb/", smbproxy.Handle)
 	mux.HandleFunc("/proxy", s.handleSpiderProxy)
 	mux.HandleFunc("/parse", s.handleParsePage)
+	mux.HandleFunc("/file", s.handleFile)
 	mux.HandleFunc("/file/", s.handleFile)
+	mux.HandleFunc("/image/", s.handleImage)
+	mux.HandleFunc("/tvbus", s.handleTvbus)
 	mux.HandleFunc("/upload", s.handleUpload)
 	mux.HandleFunc("/newFolder", s.handleNewFolder)
 	mux.HandleFunc("/delFolder", s.handleDelPath)
@@ -364,10 +367,46 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.Method == http.MethodPost {
-		_ = r.ParseForm()
-		for key, values := range r.PostForm {
-			if len(values) > 0 {
-				params[key] = values[0]
+		ct := r.Header.Get("Content-Type")
+		if strings.HasPrefix(strings.ToLower(ct), "multipart/form-data") {
+			// Proxy.java：params.putAll(files) — Nano parseBody 把文件字段映到临时路径
+			if err := r.ParseMultipartForm(32 << 20); err == nil && r.MultipartForm != nil {
+				for key, values := range r.MultipartForm.Value {
+					if len(values) > 0 {
+						params[key] = values[0]
+					}
+				}
+				for key, files := range r.MultipartForm.File {
+					if len(files) == 0 || files[0] == nil {
+						continue
+					}
+					fh := files[0]
+					tmp, err := os.CreateTemp("", "kotv-proxy-*")
+					if err != nil {
+						continue
+					}
+					src, err := fh.Open()
+					if err != nil {
+						_ = tmp.Close()
+						_ = os.Remove(tmp.Name())
+						continue
+					}
+					_, copyErr := io.Copy(tmp, src)
+					_ = src.Close()
+					_ = tmp.Close()
+					if copyErr != nil {
+						_ = os.Remove(tmp.Name())
+						continue
+					}
+					params[key] = tmp.Name()
+				}
+			}
+		} else {
+			_ = r.ParseForm()
+			for key, values := range r.PostForm {
+				if len(values) > 0 {
+					params[key] = values[0]
+				}
 			}
 		}
 	}

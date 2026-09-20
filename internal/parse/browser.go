@@ -587,13 +587,14 @@ func androidBrowserSniff(pageURL string, headers map[string]string, click string
 		ads = GetAds()
 	}
 	reqBody := map[string]interface{}{
-		"url":       pageURL,
-		"headers":   headers,
-		"timeoutMs": int(timeout / time.Millisecond),
-		"click":     click,
-		"rules":     rules,
-		"ads":       ads,
-		"detect":    detect,
+		"url":           pageURL,
+		"headers":       headers,
+		"timeoutMs":     int(timeout / time.Millisecond),
+		"click":         click,
+		"rules":         rules,
+		"ads":           ads,
+		"detect":        detect,
+		"hasVideoCheck": isVideo != nil,
 	}
 	b, err := json.Marshal(reqBody)
 	if err != nil {
