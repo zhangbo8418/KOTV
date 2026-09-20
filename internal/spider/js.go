@@ -1184,11 +1184,18 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	}
 	hdrs := map[string]interface{}{}
 	for k, vv := range hdrSrc {
-		// Connect.setHeader：OkHttp multimap 原始键名（Go Header 为规范 MIME 键）
+		// Connect.setHeader：OkHttp 原始键名；Go Header 为 MIME 规范键，同时写小写键供脚本读取。
+		var val interface{}
 		if len(vv) == 1 {
-			hdrs[k] = vv[0]
+			val = vv[0]
 		} else if len(vv) > 1 {
-			hdrs[k] = vv
+			val = vv
+		} else {
+			continue
+		}
+		hdrs[k] = val
+		if lk := strings.ToLower(k); lk != k {
+			hdrs[lk] = val
 		}
 	}
 	result["headers"] = hdrs

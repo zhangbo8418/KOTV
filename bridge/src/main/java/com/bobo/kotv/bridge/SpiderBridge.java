@@ -1560,8 +1560,8 @@ public class SpiderBridge {
     }
 
     /**
-     * createFun：用官方 jar 内 {@code com.github.catvod.js.utils.Parser}。
-     * Go QuickJS 无法直接 new Java Function(whl.ctx)，故经 bridge RPC；失败由 parser.js 回落。
+     * createFun：优先 Parser，失败再反射 Function 上同名 parseDom*（jar 内实现不一）。
+     * Go QuickJS 无法直接 new Java Function(whl.ctx)，故经 bridge RPC；仍失败由 parser.js 回落。
      */
     @SuppressWarnings("unchecked")
     private static String invokeJsParse(JsonObject args) {
@@ -1587,8 +1587,31 @@ public class SpiderBridge {
             String texts = args.has("texts") ? args.get("texts").getAsString() : "";
             String urls = args.has("urls") ? args.get("urls").getAsString() : "";
 
-            Class<?> parserClz = loader.loadClass("com.github.catvod.js.utils.Parser");
-            Object parser = parserClz.getConstructor().newInstance();
+            Object parser = null;
+            Class<?> parserClz = null;
+            String[] candidates = {
+                    "com.github.catvod.js.utils.Parser",
+                    "com.github.catvod.js.Function"
+            };
+            Throwable last = null;
+            for (String name : candidates) {
+                try {
+                    parserClz = loader.loadClass(name);
+                    try {
+                        parser = parserClz.getConstructor().newInstance();
+                    } catch (NoSuchMethodException e) {
+                        // Function(QuickJSContext) 等：尝试无参失败则跳过该类
+                        last = e;
+                        continue;
+                    }
+                    break;
+                } catch (Throwable t) {
+                    last = t;
+                }
+            }
+            if (parser == null || parserClz == null) {
+                throw last != null ? last : new ClassNotFoundException("Parser/Function");
+            }
             switch (op) {
                 case "pdfh": {
                     Object v = parserClz.getMethod("parseDomForUrl", String.class, String.class, String.class)

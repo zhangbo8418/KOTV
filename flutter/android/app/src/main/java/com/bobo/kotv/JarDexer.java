@@ -73,9 +73,9 @@ public final class JarDexer {
     }
 
     if (jarHasDex(src)) {
-      // 原文件 setReadOnly 后直接 DexClassLoader，不拷贝不重打包。
-      if (!src.setReadOnly()) {
-        markReadonly(src);
+      // JarLoader.load：!setReadOnly 则中止，不建 DexClassLoader。
+      if (!ensureReadonly(src)) {
+        throw new IllegalStateException("site jar not readonly: " + srcPath);
       }
       return src.getAbsolutePath();
     }
@@ -199,8 +199,8 @@ public final class JarDexer {
     if (!load.isFile() || load.length() == 0L) {
       throw new IllegalStateException("site jar not loadable: " + srcPath);
     }
-    if (!load.setReadOnly()) {
-      markReadonly(load);
+    if (!ensureReadonly(load)) {
+      throw new IllegalStateException("site jar not readonly: " + load.getAbsolutePath());
     }
     String cachePath = Path.jar().getAbsolutePath();
     ClassLoader appParent = ctx.getClassLoader();
@@ -417,6 +417,14 @@ public final class JarDexer {
     }
     //noinspection ResultOfMethodCallIgnored
     f.delete();
+  }
+
+  /** JarLoader.load：setReadOnly 失败则中止加载。 */
+  private static boolean ensureReadonly(File f) {
+    if (f == null) return false;
+    if (f.setReadOnly()) return true;
+    markReadonly(f);
+    return !f.canWrite();
   }
 
   private static void markReadonly(File f) {

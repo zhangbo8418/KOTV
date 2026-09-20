@@ -417,7 +417,6 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 				return model.Result{Success: false}, err
 			}
 			result.Key = site.Key
-			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 4:
 			params := map[string]string{
@@ -434,7 +433,6 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 				return model.Result{Success: false}, err
 			}
 			result.Key = site.Key
-			sanitizeResultPlayURLs(site, &result)
 			applySourceFetch(&result)
 		case 0, 1, 2:
 			rawID := id
@@ -804,22 +802,40 @@ func resultOrSiteHeader(siteHdr, resultHdr model.FlexHeader) model.FlexHeader {
 // Action SiteApi.action：type3 爬虫；type4 把 action 当 URL GET；其它空。
 func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	action = strings.TrimSpace(action)
+	var raw string
+	var err error
 	switch site.TypeID() {
 	case 3:
-		return s.cfg.Spider(site).Action(action)
+		raw, err = s.cfg.Spider(site).Action(action)
+		if err != nil {
+			return "", err
+		}
 	case 4:
 		// OkHttp.string：非 http / 异常→""；Result.fromJson 空→{}；不向调用方抛错。
 		if action == "" || !strings.HasPrefix(strings.ToLower(action), "http") {
 			return "{}", nil
 		}
-		body, err := util.HTTPGetParamsInsecure(action, nil, nil)
-		if err != nil || strings.TrimSpace(body) == "" {
+		body, gerr := util.HTTPGetParamsInsecure(action, nil, nil)
+		if gerr != nil || strings.TrimSpace(body) == "" {
 			return "{}", nil
 		}
-		return body, nil
+		raw = body
 	default:
 		return "{}", nil
 	}
+	// SiteApi.action → Result.fromJson（会 trans）。
+	result, ferr := fromType(1, raw)
+	if ferr != nil {
+		if strings.TrimSpace(raw) == "" {
+			return "{}", nil
+		}
+		return raw, nil
+	}
+	out := util.EncodeJSON(result)
+	if strings.TrimSpace(out) == "" {
+		return "{}", nil
+	}
+	return out, nil
 }
 
 // ManualVideoCheck CustomWebView：spider.manualVideoCheck()。

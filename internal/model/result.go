@@ -53,13 +53,45 @@ func (r Result) EffectiveMsg() string {
 	return msg
 }
 
-// CleanDesc 去掉 desc 中多余空白。
+// CleanDesc Util.clean：仅含 < 时剥 HTML，再整理空白。
 func CleanDesc(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
-	return strings.Join(strings.Fields(s), " ")
+	if strings.Contains(s, "<") {
+		s = stripHTMLTags(s)
+		s = strings.ReplaceAll(s, "\u00a0", " ")
+		s = strings.ReplaceAll(s, "\u3000", " ")
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(strings.ReplaceAll(line, "\r", ""))
+		if line == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(line)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func stripHTMLTags(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // Type 分类。
@@ -123,13 +155,50 @@ type FilterItem struct {
 	V FlexString `json:"v"`
 }
 
+// UnmarshalJSON Filter.check：丢掉 value 中的 null / 空项。
+func (f *Filter) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || string(data) == "null" {
+		*f = Filter{}
+		return nil
+	}
+	var raw struct {
+		Key   string            `json:"key"`
+		Name  string            `json:"name"`
+		Init  FlexString        `json:"init"`
+		Value []json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	f.Key = raw.Key
+	f.Name = raw.Name
+	f.Init = raw.Init
+	f.Value = nil
+	for _, v := range raw.Value {
+		v = bytes.TrimSpace(v)
+		if len(v) == 0 || string(v) == "null" {
+			continue
+		}
+		var it FilterItem
+		if err := json.Unmarshal(v, &it); err != nil {
+			continue
+		}
+		if strings.TrimSpace(it.N) == "" && strings.TrimSpace(it.V.String()) == "" {
+			continue
+		}
+		f.Value = append(f.Value, it)
+	}
+	return nil
+}
+
 // FilterMap 值可为单个 Filter 对象或 Filter 数组。
 type FilterMap map[string][]Filter
 
 func (m *FilterMap) UnmarshalJSON(data []byte) error {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 || string(data) == "null" {
- *m = nil
+		*m = nil
 		return nil
 	}
 	var raw map[string]json.RawMessage
@@ -199,14 +268,7 @@ func (u *URL) UnmarshalJSON(data []byte) error {
 		if len(u.URLs) > 0 && u.Position >= len(u.URLs) {
 			u.Position = len(u.URLs) - 1
 		}
-		if u.Position > 0 && u.Position < len(u.URLs) {
-			// 把默认项调到首位，方便 qualIdx=0
-			u.URLs[0], u.URLs[u.Position] = u.URLs[u.Position], u.URLs[0]
-			if len(u.Names) == len(u.URLs) {
-				u.Names[0], u.Names[u.Position] = u.Names[u.Position], u.Names[0]
-			}
-			u.Position = 0
-		}
+		// Url.v()：按 position 取值，不改 values 顺序。
 		return nil
 	}
 	var arr []json.RawMessage

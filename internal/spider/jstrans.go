@@ -116,9 +116,6 @@ func S2TResult(result *model.Result) {
 	for i := range result.Subs {
 		result.Subs[i].Name = s2t(result.Subs[i].Name)
 	}
-	if result.Desc != "" {
-		result.Desc = model.CleanDesc(s2t(result.Desc))
-	}
 }
 
 func s2tFilter(f *model.Filter) {

@@ -644,11 +644,10 @@ func (s *pySpider) DetailContent(ids []string) (string, error) {
 	return s.run("detailContent", map[string]interface{}{"ids": ids})
 }
 func (s *pySpider) SearchContent(key string, quick bool, pg string) (string, error) {
-	args := map[string]interface{}{"key": key, "quick": quick}
-	if pg != "" && pg != "1" {
-		args["pg"] = pg
+	if strings.TrimSpace(pg) == "" {
+		pg = "1"
 	}
-	return s.run("searchContent", args)
+	return s.run("searchContent", map[string]interface{}{"key": key, "quick": quick, "pg": pg})
 }
 func (s *pySpider) PlayerContent(flag, id string, vipFlags []string) (string, error) {
 	return s.run("playerContent", map[string]interface{}{"flag": flag, "id": id, "vipFlags": vipFlags})

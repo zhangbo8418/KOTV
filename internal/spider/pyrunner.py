@@ -68,6 +68,76 @@ def _ensure_bundled_site_packages():
 _ensure_bundled_site_packages()
 
 
+def _install_java_module_stubs():
+    """桌面 CPython：为 base/spider.py 的 Proxy / Python import 提供桩。"""
+    import types
+
+    def ensure_pkg(name):
+        if name in sys.modules:
+            return sys.modules[name]
+        m = types.ModuleType(name)
+        m.__path__ = []
+        sys.modules[name] = m
+        parent, _, leaf = name.rpartition(".")
+        if parent:
+            setattr(ensure_pkg(parent), leaf, m)
+        return m
+
+    ensure_pkg("com.github.catvod")
+
+    class Proxy:
+        @staticmethod
+        def getPort():
+            try:
+                return int(os.environ.get("KOTV_PROXY_PORT", "9978") or "9978")
+            except Exception:
+                return 9978
+
+        @staticmethod
+        def getUrl(local=True):
+            port = Proxy.getPort()
+            if local:
+                host = "127.0.0.1"
+            else:
+                host = (os.environ.get("KOTV_PROXY_HOST") or "").strip() or "127.0.0.1"
+            return f"http://{host}:{port}/proxy"
+
+    proxy_mod = types.ModuleType("com.github.catvod.Proxy")
+    proxy_mod.Proxy = Proxy
+    # `from com.github.catvod import Proxy` 与 `from com.github.catvod.Proxy import getUrl`
+    for name in ("getPort", "getUrl"):
+        setattr(proxy_mod, name, getattr(Proxy, name))
+    sys.modules["com.github.catvod.Proxy"] = proxy_mod
+    sys.modules["com.github.catvod"].Proxy = Proxy
+
+    ensure_pkg("com.chaquo.python")
+
+    class _CacheDir:
+        def getAbsolutePath(self):
+            return os.environ.get("KOTV_PY_CACHE") or os.path.dirname(os.path.dirname(__file__))
+
+    class _App:
+        def getCacheDir(self):
+            return _CacheDir()
+
+    class _Platform:
+        def getApplication(self):
+            return _App()
+
+    class Python:
+        @staticmethod
+        def getPlatform():
+            return _Platform()
+
+    py_mod = types.ModuleType("com.chaquo.python.Python")
+    py_mod.Python = Python
+    sys.modules["com.chaquo.python.Python"] = py_mod
+    sys.modules["com.chaquo.python"].Python = Python
+
+
+_install_java_module_stubs()
+
+
 def _ensure_ssl_certs():
     """桌面/embed Python 常缺 CA，补齐后让 requests/urlopen 可用 HTTPS。"""
     candidates = []
@@ -399,7 +469,13 @@ def invoke(method, args):
     if method == "playerContent":
         return encode_result(fn(args.get("flag", ""), args.get("id", ""), args.get("vipFlags") or []))
     if method == "liveContent":
-        return encode_result(fn(args.get("url", "")))
+        # TV app.py：原样返回，不 json.dumps；None → 空串。
+        value = fn(args.get("url", ""))
+        if value is None:
+            return ""
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
     if method == "localProxy":
         return encode_proxy_result(fn(args.get("params") or {}))
     if method == "action":

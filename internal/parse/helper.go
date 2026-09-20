@@ -84,12 +84,20 @@ func ShouldShowParseUI(r model.Result, flags []string, parses []model.Parse) boo
 	return IsUseParse(r, flags, parses)
 }
 
-// EpisodeURL ParseJob：webUrl = result.getUrl().v()（不含 playUrl 前缀）。
+// EpisodeURL ParseJob：webUrl = result.getUrl().v()（按 Url.position，不含 playUrl 前缀）。
 func EpisodeURL(r model.Result) string {
-	if len(r.URL.URLs) > 0 {
-		return r.URL.URLs[0]
+	urls := r.URL.URLs
+	if len(urls) == 0 {
+		return ""
 	}
-	return ""
+	pos := r.URL.Position
+	if pos < 0 {
+		pos = 0
+	}
+	if pos >= len(urls) {
+		pos = len(urls) - 1
+	}
+	return urls[pos]
 }
 
 // WebURL 兼容旧调用：playUrl 前缀 + url（仅在明确需要拼前缀时使用）。

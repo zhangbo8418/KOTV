@@ -411,11 +411,8 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		if len(values) == 0 {
 			continue
 		}
-		lk := strings.ToLower(key)
-		if lk == "host" || lk == "connection" || lk == "content-length" {
-			continue
-		}
-		params[lk] = values[0]
+		// Proxy.java putAll(headers)：全量灌入（含 host/connection/content-length）。
+		params[strings.ToLower(key)] = values[0]
 	}
 	// NanoHTTPD：headers 注入 remote-addr / http-client-ip
 	if ip := clientIPFromRemoteAddr(r.RemoteAddr); ip != "" {
@@ -437,14 +434,14 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := config.Default()
 	if cfg == nil {
-		http.Error(w, "config not ready", http.StatusServiceUnavailable)
+		http.Error(w, "config not ready", http.StatusInternalServerError)
 		return
 	}
 	siteKey := params["siteKey"]
 	if siteKey == "" {
 		status, contentType, body, headers, err := spider.GlobalProxy(params)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		writeProxyResponse(w, status, contentType, body, headers)
@@ -454,7 +451,7 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 	if site := cfg.GetSite(siteKey); site != nil && site.Key != "" {
 		status, contentType, body, headers, err := cfg.Spider(*site).Proxy(params)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		writeProxyResponse(w, status, contentType, body, headers)
@@ -463,7 +460,7 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 	if live := cfg.GetLive(siteKey); live != nil && live.Name != "" {
 		api := strings.TrimSpace(live.API)
 		if api == "" {
-			http.Error(w, "live api empty", http.StatusNotFound)
+			http.Error(w, "Invalid proxy response", http.StatusInternalServerError)
 			return
 		}
 		jar := live.JAR
@@ -475,13 +472,13 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		spider.SetRecent(live.Name, api, ext, jar)
 		status, contentType, body, headers, err := sp.Proxy(params)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		writeProxyResponse(w, status, contentType, body, headers)
 		return
 	}
-	http.Error(w, "site not found", http.StatusNotFound)
+	http.Error(w, "Invalid proxy response", http.StatusInternalServerError)
 }
 
 func clientIPFromRemoteAddr(remote string) string {
@@ -497,8 +494,9 @@ func clientIPFromRemoteAddr(remote string) string {
 }
 
 func writeProxyResponse(w http.ResponseWriter, status int, contentType string, body []byte, headers map[string]string) {
-	if status <= 0 {
-		status = http.StatusOK
+	// Proxy.toStatus：非 100–599（含 ≤0）→ 500。
+	if status < 100 || status > 599 {
+		status = http.StatusInternalServerError
 	}
 	bodyStream := headers[spider.ProxyBodyStreamHeader]
 	bodyFile := headers[spider.ProxyBodyFileHeader]
@@ -506,7 +504,7 @@ func writeProxyResponse(w http.ResponseWriter, status int, contentType string, b
 		w.Header().Set("Content-Type", contentType)
 	}
 	for k, v := range headers {
-		if skipProxyResponseHeader(k) {
+		if skipProxyResponseHeader(k, bodyStream != "") {
 			continue
 		}
 		if strings.EqualFold(k, "content-type") && contentType != "" {
@@ -558,7 +556,7 @@ func writeProxyResponse(w http.ResponseWriter, status int, contentType string, b
 	_, _ = w.Write(body)
 }
 
-func skipProxyResponseHeader(name string) bool {
+func skipProxyResponseHeader(name string, keepContentEncoding bool) bool {
 	switch {
 	case strings.EqualFold(name, spider.ProxyBodyFileHeader),
 		strings.EqualFold(name, spider.ProxyBodyStreamHeader),
@@ -568,10 +566,11 @@ func skipProxyResponseHeader(name string) bool {
 		strings.EqualFold(name, "keep-alive"),
 		strings.EqualFold(name, "proxy-connection"),
 		strings.EqualFold(name, "trailer"),
-		strings.EqualFold(name, "upgrade"),
-		// body 已由 bridge 解码落盘/入内存时，上游 Content-Encoding 不能再转给客户端。
-		strings.EqualFold(name, "content-encoding"):
+		strings.EqualFold(name, "upgrade"):
 		return true
+	case strings.EqualFold(name, "content-encoding"):
+		// bodyStream 原样泵保留编码；已解码入内存/落盘则剥掉。
+		return !keepContentEncoding
 	default:
 		return false
 	}
