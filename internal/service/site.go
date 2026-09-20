@@ -199,7 +199,7 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 	case 0, 1, 2:
 		// type2：非 spider 分支，JSON 解析（FromType≠0→JSON）。
 		var body string
-		body, err = util.HTTPGet(site.API, map[string]string(site.Header))
+		body, err = util.HTTPGetInsecure(site.API, map[string]string(site.Header))
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
@@ -811,7 +811,7 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 		if action == "" {
 			return "{}", nil
 		}
-		return util.HTTPGet(action, nil)
+		return util.HTTPGetInsecure(action, nil)
 	default:
 		return "{}", nil
 	}

@@ -876,10 +876,12 @@ func (s *jsSpider) jsReq(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qj
 			result := doJSRequest(u, options)
 			select {
 			case <-s.quitCh:
+				complete.Free()
 				return
 			default:
 			}
 			if s.epoch.Load() != epoch {
+				complete.Free()
 				return
 			}
 			c.Schedule(func(inner *qjs.Context) {

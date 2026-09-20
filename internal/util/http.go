@@ -2,6 +2,7 @@ package util
 
 import (
 	"crypto/md5"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -16,6 +17,9 @@ import (
 )
 
 var client = &http.Client{Timeout: 30 * time.Second}
+
+// insecureClient：爬虫/CMS/jar 下载用不校验证书（OkHttp trust-all）；鉴权/更新仍走 client。
+var insecureClient = newInsecureClient(nil)
 
 // FileURLPath 将 file:// / file: URL 解析为本地路径；非 file URL 返回 false。
 func FileURLPath(raw string) (string, bool) {
@@ -143,7 +147,14 @@ func applyHeaders(req *http.Request, headers map[string]string) {
 }
 
 func doRequest(req *http.Request) ([]byte, error) {
-	resp, err := GetClient().Do(req)
+	return doRequestWith(client, req)
+}
+
+func doRequestWith(c *http.Client, req *http.Request) ([]byte, error) {
+	if c == nil {
+		c = client
+	}
+	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +174,93 @@ func GetClient() *http.Client {
 	return client
 }
 
+// InsecureClient 爬虫/CMS/jar 下载用客户端（跳过 TLS 校验，复用代理）。
+func InsecureClient() *http.Client {
+	return insecureClient
+}
+
+func newInsecureClient(proxy func(*http.Request) (*url.URL, error)) *http.Client {
+	transport := &http.Transport{}
+	if t, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = t.Clone()
+	}
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+	transport.Proxy = proxy
+	return &http.Client{Timeout: 30 * time.Second, Transport: transport}
+}
+
+// HTTPGetInsecure 同 HTTPGet，但不校验证书。
+func HTTPGetInsecure(rawURL string, headers map[string]string) (string, error) {
+	b, err := HTTPGetBytesInsecure(rawURL, headers)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// HTTPGetBytesInsecure 同 HTTPGetBytes，但不校验证书。
+func HTTPGetBytesInsecure(rawURL string, headers map[string]string) ([]byte, error) {
+	return HTTPGetParamsBytesInsecure(rawURL, headers, nil)
+}
+
+// HTTPGetParamsInsecure 同 HTTPGetParams，但不校验证书。
+func HTTPGetParamsInsecure(rawURL string, headers map[string]string, params map[string]string) (string, error) {
+	b, err := HTTPGetParamsBytesInsecure(rawURL, headers, params)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// HTTPGetParamsBytesInsecure 同 HTTPGetParamsBytes，但不校验证书。
+func HTTPGetParamsBytesInsecure(rawURL string, headers map[string]string, params map[string]string) ([]byte, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if local, ok := FileURLPath(rawURL); ok {
+		return os.ReadFile(local)
+	}
+	rawURL = EncodeURL(rawURL)
+	if len(params) > 0 {
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return nil, err
+		}
+		q := u.Query()
+		for k, v := range params {
+			q.Set(k, v)
+		}
+		u.RawQuery = q.Encode()
+		rawURL = u.String()
+	}
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	applyHeaders(req, headers)
+	return doRequestWith(insecureClient, req)
+}
+
+// HTTPPostFormInsecure 同 HTTPPostForm，但不校验证书。
+func HTTPPostFormInsecure(rawURL string, headers map[string]string, params map[string]string) (string, error) {
+	rawURL = EncodeURL(rawURL)
+	form := url.Values{}
+	for k, v := range params {
+		form.Set(k, v)
+	}
+	req, err := http.NewRequest(http.MethodPost, rawURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	applyHeaders(req, headers)
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	b, err := doRequestWith(insecureClient, req)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 // SetProxy 设置 HTTP 代理，空则清除。格式 http://host:port 或 host:port。
 func SetProxy(proxyURL string) {
 	proxyURL = strings.TrimSpace(proxyURL)
@@ -170,27 +268,25 @@ func SetProxy(proxyURL string) {
 	if t, ok := http.DefaultTransport.(*http.Transport); ok {
 		transport = t.Clone()
 	}
+	var proxy func(*http.Request) (*url.URL, error)
 	if proxyURL == "" || proxyURL == "false" || strings.HasPrefix(proxyURL, "false#") {
-		transport.Proxy = nil
-		client = &http.Client{Timeout: 30 * time.Second, Transport: transport}
-		return
+		proxy = nil
+	} else {
+		if i := strings.Index(proxyURL, "#"); i >= 0 {
+			proxyURL = proxyURL[i+1:]
+		}
+		if proxyURL != "" {
+			if !strings.Contains(proxyURL, "://") {
+				proxyURL = "http://" + proxyURL
+			}
+			if u, err := url.Parse(proxyURL); err == nil {
+				proxy = http.ProxyURL(u)
+			}
+		}
 	}
-	if i := strings.Index(proxyURL, "#"); i >= 0 {
-		proxyURL = proxyURL[i+1:]
-	}
-	if proxyURL == "" {
-		client = &http.Client{Timeout: 30 * time.Second, Transport: transport}
-		return
-	}
-	if !strings.Contains(proxyURL, "://") {
-		proxyURL = "http://" + proxyURL
-	}
-	u, err := url.Parse(proxyURL)
-	if err != nil {
-		return
-	}
-	transport.Proxy = http.ProxyURL(u)
+	transport.Proxy = proxy
 	client = &http.Client{Timeout: 30 * time.Second, Transport: transport}
+	insecureClient = newInsecureClient(proxy)
 }
 
 type HTTPError struct {

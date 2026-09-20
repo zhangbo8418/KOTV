@@ -44,9 +44,9 @@ func siteCall(cfg *config.Manager, site model.Site, params map[string]string) (s
 	}
 	headers := map[string]string(site.Header)
 	if len(ext) > 1000 {
-		return util.HTTPPostForm(site.API, headers, params)
+		return util.HTTPPostFormInsecure(site.API, headers, params)
 	}
-	return util.HTTPGetParams(site.API, headers, params)
+	return util.HTTPGetParamsInsecure(site.API, headers, params)
 }
 
 // fetchExt Site.fetchExt：ext 以 http 开头则先下载正文写回。
@@ -55,13 +55,11 @@ func fetchExt(site model.Site) (model.Site, error) {
 	if !strings.HasPrefix(ext, "http://") && !strings.HasPrefix(ext, "https://") {
 		return site, nil
 	}
-	body, err := util.HTTPGet(ext, nil)
-	if err != nil {
-		return site, err
+	body, err := util.HTTPGetInsecure(ext, nil)
+	if err != nil || strings.TrimSpace(body) == "" {
+		// OkHttp.string 异常→空串，不改 ext、不抛错。
+		return site, nil
 	}
-	body = strings.TrimSpace(body)
-	if body != "" {
-		site.Ext = model.FlexString(body)
-	}
+	site.Ext = model.FlexString(strings.TrimSpace(body))
 	return site, nil
 }

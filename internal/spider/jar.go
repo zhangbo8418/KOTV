@@ -312,7 +312,7 @@ func downloadBinary(rawURL, dest string) error {
 	if localPath, ok := localFilePath(rawURL); ok {
 		b, err = os.ReadFile(localPath)
 	} else {
-		b, err = util.HTTPGetBytes(rawURL, nil)
+		b, err = util.HTTPGetBytesInsecure(rawURL, nil)
 	}
 	if err != nil {
 		return err
@@ -394,7 +394,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	}
 	path, expectMD5 := util.SplitJarSpec(spec)
 	if strings.HasPrefix(expectMD5, "http://") || strings.HasPrefix(expectMD5, "https://") {
-		value, err := util.HTTPGet(expectMD5, nil)
+		value, err := util.HTTPGetInsecure(expectMD5, nil)
 		if err != nil {
 			log.Printf("spider.jar 远程 md5 读取失败，将直接下载: %v", err)
 			expectMD5 = ""

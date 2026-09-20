@@ -83,10 +83,10 @@ func decodeCipherInput(input string, inBase64 bool) ([]byte, bool) {
 // blockCipherX：aesX / desX 共用的 CBC/ECB + PKCS7 路径。
 func blockCipherX(block cipher.Block, blockSize int, mode string, encrypt bool, data, ivb []byte, outBase64 bool) string {
 	upper := strings.ToUpper(mode)
-	// Crypto.getAesTransformation / getDesTransformation：CBC/ECB 强制 PKCS5，忽略串内 NoPadding。
+	// Crypto.getAesTransformation：AES/CBC|ECB 强制 PKCS5；
+	// getDesTransformation：仅 DESede/CBC* 强制 PKCS5，其余 mode+"Padding"（可真 NoPadding）。
 	forcePKCS := strings.HasPrefix(upper, "AES/CBC") || strings.HasPrefix(upper, "AES/ECB") ||
-		strings.HasPrefix(upper, "DESEDE/CBC") || strings.HasPrefix(upper, "DESEDE/ECB") ||
-		strings.HasPrefix(upper, "DES/CBC") || strings.HasPrefix(upper, "DES/ECB")
+		strings.HasPrefix(upper, "DESEDE/CBC")
 	noPadding := !forcePKCS && strings.Contains(upper+"PADDING", "NOPADDING")
 	useCBC := strings.Contains(upper, "CBC")
 

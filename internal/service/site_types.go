@@ -57,7 +57,7 @@ func fetchPic(site model.Site, r model.Result) (model.Result, error) {
 		"ids": strings.Join(ids, ","),
 	}
 	// fetchPic 走 OkHttp.newCall(..., params)，不附加 extend。
-	body, err := util.HTTPGetParams(site.API, map[string]string(site.Header), params)
+	body, err := util.HTTPGetParamsInsecure(site.API, map[string]string(site.Header), params)
 	if err != nil {
 		return r, err
 	}
