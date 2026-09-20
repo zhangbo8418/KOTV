@@ -74,10 +74,10 @@ import java.util.concurrent.atomic.AtomicLong
  * - Texture（兼容）：Flutter [TextureRegistry]（部分 HDR/10bit 会花屏，仅作回退）
  * 勿再因 API&lt;26 强制 Texture：RK 盒上 Flutter Texture + HDR 呈绿条花屏。
  *
- * 软硬解（DecodeTrackSelector + ExoUtil）：
+ * 软硬解（DecodeTrackSelector + 扩展渲染）：
  * - hard：视频 MediaCodec 硬解优先；音轨 MediaCodec 优先、FFmpeg（AV3A）可回退
- * - auto：同 hard；解码失败再整实例软解重建一次
- * - soft：音轨强制 FFmpeg；视频仍走 MediaCodec（KOTV 无 FfmpegVideoRenderer）+ 软件解码器优先
+ * - auto：硬解优先；解码失败再整实例软解重建一次
+ * - soft：按 softAudioPrefer / softVideoPrefer 决定 nextlib FFmpeg 音/视轨是否优先
  *
  * Media3 须为 FongMi 完整产物（scripts/build-fongmi-media3.sh 覆盖 webhtv 残缺 AAR）。
  */
@@ -204,6 +204,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var equalizer: Equalizer? = null
   private var loudnessEnhancer: LoudnessEnhancer? = null
   private val channelMixing = ChannelMixingAudioProcessor()
+  private val audioEffectProcessor = KotvAudioEffectProcessor()
   private val videoEqCtrl = KotvExoVideoEqController()
   private var eqBrightness = 0
   private var eqContrast = 0
@@ -1422,6 +1423,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         audioPassThrough,
         secondaryOut,
         if (audioPassThrough) null else channelMixing,
+        if (audioPassThrough) null else audioEffectProcessor,
       )
     when (mode) {
       "soft" -> factory.setMediaCodecSelector(SOFT_PREFER_SELECTOR)
@@ -1543,6 +1545,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     } catch (_: Throwable) {
     }
     loudnessEnhancer = null
+  }
+
+  private fun releaseAudioEffects() {
+    releaseAudioEq()
+    audioEffectProcessor.resetSettings()
   }
 
   private fun normalizeAudioEq(raw: String): String {
@@ -1753,11 +1760,15 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  /** BassBoost / Equalizer / Loudness / 声道混合；直通时跳过以免破 SPDIF。 */
+  /** BassBoost / Equalizer / 响度处理 / 声道混合；直通时跳过以免破 SPDIF。 */
   private fun applyAudioEq() {
     releaseAudioEq()
     updateChannelMix()
-    if (audioPassThrough) return
+    if (audioPassThrough) {
+      audioEffectProcessor.resetSettings()
+      return
+    }
+    syncAudioEffectProcessor()
     val p = player ?: return
     val session =
       try {
@@ -1778,7 +1789,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         audioEqMode == "voice" -> applyVoiceBands(session, strength = 1.0)
         audioEqMode != "off" -> applyCustomAudioBands(session)
       }
-      applyLoudnessStack(session)
+      applyDialogueLoudness(session)
     } catch (t: Throwable) {
       Log.w(TAG, "applyAudioEq mode=$audioEqMode dialogue=$audioDialogue", t)
       releaseAudioEq()
@@ -1854,26 +1865,33 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     equalizer = eq
   }
 
-  /** Loudness / boost / preamp / dialogue 残余增益。 */
-  private fun applyLoudnessStack(session: Int) {
-    var gainMb = 0
-    if (audioLoudness) gainMb += 600
+  /** 响度 / 稳定量 / boost / preamp → PCM 处理器（无需 audioSession）。 */
+  private fun syncAudioEffectProcessor() {
+    audioEffectProcessor.setConfig(
+      KotvAudioEffectProcessor.Config(
+        loudness = audioLoudness,
+        stability = audioStability.coerceIn(0, 100),
+        boost = audioBoost.coerceIn(0, 1200),
+        preamp = audioPreamp.coerceIn(-1200, 0),
+      ),
+    )
+  }
+
+  /** 对白增益仍用系统 LoudnessEnhancer（并可能叠 voice 频段）。 */
+  private fun applyDialogueLoudness(session: Int) {
+    var dialogueMb = 0
     if (audioDialogue > 0 && audioEqBands.isBlank()) {
-      gainMb += (900.0 * audioDialogue / 100.0).toInt()
+      dialogueMb += (900.0 * audioDialogue / 100.0).toInt()
       if (equalizer == null && audioEqMode == "off") {
         applyVoiceBands(session, strength = 0.85 * audioDialogue / 100.0)
       }
     } else if (audioDialogue > 0) {
-      gainMb += (400.0 * audioDialogue / 100.0).toInt()
+      dialogueMb += (400.0 * audioDialogue / 100.0).toInt()
     }
-    gainMb += audioBoost
-    gainMb += audioPreamp
-    // 稳定度粗近似：略抬目标响度。
-    if (audioStability > 0) gainMb += (audioStability * 2)
-    if (gainMb == 0) return
+    if (dialogueMb == 0) return
     try {
       val le = LoudnessEnhancer(session)
-      le.setTargetGain(gainMb.coerceIn(-1200, 2000))
+      le.setTargetGain(dialogueMb.coerceIn(-1200, 2000))
       le.enabled = true
       loudnessEnhancer = le
     } catch (t: Throwable) {
@@ -2040,7 +2058,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     surfaceHost?.setBufferingUi(false, "")
     diskPreload.stop()
     KotvExoCacheWarmer.cancel()
-    releaseAudioEq()
+    releaseAudioEffects()
     try {
       videoEqCtrl.clear(player)
     } catch (_: Throwable) {

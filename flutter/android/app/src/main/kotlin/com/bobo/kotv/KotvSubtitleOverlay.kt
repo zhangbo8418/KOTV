@@ -124,7 +124,7 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
 
   /**
    * @param primaryPos mpv 风格 0–150（100=底部默认）
-   * @param secondaryPos 副字幕：0=顶部默认；>0 时按同刻度换算 topMargin
+   * @param secondaryPos 副字幕：0=顶部默认；>0 时按主字幕刻度换算 topMargin
    */
   fun setStyle(
     fontScale: Float,

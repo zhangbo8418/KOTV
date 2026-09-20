@@ -210,6 +210,86 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (v != null) await _set(key, v, msg: msg);
   }
 
+  /// 存储格式：`false#` 关闭；`true#http://host:port` 开启。界面不展示原始串。
+  String _proxyDisplay(String raw) {
+    final s = raw.trim();
+    if (!_proxyEnabled(s)) return '未开启';
+    final url = _proxyUrl(s);
+    return url.isEmpty ? '已开启（未填地址）' : url;
+  }
+
+  bool _proxyEnabled(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty || s == 'false' || s.startsWith('false#')) return false;
+    if (s.startsWith('true#')) return true;
+    if (s == 'true') return true;
+    return s.isNotEmpty;
+  }
+
+  String _proxyUrl(String raw) {
+    final s = raw.trim();
+    final i = s.indexOf('#');
+    if (i >= 0) return s.substring(i + 1).trim();
+    if (s == 'false' || s == 'true') return '';
+    return s;
+  }
+
+  Future<void> _editProxy() async {
+    final raw = g('proxy');
+    final enabled = _proxyEnabled(raw);
+    final url = _proxyUrl(raw);
+    final mode = await pickChoice(
+      context,
+      title: '代理',
+      current: enabled ? 'on' : 'off',
+      options: const [
+        ('未开启', 'off'),
+        ('开启', 'on'),
+      ],
+    );
+    if (mode == null) return;
+    if (mode == 'off') {
+      await _set('proxy', 'false#', msg: '代理已关闭');
+      return;
+    }
+    final c = TextEditingController(text: url.isEmpty ? 'http://127.0.0.1:7890' : url);
+    final p = KotvPalette.of(context);
+    final next = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: p.dialogBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text('代理地址', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
+        content: SizedBox(
+          width: 540,
+          child: TextField(
+            controller: c,
+            autofocus: true,
+            style: TextStyle(color: p.fg),
+            decoration: InputDecoration(
+              hintText: 'http://127.0.0.1:7890 或 socks5://127.0.0.1:1080',
+              hintStyle: TextStyle(color: p.muted),
+              filled: true,
+              fillColor: p.input,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('确定')),
+        ],
+      ),
+    );
+    c.dispose();
+    if (next == null) return;
+    if (next.isEmpty) {
+      await _set('proxy', 'false#', msg: '代理已关闭');
+      return;
+    }
+    await _set('proxy', 'true#$next', msg: '代理已更新');
+  }
+
   /// 播放器二级设置：底部弹层，内嵌开关 / 滑块 / 入口。
   Future<void> _showPlayerSubSheet({
     required String title,
@@ -524,14 +604,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           _sheetNav(
             label: '首选字幕语言',
-            value: langs.isEmpty ? '默认' : langs,
+            value: langs.isEmpty ? '系统默认' : langs,
             onTap: () async {
-              await _prompt(
-                '首选字幕语言',
-                '逗号分隔，如 zh,zh-CN,en。空=默认。',
-                langs,
-                (v) => _set('exoPreferredTextLangs', v.trim(), msg: '首选字幕语言已更新'),
+              const opts = <(String, String)>[
+                ('中文', 'zh'),
+                ('简体中文', 'zh-Hans'),
+                ('繁体中文', 'zh-Hant'),
+                ('英语', 'en'),
+                ('日语', 'ja'),
+                ('韩语', 'ko'),
+                ('法语', 'fr'),
+                ('德语', 'de'),
+                ('西班牙语', 'es'),
+                ('俄语', 'ru'),
+                ('葡萄牙语', 'pt'),
+                ('阿拉伯语', 'ar'),
+                ('泰语', 'th'),
+                ('越南语', 'vi'),
+                ('印尼语', 'id'),
+              ];
+              final current = langs
+                  .split(RegExp(r'[,;|\s]+'))
+                  .map((e) => e.trim())
+                  .where((e) => e.isNotEmpty)
+                  .toSet();
+              final picked = await pickMultiChoice(
+                context,
+                title: '首选字幕语言',
+                current: current,
+                options: opts,
               );
+              if (picked == null) return;
+              await _set('exoPreferredTextLangs', picked.join(','), msg: '首选字幕语言已更新');
               setSheet(() {});
             },
           ),
@@ -2311,8 +2415,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: '代理',
-                          value: g('proxy').isEmpty ? '未配置' : g('proxy'),
-                          onTap: () => _prompt('代理', 'false# 或 true#http://127.0.0.1:7890', g('proxy'), (v) => _set('proxy', v, msg: '代理已更新')),
+                          value: _proxyDisplay(g('proxy')),
+                          onTap: () => _editProxy(),
                         ),
                         if (!kIsWeb)
                           KotvSettingsCell(

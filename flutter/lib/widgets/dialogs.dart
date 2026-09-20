@@ -850,6 +850,80 @@ Future<String?> pickChoice(
   );
 }
 
+/// 多选；返回选中 value 列表（可为空）。点确定才提交。
+Future<List<String>?> pickMultiChoice(
+  BuildContext context, {
+  required String title,
+  required Set<String> current,
+  required List<(String label, String value)> options,
+}) {
+  final selected = {...current};
+  return showDialog<List<String>>(
+    context: context,
+    builder: (ctx) {
+      return StatefulBuilder(
+        builder: (ctx, setLocal) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF63248A),
+            title: Text(title, style: const TextStyle(color: Colors.white)),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final o in options)
+                      CheckboxListTile(
+                        dense: true,
+                        value: selected.contains(o.$2),
+                        activeColor: Colors.white,
+                        checkColor: const Color(0xFF63248A),
+                        title: Text(o.$1, style: const TextStyle(color: Colors.white)),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        onChanged: (on) {
+                          setLocal(() {
+                            if (on == true) {
+                              selected.add(o.$2);
+                            } else {
+                              selected.remove(o.$2);
+                            }
+                          });
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('取消', style: TextStyle(color: Colors.white70)),
+              ),
+              TextButton(
+                onPressed: () {
+                  selected.clear();
+                  setLocal(() {});
+                },
+                child: const Text('清空', style: TextStyle(color: Colors.white70)),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final order = <String>[];
+                  for (final o in options) {
+                    if (selected.contains(o.$2)) order.add(o.$2);
+                  }
+                  Navigator.pop(ctx, order);
+                },
+                child: const Text('确定'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
+
 class _SourceListDialog extends StatefulWidget {
   const _SourceListDialog({
     super.key,

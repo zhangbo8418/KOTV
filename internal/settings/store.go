@@ -162,7 +162,7 @@ func defaultFile() file {
 			{ID: "log", Label: "日志级别", Value: "info"},
 			{ID: "player", Label: "点播播放器", Value: defaultVodPlayerValue()},
 			{ID: "playerLive", Label: "直播播放器", Value: defaultLivePlayerValue()},
-			{ID: "proxy", Label: "代理", Value: "false#"},
+			{ID: "proxy", Label: "代理", Value: "false#"}, // false#=关；true#URL=开（界面不展示该串）
 			{ID: "theme", Label: "主题", Value: "system"},
 			{ID: "adFilter", Label: "M3U8广告过滤", Value: "true"},
 			{ID: "m3u8FilterConfig", Label: "M3U8过滤配置(smart|mild)", Value: "{\"mode\":\"smart\"}"},
