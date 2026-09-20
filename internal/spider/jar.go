@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -29,6 +30,12 @@ var (
 	jarPath    string
 	configBase string // 相对 spider.jar / ./js 等据此解析
 	jarSpiders = map[string]*jarSpider{}
+)
+
+// 无 md5 jar：仅 LoadJar/clearJar 换世代后首次强制刷新（非每个业务 call）。
+var (
+	jarRefreshGen     atomic.Uint64
+	jarNoMD5Refreshed sync.Map // downloadURL -> gen
 )
 
 // 多用户：按 ScopeID 隔离配置基址，避免 A 换源覆盖 B 的相对路径解析。
@@ -73,11 +80,20 @@ func clearJar() {
 	jarPath = ""
 	configBase = ""
 	jarMu.Unlock()
+	bumpJarRefreshGen()
 	// destroy spiders and drop loaders；向 bridge 发 clear；独立进程可按需 Kill 重建。
 	req := bridgeRequest{Method: "clear"}
 	if payload, err := json.Marshal(req); err == nil {
 		_, _ = callJavaBridge(payload)
 	}
+}
+
+func bumpJarRefreshGen() {
+	jarRefreshGen.Add(1)
+	jarNoMD5Refreshed.Range(func(k, _ any) bool {
+		jarNoMD5Refreshed.Delete(k)
+		return true
+	})
 }
 
 // SetConfigBase 设置当前点播配置基址。有 ScopeID 时只写入该会话，不覆盖他人。
@@ -196,15 +212,11 @@ func LoadJar(spec string, configBaseArg ...string) error {
 	if spec == "" {
 		return nil
 	}
+	bumpJarRefreshGen()
 	base := ConfigBase()
 	if len(configBaseArg) > 0 && strings.TrimSpace(configBaseArg[0]) != "" {
 		base = strings.TrimSpace(configBaseArg[0])
 		SetConfigBase(base)
-	}
-	// assets:// 根 spider：UrlUtil.convert，走本地代理。
-	if strings.HasPrefix(spec, "assets://") {
-		localBase := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
-		spec = localBase + "/" + strings.TrimPrefix(spec, "assets://")
 	}
 	dest, err := cacheJar(spec, base, true)
 	if err != nil {
@@ -367,6 +379,11 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	if spec == "" {
 		return "", fmt.Errorf("空 jar")
 	}
+	// assets://：UrlUtil.convert，走本地代理（任意站点 jar，不限根 LoadJar）。
+	if strings.HasPrefix(spec, "assets://") {
+		localBase := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
+		spec = localBase + "/" + strings.TrimPrefix(spec, "assets://")
+	}
 	if allowOverride {
 		// 仅 spider-override.jar 可劫持配置里的 spider。
 		// data/spider.jar 若也劫持，会换成过期的 PC 瘦包（缺 Nostr 等类）。
@@ -416,20 +433,24 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	}
 	// 按 jar 地址哈希缓存，不用配置里的 md5 当文件名。
 	dest := paths.JarPath(util.MD5(downloadURL))
+	gen := jarRefreshGen.Load()
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
 		if expectMD5 == "" {
-			// 无 md5：冷加载始终重新下载（JarLoader 无 md5 时每次 Download）；
-			// 刷新失败沿用旧包，不因网络抖动把可用站点打挂。
+			// 无 md5：仅本世代首次强制刷新（LoadJar/clear 后）；同世代业务 call 直接用磁盘包。
+			if v, ok := jarNoMD5Refreshed.Load(downloadURL); ok {
+				if g, _ := v.(uint64); g == gen {
+					return dest, nil
+				}
+			}
 			oldSum := fileMD5(dest)
 			if err := downloadBinary(downloadURL, dest); err != nil {
 				log.Printf("spider.jar 刷新失败，沿用旧缓存 (%s): %v", downloadURL, err)
 			} else if newSum := fileMD5(dest); newSum != oldSum {
-				// 磁盘包变了必须让 JVM/Dex 侧丢弃旧 ClassLoader+爬虫实例，
-				// 否则 parseJar 命中内存缓存、跑的仍是旧类（需整包 clear）。
 				if err := reloadBridgeJar(dest); err != nil {
 					log.Printf("spider.jar 内存重载失败，沿用已加载类 (%s): %v", dest, err)
 				}
 			}
+			jarNoMD5Refreshed.Store(downloadURL, gen)
 			return dest, nil
 		}
 		if fileMD5(dest) == expectMD5 {
@@ -440,6 +461,9 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	}
 	if err := downloadBinary(downloadURL, dest); err != nil {
 		return "", fmt.Errorf("下载 spider.jar 失败 (%s): %w", downloadURL, err)
+	}
+	if expectMD5 == "" {
+		jarNoMD5Refreshed.Store(downloadURL, gen)
 	}
 	if expectMD5 != "" {
 		if actual := fileMD5(dest); actual != expectMD5 {

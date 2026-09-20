@@ -870,10 +870,29 @@ func (s *jsSpider) jsReq(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qj
 		}
 	}
 	if complete != nil {
-		// 有 complete 时异步回调
+		// 有 complete 时异步回调；Destroy 后不再 Schedule。
+		epoch := s.epoch.Load()
 		go func() {
 			result := doJSRequest(u, options)
+			select {
+			case <-s.quitCh:
+				return
+			default:
+			}
+			if s.epoch.Load() != epoch {
+				return
+			}
 			c.Schedule(func(inner *qjs.Context) {
+				if s.epoch.Load() != epoch {
+					complete.Free()
+					return
+				}
+				select {
+				case <-s.quitCh:
+					complete.Free()
+					return
+				default:
+				}
 				value := jsConnectResult(inner, result)
 				ret := complete.Execute(inner.NewUndefined(), value)
 				if ret != nil {
@@ -1096,11 +1115,16 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 		req.Header.Set("User-Agent", "okhttp/4.12.0")
 	}
 	client := &http.Client{
-		Timeout:   time.Duration(max(options.Timeout, 0)) * time.Millisecond,
 		Transport: jsRequestTransport(),
 	}
-	if options.Timeout <= 0 {
+	// 缺省 10000ms；timeout:0 无超时；负值回落默认客户端超时。
+	switch {
+	case options.Timeout < 0:
 		client.Timeout = util.GetClient().Timeout
+	case options.Timeout == 0:
+		client.Timeout = 0
+	default:
+		client.Timeout = time.Duration(options.Timeout) * time.Millisecond
 	}
 	if options.Redirect == 0 {
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

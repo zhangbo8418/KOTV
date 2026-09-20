@@ -234,8 +234,20 @@ func (a *App) APIAction(siteKey, action string) (map[string]any, error) {
 	msg := ""
 	var parsed map[string]any
 	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &parsed) == nil {
-		if m, ok := parsed["msg"].(string); ok {
-			msg = strings.TrimSpace(m)
+		// 用 Result 语义：code!=0 时清空 msg
+		if r, err := model.DecodeResultJSON(raw); err == nil {
+			msg = r.EffectiveMsg()
+		} else if m, ok := parsed["msg"].(string); ok {
+			code := 0
+			switch c := parsed["code"].(type) {
+			case float64:
+				code = int(c)
+			case int:
+				code = c
+			}
+			if code == 0 {
+				msg = strings.TrimSpace(m)
+			}
 		}
 	}
 	return map[string]any{
@@ -275,6 +287,7 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 		"ok":     true,
 		"vod":    vodDetailDTO(detail, sk),
 		"magnet": thunder.NeedsParse(&detail),
+		"desc":   model.CleanDesc(detail.VodContent),
 	}, nil
 }
 
@@ -478,7 +491,10 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 
 	var playURL string
 	var headers map[string]string
-	var danmakuURL string
+	var danmakuItems []model.DanmakuItem
+	var playSubs []model.Sub
+	var playArtwork, playDesc, playMsg string
+	var playPosition int
 	var qualNames, qualURLs []string
 	var playDrm *model.Drm
 	var didParse bool
@@ -501,7 +517,15 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		}
 		playDrm = result.Drm
 		headers = map[string]string(result.Header)
-		danmakuURL = result.Danmaku.String()
+		danmakuItems = append([]model.DanmakuItem(nil), result.Danmaku.Items...)
+		playSubs = append([]model.Sub(nil), result.Subs...)
+		playArtwork = strings.TrimSpace(result.Artwork)
+		playDesc = model.CleanDesc(result.Desc)
+		playMsg = result.EffectiveMsg()
+		playPosition = int(result.Position.Value)
+		if !result.Position.Valid {
+			playPosition = result.URL.Position
+		}
 		qualNames = result.URL.Names
 		qualURLs = result.URL.URLs
 		api := cfg.API()
@@ -549,8 +573,23 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			qualNames = result.URL.Names
 			qualURLs = result.URL.URLs
 			playURL = apiResolvePlayURL("", result.PlayURL, result.URL.URLs, qualIdx)
-			if result.Danmaku != "" {
-				danmakuURL = result.Danmaku.String()
+			if len(result.Danmaku.Items) > 0 {
+				danmakuItems = append([]model.DanmakuItem(nil), result.Danmaku.Items...)
+			}
+			if len(result.Subs) > 0 {
+				playSubs = append([]model.Sub(nil), result.Subs...)
+			}
+			if s := strings.TrimSpace(result.Artwork); s != "" {
+				playArtwork = s
+			}
+			if s := model.CleanDesc(result.Desc); s != "" {
+				playDesc = s
+			}
+			if m := result.EffectiveMsg(); m != "" {
+				playMsg = m
+			}
+			if result.Position.Valid {
+				playPosition = int(result.Position.Value)
 			}
 		}
 	}
@@ -610,21 +649,48 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	for i, u := range qualURLs {
 		pubQualURLs[i] = playproxy.PublicizeURL(localproxy.ConvertScheme(u))
 	}
+	danmakuDTO := make([]map[string]any, 0, len(danmakuItems))
+	for _, it := range danmakuItems {
+		u := playproxy.PublicizeURL(localproxy.ConvertScheme(it.URL))
+		if u == "" {
+			continue
+		}
+		danmakuDTO = append(danmakuDTO, map[string]any{"name": it.Name, "url": u})
+	}
+	subsDTO := make([]map[string]any, 0, len(playSubs))
+	for _, s := range playSubs {
+		u := playproxy.PublicizeURL(localproxy.ConvertScheme(s.URL))
+		if u == "" {
+			continue
+		}
+		subsDTO = append(subsDTO, map[string]any{
+			"url":    u,
+			"name":   s.Name,
+			"lang":   s.Lang,
+			"format": s.Format,
+			"flag":   s.Flag,
+		})
+	}
 	return map[string]any{
-		"ok":               true,
-		"url":              playproxy.PublicizeURL(playURL),
-		"media":            playproxy.PublicizeURL(mediaURL),
-		"magnet":           isMagnetPlay,
-		"parsed":           didParse,
-		"headers":          headers,
-		"drm":              playDrm,
-		"danmaku":          playproxy.PublicizeURL(danmakuURL),
-		"qualities":        map[string]any{"names": qualNames, "urls": pubQualURLs},
+		"ok":                  true,
+		"url":                 playproxy.PublicizeURL(playURL),
+		"media":               playproxy.PublicizeURL(mediaURL),
+		"magnet":              isMagnetPlay,
+		"parsed":              didParse,
+		"headers":             headers,
+		"drm":                 playDrm,
+		"danmaku":             danmakuDTO,
+		"subs":                subsDTO,
+		"artwork":             playArtwork,
+		"desc":                playDesc,
+		"msg":                 playMsg,
+		"position":            playPosition,
+		"qualities":           map[string]any{"names": qualNames, "urls": pubQualURLs},
 		"backendProxyPlay":    settings.IsBackendProxyPlay(),
 		"preferSpiderProxy":   settings.PreferSpiderProxyPlay(),
 		"site":                site.Key,
-		"flag":             flag,
-		"id":               vodID,
+		"flag":                flag,
+		"id":                  vodID,
 	}, nil
 }
 

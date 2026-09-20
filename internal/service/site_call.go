@@ -55,7 +55,7 @@ func fetchExt(site model.Site) (model.Site, error) {
 	if !strings.HasPrefix(ext, "http://") && !strings.HasPrefix(ext, "https://") {
 		return site, nil
 	}
-	body, err := util.HTTPGet(ext, map[string]string(site.Header))
+	body, err := util.HTTPGet(ext, nil)
 	if err != nil {
 		return site, err
 	}

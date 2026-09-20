@@ -256,7 +256,8 @@ def _download_dep(name):
     if not str(dep_url).startswith("http"):
         return
     try:
-        with urlopen(dep_url, timeout=30) as response:
+        ctx = ssl._create_unverified_context()
+        with urlopen(dep_url, timeout=30, context=ctx) as response:
             data = response.read()
         if not _looks_like_python_source(data):
             print("[pyrunner] skip non-python dep %s from %s" % (name, dep_url), file=sys.stderr)

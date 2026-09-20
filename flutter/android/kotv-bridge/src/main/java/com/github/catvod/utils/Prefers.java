@@ -130,7 +130,7 @@ public class Prefers {
             if (n.toString().contains(".")) ed.putFloat(key, n.floatValue());
             else ed.putInt(key, n.intValue());
         } else {
-            ed.putString(key, String.valueOf(obj));
+            return;
         }
         ed.apply();
     }

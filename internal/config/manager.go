@@ -712,9 +712,9 @@ func resolveSitePaths(api *model.Api) {
 		if ext := strings.TrimSpace(site.Ext.String()); ext != "" {
 			site.Ext = model.FlexString(resolveSiteField(base, ext))
 		}
-		// Site.objectFrom：jar 空则继承根 spider。
+		// Site.objectFrom：jar 空则继承根 spider（经 resolve，含 assets://）。
 		if strings.TrimSpace(site.Jar) == "" {
-			site.Jar = spiderJar
+			site.Jar = resolveSiteField(base, spiderJar)
 		} else {
 			site.Jar = resolveSiteField(base, site.Jar)
 		}
@@ -732,7 +732,7 @@ func resolveSitePaths(api *model.Api) {
 			live.Ext = model.FlexString(resolveSiteField(base, ext))
 		}
 		if strings.TrimSpace(live.JAR) == "" {
-			live.JAR = spiderJar
+			live.JAR = resolveSiteField(base, spiderJar)
 		} else {
 			live.JAR = resolveSiteField(base, live.JAR)
 		}

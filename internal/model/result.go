@@ -25,10 +25,41 @@ type Result struct {
 	Key       string      `json:"key"`
 	Click     string      `json:"click"`
 	Drm       *Drm        `json:"drm"`
+	Subs      []Sub       `json:"subs"`
+	Artwork   string      `json:"artwork"`
+	Desc      string      `json:"desc"`
+	Position  FlexInt     `json:"position"`
 	PageCount FlexInt     `json:"pagecount"`
 	Code      FlexInt     `json:"code"`
 	Msg       FlexString  `json:"msg"`
 	Success   bool        `json:"-"`
+}
+
+// Sub 外挂字幕轨。
+type Sub struct {
+	URL    string `json:"url"`
+	Name   string `json:"name"`
+	Lang   string `json:"lang"`
+	Format string `json:"format"`
+	Flag   int    `json:"flag"`
+}
+
+// EffectiveMsg：code!=0 或空 msg → ""（Result.getMsg）。
+func (r Result) EffectiveMsg() string {
+	msg := strings.TrimSpace(r.Msg.String())
+	if msg == "" || (r.Code.Valid && r.Code.Value != 0) {
+		return ""
+	}
+	return msg
+}
+
+// CleanDesc 去掉 desc 中多余空白。
+func CleanDesc(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // Type 分类。
@@ -129,10 +160,11 @@ func (m *FilterMap) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// URL 播放地址（支持单地址、字符串数组，或交替 name/url 数组）。
+// URL 播放地址（支持单地址、字符串数组、交替 name/url 数组，或 {values,position} 对象）。
 type URL struct {
-	URLs  []string
-	Names []string
+	URLs     []string
+	Names    []string
+	Position int // Url.position，默认 0
 }
 
 func (u *URL) UnmarshalJSON(data []byte) error {
@@ -145,30 +177,58 @@ func (u *URL) UnmarshalJSON(data []byte) error {
 		u.URLs = []string{s}
 		return nil
 	}
+	if len(data) > 0 && data[0] == '{' {
+		var obj struct {
+			Values   []struct {
+				N string `json:"n"`
+				V string `json:"v"`
+			} `json:"values"`
+			Position int `json:"position"`
+		}
+		if err := json.Unmarshal(data, &obj); err != nil {
+			return nil
+		}
+		for _, it := range obj.Values {
+			u.Names = append(u.Names, it.N)
+			u.URLs = append(u.URLs, it.V)
+		}
+		u.Position = obj.Position
+		if u.Position < 0 {
+			u.Position = 0
+		}
+		if len(u.URLs) > 0 && u.Position >= len(u.URLs) {
+			u.Position = len(u.URLs) - 1
+		}
+		if u.Position > 0 && u.Position < len(u.URLs) {
+			// 把默认项调到首位，方便 qualIdx=0
+			u.URLs[0], u.URLs[u.Position] = u.URLs[u.Position], u.URLs[0]
+			if len(u.Names) == len(u.URLs) {
+				u.Names[0], u.Names[u.Position] = u.Names[u.Position], u.Names[0]
+			}
+			u.Position = 0
+		}
+		return nil
+	}
 	var arr []json.RawMessage
 	if err := json.Unmarshal(data, &arr); err != nil {
 		return nil
 	}
-	// 交替 name/url：["线路1","http://a","线路2","http://b"]
-	if len(arr) >= 2 && len(arr)%2 == 0 {
+	// UrlAdapter.convert：严格成对 name/url，奇数尾丢弃。
+	if len(arr) >= 2 {
 		var names, urls []string
-		ok := true
 		for i := 0; i+1 < len(arr); i += 2 {
 			var n, v string
 			if json.Unmarshal(arr[i], &n) != nil || json.Unmarshal(arr[i+1], &v) != nil {
-				ok = false
+				names, urls = nil, nil
 				break
 			}
 			names = append(names, n)
 			urls = append(urls, v)
 		}
-		if ok {
- // 若第二项看起来像 URL，按交替解析；否则退回纯字符串数组
-			if looksLikePlayURL(urls[0]) || !looksLikePlayURL(names[0]) {
-				u.Names = names
-				u.URLs = urls
-				return nil
-			}
+		if len(urls) > 0 {
+			u.Names = names
+			u.URLs = urls
+			return nil
 		}
 	}
 	var strs []string
@@ -176,15 +236,6 @@ func (u *URL) UnmarshalJSON(data []byte) error {
 		u.URLs = strs
 	}
 	return nil
-}
-
-func looksLikePlayURL(s string) bool {
-	s = strings.TrimSpace(strings.ToLower(s))
-	return strings.HasPrefix(s, "http://") ||
-		strings.HasPrefix(s, "https://") ||
-		strings.HasPrefix(s, "magnet:") ||
-		strings.Contains(s, ".m3u8") ||
-		strings.Contains(s, ".mp4")
 }
 
 // DecodeResultJSON 反序列化 JSON Result。

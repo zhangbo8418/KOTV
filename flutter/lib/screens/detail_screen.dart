@@ -156,6 +156,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _stableVolumeOn = false;
   String _danmakuApi = '';
   String _lastPlayDanmaku = '';
+  List<DanmakuSource> _lastSpiderDanmakuSources = const [];
   double _danmakuSize = 18;
   double _danmakuOpacity = 0.85;
   int _danmakuRows = 6;
@@ -1516,21 +1517,34 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     required String playDanmaku,
     required String name,
     required String episode,
+    List<DanmakuSource> spiderSources = const [],
   }) async {
     _danmakuItems.value = const [];
     if (!_danmakuLoad) return;
     _lastPlayDanmaku = playDanmaku;
+    _lastSpiderDanmakuSources = spiderSources;
     final engineBase = ref.read(apiProvider).baseUrl;
-    final src = kotvRewriteEngineLocalUrl(playDanmaku.trim(), engineBase);
+    String spiderUrl = '';
+    List<DanmakuSource> spiderList = spiderSources;
+    if (spiderList.isEmpty && playDanmaku.trim().isNotEmpty) {
+      spiderUrl = kotvRewriteEngineLocalUrl(playDanmaku.trim(), engineBase);
+    } else if (spiderList.isNotEmpty) {
+      spiderList = [
+        for (final s in spiderList)
+          DanmakuSource(name: s.name, url: kotvRewriteEngineLocalUrl(s.url, engineBase)),
+      ];
+      final idx = _danmakuSourceIdx.clamp(0, spiderList.length - 1);
+      spiderUrl = spiderList[idx].url;
+    }
     final api = _danmakuApi.trim();
-    final canSpider = src.isNotEmpty;
+    final canSpider = spiderUrl.isNotEmpty;
     final canApi = api.isNotEmpty && _danmakuAuto;
     if (!canSpider && !canApi) return;
     try {
       List<DanmakuItem> items = const [];
-      List<DanmakuSource> sources = const [];
+      List<DanmakuSource> sources = spiderList;
       if (_danmakuSpiderFirst) {
-        if (canSpider) items = await DanmakuLoader.loadUrl(src);
+        if (canSpider) items = await DanmakuLoader.loadUrl(spiderUrl, followSources: spiderList.length <= 1);
         if (items.isEmpty && canApi) {
           final body = await DanmakuLoader.fetchApiBody(api, name: name, episode: episode);
           sources = DanmakuLoader.listSources(body);
@@ -1552,7 +1566,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             items = DanmakuParser.parse(body);
           }
         }
-        if (items.isEmpty && canSpider) items = await DanmakuLoader.loadUrl(src);
+        if (items.isEmpty && canSpider) {
+          items = await DanmakuLoader.loadUrl(spiderUrl, followSources: spiderList.length <= 1);
+          if (sources.isEmpty) sources = spiderList;
+        }
       }
       if (!mounted) return;
       if (_danmakuOffsetSec.abs() > 0.0001) {
@@ -1578,6 +1595,29 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _danmakuItems.value = const [];
       }
     }
+  }
+
+  List<DanmakuSource> _danmakuSourcesFromPlay(dynamic raw) {
+    if (raw is List) {
+      final out = <DanmakuSource>[];
+      for (var i = 0; i < raw.length; i++) {
+        final it = raw[i];
+        if (it is Map) {
+          final u = '${it['url'] ?? ''}'.trim();
+          if (u.isEmpty) continue;
+          final n = '${it['name'] ?? ''}'.trim();
+          out.add(DanmakuSource(name: n.isEmpty ? '源 ${i + 1}' : n, url: u));
+        } else {
+          final u = '$it'.trim();
+          if (u.isEmpty) continue;
+          out.add(DanmakuSource(name: '源 ${i + 1}', url: u));
+        }
+      }
+      return out;
+    }
+    final s = '${raw ?? ''}'.trim();
+    if (s.isEmpty || s == 'null' || s.startsWith('[')) return const [];
+    return [DanmakuSource(name: '源 1', url: s)];
   }
 
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
@@ -1855,11 +1895,32 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         } catch (_) {}
       }
       if (!mounted) return;
+      final spiderDm = _danmakuSourcesFromPlay(data['danmaku']);
       unawaited(_loadDanmakuForEpisode(
-        playDanmaku: '${data['danmaku'] ?? ''}',
+        playDanmaku: spiderDm.isEmpty ? '' : spiderDm.first.url,
+        spiderSources: spiderDm,
         name: d.name,
         episode: ep.name,
       ));
+      final playSubs = data['subs'];
+      if (playSubs is List && playSubs.isNotEmpty) {
+        final subMaps = <Map<String, dynamic>>[
+          for (final s in playSubs)
+            if (s is Map)
+              {
+                'url': '${s['url'] ?? ''}',
+                'name': '${s['name'] ?? ''}',
+                'lang': '${s['lang'] ?? ''}',
+                'format': '${s['format'] ?? ''}',
+              },
+        ];
+        try {
+          final pb = _playback;
+          if (pb is ExoPlayback) {
+            pb.setExternalSubs(subMaps);
+          }
+        } catch (_) {}
+      }
       _scheduleNextEpisodePreload(
         site: d.site.isNotEmpty ? d.site : widget.site,
         id: widget.id,
@@ -2394,6 +2455,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           final epName = (_epIdx >= 0 && _epIdx < _eps.length) ? _eps[_epIdx].name : '';
           unawaited(_loadDanmakuForEpisode(
             playDanmaku: _lastPlayDanmaku,
+            spiderSources: _lastSpiderDanmakuSources,
             name: d.name,
             episode: epName,
           ));

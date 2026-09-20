@@ -228,6 +228,23 @@ func (s *pySpider) ensureScript() (string, error) {
 		return api, nil
 	}
 	dest := filepath.Join(paths.PyCache(), util.MD5(s.api)+".py")
+	// http(s) 主脚本每次覆盖写入（Chaquopy download/writeFile）；失败沿用旧文件。
+	if strings.HasPrefix(api, "http://") || strings.HasPrefix(api, "https://") {
+		data, err := util.HTTPGet(s.api, nil)
+		if err == nil {
+			if werr := os.WriteFile(dest, []byte(data), 0o644); werr == nil {
+				s.scriptPath = dest
+				return dest, nil
+			}
+		} else {
+			log.Printf("py script refresh failed (%s): %v", s.api, err)
+		}
+		if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
+			s.scriptPath = dest
+			return dest, nil
+		}
+		return "", err
+	}
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
 		s.scriptPath = dest
 		return dest, nil

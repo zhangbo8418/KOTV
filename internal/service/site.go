@@ -19,6 +19,7 @@ import (
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
 	"github.com/bobo/KOTV/internal/util"
@@ -27,6 +28,9 @@ import (
 
 // PushAgentKey SiteApi.PUSH：无站点配置时的推送入口。
 const PushAgentKey = "push_agent"
+
+// PushAgentPic 推送详情占位图（TV R.string.push_image 等价 data URI，1x1 JPEG）。
+const PushAgentPic = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGfAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
 
 // SiteService 站点内容服务，站点内容服务。
 type SiteService struct {
@@ -171,11 +175,13 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 			return model.Result{Success: false}, err
 		}
 		if !skipHome {
-			if hv, herr := sp.HomeVideoContent(); herr == nil {
-				extra, _ := decodeResult(hv)
-				if len(extra.List) > 0 {
-					result.List = extra.List
-				}
+			hv, herr := sp.HomeVideoContent()
+			if herr != nil {
+				return model.Result{Success: false}, herr
+			}
+			extra, _ := decodeResult(hv)
+			if len(extra.List) > 0 {
+				result.List = extra.List
 			}
 		}
 		applyTypes(site, &result)
@@ -301,6 +307,7 @@ func (s *SiteService) DetailContent(vod model.Vod) (model.Vod, error) {
 		detail := model.Vod{
 			VodID:       model.FlexString(id),
 			VodName:     id,
+			VodPic:      PushAgentPic,
 			VodPlayURL:  id,
 			VodPlayFrom: "推送",
 			Site:        site,
@@ -377,6 +384,10 @@ func (s *SiteService) CachedDetail(vodID string) (model.Vod, bool) {
 func (s *SiteService) PlayerContent(site model.Site, flag, id string) (model.Result, error) {
 	var result model.Result
 	var err error
+
+	// SiteApi.playerContent：先停掉专用源/磁力任务。
+	source.Stop()
+	thunder.Stop()
 
 	// push_agent 直接把 id 当 url，再走 Source.fetch。
 	if site.Key == PushAgentKey {

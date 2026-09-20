@@ -6,14 +6,21 @@ import (
 	"strings"
 )
 
-// FlexDanmaku 可为 URL 字符串、对象 {url}、或对象数组。
-// 整字段若用 string 接数组会导致整个 Result 反序列化失败 → 首页/分类变空。
-type FlexDanmaku string
+// DanmakuItem 单条弹幕源。
+type DanmakuItem struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// FlexDanmaku 可为 URL 字符串、对象 {url,name}、或对象/字符串数组。
+type FlexDanmaku struct {
+	Items []DanmakuItem
+}
 
 func (d *FlexDanmaku) UnmarshalJSON(b []byte) error {
 	b = bytes.TrimSpace(b)
 	if len(b) == 0 || bytes.Equal(b, []byte("null")) {
-		*d = ""
+		*d = FlexDanmaku{}
 		return nil
 	}
 	switch b[0] {
@@ -22,17 +29,23 @@ func (d *FlexDanmaku) UnmarshalJSON(b []byte) error {
 		if err := json.Unmarshal(b, &s); err != nil {
 			return err
 		}
-		*d = FlexDanmaku(strings.TrimSpace(s))
+		s = strings.TrimSpace(s)
+		if s != "" {
+			d.Items = []DanmakuItem{{URL: s}}
+		}
 		return nil
 	case '{':
-		*d = FlexDanmaku(danmakuURLFromObj(b))
+		if it, ok := danmakuItemFromObj(b); ok {
+			d.Items = []DanmakuItem{it}
+		}
 		return nil
 	case '[':
 		var arr []json.RawMessage
 		if err := json.Unmarshal(b, &arr); err != nil {
-			*d = ""
+			*d = FlexDanmaku{}
 			return nil
 		}
+		var items []DanmakuItem
 		for _, item := range arr {
 			item = bytes.TrimSpace(item)
 			if len(item) == 0 || bytes.Equal(item, []byte("null")) {
@@ -42,42 +55,58 @@ func (d *FlexDanmaku) UnmarshalJSON(b []byte) error {
 				var s string
 				if json.Unmarshal(item, &s) == nil {
 					if s = strings.TrimSpace(s); s != "" {
-						*d = FlexDanmaku(s)
-						return nil
+						items = append(items, DanmakuItem{URL: s})
 					}
 				}
 				continue
 			}
-			if u := danmakuURLFromObj(item); u != "" {
-				*d = FlexDanmaku(u)
-				return nil
+			if it, ok := danmakuItemFromObj(item); ok {
+				items = append(items, it)
 			}
 		}
-		*d = ""
+		d.Items = items
 		return nil
 	default:
-		// 数字等：尽量当字符串保留
-		*d = FlexDanmaku(string(b))
+		s := strings.TrimSpace(string(b))
+		if s != "" {
+			d.Items = []DanmakuItem{{URL: s}}
+		}
 		return nil
 	}
 }
 
-func danmakuURLFromObj(b []byte) string {
+func danmakuItemFromObj(b []byte) (DanmakuItem, bool) {
 	var obj struct {
 		URL  string `json:"url"`
 		Name string `json:"name"`
 	}
 	if json.Unmarshal(b, &obj) != nil {
-		return ""
+		return DanmakuItem{}, false
 	}
-	if u := strings.TrimSpace(obj.URL); u != "" {
-		return u
+	u := strings.TrimSpace(obj.URL)
+	n := strings.TrimSpace(obj.Name)
+	if u == "" && n != "" && (strings.HasPrefix(n, "http://") || strings.HasPrefix(n, "https://")) {
+		u, n = n, ""
 	}
-	return strings.TrimSpace(obj.Name)
+	if u == "" {
+		return DanmakuItem{}, false
+	}
+	return DanmakuItem{Name: n, URL: u}, true
 }
 
 func (d FlexDanmaku) MarshalJSON() ([]byte, error) {
-	return json.Marshal(string(d))
+	if len(d.Items) == 0 {
+		return json.Marshal("")
+	}
+	if len(d.Items) == 1 && d.Items[0].Name == "" {
+		return json.Marshal(d.Items[0].URL)
+	}
+	return json.Marshal(d.Items)
 }
 
-func (d FlexDanmaku) String() string { return string(d) }
+func (d FlexDanmaku) String() string {
+	if len(d.Items) == 0 {
+		return ""
+	}
+	return d.Items[0].URL
+}

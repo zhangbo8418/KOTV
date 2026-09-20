@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
+	"crypto/tls"
 	"io"
 	"net/http"
 	"net/url"
@@ -105,7 +106,7 @@ func drainBody(resp *http.Response) []byte {
 	return b
 }
 
-// jsRequestTransport 关闭自动解压，以便对 raw deflate 的处理。
+// jsRequestTransport 关闭自动解压；TLS 不校验（OkHttp trust-all）。
 func jsRequestTransport() http.RoundTripper {
 	base := util.GetClient().Transport
 	if base == nil {
@@ -114,9 +115,18 @@ func jsRequestTransport() http.RoundTripper {
 	if t, ok := base.(*http.Transport); ok {
 		cl := t.Clone()
 		cl.DisableCompression = true
+		if cl.TLSClientConfig == nil {
+			cl.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+		} else {
+			cl.TLSClientConfig = cl.TLSClientConfig.Clone()
+			cl.TLSClientConfig.InsecureSkipVerify = true
+		}
 		return cl
 	}
-	return &http.Transport{DisableCompression: true}
+	return &http.Transport{
+		DisableCompression: true,
+		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+	}
 }
 
 // decodeJSContentEncoding ResponseInterceptor：gzip + Inflater(nowrap) deflate。

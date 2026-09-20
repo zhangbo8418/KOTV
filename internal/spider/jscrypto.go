@@ -83,7 +83,11 @@ func decodeCipherInput(input string, inBase64 bool) ([]byte, bool) {
 // blockCipherX：aesX / desX 共用的 CBC/ECB + PKCS7 路径。
 func blockCipherX(block cipher.Block, blockSize int, mode string, encrypt bool, data, ivb []byte, outBase64 bool) string {
 	upper := strings.ToUpper(mode)
-	noPadding := strings.Contains(upper+"PADDING", "NOPADDING")
+	// Crypto.getAesTransformation / getDesTransformation：CBC/ECB 强制 PKCS5，忽略串内 NoPadding。
+	forcePKCS := strings.HasPrefix(upper, "AES/CBC") || strings.HasPrefix(upper, "AES/ECB") ||
+		strings.HasPrefix(upper, "DESEDE/CBC") || strings.HasPrefix(upper, "DESEDE/ECB") ||
+		strings.HasPrefix(upper, "DES/CBC") || strings.HasPrefix(upper, "DES/ECB")
+	noPadding := !forcePKCS && strings.Contains(upper+"PADDING", "NOPADDING")
 	useCBC := strings.Contains(upper, "CBC")
 
 	var out []byte
@@ -193,9 +197,7 @@ func decodeJSBase64(text string) ([]byte, error) {
 	return base64.URLEncoding.DecodeString(text)
 }
 
-// rsaX Crypto.rsa。
-// 标准 pub+encrypt / priv+decrypt 走 Go crypto/rsa；
-// 反向（priv 加密 / pub 解密）无标准 API，用原始 RSA 模幂尽力实现（尤其 NoPadding）。
+// rsaX Crypto.rsa（分块：encrypt 块长 keySize-padding，decrypt 块长 keySize）。
 func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key string, outBase64 bool) string {
 	data := []byte(input)
 	if inBase64 {
@@ -209,10 +211,17 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 	if err != nil || len(keyBytes) == 0 {
 		return ""
 	}
-	var out []byte
 	noPadding := strings.EqualFold(mode, "RSA/None/NoPadding")
 	oaep := strings.EqualFold(mode, "RSA/None/OAEPPadding") ||
 		strings.Contains(strings.ToUpper(mode), "OAEP")
+	overhead := 11
+	if noPadding {
+		overhead = 0
+	} else if oaep {
+		overhead = 42
+	}
+
+	var out []byte
 	if pub && encrypt {
 		k, parseErr := x509.ParsePKIXPublicKey(keyBytes)
 		if parseErr != nil {
@@ -222,13 +231,15 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 		if !ok {
 			return ""
 		}
-		if noPadding {
-			out, err = rsaRawPublic(rpk, data)
-		} else if oaep {
-			out, err = rsa.EncryptOAEP(sha1.New(), rand.Reader, rpk, data, nil)
-		} else {
-			out, err = rsa.EncryptPKCS1v15(rand.Reader, rpk, data)
-		}
+		out, err = rsaChunk(encrypt, overhead, rpk.Size(), data, func(chunk []byte) ([]byte, error) {
+			if noPadding {
+				return rsaRawPublic(rpk, chunk)
+			}
+			if oaep {
+				return rsa.EncryptOAEP(sha1.New(), rand.Reader, rpk, chunk, nil)
+			}
+			return rsa.EncryptPKCS1v15(rand.Reader, rpk, chunk)
+		})
 	} else if !pub && !encrypt {
 		rpk, parseErr := x509.ParsePKCS8PrivateKey(keyBytes)
 		if parseErr != nil {
@@ -238,15 +249,16 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 		if !ok {
 			return ""
 		}
-		if noPadding {
-			out, err = rsaRawPrivate(priv, data)
-		} else if oaep {
-			out, err = rsa.DecryptOAEP(sha1.New(), rand.Reader, priv, data, nil)
-		} else {
-			out, err = rsa.DecryptPKCS1v15(rand.Reader, priv, data)
-		}
+		out, err = rsaChunk(encrypt, overhead, priv.Size(), data, func(chunk []byte) ([]byte, error) {
+			if noPadding {
+				return rsaRawPrivate(priv, chunk)
+			}
+			if oaep {
+				return rsa.DecryptOAEP(sha1.New(), rand.Reader, priv, chunk, nil)
+			}
+			return rsa.DecryptPKCS1v15(rand.Reader, priv, chunk)
+		})
 	} else if !pub && encrypt {
-		// 允许私钥加密；Go 标准库无对应 API，NoPadding 用原始模幂，PKCS1 尽力 raw
 		rpk, parseErr := x509.ParsePKCS8PrivateKey(keyBytes)
 		if parseErr != nil {
 			return ""
@@ -255,7 +267,9 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 		if !ok {
 			return ""
 		}
-		out, err = rsaRawPrivate(priv, data)
+		out, err = rsaChunk(encrypt, overhead, priv.Size(), data, func(chunk []byte) ([]byte, error) {
+			return rsaRawPrivate(priv, chunk)
+		})
 	} else if pub && !encrypt {
 		k, parseErr := x509.ParsePKIXPublicKey(keyBytes)
 		if parseErr != nil {
@@ -265,7 +279,9 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 		if !ok {
 			return ""
 		}
-		out, err = rsaRawPublic(rpk, data)
+		out, err = rsaChunk(encrypt, overhead, rpk.Size(), data, func(chunk []byte) ([]byte, error) {
+			return rsaRawPublic(rpk, chunk)
+		})
 	} else {
 		return ""
 	}
@@ -276,6 +292,38 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 		return base64Std(out)
 	}
 	return string(out)
+}
+
+func rsaChunk(encrypt bool, overhead, keySize int, data []byte, transform func([]byte) ([]byte, error)) ([]byte, error) {
+	if len(data) == 0 {
+		return data, nil
+	}
+	inputBlock := keySize
+	if encrypt {
+		inputBlock = keySize - overhead
+		if inputBlock <= 0 {
+			return nil, rsa.ErrMessageTooLong
+		}
+	}
+	var out []byte
+	for offset := 0; offset < len(data); offset += inputBlock {
+		end := offset + inputBlock
+		if end > len(data) {
+			end = len(data)
+		}
+		chunk := data[offset:end]
+		if overhead == 0 && encrypt && len(chunk) < keySize {
+			padded := make([]byte, keySize)
+			copy(padded[keySize-len(chunk):], chunk)
+			chunk = padded
+		}
+		block, err := transform(chunk)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, block...)
+	}
+	return out, nil
 }
 
 // parseRSAKeyBytes Crypto.generateKey：支持 PEM 或剥头后的裸 base64。

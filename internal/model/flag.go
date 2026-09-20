@@ -16,11 +16,23 @@ type Flag struct {
 }
 
 func CreateFlag(name string) Flag {
+	show := name
+	// Flag.trans：系统繁体时 Show 做 s2t（由 spider.S2TFlagShow 注入，避免 model→spider 循环）。
+	if s2tFlagShow != nil {
+		show = s2tFlagShow(name)
+	}
 	return Flag{
 		Flag:     name,
-		Show:     name,
+		Show:     show,
 		Position: -1,
 	}
+}
+
+// SetFlagShowS2T 由 spider 包在 init 时注册，避免循环依赖。
+var s2tFlagShow func(string) string
+
+func SetFlagShowS2T(fn func(string) string) {
+	s2tFlagShow = fn
 }
 
 // CreateEpisode 解析 name$url#name1$url1 格式。
