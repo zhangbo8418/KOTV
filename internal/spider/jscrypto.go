@@ -7,9 +7,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"hash"
+	"io"
 	"math/big"
 	"strings"
 )
@@ -268,7 +271,13 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 			return ""
 		}
 		out, err = rsaChunk(encrypt, overhead, priv.Size(), data, func(chunk []byte) ([]byte, error) {
-			return rsaRawPrivate(priv, chunk)
+			if noPadding {
+				return rsaRawPrivate(priv, chunk)
+			}
+			if oaep {
+				return encryptOAEPPrivate(priv, chunk)
+			}
+			return encryptPKCS1v15Private(priv, chunk)
 		})
 	} else if pub && !encrypt {
 		k, parseErr := x509.ParsePKIXPublicKey(keyBytes)
@@ -280,7 +289,13 @@ func rsaX(mode string, pub, encrypt bool, input string, inBase64 bool, key strin
 			return ""
 		}
 		out, err = rsaChunk(encrypt, overhead, rpk.Size(), data, func(chunk []byte) ([]byte, error) {
-			return rsaRawPublic(rpk, chunk)
+			if noPadding {
+				return rsaRawPublic(rpk, chunk)
+			}
+			if oaep {
+				return decryptOAEPPublic(rpk, chunk)
+			}
+			return decryptPKCS1v15Public(rpk, chunk)
 		})
 	} else {
 		return ""
@@ -363,6 +378,148 @@ func rsaRawPrivate(key *rsa.PrivateKey, input []byte) ([]byte, error) {
 		return nil, rsa.ErrDecryption
 	}
 	return leftPad(new(big.Int).Exp(n, key.D, key.N).Bytes(), size), nil
+}
+
+// encryptPKCS1v15Private Cipher 私钥加密：PKCS1 type1 填充后私钥运算。
+func encryptPKCS1v15Private(priv *rsa.PrivateKey, msg []byte) ([]byte, error) {
+	k := priv.Size()
+	if len(msg) > k-11 {
+		return nil, rsa.ErrMessageTooLong
+	}
+	em := make([]byte, k)
+	em[0] = 0x00
+	em[1] = 0x01
+	for i := 2; i < k-len(msg)-1; i++ {
+		em[i] = 0xff
+	}
+	em[k-len(msg)-1] = 0x00
+	copy(em[k-len(msg):], msg)
+	return rsaRawPrivate(priv, em)
+}
+
+// decryptPKCS1v15Public Cipher 公钥解密：公钥运算后去 PKCS1 填充。
+func decryptPKCS1v15Public(pub *rsa.PublicKey, ciphertext []byte) ([]byte, error) {
+	em, err := rsaRawPublic(pub, ciphertext)
+	if err != nil {
+		return nil, err
+	}
+	return pkcs1Unpad(em)
+}
+
+func pkcs1Unpad(em []byte) ([]byte, error) {
+	if len(em) < 11 || em[0] != 0x00 {
+		return nil, rsa.ErrDecryption
+	}
+	var i int
+	switch em[1] {
+	case 0x01:
+		for i = 2; i < len(em); i++ {
+			if em[i] != 0xff {
+				break
+			}
+		}
+	case 0x02:
+		for i = 2; i < len(em); i++ {
+			if em[i] == 0x00 {
+				break
+			}
+		}
+	default:
+		return nil, rsa.ErrDecryption
+	}
+	if i >= len(em) || em[i] != 0x00 {
+		return nil, rsa.ErrDecryption
+	}
+	return em[i+1:], nil
+}
+
+// encryptOAEPPrivate / decryptOAEPPublic：OAEP 填充 + 私钥/公钥 raw（Cipher 双向）。
+func encryptOAEPPrivate(priv *rsa.PrivateKey, msg []byte) ([]byte, error) {
+	em, err := oaepEncode(sha1.New(), rand.Reader, msg, nil, priv.Size())
+	if err != nil {
+		return nil, err
+	}
+	return rsaRawPrivate(priv, em)
+}
+
+func decryptOAEPPublic(pub *rsa.PublicKey, ciphertext []byte) ([]byte, error) {
+	em, err := rsaRawPublic(pub, ciphertext)
+	if err != nil {
+		return nil, err
+	}
+	return oaepDecode(sha1.New(), em, nil)
+}
+
+func oaepEncode(hash hash.Hash, random io.Reader, msg, label []byte, k int) ([]byte, error) {
+	hLen := hash.Size()
+	if len(msg) > k-2*hLen-2 {
+		return nil, rsa.ErrMessageTooLong
+	}
+	hash.Reset()
+	hash.Write(label)
+	lHash := hash.Sum(nil)
+
+	em := make([]byte, k)
+	seed := em[1 : 1+hLen]
+	db := em[1+hLen:]
+	copy(db, lHash)
+	db[len(db)-len(msg)-1] = 0x01
+	copy(db[len(db)-len(msg):], msg)
+	if _, err := io.ReadFull(random, seed); err != nil {
+		return nil, err
+	}
+	mgf1XOR(db, hash, seed)
+	mgf1XOR(seed, hash, db)
+	return em, nil
+}
+
+func oaepDecode(hash hash.Hash, em, label []byte) ([]byte, error) {
+	hLen := hash.Size()
+	if len(em) < 2*hLen+2 || em[0] != 0x00 {
+		return nil, rsa.ErrDecryption
+	}
+	seed := em[1 : 1+hLen]
+	db := make([]byte, len(em)-1-hLen)
+	copy(db, em[1+hLen:])
+	mgf1XOR(seed, hash, db)
+	mgf1XOR(db, hash, seed)
+
+	hash.Reset()
+	hash.Write(label)
+	lHash := hash.Sum(nil)
+	if subtle.ConstantTimeCompare(db[:hLen], lHash) != 1 {
+		return nil, rsa.ErrDecryption
+	}
+	i := hLen
+	for i < len(db) && db[i] == 0x00 {
+		i++
+	}
+	if i >= len(db) || db[i] != 0x01 {
+		return nil, rsa.ErrDecryption
+	}
+	return db[i+1:], nil
+}
+
+func mgf1XOR(out []byte, hash hash.Hash, seed []byte) {
+	var counter [4]byte
+	var digest []byte
+	done := 0
+	for done < len(out) {
+		hash.Reset()
+		hash.Write(seed)
+		hash.Write(counter[:])
+		digest = hash.Sum(digest[:0])
+		for i := 0; i < len(digest) && done < len(out); i++ {
+			out[done] ^= digest[i]
+			done++
+		}
+		for i := 3; i >= 0; i-- {
+			counter[i]++
+			if counter[i] != 0 {
+				break
+			}
+		}
+	}
 }
 
 func leftPad(data []byte, size int) []byte {

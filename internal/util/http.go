@@ -139,7 +139,7 @@ func HTTPPostForm(rawURL string, headers map[string]string, params map[string]st
 
 func applyHeaders(req *http.Request, headers map[string]string) {
 	if headers == nil || headers["User-Agent"] == "" {
-		req.Header.Set("User-Agent", "Mozilla/5.0 KOTV/1.0")
+		req.Header.Set("User-Agent", "okhttp/4.12.0")
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -151,6 +151,15 @@ func doRequest(req *http.Request) ([]byte, error) {
 }
 
 func doRequestWith(c *http.Client, req *http.Request) ([]byte, error) {
+	return doRequestCore(c, req, false)
+}
+
+// doRequestAllowError 读完 body 后不因 HTTP ≥400 失败（CMS OkHttp.string 行为）。
+func doRequestAllowError(c *http.Client, req *http.Request) ([]byte, error) {
+	return doRequestCore(c, req, true)
+}
+
+func doRequestCore(c *http.Client, req *http.Request, allowErrorStatus bool) ([]byte, error) {
 	if c == nil {
 		c = client
 	}
@@ -163,7 +172,7 @@ func doRequestWith(c *http.Client, req *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode >= 400 {
+	if !allowErrorStatus && resp.StatusCode >= 400 {
 		return nil, &HTTPError{Code: resp.StatusCode, Body: string(b)}
 	}
 	return b, nil
@@ -198,12 +207,12 @@ func HTTPGetInsecure(rawURL string, headers map[string]string) (string, error) {
 	return string(b), nil
 }
 
-// HTTPGetBytesInsecure 同 HTTPGetBytes，但不校验证书。
+// HTTPGetBytesInsecure 同 HTTPGetBytes，但不校验证书；≥400 仍报错（jar/Py 二进制下载）。
 func HTTPGetBytesInsecure(rawURL string, headers map[string]string) ([]byte, error) {
-	return HTTPGetParamsBytesInsecure(rawURL, headers, nil)
+	return httpGetParamsBytesInsecure(rawURL, headers, nil, false)
 }
 
-// HTTPGetParamsInsecure 同 HTTPGetParams，但不校验证书。
+// HTTPGetParamsInsecure 同 HTTPGetParams，但不校验证书；读 body 不看 status（CMS）。
 func HTTPGetParamsInsecure(rawURL string, headers map[string]string, params map[string]string) (string, error) {
 	b, err := HTTPGetParamsBytesInsecure(rawURL, headers, params)
 	if err != nil {
@@ -212,8 +221,12 @@ func HTTPGetParamsInsecure(rawURL string, headers map[string]string, params map[
 	return string(b), nil
 }
 
-// HTTPGetParamsBytesInsecure 同 HTTPGetParamsBytes，但不校验证书。
+// HTTPGetParamsBytesInsecure 同 HTTPGetParamsBytes，但不校验证书；读 body 不看 status（CMS）。
 func HTTPGetParamsBytesInsecure(rawURL string, headers map[string]string, params map[string]string) ([]byte, error) {
+	return httpGetParamsBytesInsecure(rawURL, headers, params, true)
+}
+
+func httpGetParamsBytesInsecure(rawURL string, headers map[string]string, params map[string]string, allowErrorStatus bool) ([]byte, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if local, ok := FileURLPath(rawURL); ok {
 		return os.ReadFile(local)
@@ -236,10 +249,13 @@ func HTTPGetParamsBytesInsecure(rawURL string, headers map[string]string, params
 		return nil, err
 	}
 	applyHeaders(req, headers)
+	if allowErrorStatus {
+		return doRequestAllowError(insecureClient, req)
+	}
 	return doRequestWith(insecureClient, req)
 }
 
-// HTTPPostFormInsecure 同 HTTPPostForm，但不校验证书。
+// HTTPPostFormInsecure 同 HTTPPostForm，但不校验证书；读 body 不看 status（CMS）。
 func HTTPPostFormInsecure(rawURL string, headers map[string]string, params map[string]string) (string, error) {
 	rawURL = EncodeURL(rawURL)
 	form := url.Values{}
@@ -254,7 +270,7 @@ func HTTPPostFormInsecure(rawURL string, headers map[string]string, params map[s
 	if req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
-	b, err := doRequestWith(insecureClient, req)
+	b, err := doRequestAllowError(insecureClient, req)
 	if err != nil {
 		return "", err
 	}

@@ -55,7 +55,7 @@ func fetchExt(site model.Site) (model.Site, error) {
 	if !strings.HasPrefix(ext, "http://") && !strings.HasPrefix(ext, "https://") {
 		return site, nil
 	}
-	body, err := util.HTTPGetInsecure(ext, nil)
+	body, err := util.HTTPGetParamsInsecure(ext, nil, nil)
 	if err != nil || strings.TrimSpace(body) == "" {
 		// OkHttp.string 异常→空串，不改 ext、不抛错。
 		return site, nil

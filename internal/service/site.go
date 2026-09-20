@@ -199,7 +199,7 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 	case 0, 1, 2:
 		// type2：非 spider 分支，JSON 解析（FromType≠0→JSON）。
 		var body string
-		body, err = util.HTTPGetInsecure(site.API, map[string]string(site.Header))
+		body, err = util.HTTPGetParamsInsecure(site.API, map[string]string(site.Header), nil)
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
@@ -808,10 +808,15 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	case 3:
 		return s.cfg.Spider(site).Action(action)
 	case 4:
-		if action == "" {
+		// OkHttp.string：非 http / 异常→""；Result.fromJson 空→{}；不向调用方抛错。
+		if action == "" || !strings.HasPrefix(strings.ToLower(action), "http") {
 			return "{}", nil
 		}
-		return util.HTTPGetInsecure(action, nil)
+		body, err := util.HTTPGetParamsInsecure(action, nil, nil)
+		if err != nil || strings.TrimSpace(body) == "" {
+			return "{}", nil
+		}
+		return body, nil
 	default:
 		return "{}", nil
 	}
