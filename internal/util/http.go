@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,48 @@ var client = &http.Client{Timeout: 30 * time.Second}
 
 // insecureClient：爬虫/CMS/jar 下载用不校验证书（OkHttp trust-all）；鉴权/更新仍走 client。
 var insecureClient = newInsecureClient(nil)
+
+// insecureRedirectMap ResponseInterceptor.redirectMap（CMS insecure）。
+var insecureRedirectMap sync.Map
+
+func rememberInsecureRedirect(from, location string) {
+	from = strings.TrimSpace(from)
+	location = strings.TrimSpace(location)
+	if from == "" || location == "" {
+		return
+	}
+	abs := location
+	if !strings.HasPrefix(location, "http://") && !strings.HasPrefix(location, "https://") {
+		if bu, err := url.Parse(from); err == nil {
+			if ref, err := url.Parse(location); err == nil {
+				abs = bu.ResolveReference(ref).String()
+			}
+		}
+	}
+	insecureRedirectMap.Store(abs, from)
+}
+
+func lookupInsecureRedirectOrigin(requestURL string) (string, bool) {
+	if v, ok := insecureRedirectMap.Load(strings.TrimSpace(requestURL)); ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s, true
+		}
+	}
+	return "", false
+}
+
+func trackInsecureRedirects(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return http.ErrUseLastResponse
+	}
+	if len(via) > 0 && req != nil && req.URL != nil {
+		prev := via[len(via)-1]
+		if prev != nil && prev.URL != nil {
+			rememberInsecureRedirect(prev.URL.String(), req.URL.String())
+		}
+	}
+	return nil
+}
 
 // FileURLPath 将 file:// / file: URL 解析为本地路径；非 file URL 返回 false。
 func FileURLPath(raw string) (string, bool) {
@@ -186,19 +229,58 @@ func doRequestCore(c *http.Client, req *http.Request, allowErrorStatus bool) ([]
 	if c == nil {
 		c = client
 	}
+	if allowErrorStatus {
+		ApplyBasicFromUserInfo(req)
+	}
 	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
 	}
+	if allowErrorStatus && resp.StatusCode == http.StatusUnauthorized {
+		if retry, rerr := RetryAuthOn401(c, req, resp); rerr == nil && retry != nil {
+			resp = retry
+		}
+	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+	enc := resp.Header.Get("Content-Encoding")
+	b := DecodeContentEncoding(enc, raw)
+	if allowErrorStatus {
+		if isHTTPRedirectStatus(resp.StatusCode) {
+			if loc := resp.Header.Get("Location"); loc != "" && req.URL != nil {
+				rememberInsecureRedirect(req.URL.String(), loc)
+			}
+		}
+		if resp.StatusCode == http.StatusNotAcceptable && req.URL != nil {
+			if origin, ok := lookupInsecureRedirectOrigin(req.URL.String()); ok {
+				req2, err2 := http.NewRequest(http.MethodGet, origin, nil)
+				if err2 == nil {
+					for k, vv := range req.Header {
+						for _, v := range vv {
+							req2.Header.Add(k, v)
+						}
+					}
+					return doRequestCore(c, req2, true)
+				}
+			}
+		}
 	}
 	if !allowErrorStatus && resp.StatusCode >= 400 {
 		return nil, &HTTPError{Code: resp.StatusCode, Body: string(b)}
 	}
 	return b, nil
+}
+
+func isHTTPRedirectStatus(code int) bool {
+	switch code {
+	case 301, 302, 303, 307, 308:
+		return true
+	default:
+		return false
+	}
 }
 
 // GetClient 返回可配置代理的 HTTP 客户端。
@@ -218,7 +300,11 @@ func newInsecureClient(proxy func(*http.Request) (*url.URL, error)) *http.Client
 	}
 	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	transport.Proxy = proxy
-	return &http.Client{Timeout: 30 * time.Second, Transport: transport}
+	return &http.Client{
+		Timeout:       30 * time.Second,
+		Transport:     transport,
+		CheckRedirect: trackInsecureRedirects,
+	}
 }
 
 // HTTPGetInsecure 同 HTTPGet，但不校验证书。
@@ -264,9 +350,10 @@ func httpGetParamsBytesInsecure(rawURL string, headers map[string]string, params
 		for k, v := range params {
 			q.Set(k, v)
 		}
-		u.RawQuery = q.Encode()
+		u.RawQuery = EncodeQueryOkHTTP(q)
 		rawURL = u.String()
 	}
+	rawURL = ApplyStickyAuthQuery(rawURL)
 	rawURL, headers = applyVodNet(rawURL, headers)
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -282,6 +369,7 @@ func httpGetParamsBytesInsecure(rawURL string, headers map[string]string, params
 // HTTPPostFormInsecure 同 HTTPPostForm，但不校验证书；读 body 不看 status（CMS）。
 func HTTPPostFormInsecure(rawURL string, headers map[string]string, params map[string]string) (string, error) {
 	rawURL = EncodeURL(rawURL)
+	rawURL = ApplyStickyAuthQuery(rawURL)
 	rawURL, headers = applyVodNet(rawURL, headers)
 	form := url.Values{}
 	for k, v := range params {

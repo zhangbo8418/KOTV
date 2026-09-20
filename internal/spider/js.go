@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -1105,10 +1106,17 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	} else if options.Body != "" && headerValue(options.Headers, "Content-Type") != "" {
 		body = options.Body
 	}
+	u = util.ApplyStickyAuthQuery(u)
 	options.Headers = InjectVodHeaders(u, options.Headers)
 	req, err := http.NewRequest(options.Method, u, strings.NewReader(body))
 	if err != nil {
 		return jsError()
+	}
+	if body != "" {
+		bodyBytes := []byte(body)
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(string(bodyBytes))), nil
+		}
 	}
 	for k, v := range options.Headers {
 		req.Header.Set(k, v)
@@ -1117,17 +1125,25 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", "okhttp/4.12.0")
 	}
-	client := &http.Client{
-		Transport: jsRequestTransport(),
+	util.ApplyBasicFromUserInfo(req)
+	timeoutMs := options.Timeout
+	if timeoutMs < 0 {
+		timeoutMs = int(util.GetClient().Timeout / time.Millisecond)
 	}
-	// 缺省 10000ms；timeout:0 无超时；负值回落默认客户端超时。
-	switch {
-	case options.Timeout < 0:
-		client.Timeout = util.GetClient().Timeout
-	case options.Timeout == 0:
-		client.Timeout = 0
-	default:
-		client.Timeout = time.Duration(options.Timeout) * time.Millisecond
+	transport := jsRequestTransport()
+	if t, ok := transport.(*http.Transport); ok {
+		cl := t.Clone()
+		if timeoutMs > 0 {
+			d := timeoutMs
+			cl.DialContext = wrapDialTimeout(cl.DialContext, time.Duration(d)*time.Millisecond)
+			cl.ResponseHeaderTimeout = time.Duration(d) * time.Millisecond
+		}
+		transport = cl
+	}
+	client := &http.Client{
+		Transport: transport,
+		// OkHttp：connect/read/write 分相，不用整次 Client.Timeout 墙钟。
+		Timeout: 0,
 	}
 	if options.Redirect == 0 {
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -1140,10 +1156,20 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 		jsLog("[js-http] fail method=%s url=%s err=%v", options.Method, u, err)
 		return jsError()
 	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		if retry, rerr := util.RetryAuthOn401(client, req, resp); rerr == nil && retry != nil {
+			resp = retry
+		}
+	}
 	defer resp.Body.Close()
-	b := drainBody(resp)
-	b = decodeJSContentEncoding(resp.Header.Get("Content-Encoding"), b)
+	enc := resp.Header.Get("Content-Encoding")
+	raw := drainBody(resp)
+	b := decodeJSContentEncoding(enc, raw)
 	code, hdrSrc, b := applyJSRedirectDance(u, resp, b)
+	encLower := strings.ToLower(strings.TrimSpace(enc))
+	if encLower == "gzip" || encLower == "deflate" {
+		util.StripDecodedContentHeaders(hdrSrc, enc, true)
+	}
 	if options.Redirect == 0 && isHTTPRedirect(code) {
 		jsLog("[js-http] no-follow redirect method=%s url=%s code=%d location=%s", options.Method, u, code, hdrSrc.Get("Location"))
 	} else if code == 0 || code >= 400 {

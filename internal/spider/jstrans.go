@@ -125,7 +125,7 @@ func s2tFilter(f *model.Filter) {
 	if f == nil {
 		return
 	}
-	f.Name = s2t(f.Name)
+	// Filter.trans：只转 Value，不转 name。
 	for i := range f.Value {
 		f.Value[i].N = s2t(f.Value[i].N)
 	}

@@ -356,32 +356,23 @@ func (s *Server) handleCachedM3U8(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 	params := map[string]string{}
+	// Proxy.java：getParms（query+form）→ putAll(headers)→ putAll(files)
 	for key, values := range r.URL.Query() {
 		if len(values) > 0 {
 			params[key] = values[0]
 		}
 	}
-	// Proxy.java：getParms 后 putAll(headers)，头覆盖同名 query；Nano 头名为小写。
-	for key, values := range r.Header {
-		if len(values) == 0 {
-			continue
-		}
-		lk := strings.ToLower(key)
-		if lk == "host" || lk == "connection" || lk == "content-length" {
-			continue
-		}
-		params[lk] = values[0]
-	}
+	var fileParams map[string]string
 	if r.Method == http.MethodPost {
 		ct := r.Header.Get("Content-Type")
 		if strings.HasPrefix(strings.ToLower(ct), "multipart/form-data") {
-			// Proxy.java：params.putAll(files) — Nano parseBody 把文件字段映到临时路径
 			if err := r.ParseMultipartForm(32 << 20); err == nil && r.MultipartForm != nil {
 				for key, values := range r.MultipartForm.Value {
 					if len(values) > 0 {
 						params[key] = values[0]
 					}
 				}
+				fileParams = map[string]string{}
 				for key, files := range r.MultipartForm.File {
 					if len(files) == 0 || files[0] == nil {
 						continue
@@ -404,7 +395,7 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 						_ = os.Remove(tmp.Name())
 						continue
 					}
-					params[key] = tmp.Name()
+					fileParams[key] = tmp.Name()
 				}
 			}
 		} else {
@@ -415,6 +406,24 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+	for key, values := range r.Header {
+		if len(values) == 0 {
+			continue
+		}
+		lk := strings.ToLower(key)
+		if lk == "host" || lk == "connection" || lk == "content-length" {
+			continue
+		}
+		params[lk] = values[0]
+	}
+	// NanoHTTPD：headers 注入 remote-addr / http-client-ip
+	if ip := clientIPFromRemoteAddr(r.RemoteAddr); ip != "" {
+		params["remote-addr"] = ip
+		params["http-client-ip"] = ip
+	}
+	for k, v := range fileParams {
+		params[k] = v
 	}
 	if params["do"] == "ck" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -473,6 +482,18 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Error(w, "site not found", http.StatusNotFound)
+}
+
+func clientIPFromRemoteAddr(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(remote)
+	if err == nil {
+		return host
+	}
+	return remote
 }
 
 func writeProxyResponse(w http.ResponseWriter, status int, contentType string, body []byte, headers map[string]string) {

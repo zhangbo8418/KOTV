@@ -273,7 +273,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 					remain = nestedSniffMinTimeout
 				}
 				// 嵌套页自带超时；父页须有足够总时长等它（见 defaultParseWebTimeout）。
-				nested, nh, nerr := browserSniff(target, mergeHeaders(headers, h), click, rules, remain, false, isVideo, manualVideo, depth+1)
+				nested, nh, nerr := browserSniff(target, overlayHeaders(headers, h), click, rules, remain, false, isVideo, manualVideo, depth+1)
 				if nerr == nil && nested != "" {
 					emit(nested, nh)
 				} else if nerr != nil {

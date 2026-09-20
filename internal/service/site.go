@@ -438,15 +438,18 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 			applySourceFetch(&result)
 		case 0, 1, 2:
 			rawID := id
-			id = normalizePlayID(site, id)
-			// 本地拼 Result，不请求 API。parse 用原始 id；播放 URL 用绝对化后的 id。
+			// SiteApi：setUrl(id) 用原始剧集 id；parse 用 Sniffer.isVideoFormat(id)。
 			parseVal := 1
-			if s.IsVideoFormat(site, rawID) && strings.TrimSpace(site.PlayURL) == "" {
+			rules := parse.GetRules()
+			if len(rules) == 0 && s.cfg != nil {
+				rules = s.cfg.API().Rules
+			}
+			if parse.IsVideoFormatRules(rawID, rules) && strings.TrimSpace(site.PlayURL) == "" {
 				parseVal = 0
 			}
 			result = model.Result{
 				Success: true,
-				URL:     model.URL{URLs: []string{id}},
+				URL:     model.URL{URLs: []string{rawID}},
 				Flag:    flag,
 				Key:     site.Key,
 				Header:  site.Header,
@@ -460,7 +463,7 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 	}
 
 	// Result.setHeader：仅当结果头为空时写入站点头。
-	result.Header = mergeHeaders(site.Header, result.Header)
+	result.Header = resultOrSiteHeader(site.Header, result.Header)
 	if result.Flag == "" && flag != "" {
 		result.Flag = flag
 	}
@@ -790,7 +793,7 @@ func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, pa
 	}
 }
 
-func mergeHeaders(siteHdr, resultHdr model.FlexHeader) model.FlexHeader {
+func resultOrSiteHeader(siteHdr, resultHdr model.FlexHeader) model.FlexHeader {
 	// Result.setHeader：结果已有头则保留，否则用站点头。
 	if len(resultHdr) == 0 {
 		return siteHdr

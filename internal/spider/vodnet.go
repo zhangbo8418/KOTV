@@ -33,6 +33,7 @@ func setGoNetConfig(headersJSON, hostsJSON []byte) {
 	vodHdrRules = rules
 	vodHostMap = hosts
 	vodNetMu.Unlock()
+	util.ClearHTTPAuth()
 }
 
 func parseVodHeaderRules(raw []byte) []vodHeaderRule {

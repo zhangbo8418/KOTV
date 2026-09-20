@@ -1,10 +1,6 @@
 package spider
 
 import (
-	"bytes"
-	"compress/flate"
-	"compress/gzip"
-	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"io"
@@ -152,40 +148,22 @@ func jsRequestTransport() http.RoundTripper {
 	return cl
 }
 
-// decodeJSContentEncoding ResponseInterceptor：gzip + Inflater(nowrap) deflate。
-func decodeJSContentEncoding(encoding string, body []byte) []byte {
-	if len(body) == 0 {
-		return body
+func wrapDialTimeout(base func(context.Context, string, string) (net.Conn, error), d time.Duration) func(context.Context, string, string) (net.Conn, error) {
+	if d <= 0 {
+		return base
 	}
-	switch strings.ToLower(strings.TrimSpace(encoding)) {
-	case "gzip":
-		r, err := gzip.NewReader(bytes.NewReader(body))
-		if err != nil {
-			return body
-		}
-		defer r.Close()
-		if out, err := io.ReadAll(r); err == nil {
-			return out
-		}
-	case "deflate":
-		// new Inflater(true) → raw deflate（无 zlib 头）
-		if out, err := inflateRaw(body); err == nil {
-			return out
-		}
-		// 兼容 zlib-wrapped deflate
-		if r, err := zlib.NewReader(bytes.NewReader(body)); err == nil {
-			out, err2 := io.ReadAll(r)
-			r.Close()
-			if err2 == nil {
-				return out
-			}
-		}
+	if base == nil {
+		dialer := &net.Dialer{Timeout: d}
+		base = dialer.DialContext
 	}
-	return body
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		cctx, cancel := context.WithTimeout(ctx, d)
+		defer cancel()
+		return base(cctx, network, addr)
+	}
 }
 
-func inflateRaw(body []byte) ([]byte, error) {
-	r := flate.NewReader(bytes.NewReader(body))
-	defer r.Close()
-	return io.ReadAll(r)
+// decodeJSContentEncoding ResponseInterceptor：gzip + Inflater(nowrap) deflate。
+func decodeJSContentEncoding(encoding string, body []byte) []byte {
+	return util.DecodeContentEncoding(encoding, body)
 }

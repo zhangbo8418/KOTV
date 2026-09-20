@@ -111,7 +111,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 
 	start := time.Now()
 	// doInBackground 的 webUrl 始终是 episode URL，json:/parse: 只改 selected parse。
-	hdr := mergeHeaders(nil, map[string]string(r.Header))
+	hdr := overlayHeaders(nil, map[string]string(r.Header))
 	webURL := EpisodeURL(r)
 	// 相对播放页：用结果头 Referer 拼绝对地址，避免 unsupported protocol scheme。
 	if webURL != "" && !strings.Contains(webURL, "://") {
@@ -200,7 +200,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 			return r, fmt.Errorf("解析结果无效")
 	}
 	// checkResult(needParse)→startWeb / CustomWebView：非直链播放页再嗅一次。
-	mergedHdr := mergeHeaders(hdr, sniffHdr)
+	mergedHdr := overlayHeaders(hdr, sniffHdr)
 	if reParsed, reHdr, reErr := resniffIfNeeded(parsed, mergedHdr, click, opts.Rules, opts.IsVideo, opts.ManualVideo); reErr != nil {
 		parseLog("[parse] re-sniff fail via=%s err=%v", via, reErr)
 		return r, reErr
@@ -208,7 +208,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		parseLog("[parse] re-sniff ok via=%s out=%s", via, parsePreview(reParsed, 200))
 		parsed = reParsed
 		if len(reHdr) > 0 {
-			sniffHdr = mergeHeaders(sniffHdr, reHdr)
+			sniffHdr = overlayHeaders(sniffHdr, reHdr)
 		}
 	}
 
@@ -217,7 +217,7 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	r.URL = model.URL{URLs: []string{parsed}}
 	r.PlayURL = ""
 	if len(sniffHdr) > 0 {
-		r.Header = model.FlexHeader(mergeHeaders(map[string]string(r.Header), pickPlayHeaders(sniffHdr)))
+		r.Header = model.FlexHeader(overlayHeaders(map[string]string(r.Header), pickPlayHeaders(sniffHdr)))
 	}
 	return r, nil
 }
@@ -345,7 +345,7 @@ func selectedEmpty(p *model.Parse) bool {
 }
 
 func executeParse(p model.Parse, webURL, flag string, headers map[string]string, parses []model.Parse, rules []model.Rule, click string, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
-	headers = mergeHeaders(headers, parseExtHeaders(p.Ext.String()))
+	headers = overlayHeaders(headers, parseExtHeaders(p.Ext.String()))
 	start := time.Now()
 	parseLog("[parse] execute name=%q type=%d web=%s", p.Name, p.TypeID(), parsePreview(webURL, 120))
 	switch p.TypeID() {
@@ -389,7 +389,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		}
 		parseLog("[parse] type2 ok name=%q needWeb=%v out=%s cost=%s", p.Name, needWeb, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 		if needWeb {
-			return sniffParsedWeb(u, mergeHeaders(headers, h), click, rules, isVideo, manualVideo)
+			return sniffParsedWeb(u, overlayHeaders(headers, h), click, rules, isVideo, manualVideo)
 		}
 		return u, pickPlayHeaders(h), nil
 	case 3:
@@ -400,7 +400,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		}
 		parseLog("[parse] type3 ok name=%q needWeb=%v out=%s cost=%s", p.Name, needWeb, parsePreview(u, 160), time.Since(start).Truncate(time.Millisecond))
 		if needWeb {
-			return sniffParsedWeb(u, mergeHeaders(headers, h), click, rules, isVideo, manualVideo)
+			return sniffParsedWeb(u, overlayHeaders(headers, h), click, rules, isVideo, manualVideo)
 		}
 		return u, pickPlayHeaders(h), nil
 	case 4:
@@ -465,7 +465,7 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 		wg.Add(1)
 		go func(p model.Parse) {
 			defer wg.Done()
-			hdr := mergeHeaders(headers, parseExtHeaders(p.Ext.String()))
+			hdr := overlayHeaders(headers, parseExtHeaders(p.Ext.String()))
 			u, h, err := JSONParseEx(p.URL, webURL, hdr)
 			// checkResult：url.length() > 40 才算成功。
 			if err == nil && len(u) > 40 {
@@ -679,7 +679,7 @@ func extractPlayFromJSON(raw string) (string, map[string]string, bool, error) {
 	return "", nil, false, nil
 }
 
-func mergeHeaders(a, b map[string]string) map[string]string {
+func overlayHeaders(a, b map[string]string) map[string]string {
 	out := make(map[string]string)
 	for k, v := range a {
 		out[k] = v
@@ -706,7 +706,7 @@ func PlayPageSniff(pageURL string, headers map[string]string) (string, error) {
 		return pageURL, nil
 	}
 	start := time.Now()
-	hdr := mergeHeaders(map[string]string{
+	hdr := overlayHeaders(map[string]string{
 		"User-Agent": "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/90.0.4430.91 Mobile Safari/537.36",
 		"Referer":    pageURL,
 	}, headers)
