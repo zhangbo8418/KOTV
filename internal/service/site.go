@@ -186,8 +186,16 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		}
 		applyTypes(site, &result)
 	case 4:
+		if fetched, ferr := fetchExt(site); ferr == nil {
+			after := strings.TrimSpace(fetched.Ext.String())
+			before := strings.TrimSpace(site.Ext.String())
+			if s.cfg != nil && after != "" && after != before {
+				s.cfg.SetSiteExt(site.Key, fetched.Ext)
+			}
+			site = fetched
+		}
 		var body string
-		body, err = siteCall(s.cfg, site, map[string]string{"filter": "true"})
+		body, err = siteCall(site, map[string]string{"filter": "true"})
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
@@ -274,7 +282,7 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 			params["ext"] = base64URLSafe(string(b))
 		}
 		var body string
-		body, err = siteCall(s.cfg, site, params)
+		body, err = siteCall(site, params)
 		if err != nil {
 			return model.Result{Success: false}, err
 		}
@@ -337,7 +345,7 @@ func (s *SiteService) DetailContent(reqKey string, vod model.Vod) (model.Vod, er
 			"ids": vod.VodID.String(),
 		}
 		var body string
-		body, err = siteCall(s.cfg, *site, params)
+		body, err = siteCall(*site, params)
 		if err != nil {
 			return vod, err
 		}
@@ -423,7 +431,7 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 				"flag": flag,
 			}
 			var body string
-			body, err = siteCall(s.cfg, site, params)
+			body, err = siteCall(site, params)
 			if err != nil {
 				return model.Result{Success: false}, err
 			}
@@ -707,7 +715,7 @@ func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcu
 func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, page string) ([]model.Vod, error) {
 	switch site.TypeID() {
 	case 3:
-		sp := s.cfg.Spider(site)
+		sp := s.cfg.SpiderOnly(site)
 		raw, err := sp.SearchContent(keyword, quick, page)
 		if err != nil {
 			return nil, err
@@ -726,7 +734,7 @@ func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, pa
 		if page != "" && page != "1" {
 			params["pg"] = page
 		}
-		body, err := siteCall(s.cfg, site, params)
+		body, err := siteCall(site, params)
 		if err != nil {
 			return nil, err
 		}

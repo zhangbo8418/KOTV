@@ -132,7 +132,7 @@ func (m *Manager) GetSite(key string) *model.Site {
 	return nil
 }
 
-// SetSiteExt 将 fetchExt 下载后的正文写回内存配置（后续 siteCall 不再带 URL）。
+// SetSiteExt 将 type4 home 的 fetchExt 正文写回内存配置（后续 siteCall 可带已下载 extend）。
 func (m *Manager) SetSiteExt(key string, ext model.FlexString) {
 	if m == nil || strings.TrimSpace(key) == "" {
 		return
@@ -853,13 +853,22 @@ func looksLikeBase64Payload(s string) bool {
 }
 
 func (m *Manager) Spider(site model.Site) spider.Spider {
+	sp := m.SpiderOnly(site)
 	jar := site.Jar
 	if jar == "" {
 		jar = m.API().Spider
 	}
-	ext := site.Ext.String()
-	spider.SetRecent(site.Key, site.API, ext, jar)
-	return spider.Get(site.Key, site.API, ext, jar)
+	spider.SetRecent(site.Key, site.API, site.Ext.String(), jar)
+	return sp
+}
+
+// SpiderOnly 只取爬虫实例，不改 recent（搜索路径）。
+func (m *Manager) SpiderOnly(site model.Site) spider.Spider {
+	jar := site.Jar
+	if jar == "" {
+		jar = m.API().Spider
+	}
+	return spider.Get(site.Key, site.API, site.Ext.String(), jar)
 }
 
 func (m *Manager) expandLives(api *model.Api) {

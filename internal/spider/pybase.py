@@ -125,15 +125,11 @@ class Spider(metaclass=ABCMeta):
         )
 
     def getProxyUrl(self, local=True):
-        # getProxyUrl；附加 siteKey 以便桌面端精确路由。
         port = os.environ.get("KOTV_PROXY_PORT", "9978")
         if local:
             host = "127.0.0.1"
         else:
             host = (os.environ.get("KOTV_PROXY_HOST") or "").strip() or "127.0.0.1"
-        key = getattr(self, "siteKey", "") or ""
-        if key:
-            return f"http://{host}:{port}/proxy?do=py&siteKey={key}"
         return f"http://{host}:{port}/proxy?do=py"
 
     def log(self, message):

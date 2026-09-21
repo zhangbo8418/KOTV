@@ -183,10 +183,6 @@ func notifyParseJarAsync(jarPath string, recent bool) {
 	go notifyParseJar(jarPath, recent)
 }
 
-func notifyJarRecent(jarPath string) {
-	notifyParseJar(jarPath, true)
-}
-
 // EnsureJar JarLoader.dex：下载并 parseJar，不改 recent（供 JS 站挂 Function 用）。
 func EnsureJar(spec string, configBaseArg ...string) error {
 	spec = strings.TrimSpace(spec)
