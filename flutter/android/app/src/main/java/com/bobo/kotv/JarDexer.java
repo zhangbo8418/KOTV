@@ -155,9 +155,6 @@ public final class JarDexer {
             "安卓仅支持含 classes.dex 的站点包；当前 jar 需 PC 侧预转 dex: " + src.getName(),
             e);
       }
-    } catch (InterruptedException e) {
-      deleteRecursive(work);
-      throw e;
     } catch (Throwable t) {
       deleteRecursive(work);
       throw new IllegalStateException(
