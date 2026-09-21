@@ -391,7 +391,6 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 
 	// site.isEmpty() && push_agent：直接把 id 当 url，再走 Source.fetch。
 	if site.IsEmpty() && reqKey == PushAgentKey {
-		id = normalizePlayID(site, id)
 		result = model.Result{
 			Success: true,
 			URL:     model.URL{URLs: []string{id}},
@@ -475,94 +474,41 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 	return result, nil
 }
 
-// normalizePlayID 清洗剧集 id，并将相对路径尽量补成绝对地址（供 JS request / 二次解析使用）。
-func normalizePlayID(site model.Site, id string) string {
-	return resolvePlayAbsolute(id, playURLBases(site, nil)...)
-}
-
-func sanitizeResultPlayURLs(site model.Site, r *model.Result) {
-	if r == nil || len(r.URL.URLs) == 0 {
-		return
-	}
-	bases := playURLBases(site, r)
-	for i, u := range r.URL.URLs {
-		r.URL.URLs[i] = resolvePlayAbsolute(u, bases...)
-	}
-}
-
-// playURLBases 相对播放地址的拼接基址：结果头 Referer/Origin → 站点头 → site.API。
-// 日志里常见 JS 源返回 /play/xxx.html，Referer 为站点根（如 https://www.lmm85.com）。
-func playURLBases(site model.Site, r *model.Result) []string {
-	var bases []string
-	seen := map[string]bool{}
-	add := func(raw string) {
-		raw = strings.TrimSpace(raw)
-		if raw == "" || !strings.HasPrefix(raw, "http") || seen[raw] {
-			return
-		}
-		seen[raw] = true
-		bases = append(bases, raw)
-	}
-	addFromHeader := func(h map[string]string) {
-		if h == nil {
-			return
-		}
-		for _, k := range []string{"Referer", "referer", "Origin", "origin"} {
-			add(h[k])
-		}
-	}
-	if r != nil {
-		addFromHeader(map[string]string(r.Header))
-	}
-	addFromHeader(map[string]string(site.Header))
-	add(site.API)
-	return bases
-}
-
-func resolvePlayAbsolute(id string, bases ...string) string {
-	id = model.CleanEpisodePlayURL(id)
-	if id == "" || strings.HasPrefix(id, "http://") || strings.HasPrefix(id, "https://") ||
-		thunder.Match(id) || strings.HasPrefix(strings.ToLower(id), "ed2k:") {
-		return id
-	}
-	for _, base := range bases {
-		if abs := util.ResolveRelativeURL(base, id); abs != "" && abs != id &&
-			(strings.HasPrefix(abs, "http://") || strings.HasPrefix(abs, "https://")) {
-			return abs
-		}
-	}
-	return id
-}
-
 // applySourceFetch Source.fetch：特殊 scheme / .strm 预处理后再二次解析/起播。
 // - video:// → 剥前缀 + parse=1（逼宿主嗅探）
 // - push://  → 剥前缀 + parse=0（桌面直接播内层 URL）
 // - *.strm  → 读文本首行真实地址 + parse=0
+// 只处理 URL.Position 对应项并写回同 index（Url.v / replace）。
 // Force / JianPian / TVBus / Youtube 依赖 Android Native 预处理。
 func applySourceFetch(r *model.Result) {
 	if r == nil || len(r.URL.URLs) == 0 {
 		return
 	}
+	i := r.URL.Position
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(r.URL.URLs) {
+		i = len(r.URL.URLs) - 1
+	}
 	forceParse := false
 	directPlay := false
-	for i, raw := range r.URL.URLs {
-		u := strings.TrimSpace(raw)
-		lower := strings.ToLower(u)
-		switch {
-		case strings.HasPrefix(lower, "video://"):
-			u = strings.TrimSpace(u[len("video://"):])
-			r.URL.URLs[i] = u
-			forceParse = true
-		case strings.HasPrefix(lower, "push://"):
-			u = strings.TrimSpace(u[len("push://"):])
-			r.URL.URLs[i] = u
-			directPlay = true
-		case strmPath(u):
-			if fetched := fetchStrmURL(u); fetched != "" {
-				r.URL.URLs[i] = fetched
-			}
-			directPlay = true
+	u := strings.TrimSpace(r.URL.URLs[i])
+	lower := strings.ToLower(u)
+	switch {
+	case strings.HasPrefix(lower, "video://"):
+		u = strings.TrimSpace(u[len("video://"):])
+		r.URL.URLs[i] = u
+		forceParse = true
+	case strings.HasPrefix(lower, "push://"):
+		u = strings.TrimSpace(u[len("push://"):])
+		r.URL.URLs[i] = u
+		directPlay = true
+	case strmPath(u):
+		if fetched := fetchStrmURL(u); fetched != "" {
+			r.URL.URLs[i] = fetched
 		}
+		directPlay = true
 	}
 	switch {
 	case forceParse:
@@ -621,9 +567,7 @@ func fetchStrmHTTP(rawURL string) string {
 	}
 	defer resp.Body.Close()
 	disp := resp.Header.Get("Content-Disposition")
-	ct := strings.ToLower(resp.Header.Get("Content-Type"))
-	text := strings.Contains(disp, ".strm") || strings.Contains(disp, ".txt") ||
-		strings.Contains(ct, "text/") || strings.HasSuffix(strings.ToLower(path.Base(rawURL)), ".strm")
+	text := strings.Contains(disp, ".strm") || strings.Contains(disp, ".txt")
 	if !text {
 		return rawURL
 	}
@@ -650,10 +594,17 @@ func firstLine(s string) string {
 }
 
 func applyThunderFetch(r *model.Result) error {
-	u := ""
-	if len(r.URL.URLs) > 0 {
-		u = r.URL.URLs[0]
+	if r == nil || len(r.URL.URLs) == 0 {
+		return nil
 	}
+	i := r.URL.Position
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(r.URL.URLs) {
+		i = len(r.URL.URLs) - 1
+	}
+	u := r.URL.URLs[i]
 	if u == "" || !thunder.Match(u) {
 		return nil
 	}
@@ -661,7 +612,7 @@ func applyThunderFetch(r *model.Result) error {
 	if err != nil {
 		return err
 	}
-	r.URL = model.URL{URLs: []string{local}, Names: r.URL.Names}
+	r.URL.URLs[i] = local
 	r.Parse = model.FlexInt{Valid: true, Value: 0}
 	return nil
 }
@@ -672,8 +623,10 @@ func (s *SiteService) Search(keyword string, siteKeys []string) ([]model.Collect
 
 // SearchParallel 多站并发搜索，maxConcurrent 为并发上限（<=0 时默认 4）。
 func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcurrent int) ([]model.Collect, error) {
-	// 宿主统一繁→简，提高繁体关键词在简体源上的命中率。
-	keyword = spider.T2S(strings.TrimSpace(keyword))
+	keyword = strings.TrimSpace(keyword)
+	if spider.TransEnabled() {
+		keyword = spider.T2S(keyword)
+	}
 	sites := s.cfg.Sites()
 	if len(siteKeys) > 0 {
 		filtered := make([]model.Site, 0)

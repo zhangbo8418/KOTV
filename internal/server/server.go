@@ -179,6 +179,7 @@ func (s *Server) Start() error {
 			localproxy.SetPort(port)
 			playproxy.SetPortFunc(func() int { return port })
 			thunder.SetPortFunc(func() int { return port })
+			spider.SetLocalProxyPort(port)
 			break
 		}
 	}

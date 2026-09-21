@@ -421,6 +421,12 @@ public class SpiderBridge {
                         ? argsObj.get("url").getAsString() : "");
                 return "{}";
             }
+            if ("configLocalProxy".equals(method)) {
+                int p = argsObj.has("port") && !argsObj.get("port").isJsonNull()
+                        ? argsObj.get("port").getAsInt() : 0;
+                applyLocalProxyPort(p);
+                return "{}";
+            }
             // JarLoader.jsonExt / jsonExtMix：只用 recent ClassLoader，不走 getSpider。
             if ("jsonExt".equals(method)) {
                 String parseKey = argsObj.get("parseKey").getAsString();
@@ -632,21 +638,27 @@ public class SpiderBridge {
      * 桌面用 URLClassLoader 代替 DexClassLoader。
      */
     private static void parseJar(String jarPath) {
+        if (Thread.interrupted()) return;
         if (jarPath == null || jarPath.isEmpty()) return;
         if (loaders.containsKey(jarPath)) return;
         Object lock = jarLocks.computeIfAbsent(jarPath, k -> new Object());
         synchronized (lock) {
+            if (Thread.interrupted()) return;
             if (loaders.containsKey(jarPath)) return;
             try {
+                if (Thread.interrupted()) return;
                 ClassLoader loader = createLoader(jarPath);
+                if (Thread.interrupted()) return;
                 ClassLoader prev = Thread.currentThread().getContextClassLoader();
                 try {
                     Thread.currentThread().setContextClassLoader(loader);
                     initializeHost();
+                    if (Thread.interrupted()) return;
                     initializeSpiderJar(jarPath, loader);
                 } finally {
                     Thread.currentThread().setContextClassLoader(prev);
                 }
+                if (Thread.interrupted()) return;
                 loaders.put(jarPath, loader);
             } catch (Exception e) {
                 // 加载失败静默记日志；getSpider 侧因 loader 缺失
@@ -662,10 +674,17 @@ public class SpiderBridge {
         com.github.catvod.Proxy.set(configuredProxyPort());
     }
 
+    private static void applyLocalProxyPort(int p) {
+        if (p <= 0) return;
+        System.setProperty("kotv.proxy.port", Integer.toString(p));
+        com.github.catvod.Proxy.set(p);
+    }
+
     private static int configuredProxyPort() {
- String value = System.getProperty("kotv.proxy.port", System.getenv("KOTV_PROXY_PORT"));
+        String value = System.getProperty("kotv.proxy.port", System.getenv("KOTV_PROXY_PORT"));
+        if (value == null || value.isEmpty()) return 9978;
         try {
-            return Integer.parseInt(value);
+            return Integer.parseInt(value.trim());
         } catch (Exception ignored) {
             return 9978;
         }
@@ -740,6 +759,9 @@ public class SpiderBridge {
     }
 
     private static ClassLoader createDexLoader(File jarFile) throws Exception {
+        if (Thread.interrupted()) {
+            throw new InterruptedException("createDexLoader interrupted");
+        }
         if (!jarFile.isFile() || jarFile.length() == 0L) {
             throw new IOException("site jar missing: " + jarFile);
         }
@@ -752,14 +774,23 @@ public class SpiderBridge {
         Method create = siteJarCreateLoaderMethod;
         if (create != null) {
             try {
+                if (Thread.interrupted()) {
+                    throw new InterruptedException("createDexLoader interrupted");
+                }
                 Object cl = create.invoke(null, c, jarFile.getAbsolutePath(), parent);
                 if (cl instanceof ClassLoader) {
                     return (ClassLoader) cl;
                 }
             } catch (java.lang.reflect.InvocationTargetException e) {
                 Throwable cauze = e.getCause() != null ? e.getCause() : e;
+                if (cauze instanceof InterruptedException) {
+                    throw (InterruptedException) cauze;
+                }
                 throw new IOException("createSiteClassLoader failed: " + cauze.getMessage(), cauze);
             }
+        }
+        if (Thread.interrupted()) {
+            throw new InterruptedException("createDexLoader interrupted");
         }
         File sealed = resolveSealedSiteJar(c, jarFile);
         File opt;

@@ -11,6 +11,7 @@ public class Proxy {
     }
 
     public static int getPort() {
+        ensurePort();
         return port;
     }
 
@@ -25,13 +26,20 @@ public class Proxy {
 
     /** KOTV / 社区站点 Util.notify、UI 握手用本地根地址 */
     public static String getHostPort() {
-        if (port <= 0) {
-            String configured = System.getProperty("kotv.proxy.port", System.getenv("KOTV_PROXY_PORT"));
-            if (configured != null && !configured.isEmpty()) {
-                try { port = Integer.parseInt(configured.trim()); } catch (NumberFormatException ignored) {}
-            }
-        }
+        ensurePort();
         if (port <= 0) return "http://127.0.0.1:9978";
         return "http://127.0.0.1:" + port;
+    }
+
+    /** 惰性回落 kotv.proxy.port / KOTV_PROXY_PORT（与 getHostPort 同源）。 */
+    private static void ensurePort() {
+        if (port > 0) return;
+        String configured = System.getProperty("kotv.proxy.port", System.getenv("KOTV_PROXY_PORT"));
+        if (configured != null && !configured.isEmpty()) {
+            try {
+                port = Integer.parseInt(configured.trim());
+            } catch (NumberFormatException ignored) {
+            }
+        }
     }
 }

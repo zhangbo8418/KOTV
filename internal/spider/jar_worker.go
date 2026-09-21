@@ -132,7 +132,8 @@ var (
 	netConfigJSON     []byte // 空 clientId 默认桶（兼容）
 	netConfigByClient map[string][]byte
 	userProxyJSON     []byte
-	netPrimed         bool // Android HTTP 用
+	localProxyJSON    []byte // 本机 HTTP 实听端口 → bridge Proxy.set
+	netPrimed         bool   // Android HTTP 用
 )
 
 // 进行中的 JAR HTTP 调用，按 ScopeID 软取消（不杀 JVM）。
@@ -235,6 +236,23 @@ func SetUserProxy(spec string) {
 	pushBridgeIfAlive(payload)
 }
 
+// SetLocalProxyPort 本机 HTTP 实听端口下发到 bridge：System.setProperty + Proxy.set。
+func SetLocalProxyPort(port int) {
+	if port <= 0 {
+		return
+	}
+	req := map[string]interface{}{"method": "configLocalProxy", "args": map[string]int{"port": port}}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return
+	}
+	netConfigMu.Lock()
+	localProxyJSON = payload
+	netPrimed = false
+	netConfigMu.Unlock()
+	pushBridgeIfAlive(payload)
+}
+
 func currentNetConfig() [][]byte {
 	netConfigMu.Lock()
 	defer netConfigMu.Unlock()
@@ -257,6 +275,9 @@ func currentNetConfig() [][]byte {
 	}
 	if len(userProxyJSON) > 0 {
 		out = append(out, userProxyJSON)
+	}
+	if len(localProxyJSON) > 0 {
+		out = append(out, localProxyJSON)
 	}
 	return out
 }
@@ -730,6 +751,7 @@ func primeAndroidNetConfigOnce() error {
 		push(netConfigByClient[cid])
 	}
 	push(userProxyJSON)
+	push(localProxyJSON)
 	netPrimed = true
 	netConfigMu.Unlock()
 

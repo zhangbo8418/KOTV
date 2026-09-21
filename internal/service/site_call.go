@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/base64"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/model"
@@ -22,7 +23,7 @@ func base64URLSafe(s string) string {
 	return base64.URLEncoding.EncodeToString([]byte(s))
 }
 
-// siteCall 先 fetchExt；有 ext 时附加 extend；≤1000 GET query，>1000 POST form。
+// siteCall 先 fetchExt；有 ext 时附加 extend；≤1000 字符 GET query，>1000 POST form。
 // cfg 非空时把下载后的 Ext 写回内存站点，避免后续请求仍带 http URL。
 func siteCall(cfg *config.Manager, site model.Site, params map[string]string) (string, error) {
 	var err error
@@ -43,7 +44,7 @@ func siteCall(cfg *config.Manager, site model.Site, params map[string]string) (s
 		params["extend"] = ext
 	}
 	headers := map[string]string(site.Header)
-	if len(ext) > 1000 {
+	if utf8.RuneCountInString(ext) > 1000 {
 		return util.HTTPPostFormInsecure(site.API, headers, params)
 	}
 	return util.HTTPGetParamsInsecure(site.API, headers, params)

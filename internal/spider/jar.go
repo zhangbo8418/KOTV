@@ -16,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
@@ -145,7 +144,7 @@ func setRecentJar(jarSpec string) {
 	notifyParseJar(dest, true)
 }
 
-const parseJarBridgeTimeout = 30 * time.Second
+const parseJarBridgeTimeout = javaBridgeCallTimeout
 
 // notifyParseJar BaseLoader.parseJar(jar, recent)：真加载 ClassLoader+Init+Proxy，可选设 recent。
 func notifyParseJar(jarPath string, recent bool) {

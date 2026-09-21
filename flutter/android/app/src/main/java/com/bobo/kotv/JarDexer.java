@@ -61,6 +61,9 @@ public final class JarDexer {
    * @return 可交给 {@link DexClassLoader} 的 jar 绝对路径
    */
   public static String ensureSiteDexJar(Object context, String srcPath) throws Exception {
+    if (Thread.interrupted()) {
+      throw new InterruptedException("ensureSiteDexJar interrupted");
+    }
     if (!(context instanceof Context)) {
       throw new IllegalArgumentException(
           "ensureSiteDexJar expects android.content.Context, got "
@@ -80,6 +83,9 @@ public final class JarDexer {
       return src.getAbsolutePath();
     }
 
+    if (Thread.interrupted()) {
+      throw new InterruptedException("ensureSiteDexJar interrupted");
+    }
     File codeCache = ctx.getCodeCacheDir();
     File sealedDir = new File(codeCache, "kotv_site_jars");
     if (!sealedDir.isDirectory() && !sealedDir.mkdirs()) {
@@ -93,6 +99,9 @@ public final class JarDexer {
       return sealed.getAbsolutePath();
     }
 
+    if (Thread.interrupted()) {
+      throw new InterruptedException("ensureSiteDexJar interrupted");
+    }
     File work = new File(sealedDir, key + "-d8-work");
     deleteRecursive(work);
     if (!work.mkdirs()) {
@@ -134,6 +143,10 @@ public final class JarDexer {
     }
     Log.i(TAG, "d8 library jars=" + libCount);
 
+    if (Thread.interrupted()) {
+      deleteRecursive(work);
+      throw new InterruptedException("ensureSiteDexJar interrupted");
+    }
     try {
       try {
         D8.run(builder.build());
@@ -142,6 +155,9 @@ public final class JarDexer {
             "安卓仅支持含 classes.dex 的站点包；当前 jar 需 PC 侧预转 dex: " + src.getName(),
             e);
       }
+    } catch (InterruptedException e) {
+      deleteRecursive(work);
+      throw e;
     } catch (Throwable t) {
       deleteRecursive(work);
       throw new IllegalStateException(
@@ -186,6 +202,9 @@ public final class JarDexer {
    */
   public static ClassLoader createSiteClassLoader(Object context, String srcPath, ClassLoader parent)
       throws Exception {
+    if (Thread.interrupted()) {
+      throw new InterruptedException("createSiteClassLoader interrupted");
+    }
     if (!(context instanceof Context)) {
       throw new IllegalArgumentException("createSiteClassLoader expects Context");
     }
@@ -196,6 +215,9 @@ public final class JarDexer {
     }
     boolean hasDex = jarHasDex(src);
     File load = new File(ensureSiteDexJar(ctx, srcPath));
+    if (Thread.interrupted()) {
+      throw new InterruptedException("createSiteClassLoader interrupted");
+    }
     if (!load.isFile() || load.length() == 0L) {
       throw new IllegalStateException("site jar not loadable: " + srcPath);
     }
