@@ -338,6 +338,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   bool _liveAcross = true;
   bool _liveInvert = false;
   String _liveScale = 'default';
+  AspectSpec _liveAspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
   /// off | audio | pip
   String _playerBackground = 'pip';
   int _playSerial = 0;
@@ -567,6 +568,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
         final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
         _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
+        _liveAspect = _liveAspectFromScale(_liveScale);
         unawaited(_playback.setVideoScale(_liveScale));
         final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
         final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
@@ -901,6 +903,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
       final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
       _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
+      _liveAspect = _liveAspectFromScale(_liveScale);
       unawaited(_playback.setVideoScale(_liveScale));
     } catch (_) {}
     final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
@@ -941,6 +944,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         // 直播页 live=true：直链立刻 play（含 EPG 回看时移流）。
         // 不写 demuxer-max-bytes / cache-secs；无 Flutter play:false 等缓冲。
         await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null, live: live);
+        unawaited(pb.setVideoScale(_liveScale));
         if (_backend != KotvEmbedBackend.mpv) {
           try {
             await pb.play();
@@ -984,26 +988,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (_playUrl.isEmpty) {
       return const ColoredBox(color: Colors.black);
     }
-    // MPV：勿随 listenable 重建 Video（会 seek(0) 播停循环）；FVP/Exo 仍需尺寸变化时刷新。
-    if (kotvEmbedBackend(_playerVal) == KotvEmbedBackend.mpv) {
-      return ExcludeFocus(
-        child: kotvPlaybackView(
-          playerVal: _playerVal,
-          playback: _playback,
-          mpv: _mk,
-        ),
+    // 勿包 ListenableBuilder：position/playing 高频 notify 会重建 Texture，PC FVP 可掉到 ~5fps。
+    Widget view = kotvPlaybackView(
+      playerVal: _playerVal,
+      playback: _playback,
+      mpv: _mk,
+      fit: _liveAspect.fit,
+    );
+    final ratio = _liveAspect.ratio;
+    final mpvNativeScale = kotvIsAndroid() && _mk is NativeMpvPlayback;
+    if (!mpvNativeScale && ratio != null && ratio > 0) {
+      view = ColoredBox(
+        color: Colors.black,
+        child: Center(child: AspectRatio(aspectRatio: ratio, child: view)),
       );
     }
-    return ListenableBuilder(
-      listenable: _playback,
-      builder: (context, _) => ExcludeFocus(
-        child: kotvPlaybackView(
-          playerVal: _playerVal,
-          playback: _playback,
-          mpv: _mk,
-        ),
-      ),
-    );
+    return ExcludeFocus(child: view);
   }
 
   /// 仅 Android Hybrid：无帧/缓冲时盖住防叠影。
@@ -1027,6 +1027,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     );
   }
 
+  AspectSpec _liveAspectFromScale(String scale) {
+    switch (scale) {
+      case 'fill':
+        return const AspectSpec(key: 'fill', fit: BoxFit.fill);
+      case 'zoom':
+        return const AspectSpec(key: 'zoom', fit: BoxFit.cover);
+      case '16:9':
+        return const AspectSpec(key: '16:9', fit: BoxFit.fill, ratio: 16 / 9);
+      case '4:3':
+        return const AspectSpec(key: '4:3', fit: BoxFit.fill, ratio: 4 / 3);
+      default:
+        return const AspectSpec(key: 'default', fit: BoxFit.contain);
+    }
+  }
+
   String _liveScaleLabel(String key) {
     return switch (key) {
       'fill' => '拉伸',
@@ -1041,7 +1056,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     const keys = ['default', 'fill', 'zoom', '16:9', '4:3'];
     final i = keys.indexOf(_liveScale);
     final next = keys[(i < 0 ? 0 : i + 1) % keys.length];
-    setState(() => _liveScale = next);
+    setState(() {
+      _liveScale = next;
+      _liveAspect = _liveAspectFromScale(next);
+    });
     unawaited(_playback.setVideoScale(next));
     try {
       await ref.read(apiProvider).setSetting('playerScaleLive', next);

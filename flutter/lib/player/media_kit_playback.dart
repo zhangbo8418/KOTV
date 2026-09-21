@@ -74,7 +74,7 @@ class MediaKitPlayback extends KotvPlayback {
               configuration: (opts ?? const KotvMpvOpts()).videoControllerConfiguration(),
             ) {
     _subs.add(player.stream.playing.listen((_) => notifyListeners()));
-    _subs.add(player.stream.position.listen((_) => notifyListeners()));
+    // 进度走 positionStream 直通 player.stream.position；勿每帧 notifyListeners。
     _subs.add(player.stream.duration.listen((_) => notifyListeners()));
     _subs.add(player.stream.buffer.listen((_) => notifyListeners()));
     _subs.add(player.stream.buffering.listen((v) {
@@ -464,6 +464,34 @@ class MediaKitPlayback extends KotvPlayback {
       try {
         await (player.platform as dynamic).setProperty('af', on ? 'loudnorm' : '');
       } catch (_) {}
+    }
+  }
+
+  /// 桌面 libmpv：Texture 常与视口同尺寸，Flutter BoxFit 无效；须写 keepaspect/panscan/video-aspect-override。
+  @override
+  Future<void> setVideoScale(String mode) async {
+    final m = mode.trim().isEmpty ? 'default' : mode.trim();
+    switch (m.toLowerCase()) {
+      case 'fill':
+        await _mpvSet('keepaspect', 'no');
+        await _mpvSet('panscan', '0');
+        await _mpvSet('video-aspect-override', 'no');
+      case 'zoom':
+        await _mpvSet('keepaspect', 'yes');
+        await _mpvSet('panscan', '1');
+        await _mpvSet('video-aspect-override', 'no');
+      case '16:9':
+        await _mpvSet('keepaspect', 'yes');
+        await _mpvSet('panscan', '0');
+        await _mpvSet('video-aspect-override', '16:9');
+      case '4:3':
+        await _mpvSet('keepaspect', 'yes');
+        await _mpvSet('panscan', '0');
+        await _mpvSet('video-aspect-override', '4:3');
+      default:
+        await _mpvSet('keepaspect', 'yes');
+        await _mpvSet('panscan', '0');
+        await _mpvSet('video-aspect-override', 'no');
     }
   }
 

@@ -50,6 +50,15 @@ void kotvRegisterFvp() {
   }
   fvp.registerWith(options: {
     'platforms': platforms,
-    'player': playerOpts,
+    // 覆盖插件默认 d3d11.sync.cpu=1：每帧 GPU→CPU 同步会把 Texture 卡到个位数 FPS。
+    'global': <String, Object>{
+      'd3d11.sync.cpu': 0,
+    },
+    // 插件 create 时写死 shader_resource=0，会关掉 D3D11 0-copy；此处覆盖回 1。
+    // Texture 尺寸交给视频帧（不设 maxWidth/maxHeight）。
+    'player': <String, String>{
+      ...playerOpts,
+      'video.decoder': 'shader_resource=1',
+    },
   });
 }

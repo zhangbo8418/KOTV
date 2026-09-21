@@ -34,6 +34,8 @@ class FvpPlayback extends KotvPlayback {
   double _rate = 1;
   String _decodeMode = 'auto';
   String _videoScale = 'default';
+  /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
+  final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
   List<KotvTrack> _audioTracks = const [];
   List<KotvTrack> _videoTracks = const [];
   List<KotvTrack> _subtitleTracks = const [];
@@ -136,6 +138,18 @@ class FvpPlayback extends KotvPlayback {
   String? get currentSecondarySubtitleId => _currentSecondarySubtitleId;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
+    // 只跟 _viewGen（尺寸/比例），不跟 position/buffering 的 notifyListeners。
+    return ValueListenableBuilder<int>(
+      valueListenable: _viewGen,
+      builder: (context, _, __) => _buildViewBody(fit: fit),
+    );
+  }
+
+  void _bumpView() {
+    _viewGen.value++;
+  }
+
+  Widget _buildViewBody({required BoxFit fit}) {
     final c = _c;
     if (c == null) {
       return const ColoredBox(color: Colors.black);
@@ -156,6 +170,8 @@ class FvpPlayback extends KotvPlayback {
         ),
       );
     }
+    // Texture 路径靠 Flutter BoxFit；mdk 无有效的 video.aspect 属性。
+    final effective = _fitFromScale(_videoScale, fit);
     // 未出尺寸前占满父级，保证 Windows Texture 有非零面积（FittedBox+0x0 会一直黑）。
     final sz = c.value.size;
     if (!c.value.isInitialized || sz.width <= 0 || sz.height <= 0) {
@@ -165,13 +181,28 @@ class FvpPlayback extends KotvPlayback {
       );
     }
     return FittedBox(
-      fit: fit,
+      fit: effective,
       child: SizedBox(
         width: sz.width,
         height: sz.height,
         child: VideoPlayer(c),
       ),
     );
+  }
+
+  static BoxFit _fitFromScale(String scale, BoxFit fallback) {
+    switch (scale.trim().toLowerCase()) {
+      case 'fill':
+      case '16:9':
+      case '4:3':
+        return BoxFit.fill;
+      case 'zoom':
+        return BoxFit.cover;
+      case 'default':
+        return BoxFit.contain;
+      default:
+        return fallback;
+    }
   }
 
   /// 摘掉 listener 后走统一拆机：pause → 排空 → dispose（超时丢后台，避免卡死 open）。
@@ -181,6 +212,7 @@ class FvpPlayback extends KotvPlayback {
     _c = null;
     _listener = null;
     if (c == null) return;
+    _bumpView();
     if (l != null) {
       try {
         c.removeListener(l);
@@ -238,6 +270,14 @@ class FvpPlayback extends KotvPlayback {
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );
       _c = c;
+      _bumpView();
+      var lastInit = false;
+      var lastPlaying = false;
+      var lastBuffering = false;
+      var lastW = 0.0;
+      var lastH = 0.0;
+      var lastErr = '';
+      var lastOpening = true;
       _listener = () {
         if (_c != c) return;
         final v = c.value;
@@ -267,6 +307,25 @@ class FvpPlayback extends KotvPlayback {
         if (v.isInitialized && !_opening) {
           _refreshTracksQuiet();
         }
+        // 勿因 position 高频 notify：页面 ListenableBuilder 会重建 Texture，PC 可掉到 ~5fps。
+        final err = v.errorDescription ?? _lastError ?? '';
+        final w = v.size.width;
+        final h = v.size.height;
+        final viewChanged = lastInit != v.isInitialized || lastW != w || lastH != h || lastErr != err;
+        final uiChanged = viewChanged ||
+            lastPlaying != v.isPlaying ||
+            lastBuffering != v.isBuffering ||
+            lastOpening != _opening ||
+            v.isCompleted;
+        if (!uiChanged) return;
+        lastInit = v.isInitialized;
+        lastPlaying = v.isPlaying;
+        lastBuffering = v.isBuffering;
+        lastW = w;
+        lastH = h;
+        lastErr = err;
+        lastOpening = _opening;
+        if (viewChanged) _bumpView();
         notifyListeners();
       };
       c.addListener(_listener!);
@@ -551,6 +610,12 @@ class FvpPlayback extends KotvPlayback {
     try {
       c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
     } catch (_) {}
+    // fvp 插件 create 默认 shader_resource=0，关掉 D3D11 0-copy，PC 点播易卡成个位数帧。
+    if (kotvIsDesktop()) {
+      try {
+        c.setProperty('video.decoder', 'shader_resource=1');
+      } catch (_) {}
+    }
   }
 
   void applyPlayerOptions(Map<String, dynamic> settings) {
@@ -739,22 +804,11 @@ class FvpPlayback extends KotvPlayback {
   @override
   Future<void> setVideoScale(String mode) async {
     final m = mode.trim().isEmpty ? 'default' : mode.trim();
+    if (_videoScale == m) return;
     _videoScale = m;
-    final c = _c;
-    if (c == null || !c.value.isInitialized) return;
-    try {
-      switch (m.toLowerCase()) {
-        case '16:9':
-          c.setProperty('video.aspect', '16/9');
-        case '4:3':
-          c.setProperty('video.aspect', '4/3');
-        case 'fill':
-        case 'zoom':
-          c.setProperty('video.aspect', '-1');
-        default:
-          c.setProperty('video.aspect', '0');
-      }
-    } catch (_) {}
+    // Texture 路径由 buildView 的 BoxFit 落实；勿写无效的 video.aspect。
+    _bumpView();
+    notifyListeners();
   }
 
   @override
@@ -946,6 +1000,7 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   void dispose() {
+    _viewGen.dispose();
     unawaited(() async {
       try {
         await stop();
