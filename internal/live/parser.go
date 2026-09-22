@@ -2,6 +2,7 @@ package live
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,24 +36,94 @@ func isM3U(text string) bool {
 	return m3uHeaderRe.MatchString(text)
 }
 
+// jsonChannel 直播 JSON 列表里的频道字段（与 Group/Channel 的序列化名一致）。
+type jsonChannel struct {
+	Name    string            `json:"name"`
+	Logo    string            `json:"logo"`
+	Number  model.FlexString  `json:"number"`
+	EPG     string            `json:"epg"`
+	UA      string            `json:"ua"`
+	Click   string            `json:"click"`
+	Format  string            `json:"format"`
+	Origin  string            `json:"origin"`
+	Referer string            `json:"referer"`
+	TvgID   string            `json:"tvgId"`
+	TvgName string            `json:"tvgName"`
+	Parse   model.FlexInt     `json:"parse"`
+	Header  model.FlexHeader  `json:"header"`
+	Catchup *model.Catchup    `json:"catchup"`
+	Drm     *model.Drm        `json:"drm"`
+	URL     []string          `json:"url"`
+	URLs    []string          `json:"urls"`
+}
+
+type jsonGroup struct {
+	Name    string        `json:"name"`
+	Pass    string        `json:"pass"`
+	Channel []jsonChannel `json:"channel"`
+}
+
 func parseJSON(live *model.Live, text string) {
-	var dtos []struct {
-		Name    string `json:"name"`
-		Channel []struct {
-			Name string   `json:"name"`
-			Logo string   `json:"logo"`
-			URL  []string `json:"url"`
-			URLs []string `json:"urls"`
-		} `json:"channel"`
-	}
+	var dtos []jsonGroup
 	if err := json.Unmarshal([]byte(text), &dtos); err != nil {
 		return
 	}
 	for _, dto := range dtos {
 		g := live.FindGroup(dto.Name)
+		if g.Pass == "" && dto.Pass != "" {
+			g.Pass = dto.Pass
+		}
 		for _, ch := range dto.Channel {
 			c := g.FindChannel(ch.Name)
-			c.Logo = ch.Logo
+			if ch.Logo != "" {
+				c.Logo = ch.Logo
+			}
+			if n := strings.TrimSpace(ch.Number.String()); n != "" {
+				c.Number = n
+			}
+			if ch.EPG != "" {
+				c.EPG = ch.EPG
+			}
+			if ch.UA != "" {
+				c.UA = ch.UA
+			}
+			if ch.Click != "" {
+				c.Click = ch.Click
+			}
+			if ch.Format != "" {
+				c.Format = normalizeManifest(ch.Format)
+			}
+			if ch.Origin != "" {
+				c.Origin = ch.Origin
+			}
+			if ch.Referer != "" {
+				c.Referer = ch.Referer
+			}
+			if ch.TvgID != "" {
+				c.TvgID = ch.TvgID
+			}
+			if ch.TvgName != "" {
+				c.TvgName = ch.TvgName
+			}
+			if ch.Parse.Valid && ch.Parse.Value != 0 {
+				c.Parse = ch.Parse.Value
+			}
+			if len(ch.Header) > 0 {
+				if c.Header == nil {
+					c.Header = make(map[string]string, len(ch.Header))
+				}
+				for k, v := range ch.Header {
+					c.Header[k] = v
+				}
+			}
+			if ch.Catchup != nil && !ch.Catchup.IsEmpty() {
+				cp := *ch.Catchup
+				c.Catchup = &cp
+			}
+			if ch.Drm != nil && ch.Drm.Key != "" {
+				d := *ch.Drm
+				c.Drm = &d
+			}
 			urls := ch.URL
 			if len(urls) == 0 {
 				urls = ch.URLs
@@ -81,13 +152,19 @@ func parseM3U(live *model.Live, text string) {
 		switch {
 		case strings.HasPrefix(line, "#EXTM3U"):
 			globalCatchup = readCatchup(line, globalCatchup)
+			// 头行 EPG：tvg-url → url-tvg → 无引号写法兜底；源本身已有 epg 时不覆盖。
+			if live.EPG == "" {
+				if m := attrRe("tvg-url").FindStringSubmatch(line); len(m) > 1 {
+					live.EPG = m[1]
+				}
+			}
 			if live.EPG == "" {
 				if m := attrRe("url-tvg").FindStringSubmatch(line); len(m) > 1 {
 					live.EPG = m[1]
 				}
-				if m := attrRe("tvg-url").FindStringSubmatch(line); len(m) > 1 {
-					live.EPG = m[1]
-				}
+			}
+			if live.EPG == "" {
+				live.EPG = extractUnquoted(line, "tvg-url=", "url-tvg=")
 			}
 			live.Catchup = model.CatchupDecide(readCatchup(line, model.Catchup{}), globalCatchup)
 		case strings.HasPrefix(line, "#EXTINF:"):
@@ -196,7 +273,7 @@ func apply(live *model.Live) {
 			ch := &live.Groups[gi].Channels[ci]
 			if ch.Number == "" {
 				number++
-				ch.Number = itoa(number)
+				ch.Number = fmt.Sprintf("%03d", number)
 			}
 			ch.ApplyLive(live)
 		}
@@ -205,6 +282,25 @@ func apply(live *model.Live) {
 
 func attrRe(name string) *regexp.Regexp {
 	return regexp.MustCompile(name + `="([^"]*)"`)
+}
+
+// extractUnquoted 取 `key=value` 无引号写法的 value（到空白或行尾），按 keys 顺序首个命中。
+func extractUnquoted(line string, keys ...string) string {
+	for _, key := range keys {
+		i := strings.Index(line, key)
+		if i < 0 {
+			continue
+		}
+		rest := line[i+len(key):]
+		if j := strings.IndexAny(rest, " \t"); j >= 0 {
+			rest = rest[:j]
+		}
+		rest = strings.Trim(strings.TrimSpace(rest), `"`)
+		if rest != "" {
+			return rest
+		}
+	}
+	return ""
 }
 
 func readCatchup(line string, fallback model.Catchup) model.Catchup {
@@ -225,6 +321,7 @@ func readCatchup(line string, fallback model.Catchup) model.Catchup {
 
 type lineSetting struct {
 	ua, referer, origin string
+	click               string
 	parse               int
 	format              string
 	header              map[string]string
@@ -235,6 +332,7 @@ type lineSetting struct {
 
 func (s *lineSetting) matches(line string) bool {
 	return strings.HasPrefix(line, "ua") || strings.HasPrefix(line, "parse") ||
+		strings.HasPrefix(line, "click") ||
 		strings.HasPrefix(line, "referer") || strings.HasPrefix(line, "origin") ||
 		strings.HasPrefix(line, "header") || strings.HasPrefix(line, "format") ||
 		strings.HasPrefix(line, "forceKey") ||
@@ -257,6 +355,8 @@ func (s *lineSetting) apply(line string) {
 		s.referer = strings.TrimSpace(line[len("referer="):])
 	case strings.HasPrefix(lower, "origin="):
 		s.origin = strings.TrimSpace(line[len("origin="):])
+	case strings.HasPrefix(lower, "click="):
+		s.click = strings.TrimSpace(line[len("click="):])
 	case strings.HasPrefix(lower, "parse="):
 		if n, err := strconv.Atoi(strings.TrimSpace(line[len("parse="):])); err == nil {
 			s.parse = n
@@ -271,6 +371,12 @@ func (s *lineSetting) apply(line string) {
 		s.referer = strings.TrimPrefix(line, "#EXTVLCOPT:http-referrer=")
 	case strings.HasPrefix(line, "#EXTVLCOPT:http-origin="):
 		s.origin = strings.TrimPrefix(line, "#EXTVLCOPT:http-origin=")
+	case strings.HasPrefix(lower, "#extvlcopt:http-cookie="):
+		// VLC cookie 选项进 Cookie 请求头（去掉包裹引号）。
+		v := strings.TrimSpace(line[len("#EXTVLCOPT:http-cookie="):])
+		if v = strings.ReplaceAll(v, `"`, ""); v != "" {
+			s.header["Cookie"] = v
+		}
 	case strings.HasPrefix(line, "#EXTHTTP:"):
 		s.applyPipeHeaders(strings.TrimPrefix(line, "#EXTHTTP:"))
 	case strings.HasPrefix(line, "#KODIPROP:"):
@@ -383,6 +489,9 @@ func (s *lineSetting) copyTo(ch *model.LiveChannel) {
 	if s.origin != "" {
 		ch.Origin = s.origin
 	}
+	if s.click != "" {
+		ch.Click = s.click
+	}
 	if s.parse != 0 {
 		ch.Parse = s.parse
 	}
@@ -413,6 +522,7 @@ func (s *lineSetting) copyTo(ch *model.LiveChannel) {
 
 func (s *lineSetting) clear() {
 	s.ua, s.referer, s.origin = "", "", ""
+	s.click = ""
 	s.parse = 0
 	s.format = ""
 	s.header = make(map[string]string)
@@ -441,18 +551,4 @@ func normalizeManifest(f string) string {
 	default:
 		return f
 	}
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [12]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }

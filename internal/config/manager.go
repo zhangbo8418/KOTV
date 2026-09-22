@@ -451,8 +451,17 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	if strings.TrimSpace(data) == "" {
 		return fmt.Errorf("配置数据为空")
 	}
+	// `xxxxxxxx**`+base64 / `2423…` AES-CBC 包装的正文先解开。
+	data, err = decodeConfigBody(data)
+	if err != nil {
+		return err
+	}
 
 	cleaned := util.CleanJSONComments(data)
+	// 服务端错误说明 {"msg":"…"}：报错而不是当空配置加载。
+	if msg := configErrorMessage(cleaned); msg != "" {
+		return fmt.Errorf("%s", msg)
+	}
 	if depots := parseDepotIndex(cleaned); len(depots) > 0 {
 		return m.loadDepotIndex(cfg, depots)
 	}

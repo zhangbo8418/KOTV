@@ -258,11 +258,19 @@ func matchVideo(u string, rules []model.Rule, check func(string) bool) bool {
 	return IsVideoFormatRules(u, rules)
 }
 
-// ResolveLiveURL 直播地址解析。
-func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers map[string]string) (string, error) {
+// ResolveLiveURL 直播地址解析。click 为频道/源级 `click=` 脚本，Web 嗅探时在页面里执行。
+func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers map[string]string, click string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
+	}
+	// 有 click 时 http-sniff 拿不到点击后的地址，直接 Web 嗅探。
+	sniff := func(u string) (string, error) {
+		if strings.TrimSpace(click) == "" {
+			return PlayPageSniff(u, headers)
+		}
+		out, _, err := sniffParsedWeb(u, headers, click, nil, nil, false)
+		return out, err
 	}
 	if strings.HasPrefix(raw, "json:") {
 		u := strings.TrimPrefix(raw, "json:")
@@ -273,13 +281,13 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 		if out != "" {
 			return out, err
 		}
-		return PlayPageSniff(u, headers)
+		return sniff(u)
 	}
 	if strings.HasPrefix(raw, "parse:") {
 		name := strings.TrimPrefix(raw, "parse:")
 		for _, p := range parses {
 			if p.Name == name {
-				u, _, err := executeParse(p, "", "", headers, parses, nil, "", nil, false)
+				u, _, err := executeParse(p, "", "", headers, parses, nil, click, nil, false)
 				return u, err
 			}
 		}
@@ -302,10 +310,10 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 			return out, nil
 		}
 	}
-		if sniffed, _ := PlayPageSniff(raw, headers); sniffed != "" {
-			return sniffed, nil
-		}
-		return "", fmt.Errorf("直播地址需要解析但无可用解析器")
+	if sniffed, _ := sniff(raw); sniffed != "" {
+		return sniffed, nil
+	}
+	return "", fmt.Errorf("直播地址需要解析但无可用解析器")
 }
 
 func resolveParse(r model.Result, parses []model.Parse, useParse bool, prefer string) *model.Parse {

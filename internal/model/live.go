@@ -19,6 +19,9 @@ type Live struct {
 	UA         string     `json:"ua"`
 	Referer    string     `json:"referer"`
 	Origin     string     `json:"origin"`
+	Click      string     `json:"click"`
+	// Pass 为 true 时分组名里的 `_密码` 只截掉不设密码（全部可见）。
+	Pass       bool       `json:"pass"`
 	PlayerType FlexInt    `json:"playerType"`
 	Header     FlexHeader `json:"header"`
 	Catchup    Catchup    `json:"catchup"`
@@ -26,19 +29,19 @@ type Live struct {
 	Groups     []LiveGroup `json:"-"`
 }
 
-// SplitGroupPass 解析分组名「显示名_密码」：最后一个 _ 之后为密码。
-func SplitGroupPass(raw string) (name, pass string) {
-	if i := strings.LastIndex(raw, "_"); i >= 0 {
-		pass = raw[i+1:]
-		if pass != "" {
-			return raw[:i], pass
-		}
+// SplitGroupPass 解析分组名「显示名_密码」：按第一个 _ 切分，前段为显示名。
+// livePass=true 时不设密码；后段为空也不设密码。
+func SplitGroupPass(raw string, livePass bool) (name, pass string) {
+	parts := strings.SplitN(raw, "_", 2)
+	name = parts[0]
+	if livePass || len(parts) == 1 {
+		return name, ""
 	}
-	return raw, ""
+	return name, parts[1]
 }
 
 func (l *Live) FindGroup(raw string) *LiveGroup {
-	name, pass := SplitGroupPass(raw)
+	name, pass := SplitGroupPass(raw, l.Pass)
 	for i := range l.Groups {
 		if l.Groups[i].Name == name && l.Groups[i].Pass == pass {
 			return &l.Groups[i]
@@ -94,6 +97,7 @@ type LiveChannel struct {
 	UA       string
 	Referer  string
 	Origin   string
+	Click    string
 	URLs     []string
 	URLIndex int
 	Header   map[string]string
@@ -161,8 +165,8 @@ func (c *LiveChannel) ApplyLive(live *Live) {
 	if c.Origin == "" && live.Origin != "" {
 		c.Origin = live.Origin
 	}
-	if c.EPG == "" && live.EPG != "" {
-		c.EPG = live.EPG
+	if c.Click == "" && live.Click != "" {
+		c.Click = live.Click
 	}
 	if len(c.Header) == 0 && len(live.Header) > 0 {
 		c.Header = make(map[string]string)
@@ -173,6 +177,11 @@ func (c *LiveChannel) ApplyLive(live *Live) {
 	if c.Catchup == nil && !live.Catchup.IsEmpty() {
 		cp := live.Catchup
 		c.Catchup = &cp
+	}
+	// 源级 epg 只在此继承原串；{id}/{name}/{epg}/{date} 的展开在 live.LoadChannelEPG 拉取时做
+	// （那里同时保留逗号列表里的 XMLTV 地址）。
+	if c.EPG == "" && live.EPG != "" {
+		c.EPG = live.EPG
 	}
 	// live.logo 模板（含 {id}/{name}）展开到频道 logo。
 	logoTemplate := live.Logo

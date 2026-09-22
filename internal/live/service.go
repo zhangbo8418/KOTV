@@ -186,7 +186,7 @@ func (s *Service) ResolvePlayURLParsed(ch *model.LiveChannel) (string, map[strin
 	if s.cfg != nil {
 		parses = s.cfg.API().Parses
 	}
-	out, err := parsepkg.ResolveLiveURL(raw, needParse, parses, headers)
+	out, err := parsepkg.ResolveLiveURL(raw, needParse, parses, headers, ch.Click)
 	if err != nil {
 		return raw, headers, err
 	}
