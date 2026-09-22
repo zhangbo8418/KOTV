@@ -69,7 +69,7 @@ func FromXML(raw string) (Result, error) {
 	for _, v := range rss.List.Video {
 		vod := Vod{
 			VodID:       FlexString(strings.TrimSpace(v.ID)),
-			VodName:     strings.TrimSpace(v.Name),
+			VodName:     CleanName(v.Name),
 			TypeName:    strings.TrimSpace(v.Type),
 			VodPic:      strings.TrimSpace(v.Pic),
 			VodRemarks:  strings.TrimSpace(v.Note),

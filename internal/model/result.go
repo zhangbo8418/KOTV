@@ -3,6 +3,8 @@ package model
 import (
 	"bytes"
 	"encoding/json"
+	"html"
+	"regexp"
 	"strings"
 
 	"github.com/bobo/KOTV/internal/lenientjson"
@@ -53,14 +55,18 @@ func (r Result) EffectiveMsg() string {
 	return msg
 }
 
-// CleanDesc Util.clean：仅含 < 时剥 HTML，再整理空白。
+var htmlBreakTag = regexp.MustCompile(`(?i)<br\s*/?>|</p>|</div>|</li>|</tr>`)
+
+// CleanDesc 含 < 时：把换行类标签换成 \n，剥其余标签，解码实体，再逐行 trim。
 func CleanDesc(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
 	if strings.Contains(s, "<") {
+		s = htmlBreakTag.ReplaceAllString(s, "\n")
 		s = stripHTMLTags(s)
+		s = html.UnescapeString(s)
 		s = strings.ReplaceAll(s, "\u00a0", " ")
 		s = strings.ReplaceAll(s, "\u3000", " ")
 	}
@@ -78,6 +84,19 @@ func CleanDesc(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
+// CleanName 剥 HTML 标签并解码实体（标题显示用）。
+func CleanName(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.Contains(s, "<") || strings.Contains(s, "&") {
+		s = stripHTMLTags(s)
+		s = html.UnescapeString(s)
+	}
+	return strings.TrimSpace(s)
+}
+
 func stripHTMLTags(s string) string {
 	var b strings.Builder
 	inTag := false
@@ -92,6 +111,15 @@ func stripHTMLTags(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func cleanResultVods(r *Result) {
+	if r == nil {
+		return
+	}
+	for i := range r.List {
+		r.List[i].VodName = CleanName(r.List[i].VodName)
+	}
 }
 
 // Type 分类。
@@ -307,6 +335,7 @@ func DecodeResultJSON(raw string) (Result, error) {
 	if err := lenientjson.Unmarshal([]byte(raw), &result); err != nil {
 		return Result{}, err
 	}
+	cleanResultVods(&result)
 	return result, nil
 }
 

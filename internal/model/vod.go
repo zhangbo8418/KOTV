@@ -128,12 +128,39 @@ func EpisodePage(eps []Episode, index int) []Episode {
 	return eps[from:to]
 }
 
+var (
+	getDigitBracket = regexp.MustCompile(`\[.*?\]|\(.*?\)`)
+	getDigitYear    = regexp.MustCompile(`(^|[^0-9])((?:19|20)\d{2})([^0-9]|$)`)
+	getDigitRes     = regexp.MustCompile(`(?i)2160p|1080p|720p|480p|4k|h26[45]|x26[45]|mp4`)
+	getDigitEp      = regexp.MustCompile(`(?i)(?:ep|第|e|[-\.\s])\s?(\d{1,4})`)
+	getDigitDigits  = regexp.MustCompile(`\D+`)
+)
+
+// GetDigit 从备注/集名中抽集数：去括号与年份与分辨率后，优先匹配「第|ep|e」数字，否则拼剩余数字。
 func GetDigit(s string) int {
-	re := regexp.MustCompile(`\d+`)
-	m := re.FindString(s)
-	if m == "" {
+	text := getDigitBracket.ReplaceAllString(s, "")
+	for {
+		loc := getDigitYear.FindStringSubmatchIndex(text)
+		if loc == nil {
+			break
+		}
+		// 保留前后非数字边界字符，只删年份本身。
+		text = text[:loc[4]] + text[loc[5]:]
+	}
+	text = getDigitRes.ReplaceAllString(strings.ToLower(text), "")
+	if m := getDigitEp.FindStringSubmatch(text); len(m) > 1 {
+		n, err := strconv.Atoi(m[1])
+		if err == nil {
+			return n
+		}
+	}
+	number := getDigitDigits.ReplaceAllString(text, "")
+	if number == "" {
 		return -1
 	}
-	n, _ := strconv.Atoi(m)
+	n, err := strconv.Atoi(number)
+	if err != nil {
+		return -1
+	}
 	return n
 }
