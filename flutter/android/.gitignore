@@ -11,3 +11,5 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+# 侧载 CI 固定签名（非 Play 上架密钥）；入库后每次构建证书指纹一致，可覆盖安装。
+!app/kotv-ci.jks

@@ -61,10 +61,26 @@ android {
         }
     }
 
+    // 固定 CI/本机 release 签名：避免每次 runner 新建 debug.keystore 导致 APK 签名指纹变化、无法覆盖安装。
+    // 侧载分发用；上架 Play 请换私有 keystore，并用 KOTV_STORE_* 环境变量覆盖。
+    def kotvStoreFile = System.getenv("KOTV_STORE_FILE") ?: "kotv-ci.jks"
+    def kotvStorePassword = System.getenv("KOTV_STORE_PASSWORD") ?: "kotv-ci-store"
+    def kotvKeyAlias = System.getenv("KOTV_KEY_ALIAS") ?: "kotv"
+    // PKCS12：key 口令与 store 口令相同
+    def kotvKeyPassword = System.getenv("KOTV_KEY_PASSWORD") ?: kotvStorePassword
+
+    signingConfigs {
+        release {
+            storeFile file(kotvStoreFile)
+            storePassword kotvStorePassword
+            keyAlias kotvKeyAlias
+            keyPassword kotvKeyPassword
+        }
+    }
+
     buildTypes {
         release {
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            signingConfig = signingConfigs.release
             // Temporary: skip R8 on low-RAM/swap Mac so MPV/libvulkan stub APK can ship for device verify.
             // Re-enable minifyEnabled=true when disk/RAM allows (JarDexer needs proguard keep rules).
             minifyEnabled false
