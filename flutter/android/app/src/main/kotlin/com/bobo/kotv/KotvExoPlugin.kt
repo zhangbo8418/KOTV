@@ -1121,6 +1121,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         androidx.media3.datasource.cache.CacheDataSource.Factory()
           .setCache(KotvExoCache.get(ctx))
           .setUpstreamDataSourceFactory(smbAware)
+          .setCacheWriteDataSinkFactory(null)
           .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
       } else {
         smbAware
