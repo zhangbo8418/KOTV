@@ -41,6 +41,7 @@ class ArtPlayback extends KotvPlayback {
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = false,
+    String? format,
   }) async {
     throw UnsupportedError('ArtPlayer 仅支持 Web');
   }

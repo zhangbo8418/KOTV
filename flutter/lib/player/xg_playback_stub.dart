@@ -41,6 +41,7 @@ class XgPlayback extends KotvPlayback {
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = false,
+    String? format,
   }) async {
     throw UnsupportedError('xgplayer 仅支持 Web');
   }

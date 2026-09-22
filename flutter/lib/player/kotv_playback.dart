@@ -49,6 +49,7 @@ abstract class KotvPlayback extends ChangeNotifier {
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = false,
+    String? format,
   });
   Future<void> playOrPause();
   Future<void> play();

@@ -41,6 +41,7 @@ class ZwPlayback extends KotvPlayback {
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = false,
+    String? format,
   }) async {
     throw UnsupportedError('ZWPlayer 仅支持 Web');
   }

@@ -191,6 +191,7 @@ class HtmlPlayback extends KotvPlayback {
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = false,
+    String? format,
   }) async {
     await stop();
     _completed = false;

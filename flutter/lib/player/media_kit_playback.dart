@@ -313,6 +313,7 @@ class MediaKitPlayback extends KotvPlayback {
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = false,
+    String? format,
   }) async {
     _url = url;
     _live = live;

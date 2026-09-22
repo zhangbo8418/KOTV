@@ -1857,7 +1857,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           }
           // 起播缓冲由守卫无限等待；仅黑屏/视源失败抛 SilentVideo 才 failover。
           // 勿再套墙钟 timeout：慢源会被误切播放器。
-          await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null);
+          await pb.open(
+            openUrl,
+            headers: openHeaders,
+            drm: hasDrm ? drm : null,
+            format: '${data['format'] ?? ''}'.trim().isEmpty ? null : '${data['format']}'.trim(),
+          );
           try {
             await _playback.play();
           } catch (_) {}

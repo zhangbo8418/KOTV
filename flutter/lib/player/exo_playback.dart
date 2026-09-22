@@ -61,6 +61,7 @@ class ExoPlayback extends KotvPlayback {
   bool _videoOutputSuppressed = false;
   String _videoScale = 'default';
   bool _live = false;
+  String? _format;
   String? _lastError;
   bool _tunneling = false;
   bool _adblock = true;
@@ -357,7 +358,7 @@ class ExoPlayback extends KotvPlayback {
         _playing = false;
         if (_repeatOne && _url.isNotEmpty) {
           // 单集循环：不通知上层切下一集
-          unawaited(open(_url, headers: _headers, drm: _drm, live: _live));
+          unawaited(open(_url, headers: _headers, drm: _drm, live: _live, format: _format));
         } else if (!_endedCtrl.isClosed) {
           _endedCtrl.add(true);
         }
@@ -384,9 +385,11 @@ class ExoPlayback extends KotvPlayback {
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = false,
+    String? format,
   }) async {
     _url = url;
     _live = live;
+    _format = format;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _drm = drm;
     _completed = false;
@@ -413,7 +416,7 @@ class ExoPlayback extends KotvPlayback {
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
-        'mime': _guessMime(url),
+        'mime': (format != null && format.trim().isNotEmpty) ? format.trim() : _guessMime(url),
         'drm': drm,
         'decodeMode': _decodeMode,
         'render': _renderMode,
@@ -983,7 +986,7 @@ class ExoPlayback extends KotvPlayback {
       final cold = _coldPlayerOptsKey();
       if (_appliedColdPlayerOptsKey != null && cold != _appliedColdPlayerOptsKey) {
         if (_url.isNotEmpty) {
-          await open(_url, headers: _headers, drm: _drm, live: _live);
+          await open(_url, headers: _headers, drm: _drm, live: _live, format: _format);
         }
       }
     } catch (_) {}
@@ -1189,7 +1192,7 @@ class ExoPlayback extends KotvPlayback {
     _subs = next;
     if (_url.isNotEmpty) {
       try {
-        await open(_url, headers: _headers, drm: _drm, live: _live);
+        await open(_url, headers: _headers, drm: _drm, live: _live, format: _format);
       } catch (_) {}
     }
   }
