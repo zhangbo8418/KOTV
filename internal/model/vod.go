@@ -44,9 +44,6 @@ func (v *Vod) IsEmpty() bool {
 
 func (v *Vod) IsFolder() bool {
 	tag := strings.ToLower(strings.TrimSpace(v.VodTag))
-	if tag == "file" {
-		return false
-	}
 	if tag == "folder" {
 		return true
 	}
