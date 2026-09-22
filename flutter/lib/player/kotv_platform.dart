@@ -106,7 +106,8 @@ KotvEmbedBackend kotvEmbedBackend(String playerVal) {
   }
 }
 
-List<(String, String)> kotvVodPlayerOptions() {
+/// 点播/直播共用同一套内置与外部播放器选项（平台差异在默认值，不在列表）。
+List<(String, String)> kotvPlayerOptions() {
   if (kIsWeb) {
     return const [
       ('浏览器播放（HTML5）（默认）', 'innie#html'),
@@ -138,34 +139,6 @@ List<(String, String)> kotvVodPlayerOptions() {
   ];
 }
 
-List<(String, String)> kotvLivePlayerOptions() {
-  if (kIsWeb) {
-    return const [
-      ('浏览器播放（HTML5）（默认）', 'innie#html'),
-      ('ArtPlayer', 'innie#art'),
-      ('西瓜播放器（xgplayer）', 'innie#xg'),
-      ('全能播放器（ZWPlayer）', 'innie#zw'),
-    ];
-  }
-  if (kotvIsAndroid()) {
-    return const [
-      ('内置 ExoPlayer（默认）', 'innie#exo'),
-      ('内置 MPV', 'innie#mpv'),
-      ('内置 FVP', 'innie#fvp'),
-    ];
-  }
-  if (kotvIsIOS()) {
-    return const [
-      ('内置 MPV（默认）', 'innie#mpv'),
-      ('内置 FVP', 'innie#fvp'),
-      ('浏览器播放（HTML5）', 'innie#html'),
-    ];
-  }
-  return [
-    ('内置 MPV（默认）', 'innie#mpv'),
-    ('内置 FVP', 'innie#fvp'),
-    ('外部 MPV', 'outie#mpv'),
-    ('外部 VLC', 'outie#vlc'),
-    if (Platform.isMacOS) ('IINA', 'outie#iina'),
-  ];
-}
+List<(String, String)> kotvVodPlayerOptions() => kotvPlayerOptions();
+
+List<(String, String)> kotvLivePlayerOptions() => kotvPlayerOptions();

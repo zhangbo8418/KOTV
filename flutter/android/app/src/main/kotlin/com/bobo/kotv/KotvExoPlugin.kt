@@ -573,12 +573,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "setRenderMode" -> {
         val mode = call.argument<String>("mode")?.trim().orEmpty()
+        call.argument<Boolean>("tunneling")?.let { tunnelingEnabled = it }
         main.post {
           try {
             renderTexture = resolveRenderTexture(mode)
+            // 对照 FongMi PlayerSetting.putRender：Texture 时关隧道。
+            if (renderTexture) tunnelingEnabled = false
             // 强制下次 bind 重挂输出，避免全屏切渲染后仍认旧 Surface 导致定格有声。
             boundSurfaceView = null
             syncOutputPath()
+            // 隧道开关变化需刷新 track params。
+            applyTrackSelectionPrefs()
             val tid = if (useFlutterTexture) ensureFlutterTexture() else -1L
             result.success(
               mapOf(
@@ -587,6 +592,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
                 "path" to if (useFlutterTexture) "flutterTexture" else "platformView",
                 "textureId" to tid,
                 "sdkInt" to Build.VERSION.SDK_INT,
+                "tunneling" to (tunnelingEnabled && !renderTexture),
               ),
             )
           } catch (t: Throwable) {

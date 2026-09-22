@@ -12,8 +12,10 @@ import 'fvp_register.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
+import 'playback_settings.dart';
 import 'silent_video_guard.dart';
 import 'video_eq.dart';
+import 'video_scale_fit.dart';
 
 /// 页内 FVP（libmdk）：经 [video_player] + fvp 插件。
 ///
@@ -170,8 +172,8 @@ class FvpPlayback extends KotvPlayback {
         ),
       );
     }
-    // Texture 路径靠 Flutter BoxFit；mdk 无有效的 video.aspect 属性。
-    final effective = _fitFromScale(_videoScale, fit);
+    // Texture：强制画幅在布局层完成；mdk 无有效的 video.aspect。
+    final scale = _videoScale.trim().isEmpty ? 'default' : _videoScale.trim();
     // 未出尺寸前占满父级，保证 Windows Texture 有非零面积（FittedBox+0x0 会一直黑）。
     final sz = c.value.size;
     if (!c.value.isInitialized || sz.width <= 0 || sz.height <= 0) {
@@ -180,29 +182,28 @@ class FvpPlayback extends KotvPlayback {
         child: SizedBox.expand(child: VideoPlayer(c)),
       );
     }
-    return FittedBox(
-      fit: effective,
-      child: SizedBox(
-        width: sz.width,
-        height: sz.height,
-        child: VideoPlayer(c),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final max = constraints.biggest;
+        if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
+          return ColoredBox(color: Colors.black, child: VideoPlayer(c));
+        }
+        final box = kotvBoxForVideoScale(max, sz, scale);
+        final effective = kotvFitFromVideoScale(scale, fit);
+        final child = SizedBox(
+          width: box.width,
+          height: box.height,
+          child: FittedBox(
+            fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
+            child: SizedBox(width: sz.width, height: sz.height, child: VideoPlayer(c)),
+          ),
+        );
+        if (effective == BoxFit.cover) {
+          return ClipRect(child: Center(child: child));
+        }
+        return Center(child: child);
+      },
     );
-  }
-
-  static BoxFit _fitFromScale(String scale, BoxFit fallback) {
-    switch (scale.trim().toLowerCase()) {
-      case 'fill':
-      case '16:9':
-      case '4:3':
-        return BoxFit.fill;
-      case 'zoom':
-        return BoxFit.cover;
-      case 'default':
-        return BoxFit.contain;
-      default:
-        return fallback;
-    }
   }
 
   /// 摘掉 listener 后走统一拆机：pause → 排空 → dispose（超时丢后台，避免卡死 open）。
@@ -625,7 +626,7 @@ class FvpPlayback extends KotvPlayback {
     _secondarySubtitleMode = (sec == 'auto' || sec == 'on' || sec == 'manual' || sec == 'default' || sec == 'player')
         ? (sec == 'on' ? 'auto' : (sec == 'player' ? 'default' : sec))
         : 'default';
-    _preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
+    _preferredTextLangs = kotvPreferredTextLangsFromSettings(settings);
     _videoEq = KotvVideoEq.fromSettings(settings);
     _audioEq = kotvAudioEqFromSettings(settings);
     _audioEqBands = kotvAudioEqBandsFromSettings(settings);

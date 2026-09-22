@@ -7,9 +7,11 @@ import 'exo_surface.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
+import 'playback_settings.dart';
 import 'silent_video_guard.dart';
 import 'subtitle_style_util.dart';
 import 'video_eq.dart';
+import 'video_scale_fit.dart';
 
 /// Android ExoPlayer：Media3 + OkHttp，DRM；硬解直出到 SurfaceView（HDR 直出）。
 class ExoPlayback extends KotvPlayback {
@@ -181,7 +183,8 @@ class ExoPlayback extends KotvPlayback {
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     // 播控/设置的比例优先于传入 fit（Surface 路径靠布局 + 原生 setFit）。
     // 画面调色走原生 setVideoEffects（Surface/Texture 共用）；隧道模式不可用。
-    final effective = _fitFromScale(_videoScale, fit);
+    final scale = _videoScale.trim().isEmpty ? 'default' : _videoScale.trim();
+    final effective = kotvFitFromVideoScale(scale, fit);
     final tid = _textureId;
     if (_useFlutterTexture) {
       // Texture 兼容模式：create 完成前 tid 可能为空。
@@ -196,14 +199,15 @@ class ExoPlayback extends KotvPlayback {
             if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
               return Texture(textureId: tid);
             }
-            if (effective == BoxFit.fill || _w <= 0 || _h <= 0) {
+            if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
               return SizedBox(
                 width: max.width,
                 height: max.height,
                 child: Texture(textureId: tid),
               );
             }
-            final box = _boxFitSize(max, _displaySize, effective);
+            final video = (_w > 0 && _h > 0) ? _displaySize : const Size(16, 9);
+            final box = kotvBoxForVideoScale(max, video, scale);
             final child = SizedBox(
               width: box.width,
               height: box.height,
@@ -217,7 +221,7 @@ class ExoPlayback extends KotvPlayback {
         ),
       );
     }
-    final name = _fitName(effective);
+    final name = kotvNativeFitName(scale);
     // Surface：Hybrid Composition + SurfaceView（HDR 直出）。
     final surface = kotvExoSurfaceView(
       key: ValueKey('kotv_exo_surface_$_surfaceGeneration'),
@@ -238,10 +242,11 @@ class ExoPlayback extends KotvPlayback {
           if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
             return surface;
           }
-          if (effective == BoxFit.fill || _w <= 0 || _h <= 0) {
+          if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
             return SizedBox(width: max.width, height: max.height, child: surface);
           }
-          final box = _boxFitSize(max, _displaySize, effective);
+          final video = (_w > 0 && _h > 0) ? _displaySize : const Size(16, 9);
+          final box = kotvBoxForVideoScale(max, video, scale);
           final child = SizedBox(width: box.width, height: box.height, child: surface);
           if (effective == BoxFit.cover) {
             return ClipRect(child: Center(child: child));
@@ -252,28 +257,12 @@ class ExoPlayback extends KotvPlayback {
     );
   }
 
-  static BoxFit _fitFromScale(String scale, BoxFit fallback) {
-    switch (scale) {
-      case 'fill':
-      case '16:9':
-      case '4:3':
-        return BoxFit.fill;
-      case 'zoom':
-        return BoxFit.cover;
-      case 'default':
-        return BoxFit.contain;
-      default:
-        return fallback;
-    }
-  }
-
   @override
   Future<void> setVideoScale(String mode) async {
     final m = mode.trim().isEmpty ? 'default' : mode.trim();
     _videoScale = m;
-    final f = _fitFromScale(m, BoxFit.contain);
     try {
-      await _ch.invokeMethod('setFit', {'fit': _fitName(f)});
+      await _ch.invokeMethod('setFit', {'fit': kotvNativeFitName(m)});
     } catch (_) {}
     notifyListeners();
   }
@@ -281,30 +270,6 @@ class ExoPlayback extends KotvPlayback {
   Size get _displaySize {
     final par = _pixelRatio > 0 ? _pixelRatio : 1.0;
     return Size((_w > 0 ? _w : 16) * par, (_h > 0 ? _h : 9).toDouble());
-  }
-
-  static Size _boxFitSize(Size viewport, Size video, BoxFit fit) {
-    final ar = video.width / video.height;
-    final vr = viewport.width / viewport.height;
-    switch (fit) {
-      case BoxFit.cover:
-        if (ar > vr) return Size(viewport.height * ar, viewport.height);
-        return Size(viewport.width, viewport.width / ar);
-      default:
-        if (ar > vr) return Size(viewport.width, viewport.width / ar);
-        return Size(viewport.height * ar, viewport.height);
-    }
-  }
-
-  static String _fitName(BoxFit fit) {
-    switch (fit) {
-      case BoxFit.cover:
-        return 'cover';
-      case BoxFit.fill:
-        return 'fill';
-      default:
-        return 'contain';
-    }
   }
 
   Future<void> _ensureNative() async {
@@ -740,9 +705,16 @@ class ExoPlayback extends KotvPlayback {
   Future<void> setRenderMode(String mode) async {
     final next = kotvNormalizePlayerRender(mode);
     _renderMode = next;
+    // 对照 FongMi PlayerSetting.putRender：Texture 时关隧道。
+    if (_renderMode == 'texture' && _tunneling) {
+      _tunneling = false;
+    }
     try {
       await _ensureNative();
-      final raw = await _ch.invokeMethod<dynamic>('setRenderMode', {'mode': _renderMode});
+      final raw = await _ch.invokeMethod<dynamic>('setRenderMode', {
+        'mode': _renderMode,
+        'tunneling': _tunneling && _renderMode != 'texture',
+      });
       if (raw is Map) {
         final path = '${raw['path'] ?? ''}';
         final tid = (raw['textureId'] as num?)?.toInt();
@@ -908,8 +880,8 @@ class ExoPlayback extends KotvPlayback {
     if (_bufferFactor < 1) _bufferFactor = 1;
     if (_bufferFactor > 10) _bufferFactor = 10;
     _libass = kotvSettingsMapFlag(settings, 'exoLibass', def: true);
-    _dolbyVisionPolicy = int.tryParse('${settings['exoDolbyVision'] ?? '0'}') ?? 0;
-    _preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
+    _dolbyVisionPolicy = kotvDolbyVisionFromSettings(settings);
+    _preferredTextLangs = kotvPreferredTextLangsFromSettings(settings);
     _diskPreloadMs = int.tryParse('${settings['exoDiskPreloadMs'] ?? '120000'}') ?? 120000;
     if (_diskPreloadMs < 20000) _diskPreloadMs = 20000;
     if (_diskPreloadMs > 120000) _diskPreloadMs = 120000;

@@ -1475,6 +1475,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     await _playback.setRenderMode(_renderMode);
     try {
       await ref.read(apiProvider).setSetting('playerRender', _renderMode);
+      if (_renderMode == 'texture') {
+        await ref.read(apiProvider).setSetting('exoTunneling', 'false');
+      }
     } catch (_) {}
   }
 

@@ -5,6 +5,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'playback_settings.dart';
 import 'video_eq.dart';
 
 /// 交给 lavf 的 demuxer 选项。302 / HLS 子列表由播放器自己跟，不要在 Dart 里预跳。
@@ -114,9 +115,9 @@ class KotvMpvOpts {
     final tlsVerify = kotvSettingsFlag(settings['mpvTlsVerify'] ?? 'true', def: true);
     final audioPassThrough = kotvSettingsFlag(settings['audioPassThrough'] ?? 'true', def: true);
     final diskCache = kotvSettingsFlag(settings['mpvDiskCache'] ?? 'false', def: false);
-    var dolby = int.tryParse('${settings['exoDolbyVision'] ?? '0'}') ?? 0;
+    var dolby = kotvDolbyVisionFromSettings(settings);
     if (dolby < 0 || dolby > 2) dolby = 0;
-    final preferredTextLangs = '${settings['exoPreferredTextLangs'] ?? ''}'.trim();
+    final preferredTextLangs = kotvPreferredTextLangsFromSettings(settings);
     var fontScale = double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0;
     fontScale = fontScale.clamp(0.5, 2.0);
     return KotvMpvOpts(
