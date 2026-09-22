@@ -23,15 +23,15 @@ func parseCatvodProxy(raw string) (status int, contentType string, body []byte, 
 			Buffer  int               `json:"buffer"`
 			Headers map[string]string `json:"headers"`
 		}
-		if json.Unmarshal([]byte(raw), &res) == nil && (res.Code != nil || res.Content != "" || res.Headers != nil) {
-			status, contentType, body, headers = 200, "application/octet-stream", []byte(res.Content), res.Headers
+	if json.Unmarshal([]byte(raw), &res) == nil && (res.Code != nil || res.Content != "" || res.Headers != nil) {
+			status, contentType, body = 200, "application/octet-stream", []byte(res.Content)
 			if res.Code != nil {
 				status = *res.Code
 			}
-			if headers != nil {
-				if value := headers["Content-Type"]; value != "" {
+			if res.Headers != nil {
+				if value := res.Headers["Content-Type"]; value != "" {
 					contentType = value
-				} else if value := headers["content-type"]; value != "" {
+				} else if value := res.Headers["content-type"]; value != "" {
 					contentType = value
 				}
 			}
@@ -44,7 +44,8 @@ func parseCatvodProxy(raw string) (status int, contentType string, body []byte, 
 					body = decoded
 				}
 			}
-			return status, contentType, body, headers, nil
+			// 对照 FongMi quickjs Spider.proxy2：Object[3] 无 headers，Res.headers 仅用于 Content-Type。
+			return status, contentType, body, nil, nil
 		}
 		// 兼容旧脚本：非数组且非 Res 对象时直接当正文。
 		return 200, "application/json", []byte(raw), nil, nil
