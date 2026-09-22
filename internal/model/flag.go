@@ -136,6 +136,11 @@ func (f *Flag) Find(remarks string, strict bool) *Episode {
 				return &f.Episodes[i]
 			}
 		}
+		for i := range f.Episodes {
+			if f.Episodes[i].Rule4(remarks) {
+				return &f.Episodes[i]
+			}
+		}
 	}
 	if f.Position >= 0 && f.Position < len(f.Episodes) {
 		return &f.Episodes[f.Position]

@@ -75,20 +75,16 @@ func (v *Vod) SetVodFlags() {
 	}
 	playFlags := flagSplit.Split(v.VodPlayFrom, -1)
 	playURLs := flagSplit.Split(v.VodPlayURL, -1)
-	flagMap := make(map[string]struct{})
+	// 同名线路全部保留（站点会给同名不同内容的线路）；线路名或对应 url 为空的跳过。
 	for i, name := range playFlags {
 		name = strings.TrimSpace(name)
-		if name == "" || i >= len(playURLs) {
-			continue
-		}
-		if _, exists := flagMap[name]; exists {
+		if name == "" || i >= len(playURLs) || playURLs[i] == "" {
 			continue
 		}
 		f := CreateFlag(name)
 		f.URLs = playURLs[i]
 		f.CreateEpisode(playURLs[i])
 		v.VodFlags = append(v.VodFlags, f)
-		flagMap[name] = struct{}{}
 	}
 	v.SetCurrentFlag(0)
 }
