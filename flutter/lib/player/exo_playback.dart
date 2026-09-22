@@ -8,6 +8,7 @@ import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_headers.dart';
 import 'playback_settings.dart';
+import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 import 'subtitle_style_util.dart';
 import 'video_eq.dart';
@@ -309,24 +310,22 @@ class ExoPlayback extends KotvPlayback {
     final event = '${m['event'] ?? ''}';
     switch (event) {
       case 'position':
-        final nextPos = Duration(milliseconds: (m['positionMs'] as num?)?.toInt() ?? 0);
-        final nextDur = Duration(milliseconds: (m['durationMs'] as num?)?.toInt() ?? 0);
-        final nextBuf = Duration(milliseconds: (m['bufferedMs'] as num?)?.toInt() ?? _buffered.inMilliseconds);
-        final nextPlaying = m['playing'] == true;
-        final nextBuffering = m['buffering'] == true;
-        final nextSpeed = (m['speedBps'] as num?)?.toInt() ?? _speedBps;
-        final changed = nextPlaying != _playing ||
-            nextBuffering != _buffering ||
-            nextSpeed != _speedBps ||
-            (nextPos - _position).inMilliseconds.abs() >= 200 ||
-            (nextBuf - _buffered).inMilliseconds.abs() >= 500 ||
-            nextDur != _duration;
-        _position = nextPos;
-        _duration = nextDur;
-        _buffered = nextBuf;
-        _playing = nextPlaying;
-        _buffering = nextBuffering;
-        _speedBps = nextSpeed < 0 ? 0 : nextSpeed;
+        final prev = KotvPositionSample(
+          position: _position,
+          duration: _duration,
+          buffered: _buffered,
+          playing: _playing,
+          buffering: _buffering,
+          speedBps: _speedBps,
+        );
+        final next = KotvPositionSample.fromEvent(m, prev);
+        final changed = next.shouldNotify(prev);
+        _position = next.position;
+        _duration = next.duration;
+        _buffered = next.buffered;
+        _playing = next.playing;
+        _buffering = next.buffering;
+        _speedBps = next.speedBps;
         if (!_posCtrl.isClosed) _posCtrl.add(_position);
         if (!_bufCtrl.isClosed) _bufCtrl.add(_buffered);
         if (changed) notifyListeners();
@@ -548,7 +547,7 @@ class ExoPlayback extends KotvPlayback {
     return _playing || _position > Duration.zero;
   }
 
-  /// 与 MPV 保持一致：按分辨率优先轮询全部视频轨；无轨则 play 软重试。
+  /// 按分辨率优先轮询全部视频轨；无轨则 play 软重试。
   @override
   Future<void> tryFixVideoSource() async {
     try {
@@ -909,7 +908,7 @@ class ExoPlayback extends KotvPlayback {
     if (_subtitleBgColor.isEmpty) _subtitleBgColor = '#00000000';
     final edge = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
     _subtitleEdgeType = kotvNormalizeSubtitleEdgeType(edge);
-    final styleMode = '${settings['subtitleStyleMode'] ?? 'custom'}'.trim().toLowerCase();
+    final styleMode = '${settings['subtitleStyleMode'] ?? 'original'}'.trim().toLowerCase();
     _subtitleUseSystemStyle = styleMode == 'system';
     _subtitleForceStyle = styleMode == 'custom';
     _subtitleTextOpacity =

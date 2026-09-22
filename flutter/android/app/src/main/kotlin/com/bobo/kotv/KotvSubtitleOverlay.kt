@@ -57,6 +57,8 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
   private var fontScale = 1.0f
   private var primaryPos = 0.0
   private var secondaryPos = 10.0
+  private var userFontPath = ""
+  private var assFontInjectedPath = ""
 
   val secondaryTextOutput =
     TextOutput { group: CueGroup ->
@@ -149,6 +151,8 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     val tf = resolveTypeface(fontName, fontPath)
     primaryView.typeface = Typeface.create(tf, Typeface.BOLD)
     secondaryView.typeface = Typeface.create(tf, Typeface.BOLD)
+    userFontPath = fontPath.trim()
+    injectAssFont()
     val fg = parseColorSafe(color, Color.WHITE)
     val edge = parseColorSafe(borderColor, Color.BLACK)
     val radius = (borderSize.coerceIn(0.0, 8.0).toFloat() * resources.displayMetrics.density).coerceAtLeast(0f)
@@ -244,6 +248,8 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
         AssHandlerConfig(),
       )
     assHandler = handler
+    assFontInjectedPath = ""
+    injectAssFont()
     val view = AssSubtitleView(context, handler)
     assView = view
     addView(
@@ -253,12 +259,31 @@ class KotvSubtitleOverlay(context: Context) : FrameLayout(context) {
     )
   }
 
+  /**
+   * 把用户选择的字体文件字节交给 libass（内存字体提供器），ASS 样式里引用该族名时可命中。
+   * ass-media 0.5.1 的 [AssHandlerConfig] 没有 fontconfig / 字体目录 / 默认族名参数，
+   * 系统字体目录与默认族名无法从这里配置；只能注入单个文件。
+   */
+  private fun injectAssFont() {
+    val handler = assHandler ?: return
+    val path = userFontPath
+    if (path.isEmpty() || path == assFontInjectedPath) return
+    try {
+      val f = java.io.File(path)
+      if (!f.isFile || !f.canRead()) return
+      handler.addFont(f.name, f.readBytes())
+      assFontInjectedPath = path
+    } catch (_: Throwable) {
+    }
+  }
+
   private fun releaseAss() {
     try {
       assHandler?.release()
     } catch (_: Throwable) {
     }
     assHandler = null
+    assFontInjectedPath = ""
     assView?.let { removeView(it) }
     assView = null
   }

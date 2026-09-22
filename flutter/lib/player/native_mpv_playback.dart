@@ -10,6 +10,7 @@ import 'kotv_platform.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
 import 'play_headers.dart';
+import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 
 /// Android 原生 libmpv（MethodChannel `kotv_mpv` + PlatformView Surface/Texture）。
@@ -340,25 +341,23 @@ class NativeMpvPlayback extends KotvPlayback {
     final event = '${m['event'] ?? ''}';
     switch (event) {
       case 'position':
-        final nextPos = Duration(milliseconds: (m['positionMs'] as num?)?.toInt() ?? 0);
-        final nextDur = Duration(milliseconds: (m['durationMs'] as num?)?.toInt() ?? 0);
-        final nextBuf = Duration(milliseconds: (m['bufferedMs'] as num?)?.toInt() ?? _buffered.inMilliseconds);
-        final nextPlaying = m['playing'] == true;
-        final nextBuffering = m['buffering'] == true;
-        final nextSpeed = (m['speedBps'] as num?)?.toInt() ?? 0;
+        final prev = KotvPositionSample(
+          position: _position,
+          duration: _duration,
+          buffered: _buffered,
+          playing: _playing,
+          buffering: _buffering,
+          speedBps: _speedBps,
+        );
         // 进度变化要 notify，否则 VodInlineControls 的 ListenableBuilder 不刷新。
-        final changed = nextPlaying != _playing ||
-            nextBuffering != _buffering ||
-            nextSpeed != _speedBps ||
-            (nextPos - _position).inMilliseconds.abs() >= 200 ||
-            (nextBuf - _buffered).inMilliseconds.abs() >= 500 ||
-            nextDur != _duration;
-        _position = nextPos;
-        _duration = nextDur;
-        _buffered = nextBuf;
-        _playing = nextPlaying;
-        _buffering = nextBuffering;
-        _speedBps = nextSpeed;
+        final next = KotvPositionSample.fromEvent(m, prev);
+        final changed = next.shouldNotify(prev);
+        _position = next.position;
+        _duration = next.duration;
+        _buffered = next.buffered;
+        _playing = next.playing;
+        _buffering = next.buffering;
+        _speedBps = next.speedBps;
         if (!_posCtrl.isClosed) _posCtrl.add(_position);
         if (!_bufCtrl.isClosed) _bufCtrl.add(_buffered);
         if (changed) notifyListeners();

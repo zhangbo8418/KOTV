@@ -68,6 +68,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var appliedSurfaceSize: String? = null
   private var decodeMode = "auto"
   private var gpuNext = false
+  /** open/setOpts 的 props 里下发的 demuxer-lavf-o（可能带 ClearKey decryption_key）；无则用初值常量。 */
+  private var lavfBase = LAVF_DEMUXER_O
   private var vulkanEnabled = false
   private var conf = ""
   /** 默认校验证书；坏 CA 盒子可关（设置 mpvTlsVerify=false）。 */
@@ -712,13 +714,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
                   }
                 }
                 if (fontPath.isNotEmpty()) {
-                  val parent = java.io.File(fontPath).parent
+                  val fontFile = java.io.File(fontPath)
+                  val parent = fontFile.parent
                   if (!parent.isNullOrBlank()) {
                     MPVLib.setPropertyString("sub-fonts-dir", parent)
                   }
-                  val base = java.io.File(fontPath).nameWithoutExtension
-                  if (base.isNotBlank()) {
-                    MPVLib.setPropertyString("sub-font", base)
+                  // sub-font 按族名匹配；读不出 name 表再退回文件名。
+                  val family = KotvFontFile.familyName(fontFile) ?: fontFile.nameWithoutExtension
+                  if (family.isNotBlank()) {
+                    MPVLib.setPropertyString("sub-font", family)
                   }
                 } else if (fontName.isNotEmpty() && fontName != "default") {
                   val mpvFont =
@@ -894,6 +898,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       if (created.get()) return
       val configDir = File(ctx.filesDir, "mpv").apply { mkdirs() }
       val cacheDir = File(ctx.cacheDir, "mpv").apply { mkdirs() }
+      // libass fontconfig 后端从 config-dir/fonts.conf 找系统字体目录与通用族名 alias。
+      KotvFontConfig.prepare(configDir, cacheDir)
       if (!MPVLib.tryCreate(ctx)) {
         // 已有上下文：先销毁再试一次
         MPVLib.destroyCreatedContext()
@@ -1192,6 +1198,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         value = line.substring(sp.range.last + 1).trim()
       }
       if (key.isEmpty()) continue
+      // `kotv-*` 是应用自用开关（如 kotv-log=debug），不是 mpv 选项。
+      if (key.startsWith("kotv-")) continue
       val base = if (key.startsWith("no-")) key.substring(3) else key
       if (MANAGED_CONF_OPTIONS.contains(key) || MANAGED_CONF_OPTIONS.contains(base)) {
         Log.i(TAG, "skip conf option managed by UI/engine: $key")
@@ -1250,6 +1258,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   private fun applyRuntimeOpts(props: Map<String, String>) {
     if (!created.get()) return
+    // 记下基串：随后 applyPlayHttpHeaders 会在其后拼 user_agent/referer 重写整条属性。
+    lavfBase = props["demuxer-lavf-o"]?.takeIf { it.isNotBlank() } ?: LAVF_DEMUXER_O
     val hw = resolveHwdec(props["hwdec"] ?: decodeMode)
     try {
       MPVLib.setPropertyString("hwdec", hw)
@@ -1568,7 +1578,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
     // 嵌套列表/分片不走 mpv 的 http-header-fields，要把 UA 写进 lavf，否则子请求是 Lavf 默认头。
     val lavf = buildString {
-      append(LAVF_DEMUXER_O)
+      append(lavfBase)
       append(",user_agent=").append(escapeListValue(ua))
       if (referer.isNotEmpty()) append(",referer=").append(escapeListValue(referer))
     }
@@ -1827,7 +1837,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     private const val TAG = "KotvMpv"
     private const val FALLBACK_PLAY_UA =
       "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
-    // 与 flutter/lib/player/mpv_opts.dart kotvDemuxerLavfO 一致；不设 protocol_whitelist。
+    // 仅作 open 前的初值；open/setOpts 后以 Dart props 下发的 demuxer-lavf-o 为准（见 lavfBase）。
+    // 不设 protocol_whitelist：写了就是拒绝名单外协议（RTSP/RTMP/RTP）。
     private const val LAVF_DEMUXER_O =
       "seg_max_retry=5,strict=experimental," +
         "allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0," +
