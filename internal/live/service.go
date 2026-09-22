@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/bobo/KOTV/internal/config"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
 	parsepkg "github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/settings"
@@ -146,7 +147,7 @@ func (s *Service) fetchLiveText(live model.Live) (string, error) {
 		}
 		return text, nil
 	}
-	text, err := util.HTTPGet(live.URL, live.Headers())
+	text, err := util.HTTPGet(localproxy.ConvertScheme(live.URL), live.Headers())
 	if err != nil {
 		return "", fmt.Errorf("下载直播源失败: %w", err)
 	}
@@ -186,7 +187,7 @@ func (s *Service) ResolvePlayURLParsed(ch *model.LiveChannel) (string, map[strin
 	if s.cfg != nil {
 		parses = s.cfg.API().Parses
 	}
-	out, err := parsepkg.ResolveLiveURL(raw, needParse, parses, headers, ch.Click)
+	out, err := parsepkg.ResolveLiveURL(raw, needParse, parses, headers, ch.Click, settings.Get(settings.PreferredParse))
 	if err != nil {
 		return raw, headers, err
 	}

@@ -259,7 +259,8 @@ func matchVideo(u string, rules []model.Rule, check func(string) bool) bool {
 }
 
 // ResolveLiveURL 直播地址解析。click 为频道/源级 `click=` 脚本，Web 嗅探时在页面里执行。
-func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers map[string]string, click string) (string, error) {
+// prefer 为用户选中的解析器名（settings.PreferredParse），与点播 resolveParse 同源。
+func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers map[string]string, click, prefer string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
@@ -295,17 +296,14 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 	if IsVideoFormat(raw) {
 		return raw, nil
 	}
-	// 未标记 parse 的频道直链直接播，
-	// 不要拿全局 type=1 解析器去撞直播 URL（否则普通 m3u8 也会「解析中」）。
+	// 未标记 parse 的频道直链直接播。
 	if !needParse {
 		return raw, nil
 	}
 
-	for _, p := range parses {
-		if p.TypeID() != 1 || p.URL == "" {
-			continue
-		}
-		out, err := JSONParse(p.URL, raw, headers)
+	p := resolveParse(model.Result{URL: model.URL{URLs: []string{raw}}}, parses, true, prefer)
+	if p != nil && !selectedEmpty(p) {
+		out, _, err := executeParse(*p, raw, "", headers, parses, nil, click, nil, false)
 		if err == nil && out != "" {
 			return out, nil
 		}

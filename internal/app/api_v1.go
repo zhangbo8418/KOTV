@@ -496,7 +496,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	var headers map[string]string
 	var danmakuItems []model.DanmakuItem
 	var playSubs []model.Sub
-	var playArtwork, playDesc, playMsg string
+	var playArtwork, playDesc, playMsg, playFormat string
 	var playPosition int
 	var qualNames, qualURLs []string
 	var playDrm *model.Drm
@@ -519,6 +519,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			result.Drm = prepared
 		}
 		playDrm = result.Drm
+		playFormat = strings.TrimSpace(result.Format)
 		headers = map[string]string(result.Header)
 		danmakuItems = append([]model.DanmakuItem(nil), result.Danmaku.Items...)
 		playSubs = append([]model.Sub(nil), result.Subs...)
@@ -593,6 +594,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			}
 			if result.Position.Valid {
 				playPosition = int(result.Position.Value)
+			}
+			if s := strings.TrimSpace(result.Format); s != "" {
+				playFormat = s
 			}
 		}
 	}
@@ -682,6 +686,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		"parsed":              didParse,
 		"headers":             headers,
 		"drm":                 playDrm,
+		"format":              playFormat,
 		"danmaku":             danmakuDTO,
 		"subs":                subsDTO,
 		"artwork":             playArtwork,
@@ -1560,15 +1565,17 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		ch.Drm = prepared
 	}
 	return map[string]any{
-		"ok":      true,
-		"url":     playproxy.PublicizeURL(playURL),
-		"headers": headers,
-		"name":    ch.Name,
-		"group":   g.Name,
-		"line":    ch.URLIndex,
-		"lines":   len(ch.URLs),
-		"drm":     ch.Drm,
-		"error":   errString(err),
+		"ok":       true,
+		"url":      playproxy.PublicizeURL(playURL),
+		"headers":  headers,
+		"name":     ch.Name,
+		"group":    g.Name,
+		"line":     ch.URLIndex,
+		"lines":    len(ch.URLs),
+		"lineName": ch.LineLabel(),
+		"format":   ch.Format,
+		"drm":      ch.Drm,
+		"error":    errString(err),
 	}, nil
 }
 

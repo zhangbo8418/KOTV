@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Live 直播源配置。
@@ -22,11 +23,29 @@ type Live struct {
 	Click      string     `json:"click"`
 	// Pass 为 true 时分组名里的 `_密码` 只截掉不设密码（全部可见）。
 	Pass       bool       `json:"pass"`
+	// TimeZone IANA 时区名（如 Asia/Shanghai）；空则用本机时区。
+	TimeZone   string     `json:"timeZone"`
 	PlayerType FlexInt    `json:"playerType"`
 	Header     FlexHeader `json:"header"`
 	Catchup    Catchup    `json:"catchup"`
 	Core       json.RawMessage `json:"core,omitempty"`
 	Groups     []LiveGroup `json:"-"`
+}
+
+// Location 返回源级时区；无效或空则 time.Local。
+func (l *Live) Location() *time.Location {
+	if l == nil {
+		return time.Local
+	}
+	tz := strings.TrimSpace(l.TimeZone)
+	if tz == "" {
+		return time.Local
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil || loc == nil {
+		return time.Local
+	}
+	return loc
 }
 
 // SplitGroupPass 解析分组名「显示名_密码」：按第一个 _ 切分，前段为显示名。
@@ -149,9 +168,12 @@ func (c *LiveChannel) LineLabel() string {
 	}
 	raw := c.URLs[c.URLIndex]
 	if i := indexByte(raw, '$'); i >= 0 && i+1 < len(raw) {
-		return raw[i+1:]
+		name := trimSpace(raw[i+1:])
+		if name != "" {
+			return name
+		}
 	}
-	return "线路 " + itoa(c.URLIndex+1)
+	return ""
 }
 
 func (c *LiveChannel) ApplyLive(live *Live) {
@@ -368,26 +390,4 @@ func containsBrace(s string) bool {
 		}
 	}
 	return false
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		b[i] = '-'
-	}
-	return string(b[i:])
 }

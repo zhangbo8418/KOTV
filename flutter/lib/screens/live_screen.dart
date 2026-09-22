@@ -304,6 +304,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   int _dayIdx = 0;
   int _line = 0;
   int _lines = 1;
+  String _lineName = '';
   bool _leftOpen = true;
   bool _rightOpen = false;
   /// 横屏左侧节目单列；默认收起，避免挡画面 / 撑破面板。
@@ -887,6 +888,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = true,
+    String? format,
   }) async {
     try {
       final st = await ref.read(apiProvider).getSettings();
@@ -943,7 +945,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       try {
         // 直播页 live=true：直链立刻 play（含 EPG 回看时移流）。
         // 不写 demuxer-max-bytes / cache-secs；无 Flutter play:false 等缓冲。
-        await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null, live: live);
+        await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null, live: live, format: format);
         unawaited(pb.setVideoScale(_liveScale));
         if (_backend != KotvEmbedBackend.mpv) {
           try {
@@ -1144,7 +1146,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
       _lines = (data['lines'] as int?) ?? 1;
       _line = (data['line'] as int?) ?? useLine;
-      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, drm: drm);
+      _lineName = '${data['lineName'] ?? ''}'.trim();
+      final format = '${data['format'] ?? ''}'.trim();
+      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, drm: drm, format: format.isEmpty ? null : format);
       if (!mounted || serial != _playSerial) return;
       setState(() => _status = '播放中 · $_title');
       _scheduleHideOverlays();
@@ -1894,7 +1898,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   String get _channelNum => _chIdx < 0 ? '--' : '${_chIdx + 1}'.padLeft(2, '0');
 
-  String get _lineLabel => _chIdx < 0 || _lines <= 1 ? '' : '线路 ${_line + 1}/$_lines';
+  String get _lineLabel {
+    if (_chIdx < 0 || _lines <= 1) return '';
+    if (_lineName.isNotEmpty) return '$_lineName (${_line + 1}/$_lines)';
+    return '线路 ${_line + 1}/$_lines';
+  }
 
   /// 频道列表 / 设置面板 / 底栏控件打开时，方向键与确定交给焦点遍历，不换台。
   bool get _liveUiOpen =>

@@ -110,17 +110,12 @@ func LoadChannelDays(ch *model.LiveChannel) []Epg {
 	if ch == nil {
 		return nil
 	}
-	src := ChannelEPGSource(ch)
-	api, xmls := SplitEpgURLs(src)
-	if api != "" {
-		saved := ch.EPG
-		ch.EPG = api
-		out := LoadChannelEPG(ch)
-		ch.EPG = saved
-		if len(out) > 0 {
-			return out
-		}
+	// 含源级模板展开（频道相对 epg → {epg}）。
+	if out := LoadChannelEPG(ch); len(out) > 0 {
+		return out
 	}
+	src := ChannelEPGSource(ch)
+	_, xmls := SplitEpgURLs(src)
 	for _, u := range xmls {
 		days, logo, err := LoadXMLTVDays(u, ch)
 		if err != nil || len(days) == 0 {
@@ -132,7 +127,8 @@ func LoadChannelDays(ch *model.LiveChannel) []Epg {
 		return days
 	}
 	// 兼容：整串无逗号且非模板时仍当 XMLTV。
-	if api == "" && len(xmls) == 0 && src != "" && !strings.Contains(src, "{") {
+	if len(xmls) == 0 && src != "" && !strings.Contains(src, "{") &&
+		(strings.HasPrefix(strings.ToLower(src), "http://") || strings.HasPrefix(strings.ToLower(src), "https://")) {
 		days, logo, err := LoadXMLTVDays(src, ch)
 		if err == nil && len(days) > 0 {
 			if logo != "" && !hasHTTPLogo(ch.Logo) {
@@ -155,8 +151,18 @@ func LoadChannelEPG(ch *model.LiveChannel) []Epg {
 		return nil
 	}
 	template := ch.EPG
-	if template == "" && ch.Live != nil {
-		template = ch.Live.EPG
+	epgToken := ""
+	if live := ch.Live; live != nil {
+		liveEPG := strings.TrimSpace(live.EPG)
+		chEPG := strings.TrimSpace(ch.EPG)
+		// 频道相对 epg（非 http、无 {）套源级含 { 的模板，{epg} 取频道值。
+		if chEPG != "" && !strings.Contains(chEPG, "{") && !hasHTTPPrefix(chEPG) &&
+			strings.Contains(liveEPG, "{") {
+			template = liveEPG
+			epgToken = chEPG
+		} else if template == "" {
+			template = liveEPG
+		}
 	}
 	api, _ := SplitEpgURLs(template)
 	if api != "" {
@@ -165,8 +171,11 @@ func LoadChannelEPG(ch *model.LiveChannel) []Epg {
 	if template == "" || !strings.Contains(template, "{") {
 		return nil
 	}
+	if epgToken == "" {
+		epgToken = ch.EPG
+	}
 	var out []Epg
-	zone := time.Local
+	zone := channelLocation(ch)
 	for _, offset := range []int{-1, 0, 1} {
 		date := time.Now().In(zone).AddDate(0, 0, offset).Format("2006-01-02")
 		nameToken := ch.TvgName
@@ -181,7 +190,7 @@ func LoadChannelEPG(ch *model.LiveChannel) []Epg {
 		u = strings.ReplaceAll(u, "{date}", date)
 		u = strings.ReplaceAll(u, "{id}", url.QueryEscape(idToken))
 		u = strings.ReplaceAll(u, "{name}", url.QueryEscape(nameToken))
-		u = strings.ReplaceAll(u, "{epg}", ch.EPG)
+		u = strings.ReplaceAll(u, "{epg}", epgToken)
 		u = strings.ReplaceAll(u, "{logo}", ch.Logo)
 		u = strings.ReplaceAll(u, "+", "%20")
 		if !strings.HasPrefix(u, "http") {
@@ -197,6 +206,18 @@ func LoadChannelEPG(ch *model.LiveChannel) []Epg {
 		}
 	}
 	return out
+}
+
+func channelLocation(ch *model.LiveChannel) *time.Location {
+	if ch != nil && ch.Live != nil {
+		return ch.Live.Location()
+	}
+	return time.Local
+}
+
+func hasHTTPPrefix(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
 
 // ParseEPG 解析 JSON 或简易 XML 片段。
@@ -296,9 +317,13 @@ func LoadXMLTVDays(epgURL string, ch *model.LiveChannel) ([]Epg, string, error) 
 	}
 	cacheDir := paths.EpgCache()
 	cacheFile := filepath.Join(cacheDir, util.MD5(epgURL)+".xml")
+	zone := channelLocation(ch)
 	needFetch := true
 	if st, err := os.Stat(cacheFile); err == nil {
-		if time.Since(st.ModTime()) < 6*time.Hour {
+		ageOK := time.Since(st.ModTime()) < 6*time.Hour
+		modDay := st.ModTime().In(zone).Format("2006-01-02")
+		today := time.Now().In(zone).Format("2006-01-02")
+		if ageOK && modDay == today {
 			needFetch = false
 		}
 	}
@@ -383,7 +408,7 @@ func matchXMLTVDays(data []byte, ch *model.LiveChannel, preferDate string) ([]Ep
 	}
 
 	byDay := map[string][]EpgData{}
-	zone := time.Local
+	zone := channelLocation(ch)
 	now := time.Now().In(zone)
 	minDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone).AddDate(0, 0, -1)
 	maxDay := minDay.Add(3 * 24 * time.Hour)
@@ -391,8 +416,8 @@ func matchXMLTVDays(data []byte, ch *model.LiveChannel, preferDate string) ([]Ep
 		if !ids[strings.ToLower(strings.TrimSpace(p.Channel))] {
 			continue
 		}
-		st := parseXMLTVTime(p.Start)
-		et := parseXMLTVTime(p.Stop)
+		st := parseXMLTVTime(p.Start, zone)
+		et := parseXMLTVTime(p.Stop, zone)
 		if st.IsZero() {
 			continue
 		}
@@ -426,11 +451,23 @@ func matchXMLTVDays(data []byte, ch *model.LiveChannel, preferDate string) ([]Ep
 	return out, logo, nil
 }
 
-func parseXMLTVTime(s string) time.Time {
+func parseXMLTVTime(s string, loc *time.Location) time.Time {
 	s = strings.TrimSpace(s)
+	if loc == nil {
+		loc = time.Local
+	}
 	if len(s) >= 14 {
-		t, err := time.ParseInLocation("20060102150405", s[:14], time.Local)
-		if err == nil {
+		timePart := s[:14]
+		offset := strings.TrimSpace(s[14:])
+		if offset != "" {
+			combined := timePart + " " + offset
+			for _, layout := range []string{"20060102150405 -0700", "20060102150405 -07:00"} {
+				if t, err := time.Parse(layout, combined); err == nil {
+					return t
+				}
+			}
+		}
+		if t, err := time.ParseInLocation("20060102150405", timePart, loc); err == nil {
 			return t
 		}
 	}
