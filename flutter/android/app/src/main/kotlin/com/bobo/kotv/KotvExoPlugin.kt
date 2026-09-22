@@ -1385,12 +1385,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val audioMode: Int
     when (mode) {
       "soft" -> {
-        // 软解 prefer：扩展渲染优先；不 prefer 的一侧走硬解（与 hard 侧一致）
+        // 软解 prefer：扩展渲染优先；未 prefer 时 MediaCodec 优先、FFmpeg 仍作兜底
         videoMode =
           if (softVideoPrefer) {
             DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
           } else {
-            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
           }
         audioMode =
           if (softAudioPrefer) {
@@ -1400,8 +1400,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
       }
       "hard" -> {
-        // 硬解视频 MediaCodec；音轨仍走 FFmpeg（AV3A）
-        videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+        // 硬解视频 MediaCodec 优先；FFmpeg 扩展作兜底（含 AV3A 音轨）
+        videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
         audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
       }
       else -> {
@@ -1479,6 +1479,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       val lang = m["lang"]?.toString()?.trim().orEmpty()
       val mime = m["mime"]?.toString()?.trim()?.ifEmpty { null }
         ?: m["format"]?.toString()?.trim()?.ifEmpty { null }
+        ?: subtitleMimeFromPath(u)
       val rawFlag =
         when (val f = m["flag"] ?: m["selectionFlags"] ?: m["selectionFlag"]) {
           is Number -> f.toInt()
@@ -2513,6 +2514,21 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         u.contains(".mpd") -> MimeTypes.APPLICATION_MPD
         u.contains(".ism") || u.contains("mpd/") -> MimeTypes.APPLICATION_SS
         else -> null
+      }
+    }
+
+    fun subtitleMimeFromPath(url: String): String {
+      val path =
+        try {
+          Uri.parse(url).path ?: url
+        } catch (_: Throwable) {
+          url
+        }.lowercase()
+      return when {
+        path.endsWith(".vtt") -> MimeTypes.TEXT_VTT
+        path.endsWith(".ssa") || path.endsWith(".ass") -> MimeTypes.TEXT_SSA
+        path.endsWith(".ttml") || path.endsWith(".xml") || path.endsWith(".dfxp") -> MimeTypes.APPLICATION_TTML
+        else -> MimeTypes.APPLICATION_SUBRIP
       }
     }
 
