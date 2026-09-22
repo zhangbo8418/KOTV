@@ -296,11 +296,6 @@ func hasHTTPPrefix(s string) bool {
 
 func (c *LiveChannel) BuildHeaders() map[string]string {
 	m := make(map[string]string)
-	if c.Live != nil {
-		for k, v := range c.Live.Header {
-			m[k] = v
-		}
-	}
 	for k, v := range c.Header {
 		m[k] = v
 	}
