@@ -245,6 +245,14 @@ func (s *pySpider) ensureScript() (string, error) {
 		}
 		return "", err
 	}
+	// api 本身就是 Python 源码（非 URL、非本地路径）：写入缓存后加载。
+	if isInlinePySource(api) {
+		if err := os.WriteFile(dest, []byte(s.api), 0o644); err != nil {
+			return "", err
+		}
+		s.scriptPath = dest
+		return dest, nil
+	}
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
 		s.scriptPath = dest
 		return dest, nil
@@ -258,6 +266,18 @@ func (s *pySpider) ensureScript() (string, error) {
 	}
 	s.scriptPath = dest
 	return dest, nil
+}
+
+// isInlinePySource 判断 api 是否为内联源码：不带协议、不是路径，且含换行或语句特征。
+func isInlinePySource(api string) bool {
+	if api == "" || strings.Contains(api, "://") {
+		return false
+	}
+	if strings.ContainsAny(api, "\n\r") {
+		return true
+	}
+	return strings.HasPrefix(api, "import ") || strings.HasPrefix(api, "from ") ||
+		strings.HasPrefix(api, "class ") || strings.HasPrefix(api, "def ") || strings.HasPrefix(api, "#")
 }
 
 func pyRunnerPath() (string, error) {

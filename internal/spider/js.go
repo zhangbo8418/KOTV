@@ -332,14 +332,7 @@ func (s *jsSpider) runWorker() (err error) {
 
 // initArg CatVod 脚本包装 {stype,skey,ext}。
 func (s *jsSpider) initArg() interface{} {
-	ext := strings.TrimSpace(s.ext)
-	var extVal interface{} = ext
-	if ext != "" && (strings.HasPrefix(ext, "{") || strings.HasPrefix(ext, "[")) {
-		var parsed interface{}
-		if json.Unmarshal([]byte(ext), &parsed) == nil {
-			extVal = parsed
-		}
-	}
+	extVal := jsExtValue(s.ext)
 	if !s.cat.Load() {
 		return extVal
 	}
@@ -348,6 +341,20 @@ func (s *jsSpider) initArg() interface{} {
 		"skey":  s.key,
 		"ext":   extVal,
 	}
+}
+
+// jsExtValue 只有 JSON 对象才解析成对象传给脚本；数组、标量、普通文本一律按原字符串传。
+// 脚本常对 ext 做 split/startsWith，数组被解析成 JS Array 会直接抛 TypeError。
+func jsExtValue(raw string) interface{} {
+	ext := strings.TrimSpace(raw)
+	if ext == "" || !strings.HasPrefix(ext, "{") {
+		return ext
+	}
+	var parsed map[string]interface{}
+	if json.Unmarshal([]byte(ext), &parsed) != nil {
+		return ext
+	}
+	return parsed
 }
 
 // looksLikeESModule 判断源码是否已是 ESM（否则补 export default）。
