@@ -631,11 +631,6 @@ func GlobalProxy(params map[string]string) (int, string, []byte, map[string]stri
 	return jarProxy(params)
 }
 
-// JarProxy 保留给只想打 JAR 静态 Proxy 的调用方。
-func JarProxy(params map[string]string) (int, string, []byte, map[string]string, error) {
-	return jarProxy(params)
-}
-
 func jarProxy(params map[string]string) (int, string, []byte, map[string]string, error) {
 	req := bridgeRequest{
 		Method: "proxyGlobal",

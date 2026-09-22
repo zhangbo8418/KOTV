@@ -19,7 +19,7 @@ func TestFetchExt_NonHTTPUnchanged(t *testing.T) {
 }
 
 func TestFetchExt_HTTPFailSoft(t *testing.T) {
-	// 对照 FongMi Site.fetchExt：OkHttp.string 失败→空，不改 ext、不抛错。
+	// OkHttp.string 失败→空：不改 ext、不抛错。
 	site := model.Site{Ext: model.FlexString("http://127.0.0.1:1/no-such-ext")}
 	out, err := fetchExt(site)
 	if err != nil {
@@ -44,7 +44,7 @@ func TestSiteCall_AttachesExtendLiteral(t *testing.T) {
 }
 
 func TestSiteCall_LongExtUsesUTF16Len(t *testing.T) {
-	// FongMi SiteApi.call：ext.length()>1000（UTF-16）→ POST。
+	// ext.length()>1000（UTF-16）→ POST。
 	ext := strings.Repeat("中", 1001)
 	if javaUTF16Len(ext) <= 1000 {
 		t.Fatal("fixture")

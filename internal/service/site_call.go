@@ -21,7 +21,7 @@ func base64URLSafe(s string) string {
 	return base64.URLEncoding.EncodeToString([]byte(s))
 }
 
-// javaUTF16Len 对照 Java String.length()（UTF-16 code unit 数）。
+// javaUTF16Len 返回 UTF-16 code unit 数（与 Java String.length 一致）。
 func javaUTF16Len(s string) int {
 	n := 0
 	for _, r := range s {
@@ -44,7 +44,7 @@ func siteCall(site model.Site, params map[string]string) (string, error) {
 		params["extend"] = ext
 	}
 	headers := map[string]string(site.Header)
-	// FongMi SiteApi.call：getExt().length() <= 1000 → GET；否则 POST form。
+	// getExt().length() <= 1000 → GET；否则 POST form（UTF-16 code unit）。
 	if javaUTF16Len(ext) > 1000 {
 		return util.HTTPPostFormInsecure(site.API, headers, params)
 	}

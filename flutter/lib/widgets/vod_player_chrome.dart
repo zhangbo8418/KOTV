@@ -1241,7 +1241,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       await widget.player.setRenderMode(mode);
       widget.onRenderChanged?.call(mode);
       await _persist('playerRender', mode);
-      // 对照 FongMi PlayerSetting.putRender：Texture 时关隧道并落盘。
+      // Texture 时关闭隧道并落盘（仅 Surface 可用）。
       if (mode == 'texture') {
         await _persist('exoTunneling', 'false');
       }

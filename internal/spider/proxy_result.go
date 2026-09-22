@@ -3,15 +3,17 @@ package spider
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
 // parseCatvodProxy 解析 CatVod 风格 proxy 返回值：
 // [status, contentType, body, headers?, base64Flag?]
+// 空/畸形 payload → error（勿伪装成 200）。
 func parseCatvodProxy(raw string) (status int, contentType string, body []byte, headers map[string]string, err error) {
 	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 200, "application/octet-stream", nil, nil, nil
+	if raw == "" || raw == "null" || raw == "[]" || raw == "{}" {
+		return 0, "", nil, nil, fmt.Errorf("invalid proxy response")
 	}
 
 	var arr []json.RawMessage
@@ -23,7 +25,7 @@ func parseCatvodProxy(raw string) (status int, contentType string, body []byte, 
 			Buffer  int               `json:"buffer"`
 			Headers map[string]string `json:"headers"`
 		}
-	if json.Unmarshal([]byte(raw), &res) == nil && (res.Code != nil || res.Content != "" || res.Headers != nil) {
+		if json.Unmarshal([]byte(raw), &res) == nil && (res.Code != nil || res.Content != "" || res.Headers != nil) {
 			status, contentType, body = 200, "application/octet-stream", []byte(res.Content)
 			if res.Code != nil {
 				status = *res.Code
@@ -44,11 +46,10 @@ func parseCatvodProxy(raw string) (status int, contentType string, body []byte, 
 					body = decoded
 				}
 			}
-			// 对照 FongMi quickjs Spider.proxy2：Object[3] 无 headers，Res.headers 仅用于 Content-Type。
+			// Res 对象路径：headers 只用于挑选 Content-Type，不写入 HTTP 响应。
 			return status, contentType, body, nil, nil
 		}
-		// 兼容旧脚本：非数组且非 Res 对象时直接当正文。
-		return 200, "application/json", []byte(raw), nil, nil
+		return 0, "", nil, nil, fmt.Errorf("invalid proxy response")
 	}
 
 	status = 200

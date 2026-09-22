@@ -120,7 +120,8 @@ public class Path {
 
     private static String sanitizeScope(String scopeId) {
         if (scopeId == null) return "";
-        String s = scopeId.trim().replaceAll("[^a-zA-Z0-9._:-]", "_");
+        // Windows / 多客户端 scope（c:<id> / u:<id>）路径禁止 ':'，换成下划线。
+        String s = scopeId.trim().replace(':', '_').replaceAll("[^a-zA-Z0-9._-]", "_");
         if (s.length() > 64) s = s.substring(0, 64);
         return s;
     }

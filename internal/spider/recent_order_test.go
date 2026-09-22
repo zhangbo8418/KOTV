@@ -5,7 +5,7 @@ import (
 )
 
 func TestSetRecent_JSBeforePyWhenBoth(t *testing.T) {
-	// 对照 FongMi BaseLoader.setRecent：isJs 先于 isPy。
+	// api 同时含 .js 与 .py 时 recent 记 js。
 	Clear()
 	t.Cleanup(Clear)
 	api := "http://example.com/spider.js.py"
@@ -22,7 +22,7 @@ func TestSetRecent_JSBeforePyWhenBoth(t *testing.T) {
 }
 
 func TestGet_PyBeforeJSWhenBoth(t *testing.T) {
-	// 对照 FongMi BaseLoader.getSpider：isPy 先于 isJs。
+	// api 同时含 .js 与 .py 时 Get 走 py。
 	Clear()
 	t.Cleanup(Clear)
 	api := "http://example.com/spider.js.py"

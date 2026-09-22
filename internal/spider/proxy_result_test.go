@@ -3,7 +3,7 @@ package spider
 import "testing"
 
 func TestParseCatvodProxy_ResOmitsResponseHeaders(t *testing.T) {
-	// 对照 FongMi Spider.proxy2：Object 长度 3，Res.headers 只决定 Content-Type。
+	// Res 对象路径：headers 只用于挑选 Content-Type，不写入 HTTP 响应。
 	raw := `{"code":200,"content":"ok","headers":{"Content-Type":"text/plain","X-Extra":"1"}}`
 	status, ct, body, headers, err := parseCatvodProxy(raw)
 	if err != nil {
@@ -25,5 +25,14 @@ func TestParseCatvodProxy_ArrayKeepsHeaders(t *testing.T) {
 	}
 	if headers["X-Keep"] != "yes" {
 		t.Fatalf("array path should keep headers, got %#v", headers)
+	}
+}
+
+func TestParseCatvodProxy_InvalidRejected(t *testing.T) {
+	for _, raw := range []string{"", "null", "[]", "{}", "oops"} {
+		_, _, _, _, err := parseCatvodProxy(raw)
+		if err == nil {
+			t.Fatalf("want error for %q", raw)
+		}
 	}
 }

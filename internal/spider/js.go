@@ -1308,8 +1308,8 @@ func (s *jsSpider) invoke(method string, args ...interface{}) (string, error) {
 			jsLog("[js] invoke err key=%s method=%s cost=%s err=%v", s.key, method, cost, r.err)
 			return "{}", r.err
 		}
-		// action/sniffer/isVideo 允许空串（null/false）；其它业务空结果抬成 "{}"
-		if r.out == "" && method != "action" && method != "sniffer" && method != "isVideo" {
+		// action/sniffer/isVideo/proxy 允许空串；其它业务空结果抬成 "{}"
+		if r.out == "" && method != "action" && method != "sniffer" && method != "isVideo" && method != "proxy" {
 			jsLog("[js] invoke empty→{} key=%s method=%s cost=%s", s.key, method, cost)
 			return "{}", nil
 		}

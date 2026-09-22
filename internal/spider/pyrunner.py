@@ -395,11 +395,12 @@ def encode_result(value):
 
 
 def encode_proxy_result(value):
-    """兼容历史安卓实现：localProxy 返回 list，body 可为 bytes。
+    """localProxy 返回 list，body 可为 bytes。
     JSON-IPC 无法传 bytes，转为 base64 字符串并置 flag=1。
+    None / 非法 → 空串，由 Go 侧判 invalid proxy response。
     """
     if value is None:
-        return "[]"
+        return ""
     if not isinstance(value, (list, tuple)):
         return encode_result(value)
     out = list(value)

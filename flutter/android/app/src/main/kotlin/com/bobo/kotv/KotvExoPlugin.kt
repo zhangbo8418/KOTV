@@ -577,7 +577,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             renderTexture = resolveRenderTexture(mode)
-            // 对照 FongMi PlayerSetting.putRender：Texture 时关隧道。
+	// Texture 时关闭隧道（仅 Surface 可用）。
             if (renderTexture) tunnelingEnabled = false
             // 强制下次 bind 重挂输出，避免全屏切渲染后仍认旧 Surface 导致定格有声。
             boundSurfaceView = null

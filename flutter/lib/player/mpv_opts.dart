@@ -315,15 +315,17 @@ class KotvMpvOpts {
             await set(e.key, e.value);
           }
           await set('cache-on-disk', diskCache ? 'yes' : 'no');
-          if (preferredTextLangs.trim().isNotEmpty) {
-            final slang = preferredTextLangs.replaceAll(';', ',').replaceAll(RegExp(r'\s+'), '');
-            await set('slang', slang);
-          } else {
-            final auto = kotvPreferredTextLanguagesFromLocale().join(',');
-            if (auto.isNotEmpty) await set('slang', auto);
-          }
         } catch (_) {}
       }
+      try {
+        if (preferredTextLangs.trim().isNotEmpty) {
+          final slang = preferredTextLangs.replaceAll(';', ',').replaceAll(RegExp(r'\s+'), '');
+          await set('slang', slang);
+        } else {
+          final auto = kotvPreferredTextLanguagesFromLocale().join(',');
+          if (auto.isNotEmpty) await set('slang', auto);
+        }
+      } catch (_) {}
 
       for (final e in parseConfLines(conf)) {
         await set(e.$1, e.$2);

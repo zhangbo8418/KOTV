@@ -120,9 +120,13 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   bool get buffering {
     if (!_buffering) return false;
+    // 补缓存时常 buffering；已在播（含纯音频）不当作起播缓冲，避免误切。
     if (_w > 0 && _h > 0) return false;
     if (_position > const Duration(milliseconds: 300)) return false;
     if (_ready && _playing) return false;
+    if (_playing && (_isAudioOnlyUnlocked || _position > const Duration(seconds: 1))) {
+      return false;
+    }
     return true;
   }
 
@@ -184,7 +188,7 @@ class NativeMpvPlayback extends KotvPlayback {
   String? get currentSecondarySubtitleId => _currentSecondarySubtitleId;
 
   Future<void> _refreshTracks() async {
-    if (!_ready || _w <= 0 || _h <= 0) return;
+    if (!_ready) return;
     try {
       final rawA = await _ch.invokeMethod<String>('getAudioTracks');
       final rawV = await _ch.invokeMethod<String>('getVideoTracks');
@@ -203,6 +207,26 @@ class NativeMpvPlayback extends KotvPlayback {
       }
       notifyListeners();
     } catch (_) {}
+  }
+
+  bool get _isAudioOnlyUnlocked {
+    if (_lastError != null || !_ready) return false;
+    if (_w > 0 && _h > 0) return false;
+    if (_videoTracks.isNotEmpty) return false;
+    return _audioTracks.isNotEmpty;
+  }
+
+  @override
+  bool get hasVideoSourceHint {
+    if (_lastError != null) return false;
+    if (isAudioOnlyContent) return true;
+    return _ready || _w > 0 || _position > Duration.zero || _playing;
+  }
+
+  @override
+  bool get isAudioOnlyContent {
+    if (!_isAudioOnlyUnlocked) return false;
+    return _playing || _position > Duration.zero;
   }
 
   KotvTrack _mapMpvTrack(dynamic e) {
@@ -322,7 +346,7 @@ class NativeMpvPlayback extends KotvPlayback {
         final nextPlaying = m['playing'] == true;
         final nextBuffering = m['buffering'] == true;
         final nextSpeed = (m['speedBps'] as num?)?.toInt() ?? 0;
-        // 与 Exo 一致：进度变化要 notify，否则 VodInlineControls 的 ListenableBuilder 不刷新。
+        // 进度变化要 notify，否则 VodInlineControls 的 ListenableBuilder 不刷新。
         final changed = nextPlaying != _playing ||
             nextBuffering != _buffering ||
             nextSpeed != _speedBps ||
@@ -471,6 +495,8 @@ class NativeMpvPlayback extends KotvPlayback {
       position: () => _position,
       duration: () => _duration,
       isLiveContent: () => _live || (_ready && _duration <= Duration.zero && _playing),
+      hasVideoSource: () => hasVideoSourceHint,
+      isAudioOnly: () => isAudioOnlyContent,
       onFixVideoSource: tryFixVideoSource,
     );
   }
@@ -823,9 +849,22 @@ class NativeMpvPlayback extends KotvPlayback {
   Future<void> tryFixVideoSource() async {
     if (_url.isEmpty) return;
     try {
+      await _refreshTracks();
+      if (_videoTracks.isEmpty) {
+        if (_audioTracks.isNotEmpty) return;
+        await play();
+        return;
+      }
+      for (final t in _videoTracks) {
+        await setVideoTrack(t.id);
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        if (_w > 0 && _h > 0) return;
+      }
       await _ch.invokeMethod('retryVideo');
     } catch (_) {
-      await play();
+      try {
+        await play();
+      } catch (_) {}
     }
   }
 

@@ -705,7 +705,7 @@ class ExoPlayback extends KotvPlayback {
   Future<void> setRenderMode(String mode) async {
     final next = kotvNormalizePlayerRender(mode);
     _renderMode = next;
-    // 对照 FongMi PlayerSetting.putRender：Texture 时关隧道。
+    // Texture 时关闭隧道（仅 Surface 可用）。
     if (_renderMode == 'texture' && _tunneling) {
       _tunneling = false;
     }
