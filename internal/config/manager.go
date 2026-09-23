@@ -456,6 +456,7 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	if err != nil {
 		return err
 	}
+	data = FixRelativePaths(cfg.URL, data)
 
 	cleaned := util.CleanJSONComments(data)
 	// 服务端错误说明 {"msg":"…"}：报错而不是当空配置加载。

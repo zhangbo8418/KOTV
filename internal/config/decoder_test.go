@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +67,23 @@ func TestConfigErrorMessage(t *testing.T) {
 	}
 	if got := ConfigErrorMessage(`[1]`); got != "" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFixRelativePaths(t *testing.T) {
+	base := "http://cdn/cfg/live.json"
+	in := `{"lives":[{"name":"A","url":"./list.m3u","api":"../jar/x.js"}]}`
+	out := FixRelativePaths(base, in)
+	if !strings.Contains(out, `"url":"http://cdn/cfg/list.m3u"`) {
+		t.Fatalf("url not expanded: %s", out)
+	}
+	if !strings.Contains(out, `"api":"http://cdn/jar/x.js"`) {
+		t.Fatalf("api not expanded: %s", out)
+	}
+	// JS 查询串内的 ./ 应保留字面（经 __JS1__ 保护再还原）。
+	jsIn := `{"sites":[{"api":"./lib/drpy.js?v=1"}]}`
+	jsOut := FixRelativePaths(base, jsIn)
+	if !strings.Contains(jsOut, "http://cdn/cfg/lib/drpy.js?v=1") {
+		t.Fatalf("js uri: %s", jsOut)
 	}
 }

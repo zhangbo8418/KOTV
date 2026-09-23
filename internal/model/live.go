@@ -29,7 +29,7 @@ type Live struct {
 	Header     FlexHeader `json:"header"`
 	Catchup    Catchup    `json:"catchup"`
 	Core       json.RawMessage `json:"core,omitempty"`
-	Groups     []LiveGroup `json:"-"`
+	Groups     []LiveGroup     `json:"groups"`
 }
 
 // Location 返回源级时区；无效或空则 time.Local。
@@ -89,9 +89,9 @@ func (l *Live) Headers() map[string]string {
 
 // LiveGroup 频道分组。
 type LiveGroup struct {
-	Name     string
-	Pass     string
-	Channels []LiveChannel
+	Name     string        `json:"name"`
+	Pass     string        `json:"pass"`
+	Channels []LiveChannel `json:"channel"`
 }
 
 func (g *LiveGroup) FindChannel(name string) *LiveChannel {
@@ -106,24 +106,88 @@ func (g *LiveGroup) FindChannel(name string) *LiveChannel {
 
 // LiveChannel 直播频道。
 type LiveChannel struct {
-	Name     string
-	Logo     string
-	Number   string
-	TvgID    string
-	TvgName  string
-	EPG      string
-	Parse    int
-	UA       string
-	Referer  string
-	Origin   string
-	Click    string
-	URLs     []string
-	URLIndex int
-	Header   map[string]string
-	Format   string
-	Drm      *Drm
-	Catchup  *Catchup
-	Live     *Live
+	Name     string            `json:"name"`
+	Logo     string            `json:"logo"`
+	Number   string            `json:"number"`
+	TvgID    string            `json:"tvgId"`
+	TvgName  string            `json:"tvgName"`
+	EPG      string            `json:"epg"`
+	Parse    int               `json:"parse"`
+	UA       string            `json:"ua"`
+	Referer  string            `json:"referer"`
+	Origin   string            `json:"origin"`
+	Click    string            `json:"click"`
+	URLs     []string          `json:"urls"`
+	URLIndex int               `json:"-"`
+	Header   map[string]string `json:"header"`
+	Format   string            `json:"format"`
+	Drm      *Drm              `json:"drm"`
+	Catchup  *Catchup          `json:"catchup"`
+	Live     *Live             `json:"-"`
+}
+
+// UnmarshalJSON 接受 url/urls、数字 number/parse，并规范化 format。
+func (c *LiveChannel) UnmarshalJSON(b []byte) error {
+	type raw struct {
+		Name    string       `json:"name"`
+		Logo    string       `json:"logo"`
+		Number  FlexString   `json:"number"`
+		TvgID   string       `json:"tvgId"`
+		TvgName string       `json:"tvgName"`
+		EPG     string       `json:"epg"`
+		Parse   FlexInt      `json:"parse"`
+		UA      string       `json:"ua"`
+		Referer string       `json:"referer"`
+		Origin  string       `json:"origin"`
+		Click   string       `json:"click"`
+		URL     []string     `json:"url"`
+		URLs    []string     `json:"urls"`
+		Header  FlexHeader   `json:"header"`
+		Format  string       `json:"format"`
+		Drm     *Drm         `json:"drm"`
+		Catchup *Catchup     `json:"catchup"`
+	}
+	var r raw
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	c.Name = r.Name
+	c.Logo = r.Logo
+	c.Number = strings.TrimSpace(r.Number.String())
+	c.TvgID = r.TvgID
+	c.TvgName = r.TvgName
+	c.EPG = r.EPG
+	if r.Parse.Valid {
+		c.Parse = r.Parse.Value
+	}
+	c.UA = r.UA
+	c.Referer = r.Referer
+	c.Origin = r.Origin
+	c.Click = r.Click
+	urls := r.URL
+	if len(urls) == 0 {
+		urls = r.URLs
+	}
+	c.URLs = urls
+	if len(r.Header) > 0 {
+		c.Header = map[string]string(r.Header)
+	}
+	c.Format = normalizeLiveFormat(r.Format)
+	c.Drm = r.Drm
+	c.Catchup = r.Catchup
+	return nil
+}
+
+func normalizeLiveFormat(f string) string {
+	f = strings.ToLower(strings.TrimSpace(f))
+	switch f {
+	case "mpd", "dash":
+		return "application/dash+xml"
+	case "hls", "m3u8":
+		return "application/x-mpegURL"
+	default:
+		return f
+	}
 }
 
 func (c *LiveChannel) CurrentURL() string {

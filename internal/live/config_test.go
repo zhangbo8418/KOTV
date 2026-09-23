@@ -89,3 +89,41 @@ func TestLoad_UrlsDepotFirst(t *testing.T) {
 		t.Fatalf("got=%+v", got.Groups)
 	}
 }
+
+func TestLoad_InlineGroups(t *testing.T) {
+	body := `{"lives":[{"name":"台灣頻道","groups":[{"name":"新聞台","channel":[{"name":"TVBS","urls":["http://cdn/tvbs.m3u8"]}]}]}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	got, err := NewService(nil).Load(model.Live{Name: "cfg", URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Groups) != 1 || got.Groups[0].Name != "新聞台" {
+		t.Fatalf("groups=%+v", got.Groups)
+	}
+	ch := got.Groups[0].Channels
+	if len(ch) != 1 || ch[0].Name != "TVBS" || len(ch[0].URLs) != 1 {
+		t.Fatalf("channels=%+v", ch)
+	}
+}
+
+func TestLoad_RelativeLiveURL(t *testing.T) {
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	mux.HandleFunc("/cfg/live.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"lives":[{"name":"A","url":"./list.m3u"}]}`))
+	})
+	mux.HandleFunc("/cfg/list.m3u", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("G,#genre#\nC,http://x/c.m3u8\n"))
+	})
+	got, err := NewService(nil).Load(model.Live{Name: "cfg", URL: srv.URL + "/cfg/live.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Groups) != 1 || got.Groups[0].Channels[0].Name != "C" {
+		t.Fatalf("got=%+v", got.Groups)
+	}
+}

@@ -16,6 +16,8 @@ var (
 	// 8 位字母数字 + `**`，其后为 base64 正文。
 	starMarkerRe = regexp.MustCompile(`[A-Za-z0-9]{8}\*\*`)
 	wsRe         = regexp.MustCompile(`\s+`)
+	// Decoder.JS_URI：配置串里的相对 .js? 查询，展开时先保护 ./ ../。
+	jsURIRe = regexp.MustCompile(`"(\.|\\.\\.)/(.?|.+?)\\.js\\?(.?|.+?)"`)
 )
 
 // DecodeConfigBody 解开两种包装过的配置正文；已是 JSON 对象/数组的原样返回。
@@ -44,6 +46,44 @@ func DecodeConfigBody(data string) (string, error) {
 		return out, nil
 	}
 	return data, nil
+}
+
+// FixRelativePaths 按配置基址展开正文中的 `./` / `../`（Decoder.fix）。
+// 先保护 `"…/*.js?…"` 串内的相对路径，展开后再还原。
+func FixRelativePaths(baseURL, data string) string {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" || data == "" {
+		return data
+	}
+	for {
+		loc := jsURIRe.FindStringIndex(data)
+		if loc == nil {
+			break
+		}
+		ext := data[loc[0]:loc[1]]
+		data = data[:loc[0]] + protectJSRelative(baseURL, ext) + data[loc[1]:]
+	}
+	if strings.Contains(data, "../") {
+		data = strings.ReplaceAll(data, "../", util.UriResolve(baseURL, "../"))
+	}
+	if strings.Contains(data, "./") {
+		data = strings.ReplaceAll(data, "./", util.UriResolve(baseURL, "./"))
+	}
+	if strings.Contains(data, "__JS1__") {
+		data = strings.ReplaceAll(data, "__JS1__", "./")
+	}
+	if strings.Contains(data, "__JS2__") {
+		data = strings.ReplaceAll(data, "__JS2__", "../")
+	}
+	return data
+}
+
+func protectJSRelative(baseURL, ext string) string {
+	t := strings.ReplaceAll(ext, `"./"`, `"`+util.UriResolve(baseURL, "./"))
+	t = strings.ReplaceAll(t, `"../`, `"`+util.UriResolve(baseURL, "../"))
+	t = strings.ReplaceAll(t, "./", "__JS1__")
+	t = strings.ReplaceAll(t, "../", "__JS2__")
+	return t
 }
 
 func decodeStarBase64(data string) (string, bool) {

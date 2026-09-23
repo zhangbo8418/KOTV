@@ -80,6 +80,13 @@ func (s *Service) SyncFromConfig() {
 
 // Load 加载指定直播源频道列表。
 func (s *Service) Load(live model.Live) (*model.Live, error) {
+	if len(live.Groups) > 0 {
+		apply(&live)
+		s.mu.Lock()
+		s.current = &live
+		s.mu.Unlock()
+		return &live, nil
+	}
 	if live.URL == "" && strings.TrimSpace(live.API) == "" {
 		return nil, fmt.Errorf("直播源地址为空")
 	}
@@ -91,6 +98,7 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 	if err != nil {
 		return nil, err
 	}
+	text = config.FixRelativePaths(live.URL, text)
 	cleaned := text
 	if trimmed := strings.TrimSpace(text); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		cleaned = util.CleanJSONComments(text)
@@ -133,6 +141,13 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 		}
 		s.mergeConfigLives(meta.Lives, live.URL)
 		home := meta.Lives[0]
+		if len(home.Groups) > 0 {
+			apply(&home)
+			s.mu.Lock()
+			s.current = &home
+			s.mu.Unlock()
+			return &home, nil
+		}
 		if strings.TrimSpace(home.URL) == "" && strings.TrimSpace(home.API) == "" {
 			return nil, fmt.Errorf("直播配置首页源地址为空")
 		}
