@@ -513,13 +513,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           .associate { "${it.key}" to "${it.value}" }
         main.post {
           try {
-            // tls / disk / spdif 在 init 写入，变更须重建。
-            ensurePlayer()
+            // tls / disk / spdif 在 init 写入，变更须重建；重建后若有已加载 URL 则按进度重载。
+            val url = loadedUrl
+            val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
+            val pos = positionSec
+            val rebuilt = ensurePlayer()
             applyRuntimeOpts(props)
             applyGpuApiIfNeeded()
             applyDolbyVisionOptions()
             applyPreferredSubtitleLangs()
             applyEqualizer()
+            if (rebuilt && url.isNotBlank()) {
+              retrySeekSec = pos.coerceAtLeast(0.0)
+              startLoad(url, headers)
+            }
             result.success(null)
           } catch (e: Throwable) {
             result.error("OPTS_FAILED", e.message, null)
@@ -866,7 +873,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  private fun ensurePlayer() {
+  /** @return true 若因冷选项/模式变更销毁并新建了上下文。 */
+  private fun ensurePlayer(): Boolean {
     val ctx = appContext ?: throw IllegalStateException("no context")
     if (!MPVLib.ensureLoaded(ctx)) {
       val err = MPVLib.getLoadError()
@@ -879,26 +887,31 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       throw IllegalStateException(hint, err)
     }
+    var rebuilt = false
     // 点播↔直播 demuxer/cache 选项在 init 时写入；模式变了必须重建上下文。
     if (created.get() && createdAsLive != null && createdAsLive != livePlayback) {
       Log.i(TAG, "recreate MPV context: live $createdAsLive -> $livePlayback")
       destroyPlayer()
+      rebuilt = true
     }
     if (created.get() && createdTlsVerify != null && createdTlsVerify != tlsVerify) {
       Log.i(TAG, "recreate MPV context: tlsVerify $createdTlsVerify -> $tlsVerify")
       destroyPlayer()
+      rebuilt = true
     }
     if (created.get() && createdDiskCache != null && createdDiskCache != diskCache) {
       Log.i(TAG, "recreate MPV context: diskCache $createdDiskCache -> $diskCache")
       destroyPlayer()
+      rebuilt = true
     }
     if (created.get() && createdPassThrough != null && createdPassThrough != audioPassThrough) {
       Log.i(TAG, "recreate MPV context: audioPassThrough $createdPassThrough -> $audioPassThrough")
       destroyPlayer()
+      rebuilt = true
     }
-    if (created.get()) return
+    if (created.get()) return rebuilt
     synchronized(this) {
-      if (created.get()) return
+      if (created.get()) return rebuilt
       val configDir = File(ctx.filesDir, "mpv").apply { mkdirs() }
       val cacheDir = File(ctx.cacheDir, "mpv").apply { mkdirs() }
       // libass fontconfig 后端从 config-dir/fonts.conf 找系统字体目录与通用族名 alias。
@@ -998,6 +1011,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       main.post(tick)
       Log.i(TAG, "MPV context ready abi=${MPVLib.getLoadedAbi()} live=$livePlayback tlsVerify=$tlsVerify")
     }
+    return rebuilt
   }
 
   /** 从 assets 拷 cacert.pem，设 tls-ca-file；关闭校验时 tls-verify=no。 */
