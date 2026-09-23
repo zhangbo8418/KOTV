@@ -7,7 +7,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -188,11 +187,10 @@ func LoadChannelEPG(ch *model.LiveChannel) []Epg {
 		}
 		u := template
 		u = strings.ReplaceAll(u, "{date}", date)
-		u = strings.ReplaceAll(u, "{id}", url.QueryEscape(idToken))
-		u = strings.ReplaceAll(u, "{name}", url.QueryEscape(nameToken))
+		u = strings.ReplaceAll(u, "{id}", idToken)
+		u = strings.ReplaceAll(u, "{name}", nameToken)
 		u = strings.ReplaceAll(u, "{epg}", epgToken)
 		u = strings.ReplaceAll(u, "{logo}", ch.Logo)
-		u = strings.ReplaceAll(u, "+", "%20")
 		if !strings.HasPrefix(u, "http") {
 			continue
 		}
