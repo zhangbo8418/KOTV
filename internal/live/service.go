@@ -11,6 +11,7 @@ import (
 	"github.com/bobo/KOTV/internal/model"
 	parsepkg "github.com/bobo/KOTV/internal/parse"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/util"
 )
@@ -86,8 +87,33 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 	if err != nil {
 		return nil, err
 	}
+	text, err = config.DecodeConfigBody(text)
+	if err != nil {
+		return nil, err
+	}
+	cleaned := text
+	if trimmed := strings.TrimSpace(text); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		cleaned = util.CleanJSONComments(text)
+	}
+	if msg := config.ConfigErrorMessage(cleaned); msg != "" {
+		return nil, fmt.Errorf("%s", msg)
+	}
+	if depots := config.ParseDepotIndex(cleaned); len(depots) > 0 {
+		first := strings.TrimSpace(depots[0].URL)
+		if first == "" {
+			return nil, fmt.Errorf("仓库索引 urls 为空")
+		}
+		if first == strings.TrimSpace(live.URL) {
+			return nil, fmt.Errorf("直播配置循环引用")
+		}
+		next := model.Live{Name: strings.TrimSpace(depots[0].Name), URL: first}
+		if next.Name == "" {
+			next.Name = first
+		}
+		return s.Load(next)
+	}
 	// LiveConfig：根 JSON 可含 ads/rules/lives/spider/headers/proxy/hosts。
-	if meta, ok := ParseConfigMeta(text); ok {
+	if meta, ok := ParseConfigMeta(cleaned); ok {
 		parsepkg.SetLiveAds(meta.Ads)
 		parsepkg.SetLiveRules(meta.Rules)
 		spider.SetNetConfig(meta.Headers, meta.Proxy, meta.Hosts, nil)
@@ -116,7 +142,7 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 		return s.Load(home)
 	}
 	live.Groups = nil
-	Parse(&live, text)
+	Parse(&live, cleaned)
 	if len(live.Groups) == 0 {
 		return nil, fmt.Errorf("未解析到频道")
 	}
@@ -187,13 +213,17 @@ func (s *Service) ResolvePlayURLParsed(ch *model.LiveChannel) (string, map[strin
 	headers := ch.BuildHeaders()
 	raw = stripDecorators(raw, headers)
 
+	prepared, forceParse, directPlay := source.Prepare(raw)
+	if forceParse || directPlay {
+		raw = prepared
+	}
+
 	needParse := ch.Parse == 1 ||
 		strings.HasPrefix(raw, "json:") ||
 		strings.HasPrefix(raw, "parse:") ||
-		strings.HasPrefix(raw, "video://")
-	if strings.HasPrefix(raw, "video://") {
-		raw = strings.TrimPrefix(raw, "video://")
-		needParse = true
+		forceParse
+	if directPlay {
+		needParse = false
 	}
 
 	var parses []model.Parse

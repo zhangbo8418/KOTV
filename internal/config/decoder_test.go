@@ -11,7 +11,7 @@ import (
 
 func TestDecodeConfigBody_PlainJSONUntouched(t *testing.T) {
 	in := ` {"sites":[]} `
-	out, err := decodeConfigBody(in)
+	out, err := DecodeConfigBody(in)
 	if err != nil || out != in {
 		t.Fatalf("out=%q err=%v", out, err)
 	}
@@ -20,7 +20,7 @@ func TestDecodeConfigBody_PlainJSONUntouched(t *testing.T) {
 func TestDecodeConfigBody_StarBase64(t *testing.T) {
 	plain := `{"sites":[{"key":"a"}]}`
 	in := "noise\nAbCd1234**" + base64.StdEncoding.EncodeToString([]byte(plain))
-	out, err := decodeConfigBody(in)
+	out, err := DecodeConfigBody(in)
 	if err != nil || out != plain {
 		t.Fatalf("out=%q err=%v", out, err)
 	}
@@ -42,7 +42,7 @@ func TestDecodeConfigBody_CBCHex(t *testing.T) {
 	in := "2423" + hex.EncodeToString([]byte(key)) + "2324" + hex.EncodeToString(ct) + hex.EncodeToString([]byte(iv))
 	// 带空白/换行也要能解。
 	in = in[:10] + "\n  " + in[10:]
-	out, err := decodeConfigBody(in)
+	out, err := DecodeConfigBody(in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,19 +52,19 @@ func TestDecodeConfigBody_CBCHex(t *testing.T) {
 }
 
 func TestDecodeConfigBody_CBCHexBroken(t *testing.T) {
-	if _, err := decodeConfigBody("2423zz"); err == nil {
+	if _, err := DecodeConfigBody("2423zz"); err == nil {
 		t.Fatal("want error")
 	}
 }
 
 func TestConfigErrorMessage(t *testing.T) {
-	if got := configErrorMessage(`{"msg":"账号过期"}`); got != "账号过期" {
+	if got := ConfigErrorMessage(`{"msg":"账号过期"}`); got != "账号过期" {
 		t.Fatalf("got %q", got)
 	}
-	if got := configErrorMessage(`{"sites":[]}`); got != "" {
+	if got := ConfigErrorMessage(`{"sites":[]}`); got != "" {
 		t.Fatalf("got %q", got)
 	}
-	if got := configErrorMessage(`[1]`); got != "" {
+	if got := ConfigErrorMessage(`[1]`); got != "" {
 		t.Fatalf("got %q", got)
 	}
 }

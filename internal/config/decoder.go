@@ -18,12 +18,12 @@ var (
 	wsRe         = regexp.MustCompile(`\s+`)
 )
 
-// decodeConfigBody 解开两种包装过的配置正文；已是 JSON 对象/数组的原样返回。
+// DecodeConfigBody 解开两种包装过的配置正文；已是 JSON 对象/数组的原样返回。
 //
 //   - 正文含 `xxxxxxxx**`：取标记后的内容做标准 base64 解码。
 //   - 正文以 `2423` 开头：hex 串；解码后 `$#…#$` 之间为 AES key、末 13 字符为 IV（右补 0 到 16），
 //     `2324` 之后到倒数 26 个字符为密文，AES/CBC/PKCS5 解密。
-func decodeConfigBody(data string) (string, error) {
+func DecodeConfigBody(data string) (string, error) {
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" {
 		return "", fmt.Errorf("配置数据为空")
@@ -125,8 +125,8 @@ func aesCBCDecryptPKCS5(ct, key, iv []byte) ([]byte, error) {
 	return out[:len(out)-n], nil
 }
 
-// configErrorMessage 配置顶层对象带非空 `msg` 时返回该文本（服务端错误说明），否则空串。
-func configErrorMessage(cleaned string) string {
+// ConfigErrorMessage 配置顶层对象带非空 `msg` 时返回该文本（服务端错误说明），否则空串。
+func ConfigErrorMessage(cleaned string) string {
 	trimmed := strings.TrimSpace(cleaned)
 	if !strings.HasPrefix(trimmed, "{") {
 		return ""
