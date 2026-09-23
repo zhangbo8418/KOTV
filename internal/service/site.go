@@ -4,15 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"path"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -499,24 +493,9 @@ func applySourceFetch(r *model.Result) {
 	if i >= len(r.URL.URLs) {
 		i = len(r.URL.URLs) - 1
 	}
-	forceParse := false
-	directPlay := false
-	u := strings.TrimSpace(r.URL.URLs[i])
-	lower := strings.ToLower(u)
-	switch {
-	case strings.HasPrefix(lower, "video://"):
-		u = strings.TrimSpace(u[len("video://"):])
-		r.URL.URLs[i] = u
-		forceParse = true
-	case strings.HasPrefix(lower, "push://"):
-		u = strings.TrimSpace(u[len("push://"):])
-		r.URL.URLs[i] = u
-		directPlay = true
-	case strmPath(u):
-		if fetched := fetchStrmURL(u); fetched != "" {
-			r.URL.URLs[i] = fetched
-		}
-		directPlay = true
+	out, forceParse, directPlay := source.Prepare(r.URL.URLs[i])
+	if forceParse || directPlay {
+		r.URL.URLs[i] = out
 	}
 	switch {
 	case forceParse:
@@ -524,81 +503,6 @@ func applySourceFetch(r *model.Result) {
 	case directPlay:
 		r.Parse = model.FlexInt{Valid: true, Value: 0}
 	}
-}
-
-func strmPath(u string) bool {
-	p := u
-	if i := strings.Index(u, "?"); i >= 0 {
-		p = u[:i]
-	}
-	if ju, err := url.Parse(u); err == nil && ju.Path != "" {
-		p = ju.Path
-	}
-	return strings.HasSuffix(strings.ToLower(path.Base(p)), ".strm")
-}
-
-func fetchStrmURL(u string) string {
-	u = strings.TrimSpace(u)
-	if u == "" {
-		return ""
-	}
-	lower := strings.ToLower(u)
-	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-		return fetchStrmHTTP(u)
-	}
-	filePath := u
-	if strings.HasPrefix(lower, "file://") {
-		filePath = u[len("file://"):]
-	}
-	b, err := os.ReadFile(filePath)
-	if err != nil {
-		return u
-	}
-	return firstLine(string(b))
-}
-
-func fetchStrmHTTP(rawURL string) string {
-	client := &http.Client{
-		Timeout: 20 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	req, err := http.NewRequest(http.MethodGet, util.EncodeURL(rawURL), nil)
-	if err != nil {
-		return rawURL
-	}
-	req.Header.Set("User-Agent", "okhttp/4.12.0")
-	resp, err := client.Do(req)
-	if err != nil {
-		return rawURL
-	}
-	defer resp.Body.Close()
-	disp := resp.Header.Get("Content-Disposition")
-	text := strings.Contains(disp, ".strm") || strings.Contains(disp, ".txt")
-	if !text {
-		return rawURL
-	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return rawURL
-	}
-	line := firstLine(string(b))
-	if line == "" {
-		return rawURL
-	}
-	return line
-}
-
-func firstLine(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
-		return strings.TrimSpace(s[:i])
-	}
-	return s
 }
 
 func applyThunderFetch(r *model.Result) error {
