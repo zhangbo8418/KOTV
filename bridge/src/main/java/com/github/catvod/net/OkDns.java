@@ -84,13 +84,9 @@ public class OkDns implements Dns {
     public List<InetAddress> lookup(@NonNull String hostname) throws UnknownHostException {
         NetProfiles.Profile p = NetProfiles.get(Util.clientId());
         hostname = get(hostname, p.hosts);
-        // 每次查询都先试 DoH；失败仅本次回落系统 DNS，不永久禁用。
         DnsOverHttps doh = dohClient(p.doh);
         if (doh != null) {
-            try {
-                return doh.lookup(hostname);
-            } catch (UnknownHostException ignored) {
-            }
+            return doh.lookup(hostname);
         }
         return Dns.SYSTEM.lookup(hostname);
     }
