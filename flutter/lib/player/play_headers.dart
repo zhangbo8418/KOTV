@@ -70,6 +70,9 @@ bool kotvIsLocalProxyUrl(String url) {
       ? uri.path.substring(0, uri.path.length - 1)
       : uri.path;
   if (path != '/proxy') return null;
+  final doParam = (uri.queryParameters['do'] ?? '').trim().toLowerCase();
+  // do=js|py 须走脚本 Proxy，不能展开成直链。
+  if (doParam == 'js' || doParam == 'py') return null;
   final encUrl = uri.queryParameters['url']?.trim() ?? '';
   if (encUrl.isEmpty) return null;
   final decodedUrl = _decodeProxyB64(encUrl)?.trim() ?? '';

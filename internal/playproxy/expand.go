@@ -32,6 +32,10 @@ func ExpandSpiderMediaProxy(raw string, existing map[string]string) (mediaURL st
 		return raw, existing, false
 	}
 	q := u.Query()
+	// do=js|py 须走脚本 Proxy，不能展开成直链。
+	if do := strings.ToLower(strings.TrimSpace(firstQuery(q, "do"))); do == "js" || do == "py" {
+		return raw, existing, false
+	}
 	encURL := firstQuery(q, "url")
 	if encURL == "" {
 		return raw, existing, false

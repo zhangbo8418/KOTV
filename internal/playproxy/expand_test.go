@@ -31,6 +31,20 @@ func TestExpandSpiderMediaProxyQuark(t *testing.T) {
 	}
 }
 
+func TestExpandSpiderMediaProxySkipsJsPy(t *testing.T) {
+	t.Parallel()
+	cdn := "https://cdn.example/v.mp4"
+	raw := "http://127.0.0.1:9978/proxy?do=js&url=" +
+		base64.StdEncoding.EncodeToString([]byte(cdn))
+	if _, _, ok := ExpandSpiderMediaProxy(raw, nil); ok {
+		t.Fatal("do=js must not expand")
+	}
+	raw = "proxy://do=py&url=" + url.QueryEscape(base64.StdEncoding.EncodeToString([]byte(cdn)))
+	if _, _, ok := ExpandSpiderMediaProxy(raw, nil); ok {
+		t.Fatal("do=py must not expand")
+	}
+}
+
 func TestExpandSpiderMediaProxySkipsM3U8(t *testing.T) {
 	t.Parallel()
 	cdn := "https://cdn.example/a.m3u8"
