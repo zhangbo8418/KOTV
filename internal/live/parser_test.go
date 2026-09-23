@@ -82,3 +82,36 @@ func TestParseJSON_FullChannelFields(t *testing.T) {
 		t.Fatalf("channel=%+v", c)
 	}
 }
+
+func TestParseTXT_ParseZeroSticky(t *testing.T) {
+	live := &model.Live{}
+	Parse(live, "G,#genre#\nparse=1\nA,http://a\nparse=0\nB,http://b\n")
+	chs := live.Groups[0].Channels
+	if chs[0].Parse != 1 {
+		t.Fatalf("A.Parse=%d want 1", chs[0].Parse)
+	}
+	if chs[1].Parse != 0 {
+		t.Fatalf("B.Parse=%d want 0", chs[1].Parse)
+	}
+}
+
+func TestParseTXT_UAStripQuotes(t *testing.T) {
+	live := &model.Live{}
+	Parse(live, "G,#genre#\nua=\"VLC/3.0\"\nreferer=\"http://r/\"\nC,http://c\n")
+	ch := live.Groups[0].Channels[0]
+	if ch.UA != "VLC/3.0" {
+		t.Fatalf("UA=%q", ch.UA)
+	}
+	if ch.Referer != "http://r/" {
+		t.Fatalf("Referer=%q", ch.Referer)
+	}
+}
+
+func TestParseJSON_ParseZero(t *testing.T) {
+	live := &model.Live{}
+	text := `[{"name":"G","channel":[{"name":"C","parse":0,"urls":["http://u"]}]}]`
+	Parse(live, text)
+	if live.Groups[0].Channels[0].Parse != 0 {
+		t.Fatalf("Parse=%d", live.Groups[0].Channels[0].Parse)
+	}
+}

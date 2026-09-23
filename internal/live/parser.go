@@ -105,7 +105,7 @@ func parseJSON(live *model.Live, text string) {
 			if ch.TvgName != "" {
 				c.TvgName = ch.TvgName
 			}
-			if ch.Parse.Valid && ch.Parse.Value != 0 {
+			if ch.Parse.Valid {
 				c.Parse = ch.Parse.Value
 			}
 			if len(ch.Header) > 0 {
@@ -323,6 +323,7 @@ type lineSetting struct {
 	ua, referer, origin string
 	click               string
 	parse               int
+	parseSet            bool
 	format              string
 	header              map[string]string
 	drmKey, drmType     string
@@ -350,27 +351,28 @@ func (s *lineSetting) apply(line string) {
 	lower := strings.ToLower(line)
 	switch {
 	case strings.HasPrefix(lower, "ua="):
-		s.ua = strings.TrimSpace(line[3:])
+		s.ua = strings.ReplaceAll(strings.TrimSpace(line[3:]), `"`, "")
 	case strings.HasPrefix(lower, "referer="):
-		s.referer = strings.TrimSpace(line[len("referer="):])
+		s.referer = strings.ReplaceAll(strings.TrimSpace(line[len("referer="):]), `"`, "")
 	case strings.HasPrefix(lower, "origin="):
-		s.origin = strings.TrimSpace(line[len("origin="):])
+		s.origin = strings.ReplaceAll(strings.TrimSpace(line[len("origin="):]), `"`, "")
 	case strings.HasPrefix(lower, "click="):
 		s.click = strings.TrimSpace(line[len("click="):])
 	case strings.HasPrefix(lower, "parse="):
 		if n, err := strconv.Atoi(strings.TrimSpace(line[len("parse="):])); err == nil {
 			s.parse = n
+			s.parseSet = true
 		}
 	case strings.HasPrefix(lower, "format="):
 		s.format = normalizeManifest(strings.TrimSpace(line[len("format="):]))
 	case strings.HasPrefix(lower, "forcekey="):
 		s.forceKey = strings.EqualFold(strings.TrimSpace(line[len("forceKey="):]), "true")
 	case strings.HasPrefix(line, "#EXTVLCOPT:http-user-agent="):
-		s.ua = strings.TrimPrefix(line, "#EXTVLCOPT:http-user-agent=")
+		s.ua = strings.ReplaceAll(strings.TrimPrefix(line, "#EXTVLCOPT:http-user-agent="), `"`, "")
 	case strings.HasPrefix(line, "#EXTVLCOPT:http-referrer="):
-		s.referer = strings.TrimPrefix(line, "#EXTVLCOPT:http-referrer=")
+		s.referer = strings.ReplaceAll(strings.TrimPrefix(line, "#EXTVLCOPT:http-referrer="), `"`, "")
 	case strings.HasPrefix(line, "#EXTVLCOPT:http-origin="):
-		s.origin = strings.TrimPrefix(line, "#EXTVLCOPT:http-origin=")
+		s.origin = strings.ReplaceAll(strings.TrimPrefix(line, "#EXTVLCOPT:http-origin="), `"`, "")
 	case strings.HasPrefix(lower, "#extvlcopt:http-cookie="):
 		// VLC cookie 选项进 Cookie 请求头（去掉包裹引号）。
 		v := strings.TrimSpace(line[len("#EXTVLCOPT:http-cookie="):])
@@ -492,7 +494,7 @@ func (s *lineSetting) copyTo(ch *model.LiveChannel) {
 	if s.click != "" {
 		ch.Click = s.click
 	}
-	if s.parse != 0 {
+	if s.parseSet {
 		ch.Parse = s.parse
 	}
 	if s.format != "" {
@@ -524,6 +526,7 @@ func (s *lineSetting) clear() {
 	s.ua, s.referer, s.origin = "", "", ""
 	s.click = ""
 	s.parse = 0
+	s.parseSet = false
 	s.format = ""
 	s.header = make(map[string]string)
 	s.drmKey, s.drmType = "", ""

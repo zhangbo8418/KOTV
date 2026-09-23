@@ -260,27 +260,30 @@ func matchVideo(u string, rules []model.Rule, check func(string) bool) bool {
 
 // ResolveLiveURL 直播地址解析。click 为频道/源级 `click=` 脚本，Web 嗅探时在页面里执行。
 // prefer 为用户选中的解析器名（settings.PreferredParse），与点播 resolveParse 同源。
-func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers map[string]string, click, prefer string) (string, error) {
+// 第二个返回值为解析/嗅探得到的起播头（UA/Referer/Cookie 等），调用方应合并进频道头。
+func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers map[string]string, click, prefer string) (string, map[string]string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", nil
+		return "", nil, nil
 	}
+	rules := GetRules()
 	// 有 click 时 http-sniff 拿不到点击后的地址，直接 Web 嗅探。
-	sniff := func(u string) (string, error) {
+	sniff := func(u string) (string, map[string]string, error) {
 		if strings.TrimSpace(click) == "" {
-			return PlayPageSniff(u, headers)
+			out, err := PlayPageSniff(u, headers)
+			return out, nil, err
 		}
-		out, _, err := sniffParsedWeb(u, headers, click, nil, nil, false)
-		return out, err
+		out, h, err := sniffParsedWeb(u, headers, click, rules, nil, false)
+		return out, pickPlayHeaders(h), err
 	}
 	if strings.HasPrefix(raw, "json:") {
 		u := strings.TrimPrefix(raw, "json:")
 		if IsVideoFormat(u) {
-			return u, nil
+			return u, nil, nil
 		}
-		out, err := JSONParse(u, "", headers)
+		out, h, err := JSONParseEx(u, "", headers)
 		if out != "" {
-			return out, err
+			return out, pickPlayHeaders(h), err
 		}
 		return sniff(u)
 	}
@@ -288,30 +291,30 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 		name := strings.TrimPrefix(raw, "parse:")
 		for _, p := range parses {
 			if p.Name == name {
-				u, _, err := executeParse(p, "", "", headers, parses, nil, click, nil, false)
-				return u, err
+				u, h, err := executeParse(p, "", "", headers, parses, rules, click, nil, false)
+				return u, pickPlayHeaders(h), err
 			}
 		}
 	}
 	if IsVideoFormat(raw) {
-		return raw, nil
+		return raw, nil, nil
 	}
 	// 未标记 parse 的频道直链直接播。
 	if !needParse {
-		return raw, nil
+		return raw, nil, nil
 	}
 
 	p := resolveParse(model.Result{URL: model.URL{URLs: []string{raw}}}, parses, true, prefer)
 	if p != nil && !selectedEmpty(p) {
-		out, _, err := executeParse(*p, raw, "", headers, parses, nil, click, nil, false)
+		out, h, err := executeParse(*p, raw, "", headers, parses, rules, click, nil, false)
 		if err == nil && out != "" {
-			return out, nil
+			return out, pickPlayHeaders(h), nil
 		}
 	}
-	if sniffed, _ := sniff(raw); sniffed != "" {
-		return sniffed, nil
+	if sniffed, h, _ := sniff(raw); sniffed != "" {
+		return sniffed, h, nil
 	}
-	return "", fmt.Errorf("直播地址需要解析但无可用解析器")
+	return "", nil, fmt.Errorf("直播地址需要解析但无可用解析器")
 }
 
 func resolveParse(r model.Result, parses []model.Parse, useParse bool, prefer string) *model.Parse {

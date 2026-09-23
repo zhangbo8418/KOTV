@@ -200,7 +200,7 @@ func LoadChannelEPG(ch *model.LiveChannel) []Epg {
 		if err != nil || text == "" {
 			continue
 		}
-		epg := ParseEPG(text, idToken, date)
+		epg := ParseEPG(text, idToken, date, zone)
 		if len(epg.List) > 0 {
 			out = append(out, epg)
 		}
@@ -220,9 +220,12 @@ func hasHTTPPrefix(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
 
-// ParseEPG 解析 JSON 或简易 XML 片段。
-func ParseEPG(text, key, date string) Epg {
+// ParseEPG 解析 JSON 或简易 XML 片段。zone 用于 JSON 节目起止时刻；nil 则用本机时区。
+func ParseEPG(text, key, date string, zone *time.Location) Epg {
 	text = strings.TrimSpace(text)
+	if zone == nil {
+		zone = time.Local
+	}
 	if strings.HasPrefix(text, "{") {
 		var dto struct {
 			Key     string    `json:"key"`
@@ -242,7 +245,7 @@ func ParseEPG(text, key, date string) Epg {
 			if dto.Date != "" {
 				epg.Date = dto.Date
 			}
-			setEpgTimes(&epg)
+			setEpgTimes(&epg, zone)
 			return epg
 		}
 	}
@@ -264,12 +267,15 @@ func ParseEPG(text, key, date string) Epg {
 	return Epg{Key: key, Date: date}
 }
 
-func setEpgTimes(epg *Epg) {
+func setEpgTimes(epg *Epg, zone *time.Location) {
+	if zone == nil {
+		zone = time.Local
+	}
 	for i := range epg.List {
-		epg.List[i].StartTime = parseEpgTime(epg.Date + epg.List[i].Start)
-		epg.List[i].EndTime = parseEpgTime(epg.Date + epg.List[i].End)
+		epg.List[i].StartTime = parseEpgTime(epg.Date+epg.List[i].Start, zone)
+		epg.List[i].EndTime = parseEpgTime(epg.Date+epg.List[i].End, zone)
 		if epg.List[i].StartTime > 0 && epg.List[i].EndTime == 0 {
- // 缺结束时间时按 30 分钟估，保证回看 playseek 能拼出区间。
+			// 缺结束时间时按 30 分钟估，保证回看 playseek 能拼出区间。
 			epg.List[i].EndTime = epg.List[i].StartTime + 30*60*1000
 		}
 		if epg.List[i].EndTime > 0 && epg.List[i].EndTime < epg.List[i].StartTime {
@@ -278,8 +284,11 @@ func setEpgTimes(epg *Epg) {
 	}
 }
 
-func parseEpgTime(source string) int64 {
+func parseEpgTime(source string, zone *time.Location) int64 {
 	source = strings.TrimSpace(source)
+	if zone == nil {
+		zone = time.Local
+	}
 	layouts := []string{
 		"2006-01-0215:04:05",
 		"2006-01-0215:04",
@@ -289,7 +298,7 @@ func parseEpgTime(source string) int64 {
 	for _, layout := range layouts {
 		s := source
 		need := len(layout)
- // 去掉空格/连字符差异后再截断。
+		// 去掉空格/连字符差异后再截断。
 		if layout == "200601021504" || layout == "20060102150405" {
 			compact := strings.Map(func(r rune) rune {
 				if r >= '0' && r <= '9' {
@@ -303,7 +312,7 @@ func parseEpgTime(source string) int64 {
 				continue
 			}
 		}
-		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+		if t, err := time.ParseInLocation(layout, s, zone); err == nil {
 			return t.UnixMilli()
 		}
 	}

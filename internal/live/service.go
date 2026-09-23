@@ -187,12 +187,23 @@ func (s *Service) ResolvePlayURLParsed(ch *model.LiveChannel) (string, map[strin
 	if s.cfg != nil {
 		parses = s.cfg.API().Parses
 	}
-	out, err := parsepkg.ResolveLiveURL(raw, needParse, parses, headers, ch.Click, settings.Get(settings.PreferredParse))
+	out, parseHdr, err := parsepkg.ResolveLiveURL(raw, needParse, parses, headers, ch.Click, settings.Get(settings.PreferredParse))
 	if err != nil {
 		return raw, headers, err
 	}
 	if out == "" {
 		out = raw
+	}
+	if len(parseHdr) > 0 {
+		if headers == nil {
+			headers = make(map[string]string, len(parseHdr))
+		}
+		for k, v := range parseHdr {
+			if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+				continue
+			}
+			headers[k] = v
+		}
 	}
 	return out, headers, nil
 }
