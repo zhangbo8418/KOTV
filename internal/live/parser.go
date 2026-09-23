@@ -473,12 +473,7 @@ func (s *lineSetting) applyPipeHeaders(raw string) {
 		_ = json.Unmarshal([]byte(raw), &s.header)
 		return
 	}
-	for _, part := range strings.Split(raw, "&") {
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) == 2 {
-			s.header[kv[0]] = kv[1]
-		}
-	}
+	s.applyAmpHeaders(s.header, raw)
 }
 
 func (s *lineSetting) copyTo(ch *model.LiveChannel) {

@@ -107,6 +107,18 @@ func TestParseTXT_UAStripQuotes(t *testing.T) {
 	}
 }
 
+func TestParseTXT_PipeHeadersOnURL(t *testing.T) {
+	live := &model.Live{}
+	Parse(live, "G,#genre#\nC,http://cdn/a.m3u8|User-Agent=\"VLC\"|Referer=\"http://r/\"\n")
+	ch := live.Groups[0].Channels[0]
+	if ch.Header["User-Agent"] != "VLC" {
+		t.Fatalf("UA header=%q hdr=%v", ch.Header["User-Agent"], ch.Header)
+	}
+	if ch.Header["Referer"] != "http://r/" {
+		t.Fatalf("Referer header=%q", ch.Header["Referer"])
+	}
+}
+
 func TestParseJSON_ParseZero(t *testing.T) {
 	live := &model.Live{}
 	text := `[{"name":"G","channel":[{"name":"C","parse":0,"urls":["http://u"]}]}]`

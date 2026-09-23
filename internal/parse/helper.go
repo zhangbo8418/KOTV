@@ -296,10 +296,7 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 			}
 		}
 	}
-	if IsVideoFormat(raw) {
-		return raw, nil, nil
-	}
-	// 未标记 parse 的频道直链直接播。
+	// 未标记 parse 的频道：已是视频后缀则直链播。
 	if !needParse {
 		return raw, nil, nil
 	}
