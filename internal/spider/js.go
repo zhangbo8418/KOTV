@@ -1047,36 +1047,20 @@ func parseJSRequest(args []*qjs.Value) (string, jsHTTPRequest) {
 	return u, options
 }
 
-func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
-	// Connect.error：code 为空字符串（脚本 if (!res.code) 才成立）
-	jsError := func() map[string]interface{} {
-		return map[string]interface{}{
-			"code":    "",
-			"content": "",
-			"headers": map[string]interface{}{},
-		}
+// buildJSPostBody 对应 Connect.getPostBody：仅 json/form/form-data 处理 data；
+// 未知 postType 忽略 data，再退到 body+Content-Type，否则空。
+func buildJSPostBody(options *jsHTTPRequest) string {
+	if options.Headers == nil {
+		options.Headers = map[string]string{}
 	}
-	u = strings.TrimSpace(u)
-	// 脚本常带 Referer 却传相对 path（如 /play/xxx.html）；按 Referer/Origin 拼绝对地址。
-	if u != "" && !strings.Contains(u, "://") && !strings.HasPrefix(strings.ToLower(u), "data:") {
-		ref := ""
-		for _, k := range []string{"Referer", "referer", "Origin", "origin"} {
-			if v := strings.TrimSpace(options.Headers[k]); strings.HasPrefix(v, "http") {
-				ref = v
-				break
-			}
-		}
-		if ref != "" {
-			if abs := util.UriResolve(ref, u); abs != "" && strings.Contains(abs, "://") {
-				jsLog("[js-http] resolve relative %s + %s → %s", ref, u, abs)
-				u = abs
-			}
-		}
-	}
-	// Connect.getPostBody：data+postType 优先；body 须同时有 Content-Type，否则空 body。
 	body := ""
 	if options.Data != "" {
 		switch options.PostType {
+		case "json":
+			body = options.Data
+			if headerValue(options.Headers, "Content-Type") == "" {
+				options.Headers["Content-Type"] = "application/json; charset=utf-8"
+			}
 		case "form":
 			var values map[string]interface{}
 			if json.Unmarshal([]byte(options.Data), &values) == nil {
@@ -1104,15 +1088,42 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 					options.Headers["Content-Type"] = "multipart/form-data; boundary=" + boundary
 				}
 			}
-		default:
-			body = options.Data
-			if headerValue(options.Headers, "Content-Type") == "" {
-				options.Headers["Content-Type"] = "application/json; charset=utf-8"
-			}
 		}
-	} else if options.Body != "" && headerValue(options.Headers, "Content-Type") != "" {
+	}
+	if body == "" && options.Body != "" && headerValue(options.Headers, "Content-Type") != "" {
 		body = options.Body
 	}
+	return body
+}
+
+func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
+	// Connect.error：code 为空字符串（脚本 if (!res.code) 才成立）
+	jsError := func() map[string]interface{} {
+		return map[string]interface{}{
+			"code":    "",
+			"content": "",
+			"headers": map[string]interface{}{},
+		}
+	}
+	u = strings.TrimSpace(u)
+	// 脚本常带 Referer 却传相对 path（如 /play/xxx.html）；按 Referer/Origin 拼绝对地址。
+	if u != "" && !strings.Contains(u, "://") && !strings.HasPrefix(strings.ToLower(u), "data:") {
+		ref := ""
+		for _, k := range []string{"Referer", "referer", "Origin", "origin"} {
+			if v := strings.TrimSpace(options.Headers[k]); strings.HasPrefix(v, "http") {
+				ref = v
+				break
+			}
+		}
+		if ref != "" {
+			if abs := util.UriResolve(ref, u); abs != "" && strings.Contains(abs, "://") {
+				jsLog("[js-http] resolve relative %s + %s → %s", ref, u, abs)
+				u = abs
+			}
+		}
+	}
+	// Connect.getPostBody：data+postType 优先；body 须同时有 Content-Type，否则空 body。
+	body := buildJSPostBody(&options)
 	u = util.ApplyStickyAuthQuery(u)
 	options.Headers = InjectVodHeaders(u, options.Headers)
 	req, err := http.NewRequest(options.Method, u, strings.NewReader(body))
