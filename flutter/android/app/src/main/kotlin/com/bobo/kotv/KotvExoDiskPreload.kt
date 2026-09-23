@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.source.preload.DiskPreloadManager
 class KotvExoDiskPreload {
   private val priorityTaskManager = PriorityTaskManager()
   private var manager: DiskPreloadManager? = null
+  private var boundPlayer: ExoPlayer? = null
 
   fun start(
     ctx: Context,
@@ -31,6 +32,7 @@ class KotvExoDiskPreload {
         .setPriorityTaskManager(priorityTaskManager)
         .build()
     manager = m
+    boundPlayer = player
     player.setPriorityTaskManager(priorityTaskManager)
     val options =
       DiskPreloadManager.Options.builder()
@@ -46,5 +48,13 @@ class KotvExoDiskPreload {
     } catch (_: Throwable) {
     }
     manager = null
+    val p = boundPlayer
+    boundPlayer = null
+    if (p != null) {
+      try {
+        p.setPriorityTaskManager(null)
+      } catch (_: Throwable) {
+      }
+    }
   }
 }

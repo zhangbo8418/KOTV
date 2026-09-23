@@ -563,7 +563,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             decodeMode = mode
             decodeFallbackTried = false
             if (currentUrl.isNotEmpty()) {
-              openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback)
+              val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+              openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback, pos)
             }
             result.success(true)
           } catch (t: Throwable) {
@@ -2317,7 +2318,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     // off↔on 需重建 TextRenderer 路数
     val wantSecondary = secondarySubtitleMode != "off"
     if (playerBuiltSecondary != wantSecondary && currentUrl.isNotEmpty()) {
-      openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback)
+      val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+      openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback, pos)
       return
     }
     applySecondarySubtitleSelection()
