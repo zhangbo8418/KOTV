@@ -429,7 +429,11 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	// 按 jar 地址哈希缓存，不用配置里的 md5 当文件名。
 	dest := paths.JarPath(util.MD5(downloadURL))
 	gen := jarRefreshGen.Load()
+	hadCache := false
+	oldSum := ""
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
+		hadCache = true
+		oldSum = fileMD5(dest)
 		if expectMD5 == "" {
 			// 无 md5：仅本世代首次强制刷新（LoadJar/clear 后）；同世代业务 call 直接用磁盘包。
 			if v, ok := jarNoMD5Refreshed.Load(downloadURL); ok {
@@ -437,7 +441,6 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 					return dest, nil
 				}
 			}
-			oldSum := fileMD5(dest)
 			if err := downloadBinary(downloadURL, dest); err != nil {
 				log.Printf("spider.jar 刷新失败，沿用旧缓存 (%s): %v", downloadURL, err)
 			} else if newSum := fileMD5(dest); newSum != oldSum {
@@ -448,17 +451,27 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 			jarNoMD5Refreshed.Store(downloadURL, gen)
 			return dest, nil
 		}
-		if fileMD5(dest) == expectMD5 {
+		if oldSum == expectMD5 {
 			return dest, nil
 		}
-		// 有 md5 但缓存不一致 → 当作过期，重新下载
-		_ = os.Remove(dest)
+		// 有 md5 但缓存不一致 → 重新下载（不先删，失败可沿用旧包）
 	}
 	if err := downloadBinary(downloadURL, dest); err != nil {
+		if hadCache {
+			log.Printf("spider.jar 下载失败，沿用旧缓存 (%s): %v", downloadURL, err)
+			return dest, nil
+		}
 		return "", fmt.Errorf("下载 spider.jar 失败 (%s): %w", downloadURL, err)
 	}
 	if expectMD5 == "" {
 		jarNoMD5Refreshed.Store(downloadURL, gen)
+	}
+	if hadCache {
+		if newSum := fileMD5(dest); newSum != oldSum {
+			if err := reloadBridgeJar(dest); err != nil {
+				log.Printf("spider.jar 内存重载失败，沿用已加载类 (%s): %v", dest, err)
+			}
+		}
 	}
 	if expectMD5 != "" {
 		if actual := fileMD5(dest); actual != expectMD5 {
