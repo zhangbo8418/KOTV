@@ -88,6 +88,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var forceLavfHls = false
   /** auto 下硬解失败后仅软解重载一次。 */
   private var decodeFallbackTried = false
+  /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
+  private var retrySeekSec = -1.0
   private var loadedUrl: String = ""
   private var loadedHeaders: Map<String, String> = emptyMap()
   private var volume = 80.0
@@ -336,6 +338,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             ioHlsRetried = false
             forceLavfHls = false
             decodeFallbackTried = false
+            retrySeekSec = -1.0
             pendingUrl = url
             pendingHeaders = headers
             loadedUrl = ""
@@ -1706,6 +1709,17 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           if (height <= 0) height = MPVLib.getPropertyInt("video-params/h") ?: height
         } catch (_: Throwable) {
         }
+        val seekTo = retrySeekSec
+        if (seekTo >= 0.5) {
+          retrySeekSec = -1.0
+          try {
+            MPVLib.command(arrayOf("seek", seekTo.toString(), "absolute"))
+          } catch (t: Throwable) {
+            Log.w(TAG, "retry seek failed", t)
+          }
+        } else {
+          retrySeekSec = -1.0
+        }
         emitSize()
         emit(mapOf("event" to "ready", "width" to width, "height" to height))
       }
@@ -1735,6 +1749,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           if (url.isNotBlank()) {
             buffering = true
             playing = false
+            retrySeekSec = positionSec.coerceAtLeast(0.0)
             main.post {
               try {
                 startLoad(url, headers)
@@ -1754,6 +1769,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           if (url.isNotBlank()) {
             buffering = true
             playing = false
+            retrySeekSec = positionSec.coerceAtLeast(0.0)
             main.post {
               try {
                 if (created.get()) {

@@ -1002,6 +1002,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     mime: String?,
     drm: Map<String, Any?>?,
     live: Boolean = false,
+    startPositionMs: Long = C.TIME_UNSET,
   ) {
     formatRetried = false
     livePlayback = live
@@ -1048,8 +1049,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     } catch (_: Throwable) {
     }
     val mediaItem = buildMediaItem(url, currentMime, currentDrm, currentHeaders)
-    // 同实例 setMediaItem → prepare → play。
-    p.setMediaItem(mediaItem, true)
+    // 同实例 setMediaItem → prepare → play。错误恢复可带 startPositionMs。
+    if (startPositionMs != C.TIME_UNSET && startPositionMs >= 0L) {
+      p.setMediaItem(mediaItem, startPositionMs)
+    } else {
+      p.setMediaItem(mediaItem, true)
+    }
     p.prepare()
     p.play()
     maybeStartDiskPreload(p, mediaItem)
@@ -1289,8 +1294,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               currentMime = retryMime
               try {
                 val cur = player ?: return
+                val pos = cur.currentPosition.coerceAtLeast(0L)
                 val item = buildMediaItem(currentUrl, currentMime, currentDrm, currentHeaders)
-                cur.setMediaItem(item, true)
+                cur.setMediaItem(item, pos)
                 cur.prepare()
                 cur.play()
                 maybeStartDiskPreload(cur, item)
@@ -1304,7 +1310,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             decodeFallbackTried = true
             Log.w(TAG, "exo decoder failed → soft rebuild")
             try {
-              openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback)
+              val pos = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+              openInternal(currentUrl, currentHeaders, currentMime, currentDrm, livePlayback, pos)
               return
             } catch (t: Throwable) {
               Log.e(TAG, "exo soft rebuild failed", t)
