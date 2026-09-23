@@ -2,6 +2,7 @@ package live
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
@@ -85,10 +86,22 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 	if err != nil {
 		return nil, err
 	}
-	// LiveConfig：根 JSON 可含 ads/rules/lives，合并进 RuleConfig。
+	// LiveConfig：根 JSON 可含 ads/rules/lives/spider/headers/proxy/hosts。
 	if meta, ok := ParseConfigMeta(text); ok {
 		parsepkg.SetLiveAds(meta.Ads)
 		parsepkg.SetLiveRules(meta.Rules)
+		spider.SetNetConfig(meta.Headers, meta.Proxy, meta.Hosts, nil)
+		rootSpider := strings.TrimSpace(meta.Spider)
+		if rootSpider != "" {
+			if err := spider.LoadJar(rootSpider, live.URL); err != nil {
+				log.Printf("直播配置 spider.jar 加载失败: %v", err)
+			}
+		}
+		for i := range meta.Lives {
+			if strings.TrimSpace(meta.Lives[i].JAR) == "" && rootSpider != "" {
+				meta.Lives[i].JAR = rootSpider
+			}
+		}
 		if len(meta.Lives) == 0 {
 			return nil, fmt.Errorf("直播配置无可用直播源")
 		}
