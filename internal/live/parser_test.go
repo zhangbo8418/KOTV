@@ -119,6 +119,22 @@ func TestParseTXT_PipeHeadersOnURL(t *testing.T) {
 	}
 }
 
+func TestParseTXT_PipeHeadersPreferPipeOverAmp(t *testing.T) {
+	live := &model.Live{}
+	Parse(live, "G,#genre#\nC,http://cdn/a.m3u8|User-Agent=VLC|Referer=http://x?a=1&b=2\n")
+	ch := live.Groups[0].Channels[0]
+	if ch.Header["User-Agent"] != "VLC" {
+		t.Fatalf("UA header=%q hdr=%v", ch.Header["User-Agent"], ch.Header)
+	}
+	// 值内 & 仍再切（FongMi headers 同）：Referer 只保留到第一个 &。
+	if ch.Header["Referer"] != "http://x?a=1" {
+		t.Fatalf("Referer header=%q hdr=%v", ch.Header["Referer"], ch.Header)
+	}
+	if ch.Header["b"] != "2" {
+		t.Fatalf("b header=%q hdr=%v", ch.Header["b"], ch.Header)
+	}
+}
+
 func TestParseJSON_ParseZero(t *testing.T) {
 	live := &model.Live{}
 	text := `[{"name":"G","channel":[{"name":"C","parse":0,"urls":["http://u"]}]}]`

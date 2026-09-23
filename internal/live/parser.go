@@ -440,7 +440,8 @@ func (s *lineSetting) applyAmpHeaders(dst map[string]string, raw string) {
 	if raw == "" {
 		return
 	}
-	if strings.Contains(raw, "|") && !strings.Contains(raw, "&") {
+	// 有 | 一律先按 | 拆（即便值里带 &，如 Referer=http://x?a=1&b=2）。
+	if strings.Contains(raw, "|") {
 		for _, part := range strings.Split(raw, "|") {
 			s.applyAmpHeaders(dst, part)
 		}
