@@ -962,23 +962,24 @@ public class SpiderBridge {
         }
     }
 
-    /** 社区 jar merge.Ly：非 Fongmi 宿主弹 WebView 配置页，老盒子 relro 会卡死主线程。 */
+    /**
+     * 仅拦饭太硬 {@code spider.merge.Ly}（非 FongMi 宿主 WebView 配置页会卡死主线程）。
+     * 勿匹配 {@code .merge.L}：会误伤 {@code parser.merge.l.f}（网盘/弹幕/订阅 AlertDialog）。
+     */
     private static boolean isJarHostConfigRunnable(Runnable runnable) {
         if (runnable == null) {
             return false;
         }
         Class<?> clz = runnable.getClass();
         String name = clz.getName();
-        // 饭太硬：com.github.catvod.spider.merge.Ly；混淆后也可能是 merge.* 短名。
-        if (name.endsWith(".Ly") || name.contains("merge.Ly") || name.contains(".merge.L")) {
+        if (name.contains("spider.merge.Ly") || name.endsWith(".merge.Ly")) {
             return true;
         }
-        String simple = clz.getSimpleName();
-        if ("Ly".equals(simple)) {
+        if ("Ly".equals(clz.getSimpleName()) && name.contains("spider.merge")) {
             return true;
         }
         String trace = String.valueOf(runnable);
-        return trace.contains("merge.Ly") || trace.contains("catvod.spider.merge.Ly");
+        return trace.contains("spider.merge.Ly") || trace.contains("catvod.spider.merge.Ly");
     }
 
     /** 从主线程 MessageQueue 摘掉已排队的 merge.Ly（Init 返回后仍可能已 post）。 */

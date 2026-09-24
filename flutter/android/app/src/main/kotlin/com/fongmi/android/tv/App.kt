@@ -388,12 +388,14 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
       return removed
     }
 
+    /** 仅拦饭太硬 spider.merge.Ly（非 FongMi 宿主 WebView 配置页会卡死主线程）。
+     * 勿用 ".merge.L"：会误伤 parser.merge.l.f（网盘/弹幕/订阅 AlertDialog）。 */
     private fun isJarHostConfigRunnable(runnable: Runnable): Boolean {
       val name = runnable.javaClass.name
-      if (name.endsWith(".Ly") || name.contains("merge.Ly") || name.contains(".merge.L")) return true
-      if ("Ly" == runnable.javaClass.simpleName) return true
+      if (name.contains("spider.merge.Ly") || name.endsWith(".merge.Ly")) return true
+      if ("Ly" == runnable.javaClass.simpleName && name.contains("spider.merge")) return true
       val trace = runnable.toString()
-      return trace.contains("merge.Ly") || trace.contains("catvod.spider.merge.Ly")
+      return trace.contains("spider.merge.Ly") || trace.contains("catvod.spider.merge.Ly")
     }
 
     @JvmStatic
