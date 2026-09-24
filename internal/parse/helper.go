@@ -301,7 +301,7 @@ func ResolveLiveURL(raw string, needParse bool, parses []model.Parse, headers ma
 		return raw, nil, nil
 	}
 
-	p := resolveParse(model.Result{URL: model.URL{URLs: []string{raw}}}, parses, true, prefer)
+	p := resolveParse(model.Result{URL: model.URL{URLs: []string{raw}}}, parses, false, prefer)
 	if p != nil && !selectedEmpty(p) {
 		out, h, err := executeParse(*p, raw, "", headers, parses, rules, click, nil, false)
 		if err == nil && out != "" {
