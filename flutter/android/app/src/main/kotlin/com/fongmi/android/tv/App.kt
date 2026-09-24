@@ -272,7 +272,49 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
     fun get(): App? = instance
 
     @JvmStatic
-    fun activity(): Activity? = resumedActivity
+    fun activity(): Activity? {
+      val cur = resumedActivity
+      if (cur != null) {
+        try {
+          if (!cur.isFinishing && !cur.isDestroyed) return cur
+        } catch (_: Throwable) {
+          return cur
+        }
+      }
+      return activityFromActivityThread()
+    }
+
+    /** jar 异步 post AlertDialog 时若生命周期回调尚未写入，从 ActivityThread 取顶层非 finishing Activity。 */
+    private fun activityFromActivityThread(): Activity? {
+      try {
+        val atClz = Class.forName("android.app.ActivityThread")
+        val at = atClz.getMethod("currentActivityThread").invoke(null) ?: return null
+        val field = atClz.getDeclaredField("mActivities")
+        field.isAccessible = true
+        val map = field.get(at) as? Map<*, *> ?: return null
+        var fallback: Activity? = null
+        for (record in map.values) {
+          if (record == null) continue
+          val recClz = record.javaClass
+          val pausedField = recClz.getDeclaredField("paused")
+          pausedField.isAccessible = true
+          val activityField = recClz.getDeclaredField("activity")
+          activityField.isAccessible = true
+          val act = activityField.get(record) as? Activity ?: continue
+          try {
+            if (act.isFinishing || act.isDestroyed) continue
+          } catch (_: Throwable) {
+            continue
+          }
+          val paused = pausedField.getBoolean(record)
+          if (!paused) return act
+          if (fallback == null) fallback = act
+        }
+        return fallback
+      } catch (_: Throwable) {
+        return null
+      }
+    }
 
     @JvmStatic
     fun setSpoofFongmiPackage(on: Boolean): Boolean {

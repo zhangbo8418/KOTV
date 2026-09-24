@@ -508,8 +508,10 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	injectGodParse(&api)
 
 	visible := filterVisible(api.Sites)
+	// 用户已选首页（含豆瓣 / 网盘配置）必须保留；仅在未设置或站点已消失时才自动挑默认。
+	// 勿用 isMetaSite 覆盖显式选择——否则换到豆瓣/TG豆瓣/网盘配置后一 reload 又弹回 Youtube。
 	home := resolveHome(cfg.Home, visible)
-	if home.Key == "" || isMetaSite(home) {
+	if home.Key == "" {
 		home = pickDefaultHome(visible)
 	}
 	if home.Key != "" {
@@ -674,15 +676,22 @@ func isMetaSite(s model.Site) bool {
 	return IsMetaSite(s)
 }
 
-// IsMetaSite 导航/说明类站点：不宜作为默认首页。
+// IsMetaSite 仅用于 PickDefaultHome：跳过不宜「自动」当作首页的站。
+// 用户换源选中的站一律尊重，不要在 LoadFromSource / getConfig 里用本函数覆盖。
 func IsMetaSite(s model.Site) bool {
-	n := strings.ToLower(s.Name + " " + s.Key + " " + s.API)
+	key := strings.TrimSpace(s.Key)
+	// 仓内设置枢纽：可换源进入，但不要自动当默认首页。
+	if key == "网盘配置" || key == "Config" {
+		return true
+	}
+	n := strings.ToLower(s.Name + " " + key + " " + s.API)
 	for _, bad := range []string{
-		"intruduce", "introduce", "登录", "配置", "网盘登录", "说明", "公告", "push",
-		// 豆瓣首页多为 msearch: id，本站 detail 常为空，不宜作为默认首页。
+		"intruduce", "introduce", "网盘登录", "说明", "公告",
+		// 豆瓣/TG豆瓣可手动设首页；自动默认仍跳过（msearch 本站 detail 常空）。
 		"douban", "豆瓣",
 		// 仓内导航站：API 常为空，home 会报 unsupported protocol scheme。
 		"切源", "换源", "点我", "选源", "站点列表",
+		"push_agent", "pushagent",
 	} {
 		if strings.Contains(n, bad) {
 			return true

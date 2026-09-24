@@ -77,7 +77,8 @@ func (a *App) APIGetConfig() map[string]any {
 			if src := strings.TrimSpace(settings.Get(settings.VOD)); src != "" {
 				sess.Source = src
 			}
-			if home := sess.Cfg.Home(); home.Key == "" || home.API == "" || config.IsMetaSite(home) {
+			// 仅在未设首页或站点已从仓中消失时纠正；勿因 API 空 / IsMetaSite 打掉用户选的豆瓣、网盘配置。
+			if home := sess.Cfg.Home(); home.Key == "" || sess.Cfg.GetSite(home.Key) == nil {
 				if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
 					sess.Cfg.SetHome(alt)
 				}
@@ -86,8 +87,7 @@ func (a *App) APIGetConfig() map[string]any {
 			ready, errMsg = sess.Ready, sess.ErrMsg
 			source = sess.Source
 		} else if ready && cfg != nil {
-			// 已 ready 但 home 仍是空 API 元站点时纠正一次
-			if home := cfg.Home(); home.API == "" || config.IsMetaSite(home) {
+			if home := cfg.Home(); home.Key == "" || cfg.GetSite(home.Key) == nil {
 				if alt := config.PickDefaultHome(cfg.Sites()); alt.Key != "" && alt.Key != home.Key {
 					cfg.SetHome(alt)
 					if sess != nil {

@@ -711,7 +711,11 @@ public class SpiderBridge {
         if (extend == null) {
             extend = "";
         }
-        Context initCtx = ctx();
+        // jar AlertDialog 需要 Activity window token；有前台 Activity 时优先传入。
+        Context initCtx = UiContext.forUi();
+        if (initCtx == null) {
+            initCtx = ctx();
+        }
         spider.init(initCtx, extend);
     }
 

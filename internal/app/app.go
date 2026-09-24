@@ -227,8 +227,8 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 		sess.Ready = true
 		sess.ErrMsg = ""
 		sess.Source = settings.Get(settings.VOD)
-		// 全局 home 若是「点我切源」等元站点，会话侧换成第一个真实站，避免 home API 空 URL。
-		if home := sess.Cfg.Home(); home.Key == "" || home.API == "" || config.IsMetaSite(home) {
+		// 仅补「未设 / 站点已删」；用户选的豆瓣、网盘配置等不要被 IsMetaSite / 空 API 打掉。
+		if home := sess.Cfg.Home(); home.Key == "" || sess.Cfg.GetSite(home.Key) == nil {
 			if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
 				sess.Cfg.SetHome(alt)
 			}
@@ -455,7 +455,7 @@ func (a *App) syncSessionsFromGlobal() {
 		sess.Ready = true
 		sess.ErrMsg = ""
 		sess.Source = settings.Get(settings.VOD)
-		if home := sess.Cfg.Home(); home.Key == "" || home.API == "" || config.IsMetaSite(home) {
+		if home := sess.Cfg.Home(); home.Key == "" || sess.Cfg.GetSite(home.Key) == nil {
 			if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
 				sess.Cfg.SetHome(alt)
 			}
