@@ -105,6 +105,21 @@ func drainBody(resp *http.Response) []byte {
 	return b
 }
 
+// preserveNestedURLPath 保留 path 中嵌套的 http(s)://，避免 EscapedPath 编码冒号。
+// Opaque 不以 "//" 开头时 RequestURI 原样返回，线格式与 OkHttp/toybox 一致。
+func preserveNestedURLPath(req *http.Request) {
+	if req == nil || req.URL == nil {
+		return
+	}
+	p := req.URL.Path
+	if p == "" || !strings.Contains(p, "://") {
+		return
+	}
+	req.URL.Opaque = p
+	req.URL.Path = ""
+	req.URL.RawPath = ""
+}
+
 // jsRequestTransport 关闭自动解压；TLS 不校验（OkHttp trust-all）；hosts 表改写 dial 主机名。
 func jsRequestTransport() http.RoundTripper {
 	base := util.GetClient().Transport

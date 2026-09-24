@@ -58,11 +58,11 @@ public class Init {
 
     /** 弹窗/Toast 优先 Activity，否则 Application。远端客户端时包一层 WindowManager 中继。 */
     public static Context uiContext() {
-        if (!Util.hasRemoteUi()) {
-            return context();
-        }
         Context ui = UiContext.forUi();
         Context raw = ui != null ? ui : context();
+        if (!Util.hasRemoteUi()) {
+            return raw;
+        }
         return DialogRelay.maybeWrap(raw);
     }
 

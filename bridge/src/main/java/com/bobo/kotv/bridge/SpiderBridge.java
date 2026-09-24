@@ -74,6 +74,13 @@ public class SpiderBridge {
     /** Android：注入当前前台 Activity，供 dex jar 内 AlertDialog 拿 window token。 */
     public static void setAndroidActivity(Activity activity) {
         UiContext.setActivity(activity);
+        if (activity == null || !isArtVm()) {
+            return;
+        }
+        // 前台 Activity 变化时同步到已加载 jar 的 spider.Init（本地 Config 弹窗依赖）。
+        for (ClassLoader loader : loaders.values()) {
+            refreshSpiderJarUi(loader);
+        }
     }
 
     private static void disableHutoolBouncyCastle() {
@@ -1083,7 +1090,11 @@ public class SpiderBridge {
         }
     }
 
-    /** 仅 remoteUi 远端弹窗时补 Activity；Init 阶段不注入，避免 jar 过早建 WebView。 */
+    /**
+     * 把前台 Activity 写入 jar 的 {@code spider.Init}（字段 / setActivity）。
+     * Init 阶段仍不注入（见 {@link #invokeSpiderJarInit0}），避免过早 WebView；
+     * getSpider / 换 Activity 时再补，否则 Config 站 AlertDialog.Builder(null) NPE。
+     */
     private static void injectJarInitActivity(Class<?> initClz, Activity act) {
         if (act == null || initClz == null) {
             return;
@@ -1125,12 +1136,16 @@ public class SpiderBridge {
     }
 
     private static void refreshSpiderJarUi(ClassLoader loader) {
-        if (!isArtVm() || loader == null || !com.github.catvod.utils.Util.hasRemoteUi()) {
+        if (!isArtVm() || loader == null) {
+            return;
+        }
+        Activity act = UiContext.activity();
+        if (act == null) {
             return;
         }
         try {
             Class<?> clz = loader.loadClass("com.github.catvod.spider.Init");
-            injectJarInitActivity(clz, UiContext.activity());
+            injectJarInitActivity(clz, act);
         } catch (Throwable ignored) {
         }
     }

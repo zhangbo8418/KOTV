@@ -1130,6 +1130,9 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	if err != nil {
 		return jsError()
 	}
+	// /c/…/null/http://127.0.0.1:35456/… 这类嵌套 URL：EscapedPath 会把 ':'
+	// 编成 %3A，DownloadProxyServer 解析失败返回 400 error params → 直播转点播无剧集。
+	preserveNestedURLPath(req)
 	if body != "" {
 		bodyBytes := []byte(body)
 		req.GetBody = func() (io.ReadCloser, error) {
