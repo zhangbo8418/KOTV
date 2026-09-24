@@ -104,7 +104,7 @@ func ChannelEPGSource(ch *model.LiveChannel) string {
 	return ""
 }
 
-// LoadChannelDays 拉节目单：先模板 API，再 XMLTV。
+// LoadChannelDays 拉节目单：先模板 API，再无 {} 的 HTTP JSON，最后 XMLTV。
 func LoadChannelDays(ch *model.LiveChannel) []Epg {
 	if ch == nil {
 		return nil
@@ -114,6 +114,10 @@ func LoadChannelDays(ch *model.LiveChannel) []Epg {
 		return out
 	}
 	src := ChannelEPGSource(ch)
+	// 无花括号的 http(s) JSON 节目接口（LiveApi.fetchEpgDay → Epg.objectFrom）。
+	if out := loadHTTPJSONEPG(ch, src); len(out) > 0 {
+		return out
+	}
 	_, xmls := SplitEpgURLs(src)
 	for _, u := range xmls {
 		days, logo, err := LoadXMLTVDays(u, ch)
@@ -134,6 +138,62 @@ func LoadChannelDays(ch *model.LiveChannel) []Epg {
 				ch.Logo = logo
 			}
 			return days
+		}
+	}
+	return nil
+}
+
+// loadHTTPJSONEPG 对无 {}、非 xml/gz 的 http(s) 地址按昨/今/明拉 JSON 节目单。
+func loadHTTPJSONEPG(ch *model.LiveChannel, src string) []Epg {
+	src = strings.TrimSpace(src)
+	if src == "" || strings.Contains(src, "{") {
+		return nil
+	}
+	var urls []string
+	for _, part := range strings.Split(src, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" || strings.Contains(part, "{") || !hasHTTPPrefix(part) {
+			continue
+		}
+		low := strings.ToLower(part)
+		if strings.Contains(low, "xml") || strings.HasSuffix(low, ".gz") {
+			continue
+		}
+		urls = append(urls, part)
+	}
+	if len(urls) == 0 {
+		return nil
+	}
+	zone := channelLocation(ch)
+	nameToken := ch.TvgName
+	if nameToken == "" {
+		nameToken = ch.Name
+	}
+	idToken := ch.TvgID
+	if idToken == "" {
+		idToken = nameToken
+	}
+	var out []Epg
+	for _, base := range urls {
+		dayOut := make([]Epg, 0, 3)
+		for _, offset := range []int{-1, 0, 1} {
+			date := time.Now().In(zone).AddDate(0, 0, offset).Format("2006-01-02")
+			u := strings.ReplaceAll(base, "{date}", date)
+			text, err := util.HTTPGet(u, nil)
+			if err != nil || text == "" {
+				continue
+			}
+			if !strings.HasPrefix(strings.TrimSpace(text), "{") {
+				continue
+			}
+			epg := ParseEPG(text, idToken, date, zone)
+			if len(epg.List) > 0 {
+				dayOut = append(dayOut, epg)
+			}
+		}
+		if len(dayOut) > 0 {
+			out = append(out, dayOut...)
+			return out
 		}
 	}
 	return nil

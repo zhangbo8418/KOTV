@@ -2,6 +2,8 @@ package live
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -15,6 +17,29 @@ func TestSplitEpgURLs(t *testing.T) {
 	}
 	if len(xmls) != 2 || xmls[0] != "https://b/epg.xml.gz" || xmls[1] != "https://c/guide.xml" {
 		t.Fatalf("xmls=%v", xmls)
+	}
+}
+
+func TestLoadChannelDays_PlainHTTPJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"epg_data":[{"title":"新闻","start":"1200","end":"1300"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	ch := &model.LiveChannel{Name: "TVBS", TvgID: "tvbs", EPG: srv.URL}
+	days := LoadChannelDays(ch)
+	if len(days) == 0 {
+		t.Fatal("expected JSON epg days")
+	}
+	found := false
+	for _, d := range days {
+		for _, p := range d.List {
+			if p.Title == "新闻" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("days=%+v", days)
 	}
 }
 
