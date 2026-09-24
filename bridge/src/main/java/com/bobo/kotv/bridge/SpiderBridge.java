@@ -71,13 +71,12 @@ public class SpiderBridge {
         disableHutoolBouncyCastle();
     }
 
-    /** Android：注入当前前台 Activity，供 dex jar 内 AlertDialog 拿 window token。 */
+    /** Android：写入前台 Activity，并同步到已加载 jar 的 spider.Init。 */
     public static void setAndroidActivity(Activity activity) {
         UiContext.setActivity(activity);
         if (activity == null || !isArtVm()) {
             return;
         }
-        // 前台 Activity 变化时同步到已加载 jar 的 spider.Init（本地 Config 弹窗依赖）。
         for (ClassLoader loader : loaders.values()) {
             refreshSpiderJarUi(loader);
         }

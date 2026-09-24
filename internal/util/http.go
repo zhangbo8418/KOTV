@@ -409,12 +409,13 @@ func SetProxy(proxyURL string) {
 				proxyURL = "http://" + proxyURL
 			}
 			if u, err := url.Parse(proxyURL); err == nil {
-				// ProxyURL 会代理 127.0.0.1；本机 allinone/10079/引擎端口必须直连。
+				// http.ProxyURL 会把 127.0.0.1 也送进代理；本仓库 SpiderBridge
+				// 默认选择器对 127.0.0.1、localhost 返回 NO_PROXY。
 				fixed := http.ProxyURL(u)
 				proxy = func(req *http.Request) (*url.URL, error) {
 					if req != nil && req.URL != nil {
-						h := strings.ToLower(req.URL.Hostname())
-						if h == "127.0.0.1" || h == "localhost" || h == "::1" {
+						h := req.URL.Hostname()
+						if h == "127.0.0.1" || h == "localhost" {
 							return nil, nil
 						}
 					}

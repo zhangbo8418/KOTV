@@ -1708,16 +1708,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         '${data['url'] ?? ''}',
         ref.read(apiProvider).baseUrl,
       );
-      if (playUrl.isEmpty) {
-        final msg = '${data['msg'] ?? ''}'.trim();
-        // Config 站点：detail/play 只弹 jar 对话框，无起播地址。
-        if (flag.flag == 'Config' || msg.isNotEmpty) {
-          if (!mounted) return;
-          setState(() => _status = msg.isNotEmpty ? msg : '已打开配置');
-          return;
-        }
-        throw Exception('空播放地址');
-      }
+      if (playUrl.isEmpty) throw Exception('空播放地址');
       final mediaUrl = kotvRewriteEngineLocalUrl(
         '${data['media'] ?? ''}',
         ref.read(apiProvider).baseUrl,

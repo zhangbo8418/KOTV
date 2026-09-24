@@ -602,17 +602,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	}
 
 	if playURL == "" {
-		// Config 站：playerContent 只弹 AlertDialog/WebView，不返回可播 URL。
-		if strings.EqualFold(strings.TrimSpace(flag), "Config") || strings.TrimSpace(playMsg) != "" {
-			return map[string]any{
-				"ok":      true,
-				"url":     "",
-				"media":   "",
-				"msg":     playMsg,
-				"headers": headers,
-				"magnet":  false,
-				"parse":   false,
-			}, nil
+		// 有 msg 则作为错误返回；否则空 URL 视为未获取到播放地址。
+		if playMsg != "" {
+			return nil, fmt.Errorf("%s", playMsg)
 		}
 		return nil, fmt.Errorf("未获取到播放地址")
 	}
