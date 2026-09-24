@@ -525,7 +525,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             applyEqualizer()
             if (rebuilt && url.isNotBlank()) {
               retrySeekSec = pos.coerceAtLeast(0.0)
-              startLoad(url, headers)
+              // 与 open 一致：先挂 Surface 再 loadfile，避免有声无画。
+              tryAttachSurface()
+              if (surfaceLayerEnabled && !surfaceAttached) {
+                pendingUrl = url
+                pendingHeaders = LinkedHashMap(headers)
+                maybeLoadPending()
+              } else {
+                startLoad(url, headers)
+              }
             }
             result.success(null)
           } catch (e: Throwable) {
