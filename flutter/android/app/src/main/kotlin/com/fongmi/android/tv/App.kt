@@ -92,8 +92,41 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   }
 
   override fun getPackageName(): String {
+    // Toast/Window 加窗会校验 package↔UID；伪装成 fongmi 时会 SecurityException 闪退。
+    if (callerNeedsRealPackage()) return super.getPackageName()
     if (spoofFongmiPackage || callerIsSpiderJar()) return FONGMI_PACKAGE
     return super.getPackageName()
+  }
+
+  override fun getApplicationInfo(): ApplicationInfo {
+    val info = super.getApplicationInfo()
+    if (!spoofFongmiPackage || !callerNeedsRealPackage()) return info
+    val real = realPackageName ?: return info
+    if (info.packageName == real) return info
+    return ApplicationInfo(info).also { it.packageName = real; it.processName = real }
+  }
+
+  /** Toast / 系统窗 / Dialog 必须以真实包名加窗。 */
+  private fun callerNeedsRealPackage(): Boolean {
+    val st = Throwable().stackTrace
+    var i = 0
+    while (i < st.size && i < 32) {
+      val n = st[i].className
+      if (n.startsWith("android.widget.Toast") ||
+          n.startsWith("android.widget.ToastPresenter") ||
+          n.startsWith("android.view.WindowManager") ||
+          n.startsWith("android.view.ViewRootImpl") ||
+          n.startsWith("android.app.Dialog") ||
+          n.startsWith("android.app.AlertDialog") ||
+          n.startsWith("com.android.internal.policy") ||
+          n.contains("NotificationManager") ||
+          n.contains("StatusBarManager")
+      ) {
+        return true
+      }
+      i++
+    }
+    return false
   }
 
   private fun callerIsSpiderJar(): Boolean {
