@@ -220,10 +220,9 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   }
 
   override fun onActivityPaused(activity: Activity) {
-    if (activity === resumedActivity) {
-      resumedActivity = null
-      syncUiActivity(null)
-    }
+    // 不在 pause 清空 Activity。jar 的 playerContent 会 post AlertDialog 到主线程；
+    // pause 后若立刻 syncUiActivity(null)，Builder 会拿到 null 并 NPE（网盘配置实测）。
+    // 仍存活的 Activity 保留到 onDestroyed，供弹窗使用。
   }
 
   override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {

@@ -294,8 +294,14 @@ public class SpiderBridge {
         disableSystemProxies();
         if (isArtVm()) {
             Activity act = UiContext.activity();
+            if (act == null) {
+                act = appActivity();
+            }
             if (act != null) {
                 UiContext.setActivity(act);
+                for (ClassLoader loader : loaders.values()) {
+                    refreshSpiderJarUi(loader);
+                }
             }
         }
         String clientId = "";
@@ -1134,11 +1140,24 @@ public class SpiderBridge {
         }
     }
 
+    private static Activity appActivity() {
+        try {
+            Class<?> clz = Class.forName("com.fongmi.android.tv.App");
+            Object a = clz.getMethod("activity").invoke(null);
+            return a instanceof Activity ? (Activity) a : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     private static void refreshSpiderJarUi(ClassLoader loader) {
         if (!isArtVm() || loader == null) {
             return;
         }
         Activity act = UiContext.activity();
+        if (act == null) {
+            act = appActivity();
+        }
         if (act == null) {
             return;
         }
