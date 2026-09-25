@@ -34,6 +34,7 @@ import '../player/playback_failover.dart';
 import '../player/tv_remote_keys.dart';
 import '../providers.dart';
 import '../nav/kotv_page.dart';
+import '../nav/kotv_routes.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
@@ -49,6 +50,7 @@ import '../widgets/kotv_network_image.dart';
 import '../widgets/mini_hover_shell.dart';
 import '../widgets/vod_player_chrome.dart';
 import 'detail_fullscreen.dart';
+import 'folder_screen.dart';
 import 'shell.dart';
 
 class DetailScreen extends ConsumerStatefulWidget {
@@ -3231,11 +3233,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           const SizedBox(height: 6),
           KotvClickableContent(
             raw: d.content,
-            site: siteKey,
             prefix: '简介：',
             style: introStyle,
             linkStyle: introLinkStyle,
             maxLines: 3,
+            onOpen: (c) => _openContentFolder(c, siteKey),
           ),
         ],
       );
@@ -3563,6 +3565,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
+  void _openContentFolder(KotvContentClick click, String site) {
+    if (!mounted) return;
+    Navigator.of(context).push(
+      kotvDetailRoute(
+        builder: (_) => FolderScreen(
+          tid: click.typeId,
+          title: click.typeName.isNotEmpty ? click.typeName : click.label,
+          site: site,
+        ),
+      ),
+    );
+  }
+
   String _quickSearchQuery(VodDetail d) {
     var q = d.actor.trim();
     if (q.isEmpty || q == '暂无') return d.name;
@@ -3609,9 +3624,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 ),
                 KotvClickableContent(
                   raw: d.content,
-                  site: siteKey,
                   style: bodyStyle,
                   linkStyle: linkStyle,
+                  onOpen: (c) {
+                    Navigator.pop(ctx);
+                    _openContentFolder(c, siteKey);
+                  },
                 ),
               ],
             ),

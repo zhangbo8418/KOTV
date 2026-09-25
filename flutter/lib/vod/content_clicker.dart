@@ -3,9 +3,6 @@ import 'dart:convert';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-import '../nav/kotv_routes.dart';
-import '../screens/folder_screen.dart';
-
 /// Sniffer.CLICKER：`[a=cr:{json}/]label[/a]`，json 为 Class（type_id / type_name）。
 final RegExp kotvContentClicker = RegExp(
   r'\[a=cr:(\{.*?\})\/](.*?)\[\/a]',
@@ -47,22 +44,22 @@ String kotvStripHtmlKeepClicker(String raw) {
       .trim();
 }
 
-/// 详情简介：解析 CLICKER 为可点目录链接。
+/// 详情简介：解析 CLICKER 为可点链接；具体跳转由 [onOpen] 处理。
 class KotvClickableContent extends StatefulWidget {
   const KotvClickableContent({
     super.key,
     required this.raw,
-    required this.site,
     required this.style,
     required this.linkStyle,
+    required this.onOpen,
     this.prefix = '',
     this.maxLines,
   });
 
   final String raw;
-  final String site;
   final TextStyle style;
   final TextStyle linkStyle;
+  final void Function(KotvContentClick click) onOpen;
   final String prefix;
   final int? maxLines;
 
@@ -105,19 +102,7 @@ class _KotvClickableContentState extends State<KotvClickableContent> {
       if (click == null) {
         out.add(TextSpan(text: m.group(0) ?? '', style: widget.style));
       } else {
-        final recognizer = TapGestureRecognizer()
-          ..onTap = () {
-            if (!mounted) return;
-            Navigator.of(context).push(
-              kotvDetailRoute(
-                builder: (_) => FolderScreen(
-                  tid: click.typeId,
-                  title: click.typeName.isNotEmpty ? click.typeName : click.label,
-                  site: widget.site,
-                ),
-              ),
-            );
-          };
+        final recognizer = TapGestureRecognizer()..onTap = () => widget.onOpen(click);
         _recognizers.add(recognizer);
         out.add(TextSpan(text: click.label, style: widget.linkStyle, recognizer: recognizer));
       }
