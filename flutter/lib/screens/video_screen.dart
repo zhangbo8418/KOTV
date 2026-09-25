@@ -398,7 +398,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   void _open(VodItem it) {
-    openVodItem(context, ref, it, site: it.site, fromFolder: _categoryIsFolder);
+    openVodItem(
+      context,
+      ref,
+      it,
+      site: it.site,
+      fromFolder: _categoryIsFolder,
+      extend: Map<String, String>.from(_extend),
+    );
   }
 
   void _searchItem(VodItem it) {
@@ -511,11 +518,17 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       orElse: () => <SiteInfo>[],
     );
     SiteInfo? home;
+    final homeKey = cfg.maybeWhen(data: (c) => '${c['home'] ?? ''}'.trim(), orElse: () => '');
+    final homeNameCfg = cfg.maybeWhen(data: (c) => '${c['homeName'] ?? ''}'.trim(), orElse: () => '');
     for (final s in sites) {
-      if (s.home) {
+      if (homeKey.isNotEmpty ? s.key == homeKey : s.home) {
         home = s;
         break;
       }
+    }
+    // 隐藏站作首页时不在 sites[]；用顶层 home/homeName。
+    if (home == null && homeKey.isNotEmpty) {
+      home = SiteInfo(key: homeKey, name: homeNameCfg.isNotEmpty ? homeNameCfg : homeKey, home: true);
     }
     home ??= sites.isEmpty ? null : sites.first;
     final cfgSource = cfg.maybeWhen(data: (c) => '${c['source'] ?? ''}'.trim(), orElse: () => '');

@@ -25,10 +25,9 @@ class VodItem {
 
   bool get hasAction => action.trim().isNotEmpty;
 
-  /// 显式 `vod_tag=file` 不当目录；`folder` 或 cate 才进文件夹。
+  /// `folder` 标签或 cate 非空即目录（与引擎 Vod.IsFolder / TV Vod.isFolder 一致）。
   bool get isFolder {
     final tag = vodTag.trim().toLowerCase();
-    if (tag == 'file') return false;
     return folder || tag == 'folder' || cate.trim().isNotEmpty;
   }
 

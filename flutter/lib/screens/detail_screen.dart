@@ -1151,19 +1151,22 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _kept = kept;
         _loading = false;
       });
-      unawaited(_resumeOrAutoPlay());
       final id = vod.id.isNotEmpty ? vod.id : widget.id;
       final site = vod.site.isNotEmpty ? vod.site : widget.site;
+      final needExpand = data['magnet'] == true || _detailHasMagnet(vod);
+      if (needExpand && mounted) {
+        // 先展开再起播，避免异步 expand 与 _playAt 竞态清空选集。
+        await _expandMagnet(id: id, site: site);
+        if (mounted) await _resumeOrAutoPlay();
+      } else {
+        unawaited(_resumeOrAutoPlay());
+      }
       final off = await LocalPlayOffsets.get(id, site);
       if (mounted) {
         setState(() {
           _openingSec = off.$1;
           _endingSec = off.$2;
         });
-      }
-      final needExpand = data['magnet'] == true || _detailHasMagnet(vod);
-      if (needExpand && mounted) {
-        unawaited(_expandMagnet(id: id, site: site));
       }
     } catch (e) {
       setState(() {

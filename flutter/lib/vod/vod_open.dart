@@ -35,20 +35,25 @@ bool siteIsIndex(WidgetRef ref, String siteKey) {
     }
     return false;
   }
+  final homeKey = '${cfg?['home'] ?? ''}'.trim();
   for (final s in sites) {
-    if (s['home'] == true) return s['indexs'] == true;
+    if (homeKey.isNotEmpty ? '${s['key'] ?? ''}' == homeKey : s['home'] == true) {
+      return s['indexs'] == true;
+    }
   }
   return false;
 }
 
 /// 打开列表项：action → 站点 action；folder → 进目录；索引站 → 搜索；否则进详情。
 /// [fromFolder] 带 mark 以便详情按文件名选中那一集。
+/// [extend] 父级分类筛选，嵌套目录继续带上。
 Future<void> openVodItem(
   BuildContext context,
   WidgetRef ref,
   VodItem item, {
   String? site,
   bool fromFolder = false,
+  Map<String, String>? extend,
 }) async {
   final siteKey = (site ?? item.site).trim();
   if (item.hasAction) {
@@ -77,6 +82,7 @@ Future<void> openVodItem(
           tid: item.id,
           title: item.name,
           site: siteKey,
+          extend: extend == null || extend.isEmpty ? const {} : Map<String, String>.from(extend),
         ),
       ),
     );

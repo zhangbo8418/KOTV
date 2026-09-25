@@ -425,8 +425,8 @@ class KotvApi {
 
   /// 打断进行中的详情/分类等爬虫请求。
   /// [hard] 硬杀所属 JVM/Py/JS；换集默认 false（软取消）。
-  /// [thunder] 停磁力 Fetch（会显示「已取消」）；非磁力起播应 false。
-  Future<Map<String, dynamic>> cancelPending({bool hard = false, bool thunder = true}) async {
+  /// [thunder] 停磁力 Fetch / 专用源；默认 false（离开详情不停；磁力起播显式 true）。
+  Future<Map<String, dynamic>> cancelPending({bool hard = false, bool thunder = false}) async {
     try {
       final res = await http
           .post(

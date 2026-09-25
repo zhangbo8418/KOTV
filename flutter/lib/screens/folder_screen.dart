@@ -15,11 +15,14 @@ class FolderScreen extends ConsumerStatefulWidget {
     required this.tid,
     required this.title,
     this.site = '',
+    this.extend = const {},
   });
 
   final String tid;
   final String title;
   final String site;
+  /// 父级分类筛选，嵌套目录继续带上。
+  final Map<String, String> extend;
 
   @override
   ConsumerState<FolderScreen> createState() => _FolderScreenState();
@@ -56,6 +59,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
             widget.tid,
             pg: '$pg',
             site: widget.site,
+            extend: widget.extend.isEmpty ? null : Map<String, String>.from(widget.extend),
           );
       final list = ((data['list'] as List?) ?? [])
           .whereType<Map>()
@@ -128,7 +132,14 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
                             }
                             final it = _items[i];
                             return TvFocus(
-                              onPressed: () => openVodItem(context, ref, it, site: widget.site, fromFolder: true),
+                              onPressed: () => openVodItem(
+                                context,
+                                ref,
+                                it,
+                                site: widget.site,
+                                fromFolder: true,
+                                extend: widget.extend,
+                              ),
                               onLongPress: it.hasAction || it.isFolder ? null : () => searchByName(ref, it.name),
                               child: ListTile(
                                 leading: Icon(
@@ -138,7 +149,14 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
                                 title: Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis),
                                 subtitle: it.remarks.isEmpty ? null : Text(it.remarks),
                                 trailing: it.isFolder ? const Icon(Icons.chevron_right) : null,
-                                onTap: () => openVodItem(context, ref, it, site: widget.site, fromFolder: true),
+                                onTap: () => openVodItem(
+                                  context,
+                                  ref,
+                                  it,
+                                  site: widget.site,
+                                  fromFolder: true,
+                                  extend: widget.extend,
+                                ),
                                 onLongPress: it.hasAction || it.isFolder ? null : () => searchByName(ref, it.name),
                               ),
                             );

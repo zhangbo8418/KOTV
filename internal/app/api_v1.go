@@ -95,12 +95,17 @@ func (a *App) APIGetConfig() map[string]any {
 			"home":       s.Key == home.Key,
 		})
 	}
+	homeName := strings.TrimSpace(home.Name)
+	if homeName == "" {
+		homeName = home.Key
+	}
 	return map[string]any{
 		"ok":        true,
 		"ready":     ready,
 		"error":     errMsg,
 		"source":    source,
 		"home":      home.Key,
+		"homeName":  homeName,
 		"sites":     sites,
 		"wallpaper": strings.TrimSpace(cfg.API().Wallpaper),
 		"logo":      strings.TrimSpace(cfg.API().Logo),
@@ -357,11 +362,11 @@ func (a *App) APIBtProgress() map[string]any {
 // APICancelPending 打断进行中的爬虫/磁力。
 // opts:
 //   - hard: true 时硬杀当前所属 JVM/Py/JS；false 仅软取消当前 Scope 请求
-//   - thunder: true 时 Stop 磁力 Fetch（会把进度置为「已取消」）；非磁力起播应传 false
+//   - thunder: true 时 Stop 磁力 Fetch / 专用源；默认 false（离开详情不停；磁力起播路径显式传 true）
 func (a *App) APICancelPending(opts map[string]any) map[string]any {
 	_, sites, _ := a.scope()
 	hard := optBool(opts, "hard", false)
-	stopThunder := optBool(opts, "thunder", true)
+	stopThunder := optBool(opts, "thunder", false)
 	if hard {
 		sites.CancelPendingContent()
 	} else {

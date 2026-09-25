@@ -2213,11 +2213,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final cfg = ref.watch(configProvider);
     final homeName = cfg.maybeWhen(
       data: (c) {
+        final key = '${c['home'] ?? ''}'.trim();
+        final named = '${c['homeName'] ?? ''}'.trim();
+        if (named.isNotEmpty) return named;
         final sites = ((c['sites'] as List?) ?? []).whereType<Map>();
         for (final s in sites) {
-          if (s['home'] == true) return '${s['name'] ?? s['key']}';
+          if ('${s['key'] ?? ''}' == key || s['home'] == true) {
+            return '${s['name'] ?? s['key']}';
+          }
         }
-        return '未选择';
+        return key.isNotEmpty ? key : '未选择';
       },
       orElse: () => '未选择',
     );

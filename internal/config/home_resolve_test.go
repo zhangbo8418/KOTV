@@ -8,18 +8,6 @@ import (
 	"github.com/bobo/KOTV/internal/model"
 )
 
-func TestPickDefaultHome_FirstVisible(t *testing.T) {
-	sites := []model.Site{
-		{Key: "豆瓣", Name: "豆瓣"},
-		{Key: "网盘配置", Name: "网盘及彈幕配置"},
-		{Key: "Youtube", Name: "Youtube"},
-	}
-	home := PickDefaultHome(sites)
-	if home.Key != "豆瓣" {
-		t.Fatalf("PickDefaultHome got %q want 豆瓣", home.Key)
-	}
-}
-
 func TestResolveHome_PrefersSavedKey(t *testing.T) {
 	sites := []model.Site{
 		{Key: "豆瓣", Name: "豆瓣"},
@@ -43,10 +31,6 @@ func TestResolveHome_IncludesHidden(t *testing.T) {
 	home := resolveHome("cfg", sites)
 	if home.Key != "cfg" {
 		t.Fatalf("resolveHome on full list got %q want cfg", home.Key)
-	}
-	visible := filterVisible(sites)
-	if len(visible) != 1 || visible[0].Key != "豆瓣" {
-		t.Fatalf("filterVisible should drop hide, got %+v", visible)
 	}
 }
 

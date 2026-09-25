@@ -650,24 +650,6 @@ func resolveHome(homeKey string, sites []model.Site) model.Site {
 	return model.Site{}
 }
 
-// PickDefaultHome 无已选首页时取列表第一项（VodConfig.initSite orElse get(0)）。
-func PickDefaultHome(sites []model.Site) model.Site {
-	if len(sites) > 0 {
-		return sites[0]
-	}
-	return model.Site{}
-}
-
-func filterVisible(sites []model.Site) []model.Site {
-	out := make([]model.Site, 0, len(sites))
-	for _, s := range sites {
-		if !s.IsHide() {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 // injectGodParse VodConfig.setParses：parses 非空时在首位插入超级解析。
 func injectGodParse(api *model.Api) {
 	if api == nil || len(api.Parses) == 0 {

@@ -135,7 +135,8 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
     while (i < st.size && i < 16) {
       val n = st[i].className
       if (n.startsWith("com.github.catvod.spider") ||
-          n.contains("merge.Ly") ||
+          n.contains("spider.merge.Ly") ||
+          n.contains("catvod.spider.merge.Ly") ||
           n.contains("DexNative") ||
           n.contains("ftyguard") ||
           n.contains("mergeguard")
