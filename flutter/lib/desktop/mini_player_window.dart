@@ -15,7 +15,7 @@ class MiniPlayerWindow {
 
   static const _android = MethodChannel('kotv_android');
 
-  /// 站点 jar 调 Activity.finish() 时由原生转发；由 main 注入（出详情、不退桌面）。
+  /// 原生 MainActivity 非 Flutter finish → spiderFinish；由 main 注入出详情。
   static Future<void> Function()? onSpiderFinish;
 
   static bool get active => _active;
@@ -163,7 +163,7 @@ class MiniPlayerWindow {
     }
   }
 
-  /// 在 main 里调用一次：系统 PiP 变化；站点 jar finish→只出详情（Config 弹窗技巧）。
+  /// 在 main 里调用一次：系统 PiP 变化；spiderFinish→只出详情。
   static void bindAndroidPipListener() {
     if (kIsWeb || !Platform.isAndroid) return;
     _android.setMethodCallHandler((call) async {

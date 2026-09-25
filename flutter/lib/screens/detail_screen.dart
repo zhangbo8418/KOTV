@@ -93,7 +93,7 @@ class DetailScreen extends ConsumerStatefulWidget {
     return until != null && DateTime.now().isBefore(until);
   }
 
-  /// jar 把「关详情」写成 Activity.finish()：只出 Flutter 详情栈，不退桌面。
+  /// 原生 spiderFinish / 空播地址：只出 Flutter 详情栈，不销毁 Activity。
   static Future<void> leaveIfOpen() async {
     final active = _DetailScreenState._active;
     if (active == null) return;
@@ -1879,7 +1879,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         ref.read(apiProvider).baseUrl,
       );
       if (playUrl.isEmpty) {
-        // Config 等站：playerContent 只弹窗、无播放地址；出详情以便弹窗叠在首页。
+        // playerContent 已跑完（配置站会在 jar 内 AlertDialog.show）；无地址则出详情，
+        // 弹窗挂在 MainActivity 上叠首页。有 msg 的失败走 catch，不会落到这里。
         if (mounted) unawaited(_leavePage());
         return;
       }

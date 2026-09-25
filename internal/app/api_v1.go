@@ -599,11 +599,33 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	}
 
 	if playURL == "" {
-		// 有 msg 则作为错误返回；否则空 URL 视为未获取到播放地址。
+		// 有 msg：真实失败。无 msg：playerContent 可能已副作用弹窗（csp_Config），
+		// 仍返回 ok+空 url，详情页出栈后弹窗叠在首页；勿在此抛错打断该路径。
 		if playMsg != "" {
 			return nil, fmt.Errorf("%s", playMsg)
 		}
-		return nil, fmt.Errorf("未获取到播放地址")
+		return map[string]any{
+			"ok":                true,
+			"url":               "",
+			"media":             "",
+			"magnet":            false,
+			"parsed":            didParse,
+			"headers":           headers,
+			"drm":               playDrm,
+			"format":            playFormat,
+			"danmaku":           []any{},
+			"subs":              []any{},
+			"artwork":           playArtwork,
+			"desc":              playDesc,
+			"msg":               "",
+			"position":          playPosition,
+			"qualities":         map[string]any{"names": qualNames, "urls": []string{}},
+			"backendProxyPlay":  settings.IsBackendProxyPlay(),
+			"preferSpiderProxy": settings.PreferSpiderProxyPlay(),
+			"site":              site.Key,
+			"flag":              flag,
+			"id":                vodID,
+		}, nil
 	}
 	// convert：须在可播判断之前，否则 proxy:// 会被当成不可播。
 	playURL = localproxy.ConvertScheme(playURL)

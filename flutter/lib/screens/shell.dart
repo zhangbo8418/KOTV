@@ -151,7 +151,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     if (kotvPopTopPopup(rootNavigatorKey.currentState)) return;
     if (kotvPopTopPopup(_shellNavKey.currentState)) return;
 
-    // isFullscreen() → exitFullscreen()，否则出详情（jar finish 由 MainActivity 转 spiderFinish）。
+    // 全屏先退沉浸；jar/原生 finish → spiderFinish → leaveIfOpen。
     // 必须先于 root.pop / maybePop：全屏页若先退沉浸，全局右键再进来会当成「出详情」直接回首页。
     if (DetailScreen.isImmersive) {
       unawaited(DetailScreen.exitImmersiveIfOpen());
