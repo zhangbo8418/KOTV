@@ -658,10 +658,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _magnetPlay = false;
     _stopBtProgressPoll();
     _syncAndroidAutoPip();
-    // Source.stop：离开详情只软取消爬虫请求 + 停磁力；勿硬杀 JVM（否则再进详情常空剧集）。
+    // 离开详情：只软取消爬虫请求一次；不 stop thunder/source（起播路径再停）。
     final api = _api;
     if (api != null) {
-      unawaited(api.cancelPending(hard: false, thunder: true));
+      unawaited(api.cancelPending(hard: false, thunder: false));
     }
 
     // 硬拆前先软停：pause 即停声，勿 setVolume(0)（会脏包装类音量）。
@@ -954,11 +954,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_active == this) _active = null;
     MiniPlayerWindow.onAndroidPipChanged = null;
     unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, false));
-    // 离开详情：回传扫码取消并软打断进行中请求；不要再 nav.pop（本页正在出栈）。
+    // 离开详情：回传扫码取消。软取消已在 [_stopHard] 做过；仅兜底未走 _leavePage 的路径。
     final api = _api;
     if (api != null) {
       unawaited(PostMsgHost.instance?.cancelAll(reply: true, popDialog: false) ?? Future<void>.value());
-      unawaited(api.cancelPending(hard: false, thunder: true));
+      if (!_stoppedHard) {
+        unawaited(api.cancelPending(hard: false, thunder: false));
+      }
     }
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
@@ -1149,7 +1151,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _kept = kept;
         _loading = false;
       });
-      _applyFolderMark();
+      unawaited(_resumeOrAutoPlay());
       final id = vod.id.isNotEmpty ? vod.id : widget.id;
       final site = vod.site.isNotEmpty ? vod.site : widget.site;
       final off = await LocalPlayOffsets.get(id, site);
@@ -1297,13 +1299,30 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return -1;
   }
 
-  /// 从目录点文件：按 mark 匹配集名并自动起播。
-  void _applyFolderMark() {
-    final mark = widget.mark.trim();
-    if (mark.isEmpty) return;
+  /// 详情就绪后起播：folder mark 优先，否则按历史集名，再否则第一线第一集。
+  /// 配置类站（SUBSCRIBECONFIG / Config）依赖此路径走到 playerContent 弹窗。
+  Future<void> _resumeOrAutoPlay() async {
+    final d = _detail;
+    if (d == null || d.flags.isEmpty) return;
     final eps = _eps;
     if (eps.isEmpty) return;
-    var idx = _matchEpisodeIndex(eps, mark);
+
+    var mark = widget.mark.trim();
+    if (mark.isEmpty) {
+      try {
+        final id = d.id.isNotEmpty ? d.id : widget.id;
+        final site = d.site.isNotEmpty ? d.site : widget.site;
+        final hist = await LocalHistory.list();
+        for (final h in hist) {
+          if (h.id == id && h.site == site) {
+            mark = h.remarks.trim();
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    var idx = mark.isNotEmpty ? _matchEpisodeIndex(eps, mark) : -1;
     if (idx < 0) idx = 0;
     _epIdx = idx;
     _epPage = idx ~/ _epSize;

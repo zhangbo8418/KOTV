@@ -25,15 +25,12 @@ type DB struct {
 
 var defaultDB *DB
 
-func Open() (*DB, error) {
-	if defaultDB != nil {
-		return defaultDB, nil
-	}
-	conn, err := sql.Open("sqlite", paths.DB())
+// OpenPath 打开指定路径的 SQLite（单测 / 自定义库）；不设为进程默认 DB。
+func OpenPath(path string) (*DB, error) {
+	conn, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
-	// 单连接 + busy 等待，降低并发写时 SQLITE_BUSY
 	conn.SetMaxOpenConns(1)
 	conn.SetMaxIdleConns(1)
 	conn.SetConnMaxLifetime(0)
@@ -41,6 +38,18 @@ func Open() (*DB, error) {
 	_, _ = conn.Exec(`PRAGMA journal_mode = WAL`)
 	db := &DB{conn: conn}
 	if err := db.migrate(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func Open() (*DB, error) {
+	if defaultDB != nil {
+		return defaultDB, nil
+	}
+	db, err := OpenPath(paths.DB())
+	if err != nil {
 		return nil, err
 	}
 	defaultDB = db

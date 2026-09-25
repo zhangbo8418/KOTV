@@ -507,15 +507,12 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	// VodConfig.setParses：非空时在首位插入超级解析（type=4）。
 	injectGodParse(&api)
 
-	visible := filterVisible(api.Sites)
-	// VodConfig.initSite：按 config.home 找站，找不到则用列表第一项。
-	home := resolveHome(cfg.Home, visible)
-	if home.Key == "" && len(visible) > 0 {
-		home = visible[0]
+	// VodConfig.initSite：全量 sites 按 config.home 匹配，否则 get(0)；setHome(..., false) 不落盘。
+	home := resolveHome(cfg.Home, api.Sites)
+	if home.Key == "" && len(api.Sites) > 0 {
+		home = api.Sites[0]
 	}
-	if home.Key != "" {
-		cfg.Home = home.Key
-	}
+	// 运行时 m.home；勿把 fallback 写进 cfg.Home 再 Upsert（否则会持久化纠正结果）。
 
 	m.initLiveFromVod(cfg, &api)
 
@@ -653,7 +650,7 @@ func resolveHome(homeKey string, sites []model.Site) model.Site {
 	return model.Site{}
 }
 
-// PickDefaultHome 无已选首页时取可见列表第一项（VodConfig.initSite orElse get(0)）。
+// PickDefaultHome 无已选首页时取列表第一项（VodConfig.initSite orElse get(0)）。
 func PickDefaultHome(sites []model.Site) model.Site {
 	if len(sites) > 0 {
 		return sites[0]

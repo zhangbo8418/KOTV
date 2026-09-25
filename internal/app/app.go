@@ -227,12 +227,6 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 		sess.Ready = true
 		sess.ErrMsg = ""
 		sess.Source = settings.Get(settings.VOD)
-		// 未设首页或站点已删时取列表第一项。
-		if home := sess.Cfg.Home(); home.Key == "" || sess.Cfg.GetSite(home.Key) == nil {
-			if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
-				sess.Cfg.SetHome(alt)
-			}
-		}
 	}
 	src, homeKey := clientsession.LoadSource(sess.ClientID)
 	src = strings.TrimSpace(src)
@@ -455,11 +449,6 @@ func (a *App) syncSessionsFromGlobal() {
 		sess.Ready = true
 		sess.ErrMsg = ""
 		sess.Source = settings.Get(settings.VOD)
-		if home := sess.Cfg.Home(); home.Key == "" || sess.Cfg.GetSite(home.Key) == nil {
-			if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
-				sess.Cfg.SetHome(alt)
-			}
-		}
 	})
 }
 

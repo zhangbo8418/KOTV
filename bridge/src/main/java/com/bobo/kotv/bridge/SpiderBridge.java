@@ -71,10 +71,16 @@ public class SpiderBridge {
         disableHutoolBouncyCastle();
     }
 
-    /** Android：写入前台 Activity，并同步到已加载 jar 的 spider.Init。 */
+    /** Android：写入前台 Activity，并同步到已加载 jar 的 spider.Init；null 时清空 jar Init。 */
     public static void setAndroidActivity(Activity activity) {
         UiContext.setActivity(activity);
-        if (activity == null || !isArtVm()) {
+        if (!isArtVm()) {
+            return;
+        }
+        if (activity == null) {
+            for (ClassLoader loader : loaders.values()) {
+                clearJarInitActivity(loader);
+            }
             return;
         }
         for (ClassLoader loader : loaders.values()) {
@@ -1109,6 +1115,25 @@ public class SpiderBridge {
         if (act == null || initClz == null) {
             return;
         }
+        writeJarInitActivity(initClz, act);
+    }
+
+    /** destroy 后清空 jar Init.activity，避免持已销毁 Activity。 */
+    private static void clearJarInitActivity(ClassLoader loader) {
+        if (loader == null) {
+            return;
+        }
+        try {
+            Class<?> clz = loader.loadClass("com.github.catvod.spider.Init");
+            writeJarInitActivity(clz, null);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void writeJarInitActivity(Class<?> initClz, Activity act) {
+        if (initClz == null) {
+            return;
+        }
         for (String name : new String[]{"setActivity", "bindActivity", "attachActivity"}) {
             try {
                 initClz.getMethod(name, Activity.class).invoke(null, act);
@@ -1136,7 +1161,7 @@ public class SpiderBridge {
                     java.lang.ref.WeakReference<?> ref = (java.lang.ref.WeakReference<?>) current;
                     Object target = ref.get();
                     if (target == null || target instanceof Activity) {
-                        field.set(null, new java.lang.ref.WeakReference<>(act));
+                        field.set(null, act == null ? null : new java.lang.ref.WeakReference<>(act));
                         return;
                     }
                 }

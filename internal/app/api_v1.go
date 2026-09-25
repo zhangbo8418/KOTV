@@ -77,24 +77,9 @@ func (a *App) APIGetConfig() map[string]any {
 			if src := strings.TrimSpace(settings.Get(settings.VOD)); src != "" {
 				sess.Source = src
 			}
-			// 未设首页或站点已从仓中消失时取列表第一项。
-			if home := sess.Cfg.Home(); home.Key == "" || sess.Cfg.GetSite(home.Key) == nil {
-				if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
-					sess.Cfg.SetHome(alt)
-				}
-			}
 			cfg = sess.Cfg
 			ready, errMsg = sess.Ready, sess.ErrMsg
 			source = sess.Source
-		} else if ready && cfg != nil {
-			if home := cfg.Home(); home.Key == "" || cfg.GetSite(home.Key) == nil {
-				if alt := config.PickDefaultHome(cfg.Sites()); alt.Key != "" && alt.Key != home.Key {
-					cfg.SetHome(alt)
-					if sess != nil {
-						clientsession.SaveSource(sess.ClientID, sess.Source, alt.Key)
-					}
-				}
-			}
 		}
 	}
 	home := cfg.Home()
