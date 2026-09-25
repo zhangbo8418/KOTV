@@ -3169,9 +3169,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final eps = _eps;
     final pageCount = eps.isEmpty ? 0 : ((eps.length - 1) ~/ _epSize) + 1;
     final pageEps = eps.skip(_epPage * _epSize).take(_epSize).toList();
-    final director = d.director.isEmpty ? '暂无' : d.director;
-    final actor = d.actor.isEmpty ? '暂无' : d.actor;
     final siteKey = d.site.isNotEmpty ? d.site : widget.site;
+    final compact = KotvLayout.isCompact(context);
+    final p = KotvPalette.of(context);
+    final fg = p.fg;
+    final muted = p.muted;
     final introStyle = TextStyle(color: muted, fontSize: 15, height: 1.5);
     final introLinkStyle = TextStyle(
       color: p.primary,
@@ -3180,10 +3182,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       decoration: TextDecoration.underline,
       decorationColor: p.primary,
     );
-    final compact = KotvLayout.isCompact(context);
-    final p = KotvPalette.of(context);
-    final fg = p.fg;
-    final muted = p.muted;
+    final metaStyle = TextStyle(color: muted, fontSize: 14.5, height: 1.3);
+    final metaLinkStyle = TextStyle(
+      color: p.primary,
+      fontSize: 14.5,
+      height: 1.3,
+      decoration: TextDecoration.underline,
+      decorationColor: p.primary,
+    );
 
     Widget videoPane({required bool expand}) {
       return Container(
@@ -3217,18 +3223,22 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final info = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '导演：$director',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          KotvClickableContent(
+            raw: d.director,
+            prefix: '导演：',
             style: TextStyle(color: muted, fontSize: 15, height: 1.45),
+            linkStyle: introLinkStyle.copyWith(fontSize: 15, height: 1.45),
+            maxLines: 1,
+            onOpen: (c) => _openContentFolder(c, siteKey),
           ),
           const SizedBox(height: 6),
-          Text(
-            '演员：$actor',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+          KotvClickableContent(
+            raw: d.actor,
+            prefix: '演员：',
             style: TextStyle(color: muted, fontSize: 15, height: 1.45),
+            linkStyle: introLinkStyle.copyWith(fontSize: 15, height: 1.45),
+            maxLines: 2,
+            onOpen: (c) => _openContentFolder(c, siteKey),
           ),
           const SizedBox(height: 6),
           KotvClickableContent(
@@ -3294,6 +3304,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 pic: d.pic,
                 site: d.site.isNotEmpty ? d.site : widget.site,
                 remarks: d.remarks,
+                typeName: d.typeName,
               ));
               setState(() {
                 _kept = kept;
@@ -3425,7 +3436,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 spacing: 16,
                 runSpacing: 6,
                 children: [
-                  _meta('更新：${d.remarks.isEmpty ? '暂无' : d.remarks}'),
+                  KotvClickableContent(
+                    raw: d.remarks,
+                    prefix: '更新：',
+                    style: metaStyle,
+                    linkStyle: metaLinkStyle,
+                    maxLines: 1,
+                    onOpen: (c) => _openContentFolder(c, siteKey),
+                  ),
                   _meta('来源：${d.site.isEmpty ? '未知' : d.site}'),
                   _meta('年份：${d.year.isEmpty ? '暂无' : d.year}'),
                   if (d.area.isNotEmpty) _meta('地区：${d.area}'),
@@ -3484,7 +3502,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                             spacing: 20,
                             runSpacing: 6,
                             children: [
-                              _meta('更新：${d.remarks.isEmpty ? '暂无' : d.remarks}'),
+                              KotvClickableContent(
+                                raw: d.remarks,
+                                prefix: '更新：',
+                                style: metaStyle,
+                                linkStyle: metaLinkStyle,
+                                maxLines: 1,
+                                onOpen: (c) => _openContentFolder(c, siteKey),
+                              ),
                               _meta('来源：${d.site.isEmpty ? '未知' : d.site}'),
                               _meta('年份：${d.year.isEmpty ? '暂无' : d.year}'),
                               if (d.area.isNotEmpty) _meta('地区：${d.area}'),
@@ -3613,15 +3638,43 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                KotvClickableContent(
+                  raw: d.director,
+                  prefix: '导演：',
+                  style: bodyStyle,
+                  linkStyle: linkStyle,
+                  onOpen: (c) {
+                    Navigator.pop(ctx);
+                    _openContentFolder(c, siteKey);
+                  },
+                ),
+                KotvClickableContent(
+                  raw: d.actor,
+                  prefix: '演员：',
+                  style: bodyStyle,
+                  linkStyle: linkStyle,
+                  onOpen: (c) {
+                    Navigator.pop(ctx);
+                    _openContentFolder(c, siteKey);
+                  },
+                ),
                 Text(
-                  '导演：${d.director.isEmpty ? '暂无' : d.director}\n'
-                  '演员：${d.actor.isEmpty ? '暂无' : d.actor}\n'
                   '类型：${d.typeName.isEmpty ? '暂无' : d.typeName}\n'
                   '年份：${d.year.isEmpty ? '暂无' : d.year}\n'
-                  '地区：${d.area.isEmpty ? '暂无' : d.area}\n'
-                  '备注：${d.remarks.isEmpty ? '暂无' : d.remarks}\n',
+                  '地区：${d.area.isEmpty ? '暂无' : d.area}\n',
                   style: bodyStyle,
                 ),
+                KotvClickableContent(
+                  raw: d.remarks,
+                  prefix: '备注：',
+                  style: bodyStyle,
+                  linkStyle: linkStyle,
+                  onOpen: (c) {
+                    Navigator.pop(ctx);
+                    _openContentFolder(c, siteKey);
+                  },
+                ),
+                const SizedBox(height: 8),
                 KotvClickableContent(
                   raw: d.content,
                   style: bodyStyle,

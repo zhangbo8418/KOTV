@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
-import '../nav/kotv_routes.dart';
 import '../remote/local_collect.dart';
 import '../theme/layout_scale.dart';
+import '../vod/vod_open.dart';
 import '../widgets/chrome.dart';
 import '../widgets/poster_card.dart';
-import 'detail_screen.dart';
 import 'shell.dart';
 
 class CollectScreen extends ConsumerStatefulWidget {
@@ -100,9 +99,7 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
                           return;
                         }
                         if (!context.mounted) return;
-                        Navigator.of(context).push(
-                          kotvDetailRoute(builder: (_) => DetailScreen(id: it.id, site: it.site, title: it.name)),
-                        );
+                        await openVodItem(context, ref, it, site: it.site);
                       },
                     ),
         ),

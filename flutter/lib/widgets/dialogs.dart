@@ -18,6 +18,11 @@ import '../screens/file_browser_screen.dart';
 import '../screens/live_screen.dart';
 import 'chrome.dart';
 
+Future<void> _prepareLeavePlayback() async {
+  await DetailScreen.prepareLeave();
+  await LiveScreen.prepareLeave();
+}
+
 /// 弹窗尺寸：窄屏用满宽减边距，避免固定 720 被压成竖条。
 ({double width, double height, EdgeInsets inset, bool compact}) _dialogMetrics(BuildContext context) {
   final sz = MediaQuery.sizeOf(context);
@@ -139,6 +144,9 @@ Future<void> showSitePicker(
   required Future<void> Function(String key) onSelect,
 }) async {
   if (sites.isEmpty) return;
+  final scrollCtrl = ScrollController();
+  final homeIdx = sites.indexWhere((s) => s.home);
+  final focusIdx = homeIdx >= 0 ? homeIdx : 0;
   await showDialog<void>(
     context: context,
     builder: (ctx) {
@@ -155,6 +163,15 @@ Future<void> showSitePicker(
             setLocal(() => local = list);
             ref.invalidate(configProvider);
           }
+
+          final curHomeIdx = local.indexWhere((s) => s.home);
+          final curFocus = curHomeIdx >= 0 ? curHomeIdx : focusIdx;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!scrollCtrl.hasClients || curFocus <= 0) return;
+            final itemH = (m.compact ? 44.0 : 52.0) + (m.compact ? 4.0 : 8.0);
+            final target = (curFocus * itemH).clamp(0.0, scrollCtrl.position.maxScrollExtent);
+            scrollCtrl.jumpTo(target);
+          });
 
           return Dialog(
             backgroundColor: Colors.transparent,
@@ -204,6 +221,7 @@ Future<void> showSitePicker(
                       SizedBox(height: m.compact ? 10 : 16),
                       Expanded(
                         child: ListView.separated(
+                          controller: scrollCtrl,
                           itemCount: local.length,
                           separatorBuilder: (_, __) => SizedBox(height: m.compact ? 4 : 8),
                           itemBuilder: (_, i) {
@@ -217,7 +235,7 @@ Future<void> showSitePicker(
                                       label: s.name,
                                       height: 40,
                                       selected: s.home,
-                                      autofocus: i == 0,
+                                      autofocus: i == curFocus,
                                       onTap: () {
                                         Navigator.pop(ctx);
                                         onSelect(s.key);
@@ -258,7 +276,7 @@ Future<void> showSitePicker(
                                     label: s.name,
                                     height: 44,
                                     selected: s.home,
-                                    autofocus: i == 0,
+                                    autofocus: i == curFocus,
                                     onTap: () {
                                       Navigator.pop(ctx);
                                       onSelect(s.key);
@@ -304,6 +322,7 @@ Future<void> showSitePicker(
       );
     },
   );
+  scrollCtrl.dispose();
 }
 
 Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
@@ -335,9 +354,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
               status = '加载配置中…';
             });
             try {
-              // 添加/加载新源前停详情与直播。
-              await DetailScreen.prepareLeave();
-              await LiveScreen.prepareLeave();
+              await _prepareLeavePlayback();
               await api.loadConfig(src).timeout(const Duration(seconds: 45));
               ref.invalidate(configProvider);
               ref.invalidate(settingsProvider);
@@ -500,6 +517,7 @@ Future<({String url, String name})?> showEditLiveDialog(BuildContext context, Wi
     initialName: initialName,
     onSave: (newUrl, name) => api.editLive(oldUrl: oldUrl, url: newUrl, name: name),
     onDelete: api.deleteLive,
+    stopPlaybackAlways: true,
   );
 }
 
@@ -512,6 +530,8 @@ Future<({String url, String name})?> _showEditSourceDialog(
   required String initialName,
   required Future<Map<String, dynamic>> Function(String url, String name) onSave,
   Future<Map<String, dynamic>> Function(String url)? onDelete,
+  /// 直播源：任意保存/删除都停播；点播仅 URL 变更或删除时停。
+  bool stopPlaybackAlways = false,
 }) async {
   final nameCtrl = TextEditingController(text: initialName);
   final urlCtrl = TextEditingController(text: oldUrl);
@@ -538,6 +558,7 @@ Future<({String url, String name})?> _showEditSourceDialog(
                 status = '删除中…';
               });
               try {
+                await _prepareLeavePlayback();
                 await onDelete(oldUrl).timeout(const Duration(seconds: 45));
                 ref.invalidate(configProvider);
                 ref.invalidate(settingsProvider);
@@ -560,6 +581,9 @@ Future<({String url, String name})?> _showEditSourceDialog(
               status = '保存中…';
             });
             try {
+              if (stopPlaybackAlways || url != oldUrl) {
+                await _prepareLeavePlayback();
+              }
               await onSave(url, name).timeout(const Duration(seconds: 45));
               // 只改备注时不要 invalidate 首页，避免底层路由重建把源列表弹窗刷回打开时的快照。
               ref.invalidate(settingsProvider);
@@ -743,6 +767,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
   if (ok == true) {
     final src = ctrl.text.trim();
     if (src.isNotEmpty) {
+      await _prepareLeavePlayback();
       await api.setSetting('live', src);
       ref.invalidate(settingsProvider);
     }
@@ -776,7 +801,10 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
       addLabel: '＋ 添加直播源',
       vodStyle: false,
       onEdit: (url, title) => showEditLiveDialog(ctx, ref, url: url, title: title),
-      onDelete: api.deleteLive,
+      onDelete: (url) async {
+        await _prepareLeavePlayback();
+        await api.deleteLive(url);
+      },
     ),
   );
   if (!context.mounted) return false;
@@ -785,6 +813,7 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
     await showAddLiveDialog(context, ref);
     return true;
   }
+  await _prepareLeavePlayback();
   await api.setSetting('live', selected);
   return true;
 }
@@ -818,7 +847,10 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
       vodStyle: true,
       fallbackCurrent: current,
       onEdit: (url, title) => showEditVodDialog(ctx, ref, url: url, title: title),
-      onDelete: api.deleteRepo,
+      onDelete: (url) async {
+        await _prepareLeavePlayback();
+        await api.deleteRepo(url);
+      },
     ),
   );
 
@@ -829,8 +861,7 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
   }
 
   // 换线路前停详情/直播，避免后台继续出声。
-  await DetailScreen.prepareLeave();
-  await LiveScreen.prepareLeave();
+  await _prepareLeavePlayback();
   if (!context.mounted) return false;
 
   final label = selected.length > 40 ? '${selected.substring(0, 40)}…' : selected;

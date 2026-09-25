@@ -64,6 +64,11 @@ class LocalCollect {
                 'vod_remarks': e.remarks,
                 'type_name': e.typeName,
                 'site': e.site,
+                if (e.vodTag.trim().isNotEmpty) 'vod_tag': e.vodTag,
+                if (e.cate.trim().isNotEmpty) 'cate': e.cate,
+                if (e.action.trim().isNotEmpty) 'action': e.action,
+                if (e.flag.trim().isNotEmpty) 'vod_flag': e.flag,
+                if (e.folder) 'is_folder': true,
               })
           .toList()),
     );
