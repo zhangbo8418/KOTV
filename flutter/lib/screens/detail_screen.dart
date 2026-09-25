@@ -114,6 +114,9 @@ class DetailScreen extends ConsumerStatefulWidget {
     } catch (_) {}
     active._immersiveFullscreen = false;
     try {
+      await active._flushWatchProgress(force: true);
+    } catch (_) {}
+    try {
       await active._stopHard().timeout(const Duration(seconds: 4));
     } catch (_) {}
     if (!active.mounted) return;
@@ -650,6 +653,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 先 pause 停声，再卸画面 / release，避免 WASAPI 边播边拆卡音（不改音量）。
   /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
   Future<void> _stopHard() async {
+    try {
+      await _flushWatchProgress(force: true);
+    } catch (_) {}
     _playbackLive = false;
     _advanceBusy = false;
     _playGen++;
@@ -761,6 +767,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _leaving = true;
     // 立刻清 _active：否则 goKotvPage→prepareLeave 仍会 await 本页硬停，切 Tab 像点不动。
     if (_active == this) _active = null;
+    try {
+      await _flushWatchProgress(force: true);
+    } catch (_) {}
     // 先硬停再出栈：否则 Navigator.pop → dispose 里 ref 抛错时 FVP 会继续后台出声。
     try {
       await _stopHard();
@@ -944,8 +953,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   Future<void> _saveWatchProgress(int positionMs, int durationMs) async {
+    await _writeWatchProgress(positionMs, durationMs, force: false);
+  }
+
+  /// 离开/换集：force 时忽略 5s 下限，立即把当前集进度写入 LocalHistory。
+  Future<void> _flushWatchProgress({bool force = false}) async {
+    final pos = _playback.position.inMilliseconds;
+    final dur = _playback.duration.inMilliseconds;
+    await _writeWatchProgress(pos, dur, force: force);
+  }
+
+  Future<void> _writeWatchProgress(int positionMs, int durationMs, {required bool force}) async {
     final d = _detail;
-    if (d == null || positionMs < 5000) return;
+    if (d == null) return;
+    if (!force && positionMs < 5000) return;
+    if (force && positionMs <= 0) return;
     final epName = _currentEpisodeName() ?? '';
     if (epName.isEmpty) return;
     final flag = d.flags.isEmpty
@@ -962,6 +984,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         positionMs: positionMs,
         durationMs: durationMs,
       ));
+      _lastProgressSave = DateTime.now();
     } catch (_) {}
   }
 
@@ -1750,6 +1773,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final eps = _eps;
     if (epIdx < 0 || epIdx >= eps.length) return;
     final ep = eps[epIdx];
+    // 换集前先落盘当前集进度，再 push 新集（positionMs: 0）。
+    if (_epIdx >= 0 && _epIdx != epIdx) {
+      try {
+        await _flushWatchProgress(force: true);
+      } catch (_) {}
+    }
     _stoppedHard = false;
     // 换集：抬世代，关掉 READY/连播（BUFFERING 时 Clock=null）
     final gen = ++_playGen;
@@ -3396,12 +3425,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               });
             }),
             _action('换源', Icons.visibility_outlined, () {
-              if (flags.length <= 1) {
-                setState(() => _status = '仅一条线路，无法换源');
+              final name = (_detail?.name ?? widget.title).trim();
+              if (name.isEmpty) {
+                setState(() => _status = '无法换源');
                 return;
               }
-              final next = (_flagIdx + 1) % flags.length;
-              _selectFlag(next);
+              unawaited(_leavePage(afterPop: () => searchByName(ref, name)));
             }),
             _action('解析', Icons.tune_rounded, () => _pickParse()),
           ],

@@ -2106,7 +2106,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final dir = await getApplicationDocumentsDirectory();
     final def = '${dir.path}${Platform.pathSeparator}kotv-backup.json.gz';
     await _prompt('备份导出路径', def, def, (path) async {
-      final data = await _runTool('正在备份', () => ref.read(apiProvider).tools('backupExport', {'path': path}));
+      final hist = LocalHistory.toSyncTargets(await LocalHistory.list());
+      final keep = LocalCollect.toSyncTargets(await LocalCollect.list());
+      final data = await _runTool(
+        '正在备份',
+        () => ref.read(apiProvider).tools('backupExport', {
+              'path': path,
+              'history': jsonEncode(hist),
+              'keep': jsonEncode(keep),
+            }),
+      );
       if (data == null || !mounted) return;
       setState(() => _status = '${data['message'] ?? '备份已导出'} → $path');
       showAppNews(context, '备份已导出\n$path');
@@ -2119,6 +2128,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _prompt('备份文件路径', def, def, (path) async {
       final data = await _runTool('正在恢复', () => ref.read(apiProvider).tools('backupImport', {'path': path}));
       if (data == null || !mounted) return;
+      final histRaw = '${data['history'] ?? ''}'.trim();
+      final keepRaw = '${data['keep'] ?? ''}'.trim();
+      if (histRaw.isNotEmpty) {
+        await LocalHistory.replaceAll(LocalHistory.fromSyncTargets(histRaw));
+      }
+      if (keepRaw.isNotEmpty) {
+        await LocalCollect.replaceAll(LocalCollect.fromSyncTargets(keepRaw));
+      }
       setState(() => _status = '${data['message'] ?? '备份已恢复'}');
       await _reload();
       ref.invalidate(configProvider);

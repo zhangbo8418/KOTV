@@ -58,6 +58,17 @@ void main() {
     expect(targets.first['key'], 's1\$\$\$v1');
   });
 
+  test('LocalHistory.fromSyncTargets parses site\$\$\$id', () {
+    final items = LocalHistory.fromSyncTargets(
+      '[{"key":"s1\$\$\$v9","vodName":"N","vodPic":"p","vodFlag":"f","vodRemarks":"ep1","position":9000,"duration":10000}]',
+    );
+    expect(items, hasLength(1));
+    expect(items.first.id, 'v9');
+    expect(items.first.site, 's1');
+    expect(items.first.positionMs, 9000);
+    expect(items.first.flag, 'f');
+  });
+
   test('LocalRevSort persists', () async {
     expect(await LocalRevSort.get('v1', 's1'), isFalse);
     await LocalRevSort.set('v1', 's1', true);

@@ -15,21 +15,19 @@ const version = 1
 
 // Payload 备份包内容。
 type Payload struct {
-	Version  int               `json:"version"`
-	Settings []settings.Entry  `json:"settings"`
-	History  []database.History `json:"history"`
-	Keep     []database.Keep   `json:"keep"`
+	Version  int                 `json:"version"`
+	Settings []settings.Entry    `json:"settings"`
+	History  []database.History  `json:"history"`
+	Keep     []database.Keep     `json:"keep"`
 }
 
-// Export 导出 gzip 压缩的 JSON 备份。
-func Export(db *database.DB) ([]byte, error) {
-	hist, err := db.ListAllHistory()
-	if err != nil {
-		return nil, err
+// ExportClient 用客户端传入的历史/收藏打包（不读引擎 DB 列表）。
+func ExportClient(hist []database.History, keep []database.Keep) ([]byte, error) {
+	if hist == nil {
+		hist = []database.History{}
 	}
-	keep, err := db.ListAllKeep(database.KeepTypeVod)
-	if err != nil {
-		return nil, err
+	if keep == nil {
+		keep = []database.Keep{}
 	}
 	payload := Payload{
 		Version:  version,
@@ -52,32 +50,32 @@ func Export(db *database.DB) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Import 从 gzip JSON 恢复；事务写入 history/keep，再替换 settings。
-func Import(db *database.DB, data []byte) error {
+// Import 从 gzip JSON 恢复；写入引擎 DB 的 history/keep 与 settings，并返回 payload 供客户端落 SP。
+func Import(db *database.DB, data []byte) (*Payload, error) {
 	raw, err := gunzip(data)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var payload Payload
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return fmt.Errorf("备份格式无效: %w", err)
+		return nil, fmt.Errorf("备份格式无效: %w", err)
 	}
 	if payload.Version > version {
-		return fmt.Errorf("备份版本 %d 不受支持", payload.Version)
+		return nil, fmt.Errorf("备份版本 %d 不受支持", payload.Version)
 	}
 	if err := db.ImportHistory(payload.History, 2); err != nil {
-		return fmt.Errorf("恢复历史失败: %w", err)
+		return nil, fmt.Errorf("恢复历史失败: %w", err)
 	}
 	if err := db.ImportKeep(payload.Keep, 2); err != nil {
-		return fmt.Errorf("恢复收藏失败: %w", err)
+		return nil, fmt.Errorf("恢复收藏失败: %w", err)
 	}
 	if len(payload.Settings) > 0 {
 		settings.ReplaceEntries(payload.Settings)
 		if err := settings.Save(); err != nil {
-			return fmt.Errorf("恢复设置失败: %w", err)
+			return nil, fmt.Errorf("恢复设置失败: %w", err)
 		}
 	}
-	return nil
+	return &payload, nil
 }
 
 func gunzip(data []byte) ([]byte, error) {

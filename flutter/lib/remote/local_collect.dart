@@ -3,11 +3,17 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import 'sync_import_apply.dart';
 
 class LocalCollect {
   static const _key = 'kotv_collect_v1';
 
   static Future<List<VodItem>> list() async {
+    await SyncImportApply.pull();
+    return _listRaw();
+  }
+
+  static Future<List<VodItem>> _listRaw() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_key);
     if (raw == null || raw.isEmpty) return [];
@@ -44,12 +50,12 @@ class LocalCollect {
   }
 
   static Future<bool> isKept(String id, String site, {String configSource = ''}) async {
-    final list = await LocalCollect.list();
+    final list = await _listRaw();
     return _indexOf(list, id: id, site: site, configSource: configSource) >= 0;
   }
 
   static Future<bool> toggle(VodItem item) async {
-    final cur = await list();
+    final cur = await _listRaw();
     final i = _indexOf(cur, id: item.id, site: item.site, configSource: item.configSource);
     if (i >= 0) {
       cur.removeAt(i);
@@ -69,7 +75,7 @@ class LocalCollect {
     String configSource = '',
   }) async {
     if (oldId.isEmpty || newId.isEmpty || oldId == newId) return;
-    final cur = await list();
+    final cur = await _listRaw();
     final oldIdx = _indexOf(cur, id: oldId, site: site, configSource: configSource);
     if (oldIdx < 0) return;
     final newIdx = _indexOf(cur, id: newId, site: site, configSource: configSource);
@@ -94,7 +100,7 @@ class LocalCollect {
     String? typeName,
   }) async {
     if (id.isEmpty) return;
-    final cur = await list();
+    final cur = await _listRaw();
     final i = _indexOf(cur, id: id, site: site, configSource: configSource);
     if (i < 0) return;
     final e = cur[i];
@@ -115,7 +121,7 @@ class LocalCollect {
   }
 
   static Future<void> remove(VodItem item) async {
-    final cur = await list();
+    final cur = await _listRaw();
     final i = _indexOf(cur, id: item.id, site: item.site, configSource: item.configSource);
     if (i >= 0) {
       cur.removeAt(i);
@@ -123,6 +129,10 @@ class LocalCollect {
       cur.removeWhere((e) => e.id == item.id && e.site == item.site);
     }
     await _save(cur);
+  }
+
+  static Future<void> replaceAll(List<VodItem> items) async {
+    await _save(items.take(200).toList());
   }
 
   static VodItem _copy(
@@ -191,7 +201,35 @@ class LocalCollect {
             'type': 0,
             'cid': 0,
             'siteName': e.site,
+            if (e.configSource.trim().isNotEmpty) 'config_source': e.configSource,
           },
     ];
+  }
+
+  static List<VodItem> fromSyncTargets(String raw) {
+    final out = <VodItem>[];
+    for (final j in decodeSyncList(raw)) {
+      var site = '';
+      var id = '';
+      parseSyncVodKey('${j['key'] ?? ''}', (s, i) {
+        site = s;
+        id = i;
+      });
+      if (id.isEmpty) {
+        final sn = '${j['siteName'] ?? ''}'.trim();
+        if (sn.isNotEmpty) site = sn;
+      }
+      if (id.isEmpty) continue;
+      out.add(VodItem(
+        id: id,
+        name: '${j['vodName'] ?? ''}',
+        pic: '${j['vodPic'] ?? ''}',
+        remarks: '${j['vodRemarks'] ?? ''}',
+        site: site,
+        flag: '${j['vodFlag'] ?? ''}',
+        configSource: '${j['config_source'] ?? j['configSource'] ?? ''}',
+      ));
+    }
+    return out;
   }
 }

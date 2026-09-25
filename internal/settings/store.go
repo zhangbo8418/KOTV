@@ -60,6 +60,9 @@ const (
 	Incognito     Type = "incognito"
 	SyncPairCode  Type = "syncPairCode"
 	DeviceUUID    Type = "deviceUUID"
+	// SyncHistoryPending / SyncKeepPending：同步接收后待客户端落 SP 的 JSON。
+	SyncHistoryPending Type = "kotv_sync_history"
+	SyncKeepPending    Type = "kotv_sync_keep"
 	RemoteAuth    Type = "remoteAuth"    // 远端强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
 	// BackendProxyPlay 远端前端连入时，网盘是否经引擎 /proxy（jar 原生库/go/Java 多线程）。

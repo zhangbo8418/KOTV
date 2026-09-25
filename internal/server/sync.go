@@ -186,13 +186,21 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 					return err
 				}
 				normalizeHistoryKeys(items)
-				return db.ImportHistory(items, mode)
+				if err := db.ImportHistory(items, mode); err != nil {
+					return err
+				}
+				stashSyncPending("history", body)
+				return nil
 			case "keep":
 				var items []database.Keep
 				if err := json.Unmarshal(body, &items); err != nil {
 					return err
 				}
-				return db.ImportKeep(items, mode)
+				if err := db.ImportKeep(items, mode); err != nil {
+					return err
+				}
+				stashSyncPending("keep", body)
+				return nil
 			default:
 				return http.ErrNotSupported
 			}
@@ -202,20 +210,29 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 			if force {
 				mode = 2
 			}
+			body := []byte(targetsJSON)
 			switch typ {
 			case "history":
 				var items []database.History
-				if err := json.Unmarshal([]byte(targetsJSON), &items); err != nil {
+				if err := json.Unmarshal(body, &items); err != nil {
 					return err
 				}
 				normalizeHistoryKeys(items)
-				return db.ImportHistory(items, mode)
-			case "keep":
-				var items []database.Keep
-				if err := json.Unmarshal([]byte(targetsJSON), &items); err != nil {
+				if err := db.ImportHistory(items, mode); err != nil {
 					return err
 				}
-				return db.ImportKeep(items, mode)
+				stashSyncPending("history", body)
+				return nil
+			case "keep":
+				var items []database.Keep
+				if err := json.Unmarshal(body, &items); err != nil {
+					return err
+				}
+				if err := db.ImportKeep(items, mode); err != nil {
+					return err
+				}
+				stashSyncPending("keep", body)
+				return nil
 			default:
 				return http.ErrNotSupported
 			}
@@ -273,6 +290,23 @@ func normalizeHistoryKeys(items []database.History) {
 			items[i].Ending = 0
 		}
 	}
+}
+
+// stashSyncPending 把本次同步 targets 原文写入 settings，供客户端落 SP。
+func stashSyncPending(typ string, body []byte) {
+	raw := strings.TrimSpace(string(body))
+	if raw == "" {
+		return
+	}
+	switch typ {
+	case "history":
+		settings.Set(settings.SyncHistoryPending, raw)
+	case "keep":
+		settings.Set(settings.SyncKeepPending, raw)
+	default:
+		return
+	}
+	_ = settings.Save()
 }
 
 // historyKeyFromTV：外部 site$$$vodId → KOTV vodId@site

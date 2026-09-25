@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api/kotv_api.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
+import 'sync_import_apply.dart';
 
 /// 轮询 Go 引擎遥控队列，并把播放状态回写给遥控页。
 class RemoteBridge {
@@ -103,6 +104,11 @@ class LocalHistory {
   static const _key = 'kotv_history_v1';
 
   static Future<List<VodItem>> list() async {
+    await SyncImportApply.pull();
+    return _listRaw();
+  }
+
+  static Future<List<VodItem>> _listRaw() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_key);
     if (raw == null || raw.isEmpty) return [];
@@ -126,7 +132,7 @@ class LocalHistory {
       final eng = p.getString('kotv_incognito');
       if (eng == 'true') return;
     } catch (_) {}
-    final cur = await list();
+    final cur = await _listRaw();
     cur.removeWhere((e) => e.id == item.id && e.site == item.site);
     cur.insert(0, item);
     final trimmed = cur.take(60).toList();
@@ -140,7 +146,7 @@ class LocalHistory {
     required String newId,
   }) async {
     if (oldId.isEmpty || newId.isEmpty || oldId == newId) return;
-    final cur = await list();
+    final cur = await _listRaw();
     final oldIdx = cur.indexWhere((e) => e.id == oldId && e.site == site);
     if (oldIdx < 0) return;
     final newIdx = cur.indexWhere((e) => e.id == newId && e.site == site);
@@ -162,6 +168,10 @@ class LocalHistory {
       durationMs: e.durationMs,
     );
     await _persist(cur);
+  }
+
+  static Future<void> replaceAll(List<VodItem> items) async {
+    await _persist(items.take(60).toList());
   }
 
   static Future<void> _persist(List<VodItem> items) async {
@@ -206,6 +216,30 @@ class LocalHistory {
     ];
   }
 
+  static List<VodItem> fromSyncTargets(String raw) {
+    final out = <VodItem>[];
+    for (final j in decodeSyncList(raw)) {
+      var site = '';
+      var id = '';
+      parseSyncVodKey('${j['key'] ?? ''}', (s, i) {
+        site = s;
+        id = i;
+      });
+      if (id.isEmpty) continue;
+      out.add(VodItem(
+        id: id,
+        name: '${j['vodName'] ?? ''}',
+        pic: '${j['vodPic'] ?? ''}',
+        remarks: '${j['vodRemarks'] ?? ''}',
+        site: site,
+        flag: '${j['vodFlag'] ?? ''}',
+        positionMs: syncInt(j['position']),
+        durationMs: syncInt(j['duration']),
+      ));
+    }
+    return out;
+  }
+
   static Future<void> setIncognito(bool on) async {
     final p = await SharedPreferences.getInstance();
     await p.setString('kotv_incognito', on ? 'true' : 'false');
@@ -217,7 +251,7 @@ class LocalHistory {
   }
 
   static Future<void> remove(VodItem item) async {
-    final cur = await list();
+    final cur = await _listRaw();
     cur.removeWhere((e) => e.id == item.id && e.site == item.site);
     await _persist(cur);
   }

@@ -47,9 +47,11 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 			strParam(params, "targets"),
 		)
 	case "backupexport":
-		return a.toolBackupExport(strParam(params, "path"))
+		return a.toolBackupExport(params)
 	case "backupimport":
 		return a.toolBackupImport(strParam(params, "path"))
+	case "consumesyncimport":
+		return a.toolConsumeSyncImport()
 	case "castdiscover":
 		return a.toolCastDiscover()
 	case "cast":
@@ -268,21 +270,13 @@ func (a *App) toolSyncSend(host, pair, syncType, targets string) (map[string]any
 	if syncType != "history" && syncType != "keep" {
 		return nil, fmt.Errorf("无效同步类型")
 	}
-	var body []byte
-	var err error
-	if targets != "" {
-		// Flutter 端已序列化 LocalHistory/LocalCollect，直接转发。
-		if !json.Valid([]byte(targets)) {
-			return nil, fmt.Errorf("targets 不是合法 JSON")
-		}
-		body = []byte(targets)
-	} else {
-		body, err = exportSyncPayload(a.DB, syncType)
-		if err != nil {
-			return nil, err
-		}
+	if targets == "" {
+		return nil, fmt.Errorf("请提供 targets（客户端历史/收藏）")
 	}
-	if err := sendSyncData(host, pair, syncType, 1, body); err != nil {
+	if !json.Valid([]byte(targets)) {
+		return nil, fmt.Errorf("targets 不是合法 JSON")
+	}
+	if err := sendSyncData(host, pair, syncType, 1, []byte(targets)); err != nil {
 		return nil, err
 	}
 	label := "历史"
@@ -292,12 +286,25 @@ func (a *App) toolSyncSend(host, pair, syncType, targets string) (map[string]any
 	return map[string]any{"ok": true, "message": "已发送" + label}, nil
 }
 
-func (a *App) toolBackupExport(path string) (map[string]any, error) {
-	path = strings.TrimSpace(path)
+func (a *App) toolBackupExport(params map[string]any) (map[string]any, error) {
+	path := strParam(params, "path")
 	if path == "" {
 		return nil, fmt.Errorf("请指定备份路径")
 	}
-	data, err := backup.Export(a.DB)
+	histRaw := strParam(params, "history")
+	keepRaw := strParam(params, "keep")
+	if histRaw == "" || keepRaw == "" {
+		return nil, fmt.Errorf("请提供 history 与 keep（客户端列表）")
+	}
+	var hist []database.History
+	var keep []database.Keep
+	if err := json.Unmarshal([]byte(histRaw), &hist); err != nil {
+		return nil, fmt.Errorf("history 不是合法 JSON: %w", err)
+	}
+	if err := json.Unmarshal([]byte(keepRaw), &keep); err != nil {
+		return nil, fmt.Errorf("keep 不是合法 JSON: %w", err)
+	}
+	data, err := backup.ExportClient(hist, keep)
 	if err != nil {
 		return nil, err
 	}
@@ -319,11 +326,32 @@ func (a *App) toolBackupImport(path string) (map[string]any, error) {
 	if len(data) > 32<<20 {
 		return nil, fmt.Errorf("备份文件过大")
 	}
-	if err := backup.Import(a.DB, data); err != nil {
+	payload, err := backup.Import(a.DB, data)
+	if err != nil {
 		return nil, err
 	}
 	a.SyncDLNARenderer()
-	return map[string]any{"ok": true, "message": "备份已恢复"}, nil
+	histJSON, _ := json.Marshal(payload.History)
+	keepJSON, _ := json.Marshal(payload.Keep)
+	return map[string]any{
+		"ok":      true,
+		"message": "备份已恢复",
+		"history": string(histJSON),
+		"keep":    string(keepJSON),
+	}, nil
+}
+
+func (a *App) toolConsumeSyncImport() (map[string]any, error) {
+	hist := strings.TrimSpace(settings.Get(settings.SyncHistoryPending))
+	keep := strings.TrimSpace(settings.Get(settings.SyncKeepPending))
+	settings.Set(settings.SyncHistoryPending, "")
+	settings.Set(settings.SyncKeepPending, "")
+	_ = settings.Save()
+	return map[string]any{
+		"ok":      true,
+		"history": hist,
+		"keep":    keep,
+	}, nil
 }
 
 func (a *App) toolCastDiscover() (map[string]any, error) {
@@ -389,25 +417,6 @@ func (a *App) toolCast(index int) (map[string]any, error) {
 		"label":    used.Label(),
 		"message":  "已投屏到 " + used.Label(),
 	}, nil
-}
-
-func exportSyncPayload(db *database.DB, syncType string) ([]byte, error) {
-	switch syncType {
-	case "history":
-		items, err := db.ListAllHistory()
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(items)
-	case "keep":
-		items, err := db.ListAllKeep(database.KeepTypeVod)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(items)
-	default:
-		return nil, fmt.Errorf("无效同步类型")
-	}
 }
 
 func sendSyncData(host, pair, syncType string, mode int, body []byte) error {

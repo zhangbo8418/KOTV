@@ -72,4 +72,14 @@ void main() {
     expect(targets.first['key'], 's\$\$\$1');
     expect(targets.first['vodName'], '片');
   });
+
+  test('LocalCollect.fromSyncTargets restores config_source', () {
+    final items = LocalCollect.fromSyncTargets(
+      '[{"key":"s\$\$\$1","vodName":"片","config_source":"http://cfg"}]',
+    );
+    expect(items, hasLength(1));
+    expect(items.first.id, '1');
+    expect(items.first.site, 's');
+    expect(items.first.configSource, 'http://cfg');
+  });
 }

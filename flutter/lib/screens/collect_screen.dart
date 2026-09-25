@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
+import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../theme/layout_scale.dart';
 import '../vod/vod_open.dart';
@@ -29,10 +30,19 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
 
   Future<void> _reload() async {
     setState(() => _loading = true);
+    var currentSource = '';
+    try {
+      final cfg = await ref.read(apiProvider).getConfig();
+      currentSource = '${cfg['source'] ?? ''}'.trim();
+    } catch (_) {}
     final list = await LocalCollect.list();
+    final filtered = list.where((e) {
+      final cs = e.configSource.trim();
+      return cs.isEmpty || cs == currentSource;
+    }).toList();
     if (!mounted) return;
     setState(() {
-      _items = list;
+      _items = filtered;
       _loading = false;
     });
   }

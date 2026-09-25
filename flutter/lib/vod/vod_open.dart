@@ -8,6 +8,7 @@ import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../screens/detail_screen.dart';
 import '../screens/folder_screen.dart';
+import '../screens/live_screen.dart';
 
 /// 用片名去全网搜索。
 void searchByName(WidgetRef ref, String name) {
@@ -91,6 +92,28 @@ Future<void> openVodItem(
   if (siteIsIndex(ref, siteKey)) {
     searchByName(ref, item.name);
     return;
+  }
+  final wantSource = item.configSource.trim();
+  if (wantSource.isNotEmpty) {
+    try {
+      final api = ref.read(apiProvider);
+      final cfg = await api.getConfig();
+      final cur = '${cfg['source'] ?? ''}'.trim();
+      if (cur != wantSource) {
+        await DetailScreen.prepareLeave();
+        await LiveScreen.prepareLeave();
+        await api.loadConfig(wantSource).timeout(const Duration(seconds: 45));
+        ref.invalidate(configProvider);
+        ref.invalidate(settingsProvider);
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('切源失败: $e')),
+      );
+      return;
+    }
+    if (!context.mounted) return;
   }
   await LocalHistory.push(item);
   if (!context.mounted) return;
