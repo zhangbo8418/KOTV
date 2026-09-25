@@ -93,6 +93,23 @@ class DetailScreen extends ConsumerStatefulWidget {
     return until != null && DateTime.now().isBefore(until);
   }
 
+  /// jar 把「关详情」写成 Activity.finish()：只出 Flutter 详情栈，不退桌面。
+  static Future<void> leaveIfOpen() async {
+    final active = _DetailScreenState._active;
+    if (active == null) return;
+    if (active._leaving || active._stoppedHard) {
+      if (active.mounted) {
+        active._allowPop = true;
+        try {
+          final nav = Navigator.of(active.context);
+          if (nav.canPop()) nav.pop();
+        } catch (_) {}
+      }
+      return;
+    }
+    await active._leavePage();
+  }
+
   /// 换源/切 Tab：尽快放开 PopScope；并 await 硬停，避免卸树后 FVP/HTML 后台出声。
   static Future<void> prepareLeave() async {
     final active = _DetailScreenState._active;
@@ -1861,7 +1878,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         '${data['url'] ?? ''}',
         ref.read(apiProvider).baseUrl,
       );
-      if (playUrl.isEmpty) throw Exception('空播放地址');
+      if (playUrl.isEmpty) {
+        // Config 等站：playerContent 只弹窗、无播放地址；出详情以便弹窗叠在首页。
+        if (mounted) unawaited(_leavePage());
+        return;
+      }
       final mediaUrl = kotvRewriteEngineLocalUrl(
         '${data['media'] ?? ''}',
         ref.read(apiProvider).baseUrl,

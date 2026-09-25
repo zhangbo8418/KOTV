@@ -15,6 +15,9 @@ class MiniPlayerWindow {
 
   static const _android = MethodChannel('kotv_android');
 
+  /// 站点 jar 调 Activity.finish() 时由原生转发；由 main 注入（出详情、不退桌面）。
+  static Future<void> Function()? onSpiderFinish;
+
   static bool get active => _active;
   static bool _active = false;
   static Size? _prevSize;
@@ -160,7 +163,7 @@ class MiniPlayerWindow {
     }
   }
 
-  /// 在 main 里调用一次，监听系统 PiP 模式变化。
+  /// 在 main 里调用一次：系统 PiP 变化；站点 jar finish→只出详情（Config 弹窗技巧）。
   static void bindAndroidPipListener() {
     if (kIsWeb || !Platform.isAndroid) return;
     _android.setMethodCallHandler((call) async {
@@ -168,6 +171,8 @@ class MiniPlayerWindow {
         final inPip = call.arguments == true;
         _active = inPip;
         onAndroidPipChanged?.call(inPip);
+      } else if (call.method == 'spiderFinish') {
+        await onSpiderFinish?.call();
       }
       return null;
     });

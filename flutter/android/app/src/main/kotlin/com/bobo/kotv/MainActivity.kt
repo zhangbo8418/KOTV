@@ -469,4 +469,25 @@ class MainActivity : FlutterActivity() {
     private const val REQ_PICK_CONFIG = 0xC459
     private const val REQ_MANAGE_STORAGE = 0xC45A
   }
+
+  /**
+   * 站点 jar（如 Config）把「关详情」写成 Activity.finish()。
+   * 本壳只有 MainActivity，直接 finish 会退桌面；改通知 Flutter 出详情栈。
+   * Flutter SystemNavigator.pop 仍走 io.flutter.* 栈，继续真退出。
+   */
+  override fun finish() {
+    val fromFlutter = Thread.currentThread().stackTrace.any { el ->
+      el.className.startsWith("io.flutter.")
+    }
+    if (!fromFlutter) {
+      runOnUiThread {
+        try {
+          androidChannel?.invokeMethod("spiderFinish", null)
+        } catch (_: Throwable) {
+        }
+      }
+      return
+    }
+    super.finish()
+  }
 }
