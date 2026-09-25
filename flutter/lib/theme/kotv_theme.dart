@@ -27,18 +27,21 @@ class KotvColors {
 ///
 /// Emoji：Win7 包内同时带 [NotoColorEmoji] 与 [NotoEmoji]，但回退链按**运行时的系统版本**区分——
 /// Win10/11 只用彩色（Segoe UI Emoji / NotoColorEmoji），绝不把 NotoEmoji 放前面，否则会整页黑白 emoji。
-/// 真 Win7 上 COLR 常渲不出，再在彩色之后回退 NotoEmoji（黑白轮廓）。
+/// 真 Win7 上 COLR 常认字却渲不出，须把 [NotoEmoji]（黑白）放在 [NotoColorEmoji] 前面。
+List<String> kotvFontFallbacks() => _kotvFontFallbacks();
+
 List<String> _kotvFontFallbacks() {
   if (kIsWeb) return const [];
   if (Platform.isWindows) {
     if (kotvIsWindows7()) {
+      // COLR 在 Win7 常认字却渲不出；黑白 NotoEmoji 必须排在彩色前面，否则会空白。
       return const [
         'Segoe UI',
         'Microsoft YaHei UI',
         'Microsoft YaHei',
         'NotoSansSC',
-        'NotoColorEmoji',
         'NotoEmoji',
+        'NotoColorEmoji',
         'Segoe UI Symbol',
       ];
     }

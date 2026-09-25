@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/settings"
 )
 
@@ -68,6 +69,8 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 	// 不按 URI 扩展名删切片：正片常伪装成 .png/.jpg/.mp3/无后缀等。
 	filtered = convertRelativeTsToAbsolute(filtered, base)
 	filtered = absolutizeTagURIs(filtered, base)
+	// 分片带 Cookie/Referer：改写为 /proxy/play，避免播放器直拉 CDN 报 412。
+	filtered = proxyMediaURIs(filtered, headers)
 
 	segments := countSegments(filtered)
 	if segments < 2 {
@@ -309,4 +312,42 @@ func sumExtinf(content string) float64 {
 
 func convertRelativeTsToAbsolute(content, base string) string {
 	return absolutizeURIs(content, base)
+}
+
+// proxyMediaURIs 把 http(s) 媒体行与 URI="…" 登记为 /proxy/play，使分片请求带上 headers。
+func proxyMediaURIs(content string, headers map[string]string) string {
+	if len(headers) == 0 || content == "" {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		if strings.HasPrefix(trim, "http://") || strings.HasPrefix(trim, "https://") {
+			lines[i] = playproxy.Register(trim, headers)
+		}
+	}
+	out := strings.Join(lines, "\n")
+	if !strings.Contains(strings.ToUpper(out), "URI=") {
+		return out
+	}
+	return tagURIRe.ReplaceAllStringFunc(out, func(m string) string {
+		sub := tagURIRe.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		raw := sub[1]
+		if raw == "" || strings.HasPrefix(raw, "data:") {
+			return m
+		}
+		if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+			return m
+		}
+		if strings.Contains(raw, "/proxy/play?") || strings.Contains(raw, "/proxy/cached_m3u8") {
+			return m
+		}
+		return `URI="` + playproxy.Register(raw, headers) + `"`
+	})
 }

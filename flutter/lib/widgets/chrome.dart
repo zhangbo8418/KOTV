@@ -216,6 +216,7 @@ class AppPill extends StatelessWidget {
       fontSize: fontSize,
       fontWeight: FontWeight.w700,
       height: 1.2,
+      fontFamilyFallback: kotvFontFallbacks(),
     );
     final hasSuffix = suffix != null && suffix!.isNotEmpty;
     final labelText = Text(

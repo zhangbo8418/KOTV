@@ -40,16 +40,66 @@ public final class UiContext {
 
     public static Activity activity() {
         Activity act = activityRef.get();
-        if (act == null) {
-            return null;
+        if (act != null) {
+            try {
+                if (!act.isFinishing() && !act.isDestroyed()) {
+                    return act;
+                }
+            } catch (Throwable ignored) {
+                return act;
+            }
         }
+        return activityFromActivityThread();
+    }
+
+    /** jar 异步 post AlertDialog 时 WeakRef 可能已空，从 ActivityThread 取顶层非 finishing Activity。 */
+    private static Activity activityFromActivityThread() {
         try {
-            if (act.isFinishing() || act.isDestroyed()) {
+            Class<?> atClz = Class.forName("android.app.ActivityThread");
+            Object at = atClz.getMethod("currentActivityThread").invoke(null);
+            if (at == null) {
                 return null;
             }
+            java.lang.reflect.Field field = atClz.getDeclaredField("mActivities");
+            field.setAccessible(true);
+            Object mapObj = field.get(at);
+            if (!(mapObj instanceof java.util.Map)) {
+                return null;
+            }
+            Activity fallback = null;
+            for (Object record : ((java.util.Map<?, ?>) mapObj).values()) {
+                if (record == null) {
+                    continue;
+                }
+                Class<?> recClz = record.getClass();
+                java.lang.reflect.Field pausedField = recClz.getDeclaredField("paused");
+                pausedField.setAccessible(true);
+                java.lang.reflect.Field activityField = recClz.getDeclaredField("activity");
+                activityField.setAccessible(true);
+                Object actObj = activityField.get(record);
+                if (!(actObj instanceof Activity)) {
+                    continue;
+                }
+                Activity a = (Activity) actObj;
+                try {
+                    if (a.isFinishing() || a.isDestroyed()) {
+                        continue;
+                    }
+                } catch (Throwable ignored) {
+                    continue;
+                }
+                boolean paused = pausedField.getBoolean(record);
+                if (!paused) {
+                    return a;
+                }
+                if (fallback == null) {
+                    fallback = a;
+                }
+            }
+            return fallback;
         } catch (Throwable ignored) {
+            return null;
         }
-        return act;
     }
 
     /** AlertDialog / Toast 优先 Activity，否则 Application。 */

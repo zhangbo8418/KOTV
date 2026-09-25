@@ -17,4 +17,4 @@ KOTV_WIN7=1 ./scripts/fetch-flutter-fonts.sh
 
 `adapt-flutter-win7-sdk.sh` 向 pubspec 注入 CJK + **彩色** + **黑白** emoji 三套字体。
 
-运行时（`kotv_theme.dart`）按系统版本选链：**真 Win7** 在 `NotoColorEmoji` 之后回退 `NotoEmoji`；**Win10/11**（含 Win7 包装在新机运行）只用 `Segoe UI Emoji` / `NotoColorEmoji`，不把 `NotoEmoji` 放进回退链，避免整机 emoji 变黑白。
+运行时（`kotv_theme.dart`）按系统版本选链：**真 Win7** 将 `NotoEmoji`（黑白）放在 `NotoColorEmoji` 之前（COLR 常认字却空白）；**Win10/11**（含 Win7 包装在新机运行）只用 `Segoe UI Emoji` / `NotoColorEmoji`，不把 `NotoEmoji` 放进回退链，避免整机 emoji 变黑白。
