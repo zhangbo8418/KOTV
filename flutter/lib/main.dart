@@ -19,7 +19,6 @@ import 'player/buffer_budget.dart';
 import 'player/kotv_playback.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
-import 'screens/detail_screen.dart';
 import 'theme/layout_scale.dart';
 import 'theme/kotv_palette.dart';
 import 'theme/kotv_theme.dart';
@@ -274,7 +273,6 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     MiniPlayerWindow.bindAndroidPipListener();
-    MiniPlayerWindow.onSpiderFinish = () => DetailScreen.leaveIfOpen();
     // 同步一次当前系统亮暗
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

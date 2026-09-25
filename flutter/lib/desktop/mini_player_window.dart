@@ -15,9 +15,6 @@ class MiniPlayerWindow {
 
   static const _android = MethodChannel('kotv_android');
 
-  /// 原生 MainActivity 非 Flutter finish → spiderFinish；由 main 注入出详情。
-  static Future<void> Function()? onSpiderFinish;
-
   static bool get active => _active;
   static bool _active = false;
   static Size? _prevSize;
@@ -163,7 +160,7 @@ class MiniPlayerWindow {
     }
   }
 
-  /// 在 main 里调用一次：系统 PiP 变化；spiderFinish→只出详情。
+  /// 在 main 里调用一次：系统 PiP 变化。
   static void bindAndroidPipListener() {
     if (kIsWeb || !Platform.isAndroid) return;
     _android.setMethodCallHandler((call) async {
@@ -171,8 +168,6 @@ class MiniPlayerWindow {
         final inPip = call.arguments == true;
         _active = inPip;
         onAndroidPipChanged?.call(inPip);
-      } else if (call.method == 'spiderFinish') {
-        await onSpiderFinish?.call();
       }
       return null;
     });

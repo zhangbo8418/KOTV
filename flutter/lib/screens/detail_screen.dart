@@ -93,23 +93,6 @@ class DetailScreen extends ConsumerStatefulWidget {
     return until != null && DateTime.now().isBefore(until);
   }
 
-  /// 原生 spiderFinish / 空播地址：只出 Flutter 详情栈，不销毁 Activity。
-  static Future<void> leaveIfOpen() async {
-    final active = _DetailScreenState._active;
-    if (active == null) return;
-    if (active._leaving || active._stoppedHard) {
-      if (active.mounted) {
-        active._allowPop = true;
-        try {
-          final nav = Navigator.of(active.context);
-          if (nav.canPop()) nav.pop();
-        } catch (_) {}
-      }
-      return;
-    }
-    await active._leavePage();
-  }
-
   /// 换源/切 Tab：尽快放开 PopScope；并 await 硬停，避免卸树后 FVP/HTML 后台出声。
   static Future<void> prepareLeave() async {
     final active = _DetailScreenState._active;

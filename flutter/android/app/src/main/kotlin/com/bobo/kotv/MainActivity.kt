@@ -469,25 +469,4 @@ class MainActivity : FlutterActivity() {
     private const val REQ_PICK_CONFIG = 0xC459
     private const val REQ_MANAGE_STORAGE = 0xC45A
   }
-
-  /**
-   * jar 内偶发 Activity.finish()（实测 肥猫 spider.Init.interceptActivityStart）。
-   * 本壳只有 MainActivity，真 finish 会退桌面；非 Flutter 栈调用时只通知出详情。
-   * Flutter SystemNavigator.pop（栈含 io.flutter.*）仍走真退出。
-   */
-  override fun finish() {
-    val fromFlutter = Thread.currentThread().stackTrace.any { el ->
-      el.className.startsWith("io.flutter.")
-    }
-    if (!fromFlutter) {
-      runOnUiThread {
-        try {
-          androidChannel?.invokeMethod("spiderFinish", null)
-        } catch (_: Throwable) {
-        }
-      }
-      return
-    }
-    super.finish()
-  }
 }
