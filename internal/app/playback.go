@@ -60,7 +60,7 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	}
 	// convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
-	// 本机不展开 CDN，保留 /proxy 给 jar 加速；远端仅开关开启时同样保留。
+	// 默认展开 CDN；仅「网盘经后端加速」开启时保留 /proxy。
 	if !settings.PreferSpiderProxyPlay() {
 		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
 			raw = media

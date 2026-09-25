@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/paths"
 )
 
@@ -65,9 +64,8 @@ const (
 	SyncKeepPending    Type = "kotv_sync_keep"
 	RemoteAuth    Type = "remoteAuth"    // 远端强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
-	// BackendProxyPlay 远端前端连入时，网盘是否经引擎 /proxy（jar 原生库/go/Java 多线程）。
-	// 本机播放始终走本地 /proxy、不展开 CDN，不受此开关影响。
-	// 默认 false：远端优先直连 CDN；true：远端也走引擎代理加速。
+	// BackendProxyPlay 网盘是否经引擎 /proxy（jar 原生库/go/Java 多线程）。
+	// 默认 false：展开为 CDN 直链；true：保留爬虫 /proxy 加速。
 	BackendProxyPlay Type = "backendProxyPlay"
 
 	// 播放细项（须进 APIGetSettings 白名单，否则冷启动丢设置）。
@@ -206,7 +204,7 @@ func defaultFile() file {
 			{ID: "deviceUUID", Label: "设备标识", Value: ""},
 			{ID: "remoteAuth", Label: "远端鉴权", Value: "false"},
 			{ID: "allowRegister", Label: "开放注册", Value: "false"},
-			{ID: "backendProxyPlay", Label: "远端网盘经后端加速", Value: "false"},
+			{ID: "backendProxyPlay", Label: "网盘经后端加速", Value: "false"},
 			{ID: "audioPassThrough", Label: "音频直通", Value: "true"},
 			{ID: "exoDiskCache", Label: "Exo磁盘缓存", Value: "false"},
 			{ID: "exoAdblock", Label: "Exo去广告", Value: "true"},
@@ -336,7 +334,7 @@ func Load() error {
 	ensureSettingLocked(PlayerFailover, "自动切换播放器", "auto")
 	ensureSettingLocked(RemoteAuth, "远端鉴权", "false")
 	ensureSettingLocked(AllowRegister, "开放注册", "false")
-	ensureSettingLocked(BackendProxyPlay, "远端网盘经后端加速", "false")
+	ensureSettingLocked(BackendProxyPlay, "网盘经后端加速", "false")
 	ensureSettingLocked(AudioPassThrough, "音频直通", "true")
 	ensureSettingLocked(ExoDiskCache, "Exo磁盘缓存", "false")
 	ensureSettingLocked(ExoAdblock, "Exo去广告", "true")
@@ -470,15 +468,11 @@ func IsLiveChange() bool { return boolSetting(LiveChange, true) }
 // IsLiveInvert 反转上下换台方向（默认关）。
 func IsLiveInvert() bool { return boolSetting(LiveInvert, false) }
 
-// IsBackendProxyPlay 远端是否经 /proxy 加速（默认关）。本机恒走本地代理。
+// IsBackendProxyPlay 网盘是否经 /proxy 加速（默认关 → 展开 CDN）。
 func IsBackendProxyPlay() bool { return boolSetting(BackendProxyPlay, false) }
 
-// PreferSpiderProxyPlay 是否保留 jar /proxy、不展开 CDN。
-// 本机（无 PublicBase）走本地代理；远端仅当 BackendProxyPlay 开启。
+// PreferSpiderProxyPlay 是否保留 jar /proxy、不展开 CDN（等同 BackendProxyPlay）。
 func PreferSpiderProxyPlay() bool {
-	if hostclient.PublicBase() == "" {
-		return true
-	}
 	return IsBackendProxyPlay()
 }
 

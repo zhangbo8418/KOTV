@@ -51,22 +51,6 @@ func TestApiLooksUnplayableLocal(t *testing.T) {
 	}
 }
 
-func TestJarNonStandardLocalProxyFishplay(t *testing.T) {
-	t.Parallel()
-	if !jarNonStandardLocalProxy("http://127.0.0.1:9978/fishplay/go/quark/32t/abc") {
-		t.Fatal("fishplay on loopback should be rejected")
-	}
-	if !jarNonStandardLocalProxy("http://192.168.31.175:9978/fishplay/go/quark/32t/abc") {
-		t.Fatal("fishplay on LAN should be rejected")
-	}
-	if jarNonStandardLocalProxy("http://127.0.0.1:9978/proxy?do=quark&url=x") {
-		t.Fatal("standard /proxy should pass")
-	}
-	if jarNonStandardLocalProxy("http://cdn.example/a.mp4") {
-		t.Fatal("cdn should pass")
-	}
-}
-
 func TestPreparePlaybackURLSkipsLocal(t *testing.T) {
 	t.Parallel()
 	a := &App{}
@@ -76,8 +60,10 @@ func TestPreparePlaybackURLSkipsLocal(t *testing.T) {
 	}
 }
 
-func TestPreparePlaybackURLLocalKeepsSpiderProxyLikeTV(t *testing.T) {
-	// 本机无 PublicBase：保留 /proxy，不展开成 /proxy/play。
+func TestPreparePlaybackURLExpandsQuarkProxyByDefault(t *testing.T) {
+	settings.Set(settings.BackendProxyPlay, "false")
+	defer settings.Set(settings.BackendProxyPlay, "false")
+
 	a := &App{}
 	cdn := "https://cdn-quark.example/01.mkv"
 	hdrJSON := `{"Cookie":"qk=1","User-Agent":"Quark"}`
@@ -85,8 +71,15 @@ func TestPreparePlaybackURLLocalKeepsSpiderProxyLikeTV(t *testing.T) {
 		base64.StdEncoding.EncodeToString([]byte(cdn)) +
 		"&header=" + base64.StdEncoding.EncodeToString([]byte(hdrJSON))
 	got := a.PreparePlaybackURL(raw, nil)
-	if !strings.Contains(got, "/proxy?") || strings.Contains(got, "/proxy/play?") {
-		t.Fatalf("local should keep spider /proxy, got %q", got)
+	if !strings.Contains(got, "/proxy/play?id=") {
+		t.Fatalf("default expected /proxy/play (CDN expand), got %q", got)
+	}
+	upstream, headers := playproxy.Resolve(got)
+	if upstream != cdn {
+		t.Fatalf("upstream=%q want %q", upstream, cdn)
+	}
+	if headers["Cookie"] != "qk=1" {
+		t.Fatalf("headers=%v", headers)
 	}
 }
 

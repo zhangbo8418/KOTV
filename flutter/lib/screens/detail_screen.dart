@@ -1916,11 +1916,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
         _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
       } catch (_) {}
-      final remoteEngine = !kotvIsLocalEngineBaseUrl(ref.read(apiProvider).baseUrl);
-      // 本机走本地代理；远端看开关。优先用引擎 play 接口算好的 preferSpiderProxy。
+      // 优先用引擎 play 接口算好的 preferSpiderProxy；缺省时仅看加速开关。
       final preferSpiderProxy = data.containsKey('preferSpiderProxy')
           ? data['preferSpiderProxy'] == true
-          : (!remoteEngine || backendProxyPlay);
+          : backendProxyPlay;
       // 有 DRM 或 SMB 强制 Exo；本地碟片/ISO 强制 MPV（自编译 dvdnav/libbluray）。
       final smb = mediaUrl.trim().toLowerCase().startsWith('smb://') ||
           playUrl.trim().toLowerCase().startsWith('smb://');
@@ -1953,7 +1952,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         final pb = _playback;
         await pb.setDecodeMode(failover.decodeMode);
         await pb.setRenderMode(_renderMode);
-        // 本机/远端开加速：走 playUrl（/proxy）；远端默认才直连 CDN。
+        // 加速开：走 playUrl（/proxy）；默认直连 CDN（media / 展开 proxy）。
         final localMedia = mediaUrl.startsWith('file:') ||
             mediaUrl.startsWith('content:') ||
             (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
