@@ -141,6 +141,7 @@ class LocalHistory {
                 'vod_remarks': e.remarks,
                 'type_name': e.typeName,
                 'site': e.site,
+                if (e.flag.trim().isNotEmpty) 'vod_flag': e.flag,
               })
           .toList()),
     );
@@ -170,6 +171,7 @@ class LocalHistory {
                 'vod_remarks': e.remarks,
                 'type_name': e.typeName,
                 'site': e.site,
+                if (e.flag.trim().isNotEmpty) 'vod_flag': e.flag,
               })
           .toList()),
     );

@@ -29,6 +29,8 @@ import '../widgets/auth_gate.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
+import 'detail_screen.dart';
+import 'live_screen.dart';
 import 'shell.dart';
 import 'user_admin_screen.dart';
 
@@ -139,7 +141,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           key == 'danmakuOpacity' ||
           key == 'danmakuRows') {
         ref.invalidate(configProvider);
-        ref.invalidate(homeProvider);
       }
     } catch (e) {
       setState(() => _status = '$e');
@@ -1906,7 +1907,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final msg = '${data['message'] ?? '清理完成'}';
     if (data['reloaded'] == true) {
       ref.invalidate(configProvider);
-      ref.invalidate(homeProvider);
       ref.invalidate(settingsProvider);
     }
     setState(() => _status = msg);
@@ -1934,7 +1934,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       });
       ref.invalidate(engineReadyProvider);
       ref.invalidate(configProvider);
-      ref.invalidate(homeProvider);
       ref.invalidate(settingsProvider);
       showAppNews(context, '已切换为本机引擎\n${launcher.baseUrl}');
       return;
@@ -1999,7 +1998,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
     ref.invalidate(engineReadyProvider);
     ref.invalidate(configProvider);
-    ref.invalidate(homeProvider);
     ref.invalidate(settingsProvider);
     showAppNews(context, '登录成功\n用户：${login.username}\n$normalized');
   }
@@ -2024,7 +2022,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
     ref.invalidate(engineReadyProvider);
     ref.invalidate(configProvider);
-    ref.invalidate(homeProvider);
     ref.invalidate(settingsProvider);
     showAppNews(context, '已退出远端登录\n当前使用本机引擎');
   }
@@ -2118,7 +2115,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       setState(() => _status = '${data['message'] ?? '备份已恢复'}');
       await _reload();
       ref.invalidate(configProvider);
-      ref.invalidate(homeProvider);
       showAppNews(context, '${data['message'] ?? '备份已恢复'}');
     });
   }
@@ -2183,11 +2179,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             break;
           }
         }
+        // 换首页前停详情/直播，避免后台继续出声。
+        await DetailScreen.prepareLeave();
+        await LiveScreen.prepareLeave();
         ref.read(uiBusyProvider.notifier).state = '正在切换到 $name…';
         try {
           await ref.read(apiProvider).setHome(key);
           ref.invalidate(configProvider);
-          ref.invalidate(homeProvider);
           ref.invalidate(settingsProvider);
           setState(() => _status = '已切换首页数据源：$name');
         } catch (e) {

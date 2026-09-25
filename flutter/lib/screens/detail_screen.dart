@@ -40,6 +40,7 @@ import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../vod/content_clicker.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
@@ -1302,15 +1303,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return -1;
   }
 
-  /// 详情就绪后起播：folder mark 优先，否则按历史集名，再否则第一线第一集。
+  /// 详情就绪后起播：folder mark 优先，否则按历史线路+集名，再否则第一线第一集。
   /// 配置类站（SUBSCRIBECONFIG / Config）依赖此路径走到 playerContent 弹窗。
   Future<void> _resumeOrAutoPlay() async {
     final d = _detail;
     if (d == null || d.flags.isEmpty) return;
-    final eps = _eps;
-    if (eps.isEmpty) return;
 
     var mark = widget.mark.trim();
+    var histFlag = '';
     if (mark.isEmpty) {
       try {
         final id = d.id.isNotEmpty ? d.id : widget.id;
@@ -1319,12 +1319,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         for (final h in hist) {
           if (h.id == id && h.site == site) {
             mark = h.remarks.trim();
+            histFlag = h.flag.trim();
             break;
           }
         }
       } catch (_) {}
     }
     if (!mounted) return;
+    if (histFlag.isNotEmpty) {
+      final fi = d.flags.indexWhere((f) => f.flag == histFlag || f.show == histFlag);
+      if (fi >= 0) _flagIdx = fi;
+    }
+    final eps = _eps;
+    if (eps.isEmpty) return;
     var idx = mark.isNotEmpty ? _matchEpisodeIndex(eps, mark) : -1;
     if (idx < 0) idx = 0;
     _epIdx = idx;
@@ -1752,6 +1759,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         pic: d.pic,
         site: d.site,
         remarks: ep.name,
+        flag: flag.flag,
       ));
       // 起播再读一次：设置页改播放器/软硬解/自动切换后，详情页可能还开着。
       var backendProxyPlay = data['backendProxyPlay'] == true;
@@ -3161,12 +3169,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final pageEps = eps.skip(_epPage * _epSize).take(_epSize).toList();
     final director = d.director.isEmpty ? '暂无' : d.director;
     final actor = d.actor.isEmpty ? '暂无' : d.actor;
-    final introRaw = d.content.isEmpty ? '' : d.content;
-    final intro = introRaw
-        .replaceAll(RegExp(r'<[^>]*>'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    final introText = intro.isEmpty ? '暂无' : intro;
+    final siteKey = d.site.isNotEmpty ? d.site : widget.site;
+    final introStyle = TextStyle(color: muted, fontSize: 15, height: 1.5);
+    final introLinkStyle = TextStyle(
+      color: p.primary,
+      fontSize: 15,
+      height: 1.5,
+      decoration: TextDecoration.underline,
+      decorationColor: p.primary,
+    );
     final compact = KotvLayout.isCompact(context);
     final p = KotvPalette.of(context);
     final fg = p.fg;
@@ -3218,11 +3229,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             style: TextStyle(color: muted, fontSize: 15, height: 1.45),
           ),
           const SizedBox(height: 6),
-          Text(
-            '简介：$introText',
+          KotvClickableContent(
+            raw: d.content,
+            site: siteKey,
+            prefix: '简介：',
+            style: introStyle,
+            linkStyle: introLinkStyle,
             maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: muted, fontSize: 15, height: 1.5),
           ),
         ],
       );
@@ -3565,6 +3578,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   void _showVodMeta(VodDetail d) {
     final p = KotvPalette.of(context);
+    final siteKey = d.site.isNotEmpty ? d.site : widget.site;
+    final bodyStyle = TextStyle(color: p.muted, height: 1.55, fontSize: 15);
+    final linkStyle = TextStyle(
+      color: p.primary,
+      height: 1.55,
+      fontSize: 15,
+      decoration: TextDecoration.underline,
+      decorationColor: p.primary,
+    );
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -3573,15 +3595,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         content: SizedBox(
           width: 520,
           child: SingleChildScrollView(
-            child: Text(
-              '导演：${d.director.isEmpty ? '暂无' : d.director}\n'
-              '演员：${d.actor.isEmpty ? '暂无' : d.actor}\n'
-              '类型：${d.typeName.isEmpty ? '暂无' : d.typeName}\n'
-              '年份：${d.year.isEmpty ? '暂无' : d.year}\n'
-              '地区：${d.area.isEmpty ? '暂无' : d.area}\n'
-              '备注：${d.remarks.isEmpty ? '暂无' : d.remarks}\n\n'
-              '${d.content.isEmpty ? '暂无简介' : d.content.replaceAll(RegExp(r'<[^>]*>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim()}',
-              style: TextStyle(color: p.muted, height: 1.55, fontSize: 15),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '导演：${d.director.isEmpty ? '暂无' : d.director}\n'
+                  '演员：${d.actor.isEmpty ? '暂无' : d.actor}\n'
+                  '类型：${d.typeName.isEmpty ? '暂无' : d.typeName}\n'
+                  '年份：${d.year.isEmpty ? '暂无' : d.year}\n'
+                  '地区：${d.area.isEmpty ? '暂无' : d.area}\n'
+                  '备注：${d.remarks.isEmpty ? '暂无' : d.remarks}\n',
+                  style: bodyStyle,
+                ),
+                KotvClickableContent(
+                  raw: d.content,
+                  site: siteKey,
+                  style: bodyStyle,
+                  linkStyle: linkStyle,
+                ),
+              ],
             ),
           ),
         ),

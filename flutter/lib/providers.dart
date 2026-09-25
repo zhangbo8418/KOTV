@@ -63,19 +63,6 @@ final backdropProvider = Provider<Map<String, dynamic>>((ref) {
   );
 });
 
-final homeProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  await ref.watch(engineReadyProvider.future);
-  return ref.watch(apiProvider).home();
-});
-
-final categoryTidProvider = StateProvider<String>((ref) => 'home');
-
-final categoryProvider = FutureProvider<Map<String, dynamic>>((ref) async {
-  await ref.watch(engineReadyProvider.future);
-  final tid = ref.watch(categoryTidProvider);
-  return ref.watch(apiProvider).category(tid);
-});
-
 final pendingSearchProvider = StateProvider<String?>((ref) => null);
 
 final remoteBridgeProvider = StateProvider<RemoteBridge?>((ref) => null);

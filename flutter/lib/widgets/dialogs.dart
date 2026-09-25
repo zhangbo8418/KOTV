@@ -13,7 +13,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../providers.dart';
+import '../screens/detail_screen.dart';
 import '../screens/file_browser_screen.dart';
+import '../screens/live_screen.dart';
 import 'chrome.dart';
 
 /// 弹窗尺寸：窄屏用满宽减边距，避免固定 720 被压成竖条。
@@ -333,9 +335,11 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
               status = '加载配置中…';
             });
             try {
+              // 添加/加载新源前停详情与直播。
+              await DetailScreen.prepareLeave();
+              await LiveScreen.prepareLeave();
               await api.loadConfig(src).timeout(const Duration(seconds: 45));
               ref.invalidate(configProvider);
-              ref.invalidate(homeProvider);
               ref.invalidate(settingsProvider);
               if (ctx.mounted) Navigator.pop(ctx, true);
             } on TimeoutException {
@@ -451,10 +455,11 @@ Future<({String url, String name})?> showEditVodDialog(BuildContext context, Wid
     context,
     ref,
     kindTitle: '编辑点播源',
-    hint: '可改名称与地址；名称可空，空则列表显示完整地址',
+    hint: '可改名称与地址；名称可空，空则列表显示完整地址；地址清空保存即删除',
     oldUrl: oldUrl,
     initialName: initialName,
     onSave: (newUrl, name) => api.editRepo(oldUrl: oldUrl, url: newUrl, name: name),
+    onDelete: api.deleteRepo,
   );
 }
 
@@ -490,10 +495,11 @@ Future<({String url, String name})?> showEditLiveDialog(BuildContext context, Wi
     context,
     ref,
     kindTitle: '编辑直播源',
-    hint: '可改名称与地址；名称可空，空则列表显示完整地址',
+    hint: '可改名称与地址；名称可空，空则列表显示完整地址；地址清空保存即删除',
     oldUrl: oldUrl,
     initialName: initialName,
     onSave: (newUrl, name) => api.editLive(oldUrl: oldUrl, url: newUrl, name: name),
+    onDelete: api.deleteLive,
   );
 }
 
@@ -505,6 +511,7 @@ Future<({String url, String name})?> _showEditSourceDialog(
   required String oldUrl,
   required String initialName,
   required Future<Map<String, dynamic>> Function(String url, String name) onSave,
+  Future<Map<String, dynamic>> Function(String url)? onDelete,
 }) async {
   final nameCtrl = TextEditingController(text: initialName);
   final urlCtrl = TextEditingController(text: oldUrl);
@@ -520,8 +527,32 @@ Future<({String url, String name})?> _showEditSourceDialog(
           Future<void> save() async {
             final name = nameCtrl.text.trim();
             final url = urlCtrl.text.trim();
+            // 编辑时空地址 = 删除该配置（ConfigDialog url.isEmpty → delete）。
             if (url.isEmpty) {
-              setLocal(() => status = '请输入源地址');
+              if (onDelete == null) {
+                setLocal(() => status = '请输入源地址');
+                return;
+              }
+              setLocal(() {
+                busy = true;
+                status = '删除中…';
+              });
+              try {
+                await onDelete(oldUrl).timeout(const Duration(seconds: 45));
+                ref.invalidate(configProvider);
+                ref.invalidate(settingsProvider);
+                if (ctx.mounted) Navigator.of(ctx, rootNavigator: true).pop(true);
+              } on TimeoutException {
+                setLocal(() {
+                  busy = false;
+                  status = '删除超时';
+                });
+              } catch (e) {
+                setLocal(() {
+                  busy = false;
+                  status = '$e';
+                });
+              }
               return;
             }
             setLocal(() {
@@ -534,7 +565,6 @@ Future<({String url, String name})?> _showEditSourceDialog(
               ref.invalidate(settingsProvider);
               if (url != oldUrl) {
                 ref.invalidate(configProvider);
-                ref.invalidate(homeProvider);
               }
               if (ctx.mounted) Navigator.of(ctx, rootNavigator: true).pop(true);
             } on TimeoutException {
@@ -798,6 +828,11 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
     return showAddVodDialog(context, ref);
   }
 
+  // 换线路前停详情/直播，避免后台继续出声。
+  await DetailScreen.prepareLeave();
+  await LiveScreen.prepareLeave();
+  if (!context.mounted) return false;
+
   final label = selected.length > 40 ? '${selected.substring(0, 40)}…' : selected;
   ref.read(uiBusyProvider.notifier).state = '切换线路中…\n$label';
   try {
@@ -811,7 +846,6 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
     ref.invalidate(configProvider);
-    ref.invalidate(homeProvider);
     ref.invalidate(settingsProvider);
     return true;
   } catch (e) {

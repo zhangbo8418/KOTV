@@ -10,6 +10,7 @@ class VodItem {
     this.vodTag = '',
     this.cate = '',
     this.folder = false,
+    this.flag = '',
   });
 
   final String id;
@@ -22,6 +23,8 @@ class VodItem {
   final String vodTag;
   final String cate;
   final bool folder;
+  /// 历史恢复用线路 flag（vodFlag）。
+  final String flag;
 
   bool get hasAction => action.trim().isNotEmpty;
 
@@ -42,6 +45,7 @@ class VodItem {
         vodTag: '${j['vod_tag'] ?? ''}',
         cate: '${j['cate'] ?? ''}',
         folder: j['is_folder'] == true,
+        flag: '${j['vod_flag'] ?? j['flag'] ?? ''}',
       );
 }
 

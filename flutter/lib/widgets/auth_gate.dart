@@ -190,7 +190,6 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
     }
     await client.login(u, pw);
     ref.invalidate(configProvider);
-    ref.invalidate(homeProvider);
     ref.invalidate(settingsProvider);
     return RemoteLoginResult(ok: true, username: u);
   } catch (e) {

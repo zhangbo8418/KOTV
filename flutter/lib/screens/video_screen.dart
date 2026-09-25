@@ -19,6 +19,7 @@ import '../widgets/kotv_network_image.dart';
 import '../widgets/poster_card.dart';
 import '../vod/vod_open.dart';
 import 'detail_screen.dart';
+import 'live_screen.dart';
 import 'shell.dart';
 
 class VideoScreen extends ConsumerStatefulWidget {
@@ -439,8 +440,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           }
           return key;
         }();
-        // 换源前先硬停详情播放，再清栈，避免后台继续出声。
+        // 换源前先硬停详情/直播，再清栈，避免后台继续出声。
         await DetailScreen.prepareLeave();
+        await LiveScreen.prepareLeave();
         final nav = Navigator.of(context);
         if (nav.canPop()) {
           nav.popUntil((r) => r.isFirst);
