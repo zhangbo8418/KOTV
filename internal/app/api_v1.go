@@ -77,7 +77,7 @@ func (a *App) APIGetConfig() map[string]any {
 			if src := strings.TrimSpace(settings.Get(settings.VOD)); src != "" {
 				sess.Source = src
 			}
-			// 仅在未设首页或站点已从仓中消失时纠正；勿因 API 空 / IsMetaSite 打掉用户选的豆瓣、网盘配置。
+			// 未设首页或站点已从仓中消失时取列表第一项。
 			if home := sess.Cfg.Home(); home.Key == "" || sess.Cfg.GetSite(home.Key) == nil {
 				if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
 					sess.Cfg.SetHome(alt)

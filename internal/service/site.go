@@ -140,20 +140,8 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 	var result model.Result
 	var err error
 
-	// 空 API 早拒，避免甩出 Get "" unsupported protocol。
-	if strings.TrimSpace(site.API) == "" {
-		name := strings.TrimSpace(site.Name)
-		if name == "" {
-			name = strings.TrimSpace(site.Key)
-		}
-		if name == "" {
-			name = "未选站"
-		}
-		return model.Result{Success: false}, fmt.Errorf("站点「%s」无接口地址，请换源或换站", name)
-	}
-
 	switch site.TypeID() {
-	case 3: // Spider
+	case 3: // Spider：api 为 csp_/脚本路径，靠 jar+key 加载，勿按 HTTP 空址早拒。
 		sp := s.cfg.Spider(site)
 		skipHome := settings.ConsumeCrash()
 		var home string
@@ -180,6 +168,9 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		}
 		applyTypes(site, &result)
 	case 4:
+		if strings.TrimSpace(site.API) == "" {
+			return model.Result{Success: false}, fmt.Errorf("站点「%s」无接口地址，请换源或换站", siteLabel(site))
+		}
 		if fetched, ferr := fetchExt(site); ferr == nil {
 			after := strings.TrimSpace(fetched.Ext.String())
 			before := strings.TrimSpace(site.Ext.String())
@@ -199,6 +190,9 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		}
 		applyTypes(site, &result)
 	case 0, 1, 2:
+		if strings.TrimSpace(site.API) == "" {
+			return model.Result{Success: false}, fmt.Errorf("站点「%s」无接口地址，请换源或换站", siteLabel(site))
+		}
 		// type2：非 spider 分支，JSON 解析（FromType≠0→JSON）。
 		var body string
 		body, err = util.HTTPGetParamsInsecure(site.API, map[string]string(site.Header), nil)
@@ -222,6 +216,17 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 		result.List[i].Site = &site
 	}
 	return result, nil
+}
+
+func siteLabel(site model.Site) string {
+	name := strings.TrimSpace(site.Name)
+	if name == "" {
+		name = strings.TrimSpace(site.Key)
+	}
+	if name == "" {
+		name = "未选站"
+	}
+	return name
 }
 
 func (s *SiteService) CategoryContent(tid, pg string, extend map[string]string) (model.Result, error) {
@@ -290,9 +295,12 @@ func (s *SiteService) CategoryContentForSite(siteKey, tid, pg string, extend map
 	for i := range result.List {
 		result.List[i].Site = &site
 	}
-	s.mu.Lock()
-	s.putCategoryCache(site, tid, pg, extend, result)
-	s.mu.Unlock()
+	// 空列表不入缓存：中断/瞬时失败会写出空页，再进同类目会一直「暂无内容」。
+	if len(result.List) > 0 {
+		s.mu.Lock()
+		s.putCategoryCache(site, tid, pg, extend, result)
+		s.mu.Unlock()
+	}
 	return result, nil
 }
 

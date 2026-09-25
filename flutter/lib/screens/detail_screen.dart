@@ -658,10 +658,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _magnetPlay = false;
     _stopBtProgressPoll();
     _syncAndroidAutoPip();
-    // Source.stop：离开详情硬杀运行时 + 停磁力（用缓存 api，避免 dispose 后 ref 不可用）
+    // Source.stop：离开详情只软取消爬虫请求 + 停磁力；勿硬杀 JVM（否则再进详情常空剧集）。
     final api = _api;
     if (api != null) {
-      unawaited(api.cancelPending(hard: true, thunder: true));
+      unawaited(api.cancelPending(hard: false, thunder: true));
     }
 
     // 硬拆前先软停：pause 即停声，勿 setVolume(0)（会脏包装类音量）。
@@ -954,11 +954,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_active == this) _active = null;
     MiniPlayerWindow.onAndroidPipChanged = null;
     unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, false));
-    // 离开详情：回传扫码取消并打断 JAR；不要再 nav.pop（本页正在出栈）。
+    // 离开详情：回传扫码取消并软打断进行中请求；不要再 nav.pop（本页正在出栈）。
     final api = _api;
     if (api != null) {
       unawaited(PostMsgHost.instance?.cancelAll(reply: true, popDialog: false) ?? Future<void>.value());
-      unawaited(api.cancelPending(hard: true, thunder: true));
+      unawaited(api.cancelPending(hard: false, thunder: true));
     }
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());

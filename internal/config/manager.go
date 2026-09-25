@@ -508,11 +508,10 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 	injectGodParse(&api)
 
 	visible := filterVisible(api.Sites)
-	// 用户已选首页（含豆瓣 / 网盘配置）必须保留；仅在未设置或站点已消失时才自动挑默认。
-	// 勿用 isMetaSite 覆盖显式选择——否则换到豆瓣/TG豆瓣/网盘配置后一 reload 又弹回 Youtube。
+	// VodConfig.initSite：按 config.home 找站，找不到则用列表第一项。
 	home := resolveHome(cfg.Home, visible)
-	if home.Key == "" {
-		home = pickDefaultHome(visible)
+	if home.Key == "" && len(visible) > 0 {
+		home = visible[0]
 	}
 	if home.Key != "" {
 		cfg.Home = home.Key
@@ -654,50 +653,12 @@ func resolveHome(homeKey string, sites []model.Site) model.Site {
 	return model.Site{}
 }
 
-func pickDefaultHome(sites []model.Site) model.Site {
-	return PickDefaultHome(sites)
-}
-
-// PickDefaultHome 导出给会话 bootstrap：跳过元站点。
+// PickDefaultHome 无已选首页时取可见列表第一项（VodConfig.initSite orElse get(0)）。
 func PickDefaultHome(sites []model.Site) model.Site {
-	for _, s := range sites {
-		if isMetaSite(s) {
-			continue
-		}
-		return s
-	}
 	if len(sites) > 0 {
 		return sites[0]
 	}
 	return model.Site{}
-}
-
-func isMetaSite(s model.Site) bool {
-	return IsMetaSite(s)
-}
-
-// IsMetaSite 仅用于 PickDefaultHome：跳过不宜「自动」当作首页的站。
-// 用户换源选中的站一律尊重，不要在 LoadFromSource / getConfig 里用本函数覆盖。
-func IsMetaSite(s model.Site) bool {
-	key := strings.TrimSpace(s.Key)
-	// 仓内设置枢纽：可换源进入，但不要自动当默认首页。
-	if key == "网盘配置" || key == "Config" {
-		return true
-	}
-	n := strings.ToLower(s.Name + " " + key + " " + s.API)
-	for _, bad := range []string{
-		"intruduce", "introduce", "网盘登录", "说明", "公告",
-		// 豆瓣/TG豆瓣可手动设首页；自动默认仍跳过（msearch 本站 detail 常空）。
-		"douban", "豆瓣",
-		// 仓内导航站：API 常为空，home 会报 unsupported protocol scheme。
-		"切源", "换源", "点我", "选源", "站点列表",
-		"push_agent", "pushagent",
-	} {
-		if strings.Contains(n, bad) {
-			return true
-		}
-	}
-	return false
 }
 
 func filterVisible(sites []model.Site) []model.Site {

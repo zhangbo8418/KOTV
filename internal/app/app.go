@@ -227,7 +227,7 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 		sess.Ready = true
 		sess.ErrMsg = ""
 		sess.Source = settings.Get(settings.VOD)
-		// 仅补「未设 / 站点已删」；用户选的豆瓣、网盘配置等不要被 IsMetaSite / 空 API 打掉。
+		// 未设首页或站点已删时取列表第一项。
 		if home := sess.Cfg.Home(); home.Key == "" || sess.Cfg.GetSite(home.Key) == nil {
 			if alt := config.PickDefaultHome(sess.Cfg.Sites()); alt.Key != "" {
 				sess.Cfg.SetHome(alt)
