@@ -87,6 +87,11 @@ class PostMsgHost {
     unawaited(cancelAll(reply: true));
   }
 
+  /// 软打断引擎侧占住的请求（与 PopScope / 超时 / dismissAfter 关窗一致）。
+  void _interruptPending() {
+    unawaited(api.cancelPending(hard: false, thunder: false));
+  }
+
   /// 关掉当前声明式窗，并向引擎回传 dismiss。
   /// [popDialog] 保留兼容：关窗一律走 dialog context，不会误 pop 其它路由。
   /// 用户/外壳取消时顺带 [cancelPending]，避免 JAR 占住后详情再也进不去。
@@ -96,7 +101,7 @@ class PostMsgHost {
       await _enqueueReply(id: id, action: 'dismiss', values: _hostClientValues());
     }
     _pendingDoc = null;
-    unawaited(api.cancelPending(hard: false, thunder: false));
+    _interruptPending();
     if (popDialog || _sessionActive || _opening) {
       _dismiss();
     } else {
@@ -238,6 +243,8 @@ class PostMsgHost {
     _timeout = Timer(Duration(milliseconds: timeoutMs), () {
       if (_activeId != id) return;
       unawaited(_enqueueReply(id: id, action: 'timeout'));
+      // 超时关窗也要打断 pending，否则 JAR/爬虫仍占住，后续进详情会卡住。
+      _interruptPending();
       _dismiss();
     });
   }
@@ -407,7 +414,7 @@ class PostMsgHost {
                 if (_lifecycleId != null) {
                   unawaited(_enqueueReply(id: _lifecycleId!, action: 'dismiss', values: _hostClientValues()));
                 }
-                unawaited(api.cancelPending(hard: false, thunder: false));
+                _interruptPending();
                 _activeId = null;
               }
               _dialogContext = null;
@@ -438,6 +445,9 @@ class PostMsgHost {
                       final id = '${doc['id']}';
                       await _enqueueReply(id: id, action: action, values: collect());
                       if (dismissAfter) {
+                        // 确认关窗：与超时/手势返回一致，打断 pending。
+                        // 仅提交中间态、不关窗的 fire 不取消。
+                        _interruptPending();
                         _dismiss();
                       }
                     }

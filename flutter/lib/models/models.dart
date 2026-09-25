@@ -11,6 +11,9 @@ class VodItem {
     this.cate = '',
     this.folder = false,
     this.flag = '',
+    this.configSource = '',
+    this.positionMs = 0,
+    this.durationMs = 0,
   });
 
   final String id;
@@ -25,6 +28,11 @@ class VodItem {
   final bool folder;
   /// 历史恢复用线路 flag（vodFlag）。
   final String flag;
+  /// 点播配置 source，收藏去重用；空表示旧条目。
+  final String configSource;
+  /// 续播进度（毫秒）。
+  final int positionMs;
+  final int durationMs;
 
   bool get hasAction => action.trim().isNotEmpty;
 
@@ -46,7 +54,15 @@ class VodItem {
         cate: '${j['cate'] ?? ''}',
         folder: j['is_folder'] == true,
         flag: '${j['vod_flag'] ?? j['flag'] ?? ''}',
+        configSource: '${j['config_source'] ?? ''}',
+        positionMs: _asInt(j['position'] ?? j['positionMs']),
+        durationMs: _asInt(j['duration'] ?? j['durationMs']),
       );
+
+  static int _asInt(dynamic v) {
+    if (v is num) return v.toInt();
+    return int.tryParse('$v') ?? 0;
+  }
 }
 
 class FilterOption {

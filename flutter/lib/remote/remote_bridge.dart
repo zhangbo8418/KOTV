@@ -130,10 +130,45 @@ class LocalHistory {
     cur.removeWhere((e) => e.id == item.id && e.site == item.site);
     cur.insert(0, item);
     final trimmed = cur.take(60).toList();
+    await _persist(trimmed);
+  }
+
+  /// 详情返回真实 id 后迁移键；若新键已存在则去掉旧条目。
+  static Future<void> replaceId({
+    required String site,
+    required String oldId,
+    required String newId,
+  }) async {
+    if (oldId.isEmpty || newId.isEmpty || oldId == newId) return;
+    final cur = await list();
+    final oldIdx = cur.indexWhere((e) => e.id == oldId && e.site == site);
+    if (oldIdx < 0) return;
+    final newIdx = cur.indexWhere((e) => e.id == newId && e.site == site);
+    if (newIdx >= 0) {
+      cur.removeAt(oldIdx);
+      await _persist(cur);
+      return;
+    }
+    final e = cur[oldIdx];
+    cur[oldIdx] = VodItem(
+      id: newId,
+      name: e.name,
+      pic: e.pic,
+      remarks: e.remarks,
+      typeName: e.typeName,
+      site: e.site,
+      flag: e.flag,
+      positionMs: e.positionMs,
+      durationMs: e.durationMs,
+    );
+    await _persist(cur);
+  }
+
+  static Future<void> _persist(List<VodItem> items) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(
       _key,
-      jsonEncode(trimmed
+      jsonEncode(items
           .map((e) => {
                 'vod_id': e.id,
                 'vod_name': e.name,
@@ -142,9 +177,33 @@ class LocalHistory {
                 'type_name': e.typeName,
                 'site': e.site,
                 if (e.flag.trim().isNotEmpty) 'vod_flag': e.flag,
+                if (e.positionMs > 0) 'position': e.positionMs,
+                if (e.durationMs > 0) 'duration': e.durationMs,
               })
           .toList()),
     );
+  }
+
+  /// 同步协议 History JSON（site$$$id）。
+  static List<Map<String, dynamic>> toSyncTargets(List<VodItem> items) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return [
+      for (final e in items)
+        if (e.id.isNotEmpty)
+          {
+            'key': '${e.site}\$\$\$${e.id}',
+            'vodPic': e.pic,
+            'vodName': e.name,
+            'vodFlag': e.flag,
+            'vodRemarks': e.remarks,
+            'createTime': now,
+            'position': e.positionMs,
+            'duration': e.durationMs,
+            'speed': 1.0,
+            'opening': 0,
+            'ending': 0,
+          },
+    ];
   }
 
   static Future<void> setIncognito(bool on) async {
@@ -160,21 +219,7 @@ class LocalHistory {
   static Future<void> remove(VodItem item) async {
     final cur = await list();
     cur.removeWhere((e) => e.id == item.id && e.site == item.site);
-    final p = await SharedPreferences.getInstance();
-    await p.setString(
-      _key,
-      jsonEncode(cur
-          .map((e) => {
-                'vod_id': e.id,
-                'vod_name': e.name,
-                'vod_pic': e.pic,
-                'vod_remarks': e.remarks,
-                'type_name': e.typeName,
-                'site': e.site,
-                if (e.flag.trim().isNotEmpty) 'vod_flag': e.flag,
-              })
-          .toList()),
-    );
+    await _persist(cur);
   }
 }
 
@@ -207,6 +252,23 @@ class LocalPlayOffsets {
         'ending': endingSec.clamp(0, 3600),
       }),
     );
+  }
+}
+
+/// 详情集列表倒序偏好，按 vodId@site 本地持久化。
+class LocalRevSort {
+  static String _key(String id, String site) => 'kotv_rev_${site}_$id';
+
+  static Future<bool> get(String id, String site) async {
+    if (id.isEmpty) return false;
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_key(id, site)) ?? false;
+  }
+
+  static Future<void> set(String id, String site, bool reversed) async {
+    if (id.isEmpty) return;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_key(id, site), reversed);
   }
 }
 

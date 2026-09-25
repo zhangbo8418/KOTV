@@ -51,13 +51,6 @@ type App struct {
 	PendingSearch    string
 	RemoteSearchAuto bool
 
-	// 播放失败跨站换源会话（详情页重建后仍保留）。
-	fbMu      sync.Mutex
-	fbFailed  map[string]bool
-	fbQueue   []model.Vod
-	fbRemarks string
-	fbArmed   bool
-
 	mediaMu    sync.RWMutex
 	mediaState string
 	mediaTitle string
@@ -614,84 +607,6 @@ func (a *App) MediaTitle() string {
 	a.mediaMu.RLock()
 	defer a.mediaMu.RUnlock()
 	return a.mediaTitle
-}
-
-func vodFallbackKey(siteKey, vodID string) string {
-	return siteKey + "@" + vodID
-}
-
-// ClearVodFallback 清除跨站换源会话（用户手动进详情时调用）。
-func (a *App) ClearVodFallback() {
-	a.fbMu.Lock()
-	defer a.fbMu.Unlock()
-	a.fbFailed = nil
-	a.fbQueue = nil
-	a.fbRemarks = ""
-	a.fbArmed = false
-}
-
-// VodFallbackArmed 是否正携带自动换源播放意图。
-func (a *App) VodFallbackArmed() bool {
-	a.fbMu.Lock()
-	defer a.fbMu.Unlock()
-	return a.fbArmed
-}
-
-// MarkVodFallbackFailed 记录当前片源已失败。
-func (a *App) MarkVodFallbackFailed(siteKey, vodID string) {
-	a.fbMu.Lock()
-	defer a.fbMu.Unlock()
-	if a.fbFailed == nil {
-		a.fbFailed = map[string]bool{}
-	}
-	a.fbFailed[vodFallbackKey(siteKey, vodID)] = true
-}
-
-// IsVodFallbackFailed 是否已在本轮换源中失败过。
-func (a *App) IsVodFallbackFailed(siteKey, vodID string) bool {
-	a.fbMu.Lock()
-	defer a.fbMu.Unlock()
-	return a.fbFailed[vodFallbackKey(siteKey, vodID)]
-}
-
-// SetVodFallbackQueue 写入待切换的站源队列，并记下续播集名。
-func (a *App) SetVodFallbackQueue(items []model.Vod, remarks string) {
-	a.fbMu.Lock()
-	defer a.fbMu.Unlock()
-	a.fbQueue = append([]model.Vod(nil), items...)
-	a.fbRemarks = remarks
-}
-
-// PopVodFallback 取出下一个候选站源并武装自动播放。
-func (a *App) PopVodFallback() (model.Vod, string, bool) {
-	a.fbMu.Lock()
-	defer a.fbMu.Unlock()
-	for len(a.fbQueue) > 0 {
-		item := a.fbQueue[0]
-		a.fbQueue = a.fbQueue[1:]
-		siteKey := ""
-		if item.Site != nil {
-			siteKey = item.Site.Key
-		}
-		if a.fbFailed[vodFallbackKey(siteKey, item.VodID.String())] {
-			continue
-		}
-		a.fbArmed = true
-		return item, a.fbRemarks, true
-	}
-	a.fbArmed = false
-	return model.Vod{}, "", false
-}
-
-// TakeVodFallbackPlay 详情页加载后消费一次自动播放意图，返回续播集名。
-func (a *App) TakeVodFallbackPlay() (remarks string, ok bool) {
-	a.fbMu.Lock()
-	defer a.fbMu.Unlock()
-	if !a.fbArmed {
-		return "", false
-	}
-	a.fbArmed = false
-	return a.fbRemarks, true
 }
 
 func (a *App) LoadDanmaku(url string) {

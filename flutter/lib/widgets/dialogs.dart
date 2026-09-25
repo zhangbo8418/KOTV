@@ -147,6 +147,7 @@ Future<void> showSitePicker(
   final scrollCtrl = ScrollController();
   final homeIdx = sites.indexWhere((s) => s.home);
   final focusIdx = homeIdx >= 0 ? homeIdx : 0;
+  var didScrollToHome = false;
   await showDialog<void>(
     context: context,
     builder: (ctx) {
@@ -166,12 +167,15 @@ Future<void> showSitePicker(
 
           final curHomeIdx = local.indexWhere((s) => s.home);
           final curFocus = curHomeIdx >= 0 ? curHomeIdx : focusIdx;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!scrollCtrl.hasClients || curFocus <= 0) return;
-            final itemH = (m.compact ? 44.0 : 52.0) + (m.compact ? 4.0 : 8.0);
-            final target = (curFocus * itemH).clamp(0.0, scrollCtrl.position.maxScrollExtent);
-            scrollCtrl.jumpTo(target);
-          });
+          if (!didScrollToHome) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (didScrollToHome || !scrollCtrl.hasClients || curFocus <= 0) return;
+              didScrollToHome = true;
+              final itemH = (m.compact ? 44.0 : 52.0) + (m.compact ? 4.0 : 8.0);
+              final target = (curFocus * itemH).clamp(0.0, scrollCtrl.position.maxScrollExtent);
+              scrollCtrl.jumpTo(target);
+            });
+          }
 
           return Dialog(
             backgroundColor: Colors.transparent,

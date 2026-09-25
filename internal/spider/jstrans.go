@@ -128,12 +128,34 @@ func s2tFilter(f *model.Filter) {
 	}
 }
 
-// Sniffer.CLICKER：含可点链接标记时不做 s2t，避免破坏 [a=cr:{…}/]…[/a]。
-var clickerRe = regexp.MustCompile(`\[a=cr:\{.*?\}\/](.*?)\[\/a]`)
+// Sniffer.CLICKER：`[a=cr:{json}/]label[/a]`。
+// 无标记则整段 s2t；有标记则转标记外文本与 label，JSON 正文不动。
+var clickerRe = regexp.MustCompile(`\[a=cr:(\{.*?\})\/](.*?)\[\/a]`)
 
 func s2tUnlessClicker(text string) string {
-	if clickerRe.MatchString(text) {
+	if text == "" {
 		return text
 	}
-	return s2t(text)
+	if !clickerRe.MatchString(text) {
+		return s2t(text)
+	}
+	var b strings.Builder
+	b.Grow(len(text) + 8)
+	last := 0
+	for _, m := range clickerRe.FindAllStringSubmatchIndex(text, -1) {
+		// m: full[0:1] json[2:3] label[4:5]
+		if m[0] > last {
+			b.WriteString(s2t(text[last:m[0]]))
+		}
+		b.WriteString("[a=cr:")
+		b.WriteString(text[m[2]:m[3]])
+		b.WriteString("/]")
+		b.WriteString(s2t(text[m[4]:m[5]]))
+		b.WriteString("[/a]")
+		last = m[1]
+	}
+	if last < len(text) {
+		b.WriteString(s2t(text[last:]))
+	}
+	return b.String()
 }

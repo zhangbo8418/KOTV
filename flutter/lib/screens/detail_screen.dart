@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -38,6 +39,7 @@ import '../nav/kotv_routes.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
+import '../vod/vod_open.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
@@ -140,6 +142,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _chromeRemoteFocus = false;
   int _epPage = 0;
   bool _reversed = false;
+  /// 起播续播 seek（毫秒）；与片头合并后一次性 seek。
+  int _resumeSeekMs = 0;
+  /// READY 后再执行的起播 seek（续播/片头）。
+  int _pendingStartSeekMs = 0;
+  DateTime? _lastProgressSave;
+  String _configSource = '';
   bool _kept = false;
   String _status = '选择剧集开始播放';
   String _playUrl = '';
@@ -891,16 +899,32 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 片头起播跳过；片尾 `ending+position>=duration` 切下一集。
+  /// 片头起播跳过；片尾 `ending+position>=duration` 切下一集；节流写续播进度。
   /// Clock 仅在 READY（[_playbackLive]）后生效，避免解析/换集中连跳。
   void _onPositionTick(Duration pos) {
     if (_playUrl.isEmpty || !mounted) return;
     _syncPlayStatus();
     _markPlaybackLiveIfNeeded();
     if (!_playbackLive || _endConsumedGen == _playGen) return;
+    final dur = _playback.duration;
+    if (_pendingStartSeekMs > 0) {
+      final ms = _pendingStartSeekMs;
+      _pendingStartSeekMs = 0;
+      _openingSeekDone = true;
+      if (pos.inMilliseconds + 800 < ms) {
+        unawaited(_playback.seek(Duration(milliseconds: ms)));
+        return;
+      }
+    }
+    if (dur.inMilliseconds > 0 && pos.inMilliseconds >= 5000) {
+      final now = DateTime.now();
+      if (_lastProgressSave == null || now.difference(_lastProgressSave!) >= const Duration(seconds: 5)) {
+        _lastProgressSave = now;
+        unawaited(_saveWatchProgress(pos.inMilliseconds, dur.inMilliseconds));
+      }
+    }
     if (!_skipOpeningEnding) return;
     if (_playback.repeatOne) return;
-    final dur = _playback.duration;
     if (dur.inMilliseconds <= 0) return;
     final openMs = _openingSec * 1000;
     final endMs = _endingSec * 1000;
@@ -917,6 +941,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _openingSeekDone = false;
       unawaited(_advanceToNextEpisode());
     }
+  }
+
+  Future<void> _saveWatchProgress(int positionMs, int durationMs) async {
+    final d = _detail;
+    if (d == null || positionMs < 5000) return;
+    final epName = _currentEpisodeName() ?? '';
+    if (epName.isEmpty) return;
+    final flag = d.flags.isEmpty
+        ? ''
+        : d.flags[_flagIdx.clamp(0, d.flags.length - 1)].flag;
+    try {
+      await LocalHistory.push(VodItem(
+        id: _detailId(),
+        name: d.name,
+        pic: d.pic,
+        site: _detailSite(),
+        remarks: epName,
+        flag: flag,
+        positionMs: positionMs,
+        durationMs: durationMs,
+      ));
+    } catch (_) {}
   }
 
   Future<void> _onPlaybackEnded() async {
@@ -1031,10 +1077,35 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     try {
       final data = await ref.read(apiProvider).detail(id: widget.id, site: widget.site);
       final vod = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
-      final kept = await LocalCollect.isKept(
-        vod.id.isNotEmpty ? vod.id : widget.id,
-        vod.site.isNotEmpty ? vod.site : widget.site,
+      final id = vod.id.isNotEmpty ? vod.id : widget.id;
+      final site = vod.site.isNotEmpty ? vod.site : widget.site;
+      var configSource = '';
+      try {
+        final cfg = await ref.read(apiProvider).getConfig();
+        configSource = '${cfg['source'] ?? ''}'.trim();
+      } catch (_) {}
+      _configSource = configSource;
+      // 入口 id ≠ 详情 id：迁移收藏/历史键，避免双份与 play 键分裂。
+      if (vod.id.isNotEmpty && widget.id.isNotEmpty && vod.id != widget.id) {
+        await LocalCollect.replaceId(
+          site: site,
+          oldId: widget.id,
+          newId: vod.id,
+          configSource: configSource,
+        );
+        await LocalHistory.replaceId(site: site, oldId: widget.id, newId: vod.id);
+      }
+      await LocalCollect.updateMeta(
+        id: id,
+        site: site,
+        configSource: configSource,
+        name: vod.name,
+        pic: vod.pic,
+        remarks: vod.remarks,
+        typeName: vod.typeName,
       );
+      final kept = await LocalCollect.isKept(id, site, configSource: configSource);
+      final rev = await LocalRevSort.get(id, site);
       try {
         final st = await ref.read(apiProvider).getSettings();
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
@@ -1152,10 +1223,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       setState(() {
         _detail = vod;
         _kept = kept;
+        _reversed = rev;
         _loading = false;
       });
-      final id = vod.id.isNotEmpty ? vod.id : widget.id;
-      final site = vod.site.isNotEmpty ? vod.site : widget.site;
       final needExpand = data['magnet'] == true || _detailHasMagnet(vod);
       if (needExpand && mounted) {
         // 先展开再起播，避免异步 expand 与 _playAt 竞态清空选集。
@@ -1176,6 +1246,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _error = '$e';
         _loading = false;
       });
+      final name = widget.title.trim().isNotEmpty ? widget.title.trim() : '';
+      if (name.isNotEmpty && mounted) {
+        unawaited(_leavePage(afterPop: () => searchByName(ref, name)));
+      }
     }
   }
 
@@ -1309,35 +1383,53 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 配置类站（SUBSCRIBECONFIG / Config）依赖此路径走到 playerContent 弹窗。
   Future<void> _resumeOrAutoPlay() async {
     final d = _detail;
-    if (d == null || d.flags.isEmpty) return;
+    if (d == null) return;
+    if (d.flags.isEmpty) {
+      final name = d.name.trim();
+      if (name.isNotEmpty && mounted) {
+        await _leavePage(afterPop: () => searchByName(ref, name));
+      }
+      return;
+    }
 
     var mark = widget.mark.trim();
     var histFlag = '';
+    _resumeSeekMs = 0;
     if (mark.isEmpty) {
       try {
-        final id = d.id.isNotEmpty ? d.id : widget.id;
-        final site = d.site.isNotEmpty ? d.site : widget.site;
+        final id = _detailId();
+        final site = _detailSite();
         final hist = await LocalHistory.list();
         for (final h in hist) {
           if (h.id == id && h.site == site) {
             mark = h.remarks.trim();
             histFlag = h.flag.trim();
+            if (h.positionMs > 0) _resumeSeekMs = h.positionMs;
             break;
           }
         }
       } catch (_) {}
     }
     if (!mounted) return;
+    var nextFlag = _flagIdx;
     if (histFlag.isNotEmpty) {
       final fi = d.flags.indexWhere((f) => f.flag == histFlag || f.show == histFlag);
-      if (fi >= 0) _flagIdx = fi;
+      if (fi >= 0) nextFlag = fi;
     }
+    _flagIdx = nextFlag; // _eps 依赖当前线路
     final eps = _eps;
     if (eps.isEmpty) return;
     var idx = mark.isNotEmpty ? _matchEpisodeIndex(eps, mark) : -1;
-    if (idx < 0) idx = 0;
-    _epIdx = idx;
-    _epPage = idx ~/ _epSize;
+    if (idx < 0) {
+      idx = 0;
+      _resumeSeekMs = 0; // 未命中历史集则不续播进度
+    }
+    if (!mounted) return;
+    setState(() {
+      _flagIdx = nextFlag;
+      _epIdx = idx;
+      _epPage = idx ~/ _epSize;
+    });
     unawaited(_playAt(idx));
   }
 
@@ -1668,6 +1760,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _lastVideoW = 0;
     _lastVideoH = 0;
     _openingSeekDone = false;
+    _pendingStartSeekMs = 0;
     _endedSub?.cancel();
     _endedSub = null;
     _posSub?.cancel();
@@ -1717,8 +1810,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         } else {
           data = await ref.read(apiProvider).play(
                 url: ep.url,
-                site: d.site.isNotEmpty ? d.site : widget.site,
-                id: widget.id,
+                site: _detailSite(),
+                id: _detailId(),
                 flag: flag.flag,
               );
         }
@@ -1729,8 +1822,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (!ok || serial != _playAtSerial || !mounted) rethrow;
         data = await ref.read(apiProvider).play(
               url: ep.url,
-              site: d.site.isNotEmpty ? d.site : widget.site,
-              id: widget.id,
+              site: _detailSite(),
+              id: _detailId(),
               flag: flag.flag,
             );
       }
@@ -1756,12 +1849,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           : null;
       final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
       await LocalHistory.push(VodItem(
-        id: d.id.isNotEmpty ? d.id : widget.id,
+        id: _detailId(),
         name: d.name,
         pic: d.pic,
-        site: d.site,
+        site: _detailSite(),
         remarks: ep.name,
         flag: flag.flag,
+        positionMs: 0,
+        durationMs: 0,
       ));
       // 起播再读一次：设置页改播放器/软硬解/自动切换后，详情页可能还开着。
       var backendProxyPlay = data['backendProxyPlay'] == true;
@@ -1925,6 +2020,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         throw lastOpenError ?? const KotvSilentVideoException();
       }
       if (serial != _playAtSerial || !mounted) return;
+      // 续播与片头合并；READY 后由 [_onPositionTick] 执行，避免 open 后立刻 seek 丢效。
+      final resumeMs = _resumeSeekMs;
+      _resumeSeekMs = 0;
+      _pendingStartSeekMs = math.max(_openingSec * 1000, resumeMs);
       // 音量/倍速已在 open 前套好；稳定音量用轻量 dynaudnorm，起播后立刻挂，勿再拖 800ms。
       if (_stableVolumeOn) {
         try {
@@ -1959,8 +2058,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         } catch (_) {}
       }
       _scheduleNextEpisodePreload(
-        site: d.site.isNotEmpty ? d.site : widget.site,
-        id: widget.id,
+        site: _detailSite(),
+        id: _detailId(),
         flag: flag.flag,
         eps: eps,
         currentIdx: epIdx,
@@ -2432,8 +2531,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   Widget _buildImmersiveFullscreenPage({bool externalVideo = false}) {
     final d = _detail!;
     final api = ref.read(apiProvider);
-    final id = d.id.isNotEmpty ? d.id : widget.id;
-    final site = d.site.isNotEmpty ? d.site : widget.site;
+    final id = _detailId();
+    final site = _detailSite();
     final eps = _eps;
     final epIdx = _epIdx;
     final title = '${d.name}${epIdx >= 0 && epIdx < eps.length ? ' · ${eps[epIdx].name}' : ''}';
@@ -2674,8 +2773,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         onPlayerStatus: api.playerStatus,
         onExternalPlayer: (player) => api.playerExternal(url: _playUrl, player: player),
         onToggleKeep: () async {
-          final item = VodItem(id: id, name: d.name, pic: d.pic, site: site, remarks: d.remarks);
-          final kept = await LocalCollect.toggle(item);
+          final kept = await LocalCollect.toggle(_collectItemFromDetail());
           if (mounted) {
             setState(() => _kept = kept);
           }
@@ -3182,14 +3280,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       decoration: TextDecoration.underline,
       decorationColor: p.primary,
     );
-    final metaStyle = TextStyle(color: muted, fontSize: 14.5, height: 1.3);
-    final metaLinkStyle = TextStyle(
-      color: p.primary,
-      fontSize: 14.5,
-      height: 1.3,
-      decoration: TextDecoration.underline,
-      decorationColor: p.primary,
-    );
 
     Widget videoPane({required bool expand}) {
       return Container(
@@ -3296,16 +3386,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 }
                 _status = _reversed ? '已倒序' : '已正序';
               });
+              unawaited(LocalRevSort.set(_detailId(), _detailSite(), _reversed));
             }),
             _action(_kept ? '取消收藏' : '收藏', Icons.star_border_rounded, () async {
-              final kept = await LocalCollect.toggle(VodItem(
-                id: d.id.isNotEmpty ? d.id : widget.id,
-                name: d.name,
-                pic: d.pic,
-                site: d.site.isNotEmpty ? d.site : widget.site,
-                remarks: d.remarks,
-                typeName: d.typeName,
-              ));
+              final kept = await LocalCollect.toggle(_collectItemFromDetail());
               setState(() {
                 _kept = kept;
                 _status = kept ? '已加入收藏' : '已取消收藏';
@@ -3345,6 +3429,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 child: SizedBox(
                   height: pillH + 2,
                   child: HScrollList(
+                    scrollToIndex: _flagIdx,
                     itemCount: flags.length,
                     separatorBuilder: (_, __) => SizedBox(width: compact ? 6 : 8),
                     itemBuilder: (_, i) => AppPill(
@@ -3367,6 +3452,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             SizedBox(
               height: pillH,
               child: HScrollList(
+                scrollToIndex: _epPage,
                 itemCount: pageCount,
                 separatorBuilder: (_, __) => SizedBox(width: compact ? 6 : 8),
                 itemBuilder: (_, i) {
@@ -3435,19 +3521,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               Wrap(
                 spacing: 16,
                 runSpacing: 6,
-                children: [
-                  KotvClickableContent(
-                    raw: d.remarks,
-                    prefix: '更新：',
-                    style: metaStyle,
-                    linkStyle: metaLinkStyle,
-                    maxLines: 1,
-                    onOpen: (c) => _openContentFolder(c, siteKey),
-                  ),
-                  _meta('来源：${d.site.isEmpty ? '未知' : d.site}'),
-                  _meta('年份：${d.year.isEmpty ? '暂无' : d.year}'),
-                  if (d.area.isNotEmpty) _meta('地区：${d.area}'),
-                ],
+                children: _remarksMetaChips(siteKey),
               ),
               const SizedBox(height: 8),
               metaBlock(),
@@ -3501,19 +3575,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                           Wrap(
                             spacing: 20,
                             runSpacing: 6,
-                            children: [
-                              KotvClickableContent(
-                                raw: d.remarks,
-                                prefix: '更新：',
-                                style: metaStyle,
-                                linkStyle: metaLinkStyle,
-                                maxLines: 1,
-                                onOpen: (c) => _openContentFolder(c, siteKey),
-                              ),
-                              _meta('来源：${d.site.isEmpty ? '未知' : d.site}'),
-                              _meta('年份：${d.year.isEmpty ? '暂无' : d.year}'),
-                              if (d.area.isNotEmpty) _meta('地区：${d.area}'),
-                            ],
+                            children: _remarksMetaChips(siteKey),
                           ),
                           const SizedBox(height: 8),
                           metaBlock(),
@@ -3588,6 +3650,60 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       t,
       style: TextStyle(color: p.muted, fontSize: 14.5, height: 1.3),
     );
+  }
+
+  /// 详情真实 id（入口路由 id 可能不同）。
+  String _detailId() {
+    final d = _detail;
+    if (d != null && d.id.isNotEmpty) return d.id;
+    return widget.id;
+  }
+
+  String _detailSite() {
+    final d = _detail;
+    if (d != null && d.site.isNotEmpty) return d.site;
+    return widget.site;
+  }
+
+  /// 页内收藏与遥控收藏共用同一 VodItem（含 typeName / remarks / configSource）。
+  VodItem _collectItemFromDetail() {
+    final d = _detail!;
+    return VodItem(
+      id: _detailId(),
+      name: d.name,
+      pic: d.pic,
+      site: _detailSite(),
+      remarks: d.remarks,
+      typeName: d.typeName,
+      configSource: _configSource,
+    );
+  }
+
+  /// 窄屏/宽屏共用的备注 meta chips（更新 CLICKER + 来源/年份/地区）。
+  List<Widget> _remarksMetaChips(String siteKey) {
+    final d = _detail!;
+    final p = KotvPalette.of(context);
+    final metaStyle = TextStyle(color: p.muted, fontSize: 14.5, height: 1.3);
+    final metaLinkStyle = TextStyle(
+      color: p.primary,
+      fontSize: 14.5,
+      height: 1.3,
+      decoration: TextDecoration.underline,
+      decorationColor: p.primary,
+    );
+    return [
+      KotvClickableContent(
+        raw: d.remarks,
+        prefix: '更新：',
+        style: metaStyle,
+        linkStyle: metaLinkStyle,
+        maxLines: 1,
+        onOpen: (c) => _openContentFolder(c, siteKey),
+      ),
+      _meta('来源：${d.site.isEmpty ? '未知' : d.site}'),
+      _meta('年份：${d.year.isEmpty ? '暂无' : d.year}'),
+      if (d.area.isNotEmpty) _meta('地区：${d.area}'),
+    ];
   }
 
   void _openContentFolder(KotvContentClick click, String site) {

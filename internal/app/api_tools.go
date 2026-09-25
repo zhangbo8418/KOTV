@@ -40,7 +40,12 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 		_ = settings.Save()
 		return map[string]any{"ok": true, "pairCode": code, "message": "新配对码: " + code}, nil
 	case "syncsend":
-		return a.toolSyncSend(strParam(params, "host"), strParam(params, "pair"), strParam(params, "type"))
+		return a.toolSyncSend(
+			strParam(params, "host"),
+			strParam(params, "pair"),
+			strParam(params, "type"),
+			strParam(params, "targets"),
+		)
 	case "backupexport":
 		return a.toolBackupExport(strParam(params, "path"))
 	case "backupimport":
@@ -249,10 +254,11 @@ func (a *App) toolCheckSpider() (map[string]any, error) {
 	}, nil
 }
 
-func (a *App) toolSyncSend(host, pair, syncType string) (map[string]any, error) {
+func (a *App) toolSyncSend(host, pair, syncType, targets string) (map[string]any, error) {
 	host = strings.TrimSpace(host)
 	pair = strings.TrimSpace(pair)
 	syncType = strings.TrimSpace(syncType)
+	targets = strings.TrimSpace(targets)
 	if host == "" {
 		return nil, fmt.Errorf("IP 不能为空")
 	}
@@ -262,9 +268,19 @@ func (a *App) toolSyncSend(host, pair, syncType string) (map[string]any, error) 
 	if syncType != "history" && syncType != "keep" {
 		return nil, fmt.Errorf("无效同步类型")
 	}
-	body, err := exportSyncPayload(a.DB, syncType)
-	if err != nil {
-		return nil, err
+	var body []byte
+	var err error
+	if targets != "" {
+		// Flutter 端已序列化 LocalHistory/LocalCollect，直接转发。
+		if !json.Valid([]byte(targets)) {
+			return nil, fmt.Errorf("targets 不是合法 JSON")
+		}
+		body = []byte(targets)
+	} else {
+		body, err = exportSyncPayload(a.DB, syncType)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := sendSyncData(host, pair, syncType, 1, body); err != nil {
 		return nil, err

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import '../util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
@@ -20,6 +21,7 @@ import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
 import '../player/video_eq.dart';
 import '../providers.dart';
+import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
 import '../util/kotv_clear_ephemeral.dart';
@@ -2086,10 +2088,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
     );
     if (ok != true) return;
+    final typeTrim = type.trim();
+    final targets = typeTrim == 'keep'
+        ? LocalCollect.toSyncTargets(await LocalCollect.list())
+        : LocalHistory.toSyncTargets(await LocalHistory.list());
     final data = await _runTool('正在发送', () => ref.read(apiProvider).tools('syncSend', {
           'host': hostCtrl.text.trim(),
           'pair': pairCtrl.text.trim(),
-          'type': type,
+          'type': typeTrim,
+          'targets': jsonEncode(targets),
         }));
     if (data == null || !mounted) return;
     setState(() => _status = '${data['message'] ?? '已发送'}');
