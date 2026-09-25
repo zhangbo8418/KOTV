@@ -51,6 +51,22 @@ func TestApiLooksUnplayableLocal(t *testing.T) {
 	}
 }
 
+func TestJarNonStandardLocalProxyFishplay(t *testing.T) {
+	t.Parallel()
+	if !jarNonStandardLocalProxy("http://127.0.0.1:9978/fishplay/go/quark/32t/abc") {
+		t.Fatal("fishplay on loopback should be rejected")
+	}
+	if !jarNonStandardLocalProxy("http://192.168.31.175:9978/fishplay/go/quark/32t/abc") {
+		t.Fatal("fishplay on LAN should be rejected")
+	}
+	if jarNonStandardLocalProxy("http://127.0.0.1:9978/proxy?do=quark&url=x") {
+		t.Fatal("standard /proxy should pass")
+	}
+	if jarNonStandardLocalProxy("http://cdn.example/a.mp4") {
+		t.Fatal("cdn should pass")
+	}
+}
+
 func TestPreparePlaybackURLSkipsLocal(t *testing.T) {
 	t.Parallel()
 	a := &App{}

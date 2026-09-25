@@ -49,7 +49,18 @@ const kotvDefaultImageUa =
   }
 
   headers.putIfAbsent('User-Agent', () => kotvDefaultImageUa);
+  _ensureHotlinkReferer(s, headers);
   return (url: s, headers: headers);
+}
+
+/// 豆瓣等 CDN 防盗链：站源常省略 @Referer=，直连会 403。
+void _ensureHotlinkReferer(String imageUrl, Map<String, String> headers) {
+  if (headers.containsKey('Referer')) return;
+  final host = Uri.tryParse(imageUrl)?.host.toLowerCase() ?? '';
+  if (host.isEmpty) return;
+  if (host.contains('doubanio.com') || host == 'douban.com' || host.endsWith('.douban.com')) {
+    headers['Referer'] = 'https://movie.douban.com/';
+  }
 }
 
 bool _looksLikePicDecorator(String after) {

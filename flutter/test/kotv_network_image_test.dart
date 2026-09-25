@@ -28,4 +28,20 @@ void main() {
     expect(p.url, 'https://example.com/a.jpg');
     expect(p.headers['User-Agent'], kotvDefaultImageUa);
   });
+
+  test('plain doubanio gets movie.douban.com Referer', () {
+    final p = kotvParseImageUrl(
+      'https://img2.doubanio.com/view/photo/s_ratio_poster/public/p2935130131.jpg',
+    );
+    expect(p.headers['Referer'], 'https://movie.douban.com/');
+    expect(p.headers['User-Agent'], isNotEmpty);
+  });
+
+  test('explicit Referer is kept for doubanio', () {
+    final p = kotvParseImageUrl(
+      'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p1.jpg'
+      '@Referer=https://www.douban.com/',
+    );
+    expect(p.headers['Referer'], 'https://www.douban.com/');
+  });
 }

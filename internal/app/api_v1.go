@@ -629,6 +629,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	}
 	// convert：须在可播判断之前，否则 proxy:// 会被当成不可播。
 	playURL = localproxy.ConvertScheme(playURL)
+	if jarNonStandardLocalProxy(playURL) {
+		return nil, fmt.Errorf("站源返回了非标准本地代理地址（%s）；宿主只提供 /proxy?...，请换返回 proxy://do=… 的站源/jar", shortPlayPath(playURL))
+	}
 	if apiLooksUnplayable(playURL) {
 		return nil, fmt.Errorf("未解析到可播放地址")
 	}
@@ -915,6 +918,36 @@ func apiLooksUnplayable(u string) bool {
 		return true
 	}
 	return !parse.IsVideoFormat(u)
+}
+
+// jarNonStandardLocalProxy 站源 jar 自创的本地路径（如 /fishplay/…），不是 FongMi /proxy?...。
+// 宿主未实现这些路由；原样交给播放器只会 404。KOTV 源码里也不存在 fishplay。
+func jarNonStandardLocalProxy(u string) bool {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return false
+	}
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	p := strings.ToLower(parsed.Path)
+	return strings.HasPrefix(p, "/fishplay")
+}
+
+func shortPlayPath(u string) string {
+	parsed, err := url.Parse(strings.TrimSpace(u))
+	if err != nil || parsed.Path == "" {
+		if len(u) > 64 {
+			return u[:64] + "…"
+		}
+		return u
+	}
+	p := parsed.Path
+	if len(p) > 48 {
+		return p[:48] + "…"
+	}
+	return p
 }
 
 func mergeStringMaps(a, b map[string]string) map[string]string {
