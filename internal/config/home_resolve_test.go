@@ -115,3 +115,32 @@ func TestSetHome_PersistsExplicitChoice(t *testing.T) {
 		t.Fatalf("explicit SetHome DB home=%q want Youtube", got.Home)
 	}
 }
+
+func TestSetHome_EphemeralAlsoPersistsDB(t *testing.T) {
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "ephemeral-home.db"))
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+
+	const url = "file:///tmp/kotv-ephemeral-home.json"
+	raw := `{"sites":[{"key":"Youtube","name":"Youtube","type":1,"api":"http://example.test/y"},{"key":"cfg","name":"网盘及弹幕配置","hide":1,"type":3,"api":"csp_Config"}]}`
+	base := NewManager(db)
+	if err := base.ParseConfig(&database.Config{
+		Type: database.ConfigTypeSite,
+		URL:  url,
+		JSON: raw,
+		Home: "Youtube",
+	}, true); err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	ephem := base.CloneEphemeral()
+	ephem.SetHome(model.Site{Key: "cfg", Name: "网盘及弹幕配置"})
+	got, err := db.FindConfig(url, database.ConfigTypeSite)
+	if err != nil || got == nil {
+		t.Fatalf("FindConfig: %v", err)
+	}
+	if got.Home != "cfg" {
+		t.Fatalf("ephemeral SetHome DB home=%q want cfg", got.Home)
+	}
+}

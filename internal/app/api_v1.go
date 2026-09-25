@@ -151,7 +151,14 @@ func (a *App) APISetHome(siteKey string) error {
 	sites.InvalidateHomeOnly()
 	cfg.SetHome(*site)
 	if sess != nil {
-		clientsession.SaveSource(sess.ClientID, sess.Source, site.Key)
+		src := strings.TrimSpace(sess.Source)
+		if src == "" {
+			src = strings.TrimSpace(cfg.API().URL)
+		}
+		if src == "" {
+			src = strings.TrimSpace(settings.Get(settings.VOD))
+		}
+		clientsession.SaveSource(sess.ClientID, src, site.Key)
 	}
 	return nil
 }

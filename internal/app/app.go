@@ -206,12 +206,21 @@ func bindSessionConfig(sess *clientsession.Session, cfg *config.Manager) {
 	sess.Live = liveSvc
 }
 
-// bootstrapSession 首次进入时从磁盘恢复该 Scope 上次选中的点播源。
+// bootstrapSession 首次进入时从磁盘恢复该 Scope 上次选中的点播源与首页。
 func (a *App) bootstrapSession(sess *clientsession.Session) {
 	if sess == nil || sess.Bootstrapped {
 		return
 	}
 	sess.Bootstrapped = true
+	applyHome := func(homeKey string) {
+		homeKey = strings.TrimSpace(homeKey)
+		if homeKey == "" || sess.Cfg == nil {
+			return
+		}
+		if site := sess.Cfg.GetSite(homeKey); site != nil {
+			sess.Cfg.SetHome(*site)
+		}
+	}
 	adoptGlobal := func() {
 		if !a.Ready {
 			return
@@ -225,15 +234,21 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 	src = strings.TrimSpace(src)
 	if src == "" {
 		adoptGlobal()
+		// 无独立源记录时仍尝试套用已记首页（与全局同源）。
+		applyHome(homeKey)
 		return
 	}
 	cur := strings.TrimSpace(sess.Source)
 	if cur != "" && cur == src && sess.Ready {
+		// 源未变时也必须恢复首页：ephemeral SetHome 不写 settings.VOD，
+		// 全局 Init 常落在站点列表第一项（如 Youtube），不能在此直接 return。
+		applyHome(homeKey)
 		return
 	}
 	if err := sess.Cfg.LoadFromSource(src); err != nil {
 		if a.Ready {
 			adoptGlobal()
+			applyHome(homeKey)
 			return
 		}
 		sess.Ready = false
@@ -243,11 +258,7 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 	sess.Source = src
 	sess.Ready = true
 	sess.ErrMsg = ""
-	if homeKey != "" {
-		if site := sess.Cfg.GetSite(homeKey); site != nil {
-			sess.Cfg.SetHome(*site)
-		}
-	}
+	applyHome(homeKey)
 	if sess.Live != nil {
 		sess.Live.SyncFromConfig()
 	}

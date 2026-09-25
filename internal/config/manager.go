@@ -54,16 +54,13 @@ func (m *Manager) Home() model.Site {
 	return m.home
 }
 
-// SetHome 切换首页站点；非 ephemeral 时持久化到 DB。
+// SetHome 切换首页站点；有配置 URL 时写入 DB（供冷启动 Init 回落）。
+// ephemeral 会话另由 client_sessions 记每位用户的 home；两者并存。
 func (m *Manager) SetHome(site model.Site) {
 	m.mu.Lock()
 	m.home = site
 	cfgURL := m.api.URL
-	ephemeral := m.ephemeral
 	m.mu.Unlock()
-	if ephemeral {
-		return
-	}
 	if m.db != nil && site.Key != "" && cfgURL != "" {
 		if err := m.db.SetConfigHome(cfgURL, database.ConfigTypeSite, site.Key); err != nil {
 			log.Printf("保存首页站点失败: %v", err)
@@ -267,17 +264,27 @@ func (m *Manager) Clear() {
 	}
 }
 
-// EnsureVodFromHistory 开 HTTP 前用 DB 最新源同步 settings.VOD。
+// EnsureVodFromHistory 仅在 settings.VOD 为空时用 DB 最近源填指针；不得覆盖用户已选源。
 func (m *Manager) EnsureVodFromHistory() {
-	if u := m.syncVodPointerFromDB(); u != "" {
-		log.Printf("boot: 当前点播源指针 <- DB: %s", u)
+	if strings.TrimSpace(settings.Get(settings.VOD)) != "" {
+		return
+	}
+	if u := m.fillVodPointerIfEmpty(); u != "" {
+		log.Printf("boot: settings.VOD 为空，回落 DB 最近源: %s", u)
 	}
 }
 
-// InitFromSettings 当前源 = config 表 time DESC 最新一条。
+// InitFromSettings 以 settings.VOD 为准加载；仅未配置时回落 DB 最近一条。
 func (m *Manager) InitFromSettings() error {
+	vod := strings.TrimSpace(settings.Get(settings.VOD))
+	if vod == "" {
+		_ = m.fillVodPointerIfEmpty()
+		vod = strings.TrimSpace(settings.Get(settings.VOD))
+	}
+	if vod != "" {
+		return m.initFromVod(vod)
+	}
 	if c := m.latestSiteConfig(); c != nil {
-		_ = m.syncVodPointerFromDB()
 		if strings.TrimSpace(c.JSON) != "" {
 			return m.ParseConfig(c, true)
 		}
@@ -285,7 +292,7 @@ func (m *Manager) InitFromSettings() error {
 			return m.ParseConfig(c, false)
 		}
 	}
-	return m.initFromVod(settings.Get(settings.VOD))
+	return fmt.Errorf("未配置点播源")
 }
 
 func (m *Manager) latestSiteConfig() *database.Config {
@@ -302,7 +309,11 @@ func (m *Manager) latestSiteConfig() *database.Config {
 	return c
 }
 
-func (m *Manager) syncVodPointerFromDB() string {
+// fillVodPointerIfEmpty 仅当 settings.VOD 为空时写入 DB 最近源。
+func (m *Manager) fillVodPointerIfEmpty() string {
+	if strings.TrimSpace(settings.Get(settings.VOD)) != "" {
+		return ""
+	}
 	c := m.latestSiteConfig()
 	if c == nil {
 		return ""
@@ -311,10 +322,8 @@ func (m *Manager) syncVodPointerFromDB() string {
 	if u == "" {
 		return ""
 	}
-	if settings.Get(settings.VOD) != u {
-		settings.Set(settings.VOD, u)
-		_ = settings.Save()
-	}
+	settings.Set(settings.VOD, u)
+	_ = settings.Save()
 	return u
 }
 
@@ -334,7 +343,7 @@ func (m *Manager) initFromVod(vod string) error {
 		}
 		return m.ParseConfig(cfg, cfg.JSON != "")
 	}
-	// http(s)/file URL 按远程或本地配置拉取
+	// http(s)/file URL 按远程或本地配置拉取；库里已有 JSON 正文时优先用缓存（冷启动不依赖外网）。
 	if looksLikeURL(vod) {
 		cfg, err := m.db.FindConfig(vod, database.ConfigTypeSite)
 		if err != nil {
@@ -344,6 +353,9 @@ func (m *Manager) initFromVod(vod string) error {
 			cfg = &database.Config{Type: database.ConfigTypeSite, URL: vod}
 		} else {
 			cfg.URL = vod
+		}
+		if strings.TrimSpace(cfg.JSON) != "" {
+			return m.ParseConfig(cfg, true)
 		}
 		return m.ParseConfig(cfg, false)
 	}
