@@ -981,12 +981,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (fo.isNotEmpty) {
         _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
       }
-      final liveChange = '${settings['liveChange'] ?? 'true'}'.trim().toLowerCase();
-      _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
-      final across = '${settings['liveAcross'] ?? 'true'}'.trim().toLowerCase();
-      _liveAcross = across != 'false' && across != 'off' && across != '0';
-      final invert = '${settings['liveInvert'] ?? 'false'}'.trim().toLowerCase();
-      _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
+      // across/invert/change 仅在 bootstrap / 面板切换时更新，避免每次开播覆盖用户刚改的开关。
       final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
       _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
       _liveAspect = _liveAspectFromScale(_liveScale);
@@ -1727,15 +1722,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   Future<void> _findChannelByNumber(String raw) async {
     final n = int.tryParse(raw);
     if (n == null || n <= 0) return;
+    // 优先按频道 number 扫全部分组（含跨组）。
+    for (var gi = 0; gi < _groups.length; gi++) {
+      if (_groupLocked(gi)) continue;
+      final chs = ((_groups[gi]['channels'] as List?) ?? []).whereType<Map>().toList();
+      for (var ci = 0; ci < chs.length; ci++) {
+        final cn = int.tryParse('${chs[ci]['number'] ?? ''}'.trim());
+        if (cn == null || cn != n) continue;
+        setState(() {
+          _groupIdx = gi;
+          _chIdx = ci;
+        });
+        await _playChannel(ci, showList: false);
+        return;
+      }
+    }
+    // 无 number：回落当前分组 1-based 序号。
     final chs = _channels;
-    // 优先匹配频道自带 number，否则按当前分组 1-based 序号。
-    var idx = chs.indexWhere((c) {
-      final cn = int.tryParse('${c['number'] ?? ''}'.trim());
-      return cn != null && cn == n;
-    });
-    if (idx < 0 && n >= 1 && n <= chs.length) idx = n - 1;
-    if (idx < 0) return;
-    await _playChannel(idx, showList: false);
+    if (n >= 1 && n <= chs.length) {
+      await _playChannel(n - 1, showList: false);
+    }
   }
 
   void _showLiveChromeAndFocusPlay() {
@@ -1876,6 +1882,51 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _edgeZone = -1;
     _pointerAtBottom = false;
     _scheduleHideMouse();
+  }
+
+  void _selectEpgDay(int i, {bool resetHide = false}) {
+    if (resetHide) _cancelHideOverlays();
+    final progs = (((_epgDays[i]['list'] as List?) ?? [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList());
+    setState(() {
+      _dayIdx = i;
+      _programs = progs;
+    });
+  }
+
+  Widget _epgDayTabs({
+    required bool land,
+    double? height,
+    double? pillWidth,
+    double? pillHeight,
+    double? fontSize,
+    EdgeInsetsGeometry? padding,
+    bool resetHideOnSelect = false,
+  }) {
+    if (_epgDays.length <= 1) return const SizedBox.shrink();
+    return SizedBox(
+      height: height ?? (land ? 24.0 : 28.0),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: padding,
+        itemCount: _epgDays.length,
+        separatorBuilder: (_, __) => SizedBox(width: land ? 3 : 6),
+        itemBuilder: (_, i) {
+          final d = '${_epgDays[i]['date'] ?? 'D$i'}';
+          final label = d.length >= 10 ? d.substring(5, 10) : d;
+          return AppPill(
+            label: label,
+            width: pillWidth ?? (land ? 56.0 : 72.0),
+            height: pillHeight ?? (land ? 22.0 : 30.0),
+            fontSize: fontSize ?? (land ? 10.0 : 12.0),
+            selected: i == _dayIdx,
+            onTap: () => _selectEpgDay(i, resetHide: resetHideOnSelect),
+          );
+        },
+      ),
+    );
   }
 
   Widget _epgProgramTile(
@@ -2571,35 +2622,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                           ),
                                         ),
                                         if (_epgDays.length > 1)
-                                          SizedBox(
-                                            height: land ? 24 : 28,
-                                            child: ListView.separated(
-                                              scrollDirection: Axis.horizontal,
-                                              itemCount: _epgDays.length,
-                                              separatorBuilder: (_, __) => SizedBox(width: land ? 3 : 4),
-                                              itemBuilder: (_, i) {
-                                                final d = '${_epgDays[i]['date'] ?? 'D$i'}';
-                                                final label = d.length >= 10 ? d.substring(5, 10) : d;
-                                                return AppPill(
-                                                  label: label,
-                                                  width: land ? 56 : 64,
-                                                  height: land ? 22 : 26,
-                                                  fontSize: land ? 10 : 11,
-                                                  selected: i == _dayIdx,
-                                                  onTap: () {
-                                                    _cancelHideOverlays();
-                                                    final progs = (((_epgDays[i]['list'] as List?) ?? [])
-                                                        .whereType<Map>()
-                                                        .map((e) => Map<String, dynamic>.from(e))
-                                                        .toList());
-                                                    setState(() {
-                                                      _dayIdx = i;
-                                                      _programs = progs;
-                                                    });
-                                                  },
-                                                );
-                                              },
-                                            ),
+                                          _epgDayTabs(
+                                            land: land,
+                                            resetHideOnSelect: true,
                                           ),
                                         SizedBox(height: land ? 4 : 6),
                                         Expanded(
@@ -3222,35 +3247,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_epgDays.length > 1)
-          SizedBox(
+          _epgDayTabs(
+            land: false,
             height: 40,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
-              itemCount: _epgDays.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 6),
-              itemBuilder: (_, i) {
-                final d = '${_epgDays[i]['date'] ?? 'D$i'}';
-                final label = d.length >= 10 ? d.substring(5, 10) : d;
-                return AppPill(
-                  label: label,
-                  width: 72,
-                  height: 30,
-                  fontSize: 12,
-                  selected: i == _dayIdx,
-                  onTap: () {
-                    final progs = (((_epgDays[i]['list'] as List?) ?? [])
-                        .whereType<Map>()
-                        .map((e) => Map<String, dynamic>.from(e))
-                        .toList());
-                    setState(() {
-                      _dayIdx = i;
-                      _programs = progs;
-                    });
-                  },
-                );
-              },
-            ),
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
           ),
         Expanded(
           child: _programs.isEmpty

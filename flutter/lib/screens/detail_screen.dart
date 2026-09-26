@@ -880,23 +880,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// playbackEnded / onTimeChanged→nextEpisode：每集只前进一次。
-  Future<void> _advanceToNextEpisode() async {
+  /// playbackEnded / onTimeChanged→nextEpisode / 控件下一集：每集只前进一次。
+  /// [fromEnd] 为真时要求已 READY 且本世代未消耗；控件/手势下一集传 false。
+  Future<void> _advanceToNextEpisode({bool fromEnd = true}) async {
     if (!mounted || _advanceBusy) return;
-    if (!_playbackLive) return;
-    if (_endConsumedGen == _playGen) return;
+    if (fromEnd) {
+      if (!_playbackLive) return;
+      if (_endConsumedGen == _playGen) return;
+    }
     final eps = _eps;
     final next = _epIdx + 1;
     if (next < 0 || next >= eps.length) {
       if (mounted) setState(() => _status = '播放结束');
-      _endConsumedGen = _playGen;
-      _playbackLive = false;
+      if (fromEnd) {
+        _endConsumedGen = _playGen;
+        _playbackLive = false;
+      }
       return;
     }
     _endConsumedGen = _playGen;
     _playbackLive = false;
     _advanceBusy = true;
-    if (mounted) setState(() => _status = '自动播放下一集…');
+    if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');
     try {
       if (_immersiveFullscreen) {
         await _fsPageKey.currentState?.animateAutoNext();
@@ -963,12 +968,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await _writeWatchProgress(pos, dur, force: force);
   }
 
-  Future<void> _writeWatchProgress(int positionMs, int durationMs, {required bool force}) async {
+  Future<void> _writeWatchProgress(int positionMs, int durationMs, {required bool force, String? episodeName}) async {
     final d = _detail;
     if (d == null) return;
     if (!force && positionMs < 5000) return;
     if (force && positionMs <= 0) return;
-    final epName = _currentEpisodeName() ?? '';
+    final epName = (episodeName ?? _currentEpisodeName() ?? '').trim();
     if (epName.isEmpty) return;
     final flag = d.flags.isEmpty
         ? ''
@@ -1045,50 +1050,48 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _stopBtProgressPoll();
     _danmakuItems.dispose();
     _fsSwipeDy.dispose();
-    // 正常路径已在 [_stopHard] 里 await release；引擎引用已清空。
-    // 异常路径（未走 _leavePage）仍兜底停+释放，避免漏音。
+    // 正常路径已在 [_stopHard] 里 await release+dispose，引擎引用已清空。
+    // 异常路径（未走 _leavePage）只走异步 release→dispose，避免与同步 dispose 竞态。
     if (!_stoppedHard) {
+      final fvp = _fvp;
+      final mk = _mk;
+      final exo = _exo;
+      final html = _html;
+      final art = _art;
+      final xg = _xg;
+      final zw = _zw;
+      final mkPlayer = _mkPlayer;
+      _fvp = null;
+      _mk = null;
+      _exo = null;
+      _html = null;
+      _art = null;
+      _xg = null;
+      _zw = null;
+      _mkPlayer = null;
       unawaited(() async {
-        try {
-          await _fvp?.release();
-        } catch (_) {}
-        try {
-          await _mk?.release();
-        } catch (_) {}
-        try {
-          await _exo?.release();
-        } catch (_) {}
-        try {
-          await _html?.release();
-        } catch (_) {}
-        try {
-          await _art?.release();
-        } catch (_) {}
-        try {
-          await _xg?.release();
-        } catch (_) {}
-        try {
-          await _zw?.release();
-        } catch (_) {}
+        Future<void> hardRelease(KotvPlayback? p) async {
+          if (p == null) return;
+          try {
+            await p.release();
+          } catch (_) {}
+          try {
+            p.dispose();
+          } catch (_) {}
+        }
+
+        await Future.wait<void>([
+          hardRelease(fvp),
+          hardRelease(mk),
+          hardRelease(exo),
+          hardRelease(html),
+          hardRelease(art),
+          hardRelease(xg),
+          hardRelease(zw),
+        ]);
+        await kotvDisposeMpvPlayer(mkPlayer);
       }());
     }
-    _fvp?.dispose();
-    _mk?.dispose();
-    _exo?.dispose();
-    _html?.dispose();
-    _art?.dispose();
-    _xg?.dispose();
-    _zw?.dispose();
-    final mkPlayer = _mkPlayer;
-    _mkPlayer = null;
-    _mk = null;
-    _fvp = null;
-    _exo = null;
-    _html = null;
-    _art = null;
-    _xg = null;
-    _zw = null;
-    unawaited(kotvDisposeMpvPlayer(mkPlayer));
     super.dispose();
   }
 
@@ -1773,12 +1776,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final eps = _eps;
     if (epIdx < 0 || epIdx >= eps.length) return;
     final ep = eps[epIdx];
-    // 换集前先落盘当前集进度，再 push 新集（positionMs: 0）。
-    if (_epIdx >= 0 && _epIdx != epIdx) {
-      try {
-        await _flushWatchProgress(force: true);
-      } catch (_) {}
-    }
+    final prevEpIdx = _epIdx;
+    final prevEpName = (prevEpIdx >= 0 && prevEpIdx != epIdx) ? (_currentEpisodeName() ?? '') : '';
+    final flushPos = prevEpName.isNotEmpty ? _playback.position.inMilliseconds : 0;
+    final flushDur = prevEpName.isNotEmpty ? _playback.duration.inMilliseconds : 0;
     _stoppedHard = false;
     // 换集：抬世代，关掉 READY/连播（BUFFERING 时 Clock=null）
     final gen = ++_playGen;
@@ -1798,7 +1799,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         ep.url.toLowerCase().contains('.torrent') ||
         ep.url.contains('/proxy/bt/') ||
         ep.url.toLowerCase().startsWith('magnet://local');
-    // 立刻高亮：不要等停播/解析，否则 PC 要点 1–2 秒按钮才变色。
+    // 立刻高亮：先于 flush/停播，避免点选集要等落盘才变色。
     if (mounted) {
       setState(() {
         _epIdx = epIdx;
@@ -1812,6 +1813,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       });
     }
     _syncFullscreen();
+    // 换集前落盘上一集进度（高亮已切到新集，须用记下的集名）。
+    if (prevEpName.isNotEmpty) {
+      try {
+        await _writeWatchProgress(flushPos, flushDur, force: true, episodeName: prevEpName);
+      } catch (_) {}
+    }
     // 解析/拉流可能要数秒：先停播，避免上一集在后台继续出声。
     await _stopAllBackends();
     if (serial != _playAtSerial || !mounted) return;
@@ -2053,10 +2060,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         throw lastOpenError ?? const KotvSilentVideoException();
       }
       if (serial != _playAtSerial || !mounted) return;
-      // 续播与片头合并；READY 后由 [_onPositionTick] 执行，避免 open 后立刻 seek 丢效。
+      // 续播与片头合并；关「跳过片头片尾」时 pending 只用续播点。
       final resumeMs = _resumeSeekMs;
       _resumeSeekMs = 0;
-      _pendingStartSeekMs = math.max(_openingSec * 1000, resumeMs);
+      _pendingStartSeekMs = _skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs;
       // 音量/倍速已在 open 前套好；稳定音量用轻量 dynaudnorm，起播后立刻挂，勿再拖 800ms。
       if (_stableVolumeOn) {
         try {
@@ -2648,7 +2655,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           });
         },
         onSelectEp: (i) => _playAt(i),
-        onNext: () => _playAt(_epIdx + 1),
+        onNext: () => unawaited(_advanceToNextEpisode(fromEnd: false)),
         onPrev: () => _playAt(_epIdx - 1),
         onDecodeChanged: (mode) {
           if (mounted) {

@@ -175,7 +175,7 @@ class DetailFullscreenPage extends StatefulWidget {
 
 class DetailFullscreenPageState extends State<DetailFullscreenPage>
     with SingleTickerProviderStateMixin {
-  bool _showChrome = true;
+  bool _showChrome = false;
   MouseCursor _mouseCursor = SystemMouseCursors.basic;
   bool _pointerIn = false;
   late AspectSpec _aspect = widget.aspect;
@@ -248,9 +248,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _refreshForceLandscapeBtn();
-      if (widget.playback.playing) {
-        _schedulePlayingHide();
-      } else {
+      // 进全屏默认不亮控件；暂停时仍亮，方便继续播。
+      if (!widget.playback.playing) {
         _setChrome(show: true, hideCursor: false);
       }
     });

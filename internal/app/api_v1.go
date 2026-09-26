@@ -1510,12 +1510,13 @@ func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
 			ch := &loaded.Groups[gi].Channels[ci]
 			ch.ApplyLive(loaded)
 			chs = append(chs, map[string]any{
-				"index": ci,
-				"name":  ch.Name,
-				"logo":  ch.ResolvedLogo(),
-				"tvgId": ch.TvgID,
-				"urls":  len(ch.URLs),
-				"line":  ch.URLIndex,
+				"index":  ci,
+				"name":   ch.Name,
+				"number": ch.Number,
+				"logo":   ch.ResolvedLogo(),
+				"tvgId":  ch.TvgID,
+				"urls":   len(ch.URLs),
+				"line":   ch.URLIndex,
 			})
 		}
 		groups = append(groups, map[string]any{
