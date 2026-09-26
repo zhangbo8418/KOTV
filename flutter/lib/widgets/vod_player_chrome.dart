@@ -485,7 +485,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   int _openingSec = 0;
   int _endingSec = 0;
   bool _loopSkip = true; // 有片头/片尾值即生效；开关仅用于临时关闭
-  bool _endingSkipFired = false;
   bool _openingSeekDone = false;
   bool _repeatOne = false;
   bool _epOpen = false;
@@ -643,20 +642,17 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       _endingSec = widget.endingSec;
     }
     if (oldWidget.epIdx != widget.epIdx) {
-      _endingSkipFired = false;
       _openingSeekDone = false;
       if (_epOpen) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollEpIntoView());
       }
     }
     if (oldWidget.playUrl != widget.playUrl) {
-      _endingSkipFired = false;
       _openingSeekDone = false;
     }
     if (!identical(oldWidget.player, widget.player)) {
       _skipSub?.cancel();
       _skipSub = widget.player.positionStream.listen(_onPositionTick);
-      _endingSkipFired = false;
       _openingSeekDone = false;
       final rate = widget.player.rate;
       final i = _speeds.indexWhere((s) => (s - rate).abs() < 0.01);
@@ -743,16 +739,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   }
 
   void _onPositionTick(Duration pos) {
-    if (!_loopSkip) {
-      _endingSkipFired = false;
-      return;
-    }
+    if (!_loopSkip) return;
     final dur = widget.player.duration;
     if (dur.inMilliseconds <= 0) return;
     final openMs = _openingSec * 1000;
-    final endMs = _endingSec * 1000;
 
-    // 片头：startPositionMs = max(opening, position) —— 起播靠近片头时跳到 opening
+    // 片头跳过；片尾连播只走详情页 [_advanceToNextEpisode]，避免与 chrome 双通道连跳。
     if (openMs > 0 && !_openingSeekDone) {
       if (pos.inMilliseconds + 800 < openMs) {
         _openingSeekDone = true;
@@ -762,17 +754,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       if (pos.inMilliseconds >= openMs) {
         _openingSeekDone = true;
       }
-    }
-
-    // 片尾：`ending + position >= duration` → 下一集（无需额外开关）
-    if (endMs > 0 && pos.inMilliseconds + endMs >= dur.inMilliseconds) {
-      if (!_endingSkipFired && widget.onNext != null && !widget.player.repeatOne) {
-        _endingSkipFired = true;
-        _openingSeekDone = false;
-        widget.onNext!();
-      }
-    } else {
-      _endingSkipFired = false;
     }
   }
 
@@ -1885,7 +1866,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           onChanged: (v) {
                             sync(() {
                               _loopSkip = v;
-                              _endingSkipFired = false;
                               _openingSeekDone = false;
                             });
                             unawaited(_persist('playerSkipOpeningEnding', v ? 'true' : 'false'));
