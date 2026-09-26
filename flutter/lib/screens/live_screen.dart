@@ -45,6 +45,13 @@ import 'shell.dart';
 
 const _liveKeepSep = '\$\$\$';
 const _liveKeepPrefKey = 'kotv_live_keep';
+const _liveFavPrefKey = 'kotv_live_fav_names';
+const _liveFavGroupName = '收藏';
+/// 频道栏 / 信息条 / 控件自动隐藏（5s）。
+const _liveOverlayHide = Duration(seconds: 5);
+const _liveIdleStatus = '菜单键打开频道列表 · 点击右侧换源/设置';
+/// 回看快进快退步长（10s）。
+const _liveCatchupSeekStep = Duration(seconds: 10);
 
 class LiveScreen extends ConsumerStatefulWidget {
   const LiveScreen({super.key});
@@ -325,7 +332,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   int _portraitTab = 0;
   /// 竖屏播放器底栏显隐（点画面切换；数秒后自动隐藏）
   bool _portraitChrome = true;
-  String _status = '菜单键打开频道列表 · 点击右侧换源/设置';
+  String _status = _liveIdleStatus;
   String _title = '选择频道开始播放';
   String _decodeMode = 'auto';
   String _prefDecodeMode = 'auto';
@@ -347,6 +354,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   Map<String, String>? _playHeaders;
   Map<String, dynamic>? _playDrm;
   Timer? _catchupHideTimer;
+  /// 长按收藏的频道名（跨源持久化；灌入「收藏」组）。
+  final Set<String> _favNames = {};
   Timer? _portraitHideTimer;
   Timer? _cursorHideTimer;
   MouseCursor _mouseCursor = SystemMouseCursors.basic;
@@ -672,6 +681,79 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return 0;
   }
 
+  Future<void> _loadFavNames() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = (prefs.getString(_liveFavPrefKey) ?? '').trim();
+      _favNames
+        ..clear()
+        ..addAll(raw.split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty));
+    } catch (_) {}
+  }
+
+  Future<void> _persistFavNames() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_liveFavPrefKey, _favNames.join('\n'));
+    } catch (_) {}
+  }
+
+  /// 源内无「收藏」组时，按持久化频道名注入第 0 组。
+  void _applyFavoriteGroup() {
+    _groups.removeWhere((g) => g['_kotvFav'] == true);
+    final hasSourceFav = _groups.any((g) => '${g['name'] ?? ''}' == _liveFavGroupName);
+    if (hasSourceFav || _favNames.isEmpty) return;
+    final seen = <String>{};
+    final favChs = <Map<String, dynamic>>[];
+    for (final g in _groups) {
+      final chs = ((g['channels'] as List?) ?? []).whereType<Map>();
+      for (final c in chs) {
+        final name = '${c['name'] ?? ''}'.trim();
+        if (name.isEmpty || !_favNames.contains(name) || !seen.add(name)) continue;
+        favChs.add(Map<String, dynamic>.from(c));
+      }
+    }
+    if (favChs.isEmpty) return;
+    _groups.insert(0, {
+      'name': _liveFavGroupName,
+      'channels': favChs,
+      '_kotvFav': true,
+    });
+  }
+
+  Future<void> _toggleChannelFav(int chIdx) async {
+    final chs = _channels;
+    if (chIdx < 0 || chIdx >= chs.length) return;
+    final name = '${chs[chIdx]['name'] ?? ''}'.trim();
+    if (name.isEmpty) return;
+    final adding = !_favNames.contains(name);
+    final groupNameBefore = _groupIdx < _groups.length ? '${_groups[_groupIdx]['name'] ?? ''}' : '';
+    final playingName = _chIdx >= 0 && _chIdx < chs.length ? '${chs[_chIdx]['name'] ?? ''}' : '';
+    if (adding) {
+      _favNames.add(name);
+    } else {
+      _favNames.remove(name);
+    }
+    await _persistFavNames();
+    _applyFavoriteGroup();
+    var gi = _groups.indexWhere((g) => '${g['name'] ?? ''}' == groupNameBefore);
+    if (gi < 0) gi = 0;
+    setState(() {
+      _groupIdx = gi.clamp(0, _groups.isEmpty ? 0 : _groups.length - 1);
+      final list = _channels;
+      if (playingName.isNotEmpty) {
+        final idx = list.indexWhere((c) => '${c['name'] ?? ''}' == playingName);
+        _chIdx = idx >= 0 ? idx : (list.isEmpty ? -1 : list.length - 1);
+      } else if (_chIdx >= list.length) {
+        _chIdx = list.isEmpty ? -1 : list.length - 1;
+      }
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(adding ? '已加入收藏' : '已移出收藏'), duration: const Duration(seconds: 2)),
+    );
+  }
+
   Future<void> _loadSource(int index, {bool autoPlay = false}) async {
     if (!mounted) return;
     setState(() {
@@ -689,12 +771,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final data = await ref.read(apiProvider).liveLoad(index: index);
       if (!mounted) return;
       _groups = ((data['groups'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      await _loadFavNames();
+      _applyFavoriteGroup();
       _groupIdx = 0;
       _chIdx = -1;
       setState(() {
         _loading = false;
         _title = '${data['name'] ?? '直播'}';
-        _status = '点击左侧换台 · 点击右侧换源/设置';
+        _status = _liveIdleStatus;
       });
       if (autoPlay) {
         final restored = await _tryRestoreKeep();
@@ -747,7 +831,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _playFirstChannel() async {
     var start = 0;
-    if (_groups.length > 1 && '${_groups[0]['name'] ?? ''}' == '收藏') start = 1;
+    if (_groups.length > 1 && '${_groups[0]['name'] ?? ''}' == _liveFavGroupName) start = 1;
     for (var n = 0; n < _groups.length; n++) {
       final gi = (start + n) % _groups.length;
       if (_groupLocked(gi)) continue;
@@ -1154,7 +1238,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, drm: drm, format: format.isEmpty ? null : format);
       if (!mounted || serial != _playSerial) return;
       setState(() => _status = '播放中 · $_title');
-      _scheduleHideOverlays();
+      // 换台亮底栏频道信息，约 5s 收起。
+      _flashChannelInfo();
       // 移动端播放器控件：显示后自动隐藏
       if (KotvLayout.useBottomNav(context) || KotvLayout.isCompact(context)) {
         _pulsePortraitChrome();
@@ -1242,7 +1327,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void _pulseCatchupChrome() {
     _catchupHideTimer?.cancel();
     setState(() => _catchupChrome = true);
-    _catchupHideTimer = Timer(const Duration(seconds: 5), () {
+    _catchupHideTimer = Timer(_liveOverlayHide, () {
       if (mounted && _catchup && !_miniDesktop) {
         setState(() => _catchupChrome = false);
       }
@@ -1279,7 +1364,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _portraitHideTimer?.cancel();
     if (!mounted) return;
     setState(() => _portraitChrome = true);
-    _portraitHideTimer = Timer(const Duration(seconds: 5), () {
+    _portraitHideTimer = Timer(_liveOverlayHide, () {
       if (mounted && !_miniDesktop) {
         setState(() => _portraitChrome = false);
       }
@@ -1559,8 +1644,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   void _scheduleHideOverlays() {
     _hideTimer?.cancel();
-    final land = mounted && KotvLayout.isLandscapeCompact(context);
-    _hideTimer = Timer(Duration(seconds: land ? 12 : 8), () {
+    _hideTimer = Timer(_liveOverlayHide, () {
       if (mounted) {
         setState(() {
           _leftOpen = false;
@@ -1572,14 +1656,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     });
   }
 
+  void _flashChannelInfo() {
+    if (!_leftOpen && !_rightOpen) {
+      setState(() {
+        _chromeVisible = true;
+        if (_catchup) _catchupChrome = true;
+      });
+    }
+    _scheduleHideOverlays();
+  }
+
   void _openLeft() {
     setState(() {
       _leftOpen = true;
       _rightOpen = false;
       _epgOpen = false;
       _chromeVisible = false;
-      _cancelHideOverlays();
     });
+    _scheduleHideOverlays();
     if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _leftOpen) _leftFocus.requestFocus();
@@ -1591,8 +1685,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _rightOpen = true;
       _leftOpen = false;
       _chromeVisible = false;
-      _cancelHideOverlays();
     });
+    _scheduleHideOverlays();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _rightOpen) _rightFocus.requestFocus();
     });
@@ -1979,11 +2073,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return KeyEventResult.handled;
       }
       if (_catchup && kotvIsMediaRewind(key)) {
-        _seekByRemote(const Duration(seconds: -15));
+        _seekByRemote(-_liveCatchupSeekStep);
         return KeyEventResult.handled;
       }
       if (_catchup && kotvIsMediaFastForward(key)) {
-        _seekByRemote(const Duration(seconds: 15));
+        _seekByRemote(_liveCatchupSeekStep);
         return KeyEventResult.handled;
       }
       if (kotvIsEnterKey(key) ||
@@ -2018,11 +2112,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return KeyEventResult.handled;
       }
       if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
-        _seekByRemote(const Duration(seconds: -15));
+        _seekByRemote(-_liveCatchupSeekStep);
         return KeyEventResult.handled;
       }
       if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
-        _seekByRemote(const Duration(seconds: 15));
+        _seekByRemote(_liveCatchupSeekStep);
         return KeyEventResult.handled;
       }
       if (kotvIsSettingsKey(key)) {
@@ -2062,6 +2156,42 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  Widget _buildLiveCatchupChrome({
+    VoidCallback? onBump,
+    bool miniActive = false,
+    bool translucent = false,
+    bool autofocusPlay = false,
+    bool offerFullscreen = true,
+    VoidCallback? onMini,
+    ValueChanged<KotvDesktopFullscreenKind>? onExpand,
+  }) {
+    return LiveCatchupChrome(
+      player: _playback,
+      miniActive: miniActive,
+      translucent: translucent,
+      autofocusPlay: autofocusPlay,
+      playFocusNode: autofocusPlay ? _playFocus : null,
+      onBump: onBump,
+      playerLabel: flutterPlayerLabel(_playerVal),
+      decodeLabel: _decodeLabel,
+      offerFullscreenChoice: offerFullscreen ? null : false,
+      fullscreenActive: _immersive,
+      onCast: () => unawaited(_cast()),
+      onMini: onMini,
+      onExpand: onExpand,
+      onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
+      onDecode: () => unawaited(_pickDecode()),
+      onScale: () => unawaited(_cycleLiveScale()),
+      scaleLabel: _liveScaleLabel(_liveScale),
+      onAcross: _onLiveAcross,
+      acrossOn: _liveAcross,
+      onInvert: _onLiveInvert,
+      invertOn: _liveInvert,
+      onFailSwitch: _onLiveFailSwitch,
+      failSwitchOn: _liveAutoChange,
+    );
   }
 
   @override
@@ -2108,24 +2238,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           child: MiniHoverShell(
             player: _playback,
             video: _buildSharedLiveVideo(),
-            chrome: LiveCatchupChrome(
-              player: _playback,
+            chrome: _buildLiveCatchupChrome(
               miniActive: true,
               translucent: true,
-              playerLabel: flutterPlayerLabel(_playerVal),
-              decodeLabel: _decodeLabel,
-              onCast: () => unawaited(_cast()),
               onMini: () => unawaited(_exitMini()),
-              onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
-              onDecode: () => unawaited(_pickDecode()),
-              onScale: () => unawaited(_cycleLiveScale()),
-              scaleLabel: _liveScaleLabel(_liveScale),
-              onAcross: _onLiveAcross,
-              acrossOn: _liveAcross,
-              onInvert: _onLiveInvert,
-              invertOn: _liveInvert,
-              onFailSwitch: _onLiveFailSwitch,
-              failSwitchOn: _liveAutoChange,
             ),
           ),
         ),
@@ -2351,6 +2467,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                               _cancelHideOverlays();
                                               unawaited(_playChannel(i));
                                             },
+                                            onLongPress: () => unawaited(_toggleChannelFav(i)),
                                             child: Material(
                                               color: sel ? const Color(0x2EFFFFFF) : Colors.transparent,
                                               borderRadius: BorderRadius.circular(8),
@@ -2759,28 +2876,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                           }
                           _scheduleHideMouse();
                         },
-                        child: LiveCatchupChrome(
-                          player: _playback,
+                        child: _buildLiveCatchupChrome(
                           autofocusPlay: true,
-                          playFocusNode: _playFocus,
+                          offerFullscreen: false,
                           onBump: _bumpLiveChrome,
-                          playerLabel: flutterPlayerLabel(_playerVal),
-                          decodeLabel: _decodeLabel,
-                          offerFullscreenChoice: false,
-                          fullscreenActive: _immersive,
-                          onCast: () => unawaited(_cast()),
                           onMini: () => unawaited(_enterMini()),
                           onExpand: (_) => unawaited(_toggleLiveFullscreen()),
-                          onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
-                          onDecode: () => unawaited(_pickDecode()),
-                          onScale: () => unawaited(_cycleLiveScale()),
-                          scaleLabel: _liveScaleLabel(_liveScale),
-                          onAcross: _onLiveAcross,
-                          acrossOn: _liveAcross,
-                          onInvert: _onLiveInvert,
-                          invertOn: _liveInvert,
-                          onFailSwitch: _onLiveFailSwitch,
-                          failSwitchOn: _liveAutoChange,
                         ),
                       ),
                     ),
@@ -2863,40 +2964,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    child: LiveCatchupChrome(
-                      player: _playback,
+                    child: _buildLiveCatchupChrome(
                       autofocusPlay: true,
-                      playFocusNode: _playFocus,
+                      offerFullscreen: false,
                       onBump: _pulsePortraitChrome,
-                      playerLabel: flutterPlayerLabel(_playerVal),
-                      decodeLabel: _decodeLabel,
-                      offerFullscreenChoice: false,
-                      fullscreenActive: _immersive,
-                      onCast: () {
-                        unawaited(_cast());
-                      },
-                      onMini: () {
-                        unawaited(_enterMini());
-                      },
-                      onExpand: (_) {
-                        unawaited(_toggleLiveFullscreen());
-                      },
-                      onPlayer: kotvCanSwitchPlayer(live: true)
-                          ? () {
-                              unawaited(_pickPlayer());
-                            }
-                          : null,
-                      onDecode: () {
-                        unawaited(_pickDecode());
-                      },
-                      onScale: () => unawaited(_cycleLiveScale()),
-                      scaleLabel: _liveScaleLabel(_liveScale),
-                      onAcross: _onLiveAcross,
-                      acrossOn: _liveAcross,
-                      onInvert: _onLiveInvert,
-                      invertOn: _liveInvert,
-                      onFailSwitch: _onLiveFailSwitch,
-                      failSwitchOn: _liveAutoChange,
+                      onMini: () => unawaited(_enterMini()),
+                      onExpand: (_) => unawaited(_toggleLiveFullscreen()),
                     ),
                   ),
               ],
@@ -3104,6 +3177,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   child: InkWell(
                     borderRadius: BorderRadius.circular(6),
                     onTap: () => _playChannel(i),
+                    onLongPress: () => unawaited(_toggleChannelFav(i)),
                     child: SizedBox(
                       height: 36,
                       child: Padding(
