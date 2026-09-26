@@ -99,6 +99,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _extraOpenProps = Map<String, String>.from(props);
   }
 
+  @override
   String? get lastError => _lastError;
 
   @override

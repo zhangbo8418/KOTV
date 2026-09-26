@@ -361,6 +361,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   MouseCursor _mouseCursor = SystemMouseCursors.basic;
   bool _pointerAtBottom = false;
   RemoteBridge? _boundRemote;
+  KotvPlayback? _errorWiredPb;
+  VoidCallback? _playbackErrorListener;
+  bool _failSwitchBusy = false;
 
   @override
   void initState() {
@@ -426,6 +429,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _catchupHideTimer?.cancel();
     _portraitHideTimer?.cancel();
     _cursorHideTimer?.cancel();
+    _unwireLivePlaybackErrors();
     _focus.dispose();
     _playFocus.dispose();
     _rightFocus.dispose();
@@ -1031,6 +1035,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             await pb.play();
           } catch (_) {}
         }
+        _wireLivePlaybackErrors(pb);
         return;
       } on KotvSilentVideoException catch (e) {
         lastError = e;
@@ -1054,6 +1059,48 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
     if (lastError != null) throw lastError;
     throw const KotvSilentVideoException();
+  }
+
+  void _unwireLivePlaybackErrors() {
+    final pb = _errorWiredPb;
+    final cb = _playbackErrorListener;
+    if (pb != null && cb != null) {
+      try {
+        pb.removeListener(cb);
+      } catch (_) {}
+    }
+    _errorWiredPb = null;
+    _playbackErrorListener = null;
+  }
+
+  void _wireLivePlaybackErrors(KotvPlayback pb) {
+    _unwireLivePlaybackErrors();
+    _playbackErrorListener = () {
+      if (!mounted || _playUrl.isEmpty) return;
+      final err = pb.lastError;
+      if (err == null || err.trim().isEmpty) return;
+      unawaited(_tryFailSwitchOnPlaybackError());
+    };
+    _errorWiredPb = pb;
+    pb.addListener(_playbackErrorListener!);
+  }
+
+  /// 播放中出错：失败换线开且非末线时切下一线（与开播 catch 同策略）。
+  Future<void> _tryFailSwitchOnPlaybackError() async {
+    if (!_liveAutoChange || _failSwitchBusy) return;
+    if (_chIdx < 0 || _lines <= 1 || _line >= _lines - 1) return;
+    _failSwitchBusy = true;
+    final serial = _playSerial;
+    final chIdx = _chIdx;
+    final next = _line + 1;
+    try {
+      if (mounted) {
+        setState(() => _status = '线路失败，自动换线 ${next + 1}/$_lines…');
+      }
+      await _playChannel(chIdx, line: next);
+    } finally {
+      if (serial == _playSerial || mounted) _failSwitchBusy = false;
+    }
   }
 
   /// 全屏/竖屏/横屏共用画面。Android PlatformView 才用 GlobalKey reparent。
@@ -1722,7 +1769,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   Future<void> _findChannelByNumber(String raw) async {
     final n = int.tryParse(raw);
     if (n == null || n <= 0) return;
-    // 优先按频道 number 扫全部分组（含跨组）。
+    // 按全局 channel.number 扫全部分组（无组内序号兜底）。
     for (var gi = 0; gi < _groups.length; gi++) {
       if (_groupLocked(gi)) continue;
       final chs = ((_groups[gi]['channels'] as List?) ?? []).whereType<Map>().toList();
@@ -1737,11 +1784,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return;
       }
     }
-    // 无 number：回落当前分组 1-based 序号。
-    final chs = _channels;
-    if (n >= 1 && n <= chs.length) {
-      await _playChannel(n - 1, showList: false);
-    }
+  }
+
+  /// 列表/信息条频道号：优先源内全局 number（多为 %03d），空则用组内位次补三位。
+  String _channelNumberLabel(Map ch, int indexInGroup) {
+    final n = '${ch['number'] ?? ''}'.trim();
+    if (n.isNotEmpty) return n;
+    return '${indexInGroup + 1}'.padLeft(3, '0');
   }
 
   void _showLiveChromeAndFocusPlay() {
@@ -1761,9 +1810,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void _bumpLiveChrome() {
     if (_catchup) {
       _pulseCatchupChrome();
-    } else if (_chromeVisible) {
+    } else if (_leftOpen || _rightOpen || _chromeVisible) {
       _scheduleHideOverlays();
     }
+  }
+
+  void _selectChannelFromList(int i) {
+    _cancelHideOverlays();
+    // 再点当前频道：展开 EPG，不重播。
+    if (i == _chIdx && !_catchup) {
+      setState(() {
+        _leftOpen = true;
+        _epgOpen = true;
+        _rightOpen = false;
+        _chromeVisible = false;
+      });
+      _scheduleHideOverlays();
+      if (_programs.isEmpty) unawaited(_loadEpg());
+      return;
+    }
+    unawaited(_playChannel(i));
   }
 
   /// 点中间：关菜单，或像抖音一样点画面播/停（左右仍是频道/设置）。
@@ -2062,7 +2128,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return '';
   }
 
-  String get _channelNum => _chIdx < 0 ? '--' : '${_chIdx + 1}'.padLeft(2, '0');
+  String get _channelNum {
+    if (_chIdx < 0) return '--';
+    final chs = _channels;
+    if (_chIdx >= chs.length) return '--';
+    return _channelNumberLabel(chs[_chIdx], _chIdx);
+  }
 
   String get _lineLabel {
     if (_chIdx < 0 || _lines <= 1) return '';
@@ -2152,7 +2223,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
 
     // —— 控件全隐：一键一义 ——
-    // 菜单 → 底栏；OK/左 → 频道；右/设置 → 设置栏；上下换台；时移时左右 seek。
+    // 菜单 → 底栏；OK → 频道栏；设置 → 设置栏；上下换台；左右换线（回看则 seek）。
+    // 鼠标右键仍走返回，不在此处理。
     if (kotvIsMenuKey(key)) {
       _showLiveChromeAndFocusPlay();
       return KeyEventResult.handled;
@@ -2176,11 +2248,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       }
       // 时移中上下仍可换台
     }
-    if (kotvIsSettingsKey(key) || kotvIsRightKey(key)) {
+    if (kotvIsSettingsKey(key)) {
       _openRight();
       return KeyEventResult.handled;
     }
-    if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key) || kotvIsLeftKey(key)) {
+    if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
       _openLeft();
       return KeyEventResult.handled;
     }
@@ -2194,13 +2266,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
       return KeyEventResult.handled;
     }
-    if (kotvIsMediaRewind(key)) {
+    if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
       if (_chIdx >= 0 && _lines > 1) {
         unawaited(_playChannel(_chIdx, line: (_line - 1 + _lines) % _lines));
       }
       return KeyEventResult.handled;
     }
-    if (kotvIsMediaFastForward(key)) {
+    if (kotvIsRightKey(key) || kotvIsMediaFastForward(key)) {
       if (_chIdx >= 0 && _lines > 1) {
         unawaited(_playChannel(_chIdx, line: (_line + 1) % _lines));
       }
@@ -2514,10 +2586,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                             autofocus: focusHere,
                                             focusNode: focusHere ? _leftFocus : null,
                                             borderRadius: 8,
-                                            onPressed: () {
-                                              _cancelHideOverlays();
-                                              unawaited(_playChannel(i));
-                                            },
+                                            onPressed: () => _selectChannelFromList(i),
                                             onLongPress: () => unawaited(_toggleChannelFav(i)),
                                             child: Material(
                                               color: sel ? const Color(0x2EFFFFFF) : Colors.transparent,
@@ -2529,9 +2598,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                   child: Row(
                                                     children: [
                                                       SizedBox(
-                                                        width: land ? 22 : 28,
+                                                        width: land ? 30 : 36,
                                                         child: Text(
-                                                          '${i + 1}'.padLeft(2, '0'),
+                                                          _channelNumberLabel(ch, i),
                                                           style: TextStyle(
                                                             color: Colors.white.withOpacity(0.8),
                                                             fontSize: land ? 12 : 16,
@@ -3201,7 +3270,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   borderRadius: BorderRadius.circular(6),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(6),
-                    onTap: () => _playChannel(i),
+                    onTap: () => _selectChannelFromList(i),
                     onLongPress: () => unawaited(_toggleChannelFav(i)),
                     child: SizedBox(
                       height: 36,
@@ -3210,8 +3279,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         child: Row(
                           children: [
                             SizedBox(
-                              width: 22,
-                              child: Text('${i + 1}'.padLeft(2, '0'), style: TextStyle(color: p.muted, fontSize: 11)),
+                              width: 28,
+                              child: Text(_channelNumberLabel(ch, i), style: TextStyle(color: p.muted, fontSize: 11)),
                             ),
                             const SizedBox(width: 4),
                             _LiveChannelLogo(name: name, logo: logo, width: 28, height: 22),

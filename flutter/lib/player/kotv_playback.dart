@@ -43,6 +43,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 本集自然播完（非手动 stop）时发出 true。
   Stream<bool> get completedStream;
 
+  /// 最近一次播放错误文案；无错误为 null。播放中失败换线等可订阅 [addListener] 后读此字段。
+  String? get lastError => null;
+
   /// [live]=true：直播页语境，跳过点播 KotvBufferBudget 预读。
   Future<void> open(
     String url, {

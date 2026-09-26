@@ -65,6 +65,7 @@ class FvpPlayback extends KotvPlayback {
 
   VideoPlayerController? get controller => _c;
 
+  @override
   String? get lastError => _lastError;
 
   @override

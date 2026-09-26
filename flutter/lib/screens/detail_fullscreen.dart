@@ -682,10 +682,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final isDown = event is KeyDownEvent;
+    final isRepeat = event is KeyRepeatEvent;
+    if (!isDown && !isRepeat) return KeyEventResult.ignored;
     final key = event.logicalKey;
 
-    if (kotvIsBackKey(key)) {
+    if (isDown && kotvIsBackKey(key)) {
       if (kotvPopTopPopup(rootNavigatorKey.currentState)) {
         return KeyEventResult.handled;
       }
@@ -709,7 +711,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
     // 有底栏/选集：方向键交给 TvFocus；快退/快进才 seek（勿抢横移）。
     if (_showChrome || _epOpen) {
-      if (kotvIsMenuKey(key)) {
+      if (isDown && kotvIsMenuKey(key)) {
         if (_epOpen) {
           _chromeKey.currentState?.closeEpisodes();
           setState(() {});
@@ -717,7 +719,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         _setChrome(show: false, hideCursor: true);
         return KeyEventResult.handled;
       }
-      if (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE) {
+      if (isDown && (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE)) {
         if (widget.episodes.isEmpty) return KeyEventResult.handled;
         _bumpChrome();
         _chromeKey.currentState?.openEpisodes();
@@ -734,12 +736,13 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         _bumpChrome();
         return KeyEventResult.handled;
       }
-      if (kotvIsEnterKey(key) ||
-          kotvIsMediaPlayPause(key) ||
-          kotvIsUpKey(key) ||
-          kotvIsDownKey(key) ||
-          kotvIsLeftKey(key) ||
-          kotvIsRightKey(key)) {
+      if (isDown &&
+          (kotvIsEnterKey(key) ||
+              kotvIsMediaPlayPause(key) ||
+              kotvIsUpKey(key) ||
+              kotvIsDownKey(key) ||
+              kotvIsLeftKey(key) ||
+              kotvIsRightKey(key))) {
         final primary = FocusManager.instance.primaryFocus;
         if ((kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) &&
             (primary == null || primary == node)) {
@@ -754,12 +757,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
 
     // —— 控件全隐：一键一义 ——
-    // 菜单/OK → 亮底栏；设置/E → 选集；左右 → seek；上下 → 切集。
-    if (kotvIsMenuKey(key) || kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+    // 菜单/OK → 亮底栏；设置/E → 选集；左右 → seek（含长按重复）；上下 → 亮控件。
+    if (isDown && (kotvIsMenuKey(key) || kotvIsEnterKey(key) || kotvIsMediaPlayPause(key))) {
       _showChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
-    if (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE) {
+    if (isDown && (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE)) {
       if (widget.episodes.isEmpty) {
         _showChromeAndFocusPlay();
         return KeyEventResult.handled;
@@ -777,12 +780,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _seekByRemote(const Duration(seconds: 10));
       return KeyEventResult.handled;
     }
-    if (kotvIsUpKey(key)) {
-      _goPrev();
+    if (isDown && kotvIsUpKey(key)) {
+      _showChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
-    if (kotvIsDownKey(key)) {
-      _goNext();
+    if (isDown && kotvIsDownKey(key)) {
+      _showChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;

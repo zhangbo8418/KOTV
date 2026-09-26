@@ -485,7 +485,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   int _openingSec = 0;
   int _endingSec = 0;
   bool _loopSkip = true; // 有片头/片尾值即生效；开关仅用于临时关闭
-  bool _openingSeekDone = false;
   bool _repeatOne = false;
   bool _epOpen = false;
   bool _danmakuOn = false;
@@ -500,7 +499,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   String _playerLabel = flutterPlayerLabel(kotvDefaultVodPlayer());
   Timer? _clockTimer;
   Timer? _epHideTimer;
-  StreamSubscription<Duration>? _skipSub;
   DateTime _now = DateTime.now();
   final ScrollController _epScroll = ScrollController();
   final FocusNode _playFocus = FocusNode(debugLabel: 'vod_fs_play');
@@ -580,7 +578,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     if (ai >= 0) _aspectIdx = ai;
     unawaited(_refreshPlayerLabel());
     if (_stableVolume) unawaited(_applyStableVolume(true));
-    _skipSub = widget.player.positionStream.listen(_onPositionTick);
     unawaited(_loadDanmakuOffset());
     unawaited(_loadSkipOpeningEnding());
   }
@@ -642,18 +639,11 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       _endingSec = widget.endingSec;
     }
     if (oldWidget.epIdx != widget.epIdx) {
-      _openingSeekDone = false;
       if (_epOpen) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollEpIntoView());
       }
     }
-    if (oldWidget.playUrl != widget.playUrl) {
-      _openingSeekDone = false;
-    }
     if (!identical(oldWidget.player, widget.player)) {
-      _skipSub?.cancel();
-      _skipSub = widget.player.positionStream.listen(_onPositionTick);
-      _openingSeekDone = false;
       final rate = widget.player.rate;
       final i = _speeds.indexWhere((s) => (s - rate).abs() < 0.01);
       if (i >= 0) _speedIdx = i;
@@ -672,7 +662,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     _clockTimer?.cancel();
     _epHideTimer?.cancel();
     _sleepTimer?.cancel();
-    _skipSub?.cancel();
     _epScroll.dispose();
     _playFocus.dispose();
     _epFocus.dispose();
@@ -735,25 +724,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         _playerVal = cur;
         _playerLabel = flutterPlayerLabel(cur);
       });
-    }
-  }
-
-  void _onPositionTick(Duration pos) {
-    if (!_loopSkip) return;
-    final dur = widget.player.duration;
-    if (dur.inMilliseconds <= 0) return;
-    final openMs = _openingSec * 1000;
-
-    // 片头跳过；片尾连播只走详情页 [_advanceToNextEpisode]，避免与 chrome 双通道连跳。
-    if (openMs > 0 && !_openingSeekDone) {
-      if (pos.inMilliseconds + 800 < openMs) {
-        _openingSeekDone = true;
-        unawaited(widget.player.seek(Duration(milliseconds: openMs)));
-        return;
-      }
-      if (pos.inMilliseconds >= openMs) {
-        _openingSeekDone = true;
-      }
     }
   }
 
@@ -1866,10 +1836,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           onChanged: (v) {
                             sync(() {
                               _loopSkip = v;
-                              _openingSeekDone = false;
                             });
                             unawaited(_persist('playerSkipOpeningEnding', v ? 'true' : 'false'));
-                            if (v) _onPositionTick(widget.player.position);
                           },
                         ),
                         toggleRow(

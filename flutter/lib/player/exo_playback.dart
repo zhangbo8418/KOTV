@@ -121,6 +121,8 @@ class ExoPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 ExoPlayer';
   @override
+  String? get lastError => _lastError;
+  @override
   bool get playing => _playing;
   @override
   bool get completed => _completed;
