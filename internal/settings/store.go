@@ -62,7 +62,7 @@ const (
 	// SyncHistoryPending / SyncKeepPending：同步接收后待客户端落 SP 的 JSON。
 	SyncHistoryPending Type = "kotv_sync_history"
 	SyncKeepPending    Type = "kotv_sync_keep"
-	RemoteAuth    Type = "remoteAuth"    // 远端强制登录，默认 false
+	RemoteAuth    Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
 	// BackendProxyPlay 网盘是否经引擎 /proxy（jar 原生库/go/Java 多线程）。
 	// 默认 false：展开为 CDN 直链；true：保留爬虫 /proxy 加速。

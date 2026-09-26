@@ -6,8 +6,10 @@ import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
+import 'chrome.dart';
 
-/// Web：打开页必须登录本站账号。PC/安卓：仅远端鉴权开启时在设置里登录。
+/// Web：打开页必须登录本站账号。
+/// PC/安卓：连远端引擎时，对方须开启「远端鉴权」，再登录一次。
 Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
 
@@ -45,6 +47,13 @@ Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async
     st = await api.authStatus();
   } catch (_) {
     return true;
+  }
+  // 非本机且对方未开远端鉴权：禁止继续用远端。
+  if (st['loopback'] != true && st['remoteAccess'] != true) {
+    if (context.mounted) {
+      showAppNews(context, '对方未开启远端鉴权\n请在后端「用户管理」中打开后再连接');
+    }
+    return false;
   }
   if (st['authRequired'] != true) return true;
 

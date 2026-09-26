@@ -457,7 +457,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
             onBack: () => Navigator.of(context).maybePop(),
             onSearch: () => goKotvPage(ref, KotvPage.search),
             onProfile: () => goKotvPage(ref, KotvPage.profile),
-            onNews: () => showAppNews(context, '用户管理：本机免登录。非本机在连接时登录一次即可；管理员可管账号，看片与本机同体验（按账号隔离）。'),
+            onNews: () => showAppNews(context, '用户管理：本机免登录。开启「远端鉴权」后，非本机才可连接并登录；管理员可管账号，看片按账号隔离。'),
             title: '用户管理',
           ),
           if (_status.isNotEmpty || _busy)
@@ -499,7 +499,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                           KotvSettingsCard(children: [
                             SwitchListTile(
                               title: Text('开启远端鉴权', style: TextStyle(color: p.fg)),
-                              subtitle: Text('开启后非本机前端连接时登录一次，之后与本机同体验并按账号隔离', style: TextStyle(color: p.muted, fontSize: 12)),
+                              subtitle: Text('关闭时仅本机可用；开启后非本机才能连接并登录，按账号隔离', style: TextStyle(color: p.muted, fontSize: 12)),
                               value: _remoteAuth,
                               onChanged: _busy ? null : (v) => unawaited(_setFlag(remoteAuth: v)),
                             ),

@@ -20,6 +20,15 @@ func isLoopbackRequest(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// remoteAccessAllowed 非本机必须开启远端鉴权才可连入（登录/业务 API）。
+// 本机 loopback 始终允许。
+func remoteAccessAllowed(r *http.Request) bool {
+	if isLoopbackRequest(r) {
+		return true
+	}
+	return auth.RemoteAuthEnabled()
+}
+
 func authRequiredFor(r *http.Request) bool {
 	plat := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform")))
 	// Web 固定本站后端：打开页必须登录（与 remoteAuth / 是否本机无关）。
@@ -36,6 +45,18 @@ func authRequiredFor(r *http.Request) bool {
 	return true
 }
 
+// probeOnlyPath 未开远端鉴权时，非本机仅允许探测（不能登录/用业务）。
+func probeOnlyPath(path string) bool {
+	switch path {
+	case "/api/v1/health",
+		"/api/v1/net",
+		"/api/v1/auth/status":
+		return true
+	default:
+		return false
+	}
+}
+
 func publicAuthPath(path string) bool {
 	switch path {
 	case "/api/v1/health",
@@ -50,6 +71,7 @@ func publicAuthPath(path string) bool {
 }
 
 // withAuth 远端鉴权中间件；成功后绑定 userId。
+// 非本机且未开 remoteAuth：拒绝连接与登录（仅放行 health/net/auth/status 探测）。
 // Web（X-Kotv-Client-Platform=web）：始终要求登录。
 // 本机 loopback 的 PC/安卓：免登录，会话只用 clientId。
 // 非本机且开启 remoteAuth：必须 Bearer，会话用 u:<userId> 隔离。
@@ -82,6 +104,19 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 					r = r.WithContext(withAuthUser(r.Context(), u))
 				}
 			}
+			next(w, r)
+			return
+		}
+
+		// 非本机未开远端鉴权：禁止登录与业务；仅允许探测接口。
+		if !remoteAccessAllowed(r) {
+			if !probeOnlyPath(r.URL.Path) {
+				writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")
+				return
+			}
+			done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
+			defer done()
+			bindPlat()
 			next(w, r)
 			return
 		}
@@ -185,7 +220,8 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		"remoteAuth":     auth.RemoteAuthEnabled(),
 		"allowRegister":  auth.AllowRegister(),
 		"authRequired":   authRequiredFor(r),
-		"adminRequired":  !isLoopbackRequest(r),
+		"remoteAccess":   remoteAccessAllowed(r),
+		"adminRequired":  !isLoopbackRequest(r) && auth.RemoteAuthEnabled(),
 		"loopback":       isLoopbackRequest(r),
 	})
 }
@@ -197,6 +233,10 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !remoteAccessAllowed(r) {
+		writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")
 		return
 	}
 	var body struct {
@@ -223,6 +263,10 @@ func (s *Server) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !remoteAccessAllowed(r) {
+		writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")
 		return
 	}
 	var body struct {

@@ -1968,6 +1968,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     var allowReg = false;
     try {
       final st = await probe.authStatus().timeout(const Duration(seconds: 4));
+      if (st['remoteAccess'] != true && st['remoteAuth'] != true) {
+        if (!mounted) return;
+        setState(() => _status = '对方未开启远端鉴权');
+        showAppNews(context, '对方未开启远端鉴权\n请在安卓端「用户管理」打开后再连接\n仍使用本机引擎');
+        return;
+      }
       allowReg = st['allowRegister'] == true;
     } catch (_) {}
 
