@@ -305,7 +305,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   int _line = 0;
   int _lines = 1;
   String _lineName = '';
-  bool _leftOpen = true;
+  bool _leftOpen = false;
   bool _rightOpen = false;
   /// 横屏左侧节目单列；默认收起，避免挡画面 / 撑破面板。
   bool _epgOpen = false;
@@ -325,7 +325,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   int _portraitTab = 0;
   /// 竖屏播放器底栏显隐（点画面切换；数秒后自动隐藏）
   bool _portraitChrome = true;
-  String _status = '点击左侧换台 · 点击右侧换源/设置';
+  String _status = '菜单键打开频道列表 · 点击右侧换源/设置';
   String _title = '选择频道开始播放';
   String _decodeMode = 'auto';
   String _prefDecodeMode = 'auto';
@@ -1079,6 +1079,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     } catch (_) {}
   }
 
+  void _onLiveAcross() => unawaited(_toggleLiveFlag('liveAcross', !_liveAcross));
+  void _onLiveInvert() => unawaited(_toggleLiveFlag('liveInvert', !_liveInvert));
+  void _onLiveFailSwitch() => unawaited(_toggleLiveFlag('liveChange', !_liveAutoChange));
+
   /// 上下换台；[_liveAcross] 为真时到组边界跨组，[_liveInvert] 由调用方决定方向。
   Future<void> _stepChannel({required int delta}) async {
     if (_groups.isEmpty) return;
@@ -1108,7 +1112,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     await _playChannel(delta > 0 ? 0 : n.length - 1);
   }
 
-  Future<void> _playChannel(int chIdx, {int? line, bool showList = true}) async {
+  Future<void> _playChannel(int chIdx, {int? line, bool showList = false}) async {
     if (!await _ensureUnlocked(_groupIdx)) return;
     final chs = _channels;
     if (chIdx < 0 || chIdx >= chs.length) return;
@@ -1121,10 +1125,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       // 直播频道 URL 直链开播，不走点播「解析」文案。
       _status = '换台中…';
       _title = '${ch['name'] ?? ''}';
-      if (showList) {
-        _leftOpen = true;
-        _epgOpen = false;
-      }
+      // showList=true 仅用于主动展开列表；默认选台后收起，避免挡画面。
+      _leftOpen = showList;
+      _epgOpen = false;
       _catchup = false;
       _catchupChrome = false;
       _catchupProgIdx = -1;
@@ -1176,8 +1179,20 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     // stop → LiveApi.getUrl+Catchup.format → 立刻 play（与 _playChannel 同序）。
     if (_chIdx < 0) return;
     final serial = ++_playSerial;
+    final prevCatchup = _catchup;
+    final prevProgIdx = _catchupProgIdx;
+    final prevTitle = _title;
+    // 先亮回看项，再拉流（换台同理先写 _chIdx）。
+    setState(() {
+      _status = '加载回看…';
+      _catchup = true;
+      _catchupProgIdx = progIdx;
+      _catchupChrome = true;
+      _leftOpen = false;
+      _rightOpen = false;
+      _epgOpen = false;
+    });
     try {
-      setState(() => _status = '加载回看…');
       await _stopAllBackends();
       if (!mounted || serial != _playSerial) return;
       final data = await ref.read(apiProvider).liveCatchup(
@@ -1214,7 +1229,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: _title, url: url);
     } catch (e) {
       if (!mounted || serial != _playSerial) return;
-      setState(() => _status = '回看失败: $e');
+      setState(() {
+        _catchup = prevCatchup;
+        _catchupProgIdx = prevProgIdx;
+        _catchupChrome = prevCatchup;
+        _title = prevTitle;
+        _status = '回看失败: $e';
+      });
     }
   }
 
@@ -2099,11 +2120,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               onDecode: () => unawaited(_pickDecode()),
               onScale: () => unawaited(_cycleLiveScale()),
               scaleLabel: _liveScaleLabel(_liveScale),
-              onAcross: () => unawaited(_toggleLiveFlag('liveAcross', !_liveAcross)),
+              onAcross: _onLiveAcross,
               acrossOn: _liveAcross,
-              onInvert: () => unawaited(_toggleLiveFlag('liveInvert', !_liveInvert)),
+              onInvert: _onLiveInvert,
               invertOn: _liveInvert,
-              onFailSwitch: () => unawaited(_toggleLiveFlag('liveChange', !_liveAutoChange)),
+              onFailSwitch: _onLiveFailSwitch,
               failSwitchOn: _liveAutoChange,
             ),
           ),
@@ -2572,19 +2593,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                 AppPill(
                                   label: '跨组换台 · ${_liveAcross ? '开' : '关'}',
                                   height: 40,
-                                  onTap: () => unawaited(_toggleLiveFlag('liveAcross', !_liveAcross)),
+                                  onTap: _onLiveAcross,
                                 ),
                                 const SizedBox(height: 8),
                                 AppPill(
                                   label: '反转换台 · ${_liveInvert ? '开' : '关'}',
                                   height: 40,
-                                  onTap: () => unawaited(_toggleLiveFlag('liveInvert', !_liveInvert)),
+                                  onTap: _onLiveInvert,
                                 ),
                                 const SizedBox(height: 8),
                                 AppPill(
                                   label: '失败换线 · ${_liveAutoChange ? '开' : '关'}',
                                   height: 40,
-                                  onTap: () => unawaited(_toggleLiveFlag('liveChange', !_liveAutoChange)),
+                                  onTap: _onLiveFailSwitch,
                                 ),
                                 const SizedBox(height: 8),
                                 AppPill(label: '迷你桌面播放', height: 40, onTap: () => unawaited(_enterMini())),
@@ -2754,11 +2775,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                           onDecode: () => unawaited(_pickDecode()),
                           onScale: () => unawaited(_cycleLiveScale()),
                           scaleLabel: _liveScaleLabel(_liveScale),
-                          onAcross: () => unawaited(_toggleLiveFlag('liveAcross', !_liveAcross)),
+                          onAcross: _onLiveAcross,
                           acrossOn: _liveAcross,
-                          onInvert: () => unawaited(_toggleLiveFlag('liveInvert', !_liveInvert)),
+                          onInvert: _onLiveInvert,
                           invertOn: _liveInvert,
-                          onFailSwitch: () => unawaited(_toggleLiveFlag('liveChange', !_liveAutoChange)),
+                          onFailSwitch: _onLiveFailSwitch,
                           failSwitchOn: _liveAutoChange,
                         ),
                       ),
@@ -2870,11 +2891,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                       },
                       onScale: () => unawaited(_cycleLiveScale()),
                       scaleLabel: _liveScaleLabel(_liveScale),
-                      onAcross: () => unawaited(_toggleLiveFlag('liveAcross', !_liveAcross)),
+                      onAcross: _onLiveAcross,
                       acrossOn: _liveAcross,
-                      onInvert: () => unawaited(_toggleLiveFlag('liveInvert', !_liveInvert)),
+                      onInvert: _onLiveInvert,
                       invertOn: _liveInvert,
-                      onFailSwitch: () => unawaited(_toggleLiveFlag('liveChange', !_liveAutoChange)),
+                      onFailSwitch: _onLiveFailSwitch,
                       failSwitchOn: _liveAutoChange,
                     ),
                   ),
