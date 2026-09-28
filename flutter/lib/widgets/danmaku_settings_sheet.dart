@@ -165,7 +165,7 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
     final size = (double.tryParse(g('danmakuSize', '18')) ?? 18).clamp(12.0, 48.0);
     final opacity = (double.tryParse(g('danmakuOpacity', '85')) ?? 85).clamp(0.0, 100.0);
     final rows = (double.tryParse(g('danmakuRows', '6')) ?? 6).clamp(1.0, 16.0);
-    final offset = (double.tryParse(g('danmakuOffsetMs', '0')) ?? 0).clamp(-60000.0, 60000.0);
+    final offset = (double.tryParse(g('danmakuOffsetMs', '0')) ?? 0).clamp(-300000.0, 300000.0);
     final maxOnScreen = (double.tryParse(g('danmakuMaxOnScreen', '150')) ?? 150).clamp(10.0, 500.0);
     final scrollArea = (double.tryParse(g('danmakuScrollArea', '50')) ?? 50).clamp(10.0, 100.0);
 
@@ -260,10 +260,20 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
                         onCommit: (v) => _set('danmakuScrollArea', '${v.round()}'),
                       ),
                       _slider(
+                        label: '水平间距',
+                        value: (double.tryParse(g('danmakuScrollGap', '8')) ?? 8).clamp(0.0, 20.0),
+                        min: 0,
+                        max: 20,
+                        divisions: 20,
+                        format: (v) => '${v.round()}%',
+                        onChanging: (v) => setState(() => _s['danmakuScrollGap'] = '${v.round()}'),
+                        onCommit: (v) => _set('danmakuScrollGap', '${v.round()}'),
+                      ),
+                      _slider(
                         label: '时轴偏移',
                         value: offset,
-                        min: -60000,
-                        max: 60000,
+                        min: -300000,
+                        max: 300000,
                         divisions: 120,
                         format: (v) {
                           final s = (v / 1000).round();
@@ -285,6 +295,7 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
                         switch (g('danmakuStrokeMode', 'shadow').trim().toLowerCase()) {
                           'none' => '无',
                           'outline' => '描边',
+                          'projection' => '投影',
                           _ => '阴影',
                         },
                         () async {
@@ -293,10 +304,65 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
                             ('无', 'none'),
                             ('描边', 'outline'),
                             ('阴影', 'shadow'),
+                            ('投影', 'projection'),
                           ]);
                           if (picked != null) await _set('danmakuStrokeMode', picked);
                         },
                       ),
+                      if (g('danmakuStrokeMode', 'shadow').trim().toLowerCase() == 'outline')
+                        _slider(
+                          label: '描边宽度',
+                          value: ((double.tryParse(g('danmakuStrokeWidth', '0.12')) ?? 0.12) * 100).clamp(5.0, 30.0),
+                          min: 5,
+                          max: 30,
+                          divisions: 25,
+                          format: (v) => '${(v / 100).toStringAsFixed(2)}×',
+                          onChanging: (v) => setState(() => _s['danmakuStrokeWidth'] = (v / 100).toStringAsFixed(2)),
+                          onCommit: (v) => _set('danmakuStrokeWidth', (v / 100).toStringAsFixed(2)),
+                        ),
+                      if (g('danmakuStrokeMode', 'shadow').trim().toLowerCase() == 'shadow')
+                        _slider(
+                          label: '阴影透明度',
+                          value: ((double.tryParse(g('danmakuShadowOpacity', '0.5')) ?? 0.5) * 100).clamp(0.0, 90.0),
+                          min: 0,
+                          max: 90,
+                          divisions: 18,
+                          format: (v) => '${v.round()}%',
+                          onChanging: (v) => setState(() => _s['danmakuShadowOpacity'] = (v / 100).toStringAsFixed(2)),
+                          onCommit: (v) => _set('danmakuShadowOpacity', (v / 100).toStringAsFixed(2)),
+                        ),
+                      if (g('danmakuStrokeMode', 'shadow').trim().toLowerCase() == 'projection') ...[
+                        _slider(
+                          label: '投影偏移 X',
+                          value: ((double.tryParse(g('danmakuProjectionOffsetX', '0.08')) ?? 0.08) * 100).clamp(2.0, 15.0),
+                          min: 2,
+                          max: 15,
+                          divisions: 13,
+                          format: (v) => '${(v / 100).toStringAsFixed(2)}×',
+                          onChanging: (v) => setState(() => _s['danmakuProjectionOffsetX'] = (v / 100).toStringAsFixed(2)),
+                          onCommit: (v) => _set('danmakuProjectionOffsetX', (v / 100).toStringAsFixed(2)),
+                        ),
+                        _slider(
+                          label: '投影偏移 Y',
+                          value: ((double.tryParse(g('danmakuProjectionOffsetY', '0.08')) ?? 0.08) * 100).clamp(2.0, 15.0),
+                          min: 2,
+                          max: 15,
+                          divisions: 13,
+                          format: (v) => '${(v / 100).toStringAsFixed(2)}×',
+                          onChanging: (v) => setState(() => _s['danmakuProjectionOffsetY'] = (v / 100).toStringAsFixed(2)),
+                          onCommit: (v) => _set('danmakuProjectionOffsetY', (v / 100).toStringAsFixed(2)),
+                        ),
+                        _slider(
+                          label: '投影透明度',
+                          value: ((double.tryParse(g('danmakuProjectionOpacity', '0.2')) ?? 0.2) * 100).clamp(0.0, 90.0),
+                          min: 0,
+                          max: 90,
+                          divisions: 18,
+                          format: (v) => '${v.round()}%',
+                          onChanging: (v) => setState(() => _s['danmakuProjectionOpacity'] = (v / 100).toStringAsFixed(2)),
+                          onCommit: (v) => _set('danmakuProjectionOpacity', (v / 100).toStringAsFixed(2)),
+                        ),
+                      ],
                       _nav(
                         '颜色策略',
                         switch (g('danmakuColorMode', 'original').trim().toLowerCase()) {

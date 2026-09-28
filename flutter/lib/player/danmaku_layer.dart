@@ -237,6 +237,16 @@ class DanmakuOverlay extends StatefulWidget {
     this.rowsTop = 3,
     this.rowsBottom = 3,
     this.fontFamily = 'default',
+    /// 同轨水平间隙占屏宽比例（0–0.2）；原硬编码 0.08。
+    this.scrollGapRatio = 0.08,
+    /// 描边宽度相对字号（outline）。
+    this.strokeWidth = 0.12,
+    /// 阴影不透明度（shadow）。
+    this.shadowOpacity = 0.5,
+    /// 投影偏移相对字号、投影透明度（projection）。
+    this.projectionOffsetX = 0.08,
+    this.projectionOffsetY = 0.08,
+    this.projectionOpacity = 0.2,
   });
 
   final bool enabled;
@@ -263,6 +273,12 @@ class DanmakuOverlay extends StatefulWidget {
   final int rowsTop;
   final int rowsBottom;
   final String fontFamily;
+  final double scrollGapRatio;
+  final double strokeWidth;
+  final double shadowOpacity;
+  final double projectionOffsetX;
+  final double projectionOffsetY;
+  final double projectionOpacity;
 
   @override
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
@@ -348,6 +364,33 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
         _lastActivateSec = -1;
         _cursor = 0;
       }
+    }
+    // 密度/类型/时长等改了：清空在飞弹幕，回放最近窗口按新规则重投（否则观感像「设置无效」）。
+    final layoutChanged = oldWidget.fontSize != widget.fontSize ||
+        oldWidget.rows != widget.rows ||
+        oldWidget.maxOnScreen != widget.maxOnScreen ||
+        oldWidget.scrollAreaRatio != widget.scrollAreaRatio ||
+        oldWidget.durationMs != widget.durationMs ||
+        oldWidget.fixedDurationMs != widget.fixedDurationMs ||
+        oldWidget.lineSpacing != widget.lineSpacing ||
+        oldWidget.rowsTop != widget.rowsTop ||
+        oldWidget.rowsBottom != widget.rowsBottom ||
+        oldWidget.showScroll != widget.showScroll ||
+        oldWidget.showTop != widget.showTop ||
+        oldWidget.showBottom != widget.showBottom ||
+        oldWidget.showReverse != widget.showReverse ||
+        oldWidget.showSpecial != widget.showSpecial ||
+        oldWidget.showPositioned != widget.showPositioned ||
+        oldWidget.scrollGapRatio != widget.scrollGapRatio;
+    if (layoutChanged && widget.enabled) {
+      _flying.clear();
+      final mediaSec = _mediaPos.inMilliseconds / 1000.0;
+      _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
+      _cursor = 0;
+      while (_cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
+        _cursor++;
+      }
+      if (_layoutW >= 1) _scheduleActivate(_layoutW);
     }
     _syncTicker();
   }
@@ -542,7 +585,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     required bool reverse,
   }) {
     if (viewW < 1) return 0;
-    final gap = viewW * 0.08;
+    final gap = viewW * widget.scrollGapRatio.clamp(0.0, 0.2);
     for (var lane = 0; lane < lanes; lane++) {
       if (_scrollLaneFree(
         lane: lane,
@@ -664,6 +707,11 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
                     rowsTop: widget.rowsTop,
                     rowsBottom: widget.rowsBottom,
                     fontFamily: widget.fontFamily,
+                    strokeWidth: widget.strokeWidth,
+                    shadowOpacity: widget.shadowOpacity,
+                    projectionOffsetX: widget.projectionOffsetX,
+                    projectionOffsetY: widget.projectionOffsetY,
+                    projectionOpacity: widget.projectionOpacity,
                   ),
                 );
               },
@@ -705,6 +753,11 @@ class _DanmakuPainter extends CustomPainter {
     this.rowsTop = 3,
     this.rowsBottom = 3,
     this.fontFamily = 'default',
+    this.strokeWidth = 0.12,
+    this.shadowOpacity = 0.5,
+    this.projectionOffsetX = 0.08,
+    this.projectionOffsetY = 0.08,
+    this.projectionOpacity = 0.2,
   });
   final List<_Flying> flying;
   final double mediaSec;
@@ -719,6 +772,11 @@ class _DanmakuPainter extends CustomPainter {
   final int rowsTop;
   final int rowsBottom;
   final String fontFamily;
+  final double strokeWidth;
+  final double shadowOpacity;
+  final double projectionOffsetX;
+  final double projectionOffsetY;
+  final double projectionOpacity;
 
   Color _resolveColor(int raw) {
     final op = opacity.clamp(0.15, 1.0);
@@ -732,19 +790,35 @@ class _DanmakuPainter extends CustomPainter {
     }
   }
 
-  List<Shadow> _shadows() {
+  List<Shadow> _shadows(double fs) {
     switch (strokeMode.trim().toLowerCase()) {
       case 'none':
         return const [];
       case 'outline':
-        return const [
-          Shadow(offset: Offset(-1, 0), color: Colors.black87),
-          Shadow(offset: Offset(1, 0), color: Colors.black87),
-          Shadow(offset: Offset(0, -1), color: Colors.black87),
-          Shadow(offset: Offset(0, 1), color: Colors.black87),
+        final d = (fs * strokeWidth.clamp(0.05, 0.3)).clamp(0.5, 6.0);
+        final c = Colors.black.withOpacity(0.85);
+        return [
+          Shadow(offset: Offset(-d, 0), color: c),
+          Shadow(offset: Offset(d, 0), color: c),
+          Shadow(offset: Offset(0, -d), color: c),
+          Shadow(offset: Offset(0, d), color: c),
+        ];
+      case 'projection':
+        final ox = fs * projectionOffsetX.clamp(0.02, 0.15);
+        final oy = fs * projectionOffsetY.clamp(0.02, 0.15);
+        return [
+          Shadow(
+            offset: Offset(ox, oy),
+            color: Colors.black.withOpacity(projectionOpacity.clamp(0.0, 0.9)),
+          ),
         ];
       default:
-        return const [Shadow(blurRadius: 2, color: Colors.black87)];
+        return [
+          Shadow(
+            blurRadius: 2,
+            color: Colors.black.withOpacity(shadowOpacity.clamp(0.0, 0.9)),
+          ),
+        ];
     }
   }
 
@@ -760,7 +834,7 @@ class _DanmakuPainter extends CustomPainter {
       fs * lineSpacing.clamp(1.0, 2.0),
       areaH / lanes,
     ).clamp(fs, 80.0);
-    final shadows = _shadows();
+    final shadows = _shadows(fs);
     for (final f in flying) {
       final durSec = f.durationMs / 1000.0;
       if (durSec <= 0) continue;
@@ -830,6 +904,11 @@ class _DanmakuPainter extends CustomPainter {
         colorMode != old.colorMode ||
         rowsTop != old.rowsTop ||
         rowsBottom != old.rowsBottom ||
-        fontFamily != old.fontFamily;
+        fontFamily != old.fontFamily ||
+        strokeWidth != old.strokeWidth ||
+        shadowOpacity != old.shadowOpacity ||
+        projectionOffsetX != old.projectionOffsetX ||
+        projectionOffsetY != old.projectionOffsetY ||
+        projectionOpacity != old.projectionOpacity;
   }
 }

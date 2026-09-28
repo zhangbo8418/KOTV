@@ -48,11 +48,11 @@ double kotvSubtitleShadowStrength(String? raw, {double def = 50}) {
   return (double.tryParse('${raw ?? ''}') ?? def).clamp(0, 100);
 }
 
-/// none / outline / shadow。
+/// none / outline / shadow / projection。
 String kotvNormalizeDanmakuStroke(String? raw) {
   final s = (raw ?? '').trim().toLowerCase();
   return switch (s) {
-    'none' || 'outline' => s,
+    'none' || 'outline' || 'projection' => s,
     _ => 'shadow',
   };
 }

@@ -426,8 +426,6 @@ class VodFullscreenChrome extends StatefulWidget {
     this.onMini,
     this.onRotate,
     this.rotateLabel,
-    this.danmakuOn = false,
-    this.onDanmakuChanged,
     this.danmakuSources = const [],
     this.danmakuSourceIdx = 0,
     this.onDanmakuSourceChanged,
@@ -477,8 +475,6 @@ class VodFullscreenChrome extends StatefulWidget {
   final VoidCallback? onRefresh;
   final VoidCallback? onCast;
   final VoidCallback? onMini;
-  final bool danmakuOn;
-  final ValueChanged<bool>? onDanmakuChanged;
   final List<DanmakuSource> danmakuSources;
   final int danmakuSourceIdx;
   final ValueChanged<int>? onDanmakuSourceChanged;
@@ -507,11 +503,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   bool _loopSkip = true; // 有片头/片尾值即生效；开关仅用于临时关闭
   bool _repeatOne = false;
   bool _epOpen = false;
-  bool _danmakuOn = false;
   bool _ambientOn = false;
   bool _stableVolume = false;
   bool _debugHud = false;
-  int _danmakuOffsetSec = 0;
   int _sleepMinutes = 0;
   Timer? _sleepTimer;
   String _keepLabel = '收藏';
@@ -578,7 +572,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   void initState() {
     super.initState();
     FocusManager.instance.addListener(_onGlobalFocus);
-    _danmakuOn = widget.danmakuOn;
     _ambientOn = widget.ambientOn;
     _stableVolume = widget.stableVolumeOn;
     _keepLabel = widget.keepLabel;
@@ -598,7 +591,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     if (ai >= 0) _aspectIdx = ai;
     unawaited(_refreshPlayerLabel());
     if (_stableVolume) unawaited(_applyStableVolume(true));
-    unawaited(_loadDanmakuOffset());
     unawaited(_loadSkipOpeningEnding());
   }
 
@@ -609,15 +601,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       final on = raw != 'false' && raw != '0' && raw != 'off';
       if (!mounted) return;
       setState(() => _loopSkip = on);
-    } catch (_) {}
-  }
-
-  Future<void> _loadDanmakuOffset() async {
-    try {
-      final m = await _loadSettings();
-      final ms = int.tryParse(m['danmakuOffsetMs'] ?? '0') ?? 0;
-      if (!mounted) return;
-      setState(() => _danmakuOffsetSec = (ms / 1000).round().clamp(-60, 60));
     } catch (_) {}
   }
 
@@ -639,9 +622,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     }
     if (oldWidget.keepLabel != widget.keepLabel) {
       _keepLabel = widget.keepLabel;
-    }
-    if (oldWidget.danmakuOn != widget.danmakuOn) {
-      _danmakuOn = widget.danmakuOn;
     }
     if (oldWidget.ambientOn != widget.ambientOn) {
       _ambientOn = widget.ambientOn;
@@ -1860,16 +1840,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             unawaited(_persist('playerSkipOpeningEnding', v ? 'true' : 'false'));
                           },
                         ),
-                        toggleRow(
-                          icon: Icons.subtitles_outlined,
-                          label: '弹幕',
-                          value: _danmakuOn,
-                          onChanged: (v) {
-                            sync(() => _danmakuOn = v);
-                            widget.onDanmakuChanged?.call(v);
-                            unawaited(_persist('danmaku', v ? 'true' : 'false'));
-                          },
-                        ),
                         linkRow(
                           icon: Icons.tune,
                           label: '弹幕设置',
@@ -1882,48 +1852,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               persist: _persist,
                             );
                           },
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          child: SizedBox(
-                            height: 52,
-                            child: Row(
-                              children: [
-                                const SizedBox(width: 8),
-                                const Icon(Icons.av_timer, color: Colors.white, size: 24),
-                                const SizedBox(width: 16),
-                                const Expanded(
-                                  child: Text('弹幕时轴', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
-                                ),
-                                _TinyBtn(
-                                  label: '-',
-                                  onTap: () {
-                                    final next = (_danmakuOffsetSec - 1).clamp(-60, 60);
-                                    sync(() => _danmakuOffsetSec = next);
-                                    unawaited(_persist('danmakuOffsetMs', '${next * 1000}'));
-                                  },
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                                  child: Text(
-                                    _danmakuOffsetSec == 0
-                                        ? '0 s'
-                                        : (_danmakuOffsetSec > 0 ? '+$_danmakuOffsetSec s' : '$_danmakuOffsetSec s'),
-                                    style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
-                                  ),
-                                ),
-                                _TinyBtn(
-                                  label: '+',
-                                  onTap: () {
-                                    final next = (_danmakuOffsetSec + 1).clamp(-60, 60);
-                                    sync(() => _danmakuOffsetSec = next);
-                                    unawaited(_persist('danmakuOffsetMs', '${next * 1000}'));
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                              ],
-                            ),
-                          ),
                         ),
                         if (widget.danmakuSources.length > 1)
                           linkRow(

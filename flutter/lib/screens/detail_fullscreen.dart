@@ -56,7 +56,6 @@ class DetailFullscreenPage extends StatefulWidget {
     this.onCast,
     this.onMini,
     this.danmakuOn = false,
-    this.onDanmakuChanged,
     this.danmakuItems = const [],
     this.danmakuSize = 18,
     this.danmakuOpacity = 0.85,
@@ -78,6 +77,12 @@ class DetailFullscreenPage extends StatefulWidget {
     this.danmakuFontFamily = 'default',
     this.danmakuRowsTop = 3,
     this.danmakuRowsBottom = 3,
+    this.danmakuScrollGap = 0.08,
+    this.danmakuStrokeWidth = 0.12,
+    this.danmakuShadowOpacity = 0.5,
+    this.danmakuProjectionOffsetX = 0.08,
+    this.danmakuProjectionOffsetY = 0.08,
+    this.danmakuProjectionOpacity = 0.2,
     this.danmakuSources = const [],
     this.danmakuSourceIdx = 0,
     this.onDanmakuSourceChanged,
@@ -131,7 +136,6 @@ class DetailFullscreenPage extends StatefulWidget {
   final VoidCallback? onCast;
   final VoidCallback? onMini;
   final bool danmakuOn;
-  final ValueChanged<bool>? onDanmakuChanged;
   final List<DanmakuItem> danmakuItems;
   final double danmakuSize;
   final double danmakuOpacity;
@@ -153,6 +157,12 @@ class DetailFullscreenPage extends StatefulWidget {
   final String danmakuFontFamily;
   final int danmakuRowsTop;
   final int danmakuRowsBottom;
+  final double danmakuScrollGap;
+  final double danmakuStrokeWidth;
+  final double danmakuShadowOpacity;
+  final double danmakuProjectionOffsetX;
+  final double danmakuProjectionOffsetY;
+  final double danmakuProjectionOpacity;
   final List<DanmakuSource> danmakuSources;
   final int danmakuSourceIdx;
   final ValueChanged<int>? onDanmakuSourceChanged;
@@ -965,11 +975,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       // 竖屏用「全屏观看」；仅锁横屏后顶栏出「竖屏」以便切回。
       onRotate: _showTopPortraitRotate ? () => unawaited(_lockPortraitMode()) : null,
       rotateLabel: _showTopPortraitRotate ? '竖屏' : null,
-      danmakuOn: _danmakuOn,
-      onDanmakuChanged: (v) {
-        setState(() => _danmakuOn = v);
-        widget.onDanmakuChanged?.call(v);
-      },
       danmakuSources: widget.danmakuSources,
       danmakuSourceIdx: widget.danmakuSourceIdx,
       onDanmakuSourceChanged: widget.onDanmakuSourceChanged,
@@ -1074,6 +1079,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                           rowsTop: widget.danmakuRowsTop,
                           rowsBottom: widget.danmakuRowsBottom,
                           fontFamily: widget.danmakuFontFamily,
+                          scrollGapRatio: widget.danmakuScrollGap,
+                          strokeWidth: widget.danmakuStrokeWidth,
+                          shadowOpacity: widget.danmakuShadowOpacity,
+                          projectionOffsetX: widget.danmakuProjectionOffsetX,
+                          projectionOffsetY: widget.danmakuProjectionOffsetY,
+                          projectionOpacity: widget.danmakuProjectionOpacity,
                         ),
                       ],
                     ),

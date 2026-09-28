@@ -191,6 +191,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String _danmakuFontFamily = 'default';
   int _danmakuRowsTop = 3;
   int _danmakuRowsBottom = 3;
+  double _danmakuScrollGap = 0.08;
+  double _danmakuStrokeWidth = 0.12;
+  double _danmakuShadowOpacity = 0.5;
+  double _danmakuProjectionOffsetX = 0.08;
+  double _danmakuProjectionOffsetY = 0.08;
+  double _danmakuProjectionOpacity = 0.2;
   int _danmakuSourceIdx = 0;
   List<DanmakuSource> _danmakuSources = const [];
   double _danmakuOffsetSec = 0;
@@ -1237,6 +1243,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _danmakuFontFamily = kotvNormalizeSubtitleFont('${settings['danmakuFont'] ?? 'default'}');
         _danmakuRowsTop = (int.tryParse('${settings['danmakuRowsTop'] ?? '3'}') ?? 3).clamp(1, 8);
         _danmakuRowsBottom = (int.tryParse('${settings['danmakuRowsBottom'] ?? '3'}') ?? 3).clamp(1, 8);
+        final gapRaw = double.tryParse('${settings['danmakuScrollGap'] ?? '8'}') ?? 8;
+        _danmakuScrollGap = (gapRaw > 1 ? gapRaw / 100.0 : gapRaw).clamp(0.0, 0.2);
+        _danmakuStrokeWidth = (double.tryParse('${settings['danmakuStrokeWidth'] ?? '0.12'}') ?? 0.12).clamp(0.05, 0.3);
+        _danmakuShadowOpacity = (double.tryParse('${settings['danmakuShadowOpacity'] ?? '0.5'}') ?? 0.5).clamp(0.0, 0.9);
+        _danmakuProjectionOffsetX = (double.tryParse('${settings['danmakuProjectionOffsetX'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
+        _danmakuProjectionOffsetY = (double.tryParse('${settings['danmakuProjectionOffsetY'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
+        _danmakuProjectionOpacity = (double.tryParse('${settings['danmakuProjectionOpacity'] ?? '0.2'}') ?? 0.2).clamp(0.0, 0.9);
         _danmakuOffsetSec = ((int.tryParse('${settings['danmakuOffsetMs'] ?? '0'}') ?? 0) / 1000.0);
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
@@ -2453,6 +2466,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                   rowsTop: _danmakuRowsTop,
                   rowsBottom: _danmakuRowsBottom,
                   fontFamily: _danmakuFontFamily,
+                  scrollGapRatio: _danmakuScrollGap,
+                  strokeWidth: _danmakuStrokeWidth,
+                  shadowOpacity: _danmakuShadowOpacity,
+                  projectionOffsetX: _danmakuProjectionOffsetX,
+                  projectionOffsetY: _danmakuProjectionOffsetY,
+                  projectionOpacity: _danmakuProjectionOpacity,
                 ),
               ),
               KotvBufferingOverlay(
@@ -2577,6 +2596,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _danmakuFontFamily = kotvNormalizeSubtitleFont('${settings['danmakuFont'] ?? 'default'}');
         _danmakuRowsTop = (int.tryParse('${settings['danmakuRowsTop'] ?? '3'}') ?? 3).clamp(1, 8);
         _danmakuRowsBottom = (int.tryParse('${settings['danmakuRowsBottom'] ?? '3'}') ?? 3).clamp(1, 8);
+        final gapRaw = double.tryParse('${settings['danmakuScrollGap'] ?? '8'}') ?? 8;
+        _danmakuScrollGap = (gapRaw > 1 ? gapRaw / 100.0 : gapRaw).clamp(0.0, 0.2);
+        _danmakuStrokeWidth = (double.tryParse('${settings['danmakuStrokeWidth'] ?? '0.12'}') ?? 0.12).clamp(0.05, 0.3);
+        _danmakuShadowOpacity = (double.tryParse('${settings['danmakuShadowOpacity'] ?? '0.5'}') ?? 0.5).clamp(0.0, 0.9);
+        _danmakuProjectionOffsetX = (double.tryParse('${settings['danmakuProjectionOffsetX'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
+        _danmakuProjectionOffsetY = (double.tryParse('${settings['danmakuProjectionOffsetY'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
+        _danmakuProjectionOpacity = (double.tryParse('${settings['danmakuProjectionOpacity'] ?? '0.2'}') ?? 0.2).clamp(0.0, 0.9);
       });
     } catch (_) {}
   }
@@ -2634,6 +2660,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         danmakuFontFamily: _danmakuFontFamily,
         danmakuRowsTop: _danmakuRowsTop,
         danmakuRowsBottom: _danmakuRowsBottom,
+        danmakuScrollGap: _danmakuScrollGap,
+        danmakuStrokeWidth: _danmakuStrokeWidth,
+        danmakuShadowOpacity: _danmakuShadowOpacity,
+        danmakuProjectionOffsetX: _danmakuProjectionOffsetX,
+        danmakuProjectionOffsetY: _danmakuProjectionOffsetY,
+        danmakuProjectionOpacity: _danmakuProjectionOpacity,
         danmakuSources: _danmakuSources,
         danmakuSourceIdx: _danmakuSourceIdx,
         onDanmakuSourceChanged: (i) {
@@ -2784,7 +2816,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'danmakuRows') {
             setState(() => _danmakuRows = int.tryParse(v) ?? _danmakuRows);
           }
-          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuFixedDurationMs' || k == 'danmakuLineSpacing' || k == 'danmakuStrokeMode' || k == 'danmakuColorMode' || k == 'danmakuFont' || k == 'danmakuRowsTop' || k == 'danmakuRowsBottom') {
+          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuScrollGap' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuFixedDurationMs' || k == 'danmakuLineSpacing' || k == 'danmakuStrokeMode' || k == 'danmakuStrokeWidth' || k == 'danmakuShadowOpacity' || k == 'danmakuProjectionOffsetX' || k == 'danmakuProjectionOffsetY' || k == 'danmakuProjectionOpacity' || k == 'danmakuColorMode' || k == 'danmakuFont' || k == 'danmakuRowsTop' || k == 'danmakuRowsBottom') {
             unawaited(_refreshDanmakuPrefs());
           }
           if (k == 'playerDecode') {
@@ -2831,9 +2863,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             setState(() => _kept = kept);
           }
           return kept ? '取消收藏' : '收藏';
-        },
-        onDanmakuChanged: (v) {
-          if (mounted) setState(() => _danmakuOn = v);
         },
         onAmbientChanged: (v) {
           if (mounted) setState(() => _ambientOn = v);
