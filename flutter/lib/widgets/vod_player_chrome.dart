@@ -144,30 +144,24 @@ class VodInlineControls extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
-      // 播停/音量靠 ChangeNotifier；进度必须走 positionStream——
-      // 桌面 MPV（MediaKit）故意不因 position 高频 notifyListeners，否则详情内嵌进度条会停住。
-      child: ListenableBuilder(
-        listenable: player,
-        builder: (context, _) {
-          return StreamBuilder<Duration>(
-            stream: player.positionStream,
-            builder: (context, _) {
-              final pos = player.position;
-              final dur = player.duration;
-              final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
-              final vol = player.volume.clamp(0, 100).toDouble();
-              return LayoutBuilder(
-                builder: (context, constraints) {
-                  // 仅迷你窗缩控件；详情内嵌始终显示「当前 / 总时长」
-                  final narrow = miniActive || constraints.maxWidth < 480;
-                  final iconSize = narrow ? 32.0 : 40.0;
-                  final volW = narrow ? 72.0 : 110.0;
-                  return Padding(
-                    padding: EdgeInsets.fromLTRB(narrow ? 4 : 8, narrow ? 2 : 6, narrow ? 4 : 8, narrow ? 2 : 6),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
+      // 播停/音量：ListenableBuilder；进度：positionStream（Exo/MPV 也不因进度 notify）。
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow = miniActive || constraints.maxWidth < 480;
+          final iconSize = narrow ? 32.0 : 40.0;
+          final volW = narrow ? 72.0 : 110.0;
+          return Padding(
+            padding: EdgeInsets.fromLTRB(narrow ? 4 : 8, narrow ? 2 : 6, narrow ? 4 : 8, narrow ? 2 : 6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    ListenableBuilder(
+                      listenable: player,
+                      builder: (context, _) {
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             _IconAct(
                               icon: player.playing ? Icons.pause : Icons.play_arrow,
@@ -196,49 +190,67 @@ class VodInlineControls extends StatelessWidget {
                               ),
                             if (onExpand != null && !miniActive)
                               KotvFullscreenExpandButton(size: iconSize, onSelect: onExpand!),
-                            SizedBox(width: narrow ? 4 : 8),
-                            Flexible(
-                              child: Text(
-                                '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: narrow ? 11 : 12),
-                              ),
-                            ),
-                            if (!narrow) ...[
-                              const Spacer(),
-                              Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
-                            ] else
-                              const SizedBox(width: 4),
-                            SizedBox(
-                              width: volW,
-                              child: ExcludeFocus(
-                                child: SliderTheme(
-                                  data: _sliderTheme(context),
-                                  child: Slider(
-                                    value: vol,
-                                    max: 100,
-                                    onChanged: (v) => player.setVolume(v),
-                                  ),
-                                ),
-                              ),
-                            ),
                           ],
-                        ),
-                        ExcludeFocus(
-                          child: KotvSeekSlider(
-                            player: player,
-                            maxMs: total,
-                            secondaryMs: _sliderBuffered(player, total),
-                            theme: _sliderTheme(context),
-                          ),
-                        ),
-                      ],
+                        );
+                      },
                     ),
-                  );
-                },
-              );
-            },
+                    SizedBox(width: narrow ? 4 : 8),
+                    Flexible(
+                      child: StreamBuilder<Duration>(
+                        stream: player.positionStream,
+                        builder: (context, _) {
+                          return Text(
+                            '${fmtPlayerTime(player.position)} / ${fmtPlayerTime(player.duration)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: narrow ? 11 : 12),
+                          );
+                        },
+                      ),
+                    ),
+                    if (!narrow) ...[
+                      const Spacer(),
+                      Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                    ] else
+                      const SizedBox(width: 4),
+                    SizedBox(
+                      width: volW,
+                      child: ListenableBuilder(
+                        listenable: player,
+                        builder: (context, _) {
+                          final vol = player.volume.clamp(0, 100).toDouble();
+                          return ExcludeFocus(
+                            child: SliderTheme(
+                              data: _sliderTheme(context),
+                              child: Slider(
+                                value: vol,
+                                max: 100,
+                                onChanged: (v) => player.setVolume(v),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                ExcludeFocus(
+                  child: StreamBuilder<Duration>(
+                    stream: player.positionStream,
+                    builder: (context, _) {
+                      final dur = player.duration;
+                      final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
+                      return KotvSeekSlider(
+                        player: player,
+                        maxMs: total,
+                        secondaryMs: _sliderBuffered(player, total),
+                        theme: _sliderTheme(context),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           );
         },
       ),

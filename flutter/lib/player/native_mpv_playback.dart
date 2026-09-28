@@ -351,9 +351,9 @@ class NativeMpvPlayback extends KotvPlayback {
           buffering: _buffering,
           speedBps: _speedBps,
         );
-        // 进度变化要 notify，否则 VodInlineControls 的 ListenableBuilder 不刷新。
+        // 进度走 positionStream；仅播停/缓冲态 notify（控件已不靠 Listenable 刷进度）。
         final next = KotvPositionSample.fromEvent(m, prev);
-        final changed = next.shouldNotify(prev);
+        final stateChanged = next.shouldNotifyState(prev);
         _position = next.position;
         _duration = next.duration;
         _buffered = next.buffered;
@@ -362,7 +362,7 @@ class NativeMpvPlayback extends KotvPlayback {
         _speedBps = next.speedBps;
         if (!_posCtrl.isClosed) _posCtrl.add(_position);
         if (!_bufCtrl.isClosed) _bufCtrl.add(_buffered);
-        if (changed) notifyListeners();
+        if (stateChanged) notifyListeners();
         break;
       case 'ready':
         final nw = (m['width'] as num?)?.toInt() ?? _w;

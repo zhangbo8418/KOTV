@@ -673,7 +673,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           result.success(true)
         }
       }
-      // SurfaceView Hybrid Composition 上 Flutter 叠字会重影；缓冲 UI 画在原生宿主里。
+      // 已废弃：缓冲浮层改走 Flutter KotvBufferingOverlay；保留通道勿再扩。
       "setBufferingUi" -> {
         val show = call.argument<Boolean>("show") == true
         val text = call.argument<String>("text") ?: "缓冲中"
@@ -782,15 +782,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   internal fun attachSurfaceHost(host: KotvExoSurfaceHost) {
-    if (useFlutterTexture) {
-      // 老盒不走 PlatformView；若误挂了宿主也不绑 Surface，避免双输出。
-      Log.w(TAG, "ignore PlatformView host (flutterTexture path)")
-      return
-    }
     surfaceHost = host
     boundSurfaceView = null
+    if (useFlutterTexture) {
+      // Texture 出画走 Flutter Texture；PlatformView 只挂字幕 overlay，勿再绑视频 Surface。
+      host.prepareSubtitleOnly()
+      ensureSubtitleOverlay(host)
+      return
+    }
     ensureSubtitleOverlay(host)
     // 出画前只留黑底宿主；有尺寸后再 setRender 建 SurfaceView。
+    host.setBackgroundColor(android.graphics.Color.BLACK)
     if (surfaceLayerEnabled) {
       host.setRender(false, ::onSurfaceReady)
       onSurfaceReady()
@@ -854,7 +856,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val wantFlutter = renderTexture
     useFlutterTexture = wantFlutter
     if (useFlutterTexture) {
-      surfaceHost?.let { unbindPlayerOutput(it) }
+      surfaceHost?.let {
+        unbindPlayerOutput(it)
+        it.prepareSubtitleOnly()
+        ensureSubtitleOverlay(it)
+      }
       ensureFlutterTexture()
       bindPlayerSurface()
     } else {
@@ -916,6 +922,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (useFlutterTexture || !surfaceLayerEnabled) return
     val host = surfaceHost ?: return
     unbindPlayerOutput(host)
+    // Texture 字幕宿主可能把底色设成透明；回到 Surface 出画须恢复黑底。
+    host.setBackgroundColor(android.graphics.Color.BLACK)
     // PlatformView 路径仅 SurfaceView（Texture 已改走 Flutter Texture）。
     host.setRender(false, ::onSurfaceReady)
     bindPlayerSurface()
@@ -2653,6 +2661,7 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
     stripPlatformViewFocus()
   }
 
+  /** @deprecated 缓冲浮层已改 Flutter；保留实现勿再扩。 */
   fun setBufferingUi(show: Boolean, text: String) {
     bufferingText.text = text.ifBlank { "缓冲中" }
     bufferingPanel.visibility = if (show) View.VISIBLE else View.GONE
@@ -2668,6 +2677,16 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
     surfaceView = null
     textureView = null
     bufferingPanel.bringToFront()
+  }
+
+  /**
+   * Flutter Texture 出画时：宿主透明、无视频层，仅承载 [KotvSubtitleOverlay]。
+   * 原生 bufferingPanel 已废弃（缓冲走 Flutter [KotvBufferingOverlay]），保持隐藏。
+   */
+  fun prepareSubtitleOnly() {
+    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+    clearVideoLayer()
+    bufferingPanel.visibility = View.GONE
   }
 
   fun setRender(texture: Boolean, onReady: () -> Unit) {

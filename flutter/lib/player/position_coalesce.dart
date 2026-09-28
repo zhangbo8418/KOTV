@@ -32,13 +32,17 @@ class KotvPositionSample {
     );
   }
 
-  /// 是否需要 notifyListeners。
+  /// 是否需要 notifyListeners（含进度/网速）——旧路径；新路径用 [shouldNotifyState]。
   bool shouldNotify(KotvPositionSample prev) {
-    return playing != prev.playing ||
-        buffering != prev.buffering ||
+    return shouldNotifyState(prev) ||
         speedBps != prev.speedBps ||
         (position - prev.position).inMilliseconds.abs() >= 200 ||
         (buffered - prev.buffered).inMilliseconds.abs() >= 500 ||
         duration != prev.duration;
+  }
+
+  /// 仅播停/缓冲态变化才通知 ListenableBuilder（进度走 positionStream，避免掉帧）。
+  bool shouldNotifyState(KotvPositionSample prev) {
+    return playing != prev.playing || buffering != prev.buffering;
   }
 }

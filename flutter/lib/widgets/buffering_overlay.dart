@@ -7,8 +7,8 @@ import '../player/kotv_traffic.dart';
 
 /// 缓冲中在**播放器 Stack 内**居中显示转圈 + 实时网速（必须叠在视频区域，不能挂全局 Overlay）。
 ///
-/// Exo SurfaceView：改由原生宿主画浮层（Hybrid Composition 上 Flutter 叠字会重影）。
-/// 其它后端（MPV/FVP/Texture）仍用本组件 Flutter 浮层。
+/// 全后端统一用本组件 Flutter 浮层（含 Exo Surface/Texture）。
+/// 原生 `setBufferingUi` / host bufferingPanel 已废弃。
 /// 浮层用 [KotvTraffic] 测速。
 class KotvBufferingOverlay extends StatefulWidget {
   const KotvBufferingOverlay({
@@ -133,7 +133,7 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
     final label = (forced != null && forced.isNotEmpty)
         ? forced
         : '缓冲中  $speed';
-    // Exo Surface：缓冲 UI 画在原生宿主，避免 Hybrid Composition 叠字重影。
+    // 原生缓冲浮层已废弃；preferNative=true 时才走死路径。
     if (widget.player.preferNativeBufferingOverlay) {
       _syncNative(_visible, label);
       return const SizedBox.shrink();

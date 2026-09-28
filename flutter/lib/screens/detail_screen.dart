@@ -1182,7 +1182,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         final subFontPath = '${settings['subtitleFontPath'] ?? ''}'.trim();
         unawaited(_playback.setSubtitleStyle(
           scale: fontScale,
-          pos: subPos.clamp(0, 150),
+          pos: subPos.clamp(-20, 30),
           secondaryPos: subSecPos.clamp(0, 150),
           color: forceStyle && subColor.isNotEmpty ? subColor : null,
           borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
@@ -2408,8 +2408,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             // letterbox 默认黑底，避免镂空透出壳壁纸；氛围模式由外层沉浸 Stack 去掉四周黑底。
             const ColoredBox(color: Colors.black),
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
-            // 仅 Android：解析/无帧/缓冲盖住 Hybrid Surface，防止与控件叠影。
-            // 桌面 Texture 无重影，换集也不卸面，故不盖。
+            // 仅 Android：解析/无帧/起播缓冲盖住 Hybrid Surface，防叠影。
+            // 勿用 stalling：中途 STATE_BUFFERING 也会盖黑最后一帧（Exo 点播极卡）。
             if (kotvIsAndroid())
               ListenableBuilder(
                 listenable: _playback,
@@ -2418,7 +2418,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                       _status.contains('嗅探') ||
                       _status.contains('换集中');
                   final noFrame = _playback.width <= 0 && _playback.height <= 0;
-                  final cover = parsing || noFrame || _playback.stalling;
+                  final startBuf = !_playback.playing && _playback.buffering;
+                  final cover = parsing || noFrame || startBuf;
                   if (!cover) return const SizedBox.shrink();
                   return const ColoredBox(color: Colors.black);
                 },
@@ -2521,7 +2522,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final subFontPath = '${settings['subtitleFontPath'] ?? ''}'.trim();
       unawaited(_playback.setSubtitleStyle(
         scale: fontScale,
-        pos: subPos.clamp(0, 150),
+        pos: subPos.clamp(-20, 30),
         secondaryPos: subSecPos.clamp(0, 150),
         color: forceStyle && subColor.isNotEmpty ? subColor : null,
         borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,

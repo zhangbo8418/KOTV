@@ -154,18 +154,11 @@ class ExoPlayback extends KotvPlayback {
   /// 浮层网速：跟 Exo 真实缓冲态（含拖动后补缓存）；[buffering] 仍收紧以免误切播放器。
   bool get stalling => _buffering;
   @override
-  /// SurfaceView + MediaOverlay：原生叠字会被盖住；缓冲/解析走 Flutter 层。
+  /// 定案：缓冲/解析一律 Flutter [KotvBufferingOverlay]；原生 panel 废弃勿扩。
   bool get preferNativeBufferingOverlay => false;
   @override
   Future<void> setNativeBufferingOverlay({required bool visible, required String text}) async {
-    if (!preferNativeBufferingOverlay) return;
-    try {
-      await _ensureNative();
-      await _ch.invokeMethod('setBufferingUi', {
-        'show': visible,
-        'text': text,
-      });
-    } catch (_) {}
+    // 死路径：preferNativeBufferingOverlay 恒 false，保留空实现以免旧调用炸。
   }
   @override
   int get networkSpeedBps => _speedBps;
@@ -192,35 +185,57 @@ class ExoPlayback extends KotvPlayback {
     final tid = _textureId;
     if (_useFlutterTexture) {
       // Texture 兼容模式：create 完成前 tid 可能为空。
+      // 视频走 Flutter Texture；透明 PlatformView 仅挂原生字幕 overlay（否则 onCues 无处可画）。
+      final name = kotvNativeFitName(scale);
+      final subtitleHost = kotvExoSurfaceView(
+        key: ValueKey('kotv_exo_sub_$_surfaceGeneration'),
+        viewType: _viewType,
+        fitName: name,
+        hybrid: true,
+        onFit: (_) {},
+      );
       if (tid == null || tid < 0) {
-        return const ColoredBox(color: Colors.black);
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            const ColoredBox(color: Colors.black),
+            Positioned.fill(child: subtitleHost),
+          ],
+        );
       }
       return ColoredBox(
         color: Colors.black,
         child: LayoutBuilder(
           builder: (context, c) {
             final max = c.biggest;
+            Widget video;
             if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
-              return Texture(textureId: tid);
-            }
-            if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
-              return SizedBox(
+              video = Texture(textureId: tid);
+            } else if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
+              video = SizedBox(
                 width: max.width,
                 height: max.height,
                 child: Texture(textureId: tid),
               );
+            } else {
+              final size = (_w > 0 && _h > 0) ? _displaySize : const Size(16, 9);
+              final box = kotvBoxForVideoScale(max, size, scale);
+              final child = SizedBox(
+                width: box.width,
+                height: box.height,
+                child: Texture(textureId: tid),
+              );
+              video = effective == BoxFit.cover
+                  ? ClipRect(child: Center(child: child))
+                  : Center(child: child);
             }
-            final video = (_w > 0 && _h > 0) ? _displaySize : const Size(16, 9);
-            final box = kotvBoxForVideoScale(max, video, scale);
-            final child = SizedBox(
-              width: box.width,
-              height: box.height,
-              child: Texture(textureId: tid),
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                video,
+                Positioned.fill(child: subtitleHost),
+              ],
             );
-            if (effective == BoxFit.cover) {
-              return ClipRect(child: Center(child: child));
-            }
-            return Center(child: child);
           },
         ),
       );
@@ -322,7 +337,9 @@ class ExoPlayback extends KotvPlayback {
           speedBps: _speedBps,
         );
         final next = KotvPositionSample.fromEvent(m, prev);
-        final changed = next.shouldNotify(prev);
+        // 进度/网速只推 Stream；勿因 position 高频 notify（ListenableBuilder 会掉帧）。
+        // 播停/缓冲态变化才 notifyListeners。
+        final stateChanged = next.shouldNotifyState(prev);
         _position = next.position;
         _duration = next.duration;
         _buffered = next.buffered;
@@ -331,7 +348,7 @@ class ExoPlayback extends KotvPlayback {
         _speedBps = next.speedBps;
         if (!_posCtrl.isClosed) _posCtrl.add(_position);
         if (!_bufCtrl.isClosed) _bufCtrl.add(_buffered);
-        if (changed) notifyListeners();
+        if (stateChanged) notifyListeners();
         break;
       case 'ready':
       case 'size':
@@ -669,7 +686,8 @@ class ExoPlayback extends KotvPlayback {
   Future<void> seek(Duration d) async {
     await _ch.invokeMethod('seek', {'positionMs': d.inMilliseconds});
     _position = d;
-    notifyListeners();
+    if (!_posCtrl.isClosed) _posCtrl.add(_position);
+    // 进度走 Stream；勿 notifyListeners，避免拖动时整树 ListenableBuilder 重建。
   }
 
   @override

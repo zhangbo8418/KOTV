@@ -608,7 +608,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final subFontPath = '${settings['subtitleFontPath'] ?? ''}'.trim();
         unawaited(_playback.setSubtitleStyle(
           scale: fontScale.toDouble(),
-          pos: subPos.clamp(0, 150).toDouble(),
+          pos: subPos.clamp(-20, 30).toDouble(),
           secondaryPos: subSecPos.clamp(0, 150).toDouble(),
           color: forceStyle && subColor.isNotEmpty ? subColor : null,
           borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
@@ -1171,8 +1171,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return ExcludeFocus(child: view);
   }
 
-  /// 仅 Android Hybrid：无帧/缓冲时盖住防叠影。
-  /// 换台不盖黑，保留上一台最后一帧；桌面 Texture 不盖。
+  /// 仅 Android Hybrid：解析/无帧/起播缓冲盖住防叠影。
+  /// 勿用 stalling：中途补缓存会盖黑最后一帧。换台不盖，保留上一台帧。
   Widget _buildLiveSurfaceCover() {
     if (kotvIsDesktop()) return const SizedBox.shrink();
     return ListenableBuilder(
@@ -1181,11 +1181,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final loading = _loading ||
             _status.contains('解析') ||
             _status.contains('加载') ||
-            _status.contains('缓冲') ||
             _status.contains('嗅探');
         final noFrame = _playback.width <= 0 && _playback.height <= 0;
+        final startBuf = !_playback.playing && _playback.buffering;
         // 换台中若仍有上一帧尺寸，不盖黑。
-        final cover = loading || (noFrame && !_status.contains('换台')) || _playback.stalling;
+        final cover = loading ||
+            (noFrame && !_status.contains('换台')) ||
+            (startBuf && !_status.contains('换台'));
         if (!cover) return const SizedBox.shrink();
         return const IgnorePointer(child: ColoredBox(color: Colors.black));
       },
@@ -2273,18 +2275,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final isDown = event is KeyDownEvent;
+    final isRepeat = event is KeyRepeatEvent;
+    if (!isDown && !isRepeat) return KeyEventResult.ignored;
     final key = event.logicalKey;
     final chs = _channels;
 
     if (kotvIsBackKey(key)) {
+      if (!isDown) return KeyEventResult.ignored;
       if (_handleLiveBack()) return KeyEventResult.handled;
       return KeyEventResult.ignored;
     }
 
-    // 数字切台：控件开着也可用（常见盒子习惯）。
+    // 数字切台：控件开着也可用（常见盒子习惯）；仅 Down，勿 KeyRepeat 连发。
     final digit = kotvDigitFromKey(key);
     if (digit != null) {
+      if (!isDown) return KeyEventResult.ignored;
       _onZapDigit(digit);
       return KeyEventResult.handled;
     }
@@ -2292,6 +2298,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     // 有面板/底栏：方向键交给 TvFocus；快退/快进才 seek（勿抢选台横移）。
     if (_liveUiOpen) {
       if (kotvIsMenuKey(key)) {
+        if (!isDown) return KeyEventResult.ignored;
         if (_leftOpen || _rightOpen) {
           setState(() {
             _leftOpen = false;
@@ -2308,6 +2315,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return KeyEventResult.handled;
       }
       if (kotvIsSettingsKey(key)) {
+        if (!isDown) return KeyEventResult.ignored;
         _openRight();
         return KeyEventResult.handled;
       }
@@ -2325,6 +2333,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           kotvIsDownKey(key) ||
           kotvIsLeftKey(key) ||
           kotvIsRightKey(key)) {
+        if (!isDown) return KeyEventResult.ignored;
         final primary = FocusManager.instance.primaryFocus;
         if ((kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) &&
             (primary == null || primary == node) &&
@@ -2341,13 +2350,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
     // —— 控件全隐：一键一义 ——
     // 菜单 → 底栏；OK → 频道栏；设置 → 设置栏；上下换台；左右换线（回看则 seek）。
-    // 鼠标右键仍走返回，不在此处理。
+    // 鼠标右键仍走返回，不在此处理。菜单/返回/设置/OK 仅 Down；上下换台与左右 seek/换线接受 KeyRepeat。
     if (kotvIsMenuKey(key)) {
+      if (!isDown) return KeyEventResult.ignored;
       _showLiveChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
     if (_catchup) {
       if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+        if (!isDown) return KeyEventResult.ignored;
         _openLeft();
         return KeyEventResult.handled;
       }
@@ -2360,16 +2371,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return KeyEventResult.handled;
       }
       if (kotvIsSettingsKey(key)) {
+        if (!isDown) return KeyEventResult.ignored;
         _openRight();
         return KeyEventResult.handled;
       }
       // 时移中上下仍可换台
     }
     if (kotvIsSettingsKey(key)) {
+      if (!isDown) return KeyEventResult.ignored;
       _openRight();
       return KeyEventResult.handled;
     }
     if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+      if (!isDown) return KeyEventResult.ignored;
       _openLeft();
       return KeyEventResult.handled;
     }
