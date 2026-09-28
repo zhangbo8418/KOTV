@@ -144,22 +144,28 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 	case 3: // Spider：api 为 csp_/脚本路径，靠 jar+key 加载，勿按 HTTP 空址早拒。
 		sp := s.cfg.Spider(site)
 		skipHome := settings.ConsumeCrash()
-		var home string
-		if !skipHome {
+		if skipHome {
+			result = model.Result{}
+		} else {
+			type homeBundler interface {
+				HomeBundle(filter bool) (home string, homeVod string, err error)
+			}
+			var home, hv string
 			var herr error
-			home, herr = sp.HomeContent(true)
+			if hb, ok := sp.(homeBundler); ok {
+				home, hv, herr = hb.HomeBundle(true)
+			} else {
+				home, herr = sp.HomeContent(true)
+				if herr == nil {
+					hv, herr = sp.HomeVideoContent()
+				}
+			}
 			if herr != nil {
 				return model.Result{Success: false}, herr
 			}
-		}
-		result, err = decodeResult(home)
-		if err != nil {
-			return model.Result{Success: false}, err
-		}
-		if !skipHome {
-			hv, herr := sp.HomeVideoContent()
-			if herr != nil {
-				return model.Result{Success: false}, herr
+			result, err = decodeResult(home)
+			if err != nil {
+				return model.Result{Success: false}, err
 			}
 			extra, _ := decodeResult(hv)
 			if len(extra.List) > 0 {

@@ -102,6 +102,13 @@ func (p *jsPool) withSlot(fn func(s *jsSpider) (string, error)) (string, error) 
 	return fn(s)
 }
 
+// withStickySlot 同 slot 连续跑多段（如 home→homeVod），避免二次 acquire 冷启新 Runtime。
+func (p *jsPool) withStickySlot(fn func(s *jsSpider) error) error {
+	s, idx := p.acquire()
+	defer p.release(idx)
+	return fn(s)
+}
+
 func (p *jsPool) Init(ext string) error {
 	p.ext = ext
 	_, err := p.withSlot(func(s *jsSpider) (string, error) {
@@ -109,6 +116,20 @@ func (p *jsPool) Init(ext string) error {
 		return "", s.Init(ext)
 	})
 	return err
+}
+
+// HomeBundle 同 slot 串行 home + homeVod（首页专用）。
+func (p *jsPool) HomeBundle(filter bool) (home string, homeVod string, err error) {
+	err = p.withStickySlot(func(s *jsSpider) error {
+		var e error
+		home, e = s.HomeContent(filter)
+		if e != nil {
+			return e
+		}
+		homeVod, e = s.HomeVideoContent()
+		return e
+	})
+	return home, homeVod, err
 }
 
 func (p *jsPool) HomeContent(filter bool) (string, error) {

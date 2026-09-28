@@ -1346,12 +1346,7 @@ func (s *jsSpider) interrupt() {
 
 func (s *jsSpider) Init(ext string) error {
 	s.ext = ext
-	// EnsureJar 已在 runWorker dex；此处保留以防 Init 早于 worker。
-	if jar := s.resolveJsJar(); jar != "" {
-		if err := EnsureJar(jar); err != nil {
-			log.Printf("js spider dex(jar) failed key=%s: %v", s.key, err)
-		}
-	}
+	// EnsureJar 只在 runWorker 做一次；此处勿再同步 HTTP parseJar。
 	_, err := s.invoke("init", ext)
 	return err
 }

@@ -3261,6 +3261,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             children: [
               Row(
                 children: [
+                  SizedBox(
+                    width: _channelNumColWidth(15, digits: _channelNumDigitsFor(_channels)),
+                    child: Text(
+                      _channelNum,
+                      softWrap: false,
+                      overflow: TextOverflow.clip,
+                      style: TextStyle(
+                        color: p.fg,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   _LiveChannelLogo(name: title, logo: _currentLogo, width: 40, height: 30),
                   const SizedBox(width: 8),
                   Expanded(
@@ -3268,7 +3283,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         KotvMarqueeText(
-                          '$_channelNum  $title',
+                          title,
                           active: true,
                           style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w700),
                         ),

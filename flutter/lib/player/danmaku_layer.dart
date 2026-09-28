@@ -278,6 +278,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
   List<DanmakuItem> _sorted = const [];
   int _cursor = 0;
   double _lastActivateSec = -1;
+  double _layoutW = 0;
+  bool _activateScheduled = false;
 
   /// 媒体时钟：播中用墙钟外推，暂停钉住；positionStream 定期校准。
   Duration _basePos = Duration.zero;
@@ -290,15 +292,37 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     super.initState();
     _sorted = _sortedCopy(widget.items);
     _bindPlayer(widget.player);
+    _tick.addListener(_onTick);
     _syncTicker();
   }
 
   @override
   void dispose() {
+    _tick.removeListener(_onTick);
     _posSub?.cancel();
     widget.player.removeListener(_onPlayerNotify);
     _tick.dispose();
     super.dispose();
+  }
+
+  void _onTick() {
+    if (!mounted || !widget.enabled || _paused) return;
+    final w = _layoutW;
+    if (w < 1) return;
+    _activate(_mediaPos.inMilliseconds / 1000.0, viewW: w);
+  }
+
+  void _scheduleActivate(double viewW) {
+    _layoutW = viewW;
+    if (_activateScheduled || !widget.enabled || _paused) return;
+    _activateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _activateScheduled = false;
+      if (!mounted || !widget.enabled || _paused) return;
+      final w = _layoutW;
+      if (w < 1) return;
+      _activate(_mediaPos.inMilliseconds / 1000.0, viewW: w);
+    });
   }
 
   @override
@@ -618,12 +642,16 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
                 final w = c.maxWidth;
                 final h = c.maxHeight;
                 if (w < 1 || h < 1) return const SizedBox.shrink();
+                if ((w - _layoutW).abs() > 0.5) {
+                  _scheduleActivate(w);
+                } else {
+                  _layoutW = w;
+                }
                 final mediaSec = _mediaPos.inMilliseconds / 1000.0;
-                if (!_paused) _activate(mediaSec, viewW: w);
                 return CustomPaint(
                   size: Size(w, h),
                   painter: _DanmakuPainter(
-                    flying: List.of(_flying),
+                    flying: _flying,
                     mediaSec: mediaSec,
                     fontSize: widget.fontSize,
                     opacity: widget.opacity,
@@ -788,5 +816,20 @@ class _DanmakuPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _DanmakuPainter old) => true;
+  bool shouldRepaint(covariant _DanmakuPainter old) {
+    return mediaSec != old.mediaSec ||
+        flying.length != old.flying.length ||
+        !identical(flying, old.flying) ||
+        fontSize != old.fontSize ||
+        opacity != old.opacity ||
+        rows != old.rows ||
+        scrollAreaRatio != old.scrollAreaRatio ||
+        bold != old.bold ||
+        lineSpacing != old.lineSpacing ||
+        strokeMode != old.strokeMode ||
+        colorMode != old.colorMode ||
+        rowsTop != old.rowsTop ||
+        rowsBottom != old.rowsBottom ||
+        fontFamily != old.fontFamily;
+  }
 }

@@ -39,7 +39,7 @@ class SpiderService private constructor(
    * 固定池在启动时建线程，避免 accept 时再创建。
    */
   private val workerPool = Executors.newFixedThreadPool(
-    4,
+    spiderHttpPoolSize(),
     object : ThreadFactory {
       private val n = AtomicInteger(0)
       override fun newThread(r: Runnable): Thread =
@@ -267,6 +267,12 @@ class SpiderService private constructor(
     private const val TAG = "KotvSpiderService"
     const val DefaultHost = "127.0.0.1"
     const val DefaultPort = 9979
+
+    // 与 Go JS 池上限同级：过小会让 /jar/call 与 sniff 互相排队。
+    private fun spiderHttpPoolSize(): Int {
+      val n = Runtime.getRuntime().availableProcessors().coerceAtLeast(4)
+      return n.coerceAtMost(8)
+    }
 
     fun create(context: Context, host: String, port: Int): SpiderService {
       return SpiderService(context.applicationContext, host, port)

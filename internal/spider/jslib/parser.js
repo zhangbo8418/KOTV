@@ -19,7 +19,6 @@ if (!load) {
 
 globalThis.cheerio = cheerioMod.default ?? cheerioMod;
 
-const PARSE_CACHE = true;
 const NOADD_INDEX =
   ":eq|:lt|:gt|:first|:last|:not|:even|:odd|:has|:contains|:matches|:empty|^body$|^#";
 const URLJOIN_ATTR = "(url|src|href|-original|-src|-play|-url|style)$|^(data-|url-|src-)";
@@ -103,11 +102,29 @@ function resolveUrl(base, rel) {
   }
 }
 
+/** 同 html 复用 Document（FongMi Cache 同思路）；顶层函数共用一份。 */
+const docCache = {
+  pdfhHtml: "",
+  pdfhDoc: null,
+  pdfaHtml: "",
+  pdfaDoc: null,
+  getPdfh(html) {
+    if (html === this.pdfhHtml && this.pdfhDoc) return this.pdfhDoc;
+    this.pdfhDoc = load(html);
+    this.pdfhHtml = html;
+    return this.pdfhDoc;
+  },
+  getPdfa(html) {
+    if (html === this.pdfaHtml && this.pdfaDoc) return this.pdfaDoc;
+    this.pdfaDoc = load(html);
+    this.pdfaHtml = html;
+    return this.pdfaDoc;
+  },
+};
+
 class Jsoup {
   constructor(myUrl = "") {
     this.MY_URL = myUrl;
-    this.pdfa_html = "";
-    this.pdfa_doc = null;
   }
 
   parseOneRule(doc, nparse, ret) {
@@ -125,17 +142,12 @@ class Jsoup {
 
   pdfa(html, parse) {
     if (!html || !parse) return [];
-    // 以 / 开头走 xpath
     if (parse.startsWith("/") && typeof globalThis.__xpathList === "function") {
       const list = globalThis.__xpathList(html, parse);
       return Array.isArray(list) ? list : [];
     }
     parse = parseHikerToJq(parse, false);
-    const doc = load(html);
-    if (PARSE_CACHE && this.pdfa_html !== html) {
-      this.pdfa_html = html;
-      this.pdfa_doc = doc;
-    }
+    const doc = docCache.getPdfa(html);
     const parses = parse.split(" ");
     let ret = null;
     for (const nparse of parses) {
@@ -151,7 +163,6 @@ class Jsoup {
 
   pdfl(html, parse, listText, listUrl, urlKey) {
     if (!html || !parse) return [];
-    // 第 5 参 urlKey 才是拼接基址（drpy 传 MY_URL）。
     const base = urlKey || this.MY_URL || globalThis.MY_URL || "";
     if (parse.startsWith("/") && typeof globalThis.__xpathList === "function") {
       const nodes = globalThis.__xpathList(html, parse);
@@ -165,7 +176,7 @@ class Jsoup {
       return out;
     }
     parse = parseHikerToJq(parse, false);
-    const doc = load(html);
+    const doc = docCache.getPdfa(html);
     const parses = parse.split(" ");
     let ret = null;
     for (const pars of parses) {
@@ -199,18 +210,13 @@ class Jsoup {
         return globalThis.__xpathHtml(html, expr) || "";
       }
       if (option && option !== "Text" && option !== "Html") {
-        // 属性：用节点 outerHTML 再走 CSS 取属性
         const node = globalThis.__xpathHtml(html, expr) || "";
         if (!node) return "";
         return this.pdfh(node, "body&&" + option, baseUrl);
       }
       return globalThis.__xpathHtml(html, expr) || "";
     }
-    const doc = load(html);
-    if (PARSE_CACHE && this.pdfa_html !== html) {
-      this.pdfa_html = html;
-      this.pdfa_doc = doc;
-    }
+    const doc = docCache.getPdfh(html);
     if (parse === "body&&Text" || parse === "Text") return parseText(doc.text());
     if (parse === "body&&Html" || parse === "Html") return doc.html() || "";
 
@@ -259,7 +265,6 @@ class Jsoup {
   }
 
   pd(html, parse, baseUrl = "") {
-    // pdfh 后再 joinUrl(base, result)
     if (!baseUrl) baseUrl = this.MY_URL;
     const result = this.pdfh(html, parse, "");
     if (!result) return "";
@@ -269,11 +274,14 @@ class Jsoup {
   }
 }
 
+/** 模块级单例：避免每次 pdf* 新建实例导致 Document 缓存失效。 */
+const shared = new Jsoup();
+
 function pdfh(html, parse, baseUrl) {
-  // 优先进程内 Jsoup。Android 上 __jarPdf* 走 :9979 RPC，实测单次 pdfa ~2–3s
-  //（潇洒哥 homeVod 累计 25s+；路漫漫 category ~10s），PC 同路径也偏慢。
+  // 优先进程内 cheerio。Android 上 __jarPdf* 走 :9979 RPC，实测单次 pdfa ~2–3s。
   try {
-    return new Jsoup(baseUrl || globalThis.MY_URL || "").pdfh(html, parse, baseUrl || "");
+    shared.MY_URL = baseUrl || globalThis.MY_URL || "";
+    return shared.pdfh(html, parse, baseUrl || "");
   } catch (_) {}
   if (typeof globalThis.__jarPdfh === "function") {
     try {
@@ -285,7 +293,7 @@ function pdfh(html, parse, baseUrl) {
 }
 function pdfa(html, parse) {
   try {
-    return new Jsoup().pdfa(html, parse);
+    return shared.pdfa(html, parse);
   } catch (_) {}
   if (typeof globalThis.__jarPdfa === "function") {
     try {
@@ -297,7 +305,8 @@ function pdfa(html, parse) {
 }
 function pd(html, parse, baseUrl) {
   try {
-    return new Jsoup(baseUrl || globalThis.MY_URL || "").pd(html, parse, baseUrl || "");
+    shared.MY_URL = baseUrl || globalThis.MY_URL || "";
+    return shared.pd(html, parse, baseUrl || "");
   } catch (_) {}
   if (typeof globalThis.__jarPd === "function") {
     try {
@@ -310,8 +319,8 @@ function pd(html, parse, baseUrl) {
 function pdfl(html, parse, listText, listUrl, urlKey) {
   const base = urlKey || globalThis.MY_URL || "";
   try {
-    // 回落时把 urlKey 传给 pd，避免 new Jsoup() 无 MY_URL 导致集地址保持相对 path。
-    return new Jsoup(base).pdfl(html, parse, listText, listUrl, base);
+    shared.MY_URL = base;
+    return shared.pdfl(html, parse, listText, listUrl, base);
   } catch (_) {}
   if (typeof globalThis.__jarPdfl === "function") {
     try {
