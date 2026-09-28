@@ -39,6 +39,7 @@ import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/live_player_chrome.dart';
+import '../widgets/marquee_text.dart';
 import '../widgets/mini_hover_shell.dart';
 import '../widgets/vod_player_chrome.dart';
 import 'shell.dart';
@@ -1855,6 +1856,62 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return '${indexInGroup + 1}'.padLeft(3, '0');
   }
 
+  /// 频道号列宽：按字号估 3–4 位 tabular，避免 PC 全屏被裁成半个字。
+  double _channelNumColWidth(double fontSize, {int digits = 3}) {
+    return (fontSize * 0.62 * digits + 10).clamp(40.0, 72.0);
+  }
+
+  /// 侧栏超宽时优先缩 EPG/分组，频道列保底（号码+logo+短台名）。
+  ({double groupW, double channelW, double epgW, double epgTabW}) _fitLivePanelCols({
+    required double innerMax,
+    required double gap1,
+    required double gapTab,
+    required double gap2,
+    required bool epgOpen,
+    required double channelFloor,
+    required double groupFloor,
+    required double epgFloor,
+    required double epgTabFloor,
+    required double groupW,
+    required double channelW,
+    required double epgW,
+    required double epgTabW,
+  }) {
+    var g = groupW;
+    var c = channelW;
+    var e = epgW;
+    var t = epgTabW;
+    double content() => g + gap1 + c + gapTab + t + (epgOpen ? gap2 + e : 0);
+    var excess = content() - innerMax;
+    if (excess <= 0) {
+      return (groupW: g, channelW: c, epgW: e, epgTabW: t);
+    }
+    if (epgOpen && excess > 0) {
+      final can = (e - epgFloor).clamp(0.0, e);
+      final take = excess < can ? excess : can;
+      e -= take;
+      excess -= take;
+    }
+    if (excess > 0) {
+      final can = (g - groupFloor).clamp(0.0, g);
+      final take = excess < can ? excess : can;
+      g -= take;
+      excess -= take;
+    }
+    if (excess > 0) {
+      final can = (c - channelFloor).clamp(0.0, c);
+      final take = excess < can ? excess : can;
+      c -= take;
+      excess -= take;
+    }
+    if (excess > 0 && t > epgTabFloor) {
+      final can = (t - epgTabFloor).clamp(0.0, t);
+      final take = excess < can ? excess : can;
+      t -= take;
+    }
+    return (groupW: g, channelW: c, epgW: e, epgTabW: t);
+  }
+
   void _showLiveChromeAndFocusPlay() {
     setState(() {
       _leftOpen = false;
@@ -2098,10 +2155,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
+                    child: KotvMarqueeText(
                       label,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                      active: sel || focusHere,
                       style: TextStyle(
                         color: sel ? Colors.white : p.fg,
                         fontSize: 13,
@@ -2156,10 +2212,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                     ),
                   ),
                 Expanded(
-                  child: Text(
+                  child: KotvMarqueeText(
                     '$label${playing ? ' · 回看中' : (canCatchup ? ' · 回看' : '')}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                    active: sel || focusHere,
                     style: TextStyle(
                       color: Colors.white.withOpacity(sel ? 1 : 0.85),
                       fontSize: land ? 12 : (12.0 * wScale.clamp(1.0, 1.2)),
@@ -2579,28 +2634,45 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             final gap1 = land ? 4.0 : 6.0;
                             final gapTab = land ? 4.0 : 6.0;
                             final gap2 = land ? 6.0 : 6.0;
-                            final contentW = groupW +
-                                gap1 +
-                                channelW +
-                                gapTab +
-                                epgTabW +
-                                (_epgOpen ? gap2 + epgW : 0);
-                            final leftW = contentW + padH;
                             final pillH = land ? 30.0 : 36.0;
                             final chH = land ? 36.0 : 48.0;
                             final font = land ? 12.0 : (13.0 * wScale.clamp(1.0, 1.25));
                             final logoW = land ? 28.0 : 40.0;
                             final logoH = land ? 22.0 : 30.0;
+                            final numColW = _channelNumColWidth(font, digits: 4);
+                            final channelChrome = numColW + (land ? 4 : 12) + logoW + (land ? 6 : 12);
+                            final channelFloor = channelChrome + 56;
                             // 桌面全屏最多约占半屏，避免挡完画面；窄屏仍可到 92%
                             final maxFrac = (_immersive && !land) ? 0.52 : 0.92;
-                            final panelW = leftW.clamp(0.0, screenW * maxFrac);
+                            final contentW0 = groupW +
+                                gap1 +
+                                channelW +
+                                gapTab +
+                                epgTabW +
+                                (_epgOpen ? gap2 + epgW : 0);
+                            final leftW0 = contentW0 + padH;
+                            final panelW = leftW0.clamp(0.0, screenW * maxFrac);
                             final innerMax = (panelW - padH).clamp(1.0, panelW);
-                            if (contentW > innerMax) {
-                              final scale = innerMax / contentW;
-                              groupW *= scale;
-                              channelW *= scale;
-                              epgW *= scale;
-                              epgTabW *= scale;
+                            if (contentW0 > innerMax) {
+                              final fitted = _fitLivePanelCols(
+                                innerMax: innerMax,
+                                gap1: gap1,
+                                gapTab: gapTab,
+                                gap2: gap2,
+                                epgOpen: _epgOpen,
+                                channelFloor: channelFloor,
+                                groupFloor: land ? 72.0 : 88.0,
+                                epgFloor: land ? 120.0 : 140.0,
+                                epgTabFloor: land ? 24.0 : 28.0,
+                                groupW: groupW,
+                                channelW: channelW,
+                                epgW: epgW,
+                                epgTabW: epgTabW,
+                              );
+                              groupW = fitted.groupW;
+                              channelW = fitted.channelW;
+                              epgW = fitted.epgW;
+                              epgTabW = fitted.epgTabW;
                             }
                             return SizedBox(
                             width: panelW,
@@ -2623,6 +2695,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                             height: pillH,
                                             fontSize: font,
                                             selected: i == _groupIdx,
+                                            marqueeWhenSelected: true,
                                             onTap: () {
                                               _cancelHideOverlays();
                                               _selectGroup(i);
@@ -2661,12 +2734,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                   child: Row(
                                                     children: [
                                                       SizedBox(
-                                                        width: land ? 30 : 36,
+                                                        width: numColW,
                                                         child: Text(
                                                           _channelNumberLabel(ch, i),
+                                                          softWrap: false,
                                                           style: TextStyle(
                                                             color: Colors.white.withOpacity(0.8),
                                                             fontSize: land ? 12 : 16,
+                                                            fontFeatures: const [FontFeature.tabularFigures()],
                                                           ),
                                                         ),
                                                       ),
@@ -2674,10 +2749,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                       _LiveChannelLogo(name: name, logo: logo, width: logoW, height: logoH),
                                                       SizedBox(width: land ? 6 : 12),
                                                       Expanded(
-                                                        child: Text(
+                                                        child: KotvMarqueeText(
                                                           name,
-                                                          maxLines: 2,
-                                                          overflow: TextOverflow.ellipsis,
+                                                          active: sel || focusHere,
                                                           style: TextStyle(
                                                             color: Colors.white,
                                                             fontSize: land ? 12 : (15.0 * wScale.clamp(1.0, 1.2)),
@@ -2986,17 +3060,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(
+                                    KotvMarqueeText(
                                       _title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                      active: true,
                                       style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
                                     ),
                                     if (_programLabel.isNotEmpty || _status.isNotEmpty)
-                                      Text(
+                                      KotvMarqueeText(
                                         _programLabel.isNotEmpty ? _programLabel : _status,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                        active: true,
                                         style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13),
                                       ),
                                   ],
@@ -3151,20 +3223,18 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        KotvMarqueeText(
                           '$_channelNum  $title',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          active: true,
                           style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w700),
                         ),
-                        Text(
+                        KotvMarqueeText(
                           [
                             if (_programLabel.isNotEmpty) _programLabel,
                             if (_lineLabel.isNotEmpty) _lineLabel,
                             _status,
                           ].where((e) => e.isNotEmpty).join(' · '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          active: true,
                           style: TextStyle(color: p.muted, fontSize: 12),
                         ),
                       ],
@@ -3297,10 +3367,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         constraints: const BoxConstraints(minHeight: 28),
                         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
                         alignment: Alignment.center,
-                        child: Text(
+                        child: KotvMarqueeText(
                           name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                          active: sel,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: sel ? Colors.white : p.fg,
@@ -3342,17 +3411,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         child: Row(
                           children: [
                             SizedBox(
-                              width: 28,
-                              child: Text(_channelNumberLabel(ch, i), style: TextStyle(color: p.muted, fontSize: 11)),
+                              width: _channelNumColWidth(11, digits: 4),
+                              child: Text(
+                                _channelNumberLabel(ch, i),
+                                softWrap: false,
+                                style: TextStyle(
+                                  color: p.muted,
+                                  fontSize: 11,
+                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                ),
+                              ),
                             ),
                             const SizedBox(width: 4),
                             _LiveChannelLogo(name: name, logo: logo, width: 28, height: 22),
                             const SizedBox(width: 6),
                             Expanded(
-                              child: Text(
+                              child: KotvMarqueeText(
                                 name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                active: sel,
                                 style: TextStyle(
                                   color: p.fg,
                                   fontSize: 12,

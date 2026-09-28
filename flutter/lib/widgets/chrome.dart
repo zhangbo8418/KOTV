@@ -8,6 +8,7 @@ import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import 'h_scroll.dart';
+import 'marquee_text.dart';
 
 /// Legacy 背景：按 settings.backdrop（wallMode）切换渐变/壁纸/内置主题。
 class AppBackdrop extends ConsumerStatefulWidget {
@@ -185,6 +186,7 @@ class AppPill extends StatelessWidget {
     this.autofocus = false,
     this.focusNode,
     this.suffix,
+    this.marqueeWhenSelected = false,
   });
 
   final String label;
@@ -200,6 +202,8 @@ class AppPill extends StatelessWidget {
   final FocusNode? focusNode;
   /// 固定显示在文案后的标记（如「（当前）」），不参与省略，避免长 URL 把标记裁掉。
   final String? suffix;
+  /// 选中时对过长 label 跑马灯（直播分组等）。
+  final bool marqueeWhenSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -219,16 +223,23 @@ class AppPill extends StatelessWidget {
       fontFamilyFallback: kotvFontFallbacks(),
     );
     final hasSuffix = suffix != null && suffix!.isNotEmpty;
-    final labelText = Text(
-      label,
-      maxLines: 1,
-      softWrap: false,
-      overflow: TextOverflow.ellipsis,
-      textAlign: hasSuffix ? TextAlign.left : TextAlign.center,
-      style: style,
-    );
+    final labelText = marqueeWhenSelected
+        ? KotvMarqueeText(
+            label,
+            style: style,
+            active: selected,
+            textAlign: hasSuffix ? TextAlign.left : TextAlign.center,
+          )
+        : Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+            textAlign: hasSuffix ? TextAlign.left : TextAlign.center,
+            style: style,
+          );
     // 有 suffix 时拉满可用宽度，保证「（当前）」不被长 URL 挤掉。
-    final effectiveWidth = w ?? (hasSuffix ? double.infinity : null);
+    final effectiveWidth = w ?? (hasSuffix || marqueeWhenSelected ? double.infinity : null);
     final content = hasSuffix
         ? Row(
             children: [
@@ -260,7 +271,9 @@ class AppPill extends StatelessWidget {
             ),
             // 固定宽度：居中；自适应：widthFactor=1 按文字收缩，同时垂直居中
             child: effectiveWidth != null
-                ? (hasSuffix ? content : Center(child: content))
+                ? (hasSuffix || marqueeWhenSelected
+                    ? content
+                    : Center(child: content))
                 : Align(
                     alignment: Alignment.center,
                     widthFactor: 1,
