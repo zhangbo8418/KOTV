@@ -2370,7 +2370,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                   child: SizedBox(
                     width: rect.width,
                     height: rect.height,
-                    child: child,
+                    child: ClipRect(child: child),
                   ),
                 ),
               ],
@@ -2430,7 +2430,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 valueListenable: _danmakuItems,
                 builder: (context, items, _) => DanmakuOverlay(
                   enabled: _danmakuOn,
-                  position: _playback.position,
+                  player: _playback,
                   items: items,
                   fontSize: _danmakuSize,
                   opacity: _danmakuOpacity,

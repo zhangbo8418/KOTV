@@ -1052,7 +1052,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         _buildVideo(),
                         DanmakuOverlay(
                           enabled: _danmakuOn,
-                          position: _pos,
+                          player: widget.playback,
                           items: widget.danmakuItems,
                           fontSize: widget.danmakuSize,
                           opacity: widget.danmakuOpacity,

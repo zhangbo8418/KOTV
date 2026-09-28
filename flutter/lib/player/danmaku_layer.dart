@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'danmaku_file_read.dart';
+import 'kotv_playback.dart';
 
 /// 单条弹幕（internal/danmaku.Item）。
 class DanmakuItem {
@@ -208,12 +209,13 @@ class DanmakuSource {
   final String url;
 }
 
-/// 全屏弹幕层：按播放进度滚动显示。
+/// 叠在画面上的弹幕层：跟 [KotvPlayback.positionStream] 与媒体时钟滚动，
+/// 不依赖父组件 setState；暂停时冻结，倍速跟播放速率。
 class DanmakuOverlay extends StatefulWidget {
   const DanmakuOverlay({
     super.key,
     required this.enabled,
-    required this.position,
+    required this.player,
     required this.items,
     this.fontSize = 18,
     this.opacity = 0.85,
@@ -238,7 +240,7 @@ class DanmakuOverlay extends StatefulWidget {
   });
 
   final bool enabled;
-  final Duration position;
+  final KotvPlayback player;
   final List<DanmakuItem> items;
   final double fontSize;
   final double opacity;
@@ -267,13 +269,34 @@ class DanmakuOverlay extends StatefulWidget {
 }
 
 class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProviderStateMixin {
+  static const _maxActivateWindowSec = 3.0;
+
   late final AnimationController _tick =
-      AnimationController(vsync: this, duration: const Duration(days: 1))..repeat();
+      AnimationController(vsync: this, duration: const Duration(days: 1));
+  StreamSubscription<Duration>? _posSub;
   final List<_Flying> _flying = [];
-  double _lastSec = -1;
+  List<DanmakuItem> _sorted = const [];
+  int _cursor = 0;
+  double _lastActivateSec = -1;
+
+  /// 媒体时钟：播中用墙钟外推，暂停钉住；positionStream 定期校准。
+  Duration _basePos = Duration.zero;
+  int _baseElapsedMs = 0;
+  bool _paused = true;
+  double _rate = 1.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _sorted = _sortedCopy(widget.items);
+    _bindPlayer(widget.player);
+    _syncTicker();
+  }
 
   @override
   void dispose() {
+    _posSub?.cancel();
+    widget.player.removeListener(_onPlayerNotify);
     _tick.dispose();
     super.dispose();
   }
@@ -281,14 +304,89 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
   @override
   void didUpdateWidget(covariant DanmakuOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!widget.enabled) {
-      _flying.clear();
-      _lastSec = -1;
-      return;
+    if (!identical(oldWidget.player, widget.player)) {
+      oldWidget.player.removeListener(_onPlayerNotify);
+      _posSub?.cancel();
+      _bindPlayer(widget.player);
     }
     if (!identical(oldWidget.items, widget.items) && oldWidget.items != widget.items) {
+      _sorted = _sortedCopy(widget.items);
       _flying.clear();
-      _lastSec = -1;
+      _cursor = 0;
+      _lastActivateSec = -1;
+    }
+    if (oldWidget.enabled != widget.enabled) {
+      if (!widget.enabled) {
+        _flying.clear();
+        _lastActivateSec = -1;
+      } else {
+        _rebase(widget.player.position, paused: !widget.player.playing, rate: widget.player.rate);
+        _lastActivateSec = -1;
+        _cursor = 0;
+      }
+    }
+    _syncTicker();
+  }
+
+  List<DanmakuItem> _sortedCopy(List<DanmakuItem> items) {
+    if (items.isEmpty) return const [];
+    final out = List<DanmakuItem>.of(items);
+    out.sort((a, b) => a.time.compareTo(b.time));
+    return out;
+  }
+
+  void _bindPlayer(KotvPlayback p) {
+    _rebase(p.position, paused: !p.playing, rate: p.rate);
+    _posSub = p.positionStream.listen(_onPosition);
+    p.addListener(_onPlayerNotify);
+  }
+
+  void _onPlayerNotify() {
+    if (!mounted) return;
+    final p = widget.player;
+    final playing = p.playing;
+    final rate = p.rate <= 0 ? 1.0 : p.rate;
+    if (playing == !_paused && (rate - _rate).abs() < 0.001) return;
+    // 暂停瞬间钉住外推位置，避免 MPV position 尚未刷新导致回跳。
+    final pin = (!playing && !_paused) ? _mediaPos : p.position;
+    _rebase(pin, paused: !playing, rate: rate);
+    _syncTicker();
+  }
+
+  void _onPosition(Duration d) {
+    if (!mounted) return;
+    final jumpBack = d + const Duration(milliseconds: 400) < _mediaPos;
+    final jumpFwd = d > _mediaPos + const Duration(seconds: 2);
+    _rebase(d, paused: !widget.player.playing, rate: widget.player.rate);
+    if (jumpBack || jumpFwd) {
+      _flying.clear();
+      _lastActivateSec = -1;
+      _cursor = 0;
+    }
+  }
+
+  void _rebase(Duration pos, {required bool paused, required double rate}) {
+    _basePos = pos;
+    _baseElapsedMs = DateTime.now().millisecondsSinceEpoch;
+    _paused = paused;
+    _rate = rate <= 0 ? 1.0 : rate;
+  }
+
+  Duration get _mediaPos {
+    if (_paused) return _basePos;
+    final elapsed = DateTime.now().millisecondsSinceEpoch - _baseElapsedMs;
+    return _basePos + Duration(milliseconds: (elapsed * _rate).round());
+  }
+
+  void _syncTicker() {
+    final want = widget.enabled && !_paused;
+    if (want) {
+      if (!_tick.isAnimating) _tick.repeat();
+      return;
+    }
+    if (_tick.isAnimating) {
+      _tick.stop();
+      if (mounted) setState(() {});
     }
   }
 
@@ -302,38 +400,61 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     return widget.showScroll;
   }
 
-  void _spawn(Duration pos, Size size) {
-    if (!widget.enabled || widget.items.isEmpty) return;
-    final sec = pos.inMilliseconds / 1000.0;
-    if (_lastSec < 0) _lastSec = sec;
-    // 回退/跳播时重置窗口
-    if (sec + 0.05 < _lastSec) {
-      _flying.clear();
-      _lastSec = sec;
+  void _activate(double mediaSec) {
+    if (!widget.enabled || _sorted.isEmpty) return;
+    if (_lastActivateSec < 0) {
+      _lastActivateSec = mediaSec;
+      // 首次：游标移到当前时间，避免一上来把片头全吐出。
+      while (_cursor < _sorted.length && _sorted[_cursor].time < mediaSec) {
+        _cursor++;
+      }
+      return;
     }
-    final from = _lastSec;
-    final to = sec + 0.35;
+    if (mediaSec + 0.05 < _lastActivateSec) {
+      _flying.clear();
+      _lastActivateSec = mediaSec;
+      _cursor = 0;
+      while (_cursor < _sorted.length && _sorted[_cursor].time < mediaSec) {
+        _cursor++;
+      }
+      return;
+    }
+    final from = _lastActivateSec;
+    final to = mediaSec;
+    if (to <= from) return;
+    final windowFrom = math.max(from, to - _maxActivateWindowSec);
     final maxOn = widget.maxOnScreen.clamp(10, 500);
     final scrollDur = widget.durationMs.clamp(3000, 15000);
     final fixedDur = widget.fixedDurationMs.clamp(2000, 10000);
-    for (final it in widget.items) {
-      if (it.time >= from && it.time < to && _allowMode(it.mode)) {
-        final lanes = widget.rows.clamp(1, 16);
-        final fixed = it.mode == 4 || it.mode == 5 || it.mode == 7;
+    final lanes = widget.rows.clamp(1, 16);
+
+    while (_cursor < _sorted.length && _sorted[_cursor].time < windowFrom) {
+      _cursor++;
+    }
+    var i = _cursor;
+    while (i < _sorted.length) {
+      final it = _sorted[i];
+      if (it.time >= to) break;
+      if (it.time >= windowFrom && _allowMode(it.mode)) {
+        if (_flying.length >= maxOn) break;
+        final fixed = it.mode == 4 || it.mode == 5 || it.mode == 7 || it.mode >= 8;
         _flying.add(_Flying(
           item: it,
-          born: DateTime.now(),
-          lane: math.Random(it.content.hashCode ^ sec.toInt()).nextInt(lanes),
+          activatedSec: it.time,
+          lane: math.Random(it.content.hashCode ^ it.time.toInt()).nextInt(lanes),
           durationMs: fixed
               ? fixedDur
               : scrollDur + (it.content.length * 40).clamp(0, 3000),
         ));
       }
+      i++;
     }
-    _lastSec = to;
-    // 回收过期
-    final now = DateTime.now();
-    _flying.removeWhere((f) => now.difference(f.born).inMilliseconds > f.durationMs + 200);
+    _cursor = i;
+    _lastActivateSec = to;
+
+    _flying.removeWhere(
+      (f) => mediaSec - f.activatedSec > f.durationMs / 1000.0 + 0.25 || mediaSec < f.activatedSec - 0.05,
+    );
     if (_flying.length > maxOn) {
       _flying.removeRange(0, _flying.length - maxOn);
     }
@@ -343,33 +464,39 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
   Widget build(BuildContext context) {
     if (!widget.enabled) return const SizedBox.shrink();
     return IgnorePointer(
-      child: AnimatedBuilder(
-        animation: _tick,
-        builder: (context, _) {
-          return LayoutBuilder(
-            builder: (context, c) {
-              _spawn(widget.position, Size(c.maxWidth, c.maxHeight));
-              return CustomPaint(
-                size: Size(c.maxWidth, c.maxHeight),
-                painter: _DanmakuPainter(
-                  flying: List.of(_flying),
-                  now: DateTime.now(),
-                  fontSize: widget.fontSize,
-                  opacity: widget.opacity,
-                  rows: widget.rows,
-                  scrollAreaRatio: widget.scrollAreaRatio,
-                  bold: widget.bold,
-                  lineSpacing: widget.lineSpacing,
-                  strokeMode: widget.strokeMode,
-                  colorMode: widget.colorMode,
-                  rowsTop: widget.rowsTop,
-                  rowsBottom: widget.rowsBottom,
-                  fontFamily: widget.fontFamily,
-                ),
-              );
-            },
-          );
-        },
+      child: ClipRect(
+        child: AnimatedBuilder(
+          animation: _tick,
+          builder: (context, _) {
+            return LayoutBuilder(
+              builder: (context, c) {
+                final w = c.maxWidth;
+                final h = c.maxHeight;
+                if (w < 1 || h < 1) return const SizedBox.shrink();
+                final mediaSec = _mediaPos.inMilliseconds / 1000.0;
+                if (!_paused) _activate(mediaSec);
+                return CustomPaint(
+                  size: Size(w, h),
+                  painter: _DanmakuPainter(
+                    flying: List.of(_flying),
+                    mediaSec: mediaSec,
+                    fontSize: widget.fontSize,
+                    opacity: widget.opacity,
+                    rows: widget.rows,
+                    scrollAreaRatio: widget.scrollAreaRatio,
+                    bold: widget.bold,
+                    lineSpacing: widget.lineSpacing,
+                    strokeMode: widget.strokeMode,
+                    colorMode: widget.colorMode,
+                    rowsTop: widget.rowsTop,
+                    rowsBottom: widget.rowsBottom,
+                    fontFamily: widget.fontFamily,
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
@@ -378,12 +505,12 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
 class _Flying {
   _Flying({
     required this.item,
-    required this.born,
+    required this.activatedSec,
     required this.lane,
     required this.durationMs,
   });
   final DanmakuItem item;
-  final DateTime born;
+  final double activatedSec;
   final int lane;
   final int durationMs;
 }
@@ -391,7 +518,7 @@ class _Flying {
 class _DanmakuPainter extends CustomPainter {
   _DanmakuPainter({
     required this.flying,
-    required this.now,
+    required this.mediaSec,
     required this.fontSize,
     required this.opacity,
     required this.rows,
@@ -405,7 +532,7 @@ class _DanmakuPainter extends CustomPainter {
     this.fontFamily = 'default',
   });
   final List<_Flying> flying;
-  final DateTime now;
+  final double mediaSec;
   final double fontSize;
   final double opacity;
   final int rows;
@@ -455,7 +582,9 @@ class _DanmakuPainter extends CustomPainter {
     final laneH = (areaH / lanes * lineSpacing.clamp(1.0, 2.0)).clamp(20.0, 64.0);
     final shadows = _shadows();
     for (final f in flying) {
-      final t = now.difference(f.born).inMilliseconds / f.durationMs;
+      final durSec = f.durationMs / 1000.0;
+      if (durSec <= 0) continue;
+      final t = (mediaSec - f.activatedSec) / durSec;
       if (t < 0 || t > 1) continue;
       final fs = fontSize.clamp(12.0, 48.0);
       final family = switch (fontFamily.trim().toLowerCase()) {
