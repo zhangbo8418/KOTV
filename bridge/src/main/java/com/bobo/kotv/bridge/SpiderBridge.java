@@ -45,9 +45,31 @@ public class SpiderBridge {
     private static final Map<String, Spider> spiders = new ConcurrentHashMap<>();
     private static final Map<String, ClassLoader> loaders = new ConcurrentHashMap<>();
     private static final Map<String, Method> proxyMethods = new ConcurrentHashMap<>();
+    /**
+     * jsParse 按 jar 路径复用 Parser（内含 Cache），对齐 FongMi Function 持有单例 Parser。
+     * 每次 newInstance 会丢掉 Document 缓存，且反射找方法开销大。
+     */
+    private static final ConcurrentHashMap<String, JsParseSession> jsParseSessions = new ConcurrentHashMap<>();
     /** 按 jarPath 锁，避免一个 jar Init 卡住阻塞其它 jar 加载。 */
     private static final ConcurrentHashMap<String, Object> jarLocks = new ConcurrentHashMap<>();
     private static volatile String recentJar;
+
+    /** 同 jar 的 pdfh/pdfa/pd/pdfl 共用；invoke 时 synchronized，避免 Cache 并发写。 */
+    private static final class JsParseSession {
+        final ClassLoader loader;
+        final Object parser;
+        final Method parseUrl;
+        final Method parseArray;
+        final Method parseList;
+
+        JsParseSession(ClassLoader loader, Object parser, Method parseUrl, Method parseArray, Method parseList) {
+            this.loader = loader;
+            this.parser = parser;
+            this.parseUrl = parseUrl;
+            this.parseArray = parseArray;
+            this.parseList = parseList;
+        }
+    }
 
     static {
         if (!isArtVm()) {
@@ -1324,6 +1346,7 @@ public class SpiderBridge {
         }
         spiders.clear();
         proxyMethods.clear();
+        jsParseSessions.clear();
         recentJar = null;
         for (ClassLoader loader : loaders.values()) {
             if (loader instanceof URLClassLoader) {
@@ -1360,6 +1383,7 @@ public class SpiderBridge {
             }
         }
         proxyMethods.remove(jarPath);
+        jsParseSessions.remove(jarPath);
         // recentJar 只是路径：重载后同路径新 loader 仍是「最近」，保留给 jsonExt 用。
     }
 
@@ -1656,6 +1680,7 @@ public class SpiderBridge {
     /**
      * createFun：优先 Parser，失败再反射 Function 上同名 parseDom*（jar 内实现不一）。
      * Go QuickJS 无法直接 new Java Function(whl.ctx)，故经 bridge RPC；仍失败由 parser.js 回落。
+     * 同 jar 复用 Parser+Cache（见 {@link #jsParseSessions}）。
      */
     @SuppressWarnings("unchecked")
     private static String invokeJsParse(JsonObject args) {
@@ -1663,17 +1688,31 @@ public class SpiderBridge {
         try {
             String jar = args.has("jar") && !args.get("jar").isJsonNull()
                     ? args.get("jar").getAsString() : "";
-            if (jar != null && !jar.isEmpty()) {
+            if (jar == null) jar = "";
+            if (!jar.isEmpty()) {
                 File jf = new File(jar);
                 // 仅加载真实本地路径；相对 spider.jar;md5;… 勿当文件名（Go 应先 cacheJar）。
                 if (jf.isFile() && jf.length() > 0L) {
-                parseJar(jar);
+                    // parseJar 自身对已加载路径短路；此处避免无意义文件探测后的重复调用开销可忽略。
+                    if (!loaders.containsKey(jar)) {
+                        parseJar(jar);
+                    }
                 } else {
                     System.err.println("jsParse skip unresolved jar key: " + jar);
                 }
             }
-            ClassLoader loader = (jar != null && !jar.isEmpty() && loaders.containsKey(jar))
+            ClassLoader loader = (!jar.isEmpty() && loaders.containsKey(jar))
                     ? loaders.get(jar) : requireRecentLoader();
+            String cacheKey = !jar.isEmpty() ? jar : (recentJar != null ? recentJar : "");
+            if (cacheKey.isEmpty()) {
+                for (Map.Entry<String, ClassLoader> e : loaders.entrySet()) {
+                    if (e.getValue() == loader) {
+                        cacheKey = e.getKey();
+                        break;
+                    }
+                }
+            }
+            JsParseSession session = resolveJsParseSession(cacheKey, loader);
             String op = args.has("op") ? args.get("op").getAsString() : "";
             String html = args.has("html") ? args.get("html").getAsString() : "";
             String rule = args.has("rule") ? args.get("rule").getAsString() : "";
@@ -1681,66 +1720,93 @@ public class SpiderBridge {
             String texts = args.has("texts") ? args.get("texts").getAsString() : "";
             String urls = args.has("urls") ? args.get("urls").getAsString() : "";
 
-            Object parser = null;
-            Class<?> parserClz = null;
-            String[] candidates = {
-                    "com.github.catvod.js.utils.Parser",
-                    "com.github.catvod.js.Function"
-            };
-            Throwable last = null;
-            for (String name : candidates) {
-                try {
-                    parserClz = loader.loadClass(name);
-                    try {
-                        parser = parserClz.getConstructor().newInstance();
-                    } catch (NoSuchMethodException e) {
-                        // Function(QuickJSContext) 等：尝试无参失败则跳过该类
-                        last = e;
-                        continue;
+            synchronized (session) {
+                switch (op) {
+                    case "pdfh": {
+                        Object v = session.parseUrl.invoke(session.parser, html, rule, "");
+                        out.addProperty("value", v == null ? "" : String.valueOf(v));
+                        return GSON.toJson(out);
                     }
-                    break;
-                } catch (Throwable t) {
-                    last = t;
+                    case "pd": {
+                        Object v = session.parseUrl.invoke(session.parser, html, rule, url);
+                        out.addProperty("value", v == null ? "" : String.valueOf(v));
+                        return GSON.toJson(out);
+                    }
+                    case "pdfa": {
+                        List<String> list = (List<String>) session.parseArray.invoke(session.parser, html, rule);
+                        out.add("list", GSON.toJsonTree(list == null ? List.of() : list));
+                        return GSON.toJson(out);
+                    }
+                    case "pdfl": {
+                        List<String> list = (List<String>) session.parseList
+                                .invoke(session.parser, html, rule, texts, urls, url);
+                        out.add("list", GSON.toJsonTree(list == null ? List.of() : list));
+                        return GSON.toJson(out);
+                    }
+                    default:
+                        out.addProperty("error", "unknown op: " + op);
+                        return GSON.toJson(out);
                 }
-            }
-            if (parser == null || parserClz == null) {
-                throw last != null ? last : new ClassNotFoundException("Parser/Function");
-            }
-            switch (op) {
-                case "pdfh": {
-                    Object v = parserClz.getMethod("parseDomForUrl", String.class, String.class, String.class)
-                            .invoke(parser, html, rule, "");
-                    out.addProperty("value", v == null ? "" : String.valueOf(v));
-                    return GSON.toJson(out);
-                }
-                case "pd": {
-                    Object v = parserClz.getMethod("parseDomForUrl", String.class, String.class, String.class)
-                            .invoke(parser, html, rule, url);
-                    out.addProperty("value", v == null ? "" : String.valueOf(v));
-                    return GSON.toJson(out);
-                }
-                case "pdfa": {
-                    List<String> list = (List<String>) parserClz
-                            .getMethod("parseDomForArray", String.class, String.class)
-                            .invoke(parser, html, rule);
-                    out.add("list", GSON.toJsonTree(list == null ? List.of() : list));
-                    return GSON.toJson(out);
-                }
-                case "pdfl": {
-                    List<String> list = (List<String>) parserClz
-                            .getMethod("parseDomForList", String.class, String.class, String.class, String.class, String.class)
-                            .invoke(parser, html, rule, texts, urls, url);
-                    out.add("list", GSON.toJsonTree(list == null ? List.of() : list));
-                    return GSON.toJson(out);
-                }
-                default:
-                    out.addProperty("error", "unknown op: " + op);
-                    return GSON.toJson(out);
             }
         } catch (Throwable e) {
             out.addProperty("error", e.toString());
             return GSON.toJson(out);
         }
+    }
+
+    /** 同 jar+同 ClassLoader 复用；loader 换新（reload）时重建。 */
+    private static JsParseSession resolveJsParseSession(String cacheKey, ClassLoader loader) throws Throwable {
+        if (cacheKey == null) cacheKey = "";
+        if (!cacheKey.isEmpty()) {
+            JsParseSession existing = jsParseSessions.get(cacheKey);
+            if (existing != null && existing.loader == loader) {
+                return existing;
+            }
+            Object lock = jarLocks.computeIfAbsent(cacheKey, k -> new Object());
+            synchronized (lock) {
+                existing = jsParseSessions.get(cacheKey);
+                if (existing != null && existing.loader == loader) {
+                    return existing;
+                }
+                JsParseSession created = createJsParseSession(loader);
+                jsParseSessions.put(cacheKey, created);
+                return created;
+            }
+        }
+        return createJsParseSession(loader);
+    }
+
+    private static JsParseSession createJsParseSession(ClassLoader loader) throws Throwable {
+        Object parser = null;
+        Class<?> parserClz = null;
+        String[] candidates = {
+                "com.github.catvod.js.utils.Parser",
+                "com.github.catvod.js.Function"
+        };
+        Throwable last = null;
+        for (String name : candidates) {
+            try {
+                parserClz = loader.loadClass(name);
+                try {
+                    parser = parserClz.getConstructor().newInstance();
+                } catch (NoSuchMethodException e) {
+                    // Function(QuickJSContext) 等：尝试无参失败则跳过该类
+                    last = e;
+                    continue;
+                }
+                break;
+            } catch (Throwable t) {
+                last = t;
+            }
+        }
+        if (parser == null || parserClz == null) {
+            throw last != null ? last : new ClassNotFoundException("Parser/Function");
+        }
+        Method parseUrl = parserClz.getMethod("parseDomForUrl", String.class, String.class, String.class);
+        Method parseArray = parserClz.getMethod("parseDomForArray", String.class, String.class);
+        Method parseList = parserClz.getMethod(
+                "parseDomForList", String.class, String.class, String.class, String.class, String.class);
+        return new JsParseSession(loader, parser, parseUrl, parseArray, parseList);
     }
 
     private static String invokeJsonExt(String key, LinkedHashMap<String, String> jxs, String url) {
