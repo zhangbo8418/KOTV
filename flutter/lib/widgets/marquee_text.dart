@@ -98,52 +98,58 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
         }
 
         if (!_overflow || !widget.active) {
-          return Text(
-            widget.text,
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.ellipsis,
-            textAlign: widget.textAlign,
-            style: widget.style,
+          return SizedBox(
+            width: maxW.isFinite && maxW > 0 ? maxW : null,
+            child: Text(
+              widget.text,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              textAlign: widget.textAlign,
+              style: widget.style,
+            ),
           );
         }
 
         final pauseFrac = widget.pause.inMilliseconds /
             (_ctrl.duration?.inMilliseconds.clamp(1, 1 << 30) ?? 1);
-        return ClipRect(
-          child: AnimatedBuilder(
-            animation: _ctrl,
-            builder: (context, _) {
-              final t = _ctrl.value;
-              // 前 pauseFrac 停在起点，其后线性滚出。
-              final progress = t <= pauseFrac ? 0.0 : (t - pauseFrac) / (1 - pauseFrac).clamp(0.01, 1.0);
-              final dx = -progress * (_textW + widget.blankGap);
-              return Stack(
-                clipBehavior: Clip.hardEdge,
-                children: [
-                  Transform.translate(
-                    offset: Offset(dx, 0),
-                    child: Text(
-                      widget.text,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.visible,
-                      style: widget.style,
+        return SizedBox(
+          width: maxW,
+          child: ClipRect(
+            child: AnimatedBuilder(
+              animation: _ctrl,
+              builder: (context, _) {
+                final t = _ctrl.value;
+                // 前 pauseFrac 停在起点，其后线性滚出。
+                final progress = t <= pauseFrac ? 0.0 : (t - pauseFrac) / (1 - pauseFrac).clamp(0.01, 1.0);
+                final dx = -progress * (_textW + widget.blankGap);
+                return Stack(
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    Transform.translate(
+                      offset: Offset(dx, 0),
+                      child: Text(
+                        widget.text,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.visible,
+                        style: widget.style,
+                      ),
                     ),
-                  ),
-                  Transform.translate(
-                    offset: Offset(dx + _textW + widget.blankGap, 0),
-                    child: Text(
-                      widget.text,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.visible,
-                      style: widget.style,
+                    Transform.translate(
+                      offset: Offset(dx + _textW + widget.blankGap, 0),
+                      child: Text(
+                        widget.text,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.visible,
+                        style: widget.style,
+                      ),
                     ),
-                  ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
         );
       },

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -186,15 +185,11 @@ func (s *jsSpider) runWorker() (err error) {
 		}
 	}()
 
-	// JsLoader → dex(jar) → createFun：worker 启动即 parseJar（Init+Proxy）。
+	// 勿同步 EnsureJar：Android 上 D8+Init 可堵数十秒，本地 parser.js 已能回落。
+	// 后台预热；首次 __jarPdfh / JsParse 再 EnsureJar。
 	jsLog("[js] worker start key=%s api=%s jar=%s", s.key, s.api, s.resolveJsJar())
 	if jar := s.resolveJsJar(); jar != "" {
-		if err := EnsureJar(jar); err != nil {
-			jsLog("[js] dex(jar) failed key=%s: %v", s.key, err)
-			log.Printf("js spider dex(jar) failed key=%s: %v", s.key, err)
-		} else {
-			jsLog("[js] dex(jar) ok key=%s jar=%s", s.key, jar)
-		}
+		WarmJarAsync(jar)
 	}
 
 	// Spider.createCtx：BytecodeModuleLoader + evaluateModule。
@@ -1346,12 +1341,7 @@ func (s *jsSpider) interrupt() {
 
 func (s *jsSpider) Init(ext string) error {
 	s.ext = ext
-	// EnsureJar 已在 runWorker dex；此处保留以防 Init 早于 worker。
-	if jar := s.resolveJsJar(); jar != "" {
-		if err := EnsureJar(jar); err != nil {
-			log.Printf("js spider dex(jar) failed key=%s: %v", s.key, err)
-		}
-	}
+	// jar 由 runWorker WarmJarAsync / 首次 JsParse EnsureJar；勿在此同步挡 init。
 	_, err := s.invoke("init", ext)
 	return err
 }

@@ -13,6 +13,7 @@ import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 import '../util/pick_subtitle_file.dart';
+import 'danmaku_settings_sheet.dart';
 import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
 
@@ -1867,6 +1868,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             sync(() => _danmakuOn = v);
                             widget.onDanmakuChanged?.call(v);
                             unawaited(_persist('danmaku', v ? 'true' : 'false'));
+                          },
+                        ),
+                        linkRow(
+                          icon: Icons.tune,
+                          label: '弹幕设置',
+                          trailing: '',
+                          onTap: () async {
+                            Navigator.pop(ctx);
+                            await showKotvDanmakuSettingsSheet(
+                              context: context,
+                              loadSettings: _loadSettings,
+                              persist: _persist,
+                            );
                           },
                         ),
                         Padding(

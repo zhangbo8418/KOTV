@@ -201,6 +201,23 @@ func EnsureJar(spec string, configBaseArg ...string) error {
 	return nil
 }
 
+// WarmJarAsync 后台 dex/parseJar，不挡 JS 冷启；首次 pdfh 仍走 EnsureJar。
+func WarmJarAsync(spec string, configBaseArg ...string) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return
+	}
+	base := ConfigBase()
+	if len(configBaseArg) > 0 && strings.TrimSpace(configBaseArg[0]) != "" {
+		base = strings.TrimSpace(configBaseArg[0])
+	}
+	go func() {
+		if err := EnsureJar(spec, base); err != nil {
+			log.Printf("WarmJarAsync failed (%s): %v", spec, err)
+		}
+	}()
+}
+
 // LoadJar 下载并缓存根 spider.jar。configBase 用于解析相对路径（如 spider.jar;md5;xxx）。
 func LoadJar(spec string, configBaseArg ...string) error {
 	spec = strings.TrimSpace(spec)
@@ -731,6 +748,10 @@ func JsParse(jar, op, html, rule, url, texts, urls string) (value string, list [
 	}
 	jar = strings.TrimSpace(jar)
 	if jar != "" {
+		// 首次 pdfh 才同步 Ensure（冷启已 WarmJarAsync）；失败则上层走 parser.js。
+		if err := EnsureJar(jar); err != nil {
+			log.Printf("jsParse EnsureJar skip (%s): %v", jar, err)
+		}
 		// 必须传本地已缓存路径。相对 spider.jar;md5;… 会让 Android 当成文件名反复失败。
 		if dest, e := cacheJar(jar, ConfigBase(), false); e == nil && strings.TrimSpace(dest) != "" {
 			args["jar"] = dest

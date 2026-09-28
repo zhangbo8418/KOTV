@@ -1858,9 +1858,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return '${indexInGroup + 1}'.padLeft(3, '0');
   }
 
-  /// 频道号列宽：按字号估 3–4 位 tabular，避免 PC 全屏被裁成半个字。
+  /// 频道号列宽：按位数 tabular，避免 PC 全屏/侧栏被裁成半个字。
   double _channelNumColWidth(double fontSize, {int digits = 3}) {
-    return (fontSize * 0.62 * digits + 10).clamp(40.0, 72.0);
+    return (fontSize * 0.62 * digits.clamp(3, 8) + 10).clamp(40.0, 120.0);
+  }
+
+  /// 当前列表最长频道号位数（至少 3）。
+  int _channelNumDigitsFor(List<Map<String, dynamic>> channels) {
+    var max = 3;
+    for (var i = 0; i < channels.length; i++) {
+      final n = _channelNumberLabel(channels[i], i).length;
+      if (n > max) max = n;
+    }
+    return max.clamp(3, 8);
   }
 
   /// 侧栏超宽时优先缩 EPG/分组，频道列保底（号码+logo+短台名）。
@@ -2653,7 +2663,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             final font = land ? 12.0 : (13.0 * wScale.clamp(1.0, 1.25));
                             final logoW = land ? 28.0 : 40.0;
                             final logoH = land ? 22.0 : 30.0;
-                            final numColW = _channelNumColWidth(font, digits: 4);
+                            final numDigits = _channelNumDigitsFor(_channels);
+                            final numColW = _channelNumColWidth(font, digits: numDigits);
                             final channelChrome = numColW + (land ? 4 : 12) + logoW + (land ? 6 : 12);
                             final channelFloor = channelChrome + 56;
                             // 桌面全屏最多约占半屏，避免挡完画面；窄屏仍可到 92%
@@ -3065,13 +3076,25 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           child: Row(
                             children: [
-                              Text(_channelNum, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 20)),
+                              SizedBox(
+                                width: _channelNumColWidth(20, digits: _channelNumDigitsFor(_channels)),
+                                child: Text(
+                                  _channelNum,
+                                  softWrap: false,
+                                  overflow: TextOverflow.clip,
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.7),
+                                    fontSize: 20,
+                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                  ),
+                                ),
+                              ),
                               const SizedBox(width: 12),
                               _LiveChannelLogo(name: _title, logo: _currentLogo),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     KotvMarqueeText(
@@ -3089,8 +3112,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                 ),
                               ),
                               if (_lineLabel.isNotEmpty) ...[
-                                Text(_lineLabel, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13)),
                                 const SizedBox(width: 8),
+                                Flexible(
+                                  child: KotvMarqueeText(
+                                    _lineLabel,
+                                    active: true,
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13),
+                                  ),
+                                ),
                               ],
                             ],
                           ),
@@ -3235,7 +3265,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         KotvMarqueeText(
                           '$_channelNum  $title',
@@ -3425,7 +3455,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         child: Row(
                           children: [
                             SizedBox(
-                              width: _channelNumColWidth(11, digits: 4),
+                              width: _channelNumColWidth(11, digits: _channelNumDigitsFor(_channels)),
                               child: Text(
                                 _channelNumberLabel(ch, i),
                                 softWrap: false,

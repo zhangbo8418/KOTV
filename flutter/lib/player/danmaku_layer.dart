@@ -400,7 +400,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     return widget.showScroll;
   }
 
-  void _activate(double mediaSec) {
+  void _activate(double mediaSec, {required double viewW}) {
     if (!widget.enabled || _sorted.isEmpty) return;
     if (_lastActivateSec < 0) {
       _lastActivateSec = mediaSec;
@@ -427,6 +427,9 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     final scrollDur = widget.durationMs.clamp(3000, 15000);
     final fixedDur = widget.fixedDurationMs.clamp(2000, 10000);
     final lanes = widget.rows.clamp(1, 16);
+    final topLanes = widget.rowsTop.clamp(1, 8);
+    final bottomLanes = widget.rowsBottom.clamp(1, 8);
+    final fs = widget.fontSize.clamp(12.0, 48.0);
 
     while (_cursor < _sorted.length && _sorted[_cursor].time < windowFrom) {
       _cursor++;
@@ -437,15 +440,48 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
       if (it.time >= to) break;
       if (it.time >= windowFrom && _allowMode(it.mode)) {
         if (_flying.length >= maxOn) break;
-        final fixed = it.mode == 4 || it.mode == 5 || it.mode == 7 || it.mode >= 8;
-        _flying.add(_Flying(
-          item: it,
-          activatedSec: it.time,
-          lane: math.Random(it.content.hashCode ^ it.time.toInt()).nextInt(lanes),
-          durationMs: fixed
-              ? fixedDur
-              : scrollDur + (it.content.length * 40).clamp(0, 3000),
-        ));
+        final mode = it.mode;
+        final fixed = mode == 4 || mode == 5 || mode == 7 || mode >= 8;
+        final durationMs = fixed
+            ? fixedDur
+            : scrollDur + (it.content.length * 40).clamp(0, 3000);
+        final textW = _estimateTextWidth(it.content, fs);
+        final int? lane;
+        if (mode == 4) {
+          lane = _pickFixedLane(bottomLanes, top: false, mediaSec: mediaSec);
+        } else if (mode == 5) {
+          lane = _pickFixedLane(topLanes, top: true, mediaSec: mediaSec);
+        } else if (mode == 7 || mode >= 8) {
+          // 定位/特殊：占位不强占滚动轨，用内容哈希落点。
+          lane = it.content.hashCode.abs() % 5;
+        } else if (mode == 6) {
+          lane = _pickScrollLane(
+            lanes: lanes,
+            mediaSec: mediaSec,
+            viewW: viewW,
+            textW: textW,
+            durationMs: durationMs,
+            reverse: true,
+          );
+        } else {
+          lane = _pickScrollLane(
+            lanes: lanes,
+            mediaSec: mediaSec,
+            viewW: viewW,
+            textW: textW,
+            durationMs: durationMs,
+            reverse: false,
+          );
+        }
+        if (lane != null) {
+          _flying.add(_Flying(
+            item: it,
+            activatedSec: it.time,
+            lane: lane,
+            durationMs: durationMs,
+            textWidth: textW,
+          ));
+        }
       }
       i++;
     }
@@ -458,6 +494,115 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     if (_flying.length > maxOn) {
       _flying.removeRange(0, _flying.length - maxOn);
     }
+  }
+
+  double _estimateTextWidth(String text, double fontSize) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600),
+      ),
+      textDirection: ui.TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    return tp.width;
+  }
+
+  /// 滚动轨：无可用轨返回 null（丢弃，避免叠轨）。
+  int? _pickScrollLane({
+    required int lanes,
+    required double mediaSec,
+    required double viewW,
+    required double textW,
+    required int durationMs,
+    required bool reverse,
+  }) {
+    if (viewW < 1) return 0;
+    final gap = viewW * 0.08;
+    for (var lane = 0; lane < lanes; lane++) {
+      if (_scrollLaneFree(
+        lane: lane,
+        mediaSec: mediaSec,
+        viewW: viewW,
+        textW: textW,
+        durationMs: durationMs,
+        reverse: reverse,
+        gap: gap,
+      )) {
+        return lane;
+      }
+    }
+    return null;
+  }
+
+  bool _scrollLaneFree({
+    required int lane,
+    required double mediaSec,
+    required double viewW,
+    required double textW,
+    required int durationMs,
+    required bool reverse,
+    required double gap,
+  }) {
+    final newDur = durationMs / 1000.0;
+    if (newDur <= 0) return false;
+    final newTravel = viewW + textW;
+    final newSpeed = newTravel / newDur;
+    for (final f in _flying) {
+      final mode = f.item.mode;
+      final fReverse = mode == 6;
+      final fScroll = mode != 4 && mode != 5 && mode != 7 && mode < 8;
+      if (mode != 6 && !fScroll) continue;
+      if (fReverse != reverse) continue;
+      if (f.lane != lane) continue;
+      final durSec = f.durationMs / 1000.0;
+      if (durSec <= 0) continue;
+      final t = ((mediaSec - f.activatedSec) / durSec).clamp(0.0, 1.0);
+      final existW = f.textWidth > 0 ? f.textWidth : _estimateTextWidth(f.item.content, widget.fontSize);
+      final travel = viewW + existW;
+      final x = reverse ? -existW + t * travel : viewW - t * travel;
+      final right = x + existW;
+      final oldSpeed = travel / durSec;
+      if (!reverse) {
+        // 新弹从右侧进入；尾弹右缘须已离开右缘足够间隙。
+        if (right > viewW - gap) return false;
+        if (newSpeed > oldSpeed + 0.5) {
+          final headStart = viewW - right;
+          if (headStart <= 0) return false;
+          final catchTime = headStart / (newSpeed - oldSpeed);
+          final remain = (1 - t) * durSec;
+          if (catchTime < remain) return false;
+        }
+      } else {
+        // 逆向从左侧进入；尾弹左缘须已离开左缘足够间隙。
+        if (x < gap) return false;
+        if (newSpeed > oldSpeed + 0.5) {
+          final headStart = x;
+          if (headStart <= 0) return false;
+          final catchTime = headStart / (newSpeed - oldSpeed);
+          final remain = (1 - t) * durSec;
+          if (catchTime < remain) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  int? _pickFixedLane(int rows, {required bool top, required double mediaSec}) {
+    final occupied = <int>{};
+    for (final f in _flying) {
+      final mode = f.item.mode;
+      if (top && mode != 5) continue;
+      if (!top && mode != 4) continue;
+      final durSec = f.durationMs / 1000.0;
+      if (mediaSec - f.activatedSec < durSec) {
+        occupied.add(f.lane % rows);
+      }
+    }
+    for (var i = 0; i < rows; i++) {
+      if (!occupied.contains(i)) return i;
+    }
+    return null;
   }
 
   @override
@@ -474,7 +619,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
                 final h = c.maxHeight;
                 if (w < 1 || h < 1) return const SizedBox.shrink();
                 final mediaSec = _mediaPos.inMilliseconds / 1000.0;
-                if (!_paused) _activate(mediaSec);
+                if (!_paused) _activate(mediaSec, viewW: w);
                 return CustomPaint(
                   size: Size(w, h),
                   painter: _DanmakuPainter(
@@ -508,11 +653,13 @@ class _Flying {
     required this.activatedSec,
     required this.lane,
     required this.durationMs,
+    this.textWidth = 0,
   });
   final DanmakuItem item;
   final double activatedSec;
   final int lane;
   final int durationMs;
+  final double textWidth;
 }
 
 class _DanmakuPainter extends CustomPainter {
@@ -579,7 +726,12 @@ class _DanmakuPainter extends CustomPainter {
     final topLanes = rowsTop.clamp(1, 8);
     final bottomLanes = rowsBottom.clamp(1, 8);
     final areaH = (size.height * scrollAreaRatio.clamp(0.1, 1.0)).clamp(40.0, size.height);
-    final laneH = (areaH / lanes * lineSpacing.clamp(1.0, 2.0)).clamp(20.0, 64.0);
+    final fs = fontSize.clamp(12.0, 48.0);
+    // 行高不低于字高，避免邻轨纵向压字。
+    final laneH = math.max(
+      fs * lineSpacing.clamp(1.0, 2.0),
+      areaH / lanes,
+    ).clamp(fs, 80.0);
     final shadows = _shadows();
     for (final f in flying) {
       final durSec = f.durationMs / 1000.0;
