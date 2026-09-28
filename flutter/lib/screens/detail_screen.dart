@@ -394,6 +394,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final player = kotvCreateMpvPlayer(conf: _mpvOpts.conf);
     _mkPlayer = player;
     _mk = MediaKitPlayback(player, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
+    _playingSub?.cancel();
+    _bufferingSub?.cancel();
     _playingSub = player.stream.playing.listen((_) {
       if (!mounted || _playUrl.isEmpty || !_useMpv) return;
       _markPlaybackLiveIfNeeded();
@@ -410,6 +412,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
   Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
     if (keep != KotvEmbedBackend.mpv) {
+      _playingSub?.cancel();
+      _bufferingSub?.cancel();
+      _playingSub = null;
+      _bufferingSub = null;
       try {
         await _mk?.pause();
       } catch (_) {}
@@ -640,6 +646,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     try {
       await _stopHard();
     } catch (_) {}
+    _playingSub?.cancel();
+    _bufferingSub?.cancel();
+    _playingSub = null;
+    _bufferingSub = null;
     final mkPlayer = _mkPlayer;
     _mkPlayer = null;
     try {
@@ -882,6 +892,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   /// playbackEnded / onTimeChanged→nextEpisode / 控件下一集：每集只前进一次。
   /// [fromEnd] 为真时要求已 READY 且本世代未消耗；控件/手势下一集传 false。
+  /// 全屏上滑已先做动画时由 [DetailFullscreenPage] 调 [onNext]，此处不再二次 animate。
   Future<void> _advanceToNextEpisode({bool fromEnd = true}) async {
     if (!mounted || _advanceBusy) return;
     if (fromEnd) {
@@ -903,7 +914,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _advanceBusy = true;
     if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');
     try {
-      if (_immersiveFullscreen) {
+      // 仅自动连播需要抖音式动画；手势/按钮已在全屏页内播过，勿再 animate。
+      if (_immersiveFullscreen && fromEnd) {
         await _fsPageKey.currentState?.animateAutoNext();
       }
       if (!mounted) return;
@@ -3071,7 +3083,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   KeyEventResult _onInlinePlayerKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent || _playUrl.isEmpty) return KeyEventResult.ignored;
+    final isDown = event is KeyDownEvent;
+    final isRepeat = event is KeyRepeatEvent;
+    if (!isDown && !isRepeat) return KeyEventResult.ignored;
+    if (_playUrl.isEmpty) return KeyEventResult.ignored;
     final key = event.logicalKey;
 
     void seekBy(Duration delta) {
@@ -3081,7 +3096,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
     // 底栏已获焦：方向键交给 TvFocus；快退/快进才 seek。
     if (_chromeRemoteFocus) {
-      if (kotvIsMenuKey(key)) {
+      if (isDown && kotvIsMenuKey(key)) {
         setState(() => _chromeRemoteFocus = false);
         return KeyEventResult.handled;
       }
@@ -3093,7 +3108,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         seekBy(const Duration(seconds: 10));
         return KeyEventResult.handled;
       }
-      if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+      if (isDown && (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key))) {
         final primary = FocusManager.instance.primaryFocus;
         if (primary == null || primary == node) {
           unawaited(_playback.playOrPause());
@@ -3107,7 +3122,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
     // —— 底栏未获焦 ——
     // 菜单/上下 → 亮底栏；左右 → seek（勿再用左右「调菜单」）。
-    if (kotvIsMenuKey(key) || kotvIsUpKey(key) || kotvIsDownKey(key)) {
+    if (isDown && (kotvIsMenuKey(key) || kotvIsUpKey(key) || kotvIsDownKey(key))) {
       setState(() => _chromeRemoteFocus = true);
       return KeyEventResult.handled;
     }
@@ -3119,7 +3134,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       seekBy(const Duration(seconds: 10));
       return KeyEventResult.handled;
     }
-    if (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key)) {
+    if (isDown && (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key))) {
       final primary = FocusManager.instance.primaryFocus;
       if (primary == null || primary == node) {
         unawaited(_playback.playOrPause());

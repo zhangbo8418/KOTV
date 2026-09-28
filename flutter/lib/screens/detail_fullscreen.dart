@@ -465,9 +465,18 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     widget.onRenderChanged?.call(mode);
   }
 
-  void _goNext() {
+  void _goNext({bool didAnimate = false}) {
     if (_epIdx + 1 >= widget.episodes.length) {
       _flashSwipeHint('已是最后一集');
+      return;
+    }
+    // 底栏/遥控下一集：先抖音式动画再切；上滑手势已在 onDone 前播完。
+    if (!didAnimate) {
+      unawaited(() async {
+        final ok = await animateAutoNext();
+        if (!ok || !mounted) return;
+        _goNext(didAnimate: true);
+      }());
       return;
     }
     widget.onNext?.call();
@@ -643,7 +652,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       final next = _epIdx + 1;
       final name = next < widget.episodes.length ? widget.episodes[next] : '';
       _flashSwipeHint(name.isEmpty ? '下一集' : '下一集 · $name');
-      unawaited(_animateSwipeTo(-h, onDone: _goNext));
+      unawaited(_animateSwipeTo(-h, onDone: () => _goNext(didAnimate: true)));
     } else if (commitPrev) {
       _lastSwipeAt = now;
       final prev = _epIdx - 1;

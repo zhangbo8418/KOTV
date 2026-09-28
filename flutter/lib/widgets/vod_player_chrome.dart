@@ -144,92 +144,99 @@ class VodInlineControls extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
+      // 播停/音量靠 ChangeNotifier；进度必须走 positionStream——
+      // 桌面 MPV（MediaKit）故意不因 position 高频 notifyListeners，否则详情内嵌进度条会停住。
       child: ListenableBuilder(
         listenable: player,
         builder: (context, _) {
-          final pos = player.position;
-          final dur = player.duration;
-          final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
-          final vol = player.volume.clamp(0, 100).toDouble();
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              // 仅迷你窗缩控件；详情内嵌始终显示「当前 / 总时长」
-              final narrow = miniActive || constraints.maxWidth < 480;
-              final iconSize = narrow ? 32.0 : 40.0;
-              final volW = narrow ? 72.0 : 110.0;
-              return Padding(
-                padding: EdgeInsets.fromLTRB(narrow ? 4 : 8, narrow ? 2 : 6, narrow ? 4 : 8, narrow ? 2 : 6),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
+          return StreamBuilder<Duration>(
+            stream: player.positionStream,
+            builder: (context, _) {
+              final pos = player.position;
+              final dur = player.duration;
+              final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
+              final vol = player.volume.clamp(0, 100).toDouble();
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  // 仅迷你窗缩控件；详情内嵌始终显示「当前 / 总时长」
+                  final narrow = miniActive || constraints.maxWidth < 480;
+                  final iconSize = narrow ? 32.0 : 40.0;
+                  final volW = narrow ? 72.0 : 110.0;
+                  return Padding(
+                    padding: EdgeInsets.fromLTRB(narrow ? 4 : 8, narrow ? 2 : 6, narrow ? 4 : 8, narrow ? 2 : 6),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        _IconAct(
-                          icon: player.playing ? Icons.pause : Icons.play_arrow,
-                          tip: player.playing ? '暂停' : '播放',
-                          size: iconSize,
-                          autofocus: autofocusPlay,
-                          onTap: () => player.playOrPause(),
-                        ),
-                        _IconAct(
-                          icon: Icons.stop,
-                          tip: '停止',
-                          size: iconSize,
-                          onTap: () {
-                            player.stop();
-                            onStop?.call();
-                          },
-                        ),
-                        if (onCast != null)
-                          _IconAct(icon: Icons.cast, tip: '投屏', size: iconSize, onTap: onCast!),
-                        if (onMini != null)
-                          _IconAct(
-                            icon: miniActive ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
-                            tip: miniActive ? '还原窗口' : '迷你桌面播放',
-                            size: iconSize,
-                            onTap: onMini!,
-                          ),
-                        if (onExpand != null && !miniActive)
-                          KotvFullscreenExpandButton(size: iconSize, onSelect: onExpand!),
-                        SizedBox(width: narrow ? 4 : 8),
-                        Flexible(
-                          child: Text(
-                            '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: narrow ? 11 : 12),
-                          ),
-                        ),
-                        if (!narrow) ...[
-                          const Spacer(),
-                          Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
-                        ] else
-                          const SizedBox(width: 4),
-                        SizedBox(
-                          width: volW,
-                          child: ExcludeFocus(
-                            child: SliderTheme(
-                              data: _sliderTheme(context),
-                              child: Slider(
-                                value: vol,
-                                max: 100,
-                                onChanged: (v) => player.setVolume(v),
+                        Row(
+                          children: [
+                            _IconAct(
+                              icon: player.playing ? Icons.pause : Icons.play_arrow,
+                              tip: player.playing ? '暂停' : '播放',
+                              size: iconSize,
+                              autofocus: autofocusPlay,
+                              onTap: () => player.playOrPause(),
+                            ),
+                            _IconAct(
+                              icon: Icons.stop,
+                              tip: '停止',
+                              size: iconSize,
+                              onTap: () {
+                                player.stop();
+                                onStop?.call();
+                              },
+                            ),
+                            if (onCast != null)
+                              _IconAct(icon: Icons.cast, tip: '投屏', size: iconSize, onTap: onCast!),
+                            if (onMini != null)
+                              _IconAct(
+                                icon: miniActive ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
+                                tip: miniActive ? '还原窗口' : '迷你桌面播放',
+                                size: iconSize,
+                                onTap: onMini!,
+                              ),
+                            if (onExpand != null && !miniActive)
+                              KotvFullscreenExpandButton(size: iconSize, onSelect: onExpand!),
+                            SizedBox(width: narrow ? 4 : 8),
+                            Flexible(
+                              child: Text(
+                                '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: narrow ? 11 : 12),
                               ),
                             ),
+                            if (!narrow) ...[
+                              const Spacer(),
+                              Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                            ] else
+                              const SizedBox(width: 4),
+                            SizedBox(
+                              width: volW,
+                              child: ExcludeFocus(
+                                child: SliderTheme(
+                                  data: _sliderTheme(context),
+                                  child: Slider(
+                                    value: vol,
+                                    max: 100,
+                                    onChanged: (v) => player.setVolume(v),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        ExcludeFocus(
+                          child: KotvSeekSlider(
+                            player: player,
+                            maxMs: total,
+                            secondaryMs: _sliderBuffered(player, total),
+                            theme: _sliderTheme(context),
                           ),
                         ),
                       ],
                     ),
-                    ExcludeFocus(
-                      child: KotvSeekSlider(
-                        player: player,
-                        maxMs: total,
-                        secondaryMs: _sliderBuffered(player, total),
-                        theme: _sliderTheme(context),
-                      ),
-                    ),
-                  ],
-                ),
+                  );
+                },
               );
             },
           );
@@ -2147,8 +2154,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             left: 12,
             top: viewTop + 8,
             child: IgnorePointer(
-              child: ListenableBuilder(
-                listenable: widget.player,
+              child: StreamBuilder<Duration>(
+                stream: widget.player.positionStream,
                 builder: (_, __) {
                   final bps = widget.player.networkSpeedBps;
                   final speed = bps <= 0

@@ -49,7 +49,7 @@ const _liveFavPrefKey = 'kotv_live_fav_names';
 const _liveFavGroupName = '收藏';
 /// 频道栏 / 信息条 / 控件自动隐藏（5s）。
 const _liveOverlayHide = Duration(seconds: 5);
-const _liveIdleStatus = '菜单键打开频道列表 · 点击右侧换源/设置';
+const _liveIdleStatus = '确定键打开频道列表 · 菜单键打开底栏 · 点击右侧换源/设置';
 /// 回看快进快退步长（10s）。
 const _liveCatchupSeekStep = Duration(seconds: 10);
 
@@ -363,7 +363,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   RemoteBridge? _boundRemote;
   KotvPlayback? _errorWiredPb;
   VoidCallback? _playbackErrorListener;
+  StreamSubscription<bool>? _endedSub;
   bool _failSwitchBusy = false;
+  bool _endedBusy = false;
 
   @override
   void initState() {
@@ -430,6 +432,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _portraitHideTimer?.cancel();
     _cursorHideTimer?.cancel();
     _unwireLivePlaybackErrors();
+    _unwireLivePlaybackEnded();
     _focus.dispose();
     _playFocus.dispose();
     _rightFocus.dispose();
@@ -1036,6 +1039,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           } catch (_) {}
         }
         _wireLivePlaybackErrors(pb);
+        _wireLivePlaybackEnded(pb);
         return;
       } on KotvSilentVideoException catch (e) {
         lastError = e;
@@ -1083,6 +1087,38 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     };
     _errorWiredPb = pb;
     pb.addListener(_playbackErrorListener!);
+  }
+
+  void _unwireLivePlaybackEnded() {
+    _endedSub?.cancel();
+    _endedSub = null;
+  }
+
+  void _wireLivePlaybackEnded(KotvPlayback pb) {
+    _unwireLivePlaybackEnded();
+    _endedSub = pb.completedStream.listen((done) {
+      if (!done || !mounted || _playUrl.isEmpty) return;
+      unawaited(_onLivePlaybackEnded());
+    });
+  }
+
+  /// 播完：回看尽量下一可回看节目；否则下一台（跳过收藏/空/锁）。
+  Future<void> _onLivePlaybackEnded() async {
+    if (_endedBusy) return;
+    _endedBusy = true;
+    try {
+      if (_catchup) {
+        for (var i = _catchupProgIdx + 1; i < _programs.length; i++) {
+          if (_programs[i]['catchup'] == true) {
+            await _playCatchup(i);
+            return;
+          }
+        }
+      }
+      await _stepChannel(delta: _liveInvert ? -1 : 1);
+    } finally {
+      _endedBusy = false;
+    }
   }
 
   /// 播放中出错：失败换线开且非末线时切下一线（与开播 catch 同策略）。
@@ -1210,12 +1246,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void _onLiveFailSwitch() => unawaited(_toggleLiveFlag('liveChange', !_liveAutoChange));
 
   /// 上下换台；[_liveAcross] 为真时到组边界跨组，[_liveInvert] 由调用方决定方向。
+  /// 跨组时跳过「收藏」、空组与仍锁定的组。
   Future<void> _stepChannel({required int delta}) async {
     if (_groups.isEmpty) return;
     final chs = _channels;
     if (chs.isEmpty) {
       if (!_liveAcross || _groups.length < 2) return;
-      final gNext = (_groupIdx + (delta > 0 ? 1 : -1) + _groups.length) % _groups.length;
+      final gNext = _nextPlayableGroup(_groupIdx, delta);
+      if (gNext < 0) return;
       setState(() => _groupIdx = gNext);
       final n = _channels;
       if (n.isEmpty) return;
@@ -1231,11 +1269,35 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await _playChannel(((next % chs.length) + chs.length) % chs.length);
       return;
     }
-    final gNext = (_groupIdx + (delta > 0 ? 1 : -1) + _groups.length) % _groups.length;
+    final gNext = _nextPlayableGroup(_groupIdx, delta);
+    if (gNext < 0) return;
     setState(() => _groupIdx = gNext);
     final n = _channels;
     if (n.isEmpty) return;
     await _playChannel(delta > 0 ? 0 : n.length - 1);
+  }
+
+  /// 从 [from] 起按 [delta] 找下一个可播分组（跳过收藏/空/锁定）。
+  int _nextPlayableGroup(int from, int delta) {
+    if (_groups.isEmpty) return -1;
+    final step = delta >= 0 ? 1 : -1;
+    for (var n = 1; n <= _groups.length; n++) {
+      final gi = (from + step * n + _groups.length * n) % _groups.length;
+      if (_groupShouldSkip(gi)) continue;
+      final chs = ((_groups[gi]['channels'] as List?) ?? []).whereType<Map>().toList();
+      if (chs.isEmpty) continue;
+      return gi;
+    }
+    return -1;
+  }
+
+  bool _groupShouldSkip(int gi) {
+    if (gi < 0 || gi >= _groups.length) return true;
+    final g = _groups[gi];
+    if (g['_kotvFav'] == true) return true;
+    if ('${g['name'] ?? ''}' == _liveFavGroupName) return true;
+    if (_groupLocked(gi)) return true;
+    return false;
   }
 
   Future<void> _playChannel(int chIdx, {int? line, bool showList = false}) async {
@@ -2297,6 +2359,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       autofocusPlay: autofocusPlay,
       playFocusNode: autofocusPlay ? _playFocus : null,
       onBump: onBump,
+      showSeek: _catchup,
       playerLabel: flutterPlayerLabel(_playerVal),
       decodeLabel: _decodeLabel,
       offerFullscreenChoice: offerFullscreen ? null : false,
@@ -2768,7 +2831,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   onTap: () {
                                     final chs = _channels;
                                     if (chs.isEmpty) return;
-                                    _playChannel(_chIdx <= 0 ? chs.length - 1 : _chIdx - 1);
+                                    unawaited(_stepChannel(delta: _liveInvert ? 1 : -1));
                                   },
                                 ),
                                 const SizedBox(height: 8),
@@ -2778,7 +2841,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   onTap: () {
                                     final chs = _channels;
                                     if (chs.isEmpty) return;
-                                    _playChannel((_chIdx + 1) % chs.length);
+                                    unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
                                   },
                                 ),
                                 const SizedBox(height: 8),

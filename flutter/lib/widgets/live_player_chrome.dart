@@ -41,6 +41,8 @@ class LiveCatchupChrome extends StatelessWidget {
     this.playFocusNode,
     /// 任意控件操作后回调（重排隐藏计时）。
     this.onBump,
+    /// 回看时显示时间与进度条；直播不画废进度。
+    this.showSeek = false,
   });
 
   final KotvPlayback player;
@@ -67,6 +69,7 @@ class LiveCatchupChrome extends StatelessWidget {
   final bool autofocusPlay;
   final FocusNode? playFocusNode;
   final VoidCallback? onBump;
+  final bool showSeek;
 
   void _tap(VoidCallback? action) {
     action?.call();
@@ -151,11 +154,13 @@ class LiveCatchupChrome extends StatelessWidget {
                       _textAct(invertOn ? '反转开' : '反转关', () => _tap(onInvert)),
                     if (onFailSwitch != null)
                       _textAct(failSwitchOn ? '换线开' : '换线关', () => _tap(onFailSwitch)),
-                    const SizedBox(width: 6),
-                    Text(
-                      compact ? fmtPlayerTime(pos) : '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',
-                      style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : (compact ? 11 : 12)),
-                    ),
+                    if (showSeek) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        compact ? fmtPlayerTime(pos) : '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',
+                        style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : (compact ? 11 : 12)),
+                      ),
+                    ],
                     const Spacer(),
                     if (!compact)
                       Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: land ? 11 : 12)),
@@ -182,27 +187,28 @@ class LiveCatchupChrome extends StatelessWidget {
                     ),
                   ],
                 ),
-                KotvSeekSlider(
-                  player: player,
-                  maxMs: total,
-                  secondaryMs: () {
-                    if (total <= 0) return 0.0;
-                    final p = pos.inMilliseconds.toDouble().clamp(0.0, total);
-                    final b = player.buffered.inMilliseconds.toDouble().clamp(0.0, total);
-                    return b < p ? p : b;
-                  }(),
-                  enabled: dur.inMilliseconds > 0,
-                  onInteraction: onBump,
-                  theme: SliderTheme.of(context).copyWith(
-                    trackHeight: land ? 2 : 3,
-                    thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
-                    overlayShape: RoundSliderOverlayShape(overlayRadius: land ? 10 : 12),
-                    activeTrackColor: KotvColors.primary,
-                    inactiveTrackColor: Colors.white24,
-                    secondaryActiveTrackColor: Colors.white38,
-                    thumbColor: Colors.white,
+                if (showSeek)
+                  KotvSeekSlider(
+                    player: player,
+                    maxMs: total,
+                    secondaryMs: () {
+                      if (total <= 0) return 0.0;
+                      final p = pos.inMilliseconds.toDouble().clamp(0.0, total);
+                      final b = player.buffered.inMilliseconds.toDouble().clamp(0.0, total);
+                      return b < p ? p : b;
+                    }(),
+                    enabled: dur.inMilliseconds > 0,
+                    onInteraction: onBump,
+                    theme: SliderTheme.of(context).copyWith(
+                      trackHeight: land ? 2 : 3,
+                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
+                      overlayShape: RoundSliderOverlayShape(overlayRadius: land ? 10 : 12),
+                      activeTrackColor: KotvColors.primary,
+                      inactiveTrackColor: Colors.white24,
+                      secondaryActiveTrackColor: Colors.white38,
+                      thumbColor: Colors.white,
+                    ),
                   ),
-                ),
               ],
             ),
           );

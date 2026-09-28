@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../player/kotv_playback.dart';
@@ -6,6 +8,8 @@ import '../theme/kotv_theme.dart';
 /// 进度条：拖动只改 UI，松手才 [KotvPlayback.seek]。
 ///
 /// seek 完成前钉住目标位置，避免播放器短暂回报 0 导致进度条闪回开头。
+/// 钉住清除必须听 [KotvPlayback.positionStream]：桌面 MPV（MediaKit）不因
+/// position 调 [ChangeNotifier.notifyListeners]。
 class KotvSeekSlider extends StatefulWidget {
   const KotvSeekSlider({
     super.key,
@@ -31,19 +35,20 @@ class KotvSeekSlider extends StatefulWidget {
 class _KotvSeekSliderState extends State<KotvSeekSlider> {
   double? _scrubMs;
   double? _pendingSeekMs;
+  StreamSubscription<Duration>? _posSub;
 
   @override
   void initState() {
     super.initState();
-    widget.player.addListener(_onPlayer);
+    _wirePosition(widget.player);
   }
 
   @override
   void didUpdateWidget(covariant KotvSeekSlider oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.player != widget.player) {
-      oldWidget.player.removeListener(_onPlayer);
-      widget.player.addListener(_onPlayer);
+      _unwirePosition();
+      _wirePosition(widget.player);
       _scrubMs = null;
       _pendingSeekMs = null;
     }
@@ -51,18 +56,25 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> {
 
   @override
   void dispose() {
-    widget.player.removeListener(_onPlayer);
+    _unwirePosition();
     super.dispose();
   }
 
-  void _onPlayer() {
-    final pending = _pendingSeekMs;
-    if (pending == null || !mounted) return;
-    final max = widget.maxMs <= 0 ? 1.0 : widget.maxMs;
-    final live = widget.player.position.inMilliseconds.toDouble().clamp(0.0, max);
-    if ((live - pending).abs() <= 1500) {
-      setState(() => _pendingSeekMs = null);
-    }
+  void _unwirePosition() {
+    _posSub?.cancel();
+    _posSub = null;
+  }
+
+  void _wirePosition(KotvPlayback player) {
+    _posSub = player.positionStream.listen((_) {
+      final pending = _pendingSeekMs;
+      if (pending == null || !mounted) return;
+      final max = widget.maxMs <= 0 ? 1.0 : widget.maxMs;
+      final live = player.position.inMilliseconds.toDouble().clamp(0.0, max);
+      if ((live - pending).abs() <= 1500) {
+        setState(() => _pendingSeekMs = null);
+      }
+    });
   }
 
   @override
