@@ -270,42 +270,56 @@ class Jsoup {
 }
 
 function pdfh(html, parse, baseUrl) {
+  // 优先进程内 Jsoup。Android 上 __jarPdf* 走 :9979 RPC，实测单次 pdfa ~2–3s
+  //（潇洒哥 homeVod 累计 25s+；路漫漫 category ~10s），PC 同路径也偏慢。
+  try {
+    return new Jsoup(baseUrl || globalThis.MY_URL || "").pdfh(html, parse, baseUrl || "");
+  } catch (_) {}
   if (typeof globalThis.__jarPdfh === "function") {
     try {
       const v = globalThis.__jarPdfh(html, parse);
       if (v !== undefined && v !== null) return v;
     } catch (_) {}
   }
-  return new Jsoup(baseUrl || globalThis.MY_URL || "").pdfh(html, parse, baseUrl || "");
+  return "";
 }
 function pdfa(html, parse) {
+  try {
+    return new Jsoup().pdfa(html, parse);
+  } catch (_) {}
   if (typeof globalThis.__jarPdfa === "function") {
     try {
       const v = globalThis.__jarPdfa(html, parse);
       if (Array.isArray(v)) return v;
     } catch (_) {}
   }
-  return new Jsoup().pdfa(html, parse);
+  return [];
 }
 function pd(html, parse, baseUrl) {
+  try {
+    return new Jsoup(baseUrl || globalThis.MY_URL || "").pd(html, parse, baseUrl || "");
+  } catch (_) {}
   if (typeof globalThis.__jarPd === "function") {
     try {
       const v = globalThis.__jarPd(html, parse, baseUrl || globalThis.MY_URL || "");
       if (v !== undefined && v !== null) return v;
     } catch (_) {}
   }
-  return new Jsoup(baseUrl || globalThis.MY_URL || "").pd(html, parse, baseUrl || "");
+  return "";
 }
 function pdfl(html, parse, listText, listUrl, urlKey) {
   const base = urlKey || globalThis.MY_URL || "";
+  try {
+    // 回落时把 urlKey 传给 pd，避免 new Jsoup() 无 MY_URL 导致集地址保持相对 path。
+    return new Jsoup(base).pdfl(html, parse, listText, listUrl, base);
+  } catch (_) {}
   if (typeof globalThis.__jarPdfl === "function") {
     try {
       const v = globalThis.__jarPdfl(html, parse, listText, listUrl, base);
       if (Array.isArray(v)) return v;
     } catch (_) {}
   }
-  // 回落时把 urlKey 传给 pd，避免 new Jsoup() 无 MY_URL 导致集地址保持相对 path。
-  return new Jsoup(base).pdfl(html, parse, listText, listUrl, base);
+  return [];
 }
 
 globalThis.pdfh = pdfh;

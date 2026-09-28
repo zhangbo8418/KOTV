@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -185,11 +186,15 @@ func (s *jsSpider) runWorker() (err error) {
 		}
 	}()
 
-	// 勿同步 EnsureJar：Android 上 D8+Init 可堵数十秒，本地 parser.js 已能回落。
-	// 后台预热；首次 __jarPdfh / JsParse 再 EnsureJar。
+	// JsLoader → dex(jar) → createFun：worker 启动即 parseJar（Init+Proxy）。
 	jsLog("[js] worker start key=%s api=%s jar=%s", s.key, s.api, s.resolveJsJar())
 	if jar := s.resolveJsJar(); jar != "" {
-		WarmJarAsync(jar)
+		if err := EnsureJar(jar); err != nil {
+			jsLog("[js] dex(jar) failed key=%s: %v", s.key, err)
+			log.Printf("js spider dex(jar) failed key=%s: %v", s.key, err)
+		} else {
+			jsLog("[js] dex(jar) ok key=%s jar=%s", s.key, jar)
+		}
 	}
 
 	// Spider.createCtx：BytecodeModuleLoader + evaluateModule。
@@ -771,7 +776,7 @@ func (s *jsSpider) registerHost(ctx *qjs.Context) {
 		return v
 	}))
 
-	// createFun：优先走 jar 内 Parser/Function（bridge jsParse），失败由 parser.js 回落。
+	// createFun：挂 __jarPdf* 作兜底；parser.js 优先进程内 Jsoup（Android jar RPC 单次 pdfa 可到数秒）。
 	jar := s.resolveJsJar()
 	g.Set("__jarPdfh", ctx.NewFunction(func(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
 		html, rule := "", ""
@@ -1341,7 +1346,12 @@ func (s *jsSpider) interrupt() {
 
 func (s *jsSpider) Init(ext string) error {
 	s.ext = ext
-	// jar 由 runWorker WarmJarAsync / 首次 JsParse EnsureJar；勿在此同步挡 init。
+	// EnsureJar 已在 runWorker dex；此处保留以防 Init 早于 worker。
+	if jar := s.resolveJsJar(); jar != "" {
+		if err := EnsureJar(jar); err != nil {
+			log.Printf("js spider dex(jar) failed key=%s: %v", s.key, err)
+		}
+	}
 	_, err := s.invoke("init", ext)
 	return err
 }
