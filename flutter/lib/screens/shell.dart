@@ -305,7 +305,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                         behavior: HitTestBehavior.opaque,
                         onLongPress: () => ref.read(uiBusyProvider.notifier).state = null,
                         child: ColoredBox(
-                          color: const Color(0x990A0820),
+                          color: Colors.black.withOpacity(0.55),
                           child: Center(
                             child: Container(
                               constraints: BoxConstraints(
@@ -314,23 +314,23 @@ class _AppShellState extends ConsumerState<AppShell> {
                               ),
                               padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 28),
                               decoration: BoxDecoration(
-                                color: const Color(0xCC63248A),
+                                color: KotvPalette.of(context).dialogBg,
                                 borderRadius: BorderRadius.circular(18),
-                                border: Border.all(color: const Color(0x55D8A5E8)),
+                                border: Border.all(color: KotvPalette.of(context).outline),
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const SizedBox(
+                                  SizedBox(
                                     width: 36,
                                     height: 36,
-                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                                    child: CircularProgressIndicator(color: KotvPalette.of(context).fg, strokeWidth: 3),
                                   ),
                                   const SizedBox(height: 14),
                                   Text(
                                     busy,
                                     textAlign: TextAlign.center,
-                                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                                    style: TextStyle(color: KotvPalette.of(context).fg, fontSize: 16, fontWeight: FontWeight.w600),
                                   ),
                                 ],
                               ),

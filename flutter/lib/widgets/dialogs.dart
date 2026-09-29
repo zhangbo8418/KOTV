@@ -900,18 +900,19 @@ Future<String?> pickChoice(
   required String current,
   required List<(String label, String value)> options,
 }) {
+  final p = KotvPalette.of(context);
   return showDialog<String>(
     context: context,
     builder: (ctx) => SimpleDialog(
-      backgroundColor: const Color(0xFF63248A),
-      title: Text(title, style: const TextStyle(color: Colors.white)),
+      backgroundColor: p.dialogBg,
+      title: Text(title, style: TextStyle(color: p.fg)),
       children: [
         for (final o in options)
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, o.$2),
             child: Text(
               o.$1 + (o.$2 == current ? '  ✓' : ''),
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: p.fg),
             ),
           ),
       ],
@@ -927,14 +928,15 @@ Future<List<String>?> pickMultiChoice(
   required List<(String label, String value)> options,
 }) {
   final selected = {...current};
+  final p = KotvPalette.of(context);
   return showDialog<List<String>>(
     context: context,
     builder: (ctx) {
       return StatefulBuilder(
         builder: (ctx, setLocal) {
           return AlertDialog(
-            backgroundColor: const Color(0xFF63248A),
-            title: Text(title, style: const TextStyle(color: Colors.white)),
+            backgroundColor: p.dialogBg,
+            title: Text(title, style: TextStyle(color: p.fg)),
             content: SizedBox(
               width: 420,
               child: SingleChildScrollView(
@@ -945,9 +947,9 @@ Future<List<String>?> pickMultiChoice(
                       CheckboxListTile(
                         dense: true,
                         value: selected.contains(o.$2),
-                        activeColor: Colors.white,
-                        checkColor: const Color(0xFF63248A),
-                        title: Text(o.$1, style: const TextStyle(color: Colors.white)),
+                        activeColor: p.fg,
+                        checkColor: p.dialogBg,
+                        title: Text(o.$1, style: TextStyle(color: p.fg)),
                         controlAffinity: ListTileControlAffinity.leading,
                         onChanged: (on) {
                           setLocal(() {
@@ -966,14 +968,14 @@ Future<List<String>?> pickMultiChoice(
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('取消', style: TextStyle(color: Colors.white70)),
+                child: Text('取消', style: TextStyle(color: p.muted)),
               ),
               TextButton(
                 onPressed: () {
                   selected.clear();
                   setLocal(() {});
                 },
-                child: const Text('清空', style: TextStyle(color: Colors.white70)),
+                child: Text('清空', style: TextStyle(color: p.muted)),
               ),
               FilledButton(
                 onPressed: () {
@@ -1071,10 +1073,10 @@ class _SourceListDialogState extends State<_SourceListDialog> {
     final current = '${_local[widget.currentKey] ?? widget.fallbackCurrent}';
     final m = _dialogMetrics(context);
     final p = KotvPalette.of(context);
-    final bg = widget.vodStyle ? const Color(0xFA3B1970) : p.dialogBg;
-    final border = widget.vodStyle ? const Color(0x70D8A5E8) : p.outline;
-    final titleColor = widget.vodStyle ? Colors.white : p.fg;
-    final hintColor = widget.vodStyle ? const Color(0xFFCF4274) : p.muted;
+    final bg = p.dialogBg;
+    final border = p.outline;
+    final titleColor = p.fg;
+    final hintColor = p.muted;
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: m.inset,

@@ -1586,27 +1586,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ('杂项（HTTP/EPG/字幕等）', 'other'),
     ]);
     if (choice == null || !mounted) return;
+    final pal = KotvPalette.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF63248A),
-        title: const Text('确认清理？', style: TextStyle(color: Colors.white)),
+        backgroundColor: pal.dialogBg,
+        title: Text('确认清理？', style: TextStyle(color: pal.fg)),
         content: Text(
           choice == 'all'
               ? '将清理爬虫包、磁力缓冲、日志、HTTP/封面等，以及 UI 侧临时文件。\n保留设置与数据库（观看历史等）。\n清理爬虫包后会自动重载点播源。'
               : (choice == 'script' || choice == 'jar')
                   ? '将清理所选爬虫缓存，不会删除设置与观看历史。\n清理后会自动重载点播源。'
                   : '将清理所选缓存，不会删除设置与观看历史。',
-          style: const TextStyle(color: Colors.white70),
+          style: TextStyle(color: pal.muted),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消', style: TextStyle(color: Colors.white70)),
+            child: Text('取消', style: TextStyle(color: pal.muted)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('清理', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            child: Text('清理', style: TextStyle(color: pal.fg, fontWeight: FontWeight.w700)),
           ),
         ],
       ),

@@ -317,8 +317,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   bool _rightOpen = false;
   /// 横屏左侧节目单列；默认收起，避免挡画面 / 撑破面板。
   bool _epgOpen = false;
-  /// 返回 / 底栏：点屏幕中间显隐；与左右菜单互斥，不一起出现。
+  /// 回看底栏播控；直播不用。
   bool _chromeVisible = false;
+  /// 换台后短暂频道信息条（不等于播控）。
+  bool _channelInfoVisible = false;
   bool _catchup = false;
   bool _catchupChrome = false;
   /// 当前回看的节目下标；-1 表示未在回看。
@@ -486,12 +488,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         unawaited(_playback.play());
         break;
       case 'pause':
-        unawaited(_playback.pause());
+        if (_catchup) unawaited(_playback.pause());
         break;
       case 'toggle':
       case 'playpause':
       case 'play_pause':
-        unawaited(_playback.playOrPause());
+        if (_catchup) {
+          unawaited(_playback.playOrPause());
+        } else {
+          _flashChannelInfo();
+        }
         break;
       case 'seek':
         if (seekMs > 0) {
@@ -530,12 +536,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       unawaited(_exitCatchup());
       return true;
     }
-    if (_leftOpen || _rightOpen || _chromeVisible || _catchupChrome) {
+    if (_leftOpen || _rightOpen || _chromeVisible || _catchupChrome || _channelInfoVisible) {
       setState(() {
         _leftOpen = false;
         _rightOpen = false;
         _chromeVisible = false;
         _catchupChrome = false;
+        _channelInfoVisible = false;
       });
       _catchupHideTimer?.cancel();
       return true;
@@ -887,23 +894,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   Future<bool> _ensureUnlocked(int groupIdx) async {
     if (!_groupLocked(groupIdx)) return true;
     final ctrl = TextEditingController();
+    final pal = KotvPalette.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF63248A),
-        title: const Text('解锁分组', style: TextStyle(color: Colors.white)),
+        backgroundColor: pal.dialogBg,
+        title: Text('解锁分组', style: TextStyle(color: pal.fg)),
         content: TextField(
           controller: ctrl,
           obscureText: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
+          style: TextStyle(color: pal.fg),
+          decoration: InputDecoration(
             hintText: '请输入分组密码',
-            hintStyle: TextStyle(color: Colors.white38),
+            hintStyle: TextStyle(color: pal.muted),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('取消', style: TextStyle(color: pal.muted))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('确定', style: TextStyle(color: pal.fg))),
         ],
       ),
     );
@@ -1480,9 +1488,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   void _togglePortraitChrome() {
     if (_playUrl.isNotEmpty) {
-      final wasPlaying = _playback.playing;
-      unawaited(_playback.playOrPause());
       if (_catchup) {
+        final wasPlaying = _playback.playing;
+        unawaited(_playback.playOrPause());
         if (wasPlaying) {
           _pulseCatchupChrome();
         } else {
@@ -1491,12 +1499,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         }
         return;
       }
-      if (wasPlaying) {
-        _pulsePortraitChrome();
-      } else {
-        _portraitHideTimer?.cancel();
-        setState(() => _portraitChrome = false);
-      }
+      // 直播：不暂停，只闪信息 / 竖屏信息条。
+      _flashChannelInfo();
+      _pulsePortraitChrome();
       return;
     }
     if (_catchup) {
@@ -1758,6 +1763,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           _rightOpen = false;
           _epgOpen = false;
           _chromeVisible = false;
+          _channelInfoVisible = false;
         });
       }
     });
@@ -1766,8 +1772,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void _flashChannelInfo() {
     if (!_leftOpen && !_rightOpen) {
       setState(() {
-        _chromeVisible = true;
-        if (_catchup) _catchupChrome = true;
+        _channelInfoVisible = true;
+        // 直播只闪信息条；回看可顺带亮播控。
+        if (_catchup) {
+          _catchupChrome = true;
+          _chromeVisible = true;
+        }
       });
     }
     _scheduleHideOverlays();
@@ -1779,6 +1789,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _rightOpen = false;
       _epgOpen = false;
       _chromeVisible = false;
+      _channelInfoVisible = false;
     });
     _scheduleHideOverlays();
     if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
@@ -1792,6 +1803,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _rightOpen = true;
       _leftOpen = false;
       _chromeVisible = false;
+      _channelInfoVisible = false;
     });
     _scheduleHideOverlays();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1925,23 +1937,29 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   void _showLiveChromeAndFocusPlay() {
-    setState(() {
-      _leftOpen = false;
-      _rightOpen = false;
-      _chromeVisible = true;
-      if (_catchup) _catchupChrome = true;
-    });
-    _scheduleHideOverlays();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_chromeVisible || _catchupChrome) _playFocus.requestFocus();
-    });
+    if (_catchup) {
+      setState(() {
+        _leftOpen = false;
+        _rightOpen = false;
+        _chromeVisible = true;
+        _catchupChrome = true;
+        _channelInfoVisible = false;
+      });
+      _scheduleHideOverlays();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_catchupChrome) _playFocus.requestFocus();
+      });
+      return;
+    }
+    // 直播：菜单键开频道列表，不拉播控条。
+    _openLeft();
   }
 
   void _bumpLiveChrome() {
     if (_catchup) {
       _pulseCatchupChrome();
-    } else if (_leftOpen || _rightOpen || _chromeVisible) {
+    } else if (_leftOpen || _rightOpen || _channelInfoVisible) {
       _scheduleHideOverlays();
     }
   }
@@ -1976,12 +1994,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _togglePlayPauseOnSurface();
   }
 
-  /// 点播放画面：播放中→暂停并出控件；暂停中→继续播并藏控件。
+  /// 点播放画面：回看可暂停并出控件；直播只闪频道信息，不停流。
   void _togglePlayPauseOnSurface() {
     if (_playUrl.isEmpty) return;
-    final wasPlaying = _playback.playing;
-    unawaited(_playback.playOrPause());
     if (_catchup) {
+      final wasPlaying = _playback.playing;
+      unawaited(_playback.playOrPause());
       if (wasPlaying) {
         _pulseCatchupChrome();
         _keepMouseVisible();
@@ -1992,15 +2010,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       }
       return;
     }
-    if (wasPlaying) {
-      setState(() => _chromeVisible = true);
-      _scheduleHideOverlays();
-      _keepMouseVisible();
-    } else {
-      setState(() => _chromeVisible = false);
-      _cancelHideOverlays();
-      _scheduleHideMouse();
-    }
+    _flashChannelInfo();
+    _keepMouseVisible();
   }
 
   /// 双击：未真全屏则占满屏幕；已真全屏则缩回铺满窗口。
@@ -2058,8 +2069,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         if (_catchup) {
           _catchupHideTimer?.cancel();
           if (!_catchupChrome) setState(() => _catchupChrome = true);
-        } else if (!portrait && !_leftOpen && !_rightOpen && !_chromeVisible) {
-          setState(() => _chromeVisible = true);
+        } else if (!portrait && !_leftOpen && !_rightOpen) {
+          // 直播：底边移入只亮频道信息，不拉播控。
+          if (!_channelInfoVisible) setState(() => _channelInfoVisible = true);
+          _scheduleHideOverlays();
         }
       } else if (_playback.playing) {
         if (portrait) {
@@ -2067,7 +2080,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         }
         if (_catchup) {
           _pulseCatchupChrome();
-        } else if (!portrait && _chromeVisible && !_leftOpen && !_rightOpen) {
+        } else if (!portrait && _channelInfoVisible && !_leftOpen && !_rightOpen) {
           _scheduleHideOverlays();
         }
       }
@@ -2270,9 +2283,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return '线路 ${_line + 1}/$_lines';
   }
 
-  /// 频道列表 / 设置面板 / 底栏控件打开时，方向键与确定交给焦点遍历，不换台。
+  /// 侧栏或回看播控打开时，方向键交给焦点；频道信息条不挡换台。
   bool get _liveUiOpen =>
-      _leftOpen || _rightOpen || _chromeVisible || _catchupChrome;
+      _leftOpen || _rightOpen || (_catchup && _catchupChrome);
 
   void _seekByRemote(Duration delta) {
     final next = _playback.position + delta;
@@ -2314,11 +2327,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             _leftOpen = false;
             _rightOpen = false;
           });
-          _showLiveChromeAndFocusPlay();
+          if (_catchup) {
+            _showLiveChromeAndFocusPlay();
+          } else {
+            _flashChannelInfo();
+          }
         } else {
           setState(() {
             _chromeVisible = false;
             _catchupChrome = false;
+            _channelInfoVisible = false;
           });
           _cancelHideOverlays();
         }
@@ -2597,40 +2615,50 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                     ),
                   ),
                   if (_playUrl.isNotEmpty && !_leftOpen && !_rightOpen)
-                    // 中心播停仅触控；遥控走底栏 / 菜单，避免焦点停在画面正中。
-                    ExcludeFocus(
-                      child: CenterPlayPauseButton(
-                        player: _playback,
-                        hideWhenBuffering: true,
-                        enabled: !_loading &&
-                            !_status.contains('换台') &&
-                            !_status.contains('解析') &&
-                            !_status.contains('加载') &&
-                            !_status.contains('缓冲'),
+                    if (_catchup)
+                      ExcludeFocus(
+                        child: CenterPlayPauseButton(
+                          player: _playback,
+                          hideWhenBuffering: true,
+                          enabled: !_loading &&
+                              !_status.contains('换台') &&
+                              !_status.contains('解析') &&
+                              !_status.contains('加载') &&
+                              !_status.contains('缓冲'),
+                        ),
                       ),
-                    ),
-                  if ((_chromeVisible || _catchupChrome) && !_leftOpen && !_rightOpen)
+                  if ((_catchup && _catchupChrome) && !_leftOpen && !_rightOpen)
                     Positioned(
                       left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
                       top: KotvLayout.isLandscapeCompact(context) ? 8 : 12,
                       child: AppPill(
                         label: _immersive
                             ? '退出全屏'
-                            : (_catchup ? '返回直播' : '返回'),
+                            : '返回直播',
                         width: KotvLayout.isLandscapeCompact(context)
-                            ? (_catchup && !_immersive ? 96.0 : 78.0)
-                            : (_catchup && !_immersive ? 110.0 : 96.0),
+                            ? (!_immersive ? 96.0 : 78.0)
+                            : (!_immersive ? 110.0 : 96.0),
                         height: KotvLayout.isLandscapeCompact(context) ? 28 : 36,
                         fontSize: KotvLayout.isLandscapeCompact(context) ? 12 : 14,
                         onTap: () {
                           if (_immersive) {
                             unawaited(_exitImmersive());
-                          } else if (_catchup) {
-                            unawaited(_exitCatchup());
                           } else {
-                            goKotvPage(ref, KotvPage.video);
+                            unawaited(_exitCatchup());
                           }
                         },
+                      ),
+                    ),
+                  if (!_catchup && _immersive && !_leftOpen && !_rightOpen)
+                    Positioned(
+                      left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
+                      top: KotvLayout.isLandscapeCompact(context) ? 8 : 12,
+                      child: AppPill(
+                        label: '退出全屏',
+                        width: KotvLayout.isLandscapeCompact(context) ? 78.0 : 96.0,
+                        height: KotvLayout.isLandscapeCompact(context) ? 28 : 36,
+                        fontSize: KotvLayout.isLandscapeCompact(context) ? 12 : 14,
+                        onTap: () => unawaited(_exitImmersive()),
                       ),
                     ),
                   if (_leftOpen)
@@ -3063,8 +3091,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         ),
                       ),
                     ),
-                  // 底栏信息条（频道名）；遥控选控件走下方 LiveCatchupChrome
-                  if (_chromeVisible && !_leftOpen && !_rightOpen && (!_catchup || !_catchupChrome))
+                  // 底栏信息条（频道名）；不挡上下换台。
+                  if (_channelInfoVisible && !_leftOpen && !_rightOpen && (!_catchup || !_catchupChrome))
                     Positioned(
                       left: 16,
                       right: 16,
@@ -3127,8 +3155,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         ),
                       ),
                     ),
-                  // 底栏控件可 TvFocus 遥控选择
-                  if ((_chromeVisible || (_catchup && _catchupChrome)) && !_leftOpen && !_rightOpen)
+                  // 底栏播控：仅回看。
+                  if (_catchup && _catchupChrome && !_leftOpen && !_rightOpen)
                     Positioned(
                       left: 0,
                       right: 0,
@@ -3172,7 +3200,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final p = KotvPalette.of(context);
     final chs = _channels;
     final title = _title.isNotEmpty ? _title : '直播';
-    final showChrome = _portraitChrome || (_catchup && _catchupChrome);
+    final showChrome = _catchup && (_portraitChrome || _catchupChrome);
     return Column(
       children: [
           LibraryTopBar(
@@ -3215,7 +3243,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                       _status.contains('缓冲') ||
                       _loading,
                 ),
-                if (_playUrl.isNotEmpty)
+                if (_catchup && _playUrl.isNotEmpty)
                   CenterPlayPauseButton(
                     player: _playback,
                     hideWhenBuffering: true,

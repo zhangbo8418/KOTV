@@ -67,23 +67,24 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
 
   Future<void> _promptText(String title, String hint, String current) async {
     final c = TextEditingController(text: current);
+    final pal = KotvPalette.of(context);
     final v = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF63248A),
-        title: Text(title, style: const TextStyle(color: Colors.white)),
+        backgroundColor: pal.dialogBg,
+        title: Text(title, style: TextStyle(color: pal.fg)),
         content: TextField(
           controller: c,
           autofocus: true,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: pal.fg),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.45)),
+            hintStyle: TextStyle(color: pal.muted),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('确定')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: pal.muted))),
+          TextButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: Text('确定', style: TextStyle(color: pal.fg))),
         ],
       ),
     );
