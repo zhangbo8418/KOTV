@@ -80,6 +80,20 @@ class KotvApi {
 
   Future<Map<String, dynamic>> health() => _get('/api/v1/health');
 
+  /// 引擎本机信息：`name` / `ip` / `uuid`（见 `GET /device`）。
+  Future<Map<String, dynamic>> getDevice() async {
+    final res = await http
+        .get(_u('/device'), headers: await _headers())
+        .timeout(const Duration(seconds: 15));
+    final text = utf8.decode(res.bodyBytes);
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {}
+    throw KotvApiException(text.trim().isEmpty ? 'HTTP ${res.statusCode}' : text.trim());
+  }
+
   Future<Map<String, dynamic>> authStatus() => _get('/api/v1/auth/status');
 
   Future<Map<String, dynamic>> login(String username, String password) async {

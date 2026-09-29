@@ -1267,7 +1267,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
         final skipRaw = '${settings['playerSkipOpeningEnding'] ?? 'true'}'.toLowerCase();
         _skipOpeningEnding = skipRaw != 'false' && skipRaw != '0' && skipRaw != 'off';
-        _prefVolume = double.tryParse('${settings['playerVolume'] ?? ''}');
+        _prefVolume = _normalizePlayerVolumePref(settings['playerVolume']);
+        if (_prefVolume == 80) {
+          final rawVol = double.tryParse('${settings['playerVolume'] ?? ''}');
+          if (rawVol != null && rawVol <= 0) {
+            unawaited(ref.read(apiProvider).setSetting('playerVolume', '80'));
+          }
+        }
         kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
         unawaited(KotvBufferBudget.warm());
       } catch (_) {}
@@ -1894,9 +1900,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         ref.read(apiProvider).baseUrl,
       );
       if (playUrl.isEmpty) {
-        // playerContent 已跑完（配置站会在 jar 内 AlertDialog.show）；无地址则出详情，
-        // 弹窗挂在 MainActivity 上叠首页。有 msg 的失败走 catch，不会落到这里。
-        if (mounted) unawaited(_leavePage());
+        // 空地址留在详情；Config 弹窗依赖 pause 仍保留的 Activity，勿出栈。
+        const tip = '播放地址加载失败';
+        if (!mounted) return;
+        setState(() {
+          _status = tip;
+          _immersiveEpCover = false;
+        });
+        _stopBtProgressPoll();
+        _playbackLive = false;
+        _sessionStartedAt = null;
         return;
       }
       final mediaUrl = kotvRewriteEngineLocalUrl(
@@ -2044,7 +2057,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           final vol = _prefVolume;
           if (vol != null) {
             try {
-              await pb.setVolume(vol.clamp(0, 100));
+              await pb.setVolume(vol);
             } catch (_) {}
           }
           // 起播缓冲由守卫无限等待；仅黑屏/视源失败抛 SilentVideo 才 failover。
@@ -2150,27 +2163,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _stopBtProgressPoll();
       _playbackLive = false;
       _sessionStartedAt = null;
-      setState(() {
-        _playUrl = '';
-        _immersiveEpCover = false;
-        _status = _friendlyPlayError(
-          e,
-          triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
-        );
-      });
-      _syncAndroidAutoPip();
-      _syncFullscreen();
+      final tip = _friendlyPlayError(
+        e,
+        triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
+      );
+      // 留页并保留舞台；勿清 _playUrl 拆掉播放区。
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _friendlyPlayError(
-                e,
-                triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
-              ),
-            ),
-          ),
-        );
+        setState(() {
+          _immersiveEpCover = false;
+          _status = tip;
+        });
+        _syncAndroidAutoPip();
+        _syncFullscreen();
       }
     }
   }
@@ -2209,6 +2213,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     while (s.contains('播放失败: 播放失败:')) {
       s = s.replaceAll('播放失败: 播放失败:', '播放失败:');
     }
+    if (s.contains('空') && s.toLowerCase().contains('url')) return '播放地址加载失败';
     if (s.startsWith('播放失败:')) return s;
     if (s.startsWith('解析失败:')) return '播放失败: ${s.substring('解析失败:'.length).trimLeft()}';
     return '播放失败: $s';
@@ -2681,6 +2686,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             episode: epName,
           ));
         },
+        onDanmakuSettingsChanged: () => unawaited(_refreshDanmakuPrefs()),
         ambientOn: _ambientOn,
         stableVolumeOn: _stableVolumeOn,
         holdSpeed: _holdSpeed,
@@ -2816,7 +2822,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'danmakuRows') {
             setState(() => _danmakuRows = int.tryParse(v) ?? _danmakuRows);
           }
-          if (k.startsWith('danmakuShow') || k == 'danmakuMaxOnScreen' || k == 'danmakuScrollArea' || k == 'danmakuScrollGap' || k == 'danmakuBold' || k == 'danmakuDurationMs' || k == 'danmakuFixedDurationMs' || k == 'danmakuLineSpacing' || k == 'danmakuStrokeMode' || k == 'danmakuStrokeWidth' || k == 'danmakuShadowOpacity' || k == 'danmakuProjectionOffsetX' || k == 'danmakuProjectionOffsetY' || k == 'danmakuProjectionOpacity' || k == 'danmakuColorMode' || k == 'danmakuFont' || k == 'danmakuRowsTop' || k == 'danmakuRowsBottom') {
+          if (k.startsWith('danmaku')) {
             unawaited(_refreshDanmakuPrefs());
           }
           if (k == 'playerDecode') {
@@ -3087,6 +3093,36 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                     !_status.contains('换集中'),
               ),
             ),
+          if (_status.startsWith('播放失败') || _status == '播放地址加载失败')
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: false,
+                child: ColoredBox(
+                  color: const Color(0x99000000),
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _status,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            '可换源 / 解析后重试',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white.withOpacity(0.72), fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -3097,6 +3133,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       player: _playback,
       miniActive: _miniDesktop,
       autofocusPlay: _chromeRemoteFocus,
+      onPersistSetting: (k, v) => ref.read(apiProvider).setSetting(k, v),
       onCast: () => unawaited(_cast()),
       onMini: () => unawaited(_miniDesktop ? _exitMini() : _enterMini()),
       onExpand: (kind) => unawaited(_enterFullscreen(kind)),
@@ -3194,6 +3231,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               player: _playback,
               miniActive: true,
               translucent: true,
+              onPersistSetting: (k, v) => ref.read(apiProvider).setSetting(k, v),
               onCast: () => unawaited(_cast()),
               onMini: () => unawaited(_exitMini()),
               onExpand: (kind) => unawaited(_enterFullscreen(kind)),
@@ -3275,9 +3313,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
                 Offstage(
                   offstage: _immersiveFullscreen,
-                  child: TickerMode(
-                    enabled: !_immersiveFullscreen,
-                    child: detailScaffold,
+                  child: ExcludeFocus(
+                    excluding: _immersiveFullscreen,
+                    child: TickerMode(
+                      enabled: !_immersiveFullscreen,
+                      child: detailScaffold,
+                    ),
                   ),
                 ),
               ],
@@ -3748,6 +3789,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final d = _detail;
     if (d != null && d.site.isNotEmpty) return d.site;
     return widget.site;
+  }
+
+  /// 音量偏好：≤0 视为脏数据，回退 80；合法范围 1–100。
+  double? _normalizePlayerVolumePref(Object? raw) {
+    final v = double.tryParse('${raw ?? ''}');
+    if (v == null) return null;
+    if (v <= 0) return 80;
+    return v.clamp(1, 100);
   }
 
   /// 页内收藏与遥控收藏共用同一 VodItem（含 typeName / remarks / configSource）。

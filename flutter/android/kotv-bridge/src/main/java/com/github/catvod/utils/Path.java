@@ -55,7 +55,7 @@ public class Path {
     public static File cache() {
         android.content.Context c = Init.context();
         if (c == null) {
-            throw new IllegalStateException("Init.context is null; KotvApplication must call Init.set");
+            throw new IllegalStateException("Init.context is null; App must call Init.set");
         }
         return c.getCacheDir();
     }
@@ -63,7 +63,7 @@ public class Path {
     public static File files() {
         android.content.Context c = Init.context();
         if (c == null) {
-            throw new IllegalStateException("Init.context is null; KotvApplication must call Init.set");
+            throw new IllegalStateException("Init.context is null; App must call Init.set");
         }
         return c.getFilesDir();
     }

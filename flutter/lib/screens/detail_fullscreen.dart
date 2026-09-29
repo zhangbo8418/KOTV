@@ -86,6 +86,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.danmakuSources = const [],
     this.danmakuSourceIdx = 0,
     this.onDanmakuSourceChanged,
+    this.onDanmakuSettingsChanged,
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
@@ -166,6 +167,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final List<DanmakuSource> danmakuSources;
   final int danmakuSourceIdx;
   final ValueChanged<int>? onDanmakuSourceChanged;
+  final VoidCallback? onDanmakuSettingsChanged;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
@@ -404,11 +406,15 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       if (_showForceLandscape) setState(() => _showForceLandscape = false);
       return;
     }
-    final show = kotvShouldShowForceLandscape(
-      screen: MediaQuery.sizeOf(context),
-      videoWidth: widget.playback.width,
-      videoHeight: widget.playback.height,
-    );
+    final pb = widget.playback;
+    // 未出画/首帧缓冲中不显示，避免半透明 chip 盖 PlatformView 叠影。
+    final hasFrame = pb.width > 0 && pb.height > 0 && (pb.playing || !pb.buffering);
+    final show = hasFrame &&
+        kotvShouldShowForceLandscape(
+          screen: MediaQuery.sizeOf(context),
+          videoWidth: pb.width,
+          videoHeight: pb.height,
+        );
     if (show != _showForceLandscape) {
       setState(() => _showForceLandscape = show);
     }
@@ -776,8 +782,13 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
 
     // —— 控件全隐：一键一义 ——
-    // 菜单/OK → 亮底栏；设置/E → 选集；左右 → seek（含长按重复）；上下 → 亮控件。
-    if (isDown && (kotvIsMenuKey(key) || kotvIsEnterKey(key) || kotvIsMediaPlayPause(key))) {
+    // OK/播停 → 真播停（可短暂亮栏）；菜单 → 亮底栏；设置/E → 选集；左右 → seek；上下 → 亮控件。
+    if (isDown && (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key))) {
+      unawaited(widget.playback.playOrPause());
+      _showChromeAndFocusPlay();
+      return KeyEventResult.handled;
+    }
+    if (isDown && kotvIsMenuKey(key)) {
       _showChromeAndFocusPlay();
       return KeyEventResult.handled;
     }
@@ -908,21 +919,21 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
             borderRadius: BorderRadius.circular(24),
             child: Ink(
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.55),
+                color: const Color(0xE6121212),
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: Colors.white.withOpacity(0.28)),
               ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.screen_rotation_rounded, color: Colors.white.withOpacity(0.95), size: 20),
-                    const SizedBox(width: 8),
+                    Icon(Icons.screen_rotation_rounded, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
                     Text(
                       '全屏观看',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.95),
+                        color: Colors.white,
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.2,
@@ -978,6 +989,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       danmakuSources: widget.danmakuSources,
       danmakuSourceIdx: widget.danmakuSourceIdx,
       onDanmakuSourceChanged: widget.onDanmakuSourceChanged,
+      onDanmakuSettingsChanged: widget.onDanmakuSettingsChanged,
       ambientOn: _ambientOn,
       onAmbientChanged: (v) {
         setState(() => _ambientOn = v);

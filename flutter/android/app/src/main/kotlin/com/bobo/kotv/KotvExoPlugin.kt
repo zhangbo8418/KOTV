@@ -283,8 +283,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       com.github.catvod.net.OkHttp.player()
     } catch (_: Throwable) {
       OkHttpClient.Builder()
-        .followRedirects(true)
-        .followSslRedirects(true)
+        .addInterceptor(com.github.catvod.net.ProxyRedirectInterceptor())
+        .followRedirects(false)
+        .followSslRedirects(false)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
@@ -1185,11 +1186,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     val selector = buildTrackSelector(ctx, effective)
     trackSelector = selector
-    val loadControl: LoadControl? = if (live) {
-      null
-    } else {
-      val factor = bufferFactor.coerceIn(1, 10)
-      // duration×factor + PRELOAD 64MiB 与 TV ExoUtil 同形；再另接 KotvMemBudget 作主播放器内存上限。
+    // duration×factor；主播放器不设字节顶（无 PreloadManager 也不挂 PRELOAD 名额）。
+    val factor = bufferFactor.coerceIn(1, 10)
+    val loadControl: LoadControl =
       DefaultLoadControl.Builder()
         .setBufferDurationsMs(
           DefaultLoadControl.DEFAULT_MIN_BUFFER_MS * factor,
@@ -1197,22 +1196,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
         )
-        .setTargetBufferBytes(bufferBudgetBytes(ctx))
-        .setPlayerTargetBufferBytes(
-          androidx.media3.exoplayer.analytics.PlayerId.PRELOAD.name,
-          64 * 1024 * 1024,
-        )
         .build()
-    }
     val bandwidthMeter = DefaultBandwidthMeter.Builder(ctx).build()
     val builder = ExoPlayer.Builder(ctx)
       .setMediaSourceFactory(mediaSourceFactory)
       .setRenderersFactory(renderers)
       .setTrackSelector(selector)
       .setBandwidthMeter(bandwidthMeter)
-    if (loadControl != null) {
-      builder.setLoadControl(loadControl)
-    }
+      .setLoadControl(loadControl)
     val p = builder.build()
     p.setAudioAttributes(
       androidx.media3.common.AudioAttributes.Builder()
@@ -1237,6 +1228,34 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         p.addAnalyticsListener(androidx.media3.exoplayer.util.EventLogger("KotvExo"))
       } catch (_: Throwable) {
       }
+    }
+    try {
+      p.addAnalyticsListener(
+        object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+          override fun onVideoDecoderInitialized(
+            eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMs: Long,
+          ) {
+            Log.i(
+              TAG,
+              "videoDecoder=$decoderName decodeMode=${playerBuiltDecode ?: effectiveDecodeMode()} initMs=$initializationDurationMs",
+            )
+          }
+
+          override fun onAudioDecoderInitialized(
+            eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMs: Long,
+          ) {
+            Log.i(TAG, "audioDecoder=$decoderName")
+          }
+        },
+      )
+    } catch (t: Throwable) {
+      Log.w(TAG, "decoder analytics failed", t)
     }
     try {
       assHandler?.init(p)
@@ -1373,7 +1392,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
    * tunnel 仅 Surface（Texture 必须关）。
    */
   private fun buildTrackSelector(ctx: Context, mode: String): DecodeTrackSelector {
-    val trackSelector = DecodeTrackSelector(ctx)
+    val trackSelector = KotvDecodeTrackSelector(ctx)
     val builder = trackSelector.buildUponParameters()
     builder.setForceHighestSupportedBitrate(true)
     builder.setTunnelingEnabled(tunnelingEnabled && !renderTexture)
@@ -1411,34 +1430,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun buildRenderersFactory(ctx: Context, mode: String): KotvFfmpegRenderersFactory {
-    val videoMode: Int
-    val audioMode: Int
-    when (mode) {
-      "soft" -> {
-        // 软解 prefer：扩展渲染优先；未 prefer 时 MediaCodec 优先、FFmpeg 仍作兜底
-        videoMode =
-          if (softVideoPrefer) {
-            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
-          } else {
-            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-          }
-        audioMode =
-          if (softAudioPrefer) {
-            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
-          } else {
-            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-          }
-      }
-      "hard" -> {
-        // 硬解视频 MediaCodec 优先；FFmpeg 扩展作兜底（含 AV3A 音轨）
-        videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-        audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-      }
-      else -> {
-        videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-        audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-      }
-    }
+    // 扩展恒 ON；软解靠 DECODE_SOFTWARE / track prefer 选 FFmpeg，勿 PREFER 抢轨。
+    val videoMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+    val audioMode = DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
     val secondaryOut =
       if (secondarySubtitleMode != "off") {
         (subtitleOverlay ?: KotvSubtitleOverlay(ctx).also { subtitleOverlay = it }).secondaryTextOutput
@@ -1457,7 +1451,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         if (audioPassThrough) null else audioEffectProcessor,
       )
     when (mode) {
-      "soft" -> factory.setMediaCodecSelector(SOFT_PREFER_SELECTOR)
+      "soft" -> {
+        // 仅 softVideoPrefer 时软 MediaCodec 优先；否则硬优先（与 DECODE 偏好一致）。
+        if (softVideoPrefer || softAudioPrefer) {
+          factory.setMediaCodecSelector(SOFT_PREFER_SELECTOR)
+        } else {
+          factory.setMediaCodecSelector(HARD_PREFER_SELECTOR)
+        }
+      }
       else -> factory.setMediaCodecSelector(HARD_PREFER_SELECTOR)
     }
     return factory
@@ -2404,25 +2405,18 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  private fun bufferBudgetBytes(ctx: Context): Int = KotvMemBudget.bytes(ctx)
-
   private fun defaultUserAgent(): String {
     val ctx = appContext ?: return FALLBACK_PLAY_UA
     return Util.getUserAgent(ctx, ctx.packageName)
   }
 
+  /** Dart 侧已做头规范化；此处仅补缺省 UA。 */
   private fun normalizeHeaders(raw: Map<String, String>): Map<String, String> {
     val out = linkedMapOf<String, String>()
     for ((k0, v0) in raw) {
-      var k = k0.trim()
-      var v = v0.trim()
+      val k = k0.trim()
+      val v = v0.trim()
       if (k.isEmpty() || v.isEmpty()) continue
-      // CatVod 偶发把多头塞进一个 value：User-Agent$xx#Referer$yy
-      if (v.contains('$') && (v.contains('#') || k.equals("header", true))) {
-        parseCatvodHeaderBlob(v).forEach { (hk, hv) -> out[canonicalHeader(hk)] = hv }
-        continue
-      }
-      k = canonicalHeader(k)
       out[k] = v
     }
     if (out.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
@@ -2439,11 +2433,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     private const val FALLBACK_PLAY_UA =
       "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
 
-    /** 硬解直出：优先 hardwareAccelerated；无硬解时仍交完整列表（不按编码阉割）。 */
+    /** 硬解优先：硬件编解码器在前，软件 MediaCodec 仍保留作兜底（勿只返回 hard，否则 profileLevel 拒支持时会直接跳进坏软解 FFmpeg）。 */
     private val HARD_PREFER_SELECTOR = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
       val infos = MediaCodecUtil.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
       val hard = infos.filter { it.hardwareAccelerated }
-      if (hard.isNotEmpty()) hard else infos
+      val soft = infos.filter { !it.hardwareAccelerated }
+      if (hard.isEmpty()) infos else hard + soft
     }
 
     /** 软解：优先软件 MediaCodec；无软件实现时回落原列表。 */
@@ -2515,29 +2510,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
         errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
         errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
-    }
-
-    fun parseCatvodHeaderBlob(blob: String): Map<String, String> {
-      val map = linkedMapOf<String, String>()
-      for (part in blob.split('#')) {
-        val i = part.indexOf('$')
-        if (i <= 0) continue
-        val k = part.substring(0, i).trim()
-        val v = part.substring(i + 1).trim()
-        if (k.isNotEmpty() && v.isNotEmpty()) map[k] = v
-      }
-      return map
-    }
-
-    fun canonicalHeader(k: String): String {
-      return when (k.lowercase()) {
-        "user-agent", "ua" -> "User-Agent"
-        "referer", "referrer" -> "Referer"
-        "cookie" -> "Cookie"
-        "origin" -> "Origin"
-        "host" -> "Host"
-        else -> k
-      }
     }
 
     fun guessMime(url: String): String? {

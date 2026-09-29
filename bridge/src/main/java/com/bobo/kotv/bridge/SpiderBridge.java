@@ -931,7 +931,7 @@ public class SpiderBridge {
                     Context asApp = app.getApplicationContext();
                     Context initCtx = asApp != null ? asApp : app;
                     // 必须传真正的 Application：饭太硬 wrapper Init 会 (Application) context。
-                    // 包名伪装走 KotvApplication.spoofFongmiPackage（反射，避免 bridge→app 循环依赖）。
+                    // 包名伪装走 App.spoofFongmiPackage（反射，避免 bridge→app 循环依赖）。
                     boolean spoofed = setSpoofFongmiPackage(true);
                     try {
                         init.invoke(null, initCtx);

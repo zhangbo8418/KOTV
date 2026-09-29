@@ -18,7 +18,7 @@ public class Prefers {
     public static SharedPreferences getPrefers() {
         Context ctx = Init.context();
         if (ctx == null) {
-            throw new IllegalStateException("Init.context is null; KotvApplication must call Init.set");
+            throw new IllegalStateException("Init.context is null; App must call Init.set");
         }
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(ctx);
         migrateLegacy(ctx, prefs);

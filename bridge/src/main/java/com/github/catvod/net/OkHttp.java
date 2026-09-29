@@ -290,7 +290,18 @@ public class OkHttp {
     }
 
     private static OkHttpClient.Builder getBuilder() {
-        OkHttpClient.Builder builder = new OkHttpClient.Builder().addInterceptor(requestInterceptor()).addInterceptor(authInterceptor()).addNetworkInterceptor(responseInterceptor()).connectTimeout(TIMEOUT, TimeUnit.MILLISECONDS).readTimeout(TIMEOUT, TimeUnit.MILLISECONDS).writeTimeout(TIMEOUT, TimeUnit.MILLISECONDS).dns(dns()).hostnameVerifier((hostname, session) -> true);
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                .addInterceptor(requestInterceptor())
+                .addInterceptor(authInterceptor())
+                .addInterceptor(new ProxyRedirectInterceptor())
+                .addNetworkInterceptor(responseInterceptor())
+                .connectTimeout(TIMEOUT, TimeUnit.MILLISECONDS)
+                .readTimeout(TIMEOUT, TimeUnit.MILLISECONDS)
+                .writeTimeout(TIMEOUT, TimeUnit.MILLISECONDS)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .dns(dns())
+                .hostnameVerifier((hostname, session) -> true);
         SSLContext ssl = getSSLContext();
         if (ssl != null) {
             builder.sslSocketFactory(ssl.getSocketFactory(), trustAllCertificates());

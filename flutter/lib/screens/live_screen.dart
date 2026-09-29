@@ -635,8 +635,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
         _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
         final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
-        if (vol != null) {
-          await _playback.setVolume(vol.clamp(0, 100));
+        if (vol != null && vol > 0) {
+          await _playback.setVolume(vol.clamp(1, 100));
+        } else if (vol != null && vol <= 0) {
+          await _playback.setVolume(80);
+          try {
+            await ref.read(apiProvider).setSetting('playerVolume', '80');
+          } catch (_) {}
         }
         kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
         if (!mounted) return;
@@ -2461,6 +2466,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       decodeLabel: _decodeLabel,
       offerFullscreenChoice: offerFullscreen ? null : false,
       fullscreenActive: _immersive,
+      onPersistSetting: (k, v) => ref.read(apiProvider).setSetting(k, v),
       onCast: () => unawaited(_cast()),
       onMini: onMini,
       onExpand: onExpand,
@@ -3039,18 +3045,25 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   ),
                                 ],
                                 const SizedBox(height: 8),
-                                StreamBuilder(
-                                  stream: _playback.positionStream,
+                                ListenableBuilder(
+                                  listenable: _playback,
                                   builder: (context, _) {
-                                    final vol = _playback.volume.clamp(0, 100).toDouble();
+                                    final vol = _playback.volume.clamp(1, 100).toDouble();
                                     return Column(
                                       crossAxisAlignment: CrossAxisAlignment.stretch,
                                       children: [
                                         Text('音量 ${vol.round()}', style: const TextStyle(color: Colors.white70)),
                                         Slider(
                                           value: vol,
+                                          min: 1,
                                           max: 100,
                                           onChanged: (v) => _playback.setVolume(v),
+                                          onChangeEnd: (v) async {
+                                            final n = v.round().clamp(1, 100);
+                                            try {
+                                              await ref.read(apiProvider).setSetting('playerVolume', '$n');
+                                            } catch (_) {}
+                                          },
                                         ),
                                       ],
                                     );
@@ -3097,66 +3110,69 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                       left: 16,
                       right: 16,
                       bottom: 16,
-                      child: Material(
-                        color: KotvPalette.of(context).dialogBg,
-                        elevation: 0,
-                        shadowColor: Colors.transparent,
-                        surfaceTintColor: Colors.transparent,
-                        borderRadius: BorderRadius.circular(10),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: _channelNumColWidth(20, digits: _channelNumDigitsFor(_channels)),
-                                child: Text(
-                                  _channelNum,
-                                  softWrap: false,
-                                  overflow: TextOverflow.clip,
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
-                                    fontSize: 20,
-                                    fontFeatures: const [FontFeature.tabularFigures()],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              _LiveChannelLogo(name: _title, logo: _currentLogo),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    KotvMarqueeText(
-                                      _title,
-                                      active: true,
-                                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                      child: Builder(builder: (context) {
+                        final pal = KotvPalette.of(context);
+                        return Material(
+                          color: pal.dialogBg,
+                          elevation: 0,
+                          shadowColor: Colors.transparent,
+                          surfaceTintColor: Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: _channelNumColWidth(20, digits: _channelNumDigitsFor(_channels)),
+                                  child: Text(
+                                    _channelNum,
+                                    softWrap: false,
+                                    overflow: TextOverflow.clip,
+                                    style: TextStyle(
+                                      color: pal.muted,
+                                      fontSize: 20,
+                                      fontFeatures: const [FontFeature.tabularFigures()],
                                     ),
-                                    if (_programLabel.isNotEmpty || _status.isNotEmpty)
-                                      KotvMarqueeText(
-                                        _programLabel.isNotEmpty ? _programLabel : _status,
-                                        active: true,
-                                        style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              if (_lineLabel.isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: KotvMarqueeText(
-                                    _lineLabel,
-                                    active: true,
-                                    textAlign: TextAlign.right,
-                                    style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13),
                                   ),
                                 ),
+                                const SizedBox(width: 12),
+                                _LiveChannelLogo(name: _title, logo: _currentLogo),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      KotvMarqueeText(
+                                        _title,
+                                        active: true,
+                                        style: TextStyle(color: pal.fg, fontSize: 18, fontWeight: FontWeight.w600),
+                                      ),
+                                      if (_programLabel.isNotEmpty || _status.isNotEmpty)
+                                        KotvMarqueeText(
+                                          _programLabel.isNotEmpty ? _programLabel : _status,
+                                          active: true,
+                                          style: TextStyle(color: pal.muted, fontSize: 13),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                if (_lineLabel.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: KotvMarqueeText(
+                                      _lineLabel,
+                                      active: true,
+                                      textAlign: TextAlign.right,
+                                      style: TextStyle(color: pal.muted, fontSize: 13),
+                                    ),
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      }),
                     ),
                   // 底栏播控：仅回看。
                   if (_catchup && _catchupChrome && !_leftOpen && !_rightOpen)

@@ -42,6 +42,12 @@ bool kotvIsMediaRewind(LogicalKeyboardKey key) => key == LogicalKeyboardKey.medi
 bool kotvIsMediaFastForward(LogicalKeyboardKey key) =>
     key == LogicalKeyboardKey.mediaFastForward;
 
+bool kotvIsVolumeUpKey(LogicalKeyboardKey key) =>
+    key == LogicalKeyboardKey.audioVolumeUp;
+
+bool kotvIsVolumeDownKey(LogicalKeyboardKey key) =>
+    key == LogicalKeyboardKey.audioVolumeDown;
+
 /// 0–9；遥控器数字键 / 键盘主区与小键盘。找不到返回 null。
 int? kotvDigitFromKey(LogicalKeyboardKey key) {
   const main = <LogicalKeyboardKey>[

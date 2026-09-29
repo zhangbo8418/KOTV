@@ -30,6 +30,8 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
   List<Map<String, dynamic>> _users = [];
   Map<String, dynamic>? _me;
   bool _forceChangeShown = false;
+  String _deviceIp = '';
+  String _devicePort = '9978';
 
   KotvApi get _api => ref.read(apiProvider);
 
@@ -73,6 +75,16 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
   Future<void> _refresh() async {
     setState(() => _busy = true);
     try {
+      try {
+        final st = await _api.getSettings();
+        _devicePort = '${st['port'] ?? '9978'}';
+      } catch (_) {}
+      try {
+        final dev = await _api.getDevice();
+        _deviceIp = '${dev['ip'] ?? ''}'.trim();
+      } catch (_) {
+        _deviceIp = '';
+      }
       final me = await _api.authMe();
       final user = Map<String, dynamic>.from((me['user'] as Map?) ?? const {});
       final role = '${user['role'] ?? ''}';
@@ -457,9 +469,25 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
             onBack: () => Navigator.of(context).maybePop(),
             onSearch: () => goKotvPage(ref, KotvPage.search),
             onProfile: () => goKotvPage(ref, KotvPage.profile),
-            onNews: () => showAppNews(context, '用户管理：本机免登录。开启「远端鉴权」后，非本机才可连接并登录；管理员可管账号，看片按账号隔离。'),
+            onNews: () => showAppNews(
+              context,
+              _deviceIp.isNotEmpty
+                  ? '用户管理：本机免登录。远端鉴权开启后非本机需登录。\n本机访问：http://$_deviceIp:$_devicePort/'
+                  : '用户管理：本机免登录。开启「远端鉴权」后，非本机才可连接并登录；管理员可管账号，看片按账号隔离。',
+            ),
             title: '用户管理',
           ),
+          if (_deviceIp.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '本机 http://$_deviceIp:$_devicePort/',
+                  style: TextStyle(color: p.muted, fontSize: 13),
+                ),
+              ),
+            ),
           if (_status.isNotEmpty || _busy)
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),

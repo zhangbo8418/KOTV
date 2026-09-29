@@ -7,6 +7,7 @@ import '../api/kotv_auth_token.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
 import 'chrome.dart';
+import 'kotv_tv_text_field.dart';
 
 /// Web：打开页必须登录本站账号。
 /// PC/安卓：连远端引擎时，对方须开启「远端鉴权」，再登录一次。
@@ -126,7 +127,7 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
                   style: TextStyle(color: p.muted, fontSize: 13),
                 ),
                 const SizedBox(height: 14),
-                TextField(
+                KotvTvTextField(
                   controller: userCtrl,
                   autofocus: true,
                   style: TextStyle(color: p.fg),
@@ -139,7 +140,7 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
                   ),
                 ),
                 const SizedBox(height: 10),
-                TextField(
+                KotvTvTextField(
                   controller: passCtrl,
                   obscureText: true,
                   onSubmitted: (_) => Navigator.pop(ctx, true),

@@ -19,6 +19,7 @@ class KotvSeekSlider extends StatefulWidget {
     this.enabled = true,
     this.onInteraction,
     this.theme,
+    this.focusNode,
   });
 
   final KotvPlayback player;
@@ -27,6 +28,7 @@ class KotvSeekSlider extends StatefulWidget {
   final bool enabled;
   final VoidCallback? onInteraction;
   final SliderThemeData? theme;
+  final FocusNode? focusNode;
 
   @override
   State<KotvSeekSlider> createState() => _KotvSeekSliderState();
@@ -85,6 +87,7 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> {
     final secondary = (widget.secondaryMs ?? live).clamp(0.0, max);
 
     final slider = Slider(
+      focusNode: widget.focusNode,
       value: value,
       secondaryTrackValue: secondary < value ? value : secondary,
       max: max,

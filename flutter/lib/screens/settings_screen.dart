@@ -32,6 +32,7 @@ import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/danmaku_settings_sheet.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/kotv_tv_text_field.dart';
 import 'detail_screen.dart';
 import 'live_screen.dart';
 import 'shell.dart';
@@ -55,6 +56,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _remoteUser = '';
   String _vodDesc = '';
   String _liveDesc = '';
+  String _deviceIp = '';
   bool _loading = true;
   bool _busy = false;
   /// 安卓：设备支持 Vulkan≥1.2 时才显示开关。
@@ -94,6 +96,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
       _vodDesc = '${data['vodDesc'] ?? ''}';
       _liveDesc = '${data['liveDesc'] ?? ''}';
+      try {
+        final dev = await ref.read(apiProvider).getDevice();
+        _deviceIp = '${dev['ip'] ?? ''}'.trim();
+      } catch (_) {
+        _deviceIp = '';
+      }
       await LocalHistory.setIncognito(g('incognito', 'false') == 'true');
       kotvApplyPlayUaSetting(g('ua'));
       if (kotvIsAndroid()) {
@@ -186,7 +194,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text(title, style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
           width: 540,
-          child: TextField(
+          child: KotvTvTextField(
             controller: c,
             autofocus: true,
             maxLines: maxLines,
@@ -209,8 +217,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (v != null) await onOK(v);
   }
 
-  Future<void> _pick(String title, String key, List<(String, String)> options, {String? msg}) async {
-    final v = await pickChoice(context, title: title, current: g(key), options: options);
+  Future<void> _pick(
+    String title,
+    String key,
+    List<(String, String)> options, {
+    String? msg,
+    String? defaultValue,
+  }) async {
+    final cur = g(key, defaultValue ?? '');
+    final v = await pickChoice(context, title: title, current: cur, options: options);
     if (v != null) await _set(key, v, msg: msg);
   }
 
@@ -266,7 +281,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text('代理地址', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
           width: 540,
-          child: TextField(
+          child: KotvTvTextField(
             controller: c,
             autofocus: true,
             style: TextStyle(color: p.fg),
@@ -1467,7 +1482,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 style: TextStyle(color: p.muted, fontSize: 12),
               ),
               const SizedBox(height: 10),
-              TextField(
+              KotvTvTextField(
                 controller: c,
                 autofocus: true,
                 maxLines: 3,
@@ -1794,13 +1809,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
+              KotvTvTextField(
                 controller: hostCtrl,
                 style: TextStyle(color: p.fg),
                 decoration: InputDecoration(hintText: '192.168.1.100 或 IP:9978', hintStyle: TextStyle(color: p.muted)),
               ),
               const SizedBox(height: 10),
-              TextField(
+              KotvTvTextField(
                 controller: pairCtrl,
                 style: TextStyle(color: p.fg),
                 decoration: InputDecoration(hintText: '对端配对码', hintStyle: TextStyle(color: p.muted)),
@@ -2053,6 +2068,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ((kotvIsDesktop() || kotvIsIOS()) || (kotvIsAndroid() && _androidVulkanOk));
     final showMpvGpuNext = usesMpv && kotvIsAndroid();
     final showMpvTls = usesMpv && kotvIsAndroid();
+    final canPickPlayer = kotvCanSwitchPlayer(live: false);
+    final canPickLivePlayer = kotvCanSwitchPlayer(live: true);
+    final playerUnavailableHint = kIsWeb
+        ? 'Web 端仅支持浏览器 HTML5 播放'
+        : '当前客户端无法切换内置播放器';
+    final lanHintIp = _deviceIp.isNotEmpty ? _deviceIp : '<本机IP>';
 
     return Column(
       children: [
@@ -2060,7 +2081,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           onBack: () => kotvPageBack(ref),
           onSearch: () => goKotvPage(ref, KotvPage.search),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
-          onNews: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port/\n（Web 包为客户端；普通引擎为遥控。遥控见 /remote/）'),
+          onNews: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://$lanHintIp:$_port/\n（Web 包为客户端；普通引擎为遥控。遥控见 /remote/）'),
           title: '设置',
         ),
         if (_status.isNotEmpty)
@@ -2210,21 +2231,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '点播播放器',
                           value: playerLabel,
-                          onTap: kotvCanSwitchPlayer(live: false)
+                          onTap: canPickPlayer
                               ? () => _pick('点播播放器', 'player', kotvVodPlayerOptions(), msg: '点播播放器已切换')
-                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/FVP）'),
+                              : () => showAppNews(context, playerUnavailableHint),
                         ),
                         KotvSettingsCell(
                           label: '直播播放器',
                           value: livePlayerLabel,
-                          onTap: kotvCanSwitchPlayer(live: true)
+                          onTap: canPickLivePlayer
                               ? () => _pick(
                                     '直播播放器',
                                     'playerLive',
                                     kotvLivePlayerOptions(),
                                     msg: '直播播放器已切换',
                                   )
-                              : () => showAppNews(context, 'Web 端仅支持浏览器 HTML5 播放（无法使用 MPV/FVP）'),
+                              : () => showAppNews(context, playerUnavailableHint),
                         ),
                         KotvSettingsCell(
                           label: '解码方式',
@@ -2276,33 +2297,48 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             'audio' => '后台续播',
                             _ => '画中画',
                           },
-                          onTap: () => _pick('后台播放', 'playerBackground', const [
-                            ('离开暂停', 'off'),
-                            ('后台续播（卸画面留声音）', 'audio'),
-                            ('自动画中画', 'pip'),
-                          ]),
+                          onTap: () => _pick(
+                            '后台播放',
+                            'playerBackground',
+                            const [
+                              ('离开暂停', 'off'),
+                              ('后台续播（卸画面留声音）', 'audio'),
+                              ('自动画中画', 'pip'),
+                            ],
+                            defaultValue: 'pip',
+                          ),
                         ),
                         KotvSettingsCell(
                           label: '画面比例',
                           value: scaleLabel,
-                          onTap: () => _pick('画面比例', 'playerScale', const [
-                            ('适应', 'default'),
-                            ('拉伸', 'fill'),
-                            ('Zoom', 'zoom'),
-                            ('16:9', '16:9'),
-                            ('4:3', '4:3'),
-                          ]),
+                          onTap: () => _pick(
+                            '画面比例',
+                            'playerScale',
+                            const [
+                              ('适应', 'default'),
+                              ('拉伸', 'fill'),
+                              ('Zoom', 'zoom'),
+                              ('16:9', '16:9'),
+                              ('4:3', '4:3'),
+                            ],
+                            defaultValue: 'default',
+                          ),
                         ),
                         KotvSettingsCell(
                           label: '直播画面比例',
                           value: scaleLiveLabel,
-                          onTap: () => _pick('直播画面比例', 'playerScaleLive', const [
-                            ('适应', 'default'),
-                            ('拉伸', 'fill'),
-                            ('Zoom', 'zoom'),
-                            ('16:9', '16:9'),
-                            ('4:3', '4:3'),
-                          ]),
+                          onTap: () => _pick(
+                            '直播画面比例',
+                            'playerScaleLive',
+                            const [
+                              ('适应', 'default'),
+                              ('拉伸', 'fill'),
+                              ('Zoom', 'zoom'),
+                              ('16:9', '16:9'),
+                              ('4:3', '4:3'),
+                            ],
+                            defaultValue: scale,
+                          ),
                         ),
                         KotvSettingsCell(
                           label: '自动切换播放器',
@@ -2444,8 +2480,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: 'Web / 遥控',
-                          value: ':$_port',
-                          onTap: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://<本机IP>:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
+                          value: _deviceIp.isNotEmpty ? '$_deviceIp:$_port' : ':$_port',
+                          onTap: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://$lanHintIp:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
                         ),
                         KotvSettingsCell(
                           label: '用户管理',

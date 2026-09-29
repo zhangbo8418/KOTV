@@ -1,0 +1,224 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../player/kotv_playback.dart';
+import '../player/tv_remote_keys.dart';
+import '../theme/kotv_palette.dart';
+import '../theme/kotv_theme.dart';
+
+/// 播控右侧音量：默认只显示扬声器；获焦/悬停展开滑条；激活后左右键调音并落盘。
+class KotvVolumeControl extends StatefulWidget {
+  const KotvVolumeControl({
+    super.key,
+    required this.player,
+    this.onPersist,
+    this.onEngage,
+    this.iconSize = 40,
+    this.sliderWidth = 120,
+    this.compact = false,
+  });
+
+  final KotvPlayback player;
+  final Future<void> Function(int volume)? onPersist;
+  final VoidCallback? onEngage;
+  final double iconSize;
+  final double sliderWidth;
+  final bool compact;
+
+  @override
+  State<KotvVolumeControl> createState() => _KotvVolumeControlState();
+}
+
+class _KotvVolumeControlState extends State<KotvVolumeControl> {
+  late final FocusNode _focus = FocusNode(debugLabel: 'kotv_volume', onKeyEvent: _onKey);
+  final FocusNode _sliderFocus = FocusNode(canRequestFocus: false, skipTraversal: true);
+  bool _expanded = false;
+  bool _hovering = false;
+  bool _highlight = false;
+  Timer? _collapseTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_onFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    _collapseTimer?.cancel();
+    _focus.removeListener(_onFocusChanged);
+    _focus.dispose();
+    _sliderFocus.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChanged() {
+    final focused = _focus.hasFocus;
+    if (_highlight != focused) {
+      setState(() => _highlight = focused);
+    }
+    if (focused) {
+      _collapseTimer?.cancel();
+      if (!_expanded) setState(() => _expanded = true);
+      widget.onEngage?.call();
+    } else if (!_hovering) {
+      _scheduleCollapse();
+    }
+  }
+
+  void _scheduleCollapse() {
+    _collapseTimer?.cancel();
+    _collapseTimer = Timer(const Duration(milliseconds: 450), () {
+      if (!mounted || _focus.hasFocus || _hovering) return;
+      setState(() => _expanded = false);
+    });
+  }
+
+  void _setHover(bool on) {
+    _hovering = on;
+    if (on) {
+      _collapseTimer?.cancel();
+      if (!_expanded) setState(() => _expanded = true);
+      widget.onEngage?.call();
+    } else if (!_focus.hasFocus) {
+      _scheduleCollapse();
+    }
+  }
+
+  int _clampVol(num v) => v.round().clamp(1, 100);
+
+  Future<void> _applyVolume(double raw, {required bool persist}) async {
+    final n = _clampVol(raw);
+    await widget.player.setVolume(n.toDouble());
+    widget.onEngage?.call();
+    if (persist) {
+      final p = widget.onPersist;
+      if (p != null) await p(n);
+    }
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    final vol = widget.player.volume;
+
+    if (kotvIsVolumeUpKey(key) ||
+        kotvIsVolumeDownKey(key) ||
+        kotvIsLeftKey(key) ||
+        kotvIsRightKey(key)) {
+      if (!_expanded) setState(() => _expanded = true);
+      final up = kotvIsVolumeUpKey(key) || kotvIsRightKey(key);
+      final step = event is KeyRepeatEvent ? 2.0 : 5.0;
+      unawaited(_applyVolume(vol + (up ? step : -step), persist: true));
+      return KeyEventResult.handled;
+    }
+
+    if (kotvIsEnterKey(key)) {
+      setState(() => _expanded = !_expanded);
+      widget.onEngage?.call();
+      return KeyEventResult.handled;
+    }
+
+    if (kotvIsUpKey(key)) {
+      return node.focusInDirection(TraversalDirection.up) ? KeyEventResult.handled : KeyEventResult.ignored;
+    }
+    if (kotvIsDownKey(key)) {
+      return node.focusInDirection(TraversalDirection.down) ? KeyEventResult.handled : KeyEventResult.ignored;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  IconData _iconFor(double vol) {
+    if (vol <= 1) return Icons.volume_mute_rounded;
+    if (vol < 35) return Icons.volume_down_rounded;
+    return Icons.volume_up_rounded;
+  }
+
+  Color _ringColor(Color focus) {
+    if (focus.computeLuminance() >= 0.4) return focus;
+    return Color.lerp(focus, Colors.white, 0.55) ?? focus;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final land = widget.compact;
+    final iconSz = land ? (widget.iconSize <= 34 ? 18.0 : 20.0) : (widget.iconSize <= 34 ? 18.0 : 22.0);
+    final ring = _ringColor(KotvPalette.of(context).focus);
+    return MouseRegion(
+      onEnter: (_) => _setHover(true),
+      onExit: (_) => _setHover(false),
+      child: ListenableBuilder(
+        listenable: widget.player,
+        builder: (context, _) {
+          final vol = widget.player.volume.clamp(1, 100).toDouble();
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedSize(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.centerRight,
+                child: _expanded
+                    ? SizedBox(
+                        width: widget.sliderWidth,
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: land ? 2 : 3,
+                            thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
+                            overlayShape: RoundSliderOverlayShape(overlayRadius: land ? 10 : 12),
+                            activeTrackColor: KotvColors.primary,
+                            inactiveTrackColor: Colors.white24,
+                            thumbColor: Colors.white,
+                          ),
+                          child: Slider(
+                            // 焦点在扬声器节点；滑条仅鼠标/触控，避免与遥控左右键抢焦。
+                            focusNode: _sliderFocus,
+                            value: vol,
+                            min: 1,
+                            max: 100,
+                            onChanged: (v) => unawaited(_applyVolume(v, persist: false)),
+                            onChangeEnd: (v) => unawaited(_applyVolume(v, persist: true)),
+                          ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+              Focus(
+                focusNode: _focus,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    _focus.requestFocus();
+                    setState(() => _expanded = !_expanded);
+                    widget.onEngage?.call();
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    width: widget.iconSize,
+                    height: widget.iconSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _highlight ? ring.withOpacity(0.22) : null,
+                      border: Border.all(
+                        color: _highlight ? ring : Colors.transparent,
+                        width: _highlight ? 3 : 0,
+                      ),
+                      boxShadow: _highlight
+                          ? [BoxShadow(color: ring.withOpacity(0.55), blurRadius: 14, spreadRadius: 1)]
+                          : null,
+                    ),
+                    child: Icon(_iconFor(vol), color: Colors.white, size: iconSz),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}

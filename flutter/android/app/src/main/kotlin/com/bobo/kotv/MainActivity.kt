@@ -273,9 +273,6 @@ class MainActivity : FlutterActivity() {
 
   // 不在 onPostResume 自动弹「所有文件访问」：仅选本地配置等文件入口显式 ensureStoragePermission。
   // 否则包名伪装期间误跳系统设置页，表现为点源配置后像回桌面。
-  private fun promptStoragePermissionIfNeeded() {
-    // no-op：权限改由 Flutter 选文件路径主动申请
-  }
 
   @Deprecated("Deprecated in Java")
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -427,7 +424,6 @@ class MainActivity : FlutterActivity() {
     if (spiderKickStarted) return
     spiderKickStarted = true
     window.decorView.post {
-      promptStoragePermissionIfNeeded()
       try {
         SpiderServiceManager.start(this)
       } catch (_: Throwable) {

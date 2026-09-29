@@ -381,7 +381,17 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
         oldWidget.showReverse != widget.showReverse ||
         oldWidget.showSpecial != widget.showSpecial ||
         oldWidget.showPositioned != widget.showPositioned ||
-        oldWidget.scrollGapRatio != widget.scrollGapRatio;
+        oldWidget.scrollGapRatio != widget.scrollGapRatio ||
+        oldWidget.bold != widget.bold ||
+        oldWidget.strokeMode != widget.strokeMode ||
+        oldWidget.colorMode != widget.colorMode ||
+        oldWidget.fontFamily != widget.fontFamily ||
+        oldWidget.strokeWidth != widget.strokeWidth ||
+        oldWidget.shadowOpacity != widget.shadowOpacity ||
+        oldWidget.projectionOffsetX != widget.projectionOffsetX ||
+        oldWidget.projectionOffsetY != widget.projectionOffsetY ||
+        oldWidget.projectionOpacity != widget.projectionOpacity ||
+        oldWidget.opacity != widget.opacity;
     if (layoutChanged && widget.enabled) {
       _flying.clear();
       final mediaSec = _mediaPos.inMilliseconds / 1000.0;

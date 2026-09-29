@@ -8,6 +8,7 @@ import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../widgets/chrome.dart';
+import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/poster_card.dart';
 import '../vod/vod_open.dart';
 import 'shell.dart';
@@ -263,7 +264,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final p = KotvPalette.of(context);
     return ListView(
       children: [
-        TextField(
+        KotvTvTextField(
           controller: _ctrl,
           style: TextStyle(color: p.fg),
           decoration: InputDecoration(

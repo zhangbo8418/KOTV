@@ -10,7 +10,7 @@ import java.lang.ref.WeakReference;
 
 /**
  * dex jar 弹窗需要 Activity window token；Application 单独用在 Flutter 壳上易 BadTokenException。
- * 由 {@code KotvApplication} 生命周期写入，{@code SpiderBridge} / jar Init 注入读取。
+ * 由 {@code App} 生命周期写入，{@code SpiderBridge} / jar Init 注入读取。
  */
 public final class UiContext {
 

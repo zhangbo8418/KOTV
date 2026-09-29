@@ -9,6 +9,7 @@ import '../theme/layout_scale.dart';
 import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
 import 'vod_player_chrome.dart';
+import 'volume_control.dart';
 
 /// 直播底栏控件：播放/暂停、投屏、迷你、全屏、播放器、软硬解、音量；（回看时含进度）。
 class LiveCatchupChrome extends StatelessWidget {
@@ -43,6 +44,7 @@ class LiveCatchupChrome extends StatelessWidget {
     this.onBump,
     /// 回看时显示时间与进度条；直播不画废进度。
     this.showSeek = false,
+    this.onPersistSetting,
   });
 
   final KotvPlayback player;
@@ -70,6 +72,7 @@ class LiveCatchupChrome extends StatelessWidget {
   final FocusNode? playFocusNode;
   final VoidCallback? onBump;
   final bool showSeek;
+  final Future<void> Function(String key, String value)? onPersistSetting;
 
   void _tap(VoidCallback? action) {
     action?.call();
@@ -90,7 +93,6 @@ class LiveCatchupChrome extends StatelessWidget {
           final pos = player.position;
           final dur = player.duration;
           final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
-          final vol = player.volume.clamp(0, 100).toDouble();
           final compact = miniActive || MediaQuery.sizeOf(context).width < 560 || land;
           return Padding(
             padding: EdgeInsets.fromLTRB(compact ? 4 : 10, land ? 2 : 4, compact ? 4 : 10, land ? 4 : 6),
@@ -162,28 +164,15 @@ class LiveCatchupChrome extends StatelessWidget {
                       ),
                     ],
                     const Spacer(),
-                    if (!compact)
-                      Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: land ? 11 : 12)),
-                    SizedBox(
-                      width: compact ? 72 : (land ? 90 : 110),
-                      child: SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: land ? 2 : 3,
-                          thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
-                          overlayShape: RoundSliderOverlayShape(overlayRadius: land ? 10 : 12),
-                          activeTrackColor: KotvColors.primary,
-                          inactiveTrackColor: Colors.white24,
-                          thumbColor: Colors.white,
-                        ),
-                        child: Slider(
-                          value: vol,
-                          max: 100,
-                          onChanged: (v) {
-                            player.setVolume(v);
-                            onBump?.call();
-                          },
-                        ),
-                      ),
+                    KotvVolumeControl(
+                      player: player,
+                      iconSize: iconSize,
+                      sliderWidth: compact ? 72 : (land ? 90 : 110),
+                      compact: compact,
+                      onEngage: onBump,
+                      onPersist: onPersistSetting == null
+                          ? null
+                          : (n) => onPersistSetting!('playerVolume', '$n'),
                     ),
                   ],
                 ),

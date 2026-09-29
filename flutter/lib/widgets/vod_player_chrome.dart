@@ -16,6 +16,7 @@ import '../util/pick_subtitle_file.dart';
 import 'danmaku_settings_sheet.dart';
 import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
+import 'volume_control.dart';
 
 const _speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
 
@@ -130,6 +131,7 @@ class VodInlineControls extends StatelessWidget {
     this.miniActive = false,
     this.translucent = false,
     this.autofocusPlay = false,
+    this.onPersistSetting,
   });
 
   final KotvPlayback player;
@@ -140,6 +142,7 @@ class VodInlineControls extends StatelessWidget {
   final bool miniActive;
   final bool translucent;
   final bool autofocusPlay;
+  final Future<void> Function(String key, String value)? onPersistSetting;
 
   @override
   Widget build(BuildContext context) {
@@ -209,46 +212,30 @@ class VodInlineControls extends StatelessWidget {
                         },
                       ),
                     ),
-                    if (!narrow) ...[
-                      const Spacer(),
-                      Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
-                    ] else
-                      const SizedBox(width: 4),
-                    SizedBox(
-                      width: volW,
-                      child: ListenableBuilder(
-                        listenable: player,
-                        builder: (context, _) {
-                          final vol = player.volume.clamp(0, 100).toDouble();
-                          return ExcludeFocus(
-                            child: SliderTheme(
-                              data: _sliderTheme(context),
-                              child: Slider(
-                                value: vol,
-                                max: 100,
-                                onChanged: (v) => player.setVolume(v),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+                    if (!narrow) const Spacer(),
+                    KotvVolumeControl(
+                      player: player,
+                      iconSize: iconSize,
+                      sliderWidth: volW,
+                      compact: narrow,
+                      onPersist: onPersistSetting == null
+                          ? null
+                          : (n) => onPersistSetting!('playerVolume', '$n'),
                     ),
                   ],
                 ),
-                ExcludeFocus(
-                  child: StreamBuilder<Duration>(
-                    stream: player.positionStream,
-                    builder: (context, _) {
-                      final dur = player.duration;
-                      final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
-                      return KotvSeekSlider(
-                        player: player,
-                        maxMs: total,
-                        secondaryMs: _sliderBuffered(player, total),
-                        theme: _sliderTheme(context),
-                      );
-                    },
-                  ),
+                StreamBuilder<Duration>(
+                  stream: player.positionStream,
+                  builder: (context, _) {
+                    final dur = player.duration;
+                    final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
+                    return KotvSeekSlider(
+                      player: player,
+                      maxMs: total,
+                      secondaryMs: _sliderBuffered(player, total),
+                      theme: _sliderTheme(context),
+                    );
+                  },
                 ),
               ],
             ),
@@ -429,6 +416,7 @@ class VodFullscreenChrome extends StatefulWidget {
     this.danmakuSources = const [],
     this.danmakuSourceIdx = 0,
     this.onDanmakuSourceChanged,
+    this.onDanmakuSettingsChanged,
     this.ambientOn = false,
     this.onAmbientChanged,
     this.stableVolumeOn = false,
@@ -478,6 +466,8 @@ class VodFullscreenChrome extends StatefulWidget {
   final List<DanmakuSource> danmakuSources;
   final int danmakuSourceIdx;
   final ValueChanged<int>? onDanmakuSourceChanged;
+  /// 弹幕设置 sheet 内热更新（字号等已即时；其余靠父页 refresh）。
+  final VoidCallback? onDanmakuSettingsChanged;
   final bool ambientOn;
   final ValueChanged<bool>? onAmbientChanged;
   final bool stableVolumeOn;
@@ -516,6 +506,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   DateTime _now = DateTime.now();
   final ScrollController _epScroll = ScrollController();
   final FocusNode _playFocus = FocusNode(debugLabel: 'vod_fs_play');
+  final FocusNode _seekFocus = FocusNode(debugLabel: 'vod_fs_seek');
   final FocusNode _epFocus = FocusNode(debugLabel: 'vod_fs_ep');
   static const double _epItemExtent = 48;
   bool _pointerHoldingChrome = false;
@@ -664,6 +655,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     _sleepTimer?.cancel();
     _epScroll.dispose();
     _playFocus.dispose();
+    _seekFocus.dispose();
     _epFocus.dispose();
     super.dispose();
   }
@@ -1850,6 +1842,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               context: context,
                               loadSettings: _loadSettings,
                               persist: _persist,
+                              onChanged: widget.onDanmakuSettingsChanged,
                             );
                           },
                         ),
@@ -2200,246 +2193,239 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                 color: const Color(0x99000000),
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(padH, land ? 6 : 12, padH, padBot),
-                  child: StreamBuilder(
-                    stream: widget.player.positionStream,
-                    builder: (context, _) {
-                      final pos = widget.player.position;
-                      final dur = widget.player.duration;
-                      final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
-                      final vol = widget.player.volume.clamp(0, 100).toDouble();
-                      return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                '${_now.hour.toString().padLeft(2, '0')}:${_now.minute.toString().padLeft(2, '0')}:${_now.second.toString().padLeft(2, '0')}',
-                                style: TextStyle(color: Colors.white, fontSize: clockSize, fontWeight: FontWeight.w700, height: 1),
-                              ),
-                              Text(_endsAt, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: land ? 11 : 13)),
-                            ],
-                          ),
-                        ),
-                        SizedBox(height: land ? 2 : 4),
-                        Row(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            SizedBox(
-                              width: land ? 64 : 78,
-                              child: Text(fmtClockHms(pos), style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13)),
+                            Text(
+                              '${_now.hour.toString().padLeft(2, '0')}:${_now.minute.toString().padLeft(2, '0')}:${_now.second.toString().padLeft(2, '0')}',
+                              style: TextStyle(color: Colors.white, fontSize: clockSize, fontWeight: FontWeight.w700, height: 1),
                             ),
-                            Expanded(
-                              child: ExcludeFocus(
+                            Text(_endsAt, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: land ? 11 : 13)),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: land ? 2 : 4),
+                      StreamBuilder(
+                        stream: widget.player.positionStream,
+                        builder: (context, _) {
+                          final pos = widget.player.position;
+                          final dur = widget.player.duration;
+                          final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
+                          return Row(
+                            children: [
+                              SizedBox(
+                                width: land ? 64 : 78,
+                                child: Text(fmtClockHms(pos), style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13)),
+                              ),
+                              Expanded(
                                 child: KotvSeekSlider(
                                   player: widget.player,
                                   maxMs: total,
                                   secondaryMs: _sliderBuffered(widget.player, total),
                                   theme: _sliderTheme(context),
                                   onInteraction: widget.onBump,
+                                  focusNode: _seekFocus,
                                 ),
                               ),
-                            ),
-                            SizedBox(
-                              width: land ? 64 : 78,
-                              child: Text(
-                                fmtClockHms(dur),
-                                textAlign: TextAlign.right,
-                                style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13),
+                              SizedBox(
+                                width: land ? 64 : 78,
+                                child: Text(
+                                  fmtClockHms(dur),
+                                  textAlign: TextAlign.right,
+                                  style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: land ? 2 : 6),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  children: [
-                                    _IconAct(icon: Icons.skip_previous, tip: '上一集', size: land ? 32.0 : 40.0, onTap: () {
-                                      widget.onPrev?.call();
-                                      widget.onBump();
-                                    }),
-                                    _IconAct(
-                                      icon: widget.player.playing ? Icons.pause : Icons.play_arrow,
-                                      tip: widget.player.playing ? '暂停' : '播放',
-                                      size: land ? 32.0 : 40.0,
-                                      autofocus: true,
-                                      focusNode: _playFocus,
-                                      onTap: () {
-                                        widget.player.playOrPause();
-                                        widget.onBump();
-                                        setState(() {});
-                                      },
-                                    ),
-                                    _IconAct(icon: Icons.skip_next, tip: '下一集', size: land ? 32.0 : 40.0, onTap: () {
-                                      widget.onNext?.call();
-                                      widget.onBump();
-                                    }),
-                                    _IconAct(
-                                      icon: Icons.fast_forward,
-                                      tip: '倍速（长按细调）',
-                                      badge: 'x${widget.player.rate.toStringAsFixed(widget.player.rate == widget.player.rate.roundToDouble() ? 0 : 1)}',
-                                      size: land ? 32.0 : 40.0,
-                                      onTap: _cycleSpeed,
-                                      onLongPress: () => unawaited(_showSpeedSheet()),
-                                    ),
-                                    _IconAct(icon: Icons.replay, tip: '重播', size: land ? 32.0 : 40.0, onTap: () {
-                                      widget.onReplay?.call();
-                                      widget.player.seek(Duration.zero);
-                                      widget.player.play();
-                                      widget.onBump();
-                                    }),
-                                    _IconAct(
-                                      icon: Icons.aspect_ratio,
-                                      tip: '比例：${_aspects[_aspectIdx].$2}',
-                                      badge: _aspectBadge(_aspects[_aspectIdx].$1),
-                                      size: land ? 32.0 : 40.0,
-                                      onTap: _cycleAspect,
-                                    ),
-                                    _IconAct(
-                                      icon: Icons.memory,
-                                      tip: _decodeModes[_decodeIdx].$2,
-                                      badge: _decodeModes[_decodeIdx].$2.substring(0, 1),
-                                      size: land ? 32.0 : 40.0,
-                                      onTap: _cycleDecode,
-                                    ),
-                                    _IconAct(
-                                      icon: Icons.closed_caption,
-                                      tip: '字幕',
-                                      size: land ? 32.0 : 40.0,
-                                      onTap: () => _showTrackSheet(kind: 'subtitle'),
-                                    ),
-                                    if (widget.player.supportsDiscNav &&
-                                        KotvDiscPlay.looksLike(widget.playUrl))
-                                      _IconAct(
-                                        icon: Icons.album_outlined,
-                                        tip: '碟片导航',
-                                        size: land ? 32.0 : 40.0,
-                                        onTap: () => _showTrackSheet(kind: 'disc'),
-                                      ),
-                                    _IconAct(
-                                      icon: Icons.audiotrack,
-                                      tip: '音轨',
-                                      size: land ? 32.0 : 40.0,
-                                      onTap: () => _showTrackSheet(kind: 'audio'),
-                                    ),
-                                    _IconAct(
-                                      icon: Icons.videocam_outlined,
-                                      tip: '视频轨',
-                                      size: land ? 32.0 : 40.0,
-                                      onTap: () => _showTrackSheet(kind: 'video'),
-                                    ),
-                                    if (kotvCanSwitchPlayer(live: false))
-                                      _IconAct(
-                                        icon: Icons.devices,
-                                        tip: '播放器（$_playerLabel）',
-                                        badge: flutterIsEmbedPlayer(_playerVal) ? '内' : '外',
-                                        size: land ? 32.0 : 40.0,
-                                        onTap: _showPlayerDialog,
-                                      ),
-                                    const SizedBox(width: 6),
-                                    Container(width: 1, height: 26, color: const Color(0x4DFFFFFF)),
-                                    const SizedBox(width: 8),
-                                    _TinyBtn(
-                                      label: '片头',
-                                      onTap: () {
-                                        final sec = (widget.player.position.inMilliseconds / 1000).round().clamp(0, 3600);
-                                        unawaited(_setOffsets(sec, _endingSec));
-                                        widget.onBump();
-                                      },
-                                    ),
-                                    const SizedBox(width: 8),
-                                    _TinyBtn(label: '-', onTap: () {
-                                      unawaited(_setOffsets(_openingSec - 5, _endingSec));
-                                      widget.onBump();
-                                    }),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                                      child: Text(fmtMmSs(_openingSec), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                                    ),
-                                    _TinyBtn(label: '+', onTap: () {
-                                      unawaited(_setOffsets(_openingSec + 5, _endingSec));
-                                      widget.onBump();
-                                    }),
-                                    const SizedBox(width: 8),
-                                    _TinyBtn(
-                                      label: '片尾',
-                                      onTap: () {
-                                        final dur = widget.player.duration.inMilliseconds;
-                                        final pos = widget.player.position.inMilliseconds;
-                                        final endSec = dur > 0
-                                            ? ((dur - pos) / 1000).round().clamp(0, 3600)
-                                            : 0;
-                                        unawaited(_setOffsets(_openingSec, endSec));
-                                        widget.onBump();
-                                      },
-                                    ),
-                                    const SizedBox(width: 8),
-                                    _TinyBtn(label: '-', onTap: () {
-                                      unawaited(_setOffsets(_openingSec, _endingSec - 5));
-                                      widget.onBump();
-                                    }),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                                      child: Text(fmtMmSs(_endingSec), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                                    ),
-                                    _TinyBtn(label: '+', onTap: () {
-                                      unawaited(_setOffsets(_openingSec, _endingSec + 5));
-                                      widget.onBump();
-                                    }),
-                                    const SizedBox(width: 8),
-                                    _TinyBtn(
-                                      label: '重置',
-                                      onTap: () {
-                                        unawaited(_setOffsets(0, 0));
-                                        widget.onBump();
-                                      },
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Container(width: 1, height: 26, color: const Color(0x4DFFFFFF)),
-                                    const SizedBox(width: 4),
-                                    _TextAct(label: '更多', onTap: _showMore),
-                                    if (widget.episodes.isNotEmpty)
-                                      _TextAct(label: '选集', onTap: () {
-                                        openEpisodes();
+                            ],
+                          );
+                        },
+                      ),
+                      SizedBox(height: land ? 2 : 6),
+                      ListenableBuilder(
+                        listenable: widget.player,
+                        builder: (context, _) {
+                          return Row(
+                            children: [
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: Row(
+                                    children: [
+                                      _IconAct(icon: Icons.skip_previous, tip: '上一集', size: land ? 32.0 : 40.0, onTap: () {
+                                        widget.onPrev?.call();
                                         widget.onBump();
                                       }),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Text('音量', style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12)),
-                            SizedBox(
-                              width: 140,
-                              child: ExcludeFocus(
-                                child: SliderTheme(
-                                  data: _sliderTheme(context),
-                                  child: Slider(
-                                    value: vol,
-                                    max: 100,
-                                    onChanged: (v) {
-                                      widget.player.setVolume(v);
-                                      unawaited(_persist('playerVolume', '${v.round()}'));
-                                      widget.onBump();
-                                    },
+                                      _IconAct(
+                                        icon: widget.player.playing ? Icons.pause : Icons.play_arrow,
+                                        tip: widget.player.playing ? '暂停' : '播放',
+                                        size: land ? 32.0 : 40.0,
+                                        autofocus: true,
+                                        focusNode: _playFocus,
+                                        onTap: () {
+                                          widget.player.playOrPause();
+                                          widget.onBump();
+                                          setState(() {});
+                                        },
+                                      ),
+                                      _IconAct(icon: Icons.skip_next, tip: '下一集', size: land ? 32.0 : 40.0, onTap: () {
+                                        widget.onNext?.call();
+                                        widget.onBump();
+                                      }),
+                                      _IconAct(
+                                        icon: Icons.fast_forward,
+                                        tip: '倍速（长按细调）',
+                                        badge: 'x${widget.player.rate.toStringAsFixed(widget.player.rate == widget.player.rate.roundToDouble() ? 0 : 1)}',
+                                        size: land ? 32.0 : 40.0,
+                                        onTap: _cycleSpeed,
+                                        onLongPress: () => unawaited(_showSpeedSheet()),
+                                      ),
+                                      _IconAct(icon: Icons.replay, tip: '重播', size: land ? 32.0 : 40.0, onTap: () {
+                                        widget.onReplay?.call();
+                                        widget.player.seek(Duration.zero);
+                                        widget.player.play();
+                                        widget.onBump();
+                                      }),
+                                      _IconAct(
+                                        icon: Icons.aspect_ratio,
+                                        tip: '比例：${_aspects[_aspectIdx].$2}',
+                                        badge: _aspectBadge(_aspects[_aspectIdx].$1),
+                                        size: land ? 32.0 : 40.0,
+                                        onTap: _cycleAspect,
+                                      ),
+                                      _IconAct(
+                                        icon: Icons.memory,
+                                        tip: _decodeModes[_decodeIdx].$2,
+                                        badge: _decodeModes[_decodeIdx].$2.substring(0, 1),
+                                        size: land ? 32.0 : 40.0,
+                                        onTap: _cycleDecode,
+                                      ),
+                                      _IconAct(
+                                        icon: Icons.closed_caption,
+                                        tip: '字幕',
+                                        size: land ? 32.0 : 40.0,
+                                        onTap: () => _showTrackSheet(kind: 'subtitle'),
+                                      ),
+                                      if (widget.player.supportsDiscNav &&
+                                          KotvDiscPlay.looksLike(widget.playUrl))
+                                        _IconAct(
+                                          icon: Icons.album_outlined,
+                                          tip: '碟片导航',
+                                          size: land ? 32.0 : 40.0,
+                                          onTap: () => _showTrackSheet(kind: 'disc'),
+                                        ),
+                                      _IconAct(
+                                        icon: Icons.audiotrack,
+                                        tip: '音轨',
+                                        size: land ? 32.0 : 40.0,
+                                        onTap: () => _showTrackSheet(kind: 'audio'),
+                                      ),
+                                      _IconAct(
+                                        icon: Icons.videocam_outlined,
+                                        tip: '视频轨',
+                                        size: land ? 32.0 : 40.0,
+                                        onTap: () => _showTrackSheet(kind: 'video'),
+                                      ),
+                                      if (kotvCanSwitchPlayer(live: false))
+                                        _IconAct(
+                                          icon: Icons.devices,
+                                          tip: '播放器（$_playerLabel）',
+                                          badge: flutterIsEmbedPlayer(_playerVal) ? '内' : '外',
+                                          size: land ? 32.0 : 40.0,
+                                          onTap: _showPlayerDialog,
+                                        ),
+                                      const SizedBox(width: 6),
+                                      Container(width: 1, height: 26, color: const Color(0x4DFFFFFF)),
+                                      const SizedBox(width: 8),
+                                      _TinyBtn(
+                                        label: '片头',
+                                        onTap: () {
+                                          final sec = (widget.player.position.inMilliseconds / 1000).round().clamp(0, 3600);
+                                          unawaited(_setOffsets(sec, _endingSec));
+                                          widget.onBump();
+                                        },
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _TinyBtn(label: '-', onTap: () {
+                                        unawaited(_setOffsets(_openingSec - 5, _endingSec));
+                                        widget.onBump();
+                                      }),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                                        child: Text(fmtMmSs(_openingSec), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                                      ),
+                                      _TinyBtn(label: '+', onTap: () {
+                                        unawaited(_setOffsets(_openingSec + 5, _endingSec));
+                                        widget.onBump();
+                                      }),
+                                      const SizedBox(width: 8),
+                                      _TinyBtn(
+                                        label: '片尾',
+                                        onTap: () {
+                                          final dur = widget.player.duration.inMilliseconds;
+                                          final pos = widget.player.position.inMilliseconds;
+                                          final endSec = dur > 0
+                                              ? ((dur - pos) / 1000).round().clamp(0, 3600)
+                                              : 0;
+                                          unawaited(_setOffsets(_openingSec, endSec));
+                                          widget.onBump();
+                                        },
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _TinyBtn(label: '-', onTap: () {
+                                        unawaited(_setOffsets(_openingSec, _endingSec - 5));
+                                        widget.onBump();
+                                      }),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                                        child: Text(fmtMmSs(_endingSec), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                                      ),
+                                      _TinyBtn(label: '+', onTap: () {
+                                        unawaited(_setOffsets(_openingSec, _endingSec + 5));
+                                        widget.onBump();
+                                      }),
+                                      const SizedBox(width: 8),
+                                      _TinyBtn(
+                                        label: '重置',
+                                        onTap: () {
+                                          unawaited(_setOffsets(0, 0));
+                                          widget.onBump();
+                                        },
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Container(width: 1, height: 26, color: const Color(0x4DFFFFFF)),
+                                      const SizedBox(width: 4),
+                                      _TextAct(label: '更多', onTap: _showMore),
+                                      if (widget.episodes.isNotEmpty)
+                                        _TextAct(label: '选集', onTap: () {
+                                          openEpisodes();
+                                          widget.onBump();
+                                        }),
+                                    ],
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    );
-                  },
+                              const SizedBox(width: 10),
+                              KotvVolumeControl(
+                                player: widget.player,
+                                iconSize: land ? 32.0 : 40.0,
+                                sliderWidth: 140,
+                                compact: land,
+                                onEngage: widget.onBump,
+                                onPersist: (n) => _persist('playerVolume', '$n'),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
             ),
           ),
         ],
