@@ -54,12 +54,9 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> {
     super.dispose();
   }
 
+  /// 只管展开/收起；高亮走 [FocusableActionDetector.onShowFocusHighlight]（触控不留常亮框）。
   void _onFocusChanged() {
-    final focused = _focus.hasFocus;
-    if (_highlight != focused) {
-      setState(() => _highlight = focused);
-    }
-    if (focused) {
+    if (_focus.hasFocus) {
       _collapseTimer?.cancel();
       if (!_expanded) setState(() => _expanded = true);
       widget.onEngage?.call();
@@ -187,12 +184,25 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> {
                       )
                     : const SizedBox.shrink(),
               ),
-              Focus(
+              FocusableActionDetector(
                 focusNode: _focus,
+                onShowFocusHighlight: (v) {
+                  if (_highlight == v) return;
+                  setState(() => _highlight = v);
+                },
+                actions: <Type, Action<Intent>>{
+                  ActivateIntent: CallbackAction<ActivateIntent>(
+                    onInvoke: (_) {
+                      setState(() => _expanded = !_expanded);
+                      widget.onEngage?.call();
+                      return null;
+                    },
+                  ),
+                },
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () {
-                    _focus.requestFocus();
+                    // 触控展开不 requestFocus，避免留下常亮焦点环。
                     setState(() => _expanded = !_expanded);
                     widget.onEngage?.call();
                   },

@@ -13,6 +13,17 @@ final kotvPageStackProvider = StateProvider<List<KotvPage>>((ref) => <KotvPage>[
 /// 到根页即止，不弹出「再按一次返回桌面」。
 void Function()? kotvHandleAppBack;
 
+/// 根/壳 Navigator 最上层是否为弹层（[PopupRoute]），不 pop。
+bool kotvHasTopPopup(NavigatorState? nav) {
+  if (nav == null || !nav.canPop()) return false;
+  Route<dynamic>? top;
+  nav.popUntil((route) {
+    top = route;
+    return true;
+  });
+  return top is PopupRoute;
+}
+
 /// 关掉最顶层的弹层 / BottomSheet（[PopupRoute]）。有则 pop 一层并返回 true。
 bool kotvPopTopPopup(NavigatorState? nav) {
   if (nav == null || !nav.canPop()) return false;

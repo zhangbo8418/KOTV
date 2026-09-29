@@ -1,5 +1,4 @@
 import 'dart:async';
-import '../util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -369,6 +368,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   StreamSubscription<bool>? _endedSub;
   bool _failSwitchBusy = false;
   bool _endedBusy = false;
+  bool _pickingPlayer = false;
 
   @override
   void initState() {
@@ -526,8 +526,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     unawaited(_playback.addSubtitleFile(path.trim(), title: name));
   }
 
+  bool _livePopupOpen() {
+    if (kotvHasTopPopup(rootNavigatorKey.currentState)) return true;
+    if (!mounted) return false;
+    return kotvHasTopPopup(Navigator.of(context, rootNavigator: false));
+  }
+
+  bool _popLivePopup() {
+    if (kotvPopTopPopup(rootNavigatorKey.currentState)) return true;
+    if (!mounted) return false;
+    return kotvPopTopPopup(Navigator.of(context, rootNavigator: false));
+  }
+
   /// 返回：沉浸全屏 → 退出回看 → 关侧栏/控件 → 未消费（交给外壳双返退桌面）。
   bool _handleLiveBack() {
+    if (_popLivePopup()) return true;
     if (_immersive) {
       unawaited(_exitImmersive());
       return true;
@@ -1709,34 +1722,42 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _pickPlayer() async {
-    final options = kotvLivePlayerOptions();
-    final v = await pickChoice(context, title: '直播播放器', current: _prefPlayerVal, options: options);
-    if (v == null) return;
-    final prev = _prefPlayerVal;
-    setState(() {
-      _playerVal = v;
-      _prefPlayerVal = v;
-    });
+    if (_pickingPlayer) return;
+    _pickingPlayer = true;
     try {
-      await ref.read(apiProvider).setSetting('playerLive', v);
-    } catch (_) {}
-    if (v.startsWith('outie#') && _playUrl.isNotEmpty) {
+      final navCtx = rootNavigatorKey.currentContext ?? context;
+      if (!navCtx.mounted) return;
+      final options = kotvLivePlayerOptions();
+      final v = await pickChoice(navCtx, title: '直播播放器', current: _prefPlayerVal, options: options);
+      if (v == null || !mounted) return;
+      final prev = _prefPlayerVal;
+      setState(() {
+        _playerVal = v;
+        _prefPlayerVal = v;
+      });
       try {
-        await ref.read(apiProvider).playerExternal(url: _playUrl, player: v);
-        await _playback.pause();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(v)}打开')));
+        await ref.read(apiProvider).setSetting('playerLive', v);
+      } catch (_) {}
+      if (v.startsWith('outie#') && _playUrl.isNotEmpty) {
+        try {
+          await ref.read(apiProvider).playerExternal(url: _playUrl, player: v);
+          await _playback.pause();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(v)}打开')));
+          }
+        } catch (e) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
         }
-      } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        return;
       }
-      return;
-    }
-    if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
-      final pos = _playback.position;
-      await _openLiveUrl(_playUrl, headers: _playHeaders, drm: _playDrm, live: true);
-      if (pos > Duration.zero) await _playback.seek(pos);
-      if (mounted) setState(() {});
+      if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
+        final pos = _playback.position;
+        await _openLiveUrl(_playUrl, headers: _playHeaders, drm: _playDrm, live: true);
+        if (pos > Duration.zero) await _playback.seek(pos);
+        if (mounted) setState(() {});
+      }
+    } finally {
+      _pickingPlayer = false;
     }
   }
 
@@ -2184,6 +2205,20 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
                 children: [
+                  if (start.isNotEmpty)
+                    SizedBox(
+                      width: 44,
+                      child: Text(
+                        start,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: sel ? Colors.white : p.fg.withOpacity(0.75),
+                          fontSize: 12,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
                   Expanded(
                     child: KotvMarqueeText(
                       label,
@@ -2234,6 +2269,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                     width: land ? 38 : 44,
                     child: Text(
                       start,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: Colors.white.withOpacity(sel ? 1 : 0.75),
                         fontSize: land ? 11 : 12,
@@ -2267,12 +2304,31 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return '${chs[_chIdx]['logo'] ?? ''}';
   }
 
-  String get _programLabel {
+  /// 仅「正在播出」；无 now 不回退到首条（避免 00:xx 假当前）。
+  Map<String, dynamic>? get _currentProgram {
     for (final p in _programs) {
-      if (p['now'] == true) return '${p['label'] ?? p['title'] ?? ''}';
+      if (p['now'] == true) return p;
     }
-    if (_programs.isNotEmpty) return '${_programs.first['label'] ?? _programs.first['title'] ?? ''}';
-    return '';
+    return null;
+  }
+
+  String get _programTimeLabel {
+    final p = _currentProgram;
+    if (p == null) return '';
+    final start = '${p['start'] ?? ''}'.trim();
+    final end = '${p['end'] ?? ''}'.trim();
+    if (start.isEmpty && end.isEmpty) return '';
+    if (start.isEmpty) return end;
+    if (end.isEmpty) return start;
+    return '$start ~ $end';
+  }
+
+  String get _programTitleLabel {
+    final p = _currentProgram;
+    if (p == null) return '';
+    final title = '${p['title'] ?? ''}'.trim();
+    if (title.isNotEmpty) return title;
+    return '${p['label'] ?? ''}'.trim();
   }
 
   String get _channelNum {
@@ -2311,9 +2367,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
     if (kotvIsBackKey(key)) {
       if (!isDown) return KeyEventResult.ignored;
+      if (_popLivePopup()) return KeyEventResult.handled;
       if (_handleLiveBack()) return KeyEventResult.handled;
       return KeyEventResult.ignored;
     }
+
+    // 根 Navigator 上的 pickChoice 不会使本页 ModalRoute 失 current，勿在弹窗开着时换台/切线。
+    if (_livePopupOpen()) return KeyEventResult.ignored;
 
     // 数字切台：控件开着也可用（常见盒子习惯）；仅 Down，勿 KeyRepeat 连发。
     final digit = kotvDigitFromKey(key);
@@ -3148,11 +3208,38 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         active: true,
                                         style: TextStyle(color: pal.fg, fontSize: 18, fontWeight: FontWeight.w600),
                                       ),
-                                      if (_programLabel.isNotEmpty || _status.isNotEmpty)
-                                        KotvMarqueeText(
-                                          _programLabel.isNotEmpty ? _programLabel : _status,
-                                          active: true,
-                                          style: TextStyle(color: pal.muted, fontSize: 13),
+                                      if (_programTimeLabel.isNotEmpty ||
+                                          _programTitleLabel.isNotEmpty ||
+                                          _status.isNotEmpty)
+                                        Row(
+                                          children: [
+                                            if (_programTimeLabel.isNotEmpty) ...[
+                                              SizedBox(
+                                                width: 88,
+                                                child: Text(
+                                                  _programTimeLabel,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    color: pal.muted,
+                                                    fontSize: 12,
+                                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                            ],
+                                            Expanded(
+                                              child: KotvMarqueeText(
+                                                [
+                                                  if (_programTitleLabel.isNotEmpty) _programTitleLabel,
+                                                  if (_programTitleLabel.isEmpty && _status.isNotEmpty) _status,
+                                                ].where((e) => e.isNotEmpty).join(' · '),
+                                                active: false,
+                                                style: TextStyle(color: pal.muted, fontSize: 13),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                     ],
                                   ),
@@ -3334,14 +3421,36 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                           active: true,
                           style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w700),
                         ),
-                        KotvMarqueeText(
-                          [
-                            if (_programLabel.isNotEmpty) _programLabel,
-                            if (_lineLabel.isNotEmpty) _lineLabel,
-                            _status,
-                          ].where((e) => e.isNotEmpty).join(' · '),
-                          active: true,
-                          style: TextStyle(color: p.muted, fontSize: 12),
+                        Row(
+                          children: [
+                            if (_programTimeLabel.isNotEmpty) ...[
+                              SizedBox(
+                                width: 88,
+                                child: Text(
+                                  _programTimeLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: p.muted,
+                                    fontSize: 12,
+                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                            ],
+                            Expanded(
+                              child: KotvMarqueeText(
+                                [
+                                  if (_programTitleLabel.isNotEmpty) _programTitleLabel,
+                                  if (_lineLabel.isNotEmpty) _lineLabel,
+                                  if (_status.isNotEmpty) _status,
+                                ].where((e) => e.isNotEmpty).join(' · '),
+                                active: false,
+                                style: TextStyle(color: p.muted, fontSize: 12),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),

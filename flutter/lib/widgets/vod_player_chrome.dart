@@ -212,7 +212,7 @@ class VodInlineControls extends StatelessWidget {
                         },
                       ),
                     ),
-                    if (!narrow) const Spacer(),
+                    const Spacer(),
                     KotvVolumeControl(
                       player: player,
                       iconSize: iconSize,

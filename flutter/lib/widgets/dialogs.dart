@@ -903,13 +903,14 @@ Future<String?> pickChoice(
   final p = KotvPalette.of(context);
   return showDialog<String>(
     context: context,
+    useRootNavigator: true,
     builder: (ctx) => SimpleDialog(
       backgroundColor: p.dialogBg,
       title: Text(title, style: TextStyle(color: p.fg)),
       children: [
         for (final o in options)
           SimpleDialogOption(
-            onPressed: () => Navigator.pop(ctx, o.$2),
+            onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(o.$2),
             child: Text(
               o.$1 + (o.$2 == current ? '  ✓' : ''),
               style: TextStyle(color: p.fg),

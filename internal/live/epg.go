@@ -339,6 +339,13 @@ func setEpgTimes(epg *Epg, zone *time.Location) {
 		if epg.List[i].EndTime > 0 && epg.List[i].EndTime < epg.List[i].StartTime {
 			epg.List[i].EndTime += 24 * 60 * 60 * 1000
 		}
+		// 显示串按源时区重写为 15:04，避免 JSON 脏 start/end 上屏。
+		if epg.List[i].StartTime > 0 {
+			epg.List[i].Start = time.UnixMilli(epg.List[i].StartTime).In(zone).Format("15:04")
+		}
+		if epg.List[i].EndTime > 0 {
+			epg.List[i].End = time.UnixMilli(epg.List[i].EndTime).In(zone).Format("15:04")
+		}
 	}
 }
 
