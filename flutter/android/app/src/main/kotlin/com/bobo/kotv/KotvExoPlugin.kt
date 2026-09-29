@@ -1426,7 +1426,11 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val soft = mode == "soft"
     val audioDecode = if (soft && softAudioPrefer) C.DECODE_SOFTWARE else C.DECODE_HARDWARE
     val videoDecode = if (soft && softVideoPrefer) C.DECODE_SOFTWARE else C.DECODE_HARDWARE
-    trackSelector.setRendererDecodePreferences(audioDecode, videoDecode)
+    if (trackSelector is KotvDecodeTrackSelector) {
+      trackSelector.applyDecodePreferences(audioDecode, videoDecode)
+    } else {
+      trackSelector.setRendererDecodePreferences(audioDecode, videoDecode)
+    }
   }
 
   private fun buildRenderersFactory(ctx: Context, mode: String): KotvFfmpegRenderersFactory {

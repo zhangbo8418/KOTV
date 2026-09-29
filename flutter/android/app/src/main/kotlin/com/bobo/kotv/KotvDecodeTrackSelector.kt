@@ -19,10 +19,11 @@ class KotvDecodeTrackSelector(context: Context) : DecodeTrackSelector(context) {
   @Volatile private var videoDecode: Int = C.DECODE_HARDWARE
   @Volatile private var audioDecode: Int = C.DECODE_HARDWARE
 
-  override fun setRendererDecodePreferences(audioDecode: Int, videoDecode: Int) {
+  /** 父类 [setRendererDecodePreferences] 为 final，额外记一份供 EXCEEDS 硬解偏好判断。 */
+  fun applyDecodePreferences(audioDecode: Int, videoDecode: Int) {
     this.audioDecode = audioDecode
     this.videoDecode = videoDecode
-    super.setRendererDecodePreferences(audioDecode, videoDecode)
+    setRendererDecodePreferences(audioDecode, videoDecode)
   }
 
   override fun isPreferredRenderer(
