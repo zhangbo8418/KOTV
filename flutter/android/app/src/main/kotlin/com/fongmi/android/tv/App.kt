@@ -32,6 +32,9 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
   override fun attachBaseContext(base: Context) {
     super.attachBaseContext(base)
     instance = this
+    if (realPackageName.isNullOrEmpty()) {
+      realPackageName = base.packageName
+    }
     installInitCrashGuard()
     // Before Flutter/GPU can load system libvulkan.so: register app stub first
     // so libmpv DT_NEEDED libvulkan.so binds to our 1.1 symbol stubs (API 25).
@@ -271,6 +274,22 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
 
     @JvmStatic
     fun get(): App? = instance
+
+    /** 存储权限 / 系统设置 Intent 必须用真实包名，勿经伪装 getPackageName()。 */
+    @JvmStatic
+    fun realAppPackageName(): String {
+      val stored = realPackageName
+      if (!stored.isNullOrEmpty()) return stored
+      val app = instance ?: return ""
+      return try {
+        // 伪装前 applicationInfo 已是真名；伪装后靠 realPackageName 字段。
+        val infoName = app.applicationInfo?.packageName
+        if (!infoName.isNullOrEmpty() && infoName != FONGMI_PACKAGE) return infoName
+        app.baseContext.packageName
+      } catch (_: Throwable) {
+        ""
+      }
+    }
 
     @JvmStatic
     fun activity(): Activity? {

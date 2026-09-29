@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'drm_opts.dart';
+import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'mpv_opts.dart';
@@ -440,6 +441,9 @@ class NativeMpvPlayback extends KotvPlayback {
     // 后台仅音频抑制时不挂。
     await _syncSurfaceLayer();
     try {
+      if (!live) {
+        await KotvBufferBudget.warm();
+      }
       final props = <String, String>{
         ..._opts.propertyMap(live: live),
         ..._extraOpenProps,

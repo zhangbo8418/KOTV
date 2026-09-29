@@ -1382,7 +1382,7 @@ class SettingPanel extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
       decoration: BoxDecoration(
-        color: p.surface.withOpacity(p.light ? 0.55 : 0.35),
+        color: p.light ? p.surface.withOpacity(0.55) : p.dialogBg,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: p.outline.withOpacity(0.45)),
       ),

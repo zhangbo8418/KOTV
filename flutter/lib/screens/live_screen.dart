@@ -3091,14 +3091,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         ),
                       ),
                     ),
-                  // 底栏信息条（频道名）；不挡上下换台。
+                  // 底栏信息条（频道名）；无回看播控时贴底，不挡上下换台。
                   if (_channelInfoVisible && !_leftOpen && !_rightOpen && (!_catchup || !_catchupChrome))
                     Positioned(
                       left: 16,
                       right: 16,
-                      bottom: 72,
+                      bottom: 16,
                       child: Material(
-                        color: const Color(0xA6000000),
+                        color: KotvPalette.of(context).dialogBg,
+                        elevation: 0,
+                        shadowColor: Colors.transparent,
+                        surfaceTintColor: Colors.transparent,
                         borderRadius: BorderRadius.circular(10),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

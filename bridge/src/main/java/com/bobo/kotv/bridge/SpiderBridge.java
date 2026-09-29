@@ -908,8 +908,11 @@ public class SpiderBridge {
             future.cancel(true);
             System.err.println("spider Init timed out after " + timeoutMs
                     + "ms (WebView/config page?), continuing without full Init");
+            // 超时后仍注入前台 Activity，配置站 AlertDialog / DialogRelay 才能弹窗。
+            refreshSpiderJarUi(loader);
         } catch (Exception e) {
             System.err.println("optional spider Init skipped: " + e);
+            refreshSpiderJarUi(loader);
         } finally {
             exec.shutdownNow();
         }

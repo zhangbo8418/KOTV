@@ -145,13 +145,6 @@ Widget _kotvErrorWidget(FlutterErrorDetails details) {
   );
 }
 
-Future<void> _ensureAndroidStoragePermission() async {
-  try {
-    const ch = MethodChannel('kotv_android');
-    await ch.invokeMethod<bool>('ensureStoragePermission');
-  } catch (_) {}
-}
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Android 冷启动即 edge-to-edge，状态栏透明（与 MainActivity / styles 一致）。
@@ -193,9 +186,8 @@ Future<void> main() async {
     // Android 播放走原生 Exo/MPV，不初始化 media_kit（亦未依赖 media_kit_libs）。
     if (!Platform.isAndroid) {
       MediaKit.ensureInitialized();
-    } else {
-      unawaited(_ensureAndroidStoragePermission());
     }
+    // Android 存储权限仅在选本地配置等文件入口申请，勿冷启动跳系统设置页。
   }
   unawaited(KotvBufferBudget.warm());
   unawaited(_kotvSyncLanguageSetting());

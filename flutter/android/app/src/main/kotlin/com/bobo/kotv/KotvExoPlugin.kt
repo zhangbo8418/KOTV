@@ -161,6 +161,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var secondarySubtitleId: String = ""
   private var playerBuiltLibass: Boolean? = null
   private var playerBuiltSecondary: Boolean? = null
+  /** diskCache / bufferFactor 写入 LoadControl 与 CacheDataSource，变更须重建。 */
+  private var playerBuiltDiskCache: Boolean? = null
+  private var playerBuiltBufferFactor: Int? = null
   private var subtitleOverlay: KotvSubtitleOverlay? = null
   private var subtitleFontScale = 1.0f
   private var subtitlePos = 0.0
@@ -1037,7 +1040,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         playerBuiltDecode != effective ||
         playerBuiltDrmKey != nextDrmKey ||
         playerBuiltLibass != libassEnabled ||
-        playerBuiltSecondary != wantSecondary
+        playerBuiltSecondary != wantSecondary ||
+        playerBuiltDiskCache != diskCacheEnabled ||
+        playerBuiltBufferFactor != bufferFactor
 
     if (needRebuild) {
       rebuildPlayer(live, effective, nextDrmKey)
@@ -1184,6 +1189,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       null
     } else {
       val factor = bufferFactor.coerceIn(1, 10)
+      // duration×factor + PRELOAD 64MiB 与 TV ExoUtil 同形；再另接 KotvMemBudget 作主播放器内存上限。
       DefaultLoadControl.Builder()
         .setBufferDurationsMs(
           DefaultLoadControl.DEFAULT_MIN_BUFFER_MS * factor,
@@ -1191,6 +1197,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
         )
+        .setTargetBufferBytes(bufferBudgetBytes(ctx))
         .setPlayerTargetBufferBytes(
           androidx.media3.exoplayer.analytics.PlayerId.PRELOAD.name,
           64 * 1024 * 1024,
@@ -1242,6 +1249,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     playerBuiltDrmKey = nextDrmKey
     playerBuiltLibass = libassEnabled
     playerBuiltSecondary = secondarySubtitleMode != "off"
+    playerBuiltDiskCache = diskCacheEnabled
+    playerBuiltBufferFactor = bufferFactor
     preloadUpstream = smbAware
     preloadRenderers = renderers
     bindPlayerSurface()
@@ -2157,6 +2166,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     playerBuiltDrmKey = null
     playerBuiltLibass = null
     playerBuiltSecondary = null
+    playerBuiltDiskCache = null
+    playerBuiltBufferFactor = null
     try {
       subtitleOverlay?.setLibassEnabled(false)
     } catch (_: Throwable) {

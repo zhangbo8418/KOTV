@@ -31,7 +31,6 @@ class MainActivity : FlutterActivity() {
   private var castMulticastLock: WifiManager.MulticastLock? = null
   private var pickConfigResult: MethodChannel.Result? = null
   private var storagePermResult: MethodChannel.Result? = null
-  private var storagePromptStarted = false
   private var batteryPromptStarted = false
   /** 正在播放时：Home/切应用自动进系统画中画（Android 12+ setAutoEnterEnabled）。 */
   private var pipAutoEnter = false
@@ -202,9 +201,10 @@ class MainActivity : FlutterActivity() {
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && canRequestAllFilesAccess()) {
       storagePermResult = result
+      val pkg = storagePackageName()
       try {
         val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-        intent.data = Uri.parse("package:$packageName")
+        intent.data = Uri.parse("package:$pkg")
         @Suppress("DEPRECATION")
         startActivityForResult(intent, REQ_MANAGE_STORAGE)
       } catch (_: Throwable) {
@@ -231,13 +231,24 @@ class MainActivity : FlutterActivity() {
   /** 部分安卓盒子没有「所有文件访问」设置页，改走运行时读权限。 */
   private fun canRequestAllFilesAccess(): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+    val pkg = storagePackageName()
     val app = Intent(
       Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-      Uri.parse("package:$packageName"),
+      Uri.parse("package:$pkg"),
     )
     val all = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
     return app.resolveActivity(packageManager) != null ||
       all.resolveActivity(packageManager) != null
+  }
+
+  private fun storagePackageName(): String {
+    val real = try {
+      com.fongmi.android.tv.App.realAppPackageName()
+    } catch (_: Throwable) {
+      ""
+    }
+    if (real.isNotEmpty()) return real
+    return applicationInfo.packageName.takeIf { it.isNotEmpty() } ?: packageName
   }
 
   private fun storagePermissionsToRequest(): List<String> {
@@ -260,19 +271,10 @@ class MainActivity : FlutterActivity() {
     }
   }
 
-  /** 首启尽早申请本地文件访问。 */
+  // 不在 onPostResume 自动弹「所有文件访问」：仅选本地配置等文件入口显式 ensureStoragePermission。
+  // 否则包名伪装期间误跳系统设置页，表现为点源配置后像回桌面。
   private fun promptStoragePermissionIfNeeded() {
-    if (storagePromptStarted || KotvFileChooser.hasStoragePermission(this)) return
-    storagePromptStarted = true
-    ensureStoragePermission(
-      object : MethodChannel.Result {
-        override fun success(result: Any?) {}
-
-        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {}
-
-        override fun notImplemented() {}
-      },
-    )
+    // no-op：权限改由 Flutter 选文件路径主动申请
   }
 
   @Deprecated("Deprecated in Java")

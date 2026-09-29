@@ -630,7 +630,7 @@ class _NewsPill extends StatelessWidget {
         // 按文字固有宽度收缩，避免固定 132*s 在「字不缩、壳缩小」时内部 RIGHT OVERFLOW
         child: Container(
           height: 32,
-          decoration: BoxDecoration(color: p.input.withOpacity(0.85), borderRadius: BorderRadius.circular(16)),
+          decoration: BoxDecoration(color: p.pillBg, borderRadius: BorderRadius.circular(16)),
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             mainAxisSize: MainAxisSize.min,

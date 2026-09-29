@@ -1556,15 +1556,15 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   private fun collectCookies(conn: HttpURLConnection, out: MutableMap<String, String>) {
-    val values = conn.headerFields.entries
-      .firstOrNull { it.key != null && it.key.equals("Set-Cookie", ignoreCase = true) }
-      ?.value
-      ?: return
-    for (raw in values) {
-      val pair = raw.substringBefore(";").trim()
-      val eq = pair.indexOf('=')
-      if (eq <= 0) continue
-      out[pair.substring(0, eq).trim()] = pair.substring(eq + 1).trim()
+    val fields = conn.headerFields ?: return
+    for ((key, values) in fields) {
+      if (key == null || !key.equals("Set-Cookie", ignoreCase = true) || values == null) continue
+      for (raw in values) {
+        val pair = raw.substringBefore(";").trim()
+        val eq = pair.indexOf('=')
+        if (eq <= 0) continue
+        out[pair.substring(0, eq).trim()] = pair.substring(eq + 1).trim()
+      }
     }
   }
 
