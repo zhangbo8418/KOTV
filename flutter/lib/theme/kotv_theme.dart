@@ -178,6 +178,9 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     ),
     dialogTheme: DialogThemeData(
       backgroundColor: palette.dialogBg,
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
       contentTextStyle: TextStyle(color: palette.fg, fontFamilyFallback: fallbacks),
       titleTextStyle: TextStyle(color: palette.fg, fontSize: 20, fontWeight: FontWeight.w700, fontFamilyFallback: fallbacks),
     ),
