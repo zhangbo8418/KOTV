@@ -207,13 +207,12 @@ class KotvEngineService : Service() {
       env["KOTV_DATA_DIR"] = File(filesDir, "KOTV").absolutePath
       env["HOME"] = filesDir.absolutePath
       KotvDeviceEnv.lanIpv4(this)?.let { env["KOTV_LAN_IP"] = it }
-      // 对应 FongMi ZoneId.systemDefault()：IANA + 偏移兜底（旧 so / LoadLocation 失败）。
+      // 对应 FongMi ZoneId.systemDefault()：注入 IANA id（经 Go tzdata LoadLocation）。
       val tz = KotvDeviceEnv.timeZoneId()
       if (tz.isNotEmpty()) {
         env["KOTV_TZ"] = tz
         env["TZ"] = tz
       }
-      env["KOTV_TZ_OFFSET_MS"] = KotvDeviceEnv.timeZoneOffsetMs().toString()
       try {
         env["KOTV_LOCALE_COUNTRY"] = java.util.Locale.getDefault().country ?: ""
       } catch (_: Throwable) {
