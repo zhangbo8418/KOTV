@@ -427,19 +427,6 @@ func ShutdownJavaBridge() {
 	}
 }
 
-// ClearJarBridgeOnSwitch 换站时清空 Go 侧 jar 缓存，并向 bridge 发 clear。
-func ClearJarBridgeOnSwitch() {
-	jarMu.Lock()
-	jarSpiders = map[string]*jarSpider{}
-	jarMu.Unlock()
-	req := bridgeRequest{Method: "clear"}
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return
-	}
-	_, _ = callJavaBridge(payload)
-}
-
 func (w *javaBridgeClient) currentBaseURL() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()

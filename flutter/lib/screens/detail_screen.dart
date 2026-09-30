@@ -94,10 +94,18 @@ class DetailScreen extends ConsumerStatefulWidget {
   }
 
   /// 换源/切 Tab：尽快放开 PopScope；并 await 硬停，避免卸树后 FVP/HTML 后台出声。
+  /// 并发调用会挂到同一 Completer，禁止「提前 return 后立刻卸树」。
   static Future<void> prepareLeave() async {
+    final inFlight = _DetailScreenState._leaveDone;
+    if (inFlight != null) {
+      try {
+        await inFlight.future.timeout(const Duration(seconds: 5));
+      } catch (_) {}
+      return;
+    }
     final active = _DetailScreenState._active;
     if (active == null) return;
-    if (active._leaving || active._stoppedHard) {
+    if (active._stoppedHard) {
       if (active.mounted) {
         active._allowPop = true;
         active.setState(() {});
@@ -105,25 +113,35 @@ class DetailScreen extends ConsumerStatefulWidget {
       }
       return;
     }
+    final done = Completer<void>();
+    _DetailScreenState._leaveDone = done;
     active._leaving = true;
     if (_DetailScreenState._active == active) {
       _DetailScreenState._active = null;
     }
     try {
-      active.ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
-    } catch (_) {}
-    active._immersiveFullscreen = false;
-    try {
-      await active._flushWatchProgress(force: true);
-    } catch (_) {}
-    try {
-      await active._stopHard().timeout(const Duration(seconds: 4));
-    } catch (_) {}
-    if (!active.mounted) return;
-    // 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
-    active._allowPop = true;
-    active.setState(() {});
-    await WidgetsBinding.instance.endOfFrame;
+      try {
+        active.ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+      } catch (_) {}
+      active._immersiveFullscreen = false;
+      try {
+        await active._flushWatchProgress(force: true);
+      } catch (_) {}
+      try {
+        await active._stopHard().timeout(const Duration(seconds: 4));
+      } catch (_) {}
+      if (active.mounted) {
+        // 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
+        active._allowPop = true;
+        active.setState(() {});
+        await WidgetsBinding.instance.endOfFrame;
+      }
+    } finally {
+      if (!done.isCompleted) done.complete();
+      if (_DetailScreenState._leaveDone == done) {
+        _DetailScreenState._leaveDone = null;
+      }
+    }
   }
 
   @override
@@ -132,6 +150,8 @@ class DetailScreen extends ConsumerStatefulWidget {
 
 class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBindingObserver {
   static _DetailScreenState? _active;
+  /// 进行中的离开/硬停；并发 [prepareLeave]/[_leavePage] 挂此等待。
+  static Completer<void>? _leaveDone;
   VodDetail? _detail;
   String? _error;
   bool _loading = true;
@@ -697,13 +717,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(api.cancelPending(hard: false, thunder: false));
     }
 
-    // 硬拆前先软停：pause 即停声，勿 setVolume(0)（会脏包装类音量）。
-    try {
-      await _mk?.pause();
-    } catch (_) {}
-    try {
-      await _fvp?.pause();
-    } catch (_) {}
+    // 硬拆前先软停全部后端：pause 即停声，勿 setVolume(0)（会脏包装类音量）。
+    Future<void> softPause(KotvPlayback? p) async {
+      if (p == null) return;
+      try {
+        await p.pause();
+      } catch (_) {}
+    }
+
+    await Future.wait<void>([
+      softPause(_mk),
+      softPause(_fvp),
+      softPause(_exo),
+      softPause(_html),
+      softPause(_art),
+      softPause(_xg),
+      softPause(_zw),
+    ]);
 
     _playUrl = '';
     if (mounted) {
@@ -779,40 +809,56 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   Future<void> _leavePage({VoidCallback? afterPop}) async {
-    if (_leaving) return;
+    final inFlight = _leaveDone;
+    if (_leaving || inFlight != null) {
+      try {
+        await (inFlight ?? _leaveDone)?.future.timeout(const Duration(seconds: 5));
+      } catch (_) {}
+      afterPop?.call();
+      return;
+    }
+    final done = Completer<void>();
+    _leaveDone = done;
     _leaving = true;
     // 立刻清 _active：否则 goKotvPage→prepareLeave 仍会 await 本页硬停，切 Tab 像点不动。
     if (_active == this) _active = null;
     try {
-      await _flushWatchProgress(force: true);
-    } catch (_) {}
-    // 先硬停再出栈：否则 Navigator.pop → dispose 里 ref 抛错时 FVP 会继续后台出声。
-    try {
-      await _stopHard();
-    } catch (_) {}
-    if (_immersiveFullscreen) {
       try {
-        await _exitImmersiveFullscreen();
+        await _flushWatchProgress(force: true);
       } catch (_) {}
-    }
-    if (_miniDesktop) {
+      // 先硬停再出栈：否则 Navigator.pop → dispose 里 ref 抛错时 FVP 会继续后台出声。
       try {
-        await _exitMini();
+        await _stopHard();
       } catch (_) {}
-    }
-    if (!mounted) {
+      if (_immersiveFullscreen) {
+        try {
+          await _exitImmersiveFullscreen();
+        } catch (_) {}
+      }
+      if (_miniDesktop) {
+        try {
+          await _exitMini();
+        } catch (_) {}
+      }
+      if (!mounted) {
+        afterPop?.call();
+        return;
+      }
+      _allowPop = true;
+      setState(() {});
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) {
+        afterPop?.call();
+        return;
+      }
+      Navigator.of(context).pop();
       afterPop?.call();
-      return;
+    } finally {
+      if (!done.isCompleted) done.complete();
+      if (_leaveDone == done) {
+        _leaveDone = null;
+      }
     }
-    _allowPop = true;
-    setState(() {});
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) {
-      afterPop?.call();
-      return;
-    }
-    Navigator.of(context).pop();
-    afterPop?.call();
   }
 
   void _wireEnded(KotvPlayback p) {

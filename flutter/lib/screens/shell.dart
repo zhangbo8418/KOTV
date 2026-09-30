@@ -415,7 +415,8 @@ class _AppShellState extends ConsumerState<AppShell> {
 /// 直播页注册：返回键优先关侧栏/退出沉浸全屏。返回 true 表示已消费。
 bool Function()? liveScreenHandleBack;
 
-void goKotvPage(WidgetRef ref, KotvPage page, {bool recordHistory = true}) {
+/// 切主页面前先 await 硬停，再改页；避免全屏回主页时卸树与停播竞态。
+Future<void> goKotvPage(WidgetRef ref, KotvPage page, {bool recordHistory = true}) async {
   final cur = ref.read(kotvPageProvider);
   if (recordHistory && cur != page) {
     final stack = List<KotvPage>.from(ref.read(kotvPageStackProvider));
@@ -425,9 +426,9 @@ void goKotvPage(WidgetRef ref, KotvPage page, {bool recordHistory = true}) {
     }
     ref.read(kotvPageStackProvider.notifier).state = stack;
   }
-  // 切主页面前硬停详情/直播播放，避免后台出声。
-  unawaited(DetailScreen.prepareLeave());
-  unawaited(LiveScreen.prepareLeave());
+  // 必须先停完再切页：否则 listen→pushAndRemoveUntil 会与硬停抢跑。
+  await DetailScreen.prepareLeave();
+  await LiveScreen.prepareLeave();
   // 切 Tab 时若有声明式弹窗则关掉，避免遮罩残留挡后续详情
   if (cur != page) {
     final post = PostMsgHost.instance;
@@ -444,10 +445,10 @@ void kotvPageBack(WidgetRef ref) {
   if (stack.isNotEmpty) {
     final prev = stack.removeLast();
     ref.read(kotvPageStackProvider.notifier).state = stack;
-    goKotvPage(ref, prev, recordHistory: false);
+    unawaited(goKotvPage(ref, prev, recordHistory: false));
     return;
   }
-  goKotvPage(ref, KotvPage.video, recordHistory: false);
+  unawaited(goKotvPage(ref, KotvPage.video, recordHistory: false));
 }
 
 String remoteHint(WidgetRef ref) {

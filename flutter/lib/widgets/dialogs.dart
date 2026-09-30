@@ -362,6 +362,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
               await api.loadConfig(src).timeout(const Duration(seconds: 45));
               ref.invalidate(configProvider);
               ref.invalidate(settingsProvider);
+              ref.read(vodContentEpochProvider.notifier).state++;
               if (ctx.mounted) Navigator.pop(ctx, true);
             } on TimeoutException {
               if (!ctx.mounted) return;
@@ -882,6 +883,7 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
     }
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);
+    ref.read(vodContentEpochProvider.notifier).state++;
     return true;
   } catch (e) {
     if (context.mounted) {

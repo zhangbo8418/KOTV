@@ -18,6 +18,7 @@ import (
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/subtitle"
 	"github.com/bobo/KOTV/internal/update"
 )
@@ -137,9 +138,11 @@ func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {
 
 	reloaded := false
 	if opt.Script || opt.Jar {
-		// 爬虫包清掉后必须重载配置，重新下载 JAR / 拉站源。
-		a.Sites.InvalidateLoads()
-		if err := a.ReloadConfig(); err != nil {
+		// 爬虫包清掉后必须重载配置，重新下载 JAR / 拉站源；LoadJar 同步 parseJar。
+		err := spider.WithSyncLoadJar(func() error {
+			return a.ReloadConfig()
+		})
+		if err != nil {
 			msg += "；重载源失败: " + err.Error()
 			res.Errors = append(res.Errors, "reload: "+err.Error())
 		} else {

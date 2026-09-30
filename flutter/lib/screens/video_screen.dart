@@ -479,6 +479,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<int>(vodContentEpochProvider, (prev, next) {
+      if (prev == null || prev == next) return;
+      unawaited(_reload(clearContent: true));
+    });
     try {
       return _buildRoot(context);
     } catch (e, st) {

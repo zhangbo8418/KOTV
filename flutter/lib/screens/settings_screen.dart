@@ -1648,6 +1648,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (data == null || !mounted) return;
     final msg = '${data['message'] ?? '清理完成'}';
     if (data['reloaded'] == true) {
+      ref.read(vodContentEpochProvider.notifier).state++;
       ref.invalidate(configProvider);
       ref.invalidate(settingsProvider);
     }

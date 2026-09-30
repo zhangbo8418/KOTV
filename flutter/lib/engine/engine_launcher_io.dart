@@ -251,10 +251,17 @@ class EngineLauncher {
         final tz = '${raw['timeZoneId'] ?? ''}'.trim();
         if (cache.isNotEmpty) {
           env['KOTV_CACHE_DIR'] = cache;
-          env['KOTV_DATA_DIR'] = p.join(cache, 'KOTV');
         }
         if (files.isNotEmpty) {
           env['HOME'] = files;
+          // 持久数据进 filesDir，避免清缓存/系统清 cache 丢掉多仓 DB。
+          final neu = p.join(files, 'KOTV');
+          if (cache.isNotEmpty) {
+            migrateAndroidKotvDataIfNeeded(oldRoot: p.join(cache, 'KOTV'), newRoot: neu);
+          }
+          env['KOTV_DATA_DIR'] = neu;
+        } else if (cache.isNotEmpty) {
+          env['KOTV_DATA_DIR'] = p.join(cache, 'KOTV');
         }
         if (lanIp.isNotEmpty) {
           env['KOTV_LAN_IP'] = lanIp;

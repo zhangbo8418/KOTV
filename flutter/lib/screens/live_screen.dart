@@ -68,9 +68,20 @@ class LiveScreen extends ConsumerStatefulWidget {
 class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObserver {
   static _LiveScreenState? _active;
 
+  static Completer<void>? _leaveDone;
+
   static Future<void> prepareLeave() async {
+    final inFlight = _leaveDone;
+    if (inFlight != null) {
+      try {
+        await inFlight.future.timeout(const Duration(seconds: 5));
+      } catch (_) {}
+      return;
+    }
     final active = _active;
     if (active == null) return;
+    final done = Completer<void>();
+    _leaveDone = done;
     try {
       if (active._immersive) {
         try {
@@ -78,7 +89,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         } catch (_) {}
       }
       await active._releaseAllBackends().timeout(const Duration(seconds: 4));
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      if (!done.isCompleted) done.complete();
+      if (_leaveDone == done) {
+        _leaveDone = null;
+      }
+    }
   }
 
   Player? _mkPlayer;
@@ -229,12 +246,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   /// 切 Tab / 离开直播：先 pause 停声，再 stop + release（不改音量）。
   Future<void> _releaseAllBackends() async {
-    try {
-      await _mk?.pause();
-    } catch (_) {}
-    try {
-      await _fvp?.pause();
-    } catch (_) {}
+    Future<void> softPause(KotvPlayback? p) async {
+      if (p == null) return;
+      try {
+        await p.pause();
+      } catch (_) {}
+    }
+
+    await Future.wait<void>([
+      softPause(_mk),
+      softPause(_fvp),
+      softPause(_exo),
+      softPause(_html),
+      softPause(_art),
+      softPause(_xg),
+      softPause(_zw),
+    ]);
 
     final fvp = _fvp;
     final mk = _mk;

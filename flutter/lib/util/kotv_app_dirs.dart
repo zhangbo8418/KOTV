@@ -12,7 +12,7 @@ import 'package:path_provider/path_provider.dart';
 /// | Windows | `%APPDATA%/KOTV` |
 /// | macOS | `~/Library/Application Support/KOTV` |
 /// | Linux | `~/.local/share/KOTV` |
-/// | Android | 应用 cache/`KOTV`（与引擎 `KOTV_DATA_DIR` 一致） |
+/// | Android | 应用 files/`KOTV`（与引擎 `KOTV_DATA_DIR` 一致；旧 cache/`KOTV` 会迁移） |
 Future<Directory> kotvDataRoot() async {
   if (kIsWeb) {
     return Directory.systemTemp;
@@ -77,12 +77,58 @@ Directory _ensureDir(String path) {
   return d;
 }
 
+/// 旧版数据在 cacheDir/KOTV；迁到 filesDir/KOTV，避免清缓存/系统清 cache 丢多仓。
+void migrateAndroidKotvDataIfNeeded({required String oldRoot, required String newRoot}) {
+  if (oldRoot.isEmpty || newRoot.isEmpty) return;
+  if (p.equals(oldRoot, newRoot)) return;
+  final oldDir = Directory(oldRoot);
+  if (!oldDir.existsSync()) return;
+  final newDb = File(p.join(newRoot, 'db', 'tv.db'));
+  if (newDb.existsSync()) return;
+  _ensureDir(newRoot);
+  for (final name in ['db', 'setting.ini']) {
+    final src = File(p.join(oldRoot, name));
+    final srcDir = Directory(p.join(oldRoot, name));
+    final dest = p.join(newRoot, name);
+    try {
+      if (srcDir.existsSync()) {
+        _copyDirSync(srcDir, Directory(dest));
+      } else if (src.existsSync()) {
+        File(dest).parent.createSync(recursive: true);
+        src.copySync(dest);
+      }
+    } catch (_) {}
+  }
+}
+
+void _copyDirSync(Directory src, Directory dest) {
+  dest.createSync(recursive: true);
+  for (final e in src.listSync(followLinks: false)) {
+    final name = p.basename(e.path);
+    final target = p.join(dest.path, name);
+    if (e is Directory) {
+      _copyDirSync(e, Directory(target));
+    } else if (e is File) {
+      e.copySync(target);
+    }
+  }
+}
+
 Future<Directory> _androidDataRoot() async {
   try {
     const ch = MethodChannel('kotv_android_spider');
     final raw = await ch.invokeMethod<dynamic>('paths');
     if (raw is Map) {
+      final files = '${raw['filesDir'] ?? ''}'.trim();
       final cache = '${raw['cacheDir'] ?? ''}'.trim();
+      if (files.isNotEmpty) {
+        final neu = p.join(files, 'KOTV');
+        if (cache.isNotEmpty) {
+          migrateAndroidKotvDataIfNeeded(oldRoot: p.join(cache, 'KOTV'), newRoot: neu);
+        }
+        return _ensureDir(neu);
+      }
+      // 旧通道无 filesDir 时回落 cache（兼容极旧包）。
       if (cache.isNotEmpty) {
         return _ensureDir(p.join(cache, 'KOTV'));
       }

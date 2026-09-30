@@ -1361,6 +1361,10 @@ public class SpiderBridge {
         }
         loaders.clear();
         jarLocks.clear();
+        try {
+            com.github.catvod.net.OkHttp.get().clear();
+        } catch (Throwable ignored) {
+        }
     }
 
     /** 按路径卸载单个 jar：destroy 其爬虫、关闭 loader 并移除缓存，供磁盘包刷新后重载。 */

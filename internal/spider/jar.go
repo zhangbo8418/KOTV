@@ -37,6 +37,10 @@ var (
 	jarNoMD5Refreshed sync.Map // downloadURL -> gen
 	// 同 dest 的 parseJar 通知去重（多 JS worker EnsureJar 并发时只 POST 一次）。
 	parseJarNotified sync.Map // dest -> struct{}
+	// 同 dest 进行中的 parseJar：并发 EnsureJar 等待完成，避免未加载完就调爬虫。
+	parseJarFlights sync.Map // dest -> *parseJarFlight
+	// 清缓存重载：LoadJar 同步 parseJar，避免首页先拉站时 ClassLoader 未就绪。
+	forceSyncParseJar atomic.Bool
 )
 
 // 多用户：按 ScopeID 隔离配置基址，避免 A 换源覆盖 B 的相对路径解析。
@@ -99,6 +103,21 @@ func bumpJarRefreshGen() {
 		parseJarNotified.Delete(k)
 		return true
 	})
+	parseJarFlights.Range(func(k, _ any) bool {
+		parseJarFlights.Delete(k)
+		return true
+	})
+}
+
+type parseJarFlight struct {
+	done chan struct{}
+}
+
+// WithSyncLoadJar 在 fn 期间让 LoadJar 同步 parseJar（清缓存重载用）。
+func WithSyncLoadJar(fn func() error) error {
+	forceSyncParseJar.Store(true)
+	defer forceSyncParseJar.Store(false)
+	return fn()
 }
 
 // SetConfigBase 设置当前点播配置基址。有 ScopeID 时只写入该会话，不覆盖他人。
@@ -158,15 +177,34 @@ func notifyParseJar(jarPath string, recent bool) {
 	if jarPath == "" {
 		return
 	}
-	// recent=false（EnsureJar）：同 dest 只通知一次，避免 8 worker 各打一遍 :9979。
-	// recent=true（LoadJar）：换源须设 recent，仍通知；同时记入去重表供后续 EnsureJar 跳过。
+	// recent=false（EnsureJar）：同 dest 只真正 parse 一次；进行中则等待，已完成则跳过。
+	// recent=true（LoadJar）：换源须设 recent，仍通知；若同 dest 进行中则先等完再跑。
 	if !recent {
-		if _, loaded := parseJarNotified.LoadOrStore(jarPath, struct{}{}); loaded {
+		if f, ok := parseJarFlights.Load(jarPath); ok {
+			<-f.(*parseJarFlight).done
 			return
 		}
-	} else {
-		parseJarNotified.Store(jarPath, struct{}{})
+		if _, done := parseJarNotified.Load(jarPath); done {
+			return
+		}
 	}
+
+	flight := &parseJarFlight{done: make(chan struct{})}
+	if actual, loaded := parseJarFlights.LoadOrStore(jarPath, flight); loaded {
+		existing := actual.(*parseJarFlight)
+		<-existing.done
+		if !recent {
+			return
+		}
+		flight = &parseJarFlight{done: make(chan struct{})}
+		parseJarFlights.Store(jarPath, flight)
+	}
+	defer func() {
+		close(flight.done)
+		parseJarFlights.Delete(jarPath)
+	}()
+
+	parseJarNotified.Store(jarPath, struct{}{})
 	req := bridgeRequest{
 		Method: "parseJar",
 		Jar:    jarPath,
@@ -240,8 +278,12 @@ func LoadJar(spec string, configBaseArg ...string) error {
 	jarPath = dest
 	jarMu.Unlock()
 	// VodConfig.parseJar(spider, true)：ClassLoader+Init+Proxy 后设为 recent。
-	// 换源时不阻塞 HTTP：Init 可能在 WebView 配置页卡住，首页首次拉取时会再触发 parseJar。
-	notifyParseJarAsync(dest, true)
+	// 换源默认不阻塞 HTTP（Init 可能在 WebView 配置页卡住）；清缓存路径 WithSyncLoadJar 同步。
+	if forceSyncParseJar.Load() {
+		notifyParseJar(dest, true)
+	} else {
+		notifyParseJarAsync(dest, true)
+	}
 	return nil
 }
 

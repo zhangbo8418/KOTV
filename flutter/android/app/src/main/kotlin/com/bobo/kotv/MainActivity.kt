@@ -98,6 +98,7 @@ class MainActivity : FlutterActivity() {
                 "enginePath" to File(nativeLib, "libkotv_engine.so").absolutePath,
                 "lanIp" to (KotvDeviceEnv.lanIpv4(this) ?: ""),
                 "timeZoneId" to KotvDeviceEnv.timeZoneId(),
+                "timeZoneOffsetMs" to KotvDeviceEnv.timeZoneOffsetMs(),
               ),
             )
           }

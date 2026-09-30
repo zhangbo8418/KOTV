@@ -406,6 +406,7 @@ func (a *App) ReloadConfig() error {
 	// 换仓前先不可用，避免 Clear 窗口内仍 Ready 去 Get ""。
 	a.Ready = false
 	a.ErrMsg = ""
+	a.Sites.InvalidateLoads()
 	a.Config.Clear()
 	if err := a.Config.InitFromSettings(); err != nil {
 		a.ErrMsg = err.Error()
@@ -424,6 +425,7 @@ func (a *App) LoadVodSource(source string) error {
 	spider.SetUserProxy(settings.Get(settings.Proxy))
 	a.Ready = false
 	a.ErrMsg = ""
+	a.Sites.InvalidateLoads()
 	a.Config.Clear()
 	if err := a.Config.LoadFromSource(source); err != nil {
 		a.ErrMsg = err.Error()
@@ -497,7 +499,7 @@ func (a *App) Shutdown() {
 	if a.presence != nil {
 		a.presence.Stop()
 	}
-	// 不要走 InvalidateLoads：其中 ClearJarBridgeOnSwitch 可能短暂把 JVM 再拉起来。
+	// 关停：打断脚本/JAR 并关 bridge，勿再拉起 JVM。
 	spider.InterruptScriptSpiders()
 	spider.InterruptJavaBridge()
 	spider.ResetScriptSpiders()
