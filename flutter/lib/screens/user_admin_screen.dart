@@ -31,6 +31,9 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
   Map<String, dynamic>? _me;
   bool _forceChangeShown = false;
   String _deviceIp = '';
+  List<String> _deviceIpv4 = [];
+  List<String> _deviceIpv6 = [];
+  String _devicePublicIp = '';
   String _devicePort = '9978';
 
   KotvApi get _api => ref.read(apiProvider);
@@ -82,8 +85,26 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
       try {
         final dev = await _api.getDevice();
         _deviceIp = '${dev['ip'] ?? ''}'.trim();
+        _deviceIpv4 = ((dev['ipv4'] as List?) ?? const [])
+            .map((e) => '$e'.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+        _deviceIpv6 = ((dev['ipv6'] as List?) ?? const [])
+            .map((e) => '$e'.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+        _devicePublicIp = '${dev['publicIp'] ?? ''}'.trim();
+        if (_deviceIp.isEmpty && _deviceIpv4.isNotEmpty) {
+          _deviceIp = _deviceIpv4.first;
+        }
+        if (_deviceIp.isEmpty && _devicePublicIp.isNotEmpty) {
+          _deviceIp = _devicePublicIp;
+        }
       } catch (_) {
         _deviceIp = '';
+        _deviceIpv4 = [];
+        _deviceIpv6 = [];
+        _devicePublicIp = '';
       }
       final me = await _api.authMe();
       final user = Map<String, dynamic>.from((me['user'] as Map?) ?? const {});
@@ -477,14 +498,25 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
             ),
             title: '用户管理',
           ),
-          if (_deviceIp.isNotEmpty)
+          if (_deviceIp.isNotEmpty || _deviceIpv4.isNotEmpty || _deviceIpv6.isNotEmpty || _devicePublicIp.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '本机 http://$_deviceIp:$_devicePort/',
-                  style: TextStyle(color: p.muted, fontSize: 13),
+                  [
+                    if (_deviceIpv4.isNotEmpty)
+                      '局域网 IPv4: ${_deviceIpv4.join(', ')}'
+                    else if (_devicePublicIp.isNotEmpty)
+                      '公网 IPv4: $_devicePublicIp'
+                    else if (_deviceIp.isNotEmpty)
+                      '本机 IP: $_deviceIp',
+                    if (_deviceIpv6.isNotEmpty) 'IPv6: ${_deviceIpv6.join(', ')}',
+                    if (_deviceIpv4.isNotEmpty && _devicePublicIp.isNotEmpty && !_deviceIpv4.contains(_devicePublicIp))
+                      '公网 IPv4: $_devicePublicIp',
+                    '访问 http://${_deviceIp.isNotEmpty ? _deviceIp : (_deviceIpv4.isNotEmpty ? _deviceIpv4.first : _devicePublicIp)}:$_devicePort/',
+                  ].where((e) => e.isNotEmpty).join('\n'),
+                  style: TextStyle(color: p.muted, fontSize: 13, height: 1.35),
                 ),
               ),
             ),

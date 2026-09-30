@@ -160,10 +160,14 @@ func (s *Server) Start() error {
 	})
 	mux.HandleFunc("/device", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"name": "KO影视",
-			"ip":   localIP(),
-			"uuid": settings.EnsureDeviceUUID(),
+		info := collectDeviceAddrs()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"name":     "KO影视",
+			"ip":       info.Primary,
+			"ipv4":     info.IPv4,
+			"ipv6":     info.IPv6,
+			"publicIp": info.PublicIP,
+			"uuid":     settings.EnsureDeviceUUID(),
 		})
 	})
 
@@ -592,9 +596,43 @@ func first(vals ...string) string {
 }
 
 func localIP() string {
+	return collectDeviceAddrs().Primary
+}
+
+type deviceAddrs struct {
+	Primary  string
+	IPv4     []string
+	IPv6     []string
+	PublicIP string
+}
+
+func isPrivateIPv4(ip net.IP) bool {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	switch {
+	case ip4[0] == 10:
+		return true
+	case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
+		return true
+	case ip4[0] == 192 && ip4[1] == 168:
+		return true
+	default:
+		return false
+	}
+}
+
+func collectDeviceAddrs() deviceAddrs {
+	out := deviceAddrs{}
+	seen4 := map[string]struct{}{}
+	seen6 := map[string]struct{}{}
+	var private4, other4 []string
+
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return "127.0.0.1"
+		out.Primary = "127.0.0.1"
+		return out
 	}
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
@@ -612,16 +650,83 @@ func localIP() string {
 			case *net.IPAddr:
 				ip = v.IP
 			}
-			if ip == nil || ip.IsLoopback() {
+			if ip == nil || ip.IsLoopback() || ip.IsMulticast() || ip.IsUnspecified() {
 				continue
 			}
-			ip = ip.To4()
-			if ip != nil {
-				return ip.String()
+			if ip4 := ip.To4(); ip4 != nil {
+				s := ip4.String()
+				if _, ok := seen4[s]; ok {
+					continue
+				}
+				seen4[s] = struct{}{}
+				if isPrivateIPv4(ip4) {
+					private4 = append(private4, s)
+				} else {
+					other4 = append(other4, s)
+				}
+				continue
+			}
+			// IPv6：跳过链路本地；保留可路由地址。
+			if ip.IsLinkLocalUnicast() {
+				continue
+			}
+			s := ip.String()
+			if _, ok := seen6[s]; ok {
+				continue
+			}
+			seen6[s] = struct{}{}
+			out.IPv6 = append(out.IPv6, s)
+		}
+	}
+
+	out.IPv4 = append(append([]string{}, private4...), other4...)
+	switch {
+	case len(private4) > 0:
+		out.Primary = private4[0]
+	case len(other4) > 0:
+		out.Primary = other4[0]
+		out.PublicIP = other4[0]
+	case len(out.IPv6) > 0:
+		out.Primary = out.IPv6[0]
+	default:
+		if pub := lookupPublicIPv4(); pub != "" {
+			out.PublicIP = pub
+			out.Primary = pub
+		} else {
+			out.Primary = "127.0.0.1"
+		}
+	}
+	if out.PublicIP == "" && len(private4) == 0 {
+		if pub := lookupPublicIPv4(); pub != "" {
+			out.PublicIP = pub
+			if out.Primary == "127.0.0.1" || out.Primary == "" {
+				out.Primary = pub
 			}
 		}
 	}
-	return "127.0.0.1"
+	return out
+}
+
+// lookupPublicIPv4 无可用局域网地址时探测公网 IPv4（短超时，失败则空）。
+func lookupPublicIPv4() string {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("https://api.ipify.org")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return ""
+	}
+	ip := strings.TrimSpace(string(b))
+	if net.ParseIP(ip) == nil || net.ParseIP(ip).To4() == nil {
+		return ""
+	}
+	return ip
 }
 
 func cors(next http.Handler) http.Handler {

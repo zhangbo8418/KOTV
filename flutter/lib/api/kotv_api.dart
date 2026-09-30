@@ -80,7 +80,7 @@ class KotvApi {
 
   Future<Map<String, dynamic>> health() => _get('/api/v1/health');
 
-  /// 引擎本机信息：`name` / `ip` / `uuid`（见 `GET /device`）。
+  /// 引擎本机信息：`name` / `ip` / `ipv4` / `ipv6` / `publicIp` / `uuid`（见 `GET /device`）。
   Future<Map<String, dynamic>> getDevice() async {
     final res = await http
         .get(_u('/device'), headers: await _headers())

@@ -693,10 +693,9 @@ class LibraryTopBar extends StatelessWidget {
               SizedBox(width: land ? 6 : 8),
               Flexible(
                 flex: trailing != null ? 1 : 2,
-                child: Text(
+                child: KotvMarqueeText(
                   title!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  active: true,
                   style: TextStyle(
                     color: KotvPalette.of(context).fg,
                     fontSize: land ? 14 : 16,

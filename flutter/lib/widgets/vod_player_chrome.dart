@@ -199,20 +199,20 @@ class VodInlineControls extends StatelessWidget {
                       },
                     ),
                     SizedBox(width: narrow ? 4 : 8),
-                    Flexible(
+                    Expanded(
                       child: StreamBuilder<Duration>(
                         stream: player.positionStream,
                         builder: (context, _) {
                           return Text(
                             '${fmtPlayerTime(player.position)} / ${fmtPlayerTime(player.duration)}',
                             maxLines: 1,
+                            softWrap: false,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: narrow ? 11 : 12),
                           );
                         },
                       ),
                     ),
-                    const Spacer(),
                     KotvVolumeControl(
                       player: player,
                       iconSize: iconSize,
