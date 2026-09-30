@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/bobo/KOTV/internal/app"
 	"github.com/bobo/KOTV/internal/remote"
+	"github.com/bobo/KOTV/internal/util"
 
-	// 安卓 sidecar 无系统 zoneinfo；嵌入后 TZ / Live.timeZone 的 IANA 名才能生效。
+	// 安卓 sidecar 无系统 zoneinfo；嵌入后 KOTV_TZ / Live.timeZone 的 IANA 名才能生效。
 	_ "time/tzdata"
 )
 
@@ -21,7 +23,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("KOTV engine ready http://127.0.0.1:%d (api=/api/v1)", a.Server.Port())
+	dev := util.DeviceLocation()
+	log.Printf("KOTV engine ready http://127.0.0.1:%d (api=/api/v1) tz=%s local=%s now=%s",
+		a.Server.Port(), dev, time.Local, time.Now().In(dev).Format(time.RFC3339))
 	if a.ErrMsg != "" {
 		log.Printf("config: %s", a.ErrMsg)
 	}

@@ -270,7 +270,7 @@ func channelLocation(ch *model.LiveChannel) *time.Location {
 	if ch != nil && ch.Live != nil {
 		return ch.Live.Location()
 	}
-	return time.Local
+	return util.DeviceLocation()
 }
 
 func hasHTTPPrefix(s string) bool {
@@ -278,11 +278,11 @@ func hasHTTPPrefix(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
 
-// ParseEPG 解析 JSON 或简易 XML 片段。zone 用于 JSON 节目起止时刻；nil 则用本机时区。
+// ParseEPG 解析 JSON 或简易 XML 片段。zone 用于 JSON 节目起止时刻；nil 则用设备时区。
 func ParseEPG(text, key, date string, zone *time.Location) Epg {
 	text = strings.TrimSpace(text)
 	if zone == nil {
-		zone = time.Local
+		zone = util.DeviceLocation()
 	}
 	if strings.HasPrefix(text, "{") {
 		var dto struct {
@@ -327,7 +327,7 @@ func ParseEPG(text, key, date string, zone *time.Location) Epg {
 
 func setEpgTimes(epg *Epg, zone *time.Location) {
 	if zone == nil {
-		zone = time.Local
+		zone = util.DeviceLocation()
 	}
 	for i := range epg.List {
 		epg.List[i].StartTime = parseEpgTime(epg.Date+epg.List[i].Start, zone)
@@ -352,7 +352,7 @@ func setEpgTimes(epg *Epg, zone *time.Location) {
 func parseEpgTime(source string, zone *time.Location) int64 {
 	source = strings.TrimSpace(source)
 	if zone == nil {
-		zone = time.Local
+		zone = util.DeviceLocation()
 	}
 	layouts := []string{
 		"2006-01-0215:04:05",
@@ -528,7 +528,7 @@ func matchXMLTVDays(data []byte, ch *model.LiveChannel, preferDate string) ([]Ep
 func parseXMLTVTime(s string, loc *time.Location) time.Time {
 	s = strings.TrimSpace(s)
 	if loc == nil {
-		loc = time.Local
+		loc = util.DeviceLocation()
 	}
 	if len(s) >= 14 {
 		timePart := s[:14]
@@ -663,7 +663,7 @@ func formatMillis(ms int64, fmtStr string) string {
 	if fmtStr == "timestamp" {
 		return fmt.Sprintf("%d", ms/1000)
 	}
-	zone := time.Local
+	zone := util.DeviceLocation()
 	f := fmtStr
 	// 部分源写 {(b)yyyyMMddHHmmss:utc}，按 UTC 输出。
 	if i := strings.Index(f, ":"); i >= 0 {

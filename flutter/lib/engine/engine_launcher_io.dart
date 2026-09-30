@@ -249,6 +249,7 @@ class EngineLauncher {
         final files = '${raw['filesDir'] ?? ''}'.trim();
         final lanIp = '${raw['lanIp'] ?? ''}'.trim();
         final tz = '${raw['timeZoneId'] ?? ''}'.trim();
+        final tzOffset = '${raw['timeZoneOffsetMs'] ?? ''}'.trim();
         if (cache.isNotEmpty) {
           env['KOTV_CACHE_DIR'] = cache;
           env['KOTV_DATA_DIR'] = p.join(cache, 'KOTV');
@@ -260,7 +261,11 @@ class EngineLauncher {
           env['KOTV_LAN_IP'] = lanIp;
         }
         if (tz.isNotEmpty) {
+          env['KOTV_TZ'] = tz;
           env['TZ'] = tz;
+        }
+        if (tzOffset.isNotEmpty) {
+          env['KOTV_TZ_OFFSET_MS'] = tzOffset;
         }
       }
     } catch (e) {

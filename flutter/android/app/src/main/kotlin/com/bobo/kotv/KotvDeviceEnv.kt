@@ -16,6 +16,14 @@ object KotvDeviceEnv {
       ""
     }
 
+  /** 含夏令时的当前偏移（毫秒，东为正），供 Go FixedZone，不依赖 zoneinfo。 */
+  fun timeZoneOffsetMs(): Int =
+    try {
+      TimeZone.getDefault().getOffset(System.currentTimeMillis())
+    } catch (_: Throwable) {
+      0
+    }
+
   fun lanIpv4(context: Context): String? {
     try {
       val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager

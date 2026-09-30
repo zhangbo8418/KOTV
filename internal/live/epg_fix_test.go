@@ -31,8 +31,8 @@ func TestLiveLocation(t *testing.T) {
 	if l.Location().String() != "Asia/Tokyo" {
 		t.Fatalf("loc=%s", l.Location())
 	}
-	if (&model.Live{}).Location() != time.Local {
-		t.Fatal("empty should be Local")
+	if (&model.Live{}).Location() == nil {
+		t.Fatal("empty timeZone location nil")
 	}
 }
 

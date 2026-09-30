@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/bobo/KOTV/internal/util"
 )
 
 // Live 直播源配置。
@@ -32,18 +34,18 @@ type Live struct {
 	Groups     []LiveGroup     `json:"groups"`
 }
 
-// Location 返回源级时区；无效或空则 time.Local。
+// Location 返回源级时区；无效或空则设备墙钟时区（非盲目 time.Local）。
 func (l *Live) Location() *time.Location {
 	if l == nil {
-		return time.Local
+		return util.DeviceLocation()
 	}
 	tz := strings.TrimSpace(l.TimeZone)
 	if tz == "" {
-		return time.Local
+		return util.DeviceLocation()
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil || loc == nil {
-		return time.Local
+		return util.DeviceLocation()
 	}
 	return loc
 }

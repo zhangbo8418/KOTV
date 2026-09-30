@@ -208,8 +208,13 @@ class KotvEngineService : Service() {
       KotvDeviceEnv.lanIpv4(this)?.let { env["KOTV_LAN_IP"] = it }
       val tz = KotvDeviceEnv.timeZoneId()
       if (tz.isNotEmpty()) {
-        // Go time.Local 读 TZ；未设时安卓 sidecar 常为 UTC，EPG 墙钟会偏 8 小时。
+        env["KOTV_TZ"] = tz
+        // 仍写 TZ：部分库读它；EPG 主路径用 KOTV_TZ / OFFSET，不依赖 time.Local。
         env["TZ"] = tz
+      }
+      val offsetMs = KotvDeviceEnv.timeZoneOffsetMs()
+      if (offsetMs != 0 || tz.isNotEmpty()) {
+        env["KOTV_TZ_OFFSET_MS"] = offsetMs.toString()
       }
       try {
         env["KOTV_LOCALE_COUNTRY"] = java.util.Locale.getDefault().country ?: ""

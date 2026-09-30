@@ -967,16 +967,20 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final data = await ref.read(apiProvider).liveEpg(group: _groupIdx, channel: _chIdx);
       final days = ((data['days'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
       var dayIdx = 0;
-      final today = DateTime.now().toIso8601String().substring(0, 10);
+      final today = _localDateString();
       for (var i = 0; i < days.length; i++) {
         if ('${days[i]['date']}' == today) {
           dayIdx = i;
           break;
         }
       }
+      final dayDate = days.isEmpty ? today : '${days[dayIdx]['date'] ?? today}';
       final progs = days.isEmpty
           ? <Map<String, dynamic>>[]
-          : (((days[dayIdx]['list'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList());
+          : _programsWithLocalNow(
+              (((days[dayIdx]['list'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()),
+              dayDate,
+            );
       final logo = '${data['logo'] ?? ''}'.trim();
       if (!mounted) return;
       setState(() {
@@ -2122,10 +2126,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   void _selectEpgDay(int i, {bool resetHide = false}) {
     if (resetHide) _cancelHideOverlays();
-    final progs = (((_epgDays[i]['list'] as List?) ?? [])
-        .whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList());
+    final dayDate = '${_epgDays[i]['date'] ?? _localDateString()}';
+    final progs = _programsWithLocalNow(
+      (((_epgDays[i]['list'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()),
+      dayDate,
+    );
     setState(() {
       _dayIdx = i;
       _programs = progs;
@@ -2304,12 +2309,65 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return '${chs[_chIdx]['logo'] ?? ''}';
   }
 
-  /// 仅「正在播出」；无 now 不回退到首条（避免 00:xx 假当前）。
+  /// 仅「正在播出」；用本地墙钟重算，忽略引擎在 UTC Local 下标错的 now。
   Map<String, dynamic>? get _currentProgram {
     for (final p in _programs) {
       if (p['now'] == true) return p;
     }
     return null;
+  }
+
+  /// `DateTime.now().toIso8601String()` 是 UTC 日期，不能用来对 EPG 日。
+  static String _localDateString([DateTime? n]) {
+    final d = n ?? DateTime.now();
+    final y = d.year.toString().padLeft(4, '0');
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '$y-$m-$day';
+  }
+
+  static DateTime? _epgWallClock(String date, String hm) {
+    final dm = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(date.trim());
+    final tm = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(hm.trim());
+    if (dm == null || tm == null) return null;
+    final y = int.tryParse(dm.group(1)!);
+    final mo = int.tryParse(dm.group(2)!);
+    final d = int.tryParse(dm.group(3)!);
+    final h = int.tryParse(tm.group(1)!);
+    final mi = int.tryParse(tm.group(2)!);
+    if (y == null || mo == null || d == null || h == null || mi == null) return null;
+    return DateTime(y, mo, d, h, mi);
+  }
+
+  /// 按设备本地墙钟判断是否正在播出（EPG 的 start/end 是墙钟串）。
+  static bool _epgIsNowLocal(String date, String start, String end, [DateTime? now]) {
+    final s = _epgWallClock(date, start);
+    var e = _epgWallClock(date, end);
+    if (s == null || e == null) return false;
+    if (!e.isAfter(s)) {
+      e = e.add(const Duration(days: 1));
+    }
+    final n = now ?? DateTime.now();
+    return !n.isBefore(s) && !n.isAfter(e);
+  }
+
+  List<Map<String, dynamic>> _programsWithLocalNow(List<Map<String, dynamic>> progs, String date) {
+    final day = date.trim().isNotEmpty ? date.trim() : _localDateString();
+    final now = DateTime.now();
+    return progs.map((e) {
+      final m = Map<String, dynamic>.from(e);
+      final start = '${m['start'] ?? ''}'.trim();
+      final end = '${m['end'] ?? ''}'.trim();
+      if (start.isNotEmpty && end.isNotEmpty) {
+        final isNow = _epgIsNowLocal(day, start, end, now);
+        m['now'] = isNow;
+        final s = _epgWallClock(day, start);
+        if (s != null) {
+          m['future'] = s.isAfter(now);
+        }
+      }
+      return m;
+    }).toList();
   }
 
   String get _programTimeLabel {
