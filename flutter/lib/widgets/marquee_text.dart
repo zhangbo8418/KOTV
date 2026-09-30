@@ -34,6 +34,10 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
   double _textW = 0;
   double _viewW = 0;
   bool _overflow = false;
+  String? _measuredText;
+  TextStyle? _measuredStyle;
+  double? _measuredViewW;
+  TextScaler? _measuredScaler;
 
   @override
   void dispose() {
@@ -44,25 +48,64 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
   @override
   void didUpdateWidget(covariant KotvMarqueeText oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.text != widget.text ||
-        oldWidget.style != widget.style ||
-        oldWidget.active != widget.active ||
+    final contentChanged = oldWidget.text != widget.text || oldWidget.style != widget.style;
+    final animParamsChanged = oldWidget.active != widget.active ||
         oldWidget.velocity != widget.velocity ||
         oldWidget.pause != widget.pause ||
-        oldWidget.blankGap != widget.blankGap) {
+        oldWidget.blankGap != widget.blankGap;
+    // 文案变了但父级宽度不变时，build 里旧逻辑不会重测 → 超长有时不滚。
+    if (contentChanged && _viewW > 1) {
+      _remeasure(_viewW, MediaQuery.maybeTextScalerOf(context) ?? TextScaler.noScaling);
+    }
+    if (contentChanged || animParamsChanged) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _syncAnim();
       });
     }
   }
 
-  double _measure(String text, TextStyle style) {
+  TextStyle _effectiveStyle() {
+    final base = DefaultTextStyle.of(context).style;
+    final merged = base.merge(widget.style);
+    if (widget.style.fontFamilyFallback != null && widget.style.fontFamilyFallback!.isNotEmpty) {
+      return merged;
+    }
+    if (base.fontFamilyFallback != null && base.fontFamilyFallback!.isNotEmpty) {
+      return merged.copyWith(fontFamilyFallback: base.fontFamilyFallback);
+    }
+    return merged;
+  }
+
+  double _measure(String text, TextStyle style, TextScaler scaler) {
     final tp = TextPainter(
       text: TextSpan(text: text, style: style),
       textDirection: TextDirection.ltr,
+      textScaler: scaler,
       maxLines: 1,
     )..layout();
     return tp.width;
+  }
+
+  bool _remeasure(double maxW, TextScaler scaler) {
+    if (!maxW.isFinite || maxW <= 0) return false;
+    final style = _effectiveStyle();
+    final same = _measuredText == widget.text &&
+        _measuredStyle == style &&
+        _measuredScaler == scaler &&
+        _measuredViewW != null &&
+        (_measuredViewW! - maxW).abs() <= 0.5;
+    if (same) return false;
+
+    final tw = _measure(widget.text, style, scaler);
+    final overflow = tw > maxW + 0.5;
+    _viewW = maxW;
+    _textW = tw;
+    _overflow = overflow;
+    _measuredText = widget.text;
+    _measuredStyle = style;
+    _measuredViewW = maxW;
+    _measuredScaler = scaler;
+    return true;
   }
 
   void _syncAnim() {
@@ -75,26 +118,34 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
     final travel = _textW + widget.blankGap;
     final seconds = (travel / widget.velocity.clamp(12.0, 120.0)).clamp(2.0, 40.0);
     final total = Duration(milliseconds: (seconds * 1000).round()) + widget.pause;
-    if (_ctrl.duration != total) {
+    final durationChanged = _ctrl.duration != total;
+    if (durationChanged) {
       _ctrl.duration = total;
     }
     if (!_ctrl.isAnimating) {
       _ctrl.repeat();
+    } else if (durationChanged) {
+      _ctrl
+        ..stop()
+        ..reset()
+        ..repeat();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final scaler = MediaQuery.textScalerOf(context);
+    final style = _effectiveStyle();
     return LayoutBuilder(
       builder: (context, c) {
         final maxW = c.maxWidth;
-        if (maxW.isFinite && maxW > 0 && (maxW - _viewW).abs() > 0.5) {
-          _viewW = maxW;
-          _textW = _measure(widget.text, widget.style);
-          _overflow = _textW > maxW + 0.5;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _syncAnim();
-          });
+        if (maxW.isFinite && maxW > 0) {
+          final changed = _remeasure(maxW, scaler);
+          if (changed) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _syncAnim();
+            });
+          }
         }
 
         if (!_overflow || !widget.active) {
@@ -106,13 +157,32 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
               softWrap: false,
               overflow: TextOverflow.ellipsis,
               textAlign: widget.textAlign,
-              style: widget.style,
+              style: style,
             ),
           );
         }
 
-        final pauseFrac = widget.pause.inMilliseconds /
-            (_ctrl.duration?.inMilliseconds.clamp(1, 1 << 30) ?? 1);
+        final durMs = _ctrl.duration?.inMilliseconds ?? 0;
+        // duration 尚未由 _syncAnim 写好时先静态显示，避免 pauseFrac→∞ 导致永远不滚。
+        if (durMs <= 0) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _syncAnim();
+          });
+          return SizedBox(
+            width: maxW,
+            child: ClipRect(
+              child: Text(
+                widget.text,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
+                style: style,
+              ),
+            ),
+          );
+        }
+
+        final pauseFrac = (widget.pause.inMilliseconds / durMs).clamp(0.0, 0.9);
         return SizedBox(
           width: maxW,
           child: ClipRect(
@@ -120,7 +190,6 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
               animation: _ctrl,
               builder: (context, _) {
                 final t = _ctrl.value;
-                // 前 pauseFrac 停在起点，其后线性滚出。
                 final progress = t <= pauseFrac ? 0.0 : (t - pauseFrac) / (1 - pauseFrac).clamp(0.01, 1.0);
                 final dx = -progress * (_textW + widget.blankGap);
                 return Stack(
@@ -133,7 +202,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
                         maxLines: 1,
                         softWrap: false,
                         overflow: TextOverflow.visible,
-                        style: widget.style,
+                        style: style,
                       ),
                     ),
                     Transform.translate(
@@ -143,7 +212,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
                         maxLines: 1,
                         softWrap: false,
                         overflow: TextOverflow.visible,
-                        style: widget.style,
+                        style: style,
                       ),
                     ),
                   ],
