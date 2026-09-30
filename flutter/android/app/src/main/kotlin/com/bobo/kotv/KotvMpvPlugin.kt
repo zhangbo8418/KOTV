@@ -1511,6 +1511,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             return finishFollow(raw, current, cookies, headers)
           }
           if (next == current) return finishFollow(raw, current, cookies, headers)
+          // 跨 host/scheme/port 时剥 Authorization，避免鉴权头带到新域。
+          if (authorityChanged(current, next)) {
+            headers.keys.filter { it.equals("Authorization", ignoreCase = true) }.toList().forEach {
+              headers.remove(it)
+            }
+          }
           current = next
           return@repeat
         }
@@ -1553,6 +1559,18 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     if (ua.isEmpty()) ua = FALLBACK_PLAY_UA
     conn.setRequestProperty("User-Agent", ua)
+  }
+
+  private fun authorityChanged(from: String, to: String): Boolean {
+    return try {
+      val a = URI(from)
+      val b = URI(to)
+      !a.scheme.equals(b.scheme, ignoreCase = true) ||
+        !a.host.equals(b.host, ignoreCase = true) ||
+        a.port != b.port
+    } catch (_: Throwable) {
+      true
+    }
   }
 
   private fun collectCookies(conn: HttpURLConnection, out: MutableMap<String, String>) {

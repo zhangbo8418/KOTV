@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/dlna"
+	"github.com/bobo/KOTV/internal/util"
 	castdns "github.com/vishen/go-chromecast/dns"
 )
 
@@ -110,23 +111,28 @@ func Discover(timeout time.Duration) ([]Device, error) {
 }
 
 func discoverChromecast(timeout time.Duration) ([]Device, error) {
-	// Android：Go net.Interfaces 常因 netlinkrib 失败；无组播网卡时软跳过，只保留 DLNA。
+	// Android：Go net.Interfaces 常因 netlinkrib 失败；有 KOTV_LAN_IP 时仍尝试发现。
 	if runtime.GOOS == "android" {
+		lan := util.LanIP()
 		ifaces, err := net.Interfaces()
 		usable := 0
 		if err != nil {
-			log.Printf("cast: skip Chromecast on Android (interfaces: %v)", err)
-			return nil, nil
-		}
-		for _, iface := range ifaces {
-			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 || iface.Flags&net.FlagLoopback != 0 {
-				continue
+			if lan == "" {
+				log.Printf("cast: skip Chromecast on Android (interfaces: %v)", err)
+				return nil, nil
 			}
-			usable++
-		}
-		if usable == 0 {
-			log.Printf("cast: skip Chromecast on Android (no multicast interfaces)")
-			return nil, nil
+			log.Printf("cast: Android interfaces failed (%v); try discover with LanIP=%s", err, lan)
+		} else {
+			for _, iface := range ifaces {
+				if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 || iface.Flags&net.FlagLoopback != 0 {
+					continue
+				}
+				usable++
+			}
+			if usable == 0 && lan == "" {
+				log.Printf("cast: skip Chromecast on Android (no multicast interfaces)")
+				return nil, nil
+			}
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

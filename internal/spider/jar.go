@@ -35,6 +35,8 @@ var (
 var (
 	jarRefreshGen     atomic.Uint64
 	jarNoMD5Refreshed sync.Map // downloadURL -> gen
+	// 同 dest 的 parseJar 通知去重（多 JS worker EnsureJar 并发时只 POST 一次）。
+	parseJarNotified sync.Map // dest -> struct{}
 )
 
 // 多用户：按 ScopeID 隔离配置基址，避免 A 换源覆盖 B 的相对路径解析。
@@ -93,6 +95,10 @@ func bumpJarRefreshGen() {
 		jarNoMD5Refreshed.Delete(k)
 		return true
 	})
+	parseJarNotified.Range(func(k, _ any) bool {
+		parseJarNotified.Delete(k)
+		return true
+	})
 }
 
 // SetConfigBase 设置当前点播配置基址。有 ScopeID 时只写入该会话，不覆盖他人。
@@ -148,6 +154,19 @@ const parseJarBridgeTimeout = javaBridgeCallTimeout
 
 // notifyParseJar BaseLoader.parseJar(jar, recent)：真加载 ClassLoader+Init+Proxy，可选设 recent。
 func notifyParseJar(jarPath string, recent bool) {
+	jarPath = strings.TrimSpace(jarPath)
+	if jarPath == "" {
+		return
+	}
+	// recent=false（EnsureJar）：同 dest 只通知一次，避免 8 worker 各打一遍 :9979。
+	// recent=true（LoadJar）：换源须设 recent，仍通知；同时记入去重表供后续 EnsureJar 跳过。
+	if !recent {
+		if _, loaded := parseJarNotified.LoadOrStore(jarPath, struct{}{}); loaded {
+			return
+		}
+	} else {
+		parseJarNotified.Store(jarPath, struct{}{})
+	}
 	req := bridgeRequest{
 		Method: "parseJar",
 		Jar:    jarPath,

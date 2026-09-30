@@ -369,11 +369,7 @@ func (a *App) listenEvents() {
 				if path == "" {
 					continue
 				}
-				if strings.HasPrefix(strings.ToLower(path), "http://") || strings.HasPrefix(strings.ToLower(path), "https://") {
-					_ = danmaku.LoadURL(path)
-				} else {
-					_ = danmaku.LoadFile(path)
-				}
+				// 弹幕由 Flutter DanmakuLoader 加载渲染；此处只推路径，避免引擎再 Load* 双份 IO。
 				remote.DefaultQueue.PushRefresh("danmaku", path, "")
 			}
 		}

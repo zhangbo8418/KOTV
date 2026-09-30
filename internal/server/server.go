@@ -596,10 +596,6 @@ func first(vals ...string) string {
 	return ""
 }
 
-func localIP() string {
-	return collectDeviceAddrs().Primary
-}
-
 type deviceAddrs struct {
 	Primary  string
 	IPv4     []string

@@ -12,7 +12,7 @@ import 'vod_player_chrome.dart';
 import 'volume_control.dart';
 
 /// 直播底栏控件：播放/暂停、投屏、迷你、全屏、播放器、软硬解、音量；（回看时含进度）。
-class LiveCatchupChrome extends StatelessWidget {
+class LiveCatchupChrome extends StatefulWidget {
   const LiveCatchupChrome({
     super.key,
     required this.player,
@@ -74,112 +74,141 @@ class LiveCatchupChrome extends StatelessWidget {
   final bool showSeek;
   final Future<void> Function(String key, String value)? onPersistSetting;
 
+  @override
+  State<LiveCatchupChrome> createState() => _LiveCatchupChromeState();
+}
+
+class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
+  final FocusNode _seekFocus = FocusNode(debugLabel: 'live_catchup_seek');
+
+  @override
+  void dispose() {
+    _seekFocus.dispose();
+    super.dispose();
+  }
+
   void _tap(VoidCallback? action) {
     action?.call();
-    onBump?.call();
+    widget.onBump?.call();
   }
 
   @override
   Widget build(BuildContext context) {
-    final resolvedPlayerLabel =
-        playerLabel.trim().isEmpty ? flutterPlayerLabel(kotvDefaultLivePlayer()) : playerLabel;
+    final player = widget.player;
+    final resolvedPlayerLabel = widget.playerLabel.trim().isEmpty
+        ? flutterPlayerLabel(kotvDefaultLivePlayer())
+        : widget.playerLabel;
     final land = KotvLayout.isLandscapeCompact(context);
     final iconSize = land ? 30.0 : 40.0;
+    final compact = widget.miniActive || MediaQuery.sizeOf(context).width < 560 || land;
     return Material(
-      color: translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
-      child: StreamBuilder(
-        stream: player.positionStream,
-        builder: (context, _) {
-          final pos = player.position;
-          final dur = player.duration;
-          final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
-          final compact = miniActive || MediaQuery.sizeOf(context).width < 560 || land;
-          return Padding(
-            padding: EdgeInsets.fromLTRB(compact ? 4 : 10, land ? 2 : 4, compact ? 4 : 10, land ? 4 : 6),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+      color: widget.translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
+      // 按钮/音量不挂 positionStream；仅时间与进度条随流重建（同点播内嵌底栏）。
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(compact ? 4 : 10, land ? 2 : 4, compact ? 4 : 10, land ? 4 : 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    _act(
+                ListenableBuilder(
+                  listenable: player,
+                  builder: (context, _) {
+                    return _act(
                       icon: player.playing ? Icons.pause : Icons.play_arrow,
                       tip: player.playing ? '暂停' : '播放',
                       compact: compact,
                       size: iconSize,
-                      autofocus: autofocusPlay,
-                      focusNode: playFocusNode,
+                      autofocus: widget.autofocusPlay,
+                      focusNode: widget.playFocusNode,
                       onTap: () => _tap(() => player.playOrPause()),
-                    ),
-                    if (onCast != null)
-                      _act(
-                        icon: Icons.cast,
-                        tip: '投屏',
-                        compact: compact,
-                        size: iconSize,
-                        onTap: () => _tap(onCast),
-                      ),
-                    if (onMini != null)
-                      _act(
-                        icon: miniActive ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
-                        tip: miniActive ? '还原窗口' : '迷你桌面播放',
-                        compact: compact,
-                        size: iconSize,
-                        onTap: () => _tap(onMini),
-                      ),
-                    if (onExpand != null && !miniActive)
-                      (offerFullscreenChoice == false)
-                          ? _act(
-                              icon: fullscreenActive ? Icons.fullscreen_exit : Icons.fullscreen,
-                              tip: fullscreenActive ? '退出全屏' : '全屏',
-                              compact: compact,
-                              size: iconSize,
-                              onTap: () => _tap(() => onExpand!(KotvDesktopFullscreenKind.display)),
-                            )
-                          : KotvFullscreenExpandButton(
-                              size: iconSize,
-                              iconSize: iconSize <= 32 ? 16 : 22,
-                              offerDisplayChoice: offerFullscreenChoice,
-                              onSelect: (kind) => _tap(() => onExpand!(kind)),
-                            ),
-                    if (!compact && onPlayer != null)
-                      _textAct(resolvedPlayerLabel, () => _tap(onPlayer)),
-                    if (!compact && onDecode != null)
-                      _textAct(decodeLabel, () => _tap(onDecode)),
-                    if (onScale != null)
-                      _textAct(
-                        scaleLabel.trim().isEmpty ? '比例' : scaleLabel,
-                        () => _tap(onScale),
-                      ),
-                    if (onAcross != null)
-                      _textAct(acrossOn ? '跨组开' : '跨组关', () => _tap(onAcross)),
-                    if (onInvert != null)
-                      _textAct(invertOn ? '反转开' : '反转关', () => _tap(onInvert)),
-                    if (onFailSwitch != null)
-                      _textAct(failSwitchOn ? '换线开' : '换线关', () => _tap(onFailSwitch)),
-                    if (showSeek) ...[
-                      const SizedBox(width: 6),
-                      Text(
+                    );
+                  },
+                ),
+                if (widget.onCast != null)
+                  _act(
+                    icon: Icons.cast,
+                    tip: '投屏',
+                    compact: compact,
+                    size: iconSize,
+                    onTap: () => _tap(widget.onCast),
+                  ),
+                if (widget.onMini != null)
+                  _act(
+                    icon: widget.miniActive ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
+                    tip: widget.miniActive ? '还原窗口' : '迷你桌面播放',
+                    compact: compact,
+                    size: iconSize,
+                    onTap: () => _tap(widget.onMini),
+                  ),
+                if (widget.onExpand != null && !widget.miniActive)
+                  (widget.offerFullscreenChoice == false)
+                      ? _act(
+                          icon: widget.fullscreenActive ? Icons.fullscreen_exit : Icons.fullscreen,
+                          tip: widget.fullscreenActive ? '退出全屏' : '全屏',
+                          compact: compact,
+                          size: iconSize,
+                          onTap: () => _tap(() => widget.onExpand!(KotvDesktopFullscreenKind.display)),
+                        )
+                      : KotvFullscreenExpandButton(
+                          size: iconSize,
+                          iconSize: iconSize <= 32 ? 16 : 22,
+                          offerDisplayChoice: widget.offerFullscreenChoice,
+                          onSelect: (kind) => _tap(() => widget.onExpand!(kind)),
+                        ),
+                if (!compact && widget.onPlayer != null)
+                  _textAct(resolvedPlayerLabel, () => _tap(widget.onPlayer)),
+                if (!compact && widget.onDecode != null)
+                  _textAct(widget.decodeLabel, () => _tap(widget.onDecode)),
+                if (widget.onScale != null)
+                  _textAct(
+                    widget.scaleLabel.trim().isEmpty ? '比例' : widget.scaleLabel,
+                    () => _tap(widget.onScale),
+                  ),
+                if (widget.onAcross != null)
+                  _textAct(widget.acrossOn ? '跨组开' : '跨组关', () => _tap(widget.onAcross)),
+                if (widget.onInvert != null)
+                  _textAct(widget.invertOn ? '反转开' : '反转关', () => _tap(widget.onInvert)),
+                if (widget.onFailSwitch != null)
+                  _textAct(widget.failSwitchOn ? '换线开' : '换线关', () => _tap(widget.onFailSwitch)),
+                if (widget.showSeek) ...[
+                  const SizedBox(width: 6),
+                  StreamBuilder<Duration>(
+                    stream: player.positionStream,
+                    builder: (context, _) {
+                      final pos = player.position;
+                      final dur = player.duration;
+                      return Text(
                         compact ? fmtPlayerTime(pos) : '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',
                         style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : (compact ? 11 : 12)),
-                      ),
-                    ],
-                    const Spacer(),
-                    KotvVolumeControl(
-                      player: player,
-                      iconSize: iconSize,
-                      sliderWidth: compact ? 72 : (land ? 90 : 110),
-                      compact: compact,
-                      onEngage: onBump,
-                      onPersist: onPersistSetting == null
-                          ? null
-                          : (n) => onPersistSetting!('playerVolume', '$n'),
-                    ),
-                  ],
+                      );
+                    },
+                  ),
+                ],
+                const Spacer(),
+                KotvVolumeControl(
+                  player: player,
+                  iconSize: iconSize,
+                  sliderWidth: compact ? 72 : (land ? 90 : 110),
+                  compact: compact,
+                  onEngage: widget.onBump,
+                  onPersist: widget.onPersistSetting == null
+                      ? null
+                      : (n) => widget.onPersistSetting!('playerVolume', '$n'),
                 ),
-                if (showSeek)
-                  KotvSeekSlider(
+              ],
+            ),
+            if (widget.showSeek)
+              StreamBuilder<Duration>(
+                stream: player.positionStream,
+                builder: (context, _) {
+                  final pos = player.position;
+                  final dur = player.duration;
+                  final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
+                  return KotvSeekSlider(
                     player: player,
                     maxMs: total,
+                    focusNode: _seekFocus,
                     secondaryMs: () {
                       if (total <= 0) return 0.0;
                       final p = pos.inMilliseconds.toDouble().clamp(0.0, total);
@@ -187,7 +216,7 @@ class LiveCatchupChrome extends StatelessWidget {
                       return b < p ? p : b;
                     }(),
                     enabled: dur.inMilliseconds > 0,
-                    onInteraction: onBump,
+                    onInteraction: widget.onBump,
                     theme: SliderTheme.of(context).copyWith(
                       trackHeight: land ? 2 : 3,
                       thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
@@ -197,11 +226,11 @@ class LiveCatchupChrome extends StatelessWidget {
                       secondaryActiveTrackColor: Colors.white38,
                       thumbColor: Colors.white,
                     ),
-                  ),
-              ],
-            ),
-          );
-        },
+                  );
+                },
+              ),
+          ],
+        ),
       ),
     );
   }

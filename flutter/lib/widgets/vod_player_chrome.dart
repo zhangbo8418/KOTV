@@ -120,7 +120,7 @@ class CenterPlayPauseButton extends StatelessWidget {
 }
 
 /// 详情页内嵌播放器底栏（video_surface）。
-class VodInlineControls extends StatelessWidget {
+class VodInlineControls extends StatefulWidget {
   const VodInlineControls({
     super.key,
     required this.player,
@@ -145,13 +145,27 @@ class VodInlineControls extends StatelessWidget {
   final Future<void> Function(String key, String value)? onPersistSetting;
 
   @override
+  State<VodInlineControls> createState() => _VodInlineControlsState();
+}
+
+class _VodInlineControlsState extends State<VodInlineControls> {
+  final FocusNode _seekFocus = FocusNode(debugLabel: 'vod_inline_seek');
+
+  @override
+  void dispose() {
+    _seekFocus.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final player = widget.player;
     return Material(
-      color: translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
+      color: widget.translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
       // 播停/音量：ListenableBuilder；进度：positionStream（Exo/MPV 也不因进度 notify）。
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final narrow = miniActive || constraints.maxWidth < 480;
+          final narrow = widget.miniActive || constraints.maxWidth < 480;
           final iconSize = narrow ? 32.0 : 40.0;
           final volW = narrow ? 72.0 : 110.0;
           return Padding(
@@ -171,7 +185,7 @@ class VodInlineControls extends StatelessWidget {
                               icon: player.playing ? Icons.pause : Icons.play_arrow,
                               tip: player.playing ? '暂停' : '播放',
                               size: iconSize,
-                              autofocus: autofocusPlay,
+                              autofocus: widget.autofocusPlay,
                               onTap: () => player.playOrPause(),
                             ),
                             _IconAct(
@@ -180,20 +194,20 @@ class VodInlineControls extends StatelessWidget {
                               size: iconSize,
                               onTap: () {
                                 player.stop();
-                                onStop?.call();
+                                widget.onStop?.call();
                               },
                             ),
-                            if (onCast != null)
-                              _IconAct(icon: Icons.cast, tip: '投屏', size: iconSize, onTap: onCast!),
-                            if (onMini != null)
+                            if (widget.onCast != null)
+                              _IconAct(icon: Icons.cast, tip: '投屏', size: iconSize, onTap: widget.onCast!),
+                            if (widget.onMini != null)
                               _IconAct(
-                                icon: miniActive ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
-                                tip: miniActive ? '还原窗口' : '迷你桌面播放',
+                                icon: widget.miniActive ? Icons.close_fullscreen : Icons.picture_in_picture_alt,
+                                tip: widget.miniActive ? '还原窗口' : '迷你桌面播放',
                                 size: iconSize,
-                                onTap: onMini!,
+                                onTap: widget.onMini!,
                               ),
-                            if (onExpand != null && !miniActive)
-                              KotvFullscreenExpandButton(size: iconSize, onSelect: onExpand!),
+                            if (widget.onExpand != null && !widget.miniActive)
+                              KotvFullscreenExpandButton(size: iconSize, onSelect: widget.onExpand!),
                           ],
                         );
                       },
@@ -218,9 +232,9 @@ class VodInlineControls extends StatelessWidget {
                       iconSize: iconSize,
                       sliderWidth: volW,
                       compact: narrow,
-                      onPersist: onPersistSetting == null
+                      onPersist: widget.onPersistSetting == null
                           ? null
-                          : (n) => onPersistSetting!('playerVolume', '$n'),
+                          : (n) => widget.onPersistSetting!('playerVolume', '$n'),
                     ),
                   ],
                 ),
@@ -232,6 +246,7 @@ class VodInlineControls extends StatelessWidget {
                     return KotvSeekSlider(
                       player: player,
                       maxMs: total,
+                      focusNode: _seekFocus,
                       secondaryMs: _sliderBuffered(player, total),
                       theme: _sliderTheme(context),
                     );

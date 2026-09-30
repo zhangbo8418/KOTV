@@ -599,8 +599,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	}
 
 	if playURL == "" {
-		// 有 msg：真实失败。无 msg：playerContent 可能已副作用弹窗（csp_Config），
-		// 仍返回 ok+空 url，详情页出栈后弹窗叠在首页；勿在此抛错打断该路径。
+		// 有 msg：真实失败。无 msg：playerContent 可能已副作用弹窗（csp_Config）；
+		// 仍返回 ok+空 url，详情页留栈保 Activity，前端勿标「加载失败」。
 		if playMsg != "" {
 			return nil, fmt.Errorf("%s", playMsg)
 		}

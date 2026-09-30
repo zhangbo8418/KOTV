@@ -1901,7 +1901,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       );
       if (playUrl.isEmpty) {
         // 空地址留在详情；Config 弹窗依赖 pause 仍保留的 Activity，勿出栈。
-        const tip = '播放地址加载失败';
+        // 无 msg：多为 Config 副作用，不标「加载失败」。
+        final tip = '${data['msg'] ?? ''}'.trim();
         if (!mounted) return;
         setState(() {
           _status = tip;
