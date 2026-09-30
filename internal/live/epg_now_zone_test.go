@@ -3,6 +3,8 @@ package live
 import (
 	"testing"
 	"time"
+
+	"github.com/bobo/KOTV/internal/util"
 )
 
 // 复现：墙钟 JSON 按 UTC 解析时，CST 11:33 会被标成 03:30 档「正在播出」。
@@ -42,5 +44,23 @@ func TestIsInRange_WallClockUsesZoneNotUTC(t *testing.T) {
 	}
 	if asSH.List[1].Start != "11:30" || asSH.List[1].End != "12:00" {
 		t.Fatalf("display=%s~%s", asSH.List[1].Start, asSH.List[1].End)
+	}
+}
+
+// DeviceLocation 经 KOTV_TZ=IANA（含夏令时），对应 FongMi ZoneId.systemDefault/of。
+func TestParseEPG_DeviceLocationIANA(t *testing.T) {
+	t.Setenv("KOTV_TZ", "America/New_York")
+	t.Setenv("TZ", "UTC")
+	zone := util.DeviceLocation()
+	if zone.String() != "America/New_York" {
+		t.Fatalf("zone=%s", zone)
+	}
+	// 2024-07-01 16:00 EDT = 20:00 UTC；节目 16:00~17:00 应为 now。
+	raw := `{"date":"2024-07-01","list":[{"title":"NY","start":"16:00","end":"17:00"}]}`
+	epg := ParseEPG(raw, "k", "2024-07-01", zone)
+	now := time.Date(2024, 7, 1, 20, 30, 0, 0, time.UTC).UnixMilli()
+	if len(epg.List) != 1 || !(epg.List[0].StartTime <= now && now <= epg.List[0].EndTime) {
+		t.Fatalf("Start=%d End=%d now=%d display=%s~%s",
+			epg.List[0].StartTime, epg.List[0].EndTime, now, epg.List[0].Start, epg.List[0].End)
 	}
 }
