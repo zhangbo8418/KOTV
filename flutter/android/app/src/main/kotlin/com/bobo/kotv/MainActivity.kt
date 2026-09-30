@@ -96,6 +96,8 @@ class MainActivity : FlutterActivity() {
                 "codeCacheDir" to codeCache,
                 "nativeLibraryDir" to nativeLib,
                 "enginePath" to File(nativeLib, "libkotv_engine.so").absolutePath,
+                "lanIp" to (KotvDeviceEnv.lanIpv4(this) ?: ""),
+                "timeZoneId" to KotvDeviceEnv.timeZoneId(),
               ),
             )
           }

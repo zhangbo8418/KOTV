@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/url"
 	"runtime"
 	"strings"
@@ -286,35 +285,9 @@ func RewriteLocalURL(raw string) string {
 	return raw
 }
 
-// LocalIP 获取首选局域网 IPv4。
+// LocalIP 获取首选局域网 IPv4（含安卓 KOTV_LAN_IP 注入路径）。
 func LocalIP() string {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, _ := iface.Addrs()
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() {
-				continue
-			}
-			ip = ip.To4()
-			if ip != nil {
-				return ip.String()
-			}
-		}
-	}
-	return ""
+	return util.LanIP()
 }
 
 func buildDIDL(mediaURL, title string, headers map[string]string) string {

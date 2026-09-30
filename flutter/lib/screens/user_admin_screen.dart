@@ -84,14 +84,18 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
       } catch (_) {}
       try {
         final dev = await _api.getDevice();
-        _deviceIp = '${dev['ip'] ?? ''}'.trim();
+        var ip = '${dev['ip'] ?? ''}'.trim();
+        if (ip == '127.0.0.1' || ip == '::1' || ip == 'localhost') {
+          ip = '';
+        }
+        _deviceIp = ip;
         _deviceIpv4 = ((dev['ipv4'] as List?) ?? const [])
             .map((e) => '$e'.trim())
-            .where((e) => e.isNotEmpty)
+            .where((e) => e.isNotEmpty && e != '127.0.0.1')
             .toList();
         _deviceIpv6 = ((dev['ipv6'] as List?) ?? const [])
             .map((e) => '$e'.trim())
-            .where((e) => e.isNotEmpty)
+            .where((e) => e.isNotEmpty && e != '::1')
             .toList();
         _devicePublicIp = '${dev['publicIp'] ?? ''}'.trim();
         if (_deviceIp.isEmpty && _deviceIpv4.isNotEmpty) {

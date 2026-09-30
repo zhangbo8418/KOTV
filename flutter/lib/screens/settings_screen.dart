@@ -98,7 +98,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _liveDesc = '${data['liveDesc'] ?? ''}';
       try {
         final dev = await ref.read(apiProvider).getDevice();
-        _deviceIp = '${dev['ip'] ?? ''}'.trim();
+        var ip = '${dev['ip'] ?? ''}'.trim();
+        if (ip == '127.0.0.1' || ip == '::1' || ip == 'localhost') {
+          ip = '';
+        }
+        _deviceIp = ip;
       } catch (_) {
         _deviceIp = '';
       }

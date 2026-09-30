@@ -238,7 +238,7 @@ class EngineLauncher {
     return env;
   }
 
-  /// Android：注入应用可写目录，供 Go paths.Root() 使用。
+  /// Android：注入应用可写目录、局域网 IP、系统时区（供 Go paths / /device / EPG）。
   Future<Map<String, String>> _androidEnv(Map<String, String> base) async {
     final env = Map<String, String>.from(base);
     const ch = MethodChannel('kotv_android_spider');
@@ -247,12 +247,20 @@ class EngineLauncher {
       if (raw is Map) {
         final cache = '${raw['cacheDir'] ?? ''}'.trim();
         final files = '${raw['filesDir'] ?? ''}'.trim();
+        final lanIp = '${raw['lanIp'] ?? ''}'.trim();
+        final tz = '${raw['timeZoneId'] ?? ''}'.trim();
         if (cache.isNotEmpty) {
           env['KOTV_CACHE_DIR'] = cache;
           env['KOTV_DATA_DIR'] = p.join(cache, 'KOTV');
         }
         if (files.isNotEmpty) {
           env['HOME'] = files;
+        }
+        if (lanIp.isNotEmpty) {
+          env['KOTV_LAN_IP'] = lanIp;
+        }
+        if (tz.isNotEmpty) {
+          env['TZ'] = tz;
         }
       }
     } catch (e) {

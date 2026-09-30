@@ -27,6 +27,7 @@ import (
 	"github.com/bobo/KOTV/internal/smbproxy"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
+	"github.com/bobo/KOTV/internal/util"
 )
 
 //go:embed resources
@@ -629,53 +630,65 @@ func collectDeviceAddrs() deviceAddrs {
 	seen6 := map[string]struct{}{}
 	var private4, other4 []string
 
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		out.Primary = "127.0.0.1"
-		return out
+	add4 := func(ip net.IP) {
+		ip4 := ip.To4()
+		if ip4 == nil || ip4.IsLoopback() || ip4.IsMulticast() || ip4.IsUnspecified() {
+			return
+		}
+		s := ip4.String()
+		if _, ok := seen4[s]; ok {
+			return
+		}
+		seen4[s] = struct{}{}
+		if isPrivateIPv4(ip4) {
+			private4 = append(private4, s)
+		} else {
+			other4 = append(other4, s)
+		}
 	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
+
+	// 安卓 11+：Go net.Interfaces 常因 netlinkrib 失败；优先 Java 注入的 KOTV_LAN_IP。
+	if lan := util.LanIP(); lan != "" {
+		if ip := net.ParseIP(lan); ip != nil {
+			add4(ip)
 		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-			if ip == nil || ip.IsLoopback() || ip.IsMulticast() || ip.IsUnspecified() {
+	}
+
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 				continue
 			}
-			if ip4 := ip.To4(); ip4 != nil {
-				s := ip4.String()
-				if _, ok := seen4[s]; ok {
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				if ip == nil || ip.IsLoopback() || ip.IsMulticast() || ip.IsUnspecified() {
 					continue
 				}
-				seen4[s] = struct{}{}
-				if isPrivateIPv4(ip4) {
-					private4 = append(private4, s)
-				} else {
-					other4 = append(other4, s)
+				if ip.To4() != nil {
+					add4(ip)
+					continue
 				}
-				continue
+				// IPv6：跳过链路本地；保留可路由地址。
+				if ip.IsLinkLocalUnicast() {
+					continue
+				}
+				s := ip.String()
+				if _, ok := seen6[s]; ok {
+					continue
+				}
+				seen6[s] = struct{}{}
+				out.IPv6 = append(out.IPv6, s)
 			}
-			// IPv6：跳过链路本地；保留可路由地址。
-			if ip.IsLinkLocalUnicast() {
-				continue
-			}
-			s := ip.String()
-			if _, ok := seen6[s]; ok {
-				continue
-			}
-			seen6[s] = struct{}{}
-			out.IPv6 = append(out.IPv6, s)
 		}
 	}
 

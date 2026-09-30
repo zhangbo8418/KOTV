@@ -10,6 +10,9 @@ import (
 
 	"github.com/bobo/KOTV/internal/app"
 	"github.com/bobo/KOTV/internal/remote"
+
+	// 安卓 sidecar 无系统 zoneinfo；嵌入后 TZ / Live.timeZone 的 IANA 名才能生效。
+	_ "time/tzdata"
 )
 
 func main() {
