@@ -34,7 +34,7 @@ type Live struct {
 	Groups     []LiveGroup     `json:"groups"`
 }
 
-// Location 返回源级时区；无效或空则设备墙钟时区（非盲目 time.Local）。
+// Location 返回源级时区；空/无效则设备默认时区（FongMi ZoneId.systemDefault）。
 func (l *Live) Location() *time.Location {
 	if l == nil {
 		return util.DeviceLocation()
