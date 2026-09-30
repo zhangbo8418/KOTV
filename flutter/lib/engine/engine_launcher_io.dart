@@ -255,11 +255,7 @@ class EngineLauncher {
         if (files.isNotEmpty) {
           env['HOME'] = files;
           // 持久数据进 filesDir，避免清缓存/系统清 cache 丢掉多仓 DB。
-          final neu = p.join(files, 'KOTV');
-          if (cache.isNotEmpty) {
-            migrateAndroidKotvDataIfNeeded(oldRoot: p.join(cache, 'KOTV'), newRoot: neu);
-          }
-          env['KOTV_DATA_DIR'] = neu;
+          env['KOTV_DATA_DIR'] = p.join(files, 'KOTV');
         } else if (cache.isNotEmpty) {
           env['KOTV_DATA_DIR'] = p.join(cache, 'KOTV');
         }

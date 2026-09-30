@@ -204,9 +204,7 @@ class KotvEngineService : Service() {
       val env = pb.environment()
       env["KOTV_CACHE_DIR"] = cacheDir.absolutePath
       // 持久数据进 filesDir，避免清缓存/系统清 cache 丢掉多仓 DB。
-      val dataDir = File(filesDir, "KOTV")
-      migrateKotvDataIfNeeded(File(cacheDir, "KOTV"), dataDir)
-      env["KOTV_DATA_DIR"] = dataDir.absolutePath
+      env["KOTV_DATA_DIR"] = File(filesDir, "KOTV").absolutePath
       env["HOME"] = filesDir.absolutePath
       KotvDeviceEnv.lanIpv4(this)?.let { env["KOTV_LAN_IP"] = it }
       // 对应 FongMi ZoneId.systemDefault()：IANA + 偏移兜底（旧 so / LoadLocation 失败）。
@@ -338,30 +336,6 @@ class KotvEngineService : Service() {
     const val ACTION_STOP = "com.bobo.kotv.action.STOP_ENGINE"
 
     private val running = AtomicBoolean(false)
-
-    /** 旧版数据在 cacheDir/KOTV；迁到 filesDir/KOTV，避免清缓存丢掉多仓。 */
-    fun migrateKotvDataIfNeeded(oldRoot: File, newRoot: File) {
-      try {
-        if (!oldRoot.exists() || oldRoot.absolutePath == newRoot.absolutePath) return
-        val newDb = File(newRoot, "db/tv.db")
-        if (newDb.exists()) return
-        if (!newRoot.exists()) newRoot.mkdirs()
-        for (name in listOf("db", "setting.ini")) {
-          val src = File(oldRoot, name)
-          if (!src.exists()) continue
-          val dest = File(newRoot, name)
-          if (src.isDirectory) {
-            src.copyRecursively(dest, overwrite = false)
-          } else {
-            dest.parentFile?.mkdirs()
-            src.copyTo(dest, overwrite = false)
-          }
-        }
-        Log.i(TAG, "migrated KOTV data ${oldRoot.absolutePath} -> ${newRoot.absolutePath}")
-      } catch (t: Throwable) {
-        Log.w(TAG, "migrate KOTV data failed", t)
-      }
-    }
 
     fun start(context: Context) {
       running.set(true)
