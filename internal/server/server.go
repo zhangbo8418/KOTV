@@ -697,24 +697,18 @@ func collectDeviceAddrs() deviceAddrs {
 	case len(private4) > 0:
 		out.Primary = private4[0]
 	case len(other4) > 0:
+		// 接口上的非私网地址可作为本机可达地址（如公网直出），同时记 publicIp。
 		out.Primary = other4[0]
 		out.PublicIP = other4[0]
 	case len(out.IPv6) > 0:
 		out.Primary = out.IPv6[0]
 	default:
-		if pub := lookupPublicIPv4(); pub != "" {
-			out.PublicIP = pub
-			out.Primary = pub
-		} else {
-			out.Primary = "127.0.0.1"
-		}
+		// 无本机网卡地址时不要用 127.0.0.1 / 纯探测公网充当「本机访问」入口。
+		out.Primary = ""
 	}
 	if out.PublicIP == "" && len(private4) == 0 {
 		if pub := lookupPublicIPv4(); pub != "" {
 			out.PublicIP = pub
-			if out.Primary == "127.0.0.1" || out.Primary == "" {
-				out.Primary = pub
-			}
 		}
 	}
 	return out

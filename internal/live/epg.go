@@ -309,7 +309,7 @@ func ParseEPG(text, key, date string, zone *time.Location) Epg {
 	}
 	// 简易 XML programme 片段（EpgParser.getEpg）
 	if strings.Contains(text, "<programme") || strings.Contains(text, "<tv") {
-		if days, _, err := matchXMLTVDays([]byte(text), &model.LiveChannel{TvgID: key, Name: key}, date); err == nil {
+		if days, _, err := matchXMLTVDaysZone([]byte(text), &model.LiveChannel{TvgID: key, Name: key}, date, zone); err == nil {
 			for _, d := range days {
 				if d.Date == date || date == "" {
 					d.Key = key
@@ -337,7 +337,8 @@ func setEpgTimes(epg *Epg, zone *time.Location) {
 			epg.List[i].EndTime = epg.List[i].StartTime + 30*60*1000
 		}
 		if epg.List[i].EndTime > 0 && epg.List[i].EndTime < epg.List[i].StartTime {
-			epg.List[i].EndTime += 24 * 60 * 60 * 1000
+			// 按源时区加一天（夏令时日不是死写 86400000ms）。
+			epg.List[i].EndTime = time.UnixMilli(epg.List[i].EndTime).In(zone).AddDate(0, 0, 1).UnixMilli()
 		}
 		// 显示串按源时区重写为 15:04，避免 JSON 脏 start/end 上屏。
 		if epg.List[i].StartTime > 0 {
@@ -450,6 +451,10 @@ type xmlProgramme struct {
 }
 
 func matchXMLTVDays(data []byte, ch *model.LiveChannel, preferDate string) ([]Epg, string, error) {
+	return matchXMLTVDaysZone(data, ch, preferDate, channelLocation(ch))
+}
+
+func matchXMLTVDaysZone(data []byte, ch *model.LiveChannel, preferDate string, zone *time.Location) ([]Epg, string, error) {
 	var doc xmltv
 	if err := xml.Unmarshal(data, &doc); err != nil {
 		return nil, "", err
@@ -482,7 +487,9 @@ func matchXMLTVDays(data []byte, ch *model.LiveChannel, preferDate string) ([]Ep
 	}
 
 	byDay := map[string][]EpgData{}
-	zone := channelLocation(ch)
+	if zone == nil {
+		zone = channelLocation(ch)
+	}
 	now := time.Now().In(zone)
 	minDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone).AddDate(0, 0, -1)
 	maxDay := minDay.Add(3 * 24 * time.Hour)

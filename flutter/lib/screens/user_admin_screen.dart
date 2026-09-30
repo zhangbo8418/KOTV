@@ -510,15 +510,20 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                 child: Text(
                   [
                     if (_deviceIpv4.isNotEmpty)
-                      '局域网 IPv4: ${_deviceIpv4.join(', ')}'
-                    else if (_devicePublicIp.isNotEmpty)
-                      '公网 IPv4: $_devicePublicIp'
+                      '本机 IPv4: ${_deviceIpv4.join(', ')}'
                     else if (_deviceIp.isNotEmpty)
                       '本机 IP: $_deviceIp',
                     if (_deviceIpv6.isNotEmpty) 'IPv6: ${_deviceIpv6.join(', ')}',
-                    if (_deviceIpv4.isNotEmpty && _devicePublicIp.isNotEmpty && !_deviceIpv4.contains(_devicePublicIp))
+                    if (_devicePublicIp.isNotEmpty &&
+                        !_deviceIpv4.contains(_devicePublicIp) &&
+                        _deviceIp != _devicePublicIp)
                       '公网 IPv4: $_devicePublicIp',
-                    '访问 http://${_deviceIp.isNotEmpty ? _deviceIp : (_deviceIpv4.isNotEmpty ? _deviceIpv4.first : _devicePublicIp)}:$_devicePort/',
+                    if (_deviceIp.isNotEmpty || _deviceIpv4.isNotEmpty)
+                      '访问 http://${_deviceIp.isNotEmpty ? _deviceIp : _deviceIpv4.first}:$_devicePort/'
+                    else if (_deviceIpv6.isNotEmpty)
+                      '访问 http://[${_deviceIpv6.first}]:$_devicePort/'
+                    else if (_devicePublicIp.isNotEmpty)
+                      '公网探测（未必可作局域网入口）: $_devicePublicIp',
                   ].where((e) => e.isNotEmpty).join('\n'),
                   style: TextStyle(color: p.muted, fontSize: 13, height: 1.35),
                 ),

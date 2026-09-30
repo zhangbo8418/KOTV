@@ -1456,8 +1456,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       )
     when (mode) {
       "soft" -> {
-        // 仅 softVideoPrefer 时软 MediaCodec 优先；否则硬优先（与 DECODE 偏好一致）。
-        if (softVideoPrefer || softAudioPrefer) {
+        // MediaCodec 排序只跟视轨 softVideoPrefer；音轨由 DECODE_SOFTWARE 单独控制。
+        if (softVideoPrefer) {
           factory.setMediaCodecSelector(SOFT_PREFER_SELECTOR)
         } else {
           factory.setMediaCodecSelector(HARD_PREFER_SELECTOR)

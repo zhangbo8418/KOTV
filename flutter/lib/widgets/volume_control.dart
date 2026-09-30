@@ -103,12 +103,21 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> {
     final key = event.logicalKey;
     final vol = widget.player.volume;
 
-    if (kotvIsVolumeUpKey(key) ||
-        kotvIsVolumeDownKey(key) ||
-        kotvIsLeftKey(key) ||
-        kotvIsRightKey(key)) {
+    if (kotvIsVolumeUpKey(key) || kotvIsVolumeDownKey(key)) {
       if (!_expanded) setState(() => _expanded = true);
-      final up = kotvIsVolumeUpKey(key) || kotvIsRightKey(key);
+      final up = kotvIsVolumeUpKey(key);
+      final step = event is KeyRepeatEvent ? 2.0 : 5.0;
+      unawaited(_applyVolume(vol + (up ? step : -step), persist: true));
+      return KeyEventResult.handled;
+    }
+
+    // 未展开时左右用于焦点遍历；展开后左右调音量。
+    if (kotvIsLeftKey(key) || kotvIsRightKey(key)) {
+      if (!_expanded) {
+        final dir = kotvIsLeftKey(key) ? TraversalDirection.left : TraversalDirection.right;
+        return node.focusInDirection(dir) ? KeyEventResult.handled : KeyEventResult.ignored;
+      }
+      final up = kotvIsRightKey(key);
       final step = event is KeyRepeatEvent ? 2.0 : 5.0;
       unawaited(_applyVolume(vol + (up ? step : -step), persist: true));
       return KeyEventResult.handled;

@@ -93,7 +93,10 @@ public class OkHttp {
     }
 
     public static OkHttpClient noRedirect(long timeout) {
-        return client().newBuilder().connectTimeout(timeout, TimeUnit.MILLISECONDS).readTimeout(timeout, TimeUnit.MILLISECONDS).writeTimeout(timeout, TimeUnit.MILLISECONDS).followRedirects(false).followSslRedirects(false).build();
+        OkHttpClient.Builder builder = client().newBuilder().connectTimeout(timeout, TimeUnit.MILLISECONDS).readTimeout(timeout, TimeUnit.MILLISECONDS).writeTimeout(timeout, TimeUnit.MILLISECONDS).followRedirects(false).followSslRedirects(false);
+        // getLocation 依赖读到 3xx Location；若仍挂 ProxyRedirectInterceptor 会跟到 200 导致 Location 空。
+        builder.interceptors().removeIf(item -> item instanceof ProxyRedirectInterceptor);
+        return builder.build();
     }
 
     public static OkHttpClient client(boolean redirect, long timeout) {
