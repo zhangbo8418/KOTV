@@ -2005,6 +2005,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (bp.isNotEmpty) {
           backendProxyPlay = bp == 'true' || bp == '1' || bp == 'on';
         }
+        final speedPref = double.tryParse('${settings['playerSpeed'] ?? ''}');
+        if (speedPref != null && speedPref > 0) {
+          _prefSpeed = speedPref.clamp(0.1, 5.0);
+        }
+        final volPref = _normalizePlayerVolumePref(settings['playerVolume']);
+        if (volPref != null) {
+          _prefVolume = volPref;
+        }
         _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
         _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
       } catch (_) {}
@@ -2796,6 +2804,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               unawaited(_playback.setRate(_prefSpeed!));
             }
           }
+          if (k == 'playerVolume') {
+            final vol = _normalizePlayerVolumePref(v);
+            if (vol != null) {
+              setState(() => _prefVolume = vol);
+            }
+          }
           if (k == 'playerSkipOpeningEnding') {
             setState(() {
               _skipOpeningEnding = v.toLowerCase() != 'false' && v != '0' && v.toLowerCase() != 'off';
@@ -3180,7 +3194,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       player: _playback,
       miniActive: _miniDesktop,
       autofocusPlay: _chromeRemoteFocus,
-      onPersistSetting: (k, v) => ref.read(apiProvider).setSetting(k, v),
+      onPersistSetting: _persistInlineSetting,
       onCast: () => unawaited(_cast()),
       onMini: () => unawaited(_miniDesktop ? _exitMini() : _enterMini()),
       onExpand: (kind) => unawaited(_enterFullscreen(kind)),
@@ -3194,6 +3208,22 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }
       },
     );
+  }
+
+  /// 内联/迷你播控落盘：音量写回 [_prefVolume]，切集起播才不会还原旧偏好。
+  Future<void> _persistInlineSetting(String k, String v) async {
+    await ref.read(apiProvider).setSetting(k, v);
+    if (!mounted) return;
+    if (k == 'playerVolume') {
+      final vol = _normalizePlayerVolumePref(v);
+      if (vol != null) setState(() => _prefVolume = vol);
+    }
+    if (k == 'playerSpeed') {
+      final s = double.tryParse(v);
+      if (s != null && s > 0) {
+        setState(() => _prefSpeed = s.clamp(0.1, 5.0));
+      }
+    }
   }
 
   KeyEventResult _onInlinePlayerKey(FocusNode node, KeyEvent event) {
@@ -3278,7 +3308,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               player: _playback,
               miniActive: true,
               translucent: true,
-              onPersistSetting: (k, v) => ref.read(apiProvider).setSetting(k, v),
+              onPersistSetting: _persistInlineSetting,
               onCast: () => unawaited(_cast()),
               onMini: () => unawaited(_exitMini()),
               onExpand: (kind) => unawaited(_enterFullscreen(kind)),

@@ -21,4 +21,25 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
     </style>
+
+    <!-- jar getButtonTextColor 在小米/夜间为白；系统 multiChoice 需深色列表底才可读 -->
+    <style name="KotvJarDarkAlertDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorBackground">#FF333333</item>
+        <item name="android:textColorPrimary">#FFFFFFFF</item>
+        <item name="android:textColorSecondary">#FFCCCCCC</item>
+        <item name="android:textColorAlertDialogListItem">#FFFFFFFF</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
+    <style name="KotvJarDarkAlertDialogOverlay">
+        <item name="android:alertDialogTheme">@style/KotvJarDarkAlertDialog</item>
+    </style>
+
+    <!-- jar finish 承接页：全透明，不抢焦点 -->
+    <style name="KotvJarSessionTheme" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

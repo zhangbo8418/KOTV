@@ -112,6 +112,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   final FocusNode _leftFocus = FocusNode(debugLabel: 'live_ch');
   final FocusNode _epgFocus = FocusNode(debugLabel: 'live_epg');
   final FocusNode _epgTabFocus = FocusNode(debugLabel: 'live_epg_tab');
+  final ScrollController _epgScroll = ScrollController();
   String _zapDigits = '';
   Timer? _zapTimer;
 
@@ -469,6 +470,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _leftFocus.dispose();
     _epgFocus.dispose();
     _epgTabFocus.dispose();
+    _epgScroll.dispose();
     _zapTimer?.cancel();
     unawaited(_fvp?.stop() ?? Future<void>.value());
     unawaited(_mk?.stop() ?? Future<void>.value());
@@ -1018,6 +1020,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           }
         }
       });
+      _scheduleScrollEpgToHighlight();
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -1026,6 +1029,34 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         });
       }
     }
+  }
+
+  /// 回看项优先，否则「正在播出」；供 EPG 列表滚到可视区。
+  int _epgHighlightIndex() {
+    if (_catchup && _catchupProgIdx >= 0 && _catchupProgIdx < _programs.length) {
+      return _catchupProgIdx;
+    }
+    for (var i = 0; i < _programs.length; i++) {
+      if (_programs[i]['now'] == true) return i;
+    }
+    return -1;
+  }
+
+  void _scheduleScrollEpgToHighlight() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_epgScroll.hasClients || _programs.isEmpty) return;
+      final i = _epgHighlightIndex();
+      if (i < 0) return;
+      final land = MediaQuery.orientationOf(context) == Orientation.landscape;
+      final extent = land ? 36.0 : 52.0;
+      final max = _epgScroll.position.maxScrollExtent;
+      final target = (i * extent - extent).clamp(0.0, max);
+      _epgScroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+      );
+    });
   }
 
   Future<void> _openLiveUrl(
@@ -2157,6 +2188,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _dayIdx = i;
       _programs = progs;
     });
+    _scheduleScrollEpgToHighlight();
   }
 
   Widget _epgDayTabs({
@@ -2202,13 +2234,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final now = prog['now'] == true;
     final canCatchup = prog['catchup'] == true;
     final playing = _catchup && i == _catchupProgIdx;
-    final sel = playing || now;
+    // 回看时只高亮回看项；直播时高亮「正在播出」。
+    final sel = playing || (!_catchup && now);
     final start = '${prog['start'] ?? ''}'.trim();
     final title = '${prog['title'] ?? ''}'.trim();
     final fallback = '${prog['label'] ?? ''}'.trim();
     final label = title.isNotEmpty ? title : fallback;
-    final focusHere = playing || (!_catchup && now);
-    // 无「正在播出」且无可回看：仍可聚焦浏览，确定无动作。
+    final focusHere = sel;
     void activate() {
       _cancelHideOverlays();
       if (canCatchup) unawaited(_playCatchup(i));
@@ -2218,109 +2250,115 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final p = KotvPalette.of(context);
       return Padding(
         padding: const EdgeInsets.only(bottom: 4),
-        child: TvFocus(
+        child: _LiveEpgFocusTile(
           autofocus: focusHere,
           focusNode: focusHere ? _epgFocus : null,
           borderRadius: 8,
           onPressed: canCatchup ? activate : null,
-          child: Material(
-            color: playing
-                ? p.selected.withOpacity(0.95)
-                : (now ? p.selected.withOpacity(0.75) : p.pillBg.withOpacity(0.7)),
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                children: [
-                  if (start.isNotEmpty)
-                    SizedBox(
-                      width: 44,
-                      child: Text(
-                        start,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+          builder: (focused) {
+            final active = sel || focused;
+            return Material(
+              color: sel
+                  ? p.selected.withOpacity(playing ? 0.95 : 0.75)
+                  : p.pillBg.withOpacity(0.7),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    if (start.isNotEmpty)
+                      SizedBox(
+                        width: 44,
+                        child: Text(
+                          start,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: sel ? Colors.white : p.fg.withOpacity(0.75),
+                            fontSize: 12,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                    Expanded(
+                      child: KotvMarqueeText(
+                        label,
+                        active: active,
                         style: TextStyle(
-                          color: sel ? Colors.white : p.fg.withOpacity(0.75),
-                          fontSize: 12,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+                          color: sel ? Colors.white : p.fg,
+                          fontSize: 13,
+                          fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                         ),
                       ),
                     ),
-                  Expanded(
-                    child: KotvMarqueeText(
-                      label,
-                      active: sel || focusHere,
-                      style: TextStyle(
-                        color: sel ? Colors.white : p.fg,
-                        fontSize: 13,
-                        fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  if (playing)
-                    Text('回看中', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))
-                  else if (canCatchup)
-                    Text('回看', style: TextStyle(color: p.primary, fontSize: 12, fontWeight: FontWeight.w700))
-                  else if (now)
-                    const Text('正在播出', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                ],
+                    if (playing)
+                      Text('回看中', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))
+                    else if (canCatchup)
+                      Text('回看', style: TextStyle(color: p.primary, fontSize: 12, fontWeight: FontWeight.w700))
+                    else if (now && !_catchup)
+                      const Text('正在播出', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       );
     }
 
     return Padding(
       padding: EdgeInsets.only(bottom: land ? 2 : 4),
-      child: TvFocus(
+      child: _LiveEpgFocusTile(
         autofocus: focusHere,
         focusNode: focusHere ? _epgFocus : null,
         borderRadius: 6,
         onPressed: canCatchup ? activate : null,
-        child: Material(
-          color: playing
-              ? const Color(0xE0C73C62)
-              : (now ? const Color(0xB0C73C62) : const Color(0x9918161E)),
-          borderRadius: BorderRadius.circular(6),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: land ? 6 : 8,
-              vertical: land ? 5 : 8,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (start.isNotEmpty)
-                  SizedBox(
-                    width: land ? 38 : 44,
-                    child: Text(
-                      start,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+        builder: (focused) {
+          final active = sel || focused;
+          return Material(
+            color: sel
+                ? (playing ? const Color(0xE0C73C62) : const Color(0xB0C73C62))
+                : const Color(0x9918161E),
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: land ? 6 : 8,
+                vertical: land ? 5 : 8,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (start.isNotEmpty)
+                    SizedBox(
+                      width: land ? 38 : 44,
+                      child: Text(
+                        start,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(sel ? 1 : 0.75),
+                          fontSize: land ? 11 : 12,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    child: KotvMarqueeText(
+                      '$label${playing ? ' · 回看中' : (canCatchup ? ' · 回看' : '')}',
+                      active: active,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(sel ? 1 : 0.75),
-                        fontSize: land ? 11 : 12,
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                        color: Colors.white.withOpacity(sel ? 1 : 0.85),
+                        fontSize: land ? 12 : (12.0 * wScale.clamp(1.0, 1.2)),
+                        height: 1.2,
+                        fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                       ),
                     ),
                   ),
-                Expanded(
-                  child: KotvMarqueeText(
-                    '$label${playing ? ' · 回看中' : (canCatchup ? ' · 回看' : '')}',
-                    active: sel || focusHere,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(sel ? 1 : 0.85),
-                      fontSize: land ? 12 : (12.0 * wScale.clamp(1.0, 1.2)),
-                      height: 1.2,
-                      fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -2937,6 +2975,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                           unawaited(_loadEpg());
                                         }
                                         if (_epgOpen) {
+                                          _scheduleScrollEpgToHighlight();
                                           WidgetsBinding.instance.addPostFrameCallback((_) {
                                             if (mounted && _epgOpen) _epgFocus.requestFocus();
                                           });
@@ -2997,6 +3036,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                   ),
                                                 )
                                               : ListView.builder(
+                                                  controller: _epgScroll,
                                                   itemCount: _programs.length,
                                                   itemBuilder: (_, i) => _epgProgramTile(
                                                     i,
@@ -3250,17 +3290,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         Row(
                                           children: [
                                             if (_programTimeLabel.isNotEmpty) ...[
-                                              SizedBox(
-                                                width: 88,
-                                                child: Text(
-                                                  _programTimeLabel,
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    color: pal.muted,
-                                                    fontSize: 12,
-                                                    fontFeatures: const [FontFeature.tabularFigures()],
-                                                  ),
+                                              Text(
+                                                _programTimeLabel,
+                                                maxLines: 1,
+                                                softWrap: false,
+                                                style: TextStyle(
+                                                  color: pal.muted,
+                                                  fontSize: 12,
+                                                  fontFeatures: const [FontFeature.tabularFigures()],
                                                 ),
                                               ),
                                               const SizedBox(width: 6),
@@ -3460,17 +3497,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         Row(
                           children: [
                             if (_programTimeLabel.isNotEmpty) ...[
-                              SizedBox(
-                                width: 88,
-                                child: Text(
-                                  _programTimeLabel,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: p.muted,
-                                    fontSize: 12,
-                                    fontFeatures: const [FontFeature.tabularFigures()],
-                                  ),
+                              Text(
+                                _programTimeLabel,
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(
+                                  color: p.muted,
+                                  fontSize: 12,
+                                  fontFeatures: const [FontFeature.tabularFigures()],
                                 ),
                               ),
                               const SizedBox(width: 6),
@@ -3724,12 +3758,82 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   ),
                 )
               : ListView.builder(
+                  controller: _epgScroll,
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
                   itemCount: _programs.length,
                   itemBuilder: (_, i) => _epgProgramTile(i, land: false, wScale: 1, portrait: true),
                 ),
         ),
       ],
+    );
+  }
+}
+
+/// EPG 项：焦点环 + 真实获焦时跑马灯（不把 now/回看当成永久焦点）。
+class _LiveEpgFocusTile extends StatefulWidget {
+  const _LiveEpgFocusTile({
+    required this.builder,
+    this.onPressed,
+    this.autofocus = false,
+    this.focusNode,
+    this.borderRadius = 6,
+  });
+
+  final Widget Function(bool focused) builder;
+  final VoidCallback? onPressed;
+  final bool autofocus;
+  final FocusNode? focusNode;
+  final double borderRadius;
+
+  @override
+  State<_LiveEpgFocusTile> createState() => _LiveEpgFocusTileState();
+}
+
+class _LiveEpgFocusTileState extends State<_LiveEpgFocusTile> {
+  bool _highlight = false;
+
+  Color _ringColor(Color focus) {
+    if (focus.computeLuminance() >= 0.4) return focus;
+    return Color.lerp(focus, Colors.white, 0.55) ?? focus;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ring = _ringColor(KotvPalette.of(context).focus);
+    return FocusableActionDetector(
+      focusNode: widget.focusNode,
+      autofocus: widget.autofocus,
+      onShowFocusHighlight: (v) {
+        if (_highlight == v) return;
+        setState(() => _highlight = v);
+      },
+      actions: <Type, Action<Intent>>{
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (_) {
+            widget.onPressed?.call();
+            return null;
+          },
+        ),
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.borderRadius),
+            color: _highlight ? ring.withOpacity(0.22) : null,
+            border: Border.all(
+              color: _highlight ? ring : Colors.transparent,
+              width: _highlight ? 3 : 0,
+            ),
+            boxShadow: _highlight
+                ? [BoxShadow(color: ring.withOpacity(0.55), blurRadius: 14, spreadRadius: 1)]
+                : null,
+          ),
+          child: widget.builder(_highlight),
+        ),
+      ),
     );
   }
 }

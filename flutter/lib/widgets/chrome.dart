@@ -269,16 +269,12 @@ class AppPill extends StatelessWidget {
               borderRadius: BorderRadius.circular(8 * s),
               border: Border.all(color: border),
             ),
-            // 固定宽度：居中；自适应：widthFactor=1 按文字收缩，同时垂直居中
-            child: effectiveWidth != null
-                ? (hasSuffix || marqueeWhenSelected
-                    ? content
-                    : Center(child: content))
-                : Align(
-                    alignment: Alignment.center,
-                    widthFactor: 1,
-                    child: content,
-                  ),
+            // 固定高度内垂直居中；自适应宽度时 widthFactor=1 按文字收缩
+            child: Align(
+              alignment: Alignment.center,
+              widthFactor: effectiveWidth == null ? 1 : null,
+              child: content,
+            ),
           ),
         ),
       ),

@@ -42,7 +42,19 @@ class MainActivity : FlutterActivity() {
       window.statusBarColor = android.graphics.Color.TRANSPARENT
       window.navigationBarColor = android.graphics.Color.TRANSPARENT
     }
+    // 潇洒 jar：小米/夜间 getButtonTextColor=白，而 Theme.Light 的 multiChoice 列表偏浅 → 白字白底。
+    // 只改 AlertDialog 主题，不整站改成常驻深色。
+    if (jarNeedsDarkAlertDialogList()) {
+      theme.applyStyle(R.style.KotvJarDarkAlertDialogOverlay, true)
+    }
     super.onCreate(savedInstanceState)
+  }
+
+  private fun jarNeedsDarkAlertDialogList(): Boolean {
+    val m = Build.MANUFACTURER.orEmpty()
+    if (m.equals("Xiaomi", true) || m.equals("Redmi", true)) return true
+    val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+    return night == Configuration.UI_MODE_NIGHT_YES
   }
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

@@ -92,7 +92,9 @@ public class Path {
         return files("wallpaper_cache");
     }
 
-    /** 站点凭证等：TV[/scope]/.name */
+    /** 站点凭证等：TV[/scope]/.name。
+     * 空 scope 时落在 {@code /TV/.name}（与常见宿主 Path.tv(name) 一致）。
+     * 潇洒等 jar 网盘 cookie 自管 {@code /TVBox/} 与 filesDir/Pizazz，不经本方法。 */
     public static File tv(String name) {
         return tv(clientScope(), name);
     }

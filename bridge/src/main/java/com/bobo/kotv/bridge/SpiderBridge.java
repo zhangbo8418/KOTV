@@ -1617,7 +1617,13 @@ public class SpiderBridge {
             }
             case "detailContent": {
                 List<String> ids = GSON.fromJson(args.get("ids"), List.class);
-                return emptyToObject(spider.detailContent(ids));
+                // VOX Config.doDetailContent 会 finish 顶层 Activity；用短生命周期页承接，避免关掉 MainActivity。
+                boolean session = enterJarSession();
+                try {
+                    return emptyToObject(spider.detailContent(ids));
+                } finally {
+                    if (session) leaveJarSession();
+                }
             }
             case "searchContent": {
                 String key = args.get("key").getAsString();
@@ -1644,7 +1650,12 @@ public class SpiderBridge {
             case "liveContent":
                 return emptyToObject(spider.liveContent(args.has("url") ? args.get("url").getAsString() : ""));
             case "action": {
-                return emptyToObject(spider.action(args.has("action") ? args.get("action").getAsString() : ""));
+                boolean session = enterJarSession();
+                try {
+                    return emptyToObject(spider.action(args.has("action") ? args.get("action").getAsString() : ""));
+                } finally {
+                    if (session) leaveJarSession();
+                }
             }
             case "manualVideoCheck":
                 return Boolean.toString(spider.manualVideoCheck());
@@ -1664,6 +1675,32 @@ public class SpiderBridge {
     private static String emptyToObject(String raw) {
         if (raw == null || raw.trim().isEmpty()) return "{}";
         return raw;
+    }
+
+    /**
+     * 反射启动 {@code KotvJarSessionActivity}（仅 Android App 进程存在该类）。
+     * jar 用 ActivityThread 取顶层页再 finish 时，关掉的是会话页而非 MainActivity。
+     */
+    private static boolean enterJarSession() {
+        if (!isArtVm()) return false;
+        try {
+            Class<?> clz = Class.forName("com.bobo.kotv.KotvJarSessionActivity");
+            Context c = UiContext.activity();
+            if (c == null) c = ctx();
+            Object ok = clz.getMethod("enter", Context.class).invoke(null, c);
+            return ok instanceof Boolean && (Boolean) ok;
+        } catch (Throwable t) {
+            System.err.println("enterJarSession: " + t.getMessage());
+            return false;
+        }
+    }
+
+    private static void leaveJarSession() {
+        try {
+            Class<?> clz = Class.forName("com.bobo.kotv.KotvJarSessionActivity");
+            clz.getMethod("leave").invoke(null);
+        } catch (Throwable ignored) {
+        }
     }
 
     /** JarLoader.requireRecentLoader：Mix/Json 只从 recent jar 反射。 */

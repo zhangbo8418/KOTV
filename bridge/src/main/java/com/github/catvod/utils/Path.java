@@ -76,7 +76,8 @@ public class Path {
         return files("wallpaper_cache");
     }
 
-    /** 站点凭证等：TV[/scope]/.name（多前端按 Scope/userId 隔离 cookie/token） */
+    /** 站点凭证等：TV[/scope]/.name（多前端按 Scope/userId 隔离 cookie/token）。
+     * 空 scope → {@code /TV/.name}。潇洒等 jar 网盘走自管 TVBox/filesDir，不经本方法。 */
     public static File tv(String name) {
         return tv(Util.scopeId(), name);
     }

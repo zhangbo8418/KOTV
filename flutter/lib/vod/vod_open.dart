@@ -57,11 +57,13 @@ Future<void> openVodItem(
   Map<String, String>? extend,
 }) async {
   final siteKey = (site ?? item.site).trim();
-  if (item.hasAction) {
+    if (item.hasAction) {
     final api = ref.read(apiProvider);
     try {
       final res = await api.siteAction(site: siteKey, action: item.action);
       if (!context.mounted) return;
+      // 网盘授权等会改 jar 磁盘凭证；刷首页登录态文案。
+      ref.read(vodContentEpochProvider.notifier).state++;
       final msg = '${res['msg'] ?? ''}'.trim();
       if (msg.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -127,4 +129,6 @@ Future<void> openVodItem(
       ),
     ),
   );
+  // 配置站 detail（网盘授权 / 模式切换等）返回后刷首页。
+  ref.read(vodContentEpochProvider.notifier).state++;
 }
