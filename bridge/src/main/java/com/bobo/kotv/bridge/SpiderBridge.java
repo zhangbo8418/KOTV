@@ -1649,14 +1649,9 @@ public class SpiderBridge {
             }
             case "liveContent":
                 return emptyToObject(spider.liveContent(args.has("url") ? args.get("url").getAsString() : ""));
-            case "action": {
-                boolean session = enterJarSession();
-                try {
-                    return emptyToObject(spider.action(args.has("action") ? args.get("action").getAsString() : ""));
-                } finally {
-                    if (session) leaveJarSession();
-                }
-            }
+            case "action":
+                // 摸鱼儿等 action 会 post AlertDialog；不可包 JarSession，否则 leave finish 带走弹窗。
+                return emptyToObject(spider.action(args.has("action") ? args.get("action").getAsString() : ""));
             case "manualVideoCheck":
                 return Boolean.toString(spider.manualVideoCheck());
             case "isVideoFormat":
@@ -1678,13 +1673,14 @@ public class SpiderBridge {
     }
 
     /**
-     * 反射启动 {@code KotvJarSessionActivity}（仅 Android App 进程存在该类）。
+     * 反射启动 {@code KotvJarVideoActivity}（仅 Android App 进程存在该类）。
      * jar 用 ActivityThread 取顶层页再 finish 时，关掉的是会话页而非 MainActivity。
+     * 类名含 Video：摸鱼儿 g0 会 finish 含 Video/Detail 的页后再弹窗。
      */
     private static boolean enterJarSession() {
         if (!isArtVm()) return false;
         try {
-            Class<?> clz = Class.forName("com.bobo.kotv.KotvJarSessionActivity");
+            Class<?> clz = Class.forName("com.bobo.kotv.KotvJarVideoActivity");
             Context c = UiContext.activity();
             if (c == null) c = ctx();
             Object ok = clz.getMethod("enter", Context.class).invoke(null, c);
@@ -1697,7 +1693,7 @@ public class SpiderBridge {
 
     private static void leaveJarSession() {
         try {
-            Class<?> clz = Class.forName("com.bobo.kotv.KotvJarSessionActivity");
+            Class<?> clz = Class.forName("com.bobo.kotv.KotvJarVideoActivity");
             clz.getMethod("leave").invoke(null);
         } catch (Throwable ignored) {
         }

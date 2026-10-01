@@ -1349,10 +1349,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _error = '$e';
         _loading = false;
       });
-      final name = widget.title.trim().isNotEmpty ? widget.title.trim() : '';
-      if (name.isNotEmpty && mounted) {
-        unawaited(_leavePage(afterPop: () => searchByName(ref, name)));
-      }
     }
   }
 
@@ -1489,8 +1485,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (d == null) return;
     if (d.flags.isEmpty) {
       final name = d.name.trim();
-      if (name.isNotEmpty && mounted) {
+      if (!mounted) return;
+      if (name.isNotEmpty) {
         await _leavePage(afterPop: () => searchByName(ref, name));
+      } else {
+        // 配置项副作用（finish 已被会话页承接）：无片名可搜，直接关详情。
+        await _leavePage();
       }
       return;
     }

@@ -13,11 +13,13 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * 短生命周期透明页：承接 jar 里对 [Activity.finish] 的调用。
  *
- * VOX Config.doDetailContent 会先 `Init.getActivity().finish()`（ActivityThread 顶层页）。
- * FongMi 点配置项会先开 VideoActivity，finish 只关那一层；KOTV 若只有 MainActivity
- * 会被直接 finish 而回到桌面。在 detailContent/action 前把本页顶到前台即可。
+ * 类名含 Video：摸鱼儿 FishConfig.g0 会 finish 含 Detail/Video 的 Activity，
+ * 再异步弹 AlertDialog；关本页后弹窗可挂回 MainActivity。
+ *
+ * VOX Config.doDetailContent 也会 finish 顶层页；有本页则不会关掉 MainActivity。
+ * 勿用于 spider.action：异步 AlertDialog 会挂在本页上，leave 时随 finish 消失。
  */
-class KotvJarSessionActivity : Activity() {
+class KotvJarVideoActivity : Activity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -38,9 +40,9 @@ class KotvJarSessionActivity : Activity() {
   }
 
   companion object {
-    private const val TAG = "KotvJarSession"
+    private const val TAG = "KotvJarVideo"
     private val depth = AtomicInteger(0)
-    @Volatile private var current: WeakReference<KotvJarSessionActivity>? = null
+    @Volatile private var current: WeakReference<KotvJarVideoActivity>? = null
     @Volatile private var readyLatch: CountDownLatch? = null
 
     /** @return 是否由本次调用负责 [leave]（嵌套 enter 返回 false）。 */
@@ -56,7 +58,7 @@ class KotvJarSessionActivity : Activity() {
       val latch = CountDownLatch(1)
       readyLatch = latch
       try {
-        val intent = Intent(context, KotvJarSessionActivity::class.java)
+        val intent = Intent(context, KotvJarVideoActivity::class.java)
         intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
         when (context) {
           is Activity -> {

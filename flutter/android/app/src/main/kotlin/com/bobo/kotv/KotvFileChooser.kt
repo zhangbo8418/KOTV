@@ -360,10 +360,25 @@ object KotvFileChooser {
     return pkg.contains("frameworkpackagestubs")
   }
 
-  fun hasStoragePermission(context: Context): Boolean {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
-      return true
+  /**
+   * 能否写共享存储（如 `/TVBox/` 网盘凭证）。
+   * API 30+ 必须以 [Environment.isExternalStorageManager] 为准；
+   * [READ_MEDIA_*] / 仅 READ 不能冒充可写。
+   */
+  fun canWriteSharedStorage(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      return Environment.isExternalStorageManager()
     }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      return context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+        PackageManager.PERMISSION_GRANTED
+    }
+    return true
+  }
+
+  /** 能否读媒体（选字体/字幕等）；与 [canWriteSharedStorage] 分开。 */
+  fun canReadMedia(context: Context): Boolean {
+    if (canWriteSharedStorage(context)) return true
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       return context.checkSelfPermission(android.Manifest.permission.READ_MEDIA_VIDEO) ==
         PackageManager.PERMISSION_GRANTED
@@ -374,4 +389,7 @@ object KotvFileChooser {
     }
     return true
   }
+
+  /** 兼容旧调用：按写共享存储能力判断（网盘授权 / 本地仓相对路径）。 */
+  fun hasStoragePermission(context: Context): Boolean = canWriteSharedStorage(context)
 }

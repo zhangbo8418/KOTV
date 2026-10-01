@@ -31,6 +31,8 @@ class MainActivity : FlutterActivity() {
   private var castMulticastLock: WifiManager.MulticastLock? = null
   private var pickConfigResult: MethodChannel.Result? = null
   private var storagePermResult: MethodChannel.Result? = null
+  private var readMediaPermResult: MethodChannel.Result? = null
+  private var readMediaPermResult: MethodChannel.Result? = null
   private var batteryPromptStarted = false
   /** 正在播放时：Home/切应用自动进系统画中画（Android 12+ setAutoEnterEnabled）。 */
   private var pipAutoEnter = false
@@ -142,6 +144,7 @@ class MainActivity : FlutterActivity() {
         }
         "ensureCastPermissions" -> ensureCastPermissions(result)
         "ensureStoragePermission" -> ensureStoragePermission(result)
+        "ensureReadMediaPermission" -> ensureReadMediaPermission(result)
         "pickConfigFile" -> pickConfigFile(result)
         "useFileBrowser" -> result.success(KotvFileChooser.shouldUseFileBrowser(this))
         "storageRoot" -> result.success(KotvFileChooser.storageRoot())
@@ -209,7 +212,8 @@ class MainActivity : FlutterActivity() {
   }
 
   private fun ensureStoragePermission(result: MethodChannel.Result) {
-    if (KotvFileChooser.hasStoragePermission(this)) {
+    // 写 /TVBox/ 等共享路径：API 30+ 必须 MANAGE；不得用 READ_MEDIA 冒充成功。
+    if (KotvFileChooser.canWriteSharedStorage(this)) {
       result.success(true)
       return
     }
@@ -232,17 +236,35 @@ class MainActivity : FlutterActivity() {
       }
       return
     }
-    val need = storagePermissionsToRequest()
+    val need = writePermissionsToRequest()
     if (need.isEmpty()) {
-      result.success(true)
+      result.success(KotvFileChooser.canWriteSharedStorage(this))
       return
     }
     castPermResult = null
+    readMediaPermResult = null
     storagePermResult = result
     ActivityCompat.requestPermissions(this, need.toTypedArray(), REQ_STORAGE)
   }
 
-  /** 部分安卓盒子没有「所有文件访问」设置页，改走运行时读权限。 */
+  /** 选字体/字幕等只需读媒体，不强制「所有文件访问」。 */
+  private fun ensureReadMediaPermission(result: MethodChannel.Result) {
+    if (KotvFileChooser.canReadMedia(this)) {
+      result.success(true)
+      return
+    }
+    val need = readMediaPermissionsToRequest()
+    if (need.isEmpty()) {
+      result.success(KotvFileChooser.canReadMedia(this))
+      return
+    }
+    castPermResult = null
+    storagePermResult = null
+    readMediaPermResult = result
+    ActivityCompat.requestPermissions(this, need.toTypedArray(), REQ_READ_MEDIA)
+  }
+
+  /** 部分安卓盒子没有「所有文件访问」设置页，改走运行时写权限（仅 API < R）。 */
   private fun canRequestAllFilesAccess(): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
     val pkg = storagePackageName()
@@ -265,19 +287,28 @@ class MainActivity : FlutterActivity() {
     return applicationInfo.packageName.takeIf { it.isNotEmpty() } ?: packageName
   }
 
-  private fun storagePermissionsToRequest(): List<String> {
-    val out = ArrayList<String>(3)
+  /** API ≥ R 写共享存储只能走 MANAGE；此处仅 API < R 申请 WRITE。 */
+  private fun writePermissionsToRequest(): List<String> {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) return emptyList()
+    val out = ArrayList<String>(2)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      out.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+      out.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+    return out.filter {
+      ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+    }
+  }
+
+  private fun readMediaPermissionsToRequest(): List<String> {
+    val out = ArrayList<String>(2)
     when {
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
         out.add(Manifest.permission.READ_MEDIA_VIDEO)
         out.add(Manifest.permission.READ_MEDIA_AUDIO)
       }
-      Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
         out.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-      }
-      else -> {
-        out.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-        out.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
       }
     }
     return out.filter {
@@ -318,7 +349,7 @@ class MainActivity : FlutterActivity() {
         pending.success(Uri.fromFile(File(path)).toString())
       }
       REQ_MANAGE_STORAGE -> {
-        storagePermResult?.success(KotvFileChooser.hasStoragePermission(this))
+        storagePermResult?.success(KotvFileChooser.canWriteSharedStorage(this))
         storagePermResult = null
       }
     }
@@ -427,9 +458,13 @@ class MainActivity : FlutterActivity() {
       return
     }
     if (requestCode == REQ_STORAGE) {
-      val ok = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-      storagePermResult?.success(ok)
+      storagePermResult?.success(KotvFileChooser.canWriteSharedStorage(this))
       storagePermResult = null
+      return
+    }
+    if (requestCode == REQ_READ_MEDIA) {
+      readMediaPermResult?.success(KotvFileChooser.canReadMedia(this))
+      readMediaPermResult = null
     }
   }
 
@@ -480,5 +515,6 @@ class MainActivity : FlutterActivity() {
     private const val REQ_STORAGE = 0xC458
     private const val REQ_PICK_CONFIG = 0xC459
     private const val REQ_MANAGE_STORAGE = 0xC45A
+    private const val REQ_READ_MEDIA = 0xC45B
   }
 }

@@ -1,4 +1,8 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
@@ -9,6 +13,44 @@ import '../remote/remote_bridge.dart';
 import '../screens/detail_screen.dart';
 import '../screens/folder_screen.dart';
 import '../screens/live_screen.dart';
+
+/// 网盘授权等会写 `/TVBox/`；API 30+ 需「所有文件访问」。失败返回 false。
+Future<bool> _ensureSharedStorageWrite() async {
+  if (kIsWeb || !Platform.isAndroid) return true;
+  try {
+    const ch = MethodChannel('kotv_android');
+    return await ch.invokeMethod<bool>('ensureStoragePermission') ?? false;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// 配置站 / 带 action 的项会写共享存储（网盘 cookie 等）。
+bool siteNeedsSharedWrite(WidgetRef ref, String siteKey) {
+  final cfg = ref.read(configProvider).valueOrNull;
+  final sites = ((cfg?['sites'] as List?) ?? []).whereType<Map>();
+  for (final s in sites) {
+    if ('${s['key'] ?? ''}' != siteKey) continue;
+    final api = '${s['api'] ?? ''}'.toLowerCase();
+    return api.contains('config');
+  }
+  return false;
+}
+
+Future<bool> _gateSharedStorageWrite(BuildContext context, WidgetRef ref, String siteKey, {required bool force}) async {
+  if (!force && !siteNeedsSharedWrite(ref, siteKey)) return true;
+  final ok = await _ensureSharedStorageWrite();
+  if (ok) return true;
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('需要「所有文件访问」权限才能保存网盘登录态'),
+        duration: Duration(seconds: 4),
+      ),
+    );
+  }
+  return false;
+}
 
 /// 用片名去全网搜索。
 void searchByName(WidgetRef ref, String name) {
@@ -57,7 +99,9 @@ Future<void> openVodItem(
   Map<String, String>? extend,
 }) async {
   final siteKey = (site ?? item.site).trim();
-    if (item.hasAction) {
+  if (item.hasAction) {
+    if (!await _gateSharedStorageWrite(context, ref, siteKey, force: true)) return;
+    if (!context.mounted) return;
     final api = ref.read(apiProvider);
     try {
       final res = await api.siteAction(site: siteKey, action: item.action);
@@ -117,7 +161,8 @@ Future<void> openVodItem(
     }
     if (!context.mounted) return;
   }
-  await LocalHistory.push(item);
+  // 仅 Config 站（网盘授权等）强制写权限；普通点播不弹「所有文件访问」。
+  if (!await _gateSharedStorageWrite(context, ref, siteKey, force: false)) return;
   if (!context.mounted) return;
   await Navigator.of(context).push(
     kotvDetailRoute(

@@ -481,7 +481,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   Widget build(BuildContext context) {
     ref.listen<int>(vodContentEpochProvider, (prev, next) {
       if (prev == null || prev == next) return;
-      unawaited(_reload(clearContent: true));
+      // 网盘授权等只刷新列表文案；勿 clearContent，否则清空 _types 只剩「首页」。
+      unawaited(_reload());
     });
     try {
       return _buildRoot(context);

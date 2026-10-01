@@ -18,7 +18,7 @@ Future<String?> kotvPickSubtitleFile(BuildContext context) async {
     try {
       const ch = MethodChannel('kotv_android');
       try {
-        await ch.invokeMethod<bool>('ensureStoragePermission');
+        await ch.invokeMethod<bool>('ensureReadMediaPermission');
       } catch (_) {}
       var useBrowser = false;
       try {
