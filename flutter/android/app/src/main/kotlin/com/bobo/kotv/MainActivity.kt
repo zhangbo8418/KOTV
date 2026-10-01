@@ -211,33 +211,35 @@ class MainActivity : FlutterActivity() {
   }
 
   private fun ensureStoragePermission(result: MethodChannel.Result) {
-    val requestAll = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && canRequestAllFilesAccess()
-    if (KotvFileChooser.hasFilePermission(this, requestAll)) {
+    if (KotvFileChooser.canWriteSharedStorage(this)) {
       result.success(true)
       return
     }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && canRequestAllFilesAccess()) {
+    // API 30+ 写 /TVBox/ 必须进系统「所有文件访问」。resolveActivity 在部分机型为 null，仍要 start。
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       storagePermResult = result
       val pkg = storagePackageName()
-      try {
-        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-        intent.data = Uri.parse("package:$pkg")
-        @Suppress("DEPRECATION")
-        startActivityForResult(intent, REQ_MANAGE_STORAGE)
-      } catch (_: Throwable) {
+      val intents = listOf(
+        Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+          data = Uri.parse("package:$pkg")
+        },
+        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+      )
+      for (intent in intents) {
         try {
           @Suppress("DEPRECATION")
-          startActivityForResult(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION), REQ_MANAGE_STORAGE)
-        } catch (t: Throwable) {
-          storagePermResult = null
-          result.error("storage", t.message ?: t.toString(), null)
+          startActivityForResult(intent, REQ_MANAGE_STORAGE)
+          return
+        } catch (_: Throwable) {
         }
       }
+      storagePermResult = null
+      result.success(false)
       return
     }
     val need = storagePermissionsToRequest()
     if (need.isEmpty()) {
-      result.success(KotvFileChooser.hasFilePermission(this, false))
+      result.success(KotvFileChooser.canWriteSharedStorage(this))
       return
     }
     castPermResult = null
@@ -263,19 +265,6 @@ class MainActivity : FlutterActivity() {
     ActivityCompat.requestPermissions(this, need.toTypedArray(), REQ_READ_MEDIA)
   }
 
-  /** 部分安卓盒子没有「所有文件访问」设置页，改走运行时写权限（仅 API < R）。 */
-  private fun canRequestAllFilesAccess(): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
-    val pkg = storagePackageName()
-    val app = Intent(
-      Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-      Uri.parse("package:$pkg"),
-    )
-    val all = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-    return app.resolveActivity(packageManager) != null ||
-      all.resolveActivity(packageManager) != null
-  }
-
   private fun storagePackageName(): String {
     val real = try {
       com.fongmi.android.tv.App.realAppPackageName()
@@ -286,15 +275,11 @@ class MainActivity : FlutterActivity() {
     return applicationInfo.packageName.takeIf { it.isNotEmpty() } ?: packageName
   }
 
-  /** 打不开「所有文件访问」时申请的运行时权限：≤29 为 WRITE，否则为 READ。 */
+  /** API < 30：系统运行时对话框申请 WRITE。 */
   private fun storagePermissionsToRequest(): List<String> {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return emptyList()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) return emptyList()
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return emptyList()
-    val perm = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
-      Manifest.permission.WRITE_EXTERNAL_STORAGE
-    } else {
-      Manifest.permission.READ_EXTERNAL_STORAGE
-    }
+    val perm = Manifest.permission.WRITE_EXTERNAL_STORAGE
     if (ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED) {
       return emptyList()
     }
@@ -350,7 +335,7 @@ class MainActivity : FlutterActivity() {
         pending.success(Uri.fromFile(File(path)).toString())
       }
       REQ_MANAGE_STORAGE -> {
-        storagePermResult?.success(KotvFileChooser.hasFilePermission(this, canRequestAllFilesAccess()))
+        storagePermResult?.success(KotvFileChooser.canWriteSharedStorage(this))
         storagePermResult = null
       }
     }
@@ -459,7 +444,7 @@ class MainActivity : FlutterActivity() {
       return
     }
     if (requestCode == REQ_STORAGE) {
-      storagePermResult?.success(KotvFileChooser.hasFilePermission(this, false))
+      storagePermResult?.success(KotvFileChooser.canWriteSharedStorage(this))
       storagePermResult = null
       return
     }

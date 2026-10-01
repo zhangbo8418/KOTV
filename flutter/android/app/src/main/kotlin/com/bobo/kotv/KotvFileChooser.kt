@@ -360,27 +360,7 @@ object KotvFileChooser {
     return pkg.contains("frameworkpackagestubs")
   }
 
-  /**
-   * 文件权限是否已满足。
-   * 能打开「所有文件访问」时只认 [Environment.isExternalStorageManager]。
-   * 打不开该设置页时：API 33+ 视为已有；更低版本认 WRITE（≤29）或 READ。
-   */
-  fun hasFilePermission(context: Context, canRequestAllFiles: Boolean): Boolean {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
-      return true
-    }
-    if (canRequestAllFiles) return false
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return true
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
-    val perm = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
-      android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-    } else {
-      android.Manifest.permission.READ_EXTERNAL_STORAGE
-    }
-    return context.checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED
-  }
-
-  /** API 30+ 且已是所有文件访问时，才能写 `/TVBox/`。 */
+  /** API 30+ 且已是所有文件访问时，才能写 `/TVBox/`。未授予不能当成已有。 */
   fun canWriteSharedStorage(context: Context): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       return Environment.isExternalStorageManager()

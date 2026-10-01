@@ -37,10 +37,20 @@ bool siteNeedsSharedWrite(WidgetRef ref, String siteKey) {
   return false;
 }
 
-/// 配置站 / action 打开前先走文件权限请求，拒绝后仍继续（爬虫自己写盘）。
-Future<void> _requestSharedStorageIfNeeded(BuildContext context, WidgetRef ref, String siteKey, {required bool force}) async {
-  if (!force && !siteNeedsSharedWrite(ref, siteKey)) return;
-  await _ensureSharedStorageWrite();
+/// 配置站 / action 打开前弹出系统授权。未授予则拦住，不继续进授权页。
+Future<bool> _gateSharedStorageWrite(BuildContext context, WidgetRef ref, String siteKey, {required bool force}) async {
+  if (!force && !siteNeedsSharedWrite(ref, siteKey)) return true;
+  final ok = await _ensureSharedStorageWrite();
+  if (ok) return true;
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('需要授予存储权限才能保存网盘登录态'),
+        duration: Duration(seconds: 4),
+      ),
+    );
+  }
+  return false;
 }
 
 /// 用片名去全网搜索。
@@ -91,7 +101,7 @@ Future<void> openVodItem(
 }) async {
   final siteKey = (site ?? item.site).trim();
   if (item.hasAction) {
-    await _requestSharedStorageIfNeeded(context, ref, siteKey, force: true);
+    if (!await _gateSharedStorageWrite(context, ref, siteKey, force: true)) return;
     if (!context.mounted) return;
     final api = ref.read(apiProvider);
     try {
@@ -152,8 +162,8 @@ Future<void> openVodItem(
     }
     if (!context.mounted) return;
   }
-  // 仅 api 含 Config 的站在进详情前请求文件权限；拒绝不拦截。
-  await _requestSharedStorageIfNeeded(context, ref, siteKey, force: false);
+  // 仅 api 含 Config 的站弹出系统授权；未授予不进详情。
+  if (!await _gateSharedStorageWrite(context, ref, siteKey, force: false)) return;
   if (!context.mounted) return;
   await Navigator.of(context).push(
     kotvDetailRoute(
