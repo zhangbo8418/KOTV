@@ -360,10 +360,23 @@ object KotvFileChooser {
     return pkg.contains("frameworkpackagestubs")
   }
 
-  /** API 30+ 且已是所有文件访问时，才能写 `/TVBox/`。未授予不能当成已有。 */
+  /**
+   * API 30+ 且已是所有文件访问时，才能写 `/TVBox/`。
+   * 无参 [Environment.isExternalStorageManager] 会读 [Context.getPackageName]。
+   * jar Init 后包名会暂时改成 com.fongmi.android.tv，无参检查会去查那个包名，已授予也会得到 false，于是每次都打开设置页。
+   */
   fun canWriteSharedStorage(context: Context): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      return Environment.isExternalStorageManager()
+      val real = try {
+        com.fongmi.android.tv.App.realAppPackageName()
+      } catch (_: Throwable) {
+        ""
+      }
+      return if (real.isNotEmpty()) {
+        Environment.isExternalStorageManager(real)
+      } else {
+        Environment.isExternalStorageManager()
+      }
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       return context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
