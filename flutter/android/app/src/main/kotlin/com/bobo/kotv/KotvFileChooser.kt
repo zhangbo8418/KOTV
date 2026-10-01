@@ -1,5 +1,6 @@
 package com.bobo.kotv
 
+import android.app.AppOpsManager
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
@@ -9,6 +10,7 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Process
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Log
@@ -362,8 +364,9 @@ object KotvFileChooser {
 
   /**
    * API 30+ 且已是所有文件访问时，才能写 `/TVBox/`。
-   * 无参 [Environment.isExternalStorageManager] 会读 [Context.getPackageName]。
+   * 无参 [Environment.isExternalStorageManager] 会读当前包名。
    * jar Init 后包名会暂时改成 com.fongmi.android.tv，无参检查会去查那个包名，已授予也会得到 false，于是每次都打开设置页。
+   * SDK 里带参重载只接受 [File]，不接受包名，所以按真实包名查 AppOps。
    */
   fun canWriteSharedStorage(context: Context): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -372,9 +375,17 @@ object KotvFileChooser {
       } catch (_: Throwable) {
         ""
       }
-      return if (real.isNotEmpty()) {
-        Environment.isExternalStorageManager(real)
-      } else {
+      if (real.isEmpty()) return Environment.isExternalStorageManager()
+      return try {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+          ?: return Environment.isExternalStorageManager()
+        val mode = appOps.unsafeCheckOpNoThrow(
+          "android:manage_external_storage",
+          Process.myUid(),
+          real,
+        )
+        mode == AppOpsManager.MODE_ALLOWED
+      } catch (_: Throwable) {
         Environment.isExternalStorageManager()
       }
     }
