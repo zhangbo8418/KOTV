@@ -53,6 +53,17 @@ Future<bool> _gateSharedStorageWrite(BuildContext context, WidgetRef ref, String
   return false;
 }
 
+/// detailContent 期间 jar 是否 finish 了详情层。读一次即清掉。
+Future<bool> _consumeJarDetailDismissed() async {
+  if (kIsWeb || !Platform.isAndroid) return false;
+  try {
+    const ch = MethodChannel('kotv_android');
+    return await ch.invokeMethod<bool>('consumeJarDetailDismissed') ?? false;
+  } catch (_) {
+    return false;
+  }
+}
+
 /// 用片名去全网搜索。
 void searchByName(WidgetRef ref, String name) {
   final q = name.trim();
@@ -165,6 +176,24 @@ Future<void> openVodItem(
   // 仅 api 含 Config 的站弹出系统授权；未授予不进详情。
   if (!await _gateSharedStorageWrite(context, ref, siteKey, force: false)) return;
   if (!context.mounted) return;
+  Map<String, dynamic> data;
+  try {
+    data = await ref.read(apiProvider).detail(id: item.id, site: siteKey.isEmpty ? null : siteKey);
+  } catch (e) {
+    if (await _consumeJarDetailDismissed()) {
+      ref.read(vodContentEpochProvider.notifier).state++;
+      return;
+    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    return;
+  }
+  // jar 在 detailContent 里 finish 了详情层：留在列表，不打开详情页。
+  if (await _consumeJarDetailDismissed()) {
+    ref.read(vodContentEpochProvider.notifier).state++;
+    return;
+  }
+  if (!context.mounted) return;
   await Navigator.of(context).push(
     kotvDetailRoute(
       builder: (_) => DetailScreen(
@@ -172,6 +201,7 @@ Future<void> openVodItem(
         site: siteKey,
         title: item.name,
         mark: fromFolder ? item.name : '',
+        initialDetail: data,
       ),
     ),
   );

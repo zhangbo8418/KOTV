@@ -152,6 +152,7 @@ class MainActivity : FlutterActivity() {
           result.success(KotvFileChooser.listDir(path))
         }
         "hasStoragePermission" -> result.success(KotvFileChooser.hasStoragePermission(this))
+        "consumeJarDetailDismissed" -> result.success(KotvJarVideoActivity.consumeDismissed())
         "getMemoryInfo" -> {
           try {
             val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager

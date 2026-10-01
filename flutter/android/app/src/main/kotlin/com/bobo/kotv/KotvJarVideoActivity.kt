@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import java.lang.ref.WeakReference
 import java.util.concurrent.CountDownLatch
@@ -32,6 +34,13 @@ class KotvJarVideoActivity : Activity() {
     signalReady()
   }
 
+  override fun finish() {
+    // jar 在 detailContent 里 finish 顶层页：记下，宿主不要再打开详情。
+    // leave() 自己收尾时不算。
+    if (!leaving) dismissedByJar = true
+    super.finish()
+  }
+
   override fun onDestroy() {
     val cur = current?.get()
     if (cur === this) current = null
@@ -44,6 +53,8 @@ class KotvJarVideoActivity : Activity() {
     private val depth = AtomicInteger(0)
     @Volatile private var current: WeakReference<KotvJarVideoActivity>? = null
     @Volatile private var readyLatch: CountDownLatch? = null
+    @Volatile private var leaving = false
+    @Volatile private var dismissedByJar = false
 
     /** @return 是否由本次调用负责 [leave]（嵌套 enter 返回 false）。 */
     @JvmStatic
@@ -51,6 +62,8 @@ class KotvJarVideoActivity : Activity() {
       if (context == null) return false
       val prev = depth.getAndIncrement()
       if (prev > 0) return false
+      leaving = false
+      dismissedByJar = false
       val existing = current?.get()
       if (existing != null && !existing.isFinishing && !isDestroyedSafe(existing)) {
         return true
@@ -91,13 +104,25 @@ class KotvJarVideoActivity : Activity() {
       if (d > 0) return
       if (d < 0) depth.set(0)
       val act = current?.get() ?: return
+      val latch = CountDownLatch(1)
+      val task = Runnable {
+        try {
+          // 排在本 runnable 前面的 jar finish() 已经跑过：保持 dismissedByJar。
+          if (!act.isFinishing && !isDestroyedSafe(act)) {
+            leaving = true
+            act.finish()
+          }
+        } catch (_: Throwable) {
+        } finally {
+          latch.countDown()
+        }
+      }
       try {
-        if (!act.isFinishing && !isDestroyedSafe(act)) {
-          act.runOnUiThread {
-            try {
-              act.finish()
-            } catch (_: Throwable) {
-            }
+        // 始终 post，让 detailContent 里已入队的 finish() 先执行。
+        Handler(Looper.getMainLooper()).post(task)
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+          if (!latch.await(2500, TimeUnit.MILLISECONDS)) {
+            Log.w(TAG, "leave ui timeout")
           }
         }
       } catch (_: Throwable) {
@@ -115,6 +140,14 @@ class KotvJarVideoActivity : Activity() {
     private fun signalReady() {
       readyLatch?.countDown()
       readyLatch = null
+    }
+
+    /** detailContent 期间 jar 是否 finish 了本页。读一次即清掉。 */
+    @JvmStatic
+    fun consumeDismissed(): Boolean {
+      val v = dismissedByJar
+      dismissedByJar = false
+      return v
     }
   }
 }

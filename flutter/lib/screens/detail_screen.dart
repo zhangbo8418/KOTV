@@ -56,13 +56,22 @@ import 'folder_screen.dart';
 import 'shell.dart';
 
 class DetailScreen extends ConsumerStatefulWidget {
-  const DetailScreen({super.key, required this.id, this.site = '', this.title = '', this.mark = ''});
+  const DetailScreen({
+    super.key,
+    required this.id,
+    this.site = '',
+    this.title = '',
+    this.mark = '',
+    this.initialDetail,
+  });
 
   final String id;
   final String site;
   final String title;
   /// 从目录点文件时按集名匹配并起播。
   final String mark;
+  /// 打开前已经拿到的详情，避免再请求一次。
+  final Map<String, dynamic>? initialDetail;
 
   /// 详情是否在栈上（含播放中 PopScope.canPop=false）。
   static bool get isOpen => _DetailScreenState._active != null;
@@ -1165,7 +1174,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _error = null;
     });
     try {
-      final data = await ref.read(apiProvider).detail(id: widget.id, site: widget.site);
+      final data = widget.initialDetail ??
+          await ref.read(apiProvider).detail(id: widget.id, site: widget.site);
       final vod = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
       final id = vod.id.isNotEmpty ? vod.id : widget.id;
       final site = vod.site.isNotEmpty ? vod.site : widget.site;
@@ -1479,21 +1489,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 详情就绪后起播：folder mark 优先，否则按历史线路+集名，再否则第一线第一集。
-  /// 配置类站（SUBSCRIBECONFIG / Config）依赖此路径走到 playerContent 弹窗。
   Future<void> _resumeOrAutoPlay() async {
     final d = _detail;
-    if (d == null) return;
-    if (d.flags.isEmpty) {
-      final name = d.name.trim();
-      if (!mounted) return;
-      if (name.isNotEmpty) {
-        await _leavePage(afterPop: () => searchByName(ref, name));
-      } else {
-        // 配置项副作用（finish 已被会话页承接）：无片名可搜，直接关详情。
-        await _leavePage();
-      }
-      return;
-    }
+    if (d == null || d.flags.isEmpty) return;
 
     var mark = widget.mark.trim();
     var histFlag = '';
