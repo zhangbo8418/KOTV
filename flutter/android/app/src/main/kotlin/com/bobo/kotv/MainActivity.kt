@@ -32,7 +32,6 @@ class MainActivity : FlutterActivity() {
   private var pickConfigResult: MethodChannel.Result? = null
   private var storagePermResult: MethodChannel.Result? = null
   private var readMediaPermResult: MethodChannel.Result? = null
-  private var readMediaPermResult: MethodChannel.Result? = null
   private var batteryPromptStarted = false
   /** 正在播放时：Home/切应用自动进系统画中画（Android 12+ setAutoEnterEnabled）。 */
   private var pipAutoEnter = false
@@ -212,8 +211,8 @@ class MainActivity : FlutterActivity() {
   }
 
   private fun ensureStoragePermission(result: MethodChannel.Result) {
-    // 写 /TVBox/ 等共享路径：API 30+ 必须 MANAGE；不得用 READ_MEDIA 冒充成功。
-    if (KotvFileChooser.canWriteSharedStorage(this)) {
+    val requestAll = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && canRequestAllFilesAccess()
+    if (KotvFileChooser.hasFilePermission(this, requestAll)) {
       result.success(true)
       return
     }
@@ -236,9 +235,9 @@ class MainActivity : FlutterActivity() {
       }
       return
     }
-    val need = writePermissionsToRequest()
+    val need = storagePermissionsToRequest()
     if (need.isEmpty()) {
-      result.success(KotvFileChooser.canWriteSharedStorage(this))
+      result.success(KotvFileChooser.hasFilePermission(this, false))
       return
     }
     castPermResult = null
@@ -287,17 +286,19 @@ class MainActivity : FlutterActivity() {
     return applicationInfo.packageName.takeIf { it.isNotEmpty() } ?: packageName
   }
 
-  /** API ≥ R 写共享存储只能走 MANAGE；此处仅 API < R 申请 WRITE。 */
-  private fun writePermissionsToRequest(): List<String> {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) return emptyList()
-    val out = ArrayList<String>(2)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      out.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-      out.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+  /** 打不开「所有文件访问」时申请的运行时权限：≤29 为 WRITE，否则为 READ。 */
+  private fun storagePermissionsToRequest(): List<String> {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return emptyList()
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return emptyList()
+    val perm = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+      Manifest.permission.WRITE_EXTERNAL_STORAGE
+    } else {
+      Manifest.permission.READ_EXTERNAL_STORAGE
     }
-    return out.filter {
-      ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+    if (ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED) {
+      return emptyList()
     }
+    return listOf(perm)
   }
 
   private fun readMediaPermissionsToRequest(): List<String> {
@@ -349,7 +350,7 @@ class MainActivity : FlutterActivity() {
         pending.success(Uri.fromFile(File(path)).toString())
       }
       REQ_MANAGE_STORAGE -> {
-        storagePermResult?.success(KotvFileChooser.canWriteSharedStorage(this))
+        storagePermResult?.success(KotvFileChooser.hasFilePermission(this, canRequestAllFilesAccess()))
         storagePermResult = null
       }
     }
@@ -458,7 +459,7 @@ class MainActivity : FlutterActivity() {
       return
     }
     if (requestCode == REQ_STORAGE) {
-      storagePermResult?.success(KotvFileChooser.canWriteSharedStorage(this))
+      storagePermResult?.success(KotvFileChooser.hasFilePermission(this, false))
       storagePermResult = null
       return
     }

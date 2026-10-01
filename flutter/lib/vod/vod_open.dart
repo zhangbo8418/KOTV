@@ -37,19 +37,10 @@ bool siteNeedsSharedWrite(WidgetRef ref, String siteKey) {
   return false;
 }
 
-Future<bool> _gateSharedStorageWrite(BuildContext context, WidgetRef ref, String siteKey, {required bool force}) async {
-  if (!force && !siteNeedsSharedWrite(ref, siteKey)) return true;
-  final ok = await _ensureSharedStorageWrite();
-  if (ok) return true;
-  if (context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('需要「所有文件访问」权限才能保存网盘登录态'),
-        duration: Duration(seconds: 4),
-      ),
-    );
-  }
-  return false;
+/// 配置站 / action 打开前先走文件权限请求，拒绝后仍继续（爬虫自己写盘）。
+Future<void> _requestSharedStorageIfNeeded(BuildContext context, WidgetRef ref, String siteKey, {required bool force}) async {
+  if (!force && !siteNeedsSharedWrite(ref, siteKey)) return;
+  await _ensureSharedStorageWrite();
 }
 
 /// 用片名去全网搜索。
@@ -100,7 +91,7 @@ Future<void> openVodItem(
 }) async {
   final siteKey = (site ?? item.site).trim();
   if (item.hasAction) {
-    if (!await _gateSharedStorageWrite(context, ref, siteKey, force: true)) return;
+    await _requestSharedStorageIfNeeded(context, ref, siteKey, force: true);
     if (!context.mounted) return;
     final api = ref.read(apiProvider);
     try {
@@ -161,8 +152,8 @@ Future<void> openVodItem(
     }
     if (!context.mounted) return;
   }
-  // 仅 Config 站（网盘授权等）强制写权限；普通点播不弹「所有文件访问」。
-  if (!await _gateSharedStorageWrite(context, ref, siteKey, force: false)) return;
+  // 仅 api 含 Config 的站在进详情前请求文件权限；拒绝不拦截。
+  await _requestSharedStorageIfNeeded(context, ref, siteKey, force: false);
   if (!context.mounted) return;
   await Navigator.of(context).push(
     kotvDetailRoute(
