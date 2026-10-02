@@ -1179,7 +1179,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   /// 起播途中已作废：实例仍归本页（换台）交给新一次起播；
-  /// 已被 [_releaseAllBackends] 摘掉（离开直播）则停掉并 dispose，避免后台出声。
+  /// 已被 [_releaseAllBackends] / dispose 摘掉并释放（离开直播）则再停一次，防止打开晚到后出声。
   Future<void> _dropStalePlayback(KotvPlayback pb) async {
     final owned = identical(pb, _mk) ||
         identical(pb, _fvp) ||
@@ -1193,14 +1193,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await pb.pause();
     } catch (_) {}
     try {
-      await pb.release();
-    } catch (_) {
-      try {
-        await pb.stop();
-      } catch (_) {}
-    }
-    try {
-      pb.dispose();
+      await pb.stop();
     } catch (_) {}
   }
 

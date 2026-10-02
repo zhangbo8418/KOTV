@@ -883,6 +883,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (stopSerial == _playAtSerial) _stoppedHard = true;
   }
 
+  /// 起播途中已作废：实例仍归本页（换集）交给新一次起播；
+  /// 已被 [_stopHard] 摘掉并释放（离开详情）则再停一次，防止打开晚到后出声。
+  Future<void> _dropStalePlayback(KotvPlayback pb) async {
+    final owned = identical(pb, _mk) ||
+        identical(pb, _fvp) ||
+        identical(pb, _exo) ||
+        identical(pb, _html) ||
+        identical(pb, _art) ||
+        identical(pb, _xg) ||
+        identical(pb, _zw);
+    if (owned) return;
+    try {
+      await pb.pause();
+    } catch (_) {}
+    try {
+      await pb.stop();
+    } catch (_) {}
+  }
+
   Future<void> _leavePage({VoidCallback? afterPop}) async {
     final inFlight = _leaveDone;
     if (_leaving || inFlight != null) {
@@ -2192,6 +2211,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             drm: hasDrm ? drm : null,
             format: '${data['format'] ?? ''}'.trim().isEmpty ? null : '${data['format']}'.trim(),
           );
+          if (serial != _playAtSerial || !mounted) {
+            await _dropStalePlayback(pb);
+            return;
+          }
           // 续播与片头合成一个起点，在 play 之前 seek；进度回调不再对同一点前跳。
           final resumeMs = _resumeSeekMs;
           _resumeSeekMs = 0;
@@ -2202,12 +2225,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             } catch (_) {}
           }
           if (_skipOpeningEnding) _openingSeekDone = true;
+          if (serial != _playAtSerial || !mounted) {
+            await _dropStalePlayback(pb);
+            return;
+          }
           try {
-            await _playback.play();
+            await pb.play();
           } catch (_) {}
           opened = true;
           break;
         } on KotvSilentVideoException catch (e) {
+          if (serial != _playAtSerial || !mounted) {
+            await _dropStalePlayback(pb);
+            return;
+          }
           lastOpenError = e;
           if (!failover.enabled) {
             // 关闭自动切换：不换引擎、不判失败，继续当前播放器。
