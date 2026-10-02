@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -12,6 +14,7 @@ import '../util/runtime_info.dart';
 import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
+import '../player/playback_guard.dart';
 import '../vod/vod_open.dart';
 import '../widgets/poster_card.dart';
 import 'shell.dart';
@@ -32,6 +35,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(kotvStopBackgroundPlayback(keepMini: true));
+    });
     _reload();
   }
 

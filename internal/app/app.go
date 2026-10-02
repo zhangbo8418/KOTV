@@ -136,7 +136,8 @@ func New() (*App, error) {
 	liveSvc.SyncFromConfig()
 
 	if err := a.Server.Start(); err != nil {
-		log.Printf("HTTP 服务启动失败: %v", err)
+		_ = db.Close()
+		return nil, err
 	}
 	a.Server.SetSyncHandler(server.NewAppSyncHandler(db, func(code string) bool {
 		return code != "" && code == settings.Get(settings.SyncPairCode)

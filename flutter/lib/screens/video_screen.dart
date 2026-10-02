@@ -17,6 +17,7 @@ import '../widgets/dialogs.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
 import '../widgets/poster_card.dart';
+import '../player/playback_guard.dart';
 import '../vod/vod_open.dart';
 import 'detail_screen.dart';
 import 'live_screen.dart';
@@ -54,7 +55,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(kotvStopBackgroundPlayback(keepMini: true));
+      _bootstrap();
+    });
     _bannerTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted || _tid != null) return;
       final n = _apiBanners.isNotEmpty ? _apiBanners.length : _bannerSlides.length;

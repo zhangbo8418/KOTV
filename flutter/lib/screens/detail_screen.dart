@@ -76,6 +76,42 @@ class DetailScreen extends ConsumerStatefulWidget {
   /// 详情是否在栈上（含播放中 PopScope.canPop=false）。
   static bool get isOpen => _DetailScreenState._active != null;
 
+  /// 当前路由就是这一页（上面没有目录等再压的页面）。
+  static bool get isForeground {
+    final active = _DetailScreenState._active;
+    if (active == null || !active.mounted) return false;
+    return ModalRoute.of(active.context)?.isCurrent == true;
+  }
+
+  /// 正在看的片子就是这一部（入口 id 或详情返回的 id）。
+  static bool matches(String id, String site) {
+    final active = _DetailScreenState._active;
+    if (active == null || !active.mounted) return false;
+    if (active._routeSite.trim() != site.trim()) return false;
+    final want = id.trim();
+    if (want.isEmpty) return false;
+    return active._routeId.trim() == want || active._detailId().trim() == want;
+  }
+
+  /// 已打开的详情换成另一部，不压新路由。
+  static Future<void> retarget({
+    required String id,
+    required String site,
+    required String title,
+    required String mark,
+    Map<String, dynamic>? initialDetail,
+  }) async {
+    final active = _DetailScreenState._active;
+    if (active == null || !active.mounted) return;
+    await active._retarget(
+      id: id,
+      site: site,
+      title: title,
+      mark: mark,
+      initialDetail: initialDetail,
+    );
+  }
+
   /// 全窗口 / 系统全屏（以页面本地状态为准，不依赖 provider 时序）。
   static bool get isImmersive => _DetailScreenState._active?._immersiveFullscreen == true;
 
@@ -139,6 +175,12 @@ class DetailScreen extends ConsumerStatefulWidget {
       try {
         await active._stopHard().timeout(const Duration(seconds: 4));
       } catch (_) {}
+      if (active._miniDesktop) {
+        active._miniDesktop = false;
+        try {
+          await MiniPlayerWindow.exit();
+        } catch (_) {}
+      }
       if (active.mounted) {
         // 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
         active._allowPop = true;
@@ -250,17 +292,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_detail_video');
   /// 量测详情页播控槽，供稳定 Positioned（Texture/PlatformView）宿主对齐。
   /// 画面在 Stack 上层、不在 ListView 子树；滚动时必须同步槽位，否则钉死在首次位置。
+  /// [_videoLayerRect] 非全屏是黑槽相对详情 Stack 的矩形（与顶栏下内容区相交），
+  /// 全屏是整块 Stack。Surface 按这块矩形摆放，全屏只改矩形。
   final GlobalKey _videoSlotKey = GlobalKey(debugLabel: 'kotv_detail_video_slot');
   final GlobalKey _detailStackKey = GlobalKey(debugLabel: 'kotv_detail_stack');
-  /// 画面层的位置由 [CompositedTransformFollower] 在合成期直接跟随黑槽
-  /// （[CompositedTransformTarget]），滚动 / 窗口缩放 / 顶栏高度变化都不会错位；
-  /// [_videoLayerRect] 只提供尺寸（非全屏）或整屏矩形（全屏）。
-  /// 画面叠在 Scaffold 之上，必须裁到 [_bodyClipRect]（顶栏下 Expanded），
-  /// 否则下滑时画面跟槽上移会盖住顶栏按钮。
-  final LayerLink _videoLink = LayerLink();
   final GlobalKey _bodyClipKey = GlobalKey(debugLabel: 'kotv_detail_body_clip');
   Rect? _videoLayerRect;
-  Rect? _bodyClipRect;
   bool _videoSlotSyncScheduled = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
@@ -308,6 +345,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _preloadNextEpisode = false;
   bool _exoDiskCache = false;
   RemoteBridge? _boundRemote;
+  String _routeId = '';
+  String _routeSite = '';
+  String _routeTitle = '';
+  String _routeMark = '';
+  Map<String, dynamic>? _routeInitial;
 
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
@@ -543,6 +585,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   @override
   void initState() {
     super.initState();
+    _routeId = widget.id;
+    _routeSite = widget.site;
+    _routeTitle = widget.title;
+    _routeMark = widget.mark;
+    _routeInitial = widget.initialDetail;
     WidgetsBinding.instance.addObserver(this);
     _api = ref.read(apiProvider);
     _active = this;
@@ -553,6 +600,33 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     };
     _load();
     WidgetsBinding.instance.addPostFrameCallback((_) => _attachRemoteHandlers());
+  }
+
+  Future<void> _retarget({
+    required String id,
+    required String site,
+    required String title,
+    required String mark,
+    Map<String, dynamic>? initialDetail,
+  }) async {
+    _routeId = id;
+    _routeSite = site;
+    _routeTitle = title;
+    _routeMark = mark;
+    _routeInitial = initialDetail;
+    _epIdx = -1;
+    _flagIdx = 0;
+    if (_miniDesktop) {
+      try {
+        await _exitMini();
+      } catch (_) {}
+    }
+    try {
+      await _stopHard().timeout(const Duration(seconds: 4));
+    } catch (_) {}
+    _stoppedHard = false;
+    if (!mounted || _active != this) return;
+    await _load();
   }
 
   @override
@@ -707,6 +781,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _endConsumedGen = _playGen;
     // 抬起播世代：返回/停播时丢弃进行中的 play/磁力 Fetch 结果
     _playAtSerial++;
+    final stopSerial = _playAtSerial;
     _sessionStartedAt = null;
     _playingSub?.cancel();
     _endedSub?.cancel();
@@ -814,7 +889,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       zw?.dispose();
     } catch (_) {}
 
-    _stoppedHard = true;
+    if (stopSerial == _playAtSerial) _stoppedHard = true;
   }
 
   Future<void> _leavePage({VoidCallback? afterPop}) async {
@@ -1174,11 +1249,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _error = null;
     });
     try {
-      final data = widget.initialDetail ??
-          await ref.read(apiProvider).detail(id: widget.id, site: widget.site);
+      final seeded = _routeInitial;
+      _routeInitial = null;
+      final data = seeded ??
+          await ref.read(apiProvider).detail(id: _routeId, site: _routeSite);
       final vod = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
-      final id = vod.id.isNotEmpty ? vod.id : widget.id;
-      final site = vod.site.isNotEmpty ? vod.site : widget.site;
+      final id = vod.id.isNotEmpty ? vod.id : _routeId;
+      final site = vod.site.isNotEmpty ? vod.site : _routeSite;
       var configSource = '';
       try {
         final cfg = await ref.read(apiProvider).getConfig();
@@ -1186,14 +1263,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       } catch (_) {}
       _configSource = configSource;
       // 入口 id ≠ 详情 id：迁移收藏/历史键，避免双份与 play 键分裂。
-      if (vod.id.isNotEmpty && widget.id.isNotEmpty && vod.id != widget.id) {
+      if (vod.id.isNotEmpty && _routeId.isNotEmpty && vod.id != _routeId) {
         await LocalCollect.replaceId(
           site: site,
-          oldId: widget.id,
+          oldId: _routeId,
           newId: vod.id,
           configSource: configSource,
         );
-        await LocalHistory.replaceId(site: site, oldId: widget.id, newId: vod.id);
+        await LocalHistory.replaceId(site: site, oldId: _routeId, newId: vod.id);
       }
       await LocalCollect.updateMeta(
         id: id,
@@ -1493,7 +1570,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final d = _detail;
     if (d == null || d.flags.isEmpty) return;
 
-    var mark = widget.mark.trim();
+    var mark = _routeMark.trim();
     var histFlag = '';
     _resumeSeekMs = 0;
     if (mark.isEmpty) {
@@ -2327,64 +2404,59 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _syncVideoSlotRect();
     });
   }
-  /// 非全屏：黑槽尺寸（LayerLink 管位置）+ 内容区裁剪矩形（防盖顶栏）。
+  /// 非全屏：黑槽相对详情 Stack 的矩形，再与顶栏下内容区相交。
   void _syncVideoSlotRect() {
     if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
     final slotBox = _videoSlotKey.currentContext?.findRenderObject() as RenderBox?;
     final bodyBox = _bodyClipKey.currentContext?.findRenderObject() as RenderBox?;
     final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (slotBox == null || stackBox == null || !slotBox.hasSize || !stackBox.hasSize) return;
+    if (!slotBox.attached || !stackBox.attached) return;
 
-    Size? nextSlot;
-    if (slotBox != null && slotBox.hasSize) {
-      final s = slotBox.size;
-      if (s.width >= 1 && s.height >= 1) nextSlot = s;
+    late final Rect next;
+    try {
+      var measured = slotBox.localToGlobal(Offset.zero, ancestor: stackBox) & slotBox.size;
+      if (bodyBox != null && bodyBox.hasSize && bodyBox.attached) {
+        final body = bodyBox.localToGlobal(Offset.zero, ancestor: stackBox) & bodyBox.size;
+        measured = measured.intersect(body);
+      }
+      next = measured;
+    } catch (_) {
+      return;
     }
 
-    Rect? nextClip;
-    if (bodyBox != null && stackBox != null && bodyBox.hasSize && stackBox.hasSize) {
-      final o = bodyBox.localToGlobal(Offset.zero, ancestor: stackBox);
-      final r = o & bodyBox.size;
-      if (r.width >= 1 && r.height >= 1) nextClip = r;
+    final prev = _videoLayerRect;
+    final empty = next.width < 1 || next.height < 1;
+    if (empty) {
+      if (prev == null || prev.width < 1 || prev.height < 1) return;
+      setState(() => _videoLayerRect = null);
+      return;
     }
-
-    final prevSlot = _videoLayerRect;
-    final prevClip = _bodyClipRect;
-    final slotSame = nextSlot == null ||
-        (prevSlot != null &&
-            (prevSlot.width - nextSlot.width).abs() < 0.5 &&
-            (prevSlot.height - nextSlot.height).abs() < 0.5);
-    final clipSame = nextClip == null ||
-        (prevClip != null &&
-            (prevClip.left - nextClip.left).abs() < 0.5 &&
-            (prevClip.top - nextClip.top).abs() < 0.5 &&
-            (prevClip.width - nextClip.width).abs() < 0.5 &&
-            (prevClip.height - nextClip.height).abs() < 0.5);
-    if (slotSame && clipSame) return;
-    setState(() {
-      if (nextSlot != null) _videoLayerRect = Offset.zero & nextSlot;
-      if (nextClip != null) _bodyClipRect = nextClip;
-    });
+    if (prev != null &&
+        (prev.left - next.left).abs() < 0.5 &&
+        (prev.top - next.top).abs() < 0.5 &&
+        (prev.width - next.width).abs() < 0.5 &&
+        (prev.height - next.height).abs() < 0.5) {
+      return;
+    }
+    setState(() => _videoLayerRect = next);
   }
-  /// 黑槽占位：[CompositedTransformTarget] 供画面层跟随；LayoutBuilder 捕获
-  /// 不经 rebuild 的布局变化（窗口缩放、顶栏高度变化）刷新尺寸。
+  /// 黑槽占位。LayoutBuilder 捕获不经 rebuild 的尺寸变化（窗口缩放、顶栏高度）。
   Widget _buildVideoSlot() {
-    return CompositedTransformTarget(
-      link: _videoLink,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final size = constraints.biggest;
-          final prev = _videoLayerRect;
-          if (!_immersiveFullscreen &&
-              size.width >= 1 &&
-              size.height >= 1 &&
-              (prev == null ||
-                  (prev.width - size.width).abs() >= 0.5 ||
-                  (prev.height - size.height).abs() >= 0.5)) {
-            _scheduleSyncVideoSlot();
-          }
-          return ColoredBox(key: _videoSlotKey, color: Colors.black);
-        },
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        final prev = _videoLayerRect;
+        if (!_immersiveFullscreen &&
+            size.width >= 1 &&
+            size.height >= 1 &&
+            (prev == null ||
+                (prev.width - size.width).abs() >= 0.5 ||
+                (prev.height - size.height).abs() >= 0.5)) {
+          _scheduleSyncVideoSlot();
+        }
+        return ColoredBox(key: _videoSlotKey, color: Colors.black);
+      },
     );
   }
   /// [stackSize]：详情 Stack 实测约束。沉浸全屏勿用 MediaQuery 整窗尺寸——
@@ -2412,41 +2484,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return ValueListenableBuilder<double>(
       valueListenable: _fsSwipeDy,
       builder: (context, swipeDy, child) {
-        if (_immersiveFullscreen) {
-          return Positioned(
-            left: rect.left,
-            top: rect.top + swipeDy,
-            width: rect.width,
-            height: rect.height,
-            child: child!,
-          );
-        }
-        // 非全屏：Follower 跟黑槽；外层裁到 Expanded（顶栏下），下滑不会盖住顶栏。
-        final clip = _bodyClipRect;
-        if (clip == null || clip.width < 1 || clip.height < 1) {
-          return const SizedBox.shrink();
-        }
         return Positioned(
-          left: clip.left,
-          top: clip.top,
-          width: clip.width,
-          height: clip.height,
-          child: ClipRect(
-            child: Stack(
-              clipBehavior: Clip.hardEdge,
-              children: [
-                CompositedTransformFollower(
-                  link: _videoLink,
-                  showWhenUnlinked: false,
-                  child: SizedBox(
-                    width: rect.width,
-                    height: rect.height,
-                    child: ClipRect(child: child),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          left: rect.left,
+          top: rect.top + (_immersiveFullscreen ? swipeDy : 0),
+          width: rect.width,
+          height: rect.height,
+          child: child!,
         );
       },
       child: GestureDetector(
@@ -2990,6 +3033,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       setState(() {
         _immersiveFullscreen = false;
         _immersiveEpCover = false;
+        _videoLayerRect = null;
       });
       // 黑槽需重新进树后量测：同帧可能仍为空，再排一次。
       _syncVideoSlotRect();
@@ -3122,7 +3166,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                     ),
                   ))
           else if (stableSlot)
-            // 桌面：仅占位 + LayerLink 目标；真正 Texture 在 [_buildStableVideoLayer]。
+            // 仅占位；真正 Texture / Surface 在 [_buildStableVideoLayer]，按这块槽的矩形摆放。
             _buildVideoSlot()
           else
             // 勿包 ListenableBuilder：position/playing 高频 notify 会重建 Video。
@@ -3335,7 +3379,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
                 onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
                 onNews: () => showAppNews(context, remoteHint(ref)),
-                title: widget.title.isNotEmpty ? widget.title : '详情',
+                title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
               ),
               Expanded(
                 child: KeyedSubtree(
@@ -3374,13 +3418,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               setState(() => _videoLayerRect = Offset.zero & stackSize);
             });
           }
-          return Stack(
+          return NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              if (!_immersiveFullscreen &&
+                  (notification is ScrollUpdateNotification || notification is ScrollEndNotification)) {
+                _scheduleSyncVideoSlot();
+              }
+              return false;
+            },
+            child: Stack(
             key: _detailStackKey,
             fit: StackFit.expand,
             children: [
               // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
               // 仅氛围模式去掉黑底，四周才透 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影。
-              // 桌面 Offstage 保活（LayerLink / media_kit Texture 不宜整树卸装）。
+              // 桌面 Offstage 保活（media_kit Texture 不宜整树卸装）。
               if (kotvIsAndroid()) ...[
                 if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
                 if (!_immersiveFullscreen) detailScaffold,
@@ -3397,7 +3449,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                   ),
                 ),
               ],
-              // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏由 [_bodyClipRect] 裁切，不盖顶栏。
+              // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏矩形已与顶栏下内容区相交。
               if (_playUrl.isNotEmpty) _buildStableVideoLayer(context, stackSize: stackSize),
               // 换集过渡黑盖：仅 Android Hybrid；桌面 Texture 不盖。
               if (kotvIsAndroid() && _immersiveFullscreen && _immersiveEpCover)
@@ -3408,6 +3460,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               if (_immersiveFullscreen && _detail != null)
                 _buildImmersiveFullscreenPage(externalVideo: true),
             ],
+            ),
           );
         },
       );
@@ -3424,7 +3477,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
                 onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
                 onNews: () => showAppNews(context, remoteHint(ref)),
-                title: widget.title.isNotEmpty ? widget.title : '详情',
+                title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
               ),
               Expanded(
                 child: _loading
@@ -3468,7 +3521,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final eps = _eps;
     final pageCount = eps.isEmpty ? 0 : ((eps.length - 1) ~/ _epSize) + 1;
     final pageEps = eps.skip(_epPage * _epSize).take(_epSize).toList();
-    final siteKey = d.site.isNotEmpty ? d.site : widget.site;
+    final siteKey = d.site.isNotEmpty ? d.site : _routeSite;
     final compact = KotvLayout.isCompact(context);
     final p = KotvPalette.of(context);
     final fg = p.fg;
@@ -3597,7 +3650,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               });
             }),
             _action('换源', Icons.visibility_outlined, () {
-              final name = (_detail?.name ?? widget.title).trim();
+              final name = (_detail?.name ?? _routeTitle).trim();
               if (name.isEmpty) {
                 setState(() => _status = '无法换源');
                 return;
@@ -3857,13 +3910,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String _detailId() {
     final d = _detail;
     if (d != null && d.id.isNotEmpty) return d.id;
-    return widget.id;
+    return _routeId;
   }
 
   String _detailSite() {
     final d = _detail;
     if (d != null && d.site.isNotEmpty) return d.site;
-    return widget.site;
+    return _routeSite;
   }
 
   /// 音量偏好：≤0 视为脏数据，回退 80；合法范围 1–100。
@@ -3943,7 +3996,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   void _showVodMeta(VodDetail d) {
     final p = KotvPalette.of(context);
-    final siteKey = d.site.isNotEmpty ? d.site : widget.site;
+    final siteKey = d.site.isNotEmpty ? d.site : _routeSite;
     final bodyStyle = TextStyle(color: p.muted, height: 1.55, fontSize: 15);
     final linkStyle = TextStyle(
       color: p.primary,

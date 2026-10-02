@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../nav/kotv_page.dart';
+import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 
 /// 迷你窗 / 全窗口：画面铺满；鼠标移入露出底栏，播放中超时收起；暂停时保持底栏。
@@ -87,16 +88,14 @@ class _MiniHoverShellState extends State<MiniHoverShell> {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(widget.borderRadius),
-      child: MouseRegion(
-        onEnter: (_) => _enter(),
-        onExit: (_) => _leave(),
-        onHover: (_) => _enter(),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onSecondaryTap: () => kotvHandleAppBack?.call(),
-          child: Stack(
+    final shell = MouseRegion(
+      onEnter: (_) => _enter(),
+      onExit: (_) => _leave(),
+      onHover: (_) => _enter(),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onSecondaryTap: () => kotvHandleAppBack?.call(),
+        child: Stack(
           fit: StackFit.expand,
           children: [
             ColoredBox(color: const Color(0xFF0A0A12), child: widget.video),
@@ -126,9 +125,13 @@ class _MiniHoverShellState extends State<MiniHoverShell> {
               ),
             ),
           ],
-          ),
         ),
       ),
+    );
+    if (kotvIsWindows7()) return shell;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(widget.borderRadius),
+      child: shell,
     );
   }
 }

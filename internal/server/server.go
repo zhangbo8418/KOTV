@@ -34,7 +34,6 @@ import (
 var remoteFS embed.FS
 
 const defaultPort = 9978
-const maxPort = 9999
 
 // Server 局域网 HTTP 遥控服务，对应 KtorD。
 type Server struct {
@@ -172,25 +171,17 @@ func (s *Server) Start() error {
 		})
 	})
 
-	var ln net.Listener
-	var err error
-	for port := defaultPort; port <= maxPort; port++ {
-		// 绑定所有接口以便 DLNA 设备访问本地代理
-		ln, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
-		if err == nil {
-			s.mu.Lock()
-			s.port = port
-			s.mu.Unlock()
-			localproxy.SetPort(port)
-			playproxy.SetPortFunc(func() int { return port })
-			thunder.SetPortFunc(func() int { return port })
-			spider.SetLocalProxyPort(port)
-			break
-		}
-	}
-	if ln == nil {
+	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", defaultPort))
+	if err != nil {
 		return fmt.Errorf("无法启动 HTTP 服务: %w", err)
 	}
+	s.mu.Lock()
+	s.port = defaultPort
+	s.mu.Unlock()
+	localproxy.SetPort(defaultPort)
+	playproxy.SetPortFunc(func() int { return defaultPort })
+	thunder.SetPortFunc(func() int { return defaultPort })
+	spider.SetLocalProxyPort(defaultPort)
 
 	s.http = &http.Server{Handler: cors(mux)}
 	go func() {

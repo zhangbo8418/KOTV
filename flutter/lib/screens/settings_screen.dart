@@ -14,6 +14,7 @@ import '../api/kotv_auth_token.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
+import '../player/playback_guard.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/mpv_opts.dart';
@@ -66,6 +67,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(kotvStopBackgroundPlayback(keepMini: true));
+    });
     SharedPreferences.getInstance().then((p) async {
       final draft = p.getString('engine_base_url_draft') ?? '';
       final effective = p.getString('engine_base_url') ?? '';

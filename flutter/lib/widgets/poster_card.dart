@@ -32,10 +32,7 @@ class PosterCard extends StatelessWidget {
       borderRadius: 10 * s,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: ClipRRect(
+        child: ClipRRect(
             borderRadius: BorderRadius.circular(10 * s),
             child: LayoutBuilder(
               builder: (context, c) {
@@ -126,7 +123,6 @@ class PosterCard extends StatelessWidget {
             ),
           ),
         ),
-      ),
     );
   }
 

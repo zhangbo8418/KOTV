@@ -41,6 +41,7 @@ import '../widgets/live_player_chrome.dart';
 import '../widgets/marquee_text.dart';
 import '../widgets/mini_hover_shell.dart';
 import '../widgets/vod_player_chrome.dart';
+import 'detail_screen.dart';
 import 'shell.dart';
 
 const _liveKeepSep = '\$\$\$';
@@ -593,6 +594,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _bootstrap() async {
+    await DetailScreen.prepareLeave();
     if (!mounted) return;
     setState(() {
       _loading = true;

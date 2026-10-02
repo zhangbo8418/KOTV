@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../desktop/mini_player_window.dart';
 import '../nav/kotv_page.dart';
+import '../player/playback_guard.dart';
 import '../providers.dart';
 import '../player/play_headers.dart';
 import '../remote/local_collect.dart';
@@ -242,9 +244,10 @@ class _AppShellState extends ConsumerState<AppShell> {
       if (prev == null || prev == next) return;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
-        await DetailScreen.prepareLeave();
-        if (!mounted) return;
-        await LiveScreen.prepareLeave();
+        // 悬浮小窗是唯一允许留在后台的播放。换掉根路由会卸掉它，所以小窗开着时留在当前页。
+        // 切到直播则卸掉，直播自己要出声。
+        if (MiniPlayerWindow.active && next != KotvPage.live) return;
+        await kotvStopBackgroundPlayback();
         if (!mounted) return;
         final nav = _shellNavKey.currentState;
         if (nav == null) return;
@@ -418,6 +421,8 @@ bool Function()? liveScreenHandleBack;
 /// 切主页面前先 await 硬停，再改页；避免全屏回主页时卸树与停播竞态。
 Future<void> goKotvPage(WidgetRef ref, KotvPage page, {bool recordHistory = true}) async {
   final cur = ref.read(kotvPageProvider);
+  // 悬浮小窗开着时不切页：换根路由会卸掉这个唯一还在出声的实例。切到直播仍卸掉。
+  if (MiniPlayerWindow.active && page != KotvPage.live) return;
   if (recordHistory && cur != page) {
     final stack = List<KotvPage>.from(ref.read(kotvPageStackProvider));
     stack.add(cur);
@@ -427,8 +432,7 @@ Future<void> goKotvPage(WidgetRef ref, KotvPage page, {bool recordHistory = true
     ref.read(kotvPageStackProvider.notifier).state = stack;
   }
   // 必须先停完再切页：否则 listen→pushAndRemoveUntil 会与硬停抢跑。
-  await DetailScreen.prepareLeave();
-  await LiveScreen.prepareLeave();
+  await kotvStopBackgroundPlayback();
   // 切 Tab 时若有声明式弹窗则关掉，避免遮罩残留挡后续详情
   if (cur != page) {
     final post = PostMsgHost.instance;

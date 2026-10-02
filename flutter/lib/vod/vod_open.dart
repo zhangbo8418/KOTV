@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -9,10 +10,10 @@ import '../models/models.dart';
 import '../nav/kotv_page.dart';
 import '../nav/kotv_routes.dart';
 import '../providers.dart';
-import '../remote/remote_bridge.dart';
+import '../desktop/mini_player_window.dart';
+import '../player/playback_guard.dart';
 import '../screens/detail_screen.dart';
 import '../screens/folder_screen.dart';
-import '../screens/live_screen.dart';
 
 /// 网盘授权等会写 `/TVBox/`；API 30+ 需「所有文件访问」。失败返回 false。
 Future<bool> _ensureSharedStorageWrite() async {
@@ -99,9 +100,13 @@ bool siteIsIndex(WidgetRef ref, String siteKey) {
   return false;
 }
 
+Future<void>? _vodOpenSerial;
+
 /// 打开列表项：action → 站点 action；folder → 进目录；索引站 → 搜索；否则进详情。
 /// [fromFolder] 带 mark 以便详情按文件名选中那一集。
 /// [extend] 父级分类筛选，嵌套目录继续带上。
+///
+/// 串行到路由压上为止。正在看的同一部直接返回；另一部在当前详情里换片。
 Future<void> openVodItem(
   BuildContext context,
   WidgetRef ref,
@@ -109,6 +114,40 @@ Future<void> openVodItem(
   String? site,
   bool fromFolder = false,
   Map<String, String>? extend,
+}) {
+  final prev = _vodOpenSerial ?? Future<void>.value();
+  final gate = Completer<void>();
+  _vodOpenSerial = gate.future;
+  void release() {
+    if (!gate.isCompleted) gate.complete();
+  }
+
+  return prev.catchError((Object _, StackTrace __) {}).then((_) async {
+    if (!context.mounted) return;
+    try {
+      await _openVodItemBody(
+        context,
+        ref,
+        item,
+        site: site,
+        fromFolder: fromFolder,
+        extend: extend,
+        release: release,
+      );
+    } finally {
+      release();
+    }
+  });
+}
+
+Future<void> _openVodItemBody(
+  BuildContext context,
+  WidgetRef ref,
+  VodItem item, {
+  String? site,
+  bool fromFolder = false,
+  Map<String, String>? extend,
+  required void Function() release,
 }) async {
   final siteKey = (site ?? item.site).trim();
   if (item.hasAction) {
@@ -135,6 +174,9 @@ Future<void> openVodItem(
     return;
   }
   if (item.isFolder) {
+    await kotvStopBackgroundPlayback(keepMini: true);
+    if (!context.mounted) return;
+    release();
     await Navigator.of(context).push(
       kotvDetailRoute(
         builder: (_) => FolderScreen(
@@ -148,6 +190,9 @@ Future<void> openVodItem(
     return;
   }
   if (siteIsIndex(ref, siteKey)) {
+    await kotvStopBackgroundPlayback(keepMini: true);
+    if (!context.mounted) return;
+    if (MiniPlayerWindow.active) return;
     searchByName(ref, item.name);
     return;
   }
@@ -158,8 +203,7 @@ Future<void> openVodItem(
       final cfg = await api.getConfig();
       final cur = '${cfg['source'] ?? ''}'.trim();
       if (cur != wantSource) {
-        await DetailScreen.prepareLeave();
-        await LiveScreen.prepareLeave();
+        await kotvStopBackgroundPlayback();
         await api.loadConfig(wantSource).timeout(const Duration(seconds: 45));
         ref.invalidate(configProvider);
         ref.invalidate(settingsProvider);
@@ -174,6 +218,7 @@ Future<void> openVodItem(
     if (!context.mounted) return;
   }
   // 仅 api 含 Config 的站弹出系统授权；未授予不进详情。
+  if (DetailScreen.isForeground && DetailScreen.matches(item.id, siteKey)) return;
   if (!await _gateSharedStorageWrite(context, ref, siteKey, force: false)) return;
   if (!context.mounted) return;
   Map<String, dynamic> data;
@@ -194,13 +239,28 @@ Future<void> openVodItem(
     return;
   }
   if (!context.mounted) return;
+  if (DetailScreen.isForeground && DetailScreen.matches(item.id, siteKey)) return;
+  final mark = fromFolder ? item.name : '';
+  if (DetailScreen.isForeground) {
+    await DetailScreen.retarget(
+      id: item.id,
+      site: siteKey,
+      title: item.name,
+      mark: mark,
+      initialDetail: data,
+    );
+    return;
+  }
+  await kotvStopBackgroundPlayback();
+  if (!context.mounted) return;
+  release();
   await Navigator.of(context).push(
     kotvDetailRoute(
       builder: (_) => DetailScreen(
         id: item.id,
         site: siteKey,
         title: item.name,
-        mark: fromFolder ? item.name : '',
+        mark: mark,
         initialDetail: data,
       ),
     ),

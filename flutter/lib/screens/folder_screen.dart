@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,7 @@ import '../providers.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../player/playback_guard.dart';
 import '../vod/vod_open.dart';
 
 /// `vod_tag=folder` 用 categoryContent(tid=vod_id) 进目录。
@@ -39,6 +42,9 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(kotvStopBackgroundPlayback(keepMini: true));
+    });
     _load(replace: true);
   }
 
@@ -149,15 +155,6 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
                                 title: Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis),
                                 subtitle: it.remarks.isEmpty ? null : Text(it.remarks),
                                 trailing: it.isFolder ? const Icon(Icons.chevron_right) : null,
-                                onTap: () => openVodItem(
-                                  context,
-                                  ref,
-                                  it,
-                                  site: widget.site,
-                                  fromFolder: true,
-                                  extend: widget.extend,
-                                ),
-                                onLongPress: it.hasAction || it.isFolder ? null : () => searchByName(ref, it.name),
                               ),
                             );
                           },
