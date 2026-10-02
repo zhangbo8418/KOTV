@@ -1,6 +1,20 @@
 import 'package:flutter/material.dart';
 
-/// 单行文案：未溢出普通显示；溢出且 [active] 时水平跑马灯。
+/// 外层焦点或悬停时，内部超长文案跟着跑马灯。
+class KotvMarqueeHost extends InheritedWidget {
+  const KotvMarqueeHost({super.key, required this.active, required super.child});
+
+  final bool active;
+
+  static bool activeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<KotvMarqueeHost>()?.active ?? false;
+  }
+
+  @override
+  bool updateShouldNotify(KotvMarqueeHost oldWidget) => active != oldWidget.active;
+}
+
+/// 单行文案：未溢出普通显示；溢出且 [active] 或外层焦点/悬停时水平跑马灯。
 ///
 /// 未激活时用 ellipsis，避免列表里上百行同时动画。
 class KotvMarqueeText extends StatefulWidget {
@@ -34,6 +48,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
   double _textW = 0;
   double _viewW = 0;
   bool _overflow = false;
+  bool _wantRun = false;
   String? _measuredText;
   TextStyle? _measuredStyle;
   double? _measuredViewW;
@@ -109,7 +124,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
   }
 
   void _syncAnim() {
-    final shouldRun = widget.active && _overflow && _viewW > 1 && _textW > _viewW;
+    final shouldRun = _wantRun && _overflow && _viewW > 1 && _textW > _viewW;
     if (!shouldRun) {
       if (_ctrl.isAnimating) _ctrl.stop();
       _ctrl.value = 0;
@@ -134,6 +149,13 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
+    final want = widget.active || KotvMarqueeHost.activeOf(context);
+    if (want != _wantRun) {
+      _wantRun = want;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncAnim();
+      });
+    }
     final scaler = MediaQuery.textScalerOf(context);
     final style = _effectiveStyle();
     return LayoutBuilder(
@@ -148,7 +170,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
           }
         }
 
-        if (!_overflow || !widget.active) {
+        if (!_overflow || !_wantRun) {
           return SizedBox(
             width: maxW.isFinite && maxW > 0 ? maxW : null,
             child: Text(

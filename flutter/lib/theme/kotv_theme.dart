@@ -6,6 +6,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 
 import '../player/kotv_platform.dart';
+import '../widgets/marquee_text.dart';
 import 'kotv_palette.dart';
 
 /// lumen 默认色板（兼容旧引用；新代码优先 [KotvPalette.of]）。
@@ -213,6 +214,7 @@ class TvFocus extends StatefulWidget {
 
 class _TvFocusState extends State<TvFocus> {
   bool _highlight = false;
+  bool _hovered = false;
 
   /// 深色面板上过暗的 focus 色会「看不见」；抬亮一档做描边。
   Color _ringColor(Color focus) {
@@ -239,30 +241,43 @@ class _TvFocusState extends State<TvFocus> {
         }),
       },
       // opaque：透明边框区域也要接到点击（手机顶栏胶囊常见点偏失效）
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onPressed,
-        onLongPress: widget.onLongPress,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(widget.borderRadius),
-            color: _highlight ? ring.withOpacity(0.22) : null,
-            border: Border.all(
-              color: _highlight ? ring : Colors.transparent,
-              width: _highlight ? 3 : 0,
+      child: MouseRegion(
+        onEnter: (_) {
+          if (_hovered) return;
+          setState(() => _hovered = true);
+        },
+        onExit: (_) {
+          if (!_hovered) return;
+          setState(() => _hovered = false);
+        },
+        child: KotvMarqueeHost(
+          active: _highlight || _hovered,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onPressed,
+            onLongPress: widget.onLongPress,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(widget.borderRadius),
+                color: _highlight ? ring.withOpacity(0.22) : null,
+                border: Border.all(
+                  color: _highlight ? ring : Colors.transparent,
+                  width: _highlight ? 3 : 0,
+                ),
+                boxShadow: _highlight
+                    ? [
+                        BoxShadow(
+                          color: ring.withOpacity(0.55),
+                          blurRadius: 14,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: widget.child,
             ),
-            boxShadow: _highlight
-                ? [
-                    BoxShadow(
-                      color: ring.withOpacity(0.55),
-                      blurRadius: 14,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
           ),
-          child: widget.child,
         ),
       ),
     );

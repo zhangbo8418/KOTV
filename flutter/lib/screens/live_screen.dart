@@ -2252,14 +2252,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final p = KotvPalette.of(context);
       return Padding(
         padding: const EdgeInsets.only(bottom: 4),
-        child: _LiveEpgFocusTile(
+        child: TvFocus(
           autofocus: focusHere,
           focusNode: focusHere ? _epgFocus : null,
           borderRadius: 8,
           onPressed: canCatchup ? activate : null,
-          builder: (focused) {
-            final active = sel || focused;
-            return Material(
+          child: Material(
               color: sel
                   ? p.selected.withOpacity(playing ? 0.95 : 0.75)
                   : p.pillBg.withOpacity(0.7),
@@ -2285,7 +2283,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                     Expanded(
                       child: KotvMarqueeText(
                         label,
-                        active: active,
+                        active: sel,
                         style: TextStyle(
                           color: sel ? Colors.white : p.fg,
                           fontSize: 13,
@@ -2302,22 +2300,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   ],
                 ),
               ),
-            );
-          },
+            ),
         ),
       );
     }
 
     return Padding(
       padding: EdgeInsets.only(bottom: land ? 2 : 4),
-      child: _LiveEpgFocusTile(
+      child: TvFocus(
         autofocus: focusHere,
         focusNode: focusHere ? _epgFocus : null,
         borderRadius: 6,
         onPressed: canCatchup ? activate : null,
-        builder: (focused) {
-          final active = sel || focused;
-          return Material(
+        child: Material(
             color: sel
                 ? (playing ? const Color(0xE0C73C62) : const Color(0xB0C73C62))
                 : const Color(0x9918161E),
@@ -2347,7 +2342,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   Expanded(
                     child: KotvMarqueeText(
                       '$label${playing ? ' · 回看中' : (canCatchup ? ' · 回看' : '')}',
-                      active: active,
+                      active: sel,
                       style: TextStyle(
                         color: Colors.white.withOpacity(sel ? 1 : 0.85),
                         fontSize: land ? 12 : (12.0 * wScale.clamp(1.0, 1.2)),
@@ -2359,8 +2354,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 ],
               ),
             ),
-          );
-        },
+          ),
       ),
     );
   }
@@ -2946,7 +2940,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                       Expanded(
                                                         child: KotvMarqueeText(
                                                           name,
-                                                          active: sel || focusHere,
+                                                          active: sel,
                                                           style: TextStyle(
                                                             color: Colors.white,
                                                             fontSize: land ? 12 : (15.0 * wScale.clamp(1.0, 1.2)),
@@ -3643,12 +3637,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 final sel = i == _groupIdx;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 3),
-                  child: Material(
-                    color: sel ? p.selected : p.pillBg.withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(6),
-                    child: InkWell(
+                  child: TvFocus(
+                    borderRadius: 6,
+                    onPressed: () => _selectGroup(i),
+                    child: Material(
+                      color: sel ? p.selected : p.pillBg.withOpacity(0.7),
                       borderRadius: BorderRadius.circular(6),
-                      onTap: () => _selectGroup(i),
                       child: Container(
                         width: double.infinity,
                         constraints: const BoxConstraints(minHeight: 28),
@@ -3684,13 +3678,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               final sel = i == _chIdx;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 3),
-                child: Material(
-                  color: sel ? p.selected.withOpacity(0.28) : p.pillBg.withOpacity(0.55),
-                  borderRadius: BorderRadius.circular(6),
-                  child: InkWell(
+                child: TvFocus(
+                  borderRadius: 6,
+                  onPressed: () => _selectChannelFromList(i),
+                  onLongPress: () => unawaited(_toggleChannelFav(i)),
+                  child: Material(
+                    color: sel ? p.selected.withOpacity(0.28) : p.pillBg.withOpacity(0.55),
                     borderRadius: BorderRadius.circular(6),
-                    onTap: () => _selectChannelFromList(i),
-                    onLongPress: () => unawaited(_toggleChannelFav(i)),
                     child: SizedBox(
                       height: 36,
                       child: Padding(
@@ -3767,75 +3761,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 ),
         ),
       ],
-    );
-  }
-}
-
-/// EPG 项：焦点环 + 真实获焦时跑马灯（不把 now/回看当成永久焦点）。
-class _LiveEpgFocusTile extends StatefulWidget {
-  const _LiveEpgFocusTile({
-    required this.builder,
-    this.onPressed,
-    this.autofocus = false,
-    this.focusNode,
-    this.borderRadius = 6,
-  });
-
-  final Widget Function(bool focused) builder;
-  final VoidCallback? onPressed;
-  final bool autofocus;
-  final FocusNode? focusNode;
-  final double borderRadius;
-
-  @override
-  State<_LiveEpgFocusTile> createState() => _LiveEpgFocusTileState();
-}
-
-class _LiveEpgFocusTileState extends State<_LiveEpgFocusTile> {
-  bool _highlight = false;
-
-  Color _ringColor(Color focus) {
-    if (focus.computeLuminance() >= 0.4) return focus;
-    return Color.lerp(focus, Colors.white, 0.55) ?? focus;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ring = _ringColor(KotvPalette.of(context).focus);
-    return FocusableActionDetector(
-      focusNode: widget.focusNode,
-      autofocus: widget.autofocus,
-      onShowFocusHighlight: (v) {
-        if (_highlight == v) return;
-        setState(() => _highlight = v);
-      },
-      actions: <Type, Action<Intent>>{
-        ActivateIntent: CallbackAction<ActivateIntent>(
-          onInvoke: (_) {
-            widget.onPressed?.call();
-            return null;
-          },
-        ),
-      },
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onPressed,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(widget.borderRadius),
-            color: _highlight ? ring.withOpacity(0.22) : null,
-            border: Border.all(
-              color: _highlight ? ring : Colors.transparent,
-              width: _highlight ? 3 : 0,
-            ),
-            boxShadow: _highlight
-                ? [BoxShadow(color: ring.withOpacity(0.55), blurRadius: 14, spreadRadius: 1)]
-                : null,
-          ),
-          child: widget.builder(_highlight),
-        ),
-      ),
     );
   }
 }
