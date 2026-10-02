@@ -17,7 +17,6 @@ import '../widgets/dialogs.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
 import '../widgets/poster_card.dart';
-import '../player/playback_guard.dart';
 import '../vod/vod_open.dart';
 import 'detail_screen.dart';
 import 'live_screen.dart';
@@ -55,10 +54,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(kotvStopBackgroundPlayback(keepMini: true));
-      _bootstrap();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
     _bannerTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted || _tid != null) return;
       final n = _apiBanners.isNotEmpty ? _apiBanners.length : _bannerSlides.length;
@@ -211,12 +207,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         return;
       }
 
-      final api = ref.read(apiProvider);
-      final data = _tid == null || _tid!.isEmpty
-          ? await api.home().timeout(const Duration(seconds: 25))
-          : await api
-              .category(_tid!, pg: '1', extend: Map<String, String>.from(_extend))
-              .timeout(const Duration(seconds: 25));
+      final data = await _fetchFirstPage(gen);
       if (!mounted || gen != _loadGen) return;
       _applyPage(data, replace: true);
       await _fillHomeRecommendIfEmpty(gen);
@@ -233,12 +224,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         final ok = await ref.read(engineLauncherProvider).recoverIfNeeded();
         if (ok) {
           try {
-            final api = ref.read(apiProvider);
-            final data = _tid == null || _tid!.isEmpty
-                ? await api.home().timeout(const Duration(seconds: 25))
-                : await api
-                    .category(_tid!, pg: '1', extend: Map<String, String>.from(_extend))
-                    .timeout(const Duration(seconds: 25));
+            final data = await _fetchFirstPage(gen);
             if (!mounted || gen != _loadGen) return;
             _applyPage(data, replace: true);
             await _fillHomeRecommendIfEmpty(gen);
@@ -254,6 +240,29 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       setState(() => _statusMsg = msg);
     } finally {
       if (mounted && gen == _loadGen) setState(() => _loading = false);
+    }
+  }
+
+  /// 首屏：分类页单次 25s；首页在超时 / 换源作废时接着请求（换仓后 jar 冷启动可达 30~90s，
+  /// 引擎 singleflight 会把这次加载跑完并缓存），总共约 100s。
+  Future<Map<String, dynamic>> _fetchFirstPage(int gen) async {
+    final api = ref.read(apiProvider);
+    final tid = _tid;
+    if (tid != null && tid.isNotEmpty) {
+      return api
+          .category(tid, pg: '1', extend: Map<String, String>.from(_extend))
+          .timeout(const Duration(seconds: 25));
+    }
+    const attempts = 4;
+    for (var i = 0;; i++) {
+      try {
+        return await api.home().timeout(const Duration(seconds: 25));
+      } catch (e) {
+        final msg = '$e';
+        final retry = msg.contains('Timeout') || msg.contains('首页加载已取消');
+        if (!retry || i >= attempts - 1 || !mounted || gen != _loadGen) rethrow;
+        setState(() => _statusMsg = '正在加载首页…');
+      }
     }
   }
 
@@ -429,8 +438,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   Future<void> _openSitePicker(List<SiteInfo> sites) async {
     if (sites.isEmpty) {
-      await showAddVodDialog(context, ref);
-      await _reload();
+      await _addSource();
       return;
     }
     await showSitePicker(
@@ -476,9 +484,15 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   Future<void> _addSource() async {
-    await showAddVodDialog(context, ref);
+    final loaded = await showAddVodDialog(context, ref);
+    if (!mounted) return;
     await _refreshLocalMeta();
-    await _reload();
+    if (!loaded || !mounted) return;
+    setState(() {
+      _tid = null;
+      _extend.clear();
+    });
+    await _reload(clearContent: true);
   }
 
   @override

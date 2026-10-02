@@ -12,7 +12,6 @@ import '../theme/kotv_palette.dart';
 import '../widgets/chrome.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/poster_card.dart';
-import '../player/playback_guard.dart';
 import '../vod/vod_open.dart';
 import 'shell.dart';
 
@@ -51,7 +50,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     super.initState();
     _loadHot();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(kotvStopBackgroundPlayback(keepMini: true));
       final pending = ref.read(pendingSearchProvider);
       if (pending != null && pending.isNotEmpty) {
         _ctrl.text = pending;

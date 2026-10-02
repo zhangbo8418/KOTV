@@ -14,7 +14,6 @@ import '../api/kotv_auth_token.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
-import '../player/playback_guard.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/mpv_opts.dart';
@@ -67,9 +66,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(kotvStopBackgroundPlayback(keepMini: true));
-    });
     SharedPreferences.getInstance().then((p) async {
       final draft = p.getString('engine_base_url_draft') ?? '';
       final effective = p.getString('engine_base_url') ?? '';
@@ -1660,8 +1656,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showAppNews(context, msg);
   }
 
-  Future<void> _applyEngineUrl(String raw) async {
+  /// 切换业务引擎：[baseUrl] 为空即本机。写 prefs → 换地址 → 作废缓存 →
+  /// 本机未运行则拉起 → 重新加载本页（点播源 / 直播源 / 线路等换成新引擎的数据）。
+  Future<void> _switchEngine(String baseUrl, {String user = ''}) async {
     final launcher = ref.read(engineLauncherProvider);
+    final prefs = await SharedPreferences.getInstance();
+    if (baseUrl.isEmpty) {
+      await prefs.remove('engine_base_url');
+      await prefs.remove('remote_username');
+    } else {
+      await prefs.setString('engine_base_url', baseUrl);
+      await prefs.setString('remote_username', user);
+    }
+    launcher.applyBaseUrl(baseUrl);
+    ref.read(apiProvider).baseUrl = launcher.baseUrl;
+    ref.invalidate(engineReadyProvider);
+    ref.invalidate(configProvider);
+    ref.invalidate(settingsProvider);
+    if (!mounted) return;
+    setState(() => _remoteUser = user);
+    if (baseUrl.isEmpty) {
+      try {
+        await launcher.recoverIfNeeded();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    await _reload();
+  }
+
+  Future<void> _applyEngineUrl(String raw) async {
     final normalized = kotvNormalizeEngineBaseUrl(raw);
     _engineCtrl.text = normalized;
     final prefs = await SharedPreferences.getInstance();
@@ -1669,20 +1692,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // 空 / 本机：立即切回本机，清远端登录态
     if (normalized.isEmpty || kotvIsLocalEngineBaseUrl(normalized)) {
       await prefs.remove('engine_base_url_draft');
-      await prefs.remove('engine_base_url');
-      await prefs.remove('remote_username');
       await kotvClearAuthToken();
-      launcher.applyBaseUrl('');
-      ref.read(apiProvider).baseUrl = launcher.baseUrl;
+      await _switchEngine('');
       if (!mounted) return;
-      setState(() {
-        _remoteUser = '';
-        _status = '已使用本机引擎';
-      });
-      ref.invalidate(engineReadyProvider);
-      ref.invalidate(configProvider);
-      ref.invalidate(settingsProvider);
-      showAppNews(context, '已切换为本机引擎\n${launcher.baseUrl}');
+      setState(() => _status = '已使用本机引擎');
+      showAppNews(context, '已切换为本机引擎\n${ref.read(engineLauncherProvider).baseUrl}');
       return;
     }
 
@@ -1741,41 +1755,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
 
     // 登录成功：才切换业务引擎
-    await prefs.setString('engine_base_url', normalized);
-    await prefs.setString('remote_username', login.username);
-    launcher.applyBaseUrl(normalized);
-    ref.read(apiProvider).baseUrl = launcher.baseUrl;
-    setState(() {
-      _remoteUser = login.username;
-      _status = '远端已登录：${login.username}';
-    });
-    ref.invalidate(engineReadyProvider);
-    ref.invalidate(configProvider);
-    ref.invalidate(settingsProvider);
+    await _switchEngine(normalized, user: login.username);
+    if (!mounted) return;
+    setState(() => _status = '远端已登录：${login.username}');
     showAppNews(context, '登录成功\n用户：${login.username}\n$normalized');
   }
 
   Future<void> _logoutRemote() async {
-    final launcher = ref.read(engineLauncherProvider);
-    final prefs = await SharedPreferences.getInstance();
     try {
       await ref.read(apiProvider).logout();
     } catch (_) {
       await kotvClearAuthToken();
     }
-    await prefs.remove('engine_base_url');
-    await prefs.remove('remote_username');
     // draft 保留，方便再次登录
-    launcher.applyBaseUrl('');
-    ref.read(apiProvider).baseUrl = launcher.baseUrl;
+    await _switchEngine('');
     if (!mounted) return;
-    setState(() {
-      _remoteUser = '';
-      _status = '已退出远端，回到本机';
-    });
-    ref.invalidate(engineReadyProvider);
-    ref.invalidate(configProvider);
-    ref.invalidate(settingsProvider);
+    setState(() => _status = '已退出远端，回到本机');
     showAppNews(context, '已退出远端登录\n当前使用本机引擎');
   }
 

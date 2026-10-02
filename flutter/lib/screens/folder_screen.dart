@@ -8,7 +8,6 @@ import '../providers.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
-import '../player/playback_guard.dart';
 import '../vod/vod_open.dart';
 
 /// `vod_tag=folder` 用 categoryContent(tid=vod_id) 进目录。
@@ -42,9 +41,6 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(kotvStopBackgroundPlayback(keepMini: true));
-    });
     _load(replace: true);
   }
 

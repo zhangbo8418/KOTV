@@ -55,7 +55,7 @@ Future<bool> _gateSharedStorageWrite(BuildContext context, WidgetRef ref, String
 }
 
 /// detailContent 期间 jar 是否 finish 了详情层。读一次即清掉。
-Future<bool> _consumeJarDetailDismissed() async {
+Future<bool> kotvConsumeJarDetailDismissed() async {
   if (kIsWeb || !Platform.isAndroid) return false;
   try {
     const ch = MethodChannel('kotv_android');
@@ -221,25 +221,7 @@ Future<void> _openVodItemBody(
   if (DetailScreen.isForeground && DetailScreen.matches(item.id, siteKey)) return;
   if (!await _gateSharedStorageWrite(context, ref, siteKey, force: false)) return;
   if (!context.mounted) return;
-  Map<String, dynamic> data;
-  try {
-    data = await ref.read(apiProvider).detail(id: item.id, site: siteKey.isEmpty ? null : siteKey);
-  } catch (e) {
-    if (await _consumeJarDetailDismissed()) {
-      ref.read(vodContentEpochProvider.notifier).state++;
-      return;
-    }
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-    return;
-  }
-  // jar 在 detailContent 里 finish 了详情层：留在列表，不打开详情页。
-  if (await _consumeJarDetailDismissed()) {
-    ref.read(vodContentEpochProvider.notifier).state++;
-    return;
-  }
-  if (!context.mounted) return;
-  if (DetailScreen.isForeground && DetailScreen.matches(item.id, siteKey)) return;
+  // 先进详情页再拉详情：点了立刻跳转。jar 在 detailContent 里 finish 详情层由详情页自己出栈。
   final mark = fromFolder ? item.name : '';
   if (DetailScreen.isForeground) {
     await DetailScreen.retarget(
@@ -247,7 +229,6 @@ Future<void> _openVodItemBody(
       site: siteKey,
       title: item.name,
       mark: mark,
-      initialDetail: data,
     );
     return;
   }
@@ -261,7 +242,6 @@ Future<void> _openVodItemBody(
         site: siteKey,
         title: item.name,
         mark: mark,
-        initialDetail: data,
       ),
     ),
   );

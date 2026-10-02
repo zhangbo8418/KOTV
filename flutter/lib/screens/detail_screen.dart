@@ -62,7 +62,6 @@ class DetailScreen extends ConsumerStatefulWidget {
     this.site = '',
     this.title = '',
     this.mark = '',
-    this.initialDetail,
   });
 
   final String id;
@@ -70,8 +69,6 @@ class DetailScreen extends ConsumerStatefulWidget {
   final String title;
   /// 从目录点文件时按集名匹配并起播。
   final String mark;
-  /// 打开前已经拿到的详情，避免再请求一次。
-  final Map<String, dynamic>? initialDetail;
 
   /// 详情是否在栈上（含播放中 PopScope.canPop=false）。
   static bool get isOpen => _DetailScreenState._active != null;
@@ -99,7 +96,6 @@ class DetailScreen extends ConsumerStatefulWidget {
     required String site,
     required String title,
     required String mark,
-    Map<String, dynamic>? initialDetail,
   }) async {
     final active = _DetailScreenState._active;
     if (active == null || !active.mounted) return;
@@ -108,7 +104,6 @@ class DetailScreen extends ConsumerStatefulWidget {
       site: site,
       title: title,
       mark: mark,
-      initialDetail: initialDetail,
     );
   }
 
@@ -216,10 +211,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _chromeRemoteFocus = false;
   int _epPage = 0;
   bool _reversed = false;
-  /// 起播续播 seek（毫秒）；与片头合并后一次性 seek。
+  /// 起播续播 seek（毫秒）；与片头合并后在 play 之前一次性 seek。
   int _resumeSeekMs = 0;
-  /// READY 后再执行的起播 seek（续播/片头）。
-  int _pendingStartSeekMs = 0;
   DateTime? _lastProgressSave;
   String _configSource = '';
   bool _kept = false;
@@ -290,14 +283,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   DateTime? _suppressDetailPopUntil;
   KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
   final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_detail_video');
-  /// 量测详情页播控槽，供稳定 Positioned（Texture/PlatformView）宿主对齐。
-  /// 画面在 Stack 上层、不在 ListView 子树；滚动时必须同步槽位，否则钉死在首次位置。
-  /// [_videoLayerRect] 非全屏是黑槽相对详情 Stack 的矩形（与顶栏下内容区相交），
-  /// 全屏是整块 Stack。Surface 按这块矩形摆放，全屏只改矩形。
+  /// 画面层的位置由 [CompositedTransformFollower] 在合成期直接跟随黑槽
+  /// （[CompositedTransformTarget]），滚动 / 窗口缩放 / 顶栏高度变化都不会错位；
+  /// [_videoLayerRect] 只提供尺寸（非全屏）或整屏矩形（全屏）。
+  /// 画面叠在 Scaffold 之上，必须裁到 [_bodyClipRect]（顶栏下 Expanded），
+  /// 否则下滑会盖住顶栏。
+  final LayerLink _videoLink = LayerLink();
   final GlobalKey _videoSlotKey = GlobalKey(debugLabel: 'kotv_detail_video_slot');
   final GlobalKey _detailStackKey = GlobalKey(debugLabel: 'kotv_detail_stack');
   final GlobalKey _bodyClipKey = GlobalKey(debugLabel: 'kotv_detail_body_clip');
   Rect? _videoLayerRect;
+  Rect? _bodyClipRect;
   bool _videoSlotSyncScheduled = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
@@ -349,8 +345,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String _routeSite = '';
   String _routeTitle = '';
   String _routeMark = '';
-  Map<String, dynamic>? _routeInitial;
-
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
   bool get _useMpv => _backend == KotvEmbedBackend.mpv;
@@ -589,7 +583,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _routeSite = widget.site;
     _routeTitle = widget.title;
     _routeMark = widget.mark;
-    _routeInitial = widget.initialDetail;
     WidgetsBinding.instance.addObserver(this);
     _api = ref.read(apiProvider);
     _active = this;
@@ -607,13 +600,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     required String site,
     required String title,
     required String mark,
-    Map<String, dynamic>? initialDetail,
   }) async {
     _routeId = id;
     _routeSite = site;
     _routeTitle = title;
     _routeMark = mark;
-    _routeInitial = initialDetail;
     _epIdx = -1;
     _flagIdx = 0;
     if (_miniDesktop) {
@@ -1069,15 +1060,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _markPlaybackLiveIfNeeded();
     if (!_playbackLive || _endConsumedGen == _playGen) return;
     final dur = _playback.duration;
-    if (_pendingStartSeekMs > 0) {
-      final ms = _pendingStartSeekMs;
-      _pendingStartSeekMs = 0;
-      _openingSeekDone = true;
-      if (pos.inMilliseconds + 800 < ms) {
-        unawaited(_playback.seek(Duration(milliseconds: ms)));
-        return;
-      }
-    }
     if (dur.inMilliseconds > 0 && pos.inMilliseconds >= 5000) {
       final now = DateTime.now();
       if (_lastProgressSave == null || now.difference(_lastProgressSave!) >= const Duration(seconds: 5)) {
@@ -1249,10 +1231,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _error = null;
     });
     try {
-      final seeded = _routeInitial;
-      _routeInitial = null;
-      final data = seeded ??
-          await ref.read(apiProvider).detail(id: _routeId, site: _routeSite);
+      Object? fetchError;
+      Map<String, dynamic>? fetched;
+      try {
+        fetched = await ref.read(apiProvider).detail(id: _routeId, site: _routeSite);
+      } catch (e) {
+        fetchError = e;
+      }
+      // jar 在 detailContent 里 finish 了详情层：本页出栈回列表；首页由 openVodItem 在 push 返回后刷新。
+      if (await kotvConsumeJarDetailDismissed()) {
+        if (mounted) await _leavePage();
+        return;
+      }
+      if (fetchError != null) throw fetchError;
+      if (!mounted) return;
+      final data = fetched!;
       final vod = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
       final id = vod.id.isNotEmpty ? vod.id : _routeId;
       final site = vod.site.isNotEmpty ? vod.site : _routeSite;
@@ -1416,14 +1409,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _reversed = rev;
         _loading = false;
       });
-      final needExpand = data['magnet'] == true || _detailHasMagnet(vod);
-      if (needExpand && mounted) {
-        // 先展开再起播，避免异步 expand 与 _playAt 竞态清空选集。
-        await _expandMagnet(id: id, site: site);
-        if (mounted) await _resumeOrAutoPlay();
-      } else {
-        unawaited(_resumeOrAutoPlay());
-      }
       final off = await LocalPlayOffsets.get(id, site);
       if (mounted) {
         setState(() {
@@ -1431,7 +1416,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           _endingSec = off.$2;
         });
       }
+      if (!mounted) return;
+      final needExpand = data['magnet'] == true || _detailHasMagnet(vod);
+      if (needExpand) {
+        // 先展开再起播，避免异步 expand 与 _playAt 竞态清空选集。
+        await _expandMagnet(id: id, site: site);
+        if (mounted) await _resumeOrAutoPlay();
+      } else {
+        unawaited(_resumeOrAutoPlay());
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = '$e';
         _loading = false;
@@ -1942,7 +1937,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _lastVideoW = 0;
     _lastVideoH = 0;
     _openingSeekDone = false;
-    _pendingStartSeekMs = 0;
     _endedSub?.cancel();
     _endedSub = null;
     _posSub?.cancel();
@@ -2198,6 +2192,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             drm: hasDrm ? drm : null,
             format: '${data['format'] ?? ''}'.trim().isEmpty ? null : '${data['format']}'.trim(),
           );
+          // 续播与片头合成一个起点，在 play 之前 seek；进度回调不再对同一点前跳。
+          final resumeMs = _resumeSeekMs;
+          _resumeSeekMs = 0;
+          final startMs = _skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs;
+          if (startMs > 0) {
+            try {
+              await pb.seek(Duration(milliseconds: startMs));
+            } catch (_) {}
+          }
+          if (_skipOpeningEnding) _openingSeekDone = true;
           try {
             await _playback.play();
           } catch (_) {}
@@ -2228,10 +2232,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         throw lastOpenError ?? const KotvSilentVideoException();
       }
       if (serial != _playAtSerial || !mounted) return;
-      // 续播与片头合并；关「跳过片头片尾」时 pending 只用续播点。
-      final resumeMs = _resumeSeekMs;
-      _resumeSeekMs = 0;
-      _pendingStartSeekMs = _skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs;
       // 音量/倍速已在 open 前套好；稳定音量用轻量 dynaudnorm，起播后立刻挂，勿再拖 800ms。
       if (_stableVolumeOn) {
         try {
@@ -2276,7 +2276,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       // 仍未 READY：等进度回调 _markPlaybackLiveIfNeeded（STATE_READY 才挂 Clock）
       _playbackLive = false;
       _sessionStartedAt = DateTime.now();
-      _openingSeekDone = false;
       if (gen == _playGen) {
         _wireEnded(_playback);
         _wirePosition(_playback);
@@ -2404,59 +2403,72 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _syncVideoSlotRect();
     });
   }
-  /// 非全屏：黑槽相对详情 Stack 的矩形，再与顶栏下内容区相交。
+  /// 非全屏：黑槽尺寸（LayerLink 管位置）+ 内容区裁剪矩形（防盖顶栏）。
   void _syncVideoSlotRect() {
     if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
     final slotBox = _videoSlotKey.currentContext?.findRenderObject() as RenderBox?;
     final bodyBox = _bodyClipKey.currentContext?.findRenderObject() as RenderBox?;
     final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
-    if (slotBox == null || stackBox == null || !slotBox.hasSize || !stackBox.hasSize) return;
-    if (!slotBox.attached || !stackBox.attached) return;
 
-    late final Rect next;
-    try {
-      var measured = slotBox.localToGlobal(Offset.zero, ancestor: stackBox) & slotBox.size;
-      if (bodyBox != null && bodyBox.hasSize && bodyBox.attached) {
-        final body = bodyBox.localToGlobal(Offset.zero, ancestor: stackBox) & bodyBox.size;
-        measured = measured.intersect(body);
-      }
-      next = measured;
-    } catch (_) {
-      return;
+    Size? nextSlot;
+    if (slotBox != null && slotBox.hasSize && slotBox.attached) {
+      final s = slotBox.size;
+      if (s.width >= 1 && s.height >= 1) nextSlot = s;
     }
 
-    final prev = _videoLayerRect;
-    final empty = next.width < 1 || next.height < 1;
-    if (empty) {
-      if (prev == null || prev.width < 1 || prev.height < 1) return;
-      setState(() => _videoLayerRect = null);
-      return;
+    Rect? nextClip;
+    if (bodyBox != null &&
+        stackBox != null &&
+        bodyBox.hasSize &&
+        stackBox.hasSize &&
+        bodyBox.attached &&
+        stackBox.attached) {
+      try {
+        final o = bodyBox.localToGlobal(Offset.zero, ancestor: stackBox);
+        final r = o & bodyBox.size;
+        if (r.width >= 1 && r.height >= 1) nextClip = r;
+      } catch (_) {}
     }
-    if (prev != null &&
-        (prev.left - next.left).abs() < 0.5 &&
-        (prev.top - next.top).abs() < 0.5 &&
-        (prev.width - next.width).abs() < 0.5 &&
-        (prev.height - next.height).abs() < 0.5) {
-      return;
-    }
-    setState(() => _videoLayerRect = next);
+
+    final prevSlot = _videoLayerRect;
+    final prevClip = _bodyClipRect;
+    final slotSame = nextSlot == null ||
+        (prevSlot != null &&
+            (prevSlot.width - nextSlot.width).abs() < 0.5 &&
+            (prevSlot.height - nextSlot.height).abs() < 0.5);
+    final clipSame = nextClip == null ||
+        (prevClip != null &&
+            (prevClip.left - nextClip.left).abs() < 0.5 &&
+            (prevClip.top - nextClip.top).abs() < 0.5 &&
+            (prevClip.width - nextClip.width).abs() < 0.5 &&
+            (prevClip.height - nextClip.height).abs() < 0.5);
+    if (slotSame && clipSame) return;
+    setState(() {
+      if (nextSlot != null) _videoLayerRect = Offset.zero & nextSlot;
+      if (nextClip != null) _bodyClipRect = nextClip;
+    });
   }
-  /// 黑槽占位。LayoutBuilder 捕获不经 rebuild 的尺寸变化（窗口缩放、顶栏高度）。
+  /// 黑槽占位：[CompositedTransformTarget] 供画面层跟随；LayoutBuilder 捕获
+  /// 不经 rebuild 的布局变化（窗口缩放、顶栏高度变化）刷新尺寸。
   Widget _buildVideoSlot() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final size = constraints.biggest;
-        final prev = _videoLayerRect;
-        if (!_immersiveFullscreen &&
-            size.width >= 1 &&
-            size.height >= 1 &&
-            (prev == null ||
-                (prev.width - size.width).abs() >= 0.5 ||
-                (prev.height - size.height).abs() >= 0.5)) {
-          _scheduleSyncVideoSlot();
-        }
-        return ColoredBox(key: _videoSlotKey, color: Colors.black);
-      },
+    return CompositedTransformTarget(
+      link: _videoLink,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = constraints.biggest;
+          final prev = _videoLayerRect;
+          if (!_immersiveFullscreen &&
+              size.width >= 1 &&
+              size.height >= 1 &&
+              (prev == null ||
+                  _bodyClipRect == null ||
+                  (prev.width - size.width).abs() >= 0.5 ||
+                  (prev.height - size.height).abs() >= 0.5)) {
+            _scheduleSyncVideoSlot();
+          }
+          return ColoredBox(key: _videoSlotKey, color: Colors.black);
+        },
+      ),
     );
   }
   /// [stackSize]：详情 Stack 实测约束。沉浸全屏勿用 MediaQuery 整窗尺寸——
@@ -2484,12 +2496,41 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return ValueListenableBuilder<double>(
       valueListenable: _fsSwipeDy,
       builder: (context, swipeDy, child) {
+        if (_immersiveFullscreen) {
+          return Positioned(
+            left: rect.left,
+            top: rect.top + swipeDy,
+            width: rect.width,
+            height: rect.height,
+            child: child!,
+          );
+        }
+        // 非全屏：Follower 跟黑槽；外层裁到 Expanded（顶栏下），下滑不会盖住顶栏。
+        final clip = _bodyClipRect;
+        if (clip == null || clip.width < 1 || clip.height < 1) {
+          return const SizedBox.shrink();
+        }
         return Positioned(
-          left: rect.left,
-          top: rect.top + (_immersiveFullscreen ? swipeDy : 0),
-          width: rect.width,
-          height: rect.height,
-          child: child!,
+          left: clip.left,
+          top: clip.top,
+          width: clip.width,
+          height: clip.height,
+          child: ClipRect(
+            child: Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                CompositedTransformFollower(
+                  link: _videoLink,
+                  showWhenUnlinked: false,
+                  child: SizedBox(
+                    width: rect.width,
+                    height: rect.height,
+                    child: ClipRect(child: child),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
       child: GestureDetector(
@@ -3034,6 +3075,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _immersiveFullscreen = false;
         _immersiveEpCover = false;
         _videoLayerRect = null;
+        _bodyClipRect = null;
       });
       // 黑槽需重新进树后量测：同帧可能仍为空，再排一次。
       _syncVideoSlotRect();

@@ -248,6 +248,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   /// 切 Tab / 离开直播：先 pause 停声，再 stop + release（不改音量）。
   Future<void> _releaseAllBackends() async {
+    // 作废进行中的起播：否则 livePlay 返回后会经 [_playback] 新建一个无人管的播放器。
+    _playSerial++;
+    _unwireLivePlaybackErrors();
+    _unwireLivePlaybackEnded();
     Future<void> softPause(KotvPlayback? p) async {
       if (p == null) return;
       try {
@@ -445,6 +449,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   @override
   void dispose() {
+    _playSerial++;
     WidgetsBinding.instance.removeObserver(this);
     _detachRemoteHandlers();
     if (_active == this) _active = null;
@@ -490,6 +495,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final mkPlayer = _mkPlayer;
     _mkPlayer = null;
     _mk = null;
+    _fvp = null;
+    _exo = null;
+    _html = null;
+    _art = null;
+    _xg = null;
+    _zw = null;
     unawaited(kotvDisposeMpvPlayer(mkPlayer));
     super.dispose();
   }
@@ -594,6 +605,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _bootstrap() async {
+    final serial = _playSerial;
     await DetailScreen.prepareLeave();
     if (!mounted) return;
     setState(() {
@@ -704,7 +716,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final keepSrc = await _preferredSourceIndex();
       if (!mounted) return;
       // 全平台一致：有上次记录则恢复频道，否则自动播第一个可用频道。
-      await _loadSource(keepSrc, autoPlay: true);
+      await _loadSource(keepSrc, autoPlay: serial == _playSerial);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -820,6 +832,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _loadSource(int index, {bool autoPlay = false}) async {
     if (!mounted) return;
+    // 加载期间离开直播或已手动选台：不再自动起播。
+    final serial = _playSerial;
     setState(() {
       _loading = true;
       _srcIdx = index;
@@ -834,7 +848,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     try {
       final data = await ref.read(apiProvider).liveLoad(index: index);
       if (!mounted) return;
-      _groups = ((data['groups'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      // 频道一次性转成 typed list：[_channels] 直接返回，build 里不再整表复制。
+      _groups = ((data['groups'] as List?) ?? []).whereType<Map>().map((e) {
+        final g = Map<String, dynamic>.from(e);
+        g['channels'] = ((g['channels'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((c) => Map<String, dynamic>.from(c))
+            .toList();
+        return g;
+      }).toList();
       await _loadFavNames();
       _applyFavoriteGroup();
       _groupIdx = 0;
@@ -844,7 +866,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _title = '${data['name'] ?? '直播'}';
         _status = _liveIdleStatus;
       });
-      if (autoPlay) {
+      if (autoPlay && serial == _playSerial) {
         final restored = await _tryRestoreKeep();
         if (!mounted) return;
         if (!restored) await _playFirstChannel();
@@ -931,7 +953,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   List<Map<String, dynamic>> get _channels {
     if (_groups.isEmpty) return const [];
     final g = _groups[_groupIdx.clamp(0, _groups.length - 1)];
-    return ((g['channels'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    final chs = g['channels'];
+    return chs is List<Map<String, dynamic>> ? chs : const [];
   }
 
   bool _groupLocked(int i) {
@@ -1063,6 +1086,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _openLiveUrl(
     String url, {
+    required int serial,
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = true,
@@ -1089,36 +1113,39 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       lockExoForDrm: hasDrm && kotvIsAndroid(),
       enabled: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover) && !hasDrm,
     );
+    bool stale() => !mounted || serial != _playSerial;
     Object? lastError;
     for (var attempt = 0; attempt < 8; attempt++) {
+      if (stale()) return;
       failover.markAttempt();
       _playerVal = failover.playerVal;
       _decodeMode = failover.decodeMode;
       await _stopInactiveBackends(_backend);
+      if (stale()) return;
       final openUrl = url;
       final openHeaders = headers;
-      if (mounted) {
-        setState(() {
-          _playUrl = openUrl;
-          _playHeaders = openHeaders;
-          _playDrm = hasDrm ? drm : null;
-          _playerVal = failover.playerVal;
-          _decodeMode = failover.decodeMode;
-        });
-        await WidgetsBinding.instance.endOfFrame;
-      } else {
+      setState(() {
         _playUrl = openUrl;
         _playHeaders = openHeaders;
         _playDrm = hasDrm ? drm : null;
-      }
+        _playerVal = failover.playerVal;
+        _decodeMode = failover.decodeMode;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+      if (stale()) return;
       _syncAndroidAutoPip();
       final pb = _playback;
       await pb.setDecodeMode(failover.decodeMode);
       await pb.setRenderMode(_renderMode);
+      if (stale()) return;
       try {
         // 直播页 live=true：直链立刻 play（含 EPG 回看时移流）。
         // 不写 demuxer-max-bytes / cache-secs；无 Flutter play:false 等缓冲。
         await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null, live: live, format: format);
+        if (stale()) {
+          await _dropStalePlayback(pb);
+          return;
+        }
         unawaited(pb.setVideoScale(_liveScale));
         if (_backend != KotvEmbedBackend.mpv) {
           try {
@@ -1132,24 +1159,49 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         lastError = e;
         if (!failover.enabled) return;
       }
+      if (stale()) {
+        await _dropStalePlayback(pb);
+        return;
+      }
       final step = failover.nextStep();
       if (step == null) break;
-      if (mounted) {
-        setState(() {
-          _playerVal = step.playerVal;
-          _decodeMode = step.decodeMode;
-          _status = step.status;
-        });
-      } else {
+      setState(() {
         _playerVal = step.playerVal;
         _decodeMode = step.decodeMode;
-      }
+        _status = step.status;
+      });
       try {
         await pb.stop();
       } catch (_) {}
     }
     if (lastError != null) throw lastError;
     throw const KotvSilentVideoException();
+  }
+
+  /// 起播途中已作废：实例仍归本页（换台）交给新一次起播；
+  /// 已被 [_releaseAllBackends] 摘掉（离开直播）则停掉并 dispose，避免后台出声。
+  Future<void> _dropStalePlayback(KotvPlayback pb) async {
+    final owned = identical(pb, _mk) ||
+        identical(pb, _fvp) ||
+        identical(pb, _exo) ||
+        identical(pb, _html) ||
+        identical(pb, _art) ||
+        identical(pb, _xg) ||
+        identical(pb, _zw);
+    if (owned) return;
+    try {
+      await pb.pause();
+    } catch (_) {}
+    try {
+      await pb.release();
+    } catch (_) {
+      try {
+        await pb.stop();
+      } catch (_) {}
+    }
+    try {
+      pb.dispose();
+    } catch (_) {}
   }
 
   void _unwireLivePlaybackErrors() {
@@ -1428,7 +1480,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _line = (data['line'] as int?) ?? useLine;
       _lineName = '${data['lineName'] ?? ''}'.trim();
       final format = '${data['format'] ?? ''}'.trim();
-      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, drm: drm, format: format.isEmpty ? null : format);
+      await _openLiveUrl(url, serial: serial, headers: headers.isEmpty ? null : headers, drm: drm, format: format.isEmpty ? null : format);
       if (!mounted || serial != _playSerial) return;
       setState(() => _status = '播放中 · $_title');
       // 换台亮底栏频道信息，约 5s 收起。
@@ -1488,7 +1540,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       };
       final drmRaw = data['drm'];
       final drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
-      await _openLiveUrl(url, headers: headers.isEmpty ? null : headers, drm: drm, live: true);
+      await _openLiveUrl(url, serial: serial, headers: headers.isEmpty ? null : headers, drm: drm, live: true);
       if (!mounted || serial != _playSerial) return;
       setState(() {
         _title = '${data['name'] ?? _title}';
@@ -1760,7 +1812,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (_playUrl.isNotEmpty) {
       final pos = _playback.position;
       // 直播/回看均 live 起播；回看再 seek 回原进度。
-      await _openLiveUrl(_playUrl, headers: _playHeaders, drm: _playDrm, live: true);
+      final serial = ++_playSerial;
+      await _openLiveUrl(_playUrl, serial: serial, headers: _playHeaders, drm: _playDrm, live: true);
+      if (!mounted || serial != _playSerial) return;
       if (pos > Duration.zero) await _playback.seek(pos);
     }
   }
@@ -1812,9 +1866,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       }
       if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
         final pos = _playback.position;
-        await _openLiveUrl(_playUrl, headers: _playHeaders, drm: _playDrm, live: true);
+        final serial = ++_playSerial;
+        await _openLiveUrl(_playUrl, serial: serial, headers: _playHeaders, drm: _playDrm, live: true);
+        if (!mounted || serial != _playSerial) return;
         if (pos > Duration.zero) await _playback.seek(pos);
-        if (mounted) setState(() {});
+        setState(() {});
       }
     } finally {
       _pickingPlayer = false;
