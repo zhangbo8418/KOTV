@@ -908,12 +908,20 @@ Future<String?> pickChoice(
       backgroundColor: p.dialogBg,
       title: Text(title, style: TextStyle(color: p.fg)),
       children: [
-        for (final o in options)
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(o.$2),
-            child: Text(
-              o.$1 + (o.$2 == current ? '  ✓' : ''),
-              style: TextStyle(color: p.fg),
+        for (var i = 0; i < options.length; i++)
+          TvFocus(
+            autofocus: options[i].$2 == current || (i == 0 && !options.any((o) => o.$2 == current)),
+            onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(options[i].$2),
+            borderRadius: 8,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  options[i].$1 + (options[i].$2 == current ? '  ✓' : ''),
+                  style: TextStyle(color: p.fg),
+                ),
+              ),
             ),
           ),
       ],

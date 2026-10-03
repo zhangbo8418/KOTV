@@ -347,6 +347,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   int _srcIdx = 0;
   int _groupIdx = 0;
   int _chIdx = -1;
+  /// 正在播的分类和频道。浏览其它分类时 [_chIdx] 会空着，切回来再恢复。
+  int _playGroupIdx = -1;
+  int _playChIdx = -1;
+  String _playGroupName = '';
+  String _playChName = '';
+  DateTime? _liveBackUntil;
+  bool _liveBackConsumed = false;
   int _dayIdx = 0;
   int _line = 0;
   int _lines = 1;
@@ -587,26 +594,46 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return kotvPopTopPopup(Navigator.of(context, rootNavigator: false));
   }
 
-  /// 返回：沉浸全屏 → 退出回看 → 关侧栏/控件 → 未消费（交给外壳双返退桌面）。
+  /// 返回一次只关一层：弹窗、右设置、左频道栏、信息条或回看播控，然后才退出回看或全屏。
+  /// 同一按键会打到本页 Focus 和外壳，短时间内第二次调用沿用第一次的结果。
   bool _handleLiveBack() {
+    final now = DateTime.now();
+    final until = _liveBackUntil;
+    if (until != null && now.isBefore(until)) return _liveBackConsumed;
+    _liveBackUntil = now.add(const Duration(milliseconds: 400));
+    final consumed = _handleLiveBackOnce();
+    _liveBackConsumed = consumed;
+    return consumed;
+  }
+
+  bool _handleLiveBackOnce() {
     if (_popLivePopup()) return true;
-    if (_immersive) {
-      unawaited(_exitImmersive());
+    if (_rightOpen) {
+      setState(() => _rightOpen = false);
+      return true;
+    }
+    if (_leftOpen) {
+      setState(() {
+        _leftOpen = false;
+        _epgOpen = false;
+      });
+      return true;
+    }
+    if (_channelInfoVisible || _chromeVisible || _catchupChrome) {
+      setState(() {
+        _chromeVisible = false;
+        _catchupChrome = false;
+        _channelInfoVisible = false;
+      });
+      _catchupHideTimer?.cancel();
       return true;
     }
     if (_catchup) {
       unawaited(_exitCatchup());
       return true;
     }
-    if (_leftOpen || _rightOpen || _chromeVisible || _catchupChrome || _channelInfoVisible) {
-      setState(() {
-        _leftOpen = false;
-        _rightOpen = false;
-        _chromeVisible = false;
-        _catchupChrome = false;
-        _channelInfoVisible = false;
-      });
-      _catchupHideTimer?.cancel();
+    if (_immersive) {
+      unawaited(_exitImmersive());
       return true;
     }
     return false;
@@ -820,6 +847,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
     await _persistFavNames();
     _applyFavoriteGroup();
+    _rebindPlaying();
     var gi = _groups.indexWhere((g) => '${g['name'] ?? ''}' == groupNameBefore);
     if (gi < 0) gi = 0;
     setState(() {
@@ -869,6 +897,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _applyFavoriteGroup();
       _groupIdx = 0;
       _chIdx = -1;
+      _playGroupIdx = -1;
+      _playChIdx = -1;
+      _playGroupName = '';
+      _playChName = '';
       setState(() {
         _loading = false;
         _title = '${data['name'] ?? '直播'}';
@@ -1013,14 +1045,50 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
+  void _rememberPlaying(int groupIdx, int chIdx, String groupName, String chName) {
+    _playGroupIdx = groupIdx;
+    _playChIdx = chIdx;
+    _playGroupName = groupName;
+    _playChName = chName;
+  }
+
+  /// 收藏组插入或移除后，按名字把正在播的下标拨回去。
+  void _rebindPlaying() {
+    if (_playGroupName.isEmpty) return;
+    for (var gi = 0; gi < _groups.length; gi++) {
+      if ('${_groups[gi]['name'] ?? ''}' != _playGroupName) continue;
+      final raw = _groups[gi]['channels'];
+      if (raw is! List) continue;
+      for (var ci = 0; ci < raw.length; ci++) {
+        final c = raw[ci];
+        if (c is! Map) continue;
+        if ('${c['name'] ?? ''}' != _playChName) continue;
+        _playGroupIdx = gi;
+        _playChIdx = ci;
+        return;
+      }
+    }
+  }
+
   Future<void> _selectGroup(int i) async {
     if (!await _ensureUnlocked(i)) return;
     setState(() {
       _groupIdx = i;
-      _chIdx = -1;
+      final n = _channels.length;
+      if (i == _playGroupIdx && _playChIdx >= 0 && _playChIdx < n) {
+        _chIdx = _playChIdx;
+      } else {
+        _chIdx = -1;
+      }
       _epgDays = [];
       _programs = [];
     });
+    _scrollListTo(_groupScroll, _groupSelKey, _groupIdx, _groups.length);
+    if (_chIdx >= 0) {
+      _scheduleScrollToCurrent(epg: false);
+      unawaited(_loadEpg());
+      return;
+    }
     if (_channelScroll.hasClients) _channelScroll.jumpTo(0);
   }
 
@@ -1469,6 +1537,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final serial = ++_playSerial;
     final ch = chs[chIdx];
     final useLine = line ?? (ch['line'] as int? ?? 0);
+    final playGroup = _groupIdx;
+    final playGroupName = playGroup >= 0 && playGroup < _groups.length ? '${_groups[playGroup]['name'] ?? ''}' : '';
+    final playChName = '${ch['name'] ?? ''}';
     setState(() {
       _chIdx = chIdx;
       _line = useLine;
@@ -1489,7 +1560,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     await _stopAllBackends();
     if (!mounted || serial != _playSerial) return;
     try {
-      final data = await ref.read(apiProvider).livePlay(group: _groupIdx, channel: chIdx, line: useLine);
+      final data = await ref.read(apiProvider).livePlay(group: playGroup, channel: chIdx, line: useLine);
       if (!mounted || serial != _playSerial) return;
       final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
       if (url.isEmpty) throw Exception('空播放地址');
@@ -1505,7 +1576,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final format = '${data['format'] ?? ''}'.trim();
       await _openLiveUrl(url, serial: serial, headers: headers.isEmpty ? null : headers, drm: drm, format: format.isEmpty ? null : format);
       if (!mounted || serial != _playSerial) return;
-      setState(() => _status = '播放中 · $_title');
+      setState(() {
+        _status = '播放中 · $_title';
+        _rememberPlaying(playGroup, chIdx, playGroupName, playChName);
+      });
       // 换台亮底栏频道信息，约 5s 收起。
       _flashChannelInfo();
       // 移动端播放器控件：显示后自动隐藏
@@ -2121,7 +2195,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       });
       return;
     }
-    // 直播：菜单键开频道列表，不拉播控条。
     _openLeft();
   }
 
@@ -2527,7 +2600,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
     if (kotvIsBackKey(key)) {
       if (!isDown) return KeyEventResult.ignored;
-      if (_popLivePopup()) return KeyEventResult.handled;
       if (_handleLiveBack()) return KeyEventResult.handled;
       return KeyEventResult.ignored;
     }
@@ -2547,24 +2619,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (_liveUiOpen) {
       if (kotvIsMenuKey(key)) {
         if (!isDown) return KeyEventResult.ignored;
-        if (_leftOpen || _rightOpen) {
-          setState(() {
-            _leftOpen = false;
-            _rightOpen = false;
-          });
-          if (_catchup) {
-            _showLiveChromeAndFocusPlay();
-          } else {
-            _flashChannelInfo();
-          }
-        } else {
-          setState(() {
-            _chromeVisible = false;
-            _catchupChrome = false;
-            _channelInfoVisible = false;
-          });
-          _cancelHideOverlays();
-        }
+        _toggleRight();
         return KeyEventResult.handled;
       }
       if (kotvIsSettingsKey(key)) {
@@ -2602,11 +2657,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
 
     // —— 控件全隐：一键一义 ——
-    // 菜单 → 底栏；OK → 频道栏；设置 → 设置栏；上下换台；左右换线（回看则 seek）。
+    // 菜单 → 右侧设置；OK → 频道栏；设置 → 设置栏；上下换台；左右换线（回看则 seek）。
     // 鼠标右键仍走返回，不在此处理。菜单/返回/设置/OK 仅 Down；上下换台与左右 seek/换线接受 KeyRepeat。
     if (kotvIsMenuKey(key)) {
       if (!isDown) return KeyEventResult.ignored;
-      _showLiveChromeAndFocusPlay();
+      _toggleRight();
       return KeyEventResult.handled;
     }
     if (_catchup) {
@@ -2875,7 +2930,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         },
                       ),
                     ),
-                  if (!_catchup && _immersive && !_leftOpen && !_rightOpen)
+                  if (!_catchup && _immersive && _channelInfoVisible && !_leftOpen && !_rightOpen)
                     Positioned(
                       left: KotvLayout.isLandscapeCompact(context) ? 10 : 16,
                       top: KotvLayout.isLandscapeCompact(context) ? 8 : 12,

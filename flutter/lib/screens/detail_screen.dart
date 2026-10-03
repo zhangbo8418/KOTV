@@ -281,6 +281,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _immersiveEpCover = false;
   /// 退出全屏后短时挡住「再 pop 详情」，避免双通道返回直接回首页。
   DateTime? _suppressDetailPopUntil;
+  DateTime? _immersiveBackUntil;
   KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
   final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_detail_video');
   /// 画面层的位置由 [CompositedTransformFollower] 在合成期直接跟随黑槽
@@ -586,6 +587,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     WidgetsBinding.instance.addObserver(this);
     _api = ref.read(apiProvider);
     _active = this;
+    detailImmersiveBack = _handleImmersiveBack;
     kotvRegisterQuitHook(_prepareQuit);
     MiniPlayerWindow.onAndroidPipChanged = (inPip) {
       if (!mounted) return;
@@ -1178,6 +1180,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _detachRemoteHandlers();
     kotvUnregisterQuitHook(_prepareQuit);
     if (_active == this) _active = null;
+    if (detailImmersiveBack == _handleImmersiveBack) detailImmersiveBack = null;
     MiniPlayerWindow.onAndroidPipChanged = null;
     unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, false));
     // 离开详情：回传扫码取消。软取消已在 [_stopHard] 做过；仅兜底未走 _leavePage 的路径。
@@ -3087,6 +3090,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     });
   }
 
+  /// 全屏返回：弹窗、右侧选集、底栏、退出全屏。同一按键的第二次投递不再往下关一层。
+  Future<void> _handleImmersiveBack() async {
+    final now = DateTime.now();
+    final until = _immersiveBackUntil;
+    if (until != null && now.isBefore(until)) return;
+    _immersiveBackUntil = now.add(const Duration(milliseconds: 400));
+    if (kotvPopTopPopup(rootNavigatorKey.currentState)) return;
+    if (mounted && kotvPopTopPopup(Navigator.of(context, rootNavigator: false))) return;
+    if (detailFullscreenDismissLayer?.call() == true) return;
+    if (!_immersiveFullscreen) return;
+    await _exitImmersiveFullscreen();
+  }
+
   Future<void> _exitImmersiveFullscreen() async {
     if (!_immersiveFullscreen) return;
     // 先挡二次返回：Focus 与 PopScope/壳层常在同一按键上各走一遍。
@@ -3552,11 +3568,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       canPop: _allowPop,
       onPopInvoked: (didPop) {
         if (didPop) return;
-        // 调色 / 更多等 BottomSheet：先关弹层。
-        if (kotvPopTopPopup(rootNavigatorKey.currentState)) return;
-        if (kotvPopTopPopup(Navigator.of(context, rootNavigator: false))) return;
         if (_immersiveFullscreen) {
-          unawaited(_exitImmersiveFullscreen());
+          unawaited(_handleImmersiveBack());
           return;
         }
         // 刚退全屏：同一次返回不要再出详情（全屏返回只上一层）。
@@ -3564,6 +3577,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (until != null && DateTime.now().isBefore(until)) {
           return;
         }
+        if (kotvPopTopPopup(rootNavigatorKey.currentState)) return;
+        if (kotvPopTopPopup(Navigator.of(context, rootNavigator: false))) return;
         unawaited(_leavePage());
       },
       child: body,

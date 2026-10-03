@@ -189,6 +189,15 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
 }
 
 /// 遥控器焦点框。
+/// 浅色板用焦点色本身。深色板上过暗的颜色向白色提亮，避免深底上看不见。
+Color kotvFocusRingColor(KotvPalette pal) {
+  final focus = pal.focus;
+  if (pal.light) return focus;
+  if (focus.computeLuminance() >= 0.4) return focus;
+  return Color.lerp(focus, Colors.white, 0.55) ?? focus;
+}
+
+/// 遥控器焦点环：键盘/遥控亮框，鼠标点击不留下常亮框。
 class TvFocus extends StatefulWidget {
   const TvFocus({
     super.key,
@@ -198,6 +207,7 @@ class TvFocus extends StatefulWidget {
     this.autofocus = false,
     this.focusNode,
     this.borderRadius = 12,
+    this.scrollIntoView = false,
   });
 
   final Widget child;
@@ -207,6 +217,8 @@ class TvFocus extends StatefulWidget {
   /// 外部持有时可 [FocusNode.requestFocus]（全屏亮控件后强制落到播停）。
   final FocusNode? focusNode;
   final double borderRadius;
+  /// 获焦时把当前项滚进所属的横向/纵向滚动区域。
+  final bool scrollIntoView;
 
   @override
   State<TvFocus> createState() => _TvFocusState();
@@ -216,21 +228,27 @@ class _TvFocusState extends State<TvFocus> {
   bool _highlight = false;
   bool _hovered = false;
 
-  /// 深色面板上过暗的 focus 色会「看不见」；抬亮一档做描边。
-  Color _ringColor(Color focus) {
-    if (focus.computeLuminance() >= 0.4) return focus;
-    return Color.lerp(focus, Colors.white, 0.55) ?? focus;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final focus = KotvPalette.of(context).focus;
-    final ring = _ringColor(focus);
+    final pal = KotvPalette.of(context);
+    final ring = kotvFocusRingColor(pal);
+    final fill = pal.light ? 0.32 : 0.22;
     return FocusableActionDetector(
       focusNode: widget.focusNode,
       autofocus: widget.autofocus,
       // 只用系统「是否该画焦点」：遥控/键盘会亮，鼠标点击不会留下常亮框。
       onShowFocusHighlight: (v) {
+        if (v && widget.scrollIntoView) {
+          final ctx = context;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!ctx.mounted) return;
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.5,
+              duration: const Duration(milliseconds: 160),
+            );
+          });
+        }
         if (_highlight == v) return;
         setState(() => _highlight = v);
       },
@@ -260,7 +278,7 @@ class _TvFocusState extends State<TvFocus> {
               duration: const Duration(milliseconds: 120),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(widget.borderRadius),
-                color: _highlight ? ring.withOpacity(0.22) : null,
+                color: _highlight ? ring.withOpacity(fill) : null,
                 border: Border.all(
                   color: _highlight ? ring : Colors.transparent,
                   width: _highlight ? 3 : 0,

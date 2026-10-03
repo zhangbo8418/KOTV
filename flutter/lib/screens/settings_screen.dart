@@ -24,6 +24,7 @@ import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
+import '../theme/kotv_theme.dart';
 import '../util/kotv_clear_ephemeral.dart';
 import '../util/pick_font_file.dart';
 import '../util/runtime_info.dart';
@@ -383,14 +384,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     String? subtitle,
   }) {
     final p = KotvPalette.of(context);
-    return ListTile(
-      title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
-      subtitle: subtitle == null
-          ? null
-          : Text(subtitle, style: TextStyle(color: p.muted, fontSize: 12)),
-      trailing: Switch.adaptive(
-        value: value,
-        onChanged: (v) => unawaited(onChanged(v)),
+    return TvFocus(
+      onPressed: () => unawaited(onChanged(!value)),
+      borderRadius: 8,
+      child: ListTile(
+        title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
+        subtitle: subtitle == null
+            ? null
+            : Text(subtitle, style: TextStyle(color: p.muted, fontSize: 12)),
+        trailing: ExcludeFocus(
+          child: Switch.adaptive(
+            value: value,
+            onChanged: (v) => unawaited(onChanged(v)),
+          ),
+        ),
       ),
     );
   }
@@ -401,24 +408,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     required VoidCallback onTap,
   }) {
     final p = KotvPalette.of(context);
-    return ListTile(
-      title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 140),
-            child: Text(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: p.muted, fontSize: 14),
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: 8,
+      child: ListTile(
+        title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 140),
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: p.muted, fontSize: 14),
+              ),
             ),
-          ),
-          Icon(Icons.chevron_right, color: p.muted.withOpacity(0.7)),
-        ],
+            Icon(Icons.chevron_right, color: p.muted.withOpacity(0.7)),
+          ],
+        ),
       ),
-      onTap: onTap,
     );
   }
 

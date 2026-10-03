@@ -149,23 +149,27 @@ class _AppShellState extends ConsumerState<AppShell> {
       _handlingBack = false;
     });
 
-    // 先关弹层 / BottomSheet，再退全屏或出详情。
-    if (kotvPopTopPopup(rootNavigatorKey.currentState)) return;
-    if (kotvPopTopPopup(_shellNavKey.currentState)) return;
-
-    // 全屏先退沉浸。必须先于 root.pop / maybePop：全屏页若先退沉浸，
-    // 全局右键再进来会当成「出详情」直接回首页。
+    // 全屏先退一层（弹窗、选集或底栏），再退沉浸。必须先于 root.pop / maybePop。
     if (DetailScreen.isImmersive) {
-      unawaited(DetailScreen.exitImmersiveIfOpen());
+      final back = detailImmersiveBack;
+      if (back != null) {
+        unawaited(back());
+      } else {
+        unawaited(DetailScreen.exitImmersiveIfOpen());
+      }
       return;
     }
     if (DetailScreen.suppressBackAfterImmersiveExit) {
       return;
     }
-    if (LiveScreen.isImmersive) {
-      liveScreenHandleBack?.call();
-      return;
+    final page = ref.read(kotvPageProvider);
+    if (!DetailScreen.isOpen && (LiveScreen.isImmersive || page == KotvPage.live)) {
+      if (liveScreenHandleBack?.call() == true) return;
     }
+
+    // 先关弹层 / BottomSheet，再出详情。
+    if (kotvPopTopPopup(rootNavigatorKey.currentState)) return;
+    if (kotvPopTopPopup(_shellNavKey.currentState)) return;
 
     final root = rootNavigatorKey.currentState;
     // 扫码等 useRootNavigator 弹窗：先 pop。
@@ -178,7 +182,6 @@ class _AppShellState extends ConsumerState<AppShell> {
       unawaited(post.cancelAll(reply: true, popDialog: true));
       return;
     }
-    final page = ref.read(kotvPageProvider);
     final nav = _shellNavKey.currentState;
     // 详情：maybePop→硬停出栈。绝勿 raw nav.pop（会跳过停播）。
     if (DetailScreen.isOpen) {
@@ -190,10 +193,6 @@ class _AppShellState extends ConsumerState<AppShell> {
     if (nav != null && nav.canPop()) {
       nav.pop();
       return;
-    }
-    // 直播：先关侧栏/退出回看。
-    if (page == KotvPage.live) {
-      if (liveScreenHandleBack?.call() == true) return;
     }
     // 非首页：退到上一主 Tab（kotvPageStack）；无栈则回点播首页。
     if (page != KotvPage.video) {
@@ -417,6 +416,12 @@ class _AppShellState extends ConsumerState<AppShell> {
 
 /// 直播页注册：返回键优先关侧栏/退出沉浸全屏。返回 true 表示已消费。
 bool Function()? liveScreenHandleBack;
+
+/// 点播全屏页注册：关掉右侧选集或底栏。返回 true 表示已关掉一层。
+bool Function()? detailFullscreenDismissLayer;
+
+/// 详情页注册：弹窗、选集、底栏、退出全屏共用这一条返回。
+Future<void> Function()? detailImmersiveBack;
 
 /// 切主页面。停播在 [AppShell] 监听页变化、换根路由之前统一做。
 Future<void> goKotvPage(WidgetRef ref, KotvPage page, {bool recordHistory = true}) async {

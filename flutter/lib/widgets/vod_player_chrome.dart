@@ -292,6 +292,7 @@ class _IconAct extends StatelessWidget {
     this.size = 40,
     this.autofocus = false,
     this.focusNode,
+    this.scrollIntoView = false,
   });
 
   final IconData icon;
@@ -302,6 +303,7 @@ class _IconAct extends StatelessWidget {
   final double size;
   final bool autofocus;
   final FocusNode? focusNode;
+  final bool scrollIntoView;
 
   @override
   Widget build(BuildContext context) {
@@ -311,6 +313,7 @@ class _IconAct extends StatelessWidget {
       child: TvFocus(
         autofocus: autofocus,
         focusNode: focusNode,
+        scrollIntoView: scrollIntoView,
         onPressed: onTap,
         onLongPress: onLongPress,
         borderRadius: 8,
@@ -340,19 +343,40 @@ class _IconAct extends StatelessWidget {
 }
 
 class _TextAct extends StatelessWidget {
-  const _TextAct({required this.label, required this.onTap});
+  const _TextAct({required this.label, required this.onTap, this.scrollIntoView = false});
 
   final String label;
   final VoidCallback onTap;
+  final bool scrollIntoView;
 
   @override
   Widget build(BuildContext context) {
     return TvFocus(
       onPressed: onTap,
       borderRadius: 8,
+      scrollIntoView: scrollIntoView,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
+}
+
+/// 片头/片尾时间：能停住焦点环，确定键不改数值，左右仍走到相邻按钮。
+class _OffsetClock extends StatelessWidget {
+  const _OffsetClock(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocus(
+      scrollIntoView: true,
+      borderRadius: 6,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
       ),
     );
   }
@@ -369,6 +393,7 @@ class _TinyBtn extends StatelessWidget {
     return TvFocus(
       onPressed: onTap,
       borderRadius: 6,
+      scrollIntoView: true,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
@@ -1265,33 +1290,32 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     bool selected = false,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          height: 52,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, color: Colors.white, size: 24),
-                  const SizedBox(width: 16),
-                ],
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    ),
+    return TvFocus(
+      autofocus: selected,
+      onPressed: onTap,
+      borderRadius: 8,
+      child: SizedBox(
+        height: 52,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, color: Colors.white, size: 24),
+                const SizedBox(width: 16),
+              ],
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
-                if (selected) const Icon(Icons.check, color: Colors.white, size: 22),
-              ],
-            ),
+              ),
+              if (selected) const Icon(Icons.check, color: Colors.white, size: 22),
+            ],
           ),
         ),
       ),
@@ -1706,29 +1730,37 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               required String label,
               required bool value,
               required ValueChanged<bool> onChanged,
+              bool autofocus = false,
             }) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                child: SizedBox(
-                  height: 52,
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 8),
-                      Icon(icon, color: Colors.white, size: 24),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
-                      ),
-                      Switch.adaptive(
-                        value: value,
-                        activeColor: Colors.white,
-                        activeTrackColor: const Color(0xFF5C5C66),
-                        inactiveThumbColor: const Color(0xFFB0B0B8),
-                        inactiveTrackColor: const Color(0xFF3A3A42),
-                        onChanged: onChanged,
-                      ),
-                      const SizedBox(width: 4),
-                    ],
+              return TvFocus(
+                autofocus: autofocus,
+                onPressed: () => onChanged(!value),
+                borderRadius: 8,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  child: SizedBox(
+                    height: 52,
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 8),
+                        Icon(icon, color: Colors.white, size: 24),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
+                        ),
+                        ExcludeFocus(
+                          child: Switch.adaptive(
+                            value: value,
+                            activeColor: Colors.white,
+                            activeTrackColor: const Color(0xFF5C5C66),
+                            inactiveThumbColor: const Color(0xFFB0B0B8),
+                            inactiveTrackColor: const Color(0xFF3A3A42),
+                            onChanged: onChanged,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -1739,29 +1771,29 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               required String label,
               String trailing = '',
               required VoidCallback onTap,
+              bool autofocus = false,
             }) {
-              return Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: onTap,
-                  child: SizedBox(
-                    height: 52,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Icon(icon, color: Colors.white, size: 24),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
-                          ),
-                          Text(
-                            trailing.isEmpty ? '' : trailing,
-                            style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 15),
-                          ),
-                          Icon(Icons.chevron_right, color: Colors.white.withOpacity(0.45), size: 22),
-                        ],
-                      ),
+              return TvFocus(
+                autofocus: autofocus,
+                onPressed: onTap,
+                borderRadius: 8,
+                child: SizedBox(
+                  height: 52,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Icon(icon, color: Colors.white, size: 24),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
+                        ),
+                        Text(
+                          trailing.isEmpty ? '' : trailing,
+                          style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 15),
+                        ),
+                        Icon(Icons.chevron_right, color: Colors.white.withOpacity(0.45), size: 22),
+                      ],
                     ),
                   ),
                 ),
@@ -1798,6 +1830,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                         linkRow(
                           icon: Icons.tune,
                           label: '画面调色',
+                          autofocus: true,
                           onTap: () => unawaited(_showVideoEqSheet(ctx)),
                         ),
                         linkRow(
@@ -2264,14 +2297,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                   scrollDirection: Axis.horizontal,
                                   child: Row(
                                     children: [
-                                      _IconAct(icon: Icons.skip_previous, tip: '上一集', size: land ? 32.0 : 40.0, onTap: () {
+                                      _IconAct(icon: Icons.skip_previous, tip: '上一集', size: land ? 32.0 : 40.0, scrollIntoView: true, onTap: () {
                                         widget.onPrev?.call();
                                         widget.onBump();
                                       }),
                                       _IconAct(
                                         icon: widget.player.playing ? Icons.pause : Icons.play_arrow,
                                         tip: widget.player.playing ? '暂停' : '播放',
-                                        size: land ? 32.0 : 40.0,
+                                        size: land ? 32.0 : 40.0, scrollIntoView: true,
                                         autofocus: true,
                                         focusNode: _playFocus,
                                         onTap: () {
@@ -2280,7 +2313,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                           setState(() {});
                                         },
                                       ),
-                                      _IconAct(icon: Icons.skip_next, tip: '下一集', size: land ? 32.0 : 40.0, onTap: () {
+                                      _IconAct(icon: Icons.skip_next, tip: '下一集', size: land ? 32.0 : 40.0, scrollIntoView: true, onTap: () {
                                         widget.onNext?.call();
                                         widget.onBump();
                                       }),
@@ -2288,11 +2321,11 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         icon: Icons.fast_forward,
                                         tip: '倍速（长按细调）',
                                         badge: 'x${widget.player.rate.toStringAsFixed(widget.player.rate == widget.player.rate.roundToDouble() ? 0 : 1)}',
-                                        size: land ? 32.0 : 40.0,
+                                        size: land ? 32.0 : 40.0, scrollIntoView: true,
                                         onTap: _cycleSpeed,
                                         onLongPress: () => unawaited(_showSpeedSheet()),
                                       ),
-                                      _IconAct(icon: Icons.replay, tip: '重播', size: land ? 32.0 : 40.0, onTap: () {
+                                      _IconAct(icon: Icons.replay, tip: '重播', size: land ? 32.0 : 40.0, scrollIntoView: true, onTap: () {
                                         widget.onReplay?.call();
                                         widget.player.seek(Duration.zero);
                                         widget.player.play();
@@ -2302,20 +2335,20 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         icon: Icons.aspect_ratio,
                                         tip: '比例：${_aspects[_aspectIdx].$2}',
                                         badge: _aspectBadge(_aspects[_aspectIdx].$1),
-                                        size: land ? 32.0 : 40.0,
+                                        size: land ? 32.0 : 40.0, scrollIntoView: true,
                                         onTap: _cycleAspect,
                                       ),
                                       _IconAct(
                                         icon: Icons.memory,
                                         tip: _decodeModes[_decodeIdx].$2,
                                         badge: _decodeModes[_decodeIdx].$2.substring(0, 1),
-                                        size: land ? 32.0 : 40.0,
+                                        size: land ? 32.0 : 40.0, scrollIntoView: true,
                                         onTap: _cycleDecode,
                                       ),
                                       _IconAct(
                                         icon: Icons.closed_caption,
                                         tip: '字幕',
-                                        size: land ? 32.0 : 40.0,
+                                        size: land ? 32.0 : 40.0, scrollIntoView: true,
                                         onTap: () => _showTrackSheet(kind: 'subtitle'),
                                       ),
                                       if (widget.player.supportsDiscNav &&
@@ -2323,19 +2356,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         _IconAct(
                                           icon: Icons.album_outlined,
                                           tip: '碟片导航',
-                                          size: land ? 32.0 : 40.0,
+                                          size: land ? 32.0 : 40.0, scrollIntoView: true,
                                           onTap: () => _showTrackSheet(kind: 'disc'),
                                         ),
                                       _IconAct(
                                         icon: Icons.audiotrack,
                                         tip: '音轨',
-                                        size: land ? 32.0 : 40.0,
+                                        size: land ? 32.0 : 40.0, scrollIntoView: true,
                                         onTap: () => _showTrackSheet(kind: 'audio'),
                                       ),
                                       _IconAct(
                                         icon: Icons.videocam_outlined,
                                         tip: '视频轨',
-                                        size: land ? 32.0 : 40.0,
+                                        size: land ? 32.0 : 40.0, scrollIntoView: true,
                                         onTap: () => _showTrackSheet(kind: 'video'),
                                       ),
                                       if (kotvCanSwitchPlayer(live: false))
@@ -2343,7 +2376,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                           icon: Icons.devices,
                                           tip: '播放器（$_playerLabel）',
                                           badge: flutterIsEmbedPlayer(_playerVal) ? '内' : '外',
-                                          size: land ? 32.0 : 40.0,
+                                          size: land ? 32.0 : 40.0, scrollIntoView: true,
                                           onTap: _showPlayerDialog,
                                         ),
                                       const SizedBox(width: 6),
@@ -2362,10 +2395,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         unawaited(_setOffsets(_openingSec - 5, _endingSec));
                                         widget.onBump();
                                       }),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                                        child: Text(fmtMmSs(_openingSec), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                                      ),
+                                      _OffsetClock(fmtMmSs(_openingSec)),
                                       _TinyBtn(label: '+', onTap: () {
                                         unawaited(_setOffsets(_openingSec + 5, _endingSec));
                                         widget.onBump();
@@ -2388,10 +2418,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         unawaited(_setOffsets(_openingSec, _endingSec - 5));
                                         widget.onBump();
                                       }),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                                        child: Text(fmtMmSs(_endingSec), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                                      ),
+                                      _OffsetClock(fmtMmSs(_endingSec)),
                                       _TinyBtn(label: '+', onTap: () {
                                         unawaited(_setOffsets(_openingSec, _endingSec + 5));
                                         widget.onBump();
@@ -2407,9 +2434,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       const SizedBox(width: 8),
                                       Container(width: 1, height: 26, color: const Color(0x4DFFFFFF)),
                                       const SizedBox(width: 4),
-                                      _TextAct(label: '更多', onTap: _showMore),
+                                      _TextAct(label: '更多', onTap: _showMore, scrollIntoView: true),
                                       if (widget.episodes.isNotEmpty)
-                                        _TextAct(label: '选集', onTap: () {
+                                        _TextAct(label: '选集', scrollIntoView: true, onTap: () {
                                           openEpisodes();
                                           widget.onBump();
                                         }),

@@ -45,7 +45,6 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> {
   StreamSubscription<Duration>? _posSub;
   FocusNode? _ownedFocus;
   bool _highlight = false;
-  final FocusNode _sliderFocus = FocusNode(canRequestFocus: false, skipTraversal: true);
 
   FocusNode get _focus => widget.focusNode ?? _ownedFocus!;
 
@@ -86,7 +85,6 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> {
     _unwirePosition();
     _focus.onKeyEvent = null;
     _ownedFocus?.dispose();
-    _sliderFocus.dispose();
     super.dispose();
   }
 
@@ -150,49 +148,47 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> {
     return KeyEventResult.ignored;
   }
 
-  Color _ringColor(Color focus) {
-    if (focus.computeLuminance() >= 0.4) return focus;
-    return Color.lerp(focus, Colors.white, 0.55) ?? focus;
-  }
-
   @override
   Widget build(BuildContext context) {
     final max = _max;
     final value = _value;
     final live = widget.player.position.inMilliseconds.toDouble().clamp(0.0, max);
     final secondary = (widget.secondaryMs ?? live).clamp(0.0, max);
-    final ring = _ringColor(KotvPalette.of(context).focus);
+    final pal = KotvPalette.of(context);
+    final ring = kotvFocusRingColor(pal);
+    final ringWidth = pal.light ? 3.0 : 2.0;
 
-    final slider = Slider(
-      focusNode: _sliderFocus,
-      value: value,
-      secondaryTrackValue: secondary < value ? value : secondary,
-      max: max,
-      onChangeStart: widget.enabled
-          ? (v) {
-              setState(() {
-                _pendingSeekMs = null;
-                _scrubMs = v;
-              });
-              widget.onInteraction?.call();
-            }
-          : null,
-      onChanged: widget.enabled
-          ? (v) {
-              setState(() => _scrubMs = v);
-              widget.onInteraction?.call();
-            }
-          : null,
-      onChangeEnd: widget.enabled
-          ? (v) {
-              setState(() {
-                _scrubMs = null;
-                _pendingSeekMs = v;
-              });
-              widget.player.seek(Duration(milliseconds: v.round()));
-              widget.onInteraction?.call();
-            }
-          : null,
+    final slider = ExcludeFocus(
+      child: Slider(
+        value: value,
+        secondaryTrackValue: secondary < value ? value : secondary,
+        max: max,
+        onChangeStart: widget.enabled
+            ? (v) {
+                setState(() {
+                  _pendingSeekMs = null;
+                  _scrubMs = v;
+                });
+                widget.onInteraction?.call();
+              }
+            : null,
+        onChanged: widget.enabled
+            ? (v) {
+                setState(() => _scrubMs = v);
+                widget.onInteraction?.call();
+              }
+            : null,
+        onChangeEnd: widget.enabled
+            ? (v) {
+                setState(() {
+                  _scrubMs = null;
+                  _pendingSeekMs = v;
+                });
+                widget.player.seek(Duration(milliseconds: v.round()));
+                widget.onInteraction?.call();
+              }
+            : null,
+      ),
     );
 
     final themed = widget.theme != null
@@ -221,10 +217,10 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> {
         padding: const EdgeInsets.symmetric(vertical: 2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          color: _highlight ? ring.withOpacity(0.18) : null,
+          color: _highlight ? ring.withOpacity(pal.light ? 0.32 : 0.18) : null,
           border: Border.all(
             color: _highlight ? ring : Colors.transparent,
-            width: _highlight ? 2 : 0,
+            width: _highlight ? ringWidth : 0,
           ),
           boxShadow: _highlight
               ? [BoxShadow(color: ring.withOpacity(0.45), blurRadius: 10, spreadRadius: 0)]

@@ -144,16 +144,13 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> {
     return Icons.volume_up_rounded;
   }
 
-  Color _ringColor(Color focus) {
-    if (focus.computeLuminance() >= 0.4) return focus;
-    return Color.lerp(focus, Colors.white, 0.55) ?? focus;
-  }
+  Color _ringColor(KotvPalette pal) => kotvFocusRingColor(pal);
 
   @override
   Widget build(BuildContext context) {
     final land = widget.compact;
     final iconSz = land ? (widget.iconSize <= 34 ? 18.0 : 20.0) : (widget.iconSize <= 34 ? 18.0 : 22.0);
-    final ring = _ringColor(KotvPalette.of(context).focus);
+    final ring = _ringColor(KotvPalette.of(context));
     return MouseRegion(
       onEnter: (_) => _setHover(true),
       onExit: (_) => _setHover(false),

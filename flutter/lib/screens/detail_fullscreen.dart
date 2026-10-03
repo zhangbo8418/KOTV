@@ -233,6 +233,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   @override
   void initState() {
     super.initState();
+    detailFullscreenDismissLayer = _dismissOneLayer;
     _swipeAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 280))
       ..addListener(() {
         final t = _swipeTween;
@@ -292,6 +293,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   @override
   void dispose() {
+    if (detailFullscreenDismissLayer == _dismissOneLayer) {
+      detailFullscreenDismissLayer = null;
+    }
     _hideTimer?.cancel();
     _hintTimer?.cancel();
     _swipeAnim.dispose();
@@ -459,6 +463,36 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   bool get _epOpen => _chromeKey.currentState?.epOpen ?? false;
+
+  /// 返回关掉一层。选集优先于底栏。
+  bool _dismissOneLayer() {
+    if (_epOpen) {
+      _chromeKey.currentState?.closeEpisodes();
+      setState(() {});
+      if (_showChrome) _chromeKey.currentState?.focusPlayControl();
+      return true;
+    }
+    if (_showChrome) {
+      _setChrome(show: false, hideCursor: true);
+      return true;
+    }
+    return false;
+  }
+
+  void _toggleEpisodes() {
+    if (widget.episodes.isEmpty) {
+      _showChromeAndFocusPlay();
+      return;
+    }
+    if (_epOpen) {
+      _chromeKey.currentState?.closeEpisodes();
+      setState(() {});
+      return;
+    }
+    _bumpChrome();
+    _chromeKey.currentState?.openEpisodes();
+    setState(() {});
+  }
 
   void _flashSwipeHint(String text) {
     _hintTimer?.cancel();
@@ -713,42 +747,23 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     final key = event.logicalKey;
 
     if (isDown && kotvIsBackKey(key)) {
-      if (kotvPopTopPopup(rootNavigatorKey.currentState)) {
-        return KeyEventResult.handled;
+      final back = detailImmersiveBack;
+      if (back != null) {
+        unawaited(back());
+      } else if (!_dismissOneLayer()) {
+        unawaited(_exitFullscreen());
       }
-      if (kotvPopTopPopup(Navigator.of(context, rootNavigator: false))) {
-        return KeyEventResult.handled;
-      }
-      if (_epOpen) {
-        _chromeKey.currentState?.closeEpisodes();
-        setState(() {});
-        _bumpChrome();
-        _chromeKey.currentState?.focusPlayControl();
-        return KeyEventResult.handled;
-      }
-      if (_showChrome) {
-        _setChrome(show: false, hideCursor: true);
-        return KeyEventResult.handled;
-      }
-      unawaited(_exitFullscreen());
       return KeyEventResult.handled;
     }
 
     // 有底栏/选集：方向键交给 TvFocus；快退/快进才 seek（勿抢横移）。
     if (_showChrome || _epOpen) {
       if (isDown && kotvIsMenuKey(key)) {
-        if (_epOpen) {
-          _chromeKey.currentState?.closeEpisodes();
-          setState(() {});
-        }
-        _setChrome(show: false, hideCursor: true);
+        _toggleEpisodes();
         return KeyEventResult.handled;
       }
       if (isDown && (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE)) {
-        if (widget.episodes.isEmpty) return KeyEventResult.handled;
-        _bumpChrome();
-        _chromeKey.currentState?.openEpisodes();
-        setState(() {});
+        _toggleEpisodes();
         return KeyEventResult.handled;
       }
       if (!_epOpen && kotvIsMediaRewind(key)) {
@@ -789,17 +804,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return KeyEventResult.handled;
     }
     if (isDown && kotvIsMenuKey(key)) {
-      _showChromeAndFocusPlay();
+      _toggleEpisodes();
       return KeyEventResult.handled;
     }
     if (isDown && (kotvIsSettingsKey(key) || key == LogicalKeyboardKey.keyE)) {
-      if (widget.episodes.isEmpty) {
-        _showChromeAndFocusPlay();
-        return KeyEventResult.handled;
-      }
-      _bumpChrome();
-      _chromeKey.currentState?.openEpisodes();
-      setState(() {});
+      _toggleEpisodes();
       return KeyEventResult.handled;
     }
     if (kotvIsLeftKey(key) || kotvIsMediaRewind(key)) {
