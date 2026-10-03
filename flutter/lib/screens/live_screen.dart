@@ -114,6 +114,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   final FocusNode _epgFocus = FocusNode(debugLabel: 'live_epg');
   final FocusNode _epgTabFocus = FocusNode(debugLabel: 'live_epg_tab');
   final ScrollController _epgScroll = ScrollController();
+  // 竖屏与全屏面板不会同时出现，分类/频道/节目单各共用一个控制器和选中项 key。
+  final ScrollController _groupScroll = ScrollController();
+  final ScrollController _channelScroll = ScrollController();
+  final GlobalKey _groupSelKey = GlobalKey(debugLabel: 'live_group_sel');
+  final GlobalKey _channelSelKey = GlobalKey(debugLabel: 'live_channel_sel');
+  final GlobalKey _epgSelKey = GlobalKey(debugLabel: 'live_epg_sel');
   String _zapDigits = '';
   Timer? _zapTimer;
 
@@ -477,6 +483,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _epgFocus.dispose();
     _epgTabFocus.dispose();
     _epgScroll.dispose();
+    _groupScroll.dispose();
+    _channelScroll.dispose();
     _zapTimer?.cancel();
     unawaited(_fvp?.stop() ?? Future<void>.value());
     unawaited(_mk?.stop() ?? Future<void>.value());
@@ -1013,6 +1021,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _epgDays = [];
       _programs = [];
     });
+    if (_channelScroll.hasClients) _channelScroll.jumpTo(0);
   }
 
   Future<void> _loadEpg() async {
@@ -1068,19 +1077,38 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   void _scheduleScrollEpgToHighlight() {
+    _scrollListTo(_epgScroll, _epgSelKey, _epgHighlightIndex(), _programs.length);
+  }
+
+  /// 分类、频道、节目单都滚到当前项；列表未挂上就跳过（打开面板时会再滚）。
+  void _scheduleScrollToCurrent({bool epg = true}) {
+    _scrollListTo(_groupScroll, _groupSelKey, _groupIdx, _groups.length);
+    _scrollListTo(_channelScroll, _channelSelKey, _chIdx, _channels.length);
+    if (epg) _scheduleScrollEpgToHighlight();
+  }
+
+  /// 目标项已建出就直接居中；否则先按列表平均行高跳到附近让它建出来，下一帧再居中。
+  void _scrollListTo(ScrollController c, GlobalKey key, int index, int count) {
+    if (index < 0 || index >= count) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_epgScroll.hasClients || _programs.isEmpty) return;
-      final i = _epgHighlightIndex();
-      if (i < 0) return;
-      final land = MediaQuery.orientationOf(context) == Orientation.landscape;
-      final extent = land ? 36.0 : 52.0;
-      final max = _epgScroll.position.maxScrollExtent;
-      final target = (i * extent - extent).clamp(0.0, max);
-      _epgScroll.animateTo(
-        target,
-        duration: const Duration(milliseconds: 240),
-        curve: Curves.easeOutCubic,
-      );
+      if (!mounted || !c.hasClients) return;
+      final ctx = key.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+        );
+        return;
+      }
+      final pos = c.position;
+      final avg = (pos.maxScrollExtent + pos.viewportDimension) / count;
+      c.jumpTo((index * avg - pos.viewportDimension / 2).clamp(0.0, pos.maxScrollExtent));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final built = key.currentContext;
+        if (mounted && built != null) Scrollable.ensureVisible(built, alignment: 0.5);
+      });
     });
   }
 
@@ -1454,6 +1482,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _catchupChrome = false;
       _catchupProgIdx = -1;
     });
+    // 节目单在 _loadEpg 拿到新数据后再滚。
+    _scheduleScrollToCurrent(epg: false);
     // EPG 与开播解耦：勿等 open 成功（FVP/MPV 卡住时节目单也出不来）。
     unawaited(_loadEpg());
     await _stopAllBackends();
@@ -1785,6 +1815,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     await kotvExitSystemFullscreen(
       wasDisplayFullscreen: _desktopFs == KotvDesktopFullscreenKind.display,
     );
+    if (!mounted) return;
+    // 竖屏列表重建后回到顶部，再滚到当前项。
+    _scheduleScrollToCurrent();
   }
 
   Future<void> _pickDecode() async {
@@ -1928,6 +1961,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     });
     _scheduleHideOverlays();
     if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
+    _scheduleScrollToCurrent(epg: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _leftOpen) _leftFocus.requestFocus();
     });
@@ -2110,7 +2144,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _chromeVisible = false;
       });
       _scheduleHideOverlays();
-      if (_programs.isEmpty) unawaited(_loadEpg());
+      if (_programs.isEmpty) {
+        unawaited(_loadEpg());
+      } else {
+        _scheduleScrollEpgToHighlight();
+      }
       return;
     }
     unawaited(_playChannel(i));
@@ -2292,6 +2330,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final fallback = '${prog['label'] ?? ''}'.trim();
     final label = title.isNotEmpty ? title : fallback;
     final focusHere = sel;
+    final rowKey = i == _epgHighlightIndex() ? _epgSelKey : null;
     void activate() {
       _cancelHideOverlays();
       if (canCatchup) unawaited(_playCatchup(i));
@@ -2300,6 +2339,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (portrait) {
       final p = KotvPalette.of(context);
       return Padding(
+        key: rowKey,
         padding: const EdgeInsets.only(bottom: 4),
         child: TvFocus(
           autofocus: focusHere,
@@ -2355,6 +2395,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
 
     return Padding(
+      key: rowKey,
       padding: EdgeInsets.only(bottom: land ? 2 : 4),
       child: TvFocus(
         autofocus: focusHere,
@@ -2922,11 +2963,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   SizedBox(
                                     width: groupW,
                                     child: ListView.builder(
+                                      controller: _groupScroll,
                                       itemCount: _groups.length,
                                       itemBuilder: (_, i) {
                                         final g = _groups[i];
                                         final locked = _groupLocked(i);
                                         return Padding(
+                                          key: i == _groupIdx ? _groupSelKey : null,
                                           padding: EdgeInsets.only(bottom: land ? 4 : 6),
                                           child: AppPill(
                                             label: '${locked ? '🔒 ' : ''}${g['name'] ?? ''}',
@@ -2947,6 +2990,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   SizedBox(
                                     width: channelW,
                                     child: ListView.builder(
+                                      controller: _channelScroll,
                                       itemCount: _channels.length,
                                       itemBuilder: (_, i) {
                                         final ch = _channels[i];
@@ -2955,6 +2999,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         final sel = i == _chIdx;
                                         final focusHere = sel || (_chIdx < 0 && i == 0);
                                         return Padding(
+                                          key: sel ? _channelSelKey : null,
                                           padding: EdgeInsets.only(bottom: land ? 2 : 4),
                                           child: TvFocus(
                                             autofocus: focusHere,
@@ -3640,7 +3685,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                       height: 34,
                       fontSize: 13,
                       selected: _portraitTab == 0,
-                      onTap: () => setState(() => _portraitTab = 0),
+                      onTap: () {
+                        setState(() => _portraitTab = 0);
+                        _scheduleScrollToCurrent(epg: false);
+                      },
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -3652,7 +3700,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                       selected: _portraitTab == 1,
                       onTap: () {
                         setState(() => _portraitTab = 1);
-                        if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
+                        if (_programs.isEmpty && _chIdx >= 0) {
+                          unawaited(_loadEpg());
+                        } else {
+                          _scheduleScrollEpgToHighlight();
+                        }
                       },
                     ),
                   ),
@@ -3677,6 +3729,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           child: ColoredBox(
             color: p.bottomNav.withOpacity(0.92),
             child: ListView.builder(
+              controller: _groupScroll,
               padding: const EdgeInsets.fromLTRB(4, 4, 3, 4),
               itemCount: _groups.length,
               itemBuilder: (_, i) {
@@ -3685,6 +3738,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 final name = '${locked ? '🔒' : ''}${g['name'] ?? ''}';
                 final sel = i == _groupIdx;
                 return Padding(
+                  key: sel ? _groupSelKey : null,
                   padding: const EdgeInsets.only(bottom: 3),
                   child: TvFocus(
                     borderRadius: 6,
@@ -3718,6 +3772,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         ),
         Expanded(
           child: ListView.builder(
+            controller: _channelScroll,
             padding: const EdgeInsets.fromLTRB(3, 4, 6, 4),
             itemCount: chs.length,
             itemBuilder: (_, i) {
@@ -3726,6 +3781,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               final logo = '${ch['logo'] ?? ''}';
               final sel = i == _chIdx;
               return Padding(
+                key: sel ? _channelSelKey : null,
                 padding: const EdgeInsets.only(bottom: 3),
                 child: TvFocus(
                   borderRadius: 6,

@@ -643,9 +643,6 @@ class NativeMpvPlayback extends KotvPlayback {
     await _setSurfaceLayerEnabled(_url.isNotEmpty && !_videoOutputSuppressed);
   }
 
-  /// 槽尺寸或进出全屏后补挂。同态调用不重建 PlatformView。
-  Future<void> ensureSurfaceAttached() => _syncSurfaceLayer();
-
   @override
   Future<void> setVideoOutputEnabled(bool enabled) async {
     _videoOutputSuppressed = !enabled;

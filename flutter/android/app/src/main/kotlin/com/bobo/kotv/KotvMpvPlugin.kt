@@ -1,8 +1,14 @@
 package com.bobo.kotv
 
 import android.content.Context
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.SurfaceTexture
+import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -86,8 +92,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** IO/探测失败后强制 lavf=hls 再试一次。 */
   private var ioHlsRetried = false
   private var forceLavfHls = false
-  /** auto 下硬解失败后仅软解重载一次。 */
-  private var decodeFallbackTried = false
   /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
   private var retrySeekSec = -1.0
   private var loadedUrl: String = ""
@@ -114,7 +118,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /** ensurePlayer 时写入的 tls-verify；变更须重建上下文。 */
   private var createdTlsVerify: Boolean? = null
   private var createdDiskCache: Boolean? = null
-  private var createdPassThrough: Boolean? = null
+  /** 最近一次写入的 audio-spdif；空=当前输出不直通。 */
+  private var appliedSpdif: String? = null
 
   private val tick = object : Runnable {
     override fun run() {
@@ -197,6 +202,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         parkSurfaceTransient()
       }
     }
+    host.onSurfaceSize = { w, h -> if (surfaceHost === host) applySurfaceSize("${w}x$h") }
     if (surfaceLayerEnabled) {
       host.setRender(renderTexture)
       if (host.currentSurface() != null) {
@@ -337,7 +343,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             height = 0
             ioHlsRetried = false
             forceLavfHls = false
-            decodeFallbackTried = false
             retrySeekSec = -1.0
             pendingUrl = url
             pendingHeaders = headers
@@ -513,7 +518,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           .associate { "${it.key}" to "${it.value}" }
         main.post {
           try {
-            // tls / disk / spdif 在 init 写入，变更须重建；重建后若有已加载 URL 则按进度重载。
+            // tls / disk 在 init 写入，变更须重建；重建后若有已加载 URL 则按进度重载。
             val url = loadedUrl
             val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
             val pos = positionSec
@@ -523,6 +528,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             applyDolbyVisionOptions()
             applyPreferredSubtitleLangs()
             applyEqualizer()
+            applySpdif()
             if (rebuilt && url.isNotBlank()) {
               retrySeekSec = pos.coerceAtLeast(0.0)
               // 与 open 一致：先挂 Surface 再 loadfile，避免有声无画。
@@ -912,11 +918,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       destroyPlayer()
       rebuilt = true
     }
-    if (created.get() && createdPassThrough != null && createdPassThrough != audioPassThrough) {
-      Log.i(TAG, "recreate MPV context: audioPassThrough $createdPassThrough -> $audioPassThrough")
-      destroyPlayer()
-      rebuilt = true
-    }
     if (created.get()) return rebuilt
     synchronized(this) {
       if (created.get()) return rebuilt
@@ -989,11 +990,10 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         MPVLib.setOptionString("demuxer-max-back-bytes", demuxerMiB(back))
         MPVLib.setOptionString("cache-pause-initial", "no")
       }
-      if (audioPassThrough) {
-        MPVLib.setOptionString("audio-spdif", "ac3,eac3,truehd,dts,dtshd")
-      } else {
-        MPVLib.setOptionString("audio-spdif", "")
-      }
+      val spdif = spdifCodecs(ctx)
+      MPVLib.setOptionString("audio-spdif", spdif)
+      appliedSpdif = spdif
+      Log.i(TAG, "audio-spdif=$spdif")
       applyDolbyVisionOptions()
       applyPreferredSubtitleLangs()
       // 字幕基础：内嵌字体 + ASS 按比例缩放（细项仍可走 mpv.conf / setSubtitleStyle）。
@@ -1013,7 +1013,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       createdAsLive = livePlayback
       createdTlsVerify = tlsVerify
       createdDiskCache = diskCache
-      createdPassThrough = audioPassThrough
       applyAspectMode()
       main.removeCallbacks(tick)
       main.post(tick)
@@ -1269,15 +1268,82 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     } catch (t: Throwable) {
       Log.w(TAG, "apply video vf", t)
     }
+    applyAudioAf()
+  }
+
+  private fun applyAudioAf() {
     try {
       // 直通时不强塞 af，避免破 SPDIF。
-      if (audioPassThrough && audioAf.isNotEmpty()) {
+      if (!appliedSpdif.isNullOrEmpty() && audioAf.isNotEmpty()) {
         Log.i(TAG, "skip audio af while passthrough enabled")
       } else {
         MPVLib.setPropertyString("af", audioAf)
       }
     } catch (t: Throwable) {
       Log.w(TAG, "apply audio af", t)
+    }
+  }
+
+  /** 设置开且当前输出能直出时才直通；手机扬声器等不支持时 MPV 直接解成 PCM。 */
+  private fun spdifCodecs(ctx: Context?): String {
+    if (!audioPassThrough || ctx == null) return ""
+    val candidates = listOf(
+      "ac3" to AudioFormat.ENCODING_AC3,
+      "eac3" to AudioFormat.ENCODING_E_AC3,
+      "truehd" to AudioFormat.ENCODING_DOLBY_TRUEHD,
+      "dts" to AudioFormat.ENCODING_DTS,
+      "dtshd" to AudioFormat.ENCODING_DTS_HD,
+    )
+    val supported = try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val attrs = AudioAttributes.Builder()
+          .setUsage(AudioAttributes.USAGE_MEDIA)
+          .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+          .build()
+        val masks = intArrayOf(AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.CHANNEL_OUT_7POINT1_SURROUND)
+        candidates.filter { (_, enc) ->
+          masks.any { mask ->
+            val fmt = AudioFormat.Builder()
+              .setEncoding(enc)
+              .setSampleRate(48000)
+              .setChannelMask(mask)
+              .build()
+            AudioTrack.isDirectPlaybackSupported(fmt, attrs)
+          }
+        }
+      } else {
+        val encodings = HashSet<Int>()
+        val plug = ctx.registerReceiver(null, IntentFilter(AudioManager.ACTION_HDMI_AUDIO_PLUG))
+        if (plug != null && plug.getIntExtra(AudioManager.EXTRA_AUDIO_PLUG_STATE, 0) == 1) {
+          plug.getIntArrayExtra(AudioManager.EXTRA_ENCODINGS)?.forEach { encodings.add(it) }
+        }
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        am?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.forEach { dev ->
+          when (dev.type) {
+            AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC, AudioDeviceInfo.TYPE_LINE_DIGITAL ->
+              dev.encodings.forEach { encodings.add(it) }
+          }
+        }
+        candidates.filter { (_, enc) -> enc in encodings }
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "query passthrough support", t)
+      emptyList()
+    }
+    return supported.joinToString(",") { it.first }
+  }
+
+  /** 每次 loadfile 前按当前输出设备重算（插拔 HDMI 后下一次起播生效）。 */
+  private fun applySpdif() {
+    val spdif = spdifCodecs(appContext)
+    if (spdif == appliedSpdif) return
+    try {
+      MPVLib.setPropertyString("audio-spdif", spdif)
+      appliedSpdif = spdif
+      Log.i(TAG, "audio-spdif=$spdif")
+      applyAudioAf()
+    } catch (t: Throwable) {
+      Log.w(TAG, "apply audio-spdif", t)
     }
   }
 
@@ -1390,14 +1456,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (!surface.isValid) return
     try {
       val vo = if (gpuNext) "gpu-next" else "gpu"
-      val w = surfaceHost?.width ?: 0
-      val h = surfaceHost?.height ?: 0
-      val size = if (w > 0 && h > 0) "${w}x${h}" else null
+      val size = surfaceSizeOf(surfaceHost)
       if (surfaceAttached && attachedSurface === surface) {
-        if (size != null && size != appliedSurfaceSize) {
-          MPVLib.setPropertyString("android-surface-size", size)
-          appliedSurfaceSize = size
-        }
+        if (size != null) applySurfaceSize(size)
         return
       }
       if (surfaceAttached) {
@@ -1411,10 +1472,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.attachSurface(surface)
       surfaceAttached = true
       attachedSurface = surface
-      if (size != null) {
-        MPVLib.setPropertyString("android-surface-size", size)
-        appliedSurfaceSize = size
-      }
+      appliedSurfaceSize = null
+      if (size != null) applySurfaceSize(size)
       MPVLib.setPropertyString("vo", vo)
       // 绑定输出时不强制 force-window / 不重播；保持 pause 与 time-pos。
       if (pendingUrl == null) {
@@ -1422,6 +1481,26 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     } catch (e: Throwable) {
       Log.e(TAG, "attachSurface", e)
+    }
+  }
+
+  /** 优先缓冲区回调的宽高，没有时退回 View 宽高。 */
+  private fun surfaceSizeOf(host: KotvMpvSurfaceHost?): String? {
+    if (host == null) return null
+    host.bufferSize?.let { return it }
+    val w = host.width
+    val h = host.height
+    return if (w > 0 && h > 0) "${w}x${h}" else null
+  }
+
+  /** android-surface-size 唯一写入处；未绑 Surface 时由 tryAttachSurface 绑定后再写。 */
+  private fun applySurfaceSize(size: String) {
+    if (!created.get() || !surfaceAttached || size == appliedSurfaceSize) return
+    try {
+      MPVLib.setPropertyString("android-surface-size", size)
+      appliedSurfaceSize = size
+    } catch (t: Throwable) {
+      Log.w(TAG, "android-surface-size", t)
     }
   }
 
@@ -1450,6 +1529,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       loadedHeaders = headers
       applyPlayHttpHeaders(headers)
       applyForcedHlsFormat()
+      applySpdif()
       MPVLib.setPropertyDouble("volume", volume)
       MPVLib.setPropertyDouble("speed", rate)
       MPVLib.command(arrayOf("loadfile", url, "replace"))
@@ -1666,7 +1746,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     createdAsLive = null
     createdTlsVerify = null
     createdDiskCache = null
-    createdPassThrough = null
+    appliedSpdif = null
     if (!created.getAndSet(false)) return
     try {
       MPVLib.removeObserver(this)
@@ -1800,47 +1880,11 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             return
           }
         }
-        if (shouldDecodeFallback(error, errorText) && !decodeFallbackTried) {
-          decodeFallbackTried = true
-          decodeMode = "soft"
-          Log.w(TAG, "mpv decode error → soft hwdec retry err=$error text=$errorText")
-          val url = loadedUrl.ifBlank { pendingUrl.orEmpty() }
-          val headers = if (loadedHeaders.isNotEmpty()) loadedHeaders else pendingHeaders
-          if (url.isNotBlank()) {
-            buffering = true
-            playing = false
-            retrySeekSec = positionSec.coerceAtLeast(0.0)
-            main.post {
-              try {
-                if (created.get()) {
-                  MPVLib.setPropertyString("hwdec", "no")
-                }
-                startLoad(url, headers)
-              } catch (t: Throwable) {
-                emit(mapOf("event" to "error", "message" to (t.message ?: "decode fallback failed")))
-              }
-            }
-            return
-          }
-        }
         val msg = errorText?.takeIf { it.isNotBlank() } ?: "MPV error $error"
         emit(mapOf("event" to "error", "message" to msg))
       }
       else -> {}
     }
-  }
-
-  /** auto 下硬解失败：翻软解再 load 一次。 */
-  private fun shouldDecodeFallback(error: Int, errorText: String?): Boolean {
-    val mode = decodeMode.trim().lowercase()
-    if (mode.isNotEmpty() && mode != "auto" && mode != "auto-safe") return false
-    val t = errorText?.lowercase().orEmpty()
-    if (t.contains("decode") || t.contains("decoder") || t.contains("hwdec") ||
-      t.contains("mediacodec") || t.contains("codec") || t.contains("vd:")
-    ) {
-      return true
-    }
-    return error == MPVLib.MpvError.MPV_ERROR_UNSUPPORTED
   }
 
   /** LOADING_FAILED / UNKNOWN_FORMAT / GENERIC，或文案像 IO。 */
@@ -1934,6 +1978,11 @@ internal class KotvMpvSurfaceHost(context: Context) :
   private var textureSurface: Surface? = null
   private var useTexture = false
   var onSurface: ((Boolean) -> Unit)? = null
+  /** 缓冲区宽高变化；android-surface-size 由插件统一写。 */
+  var onSurfaceSize: ((Int, Int) -> Unit)? = null
+  /** 最近一次回调的缓冲区宽高（"WxH"）；未知时为 null。 */
+  var bufferSize: String? = null
+    private set
 
   init {
     setBackgroundColor(Color.BLACK)
@@ -2011,6 +2060,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
     unbindViews()
     releaseTextureSurface()
     onSurface = null
+    onSurfaceSize = null
     removeAllViews()
   }
 
@@ -2028,6 +2078,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
     } catch (_: Throwable) {
     }
     textureSurface = null
+    bufferSize = null
   }
 
   private fun bindTextureSurface(st: SurfaceTexture?, width: Int, height: Int) {
@@ -2040,12 +2091,8 @@ internal class KotvMpvSurfaceHost(context: Context) :
 
   private fun applySurfaceSize(width: Int, height: Int) {
     if (width <= 0 || height <= 0) return
-    try {
-      if (MPVLib.getLoadedAbi() != null) {
-        MPVLib.setPropertyString("android-surface-size", "${width}x$height")
-      }
-    } catch (_: Throwable) {
-    }
+    bufferSize = "${width}x$height"
+    onSurfaceSize?.invoke(width, height)
   }
 
   override fun surfaceCreated(holder: SurfaceHolder) {
@@ -2058,6 +2105,7 @@ internal class KotvMpvSurfaceHost(context: Context) :
   }
 
   override fun surfaceDestroyed(holder: SurfaceHolder) {
+    bufferSize = null
     onSurface?.invoke(false)
   }
 

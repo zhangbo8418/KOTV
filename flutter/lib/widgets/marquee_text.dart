@@ -49,6 +49,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
   double _viewW = 0;
   bool _overflow = false;
   bool _wantRun = false;
+  bool _syncScheduled = false;
   String? _measuredText;
   TextStyle? _measuredStyle;
   double? _measuredViewW;
@@ -72,11 +73,23 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
     if (contentChanged && _viewW > 1) {
       _remeasure(_viewW, MediaQuery.maybeTextScalerOf(context) ?? TextScaler.noScaling);
     }
-    if (contentChanged || animParamsChanged) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _syncAnim();
-      });
-    }
+    if (contentChanged || animParamsChanged) _scheduleSync();
+  }
+
+  void _scheduleSync() {
+    if (_syncScheduled) return;
+    _syncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncScheduled = false;
+      if (mounted) _syncAnim();
+    });
+  }
+
+  /// 一轮时长（含开头停顿）；只依赖已测宽度与参数，build 与 [_syncAnim] 共用。
+  Duration _cycle() {
+    final travel = _textW + widget.blankGap;
+    final seconds = (travel / widget.velocity.clamp(12.0, 120.0)).clamp(2.0, 40.0);
+    return Duration(milliseconds: (seconds * 1000).round()) + widget.pause;
   }
 
   TextStyle _effectiveStyle() {
@@ -130,9 +143,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
       _ctrl.value = 0;
       return;
     }
-    final travel = _textW + widget.blankGap;
-    final seconds = (travel / widget.velocity.clamp(12.0, 120.0)).clamp(2.0, 40.0);
-    final total = Duration(milliseconds: (seconds * 1000).round()) + widget.pause;
+    final total = _cycle();
     final durationChanged = _ctrl.duration != total;
     if (durationChanged) {
       _ctrl.duration = total;
@@ -152,23 +163,14 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
     final want = widget.active || KotvMarqueeHost.activeOf(context);
     if (want != _wantRun) {
       _wantRun = want;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _syncAnim();
-      });
+      _scheduleSync();
     }
     final scaler = MediaQuery.textScalerOf(context);
     final style = _effectiveStyle();
     return LayoutBuilder(
       builder: (context, c) {
         final maxW = c.maxWidth;
-        if (maxW.isFinite && maxW > 0) {
-          final changed = _remeasure(maxW, scaler);
-          if (changed) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _syncAnim();
-            });
-          }
-        }
+        if (maxW.isFinite && maxW > 0 && _remeasure(maxW, scaler)) _scheduleSync();
 
         if (!_overflow || !_wantRun) {
           return SizedBox(
@@ -184,26 +186,7 @@ class _KotvMarqueeTextState extends State<KotvMarqueeText> with SingleTickerProv
           );
         }
 
-        final durMs = _ctrl.duration?.inMilliseconds ?? 0;
-        // duration 尚未由 _syncAnim 写好时先静态显示，避免 pauseFrac→∞ 导致永远不滚。
-        if (durMs <= 0) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _syncAnim();
-          });
-          return SizedBox(
-            width: maxW,
-            child: ClipRect(
-              child: Text(
-                widget.text,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.visible,
-                style: style,
-              ),
-            ),
-          );
-        }
-
+        final durMs = _cycle().inMilliseconds;
         final pauseFrac = (widget.pause.inMilliseconds / durMs).clamp(0.0, 0.9);
         return SizedBox(
           width: maxW,

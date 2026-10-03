@@ -410,7 +410,7 @@ class KotvMpvOpts {
         'eqSaturation': videoEq.enabled ? videoEq.saturation : 0,
         'eqGamma': videoEq.enabled ? videoEq.gamma : 0,
         'eqHue': videoEq.enabled ? videoEq.hue : 0,
-        'audioAf': audioPassThrough ? '' : _composedAf(),
+        'audioAf': _composedAf(),
         'videoVf': videoEq.mpvVf(),
         'subtitleFontScale': subtitleFontScale.clamp(0.5, 2.0),
       };

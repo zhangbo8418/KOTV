@@ -2463,7 +2463,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
     final prevSlot = _videoLayerRect;
     final prevClip = _bodyClipRect;
-    final hadLayer = _layerReady(prevSlot, prevClip);
     final slotSame = nextSlot == null ||
         (prevSlot != null &&
             (prevSlot.width - nextSlot.width).abs() < 0.5 &&
@@ -2479,28 +2478,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (nextSlot != null) _videoLayerRect = Offset.zero & nextSlot;
       if (nextClip != null) _bodyClipRect = nextClip;
     });
-    if (!hadLayer && _layerReady(_videoLayerRect, _bodyClipRect)) {
-      unawaited(_ensureDetailSurface());
-    }
   }
 
-  bool _layerReady(Rect? slot, Rect? clip) {
-    return slot != null &&
-        slot.width >= 1 &&
-        slot.height >= 1 &&
-        clip != null &&
-        clip.width >= 1 &&
-        clip.height >= 1;
-  }
-
-  /// 原生 MPV：Surface 晚进树或全屏改父级后，把 pending 的 loadfile 挂上。
-  Future<void> _ensureDetailSurface() async {
-    final mk = _mk;
-    if (mk is! NativeMpvPlayback || _playUrl.isEmpty) return;
-    try {
-      await mk.ensureSurfaceAttached();
-    } catch (_) {}
-  }
   /// 黑槽占位：[CompositedTransformTarget] 供画面层跟随；LayoutBuilder 捕获
   /// 不经 rebuild 的布局变化（窗口缩放、顶栏高度变化）刷新尺寸。
   Widget _buildVideoSlot() {
@@ -3132,7 +3111,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || _immersiveFullscreen) return;
     _syncVideoSlotRect();
-    await _ensureDetailSurface();
   }
 
   Future<void> _cast() async {

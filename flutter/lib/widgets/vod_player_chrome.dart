@@ -596,7 +596,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final ai = _aspects.indexWhere((e) => e.$1 == widget.aspect.key);
     if (ai >= 0) _aspectIdx = ai;
     unawaited(_refreshPlayerLabel());
-    if (_stableVolume) unawaited(_applyStableVolume(true));
     unawaited(_loadSkipOpeningEnding());
   }
 
@@ -634,7 +633,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     }
     if (oldWidget.stableVolumeOn != widget.stableVolumeOn) {
       _stableVolume = widget.stableVolumeOn;
-      unawaited(_applyStableVolume(_stableVolume));
     }
     if (oldWidget.aspect.key != widget.aspect.key) {
       final ai = _aspects.indexWhere((e) => e.$1 == widget.aspect.key);
@@ -1832,7 +1830,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           value: _stableVolume,
                           onChanged: (v) {
                             sync(() => _stableVolume = v);
-                            unawaited(_applyStableVolume(v));
                             unawaited(_persist('playerStableVolume', v ? 'true' : 'false'));
                           },
                         ),
@@ -1985,10 +1982,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         );
       },
     );
-  }
-
-  Future<void> _applyStableVolume(bool on) async {
-    await widget.player.setStableVolume(on);
   }
 
   Future<void> _pickSleepTimer(BuildContext sheetCtx, StateSetter setSheet) async {
