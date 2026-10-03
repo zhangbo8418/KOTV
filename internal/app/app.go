@@ -455,6 +455,72 @@ func (a *App) syncSessionsFromGlobal() {
 	})
 }
 
+type sessionSourceSnap struct {
+	sess *clientsession.Session
+	src  string
+	home string
+}
+
+func (a *App) snapshotSessionSources() []sessionSourceSnap {
+	if a == nil || a.sessions == nil {
+		return nil
+	}
+	var out []sessionSourceSnap
+	a.sessions.ForEach(func(sess *clientsession.Session) {
+		if sess == nil {
+			return
+		}
+		src, home := clientsession.LoadSource(sess.ClientID)
+		src = strings.TrimSpace(src)
+		if src == "" {
+			src = strings.TrimSpace(sess.Source)
+		}
+		if src == "" {
+			return
+		}
+		out = append(out, sessionSourceSnap{
+			sess: sess,
+			src:  src,
+			home: strings.TrimSpace(home),
+		})
+	})
+	return out
+}
+
+// restoreSessionSources 按清理前记下的会话源重新拉取。http(s) 不走库内 JSON。
+func (a *App) restoreSessionSources(snaps []sessionSourceSnap) error {
+	var errs []string
+	for _, s := range snaps {
+		if s.sess == nil || s.sess.Cfg == nil {
+			errs = append(errs, "会话配置未就绪")
+			continue
+		}
+		if err := s.sess.Cfg.ReloadFresh(s.src); err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		if s.home != "" {
+			if site := s.sess.Cfg.GetSite(s.home); site != nil {
+				s.sess.Cfg.SetHome(*site)
+			}
+		}
+		s.sess.Source = s.src
+		s.sess.Ready = true
+		s.sess.ErrMsg = ""
+		if s.sess.Live != nil {
+			s.sess.Live.SyncFromConfig()
+		}
+		if s.sess.Sites != nil {
+			s.sess.Sites.InvalidateHomeOnly()
+		}
+		clientsession.SaveSource(s.sess.ClientID, s.src, s.home)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 func (a *App) OpenPushURL(url string) {
 	a.openPushURL(url)
 }

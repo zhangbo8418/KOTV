@@ -2463,6 +2463,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
     final prevSlot = _videoLayerRect;
     final prevClip = _bodyClipRect;
+    final hadLayer = _layerReady(prevSlot, prevClip);
     final slotSame = nextSlot == null ||
         (prevSlot != null &&
             (prevSlot.width - nextSlot.width).abs() < 0.5 &&
@@ -2478,6 +2479,27 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (nextSlot != null) _videoLayerRect = Offset.zero & nextSlot;
       if (nextClip != null) _bodyClipRect = nextClip;
     });
+    if (!hadLayer && _layerReady(_videoLayerRect, _bodyClipRect)) {
+      unawaited(_ensureDetailSurface());
+    }
+  }
+
+  bool _layerReady(Rect? slot, Rect? clip) {
+    return slot != null &&
+        slot.width >= 1 &&
+        slot.height >= 1 &&
+        clip != null &&
+        clip.width >= 1 &&
+        clip.height >= 1;
+  }
+
+  /// 原生 MPV：Surface 晚进树或全屏改父级后，把 pending 的 loadfile 挂上。
+  Future<void> _ensureDetailSurface() async {
+    final mk = _mk;
+    if (mk is! NativeMpvPlayback || _playUrl.isEmpty) return;
+    try {
+      await mk.ensureSurfaceAttached();
+    } catch (_) {}
   }
   /// 黑槽占位：[CompositedTransformTarget] 供画面层跟随；LayoutBuilder 捕获
   /// 不经 rebuild 的布局变化（窗口缩放、顶栏高度变化）刷新尺寸。
@@ -2506,13 +2528,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 若底栏/SafeArea 仍占位，整窗高会比可见区大，contain 居中会明显偏下。
   Rect _stableVideoRect(BuildContext context, {Size? stackSize}) {
     if (_immersiveFullscreen) {
-      final s = stackSize;
-      Rect r;
-      if (s != null && s.width >= 1 && s.height >= 1) {
-        r = Offset.zero & s;
-      } else {
-        r = _videoLayerRect ?? (Offset.zero & MediaQuery.sizeOf(context));
-      }
+      final s = (stackSize != null && stackSize.width >= 1 && stackSize.height >= 1)
+          ? stackSize
+          : MediaQuery.sizeOf(context);
+      final r = Offset.zero & s;
       // 氛围模式：画面略内缩，四周透出壳层壁纸（默认适应仍是黑边）。
       if (_ambientOn && r.width > 80 && r.height > 96) {
         return Rect.fromLTRB(r.left + 28, r.top + 36, r.right - 28, r.bottom - 36);
@@ -3076,15 +3095,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await kotvEnterSystemFullscreen(desktopFs);
     if (!mounted) return;
     ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
-    final full = MediaQuery.sizeOf(context);
     setState(() {
       _desktopFs = desktopFs;
       _immersiveFullscreen = true;
       _fsSwipeDy.value = 0;
-      // 立刻铺满，避免先卸树再重建；外层 Positioned 只改几何。
-      if (_useStableVideoLayer) {
-        _videoLayerRect = Offset.zero & full;
-      }
     });
     _syncFullscreen();
     // 壳层 SafeArea/底栏撤掉后再补一次沉浸，避免状态栏占位。
@@ -3105,12 +3119,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       setState(() {
         _immersiveFullscreen = false;
         _immersiveEpCover = false;
-        _videoLayerRect = null;
-        _bodyClipRect = null;
       });
-      // 黑槽需重新进树后量测：同帧可能仍为空，再排一次。
-      _syncVideoSlotRect();
-      _scheduleSyncVideoSlot();
     }
     await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
     if (!kotvIsDesktop()) {
@@ -3118,6 +3127,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
       } catch (_) {}
     }
+    if (!mounted) return;
+    // 方向稳定后再量槽。尺寸一直留着，PlatformView 不卸树。
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || _immersiveFullscreen) return;
+    _syncVideoSlotRect();
+    await _ensureDetailSurface();
   }
 
   Future<void> _cast() async {
@@ -3478,17 +3493,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted || !_immersiveFullscreen) return;
               ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
-            });
-          }
-          if (_immersiveFullscreen &&
-              stackSize.width >= 1 &&
-              stackSize.height >= 1 &&
-              (_videoLayerRect == null ||
-                  (_videoLayerRect!.width - stackSize.width).abs() >= 0.5 ||
-                  (_videoLayerRect!.height - stackSize.height).abs() >= 0.5)) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted || !_immersiveFullscreen) return;
-              setState(() => _videoLayerRect = Offset.zero & stackSize);
             });
           }
           return NotificationListener<ScrollNotification>(

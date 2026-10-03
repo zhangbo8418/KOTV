@@ -1651,6 +1651,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ref.read(vodContentEpochProvider.notifier).state++;
       ref.invalidate(configProvider);
       ref.invalidate(settingsProvider);
+      await _reload();
+      if (!mounted) return;
     }
     setState(() => _status = msg);
     showAppNews(context, msg);

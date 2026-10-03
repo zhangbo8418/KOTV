@@ -368,6 +368,30 @@ func (m *Manager) initFromVod(vod string) error {
 	return m.ParseConfig(cfg, false)
 }
 
+// ReloadFresh 重新加载点播源。http(s) 不使用库内 JSON，重新请求该地址。
+func (m *Manager) ReloadFresh(source string) error {
+	source = NormalizeSource(source)
+	if source == "" {
+		return fmt.Errorf("未配置点播源")
+	}
+	lower := strings.ToLower(source)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		cfg := &database.Config{Type: database.ConfigTypeSite, URL: source}
+		if m.db != nil {
+			found, err := m.db.FindConfig(source, database.ConfigTypeSite)
+			if err != nil {
+				return err
+			}
+			if found != nil {
+				cfg = found
+				cfg.URL = source
+			}
+		}
+		return m.ParseConfig(cfg, false)
+	}
+	return m.initFromVod(source)
+}
+
 // SourceDisplayName 无接口名时回落为完整地址（勿截成路径末段）。
 func SourceDisplayName(raw string) string {
 	return strings.TrimSpace(raw)

@@ -139,14 +139,30 @@ func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {
 	reloaded := false
 	if opt.Script || opt.Jar {
 		// 爬虫包清掉后必须重载配置，重新下载 JAR / 拉站源；LoadJar 同步 parseJar。
+		// 会话当前源在 ReloadConfig 里会被 settings.VOD 盖掉，先记下，再按该地址重新 GET。
+		snaps := a.snapshotSessionSources()
+		var restoreErr error
 		err := spider.WithSyncLoadJar(func() error {
-			return a.ReloadConfig()
+			rerr := a.ReloadConfig()
+			if len(snaps) > 0 {
+				restoreErr = a.restoreSessionSources(snaps)
+			}
+			return rerr
 		})
 		if err != nil {
 			msg += "；重载源失败: " + err.Error()
 			res.Errors = append(res.Errors, "reload: "+err.Error())
+		}
+		if restoreErr != nil {
+			msg += "；重新拉取当前源失败: " + restoreErr.Error()
+			res.Errors = append(res.Errors, "session: "+restoreErr.Error())
+		}
+		if len(snaps) > 0 {
+			reloaded = restoreErr == nil
 		} else {
-			reloaded = true
+			reloaded = err == nil
+		}
+		if reloaded {
 			msg += "；已重新拉取点播源"
 		}
 	}
