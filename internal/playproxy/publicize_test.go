@@ -46,6 +46,10 @@ func TestPublicizeURLUsesClientOriginPort(t *testing.T) {
 	if got != "https://tv.example.com:8443/file/a.jpg" {
 		t.Fatalf("listen port leaked: %q", got)
 	}
+	got = PublicizeURL("http://10.0.0.2:8080/live.m3u8")
+	if got != "http://10.0.0.2:8080/live.m3u8" {
+		t.Fatalf("other host must stay, got %q", got)
+	}
 	got = PublicizeURL("http://127.0.0.1:5266/fishplay/go/quark/x")
 	if !strings.Contains(got, "https://tv.example.com:8443/proxy/play?id=") {
 		t.Fatalf("loopback port should be relayed on the client origin, got %q", got)

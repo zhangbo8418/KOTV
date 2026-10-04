@@ -58,6 +58,17 @@ bool kotvIsEngineServedPath(String path) {
       p == '/tvbus' ||
       p == '/cache' ||
       p.startsWith('/cache/') ||
+      p == '/upload' ||
+      p.startsWith('/upload/') ||
+      p == '/health' ||
+      p == '/media' ||
+      p == '/device' ||
+      p == '/action' ||
+      p == '/postMsg' ||
+      p == '/uiReply' ||
+      p == '/newFolder' ||
+      p == '/delFolder' ||
+      p == '/delFile' ||
       p.startsWith('/api/');
 }
 
@@ -126,11 +137,7 @@ String kotvRewriteEngineLocalUrl(String mediaUrl, String engineBaseUrl) {
     return media;
   }
   final rewrite = _isLoopbackHost(host) || _isPrivateOrLinkLocalIPv4(host);
-  if (!rewrite) return media;
-  // 只改本引擎自己的路径或同端口。别的回环端口不能改写到引擎端口上。
-  final enginePath = kotvIsEngineServedPath(m.path);
-  final samePort = m.hasPort && b.hasPort && m.port == b.port;
-  if (!enginePath && !samePort) return media;
+  if (!rewrite || !kotvIsEngineServedPath(m.path)) return media;
   return Uri(
     scheme: b.scheme.isEmpty ? 'http' : b.scheme,
     userInfo: m.userInfo.isEmpty ? null : m.userInfo,

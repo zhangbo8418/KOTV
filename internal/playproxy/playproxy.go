@@ -110,7 +110,7 @@ func LocalHTTPBase() string {
 
 // PublicizeURL 把地址改成当前请求的客户端打得开的形式。
 // 回环且端口不是本引擎时，由本机代拉后给出已有的 /proxy/play。
-// 本引擎端口或内网地址只换主机，路径和查询保持不变。
+// 本引擎路径上的回环或内网主机换成前端填写的连接根。其它地址保持不变。
 // 本机请求（PublicBase 为空）原样返回。headers 可选，只在代拉时附上。
 func PublicizeURL(raw string, headers ...map[string]string) string {
 	raw = strings.TrimSpace(raw)
@@ -154,7 +154,7 @@ func rewritePublicHost(raw string) string {
 		}
 		return raw
 	}
-	if !isRewriteableProxyHost(host) {
+	if !isRewriteableProxyHost(host) || !isEngineServedPath(u.Path) {
 		return raw
 	}
 	u.Scheme = pb.Scheme
@@ -201,6 +201,10 @@ func isEngineServedPath(path string) bool {
 	case path == "/upload" || strings.HasPrefix(path, "/upload/"):
 		return true
 	case path == "/health" || path == "/media" || path == "/device":
+		return true
+	case path == "/action" || path == "/postMsg" || path == "/uiReply":
+		return true
+	case path == "/newFolder" || path == "/delFolder" || path == "/delFile":
 		return true
 	case strings.HasPrefix(path, "/api/"):
 		return true

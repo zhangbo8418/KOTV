@@ -58,6 +58,16 @@ void main() {
     );
   });
 
+  test('keeps a private url that is not an engine path', () {
+    expect(
+      kotvRewriteEngineLocalUrl(
+        'http://10.0.0.2:8080/live.m3u8',
+        'https://tv.example.com:8443',
+      ),
+      'http://10.0.0.2:8080/live.m3u8',
+    );
+  });
+
   test('keeps a loopback url whose port is not the engine port', () {
     expect(
       kotvRewriteEngineLocalUrl(
