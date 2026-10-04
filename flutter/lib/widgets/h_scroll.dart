@@ -2,6 +2,7 @@ import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 /// 桌面端允许鼠标拖动滚动（Flutter 默认仅触摸/触控板）。
 class KotvScrollBehavior extends MaterialScrollBehavior {
@@ -26,7 +27,7 @@ class KotvScrollBehavior extends MaterialScrollBehavior {
 }
 
 /// 横向列表：鼠标拖动 + 滚轮（上下也映射为左右）。
-/// [scrollToIndex] 变化时把对应项滚入可视区（详情线路/分页选集）。
+/// 打开时停在 [scrollToIndex]。[itemStride] 已知则首帧就在该项；宽度随文字变化时，先按布局量出起点再跳过去。
 class HScrollList extends StatefulWidget {
   const HScrollList({
     super.key,
@@ -36,6 +37,7 @@ class HScrollList extends StatefulWidget {
     this.padding,
     this.physics,
     this.scrollToIndex,
+    this.itemStride,
   });
 
   final int itemCount;
@@ -44,28 +46,82 @@ class HScrollList extends StatefulWidget {
   final EdgeInsetsGeometry? padding;
   final ScrollPhysics? physics;
   final int? scrollToIndex;
+  /// 每项占位（含间距）。为空时按子组件布局结果定位。
+  final double? itemStride;
 
   @override
   State<HScrollList> createState() => _HScrollListState();
 }
 
 class _HScrollListState extends State<HScrollList> {
-  final _sc = ScrollController();
-  final Map<int, GlobalKey> _itemKeys = {};
+  late final KotvJumpController _sc = KotvJumpController(initialOffset: _offset(widget.scrollToIndex));
+  final GlobalKey _selKey = GlobalKey();
+  int? _pendingIndex;
+  var _hideUntilPlaced = false;
+  var _placeTries = 0;
+
+  bool get _measure => widget.itemStride == null && widget.scrollToIndex != null && widget.scrollToIndex! > 0;
+
+  double _offset(int? index) {
+    final stride = widget.itemStride;
+    if (index == null || index <= 0 || stride == null || stride <= 0) return 0;
+    return index * stride;
+  }
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollSelectedIntoView());
+    if (_measure) {
+      _hideUntilPlaced = true;
+      _queuePlace(widget.scrollToIndex);
+    }
   }
 
   @override
   void didUpdateWidget(HScrollList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.scrollToIndex != oldWidget.scrollToIndex ||
-        widget.itemCount != oldWidget.itemCount) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollSelectedIntoView());
+    if (widget.scrollToIndex == oldWidget.scrollToIndex && widget.itemStride == oldWidget.itemStride) return;
+    if (widget.itemStride != null) {
+      _pendingIndex = null;
+      _hideUntilPlaced = false;
+      _sc.reveal(_offset(widget.scrollToIndex));
+      return;
     }
+    _queuePlace(widget.scrollToIndex);
+  }
+
+  void _queuePlace(int? index) {
+    if (index == null || index <= 0 || widget.itemStride != null) {
+      _pendingIndex = null;
+      _hideUntilPlaced = false;
+      if (index != null && index <= 0) _sc.reveal(0);
+      return;
+    }
+    _pendingIndex = index;
+    _placeTries = 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _placePending());
+  }
+
+  void _placePending() {
+    final index = _pendingIndex;
+    if (!mounted || index == null || index != widget.scrollToIndex) return;
+    final object = _selKey.currentContext?.findRenderObject();
+    final viewport = object == null ? null : RenderAbstractViewport.maybeOf(object);
+    if (object is! RenderBox || !object.hasSize || viewport == null || !_sc.hasClients || !_sc.position.hasContentDimensions) {
+      if (_placeTries++ < 4) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _placePending());
+        return;
+      }
+      _pendingIndex = null;
+      _hideUntilPlaced = false;
+      if (mounted) setState(() {});
+      return;
+    }
+    final target = viewport.getOffsetToReveal(object, 0.0).offset;
+    _pendingIndex = null;
+    _hideUntilPlaced = false;
+    _sc.reveal(target);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -74,36 +130,10 @@ class _HScrollListState extends State<HScrollList> {
     super.dispose();
   }
 
-  GlobalKey _keyFor(int i) => _itemKeys.putIfAbsent(i, GlobalKey.new);
-
-  void _scrollSelectedIntoView() {
-    final i = widget.scrollToIndex;
-    if (i == null || i < 0 || i >= widget.itemCount || !mounted) return;
-    final ctx = _itemKeys[i]?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx, alignment: 0.35, duration: Duration.zero);
-      return;
-    }
-    // builder 未构建离屏项时先估跳，再 ensureVisible。
-    if (!_sc.hasClients) return;
-    final pos = _sc.position;
-    const est = 96.0;
-    final target = (i * est).clamp(pos.minScrollExtent, pos.maxScrollExtent);
-    _sc.jumpTo(target);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final c = _itemKeys[i]?.currentContext;
-      if (c != null) {
-        Scrollable.ensureVisible(c, alignment: 0.35, duration: Duration.zero);
-      }
-    });
-  }
-
   Widget? _buildItem(BuildContext context, int i) {
     final child = widget.itemBuilder(context, i);
-    if (child == null) return null;
-    if (widget.scrollToIndex == null) return child;
-    return KeyedSubtree(key: _keyFor(i), child: child);
+    if (child == null || !_measure || i != widget.scrollToIndex) return child;
+    return KeyedSubtree(key: _selKey, child: child);
   }
 
   void _onWheel(PointerSignalEvent e) {
@@ -120,6 +150,7 @@ class _HScrollListState extends State<HScrollList> {
         ? ListView.separated(
             controller: _sc,
             scrollDirection: Axis.horizontal,
+            scrollCacheExtent: _measure ? const ScrollCacheExtent.pixels(1000000) : null,
             padding: widget.padding,
             physics: widget.physics,
             itemCount: widget.itemCount,
@@ -129,6 +160,7 @@ class _HScrollListState extends State<HScrollList> {
         : ListView.builder(
             controller: _sc,
             scrollDirection: Axis.horizontal,
+            scrollCacheExtent: _measure ? const ScrollCacheExtent.pixels(1000000) : null,
             padding: widget.padding,
             physics: widget.physics,
             itemCount: widget.itemCount,
@@ -139,60 +171,50 @@ class _HScrollListState extends State<HScrollList> {
       behavior: const KotvScrollBehavior(showScrollbar: false),
       child: Listener(
         onPointerSignal: _onWheel,
-        child: list,
+        child: IgnorePointer(
+          ignoring: _hideUntilPlaced,
+          child: Opacity(
+            opacity: _hideUntilPlaced ? 0 : 1,
+            child: list,
+          ),
+        ),
       ),
     );
   }
 }
 
-/// 把列表第 [index] 项滚进可视区。
-/// 该项还没建出来时，先按平均尺寸跳到附近，下一帧再对准。
-void kotvScrollIndexIntoView({
-  required ScrollController controller,
-  required GlobalKey itemKey,
-  required int index,
-  required int count,
-  double alignment = 0.5,
-  Duration duration = Duration.zero,
-  Curve curve = Curves.easeOutCubic,
-  bool Function()? isActive,
-  int maxAttempts = 8,
-}) {
-  if (index < 0 || count <= 0 || index >= count) return;
-  var attempt = 0;
-  void tick() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (isActive != null && !isActive()) return;
-      if (!controller.hasClients || !controller.position.hasContentDimensions) {
-        if (++attempt < maxAttempts) tick();
-        return;
-      }
-      final ctx = itemKey.currentContext;
-      if (ctx != null && ctx.mounted) {
-        Scrollable.ensureVisible(ctx, alignment: alignment, duration: duration, curve: curve);
-        return;
-      }
-      final pos = controller.position;
-      if (pos.maxScrollExtent <= 0) {
-        if (pos.viewportDimension <= 0 && ++attempt < maxAttempts) tick();
-        return;
-      }
-      final avg = (pos.maxScrollExtent + pos.viewportDimension) / count;
-      final target = (index * avg - pos.viewportDimension * alignment).clamp(pos.minScrollExtent, pos.maxScrollExtent);
-      controller.jumpTo(target);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (isActive != null && !isActive()) return;
-        final built = itemKey.currentContext;
-        if (built != null && built.mounted) {
-          Scrollable.ensureVisible(built, alignment: alignment);
-          return;
-        }
-        if (++attempt < maxAttempts) tick();
-      });
-    });
+/// 列表打开时直接停在指定偏移，不从开头滑过去。
+class KotvJumpController extends ScrollController {
+  KotvJumpController({double initialOffset = 0})
+      : _offset = initialOffset < 0 ? 0 : initialOffset,
+        super(initialScrollOffset: initialOffset < 0 ? 0 : initialOffset, keepScrollOffset: false);
+
+  double _offset;
+
+  void arm(double offset) {
+    _offset = offset < 0 ? 0 : offset;
   }
 
-  tick();
+  void reveal(double offset) {
+    arm(offset);
+    if (!hasClients || !position.hasContentDimensions) return;
+    final pos = position;
+    final target = _offset.clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    if ((pos.pixels - target).abs() < 0.5) return;
+    pos.jumpTo(target);
+  }
+
+  @override
+  ScrollPosition createScrollPosition(ScrollPhysics physics, ScrollContext context, ScrollPosition? oldPosition) {
+    return ScrollPositionWithSingleContext(
+      physics: physics,
+      context: context,
+      initialPixels: _offset,
+      keepScrollOffset: keepScrollOffset,
+      oldPosition: oldPosition,
+      debugLabel: debugLabel,
+    );
+  }
 }
 
 /// 包装已有横向 [ListView] / [SingleChildScrollView]，仅补桌面拖动（无自管 controller）。

@@ -115,13 +115,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   final FocusNode _leftFocus = FocusNode(debugLabel: 'live_ch');
   final FocusNode _epgFocus = FocusNode(debugLabel: 'live_epg');
   final FocusNode _epgTabFocus = FocusNode(debugLabel: 'live_epg_tab');
-  final ScrollController _epgScroll = ScrollController();
-  // 竖屏与全屏面板不会同时出现，分类/频道/节目单各共用一个控制器和选中项 key。
-  final ScrollController _groupScroll = ScrollController();
-  final ScrollController _channelScroll = ScrollController();
-  final GlobalKey _groupSelKey = GlobalKey(debugLabel: 'live_group_sel');
-  final GlobalKey _channelSelKey = GlobalKey(debugLabel: 'live_channel_sel');
-  final GlobalKey _epgSelKey = GlobalKey(debugLabel: 'live_epg_sel');
+  final KotvJumpController _epgScroll = KotvJumpController();
+  // 竖屏与全屏面板不会同时出现，分类、频道、节目单各共用一个控制器。
+  final KotvJumpController _groupScroll = KotvJumpController();
+  final KotvJumpController _channelScroll = KotvJumpController();
+  double _groupStride = 42;
+  double _channelStride = 52;
+  double _epgStride = 36;
   String _zapDigits = '';
   Timer? _zapTimer;
 
@@ -1093,13 +1093,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _epgDays = [];
       _programs = [];
     });
-    _scrollListTo(_groupScroll, _groupSelKey, _groupIdx, _groups.length);
-    if (_chIdx >= 0) {
-      _scheduleScrollToCurrent(epg: false);
-      unawaited(_loadEpg());
-      return;
-    }
-    if (_channelScroll.hasClients) _channelScroll.jumpTo(0);
+    _scheduleScrollToCurrent(epg: false);
+    if (_chIdx >= 0) unawaited(_loadEpg());
   }
 
   Future<void> _loadEpg() async {
@@ -1155,26 +1150,47 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   void _scheduleScrollEpgToHighlight() {
-    _scrollListTo(_epgScroll, _epgSelKey, _epgHighlightIndex(), _programs.length);
+    _showAt(_epgScroll, _epgHighlightIndex(), _epgStride);
   }
 
-  /// 分类、频道、节目单都滚到当前项；列表未挂上就跳过（打开面板时会再滚）。
+  /// 分类、频道、节目单直接停在当前项，不从列表开头滑过去。
   void _scheduleScrollToCurrent({bool epg = true}) {
-    _scrollListTo(_groupScroll, _groupSelKey, _groupIdx, _groups.length);
-    _scrollListTo(_channelScroll, _channelSelKey, _chIdx, _channels.length);
+    _showAt(_groupScroll, _groupIdx, _groupStride);
+    _showAt(_channelScroll, _chIdx, _channelStride);
     if (epg) _scheduleScrollEpgToHighlight();
   }
 
-  /// 目标项已建出就直接居中；否则先按列表平均行高跳到附近让它建出来，下一帧再居中。
-  void _scrollListTo(ScrollController c, GlobalKey key, int index, int count) {
-    kotvScrollIndexIntoView(
-      controller: c,
-      itemKey: key,
-      index: index,
-      count: count,
-      duration: const Duration(milliseconds: 240),
-      isActive: () => mounted,
-    );
+  void _showAt(KotvJumpController controller, int index, double stride) {
+    final offset = index <= 0 || stride <= 0 ? 0.0 : index * stride;
+    if (!controller.hasClients) {
+      controller.arm(offset);
+      return;
+    }
+    controller.reveal(offset);
+  }
+
+  /// 列表还没挂上时写入首帧偏移；行高变了再在下一帧跳到当前项。
+  void _pinList(KotvJumpController controller, int index, double stride, double previous) {
+    if (!controller.hasClients) {
+      _showAt(controller, index, stride);
+      return;
+    }
+    if ((stride - previous).abs() <= 0.5) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showAt(controller, index, stride);
+    });
+  }
+
+  double _oneLine(BuildContext context, TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(text: '国', style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final h = painter.height;
+    painter.dispose();
+    return h;
   }
 
   Future<void> _openLiveUrl(
@@ -1887,7 +1903,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       wasDisplayFullscreen: _desktopFs == KotvDesktopFullscreenKind.display,
     );
     if (!mounted) return;
-    // 竖屏列表重建后回到顶部，再滚到当前项。
+    // 竖屏列表重建后直接停在当前分组、频道和节目。
     _scheduleScrollToCurrent();
   }
 
@@ -2364,6 +2380,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       height: height ?? (land ? 24.0 : 28.0),
       child: HScrollList(
         scrollToIndex: _dayIdx,
+        itemStride: (pillWidth ?? (land ? 56.0 : 72.0)) * LayoutScale.layoutOf(context) + (land ? 3.0 : 6.0),
         padding: padding,
         itemCount: _epgDays.length,
         separatorBuilder: (_, __) => SizedBox(width: land ? 3 : 6),
@@ -2400,7 +2417,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final fallback = '${prog['label'] ?? ''}'.trim();
     final label = title.isNotEmpty ? title : fallback;
     final focusHere = sel;
-    final rowKey = i == _epgHighlightIndex() ? _epgSelKey : null;
     void activate() {
       _cancelHideOverlays();
       if (canCatchup) unawaited(_playCatchup(i));
@@ -2409,7 +2425,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (portrait) {
       final p = KotvPalette.of(context);
       return Padding(
-        key: rowKey,
         padding: const EdgeInsets.only(bottom: 4),
         child: TvFocus(
           autofocus: focusHere,
@@ -2465,7 +2480,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
 
     return Padding(
-      key: rowKey,
       padding: EdgeInsets.only(bottom: land ? 2 : 4),
       child: TvFocus(
         autofocus: focusHere,
@@ -2966,6 +2980,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             final gap2 = land ? 6.0 : 6.0;
                             final pillH = land ? 30.0 : 36.0;
                             final chH = land ? 36.0 : 48.0;
+                            final groupStride = pillH * LayoutScale.layoutOf(context) + (land ? 4.0 : 6.0);
+                            final channelStride = chH + (land ? 2.0 : 4.0);
+                            final epgFont = land ? 12.0 : (12.0 * wScale.clamp(1.0, 1.2));
+                            final epgStride = _oneLine(
+                                  context,
+                                  TextStyle(fontSize: epgFont, height: 1.2, fontWeight: FontWeight.w700),
+                                ) +
+                                (land ? 10.0 : 16.0) +
+                                (land ? 2.0 : 4.0);
+                            _pinList(_groupScroll, _groupIdx, groupStride, _groupStride);
+                            _pinList(_channelScroll, _chIdx, channelStride, _channelStride);
+                            _pinList(_epgScroll, _epgHighlightIndex(), epgStride, _epgStride);
+                            _groupStride = groupStride;
+                            _channelStride = channelStride;
+                            _epgStride = epgStride;
                             final font = land ? 12.0 : (13.0 * wScale.clamp(1.0, 1.25));
                             final logoW = land ? 28.0 : 40.0;
                             final logoH = land ? 22.0 : 30.0;
@@ -3021,7 +3050,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         final g = _groups[i];
                                         final locked = _groupLocked(i);
                                         return Padding(
-                                          key: i == _groupIdx ? _groupSelKey : null,
                                           padding: EdgeInsets.only(bottom: land ? 4 : 6),
                                           child: AppPill(
                                             label: '${locked ? '🔒 ' : ''}${g['name'] ?? ''}',
@@ -3051,7 +3079,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         final sel = i == _chIdx;
                                         final focusHere = sel || (_chIdx < 0 && i == 0);
                                         return Padding(
-                                          key: sel ? _channelSelKey : null,
                                           padding: EdgeInsets.only(bottom: land ? 2 : 4),
                                           child: TvFocus(
                                             autofocus: focusHere,
@@ -3773,6 +3800,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Widget _portraitChannelPanel(KotvPalette p, List<Map<String, dynamic>> chs) {
+    final groupLine = _oneLine(context, const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, height: 1.15));
+    final groupBox = groupLine + 10 > 28 ? groupLine + 10 : 28.0;
+    final groupStride = groupBox + 3;
+    const channelStride = 39.0;
+    _pinList(_groupScroll, _groupIdx, groupStride, _groupStride);
+    _pinList(_channelScroll, _chIdx, channelStride, _channelStride);
+    _groupStride = groupStride;
+    _channelStride = channelStride;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -3790,7 +3825,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 final name = '${locked ? '🔒' : ''}${g['name'] ?? ''}';
                 final sel = i == _groupIdx;
                 return Padding(
-                  key: sel ? _groupSelKey : null,
                   padding: const EdgeInsets.only(bottom: 3),
                   child: TvFocus(
                     borderRadius: 6,
@@ -3833,7 +3867,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               final logo = '${ch['logo'] ?? ''}';
               final sel = i == _chIdx;
               return Padding(
-                key: sel ? _channelSelKey : null,
                 padding: const EdgeInsets.only(bottom: 3),
                 child: TvFocus(
                   borderRadius: 6,
@@ -3889,6 +3922,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Widget _portraitEpgPanel(KotvPalette p) {
+    final epgStride = _oneLine(context, const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)) + 24;
+    _pinList(_epgScroll, _epgHighlightIndex(), epgStride, _epgStride);
+    _epgStride = epgStride;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

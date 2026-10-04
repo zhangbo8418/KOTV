@@ -721,6 +721,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                       height: pillH,
                       child: HScrollList(
                         scrollToIndex: selIdx >= 0 ? selIdx : null,
+                        itemStride: pillW == null ? null : pillW * LayoutScale.layoutOf(context) + sepW,
                         itemCount: f.values.length,
                         separatorBuilder: (_, __) => SizedBox(width: sepW),
                         itemBuilder: (_, i) {

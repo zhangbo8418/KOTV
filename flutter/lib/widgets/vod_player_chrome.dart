@@ -16,6 +16,7 @@ import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 import '../util/pick_subtitle_file.dart';
 import 'danmaku_settings_sheet.dart';
+import 'h_scroll.dart';
 import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
 import 'volume_control.dart';
@@ -791,7 +792,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   Timer? _clockTimer;
   Timer? _epHideTimer;
   DateTime _now = DateTime.now();
-  final ScrollController _epScroll = ScrollController();
+  final KotvJumpController _epScroll = KotvJumpController();
   final FocusNode _playFocus = FocusNode(debugLabel: 'vod_fs_play');
   final FocusNode _seekFocus = FocusNode(debugLabel: 'vod_fs_seek');
   final FocusNode _epFocus = FocusNode(debugLabel: 'vod_fs_ep');
@@ -914,10 +915,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       _openingSec = widget.openingSec;
       _endingSec = widget.endingSec;
     }
-    if (oldWidget.epIdx != widget.epIdx) {
-      if (_epOpen) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollEpIntoView());
-      }
+    if (oldWidget.epIdx != widget.epIdx && _epOpen) {
+      _placeEpisode(widget.epIdx);
     }
     if (!identical(oldWidget.player, widget.player)) {
       final rate = widget.player.rate;
@@ -965,9 +964,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
 
   void openEpisodes() {
     _epHideTimer?.cancel();
+    _placeEpisode(widget.epIdx);
     setState(() => _epOpen = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollEpIntoView();
       if (mounted) _epFocus.requestFocus();
     });
   }
@@ -977,12 +976,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     setState(() => _epOpen = false);
   }
 
-  void _scrollEpIntoView() {
-    final i = widget.epIdx;
-    if (i < 0 || !_epScroll.hasClients) return;
-    final pos = _epScroll.position;
-    final target = (i * _epItemExtent).clamp(pos.minScrollExtent, pos.maxScrollExtent);
-    _epScroll.jumpTo(target);
+  /// 列表内边距在 itemExtent 之前，第 i 集的起点是 padding + i * extent。
+  void _placeEpisode(int i) {
+    const padTop = 8.0;
+    final offset = i <= 0 ? 0.0 : padTop + i * _epItemExtent;
+    if (_epScroll.hasClients) {
+      _epScroll.reveal(offset);
+    } else {
+      _epScroll.arm(offset);
+    }
   }
 
   Future<void> _refreshPlayerLabel() async {
