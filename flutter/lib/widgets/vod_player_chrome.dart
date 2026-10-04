@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../player/danmaku_layer.dart';
 import '../player/disc_play.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
+import '../player/tv_remote_keys.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
@@ -28,6 +30,251 @@ const _aspects = <(String key, String label, BoxFit fit, double? ratio)>[
   ('16:9', '16:9', BoxFit.fill, 16 / 9),
   ('4:3', '4:3', BoxFit.fill, 4 / 3),
 ];
+
+/// 画面调色、音频效果共用的预设按钮。
+class _EqPresetChip extends StatelessWidget {
+  const _EqPresetChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8, bottom: 8),
+      child: TvFocus(
+        autofocus: selected,
+        onPressed: onTap,
+        borderRadius: 20,
+        child: Material(
+          color: selected ? Colors.white : const Color(0xFF3A3A42),
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (selected) ...[
+                  const Icon(Icons.check, size: 16, color: Colors.black87),
+                  const SizedBox(width: 4),
+                ],
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: selected ? Colors.black87 : Colors.white.withOpacity(0.92),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 整行获焦，左右键按一格改数值，松手再提交。
+class _EqSliderRow extends StatefulWidget {
+  const _EqSliderRow({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+    required this.onCommit,
+    this.divisions = 40,
+    this.format,
+  });
+
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final int divisions;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onCommit;
+  final String Function(double value)? format;
+
+  @override
+  State<_EqSliderRow> createState() => _EqSliderRowState();
+}
+
+class _EqSliderRowState extends State<_EqSliderRow> {
+  final _focus = FocusNode();
+  double? _pending;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.onKeyEvent = _onKey;
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  double get _value => (_pending ?? widget.value).clamp(widget.min, widget.max);
+
+  String _text(double v) => widget.format?.call(v) ?? '${v.round()}';
+
+  void _step(bool forward) {
+    final parts = widget.divisions <= 0 ? 1 : widget.divisions;
+    final step = (widget.max - widget.min) / parts;
+    final next = (_value + (forward ? step : -step)).clamp(widget.min, widget.max);
+    setState(() => _pending = next);
+    widget.onChanged(next);
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    final key = event.logicalKey;
+    if (kotvIsLeftKey(key) || kotvIsRightKey(key)) {
+      if (event is KeyDownEvent || event is KeyRepeatEvent) {
+        _step(kotvIsRightKey(key));
+      } else if (event is KeyUpEvent) {
+        final v = _value;
+        setState(() => _pending = null);
+        widget.onCommit(v);
+      }
+      return KeyEventResult.handled;
+    }
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    if (kotvIsUpKey(key)) {
+      return node.focusInDirection(TraversalDirection.up) ? KeyEventResult.handled : KeyEventResult.ignored;
+    }
+    if (kotvIsDownKey(key)) {
+      return node.focusInDirection(TraversalDirection.down) ? KeyEventResult.handled : KeyEventResult.ignored;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _value;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: TvFocus(
+        focusNode: _focus,
+        borderRadius: 8,
+        child: Row(
+          children: [
+            if (widget.label.isNotEmpty)
+              SizedBox(
+                width: 72,
+                child: Text(widget.label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+              ),
+            Expanded(
+              child: ExcludeFocus(
+                child: Slider(
+                  value: v,
+                  min: widget.min,
+                  max: widget.max,
+                  divisions: widget.divisions,
+                  label: _text(v),
+                  onChanged: (nv) {
+                    setState(() => _pending = nv);
+                    widget.onChanged(nv);
+                  },
+                  onChangeEnd: (nv) {
+                    setState(() => _pending = null);
+                    widget.onCommit(nv);
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 确定键或指针按住时预览，松开恢复。
+class _HoldPreviewButton extends StatefulWidget {
+  const _HoldPreviewButton({required this.label, required this.onHold});
+
+  final String label;
+  final ValueChanged<bool> onHold;
+
+  @override
+  State<_HoldPreviewButton> createState() => _HoldPreviewButtonState();
+}
+
+class _HoldPreviewButtonState extends State<_HoldPreviewButton> {
+  final _focus = FocusNode();
+  bool _held = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.onKeyEvent = _onKey;
+  }
+
+  @override
+  void dispose() {
+    if (_held) {
+      _held = false;
+      widget.onHold(false);
+    }
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _setHeld(bool held) {
+    if (_held == held) return;
+    setState(() => _held = held);
+    widget.onHold(held);
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (!kotvIsEnterKey(event.logicalKey)) return KeyEventResult.ignored;
+    if (event is KeyDownEvent) {
+      _setHeld(true);
+      return KeyEventResult.handled;
+    }
+    if (event is KeyRepeatEvent) return KeyEventResult.handled;
+    if (event is KeyUpEvent) {
+      _setHeld(false);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocus(
+      focusNode: _focus,
+      borderRadius: 8,
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (_) => _setHeld(true),
+        onPointerUp: (_) => _setHeld(false),
+        onPointerCancel: (_) => _setHeld(false),
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: _held ? Colors.white : Colors.transparent,
+            border: Border.all(color: _held ? Colors.white : Colors.white38),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            widget.label,
+            style: TextStyle(color: _held ? Colors.black87 : Colors.white70, fontSize: 13),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class AspectSpec {
   const AspectSpec({required this.key, required this.fit, this.ratio});
@@ -796,68 +1043,38 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         return StatefulBuilder(
           builder: (ctx, setSheet) {
             final custom = preset == 'custom';
-            Widget chip(String id, String label) {
-              final on = preset == id || (id == 'off' && (preset.isEmpty || preset == 'off'));
-              return Padding(
-                padding: const EdgeInsets.only(right: 8, bottom: 8),
-                child: Material(
-                  color: on ? Colors.white : const Color(0xFF3A3A42),
-                  borderRadius: BorderRadius.circular(20),
-                  child: InkWell(
-                    onTap: () async {
-                      preset = id;
-                      setSheet(() {});
-                      await _persist('videoEq', id);
-                    },
-                    borderRadius: BorderRadius.circular(20),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (on) ...[
-                            const Icon(Icons.check, size: 16, color: Colors.black87),
-                            const SizedBox(width: 4),
-                          ],
-                          Text(
-                            label,
-                            style: TextStyle(
-                              color: on ? Colors.black87 : Colors.white.withOpacity(0.92),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
+            bool selected(String id) => preset == id || (id == 'off' && (preset.isEmpty || preset == 'off'));
+            Future<void> pick(String id) async {
+              preset = id;
+              setSheet(() {});
+              await _persist('videoEq', id);
             }
             Widget slider(String label, String key, double min, double max, {int divisions = 40}) {
-              final v = numOf(key).clamp(min, max);
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                child: Row(
-                  children: [
-                    SizedBox(width: 72, child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13))),
-                    Expanded(
-                      child: Slider(
-                        value: v,
-                        min: min,
-                        max: max,
-                        divisions: divisions,
-                        label: '${v.round()}',
-                        onChanged: (nv) {
-                          s[key] = '${nv.round()}';
-                          setSheet(() {});
-                        },
-                        onChangeEnd: (nv) => unawaited(_persist(key, '${nv.round()}')),
-                      ),
-                    ),
-                  ],
-                ),
+              return _EqSliderRow(
+                label: label,
+                value: numOf(key).clamp(min, max),
+                min: min,
+                max: max,
+                divisions: divisions,
+                onChanged: (nv) {
+                  s[key] = '${nv.round()}';
+                  setSheet(() {});
+                },
+                onCommit: (nv) => unawaited(_persist(key, '${nv.round()}')),
               );
+            }
+            Future<void> reset() async {
+              for (final k in const [
+                'videoBrightness',
+                'videoContrast',
+                'videoSaturation',
+                'videoSharpness',
+                'videoTemperature',
+              ]) {
+                s[k] = '0';
+                await _persist(k, '0');
+              }
+              setSheet(() {});
             }
             return _chromeSheetFrame(
               ctx,
@@ -878,7 +1095,11 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                         ('anime', '动漫'),
                         ('custom', '自定义'),
                       ])
-                        chip(e.$1, e.$2),
+                        _EqPresetChip(
+                          label: e.$2,
+                          selected: selected(e.$1),
+                          onTap: () => unawaited(pick(e.$1)),
+                        ),
                     ],
                   ),
                 ),
@@ -893,38 +1114,27 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     child: Row(
                       children: [
                         Expanded(
-                          child: Listener(
-                            onPointerDown: (_) => unawaited(widget.player.setFxPreview(videoOriginal: true)),
-                            onPointerUp: (_) => unawaited(widget.player.setFxPreview(videoOriginal: false)),
-                            onPointerCancel: (_) => unawaited(widget.player.setFxPreview(videoOriginal: false)),
-                            child: Container(
-                              alignment: Alignment.center,
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.white38),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Text('按住看原画', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                            ),
+                          child: _HoldPreviewButton(
+                            label: '按住看原画',
+                            onHold: (held) => unawaited(widget.player.setFxPreview(videoOriginal: held)),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: OutlinedButton(
-                            onPressed: () async {
-                              for (final k in const [
-                                'videoBrightness',
-                                'videoContrast',
-                                'videoSaturation',
-                                'videoSharpness',
-                                'videoTemperature',
-                              ]) {
-                                s[k] = '0';
-                                await _persist(k, '0');
-                              }
-                              setSheet(() {});
-                            },
-                            child: const Text('复位', style: TextStyle(color: Colors.white70)),
+                          child: TvFocus(
+                            borderRadius: 8,
+                            onPressed: () => unawaited(reset()),
+                            child: ExcludeFocus(
+                              child: Container(
+                                alignment: Alignment.center,
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.white38),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Text('复位', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -937,6 +1147,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         );
       },
     );
+    if (mounted) unawaited(widget.player.setFxPreview(videoOriginal: false));
   }
 
   Future<void> _showAudioFxSheet(BuildContext moreCtx) async {
@@ -957,41 +1168,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         return StatefulBuilder(
           builder: (ctx, setSheet) {
             Widget chip(String id, String label) {
-              final on = eq == id;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8, bottom: 8),
-                child: Material(
-                  color: on ? Colors.white : const Color(0xFF3A3A42),
-                  borderRadius: BorderRadius.circular(20),
-                  child: InkWell(
-                    onTap: () async {
-                      eq = id;
-                      setSheet(() {});
-                      await _persist('audioEq', id);
-                    },
-                    borderRadius: BorderRadius.circular(20),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (on) ...[
-                            const Icon(Icons.check, size: 16, color: Colors.black87),
-                            const SizedBox(width: 4),
-                          ],
-                          Text(
-                            label,
-                            style: TextStyle(
-                              color: on ? Colors.black87 : Colors.white.withOpacity(0.92),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+              return _EqPresetChip(
+                label: label,
+                selected: eq == id,
+                onTap: () {
+                  eq = id;
+                  setSheet(() {});
+                  unawaited(_persist('audioEq', id));
+                },
               );
             }
             return _chromeSheetFrame(
@@ -1011,88 +1195,50 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     ],
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 72, child: Text('对白', style: TextStyle(color: Colors.white70, fontSize: 13))),
-                      Expanded(
-                        child: Slider(
-                          value: dialogue.clamp(0, 100),
-                          min: 0,
-                          max: 100,
-                          divisions: 20,
-                          label: dialogue <= 0 ? '关' : '${dialogue.round()}',
-                          onChanged: (v) {
-                            dialogue = v;
-                            setSheet(() {});
-                          },
-                          onChangeEnd: (v) => unawaited(_persist('audioDialogue', '${v.round()}')),
-                        ),
-                      ),
-                    ],
-                  ),
+                _EqSliderRow(
+                  label: '对白',
+                  value: dialogue.clamp(0, 100),
+                  min: 0,
+                  max: 100,
+                  divisions: 20,
+                  format: (v) => v <= 0 ? '关' : '${v.round()}',
+                  onChanged: (v) {
+                    dialogue = v;
+                    setSheet(() {});
+                  },
+                  onCommit: (v) => unawaited(_persist('audioDialogue', '${v.round()}')),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 72, child: Text('平衡', style: TextStyle(color: Colors.white70, fontSize: 13))),
-                      Expanded(
-                        child: Slider(
-                          value: balance,
-                          min: -100,
-                          max: 100,
-                          divisions: 40,
-                          label: balance.round() == 0 ? '居中' : '${balance.round()}',
-                          onChanged: (v) {
-                            balance = v;
-                            setSheet(() {});
-                          },
-                          onChangeEnd: (v) => unawaited(_persist('audioBalance', '${v.round()}')),
-                        ),
-                      ),
-                    ],
-                  ),
+                _EqSliderRow(
+                  label: '平衡',
+                  value: balance,
+                  min: -100,
+                  max: 100,
+                  divisions: 40,
+                  format: (v) => v.round() == 0 ? '居中' : '${v.round()}',
+                  onChanged: (v) {
+                    balance = v;
+                    setSheet(() {});
+                  },
+                  onCommit: (v) => unawaited(_persist('audioBalance', '${v.round()}')),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 72, child: Text('音画', style: TextStyle(color: Colors.white70, fontSize: 13))),
-                      Expanded(
-                        child: Slider(
-                          value: offset,
-                          min: -5000,
-                          max: 5000,
-                          divisions: 100,
-                          label: '${offset.round()} ms',
-                          onChanged: (v) {
-                            offset = v;
-                            setSheet(() {});
-                          },
-                          onChangeEnd: (v) => unawaited(_persist('audioOffsetMs', '${v.round()}')),
-                        ),
-                      ),
-                    ],
-                  ),
+                _EqSliderRow(
+                  label: '音画',
+                  value: offset,
+                  min: -5000,
+                  max: 5000,
+                  divisions: 100,
+                  format: (v) => '${v.round()} ms',
+                  onChanged: (v) {
+                    offset = v;
+                    setSheet(() {});
+                  },
+                  onCommit: (v) => unawaited(_persist('audioOffsetMs', '${v.round()}')),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                  child: Listener(
-                    onPointerDown: (_) => unawaited(widget.player.setFxPreview(audioOriginal: true)),
-                    onPointerUp: (_) => unawaited(widget.player.setFxPreview(audioOriginal: false)),
-                    onPointerCancel: (_) => unawaited(widget.player.setFxPreview(audioOriginal: false)),
-                    child: Container(
-                      width: double.infinity,
-                      alignment: Alignment.center,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.white38),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text('按住试听原音', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                    ),
+                  child: _HoldPreviewButton(
+                    label: '按住试听原音',
+                    onHold: (held) => unawaited(widget.player.setFxPreview(audioOriginal: held)),
                   ),
                 ),
               ],
@@ -1101,6 +1247,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
         );
       },
     );
+    if (mounted) unawaited(widget.player.setFxPreview(audioOriginal: false));
   }
 
   void _cycleSpeed() {
@@ -1120,6 +1267,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheet) {
+            void pickSpeed(double s) {
+              rate = s;
+              setSheet(() {});
+              widget.player.setRate(s);
+              setState(() => _speedIdx = _speeds.indexOf(s));
+              unawaited(_persist('playerSpeed', '$s'));
+              Navigator.pop(ctx);
+              widget.onBump();
+            }
             return _chromeSheetFrame(
               ctx,
               title: '播放倍速',
@@ -1132,18 +1288,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700),
                   ),
                 ),
-                Slider(
+                _EqSliderRow(
+                  label: '',
                   value: rate,
                   min: 0.1,
                   max: 5.0,
                   divisions: 49,
-                  label: '×${rate.toStringAsFixed(1)}',
+                  format: (v) => '×${v.toStringAsFixed(1)}',
                   onChanged: (v) {
                     rate = v;
                     setSheet(() {});
                     widget.player.setRate(v);
                   },
-                  onChangeEnd: (v) {
+                  onCommit: (v) {
                     final i = _speeds.indexWhere((s) => (s - v).abs() < 0.05);
                     setState(() {
                       if (i >= 0) _speedIdx = i;
@@ -1159,17 +1316,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     runSpacing: 8,
                     children: [
                       for (final s in _speeds)
-                        ActionChip(
-                          label: Text('×${s == s.roundToDouble() ? s.toStringAsFixed(0) : s}'),
-                          onPressed: () {
-                            rate = s;
-                            setSheet(() {});
-                            widget.player.setRate(s);
-                            setState(() => _speedIdx = _speeds.indexOf(s));
-                            unawaited(_persist('playerSpeed', '$s'));
-                            Navigator.pop(ctx);
-                            widget.onBump();
-                          },
+                        TvFocus(
+                          autofocus: (rate - s).abs() < 0.05,
+                          borderRadius: 20,
+                          onPressed: () => pickSpeed(s),
+                          child: ExcludeFocus(
+                            child: ActionChip(
+                              label: Text('×${s == s.roundToDouble() ? s.toStringAsFixed(0) : s}'),
+                              onPressed: () => pickSpeed(s),
+                            ),
+                          ),
                         ),
                     ],
                   ),

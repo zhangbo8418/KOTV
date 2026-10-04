@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../theme/layout_scale.dart';
 import 'fullscreen_sys.dart' if (dart.library.html) 'fullscreen_sys_web.dart' as sys;
 import 'kotv_platform.dart';
 
@@ -59,7 +60,14 @@ Future<void> kotvExitSystemFullscreen({required bool wasDisplayFullscreen}) asyn
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   } catch (_) {}
   try {
-    await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    if (KotvLayout.television) {
+      await SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    }
   } catch (_) {}
   if (!wasDisplayFullscreen) return;
   if (kIsWeb) {

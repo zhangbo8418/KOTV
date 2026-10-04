@@ -150,6 +150,16 @@ Future<void> main() async {
   // Android 冷启动即 edge-to-edge，状态栏透明（与 MainActivity / styles 一致）。
   if (!kIsWeb && Platform.isAndroid) {
     try {
+      final tv = await const MethodChannel('kotv_android').invokeMethod<bool>('isTelevision');
+      KotvLayout.television = tv == true;
+      if (KotvLayout.television) {
+        await SystemChrome.setPreferredOrientations(const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      }
+    } catch (_) {}
+    try {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       SystemChrome.setSystemUIOverlayStyle(
         const SystemUiOverlayStyle(

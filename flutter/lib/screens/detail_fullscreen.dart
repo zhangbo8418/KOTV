@@ -19,6 +19,7 @@ import '../player/kotv_platform.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/tv_remote_keys.dart';
 import '../nav/kotv_page.dart';
+import '../theme/layout_scale.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
 import 'shell.dart';
@@ -249,8 +250,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     });
     widget.playback.addListener(_onPlaybackChanged);
     // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
-    if (!kotvIsDesktop() && !kIsWeb) {
-      // 先锁竖屏再进沉浸：锁方向常会把系统栏拉回来。
+    if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
+      // 先锁竖屏再进沉浸：锁方向常会把系统栏拉回来。电视保持横屏。
       unawaited(() async {
         await kotvLockPortrait();
         await kotvEnterSystemFullscreen(widget.desktopFullscreen);
@@ -435,6 +436,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Future<void> _lockPortraitMode() async {
+    if (KotvLayout.television) return;
     setState(() => _forcedLandscape = false);
     await kotvLockPortrait();
     await kotvEnterSystemFullscreen(widget.desktopFullscreen);

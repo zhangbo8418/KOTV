@@ -43,100 +43,120 @@ const (
 	PlayerStableVolume Type = "playerStableVolume"
 	UA                 Type = "ua" // 播放 User-Agent；空则用 Media3 默认
 	// MPV：mpv_vulkan / mpv_gpu_next + 自定义 mpv.conf
-	MpvVulkan     Type = "mpvVulkan"
-	MpvGpuNext    Type = "mpvGpuNext"
-	MpvConf       Type = "mpvConf"
-	LiveKeep      Type = "liveKeep"     // 上次直播：源$$$分组$$$频道$$$线路URL
-	LiveAcross    Type = "liveAcross"   // 跨分组换台，默认 true
-	LiveChange    Type = "liveChange"   // 播放失败自动换线，默认 true
-	LiveInvert    Type = "liveInvert"   // 反转上下换台方向，默认 false
-	DLNARenderer  Type = "dlnaRenderer" // 作为 DLNA 被投端，默认 false
-	UpdateURL     Type = "updateUrl"
-	AvatarPath    Type = "avatarPath"
-	WallMode      Type = "wallMode"
-	WallURL       Type = "wallURL"
-	WallFile      Type = "wallFile"
-	Incognito     Type = "incognito"
-	SyncPairCode  Type = "syncPairCode"
-	DeviceUUID    Type = "deviceUUID"
+	MpvVulkan    Type = "mpvVulkan"
+	MpvGpuNext   Type = "mpvGpuNext"
+	MpvConf      Type = "mpvConf"
+	LiveKeep     Type = "liveKeep"     // 上次直播：源$$$分组$$$频道$$$线路URL
+	LiveAcross   Type = "liveAcross"   // 跨分组换台，默认 true
+	LiveChange   Type = "liveChange"   // 播放失败自动换线，默认 true
+	LiveInvert   Type = "liveInvert"   // 反转上下换台方向，默认 false
+	DLNARenderer Type = "dlnaRenderer" // 作为 DLNA 被投端，默认 false
+	UpdateURL    Type = "updateUrl"
+	AvatarPath   Type = "avatarPath"
+	WallMode     Type = "wallMode"
+	WallURL      Type = "wallURL"
+	WallFile     Type = "wallFile"
+	Incognito    Type = "incognito"
+	SyncPairCode Type = "syncPairCode"
+	DeviceUUID   Type = "deviceUUID"
 	// SyncHistoryPending / SyncKeepPending：同步接收后待客户端落 SP 的 JSON。
 	SyncHistoryPending Type = "kotv_sync_history"
 	SyncKeepPending    Type = "kotv_sync_keep"
-	RemoteAuth    Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
-	AllowRegister Type = "allowRegister" // 开放注册，默认 false
+	RemoteAuth         Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
+	AllowRegister      Type = "allowRegister" // 开放注册，默认 false
 	// BackendProxyPlay 网盘是否经引擎 /proxy（jar 原生库/go/Java 多线程）。
 	// 默认 false：展开为 CDN 直链；true：保留爬虫 /proxy 加速。
 	BackendProxyPlay Type = "backendProxyPlay"
 
 	// 播放细项（须进 APIGetSettings 白名单，否则冷启动丢设置）。
-	AudioPassThrough       Type = "audioPassThrough"
-	ExoDiskCache           Type = "exoDiskCache"
-	ExoAdblock             Type = "exoAdblock"
-	ExoTunneling           Type = "exoTunneling"
-	ExoPreferAac           Type = "exoPreferAac"
-	ExoSkipSilence         Type = "exoSkipSilence"
-	ExoSoftAudioPrefer     Type = "exoSoftAudioPrefer"
-	ExoSoftVideoPrefer     Type = "exoSoftVideoPrefer"
-	ExoBuffer              Type = "exoBuffer"
-	ExoLibass              Type = "exoLibass"
-	ExoSecondarySubtitle   Type = "exoSecondarySubtitle"
-	ExoDolbyVision         Type = "exoDolbyVision"
-	ExoPreferredTextLangs  Type = "exoPreferredTextLangs"
-	ExoDiskPreloadMs       Type = "exoDiskPreloadMs"
-	MpvTlsVerify           Type = "mpvTlsVerify"
-	MpvDiskCache           Type = "mpvDiskCache"
-	MpvGpuApi              Type = "mpvGpuApi"
-	VideoEq                Type = "videoEq"
-	AudioEq                Type = "audioEq"
-	VideoBrightness        Type = "videoBrightness"
-	VideoContrast          Type = "videoContrast"
-	VideoSaturation        Type = "videoSaturation"
-	VideoGamma             Type = "videoGamma"
-	VideoHue               Type = "videoHue"
-	VideoTemperature       Type = "videoTemperature"
-	VideoSharpness         Type = "videoSharpness"
-	VideoShadow            Type = "videoShadow"
-	PreloadNextEpisode     Type = "preloadNextEpisode"
-	SubtitleFontScale      Type = "subtitleFontScale"
-	SubtitlePos            Type = "subtitlePos"
-	SubtitleColor          Type = "subtitleColor"
-	SubtitleBorderColor    Type = "subtitleBorderColor"
-	SubtitleBorderSize     Type = "subtitleBorderSize"
-	SubtitleSecondaryPos   Type = "subtitleSecondaryPos"
-	SubtitleBgColor        Type = "subtitleBgColor"
-	AudioEqBands           Type = "audioEqBands"
-	AudioDialogue          Type = "audioDialogue"
-	AudioBalance           Type = "audioBalance"
-	DanmakuOffsetMs        Type = "danmakuOffsetMs"
-	SubtitleStyleMode      Type = "subtitleStyleMode"
-	SubtitleEdgeType       Type = "subtitleEdgeType"
-	SubtitleTextOpacity    Type = "subtitleTextOpacity"
-	SubtitleBgOpacity      Type = "subtitleBgOpacity"
-	SubtitleEdgeOpacity    Type = "subtitleEdgeOpacity"
-	SubtitleOffsetMs       Type = "subtitleOffsetMs"
-	SubtitleShadowStrength Type = "subtitleShadowStrength"
-	SubtitleFont           Type = "subtitleFont"
-	SubtitleFontPath       Type = "subtitleFontPath"
-	PlayerScaleLive        Type = "playerScaleLive"
-	PlayerBackground       Type = "playerBackground"
-	PlayerSpeedLongPress   Type = "playerSpeedLongPress"
-	DanmakuLoad            Type = "danmakuLoad"
-	DanmakuAuto            Type = "danmakuAuto"
-	DanmakuSpiderFirst     Type = "danmakuSpiderFirst"
-	DanmakuShowScroll      Type = "danmakuShowScroll"
-	DanmakuShowTop         Type = "danmakuShowTop"
-	DanmakuShowBottom      Type = "danmakuShowBottom"
-	DanmakuShowReverse     Type = "danmakuShowReverse"
-	DanmakuShowSpecial     Type = "danmakuShowSpecial"
-	DanmakuShowPositioned  Type = "danmakuShowPositioned"
-	DanmakuFixedDurationMs Type = "danmakuFixedDurationMs"
-	DanmakuStrokeMode      Type = "danmakuStrokeMode"
-	DanmakuColorMode       Type = "danmakuColorMode"
-	DanmakuFont            Type = "danmakuFont"
-	DanmakuRowsTop         Type = "danmakuRowsTop"
-	DanmakuRowsBottom      Type = "danmakuRowsBottom"
-	ExoDiskPreloadThreads  Type = "exoDiskPreloadThreads"
-	ExoDiskPreloadSizeMb   Type = "exoDiskPreloadSizeMb"
+	AudioPassThrough         Type = "audioPassThrough"
+	ExoDiskCache             Type = "exoDiskCache"
+	ExoAdblock               Type = "exoAdblock"
+	ExoTunneling             Type = "exoTunneling"
+	ExoPreferAac             Type = "exoPreferAac"
+	ExoSkipSilence           Type = "exoSkipSilence"
+	ExoSoftAudioPrefer       Type = "exoSoftAudioPrefer"
+	ExoSoftVideoPrefer       Type = "exoSoftVideoPrefer"
+	ExoBuffer                Type = "exoBuffer"
+	ExoLibass                Type = "exoLibass"
+	ExoSecondarySubtitle     Type = "exoSecondarySubtitle"
+	ExoDolbyVision           Type = "exoDolbyVision"
+	ExoPreferredTextLangs    Type = "exoPreferredTextLangs"
+	ExoDiskPreloadMs         Type = "exoDiskPreloadMs"
+	MpvTlsVerify             Type = "mpvTlsVerify"
+	MpvDiskCache             Type = "mpvDiskCache"
+	MpvGpuApi                Type = "mpvGpuApi"
+	VideoEq                  Type = "videoEq"
+	AudioEq                  Type = "audioEq"
+	VideoBrightness          Type = "videoBrightness"
+	VideoContrast            Type = "videoContrast"
+	VideoSaturation          Type = "videoSaturation"
+	VideoGamma               Type = "videoGamma"
+	VideoHue                 Type = "videoHue"
+	VideoTemperature         Type = "videoTemperature"
+	VideoSharpness           Type = "videoSharpness"
+	VideoShadow              Type = "videoShadow"
+	PreloadNextEpisode       Type = "preloadNextEpisode"
+	SubtitleFontScale        Type = "subtitleFontScale"
+	SubtitlePos              Type = "subtitlePos"
+	SubtitleColor            Type = "subtitleColor"
+	SubtitleBorderColor      Type = "subtitleBorderColor"
+	SubtitleBorderSize       Type = "subtitleBorderSize"
+	SubtitleSecondaryPos     Type = "subtitleSecondaryPos"
+	SubtitleBgColor          Type = "subtitleBgColor"
+	AudioEqBands             Type = "audioEqBands"
+	AudioDialogue            Type = "audioDialogue"
+	AudioBalance             Type = "audioBalance"
+	DanmakuOffsetMs          Type = "danmakuOffsetMs"
+	SubtitleStyleMode        Type = "subtitleStyleMode"
+	SubtitleEdgeType         Type = "subtitleEdgeType"
+	SubtitleTextOpacity      Type = "subtitleTextOpacity"
+	SubtitleBgOpacity        Type = "subtitleBgOpacity"
+	SubtitleEdgeOpacity      Type = "subtitleEdgeOpacity"
+	SubtitleOffsetMs         Type = "subtitleOffsetMs"
+	SubtitleShadowStrength   Type = "subtitleShadowStrength"
+	SubtitleFont             Type = "subtitleFont"
+	SubtitleFontPath         Type = "subtitleFontPath"
+	PlayerScaleLive          Type = "playerScaleLive"
+	PlayerBackground         Type = "playerBackground"
+	PlayerSpeedLongPress     Type = "playerSpeedLongPress"
+	DanmakuLoad              Type = "danmakuLoad"
+	DanmakuAuto              Type = "danmakuAuto"
+	DanmakuSpiderFirst       Type = "danmakuSpiderFirst"
+	DanmakuShowScroll        Type = "danmakuShowScroll"
+	DanmakuShowTop           Type = "danmakuShowTop"
+	DanmakuShowBottom        Type = "danmakuShowBottom"
+	DanmakuShowReverse       Type = "danmakuShowReverse"
+	DanmakuShowSpecial       Type = "danmakuShowSpecial"
+	DanmakuShowPositioned    Type = "danmakuShowPositioned"
+	DanmakuFixedDurationMs   Type = "danmakuFixedDurationMs"
+	DanmakuStrokeMode        Type = "danmakuStrokeMode"
+	DanmakuColorMode         Type = "danmakuColorMode"
+	DanmakuFont              Type = "danmakuFont"
+	DanmakuRowsTop           Type = "danmakuRowsTop"
+	DanmakuRowsBottom        Type = "danmakuRowsBottom"
+	DanmakuMaxOnScreen       Type = "danmakuMaxOnScreen"
+	DanmakuScrollArea        Type = "danmakuScrollArea"
+	DanmakuScrollGap         Type = "danmakuScrollGap"
+	DanmakuShadowOpacity     Type = "danmakuShadowOpacity"
+	DanmakuDurationMs        Type = "danmakuDurationMs"
+	DanmakuLineSpacing       Type = "danmakuLineSpacing"
+	DanmakuBold              Type = "danmakuBold"
+	DanmakuStrokeWidth       Type = "danmakuStrokeWidth"
+	DanmakuProjectionOffsetX Type = "danmakuProjectionOffsetX"
+	DanmakuProjectionOffsetY Type = "danmakuProjectionOffsetY"
+	DanmakuProjectionOpacity Type = "danmakuProjectionOpacity"
+	AudioChannelMode         Type = "audioChannelMode"
+	AudioStability           Type = "audioStability"
+	AudioBoost               Type = "audioBoost"
+	AudioPreamp              Type = "audioPreamp"
+	AudioLoudness            Type = "audioLoudness"
+	AudioCenterGain          Type = "audioCenterGain"
+	AudioOffsetMs            Type = "audioOffsetMs"
+	PlayerSkipOpeningEnding  Type = "playerSkipOpeningEnding"
+	BootLive                 Type = "bootLive"
+	ExoDiskPreloadThreads    Type = "exoDiskPreloadThreads"
+	ExoDiskPreloadSizeMb     Type = "exoDiskPreloadSizeMb"
 	// Crash：UI 崩溃后跳过一次 spider homeContent（SiteApi Prefers crash）。
 	Crash Type = "crash"
 	// Language：UI/系统语言提示（如 zh-Hant）；TransEnabled 用。
@@ -271,6 +291,26 @@ func defaultFile() file {
 			{ID: "danmakuFont", Label: "弹幕字体", Value: "default"},
 			{ID: "danmakuRowsTop", Label: "顶部弹幕行数", Value: "3"},
 			{ID: "danmakuRowsBottom", Label: "底部弹幕行数", Value: "3"},
+			{ID: "danmakuMaxOnScreen", Label: "同屏弹幕上限", Value: "150"},
+			{ID: "danmakuScrollArea", Label: "弹幕滚动区域", Value: "50"},
+			{ID: "danmakuScrollGap", Label: "弹幕水平间距", Value: "8"},
+			{ID: "danmakuShadowOpacity", Label: "弹幕阴影透明度", Value: "0.5"},
+			{ID: "danmakuDurationMs", Label: "滚动弹幕时长", Value: "8000"},
+			{ID: "danmakuLineSpacing", Label: "弹幕行距", Value: "1.4"},
+			{ID: "danmakuBold", Label: "弹幕粗体", Value: "false"},
+			{ID: "danmakuStrokeWidth", Label: "弹幕描边宽度", Value: "0.12"},
+			{ID: "danmakuProjectionOffsetX", Label: "弹幕投影水平", Value: "0.08"},
+			{ID: "danmakuProjectionOffsetY", Label: "弹幕投影垂直", Value: "0.08"},
+			{ID: "danmakuProjectionOpacity", Label: "弹幕投影透明度", Value: "0.2"},
+			{ID: "audioChannelMode", Label: "声道模式", Value: "auto"},
+			{ID: "audioStability", Label: "音量稳定", Value: "0"},
+			{ID: "audioBoost", Label: "音量提升", Value: "0"},
+			{ID: "audioPreamp", Label: "前置衰减", Value: "0"},
+			{ID: "audioLoudness", Label: "响度归一", Value: "false"},
+			{ID: "audioCenterGain", Label: "中置增益", Value: "0"},
+			{ID: "audioOffsetMs", Label: "音画偏移", Value: "0"},
+			{ID: "playerSkipOpeningEnding", Label: "跳过片头片尾", Value: "true"},
+			{ID: "bootLive", Label: "开机进直播", Value: "false"},
 			{ID: "exoDiskPreloadThreads", Label: "Exo预读线程", Value: "1"},
 			{ID: "exoDiskPreloadSizeMb", Label: "Exo预读容量MB", Value: "128"},
 			{ID: "crash", Label: "首页崩溃跳过", Value: "false"},
@@ -383,9 +423,44 @@ func Load() error {
 	ensureSettingLocked(PlayerScaleLive, "直播画面比例", "default")
 	ensureSettingLocked(PlayerBackground, "后台播放", "pip")
 	ensureSettingLocked(PlayerSpeedLongPress, "长按倍速", "2.0")
+	ensureSettingLocked(SubtitleShadowStrength, "字幕阴影强度", "50")
+	ensureSettingLocked(SubtitleFont, "字幕字体", "default")
+	ensureSettingLocked(SubtitleFontPath, "字幕字体文件", "")
 	ensureSettingLocked(DanmakuLoad, "加载弹幕", "true")
 	ensureSettingLocked(DanmakuAuto, "自动搜索弹幕", "true")
 	ensureSettingLocked(DanmakuSpiderFirst, "片源弹幕优先", "true")
+	ensureSettingLocked(DanmakuShowScroll, "滚动弹幕", "true")
+	ensureSettingLocked(DanmakuShowTop, "顶部弹幕", "true")
+	ensureSettingLocked(DanmakuShowBottom, "底部弹幕", "true")
+	ensureSettingLocked(DanmakuShowReverse, "逆向弹幕", "true")
+	ensureSettingLocked(DanmakuShowSpecial, "特殊弹幕", "true")
+	ensureSettingLocked(DanmakuShowPositioned, "定位弹幕", "true")
+	ensureSettingLocked(DanmakuFixedDurationMs, "固定弹幕时长", "5000")
+	ensureSettingLocked(DanmakuStrokeMode, "弹幕描边", "shadow")
+	ensureSettingLocked(DanmakuColorMode, "弹幕颜色", "original")
+	ensureSettingLocked(DanmakuFont, "弹幕字体", "default")
+	ensureSettingLocked(DanmakuRowsTop, "顶部弹幕行数", "3")
+	ensureSettingLocked(DanmakuRowsBottom, "底部弹幕行数", "3")
+	ensureSettingLocked(DanmakuMaxOnScreen, "同屏弹幕上限", "150")
+	ensureSettingLocked(DanmakuScrollArea, "弹幕滚动区域", "50")
+	ensureSettingLocked(DanmakuScrollGap, "弹幕水平间距", "8")
+	ensureSettingLocked(DanmakuShadowOpacity, "弹幕阴影透明度", "0.5")
+	ensureSettingLocked(DanmakuDurationMs, "滚动弹幕时长", "8000")
+	ensureSettingLocked(DanmakuLineSpacing, "弹幕行距", "1.4")
+	ensureSettingLocked(DanmakuBold, "弹幕粗体", "false")
+	ensureSettingLocked(DanmakuStrokeWidth, "弹幕描边宽度", "0.12")
+	ensureSettingLocked(DanmakuProjectionOffsetX, "弹幕投影水平", "0.08")
+	ensureSettingLocked(DanmakuProjectionOffsetY, "弹幕投影垂直", "0.08")
+	ensureSettingLocked(DanmakuProjectionOpacity, "弹幕投影透明度", "0.2")
+	ensureSettingLocked(AudioChannelMode, "声道模式", "auto")
+	ensureSettingLocked(AudioStability, "音量稳定", "0")
+	ensureSettingLocked(AudioBoost, "音量提升", "0")
+	ensureSettingLocked(AudioPreamp, "前置衰减", "0")
+	ensureSettingLocked(AudioLoudness, "响度归一", "false")
+	ensureSettingLocked(AudioCenterGain, "中置增益", "0")
+	ensureSettingLocked(AudioOffsetMs, "音画偏移", "0")
+	ensureSettingLocked(PlayerSkipOpeningEnding, "跳过片头片尾", "true")
+	ensureSettingLocked(BootLive, "开机进直播", "false")
 	ensureSettingLocked(ExoDiskPreloadThreads, "Exo预读线程", "1")
 	ensureSettingLocked(ExoDiskPreloadSizeMb, "Exo预读容量MB", "128")
 	return nil

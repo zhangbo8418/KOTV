@@ -403,6 +403,30 @@ class KotvMpvOpts {
     return out;
   }
 
+  /// 按住看原画 / 试听原音要写的属性。不含 hwdec。
+  /// 音频直通时不写 af，避免盖掉当前直通。
+  Map<String, String> fxPreviewProperties({
+    required bool videoOriginal,
+    required bool audioOriginal,
+  }) {
+    final out = <String, String>{};
+    if (videoOriginal) {
+      out['brightness'] = '0';
+      out['contrast'] = '0';
+      out['saturation'] = '0';
+      out['gamma'] = '0';
+      out['hue'] = '0';
+      out['vf'] = '';
+    } else {
+      out.addAll(videoEq.mpvProps());
+      out['vf'] = videoEq.mpvVf();
+    }
+    if (!audioPassThrough) {
+      out['af'] = audioOriginal ? '' : _composedAf();
+    }
+    return out;
+  }
+
   /// 原生通道 open/setOpts 附加的 EQ 参数。
   Map<String, dynamic> equalizerChannelArgs() => {
         'eqBrightness': videoEq.enabled ? videoEq.brightness : 0,

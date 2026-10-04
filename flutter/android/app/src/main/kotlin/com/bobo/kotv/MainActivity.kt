@@ -145,6 +145,7 @@ class MainActivity : FlutterActivity() {
         "ensureStoragePermission" -> ensureStoragePermission(result)
         "ensureReadMediaPermission" -> ensureReadMediaPermission(result)
         "pickConfigFile" -> pickConfigFile(result)
+        "isTelevision" -> result.success(KotvFileChooser.isTelevision(this))
         "useFileBrowser" -> result.success(KotvFileChooser.shouldUseFileBrowser(this))
         "storageRoot" -> result.success(KotvFileChooser.storageRoot())
         "listDir" -> {

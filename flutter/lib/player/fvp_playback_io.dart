@@ -62,6 +62,8 @@ class FvpPlayback extends KotvPlayback {
   int _audioCenterGain = 0;
   String _audioChannelMode = 'auto';
   int _audioOffsetMs = 0;
+  bool _previewVideoOriginal = false;
+  bool _previewAudioOriginal = false;
 
   VideoPlayerController? get controller => _c;
 
@@ -646,6 +648,46 @@ class FvpPlayback extends KotvPlayback {
     notifyListeners();
   }
 
+  @override
+  Future<void> setFxPreview({bool? videoOriginal, bool? audioOriginal}) async {
+    var changed = false;
+    if (videoOriginal != null && videoOriginal != _previewVideoOriginal) {
+      _previewVideoOriginal = videoOriginal;
+      changed = true;
+    }
+    if (audioOriginal != null && audioOriginal != _previewAudioOriginal) {
+      _previewAudioOriginal = audioOriginal;
+      changed = true;
+    }
+    if (!changed) return;
+    final c = _c;
+    if (c == null || !c.value.isInitialized) return;
+    try {
+      _writeFxFilters(c);
+    } catch (_) {}
+  }
+
+  void _writeFxFilters(VideoPlayerController c) {
+    c.setProperty('video.avfilter', _previewVideoOriginal ? '' : _videoEq.fvpAvfilter());
+    c.setProperty(
+      'audio.avfilter',
+      _previewAudioOriginal
+          ? ''
+          : kotvAudioEqFvpFilter(
+              _audioEq,
+              bands: _audioEqBands,
+              dialogue: _audioDialogue,
+              balance: _audioBalance,
+              channelMode: _audioChannelMode,
+              stability: _audioStability,
+              boost: _audioBoost,
+              preamp: _audioPreamp,
+              loudness: _audioLoudness,
+              centerGain: _audioCenterGain,
+            ),
+    );
+  }
+
   void _applyRuntimeOptions(VideoPlayerController? c) {
     if (c == null || !c.value.isInitialized) return;
     try {
@@ -656,21 +698,7 @@ class FvpPlayback extends KotvPlayback {
       if (langs.isNotEmpty) {
         c.setProperty('subtitle.language', langs);
       }
-      final vf = _videoEq.fvpAvfilter();
-      c.setProperty('video.avfilter', vf);
-      final af = kotvAudioEqFvpFilter(
-        _audioEq,
-        bands: _audioEqBands,
-        dialogue: _audioDialogue,
-        balance: _audioBalance,
-        channelMode: _audioChannelMode,
-        stability: _audioStability,
-        boost: _audioBoost,
-        preamp: _audioPreamp,
-        loudness: _audioLoudness,
-        centerGain: _audioCenterGain,
-      );
-      c.setProperty('audio.avfilter', af);
+      _writeFxFilters(c);
       c.setProperty('audio.delay', (_audioOffsetMs / 1000.0).toStringAsFixed(3));
       _syncSubtitleTracks(c);
     } catch (_) {}

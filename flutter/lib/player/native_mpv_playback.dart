@@ -40,6 +40,8 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   KotvMpvOpts _opts;
+  bool _previewVideoOriginal = false;
+  bool _previewAudioOriginal = false;
   StreamSubscription? _sub;
   bool _nativeReady = false;
   bool _playing = false;
@@ -685,6 +687,29 @@ class NativeMpvPlayback extends KotvPlayback {
         ...opts.equalizerChannelArgs(),
       });
     } catch (_) {}
+  }
+
+  @override
+  Future<void> setFxPreview({bool? videoOriginal, bool? audioOriginal}) async {
+    var changed = false;
+    if (videoOriginal != null && videoOriginal != _previewVideoOriginal) {
+      _previewVideoOriginal = videoOriginal;
+      changed = true;
+    }
+    if (audioOriginal != null && audioOriginal != _previewAudioOriginal) {
+      _previewAudioOriginal = audioOriginal;
+      changed = true;
+    }
+    if (!changed) return;
+    final props = _opts.fxPreviewProperties(
+      videoOriginal: _previewVideoOriginal,
+      audioOriginal: _previewAudioOriginal,
+    );
+    for (final e in props.entries) {
+      try {
+        await _ch.invokeMethod('setProperty', {'key': e.key, 'value': e.value});
+      } catch (_) {}
+    }
   }
 
   @override

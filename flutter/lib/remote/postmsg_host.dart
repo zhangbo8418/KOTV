@@ -601,7 +601,7 @@ class PostMsgHost {
     final screen = MediaQuery.sizeOf(context);
     final desktop = kotvIsDesktop();
     final s = hostUiScale(context);
-    final compact = screen.width < 640 * s || screen.shortestSide < 560 * s;
+    final compact = KotvLayout.isCompact(context);
     final inset = EdgeInsets.symmetric(
       horizontal: (compact ? 10.0 : (desktop ? 64.0 : 48.0)) * s,
       vertical: (compact ? 12.0 : (desktop ? 48.0 : 40.0)) * s,

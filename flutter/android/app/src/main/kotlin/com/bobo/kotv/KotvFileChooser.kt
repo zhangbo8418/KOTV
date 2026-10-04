@@ -350,9 +350,20 @@ object KotvFileChooser {
    * 电视 / 无可用文档选择器时走应用内 FileActivity，
    * 才能进目录；系统桩选择器常把目录当文件返回。
    */
-  fun shouldUseFileBrowser(context: Context): Boolean {
-    val ui = context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
+  /** 电视界面、Leanback、无触摸。不读面板像素档。 */
+  fun isTelevision(context: Context): Boolean {
+    val cfg = context.resources.configuration
+    val ui = cfg.uiMode and Configuration.UI_MODE_TYPE_MASK
     if (ui == Configuration.UI_MODE_TYPE_TELEVISION) return true
+    val pm = context.packageManager
+    if (pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) return true
+    if (pm.hasSystemFeature("android.software.leanback_only")) return true
+    if (pm.hasSystemFeature("android.hardware.type.television")) return true
+    return cfg.touchscreen == Configuration.TOUCHSCREEN_NOTOUCH
+  }
+
+  fun shouldUseFileBrowser(context: Context): Boolean {
+    if (isTelevision(context)) return true
     val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
     intent.addCategory(Intent.CATEGORY_OPENABLE)
     intent.type = "*/*"

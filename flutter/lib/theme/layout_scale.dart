@@ -46,21 +46,29 @@ class LayoutScale extends InheritedWidget {
 class KotvLayout {
   KotvLayout._();
 
+  /// 系统电视标记（电视界面 / Leanback / 无触摸）。冷启动查询后写入。
+  /// 不表示面板是 720P、1080P、2K、4K 或 8K。
+  static bool television = false;
+
   /// 竖屏且宽度偏窄 → 普通 App 式底部菜单。
   static bool useBottomNav(BuildContext context) {
+    if (television) return false;
     final size = MediaQuery.sizeOf(context);
     return size.height > size.width && size.width < 900;
   }
 
   /// 手机横屏（宽但矮）→ 走桌面/横屏布局，不当竖屏紧凑。
   static bool isLandscapeCompact(BuildContext context) {
+    if (television) return false;
     final size = MediaQuery.sizeOf(context);
     return size.width >= size.height && size.height < 520;
   }
 
   /// 窄屏竖屏手机或缩得很小的桌面窗。
   /// **不含**手机横屏（否则会错误套用竖屏列表/网格）。
+  /// 电视不算紧凑：逻辑短边分不开 540 的电视和手机。
   static bool isCompact(BuildContext context) {
+    if (television) return false;
     if (isLandscapeCompact(context)) return false;
     final size = MediaQuery.sizeOf(context);
     return size.width < 720 || size.shortestSide < 560;

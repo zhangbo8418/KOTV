@@ -3,6 +3,7 @@ import '../util/kotv_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../player/kotv_platform.dart';
@@ -242,11 +243,7 @@ class _TvFocusState extends State<TvFocus> {
           final ctx = context;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!ctx.mounted) return;
-            Scrollable.ensureVisible(
-              ctx,
-              alignment: 0.5,
-              duration: const Duration(milliseconds: 160),
-            );
+            _jumpNearestScrollableIfClipped(ctx);
           });
         }
         if (_highlight == v) return;
@@ -300,6 +297,29 @@ class _TvFocusState extends State<TvFocus> {
       ),
     );
   }
+}
+
+/// 最近一层滚动区里已经完整露出就不动；被裁切时立刻跳到刚好露出。
+/// 不带动外层滚动，也不做一段滚动动画。
+void _jumpNearestScrollableIfClipped(BuildContext context) {
+  final object = context.findRenderObject();
+  if (object == null || !object.attached) return;
+  final viewport = RenderAbstractViewport.maybeOf(object);
+  final scrollable = Scrollable.maybeOf(context);
+  if (viewport == null || scrollable == null) return;
+  final position = scrollable.position;
+  if (!position.hasContentDimensions) return;
+  try {
+    final revealed = RevealedOffset.clampOffset(
+      leadingEdgeOffset: viewport.getOffsetToReveal(object, 0.0, axis: position.axis),
+      trailingEdgeOffset: viewport.getOffsetToReveal(object, 1.0, axis: position.axis),
+      currentOffset: position.pixels,
+    );
+    if (revealed == null) return;
+    final target = revealed.offset.clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
+    if (target == position.pixels) return;
+    position.jumpTo(target);
+  } catch (_) {}
 }
 
 /// 播放器快捷键（方向键/确认/返回）。

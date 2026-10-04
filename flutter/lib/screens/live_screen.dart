@@ -474,7 +474,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       unawaited(MiniPlayerWindow.exit());
     }
     if (_immersive && !kotvIsDesktop()) {
-      unawaited(SystemChrome.setPreferredOrientations(DeviceOrientation.values));
+      if (KotvLayout.television) {
+        unawaited(SystemChrome.setPreferredOrientations(const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]));
+      } else {
+        unawaited(SystemChrome.setPreferredOrientations(DeviceOrientation.values));
+      }
       unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     }
     _hideTimer?.cancel();

@@ -26,7 +26,7 @@ Future<void> _prepareLeavePlayback() async {
 /// 弹窗尺寸：窄屏用满宽减边距，避免固定 720 被压成竖条。
 ({double width, double height, EdgeInsets inset, bool compact}) _dialogMetrics(BuildContext context) {
   final sz = MediaQuery.sizeOf(context);
-  final compact = sz.width < 640 || sz.shortestSide < 560;
+  final compact = KotvLayout.isCompact(context);
   final inset = compact ? const EdgeInsets.symmetric(horizontal: 10, vertical: 12) : const EdgeInsets.symmetric(horizontal: 48, vertical: 40);
   final innerW = sz.width - inset.horizontal;
   final innerH = sz.height - inset.vertical;

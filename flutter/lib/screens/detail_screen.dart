@@ -1353,52 +1353,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           forceStyle: forceStyle,
         ));
         unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
-        _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
-        _danmakuLoad = _flagFromSettings(settings, 'danmakuLoad', true);
-        _danmakuAuto = _flagFromSettings(settings, 'danmakuAuto', true);
-        _danmakuSpiderFirst = _flagFromSettings(settings, 'danmakuSpiderFirst', true);
         final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
         _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
         _holdSpeed = (double.tryParse('${settings['playerSpeedLongPress'] ?? '2.0'}') ?? 2.0).clamp(2.0, 5.0).toDouble();
         _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
         _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
         _syncAndroidAutoPip();
-        _danmakuApi = '${settings['danmakuApi'] ?? ''}';
-        _danmakuSize = double.tryParse('${settings['danmakuSize'] ?? ''}') ?? 18;
-        final op = double.tryParse('${settings['danmakuOpacity'] ?? ''}');
-        _danmakuOpacity = op == null ? 0.85 : (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0);
-        _danmakuRows = int.tryParse('${settings['danmakuRows'] ?? ''}') ?? 6;
-        _danmakuMaxOnScreen = int.tryParse('${settings['danmakuMaxOnScreen'] ?? '150'}') ?? 150;
-        final sa = double.tryParse('${settings['danmakuScrollArea'] ?? '50'}');
-        _danmakuScrollArea = sa == null ? 0.5 : (sa > 1 ? sa / 100.0 : sa).clamp(0.1, 1.0);
-        bool dFlag(String k, [bool def = true]) {
-          final v = '${settings[k] ?? ''}'.trim().toLowerCase();
-          if (v.isEmpty) return def;
-          return v != 'false' && v != '0' && v != 'off';
-        }
-        _danmakuShowScroll = dFlag('danmakuShowScroll');
-        _danmakuShowTop = dFlag('danmakuShowTop');
-        _danmakuShowBottom = dFlag('danmakuShowBottom');
-        _danmakuShowReverse = dFlag('danmakuShowReverse');
-        _danmakuShowSpecial = dFlag('danmakuShowSpecial');
-        _danmakuShowPositioned = dFlag('danmakuShowPositioned');
-        _danmakuBold = dFlag('danmakuBold', false);
-        _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
-        _danmakuFixedDurationMs = int.tryParse('${settings['danmakuFixedDurationMs'] ?? '5000'}') ?? 5000;
-        _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
-        _danmakuStrokeMode = kotvNormalizeDanmakuStroke('${settings['danmakuStrokeMode'] ?? 'shadow'}');
-        _danmakuColorMode = kotvNormalizeDanmakuColorMode('${settings['danmakuColorMode'] ?? 'original'}');
-        _danmakuFontFamily = kotvNormalizeSubtitleFont('${settings['danmakuFont'] ?? 'default'}');
-        _danmakuRowsTop = (int.tryParse('${settings['danmakuRowsTop'] ?? '3'}') ?? 3).clamp(1, 8);
-        _danmakuRowsBottom = (int.tryParse('${settings['danmakuRowsBottom'] ?? '3'}') ?? 3).clamp(1, 8);
-        final gapRaw = double.tryParse('${settings['danmakuScrollGap'] ?? '8'}') ?? 8;
-        _danmakuScrollGap = (gapRaw > 1 ? gapRaw / 100.0 : gapRaw).clamp(0.0, 0.2);
-        _danmakuStrokeWidth = (double.tryParse('${settings['danmakuStrokeWidth'] ?? '0.12'}') ?? 0.12).clamp(0.05, 0.3);
-        _danmakuShadowOpacity = (double.tryParse('${settings['danmakuShadowOpacity'] ?? '0.5'}') ?? 0.5).clamp(0.0, 0.9);
-        _danmakuProjectionOffsetX = (double.tryParse('${settings['danmakuProjectionOffsetX'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
-        _danmakuProjectionOffsetY = (double.tryParse('${settings['danmakuProjectionOffsetY'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
-        _danmakuProjectionOpacity = (double.tryParse('${settings['danmakuProjectionOpacity'] ?? '0.2'}') ?? 0.2).clamp(0.0, 0.9);
-        _danmakuOffsetSec = ((int.tryParse('${settings['danmakuOffsetMs'] ?? '0'}') ?? 0) / 1000.0);
+        _applyDanmakuPrefsFromSettings(settings, applyOffset: true);
         final scale = '${settings['playerScale'] ?? 'default'}';
         _aspect = _aspectFromScale(scale);
         unawaited(_playback.setVideoScale(_aspect.key));
@@ -2741,43 +2702,54 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return v != 'false' && v != '0' && v != 'off';
   }
 
+  /// 把接口里的弹幕参数写进当前画面。
+  /// [applyOffset] 只在起播时记下时轴；之后改偏移走增量平移，读回不再加一次。
+  void _applyDanmakuPrefsFromSettings(Map<String, dynamic> settings, {bool applyOffset = false}) {
+    _danmakuOn = '${settings['danmaku'] ?? ''}'.toLowerCase() == 'true';
+    _danmakuLoad = _flagFromSettings(settings, 'danmakuLoad', true);
+    _danmakuAuto = _flagFromSettings(settings, 'danmakuAuto', true);
+    _danmakuSpiderFirst = _flagFromSettings(settings, 'danmakuSpiderFirst', true);
+    _danmakuApi = '${settings['danmakuApi'] ?? ''}';
+    _danmakuSize = double.tryParse('${settings['danmakuSize'] ?? ''}') ?? 18;
+    final op = double.tryParse('${settings['danmakuOpacity'] ?? ''}');
+    _danmakuOpacity = op == null ? 0.85 : (op > 1 ? op / 100.0 : op).clamp(0.15, 1.0);
+    _danmakuRows = int.tryParse('${settings['danmakuRows'] ?? ''}') ?? 6;
+    _danmakuMaxOnScreen = int.tryParse('${settings['danmakuMaxOnScreen'] ?? '150'}') ?? 150;
+    final sa = double.tryParse('${settings['danmakuScrollArea'] ?? '50'}');
+    _danmakuScrollArea = sa == null ? 0.5 : (sa > 1 ? sa / 100.0 : sa).clamp(0.1, 1.0);
+    _danmakuShowScroll = _flagFromSettings(settings, 'danmakuShowScroll');
+    _danmakuShowTop = _flagFromSettings(settings, 'danmakuShowTop');
+    _danmakuShowBottom = _flagFromSettings(settings, 'danmakuShowBottom');
+    _danmakuShowReverse = _flagFromSettings(settings, 'danmakuShowReverse');
+    _danmakuShowSpecial = _flagFromSettings(settings, 'danmakuShowSpecial');
+    _danmakuShowPositioned = _flagFromSettings(settings, 'danmakuShowPositioned');
+    _danmakuBold = _flagFromSettings(settings, 'danmakuBold', false);
+    _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
+    _danmakuFixedDurationMs = int.tryParse('${settings['danmakuFixedDurationMs'] ?? '5000'}') ?? 5000;
+    _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
+    _danmakuStrokeMode = kotvNormalizeDanmakuStroke('${settings['danmakuStrokeMode'] ?? 'shadow'}');
+    _danmakuColorMode = kotvNormalizeDanmakuColorMode('${settings['danmakuColorMode'] ?? 'original'}');
+    _danmakuFontFamily = kotvNormalizeSubtitleFont('${settings['danmakuFont'] ?? 'default'}');
+    _danmakuRowsTop = (int.tryParse('${settings['danmakuRowsTop'] ?? '3'}') ?? 3).clamp(1, 8);
+    _danmakuRowsBottom = (int.tryParse('${settings['danmakuRowsBottom'] ?? '3'}') ?? 3).clamp(1, 8);
+    final gapRaw = double.tryParse('${settings['danmakuScrollGap'] ?? '8'}') ?? 8;
+    _danmakuScrollGap = (gapRaw > 1 ? gapRaw / 100.0 : gapRaw).clamp(0.0, 0.2);
+    _danmakuStrokeWidth = (double.tryParse('${settings['danmakuStrokeWidth'] ?? '0.12'}') ?? 0.12).clamp(0.05, 0.3);
+    _danmakuShadowOpacity = (double.tryParse('${settings['danmakuShadowOpacity'] ?? '0.5'}') ?? 0.5).clamp(0.0, 0.9);
+    _danmakuProjectionOffsetX = (double.tryParse('${settings['danmakuProjectionOffsetX'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
+    _danmakuProjectionOffsetY = (double.tryParse('${settings['danmakuProjectionOffsetY'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
+    _danmakuProjectionOpacity = (double.tryParse('${settings['danmakuProjectionOpacity'] ?? '0.2'}') ?? 0.2).clamp(0.0, 0.9);
+    if (applyOffset) {
+      _danmakuOffsetSec = ((int.tryParse('${settings['danmakuOffsetMs'] ?? '0'}') ?? 0) / 1000.0);
+    }
+  }
+
   Future<void> _refreshDanmakuPrefs() async {
     try {
       final st = await ref.read(apiProvider).getSettings();
       final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
       if (!mounted) return;
-      setState(() {
-        _danmakuMaxOnScreen = int.tryParse('${settings['danmakuMaxOnScreen'] ?? '150'}') ?? 150;
-        final sa = double.tryParse('${settings['danmakuScrollArea'] ?? '50'}');
-        _danmakuScrollArea = sa == null ? 0.5 : (sa > 1 ? sa / 100.0 : sa).clamp(0.1, 1.0);
-        bool dFlag(String k, [bool def = true]) {
-          final v = '${settings[k] ?? ''}'.trim().toLowerCase();
-          if (v.isEmpty) return def;
-          return v != 'false' && v != '0' && v != 'off';
-        }
-        _danmakuShowScroll = dFlag('danmakuShowScroll');
-        _danmakuShowTop = dFlag('danmakuShowTop');
-        _danmakuShowBottom = dFlag('danmakuShowBottom');
-        _danmakuShowReverse = dFlag('danmakuShowReverse');
-        _danmakuShowSpecial = dFlag('danmakuShowSpecial');
-        _danmakuShowPositioned = dFlag('danmakuShowPositioned');
-        _danmakuBold = dFlag('danmakuBold', false);
-        _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
-        _danmakuFixedDurationMs = int.tryParse('${settings['danmakuFixedDurationMs'] ?? '5000'}') ?? 5000;
-        _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
-        _danmakuStrokeMode = kotvNormalizeDanmakuStroke('${settings['danmakuStrokeMode'] ?? 'shadow'}');
-        _danmakuColorMode = kotvNormalizeDanmakuColorMode('${settings['danmakuColorMode'] ?? 'original'}');
-        _danmakuFontFamily = kotvNormalizeSubtitleFont('${settings['danmakuFont'] ?? 'default'}');
-        _danmakuRowsTop = (int.tryParse('${settings['danmakuRowsTop'] ?? '3'}') ?? 3).clamp(1, 8);
-        _danmakuRowsBottom = (int.tryParse('${settings['danmakuRowsBottom'] ?? '3'}') ?? 3).clamp(1, 8);
-        final gapRaw = double.tryParse('${settings['danmakuScrollGap'] ?? '8'}') ?? 8;
-        _danmakuScrollGap = (gapRaw > 1 ? gapRaw / 100.0 : gapRaw).clamp(0.0, 0.2);
-        _danmakuStrokeWidth = (double.tryParse('${settings['danmakuStrokeWidth'] ?? '0.12'}') ?? 0.12).clamp(0.05, 0.3);
-        _danmakuShadowOpacity = (double.tryParse('${settings['danmakuShadowOpacity'] ?? '0.5'}') ?? 0.5).clamp(0.0, 0.9);
-        _danmakuProjectionOffsetX = (double.tryParse('${settings['danmakuProjectionOffsetX'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
-        _danmakuProjectionOffsetY = (double.tryParse('${settings['danmakuProjectionOffsetY'] ?? '0.08'}') ?? 0.08).clamp(0.02, 0.15);
-        _danmakuProjectionOpacity = (double.tryParse('${settings['danmakuProjectionOpacity'] ?? '0.2'}') ?? 0.2).clamp(0.0, 0.9);
-      });
+      setState(() => _applyDanmakuPrefsFromSettings(settings));
     } catch (_) {}
   }
 
@@ -3067,8 +3039,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (d == null || !mounted || _playUrl.isEmpty) return;
     if (_miniDesktop) await _exitMini();
     if (!mounted) return;
-    if (!kotvIsDesktop() && !kIsWeb) {
-      // 抖音式：全屏保持竖屏，上下滑切集；点「全屏观看」才锁横屏。
+    if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
+      // 抖音式：手机全屏保持竖屏，上下滑切集；点「全屏观看」才锁横屏。
       try {
         await kotvLockPortrait();
       } catch (_) {}
@@ -3117,7 +3089,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       });
     }
     await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
-    if (!kotvIsDesktop()) {
+    if (!kotvIsDesktop() && !KotvLayout.television) {
       try {
         await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
       } catch (_) {}

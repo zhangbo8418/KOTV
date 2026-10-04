@@ -110,6 +110,8 @@ class MediaKitPlayback extends KotvPlayback {
   final Player player;
   final VideoController controller;
   KotvMpvOpts _opts;
+  bool _previewVideoOriginal = false;
+  bool _previewAudioOriginal = false;
   final List<StreamSubscription> _subs = [];
   String _url = '';
   Map<String, String> _headers = const {};
@@ -451,6 +453,31 @@ class MediaKitPlayback extends KotvPlayback {
   Future<void> setDecodeMode(String mode) async {
     _opts = _opts.copyWith(decodeMode: mode);
     await applyOpts(_opts);
+  }
+
+  @override
+  Future<void> setFxPreview({bool? videoOriginal, bool? audioOriginal}) async {
+    var changed = false;
+    if (videoOriginal != null && videoOriginal != _previewVideoOriginal) {
+      _previewVideoOriginal = videoOriginal;
+      changed = true;
+    }
+    if (audioOriginal != null && audioOriginal != _previewAudioOriginal) {
+      _previewAudioOriginal = audioOriginal;
+      changed = true;
+    }
+    if (!changed) return;
+    final platform = player.platform;
+    if (platform == null) return;
+    final props = _opts.fxPreviewProperties(
+      videoOriginal: _previewVideoOriginal,
+      audioOriginal: _previewAudioOriginal,
+    );
+    for (final e in props.entries) {
+      try {
+        await (platform as dynamic).setProperty(e.key, e.value);
+      } catch (_) {}
+    }
   }
 
   @override
