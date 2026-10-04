@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../theme/kotv_theme.dart';
+
 /// 配置根 `logo`：圆形图；失败回落默认图标。点击行为由调用方决定（点击打开历史）。
 class ConfigLogoAvatar extends StatelessWidget {
   const ConfigLogoAvatar({
@@ -35,12 +37,17 @@ class ConfigLogoAvatar extends StatelessWidget {
           : Icon(fallbackIcon, size: radius * 1.05, color: Colors.white),
     );
     if (onTap == null) return child;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: child,
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: radius,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          canRequestFocus: false,
+          child: child,
+        ),
       ),
     );
   }
@@ -163,10 +170,14 @@ class _ConfigBannerPanelState extends State<ConfigBannerPanel> {
     final cur = _current;
     final pic = cur?.image ?? '';
     final title = cur?.title.trim() ?? '';
-    return Material(
+    return TvFocus(
+      onPressed: cur == null ? null : () => widget.onTap?.call(cur),
+      borderRadius: widget.borderRadius,
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: cur == null ? null : () => widget.onTap?.call(cur),
+        canRequestFocus: false,
         borderRadius: BorderRadius.circular(widget.borderRadius),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(widget.borderRadius),
@@ -225,6 +236,7 @@ class _ConfigBannerPanelState extends State<ConfigBannerPanel> {
             ),
           ),
         ),
+      ),
       ),
     );
   }

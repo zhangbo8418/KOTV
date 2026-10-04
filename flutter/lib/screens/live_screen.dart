@@ -36,6 +36,7 @@ import '../theme/layout_scale.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
+import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/live_player_chrome.dart';
 import '../widgets/marquee_text.dart';
@@ -1019,8 +1020,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       builder: (ctx) => AlertDialog(
         backgroundColor: pal.dialogBg,
         title: Text('解锁分组', style: TextStyle(color: pal.fg)),
-        content: TextField(
+        content: KotvTvTextField(
           controller: ctrl,
+          autofocus: true,
           obscureText: true,
           style: TextStyle(color: pal.fg),
           decoration: InputDecoration(
@@ -1029,8 +1031,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('取消', style: TextStyle(color: pal.muted))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('确定', style: TextStyle(color: pal.fg))),
+          KotvFocusAction(label: '取消', color: pal.muted, onPressed: () => Navigator.pop(ctx, false)),
+          KotvFocusAction(label: '确定', color: pal.fg, onPressed: () => Navigator.pop(ctx, true)),
         ],
       ),
     );

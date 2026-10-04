@@ -47,6 +47,7 @@ import '../vod/content_clicker.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
+import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
 import '../widgets/mini_hover_shell.dart';
@@ -1643,7 +1644,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       builder: (ctx) => AlertDialog(
         backgroundColor: p.dialogBg,
         title: Text('Assrt 搜索字幕', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
-        content: TextField(
+        content: KotvTvTextField(
           controller: qCtrl,
           autofocus: true,
           style: TextStyle(color: p.fg),
@@ -1657,8 +1658,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, qCtrl.text.trim()), child: const Text('搜索')),
+          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
+          KotvFocusAction(label: '搜索', filled: true, onPressed: () => Navigator.pop(ctx, qCtrl.text.trim())),
         ],
       ),
     );
@@ -3633,10 +3634,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ),
         ],
       );
-      return InkWell(
-        onTap: () => _showVodMeta(d),
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: info),
+      return TvFocus(
+        onPressed: () => _showVodMeta(d),
+        borderRadius: 8,
+        child: InkWell(
+          onTap: () => _showVodMeta(d),
+          canRequestFocus: false,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: info),
+        ),
       );
     }
 
@@ -4105,7 +4111,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('关闭', style: TextStyle(color: p.primary))),
+          KotvFocusAction(label: '关闭', color: p.primary, autofocus: true, onPressed: () => Navigator.pop(ctx)),
         ],
       ),
     );
@@ -4130,6 +4136,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           color: Colors.transparent,
           child: InkWell(
             onTap: onTap,
+            canRequestFocus: false,
             borderRadius: BorderRadius.circular(radius),
             child: Ink(
               width: w,

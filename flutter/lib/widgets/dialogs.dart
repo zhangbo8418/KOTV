@@ -9,6 +9,7 @@ import 'package:file_selector/file_selector.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import 'kotv_tv_text_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
@@ -409,7 +410,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
                       const SizedBox(height: 8),
                       Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON', style: TextStyle(color: p.muted, fontSize: m.compact ? 12 : 13)),
                       const SizedBox(height: 12),
-                      TextField(
+                      KotvTvTextField(
                         controller: ctrl,
                         maxLines: m.compact ? 3 : 4,
                         enabled: !busy,
@@ -639,7 +640,7 @@ Future<({String url, String name})?> _showEditSourceDialog(
                       const SizedBox(height: 8),
                       Text(hint, style: TextStyle(color: p.muted, fontSize: 12)),
                       const SizedBox(height: 12),
-                      TextField(
+                      KotvTvTextField(
                         controller: nameCtrl,
                         enabled: !busy,
                         style: TextStyle(color: p.fg),
@@ -653,7 +654,7 @@ Future<({String url, String name})?> _showEditSourceDialog(
                         ),
                       ),
                       const SizedBox(height: 10),
-                      TextField(
+                      KotvTvTextField(
                         controller: urlCtrl,
                         maxLines: m.compact ? 2 : 3,
                         enabled: !busy,
@@ -741,7 +742,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
                   const SizedBox(height: 8),
                   Text('可填在线 M3U/TXT/JSON 地址，或本机路径', style: TextStyle(color: p.muted, fontSize: m.compact ? 12 : 13)),
                   const SizedBox(height: 12),
-                  TextField(
+                  KotvTvTextField(
                     controller: ctrl,
                     style: TextStyle(color: p.fg),
                     cursorColor: p.primary,
@@ -952,41 +953,57 @@ Future<List<String>?> pickMultiChoice(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    for (final o in options)
-                      CheckboxListTile(
-                        dense: true,
-                        value: selected.contains(o.$2),
-                        activeColor: p.fg,
-                        checkColor: p.dialogBg,
-                        title: Text(o.$1, style: TextStyle(color: p.fg)),
-                        controlAffinity: ListTileControlAffinity.leading,
-                        onChanged: (on) {
+                    for (var i = 0; i < options.length; i++)
+                      TvFocus(
+                        autofocus: i == 0,
+                        borderRadius: 8,
+                        scrollIntoView: true,
+                        onPressed: () {
                           setLocal(() {
-                            if (on == true) {
-                              selected.add(o.$2);
-                            } else {
-                              selected.remove(o.$2);
-                            }
+                            if (!selected.remove(options[i].$2)) selected.add(options[i].$2);
                           });
                         },
+                        child: ExcludeFocus(
+                          child: CheckboxListTile(
+                            dense: true,
+                            value: selected.contains(options[i].$2),
+                            activeColor: p.fg,
+                            checkColor: p.dialogBg,
+                            title: Text(options[i].$1, style: TextStyle(color: p.fg)),
+                            controlAffinity: ListTileControlAffinity.leading,
+                            onChanged: (on) {
+                              setLocal(() {
+                                if (on == true) {
+                                  selected.add(options[i].$2);
+                                } else {
+                                  selected.remove(options[i].$2);
+                                }
+                              });
+                            },
+                          ),
+                        ),
                       ),
                   ],
                 ),
               ),
             ),
             actions: [
-              TextButton(
+              KotvFocusAction(
+                label: '取消',
+                color: p.muted,
                 onPressed: () => Navigator.pop(ctx),
-                child: Text('取消', style: TextStyle(color: p.muted)),
               ),
-              TextButton(
+              KotvFocusAction(
+                label: '清空',
+                color: p.muted,
                 onPressed: () {
                   selected.clear();
                   setLocal(() {});
                 },
-                child: Text('清空', style: TextStyle(color: p.muted)),
               ),
-              FilledButton(
+              KotvFocusAction(
+                label: '确定',
+                filled: true,
                 onPressed: () {
                   final order = <String>[];
                   for (final o in options) {
@@ -994,7 +1011,6 @@ Future<List<String>?> pickMultiChoice(
                   }
                   Navigator.pop(ctx, order);
                 },
-                child: const Text('确定'),
               ),
             ],
           );
@@ -1227,6 +1243,7 @@ class _CircleIcon extends StatelessWidget {
           customBorder: const CircleBorder(),
           onTap: onTap,
           onLongPress: onLongPress,
+          canRequestFocus: false,
           child: SizedBox(width: 36, height: 36, child: Icon(icon, color: p.fg, size: 18)),
         ),
       ),
@@ -1275,10 +1292,15 @@ class SettingChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
-    return Material(
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: 10,
+      scrollIntoView: true,
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        canRequestFocus: false,
         borderRadius: BorderRadius.circular(10),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
@@ -1308,6 +1330,7 @@ class SettingChip extends StatelessWidget {
           ),
         ),
       ),
+      ),
     );
   }
 }
@@ -1330,10 +1353,15 @@ class SettingRow extends StatelessWidget {
     final p = KotvPalette.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
+      child: TvFocus(
+        onPressed: onTap,
+        borderRadius: 12,
+        scrollIntoView: true,
+        child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
+          canRequestFocus: false,
           borderRadius: BorderRadius.circular(12),
           child: Ink(
             decoration: BoxDecoration(
@@ -1373,6 +1401,7 @@ class SettingRow extends StatelessWidget {
               ),
             ),
           ),
+        ),
         ),
       ),
     );
@@ -1460,10 +1489,15 @@ class KotvSettingsWideTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
-    return Material(
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: 8,
+      scrollIntoView: true,
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        canRequestFocus: false,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
@@ -1486,6 +1520,7 @@ class KotvSettingsWideTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -1520,11 +1555,17 @@ class KotvSettingsCell extends StatelessWidget {
       fontSize: oneCol ? 14 : 13,
       height: 1.2,
     );
-    return Material(
+    return TvFocus(
+      onPressed: onTap,
+      onLongPress: onLongPress,
+      borderRadius: 8,
+      scrollIntoView: true,
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
+        canRequestFocus: false,
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: oneCol ? 14 : 12, vertical: oneCol ? 14 : 13),
           // 标签按内容宽，数值吃满剩余宽度（由布局 ellipsis，不再硬截 10 字）。
@@ -1550,6 +1591,7 @@ class KotvSettingsCell extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

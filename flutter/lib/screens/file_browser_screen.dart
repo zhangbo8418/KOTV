@@ -144,7 +144,14 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           backgroundColor: p.surface,
           foregroundColor: p.fg,
           title: Text(widget.title),
-          leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: _goUp),
+          leading: TvFocus(
+            onPressed: _goUp,
+            borderRadius: 18,
+            autofocus: _items.isEmpty,
+            child: ExcludeFocus(
+              child: IconButton(icon: const Icon(Icons.arrow_back), onPressed: _goUp),
+            ),
+          ),
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -166,7 +173,10 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                             return TvFocus(
                               autofocus: i == 0,
                               onPressed: () => _enter(it),
-                              child: ListTile(
+                              borderRadius: 8,
+                              scrollIntoView: true,
+                              child: ExcludeFocus(
+                                child: ListTile(
                                 leading: Icon(
                                   it.isDir ? Icons.folder_outlined : Icons.insert_drive_file_outlined,
                                   color: p.primary,
@@ -174,6 +184,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                                 title: Text(it.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                                 trailing: it.isDir ? const Icon(Icons.chevron_right) : null,
                                 onTap: () => _enter(it),
+                              ),
                               ),
                             );
                           },

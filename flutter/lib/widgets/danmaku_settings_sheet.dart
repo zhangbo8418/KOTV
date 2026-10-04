@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../theme/kotv_palette.dart';
+import '../theme/kotv_theme.dart';
+import 'chrome.dart';
 import 'dialogs.dart';
+import 'kotv_tv_text_field.dart';
 
 /// 弹幕完整设置（设置页与播放页「更多」共用）。
 Future<void> showKotvDanmakuSettingsSheet({
@@ -73,7 +76,7 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
       builder: (ctx) => AlertDialog(
         backgroundColor: pal.dialogBg,
         title: Text(title, style: TextStyle(color: pal.fg)),
-        content: TextField(
+        content: KotvTvTextField(
           controller: c,
           autofocus: true,
           style: TextStyle(color: pal.fg),
@@ -83,8 +86,8 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: pal.muted))),
-          TextButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: Text('确定', style: TextStyle(color: pal.fg))),
+          KotvFocusAction(label: '取消', color: pal.muted, onPressed: () => Navigator.pop(ctx)),
+          KotvFocusAction(label: '确定', color: pal.fg, onPressed: () => Navigator.pop(ctx, c.text.trim())),
         ],
       ),
     );
@@ -94,24 +97,38 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
 
   Widget _toggle(String label, bool value, Future<void> Function(bool) onChanged) {
     final p = KotvPalette.of(context);
-    return ListTile(
-      title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
-      trailing: Switch.adaptive(value: value, onChanged: (v) => unawaited(onChanged(v))),
+    return TvFocus(
+      onPressed: () => unawaited(onChanged(!value)),
+      borderRadius: 8,
+      scrollIntoView: true,
+      child: ExcludeFocus(
+        child: ListTile(
+          title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
+          trailing: Switch.adaptive(value: value, onChanged: (v) => unawaited(onChanged(v))),
+        ),
+      ),
     );
   }
 
   Widget _nav(String label, String value, VoidCallback onTap) {
     final p = KotvPalette.of(context);
-    return ListTile(
-      title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(value, style: TextStyle(color: p.muted, fontSize: 13)),
-          Icon(Icons.chevron_right, color: p.muted),
-        ],
+    return TvFocus(
+      onPressed: onTap,
+      borderRadius: 8,
+      scrollIntoView: true,
+      child: ExcludeFocus(
+        child: ListTile(
+          title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(value, style: TextStyle(color: p.muted, fontSize: 13)),
+              Icon(Icons.chevron_right, color: p.muted),
+            ],
+          ),
+          onTap: onTap,
+        ),
       ),
-      onTap: onTap,
     );
   }
 
@@ -189,9 +206,15 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
                       Expanded(
                         child: Text('弹幕设置', style: TextStyle(color: p.fg, fontSize: 17, fontWeight: FontWeight.w700)),
                       ),
-                      IconButton(
+                      TvFocus(
                         onPressed: () => Navigator.pop(context),
-                        icon: Icon(Icons.close, color: p.muted),
+                        borderRadius: 18,
+                        child: ExcludeFocus(
+                          child: IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            icon: Icon(Icons.close, color: p.muted),
+                          ),
+                        ),
                       ),
                     ],
                   ),

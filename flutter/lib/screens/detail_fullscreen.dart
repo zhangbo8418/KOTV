@@ -19,6 +19,7 @@ import '../player/kotv_platform.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/tv_remote_keys.dart';
 import '../nav/kotv_page.dart';
+import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
@@ -923,10 +924,14 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       top: top,
       child: Align(
         alignment: Alignment.topCenter,
-        child: Material(
+        child: TvFocus(
+          onPressed: () => unawaited(_forceLandscape()),
+          borderRadius: 24,
+          child: Material(
           color: Colors.transparent,
           child: InkWell(
             onTap: () => unawaited(_forceLandscape()),
+            canRequestFocus: false,
             borderRadius: BorderRadius.circular(24),
             child: Ink(
               decoration: BoxDecoration(
@@ -954,6 +959,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                 ),
               ),
             ),
+          ),
           ),
         ),
       ),

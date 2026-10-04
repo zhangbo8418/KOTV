@@ -143,6 +143,7 @@ class NavPill extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
+          canRequestFocus: false,
           borderRadius: BorderRadius.circular(r),
           child: Container(
             height: h,
@@ -258,6 +259,7 @@ class AppPill extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           onLongPress: onLongPress,
+          canRequestFocus: false,
           borderRadius: BorderRadius.circular(8 * s),
           child: Container(
             width: effectiveWidth,
@@ -314,6 +316,7 @@ class FeatureCard extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
+          canRequestFocus: false,
           borderRadius: BorderRadius.circular(radius),
           child: SizedBox(
             height: height,
@@ -457,6 +460,7 @@ class EpisodeChip extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
+          canRequestFocus: false,
           borderRadius: BorderRadius.circular(8),
           child: Container(
             height: height,
@@ -589,6 +593,7 @@ class _TopStatusBarState extends State<TopStatusBar> {
                           child: InkWell(
                             customBorder: const CircleBorder(),
                             onTap: widget.onSettings,
+                            canRequestFocus: false,
                             child: SizedBox(
                               width: landscape ? 28 : 36,
                               height: landscape ? 28 : 36,
@@ -622,6 +627,7 @@ class _NewsPill extends StatelessWidget {
       borderRadius: 16 * s,
       child: InkWell(
         onTap: onTap,
+        canRequestFocus: false,
         borderRadius: BorderRadius.circular(16 * s),
         // 按文字固有宽度收缩，避免固定 132*s 在「字不缩、壳缩小」时内部 RIGHT OVERFLOW
         child: Container(
@@ -800,6 +806,64 @@ class CategoryNavBar extends StatelessWidget {
   }
 }
 
+/// 弹窗文字按钮。遥控器落点画焦点环；内层不再单独进焦点遍历。
+class KotvFocusAction extends StatelessWidget {
+  const KotvFocusAction({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.color,
+    this.fontWeight = FontWeight.w600,
+    this.fontSize,
+    this.underline = false,
+    this.autofocus = false,
+    this.filled = false,
+    this.fillColor,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
+  final Color? color;
+  final FontWeight fontWeight;
+  final double? fontSize;
+  final bool underline;
+  final bool autofocus;
+  final bool filled;
+  final Color? fillColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = KotvPalette.of(context);
+    final fg = color ?? (filled ? Colors.white : p.fg);
+    final labelWidget = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: fg,
+          fontWeight: fontWeight,
+          fontSize: fontSize,
+          decoration: underline ? TextDecoration.underline : null,
+        ),
+      ),
+    );
+    return TvFocus(
+      autofocus: autofocus,
+      onPressed: onPressed,
+      borderRadius: 8,
+      child: filled
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                color: fillColor ?? p.primary,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: labelWidget,
+            )
+          : labelWidget,
+    );
+  }
+}
+
 void showAppNews(BuildContext context, String message) {
   final p = KotvPalette.of(context);
   showDialog<void>(
@@ -808,7 +872,9 @@ void showAppNews(BuildContext context, String message) {
       backgroundColor: p.dialogBg,
       title: Text('提示', style: TextStyle(color: p.fg)),
       content: Text(message, style: TextStyle(color: p.muted)),
-      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text('好的', style: TextStyle(color: p.primary)))],
+      actions: [
+        KotvFocusAction(label: '好的', color: p.primary, autofocus: true, onPressed: () => Navigator.pop(ctx)),
+      ],
     ),
   );
 }

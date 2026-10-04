@@ -8,8 +8,10 @@ import '../api/kotv_auth_token.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
+import '../theme/kotv_theme.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/kotv_tv_text_field.dart';
 import 'shell.dart';
 
 /// 本机引擎用户管理（`/admin`）：鉴权/注册开关、账号 CRUD、改密。
@@ -182,14 +184,14 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
             children: [
               Text('管理用户需管理员账号。新装默认 admin / admin。', style: TextStyle(color: p.muted, fontSize: 13)),
               const SizedBox(height: 12),
-              TextField(
+              KotvTvTextField(
                 controller: userCtrl,
                 autofocus: true,
                 style: TextStyle(color: p.fg),
                 decoration: InputDecoration(hintText: '用户名', hintStyle: TextStyle(color: p.muted)),
               ),
               const SizedBox(height: 10),
-              TextField(
+              KotvTvTextField(
                 controller: passCtrl,
                 obscureText: true,
                 style: TextStyle(color: p.fg),
@@ -200,8 +202,8 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('登录')),
+          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx, false)),
+          KotvFocusAction(label: '登录', filled: true, onPressed: () => Navigator.pop(ctx, true)),
         ],
       ),
     );
@@ -256,14 +258,14 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(
+                KotvTvTextField(
                   controller: userCtrl,
                   autofocus: true,
                   style: TextStyle(color: p.fg),
                   decoration: InputDecoration(hintText: '用户名', hintStyle: TextStyle(color: p.muted)),
                 ),
                 const SizedBox(height: 10),
-                TextField(
+                KotvTvTextField(
                   controller: passCtrl,
                   obscureText: true,
                   style: TextStyle(color: p.fg),
@@ -276,6 +278,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                     const Spacer(),
                     DropdownButton<String>(
                       value: role,
+                      focusColor: p.focus.withOpacity(0.28),
                       dropdownColor: p.dialogBg,
                       style: TextStyle(color: p.fg),
                       items: const [
@@ -293,8 +296,8 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('取消', style: TextStyle(color: p.muted))),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('创建')),
+            KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx, false)),
+            KotvFocusAction(label: '创建', filled: true, onPressed: () => Navigator.pop(ctx, true)),
           ],
         ),
       ),
@@ -325,7 +328,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: p.dialogBg,
         title: Text('重置密码 · $name', style: TextStyle(color: p.fg)),
-        content: TextField(
+        content: KotvTvTextField(
           controller: passCtrl,
           obscureText: true,
           autofocus: true,
@@ -333,8 +336,8 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
           decoration: InputDecoration(hintText: '新密码（至少 6 位）', hintStyle: TextStyle(color: p.muted)),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx, false)),
+          KotvFocusAction(label: '确定', filled: true, onPressed: () => Navigator.pop(ctx, true)),
         ],
       ),
     );
@@ -381,11 +384,12 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
           title: Text('删除账号', style: TextStyle(color: p.fg)),
           content: Text('确定删除 $name？', style: TextStyle(color: p.muted)),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('取消', style: TextStyle(color: p.muted))),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE53955)),
+            KotvFocusAction(label: '取消', color: p.muted, autofocus: true, onPressed: () => Navigator.pop(ctx, false)),
+            KotvFocusAction(
+              label: '删除',
+              filled: true,
+              fillColor: const Color(0xFFE53955),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('删除'),
             ),
           ],
         );
@@ -432,7 +436,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text('初始管理员仍在使用默认密码，请先修改后再继续。', style: TextStyle(color: p.muted, fontSize: 13)),
                 ),
-              TextField(
+              KotvTvTextField(
                 controller: oldCtrl,
                 obscureText: true,
                 autofocus: true,
@@ -440,7 +444,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                 decoration: InputDecoration(hintText: '旧密码', hintStyle: TextStyle(color: p.muted)),
               ),
               const SizedBox(height: 10),
-              TextField(
+              KotvTvTextField(
                 controller: newCtrl,
                 obscureText: true,
                 style: TextStyle(color: p.fg),
@@ -451,8 +455,8 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
         ),
         actions: [
           if (!forced)
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('保存')),
+            KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx, false)),
+          KotvFocusAction(label: '保存', filled: true, onPressed: () => Navigator.pop(ctx, true)),
         ],
       ),
     );
@@ -566,17 +570,31 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                         children: [
                           const KotvSettingsSectionTitle('远端鉴权'),
                           KotvSettingsCard(children: [
-                            SwitchListTile(
-                              title: Text('开启远端鉴权', style: TextStyle(color: p.fg)),
-                              subtitle: Text('关闭时仅本机可用；开启后非本机才能连接并登录，按账号隔离', style: TextStyle(color: p.muted, fontSize: 12)),
-                              value: _remoteAuth,
-                              onChanged: _busy ? null : (v) => unawaited(_setFlag(remoteAuth: v)),
+                            TvFocus(
+                              onPressed: _busy ? null : () => unawaited(_setFlag(remoteAuth: !_remoteAuth)),
+                              borderRadius: 8,
+                              scrollIntoView: true,
+                              child: ExcludeFocus(
+                                child: SwitchListTile(
+                                  title: Text('开启远端鉴权', style: TextStyle(color: p.fg)),
+                                  subtitle: Text('关闭时仅本机可用；开启后非本机才能连接并登录，按账号隔离', style: TextStyle(color: p.muted, fontSize: 12)),
+                                  value: _remoteAuth,
+                                  onChanged: _busy ? null : (v) => unawaited(_setFlag(remoteAuth: v)),
+                                ),
+                              ),
                             ),
-                            SwitchListTile(
-                              title: Text('开放远端注册', style: TextStyle(color: p.fg)),
-                              subtitle: Text('允许访客自行注册普通账号', style: TextStyle(color: p.muted, fontSize: 12)),
-                              value: _allowRegister,
-                              onChanged: _busy ? null : (v) => unawaited(_setFlag(allowRegister: v)),
+                            TvFocus(
+                              onPressed: _busy ? null : () => unawaited(_setFlag(allowRegister: !_allowRegister)),
+                              borderRadius: 8,
+                              scrollIntoView: true,
+                              child: ExcludeFocus(
+                                child: SwitchListTile(
+                                  title: Text('开放远端注册', style: TextStyle(color: p.fg)),
+                                  subtitle: Text('允许访客自行注册普通账号', style: TextStyle(color: p.muted, fontSize: 12)),
+                                  value: _allowRegister,
+                                  onChanged: _busy ? null : (v) => unawaited(_setFlag(allowRegister: v)),
+                                ),
+                              ),
                             ),
                           ]),
                           const SizedBox(height: 8),
@@ -617,17 +635,23 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                                           ],
                                         ),
                                       ),
-                                      TextButton(
+                                      KotvFocusAction(
+                                        label: enabled ? '停用' : '启用',
+                                        color: p.fg,
+                                        fontSize: 12,
                                         onPressed: () => unawaited(_toggleEnabled(u)),
-                                        child: Text(enabled ? '停用' : '启用', style: TextStyle(color: p.fg, fontSize: 12)),
                                       ),
-                                      TextButton(
+                                      KotvFocusAction(
+                                        label: '重置密码',
+                                        color: p.fg,
+                                        fontSize: 12,
                                         onPressed: () => unawaited(_resetPassword(u)),
-                                        child: Text('重置密码', style: TextStyle(color: p.fg, fontSize: 12)),
                                       ),
-                                      TextButton(
+                                      KotvFocusAction(
+                                        label: '删除',
+                                        color: const Color(0xFFE53955),
+                                        fontSize: 12,
                                         onPressed: () => unawaited(_deleteUser(u)),
-                                        child: const Text('删除', style: TextStyle(color: Color(0xFFE53955), fontSize: 12)),
                                       ),
                                     ],
                                   ),

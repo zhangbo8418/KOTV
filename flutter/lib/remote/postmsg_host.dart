@@ -10,8 +10,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api/kotv_api.dart';
 import '../player/kotv_platform.dart';
 import '../theme/kotv_palette.dart';
+import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 import '../widgets/chrome.dart';
+import '../widgets/kotv_tv_text_field.dart';
 
 /// 通用宿主弹窗：只认协议 [UI:] / [UI_CLOSE:]，不关心业务。
 /// 脚本（JAR/JS/Py）决定内容与时机；宿主只负责：
@@ -825,10 +827,10 @@ class PostMsgHost {
           final c = TextEditingController(text: '${el['value'] ?? ''}');
           return c;
         });
-        final field = TextField(
+        final field = KotvTvTextField(
           controller: ctrl,
           obscureText: el['password'] == true,
-          maxLines: el['multiline'] == true ? null : 1,
+          maxLines: el['multiline'] == true ? 8 : 1,
           minLines: el['multiline'] == true ? 3 : 1,
           style: TextStyle(color: palette.fg, fontSize: font),
           cursorColor: palette.primary,
@@ -860,13 +862,20 @@ class PostMsgHost {
         if (id.isEmpty) return const [];
         checks.putIfAbsent(id, () => el['checked'] == true);
         return [
-          CheckboxListTile(
-            value: checks[id] ?? false,
-            title: Text('${el['text'] ?? ''}', style: TextStyle(color: palette.muted, fontSize: font)),
-            onChanged: (v) => setLocal(() => checks[id] = v ?? false),
-            controlAffinity: ListTileControlAffinity.leading,
-            activeColor: palette.primary,
-            dense: true,
+          TvFocus(
+            onPressed: () => setLocal(() => checks[id] = !(checks[id] ?? false)),
+            borderRadius: 8,
+            scrollIntoView: true,
+            child: ExcludeFocus(
+              child: CheckboxListTile(
+                value: checks[id] ?? false,
+                title: Text('${el['text'] ?? ''}', style: TextStyle(color: palette.muted, fontSize: font)),
+                onChanged: (v) => setLocal(() => checks[id] = v ?? false),
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: palette.primary,
+                dense: true,
+              ),
+            ),
           ),
         ];
       case 'radio':
@@ -877,13 +886,20 @@ class PostMsgHost {
         return [
           for (final o in options)
             if (o is Map)
-              RadioListTile<String>(
-                value: '${o['id'] ?? ''}',
-                groupValue: radios[id],
-                title: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: palette.muted, fontSize: font)),
-                onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
-                activeColor: palette.primary,
-                dense: true,
+              TvFocus(
+                onPressed: () => setLocal(() => radios[id] = '${o['id'] ?? ''}'),
+                borderRadius: 8,
+                scrollIntoView: true,
+                child: ExcludeFocus(
+                  child: RadioListTile<String>(
+                    value: '${o['id'] ?? ''}',
+                    groupValue: radios[id],
+                    title: Text('${o['label'] ?? o['id'] ?? ''}', style: TextStyle(color: palette.muted, fontSize: font)),
+                    onChanged: (v) => setLocal(() => radios[id] = v ?? ''),
+                    activeColor: palette.primary,
+                    dense: true,
+                  ),
+                ),
               ),
         ];
       case 'select':
@@ -893,6 +909,7 @@ class PostMsgHost {
         selects.putIfAbsent(id, () => '${el['value'] ?? (options.isNotEmpty && options.first is Map ? options.first['id'] : '')}');
         final dropdown = DropdownButtonFormField<String>(
           value: selects[id]?.isEmpty == true ? null : selects[id],
+          focusColor: palette.focus.withOpacity(0.28),
           dropdownColor: palette.dialogBg,
           style: TextStyle(color: palette.fg, fontSize: font),
           items: [
@@ -962,12 +979,12 @@ class PostMsgHost {
             padding: EdgeInsets.only(bottom: 4 * uiScale),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: TextButton(
+              child: KotvFocusAction(
+                label: labelText,
+                color: palette.primary,
+                fontSize: font,
+                underline: true,
                 onPressed: () => unawaited(_openExternal(linkUrl)),
-                child: Text(
-                  labelText,
-                  style: TextStyle(color: palette.primary, decoration: TextDecoration.underline, fontSize: font),
-                ),
               ),
             ),
           ),

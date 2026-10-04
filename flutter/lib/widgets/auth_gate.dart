@@ -157,9 +157,10 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
                   const SizedBox(height: 8),
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: TextButton(
+                    child: KotvFocusAction(
+                      label: modeRegister ? '已有账号？去登录' : '没有账号？注册',
+                      color: p.primary,
                       onPressed: () => setLocal(() => modeRegister = !modeRegister),
-                      child: Text(modeRegister ? '已有账号？去登录' : '没有账号？注册', style: TextStyle(color: p.primary)),
                     ),
                   ),
                 ],
@@ -168,17 +169,19 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
                   children: [
                     if (allowCancel) ...[
                       Expanded(
-                        child: TextButton(
+                        child: KotvFocusAction(
+                          label: '取消',
+                          color: p.muted,
                           onPressed: () => Navigator.pop(ctx, false),
-                          child: Text('取消', style: TextStyle(color: p.muted)),
                         ),
                       ),
                       const SizedBox(width: 8),
                     ],
                     Expanded(
-                      child: FilledButton(
+                      child: KotvFocusAction(
+                        label: modeRegister ? '注册并登录' : '登录',
+                        filled: true,
                         onPressed: () => Navigator.pop(ctx, true),
-                        child: Text(modeRegister ? '注册并登录' : '登录'),
                       ),
                     ),
                   ],

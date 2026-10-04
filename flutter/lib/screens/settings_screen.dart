@@ -215,8 +215,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('确定')),
+          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
+          KotvFocusAction(label: '确定', filled: true, onPressed: () => Navigator.pop(ctx, c.text.trim())),
         ],
       ),
     );
@@ -301,8 +301,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('确定')),
+          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
+          KotvFocusAction(label: '确定', filled: true, onPressed: () => Navigator.pop(ctx, c.text.trim())),
         ],
       ),
     );
@@ -351,9 +351,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   style: TextStyle(color: p.fg, fontSize: 17, fontWeight: FontWeight.w700),
                                 ),
                               ),
-                              IconButton(
+                              TvFocus(
                                 onPressed: () => Navigator.pop(ctx),
-                                icon: Icon(Icons.close, color: p.muted),
+                                borderRadius: 18,
+                                child: ExcludeFocus(
+                                  child: IconButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    icon: Icon(Icons.close, color: p.muted),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
@@ -388,17 +394,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return TvFocus(
       onPressed: () => unawaited(onChanged(!value)),
       borderRadius: 8,
-      child: ListTile(
+      scrollIntoView: true,
+      child: ExcludeFocus(
+        child: ListTile(
         title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
         subtitle: subtitle == null
             ? null
             : Text(subtitle, style: TextStyle(color: p.muted, fontSize: 12)),
-        trailing: ExcludeFocus(
-          child: Switch.adaptive(
-            value: value,
-            onChanged: (v) => unawaited(onChanged(v)),
-          ),
+        trailing: Switch.adaptive(
+          value: value,
+          onChanged: (v) => unawaited(onChanged(v)),
         ),
+      ),
       ),
     );
   }
@@ -412,7 +419,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return TvFocus(
       onPressed: onTap,
       borderRadius: 8,
-      child: ListTile(
+      scrollIntoView: true,
+      child: ExcludeFocus(
+        child: ListTile(
         title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -429,6 +438,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             Icon(Icons.chevron_right, color: p.muted.withOpacity(0.7)),
           ],
         ),
+      ),
       ),
     );
   }
@@ -1506,8 +1516,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('确定')),
+          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
+          KotvFocusAction(label: '确定', filled: true, onPressed: () => Navigator.pop(ctx, c.text.trim())),
         ],
       ),
     );
@@ -1622,13 +1632,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           style: TextStyle(color: pal.muted),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消', style: TextStyle(color: pal.muted)),
-          ),
-          TextButton(
+          KotvFocusAction(label: '取消', color: pal.muted, onPressed: () => Navigator.pop(ctx, false)),
+          KotvFocusAction(
+            label: '清理',
+            color: pal.fg,
+            fontWeight: FontWeight.w700,
+            autofocus: true,
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('清理', style: TextStyle(color: pal.fg, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -1832,8 +1842,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('发送')),
+          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx, false)),
+          KotvFocusAction(label: '发送', filled: true, onPressed: () => Navigator.pop(ctx, true)),
         ],
       ),
     );
@@ -2116,7 +2126,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                       ),
                     Expanded(child: Text(_status, style: TextStyle(color: p.muted, fontSize: 13))),
-                    InkWell(onTap: () => setState(() => _status = ''), child: Icon(Icons.close, color: p.muted, size: 16)),
+                    TvFocus(
+                      onPressed: () => setState(() => _status = ''),
+                      borderRadius: 12,
+                      child: InkWell(
+                        onTap: () => setState(() => _status = ''),
+                        canRequestFocus: false,
+                        child: Icon(Icons.close, color: p.muted, size: 16),
+                      ),
+                    ),
                   ],
                 ),
               );

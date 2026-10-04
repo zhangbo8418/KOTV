@@ -137,8 +137,12 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
     required String label,
     required KotvDesktopFullscreenKind kind,
   }) {
-    return InkWell(
+    return TvFocus(
+      onPressed: () => _pick(kind),
+      borderRadius: 12,
+      child: InkWell(
       onTap: () => _pick(kind),
+      canRequestFocus: false,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
@@ -157,6 +161,7 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
             ),
           ],
         ),
+      ),
       ),
     );
   }

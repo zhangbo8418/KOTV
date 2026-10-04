@@ -24,6 +24,7 @@ import 'theme/kotv_palette.dart';
 import 'theme/kotv_theme.dart';
 import 'util/kotv_app_dirs.dart';
 import 'widgets/chrome.dart';
+import 'widgets/kotv_tv_text_field.dart';
 import 'widgets/h_scroll.dart';
 
 /// Release 构建里 build 抛异常会渲染成一块灰色空白（默认 ErrorWidget），
@@ -433,7 +434,7 @@ class _EngineOfflinePage extends ConsumerWidget {
         title: Text('连接后端服务', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
           width: 520,
-          child: TextField(
+          child: KotvTvTextField(
             controller: ctrl,
             autofocus: true,
             style: TextStyle(color: p.fg),
@@ -444,8 +445,8 @@ class _EngineOfflinePage extends ConsumerWidget {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: p.muted))),
-          FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('保存并重试')),
+          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
+          KotvFocusAction(label: '保存并重试', filled: true, onPressed: () => Navigator.pop(ctx, ctrl.text.trim())),
         ],
       ),
     );

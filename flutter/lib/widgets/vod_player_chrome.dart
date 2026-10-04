@@ -2248,7 +2248,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               style: TextStyle(color: Colors.white.withOpacity(0.75), height: 1.55, fontSize: 15),
             ),
           ),
-          SwitchListTile(
+          TvFocus(
+            onPressed: () {
+              setState(() => _debugHud = !_debugHud);
+              Navigator.pop(context);
+            },
+            borderRadius: 8,
+            child: ExcludeFocus(
+              child: SwitchListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 12),
             title: const Text('角落实时信息', style: TextStyle(color: Colors.white)),
             value: _debugHud,
@@ -2257,6 +2264,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               setState(() => _debugHud = v);
               Navigator.pop(context);
             },
+          ),
+            ),
           ),
         ],
       ),
@@ -2660,9 +2669,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                 ),
                               ),
                             ),
-                            IconButton(
+                            TvFocus(
                               onPressed: closeEpisodes,
-                              icon: const Icon(Icons.close, color: Colors.white70),
+                              borderRadius: 18,
+                              child: ExcludeFocus(
+                                child: IconButton(
+                                  onPressed: closeEpisodes,
+                                  icon: const Icon(Icons.close, color: Colors.white70),
+                                ),
+                              ),
                             ),
                           ],
                         ),
