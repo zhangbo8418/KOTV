@@ -150,7 +150,7 @@ class _HScrollListState extends State<HScrollList> {
         ? ListView.separated(
             controller: _sc,
             scrollDirection: Axis.horizontal,
-            scrollCacheExtent: _measure ? const ScrollCacheExtent.pixels(1000000) : null,
+            cacheExtent: _measure ? 1000000 : null,
             padding: widget.padding,
             physics: widget.physics,
             itemCount: widget.itemCount,
@@ -160,7 +160,7 @@ class _HScrollListState extends State<HScrollList> {
         : ListView.builder(
             controller: _sc,
             scrollDirection: Axis.horizontal,
-            scrollCacheExtent: _measure ? const ScrollCacheExtent.pixels(1000000) : null,
+            cacheExtent: _measure ? 1000000 : null,
             padding: widget.padding,
             physics: widget.physics,
             itemCount: widget.itemCount,

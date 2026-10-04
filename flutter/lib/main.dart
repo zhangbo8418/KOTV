@@ -274,6 +274,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
   @override
   void initState() {
     super.initState();
+    KotvKeyHighlight.install();
     WidgetsBinding.instance.addObserver(this);
     MiniPlayerWindow.bindAndroidPipListener();
     // 同步一次当前系统亮暗
@@ -390,9 +391,22 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
         return Listener(
           behavior: HitTestBehavior.translucent,
           onPointerDown: (e) {
-            if (e.kind != PointerDeviceKind.mouse) return;
-            if ((e.buttons & kSecondaryMouseButton) == 0) return;
-            kotvHandleAppBack?.call();
+            switch (e.kind) {
+              case PointerDeviceKind.mouse:
+              case PointerDeviceKind.trackpad:
+                KotvKeyHighlight.disarm();
+                if (e.kind == PointerDeviceKind.mouse && (e.buttons & kSecondaryMouseButton) != 0) {
+                  kotvHandleAppBack?.call();
+                }
+                break;
+              case PointerDeviceKind.touch:
+              case PointerDeviceKind.stylus:
+              case PointerDeviceKind.invertedStylus:
+                KotvKeyHighlight.disarm();
+                break;
+              case PointerDeviceKind.unknown:
+                break;
+            }
           },
           child: child ?? const SizedBox.shrink(),
         );

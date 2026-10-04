@@ -2,11 +2,11 @@ PODS:
   - file_selector_macos (0.0.1):
     - FlutterMacOS
   - FlutterMacOS (1.0.0)
-  - fvp (0.38.1):
+  - fvp (0.39.0):
     - Flutter
     - FlutterMacOS
-    - mdk (~> 0.38.0)
-  - mdk (0.38.0)
+    - mdk (~> 0.39.0)
+  - mdk (0.39.0)
   - media_kit_libs_macos_video (1.0.4):
     - FlutterMacOS
   - media_kit_video (0.0.1):
@@ -79,7 +79,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   file_selector_macos: 9e9e068e90ebee155097d00e89ae91edb2374db7
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
-  fvp: 3b8bd5288c31057debb408b58d009f1ca10074f4
+  fvp: 46a1850dc50aa807c33caaf964fcba6ae75deab5
   mdk: a45274ea736b9a727ae1977ba69f62bca3352791
   media_kit_libs_macos_video: 85a23e549b5f480e72cae3e5634b5514bc692f65
   media_kit_video: fa6564e3799a0a28bff39442334817088b7ca758

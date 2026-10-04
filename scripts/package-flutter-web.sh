@@ -53,6 +53,8 @@ echo "==> prepare runtime"
 "$ROOT/scripts/verify-runtime.sh" runtime "$PLAT"
 
 echo "==> Flutter Web (base-href /)"
+# 与桌面/安卓同一套 pub get，否则 Web 会停在 pubspec.lock 里的旧 fvp。
+"$ROOT/scripts/flutter-pub-get.sh"
 cd "$ROOT/flutter"
 "$FLUTTER_BIN" config --enable-web
 "$FLUTTER_BIN" build web --base-href / --no-wasm-dry-run

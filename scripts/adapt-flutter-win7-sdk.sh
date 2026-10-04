@@ -16,6 +16,7 @@ perl -i -pe 's/shared_preferences:\s*\^2\.3\.3/shared_preferences: 2.3.0/' "$APP
 perl -i -pe 's/web:\s*\^1\.1\.0/web: 0.5.1/' "$APP"
 perl -i -pe 's/wakelock_plus:\s*[^\n]+/wakelock_plus: 1.2.8/' "$APP"
 perl -i -pe 's/video_player:\s*\^[^\n]+/video_player: 2.9.2/' "$APP"
+# 0.38.0 起 fvp 要求 Flutter >=3.22、Dart ^3.4，这条 Flutter 3.19 线不能用 0.39.0。
 perl -i -pe 's/fvp:\s*[^\n]+/fvp: 0.37.3/' "$APP"
 perl -i -pe 's/media_kit_video:\s*[^\n]+/media_kit_video: 1.2.5/' "$APP"
 

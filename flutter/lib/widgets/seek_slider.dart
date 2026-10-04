@@ -39,7 +39,7 @@ class KotvSeekSlider extends StatefulWidget {
   State<KotvSeekSlider> createState() => _KotvSeekSliderState();
 }
 
-class _KotvSeekSliderState extends State<KotvSeekSlider> {
+class _KotvSeekSliderState extends State<KotvSeekSlider> with KotvKeyHighlightState {
   double? _scrubMs;
   double? _pendingSeekMs;
   StreamSubscription<Duration>? _posSub;
@@ -217,12 +217,12 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> {
         padding: const EdgeInsets.symmetric(vertical: 2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          color: _highlight ? ring.withOpacity(pal.light ? 0.32 : 0.18) : null,
+          color: kotvRing(_highlight) ? ring.withOpacity(pal.light ? 0.32 : 0.18) : null,
           border: Border.all(
-            color: _highlight ? ring : Colors.transparent,
-            width: _highlight ? ringWidth : 0,
+            color: kotvRing(_highlight) ? ring : Colors.transparent,
+            width: kotvRing(_highlight) ? ringWidth : 0,
           ),
-          boxShadow: _highlight
+          boxShadow: kotvRing(_highlight)
               ? [BoxShadow(color: ring.withOpacity(0.45), blurRadius: 10, spreadRadius: 0)]
               : null,
         ),

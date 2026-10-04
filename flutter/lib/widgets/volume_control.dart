@@ -31,7 +31,7 @@ class KotvVolumeControl extends StatefulWidget {
   State<KotvVolumeControl> createState() => _KotvVolumeControlState();
 }
 
-class _KotvVolumeControlState extends State<KotvVolumeControl> {
+class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighlightState {
   late final FocusNode _focus = FocusNode(debugLabel: 'kotv_volume', onKeyEvent: _onKey);
   final FocusNode _sliderFocus = FocusNode(canRequestFocus: false, skipTraversal: true);
   bool _expanded = false;
@@ -218,12 +218,12 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> {
                     height: widget.iconSize,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: _highlight ? ring.withOpacity(0.22) : null,
+                      color: kotvRing(_highlight) ? ring.withOpacity(0.22) : null,
                       border: Border.all(
-                        color: _highlight ? ring : Colors.transparent,
-                        width: _highlight ? 3 : 0,
+                        color: kotvRing(_highlight) ? ring : Colors.transparent,
+                        width: kotvRing(_highlight) ? 3 : 0,
                       ),
-                      boxShadow: _highlight
+                      boxShadow: kotvRing(_highlight)
                           ? [BoxShadow(color: ring.withOpacity(0.55), blurRadius: 14, spreadRadius: 1)]
                           : null,
                     ),

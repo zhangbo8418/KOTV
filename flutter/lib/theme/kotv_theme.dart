@@ -198,6 +198,52 @@ Color kotvFocusRingColor(KotvPalette pal) {
   return Color.lerp(focus, Colors.white, 0.55) ?? focus;
 }
 
+/// 焦点环默认关闭。鼠标、触控、触控板按下关掉；键盘或遥控器按键才打开。
+class KotvKeyHighlight {
+  KotvKeyHighlight._();
+
+  static final ValueNotifier<bool> active = ValueNotifier<bool>(false);
+  static var _installed = false;
+
+  static void install() {
+    if (_installed) return;
+    _installed = true;
+    HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  static bool _onKey(KeyEvent event) {
+    if ((event is KeyDownEvent || event is KeyRepeatEvent) && !active.value) {
+      active.value = true;
+    }
+    return false;
+  }
+
+  static void disarm() {
+    if (active.value) active.value = false;
+  }
+}
+
+/// 把框架焦点高亮接到 [KotvKeyHighlight]：未按键时不画环。
+mixin KotvKeyHighlightState<T extends StatefulWidget> on State<T> {
+  @override
+  void initState() {
+    super.initState();
+    KotvKeyHighlight.active.addListener(_kotvOnKeyHighlight);
+  }
+
+  @override
+  void dispose() {
+    KotvKeyHighlight.active.removeListener(_kotvOnKeyHighlight);
+    super.dispose();
+  }
+
+  void _kotvOnKeyHighlight() {
+    if (mounted) setState(() {});
+  }
+
+  bool kotvRing(bool frameworkHighlight) => frameworkHighlight && KotvKeyHighlight.active.value;
+}
+
 /// 遥控器焦点环：键盘/遥控亮框，鼠标点击不留下常亮框。
 class TvFocus extends StatefulWidget {
   const TvFocus({
@@ -225,7 +271,7 @@ class TvFocus extends StatefulWidget {
   State<TvFocus> createState() => _TvFocusState();
 }
 
-class _TvFocusState extends State<TvFocus> {
+class _TvFocusState extends State<TvFocus> with KotvKeyHighlightState {
   bool _highlight = false;
   bool _hovered = false;
 
@@ -266,7 +312,7 @@ class _TvFocusState extends State<TvFocus> {
           setState(() => _hovered = false);
         },
         child: KotvMarqueeHost(
-          active: _highlight || _hovered,
+          active: kotvRing(_highlight) || _hovered,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: widget.onPressed,
@@ -275,12 +321,12 @@ class _TvFocusState extends State<TvFocus> {
               duration: const Duration(milliseconds: 120),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(widget.borderRadius),
-                color: _highlight ? ring.withOpacity(fill) : null,
+                color: kotvRing(_highlight) ? ring.withOpacity(fill) : null,
                 border: Border.all(
-                  color: _highlight ? ring : Colors.transparent,
-                  width: _highlight ? 3 : 0,
+                  color: kotvRing(_highlight) ? ring : Colors.transparent,
+                  width: kotvRing(_highlight) ? 3 : 0,
                 ),
-                boxShadow: _highlight
+                boxShadow: kotvRing(_highlight)
                     ? [
                         BoxShadow(
                           color: ring.withOpacity(0.55),
