@@ -136,14 +136,23 @@ prepare_jre() {
   esac
 
   echo "[jre] resolving Liberica ${jre_ver} JRE ($plat) ..."
-  local url
-  url="$(
-    curl -fsSL --http1.1 --connect-timeout 30 \
+  local url="" i api body
+  api="https://api.bell-sw.com/v1/liberica/releases?version-feature=${jre_ver}&os=${os}&arch=${arch}&bitness=64&package-type=${pkg}&bundle-type=jre&version-modifier=latest"
+  # curl 默认不重试 DNS 失败。Runner 偶发解析不到 api.bell-sw.com 时，空响应会让后面的 JSON 解析直接失败。
+  for i in 1 2 3 4 5; do
+    body="$(mktemp)"
+    if curl -fsSL --http1.1 --connect-timeout 30 \
       -A "KOTV-prepare-runtime" \
-      "https://api.bell-sw.com/v1/liberica/releases?version-feature=${jre_ver}&os=${os}&arch=${arch}&bitness=64&package-type=${pkg}&bundle-type=jre&version-modifier=latest" \
-      | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d, "no Liberica releases"; print(d[0]["downloadUrl"])'
-  )"
-  [[ -n "$url" ]] || { echo "ERROR: Liberica download URL empty for $plat" >&2; exit 1; }
+      -o "$body" \
+      "$api" && [[ -s "$body" ]]; then
+      url="$(python3 -c 'import json,sys; d=json.load(sys.stdin); assert d, "no Liberica releases"; print(d[0]["downloadUrl"])' <"$body")" || url=""
+    fi
+    rm -f "$body"
+    [[ -n "$url" ]] && break
+    echo "[jre] resolve failed, retry $i ..."
+    sleep $((i * 2))
+  done
+  [[ -n "$url" ]] || { echo "ERROR: Liberica download URL empty for $plat ($api)" >&2; exit 1; }
   local archive="$CACHE/jre-liberica-${plat}.${ext}"
   echo "[jre] downloading Liberica JRE: $url"
   download "$url" "$archive"
