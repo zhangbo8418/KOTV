@@ -16,6 +16,7 @@ import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 import '../util/pick_subtitle_file.dart';
 import 'danmaku_settings_sheet.dart';
+import 'kotv_step_slider.dart';
 import 'h_scroll.dart';
 import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
@@ -75,123 +76,6 @@ class _EqPresetChip extends StatelessWidget {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 整行获焦，左右键按一格改数值，松手再提交。
-class _EqSliderRow extends StatefulWidget {
-  const _EqSliderRow({
-    required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.onChanged,
-    required this.onCommit,
-    this.divisions = 40,
-    this.format,
-  });
-
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final int divisions;
-  final ValueChanged<double> onChanged;
-  final ValueChanged<double> onCommit;
-  final String Function(double value)? format;
-
-  @override
-  State<_EqSliderRow> createState() => _EqSliderRowState();
-}
-
-class _EqSliderRowState extends State<_EqSliderRow> {
-  final _focus = FocusNode();
-  double? _pending;
-
-  @override
-  void initState() {
-    super.initState();
-    _focus.onKeyEvent = _onKey;
-  }
-
-  @override
-  void dispose() {
-    _focus.dispose();
-    super.dispose();
-  }
-
-  double get _value => (_pending ?? widget.value).clamp(widget.min, widget.max);
-
-  String _text(double v) => widget.format?.call(v) ?? '${v.round()}';
-
-  void _step(bool forward) {
-    final parts = widget.divisions <= 0 ? 1 : widget.divisions;
-    final step = (widget.max - widget.min) / parts;
-    final next = (_value + (forward ? step : -step)).clamp(widget.min, widget.max);
-    setState(() => _pending = next);
-    widget.onChanged(next);
-  }
-
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    final key = event.logicalKey;
-    if (kotvIsLeftKey(key) || kotvIsRightKey(key)) {
-      if (event is KeyDownEvent || event is KeyRepeatEvent) {
-        _step(kotvIsRightKey(key));
-      } else if (event is KeyUpEvent) {
-        final v = _value;
-        setState(() => _pending = null);
-        widget.onCommit(v);
-      }
-      return KeyEventResult.handled;
-    }
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
-    if (kotvIsUpKey(key)) {
-      return node.focusInDirection(TraversalDirection.up) ? KeyEventResult.handled : KeyEventResult.ignored;
-    }
-    if (kotvIsDownKey(key)) {
-      return node.focusInDirection(TraversalDirection.down) ? KeyEventResult.handled : KeyEventResult.ignored;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final v = _value;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-      child: TvFocus(
-        focusNode: _focus,
-        borderRadius: 8,
-        child: Row(
-          children: [
-            if (widget.label.isNotEmpty)
-              SizedBox(
-                width: 72,
-                child: Text(widget.label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-              ),
-            Expanded(
-              child: ExcludeFocus(
-                child: Slider(
-                  value: v,
-                  min: widget.min,
-                  max: widget.max,
-                  divisions: widget.divisions,
-                  label: _text(v),
-                  onChanged: (nv) {
-                    setState(() => _pending = nv);
-                    widget.onChanged(nv);
-                  },
-                  onChangeEnd: (nv) {
-                    setState(() => _pending = null);
-                    widget.onCommit(nv);
-                  },
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -1052,13 +936,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               await _persist('videoEq', id);
             }
             Widget slider(String label, String key, double min, double max, {int divisions = 40}) {
-              return _EqSliderRow(
+              return KotvStepSlider(
+                inline: true,
                 label: label,
                 value: numOf(key).clamp(min, max),
                 min: min,
                 max: max,
                 divisions: divisions,
-                onChanged: (nv) {
+                onChanging: (nv) {
                   s[key] = '${nv.round()}';
                   setSheet(() {});
                 },
@@ -1197,40 +1082,43 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     ],
                   ),
                 ),
-                _EqSliderRow(
+                KotvStepSlider(
+                  inline: true,
                   label: '对白',
                   value: dialogue.clamp(0, 100),
                   min: 0,
                   max: 100,
                   divisions: 20,
                   format: (v) => v <= 0 ? '关' : '${v.round()}',
-                  onChanged: (v) {
+                  onChanging: (v) {
                     dialogue = v;
                     setSheet(() {});
                   },
                   onCommit: (v) => unawaited(_persist('audioDialogue', '${v.round()}')),
                 ),
-                _EqSliderRow(
+                KotvStepSlider(
+                  inline: true,
                   label: '平衡',
                   value: balance,
                   min: -100,
                   max: 100,
                   divisions: 40,
                   format: (v) => v.round() == 0 ? '居中' : '${v.round()}',
-                  onChanged: (v) {
+                  onChanging: (v) {
                     balance = v;
                     setSheet(() {});
                   },
                   onCommit: (v) => unawaited(_persist('audioBalance', '${v.round()}')),
                 ),
-                _EqSliderRow(
+                KotvStepSlider(
+                  inline: true,
                   label: '音画',
                   value: offset,
                   min: -5000,
                   max: 5000,
                   divisions: 100,
                   format: (v) => '${v.round()} ms',
-                  onChanged: (v) {
+                  onChanging: (v) {
                     offset = v;
                     setSheet(() {});
                   },
@@ -1290,14 +1178,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700),
                   ),
                 ),
-                _EqSliderRow(
+                KotvStepSlider(
+                  inline: true,
                   label: '',
                   value: rate,
                   min: 0.1,
                   max: 5.0,
                   divisions: 49,
                   format: (v) => '×${v.toStringAsFixed(1)}',
-                  onChanged: (v) {
+                  onChanging: (v) {
                     rate = v;
                     setSheet(() {});
                     widget.player.setRate(v);

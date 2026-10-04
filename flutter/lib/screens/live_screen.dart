@@ -37,6 +37,7 @@ import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/h_scroll.dart';
+import '../widgets/kotv_step_slider.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/live_player_chrome.dart';
@@ -3354,23 +3355,23 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   listenable: _playback,
                                   builder: (context, _) {
                                     final vol = _playback.volume.clamp(1, 100).toDouble();
-                                    return Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                                      children: [
-                                        Text('音量 ${vol.round()}', style: const TextStyle(color: Colors.white70)),
-                                        Slider(
-                                          value: vol,
-                                          min: 1,
-                                          max: 100,
-                                          onChanged: (v) => _playback.setVolume(v),
-                                          onChangeEnd: (v) async {
-                                            final n = v.round().clamp(1, 100);
-                                            try {
-                                              await ref.read(apiProvider).setSetting('playerVolume', '$n');
-                                            } catch (_) {}
-                                          },
-                                        ),
-                                      ],
+                                    return KotvStepSlider(
+                                      label: '音量',
+                                      value: vol,
+                                      min: 1,
+                                      max: 100,
+                                      divisions: 99,
+                                      format: (v) => '${v.round()}',
+                                      foreground: Colors.white70,
+                                      valueColor: Colors.white70,
+                                      padding: const EdgeInsets.only(top: 4),
+                                      onChanging: (v) => unawaited(_playback.setVolume(v)),
+                                      onCommit: (v) async {
+                                        final n = v.round().clamp(1, 100);
+                                        try {
+                                          await ref.read(apiProvider).setSetting('playerVolume', '$n');
+                                        } catch (_) {}
+                                      },
                                     );
                                   },
                                 ),

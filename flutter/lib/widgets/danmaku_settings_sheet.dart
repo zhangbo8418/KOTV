@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import 'chrome.dart';
+import 'kotv_step_slider.dart';
 import 'dialogs.dart';
 import 'kotv_tv_text_field.dart';
 
@@ -142,36 +143,15 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
     required void Function(double) onChanging,
     required Future<void> Function(double) onCommit,
   }) {
-    final p = KotvPalette.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(child: Text(label, style: TextStyle(color: p.fg, fontSize: 14, fontWeight: FontWeight.w500))),
-              Text(format(value), style: TextStyle(color: p.muted, fontSize: 13)),
-            ],
-          ),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-            ),
-            child: Slider(
-              value: value.clamp(min, max),
-              min: min,
-              max: max,
-              divisions: divisions,
-              label: format(value),
-              onChanged: onChanging,
-              onChangeEnd: (v) => unawaited(onCommit(v)),
-            ),
-          ),
-        ],
-      ),
+    return KotvStepSlider(
+      label: label,
+      value: value,
+      min: min,
+      max: max,
+      divisions: divisions,
+      format: format,
+      onChanging: onChanging,
+      onCommit: onCommit,
     );
   }
 

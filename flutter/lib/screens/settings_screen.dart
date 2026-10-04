@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import '../util/kotv_io.dart';
 
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,7 +15,6 @@ import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
 import '../player/kotv_playback.dart';
-import '../player/tv_remote_keys.dart';
 import '../player/kotv_platform.dart';
 import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
@@ -34,6 +33,7 @@ import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/danmaku_settings_sheet.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/kotv_step_slider.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import 'detail_screen.dart';
 import 'live_screen.dart';
@@ -453,7 +453,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     required Future<void> Function(double) onCommit,
     void Function(double)? onChanging,
   }) {
-    return _SettingsStepSlider(
+    return KotvStepSlider(
       label: label,
       value: value,
       min: min,
@@ -2574,140 +2574,4 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   String _wallLabel(String m) => kotvWallModeNames[m] ?? m;
-}
-
-/// 设置弹层滑条：整行获焦，左右键按一格，松手再写入。
-class _SettingsStepSlider extends StatefulWidget {
-  const _SettingsStepSlider({
-    required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.onCommit,
-    this.divisions = 20,
-    this.format,
-    this.onChanging,
-  });
-
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final int divisions;
-  final String Function(double value)? format;
-  final Future<void> Function(double value) onCommit;
-  final void Function(double value)? onChanging;
-
-  @override
-  State<_SettingsStepSlider> createState() => _SettingsStepSliderState();
-}
-
-class _SettingsStepSliderState extends State<_SettingsStepSlider> {
-  final _focus = FocusNode();
-  double? _pending;
-
-  @override
-  void initState() {
-    super.initState();
-    _focus.onKeyEvent = _onKey;
-  }
-
-  @override
-  void dispose() {
-    _focus.dispose();
-    super.dispose();
-  }
-
-  double get _value => (_pending ?? widget.value).clamp(widget.min, widget.max);
-
-  String _text(double v) {
-    final fmt = widget.format;
-    if (fmt != null) return fmt(v);
-    return v.toStringAsFixed(v == v.roundToDouble() ? 0 : 1);
-  }
-
-  void _step(bool forward) {
-    if (widget.onChanging == null) return;
-    final parts = widget.divisions <= 0 ? 1 : widget.divisions;
-    final step = (widget.max - widget.min) / parts;
-    final next = (_value + (forward ? step : -step)).clamp(widget.min, widget.max);
-    setState(() => _pending = next);
-    widget.onChanging!(next);
-  }
-
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    final key = event.logicalKey;
-    if (kotvIsLeftKey(key) || kotvIsRightKey(key)) {
-      if (widget.onChanging == null) return KeyEventResult.ignored;
-      if (event is KeyDownEvent || event is KeyRepeatEvent) {
-        _step(kotvIsRightKey(key));
-      } else if (event is KeyUpEvent) {
-        final v = _value;
-        setState(() => _pending = null);
-        unawaited(widget.onCommit(v));
-      }
-      return KeyEventResult.handled;
-    }
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
-    if (kotvIsUpKey(key)) {
-      return node.focusInDirection(TraversalDirection.up) ? KeyEventResult.handled : KeyEventResult.ignored;
-    }
-    if (kotvIsDownKey(key)) {
-      return node.focusInDirection(TraversalDirection.down) ? KeyEventResult.handled : KeyEventResult.ignored;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = KotvPalette.of(context);
-    final v = _value;
-    final enabled = widget.onChanging != null;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: TvFocus(
-        focusNode: _focus,
-        borderRadius: 8,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(widget.label, style: TextStyle(color: p.fg, fontSize: 14, fontWeight: FontWeight.w500)),
-                ),
-                Text(_text(v), style: TextStyle(color: p.muted, fontSize: 13)),
-              ],
-            ),
-            ExcludeFocus(
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                ),
-                child: Slider(
-                  value: v,
-                  min: widget.min,
-                  max: widget.max,
-                  divisions: widget.divisions,
-                  label: _text(v),
-                  onChanged: enabled
-                      ? (nv) {
-                          setState(() => _pending = nv);
-                          widget.onChanging!(nv);
-                        }
-                      : null,
-                  onChangeEnd: (nv) {
-                    setState(() => _pending = null);
-                    unawaited(widget.onCommit(nv));
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
