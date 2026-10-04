@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,13 +45,44 @@ func Register(rawURL string, headers map[string]string) string {
 	if rawURL == "" || len(headers) == 0 {
 		return rawURL
 	}
-	// 已是本地代理则不再包一层。
+	return register(rawURL, headers)
+}
+
+// NeedsLocalRelay 回环地址是否标了非引擎端口。这种端口只在跑引擎的机器上听得到。
+func NeedsLocalRelay(rawURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" || !isLoopbackHost(u.Hostname()) {
+		return false
+	}
+	p := u.Port()
+	if p == "" {
+		return false
+	}
+	return p != strconv.Itoa(enginePort())
+}
+
+func enginePort() int {
+	if portFn != nil {
+		if p := portFn(); p > 0 {
+			return p
+		}
+	}
+	return 9978
+}
+
+func register(rawURL string, headers map[string]string) string {
+	if rawURL == "" {
+		return ""
+	}
 	if strings.Contains(rawURL, "/proxy/play?") || strings.Contains(rawURL, "/proxy/cached_m3u8") {
 		return rawURL
 	}
 	id := newID()
 	cp := make(map[string]string, len(headers))
 	for k, v := range headers {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			continue
+		}
 		cp[k] = v
 	}
 	mu.Lock()
@@ -59,23 +91,43 @@ func Register(rawURL string, headers map[string]string) string {
 	return fmt.Sprintf("%s/proxy/play?id=%s", LocalHTTPBase(), id)
 }
 
+func isLoopbackHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // LocalHTTPBase 本机默认 127.0.0.1:port；远端请求则用 hostclient.PublicBase。
 func LocalHTTPBase() string {
 	if b := hostclient.PublicBase(); b != "" {
 		return b
 	}
-	port := 9978
-	if portFn != nil {
-		if p := portFn(); p > 0 {
-			port = p
-		}
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d", port)
+	return fmt.Sprintf("http://127.0.0.1:%d", enginePort())
 }
 
-// PublicizeURL 将回环或内网地址换成当前请求的对外根（保留 path/query）。
-// 远端经域名/反代访问时，避免把 127.0.0.1 或局域网 IP 原样交给客户端。
-func PublicizeURL(raw string) string {
+// PublicizeURL 把地址改成当前请求的客户端打得开的形式。
+// 回环且端口不是本引擎时，由本机代拉后给出已有的 /proxy/play。
+// 本引擎端口或内网地址只换主机，路径和查询保持不变。
+// 本机请求（PublicBase 为空）原样返回。headers 可选，只在代拉时附上。
+func PublicizeURL(raw string, headers ...map[string]string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if hostclient.PublicBase() != "" && NeedsLocalRelay(raw) {
+		var hdr map[string]string
+		if len(headers) > 0 {
+			hdr = headers[0]
+		}
+		raw = register(raw, hdr)
+	}
+	return rewritePublicHost(raw)
+}
+
+func rewritePublicHost(raw string) string {
 	raw = strings.TrimSpace(raw)
 	base := hostclient.PublicBase()
 	if raw == "" || base == "" {
@@ -95,8 +147,7 @@ func PublicizeURL(raw string) string {
 	}
 	pubHost := strings.ToLower(pb.Hostname())
 	if host == pubHost {
-		// 已是对外主机，仅统一 scheme（https 反代）。
-		if pb.Scheme != "" && u.Scheme != pb.Scheme {
+		if adoptPublicOrigin(u, pb) {
 			u.Scheme = pb.Scheme
 			u.Host = pb.Host
 			return u.String()
@@ -121,6 +172,41 @@ func isRewriteableProxyHost(host string) bool {
 		return false
 	}
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+// adoptPublicOrigin 引擎自己的路径改成前端这次连接用的 scheme 和端口。
+func adoptPublicOrigin(u, pb *url.URL) bool {
+	if u == nil || pb == nil || pb.Scheme == "" || !isEngineServedPath(u.Path) {
+		return false
+	}
+	if u.Scheme != pb.Scheme {
+		return true
+	}
+	return u.Host != pb.Host
+}
+
+func isEngineServedPath(path string) bool {
+	path = strings.TrimSuffix(path, "/")
+	switch {
+	case path == "/proxy" || strings.HasPrefix(path, "/proxy/"):
+		return true
+	case path == "/file" || strings.HasPrefix(path, "/file/"):
+		return true
+	case strings.HasPrefix(path, "/image/"):
+		return true
+	case path == "/parse" || strings.HasPrefix(path, "/parse/"):
+		return true
+	case path == "/tvbus" || path == "/cache" || strings.HasPrefix(path, "/cache/"):
+		return true
+	case path == "/upload" || strings.HasPrefix(path, "/upload/"):
+		return true
+	case path == "/health" || path == "/media" || path == "/device":
+		return true
+	case strings.HasPrefix(path, "/api/"):
+		return true
+	default:
+		return false
+	}
 }
 
 func newID() string {
@@ -212,7 +298,7 @@ func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
 	if rangeHdr != "" {
 		req.Header.Set("Range", rangeHdr)
 	}
-	if req.Header.Get("User-Agent") == "" {
+	if req.Header.Get("User-Agent") == "" && !isLoopbackHost(req.URL.Hostname()) {
 		req.Header.Set("User-Agent", settings.PlayUA())
 	}
 	client := &http.Client{
@@ -226,7 +312,7 @@ func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
 			if rangeHdr != "" && !isPlaylistURL(e.URL) {
 				next.Header.Set("Range", rangeHdr)
 			}
-			if next.Header.Get("User-Agent") == "" {
+			if next.Header.Get("User-Agent") == "" && !isLoopbackHost(next.URL.Hostname()) {
 				next.Header.Set("User-Agent", settings.PlayUA())
 			}
 			return nil

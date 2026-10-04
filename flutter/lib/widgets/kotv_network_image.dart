@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -6,12 +7,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
+import '../api/kotv_engine_url.dart';
+import '../player/kotv_traffic.dart';
+
 /// 默认海报 UA（非 Android 直连时用）。
 const kotvDefaultImageUa =
     'Mozilla/5.0 (Linux; Android 7.1.2; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Safari/537.36';
 
-/// 解析站源海报地址：支持 CatVod `url@Headers={...}` / `url@Referer=...`（海报地址解析规则）。
-({String url, Map<String, String> headers}) kotvParseImageUrl(String raw) {
+/// 解析站源海报地址：支持 `url@Headers={...}` / `url@Referer=...`。
+/// [defaultUa] 为 false 时不补 User-Agent。浏览器里多出来的请求头会让跨域图片失败。
+({String url, Map<String, String> headers}) kotvParseImageUrl(
+  String raw, {
+  bool defaultUa = true,
+}) {
   var s = raw.trim();
   final headers = <String, String>{};
   if (s.isEmpty) return (url: '', headers: headers);
@@ -48,9 +56,45 @@ const kotvDefaultImageUa =
     }
   }
 
-  headers.putIfAbsent('User-Agent', () => kotvDefaultImageUa);
+  if (defaultUa) {
+    headers.putIfAbsent('User-Agent', () => kotvDefaultImageUa);
+  }
   _ensureHotlinkReferer(s, headers);
   return (url: s, headers: headers);
+}
+
+String _joinEngine(String base, String pathAndQuery) {
+  var b = base.trim();
+  while (b.endsWith('/')) {
+    b = b.substring(0, b.length - 1);
+  }
+  if (b.isEmpty) b = 'http://127.0.0.1:9978';
+  if (pathAndQuery.startsWith('/')) return '$b$pathAndQuery';
+  return '$b/$pathAndQuery';
+}
+
+/// 海报最终请求：proxy/file/引擎相对路径改到当前引擎根，回环引擎路径改到客户端正在连的主机。
+({String url, Map<String, String> headers}) kotvResolveImageRequest(String raw) {
+  var s = raw.trim();
+  final base = KotvTraffic.engineBaseUrl;
+  final lower = s.toLowerCase();
+  if (lower.startsWith('proxy://')) {
+    s = _joinEngine(base, '/proxy?${s.substring('proxy://'.length)}');
+  } else if (lower.startsWith('file://')) {
+    var path = s.substring('file://'.length);
+    while (path.startsWith('/')) {
+      path = path.substring(1);
+    }
+    path = Uri.encodeComponent(path).replaceAll('%2F', '/');
+    s = _joinEngine(base, '/file/$path');
+  } else if (s.startsWith('/image/') || s.startsWith('/file/') || s.startsWith('/proxy')) {
+    s = _joinEngine(base, s);
+  }
+  final parsed = kotvParseImageUrl(s, defaultUa: !kIsWeb);
+  return (
+    url: kotvRewriteEngineLocalUrl(parsed.url, base),
+    headers: parsed.headers,
+  );
 }
 
 /// 豆瓣等 CDN 防盗链：站源常省略 @Referer=，直连会 403。
@@ -103,6 +147,25 @@ String _canonImageHeader(String key) {
   }
 }
 
+Uint8List? kotvDecodeDataImage(String raw) {
+  final s = raw.trim();
+  if (!s.toLowerCase().startsWith('data:image/')) return null;
+  if (s.length > 8 * 1024 * 1024) return null;
+  final comma = s.indexOf(',');
+  if (comma < 5) return null;
+  final meta = s.substring(5, comma).toLowerCase();
+  if (!meta.endsWith(';base64')) return null;
+  final mime = meta.split(';').first;
+  if (!RegExp(r'^image/[a-z0-9.+-]+$').hasMatch(mime)) return null;
+  try {
+    final bytes = base64Decode(s.substring(comma + 1).replaceAll(RegExp(r'\s'), ''));
+    if (bytes.isEmpty) return null;
+    return bytes;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// 统一网络海报。
 /// Android：PlatformView + Glide 解析 `@Headers=`。
 /// 其它平台：Image.network + 解析后的 headers。
@@ -149,7 +212,19 @@ class KotvNetworkImage extends StatelessWidget {
       );
     }
 
-    final parsed = kotvParseImageUrl(raw);
+    final bytes = kotvDecodeDataImage(raw);
+    if (bytes != null) {
+      return Image.memory(
+        bytes,
+        fit: fit,
+        alignment: alignment,
+        errorBuilder: errorBuilder,
+        filterQuality: FilterQuality.low,
+        gaplessPlayback: true,
+      );
+    }
+
+    final parsed = kotvResolveImageRequest(raw);
     if (parsed.url.isEmpty ||
         !(parsed.url.startsWith('http://') || parsed.url.startsWith('https://'))) {
       if (errorBuilder != null) {
@@ -161,7 +236,7 @@ class KotvNetworkImage extends StatelessWidget {
       parsed.url,
       fit: fit,
       alignment: alignment,
-      headers: parsed.headers,
+      headers: parsed.headers.isEmpty ? null : parsed.headers,
       errorBuilder: errorBuilder,
       filterQuality: FilterQuality.low,
       gaplessPlayback: true,

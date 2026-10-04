@@ -61,7 +61,7 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	// convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
 	// 默认展开 CDN；仅「网盘经后端加速」开启时保留 /proxy。
-	if !settings.PreferSpiderProxyPlay() {
+	if !settings.IsBackendProxyPlay() {
 		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
 			raw = media
 			headers = hdrs
@@ -77,14 +77,14 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	if !thunder.Match(playURL) {
 		// 仍须走 jar 的本地代理（如 m3u8 分片改写 / so 多线程）时，只改写对外可达根。
 		if localproxy.IsSpiderProxyURL(playURL) {
-			return playproxy.PublicizeURL(playURL)
+			return playproxy.PublicizeURL(playURL, headers)
 		}
 		if resolved, err := m3u8.ResolveForPlayback(playURL, headers, port); err == nil && resolved != "" {
 			playURL = resolved
 		}
 		playURL = playproxy.Register(playURL, headers)
 	}
-	return playproxy.PublicizeURL(playURL)
+	return playproxy.PublicizeURL(playURL, headers)
 }
 
 // PlayHistory 用历史里保存的原始媒体地址起播（会重新走 m3u8/代理，不依赖旧缓存 id）。

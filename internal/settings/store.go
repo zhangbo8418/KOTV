@@ -543,13 +543,8 @@ func IsLiveChange() bool { return boolSetting(LiveChange, true) }
 // IsLiveInvert 反转上下换台方向（默认关）。
 func IsLiveInvert() bool { return boolSetting(LiveInvert, false) }
 
-// IsBackendProxyPlay 网盘是否经 /proxy 加速（默认关 → 展开 CDN）。
+// IsBackendProxyPlay 网盘 /proxy?url=&header= 是否留给 jar 拉流（默认关，展开成直链再走 /proxy/play）。
 func IsBackendProxyPlay() bool { return boolSetting(BackendProxyPlay, false) }
-
-// PreferSpiderProxyPlay 是否保留 jar /proxy、不展开 CDN（等同 BackendProxyPlay）。
-func PreferSpiderProxyPlay() bool {
-	return IsBackendProxyPlay()
-}
 
 func boolSetting(t Type, def bool) bool {
 	v := strings.ToLower(strings.TrimSpace(Get(t)))

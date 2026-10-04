@@ -62,7 +62,7 @@ object KotvImgUtil {
     return GlideUrl(url, builder.build())
   }
 
-  /** ImgUtil.cache：data: → http://127.0.0.1:port/image/{md5}；其它原样。 */
+  /// data: 写入 http://127.0.0.1:port/image/{md5}；其它原样。
   fun cache(url: String?): String {
     val u = url?.trim().orEmpty()
     if (u.isEmpty()) return ""
@@ -157,8 +157,8 @@ object KotvImgUtil {
   private fun convertLocal(url: String): String {
     val lower = url.lowercase()
     return when {
-      lower.startsWith("proxy://") -> "http://127.0.0.1:9978/proxy?" + url.substring("proxy://".length)
-      lower.startsWith("file://") -> "http://127.0.0.1:9978/file/" + url.substring("file://".length)
+      lower.startsWith("proxy://") -> "http://127.0.0.1:${proxyPort()}/proxy?" + url.substring("proxy://".length)
+      lower.startsWith("file://") -> "http://127.0.0.1:${proxyPort()}/file/" + url.substring("file://".length)
       else -> url
     }
   }

@@ -19,8 +19,8 @@ import (
 const maxDataURILength = 8 * 1024 * 1024
 
 var (
-	imageMIME   = regexp.MustCompile(`(?i)^image/[a-z0-9.+-]+$`)
-	imageCache  sync.Map // key(md5) -> cachedImage
+	imageMIME  = regexp.MustCompile(`(?i)^image/[a-z0-9.+-]+$`)
+	imageCache sync.Map // key(md5) -> cachedImage
 )
 
 type cachedImage struct {
@@ -28,7 +28,7 @@ type cachedImage struct {
 	data []byte
 }
 
-// CacheDataURI ImgUtil.cache：data: → 写入内存并返回 /image/{md5} 相对路径；非 data: 原样返回。
+// CacheDataURI 把 data: 图片写入内存并返回 /image/{md5}；其它地址原样返回。
 func CacheDataURI(url string) string {
 	url = strings.TrimSpace(url)
 	if url == "" {

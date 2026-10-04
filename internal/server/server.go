@@ -426,7 +426,7 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	// 本机 / 远端开加速：交给 jar（原生库/go/Java）。
 	// 远端未开加速：Go 展开 url+header 真流式，避免溢写。
-	if !settings.PreferSpiderProxyPlay() && playproxy.TryHandleEmbeddedProxy(w, r) {
+	if !settings.IsBackendProxyPlay() && playproxy.TryHandleEmbeddedProxy(w, r) {
 		return
 	}
 	cfg := config.Default()

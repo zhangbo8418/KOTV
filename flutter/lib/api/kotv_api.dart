@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../player/kotv_platform.dart';
 import 'kotv_auth_token.dart';
 import 'kotv_client_id.dart';
+import 'kotv_engine_url.dart';
 
 class KotvApi {
   KotvApi({String? baseUrl, String? clientId})
@@ -28,9 +29,11 @@ class KotvApi {
     // 有 token 就带上（用户管理/远端租户）；本机内容会话服务端仍只用 clientId。
     final token = await kotvAuthToken();
     final id = await ensureClientId();
+    final engineBase = kotvNormalizeEngineBaseUrl(baseUrl);
     return {
       if (id.isNotEmpty) 'X-Kotv-Client-Id': id,
       if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+      if (engineBase.isNotEmpty) 'X-Kotv-Engine-Base': engineBase,
       'X-Kotv-Client-Platform': kotvHostPlatform(),
       ...?extra,
     };

@@ -41,6 +41,33 @@ void main() {
     );
   });
 
+  test('rewrites engine path onto the filled connection origin', () {
+    expect(
+      kotvRewriteEngineLocalUrl(
+        'http://192.168.0.113:9978/proxy/play?id=abc',
+        'https://tv.example.com:8443',
+      ),
+      'https://tv.example.com:8443/proxy/play?id=abc',
+    );
+    expect(
+      kotvRewriteEngineLocalUrl(
+        'http://tv.example.com:9978/file/a.jpg',
+        'https://tv.example.com:8443',
+      ),
+      'https://tv.example.com:8443/file/a.jpg',
+    );
+  });
+
+  test('keeps a loopback url whose port is not the engine port', () {
+    expect(
+      kotvRewriteEngineLocalUrl(
+        'http://127.0.0.1:5266/fishplay/go/quark/32t/abc',
+        'http://192.168.1.8:9978',
+      ),
+      'http://127.0.0.1:5266/fishplay/go/quark/32t/abc',
+    );
+  });
+
   test('rewrite private LAN proxy to configured server host', () {
     expect(
       kotvRewriteEngineLocalUrl(

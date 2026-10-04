@@ -44,4 +44,14 @@ void main() {
     );
     expect(p.headers['Referer'], 'https://www.douban.com/');
   });
+
+  test('decodes a data image and rejects a short payload', () {
+    final png = kotvDecodeDataImage(
+      'data:image/png;base64,iVBORw0KGgo=',
+    );
+    expect(png, isNotNull);
+    expect(png, isNotEmpty);
+    expect(kotvDecodeDataImage('data:text/plain;base64,YQ=='), isNull);
+    expect(kotvDecodeDataImage('https://example.com/a.jpg'), isNull);
+  });
 }

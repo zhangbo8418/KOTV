@@ -109,6 +109,51 @@ func TestPreparePlaybackURLRemoteExpandsQuarkProxy(t *testing.T) {
 	}
 }
 
+func TestPreparePlaybackURLRelaysOtherLoopbackPort(t *testing.T) {
+	done := hostclient.EnterSession("relay-client", "", false)
+	defer done()
+	hostclient.SetPublicBase("http://192.168.1.8:9978")
+
+	a := &App{}
+	raw := "http://127.0.0.1:5266/fishplay/go/quark/32t/abc"
+	got := a.PreparePlaybackURL(raw, nil)
+	if !strings.Contains(got, "http://192.168.1.8:9978/proxy/play?id=") {
+		t.Fatalf("other loopback port should be relayed, got %q", got)
+	}
+	upstream, _ := playproxy.Resolve(got)
+	if upstream != raw {
+		t.Fatalf("upstream=%q want %q", upstream, raw)
+	}
+}
+
+func TestPreparePlaybackURLRemoteKeepsEnginePort(t *testing.T) {
+	done := hostclient.EnterSession("engine-port", "", false)
+	defer done()
+	hostclient.SetPublicBase("http://192.168.1.8:9978")
+
+	a := &App{}
+	raw := "http://127.0.0.1:9978/file/a.jpg"
+	got := a.PreparePlaybackURL(raw, nil)
+	if strings.Contains(got, "/proxy/play?") {
+		t.Fatalf("engine port must not be relayed, got %q", got)
+	}
+	if got != "http://192.168.1.8:9978/file/a.jpg" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestPreparePlaybackURLLocalKeepsOtherLoopbackPort(t *testing.T) {
+	done := hostclient.EnterSession("local-side", "", false)
+	defer done()
+	hostclient.SetPublicBase("")
+
+	a := &App{}
+	raw := "http://127.0.0.1:5266/fishplay/go/quark/32t/abc"
+	if got := a.PreparePlaybackURL(raw, nil); got != raw {
+		t.Fatalf("local playback should keep %q, got %q", raw, got)
+	}
+}
+
 func TestPreparePlaybackURLRemoteBackendProxyKeepsSpider(t *testing.T) {
 	done := hostclient.EnterSession("test-client-2", "", false)
 	defer done()

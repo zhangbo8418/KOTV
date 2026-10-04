@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/bobo/KOTV/internal/auth"
@@ -161,10 +162,14 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requestPublicBase 用请求 Host（或反代转发头）作为对外根；Host 为 127/localhost 时不改写。
+// requestPublicBase 优先用前端填写的连接根；没有则用请求 Host 或反代转发头。
+// 回环主机不改写，本机播放继续用 127.0.0.1。
 func requestPublicBase(r *http.Request) string {
 	if r == nil {
 		return ""
+	}
+	if b := clientEngineBase(r.Header.Get("X-Kotv-Engine-Base")); b != "" {
+		return b
 	}
 	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
 	if host != "" {
@@ -181,7 +186,7 @@ func requestPublicBase(r *http.Request) string {
 		hostname = h
 	}
 	hostname = strings.Trim(hostname, "[]")
-	if hostname == "127.0.0.1" || strings.EqualFold(hostname, "localhost") || hostname == "::1" {
+	if isLoopbackHostname(hostname) {
 		return ""
 	}
 	scheme := "http"
@@ -192,6 +197,26 @@ func requestPublicBase(r *http.Request) string {
 		scheme = strings.ToLower(strings.TrimSpace(strings.Split(xf, ",")[0]))
 	}
 	return scheme + "://" + host
+}
+
+func clientEngineBase(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	if isLoopbackHostname(u.Hostname()) {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+func isLoopbackHostname(hostname string) bool {
+	hostname = strings.Trim(strings.TrimSpace(hostname), "[]")
+	return hostname == "127.0.0.1" || strings.EqualFold(hostname, "localhost") || hostname == "::1"
 }
 
 func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
@@ -216,13 +241,13 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":             true,
-		"remoteAuth":     auth.RemoteAuthEnabled(),
-		"allowRegister":  auth.AllowRegister(),
-		"authRequired":   authRequiredFor(r),
-		"remoteAccess":   remoteAccessAllowed(r),
-		"adminRequired":  !isLoopbackRequest(r) && auth.RemoteAuthEnabled(),
-		"loopback":       isLoopbackRequest(r),
+		"ok":            true,
+		"remoteAuth":    auth.RemoteAuthEnabled(),
+		"allowRegister": auth.AllowRegister(),
+		"authRequired":  authRequiredFor(r),
+		"remoteAccess":  remoteAccessAllowed(r),
+		"adminRequired": !isLoopbackRequest(r) && auth.RemoteAuthEnabled(),
+		"loopback":      isLoopbackRequest(r),
 	})
 }
 

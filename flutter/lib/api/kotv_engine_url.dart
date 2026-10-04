@@ -42,6 +42,25 @@ String kotvNormalizeEngineBaseUrl(String raw) {
   return v;
 }
 
+/// 本进程 HTTP 服务提供的路径。其它回环路径是 jar 自己的监听。
+bool kotvIsEngineServedPath(String path) {
+  var p = path;
+  if (p.length > 1 && p.endsWith('/')) {
+    p = p.substring(0, p.length - 1);
+  }
+  return p == '/proxy' ||
+      p.startsWith('/proxy/') ||
+      p == '/file' ||
+      p.startsWith('/file/') ||
+      p.startsWith('/image/') ||
+      p == '/parse' ||
+      p.startsWith('/parse/') ||
+      p == '/tvbus' ||
+      p == '/cache' ||
+      p.startsWith('/cache/') ||
+      p.startsWith('/api/');
+}
+
 bool _isLoopbackHost(String host) {
   final h = host.toLowerCase();
   return h == '127.0.0.1' || h == 'localhost' || h == '::1' || h == '[::1]';
@@ -93,13 +112,25 @@ String kotvRewriteEngineLocalUrl(String mediaUrl, String engineBaseUrl) {
   if (host.isEmpty) return media;
   final baseHost = b.host.toLowerCase();
   if (host == baseHost) {
-    if (b.scheme.isNotEmpty && m.scheme != b.scheme) {
-      return m.replace(scheme: b.scheme, host: b.host, port: b.hasPort ? b.port : null).toString();
+    final schemeDiff = b.scheme.isNotEmpty && m.scheme != b.scheme;
+    final portDiff = b.hasPort != m.hasPort || (b.hasPort && m.hasPort && b.port != m.port);
+    if (kotvIsEngineServedPath(m.path) && (schemeDiff || portDiff)) {
+      return m
+          .replace(
+            scheme: b.scheme.isEmpty ? m.scheme : b.scheme,
+            host: b.host,
+            port: b.hasPort ? b.port : null,
+          )
+          .toString();
     }
     return media;
   }
   final rewrite = _isLoopbackHost(host) || _isPrivateOrLinkLocalIPv4(host);
   if (!rewrite) return media;
+  // 只改本引擎自己的路径或同端口。别的回环端口不能改写到引擎端口上。
+  final enginePath = kotvIsEngineServedPath(m.path);
+  final samePort = m.hasPort && b.hasPort && m.port == b.port;
+  if (!enginePath && !samePort) return media;
   return Uri(
     scheme: b.scheme.isEmpty ? 'http' : b.scheme,
     userInfo: m.userInfo.isEmpty ? null : m.userInfo,

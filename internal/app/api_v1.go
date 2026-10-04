@@ -107,9 +107,9 @@ func (a *App) APIGetConfig() map[string]any {
 		"home":      home.Key,
 		"homeName":  homeName,
 		"sites":     sites,
-		"wallpaper": strings.TrimSpace(cfg.API().Wallpaper),
-		"logo":      strings.TrimSpace(cfg.API().Logo),
-		"banner":    strings.TrimSpace(cfg.API().Banner),
+		"wallpaper": exposeResourceURL(cfg.API().Wallpaper),
+		"logo":      exposeResourceURL(cfg.API().Logo),
+		"banner":    exposeResourceURL(cfg.API().Banner),
 	}
 }
 
@@ -605,26 +605,25 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			return nil, fmt.Errorf("%s", playMsg)
 		}
 		return map[string]any{
-			"ok":                true,
-			"url":               "",
-			"media":             "",
-			"magnet":            false,
-			"parsed":            didParse,
-			"headers":           headers,
-			"drm":               playDrm,
-			"format":            playFormat,
-			"danmaku":           []any{},
-			"subs":              []any{},
-			"artwork":           playArtwork,
-			"desc":              playDesc,
-			"msg":               "",
-			"position":          playPosition,
-			"qualities":         map[string]any{"names": qualNames, "urls": []string{}},
-			"backendProxyPlay":  settings.IsBackendProxyPlay(),
-			"preferSpiderProxy": settings.PreferSpiderProxyPlay(),
-			"site":              site.Key,
-			"flag":              flag,
-			"id":                vodID,
+			"ok":               true,
+			"url":              "",
+			"media":            "",
+			"magnet":           false,
+			"parsed":           didParse,
+			"headers":          headers,
+			"drm":              playDrm,
+			"format":           playFormat,
+			"danmaku":          []any{},
+			"subs":             []any{},
+			"artwork":          playArtwork,
+			"desc":             playDesc,
+			"msg":              "",
+			"position":         playPosition,
+			"qualities":        map[string]any{"names": qualNames, "urls": []string{}},
+			"backendProxyPlay": settings.IsBackendProxyPlay(),
+			"site":             site.Key,
+			"flag":             flag,
+			"id":               vodID,
 		}, nil
 	}
 	// convert：须在可播判断之前，否则 proxy:// 会被当成不可播。
@@ -651,7 +650,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		}
 		playURL = local
 	} else if !thunder.IsLocalStream(playURL) && !IsLocalMediaURL(playURL) {
-		if !settings.PreferSpiderProxyPlay() {
+		if !settings.IsBackendProxyPlay() {
 			if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
 				mediaURL = media
 				headers = hdrs
@@ -674,10 +673,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	title := vodID
 	a.SetMediaPlaying(title, playURL)
 
-	// 远端前端（PC 连安卓后端）：把 127.0.0.1 换成对外可达根。
 	pubQualURLs := make([]string, len(qualURLs))
 	for i, u := range qualURLs {
-		pubQualURLs[i] = playproxy.PublicizeURL(localproxy.ConvertScheme(u))
+		pubQualURLs[i] = playproxy.PublicizeURL(localproxy.ConvertScheme(u), headers)
 	}
 	danmakuDTO := make([]map[string]any, 0, len(danmakuItems))
 	for _, it := range danmakuItems {
@@ -701,27 +699,33 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			"flag":   s.Flag,
 		})
 	}
+	exposedURL := playproxy.PublicizeURL(playURL, headers)
+	exposedMedia := mediaURL
+	if mediaURL == playURL || playproxy.NeedsLocalRelay(mediaURL) {
+		exposedMedia = exposedURL
+	} else {
+		exposedMedia = playproxy.PublicizeURL(mediaURL, headers)
+	}
 	return map[string]any{
-		"ok":                true,
-		"url":               playproxy.PublicizeURL(playURL),
-		"media":             playproxy.PublicizeURL(mediaURL),
-		"magnet":            isMagnetPlay,
-		"parsed":            didParse,
-		"headers":           headers,
-		"drm":               playDrm,
-		"format":            playFormat,
-		"danmaku":           danmakuDTO,
-		"subs":              subsDTO,
-		"artwork":           playArtwork,
-		"desc":              playDesc,
-		"msg":               playMsg,
-		"position":          playPosition,
-		"qualities":         map[string]any{"names": qualNames, "urls": pubQualURLs},
-		"backendProxyPlay":  settings.IsBackendProxyPlay(),
-		"preferSpiderProxy": settings.PreferSpiderProxyPlay(),
-		"site":              site.Key,
-		"flag":              flag,
-		"id":                vodID,
+		"ok":               true,
+		"url":              exposedURL,
+		"media":            exposedMedia,
+		"magnet":           isMagnetPlay,
+		"parsed":           didParse,
+		"headers":          headers,
+		"drm":              playDrm,
+		"format":           playFormat,
+		"danmaku":          danmakuDTO,
+		"subs":             subsDTO,
+		"artwork":          playArtwork,
+		"desc":             playDesc,
+		"msg":              playMsg,
+		"position":         playPosition,
+		"qualities":        map[string]any{"names": qualNames, "urls": pubQualURLs},
+		"backendProxyPlay": settings.IsBackendProxyPlay(),
+		"site":             site.Key,
+		"flag":             flag,
+		"id":               vodID,
 	}, nil
 }
 
@@ -755,6 +759,10 @@ func filtersDTO(filters []model.Filter) []map[string]any {
 	return out
 }
 
+func exposeResourceURL(raw string) string {
+	return playproxy.PublicizeURL(localproxy.ConvertScheme(strings.TrimSpace(raw)))
+}
+
 func vodsDTO(list []model.Vod, siteKey string) []map[string]any {
 	out := make([]map[string]any, 0, len(list))
 	for _, v := range list {
@@ -765,7 +773,7 @@ func vodsDTO(list []model.Vod, siteKey string) []map[string]any {
 		out = append(out, map[string]any{
 			"vod_id":      v.VodID.String(),
 			"vod_name":    v.VodName,
-			"vod_pic":     v.VodPic,
+			"vod_pic":     exposeResourceURL(v.VodPic),
 			"vod_remarks": v.VodRemarks,
 			"type_name":   v.TypeName,
 			"site":        sk,
@@ -816,7 +824,7 @@ func vodDetailDTO(v model.Vod, siteKey string) map[string]any {
 	return map[string]any{
 		"vod_id":       v.VodID.String(),
 		"vod_name":     v.VodName,
-		"vod_pic":      v.VodPic,
+		"vod_pic":      exposeResourceURL(v.VodPic),
 		"vod_remarks":  v.VodRemarks,
 		"vod_year":     v.VodYear.String(),
 		"vod_area":     v.VodArea,
@@ -1533,7 +1541,7 @@ func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
 				"index":  ci,
 				"name":   ch.Name,
 				"number": ch.Number,
-				"logo":   ch.ResolvedLogo(),
+				"logo":   exposeResourceURL(ch.ResolvedLogo()),
 				"tvgId":  ch.TvgID,
 				"urls":   len(ch.URLs),
 				"line":   ch.URLIndex,
@@ -1610,7 +1618,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	}
 	return map[string]any{
 		"ok":       true,
-		"url":      playproxy.PublicizeURL(playURL),
+		"url":      playproxy.PublicizeURL(playURL, headers),
 		"headers":  headers,
 		"name":     ch.Name,
 		"group":    g.Name,
@@ -1682,7 +1690,7 @@ func (a *App) APILiveEPG(group, channel int) (map[string]any, error) {
 	return map[string]any{
 		"ok":   true,
 		"name": ch.Name,
-		"logo": ch.ResolvedLogo(),
+		"logo": exposeResourceURL(ch.ResolvedLogo()),
 		"days": days,
 	}, nil
 }
@@ -1716,7 +1724,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	}
 	return map[string]any{
 		"ok":      true,
-		"url":     playproxy.PublicizeURL(url),
+		"url":     playproxy.PublicizeURL(url, headers),
 		"headers": headers,
 		"name":    list[prog].Title,
 		"group":   g.Name,

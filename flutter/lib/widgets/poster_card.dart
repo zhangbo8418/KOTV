@@ -127,8 +127,9 @@ class PosterCard extends StatelessWidget {
   }
 
   static bool _isHttpPic(String s) {
-    final t = s.trim();
-    return t.startsWith('http://') || t.startsWith('https://');
+    if (kotvDecodeDataImage(s) != null) return true;
+    final u = kotvResolveImageRequest(s).url;
+    return u.startsWith('http://') || u.startsWith('https://');
   }
 }
 

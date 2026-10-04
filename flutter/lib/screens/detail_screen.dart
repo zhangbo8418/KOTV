@@ -2068,10 +2068,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
         _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
       } catch (_) {}
-      // 优先用引擎 play 接口算好的 preferSpiderProxy；缺省时仅看加速开关。
-      final preferSpiderProxy = data.containsKey('preferSpiderProxy')
-          ? data['preferSpiderProxy'] == true
-          : backendProxyPlay;
       // 有 DRM 或 SMB 强制 Exo；本地碟片/ISO 强制 MPV（自编译 dvdnav/libbluray）。
       final smb = mediaUrl.trim().toLowerCase().startsWith('smb://') ||
           playUrl.trim().toLowerCase().startsWith('smb://');
@@ -2114,7 +2110,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           openUrl = mediaUrl;
           openHeaders = null;
         } else {
-          final preferDirect = !hasDrm && !preferSpiderProxy;
+          final preferDirect = !hasDrm && !backendProxyPlay;
           final resolved = kotvResolvePlayOpenTarget(
             playUrl: playUrl,
             mediaUrl: mediaUrl,
