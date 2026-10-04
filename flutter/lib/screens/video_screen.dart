@@ -701,7 +701,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           for (final f in _filters)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
-              child: Row(
+              child: Builder(builder: (context) {
+                final selIdx = f.values.indexWhere((v) => (_extend[f.key] ?? '') == v.value);
+                return Row(
                 children: [
                   SizedBox(
                     width: labelW,
@@ -718,6 +720,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                     child: SizedBox(
                       height: pillH,
                       child: HScrollList(
+                        scrollToIndex: selIdx >= 0 ? selIdx : null,
                         itemCount: f.values.length,
                         separatorBuilder: (_, __) => SizedBox(width: sepW),
                         itemBuilder: (_, i) {
@@ -736,7 +739,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                     ),
                   ),
                 ],
-              ),
+                );
+              }),
             ),
         ],
       ),

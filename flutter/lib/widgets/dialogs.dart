@@ -18,6 +18,7 @@ import '../screens/detail_screen.dart';
 import '../screens/file_browser_screen.dart';
 import '../screens/live_screen.dart';
 import 'chrome.dart';
+import 'h_scroll.dart';
 
 Future<void> _prepareLeavePlayback() async {
   await DetailScreen.prepareLeave();
@@ -146,9 +147,10 @@ Future<void> showSitePicker(
 }) async {
   if (sites.isEmpty) return;
   final scrollCtrl = ScrollController();
+  final homeKey = GlobalKey();
   final homeIdx = sites.indexWhere((s) => s.home);
   final focusIdx = homeIdx >= 0 ? homeIdx : 0;
-  var didScrollToHome = false;
+  var pinnedFocus = -2;
   await showDialog<void>(
     context: context,
     builder: (ctx) {
@@ -168,13 +170,18 @@ Future<void> showSitePicker(
 
           final curHomeIdx = local.indexWhere((s) => s.home);
           final curFocus = curHomeIdx >= 0 ? curHomeIdx : focusIdx;
-          if (!didScrollToHome) {
+          if (pinnedFocus != curFocus) {
+            pinnedFocus = curFocus;
+            final idx = curFocus;
+            final n = local.length;
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (didScrollToHome || !scrollCtrl.hasClients || curFocus <= 0) return;
-              didScrollToHome = true;
-              final itemH = (m.compact ? 44.0 : 52.0) + (m.compact ? 4.0 : 8.0);
-              final target = (curFocus * itemH).clamp(0.0, scrollCtrl.position.maxScrollExtent);
-              scrollCtrl.jumpTo(target);
+              kotvScrollIndexIntoView(
+                controller: scrollCtrl,
+                itemKey: homeKey,
+                index: idx,
+                count: n,
+                isActive: () => ctx.mounted,
+              );
             });
           }
 
@@ -233,6 +240,7 @@ Future<void> showSitePicker(
                             final s = local[i];
                             if (m.compact) {
                               return Row(
+                                key: i == curFocus ? homeKey : null,
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
                                   Expanded(
@@ -275,6 +283,7 @@ Future<void> showSitePicker(
                               );
                             }
                             return Row(
+                              key: i == curFocus ? homeKey : null,
                               children: [
                                 Expanded(
                                   child: AppPill(
@@ -910,8 +919,9 @@ Future<String?> pickChoice(
       title: Text(title, style: TextStyle(color: p.fg)),
       children: [
         for (var i = 0; i < options.length; i++)
-          TvFocus(
+            TvFocus(
             autofocus: options[i].$2 == current || (i == 0 && !options.any((o) => o.$2 == current)),
+            scrollIntoView: true,
             onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(options[i].$2),
             borderRadius: 8,
             child: Padding(
@@ -1054,11 +1064,20 @@ class _SourceListDialog extends StatefulWidget {
 
 class _SourceListDialogState extends State<_SourceListDialog> {
   late Map<String, dynamic> _local;
+  final _scroll = ScrollController();
+  final _currentKey = GlobalKey();
+  var _pinnedIndex = -2;
 
   @override
   void initState() {
     super.initState();
     _local = Map<String, dynamic>.from(widget.initial);
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
   }
 
   Future<void> _reload() async {
@@ -1096,6 +1115,30 @@ class _SourceListDialogState extends State<_SourceListDialog> {
   Widget build(BuildContext context) {
     final list = ((_local[widget.listKey] as List?) ?? []).whereType<Map>().toList();
     final current = '${_local[widget.currentKey] ?? widget.fallbackCurrent}';
+    var currentIndex = -1;
+    for (var i = 0; i < list.length; i++) {
+      final url = '${list[i]['url'] ?? ''}';
+      if (list[i]['current'] == true || url == current) {
+        currentIndex = i;
+        break;
+      }
+    }
+    final focusIndex = currentIndex >= 0 ? currentIndex : 0;
+    if (currentIndex >= 0 && _pinnedIndex != currentIndex) {
+      _pinnedIndex = currentIndex;
+      final idx = currentIndex;
+      final n = list.length + 1;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        kotvScrollIndexIntoView(
+          controller: _scroll,
+          itemKey: _currentKey,
+          index: idx,
+          count: n,
+          isActive: () => mounted,
+        );
+      });
+    }
     final m = _dialogMetrics(context);
     final p = KotvPalette.of(context);
     final bg = p.dialogBg;
@@ -1128,6 +1171,7 @@ class _SourceListDialogState extends State<_SourceListDialog> {
                 const SizedBox(height: 12),
                 Expanded(
                   child: ListView.separated(
+                    controller: _scroll,
                     itemCount: list.length + 1,
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (_, i) {
@@ -1144,10 +1188,10 @@ class _SourceListDialogState extends State<_SourceListDialog> {
                       final isCurrent = r['current'] == true || url == current;
                       final name = '${r['name'] ?? url}';
                       return _RepoRow(
-                        key: ValueKey('$url|$name'),
+                        key: i == currentIndex ? _currentKey : ValueKey('$url|$name'),
                         label: name,
                         current: isCurrent,
-                        autofocus: i == 0,
+                        autofocus: i == focusIndex,
                         onTap: isCurrent ? () {} : () => Navigator.pop(context, url),
                         onLongPress: () async {
                           final edited = await widget.onEdit(url, '${r['title'] ?? ''}');

@@ -145,6 +145,56 @@ class _HScrollListState extends State<HScrollList> {
   }
 }
 
+/// 把列表第 [index] 项滚进可视区。
+/// 该项还没建出来时，先按平均尺寸跳到附近，下一帧再对准。
+void kotvScrollIndexIntoView({
+  required ScrollController controller,
+  required GlobalKey itemKey,
+  required int index,
+  required int count,
+  double alignment = 0.5,
+  Duration duration = Duration.zero,
+  Curve curve = Curves.easeOutCubic,
+  bool Function()? isActive,
+  int maxAttempts = 8,
+}) {
+  if (index < 0 || count <= 0 || index >= count) return;
+  var attempt = 0;
+  void tick() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (isActive != null && !isActive()) return;
+      if (!controller.hasClients || !controller.position.hasContentDimensions) {
+        if (++attempt < maxAttempts) tick();
+        return;
+      }
+      final ctx = itemKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Scrollable.ensureVisible(ctx, alignment: alignment, duration: duration, curve: curve);
+        return;
+      }
+      final pos = controller.position;
+      if (pos.maxScrollExtent <= 0) {
+        if (pos.viewportDimension <= 0 && ++attempt < maxAttempts) tick();
+        return;
+      }
+      final avg = (pos.maxScrollExtent + pos.viewportDimension) / count;
+      final target = (index * avg - pos.viewportDimension * alignment).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      controller.jumpTo(target);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (isActive != null && !isActive()) return;
+        final built = itemKey.currentContext;
+        if (built != null && built.mounted) {
+          Scrollable.ensureVisible(built, alignment: alignment);
+          return;
+        }
+        if (++attempt < maxAttempts) tick();
+      });
+    });
+  }
+
+  tick();
+}
+
 /// 包装已有横向 [ListView] / [SingleChildScrollView]，仅补桌面拖动（无自管 controller）。
 class HScroll extends StatelessWidget {
   const HScroll({super.key, required this.child});

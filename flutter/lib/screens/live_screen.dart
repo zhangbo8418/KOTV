@@ -36,6 +36,7 @@ import '../theme/layout_scale.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
+import '../widgets/h_scroll.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/live_player_chrome.dart';
@@ -1166,27 +1167,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   /// 目标项已建出就直接居中；否则先按列表平均行高跳到附近让它建出来，下一帧再居中。
   void _scrollListTo(ScrollController c, GlobalKey key, int index, int count) {
-    if (index < 0 || index >= count) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !c.hasClients) return;
-      final ctx = key.currentContext;
-      if (ctx != null) {
-        Scrollable.ensureVisible(
-          ctx,
-          alignment: 0.5,
-          duration: const Duration(milliseconds: 240),
-          curve: Curves.easeOutCubic,
-        );
-        return;
-      }
-      final pos = c.position;
-      final avg = (pos.maxScrollExtent + pos.viewportDimension) / count;
-      c.jumpTo((index * avg - pos.viewportDimension / 2).clamp(0.0, pos.maxScrollExtent));
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final built = key.currentContext;
-        if (mounted && built != null) Scrollable.ensureVisible(built, alignment: 0.5);
-      });
-    });
+    kotvScrollIndexIntoView(
+      controller: c,
+      itemKey: key,
+      index: index,
+      count: count,
+      duration: const Duration(milliseconds: 240),
+      isActive: () => mounted,
+    );
   }
 
   Future<void> _openLiveUrl(
@@ -2374,8 +2362,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (_epgDays.length <= 1) return const SizedBox.shrink();
     return SizedBox(
       height: height ?? (land ? 24.0 : 28.0),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
+      child: HScrollList(
+        scrollToIndex: _dayIdx,
         padding: padding,
         itemCount: _epgDays.length,
         separatorBuilder: (_, __) => SizedBox(width: land ? 3 : 6),

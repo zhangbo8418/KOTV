@@ -3916,19 +3916,29 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         useRootNavigator: true,
         builder: (ctx) {
           final pal = KotvPalette.of(ctx);
+          final known = names.contains(cur);
+          Widget option(String label, String value, {required bool on}) {
+            return TvFocus(
+              autofocus: on,
+              scrollIntoView: true,
+              borderRadius: 8,
+              onPressed: () => Navigator.pop(ctx, value),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('$label${on ? '  ✓' : ''}', style: TextStyle(color: pal.fg)),
+                ),
+              ),
+            );
+          }
+
           return SimpleDialog(
             backgroundColor: pal.dialogBg,
             title: Text('选择解析器', style: TextStyle(color: pal.fg)),
             children: [
-              SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, ''),
-                child: Text('自动（默认）${cur.isEmpty ? '  ✓' : ''}', style: TextStyle(color: pal.fg)),
-              ),
-              for (final n in names)
-                SimpleDialogOption(
-                  onPressed: () => Navigator.pop(ctx, n),
-                  child: Text('$n${cur == n ? '  ✓' : ''}', style: TextStyle(color: pal.fg)),
-                ),
+              option('自动（默认）', '', on: cur.isEmpty || !known),
+              for (final n in names) option(n, n, on: cur == n),
             ],
           );
         },

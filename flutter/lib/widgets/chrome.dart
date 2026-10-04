@@ -772,6 +772,7 @@ class CategoryNavBar extends StatelessWidget {
     final p = KotvPalette.of(context);
     final compact = KotvLayout.isCompact(context);
     final bottomNav = KotvLayout.useBottomNav(context);
+    final selectedIndex = selectedTid == null ? -1 : categories.indexWhere((c) => c.id == selectedTid);
     // 固定高度匹配 NavPill(36)，避免 scale 把栏压矮后胶囊溢出
     return Container(
       height: compact ? 40.0 : 48.0,
@@ -783,6 +784,7 @@ class CategoryNavBar extends StatelessWidget {
           SizedBox(width: 8 * s),
           Expanded(
             child: HScrollList(
+              scrollToIndex: selectedIndex >= 0 ? selectedIndex : null,
               itemCount: categories.length,
               separatorBuilder: (_, __) => SizedBox(width: 8 * s),
               itemBuilder: (_, i) {

@@ -1448,6 +1448,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   }) {
     return TvFocus(
       autofocus: selected,
+      scrollIntoView: true,
       onPressed: onTap,
       borderRadius: 8,
       child: SizedBox(
