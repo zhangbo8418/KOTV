@@ -494,24 +494,53 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Widget _resultsList() {
-    return ListView(
-      children: [
+    return CustomScrollView(
+      slivers: [
         for (final c in _collects) ...[
-          SectionTitle(c.name, subtitle: '${c.list.length} 条结果'),
-          const SizedBox(height: 8),
-          PosterFlow(
-            items: c.list,
-            shrinkWrap: true,
-            padding: EdgeInsets.zero,
-            onOpen: (it) => openVodItem(context, ref, it, site: c.site),
-            onLongPress: (it) {
-              if (it.hasAction || it.isFolder) return;
-              searchByName(ref, it.name);
-            },
+          SliverToBoxAdapter(
+            child: SectionTitle(c.name, subtitle: '${c.list.length} 条结果'),
           ),
-          const SizedBox(height: 16),
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          _resultPosterSliver(c),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
         ],
       ],
+    );
+  }
+
+  Widget _resultPosterSliver(_SiteCollect c) {
+    return SliverLayoutBuilder(
+      builder: (context, constraints) {
+        final compact = KotvLayout.isCompact(context);
+        final gap = compact ? 6.0 : 10.0;
+        final pad = compact ? const EdgeInsets.fromLTRB(12, 8, 12, 16) : EdgeInsets.zero;
+        final inner = constraints.crossAxisExtent - pad.horizontal;
+        final cross = !inner.isFinite || inner <= 0
+            ? (compact ? 3 : 4)
+            : (compact ? 3 : (inner / (200.0 + gap)).floor().clamp(3, 6));
+        final grid = SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: cross,
+            mainAxisSpacing: gap,
+            crossAxisSpacing: gap,
+            childAspectRatio: 214 / 286,
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (context, i) {
+              final it = c.list[i];
+              return PosterCard(
+                item: it,
+                autofocus: false,
+                onTap: () => openVodItem(context, ref, it, site: c.site),
+                onLongPress: (it.hasAction || it.isFolder) ? null : () => searchByName(ref, it.name),
+              );
+            },
+            childCount: c.list.length,
+          ),
+        );
+        if (pad == EdgeInsets.zero) return grid;
+        return SliverPadding(padding: pad, sliver: grid);
+      },
     );
   }
 }
