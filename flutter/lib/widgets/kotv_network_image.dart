@@ -182,6 +182,7 @@ class KotvNetworkImage extends StatelessWidget {
     this.cacheWidth,
     this.cacheHeight,
     this.allowPlatformView = true,
+    this.gaplessPlayback = true,
   });
 
   final String pic;
@@ -193,6 +194,8 @@ class KotvNetworkImage extends StatelessWidget {
   final int? cacheHeight;
   /// 列表里的小图关掉。每行一个 PlatformView 会让滑动掉帧。
   final bool allowPlatformView;
+  /// 为 false 时换地址先清掉上一张，避免列表复用同一格时留着旧图。
+  final bool gaplessPlayback;
 
   @override
   Widget build(BuildContext context) {
@@ -231,7 +234,7 @@ class KotvNetworkImage extends StatelessWidget {
         alignment: alignment,
         errorBuilder: errorBuilder,
         filterQuality: filterQuality,
-        gaplessPlayback: true,
+        gaplessPlayback: gaplessPlayback,
         cacheWidth: cacheWidth,
         cacheHeight: cacheHeight,
       );
@@ -255,7 +258,7 @@ class KotvNetworkImage extends StatelessWidget {
       alignment: alignment,
       errorBuilder: errorBuilder,
       filterQuality: filterQuality,
-      gaplessPlayback: true,
+      gaplessPlayback: gaplessPlayback,
     );
   }
 }

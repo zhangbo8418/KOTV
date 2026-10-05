@@ -407,6 +407,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   /// off | audio | pip
   String _playerBackground = 'pip';
   int _playSerial = 0;
+  int _epgSerial = 0;
   String _playUrl = '';
   Map<String, String>? _playHeaders;
   Map<String, dynamic>? _playDrm;
@@ -1139,10 +1140,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final playingHere = i == _playGroupIdx && _playChIdx >= 0 && _playChIdx < _channelCountAt(i);
     setState(() {
       _groupIdx = i;
-      // 只有正在播的组才把 [_chIdx] 填上，避免信息条和节目单跟着浏览组走。
+      // 只有正在播的组才把 [_chIdx] 填上。信息条继续用正在播的那一台。
       _chIdx = playingHere ? _playChIdx : -1;
-      _epgDays = [];
-      _programs = [];
     });
     _showAt(_groupScroll, _groupIdx, _groupStride);
     // 正在播的组滚到正在播的频道。其它组滚到上次选中的频道；没选过则停在开头。
@@ -1152,9 +1151,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _loadEpg() async {
-    if (_chIdx < 0) return;
+    final group = _groupIdx;
+    final channel = _chIdx;
+    if (channel < 0 || group < 0) return;
+    final serial = ++_epgSerial;
     try {
-      final data = await ref.read(apiProvider).liveEpg(group: _groupIdx, channel: _chIdx);
+      final data = await ref.read(apiProvider).liveEpg(group: group, channel: channel);
       final days = ((data['days'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
       var dayIdx = 0;
       final today = _localDateString();
@@ -1168,28 +1170,47 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           ? <Map<String, dynamic>>[]
           : (((days[dayIdx]['list'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList());
       final logo = '${data['logo'] ?? ''}'.trim();
-      if (!mounted) return;
+      if (!mounted || serial != _epgSerial) return;
+      final stillHere = _groupIdx == group && _chIdx == channel;
+      final playingThis = _playGroupIdx == group && _playChIdx == channel;
+      if (!stillHere && !playingThis) return;
       setState(() {
         _epgDays = days;
         _dayIdx = dayIdx;
         _programs = progs;
-        // XMLTV <icon> 回填：列表里原先无 logo 时补上。
-        if (logo.isNotEmpty && _chIdx >= 0 && _chIdx < _channels.length) {
-          final cur = '${_channels[_chIdx]['logo'] ?? ''}'.trim();
-          if (cur.isEmpty) {
-            _channels[_chIdx] = Map<String, dynamic>.from(_channels[_chIdx])..['logo'] = logo;
-          }
-        }
+        _fillChannelLogo(group, channel, logo);
       });
       _scheduleScrollEpgToHighlight();
     } catch (_) {
-      if (mounted) {
+      if (!mounted || serial != _epgSerial) return;
+      if (_groupIdx == group && _chIdx == channel) {
         setState(() {
           _epgDays = [];
           _programs = [];
         });
       }
     }
+  }
+
+  /// XMLTV <icon> 只补进发起请求的那一台。列表里原先已有 logo 时不覆盖。
+  void _fillChannelLogo(int group, int channel, String logo) {
+    if (logo.isEmpty || group < 0 || group >= _groups.length || channel < 0) return;
+    final raw = _groups[group]['channels'];
+    if (raw is! List || channel >= raw.length) return;
+    final c = raw[channel];
+    if (c is! Map) return;
+    if ('${c['logo'] ?? ''}'.trim().isNotEmpty) return;
+    raw[channel] = Map<String, dynamic>.from(c)..['logo'] = logo;
+  }
+
+  Map<String, dynamic>? get _playingChannel {
+    if (_playGroupIdx < 0 || _playChIdx < 0 || _playGroupIdx >= _groups.length) return null;
+    final raw = _groups[_playGroupIdx]['channels'];
+    if (raw is! List || _playChIdx >= raw.length) return null;
+    final c = raw[_playChIdx];
+    if (c is Map<String, dynamic>) return c;
+    if (c is Map) return Map<String, dynamic>.from(c);
+    return null;
   }
 
   /// 回看项优先，否则「正在播出」；供 EPG 列表滚到可视区。
@@ -2623,9 +2644,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   String get _currentLogo {
-    final chs = _channels;
-    if (_chIdx < 0 || _chIdx >= chs.length) return '';
-    return '${chs[_chIdx]['logo'] ?? ''}';
+    final ch = _playingChannel;
+    if (ch == null) return '';
+    return '${ch['logo'] ?? ''}';
   }
 
   /// 仅「正在播出」；无 now 不回退到首条（避免 00:xx 假当前）。
@@ -2665,14 +2686,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   String get _channelNum {
-    if (_chIdx < 0) return '--';
-    final chs = _channels;
-    if (_chIdx >= chs.length) return '--';
-    return _channelNumberLabel(chs[_chIdx], _chIdx);
+    final ch = _playingChannel;
+    if (ch == null) return '--';
+    return _channelNumberLabel(ch, _playChIdx);
   }
 
   String get _lineLabel {
-    if (_chIdx < 0 || _lines <= 1) return '';
+    if (_playChIdx < 0 || _lines <= 1) return '';
     if (_lineName.isNotEmpty) return '$_lineName (${_line + 1}/$_lines)';
     return '线路 ${_line + 1}/$_lines';
   }
@@ -3520,7 +3540,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             child: Row(
                               children: [
                                 SizedBox(
-                                  width: _channelNumColWidth(20, digits: _channelNumDigitsFor(_channels)),
+                                  width: _channelNumColWidth(20, digits: _channelNum.length),
                                   child: Text(
                                     _channelNum,
                                     softWrap: false,
@@ -3730,7 +3750,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               Row(
                 children: [
                   SizedBox(
-                    width: _channelNumColWidth(15, digits: _channelNumDigitsFor(_channels)),
+                    width: _channelNumColWidth(15, digits: _channelNum.length),
                     child: Text(
                       _channelNum,
                       softWrap: false,
@@ -4116,8 +4136,10 @@ class _LiveChannelLogo extends StatelessWidget {
         child: _httpLogo
             ? KotvNetworkImage(
                 logo.trim(),
+                key: ValueKey(logo.trim()),
                 fit: BoxFit.cover,
                 allowPlatformView: false,
+                gaplessPlayback: false,
                 cacheWidth: (width * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(1, 512),
                 cacheHeight: (height * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(1, 512),
                 errorBuilder: (_, __, ___) => _fallback(),
