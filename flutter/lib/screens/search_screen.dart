@@ -293,7 +293,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   Widget _initialsKeyboard() {
     final p = KotvPalette.of(context);
-    final cells = ['退格', '←', '→', '搜索', ..._keys.split('')];
+    final cells = <String?>['退格', '←', '→', '搜索', null, null, null, ..._keys.split('')];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -323,9 +323,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             itemCount: cells.length,
             itemBuilder: (context, i) {
               final label = cells[i];
+              if (label == null) return const SizedBox.shrink();
               return TvFocus(
                 autofocus: i == 0,
                 onPressed: () => _onInitialKey(label),
+                onLongPress: label == '退格'
+                    ? () {
+                        _ctrl.value = const TextEditingValue(
+                          text: '',
+                          selection: TextSelection.collapsed(offset: 0),
+                        );
+                      }
+                    : null,
                 borderRadius: 8,
                 child: DecoratedBox(
                   decoration: BoxDecoration(

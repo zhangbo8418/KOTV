@@ -124,7 +124,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   Future<void> _bootstrap() async {
     await _refreshLocalMeta();
-    await _reload();
+    await _reload(refreshRepo: true);
   }
 
   /// 无点播源：source 空且错误像「未配置」。
@@ -158,7 +158,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     return cfg;
   }
 
-  Future<void> _reload({bool clearContent = false}) async {
+  Future<void> _reload({bool clearContent = false, bool refreshRepo = false}) async {
     final gen = ++_loadGen;
     setState(() {
       _loading = true;
@@ -207,9 +207,26 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         return;
       }
 
+      var repoErr = '';
+      if (refreshRepo) {
+        final source = '${cfg['source'] ?? ''}'.trim();
+        final lower = source.toLowerCase();
+        if (lower.startsWith('http://') || lower.startsWith('https://')) {
+          try {
+            await ref.read(apiProvider).loadConfig(source).timeout(const Duration(seconds: 45));
+          } catch (e) {
+            repoErr = '$e';
+          }
+        }
+      }
+      if (!mounted || gen != _loadGen) return;
+
       final data = await _fetchFirstPage(gen);
       if (!mounted || gen != _loadGen) return;
       _applyPage(data, replace: true);
+      if (repoErr.isNotEmpty && mounted && gen == _loadGen) {
+        setState(() => _statusMsg = '仓库加载失败: $repoErr');
+      }
       await _fillHomeRecommendIfEmpty(gen);
       // 拉完首页再刷配置缓存，避免 invalidate 与首页 setState 同帧竞态触发 Inherited 断言
       ref.invalidate(configProvider);

@@ -343,8 +343,12 @@ func (m *Manager) initFromVod(vod string) error {
 		}
 		return m.ParseConfig(cfg, cfg.JSON != "")
 	}
-	// http(s)/file URL 按远程或本地配置拉取；库里已有 JSON 正文时优先用缓存（冷启动不依赖外网）。
+	// http(s) 每次请求该地址。file 在库里已有正文时用正文，否则读文件。
 	if looksLikeURL(vod) {
+		lower := strings.ToLower(vod)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+			return m.ReloadFresh(vod)
+		}
 		cfg, err := m.db.FindConfig(vod, database.ConfigTypeSite)
 		if err != nil {
 			return err

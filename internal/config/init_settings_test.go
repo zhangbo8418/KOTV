@@ -1,6 +1,8 @@
 package config
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -52,5 +54,39 @@ func TestInitFromSettings_PrefersSettingsVODOverNewerDBRow(t *testing.T) {
 	}
 	if got := m.Home().Key; got != "cfg" {
 		t.Fatalf("Home=%q want cfg from persisted config.home", got)
+	}
+}
+
+func TestInitFromSettings_HTTPIgnoresStoredJSON(t *testing.T) {
+	const fresh = `{"sites":[{"key":"new","name":"新","type":1,"api":"http://example.test/new"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(fresh))
+	}))
+	defer srv.Close()
+
+	db, err := database.OpenPath(filepath.Join(t.TempDir(), "vod-http.db"))
+	if err != nil {
+		t.Fatalf("OpenPath: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.UpsertConfig(&database.Config{
+		Type: database.ConfigTypeSite,
+		URL:  srv.URL,
+		JSON: `{"sites":[{"key":"old","name":"旧","type":1,"api":"http://example.test/old"}]}`,
+		Name: "旧仓",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	prev := settings.Get(settings.VOD)
+	t.Cleanup(func() { settings.Set(settings.VOD, prev) })
+	settings.Set(settings.VOD, srv.URL)
+
+	m := NewManager(db)
+	if err := m.InitFromSettings(); err != nil {
+		t.Fatalf("InitFromSettings: %v", err)
+	}
+	if got := m.Home().Key; got != "new" {
+		t.Fatalf("Home=%q want new from the live response", got)
 	}
 }
