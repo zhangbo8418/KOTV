@@ -168,7 +168,8 @@ Uint8List? kotvDecodeDataImage(String raw) {
 }
 
 /// 统一网络海报。
-/// Android：PlatformView + Glide 解析 `@Headers=`。
+/// Android 大图：PlatformView + Glide 解析 `@Headers=`。
+/// [allowPlatformView] 为 false 时走客户端拉图，列表行里不能再嵌原生视图。
 /// 其它平台：按解析后的请求头拉图，User-Agent 覆盖客户端默认值。
 class KotvNetworkImage extends StatelessWidget {
   const KotvNetworkImage(
@@ -180,6 +181,7 @@ class KotvNetworkImage extends StatelessWidget {
     this.filterQuality = FilterQuality.low,
     this.cacheWidth,
     this.cacheHeight,
+    this.allowPlatformView = true,
   });
 
   final String pic;
@@ -189,6 +191,8 @@ class KotvNetworkImage extends StatelessWidget {
   final FilterQuality filterQuality;
   final int? cacheWidth;
   final int? cacheHeight;
+  /// 列表里的小图关掉。每行一个 PlatformView 会让滑动掉帧。
+  final bool allowPlatformView;
 
   @override
   Widget build(BuildContext context) {
@@ -200,7 +204,7 @@ class KotvNetworkImage extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final useGlide = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final useGlide = allowPlatformView && !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
     if (useGlide) {
       final fitParam = fit == BoxFit.contain ? 'contain' : 'cover';
       // 海报 PlatformView 不参与遥控器焦点，避免焦点陷进原生 ImageView。
@@ -228,6 +232,8 @@ class KotvNetworkImage extends StatelessWidget {
         errorBuilder: errorBuilder,
         filterQuality: filterQuality,
         gaplessPlayback: true,
+        cacheWidth: cacheWidth,
+        cacheHeight: cacheHeight,
       );
     }
 

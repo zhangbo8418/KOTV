@@ -1186,6 +1186,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final viewStart = pos.pixels;
     final viewEnd = viewStart + pos.viewportDimension;
     if (end > viewStart && start < viewEnd) return;
+    // 拖动或惯性滑动时跳转会掐断手势，列表就一顿一顿的。
+    if (pos.isScrollingNotifier.value) return;
     final target = start.clamp(pos.minScrollExtent, pos.maxScrollExtent);
     if ((pos.pixels - target).abs() < 0.5) return;
     pos.jumpTo(target);
@@ -2153,6 +2155,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return (fontSize * 0.62 * digits.clamp(3, 8) + 10).clamp(40.0, 120.0);
   }
 
+  /// 未选中用省略号。选中才跑马灯，避免频道列表每一行都挂动画。
+  Widget _liveListTitle(String text, {required bool selected, required TextStyle style, TextAlign align = TextAlign.left}) {
+    if (!selected) {
+      return Text(
+        text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        textAlign: align,
+        style: style,
+      );
+    }
+    return KotvMarqueeText(text, active: true, textAlign: align, style: style);
+  }
+
   /// 当前列表最长频道号位数（至少 3）。
   int _channelNumDigitsFor(List<Map<String, dynamic>> channels) {
     var max = 3;
@@ -3096,6 +3113,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                     width: channelW,
                                     child: ListView.builder(
                                       controller: _channelScroll,
+                                      itemExtent: channelStride,
                                       itemCount: _channels.length,
                                       itemBuilder: (_, i) {
                                         final ch = _channels[i];
@@ -3136,9 +3154,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                       _LiveChannelLogo(name: name, logo: logo, width: logoW, height: logoH),
                                                       SizedBox(width: land ? 6 : 12),
                                                       Expanded(
-                                                        child: KotvMarqueeText(
+                                                        child: _liveListTitle(
                                                           name,
-                                                          active: sel,
+                                                          selected: sel,
                                                           style: TextStyle(
                                                             color: Colors.white,
                                                             fontSize: land ? 12 : (15.0 * wScale.clamp(1.0, 1.2)),
@@ -3829,6 +3847,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final groupBox = groupLine + 10 > 28 ? groupLine + 10 : 28.0;
     final groupStride = groupBox + 3;
     const channelStride = 39.0;
+    final numDigits = _channelNumDigitsFor(chs);
+    final numColW = _channelNumColWidth(11, digits: numDigits);
     _pinList(_groupScroll, _groupIdx, groupStride, _groupStride, _pinnedGroup);
     _pinList(_channelScroll, _chIdx, channelStride, _channelStride, _pinnedChannel);
     _pinnedGroup = _groupIdx;
@@ -3864,10 +3884,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         constraints: const BoxConstraints(minHeight: 28),
                         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
                         alignment: Alignment.center,
-                        child: KotvMarqueeText(
+                        child: _liveListTitle(
                           name,
-                          active: sel,
-                          textAlign: TextAlign.center,
+                          selected: sel,
+                          align: TextAlign.center,
                           style: TextStyle(
                             color: sel ? Colors.white : p.fg,
                             fontSize: 11,
@@ -3887,6 +3907,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           child: ListView.builder(
             controller: _channelScroll,
             padding: const EdgeInsets.fromLTRB(3, 4, 6, 4),
+            itemExtent: channelStride,
             itemCount: chs.length,
             itemBuilder: (_, i) {
               final ch = chs[i];
@@ -3909,7 +3930,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         child: Row(
                           children: [
                             SizedBox(
-                              width: _channelNumColWidth(11, digits: _channelNumDigitsFor(_channels)),
+                              width: numColW,
                               child: Text(
                                 _channelNumberLabel(ch, i),
                                 softWrap: false,
@@ -3924,9 +3945,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             _LiveChannelLogo(name: name, logo: logo, width: 28, height: 22),
                             const SizedBox(width: 6),
                             Expanded(
-                              child: KotvMarqueeText(
+                              child: _liveListTitle(
                                 name,
-                                active: sel,
+                                selected: sel,
                                 style: TextStyle(
                                   color: p.fg,
                                   fontSize: 12,
@@ -4047,6 +4068,9 @@ class _LiveChannelLogo extends StatelessWidget {
             ? KotvNetworkImage(
                 logo.trim(),
                 fit: BoxFit.cover,
+                allowPlatformView: false,
+                cacheWidth: (width * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(1, 512),
+                cacheHeight: (height * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(1, 512),
                 errorBuilder: (_, __, ___) => _fallback(),
               )
             : _fallback(),

@@ -5,7 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
-/// 桌面和 iOS 用自己的客户端拉海报。
+/// 非浏览器用自己的客户端拉图。
 /// Image.network 用 headers.add，会在 Dart 默认 User-Agent 后再加一条。
 /// 豆瓣看到两条 User-Agent 就回 403；这里用 set 覆盖。
 ImageProvider kotvBytesImageProvider(String url, Map<String, String> headers) {
