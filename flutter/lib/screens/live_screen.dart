@@ -1109,7 +1109,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return -1;
   }
 
-  /// 列表里要标出的频道：当前组正在播的用 [_chIdx]，否则用该组记住的下标。
+  /// 频道列表要滚到的下标。正在播的组用 [_chIdx]，其它组用记住的频道，没记过则由调用处滚到开头。
   int _channelListIndex() {
     if (_chIdx >= 0) return _chIdx;
     return _rememberedChannel(_groupIdx);
@@ -3169,14 +3169,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         final ch = _channels[i];
                                         final name = '${ch['name'] ?? ''}';
                                         final logo = '${ch['logo'] ?? ''}';
-                                        final listIdx = _channelListIndex();
-                                        final sel = i == listIdx;
-                                        final focusHere = sel || (listIdx < 0 && i == 0);
+                                        final sel = _chIdx >= 0 && i == _chIdx;
                                         return Padding(
                                           padding: EdgeInsets.only(bottom: land ? 2 : 4),
                                           child: TvFocus(
-                                            autofocus: focusHere,
-                                            focusNode: focusHere ? _leftFocus : null,
+                                            autofocus: sel,
+                                            focusNode: sel ? _leftFocus : null,
                                             borderRadius: 8,
                                             onPressed: () => _selectChannelFromList(i),
                                             onLongPress: () => unawaited(_toggleChannelFav(i)),
@@ -3964,8 +3962,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               final ch = chs[i];
               final name = '${ch['name'] ?? ''}';
               final logo = '${ch['logo'] ?? ''}';
-              final listIdx = _channelListIndex();
-              final sel = i == listIdx;
+              final sel = _chIdx >= 0 && i == _chIdx;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 3),
                 child: TvFocus(
