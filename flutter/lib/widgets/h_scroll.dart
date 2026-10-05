@@ -76,7 +76,8 @@ class _HScrollListState extends State<HScrollList> {
     if (_measure) {
       _hideUntilPlaced = true;
       _queuePlace(index);
-    } else if (index != null) {
+    } else {
+      // 打开时没有待定位的项。之后的点选只改高亮，不再把该项拉到前缘。
       _placed = true;
     }
   }

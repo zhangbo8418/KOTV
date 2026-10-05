@@ -357,6 +357,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   /// 正在播的分类和频道。浏览其它分类时 [_chIdx] 会空着，切回来再恢复。
   int _playGroupIdx = -1;
   int _playChIdx = -1;
+  /// 每个分组上次选中的频道下标。没选过是缺省，不在这里记 -1 的占位。
+  final Map<String, int> _groupChannelPos = {};
   String _playGroupName = '';
   String _playChName = '';
   DateTime? _liveBackUntil;
@@ -1067,6 +1069,41 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _playChName = chName;
   }
 
+  String _groupNameAt(int groupIdx) {
+    if (groupIdx < 0 || groupIdx >= _groups.length) return '';
+    return '${_groups[groupIdx]['name'] ?? ''}';
+  }
+
+  int _channelCountAt(int groupIdx) {
+    if (groupIdx < 0 || groupIdx >= _groups.length) return 0;
+    final raw = _groups[groupIdx]['channels'];
+    return raw is List ? raw.length : 0;
+  }
+
+  /// 在该组选台后记下频道下标。分组重建后仍按组名取回。
+  void _rememberGroupChannel(int groupIdx, int chIdx) {
+    final name = _groupNameAt(groupIdx);
+    final n = _channelCountAt(groupIdx);
+    if (name.isEmpty || chIdx < 0 || chIdx >= n) return;
+    _groupChannelPos[name] = chIdx;
+  }
+
+  /// 该组上次选中的频道。没选过或下标已经越界时返回 -1。
+  int _rememberedChannel(int groupIdx) {
+    final name = _groupNameAt(groupIdx);
+    if (name.isEmpty) return -1;
+    final pos = _groupChannelPos[name] ?? -1;
+    final n = _channelCountAt(groupIdx);
+    if (pos < 0 || pos >= n) return -1;
+    return pos;
+  }
+
+  /// 列表里要标出的频道：当前组正在播的用 [_chIdx]，否则用该组记住的下标。
+  int _channelListIndex() {
+    if (_chIdx >= 0) return _chIdx;
+    return _rememberedChannel(_groupIdx);
+  }
+
   /// 收藏组插入或移除后，按名字把正在播的下标拨回去。
   void _rebindPlaying() {
     if (_playGroupName.isEmpty) return;
@@ -1087,18 +1124,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _selectGroup(int i) async {
     if (!await _ensureUnlocked(i)) return;
+    final remembered = _rememberedChannel(i);
+    final playingHere = i == _playGroupIdx && _playChIdx >= 0 && _playChIdx < _channelCountAt(i);
     setState(() {
       _groupIdx = i;
-      final n = _channels.length;
-      if (i == _playGroupIdx && _playChIdx >= 0 && _playChIdx < n) {
-        _chIdx = _playChIdx;
-      } else {
-        _chIdx = -1;
-      }
+      // 只有正在播的组才把 [_chIdx] 填上，避免信息条和节目单跟着浏览组走。
+      _chIdx = playingHere ? _playChIdx : -1;
       _epgDays = [];
       _programs = [];
     });
-    _scheduleScrollToCurrent(epg: false);
+    _showAt(_groupScroll, _groupIdx, _groupStride);
+    // 正在播的组滚到正在播的频道。其它组滚到上次选中的频道；没选过则停在开头。
+    final scrollTo = playingHere ? _playChIdx : (remembered < 0 ? 0 : remembered);
+    _showAt(_channelScroll, scrollTo, _channelStride);
     if (_chIdx >= 0) unawaited(_loadEpg());
   }
 
@@ -1577,6 +1615,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final playGroup = _groupIdx;
     final playGroupName = playGroup >= 0 && playGroup < _groups.length ? '${_groups[playGroup]['name'] ?? ''}' : '';
     final playChName = '${ch['name'] ?? ''}';
+    _rememberGroupChannel(playGroup, chIdx);
     setState(() {
       _chIdx = chIdx;
       _line = useLine;
@@ -3029,10 +3068,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                 (land ? 10.0 : 16.0) +
                                 (land ? 2.0 : 4.0);
                             _pinList(_groupScroll, _groupIdx, groupStride, _groupStride, _pinnedGroup);
-                            _pinList(_channelScroll, _chIdx, channelStride, _channelStride, _pinnedChannel);
+                            _pinList(_channelScroll, _channelListIndex(), channelStride, _channelStride, _pinnedChannel);
                             _pinList(_epgScroll, _epgHighlightIndex(), epgStride, _epgStride, _pinnedEpg);
                             _pinnedGroup = _groupIdx;
-                            _pinnedChannel = _chIdx;
+                            _pinnedChannel = _channelListIndex();
                             _pinnedEpg = _epgHighlightIndex();
                             _groupStride = groupStride;
                             _channelStride = channelStride;
@@ -3119,8 +3158,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         final ch = _channels[i];
                                         final name = '${ch['name'] ?? ''}';
                                         final logo = '${ch['logo'] ?? ''}';
-                                        final sel = i == _chIdx;
-                                        final focusHere = sel || (_chIdx < 0 && i == 0);
+                                        final listIdx = _channelListIndex();
+                                        final sel = i == listIdx;
+                                        final focusHere = sel || (listIdx < 0 && i == 0);
                                         return Padding(
                                           padding: EdgeInsets.only(bottom: land ? 2 : 4),
                                           child: TvFocus(
@@ -3850,9 +3890,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final numDigits = _channelNumDigitsFor(chs);
     final numColW = _channelNumColWidth(11, digits: numDigits);
     _pinList(_groupScroll, _groupIdx, groupStride, _groupStride, _pinnedGroup);
-    _pinList(_channelScroll, _chIdx, channelStride, _channelStride, _pinnedChannel);
+    _pinList(_channelScroll, _channelListIndex(), channelStride, _channelStride, _pinnedChannel);
     _pinnedGroup = _groupIdx;
-    _pinnedChannel = _chIdx;
+    _pinnedChannel = _channelListIndex();
     _groupStride = groupStride;
     _channelStride = channelStride;
     return Row(
@@ -3913,7 +3953,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               final ch = chs[i];
               final name = '${ch['name'] ?? ''}';
               final logo = '${ch['logo'] ?? ''}';
-              final sel = i == _chIdx;
+              final listIdx = _channelListIndex();
+              final sel = i == listIdx;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 3),
                 child: TvFocus(
