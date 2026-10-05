@@ -37,6 +37,7 @@ import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/chrome.dart';
 import '../widgets/h_scroll.dart';
+import '../widgets/kotv_network_image.dart';
 import '../widgets/kotv_step_slider.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/dialogs.dart';
@@ -4016,7 +4017,7 @@ class _LiveChannelLogo extends StatelessWidget {
         width: width,
         height: height,
         child: _httpLogo
-            ? Image.network(
+            ? KotvNetworkImage(
                 logo.trim(),
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => _fallback(),

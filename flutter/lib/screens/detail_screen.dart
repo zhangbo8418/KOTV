@@ -29,6 +29,7 @@ import '../player/kotv_player_factory.dart';
 import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
+import '../player/kotv_traffic.dart';
 import '../player/play_headers.dart';
 import '../player/subtitle_style_util.dart';
 import '../player/playback_failover.dart';
@@ -2111,7 +2112,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           openUrl = mediaUrl;
           openHeaders = null;
         } else {
-          final preferDirect = !hasDrm && !backendProxyPlay;
+          final preferDirect = !hasDrm &&
+              !backendProxyPlay &&
+              kotvIsLocalEngineBaseUrl(KotvTraffic.engineBaseUrl);
           final resolved = kotvResolvePlayOpenTarget(
             playUrl: playUrl,
             mediaUrl: mediaUrl,

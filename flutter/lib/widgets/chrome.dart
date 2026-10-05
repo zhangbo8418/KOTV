@@ -8,6 +8,7 @@ import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import 'h_scroll.dart';
+import 'kotv_network_image.dart';
 import 'marquee_text.dart';
 
 /// Legacy 背景：按 settings.backdrop（wallMode）切换渐变/壁纸/内置主题。
@@ -79,11 +80,10 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
               builder: (context, constraints) {
                 final dpr = MediaQuery.devicePixelRatioOf(context);
                 final w = (constraints.maxWidth * dpr).round().clamp(1, 1920);
-                return Image.network(
+                return KotvNetworkImage(
                   image,
                   key: ValueKey('$mode|$image'),
                   fit: BoxFit.cover,
-                  gaplessPlayback: true,
                   filterQuality: FilterQuality.medium,
                   // 限制解码尺寸，降低 Win7 上大图解码导致的原生闪退风险
                   cacheWidth: w,

@@ -155,7 +155,7 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> with KotvKeyHighlightSt
     final live = widget.player.position.inMilliseconds.toDouble().clamp(0.0, max);
     final secondary = (widget.secondaryMs ?? live).clamp(0.0, max);
     final pal = KotvPalette.of(context);
-    final ring = kotvFocusRingColor(pal);
+    final ring = kotvFocusRingColor(pal, onDarkSurface: true);
     final ringWidth = pal.light ? 3.0 : 2.0;
 
     final slider = ExcludeFocus(
@@ -217,7 +217,7 @@ class _KotvSeekSliderState extends State<KotvSeekSlider> with KotvKeyHighlightSt
         padding: const EdgeInsets.symmetric(vertical: 2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          color: kotvRing(_highlight) ? ring.withOpacity(pal.light ? 0.32 : 0.18) : null,
+          color: kotvRing(_highlight) ? ring.withOpacity(pal.light ? 0.22 : 0.18) : null,
           border: Border.all(
             color: kotvRing(_highlight) ? ring : Colors.transparent,
             width: kotvRing(_highlight) ? ringWidth : 0,

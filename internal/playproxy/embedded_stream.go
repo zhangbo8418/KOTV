@@ -24,14 +24,9 @@ func TryHandleEmbeddedProxy(w http.ResponseWriter, r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	rangeHdr := ""
-	if rng := r.Header.Get("Range"); rng != "" && !isFullFileRange(rng) {
-		rangeHdr = rng
-	}
+	rangeHdr := strings.TrimSpace(r.Header.Get("Range"))
 	if rangeHdr == "" {
-		if v := strings.TrimSpace(r.URL.Query().Get("range")); v != "" && !isFullFileRange(v) {
-			rangeHdr = v
-		}
+		rangeHdr = strings.TrimSpace(r.URL.Query().Get("range"))
 	}
 	e := entry{URL: media, Headers: headers}
 	resp, err := e.fetch(r, rangeHdr)

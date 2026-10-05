@@ -48,6 +48,12 @@ func Register(rawURL string, headers map[string]string) string {
 	return register(rawURL, headers)
 }
 
+// Relay 不论有没有请求头都登记 /proxy/play。
+// 远端播放列表的后续分片用它，播放器只访问连接根，数据仍由引擎去拉。
+func Relay(rawURL string, headers map[string]string) string {
+	return register(rawURL, headers)
+}
+
 // NeedsLocalRelay 回环地址是否标了非引擎端口。这种端口只在跑引擎的机器上听得到。
 func NeedsLocalRelay(rawURL string) bool {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
@@ -273,9 +279,7 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	rangeHdr := ""
 	if !isPlaylistURL(e.URL) {
-		if rng := r.Header.Get("Range"); rng != "" && !isFullFileRange(rng) {
-			rangeHdr = rng
-		}
+		rangeHdr = strings.TrimSpace(r.Header.Get("Range"))
 	}
 	resp, err := e.fetch(r, rangeHdr)
 	if err != nil {
@@ -354,15 +358,6 @@ func (c countingWriter) Write(p []byte) (int, error) {
 func isPlaylistURL(raw string) bool {
 	low := strings.ToLower(raw)
 	return strings.Contains(low, ".m3u8") || strings.Contains(low, "mpegurl")
-}
-
-func isFullFileRange(rng string) bool {
-	switch strings.TrimSpace(strings.ToLower(rng)) {
-	case "bytes=0-", "bytes=0":
-		return true
-	default:
-		return false
-	}
 }
 
 type writeOnly struct{ http.ResponseWriter }

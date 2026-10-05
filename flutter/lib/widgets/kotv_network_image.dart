@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import '../api/kotv_engine_url.dart';
 import '../player/kotv_traffic.dart';
+import 'kotv_bytes_image_stub.dart' if (dart.library.io) 'kotv_bytes_image_io.dart';
 
 /// 默认海报 UA（非 Android 直连时用）。
 const kotvDefaultImageUa =
@@ -168,7 +169,7 @@ Uint8List? kotvDecodeDataImage(String raw) {
 
 /// 统一网络海报。
 /// Android：PlatformView + Glide 解析 `@Headers=`。
-/// 其它平台：Image.network + 解析后的 headers。
+/// 其它平台：按解析后的请求头拉图，User-Agent 覆盖客户端默认值。
 class KotvNetworkImage extends StatelessWidget {
   const KotvNetworkImage(
     this.pic, {
@@ -176,12 +177,18 @@ class KotvNetworkImage extends StatelessWidget {
     this.fit = BoxFit.cover,
     this.errorBuilder,
     this.alignment = Alignment.center,
+    this.filterQuality = FilterQuality.low,
+    this.cacheWidth,
+    this.cacheHeight,
   });
 
   final String pic;
   final BoxFit fit;
   final ImageErrorWidgetBuilder? errorBuilder;
   final Alignment alignment;
+  final FilterQuality filterQuality;
+  final int? cacheWidth;
+  final int? cacheHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -219,7 +226,7 @@ class KotvNetworkImage extends StatelessWidget {
         fit: fit,
         alignment: alignment,
         errorBuilder: errorBuilder,
-        filterQuality: FilterQuality.low,
+        filterQuality: filterQuality,
         gaplessPlayback: true,
       );
     }
@@ -232,14 +239,24 @@ class KotvNetworkImage extends StatelessWidget {
       }
       return const SizedBox.shrink();
     }
-    return Image.network(
-      parsed.url,
+    var provider = kotvBytesImageProvider(parsed.url, parsed.headers);
+    if (cacheWidth != null || cacheHeight != null) {
+      provider = ResizeImage(provider, width: cacheWidth, height: cacheHeight);
+    }
+    return Image(
+      image: provider,
       fit: fit,
       alignment: alignment,
-      headers: parsed.headers.isEmpty ? null : parsed.headers,
       errorBuilder: errorBuilder,
-      filterQuality: FilterQuality.low,
+      filterQuality: filterQuality,
       gaplessPlayback: true,
     );
   }
+}
+
+/// 给只收 ImageProvider 的位置用。
+ImageProvider? kotvResolvedImageProvider(String raw) {
+  final parsed = kotvResolveImageRequest(raw);
+  if (!(parsed.url.startsWith('http://') || parsed.url.startsWith('https://'))) return null;
+  return kotvBytesImageProvider(parsed.url, parsed.headers);
 }

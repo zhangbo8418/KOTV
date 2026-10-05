@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../theme/kotv_theme.dart';
+import 'kotv_network_image.dart';
 
 /// 配置根 `logo`：圆形图；失败回落默认图标。点击行为由调用方决定（点击打开历史）。
 class ConfigLogoAvatar extends StatelessWidget {
@@ -30,7 +31,7 @@ class ConfigLogoAvatar extends StatelessWidget {
     final child = CircleAvatar(
       radius: radius,
       backgroundColor: bg,
-      backgroundImage: url.isNotEmpty && _isHttp(url) ? NetworkImage(url) : null,
+      backgroundImage: url.isNotEmpty && _isHttp(url) ? kotvResolvedImageProvider(url) : null,
       onBackgroundImageError: url.isNotEmpty && _isHttp(url) ? (_, __) {} : null,
       child: url.isNotEmpty && _isHttp(url)
           ? null
@@ -197,7 +198,7 @@ class _ConfigBannerPanelState extends State<ConfigBannerPanel> {
                     ),
                   )
                 else if (pic.isNotEmpty)
-                  Image.network(
+                  KotvNetworkImage(
                     pic,
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => const Center(

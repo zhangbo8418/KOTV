@@ -190,10 +190,14 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
 }
 
 /// 遥控器焦点框。
-/// 浅色板用焦点色本身。深色板上过暗的颜色向白色提亮，避免深底上看不见。
-Color kotvFocusRingColor(KotvPalette pal) {
+/// 浅色底上过亮的焦点色向近黑压深，避免淡蓝融进背景。
+/// 深色底上过暗的颜色向白色提亮。播控画在画面上时走深色底。
+Color kotvFocusRingColor(KotvPalette pal, {bool onDarkSurface = false}) {
   final focus = pal.focus;
-  if (pal.light) return focus;
+  if (pal.light && !onDarkSurface) {
+    if (focus.computeLuminance() <= 0.15) return focus;
+    return Color.lerp(focus, const Color(0xFF12121A), 0.62) ?? focus;
+  }
   if (focus.computeLuminance() >= 0.4) return focus;
   return Color.lerp(focus, Colors.white, 0.55) ?? focus;
 }
@@ -279,7 +283,7 @@ class _TvFocusState extends State<TvFocus> with KotvKeyHighlightState {
   Widget build(BuildContext context) {
     final pal = KotvPalette.of(context);
     final ring = kotvFocusRingColor(pal);
-    final fill = pal.light ? 0.32 : 0.22;
+    final fill = pal.light ? 0.16 : 0.22;
     return FocusableActionDetector(
       focusNode: widget.focusNode,
       autofocus: widget.autofocus,

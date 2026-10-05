@@ -3,6 +3,8 @@ package m3u8
 import (
 	"strings"
 	"testing"
+
+	"github.com/bobo/KOTV/internal/hostclient"
 )
 
 func TestProxyMediaURIs_RewritesSegments(t *testing.T) {
@@ -17,6 +19,27 @@ func TestProxyMediaURIs_RewritesSegments(t *testing.T) {
 	}
 	if n := strings.Count(out, "/proxy/play?id="); n != 2 {
 		t.Fatalf("want 2 proxied segments, got %d:\n%s", n, out)
+	}
+}
+
+func TestProxyMediaURIs_RemoteRewritesWithoutHeaders(t *testing.T) {
+	done := hostclient.EnterSession("playlist-remote", "", false)
+	defer done()
+	hostclient.SetPublicBase("http://192.168.1.8:9978")
+
+	in := "#EXTM3U\nhttps://cdn.example/a.ts\nhttp://127.0.0.1:9978/proxy/play?id=old\n"
+	out := proxyMediaURIs(in, nil)
+	if strings.Contains(out, "127.0.0.1") {
+		t.Fatalf("playlist body must not keep loopback:\n%s", out)
+	}
+	if strings.Contains(out, "cdn.example/a.ts") {
+		t.Fatalf("segment should be pulled by the engine:\n%s", out)
+	}
+	if !strings.Contains(out, "http://192.168.1.8:9978/proxy/play?id=old") {
+		t.Fatalf("existing play url should use the connection origin:\n%s", out)
+	}
+	if !strings.Contains(out, "http://192.168.1.8:9978/proxy/play?id=") {
+		t.Fatalf("expected public /proxy/play:\n%s", out)
 	}
 }
 

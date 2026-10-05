@@ -144,7 +144,7 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighl
     return Icons.volume_up_rounded;
   }
 
-  Color _ringColor(KotvPalette pal) => kotvFocusRingColor(pal);
+  Color _ringColor(KotvPalette pal) => kotvFocusRingColor(pal, onDarkSurface: true);
 
   @override
   Widget build(BuildContext context) {
