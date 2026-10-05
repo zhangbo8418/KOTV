@@ -80,5 +80,8 @@ class KotvHttpImage extends ImageProvider<KotvHttpImage> {
   }
 
   @override
-  int get hashCode => Object.hash(url, scale, Object.hashAllUnordered(headers?.entries ?? const []));
+  int get hashCode {
+    final entries = headers?.entries ?? const <MapEntry<String, String>>[];
+    return Object.hash(url, scale, Object.hashAllUnordered(entries));
+  }
 }

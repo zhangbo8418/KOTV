@@ -861,6 +861,7 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
       addLabel: '＋ 添加线路',
       vodStyle: true,
       fallbackCurrent: current,
+      keepAtStart: true,
       onEdit: (url, title) => showEditVodDialog(ctx, ref, url: url, title: title),
       onDelete: (url) async {
         await _prepareLeavePlayback();
@@ -1045,6 +1046,7 @@ class _SourceListDialog extends StatefulWidget {
     required this.onEdit,
     required this.onDelete,
     this.fallbackCurrent = '',
+    this.keepAtStart = false,
   });
 
   final String title;
@@ -1056,6 +1058,7 @@ class _SourceListDialog extends StatefulWidget {
   final String addLabel;
   final bool vodStyle;
   final String fallbackCurrent;
+  final bool keepAtStart;
   final Future<({String url, String name})?> Function(String url, String title) onEdit;
   final Future<void> Function(String url) onDelete;
 
@@ -1130,7 +1133,7 @@ class _SourceListDialogState extends State<_SourceListDialog> {
     final currentIndex = _indexOf(_local);
     final focusIndex = currentIndex >= 0 ? currentIndex : 0;
     final stride = _pillRowStride(context, pillHeight: 44, gap: 8);
-    if (_pinnedIndex != currentIndex || (_pinnedStride - stride).abs() > 0.5) {
+    if (!widget.keepAtStart && (_pinnedIndex != currentIndex || (_pinnedStride - stride).abs() > 0.5)) {
       _pinnedIndex = currentIndex;
       _pinnedStride = stride;
       final offset = currentIndex <= 0 ? 0.0 : currentIndex * stride;
@@ -1194,7 +1197,7 @@ class _SourceListDialogState extends State<_SourceListDialog> {
                         key: ValueKey('$url|$name'),
                         label: name,
                         current: isCurrent,
-                        autofocus: i == focusIndex,
+                        autofocus: widget.keepAtStart ? i == 0 : i == focusIndex,
                         onTap: isCurrent ? () {} : () => Navigator.pop(context, url),
                         onLongPress: () async {
                           final edited = await widget.onEdit(url, '${r['title'] ?? ''}');
@@ -1255,6 +1258,7 @@ class _RepoRow extends StatelessWidget {
           child: AppPill(
             label: label,
             suffix: current ? '（当前）' : null,
+            selected: current,
             height: 44,
             autofocus: autofocus,
             onTap: onTap,

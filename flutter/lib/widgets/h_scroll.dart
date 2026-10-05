@@ -59,6 +59,7 @@ class _HScrollListState extends State<HScrollList> {
   int? _pendingIndex;
   var _hideUntilPlaced = false;
   var _placeTries = 0;
+  var _placed = false;
 
   bool get _measure => widget.itemStride == null && widget.scrollToIndex != null && widget.scrollToIndex! > 0;
 
@@ -71,30 +72,36 @@ class _HScrollListState extends State<HScrollList> {
   @override
   void initState() {
     super.initState();
+    final index = widget.scrollToIndex;
     if (_measure) {
       _hideUntilPlaced = true;
-      _queuePlace(widget.scrollToIndex);
+      _queuePlace(index);
+    } else if (index != null) {
+      _placed = true;
     }
   }
 
   @override
   void didUpdateWidget(HScrollList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.scrollToIndex == oldWidget.scrollToIndex && widget.itemStride == oldWidget.itemStride) return;
+    // 打开时把正在用的项放进视口。点选之后不再改滚动位置。
+    if (_placed) return;
+    final index = widget.scrollToIndex;
+    if (index == null || index <= 0) return;
     if (widget.itemStride != null) {
       _pendingIndex = null;
       _hideUntilPlaced = false;
-      _sc.reveal(_offset(widget.scrollToIndex));
+      _placed = true;
+      _sc.reveal(_offset(index));
       return;
     }
-    _queuePlace(widget.scrollToIndex);
+    _queuePlace(index);
   }
 
   void _queuePlace(int? index) {
     if (index == null || index <= 0 || widget.itemStride != null) {
       _pendingIndex = null;
       _hideUntilPlaced = false;
-      if (index != null && index <= 0) _sc.reveal(0);
       return;
     }
     _pendingIndex = index;
@@ -114,12 +121,14 @@ class _HScrollListState extends State<HScrollList> {
       }
       _pendingIndex = null;
       _hideUntilPlaced = false;
+      _placed = true;
       if (mounted) setState(() {});
       return;
     }
     final target = viewport.getOffsetToReveal(object, 0.0).offset;
     _pendingIndex = null;
     _hideUntilPlaced = false;
+    _placed = true;
     _sc.reveal(target);
     if (mounted) setState(() {});
   }

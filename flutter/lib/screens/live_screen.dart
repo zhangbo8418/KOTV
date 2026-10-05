@@ -124,6 +124,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   double _groupStride = 42;
   double _channelStride = 52;
   double _epgStride = 36;
+  int _pinnedGroup = -999;
+  int _pinnedChannel = -999;
+  int _pinnedEpg = -999;
   String _zapDigits = '';
   Timer? _zapTimer;
 
@@ -1162,22 +1165,39 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (epg) _scheduleScrollEpgToHighlight();
   }
 
-  void _showAt(KotvJumpController controller, int index, double stride) {
-    final offset = index <= 0 || stride <= 0 ? 0.0 : index * stride;
-    if (!controller.hasClients) {
-      controller.arm(offset);
+  /// 当前项已经在视口里就不动。不在视口里时再跳到它的起点。
+  /// 列表高度还是 0 时先记下偏移，布局完成后再跳，避免被夹到 0 后停在第一项。
+  void _showAt(KotvJumpController controller, int index, double stride, [int attempt = 0]) {
+    if (index < 0 || stride <= 0) return;
+    final start = index * stride;
+    final end = start + stride;
+    if (!controller.hasClients || !controller.position.hasContentDimensions) {
+      controller.arm(start);
       return;
     }
-    controller.reveal(offset);
+    final pos = controller.position;
+    if (pos.maxScrollExtent <= 0 && start > 0 && attempt < 6) {
+      controller.arm(start);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showAt(controller, index, stride, attempt + 1);
+      });
+      return;
+    }
+    final viewStart = pos.pixels;
+    final viewEnd = viewStart + pos.viewportDimension;
+    if (end > viewStart && start < viewEnd) return;
+    final target = start.clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    if ((pos.pixels - target).abs() < 0.5) return;
+    pos.jumpTo(target);
   }
 
-  /// 列表还没挂上时写入首帧偏移；行高变了再在下一帧跳到当前项。
-  void _pinList(KotvJumpController controller, int index, double stride, double previous) {
+  /// 行高或当前下标变了，等这一帧布局完再判断要不要露出当前项。
+  void _pinList(KotvJumpController controller, int index, double stride, double previous, int pinned) {
+    if (controller.hasClients && (stride - previous).abs() <= 0.5 && index == pinned) return;
     if (!controller.hasClients) {
       _showAt(controller, index, stride);
       return;
     }
-    if ((stride - previous).abs() <= 0.5) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _showAt(controller, index, stride);
     });
@@ -2991,9 +3011,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                 ) +
                                 (land ? 10.0 : 16.0) +
                                 (land ? 2.0 : 4.0);
-                            _pinList(_groupScroll, _groupIdx, groupStride, _groupStride);
-                            _pinList(_channelScroll, _chIdx, channelStride, _channelStride);
-                            _pinList(_epgScroll, _epgHighlightIndex(), epgStride, _epgStride);
+                            _pinList(_groupScroll, _groupIdx, groupStride, _groupStride, _pinnedGroup);
+                            _pinList(_channelScroll, _chIdx, channelStride, _channelStride, _pinnedChannel);
+                            _pinList(_epgScroll, _epgHighlightIndex(), epgStride, _epgStride, _pinnedEpg);
+                            _pinnedGroup = _groupIdx;
+                            _pinnedChannel = _chIdx;
+                            _pinnedEpg = _epgHighlightIndex();
                             _groupStride = groupStride;
                             _channelStride = channelStride;
                             _epgStride = epgStride;
@@ -3806,8 +3829,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final groupBox = groupLine + 10 > 28 ? groupLine + 10 : 28.0;
     final groupStride = groupBox + 3;
     const channelStride = 39.0;
-    _pinList(_groupScroll, _groupIdx, groupStride, _groupStride);
-    _pinList(_channelScroll, _chIdx, channelStride, _channelStride);
+    _pinList(_groupScroll, _groupIdx, groupStride, _groupStride, _pinnedGroup);
+    _pinList(_channelScroll, _chIdx, channelStride, _channelStride, _pinnedChannel);
+    _pinnedGroup = _groupIdx;
+    _pinnedChannel = _chIdx;
     _groupStride = groupStride;
     _channelStride = channelStride;
     return Row(
@@ -3925,7 +3950,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Widget _portraitEpgPanel(KotvPalette p) {
     final epgStride = _oneLine(context, const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)) + 24;
-    _pinList(_epgScroll, _epgHighlightIndex(), epgStride, _epgStride);
+    final epgIndex = _epgHighlightIndex();
+    _pinList(_epgScroll, epgIndex, epgStride, _epgStride, _pinnedEpg);
+    _pinnedEpg = epgIndex;
     _epgStride = epgStride;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
