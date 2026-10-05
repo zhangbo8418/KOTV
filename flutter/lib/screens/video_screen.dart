@@ -371,12 +371,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           .whereType<Map>()
           .map((e) => CategoryFilter.fromJson(Map<String, dynamic>.from(e)))
           .toList();
+      final home = replace && (_tid == null || _tid!.isEmpty);
+      final emptyHome = home && types.isEmpty && list.isEmpty;
       setState(() {
-        _statusMsg = null;
+        _statusMsg = emptyHome ? '首页没有返回分类和推荐，请重试' : null;
         if (types.isNotEmpty) {
           _types = types;
-        } else if (replace && (_tid == null || _tid!.isEmpty)) {
-          _types = [];
         }
         if (_tid != null && _tid!.isNotEmpty) {
           if (filters.isNotEmpty) {
@@ -398,9 +398,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _extend.clear();
         }
         if (replace) {
-          _items
-            ..clear()
-            ..addAll(list);
+          if (!emptyHome || _items.isEmpty) {
+            _items
+              ..clear()
+              ..addAll(list);
+          }
         } else {
           _items.addAll(list);
         }

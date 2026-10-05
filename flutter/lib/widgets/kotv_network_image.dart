@@ -183,6 +183,7 @@ class KotvNetworkImage extends StatelessWidget {
     this.cacheHeight,
     this.allowPlatformView = true,
     this.gaplessPlayback = true,
+    this.singleFrame = false,
   });
 
   final String pic;
@@ -196,6 +197,8 @@ class KotvNetworkImage extends StatelessWidget {
   final bool allowPlatformView;
   /// 为 false 时换地址先清掉上一张，避免列表复用同一格时留着旧图。
   final bool gaplessPlayback;
+  /// 只解第一帧。台标动图不再逐帧回写图片缓存。
+  final bool singleFrame;
 
   @override
   Widget build(BuildContext context) {
@@ -228,6 +231,20 @@ class KotvNetworkImage extends StatelessWidget {
 
     final bytes = kotvDecodeDataImage(raw);
     if (bytes != null) {
+      if (singleFrame) {
+        var provider = kotvStillMemoryImage(bytes);
+        if (cacheWidth != null || cacheHeight != null) {
+          provider = ResizeImage(provider, width: cacheWidth, height: cacheHeight);
+        }
+        return Image(
+          image: provider,
+          fit: fit,
+          alignment: alignment,
+          errorBuilder: errorBuilder,
+          filterQuality: filterQuality,
+          gaplessPlayback: gaplessPlayback,
+        );
+      }
       return Image.memory(
         bytes,
         fit: fit,
@@ -248,7 +265,7 @@ class KotvNetworkImage extends StatelessWidget {
       }
       return const SizedBox.shrink();
     }
-    var provider = kotvBytesImageProvider(parsed.url, parsed.headers);
+    var provider = kotvBytesImageProvider(parsed.url, parsed.headers, singleFrame: singleFrame);
     if (cacheWidth != null || cacheHeight != null) {
       provider = ResizeImage(provider, width: cacheWidth, height: cacheHeight);
     }

@@ -4137,11 +4137,16 @@ class _LiveChannelLogo extends StatelessWidget {
             ? KotvNetworkImage(
                 logo.trim(),
                 key: ValueKey(logo.trim()),
-                fit: BoxFit.cover,
+                fit: BoxFit.contain,
                 allowPlatformView: false,
                 gaplessPlayback: false,
-                cacheWidth: (width * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(1, 512),
-                cacheHeight: (height * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(1, 512),
+                singleFrame: true,
+                cacheWidth: width >= height
+                    ? (width * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(1, 512)
+                    : null,
+                cacheHeight: height > width
+                    ? (height * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(1, 512)
+                    : null,
                 errorBuilder: (_, __, ___) => _fallback(),
               )
             : _fallback(),

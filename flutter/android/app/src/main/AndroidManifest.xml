@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <!-- 前台服务托住本机 Go 引擎，避免进后台后子进程被 OEM 杀掉 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- 锁屏/熄屏后仍跑本机 :9978，供远端连接；不点亮屏幕 -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
@@ -83,7 +83,7 @@
             android:name=".KotvEngineService"
             android:exported="false"
             android:stopWithTask="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="mediaPlayback" />
         <!-- ForceTech：p2p / p3p / mitv -->
         <service
             android:name="com.forcetech.service.P2PService"

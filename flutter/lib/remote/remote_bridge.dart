@@ -133,8 +133,33 @@ class LocalHistory {
       if (eng == 'true') return;
     } catch (_) {}
     final cur = await _listRaw();
+    var stored = item;
+    if (item.positionMs <= 0) {
+      for (final e in cur) {
+        if (e.id != item.id || e.site != item.site) continue;
+        if (e.remarks != item.remarks || e.flag != item.flag) continue;
+        if (e.positionMs <= 0) continue;
+        stored = VodItem(
+          id: item.id,
+          name: item.name,
+          pic: item.pic,
+          remarks: item.remarks,
+          typeName: item.typeName,
+          site: item.site,
+          action: item.action,
+          vodTag: item.vodTag,
+          cate: item.cate,
+          folder: item.folder,
+          flag: item.flag,
+          configSource: item.configSource,
+          positionMs: e.positionMs,
+          durationMs: item.durationMs > 0 ? item.durationMs : e.durationMs,
+        );
+        break;
+      }
+    }
     cur.removeWhere((e) => e.id == item.id && e.site == item.site);
-    cur.insert(0, item);
+    cur.insert(0, stored);
     final trimmed = cur.take(60).toList();
     await _persist(trimmed);
   }

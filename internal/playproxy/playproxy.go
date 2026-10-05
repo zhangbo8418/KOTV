@@ -288,7 +288,7 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		writeStreamHeaders(w, resp)
+		writeStreamHeaders(w, resp, !NeedsLocalRelay(e.URL))
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
 		return
@@ -328,7 +328,7 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr string
 		writePlaylistBytes(w, append(prefix, rest...), e)
 		return
 	}
-	writeStreamHeaders(w, resp)
+	writeStreamHeaders(w, resp, !NeedsLocalRelay(e.URL))
 	w.WriteHeader(resp.StatusCode)
 	if n > 0 {
 		_, _ = countingWriter{w: writeOnly{w}}.Write(prefix[:n])
@@ -336,13 +336,15 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr string
 	_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
 }
 
-func writeStreamHeaders(w http.ResponseWriter, resp *http.Response) {
+func writeStreamHeaders(w http.ResponseWriter, resp *http.Response, advertiseRanges bool) {
 	for _, h := range []string{"Content-Type", "Content-Length", "Accept-Ranges", "Content-Range"} {
 		if v := resp.Header.Get(h); v != "" {
 			w.Header().Set(h, v)
 		}
 	}
-	if w.Header().Get("Accept-Ranges") == "" {
+	// 本机爬虫端口的流靠一条连接读完。上游没声明可随机读时不要补成 bytes，
+	// 否则远端播放器读完第一段就会再发 Range，第二条请求接不上。
+	if advertiseRanges && w.Header().Get("Accept-Ranges") == "" {
 		w.Header().Set("Accept-Ranges", "bytes")
 	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")

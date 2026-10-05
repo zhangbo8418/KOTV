@@ -151,7 +151,7 @@ class KotvEngineService : Service() {
     )
     val notif: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle("KO影视")
-      .setContentText("引擎与爬虫后台运行中（可作远端主机）")
+      .setContentText("后台运行中")
       .setSmallIcon(R.mipmap.ic_launcher)
       .setContentIntent(pi)
       .setOngoing(true)
@@ -159,7 +159,7 @@ class KotvEngineService : Service() {
       .setPriority(NotificationCompat.PRIORITY_LOW)
       .build()
     if (Build.VERSION.SDK_INT >= 29) {
-      startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+      startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
     } else {
       @Suppress("DEPRECATION")
       startForeground(NOTIF_ID, notif)

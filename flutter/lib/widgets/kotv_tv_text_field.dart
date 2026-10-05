@@ -22,6 +22,7 @@ class KotvTvTextField extends StatefulWidget {
     this.onEditingComplete,
     this.enabled,
     this.readOnly = false,
+    this.showCursor,
     this.inputFormatters,
     this.cursorColor,
     this.textAlign = TextAlign.start,
@@ -42,6 +43,7 @@ class KotvTvTextField extends StatefulWidget {
   final VoidCallback? onEditingComplete;
   final bool? enabled;
   final bool readOnly;
+  final bool? showCursor;
   final List<TextInputFormatter>? inputFormatters;
   final Color? cursorColor;
   final TextAlign textAlign;
@@ -183,6 +185,7 @@ class _KotvTvTextFieldState extends State<KotvTvTextField> {
       onEditingComplete: widget.onEditingComplete,
       enabled: widget.enabled,
       readOnly: widget.readOnly,
+      showCursor: widget.showCursor,
       inputFormatters: widget.inputFormatters,
       cursorColor: widget.cursorColor,
       textAlign: widget.textAlign,

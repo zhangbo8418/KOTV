@@ -9,6 +9,7 @@ import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
+import '../theme/kotv_theme.dart';
 import '../widgets/chrome.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/poster_card.dart';
@@ -240,7 +241,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      SizedBox(height: 168, child: _leftPanel()),
+                      SizedBox(height: 168, child: _leftPanel(initials: false)),
                       const SizedBox(height: 12),
                       Expanded(child: _rightPanel()),
                     ],
@@ -250,7 +251,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     children: [
                       SizedBox(
                         width: MediaQuery.sizeOf(context).width * 0.34 - 24,
-                        child: _leftPanel(),
+                        child: _leftPanel(initials: true),
                       ),
                       const SizedBox(width: 24),
                       Expanded(child: _rightPanel()),
@@ -262,7 +263,97 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     );
   }
 
-  Widget _leftPanel() {
+  void _onInitialKey(String label) {
+    final text = _ctrl.text;
+    var cursor = _ctrl.selection.extentOffset;
+    if (!_ctrl.selection.isValid || cursor < 0 || cursor > text.length) {
+      cursor = text.length;
+    }
+    switch (label) {
+      case '退格':
+        if (cursor <= 0) return;
+        _ctrl.value = TextEditingValue(
+          text: text.replaceRange(cursor - 1, cursor, ''),
+          selection: TextSelection.collapsed(offset: cursor - 1),
+        );
+      case '←':
+        _ctrl.selection = TextSelection.collapsed(offset: cursor <= 0 ? 0 : cursor - 1);
+      case '→':
+        _ctrl.selection = TextSelection.collapsed(offset: cursor >= text.length ? text.length : cursor + 1);
+      case '搜索':
+        if (!_busy) _search(text);
+      default:
+        if (text.length > 19) return;
+        _ctrl.value = TextEditingValue(
+          text: text.replaceRange(cursor, cursor, label),
+          selection: TextSelection.collapsed(offset: cursor + label.length),
+        );
+    }
+  }
+
+  Widget _initialsKeyboard() {
+    final p = KotvPalette.of(context);
+    final cells = ['退格', '←', '→', '搜索', ..._keys.split('')];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        KotvTvTextField(
+          controller: _ctrl,
+          readOnly: true,
+          showCursor: true,
+          style: TextStyle(color: p.fg),
+          decoration: InputDecoration(
+            hintText: '拼音首字母',
+            hintStyle: TextStyle(color: p.muted),
+          ),
+        ),
+        if (_status != null) ...[
+          const SizedBox(height: 8),
+          Text(_status!, style: TextStyle(color: p.muted)),
+        ],
+        const SizedBox(height: 8),
+        Expanded(
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              mainAxisSpacing: 6,
+              crossAxisSpacing: 6,
+              childAspectRatio: 1.2,
+            ),
+            itemCount: cells.length,
+            itemBuilder: (context, i) {
+              final label = cells[i];
+              return TvFocus(
+                autofocus: i == 0,
+                onPressed: () => _onInitialKey(label),
+                borderRadius: 8,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: label == '搜索' ? p.selected : p.pillBg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: label == '搜索' ? p.primary.withOpacity(0.9) : p.pillBorder),
+                  ),
+                  child: Center(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        color: label == '搜索' ? Colors.white : p.fg,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _leftPanel({required bool initials}) {
+    if (initials) return _initialsKeyboard();
     final p = KotvPalette.of(context);
     return ListView(
       children: [

@@ -78,8 +78,8 @@ func TestTryHandleEmbeddedProxy(t *testing.T) {
 	res := rr.Result()
 	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
-	if res.Header.Get("Accept-Ranges") != "bytes" {
-		t.Fatalf("Accept-Ranges=%q", res.Header.Get("Accept-Ranges"))
+	if res.Header.Get("Accept-Ranges") != "" {
+		t.Fatalf("loopback file must not invent Accept-Ranges, got %q", res.Header.Get("Accept-Ranges"))
 	}
 	if res.StatusCode != 200 || string(body) != "MP4" {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)
@@ -92,6 +92,7 @@ func TestHandleTwoRanges(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = append(got, r.Header.Get("Range"))
 		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Accept-Ranges", "bytes")
 		switch r.Header.Get("Range") {
 		case "bytes=0-3":
 			w.Header().Set("Content-Range", "bytes 0-3/8")

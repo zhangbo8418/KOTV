@@ -130,8 +130,11 @@ func (s *SiteService) HomeContent() (model.Result, error) {
 	}
 	result := v.(model.Result)
 	s.mu.Lock()
-	s.HomeResult = result
-	s.homeCacheSite = site.Key
+	// 没有分类的结果不写入缓存。列表有片但 class 为空时，下一次仍重新请求。
+	if len(result.Types) > 0 {
+		s.HomeResult = result
+		s.homeCacheSite = site.Key
+	}
 	s.mu.Unlock()
 	return result, nil
 }
