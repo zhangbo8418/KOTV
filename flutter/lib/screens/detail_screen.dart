@@ -29,7 +29,6 @@ import '../player/kotv_player_factory.dart';
 import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
-import '../player/kotv_traffic.dart';
 import '../player/play_headers.dart';
 import '../player/subtitle_style_util.dart';
 import '../player/playback_failover.dart';
@@ -2039,7 +2038,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         durationMs: 0,
       ));
       // 起播再读一次：设置页改播放器/软硬解/自动切换后，详情页可能还开着。
-      var backendProxyPlay = data['backendProxyPlay'] == true;
       try {
         final st = await ref.read(apiProvider).getSettings();
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
@@ -2054,10 +2052,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         final decode = '${settings['playerDecode'] ?? ''}'.trim();
         if (decode.isNotEmpty) {
           _prefDecodeMode = decode;
-        }
-        final bp = '${settings['backendProxyPlay'] ?? ''}'.trim().toLowerCase();
-        if (bp.isNotEmpty) {
-          backendProxyPlay = bp == 'true' || bp == '1' || bp == 'on';
         }
         final speedPref = double.tryParse('${settings['playerSpeed'] ?? ''}');
         if (speedPref != null && speedPref > 0) {
@@ -2102,7 +2096,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         final pb = _playback;
         await pb.setDecodeMode(failover.decodeMode);
         await pb.setRenderMode(_renderMode);
-        // 加速开：走 playUrl（/proxy）；默认直连 CDN（media / 展开 proxy）。
         final localMedia = mediaUrl.startsWith('file:') ||
             mediaUrl.startsWith('content:') ||
             (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));
@@ -2112,15 +2105,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           openUrl = mediaUrl;
           openHeaders = null;
         } else {
-          final preferDirect = !hasDrm &&
-              !backendProxyPlay &&
-              kotvIsLocalEngineBaseUrl(KotvTraffic.engineBaseUrl);
           final resolved = kotvResolvePlayOpenTarget(
             playUrl: playUrl,
-            mediaUrl: mediaUrl,
             headers: headers,
             magnet: magnet,
-            preferDirectMedia: preferDirect,
           );
           openUrl = resolved.url;
           openHeaders = resolved.headers;

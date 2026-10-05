@@ -15,9 +15,8 @@ import (
 // jar 的 ProxyVideo / Quark / UC 等会把 CDN 地址和 Cookie 编进本地代理查询串。
 // 若播放器直接打 /proxy，Java bridge 会把整段视频溢写到磁盘再回传，远端播 2GB+
 // 原画几乎必挂（invalid or unsupported media / 超时）。
-// 展开后走本包 Register → /proxy/play，支持 Range 真流式转发。
-//
-// m3u8 不展开：仍需 jar 改写分片地址。
+// 展开后走本包 Register → /proxy/play，支持 Range 真流式转发。播放列表正文里的分片
+// 在转发时再登记到同一对外根。
 func ExpandSpiderMediaProxy(raw string, existing map[string]string) (mediaURL string, headers map[string]string, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -46,9 +45,6 @@ func ExpandSpiderMediaProxy(raw string, existing map[string]string) (mediaURL st
 	}
 	decodedURL = strings.TrimSpace(decodedURL)
 	low := strings.ToLower(decodedURL)
-	if strings.Contains(low, ".m3u8") || strings.Contains(low, "mpegurl") {
-		return raw, existing, false
-	}
 	if !strings.HasPrefix(low, "http://") && !strings.HasPrefix(low, "https://") {
 		return raw, existing, false
 	}

@@ -141,12 +141,14 @@ class PosterFlow extends StatelessWidget {
     required this.onOpen,
     this.onLongPress,
     this.padding = const EdgeInsets.fromLTRB(50, 10, 50, 24),
+    this.shrinkWrap = false,
   });
 
   final List<VodItem> items;
   final void Function(VodItem) onOpen;
   final void Function(VodItem)? onLongPress;
   final EdgeInsets padding;
+  final bool shrinkWrap;
 
   @override
   Widget build(BuildContext context) {
@@ -160,6 +162,8 @@ class PosterFlow extends StatelessWidget {
         // 窄屏强制 3 列；宽屏按 200px cell 算
         final cross = compact ? 3 : (inner / (200.0 + gap)).floor().clamp(3, 6);
         return GridView.builder(
+          shrinkWrap: shrinkWrap,
+          physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
           padding: pad,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: cross,

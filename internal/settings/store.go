@@ -64,9 +64,6 @@ const (
 	SyncKeepPending    Type = "kotv_sync_keep"
 	RemoteAuth         Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
 	AllowRegister      Type = "allowRegister" // 开放注册，默认 false
-	// BackendProxyPlay 网盘是否经引擎 /proxy（jar 原生库/go/Java 多线程）。
-	// 默认 false：展开为 CDN 直链；true：保留爬虫 /proxy 加速。
-	BackendProxyPlay Type = "backendProxyPlay"
 
 	// 播放细项（须进 APIGetSettings 白名单，否则冷启动丢设置）。
 	AudioPassThrough         Type = "audioPassThrough"
@@ -224,7 +221,6 @@ func defaultFile() file {
 			{ID: "deviceUUID", Label: "设备标识", Value: ""},
 			{ID: "remoteAuth", Label: "远端鉴权", Value: "false"},
 			{ID: "allowRegister", Label: "开放注册", Value: "false"},
-			{ID: "backendProxyPlay", Label: "网盘经后端加速", Value: "false"},
 			{ID: "audioPassThrough", Label: "音频直通", Value: "true"},
 			{ID: "exoDiskCache", Label: "Exo磁盘缓存", Value: "false"},
 			{ID: "exoAdblock", Label: "Exo去广告", Value: "true"},
@@ -374,7 +370,7 @@ func Load() error {
 	ensureSettingLocked(PlayerFailover, "自动切换播放器", "auto")
 	ensureSettingLocked(RemoteAuth, "远端鉴权", "false")
 	ensureSettingLocked(AllowRegister, "开放注册", "false")
-	ensureSettingLocked(BackendProxyPlay, "网盘经后端加速", "false")
+	dropSettingLocked("backendProxyPlay")
 	ensureSettingLocked(AudioPassThrough, "音频直通", "true")
 	ensureSettingLocked(ExoDiskCache, "Exo磁盘缓存", "false")
 	ensureSettingLocked(ExoAdblock, "Exo去广告", "true")
@@ -475,15 +471,39 @@ func ensureSettingLocked(t Type, label, def string) {
 	data.List = append(data.List, item{ID: string(t), Label: label, Value: def})
 }
 
+func dropSettingLocked(id string) {
+	out := data.List[:0]
+	for _, it := range data.List {
+		if it.ID == id {
+			continue
+		}
+		out = append(out, it)
+	}
+	data.List = out
+}
+
 // Save 持久化设置。
 func Save() error {
 	mu.RLock()
 	defer mu.RUnlock()
-	b, err := json.MarshalIndent(data, "", "  ")
+	cleaned := data
+	cleaned.List = withoutSetting(data.List, "backendProxyPlay")
+	b, err := json.MarshalIndent(cleaned, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(paths.Setting(), b, 0o644)
+}
+
+func withoutSetting(list []item, id string) []item {
+	out := make([]item, 0, len(list))
+	for _, it := range list {
+		if it.ID == id {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 // Get 获取设置值。
@@ -509,8 +529,11 @@ func PlayUA() string {
 	return DefaultPlayUA
 }
 
-// Set 设置值。
+// Set 设置值。已删除的网盘加速开关不再写回。
 func Set(t Type, value string) {
+	if t == "backendProxyPlay" {
+		return
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	for i := range data.List {
@@ -542,9 +565,6 @@ func IsLiveChange() bool { return boolSetting(LiveChange, true) }
 
 // IsLiveInvert 反转上下换台方向（默认关）。
 func IsLiveInvert() bool { return boolSetting(LiveInvert, false) }
-
-// IsBackendProxyPlay 网盘 /proxy?url=&header= 是否留给 jar 拉流（默认关，展开成直链再走 /proxy/play）。
-func IsBackendProxyPlay() bool { return boolSetting(BackendProxyPlay, false) }
 
 func boolSetting(t Type, def bool) bool {
 	v := strings.ToLower(strings.TrimSpace(Get(t)))

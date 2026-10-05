@@ -499,17 +499,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         for (final c in _collects) ...[
           SectionTitle(c.name, subtitle: '${c.list.length} 条结果'),
           const SizedBox(height: 8),
-          SizedBox(
-            height: 300,
-            child: PosterFlow(
-              items: c.list,
-              padding: EdgeInsets.zero,
-              onOpen: (it) => openVodItem(context, ref, it, site: c.site),
-              onLongPress: (it) {
-                if (it.hasAction || it.isFolder) return;
-                searchByName(ref, it.name);
-              },
-            ),
+          PosterFlow(
+            items: c.list,
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            onOpen: (it) => openVodItem(context, ref, it, site: c.site),
+            onLongPress: (it) {
+              if (it.hasAction || it.isFolder) return;
+              searchByName(ref, it.name);
+            },
           ),
           const SizedBox(height: 16),
         ],

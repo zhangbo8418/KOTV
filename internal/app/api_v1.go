@@ -605,25 +605,24 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			return nil, fmt.Errorf("%s", playMsg)
 		}
 		return map[string]any{
-			"ok":               true,
-			"url":              "",
-			"media":            "",
-			"magnet":           false,
-			"parsed":           didParse,
-			"headers":          headers,
-			"drm":              playDrm,
-			"format":           playFormat,
-			"danmaku":          []any{},
-			"subs":             []any{},
-			"artwork":          playArtwork,
-			"desc":             playDesc,
-			"msg":              "",
-			"position":         playPosition,
-			"qualities":        map[string]any{"names": qualNames, "urls": []string{}},
-			"backendProxyPlay": settings.IsBackendProxyPlay(),
-			"site":             site.Key,
-			"flag":             flag,
-			"id":               vodID,
+			"ok":        true,
+			"url":       "",
+			"media":     "",
+			"magnet":    false,
+			"parsed":    didParse,
+			"headers":   headers,
+			"drm":       playDrm,
+			"format":    playFormat,
+			"danmaku":   []any{},
+			"subs":      []any{},
+			"artwork":   playArtwork,
+			"desc":      playDesc,
+			"msg":       "",
+			"position":  playPosition,
+			"qualities": map[string]any{"names": qualNames, "urls": []string{}},
+			"site":      site.Key,
+			"flag":      flag,
+			"id":        vodID,
 		}, nil
 	}
 	// convert：须在可播判断之前，否则 proxy:// 会被当成不可播。
@@ -650,18 +649,8 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		}
 		playURL = local
 	} else if !thunder.IsLocalStream(playURL) && !IsLocalMediaURL(playURL) {
-		if !settings.IsBackendProxyPlay() {
-			if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(playURL, headers); ok {
-				mediaURL = media
-				headers = hdrs
-				playURL = a.PreparePlaybackURL(media, hdrs)
-			} else {
-				playURL = a.PreparePlaybackURL(playURL, headers)
-			}
-		} else {
-			// 开关开启：保留 /proxy（jar 原生库/go/Java 多线程）。
-			playURL = a.PreparePlaybackURL(playURL, headers)
-		}
+		playURL = a.PreparePlaybackURL(playURL, headers)
+		mediaURL = playURL
 	}
 	isMagnetPlay := magnet || thunder.IsLocalStream(playURL)
 
@@ -707,25 +696,24 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		exposedMedia = playproxy.PublicizeURL(mediaURL, headers)
 	}
 	return map[string]any{
-		"ok":               true,
-		"url":              exposedURL,
-		"media":            exposedMedia,
-		"magnet":           isMagnetPlay,
-		"parsed":           didParse,
-		"headers":          headers,
-		"drm":              playDrm,
-		"format":           playFormat,
-		"danmaku":          danmakuDTO,
-		"subs":             subsDTO,
-		"artwork":          playArtwork,
-		"desc":             playDesc,
-		"msg":              playMsg,
-		"position":         playPosition,
-		"qualities":        map[string]any{"names": qualNames, "urls": pubQualURLs},
-		"backendProxyPlay": settings.IsBackendProxyPlay(),
-		"site":             site.Key,
-		"flag":             flag,
-		"id":               vodID,
+		"ok":        true,
+		"url":       exposedURL,
+		"media":     exposedMedia,
+		"magnet":    isMagnetPlay,
+		"parsed":    didParse,
+		"headers":   headers,
+		"drm":       playDrm,
+		"format":    playFormat,
+		"danmaku":   danmakuDTO,
+		"subs":      subsDTO,
+		"artwork":   playArtwork,
+		"desc":      playDesc,
+		"msg":       playMsg,
+		"position":  playPosition,
+		"qualities": map[string]any{"names": qualNames, "urls": pubQualURLs},
+		"site":      site.Key,
+		"flag":      flag,
+		"id":        vodID,
 	}, nil
 }
 
@@ -1078,7 +1066,7 @@ func (a *App) APIGetSettings() map[string]any {
 		settings.AssrtToken, settings.UpdateURL, settings.WallMode, settings.WallURL,
 		settings.WallFile, settings.Incognito, settings.LiveAcross, settings.LiveChange,
 		settings.LiveInvert, settings.DLNARenderer, settings.SyncPairCode, settings.LiveKeep,
-		settings.RemoteAuth, settings.AllowRegister, settings.BackendProxyPlay,
+		settings.RemoteAuth, settings.AllowRegister,
 		settings.AudioPassThrough,
 		settings.ExoDiskCache, settings.ExoAdblock, settings.ExoTunneling,
 		settings.ExoPreferAac, settings.ExoSkipSilence,

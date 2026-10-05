@@ -2031,7 +2031,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final danOn = g('danmaku', 'false') == 'true';
     final incognito = g('incognito', 'false') == 'true';
     final dmr = g('dlnaRenderer', 'false') == 'true';
-    final backendProxyPlay = g('backendProxyPlay', 'false') == 'true';
     final parseName = g('preferredParse').isEmpty ? '自动' : g('preferredParse');
     final wall = g('wallMode', 'config');
     final theme = g('theme', 'dark');
@@ -2476,17 +2475,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           label: '无痕模式',
                           value: incognito ? '开启' : '关闭',
                           onTap: () => _set('incognito', incognito ? 'false' : 'true', msg: incognito ? '无痕已关闭' : '无痕已开启'),
-                        ),
-                        KotvSettingsCell(
-                          label: '网盘经后端加速',
-                          value: backendProxyPlay ? '开启' : '关闭',
-                          onTap: () => _set(
-                            'backendProxyPlay',
-                            backendProxyPlay ? 'false' : 'true',
-                            msg: backendProxyPlay
-                                ? '已关闭：优先直连 CDN'
-                                : '已开启：走引擎 /proxy（原生库/go/Java 多线程）',
-                          ),
                         ),
                         KotvSettingsCell(
                           label: '投屏接收',

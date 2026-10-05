@@ -7,7 +7,6 @@ import (
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/playproxy"
-	"github.com/bobo/KOTV/internal/settings"
 )
 
 func TestIsLocalMediaURL(t *testing.T) {
@@ -61,9 +60,6 @@ func TestPreparePlaybackURLSkipsLocal(t *testing.T) {
 }
 
 func TestPreparePlaybackURLExpandsQuarkProxyByDefault(t *testing.T) {
-	settings.Set(settings.BackendProxyPlay, "false")
-	defer settings.Set(settings.BackendProxyPlay, "false")
-
 	a := &App{}
 	cdn := "https://cdn-quark.example/01.mkv"
 	hdrJSON := `{"Cookie":"qk=1","User-Agent":"Quark"}`
@@ -87,8 +83,6 @@ func TestPreparePlaybackURLRemoteExpandsQuarkProxy(t *testing.T) {
 	done := hostclient.EnterSession("test-client", "", false)
 	defer done()
 	hostclient.SetPublicBase("http://192.168.1.8:9978")
-	settings.Set(settings.BackendProxyPlay, "false")
-	defer settings.Set(settings.BackendProxyPlay, "false")
 
 	a := &App{}
 	cdn := "https://cdn-quark.example/01.mkv"
@@ -154,24 +148,22 @@ func TestPreparePlaybackURLLocalKeepsOtherLoopbackPort(t *testing.T) {
 	}
 }
 
-func TestPreparePlaybackURLRemoteBackendProxyKeepsSpider(t *testing.T) {
-	done := hostclient.EnterSession("test-client-2", "", false)
-	defer done()
-	hostclient.SetPublicBase("http://192.168.1.8:9978")
-	settings.Set(settings.BackendProxyPlay, "true")
-	defer settings.Set(settings.BackendProxyPlay, "false")
-
+func TestPreparePlaybackURLExpandsM3U8Proxy(t *testing.T) {
 	a := &App{}
-	cdn := "https://cdn-quark.example/01.mkv"
+	cdn := "http://127.0.0.1:1/a.m3u8"
 	hdrJSON := `{"Cookie":"qk=1"}`
 	raw := "proxy://do=quark&type=video&url=" +
 		base64.StdEncoding.EncodeToString([]byte(cdn)) +
 		"&header=" + base64.StdEncoding.EncodeToString([]byte(hdrJSON))
 	got := a.PreparePlaybackURL(raw, nil)
-	if !strings.Contains(got, "/proxy?") || strings.Contains(got, "/proxy/play?") {
-		t.Fatalf("remote+backendProxy should keep spider /proxy, got %q", got)
+	if !strings.Contains(got, "/proxy/play?id=") {
+		t.Fatalf("m3u8 proxy should be /proxy/play, got %q", got)
 	}
-	if !strings.Contains(got, "192.168.1.8") {
-		t.Fatalf("should publicize to LAN, got %q", got)
+	upstream, headers := playproxy.Resolve(got)
+	if upstream != cdn {
+		t.Fatalf("upstream=%q want %q", upstream, cdn)
+	}
+	if headers["Cookie"] != "qk=1" {
+		t.Fatalf("headers=%v", headers)
 	}
 }

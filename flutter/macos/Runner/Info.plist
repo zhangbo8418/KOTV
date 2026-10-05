@@ -34,5 +34,9 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于连接局域网中的手机引擎，读取仓库和播放地址。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
 </dict>
 </plist>

@@ -1,7 +1,6 @@
 package playproxy
 
 import (
-	"io"
 	"net/http"
 	"strings"
 )
@@ -24,24 +23,13 @@ func TryHandleEmbeddedProxy(w http.ResponseWriter, r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	rangeHdr := strings.TrimSpace(r.Header.Get("Range"))
-	if rangeHdr == "" {
-		rangeHdr = strings.TrimSpace(r.URL.Query().Get("range"))
-	}
-	e := entry{URL: media, Headers: headers}
-	resp, err := e.fetch(r, rangeHdr)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return true
-	}
-	defer resp.Body.Close()
-	for _, h := range []string{"Content-Type", "Content-Length", "Accept-Ranges", "Content-Range"} {
-		if v := resp.Header.Get(h); v != "" {
-			w.Header().Set(h, v)
+	rangeHdr := ""
+	if !isPlaylistURL(media) {
+		rangeHdr = strings.TrimSpace(r.Header.Get("Range"))
+		if rangeHdr == "" {
+			rangeHdr = strings.TrimSpace(r.URL.Query().Get("range"))
 		}
 	}
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
+	serveEntry(w, r, entry{URL: media, Headers: headers}, rangeHdr)
 	return true
 }

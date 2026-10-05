@@ -1,6 +1,7 @@
 package playproxy
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -275,20 +277,151 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 	if !isPlaylistURL(e.URL) {
 		rangeHdr = strings.TrimSpace(r.Header.Get("Range"))
 	}
+	serveEntry(w, r, e, rangeHdr)
+}
+
+func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr string) {
 	resp, err := e.fetch(r, rangeHdr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		writeStreamHeaders(w, resp)
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
+		return
+	}
+	if isPlaylistURL(e.URL) || isPlaylistContentType(resp.Header.Get("Content-Type")) {
+		if rangeHdr != "" {
+			resp.Body.Close()
+			resp, err = e.fetch(r, "")
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer resp.Body.Close()
+		}
+		writeRewrittenPlaylist(w, resp, e)
+		return
+	}
+	prefix := make([]byte, len("#EXTM3U"))
+	n, _ := io.ReadFull(resp.Body, prefix)
+	if n == len(prefix) && bytes.Equal(prefix, []byte("#EXTM3U")) {
+		if rangeHdr != "" {
+			resp.Body.Close()
+			resp, err = e.fetch(r, "")
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer resp.Body.Close()
+			writeRewrittenPlaylist(w, resp, e)
+			return
+		}
+		rest, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writePlaylistBytes(w, append(prefix, rest...), e)
+		return
+	}
+	writeStreamHeaders(w, resp)
+	w.WriteHeader(resp.StatusCode)
+	if n > 0 {
+		_, _ = countingWriter{w: writeOnly{w}}.Write(prefix[:n])
+	}
+	_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
+}
+
+func writeStreamHeaders(w http.ResponseWriter, resp *http.Response) {
 	for _, h := range []string{"Content-Type", "Content-Length", "Accept-Ranges", "Content-Range"} {
 		if v := resp.Header.Get(h); v != "" {
 			w.Header().Set(h, v)
 		}
 	}
+	if w.Header().Get("Accept-Ranges") == "" {
+		w.Header().Set("Accept-Ranges", "bytes")
+	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
+}
+
+func writeRewrittenPlaylist(w http.ResponseWriter, resp *http.Response, e entry) {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writePlaylistBytes(w, raw, e)
+}
+
+func writePlaylistBytes(w http.ResponseWriter, raw []byte, e entry) {
+	out := []byte(rewritePlaylist(string(raw), e.URL, e.Headers))
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.WriteHeader(http.StatusOK)
+	_, _ = countingWriter{w: writeOnly{w}}.Write(out)
+}
+
+func isPlaylistContentType(ct string) bool {
+	ct = strings.ToLower(ct)
+	return strings.Contains(ct, "mpegurl") || strings.Contains(ct, "m3u8")
+}
+
+var playlistTagURIRe = regexp.MustCompile(`(?i)\bURI="([^"]+)"`)
+
+func rewritePlaylist(content, base string, headers map[string]string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trim := strings.TrimSpace(strings.TrimRight(line, "\r"))
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		lines[i] = proxyIfRemote(resolveRef(base, trim), headers)
+	}
+	out := strings.Join(lines, "\n")
+	if !strings.Contains(strings.ToUpper(out), "URI=") {
+		return out
+	}
+	return playlistTagURIRe.ReplaceAllStringFunc(out, func(m string) string {
+		sub := playlistTagURIRe.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		raw := sub[1]
+		if raw == "" || strings.HasPrefix(raw, "data:") {
+			return m
+		}
+		return `URI="` + proxyIfRemote(resolveRef(base, raw), headers) + `"`
+	})
+}
+
+func proxyIfRemote(abs string, headers map[string]string) string {
+	if !strings.HasPrefix(abs, "http://") && !strings.HasPrefix(abs, "https://") {
+		return abs
+	}
+	if strings.Contains(abs, "/proxy/play?") || strings.Contains(abs, "/proxy/cached_m3u8") {
+		return abs
+	}
+	return register(abs, headers)
+}
+
+func resolveRef(base, ref string) string {
+	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+		return ref
+	}
+	bu, err := url.Parse(base)
+	if err != nil {
+		return ref
+	}
+	ru, err := url.Parse(ref)
+	if err != nil {
+		return ref
+	}
+	return bu.ResolveReference(ru).String()
 }
 
 func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {

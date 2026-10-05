@@ -424,9 +424,8 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 		return
 	}
-	// 本机 / 远端开加速：交给 jar（原生库/go/Java）。
-	// 远端未开加速：Go 展开 url+header 真流式，避免溢写。
-	if !settings.IsBackendProxyPlay() && playproxy.TryHandleEmbeddedProxy(w, r) {
+	// url+header 由 Go 按 Range 转发。展开失败（do=js|py 等）再交给 jar。
+	if playproxy.TryHandleEmbeddedProxy(w, r) {
 		return
 	}
 	cfg := config.Default()
