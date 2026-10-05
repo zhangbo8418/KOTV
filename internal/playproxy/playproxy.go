@@ -48,12 +48,6 @@ func Register(rawURL string, headers map[string]string) string {
 	return register(rawURL, headers)
 }
 
-// Relay 不论有没有请求头都登记 /proxy/play。
-// 远端播放列表的后续分片用它，播放器只访问连接根，数据仍由引擎去拉。
-func Relay(rawURL string, headers map[string]string) string {
-	return register(rawURL, headers)
-}
-
 // NeedsLocalRelay 回环地址是否标了非引擎端口。这种端口只在跑引擎的机器上听得到。
 func NeedsLocalRelay(rawURL string) bool {
 	u, err := url.Parse(strings.TrimSpace(rawURL))

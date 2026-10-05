@@ -314,22 +314,9 @@ func convertRelativeTsToAbsolute(content, base string) string {
 	return absolutizeURIs(content, base)
 }
 
-// RewriteRemotePlaylist 在远端会话里改写播放列表：分片走连接根上的 /proxy/play，正文不留 127.0.0.1。
-func RewriteRemotePlaylist(content string) string {
-	if hostclient.PublicBase() == "" {
-		return content
-	}
-	return proxyMediaURIs(content, nil)
-}
-
 // proxyMediaURIs 把 http(s) 媒体行与 URI="…" 登记为 /proxy/play，使分片请求带上 headers。
-// 远端会话即使没有请求头也改写，避免播放器自己去续 CDN。
 func proxyMediaURIs(content string, headers map[string]string) string {
-	if content == "" {
-		return content
-	}
-	remote := hostclient.PublicBase() != ""
-	if !remote && len(headers) == 0 {
+	if len(headers) == 0 || content == "" {
 		return content
 	}
 	lines := strings.Split(content, "\n")
@@ -339,7 +326,7 @@ func proxyMediaURIs(content string, headers map[string]string) string {
 			continue
 		}
 		if strings.HasPrefix(trim, "http://") || strings.HasPrefix(trim, "https://") {
-			lines[i] = rewritePlaylistURL(trim, headers, remote)
+			lines[i] = playproxy.Register(trim, headers)
 		}
 	}
 	out := strings.Join(lines, "\n")
@@ -358,19 +345,9 @@ func proxyMediaURIs(content string, headers map[string]string) string {
 		if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
 			return m
 		}
-		return `URI="` + rewritePlaylistURL(raw, headers, remote) + `"`
-	})
-}
-
-func rewritePlaylistURL(raw string, headers map[string]string, remote bool) string {
-	if strings.Contains(raw, "/proxy/play?") || strings.Contains(raw, "/proxy/cached_m3u8") {
-		if remote {
-			return playproxy.PublicizeURL(raw, headers)
+		if strings.Contains(raw, "/proxy/play?") || strings.Contains(raw, "/proxy/cached_m3u8") {
+			return m
 		}
-		return raw
-	}
-	if remote {
-		return playproxy.Relay(raw, headers)
-	}
-	return playproxy.Register(raw, headers)
+		return `URI="` + playproxy.Register(raw, headers) + `"`
+	})
 }

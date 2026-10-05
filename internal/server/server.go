@@ -346,23 +346,12 @@ func (s *Server) handleCachedM3U8(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	if pb := requestPublicBase(r); pb != "" {
-		prev := hostclient.PublicBase()
-		hostclient.SetPublicBase(pb)
-		content = m3u8cache.RewriteRemotePlaylist(content)
-		hostclient.SetPublicBase(prev)
-	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_, _ = w.Write([]byte(content))
 }
 
 func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
-	if pb := requestPublicBase(r); pb != "" {
-		prev := hostclient.PublicBase()
-		hostclient.SetPublicBase(pb)
-		defer hostclient.SetPublicBase(prev)
-	}
 	params := map[string]string{}
 	// Proxy.java：getParms（query+form）→ putAll(headers)→ putAll(files)
 	for key, values := range r.URL.Query() {
@@ -508,17 +497,6 @@ func writeProxyResponse(w http.ResponseWriter, status int, contentType string, b
 	}
 	bodyStream := headers[spider.ProxyBodyStreamHeader]
 	bodyFile := headers[spider.ProxyBodyFileHeader]
-	if hostclient.PublicBase() != "" && bodyStream == "" {
-		if bodyFile != "" && playlistFile(bodyFile, contentType) {
-			if b, err := os.ReadFile(bodyFile); err == nil {
-				defer os.Remove(bodyFile)
-				body = []byte(m3u8cache.RewriteRemotePlaylist(string(b)))
-				bodyFile = ""
-			}
-		} else if looksLikePlaylist(contentType, body) {
-			body = []byte(m3u8cache.RewriteRemotePlaylist(string(body)))
-		}
-	}
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
@@ -573,32 +551,6 @@ func writeProxyResponse(w http.ResponseWriter, status int, contentType string, b
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
-}
-
-func playlistFile(path, contentType string) bool {
-	ct := strings.ToLower(contentType)
-	if strings.Contains(ct, "mpegurl") || strings.Contains(ct, "m3u8") {
-		if info, err := os.Stat(path); err == nil && info.Size() <= 4<<20 {
-			return true
-		}
-	}
-	return false
-}
-
-func looksLikePlaylist(contentType string, body []byte) bool {
-	ct := strings.ToLower(contentType)
-	if strings.Contains(ct, "mpegurl") || strings.Contains(ct, "m3u8") {
-		return len(body) > 0 && len(body) <= 4<<20
-	}
-	if len(body) == 0 || len(body) > 4<<20 {
-		return false
-	}
-	n := len(body)
-	if n > 32 {
-		n = 32
-	}
-	s := strings.TrimSpace(string(body[:n]))
-	return strings.HasPrefix(s, "#EXTM3U")
 }
 
 func skipProxyResponseHeader(name string, keepContentEncoding bool) bool {
