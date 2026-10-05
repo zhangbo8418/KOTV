@@ -357,8 +357,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   /// 正在播的分类和频道。浏览其它分类时 [_chIdx] 会空着，切回来再恢复。
   int _playGroupIdx = -1;
   int _playChIdx = -1;
-  /// 每个分组上次选中的频道下标。没选过是缺省，不在这里记 -1 的占位。
-  final Map<String, int> _groupChannelPos = {};
+  /// 每个分组上次选中的频道名。收藏组重排或换源后按下标会指错台。
+  final Map<String, String> _groupChannelPos = {};
   String _playGroupName = '';
   String _playChName = '';
   DateTime? _liveBackUntil;
@@ -917,6 +917,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _playChIdx = -1;
       _playGroupName = '';
       _playChName = '';
+      _groupChannelPos.clear();
       setState(() {
         _loading = false;
         _title = '${data['name'] ?? '直播'}';
@@ -1080,22 +1081,32 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return raw is List ? raw.length : 0;
   }
 
-  /// 在该组选台后记下频道下标。分组重建后仍按组名取回。
+  /// 在该组选台后记下频道名。收藏列表重排后仍能找回这一台。
   void _rememberGroupChannel(int groupIdx, int chIdx) {
-    final name = _groupNameAt(groupIdx);
-    final n = _channelCountAt(groupIdx);
-    if (name.isEmpty || chIdx < 0 || chIdx >= n) return;
-    _groupChannelPos[name] = chIdx;
+    final gname = _groupNameAt(groupIdx);
+    if (gname.isEmpty || chIdx < 0 || chIdx >= _channelCountAt(groupIdx)) return;
+    final raw = _groups[groupIdx]['channels'];
+    if (raw is! List || chIdx >= raw.length) return;
+    final c = raw[chIdx];
+    if (c is! Map) return;
+    final cname = '${c['name'] ?? ''}'.trim();
+    if (cname.isEmpty) return;
+    _groupChannelPos[gname] = cname;
   }
 
-  /// 该组上次选中的频道。没选过或下标已经越界时返回 -1。
+  /// 该组上次选中的频道在当前列表中的下标。没选过或已经不在列表里时返回 -1。
   int _rememberedChannel(int groupIdx) {
-    final name = _groupNameAt(groupIdx);
-    if (name.isEmpty) return -1;
-    final pos = _groupChannelPos[name] ?? -1;
-    final n = _channelCountAt(groupIdx);
-    if (pos < 0 || pos >= n) return -1;
-    return pos;
+    final gname = _groupNameAt(groupIdx);
+    if (gname.isEmpty) return -1;
+    final cname = _groupChannelPos[gname];
+    if (cname == null || cname.isEmpty) return -1;
+    final raw = _groups[groupIdx]['channels'];
+    if (raw is! List) return -1;
+    for (var i = 0; i < raw.length; i++) {
+      final c = raw[i];
+      if (c is Map && '${c['name'] ?? ''}'.trim() == cname) return i;
+    }
+    return -1;
   }
 
   /// 列表里要标出的频道：当前组正在播的用 [_chIdx]，否则用该组记住的下标。
