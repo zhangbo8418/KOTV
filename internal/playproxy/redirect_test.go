@@ -170,6 +170,41 @@ func TestHandlePassthroughKeepsStatusHeadersAndBody(t *testing.T) {
 	}
 }
 
+func TestHandleForwardsGzipBodyWithoutRequestingIt(t *testing.T) {
+	t.Parallel()
+	payload := []byte{0x1f, 0x8b, 0x08, 0x00, 'b', 'o', 'd', 'y'}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if enc := r.Header.Get("Accept-Encoding"); strings.Contains(strings.ToLower(enc), "gzip") {
+			t.Errorf("Accept-Encoding=%q", enc)
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	proxyURL := playproxy.Register(srv.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"})
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rr := httptest.NewRecorder()
+	playproxy.Handle(rr, req)
+	res := rr.Result()
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%q", res.StatusCode, body)
+	}
+	if res.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Content-Encoding=%q", res.Header.Get("Content-Encoding"))
+	}
+	if res.Header.Get("Content-Length") != strconv.Itoa(len(payload)) {
+		t.Fatalf("Content-Length=%q", res.Header.Get("Content-Length"))
+	}
+	if string(body) != string(payload) {
+		t.Fatalf("body=%q", body)
+	}
+}
+
 func TestHandleLeavesCDNPlaylistBytes(t *testing.T) {
 	t.Parallel()
 	raw := "#EXTM3U\nhttps://cdn.example/a.ts\n"

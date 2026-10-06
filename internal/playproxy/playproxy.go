@@ -459,6 +459,8 @@ func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
 		req.Header.Set("User-Agent", settings.PlayUA())
 	}
 	client := &http.Client{
+		// 不设 Timeout：整片可能很长。关闭自动解压，避免声明 gzip 后把 Content-Length 拿掉。
+		Transport: playTransport,
 		// 网盘 CDN 常 302 到另一域名；默认 Client 跨域会剥 Cookie → 403 HTML →
 		// 播放器报 invalid or unsupported media。
 		CheckRedirect: func(next *http.Request, via []*http.Request) error {
@@ -476,6 +478,18 @@ func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
 		},
 	}
 	return client.Do(req)
+}
+
+var playTransport = newPlayTransport()
+
+func newPlayTransport() http.RoundTripper {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Transport{DisableCompression: true}
+	}
+	tr := base.Clone()
+	tr.DisableCompression = true
+	return tr
 }
 
 func applyUpstreamHeaders(req *http.Request, headers map[string]string) {
