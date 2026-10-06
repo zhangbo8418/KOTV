@@ -125,7 +125,7 @@ func (a *App) APILoadConfig(source string) error {
 	return nil
 }
 
-// APIRefreshConfig 重新请求当前 http(s) 仓库。jar 地址没变则不重启运行时。
+// APIRefreshConfig 重新请求当前 http(s) 仓库，并重新检查 jar 与 js/py。
 func (a *App) APIRefreshConfig() error {
 	cfg, sites, sess := a.scope()
 	source := ""
@@ -147,16 +147,14 @@ func (a *App) APIRefreshConfig() error {
 		return err
 	}
 	next := strings.TrimSpace(cfg.API().Spider)
+	// 地址变了先停旧运行时，再加载。地址没变也要重新核对 jar 字节和 js/py。
 	if config.SpiderSpecChanged(prev, next) {
 		sites.InvalidateLoads()
-		if next != "" {
-			if err := spider.LoadJar(next, cfg.API().URL); err != nil {
-				log.Printf("spider.jar 加载失败: %v", err)
-			}
-		}
-	} else {
-		sites.DropContentCache()
 	}
+	if err := spider.RefreshAfterConfig(next, cfg.API().URL); err != nil {
+		log.Printf("spider.jar 加载失败: %v", err)
+	}
+	sites.DropContentCache()
 	a.finishConfigLoad(cfg, sess, source)
 	return nil
 }

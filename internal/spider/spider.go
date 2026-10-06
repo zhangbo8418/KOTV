@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/paths"
 )
 
@@ -98,6 +99,23 @@ func Clear() {
 func ResetScriptSpiders() {
 	clearJsPy()
 	clearJSMemoryCaches()
+}
+
+// RefreshAfterConfig 仓库正文已经更新。丢掉当前运行时里的 js/py，并重新检查 spider jar。
+// 无 md5 或 md5 对不上时会重新下载；js 模块缓存清掉后，下次调用再取脚本。
+func RefreshAfterConfig(spec, configBase string) error {
+	clearJSMemoryCaches()
+	if uid := strings.TrimSpace(hostclient.RuntimeUserID()); uid != "" {
+		DestroyUserScripts(uid)
+	} else {
+		clearSharedJsPy()
+	}
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		bumpJarRefreshGen()
+		return nil
+	}
+	return LoadJar(spec, configBase)
 }
 
 // clearScriptCaches 清空 JS 内存缓存，并清理本地 js/py 目录（含历史落盘残留）。
