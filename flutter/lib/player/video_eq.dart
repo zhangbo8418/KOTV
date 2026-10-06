@@ -410,7 +410,7 @@ int kotvAudioOffsetMsFromSettings(Map<String, dynamic> settings) {
   return (int.tryParse('${settings['audioOffsetMs'] ?? '0'}') ?? 0).clamp(-10000, 10000);
 }
 
-/// STANDARD 中心频 Hz（与 TV AudioEffectBands.STANDARD 一致）。
+/// STANDARD 十段中心频 Hz。
 const _kStdEqHz = <int>[32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
 /// TV `AudioPresetLevels.gainFor`（返回 mB/厘倍，÷100 → dB）。

@@ -47,7 +47,7 @@ func TestIsInRange_WallClockUsesZoneNotUTC(t *testing.T) {
 	}
 }
 
-// DeviceLocation 经 KOTV_TZ=IANA（含夏令时），对应 FongMi ZoneId.systemDefault/of。
+// DeviceLocation 读 KOTV_TZ 的 IANA 名，含夏令时。
 func TestParseEPG_DeviceLocationIANA(t *testing.T) {
 	t.Setenv("KOTV_TZ", "America/New_York")
 	t.Setenv("TZ", "UTC")

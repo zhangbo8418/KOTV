@@ -207,7 +207,7 @@ class KotvEngineService : Service() {
       env["KOTV_DATA_DIR"] = File(filesDir, "KOTV").absolutePath
       env["HOME"] = filesDir.absolutePath
       KotvDeviceEnv.lanIpv4(this)?.let { env["KOTV_LAN_IP"] = it }
-      // 对应 FongMi ZoneId.systemDefault()：注入 IANA id（经 Go tzdata LoadLocation）。
+      // 注入设备 IANA 时区，Go 用 tzdata LoadLocation。
       val tz = KotvDeviceEnv.timeZoneId()
       if (tz.isNotEmpty()) {
         env["KOTV_TZ"] = tz

@@ -36,7 +36,7 @@ func TestRsaXOAEPRoundTrip(t *testing.T) {
 		t.Fatalf("got %q want %q", dec, plain)
 	}
 
-	// 与 TV 一致：也接受带 WithSHA-1 的别名。
+	// 也接受带 WithSHA-1 的别名。
 	raw, _ := base64.StdEncoding.DecodeString(enc)
 	out, err := rsa.DecryptOAEP(sha1.New(), rand.Reader, priv, raw, nil)
 	if err != nil || string(out) != plain {

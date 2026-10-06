@@ -11,30 +11,30 @@ import (
 
 // Live 直播源配置。
 type Live struct {
-	Name       string     `json:"name"`
-	Type       FlexInt    `json:"type"`
-	URL        string     `json:"url"`
-	API        string     `json:"api"`
-	Ext        FlexString `json:"ext"` // 兼容 string / object / array（如 XtreamCode、MQiTV）
-	JAR        string     `json:"jar"`
-	EPG        string     `json:"epg"`
-	Logo       string     `json:"logo"`
-	UA         string     `json:"ua"`
-	Referer    string     `json:"referer"`
-	Origin     string     `json:"origin"`
-	Click      string     `json:"click"`
+	Name    string     `json:"name"`
+	Type    FlexInt    `json:"type"`
+	URL     string     `json:"url"`
+	API     string     `json:"api"`
+	Ext     FlexString `json:"ext"` // 兼容 string / object / array（如 XtreamCode、MQiTV）
+	JAR     string     `json:"jar"`
+	EPG     string     `json:"epg"`
+	Logo    string     `json:"logo"`
+	UA      string     `json:"ua"`
+	Referer string     `json:"referer"`
+	Origin  string     `json:"origin"`
+	Click   string     `json:"click"`
 	// Pass 为 true 时分组名里的 `_密码` 只截掉不设密码（全部可见）。
-	Pass       bool       `json:"pass"`
+	Pass bool `json:"pass"`
 	// TimeZone IANA 时区名（如 Asia/Shanghai）；空则用本机时区。
-	TimeZone   string     `json:"timeZone"`
-	PlayerType FlexInt    `json:"playerType"`
-	Header     FlexHeader `json:"header"`
-	Catchup    Catchup    `json:"catchup"`
+	TimeZone   string          `json:"timeZone"`
+	PlayerType FlexInt         `json:"playerType"`
+	Header     FlexHeader      `json:"header"`
+	Catchup    Catchup         `json:"catchup"`
 	Core       json.RawMessage `json:"core,omitempty"`
 	Groups     []LiveGroup     `json:"groups"`
 }
 
-// Location 返回源级时区；空/无效则设备默认时区（FongMi ZoneId.systemDefault）。
+// Location 返回源级时区；空或无效则用设备默认时区。
 func (l *Live) Location() *time.Location {
 	if l == nil {
 		return util.DeviceLocation()
@@ -131,23 +131,23 @@ type LiveChannel struct {
 // UnmarshalJSON 接受 url/urls、数字 number/parse，并规范化 format。
 func (c *LiveChannel) UnmarshalJSON(b []byte) error {
 	type raw struct {
-		Name    string       `json:"name"`
-		Logo    string       `json:"logo"`
-		Number  FlexString   `json:"number"`
-		TvgID   string       `json:"tvgId"`
-		TvgName string       `json:"tvgName"`
-		EPG     string       `json:"epg"`
-		Parse   FlexInt      `json:"parse"`
-		UA      string       `json:"ua"`
-		Referer string       `json:"referer"`
-		Origin  string       `json:"origin"`
-		Click   string       `json:"click"`
-		URL     []string     `json:"url"`
-		URLs    []string     `json:"urls"`
-		Header  FlexHeader   `json:"header"`
-		Format  string       `json:"format"`
-		Drm     *Drm         `json:"drm"`
-		Catchup *Catchup     `json:"catchup"`
+		Name    string     `json:"name"`
+		Logo    string     `json:"logo"`
+		Number  FlexString `json:"number"`
+		TvgID   string     `json:"tvgId"`
+		TvgName string     `json:"tvgName"`
+		EPG     string     `json:"epg"`
+		Parse   FlexInt    `json:"parse"`
+		UA      string     `json:"ua"`
+		Referer string     `json:"referer"`
+		Origin  string     `json:"origin"`
+		Click   string     `json:"click"`
+		URL     []string   `json:"url"`
+		URLs    []string   `json:"urls"`
+		Header  FlexHeader `json:"header"`
+		Format  string     `json:"format"`
+		Drm     *Drm       `json:"drm"`
+		Catchup *Catchup   `json:"catchup"`
 	}
 	var r raw
 	if err := json.Unmarshal(b, &r); err != nil {

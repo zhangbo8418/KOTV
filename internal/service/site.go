@@ -157,34 +157,32 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 			return model.Result{Success: false}, fmt.Errorf("站点「%s」没有可用爬虫", siteLabel(site))
 		}
 		sp := s.cfg.Spider(site)
-		skipHome := settings.ConsumeCrash()
-		if skipHome {
-			result = model.Result{}
+		if settings.ConsumeCrash() {
+			return model.Result{Success: false}, fmt.Errorf("上次首页异常，已跳过一次爬虫，请再试")
+		}
+		type homeBundler interface {
+			HomeBundle(filter bool) (home string, homeVod string, err error)
+		}
+		var home, hv string
+		var herr error
+		if hb, ok := sp.(homeBundler); ok {
+			home, hv, herr = hb.HomeBundle(true)
 		} else {
-			type homeBundler interface {
-				HomeBundle(filter bool) (home string, homeVod string, err error)
+			home, herr = sp.HomeContent(true)
+			if herr == nil {
+				hv, herr = sp.HomeVideoContent()
 			}
-			var home, hv string
-			var herr error
-			if hb, ok := sp.(homeBundler); ok {
-				home, hv, herr = hb.HomeBundle(true)
-			} else {
-				home, herr = sp.HomeContent(true)
-				if herr == nil {
-					hv, herr = sp.HomeVideoContent()
-				}
-			}
-			if herr != nil {
-				return model.Result{Success: false}, herr
-			}
-			result, err = decodeResult(home)
-			if err != nil {
-				return model.Result{Success: false}, err
-			}
-			extra, _ := decodeResult(hv)
-			if len(extra.List) > 0 {
-				result.List = extra.List
-			}
+		}
+		if herr != nil {
+			return model.Result{Success: false}, herr
+		}
+		result, err = decodeResult(home)
+		if err != nil {
+			return model.Result{Success: false}, err
+		}
+		extra, _ := decodeResult(hv)
+		if len(extra.List) > 0 {
+			result.List = extra.List
 		}
 		applyTypes(site, &result)
 	case 4:

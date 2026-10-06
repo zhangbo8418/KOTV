@@ -1968,7 +1968,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         await LiveScreen.prepareLeave();
         ref.read(uiBusyProvider.notifier).state = '正在切换到 $name…';
         try {
-          await ref.read(apiProvider).setHome(key);
+          final api = ref.read(apiProvider);
+          await api.setHome(key);
+          // setHome 只改当前站。首页请求放在遮罩里，爬虫在这一步执行。
+          await api.home();
           ref.invalidate(configProvider);
           ref.invalidate(settingsProvider);
           setState(() => _status = '已切换首页数据源：$name');

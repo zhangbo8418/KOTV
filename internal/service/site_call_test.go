@@ -60,7 +60,7 @@ func TestSiteCall_LongExtUsesUTF16Len(t *testing.T) {
 }
 
 func TestBase64URLSafe_Padding(t *testing.T) {
-	// FongMi Util.URL_SAFE = DEFAULT|URL_SAFE|NO_WRAP（带 padding）。
+	// URL-safe Base64 保留 padding。
 	got := base64URLSafe(`{"a":1}`)
 	if !strings.HasSuffix(got, "=") && len(got)%4 != 0 {
 		t.Fatalf("want padded url-safe base64, got %q", got)

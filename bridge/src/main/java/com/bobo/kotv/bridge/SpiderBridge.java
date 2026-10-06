@@ -46,7 +46,7 @@ public class SpiderBridge {
     private static final Map<String, ClassLoader> loaders = new ConcurrentHashMap<>();
     private static final Map<String, Method> proxyMethods = new ConcurrentHashMap<>();
     /**
-     * jsParse 按 jar 路径复用 Parser（内含 Cache），对齐 FongMi Function 持有单例 Parser。
+     * jsParse 按 jar 路径复用 Parser（内含 Cache）。
      * 每次 newInstance 会丢掉 Document 缓存，且反射找方法开销大。
      */
     private static final ConcurrentHashMap<String, JsParseSession> jsParseSessions = new ConcurrentHashMap<>();

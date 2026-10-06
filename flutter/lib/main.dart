@@ -54,27 +54,6 @@ bool _kotvIsSoftUiException(Object error) {
       (msg.contains('failed assertion') && msg.contains('dependents'));
 }
 
-/// 崩溃入口写 Prefers crash，下次 spider homeContent 跳过一次。
-void _kotvMarkHomeCrash() {
-  if (kIsWeb) return;
-  unawaited(() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      var base = (prefs.getString('engine_base_url') ?? '').trim();
-      if (base.isEmpty || !kotvIsLocalEngineBaseUrl(base)) {
-        base = 'http://127.0.0.1:9978';
-      }
-      await http
-          .post(
-            Uri.parse('$base/api/v1/settings'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'key': 'crash', 'value': 'true'}),
-          )
-          .timeout(const Duration(seconds: 2));
-    } catch (_) {}
-  }());
-}
-
 Future<void> _kotvSyncLanguageSetting() async {
   if (kIsWeb) return;
   try {
@@ -184,13 +163,9 @@ Future<void> main() async {
     }
     FlutterError.presentError(details);
     _kotvLogUiError(details.exception, details.stack, where: 'FlutterError');
-    _kotvMarkHomeCrash();
   };
   PlatformDispatcher.instance.onError = (error, stack) {
     _kotvLogUiError(error, stack, where: 'PlatformDispatcher');
-    if (!_kotvIsSoftUiException(error)) {
-      _kotvMarkHomeCrash();
-    }
     return true;
   };
   if (!kIsWeb) {

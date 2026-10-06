@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
-import '../nav/kotv_routes.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
@@ -490,8 +489,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         });
         try {
           await ref.read(apiProvider).setHome(key);
-          ref.invalidate(configProvider);
-          ref.invalidate(settingsProvider);
+          // 配置在首页请求结束之后再刷新。_reload 返回时会 invalidate。
           await _reload(clearContent: true);
         } catch (e) {
           if (mounted) setState(() => _statusMsg = '切换失败: $e');
@@ -592,7 +590,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         ? (loadingSource ? '加载中…' : '未配置源')
         : ((home != null && home.name.isNotEmpty)
             ? home.name
-            : cfg.maybeWhen(data: (c) => c['ready'] == true ? '选站' : '未配置源', orElse: () => '…') ?? '未配置源');
+            : cfg.maybeWhen(data: (c) => c['ready'] == true ? '选站' : '未配置源', orElse: () => '…'));
     final busy = ref.watch(uiBusyProvider);
     final onHome = (_tid ?? '').isEmpty;
 

@@ -9,7 +9,7 @@ import (
 	_ "time/tzdata"
 )
 
-// DeviceLocation 设备默认时区，对应 FongMi ZoneId.systemDefault()。
+// DeviceLocation 设备默认时区。
 //
 // 安卓上 Go time.Local 常为 UTC。只用 KOTV_TZ / TZ 的 IANA 名（经 tzdata）；
 // LoadLocation 失败则回落 time.Local，不做固定偏移兜底，便于发现时区注入问题。

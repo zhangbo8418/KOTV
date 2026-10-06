@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
-import '../nav/kotv_routes.dart';
 import '../providers.dart';
-import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
@@ -237,7 +235,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         Expanded(
           child: Padding(
             padding: EdgeInsets.fromLTRB(KotvLayout.isCompact(context) ? 12 : 24, 0, KotvLayout.isCompact(context) ? 12 : 24, 16),
-            child: KotvLayout.useBottomNav(context) || KotvLayout.isCompact(context)
+            child: MediaQuery.sizeOf(context).width < MediaQuery.sizeOf(context).height
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [

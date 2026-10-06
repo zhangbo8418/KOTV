@@ -627,12 +627,6 @@ func ConsumeCrash() bool {
 	return true
 }
 
-// MarkCrash 崩溃入口写入 crash=true。
-func MarkCrash() {
-	SetBool(Crash, true)
-	_ = Save()
-}
-
 // Entry 设置项快照（备份/恢复）。
 type Entry struct {
 	ID    string `json:"id"`

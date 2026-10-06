@@ -126,7 +126,7 @@ func TestParseTXT_PipeHeadersPreferPipeOverAmp(t *testing.T) {
 	if ch.Header["User-Agent"] != "VLC" {
 		t.Fatalf("UA header=%q hdr=%v", ch.Header["User-Agent"], ch.Header)
 	}
-	// 值内 & 仍再切（FongMi headers 同）：Referer 只保留到第一个 &。
+	// 值内 & 仍再切：Referer 只保留到第一个 &。
 	if ch.Header["Referer"] != "http://x?a=1" {
 		t.Fatalf("Referer header=%q hdr=%v", ch.Header["Referer"], ch.Header)
 	}

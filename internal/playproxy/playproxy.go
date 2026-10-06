@@ -1,9 +1,11 @@
 package playproxy
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -278,6 +280,11 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr string) {
+	// 回环播放口按原始 TCP 转发状态行、响应头和正文。
+	// 本机播放器直连时走的就是这条连接，不再经 http.Client 重封装。
+	if tryRawSplice(w, r, e, rangeHdr) {
+		return
+	}
 	resp, err := e.fetch(r, rangeHdr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -444,6 +451,296 @@ func resolveRef(base, ref string) string {
 		return ref
 	}
 	return bu.ResolveReference(ru).String()
+}
+
+// errUseHTTPClient 表示这条地址要走 TLS 或跨出回环，改由 http.Client 处理。
+var errUseHTTPClient = errors.New("use http client")
+
+type rawHead struct {
+	statusLine string
+	statusCode int
+	header     http.Header
+}
+
+func tryRawSplice(w http.ResponseWriter, r *http.Request, e entry, rangeHdr string) bool {
+	if !canRawSplice(e.URL) {
+		return false
+	}
+	if _, ok := w.(http.Hijacker); !ok {
+		return false
+	}
+	up, br, head, peek, finalURL, err := openRawUpstream(e, rangeHdr, clientSpliceUA(r, e.Headers), r.Header.Get("If-Range"))
+	if errors.Is(err, errUseHTTPClient) {
+		return false
+	}
+	if err != nil {
+		http.Error(w, "连接本机播放端口失败", http.StatusBadGateway)
+		return true
+	}
+	if bytes.Equal(peek, []byte("#EXTM3U")) {
+		defer up.Close()
+		rest, rerr := io.ReadAll(io.LimitReader(br, 8<<20))
+		if rerr != nil {
+			http.Error(w, "读取播放列表失败", http.StatusBadGateway)
+			return true
+		}
+		raw := make([]byte, 0, len(peek)+len(rest))
+		raw = append(raw, peek...)
+		raw = append(raw, rest...)
+		base := e.URL
+		if finalURL != "" {
+			base = finalURL
+		}
+		resp := &http.Response{StatusCode: head.statusCode, Header: head.header}
+		if out, ok := rewritePlaylist(string(raw), base, e.Headers); ok {
+			writeRewrittenPlaylist(w, resp, []byte(out))
+			return true
+		}
+		writePassthrough(w, resp, bytes.NewReader(raw))
+		return true
+	}
+	spliceToClient(w, up, br, head, peek)
+	return true
+}
+
+func canRawSplice(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "http" || u.Host == "" {
+		return false
+	}
+	return NeedsLocalRelay(raw)
+}
+
+func clientSpliceUA(r *http.Request, headers map[string]string) string {
+	if r == nil {
+		return ""
+	}
+	for k := range headers {
+		if strings.EqualFold(k, "user-agent") && strings.TrimSpace(headers[k]) != "" {
+			return ""
+		}
+	}
+	return r.Header.Get("User-Agent")
+}
+
+func openRawUpstream(e entry, rangeHdr, ua, ifRange string) (net.Conn, *bufio.Reader, rawHead, []byte, string, error) {
+	current := e.URL
+	for hop := 0; hop < 10; hop++ {
+		u, err := url.Parse(current)
+		if err != nil || u.Scheme != "http" || u.Host == "" {
+			return nil, nil, rawHead{}, nil, "", errUseHTTPClient
+		}
+		conn, err := (&net.Dialer{Timeout: 15 * time.Second}).Dial("tcp", u.Host)
+		if err != nil {
+			return nil, nil, rawHead{}, nil, "", err
+		}
+		tcpNoDelay(conn)
+		if werr := writeRawRequest(conn, u, e.Headers, rangeHdr, ua, ifRange); werr != nil {
+			conn.Close()
+			return nil, nil, rawHead{}, nil, "", werr
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		br := bufio.NewReaderSize(conn, 64*1024)
+		head, err := readRawHead(br)
+		if err != nil {
+			conn.Close()
+			return nil, nil, rawHead{}, nil, "", err
+		}
+		if head.statusCode >= 300 && head.statusCode < 400 {
+			loc := strings.TrimSpace(head.header.Get("Location"))
+			conn.Close()
+			if loc == "" {
+				return nil, nil, rawHead{}, nil, "", fmt.Errorf("重定向缺少 Location")
+			}
+			current = resolveRef(current, loc)
+			continue
+		}
+		peek := make([]byte, len("#EXTM3U"))
+		n, rerr := io.ReadFull(br, peek)
+		if rerr != nil && rerr != io.EOF && rerr != io.ErrUnexpectedEOF {
+			conn.Close()
+			return nil, nil, rawHead{}, nil, "", rerr
+		}
+		peek = peek[:n]
+		if !bytes.Equal(peek, []byte("#EXTM3U")) {
+			_ = conn.SetReadDeadline(time.Time{})
+		}
+		return conn, br, head, peek, current, nil
+	}
+	return nil, nil, rawHead{}, nil, "", fmt.Errorf("重定向次数过多")
+}
+
+func writeRawRequest(conn net.Conn, u *url.URL, headers map[string]string, rangeHdr, ua, ifRange string) error {
+	uri := u.RequestURI()
+	if uri == "" {
+		uri = "/"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "GET %s HTTP/1.1\r\n", uri)
+	fmt.Fprintf(&b, "Host: %s\r\n", u.Host)
+	for k, v := range headers {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			continue
+		}
+		lk := strings.ToLower(strings.TrimSpace(k))
+		switch lk {
+		case "host", "content-length", "content-type", "connection", "transfer-encoding", "accept-encoding", "range", "if-range", "user-agent":
+			continue
+		}
+		fmt.Fprintf(&b, "%s: %s\r\n", http.CanonicalHeaderKey(k), v)
+	}
+	if rangeHdr == "" {
+		rangeHdr = headerValue(headers, "range")
+	}
+	if rangeHdr != "" {
+		fmt.Fprintf(&b, "Range: %s\r\n", rangeHdr)
+	}
+	if ua == "" {
+		ua = headerValue(headers, "user-agent")
+	}
+	if ua != "" {
+		fmt.Fprintf(&b, "User-Agent: %s\r\n", ua)
+	}
+	if ifRange == "" {
+		ifRange = headerValue(headers, "if-range")
+	}
+	if ifRange != "" {
+		fmt.Fprintf(&b, "If-Range: %s\r\n", ifRange)
+	}
+	b.WriteString("Connection: close\r\n\r\n")
+	_, err := io.WriteString(conn, b.String())
+	return err
+}
+
+func readRawHead(br *bufio.Reader) (rawHead, error) {
+	var head rawHead
+	var total int
+	line, err := br.ReadString('\n')
+	if err != nil {
+		return head, err
+	}
+	total += len(line)
+	head.statusLine = line
+	if !strings.HasSuffix(head.statusLine, "\n") {
+		head.statusLine += "\r\n"
+	}
+	fields := strings.Fields(strings.TrimSpace(line))
+	if len(fields) < 2 {
+		return head, fmt.Errorf("状态行无法识别")
+	}
+	head.statusCode, err = strconv.Atoi(fields[1])
+	if err != nil {
+		return head, err
+	}
+	head.header = make(http.Header)
+	for {
+		line, err = br.ReadString('\n')
+		if err != nil {
+			return head, err
+		}
+		total += len(line)
+		if total > 1<<20 {
+			return head, fmt.Errorf("响应头过大")
+		}
+		trim := strings.TrimRight(line, "\r\n")
+		if trim == "" {
+			return head, nil
+		}
+		k, v, ok := strings.Cut(trim, ":")
+		if !ok {
+			continue
+		}
+		head.header.Add(strings.TrimSpace(k), strings.TrimSpace(v))
+	}
+}
+
+func spliceToClient(w http.ResponseWriter, up net.Conn, br *bufio.Reader, head rawHead, peek []byte) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		up.Close()
+		resp := &http.Response{StatusCode: head.statusCode, Header: head.header}
+		writePassthrough(w, resp, io.MultiReader(bytes.NewReader(peek), br))
+		return
+	}
+	client, _, err := hj.Hijack()
+	if err != nil {
+		up.Close()
+		http.Error(w, "连接本机播放端口失败", http.StatusBadGateway)
+		return
+	}
+	tcpNoDelay(client)
+	_ = client.SetDeadline(time.Time{})
+	var closeUp sync.Once
+	shutdownUp := func() { closeUp.Do(func() { _ = up.Close() }) }
+	go func() {
+		_, _ = io.Copy(io.Discard, client)
+		shutdownUp()
+	}()
+	defer client.Close()
+	defer shutdownUp()
+
+	var buf bytes.Buffer
+	buf.WriteString(head.statusLine)
+	hdr := filterSpliceHeaders(head.header)
+	hdr.Set("Access-Control-Allow-Origin", "*")
+	hdr.Set("Connection", "close")
+	_ = hdr.Write(&buf)
+	buf.WriteString("\r\n")
+	if len(peek) > 0 {
+		buf.Write(peek)
+	}
+	if _, err := client.Write(buf.Bytes()); err != nil {
+		return
+	}
+	if len(peek) > 0 {
+		rxBytes.Add(uint64(len(peek)))
+	}
+	copyBuf := make([]byte, 256*1024)
+	_, _ = io.CopyBuffer(countingWriter{w: client}, br, copyBuf)
+}
+
+func filterSpliceHeaders(h http.Header) http.Header {
+	hop := map[string]struct{}{
+		"connection":          {},
+		"keep-alive":          {},
+		"proxy-authenticate":  {},
+		"proxy-authorization": {},
+		"te":                  {},
+		"trailer":             {},
+		"upgrade":             {},
+	}
+	for _, c := range h.Values("Connection") {
+		for _, token := range strings.Split(c, ",") {
+			if t := strings.ToLower(strings.TrimSpace(token)); t != "" {
+				hop[t] = struct{}{}
+			}
+		}
+	}
+	out := make(http.Header, len(h))
+	for k, vals := range h {
+		if _, skip := hop[strings.ToLower(k)]; skip {
+			continue
+		}
+		for _, v := range vals {
+			out.Add(k, v)
+		}
+	}
+	return out
+}
+
+func headerValue(headers map[string]string, name string) string {
+	for k, v := range headers {
+		if strings.EqualFold(k, name) {
+			return v
+		}
+	}
+	return ""
+}
+
+func tcpNoDelay(c net.Conn) {
+	if tc, ok := c.(*net.TCPConn); ok {
+		_ = tc.SetNoDelay(true)
+	}
 }
 
 func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
