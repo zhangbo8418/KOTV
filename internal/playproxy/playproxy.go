@@ -273,10 +273,7 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	rangeHdr := ""
-	if !isPlaylistURL(e.URL) {
-		rangeHdr = strings.TrimSpace(r.Header.Get("Range"))
-	}
+	rangeHdr := strings.TrimSpace(r.Header.Get("Range"))
 	serveEntry(w, r, e, rangeHdr)
 }
 
@@ -288,121 +285,144 @@ func serveEntry(w http.ResponseWriter, r *http.Request, e entry, rangeHdr string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		writeStreamHeaders(w, resp, !NeedsLocalRelay(e.URL))
-		w.WriteHeader(resp.StatusCode)
-		_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
-		return
-	}
-	if isPlaylistURL(e.URL) || isPlaylistContentType(resp.Header.Get("Content-Type")) {
-		if rangeHdr != "" {
-			resp.Body.Close()
-			resp, err = e.fetch(r, "")
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadGateway)
-				return
-			}
-			defer resp.Body.Close()
-		}
-		writeRewrittenPlaylist(w, resp, e)
+		writePassthrough(w, resp, resp.Body)
 		return
 	}
 	prefix := make([]byte, len("#EXTM3U"))
 	n, _ := io.ReadFull(resp.Body, prefix)
-	if n == len(prefix) && bytes.Equal(prefix, []byte("#EXTM3U")) {
-		if rangeHdr != "" {
-			resp.Body.Close()
-			resp, err = e.fetch(r, "")
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadGateway)
-				return
-			}
-			defer resp.Body.Close()
-			writeRewrittenPlaylist(w, resp, e)
-			return
-		}
+	head := prefix[:n]
+	if n == len(prefix) && bytes.Equal(head, []byte("#EXTM3U")) {
 		rest, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		writePlaylistBytes(w, append(prefix, rest...), e)
+		raw := make([]byte, 0, n+len(rest))
+		raw = append(raw, head...)
+		raw = append(raw, rest...)
+		if out, ok := rewritePlaylist(string(raw), e.URL, e.Headers); ok {
+			writeRewrittenPlaylist(w, resp, []byte(out))
+			return
+		}
+		writePassthrough(w, resp, bytes.NewReader(raw))
 		return
 	}
-	writeStreamHeaders(w, resp, !NeedsLocalRelay(e.URL))
-	w.WriteHeader(resp.StatusCode)
-	if n > 0 {
-		_, _ = countingWriter{w: writeOnly{w}}.Write(prefix[:n])
-	}
-	_, _ = io.Copy(countingWriter{w: writeOnly{w}}, resp.Body)
+	writePassthrough(w, resp, io.MultiReader(bytes.NewReader(head), resp.Body))
 }
 
-func writeStreamHeaders(w http.ResponseWriter, resp *http.Response, advertiseRanges bool) {
-	for _, h := range []string{"Content-Type", "Content-Length", "Accept-Ranges", "Content-Range"} {
-		if v := resp.Header.Get(h); v != "" {
-			w.Header().Set(h, v)
+func writePassthrough(w http.ResponseWriter, resp *http.Response, body io.Reader) {
+	copyResponseHeaders(w, resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	dst := io.Writer(w)
+	if f, ok := w.(http.Flusher); ok {
+		dst = flushWriter{w: w, f: f}
+	}
+	_, _ = io.Copy(countingWriter{w: dst}, body)
+}
+
+func writeRewrittenPlaylist(w http.ResponseWriter, resp *http.Response, out []byte) {
+	copyResponseHeaders(w, resp.Header)
+	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
+	w.Header().Del("Content-Range")
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	}
+	w.WriteHeader(resp.StatusCode)
+	dst := io.Writer(w)
+	if f, ok := w.(http.Flusher); ok {
+		dst = flushWriter{w: w, f: f}
+	}
+	_, _ = countingWriter{w: dst}.Write(out)
+}
+
+// copyResponseHeaders 原样转发响应头。去掉逐跳头，不补 Accept-Ranges。
+func copyResponseHeaders(w http.ResponseWriter, h http.Header) {
+	hop := map[string]struct{}{
+		"connection":          {},
+		"keep-alive":          {},
+		"proxy-authenticate":  {},
+		"proxy-authorization": {},
+		"te":                  {},
+		"trailer":             {},
+		"transfer-encoding":   {},
+		"upgrade":             {},
+	}
+	for _, c := range h.Values("Connection") {
+		for _, token := range strings.Split(c, ",") {
+			if t := strings.ToLower(strings.TrimSpace(token)); t != "" {
+				hop[t] = struct{}{}
+			}
 		}
 	}
-	// 本机爬虫端口的流靠一条连接读完。上游没声明可随机读时不要补成 bytes，
-	// 否则远端播放器读完第一段就会再发 Range，第二条请求接不上。
-	if advertiseRanges && w.Header().Get("Accept-Ranges") == "" {
-		w.Header().Set("Accept-Ranges", "bytes")
+	for k, vals := range h {
+		if _, skip := hop[strings.ToLower(k)]; skip {
+			continue
+		}
+		for _, v := range vals {
+			w.Header().Add(k, v)
+		}
 	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 }
 
-func writeRewrittenPlaylist(w http.ResponseWriter, resp *http.Response, e entry) {
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
+type flushWriter struct {
+	w io.Writer
+	f http.Flusher
+}
+
+func (fw flushWriter) Write(p []byte) (int, error) {
+	n, err := fw.w.Write(p)
+	if n > 0 && fw.f != nil {
+		fw.f.Flush()
 	}
-	writePlaylistBytes(w, raw, e)
-}
-
-func writePlaylistBytes(w http.ResponseWriter, raw []byte, e entry) {
-	out := []byte(rewritePlaylist(string(raw), e.URL, e.Headers))
-	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.WriteHeader(http.StatusOK)
-	_, _ = countingWriter{w: writeOnly{w}}.Write(out)
-}
-
-func isPlaylistContentType(ct string) bool {
-	ct = strings.ToLower(ct)
-	return strings.Contains(ct, "mpegurl") || strings.Contains(ct, "m3u8")
+	return n, err
 }
 
 var playlistTagURIRe = regexp.MustCompile(`(?i)\bURI="([^"]+)"`)
 
-func rewritePlaylist(content, base string, headers map[string]string) string {
+func rewritePlaylist(content, base string, headers map[string]string) (string, bool) {
+	changed := false
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		trim := strings.TrimSpace(strings.TrimRight(line, "\r"))
 		if trim == "" || strings.HasPrefix(trim, "#") {
 			continue
 		}
-		lines[i] = proxyIfRemote(resolveRef(base, trim), headers)
+		abs := resolveRef(base, trim)
+		next := proxyIfRemote(abs, headers)
+		if next != abs {
+			lines[i] = next
+			changed = true
+		}
 	}
 	out := strings.Join(lines, "\n")
-	if !strings.Contains(strings.ToUpper(out), "URI=") {
-		return out
+	if strings.Contains(strings.ToUpper(out), "URI=") {
+		out = playlistTagURIRe.ReplaceAllStringFunc(out, func(m string) string {
+			sub := playlistTagURIRe.FindStringSubmatch(m)
+			if len(sub) < 2 {
+				return m
+			}
+			raw := sub[1]
+			if raw == "" || strings.HasPrefix(raw, "data:") {
+				return m
+			}
+			abs := resolveRef(base, raw)
+			next := proxyIfRemote(abs, headers)
+			if next == abs {
+				return m
+			}
+			changed = true
+			return `URI="` + next + `"`
+		})
 	}
-	return playlistTagURIRe.ReplaceAllStringFunc(out, func(m string) string {
-		sub := playlistTagURIRe.FindStringSubmatch(m)
-		if len(sub) < 2 {
-			return m
-		}
-		raw := sub[1]
-		if raw == "" || strings.HasPrefix(raw, "data:") {
-			return m
-		}
-		return `URI="` + proxyIfRemote(resolveRef(base, raw), headers) + `"`
-	})
+	if !changed {
+		return content, false
+	}
+	return out, true
 }
 
 func proxyIfRemote(abs string, headers map[string]string) string {
-	if !strings.HasPrefix(abs, "http://") && !strings.HasPrefix(abs, "https://") {
+	if !NeedsLocalRelay(abs) {
 		return abs
 	}
 	if strings.Contains(abs, "/proxy/play?") || strings.Contains(abs, "/proxy/cached_m3u8") {
@@ -446,7 +466,7 @@ func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
 				return fmt.Errorf("stopped after 10 redirects")
 			}
 			applyUpstreamHeaders(next, e.Headers)
-			if rangeHdr != "" && !isPlaylistURL(e.URL) {
+			if rangeHdr != "" {
 				next.Header.Set("Range", rangeHdr)
 			}
 			if next.Header.Get("User-Agent") == "" && !isLoopbackHost(next.URL.Hostname()) {
@@ -483,12 +503,3 @@ func (c countingWriter) Write(p []byte) (int, error) {
 	}
 	return n, err
 }
-
-func isPlaylistURL(raw string) bool {
-	low := strings.ToLower(raw)
-	return strings.Contains(low, ".m3u8") || strings.Contains(low, "mpegurl")
-}
-
-type writeOnly struct{ http.ResponseWriter }
-
-func (w writeOnly) Write(p []byte) (int, error) { return w.ResponseWriter.Write(p) }

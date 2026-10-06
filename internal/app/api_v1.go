@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path"
@@ -115,13 +116,52 @@ func (a *App) APIGetConfig() map[string]any {
 
 func (a *App) APILoadConfig(source string) error {
 	cfg, sites, sess := a.scope()
-	// 先解析新源；失败则保留旧配置与 Ready，避免首页一直转圈。
-	err := cfg.LoadFromSource(source)
-	if err != nil {
+	// 先停旧运行时，再加载新源。失败时内存里仍是旧配置。
+	sites.InvalidateLoads()
+	if err := cfg.LoadFromSource(source); err != nil {
 		return err
 	}
-	// 新源已进内存后再硬杀旧运行时（本机共享 / 远端该用户）；脚本磁盘缓存保留。
-	sites.InvalidateLoads()
+	a.finishConfigLoad(cfg, sess, source)
+	return nil
+}
+
+// APIRefreshConfig 重新请求当前 http(s) 仓库。jar 地址没变则不重启运行时。
+func (a *App) APIRefreshConfig() error {
+	cfg, sites, sess := a.scope()
+	source := ""
+	if sess != nil {
+		source = strings.TrimSpace(sess.Source)
+	}
+	if source == "" {
+		source = strings.TrimSpace(cfg.API().URL)
+	}
+	if source == "" {
+		source = strings.TrimSpace(settings.Get(settings.VOD))
+	}
+	lower := strings.ToLower(source)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return nil
+	}
+	prev := strings.TrimSpace(cfg.API().Spider)
+	if err := cfg.ReloadJSON(source); err != nil {
+		return err
+	}
+	next := strings.TrimSpace(cfg.API().Spider)
+	if config.SpiderSpecChanged(prev, next) {
+		sites.InvalidateLoads()
+		if next != "" {
+			if err := spider.LoadJar(next, cfg.API().URL); err != nil {
+				log.Printf("spider.jar 加载失败: %v", err)
+			}
+		}
+	} else {
+		sites.DropContentCache()
+	}
+	a.finishConfigLoad(cfg, sess, source)
+	return nil
+}
+
+func (a *App) finishConfigLoad(cfg *config.Manager, sess *clientsession.Session, source string) {
 	if sess != nil {
 		sess.Ready = true
 		sess.ErrMsg = ""
@@ -134,12 +174,11 @@ func (a *App) APILoadConfig(source string) error {
 			sess.Live.SyncFromConfig()
 		}
 		clientsession.SaveSource(sess.ClientID, sess.Source, cfg.Home().Key)
-	} else {
-		a.Ready = true
-		a.ErrMsg = ""
-		a.Live.SyncFromConfig()
+		return
 	}
-	return nil
+	a.Ready = true
+	a.ErrMsg = ""
+	a.Live.SyncFromConfig()
 }
 
 func (a *App) APISetHome(siteKey string) error {

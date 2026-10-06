@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -126,6 +127,77 @@ func TestHandleTwoRanges(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "bytes=0-3" || got[1] != "bytes=4-7" {
 		t.Fatalf("upstream ranges=%v", got)
+	}
+}
+
+func TestHandlePassthroughKeepsStatusHeadersAndBody(t *testing.T) {
+	t.Parallel()
+	const payload = "\x00\x00\x00\x18ftypmp42BODY"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "bytes=0-" {
+			t.Errorf("range=%q", r.Header.Get("Range"))
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("X-Play-State", "buffering")
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	proxyURL := playproxy.Register(srv.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"})
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	req.Header.Set("Range", "bytes=0-")
+	rr := httptest.NewRecorder()
+	playproxy.Handle(rr, req)
+	res := rr.Result()
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusPartialContent {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+	if res.Header.Get("X-Play-State") != "buffering" {
+		t.Fatalf("state=%q", res.Header.Get("X-Play-State"))
+	}
+	if res.Header.Get("Accept-Ranges") != "" {
+		t.Fatalf("invented Accept-Ranges=%q", res.Header.Get("Accept-Ranges"))
+	}
+	if res.Header.Get("Content-Type") != "video/mp4" {
+		t.Fatalf("type=%q", res.Header.Get("Content-Type"))
+	}
+	if string(body) != payload {
+		t.Fatalf("body=%q", body)
+	}
+}
+
+func TestHandleLeavesCDNPlaylistBytes(t *testing.T) {
+	t.Parallel()
+	raw := "#EXTM3U\nhttps://cdn.example/a.ts\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.Header().Set("X-Play-State", "open")
+		_, _ = w.Write([]byte(raw))
+	}))
+	defer srv.Close()
+
+	proxyURL := playproxy.Register(srv.URL+"/v.m3u8", map[string]string{"Cookie": "qk=1"})
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rr := httptest.NewRecorder()
+	playproxy.Handle(rr, req)
+	res := rr.Result()
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+	if string(body) != raw {
+		t.Fatalf("body=%q", body)
+	}
+	if res.Header.Get("X-Play-State") != "open" {
+		t.Fatalf("state=%q", res.Header.Get("X-Play-State"))
+	}
+	if res.Header.Get("Accept-Ranges") != "" {
+		t.Fatalf("invented Accept-Ranges=%q", res.Header.Get("Accept-Ranges"))
 	}
 }
 

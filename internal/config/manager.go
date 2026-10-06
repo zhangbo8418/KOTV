@@ -372,6 +372,11 @@ func (m *Manager) initFromVod(vod string) error {
 	return m.ParseConfig(cfg, false)
 }
 
+// SpiderSpecChanged 为真时刷新仓库后要停掉旧运行时再加载新 jar。
+func SpiderSpecChanged(prev, next string) bool {
+	return strings.TrimSpace(prev) != strings.TrimSpace(next)
+}
+
 // ReloadFresh 重新加载点播源。http(s) 不使用库内 JSON，重新请求该地址。
 func (m *Manager) ReloadFresh(source string) error {
 	source = NormalizeSource(source)
@@ -394,6 +399,27 @@ func (m *Manager) ReloadFresh(source string) error {
 		return m.ParseConfig(cfg, false)
 	}
 	return m.initFromVod(source)
+}
+
+// ReloadJSON 重新请求 http(s) 仓库并更新站点，不加载 jar。
+func (m *Manager) ReloadJSON(source string) error {
+	source = NormalizeSource(source)
+	lower := strings.ToLower(source)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return fmt.Errorf("不是 http(s) 仓库")
+	}
+	cfg := &database.Config{Type: database.ConfigTypeSite, URL: source}
+	if m.db != nil {
+		found, err := m.db.FindConfig(source, database.ConfigTypeSite)
+		if err != nil {
+			return err
+		}
+		if found != nil {
+			cfg = found
+			cfg.URL = source
+		}
+	}
+	return m.parseConfig(cfg, false, false)
 }
 
 // SourceDisplayName 无接口名时回落为完整地址（勿截成路径末段）。
@@ -476,6 +502,10 @@ func (m *Manager) LoadFromSource(source string) error {
 
 // ParseConfig 解析配置。
 func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
+	return m.parseConfig(cfg, isJSON, true)
+}
+
+func (m *Manager) parseConfig(cfg *database.Config, isJSON bool, loadJar bool) error {
 	source := cfg.URL
 	if isJSON {
 		source = cfg.JSON
@@ -534,7 +564,7 @@ func (m *Manager) ParseConfig(cfg *database.Config, isJSON bool) error {
 		parse.SetVodRules(api.Rules)
 	}
 
-	if api.Spider != "" {
+	if loadJar && api.Spider != "" {
 		if err := spider.LoadJar(api.Spider, cfg.URL); err != nil {
 			log.Printf("spider.jar 加载失败: %v", err)
 		}

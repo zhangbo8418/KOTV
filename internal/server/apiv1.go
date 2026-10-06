@@ -18,6 +18,7 @@ type ContentAPI interface {
 	APIHealth() map[string]any
 	APIGetConfig() map[string]any
 	APILoadConfig(source string) error
+	APIRefreshConfig() error
 	APISetHome(siteKey string) error
 	APIHome() (map[string]any, error)
 	APICategory(tid, pg string, extend map[string]string, siteKey string) (map[string]any, error)
@@ -100,6 +101,7 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/session/ping", wrap(s.handleSessionPing))
 	mux.HandleFunc("/api/v1/session/leave", wrap(s.handleSessionLeave))
 	mux.HandleFunc("/api/v1/config", wrap(s.handleAPIv1Config))
+	mux.HandleFunc("/api/v1/config/refresh", wrap(s.handleAPIv1ConfigRefresh))
 	mux.HandleFunc("/api/v1/home", wrap(s.handleAPIv1Home))
 	mux.HandleFunc("/api/v1/category", wrap(s.handleAPIv1Category))
 	mux.HandleFunc("/api/v1/action", wrap(s.handleAPIv1Action))
@@ -222,6 +224,27 @@ func (s *Server) handleAPIv1Config(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (s *Server) handleAPIv1ConfigRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	api := s.content()
+	if api == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "content api unavailable")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if err := api.APIRefreshConfig(); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, api.APIGetConfig())
 }
 
 func (s *Server) handleAPIv1Sites(w http.ResponseWriter, r *http.Request) {
@@ -719,15 +742,15 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Action   string `json:"action"`
-		Index    int    `json:"index"`
-		URL      string `json:"url"`
-		OldURL   string `json:"oldUrl"`
-		Name     string `json:"name"`
-		Group    int    `json:"group"`
-		Channel  int    `json:"channel"`
-		Line     int    `json:"line"`
-		Password string `json:"password"`
+		Action   string            `json:"action"`
+		Index    int               `json:"index"`
+		URL      string            `json:"url"`
+		OldURL   string            `json:"oldUrl"`
+		Name     string            `json:"name"`
+		Group    int               `json:"group"`
+		Channel  int               `json:"channel"`
+		Line     int               `json:"line"`
+		Password string            `json:"password"`
 		Day      int               `json:"day"`
 		Prog     int               `json:"prog"`
 		Headers  map[string]string `json:"headers"`

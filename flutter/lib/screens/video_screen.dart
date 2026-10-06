@@ -213,7 +213,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         final lower = source.toLowerCase();
         if (lower.startsWith('http://') || lower.startsWith('https://')) {
           try {
-            await ref.read(apiProvider).loadConfig(source).timeout(const Duration(seconds: 45));
+            await ref.read(apiProvider).refreshConfig().timeout(const Duration(seconds: 45));
           } catch (e) {
             repoErr = '$e';
           }

@@ -638,14 +638,10 @@ public class SpiderBridge {
                 Thread.currentThread().setContextClassLoader(prev);
             }
             } catch (Exception e) {
-            System.err.println(
-                    "getSpider failed key=" + key + " api=" + api + " jar=" + jarPath + ": " + e);
+                System.err.println(
+                        "getSpider failed key=" + key + " api=" + api + " jar=" + jarPath + ": " + e);
                 e.printStackTrace(System.err);
-            // 加载失败（含 jar 缺该 csp 类）静默降级为
-            // SpiderNull，站点显示空列表而不是把异常弹到首页。
-                SpiderNull nullSpider = new SpiderNull();
-                nullSpider.siteKey = key;
-                return nullSpider;
+                throw e;
             }
     }
 
@@ -677,7 +673,7 @@ public class SpiderBridge {
      * JarLoader.parseJar：同一 jar 只加载一次，创建 ClassLoader 并调用 Init / 注册 Proxy。
      * 桌面用 URLClassLoader 代替 DexClassLoader。
      */
-    private static void parseJar(String jarPath) {
+    private static void parseJar(String jarPath) throws Exception {
         if (Thread.interrupted()) return;
         if (jarPath == null || jarPath.isEmpty()) return;
         if (loaders.containsKey(jarPath)) return;
@@ -701,10 +697,9 @@ public class SpiderBridge {
                 if (Thread.interrupted()) return;
                 loaders.put(jarPath, loader);
             } catch (Exception e) {
-                // 加载失败静默记日志；getSpider 侧因 loader 缺失
-                // 落到 SpiderNull（空列表），不把异常弹到界面。
                 System.err.println("parseJar failed: " + jarPath + ": " + e);
                 e.printStackTrace(System.err);
+                throw e;
             }
         }
     }
@@ -1708,7 +1703,11 @@ public class SpiderBridge {
         ClassLoader loader = loaders.get(recent);
         if (loader == null) {
             // recent 已设但尚未 parseJar（例如仅 setRecent 旧路径）：补一次真加载。
-            parseJar(recent);
+            try {
+                parseJar(recent);
+            } catch (Exception e) {
+                throw new IllegalStateException("No jar loaded for recent key: " + recent, e);
+            }
             loader = loaders.get(recent);
         }
         if (loader == null) {

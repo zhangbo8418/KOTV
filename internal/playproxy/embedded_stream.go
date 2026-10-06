@@ -23,12 +23,9 @@ func TryHandleEmbeddedProxy(w http.ResponseWriter, r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	rangeHdr := ""
-	if !isPlaylistURL(media) {
-		rangeHdr = strings.TrimSpace(r.Header.Get("Range"))
-		if rangeHdr == "" {
-			rangeHdr = strings.TrimSpace(r.URL.Query().Get("range"))
-		}
+	rangeHdr := strings.TrimSpace(r.Header.Get("Range"))
+	if rangeHdr == "" {
+		rangeHdr = strings.TrimSpace(r.URL.Query().Get("range"))
 	}
 	serveEntry(w, r, entry{URL: media, Headers: headers}, rangeHdr)
 	return true

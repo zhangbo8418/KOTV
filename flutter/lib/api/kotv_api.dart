@@ -200,6 +200,10 @@ class KotvApi {
   Future<Map<String, dynamic>> loadConfig(String source) =>
       _post('/api/v1/config', {'source': source});
 
+  /// 重新请求当前 http(s) 仓库。jar 地址没变时不重启爬虫。
+  Future<Map<String, dynamic>> refreshConfig() =>
+      _post('/api/v1/config/refresh', {});
+
   Future<Map<String, dynamic>> setHome(String siteKey) =>
       _post('/api/v1/sites', {'home': siteKey});
 

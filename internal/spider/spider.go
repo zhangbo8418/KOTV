@@ -56,6 +56,11 @@ func isJS(api string) bool  { return strings.Contains(api, ".js") }
 func isPy(api string) bool  { return strings.Contains(api, ".py") }
 func isCSP(api string) bool { return strings.HasPrefix(api, "csp_") }
 
+// RunnableAPI 表示该 api 会进 jar / js / py。其余类型不会被当成空首页成功。
+func RunnableAPI(api string) bool {
+	return isPy(api) || isJS(api) || isCSP(api)
+}
+
 // Get 根据站源类型获取爬虫实例。
 func Get(key, api, ext, jar string) Spider {
 	switch {

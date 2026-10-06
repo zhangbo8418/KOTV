@@ -72,6 +72,14 @@ func (s *SiteService) InvalidateLoads() {
 	spider.RestartCallerRuntime()
 }
 
+// DropContentCache 清内容缓存，不停止 JVM/Py/JS。
+func (s *SiteService) DropContentCache() {
+	s.loadEpoch.Add(1)
+	s.mu.Lock()
+	s.invalidateContentCache()
+	s.mu.Unlock()
+}
+
 // InvalidateHomeOnly 仅切换首页站点：清内容缓存 + 软取消当前会话，保留运行时进程。
 func (s *SiteService) InvalidateHomeOnly() {
 	s.loadEpoch.Add(1)
@@ -145,6 +153,9 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 
 	switch site.TypeID() {
 	case 3: // Spider：api 为 csp_/脚本路径，靠 jar+key 加载，勿按 HTTP 空址早拒。
+		if !spider.RunnableAPI(site.API) {
+			return model.Result{Success: false}, fmt.Errorf("站点「%s」没有可用爬虫", siteLabel(site))
+		}
 		sp := s.cfg.Spider(site)
 		skipHome := settings.ConsumeCrash()
 		if skipHome {
