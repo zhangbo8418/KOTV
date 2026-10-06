@@ -101,8 +101,13 @@ fi
 
 echo "==> parity libs -> $PREFIX"
 if is_windows || [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  fetch "https://ftp.gnu.org/pub/gnu/libiconv/libiconv-${ICONV_VER}.tar.gz" \
-    "$src/libiconv-${ICONV_VER}.tar.gz" "$ICONV_SHA"
+  # ftp.gnu.org 经常连不上。镜像是同一份包，sha 不对会删掉再试下一源。
+  fetch "https://mirrors.kernel.org/gnu/libiconv/libiconv-${ICONV_VER}.tar.gz" \
+    "$src/libiconv-${ICONV_VER}.tar.gz" "$ICONV_SHA" \
+    || fetch "https://mirror.csclub.uwaterloo.ca/gnu/libiconv/libiconv-${ICONV_VER}.tar.gz" \
+      "$src/libiconv-${ICONV_VER}.tar.gz" "$ICONV_SHA" \
+    || fetch "https://ftp.gnu.org/pub/gnu/libiconv/libiconv-${ICONV_VER}.tar.gz" \
+      "$src/libiconv-${ICONV_VER}.tar.gz" "$ICONV_SHA"
   rm -rf "$BUILD_DIR/libiconv"
   mkdir -p "$BUILD_DIR/libiconv"
   tar -xf "$src/libiconv-${ICONV_VER}.tar.gz" -C "$BUILD_DIR/libiconv" --strip-components=1
