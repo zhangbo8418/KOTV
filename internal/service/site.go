@@ -12,7 +12,6 @@ import (
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/parse"
-	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/thunder"
@@ -26,7 +25,7 @@ const PushAgentKey = "push_agent"
 // PushAgentPic 推送详情占位图（TV R.string.push_image 等价 data URI，1x1 JPEG）。
 const PushAgentPic = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGfAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//Z"
 
-// SiteService 站点内容服务，站点内容服务。
+// SiteService 站点内容服务。
 type SiteService struct {
 	cfg *config.Manager
 	mu  sync.Mutex
@@ -157,9 +156,6 @@ func (s *SiteService) homeContentFor(site model.Site) (model.Result, error) {
 			return model.Result{Success: false}, fmt.Errorf("站点「%s」没有可用爬虫", siteLabel(site))
 		}
 		sp := s.cfg.Spider(site)
-		if settings.ConsumeCrash() {
-			return model.Result{Success: false}, fmt.Errorf("上次首页异常，已跳过一次爬虫，请再试")
-		}
 		type homeBundler interface {
 			HomeBundle(filter bool) (home string, homeVod string, err error)
 		}

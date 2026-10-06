@@ -154,8 +154,6 @@ const (
 	BootLive                 Type = "bootLive"
 	ExoDiskPreloadThreads    Type = "exoDiskPreloadThreads"
 	ExoDiskPreloadSizeMb     Type = "exoDiskPreloadSizeMb"
-	// Crash：UI 崩溃后跳过一次 spider homeContent（SiteApi Prefers crash）。
-	Crash Type = "crash"
 	// Language：UI/系统语言提示（如 zh-Hant）；TransEnabled 用。
 	Language Type = "language"
 )
@@ -309,7 +307,6 @@ func defaultFile() file {
 			{ID: "bootLive", Label: "开机进直播", Value: "false"},
 			{ID: "exoDiskPreloadThreads", Label: "Exo预读线程", Value: "1"},
 			{ID: "exoDiskPreloadSizeMb", Label: "Exo预读容量MB", Value: "128"},
-			{ID: "crash", Label: "首页崩溃跳过", Value: "false"},
 			{ID: "language", Label: "界面语言", Value: ""},
 		},
 		Cache: make(map[string]json.RawMessage),
@@ -371,6 +368,7 @@ func Load() error {
 	ensureSettingLocked(RemoteAuth, "远端鉴权", "false")
 	ensureSettingLocked(AllowRegister, "开放注册", "false")
 	dropSettingLocked("backendProxyPlay")
+	dropSettingLocked("crash")
 	ensureSettingLocked(AudioPassThrough, "音频直通", "true")
 	ensureSettingLocked(ExoDiskCache, "Exo磁盘缓存", "false")
 	ensureSettingLocked(ExoAdblock, "Exo去广告", "true")
@@ -487,7 +485,7 @@ func Save() error {
 	mu.RLock()
 	defer mu.RUnlock()
 	cleaned := data
-	cleaned.List = withoutSetting(data.List, "backendProxyPlay")
+	cleaned.List = withoutSetting(withoutSetting(data.List, "backendProxyPlay"), "crash")
 	b, err := json.MarshalIndent(cleaned, "", "  ")
 	if err != nil {
 		return err
@@ -529,9 +527,9 @@ func PlayUA() string {
 	return DefaultPlayUA
 }
 
-// Set 设置值。已删除的网盘加速开关不再写回。
+// Set 设置值。已删除的项不再写回。
 func Set(t Type, value string) {
-	if t == "backendProxyPlay" {
+	if t == "backendProxyPlay" || t == "crash" {
 		return
 	}
 	mu.Lock()
@@ -616,16 +614,6 @@ func IsIncognito() bool { return boolSetting(Incognito, false) }
 
 // IsDLNARenderer 是否作为局域网 DLNA 被投端。
 func IsDLNARenderer() bool { return boolSetting(DLNARenderer, false) }
-
-// ConsumeCrash 若 crash 为 true 则清 false 并返回 true（跳过一次 spider home）。
-func ConsumeCrash() bool {
-	if !boolSetting(Crash, false) {
-		return false
-	}
-	SetBool(Crash, false)
-	_ = Save()
-	return true
-}
 
 // Entry 设置项快照（备份/恢复）。
 type Entry struct {
