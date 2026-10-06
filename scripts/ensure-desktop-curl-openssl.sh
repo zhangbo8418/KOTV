@@ -103,10 +103,11 @@ kotv_clean_win_path "$BUILD_DIR/bin"
 src="$BUILD_DIR/curl-$CURL_VER"
 tarball="$BUILD_DIR/curl-$CURL_VER.tar.gz"
 if [[ ! -f "$src/CMakeLists.txt" ]]; then
-  curl -fsSL -o "$tarball" \
-    "https://curl.se/download/curl-${CURL_VER}.tar.gz" \
-    || curl -fsSL -o "$tarball" \
-      "https://github.com/curl/curl/releases/download/curl-$(echo "$CURL_VER" | tr . _)/curl-${CURL_VER}.tar.gz"
+  # 构建机偶发解析失败。同一地址重试，仍失败再换 GitHub 发布包。
+  curl -fL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
+    -o "$tarball" "https://curl.se/download/curl-${CURL_VER}.tar.gz" \
+    || curl -fL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
+      -o "$tarball" "https://github.com/curl/curl/releases/download/curl-$(echo "$CURL_VER" | tr . _)/curl-${CURL_VER}.tar.gz"
   rm -rf "$src"
   tar -xzf "$tarball" -C "$BUILD_DIR"
 fi
