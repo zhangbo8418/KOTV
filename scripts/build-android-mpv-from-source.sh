@@ -117,25 +117,51 @@ PY
 build_sh="$WORK/webhtv/scripts/build_mpv_native.sh"
 chmod +x "$build_sh"
 
-# extract_archive 加短连接超时，避免卡死在坏 CDN。
+# ftp.gnu.org 经常连不上。libiconv 先试镜像，文件名和后面的 sha 不变。
 python3 - "$build_sh" <<'PY'
 from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-old = '    curl --location --fail --retry 3 --output "$archive" "$url"\n'
-new = (
+old_plain = '    curl --location --fail --retry 3 --output "$archive" "$url"\n'
+old_timeout = (
     '    curl --location --fail --connect-timeout 20 --max-time 300 '
     '--retry 3 --retry-delay 2 --retry-all-errors --output "$archive" "$url"\n'
 )
-if old not in text:
-    if "--connect-timeout 20" in text:
-        print("ok extract_archive curl already has connect-timeout")
-    else:
-        raise SystemExit("ERROR: extract_archive curl line changed")
+new = (
+    '    _kotv_file="${url##*/}"\n'
+    '    _kotv_ok=0\n'
+    '    if [[ "$_kotv_file" == libiconv-*.tar.gz ]]; then\n'
+    '      _kotv_urls=(\n'
+    '        "https://mirrors.kernel.org/gnu/libiconv/${_kotv_file}"\n'
+    '        "https://mirror.csclub.uwaterloo.ca/gnu/libiconv/${_kotv_file}"\n'
+    '        "https://mirrors.ocf.berkeley.edu/gnu/libiconv/${_kotv_file}"\n'
+    '        "https://ftp.gnu.org/pub/gnu/libiconv/${_kotv_file}"\n'
+    '      )\n'
+    '    else\n'
+    '      _kotv_urls=("$url")\n'
+    '    fi\n'
+    '    for _kotv_try in "${_kotv_urls[@]}"; do\n'
+    '      rm -f "$archive"\n'
+    '      if curl --location --fail --connect-timeout 20 --max-time 300 '
+    '--retry 2 --retry-delay 2 --retry-all-errors --output "$archive" "$_kotv_try"; then\n'
+    '        _kotv_ok=1\n'
+    '        break\n'
+    '      fi\n'
+    '      log "download failed, next source: $name"\n'
+    '    done\n'
+    '    [ "$_kotv_ok" = 1 ]\n'
+)
+if "_kotv_urls" in text:
+    print("ok extract_archive already tries gnu mirrors")
+elif old_plain in text:
+    path.write_text(text.replace(old_plain, new, 1), encoding="utf-8")
+    print("ok patched extract_archive gnu mirrors")
+elif old_timeout in text:
+    path.write_text(text.replace(old_timeout, new, 1), encoding="utf-8")
+    print("ok patched extract_archive gnu mirrors")
 else:
-    path.write_text(text.replace(old, new, 1), encoding="utf-8")
-    print("ok patched extract_archive curl timeouts")
+    raise SystemExit("ERROR: extract_archive curl line changed")
 PY
 
 # webhtv 对 mpv 浅克隆 + tag deepen 在 CI 上不稳：要么 shallow 文件冲突，要么 describe 对不上。
