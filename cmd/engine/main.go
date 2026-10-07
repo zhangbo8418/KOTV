@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/app"
+	"github.com/bobo/KOTV/internal/nicrelax"
 	"github.com/bobo/KOTV/internal/remote"
 	"github.com/bobo/KOTV/internal/util"
 
@@ -18,6 +19,13 @@ import (
 )
 
 func main() {
+	// 单独跑完就退出，供安卓服务用 root 调用。不要拉起 HTTP。
+	if len(os.Args) > 1 && os.Args[1] == "-relax-nic" {
+		if err := nicrelax.Apply(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	remote.WireFlutterBridge()
 	a, err := app.New()
 	if err != nil {

@@ -186,6 +186,7 @@ class KotvEngineService : Service() {
   }
 
   private fun ensureEngine() {
+    relaxNicOffload()
     if (engineHealthy()) {
       Log.i(TAG, "engine already healthy on :9978")
       return
@@ -281,6 +282,48 @@ class KotvEngineService : Service() {
       }
     } catch (_: Throwable) {
     }
+  }
+
+  /**
+   * 关掉发送校验卸载和 GSO。RK3399 gmac 重传满尺寸 TCP 段时校验错误，
+   * Win7 不确认，播放就停在这一条连接上。需要 root；没有 su 就跳过。
+   */
+  private fun relaxNicOffload() {
+    val so = resolveEngineSo() ?: return
+    val proc = try {
+      ProcessBuilder("su", "-c", "\"$so\" -relax-nic")
+        .redirectErrorStream(true)
+        .start()
+    } catch (t: Throwable) {
+      Log.w(TAG, "relax-nic su unavailable", t)
+      return
+    }
+    val out = StringBuilder()
+    val reader = thread(name = "kotv-relax-nic-read", isDaemon = true) {
+      try {
+        out.append(proc.inputStream.bufferedReader().readText())
+      } catch (_: Throwable) {
+      }
+    }
+    var code = -1
+    val waiter = thread(name = "kotv-relax-nic-wait", isDaemon = true) {
+      code = try {
+        proc.waitFor()
+      } catch (_: Throwable) {
+        -1
+      }
+    }
+    waiter.join(4000)
+    if (waiter.isAlive) {
+      try {
+        proc.destroy()
+      } catch (_: Throwable) {
+      }
+      Log.w(TAG, "relax-nic timed out")
+      return
+    }
+    reader.join(1000)
+    Log.i(TAG, "relax-nic code=$code ${out.toString().trim()}")
   }
 
   private fun resolveEngineSo(): String? {
