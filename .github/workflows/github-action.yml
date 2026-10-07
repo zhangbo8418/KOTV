@@ -502,6 +502,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          # 镜像预装的 dotnet、模拟器和旧 NDK 占满磁盘后，Gradle 下载会失败。
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /usr/share/swift \
+            /usr/local/share/boost \
+            /usr/local/share/powershell \
+            /usr/local/share/chromium \
+            /usr/local/lib/android/sdk/ndk \
+            /usr/local/lib/android/sdk/system-images \
+            /usr/local/lib/android/sdk/emulator \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          sudo apt-get clean
+          df -h /
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
