@@ -205,6 +205,51 @@ func TestHandleForwardsGzipBodyWithoutRequestingIt(t *testing.T) {
 	}
 }
 
+func TestFetchUsesPlayerEncodingAndIfRange(t *testing.T) {
+	t.Parallel()
+	var gotAE, gotIfRange, gotUA, gotConn string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAE = r.Header.Get("Accept-Encoding")
+		gotIfRange = r.Header.Get("If-Range")
+		gotUA = r.Header.Get("User-Agent")
+		gotConn = r.Header.Get("Connection")
+		w.Header().Set("Content-Length", "4")
+		_, _ = w.Write([]byte("BODY"))
+	}))
+	defer srv.Close()
+
+	proxyURL := playproxy.Register(srv.URL+"/movie.mp4", map[string]string{
+		"Cookie":          "qk=1",
+		"Accept-Encoding": "gzip",
+		"User-Agent":      "QuarkTest",
+	})
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("If-Range", `"etag"`)
+	req.Header.Set("Connection", "close")
+	req.Header.Set("User-Agent", "Lavf/60.0.0")
+	rr := httptest.NewRecorder()
+	playproxy.Handle(rr, req)
+	res := rr.Result()
+	defer res.Body.Close()
+	_, _ = io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+	if gotAE != "identity" {
+		t.Fatalf("Accept-Encoding=%q", gotAE)
+	}
+	if gotIfRange != `"etag"` {
+		t.Fatalf("If-Range=%q", gotIfRange)
+	}
+	if gotUA != "QuarkTest" {
+		t.Fatalf("User-Agent=%q", gotUA)
+	}
+	if !strings.EqualFold(gotConn, "close") {
+		t.Fatalf("Connection=%q", gotConn)
+	}
+}
+
 func TestHandleLeavesCDNPlaylistBytes(t *testing.T) {
 	t.Parallel()
 	raw := "#EXTM3U\nhttps://cdn.example/a.ts\n"

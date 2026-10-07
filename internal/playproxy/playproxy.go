@@ -683,9 +683,7 @@ func writeRawRequest(conn net.Conn, u *url.URL, headers map[string]string, range
 		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
 			continue
 		}
-		lk := strings.ToLower(strings.TrimSpace(k))
-		switch lk {
-		case "host", "content-length", "content-type", "connection", "transfer-encoding", "accept-encoding", "range", "if-range", "user-agent":
+		if skipUpstreamHeader(k) {
 			continue
 		}
 		fmt.Fprintf(&b, "%s: %s\r\n", http.CanonicalHeaderKey(k), v)
@@ -950,12 +948,7 @@ func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
 		return nil, err
 	}
 	applyUpstreamHeaders(req, e.Headers)
-	if rangeHdr != "" {
-		req.Header.Set("Range", rangeHdr)
-	}
-	if req.Header.Get("User-Agent") == "" && !isLoopbackHost(req.URL.Hostname()) {
-		req.Header.Set("User-Agent", settings.PlayUA())
-	}
+	applyPlaybackHeaders(req, r, e.Headers, rangeHdr)
 	client := &http.Client{
 		// 不设 Timeout：整片可能很长。关闭自动解压，避免声明 gzip 后把 Content-Length 拿掉。
 		Transport: playTransport,
@@ -966,12 +959,7 @@ func (e entry) fetch(r *http.Request, rangeHdr string) (*http.Response, error) {
 				return fmt.Errorf("stopped after 10 redirects")
 			}
 			applyUpstreamHeaders(next, e.Headers)
-			if rangeHdr != "" {
-				next.Header.Set("Range", rangeHdr)
-			}
-			if next.Header.Get("User-Agent") == "" && !isLoopbackHost(next.URL.Hostname()) {
-				next.Header.Set("User-Agent", settings.PlayUA())
-			}
+			applyPlaybackHeaders(next, r, e.Headers, rangeHdr)
 			return nil
 		},
 	}
@@ -992,15 +980,64 @@ func newPlayTransport() http.RoundTripper {
 
 func applyUpstreamHeaders(req *http.Request, headers map[string]string) {
 	for k, v := range headers {
-		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
-			continue
-		}
-		lk := strings.ToLower(k)
-		switch lk {
-		case "host", "content-length", "content-type", "connection", "transfer-encoding":
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" || skipUpstreamHeader(k) {
 			continue
 		}
 		req.Header.Set(k, v)
+	}
+}
+
+// skipUpstreamHeader 这些头由播放器这次请求决定，不用登记值盖掉。
+func skipUpstreamHeader(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "host", "content-length", "content-type", "connection", "transfer-encoding", "accept-encoding", "range", "if-range", "user-agent":
+		return true
+	default:
+		return false
+	}
+}
+
+// applyPlaybackHeaders 把播放器这次请求里的 Range、UA、If-Range、Accept-Encoding、Connection 写到上游。
+// 播放器没带的就不写。登记头只在播放器没带 UA / Range / If-Range 时补上。
+func applyPlaybackHeaders(req *http.Request, r *http.Request, registered map[string]string, rangeHdr string) {
+	if rangeHdr == "" {
+		rangeHdr = headerValue(registered, "range")
+	}
+	if rangeHdr != "" {
+		req.Header.Set("Range", rangeHdr)
+	}
+	ua := ""
+	if r != nil {
+		ua = clientSpliceUA(r, registered)
+	}
+	if ua == "" {
+		ua = headerValue(registered, "user-agent")
+	}
+	if ua == "" && req.URL != nil && !isLoopbackHost(req.URL.Hostname()) {
+		ua = settings.PlayUA()
+	}
+	if ua != "" {
+		req.Header.Set("User-Agent", ua)
+	}
+	ifRange := ""
+	if r != nil {
+		ifRange = strings.TrimSpace(r.Header.Get("If-Range"))
+	}
+	if ifRange == "" {
+		ifRange = headerValue(registered, "if-range")
+	}
+	if ifRange != "" {
+		req.Header.Set("If-Range", ifRange)
+	}
+	if r == nil {
+		return
+	}
+	if ae := strings.TrimSpace(r.Header.Get("Accept-Encoding")); ae != "" {
+		req.Header.Set("Accept-Encoding", ae)
+	}
+	conn := strings.ToLower(r.Header.Get("Connection"))
+	if strings.Contains(conn, "close") {
+		req.Close = true
 	}
 }
 
