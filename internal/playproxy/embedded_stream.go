@@ -27,6 +27,6 @@ func TryHandleEmbeddedProxy(w http.ResponseWriter, r *http.Request) bool {
 	if rangeHdr == "" {
 		rangeHdr = strings.TrimSpace(r.URL.Query().Get("range"))
 	}
-	serveEntry(w, r, entry{URL: media, Headers: headers}, rangeHdr)
+	serveEntry(w, r, entry{URL: media, Headers: headers}, rangeHdr, "")
 	return true
 }

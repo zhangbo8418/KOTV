@@ -7,7 +7,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/playproxy"
@@ -39,7 +42,7 @@ func TestRawSpliceKeepsUpstreamBytes(t *testing.T) {
 	if gotCookie != "qk=1" {
 		t.Fatalf("cookie=%q", gotCookie)
 	}
-	if strings.Contains(strings.ToLower(gotAE), "gzip") {
+	if gotAE != "" {
 		t.Fatalf("Accept-Encoding=%q", gotAE)
 	}
 	if res.Header.Get("Content-Type") != "video/mp4" {
@@ -134,6 +137,143 @@ func TestRawSpliceRewritesLoopbackPlaylist(t *testing.T) {
 	}
 	if headers["Cookie"] != "qk=1" {
 		t.Fatalf("segment headers=%v", headers)
+	}
+}
+
+func TestRawSpliceForwardsPlayerAcceptEncoding(t *testing.T) {
+	t.Parallel()
+	const payload = "0123456789abcdef"
+	var gotAE string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAE = r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer up.Close()
+
+	proxyURL := playproxy.Register(up.URL+"/movie.mp4", map[string]string{
+		"Cookie":          "qk=1",
+		"Accept-Encoding": "gzip",
+	})
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(playproxy.Handle))
+	defer srv.Close()
+	req, err := http.NewRequest(http.MethodGet, srv.URL+u.RequestURI(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept-Encoding", "identity")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if _, err := io.ReadAll(res.Body); err != nil {
+		t.Fatal(err)
+	}
+	if gotAE != "identity" {
+		t.Fatalf("Accept-Encoding=%q", gotAE)
+	}
+}
+
+func TestSecondRangeDropsPreviousUpstream(t *testing.T) {
+	t.Parallel()
+	secondRangeWhileFirstHeld(t, "close")
+}
+
+func TestSecondRangeWithoutConnection(t *testing.T) {
+	t.Parallel()
+	secondRangeWhileFirstHeld(t, "")
+}
+
+func secondRangeWhileFirstHeld(t *testing.T, connection string) {
+	t.Helper()
+	var serveMu sync.Mutex
+	var n atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveMu.Lock()
+		defer serveMu.Unlock()
+		id := n.Add(1)
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Accept-Ranges", "bytes")
+		if id == 1 {
+			w.Header().Set("Content-Length", strconv.Itoa(32<<20))
+			w.WriteHeader(http.StatusOK)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			buf := make([]byte, 32*1024)
+			for {
+				if _, err := w.Write(buf); err != nil {
+					return
+				}
+			}
+		}
+		w.Header().Set("Content-Length", "4")
+		_, _ = w.Write([]byte("TAIL"))
+	}))
+	defer up.Close()
+
+	proxyURL := playproxy.Register(up.URL+"/movie.mp4", map[string]string{"Cookie": "qk=1"})
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(playproxy.Handle))
+	defer srv.Close()
+	target := srv.URL + u.RequestURI()
+
+	req1, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req1.Header.Set("Range", "bytes=0-")
+	if connection != "" {
+		req1.Header.Set("Connection", connection)
+	}
+	res1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res1.Body.Close()
+	got := make(chan error, 1)
+	go func() {
+		_, err := res1.Body.Read(make([]byte, 1))
+		got <- err
+	}()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("第一段没有数据")
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	req2, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req2.Header.Set("Range", "bytes=100-")
+	if connection != "" {
+		req2.Header.Set("Connection", connection)
+	}
+	res2, err := client.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res2.Body.Close()
+	body, err := io.ReadAll(res2.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "TAIL" {
+		t.Fatalf("body=%q status=%d", body, res2.StatusCode)
 	}
 }
 
