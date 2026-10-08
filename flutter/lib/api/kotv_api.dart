@@ -269,6 +269,7 @@ class KotvApi {
     bool exact = false,
     String excludeSite = '',
     String excludeId = '',
+    List<Map<String, String>>? exclude,
   }) =>
       _post('/api/v1/search', {
         'keyword': keyword,
@@ -276,6 +277,7 @@ class KotvApi {
         if (exact) 'exact': true,
         if (excludeSite.isNotEmpty) 'excludeSite': excludeSite,
         if (excludeId.isNotEmpty) 'excludeId': excludeId,
+        if (exclude != null && exclude.isNotEmpty) 'exclude': exclude,
       });
 
   Future<Map<String, dynamic>> play({

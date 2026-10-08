@@ -16,8 +16,8 @@ func TestSearchFirstExactReturnsBeforeSlowSite(t *testing.T) {
 	vod, ok := searchFirstExact(
 		[]model.Site{locked, current, slow, fast},
 		"片名",
-		"cur",
-		"1",
+		"片名",
+		map[string]struct{}{"cur\n1": {}},
 		func(site model.Site, keyword string) ([]model.Vod, error) {
 			if site.Key == "locked" {
 				t.Errorf("quickSearch 不是 1 的站不应被搜索")
@@ -49,7 +49,7 @@ func TestSearchFirstExactReturnsBeforeSlowSite(t *testing.T) {
 func TestSearchFirstExactSkipsCurrentAndNonQuick(t *testing.T) {
 	cur := model.Site{Key: "cur", Name: "当前"}
 	off := model.Site{Key: "off", Name: "关", Changeable: model.FlexInt{Valid: true, Value: 2}}
-	vod, ok := searchFirstExact([]model.Site{cur, off}, "片名", "cur", "1", func(site model.Site, keyword string) ([]model.Vod, error) {
+	vod, ok := searchFirstExact([]model.Site{cur, off}, "片名", "片名", map[string]struct{}{"cur\n1": {}}, func(site model.Site, keyword string) ([]model.Vod, error) {
 		if site.Key != "cur" {
 			t.Errorf("searched %s", site.Key)
 		}
@@ -57,6 +57,32 @@ func TestSearchFirstExactSkipsCurrentAndNonQuick(t *testing.T) {
 	})
 	if ok || vod.VodID.String() != "" {
 		t.Fatalf("current item must not be returned, ok=%v id=%s", ok, vod.VodID.String())
+	}
+}
+
+func TestSearchFirstExactMatchesOriginalName(t *testing.T) {
+	site := model.Site{Key: "s", Name: "站"}
+	var gotQuery string
+	vod, ok := searchFirstExact([]model.Site{site}, "電影", "电影", nil, func(site model.Site, keyword string) ([]model.Vod, error) {
+		gotQuery = keyword
+		return []model.Vod{{VodID: "7", VodName: "電影"}}, nil
+	})
+	if gotQuery != "电影" {
+		t.Fatalf("query=%q", gotQuery)
+	}
+	if !ok || vod.VodID.String() != "7" {
+		t.Fatalf("ok=%v id=%s", ok, vod.VodID.String())
+	}
+}
+
+func TestSearchFirstExactSkipsTriedPairs(t *testing.T) {
+	sites := []model.Site{{Key: "a"}, {Key: "b"}, {Key: "c"}}
+	vod, ok := searchFirstExact(sites, "片名", "片名", map[string]struct{}{"a\n1": {}, "b\n2": {}}, func(site model.Site, keyword string) ([]model.Vod, error) {
+		id := map[string]string{"a": "1", "b": "2", "c": "3"}[site.Key]
+		return []model.Vod{{VodID: model.FlexString(id), VodName: "片名"}}, nil
+	})
+	if !ok || vod.VodID.String() != "3" || vod.Site == nil || vod.Site.Key != "c" {
+		t.Fatalf("got ok=%v id=%s site=%v", ok, vod.VodID.String(), vod.Site)
 	}
 }
 

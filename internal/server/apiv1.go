@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/remote"
 )
@@ -26,7 +27,7 @@ type ContentAPI interface {
 	APIDetail(siteKey, vodID string) (map[string]any, error)
 	APIDetailExpand(siteKey, vodID string, flags []map[string]any) (map[string]any, error)
 	APIBtProgress() map[string]any
-	APISearch(keyword string, siteKeys []string, exact bool, excludeSite, excludeID string) (map[string]any, error)
+	APISearch(keyword string, siteKeys []string, exact bool, exclude []model.VodKey) (map[string]any, error)
 	APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map[string]any, error)
 	APIRemotePoll() map[string]any
 	APISetMedia(state map[string]string)
@@ -499,7 +500,7 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 	keyword := strings.TrimSpace(r.URL.Query().Get("wd"))
 	var siteKeys []string
 	var exact bool
-	var excludeSite, excludeID string
+	var exclude []model.VodKey
 	if r.Method == http.MethodPost {
 		var body struct {
 			Keyword     string   `json:"keyword"`
@@ -508,6 +509,10 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 			Exact       bool     `json:"exact"`
 			ExcludeSite string   `json:"excludeSite"`
 			ExcludeID   string   `json:"excludeId"`
+			Exclude     []struct {
+				Site string `json:"site"`
+				ID   string `json:"id"`
+			} `json:"exclude"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.Keyword != "" {
@@ -517,14 +522,18 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 		}
 		siteKeys = body.SiteKeys
 		exact = body.Exact
-		excludeSite = body.ExcludeSite
-		excludeID = body.ExcludeID
+		for _, item := range body.Exclude {
+			exclude = append(exclude, model.VodKey{Site: item.Site, ID: item.ID})
+		}
+		if strings.TrimSpace(body.ExcludeSite) != "" && strings.TrimSpace(body.ExcludeID) != "" {
+			exclude = append(exclude, model.VodKey{Site: body.ExcludeSite, ID: body.ExcludeID})
+		}
 	}
 	if keyword == "" {
 		writeAPIError(w, http.StatusBadRequest, "missing keyword")
 		return
 	}
-	out, err := api.APISearch(keyword, siteKeys, exact, excludeSite, excludeID)
+	out, err := api.APISearch(keyword, siteKeys, exact, exclude)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, err.Error())
 		return

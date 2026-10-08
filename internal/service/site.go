@@ -640,13 +640,14 @@ func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcu
 
 // SearchFirstExact 只在可搜索、可换源、允许快速搜索的站里找片名完全相等的第一条。
 // 命中后立刻返回，不等其余站。不写入 SearchResult。
-func (s *SiteService) SearchFirstExact(keyword, excludeSite, excludeID string, siteKeys []string) (model.Vod, bool, error) {
-	keyword = strings.TrimSpace(keyword)
-	if keyword == "" {
+func (s *SiteService) SearchFirstExact(keyword string, siteKeys []string, exclude []model.VodKey) (model.Vod, bool, error) {
+	matchName := strings.TrimSpace(keyword)
+	if matchName == "" {
 		return model.Vod{}, false, nil
 	}
+	query := matchName
 	if spider.TransEnabled() {
-		keyword = spider.T2S(keyword)
+		query = spider.T2S(matchName)
 	}
 	sites := s.cfg.Sites()
 	if len(siteKeys) > 0 {
@@ -663,7 +664,7 @@ func (s *SiteService) SearchFirstExact(keyword, excludeSite, excludeID string, s
 	parentCID := hostclient.Current()
 	parentUID := hostclient.CurrentUserID()
 	parentDed := hostclient.DedicatedRuntime()
-	vod, ok := searchFirstExact(sites, keyword, strings.TrimSpace(excludeSite), strings.TrimSpace(excludeID), func(site model.Site, kw string) ([]model.Vod, error) {
+	vod, ok := searchFirstExact(sites, matchName, query, vodKeySet(exclude), func(site model.Site, kw string) ([]model.Vod, error) {
 		done := hostclient.EnterSession(parentCID, parentUID, parentDed)
 		defer done()
 		return s.searchSite(site, kw, true, "1")
@@ -671,10 +672,24 @@ func (s *SiteService) SearchFirstExact(keyword, excludeSite, excludeID string, s
 	return vod, ok, nil
 }
 
-// searchFirstExact 某个站返回精确片名后立刻交出结果。
-func searchFirstExact(sites []model.Site, keyword, excludeSite, excludeID string, search func(model.Site, string) ([]model.Vod, error)) (model.Vod, bool) {
-	keyword = strings.TrimSpace(keyword)
-	if keyword == "" || search == nil {
+func vodKeySet(exclude []model.VodKey) map[string]struct{} {
+	out := make(map[string]struct{}, len(exclude))
+	for _, k := range exclude {
+		site := strings.TrimSpace(k.Site)
+		id := strings.TrimSpace(k.ID)
+		if site == "" || id == "" {
+			continue
+		}
+		out[site+"\n"+id] = struct{}{}
+	}
+	return out
+}
+
+// searchFirstExact 某个站返回与原名完全相等的第一条后立刻交出结果。query 只发给站点。
+func searchFirstExact(sites []model.Site, matchName, query string, exclude map[string]struct{}, search func(model.Site, string) ([]model.Vod, error)) (model.Vod, bool) {
+	matchName = strings.TrimSpace(matchName)
+	query = strings.TrimSpace(query)
+	if matchName == "" || query == "" || search == nil {
 		return model.Vod{}, false
 	}
 	eligible := make([]model.Site, 0, len(sites))
@@ -698,17 +713,17 @@ func searchFirstExact(sites []model.Site, keyword, excludeSite, excludeID string
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			list, err := search(site, keyword)
+			list, err := search(site, query)
 			if err != nil || len(list) == 0 {
 				return
 			}
 			for _, v := range list {
 				name := strings.TrimSpace(v.VodName)
 				id := strings.TrimSpace(v.VodID.String())
-				if name != keyword || id == "" {
+				if name != matchName || id == "" {
 					continue
 				}
-				if site.Key == excludeSite && id == excludeID {
+				if _, skip := exclude[site.Key+"\n"+id]; skip {
 					continue
 				}
 				siteCopy := site

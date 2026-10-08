@@ -347,7 +347,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String _routeId = '';
   String _routeSite = '';
   String _routeTitle = '';
-  bool _emptyFallbackUsed = false;
+  final List<({String site, String id})> _emptyTried = [];
+  bool _emptyFallbackExhausted = false;
   String _routeMark = '';
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
@@ -610,7 +611,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _routeSite = site;
     _routeTitle = title;
     _routeMark = mark;
-    _emptyFallbackUsed = false;
+    _emptyTried.clear();
+    _emptyFallbackExhausted = false;
     _epIdx = -1;
     _flagIdx = 0;
     if (_miniDesktop) {
@@ -4036,10 +4038,27 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
+  void _rememberEmptyTried(String site, String id) {
+    final s = site.trim();
+    final i = id.trim();
+    if (s.isEmpty || i.isEmpty) return;
+    for (final e in _emptyTried) {
+      if (e.site == s && e.id == i) return;
+    }
+    _emptyTried.add((site: s, id: i));
+  }
+
+  bool _emptyTriedPair(String site, String id) {
+    for (final e in _emptyTried) {
+      if (e.site == site && e.id == id) return true;
+    }
+    return false;
+  }
+
   Future<bool> _switchEmptyDetail(String name) async {
     final q = name.trim();
-    if (q.isEmpty || _emptyFallbackUsed) return false;
-    _emptyFallbackUsed = true;
+    if (q.isEmpty || _emptyFallbackExhausted) return false;
+    _rememberEmptyTried(_routeSite, _routeId);
     try {
       final cfg = await ref.read(apiProvider).getConfig();
       final keys = ((cfg['sites'] as List?) ?? [])
@@ -4048,24 +4067,32 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           .where((s) => s.searchable && s.changeable && s.key.isNotEmpty)
           .map((s) => s.key)
           .toList();
-      if (keys.isEmpty) return false;
+      if (keys.isEmpty) {
+        _emptyFallbackExhausted = true;
+        return false;
+      }
       final data = await ref.read(apiProvider).search(
         q,
         sites: keys,
         exact: true,
-        excludeSite: _routeSite,
-        excludeId: _routeId,
+        exclude: [
+          for (final e in _emptyTried) {'site': e.site, 'id': e.id},
+        ],
       );
       VodItem? hit;
       for (final raw in ((data['list'] as List?) ?? [])) {
         if (raw is! Map) continue;
         final it = VodItem.fromJson(Map<String, dynamic>.from(raw));
         if (it.name.trim() != q || it.id.isEmpty || it.site.isEmpty) continue;
-        if (it.site == _routeSite && it.id == _routeId) continue;
+        if (_emptyTriedPair(it.site, it.id)) continue;
         hit = it;
         break;
       }
-      if (hit == null || !mounted) return false;
+      if (hit == null || !mounted) {
+        if (hit == null) _emptyFallbackExhausted = true;
+        return false;
+      }
+      _rememberEmptyTried(hit.site, hit.id);
       _routeId = hit.id;
       _routeSite = hit.site;
       _routeTitle = hit.name;

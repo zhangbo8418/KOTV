@@ -50,6 +50,12 @@ func (s Site) IsChangeable() bool {
 	return s.Changeable.Value == 1
 }
 
+// VodKey 一条影片在某个站上的标识。
+type VodKey struct {
+	Site string
+	ID   string
+}
+
 // IsQuickSearch 未声明时为开。显式不是 1 则关。
 func (s Site) IsQuickSearch() bool {
 	if !s.QuickSearch.Valid {
