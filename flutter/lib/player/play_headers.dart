@@ -3,18 +3,17 @@
 /// User-Agent 优先级：
 /// 1. 请求头已有 User-Agent / ua
 /// 2. 设置项 `ua`（非空）
-/// 3. 桌面用 [kotvChromePlayUA]，其它平台用 [kotvDefaultPlayUA]
+/// 3. [kotvDefaultPlayUA]
 library;
 
 import 'hls_js_support.dart';
-import 'kotv_platform.dart';
 
-/// 手机等未配置 `ua` 时的播放缺省。输入 `o` 填入这一条。
+/// 未配置 `ua` 时的播放缺省。输入 `o` 填入这一条。
 const kotvOkHttpPlayUA = 'okhttp/5.5.0';
 
 const kotvDefaultPlayUA = kotvOkHttpPlayUA;
 
-/// 桌面未配置 `ua` 时的播放缺省。输入 `c` 填入这一条。
+/// 输入 `c` 时填入的浏览器串。
 const kotvChromePlayUA =
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36';
 
@@ -25,10 +24,9 @@ void kotvApplyPlayUaSetting(String? raw) {
   _settingsUa = (raw ?? '').trim();
 }
 
-/// 当前生效的缺省 UA。设置优先，桌面用 [kotvChromePlayUA]，其它平台用 [kotvDefaultPlayUA]。
+/// 当前生效的缺省 UA。设置优先，否则 [kotvDefaultPlayUA]。
 String kotvEffectivePlayUa() {
   if (_settingsUa.isNotEmpty) return _settingsUa;
-  if (kotvIsDesktop()) return kotvChromePlayUA;
   return kotvDefaultPlayUA;
 }
 

@@ -521,23 +521,15 @@ func Get(t Type) string {
 	return ""
 }
 
-// DefaultPlayUA 手机等未配置 ua 时的播放缺省 User-Agent。
+// DefaultPlayUA 未配置 ua 时的播放缺省 User-Agent。
 const DefaultPlayUA = util.OkHttpUA
 
-// DesktopPlayUA 桌面未配置 ua 时的播放缺省 User-Agent。
-const DesktopPlayUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
-
-// PlayUA 播放 User-Agent：设置 ua 非空则用之，桌面用 DesktopPlayUA，其它用 DefaultPlayUA。
+// PlayUA 播放 User-Agent：设置 ua 非空则用之，否则 DefaultPlayUA。
 func PlayUA() string {
 	if v := strings.TrimSpace(Get(UA)); v != "" {
 		return v
 	}
-	switch runtime.GOOS {
-	case "darwin", "windows", "linux":
-		return DesktopPlayUA
-	default:
-		return DefaultPlayUA
-	}
+	return DefaultPlayUA
 }
 
 // Set 设置值。已删除的项不再写回。

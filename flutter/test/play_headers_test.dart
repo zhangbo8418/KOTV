@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kotv/player/kotv_platform.dart';
 import 'package:kotv/player/play_headers.dart';
 
 void main() {
@@ -110,7 +109,7 @@ void main() {
     );
     expect(
       kotvNormalizePlayHeaders(const {}, url: 'https://cdn.example/a.m3u8')['User-Agent'],
-      kotvIsDesktop() ? kotvChromePlayUA : kotvOkHttpPlayUA,
+      'okhttp/5.5.0',
     );
     kotvApplyPlayUaSetting('CustomPlayer/1');
     expect(
