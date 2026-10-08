@@ -7,6 +7,18 @@ allprojects {
     }
 }
 
+// okhttp-android 5.5.0 的 AAR 声明 minCompileSdk=37。工程 compileSdk 仍是 36，targetSdk 仍是 28。
+// 选同一版本的 JVM 构件，播放和爬虫仍是 OkHttp 5.5.0，打包不再被这条元数据拦住。
+subprojects { sub ->
+    sub.configurations.configureEach { cfg ->
+        cfg.resolutionStrategy.dependencySubstitution {
+            substitute(module("com.squareup.okhttp3:okhttp-android"))
+                .using(module("com.squareup.okhttp3:okhttp-jvm:5.5.0"))
+                .because("okhttp-android 5.5.0 要求 compileSdk 37")
+        }
+    }
+}
+
 rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
