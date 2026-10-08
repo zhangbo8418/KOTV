@@ -78,7 +78,7 @@ func fetchStrmHTTP(rawURL string) string {
 	if err != nil {
 		return rawURL
 	}
-	req.Header.Set("User-Agent", "okhttp/4.12.0")
+	req.Header.Set("User-Agent", util.OkHttpUA)
 	resp, err := client.Do(req)
 	if err != nil {
 		return rawURL

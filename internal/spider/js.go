@@ -1141,7 +1141,7 @@ func doJSRequest(u string, options jsHTTPRequest) map[string]interface{} {
 	}
 	// 脚本未带 UA 时走 OkHttp 默认类 UA，避免 Go-http-client 被拦
 	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "okhttp/4.12.0")
+		req.Header.Set("User-Agent", util.OkHttpUA)
 	}
 	util.ApplyBasicFromUserInfo(req)
 	timeoutMs := options.Timeout

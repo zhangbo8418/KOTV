@@ -27,9 +27,6 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
-import androidx.annotation.OptIn
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.common.util.Util
 import `is`.xyz.mpv.MPVLib
 import java.io.File
 import java.net.HttpURLConnection
@@ -1627,12 +1624,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return current
   }
 
-  @OptIn(UnstableApi::class)
-  private fun playUserAgent(): String {
-    val ctx = appContext ?: return FALLBACK_PLAY_UA
-    return Util.getUserAgent(ctx, ctx.packageName)
-  }
-
   private fun applyProbeHeaders(conn: HttpURLConnection, headers: Map<String, String>) {
     var ua = ""
     for ((rawKey, rawValue) in headers) {
@@ -1646,7 +1637,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       conn.setRequestProperty(key, value)
     }
-    if (ua.isEmpty()) ua = playUserAgent()
+    if (ua.isEmpty()) ua = FALLBACK_PLAY_UA
     conn.setRequestProperty("User-Agent", ua)
   }
 
@@ -1704,7 +1695,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         else -> fields.add("$key: ${escapeListValue(value)}")
       }
     }
-    if (ua.isEmpty()) ua = playUserAgent()
+    if (ua.isEmpty()) ua = FALLBACK_PLAY_UA
     MPVLib.setPropertyString("user-agent", ua)
     MPVLib.setPropertyString("referrer", referer)
     MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
@@ -1944,8 +1935,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       "brightness", "contrast", "saturation", "gamma", "hue",
     )
     private const val TAG = "KotvMpv"
-    private const val FALLBACK_PLAY_UA =
-      "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
+    private const val FALLBACK_PLAY_UA = "okhttp/5.5.0"
     // 仅作 open 前的初值；open/setOpts 后以 Dart props 下发的 demuxer-lavf-o 为准（见 lavfBase）。
     // 不设 protocol_whitelist：写了就是拒绝名单外协议（RTSP/RTMP/RTP）。
     private const val LAVF_DEMUXER_O =

@@ -29,7 +29,6 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import com.bobo.kotv.exo.KotvExoVideoEqController
-import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
@@ -361,7 +360,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "sdkInt" -> result.success(Build.VERSION.SDK_INT)
-      "playUserAgent" -> result.success(defaultUserAgent())
       "open" -> {
         val url = call.argument<String>("url")?.trim().orEmpty()
         if (url.isEmpty()) {
@@ -2410,10 +2408,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  private fun defaultUserAgent(): String {
-    val ctx = appContext ?: return FALLBACK_PLAY_UA
-    return Util.getUserAgent(ctx, ctx.packageName)
-  }
+  private fun defaultUserAgent(): String = FALLBACK_PLAY_UA
 
   /** Dart 侧已做头规范化；此处仅补缺省 UA。 */
   private fun normalizeHeaders(raw: Map<String, String>): Map<String, String> {
@@ -2435,8 +2430,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     const val VIEW_TYPE = "kotv_exo/surface"
     private val STANDARD_EQ_CENTERS_MILLIHZ =
       intArrayOf(32_000, 64_000, 125_000, 250_000, 500_000, 1_000_000, 2_000_000, 4_000_000, 8_000_000, 16_000_000)
-    private const val FALLBACK_PLAY_UA =
-      "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
+    private const val FALLBACK_PLAY_UA = "okhttp/5.5.0"
 
     /** 硬解优先：硬件编解码器在前，软件 MediaCodec 仍保留作兜底（勿只返回 hard，否则 profileLevel 拒支持时会直接跳进坏软解 FFmpeg）。 */
     private val HARD_PREFER_SELECTOR = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->

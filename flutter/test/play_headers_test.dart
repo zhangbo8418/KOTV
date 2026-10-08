@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kotv/player/kotv_platform.dart';
 import 'package:kotv/player/play_headers.dart';
 
 void main() {
@@ -100,17 +101,16 @@ void main() {
     );
   });
 
-  test('empty site header uses platform ua, settings ua wins', () {
+  test('empty site header uses okhttp ua, settings ua wins', () {
     kotvApplyPlayUaSetting('');
-    kotvSetPlatformPlayUa('');
+    expect(kotvDefaultPlayUA, 'okhttp/5.5.0');
     expect(
-      kotvNormalizePlayHeaders(const {}, url: 'https://cdn.example/a.m3u8')['User-Agent'],
-      kotvDefaultPlayUA,
+      kotvChromePlayUA,
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36',
     );
-    kotvSetPlatformPlayUa('com.bobo.kotv/1.2.3 (Linux;Android 16) ExoPlayerLib/1.11.0');
     expect(
       kotvNormalizePlayHeaders(const {}, url: 'https://cdn.example/a.m3u8')['User-Agent'],
-      'com.bobo.kotv/1.2.3 (Linux;Android 16) ExoPlayerLib/1.11.0',
+      kotvIsDesktop() ? kotvChromePlayUA : kotvOkHttpPlayUA,
     );
     kotvApplyPlayUaSetting('CustomPlayer/1');
     expect(
@@ -125,6 +125,5 @@ void main() {
       'from-site',
     );
     kotvApplyPlayUaSetting('');
-    kotvSetPlatformPlayUa('');
   });
 }

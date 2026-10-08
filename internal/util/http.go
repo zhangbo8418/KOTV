@@ -180,9 +180,12 @@ func HTTPPostForm(rawURL string, headers map[string]string, params map[string]st
 	return string(b), nil
 }
 
+// OkHttpUA 请求未带 User-Agent 时写入的缺省串。
+const OkHttpUA = "okhttp/5.5.0"
+
 func applyHeaders(req *http.Request, headers map[string]string) {
 	if headers == nil || headers["User-Agent"] == "" {
-		req.Header.Set("User-Agent", "okhttp/4.12.0")
+		req.Header.Set("User-Agent", OkHttpUA)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)

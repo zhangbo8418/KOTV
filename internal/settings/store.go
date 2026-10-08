@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/bobo/KOTV/internal/paths"
+	"github.com/bobo/KOTV/internal/util"
 )
 
 // Type 设置项类型。
@@ -520,15 +521,23 @@ func Get(t Type) string {
 	return ""
 }
 
-// DefaultPlayUA 未配置 ua 时的播放缺省 User-Agent（Media3 Util.getUserAgent(applicationId) 格式）。
-const DefaultPlayUA = "com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1"
+// DefaultPlayUA 手机等未配置 ua 时的播放缺省 User-Agent。
+const DefaultPlayUA = util.OkHttpUA
 
-// PlayUA 播放 User-Agent：设置 ua 非空则用之，否则 DefaultPlayUA。
+// DesktopPlayUA 桌面未配置 ua 时的播放缺省 User-Agent。
+const DesktopPlayUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
+
+// PlayUA 播放 User-Agent：设置 ua 非空则用之，桌面用 DesktopPlayUA，其它用 DefaultPlayUA。
 func PlayUA() string {
 	if v := strings.TrimSpace(Get(UA)); v != "" {
 		return v
 	}
-	return DefaultPlayUA
+	switch runtime.GOOS {
+	case "darwin", "windows", "linux":
+		return DesktopPlayUA
+	default:
+		return DefaultPlayUA
+	}
 }
 
 // Set 设置值。已删除的项不再写回。

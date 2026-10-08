@@ -16,7 +16,6 @@ import 'desktop/mini_player_window.dart';
 import 'api/kotv_engine_url.dart';
 import 'engine/engine_launcher.dart';
 import 'player/buffer_budget.dart';
-import 'player/play_headers.dart';
 import 'player/kotv_playback.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
@@ -139,10 +138,6 @@ Future<void> main() async {
           DeviceOrientation.landscapeRight,
         ]);
       }
-    } catch (_) {}
-    try {
-      final ua = await const MethodChannel('kotv_exo').invokeMethod<String>('playUserAgent');
-      kotvSetPlatformPlayUa(ua);
     } catch (_) {}
     try {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);

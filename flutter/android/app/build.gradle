@@ -211,7 +211,7 @@ dependencies {
     // Surface/Texture 共用：帧着色器调色（setVideoEffects）
     implementation "androidx.media3:media3-effect:$media3"
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
-    implementation "com.squareup.okhttp3:okhttp:5.4.0"
+    implementation "com.squareup.okhttp3:okhttp:5.5.0"
     // 海报用 Glide + @Headers=
     implementation "com.github.bumptech.glide:glide:4.16.0"
     kapt "com.github.bumptech.glide:compiler:4.16.0"
@@ -231,8 +231,8 @@ dependencies {
 configurations.configureEach {
     resolutionStrategy.eachDependency { details ->
         if (details.requested.group == "com.squareup.okhttp3") {
-            details.useVersion("5.4.0")
-            details.because("align with kotv-bridge OkHttp 5.4.0")
+            details.useVersion("5.5.0")
+            details.because("kotv-bridge OkHttp 5.5.0")
         }
     }
 }
