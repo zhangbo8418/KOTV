@@ -2,6 +2,8 @@ package app
 
 import (
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,6 +58,52 @@ func TestPreparePlaybackURLSkipsLocal(t *testing.T) {
 	in := "file:///storage/emulated/0/a.mp4"
 	if got := a.PreparePlaybackURL(in, map[string]string{"User-Agent": "x"}); got != in {
 		t.Fatalf("local url was proxied: %s", got)
+	}
+}
+
+func TestPreparePlaybackURLLocalFileStaysPath(t *testing.T) {
+	hostclient.SetPublicBase("")
+	f, err := os.CreateTemp("", "kotv-local-*.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+	a := &App{}
+	if got := a.PreparePlaybackURL(name, nil); got != name {
+		t.Fatalf("local playback changed path: %s", got)
+	}
+	if got := a.PreparePlaybackURL("content://media/1", nil); got != "content://media/1" {
+		t.Fatalf("content uri changed: %s", got)
+	}
+}
+
+func TestPreparePlaybackURLRemoteLocalFile(t *testing.T) {
+	hostclient.SetPublicBase("http://203.0.113.8:9978")
+	defer hostclient.SetPublicBase("")
+	f, err := os.CreateTemp("", "kotv-remote-*.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+	a := &App{}
+	got := a.PreparePlaybackURL(name, nil)
+	prefix := "http://203.0.113.8:9978/file/"
+	if !strings.HasPrefix(got, prefix) {
+		t.Fatalf("remote local file = %q", got)
+	}
+	if !strings.Contains(got, filepath.Base(name)) {
+		t.Fatalf("remote local file missing name: %s", got)
+	}
+	if got := a.PreparePlaybackURL("content://media/1", nil); got != "content://media/1" {
+		t.Fatalf("content uri changed: %s", got)
+	}
+	missing := "/tmp/kotv-missing-not-there.mp4"
+	if got := a.PreparePlaybackURL(missing, nil); got != missing {
+		t.Fatalf("missing file rewritten: %s", got)
 	}
 }
 

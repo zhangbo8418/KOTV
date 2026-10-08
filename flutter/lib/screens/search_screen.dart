@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 
 import '../models/models.dart';
 import '../providers.dart';
+import '../search/suggest_words.dart';
+import '../search/zhu_to_pin.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
@@ -31,22 +35,25 @@ class SearchScreen extends ConsumerStatefulWidget {
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _ctrl = TextEditingController();
   List<_SiteCollect> _collects = [];
-  List<String> _hot = List<String>.from(_hotDefaults);
+  List<String> _hot = const [];
+  String _wordTitle = '热门搜索';
   String? _status;
   bool _busy = false;
+  bool _zhuyin = false;
   int _searchGen = 0;
+  int _wordGen = 0;
   int _doneSites = 0;
   int _totalSites = 0;
+  String _lastQuery = '';
+  Timer? _wordTimer;
 
   static const _keys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  static const _hotDefaults = [
-    '志愿军', '寻秦记电影版', '好家伙', '放开那个女巫',
-    '漫步月球', '独行月球', '流浪地球', '柯南',
-  ];
+  static const _zhuyinKeys = 'ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ0123456789';
 
   @override
   void initState() {
     super.initState();
+    _ctrl.addListener(_onQueryChanged);
     _loadHot();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final pending = ref.read(pendingSearchProvider);
@@ -61,16 +68,78 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Future<void> _loadHot() async {
     try {
       final st = await ref.read(apiProvider).getSettings();
-      final hist = ((st['searchHistory'] as List?) ?? []).map((e) => '$e').where((e) => e.isNotEmpty).toList();
-      if (hist.isNotEmpty && mounted) {
-        setState(() => _hot = hist.take(12).toList());
-      }
+      final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      final zhuyin = '${settings['searchZhuyin'] ?? ''}'.toLowerCase() == 'true';
+      final hot = ((st['searchHot'] as List?) ?? []).map((e) => '$e').where((e) => e.isNotEmpty).toList();
+      if (!mounted) return;
+      setState(() {
+        _zhuyin = zhuyin;
+        if (hot.isNotEmpty && _ctrl.text.trim().isEmpty) _hot = hot;
+      });
+    } catch (_) {}
+    if (mounted) unawaited(_refreshWords(_ctrl.text));
+  }
+
+  void _onQueryChanged() {
+    if (_ctrl.text == _lastQuery) return;
+    _lastQuery = _ctrl.text;
+    _wordGen++;
+    final gen = _wordGen;
+    _wordTimer?.cancel();
+    _wordTimer = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted || gen != _wordGen) return;
+      unawaited(_refreshWords(_ctrl.text));
+    });
+    if (_collects.isNotEmpty && mounted) {
+      setState(() => _collects = []);
+    }
+  }
+
+  Future<void> _refreshWords(String raw) async {
+    final text = raw.trim();
+    final gen = _wordGen;
+    if (text.isEmpty) {
+      if (mounted) setState(() => _wordTitle = '热门搜索');
+      try {
+        final res = await http.get(
+          Uri.parse('https://api.web.360kan.com/v1/rank?cat=1'),
+          headers: const {'Referer': 'https://www.360kan.com/rank/general'},
+        ).timeout(const Duration(seconds: 8));
+        if (!mounted || gen != _wordGen || res.statusCode != 200) return;
+        final words = parseSuggestTitles(res.body);
+        if (words.isEmpty) return;
+        setState(() => _hot = words);
+        await ref.read(apiProvider).setSetting('searchHot', jsonEncode(words));
+      } catch (_) {}
+      return;
+    }
+    if (mounted) setState(() => _wordTitle = '联想');
+    try {
+      final key = Uri.encodeQueryComponent(zhuToPin(text));
+      final res = await http.get(
+        Uri.parse('https://suggest.video.iqiyi.com/?if=mobile&key=$key'),
+      ).timeout(const Duration(seconds: 8));
+      if (!mounted || gen != _wordGen || _ctrl.text.trim().isEmpty || res.statusCode != 200) return;
+      setState(() => _hot = parseSuggestTitles(res.body));
+    } catch (_) {
+      if (mounted && gen == _wordGen) setState(() => _hot = const []);
+    }
+  }
+
+  Future<void> _toggleZhuyin() async {
+    final next = !_zhuyin;
+    setState(() => _zhuyin = next);
+    try {
+      await ref.read(apiProvider).setSetting('searchZhuyin', next ? 'true' : 'false');
     } catch (_) {}
   }
 
   @override
   void dispose() {
     _searchGen++;
+    _wordGen++;
+    _wordTimer?.cancel();
+    _ctrl.removeListener(_onQueryChanged);
     _ctrl.dispose();
     super.dispose();
   }
@@ -280,6 +349,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         _ctrl.selection = TextSelection.collapsed(offset: cursor >= text.length ? text.length : cursor + 1);
       case '搜索':
         if (!_busy) _search(text);
+      case '注音':
+      case '英文':
+        unawaited(_toggleZhuyin());
       default:
         if (text.length > 19) return;
         _ctrl.value = TextEditingValue(
@@ -291,7 +363,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   Widget _initialsKeyboard() {
     final p = KotvPalette.of(context);
-    final cells = <String?>['退格', '←', '→', '搜索', null, null, null, ..._keys.split('')];
+    final letters = (_zhuyin ? _zhuyinKeys : _keys).runes.map(String.fromCharCode).toList();
+    final cells = <String?>['退格', '←', '→', '搜索', _zhuyin ? '英文' : '注音', null, null, ...letters];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -323,7 +396,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               final label = cells[i];
               if (label == null) return const SizedBox.shrink();
               return TvFocus(
-                autofocus: i == 0,
                 onPressed: () => _onInitialKey(label),
                 onLongPress: label == '退格'
                     ? () {
@@ -562,7 +634,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Text('热门搜索', style: TextStyle(color: p.fg, fontSize: 20, fontWeight: FontWeight.w700)),
+            child: Text(_wordTitle, style: TextStyle(color: p.fg, fontSize: 20, fontWeight: FontWeight.w700)),
           ),
           Expanded(
             child: ListView.separated(

@@ -93,6 +93,7 @@ func (a *App) APIGetConfig() map[string]any {
 			"searchable": s.IsSearchable(),
 			"changeable": s.IsChangeable(),
 			"indexs":     s.IsIndex(),
+			"style":      styleTypeOf(s.Style),
 			"home":       s.Key == home.Key,
 		})
 	}
@@ -215,6 +216,7 @@ func (a *App) APIHome() (map[string]any, error) {
 		"site":  home.Key,
 		"class": typesDTO(res.Types),
 		"list":  vodsDTO(res.List, home.Key),
+		"style": styleTypeOf(home.Style),
 	}, nil
 }
 
@@ -227,19 +229,20 @@ func (a *App) APICategory(tid, pg string, extend map[string]string, siteKey stri
 	if err != nil {
 		return nil, err
 	}
-	used := cfg.Home().Key
+	used := cfg.Home()
 	if k := strings.TrimSpace(siteKey); k != "" {
 		if site := cfg.GetSite(k); site != nil && site.Key != "" {
-			used = site.Key
+			used = *site
 		}
 	}
 	return map[string]any{
 		"ok":        true,
-		"site":      used,
+		"site":      used.Key,
 		"tid":       tid,
 		"pg":        pg,
 		"pagecount": res.PageCount.Value,
-		"list":      vodsDTO(res.List, used),
+		"list":      vodsDTO(res.List, used.Key),
+		"style":     styleTypeOf(used.Style),
 		"filters":   filtersDTO(sites.FiltersForCategory(tid)),
 	}, nil
 }
@@ -685,7 +688,10 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 			return nil, fmt.Errorf("专用源解析失败: %w", err)
 		}
 		playURL = local
-	} else if !thunder.IsLocalStream(playURL) && !IsLocalMediaURL(playURL) {
+	} else if IsLocalMediaURL(playURL) {
+		playURL = exposeLocalFile(playURL)
+		mediaURL = playURL
+	} else if !thunder.IsLocalStream(playURL) {
 		playURL = a.PreparePlaybackURL(playURL, headers)
 		mediaURL = playURL
 	}
@@ -784,6 +790,13 @@ func filtersDTO(filters []model.Filter) []map[string]any {
 	return out
 }
 
+func styleTypeOf(s *model.Style) string {
+	if s == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.Type.String())
+}
+
 func exposeResourceURL(raw string) string {
 	return playproxy.PublicizeURL(localproxy.ConvertScheme(strings.TrimSpace(raw)))
 }
@@ -806,6 +819,7 @@ func vodsDTO(list []model.Vod, siteKey string) []map[string]any {
 			"vod_tag":     v.VodTag,
 			"cate":        v.Cate.String(),
 			"is_folder":   vodLooksLikeFolder(v),
+			"style":       styleTypeOf(v.Style),
 		})
 	}
 	return out
@@ -1128,6 +1142,7 @@ func (a *App) APIGetSettings() map[string]any {
 		settings.SubtitleBgOpacity, settings.SubtitleEdgeOpacity, settings.SubtitleOffsetMs,
 		settings.SubtitleShadowStrength, settings.SubtitleFont, settings.SubtitleFontPath,
 		settings.SubtitleSecondaryPos, settings.SubtitleBgColor,
+		settings.SearchZhuyin,
 		settings.DanmakuLoad, settings.DanmakuAuto, settings.DanmakuSpiderFirst,
 		settings.DanmakuShowScroll, settings.DanmakuShowTop, settings.DanmakuShowBottom,
 		settings.DanmakuShowReverse, settings.DanmakuShowSpecial, settings.DanmakuShowPositioned,
@@ -1162,6 +1177,7 @@ func (a *App) APIGetSettings() map[string]any {
 	out["runtime"] = appruntime.Status()
 	out["crawlerEnabled"] = !localCrawlerDisabled()
 	out["searchHistory"] = settings.GetSearchHistory()
+	out["searchHot"] = settings.GetSearchHot()
 	out["backdrop"] = a.APIBackdrop()
 	out["pairCode"] = settings.EnsureSyncPairCode()
 	out["remoteAuth"] = strings.EqualFold(settings.Get(settings.RemoteAuth), "true")
@@ -1401,6 +1417,18 @@ func (a *App) resolveBackdropImageURL(src string) string {
 	return src
 }
 
+func parseStringList(v string) []string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	var items []string
+	if json.Unmarshal([]byte(v), &items) == nil {
+		return items
+	}
+	return nil
+}
+
 func (a *App) APISetSettings(kv map[string]string) error {
 	needProxy := false
 	needLive := false
@@ -1409,6 +1437,10 @@ func (a *App) APISetSettings(kv map[string]string) error {
 	for k, v := range kv {
 		k = strings.TrimSpace(k)
 		if k == "" {
+			continue
+		}
+		if k == "searchHot" {
+			settings.SetSearchHot(parseStringList(v))
 			continue
 		}
 		t := settings.Type(k)

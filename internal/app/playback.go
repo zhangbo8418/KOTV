@@ -2,12 +2,16 @@ package app
 
 import (
 	"fmt"
+	"net/url"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/m3u8"
+	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/thunder"
 )
@@ -54,8 +58,11 @@ func IsEphemeralPlayURL(u string) bool {
 // PreparePlaybackURL 将媒体直链转为当前会话可播地址（m3u8 过滤缓存 + header 代理）。
 func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 	raw = strings.TrimSpace(raw)
-	if raw == "" || IsEphemeralPlayURL(raw) || IsLocalMediaURL(raw) {
+	if raw == "" || IsEphemeralPlayURL(raw) {
 		return raw
+	}
+	if IsLocalMediaURL(raw) {
+		return exposeLocalFile(raw)
 	}
 	// convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
@@ -82,6 +89,37 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 		playURL = playproxy.Register(playURL, headers)
 	}
 	return playproxy.PublicizeURL(playURL, headers)
+}
+
+// exposeLocalFile 远端前端播放时，把本机文件改成 /file/ 地址。本机请求保持原路径。content: 不改。
+func exposeLocalFile(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || hostclient.PublicBase() == "" {
+		return raw
+	}
+	if strings.HasPrefix(strings.ToLower(raw), "content:") {
+		return raw
+	}
+	if !IsLocalMediaURL(raw) {
+		return raw
+	}
+	resolved := paths.ResolveMediaPath(raw)
+	if resolved == "" {
+		return raw
+	}
+	rel := strings.TrimPrefix(filepath.ToSlash(resolved), "/")
+	parts := strings.Split(rel, "/")
+	enc := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		enc = append(enc, url.PathEscape(p))
+	}
+	if len(enc) == 0 {
+		return raw
+	}
+	return strings.TrimRight(hostclient.PublicBase(), "/") + "/file/" + strings.Join(enc, "/")
 }
 
 // PlayHistory 用历史里保存的原始媒体地址起播（会重新走 m3u8/代理，不依赖旧缓存 id）。

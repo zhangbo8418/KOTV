@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../vod/list_style.dart';
 import 'kotv_network_image.dart';
 
 /// poster：约 214×280、圆角 10、底栏标题、备注粉角标。
@@ -126,10 +127,97 @@ class PosterCard extends StatelessWidget {
     );
   }
 
-  static bool _isHttpPic(String s) {
-    if (kotvDecodeDataImage(s) != null) return true;
-    final u = kotvResolveImageRequest(s).url;
-    return u.startsWith('http://') || u.startsWith('https://');
+  static bool _isHttpPic(String s) => kotvIsPictureUrl(s);
+}
+
+bool kotvIsPictureUrl(String s) {
+  if (kotvDecodeDataImage(s) != null) return true;
+  final u = kotvResolveImageRequest(s).url;
+  return u.startsWith('http://') || u.startsWith('https://');
+}
+
+/// 横向一行：48 图、名称、备注。没有图时显示名称首字。
+class VodListTile extends StatelessWidget {
+  const VodListTile({
+    super.key,
+    required this.item,
+    required this.onTap,
+    this.onLongPress,
+  });
+
+  final VodItem item;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = KotvPalette.of(context);
+    final pic = item.pic.trim();
+    final letter = kotvNameInitial(item.name);
+    final thumb = pic.isNotEmpty && kotvIsPictureUrl(pic)
+        ? KotvNetworkImage(
+            pic,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _ListInitial(letter: letter),
+          )
+        : _ListInitial(letter: letter);
+    return TvFocus(
+      onPressed: onTap,
+      onLongPress: onLongPress,
+      borderRadius: 8,
+      child: SizedBox(
+        height: 56,
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(width: 48, height: 48, child: thumb),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                  if (item.remarks.isNotEmpty)
+                    Text(
+                      item.remarks,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: p.muted, fontSize: 12),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ListInitial extends StatelessWidget {
+  const _ListInitial({required this.letter});
+  final String letter;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = KotvPalette.of(context);
+    return ColoredBox(
+      color: p.posterPh,
+      child: Center(
+        child: Text(
+          letter,
+          style: TextStyle(color: p.fg, fontSize: 20, fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
   }
 }
 

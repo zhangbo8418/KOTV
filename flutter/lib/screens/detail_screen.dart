@@ -43,6 +43,7 @@ import '../vod/vod_open.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../theme/stable_focus.dart';
 import '../vod/content_clicker.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
@@ -346,6 +347,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String _routeId = '';
   String _routeSite = '';
   String _routeTitle = '';
+  bool _emptyFallbackUsed = false;
   String _routeMark = '';
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
@@ -608,6 +610,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _routeSite = site;
     _routeTitle = title;
     _routeMark = mark;
+    _emptyFallbackUsed = false;
     _epIdx = -1;
     _flagIdx = 0;
     if (_miniDesktop) {
@@ -1266,10 +1269,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (mounted) await _leavePage();
         return;
       }
-      if (fetchError != null) throw fetchError;
+      if (fetchError != null) {
+        if (await _switchEmptyDetail(_routeTitle)) return;
+        throw fetchError;
+      }
       if (!mounted) return;
       final data = fetched!;
       final vod = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
+      if (vod.flags.isEmpty) {
+        final name = _routeTitle.trim().isNotEmpty ? _routeTitle.trim() : vod.name.trim();
+        if (await _switchEmptyDetail(name)) return;
+      }
       final id = vod.id.isNotEmpty ? vod.id : _routeId;
       final site = vod.site.isNotEmpty ? vod.site : _routeSite;
       var configSource = '';
@@ -3656,7 +3666,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               }
             }),
             _action('搜索', Icons.search_rounded, () {
-              final q = _quickSearchQuery(d);
+              final q = d.name.trim();
               unawaited(_leavePage(afterPop: () {
                 ref.read(pendingSearchProvider.notifier).state = q;
                 goKotvPage(ref, KotvPage.search);
@@ -3909,7 +3919,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           final pal = KotvPalette.of(ctx);
           final known = names.contains(cur);
           Widget option(String label, String value, {required bool on}) {
-            return TvFocus(
+            return KotvStableFocus(
               autofocus: on,
               scrollIntoView: true,
               borderRadius: 8,
@@ -4026,17 +4036,38 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
-  String _quickSearchQuery(VodDetail d) {
-    var q = d.actor.trim();
-    if (q.isEmpty || q == '暂无') return d.name;
-    for (final sep in [',', '，', '/', '、', ' ']) {
-      final i = q.indexOf(sep);
-      if (i > 0) {
-        q = q.substring(0, i).trim();
+  Future<bool> _switchEmptyDetail(String name) async {
+    final q = name.trim();
+    if (q.isEmpty || _emptyFallbackUsed) return false;
+    _emptyFallbackUsed = true;
+    try {
+      final cfg = await ref.read(apiProvider).getConfig();
+      final keys = ((cfg['sites'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
+          .where((s) => s.searchable && s.changeable && s.key.isNotEmpty)
+          .map((s) => s.key)
+          .toList();
+      if (keys.isEmpty) return false;
+      final data = await ref.read(apiProvider).search(q, sites: keys);
+      VodItem? hit;
+      for (final raw in ((data['list'] as List?) ?? [])) {
+        if (raw is! Map) continue;
+        final it = VodItem.fromJson(Map<String, dynamic>.from(raw));
+        if (it.name.trim() != q || it.id.isEmpty || it.site.isEmpty) continue;
+        if (it.site == _routeSite && it.id == _routeId) continue;
+        hit = it;
         break;
       }
+      if (hit == null || !mounted) return false;
+      _routeId = hit.id;
+      _routeSite = hit.site;
+      _routeTitle = hit.name;
+      await _load();
+      return true;
+    } catch (_) {
+      return false;
     }
-    return q.isEmpty ? d.name : q;
   }
 
   void _showVodMeta(VodDetail d) {

@@ -156,6 +156,8 @@ const (
 	ExoDiskPreloadSizeMb     Type = "exoDiskPreloadSizeMb"
 	// Language：UI/系统语言提示（如 zh-Hant）；TransEnabled 用。
 	Language Type = "language"
+	// SearchZhuyin 横屏搜索键盘用注音。
+	SearchZhuyin Type = "searchZhuyin"
 )
 
 type item struct {
@@ -308,6 +310,7 @@ func defaultFile() file {
 			{ID: "exoDiskPreloadThreads", Label: "Exo预读线程", Value: "1"},
 			{ID: "exoDiskPreloadSizeMb", Label: "Exo预读容量MB", Value: "128"},
 			{ID: "language", Label: "界面语言", Value: ""},
+			{ID: "searchZhuyin", Label: "注音键盘", Value: "false"},
 		},
 		Cache: make(map[string]json.RawMessage),
 	}
@@ -455,6 +458,7 @@ func Load() error {
 	ensureSettingLocked(AudioOffsetMs, "音画偏移", "0")
 	ensureSettingLocked(PlayerSkipOpeningEnding, "跳过片头片尾", "true")
 	ensureSettingLocked(BootLive, "开机进直播", "false")
+	ensureSettingLocked(SearchZhuyin, "注音键盘", "false")
 	ensureSettingLocked(ExoDiskPreloadThreads, "Exo预读线程", "1")
 	ensureSettingLocked(ExoDiskPreloadSizeMb, "Exo预读容量MB", "128")
 	return nil
@@ -671,6 +675,53 @@ func ResetSyncPairCode() string {
 	Set(SyncPairCode, code)
 	_ = Save()
 	return code
+}
+
+func GetSearchHot() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	raw, ok := data.Cache["searchHot"]
+	if !ok {
+		return nil
+	}
+	var h SearchHistory
+	if json.Unmarshal(raw, &h) != nil {
+		return nil
+	}
+	out := make([]string, 0, len(h.Items))
+	for _, it := range h.Items {
+		it = strings.TrimSpace(it)
+		if it != "" {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func SetSearchHot(items []string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if data.Cache == nil {
+		data.Cache = map[string]json.RawMessage{}
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		it = strings.TrimSpace(it)
+		if it == "" {
+			continue
+		}
+		if _, ok := seen[it]; ok {
+			continue
+		}
+		seen[it] = struct{}{}
+		out = append(out, it)
+		if len(out) >= 40 {
+			break
+		}
+	}
+	b, _ := json.Marshal(SearchHistory{Items: out})
+	data.Cache["searchHot"] = b
 }
 
 func AddSearchHistory(q string) {

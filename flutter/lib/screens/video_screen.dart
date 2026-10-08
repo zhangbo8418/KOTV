@@ -16,6 +16,7 @@ import '../widgets/dialogs.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
 import '../widgets/poster_card.dart';
+import '../vod/list_style.dart';
 import '../vod/vod_open.dart';
 import 'detail_screen.dart';
 import 'live_screen.dart';
@@ -33,6 +34,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   int _page = 1;
   bool _loadingMore = false;
   final _items = <VodItem>[];
+  bool _listStyle = false;
   List<CategoryType> _types = [];
   List<CategoryFilter> _filters = [];
   final Map<String, String> _extend = {};
@@ -389,7 +391,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           .toList();
       final home = replace && (_tid == null || _tid!.isEmpty);
       final emptyHome = home && types.isEmpty && list.isEmpty;
+      final pageStyle = '${data['style'] ?? ''}'.trim();
+      final nextList = kotvListStyle(page: pageStyle, items: list.map((e) => e.styleType));
       setState(() {
+        if (replace) {
+          _listStyle = nextList;
+        } else if (!_listStyle) {
+          _listStyle = nextList;
+        }
         _statusMsg = emptyHome ? '首页没有返回分类和推荐，请重试' : null;
         if (types.isNotEmpty) {
           _types = types;
@@ -807,7 +816,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             else
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(pad * LayoutScale.of(context), 0, pad * LayoutScale.of(context), bottomPad * LayoutScale.of(context)),
-                sliver: _posterSliver(_items),
+                sliver: _listStyle ? _listSliver(_items) : _posterSliver(_items),
               ),
           ] else ...[
             SliverToBoxAdapter(
@@ -835,7 +844,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             else
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(catPad, 0, catPad, bottomPad),
-                sliver: _categoryIsFolder ? _listSliver(_items) : _posterSliver(_items),
+                sliver: _categoryIsFolder || _listStyle ? _listSliver(_items) : _posterSliver(_items),
               ),
           ],
         ],
@@ -1157,6 +1166,13 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         (context, i) {
           if (i < 0 || i >= items.length) return const SizedBox.shrink();
           final it = items[i];
+          if (_listStyle) {
+            return VodListTile(
+              item: it,
+              onTap: () => _open(it),
+              onLongPress: () => _searchItem(it),
+            );
+          }
           return TvFocus(
             onPressed: () => _open(it),
             onLongPress: () => _searchItem(it),

@@ -1,6 +1,9 @@
 package m3u8
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -40,5 +43,39 @@ https://cdn.example/a.ts
 	}
 	if !strings.Contains(out, `URI="`) || !strings.Contains(out, "/proxy/play?id=") {
 		t.Fatalf("expected proxied URI, got:\n%s", out)
+	}
+}
+
+func TestResolveForPlayback_SlidingWindowNotCached(t *testing.T) {
+	const body = "#EXTM3U\n#EXT-X-TARGETDURATION:7\n#EXT-X-MEDIA-SEQUENCE:10\n#EXTINF:6.000,\nseg0.ts\n#EXTINF:6.000,\nseg1.ts\n#EXTINF:5.640,\nseg2.ts\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	got, err := ResolveForPlayback(srv.URL+"/live.m3u8", nil, 9978)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != srv.URL+"/live.m3u8" {
+		t.Fatalf("sliding window must stay on the original url, got %s", got)
+	}
+}
+
+func TestResolveForPlayback_VodWithEndListCached(t *testing.T) {
+	const body = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.000,\nseg0.ts\n#EXTINF:4.000,\nseg1.ts\n#EXT-X-ENDLIST\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	got, err := ResolveForPlayback(srv.URL+"/vod.m3u8", nil, 9978)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "/proxy/cached_m3u8?id=") {
+		t.Fatalf("vod playlist should be cached, got %s", got)
 	}
 }

@@ -13,6 +13,7 @@ import '../player/kotv_platform.dart';
 import '../player/tv_remote_keys.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
+import '../theme/stable_focus.dart';
 import '../theme/layout_scale.dart';
 import '../util/pick_subtitle_file.dart';
 import 'danmaku_settings_sheet.dart';
@@ -49,7 +50,7 @@ class _EqPresetChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(right: 8, bottom: 8),
-      child: TvFocus(
+      child: KotvStableFocus(
         autofocus: selected,
         onPressed: onTap,
         borderRadius: 20,
@@ -174,6 +175,28 @@ String fmtPlayerTime(Duration d) {
   final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
   if (h > 0) return '$h:$m:$s';
   return '$m:$s';
+}
+
+/// FVP 直播时长是 9223372036854775807 微秒（`double.maxFinite.toInt()`）。
+/// 这个值加到 [DateTime] 上会超出允许的毫秒范围。
+const int unboundedMediaDurationUs = 9223372036854775807;
+
+bool unboundedMediaDuration(Duration d) => d.inMicroseconds >= unboundedMediaDurationUs;
+
+bool boundedMediaDuration(Duration d) {
+  final us = d.inMicroseconds;
+  return us > 0 && us < unboundedMediaDurationUs;
+}
+
+String fmtBoundedClock(Duration d) => unboundedMediaDuration(d) ? '--:--:--' : fmtClockHms(d);
+
+String fmtBoundedPlayerTime(Duration d) => unboundedMediaDuration(d) ? '--:--' : fmtPlayerTime(d);
+
+double sliderMaxMs(Duration dur, Duration pos) {
+  if (boundedMediaDuration(dur)) return dur.inMilliseconds.toDouble();
+  final p = pos.inMilliseconds;
+  if (p > 0) return p.toDouble();
+  return 1;
 }
 
 String fmtClockHms(Duration d) {
@@ -350,7 +373,7 @@ class _VodInlineControlsState extends State<VodInlineControls> {
                         stream: player.positionStream,
                         builder: (context, _) {
                           return Text(
-                            '${fmtPlayerTime(player.position)} / ${fmtPlayerTime(player.duration)}',
+                            '${fmtBoundedPlayerTime(player.position)} / ${fmtBoundedPlayerTime(player.duration)}',
                             maxLines: 1,
                             softWrap: false,
                             overflow: TextOverflow.ellipsis,
@@ -374,7 +397,8 @@ class _VodInlineControlsState extends State<VodInlineControls> {
                   stream: player.positionStream,
                   builder: (context, _) {
                     final dur = player.duration;
-                    final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
+                    final pos = player.position;
+                    final total = sliderMaxMs(dur, pos);
                     return KotvSeekSlider(
                       player: player,
                       maxMs: total,
@@ -679,7 +703,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   final KotvJumpController _epScroll = KotvJumpController();
   final FocusNode _playFocus = FocusNode(debugLabel: 'vod_fs_play');
   final FocusNode _seekFocus = FocusNode(debugLabel: 'vod_fs_seek');
-  final FocusNode _epFocus = FocusNode(debugLabel: 'vod_fs_ep');
+  final KotvFocusBag _epNodes = KotvFocusBag();
   static const double _epItemExtent = 48;
   bool _pointerHoldingChrome = false;
   bool _focusHoldingChrome = false;
@@ -824,7 +848,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     _epScroll.dispose();
     _playFocus.dispose();
     _seekFocus.dispose();
-    _epFocus.dispose();
+    _epNodes.dispose();
     super.dispose();
   }
 
@@ -842,8 +866,16 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   void focusEpisodes() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_epOpen) return;
-      _epFocus.requestFocus();
+      _focusEpisodeList();
     });
+  }
+
+  void _focusEpisodeList() {
+    final i = widget.epIdx >= 0 && widget.epIdx < widget.episodes.length
+        ? widget.epIdx
+        : (widget.episodes.isEmpty ? -1 : 0);
+    if (i < 0) return;
+    _epNodes.of('e:$i').requestFocus();
   }
 
   void openEpisodes() {
@@ -851,7 +883,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     _placeEpisode(widget.epIdx);
     setState(() => _epOpen = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _epFocus.requestFocus();
+      if (mounted) _focusEpisodeList();
     });
   }
 
@@ -1207,7 +1239,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     runSpacing: 8,
                     children: [
                       for (final s in _speeds)
-                        TvFocus(
+                        KotvStableFocus(
                           autofocus: (rate - s).abs() < 0.05,
                           borderRadius: 20,
                           onPressed: () => pickSpeed(s),
@@ -1337,7 +1369,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     bool selected = false,
     required VoidCallback onTap,
   }) {
-    return TvFocus(
+    return KotvStableFocus(
       autofocus: selected,
       scrollIntoView: true,
       onPressed: onTap,
@@ -2130,8 +2162,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             child: Text(
               '标题：${widget.title}\n'
               '分辨率：$w x $h\n'
-              '进度：${fmtClockHms(pos)} / ${fmtClockHms(dur)}\n'
-              '缓冲至：${fmtClockHms(buf)}\n'
+              '进度：${fmtBoundedClock(pos)} / ${fmtBoundedClock(dur)}\n'
+              '缓冲至：${fmtBoundedClock(buf)}\n'
               '网速：$speedLabel\n'
               '倍速：x${widget.player.rate.toStringAsFixed(2)}\n'
               '比例：${_aspects[_aspectIdx].$2}\n'
@@ -2167,10 +2199,15 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   String get _endsAt {
     final dur = widget.player.duration;
     final pos = widget.player.position;
-    if (dur.inMilliseconds <= 0) return 'Ends at --:--';
+    if (!boundedMediaDuration(dur)) return 'Ends at --:--';
     final left = dur - pos;
-    if (left.isNegative) return 'Ends at --:--';
-    final end = _now.add(left);
+    if (left.isNegative || left.inMicroseconds >= unboundedMediaDurationUs) return 'Ends at --:--';
+    final DateTime end;
+    try {
+      end = _now.add(left);
+    } on RangeError {
+      return 'Ends at --:--';
+    }
     final hh = end.hour.toString().padLeft(2, '0');
     final mm = end.minute.toString().padLeft(2, '0');
     return 'Ends at $hh:$mm';
@@ -2216,8 +2253,8 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     ),
                     child: Text(
                       '${widget.player.width}x${widget.player.height}  '
-                      '${fmtClockHms(widget.player.position)}  '
-                      'buf ${fmtClockHms(widget.player.buffered)}  '
+                      '${fmtBoundedClock(widget.player.position)}  '
+                      'buf ${fmtBoundedClock(widget.player.buffered)}  '
                       '$speed  '
                       'x${widget.player.rate.toStringAsFixed(2)}\n'
                       '${widget.player.engineLabel}',
@@ -2314,12 +2351,12 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                         builder: (context, _) {
                           final pos = widget.player.position;
                           final dur = widget.player.duration;
-                          final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
+                          final total = sliderMaxMs(dur, pos);
                           return Row(
                             children: [
                               SizedBox(
                                 width: land ? 64 : 78,
-                                child: Text(fmtClockHms(pos), style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13)),
+                                child: Text(fmtBoundedClock(pos), style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13)),
                               ),
                               Expanded(
                                 child: KotvSeekSlider(
@@ -2334,7 +2371,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                               SizedBox(
                                 width: land ? 64 : 78,
                                 child: Text(
-                                  fmtClockHms(dur),
+                                  fmtBoundedClock(dur),
                                   textAlign: TextAlign.right,
                                   style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : 13),
                                 ),
@@ -2461,10 +2498,10 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       _TinyBtn(
                                         label: '片尾',
                                         onTap: () {
-                                          final dur = widget.player.duration.inMilliseconds;
-                                          final pos = widget.player.position.inMilliseconds;
-                                          final endSec = dur > 0
-                                              ? ((dur - pos) / 1000).round().clamp(0, 3600)
+                                          final dur = widget.player.duration;
+                                          final pos = widget.player.position;
+                                          final endSec = boundedMediaDuration(dur)
+                                              ? ((dur - pos).inMilliseconds / 1000).round().clamp(0, 3600)
                                               : 0;
                                           unawaited(_setOffsets(_openingSec, endSec));
                                           widget.onBump();
@@ -2592,13 +2629,11 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             itemCount: widget.episodes.length,
                             itemBuilder: (_, i) {
                               final sel = i == widget.epIdx;
-                              final focusHere = sel || (widget.epIdx < 0 && i == 0);
                               // itemExtent 内勿再叠垂直 Padding，否则字被压成细条。
                               return Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 3),
                                 child: TvFocus(
-                                  autofocus: focusHere,
-                                  focusNode: focusHere ? _epFocus : null,
+                                  focusNode: _epNodes.of('e:$i'),
                                   borderRadius: 8,
                                   onPressed: () {
                                     widget.onSelectEp?.call(i);

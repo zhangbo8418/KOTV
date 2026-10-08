@@ -25,6 +25,7 @@ import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../theme/stable_focus.dart';
 import '../util/kotv_clear_ephemeral.dart';
 import '../util/pick_font_file.dart';
 import '../util/runtime_info.dart';
@@ -761,7 +762,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           final on = videoEq == id || (id == 'off' && (videoEq.isEmpty || videoEq == 'off'));
           return Padding(
             padding: const EdgeInsets.only(right: 8, bottom: 8),
-            child: TvFocus(
+            child: KotvStableFocus(
               autofocus: on,
               borderRadius: 20,
               onPressed: () => unawaited(savePreset(id)),
@@ -970,7 +971,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           }
           return Padding(
             padding: const EdgeInsets.only(right: 8, bottom: 8),
-            child: TvFocus(
+            child: KotvStableFocus(
               autofocus: on,
               borderRadius: 20,
               onPressed: () => unawaited(pick()),

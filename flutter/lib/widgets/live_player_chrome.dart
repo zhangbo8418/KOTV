@@ -179,7 +179,7 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
                       final pos = player.position;
                       final dur = player.duration;
                       return Text(
-                        compact ? fmtPlayerTime(pos) : '${fmtPlayerTime(pos)} / ${fmtPlayerTime(dur)}',
+                        compact ? fmtBoundedPlayerTime(pos) : '${fmtBoundedPlayerTime(pos)} / ${fmtBoundedPlayerTime(dur)}',
                         style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: land ? 11 : (compact ? 11 : 12)),
                       );
                     },
@@ -204,7 +204,7 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
                 builder: (context, _) {
                   final pos = player.position;
                   final dur = player.duration;
-                  final total = dur.inMilliseconds <= 0 ? 1.0 : dur.inMilliseconds.toDouble();
+                  final total = sliderMaxMs(dur, pos);
                   return KotvSeekSlider(
                     player: player,
                     maxMs: total,
@@ -215,7 +215,7 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
                       final b = player.buffered.inMilliseconds.toDouble().clamp(0.0, total);
                       return b < p ? p : b;
                     }(),
-                    enabled: dur.inMilliseconds > 0,
+                    enabled: boundedMediaDuration(dur),
                     onInteraction: widget.onBump,
                     theme: SliderTheme.of(context).copyWith(
                       trackHeight: land ? 2 : 3,

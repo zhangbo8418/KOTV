@@ -14,6 +14,7 @@ class VodItem {
     this.configSource = '',
     this.positionMs = 0,
     this.durationMs = 0,
+    this.styleType = '',
   });
 
   final String id;
@@ -33,6 +34,7 @@ class VodItem {
   /// 续播进度（毫秒）。
   final int positionMs;
   final int durationMs;
+  final String styleType;
 
   bool get hasAction => action.trim().isNotEmpty;
 
@@ -57,7 +59,14 @@ class VodItem {
         configSource: '${j['config_source'] ?? ''}',
         positionMs: _asInt(j['position'] ?? j['positionMs']),
         durationMs: _asInt(j['duration'] ?? j['durationMs']),
+        styleType: _styleType(j['style']),
       );
+
+  static String _styleType(dynamic v) {
+    if (v is String) return v.trim();
+    if (v is Map) return '${v['type'] ?? ''}'.trim();
+    return '';
+  }
 
   static int _asInt(dynamic v) {
     if (v is num) return v.toInt();
@@ -211,6 +220,7 @@ class SiteInfo {
     this.searchable = true,
     this.changeable = true,
     this.indexs = false,
+    this.styleType = '',
   });
   final String key;
   final String name;
@@ -219,6 +229,7 @@ class SiteInfo {
   final bool changeable;
   /// 豆瓣等索引站，点条目去全网搜索而不是本站详情。
   final bool indexs;
+  final String styleType;
 
   factory SiteInfo.fromJson(Map<String, dynamic> j) => SiteInfo(
         key: '${j['key'] ?? ''}',
@@ -227,5 +238,6 @@ class SiteInfo {
         searchable: j['searchable'] != false,
         changeable: j['changeable'] != false,
         indexs: j['indexs'] == true,
+        styleType: VodItem._styleType(j['style']),
       );
 }

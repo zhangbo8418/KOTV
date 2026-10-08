@@ -9,6 +9,7 @@ import 'package:file_selector/file_selector.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../theme/stable_focus.dart';
 import 'kotv_tv_text_field.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -250,7 +251,7 @@ Future<void> showSitePicker(
                                       label: s.name,
                                       height: 40,
                                       selected: s.home,
-                                      autofocus: i == curFocus,
+                                      autofocus: i == focusIdx,
                                       onTap: () {
                                         Navigator.pop(ctx);
                                         onSelect(s.key);
@@ -291,7 +292,7 @@ Future<void> showSitePicker(
                                     label: s.name,
                                     height: 44,
                                     selected: s.home,
-                                    autofocus: i == curFocus,
+                                    autofocus: i == focusIdx,
                                     onTap: () {
                                       Navigator.pop(ctx);
                                       onSelect(s.key);
@@ -921,7 +922,7 @@ Future<String?> pickChoice(
       title: Text(title, style: TextStyle(color: p.fg)),
       children: [
         for (var i = 0; i < options.length; i++)
-            TvFocus(
+            KotvStableFocus(
             autofocus: options[i].$2 == current || (i == 0 && !options.any((o) => o.$2 == current)),
             scrollIntoView: true,
             onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(options[i].$2),
@@ -966,7 +967,7 @@ Future<List<String>?> pickMultiChoice(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     for (var i = 0; i < options.length; i++)
-                      TvFocus(
+                      KotvStableFocus(
                         autofocus: i == 0,
                         borderRadius: 8,
                         scrollIntoView: true,

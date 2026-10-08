@@ -17,10 +17,6 @@ import (
 	"github.com/bobo/KOTV/internal/settings"
 )
 
-func jsonUnmarshal(raw string, v interface{}) error {
-	return json.Unmarshal([]byte(raw), v)
-}
-
 var httpClient = &http.Client{Timeout: 20 * time.Second}
 
 var headClient = &http.Client{Timeout: 4 * time.Second}
@@ -55,6 +51,11 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 		base = variant
 	}
 
+	// 没有 #EXT-X-ENDLIST 的列表还会继续追加切片。存成静态文件后，播放器每次刷新都拿到这一次拉下来的窗口，播完就停。
+	if !strings.Contains(content, "#EXT-X-ENDLIST") {
+		return rawURL, nil
+	}
+
 	content = absolutizeURIs(content, base)
 	content = absolutizeTagURIs(content, base)
 	cfg := loadFilterConfig()
@@ -67,7 +68,7 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 	fil := NewFilter(cfg)
 	filtered := fil.Apply(content, lms...)
 	// 不按 URI 扩展名删切片：正片常伪装成 .png/.jpg/.mp3/无后缀等。
-	filtered = convertRelativeTsToAbsolute(filtered, base)
+	filtered = absolutizeURIs(filtered, base)
 	filtered = absolutizeTagURIs(filtered, base)
 	// 分片带 Cookie/Referer：改写为 /proxy/play，避免播放器直拉 CDN 报 412。
 	filtered = proxyMediaURIs(filtered, headers)
@@ -104,7 +105,7 @@ func loadFilterConfig() FilterConfig {
 		}
 		return cfg
 	}
-	_ = jsonUnmarshal(raw, &cfg)
+	_ = json.Unmarshal([]byte(raw), &cfg)
 	return cfg.normalized()
 }
 
@@ -277,12 +278,6 @@ func resolveURL(base, ref string) string {
 	return bu.ResolveReference(ru).String()
 }
 
-// stripNonVideoSegments 已废弃：按扩展名删切片会误杀伪装正片（如整表 .png 的点播）。
-// 保留空实现以免外部误用；ResolveForPlayback 不再调用。
-func stripNonVideoSegments(content string) string {
-	return content
-}
-
 func countSegments(content string) int {
 	n := 0
 	for _, line := range strings.Split(content, "\n") {
@@ -308,10 +303,6 @@ func sumExtinf(content string) float64 {
 		sum += v
 	}
 	return sum
-}
-
-func convertRelativeTsToAbsolute(content, base string) string {
-	return absolutizeURIs(content, base)
 }
 
 // proxyMediaURIs 把 http(s) 媒体行与 URI="…" 登记为 /proxy/play，使分片请求带上 headers。

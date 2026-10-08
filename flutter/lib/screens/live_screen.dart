@@ -32,6 +32,7 @@ import '../providers.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../theme/stable_focus.dart';
 import '../theme/layout_scale.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
@@ -114,8 +115,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   final FocusNode _focus = FocusNode();
   final FocusNode _playFocus = FocusNode(debugLabel: 'live_play');
   final FocusNode _rightFocus = FocusNode(debugLabel: 'live_right');
-  final FocusNode _leftFocus = FocusNode(debugLabel: 'live_ch');
-  final FocusNode _epgFocus = FocusNode(debugLabel: 'live_epg');
+  final KotvFocusBag _chFocus = KotvFocusBag();
+  final KotvFocusBag _progFocus = KotvFocusBag();
   final FocusNode _epgTabFocus = FocusNode(debugLabel: 'live_epg_tab');
   final KotvJumpController _epgScroll = KotvJumpController();
   // 竖屏与全屏面板不会同时出现，分类、频道、节目单各共用一个控制器。
@@ -503,8 +504,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _focus.dispose();
     _playFocus.dispose();
     _rightFocus.dispose();
-    _leftFocus.dispose();
-    _epgFocus.dispose();
+    _chFocus.dispose();
+    _progFocus.dispose();
     _epgTabFocus.dispose();
     _epgScroll.dispose();
     _groupScroll.dispose();
@@ -2145,8 +2146,27 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
     _scheduleScrollToCurrent(epg: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _leftOpen) _leftFocus.requestFocus();
+      if (mounted && _leftOpen) _focusChannelList();
     });
+  }
+
+  void _focusChannelList() {
+    if (_chIdx < 0 || _chIdx >= _channels.length) return;
+    _chFocus.of('ch:$_chIdx').requestFocus();
+  }
+
+  int _highlightedProgram() {
+    if (_catchup && _catchupProgIdx >= 0 && _catchupProgIdx < _programs.length) return _catchupProgIdx;
+    for (var i = 0; i < _programs.length; i++) {
+      if (_programs[i]['now'] == true) return i;
+    }
+    return _programs.isEmpty ? -1 : 0;
+  }
+
+  void _focusProgramList() {
+    final i = _highlightedProgram();
+    if (i < 0) return;
+    _progFocus.of('p:$i').requestFocus();
   }
 
   void _openRight() {
@@ -2526,7 +2546,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final title = '${prog['title'] ?? ''}'.trim();
     final fallback = '${prog['label'] ?? ''}'.trim();
     final label = title.isNotEmpty ? title : fallback;
-    final focusHere = sel;
     void activate() {
       _cancelHideOverlays();
       if (canCatchup) unawaited(_playCatchup(i));
@@ -2537,8 +2556,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       return Padding(
         padding: const EdgeInsets.only(bottom: 4),
         child: TvFocus(
-          autofocus: focusHere,
-          focusNode: focusHere ? _epgFocus : null,
+          focusNode: _progFocus.of('p:$i'),
           borderRadius: 8,
           onPressed: canCatchup ? activate : null,
           child: Material(
@@ -2592,8 +2610,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return Padding(
       padding: EdgeInsets.only(bottom: land ? 2 : 4),
       child: TvFocus(
-        autofocus: focusHere,
-        focusNode: focusHere ? _epgFocus : null,
+        focusNode: _progFocus.of('p:$i'),
         borderRadius: 6,
         onPressed: canCatchup ? activate : null,
         child: Material(
@@ -3193,8 +3210,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         return Padding(
                                           padding: EdgeInsets.only(bottom: land ? 2 : 4),
                                           child: TvFocus(
-                                            autofocus: sel,
-                                            focusNode: sel ? _leftFocus : null,
+                                            focusNode: _chFocus.of('ch:$i'),
                                             borderRadius: 8,
                                             onPressed: () => _selectChannelFromList(i),
                                             onLongPress: () => unawaited(_toggleChannelFav(i)),
@@ -3258,11 +3274,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         if (_epgOpen) {
                                           _scheduleScrollEpgToHighlight();
                                           WidgetsBinding.instance.addPostFrameCallback((_) {
-                                            if (mounted && _epgOpen) _epgFocus.requestFocus();
+                                            if (mounted && _epgOpen) _focusProgramList();
                                           });
                                         } else {
                                           WidgetsBinding.instance.addPostFrameCallback((_) {
-                                            if (mounted && _leftOpen) _leftFocus.requestFocus();
+                                            if (mounted && _leftOpen) _focusChannelList();
                                           });
                                         }
                                       },
