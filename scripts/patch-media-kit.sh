@@ -214,10 +214,23 @@ SIZE_WAIT_NEW = """      textureId.value = null;
       return -1;
     }
     final size = await _videoSize.future;"""
-AWAIT_OLD = """    _platformViewParams.remove(playerId);
-    _players.remove(playerId)?.dispose();"""
-AWAIT_NEW = """    _platformViewParams.remove(playerId);
-    await _players.remove(playerId)?.dispose();"""
+# 0.39 在删播放器前先清 platform view；Win7 的 0.37.3 没有这一行。
+AWAIT_PAIRS = (
+    (
+        """    _platformViewParams.remove(playerId);
+    _players.remove(playerId)?.dispose();""",
+        """    _platformViewParams.remove(playerId);
+    await _players.remove(playerId)?.dispose();""",
+    ),
+    (
+        """  Future<void> dispose(int playerId) async {
+    _players.remove(playerId)?.dispose();
+  }""",
+        """  Future<void> dispose(int playerId) async {
+    await _players.remove(playerId)?.dispose();
+  }""",
+    ),
+)
 # Player.dispose 改成 Future 后，子类 MdkVideoPlayer.dispose 仍是 void 就编不过。
 SUB_DISPOSE_OLD = """  @override
   void dispose() {
@@ -237,25 +250,37 @@ mdk_text = mdk_dart.read_text(encoding="utf-8")
 fvp_changed = False
 
 def _once(label, blob, old, new):
+    return _one_of(label, blob, ((old, new),))
+
+def _one_of(label, blob, pairs):
     global fvp_changed
-    if new in blob:
-        print(f"ok fvp ({fvp_version}) already patched: {label}")
-        return blob
-    n = blob.count(old)
-    if n != 1:
-        print(
-            f"ERROR: fvp ({fvp_version}) {label} snippet count {n}; "
-            "upstream changed — update scripts/patch-media-kit.sh",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    fvp_changed = True
-    print(f"patched fvp ({fvp_version}): {label}")
-    return blob.replace(old, new, 1)
+    for _old, new in pairs:
+        if new in blob:
+            print(f"ok fvp ({fvp_version}) already patched: {label}")
+            return blob
+    for old, new in pairs:
+        n = blob.count(old)
+        if n == 1:
+            fvp_changed = True
+            print(f"patched fvp ({fvp_version}): {label}")
+            return blob.replace(old, new, 1)
+        if n > 1:
+            print(
+                f"ERROR: fvp ({fvp_version}) {label} snippet count {n}; "
+                "upstream changed — update scripts/patch-media-kit.sh",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    print(
+        f"ERROR: fvp ({fvp_version}) {label} snippet count 0; "
+        "upstream changed — update scripts/patch-media-kit.sh",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 player_text = _once("dispose stops before delete", player_text, DISPOSE_OLD, DISPOSE_NEW)
 player_text = _once("updateTexture release does not wait for size", player_text, SIZE_WAIT_OLD, SIZE_WAIT_NEW)
-mdk_text = _once("platform dispose awaits player delete", mdk_text, AWAIT_OLD, AWAIT_NEW)
+mdk_text = _one_of("platform dispose awaits player delete", mdk_text, AWAIT_PAIRS)
 mdk_text = _once("MdkVideoPlayer.dispose returns Future", mdk_text, SUB_DISPOSE_OLD, SUB_DISPOSE_NEW)
 
 if fvp_changed:

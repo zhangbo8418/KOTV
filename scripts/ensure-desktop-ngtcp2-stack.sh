@@ -68,7 +68,8 @@ fetch_extract() {
     echo "WARN: $src incomplete (missing $need_extra); re-fetch release tarball" >&2
   fi
   rm -rf "$src" "$tmp"
-  curl -fsSL -o "$tarball" \
+  curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
+    -o "$tarball" \
     "https://github.com/${repo}/releases/download/v${ver}/${name}-${ver}.tar.gz"
   mkdir -p "$tmp"
   tar -xzf "$tarball" -C "$tmp"
