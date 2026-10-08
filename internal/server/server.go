@@ -106,6 +106,7 @@ func (s *Server) Start() error {
 	// PC/安卓/iOS 发行包不含 webapp，行为不变。
 	mountWebOrRemote(mux, remote)
 	mux.HandleFunc("/proxy/cached_m3u8", s.handleCachedM3U8)
+	mux.HandleFunc(m3u8cache.RollingPlaylistPath, s.handleRollingM3U8)
 	mux.HandleFunc("/proxy/play", playproxy.Handle)
 	mux.HandleFunc("/proxy/bt/", thunder.Handle)
 	mux.HandleFunc("/proxy/smb/", smbproxy.Handle)
@@ -333,6 +334,19 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("OK"))
+}
+
+func (s *Server) handleRollingM3U8(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	content, ok := m3u8cache.ServeRolling(id)
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	_, _ = w.Write([]byte(content))
 }
 
 func (s *Server) handleCachedM3U8(w http.ResponseWriter, r *http.Request) {

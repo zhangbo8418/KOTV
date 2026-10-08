@@ -473,11 +473,35 @@ func (a *App) APISessionLeave() map[string]any {
 	return map[string]any{"ok": true}
 }
 
-func (a *App) APISearch(keyword string, siteKeys []string) (map[string]any, error) {
+func (a *App) APISearch(keyword string, siteKeys []string, exact bool, excludeSite, excludeID string) (map[string]any, error) {
 	if localCrawlerDisabled() {
 		return nil, fmt.Errorf("请先连接可用后端服务")
 	}
 	_, sites, _ := a.scope()
+	if exact {
+		vod, ok, err := sites.SearchFirstExact(keyword, excludeSite, excludeID, siteKeys)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]map[string]any, 0, 1)
+		flat := make([]map[string]any, 0, 1)
+		if ok {
+			sk := ""
+			name := ""
+			if vod.Site != nil {
+				sk = vod.Site.Key
+				name = vod.Site.Name
+			}
+			list := vodsDTO([]model.Vod{vod}, sk)
+			out = append(out, map[string]any{
+				"site": sk,
+				"name": name,
+				"list": list,
+			})
+			flat = append(flat, list...)
+		}
+		return map[string]any{"ok": true, "keyword": keyword, "collects": out, "list": flat}, nil
+	}
 	settings.AddSearchHistory(keyword)
 	cols, err := sites.SearchParallel(keyword, siteKeys, 4)
 	if err != nil {

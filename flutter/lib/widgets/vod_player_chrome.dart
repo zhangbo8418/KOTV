@@ -177,15 +177,14 @@ String fmtPlayerTime(Duration d) {
   return '$m:$s';
 }
 
-/// FVP 直播时长是 9223372036854775807 微秒（`double.maxFinite.toInt()`）。
-/// 这个值加到 [DateTime] 上会超出允许的毫秒范围。
-const int unboundedMediaDurationUs = 9223372036854775807;
+/// JS 能精确表示的最大整数。FVP 直播时长是 `double.maxFinite` 微秒，比这更大，加到 [DateTime] 上会超出范围。
+const int jsExactIntLimit = 9007199254740991;
 
-bool unboundedMediaDuration(Duration d) => d.inMicroseconds >= unboundedMediaDurationUs;
+bool unboundedMediaDuration(Duration d) => d.inMicroseconds > jsExactIntLimit;
 
 bool boundedMediaDuration(Duration d) {
   final us = d.inMicroseconds;
-  return us > 0 && us < unboundedMediaDurationUs;
+  return us > 0 && us <= jsExactIntLimit;
 }
 
 String fmtBoundedClock(Duration d) => unboundedMediaDuration(d) ? '--:--:--' : fmtClockHms(d);
@@ -2201,7 +2200,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final pos = widget.player.position;
     if (!boundedMediaDuration(dur)) return 'Ends at --:--';
     final left = dur - pos;
-    if (left.isNegative || left.inMicroseconds >= unboundedMediaDurationUs) return 'Ends at --:--';
+    if (left.isNegative || unboundedMediaDuration(left)) return 'Ends at --:--';
     final DateTime end;
     try {
       end = _now.add(left);

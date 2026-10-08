@@ -638,6 +638,104 @@ func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcu
 	return collects, nil
 }
 
+// SearchFirstExact 只在可搜索、可换源、允许快速搜索的站里找片名完全相等的第一条。
+// 命中后立刻返回，不等其余站。不写入 SearchResult。
+func (s *SiteService) SearchFirstExact(keyword, excludeSite, excludeID string, siteKeys []string) (model.Vod, bool, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return model.Vod{}, false, nil
+	}
+	if spider.TransEnabled() {
+		keyword = spider.T2S(keyword)
+	}
+	sites := s.cfg.Sites()
+	if len(siteKeys) > 0 {
+		filtered := make([]model.Site, 0)
+		for _, site := range sites {
+			for _, k := range siteKeys {
+				if site.Key == k {
+					filtered = append(filtered, site)
+				}
+			}
+		}
+		sites = filtered
+	}
+	parentCID := hostclient.Current()
+	parentUID := hostclient.CurrentUserID()
+	parentDed := hostclient.DedicatedRuntime()
+	vod, ok := searchFirstExact(sites, keyword, strings.TrimSpace(excludeSite), strings.TrimSpace(excludeID), func(site model.Site, kw string) ([]model.Vod, error) {
+		done := hostclient.EnterSession(parentCID, parentUID, parentDed)
+		defer done()
+		return s.searchSite(site, kw, true, "1")
+	})
+	return vod, ok, nil
+}
+
+// searchFirstExact 某个站返回精确片名后立刻交出结果。
+func searchFirstExact(sites []model.Site, keyword, excludeSite, excludeID string, search func(model.Site, string) ([]model.Vod, error)) (model.Vod, bool) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" || search == nil {
+		return model.Vod{}, false
+	}
+	eligible := make([]model.Site, 0, len(sites))
+	for _, site := range sites {
+		if strings.TrimSpace(site.Key) == "" || !site.IsSearchable() || !site.IsChangeable() || !site.IsQuickSearch() {
+			continue
+		}
+		eligible = append(eligible, site)
+	}
+	if len(eligible) == 0 {
+		return model.Vod{}, false
+	}
+	const maxConcurrent = 4
+	sem := make(chan struct{}, maxConcurrent)
+	found := make(chan model.Vod, 1)
+	var once sync.Once
+	var wg sync.WaitGroup
+	for _, site := range eligible {
+		wg.Add(1)
+		go func(site model.Site) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			list, err := search(site, keyword)
+			if err != nil || len(list) == 0 {
+				return
+			}
+			for _, v := range list {
+				name := strings.TrimSpace(v.VodName)
+				id := strings.TrimSpace(v.VodID.String())
+				if name != keyword || id == "" {
+					continue
+				}
+				if site.Key == excludeSite && id == excludeID {
+					continue
+				}
+				siteCopy := site
+				v.Site = &siteCopy
+				once.Do(func() { found <- v })
+				return
+			}
+		}(site)
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case v := <-found:
+		return v, true
+	case <-done:
+		select {
+		case v := <-found:
+			return v, true
+		default:
+			return model.Vod{}, false
+		}
+	}
+}
+
 func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, page string) ([]model.Vod, error) {
 	switch site.TypeID() {
 	case 3:

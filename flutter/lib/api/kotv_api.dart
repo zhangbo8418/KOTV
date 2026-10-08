@@ -263,10 +263,19 @@ class KotvApi {
 
   Future<Map<String, dynamic>> btProgress() => _get('/api/v1/bt/progress');
 
-  Future<Map<String, dynamic>> search(String keyword, {List<String>? sites}) =>
+  Future<Map<String, dynamic>> search(
+    String keyword, {
+    List<String>? sites,
+    bool exact = false,
+    String excludeSite = '',
+    String excludeId = '',
+  }) =>
       _post('/api/v1/search', {
         'keyword': keyword,
         if (sites != null && sites.isNotEmpty) 'sites': sites,
+        if (exact) 'exact': true,
+        if (excludeSite.isNotEmpty) 'excludeSite': excludeSite,
+        if (excludeId.isNotEmpty) 'excludeId': excludeId,
       });
 
   Future<Map<String, dynamic>> play({
@@ -354,17 +363,6 @@ class KotvApi {
         'group': group,
         'channel': channel,
         'line': line,
-      });
-
-  /// 已停用，原样返回。播放交给播放器。
-  Future<Map<String, dynamic>> liveWrapHls({
-    required String url,
-    Map<String, String>? headers,
-  }) =>
-      _post('/api/v1/live', {
-        'action': 'hls',
-        'url': url,
-        if (headers != null && headers.isNotEmpty) 'headers': headers,
       });
 
   Future<Map<String, dynamic>> liveUnlock({required int group, required String password}) =>

@@ -50,6 +50,7 @@ func IsLocalMediaURL(u string) bool {
 func IsEphemeralPlayURL(u string) bool {
 	u = strings.ToLower(strings.TrimSpace(u))
 	return strings.Contains(u, "/proxy/cached_m3u8") ||
+		strings.Contains(u, "/proxy/rolling_m3u8") ||
 		strings.Contains(u, "/proxy/play?") ||
 		strings.Contains(u, "/proxy/hls/") ||
 		strings.Contains(u, "/proxy/bt/")

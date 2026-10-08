@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -60,6 +61,65 @@ func TestResolveForPlayback_SlidingWindowNotCached(t *testing.T) {
 	}
 	if got != srv.URL+"/live.m3u8" {
 		t.Fatalf("sliding window must stay on the original url, got %s", got)
+	}
+}
+
+func TestResolveForPlayback_MasterWithoutEndListUsesVariant(t *testing.T) {
+	const master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nmedia.m3u8\n"
+	const media = "#EXTM3U\n#EXT-X-TARGETDURATION:7\n#EXTINF:6.000,\nseg0.ts\n#EXTINF:6.000,\nseg1.ts\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/media.m3u8") {
+			_, _ = io.WriteString(w, media)
+			return
+		}
+		_, _ = io.WriteString(w, master)
+	}))
+	defer srv.Close()
+
+	got, err := ResolveForPlayback(srv.URL+"/live.m3u8", nil, 9978)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != srv.URL+"/media.m3u8" {
+		t.Fatalf("want selected variant, got %s", got)
+	}
+}
+
+func TestResolveForPlayback_HeadersRefetchRollingPlaylist(t *testing.T) {
+	var n int
+	const master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nmedia.m3u8\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cookie") != "k=v" {
+			t.Errorf("cookie missing on %s", r.URL.Path)
+		}
+		if strings.HasSuffix(r.URL.Path, "/media.m3u8") {
+			n++
+			_, _ = io.WriteString(w, "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:"+strconv.Itoa(n)+"\n#EXTINF:6.000,\nseg.ts\n#EXTINF:6.000,\nsegx.ts\n")
+			return
+		}
+		_, _ = io.WriteString(w, master)
+	}))
+	defer srv.Close()
+
+	hdr := map[string]string{"Cookie": "k=v", "Referer": "https://cdn.example/"}
+	got, err := ResolveForPlayback(srv.URL+"/live.m3u8", hdr, 9978)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "/proxy/cached_m3u8") || !strings.Contains(got, RollingPlaylistPath+"?id=") {
+		t.Fatalf("want rolling playlist, got %s", got)
+	}
+	id := got[strings.LastIndex(got, "id=")+3:]
+	first, ok := ServeRolling(id)
+	if !ok || !strings.Contains(first, "/proxy/play?id=") || strings.Contains(first, "/seg.ts") {
+		t.Fatalf("first refetch:\n%s", first)
+	}
+	if !strings.Contains(first, "#EXT-X-MEDIA-SEQUENCE:2") {
+		t.Fatalf("first refetch should be a new pull, got:\n%s", first)
+	}
+	second, ok := ServeRolling(id)
+	if !ok || !strings.Contains(second, "#EXT-X-MEDIA-SEQUENCE:3") {
+		t.Fatalf("second refetch:\n%s", second)
 	}
 }
 

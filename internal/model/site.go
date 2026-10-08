@@ -50,6 +50,14 @@ func (s Site) IsChangeable() bool {
 	return s.Changeable.Value == 1
 }
 
+// IsQuickSearch 未声明时为开。显式不是 1 则关。
+func (s Site) IsQuickSearch() bool {
+	if !s.QuickSearch.Valid {
+		return true
+	}
+	return s.QuickSearch.Value == 1
+}
+
 func (s Site) IsHide() bool {
 	return s.Hide.Valid && s.Hide.Value == 1
 }

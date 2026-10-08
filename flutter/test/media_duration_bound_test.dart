@@ -3,7 +3,8 @@ import 'package:kotv/widgets/vod_player_chrome.dart';
 
 void main() {
   test('FVP live duration is not added onto the clock', () {
-    const live = Duration(microseconds: unboundedMediaDurationUs);
+    // VM 上 double.maxFinite.toInt()。这个字面量不能写进会编到 Web 的库。
+    const live = Duration(microseconds: 9223372036854775807);
     expect(boundedMediaDuration(live), isFalse);
     expect(unboundedMediaDuration(live), isTrue);
     expect(fmtBoundedClock(live), '--:--:--');

@@ -79,7 +79,7 @@ func register(rawURL string, headers map[string]string) string {
 	if rawURL == "" {
 		return ""
 	}
-	if strings.Contains(rawURL, "/proxy/play?") || strings.Contains(rawURL, "/proxy/cached_m3u8") {
+	if strings.Contains(rawURL, "/proxy/play?") || strings.Contains(rawURL, "/proxy/cached_m3u8") || strings.Contains(rawURL, "/proxy/rolling_m3u8") {
 		return rawURL
 	}
 	id := newID()
@@ -511,7 +511,7 @@ func proxyIfRemote(abs string, headers map[string]string) string {
 	if !NeedsLocalRelay(abs) {
 		return abs
 	}
-	if strings.Contains(abs, "/proxy/play?") || strings.Contains(abs, "/proxy/cached_m3u8") {
+	if strings.Contains(abs, "/proxy/play?") || strings.Contains(abs, "/proxy/cached_m3u8") || strings.Contains(abs, "/proxy/rolling_m3u8") {
 		return abs
 	}
 	return register(abs, headers)

@@ -26,7 +26,7 @@ type ContentAPI interface {
 	APIDetail(siteKey, vodID string) (map[string]any, error)
 	APIDetailExpand(siteKey, vodID string, flags []map[string]any) (map[string]any, error)
 	APIBtProgress() map[string]any
-	APISearch(keyword string, siteKeys []string) (map[string]any, error)
+	APISearch(keyword string, siteKeys []string, exact bool, excludeSite, excludeID string) (map[string]any, error)
 	APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map[string]any, error)
 	APIRemotePoll() map[string]any
 	APISetMedia(state map[string]string)
@@ -498,11 +498,16 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 	}
 	keyword := strings.TrimSpace(r.URL.Query().Get("wd"))
 	var siteKeys []string
+	var exact bool
+	var excludeSite, excludeID string
 	if r.Method == http.MethodPost {
 		var body struct {
-			Keyword  string   `json:"keyword"`
-			Wd       string   `json:"wd"`
-			SiteKeys []string `json:"sites"`
+			Keyword     string   `json:"keyword"`
+			Wd          string   `json:"wd"`
+			SiteKeys    []string `json:"sites"`
+			Exact       bool     `json:"exact"`
+			ExcludeSite string   `json:"excludeSite"`
+			ExcludeID   string   `json:"excludeId"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.Keyword != "" {
@@ -511,12 +516,15 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 			keyword = body.Wd
 		}
 		siteKeys = body.SiteKeys
+		exact = body.Exact
+		excludeSite = body.ExcludeSite
+		excludeID = body.ExcludeID
 	}
 	if keyword == "" {
 		writeAPIError(w, http.StatusBadRequest, "missing keyword")
 		return
 	}
-	out, err := api.APISearch(keyword, siteKeys)
+	out, err := api.APISearch(keyword, siteKeys, exact, excludeSite, excludeID)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, err.Error())
 		return

@@ -26,7 +26,7 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 	if rawURL == "" || !strings.Contains(strings.ToLower(rawURL), "m3u8") {
 		return rawURL, nil
 	}
-	if strings.Contains(rawURL, "/proxy/cached_m3u8") || strings.HasPrefix(rawURL, "file:") {
+	if strings.Contains(rawURL, "/proxy/cached_m3u8") || strings.Contains(rawURL, RollingPlaylistPath) || strings.HasPrefix(rawURL, "file:") {
 		return rawURL, nil
 	}
 	if !settings.IsAdFilterEnabled() {
@@ -51,9 +51,13 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 		base = variant
 	}
 
-	// 没有 #EXT-X-ENDLIST 的列表还会继续追加切片。存成静态文件后，播放器每次刷新都拿到这一次拉下来的窗口，播完就停。
+	// 没有 #EXT-X-ENDLIST 的列表还会继续追加切片。不能把这一次的正文存成静态文件。
 	if !strings.Contains(content, "#EXT-X-ENDLIST") {
-		return rawURL, nil
+		if !hasPlaybackHeaders(headers) {
+			return base, nil
+		}
+		id := RegisterRolling(base, headers)
+		return fmt.Sprintf("%s%s?id=%s", playbackProxyBase(localPort), RollingPlaylistPath, id), nil
 	}
 
 	content = absolutizeURIs(content, base)
@@ -83,11 +87,26 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 	}
 
 	id := DefaultCache.Put(filtered)
-	proxyBase := fmt.Sprintf("http://127.0.0.1:%d", localPort)
+	return fmt.Sprintf("%s/proxy/cached_m3u8?id=%s", playbackProxyBase(localPort), id), nil
+}
+
+func playbackProxyBase(localPort int) string {
 	if pb := hostclient.PublicBase(); pb != "" {
-		proxyBase = strings.TrimRight(pb, "/")
+		return strings.TrimRight(pb, "/")
 	}
-	return fmt.Sprintf("%s/proxy/cached_m3u8?id=%s", proxyBase, id), nil
+	if localPort <= 0 {
+		localPort = 9978
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", localPort)
+}
+
+func hasPlaybackHeaders(headers map[string]string) bool {
+	for k, v := range headers {
+		if strings.TrimSpace(k) != "" && strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func loadFilterConfig() FilterConfig {
@@ -336,7 +355,7 @@ func proxyMediaURIs(content string, headers map[string]string) string {
 		if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
 			return m
 		}
-		if strings.Contains(raw, "/proxy/play?") || strings.Contains(raw, "/proxy/cached_m3u8") {
+		if strings.Contains(raw, "/proxy/play?") || strings.Contains(raw, "/proxy/cached_m3u8") || strings.Contains(raw, RollingPlaylistPath) {
 			return m
 		}
 		return `URI="` + playproxy.Register(raw, headers) + `"`

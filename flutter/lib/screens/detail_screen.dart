@@ -4049,7 +4049,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           .map((s) => s.key)
           .toList();
       if (keys.isEmpty) return false;
-      final data = await ref.read(apiProvider).search(q, sites: keys);
+      final data = await ref.read(apiProvider).search(
+        q,
+        sites: keys,
+        exact: true,
+        excludeSite: _routeSite,
+        excludeId: _routeId,
+      );
       VodItem? hit;
       for (final raw in ((data['list'] as List?) ?? [])) {
         if (raw is! Map) continue;
