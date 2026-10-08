@@ -218,6 +218,19 @@ AWAIT_OLD = """    _platformViewParams.remove(playerId);
     _players.remove(playerId)?.dispose();"""
 AWAIT_NEW = """    _platformViewParams.remove(playerId);
     await _players.remove(playerId)?.dispose();"""
+# Player.dispose 改成 Future 后，子类 MdkVideoPlayer.dispose 仍是 void 就编不过。
+SUB_DISPOSE_OLD = """  @override
+  void dispose() {
+    streamCtl.close();
+    _initialized = false;
+    super.dispose();
+  }"""
+SUB_DISPOSE_NEW = """  @override
+  Future<void> dispose() async {
+    streamCtl.close();
+    _initialized = false;
+    await super.dispose();
+  }"""
 
 player_text = player_dart.read_text(encoding="utf-8")
 mdk_text = mdk_dart.read_text(encoding="utf-8")
@@ -243,6 +256,7 @@ def _once(label, blob, old, new):
 player_text = _once("dispose stops before delete", player_text, DISPOSE_OLD, DISPOSE_NEW)
 player_text = _once("updateTexture release does not wait for size", player_text, SIZE_WAIT_OLD, SIZE_WAIT_NEW)
 mdk_text = _once("platform dispose awaits player delete", mdk_text, AWAIT_OLD, AWAIT_NEW)
+mdk_text = _once("MdkVideoPlayer.dispose returns Future", mdk_text, SUB_DISPOSE_OLD, SUB_DISPOSE_NEW)
 
 if fvp_changed:
     player_dart.write_text(player_text, encoding="utf-8")
@@ -254,8 +268,12 @@ if "state = PlaybackState.stopped;" not in player_dart.read_text(encoding="utf-8
 if "width <= 0" not in player_dart.read_text(encoding="utf-8"):
     print("ERROR: fvp updateTexture patch verification failed", file=sys.stderr)
     sys.exit(1)
-if "await _players.remove(playerId)?.dispose();" not in mdk_dart.read_text(encoding="utf-8"):
+mdk_check = mdk_dart.read_text(encoding="utf-8")
+if "await _players.remove(playerId)?.dispose();" not in mdk_check:
     print("ERROR: fvp platform dispose patch verification failed", file=sys.stderr)
+    sys.exit(1)
+if "await super.dispose();" not in mdk_check:
+    print("ERROR: fvp MdkVideoPlayer.dispose patch verification failed", file=sys.stderr)
     sys.exit(1)
 print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
 PY
