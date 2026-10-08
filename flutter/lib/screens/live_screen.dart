@@ -240,9 +240,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   /// 切台/换线：走各后端 stopForEpisodeSwitch。
-  /// MPV（media_kit）软停保 Texture 减卡音；FVP 等须 dispose 再建，默认即硬停。
+  /// MPV 卸掉当前文件以放开缓存，Player / Texture 仍留着；FVP 等须 dispose 再建。
   Future<void> _stopAllBackends() async {
-    Future<void> softStop(KotvPlayback? p) async {
+    Future<void> stopOne(KotvPlayback? p) async {
       if (p == null) return;
       try {
         await p.stopForEpisodeSwitch();
@@ -250,13 +250,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
 
     await Future.wait<void>([
-      softStop(_mk),
-      softStop(_fvp),
-      softStop(_exo),
-      softStop(_html),
-      softStop(_art),
-      softStop(_xg),
-      softStop(_zw),
+      stopOne(_mk),
+      stopOne(_fvp),
+      stopOne(_exo),
+      stopOne(_html),
+      stopOne(_art),
+      stopOne(_xg),
+      stopOne(_zw),
     ]);
   }
 

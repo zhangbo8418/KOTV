@@ -120,7 +120,7 @@ class MediaKitPlayback extends KotvPlayback {
   bool _live;
   int _speedBps = 0;
   late Future<void> _optsReady;
-  /// 与 Exo / 原生 MPV 一致：换源时本地尺寸清零；未 [_acceptSize] 前不采信 libmpv 残留宽高。
+  /// 换源时本地尺寸清零；未 [_acceptSize] 前不采信 libmpv 残留宽高。
   int _w = 0;
   int _h = 0;
   bool _acceptSize = false;
@@ -395,12 +395,15 @@ class MediaKitPlayback extends KotvPlayback {
     notifyListeners();
   }
 
-  /// 换台：只暂停，保留同一 libmpv Player / Texture，等 open 换源，减轻桌面卡音。
+  /// 换集：卸掉当前文件，放开 demuxer 缓存。Player / Texture 不销毁，下次 open 再装新文件。
   @override
   Future<void> stopForEpisodeSwitch() async {
     if (_diag) KotvMpvDiag.note('stopForEpisodeSwitch');
+    _url = '';
+    _clearVideoSize();
+    _speedBps = 0;
     try {
-      await player.pause();
+      await player.stop();
     } catch (_) {}
     notifyListeners();
   }

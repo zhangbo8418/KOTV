@@ -10,6 +10,12 @@
 # 另外删掉 media_kit 写死的 network-timeout=5。安卓播放器不设这个选项。
 # 5 秒会被 lavf 当成读超时：下一段超过 5 秒没有新字节，已经进缓存的那段播完就停。
 #
+# 删掉 media_kit 写死的 cache-on-disk=yes。该缓存文件只追加，媒体关掉才删除。
+# 直播开播不会改这个选项；点播需要磁盘缓存时由应用在开播前写成 yes。
+#
+# fvp 的 dispose 在删除播放器前等待视频尺寸。尺寸 Completer 被换掉后可能永远等不到，
+# mdkPlayerAPI_delete 不执行，上一集的包缓存就留在进程里。补丁让释放纹理时不等尺寸，并等待删除完成。
+#
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
 set -euo pipefail
@@ -115,6 +121,28 @@ elif "'network-timeout'" in text:
 else:
     print(f"ok media_kit ({version}) already patched: network-timeout unset")
 
+# cache-on-disk=yes：只追加的缓存文件，关掉媒体才删除。默认不要打开。
+DISK = "        'cache-on-disk': 'yes',\n"
+if DISK in text:
+    if text.count(DISK) != 1:
+        print(
+            f"ERROR: expected exactly one cache-on-disk=yes, got {text.count(DISK)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    text = text.replace(DISK, "", 1)
+    changed = True
+    print(f"patched media_kit ({version}): removed cache-on-disk=yes")
+elif "'cache-on-disk'" in text:
+    print(
+        f"ERROR: media_kit ({version}) cache-on-disk present but not the known yes line; "
+        "upstream changed — update scripts/patch-media-kit.sh",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+else:
+    print(f"ok media_kit ({version}) already patched: cache-on-disk unset")
+
 if changed:
     target.write_text(text, encoding="utf-8")
 
@@ -125,5 +153,109 @@ if FIXED not in check or BUGGY in check:
 if "'network-timeout'" in check:
     print("ERROR: network-timeout still present after patch", file=sys.stderr)
     sys.exit(1)
+if "'cache-on-disk'" in check:
+    print("ERROR: cache-on-disk still present after patch", file=sys.stderr)
+    sys.exit(1)
 print(f"ok media_kit ({version}) patches applied ({target})")
+
+# fvp：width/height <= 0 时不要等视频尺寸，并等播放器真正删掉。
+fvp_root = None
+fvp_version = "?"
+for pkg in data.get("packages", []):
+    if pkg.get("name") != "fvp":
+        continue
+    uri = pkg.get("rootUri") or ""
+    if uri.startswith("file:"):
+        fvp_root = pathlib.Path(url2pathname(urlparse(uri).path))
+    else:
+        fvp_root = (cfg.parent / uri).resolve()
+    fvp_version = fvp_root.name
+    break
+
+if fvp_root is None:
+    print("fvp not in package_config.json; skip fvp patch")
+    sys.exit(0)
+
+player_dart = fvp_root / "lib" / "src" / "player.dart"
+mdk_dart = fvp_root / "lib" / "src" / "video_player_mdk.dart"
+if not player_dart.is_file() or not mdk_dart.is_file():
+    print(f"ERROR: fvp sources missing under {fvp_root}", file=sys.stderr)
+    sys.exit(1)
+
+DISPOSE_OLD = """  /// Release resources
+  void dispose() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // await: ensure no player ref in fvp plugin before mdkPlayerAPI_delete() in dart
+    await updateTexture(width: -1);
+    state = PlaybackState.stopped;"""
+DISPOSE_NEW = """  /// Release resources
+  Future<void> dispose() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): stop before delete so the demux
+    // packet cache goes away with the player.
+    state = PlaybackState.stopped;
+    // await: ensure no player ref in fvp plugin before mdkPlayerAPI_delete() in dart
+    await updateTexture(width: -1);"""
+SIZE_WAIT_OLD = """      textureId.value = null;
+    }
+    final size = await _videoSize.future;"""
+SIZE_WAIT_NEW = """      textureId.value = null;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): releasing the texture must not wait
+    // for a video size. dispose passes width -1; a replaced _videoSize completer
+    // would otherwise never finish and mdkPlayerAPI_delete would not run.
+    if ((width != null && width <= 0) || (height != null && height <= 0)) {
+      return -1;
+    }
+    final size = await _videoSize.future;"""
+AWAIT_OLD = """    _platformViewParams.remove(playerId);
+    _players.remove(playerId)?.dispose();"""
+AWAIT_NEW = """    _platformViewParams.remove(playerId);
+    await _players.remove(playerId)?.dispose();"""
+
+player_text = player_dart.read_text(encoding="utf-8")
+mdk_text = mdk_dart.read_text(encoding="utf-8")
+fvp_changed = False
+
+def _once(label, blob, old, new):
+    global fvp_changed
+    if new in blob:
+        print(f"ok fvp ({fvp_version}) already patched: {label}")
+        return blob
+    n = blob.count(old)
+    if n != 1:
+        print(
+            f"ERROR: fvp ({fvp_version}) {label} snippet count {n}; "
+            "upstream changed — update scripts/patch-media-kit.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    fvp_changed = True
+    print(f"patched fvp ({fvp_version}): {label}")
+    return blob.replace(old, new, 1)
+
+player_text = _once("dispose stops before delete", player_text, DISPOSE_OLD, DISPOSE_NEW)
+player_text = _once("updateTexture release does not wait for size", player_text, SIZE_WAIT_OLD, SIZE_WAIT_NEW)
+mdk_text = _once("platform dispose awaits player delete", mdk_text, AWAIT_OLD, AWAIT_NEW)
+
+if fvp_changed:
+    player_dart.write_text(player_text, encoding="utf-8")
+    mdk_dart.write_text(mdk_text, encoding="utf-8")
+
+if "state = PlaybackState.stopped;" not in player_dart.read_text(encoding="utf-8").split("Future<void> dispose", 1)[-1][:500]:
+    print("ERROR: fvp dispose patch verification failed", file=sys.stderr)
+    sys.exit(1)
+if "width <= 0" not in player_dart.read_text(encoding="utf-8"):
+    print("ERROR: fvp updateTexture patch verification failed", file=sys.stderr)
+    sys.exit(1)
+if "await _players.remove(playerId)?.dispose();" not in mdk_dart.read_text(encoding="utf-8"):
+    print("ERROR: fvp platform dispose patch verification failed", file=sys.stderr)
+    sys.exit(1)
+print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
 PY

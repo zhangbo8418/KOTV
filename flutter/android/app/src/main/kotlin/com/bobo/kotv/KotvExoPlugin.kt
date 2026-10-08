@@ -649,14 +649,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "stop" -> {
         main.post {
-          // 先停 DiskPreload，再 player.stop()；不清 MediaItems / 不拆 Surface。
-          // 换集复用走 setMediaItem → prepare → play；clearMediaItems 仅服务挂起场景，不在此。
+          // player.stop() 在 Rockchip 上留着 MediaCodec 和它的输出缓冲。
+          // 换集、停播都拆掉播放器；SurfaceView 仍由宿主留着，下次 open 再绑。
           try {
-            diskPreload.stop()
-          } catch (_: Throwable) {
-          }
-          try {
-            player?.stop()
+            releasePlayer()
           } catch (_: Throwable) {
           }
           result.success(true)
@@ -2191,7 +2187,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     // Flutter Texture 跨 open 复用；仅 dispose/detach 时 releaseFlutterTexture。
   }
 
-  /** 全部可用视频轨，按分辨率降序（与 MPV/FVP 重选策略一致）。 */
+  /** 全部可用视频轨，按分辨率降序。 */
   private fun videoTrackCandidates(): List<Pair<Tracks.Group, Int>> {
     val p = player ?: return emptyList()
     val out = ArrayList<Pair<Tracks.Group, Int>>()

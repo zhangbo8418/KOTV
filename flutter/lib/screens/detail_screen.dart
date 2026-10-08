@@ -515,7 +515,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.exo) {
-      // 必须 release：仅 stop 不释放 Rockchip MediaCodec，切 MPV 会占满硬解卡死。
+      // stop 已拆掉播放器并放开解码缓冲。这里再 release，以 dispose 通道和 Texture。
       try {
         await _exo?.pause();
       } catch (_) {}
@@ -561,7 +561,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 换集/换源：先停声。MPV 软停保 Texture；FVP 等默认硬停（须 dispose 再建）。
+  /// 换集/换源：先停声并放开上一集缓存。MPV 卸文件但留着 Player / Texture；FVP 等硬停（须 dispose 再建）。
   Future<void> _stopAllBackends() async {
     Future<void> stopOne(KotvPlayback? p) async {
       if (p == null) return;

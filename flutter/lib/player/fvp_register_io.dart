@@ -29,16 +29,14 @@ void kotvRegisterFvp() {
     // 直播 / 伪扩展名：给足探测窗口（勿用 lowLatency 的极小 analyzeduration，易 prepare 失败）
     'avformat.probesize': '8000000',
     'avformat.analyzeduration': '8000000',
-    // 与 MPV 一样：伪装扩展名靠探测，不设 protocol_whitelist（否则 RTSP/RTMP/RTP 会被挡）。
+    // 伪装扩展名靠探测，不设 protocol_whitelist（否则 RTSP/RTMP/RTP 会被挡）。
     'avformat.extension_picky': '0',
     'avformat.allowed_extensions': 'ALL',
     'avformat.allowed_segment_extensions': 'ALL',
     'avio.reconnect': '1',
     'avio.reconnect_delay_max': '7',
-    // 点播进度条：demux 包缓存报已下载区间（默认解码队列仅 ~4s）。
-    // 预读上限仍由开播后 setBufferRange + KotvBufferBudget 换算（mdk 无字节帽 API）。
-    'demux.buffer.ranges': '16',
-    'demux.buffer.protocols': 'http,https',
+    // 不设 demux.buffer.ranges。那是内存里的 demux 包缓存，只按段数丢弃，没有字节上限，
+    // 播完仍留着；setBufferRange 限制的是另一条解码队列。预读时长由开播后的 setBufferRange 管。
   };
   if (kotvIsAndroid()) {
     fvp.registerWith(options: {

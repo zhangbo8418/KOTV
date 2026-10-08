@@ -621,7 +621,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> stop() async {
-    // 换集/停播只 stop，会话内复用 Exo 实例（离开页走 [release]）。
+    // 原生侧会拆掉 ExoPlayer，放开解码器缓冲。Surface 宿主留着，下次 open 再建播放器。
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
@@ -646,7 +646,7 @@ class ExoPlayback extends KotvPlayback {
     _url = '';
     _w = 0;
     _h = 0;
-    // 换集保留 SurfaceView，避免卸面闪底层。
+    // 换集卸掉播放器以放开解码缓冲，SurfaceView 仍留在树上。
     notifyListeners();
   }
 
