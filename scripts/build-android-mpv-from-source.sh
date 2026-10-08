@@ -563,7 +563,8 @@ ensure_ndk29() {
   if [[ ! -f "$ndk/source.properties" ]] || ! grep -q "Pkg.Revision = $want" "$ndk/source.properties"; then
     command -v sdkmanager >/dev/null || { echo "ERROR: need Android NDK $want (sdkmanager missing)" >&2; exit 1; }
     yes | sdkmanager --licenses >/dev/null || true
-    sdkmanager "ndk;${want}"
+    # 进度写在 stdout。调用方用 $(...) 取路径，进度不能混进去。
+    sdkmanager "ndk;${want}" >&2
   fi
   [[ -f "$ndk/source.properties" ]] || { echo "ERROR: NDK $want not at $ndk" >&2; exit 1; }
   printf '%s\n' "$ndk"
