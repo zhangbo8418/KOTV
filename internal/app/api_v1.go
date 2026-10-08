@@ -696,6 +696,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 	}
 
 	mediaURL := playURL
+	directURL := ""
 	magnet := thunder.Match(playURL)
 	if magnet {
 		// 起播前 Source.stop，确保可被 cancelPending / 换集打断
@@ -716,7 +717,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		playURL = exposeLocalFile(playURL)
 		mediaURL = playURL
 	} else if !thunder.IsLocalStream(playURL) {
-		playURL = a.PreparePlaybackURL(playURL, headers)
+		playURL, directURL = a.PreparePlayback(playURL, headers)
 		mediaURL = playURL
 	}
 	isMagnetPlay := magnet || thunder.IsLocalStream(playURL)
@@ -766,6 +767,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		"ok":        true,
 		"url":       exposedURL,
 		"media":     exposedMedia,
+		"direct":    directURL,
 		"magnet":    isMagnetPlay,
 		"parsed":    didParse,
 		"headers":   headers,

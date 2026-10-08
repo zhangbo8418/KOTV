@@ -21,32 +21,34 @@ var httpClient = &http.Client{Timeout: 20 * time.Second}
 
 var headClient = &http.Client{Timeout: 4 * time.Second}
 
-// ResolveForPlayback 下载并过滤 m3u8，返回可播放地址（本地代理或原 URL）。
-func ResolveForPlayback(rawURL string, headers map[string]string, localPort int) (string, error) {
+// ResolveForPlayback 下载并过滤 m3u8。
+// 第一个返回值是不能自己带请求头的播放器要打开的地址。
+// 第二个返回值只在第一个被换成滚动列表时给出，是站点原来的地址。
+func ResolveForPlayback(rawURL string, headers map[string]string, localPort int) (string, string, error) {
 	if rawURL == "" || !strings.Contains(strings.ToLower(rawURL), "m3u8") {
-		return rawURL, nil
+		return rawURL, "", nil
 	}
 	if strings.Contains(rawURL, "/proxy/cached_m3u8") || strings.Contains(rawURL, RollingPlaylistPath) || strings.HasPrefix(rawURL, "file:") {
-		return rawURL, nil
+		return rawURL, "", nil
 	}
 	if !settings.IsAdFilterEnabled() {
-		return rawURL, nil
+		return rawURL, "", nil
 	}
 
 	content, err := fetch(rawURL, headers)
 	if err != nil {
-		return rawURL, nil // 失败时回退原地址
+		return rawURL, "", nil // 失败时回退原地址
 	}
 
 	base := rawURL
 	if IsMasterPlaylist(content) {
 		variant := firstVariantURL(content, base)
 		if variant == "" {
-			return rawURL, nil
+			return rawURL, "", nil
 		}
 		content, err = fetch(variant, headers)
 		if err != nil {
-			return rawURL, nil
+			return rawURL, "", nil
 		}
 		base = variant
 	}
@@ -54,10 +56,11 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 	// 没有 #EXT-X-ENDLIST 的列表还会继续追加切片。不能把这一次的正文存成静态文件。
 	if !strings.Contains(content, "#EXT-X-ENDLIST") {
 		if !hasPlaybackHeaders(headers) {
-			return base, nil
+			return base, "", nil
 		}
 		id := RegisterRolling(base, headers)
-		return fmt.Sprintf("%s%s?id=%s", playbackProxyBase(localPort), RollingPlaylistPath, id), nil
+		rolling := fmt.Sprintf("%s%s?id=%s", playbackProxyBase(localPort), RollingPlaylistPath, id)
+		return rolling, rawURL, nil
 	}
 
 	content = absolutizeURIs(content, base)
@@ -79,15 +82,15 @@ func ResolveForPlayback(rawURL string, headers map[string]string, localPort int)
 
 	segments := countSegments(filtered)
 	if segments < 2 {
-		return rawURL, nil
+		return rawURL, "", nil
 	}
 	// 过滤把片长砍崩 → 回退原址。
 	if dur := sumExtinf(content); dur >= 120 && sumExtinf(filtered) < dur*0.5 {
-		return rawURL, nil
+		return rawURL, "", nil
 	}
 
 	id := DefaultCache.Put(filtered)
-	return fmt.Sprintf("%s/proxy/cached_m3u8?id=%s", playbackProxyBase(localPort), id), nil
+	return fmt.Sprintf("%s/proxy/cached_m3u8?id=%s", playbackProxyBase(localPort), id), "", nil
 }
 
 func playbackProxyBase(localPort int) string {

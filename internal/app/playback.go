@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"path"
 	"path/filepath"
@@ -58,12 +59,19 @@ func IsEphemeralPlayURL(u string) bool {
 
 // PreparePlaybackURL 将媒体直链转为当前会话可播地址（m3u8 过滤缓存 + header 代理）。
 func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
+	play, _ := a.PreparePlayback(raw, headers)
+	return play
+}
+
+// PreparePlayback 的第二个返回值是能自己带请求头的播放器要打开的站点地址。
+// 为空时，这类播放器也打开第一个返回值。
+func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || IsEphemeralPlayURL(raw) {
-		return raw
+		return raw, ""
 	}
 	if IsLocalMediaURL(raw) {
-		return exposeLocalFile(raw)
+		return exposeLocalFile(raw), ""
 	}
 	// convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
@@ -79,17 +87,53 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 		}
 	}
 	playURL := raw
+	direct := ""
 	if !thunder.Match(playURL) {
 		// do=js|py 仍是脚本代理，只改写对外可达根。
 		if localproxy.IsSpiderProxyURL(playURL) {
-			return playproxy.PublicizeURL(playURL, headers)
+			return playproxy.PublicizeURL(playURL, headers), ""
 		}
-		if resolved, err := m3u8.ResolveForPlayback(playURL, headers, port); err == nil && resolved != "" {
+		if resolved, src, err := m3u8.ResolveForPlayback(playURL, headers, port); err == nil && resolved != "" {
+			if src != "" && src != resolved {
+				direct = src
+			}
 			playURL = resolved
 		}
+		before := playURL
 		playURL = playproxy.Register(playURL, headers)
+		if direct == "" && playURL != before {
+			direct = before
+		}
 	}
-	return playproxy.PublicizeURL(playURL, headers)
+	return playproxy.PublicizeURL(playURL, headers), headerCapableDirect(direct)
+}
+
+// headerCapableDirect 留下播放器自己能请求的 http(s)。回环、本机代拉地址留空。
+func headerCapableDirect(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || playproxy.NeedsLocalRelay(raw) {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+	default:
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || host == "::1" {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return ""
+	}
+	if u.Path == "/proxy" || strings.HasPrefix(u.Path, "/proxy/") {
+		return ""
+	}
+	return raw
 }
 
 // exposeLocalFile 远端前端播放时，把本机文件改成 /file/ 地址。本机请求保持原路径。content: 不改。

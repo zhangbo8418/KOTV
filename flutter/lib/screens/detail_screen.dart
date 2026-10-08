@@ -1798,7 +1798,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
                 if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
             };
-            unawaited(exo.warmCacheUrl(playUrl, headers: headers));
+            final warm = kotvResolvePlayOpenTarget(
+              playUrl: playUrl,
+              directUrl: kotvRewriteEngineLocalUrl('${data['direct'] ?? ''}', engineBase),
+              headers: headers,
+              magnet: false,
+              sendHeaders: true,
+            );
+            unawaited(exo.warmCacheUrl(warm.url, headers: warm.headers ?? const {}));
           }
         }
       } catch (_) {}
@@ -2028,6 +2035,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         '${data['media'] ?? ''}',
         ref.read(apiProvider).baseUrl,
       );
+      final directUrl = kotvRewriteEngineLocalUrl(
+        '${data['direct'] ?? ''}',
+        ref.read(apiProvider).baseUrl,
+      );
       final headers = <String, String>{
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
@@ -2119,8 +2130,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         } else {
           final resolved = kotvResolvePlayOpenTarget(
             playUrl: playUrl,
+            directUrl: directUrl,
             headers: headers,
             magnet: magnet,
+            sendHeaders: kotvPlaybackSendsHeaders(
+              playerVal: failover.playerVal,
+              mediaUrl: directUrl.trim().isNotEmpty ? directUrl : playUrl,
+            ),
           );
           openUrl = resolved.url;
           openHeaders = resolved.headers;

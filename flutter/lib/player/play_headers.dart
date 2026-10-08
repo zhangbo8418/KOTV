@@ -6,6 +6,8 @@
 /// 3. [kotvDefaultPlayUA]
 library;
 
+import 'hls_js_support.dart';
+
 /// Media3 `Util.getUserAgent(applicationId)` 格式缺省值。
 const kotvDefaultPlayUA =
     'com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1';
@@ -47,14 +49,57 @@ bool kotvIsLocalProxyUrl(String url) {
   return u.contains('127.0.0.1:') && u.contains('/proxy');
 }
 
-/// 选定最终 open 地址。网盘和带请求头的媒体都打开引擎返回的播放地址。
+/// Exo，以及会用 hls.js 拉流的网页播放器，可以自己带请求头。
+/// Safari 原生 HLS、西瓜和全能播放器不走这条。
+bool kotvPlaybackSendsHeaders({
+  required String playerVal,
+  required String mediaUrl,
+  bool? hlsJsSupported,
+}) {
+  if (playerVal == 'innie#exo') return true;
+  final hls = hlsJsSupported ?? kotvWebHlsJsSupported();
+  if (!hls) return false;
+  switch (playerVal) {
+    case 'innie#html':
+      return true;
+    case 'innie#art':
+      final path = mediaUrl.split('?').first.toLowerCase();
+      return path.contains('.m3u8');
+    default:
+      return false;
+  }
+}
+
+/// 播放器能否自己在每次请求上带请求头。只有这时才打开 [directUrl]。
+bool kotvCanOpenDirect(String url) {
+  final u = url.trim();
+  if (u.isEmpty) return false;
+  final uri = Uri.tryParse(u);
+  if (uri == null) return false;
+  if (uri.scheme != 'http' && uri.scheme != 'https') return false;
+  final host = uri.host.toLowerCase();
+  if (host.isEmpty || host == 'localhost' || host == '127.0.0.1' || host == '::1') {
+    return false;
+  }
+  if (kotvIsLocalProxyUrl(u) || u.contains('/proxy/rolling_m3u8')) return false;
+  return true;
+}
+
+/// 选定最终 open 地址。
+/// [sendHeaders] 且 [directUrl] 可直连时，打开站点地址并带上请求头。
+/// 其它情况打开引擎返回的播放地址。
 ({String url, Map<String, String>? headers}) kotvResolvePlayOpenTarget({
   required String playUrl,
   required Map<String, String> headers,
   required bool magnet,
+  String directUrl = '',
+  bool sendHeaders = false,
 }) {
   if (magnet) {
     return (url: playUrl, headers: headers.isEmpty ? null : headers);
+  }
+  if (sendHeaders && kotvCanOpenDirect(directUrl)) {
+    return (url: directUrl, headers: headers.isEmpty ? null : headers);
   }
   final cached = playUrl.contains('/proxy/cached_m3u8');
   if (cached) {

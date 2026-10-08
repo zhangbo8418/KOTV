@@ -215,3 +215,24 @@ func TestPreparePlaybackURLExpandsM3U8Proxy(t *testing.T) {
 		t.Fatalf("headers=%v", headers)
 	}
 }
+
+func TestPreparePlaybackDirectKeepsPublicURL(t *testing.T) {
+	a := &App{}
+	raw := "https://cdn.example/a.mp4"
+	play, direct := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
+	if !strings.Contains(play, "/proxy/play?id=") {
+		t.Fatalf("other players still use proxy, got %q", play)
+	}
+	if direct != raw {
+		t.Fatalf("direct=%q want %q", direct, raw)
+	}
+}
+
+func TestPreparePlaybackDirectSkipsLoopback(t *testing.T) {
+	a := &App{}
+	raw := "http://127.0.0.1:5266/a.mp4"
+	_, direct := a.PreparePlayback(raw, map[string]string{"Cookie": "a=b"})
+	if direct != "" {
+		t.Fatalf("loopback must not be opened by the player, got %q", direct)
+	}
+}

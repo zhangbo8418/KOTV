@@ -55,9 +55,12 @@ func TestResolveForPlayback_SlidingWindowNotCached(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := ResolveForPlayback(srv.URL+"/live.m3u8", nil, 9978)
+	got, direct, err := ResolveForPlayback(srv.URL+"/live.m3u8", nil, 9978)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if direct != "" {
+		t.Fatalf("no headers should not expose a second url, got %s", direct)
 	}
 	if got != srv.URL+"/live.m3u8" {
 		t.Fatalf("sliding window must stay on the original url, got %s", got)
@@ -76,9 +79,12 @@ func TestResolveForPlayback_MasterWithoutEndListUsesVariant(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := ResolveForPlayback(srv.URL+"/live.m3u8", nil, 9978)
+	got, direct, err := ResolveForPlayback(srv.URL+"/live.m3u8", nil, 9978)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if direct != "" {
+		t.Fatalf("variant url is already playable, got direct %s", direct)
 	}
 	if got != srv.URL+"/media.m3u8" {
 		t.Fatalf("want selected variant, got %s", got)
@@ -102,9 +108,12 @@ func TestResolveForPlayback_HeadersRefetchRollingPlaylist(t *testing.T) {
 	defer srv.Close()
 
 	hdr := map[string]string{"Cookie": "k=v", "Referer": "https://cdn.example/"}
-	got, err := ResolveForPlayback(srv.URL+"/live.m3u8", hdr, 9978)
+	got, direct, err := ResolveForPlayback(srv.URL+"/live.m3u8", hdr, 9978)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if direct != srv.URL+"/live.m3u8" {
+		t.Fatalf("header-capable player should get the site url, got %s", direct)
 	}
 	if strings.Contains(got, "/proxy/cached_m3u8") || !strings.Contains(got, RollingPlaylistPath+"?id=") {
 		t.Fatalf("want rolling playlist, got %s", got)
@@ -131,9 +140,12 @@ func TestResolveForPlayback_VodWithEndListCached(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := ResolveForPlayback(srv.URL+"/vod.m3u8", nil, 9978)
+	got, direct, err := ResolveForPlayback(srv.URL+"/vod.m3u8", nil, 9978)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if direct != "" {
+		t.Fatalf("filtered playlist should stay the only url, got direct %s", direct)
 	}
 	if !strings.Contains(got, "/proxy/cached_m3u8?id=") {
 		t.Fatalf("vod playlist should be cached, got %s", got)
