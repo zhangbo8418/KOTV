@@ -364,9 +364,13 @@ class FvpPlayback extends KotvPlayback {
           }
         }();
         if (live || engineLive) {
-          // 桌面直播：4s 太容易欠载停住；drop 保持追直播沿，类似 MPV cache-pause=no。
-          final liveMax = kotvIsDesktop() ? 8000 : 4000;
-          c.setBufferRange(min: 0, max: liveMax, drop: true);
+          // 桌面：缓冲 8s，丢掉过期非关键帧以追直播沿。
+          // Android 不丢：mdk 的 drop 会丢掉非关键帧，关键帧约 1 秒一张时画面就只剩大约每秒一帧。
+          if (kotvIsDesktop()) {
+            c.setBufferRange(min: 0, max: 8000, drop: true);
+          } else {
+            c.setBufferRange(min: 0, max: 4000, drop: false);
+          }
         } else {
           await KotvBufferBudget.warm();
           final maxMs = KotvBufferBudget.fvpMaxBufferMs(KotvBufferBudget.bytes());

@@ -1506,7 +1506,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 style: TextStyle(color: p.fg),
                 onChanged: detect,
                 decoration: InputDecoration(
-                  hintText: kotvDefaultPlayUA,
+                  hintText: kotvEffectivePlayUa(),
                   hintStyle: TextStyle(color: p.muted, fontSize: 12),
                   filled: true,
                   fillColor: p.input,

@@ -99,4 +99,32 @@ void main() {
       isFalse,
     );
   });
+
+  test('empty site header uses platform ua, settings ua wins', () {
+    kotvApplyPlayUaSetting('');
+    kotvSetPlatformPlayUa('');
+    expect(
+      kotvNormalizePlayHeaders(const {}, url: 'https://cdn.example/a.m3u8')['User-Agent'],
+      kotvDefaultPlayUA,
+    );
+    kotvSetPlatformPlayUa('com.bobo.kotv/1.2.3 (Linux;Android 16) ExoPlayerLib/1.11.0');
+    expect(
+      kotvNormalizePlayHeaders(const {}, url: 'https://cdn.example/a.m3u8')['User-Agent'],
+      'com.bobo.kotv/1.2.3 (Linux;Android 16) ExoPlayerLib/1.11.0',
+    );
+    kotvApplyPlayUaSetting('CustomPlayer/1');
+    expect(
+      kotvNormalizePlayHeaders(const {}, url: 'https://cdn.example/a.m3u8')['User-Agent'],
+      'CustomPlayer/1',
+    );
+    expect(
+      kotvNormalizePlayHeaders(
+        const {'User-Agent': 'from-site'},
+        url: 'https://cdn.example/a.m3u8',
+      )['User-Agent'],
+      'from-site',
+    );
+    kotvApplyPlayUaSetting('');
+    kotvSetPlatformPlayUa('');
+  });
 }

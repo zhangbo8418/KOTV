@@ -361,6 +361,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "sdkInt" -> result.success(Build.VERSION.SDK_INT)
+      "playUserAgent" -> result.success(defaultUserAgent())
       "open" -> {
         val url = call.argument<String>("url")?.trim().orEmpty()
         if (url.isEmpty()) {

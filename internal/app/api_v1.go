@@ -1714,11 +1714,6 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	}, nil
 }
 
-// APILiveHLSWrap 已停用。播放交给 MPV/Exo，不再改写 playlist。
-func (a *App) APILiveHLSWrap(raw string, headers map[string]string) map[string]any {
-	return map[string]any{"ok": true, "url": strings.TrimSpace(raw), "proxied": false}
-}
-
 func (a *App) APILiveUnlock(group int, password string) error {
 	cur := a.scopeLive().Current()
 	if cur == nil || len(cur.Groups) == 0 {

@@ -1,14 +1,15 @@
 /// 播放请求头规范化（全播放器共用）。
 ///
-/// User-Agent 优先级（与成熟播放端一致）：
+/// User-Agent 优先级：
 /// 1. 请求头已有 User-Agent / ua
 /// 2. 设置项 `ua`（非空）
-/// 3. [kotvDefaultPlayUA]
+/// 3. Android 上 [kotvSetPlatformPlayUa] 写入的系统 UA
+/// 4. [kotvDefaultPlayUA]
 library;
 
 import 'hls_js_support.dart';
 
-/// Media3 `Util.getUserAgent(applicationId)` 格式缺省值。
+/// 桌面，以及 Android 尚未取到系统信息时的缺省值。
 const kotvDefaultPlayUA =
     'com.bobo.kotv/0.1.0 (Linux;Android 13) ExoPlayerLib/1.4.1';
 
@@ -19,15 +20,22 @@ const kotvChromePlayUA =
 const kotvOkHttpPlayUA = 'okhttp/5.4.0';
 
 String _settingsUa = '';
+String _platformPlayUa = '';
 
 /// 用设置里的 `ua` 刷新缓存（开播前 / 设置变更后调用）。
 void kotvApplyPlayUaSetting(String? raw) {
   _settingsUa = (raw ?? '').trim();
 }
 
-/// 当前生效的缺省 UA（设置优先，否则 [kotvDefaultPlayUA]）。
+/// Android 启动时写入 `Util.getUserAgent` 的结果（包名、versionName、系统版本）。
+void kotvSetPlatformPlayUa(String? raw) {
+  _platformPlayUa = (raw ?? '').trim();
+}
+
+/// 当前生效的缺省 UA。设置优先，其次 Android 系统 UA，否则 [kotvDefaultPlayUA]。
 String kotvEffectivePlayUa() {
   if (_settingsUa.isNotEmpty) return _settingsUa;
+  if (_platformPlayUa.isNotEmpty) return _platformPlayUa;
   return kotvDefaultPlayUA;
 }
 
