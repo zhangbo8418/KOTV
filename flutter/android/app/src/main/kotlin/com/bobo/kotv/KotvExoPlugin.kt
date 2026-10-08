@@ -28,6 +28,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
 import com.bobo.kotv.exo.KotvExoVideoEqController
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -360,6 +361,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "sdkInt" -> result.success(Build.VERSION.SDK_INT)
+      "playUserAgent" -> result.success(defaultUserAgent())
       "open" -> {
         val url = call.argument<String>("url")?.trim().orEmpty()
         if (url.isEmpty()) {
@@ -2408,7 +2410,10 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
   }
 
-  private fun defaultUserAgent(): String = FALLBACK_PLAY_UA
+  private fun defaultUserAgent(): String {
+    val ctx = appContext ?: return FALLBACK_PLAY_UA
+    return Util.getUserAgent(ctx, ctx.packageName)
+  }
 
   /** Dart 侧已做头规范化；此处仅补缺省 UA。 */
   private fun normalizeHeaders(raw: Map<String, String>): Map<String, String> {

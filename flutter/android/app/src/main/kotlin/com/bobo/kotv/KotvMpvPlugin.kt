@@ -27,6 +27,9 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
 import `is`.xyz.mpv.MPVLib
 import java.io.File
 import java.net.HttpURLConnection
@@ -1624,6 +1627,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return current
   }
 
+  @OptIn(UnstableApi::class)
+  private fun playUserAgent(): String {
+    val ctx = appContext ?: return FALLBACK_PLAY_UA
+    return Util.getUserAgent(ctx, ctx.packageName)
+  }
+
   private fun applyProbeHeaders(conn: HttpURLConnection, headers: Map<String, String>) {
     var ua = ""
     for ((rawKey, rawValue) in headers) {
@@ -1637,7 +1646,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       conn.setRequestProperty(key, value)
     }
-    if (ua.isEmpty()) ua = FALLBACK_PLAY_UA
+    if (ua.isEmpty()) ua = playUserAgent()
     conn.setRequestProperty("User-Agent", ua)
   }
 
@@ -1695,7 +1704,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         else -> fields.add("$key: ${escapeListValue(value)}")
       }
     }
-    if (ua.isEmpty()) ua = FALLBACK_PLAY_UA
+    if (ua.isEmpty()) ua = playUserAgent()
     MPVLib.setPropertyString("user-agent", ua)
     MPVLib.setPropertyString("referrer", referer)
     MPVLib.setPropertyString("http-header-fields", fields.joinToString(","))
