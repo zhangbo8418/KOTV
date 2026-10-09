@@ -38,7 +38,9 @@ void kotvEnsureFvpRegistered({
 /// setProperty 会被丢掉。prepare 用的解码器、ClearKey、shader_resource 只能放在
 /// registerWith 的 video.decoders / player 里，插件在 create 时、prepare 之前写入。
 ///
-/// Android 关 tunnel：Surface 未就绪时隧道模式黑屏有声。
+/// Android 开 tunnel，画面用 SurfaceView。Texture 路径会在 eglSwapBuffers 里把
+/// 整帧拷成 RGBA（3840×1920 约 30MB），c2.mtk.hevc.decoder 大约一秒才画一帧。
+/// tunnel 由解码器直接写 Surface，不再经这条 GL。
 /// Win7 不改 d3d11.sync.cpu、不写 shader_resource=1：这两项会让 prepare 失败或卡住平台线程。
 /// 其它桌面把插件默认的 d3d11.sync.cpu=1 改成 0，避免每帧 GPU→CPU 同步把 Texture 卡到个位数帧；
 /// 并用 shader_resource=1 盖掉插件 create 里写死的 0，保留 D3D11 0-copy。
@@ -75,7 +77,7 @@ void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
     'player': playerOpts,
   };
   if (kotvIsAndroid()) {
-    options['tunnel'] = false;
+    options['tunnel'] = true;
   } else if (!win7) {
     options['global'] = <String, Object>{
       'd3d11.sync.cpu': 0,

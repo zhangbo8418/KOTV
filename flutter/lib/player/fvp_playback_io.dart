@@ -283,6 +283,8 @@ class FvpPlayback extends KotvPlayback {
         Uri.parse(url),
         httpHeaders: h,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        // 安卓用 SurfaceView。Texture 会把 4K 帧经 GL 拷成 RGBA。
+        viewType: kotvIsAndroid() ? VideoViewType.platformView : VideoViewType.textureView,
       );
       _c = c;
       _bumpView();
