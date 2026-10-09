@@ -8,7 +8,11 @@ def bridgeSrc = layout.buildDirectory.dir("generated/bridge-src")
 
 android {
     namespace = "com.bobo.kotv.bridge"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 0
+        }
+    }
 
     defaultConfig {
         minSdk 24

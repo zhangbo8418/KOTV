@@ -6,7 +6,7 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  FLUTTER_VERSION: "3.44.8"
+  FLUTTER_VERSION: "3.47.6"
 
 jobs:
   build-apk:
@@ -66,10 +66,10 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses >/dev/null || true
 
-      - name: Install Android SDK (compileSdk 37)
+      - name: Install Android SDK (compileSdk 37.0)
         run: |
-          sdkmanager "platforms;android-36" "platforms;android-37" "build-tools;35.0.0" >/dev/null
-          sdkmanager --list_installed 2>/dev/null | grep -E 'platforms;android-3[67]|build-tools' || true
+          sdkmanager "platforms;android-37.0" "build-tools;36.0.0" >/dev/null
+          sdkmanager --list_installed 2>/dev/null | grep -E 'platforms;android-3|build-tools' || true
 
       - name: Install Android native build tools
         run: sudo apt-get update && sudo apt-get install -y patchelf gperf autoconf automake libtool nasm yasm pkg-config meson ninja-build

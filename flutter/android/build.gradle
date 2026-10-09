@@ -41,6 +41,25 @@ subprojects { sub ->
             }
         }
     }
+    def pinCompileSdk = {
+        def androidExt = sub.extensions.findByName("android")
+        if (androidExt == null) return
+        try {
+            // 插件模板仍写 flutter.compileSdkVersion（3.47 为 36）。统一到 37.0，才能不装 android-36。
+            androidExt.compileSdk {
+                version = release(37) {
+                    minorApiLevel = 0
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+    // evaluationDependsOn(:app) 会先把 app 评完，这时再 afterEvaluate 会失败。
+    if (sub.state.executed) {
+        pinCompileSdk()
+    } else {
+        sub.afterEvaluate pinCompileSdk
+    }
     sub.pluginManager.withPlugin("com.android.application") {
         def androidExt = sub.extensions.findByName("android")
         if (androidExt != null) {
