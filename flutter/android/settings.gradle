@@ -19,6 +19,8 @@ pluginManagement {
 
 plugins {
     id "dev.flutter.flutter-plugin-loader" version "1.0.0"
+    // Flutter 3.44.8 的 Gradle 插件引用 AGP 8 的 BaseExtension / libraryVariants，不能换成 9.1.1。
+    // compileSdk 在 app 与 kotv-bridge 里设为 37，okhttp-android 5.5.0 才能通过 minCompileSdk 检查。
     id "com.android.application" version "8.11.1" apply false
     id "com.android.library" version "8.11.1" apply false
     id "org.jetbrains.kotlin.android" version "2.2.20" apply false

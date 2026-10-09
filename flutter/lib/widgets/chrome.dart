@@ -120,12 +120,16 @@ class NavPill extends StatelessWidget {
     required this.onTap,
     this.selected = false,
     this.autofocus = false,
+    this.onFocusChange,
+    this.scrollIntoView = false,
   });
 
   final String label;
   final VoidCallback onTap;
   final bool selected;
   final bool autofocus;
+  final ValueChanged<bool>? onFocusChange;
+  final bool scrollIntoView;
 
   @override
   Widget build(BuildContext context) {
@@ -138,6 +142,8 @@ class NavPill extends StatelessWidget {
     return TvFocus(
       autofocus: autofocus,
       onPressed: onTap,
+      onFocusChange: onFocusChange,
+      scrollIntoView: scrollIntoView,
       borderRadius: r,
       child: Material(
         color: Colors.transparent,
@@ -746,7 +752,7 @@ class LibraryTopBar extends StatelessWidget {
   }
 }
 
-class CategoryNavBar extends StatelessWidget {
+class CategoryNavBar extends StatefulWidget {
   const CategoryNavBar({
     super.key,
     required this.homeLabel,
@@ -767,42 +773,107 @@ class CategoryNavBar extends StatelessWidget {
   final VoidCallback onLive;
 
   @override
+  State<CategoryNavBar> createState() => _CategoryNavBarState();
+}
+
+class _CategoryNavBarState extends State<CategoryNavBar> {
+  Timer? _arm;
+  String? _pending;
+
+  @override
+  void dispose() {
+    _arm?.cancel();
+    super.dispose();
+  }
+
+  /// 焦点落到分类上约 100ms 后切换。滑过时焦点离开就取消，避免连打请求。
+  void _onPillFocus(String token, bool focused) {
+    if (focused) {
+      _arm?.cancel();
+      _pending = token;
+      _arm = Timer(const Duration(milliseconds: 100), () {
+        if (!mounted || _pending != token) return;
+        if (token == 'home') {
+          if (!widget.homeSelected) widget.onHome();
+          return;
+        }
+        final tid = token.startsWith('cat:') ? token.substring(4) : token;
+        if (tid.isEmpty || tid == widget.selectedTid) return;
+        widget.onCategory(tid);
+      });
+      return;
+    }
+    if (_pending == token) {
+      _arm?.cancel();
+      _pending = null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final s = LayoutScale.of(context);
     final p = KotvPalette.of(context);
     final compact = KotvLayout.isCompact(context);
     final bottomNav = KotvLayout.useBottomNav(context);
-    final selectedIndex = selectedTid == null ? -1 : categories.indexWhere((c) => c.id == selectedTid);
-    // 固定高度匹配 NavPill(36)，避免 scale 把栏压矮后胶囊溢出
+    final selectedIndex = widget.selectedTid == null
+        ? -1
+        : widget.categories.indexWhere((c) => c.id == widget.selectedTid);
+    // 固定高度匹配 NavPill(36)，避免 scale 把栏压矮后胶囊溢出。
+    // 按声明顺序走焦点，避免横向列表按几何距离把焦点跳到左边或右边那一项。
     return Container(
       height: compact ? 40.0 : 48.0,
       color: p.catBar,
       padding: EdgeInsets.symmetric(horizontal: compact ? 10.0 : 24.0 * s, vertical: 6),
-      child: Row(
-        children: [
-          NavPill(label: homeLabel, selected: homeSelected, onTap: onHome),
-          SizedBox(width: 8 * s),
-          Expanded(
-            child: HScrollList(
-              scrollToIndex: selectedIndex >= 0 ? selectedIndex : null,
-              itemCount: categories.length,
-              separatorBuilder: (_, __) => SizedBox(width: 8 * s),
-              itemBuilder: (_, i) {
-                final c = categories[i];
-                return NavPill(
-                  label: c.name,
-                  selected: selectedTid == c.id,
-                  onTap: () => onCategory(c.id),
-                );
-              },
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Row(
+          children: [
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(0),
+              child: NavPill(
+                key: const ValueKey('nav-home'),
+                label: widget.homeLabel,
+                selected: widget.homeSelected,
+                scrollIntoView: true,
+                onFocusChange: (v) => _onPillFocus('home', v),
+                onTap: widget.onHome,
+              ),
             ),
-          ),
-          // 竖屏底栏已有「直播」
-          if (!bottomNav) ...[
             SizedBox(width: 8 * s),
-            NavPill(label: '直播', onTap: onLive),
+            Expanded(
+              child: HScrollList(
+                scrollToIndex: selectedIndex >= 0 ? selectedIndex : null,
+                itemCount: widget.categories.length,
+                separatorBuilder: (_, __) => SizedBox(width: 8 * s),
+                itemBuilder: (_, i) {
+                  final c = widget.categories[i];
+                  return FocusTraversalOrder(
+                    order: NumericFocusOrder(i + 1),
+                    child: NavPill(
+                      key: ValueKey('nav-cat-${c.id}'),
+                      label: c.name,
+                      selected: widget.selectedTid == c.id,
+                      scrollIntoView: true,
+                      onFocusChange: (v) => _onPillFocus('cat:${c.id}', v),
+                      onTap: () => widget.onCategory(c.id),
+                    ),
+                  );
+                },
+              ),
+            ),
+            if (!bottomNav) ...[
+              SizedBox(width: 8 * s),
+              FocusTraversalOrder(
+                order: NumericFocusOrder(widget.categories.length + 1),
+                child: NavPill(
+                  key: const ValueKey('nav-live'),
+                  label: '直播',
+                  onTap: widget.onLive,
+                ),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

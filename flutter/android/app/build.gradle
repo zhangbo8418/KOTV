@@ -21,8 +21,9 @@ def kotvTargetSdk = (System.getenv("KOTV_TARGET_SDK") ?: "28").toInteger()
 
 android {
     namespace = "com.bobo.kotv"
-    // nextlib 声明 minCompileSdk 37，但 CI/本机 SDK 可能尚无 android-37；targetSdk 仍钉 28。
-    compileSdk = flutter.compileSdkVersion as Integer
+    // okhttp-android 5.5.0 的 AAR 要求 compileSdk >= 37。targetSdk 仍由 KOTV_TARGET_SDK 决定，默认 28。
+    // Flutter Gradle 插件按 AGP 8.11 的 variant API 编译，不能换成 AGP 9.1.1。
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -211,7 +212,7 @@ dependencies {
     // Surface/Texture 共用：帧着色器调色（setVideoEffects）
     implementation "androidx.media3:media3-effect:$media3"
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
-    implementation "com.squareup.okhttp3:okhttp:5.5.0"
+    implementation "com.squareup.okhttp3:okhttp-android:5.5.0"
     // 海报用 Glide + @Headers=
     implementation "com.github.bumptech.glide:glide:4.16.0"
     kapt "com.github.bumptech.glide:compiler:4.16.0"

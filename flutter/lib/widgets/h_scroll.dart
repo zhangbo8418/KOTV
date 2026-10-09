@@ -142,7 +142,8 @@ class _HScrollListState extends State<HScrollList> {
 
   Widget? _buildItem(BuildContext context, int i) {
     final child = widget.itemBuilder(context, i);
-    if (child == null || !_measure || i != widget.scrollToIndex) return child;
+    // 定位完成后不再套 GlobalKey。选中项一变，这把钥匙会跟着挪，焦点就被带到新下标上。
+    if (child == null || !_measure || _placed || i != widget.scrollToIndex) return child;
     return KeyedSubtree(key: _selKey, child: child);
   }
 

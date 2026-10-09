@@ -20,6 +20,7 @@ import android.widget.FrameLayout
 import io.flutter.view.TextureRegistry
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.ColorInfo
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -1055,7 +1056,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
     val p = player ?: error("exo player missing")
     applyTrackSelectionPrefs()
-    // setVideoEffects 须在首次 prepare 前至少调用一次以建管线；之后可热更。
+    // 调色全 0 时不调用 setVideoEffects。格式要等轨道回调才知道，这里只清掉上一集留下的着色器。
     applyVideoEq()
     applySubtitleStyle()
     applyAudioOffset()
@@ -1285,12 +1286,17 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           subtitleOverlay?.onPrimaryPlayerCues(cueGroup)
         }
 
+        override fun onTracksChanged(tracks: Tracks) {
+          applyVideoEq()
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
           val cur = player ?: return
           if (playbackState == Player.STATE_ENDED) {
             emit(mapOf("event" to "completed"))
           }
           if (playbackState == Player.STATE_READY) {
+            applyVideoEq()
             val f = cur.videoSize
             if (f.width > 0 && f.height > 0) {
               resizeFlutterTexture(f.width, f.height)
@@ -1715,7 +1721,20 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       else -> "default"
     }
 
+  private var applyingEq = false
+
   private fun applyVideoEq() {
+    if (applyingEq) return
+    applyingEq = true
+    try {
+      applyVideoEqNow()
+    } finally {
+      applyingEq = false
+    }
+  }
+
+  private fun applyVideoEqNow() {
+    val format = selectedVideoFormat()
     videoEqCtrl.apply(
       player,
       KotvExoVideoEqController.Params(
@@ -1729,7 +1748,32 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         shadow = eqShadow,
       ),
       tunneling = tunnelingEnabled && !renderTexture,
+      // 格式未到时先不装 SDR 着色器，等 onTracksChanged / STATE_READY 再决定。
+      leaveSurface = format == null || formatLeavesSurface(format),
     )
+  }
+
+  private fun selectedVideoFormat(): Format? {
+    val p = player ?: return null
+    for (group in p.currentTracks.groups) {
+      if (group.type != C.TRACK_TYPE_VIDEO) continue
+      for (i in 0 until group.length) {
+        if (!group.isTrackSelected(i)) continue
+        return group.getTrackFormat(i)
+      }
+    }
+    return null
+  }
+
+  /** HDR、10bit、杜比视界留在 Surface 直出，不进 SDR 着色器。 */
+  private fun formatLeavesSurface(format: Format): Boolean {
+    if (MimeTypes.VIDEO_DOLBY_VISION == format.sampleMimeType) return true
+    val codecs = format.codecs?.lowercase().orEmpty()
+    if (codecs.startsWith("dvh1") || codecs.startsWith("dvhe") || codecs.startsWith("dav1")) return true
+    if (codecs.startsWith("hvc1.2") || codecs.startsWith("hev1.2")) return true
+    val info = format.colorInfo ?: return false
+    if (ColorInfo.isTransferHdr(info)) return true
+    return info.lumaBitdepth >= 10 || info.chromaBitdepth >= 10
   }
 
   private fun applySubtitleStyle() {

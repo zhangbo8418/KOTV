@@ -18,7 +18,9 @@ List<String> kotvFvpVideoDecoders(String decodeMode) {
       withSoft ? [...hw, 'FFmpeg', 'dav1d'] : hw;
 
   if (kotvIsAndroid()) {
-    return appendSoft(const ['AMediaCodec']);
+    // 默认 image=1 走 AImageReader。MTK C2 会报 Client returned a buffer it does not own，
+    // 输入大约一秒才进几帧。image=0 关掉这条读回路径，解码器按帧间隔取输入。
+    return appendSoft(const ['AMediaCodec:image=0']);
   }
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
     return appendSoft(const ['VT']);

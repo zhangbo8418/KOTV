@@ -195,8 +195,7 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
 Color kotvFocusRingColor(KotvPalette pal, {bool onDarkSurface = false}) {
   final focus = pal.focus;
   if (pal.light && !onDarkSurface) {
-    if (focus.computeLuminance() <= 0.15) return focus;
-    return Color.lerp(focus, const Color(0xFF12121A), 0.62) ?? focus;
+    return focus;
   }
   if (focus.computeLuminance() >= 0.4) return focus;
   return Color.lerp(focus, Colors.white, 0.55) ?? focus;
@@ -259,6 +258,7 @@ class TvFocus extends StatefulWidget {
     this.focusNode,
     this.borderRadius = 12,
     this.scrollIntoView = false,
+    this.onFocusChange,
   });
 
   final Widget child;
@@ -270,6 +270,7 @@ class TvFocus extends StatefulWidget {
   final double borderRadius;
   /// 获焦时把当前项滚进所属的横向/纵向滚动区域。
   final bool scrollIntoView;
+  final ValueChanged<bool>? onFocusChange;
 
   @override
   State<TvFocus> createState() => _TvFocusState();
@@ -284,9 +285,11 @@ class _TvFocusState extends State<TvFocus> with KotvKeyHighlightState {
     final pal = KotvPalette.of(context);
     final ring = kotvFocusRingColor(pal);
     final fill = pal.light ? 0.16 : 0.22;
+    final lightBorderOnly = pal.light;
     return FocusableActionDetector(
       focusNode: widget.focusNode,
       autofocus: widget.autofocus,
+      onFocusChange: widget.onFocusChange,
       // 只用系统「是否该画焦点」：遥控/键盘会亮，鼠标点击不会留下常亮框。
       onShowFocusHighlight: (v) {
         if (v && widget.scrollIntoView) {
@@ -325,12 +328,12 @@ class _TvFocusState extends State<TvFocus> with KotvKeyHighlightState {
               duration: const Duration(milliseconds: 120),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(widget.borderRadius),
-                color: kotvRing(_highlight) ? ring.withOpacity(fill) : null,
+                color: kotvRing(_highlight) && !lightBorderOnly ? ring.withOpacity(fill) : null,
                 border: Border.all(
                   color: kotvRing(_highlight) ? ring : Colors.transparent,
                   width: kotvRing(_highlight) ? 3 : 0,
                 ),
-                boxShadow: kotvRing(_highlight)
+                boxShadow: kotvRing(_highlight) && !lightBorderOnly
                     ? [
                         BoxShadow(
                           color: ring.withOpacity(0.55),

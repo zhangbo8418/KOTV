@@ -46,6 +46,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   int _totalSites = 0;
   String _lastQuery = '';
   Timer? _wordTimer;
+  Future<void>? _cancelFlight;
 
   static const _keys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   static const _zhuyinKeys = 'ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ0123456789';
@@ -80,9 +81,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     if (mounted) unawaited(_refreshWords(_ctrl.text));
   }
 
+  void _cancelSiteSearch() {
+    _cancelFlight = ref.read(apiProvider).cancelPending();
+  }
+
   void _onQueryChanged() {
     if (_ctrl.text == _lastQuery) return;
     _lastQuery = _ctrl.text;
+    _searchGen++;
+    if (_busy) _cancelSiteSearch();
     _wordGen++;
     final gen = _wordGen;
     _wordTimer?.cancel();
@@ -90,9 +97,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       if (!mounted || gen != _wordGen) return;
       unawaited(_refreshWords(_ctrl.text));
     });
-    if (_collects.isNotEmpty && mounted) {
-      setState(() => _collects = []);
-    }
+    if (!mounted) return;
+    final empty = _ctrl.text.trim().isEmpty;
+    setState(() {
+      _busy = false;
+      if (empty || _collects.isNotEmpty) {
+        _collects = [];
+        if (empty) _status = null;
+      }
+    });
   }
 
   Future<void> _refreshWords(String raw) async {
@@ -196,8 +209,24 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   Future<void> _search(String q) async {
     final kw = q.trim();
-    if (kw.isEmpty) return;
+    if (kw.isEmpty) {
+      _searchGen++;
+      if (_busy) _cancelSiteSearch();
+      if (mounted) {
+        setState(() {
+          _collects = [];
+          _busy = false;
+          _status = null;
+        });
+      }
+      return;
+    }
     final gen = ++_searchGen;
+    final inflight = _cancelFlight;
+    _cancelFlight = null;
+    if (inflight != null) await inflight;
+    await ref.read(apiProvider).cancelPending();
+    if (!mounted || gen != _searchGen) return;
     setState(() {
       _busy = true;
       _status = '搜索中…';
@@ -348,7 +377,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       case '→':
         _ctrl.selection = TextSelection.collapsed(offset: cursor >= text.length ? text.length : cursor + 1);
       case '搜索':
-        if (!_busy) _search(text);
+        unawaited(_search(text));
       case '注音':
       case '英文':
         unawaited(_toggleZhuyin());

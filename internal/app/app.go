@@ -99,6 +99,7 @@ func New() (*App, error) {
 		mediaState:    "idle",
 	}
 	a.presence = clientsession.NewPresence(func(userID string) {
+		a.dropReposForUser(userID)
 		spider.KillUserRuntime(userID)
 		parse.CancelUserSniffs(userID)
 		a.sessions.RemoveByUser(userID)
@@ -175,7 +176,7 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 		cloned := a.Config.CloneEphemeral()
 		liveSvc := live.NewService(cloned)
 		liveSvc.SyncFromConfig()
-		return &clientsession.Session{
+		s := &clientsession.Session{
 			ClientID: cid,
 			Cfg:      cloned,
 			Sites:    service.NewSiteService(cloned),
@@ -184,6 +185,9 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 			Ready:    a.Ready,
 			ErrMsg:   a.ErrMsg,
 		}
+		s.SetRepoBaseline(a.siteRepoURLs())
+		cloned.SetRepoWriteHook(s.NoteRepo)
+		return s
 	})
 	// 自愈：Cfg 被换成新 Manager 后 Sites 仍钉旧指针时，换源/换站会一直 Get ""。
 	if sess.Sites == nil || sess.Sites.Config() != sess.Cfg {
@@ -205,6 +209,77 @@ func bindSessionConfig(sess *clientsession.Session, cfg *config.Manager) {
 	liveSvc := live.NewService(cfg)
 	liveSvc.SyncFromConfig()
 	sess.Live = liveSvc
+	cfg.SetRepoWriteHook(sess.NoteRepo)
+}
+
+func (a *App) siteRepoURLs() map[string]struct{} {
+	out := map[string]struct{}{}
+	if a == nil || a.DB == nil {
+		return out
+	}
+	cfgs, err := a.DB.ListConfigs(int64(database.ConfigTypeSite))
+	if err != nil {
+		return out
+	}
+	for _, c := range cfgs {
+		u := strings.TrimSpace(c.URL)
+		if u != "" {
+			out[u] = struct{}{}
+		}
+	}
+	return out
+}
+
+func sessionOwnedByUser(s *clientsession.Session, userID string) bool {
+	if s == nil || userID == "" {
+		return false
+	}
+	id := s.ClientID
+	return id == "u:"+userID || id == userID || strings.HasSuffix(id, ":"+userID)
+}
+
+// dropSessionRepos 删掉远端会话新写入、且不是本机当前 settings.VOD 的仓库行。本机会话留下。
+func (a *App) dropSessionRepos(sess *clientsession.Session) {
+	if a == nil || sess == nil || a.DB == nil || !strings.HasPrefix(sess.ClientID, "u:") {
+		return
+	}
+	added := sess.AddedRepos()
+	if len(added) == 0 {
+		return
+	}
+	held := map[string]struct{}{}
+	if a.sessions != nil {
+		a.sessions.ForEach(func(other *clientsession.Session) {
+			if other == nil || other.ClientID == sess.ClientID {
+				return
+			}
+			for u := range other.AddedRepos() {
+				held[u] = struct{}{}
+			}
+		})
+	}
+	keep := strings.TrimSpace(settings.Get(settings.VOD))
+	for _, u := range clientsession.URLsAddedBySession(added, keep, held) {
+		if err := a.DB.DeleteConfigByURL(u, database.ConfigTypeSite); err != nil {
+			log.Printf("session %s: drop repo %s: %v", sess.ClientID, u, err)
+		}
+	}
+}
+
+func (a *App) dropReposForUser(userID string) {
+	userID = strings.TrimSpace(userID)
+	if a == nil || userID == "" || a.sessions == nil {
+		return
+	}
+	var list []*clientsession.Session
+	a.sessions.ForEach(func(s *clientsession.Session) {
+		if sessionOwnedByUser(s, userID) {
+			list = append(list, s)
+		}
+	})
+	for _, s := range list {
+		a.dropSessionRepos(s)
+	}
 }
 
 // bootstrapSession 首次进入时从磁盘恢复该 Scope 上次选中的点播源与首页。

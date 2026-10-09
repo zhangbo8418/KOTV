@@ -3,6 +3,7 @@
 package clientsession
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/bobo/KOTV/internal/config"
@@ -22,6 +23,10 @@ type Session struct {
 	// Bootstrapped 是否已尝试从磁盘恢复上次源（只做一次）。
 	Bootstrapped bool
 
+	repoMu      sync.Mutex
+	repoAtStart map[string]struct{}
+	addedRepos  map[string]struct{}
+
 	mediaMu    sync.RWMutex
 	mediaState string
 	mediaTitle string
@@ -36,6 +41,20 @@ type Hub struct {
 
 func NewHub() *Hub {
 	return &Hub{byID: map[string]*Session{}}
+}
+
+// Peek 返回已有会话，不创建。
+func (h *Hub) Peek(id string) *Session {
+	if h == nil {
+		return nil
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.byID[id]
 }
 
 // ForEach 遍历当前会话（回调内勿再调 GetOrCreate，避免死锁）。

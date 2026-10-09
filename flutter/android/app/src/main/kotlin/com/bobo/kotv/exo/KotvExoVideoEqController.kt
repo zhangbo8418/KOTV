@@ -51,20 +51,24 @@ class KotvExoVideoEqController {
           shadow != 0
   }
 
-  fun apply(player: ExoPlayer?, params: Params, tunneling: Boolean) {
+  /**
+   * [leaveSurface] 为真时不安装 SDR 着色器：隧道、调色全是 0、HDR / 10bit / 杜比视界，
+   * 或画面格式还没到。从未装过效果时不调用 [ExoPlayer.setVideoEffects]，避免空列表把画面拉进 GL。
+   */
+  fun apply(player: ExoPlayer?, params: Params, tunneling: Boolean, leaveSurface: Boolean = false) {
     if (player == null) return
-    if (tunneling || !params.enabled) {
+    if (tunneling || leaveSurface || !params.enabled) {
+      if (!configured) return
       try {
-        // 空列表也要在首次 prepare 前调用，以便建好 effects 管线供后续热更。
         player.setVideoEffects(emptyList())
-        configured = false
       } catch (_: Throwable) {
-        configured = false
       }
+      configured = false
       return
     }
     colorTone.setParams(params)
     detail.setParams(params)
+    if (configured) return
     try {
       player.setVideoEffects(effects)
       configured = true

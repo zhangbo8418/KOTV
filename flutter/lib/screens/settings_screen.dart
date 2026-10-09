@@ -1688,6 +1688,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.invalidate(engineReadyProvider);
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);
+    if (baseUrl.isEmpty) {
+      ref.read(vodContentEpochProvider.notifier).state++;
+    }
     if (!mounted) return;
     setState(() => _remoteUser = user);
     if (baseUrl.isEmpty) {

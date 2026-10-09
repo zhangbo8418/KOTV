@@ -24,11 +24,12 @@ import (
 
 // Manager 管理点播配置，点播配置管理。
 type Manager struct {
-	mu        sync.RWMutex
-	api       model.Api
-	home      model.Site
-	db        *database.DB
-	ephemeral bool // 多用户临时会话：不写 settings.VOD / 不持久化 home
+	mu          sync.RWMutex
+	api         model.Api
+	home        model.Site
+	db          *database.DB
+	ephemeral   bool // 多用户临时会话：不写 settings.VOD / 不持久化 home
+	onRepoWrite func(string)
 }
 
 var defaultMgr *Manager
@@ -71,6 +72,29 @@ func (m *Manager) SetHome(site model.Site) {
 // Ephemeral 是否为多用户临时会话（不写共享 settings / home）。
 func (m *Manager) Ephemeral() bool {
 	return m.ephemeral
+}
+
+// SetRepoWriteHook 会话记下自己新写入的仓库地址，离开时删掉这些行。
+func (m *Manager) SetRepoWriteHook(fn func(string)) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.onRepoWrite = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) noteWrittenRepo(url string) {
+	url = strings.TrimSpace(url)
+	if m == nil || url == "" {
+		return
+	}
+	m.mu.RLock()
+	fn := m.onRepoWrite
+	m.mu.RUnlock()
+	if fn != nil {
+		fn(url)
+	}
 }
 
 // CloneEphemeral 深拷贝站点相关切片，供按 Scope 隔离的「当前选中源」会话。
@@ -593,6 +617,7 @@ func (m *Manager) parseConfig(cfg *database.Config, isJSON bool, loadJar bool) e
 			return err
 		}
 		_ = m.db.SyncSites(cfgID, api.Sites)
+		m.noteWrittenRepo(cfg.URL)
 	}
 
 	m.mu.Lock()
@@ -656,6 +681,7 @@ func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot) e
 		if _, err := m.db.UpsertConfig(cfg); err != nil {
 			return fmt.Errorf("写入线路 %s 失败: %w", d.DisplayName(), err)
 		}
+		m.noteWrittenRepo(url)
 		log.Printf("仓库索引已入库: %s → %s", d.DisplayName(), url)
 	}
 	if len(depotURLs) == 0 {

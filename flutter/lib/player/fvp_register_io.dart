@@ -46,6 +46,14 @@ void kotvRegisterFvp() {
     });
     return;
   }
+  // Win7 解码走 MFT d3d=9 / DXVA。d3d11.sync.cpu 与 shader_resource=1 会让 prepare 失败或卡住平台线程。
+  if (kotvIsWindows7()) {
+    fvp.registerWith(options: {
+      'platforms': platforms,
+      'player': playerOpts,
+    });
+    return;
+  }
   fvp.registerWith(options: {
     'platforms': platforms,
     // 覆盖插件默认 d3d11.sync.cpu=1：每帧 GPU→CPU 同步会把 Texture 卡到个位数 FPS。

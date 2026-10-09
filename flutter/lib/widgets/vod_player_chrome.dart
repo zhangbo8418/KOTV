@@ -498,15 +498,17 @@ class _IconAct extends StatelessWidget {
 }
 
 class _TextAct extends StatelessWidget {
-  const _TextAct({required this.label, required this.onTap, this.scrollIntoView = false});
+  const _TextAct({required this.label, required this.onTap, this.scrollIntoView = false, this.focusNode});
 
   final String label;
   final VoidCallback onTap;
   final bool scrollIntoView;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     return TvFocus(
+      focusNode: focusNode,
       onPressed: onTap,
       borderRadius: 8,
       scrollIntoView: scrollIntoView,
@@ -520,13 +522,15 @@ class _TextAct extends StatelessWidget {
 
 /// 片头/片尾时间：能停住焦点环，确定键不改数值，左右仍走到相邻按钮。
 class _OffsetClock extends StatelessWidget {
-  const _OffsetClock(this.label);
+  const _OffsetClock(this.label, {this.focusNode});
 
   final String label;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     return TvFocus(
+      focusNode: focusNode,
       scrollIntoView: true,
       borderRadius: 6,
       child: Padding(
@@ -538,14 +542,16 @@ class _OffsetClock extends StatelessWidget {
 }
 
 class _TinyBtn extends StatelessWidget {
-  const _TinyBtn({required this.label, required this.onTap});
+  const _TinyBtn({required this.label, required this.onTap, this.focusNode});
 
   final String label;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     return TvFocus(
+      focusNode: focusNode,
       onPressed: onTap,
       borderRadius: 6,
       scrollIntoView: true,
@@ -703,6 +709,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   final FocusNode _playFocus = FocusNode(debugLabel: 'vod_fs_play');
   final FocusNode _seekFocus = FocusNode(debugLabel: 'vod_fs_seek');
   final KotvFocusBag _epNodes = KotvFocusBag();
+  final KotvFocusBag _iconNodes = KotvFocusBag();
   static const double _epItemExtent = 48;
   bool _pointerHoldingChrome = false;
   bool _focusHoldingChrome = false;
@@ -848,6 +855,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     _playFocus.dispose();
     _seekFocus.dispose();
     _epNodes.dispose();
+    _iconNodes.dispose();
     super.dispose();
   }
 
@@ -1096,6 +1104,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                 },
               );
             }
+            final custom = eq == 'custom';
             return _chromeSheetFrame(
               ctx,
               title: '音频效果',
@@ -1113,55 +1122,57 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                     ],
                   ),
                 ),
-                KotvStepSlider(
-                  inline: true,
-                  label: '对白',
-                  value: dialogue.clamp(0, 100),
-                  min: 0,
-                  max: 100,
-                  divisions: 20,
-                  format: (v) => v <= 0 ? '关' : '${v.round()}',
-                  onChanging: (v) {
-                    dialogue = v;
-                    setSheet(() {});
-                  },
-                  onCommit: (v) => unawaited(_persist('audioDialogue', '${v.round()}')),
-                ),
-                KotvStepSlider(
-                  inline: true,
-                  label: '平衡',
-                  value: balance,
-                  min: -100,
-                  max: 100,
-                  divisions: 40,
-                  format: (v) => v.round() == 0 ? '居中' : '${v.round()}',
-                  onChanging: (v) {
-                    balance = v;
-                    setSheet(() {});
-                  },
-                  onCommit: (v) => unawaited(_persist('audioBalance', '${v.round()}')),
-                ),
-                KotvStepSlider(
-                  inline: true,
-                  label: '音画',
-                  value: offset,
-                  min: -5000,
-                  max: 5000,
-                  divisions: 100,
-                  format: (v) => '${v.round()} ms',
-                  onChanging: (v) {
-                    offset = v;
-                    setSheet(() {});
-                  },
-                  onCommit: (v) => unawaited(_persist('audioOffsetMs', '${v.round()}')),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                  child: _HoldPreviewButton(
-                    label: '按住试听原音',
-                    onHold: (held) => unawaited(widget.player.setFxPreview(audioOriginal: held)),
+                if (custom) ...[
+                  KotvStepSlider(
+                    inline: true,
+                    label: '对白',
+                    value: dialogue.clamp(0, 100),
+                    min: 0,
+                    max: 100,
+                    divisions: 20,
+                    format: (v) => v <= 0 ? '关' : '${v.round()}',
+                    onChanging: (v) {
+                      dialogue = v;
+                      setSheet(() {});
+                    },
+                    onCommit: (v) => unawaited(_persist('audioDialogue', '${v.round()}')),
                   ),
-                ),
+                  KotvStepSlider(
+                    inline: true,
+                    label: '平衡',
+                    value: balance,
+                    min: -100,
+                    max: 100,
+                    divisions: 40,
+                    format: (v) => v.round() == 0 ? '居中' : '${v.round()}',
+                    onChanging: (v) {
+                      balance = v;
+                      setSheet(() {});
+                    },
+                    onCommit: (v) => unawaited(_persist('audioBalance', '${v.round()}')),
+                  ),
+                  KotvStepSlider(
+                    inline: true,
+                    label: '音画',
+                    value: offset,
+                    min: -5000,
+                    max: 5000,
+                    divisions: 100,
+                    format: (v) => '${v.round()} ms',
+                    onChanging: (v) {
+                      offset = v;
+                      setSheet(() {});
+                    },
+                    onCommit: (v) => unawaited(_persist('audioOffsetMs', '${v.round()}')),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                    child: _HoldPreviewButton(
+                      label: '按住试听原音',
+                      onHold: (held) => unawaited(widget.player.setFxPreview(audioOriginal: held)),
+                    ),
+                  ),
+                ],
               ],
             );
           },
@@ -2390,7 +2401,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                   scrollDirection: Axis.horizontal,
                                   child: Row(
                                     children: [
-                                      _IconAct(icon: Icons.skip_previous, tip: '上一集', size: land ? 32.0 : 40.0, scrollIntoView: true, onTap: () {
+                                      _IconAct(icon: Icons.skip_previous, tip: '上一集', size: land ? 32.0 : 40.0, scrollIntoView: true, focusNode: _iconNodes.of('prev'), onTap: () {
                                         widget.onPrev?.call();
                                         widget.onBump();
                                       }),
@@ -2406,7 +2417,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                           setState(() {});
                                         },
                                       ),
-                                      _IconAct(icon: Icons.skip_next, tip: '下一集', size: land ? 32.0 : 40.0, scrollIntoView: true, onTap: () {
+                                      _IconAct(icon: Icons.skip_next, tip: '下一集', size: land ? 32.0 : 40.0, scrollIntoView: true, focusNode: _iconNodes.of('next'), onTap: () {
                                         widget.onNext?.call();
                                         widget.onBump();
                                       }),
@@ -2415,10 +2426,11 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         tip: '倍速（长按细调）',
                                         badge: 'x${widget.player.rate.toStringAsFixed(widget.player.rate == widget.player.rate.roundToDouble() ? 0 : 1)}',
                                         size: land ? 32.0 : 40.0, scrollIntoView: true,
+                                        focusNode: _iconNodes.of('speed'),
                                         onTap: _cycleSpeed,
                                         onLongPress: () => unawaited(_showSpeedSheet()),
                                       ),
-                                      _IconAct(icon: Icons.replay, tip: '重播', size: land ? 32.0 : 40.0, scrollIntoView: true, onTap: () {
+                                      _IconAct(icon: Icons.replay, tip: '重播', size: land ? 32.0 : 40.0, scrollIntoView: true, focusNode: _iconNodes.of('replay'), onTap: () {
                                         widget.onReplay?.call();
                                         widget.player.seek(Duration.zero);
                                         widget.player.play();
@@ -2429,6 +2441,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         tip: '比例：${_aspects[_aspectIdx].$2}',
                                         badge: _aspectBadge(_aspects[_aspectIdx].$1),
                                         size: land ? 32.0 : 40.0, scrollIntoView: true,
+                                        focusNode: _iconNodes.of('aspect'),
                                         onTap: _cycleAspect,
                                       ),
                                       _IconAct(
@@ -2436,12 +2449,14 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         tip: _decodeModes[_decodeIdx].$2,
                                         badge: _decodeModes[_decodeIdx].$2.substring(0, 1),
                                         size: land ? 32.0 : 40.0, scrollIntoView: true,
+                                        focusNode: _iconNodes.of('decode'),
                                         onTap: _cycleDecode,
                                       ),
                                       _IconAct(
                                         icon: Icons.closed_caption,
                                         tip: '字幕',
                                         size: land ? 32.0 : 40.0, scrollIntoView: true,
+                                        focusNode: _iconNodes.of('subtitle'),
                                         onTap: () => _showTrackSheet(kind: 'subtitle'),
                                       ),
                                       if (widget.player.supportsDiscNav &&
@@ -2450,18 +2465,21 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                           icon: Icons.album_outlined,
                                           tip: '碟片导航',
                                           size: land ? 32.0 : 40.0, scrollIntoView: true,
+                                          focusNode: _iconNodes.of('disc'),
                                           onTap: () => _showTrackSheet(kind: 'disc'),
                                         ),
                                       _IconAct(
                                         icon: Icons.audiotrack,
                                         tip: '音轨',
                                         size: land ? 32.0 : 40.0, scrollIntoView: true,
+                                        focusNode: _iconNodes.of('audio'),
                                         onTap: () => _showTrackSheet(kind: 'audio'),
                                       ),
                                       _IconAct(
                                         icon: Icons.videocam_outlined,
                                         tip: '视频轨',
                                         size: land ? 32.0 : 40.0, scrollIntoView: true,
+                                        focusNode: _iconNodes.of('video'),
                                         onTap: () => _showTrackSheet(kind: 'video'),
                                       ),
                                       if (kotvCanSwitchPlayer(live: false))
@@ -2470,6 +2488,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                           tip: '播放器（$_playerLabel）',
                                           badge: flutterIsEmbedPlayer(_playerVal) ? '内' : '外',
                                           size: land ? 32.0 : 40.0, scrollIntoView: true,
+                                          focusNode: _iconNodes.of('player'),
                                           onTap: _showPlayerDialog,
                                         ),
                                       const SizedBox(width: 6),
@@ -2477,6 +2496,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       const SizedBox(width: 8),
                                       _TinyBtn(
                                         label: '片头',
+                                        focusNode: _iconNodes.of('opening'),
                                         onTap: () {
                                           final sec = (widget.player.position.inMilliseconds / 1000).round().clamp(0, 3600);
                                           unawaited(_setOffsets(sec, _endingSec));
@@ -2484,18 +2504,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         },
                                       ),
                                       const SizedBox(width: 8),
-                                      _TinyBtn(label: '-', onTap: () {
+                                      _TinyBtn(label: '-', focusNode: _iconNodes.of('opening-dec'), onTap: () {
                                         unawaited(_setOffsets(_openingSec - 5, _endingSec));
                                         widget.onBump();
                                       }),
-                                      _OffsetClock(fmtMmSs(_openingSec)),
-                                      _TinyBtn(label: '+', onTap: () {
+                                      _OffsetClock(fmtMmSs(_openingSec), focusNode: _iconNodes.of('opening-clock')),
+                                      _TinyBtn(label: '+', focusNode: _iconNodes.of('opening-inc'), onTap: () {
                                         unawaited(_setOffsets(_openingSec + 5, _endingSec));
                                         widget.onBump();
                                       }),
                                       const SizedBox(width: 8),
                                       _TinyBtn(
                                         label: '片尾',
+                                        focusNode: _iconNodes.of('ending'),
                                         onTap: () {
                                           final dur = widget.player.duration;
                                           final pos = widget.player.position;
@@ -2507,18 +2528,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         },
                                       ),
                                       const SizedBox(width: 8),
-                                      _TinyBtn(label: '-', onTap: () {
+                                      _TinyBtn(label: '-', focusNode: _iconNodes.of('ending-dec'), onTap: () {
                                         unawaited(_setOffsets(_openingSec, _endingSec - 5));
                                         widget.onBump();
                                       }),
-                                      _OffsetClock(fmtMmSs(_endingSec)),
-                                      _TinyBtn(label: '+', onTap: () {
+                                      _OffsetClock(fmtMmSs(_endingSec), focusNode: _iconNodes.of('ending-clock')),
+                                      _TinyBtn(label: '+', focusNode: _iconNodes.of('ending-inc'), onTap: () {
                                         unawaited(_setOffsets(_openingSec, _endingSec + 5));
                                         widget.onBump();
                                       }),
                                       const SizedBox(width: 8),
                                       _TinyBtn(
                                         label: '重置',
+                                        focusNode: _iconNodes.of('reset-skip'),
                                         onTap: () {
                                           unawaited(_setOffsets(0, 0));
                                           widget.onBump();
@@ -2527,9 +2549,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       const SizedBox(width: 8),
                                       Container(width: 1, height: 26, color: const Color(0x4DFFFFFF)),
                                       const SizedBox(width: 4),
-                                      _TextAct(label: '更多', onTap: _showMore, scrollIntoView: true),
+                                      _TextAct(label: '更多', onTap: _showMore, scrollIntoView: true, focusNode: _iconNodes.of('more')),
                                       if (widget.episodes.isNotEmpty)
-                                        _TextAct(label: '选集', scrollIntoView: true, onTap: () {
+                                        _TextAct(label: '选集', scrollIntoView: true, focusNode: _iconNodes.of('episodes'), onTap: () {
                                           openEpisodes();
                                           widget.onBump();
                                         }),

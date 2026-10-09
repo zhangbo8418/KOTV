@@ -461,11 +461,13 @@ func (a *App) APISessionLeave() map[string]any {
 	sid := hostclient.ScopeID()
 	uid := hostclient.CurrentUserID()
 	if sid != "" {
+		a.dropSessionRepos(a.sessions.Peek(sid))
 		a.sessions.Remove(sid)
 	}
 	if a.presence != nil && uid != "" {
 		a.presence.Leave(uid) // KillUserRuntime + CancelUserSniffs + RemoveByUser
 	} else if uid != "" {
+		a.dropReposForUser(uid)
 		spider.KillUserRuntime(uid)
 		parse.CancelUserSniffs(uid)
 		a.sessions.RemoveByUser(uid)

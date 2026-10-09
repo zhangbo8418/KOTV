@@ -620,7 +620,8 @@ class FvpPlayback extends KotvPlayback {
       c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
     } catch (_) {}
     // fvp 插件 create 默认 shader_resource=0，关掉 D3D11 0-copy，PC 点播易卡成个位数帧。
-    if (kotvIsDesktop()) {
+    // Win7 不用这条：解码器是 DXVA / d3d9，再写 shader_resource=1 会让 prepare 失败。
+    if (kotvIsDesktop() && !kotvIsWindows7()) {
       try {
         c.setProperty('video.decoder', 'shader_resource=1');
       } catch (_) {}

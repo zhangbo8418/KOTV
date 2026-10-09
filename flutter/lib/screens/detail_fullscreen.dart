@@ -799,6 +799,14 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return KeyEventResult.ignored;
     }
 
+    // 缓冲网速层可见时，左右键不要快进快退，先亮底栏再在控件间移动。
+    if (widget.playback.stalling &&
+        (isDown || isRepeat) &&
+        (kotvIsLeftKey(key) || kotvIsRightKey(key) || kotvIsUpKey(key) || kotvIsDownKey(key))) {
+      _showChromeAndFocusPlay();
+      return KeyEventResult.handled;
+    }
+
     // —— 控件全隐：一键一义 ——
     // OK/播停 → 真播停（可短暂亮栏）；菜单 → 亮底栏；设置/E → 选集；左右 → seek；上下 → 亮控件。
     if (isDown && (kotvIsEnterKey(key) || kotvIsMediaPlayPause(key))) {
