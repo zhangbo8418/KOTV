@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:fvp/fvp.dart' as fvp;
 
+import 'drm_opts.dart';
+import 'fvp_decoders.dart';
 import 'kotv_platform.dart';
 
 /// 注册 libmdk 为 [video_player] 实现（非 Web）。
@@ -8,24 +10,45 @@ import 'kotv_platform.dart';
 /// 延迟到首次使用 FVP 时再注册，避免启动时加载 mdk/libffmpeg 与 libmpv 同进程冲突。
 bool _kotvFvpRegistered = false;
 
-void kotvEnsureFvpRegistered() {
-  if (_kotvFvpRegistered || kIsWeb) return;
+/// 上次写进 registerWith 的解码器列表和 ClearKey。变了才再次注册。
+String _kotvFvpSig = '';
+
+/// 当前开播要用的 ClearKey。解码方式单独变化时保留，避免下一次 prepare 丢掉密钥。
+String _kotvFvpClearKey = '';
+
+/// [decodeMode] 决定 prepare 用的解码器。
+/// [syncClearKey] 为 true 时用 [clearKeyHex] 覆盖已记住的密钥（空串表示这次没有密钥）。
+void kotvEnsureFvpRegistered({
+  String decodeMode = 'auto',
+  String? clearKeyHex,
+  bool syncClearKey = false,
+}) {
+  if (kIsWeb) return;
+  if (syncClearKey) _kotvFvpClearKey = (clearKeyHex ?? '').trim();
+  final sig = '${kotvFvpVideoDecoders(decodeMode).join('\u0001')}|$_kotvFvpClearKey';
+  if (_kotvFvpRegistered && _kotvFvpSig == sig) return;
   _kotvFvpRegistered = true;
-  kotvRegisterFvp();
+  _kotvFvpSig = sig;
+  kotvRegisterFvp(decodeMode: decodeMode, clearKeyHex: _kotvFvpClearKey);
 }
 
-/// 注册 libmdk（由 [kotvEnsureFvpRegistered] 在需要时调用，勿在 main 里无条件注册）。
+/// 注册 libmdk（由 [kotvEnsureFvpRegistered] 调用，勿在 main 里无条件注册）。
 ///
-/// [FvpPlayback] 经 video_player + fvp 插件起播；registerWith 注入 MDK_KEY /
-/// 全局 player 选项。解码器列表在开播时由 [kotvFvpVideoDecoders] 写入。
-/// Android 仅关 tunnel（Surface 未就绪时隧道模式易黑屏有声）。
+/// fvp 的 [FVPControllerExtensions] 在 initialize 之前没有 player，setVideoDecoders /
+/// setProperty 会被丢掉。prepare 用的解码器、ClearKey、shader_resource 只能放在
+/// registerWith 的 video.decoders / player 里，插件在 create 时、prepare 之前写入。
+///
+/// Android 关 tunnel：Surface 未就绪时隧道模式黑屏有声。
+/// Win7 不改 d3d11.sync.cpu、不写 shader_resource=1：这两项会让 prepare 失败或卡住平台线程。
+/// 其它桌面把插件默认的 d3d11.sync.cpu=1 改成 0，避免每帧 GPU→CPU 同步把 Texture 卡到个位数帧；
+/// 并用 shader_resource=1 盖掉插件 create 里写死的 0，保留 D3D11 0-copy。
 ///
 /// 302 跟跳交给 mdk 默认 IO（勿在 Dart 里预跳，CDN 签名会过期）。
 /// 不设 `avformat.input`：URL 后缀常是假的（.m3u8 实为 FLV，.png 实为 TS）。
-void kotvRegisterFvp() {
+void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
   if (kIsWeb) return;
   const platforms = ['windows', 'macos', 'linux', 'android', 'ios'];
-  const playerOpts = <String, String>{
+  final playerOpts = <String, String>{
     // 直播 / 伪扩展名：给足探测窗口（勿用 lowLatency 的极小 analyzeduration，易 prepare 失败）
     'avformat.probesize': '8000000',
     'avformat.analyzeduration': '8000000',
@@ -38,33 +61,25 @@ void kotvRegisterFvp() {
     // 不设 demux.buffer.ranges。那是内存里的 demux 包缓存，只按段数丢弃，没有字节上限，
     // 播完仍留着；setBufferRange 限制的是另一条解码队列。预读时长由开播后的 setBufferRange 管。
   };
-  if (kotvIsAndroid()) {
-    fvp.registerWith(options: {
-      'platforms': platforms,
-      'tunnel': false,
-      'player': playerOpts,
-    });
-    return;
+  final key = (clearKeyHex ?? '').trim();
+  if (key.isNotEmpty) {
+    playerOpts['demux.lavf.o'] = kotvLavfOWithClearKey(key);
   }
-  // Win7 解码走 MFT d3d=9 / DXVA。d3d11.sync.cpu 与 shader_resource=1 会让 prepare 失败或卡住平台线程。
-  if (kotvIsWindows7()) {
-    fvp.registerWith(options: {
-      'platforms': platforms,
-      'player': playerOpts,
-    });
-    return;
+  final win7 = kotvIsWindows7();
+  if (!kotvIsAndroid() && !win7) {
+    playerOpts['video.decoder'] = 'shader_resource=1';
   }
-  fvp.registerWith(options: {
+  final options = <String, dynamic>{
     'platforms': platforms,
-    // 覆盖插件默认 d3d11.sync.cpu=1：每帧 GPU→CPU 同步会把 Texture 卡到个位数 FPS。
-    'global': <String, Object>{
+    'video.decoders': kotvFvpVideoDecoders(decodeMode),
+    'player': playerOpts,
+  };
+  if (kotvIsAndroid()) {
+    options['tunnel'] = false;
+  } else if (!win7) {
+    options['global'] = <String, Object>{
       'd3d11.sync.cpu': 0,
-    },
-    // 插件 create 时写死 shader_resource=0，会关掉 D3D11 0-copy；此处覆盖回 1。
-    // Texture 尺寸交给视频帧（不设 maxWidth/maxHeight）。
-    'player': <String, String>{
-      ...playerOpts,
-      'video.decoder': 'shader_resource=1',
-    },
-  });
+    };
+  }
+  fvp.registerWith(options: options);
 }

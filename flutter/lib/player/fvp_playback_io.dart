@@ -20,6 +20,8 @@ import 'video_scale_fit.dart';
 /// 页内 FVP（libmdk）：经 [video_player] + fvp 插件。
 ///
 /// 须在首次使用 FVP 前调用 [kotvEnsureFvpRegistered]（见 [kotvRegisterFvp]）。
+/// 解码器与 ClearKey 由 registerWith 在 prepare 前写入；initialize 之前的
+/// setVideoDecoders / setProperty 没有 player，插件会直接丢掉。
 ///
 /// 起播顺序：先挂 [VideoPlayer]（建立 Texture/Surface），再 `initialize`/`play`。
 class FvpPlayback extends KotvPlayback {
@@ -244,11 +246,15 @@ class FvpPlayback extends KotvPlayback {
     bool live = false,
     String? format,
   }) async {
-    kotvEnsureFvpRegistered();
     final clearKeyHex = kotvIsLocalClearKey(drm) ? kotvClearKeyHex(drm) : null;
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty && clearKeyHex == null) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
+    kotvEnsureFvpRegistered(
+      decodeMode: _decodeMode,
+      clearKeyHex: clearKeyHex,
+      syncClearKey: true,
+    );
     _opening = true;
     _live = live;
     _lastError = null;
@@ -334,17 +340,6 @@ class FvpPlayback extends KotvPlayback {
         notifyListeners();
       };
       c.addListener(_listener!);
-      // initialize 前写入解码器列表（硬/软锁死；自动=硬解优先+软解回退）。
-      _applyDecodeMode(c);
-      if (clearKeyHex != null) {
-        try {
-          c.setProperty('demux.lavf.o', kotvLavfOWithClearKey(clearKeyHex));
-        } catch (_) {
-          try {
-            c.setProperty('avio.dict', 'decryption_key=$clearKeyHex');
-          } catch (_) {}
-        }
-      }
       // 先让父级 rebuild 挂上 VideoPlayer，再 initialize。
       notifyListeners();
       await SchedulerBinding.instance.endOfFrame;
@@ -611,16 +606,17 @@ class FvpPlayback extends KotvPlayback {
       return;
     }
     _decodeMode = next;
+    // 下一次 prepare 走新列表；已经在播的这一路要当场换解码器。
+    kotvEnsureFvpRegistered(decodeMode: next);
     _applyDecodeMode(_c);
   }
 
+  /// 仅对已经 initialize 的播放器生效。开播那次的列表在 registerWith 里。
   void _applyDecodeMode(VideoPlayerController? c) {
-    if (c == null) return;
+    if (c == null || !c.value.isInitialized) return;
     try {
       c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
     } catch (_) {}
-    // fvp 插件 create 默认 shader_resource=0，关掉 D3D11 0-copy，PC 点播易卡成个位数帧。
-    // Win7 不用这条：解码器是 DXVA / d3d9，再写 shader_resource=1 会让 prepare 失败。
     if (kotvIsDesktop() && !kotvIsWindows7()) {
       try {
         c.setProperty('video.decoder', 'shader_resource=1');

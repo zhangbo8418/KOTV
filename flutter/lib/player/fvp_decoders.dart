@@ -2,7 +2,11 @@ import 'package:flutter/foundation.dart';
 
 import 'kotv_platform.dart';
 
-/// FVP / libmdk 视频解码器列表（与设置「自动 / 硬解 / 软解」一致）。
+/// FVP / libmdk 视频解码器列表（自动 / 硬解 / 软解）。
+///
+/// 这个列表必须交给 registerWith 的 `video.decoders`。插件 create 在 prepare
+/// 之前读取它；initialize 之前调用 setVideoDecoders 没有 player，不会生效。
+/// 不传时插件默认是 Windows `MFT:d3d=11`、Android 不带参数的 `AMediaCodec`。
 ///
 /// - **自动**：硬解优先 + FFmpeg/dav1d 回退
 /// - **硬解**：仅平台硬解，不带软解回退
