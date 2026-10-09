@@ -115,12 +115,15 @@ class KotvBufferBudget {
     return '${mib}MiB';
   }
 
-  /// mdk [setBufferRange] 只有毫秒 API；用内存预算 ÷ 参考码率换算，不用固定秒数。
-  static int fvpMaxBufferMs(int budgetBytes, {int refBitsPerSec = 4 * 1000 * 1000}) {
-    final bps = refBitsPerSec <= 0 ? 4 * 1000 * 1000 : refBitsPerSec;
-    final bytesPerSec = bps / 8.0;
-    final ms = (budgetBytes / bytesPerSec * 1000.0).round();
-    if (ms < 1000) return 1000;
+  /// mdk [setBufferRange] 只有毫秒。把内存预算按这条流的码率换成能放下的媒体时长。
+  ///
+  /// [bitsPerSec] 来自容器或音视频轨，不用固定码率。为 0 时返回 0，调用方继续等码率，
+  /// 不要改成一段固定秒数。返回值至少 1：0 在 mdk 里表示不限制时长。
+  static int fvpMaxBufferMs(int budgetBytes, {required int bitsPerSec}) {
+    if (budgetBytes <= 0 || bitsPerSec <= 0) return 0;
+    final bytesPerSec = bitsPerSec / 8.0;
+    var ms = (budgetBytes / bytesPerSec * 1000.0).round();
+    if (ms < 1) ms = 1;
     if (ms > 2 * 3600 * 1000) return 2 * 3600 * 1000;
     return ms;
   }

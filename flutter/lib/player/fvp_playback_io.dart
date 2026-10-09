@@ -66,6 +66,8 @@ class FvpPlayback extends KotvPlayback {
   int _audioOffsetMs = 0;
   bool _previewVideoOriginal = false;
   bool _previewAudioOriginal = false;
+  bool _liveBufferSet = false;
+  bool _vodBufferSet = false;
 
   VideoPlayerController? get controller => _c;
 
@@ -257,6 +259,8 @@ class FvpPlayback extends KotvPlayback {
     );
     _opening = true;
     _live = live;
+    _liveBufferSet = false;
+    _vodBufferSet = false;
     _lastError = null;
     _completed = false;
     _audioTracks = const [];
@@ -318,6 +322,10 @@ class FvpPlayback extends KotvPlayback {
         if (v.isInitialized && !_opening) {
           _refreshTracksQuiet();
         }
+        if (v.isInitialized && !_vodBufferSet &&
+            (lastInit != v.isInitialized || lastBuffering != v.isBuffering)) {
+          _applyBufferRange(c);
+        }
         // 勿因 position 高频 notify：页面 ListenableBuilder 会重建 Texture，PC 可掉到 ~5fps。
         final err = v.errorDescription ?? _lastError ?? '';
         final w = v.size.width;
@@ -349,28 +357,10 @@ class FvpPlayback extends KotvPlayback {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
       }
-      // 点播才套 KotvBufferBudget；直播（页面 live 或 isLive）勿猛囤——直播此处只是跳过点播预读。
+      // 点播：内存预算 ÷ 这条流的码率。直播仍用短队列。
       try {
-        final engineLive = () {
-          try {
-            return c.isLive();
-          } catch (_) {
-            return false;
-          }
-        }();
-        if (live || engineLive) {
-          // 桌面：缓冲 8s，丢掉过期非关键帧以追直播沿。
-          // Android 不丢：mdk 的 drop 会丢掉非关键帧，关键帧约 1 秒一张时画面就只剩大约每秒一帧。
-          if (kotvIsDesktop()) {
-            c.setBufferRange(min: 0, max: 8000, drop: true);
-          } else {
-            c.setBufferRange(min: 0, max: 4000, drop: false);
-          }
-        } else {
-          await KotvBufferBudget.warm();
-          final maxMs = KotvBufferBudget.fvpMaxBufferMs(KotvBufferBudget.bytes());
-          c.setBufferRange(min: 1000, max: maxMs);
-        }
+        if (!_useLiveBuffer(c)) await KotvBufferBudget.warm();
+        _applyBufferRange(c);
       } catch (_) {}
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
@@ -725,9 +715,69 @@ class FvpPlayback extends KotvPlayback {
     return int.tryParse(t.replaceFirst(RegExp(r'^[tg]'), ''));
   }
 
+  /// 页面标记的直播，或 prepare 标了 live 且容器还没有片长。有片长的点播不走短队列。
+  bool _useLiveBuffer(VideoPlayerController c) {
+    if (_live) return true;
+    try {
+      if (!c.isLive()) return false;
+    } catch (_) {
+      return false;
+    }
+    final info = c.getMediaInfo() as dynamic;
+    final durMs = (info?.duration as int?) ?? 0;
+    return durMs <= 0;
+  }
+
+  int _mediaBitsPerSec(VideoPlayerController c) {
+    final info = c.getMediaInfo() as dynamic;
+    if (info == null) return 0;
+    final top = info.bitRate;
+    if (top is int && top > 0) return top;
+    var sum = 0;
+    for (final list in [info.video, info.audio]) {
+      if (list is! List) continue;
+      for (final stream in list) {
+        final b = (stream as dynamic).codec?.bitRate;
+        if (b is int && b > 0) sum += b;
+      }
+    }
+    return sum;
+  }
+
+  /// 点播：min 和 max 都是内存预算按码率换成的时长。
+  /// 队列空了会等到这段媒体时间再出包；固定 1000ms 时就是大约每秒停一次并亮网速层。
+  /// 码率还是 0 时先不写，等容器或实时码率出来再写。
+  void _applyBufferRange(VideoPlayerController c) {
+    if (!identical(_c, c)) return;
+    try {
+      if (_useLiveBuffer(c)) {
+        if (_liveBufferSet) return;
+        if (kotvIsDesktop()) {
+          c.setBufferRange(min: 0, max: 8000, drop: true);
+        } else {
+          c.setBufferRange(min: 0, max: 4000, drop: false);
+        }
+        _liveBufferSet = true;
+        _vodBufferSet = false;
+        return;
+      }
+      if (_vodBufferSet) return;
+      final bps = _mediaBitsPerSec(c);
+      if (bps <= 0) return;
+      final maxMs = KotvBufferBudget.fvpMaxBufferMs(
+        KotvBufferBudget.bytes(),
+        bitsPerSec: bps,
+      );
+      if (maxMs <= 0) return;
+      c.setBufferRange(min: maxMs, max: maxMs);
+      _vodBufferSet = true;
+    } catch (_) {}
+  }
+
   void _refreshTracksQuiet() {
     final c = _c;
     if (c == null || !c.value.isInitialized) return;
+    if (!_vodBufferSet) _applyBufferRange(c);
     try {
       final info = c.getMediaInfo() as dynamic;
       if (info == null) return;

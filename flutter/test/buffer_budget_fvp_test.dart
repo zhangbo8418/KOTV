@@ -2,13 +2,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kotv/player/buffer_budget.dart';
 
 void main() {
-  test('fvpMaxBufferMs scales from memory budget', () {
-    // 96MiB @ 4Mbps ≈ 201.3s
-    final ms = KotvBufferBudget.fvpMaxBufferMs(96 * 1024 * 1024);
-    expect(ms, greaterThan(1000));
-    expect(ms, lessThanOrEqualTo(2 * 3600 * 1000));
-    // tiny budget: proportional floor 1s (mdk API minimum)
-    expect(KotvBufferBudget.fvpMaxBufferMs(1024), 1000);
+  test('fvpMaxBufferMs follows memory budget and stream bitrate', () {
+    const budget = 96 * 1024 * 1024;
+    final sd = KotvBufferBudget.fvpMaxBufferMs(budget, bitsPerSec: 4 * 1000 * 1000);
+    final uhd = KotvBufferBudget.fvpMaxBufferMs(budget, bitsPerSec: 40 * 1000 * 1000);
+    expect(sd, greaterThan(uhd));
+    expect(sd / uhd, closeTo(10, 0.05));
+    expect(sd, lessThanOrEqualTo(2 * 3600 * 1000));
+    expect(KotvBufferBudget.fvpMaxBufferMs(budget, bitsPerSec: 0), 0);
+    expect(KotvBufferBudget.fvpMaxBufferMs(0, bitsPerSec: 4 * 1000 * 1000), 0);
   });
 
   test('mpvCacheProps uses bytes only', () {
