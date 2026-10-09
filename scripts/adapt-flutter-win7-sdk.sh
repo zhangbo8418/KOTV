@@ -26,6 +26,12 @@ if [[ -f "$THEME" ]]; then
   perl -i -pe 's/PredictiveBackPageTransitionsBuilder\(\)/ZoomPageTransitionsBuilder()/g' "$THEME"
 fi
 
+# video_player 2.9.2 的 networkUrl 没有 viewType。主工程留给安卓 SurfaceView，这里删掉才能编过。
+PLAYBACK="$ROOT/flutter/lib/player/fvp_playback_io.dart"
+if [[ -f "$PLAYBACK" ]]; then
+  perl -i -0pe 's/\n[[:space:]]*\/\/[^\n]*SurfaceView[^\n]*\n[[:space:]]*viewType: kotvIsAndroid\(\) \? VideoViewType\.platformView : VideoViewType\.textureView,//s' "$PLAYBACK"
+fi
+
 perl -i -0pe 's/\n  # 3\.44.*?\n  config:\n    enable-swift-package-manager: false\n/\n/s' "$APP" 2>/dev/null || true
 perl -i -0pe 's/\n  config:\n    enable-swift-package-manager: false\n/\n/s' "$APP" 2>/dev/null || true
 
