@@ -1,11 +1,20 @@
 import Cocoa
 import FlutterMacOS
 import Darwin
+#if arch(x86_64)
+import ObjectiveC
+#endif
 
 class MainFlutterWindow: NSWindow {
   private var hostChannel: FlutterMethodChannel?
 
   override func awakeFromNib() {
+    // Flutter 3.47 的 Impeller 在 Intel Mac 上滚动界面时整窗闪烁。
+    // 修复在 3.48 稳定版里还没有。x86_64 切片在引擎读 Info.plist 之前关掉 Impeller，界面走 Skia。
+    // arm64 编译不到这段，仍用 Impeller。
+    #if arch(x86_64)
+    kotvUseSkiaOnIntel()
+    #endif
     let flutterViewController = FlutterViewController()
     self.contentViewController = flutterViewController
     // 默认窗口 1280×720；min 放宽以支持迷你悬浮窗，常态下限由 Dart window_manager 约束
@@ -80,3 +89,25 @@ class MainFlutterWindow: NSWindow {
     return ["totalBytes": total, "availBytes": avail]
   }
 }
+
+#if arch(x86_64)
+private func kotvUseSkiaOnIntel() {
+  let bundle: AnyClass = Bundle.self
+  let original = NSSelectorFromString("objectForInfoDictionaryKey:")
+  let replacement = #selector(Bundle.kotv_objectForInfoDictionaryKey(_:))
+  guard let from = class_getInstanceMethod(bundle, original),
+        let to = class_getInstanceMethod(bundle, replacement) else {
+    return
+  }
+  method_exchangeImplementations(from, to)
+}
+
+extension Bundle {
+  @objc func kotv_objectForInfoDictionaryKey(_ key: String) -> Any? {
+    if key == "FLTEnableImpeller" {
+      return NSNumber(value: false)
+    }
+    return kotv_objectForInfoDictionaryKey(key)
+  }
+}
+#endif
