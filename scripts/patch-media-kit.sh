@@ -16,6 +16,10 @@
 # fvp 的 dispose 在删除播放器前等待视频尺寸。尺寸 Completer 被换掉后可能永远等不到，
 # mdkPlayerAPI_delete 不执行，上一集的包缓存就留在进程里。补丁让释放纹理时不等尺寸，并等待删除完成。
 #
+# Windows 插件原来每帧 CopyResource 进同一张 shared 纹理。Flutter 只在 handle 变化时
+# 才放开它，拷贝没有结束信号。补丁改成三张纹理，renderVideo 直接画进 Flutter 没拿着的
+# 那张，不再做整帧拷贝。
+#
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
 set -euo pipefail
@@ -283,9 +287,119 @@ player_text = _once("updateTexture release does not wait for size", player_text,
 mdk_text = _one_of("platform dispose awaits player delete", mdk_text, AWAIT_PAIRS)
 mdk_text = _once("MdkVideoPlayer.dispose returns Future", mdk_text, SUB_DISPOSE_OLD, SUB_DISPOSE_NEW)
 
+# Windows：三张 shared 纹理轮换。renderVideo 画进 Flutter 没拿着的那张，取纹理时只交 handle。
+WIN_PLUGIN = fvp_root / "windows" / "fvp_plugin.cpp"
+WIN_COPY_OLD = """        D3D11_TEXTURE2D_DESC desc;
+        rt->GetDesc(&desc);
+        desc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED;
+        MS_ENSURE(dev->CreateTexture2D(&desc, nullptr, &tex));
+
+        ComPtr<IDXGIResource> res;
+        MS_ENSURE(tex.As(&res));
+        HANDLE shared_handle = nullptr;
+        MS_ENSURE(res->GetSharedHandle(&shared_handle));
+        flt_surface_desc->struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor);
+        flt_surface_desc->handle = shared_handle;// tex.Get();
+        //flt_surface_desc->handle = tex.Get(); // eglbind error
+        flt_surface_desc->width = flt_surface_desc->visible_width = desc.Width;
+        flt_surface_desc->height = flt_surface_desc->visible_height = desc.Height;
+        flt_surface_desc->release_context = nullptr;
+        flt_surface_desc->release_callback = [](void* release_context) {};
+        //flt_surface_desc->format = kFlutterDesktopPixelFormatBGRA8888;
+        flt_tex = make_unique<flutter::TextureVariant>(flutter::GpuSurfaceTexture(
+            kFlutterDesktopGpuSurfaceTypeDxgiSharedHandle
+            //kFlutterDesktopGpuSurfaceTypeD3d11Texture2D
+            , [pflt_surface_desc = flt_surface_desc.get(), this](size_t width, size_t height) {
+                //printf("ObtainDescriptorCallback %llux%llu. shared_handle_ %p\\n", width, height, shared_handle_); fflush(nullptr);
+                //player.renderVideo(); // stutter
+                scoped_lock lock(mtx);
+                ctx->CopyResource(tex.Get(), rt.Get());
+                ctx->Flush();
+                return pflt_surface_desc;
+            }));
+        textureId = texRegistrar->RegisterTexture(flt_tex.get());
+
+
+        D3D11RenderAPI ra{};
+        ra.rtv = rt.Get();
+        setRenderAPI(&ra);
+        setVideoSurfaceSize(desc.Width, desc.Height);
+        setRenderCallback([this, texRegistrar](void*) {
+            scoped_lock lock(mtx);
+            renderVideo();
+            texRegistrar->MarkTextureFrameAvailable(textureId);
+            });"""
+WIN_COPY_NEW = """        D3D11_TEXTURE2D_DESC desc;
+        rt->GetDesc(&desc);
+        desc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED;
+        shared_tex[0] = rt;
+        MS_ENSURE(dev->CreateTexture2D(&desc, nullptr, &shared_tex[1]));
+        MS_ENSURE(dev->CreateTexture2D(&desc, nullptr, &shared_tex[2]));
+        for (int i = 0; i < 3; ++i) {
+            ComPtr<IDXGIResource> res;
+            MS_ENSURE(shared_tex[i].As(&res));
+            HANDLE shared_handle = nullptr;
+            MS_ENSURE(res->GetSharedHandle(&shared_handle));
+            flt_surface_desc[i].struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor);
+            flt_surface_desc[i].handle = shared_handle;
+            flt_surface_desc[i].width = flt_surface_desc[i].visible_width = desc.Width;
+            flt_surface_desc[i].height = flt_surface_desc[i].visible_height = desc.Height;
+            flt_surface_desc[i].release_context = nullptr;
+            flt_surface_desc[i].release_callback = [](void*) {};
+        }
+        flt_tex = make_unique<flutter::TextureVariant>(flutter::GpuSurfaceTexture(
+            kFlutterDesktopGpuSurfaceTypeDxgiSharedHandle
+            , [this](size_t width, size_t height) {
+                scoped_lock lock(mtx);
+                previous = held;
+                held = presented;
+                return &flt_surface_desc[presented];
+            }));
+        textureId = texRegistrar->RegisterTexture(flt_tex.get());
+
+
+        D3D11RenderAPI ra{};
+        ra.rtv = shared_tex[0].Get();
+        setRenderAPI(&ra);
+        setVideoSurfaceSize(desc.Width, desc.Height);
+        setRenderCallback([this, texRegistrar](void*) {
+            scoped_lock lock(mtx);
+            // KOTV patch (scripts/patch-media-kit.sh): draw into a texture Flutter
+            // is not holding. rtv accepts the texture itself. No CopyResource.
+            int i = 0;
+            for (int k = 0; k < 3; ++k) {
+                if (k != held && k != previous) {
+                    i = k;
+                    break;
+                }
+            }
+            D3D11RenderAPI frame{};
+            frame.rtv = shared_tex[i].Get();
+            setRenderAPI(&frame);
+            renderVideo();
+            presented = i;
+            texRegistrar->MarkTextureFrameAvailable(textureId);
+            });"""
+WIN_MEMBERS_OLD = """    unique_ptr<FlutterDesktopGpuSurfaceDescriptor> flt_surface_desc = make_unique<FlutterDesktopGpuSurfaceDescriptor>();
+    ComPtr<ID3D11Texture2D> tex;"""
+WIN_MEMBERS_NEW = """    FlutterDesktopGpuSurfaceDescriptor flt_surface_desc[3]{};
+    ComPtr<ID3D11Texture2D> shared_tex[3];
+    int held = 0;
+    int previous = 0;
+    int presented = 0;"""
+
+win_text = ""
+if not WIN_PLUGIN.is_file():
+    print(f"ERROR: fvp windows plugin missing: {WIN_PLUGIN}", file=sys.stderr)
+    sys.exit(1)
+win_text = WIN_PLUGIN.read_text(encoding="utf-8")
+win_text = _once("windows texture is rendered without a copy", win_text, WIN_COPY_OLD, WIN_COPY_NEW)
+win_text = _once("windows texture members", win_text, WIN_MEMBERS_OLD, WIN_MEMBERS_NEW)
+
 if fvp_changed:
     player_dart.write_text(player_text, encoding="utf-8")
     mdk_dart.write_text(mdk_text, encoding="utf-8")
+    WIN_PLUGIN.write_text(win_text, encoding="utf-8")
 
 if "state = PlaybackState.stopped;" not in player_dart.read_text(encoding="utf-8").split("Future<void> dispose", 1)[-1][:500]:
     print("ERROR: fvp dispose patch verification failed", file=sys.stderr)
@@ -299,6 +413,13 @@ if "await _players.remove(playerId)?.dispose();" not in mdk_check:
     sys.exit(1)
 if "await super.dispose();" not in mdk_check:
     print("ERROR: fvp MdkVideoPlayer.dispose patch verification failed", file=sys.stderr)
+    sys.exit(1)
+win_check = WIN_PLUGIN.read_text(encoding="utf-8")
+if "frame.rtv = shared_tex[i].Get();" not in win_check or "k != held" not in win_check:
+    print("ERROR: fvp windows zero-copy texture patch verification failed", file=sys.stderr)
+    sys.exit(1)
+if "CopyResource(" in win_check:
+    print("ERROR: fvp windows plugin still copies the frame", file=sys.stderr)
     sys.exit(1)
 print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
 PY

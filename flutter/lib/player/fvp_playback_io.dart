@@ -283,7 +283,7 @@ class FvpPlayback extends KotvPlayback {
         Uri.parse(url),
         httpHeaders: h,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-        // 安卓用 SurfaceView。Texture 会把 4K 帧经 GL 拷成 RGBA。
+        // 安卓用 SurfaceView。
         viewType: kotvIsAndroid() ? VideoViewType.platformView : VideoViewType.textureView,
       );
       _c = c;
@@ -609,7 +609,7 @@ class FvpPlayback extends KotvPlayback {
     try {
       c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
     } catch (_) {}
-    if (kotvIsDesktop() && !kotvIsWindows7()) {
+    if (kotvIsWindows() && !kotvIsWindows7()) {
       try {
         c.setProperty('video.decoder', 'shader_resource=1');
       } catch (_) {}

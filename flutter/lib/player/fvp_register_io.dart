@@ -38,12 +38,10 @@ void kotvEnsureFvpRegistered({
 /// setProperty 会被丢掉。prepare 用的解码器、ClearKey、shader_resource 只能放在
 /// registerWith 的 video.decoders / player 里，插件在 create 时、prepare 之前写入。
 ///
-/// Android 开 tunnel，画面用 SurfaceView。Texture 路径会在 eglSwapBuffers 里把
-/// 整帧拷成 RGBA（3840×1920 约 30MB），c2.mtk.hevc.decoder 大约一秒才画一帧。
-/// tunnel 由解码器直接写 Surface，不再经这条 GL。
-/// Win7 不改 d3d11.sync.cpu、不写 shader_resource=1：这两项会让 prepare 失败或卡住平台线程。
-/// 其它桌面把插件默认的 d3d11.sync.cpu=1 改成 0，避免每帧 GPU→CPU 同步把 Texture 卡到个位数帧；
-/// 并用 shader_resource=1 盖掉插件 create 里写死的 0，保留 D3D11 0-copy。
+/// Android 开 tunnel，画面用 SurfaceView。解码器直接写 Surface，不经 GL。
+/// shader_resource、d3d11.sync.cpu 只对 D3D11 解码生效。Win8 及以上才写：
+/// 关掉插件默认的 d3d11.sync.cpu=1，并用 shader_resource=1 盖掉 create 里写死的 0。
+/// Win7 保持插件默认。Mac、Linux、iOS 不写这两项。
 ///
 /// 302 跟跳交给 mdk 默认 IO（勿在 Dart 里预跳，CDN 签名会过期）。
 /// 不设 `avformat.input`：URL 后缀常是假的（.m3u8 实为 FLV，.png 实为 TS）。
@@ -68,7 +66,8 @@ void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
     playerOpts['demux.lavf.o'] = kotvLavfOWithClearKey(key);
   }
   final win7 = kotvIsWindows7();
-  if (!kotvIsAndroid() && !win7) {
+  final winD3d11 = kotvIsWindows() && !win7;
+  if (winD3d11) {
     playerOpts['video.decoder'] = 'shader_resource=1';
   }
   final options = <String, dynamic>{
@@ -78,7 +77,7 @@ void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
   };
   if (kotvIsAndroid()) {
     options['tunnel'] = true;
-  } else if (!win7) {
+  } else if (winD3d11) {
     options['global'] = <String, Object>{
       'd3d11.sync.cpu': 0,
     };
