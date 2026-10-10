@@ -359,9 +359,9 @@ class FvpPlayback extends KotvPlayback {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
       }
-      // 点播：内存预算 ÷ 这条流的码率。直播仍用短队列。
+      // 点播：可用内存比例 ÷ 这条流的码率。页面直播仍用短队列。
       try {
-        if (!_useLiveBuffer(c)) await KotvBufferBudget.warm();
+        if (!_live) await KotvBufferBudget.warm();
         _applyBufferRange(c);
       } catch (_) {}
       await c.setVolume((_volume / 100).clamp(0, 1));
@@ -717,19 +717,6 @@ class FvpPlayback extends KotvPlayback {
     return int.tryParse(t.replaceFirst(RegExp(r'^[tg]'), ''));
   }
 
-  /// 页面标记的直播，或 prepare 标了 live 且容器还没有片长。有片长的点播不走短队列。
-  bool _useLiveBuffer(VideoPlayerController c) {
-    if (_live) return true;
-    try {
-      if (!c.isLive()) return false;
-    } catch (_) {
-      return false;
-    }
-    final info = c.getMediaInfo() as dynamic;
-    final durMs = (info?.duration as int?) ?? 0;
-    return durMs <= 0;
-  }
-
   int _mediaBitsPerSec(VideoPlayerController c) {
     final info = c.getMediaInfo() as dynamic;
     if (info == null) return 0;
@@ -746,13 +733,35 @@ class FvpPlayback extends KotvPlayback {
     return sum;
   }
 
-  /// 点播：max 是内存预算按码率换成的时长。min 是队列空了之后再开播要攒的时长，
-  /// 用 1000，并且不超过 max。队列空了只等这一小段，不等整段预算。
-  /// 码率还是 0 时先不写，等容器或实时码率出来再写。
+  /// 进度条上灰条终点减去播放位置，就是未解码队列还剩的时长。
+  int _queueAheadMs(VideoPlayerController c) {
+    final v = c.value;
+    if (v.buffered.isEmpty) return 0;
+    var end = Duration.zero;
+    for (final r in v.buffered) {
+      if (r.end > end) end = r.end;
+    }
+    final ahead = end - v.position;
+    if (ahead.isNegative) return 0;
+    return ahead.inMilliseconds;
+  }
+
+  /// 容器或音轨码率优先。没有时用队列里的字节和时长，队列至少 1000ms 再算。
+  int _vodBitsPerSec(VideoPlayerController c) {
+    final fromInfo = _mediaBitsPerSec(c);
+    if (fromInfo > 0) return fromInfo;
+    final ahead = _queueAheadMs(c);
+    if (ahead < 1000) return 0;
+    return KotvBufferBudget.bitsPerSecFromQueue(c.bufferedPacketBytes(), ahead);
+  }
+
+  /// 点播：max 是可用内存比例按码率换成的时长。min 是队列空了之后再开播要攒的时长，
+  /// 用 1000，并且不超过 max。drop 为 false，解码取走的包离开队列，读端再补到 max。
+  /// 码率还没有时不写，也不把这次写入锁死。只有页面直播使用 drop true。
   void _applyBufferRange(VideoPlayerController c) {
     if (!identical(_c, c)) return;
     try {
-      if (_useLiveBuffer(c)) {
+      if (_live) {
         if (_liveBufferSet) return;
         if (kotvIsDesktop()) {
           c.setBufferRange(min: 0, max: 8000, drop: true);
@@ -764,8 +773,15 @@ class FvpPlayback extends KotvPlayback {
         return;
       }
       if (_vodBufferSet) return;
-      final bps = _mediaBitsPerSec(c);
-      if (bps <= 0) return;
+      final bps = _vodBitsPerSec(c);
+      if (bps <= 0) {
+        // 先前若写成了会丢包的短队列，先把 drop 清掉，等码率出来再提高 max。
+        if (_liveBufferSet) {
+          c.setBufferRange(min: 1000, max: -1, drop: false);
+          _liveBufferSet = false;
+        }
+        return;
+      }
       final maxMs = KotvBufferBudget.fvpMaxBufferMs(
         KotvBufferBudget.bytes(),
         bitsPerSec: bps,
@@ -774,6 +790,7 @@ class FvpPlayback extends KotvPlayback {
       final minMs = maxMs < 1000 ? maxMs : 1000;
       c.setBufferRange(min: minMs, max: maxMs, drop: false);
       _vodBufferSet = true;
+      _liveBufferSet = false;
     } catch (_) {}
   }
 

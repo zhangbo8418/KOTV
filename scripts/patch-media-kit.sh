@@ -23,6 +23,10 @@
 # reader.buffering 把毫秒的 position 装进了 Duration(microseconds:)。改成毫秒。
 # getPosition 组装缓冲区间时也用毫秒。
 #
+# buffered() 同一次调用记下未解码队列的字节数。
+# Windows 插件在 prepare 之前建一个 D3D11 设备，交给 d3d11.device，并设 d3d11.copy=0。
+# 不再写 d3d11.sync.cpu。
+#
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
 set -euo pipefail
@@ -185,7 +189,8 @@ if fvp_root is None:
 
 player_dart = fvp_root / "lib" / "src" / "player.dart"
 mdk_dart = fvp_root / "lib" / "src" / "video_player_mdk.dart"
-if not player_dart.is_file() or not mdk_dart.is_file():
+controller_dart = fvp_root / "lib" / "src" / "controller.dart"
+if not player_dart.is_file() or not mdk_dart.is_file() or not controller_dart.is_file():
     print(f"ERROR: fvp sources missing under {fvp_root}", file=sys.stderr)
     sys.exit(1)
 
@@ -254,6 +259,7 @@ SUB_DISPOSE_NEW = """  @override
 
 player_text = player_dart.read_text(encoding="utf-8")
 mdk_text = mdk_dart.read_text(encoding="utf-8")
+controller_text = controller_dart.read_text(encoding="utf-8")
 fvp_changed = False
 
 def _once(label, blob, old, new):
@@ -314,6 +320,95 @@ BUF_RANGE_NEW = """      if (ev.category == "reader.buffering") {
                 Duration(milliseconds: pos + bufLen),
               ),"""
 mdk_text = _once("reader.buffering range start is milliseconds", mdk_text, BUF_RANGE_OLD, BUF_RANGE_NEW)
+
+# buffered() 把字节指针传了 nullptr。同一次调用记下队列字节，供点播按内存比例换算时长。
+BUF_BYTES_NEW = """  /// Bytes in the undecoded packet queue from the last [buffered] call.
+  int packetBufferedBytes = 0;
+
+  /// Return buffered duration in milliseconds.
+  /// https://github.com/wang-bin/mdk-sdk/wiki/Player-APIs#int64_t-bufferedint64_t-bytes--nullptr-const
+  int buffered() {
+    final cbytes = calloc<Int64>();
+    final ret =
+        _player.ref.buffered
+            .asFunction<int Function(Pointer<mdkPlayer>, Pointer<Int64>)>()(
+          _player.ref.object,
+          cbytes,
+        );
+    packetBufferedBytes = cbytes.value;
+    calloc.free(cbytes);
+    return ret;
+  }"""
+BUF_BYTES_PAIRS = (
+    (
+        """  /// Return buffered duration in milliseconds.
+  /// https://github.com/wang-bin/mdk-sdk/wiki/Player-APIs#int64_t-bufferedint64_t-bytes--nullptr-const
+  int buffered() {
+    //var cbytes = calloc<Int64>();
+    final ret =
+        _player.ref.buffered
+            .asFunction<int Function(Pointer<mdkPlayer>, Pointer<Int64>)>()(
+          _player.ref.object,
+          nullptr,
+        );
+    //cbytes.value
+    //calloc.free(cbytes);
+    return ret;
+  }""",
+        BUF_BYTES_NEW,
+    ),
+    (
+        """  /// Return buffered duration in milliseconds.
+  /// https://github.com/wang-bin/mdk-sdk/wiki/Player-APIs#int64_t-bufferedint64_t-bytes--nullptr-const
+  int buffered() {
+    //var cbytes = calloc<Int64>();
+    final ret = _player.ref.buffered
+            .asFunction<int Function(Pointer<mdkPlayer>, Pointer<Int64>)>()(
+        _player.ref.object, nullptr);
+    //cbytes.value
+    //calloc.free(cbytes);
+    return ret;
+  }""",
+        BUF_BYTES_NEW,
+    ),
+)
+player_text = _one_of("buffered() keeps packet bytes", player_text, BUF_BYTES_PAIRS)
+mdk_text = _once(
+    "platform exposes buffered packet bytes",
+    mdk_text,
+    "    _players[playerId]?.setBufferRange(min: min, max: max, drop: drop);\n  }",
+    """    _players[playerId]?.setBufferRange(min: min, max: max, drop: drop);
+  }
+
+  int bufferedPacketBytes(int playerId) {
+    final player = _players[playerId];
+    if (player == null) return 0;
+    player.buffered();
+    return player.packetBufferedBytes;
+  }""",
+)
+controller_text = _once(
+    "controller exposes buffered packet bytes",
+    controller_text,
+    """  void setBufferRange({int min = -1, int max = -1, bool drop = false}) {
+    _platform.setBufferRange(_getId(this), min: min, max: max, drop: drop);
+  }""",
+    """  void setBufferRange({int min = -1, int max = -1, bool drop = false}) {
+    _platform.setBufferRange(_getId(this), min: min, max: max, drop: drop);
+  }
+
+  /// Bytes currently held in the undecoded packet queue.
+  int bufferedPacketBytes() {
+    return _platform.bufferedPacketBytes(_getId(this));
+  }""",
+)
+mdk_text = _once(
+    "do not set d3d11.sync.cpu",
+    mdk_text,
+    "    mdk.setGlobalOption('d3d11.sync.cpu', 1);\n",
+    "    // KOTV patch (scripts/patch-media-kit.sh): one shared D3D11 device is\n"
+    "    // published by the Windows plugin. Do not wait on a CPU/GPU sync option.\n",
+)
 
 # Windows：三张 shared 纹理轮换。renderVideo 画进 Flutter 没拿着的那张，取纹理时只交 handle。
 WIN_PLUGIN = fvp_root / "windows" / "fvp_plugin.cpp"
@@ -424,9 +519,68 @@ win_text = WIN_PLUGIN.read_text(encoding="utf-8")
 win_text = _once("windows texture is rendered without a copy", win_text, WIN_COPY_OLD, WIN_COPY_NEW)
 win_text = _once("windows texture members", win_text, WIN_MEMBERS_OLD, WIN_MEMBERS_NEW)
 
+DEVICE_BODY = """  // KOTV patch (scripts/patch-media-kit.sh): one D3D11 device before prepare.
+  // Decoder and Flutter textures share it. d3d11.copy=0 skips the cross-device copy.
+  MS_WARN(D3D11CreateDevice(adapter_.Get(), adapter_ ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &dev_, nullptr, &ctx_));
+  if (dev_) {
+    ComPtr<ID3D10Multithread> mt;
+    if (SUCCEEDED(dev_.As(&mt)))
+      mt->SetMultithreadProtected(TRUE);
+    SetGlobalOption("d3d11.device", static_cast<void*>(dev_.Get()));
+    const int d3d_copy = 0;
+    SetGlobalOption("d3d11.copy", d3d_copy);
+  }
+"""
+WIN_DEVICE_PAIRS = (
+    (
+        """FvpPlugin::FvpPlugin(flutter::TextureRegistrar* tr, IDXGIAdapter* adapter)
+    : texture_registrar_(tr)
+    , adapter_(adapter)
+{
+  MdkCallbacksStartup();
+}""",
+        """FvpPlugin::FvpPlugin(flutter::TextureRegistrar* tr, IDXGIAdapter* adapter)
+    : texture_registrar_(tr)
+    , adapter_(adapter)
+{
+  MdkCallbacksStartup();
+""" + DEVICE_BODY + "}",
+    ),
+    (
+        """FvpPlugin::FvpPlugin(flutter::TextureRegistrar* tr, IDXGIAdapter* adapter)
+    : texture_registrar_(tr)
+    , adapter_(adapter)
+{}""",
+        """FvpPlugin::FvpPlugin(flutter::TextureRegistrar* tr, IDXGIAdapter* adapter)
+    : texture_registrar_(tr)
+    , adapter_(adapter)
+{""" + "\n" + DEVICE_BODY + "}",
+    ),
+)
+win_text = _one_of("d3d11 device exists before prepare", win_text, WIN_DEVICE_PAIRS)
+win_text = _once(
+    "CreateRT reuses the shared d3d11 device",
+    win_text,
+    """      MS_WARN(D3D11CreateDevice(adapter_.Get(), adapter_ ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &dev_, nullptr, &ctx_));
+      if (!dev_) {
+          result->Error("device", "create device failed");
+          return;
+      }
+      ComPtr<ID3D10Multithread> mt;
+      if (SUCCEEDED(dev_.As(&mt)))
+          mt->SetMultithreadProtected(TRUE);""",
+    """      // KOTV patch (scripts/patch-media-kit.sh): device is created in the
+      // constructor and published as d3d11.device before prepare.
+      if (!dev_) {
+          result->Error("device", "create device failed");
+          return;
+      }""",
+)
+
 if fvp_changed:
     player_dart.write_text(player_text, encoding="utf-8")
     mdk_dart.write_text(mdk_text, encoding="utf-8")
+    controller_dart.write_text(controller_text, encoding="utf-8")
     WIN_PLUGIN.write_text(win_text, encoding="utf-8")
 
 if "state = PlaybackState.stopped;" not in player_dart.read_text(encoding="utf-8").split("Future<void> dispose", 1)[-1][:500]:
@@ -453,6 +607,26 @@ if "frame.rtv = shared_tex[i].Get();" not in win_check or "k != held" not in win
     sys.exit(1)
 if "CopyResource(" in win_check:
     print("ERROR: fvp windows plugin still copies the frame", file=sys.stderr)
+    sys.exit(1)
+player_check = player_dart.read_text(encoding="utf-8")
+if "packetBufferedBytes" not in player_check:
+    print("ERROR: fvp buffered() does not keep packet bytes", file=sys.stderr)
+    sys.exit(1)
+ctrl_check = controller_dart.read_text(encoding="utf-8")
+if "int bufferedPacketBytes()" not in ctrl_check:
+    print("ERROR: fvp controller does not expose bufferedPacketBytes", file=sys.stderr)
+    sys.exit(1)
+if "int bufferedPacketBytes(int playerId)" not in mdk_check:
+    print("ERROR: fvp platform does not expose bufferedPacketBytes", file=sys.stderr)
+    sys.exit(1)
+if "setGlobalOption('d3d11.sync.cpu'" in mdk_check:
+    print("ERROR: fvp still sets d3d11.sync.cpu", file=sys.stderr)
+    sys.exit(1)
+if 'SetGlobalOption("d3d11.device"' not in win_check or 'SetGlobalOption("d3d11.copy"' not in win_check:
+    print("ERROR: fvp windows plugin does not publish the shared d3d11 device", file=sys.stderr)
+    sys.exit(1)
+if win_check.count("D3D11CreateDevice(") != 1:
+    print("ERROR: fvp windows plugin must create the d3d11 device once", file=sys.stderr)
     sys.exit(1)
 print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
 PY

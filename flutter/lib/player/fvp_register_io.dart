@@ -40,8 +40,9 @@ void kotvEnsureFvpRegistered({
 ///
 /// Android 开 tunnel，画面用 SurfaceView。解码器直接写 Surface，不经 GL。
 /// shader_resource 只适用于 D3D11 且 Win8 及以上，用 1 盖掉 create 里写死的 0。
-/// d3d11.sync.cpu 是全局渲染选项。插件先写成 1，Windows（含 Win7）再写成 0。
-/// 画面是三块纹理，renderVideo 画进 Flutter 没拿着的那块。Mac、Linux、iOS 不写这两项。
+/// Windows 的 D3D11 设备由插件在 prepare 之前建好，并写成 d3d11.device。
+/// 这里把 d3d11.copy 写成 0，解码帧直接画进同一块设备上的纹理。
+/// 画面是三块纹理，renderVideo 画进 Flutter 没拿着的那块。Mac、Linux、iOS 不写这项。
 ///
 /// 302 跟跳交给 mdk 默认 IO（勿在 Dart 里预跳，CDN 签名会过期）。
 /// 不设 `avformat.input`：URL 后缀常是假的（.m3u8 实为 FLV，.png 实为 TS）。
@@ -78,7 +79,7 @@ void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
     options['tunnel'] = true;
   } else if (windows) {
     options['global'] = <String, Object>{
-      'd3d11.sync.cpu': 0,
+      'd3d11.copy': 0,
     };
   }
   fvp.registerWith(options: options);

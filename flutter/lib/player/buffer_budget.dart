@@ -16,7 +16,7 @@ import 'kotv_platform.dart';
 ///
 /// Web / HTML5：由浏览器自己管缓冲，不走本预算。
 ///
-/// 预算按**当前可用内存**为主、总内存为辅估算，再钳到平台上下限。
+/// 预算按当前可用内存的比例：约 15% 可用内存，且不超过总内存的 5%。
 class KotvBufferBudget {
   KotvBufferBudget._();
 
@@ -77,7 +77,9 @@ class KotvBufferBudget {
     return _cached!;
   }
 
-  /// 可用内存优先：约 15% avail，且不超过总内存 5%；再钳到平台上下限。
+  /// 可用内存优先：约 15% avail，且不超过总内存 5%。
+  ///
+  /// 读不到可用内存时用总内存的 5%。总内存也没有时，按桌面 8GiB、其它 3GiB 估算后再取 5%。
   static int fromDevice({
     required int totalBytes,
     required int availBytes,
@@ -87,20 +89,9 @@ class KotvBufferBudget {
         ? totalBytes
         : (desktop ? 8 * 1024 * 1024 * 1024 : 3 * 1024 * 1024 * 1024);
     final byTotal = (total * 0.05).round();
-    int budget;
-    if (availBytes > 0) {
-      final byAvail = (availBytes * 0.15).round();
-      // 可用少时跟 avail；可用充裕时也不超过总内存比例
-      budget = byAvail < byTotal ? byAvail : byTotal;
-    } else {
-      budget = byTotal;
-    }
-    final minB = desktop ? 48 * 1024 * 1024 : 24 * 1024 * 1024;
-    // 上限仍钳制，防止极端机器把 demuxer 开到数 GB
-    final maxB = desktop ? 384 * 1024 * 1024 : 96 * 1024 * 1024;
-    if (budget < minB) budget = minB;
-    if (budget > maxB) budget = maxB;
-    return budget;
+    if (availBytes <= 0) return byTotal;
+    final byAvail = (availBytes * 0.15).round();
+    return byAvail < byTotal ? byAvail : byTotal;
   }
 
   static int _fallback() => fromDevice(
@@ -109,16 +100,22 @@ class KotvBufferBudget {
         desktop: kotvIsDesktop(),
       );
 
-  /// mpv `demuxer-max-bytes` 风格：`96MiB`。
+  /// mpv `demuxer-max-bytes` 风格：`96MiB`。数值就是预算字节，不再另钳一段固定兆字节。
   static String mpvMiB(int n) {
-    final mib = (n / (1024 * 1024)).round().clamp(16, 4096);
-    return '${mib}MiB';
+    final mib = (n / (1024 * 1024)).round();
+    return '${mib < 0 ? 0 : mib}MiB';
+  }
+
+  /// 未解码队列的字节和时长换成比特率。任一侧 `<= 0` 时返回 0。
+  static int bitsPerSecFromQueue(int packetBytes, int durationMs) {
+    if (packetBytes <= 0 || durationMs <= 0) return 0;
+    return packetBytes * 8000 ~/ durationMs;
   }
 
   /// mdk [setBufferRange] 只有毫秒。把内存预算按这条流的码率换成能放下的媒体时长。
   ///
-  /// [bitsPerSec] 来自容器或音视频轨，不用固定码率。为 0 时返回 0，调用方继续等码率，
-  /// 不要改成一段固定秒数。返回值至少 1：0 在 mdk 里表示不限制时长。
+  /// [bitsPerSec] 来自容器、音视频轨，或 [bitsPerSecFromQueue]。为 0 时返回 0，
+  /// 调用方继续等码率，不要改成一段固定秒数。返回值至少 1：0 在 mdk 里表示不限制时长。
   static int fvpMaxBufferMs(int budgetBytes, {required int bitsPerSec}) {
     if (budgetBytes <= 0 || bitsPerSec <= 0) return 0;
     final bytesPerSec = bitsPerSec / 8.0;
