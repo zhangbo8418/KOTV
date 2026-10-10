@@ -3350,8 +3350,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
     }
 
-    // 底栏已获焦：方向键交给 TvFocus；快退/快进才 seek。
-    if (_chromeRemoteFocus) {
+    // 焦点已经在底栏（停止、进度条等）：上下左右交给控件遍历。
+    // 左右 seek 只在焦点不在底栏时做，避免停在停止上按向下被吃掉或改进度。
+    if (_chromeRemoteFocus || VodInlineChromeScope.focusIsInside()) {
       if (isDown && kotvIsMenuKey(key)) {
         setState(() => _chromeRemoteFocus = false);
         return KeyEventResult.handled;

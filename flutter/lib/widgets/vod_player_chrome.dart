@@ -23,6 +23,32 @@ import 'fullscreen_expand_button.dart';
 import 'seek_slider.dart';
 import 'volume_control.dart';
 
+/// 上下键只移动焦点。Material [Slider] 在传统导航里会把上下键当成改值。
+Widget _directionalNav(BuildContext context, Widget child) {
+  final mq = MediaQuery.of(context);
+  if (mq.navigationMode == NavigationMode.directional) return child;
+  return MediaQuery(
+    data: mq.copyWith(navigationMode: NavigationMode.directional),
+    child: child,
+  );
+}
+
+/// 详情内嵌底栏的范围。页面按键用它判断焦点是否已经在停止、进度条这些控件上。
+class VodInlineChromeScope extends StatelessWidget {
+  const VodInlineChromeScope({super.key, required this.child});
+
+  final Widget child;
+
+  static bool focusIsInside() {
+    final ctx = FocusManager.instance.primaryFocus?.context;
+    if (ctx == null || !ctx.mounted) return false;
+    return ctx.findAncestorWidgetOfExactType<VodInlineChromeScope>() != null;
+  }
+
+  @override
+  Widget build(BuildContext context) => child;
+}
+
 const _speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
 
 /// key / 标签 / BoxFit / 固定画幅比（16:9、4:3 时非空）。
@@ -314,7 +340,10 @@ class _VodInlineControlsState extends State<VodInlineControls> {
   @override
   Widget build(BuildContext context) {
     final player = widget.player;
-    return Material(
+    return VodInlineChromeScope(
+      child: _directionalNav(
+        context,
+        Material(
       color: widget.translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
       // 播停/音量：ListenableBuilder；进度：positionStream（Exo/MPV 也不因进度 notify）。
       child: LayoutBuilder(
@@ -411,6 +440,8 @@ class _VodInlineControlsState extends State<VodInlineControls> {
             ),
           );
         },
+      ),
+        ),
       ),
     );
   }
@@ -715,7 +746,10 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   bool _focusHoldingChrome = false;
 
   void _emitHold() {
-    widget.onHoldChanged?.call(_pointerHoldingChrome || _focusHoldingChrome);
+    // 桌面只在指针停在顶底栏时拦住隐藏。焦点还在按钮上，鼠标移出后仍要收起。
+    // 非桌面遥控焦点停在栏内时不收起。
+    final focusBlocks = _focusHoldingChrome && !kotvIsDesktop();
+    widget.onHoldChanged?.call(_pointerHoldingChrome || focusBlocks);
   }
 
   void _setPointerHold(bool hold) {
@@ -2238,7 +2272,9 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final padTopBar = land ? 6.0 : 12.0;
     final padBot = (land ? 10.0 : 22.0) + viewBot;
 
-    return Stack(
+    return _directionalNav(
+      context,
+      Stack(
       fit: StackFit.expand,
       children: [
         if (_debugHud)
@@ -2409,7 +2445,6 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                         icon: widget.player.playing ? Icons.pause : Icons.play_arrow,
                                         tip: widget.player.playing ? '暂停' : '播放',
                                         size: land ? 32.0 : 40.0, scrollIntoView: true,
-                                        autofocus: true,
                                         focusNode: _playFocus,
                                         onTap: () {
                                           widget.player.playOrPause();
@@ -2697,6 +2732,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             ),
           ),
       ],
+      ),
     );
   }
 }

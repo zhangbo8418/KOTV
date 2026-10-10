@@ -203,7 +203,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   bool _holdingSpeed = false;
   String? _holdSpeedHint;
   Timer? _hintTimer;
-  /// 指针/焦点停在顶底栏：暂停自动隐藏。
+  /// 指针停在顶底栏，或非桌面遥控焦点停在栏内。桌面鼠标离开后不因焦点停住隐藏。
   bool _chromeHold = false;
   DateTime? _lastTapAt;
   bool? _playingForChrome;
@@ -337,7 +337,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   void _schedulePlayingHide() {
     _hideTimer?.cancel();
     if (!widget.playback.playing || _chromeHold || _epOpen) return;
-    // 遥控选按钮 / 手指滑进度需要更长窗口；操作中由 onHold / onBump 续命。
+    // 桌面指针离开顶底栏后开始计时。非桌面焦点停在栏内时 onHold 拦住。
     _hideTimer = Timer(const Duration(seconds: 5), () {
       if (!mounted || !widget.playback.playing || _epOpen || _chromeHold) return;
       _setChrome(show: false, hideCursor: _hideCursorWhenIdle);

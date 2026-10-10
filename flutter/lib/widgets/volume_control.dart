@@ -33,7 +33,6 @@ class KotvVolumeControl extends StatefulWidget {
 
 class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighlightState {
   late final FocusNode _focus = FocusNode(debugLabel: 'kotv_volume', onKeyEvent: _onKey);
-  final FocusNode _sliderFocus = FocusNode(canRequestFocus: false, skipTraversal: true);
   bool _expanded = false;
   bool _hovering = false;
   bool _highlight = false;
@@ -50,7 +49,6 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighl
     _collapseTimer?.cancel();
     _focus.removeListener(_onFocusChanged);
     _focus.dispose();
-    _sliderFocus.dispose();
     super.dispose();
   }
 
@@ -177,14 +175,15 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighl
                             inactiveTrackColor: Colors.white24,
                             thumbColor: Colors.white,
                           ),
-                          child: Slider(
-                            // 焦点在扬声器节点；滑条仅鼠标/触控，避免与遥控左右键抢焦。
-                            focusNode: _sliderFocus,
-                            value: vol,
-                            min: 1,
-                            max: 100,
-                            onChanged: (v) => unawaited(_applyVolume(v, persist: false)),
-                            onChangeEnd: (v) => unawaited(_applyVolume(v, persist: true)),
+                          child: ExcludeFocus(
+                            // 滑条只给鼠标和触控。FocusableActionDetector 会把 canRequestFocus 盖成 true，所以用 ExcludeFocus 挡住键盘焦点。
+                            child: Slider(
+                              value: vol,
+                              min: 1,
+                              max: 100,
+                              onChanged: (v) => unawaited(_applyVolume(v, persist: false)),
+                              onChangeEnd: (v) => unawaited(_applyVolume(v, persist: true)),
+                            ),
                           ),
                         ),
                       )

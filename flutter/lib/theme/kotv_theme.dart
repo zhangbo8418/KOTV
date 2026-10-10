@@ -374,24 +374,3 @@ void _jumpNearestScrollableIfClipped(BuildContext context) {
     position.jumpTo(target);
   } catch (_) {}
 }
-
-/// 播放器快捷键（方向键/确认/返回）。
-Map<ShortcutActivator, Intent> playerShortcuts = {
-  const SingleActivator(LogicalKeyboardKey.select): const ActivateIntent(),
-  const SingleActivator(LogicalKeyboardKey.enter): const ActivateIntent(),
-  const SingleActivator(LogicalKeyboardKey.space): const ActivateIntent(),
-  const SingleActivator(LogicalKeyboardKey.arrowLeft): const _SeekIntent(-10000),
-  const SingleActivator(LogicalKeyboardKey.arrowRight): const _SeekIntent(10000),
-  const SingleActivator(LogicalKeyboardKey.mediaPlayPause): const ActivateIntent(),
-  const SingleActivator(LogicalKeyboardKey.goBack): const DismissIntent(),
-  const SingleActivator(LogicalKeyboardKey.escape): const DismissIntent(),
-};
-
-class _SeekIntent extends Intent {
-  const _SeekIntent(this.deltaMs);
-  final int deltaMs;
-}
-
-class SeekIntent extends _SeekIntent {
-  const SeekIntent(super.deltaMs);
-}
