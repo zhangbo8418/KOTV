@@ -746,8 +746,8 @@ class FvpPlayback extends KotvPlayback {
     return sum;
   }
 
-  /// 点播：min 和 max 都是内存预算按码率换成的时长。
-  /// 队列空了会等到这段媒体时间再出包；固定 1000ms 时就是大约每秒停一次并亮网速层。
+  /// 点播：max 是内存预算按码率换成的时长。min 是队列空了之后再开播要攒的时长，
+  /// 用 1000，并且不超过 max。队列空了只等这一小段，不等整段预算。
   /// 码率还是 0 时先不写，等容器或实时码率出来再写。
   void _applyBufferRange(VideoPlayerController c) {
     if (!identical(_c, c)) return;
@@ -771,7 +771,8 @@ class FvpPlayback extends KotvPlayback {
         bitsPerSec: bps,
       );
       if (maxMs <= 0) return;
-      c.setBufferRange(min: maxMs, max: maxMs);
+      final minMs = maxMs < 1000 ? maxMs : 1000;
+      c.setBufferRange(min: minMs, max: maxMs, drop: false);
       _vodBufferSet = true;
     } catch (_) {}
   }

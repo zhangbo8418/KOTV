@@ -20,6 +20,9 @@
 # 才放开它，拷贝没有结束信号。补丁改成三张纹理，renderVideo 直接画进 Flutter 没拿着的
 # 那张，不再做整帧拷贝。
 #
+# reader.buffering 把毫秒的 position 装进了 Duration(microseconds:)。改成毫秒。
+# getPosition 组装缓冲区间时也用毫秒。
+#
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
 set -euo pipefail
@@ -286,6 +289,31 @@ player_text = _once("dispose stops before delete", player_text, DISPOSE_OLD, DIS
 player_text = _once("updateTexture release does not wait for size", player_text, SIZE_WAIT_OLD, SIZE_WAIT_NEW)
 mdk_text = _one_of("platform dispose awaits player delete", mdk_text, AWAIT_PAIRS)
 mdk_text = _once("MdkVideoPlayer.dispose returns Future", mdk_text, SUB_DISPOSE_OLD, SUB_DISPOSE_NEW)
+# reader.buffering 的 position 是毫秒。getPosition 也按毫秒组装区间。
+# 片段带上 reader.buffering，避免和 getPosition 里已是毫秒的区间撞车。
+BUF_RANGE_OLD = """      if (ev.category == "reader.buffering") {
+        final pos = position;
+        final bufLen = buffered();
+        streamCtl.add(
+          VideoEvent(
+            eventType: VideoEventType.bufferingUpdate,
+            buffered: [
+              DurationRange(
+                Duration(microseconds: pos),
+                Duration(milliseconds: pos + bufLen),
+              ),"""
+BUF_RANGE_NEW = """      if (ev.category == "reader.buffering") {
+        final pos = position;
+        final bufLen = buffered();
+        streamCtl.add(
+          VideoEvent(
+            eventType: VideoEventType.bufferingUpdate,
+            buffered: [
+              DurationRange(
+                Duration(milliseconds: pos),
+                Duration(milliseconds: pos + bufLen),
+              ),"""
+mdk_text = _once("reader.buffering range start is milliseconds", mdk_text, BUF_RANGE_OLD, BUF_RANGE_NEW)
 
 # Windows：三张 shared 纹理轮换。renderVideo 画进 Flutter 没拿着的那张，取纹理时只交 handle。
 WIN_PLUGIN = fvp_root / "windows" / "fvp_plugin.cpp"
@@ -413,6 +441,11 @@ if "await _players.remove(playerId)?.dispose();" not in mdk_check:
     sys.exit(1)
 if "await super.dispose();" not in mdk_check:
     print("ERROR: fvp MdkVideoPlayer.dispose patch verification failed", file=sys.stderr)
+    sys.exit(1)
+buf_at = mdk_check.find('reader.buffering')
+buf_chunk = mdk_check[buf_at:buf_at + 700] if buf_at >= 0 else ""
+if "Duration(microseconds: pos)" in buf_chunk or "Duration(milliseconds: pos)" not in buf_chunk:
+    print("ERROR: fvp reader.buffering still uses microseconds", file=sys.stderr)
     sys.exit(1)
 win_check = WIN_PLUGIN.read_text(encoding="utf-8")
 if "frame.rtv = shared_tex[i].Get();" not in win_check or "k != held" not in win_check:

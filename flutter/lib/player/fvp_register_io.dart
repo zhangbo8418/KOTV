@@ -39,9 +39,9 @@ void kotvEnsureFvpRegistered({
 /// registerWith 的 video.decoders / player 里，插件在 create 时、prepare 之前写入。
 ///
 /// Android 开 tunnel，画面用 SurfaceView。解码器直接写 Surface，不经 GL。
-/// shader_resource、d3d11.sync.cpu 只对 D3D11 解码生效。Win8 及以上才写：
-/// 关掉插件默认的 d3d11.sync.cpu=1，并用 shader_resource=1 盖掉 create 里写死的 0。
-/// Win7 保持插件默认。Mac、Linux、iOS 不写这两项。
+/// shader_resource 只适用于 D3D11 且 Win8 及以上，用 1 盖掉 create 里写死的 0。
+/// d3d11.sync.cpu 是全局渲染选项。插件先写成 1，Windows（含 Win7）再写成 0。
+/// 画面是三块纹理，renderVideo 画进 Flutter 没拿着的那块。Mac、Linux、iOS 不写这两项。
 ///
 /// 302 跟跳交给 mdk 默认 IO（勿在 Dart 里预跳，CDN 签名会过期）。
 /// 不设 `avformat.input`：URL 后缀常是假的（.m3u8 实为 FLV，.png 实为 TS）。
@@ -65,9 +65,8 @@ void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
   if (key.isNotEmpty) {
     playerOpts['demux.lavf.o'] = kotvLavfOWithClearKey(key);
   }
-  final win7 = kotvIsWindows7();
-  final winD3d11 = kotvIsWindows() && !win7;
-  if (winD3d11) {
+  final windows = kotvIsWindows();
+  if (windows && !kotvIsWindows7()) {
     playerOpts['video.decoder'] = 'shader_resource=1';
   }
   final options = <String, dynamic>{
@@ -77,7 +76,7 @@ void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
   };
   if (kotvIsAndroid()) {
     options['tunnel'] = true;
-  } else if (winD3d11) {
+  } else if (windows) {
     options['global'] = <String, Object>{
       'd3d11.sync.cpu': 0,
     };

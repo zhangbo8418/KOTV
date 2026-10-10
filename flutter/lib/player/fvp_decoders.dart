@@ -35,9 +35,13 @@ List<String> kotvFvpVideoDecoders(String decodeMode) {
     return appendSoft(const ['VAAPI', 'CUDA', 'VDPAU', 'hap']);
   }
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-    // Win7：D3D11 视频解码不稳，优先 DXVA2（MFT d3d=9 / DXVA）。
+    // Win7：DXVA 是 ffmpeg 的 dxva2（D3D9）。失败返回后才试 MFT d3d=11。
+    // shared、shader_resource 只适用于 Win8 及以上。fallback=0 避免降到不返回失败的 d3d=9。
     if (kotvIsWindows7()) {
-      return appendSoft(const ['MFT:d3d=9', 'DXVA', 'hap']);
+      return appendSoft(const [
+        'DXVA',
+        'MFT:d3d=11:shared=0:shader_resource=0:fallback=0',
+      ]);
     }
     return appendSoft(const [
       'MFT:d3d=11',
