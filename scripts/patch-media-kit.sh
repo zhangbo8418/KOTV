@@ -412,13 +412,42 @@ if mdk_text.count("await _storeFailedPlayer(player);") < 3:
     print("ERROR: expected at least 3 failed-player store call sites", file=sys.stderr)
     sys.exit(1)
 
+# 上游可能仍写 d3d11.sync.cpu；缓存里也可能已被旧补丁删掉（注释文案会变）。
+if "setGlobalOption('d3d11.sync.cpu'" in mdk_text:
+    mdk_text = _once(
+        "remove undocumented d3d11.sync.cpu",
+        mdk_text,
+        "    mdk.setGlobalOption('d3d11.sync.cpu', 1);\n",
+        "    // KOTV patch: upstream fvp sets d3d11.sync.cpu, but mdk Global-Options has\n"
+        "    // no such key (only env D3D11_SYNC_CPU / d3d11.sync.kmt). Drop it; Windows\n"
+        "    // plugin publishes d3d11.device + d3d11.copy=0 instead.\n",
+    )
+else:
+    print(f"ok fvp ({fvp_version}) already patched: remove undocumented d3d11.sync.cpu")
+
+# create：player 属性写完后显式 setBufferRange(min:0)。仅靠 property "buffer"
+# 时，安卓仍见 MediaCodec 出帧间隔≈1000ms（mdk 默认 minMs）。
+# 不用 lowLatency（会把 analyzeduration 砍到 100ms，伪扩展名 prepare 易失败）。
 mdk_text = _once(
-    "remove undocumented d3d11.sync.cpu",
+    "setBufferRange min=0 after player opts",
     mdk_text,
-    "    mdk.setGlobalOption('d3d11.sync.cpu', 1);\n",
-    "    // KOTV patch: upstream fvp sets d3d11.sync.cpu, but mdk Global-Options has\n"
-    "    // no such key (only env D3D11_SYNC_CPU / d3d11.sync.kmt). Drop it; Windows\n"
-    "    // plugin publishes d3d11.device + d3d11.copy=0 instead.\n",
+    """    _playerOpts?.forEach((key, value) {
+      player.setProperty(key, value);
+    });
+
+    if (_decoders != null) {
+""",
+    """    _playerOpts?.forEach((key, value) {
+      player.setProperty(key, value);
+    });
+    // KOTV: mdk default minMs=1000 → ~1fps on queue underrun. Call the API
+    // (same as lowLatency) without shrinking analyzeduration.
+    if (_lowLatency <= 0) {
+      player.setBufferRange(min: 0);
+    }
+
+    if (_decoders != null) {
+""",
 )
 
 # Windows：三张 shared 纹理轮换。renderVideo 画进 Flutter 没拿着的那张，取纹理时只交 handle。
@@ -621,6 +650,9 @@ if "CopyResource(" in win_check:
     sys.exit(1)
 if "setGlobalOption('d3d11.sync.cpu'" in mdk_check:
     print("ERROR: fvp still sets undocumented d3d11.sync.cpu", file=sys.stderr)
+    sys.exit(1)
+if "player.setBufferRange(min: 0);" not in mdk_check or "_lowLatency <= 0" not in mdk_check:
+    print("ERROR: fvp create missing setBufferRange(min: 0) after player opts", file=sys.stderr)
     sys.exit(1)
 if 'SetGlobalOption("d3d11.device"' not in win_check or 'SetGlobalOption("d3d11.copy"' not in win_check:
     print("ERROR: fvp windows plugin does not publish the shared d3d11 device", file=sys.stderr)

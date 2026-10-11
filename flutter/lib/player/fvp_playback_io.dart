@@ -37,26 +37,9 @@ class FvpPlayback extends KotvPlayback {
   double _volume = 100;
   double _rate = 1;
   String _decodeMode = 'auto';
-  /// 安卓：`playerRender` surface|texture（与 Exo/MPV 同源设置）。
-  String _renderMode = 'surface';
-  String? _lastUrl;
-  Map<String, String>? _lastHeaders;
-  Map<String, dynamic>? _lastDrm;
-  bool _lastLive = false;
-  String? _lastFormat;
   String _videoScale = 'default';
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
   final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
-
-  bool get _androidTunnel => !kotvIsAndroid() || _renderMode == 'surface';
-
-  /// 安卓跟 [playerRender]；桌面固定 Texture。
-  VideoViewType get _androidViewType {
-    if (!kotvIsAndroid()) return VideoViewType.textureView;
-    return _renderMode == 'surface'
-        ? VideoViewType.platformView
-        : VideoViewType.textureView;
-  }
   List<KotvTrack> _audioTracks = const [];
   List<KotvTrack> _videoTracks = const [];
   List<KotvTrack> _subtitleTracks = const [];
@@ -275,16 +258,10 @@ class FvpPlayback extends KotvPlayback {
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty && clearKeyHex == null) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
-    _lastUrl = url;
-    _lastHeaders = headers == null ? null : Map<String, String>.from(headers);
-    _lastDrm = drm == null ? null : Map<String, dynamic>.from(drm);
-    _lastLive = live;
-    _lastFormat = format;
     kotvEnsureFvpRegistered(
       decodeMode: _decodeMode,
       clearKeyHex: clearKeyHex,
       syncClearKey: true,
-      androidTunnel: _androidTunnel,
     );
     _opening = true;
     _live = live;
@@ -312,8 +289,8 @@ class FvpPlayback extends KotvPlayback {
         Uri.parse(url),
         httpHeaders: h,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-        // 安卓 SurfaceView/TextureView 由 playerRender 决定（Win7 adapt 删本 viewType 行）。
-        viewType: _androidViewType,
+        // 与 macOS 相同：Flutter Texture（Win7 adapt 删本 viewType 行；2.9.2 无此参数）。
+        viewType: VideoViewType.textureView,
       );
       _c = c;
       _bumpView();
@@ -389,8 +366,11 @@ class FvpPlayback extends KotvPlayback {
         throw StateError(_lastError!);
       }
       // 点播：立刻 min=0 盖掉 mdk 默认 min=1000；max 随码率/内存预算。直播短队列。
+      // warm 失败不得跳过 setBufferRange（否则欠载时约 1fps）。
       try {
         if (!_live) await KotvBufferBudget.warm();
+      } catch (_) {}
+      try {
         _applyBufferRange(c);
       } catch (_) {}
       await c.setVolume((_volume / 100).clamp(0, 1));
@@ -628,53 +608,15 @@ class FvpPlayback extends KotvPlayback {
     }
     _decodeMode = next;
     // 下一次 prepare 走新列表；已经在播的这一路要当场换解码器。
-    kotvEnsureFvpRegistered(decodeMode: next, androidTunnel: _androidTunnel);
+    kotvEnsureFvpRegistered(decodeMode: next);
     _applyDecodeMode(_c);
-  }
-
-  @override
-  Future<void> setRenderMode(String mode) async {
-    final next = kotvNormalizePlayerRender(mode);
-    if (next == _renderMode) return;
-    _renderMode = next;
-    kotvEnsureFvpRegistered(decodeMode: _decodeMode, androidTunnel: _androidTunnel);
-    final url = _lastUrl;
-    if (url == null || url.isEmpty || _c == null) {
-      notifyListeners();
-      return;
-    }
-    // tunnel / viewType 在 create 时定死，须重建（与 Exo 原地换面不同）。
-    final pos = position;
-    final wasPlaying = playing && !buffering;
-    try {
-      await open(
-        url,
-        headers: _lastHeaders,
-        drm: _lastDrm,
-        live: _lastLive,
-        format: _lastFormat,
-      );
-      if (!_live && pos > Duration.zero) {
-        try {
-          await seek(pos);
-        } catch (_) {}
-      }
-      if (!wasPlaying) {
-        try {
-          await pause();
-        } catch (_) {}
-      }
-    } catch (_) {}
-    notifyListeners();
   }
 
   /// 仅对已经 initialize 的播放器生效。开播那次的列表在 registerWith 里。
   void _applyDecodeMode(VideoPlayerController? c) {
     if (c == null || !c.value.isInitialized) return;
     try {
-      c.setVideoDecoders(
-        kotvFvpVideoDecoders(_decodeMode, androidSurface: _androidTunnel),
-      );
+      c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
     } catch (_) {}
     // 全局 shader_resource=1 仅 win8+；Win7 写了会卡住平台线程。
     if (kotvIsWindows() && !kotvIsWindows7()) {
@@ -802,19 +744,18 @@ class FvpPlayback extends KotvPlayback {
   }
 
   /// mdk [setBufferRange]：`minMs==0` 尽快解码；`minMs>0` 时队列空了要攒到 min 才继续出包。
-  /// 默认 min=1000，欠载时大约每秒才放出一帧。点播固定 min=0；max 用内存预算÷码率。
-  /// 码率未知时先用 60s 顶住，覆盖默认 min，码率出来再抬 max。
+  /// 默认 min=1000，欠载时大约每秒才放出一帧（ADB MediaCodec timediff≈1002ms 已实测）。
+  /// 点播固定 min=0；max 用内存预算÷码率。码率未知时先用 60s，码率出来再抬 max。
   /// 直播：短队列；桌面 drop 追沿，安卓不 drop（GOP≈1s 时 drop 会只剩关键帧）。
   void _applyBufferRange(VideoPlayerController c) {
     if (!identical(_c, c)) return;
     try {
       if (_live) {
         if (_liveBufferSet) return;
-        if (kotvIsDesktop()) {
-          c.setBufferRange(min: 0, max: 8000, drop: true);
-        } else {
-          c.setBufferRange(min: 0, max: 4000, drop: false);
-        }
+        final maxMs = kotvIsDesktop() ? 8000 : 4000;
+        final drop = kotvIsDesktop();
+        c.setProperty('buffer', drop ? '0+$maxMs-' : '0+$maxMs');
+        c.setBufferRange(min: 0, max: maxMs, drop: drop);
         _liveBufferSet = true;
         _vodBufferSet = false;
         return;
@@ -828,6 +769,7 @@ class FvpPlayback extends KotvPlayback {
             )
           : 60000;
       if (maxMs <= 0) return;
+      c.setProperty('buffer', '0+$maxMs');
       c.setBufferRange(min: 0, max: maxMs, drop: false);
       if (bps > 0) {
         _vodBufferSet = true;

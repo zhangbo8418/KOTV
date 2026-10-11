@@ -16,32 +16,21 @@ String _kotvFvpSig = '';
 /// 当前开播要用的 ClearKey。解码方式单独变化时保留，避免下一次 prepare 丢掉密钥。
 String _kotvFvpClearKey = '';
 
-/// 安卓是否 tunnel（仅 Surface；与 Exo「Texture 时关隧道」一致）。
-bool _kotvFvpAndroidTunnel = true;
-
 /// [decodeMode] 决定 prepare 用的解码器。
 /// [syncClearKey] 为 true 时用 [clearKeyHex] 覆盖已记住的密钥（空串表示这次没有密钥）。
-/// [androidTunnel] 为 null 时沿用上次；Surface 开 tunnel，Texture 必须关。
 void kotvEnsureFvpRegistered({
   String decodeMode = 'auto',
   String? clearKeyHex,
   bool syncClearKey = false,
-  bool? androidTunnel,
 }) {
   if (kIsWeb) return;
   if (syncClearKey) _kotvFvpClearKey = (clearKeyHex ?? '').trim();
-  if (androidTunnel != null) _kotvFvpAndroidTunnel = androidTunnel;
-  final surface = !kotvIsAndroid() || _kotvFvpAndroidTunnel;
   final sig =
-      '${kotvFvpVideoDecoders(decodeMode, androidSurface: surface).join('\u0001')}|$_kotvFvpClearKey|$_kotvFvpAndroidTunnel';
+      '${kotvFvpVideoDecoders(decodeMode).join('\u0001')}|$_kotvFvpClearKey';
   if (_kotvFvpRegistered && _kotvFvpSig == sig) return;
   _kotvFvpRegistered = true;
   _kotvFvpSig = sig;
-  kotvRegisterFvp(
-    decodeMode: decodeMode,
-    clearKeyHex: _kotvFvpClearKey,
-    androidTunnel: _kotvFvpAndroidTunnel,
-  );
+  kotvRegisterFvp(decodeMode: decodeMode, clearKeyHex: _kotvFvpClearKey);
 }
 
 /// 注册 libmdk（由 [kotvEnsureFvpRegistered] 调用，勿在 main 里无条件注册）。
@@ -50,7 +39,8 @@ void kotvEnsureFvpRegistered({
 /// setProperty 会被丢掉。prepare 用的解码器、ClearKey、shader_resource 只能放在
 /// registerWith 的 video.decoders / player 里，插件在 create 时、prepare 之前写入。
 ///
-/// Android：`tunnel` 仅 Surface（[playerRender]）；Texture 与 Exo 一样关隧道，走 GL。
+/// 渲染与 macOS 相同：全平台 Flutter Texture。不设 Android tunnel / SurfaceView
+///（设备上 Surface+tunnel 实测 MediaCodec 出帧间隔恒约 1000ms → ~1fps；Texture/ImageReader 正常）。
 ///
 /// Windows 渲染零拷贝（含 Win7；D3D11 **图形** API，不是 Video 解码 API）：
 /// 1. 插件建共享 D3D11 设备 → d3d11.device；此处 d3d11.copy=0，跳过跨设备拷贝。
@@ -63,11 +53,9 @@ void kotvEnsureFvpRegistered({
 void kotvRegisterFvp({
   String decodeMode = 'auto',
   String? clearKeyHex,
-  bool androidTunnel = true,
 }) {
   if (kIsWeb) return;
   const platforms = ['windows', 'macos', 'linux', 'android', 'ios'];
-  final surface = !kotvIsAndroid() || androidTunnel;
   final playerOpts = <String, String>{
     // 直播 / 伪扩展名：给足探测窗口（勿用 lowLatency 的极小 analyzeduration，易 prepare 失败）
     'avformat.probesize': '8000000',
@@ -78,10 +66,10 @@ void kotvRegisterFvp({
     'avformat.allowed_segment_extensions': 'ALL',
     'avio.reconnect': '1',
     'avio.reconnect_delay_max': '7',
-    // mdk 属性 buffer = setBufferRange：值形如 "minMs" / "minMs+maxMs" / "minMs+maxMs-"。
-    // "0" = minMs=0（decode ASAP）。默认 minMs=1000 欠载时约 1fps。开播后再写 max。
-    // 不设 demux.buffer.ranges（无字节上限，播完仍占内存）。
-    'buffer': '0',
+    // mdk 属性 buffer = setBufferRange："minMs" / "minMs+maxMs" / "minMs+maxMs-"。
+    // "0+0" = minMs=0（decode ASAP）+ maxMs=INT64_MAX。默认 minMs=1000 欠载时约 1fps。
+    // create 里 patch 还会再调 setBufferRange(min:0)。开播后再写带预算的 max。
+    'buffer': '0+0',
   };
   final key = (clearKeyHex ?? '').trim();
   if (key.isNotEmpty) {
@@ -94,13 +82,10 @@ void kotvRegisterFvp({
   }
   final options = <String, dynamic>{
     'platforms': platforms,
-    'video.decoders': kotvFvpVideoDecoders(decodeMode, androidSurface: surface),
+    'video.decoders': kotvFvpVideoDecoders(decodeMode),
     'player': playerOpts,
   };
-  if (kotvIsAndroid()) {
-    // 与 Exo 相同：隧道只跟 Surface；Texture+tunnel 会异常（设备上见过 ~1fps + 音频静音）。
-    options['tunnel'] = androidTunnel;
-  } else if (windows) {
+  if (windows) {
     // Win7 / Win10+ 共用：同设备渲染，跳过跨设备 GPU 拷贝。
     options['global'] = <String, Object>{
       'd3d11.copy': 0,
