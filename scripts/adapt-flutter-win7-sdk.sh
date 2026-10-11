@@ -32,10 +32,16 @@ if [[ -f "$THEME" ]]; then
   perl -i -pe 's/PredictiveBackPageTransitionsBuilder\(\)/ZoomPageTransitionsBuilder()/g' "$THEME"
 fi
 
-# video_player 2.9.2 的 networkUrl 没有 viewType。主工程留给安卓 Surface/Texture，这里删掉才能编过。
+# video_player 2.9.2 无 viewType / VideoViewType。主工程留给安卓 Surface/Texture，这里删掉才能编过。
 PLAYBACK="$ROOT/flutter/lib/player/fvp_playback_io.dart"
 if [[ -f "$PLAYBACK" ]]; then
   perl -i -0pe 's/\n[[:space:]]*\/\/[^\n]*(?:playerRender|viewType|Surface|Texture)[^\n]*\n[[:space:]]*viewType:[^\n]+,//s' "$PLAYBACK"
+  # 参数删了还不够：getter 仍引用 VideoViewType，2.9.2 编译不过。
+  perl -i -0pe 's/\n[[:space:]]*VideoViewType get _viewType \{[\s\S]*?\n[[:space:]]*\}\n/\n/s' "$PLAYBACK"
+  if grep -q 'VideoViewType' "$PLAYBACK"; then
+    echo "ERROR: $PLAYBACK still references VideoViewType after Win7 adapt" >&2
+    exit 1
+  fi
 fi
 
 perl -i -0pe 's/\n  # 3\.44.*?\n  config:\n    enable-swift-package-manager: false\n/\n/s' "$APP" 2>/dev/null || true
