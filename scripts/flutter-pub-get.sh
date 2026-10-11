@@ -17,7 +17,14 @@ _kotv_python() {
 }
 
 _kotv_pub_cache() {
-  echo "${PUB_CACHE:-${PUB_CACHE_DIR:-$HOME/.pub-cache}}"
+  local p="${PUB_CACHE:-${PUB_CACHE_DIR:-$HOME/.pub-cache}}"
+  # Windows runner：Flutter 常把 PUB_CACHE 设成 C:\...；MSYS tar -C 打不开反斜杠路径。
+  # cygpath -m → C:/...，bash mkdir/tar 与 Windows Python pathlib 都能用。
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$p" 2>/dev/null || printf '%s\n' "$p"
+  else
+    printf '%s\n' "$p"
+  fi
 }
 
 _kotv_pub_host_leaf() {
