@@ -1311,6 +1311,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     Map<String, dynamic>? drm,
     bool live = true,
     String? format,
+    Duration startAt = Duration.zero,
   }) async {
     var playSettings = <String, dynamic>{};
     try {
@@ -1374,7 +1375,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       try {
         // 直播页 live=true：直链立刻 play（含 EPG 回看时移流）。
         // 不写 demuxer-max-bytes / cache-secs；无 Flutter play:false 等缓冲。
-        await pb.open(openUrl, headers: openHeaders, drm: hasDrm ? drm : null, live: live, format: format);
+        // 换解码/换播放器恢复进度用 startAt，勿 open 后再 seek。
+        await pb.open(
+          openUrl,
+          headers: openHeaders,
+          drm: hasDrm ? drm : null,
+          live: live,
+          format: format,
+          startAt: startAt,
+        );
         if (stale()) {
           await _dropStalePlayback(pb);
           return;
@@ -2049,11 +2058,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     } catch (_) {}
     if (_playUrl.isNotEmpty) {
       final pos = _playback.position;
-      // 直播/回看均 live 起播；回看再 seek 回原进度。
+      // 直播/回看均 live 起播；进度经 startAt 在首次 play 前恢复。
       final serial = ++_playSerial;
-      await _openLiveUrl(_playUrl, serial: serial, headers: _playHeaders, drm: _playDrm, live: true);
-      if (!mounted || serial != _playSerial) return;
-      if (pos > Duration.zero) await _playback.seek(pos);
+      await _openLiveUrl(
+        _playUrl,
+        serial: serial,
+        headers: _playHeaders,
+        drm: _playDrm,
+        live: true,
+        startAt: pos > Duration.zero ? pos : Duration.zero,
+      );
     }
   }
 
@@ -2105,9 +2119,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
         final pos = _playback.position;
         final serial = ++_playSerial;
-        await _openLiveUrl(_playUrl, serial: serial, headers: _playHeaders, drm: _playDrm, live: true);
+        await _openLiveUrl(
+          _playUrl,
+          serial: serial,
+          headers: _playHeaders,
+          drm: _playDrm,
+          live: true,
+          startAt: pos > Duration.zero ? pos : Duration.zero,
+        );
         if (!mounted || serial != _playSerial) return;
-        if (pos > Duration.zero) await _playback.seek(pos);
         setState(() {});
       }
     } finally {

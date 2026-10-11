@@ -411,6 +411,7 @@ class NativeMpvPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
     String? format,
+    Duration startAt = Duration.zero,
   }) async {
     _url = url;
     _live = live;
@@ -476,6 +477,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'preferredTextLangs': _opts.preferredTextLangs,
         'render': _renderMode,
         'props': props,
+        if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
         ..._opts.equalizerChannelArgs(),
       });
       _extraOpenProps = const {};

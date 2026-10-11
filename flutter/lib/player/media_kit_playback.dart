@@ -154,8 +154,14 @@ class MediaKitPlayback extends KotvPlayback {
   /// 由 `scripts/patch-media-kit.sh` 在 `flutter pub get` 后把 pub-cache 里的
   /// `calloc<Bool>(1)` 改为 `calloc<Int32>(1)`（主线 / Win7 线同版本同补丁，
   /// 打不上即中止打包）。应用层不再兜底。
-  Future<void> _openThenUnpause(Media media) async {
+  Future<void> _openThenUnpause(Media media, {Duration startAt = Duration.zero}) async {
     await player.open(media, play: false);
+    // 须在首次 play 前 seek（契约同 KotvPlayback.open.startAt）。
+    if (startAt > Duration.zero) {
+      try {
+        await player.seek(startAt);
+      } catch (_) {}
+    }
     await player.play();
   }
 
@@ -316,6 +322,7 @@ class MediaKitPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
     String? format,
+    Duration startAt = Duration.zero,
   }) async {
     _url = url;
     _live = live;
@@ -354,7 +361,7 @@ class MediaKitPlayback extends KotvPlayback {
       KotvMpvDiag.note('open live=$live hwdec=${_opts.hwdecValue()} '
           'gpu-api=${_opts.gpuApi} ${KotvMpvDiag.hostOf(url)}');
     }
-    await _openThenUnpause(media);
+    await _openThenUnpause(media, startAt: startAt);
     if (_diag) {
       KotvMpvDiag.note('open done (play sent) dart.playing=${player.state.playing}');
       KotvMpvDiag.scheduleOpenSnapshots(player);

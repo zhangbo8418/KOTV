@@ -2226,24 +2226,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           }
           // 起播缓冲由守卫无限等待；仅黑屏/视源失败抛 SilentVideo 才 failover。
           // 勿再套墙钟 timeout：慢源会被误切播放器。
+          // 续播与片头合成起点，经 open(startAt) 在首次 play 前 seek。
+          // 勿 open 已 play 后再 seek：FVP ADB 会 MediaCodec flush → 约 1fps。
+          final resumeMs = _resumeSeekMs;
+          _resumeSeekMs = 0;
+          final startMs = _skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs;
           await pb.open(
             openUrl,
             headers: openHeaders,
             drm: hasDrm ? drm : null,
             format: '${data['format'] ?? ''}'.trim().isEmpty ? null : '${data['format']}'.trim(),
+            startAt: Duration(milliseconds: startMs),
           );
           if (serial != _playAtSerial || !mounted) {
             await _dropStalePlayback(pb);
             return;
-          }
-          // 续播与片头合成一个起点，在 play 之前 seek；进度回调不再对同一点前跳。
-          final resumeMs = _resumeSeekMs;
-          _resumeSeekMs = 0;
-          final startMs = _skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs;
-          if (startMs > 0) {
-            try {
-              await pb.seek(Duration(milliseconds: startMs));
-            } catch (_) {}
           }
           if (_skipOpeningEnding) _openingSeekDone = true;
           if (serial != _playAtSerial || !mounted) {

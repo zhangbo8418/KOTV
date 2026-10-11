@@ -42,6 +42,7 @@ class FvpPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
     String? format,
+    Duration startAt = Duration.zero,
   }) async {
     throw UnsupportedError('FVP 不支持 Web');
   }

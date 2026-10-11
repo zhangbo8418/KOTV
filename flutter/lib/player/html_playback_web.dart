@@ -192,6 +192,7 @@ class HtmlPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
     String? format,
+    Duration startAt = Duration.zero,
   }) async {
     await stop();
     _completed = false;
@@ -218,6 +219,11 @@ class HtmlPlayback extends KotvPlayback {
     _video.loop = _loop;
     _wireVideoEvents();
     _startTick();
+    if (startAt > Duration.zero) {
+      try {
+        _video.currentTime = startAt.inMilliseconds / 1000.0;
+      } catch (_) {}
+    }
     try {
       await _video.play().toDart;
     } catch (_) {

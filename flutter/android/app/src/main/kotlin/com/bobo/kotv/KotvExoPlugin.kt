@@ -383,6 +383,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val drm = call.argument<Map<String, Any?>>("drm")
         val mode = call.argument<String>("decodeMode")?.trim()?.lowercase().orEmpty()
         val live = call.argument<Boolean>("live") == true
+        val startAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L }
         val render = call.argument<String>("render")?.trim().orEmpty()
         call.argument<Boolean>("tunneling")?.let { tunnelingEnabled = it }
         call.argument<Boolean>("adblock")?.let { adblockEnabled = it }
@@ -433,7 +434,14 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
               syncOutputPath()
             }
             decodeFallbackTried = false
-            openInternal(url, headers, mime, drm, live)
+            openInternal(
+              url,
+              headers,
+              mime,
+              drm,
+              live,
+              startPositionMs = startAtMs ?: C.TIME_UNSET,
+            )
             applyAudioEq()
             applyAudioOffset()
             applySubtitleOffset()

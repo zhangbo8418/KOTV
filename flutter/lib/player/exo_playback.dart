@@ -408,6 +408,7 @@ class ExoPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
     String? format,
+    Duration startAt = Duration.zero,
   }) async {
     _url = url;
     _live = live;
@@ -443,6 +444,7 @@ class ExoPlayback extends KotvPlayback {
         'decodeMode': _decodeMode,
         'render': _renderMode,
         'live': live,
+        if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
         'tunneling': _tunneling && _renderMode != 'texture',
         'adblock': _adblock,
         'diskCache': _diskCache && !live,
@@ -1014,7 +1016,15 @@ class ExoPlayback extends KotvPlayback {
       final cold = _coldPlayerOptsKey();
       if (_appliedColdPlayerOptsKey != null && cold != _appliedColdPlayerOptsKey) {
         if (_url.isNotEmpty) {
-          await open(_url, headers: _headers, drm: _drm, live: _live, format: _format);
+          final pos = position;
+          await open(
+            _url,
+            headers: _headers,
+            drm: _drm,
+            live: _live,
+            format: _format,
+            startAt: (!_live && pos > Duration.zero) ? pos : Duration.zero,
+          );
         }
       }
     } catch (_) {}
@@ -1221,7 +1231,15 @@ class ExoPlayback extends KotvPlayback {
     _subs = next;
     if (_url.isNotEmpty) {
       try {
-        await open(_url, headers: _headers, drm: _drm, live: _live, format: _format);
+        final pos = position;
+        await open(
+          _url,
+          headers: _headers,
+          drm: _drm,
+          live: _live,
+          format: _format,
+          startAt: (!_live && pos > Duration.zero) ? pos : Duration.zero,
+        );
       } catch (_) {}
     }
   }

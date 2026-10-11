@@ -48,12 +48,14 @@ abstract class KotvPlayback extends ChangeNotifier {
   String? get lastError => null;
 
   /// [live]=true：直播页语境，跳过点播 KotvBufferBudget 预读。
+  /// [startAt]>0：在首次 play 之前 seek（勿 play 后再 seek，FVP/MediaCodec 会 flush 后卡约 1fps）。
   Future<void> open(
     String url, {
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = false,
     String? format,
+    Duration startAt = Duration.zero,
   });
   Future<void> playOrPause();
   Future<void> play();

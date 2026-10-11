@@ -271,6 +271,7 @@ class FvpPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
     String? format,
+    Duration startAt = Duration.zero,
   }) async {
     final clearKeyHex = kotvIsLocalClearKey(drm) ? kotvClearKeyHex(drm) : null;
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty && clearKeyHex == null) {
@@ -410,6 +411,13 @@ class FvpPlayback extends KotvPlayback {
       } catch (_) {}
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
+      // 续播/片头必须在首次 play 前 seek。play 后再 seek → ADB：MediaCodec flush +
+      // AudioTrack pause，随后 Render Avg≈1000ms 约十几秒。
+      if (startAt > Duration.zero) {
+        try {
+          await c.seekTo(startAt);
+        } catch (_) {}
+      }
       await c.play();
       _applyRuntimeOptions(c);
       _refreshTracksQuiet();
@@ -658,7 +666,7 @@ class FvpPlayback extends KotvPlayback {
       notifyListeners();
       return;
     }
-    // viewType / 解码器在 create 时定死，须重建。
+    // viewType / 解码器在 create 时定死，须重建；进度经 startAt 在首次 play 前恢复。
     final pos = position;
     final wasPlaying = playing && !buffering;
     try {
@@ -668,12 +676,8 @@ class FvpPlayback extends KotvPlayback {
         drm: _lastDrm,
         live: _lastLive,
         format: _lastFormat,
+        startAt: pos > Duration.zero ? pos : Duration.zero,
       );
-      if (!_live && pos > Duration.zero) {
-        try {
-          await seek(pos);
-        } catch (_) {}
-      }
       if (!wasPlaying) {
         try {
           await pause();

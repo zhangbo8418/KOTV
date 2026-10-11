@@ -102,6 +102,7 @@ class HtmlPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
     String? format,
+    Duration startAt = Duration.zero,
   }) async {
     _opening = true;
     notifyListeners();
@@ -131,6 +132,11 @@ class HtmlPlayback extends KotvPlayback {
       await c.initialize();
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
+      if (startAt > Duration.zero) {
+        try {
+          await c.seekTo(startAt);
+        } catch (_) {}
+      }
       await c.play();
       await kotvGuardSilentVideo(
         hasVideoSize: () {

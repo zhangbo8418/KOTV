@@ -97,6 +97,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var forceLavfHls = false
   /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
   private var retrySeekSec = -1.0
+  /** open(startAtMs)：loadfile 后、unpause 前 seek，避免 play 后再 seek。 */
+  private var pendingStartAtMs = 0L
   private var loadedUrl: String = ""
   private var loadedHeaders: Map<String, String> = emptyMap()
   private var volume = 80.0
@@ -320,6 +322,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         call.argument<String>("render")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           renderTexture = resolveRenderTexture(it)
         }
+        pendingStartAtMs = call.argument<Number>("startAtMs")?.toLong()?.takeIf { it > 0L } ?: 0L
         @Suppress("UNCHECKED_CAST")
         val props = (call.argument<Map<*, *>>("props") ?: emptyMap<Any, Any>())
           .entries
@@ -1535,7 +1538,16 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       applySpdif()
       MPVLib.setPropertyDouble("volume", volume)
       MPVLib.setPropertyDouble("speed", rate)
-      MPVLib.command(arrayOf("loadfile", url, "replace"))
+      val startMs = pendingStartAtMs
+      pendingStartAtMs = 0L
+      // start= 经 loadfile options 在起播前定位（flags=replace, index=-1）。
+      if (startMs > 0L) {
+        MPVLib.command(
+          arrayOf("loadfile", url, "replace", "-1", "start=${startMs / 1000.0}"),
+        )
+      } else {
+        MPVLib.command(arrayOf("loadfile", url, "replace"))
+      }
       MPVLib.setPropertyBoolean("pause", false)
       paused = false
       playing = true

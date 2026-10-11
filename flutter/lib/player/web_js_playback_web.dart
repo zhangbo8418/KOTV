@@ -284,6 +284,7 @@ class WebJsPlayback extends KotvPlayback {
     Map<String, dynamic>? drm,
     bool live = false,
     String? format,
+    Duration startAt = Duration.zero,
   }) async {
     await stop();
     _completed = false;
@@ -310,6 +311,11 @@ class WebJsPlayback extends KotvPlayback {
       _api.setLoop(_container, _loop);
     } catch (_) {}
     _startTick();
+    if (startAt > Duration.zero) {
+      try {
+        _api.seek(_container, startAt.inMilliseconds / 1000.0);
+      } catch (_) {}
+    }
     try {
       _api.play(_container);
     } catch (_) {}
