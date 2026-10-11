@@ -548,6 +548,9 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
+    // 原生 stop 已 destroyCreatedContext；须重建 create。
+    _nativeReady = false;
+    _textureId = null;
     _playing = false;
     _buffering = false;
     _ready = false;
@@ -563,13 +566,15 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
+    // 原生已拆上下文放开 demuxer/解码缓冲；PlatformView 宿主仍留在树上。
+    _nativeReady = false;
+    _textureId = null;
     _playing = false;
     _buffering = false;
     _ready = false;
     _url = '';
     _w = 0;
     _h = 0;
-    // 换集保留 PlatformView，避免卸面闪底层。
     notifyListeners();
   }
 

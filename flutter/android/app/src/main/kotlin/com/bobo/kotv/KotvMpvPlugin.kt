@@ -396,9 +396,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             pendingUrl = null
-            if (created.get()) {
-              MPVLib.command(arrayOf("stop"))
-            }
+            // 对齐 Exo：仅 command("stop") 在 Rockchip/部分机型上仍占着 demuxer/MediaCodec。
+            // 拆掉 libmpv 上下文放开缓冲；Surface 宿主保留，下次 open→ensurePlayer 再建。
+            destroyPlayer()
             playing = false
             buffering = false
             paused = true

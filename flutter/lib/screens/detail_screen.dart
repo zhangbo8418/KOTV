@@ -561,7 +561,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 换集/换源：先停声并放开上一集缓存。MPV 卸文件但留着 Player / Texture；FVP 等硬停（须 dispose 再建）。
+  /// 换集/换源：先停声并放开上一集缓存。
+  /// 桌面 MPV 再拆掉 Player（Win7 DXVA/demuxer 仅 stop 不够）；安卓原生 MPV stop 已拆 libmpv；FVP/Exo 硬停。
   Future<void> _stopAllBackends() async {
     Future<void> stopOne(KotvPlayback? p) async {
       if (p == null) return;
@@ -579,6 +580,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       stopOne(_xg),
       stopOne(_zw),
     ]);
+    await _recycleDesktopMpv();
+  }
+
+  /// 桌面 media_kit：换集 dispose Player，下次 [_ensureMpv] 再建。安卓走原生插件，不经此路径。
+  Future<void> _recycleDesktopMpv() async {
+    if (kotvIsAndroid()) return;
+    if (_mk == null && _mkPlayer == null) return;
+    _playingSub?.cancel();
+    _bufferingSub?.cancel();
+    _playingSub = null;
+    _bufferingSub = null;
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
+    try {
+      _mk?.dispose();
+    } catch (_) {}
+    _mk = null;
+    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   @override

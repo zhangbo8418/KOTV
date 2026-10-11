@@ -384,7 +384,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> stop() async {
-    // 换集只停播，不 dispose Player（离开页走 kotvDisposeMpvPlayer）。
+    // 卸文件并压 demuxer；桌面换集由页面再 dispose Player（见 detail/live _recycleDesktopMpv）。
     _url = '';
     _clearVideoSize();
     _speedBps = 0;
@@ -392,10 +392,11 @@ class MediaKitPlayback extends KotvPlayback {
     try {
       await player.stop();
     } catch (_) {}
+    await _shrinkDemuxerCache();
     notifyListeners();
   }
 
-  /// 换集：卸掉当前文件，放开 demuxer 缓存。Player / Texture 不销毁，下次 open 再装新文件。
+  /// 换集：卸文件并压 demuxer。桌面页面会接着 dispose Player（Win7 DXVA/包缓存否则会堆）。
   @override
   Future<void> stopForEpisodeSwitch() async {
     if (_diag) KotvMpvDiag.note('stopForEpisodeSwitch');
@@ -405,7 +406,18 @@ class MediaKitPlayback extends KotvPlayback {
     try {
       await player.stop();
     } catch (_) {}
+    await _shrinkDemuxerCache();
     notifyListeners();
+  }
+
+  /// stop 之后把 demuxer 上限压到极小，促使 libmpv 丢掉上一集包缓存；下次 open 会经 applyAfterAttach 写回预算。
+  Future<void> _shrinkDemuxerCache() async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return;
+      await (platform as dynamic).setProperty('demuxer-max-bytes', '64KiB');
+      await (platform as dynamic).setProperty('demuxer-max-back-bytes', '64KiB');
+    } catch (_) {}
   }
 
   @override
