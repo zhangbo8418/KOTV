@@ -39,10 +39,12 @@ void kotvEnsureFvpRegistered({
 /// registerWith 的 video.decoders / player 里，插件在 create 时、prepare 之前写入。
 ///
 /// Android 开 tunnel，画面用 SurfaceView。解码器直接写 Surface，不经 GL。
-/// shader_resource 只适用于 D3D11 且 Win8 及以上，用 1 盖掉 create 里写死的 0。
-/// Windows 的 D3D11 设备由插件在 prepare 之前建好，并写成 d3d11.device。
-/// 这里把 d3d11.copy 写成 0，解码帧直接画进同一块设备上的纹理。
-/// 画面是三块纹理，renderVideo 画进 Flutter 没拿着的那块。Mac、Linux、iOS 不写这项。
+///
+/// Windows 渲染零拷贝（含 Win7；D3D11 **图形** API，不是 Video 解码 API）：
+/// 1. 插件建共享 D3D11 设备 → d3d11.device；此处 d3d11.copy=0，跳过跨设备拷贝。
+/// 2. 三块 DXGI shared 纹理轮换（GetSharedHandle，Win7 起可用）。
+/// 3. MFT:shader_resource / shared 仅 win8+；Win8+ 写 video.decoder=shader_resource=1
+///    盖掉 create 里的 0。Win7 不写（会卡住平台线程；解码列表见 [kotvFvpVideoDecoders]）。
 ///
 /// 302 跟跳交给 mdk 默认 IO（勿在 Dart 里预跳，CDN 签名会过期）。
 /// 不设 `avformat.input`：URL 后缀常是假的（.m3u8 实为 FLV，.png 实为 TS）。
@@ -59,14 +61,16 @@ void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
     'avformat.allowed_segment_extensions': 'ALL',
     'avio.reconnect': '1',
     'avio.reconnect_delay_max': '7',
-    // 不设 demux.buffer.ranges。那是内存里的 demux 包缓存，只按段数丢弃，没有字节上限，
-    // 播完仍留着；setBufferRange 限制的是另一条解码队列。预读时长由开播后的 setBufferRange 管。
+    // 盖掉 mdk 默认 minMs=1000（队列空了要攒满 1s 才出包 → 约 1fps）。开播后再由
+    // setBufferRange 写具体 max；不设 demux.buffer.ranges（无字节上限，播完仍占内存）。
+    'buffer': '0',
   };
   final key = (clearKeyHex ?? '').trim();
   if (key.isNotEmpty) {
     playerOpts['demux.lavf.o'] = kotvLavfOWithClearKey(key);
   }
   final windows = kotvIsWindows();
+  // MFT 的 shader_resource 仅 win8+；全局写 1 会作用到所有解码器。
   if (windows && !kotvIsWindows7()) {
     playerOpts['video.decoder'] = 'shader_resource=1';
   }
@@ -78,6 +82,7 @@ void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
   if (kotvIsAndroid()) {
     options['tunnel'] = true;
   } else if (windows) {
+    // Win7 / Win10+ 共用：同设备渲染，跳过跨设备 GPU 拷贝。
     options['global'] = <String, Object>{
       'd3d11.copy': 0,
     };

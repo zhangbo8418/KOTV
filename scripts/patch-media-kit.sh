@@ -16,6 +16,8 @@
 # fvp 的 dispose 在删除播放器前等待视频尺寸。尺寸 Completer 被换掉后可能永远等不到，
 # mdkPlayerAPI_delete 不执行，上一集的包缓存就留在进程里。补丁让释放纹理时不等尺寸，并等待删除完成。
 #
+# prepare 失败写入 _players[-hashCode] 时若覆盖同 key，旧 player 会泄漏；改为先 dispose 再挂新的。
+#
 # Windows 插件原来每帧 CopyResource 进同一张 shared 纹理。Flutter 只在 handle 变化时
 # 才放开它，拷贝没有结束信号。补丁改成三张纹理，renderVideo 直接画进 Flutter 没拿着的
 # 那张，不再做整帧拷贝。
@@ -23,9 +25,9 @@
 # reader.buffering 把毫秒的 position 装进了 Duration(microseconds:)。改成毫秒。
 # getPosition 组装缓冲区间时也用毫秒。
 #
-# buffered() 同一次调用记下未解码队列的字节数。
-# Windows 插件在 prepare 之前建一个 D3D11 设备，交给 d3d11.device，并设 d3d11.copy=0。
-# 不再写 d3d11.sync.cpu。
+# Windows 插件在 prepare 之前建一个 D3D11 设备，交给 d3d11.device，并设 d3d11.copy=0
+# （均为 mdk Global-Options 文档项）。上游 fvp 会写 d3d11.sync.cpu，wiki/mdk.dll 均无此
+# 全局选项（仅有环境变量 D3D11_SYNC_CPU 与文档项 d3d11.sync.kmt），故删掉那一行。
 #
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
@@ -48,7 +50,7 @@ _kotv_python() {
 }
 
 _kotv_python - "$PKG_CFG" <<'PY'
-import json, pathlib, sys
+import json, pathlib, re, sys
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -321,93 +323,102 @@ BUF_RANGE_NEW = """      if (ev.category == "reader.buffering") {
               ),"""
 mdk_text = _once("reader.buffering range start is milliseconds", mdk_text, BUF_RANGE_OLD, BUF_RANGE_NEW)
 
-# buffered() 把字节指针传了 nullptr。同一次调用记下队列字节，供点播按内存比例换算时长。
-BUF_BYTES_NEW = """  /// Bytes in the undecoded packet queue from the last [buffered] call.
-  int packetBufferedBytes = 0;
-
-  /// Return buffered duration in milliseconds.
-  /// https://github.com/wang-bin/mdk-sdk/wiki/Player-APIs#int64_t-bufferedint64_t-bytes--nullptr-const
-  int buffered() {
-    final cbytes = calloc<Int64>();
-    final ret =
-        _player.ref.buffered
-            .asFunction<int Function(Pointer<mdkPlayer>, Pointer<Int64>)>()(
-          _player.ref.object,
-          cbytes,
-        );
-    packetBufferedBytes = cbytes.value;
-    calloc.free(cbytes);
-    return ret;
-  }"""
-BUF_BYTES_PAIRS = (
-    (
-        """  /// Return buffered duration in milliseconds.
-  /// https://github.com/wang-bin/mdk-sdk/wiki/Player-APIs#int64_t-bufferedint64_t-bytes--nullptr-const
-  int buffered() {
-    //var cbytes = calloc<Int64>();
-    final ret =
-        _player.ref.buffered
-            .asFunction<int Function(Pointer<mdkPlayer>, Pointer<Int64>)>()(
-          _player.ref.object,
-          nullptr,
-        );
-    //cbytes.value
-    //calloc.free(cbytes);
-    return ret;
-  }""",
-        BUF_BYTES_NEW,
-    ),
-    (
-        """  /// Return buffered duration in milliseconds.
-  /// https://github.com/wang-bin/mdk-sdk/wiki/Player-APIs#int64_t-bufferedint64_t-bytes--nullptr-const
-  int buffered() {
-    //var cbytes = calloc<Int64>();
-    final ret = _player.ref.buffered
-            .asFunction<int Function(Pointer<mdkPlayer>, Pointer<Int64>)>()(
-        _player.ref.object, nullptr);
-    //cbytes.value
-    //calloc.free(cbytes);
-    return ret;
-  }""",
-        BUF_BYTES_NEW,
-    ),
-)
-player_text = _one_of("buffered() keeps packet bytes", player_text, BUF_BYTES_PAIRS)
-mdk_text = _once(
-    "platform exposes buffered packet bytes",
+# prepare / 出纹理失败时都写 _players[-hashCode]。同一 key 被覆盖时上一只 player
+# 再也 dispose 不到，连播重试/换集会把 mdk 包缓存堆在进程里。
+# 助手内部用 failedId 赋值，避免全局替换把助手自己也改成递归调用。
+ORPHAN_HELPER = """
+  /// KOTV patch: keep at most one failed player under [-hashCode]; dispose the previous.
+  Future<void> _storeFailedPlayer(MdkVideoPlayer player) async {
+    final failedId = -hashCode;
+    final prev = _players.remove(failedId);
+    _players[failedId] = player;
+    if (prev != null && !identical(prev, player)) {
+      await prev.dispose();
+    }
+  }
+"""
+# 清掉旧版误补丁（递归助手、重复注释、误挂的 @override）。
+mdk_text, n_broken = re.subn(
+    r"  @override\n\n  /// KOTV patch: keep at most one failed player[^\n]*\n"
+    r"(?:  /// KOTV patch: keep at most one failed player[^\n]*\n)?"
+    r"  Future<void> _storeFailedPlayer\(MdkVideoPlayer player\) async \{\n"
+    r"    final prev = _players\.remove\(-hashCode\);\n"
+    r"    await _storeFailedPlayer\(player\);\n"
+    r"    if \(prev != null && !identical\(prev, player\)\) \{\n"
+    r"      await prev\.dispose\(\);\n"
+    r"    \}\n"
+    r"  \}\n+",
+    ORPHAN_HELPER.lstrip("\n") + "\n",
     mdk_text,
-    "    _players[playerId]?.setBufferRange(min: min, max: max, drop: drop);\n  }",
-    """    _players[playerId]?.setBufferRange(min: min, max: max, drop: drop);
-  }
-
-  int bufferedPacketBytes(int playerId) {
-    final player = _players[playerId];
-    if (player == null) return 0;
-    player.buffered();
-    return player.packetBufferedBytes;
-  }""",
+    count=1,
 )
-controller_text = _once(
-    "controller exposes buffered packet bytes",
-    controller_text,
-    """  void setBufferRange({int min = -1, int max = -1, bool drop = false}) {
-    _platform.setBufferRange(_getId(this), min: min, max: max, drop: drop);
-  }""",
-    """  void setBufferRange({int min = -1, int max = -1, bool drop = false}) {
-    _platform.setBufferRange(_getId(this), min: min, max: max, drop: drop);
-  }
+if n_broken:
+    fvp_changed = True
+    print(f"patched fvp ({fvp_version}): fix recursive failed-player helper")
 
-  /// Bytes currently held in the undecoded packet queue.
-  int bufferedPacketBytes() {
-    return _platform.bufferedPacketBytes(_getId(this));
-  }""",
+mdk_text, n_dup = re.subn(
+    r"  @override\n\n  /// KOTV patch: keep at most one failed player[^\n]*\n"
+    r"  /// KOTV patch: keep at most one failed player[^\n]*\n"
+    r"  Future<void> _storeFailedPlayer\(MdkVideoPlayer player\) async \{\n"
+    r"    final failedId = -hashCode;\n"
+    r"    final prev = _players\.remove\(failedId\);\n"
+    r"    _players\[failedId\] = player;\n"
+    r"    if \(prev != null && !identical\(prev, player\)\) \{\n"
+    r"      await prev\.dispose\(\);\n"
+    r"    \}\n"
+    r"  \}\n+",
+    ORPHAN_HELPER.lstrip("\n") + "\n",
+    mdk_text,
+    count=1,
 )
+if n_dup:
+    fvp_changed = True
+    print(f"patched fvp ({fvp_version}): clean failed-player helper placement")
+
+if "final failedId = -hashCode;" not in mdk_text:
+    anchor = "  Future<void> dispose(int playerId) async {"
+    if anchor not in mdk_text:
+        print("ERROR: fvp platform dispose anchor missing for orphan helper", file=sys.stderr)
+        sys.exit(1)
+    mdk_text = mdk_text.replace(anchor, ORPHAN_HELPER + "\n" + anchor, 1)
+    fvp_changed = True
+    print(f"patched fvp ({fvp_version}): failed-player orphan helper")
+else:
+    print(f"ok fvp ({fvp_version}) already patched: failed-player orphan helper")
+
+orphan_n = mdk_text.count("_players[-hashCode] = player;")
+if orphan_n:
+    mdk_text = mdk_text.replace(
+        "_players[-hashCode] = player;",
+        "await _storeFailedPlayer(player);",
+    )
+    fvp_changed = True
+    print(f"patched fvp ({fvp_version}): store failed players via helper ({orphan_n})")
+elif "await _storeFailedPlayer(player);" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: store failed players via helper")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) failed-player store sites missing",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+helper_body = mdk_text.split("final failedId = -hashCode;", 1)[-1].split(
+    "Future<void> dispose(int playerId)", 1
+)[0]
+if "await _storeFailedPlayer(player);" in helper_body:
+    print("ERROR: failed-player helper still calls itself", file=sys.stderr)
+    sys.exit(1)
+if mdk_text.count("await _storeFailedPlayer(player);") < 3:
+    print("ERROR: expected at least 3 failed-player store call sites", file=sys.stderr)
+    sys.exit(1)
+
 mdk_text = _once(
-    "do not set d3d11.sync.cpu",
+    "remove undocumented d3d11.sync.cpu",
     mdk_text,
     "    mdk.setGlobalOption('d3d11.sync.cpu', 1);\n",
-    "    // KOTV patch (scripts/patch-media-kit.sh): one shared D3D11 device is\n"
-    "    // published by the Windows plugin. Do not wait on a CPU/GPU sync option.\n",
+    "    // KOTV patch: upstream fvp sets d3d11.sync.cpu, but mdk Global-Options has\n"
+    "    // no such key (only env D3D11_SYNC_CPU / d3d11.sync.kmt). Drop it; Windows\n"
+    "    // plugin publishes d3d11.device + d3d11.copy=0 instead.\n",
 )
 
 # Windows：三张 shared 纹理轮换。renderVideo 画进 Flutter 没拿着的那张，取纹理时只交 handle。
@@ -608,19 +619,8 @@ if "frame.rtv = shared_tex[i].Get();" not in win_check or "k != held" not in win
 if "CopyResource(" in win_check:
     print("ERROR: fvp windows plugin still copies the frame", file=sys.stderr)
     sys.exit(1)
-player_check = player_dart.read_text(encoding="utf-8")
-if "packetBufferedBytes" not in player_check:
-    print("ERROR: fvp buffered() does not keep packet bytes", file=sys.stderr)
-    sys.exit(1)
-ctrl_check = controller_dart.read_text(encoding="utf-8")
-if "int bufferedPacketBytes()" not in ctrl_check:
-    print("ERROR: fvp controller does not expose bufferedPacketBytes", file=sys.stderr)
-    sys.exit(1)
-if "int bufferedPacketBytes(int playerId)" not in mdk_check:
-    print("ERROR: fvp platform does not expose bufferedPacketBytes", file=sys.stderr)
-    sys.exit(1)
 if "setGlobalOption('d3d11.sync.cpu'" in mdk_check:
-    print("ERROR: fvp still sets d3d11.sync.cpu", file=sys.stderr)
+    print("ERROR: fvp still sets undocumented d3d11.sync.cpu", file=sys.stderr)
     sys.exit(1)
 if 'SetGlobalOption("d3d11.device"' not in win_check or 'SetGlobalOption("d3d11.copy"' not in win_check:
     print("ERROR: fvp windows plugin does not publish the shared d3d11 device", file=sys.stderr)

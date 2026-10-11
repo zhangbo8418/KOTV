@@ -106,16 +106,10 @@ class KotvBufferBudget {
     return '${mib < 0 ? 0 : mib}MiB';
   }
 
-  /// 未解码队列的字节和时长换成比特率。任一侧 `<= 0` 时返回 0。
-  static int bitsPerSecFromQueue(int packetBytes, int durationMs) {
-    if (packetBytes <= 0 || durationMs <= 0) return 0;
-    return packetBytes * 8000 ~/ durationMs;
-  }
-
   /// mdk [setBufferRange] 只有毫秒。把内存预算按这条流的码率换成能放下的媒体时长。
   ///
-  /// [bitsPerSec] 来自容器、音视频轨，或 [bitsPerSecFromQueue]。为 0 时返回 0，
-  /// 调用方继续等码率，不要改成一段固定秒数。返回值至少 1：0 在 mdk 里表示不限制时长。
+  /// [bitsPerSec] 来自容器或音视频轨。为 0 时返回 0，调用方用临时上限并继续等码率。
+  /// 返回值至少 1：0 在 mdk 里表示不限制时长（且与 drop 组合时可能只留关键帧）。
   static int fvpMaxBufferMs(int budgetBytes, {required int bitsPerSec}) {
     if (budgetBytes <= 0 || bitsPerSec <= 0) return 0;
     final bytesPerSec = bitsPerSec / 8.0;

@@ -228,6 +228,8 @@ class KotvMpvOpts {
       return hard ? 'mediacodec' : 'mediacodec,no';
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      // Win7：仅 dxva2。d3d11va 依赖 ID3D11VideoDevice（MSDN 最低 Win8），摸到会卡 UI。
+      // 自带 FFmpeg 只开了 d3d11va、未编 cuda/nvdec，故 Windows 链不含 CUDA。
       if (kotvIsWindows7()) {
         return hard ? 'dxva2' : 'dxva2,no';
       }

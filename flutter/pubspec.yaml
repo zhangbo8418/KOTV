@@ -24,7 +24,7 @@ dependencies:
   # 主线拉最新兼容版；Win7 线由 adapt-flutter-win7-sdk.sh 尽量钉到同档新版本。
   video_player: ^2.9.2
   web: ^1.1.0
-  # 0.39.0。Win7 / Flutter 3.19 由 adapt-flutter-win7-sdk.sh 改为 0.37.3（0.38 起要求 Flutter >=3.22、Dart ^3.4）。
+  # 0.39.0。Win7 / Flutter 3.19 仍用 0.39.0：adapt + flutter-pub-get 在 pub-cache 里放宽 SDK 校验，不升级 Flutter。
   fvp: 0.39.0
   path_provider: ^2.1.5
   path: ^1.9.0

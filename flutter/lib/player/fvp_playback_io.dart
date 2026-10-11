@@ -213,7 +213,11 @@ class FvpPlayback extends KotvPlayback {
     );
   }
 
-  /// 摘掉 listener 后走统一拆机：pause → 排空 → dispose（超时丢后台，避免卡死 open）。
+  /// 摘掉 listener 后走统一拆机：pause → 压空队列 → dispose。
+  ///
+  /// 不设 disposeTimeout：超时把 dispose 丢后台时，上一集的 mdk 包缓存会留下来；
+  /// 连播多集后进程内存会一直涨（c8394d8 / kotvTeardownPlayback 注释同因）。
+  /// 删播放器前先把 buffer 压到几乎为空，避免大队列拖慢 mdkPlayerAPI_delete。
   Future<void> _disposeController() async {
     final c = _c;
     final l = _listener;
@@ -231,12 +235,14 @@ class FvpPlayback extends KotvPlayback {
         try {
           await c.pause();
         } catch (_) {}
+        try {
+          c.setBufferRange(min: 0, max: 1, drop: true);
+        } catch (_) {}
       },
       dispose: () async {
         await c.dispose();
       },
-      drain: const Duration(milliseconds: 400),
-      disposeTimeout: const Duration(milliseconds: 600),
+      drain: const Duration(milliseconds: 50),
     );
   }
 
@@ -283,8 +289,6 @@ class FvpPlayback extends KotvPlayback {
         Uri.parse(url),
         httpHeaders: h,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-        // 安卓用 SurfaceView。
-        viewType: kotvIsAndroid() ? VideoViewType.platformView : VideoViewType.textureView,
       );
       _c = c;
       _bumpView();
@@ -359,7 +363,7 @@ class FvpPlayback extends KotvPlayback {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
       }
-      // 点播：可用内存比例 ÷ 这条流的码率。页面直播仍用短队列。
+      // 点播：立刻 min=0 盖掉 mdk 默认 min=1000；max 随码率/内存预算。直播短队列。
       try {
         if (!_live) await KotvBufferBudget.warm();
         _applyBufferRange(c);
@@ -609,6 +613,7 @@ class FvpPlayback extends KotvPlayback {
     try {
       c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
     } catch (_) {}
+    // 全局 shader_resource=1 仅 win8+；Win7 写了会卡住平台线程。
     if (kotvIsWindows() && !kotvIsWindows7()) {
       try {
         c.setProperty('video.decoder', 'shader_resource=1');
@@ -733,31 +738,10 @@ class FvpPlayback extends KotvPlayback {
     return sum;
   }
 
-  /// 进度条上灰条终点减去播放位置，就是未解码队列还剩的时长。
-  int _queueAheadMs(VideoPlayerController c) {
-    final v = c.value;
-    if (v.buffered.isEmpty) return 0;
-    var end = Duration.zero;
-    for (final r in v.buffered) {
-      if (r.end > end) end = r.end;
-    }
-    final ahead = end - v.position;
-    if (ahead.isNegative) return 0;
-    return ahead.inMilliseconds;
-  }
-
-  /// 容器或音轨码率优先。没有时用队列里的字节和时长，队列至少 1000ms 再算。
-  int _vodBitsPerSec(VideoPlayerController c) {
-    final fromInfo = _mediaBitsPerSec(c);
-    if (fromInfo > 0) return fromInfo;
-    final ahead = _queueAheadMs(c);
-    if (ahead < 1000) return 0;
-    return KotvBufferBudget.bitsPerSecFromQueue(c.bufferedPacketBytes(), ahead);
-  }
-
-  /// 点播：max 是可用内存比例按码率换成的时长。min 是队列空了之后再开播要攒的时长，
-  /// 用 1000，并且不超过 max。drop 为 false，解码取走的包离开队列，读端再补到 max。
-  /// 码率还没有时不写，也不把这次写入锁死。只有页面直播使用 drop true。
+  /// mdk [setBufferRange]：`minMs==0` 尽快解码；`minMs>0` 时队列空了要攒到 min 才继续出包。
+  /// 默认 min=1000，欠载时就会大约每秒才放出一帧（设备 MediaCodec/SurfaceView 已实测 ~1fps）。
+  /// 点播：min 固定 0；max 用内存预算÷码率。码率未知时先用 60s 顶住，覆盖默认 min，码率出来再抬 max。
+  /// 直播：短队列；桌面 drop 追沿，安卓不 drop（GOP≈1s 时 drop 会只剩关键帧）。
   void _applyBufferRange(VideoPlayerController c) {
     if (!identical(_c, c)) return;
     try {
@@ -773,24 +757,19 @@ class FvpPlayback extends KotvPlayback {
         return;
       }
       if (_vodBufferSet) return;
-      final bps = _vodBitsPerSec(c);
-      if (bps <= 0) {
-        // 先前若写成了会丢包的短队列，先把 drop 清掉，等码率出来再提高 max。
-        if (_liveBufferSet) {
-          c.setBufferRange(min: 1000, max: -1, drop: false);
-          _liveBufferSet = false;
-        }
-        return;
-      }
-      final maxMs = KotvBufferBudget.fvpMaxBufferMs(
-        KotvBufferBudget.bytes(),
-        bitsPerSec: bps,
-      );
+      final bps = _mediaBitsPerSec(c);
+      final maxMs = bps > 0
+          ? KotvBufferBudget.fvpMaxBufferMs(
+              KotvBufferBudget.bytes(),
+              bitsPerSec: bps,
+            )
+          : 60000;
       if (maxMs <= 0) return;
-      final minMs = maxMs < 1000 ? maxMs : 1000;
-      c.setBufferRange(min: minMs, max: maxMs, drop: false);
-      _vodBufferSet = true;
-      _liveBufferSet = false;
+      c.setBufferRange(min: 0, max: maxMs, drop: false);
+      if (bps > 0) {
+        _vodBufferSet = true;
+        _liveBufferSet = false;
+      }
     } catch (_) {}
   }
 
