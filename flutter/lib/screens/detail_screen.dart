@@ -567,7 +567,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 换集/换源：先停声并放开上一集缓存。
-  /// 桌面 MPV 再拆掉 Player（Win7 DXVA/demuxer 仅 stop 不够）；安卓原生 MPV stop 已拆 libmpv；FVP/Exo 硬停。
+  /// 桌面 MPV：stop 卸文件 + 压 demuxer，**保留** Player/Texture（换集 dispose 会导致第 2 集黑屏）。
+  /// 安卓原生 MPV stop 已拆 libmpv；FVP/Exo 硬停须 dispose 再建。
   Future<void> _stopAllBackends() async {
     Future<void> stopOne(KotvPlayback? p) async {
       if (p == null) return;
@@ -585,24 +586,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       stopOne(_xg),
       stopOne(_zw),
     ]);
-    await _recycleDesktopMpv();
-  }
-
-  /// 桌面 media_kit：换集 dispose Player，下次 [_ensureMpv] 再建。安卓走原生插件，不经此路径。
-  Future<void> _recycleDesktopMpv() async {
-    if (kotvIsAndroid()) return;
-    if (_mk == null && _mkPlayer == null) return;
-    _playingSub?.cancel();
-    _bufferingSub?.cancel();
-    _playingSub = null;
-    _bufferingSub = null;
-    final mkPlayer = _mkPlayer;
-    _mkPlayer = null;
-    try {
-      _mk?.dispose();
-    } catch (_) {}
-    _mk = null;
-    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   @override
@@ -2226,11 +2209,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           }
           // 起播缓冲由守卫无限等待；仅黑屏/视源失败抛 SilentVideo 才 failover。
           // 勿再套墙钟 timeout：慢源会被误切播放器。
-          // 续播与片头合成起点，经 open(startAt) 在首次 play 前 seek。
-          // 勿 open 已 play 后再 seek：FVP ADB 会 MediaCodec flush → 约 1fps。
+          // 续播与片头合成起点，经 open(startAt) 在首次 play 前定位。
+          // ADB：open 返回前若 _openingSeekDone 仍为 false，进度回调会再 seek →
+          // 第二次 MediaCodec flush → Render Avg≈1000ms（约 1fps）。
           final resumeMs = _resumeSeekMs;
           _resumeSeekMs = 0;
           final startMs = _skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs;
+          // 片头已并入 startAt：必须在 open 之前置位，堵住 open 内 guard 期间的二次 seek。
+          if (_skipOpeningEnding || startMs > 0) {
+            _openingSeekDone = true;
+          }
           await pb.open(
             openUrl,
             headers: openHeaders,
@@ -2238,11 +2226,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             format: '${data['format'] ?? ''}'.trim().isEmpty ? null : '${data['format']}'.trim(),
             startAt: Duration(milliseconds: startMs),
           );
-          if (serial != _playAtSerial || !mounted) {
-            await _dropStalePlayback(pb);
-            return;
-          }
-          if (_skipOpeningEnding) _openingSeekDone = true;
           if (serial != _playAtSerial || !mounted) {
             await _dropStalePlayback(pb);
             return;

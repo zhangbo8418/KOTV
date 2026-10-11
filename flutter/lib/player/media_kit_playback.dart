@@ -154,14 +154,8 @@ class MediaKitPlayback extends KotvPlayback {
   /// 由 `scripts/patch-media-kit.sh` 在 `flutter pub get` 后把 pub-cache 里的
   /// `calloc<Bool>(1)` 改为 `calloc<Int32>(1)`（主线 / Win7 线同版本同补丁，
   /// 打不上即中止打包）。应用层不再兜底。
-  Future<void> _openThenUnpause(Media media, {Duration startAt = Duration.zero}) async {
+  Future<void> _openThenUnpause(Media media) async {
     await player.open(media, play: false);
-    // 须在首次 play 前 seek（契约同 KotvPlayback.open.startAt）。
-    if (startAt > Duration.zero) {
-      try {
-        await player.seek(startAt);
-      } catch (_) {}
-    }
     await player.play();
   }
 
@@ -356,12 +350,17 @@ class MediaKitPlayback extends KotvPlayback {
       } catch (_) {}
       _extraOpenProps = const {};
     }
-    final media = Media(url, httpHeaders: _headers.isEmpty ? null : _headers);
+    // start 经 Media 在 load 时定位（等同原生 loadfile start=），勿 open 后再 seek。
+    final media = Media(
+      url,
+      httpHeaders: _headers.isEmpty ? null : _headers,
+      start: startAt > Duration.zero ? startAt : null,
+    );
     if (_diag) {
       KotvMpvDiag.note('open live=$live hwdec=${_opts.hwdecValue()} '
           'gpu-api=${_opts.gpuApi} ${KotvMpvDiag.hostOf(url)}');
     }
-    await _openThenUnpause(media, startAt: startAt);
+    await _openThenUnpause(media);
     if (_diag) {
       KotvMpvDiag.note('open done (play sent) dart.playing=${player.state.playing}');
       KotvMpvDiag.scheduleOpenSnapshots(player);
@@ -391,7 +390,7 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> stop() async {
-    // 卸文件并压 demuxer；桌面换集由页面再 dispose Player（见 detail/live _recycleDesktopMpv）。
+    // 卸文件并压 demuxer；Player/Texture 保留到离开页 kotvDisposeMpvPlayer。
     _url = '';
     _clearVideoSize();
     _speedBps = 0;
@@ -403,7 +402,7 @@ class MediaKitPlayback extends KotvPlayback {
     notifyListeners();
   }
 
-  /// 换集：卸文件并压 demuxer。桌面页面会接着 dispose Player（Win7 DXVA/包缓存否则会堆）。
+  /// 换集：卸文件并压 demuxer，保留 Player/Texture（避免 Win7 第 2 集黑屏）。
   @override
   Future<void> stopForEpisodeSwitch() async {
     if (_diag) KotvMpvDiag.note('stopForEpisodeSwitch');
@@ -417,7 +416,7 @@ class MediaKitPlayback extends KotvPlayback {
     notifyListeners();
   }
 
-  /// stop 之后把 demuxer 上限压到极小，促使 libmpv 丢掉上一集包缓存；下次 open 会经 applyAfterAttach 写回预算。
+  /// stop 后把 demuxer 上限压到极小，丢掉上一集包缓存；下次 open 经 applyAfterAttach 写回预算。
   Future<void> _shrinkDemuxerCache() async {
     try {
       final platform = player.platform;
