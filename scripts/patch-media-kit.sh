@@ -425,19 +425,10 @@ if "setGlobalOption('d3d11.sync.cpu'" in mdk_text:
 else:
     print(f"ok fvp ({fvp_version}) already patched: remove undocumented d3d11.sync.cpu")
 
-# create：player 属性写完后显式 setBufferRange(min:0)。仅靠 property "buffer"
-# 时，安卓仍见 MediaCodec 出帧间隔≈1000ms（mdk 默认 minMs）。
+# create：player 属性写完后显式 setBufferRange(min:0, max:0)。
+# max 必须显式 >=0：Dart 默认 max=-1 会把 max/drop 打回默认值。
 # 不用 lowLatency（会把 analyzeduration 砍到 100ms，伪扩展名 prepare 易失败）。
-mdk_text = _once(
-    "setBufferRange min=0 after player opts",
-    mdk_text,
-    """    _playerOpts?.forEach((key, value) {
-      player.setProperty(key, value);
-    });
-
-    if (_decoders != null) {
-""",
-    """    _playerOpts?.forEach((key, value) {
+BUF_RANGE_CREATE_OLD = """    _playerOpts?.forEach((key, value) {
       player.setProperty(key, value);
     });
     // KOTV: mdk default minMs=1000 → ~1fps on queue underrun. Call the API
@@ -447,8 +438,38 @@ mdk_text = _once(
     }
 
     if (_decoders != null) {
+"""
+BUF_RANGE_CREATE_NEW = """    _playerOpts?.forEach((key, value) {
+      player.setProperty(key, value);
+    });
+    // KOTV: min=0 decode ASAP; max=0 → INT64_MAX. Never pass max=-1.
+    if (_lowLatency <= 0) {
+      player.setBufferRange(min: 0, max: 0);
+    }
+
+    if (_decoders != null) {
+"""
+if "player.setBufferRange(min: 0, max: 0);" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: setBufferRange min=0 max=0 after player opts")
+elif "player.setBufferRange(min: 0);" in mdk_text and "_lowLatency <= 0" in mdk_text:
+    mdk_text = _once(
+        "setBufferRange min=0 max=0 after player opts",
+        mdk_text,
+        BUF_RANGE_CREATE_OLD,
+        BUF_RANGE_CREATE_NEW,
+    )
+else:
+    mdk_text = _once(
+        "setBufferRange min=0 max=0 after player opts",
+        mdk_text,
+        """    _playerOpts?.forEach((key, value) {
+      player.setProperty(key, value);
+    });
+
+    if (_decoders != null) {
 """,
-)
+        BUF_RANGE_CREATE_NEW,
+    )
 
 # Windows：三张 shared 纹理轮换。renderVideo 画进 Flutter 没拿着的那张，取纹理时只交 handle。
 WIN_PLUGIN = fvp_root / "windows" / "fvp_plugin.cpp"
@@ -651,8 +672,8 @@ if "CopyResource(" in win_check:
 if "setGlobalOption('d3d11.sync.cpu'" in mdk_check:
     print("ERROR: fvp still sets undocumented d3d11.sync.cpu", file=sys.stderr)
     sys.exit(1)
-if "player.setBufferRange(min: 0);" not in mdk_check or "_lowLatency <= 0" not in mdk_check:
-    print("ERROR: fvp create missing setBufferRange(min: 0) after player opts", file=sys.stderr)
+if "player.setBufferRange(min: 0, max: 0);" not in mdk_check or "_lowLatency <= 0" not in mdk_check:
+    print("ERROR: fvp create missing setBufferRange(min: 0, max: 0) after player opts", file=sys.stderr)
     sys.exit(1)
 if 'SetGlobalOption("d3d11.device"' not in win_check or 'SetGlobalOption("d3d11.copy"' not in win_check:
     print("ERROR: fvp windows plugin does not publish the shared d3d11 device", file=sys.stderr)

@@ -48,8 +48,8 @@ class FvpPlayback extends KotvPlayback {
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
   final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
 
-  /// 仅安卓 Surface 开 tunnel；Texture / 桌面一律关。
-  bool get _androidTunnel => kotvIsAndroid() && _renderMode == 'surface';
+  /// 安卓 Surface：platformView + image=0（不启 mdk tunnel）。Texture：textureView。
+  bool get _androidSurface => kotvIsAndroid() && _renderMode == 'surface';
 
   VideoViewType get _viewType {
     if (!kotvIsAndroid()) return VideoViewType.textureView;
@@ -285,7 +285,7 @@ class FvpPlayback extends KotvPlayback {
       decodeMode: _decodeMode,
       clearKeyHex: clearKeyHex,
       syncClearKey: true,
-      androidTunnel: _androidTunnel,
+      androidSurface: _androidSurface,
     );
     _opening = true;
     _live = live;
@@ -389,10 +389,10 @@ class FvpPlayback extends KotvPlayback {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
       }
-      // 立刻 min=0（盖默认 1000）；再 warm 预算后写 max。warm 失败也不得跳过 min=0。
+      // 立刻 min=0、max=INT64_MAX（勿省略 max，默认 -1 会把 max/drop 打回默认值）。
       try {
         c.setProperty('buffer', '0+0');
-        c.setBufferRange(min: 0);
+        c.setBufferRange(min: 0, max: 0);
       } catch (_) {}
       try {
         if (!_live) await KotvBufferBudget.warm();
@@ -635,7 +635,7 @@ class FvpPlayback extends KotvPlayback {
     }
     _decodeMode = next;
     // 下一次 prepare 走新列表；已经在播的这一路要当场换解码器。
-    kotvEnsureFvpRegistered(decodeMode: next, androidTunnel: _androidTunnel);
+    kotvEnsureFvpRegistered(decodeMode: next, androidSurface: _androidSurface);
     _applyDecodeMode(_c);
   }
 
@@ -644,13 +644,13 @@ class FvpPlayback extends KotvPlayback {
     final next = kotvNormalizePlayerRender(mode);
     if (next == _renderMode) return;
     _renderMode = next;
-    kotvEnsureFvpRegistered(decodeMode: _decodeMode, androidTunnel: _androidTunnel);
+    kotvEnsureFvpRegistered(decodeMode: _decodeMode, androidSurface: _androidSurface);
     final url = _lastUrl;
     if (url == null || url.isEmpty || _c == null) {
       notifyListeners();
       return;
     }
-    // tunnel / viewType 在 create 时定死，须重建。
+    // viewType / 解码器在 create 时定死，须重建。
     final pos = position;
     final wasPlaying = playing && !buffering;
     try {
@@ -680,7 +680,7 @@ class FvpPlayback extends KotvPlayback {
     if (c == null || !c.value.isInitialized) return;
     try {
       c.setVideoDecoders(
-        kotvFvpVideoDecoders(_decodeMode, androidSurface: _androidTunnel),
+        kotvFvpVideoDecoders(_decodeMode, androidSurface: _androidSurface),
       );
     } catch (_) {}
     // 全局 shader_resource=1 仅 win8+；Win7 写了会卡住平台线程。
