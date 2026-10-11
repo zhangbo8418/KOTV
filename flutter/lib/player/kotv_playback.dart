@@ -67,7 +67,7 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setRepeatOne(bool on);
   Future<void> setDecodeMode(String mode);
 
-  /// Android Exo / 原生 MPV：Surface / Texture；其它后端忽略。
+  /// Android Exo / 原生 MPV / FVP：Surface / Texture；其它后端忽略。
   Future<void> setRenderMode(String mode) async {}
 
   /// 后台「仅音频」时卸掉画面输出（音继续）；回前台再挂上。其它后端默认空实现。

@@ -37,9 +37,27 @@ class FvpPlayback extends KotvPlayback {
   double _volume = 100;
   double _rate = 1;
   String _decodeMode = 'auto';
+  /// 安卓：`playerRender` surface|texture（与 Exo 同源；桌面固定 Texture）。
+  String _renderMode = 'surface';
+  String? _lastUrl;
+  Map<String, String>? _lastHeaders;
+  Map<String, dynamic>? _lastDrm;
+  bool _lastLive = false;
+  String? _lastFormat;
   String _videoScale = 'default';
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
   final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
+
+  /// 仅安卓 Surface 开 tunnel；Texture / 桌面一律关。
+  bool get _androidTunnel => kotvIsAndroid() && _renderMode == 'surface';
+
+  VideoViewType get _viewType {
+    if (!kotvIsAndroid()) return VideoViewType.textureView;
+    return _renderMode == 'surface'
+        ? VideoViewType.platformView
+        : VideoViewType.textureView;
+  }
+
   List<KotvTrack> _audioTracks = const [];
   List<KotvTrack> _videoTracks = const [];
   List<KotvTrack> _subtitleTracks = const [];
@@ -258,10 +276,16 @@ class FvpPlayback extends KotvPlayback {
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty && clearKeyHex == null) {
       throw UnsupportedError('DRM 内容请使用内置 ExoPlayer');
     }
+    _lastUrl = url;
+    _lastHeaders = headers == null ? null : Map<String, String>.from(headers);
+    _lastDrm = drm == null ? null : Map<String, dynamic>.from(drm);
+    _lastLive = live;
+    _lastFormat = format;
     kotvEnsureFvpRegistered(
       decodeMode: _decodeMode,
       clearKeyHex: clearKeyHex,
       syncClearKey: true,
+      androidTunnel: _androidTunnel,
     );
     _opening = true;
     _live = live;
@@ -289,8 +313,8 @@ class FvpPlayback extends KotvPlayback {
         Uri.parse(url),
         httpHeaders: h,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-        // 与 macOS 相同：Flutter Texture（Win7 adapt 删本 viewType 行；2.9.2 无此参数）。
-        viewType: VideoViewType.textureView,
+        // 安卓跟 playerRender：Surface→platformView，Texture→textureView（Win7 adapt 删本行）。
+        viewType: _viewType,
       );
       _c = c;
       _bumpView();
@@ -365,8 +389,11 @@ class FvpPlayback extends KotvPlayback {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
       }
-      // 点播：立刻 min=0 盖掉 mdk 默认 min=1000；max 随码率/内存预算。直播短队列。
-      // warm 失败不得跳过 setBufferRange（否则欠载时约 1fps）。
+      // 立刻 min=0（盖默认 1000）；再 warm 预算后写 max。warm 失败也不得跳过 min=0。
+      try {
+        c.setProperty('buffer', '0+0');
+        c.setBufferRange(min: 0);
+      } catch (_) {}
       try {
         if (!_live) await KotvBufferBudget.warm();
       } catch (_) {}
@@ -608,15 +635,53 @@ class FvpPlayback extends KotvPlayback {
     }
     _decodeMode = next;
     // 下一次 prepare 走新列表；已经在播的这一路要当场换解码器。
-    kotvEnsureFvpRegistered(decodeMode: next);
+    kotvEnsureFvpRegistered(decodeMode: next, androidTunnel: _androidTunnel);
     _applyDecodeMode(_c);
+  }
+
+  @override
+  Future<void> setRenderMode(String mode) async {
+    final next = kotvNormalizePlayerRender(mode);
+    if (next == _renderMode) return;
+    _renderMode = next;
+    kotvEnsureFvpRegistered(decodeMode: _decodeMode, androidTunnel: _androidTunnel);
+    final url = _lastUrl;
+    if (url == null || url.isEmpty || _c == null) {
+      notifyListeners();
+      return;
+    }
+    // tunnel / viewType 在 create 时定死，须重建。
+    final pos = position;
+    final wasPlaying = playing && !buffering;
+    try {
+      await open(
+        url,
+        headers: _lastHeaders,
+        drm: _lastDrm,
+        live: _lastLive,
+        format: _lastFormat,
+      );
+      if (!_live && pos > Duration.zero) {
+        try {
+          await seek(pos);
+        } catch (_) {}
+      }
+      if (!wasPlaying) {
+        try {
+          await pause();
+        } catch (_) {}
+      }
+    } catch (_) {}
+    notifyListeners();
   }
 
   /// 仅对已经 initialize 的播放器生效。开播那次的列表在 registerWith 里。
   void _applyDecodeMode(VideoPlayerController? c) {
     if (c == null || !c.value.isInitialized) return;
     try {
-      c.setVideoDecoders(kotvFvpVideoDecoders(_decodeMode));
+      c.setVideoDecoders(
+        kotvFvpVideoDecoders(_decodeMode, androidSurface: _androidTunnel),
+      );
     } catch (_) {}
     // 全局 shader_resource=1 仅 win8+；Win7 写了会卡住平台线程。
     if (kotvIsWindows() && !kotvIsWindows7()) {

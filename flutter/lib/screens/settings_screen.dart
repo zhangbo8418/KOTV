@@ -2296,7 +2296,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             onTap: () async {
                               final v = await pickChoice(
                                 context,
-                                title: '渲染方式（Exo / 原生 MPV）',
+                                title: '渲染方式（Exo / 原生 MPV / FVP）',
                                 current: g('playerRender', 'surface'),
                                 options: const [
                                   ('Surface（推荐，HDR）', 'surface'),
@@ -2308,7 +2308,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               if (v == 'texture' && g('exoTunneling') == 'true') {
                                 await _set('exoTunneling', 'false', msg: 'Texture 已关隧道');
                               } else {
-                                setState(() => _status = '仅 Android 内置 Exo / 原生 MPV 生效，已保存');
+                                setState(() => _status = '仅 Android Exo / 原生 MPV / FVP 生效，已保存');
                               }
                             },
                           ),
