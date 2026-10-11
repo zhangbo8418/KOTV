@@ -507,12 +507,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       await kotvDisposeMpvPlayer(mkPlayer);
     }
     if (keep != KotvEmbedBackend.fvp) {
+      // 与 Exo 一样拆掉实例：仅 stop 时 mdk 包缓存/纹理可能残留（ADB: ReleaseRT 后 PSS/Graphics 仍涨）。
       try {
         await _fvp?.pause();
       } catch (_) {}
       try {
         await _fvp?.stop();
       } catch (_) {}
+      try {
+        _fvp?.dispose();
+      } catch (_) {}
+      _fvp = null;
     }
     if (keep != KotvEmbedBackend.exo) {
       // stop 已拆掉播放器并放开解码缓冲。这里再 release，以 dispose 通道和 Texture。
@@ -2079,37 +2084,40 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         positionMs: 0,
         durationMs: 0,
       ));
-      // 起播再读一次：设置页改播放器/软硬解/自动切换后，详情页可能还开着。
+      // 起播再读一次：设置页改播放器/软硬解/渲染/自动切换后，详情页可能还开着。
+      var playSettings = <String, dynamic>{};
       try {
         final st = await ref.read(apiProvider).getSettings();
-        final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-        final fo = '${settings['playerFailover'] ?? ''}'.trim();
+        playSettings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+        final fo = '${playSettings['playerFailover'] ?? ''}'.trim();
         if (fo.isNotEmpty) {
           _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
         }
-        final pv = '${settings['player'] ?? ''}'.trim();
+        final pv = '${playSettings['player'] ?? ''}'.trim();
         if (pv.isNotEmpty) {
           _prefPlayerVal = kotvClampPlayerVal(pv, live: false);
         }
-        final decode = '${settings['playerDecode'] ?? ''}'.trim();
+        final decode = '${playSettings['playerDecode'] ?? ''}'.trim();
         if (decode.isNotEmpty) {
           _prefDecodeMode = decode;
         }
-        // 与播放器/软硬解同级：设置页改 Texture 后详情可能还开着，不重读会仍按 Surface create。
-        _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? _renderMode}');
-        final speedPref = double.tryParse('${settings['playerSpeed'] ?? ''}');
+        _renderMode = kotvNormalizePlayerRender('${playSettings['playerRender'] ?? _renderMode}');
+        final speedPref = double.tryParse('${playSettings['playerSpeed'] ?? ''}');
         if (speedPref != null && speedPref > 0) {
           _prefSpeed = speedPref.clamp(0.1, 5.0);
         }
-        final volPref = _normalizePlayerVolumePref(settings['playerVolume']);
+        final volPref = _normalizePlayerVolumePref(playSettings['playerVolume']);
         if (volPref != null) {
           _prefVolume = volPref;
         }
-        _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
-        _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
-        _exo?.applyPlayerOptions(settings);
-        _fvp?.applyPlayerOptions(settings);
+        _preloadNextEpisode = kotvSettingsFlag(playSettings['preloadNextEpisode'] ?? 'false', def: false);
+        _exoDiskCache = kotvSettingsFlag(playSettings['exoDiskCache'] ?? 'false', def: false);
+        _exo?.applyPlayerOptions(playSettings);
+        _fvp?.applyPlayerOptions(playSettings);
       } catch (_) {}
+      // 每次 failover 新建 Exo/FVP 时用这份，避免仍按进页默认 surface create（ADB: FVP→Exo render=surface）。
+      final renderMode = kotvNormalizePlayerRender(_renderMode);
+      _renderMode = renderMode;
       // 有 DRM 或 SMB 强制 Exo；本地碟片/ISO 强制 MPV（自编译 dvdnav/libbluray）。
       final smb = mediaUrl.trim().toLowerCase().startsWith('smb://') ||
           playUrl.trim().toLowerCase().startsWith('smb://');
@@ -2140,8 +2148,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await _stopInactiveBackends(_backend);
         if (serial != _playAtSerial || !mounted) return;
         final pb = _playback;
+        // failover 新建的 Exo 默认 surface；先写入设置里的 playerRender 再 setRenderMode/create。
+        if (pb is ExoPlayback) {
+          if (playSettings.isNotEmpty) {
+            pb.applyPlayerOptions(playSettings);
+          } else {
+            pb.applyPlayerOptions({'playerRender': renderMode});
+          }
+        } else if (playSettings.isNotEmpty) {
+          _fvp?.applyPlayerOptions(playSettings);
+        }
         await pb.setDecodeMode(failover.decodeMode);
-        await pb.setRenderMode(_renderMode);
+        await pb.setRenderMode(renderMode);
         final localMedia = mediaUrl.startsWith('file:') ||
             mediaUrl.startsWith('content:') ||
             (mediaUrl.startsWith('/') && !mediaUrl.contains('://'));

@@ -293,13 +293,16 @@ class ExoPlayback extends KotvPlayback {
 
   Future<void> _ensureNative() async {
     if (_nativeReady) return;
-    final created = await _ch.invokeMethod<dynamic>('create', {'render': _renderMode});
+    // 必须带归一化后的 render：failover 新建实例时默认是 surface，若在 setRenderMode 前被预热 create 会锁死 Surface。
+    final render = kotvNormalizePlayerRender(_renderMode);
+    _renderMode = render;
+    final created = await _ch.invokeMethod<dynamic>('create', {'render': render});
     if (created is Map) {
-      final render = '${created['render'] ?? ''}';
+      final got = '${created['render'] ?? ''}';
       final path = '${created['path'] ?? ''}';
       final tid = (created['textureId'] as num?)?.toInt();
-      if (render == 'texture' || render == 'surface') {
-        _renderMode = render;
+      if (got == 'texture' || got == 'surface') {
+        _renderMode = got;
       }
       _applyNativePath(path: path, textureId: tid);
     }
@@ -887,9 +890,15 @@ class ExoPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  /// 从设置页写入：隧道 / 去广告 / 磁盘缓存 / 直通 / DV / AAC / 跳过静音。
+  /// 从设置页写入：渲染 / 隧道 / 去广告 / 磁盘缓存 / 直通 / DV / AAC / 跳过静音。
+  /// [playerRender] 只更新 Dart 字段，供 [_ensureNative] 在 [setRenderMode] 之前被调用时用对模式；
+  /// 已建连时由调用方 [setRenderMode] 同步原生（勿在此处 unawaited 以免重入）。
   void applyPlayerOptions(Map<String, dynamic> settings) {
+    if (settings.containsKey('playerRender')) {
+      _renderMode = kotvNormalizePlayerRender('${settings['playerRender']}');
+    }
     _tunneling = kotvSettingsMapFlag(settings, 'exoTunneling', def: false);
+    if (_renderMode == 'texture') _tunneling = false;
     _adblock = kotvSettingsMapFlag(settings, 'exoAdblock', def: true);
     _diskCache = kotvSettingsMapFlag(settings, 'exoDiskCache', def: false);
     _audioPassThrough = kotvSettingsMapFlag(settings, 'audioPassThrough', def: true);
@@ -1183,7 +1192,8 @@ class ExoPlayback extends KotvPlayback {
     final u = url.trim();
     if (u.isEmpty || !_diskCache) return;
     try {
-      await _ensureNative();
+      // 预热也会 create：必须先带上当前渲染模式，避免默认 surface 抢先占住原生路径。
+      await setRenderMode(_renderMode);
       await _ch.invokeMethod('warmCacheUrl', {
         'url': u,
         'headers': headers ?? const <String, String>{},

@@ -192,6 +192,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       try {
         await _fvp?.stop();
       } catch (_) {}
+      try {
+        _fvp?.dispose();
+      } catch (_) {}
+      _fvp = null;
     }
     if (keep != KotvEmbedBackend.exo) {
       try {
@@ -1308,22 +1312,25 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     bool live = true,
     String? format,
   }) async {
+    var playSettings = <String, dynamic>{};
     try {
       final st = await ref.read(apiProvider).getSettings();
-      final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-      final fo = '${settings['playerFailover'] ?? ''}'.trim();
+      playSettings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      final fo = '${playSettings['playerFailover'] ?? ''}'.trim();
       if (fo.isNotEmpty) {
         _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
       }
-      _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? _renderMode}');
+      _renderMode = kotvNormalizePlayerRender('${playSettings['playerRender'] ?? _renderMode}');
       // across/invert/change 仅在 bootstrap / 面板切换时更新，避免每次开播覆盖用户刚改的开关。
-      final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
+      final scaleLive = '${playSettings['playerScaleLive'] ?? playSettings['playerScale'] ?? 'default'}'.trim();
       _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
       _liveAspect = _liveAspectFromScale(_liveScale);
       // 比例在 setRenderMode + open 之后再套（见循环内），避免与下方重复。
-      _exo?.applyPlayerOptions(settings);
-      _fvp?.applyPlayerOptions(settings);
+      _exo?.applyPlayerOptions(playSettings);
+      _fvp?.applyPlayerOptions(playSettings);
     } catch (_) {}
+    final renderMode = kotvNormalizePlayerRender(_renderMode);
+    _renderMode = renderMode;
     final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
     final startPlayer = (hasDrm && kotvIsAndroid()) ? 'innie#exo' : _prefPlayerVal;
     final failover = KotvPlaybackFailover(
@@ -1354,8 +1361,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (stale()) return;
       _syncAndroidAutoPip();
       final pb = _playback;
+      if (pb is ExoPlayback) {
+        if (playSettings.isNotEmpty) {
+          pb.applyPlayerOptions(playSettings);
+        } else {
+          pb.applyPlayerOptions({'playerRender': renderMode});
+        }
+      }
       await pb.setDecodeMode(failover.decodeMode);
-      await pb.setRenderMode(_renderMode);
+      await pb.setRenderMode(renderMode);
       if (stale()) return;
       try {
         // 直播页 live=true：直链立刻 play（含 EPG 回看时移流）。

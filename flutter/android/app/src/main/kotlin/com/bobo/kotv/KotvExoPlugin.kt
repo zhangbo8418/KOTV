@@ -344,7 +344,8 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             val tid = if (useFlutterTexture) ensureFlutterTexture() else -1L
             Log.i(
               TAG,
-              "create sdk=${Build.VERSION.SDK_INT} render=${if (renderTexture) "texture" else "surface"} " +
+              "create sdk=${Build.VERSION.SDK_INT} requested='$mode' " +
+                "render=${if (renderTexture) "texture" else "surface"} " +
                 "path=${if (useFlutterTexture) "flutterTexture" else "platformView"} tid=$tid",
             )
             result.success(
