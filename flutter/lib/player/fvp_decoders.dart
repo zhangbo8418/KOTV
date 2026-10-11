@@ -11,7 +11,12 @@ import 'kotv_platform.dart';
 /// - **自动**：硬解优先 + FFmpeg/dav1d 回退
 /// - **硬解**：仅平台硬解，不带软解回退
 /// - **软解**：仅 FFmpeg（+ dav1d）
-List<String> kotvFvpVideoDecoders(String decodeMode) {
+///
+/// [androidSurface]：安卓 Surface（tunnel）用 `image=0` 直出；Texture（非 tunnel）用默认 AMediaCodec。
+List<String> kotvFvpVideoDecoders(
+  String decodeMode, {
+  bool androidSurface = true,
+}) {
   final m = decodeMode.trim().toLowerCase();
   final soft = m == 'soft' || m == 'software' || m == 'sw';
   final hard = m == 'hard' || m == 'hardware' || m == 'hw';
@@ -22,8 +27,10 @@ List<String> kotvFvpVideoDecoders(String decodeMode) {
       withSoft ? [...hw, 'FFmpeg', 'dav1d'] : hw;
 
   if (kotvIsAndroid()) {
-    // image=0：解码到 Surface，不用默认的 AImageReader。
-    return appendSoft(const ['AMediaCodec:image=0']);
+    // Surface/tunnel：image=0 解码到 Surface。Texture：默认 AMediaCodec（经 GL）。
+    return appendSoft([
+      androidSurface ? 'AMediaCodec:image=0' : 'AMediaCodec',
+    ]);
   }
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
     return appendSoft(const ['VT']);

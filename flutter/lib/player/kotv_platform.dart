@@ -48,12 +48,14 @@ String kotvNormalizePlayerRender(String raw) {
 String kotvPlayerRenderLabel(String raw) =>
     kotvNormalizePlayerRender(raw) == 'texture' ? 'Texture' : 'Surface';
 
-/// Surface/Texture：Android 内置 Exo 与原生 MPV 共用（设置项 `playerRender`）。
+/// Surface/Texture：Android 内置 Exo / 原生 MPV / FVP 共用（设置项 `playerRender`）。
 /// 桌面 media_kit MPV 固定 Flutter Texture（vo=libmpv），无此开关。
 bool kotvPlayerRenderApplies(String playerVal) {
   if (!kotvIsAndroid()) return false;
   final b = kotvEmbedBackend(playerVal);
-  return b == KotvEmbedBackend.exo || b == KotvEmbedBackend.mpv;
+  return b == KotvEmbedBackend.exo ||
+      b == KotvEmbedBackend.mpv ||
+      b == KotvEmbedBackend.fvp;
 }
 
 /// 点播默认：Web=HTML5；Android=Exo；其它=MPV（含 iOS）。

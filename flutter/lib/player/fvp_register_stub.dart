@@ -3,6 +3,11 @@ void kotvEnsureFvpRegistered({
   String decodeMode = 'auto',
   String? clearKeyHex,
   bool syncClearKey = false,
+  bool? androidTunnel,
 }) {}
 
-void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {}
+void kotvRegisterFvp({
+  String decodeMode = 'auto',
+  String? clearKeyHex,
+  bool androidTunnel = true,
+}) {}
