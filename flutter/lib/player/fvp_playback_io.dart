@@ -289,6 +289,8 @@ class FvpPlayback extends KotvPlayback {
         Uri.parse(url),
         httpHeaders: h,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        // 安卓用 SurfaceView（tunnel 直出；勿改 Texture，设备上会 ~1fps + 音频静音）。
+        viewType: kotvIsAndroid() ? VideoViewType.platformView : VideoViewType.textureView,
       );
       _c = c;
       _bumpView();

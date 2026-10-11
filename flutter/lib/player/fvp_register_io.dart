@@ -61,8 +61,9 @@ void kotvRegisterFvp({String decodeMode = 'auto', String? clearKeyHex}) {
     'avformat.allowed_segment_extensions': 'ALL',
     'avio.reconnect': '1',
     'avio.reconnect_delay_max': '7',
-    // 盖掉 mdk 默认 minMs=1000（队列空了要攒满 1s 才出包 → 约 1fps）。开播后再由
-    // setBufferRange 写具体 max；不设 demux.buffer.ranges（无字节上限，播完仍占内存）。
+    // mdk 属性 buffer = setBufferRange：值形如 "minMs" / "minMs+maxMs" / "minMs+maxMs-"。
+    // "0" = minMs=0（decode ASAP）。默认 minMs=1000 欠载时约 1fps。开播后再写 max。
+    // 不设 demux.buffer.ranges（无字节上限，播完仍占内存）。
     'buffer': '0',
   };
   final key = (clearKeyHex ?? '').trim();
