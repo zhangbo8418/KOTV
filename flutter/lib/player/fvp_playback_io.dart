@@ -197,36 +197,36 @@ class FvpPlayback extends KotvPlayback {
         ),
       );
     }
-    // Texture：强制画幅在布局层完成；mdk 无有效的 video.aspect。
+    // Texture：画幅在布局层完成。VideoPlayer 必须固定在同一子树位置——
+    // 若 size 0↔正 时整段替换父级，ImageReader 会 1x1↔实尺寸反复 disconnect（ADB 与 ~1fps 同现）。
     final scale = _videoScale.trim().isEmpty ? 'default' : _videoScale.trim();
-    // 未出尺寸前占满父级，保证 Windows Texture 有非零面积（FittedBox+0x0 会一直黑）。
-    final sz = c.value.size;
-    if (!c.value.isInitialized || sz.width <= 0 || sz.height <= 0) {
-      return ColoredBox(
-        color: Colors.black,
-        child: SizedBox.expand(child: VideoPlayer(c)),
-      );
-    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final max = constraints.biggest;
         if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
           return ColoredBox(color: Colors.black, child: VideoPlayer(c));
         }
-        final box = kotvBoxForVideoScale(max, sz, scale);
+        final sz = c.value.size;
+        final hasSize = c.value.isInitialized && sz.width > 0 && sz.height > 0;
+        final videoSize = hasSize ? sz : const Size(16, 9);
+        final box = hasSize ? kotvBoxForVideoScale(max, videoSize, scale) : max;
         final effective = kotvFitFromVideoScale(scale, fit);
         final child = SizedBox(
-          width: box.width,
-          height: box.height,
+          width: box.width.isFinite && box.width > 0 ? box.width : max.width,
+          height: box.height.isFinite && box.height > 0 ? box.height : max.height,
           child: FittedBox(
             fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
-            child: SizedBox(width: sz.width, height: sz.height, child: VideoPlayer(c)),
+            child: SizedBox(
+              width: videoSize.width,
+              height: videoSize.height,
+              child: VideoPlayer(c),
+            ),
           ),
         );
         if (effective == BoxFit.cover) {
           return ClipRect(child: Center(child: child));
         }
-        return Center(child: child);
+        return ColoredBox(color: Colors.black, child: Center(child: child));
       },
     );
   }
@@ -358,11 +358,17 @@ class FvpPlayback extends KotvPlayback {
             (lastInit != v.isInitialized || lastBuffering != v.isBuffering)) {
           _applyBufferRange(c);
         }
-        // 勿因 position 高频 notify：页面 ListenableBuilder 会重建 Texture，PC 可掉到 ~5fps。
+        // 勿因 position 高频 notify：页面 ListenableBuilder 会重建 Texture。
+        // 尺寸短暂掉到 0 不 _bumpView：避免 ImageReader 拆建（ADB 1x1↔实尺寸 + timediff≈1000ms）。
         final err = v.errorDescription ?? _lastError ?? '';
         final w = v.size.width;
         final h = v.size.height;
-        final viewChanged = lastInit != v.isInitialized || lastW != w || lastH != h || lastErr != err;
+        final sizeReady = w > 0 && h > 0;
+        final lastReady = lastW > 0 && lastH > 0;
+        final viewChanged = lastInit != v.isInitialized ||
+            lastErr != err ||
+            (sizeReady &&
+                (!lastReady || (lastW - w).abs() > 1.0 || (lastH - h).abs() > 1.0));
         final uiChanged = viewChanged ||
             lastPlaying != v.isPlaying ||
             lastBuffering != v.isBuffering ||
@@ -372,8 +378,10 @@ class FvpPlayback extends KotvPlayback {
         lastInit = v.isInitialized;
         lastPlaying = v.isPlaying;
         lastBuffering = v.isBuffering;
-        lastW = w;
-        lastH = h;
+        if (sizeReady) {
+          lastW = w;
+          lastH = h;
+        }
         lastErr = err;
         lastOpening = _opening;
         if (viewChanged) _bumpView();
@@ -809,7 +817,7 @@ class FvpPlayback extends KotvPlayback {
   }
 
   /// mdk [setBufferRange]：`minMs==0` 尽快解码；`minMs>0` 时队列空了要攒到 min 才继续出包。
-  /// 默认 min=1000，欠载时大约每秒才放出一帧（ADB MediaCodec timediff≈1002ms 已实测）。
+  /// 默认 min=1000，欠载时大约每秒才放出一帧（ADB MediaCodec timediff≈1000ms 已实锤）。
   /// 点播固定 min=0；max 用内存预算÷码率。码率未知时先用 60s，码率出来再抬 max。
   /// 直播：短队列；桌面 drop 追沿，安卓不 drop（GOP≈1s 时 drop 会只剩关键帧）。
   void _applyBufferRange(VideoPlayerController c) {
@@ -833,7 +841,12 @@ class FvpPlayback extends KotvPlayback {
               bitsPerSec: bps,
             )
           : 60000;
-      if (maxMs <= 0) return;
+      // max 算不出来也必须先钉死 min=0，绝不能 return 留下 mdk 默认 minMs=1000。
+      if (maxMs <= 0) {
+        c.setProperty('buffer', '0+0');
+        c.setBufferRange(min: 0, max: 0);
+        return;
+      }
       c.setProperty('buffer', '0+$maxMs');
       c.setBufferRange(min: 0, max: maxMs, drop: false);
       if (bps > 0) {
