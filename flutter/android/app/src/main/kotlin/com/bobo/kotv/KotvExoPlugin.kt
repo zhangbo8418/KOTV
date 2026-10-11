@@ -2515,9 +2515,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     }
 
-    /** 不再因老 API 强制 Texture：Flutter Texture + Rockchip HDR 会绿条花屏。 */
-    fun preferTextureOnDevice(): Boolean = false
-
     fun resolveRenderTexture(requested: String): Boolean {
       return if (requested.isNotEmpty()) isTextureRender(requested) else false
     }

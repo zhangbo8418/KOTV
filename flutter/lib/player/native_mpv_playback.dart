@@ -283,8 +283,10 @@ class NativeMpvPlayback extends KotvPlayback {
   Future<void> setVideoScale(String mode) async {
     final m = mode.trim().isEmpty ? 'default' : mode.trim();
     _videoScale = m;
+    // 未就绪只记偏好：此处 _ensureNative 会按当前 _renderMode create，易在 setRenderMode 前锁成 Surface。
+    // open 结束会再 setAspect；已就绪则热更新。
+    if (!_nativeReady) return;
     try {
-      await _ensureNative(live: _live);
       await _ch.invokeMethod('setAspect', {'mode': m});
     } catch (_) {}
   }

@@ -703,7 +703,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
         _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
         _liveAspect = _liveAspectFromScale(_liveScale);
-        unawaited(_playback.setVideoScale(_liveScale));
         final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
         final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
         final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
@@ -756,6 +755,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         if (!mounted) return;
         await _playback.setDecodeMode(_decodeMode);
         await _playback.setRenderMode(_renderMode);
+        unawaited(_playback.setVideoScale(_liveScale));
         _syncAndroidAutoPip();
       } catch (_) {}
       if (!mounted) return;
@@ -1303,11 +1303,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (fo.isNotEmpty) {
         _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
       }
+      _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? _renderMode}');
       // across/invert/change 仅在 bootstrap / 面板切换时更新，避免每次开播覆盖用户刚改的开关。
       final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
       _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
       _liveAspect = _liveAspectFromScale(_liveScale);
-      unawaited(_playback.setVideoScale(_liveScale));
+      // 比例在 setRenderMode + open 之后再套（见循环内），避免与下方重复。
+      _exo?.applyPlayerOptions(settings);
+      _fvp?.applyPlayerOptions(settings);
     } catch (_) {}
     final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
     final startPlayer = (hasDrm && kotvIsAndroid()) ? 'innie#exo' : _prefPlayerVal;

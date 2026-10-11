@@ -2076,6 +2076,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (decode.isNotEmpty) {
           _prefDecodeMode = decode;
         }
+        // 与播放器/软硬解同级：设置页改 Texture 后详情可能还开着，不重读会仍按 Surface create。
+        _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? _renderMode}');
         final speedPref = double.tryParse('${settings['playerSpeed'] ?? ''}');
         if (speedPref != null && speedPref > 0) {
           _prefSpeed = speedPref.clamp(0.1, 5.0);
@@ -2086,6 +2088,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }
         _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
         _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
+        _exo?.applyPlayerOptions(settings);
+        _fvp?.applyPlayerOptions(settings);
       } catch (_) {}
       // 有 DRM 或 SMB 强制 Exo；本地碟片/ISO 强制 MPV（自编译 dvdnav/libbluray）。
       final smb = mediaUrl.trim().toLowerCase().startsWith('smb://') ||
