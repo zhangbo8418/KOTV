@@ -405,15 +405,12 @@ class FvpPlayback extends KotvPlayback {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
       }
-      // 立刻 min=0、max=INT64_MAX（勿省略 max，默认 -1 会把 max/drop 打回默认值）。
-      // 点播 mdk 默认 minMs=1000，队列空时约每秒一帧。
-      _pinBufferMinZero(c);
+      // 单一路径钉死 min=0（勿省略 max：Dart 默认 max=-1 会把 max/drop 打回 mdk 默认）。
+      // 点播默认 minMs=1000 → 欠载约每秒一帧（ADB MediaCodec timediff≈1000ms）。
       try {
         if (!_live) await KotvBufferBudget.warm();
       } catch (_) {}
-      try {
-        _applyBufferRange(c);
-      } catch (_) {}
+      _applyBufferRange(c);
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
       // startAt 已在 create→prepare(ms)；此处勿再 seekTo。
@@ -614,16 +611,15 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Future<void> seek(Duration d) async {
-    await _c?.seekTo(d);
+    final c = _c;
+    if (c == null) return;
+    await c.seekTo(d);
+    // ADB（9dd3f71）：seek/flush 后 mdk 默认 minMs=1000 会重新生效 → timediff≈1000ms。
+    // 只走 [_applyBufferRange]，不再叠一层 pin(0+0)。
+    _vodBufferSet = false;
+    _liveBufferSet = false;
+    _applyBufferRange(c);
     notifyListeners();
-  }
-
-  /// 点播 mdk 默认 minMs=1000（队列空时约每秒一帧）；显式 min=0、max=0(=INT64_MAX)。
-  void _pinBufferMinZero(VideoPlayerController c) {
-    try {
-      c.setProperty('buffer', '0+0');
-      c.setBufferRange(min: 0, max: 0);
-    } catch (_) {}
   }
 
   @override

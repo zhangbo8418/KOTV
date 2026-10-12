@@ -512,6 +512,33 @@ else:
         PREPARE_START_NEW,
     )
 
+# lowLatency 分支：setBufferRange(min:0) 省略 max → Dart 默认 max=-1 会把 max/drop
+# 打回默认，并可能让后续路径回到 minMs=1000（ADB timediff≈1000ms）。
+LOW_LAT_BUF_OLD = """      if (_lowLatency > 1) {
+        player.setBufferRange(min: 0, max: 1000, drop: true);
+      } else {
+        player.setBufferRange(min: 0);
+      }
+"""
+LOW_LAT_BUF_NEW = """      if (_lowLatency > 1) {
+        player.setBufferRange(min: 0, max: 1000, drop: true);
+      } else {
+        // KOTV: never omit max (default -1 resets max/drop; undoes min=0).
+        player.setBufferRange(min: 0, max: 0);
+      }
+"""
+if "never omit max (default -1 resets max/drop" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: lowLatency setBufferRange max=0")
+elif "player.setBufferRange(min: 0);" in mdk_text:
+    mdk_text = _once(
+        "lowLatency setBufferRange max=0",
+        mdk_text,
+        LOW_LAT_BUF_OLD,
+        LOW_LAT_BUF_NEW,
+    )
+else:
+    print(f"ok fvp ({fvp_version}): no bare setBufferRange(min: 0) in lowLatency branch")
+
 # Windows：三张 shared 纹理轮换。renderVideo 画进 Flutter 没拿着的那张，取纹理时只交 handle。
 WIN_PLUGIN = fvp_root / "windows" / "fvp_plugin.cpp"
 WIN_COPY_OLD = """        D3D11_TEXTURE2D_DESC desc;
@@ -718,6 +745,9 @@ if "player.setBufferRange(min: 0, max: 0);" not in mdk_check or "_lowLatency <= 
     sys.exit(1)
 if "X-KOTV-Prepare-Ms" not in mdk_check or "prepare(position: prepareMs)" not in mdk_check:
     print("ERROR: fvp create missing prepare(startPosition) via X-KOTV-Prepare-Ms", file=sys.stderr)
+    sys.exit(1)
+if "player.setBufferRange(min: 0);" in mdk_check and "_lowLatency > 1" in mdk_check:
+    print("ERROR: fvp lowLatency still has setBufferRange(min: 0) without max", file=sys.stderr)
     sys.exit(1)
 if 'SetGlobalOption("d3d11.device"' not in win_check or 'SetGlobalOption("d3d11.copy"' not in win_check:
     print("ERROR: fvp windows plugin does not publish the shared d3d11 device", file=sys.stderr)
