@@ -191,6 +191,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     with SingleTickerProviderStateMixin {
   bool _showChrome = false;
   MouseCursor _mouseCursor = SystemMouseCursors.basic;
+  /// 是否在全屏 MouseRegion 内；仅用于「从窗外进入」边沿，避免窗内移动误取消关选集定时器。
   bool _pointerIn = false;
   late AspectSpec _aspect = widget.aspect;
   late String _decodeMode = widget.decodeMode;
@@ -847,7 +848,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
-    _pointerIn = true;
+    // 仅从窗外进入时取消离窗定时器；窗内移动（含离开选集到画面）不取消面板 onExit 的 8s。
+    if (!_pointerIn) {
+      _pointerIn = true;
+      _chromeKey.currentState?.cancelScheduledCloseEpisodes();
+    }
     final onRight = e.localPosition.dx >= c.maxWidth - 24;
     if (onRight && !_epOpen && widget.episodes.isNotEmpty) {
       _chromeKey.currentState?.openEpisodes();
@@ -858,6 +863,13 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _onPointerExit() {
     _pointerIn = false;
+    // 与离开选集面板相同：8 秒后关选集（此前离窗只藏底栏且被 _epOpen 拦住）。
+    _chromeKey.currentState?.scheduleCloseEpisodes();
+    _schedulePlayingHide();
+  }
+
+  void _onEpisodesAutoClosed() {
+    if (!mounted) return;
     _schedulePlayingHide();
   }
 
@@ -984,6 +996,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       onExit: () => unawaited(_exitFullscreen()),
       onBump: _bumpChrome,
       onHoldChanged: _onChromeHoldChanged,
+      onEpisodesAutoClosed: _onEpisodesAutoClosed,
       episodes: widget.episodes,
       epIdx: _epIdx,
       aspect: _aspect,

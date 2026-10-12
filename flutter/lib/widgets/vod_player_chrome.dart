@@ -658,6 +658,7 @@ class VodFullscreenChrome extends StatefulWidget {
     this.openingSec = 0,
     this.endingSec = 0,
     this.onOffsetsChanged,
+    this.onEpisodesAutoClosed,
   });
 
   final KotvPlayback player;
@@ -666,6 +667,8 @@ class VodFullscreenChrome extends StatefulWidget {
   final VoidCallback onToggleVisible;
   final VoidCallback onExit;
   final VoidCallback onBump;
+  /// 选集延时自动关闭后通知父级（以便重新排期藏栏）。
+  final VoidCallback? onEpisodesAutoClosed;
   /// 指针停在顶/底栏或焦点在控件上：父级应暂停自动隐藏。
   final ValueChanged<bool>? onHoldChanged;
   /// 手机抖音式：竖屏 ↔ 横屏全屏切换。
@@ -920,7 +923,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   }
 
   void openEpisodes() {
-    _epHideTimer?.cancel();
+    cancelScheduledCloseEpisodes();
     _placeEpisode(widget.epIdx);
     setState(() => _epOpen = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -929,8 +932,24 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
   }
 
   void closeEpisodes() {
-    _epHideTimer?.cancel();
+    cancelScheduledCloseEpisodes();
     setState(() => _epOpen = false);
+  }
+
+  /// 离开选集面板 / 离开全屏窗口：同一套 8 秒后关闭。
+  void scheduleCloseEpisodes() {
+    _epHideTimer?.cancel();
+    if (!_epOpen) return;
+    _epHideTimer = Timer(const Duration(seconds: 8), () {
+      if (!mounted || !_epOpen) return;
+      setState(() => _epOpen = false);
+      widget.onEpisodesAutoClosed?.call();
+    });
+  }
+
+  void cancelScheduledCloseEpisodes() {
+    _epHideTimer?.cancel();
+    _epHideTimer = null;
   }
 
   /// 列表内边距在 itemExtent 之前，第 i 集的起点是 padding + i * extent。
@@ -2621,15 +2640,10 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
             bottom: 0,
             child: MouseRegion(
               onEnter: (_) {
-                _epHideTimer?.cancel();
+                cancelScheduledCloseEpisodes();
                 widget.onBump();
               },
-              onExit: (_) {
-                _epHideTimer?.cancel();
-                _epHideTimer = Timer(const Duration(seconds: 8), () {
-                  if (mounted && _epOpen) setState(() => _epOpen = false);
-                });
-              },
+              onExit: (_) => scheduleCloseEpisodes(),
               child: Material(
                 // PC 全屏视频很亮时 0x99 半透明会把字「吃」成细条，加不透明底。
                 color: const Color(0xF0120A1C),
