@@ -65,13 +65,17 @@ Widget kotvPlaybackView({
       final m = mpv ?? playback;
       if (m is NativeMpvPlayback) return m.buildView(fit: fit);
       if (m is MediaKitPlayback) {
-        return Video(
-          controller: m.controller,
-          controls: NoVideoControls,
-          fit: fit,
-          wakelock: false,
-          // 桌面窗失焦/最小化也会进 paused；默认 true 会 pause 掉 libmpv，易黑屏。
-          pauseUponEnteringBackgroundMode: kotvIsAndroid(),
+        // ValueKey：换集新建 Player/VideoController 时强制 remount，避免 Win7 复用已死 Texture。
+        return KeyedSubtree(
+          key: ValueKey<int>(identityHashCode(m.player)),
+          child: Video(
+            controller: m.controller,
+            controls: NoVideoControls,
+            fit: fit,
+            wakelock: false,
+            // 桌面窗失焦/最小化也会进 paused；默认 true 会 pause 掉 libmpv，易黑屏。
+            pauseUponEnteringBackgroundMode: kotvIsAndroid(),
+          ),
         );
       }
       return const ColoredBox(color: Colors.black);

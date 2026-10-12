@@ -244,7 +244,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   /// 切台/换线：走各后端 stopForEpisodeSwitch。
-  /// 桌面 MPV 卸文件并压 demuxer，保留 Player/Texture（换台 dispose 会黑屏）。
+  /// 桌面 MPV：stop 后 dispose Player（归还包池）；宿主不拆，下次 [_ensureMpv] 再建。
   Future<void> _stopAllBackends() async {
     Future<void> stopOne(KotvPlayback? p) async {
       if (p == null) return;
@@ -262,6 +262,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       stopOne(_xg),
       stopOne(_zw),
     ]);
+    await _recycleDesktopMpv();
+  }
+
+  /// 桌面 media_kit：换台 dispose Player；不拆 Flutter 视频宿主。
+  Future<void> _recycleDesktopMpv() async {
+    if (kotvIsAndroid()) return;
+    if (_mk == null && _mkPlayer == null) return;
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
+    try {
+      _mk?.dispose();
+    } catch (_) {}
+    _mk = null;
+    if (mounted) setState(() {});
+    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   /// 切 Tab / 离开直播：先 pause 停声，再 stop + release（不改音量）。

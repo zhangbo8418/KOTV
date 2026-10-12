@@ -389,41 +389,28 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> stop() async {
-    // 卸文件并压 demuxer；Player/Texture 保留到离开页 kotvDisposeMpvPlayer。
-    _url = '';
-    _clearVideoSize();
-    _speedBps = 0;
-    if (_diag) KotvMpvDiag.note('stop');
-    try {
-      await player.stop();
-    } catch (_) {}
-    await _shrinkDemuxerCache();
-    notifyListeners();
-  }
+  Future<void> stop() => _stopUnload(reason: 'stop');
 
-  /// 换集：卸文件并压 demuxer，保留 Player/Texture（避免 Win7 第 2 集黑屏）。
+  /// 换集：卸文件。桌面详情页会再 dispose Player（归还 DXVA/包池）；
+  /// 仅压 demuxer 上限不能把内存还给 OS。
   @override
-  Future<void> stopForEpisodeSwitch() async {
-    if (_diag) KotvMpvDiag.note('stopForEpisodeSwitch');
+  Future<void> stopForEpisodeSwitch() => _stopUnload(reason: 'stopForEpisodeSwitch');
+
+  Future<void> _stopUnload({required String reason}) async {
     _url = '';
     _clearVideoSize();
     _speedBps = 0;
+    if (_diag) {
+      KotvMpvDiag.note(reason);
+      await KotvMpvDiag.snapshot(player, reason: 'before-$reason');
+    }
     try {
       await player.stop();
     } catch (_) {}
-    await _shrinkDemuxerCache();
+    if (_diag) {
+      await KotvMpvDiag.snapshot(player, reason: 'after-$reason');
+    }
     notifyListeners();
-  }
-
-  /// stop 后把 demuxer 上限压到极小，丢掉上一集包缓存；下次 open 经 applyAfterAttach 写回预算。
-  Future<void> _shrinkDemuxerCache() async {
-    try {
-      final platform = player.platform;
-      if (platform == null) return;
-      await (platform as dynamic).setProperty('demuxer-max-bytes', '64KiB');
-      await (platform as dynamic).setProperty('demuxer-max-back-bytes', '64KiB');
-    } catch (_) {}
   }
 
   @override

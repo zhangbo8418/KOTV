@@ -567,8 +567,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 换集/换源：先停声并放开上一集缓存。
-  /// 桌面 MPV：stop 卸文件 + 压 demuxer，**保留** Player/Texture（换集 dispose 会导致第 2 集黑屏）。
-  /// 安卓原生 MPV stop 已拆 libmpv；FVP/Exo 硬停须 dispose 再建。
+  /// 桌面 MPV：stop 后 dispose Player（归还 DXVA/包池），Stable 视频宿主不拆；
+  /// 下次 [_ensureMpv] 再建。安卓原生 MPV stop 已拆 libmpv；FVP/Exo 硬停须 dispose 再建。
   Future<void> _stopAllBackends() async {
     Future<void> stopOne(KotvPlayback? p) async {
       if (p == null) return;
@@ -586,6 +586,27 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       stopOne(_xg),
       stopOne(_zw),
     ]);
+    await _recycleDesktopMpv();
+  }
+
+  /// 桌面 media_kit：换集 dispose Player，下次 [_ensureMpv] 再建。
+  /// Stable/Offstage Positioned 宿主保留；[_mk]==null 时槽内为黑底，不卸整树 Texture。
+  Future<void> _recycleDesktopMpv() async {
+    if (kotvIsAndroid()) return;
+    if (_mk == null && _mkPlayer == null) return;
+    _playingSub?.cancel();
+    _bufferingSub?.cancel();
+    _playingSub = null;
+    _bufferingSub = null;
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
+    try {
+      _mk?.dispose();
+    } catch (_) {}
+    _mk = null;
+    // 先让宿主槽切到黑底（无 MediaKit Video），再 dispose Player，避免 Win7 挂死 Texture。
+    if (mounted) setState(() {});
+    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   @override

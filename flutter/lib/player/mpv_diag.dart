@@ -119,6 +119,10 @@ class KotvMpvDiag {
     'duration',
     'demuxer-cache-duration',
     'demuxer-cache-idle',
+    // 换集内存取证：对照 demuxer-cache-* / max-bytes / hwdec-current；
+    // 换集 dispose Player 后应归零，仅压上限不会把 packet pool 还给 OS。
+    'demuxer-max-bytes',
+    'demuxer-max-back-bytes',
     'cache-buffering-state',
     'current-ao',
     'audio-codec-name',
@@ -138,11 +142,17 @@ class KotvMpvDiag {
   ];
 
   /// 读一组关键属性写一行；[reason] 说明触发点（open+4s / before-pause 等）。
+  /// 附带 [ProcessInfo.currentRss]（Windows 上近似 Working Set），对照换集前后进程占用。
   static Future<void> snapshot(Player player, {required String reason}) async {
     if (_disabled) return;
     final platform = player.platform;
     if (platform == null) return;
     final parts = <String>[];
+    try {
+      parts.add('rss=${ProcessInfo.currentRss}');
+    } catch (_) {
+      parts.add('rss=!');
+    }
     for (final p in _snapshotProps) {
       try {
         final v = await (platform as dynamic)
