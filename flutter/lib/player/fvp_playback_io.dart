@@ -309,10 +309,17 @@ class FvpPlayback extends KotvPlayback {
       await _disposeController();
       notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
+      // 点播续播/片头：X-KOTV-Prepare-Ms → fvp patch prepare(ms)（对齐 Mac MPV Media.start /
+      // mdk prepare(startPosition)）。勿 prepare(0) 后再 seekTo——安卓 AMediaCodec
+      // STARTED→FLUSHING→Avg≈1000ms；Mac FVP 走 VT，无此链。
+      final openHeaders = Map<String, String>.from(h);
+      if (startAt > Duration.zero) {
+        openHeaders['X-KOTV-Prepare-Ms'] = '${startAt.inMilliseconds}';
+      }
       // 302 交给 mdk 默认 IO 跟跳（未强制 io.avio）。
       final c = VideoPlayerController.networkUrl(
         Uri.parse(url),
-        httpHeaders: h,
+        httpHeaders: openHeaders,
         videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         // 安卓跟 playerRender：Surface→platformView，Texture→textureView（Win7 adapt 删本行）。
         viewType: _viewType,
@@ -399,6 +406,7 @@ class FvpPlayback extends KotvPlayback {
         throw StateError(_lastError!);
       }
       // 立刻 min=0、max=INT64_MAX（勿省略 max，默认 -1 会把 max/drop 打回默认值）。
+      // 点播 mdk 默认 minMs=1000，队列空时约每秒一帧。
       _pinBufferMinZero(c);
       try {
         if (!_live) await KotvBufferBudget.warm();
@@ -408,19 +416,7 @@ class FvpPlayback extends KotvPlayback {
       } catch (_) {}
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
-      // 续播/片头在首次 play 前 seek。ADB（192.168.0.109）：STARTED 后立即 FLUSHING，
-      // 随后 Render Avg≈1000ms——mdk 默认 minMs=1000 在 seek 后重新生效，必须再钉 min=0。
-      if (startAt > Duration.zero) {
-        try {
-          await c.seekTo(startAt);
-        } catch (_) {}
-        _pinBufferMinZero(c);
-        _vodBufferSet = false;
-        _liveBufferSet = false;
-        try {
-          _applyBufferRange(c);
-        } catch (_) {}
-      }
+      // startAt 已在 create→prepare(ms)；此处勿再 seekTo。
       await c.play();
       _applyRuntimeOptions(c);
       _refreshTracksQuiet();
@@ -618,20 +614,11 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Future<void> seek(Duration d) async {
-    final c = _c;
-    if (c == null) return;
-    await c.seekTo(d);
-    // ADB：seek/flush 后 minMs 回到默认 1000 → 约 1fps，须重钉。
-    _pinBufferMinZero(c);
-    try {
-      _vodBufferSet = false;
-      _liveBufferSet = false;
-      _applyBufferRange(c);
-    } catch (_) {}
+    await _c?.seekTo(d);
     notifyListeners();
   }
 
-  /// mdk 默认 minMs=1000；seek 后会回到该默认（设备 ADB timediff≈1000ms）。
+  /// 点播 mdk 默认 minMs=1000（队列空时约每秒一帧）；显式 min=0、max=0(=INT64_MAX)。
   void _pinBufferMinZero(VideoPlayerController c) {
     try {
       c.setProperty('buffer', '0+0');

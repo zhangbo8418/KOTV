@@ -471,6 +471,47 @@ else:
         BUF_RANGE_CREATE_NEW,
     )
 
+# create：X-KOTV-Prepare-Ms → prepare(startPosition)；勿发往 CDN。
+# 对齐 Mac MPV Media(start:) / mdk prepare(ms)；避免 prepare(0)+seekTo 触发安卓 AMediaCodec FLUSHING。
+PREPARE_START_OLD = """    if (dataSource.httpHeaders.isNotEmpty) {
+      String headers = '';
+      dataSource.httpHeaders.forEach((key, value) {
+        headers += '$key: $value\\r\\n';
+      });
+      player.setProperty('avio.headers', headers);
+    }
+    player.media = uri;
+    int ret = await player.prepare(); // required!
+"""
+PREPARE_START_NEW = """    // KOTV: X-KOTV-Prepare-Ms → prepare(ms); strip before avio.headers (CDN).
+    // Same idea as Mac MPV Media(start:) / mdk prepare(startPosition).
+    var prepareMs = 0;
+    if (dataSource.httpHeaders.isNotEmpty) {
+      String headers = '';
+      dataSource.httpHeaders.forEach((key, value) {
+        if (key == 'X-KOTV-Prepare-Ms') {
+          prepareMs = int.tryParse(value) ?? 0;
+          return;
+        }
+        headers += '$key: $value\\r\\n';
+      });
+      if (headers.isNotEmpty) {
+        player.setProperty('avio.headers', headers);
+      }
+    }
+    player.media = uri;
+    int ret = await player.prepare(position: prepareMs); // required!
+"""
+if "X-KOTV-Prepare-Ms" in mdk_text:
+    print(f"ok fvp ({fvp_version}) already patched: prepare(startPosition) via X-KOTV-Prepare-Ms")
+else:
+    mdk_text = _once(
+        "prepare(startPosition) via X-KOTV-Prepare-Ms",
+        mdk_text,
+        PREPARE_START_OLD,
+        PREPARE_START_NEW,
+    )
+
 # Windows：三张 shared 纹理轮换。renderVideo 画进 Flutter 没拿着的那张，取纹理时只交 handle。
 WIN_PLUGIN = fvp_root / "windows" / "fvp_plugin.cpp"
 WIN_COPY_OLD = """        D3D11_TEXTURE2D_DESC desc;
@@ -674,6 +715,9 @@ if "setGlobalOption('d3d11.sync.cpu'" in mdk_check:
     sys.exit(1)
 if "player.setBufferRange(min: 0, max: 0);" not in mdk_check or "_lowLatency <= 0" not in mdk_check:
     print("ERROR: fvp create missing setBufferRange(min: 0, max: 0) after player opts", file=sys.stderr)
+    sys.exit(1)
+if "X-KOTV-Prepare-Ms" not in mdk_check or "prepare(position: prepareMs)" not in mdk_check:
+    print("ERROR: fvp create missing prepare(startPosition) via X-KOTV-Prepare-Ms", file=sys.stderr)
     sys.exit(1)
 if 'SetGlobalOption("d3d11.device"' not in win_check or 'SetGlobalOption("d3d11.copy"' not in win_check:
     print("ERROR: fvp windows plugin does not publish the shared d3d11 device", file=sys.stderr)
