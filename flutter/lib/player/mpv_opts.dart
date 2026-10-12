@@ -305,9 +305,16 @@ class KotvMpvOpts {
       }
 
       if (live) {
-        // 直播不写 demuxer-max-bytes / cache-secs；关掉 cache-pause 避免播一段停一段。
+        // 直播不写点播预算；关掉 cache-pause 避免播一段停一段。
         try {
           await set('cache-pause', 'no');
+        } catch (_) {}
+        // 换集 stop 可能把 demuxer 压到 64KiB；直播若不写回会一直饿死/卡顿。
+        try {
+          await set('demuxer-max-bytes', '150MiB');
+        } catch (_) {}
+        try {
+          await set('demuxer-max-back-bytes', '150MiB');
         } catch (_) {}
       } else {
         try {

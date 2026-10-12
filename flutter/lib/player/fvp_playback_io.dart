@@ -399,10 +399,7 @@ class FvpPlayback extends KotvPlayback {
         throw StateError(_lastError!);
       }
       // 立刻 min=0、max=INT64_MAX（勿省略 max，默认 -1 会把 max/drop 打回默认值）。
-      try {
-        c.setProperty('buffer', '0+0');
-        c.setBufferRange(min: 0, max: 0);
-      } catch (_) {}
+      _pinBufferMinZero(c);
       try {
         if (!_live) await KotvBufferBudget.warm();
       } catch (_) {}
@@ -411,11 +408,17 @@ class FvpPlayback extends KotvPlayback {
       } catch (_) {}
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
-      // 续播/片头必须在首次 play 前 seek。play 后再 seek → ADB：MediaCodec flush +
-      // AudioTrack pause，随后 Render Avg≈1000ms 约十几秒。
+      // 续播/片头在首次 play 前 seek。ADB（192.168.0.109）：STARTED 后立即 FLUSHING，
+      // 随后 Render Avg≈1000ms——mdk 默认 minMs=1000 在 seek 后重新生效，必须再钉 min=0。
       if (startAt > Duration.zero) {
         try {
           await c.seekTo(startAt);
+        } catch (_) {}
+        _pinBufferMinZero(c);
+        _vodBufferSet = false;
+        _liveBufferSet = false;
+        try {
+          _applyBufferRange(c);
         } catch (_) {}
       }
       await c.play();
@@ -615,8 +618,25 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Future<void> seek(Duration d) async {
-    await _c?.seekTo(d);
+    final c = _c;
+    if (c == null) return;
+    await c.seekTo(d);
+    // ADB：seek/flush 后 minMs 回到默认 1000 → 约 1fps，须重钉。
+    _pinBufferMinZero(c);
+    try {
+      _vodBufferSet = false;
+      _liveBufferSet = false;
+      _applyBufferRange(c);
+    } catch (_) {}
     notifyListeners();
+  }
+
+  /// mdk 默认 minMs=1000；seek 后会回到该默认（设备 ADB timediff≈1000ms）。
+  void _pinBufferMinZero(VideoPlayerController c) {
+    try {
+      c.setProperty('buffer', '0+0');
+      c.setBufferRange(min: 0, max: 0);
+    } catch (_) {}
   }
 
   @override
