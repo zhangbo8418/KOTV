@@ -58,14 +58,7 @@ void main() {
     expect(got.headers?['Cookie'], 'a=b');
   });
 
-  test('native players and hls.js art can send headers; safari/xg cannot', () {
-    expect(
-      kotvPlaybackSendsHeaders(
-        playerVal: 'innie#mpv',
-        mediaUrl: 'https://cdn.example/live.m3u8',
-      ),
-      isTrue,
-    );
+  test('fvp/exo always; mpv skips authed hls; safari/xg cannot', () {
     expect(
       kotvPlaybackSendsHeaders(
         playerVal: 'innie#fvp',
@@ -73,6 +66,42 @@ void main() {
       ),
       isTrue,
     );
+    expect(
+      kotvPlaybackSendsHeaders(
+        playerVal: 'innie#exo',
+        mediaUrl: 'https://cdn.example/live.m3u8',
+        headers: const {'Cookie': 'a=b'},
+      ),
+      isTrue,
+    );
+    // MPV：无鉴权头或仅 UA/Referer 的 HLS 可直开。
+    expect(
+      kotvPlaybackSendsHeaders(
+        playerVal: 'innie#mpv',
+        mediaUrl: 'https://cdn.example/live.m3u8',
+        headers: const {'User-Agent': 'UA', 'Referer': 'https://r/'},
+      ),
+      isTrue,
+    );
+    expect(
+      kotvPlaybackSendsHeaders(
+        playerVal: 'innie#mpv',
+        mediaUrl: 'https://cdn.example/a.mp4',
+        headers: const {'Cookie': 'a=b'},
+      ),
+      isTrue,
+    );
+    // MPV：HLS 分片不跟 Cookie，须走代理。
+    expect(
+      kotvPlaybackSendsHeaders(
+        playerVal: 'innie#mpv',
+        mediaUrl: 'https://cdn.example/live.m3u8',
+        headers: const {'Cookie': 'a=b'},
+      ),
+      isFalse,
+    );
+    expect(kotvHeadersNeedSegmentAuth(const {'Token': 'x'}), isTrue);
+    expect(kotvHeadersNeedSegmentAuth(const {'User-Agent': 'UA'}), isFalse);
     expect(
       kotvPlaybackSendsHeaders(
         playerVal: 'innie#html',

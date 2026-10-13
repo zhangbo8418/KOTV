@@ -59,25 +59,59 @@ bool kotvIsLocalProxyUrl(String url) {
   return u.contains('127.0.0.1:') && u.contains('/proxy');
 }
 
+/// 列表/分片也会跟到的请求头以外，是否还有鉴权类头（Cookie / Token 等）。
+/// MPV 的 HLS 分片只靠 lavf 带 UA/Referer，其它头进不了子请求。
+bool kotvHeadersNeedSegmentAuth(Map<String, String>? headers) {
+  if (headers == null || headers.isEmpty) return false;
+  for (final e in headers.entries) {
+    if (e.value.trim().isEmpty) continue;
+    switch (e.key.trim().toLowerCase()) {
+      case 'user-agent':
+      case 'ua':
+      case 'referer':
+      case 'referrer':
+      case 'origin':
+        continue;
+      default:
+        return true;
+    }
+  }
+  return false;
+}
+
+bool kotvLooksLikeHlsUrl(String url) {
+  final path = url.split('?').first.toLowerCase();
+  return path.contains('.m3u8') || path.endsWith('.m3u');
+}
+
 /// 能把请求头写进每次媒体请求的播放器：直开站点 URL。
-/// Exo / MPV / FVP 原生带头；html/art 仅在 hls.js 可用时（art 还须 m3u8）。
-/// Safari 原生 HLS、西瓜和全能播放器不走这条，改开引擎代理地址。
+///
+/// - Exo：OkHttp 默认请求属性，列表/分片都带。
+/// - FVP：mdk `avio.headers`，FFmpeg HTTP 子请求也会带。
+/// - MPV：主请求走 `http-header-fields`；HLS 分片不走该属性，仅 lavf 注入 UA/Referer。
+///   因此带 Cookie/Token 等鉴权头的 HLS 不能直开，须走引擎代理。
+/// - html/art：仅在 hls.js 可用时（art 还须 m3u8）。
+/// - Safari 原生 HLS、西瓜和全能播放器：改开引擎代理地址。
 bool kotvPlaybackSendsHeaders({
   required String playerVal,
   required String mediaUrl,
   bool? hlsJsSupported,
+  Map<String, String>? headers,
 }) {
   switch (playerVal) {
     case 'innie#exo':
-    case 'innie#mpv':
     case 'innie#fvp':
+      return true;
+    case 'innie#mpv':
+      if (kotvLooksLikeHlsUrl(mediaUrl) && kotvHeadersNeedSegmentAuth(headers)) {
+        return false;
+      }
       return true;
     case 'innie#html':
       return hlsJsSupported ?? kotvWebHlsJsSupported();
     case 'innie#art':
       if (!(hlsJsSupported ?? kotvWebHlsJsSupported())) return false;
-      final path = mediaUrl.split('?').first.toLowerCase();
-      return path.contains('.m3u8');
+      return kotvLooksLikeHlsUrl(mediaUrl);
     default:
       return false;
   }
