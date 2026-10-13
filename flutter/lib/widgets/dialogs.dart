@@ -15,7 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/models.dart';
 import '../providers.dart';
-import '../remote/kotv_local_prefs.dart';
+import '../api/kotv_settings_cache.dart';
 import '../screens/detail_screen.dart';
 import '../screens/file_browser_screen.dart';
 import '../screens/live_screen.dart';
@@ -514,12 +514,9 @@ Future<({String url, String name})?> showEditLiveDialog(BuildContext context, Wi
         }
       }
       if (oldUrl.isEmpty) {
-        await KotvLocalPrefs.loadFromDisk();
-        oldUrl = KotvLocalPrefs.get('live').trim();
+        oldUrl = KotvSettingsCache.get('live').trim();
         if (oldUrl.isEmpty) {
-          final st = await api.getSettings();
-          final map = Map<String, dynamic>.from((st['settings'] as Map?) ?? {});
-          await KotvLocalPrefs.hydrate(map);
+          final map = await KotvSettingsCache.fetch(api);
           oldUrl = '${map['live'] ?? ''}'.trim();
         }
       }
@@ -717,13 +714,10 @@ Future<({String url, String name})?> _showEditSourceDialog(
 
 Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
-  await KotvLocalPrefs.loadFromDisk();
-  var initial = KotvLocalPrefs.get('live');
+  var initial = KotvSettingsCache.get('live');
   if (initial.isEmpty) {
     try {
-      final st = await api.getSettings();
-      final map = Map<String, dynamic>.from((st['settings'] as Map?) ?? {});
-      await KotvLocalPrefs.hydrate(map);
+      final map = await KotvSettingsCache.fetch(api);
       initial = '${map['live'] ?? ''}';
     } catch (_) {}
   }
@@ -794,8 +788,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
     final src = ctrl.text.trim();
     if (src.isNotEmpty) {
       await _prepareLeavePlayback();
-      await KotvLocalPrefs.put('live', src);
-      await api.setSetting('live', src);
+      await KotvSettingsCache.set(api, 'live', src);
       ref.invalidate(settingsProvider);
     }
   }
@@ -841,8 +834,7 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
     return true;
   }
   await _prepareLeavePlayback();
-  await KotvLocalPrefs.put('live', selected);
-  await api.setSetting('live', selected);
+  await KotvSettingsCache.set(api, 'live', selected);
   return true;
 }
 

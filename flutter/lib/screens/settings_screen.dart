@@ -21,7 +21,7 @@ import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
 import '../player/video_eq.dart';
 import '../providers.dart';
-import '../remote/kotv_local_prefs.dart';
+import '../api/kotv_settings_cache.dart';
 import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
@@ -91,7 +91,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       final data = await ref.read(apiProvider).getSettings();
       final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
-      await KotvLocalPrefs.hydrate(map);
+      KotvSettingsCache.absorb(map);
       _s = {for (final e in map.entries) e.key: '${e.value ?? ''}'};
       final rt = Map<String, dynamic>.from((data['runtime'] as Map?) ?? {});
       _runtime = {for (final e in rt.entries) e.key: '${e.value ?? ''}'};
@@ -126,10 +126,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _set(String key, String value, {String? msg}) async {
     try {
-      await KotvLocalPrefs.put(key, value);
       final data = await ref.read(apiProvider).setSetting(key, value);
       final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
-      if (map.isNotEmpty) await KotvLocalPrefs.hydrate(map);
+      KotvSettingsCache.absorb(map);
+      KotvSettingsCache.absorb({key: value});
       setState(() {
         // 合并而非整表替换：避免 API 白名单漏键时把刚写入的值冲掉
         _s = {
@@ -171,10 +171,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _setMany(Map<String, String> kv, {String? msg}) async {
     try {
-      await KotvLocalPrefs.putMany(kv);
       final data = await ref.read(apiProvider).setSettings(kv);
       final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
-      if (map.isNotEmpty) await KotvLocalPrefs.hydrate(map);
+      KotvSettingsCache.absorb(map);
+      KotvSettingsCache.absorb(kv);
       setState(() {
         _s = {
           ..._s,

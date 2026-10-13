@@ -29,7 +29,7 @@ import '../player/subtitle_style_util.dart';
 import '../player/playback_failover.dart';
 import '../player/tv_remote_keys.dart';
 import '../providers.dart';
-import '../remote/kotv_local_prefs.dart';
+import '../api/kotv_settings_cache.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
@@ -680,7 +680,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final st = await settingsFut;
         if (!mounted) return;
         settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-        await KotvLocalPrefs.hydrate(settings);
+        KotvSettingsCache.absorb(settings);
         _applyLiveBootstrapSettings(settings);
       } catch (_) {}
       if (!mounted) return;
@@ -814,26 +814,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<String> _readLiveKeep() async {
-    await KotvLocalPrefs.loadFromDisk();
-    final local = KotvLocalPrefs.get('liveKeep').trim();
-    if (local.isNotEmpty) return local;
+    final cached = KotvSettingsCache.get('liveKeep').trim();
+    if (cached.isNotEmpty) return cached;
+    try {
+      final map = await KotvSettingsCache.fetch(ref.read(apiProvider));
+      final keep = '${map['liveKeep'] ?? ''}'.trim();
+      if (keep.isNotEmpty) return keep;
+    } catch (_) {}
     try {
       final prefs = await SharedPreferences.getInstance();
-      final legacy = (prefs.getString(_liveKeepPrefKey) ?? '').trim();
-      if (legacy.isNotEmpty) {
-        await KotvLocalPrefs.put('liveKeep', legacy);
-        return legacy;
-      }
-    } catch (_) {}
-    try {
-      final st = await ref.read(apiProvider).getSettings();
-      final keep = '${((st['settings'] as Map?) ?? const {})['liveKeep'] ?? ''}'.trim();
-      if (keep.isNotEmpty) {
-        await KotvLocalPrefs.put('liveKeep', keep);
-        return keep;
-      }
-    } catch (_) {}
-    return '';
+      return (prefs.getString(_liveKeepPrefKey) ?? '').trim();
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<int> _preferredSourceIndex() async {
@@ -1045,6 +1038,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final val = [srcName, groupName, chName, lineURL].join(_liveKeepSep);
     try {
       await _persistLiveSetting('liveKeep', val);
+    } catch (_) {}
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_liveKeepPrefKey, val);
     } catch (_) {}
   }
 
@@ -1336,15 +1333,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     String? format,
     Duration startAt = Duration.zero,
   }) async {
-    // 先读本机设置；仍空再拉引擎。
-    var playSettings = await KotvLocalPrefs.snapshot();
-    if (playSettings.isEmpty) {
-      try {
-        final st = await ref.read(apiProvider).getSettings();
-        playSettings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-        await KotvLocalPrefs.hydrate(playSettings);
-      } catch (_) {}
-    }
+    var playSettings = <String, dynamic>{};
+    try {
+      playSettings = await KotvSettingsCache.fetch(ref.read(apiProvider));
+    } catch (_) {}
     if (playSettings.isNotEmpty) {
       final fo = '${playSettings['playerFailover'] ?? ''}'.trim();
       if (fo.isNotEmpty) {
@@ -1622,8 +1614,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _persistLiveSetting(String key, String value) async {
-    await KotvLocalPrefs.put(key, value);
-    await ref.read(apiProvider).setSetting(key, value);
+    await KotvSettingsCache.set(ref.read(apiProvider), key, value);
   }
 
   Future<void> _cycleLiveScale() async {
