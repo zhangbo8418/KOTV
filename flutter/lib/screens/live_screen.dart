@@ -232,21 +232,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
-  /// 切台/换线：走各后端 stopForEpisodeSwitch。
-  /// 桌面 MPV 复用同一 Player（stop 后 open）；离开直播由 [_releaseAllBackends] dispose。
-  Future<void> _stopAllBackends() async {
-    await kotvStopPlayersForEpisodeSwitch([
-      _mk,
-      _fvp,
-      _exo,
-      _html,
-      _art,
-      _xg,
-      _zw,
-    ]);
-  }
-
-  /// 切 Tab / 离开直播：soft pause → release → 卸视图 → dispose（与详情 [_stopHard] 相同契约）。
+  /// 切 Tab / 离开直播：soft pause → release → 卸视图 → dispose。
   Future<void> _releaseAllBackends() async {
     // 作废进行中的起播：否则 livePlay 返回后会经 [_playback] 新建一个无人管的播放器。
     _playSerial++;
@@ -812,18 +798,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   /// 源内无「收藏」组时，按持久化频道名注入第 0 组。
+  /// 每条带上 `_srcGroup`/`_srcChannel`，开播/EPG 打引擎时用真实下标。
   void _applyFavoriteGroup() {
     _groups.removeWhere((g) => g['_kotvFav'] == true);
     final hasSourceFav = _groups.any((g) => '${g['name'] ?? ''}' == _liveFavGroupName);
     if (hasSourceFav || _favNames.isEmpty) return;
     final seen = <String>{};
     final favChs = <Map<String, dynamic>>[];
-    for (final g in _groups) {
-      final chs = ((g['channels'] as List?) ?? []).whereType<Map>();
-      for (final c in chs) {
+    for (var gi = 0; gi < _groups.length; gi++) {
+      final chs = ((_groups[gi]['channels'] as List?) ?? []).whereType<Map>().toList();
+      for (var ci = 0; ci < chs.length; ci++) {
+        final c = chs[ci];
         final name = '${c['name'] ?? ''}'.trim();
         if (name.isEmpty || !_favNames.contains(name) || !seen.add(name)) continue;
-        favChs.add(Map<String, dynamic>.from(c));
+        favChs.add({
+          ...Map<String, dynamic>.from(c),
+          '_srcGroup': gi,
+          '_srcChannel': ci,
+        });
       }
     }
     if (favChs.isEmpty) return;
@@ -832,6 +824,92 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       'channels': favChs,
       '_kotvFav': true,
     });
+  }
+
+  /// UI 分组/频道 → 引擎真实下标（收藏组映射回源内位置）。
+  ({int group, int channel})? _engineChannelRef(int uiGroup, int uiChannel) {
+    if (uiGroup < 0 || uiGroup >= _groups.length) return null;
+    final g = _groups[uiGroup];
+    final chs = ((g['channels'] as List?) ?? []).whereType<Map>().toList();
+    if (uiChannel < 0 || uiChannel >= chs.length) return null;
+    if (g['_kotvFav'] != true) {
+      return (group: uiGroup, channel: uiChannel);
+    }
+    final ch = chs[uiChannel];
+    final sg = ch['_srcGroup'];
+    final sc = ch['_srcChannel'];
+    final gi = sg is int ? sg : int.tryParse('$sg');
+    final ci = sc is int ? sc : int.tryParse('$sc');
+    if (gi != null && ci != null && gi >= 0 && ci >= 0) {
+      return (group: gi, channel: ci);
+    }
+    final name = '${ch['name'] ?? ''}'.trim();
+    if (name.isEmpty) return null;
+    for (var i = 0; i < _groups.length; i++) {
+      if (_groups[i]['_kotvFav'] == true) continue;
+      final list = ((_groups[i]['channels'] as List?) ?? []).whereType<Map>().toList();
+      for (var j = 0; j < list.length; j++) {
+        if ('${list[j]['name'] ?? ''}'.trim() == name) {
+          return (group: i, channel: j);
+        }
+      }
+    }
+    return null;
+  }
+
+  /// 直链可端内开播；parse / 专用 scheme / 需二次解析前缀走 livePlay。
+  bool _liveNeedsEnginePlay(Map ch, String url) {
+    final parseRaw = ch['parse'];
+    final parse = parseRaw is int ? parseRaw : int.tryParse('$parseRaw') ?? 0;
+    if (parse == 1) return true;
+    final raw = url.trim();
+    final lower = raw.toLowerCase();
+    if (lower.startsWith('json:') ||
+        lower.startsWith('parse:') ||
+        lower.startsWith('video:')) {
+      return true;
+    }
+    final scheme = (Uri.tryParse(raw)?.scheme ?? '').toLowerCase();
+    if (scheme == 'tvbus' ||
+        scheme == 'jianpian' ||
+        scheme == 'tvbox-xg' ||
+        scheme == 'xg' ||
+        scheme == 'xgplay' ||
+        scheme.startsWith('p2p') ||
+        scheme.startsWith('p3p') ||
+        scheme.startsWith('p4p') ||
+        scheme.startsWith('p5p') ||
+        scheme.startsWith('p6p') ||
+        scheme.startsWith('p7p') ||
+        scheme.startsWith('p8p') ||
+        scheme.startsWith('p9p') ||
+        scheme == 'mitv') {
+      return true;
+    }
+    final host = (Uri.tryParse(raw)?.host ?? '').toLowerCase();
+    return host.contains('youtube.com') || host.contains('youtu.be');
+  }
+
+  List<String> _channelPlayUrls(Map ch) {
+    final raw = ch['urls'];
+    if (raw is List) {
+      return [
+        for (final e in raw)
+          if ('$e'.trim().isNotEmpty) '$e'.trim(),
+      ];
+    }
+    return const [];
+  }
+
+  Map<String, String>? _channelHeaders(Map ch) {
+    final raw = ch['headers'];
+    if (raw is! Map) return null;
+    final out = <String, String>{
+      for (final e in raw.entries)
+        if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty)
+          '${e.key}': '${e.value}',
+    };
+    return out.isEmpty ? null : out;
   }
 
   Future<void> _toggleChannelFav(int chIdx) async {
@@ -1136,12 +1214,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _loadEpg() async {
-    final group = _groupIdx;
-    final channel = _chIdx;
-    if (channel < 0 || group < 0) return;
+    final uiGroup = _groupIdx;
+    final uiChannel = _chIdx;
+    if (uiChannel < 0 || uiGroup < 0) return;
+    final eng = _engineChannelRef(uiGroup, uiChannel);
+    if (eng == null) return;
     final serial = ++_epgSerial;
     try {
-      final data = await ref.read(apiProvider).liveEpg(group: group, channel: channel);
+      final data = await ref.read(apiProvider).liveEpg(group: eng.group, channel: eng.channel);
       final days = ((data['days'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
       var dayIdx = 0;
       final today = _localDateString();
@@ -1156,19 +1236,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           : (((days[dayIdx]['list'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList());
       final logo = '${data['logo'] ?? ''}'.trim();
       if (!mounted || serial != _epgSerial) return;
-      final stillHere = _groupIdx == group && _chIdx == channel;
-      final playingThis = _playGroupIdx == group && _playChIdx == channel;
+      final stillHere = _groupIdx == uiGroup && _chIdx == uiChannel;
+      final playingThis = _playGroupIdx == uiGroup && _playChIdx == uiChannel;
       if (!stillHere && !playingThis) return;
       setState(() {
         _epgDays = days;
         _dayIdx = dayIdx;
         _programs = progs;
-        _fillChannelLogo(group, channel, logo);
+        _fillChannelLogo(uiGroup, uiChannel, logo);
       });
       _scheduleScrollEpgToHighlight();
     } catch (_) {
       if (!mounted || serial != _epgSerial) return;
-      if (_groupIdx == group && _chIdx == channel) {
+      if (_groupIdx == uiGroup && _chIdx == uiChannel) {
         setState(() {
           _epgDays = [];
           _programs = [];
@@ -1300,7 +1380,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _fvp?.applyPlayerOptions(playSettings);
     }
     final renderMode = kotvNormalizePlayerRender(_renderMode);
-    _renderMode = renderMode;
     final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
     final startPlayer = (hasDrm && kotvIsAndroid()) ? 'innie#exo' : _prefPlayerVal;
     final failover = KotvPlaybackFailover(
@@ -1317,13 +1396,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       // 先停闲置后端（含旧 FVP），再改 _playerVal / 挂画面。
       final nextVal = failover.playerVal;
       final nextDecode = failover.decodeMode;
+      final prevPlayer = _playerVal;
+      final prevDecode = _decodeMode;
+      final prevRender = _renderMode;
+      final sameBackend = nextVal == prevPlayer && _playUrl.isNotEmpty;
       await _stopInactiveBackends(kotvEmbedBackend(nextVal));
       if (stale()) return;
+      final decodeChanged = nextDecode != prevDecode;
+      final renderChanged = renderMode != prevRender;
       _playerVal = nextVal;
       _decodeMode = nextDecode;
+      _renderMode = renderMode;
       final openUrl = url;
       final openHeaders = headers;
       _releasedHard = false;
+      final needRemount = !sameBackend || _playUrl != openUrl;
       setState(() {
         _playUrl = openUrl;
         _playHeaders = openHeaders;
@@ -1331,8 +1418,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _playerVal = nextVal;
         _decodeMode = nextDecode;
       });
-      await WidgetsBinding.instance.endOfFrame;
-      if (stale()) return;
+      // 同后端换台已有宿主时不必再等一帧。
+      if (needRemount) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (stale()) return;
+      }
       _syncAndroidAutoPip();
       final pb = _playback;
       if (pb is ExoPlayback) {
@@ -1342,8 +1432,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           pb.applyPlayerOptions({'playerRender': renderMode});
         }
       }
-      await pb.setDecodeMode(failover.decodeMode);
-      await pb.setRenderMode(renderMode);
+      if (decodeChanged || !sameBackend) {
+        await pb.setDecodeMode(failover.decodeMode);
+      }
+      if (renderChanged || !sameBackend) {
+        await pb.setRenderMode(renderMode);
+      }
       if (stale()) return;
       try {
         // 直播页 live=true：直链立刻 play（含 EPG 回看时移流）。
@@ -1666,10 +1760,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (chIdx < 0 || chIdx >= chs.length) return;
     final serial = ++_playSerial;
     final ch = chs[chIdx];
-    final useLine = line ?? (ch['line'] as int? ?? 0);
+    final playUrls = _channelPlayUrls(ch);
+    final useLine = (line ?? (ch['line'] as int? ?? 0)).clamp(0, playUrls.isEmpty ? 0 : playUrls.length - 1);
     final playGroup = _groupIdx;
     final playGroupName = playGroup >= 0 && playGroup < _groups.length ? '${_groups[playGroup]['name'] ?? ''}' : '';
     final playChName = '${ch['name'] ?? ''}';
+    final eng = _engineChannelRef(playGroup, chIdx);
     _rememberGroupChannel(playGroup, chIdx);
     setState(() {
       _chIdx = chIdx;
@@ -1688,24 +1784,71 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _scheduleScrollToCurrent(epg: false);
     // EPG 与开播解耦：勿等 open 成功（FVP/MPV 卡住时节目单也出不来）。
     unawaited(_loadEpg());
-    await _stopAllBackends();
-    if (!mounted || serial != _playSerial) return;
+
+    // 只停当前后端；与取地址并行。
+    final stopFut = () async {
+      try {
+        await _playback.stopForEpisodeSwitch();
+      } catch (_) {}
+    }();
+
     try {
-      final data = await ref.read(apiProvider).livePlay(group: playGroup, channel: chIdx, line: useLine);
-      if (!mounted || serial != _playSerial) return;
-      final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
+      late final String url;
+      late final Map<String, String>? headers;
+      late final Map<String, dynamic>? drm;
+      late final String format;
+      late final int lines;
+      late final int lineIdx;
+      late final String lineName;
+
+      final memUrl = playUrls.isEmpty ? '' : playUrls[useLine.clamp(0, playUrls.length - 1)];
+      final canDirect = memUrl.isNotEmpty && !_liveNeedsEnginePlay(ch, memUrl);
+      if (canDirect) {
+        url = kotvRewriteEngineLocalUrl(memUrl, ref.read(apiProvider).baseUrl);
+        headers = _channelHeaders(ch);
+        final drmRaw = ch['drm'];
+        drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
+        format = '${ch['format'] ?? ''}'.trim();
+        lines = playUrls.length;
+        lineIdx = useLine;
+        lineName = '';
+        await stopFut;
+      } else {
+        if (eng == null) throw Exception('频道无效');
+        final playFut = ref.read(apiProvider).livePlay(
+              group: eng.group,
+              channel: eng.channel,
+              line: useLine,
+            );
+        await stopFut;
+        if (!mounted || serial != _playSerial) return;
+        final data = await playFut;
+        if (!mounted || serial != _playSerial) return;
+        url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
+        headers = <String, String>{
+          for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
+            if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
+        };
+        if (headers.isEmpty) headers = null;
+        final drmRaw = data['drm'];
+        drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
+        format = '${data['format'] ?? ''}'.trim();
+        lines = (data['lines'] as int?) ?? (playUrls.isEmpty ? 1 : playUrls.length);
+        lineIdx = (data['line'] as int?) ?? useLine;
+        lineName = '${data['lineName'] ?? ''}'.trim();
+      }
       if (url.isEmpty) throw Exception('空播放地址');
-      final headers = <String, String>{
-        for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
-          if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
-      };
-      final drmRaw = data['drm'];
-      final drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
-      _lines = (data['lines'] as int?) ?? 1;
-      _line = (data['line'] as int?) ?? useLine;
-      _lineName = '${data['lineName'] ?? ''}'.trim();
-      final format = '${data['format'] ?? ''}'.trim();
-      await _openLiveUrl(url, serial: serial, headers: headers.isEmpty ? null : headers, drm: drm, format: format.isEmpty ? null : format);
+      if (!mounted || serial != _playSerial) return;
+      _lines = lines < 1 ? 1 : lines;
+      _line = lineIdx;
+      _lineName = lineName;
+      await _openLiveUrl(
+        url,
+        serial: serial,
+        headers: headers,
+        drm: drm,
+        format: format.isEmpty ? null : format,
+      );
       if (!mounted || serial != _playSerial) return;
       setState(() {
         _status = '播放中 · $_title';
@@ -1717,7 +1860,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (KotvLayout.useBottomNav(context) || KotvLayout.isCompact(context)) {
         _pulsePortraitChrome();
       }
-      await _saveLiveKeep();
+      unawaited(_saveLiveKeep());
       ref.read(remoteBridgeProvider)?.reportMedia(state: 'playing', title: _title, url: url);
     } catch (e) {
       if (!mounted || serial != _playSerial) return;
@@ -1751,14 +1894,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _epgOpen = false;
     });
     try {
-      await _stopAllBackends();
-      if (!mounted || serial != _playSerial) return;
-      final data = await ref.read(apiProvider).liveCatchup(
-            group: _groupIdx,
-            channel: _chIdx,
+      final eng = _engineChannelRef(_groupIdx, _chIdx);
+      if (eng == null) throw Exception('频道无效');
+      final stopFut = () async {
+        try {
+          await _playback.stopForEpisodeSwitch();
+        } catch (_) {}
+      }();
+      final catchFut = ref.read(apiProvider).liveCatchup(
+            group: eng.group,
+            channel: eng.channel,
             day: _dayIdx,
             prog: progIdx,
           );
+      await stopFut;
+      if (!mounted || serial != _playSerial) return;
+      final data = await catchFut;
       if (!mounted || serial != _playSerial) return;
       final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
       if (url.isEmpty) throw Exception('空回看地址');

@@ -1622,14 +1622,36 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 		for ci := range g.Channels {
 			ch := &loaded.Groups[gi].Channels[ci]
 			ch.ApplyLive(loaded)
+			origLine := ch.URLIndex
+			playURLs := make([]string, 0, len(ch.URLs))
+			var headers map[string]string
+			for i := range ch.URLs {
+				ch.URLIndex = i
+				u, h := live.ResolvePlayURL(ch)
+				if headers == nil {
+					headers = h
+				}
+				playURLs = append(playURLs, playproxy.PublicizeURL(u, h))
+			}
+			ch.URLIndex = origLine
+			drm := ch.Drm
+			if runtime.GOOS != "android" && drm != nil {
+				if prepared, derr := model.PrepareForDesktop(drm); derr == nil {
+					drm = prepared
+				}
+			}
 			chs = append(chs, map[string]any{
-				"index":  ci,
-				"name":   ch.Name,
-				"number": ch.Number,
-				"logo":   exposeResourceURL(ch.ResolvedLogo()),
-				"tvgId":  ch.TvgID,
-				"urls":   len(ch.URLs),
-				"line":   ch.URLIndex,
+				"index":   ci,
+				"name":    ch.Name,
+				"number":  ch.Number,
+				"logo":    exposeResourceURL(ch.ResolvedLogo()),
+				"tvgId":   ch.TvgID,
+				"urls":    playURLs,
+				"line":    ch.URLIndex,
+				"headers": headers,
+				"format":  ch.Format,
+				"parse":   ch.Parse,
+				"drm":     drm,
 			})
 		}
 		groups = append(groups, map[string]any{
