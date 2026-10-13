@@ -485,6 +485,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 切到其它内置后端时停掉闲置引擎。
+  /// 调用方须在改 [_playerVal] **之前**调用，以便旧 FVP/Surface 仍在树上时完成 release。
   /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
   Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
     if (keep != KotvEmbedBackend.mpv) {
@@ -507,59 +508,46 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       await kotvDisposeMpvPlayer(mkPlayer);
     }
     if (keep != KotvEmbedBackend.fvp) {
-      // 与 Exo 一样拆掉实例：仅 stop 时 mdk 包缓存/纹理可能残留（ADB: ReleaseRT 后 PSS/Graphics 仍涨）。
+      // 须拆掉实例：仅 stop 时 mdk 包缓存/纹理可能残留（ADB: ReleaseRT 后 PSS/Graphics 仍涨）。
+      // 先 stop/dispose 再置空，避免 [_playback] 在中途 new 出第二个 FVP。
+      final fvp = _fvp;
+      await kotvSoftPausePlayers([fvp]);
       try {
-        await _fvp?.pause();
+        await fvp?.stop();
       } catch (_) {}
-      try {
-        await _fvp?.stop();
-      } catch (_) {}
-      try {
-        _fvp?.dispose();
-      } catch (_) {}
-      _fvp = null;
+      kotvDisposePlaybackWrappers([fvp]);
+      if (identical(_fvp, fvp)) _fvp = null;
     }
     if (keep != KotvEmbedBackend.exo) {
-      // stop 已拆掉播放器并放开解码缓冲。这里再 release，以 dispose 通道和 Texture。
+      // stop 已拆播放器；再 release 以 dispose 通道和 Texture。
+      final exo = _exo;
+      await kotvSoftPausePlayers([exo]);
       try {
-        await _exo?.pause();
+        await exo?.release();
       } catch (_) {}
-      try {
-        await _exo?.release();
-      } catch (_) {}
-      try {
-        _exo?.dispose();
-      } catch (_) {}
-      _exo = null;
+      kotvDisposePlaybackWrappers([exo]);
+      if (identical(_exo, exo)) _exo = null;
     }
     if (keep != KotvEmbedBackend.html) {
-      try {
-        await _html?.pause();
-      } catch (_) {}
+      await kotvSoftPausePlayers([_html]);
       try {
         await _html?.stop();
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.art) {
-      try {
-        await _art?.pause();
-      } catch (_) {}
+      await kotvSoftPausePlayers([_art]);
       try {
         await _art?.stop();
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.xg) {
-      try {
-        await _xg?.pause();
-      } catch (_) {}
+      await kotvSoftPausePlayers([_xg]);
       try {
         await _xg?.stop();
       } catch (_) {}
     }
     if (keep != KotvEmbedBackend.zw) {
-      try {
-        await _zw?.pause();
-      } catch (_) {}
+      await kotvSoftPausePlayers([_zw]);
       try {
         await _zw?.stop();
       } catch (_) {}
@@ -569,21 +557,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 换集/换源：先停声。桌面 MPV 复用同一 Player（stop 后 open），Stable 宿主不拆；
   /// 离开页由 [_stopHard] dispose。安卓原生 MPV stop 已拆 libmpv；FVP/Exo 换集硬拆再建。
   Future<void> _stopAllBackends() async {
-    Future<void> stopOne(KotvPlayback? p) async {
-      if (p == null) return;
-      try {
-        await p.stopForEpisodeSwitch();
-      } catch (_) {}
-    }
-
-    await Future.wait<void>([
-      stopOne(_mk),
-      stopOne(_fvp),
-      stopOne(_exo),
-      stopOne(_html),
-      stopOne(_art),
-      stopOne(_xg),
-      stopOne(_zw),
+    await kotvStopPlayersForEpisodeSwitch([
+      _mk,
+      _fvp,
+      _exo,
+      _html,
+      _art,
+      _xg,
+      _zw,
     ]);
   }
 
@@ -806,24 +787,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(api.cancelPending(hard: false, thunder: false));
     }
 
-    // 硬拆前先软停全部后端：pause 即停声，勿 setVolume(0)（会脏包装类音量）。
-    Future<void> softPause(KotvPlayback? p) async {
-      if (p == null) return;
-      try {
-        await p.pause();
-      } catch (_) {}
-    }
-
-    await Future.wait<void>([
-      softPause(_mk),
-      softPause(_fvp),
-      softPause(_exo),
-      softPause(_html),
-      softPause(_art),
-      softPause(_xg),
-      softPause(_zw),
-    ]);
-
+    // 全后端统一：soft pause → release → 清 _playUrl 卸视图 → dispose 包装类。
+    // 见 [KotvPlayback.release] 契约；勿先卸 PlatformView（FVP/mdk Redmi 崩）。
     final fvp = _fvp;
     final mk = _mk;
     final exo = _exo;
@@ -832,32 +797,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final xg = _xg;
     final zw = _zw;
     final mkPlayer = _mkPlayer;
+    final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
 
-    Future<void> hardRelease(KotvPlayback? p) async {
-      if (p == null) return;
-      try {
-        await p.release();
-      } catch (_) {
-        try {
-          await p.stop();
-        } catch (_) {}
-      }
-    }
-
-    // 必须先 release（清 mdk players map），再清 _playUrl 卸 Hybrid Surface。
-    // 若先卸：PlatformViews.dispose → surfaceDestroyed → nativeSetSurface 时 mdk 仍在 → Redmi 崩。
-    // FVP 单独等完，勿与其它后端共用 timeout 半路放弃（否则仍会带活 mdk 卸 Surface）。
-    try {
-      await hardRelease(fvp).timeout(const Duration(seconds: 3));
-    } catch (_) {}
-    await Future.wait<void>([
-      hardRelease(mk),
-      hardRelease(exo),
-      hardRelease(html),
-      hardRelease(art),
-      hardRelease(xg),
-      hardRelease(zw),
-    ]).timeout(const Duration(seconds: 2), onTimeout: () => <void>[]);
+    await kotvSoftPausePlayers(backends);
+    await kotvHardReleasePlayers(backends, waitFirst: fvp);
 
     _fvp = null;
     _mk = null;
@@ -877,28 +820,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
     // media_kit Player 由页面持有：走 engine.release()。
     await kotvDisposeMpvPlayer(mkPlayer);
-
-    try {
-      fvp?.dispose();
-    } catch (_) {}
-    try {
-      mk?.dispose();
-    } catch (_) {}
-    try {
-      exo?.dispose();
-    } catch (_) {}
-    try {
-      html?.dispose();
-    } catch (_) {}
-    try {
-      art?.dispose();
-    } catch (_) {}
-    try {
-      xg?.dispose();
-    } catch (_) {}
-    try {
-      zw?.dispose();
-    } catch (_) {}
+    kotvDisposePlaybackWrappers(backends);
 
     if (stopSerial == _playAtSerial) _stoppedHard = true;
   }
@@ -1221,7 +1143,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _danmakuItems.dispose();
     _fsSwipeDy.dispose();
     // 正常路径已在 [_stopHard] 里 await release+dispose，引擎引用已清空。
-    // 异常路径（未走 _leavePage）只走异步 release→dispose，避免与同步 dispose 竞态。
+    // 异常路径（未走 _leavePage）：树已在卸，仍尽量先 release 再 dispose 包装类。
     if (!_stoppedHard) {
       final fvp = _fvp;
       final mk = _mk;
@@ -1231,6 +1153,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final xg = _xg;
       final zw = _zw;
       final mkPlayer = _mkPlayer;
+      final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
       _fvp = null;
       _mk = null;
       _exo = null;
@@ -1239,27 +1162,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _xg = null;
       _zw = null;
       _mkPlayer = null;
+      _playUrl = '';
+      _lastVideoPaintRect = null;
+      _videoLayerRect = null;
       unawaited(() async {
-        Future<void> hardRelease(KotvPlayback? p) async {
-          if (p == null) return;
-          try {
-            await p.release();
-          } catch (_) {}
-          try {
-            p.dispose();
-          } catch (_) {}
-        }
-
-        await Future.wait<void>([
-          hardRelease(fvp),
-          hardRelease(mk),
-          hardRelease(exo),
-          hardRelease(html),
-          hardRelease(art),
-          hardRelease(xg),
-          hardRelease(zw),
-        ]);
+        await kotvHardReleasePlayers(backends, waitFirst: fvp);
         await kotvDisposeMpvPlayer(mkPlayer);
+        kotvDisposePlaybackWrappers(backends);
       }());
     }
     super.dispose();
@@ -2143,10 +2052,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       for (var attempt = 0; attempt < 8; attempt++) {
         if (serial != _playAtSerial || !mounted) return;
         failover.markAttempt();
-        _playerVal = failover.playerVal;
-        _decodeMode = failover.decodeMode;
-        await _stopInactiveBackends(_backend);
+        // 先停闲置后端（含旧 FVP），再改 _playerVal，避免先卸 Surface 再 release。
+        final nextVal = failover.playerVal;
+        final nextDecode = failover.decodeMode;
+        await _stopInactiveBackends(kotvEmbedBackend(nextVal));
         if (serial != _playAtSerial || !mounted) return;
+        _playerVal = nextVal;
+        _decodeMode = nextDecode;
         final pb = _playback;
         // failover 新建的 Exo 默认 surface；先写入设置里的 playerRender 再 setRenderMode/create。
         if (pb is ExoPlayback) {
@@ -2271,15 +2183,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         final step = failover.nextStep();
         if (step == null) break;
         if (!mounted || serial != _playAtSerial) return;
+        try {
+          await pb.release();
+        } catch (_) {
+          try {
+            await pb.stop();
+          } catch (_) {}
+        }
+        await _stopInactiveBackends(kotvEmbedBackend(step.playerVal));
+        if (!mounted || serial != _playAtSerial) return;
         setState(() {
           _playerVal = step.playerVal;
           _decodeMode = step.decodeMode;
           _status = step.status;
         });
         _syncFullscreen();
-        try {
-          await pb.stop();
-        } catch (_) {}
       }
       if (!opened) {
         throw lastOpenError ?? const KotvSilentVideoException();
@@ -3027,12 +2945,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'player') {
             final prev = _playerVal;
             final next = kotvClampPlayerVal(v, live: false);
-            setState(() {
-              _playerVal = next;
-              _prefPlayerVal = next;
-            });
-            if (next != prev && _epIdx >= 0) {
-              unawaited(_playAt(_epIdx));
+            if (next != prev) {
+              unawaited(() async {
+                // 先停旧后端画面，再切 _playerVal / 重播。
+                await _stopInactiveBackends(kotvEmbedBackend(next));
+                if (!mounted) return;
+                setState(() {
+                  _playerVal = next;
+                  _prefPlayerVal = next;
+                });
+                if (_epIdx >= 0) await _playAt(_epIdx);
+              }());
             }
           }
           // 画面/音频/字幕热更新

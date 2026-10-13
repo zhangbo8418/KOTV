@@ -149,7 +149,13 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 查询设备 Equalizer 中心频率（Hz）；失败返回空。
   Future<List<int>> queryAudioEqCenters() async => const [];
 
-  /// 离开详情/切 Tab：stop + release，拆掉原生 AO，避免后台漏音。
+  /// 离开详情/直播/切 Tab：拆掉原生播放器与 AO，避免后台漏音。
+  ///
+  /// **页面契约（全后端统一）**：`await release()` 完成前，禁止清掉画面宿主
+  ///（如 `_playUrl=''` + setState 卸 PlatformView/Texture）。
+  /// 若先卸视图：Android Hybrid 可能在 `surfaceDestroyed` 时仍回调原生
+  ///（FVP/mdk 会崩；Exo/MPV 亦可能定格或抛 Surface 已释放）。
+  /// 正确顺序：soft pause → `await release()` → 再卸视图 → `dispose()` 包装类。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
   Future<void> release() => stop();
 
@@ -210,6 +216,74 @@ Future<void> kotvTeardownPlayback({
     // dispose 仍在跑；挂上 catch，避免未处理异步错误。
     unawaited(fut.catchError((_) {}));
   } catch (_) {}
+}
+
+/// 页面硬停前：对各后端 soft pause（停声，不改包装类音量）。
+Future<void> kotvSoftPausePlayers(Iterable<KotvPlayback?> players) async {
+  Future<void> one(KotvPlayback? p) async {
+    if (p == null) return;
+    try {
+      await p.pause();
+    } catch (_) {}
+  }
+
+  await Future.wait<void>(players.map(one));
+}
+
+/// 换集/切台：对各后端 [KotvPlayback.stopForEpisodeSwitch]（保留画面宿主）。
+Future<void> kotvStopPlayersForEpisodeSwitch(Iterable<KotvPlayback?> players) async {
+  Future<void> one(KotvPlayback? p) async {
+    if (p == null) return;
+    try {
+      await p.stopForEpisodeSwitch();
+    } catch (_) {}
+  }
+
+  await Future.wait<void>(players.map(one));
+}
+
+/// 页面硬停：先 [KotvPlayback.release] 清原生，**调用方再卸画面宿主**。
+///
+/// [waitFirst]（通常为 FVP）单独等完，勿与其它后端共用 timeout 半路放弃。
+Future<void> kotvHardReleasePlayers(
+  Iterable<KotvPlayback?> players, {
+  KotvPlayback? waitFirst,
+  Duration waitFirstTimeout = const Duration(seconds: 3),
+  Duration othersTimeout = const Duration(seconds: 2),
+}) async {
+  Future<void> one(KotvPlayback? p) async {
+    if (p == null) return;
+    try {
+      await p.release();
+    } catch (_) {
+      try {
+        await p.stop();
+      } catch (_) {}
+    }
+  }
+
+  if (waitFirst != null) {
+    try {
+      await one(waitFirst).timeout(waitFirstTimeout);
+    } catch (_) {}
+  }
+  final rest = <Future<void>>[];
+  for (final p in players) {
+    if (p == null || identical(p, waitFirst)) continue;
+    rest.add(one(p));
+  }
+  if (rest.isEmpty) return;
+  await Future.wait<void>(rest).timeout(othersTimeout, onTimeout: () => <void>[]);
+}
+
+/// [KotvPlayback.release] 之后销毁 Dart 包装类（勿在 release 前调用）。
+void kotvDisposePlaybackWrappers(Iterable<KotvPlayback?> players) {
+  for (final p in players) {
+    if (p == null) continue;
+    try {
+      p.dispose();
+    } catch (_) {}
+  }
 }
 
 /// 网速文案：统一两位小数，如 `0.00 KB/s` / `12.34 KB/s` / `100.00 MB/s`。
