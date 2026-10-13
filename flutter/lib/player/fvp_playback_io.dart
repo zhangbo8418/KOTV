@@ -196,49 +196,57 @@ class FvpPlayback extends KotvPlayback {
         ),
       );
     }
-    // VideoPlayer 须固定在同一子树位置——
-    // Texture：若 size 0↔正 时整段换父级，ImageReader 会 1x1↔实尺寸反复 disconnect。
-    // Surface/platformView：吃不到 FittedBox 变换，须按视频比例给真实布局尺寸。
+    // VideoPlayer 须固定在同一子树位置（ColoredBox→LayoutBuilder→Center→SizedBox→…）。
+    // Texture：size 0↔正 时勿换父级，否则 ImageReader 反复 disconnect。
+    // Surface/platformView：吃不到 FittedBox，按视频比例给真实布局尺寸；勿因约束抖动改祖先链。
     final scale = _videoScale.trim().isEmpty ? 'default' : _videoScale.trim();
     final surfaceLayout = _androidSurface;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final max = constraints.biggest;
-        if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
-          return ColoredBox(color: Colors.black, child: VideoPlayer(c));
-        }
-        final sz = c.value.size;
-        final hasSize = c.value.isInitialized && sz.width > 0 && sz.height > 0;
-        final videoSize = hasSize ? sz : const Size(16, 9);
-        final box = hasSize ? kotvBoxForVideoScale(max, videoSize, scale) : max;
-        final effective = kotvFitFromVideoScale(scale, fit);
-        final w = box.width.isFinite && box.width > 0 ? box.width : max.width;
-        final h = box.height.isFinite && box.height > 0 ? box.height : max.height;
-        final Widget child;
-        if (surfaceLayout) {
-          if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
-            return SizedBox(width: max.width, height: max.height, child: VideoPlayer(c));
+    return ColoredBox(
+      color: Colors.black,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          var max = constraints.biggest;
+          if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
+            max = const Size(16, 9);
           }
-          child = SizedBox(width: w, height: h, child: VideoPlayer(c));
-        } else {
-          child = SizedBox(
-            width: w,
-            height: h,
-            child: FittedBox(
-              fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
-              child: SizedBox(
-                width: videoSize.width,
-                height: videoSize.height,
-                child: VideoPlayer(c),
+          final sz = c.value.size;
+          final hasSize = c.value.isInitialized && sz.width > 0 && sz.height > 0;
+          final videoSize = hasSize ? sz : const Size(16, 9);
+          final effective = kotvFitFromVideoScale(scale, fit);
+          final Size box;
+          if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
+            box = max;
+          } else if (hasSize) {
+            box = kotvBoxForVideoScale(max, videoSize, scale);
+          } else {
+            box = max;
+          }
+          final w = box.width.isFinite && box.width > 0 ? box.width : max.width;
+          final h = box.height.isFinite && box.height > 0 ? box.height : max.height;
+          final Widget painted;
+          if (surfaceLayout) {
+            painted = SizedBox(width: w, height: h, child: VideoPlayer(c));
+          } else {
+            painted = SizedBox(
+              width: w,
+              height: h,
+              child: FittedBox(
+                fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
+                child: SizedBox(
+                  width: videoSize.width,
+                  height: videoSize.height,
+                  child: VideoPlayer(c),
+                ),
               ),
-            ),
-          );
-        }
-        if (effective == BoxFit.cover) {
-          return ClipRect(child: Center(child: child));
-        }
-        return ColoredBox(color: Colors.black, child: Center(child: child));
-      },
+            );
+          }
+          final centered = Center(child: painted);
+          if (effective == BoxFit.cover) {
+            return ClipRect(child: centered);
+          }
+          return centered;
+        },
+      ),
     );
   }
 

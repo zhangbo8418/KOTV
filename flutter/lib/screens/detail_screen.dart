@@ -289,17 +289,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   DateTime? _immersiveBackUntil;
   KotvDesktopFullscreenKind _desktopFs = KotvDesktopFullscreenKind.window;
   final GlobalKey _videoHostKey = GlobalKey(debugLabel: 'kotv_detail_video');
-  /// 画面层的位置由 [CompositedTransformFollower] 在合成期直接跟随黑槽
-  /// （[CompositedTransformTarget]），滚动 / 窗口缩放 / 顶栏高度变化都不会错位；
-  /// [_videoLayerRect] 只提供尺寸（非全屏）或整屏矩形（全屏）。
-  /// 画面叠在 Scaffold 之上，必须裁到 [_bodyClipRect]（顶栏下 Expanded），
-  /// 否则下滑会盖住顶栏。
-  final LayerLink _videoLink = LayerLink();
+  /// 稳定视频层在详情 Stack 内的矩形（含位置）。全屏进出只改几何，
+  /// 勿在 Follower / 直挂 Positioned 间切换子树（Android Hybrid Surface 卸挂会定住）。
   final GlobalKey _videoSlotKey = GlobalKey(debugLabel: 'kotv_detail_video_slot');
   final GlobalKey _detailStackKey = GlobalKey(debugLabel: 'kotv_detail_stack');
   final GlobalKey _bodyClipKey = GlobalKey(debugLabel: 'kotv_detail_body_clip');
   Rect? _videoLayerRect;
-  Rect? _bodyClipRect;
   bool _videoSlotSyncScheduled = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
@@ -2454,75 +2449,58 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _syncVideoSlotRect();
     });
   }
-  /// 非全屏：黑槽尺寸（LayerLink 管位置）+ 内容区裁剪矩形（防盖顶栏）。
+  /// 非全屏：把黑槽在详情 Stack 内的位置/尺寸写入 [_videoLayerRect]。
   void _syncVideoSlotRect() {
     if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
     final slotBox = _videoSlotKey.currentContext?.findRenderObject() as RenderBox?;
-    final bodyBox = _bodyClipKey.currentContext?.findRenderObject() as RenderBox?;
     final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
-
-    Size? nextSlot;
-    if (slotBox != null && slotBox.hasSize && slotBox.attached) {
-      final s = slotBox.size;
-      if (s.width >= 1 && s.height >= 1) nextSlot = s;
+    if (slotBox == null ||
+        stackBox == null ||
+        !slotBox.hasSize ||
+        !stackBox.hasSize ||
+        !slotBox.attached ||
+        !stackBox.attached) {
+      return;
     }
-
-    Rect? nextClip;
-    if (bodyBox != null &&
-        stackBox != null &&
-        bodyBox.hasSize &&
-        stackBox.hasSize &&
-        bodyBox.attached &&
-        stackBox.attached) {
-      try {
-        final o = bodyBox.localToGlobal(Offset.zero, ancestor: stackBox);
-        final r = o & bodyBox.size;
-        if (r.width >= 1 && r.height >= 1) nextClip = r;
-      } catch (_) {}
+    Rect? next;
+    try {
+      final o = slotBox.localToGlobal(Offset.zero, ancestor: stackBox);
+      final r = o & slotBox.size;
+      if (r.width >= 1 && r.height >= 1) next = r;
+    } catch (_) {
+      return;
     }
-
-    final prevSlot = _videoLayerRect;
-    final prevClip = _bodyClipRect;
-    final slotSame = nextSlot == null ||
-        (prevSlot != null &&
-            (prevSlot.width - nextSlot.width).abs() < 0.5 &&
-            (prevSlot.height - nextSlot.height).abs() < 0.5);
-    final clipSame = nextClip == null ||
-        (prevClip != null &&
-            (prevClip.left - nextClip.left).abs() < 0.5 &&
-            (prevClip.top - nextClip.top).abs() < 0.5 &&
-            (prevClip.width - nextClip.width).abs() < 0.5 &&
-            (prevClip.height - nextClip.height).abs() < 0.5);
-    if (slotSame && clipSame) return;
-    setState(() {
-      if (nextSlot != null) _videoLayerRect = Offset.zero & nextSlot;
-      if (nextClip != null) _bodyClipRect = nextClip;
-    });
+    if (next == null) return;
+    final prev = _videoLayerRect;
+    if (prev != null &&
+        (prev.left - next.left).abs() < 0.5 &&
+        (prev.top - next.top).abs() < 0.5 &&
+        (prev.width - next.width).abs() < 0.5 &&
+        (prev.height - next.height).abs() < 0.5) {
+      return;
+    }
+    setState(() => _videoLayerRect = next);
   }
 
-  /// 黑槽占位：[CompositedTransformTarget] 供画面层跟随；LayoutBuilder 捕获
-  /// 不经 rebuild 的布局变化（窗口缩放、顶栏高度变化）刷新尺寸。
+  /// 黑槽占位；LayoutBuilder 捕获不经 rebuild 的布局变化以刷新 [_videoLayerRect]。
   Widget _buildVideoSlot() {
-    return CompositedTransformTarget(
-      link: _videoLink,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final size = constraints.biggest;
-          final prev = _videoLayerRect;
-          if (!_immersiveFullscreen &&
-              size.width >= 1 &&
-              size.height >= 1 &&
-              (prev == null ||
-                  _bodyClipRect == null ||
-                  (prev.width - size.width).abs() >= 0.5 ||
-                  (prev.height - size.height).abs() >= 0.5)) {
-            _scheduleSyncVideoSlot();
-          }
-          return ColoredBox(key: _videoSlotKey, color: Colors.black);
-        },
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        final prev = _videoLayerRect;
+        if (!_immersiveFullscreen &&
+            size.width >= 1 &&
+            size.height >= 1 &&
+            (prev == null ||
+                (prev.width - size.width).abs() >= 0.5 ||
+                (prev.height - size.height).abs() >= 0.5)) {
+          _scheduleSyncVideoSlot();
+        }
+        return ColoredBox(key: _videoSlotKey, color: Colors.black);
+      },
     );
   }
+
   /// [stackSize]：详情 Stack 实测约束。沉浸全屏勿用 MediaQuery 整窗尺寸——
   /// 若底栏/SafeArea 仍占位，整窗高会比可见区大，contain 居中会明显偏下。
   Rect _stableVideoRect(BuildContext context, {Size? stackSize}) {
@@ -2539,47 +2517,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     return _videoLayerRect ?? Rect.zero;
   }
+
   Widget _buildStableVideoLayer(BuildContext context, {Size? stackSize}) {
     final rect = _stableVideoRect(context, stackSize: stackSize);
-    if (rect.width < 1 || rect.height < 1) return const SizedBox.shrink();
+    // 尚无黑槽几何时保留上一帧矩形，避免卸掉 Hybrid Surface。
+    final paint = (rect.width >= 1 && rect.height >= 1)
+        ? rect
+        : (_videoLayerRect != null &&
+                _videoLayerRect!.width >= 1 &&
+                _videoLayerRect!.height >= 1
+            ? _videoLayerRect!
+            : null);
+    if (paint == null) return const SizedBox.shrink();
     return ValueListenableBuilder<double>(
       valueListenable: _fsSwipeDy,
       builder: (context, swipeDy, child) {
-        if (_immersiveFullscreen) {
-          return Positioned(
-            left: rect.left,
-            top: rect.top + swipeDy,
-            width: rect.width,
-            height: rect.height,
-            child: child!,
-          );
-        }
-        // 非全屏：Follower 跟黑槽；外层裁到 Expanded（顶栏下），下滑不会盖住顶栏。
-        final clip = _bodyClipRect;
-        if (clip == null || clip.width < 1 || clip.height < 1) {
-          return const SizedBox.shrink();
-        }
+        final dy = _immersiveFullscreen ? swipeDy : 0.0;
         return Positioned(
-          left: clip.left,
-          top: clip.top,
-          width: clip.width,
-          height: clip.height,
-          child: ClipRect(
-            child: Stack(
-              clipBehavior: Clip.hardEdge,
-              children: [
-                CompositedTransformFollower(
-                  link: _videoLink,
-                  showWhenUnlinked: false,
-                  child: SizedBox(
-                    width: rect.width,
-                    height: rect.height,
-                    child: ClipRect(child: child),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          left: paint.left,
+          top: paint.top + dy,
+          width: paint.width,
+          height: paint.height,
+          child: child!,
         );
       },
       child: GestureDetector(
@@ -3157,7 +3116,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       } catch (_) {}
     }
     if (!mounted) return;
-    // 方向稳定后再量槽。尺寸一直留着，PlatformView 不卸树。
+    // 方向稳定后再量槽；稳定层只改 Positioned 几何，不卸 PlatformView。
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || _immersiveFullscreen) return;
     _syncVideoSlotRect();
