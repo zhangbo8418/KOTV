@@ -19,7 +19,7 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// PushAgentKey SiteApi.PUSH：无站点配置时的推送入口。
+// PushAgentKey 无站点配置时的推送入口 key。
 const PushAgentKey = "push_agent"
 
 // PushAgentPic 推送详情占位图（TV R.string.push_image 等价 data URI，1x1 JPEG）。
@@ -325,7 +325,7 @@ func (s *SiteService) DetailContent(reqKey string, vod model.Vod) (model.Vod, er
 		site = &h
 	}
 
-	// SiteApi.detailContent：site.isEmpty() && PUSH.equals(key) 时把 id 当播放地址。
+	// 空站点且为推送入口：把 id 当播放地址。
 	if site.IsEmpty() && reqKey == PushAgentKey {
 		id := vod.VodID.String()
 		detail := model.Vod{
@@ -433,7 +433,7 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 	var result model.Result
 	var err error
 
-	// SiteApi.playerContent：先停掉专用源/磁力任务。
+	// 起播前先停掉专用源/磁力任务。
 	source.Stop()
 	thunder.Stop()
 
@@ -483,7 +483,7 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 			applySourceFetch(&result)
 		case 0, 1, 2:
 			rawID := id
-			// SiteApi：setUrl(id) 用原始剧集 id；parse 用 Sniffer.isVideoFormat(id)。
+			// CMS：url 用原始剧集 id；已是直链且站点无 playUrl 时 parse=0。
 			parseVal := 1
 			rules := parse.GetRules()
 			if len(rules) == 0 && s.cfg != nil {
@@ -507,7 +507,7 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 		}
 	}
 
-	// Result.setHeader：仅当结果头为空时写入站点头。
+	// 仅当结果头为空时写入站点头。
 	result.Header = resultOrSiteHeader(site.Header, result.Header)
 	if result.Flag == "" && flag != "" {
 		result.Flag = flag
@@ -816,14 +816,14 @@ func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, pa
 }
 
 func resultOrSiteHeader(siteHdr, resultHdr model.FlexHeader) model.FlexHeader {
-	// Result.setHeader：结果已有头则保留，否则用站点头。
+	// 结果已有头则保留，否则用站点头。
 	if len(resultHdr) == 0 {
 		return siteHdr
 	}
 	return resultHdr
 }
 
-// Action SiteApi.action：type3 爬虫；type4 把 action 当 URL GET；其它空。
+// Action type3 走爬虫 action；type4 把 action 当 URL GET；其它返回空 JSON。
 func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	action = strings.TrimSpace(action)
 	var raw string
@@ -847,7 +847,6 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	default:
 		return "{}", nil
 	}
-	// SiteApi.action → Result.fromJson（会 trans）。
 	result, ferr := fromType(1, raw)
 	if ferr != nil {
 		if strings.TrimSpace(raw) == "" {
@@ -862,15 +861,15 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	return out, nil
 }
 
-// ManualVideoCheck CustomWebView：spider.manualVideoCheck()。
+// ManualVideoCheck 是否由爬虫接管视频格式判定。
 func (s *SiteService) ManualVideoCheck(site model.Site) bool {
 	sp := s.cfg.Spider(site)
 	ok, err := sp.ManualVideoCheck()
 	return err == nil && ok
 }
 
-// IsVideoFormat CustomWebView.isVideoFormat：
-// sniffer() 为真 → 爬虫 isVideo；否则 Sniffer.isVideoFormat（含配置 rules.regex/exclude）。
+// IsVideoFormat 判断是否为直链视频：爬虫 manualVideoCheck 为真时用爬虫 isVideo，
+// 否则用默认嗅探规则（含配置 rules.regex/exclude）。
 func (s *SiteService) IsVideoFormat(site model.Site, u string) bool {
 	sp := s.cfg.Spider(site)
 	if ok, err := sp.ManualVideoCheck(); err == nil && ok {

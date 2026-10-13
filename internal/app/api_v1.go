@@ -572,7 +572,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 	var playDrm *model.Drm
 	var didParse bool
 
-	// 一律先 SiteApi.playerContent（含站点 Header/PlayURL/parse），再 Source.fetch / ParseJob。
+	// 一律先站点 playerContent（含站点 Header/PlayURL/parse），再 Source.fetch / 二次解析。
 	// 仅磁力可先占位，真正取流仍在后面 thunder.Fetch。
 	if thunder.Match(epURL) {
 		playURL = epURL
@@ -607,7 +607,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		if len(rules) == 0 {
 			rules = api.Rules
 		}
-		// 仅 needParse / useParse 时才进 ParseJob；直链跳过。
+		// 仅 needParse / useParse 时才进二次解析；直链跳过。
 		didParse = parse.NeedParse(result) || parse.IsUseParse(result, api.Flags, api.Parses)
 		parsed, perr := parse.ResolveWithParses(result, parse.Options{
 			Parses:    api.Parses,

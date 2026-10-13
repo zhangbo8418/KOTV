@@ -64,7 +64,7 @@ object SnifferWebView {
     val rules: List<Rule>,
     val click: String,
     val timeoutMs: Long,
-    /** spider.manualVideoCheck() 为真时禁用默认 snifferRe（CustomWebView 优先 spider.isVideoFormat）。 */
+    /** spider.manualVideoCheck() 为真时禁用默认 snifferRe，改走 spider.isVideoFormat。 */
     val hasVideoCheck: Boolean,
   ) {
     val nestedUrls = LinkedHashSet<String>()
@@ -319,7 +319,7 @@ object SnifferWebView {
     handler.postDelayed(destroy, session.timeoutMs)
   }
 
-  /** Cloudflare challenge：有前台 Activity 时把嗅探 WebView 弹到对话框；关闭则结束会话（CustomWebView.onDismiss→stop(true)）。 */
+  /** Cloudflare challenge：有前台 Activity 时把嗅探 WebView 弹到对话框；关闭则结束会话。 */
   private fun showChallengeDialog(webView: WebView, session: Session, handler: Handler) {
     if (session.challengeShown || session.done.get()) return
     val act = App.activity() ?: return
@@ -380,7 +380,7 @@ object SnifferWebView {
 
   private fun addNested(session: Session, url: String): Boolean {
     synchronized(session.nestedUrls) {
-      // CustomWebView.addUrl：size > MAX 时 clear 再 add
+      // 嵌套 URL 超过上限时清空再加，避免无限跟进
       if (session.nestedUrls.size > MAX_NESTED) session.nestedUrls.clear()
       return session.nestedUrls.add(url)
     }
@@ -389,7 +389,6 @@ object SnifferWebView {
   private fun emit(session: Session, url: String, request: WebResourceRequest?) {
     if (!session.found.compareAndSet(null, url)) return
     copyRequestHeaders(request, session.outHeaders)
-    // onParseSuccess → stop(false) → hideDialog
     val handler = Handler(Looper.getMainLooper())
     handler.post {
       stopSession(session, handler, error = false)

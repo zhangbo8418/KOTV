@@ -58,7 +58,21 @@ void main() {
     expect(got.headers?['Cookie'], 'a=b');
   });
 
-  test('safari native and other web players keep the engine url', () {
+  test('native players and hls.js art can send headers; safari/xg cannot', () {
+    expect(
+      kotvPlaybackSendsHeaders(
+        playerVal: 'innie#mpv',
+        mediaUrl: 'https://cdn.example/live.m3u8',
+      ),
+      isTrue,
+    );
+    expect(
+      kotvPlaybackSendsHeaders(
+        playerVal: 'innie#fvp',
+        mediaUrl: 'https://cdn.example/a.mp4',
+      ),
+      isTrue,
+    );
     expect(
       kotvPlaybackSendsHeaders(
         playerVal: 'innie#html',
@@ -86,14 +100,6 @@ void main() {
     expect(
       kotvPlaybackSendsHeaders(
         playerVal: 'innie#xg',
-        mediaUrl: 'https://cdn.example/live.m3u8',
-        hlsJsSupported: true,
-      ),
-      isFalse,
-    );
-    expect(
-      kotvPlaybackSendsHeaders(
-        playerVal: 'innie#mpv',
         mediaUrl: 'https://cdn.example/live.m3u8',
         hlsJsSupported: true,
       ),

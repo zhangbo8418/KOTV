@@ -24,10 +24,10 @@ type Options struct {
 	Jar         string
 	Flag        string
 	Click       string // 结果自带 click
-	SiteClick   string // ParseJob.getClick：站点 click 优先
+	SiteClick   string // 站点 click；非空时优先于结果 click
 	Prefer      string // 用户指定解析器名称（空=自动）
-	IsVideo     func(string) bool // CustomWebView：站点自定义 isVideo
-	ManualVideo bool              // spider.manualVideoCheck()：拦截点禁用默认 snifferRe
+	IsVideo     func(string) bool // 站点自定义视频地址判定；非空时优先于默认嗅探规则
+	ManualVideo bool              // spider.manualVideoCheck()：为真时拦截点禁用默认 snifferRe
 }
 
 // AnnotateParseErr 避免「解析失败: 解析失败: …」重复包装。
@@ -84,7 +84,7 @@ func ShouldShowParseUI(r model.Result, flags []string, parses []model.Parse) boo
 	return IsUseParse(r, flags, parses)
 }
 
-// EpisodeURL ParseJob：webUrl = result.getUrl().v()（按 Url.position，不含 playUrl 前缀）。
+// EpisodeURL 取结果里当前清晰度的剧集地址（按 Url.position，不含 playUrl 前缀）。
 func EpisodeURL(r model.Result) string {
 	urls := r.URL.URLs
 	if len(urls) == 0 {
@@ -201,13 +201,12 @@ func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 		}
 		return r, fmt.Errorf("解析失败: 无可用解析器")
 	}
-	// checkResult：仅用 url.length() > 40 判断成功。
-	// （该层不做额外 rules/isVideo 校验；KOTV 收敛到统一的成功判定）
+	// 成功判定：播放地址长度须大于 40（不做额外 rules/isVideo 校验）。
 	if len(parsed) <= 40 {
 		parseLog("[parse] invalid result via=%s out=%s", via, parsePreview(parsed, 160))
-			return r, fmt.Errorf("解析结果无效")
+		return r, fmt.Errorf("解析结果无效")
 	}
-	// checkResult(needParse)→startWeb / CustomWebView：非直链播放页再嗅一次。
+	// 非直链播放页再嗅一次媒体地址。
 	mergedHdr := overlayHeaders(hdr, sniffHdr)
 	if reParsed, reHdr, reErr := resniffIfNeeded(parsed, mergedHdr, click, opts.Rules, opts.IsVideo, opts.ManualVideo); reErr != nil {
 		parseLog("[parse] re-sniff fail via=%s err=%v", via, reErr)
@@ -250,7 +249,7 @@ func looksLikeHTMLPlayPage(u string) bool {
 	return strings.Contains(lower, "/vod/play/") || strings.Contains(lower, "/index.php/vod/")
 }
 
-// matchVideo 优先走站点 isVideo（CustomWebView），否则走规则嗅探。
+// matchVideo 优先走站点自定义 isVideo；否则走规则嗅探。
 func matchVideo(u string, rules []model.Rule, check func(string) bool) bool {
 	if check != nil {
 		return check(u)
@@ -347,7 +346,7 @@ func resolveParse(r model.Result, parses []model.Parse, useParse bool, prefer st
 	if selected != nil && !selectedEmpty(selected) {
 		return selected
 	}
-	// ParseJob.setParse：parse 为空 → Parse.get(0, playUrl)（可为无前缀，直接嗅探 episode）。
+	// 无选中解析器时：用 playUrl 作前缀（可为空），直接嗅探剧集页。
 	return &model.Parse{Name: "inline", Type: model.FlexInt{Valid: true, Value: 0}, URL: playURL}
 }
 
@@ -369,7 +368,6 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 			parseLog("[parse] type1 fail name=%q err=%v cost=%s", p.Name, err, time.Since(start).Truncate(time.Millisecond))
 			return "", nil, err
 		}
-		// checkResult fatal：url.length() > 40
 		if u != "" && len(u) <= 40 {
 			parseLog("[parse] type1 too-short name=%q out=%q", p.Name, u)
 			return "", nil, fmt.Errorf("json 解析结果过短")
@@ -418,7 +416,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 		}
 		return u, pickPlayHeaders(h), nil
 	case 4:
-		// ParseJob.superParse：type1（按 flag 筛）竞速 + type0 Web 嗅探。
+		// type1（按 flag 筛）竞速 + type0 Web 嗅探。
 		parseLog("[parse] type4 superParse flag=%q", flag)
 		return superParse(webURL, flag, headers, parses, rules, click, isVideo, manualVideo)
 	default:
@@ -426,7 +424,7 @@ func executeParse(p model.Parse, webURL, flag string, headers map[string]string,
 	}
 }
 
-// sniffParsedWeb checkResult：jar 返回 needParse 时再走 Web 嗅探。
+// sniffParsedWeb jar 返回需二次解析时再走 Web 嗅探。
 func sniffParsedWeb(pageURL string, headers map[string]string, click string, rules []model.Rule, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
 	pageURL = strings.TrimSpace(pageURL)
 	if pageURL == "" {
@@ -439,8 +437,7 @@ func sniffParsedWeb(pageURL string, headers map[string]string, click string, rul
 	return browserSniff(pageURL, headers, click, rules, defaultParseWebTimeout, detect, isVideo, manualVideo, 0)
 }
 
-// resniffIfNeeded checkResult(Result.needParse)→startWeb：
-// 解析器返回的若是播放页/非直链，再走 http-sniff + Chromium（detect 同 CustomWebView）。
+// resniffIfNeeded 解析器返回的若是播放页/非直链，再走 http-sniff + 浏览器嗅探。
 func resniffIfNeeded(pageURL string, headers map[string]string, click string, rules []model.Rule, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
 	pageURL = strings.TrimSpace(pageURL)
 	if pageURL == "" || matchVideo(pageURL, rules, isVideo) {
@@ -457,7 +454,7 @@ func resniffIfNeeded(pageURL string, headers map[string]string, click string, ru
 	return u, h, nil
 }
 
-// superParse ParseJob.superParse / getParses(type, flag)。
+// superParse 按 flag 筛 type1 竞速，并可选并行 type0 Web 嗅探。
 func superParse(webURL, flag string, headers map[string]string, parses []model.Parse, rules []model.Rule, click string, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
 	jsons := getParses(parses, 1, flag)
 	webs := getParses(parses, 0, flag)
@@ -481,7 +478,6 @@ func superParse(webURL, flag string, headers map[string]string, parses []model.P
 			defer wg.Done()
 			hdr := overlayHeaders(headers, parseExtHeaders(p.Ext.String()))
 			u, h, err := JSONParseEx(p.URL, webURL, hdr)
-			// checkResult：url.length() > 40 才算成功。
 			if err == nil && len(u) > 40 {
 				ch <- result{url: u, hdr: pickPlayHeaders(h)}
 			}
@@ -609,32 +605,46 @@ func parseExtURL(p model.Parse) string {
 	return u[:index+1] + "cat_ext=" + b64 + "&" + u[index+1:]
 }
 
-// pickPlayHeaders 保留对起播有用的请求头。
+// pickPlayHeaders 保留嗅探到的媒体请求头（含 Cookie / Token 等自定义头）。
+// 去掉 hop-by-hop 与不宜重放的头，其余原样交给播放器。
 func pickPlayHeaders(h map[string]string) map[string]string {
 	if len(h) == 0 {
 		return nil
 	}
-	out := make(map[string]string)
+	out := make(map[string]string, len(h))
 	for k, v := range h {
-		switch {
-		case strings.EqualFold(k, "User-Agent"),
-			strings.EqualFold(k, "Referer"),
-			strings.EqualFold(k, "Origin"),
-			strings.EqualFold(k, "Cookie"),
-			strings.EqualFold(k, "Authorization"):
-			if strings.TrimSpace(v) != "" {
-				out[k] = v
-			}
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			continue
 		}
+		if dropPlaySniffHeader(k) {
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
+}
+
+func dropPlaySniffHeader(k string) bool {
+	switch {
+	case strings.EqualFold(k, "Range"),
+		strings.EqualFold(k, "Host"),
+		strings.EqualFold(k, "Connection"),
+		strings.EqualFold(k, "Content-Length"),
+		strings.EqualFold(k, "Transfer-Encoding"),
+		strings.EqualFold(k, "Accept-Encoding"):
+		return true
+	default:
+		return false
+	}
 }
 
 func jarJSONExt(p model.Parse, webURL string, parses []model.Parse) (string, map[string]string, bool, error) {
 	jxs := map[string]string{}
 	for _, cand := range parses {
 		if cand.TypeID() == 1 && cand.URL != "" {
-			// ParseJob.jsonExtend：jxs 用 item.extUrl()
 			jxs[cand.Name] = parseExtURL(cand)
 		}
 	}
@@ -654,7 +664,6 @@ func jarJSONExtMix(p model.Parse, flag, webURL string, parses []model.Parse) (st
 			"ext":  cand.Ext.String(),
 		}
 	}
-	// ParseJob.jsonMix：key = parse.getUrl()（如 Web → MixWeb）
 	raw, err := spider.JsonExtMix(flag, strings.TrimSpace(p.URL), p.Name, jxs, webURL)
 	if err != nil {
 		return "", nil, false, err
@@ -662,7 +671,7 @@ func jarJSONExtMix(p model.Parse, flag, webURL string, parses []model.Parse) (st
 	return extractPlayFromJSON(raw)
 }
 
-// extractPlayFromJSON checkResult(Result)：抽 url/header，needParse 时需二次 Web。
+// extractPlayFromJSON 从 jar/json 结果抽 url/header；needParse 时调用方再走 Web 嗅探。
 func extractPlayFromJSON(raw string) (string, map[string]string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

@@ -33,7 +33,7 @@ const defaultParseWebTimeout = 30 * time.Second
 // 嵌套嗅探至少留这么久，避免壳页耗掉大半时间后云播页秒超时。
 const nestedSniffMinTimeout = 18 * time.Second
 
-// CustomWebView.MAX_URLS：嵌套 player 页最多跟进 5 个竞速。
+// 嵌套 player 页最多跟进 5 个竞速。
 const maxNestedPlayers = 5
 
 // 与 drpy2 顶层常量一致；嗅探展开 headers 魔串 MOBILE_UA/PC_UA/UA/UC_UA/IOS_UA。
@@ -594,7 +594,7 @@ func androidBrowserSniff(pageURL string, headers map[string]string, click string
 		"rules":         rules,
 		"ads":           ads,
 		"detect":        detect,
-		"hasVideoCheck": manualVideo, // CustomWebView：仅 manualVideoCheck 时禁用默认 snifferRe
+		"hasVideoCheck": manualVideo, // 仅 manualVideoCheck 时禁用默认 snifferRe
 	}
 	b, err := json.Marshal(reqBody)
 	if err != nil {

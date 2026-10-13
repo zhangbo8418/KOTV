@@ -59,20 +59,23 @@ bool kotvIsLocalProxyUrl(String url) {
   return u.contains('127.0.0.1:') && u.contains('/proxy');
 }
 
-/// Exo，以及会用 hls.js 拉流的网页播放器，可以自己带请求头。
-/// Safari 原生 HLS、西瓜和全能播放器不走这条。
+/// 能把请求头写进每次媒体请求的播放器：直开站点 URL。
+/// Exo / MPV / FVP 原生带头；html/art 仅在 hls.js 可用时（art 还须 m3u8）。
+/// Safari 原生 HLS、西瓜和全能播放器不走这条，改开引擎代理地址。
 bool kotvPlaybackSendsHeaders({
   required String playerVal,
   required String mediaUrl,
   bool? hlsJsSupported,
 }) {
-  if (playerVal == 'innie#exo') return true;
-  final hls = hlsJsSupported ?? kotvWebHlsJsSupported();
-  if (!hls) return false;
   switch (playerVal) {
-    case 'innie#html':
+    case 'innie#exo':
+    case 'innie#mpv':
+    case 'innie#fvp':
       return true;
+    case 'innie#html':
+      return hlsJsSupported ?? kotvWebHlsJsSupported();
     case 'innie#art':
+      if (!(hlsJsSupported ?? kotvWebHlsJsSupported())) return false;
       final path = mediaUrl.split('?').first.toLowerCase();
       return path.contains('.m3u8');
     default:
