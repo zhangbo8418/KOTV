@@ -12,7 +12,7 @@ import 'kotv_platform.dart';
 /// - **硬解**：仅平台硬解，不带软解回退
 /// - **软解**：仅 FFmpeg（+ dav1d）
 ///
-/// [androidSurface]：安卓 Surface 用 `image=0` 直出；Texture 用默认 AMediaCodec（非 mdk tunnel）。
+/// [androidSurface]：安卓 Surface 用 `image=0` 直出；Texture 用默认 AMediaCodec。
 List<String> kotvFvpVideoDecoders(
   String decodeMode, {
   bool androidSurface = true,

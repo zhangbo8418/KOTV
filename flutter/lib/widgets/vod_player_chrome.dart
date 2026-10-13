@@ -2000,15 +2000,17 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             unawaited(_persist('playerAmbient', v ? 'true' : 'false'));
                           },
                         ),
-                        toggleRow(
-                          icon: Icons.graphic_eq,
-                          label: '稳定音量',
-                          value: _stableVolume,
-                          onChanged: (v) {
-                            sync(() => _stableVolume = v);
-                            unawaited(_persist('playerStableVolume', v ? 'true' : 'false'));
-                          },
-                        ),
+                        // FVP 不支持稳定音量（见 FvpPlayback.setStableVolume）。
+                        if (_playerVal != 'innie#fvp')
+                          toggleRow(
+                            icon: Icons.graphic_eq,
+                            label: '稳定音量',
+                            value: _stableVolume,
+                            onChanged: (v) {
+                              sync(() => _stableVolume = v);
+                              unawaited(_persist('playerStableVolume', v ? 'true' : 'false'));
+                            },
+                          ),
                         toggleRow(
                           icon: Icons.skip_next_outlined,
                           label: '跳过片头片尾',

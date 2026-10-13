@@ -593,12 +593,12 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             renderTexture = resolveRenderTexture(mode)
-	// Texture 时关闭隧道（仅 Surface 可用）。
+            // Texture 时关闭隧道（仅 Surface 可用）。
             if (renderTexture) tunnelingEnabled = false
             // 强制下次 bind 重挂输出，避免全屏切渲染后仍认旧 Surface 导致定格有声。
             boundSurfaceView = null
             syncOutputPath()
-            // 隧道开关变化需刷新 track params。
+            // Media3 setTunnelingEnabled：渲染/隧道变更后刷新 track params。
             applyTrackSelectionPrefs()
             val tid = if (useFlutterTexture) ensureFlutterTexture() else -1L
             result.success(

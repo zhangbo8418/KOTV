@@ -895,6 +895,7 @@ class ExoPlayback extends KotvPlayback {
   /// 从设置页写入：渲染 / 隧道 / 去广告 / 磁盘缓存 / 直通 / DV / AAC / 跳过静音。
   /// [playerRender] 只更新 Dart 字段，供 [_ensureNative] 在 [setRenderMode] 之前被调用时用对模式；
   /// 已建连时由调用方 [setRenderMode] 同步原生（勿在此处 unawaited 以免重入）。
+  /// [exoTunneling] → 原生 Media3 [setTunnelingEnabled]；仅 Surface，Texture 强制关；变更走冷选项重开。
   void applyPlayerOptions(Map<String, dynamic> settings) {
     if (settings.containsKey('playerRender')) {
       _renderMode = kotvNormalizePlayerRender('${settings['playerRender']}');

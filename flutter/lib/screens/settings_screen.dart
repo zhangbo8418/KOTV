@@ -549,12 +549,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           _sheetToggle(
             label: '隧道模式',
-            subtitle: '仅 Surface 渲染',
+            subtitle: 'Exo Media3 隧道，仅 Surface',
             value: exoTunneling,
             onChanged: (v) async {
               if (v) {
-                await _set('exoTunneling', 'true');
-                await _set('playerRender', 'surface', msg: '隧道已开，渲染改为 Surface');
+                // 须与 Surface 同批写入，避免先开隧道时仍是 Texture 被 Dart 侧强制关掉。
+                await _setMany({
+                  'playerRender': 'surface',
+                  'exoTunneling': 'true',
+                }, msg: '隧道已开，渲染改为 Surface');
               } else {
                 await _set('exoTunneling', 'false', msg: '隧道已关');
               }

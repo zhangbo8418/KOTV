@@ -2285,8 +2285,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         throw lastOpenError ?? const KotvSilentVideoException();
       }
       if (serial != _playAtSerial || !mounted) return;
-      // 音量/倍速已在 open 前套好；稳定音量用轻量 dynaudnorm，起播后立刻挂，勿再拖 800ms。
-      if (_stableVolumeOn) {
+      // 音量/倍速已在 open 前套好；稳定音量起播后立刻挂，勿再拖 800ms。
+      // FVP 跳过（见 FvpPlayback.setStableVolume）。
+      if (_stableVolumeOn && _backend != KotvEmbedBackend.fvp) {
         try {
           await _applyStableVolume(_playback, true);
         } catch (_) {}
@@ -2962,7 +2963,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (k == 'playerStableVolume') {
             final on = v.toLowerCase() == 'true';
             setState(() => _stableVolumeOn = on);
-            unawaited(_applyStableVolume(_playback, on));
+            if (_backend != KotvEmbedBackend.fvp) {
+              unawaited(_applyStableVolume(_playback, on));
+            }
           }
           if (k == 'danmaku') {
             setState(() => _danmakuOn = v.toLowerCase() == 'true');
@@ -3039,7 +3042,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           }
           if (k == 'playerRender') {
             final next = kotvNormalizePlayerRender(v);
-            if (_renderMode != next) setState(() => _renderMode = next);
+            unawaited(() async {
+              if (_renderMode != next) {
+                setState(() => _renderMode = next);
+                await _playback.setRenderMode(next);
+              }
+              // 渲染变更后再推 exo 冷选项（隧道仅 Surface；须等 setRenderMode 完成）。
+              await _reapplyPlayerFxSettings();
+            }());
           }
           if (k == 'player') {
             final prev = _playerVal;

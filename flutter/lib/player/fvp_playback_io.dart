@@ -7,7 +7,6 @@ import 'package:video_player/video_player.dart';
 
 import 'buffer_budget.dart';
 import 'fvp_decoders.dart';
-import 'fvp_diag.dart';
 import 'drm_opts.dart';
 import 'fvp_register.dart';
 import 'kotv_playback.dart';
@@ -49,7 +48,7 @@ class FvpPlayback extends KotvPlayback {
   /// 仅尺寸/比例/错误变化时递增，供 buildView 重建（勿绑 position/buffering）。
   final ValueNotifier<int> _viewGen = ValueNotifier<int>(0);
 
-  /// 安卓 Surface：platformView + image=0（不启 mdk tunnel）。Texture：textureView。
+  /// 安卓 Surface：platformView + image=0。Texture：textureView。
   bool get _androidSurface => kotvIsAndroid() && _renderMode == 'surface';
 
   VideoViewType get _viewType {
@@ -79,7 +78,6 @@ class FvpPlayback extends KotvPlayback {
   int _audioStability = 0;
   int _audioBoost = 0;
   int _audioPreamp = 0;
-  bool _audioLoudness = false;
   int _audioCenterGain = 0;
   String _audioChannelMode = 'auto';
   int _audioOffsetMs = 0;
@@ -87,118 +85,8 @@ class FvpPlayback extends KotvPlayback {
   bool _previewAudioOriginal = false;
   bool _liveBufferSet = false;
   bool _vodBufferSet = false;
-  /// 时钟对照：上一拍墙钟/片长，算 media/wall。
-  DateTime? _clockWall;
-  int _clockPosMs = 0;
-  bool? _clockStalling;
-  DateTime? _clockListenerSampleAt;
 
   VideoPlayerController? get controller => _c;
-
-  /// Mac / 安卓 / Win 同 URL 对照：media/wall + 轨 fps（只读，不改 avsync）。
-  String _clockProbe({VideoPlayerController? c, bool trackStall = true}) {
-    final ctrl = c ?? _c;
-    final aheadMs = (() {
-      final a = buffered - position;
-      return a.isNegative ? 0 : a.inMilliseconds;
-    })();
-    final now = DateTime.now();
-    final posMs = position.inMilliseconds;
-    var mediaPerWall = -1.0;
-    final prevWall = _clockWall;
-    if (trackStall && prevWall != null) {
-      final wallMs = now.difference(prevWall).inMilliseconds;
-      if (wallMs >= 400) {
-        mediaPerWall = (posMs - _clockPosMs) / wallMs;
-        final stalling = mediaPerWall >= 0 && mediaPerWall < 0.25;
-        if (_clockStalling != stalling) {
-          _clockStalling = stalling;
-          KotvFvpDiag.note(
-            stalling
-                ? 'stall-enter media/wall=${mediaPerWall.toStringAsFixed(3)} '
-                    'ahead=${aheadMs}ms'
-                : 'stall-exit media/wall=${mediaPerWall.toStringAsFixed(3)} '
-                    'ahead=${aheadMs}ms',
-          );
-          if (stalling) _clockSyncSnapshot(ctrl, 'stall-sync');
-        }
-      }
-    }
-    if (trackStall) {
-      _clockWall = now;
-      _clockPosMs = posMs;
-    }
-    final mw = mediaPerWall < 0 ? '-' : mediaPerWall.toStringAsFixed(3);
-    return 'media/wall=$mw ahead=${aheadMs}ms '
-        'pos=${posMs}ms buf=${buffered.inMilliseconds}ms '
-        'play=${ctrl?.value.isPlaying ?? false} '
-        'bufing=${ctrl?.value.isBuffering ?? false} '
-        'dur=${duration.inMilliseconds}ms';
-  }
-
-  /// 开播 HTTP 取证：host/后缀/头名（Cookie 只记有无，不落值）。
-  String _clockHttpOpenLine(
-    String url,
-    Map<String, String> headers, {
-    required bool live,
-  }) {
-    var path = '';
-    var ext = '';
-    try {
-      final u = Uri.parse(url);
-      path = u.path;
-      final slash = path.lastIndexOf('/');
-      final base = slash >= 0 ? path.substring(slash + 1) : path;
-      final dot = base.lastIndexOf('.');
-      if (dot >= 0 && dot < base.length - 1) {
-        ext = base.substring(dot + 1).toLowerCase();
-      }
-    } catch (_) {}
-    final keys = headers.keys.map((k) => k.trim()).where((k) => k.isNotEmpty).toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    bool hasKey(String name) =>
-        keys.any((k) => k.toLowerCase() == name.toLowerCase());
-    return 'http-open live=$live host=${KotvFvpDiag.hostOf(url)} '
-        'ext=${ext.isEmpty ? '-' : ext} '
-        'cookie=${hasKey('Cookie') || hasKey('cookie') ? 1 : 0} '
-        'ua=${hasKey('User-Agent') || hasKey('user-agent') ? 1 : 0} '
-        'referer=${hasKey('Referer') || hasKey('referer') ? 1 : 0} '
-        'hdr=${keys.isEmpty ? '-' : keys.join(',')}';
-  }
-
-  void _clockSyncSnapshot(VideoPlayerController? c, String tag) {
-    var vfps = '-';
-    var afps = '-';
-    var vcodec = '-';
-    var acodec = '-';
-    var aHz = '-';
-    var nV = 0;
-    var nA = 0;
-    try {
-      final mi = (c ?? _c)?.getMediaInfo() as dynamic;
-      final videos = List<dynamic>.from((mi?.video as List?) ?? const []);
-      final audios = List<dynamic>.from((mi?.audio as List?) ?? const []);
-      nV = videos.length;
-      nA = audios.length;
-      if (videos.isNotEmpty) {
-        final vs = videos.first;
-        vcodec = '${vs.codec?.codec ?? '-'}';
-        final fr = vs.codec?.frameRate;
-        vfps = fr is num ? fr.toStringAsFixed(3) : '-';
-      }
-      if (audios.isNotEmpty) {
-        final as_ = audios.first;
-        acodec = '${as_.codec?.codec ?? '-'}';
-        final fr = as_.codec?.frameRate;
-        afps = fr is num ? fr.toStringAsFixed(3) : '-';
-        aHz = '${as_.codec?.sampleRate ?? '-'}';
-      }
-    } catch (_) {}
-    KotvFvpDiag.note(
-      '$tag v=$nV:$vcodec@${vfps}fps a=$nA:$acodec@${aHz}Hz afps=$afps '
-      '${_clockProbe(c: c, trackStall: false)}',
-    );
-  }
 
   @override
   String? get lastError => _lastError;
@@ -308,9 +196,11 @@ class FvpPlayback extends KotvPlayback {
         ),
       );
     }
-    // Texture：画幅在布局层完成。VideoPlayer 必须固定在同一子树位置——
-    // 若 size 0↔正 时整段替换父级，ImageReader 会 1x1↔实尺寸反复 disconnect（ADB 与 ~1fps 同现）。
+    // VideoPlayer 须固定在同一子树位置——
+    // Texture：若 size 0↔正 时整段换父级，ImageReader 会 1x1↔实尺寸反复 disconnect。
+    // Surface/platformView：吃不到 FittedBox 变换，须按视频比例给真实布局尺寸。
     final scale = _videoScale.trim().isEmpty ? 'default' : _videoScale.trim();
+    final surfaceLayout = _androidSurface;
     return LayoutBuilder(
       builder: (context, constraints) {
         final max = constraints.biggest;
@@ -322,18 +212,28 @@ class FvpPlayback extends KotvPlayback {
         final videoSize = hasSize ? sz : const Size(16, 9);
         final box = hasSize ? kotvBoxForVideoScale(max, videoSize, scale) : max;
         final effective = kotvFitFromVideoScale(scale, fit);
-        final child = SizedBox(
-          width: box.width.isFinite && box.width > 0 ? box.width : max.width,
-          height: box.height.isFinite && box.height > 0 ? box.height : max.height,
-          child: FittedBox(
-            fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
-            child: SizedBox(
-              width: videoSize.width,
-              height: videoSize.height,
-              child: VideoPlayer(c),
+        final w = box.width.isFinite && box.width > 0 ? box.width : max.width;
+        final h = box.height.isFinite && box.height > 0 ? box.height : max.height;
+        final Widget child;
+        if (surfaceLayout) {
+          if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
+            return SizedBox(width: max.width, height: max.height, child: VideoPlayer(c));
+          }
+          child = SizedBox(width: w, height: h, child: VideoPlayer(c));
+        } else {
+          child = SizedBox(
+            width: w,
+            height: h,
+            child: FittedBox(
+              fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
+              child: SizedBox(
+                width: videoSize.width,
+                height: videoSize.height,
+                child: VideoPlayer(c),
+              ),
             ),
-          ),
-        );
+          );
+        }
         if (effective == BoxFit.cover) {
           return ClipRect(child: Center(child: child));
         }
@@ -403,17 +303,8 @@ class FvpPlayback extends KotvPlayback {
     _live = live;
     _liveBufferSet = false;
     _vodBufferSet = false;
-    _clockWall = null;
-    _clockPosMs = 0;
-    _clockStalling = null;
-    _clockListenerSampleAt = null;
     _lastError = null;
     _completed = false;
-    KotvFvpDiag.note(
-      'clock-open live=$live startAt=${startAt.inMilliseconds}ms '
-      'host=${KotvFvpDiag.hostOf(url)} decode=$_decodeMode render=$_renderMode '
-      'os=${KotvFvpDiag.platformTag}',
-    );
     _audioTracks = const [];
     _videoTracks = const [];
     _subtitleTracks = const [];
@@ -436,8 +327,6 @@ class FvpPlayback extends KotvPlayback {
       if (startAt > Duration.zero) {
         openHeaders['X-KOTV-Prepare-Ms'] = '${startAt.inMilliseconds}';
       }
-      // Dart 侧只记「带了哪些头 / 后缀」，不解析 Location、不预跳。
-      KotvFvpDiag.note(_clockHttpOpenLine(url, openHeaders, live: live));
       // 302 交给 mdk 默认 IO 跟跳（未强制 io.avio）。
       final c = VideoPlayerController.networkUrl(
         Uri.parse(url),
@@ -460,7 +349,6 @@ class FvpPlayback extends KotvPlayback {
         final v = c.value;
         if (v.hasError) {
           _lastError = v.errorDescription ?? 'FVP 播放错误';
-          KotvFvpDiag.note('clock-error $_lastError ${_clockProbe(c: c)}');
         }
         if (_opening &&
             (v.isPlaying ||
@@ -489,20 +377,8 @@ class FvpPlayback extends KotvPlayback {
             (lastInit != v.isInitialized || lastBuffering != v.isBuffering)) {
           _applyBufferRange(c);
         }
-        // Win7 直播：Timer 脉冲可能永不跑；listener 有事件就采（≥1s）。
-        final nowListen = DateTime.now();
-        final lastListen = _clockListenerSampleAt;
-        final listenDue = lastListen == null ||
-            nowListen.difference(lastListen) >= const Duration(seconds: 1);
-        if (listenDue) {
-          _clockListenerSampleAt = nowListen;
-          KotvFvpDiag.note(
-            'clock-tick live=$_live size=${v.size.width.toInt()}x${v.size.height.toInt()} '
-            '${_clockProbe(c: c)}',
-          );
-        }
         // 勿因 position 高频 notify：页面 ListenableBuilder 会重建 Texture。
-        // 尺寸短暂掉到 0 不 _bumpView：避免 ImageReader 拆建（ADB 1x1↔实尺寸 + timediff≈1000ms）。
+        // 尺寸短暂掉到 0 不 _bumpView：避免 Texture ImageReader 因 size 抖动拆建。
         final err = v.errorDescription ?? _lastError ?? '';
         final w = v.size.width;
         final h = v.size.height;
@@ -518,12 +394,6 @@ class FvpPlayback extends KotvPlayback {
             lastOpening != _opening ||
             v.isCompleted;
         if (!uiChanged) return;
-        if (lastBuffering != v.isBuffering) {
-          KotvFvpDiag.note(
-            'clock-buf ${lastBuffering ? 1 : 0}→${v.isBuffering ? 1 : 0} '
-            '${_clockProbe(c: c, trackStall: false)}',
-          );
-        }
         lastInit = v.isInitialized;
         lastPlaying = v.isPlaying;
         lastBuffering = v.isBuffering;
@@ -541,41 +411,21 @@ class FvpPlayback extends KotvPlayback {
       notifyListeners();
       await SchedulerBinding.instance.endOfFrame;
       await Future<void>.delayed(const Duration(milliseconds: 32));
-      // 分步钉桩：Win7 直播若卡在 initialize，至少留下 begin。
-      KotvFvpDiag.note('clock-init-begin live=$_live ${_clockProbe(c: c)}');
-      try {
-        await c.initialize();
-      } catch (e) {
-        KotvFvpDiag.note('clock-init-throw $e');
-        rethrow;
-      }
+      await c.initialize();
       if (c.value.hasError) {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
-        KotvFvpDiag.note('clock-init-fail $_lastError');
         throw StateError(_lastError!);
       }
-      KotvFvpDiag.note('clock-init-ok ${_clockProbe(c: c)}');
       // 单一路径钉死 min=0（勿省略 max：Dart 默认 max=-1 会把 max/drop 打回 mdk 默认）。
       // 点播默认 minMs=1000 → 欠载约每秒一帧（ADB MediaCodec timediff≈1000ms）。
       try {
         if (!_live) await KotvBufferBudget.warm();
       } catch (_) {}
       _applyBufferRange(c);
-      KotvFvpDiag.note(
-        'clock-buffer-set live=$_live vodSet=$_vodBufferSet liveSet=$_liveBufferSet '
-        '${_clockProbe(c: c, trackStall: false)}',
-      );
       await c.setVolume((_volume / 100).clamp(0, 1));
       await c.setPlaybackSpeed(_rate);
       // startAt 已在 create→prepare(ms)；此处勿再 seekTo。
       await c.play();
-      KotvFvpDiag.note('clock-play ${_clockProbe(c: c)}');
-      _clockSyncSnapshot(c, 'clock-sync');
-      KotvFvpDiag.scheduleClockPulses((tag) {
-        if (_c != c) return;
-        KotvFvpDiag.note('$tag ${_clockProbe(c: c)}');
-        if (_clockStalling == true) _clockSyncSnapshot(c, '$tag-sync');
-      });
       _applyRuntimeOptions(c);
       _refreshTracksQuiet();
       _applySecondaryAutoIfNeeded();
@@ -586,13 +436,11 @@ class FvpPlayback extends KotvPlayback {
       }
       notifyListeners();
       await _guardSilentVideo(c);
-      KotvFvpDiag.note('clock-guard-done ${_clockProbe(c: c)}');
       _refreshTracksQuiet();
       _applySecondaryAutoIfNeeded();
     } catch (e) {
       _lastError = '$e';
       _opening = false;
-      KotvFvpDiag.note('clock-open-catch $_lastError');
       notifyListeners();
       rethrow;
     }
@@ -777,8 +625,7 @@ class FvpPlayback extends KotvPlayback {
     final c = _c;
     if (c == null) return;
     await c.seekTo(d);
-    // ADB（9dd3f71）：seek/flush 后 mdk 默认 minMs=1000 会重新生效 → timediff≈1000ms。
-    // 只走 [_applyBufferRange]，不再叠一层 pin(0+0)。
+    // seek/flush 后 mdk 会把 minMs 打回默认 1000；清标志再钉死 min=0。
     _vodBufferSet = false;
     _liveBufferSet = false;
     _applyBufferRange(c);
@@ -885,7 +732,6 @@ class FvpPlayback extends KotvPlayback {
     _audioStability = kotvAudioStabilityFromSettings(settings);
     _audioBoost = kotvAudioBoostFromSettings(settings);
     _audioPreamp = kotvAudioPreampFromSettings(settings);
-    _audioLoudness = kotvAudioLoudnessFromSettings(settings);
     _audioCenterGain = kotvAudioCenterGainFromSettings(settings);
     _audioChannelMode = kotvAudioChannelModeFromSettings(settings);
     _audioOffsetMs = kotvAudioOffsetMsFromSettings(settings);
@@ -915,6 +761,7 @@ class FvpPlayback extends KotvPlayback {
 
   void _writeFxFilters(VideoPlayerController c) {
     c.setProperty('video.avfilter', _previewVideoOriginal ? '' : _videoEq.fvpAvfilter());
+    // loudness 恒 false：见 setStableVolume（dynaudnorm/loudnorm 会弄死 AO）。
     c.setProperty(
       'audio.avfilter',
       _previewAudioOriginal
@@ -928,7 +775,7 @@ class FvpPlayback extends KotvPlayback {
               stability: _audioStability,
               boost: _audioBoost,
               preamp: _audioPreamp,
-              loudness: _audioLoudness,
+              loudness: false,
               centerGain: _audioCenterGain,
             ),
     );
@@ -987,9 +834,10 @@ class FvpPlayback extends KotvPlayback {
   }
 
   /// mdk [setBufferRange]：`minMs==0` 尽快解码；`minMs>0` 时队列空了要攒到 min 才继续出包。
-  /// 默认 min=1000，欠载时大约每秒才放出一帧（ADB MediaCodec timediff≈1000ms 已实锤）。
+  /// 默认 min=1000，欠载时大约每秒才放出一帧（ADB MediaCodec timediff≈1000ms）。
   /// 点播固定 min=0；max 用内存预算÷码率。码率未知时先用 60s，码率出来再抬 max。
   /// 直播：短队列；桌面 drop 追沿，安卓不 drop（GOP≈1s 时 drop 会只剩关键帧）。
+  /// （属性 `buffer` 与本 API 等价；开播路径只调 setBufferRange。）
   void _applyBufferRange(VideoPlayerController c) {
     if (!identical(_c, c)) return;
     try {
@@ -997,7 +845,6 @@ class FvpPlayback extends KotvPlayback {
         if (_liveBufferSet) return;
         final maxMs = kotvIsDesktop() ? 8000 : 4000;
         final drop = kotvIsDesktop();
-        c.setProperty('buffer', drop ? '0+$maxMs-' : '0+$maxMs');
         c.setBufferRange(min: 0, max: maxMs, drop: drop);
         _liveBufferSet = true;
         _vodBufferSet = false;
@@ -1013,11 +860,9 @@ class FvpPlayback extends KotvPlayback {
           : 60000;
       // max 算不出来也必须先钉死 min=0，绝不能 return 留下 mdk 默认 minMs=1000。
       if (maxMs <= 0) {
-        c.setProperty('buffer', '0+0');
         c.setBufferRange(min: 0, max: 0);
         return;
       }
-      c.setProperty('buffer', '0+$maxMs');
       c.setBufferRange(min: 0, max: maxMs, drop: false);
       if (bps > 0) {
         _vodBufferSet = true;
@@ -1124,15 +969,7 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Future<void> setStableVolume(bool on) async {
-    final c = _c;
-    if (c == null || !c.value.isInitialized) return;
-    try {
-      c.setProperty('audio.avfilter', on ? 'dynaudnorm=f=75:g=15:p=0.55' : '');
-    } catch (_) {
-      try {
-        c.setProperty('audio.avfilter', on ? 'loudnorm' : '');
-      } catch (_) {}
-    }
+    // 实测：dynaudnorm/loudnorm 约 2s 后 AO 钟死 → 没声 + ~1fps。MPV/Exo 不受影响。
   }
 
   @override
@@ -1140,7 +977,7 @@ class FvpPlayback extends KotvPlayback {
     final m = mode.trim().isEmpty ? 'default' : mode.trim();
     if (_videoScale == m) return;
     _videoScale = m;
-    // Texture 路径由 buildView 的 BoxFit 落实；勿写无效的 video.aspect。
+    // Surface：真实布局尺寸；Texture：FittedBox。勿写无效的 video.aspect。
     _bumpView();
     notifyListeners();
   }
