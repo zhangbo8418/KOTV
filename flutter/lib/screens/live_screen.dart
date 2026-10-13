@@ -1825,11 +1825,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final data = await playFut;
         if (!mounted || serial != _playSerial) return;
         url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
-        headers = <String, String>{
+        final hdr = <String, String>{
           for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
             if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
         };
-        if (headers.isEmpty) headers = null;
+        headers = hdr.isEmpty ? null : hdr;
         final drmRaw = data['drm'];
         drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
         format = '${data['format'] ?? ''}'.trim();
