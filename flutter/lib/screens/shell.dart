@@ -10,6 +10,7 @@ import '../nav/kotv_page.dart';
 import '../player/playback_guard.dart';
 import '../providers.dart';
 import '../player/play_headers.dart';
+import '../remote/kotv_local_prefs.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
@@ -84,16 +85,18 @@ class _AppShellState extends ConsumerState<AppShell> {
       ..start();
     _postMsg = PostMsgHost(api, navigatorKey: rootNavigatorKey)..start();
     ref.read(remoteBridgeProvider.notifier).state = _bridge;
-    // 启动时同步无痕开关到本地历史写入逻辑
-    api.getSettings().then((st) {
+    // 先暖本机设置；再拉引擎灌入，并同步无痕等。
+    unawaited(KotvLocalPrefs.loadFromDisk());
+    api.getSettings().then((st) async {
       final map = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      await KotvLocalPrefs.hydrate(map);
       final inc = '${map['incognito'] ?? ''}'.toLowerCase() == 'true';
       kotvApplyPlayUaSetting('${map['ua'] ?? ''}');
       final bootLive = '${map['bootLive'] ?? ''}'.toLowerCase();
       if (bootLive == 'true' || bootLive == '1' || bootLive == 'on') {
         if (mounted) goKotvPage(ref, KotvPage.live);
       }
-      return LocalHistory.setIncognito(inc);
+      await LocalHistory.setIncognito(inc);
     }).catchError((_) {});
   }
 

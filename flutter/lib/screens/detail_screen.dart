@@ -36,6 +36,7 @@ import '../player/tv_remote_keys.dart';
 import '../providers.dart';
 import '../nav/kotv_page.dart';
 import '../nav/kotv_routes.dart';
+import '../remote/kotv_local_prefs.dart';
 import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
@@ -345,8 +346,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   int _nextPreloadSerial = 0;
   bool _preloadNextEpisode = false;
   bool _exoDiskCache = false;
-  /// 进页已读的播放相关设置；起播优先复用，避免每次 await getSettings。
-  Map<String, dynamic> _detailPlaySettings = const {};
   RemoteBridge? _boundRemote;
   String _routeId = '';
   String _routeSite = '';
@@ -1324,7 +1323,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       try {
         final st = await ref.read(apiProvider).getSettings();
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-        _detailPlaySettings = settings;
+        await KotvLocalPrefs.hydrate(settings);
         final decode = '${settings['playerDecode'] ?? 'auto'}';
         if (decode.isNotEmpty) {
           _decodeMode = decode;
@@ -1406,7 +1405,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (_prefVolume == 80) {
           final rawVol = double.tryParse('${settings['playerVolume'] ?? ''}');
           if (rawVol != null && rawVol <= 0) {
-            unawaited(ref.read(apiProvider).setSetting('playerVolume', '80'));
+            unawaited(() async {
+              await KotvLocalPrefs.put('playerVolume', '80');
+              await ref.read(apiProvider).setSetting('playerVolume', '80');
+            }());
           }
         }
         kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
@@ -2084,13 +2086,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ? Map<String, dynamic>.from(drmRaw)
           : null;
       final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
-      // 进页缓存的设置；空才兜底拉一次（热改由 onPersist 写回 _pref* / _detailPlaySettings）。
-      var playSettings = Map<String, dynamic>.from(_detailPlaySettings);
+      // 先读本机设置；仍空再拉引擎。
+      var playSettings = await KotvLocalPrefs.snapshot();
       if (playSettings.isEmpty) {
         try {
           final st = await ref.read(apiProvider).getSettings();
           playSettings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-          _detailPlaySettings = playSettings;
+          await KotvLocalPrefs.hydrate(playSettings);
         } catch (_) {}
       }
       if (playSettings.isNotEmpty) {
@@ -2708,11 +2710,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _reapplyPlayerFxSettings() async {
     try {
-      Map<String, dynamic> settings = Map<String, dynamic>.from(_detailPlaySettings);
+      var settings = await KotvLocalPrefs.snapshot();
       if (settings.isEmpty) {
         final st = await ref.read(apiProvider).getSettings();
         settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-        _detailPlaySettings = settings;
+        await KotvLocalPrefs.hydrate(settings);
       }
       if (!mounted) return;
       _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
@@ -2814,8 +2816,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _refreshDanmakuPrefs() async {
     try {
-      final st = await ref.read(apiProvider).getSettings();
-      final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      var settings = await KotvLocalPrefs.snapshot();
+      if (settings.isEmpty) {
+        final st = await ref.read(apiProvider).getSettings();
+        settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+        await KotvLocalPrefs.hydrate(settings);
+      }
       if (!mounted) return;
       setState(() => _applyDanmakuPrefsFromSettings(settings));
     } catch (_) {}
@@ -2932,9 +2938,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           }
         },
         onPersistSetting: (k, v) async {
+          await KotvLocalPrefs.put(k, v);
           await api.setSetting(k, v);
           if (!mounted) return;
-          _cacheDetailPlaySetting(k, v);
           if (k == 'playerScale') {
             setState(() => _aspect = _aspectFromScale(v));
             unawaited(_playback.setVideoScale(v));
@@ -3082,11 +3088,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           }
         },
         onLoadSettings: () async {
-          var map = Map<String, dynamic>.from(_detailPlaySettings);
+          var map = await KotvLocalPrefs.snapshot();
           if (map.isEmpty) {
             final st = await api.getSettings();
             map = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-            _detailPlaySettings = map;
+            await KotvLocalPrefs.hydrate(map);
           }
           return {for (final e in map.entries) e.key: '${e.value}'};
         },
@@ -3388,17 +3394,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
-  void _cacheDetailPlaySetting(String k, String v) {
-    final next = Map<String, dynamic>.from(_detailPlaySettings);
-    next[k] = v;
-    _detailPlaySettings = next;
-  }
-
   /// 内联/迷你播控落盘：音量写回 [_prefVolume]，切集起播才不会还原旧偏好。
   Future<void> _persistInlineSetting(String k, String v) async {
+    await KotvLocalPrefs.put(k, v);
     await ref.read(apiProvider).setSetting(k, v);
     if (!mounted) return;
-    _cacheDetailPlaySetting(k, v);
     if (k == 'playerVolume') {
       final vol = _normalizePlayerVolumePref(v);
       if (vol != null) setState(() => _prefVolume = vol);
@@ -4037,6 +4037,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         },
       );
       if (picked == null) return;
+      await KotvLocalPrefs.put('preferredParse', picked);
       await ref.read(apiProvider).setSetting('preferredParse', picked);
       setState(() => _status = picked.isEmpty ? '解析器: 自动' : '解析器: $picked');
       if (_epIdx >= 0) _playAt(_epIdx);
