@@ -85,10 +85,8 @@ class _AppShellState extends ConsumerState<AppShell> {
       ..start();
     _postMsg = PostMsgHost(api, navigatorKey: rootNavigatorKey)..start();
     ref.read(remoteBridgeProvider.notifier).state = _bridge;
-    // 启动拉引擎设置进进程缓存，并同步无痕等。
-    api.getSettings().then((st) async {
-      final map = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-      KotvSettingsCache.absorb(map);
+    // 启动拉引擎设置，并同步无痕等。
+    KotvSettingsCache.fetch(api, force: true).then((map) async {
       final inc = '${map['incognito'] ?? ''}'.toLowerCase() == 'true';
       kotvApplyPlayUaSetting('${map['ua'] ?? ''}');
       final bootLive = '${map['bootLive'] ?? ''}'.toLowerCase();

@@ -680,7 +680,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         final st = await settingsFut;
         if (!mounted) return;
         settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-        KotvSettingsCache.absorb(settings);
+        KotvSettingsCache.replace(settings);
         _applyLiveBootstrapSettings(settings);
       } catch (_) {}
       if (!mounted) return;

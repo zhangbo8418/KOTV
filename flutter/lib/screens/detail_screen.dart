@@ -2081,7 +2081,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ? Map<String, dynamic>.from(drmRaw)
           : null;
       final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
-      // 进程缓存（来自引擎 API）；空才再拉。
       var playSettings = <String, dynamic>{};
       try {
         playSettings = await KotvSettingsCache.fetch(ref.read(apiProvider));
@@ -3971,13 +3970,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   Future<void> _pickParse() async {
     try {
       final st = await ref.read(apiProvider).getSettings();
+      KotvSettingsCache.replace(st['settings'] as Map?);
       final parses = ((st['parses'] as List?) ?? []).whereType<Map>().toList();
       if (parses.isEmpty) {
         setState(() => _status = '当前配置无解析器');
         return;
       }
       final names = parses.map((e) => '${e['name'] ?? ''}').where((e) => e.isNotEmpty).toList();
-      final cur = '${(st['settings'] as Map?)?['preferredParse'] ?? ''}';
+      final cur = KotvSettingsCache.get('preferredParse');
       final picked = await showDialog<String>(
         context: context,
         useRootNavigator: true,

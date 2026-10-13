@@ -14,6 +14,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'desktop/mini_player_window.dart';
 import 'api/kotv_engine_url.dart';
+import 'api/kotv_settings_cache.dart';
 import 'engine/engine_launcher.dart';
 import 'player/buffer_budget.dart';
 import 'player/play_headers.dart';
@@ -455,6 +456,7 @@ class _EngineOfflinePage extends ConsumerWidget {
       launcher.applyBaseUrl(n);
     }
     ref.read(apiProvider).baseUrl = launcher.baseUrl;
+    KotvSettingsCache.clear();
     ref.invalidate(engineReadyProvider);
   }
 

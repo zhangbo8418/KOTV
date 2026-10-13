@@ -91,7 +91,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       final data = await ref.read(apiProvider).getSettings();
       final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
-      KotvSettingsCache.absorb(map);
+      KotvSettingsCache.replace(map);
       _s = {for (final e in map.entries) e.key: '${e.value ?? ''}'};
       final rt = Map<String, dynamic>.from((data['runtime'] as Map?) ?? {});
       _runtime = {for (final e in rt.entries) e.key: '${e.value ?? ''}'};
@@ -126,10 +126,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _set(String key, String value, {String? msg}) async {
     try {
-      final data = await ref.read(apiProvider).setSetting(key, value);
+      final data = await KotvSettingsCache.set(ref.read(apiProvider), key, value);
       final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
-      KotvSettingsCache.absorb(map);
-      KotvSettingsCache.absorb({key: value});
       setState(() {
         // 合并而非整表替换：避免 API 白名单漏键时把刚写入的值冲掉
         _s = {
@@ -171,10 +169,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _setMany(Map<String, String> kv, {String? msg}) async {
     try {
-      final data = await ref.read(apiProvider).setSettings(kv);
+      final data = await KotvSettingsCache.setMany(ref.read(apiProvider), kv);
       final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
-      KotvSettingsCache.absorb(map);
-      KotvSettingsCache.absorb(kv);
       setState(() {
         _s = {
           ..._s,
@@ -1694,6 +1690,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     launcher.applyBaseUrl(baseUrl);
     ref.read(apiProvider).baseUrl = launcher.baseUrl;
+    KotvSettingsCache.clear();
     ref.invalidate(engineReadyProvider);
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);

@@ -71,7 +71,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     try {
       final st = await ref.read(apiProvider).getSettings();
       final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-      KotvSettingsCache.absorb(settings);
+      KotvSettingsCache.replace(settings);
       final zhuyin = '${settings['searchZhuyin'] ?? ''}'.toLowerCase() == 'true';
       final hot = ((st['searchHot'] as List?) ?? []).map((e) => '$e').where((e) => e.isNotEmpty).toList();
       if (!mounted) return;
