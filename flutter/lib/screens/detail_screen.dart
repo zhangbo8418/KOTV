@@ -213,8 +213,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _chromeRemoteFocus = false;
   int _epPage = 0;
   bool _reversed = false;
-  /// 起播续播 seek（毫秒）；与片头合并后在 play 之前一次性 seek。
+  /// 起播续播 seek（毫秒）；仅当目标集 remarks/flag 与历史一致时并入 startAt。
   int _resumeSeekMs = 0;
+  String _resumeSeekRemarks = '';
+  String _resumeSeekFlag = '';
   DateTime? _lastProgressSave;
   String _configSource = '';
   bool _kept = false;
@@ -343,6 +345,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   int _nextPreloadSerial = 0;
   bool _preloadNextEpisode = false;
   bool _exoDiskCache = false;
+  /// 进页已读的播放相关设置；起播优先复用，避免每次 await getSettings。
+  Map<String, dynamic> _detailPlaySettings = const {};
   RemoteBridge? _boundRemote;
   String _routeId = '';
   String _routeSite = '';
@@ -1320,6 +1324,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       try {
         final st = await ref.read(apiProvider).getSettings();
         final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+        _detailPlaySettings = settings;
         final decode = '${settings['playerDecode'] ?? 'auto'}';
         if (decode.isNotEmpty) {
           _decodeMode = decode;
@@ -1327,6 +1332,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }
         _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
         _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+        _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
+        _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
         final mk = _mk;
         if (mk is NativeMpvPlayback) {
           unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
@@ -1562,6 +1569,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return -1;
   }
 
+  void _clearResumeSeek() {
+    _resumeSeekMs = 0;
+    _resumeSeekRemarks = '';
+    _resumeSeekFlag = '';
+  }
+
   /// 详情就绪后起播：folder mark 优先，否则按历史线路+集名，再否则第一线第一集。
   Future<void> _resumeOrAutoPlay() async {
     final d = _detail;
@@ -1569,7 +1582,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
     var mark = _routeMark.trim();
     var histFlag = '';
-    _resumeSeekMs = 0;
+    _clearResumeSeek();
     if (mark.isEmpty) {
       try {
         final id = _detailId();
@@ -1579,7 +1592,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (h.id == id && h.site == site) {
             mark = h.remarks.trim();
             histFlag = h.flag.trim();
-            if (h.positionMs > 0) _resumeSeekMs = h.positionMs;
+            if (h.positionMs > 0) {
+              _resumeSeekMs = h.positionMs;
+              _resumeSeekRemarks = mark;
+              _resumeSeekFlag = histFlag;
+            }
             break;
           }
         }
@@ -1597,7 +1614,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     var idx = mark.isNotEmpty ? _matchEpisodeIndex(eps, mark) : -1;
     if (idx < 0) {
       idx = 0;
-      _resumeSeekMs = 0; // 未命中历史集则不续播进度
+      _clearResumeSeek(); // 未命中历史集则不续播进度
     }
     if (!mounted) return;
     setState(() {
@@ -1992,6 +2009,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _syncAndroidAutoPip();
     _syncFullscreen();
     if (epLooksMagnet) _startBtProgressPoll();
+    // 与 play 解析并行：只记当前集，同集保留续播进度（勿 push positionMs:0）。
+    unawaited(LocalHistory.touchEpisode(
+      id: _detailId(),
+      name: d.name,
+      pic: d.pic,
+      site: _detailSite(),
+      remarks: ep.name,
+      flag: flag.flag,
+      typeName: d.typeName,
+    ));
     try {
       Map<String, dynamic> data;
       final cached = _nextPlayCache.remove(ep.url);
@@ -2028,6 +2055,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         // 无 msg：多为 Config 副作用，不标「加载失败」。
         final tip = '${data['msg'] ?? ''}'.trim();
         if (!mounted) return;
+        _clearResumeSeek();
         setState(() {
           _status = tip;
           _immersiveEpCover = false;
@@ -2056,21 +2084,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ? Map<String, dynamic>.from(drmRaw)
           : null;
       final hasDrm = drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty;
-      await LocalHistory.push(VodItem(
-        id: _detailId(),
-        name: d.name,
-        pic: d.pic,
-        site: _detailSite(),
-        remarks: ep.name,
-        flag: flag.flag,
-        positionMs: 0,
-        durationMs: 0,
-      ));
-      // 起播再读一次：设置页改播放器/软硬解/渲染/自动切换后，详情页可能还开着。
-      var playSettings = <String, dynamic>{};
-      try {
-        final st = await ref.read(apiProvider).getSettings();
-        playSettings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      // 进页缓存的设置；空才兜底拉一次（热改由 onPersist 写回 _pref* / _detailPlaySettings）。
+      var playSettings = Map<String, dynamic>.from(_detailPlaySettings);
+      if (playSettings.isEmpty) {
+        try {
+          final st = await ref.read(apiProvider).getSettings();
+          playSettings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+          _detailPlaySettings = playSettings;
+        } catch (_) {}
+      }
+      if (playSettings.isNotEmpty) {
         final fo = '${playSettings['playerFailover'] ?? ''}'.trim();
         if (fo.isNotEmpty) {
           _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
@@ -2096,7 +2119,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _exoDiskCache = kotvSettingsFlag(playSettings['exoDiskCache'] ?? 'false', def: false);
         _exo?.applyPlayerOptions(playSettings);
         _fvp?.applyPlayerOptions(playSettings);
-      } catch (_) {}
+      }
       // 每次 failover 新建 Exo/FVP 时用这份，避免仍按进页默认 surface create（ADB: FVP→Exo render=surface）。
       final renderMode = kotvNormalizePlayerRender(_renderMode);
       _renderMode = renderMode;
@@ -2211,8 +2234,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           // 续播与片头合成起点，经 open(startAt) 在首次 play 前定位。
           // ADB：open 返回前若 _openingSeekDone 仍为 false，进度回调会再 seek →
           // 第二次 MediaCodec flush → Render Avg≈1000ms（约 1fps）。
-          final resumeMs = _resumeSeekMs;
-          _resumeSeekMs = 0;
+          // 仅 remarks/flag 与历史一致才吃续播，避免点其它集误带进度。
+          final resumeOk = _resumeSeekMs > 0 &&
+              ep.name.trim() == _resumeSeekRemarks &&
+              (_resumeSeekFlag.isEmpty || flag.flag == _resumeSeekFlag || flag.show == _resumeSeekFlag);
+          final resumeMs = resumeOk ? _resumeSeekMs : 0;
+          _clearResumeSeek();
           final startMs = _skipOpeningEnding ? math.max(_openingSec * 1000, resumeMs) : resumeMs;
           // 片头已并入 startAt：必须在 open 之前置位，堵住 open 内 guard 期间的二次 seek。
           if (_skipOpeningEnding || startMs > 0) {
@@ -2681,8 +2708,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _reapplyPlayerFxSettings() async {
     try {
-      final st = await ref.read(apiProvider).getSettings();
-      final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      Map<String, dynamic> settings = Map<String, dynamic>.from(_detailPlaySettings);
+      if (settings.isEmpty) {
+        final st = await ref.read(apiProvider).getSettings();
+        settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+        _detailPlaySettings = settings;
+      }
       if (!mounted) return;
       _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
       final mk = _mk;
@@ -2903,6 +2934,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         onPersistSetting: (k, v) async {
           await api.setSetting(k, v);
           if (!mounted) return;
+          _cacheDetailPlaySetting(k, v);
           if (k == 'playerScale') {
             setState(() => _aspect = _aspectFromScale(v));
             unawaited(_playback.setVideoScale(v));
@@ -3050,8 +3082,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           }
         },
         onLoadSettings: () async {
-          final st = await api.getSettings();
-          final map = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+          var map = Map<String, dynamic>.from(_detailPlaySettings);
+          if (map.isEmpty) {
+            final st = await api.getSettings();
+            map = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+            _detailPlaySettings = map;
+          }
           return {for (final e in map.entries) e.key: '${e.value}'};
         },
         onPlayerStatus: api.playerStatus,
@@ -3352,10 +3388,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
   }
 
+  void _cacheDetailPlaySetting(String k, String v) {
+    final next = Map<String, dynamic>.from(_detailPlaySettings);
+    next[k] = v;
+    _detailPlaySettings = next;
+  }
+
   /// 内联/迷你播控落盘：音量写回 [_prefVolume]，切集起播才不会还原旧偏好。
   Future<void> _persistInlineSetting(String k, String v) async {
     await ref.read(apiProvider).setSetting(k, v);
     if (!mounted) return;
+    _cacheDetailPlaySetting(k, v);
     if (k == 'playerVolume') {
       final vol = _normalizePlayerVolumePref(v);
       if (vol != null) setState(() => _prefVolume = vol);

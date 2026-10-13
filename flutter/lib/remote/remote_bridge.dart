@@ -124,14 +124,19 @@ class LocalHistory {
     }
   }
 
-  static Future<void> push(VodItem item) async {
-    if (item.id.isEmpty) return;
+  static Future<bool> _incognito() async {
     try {
       final p = await SharedPreferences.getInstance();
       // 无痕：不写本地历史；与引擎 settings.incognito 一致（启动后改设置需重启或走引擎）。
-      final eng = p.getString('kotv_incognito');
-      if (eng == 'true') return;
-    } catch (_) {}
+      return p.getString('kotv_incognito') == 'true';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> push(VodItem item) async {
+    if (item.id.isEmpty) return;
+    if (await _incognito()) return;
     final cur = await _listRaw();
     var stored = item;
     if (item.positionMs <= 0) {
@@ -162,6 +167,47 @@ class LocalHistory {
     cur.insert(0, stored);
     final trimmed = cur.take(60).toList();
     await _persist(trimmed);
+  }
+
+  /// 起播只记「看到哪一集」：同集保留进度；换集才清零进度。勿用 [push](positionMs:0) 冲掉续播。
+  static Future<void> touchEpisode({
+    required String id,
+    required String name,
+    required String pic,
+    required String site,
+    required String remarks,
+    required String flag,
+    String typeName = '',
+  }) async {
+    if (id.isEmpty) return;
+    if (await _incognito()) return;
+    final cur = await _listRaw();
+    var positionMs = 0;
+    var durationMs = 0;
+    for (final e in cur) {
+      if (e.id != id || e.site != site) continue;
+      if (e.remarks == remarks && e.flag == flag) {
+        positionMs = e.positionMs;
+        durationMs = e.durationMs;
+      }
+      break;
+    }
+    cur.removeWhere((e) => e.id == id && e.site == site);
+    cur.insert(
+      0,
+      VodItem(
+        id: id,
+        name: name,
+        pic: pic,
+        site: site,
+        remarks: remarks,
+        flag: flag,
+        typeName: typeName,
+        positionMs: positionMs,
+        durationMs: durationMs,
+      ),
+    );
+    await _persist(cur.take(60).toList());
   }
 
   /// 详情返回真实 id 后迁移键；若新键已存在则去掉旧条目。
