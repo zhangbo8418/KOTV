@@ -17,6 +17,7 @@ class HtmlPlayback extends KotvPlayback {
   VoidCallback? _listener;
   bool _completed = false;
   bool _opening = false;
+  bool _live = false;
   double _volume = 100;
   double _rate = 1;
 
@@ -103,8 +104,10 @@ class HtmlPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     _opening = true;
+    _live = live;
     notifyListeners();
     try {
       await stop();
@@ -138,47 +141,59 @@ class HtmlPlayback extends KotvPlayback {
         } catch (_) {}
       }
       await c.play();
-      await kotvGuardSilentVideo(
-        hasVideoSize: () {
-          if (!identical(_c, c)) return true;
-          final v = c.value;
-          return v.isInitialized && v.size.width > 0 && v.size.height > 0;
-        },
-        isBuffering: () {
-          if (!identical(_c, c)) return false;
-          return _opening || c.value.isBuffering;
-        },
-        sessionAlive: () {
-          if (!identical(_c, c)) return false;
-          final v = c.value;
-          return v.isPlaying || v.position > Duration.zero;
-        },
-        isPlaying: () {
-          if (!identical(_c, c)) return false;
-          return c.value.isPlaying;
-        },
-        position: () => c.value.position,
-        duration: () => c.value.duration,
-        isLiveContent: () =>
-            live ||
-            (identical(_c, c) &&
-                c.value.duration <= Duration.zero &&
-                c.value.isPlaying),
-        hasVideoSource: () => hasVideoSourceHint,
-        isAudioOnly: () => isAudioOnlyContent,
-        onFixVideoSource: tryFixVideoSource,
-      );
-      _opening = false;
-      notifyListeners();
-      final v = c.value;
-      final hasSize = v.isInitialized && v.size.width > 0 && v.size.height > 0;
-      if (!hasSize && !isAudioOnlyContent) {
-        throw const KotvSilentVideoException();
+      if (waitReady) {
+        await awaitReadyAfterOpen();
+      } else {
+        _opening = false;
+        notifyListeners();
       }
     } catch (e) {
       _opening = false;
       notifyListeners();
       rethrow;
+    }
+  }
+
+  @override
+  Future<void> awaitReadyAfterOpen() async {
+    final c = _c;
+    if (c == null) throw const KotvSilentVideoException();
+    await kotvGuardSilentVideo(
+      hasVideoSize: () {
+        if (!identical(_c, c)) return true;
+        final v = c.value;
+        return v.isInitialized && v.size.width > 0 && v.size.height > 0;
+      },
+      isBuffering: () {
+        if (!identical(_c, c)) return false;
+        return _opening || c.value.isBuffering;
+      },
+      sessionAlive: () {
+        if (!identical(_c, c)) return false;
+        final v = c.value;
+        return v.isPlaying || v.position > Duration.zero;
+      },
+      isPlaying: () {
+        if (!identical(_c, c)) return false;
+        return c.value.isPlaying;
+      },
+      position: () => c.value.position,
+      duration: () => c.value.duration,
+      isLiveContent: () =>
+          _live ||
+          (identical(_c, c) &&
+              c.value.duration <= Duration.zero &&
+              c.value.isPlaying),
+      hasVideoSource: () => hasVideoSourceHint,
+      isAudioOnly: () => isAudioOnlyContent,
+      onFixVideoSource: tryFixVideoSource,
+    );
+    _opening = false;
+    notifyListeners();
+    final v = c.value;
+    final hasSize = v.isInitialized && v.size.width > 0 && v.size.height > 0;
+    if (!hasSize && !isAudioOnlyContent) {
+      throw const KotvSilentVideoException();
     }
   }
 

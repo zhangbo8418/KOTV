@@ -412,6 +412,7 @@ class NativeMpvPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     _url = url;
     _live = live;
@@ -501,6 +502,15 @@ class NativeMpvPlayback extends KotvPlayback {
       rethrow;
     }
 
+    if (waitReady) {
+      await awaitReadyAfterOpen();
+    } else {
+      notifyListeners();
+    }
+  }
+
+  @override
+  Future<void> awaitReadyAfterOpen() async {
     await kotvGuardSilentVideo(
       hasVideoSize: () => _ready && _w > 0 && _h > 0,
       isBuffering: () => !_ready || buffering,

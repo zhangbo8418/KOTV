@@ -16,6 +16,10 @@
 # fvp 的 dispose 在删除播放器前等待视频尺寸。尺寸 Completer 被换掉后可能永远等不到，
 # mdkPlayerAPI_delete 不执行，上一集的包缓存就留在进程里。补丁让释放纹理时不等尺寸，并等待删除完成。
 #
+# FvpVideoView.surfaceDestroyed 上游会 release()→nativeSetSurface(null)。全屏改
+# LayoutParams 常触发临时 surfaceDestroyed，整表抹掉 players 后易定格/崩。改成空
+# 实现（与 KotvExo SurfaceView 同语义）；永久卸面仍走 dispose()→release()。
+#
 # prepare 失败写入 _players[-hashCode] 时若覆盖同 key，旧 player 会泄漏；改为先 dispose 再挂新的。
 #
 # Windows 插件原来每帧 CopyResource 进同一张 shared 纹理。Flutter 只在 handle 变化时
@@ -755,5 +759,56 @@ if 'SetGlobalOption("d3d11.device"' not in win_check or 'SetGlobalOption("d3d11.
 if win_check.count("D3D11CreateDevice(") != 1:
     print("ERROR: fvp windows plugin must create the d3d11 device once", file=sys.stderr)
     sys.exit(1)
+
+# Android FvpVideoView：临时 surfaceDestroyed 勿 release（全屏改尺寸会触发）。
+fvp_video_view = (
+    fvp_root
+    / "android"
+    / "src"
+    / "main"
+    / "java"
+    / "com"
+    / "mediadevkit"
+    / "fvp"
+    / "FvpVideoView.java"
+)
+if not fvp_video_view.is_file():
+    print(f"ERROR: missing {fvp_video_view}", file=sys.stderr)
+    sys.exit(1)
+FVP_SURFACE_DESTROYED_OLD = """    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        release();
+    }"""
+FVP_SURFACE_DESTROYED_NEW = """    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        // KOTV patch (scripts/patch-media-kit.sh): fullscreen / LayoutParams
+        // changes often destroy the Surface temporarily. Do not release() here
+        // (that erases native players and freezes or crashes on rebind).
+        // Permanent teardown still goes through dispose() → release().
+    }"""
+fvv_text = fvp_video_view.read_text(encoding="utf-8")
+if FVP_SURFACE_DESTROYED_NEW in fvv_text:
+    print(f"ok fvp ({fvp_version}) already patched: FvpVideoView.surfaceDestroyed no-op")
+elif FVP_SURFACE_DESTROYED_OLD in fvv_text:
+    fvp_video_view.write_text(
+        fvv_text.replace(FVP_SURFACE_DESTROYED_OLD, FVP_SURFACE_DESTROYED_NEW, 1),
+        encoding="utf-8",
+    )
+    print(f"patched fvp ({fvp_version}): FvpVideoView.surfaceDestroyed no-op")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) FvpVideoView.surfaceDestroyed snippet missing; "
+        "upstream changed — update scripts/patch-media-kit.sh",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+fvv_check = fvp_video_view.read_text(encoding="utf-8")
+if "surfaceDestroyed(SurfaceHolder holder) {\n        release();" in fvv_check:
+    print("ERROR: FvpVideoView.surfaceDestroyed still calls release()", file=sys.stderr)
+    sys.exit(1)
+if "dispose() {\n        surfaceView.getHolder().removeCallback(this);\n        release();" not in fvv_check:
+    print("ERROR: FvpVideoView.dispose must still call release()", file=sys.stderr)
+    sys.exit(1)
+
 print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
 PY

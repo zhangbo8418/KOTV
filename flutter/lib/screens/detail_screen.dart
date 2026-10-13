@@ -755,7 +755,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
-  /// 先 pause 停声，再卸画面 / release，避免 WASAPI 边播边拆卡音（不改音量）。
+  /// soft pause → release → 清宿主 → dispose 包装类（不改音量）。
   /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
   Future<void> _stopHard() async {
     try {
@@ -787,8 +787,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(api.cancelPending(hard: false, thunder: false));
     }
 
-    // 全后端统一：soft pause → release → 清 _playUrl 卸视图 → dispose 包装类。
-    // 见 [KotvPlayback.release] 契约；勿先卸 PlatformView（FVP/mdk Redmi 崩）。
+    // soft pause → release（FVP Surface 在引擎内先摘 VideoPlayer）→ 清 _playUrl → dispose 包装类。
     final fvp = _fvp;
     final mk = _mk;
     final exo = _exo;
@@ -2052,7 +2051,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       for (var attempt = 0; attempt < 8; attempt++) {
         if (serial != _playAtSerial || !mounted) return;
         failover.markAttempt();
-        // 先停闲置后端（含旧 FVP），再改 _playerVal，避免先卸 Surface 再 release。
+        // 先停闲置后端（含旧 FVP），再改 _playerVal，避免换引擎时宿主仍挂旧面。
         final nextVal = failover.playerVal;
         final nextDecode = failover.decodeMode;
         await _stopInactiveBackends(kotvEmbedBackend(nextVal));
@@ -2457,7 +2456,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             _lastVideoPaintRect!.height >= 1)
         ? _lastVideoPaintRect
         : null;
-    // 仍无几何且正在播：用 Stack 尺寸顶住，绝不能 shrink 卸 PlatformView（FVP Surface 会崩）。
+    // 仍无几何且正在播：用 Stack 尺寸顶住，避免 shrink 卸掉 Hybrid PlatformView。
     if (paint == null && _playUrl.isNotEmpty) {
       final s = (stackSize != null && stackSize.width >= 1 && stackSize.height >= 1)
           ? stackSize

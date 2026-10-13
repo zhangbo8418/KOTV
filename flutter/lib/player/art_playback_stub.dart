@@ -43,6 +43,7 @@ class ArtPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     throw UnsupportedError('ArtPlayer 仅支持 Web');
   }

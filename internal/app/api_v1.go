@@ -1612,9 +1612,24 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 		}
 		liveSrc = srcs[index]
 	}
+	if force {
+		a.liveLoadMu.Lock()
+		a.liveLoadCachedSrc = nil
+		a.liveLoadCached = nil
+		a.liveLoadMu.Unlock()
+	}
 	loaded, err := lv.Load(liveSrc, force)
 	if err != nil {
 		return nil, err
+	}
+	if !force {
+		a.liveLoadMu.Lock()
+		if a.liveLoadCached != nil && a.liveLoadCachedSrc == loaded {
+			out := a.liveLoadCached
+			a.liveLoadMu.Unlock()
+			return out, nil
+		}
+		a.liveLoadMu.Unlock()
 	}
 	groups := make([]map[string]any, 0, len(loaded.Groups))
 	for gi, g := range loaded.Groups {
@@ -1665,12 +1680,17 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 	if name == "" {
 		name = loaded.URL
 	}
-	return map[string]any{
+	out := map[string]any{
 		"ok":     true,
 		"name":   name,
 		"url":    loaded.URL,
 		"groups": groups,
-	}, nil
+	}
+	a.liveLoadMu.Lock()
+	a.liveLoadCachedSrc = loaded
+	a.liveLoadCached = out
+	a.liveLoadMu.Unlock()
+	return out, nil
 }
 
 func (a *App) liveChannelAt(group, channel int) (*model.Live, *model.LiveGroup, *model.LiveChannel, error) {

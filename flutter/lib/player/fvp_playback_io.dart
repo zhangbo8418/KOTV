@@ -164,82 +164,40 @@ class FvpPlayback extends KotvPlayback {
   String? get currentSecondarySubtitleId => _currentSecondarySubtitleId;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
-    final c = _c;
-    if (c == null) {
-      return const ColoredBox(color: Colors.black);
-    }
-    final err = c.value.errorDescription ?? _lastError;
-    if (err != null && err.isNotEmpty && !c.value.isInitialized) {
-      return ColoredBox(
-        color: Colors.black,
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              err,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
-            ),
-          ),
-        ),
-      );
-    }
-    // VideoPlayer 必须是 ValueListenableBuilder 的 child：_viewGen 只重建尺寸壳，
-    // 勿重建 PlatformView（surfaceDestroyed→nativeSetSurface 会在 libmdk 崩）。
+    // 外层听 _viewGen：release 时 _c=null + bump 即可卸掉 VideoPlayer（页面不 setState）。
+    // VideoPlayer 在 [_FvpVideoShellState] 内只建一次，尺寸壳重建不重建 PlatformView。
     return ValueListenableBuilder<int>(
       valueListenable: _viewGen,
-      builder: (context, _, child) {
-        final scale = _videoScale.trim().isEmpty ? 'default' : _videoScale.trim();
-        final surfaceLayout = _androidSurface;
-        return ColoredBox(
-          color: Colors.black,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              var max = constraints.biggest;
-              if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
-                max = const Size(16, 9);
-              }
-              final sz = c.value.size;
-              final hasSize = c.value.isInitialized && sz.width > 0 && sz.height > 0;
-              final videoSize = hasSize ? sz : const Size(16, 9);
-              final effective = kotvFitFromVideoScale(scale, fit);
-              final Size box;
-              if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
-                box = max;
-              } else if (hasSize) {
-                box = kotvBoxForVideoScale(max, videoSize, scale);
-              } else {
-                box = max;
-              }
-              final w = box.width.isFinite && box.width > 0 ? box.width : max.width;
-              final h = box.height.isFinite && box.height > 0 ? box.height : max.height;
-              final Widget painted;
-              if (surfaceLayout) {
-                painted = SizedBox(width: w, height: h, child: child);
-              } else {
-                painted = SizedBox(
-                  width: w,
-                  height: h,
-                  child: FittedBox(
-                    fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
-                    child: SizedBox(
-                      width: videoSize.width,
-                      height: videoSize.height,
-                      child: child,
-                    ),
-                  ),
-                );
-              }
-              final centered = Center(child: painted);
-              if (effective == BoxFit.cover) {
-                return ClipRect(child: centered);
-              }
-              return centered;
-            },
-          ),
+      builder: (context, _, __) {
+        final c = _c;
+        if (c == null) {
+          return const ColoredBox(color: Colors.black);
+        }
+        final err = c.value.errorDescription ?? _lastError;
+        if (err != null && err.isNotEmpty && !c.value.isInitialized) {
+          return ColoredBox(
+            color: Colors.black,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  err,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ),
+            ),
+          );
+        }
+        // key 只绑 controller：比例/尺寸 bump 时复用同一 VideoPlayer State。
+        return _FvpVideoShell(
+          key: ValueKey<Object>(c),
+          controller: c,
+          fit: fit,
+          videoScale: _videoScale,
+          surfaceLayout: _androidSurface,
         );
       },
-      child: VideoPlayer(c),
     );
   }
 
@@ -247,8 +205,12 @@ class FvpPlayback extends KotvPlayback {
     _viewGen.value++;
   }
 
-  /// 先 pause/dispose 清掉 native players map，再卸 VideoPlayer。
-  /// 若先 _bumpView 卸 PlatformView：surfaceDestroyed→nativeSetSurface 时 mdk 仍在 map → 崩。
+  /// 停声后卸掉 [VideoPlayer]，再 `c.dispose()`。
+  ///
+  /// Android Surface（platformView）：Dart dispose **不会**对负 surfaceId 调
+  /// nativeSetSurface；原生 map 只靠 [FvpVideoView.dispose]→release。须先让
+  /// buildView 摘掉 VideoPlayer（player 仍活），再 mdk 删除，否则卸树时 UAF。
+  /// Texture：dispose 内 ReleaseRT 可清正 textureId；仍先摘视图再 dispose。
   Future<void> _disposeController() async {
     final c = _c;
     final l = _listener;
@@ -259,23 +221,21 @@ class FvpPlayback extends KotvPlayback {
         c.removeListener(l);
       } catch (_) {}
     }
-    await kotvTeardownPlayback(
-      stop: () async {
-        try {
-          await c.pause();
-        } catch (_) {}
-        try {
-          c.setBufferRange(min: 0, max: 1, drop: true);
-        } catch (_) {}
-      },
-      dispose: () async {
-        await c.dispose();
-      },
-      drain: const Duration(milliseconds: 50),
-    );
+    try {
+      await c.pause();
+    } catch (_) {}
+    try {
+      c.setBufferRange(min: 0, max: 1, drop: true);
+    } catch (_) {}
     if (!identical(_c, c)) return;
+    // 先从树上摘掉 VideoPlayer → PlatformView dispose → nativeSetSurface(null)（player 仍活）。
     _c = null;
     _bumpView();
+    await SchedulerBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    try {
+      await c.dispose();
+    } catch (_) {}
   }
 
   @override
@@ -286,6 +246,7 @@ class FvpPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     final clearKeyHex = kotvIsLocalClearKey(drm) ? kotvClearKeyHex(drm) : null;
     if (drm != null && '${drm['type'] ?? ''}'.trim().isNotEmpty && clearKeyHex == null) {
@@ -323,9 +284,8 @@ class FvpPlayback extends KotvPlayback {
       await _disposeController();
       notifyListeners();
       final h = kotvNormalizePlayHeaders(headers, url: url);
-      // 点播续播/片头：X-KOTV-Prepare-Ms → fvp patch prepare(ms)（对齐 Mac MPV Media.start /
-      // mdk prepare(startPosition)）。勿 prepare(0) 后再 seekTo——安卓 AMediaCodec
-      // STARTED→FLUSHING→Avg≈1000ms；Mac FVP 走 VT，无此链。
+      // 点播续播/片头：X-KOTV-Prepare-Ms → fvp patch prepare(ms)（mdk prepare startPosition）。
+      // 勿 prepare(0) 后再 seekTo——安卓 AMediaCodec STARTED→FLUSHING 代价高。
       final openHeaders = Map<String, String>.from(h);
       if (startAt > Duration.zero) {
         openHeaders['X-KOTV-Prepare-Ms'] = '${startAt.inMilliseconds}';
@@ -438,15 +398,31 @@ class FvpPlayback extends KotvPlayback {
         _opening = false;
       }
       notifyListeners();
-      await _guardSilentVideo(c);
-      _refreshTracksQuiet();
-      _applySecondaryAutoIfNeeded();
+      if (waitReady) {
+        await awaitReadyAfterOpen();
+      } else {
+        _refreshTracksQuiet();
+        _applySecondaryAutoIfNeeded();
+        notifyListeners();
+      }
     } catch (e) {
       _lastError = '$e';
       _opening = false;
       notifyListeners();
       rethrow;
     }
+  }
+
+  @override
+  Future<void> awaitReadyAfterOpen() async {
+    final c = _c;
+    if (c == null) {
+      throw const KotvSilentVideoException();
+    }
+    await _guardSilentVideo(c);
+    _refreshTracksQuiet();
+    _applySecondaryAutoIfNeeded();
+    notifyListeners();
   }
 
   /// 开播后短等出尺寸；仍无画面且会话存活则抛 [KotvSilentVideoException]。
@@ -618,7 +594,14 @@ class FvpPlayback extends KotvPlayback {
     notifyListeners();
   }
 
-  // 换源必须新建 VideoPlayerController，故不覆写 stopForEpisodeSwitch（默认走 stop/dispose）。
+  @override
+  Future<void> stopForEpisodeSwitch() async {
+    // 只停声；换源由 open() 单次 dispose+再建，避免换台双重 endOfFrame+50ms。
+    try {
+      await _c?.pause();
+    } catch (_) {}
+    notifyListeners();
+  }
 
   @override
   Future<void> release() => stop();
@@ -1190,5 +1173,81 @@ class FvpPlayback extends KotvPlayback {
       } catch (_) {}
     }());
     super.dispose();
+  }
+}
+
+/// 尺寸/比例壳；[VideoPlayer] 在 State 里只建一次，比例变化只改外层 SizedBox。
+class _FvpVideoShell extends StatefulWidget {
+  const _FvpVideoShell({
+    super.key,
+    required this.controller,
+    required this.fit,
+    required this.videoScale,
+    required this.surfaceLayout,
+  });
+
+  final VideoPlayerController controller;
+  final BoxFit fit;
+  final String videoScale;
+  final bool surfaceLayout;
+
+  @override
+  State<_FvpVideoShell> createState() => _FvpVideoShellState();
+}
+
+class _FvpVideoShellState extends State<_FvpVideoShell> {
+  late final Widget _video = VideoPlayer(widget.controller);
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = widget.videoScale.trim().isEmpty ? 'default' : widget.videoScale.trim();
+    final c = widget.controller;
+    return ColoredBox(
+      color: Colors.black,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          var max = constraints.biggest;
+          if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
+            max = const Size(16, 9);
+          }
+          final sz = c.value.size;
+          final hasSize = c.value.isInitialized && sz.width > 0 && sz.height > 0;
+          final videoSize = hasSize ? sz : const Size(16, 9);
+          final effective = kotvFitFromVideoScale(scale, widget.fit);
+          final Size box;
+          if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
+            box = max;
+          } else if (hasSize) {
+            box = kotvBoxForVideoScale(max, videoSize, scale);
+          } else {
+            box = max;
+          }
+          final w = box.width.isFinite && box.width > 0 ? box.width : max.width;
+          final h = box.height.isFinite && box.height > 0 ? box.height : max.height;
+          final Widget painted;
+          if (widget.surfaceLayout) {
+            painted = SizedBox(width: w, height: h, child: _video);
+          } else {
+            painted = SizedBox(
+              width: w,
+              height: h,
+              child: FittedBox(
+                fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
+                child: SizedBox(
+                  width: videoSize.width,
+                  height: videoSize.height,
+                  child: _video,
+                ),
+              ),
+            );
+          }
+          final centered = Center(child: painted);
+          if (effective == BoxFit.cover) {
+            return ClipRect(child: centered);
+          }
+          return centered;
+        },
+      ),
+    );
   }
 }

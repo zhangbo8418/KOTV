@@ -49,6 +49,8 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// [live]=true：直播页语境，跳过点播 KotvBufferBudget 预读。
   /// [startAt]>0：开播定位。MPV=Media/loadfile start；FVP=prepare(ms)（勿 prepare(0) 后再 seek）。
+  /// [waitReady]=false：只把媒体交给引擎即返回（直播换台）；出画守卫由调用方后台跑。
+  /// 默认 true：等 silent-video 守卫完成（点播详情）。
   Future<void> open(
     String url, {
     Map<String, String>? headers,
@@ -56,7 +58,11 @@ abstract class KotvPlayback extends ChangeNotifier {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   });
+
+  /// [open] 在 [waitReady]=false 时跳过的出画守卫；直播换台后台调用以触发 failover。
+  Future<void> awaitReadyAfterOpen() async {}
   Future<void> playOrPause();
   Future<void> play();
   Future<void> pause();
@@ -151,11 +157,11 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// 离开详情/直播/切 Tab：拆掉原生播放器与 AO，避免后台漏音。
   ///
-  /// **页面契约（全后端统一）**：`await release()` 完成前，禁止清掉画面宿主
-  ///（如 `_playUrl=''` + setState 卸 PlatformView/Texture）。
-  /// 若先卸视图：Android Hybrid 可能在 `surfaceDestroyed` 时仍回调原生
-  ///（FVP/mdk 会崩；Exo/MPV 亦可能定格或抛 Surface 已释放）。
-  /// 正确顺序：soft pause → `await release()` → 再卸视图 → `dispose()` 包装类。
+  /// **页面契约**：soft pause → `await release()` → 再清 `_playUrl` 卸宿主 →
+  /// `dispose()` 包装类。`release()` 内须先停声并拆掉原生绑定；FVP Android
+  /// Surface（platformView）在引擎内先摘掉 [VideoPlayer] 再 `c.dispose()`，
+  /// 因负 surfaceId 不会走 ReleaseRT，原生 map 只靠 PlatformView.dispose。
+  /// Texture / Exo / MPV：release 内或插件侧清面后即可删 player。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
   Future<void> release() => stop();
 
@@ -242,9 +248,10 @@ Future<void> kotvStopPlayersForEpisodeSwitch(Iterable<KotvPlayback?> players) as
   await Future.wait<void>(players.map(one));
 }
 
-/// 页面硬停：先 [KotvPlayback.release] 清原生，**调用方再卸画面宿主**。
+/// 页面硬停：先 [KotvPlayback.release]（含 FVP 先卸 PlatformView 再删 mdk），
+/// **调用方再清 `_playUrl` 卸页面宿主**。
 ///
-/// [waitFirst]（通常为 FVP）单独等完，勿与其它后端共用 timeout 半路放弃。
+/// [waitFirst]（通常为 FVP）单独等完卸面+dispose，勿与其它后端共用 timeout 半路放弃。
 Future<void> kotvHardReleasePlayers(
   Iterable<KotvPlayback?> players, {
   KotvPlayback? waitFirst,

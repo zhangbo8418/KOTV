@@ -60,6 +60,7 @@ class HtmlPlayback extends KotvPlayback {
   Timer? _tick;
   bool _completed = false;
   bool _opened = false;
+  bool _live = false;
   bool _buffering = false;
   bool _loop = false;
   double _volume = 100;
@@ -193,11 +194,13 @@ class HtmlPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     await stop();
     _completed = false;
     _buffering = true;
     _opened = true;
+    _live = live;
     final h = kotvNormalizePlayHeaders(headers, url: url);
     final hdrJs = h.isEmpty ? null : h.jsify();
     final drmJs = (drm == null || drm.isEmpty) ? null : drm.jsify();
@@ -229,6 +232,18 @@ class HtmlPlayback extends KotvPlayback {
     } catch (_) {
       // 自动播放策略可能拒绝；等用户点播放
     }
+    if (waitReady) {
+      await awaitReadyAfterOpen();
+    } else {
+      _width = _video.videoWidth;
+      _height = _video.videoHeight;
+      _buffering = false;
+      notifyListeners();
+    }
+  }
+
+  @override
+  Future<void> awaitReadyAfterOpen() async {
     await kotvGuardSilentVideo(
       hasVideoSize: () => _video.videoWidth > 0 && _video.videoHeight > 0,
       isBuffering: () => _buffering || _video.readyState < 3,
@@ -241,7 +256,7 @@ class HtmlPlayback extends KotvPlayback {
         return Duration(milliseconds: (d * 1000).round());
       },
       isLiveContent: () {
-        if (live) return true;
+        if (_live) return true;
         final d = _video.duration;
         return d.isInfinite;
       },

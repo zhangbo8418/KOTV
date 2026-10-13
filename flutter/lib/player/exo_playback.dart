@@ -409,6 +409,7 @@ class ExoPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     _url = url;
     _live = live;
@@ -512,7 +513,17 @@ class ExoPlayback extends KotvPlayback {
       final detail = (e.message ?? e.code).trim();
       throw StateError('Exo 无法播放该地址（$detail）。可换线路或改用其它播放器');
     }
-    // 慢源：未 READY 也按缓冲逻辑最多等 60s，避免过早切播放器。
+    if (waitReady) {
+      await awaitReadyAfterOpen();
+    } else {
+      unawaited(_refreshTrackCounts());
+      notifyListeners();
+    }
+  }
+
+  @override
+  Future<void> awaitReadyAfterOpen() async {
+    // 慢源：未 READY 也按缓冲逻辑最多等，避免过早切播放器。
     await kotvGuardSilentVideo(
       hasVideoSize: () => _ready && _w > 0 && _h > 0,
       isBuffering: () => !_ready || buffering,
@@ -771,15 +782,8 @@ class ExoPlayback extends KotvPlayback {
       _surfaceLayerEnabled = enabled;
       return;
     }
-    if (_surfaceLayerEnabled == enabled) {
-      if (enabled) {
-        try {
-          await _ensureNative();
-          await _ch.invokeMethod('setSurfaceLayerEnabled', {'enabled': true});
-        } catch (_) {}
-      }
-      return;
-    }
+    // 已是目标态：勿重复 IPC（换台 open→_syncSurfaceLayer 热路径）。
+    if (_surfaceLayerEnabled == enabled) return;
     _surfaceLayerEnabled = enabled;
     try {
       await _ensureNative();

@@ -74,6 +74,7 @@ class WebJsPlayback extends KotvPlayback {
   Timer? _tick;
   bool _completed = false;
   bool _opened = false;
+  bool _live = false;
   bool _buffering = false;
   bool _loop = false;
   bool _playing = false;
@@ -285,12 +286,14 @@ class WebJsPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     await stop();
     _completed = false;
     _buffering = true;
     _opened = true;
     _playing = false;
+    _live = live;
     final h = kotvNormalizePlayHeaders(headers, url: url);
     final hdrJs = h.isEmpty ? null : h.jsify();
     try {
@@ -319,6 +322,17 @@ class WebJsPlayback extends KotvPlayback {
     try {
       _api.play(_container);
     } catch (_) {}
+    if (waitReady) {
+      await awaitReadyAfterOpen();
+    } else {
+      _pullState();
+      _buffering = false;
+      notifyListeners();
+    }
+  }
+
+  @override
+  Future<void> awaitReadyAfterOpen() async {
     await kotvGuardSilentVideo(
       hasVideoSize: () {
         _pullState();
@@ -342,7 +356,7 @@ class WebJsPlayback extends KotvPlayback {
         return _duration;
       },
       isLiveContent: () {
-        if (live) return true;
+        if (_live) return true;
         _pullState();
         return _duration == Duration.zero && _playing;
       },

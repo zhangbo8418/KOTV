@@ -43,6 +43,7 @@ class XgPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     throw UnsupportedError('xgplayer 仅支持 Web');
   }

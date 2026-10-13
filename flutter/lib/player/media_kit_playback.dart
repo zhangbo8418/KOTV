@@ -317,6 +317,7 @@ class MediaKitPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     _url = url;
     _live = live;
@@ -372,7 +373,16 @@ class MediaKitPlayback extends KotvPlayback {
     // 与原生 MPV / Exo 一致：未 loaded 视作「未在播的缓冲」只等；loaded 后才进黑屏判定。
     // stop()/换集会重置 media_kit 状态（_loaded 回 false），必须用会话号让旧守卫
     // 看到「不缓冲且已死」而退出，否则 open() 永远不返回。
-    final session = ++_openSerial;
+    _openSerial++;
+    if (waitReady) {
+      await awaitReadyAfterOpen();
+    }
+  }
+
+  @override
+  Future<void> awaitReadyAfterOpen() async {
+    final session = _openSerial;
+    final live = _live;
     bool sameSession() => _openSerial == session && _url.isNotEmpty;
     await kotvGuardSilentVideo(
       hasVideoSize: () => width > 0 && height > 0,

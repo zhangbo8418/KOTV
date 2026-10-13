@@ -43,6 +43,7 @@ class FvpPlayback extends KotvPlayback {
     bool live = false,
     String? format,
     Duration startAt = Duration.zero,
+    bool waitReady = true,
   }) async {
     throw UnsupportedError('FVP 不支持 Web');
   }
