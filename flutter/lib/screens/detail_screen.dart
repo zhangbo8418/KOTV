@@ -295,6 +295,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   final GlobalKey _detailStackKey = GlobalKey(debugLabel: 'kotv_detail_stack');
   final GlobalKey _bodyClipKey = GlobalKey(debugLabel: 'kotv_detail_body_clip');
   Rect? _videoLayerRect;
+  /// 上一帧有效绘制矩形；全屏进出短暂量不到黑槽时复用，避免卸掉 Hybrid Surface。
+  Rect? _lastVideoPaintRect;
   bool _videoSlotSyncScheduled = false;
   /// 当前是否磁力/BT 本地流（状态文案与卡顿语义不同）。
   bool _magnetPlay = false;
@@ -822,12 +824,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       softPause(_zw),
     ]);
 
-    _playUrl = '';
-    if (mounted) {
-      setState(() {});
-      await WidgetsBinding.instance.endOfFrame;
-    }
-
     final fvp = _fvp;
     final mk = _mk;
     final exo = _exo;
@@ -836,14 +832,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final xg = _xg;
     final zw = _zw;
     final mkPlayer = _mkPlayer;
-    _fvp = null;
-    _mk = null;
-    _exo = null;
-    _html = null;
-    _art = null;
-    _xg = null;
-    _zw = null;
-    _mkPlayer = null;
 
     Future<void> hardRelease(KotvPlayback? p) async {
       if (p == null) return;
@@ -856,9 +844,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       }
     }
 
-    // FVP dispose 已在引擎内限时；整段硬停再封顶，避免任一后端拖死返回。
+    // 必须先 release（清 mdk players map），再清 _playUrl 卸 Hybrid Surface。
+    // 若先卸：PlatformViews.dispose → surfaceDestroyed → nativeSetSurface 时 mdk 仍在 → Redmi 崩。
+    // FVP 单独等完，勿与其它后端共用 timeout 半路放弃（否则仍会带活 mdk 卸 Surface）。
+    try {
+      await hardRelease(fvp).timeout(const Duration(seconds: 3));
+    } catch (_) {}
     await Future.wait<void>([
-      hardRelease(fvp),
       hardRelease(mk),
       hardRelease(exo),
       hardRelease(html),
@@ -866,6 +858,22 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       hardRelease(xg),
       hardRelease(zw),
     ]).timeout(const Duration(seconds: 2), onTimeout: () => <void>[]);
+
+    _fvp = null;
+    _mk = null;
+    _exo = null;
+    _html = null;
+    _art = null;
+    _xg = null;
+    _zw = null;
+    _mkPlayer = null;
+    _playUrl = '';
+    _lastVideoPaintRect = null;
+    _videoLayerRect = null;
+    if (mounted) {
+      setState(() {});
+      await WidgetsBinding.instance.endOfFrame;
+    }
 
     // media_kit Player 由页面持有：走 engine.release()。
     await kotvDisposeMpvPlayer(mkPlayer);
@@ -2449,9 +2457,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _syncVideoSlotRect();
     });
   }
-  /// 非全屏：把黑槽在详情 Stack 内的位置/尺寸写入 [_videoLayerRect]。
+  /// 把黑槽在详情 Stack 内的位置/尺寸写入 [_videoLayerRect]。
+  /// 沉浸全屏时详情树 Offstage 仍可布局，继续量槽便于退出立刻有矩形。
   void _syncVideoSlotRect() {
-    if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
+    if (!mounted || !_useStableVideoLayer) return;
     final slotBox = _videoSlotKey.currentContext?.findRenderObject() as RenderBox?;
     final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
     if (slotBox == null ||
@@ -2488,8 +2497,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       builder: (context, constraints) {
         final size = constraints.biggest;
         final prev = _videoLayerRect;
-        if (!_immersiveFullscreen &&
-            size.width >= 1 &&
+        if (size.width >= 1 &&
             size.height >= 1 &&
             (prev == null ||
                 (prev.width - size.width).abs() >= 0.5 ||
@@ -2520,21 +2528,32 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Widget _buildStableVideoLayer(BuildContext context, {Size? stackSize}) {
     final rect = _stableVideoRect(context, stackSize: stackSize);
-    // 尚无黑槽几何时保留上一帧矩形，避免卸掉 Hybrid Surface。
-    final paint = (rect.width >= 1 && rect.height >= 1)
-        ? rect
-        : (_videoLayerRect != null &&
-                _videoLayerRect!.width >= 1 &&
-                _videoLayerRect!.height >= 1
-            ? _videoLayerRect!
-            : null);
+    Rect? paint = (rect.width >= 1 && rect.height >= 1) ? rect : null;
+    paint ??= (_videoLayerRect != null &&
+            _videoLayerRect!.width >= 1 &&
+            _videoLayerRect!.height >= 1)
+        ? _videoLayerRect
+        : null;
+    paint ??= (_lastVideoPaintRect != null &&
+            _lastVideoPaintRect!.width >= 1 &&
+            _lastVideoPaintRect!.height >= 1)
+        ? _lastVideoPaintRect
+        : null;
+    // 仍无几何且正在播：用 Stack 尺寸顶住，绝不能 shrink 卸 PlatformView（FVP Surface 会崩）。
+    if (paint == null && _playUrl.isNotEmpty) {
+      final s = (stackSize != null && stackSize.width >= 1 && stackSize.height >= 1)
+          ? stackSize
+          : MediaQuery.sizeOf(context);
+      if (s.width >= 1 && s.height >= 1) paint = Offset.zero & s;
+    }
     if (paint == null) return const SizedBox.shrink();
+    _lastVideoPaintRect = paint;
     return ValueListenableBuilder<double>(
       valueListenable: _fsSwipeDy,
       builder: (context, swipeDy, child) {
         final dy = _immersiveFullscreen ? swipeDy : 0.0;
         return Positioned(
-          left: paint.left,
+          left: paint!.left,
           top: paint.top + dy,
           width: paint.width,
           height: paint.height,
@@ -3495,25 +3514,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             key: _detailStackKey,
             fit: StackFit.expand,
             children: [
-              // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
-              // 仅氛围模式去掉黑底，四周才透 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影。
-              // 桌面 Offstage 保活（media_kit Texture 不宜整树卸装）。
-              if (kotvIsAndroid()) ...[
-                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
-                if (!_immersiveFullscreen) detailScaffold,
-              ] else ...[
-                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
-                Offstage(
-                  offstage: _immersiveFullscreen,
-                  child: ExcludeFocus(
-                    excluding: _immersiveFullscreen,
-                    child: TickerMode(
-                      enabled: !_immersiveFullscreen,
-                      child: detailScaffold,
-                    ),
+              // 沉浸默认黑底；氛围模式才透壁纸。详情树 Offstage 保活（含黑槽），
+              // 便于退出全屏量几何；勿卸树以免 Hybrid Surface 短暂失配。
+              if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
+              Offstage(
+                offstage: _immersiveFullscreen,
+                child: ExcludeFocus(
+                  excluding: _immersiveFullscreen,
+                  child: TickerMode(
+                    enabled: !_immersiveFullscreen,
+                    child: detailScaffold,
                   ),
                 ),
-              ],
+              ),
               // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏矩形已与顶栏下内容区相交。
               if (_playUrl.isNotEmpty) _buildStableVideoLayer(context, stackSize: stackSize),
               // 换集过渡黑盖：仅 Android Hybrid；桌面 Texture 不盖。

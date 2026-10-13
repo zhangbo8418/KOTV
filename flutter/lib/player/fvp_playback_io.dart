@@ -164,18 +164,6 @@ class FvpPlayback extends KotvPlayback {
   String? get currentSecondarySubtitleId => _currentSecondarySubtitleId;
 
   Widget buildView({BoxFit fit = BoxFit.contain}) {
-    // 只跟 _viewGen（尺寸/比例），不跟 position/buffering 的 notifyListeners。
-    return ValueListenableBuilder<int>(
-      valueListenable: _viewGen,
-      builder: (context, _, __) => _buildViewBody(fit: fit),
-    );
-  }
-
-  void _bumpView() {
-    _viewGen.value++;
-  }
-
-  Widget _buildViewBody({required BoxFit fit}) {
     final c = _c;
     if (c == null) {
       return const ColoredBox(color: Colors.black);
@@ -196,72 +184,76 @@ class FvpPlayback extends KotvPlayback {
         ),
       );
     }
-    // VideoPlayer 须固定在同一子树位置（ColoredBox→LayoutBuilder→Center→SizedBox→…）。
-    // Texture：size 0↔正 时勿换父级，否则 ImageReader 反复 disconnect。
-    // Surface/platformView：吃不到 FittedBox，按视频比例给真实布局尺寸；勿因约束抖动改祖先链。
-    final scale = _videoScale.trim().isEmpty ? 'default' : _videoScale.trim();
-    final surfaceLayout = _androidSurface;
-    return ColoredBox(
-      color: Colors.black,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          var max = constraints.biggest;
-          if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
-            max = const Size(16, 9);
-          }
-          final sz = c.value.size;
-          final hasSize = c.value.isInitialized && sz.width > 0 && sz.height > 0;
-          final videoSize = hasSize ? sz : const Size(16, 9);
-          final effective = kotvFitFromVideoScale(scale, fit);
-          final Size box;
-          if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
-            box = max;
-          } else if (hasSize) {
-            box = kotvBoxForVideoScale(max, videoSize, scale);
-          } else {
-            box = max;
-          }
-          final w = box.width.isFinite && box.width > 0 ? box.width : max.width;
-          final h = box.height.isFinite && box.height > 0 ? box.height : max.height;
-          final Widget painted;
-          if (surfaceLayout) {
-            painted = SizedBox(width: w, height: h, child: VideoPlayer(c));
-          } else {
-            painted = SizedBox(
-              width: w,
-              height: h,
-              child: FittedBox(
-                fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
-                child: SizedBox(
-                  width: videoSize.width,
-                  height: videoSize.height,
-                  child: VideoPlayer(c),
-                ),
-              ),
-            );
-          }
-          final centered = Center(child: painted);
-          if (effective == BoxFit.cover) {
-            return ClipRect(child: centered);
-          }
-          return centered;
-        },
-      ),
+    // VideoPlayer 必须是 ValueListenableBuilder 的 child：_viewGen 只重建尺寸壳，
+    // 勿重建 PlatformView（surfaceDestroyed→nativeSetSurface 会在 libmdk 崩）。
+    return ValueListenableBuilder<int>(
+      valueListenable: _viewGen,
+      builder: (context, _, child) {
+        final scale = _videoScale.trim().isEmpty ? 'default' : _videoScale.trim();
+        final surfaceLayout = _androidSurface;
+        return ColoredBox(
+          color: Colors.black,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              var max = constraints.biggest;
+              if (!max.width.isFinite || !max.height.isFinite || max.width <= 0 || max.height <= 0) {
+                max = const Size(16, 9);
+              }
+              final sz = c.value.size;
+              final hasSize = c.value.isInitialized && sz.width > 0 && sz.height > 0;
+              final videoSize = hasSize ? sz : const Size(16, 9);
+              final effective = kotvFitFromVideoScale(scale, fit);
+              final Size box;
+              if (effective == BoxFit.fill && kotvForcedAspectRatio(scale) == null) {
+                box = max;
+              } else if (hasSize) {
+                box = kotvBoxForVideoScale(max, videoSize, scale);
+              } else {
+                box = max;
+              }
+              final w = box.width.isFinite && box.width > 0 ? box.width : max.width;
+              final h = box.height.isFinite && box.height > 0 ? box.height : max.height;
+              final Widget painted;
+              if (surfaceLayout) {
+                painted = SizedBox(width: w, height: h, child: child);
+              } else {
+                painted = SizedBox(
+                  width: w,
+                  height: h,
+                  child: FittedBox(
+                    fit: effective == BoxFit.fill ? BoxFit.fill : BoxFit.contain,
+                    child: SizedBox(
+                      width: videoSize.width,
+                      height: videoSize.height,
+                      child: child,
+                    ),
+                  ),
+                );
+              }
+              final centered = Center(child: painted);
+              if (effective == BoxFit.cover) {
+                return ClipRect(child: centered);
+              }
+              return centered;
+            },
+          ),
+        );
+      },
+      child: VideoPlayer(c),
     );
   }
 
-  /// 摘掉 listener 后走统一拆机：pause → 压空队列 → dispose。
-  ///
-  /// 不设 disposeTimeout：超时把 dispose 丢后台时，上一集的 mdk 包缓存会留下来；
-  /// 连播多集后进程内存会一直涨（c8394d8 / kotvTeardownPlayback 注释同因）。
-  /// 删播放器前先把 buffer 压到几乎为空，避免大队列拖慢 mdkPlayerAPI_delete。
+  void _bumpView() {
+    _viewGen.value++;
+  }
+
+  /// 先 pause/dispose 清掉 native players map，再卸 VideoPlayer。
+  /// 若先 _bumpView 卸 PlatformView：surfaceDestroyed→nativeSetSurface 时 mdk 仍在 map → 崩。
   Future<void> _disposeController() async {
     final c = _c;
     final l = _listener;
-    _c = null;
-    _listener = null;
     if (c == null) return;
-    _bumpView();
+    _listener = null;
     if (l != null) {
       try {
         c.removeListener(l);
@@ -281,6 +273,9 @@ class FvpPlayback extends KotvPlayback {
       },
       drain: const Duration(milliseconds: 50),
     );
+    if (!identical(_c, c)) return;
+    _c = null;
+    _bumpView();
   }
 
   @override
