@@ -87,6 +87,19 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 		s.mu.Unlock()
 		return &live, nil
 	}
+	// 同 URL/API 已在内存则直接复用，避免进直播页每次重下整表。
+	wantURL := strings.TrimSpace(live.URL)
+	wantAPI := strings.TrimSpace(live.API)
+	s.mu.RLock()
+	cur := s.current
+	s.mu.RUnlock()
+	if cur != nil && len(cur.Groups) > 0 {
+		curURL := strings.TrimSpace(cur.URL)
+		curAPI := strings.TrimSpace(cur.API)
+		if (wantURL != "" && wantURL == curURL) || (wantURL == "" && wantAPI != "" && wantAPI == curAPI) {
+			return cur, nil
+		}
+	}
 	if live.URL == "" && strings.TrimSpace(live.API) == "" {
 		return nil, fmt.Errorf("直播源地址为空")
 	}

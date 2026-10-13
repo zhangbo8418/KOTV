@@ -391,8 +391,8 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> stop() => _stopUnload(reason: 'stop');
 
-  /// 换集：卸文件。桌面详情页会再 dispose Player（归还 DXVA/包池）；
-  /// 仅压 demuxer 上限不能把内存还给 OS。
+  /// 换集/换台：卸文件，保留 Player（页面复用同一实例再 open）。
+  /// 离开页由 kotvDisposeMpvPlayer 真正 dispose。
   @override
   Future<void> stopForEpisodeSwitch() => _stopUnload(reason: 'stopForEpisodeSwitch');
 

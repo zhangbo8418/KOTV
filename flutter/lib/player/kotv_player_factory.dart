@@ -65,7 +65,7 @@ Widget kotvPlaybackView({
       final m = mpv ?? playback;
       if (m is NativeMpvPlayback) return m.buildView(fit: fit);
       if (m is MediaKitPlayback) {
-        // ValueKey：换集新建 Player/VideoController 时强制 remount，避免 Win7 复用已死 Texture。
+        // ValueKey：Player 重建（离开页后再进）时 remount，避免挂已死 Texture。
         return KeyedSubtree(
           key: ValueKey<int>(identityHashCode(m.player)),
           child: Video(

@@ -119,8 +119,7 @@ class KotvMpvDiag {
     'duration',
     'demuxer-cache-duration',
     'demuxer-cache-idle',
-    // 换集内存取证：对照 demuxer-cache-* / max-bytes / hwdec-current；
-    // 换集 dispose Player 后应归零，仅压上限不会把 packet pool 还给 OS。
+    // 换集内存取证：对照 demuxer-cache-* / max-bytes / hwdec-current / rss。
     'demuxer-max-bytes',
     'demuxer-max-back-bytes',
     'cache-buffering-state',

@@ -244,7 +244,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   /// 切台/换线：走各后端 stopForEpisodeSwitch。
-  /// 桌面 MPV：stop 后 dispose Player（归还包池）；宿主不拆，下次 [_ensureMpv] 再建。
+  /// 桌面 MPV 复用同一 Player（stop 后 open）；离开直播由 [_releaseAllBackends] dispose。
   Future<void> _stopAllBackends() async {
     Future<void> stopOne(KotvPlayback? p) async {
       if (p == null) return;
@@ -262,21 +262,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       stopOne(_xg),
       stopOne(_zw),
     ]);
-    await _recycleDesktopMpv();
-  }
-
-  /// 桌面 media_kit：换台 dispose Player；不拆 Flutter 视频宿主。
-  Future<void> _recycleDesktopMpv() async {
-    if (kotvIsAndroid()) return;
-    if (_mk == null && _mkPlayer == null) return;
-    final mkPlayer = _mkPlayer;
-    _mkPlayer = null;
-    try {
-      _mk?.dispose();
-    } catch (_) {}
-    _mk = null;
-    if (mounted) setState(() {});
-    await kotvDisposeMpvPlayer(mkPlayer);
   }
 
   /// 切 Tab / 离开直播：先 pause 停声，再 stop + release（不改音量）。
@@ -678,124 +663,152 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _bootstrap() async {
     final serial = _playSerial;
-    await DetailScreen.prepareLeave();
     if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
       _unlocked.clear();
     });
+    // 停上一页与拉直播源并行：频道列表不堵在 prepareLeave / 整段播控配置上。
+    final leaveFut = DetailScreen.prepareLeave();
     try {
+      final settingsFut = ref.read(apiProvider).getSettings();
+      final sourcesFut = ref.read(apiProvider).liveSources();
+      Map<String, dynamic> settings = const {};
       try {
-        final st = await ref.read(apiProvider).getSettings();
+        final st = await settingsFut;
         if (!mounted) return;
-        final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
-        final decode = '${settings['playerDecode'] ?? 'auto'}'.trim();
-        if (decode.isNotEmpty) {
-          _decodeMode = decode;
-          _prefDecodeMode = decode;
-        }
-        _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
-        _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
-        final mk = _mk;
-        if (mk is NativeMpvPlayback) {
-          unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
-        } else if (mk is MediaKitPlayback) {
-          unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
-        }
-        _exo?.applyPlayerOptions(settings);
-        _fvp?.applyPlayerOptions(settings);
-        var playerVal = '${settings['playerLive'] ?? ''}'.trim();
-        if (playerVal.isEmpty) {
-          playerVal = kotvDefaultLivePlayer();
-        }
-        _playerVal = kotvClampPlayerVal(playerVal, live: true);
-        _prefPlayerVal = _playerVal;
-        final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
-        _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
-        final liveChange = '${settings['liveChange'] ?? settings['liveAutoChange'] ?? 'true'}'.trim().toLowerCase();
-        _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
-        final across = '${settings['liveAcross'] ?? 'true'}'.trim().toLowerCase();
-        _liveAcross = across != 'false' && across != 'off' && across != '0';
-        final invert = '${settings['liveInvert'] ?? 'false'}'.trim().toLowerCase();
-        _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
-        final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
-        _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
-        _liveAspect = _liveAspectFromScale(_liveScale);
-        final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
-        final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
-        final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
-        final styleMode = '${settings['subtitleStyleMode'] ?? 'original'}'.trim().toLowerCase();
-        final forceStyle = styleMode == 'custom';
-        final useSystem = styleMode == 'system';
-        final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
-        final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
-        final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
-        final subBg = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
-        final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
-        final double textOp = (double.tryParse('${settings['subtitleTextOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
-        final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
-        final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
-        final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
-        final shadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
-        final subFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
-        final subFontPath = '${settings['subtitleFontPath'] ?? ''}'.trim();
-        unawaited(_playback.setSubtitleStyle(
-          scale: fontScale.toDouble(),
-          pos: subPos.clamp(-20, 30).toDouble(),
-          secondaryPos: subSecPos.clamp(0, 150).toDouble(),
-          color: forceStyle && subColor.isNotEmpty ? subColor : null,
-          borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
-          borderSize: forceStyle ? subBorderSize.clamp(0, 8).toDouble() : null,
-          bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
-          edgeType: forceStyle ? edgeType : null,
-          useSystemStyle: useSystem,
-          textOpacity: forceStyle || useSystem ? textOp : null,
-          bgOpacity: forceStyle || useSystem ? bgOp : null,
-          edgeOpacity: forceStyle || useSystem ? edgeOp : null,
-          shadowStrength: forceStyle || useSystem ? shadowStrength : null,
-          font: forceStyle || useSystem ? subFont : null,
-          fontPath: forceStyle || useSystem ? (subFontPath.isEmpty ? null : subFontPath) : null,
-          forceStyle: forceStyle,
-        ));
-        unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
-        final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
-        _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
-        final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
-        if (vol != null && vol > 0) {
-          await _playback.setVolume(vol.clamp(1, 100));
-        } else if (vol != null && vol <= 0) {
-          await _playback.setVolume(80);
-          try {
-            await ref.read(apiProvider).setSetting('playerVolume', '80');
-          } catch (_) {}
-        }
-        kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
-        if (!mounted) return;
-        await _playback.setDecodeMode(_decodeMode);
-        await _playback.setRenderMode(_renderMode);
-        unawaited(_playback.setVideoScale(_liveScale));
-        _syncAndroidAutoPip();
+        settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+        _applyLiveBootstrapSettings(settings);
       } catch (_) {}
       if (!mounted) return;
-      final data = await ref.read(apiProvider).liveSources();
+      final data = await sourcesFut;
       if (!mounted) return;
       _sources = ((data['sources'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
       if (_sources.isEmpty) {
         setState(() => _loading = false);
+        await leaveFut;
         return;
       }
       final keepSrc = await _preferredSourceIndex();
       if (!mounted) return;
-      // 全平台一致：有上次记录则恢复频道，否则自动播第一个可用频道。
-      await _loadSource(keepSrc, autoPlay: serial == _playSerial);
+      // 先出列表；起播前再等 leave + 播控落到引擎。
+      await _loadSource(keepSrc, autoPlay: false);
+      if (!mounted) return;
+      await leaveFut;
+      if (!mounted) return;
+      await _applyLiveBootstrapPlayback(settings);
+      if (!mounted || serial != _playSerial) return;
+      final restored = await _tryRestoreKeep();
+      if (!mounted || serial != _playSerial) return;
+      if (!restored) await _playFirstChannel();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = '$e';
         _loading = false;
       });
+      try {
+        await leaveFut;
+      } catch (_) {}
     }
+  }
+
+  /// 只写 Dart 侧直播偏好，不碰引擎（列表可先显示）。
+  void _applyLiveBootstrapSettings(Map<String, dynamic> settings) {
+    final decode = '${settings['playerDecode'] ?? 'auto'}'.trim();
+    if (decode.isNotEmpty) {
+      _decodeMode = decode;
+      _prefDecodeMode = decode;
+    }
+    _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
+    _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+    var playerVal = '${settings['playerLive'] ?? ''}'.trim();
+    if (playerVal.isEmpty) {
+      playerVal = kotvDefaultLivePlayer();
+    }
+    _playerVal = kotvClampPlayerVal(playerVal, live: true);
+    _prefPlayerVal = _playerVal;
+    final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
+    _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
+    final liveChange = '${settings['liveChange'] ?? settings['liveAutoChange'] ?? 'true'}'.trim().toLowerCase();
+    _liveAutoChange = liveChange != 'false' && liveChange != 'off' && liveChange != '0';
+    final across = '${settings['liveAcross'] ?? 'true'}'.trim().toLowerCase();
+    _liveAcross = across != 'false' && across != 'off' && across != '0';
+    final invert = '${settings['liveInvert'] ?? 'false'}'.trim().toLowerCase();
+    _liveInvert = invert == 'true' || invert == '1' || invert == 'on';
+    final scaleLive = '${settings['playerScaleLive'] ?? settings['playerScale'] ?? 'default'}'.trim();
+    _liveScale = scaleLive.isEmpty ? 'default' : scaleLive;
+    _liveAspect = _liveAspectFromScale(_liveScale);
+    final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
+    _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
+    kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
+  }
+
+  /// 列表已出后：把解码/渲染/字幕/音量落到当前引擎。
+  Future<void> _applyLiveBootstrapPlayback(Map<String, dynamic> settings) async {
+    if (settings.isEmpty) return;
+    try {
+      final mk = _mk;
+      if (mk is NativeMpvPlayback) {
+        unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+      } else if (mk is MediaKitPlayback) {
+        unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+      }
+      _exo?.applyPlayerOptions(settings);
+      _fvp?.applyPlayerOptions(settings);
+      final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
+      final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
+      final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
+      final styleMode = '${settings['subtitleStyleMode'] ?? 'original'}'.trim().toLowerCase();
+      final forceStyle = styleMode == 'custom';
+      final useSystem = styleMode == 'system';
+      final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
+      final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
+      final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
+      final subBg = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
+      final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
+      final double textOp = (double.tryParse('${settings['subtitleTextOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+      final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+      final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+      final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
+      final shadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
+      final subFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
+      final subFontPath = '${settings['subtitleFontPath'] ?? ''}'.trim();
+      unawaited(_playback.setSubtitleStyle(
+        scale: fontScale.toDouble(),
+        pos: subPos.clamp(-20, 30).toDouble(),
+        secondaryPos: subSecPos.clamp(0, 150).toDouble(),
+        color: forceStyle && subColor.isNotEmpty ? subColor : null,
+        borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
+        borderSize: forceStyle ? subBorderSize.clamp(0, 8).toDouble() : null,
+        bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
+        edgeType: forceStyle ? edgeType : null,
+        useSystemStyle: useSystem,
+        textOpacity: forceStyle || useSystem ? textOp : null,
+        bgOpacity: forceStyle || useSystem ? bgOp : null,
+        edgeOpacity: forceStyle || useSystem ? edgeOp : null,
+        shadowStrength: forceStyle || useSystem ? shadowStrength : null,
+        font: forceStyle || useSystem ? subFont : null,
+        fontPath: forceStyle || useSystem ? (subFontPath.isEmpty ? null : subFontPath) : null,
+        forceStyle: forceStyle,
+      ));
+      unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
+      final vol = double.tryParse('${settings['playerVolume'] ?? ''}');
+      if (vol != null && vol > 0) {
+        await _playback.setVolume(vol.clamp(1, 100));
+      } else if (vol != null && vol <= 0) {
+        await _playback.setVolume(80);
+        try {
+          await ref.read(apiProvider).setSetting('playerVolume', '80');
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      await _playback.setDecodeMode(_decodeMode);
+      await _playback.setRenderMode(_renderMode);
+      unawaited(_playback.setVideoScale(_liveScale));
+      _syncAndroidAutoPip();
+    } catch (_) {}
   }
 
   Future<String> _readLiveKeep() async {
