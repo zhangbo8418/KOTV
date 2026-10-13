@@ -348,11 +348,16 @@ class KotvApi {
         'name': name,
       });
 
-  Future<Map<String, dynamic>> liveLoad({int index = 0, String url = ''}) =>
+  Future<Map<String, dynamic>> liveLoad({
+    int index = 0,
+    String url = '',
+    bool force = false,
+  }) =>
       _post('/api/v1/live', {
         'action': 'load',
         'index': index,
         if (url.isNotEmpty) 'url': url,
+        if (force) 'force': true,
       });
 
   Future<Map<String, dynamic>> livePlay({

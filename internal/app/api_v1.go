@@ -1581,7 +1581,7 @@ func (a *App) APILiveSources() map[string]any {
 	}
 }
 
-func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
+func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, error) {
 	lv := a.scopeLive()
 	url = strings.TrimSpace(url)
 	if url != "" {
@@ -1612,7 +1612,7 @@ func (a *App) APILiveLoad(index int, url string) (map[string]any, error) {
 		}
 		liveSrc = srcs[index]
 	}
-	loaded, err := lv.Load(liveSrc)
+	loaded, err := lv.Load(liveSrc, force)
 	if err != nil {
 		return nil, err
 	}

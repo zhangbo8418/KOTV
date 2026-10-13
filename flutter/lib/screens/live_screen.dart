@@ -489,6 +489,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _boundRemote = bridge;
     bridge.onControl = _onRemoteControl;
     bridge.onSubtitleFile = _onRemoteSubtitle;
+    bridge.onLiveRefresh = _onRemoteLiveRefresh;
   }
 
   void _detachRemoteHandlers() {
@@ -497,6 +498,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (bridge == null) return;
     if (identical(bridge.onControl, _onRemoteControl)) bridge.onControl = null;
     if (identical(bridge.onSubtitleFile, _onRemoteSubtitle)) bridge.onSubtitleFile = null;
+    if (identical(bridge.onLiveRefresh, _onRemoteLiveRefresh)) bridge.onLiveRefresh = null;
+  }
+
+  void _onRemoteLiveRefresh() {
+    if (!mounted || _sources.isEmpty) return;
+    final i = _srcIdx.clamp(0, _sources.length - 1);
+    unawaited(_loadSource(i, autoPlay: true, force: true));
   }
 
   void _onRemoteControl(String type, int seekMs) {
@@ -602,7 +610,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return false;
   }
 
-  Future<void> _bootstrap() async {
+  Future<void> _bootstrap({bool forceLoad = false}) async {
     final serial = _playSerial;
     if (!mounted) return;
     setState(() {
@@ -635,7 +643,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final keepSrc = await _preferredSourceIndex();
       if (!mounted) return;
       // 先出列表；起播前再等 leave + 播控落到引擎。
-      await _loadSource(keepSrc, autoPlay: false);
+      await _loadSource(keepSrc, autoPlay: false, force: forceLoad);
       if (!mounted) return;
       await leaveFut;
       if (!mounted) return;
@@ -860,14 +868,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     );
   }
 
-  Future<void> _loadSource(int index, {bool autoPlay = false}) async {
+  Future<void> _loadSource(int index, {bool autoPlay = false, bool force = false}) async {
     if (!mounted) return;
     // 加载期间离开直播或已手动选台：不再自动起播。
     final serial = _playSerial;
     setState(() {
       _loading = true;
       _srcIdx = index;
-      _status = '加载直播源…';
+      _status = force ? '刷新直播源…' : '加载直播源…';
       _unlocked.clear();
       _epgDays = [];
       _programs = [];
@@ -876,7 +884,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _catchupProgIdx = -1;
     });
     try {
-      final data = await ref.read(apiProvider).liveLoad(index: index);
+      final data = await ref.read(apiProvider).liveLoad(index: index, force: force);
       if (!mounted) return;
       // 频道一次性转成 typed list：[_channels] 直接返回，build 里不再整表复制。
       _groups = ((data['groups'] as List?) ?? []).whereType<Map>().map((e) {
@@ -3541,21 +3549,31 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   Padding(
                                     padding: const EdgeInsets.only(bottom: 6),
                                     child: AppPill(
-                                      label: '${_sources[i]['name'] ?? _sources[i]['url']}',
-                                      suffix: _sources[i]['current'] == true || i == _srcIdx ? '（当前）' : null,
+                                      // 仅一个源时换源位文案为「刷新」；再点当前源会 force 重拉频道表。
+                                      label: _sources.length == 1
+                                          ? '刷新'
+                                          : '${_sources[i]['name'] ?? _sources[i]['url']}',
+                                      suffix: _sources.length > 1 &&
+                                              (_sources[i]['current'] == true || i == _srcIdx)
+                                          ? '（当前）'
+                                          : null,
                                       height: 36,
                                       fontSize: 13,
                                       selected: i == _srcIdx,
-                                      onTap: () => _loadSource(i, autoPlay: true),
+                                      onTap: () => _loadSource(
+                                        i,
+                                        autoPlay: true,
+                                        force: _sources.length == 1 || i == _srcIdx,
+                                      ),
                                     ),
                                   ),
                                 const SizedBox(height: 12),
-                                AppPill(
+                                  AppPill(
                                   label: '配置直播源',
                                   height: 40,
                                   onTap: () async {
                                     await showLivePicker(context, ref);
-                                    await _bootstrap();
+                                    await _bootstrap(forceLoad: true);
                                   },
                                 ),
                                 const SizedBox(height: 8),

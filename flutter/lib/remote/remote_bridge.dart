@@ -24,6 +24,8 @@ class RemoteBridge {
   void Function(String path)? onDanmakuFile;
   /// 遥控即时弹幕文本。
   void Function(String text)? onLiveDanmaku;
+  /// 遥控 refresh type=live：重拉当前直播源频道表。
+  void Function()? onLiveRefresh;
 
   void start() {
     _timer?.cancel();
@@ -63,6 +65,10 @@ class RemoteBridge {
         if (r is! Map) continue;
         final typ = '${r['type'] ?? ''}'.trim().toLowerCase();
         final path = '${r['path'] ?? ''}'.trim();
+        if (typ == 'live') {
+          onLiveRefresh?.call();
+          continue;
+        }
         if (path.isEmpty) continue;
         if (typ == 'subtitle') {
           onSubtitleFile?.call(path);

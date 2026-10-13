@@ -40,7 +40,7 @@ type ContentAPI interface {
 	APISetSettings(kv map[string]string) error
 	APIToggleSite(key, field string, all *bool) error
 	APILiveSources() map[string]any
-	APILiveLoad(index int, url string) (map[string]any, error)
+	APILiveLoad(index int, url string, force bool) (map[string]any, error)
 	APILivePlay(group, channel, line int) (map[string]any, error)
 	APILiveUnlock(group int, password string) error
 	APILiveEPG(group, channel int) (map[string]any, error)
@@ -769,6 +769,7 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		Password string            `json:"password"`
 		Day      int               `json:"day"`
 		Prog     int               `json:"prog"`
+		Force    bool              `json:"force"`
 		Headers  map[string]string `json:"headers"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
@@ -776,7 +777,7 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 	case "", "sources":
 		writeJSON(w, http.StatusOK, api.APILiveSources())
 	case "load":
-		out, err := api.APILiveLoad(body.Index, body.URL)
+		out, err := api.APILiveLoad(body.Index, body.URL, body.Force)
 		if err != nil {
 			writeAPIError(w, http.StatusBadGateway, err.Error())
 			return

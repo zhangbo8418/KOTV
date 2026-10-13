@@ -433,6 +433,9 @@ func (a *App) listenEvents() {
 	go func() {
 		for ev := range a.Server.Events().SubscribeRefresh() {
 			switch strings.ToLower(ev.Type) {
+			case "live":
+				// 推到 Flutter：清内存表并重拉当前直播源频道列表。
+				remote.DefaultQueue.PushRefresh("live", "", "")
 			case "subtitle":
 				if enh, ok := embed.ActiveEnhanced(); ok && ev.Path != "" {
 					_ = enh.AddSubtitleFile(ev.Path)

@@ -53,6 +53,32 @@ func TestLoad_MsgError(t *testing.T) {
 	}
 }
 
+func TestLoad_ForceRefetchSameURL(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte("G,#genre#\nC,http://x/c.m3u8\n"))
+	}))
+	t.Cleanup(srv.Close)
+	svc := NewService(nil)
+	src := model.Live{Name: "t", URL: srv.URL}
+	if _, err := svc.Load(src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Load(src); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 1 {
+		t.Fatalf("cached load should hit once, hits=%d", hits)
+	}
+	if _, err := svc.Load(src, true); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 2 {
+		t.Fatalf("force load should refetch, hits=%d", hits)
+	}
+}
+
 func TestLoad_StarWrappedTXT(t *testing.T) {
 	plain := "G,#genre#\nC,http://x/c.m3u8\n"
 	body := "AbCd1234**" + base64.StdEncoding.EncodeToString([]byte(plain))

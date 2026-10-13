@@ -79,7 +79,15 @@ func (s *Service) SyncFromConfig() {
 }
 
 // Load 加载指定直播源频道列表。
-func (s *Service) Load(live model.Live) (*model.Live, error) {
+// force=true：清掉内存中的同 URL 表并重新拉取（再点当前源 / 单源「刷新」/ 远程 refresh）。
+func (s *Service) Load(live model.Live, force ...bool) (*model.Live, error) {
+	forced := len(force) > 0 && force[0]
+	if forced {
+		live.Groups = nil
+		s.mu.Lock()
+		s.current = nil
+		s.mu.Unlock()
+	}
 	if len(live.Groups) > 0 {
 		apply(&live)
 		s.mu.Lock()
@@ -93,7 +101,7 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 	s.mu.RLock()
 	cur := s.current
 	s.mu.RUnlock()
-	if cur != nil && len(cur.Groups) > 0 {
+	if !forced && cur != nil && len(cur.Groups) > 0 {
 		curURL := strings.TrimSpace(cur.URL)
 		curAPI := strings.TrimSpace(cur.API)
 		if (wantURL != "" && wantURL == curURL) || (wantURL == "" && wantAPI != "" && wantAPI == curAPI) {
@@ -131,7 +139,7 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 		if next.Name == "" {
 			next.Name = first
 		}
-		return s.Load(next)
+		return s.Load(next, force...)
 	}
 	// LiveConfig：根 JSON 可含 ads/rules/lives/spider/headers/proxy/hosts。
 	if meta, ok := ParseConfigMeta(cleaned); ok {
@@ -167,7 +175,7 @@ func (s *Service) Load(live model.Live) (*model.Live, error) {
 		if strings.TrimSpace(home.URL) != "" && strings.TrimSpace(home.URL) == strings.TrimSpace(live.URL) {
 			return nil, fmt.Errorf("直播配置循环引用")
 		}
-		return s.Load(home)
+		return s.Load(home, force...)
 	}
 	live.Groups = nil
 	Parse(&live, cleaned)
