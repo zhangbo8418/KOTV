@@ -405,6 +405,30 @@ func (s *SiteService) CachedDetail(vodID string) (model.Vod, bool) {
 	return v, true
 }
 
+// EpisodeURLByIndex 从详情缓存按线路+集下标取原始剧集地址（DTO 可能已置空直开字段）。
+func (s *SiteService) EpisodeURLByIndex(vodID, flag string, index int) (string, bool) {
+	if index < 0 {
+		return "", false
+	}
+	v, ok := s.CachedDetail(vodID)
+	if !ok {
+		return "", false
+	}
+	v.SetVodFlags()
+	flag = strings.TrimSpace(flag)
+	for _, f := range v.VodFlags {
+		if flag != "" && f.Flag != flag && f.Show != flag {
+			continue
+		}
+		if index >= len(f.Episodes) {
+			return "", false
+		}
+		u := strings.TrimSpace(f.Episodes[index].URL)
+		return u, u != ""
+	}
+	return "", false
+}
+
 func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id string) (model.Result, error) {
 	var result model.Result
 	var err error

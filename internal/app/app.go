@@ -59,10 +59,10 @@ type App struct {
 	castMu   sync.Mutex
 	castDevs []cast.Device
 
-	// APILiveLoad 序列化缓存：Load 命中同一 *Live 时跳过全表 Resolve/Publicize。
-	liveLoadMu        sync.Mutex
-	liveLoadCachedSrc *model.Live
-	liveLoadCached    map[string]any
+	// APILiveLoad 序列化缓存：按直播源 URL 键复用已建 DTO。
+	liveLoadMu         sync.Mutex
+	liveLoadCachedKey  string
+	liveLoadCached     map[string]any
 
 	DanmakuToast string
 }

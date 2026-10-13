@@ -28,7 +28,7 @@ type ContentAPI interface {
 	APIDetailExpand(siteKey, vodID string, flags []map[string]any) (map[string]any, error)
 	APIBtProgress() map[string]any
 	APISearch(keyword string, siteKeys []string, exact bool, exclude []model.VodKey) (map[string]any, error)
-	APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map[string]any, error)
+	APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qualIdx int) (map[string]any, error)
 	APIRemotePoll() map[string]any
 	APISetMedia(state map[string]string)
 	APIListRepos() map[string]any
@@ -558,9 +558,13 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 	vodID := r.URL.Query().Get("id")
 	flag := r.URL.Query().Get("flag")
 	ep := r.URL.Query().Get("url")
+	epIdx := -1
 	qualIdx := 0
 	if v := r.URL.Query().Get("qual"); v != "" {
 		qualIdx, _ = strconv.Atoi(v)
+	}
+	if v := r.URL.Query().Get("index"); v != "" {
+		epIdx, _ = strconv.Atoi(v)
 	}
 	if r.Method == http.MethodPost {
 		var body struct {
@@ -569,8 +573,10 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 			Flag    string `json:"flag"`
 			URL     string `json:"url"`
 			Episode string `json:"episode"`
+			Index   int    `json:"index"`
 			Qual    int    `json:"qual"`
 		}
+		body.Index = -1
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.Site != "" {
 			siteKey = body.Site
@@ -586,13 +592,16 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 		} else if body.Episode != "" {
 			ep = body.Episode
 		}
+		if body.Index >= 0 {
+			epIdx = body.Index
+		}
 		qualIdx = body.Qual
 	}
-	if ep == "" {
+	if strings.TrimSpace(ep) == "" && epIdx < 0 {
 		writeAPIError(w, http.StatusBadRequest, "missing episode url")
 		return
 	}
-	out, err := api.APIPlay(siteKey, vodID, flag, ep, qualIdx)
+	out, err := api.APIPlay(siteKey, vodID, flag, ep, epIdx, qualIdx)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, err.Error())
 		return

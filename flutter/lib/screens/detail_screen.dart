@@ -338,9 +338,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _advanceBusy = false;
   DateTime? _sessionStartedAt;
   KotvApi? _api;
-  /// 下一集 play 预解析缓存（ep.url → 引擎 play 返回）。
+  /// 下一集 play 预解析缓存（flag|index → 引擎 play 返回）。
   final Map<String, Map<String, dynamic>> _nextPlayCache = {};
   int _nextPreloadSerial = 0;
+  /// 详情接口 magnet：展开/取消磁力任务用（DTO 可能已清空须引擎集的 url）。
+  bool _detailMagnet = false;
   bool _preloadNextEpisode = false;
   bool _exoDiskCache = false;
   RemoteBridge? _boundRemote;
@@ -1202,6 +1204,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         final name = _routeTitle.trim().isNotEmpty ? _routeTitle.trim() : vod.name.trim();
         if (await _switchEmptyDetail(name)) return;
       }
+      _detailMagnet = data['magnet'] == true;
       final id = vod.id.isNotEmpty ? vod.id : _routeId;
       final site = vod.site.isNotEmpty ? vod.site : _routeSite;
       var configSource = '';
@@ -1334,7 +1337,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         });
       }
       if (!mounted) return;
-      final needExpand = data['magnet'] == true || _detailHasMagnet(vod);
+      final needExpand = _detailMagnet;
       if (needExpand) {
         // 先展开再起播，避免异步 expand 与 _playAt 竞态清空选集。
         await _expandMagnet(id: id, site: site);
@@ -1351,18 +1354,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  bool _detailHasMagnet(VodDetail vod) {
-    for (final f in vod.flags) {
-      for (final ep in f.episodes) {
-        final u = ep.url.trim().toLowerCase();
-        if (u.startsWith('magnet:') || u.startsWith('thunder:') || u.startsWith('ed2k:') || u.contains('.torrent')) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
   Future<void> _expandMagnet({required String id, required String site}) async {
     if (!mounted) return;
     final cur = _detail;
@@ -1374,17 +1365,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     _startBtProgressPoll(expanding: true);
     try {
-      final flagsPayload = cur.flags
-          .map((f) => {
-                'flag': f.flag,
-                'show': f.show,
-                'episodes': f.episodes.map((e) => {'name': e.name, 'url': e.url}).toList(),
-              })
-          .toList();
-      final data = await ref.read(apiProvider).detailExpand(id: id, site: site, flags: flagsPayload);
+      // 空 url 契约下客户端 flags 无原始磁力链：引擎用详情缓存展开。
+      final data = await ref.read(apiProvider).detailExpand(id: id, site: site, flags: const []);
       if (!mounted) return;
       if (data['expanded'] == true && data['vod'] is Map) {
         final expanded = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
+        _detailMagnet = data['magnet'] == true;
         // 只替换线路/剧集，保留当前详情其它字段，避免整页重建冲掉扫码等弹窗。
         setState(() {
           _detail = cur.withFlags(expanded.flags);
@@ -1681,6 +1667,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
+  String _playCacheKey(String flag, int index) => '$flag|$index';
+
+  void _trimPlayCache() {
+    if (_nextPlayCache.length <= 2) return;
+    final keys = _nextPlayCache.keys.toList();
+    for (final k in keys.take(_nextPlayCache.length - 2)) {
+      _nextPlayCache.remove(k);
+    }
+  }
+
   void _scheduleNextEpisodePreload({
     required String site,
     required String id,
@@ -1692,34 +1688,33 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!_preloadNextEpisode || !_exoDiskCache) return;
     final nextIdx = currentIdx + 1;
     if (nextIdx < 0 || nextIdx >= eps.length) return;
-    final nextUrl = eps[nextIdx].url.trim();
-    if (nextUrl.isEmpty) return;
-    if (_nextPlayCache.containsKey(nextUrl)) return;
+    final nextEp = eps[nextIdx];
+    final cacheKey = _playCacheKey(flag, nextIdx);
+    if (_nextPlayCache.containsKey(cacheKey)) return;
     final token = ++_nextPreloadSerial;
     unawaited(() async {
       try {
-        final data = await ref.read(apiProvider).play(
-              url: nextUrl,
-              site: site,
-              id: id,
-              flag: flag,
-            );
+        late final Map<String, dynamic> data;
+        if (nextEp.url.trim().isNotEmpty) {
+          data = {
+            'url': nextEp.url.trim(),
+            if (nextEp.headers != null) 'headers': nextEp.headers,
+            'magnet': false,
+          };
+        } else {
+          data = await ref.read(apiProvider).play(
+                url: '',
+                index: nextIdx,
+                site: site,
+                id: id,
+                flag: flag,
+              );
+        }
         if (token != _nextPreloadSerial || serial != _playAtSerial) return;
         if ('${data['url'] ?? ''}'.trim().isEmpty) return;
-        // 不缓存需二次嗅探/磁力的条目，避免脏结果。
-        final magnet = data['magnet'] == true ||
-            nextUrl.toLowerCase().startsWith('magnet') ||
-            '${data['url']}'.contains('/proxy/bt/');
-        if (magnet) return;
-        _nextPlayCache[nextUrl] = Map<String, dynamic>.from(data);
-        // 只保留最近一条，避免内存膨胀。
-        if (_nextPlayCache.length > 2) {
-          final keys = _nextPlayCache.keys.toList();
-          for (final k in keys.take(_nextPlayCache.length - 2)) {
-            _nextPlayCache.remove(k);
-          }
-        }
-        // Exo 磁盘缓存开启时，把下一集媒体前段写入缓存。
+        if (data['magnet'] == true || '${data['url']}'.contains('/proxy/bt/')) return;
+        _nextPlayCache[cacheKey] = Map<String, dynamic>.from(data);
+        _trimPlayCache();
         final exo = _exo;
         if (exo != null && token == _nextPreloadSerial) {
           final engineBase = ref.read(apiProvider).baseUrl;
@@ -1875,21 +1870,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _endedSub = null;
     _posSub?.cancel();
     _posSub = null;
-    final epLooksMagnet = RegExp(r'^(magnet|thunder|ed2k):', caseSensitive: false).hasMatch(ep.url.trim()) ||
-        ep.url.toLowerCase().contains('.torrent') ||
-        ep.url.contains('/proxy/bt/') ||
-        ep.url.toLowerCase().startsWith('magnet://local');
+    _danmakuItems.value = const [];
+    final canDirect = ep.url.trim().isNotEmpty;
     // 立刻高亮：先于 flush/停播，避免点选集要等落盘才变色。
     if (mounted) {
       setState(() {
         _epIdx = epIdx;
         _epPage = epIdx ~/ _epSize;
-        _magnetPlay = epLooksMagnet;
+        _magnetPlay = false;
         // Android Hybrid：全屏换集先盖黑，避免 Surface 镂空透出详情；桌面 Texture 不盖。
         if (kotvIsAndroid() && _immersiveFullscreen) _immersiveEpCover = true;
-        _status = epLooksMagnet
-            ? '磁力解析中…'
-            : (_epLooksDirectPlayUrl(ep.url) ? '换集中…' : '解析中…');
+        // 非空 url=引擎可直开；空串须 play（磁力等由回包 magnet 再标）。
+        _status = canDirect ? '换集中…' : (_detailMagnet ? '磁力解析中…' : '解析中…');
       });
     }
     _syncFullscreen();
@@ -1906,17 +1898,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     // SoftCancel 抬 epoch → JS/JAR 立刻报「脚本调用已中断」。
     await ref.read(apiProvider).cancelPending(
           hard: false,
-          thunder: _magnetPlay || epLooksMagnet,
+          thunder: !canDirect && _detailMagnet,
         );
     if (serial != _playAtSerial || !mounted) return;
-    if (mounted) {
-      setState(() {
-        _magnetPlay = epLooksMagnet;
-      });
-    }
     _syncAndroidAutoPip();
     _syncFullscreen();
-    if (epLooksMagnet) _startBtProgressPoll();
+    if (!canDirect && _detailMagnet) _startBtProgressPoll();
     // 与 play 解析并行：只记当前集，同集保留续播进度（勿 push positionMs:0）。
     unawaited(LocalHistory.touchEpisode(
       id: _detailId(),
@@ -1929,29 +1916,38 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     ));
     try {
       Map<String, dynamic> data;
-      final cached = _nextPlayCache.remove(ep.url);
+      final cacheKey = _playCacheKey(flag.flag, epIdx);
+      final cached = _nextPlayCache.remove(cacheKey);
+      Future<Map<String, dynamic>> fetchPlay() async {
+        if (canDirect) {
+          return {
+            'url': ep.url.trim(),
+            'headers': ep.headers ?? const <String, String>{},
+            'magnet': false,
+            'parsed': false,
+          };
+        }
+        return ref.read(apiProvider).play(
+              url: '',
+              index: epIdx,
+              site: _detailSite(),
+              id: _detailId(),
+              flag: flag.flag,
+            );
+      }
+
       try {
         if (cached != null && '${cached['url'] ?? ''}'.trim().isNotEmpty) {
           data = cached;
         } else {
-          data = await ref.read(apiProvider).play(
-                url: ep.url,
-                site: _detailSite(),
-                id: _detailId(),
-                flag: flag.flag,
-              );
+          data = await fetchPlay();
         }
       } catch (e) {
         // 从后台回来常见引擎僵死：Connection closed / refused。先拉起再重试一次。
         if (!_isLocalEngineConnError(e)) rethrow;
         final ok = await ref.read(engineLauncherProvider).recoverIfNeeded();
         if (!ok || serial != _playAtSerial || !mounted) rethrow;
-        data = await ref.read(apiProvider).play(
-              url: ep.url,
-              site: _detailSite(),
-              id: _detailId(),
-              flag: flag.flag,
-            );
+        data = await fetchPlay();
       }
       if (serial != _playAtSerial || !mounted) return;
       final playUrl = kotvRewriteEngineLocalUrl(
@@ -1985,8 +1981,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
       };
-      final magnet = data['magnet'] == true || playUrl.contains('/proxy/bt/') || epLooksMagnet;
+      final magnet = data['magnet'] == true || playUrl.contains('/proxy/bt/');
       _magnetPlay = magnet;
+      if (magnet) _startBtProgressPoll();
       final drmRaw = data['drm'];
       final drm = drmRaw is Map
           ? Map<String, dynamic>.from(drmRaw)
@@ -2277,20 +2274,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _syncFullscreen();
       }
     }
-  }
-
-  /// 以下常见直链这类换集不显示「解析」浮层。
-  bool _epLooksDirectPlayUrl(String raw) {
-    final u = raw.trim().toLowerCase();
-    if (u.isEmpty) return false;
-    if (u.startsWith('rtmp:')) return true;
-    if (!(u.startsWith('http://') || u.startsWith('https://'))) return false;
-    if (u.contains('url=http') || u.contains('v=http') || u.contains('.html')) return false;
-    const marks = ['.m3u8', '.mp4', '.mkv', '.flv', '.mpd', '.mp3', '.m4a', '.aac', 'video/tos'];
-    for (final m in marks) {
-      if (u.contains(m)) return true;
-    }
-    return false;
   }
 
   /// 折叠「播放失败: 解析失败: 解析失败: …」这类层层包装。

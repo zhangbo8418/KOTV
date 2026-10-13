@@ -123,14 +123,28 @@ class CategoryType {
 }
 
 class EpisodeItem {
-  EpisodeItem({required this.name, required this.url});
+  EpisodeItem({required this.name, required this.url, this.headers});
   final String name;
+  /// 非空：引擎判定可直开；空串：须 /api/v1/play（按集下标取 raw）。
   final String url;
+  final Map<String, String>? headers;
 
-  factory EpisodeItem.fromJson(Map<String, dynamic> j) => EpisodeItem(
-        name: '${j['name'] ?? ''}',
-        url: '${j['url'] ?? ''}',
-      );
+  factory EpisodeItem.fromJson(Map<String, dynamic> j) {
+    Map<String, String>? hdr;
+    final raw = j['headers'];
+    if (raw is Map) {
+      final m = <String, String>{
+        for (final e in raw.entries)
+          if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
+      };
+      if (m.isNotEmpty) hdr = m;
+    }
+    return EpisodeItem(
+      name: '${j['name'] ?? ''}',
+      url: '${j['url'] ?? ''}'.trim(),
+      headers: hdr,
+    );
+  }
 }
 
 class FlagLine {

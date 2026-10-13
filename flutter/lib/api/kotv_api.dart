@@ -281,7 +281,8 @@ class KotvApi {
       });
 
   Future<Map<String, dynamic>> play({
-    required String url,
+    String url = '',
+    int index = -1,
     String? site,
     String? id,
     String? flag,
@@ -289,6 +290,7 @@ class KotvApi {
   }) =>
       _post('/api/v1/play', {
         'url': url,
+        if (index >= 0) 'index': index,
         if (site != null) 'site': site,
         if (id != null) 'id': id,
         if (flag != null) 'flag': flag,

@@ -322,7 +322,7 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 	}
 	return map[string]any{
 		"ok":     true,
-		"vod":    vodDetailDTO(detail, sk),
+		"vod":    vodDetailDTO(detail, sk, detailRules(cfg)),
 		"magnet": thunder.NeedsParse(&detail),
 		"desc":   model.CleanDesc(detail.VodContent),
 	}, nil
@@ -351,31 +351,33 @@ func (a *App) APIDetailExpand(siteKey, vodID string, flagsIn []map[string]any) (
 		}
 	}
 
-	if len(flagsIn) > 0 {
-		detail.VodFlags = flagsFromDTO(flagsIn)
-		detail.VodName = vodID
-	} else if cached, ok := sites.CachedDetail(vodID); ok {
+	// 详情 DTO 可能已把须引擎的集 url 置空：展开优先用引擎详情缓存里的原始地址。
+	if cached, ok := sites.CachedDetail(vodID); ok {
 		detail = cached
 		if detail.Site != nil && detail.Site.Key != "" {
 			sk = detail.Site.Key
 		}
+	} else if len(flagsIn) > 0 {
+		detail.VodFlags = flagsFromDTO(flagsIn)
+		detail.VodName = vodID
 	} else {
 		// 无缓存且客户端未传 flags：不再二次拉详情（避免冲弹窗）；直接返回未展开。
 		return map[string]any{
 			"ok":       true,
 			"expanded": false,
 			"magnet":   false,
-			"vod":      vodDetailDTO(detail, sk),
+			"vod":      vodDetailDTO(detail, sk, detailRules(cfg)),
 			"message":  "无详情缓存，跳过展开",
 		}, nil
 	}
 	detail.SetVodFlags()
+	rules := detailRules(cfg)
 	if !thunder.NeedsParse(&detail) {
 		return map[string]any{
 			"ok":       true,
 			"expanded": false,
 			"magnet":   false,
-			"vod":      vodDetailDTO(detail, sk),
+			"vod":      vodDetailDTO(detail, sk, rules),
 		}, nil
 	}
 	work := detail
@@ -389,7 +391,7 @@ func (a *App) APIDetailExpand(siteKey, vodID string, flagsIn []map[string]any) (
 		"ok":       true,
 		"expanded": true,
 		"magnet":   true,
-		"vod":      vodDetailDTO(work, sk),
+		"vod":      vodDetailDTO(work, sk, rules),
 	}, nil
 }
 
@@ -530,7 +532,7 @@ func (a *App) APISearch(keyword string, siteKeys []string, exact bool, exclude [
 	return map[string]any{"ok": true, "keyword": keyword, "collects": out, "list": flat}, nil
 }
 
-func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map[string]any, error) {
+func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qualIdx int) (map[string]any, error) {
 	cfg, sites, _ := a.scope()
 	var site model.Site
 	if siteKey != "" {
@@ -547,6 +549,11 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, qualIdx int) (map
 		site = cfg.Home()
 	}
 	epURL := strings.TrimSpace(episodeURL)
+	if epURL == "" {
+		if u, ok := sites.EpisodeURLByIndex(vodID, flag, episodeIndex); ok {
+			epURL = u
+		}
+	}
 	if epURL == "" {
 		return nil, fmt.Errorf("empty episode url")
 	}
@@ -868,15 +875,37 @@ func vodLooksLikeFolder(v model.Vod) bool {
 	return err == nil && st.IsDir()
 }
 
-func vodDetailDTO(v model.Vod, siteKey string) map[string]any {
+func detailRules(cfg *config.Manager) []model.Rule {
+	if cfg == nil {
+		return nil
+	}
+	rules := parse.GetRules()
+	if len(rules) == 0 {
+		rules = cfg.API().Rules
+	}
+	return rules
+}
+
+func vodDetailDTO(v model.Vod, siteKey string, rules []model.Rule) map[string]any {
+	var site model.Site
+	if v.Site != nil {
+		site = *v.Site
+	}
+	siteHdr := map[string]string(site.Header)
 	flags := make([]map[string]any, 0, len(v.VodFlags))
 	for _, f := range v.VodFlags {
 		eps := make([]map[string]any, 0, len(f.Episodes))
 		for _, ep := range f.Episodes {
-			eps = append(eps, map[string]any{
-				"name": ep.Name,
-				"url":  ep.URL,
-			})
+			raw := strings.TrimSpace(ep.URL)
+			item := map[string]any{"name": ep.Name, "url": ""}
+			// 可直开：下发 Publicize 后的地址 + 站点头；须引擎：空 url，客户端按集下标走 play。
+			if !live.VodNeedsEnginePlay(site, raw, rules) {
+				item["url"] = playproxy.PublicizeURL(localproxy.ConvertScheme(raw), siteHdr)
+				if len(siteHdr) > 0 {
+					item["headers"] = siteHdr
+				}
+			}
+			eps = append(eps, item)
 		}
 		show := f.Show
 		if show == "" {
@@ -1612,9 +1641,13 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 		}
 		liveSrc = srcs[index]
 	}
+	cacheKey := strings.TrimSpace(liveSrc.URL)
+	if cacheKey == "" {
+		cacheKey = strings.TrimSpace(liveSrc.Name)
+	}
 	if force {
 		a.liveLoadMu.Lock()
-		a.liveLoadCachedSrc = nil
+		a.liveLoadCachedKey = ""
 		a.liveLoadCached = nil
 		a.liveLoadMu.Unlock()
 	}
@@ -1622,9 +1655,9 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 	if err != nil {
 		return nil, err
 	}
-	if !force {
+	if !force && cacheKey != "" {
 		a.liveLoadMu.Lock()
-		if a.liveLoadCached != nil && a.liveLoadCachedSrc == loaded {
+		if a.liveLoadCached != nil && a.liveLoadCachedKey == cacheKey {
 			out := a.liveLoadCached
 			a.liveLoadMu.Unlock()
 			return out, nil
@@ -1670,7 +1703,6 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 				"line":    ch.URLIndex,
 				"headers": headers,
 				"format":  ch.Format,
-				"parse":   ch.Parse,
 				"drm":     drm,
 			})
 		}
@@ -1692,7 +1724,7 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 		"groups": groups,
 	}
 	a.liveLoadMu.Lock()
-	a.liveLoadCachedSrc = loaded
+	a.liveLoadCachedKey = cacheKey
 	a.liveLoadCached = out
 	a.liveLoadMu.Unlock()
 	return out, nil

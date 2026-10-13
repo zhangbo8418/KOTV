@@ -857,11 +857,35 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return null;
   }
 
-  /// 引擎 Load 下发的 urls：非空可直开；空串占位表示须 livePlay（保留线路下标对齐）。
+  /// 引擎 Load 下发的 urls：非空可直开；空串占位表示须 livePlay（保留线路下标）。
   List<String> _channelPlayUrls(Map ch) {
     final raw = ch['urls'];
     if (raw is! List) return const [];
     return [for (final e in raw) '$e'.trim()];
+  }
+
+  void _writeBackLivePlayUrl(
+    Map ch, {
+    required int line,
+    required String url,
+    Map<String, String>? headers,
+    String format = '',
+    Map<String, dynamic>? drm,
+  }) {
+    final raw = ch['urls'];
+    final list = raw is List ? List<dynamic>.from(raw) : <dynamic>[];
+    while (list.length <= line) {
+      list.add('');
+    }
+    if (line >= 0 && line < list.length) {
+      list[line] = url;
+      ch['urls'] = list;
+    }
+    if (headers != null && headers.isNotEmpty) {
+      ch['headers'] = Map<String, String>.from(headers);
+    }
+    if (format.isNotEmpty) ch['format'] = format;
+    if (drm != null) ch['drm'] = drm;
   }
 
   Map<String, String>? _channelHeaders(Map ch) {
@@ -1872,6 +1896,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         lines = (data['lines'] as int?) ?? (playUrls.isEmpty ? 1 : playUrls.length);
         lineIdx = (data['line'] as int?) ?? useLine;
         lineName = '${data['lineName'] ?? ''}'.trim();
+        // 引擎解析结果写回内存 urls，同台再切走直开。
+        if (url.isNotEmpty) {
+          _writeBackLivePlayUrl(ch, line: useLine, url: url, headers: headers, format: format, drm: drm);
+        }
       }
       if (url.isEmpty) throw Exception('空播放地址');
       if (!mounted || serial != _playSerial) return;
@@ -1913,7 +1941,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _playCatchup(int progIdx) async {
-    // stop → LiveApi.getUrl+Catchup.format → 立刻 play（与 _playChannel 同序）。
+    // stop → liveCatchup → 立刻 play（与 _playChannel 同序）。
     if (_chIdx < 0) return;
     final serial = ++_playSerial;
     final prevCatchup = _catchup;

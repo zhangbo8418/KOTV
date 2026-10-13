@@ -1193,8 +1193,9 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
     val selector = buildTrackSelector(ctx, effective)
     trackSelector = selector
-    // duration×factor；主播放器不设字节顶（无 PreloadManager 也不挂 PRELOAD 名额）。
+    // duration×factor + KotvMemBudget 字节顶，避免高码率连播时堆缓冲无上限。
     val factor = bufferFactor.coerceIn(1, 10)
+    val targetBytes = KotvMemBudget.bytes(ctx)
     val loadControl: LoadControl =
       DefaultLoadControl.Builder()
         .setBufferDurationsMs(
@@ -1203,6 +1204,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
           DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
         )
+        .setTargetBufferBytes(targetBytes)
         .build()
     val bandwidthMeter = DefaultBandwidthMeter.Builder(ctx).build()
     val builder = ExoPlayer.Builder(ctx)
