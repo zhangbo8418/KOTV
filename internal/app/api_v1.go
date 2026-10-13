@@ -1646,7 +1646,12 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 				if headers == nil {
 					headers = h
 				}
-				playURLs = append(playURLs, playproxy.PublicizeURL(u, h))
+				// 须引擎二次解析的线路不下发直链：客户端见空串则走 livePlay。
+				if live.NeedsEnginePlay(ch, u) {
+					playURLs = append(playURLs, "")
+				} else {
+					playURLs = append(playURLs, playproxy.PublicizeURL(u, h))
+				}
 			}
 			ch.URLIndex = origLine
 			drm := ch.Drm

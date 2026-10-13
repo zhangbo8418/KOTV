@@ -60,31 +60,6 @@ const _liveIdleStatus = '确定键打开频道列表 · 菜单键打开底栏 ·
 /// 回看快进快退步长（10s）。
 const _liveCatchupSeekStep = Duration(seconds: 10);
 
-/// 进程内直播频道表缓存：再进直播页可先画列表，再后台确认。
-class _KotvLiveListSession {
-  static int? srcIndex;
-  static String name = '';
-  static List<Map<String, dynamic>> groups = const [];
-
-  static bool has(int index) => srcIndex == index && groups.isNotEmpty;
-
-  static void store({
-    required int index,
-    required String title,
-    required List<Map<String, dynamic>> next,
-  }) {
-    srcIndex = index;
-    name = title;
-    groups = next;
-  }
-
-  static void clear() {
-    srcIndex = null;
-    name = '';
-    groups = const [];
-  }
-}
-
 class LiveScreen extends ConsumerStatefulWidget {
   const LiveScreen({super.key});
 
@@ -882,48 +857,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return null;
   }
 
-  /// 直链可端内开播；parse / 专用 scheme / 需二次解析前缀走 livePlay。
-  bool _liveNeedsEnginePlay(Map ch, String url) {
-    final parseRaw = ch['parse'];
-    final parse = parseRaw is int ? parseRaw : int.tryParse('$parseRaw') ?? 0;
-    if (parse == 1) return true;
-    final raw = url.trim();
-    final lower = raw.toLowerCase();
-    if (lower.startsWith('json:') ||
-        lower.startsWith('parse:') ||
-        lower.startsWith('video:')) {
-      return true;
-    }
-    final scheme = (Uri.tryParse(raw)?.scheme ?? '').toLowerCase();
-    if (scheme == 'tvbus' ||
-        scheme == 'jianpian' ||
-        scheme == 'tvbox-xg' ||
-        scheme == 'xg' ||
-        scheme == 'xgplay' ||
-        scheme.startsWith('p2p') ||
-        scheme.startsWith('p3p') ||
-        scheme.startsWith('p4p') ||
-        scheme.startsWith('p5p') ||
-        scheme.startsWith('p6p') ||
-        scheme.startsWith('p7p') ||
-        scheme.startsWith('p8p') ||
-        scheme.startsWith('p9p') ||
-        scheme == 'mitv') {
-      return true;
-    }
-    final host = (Uri.tryParse(raw)?.host ?? '').toLowerCase();
-    return host.contains('youtube.com') || host.contains('youtu.be');
-  }
-
+  /// 引擎 Load 下发的 urls：非空可直开；空串占位表示须 livePlay（保留线路下标对齐）。
   List<String> _channelPlayUrls(Map ch) {
     final raw = ch['urls'];
-    if (raw is List) {
-      return [
-        for (final e in raw)
-          if ('$e'.trim().isNotEmpty) '$e'.trim(),
-      ];
-    }
-    return const [];
+    if (raw is! List) return const [];
+    return [for (final e in raw) '$e'.trim()];
   }
 
   Map<String, String>? _channelHeaders(Map ch) {
@@ -998,41 +936,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (!mounted) return;
     // 加载期间离开直播或已手动选台：不再自动起播。
     final serial = _playSerial;
-    if (force) _KotvLiveListSession.clear();
-
-    // 有会话缓存：立刻出列表，后台 liveLoad 确认。
-    if (!force && _KotvLiveListSession.has(index)) {
-      _srcIdx = index;
-      _unlocked.clear();
-      _epgDays = [];
-      _programs = [];
-      _catchup = false;
-      _catchupChrome = false;
-      _catchupProgIdx = -1;
-      _applyLoadedGroups(
-        _KotvLiveListSession.groups
-            .map((g) => Map<String, dynamic>.from(g)..['channels'] = List<Map<String, dynamic>>.from(
-                  ((g['channels'] as List?) ?? const []).map((c) => Map<String, dynamic>.from(c as Map)),
-                ))
-            .toList(),
-        title: _KotvLiveListSession.name.isEmpty ? '直播' : _KotvLiveListSession.name,
-      );
-      await _loadFavNames();
-      _applyFavoriteGroup();
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _status = _liveIdleStatus;
-      });
-      unawaited(_refreshLiveSourceInBackground(index, serial: serial));
-      if (autoPlay && serial == _playSerial) {
-        final restored = await _tryRestoreKeep();
-        if (!mounted) return;
-        if (!restored) await _playFirstChannel();
-      }
-      return;
-    }
-
     setState(() {
       _loading = true;
       _srcIdx = index;
@@ -1052,7 +955,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await _loadFavNames();
       _applyLoadedGroups(groups, title: title);
       _applyFavoriteGroup();
-      _KotvLiveListSession.store(index: index, title: title, next: groups);
       setState(() {
         _loading = false;
         _status = _liveIdleStatus;
@@ -1069,32 +971,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _status = '加载失败: $e';
       });
     }
-  }
-
-  Future<void> _refreshLiveSourceInBackground(int index, {required int serial}) async {
-    try {
-      final data = await ref.read(apiProvider).liveLoad(index: index, force: false);
-      if (!mounted || serial != _playSerial || _srcIdx != index) return;
-      final groups = _parseLiveGroups(data);
-      final title = '${data['name'] ?? '直播'}';
-      await _loadFavNames();
-      if (!mounted || serial != _playSerial || _srcIdx != index) return;
-      final keepGroup = _groupIdx;
-      final keepCh = _chIdx;
-      _groups = groups;
-      _applyFavoriteGroup();
-      if (keepGroup >= 0 && keepGroup < _groups.length) {
-        _groupIdx = keepGroup;
-        final chs = _channels;
-        if (keepCh >= 0 && keepCh < chs.length) _chIdx = keepCh;
-      }
-      _KotvLiveListSession.store(index: index, title: title, next: groups);
-      if (!mounted) return;
-      setState(() {
-        _title = title;
-        _status = _liveIdleStatus;
-      });
-    } catch (_) {}
   }
 
   Future<bool> _tryRestoreKeep() async {
@@ -1961,9 +1837,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       late final int lineIdx;
       late final String lineName;
 
+      // 引擎：非空 urls[line] 可直开；空串须 livePlay。
       final memUrl = playUrls.isEmpty ? '' : playUrls[useLine.clamp(0, playUrls.length - 1)];
-      final canDirect = memUrl.isNotEmpty && !_liveNeedsEnginePlay(ch, memUrl);
-      if (canDirect) {
+      if (memUrl.isNotEmpty) {
         url = kotvRewriteEngineLocalUrl(memUrl, ref.read(apiProvider).baseUrl);
         headers = _channelHeaders(ch);
         final drmRaw = ch['drm'];
