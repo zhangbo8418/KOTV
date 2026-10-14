@@ -143,11 +143,6 @@ func Devices() []Device {
 	return out
 }
 
-// Cast 向设备推送媒体 URL（无额外选项）。
-func Cast(d Device, mediaURL, title string) error {
-	return CastWith(d, mediaURL, CastOptions{Title: title})
-}
-
 // CastWith 投送并可选写入自定义头、起播进度。
 func CastWith(d Device, mediaURL string, opt CastOptions) error {
 	if d.client == nil {

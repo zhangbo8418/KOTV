@@ -10,53 +10,10 @@ import 'chrome.dart';
 import 'kotv_tv_text_field.dart';
 
 /// Web：打开页必须登录本站账号。
-/// PC/安卓：连远端引擎时，对方须开启「远端鉴权」，再登录一次。
+/// PC/安卓连远端时在设置页走 [showRemoteLoginDialog]，不经此处。
 Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async {
+  if (!kIsWeb) return true;
   final api = ref.read(apiProvider);
-
-  if (kIsWeb) {
-    final tok = await kotvAuthToken();
-    if (tok.isNotEmpty) {
-      try {
-        await api.authMe();
-        return true;
-      } catch (_) {
-        await kotvClearAuthToken();
-      }
-    }
-    if (!context.mounted) return false;
-    var allowReg = false;
-    try {
-      final st = await api.authStatus();
-      allowReg = st['allowRegister'] == true;
-    } catch (_) {}
-    if (!context.mounted) return false;
-    final r = await showRemoteLoginDialog(
-      context,
-      ref,
-      api: api,
-      allowRegister: allowReg,
-      allowCancel: false,
-      title: '登录',
-      subtitle: '使用本站账号登录后即可观看',
-    );
-    return r.ok;
-  }
-
-  Map<String, dynamic> st;
-  try {
-    st = await api.authStatus();
-  } catch (_) {
-    return true;
-  }
-  // 非本机且对方未开远端鉴权：禁止继续用远端。
-  if (st['loopback'] != true && st['remoteAccess'] != true) {
-    if (context.mounted) {
-      showAppNews(context, '对方未开启远端鉴权\n请在后端「用户管理」中打开后再连接');
-    }
-    return false;
-  }
-  if (st['authRequired'] != true) return true;
 
   final tok = await kotvAuthToken();
   if (tok.isNotEmpty) {
@@ -67,16 +24,21 @@ Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async
       await kotvClearAuthToken();
     }
   }
-
+  if (!context.mounted) return false;
+  var allowReg = false;
+  try {
+    final st = await api.authStatus();
+    allowReg = st['allowRegister'] == true;
+  } catch (_) {}
   if (!context.mounted) return false;
   final r = await showRemoteLoginDialog(
     context,
     ref,
     api: api,
-    allowRegister: st['allowRegister'] == true,
+    allowRegister: allowReg,
     allowCancel: false,
-    title: '远端登录',
-    subtitle: '连接此引擎需登录一次，之后与本机使用相同',
+    title: '登录',
+    subtitle: '使用本站账号登录后即可观看',
   );
   return r.ok;
 }
@@ -211,20 +173,4 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
     }
     return const RemoteLoginResult(ok: false);
   }
-}
-
-/// API 抛出「需要登录」时弹出登录并返回是否成功。
-Future<bool> handleAuthRequiredError(BuildContext context, WidgetRef ref, Object error) async {
-  final s = '$error';
-  if (!s.contains('需要登录') && !s.contains('登录已失效') && !s.contains('401')) {
-    return false;
-  }
-  var allowReg = false;
-  try {
-    final st = await ref.read(apiProvider).authStatus();
-    allowReg = st['allowRegister'] == true;
-  } catch (_) {}
-  if (!context.mounted) return false;
-  final r = await showRemoteLoginDialog(context, ref, allowRegister: allowReg, allowCancel: true);
-  return r.ok;
 }

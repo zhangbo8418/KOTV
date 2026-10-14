@@ -29,7 +29,7 @@ const (
 // go-chromecast 把 LAUNCH 应答超时写死为 5s，且只认带同一 requestId 的回包。
 // 不少电视（尤其 Android TV Cast）会先推 RECEIVER_STATUS（requestId=0），
 // Chrome / pychromecast 靠状态轮询等到 App 就绪；这里保持同样的等待行为，超时放宽到 30s。
-func loadURLOnChromecast(ip string, port int, mediaURL, contentType string) error {
+func loadURLOnChromecast(ip string, port int, mediaURL, contentType string, positionMs int64) error {
 	if ip == "" || port == 0 {
 		return fmt.Errorf("设备无效")
 	}
@@ -67,9 +67,13 @@ func loadURLOnChromecast(ip string, port int, mediaURL, contentType string) erro
 	if strings.Contains(lowURL, ".m3u8") || strings.Contains(lowCT, "mpegurl") {
 		streamType = "LIVE"
 	}
+	startSec := 0
+	if positionMs > 1500 {
+		startSec = int(positionMs / 1000)
+	}
 	load := &castlib.LoadMediaCommand{
 		PayloadHeader: castlib.LoadHeader,
-		CurrentTime:   0,
+		CurrentTime:   startSec,
 		Autoplay:      true,
 		Media: castlib.MediaItem{
 			ContentId:   mediaURL,

@@ -251,7 +251,7 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 					return nil, err
 				}
 				for i := range items {
-					items[i].Key = historyKeyToTV(items[i].Key)
+					items[i].Key = database.ExternalHistoryKey(items[i].Key)
 				}
 				b, err := json.Marshal(items)
 				if err != nil {
@@ -284,7 +284,7 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 
 func normalizeHistoryKeys(items []database.History) {
 	for i := range items {
-		items[i].Key = historyKeyFromTV(items[i].Key)
+		items[i].Key = database.NormalizeExternalHistoryKey(items[i].Key)
 		if items[i].Position < 0 {
 			items[i].Position = 0
 		}
@@ -314,31 +314,3 @@ func stashSyncPending(typ string, body []byte) {
 	_ = settings.Save()
 }
 
-// historyKeyFromTV：外部 site@@@vodId@@@cid / site$$$vodId → KOTV vodId@site
-func historyKeyFromTV(key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return ""
-	}
-	if strings.Contains(key, "@@@") {
-		parts := strings.Split(key, "@@@")
-		if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
-			return parts[1] + "@" + parts[0]
-		}
-	}
-	if strings.Contains(key, "$$$") {
-		parts := strings.SplitN(key, "$$$", 2)
-		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			return parts[1] + "@" + parts[0]
-		}
-	}
-	return key
-}
-
-func historyKeyToTV(key string) string {
-	key = strings.TrimSpace(key)
-	if i := strings.LastIndex(key, "@"); i > 0 {
-		return key[i+1:] + "$$$" + key[:i]
-	}
-	return key
-}

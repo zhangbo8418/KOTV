@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// Events HTTP 遥控事件总线，对应 ServerEvent。
+// Events HTTP 遥控事件总线。
 type Events struct {
 	mu          sync.RWMutex
 	searchSubs  []chan searchEvent
@@ -55,8 +55,6 @@ func NewEvents() *Events {
 		postMsgSeen: map[string]struct{}{},
 	}
 }
-
-func (e *Events) SubscribePostMsg() <-chan string { return e.subscribe(&e.postMsgSubs, 64) }
 
 func (e *Events) SubscribeSearch() <-chan searchEvent   { return e.subscribeSearch(8) }
 func (e *Events) SubscribePush() <-chan string          { return e.subscribe(&e.pushSubs, 8) }

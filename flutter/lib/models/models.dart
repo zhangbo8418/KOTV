@@ -38,7 +38,7 @@ class VodItem {
 
   bool get hasAction => action.trim().isNotEmpty;
 
-  /// `folder` 标签或 cate 非空即目录（与引擎 Vod.IsFolder / TV Vod.isFolder 一致）。
+  /// `folder` 标签或 cate 非空即目录。
   bool get isFolder {
     final tag = vodTag.trim().toLowerCase();
     return folder || tag == 'folder' || cate.trim().isNotEmpty;

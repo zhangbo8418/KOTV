@@ -317,6 +317,8 @@ class LocalHistory {
             'vodName': e.name,
             'vodFlag': e.flag,
             'vodRemarks': e.remarks,
+            // push_agent 直链：id 即播放地址，写回引擎以免投屏 episodeUrl 被 mode=2 抹掉。
+            if (e.site == 'push_agent') 'episodeUrl': e.id,
             'createTime': now,
             'position': e.positionMs,
             'duration': e.durationMs,

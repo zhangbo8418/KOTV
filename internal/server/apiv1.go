@@ -124,15 +124,6 @@ func (s *Server) registerAPIv1(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/shutdown", wrap(s.handleAPIv1Shutdown))
 }
 
-// withHostClient 把请求头里的 X-Kotv-Client-Id 绑到当前 goroutine，供 JAR 调用携带。
-func (s *Server) withHostClient(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		done := hostclient.Enter(clientIDFromRequest(r))
-		defer done()
-		next(w, r)
-	}
-}
-
 func clientIDFromRequest(r *http.Request) string {
 	if v := strings.TrimSpace(r.Header.Get("X-Kotv-Client-Id")); v != "" {
 		return v

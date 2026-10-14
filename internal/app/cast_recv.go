@@ -122,7 +122,7 @@ func parseCastHistory(raw string) (database.History, bool) {
 	if err := json.Unmarshal([]byte(raw), &dto); err != nil {
 		return database.History{}, false
 	}
-	key := normalizeHistoryKey(dto.Key)
+	key := database.NormalizeExternalHistoryKey(dto.Key)
 	if key == "" && dto.EpisodeURL == "" {
 		return database.History{}, false
 	}
@@ -150,27 +150,6 @@ func parseCastHistory(raw string) (database.History, bool) {
 		Opening:    max64(0, dto.Opening),
 		Ending:     max64(0, dto.Ending),
 	}, true
-}
-
-// normalizeHistoryKey 把外部 site@@@vodId@@@cid / site$$$vodId 归一成 KOTV 的 vodId@siteKey。
-func normalizeHistoryKey(key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return ""
-	}
-	if strings.Contains(key, "@@@") {
-		parts := strings.Split(key, "@@@")
-		if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
-			return parts[1] + "@" + parts[0]
-		}
-	}
-	if strings.Contains(key, "$$$") {
-		parts := strings.SplitN(key, "$$$", 2)
-		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			return parts[1] + "@" + parts[0]
-		}
-	}
-	return key
 }
 
 func splitHistoryKey(key string) (vodID, siteKey string) {

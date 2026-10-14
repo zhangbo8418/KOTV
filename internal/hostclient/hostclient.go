@@ -39,52 +39,17 @@ func Enter(id string) func() {
 	return EnterSession(id, "", false)
 }
 
-// EnterBoth 兼容旧调用：有 userId 时默认视为需独立引擎（由中间件改用 EnterSession）。
-func EnterBoth(clientID, userID string) func() {
-	userID = strings.TrimSpace(userID)
-	return EnterSession(clientID, userID, userID != "")
-}
-
 // EnterSession 绑定 clientId/userId，并声明是否使用独立运行时引擎。
 // dedicated=false：本机或未开远端鉴权 → 共享 JVM/Py/JS；脚本仍全局缓存。
 func EnterSession(clientID, userID string, dedicated bool) func() {
 	clientID = strings.TrimSpace(clientID)
 	userID = strings.TrimSpace(userID)
-	if !dedicated {
-		// 共享引擎路径不把 userId 用于运行时分桶（Kill 仍可用 CurrentUserID）
-	}
 	if clientID == "" && userID == "" && !dedicated {
 		return func() {}
 	}
 	gid := goid()
 	prev, _ := byG.Load(gid)
 	byG.Store(gid, binding{ClientID: clientID, UserID: userID, Dedicated: dedicated && userID != ""})
-	return func() {
-		if prev == nil {
-			byG.Delete(gid)
-			return
-		}
-		byG.Store(gid, prev)
-	}
-}
-
-// EnterUser 仅更新 userId，保留已有 clientId / dedicated。
-func EnterUser(userID string) func() {
-	userID = strings.TrimSpace(userID)
-	gid := goid()
-	prev, _ := byG.Load(gid)
-	cid := ""
-	dedicated := false
-	if b, ok := prev.(binding); ok {
-		cid = b.ClientID
-		dedicated = b.Dedicated
-	} else if s, ok := prev.(string); ok {
-		cid = s
-	}
-	if userID == "" && cid == "" {
-		return func() {}
-	}
-	byG.Store(gid, binding{ClientID: cid, UserID: userID, Dedicated: dedicated && userID != ""})
 	return func() {
 		if prev == nil {
 			byG.Delete(gid)

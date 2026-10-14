@@ -128,7 +128,19 @@ func Discover(timeout time.Duration) ([]Device, error) {
 		}
 		return pi < pj
 	})
+	rememberDiscover(out)
 	return out, nil
+}
+
+var (
+	lastDiscoverMu sync.Mutex
+	lastDiscover   []Device
+)
+
+func rememberDiscover(devs []Device) {
+	lastDiscoverMu.Lock()
+	lastDiscover = append([]Device(nil), devs...)
+	lastDiscoverMu.Unlock()
 }
 
 func discoverChromecast(timeout time.Duration) ([]Device, error) {
@@ -196,33 +208,18 @@ func discoverChromecast(timeout time.Duration) ([]Device, error) {
 	return out, nil
 }
 
-// Cast 向设备推送媒体 URL。
-func Cast(d Device, mediaURL, title string) error {
-	_, err := CastWith(d, mediaURL, title, nil, 0)
-	return err
-}
-
 // CastOptions 投送附加参数（App 协议需要 config/device/history）。
 type CastOptions struct {
-	Title      string
-	Headers    map[string]string
-	PositionMs int64
-	ConfigJSON string
-	DeviceJSON string
+	Title       string
+	Headers     map[string]string
+	PositionMs  int64
+	ConfigJSON  string
+	DeviceJSON  string
 	HistoryJSON string
 }
 
-// CastWith 投送；headers 写入 DIDL（兼容遥控端），positionMs 起播续看。
+// CastWithOpts 投送；headers 写入 DIDL，positionMs 起播续看。
 // Chromecast 失败时，若同 IP 存在 DLNA 设备则自动回退；used 为实际成功的协议设备。
-func CastWith(d Device, mediaURL, title string, headers map[string]string, positionMs int64) (Device, error) {
-	return CastWithOpts(d, mediaURL, CastOptions{
-		Title:      title,
-		Headers:    headers,
-		PositionMs: positionMs,
-	})
-}
-
-// CastWithOpts 带 App 投屏载荷的投送。
 func CastWithOpts(d Device, mediaURL string, opt CastOptions) (Device, error) {
 	mediaURL = dlna.RewriteLocalURL(mediaURL)
 	if mediaURL == "" && d.Protocol != ProtocolApp {
@@ -238,7 +235,7 @@ func CastWithOpts(d Device, mediaURL string, opt CastOptions) (Device, error) {
 		})
 		return d, err
 	case ProtocolChromecast:
-		err := castChromecast(d, mediaURL)
+		err := castChromecast(d, mediaURL, opt.PositionMs)
 		if err == nil {
 			return d, nil
 		}
@@ -275,6 +272,17 @@ func findDLNAByHost(host string) (Device, bool) {
 	host = strings.TrimSpace(host)
 	if host == "" {
 		return Device{}, false
+	}
+	lastDiscoverMu.Lock()
+	cached := append([]Device(nil), lastDiscover...)
+	lastDiscoverMu.Unlock()
+	for _, d := range cached {
+		if d.Protocol != ProtocolDLNA {
+			continue
+		}
+		if hostMatchesLocation(host, d.Detail) {
+			return d, true
+		}
 	}
 	devs, err := dlna.Discover(3 * time.Second)
 	if err != nil {
@@ -316,7 +324,7 @@ func chromecastHint() string {
 	return "提示：若 Chrome 能投同一台电视，可再试一次 Chromecast；仍失败请选同设备的 DLNA（控制更完整）。"
 }
 
-func castChromecast(d Device, mediaURL string) error {
+func castChromecast(d Device, mediaURL string, positionMs int64) error {
 	if d.castIP == "" || d.castPort == 0 {
 		return fmt.Errorf("设备无效")
 	}
@@ -326,7 +334,7 @@ func castChromecast(d Device, mediaURL string) error {
 			time.Sleep(800 * time.Millisecond)
 			log.Printf("cast: Chromecast 重试 %d/2 → %s:%d", attempt, d.castIP, d.castPort)
 		}
-		last = loadURLOnChromecast(d.castIP, d.castPort, mediaURL, contentTypeForURL(mediaURL))
+		last = loadURLOnChromecast(d.castIP, d.castPort, mediaURL, contentTypeForURL(mediaURL), positionMs)
 		if last == nil {
 			return nil
 		}

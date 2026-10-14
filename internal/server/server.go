@@ -35,7 +35,7 @@ var remoteFS embed.FS
 
 const defaultPort = 9978
 
-// Server 局域网 HTTP 遥控服务，对应 KtorD。
+// Server 局域网 HTTP 遥控服务。
 type Server struct {
 	mu            sync.RWMutex
 	port          int

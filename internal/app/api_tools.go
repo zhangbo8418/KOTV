@@ -391,7 +391,7 @@ func (a *App) toolMirrorSync(histRaw, keepRaw string) (map[string]any, error) {
 			return nil, fmt.Errorf("history JSON: %w", err)
 		}
 		for i := range items {
-			items[i].Key = normalizeHistoryKey(items[i].Key)
+			items[i].Key = database.NormalizeExternalHistoryKey(items[i].Key)
 		}
 		owner := hostclient.DataOwner()
 		if err := a.DB.ImportHistory(owner, items, 2); err != nil {
@@ -520,7 +520,7 @@ func (a *App) castHistoryJSON(episodeURL, title string, posMs int64) string {
 		title = "投屏播放"
 	}
 	episodeURL = strings.TrimSpace(episodeURL)
-	// 对端按 site@@@vodId@@@cid 解析；直链投屏用 push_agent + URL。
+	// 当前播放直链投屏：push_agent + URL（兼容对端 @@@ 解析）。
 	key := service.PushAgentKey + "@@@" + episodeURL + "@@@0"
 	if episodeURL == "" {
 		key = service.PushAgentKey + "@@@" + title + "@@@0"
