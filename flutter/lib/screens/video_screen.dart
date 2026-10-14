@@ -151,18 +151,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   Future<void> _bootstrap() async {
     await _refreshLocalMeta();
-    // 暖启动：配置已 ready 且爬虫就绪时跳过无意义的 refreshRepo（避免二次拉仓/抬 jar 世代）。
-    var refreshRepo = true;
-    try {
-      final cfg = await ref.read(apiProvider).getConfig();
-      final ready = cfg['ready'] == true;
-      final spiderOk = cfg['spiderOk'] != false;
-      final source = '${cfg['source'] ?? ''}'.trim();
-      if (ready && spiderOk && source.isNotEmpty) {
-        refreshRepo = false;
-      }
-    } catch (_) {}
-    await _reload(refreshRepo: refreshRepo);
+    // 进首页仍 refreshRepo：重拉 http(s) 仓并 RefreshAfterConfig（核对 jar/js/py）。
+    // 与引擎远端/本机地址切换无关（那是 engineLauncher baseUrl）；分类切换不走此路径。
+    await _reload(refreshRepo: true);
   }
 
   /// 无点播源：source 空且错误像「未配置」。

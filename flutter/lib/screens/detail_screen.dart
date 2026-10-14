@@ -3495,32 +3495,35 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             onNews: () => showAppNews(context, remoteHint(ref)),
             title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
           );
-      // 壁纸只靠壳层 AppBackdrop，详情不再嵌一层（避免双绘与双 30min 定时器）。
+      // 详情压在壳层 Navigator 上（Cupertino/Material 路由默认不透明），
+      // 壳层壁纸透不出来，须自带 AppBackdrop。
       final detailScaffold = Scaffold(
         backgroundColor: Colors.transparent,
-        body: Column(
-          children: [
-            Visibility(
-              visible: false,
-              maintainSize: true,
-              maintainAnimation: true,
-              maintainState: true,
-              maintainInteractivity: false,
-              child: buildTopBar(),
-            ),
-            Expanded(
-              child: KeyedSubtree(
-                key: _bodyClipKey,
-                child: _loading
-                    ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                    : _error != null
-                        ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
-                        : _detail == null
-                            ? const SizedBox.shrink()
-                            : _buildBody(),
+        body: AppBackdrop(
+          child: Column(
+            children: [
+              Visibility(
+                visible: false,
+                maintainSize: true,
+                maintainAnimation: true,
+                maintainState: true,
+                maintainInteractivity: false,
+                child: buildTopBar(),
               ),
-            ),
-          ],
+              Expanded(
+                child: KeyedSubtree(
+                  key: _bodyClipKey,
+                  child: _loading
+                      ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                      : _error != null
+                          ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                          : _detail == null
+                              ? const SizedBox.shrink()
+                              : _buildBody(),
+                ),
+              ),
+            ],
+          ),
         ),
       );
       body = LayoutBuilder(
@@ -3546,7 +3549,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             fit: StackFit.expand,
             children: [
               // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
-              // 仅氛围模式去掉黑底，四周才透壳层壁纸；Android 仍卸详情树防 Surface 镂空双影
+              // 仅氛围模式去掉黑底，四周才透详情 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影
               // （7458fbe / ef4fb2d：稳定 Positioned 宿主，勿整页 Offstage 叠一层 Hybrid）。
               // 桌面 Offstage 保活（media_kit Texture 不宜整树卸装）。
               // 沉浸期禁止 _syncVideoSlotRect，避免 setState 重建 Hybrid Positioned。
@@ -3595,23 +3598,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     } else {
       body = Scaffold(
         backgroundColor: Colors.transparent,
-        body: Column(
-          children: [
-            LibraryTopBar(
-              onBack: () => unawaited(_leavePage()),
-              onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
-              onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
-              onNews: () => showAppNews(context, remoteHint(ref)),
-              title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
-            ),
-            Expanded(
-              child: _loading
-                  ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                  : _error != null
-                      ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
-                      : _buildBody(),
-            ),
-          ],
+        body: AppBackdrop(
+          child: Column(
+            children: [
+              LibraryTopBar(
+                onBack: () => unawaited(_leavePage()),
+                onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
+                onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
+                onNews: () => showAppNews(context, remoteHint(ref)),
+                title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
+              ),
+              Expanded(
+                child: _loading
+                    ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                    : _error != null
+                        ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                        : _buildBody(),
+              ),
+            ],
+          ),
         ),
       );
     }
