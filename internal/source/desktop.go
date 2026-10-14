@@ -12,29 +12,33 @@ import (
 	"time"
 )
 
-func fetchPlatform(playURL string, _ json.RawMessage) (string, error) {
+func fetchPlatformInfo(playURL string, _ json.RawMessage) (Info, error) {
 	playURL = strings.TrimSpace(playURL)
 	if playURL == "" {
-		return "", fmt.Errorf("空播放地址")
+		return Info{}, fmt.Errorf("空播放地址")
 	}
 	u, err := url.Parse(playURL)
 	if err != nil {
-		return "", err
+		return Info{}, err
 	}
 	scheme := strings.ToLower(u.Scheme)
 	host := strings.ToLower(u.Hostname())
 
 	switch {
 	case strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be"):
-		return fetchYouTubeDesktop(playURL)
+		out, err := fetchYouTubeDesktop(playURL)
+		if err != nil {
+			return Info{}, err
+		}
+		return Info{URL: out}, nil
 	case scheme == "jianpian" || scheme == "tvbox-xg" || scheme == "xg" || scheme == "xgplay":
-		return "", fmt.Errorf("荐片 P2P 仅安卓支持（需 libjpa）: %s", playURL)
+		return Info{}, fmt.Errorf("荐片 P2P 仅安卓支持（需 libjpa）: %s", playURL)
 	case scheme == "tvbus":
-		return "", fmt.Errorf("TVBus 仅安卓支持: %s", playURL)
+		return Info{}, fmt.Errorf("TVBus 仅安卓支持: %s", playURL)
 	case isForceScheme(scheme):
-		return "", fmt.Errorf("ForceTech (%s) 仅安卓支持: %s", scheme, playURL)
+		return Info{}, fmt.Errorf("ForceTech (%s) 仅安卓支持: %s", scheme, playURL)
 	default:
-		return "", fmt.Errorf("桌面不支持该源协议: %s", playURL)
+		return Info{}, fmt.Errorf("桌面不支持该源协议: %s", playURL)
 	}
 }
 

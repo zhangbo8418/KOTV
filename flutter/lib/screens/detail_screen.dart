@@ -2241,6 +2241,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           }
         } catch (_) {}
       }
+      // YouTube 等专用源展开后带回的标题/封面/简介，刷新详情展示。
+      final srcTitle = '${data['title'] ?? ''}'.trim();
+      final srcArt = '${data['artwork'] ?? ''}'.trim();
+      final srcDesc = '${data['desc'] ?? ''}'.trim();
+      if (mounted && _detail != null && (srcTitle.isNotEmpty || srcArt.isNotEmpty || srcDesc.isNotEmpty)) {
+        setState(() {
+          _detail = _detail!.withMeta(
+            name: srcTitle.isNotEmpty ? srcTitle : null,
+            pic: srcArt.isNotEmpty ? srcArt : null,
+            content: srcDesc.isNotEmpty ? srcDesc : null,
+          );
+        });
+      }
       _scheduleNextEpisodePreload(
         site: _detailSite(),
         id: _detailId(),

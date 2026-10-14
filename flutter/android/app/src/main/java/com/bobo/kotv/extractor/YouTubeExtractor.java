@@ -17,7 +17,9 @@ import org.schabi.newpipe.extractor.stream.Stream;
 import org.schabi.newpipe.extractor.stream.StreamInfo;
 import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 import org.schabi.newpipe.extractor.stream.StreamType;
+import org.schabi.newpipe.extractor.stream.SubtitlesStream;
 import org.schabi.newpipe.extractor.stream.VideoStream;
+import org.schabi.newpipe.extractor.MediaFormat;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
@@ -67,8 +69,82 @@ public final class YouTubeExtractor {
   }
 
   public static String fetch(String url) throws Exception {
+    return fetchDetail(url).url;
+  }
+
+  /** 可播地址 + VTT 字幕 + 标题/封面/简介。 */
+  public static FetchDetail fetchDetail(String url) throws Exception {
     ensureInit();
-    return getPlayUrl(StreamInfo.getInfo(url));
+    StreamInfo info = StreamInfo.getInfo(url);
+    FetchDetail out = new FetchDetail();
+    out.url = getPlayUrl(info);
+    out.name = info.getName();
+    try {
+      if (info.getThumbnails() != null && !info.getThumbnails().isEmpty()) {
+        out.artwork = info.getThumbnails().get(info.getThumbnails().size() - 1).getUrl();
+      }
+    } catch (Throwable ignored) {
+    }
+    try {
+      if (info.getDescription() != null) {
+        out.desc = info.getDescription().getContent();
+      }
+    } catch (Throwable ignored) {
+    }
+    out.subs = getSubtitles(info.getSubtitles());
+    return out;
+  }
+
+  public static final class FetchDetail {
+    public String url = "";
+    public String name = "";
+    public String artwork = "";
+    public String desc = "";
+    public List<String[]> subs = new ArrayList<>(); // [name, url, lang, format]
+  }
+
+  private static List<String[]> getSubtitles(List<SubtitlesStream> subtitles) {
+    if (subtitles == null || subtitles.isEmpty()) return new ArrayList<>();
+    List<String[]> out = new ArrayList<>();
+    for (SubtitlesStream subtitle : subtitles) {
+      String[] row = toSub(subtitle);
+      if (row != null) out.add(row);
+    }
+    return out;
+  }
+
+  private static String[] toSub(SubtitlesStream subtitle) {
+    String url = getSubtitleUrl(subtitle);
+    if (url == null) return null;
+    String label = subtitle.getDisplayLanguageName();
+    String language = subtitle.getLanguageTag();
+    if (label == null || label.isEmpty()) label = language;
+    if (label == null) label = "";
+    if (language == null) language = "";
+    return new String[] {label, url, language, MimeTypes.TEXT_VTT};
+  }
+
+  private static String getSubtitleUrl(SubtitlesStream subtitle) {
+    MediaFormat format = subtitle.getFormat();
+    if (format == null || subtitle.getContent().isEmpty()) return null;
+    if (subtitle.isUrl() && MimeTypes.APPLICATION_TTML.equals(format.getMimeType())) {
+      return getVttSubtitleUrl(Uri.parse(subtitle.getContent()));
+    }
+    if (!MimeTypes.TEXT_VTT.equals(format.getMimeType())) return null;
+    if (subtitle.isUrl()) return subtitle.getContent();
+    return toDataUri(MimeTypes.TEXT_VTT, subtitle.getContent());
+  }
+
+  private static String getVttSubtitleUrl(Uri uri) {
+    Uri.Builder builder = uri.buildUpon().clearQuery();
+    for (String name : uri.getQueryParameterNames()) {
+      if ("fmt".equalsIgnoreCase(name)) continue;
+      for (String value : uri.getQueryParameters(name)) {
+        builder.appendQueryParameter(name, value);
+      }
+    }
+    builder.appendQueryParameter("fmt", "vtt");
+    return builder.build().toString();
   }
 
   /** 播放列表 → [{name,url},…]；直播条目（duration==-1）跳过。 */

@@ -4,7 +4,18 @@ import (
 	"encoding/json"
 	"net/url"
 	"strings"
+
+	"github.com/bobo/KOTV/internal/model"
 )
+
+// Info 专用源展开结果：可播地址 + 可选字幕/元数据。
+type Info struct {
+	URL     string
+	Subs    []model.Sub
+	Name    string
+	Artwork string
+	Desc    string
+}
 
 // Match 是否为荐片 / TVBus / YouTube 等需预处理的播放地址。
 func Match(raw string) bool {
@@ -26,11 +37,18 @@ func Match(raw string) bool {
 	return strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be")
 }
 
-// Fetch 把专用 scheme / YouTube 转成可播 HTTP。
-// Android：荐片 / TVBus / Force / NewPipe YouTube。
-// 桌面：YouTube 走 yt-dlp；荐片 / TVBus / Force 仅安卓。
+// Fetch 把专用 scheme / YouTube 转成可播 HTTP（仅地址）。
 func Fetch(playURL string, core json.RawMessage) (string, error) {
-	return fetchPlatform(strings.TrimSpace(playURL), core)
+	info, err := FetchInfo(playURL, core)
+	if err != nil {
+		return "", err
+	}
+	return info.URL, nil
+}
+
+// FetchInfo 展开专用源，并带回字幕与标题/封面（YouTube 等）。
+func FetchInfo(playURL string, core json.RawMessage) (Info, error) {
+	return fetchPlatformInfo(strings.TrimSpace(playURL), core)
 }
 
 // Stop 停掉当前荐片/TVBus 任务。

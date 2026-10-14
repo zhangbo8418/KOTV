@@ -725,6 +725,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 
 	mediaURL := playURL
 	directURL := ""
+	sourceTitle := ""
 	magnet := thunder.Match(playURL)
 	if magnet {
 		// 起播前 Source.stop，确保可被 cancelPending / 换集打断
@@ -736,11 +737,21 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		playURL = local
 	} else if source.Match(playURL) {
 		source.Stop()
-		local, err := source.Fetch(playURL, a.liveCoreJSON())
+		info, err := source.FetchInfo(playURL, a.liveCoreJSON())
 		if err != nil {
 			return nil, fmt.Errorf("专用源解析失败: %w", err)
 		}
-		playURL = local
+		playURL = info.URL
+		if len(info.Subs) > 0 {
+			playSubs = append([]model.Sub(nil), info.Subs...)
+		}
+		sourceTitle = strings.TrimSpace(info.Name)
+		if s := strings.TrimSpace(info.Artwork); s != "" {
+			playArtwork = s
+		}
+		if s := model.CleanDesc(info.Desc); s != "" {
+			playDesc = s
+		}
 	} else if IsLocalMediaURL(playURL) {
 		playURL = exposeLocalFile(playURL)
 		mediaURL = playURL
@@ -756,6 +767,9 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 	}
 
 	title := vodID
+	if sourceTitle != "" {
+		title = sourceTitle
+	}
 	a.SetMediaPlaying(title, playURL)
 
 	pubQualURLs := make([]string, len(qualURLs))
@@ -805,6 +819,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		"subs":      subsDTO,
 		"artwork":   playArtwork,
 		"desc":      playDesc,
+		"title":     title,
 		"msg":       playMsg,
 		"position":  playPosition,
 		"qualities": map[string]any{"names": qualNames, "urls": pubQualURLs},

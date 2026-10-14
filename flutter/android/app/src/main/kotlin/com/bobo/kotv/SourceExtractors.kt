@@ -41,17 +41,48 @@ object SourceExtractors {
     val url = body.optString("url", "").trim()
     if (url.isEmpty()) return JSONObject().put("ok", false).put("error", "empty url")
     return try {
-      val out = when (schemeOf(url)) {
-        Scheme.JianPian -> fetchJianPian(url)
-        Scheme.TVBus -> fetchTVBus(url, body.optJSONObject("core"))
-        Scheme.YouTube -> YouTubeExtractor.fetch(url)
-        Scheme.Force -> ForceExtractor.fetch(url)
-        Scheme.None -> url
-      }
-      if (out.isBlank()) {
-        JSONObject().put("ok", false).put("error", "empty extract url")
-      } else {
-        JSONObject().put("ok", true).put("url", out)
+      when (schemeOf(url)) {
+        Scheme.YouTube -> {
+          val detail = YouTubeExtractor.fetchDetail(url)
+          if (detail.url.isBlank()) {
+            JSONObject().put("ok", false).put("error", "empty extract url")
+          } else {
+            val subs = JSONArray()
+            for (row in detail.subs) {
+              if (row.size < 2) continue
+              val su = row[1]?.trim().orEmpty()
+              if (su.isEmpty()) continue
+              subs.put(
+                JSONObject()
+                  .put("name", row.getOrNull(0)?.trim().orEmpty())
+                  .put("url", su)
+                  .put("lang", row.getOrNull(2)?.trim().orEmpty())
+                  .put("format", row.getOrNull(3)?.trim().orEmpty().ifEmpty { "text/vtt" }),
+              )
+            }
+            JSONObject()
+              .put("ok", true)
+              .put("url", detail.url)
+              .put("name", detail.name?.trim().orEmpty())
+              .put("artwork", detail.artwork?.trim().orEmpty())
+              .put("desc", detail.desc?.trim().orEmpty())
+              .put("subs", subs)
+          }
+        }
+        else -> {
+          val out = when (schemeOf(url)) {
+            Scheme.JianPian -> fetchJianPian(url)
+            Scheme.TVBus -> fetchTVBus(url, body.optJSONObject("core"))
+            Scheme.Force -> ForceExtractor.fetch(url)
+            Scheme.None -> url
+            Scheme.YouTube -> url // unreachable
+          }
+          if (out.isBlank()) {
+            JSONObject().put("ok", false).put("error", "empty extract url")
+          } else {
+            JSONObject().put("ok", true).put("url", out)
+          }
+        }
       }
     } catch (t: Throwable) {
       Log.e(TAG, "fetch failed: $url", t)

@@ -224,6 +224,21 @@ class VodDetail {
         typeName: typeName,
         flags: next,
       );
+
+  VodDetail withMeta({String? name, String? pic, String? content}) => VodDetail(
+        id: id,
+        name: (name != null && name.trim().isNotEmpty) ? name.trim() : this.name,
+        pic: (pic != null && pic.trim().isNotEmpty) ? pic.trim() : this.pic,
+        content: (content != null && content.trim().isNotEmpty) ? content.trim() : this.content,
+        site: site,
+        remarks: remarks,
+        year: year,
+        area: area,
+        actor: actor,
+        director: director,
+        typeName: typeName,
+        flags: flags,
+      );
 }
 
 class SiteInfo {
