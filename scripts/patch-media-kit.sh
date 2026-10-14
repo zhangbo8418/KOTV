@@ -19,8 +19,12 @@
 # FvpVideoView.surfaceDestroyed 上游会 release()→nativeSetSurface(null)。全屏改
 # LayoutParams 常触发临时 surfaceDestroyed，整表抹掉 players 后易定格/崩。改成空
 # 实现（与 KotvExo SurfaceView 同语义）；永久卸面仍走 dispose()→release()。
-# release() 清 map 须 tunnel=false（同 ReleaseRT）；上游传 bind 时的 tunnel=true
-# 会在 Redmi PlatformView.dispose→nativeSetSurface 上 UAF。
+#
+# PlatformView 卸面 UAF：nativeSetSurface 清面分支不读 JNI tunnel，只看绑定时写入的
+# TexturePlayer.directSurface。真正崩溃是 Dart 先 mdkPlayerAPI_delete，而
+# players[surfaceId] 仍包装同一 handle，随后 FvpVideoView.release→setDecoders。
+# 补丁：dispose 在 delete 前调 ReleasePlayer，按 handle 卸面并 erase map。
+# （误用 release(tunnel=false) 无效，已撤销。）
 #
 # prepare 失败写入 _players[-hashCode] 时若覆盖同 key，旧 player 会泄漏；改为先 dispose 再挂新的。
 #
@@ -211,7 +215,8 @@ DISPOSE_OLD = """  /// Release resources
     // await: ensure no player ref in fvp plugin before mdkPlayerAPI_delete() in dart
     await updateTexture(width: -1);
     state = PlaybackState.stopped;"""
-DISPOSE_NEW = """  /// Release resources
+# Previous KOTV dispose patch (stop + updateTexture, no ReleasePlayer).
+DISPOSE_LEGACY = """  /// Release resources
   Future<void> dispose() async {
     if (_pp == nullptr) {
       textureId.dispose();
@@ -222,6 +227,35 @@ DISPOSE_NEW = """  /// Release resources
     state = PlaybackState.stopped;
     // await: ensure no player ref in fvp plugin before mdkPlayerAPI_delete() in dart
     await updateTexture(width: -1);"""
+# Brief intermediate: ReleasePlayer on all platforms (desktop MissingPluginException).
+DISPOSE_RELEASE_ALWAYS = """  /// Release resources
+  Future<void> dispose() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): stop before delete so the demux
+    // packet cache goes away with the player.
+    state = PlaybackState.stopped;
+    // Texture: ReleaseRT via updateTexture. PlatformView never sets textureId —
+    // ReleasePlayer drops native players[surfaceId] while the handle is still live.
+    await updateTexture(width: -1);
+    await FvpPlatform.instance.releasePlayer(nativeHandle);"""
+DISPOSE_NEW = """  /// Release resources
+  Future<void> dispose() async {
+    if (_pp == nullptr) {
+      textureId.dispose();
+      return;
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): stop before delete so the demux
+    // packet cache goes away with the player.
+    state = PlaybackState.stopped;
+    // Texture: ReleaseRT via updateTexture. Android PlatformView never sets
+    // textureId — ReleasePlayer drops native players[surfaceId] while alive.
+    await updateTexture(width: -1);
+    if (Platform.isAndroid) {
+      await FvpPlatform.instance.releasePlayer(nativeHandle);
+    }"""
 SIZE_WAIT_OLD = """      textureId.value = null;
     }
     final size = await _videoSize.future;"""
@@ -299,7 +333,15 @@ def _one_of(label, blob, pairs):
     )
     sys.exit(1)
 
-player_text = _once("dispose stops before delete", player_text, DISPOSE_OLD, DISPOSE_NEW)
+player_text = _one_of(
+    "dispose stops before delete + ReleasePlayer",
+    player_text,
+    (
+        (DISPOSE_OLD, DISPOSE_NEW),
+        (DISPOSE_LEGACY, DISPOSE_NEW),
+        (DISPOSE_RELEASE_ALWAYS, DISPOSE_NEW),
+    ),
+)
 player_text = _once("updateTexture release does not wait for size", player_text, SIZE_WAIT_OLD, SIZE_WAIT_NEW)
 mdk_text = _one_of("platform dispose awaits player delete", mdk_text, AWAIT_PAIRS)
 mdk_text = _once("MdkVideoPlayer.dispose returns Future", mdk_text, SUB_DISPOSE_OLD, SUB_DISPOSE_NEW)
@@ -478,7 +520,7 @@ else:
     )
 
 # create：X-KOTV-Prepare-Ms → prepare(startPosition)；勿发往 CDN。
-# 对齐 Mac MPV Media(start:) / mdk prepare(ms)；避免 prepare(0)+seekTo 触发安卓 AMediaCodec FLUSHING。
+# Mac MPV Media(start:) / mdk prepare(ms) 同思路；避免 prepare(0)+seekTo 触发安卓 AMediaCodec FLUSHING。
 PREPARE_START_OLD = """    if (dataSource.httpHeaders.isNotEmpty) {
       String headers = '';
       dataSource.httpHeaders.forEach((key, value) {
@@ -812,17 +854,8 @@ if "dispose() {\n        surfaceView.getHolder().removeCallback(this);\n        
     print("ERROR: FvpVideoView.dispose must still call release()", file=sys.stderr)
     sys.exit(1)
 
-# PlatformView 永久卸面：清 map 须同 ReleaseRT（tunnel=false）。
-# 上游 release() 传构造时的 tunnel=true；Redmi 上 nativeSetSurface(0,id,null,-1,-1,true)
-# 会走 directSurface 拆解码器路径 → UAF（tombstone: FvpVideoView.release→nativeSetSurface）。
-FVP_RELEASE_OLD = """    private void release() {
-        if (released) {
-            return;
-        }
-        released = true;
-        FvpPlugin.nativeSetSurface(0, surfaceId, null, -1, -1, tunnel);
-    }"""
-FVP_RELEASE_NEW = """    private void release() {
+# 撤销误判的 tunnel=false：清面路径不读 JNI tunnel（见 fvp_plugin.cpp）。
+FVP_RELEASE_WRONG = """    private void release() {
         if (released) {
             return;
         }
@@ -831,15 +864,22 @@ FVP_RELEASE_NEW = """    private void release() {
         // tunnel=true here UAF's on Redmi MediaCodec during PlatformView.dispose.
         FvpPlugin.nativeSetSurface(0, surfaceId, null, -1, -1, false);
     }"""
+FVP_RELEASE_UPSTREAM = """    private void release() {
+        if (released) {
+            return;
+        }
+        released = true;
+        FvpPlugin.nativeSetSurface(0, surfaceId, null, -1, -1, tunnel);
+    }"""
 fvv_text = fvp_video_view.read_text(encoding="utf-8")
-if FVP_RELEASE_NEW in fvv_text:
-    print(f"ok fvp ({fvp_version}) already patched: FvpVideoView.release tunnel=false")
-elif FVP_RELEASE_OLD in fvv_text:
+if FVP_RELEASE_UPSTREAM in fvv_text:
+    print(f"ok fvp ({fvp_version}): FvpVideoView.release uses upstream tunnel arg")
+elif FVP_RELEASE_WRONG in fvv_text:
     fvp_video_view.write_text(
-        fvv_text.replace(FVP_RELEASE_OLD, FVP_RELEASE_NEW, 1),
+        fvv_text.replace(FVP_RELEASE_WRONG, FVP_RELEASE_UPSTREAM, 1),
         encoding="utf-8",
     )
-    print(f"patched fvp ({fvp_version}): FvpVideoView.release tunnel=false")
+    print(f"patched fvp ({fvp_version}): revert FvpVideoView.release tunnel=false")
 else:
     print(
         f"ERROR: fvp ({fvp_version}) FvpVideoView.release snippet missing; "
@@ -848,11 +888,251 @@ else:
     )
     sys.exit(1)
 fvv_check = fvp_video_view.read_text(encoding="utf-8")
-if "nativeSetSurface(0, surfaceId, null, -1, -1, tunnel);" in fvv_check:
-    print("ERROR: FvpVideoView.release still clears with tunnel=true", file=sys.stderr)
+if "nativeSetSurface(0, surfaceId, null, -1, -1, false);" in fvv_check:
+    print("ERROR: FvpVideoView.release still forced tunnel=false", file=sys.stderr)
     sys.exit(1)
-if "nativeSetSurface(0, surfaceId, null, -1, -1, false);" not in fvv_check:
-    print("ERROR: FvpVideoView.release must clear with tunnel=false", file=sys.stderr)
+if "nativeSetSurface(0, surfaceId, null, -1, -1, tunnel);" not in fvv_check:
+    print("ERROR: FvpVideoView.release must pass bind-time tunnel", file=sys.stderr)
+    sys.exit(1)
+
+# PlatformView：dispose 在 mdkPlayerAPI_delete 前按 handle 清 native players map。
+fvp_plugin_cpp = fvp_root / "android" / "fvp_plugin.cpp"
+fvp_plugin_java = (
+    fvp_root
+    / "android"
+    / "src"
+    / "main"
+    / "java"
+    / "com"
+    / "mediadevkit"
+    / "fvp"
+    / "FvpPlugin.java"
+)
+fvp_plat = fvp_root / "lib" / "src" / "fvp_platform_interface.dart"
+fvp_ch = fvp_root / "lib" / "src" / "fvp_method_channel.dart"
+for p in (fvp_plugin_cpp, fvp_plugin_java, fvp_plat, fvp_ch):
+    if not p.is_file():
+        print(f"ERROR: missing {p}", file=sys.stderr)
+        sys.exit(1)
+
+CPP_TP_OLD = """    TexturePlayer(jlong handle)
+        : mdk::Player(reinterpret_cast<mdkPlayerAPI*>(handle))
+    {
+    }
+
+    int width = 0;
+    int height = 0;
+    jobject surface = nullptr;
+    void* vo_opaque = nullptr; // can change by TextureRegistry.SurfaceProducer.Callback
+    bool directSurface = false; // decoder renders into the surface, no GL renderer
+private:
+};"""
+CPP_TP_NEW = """    TexturePlayer(jlong handle)
+        : mdk::Player(reinterpret_cast<mdkPlayerAPI*>(handle))
+        , apiHandle(handle)
+    {
+    }
+
+    jlong apiHandle = 0;
+    int width = 0;
+    int height = 0;
+    jobject surface = nullptr;
+    void* vo_opaque = nullptr; // can change by TextureRegistry.SurfaceProducer.Callback
+    bool directSurface = false; // decoder renders into the surface, no GL renderer
+private:
+};"""
+CPP_RELEASE_FN = """
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_mediadevkit_fvp_FvpPlugin_nativeReleasePlayer(JNIEnv *env, jobject thiz, jlong player_handle) {
+    // KOTV patch (scripts/patch-media-kit.sh): PlatformView never goes through
+    // ReleaseRT. Drop every native map entry for this handle while it is still
+    // alive — before Dart mdkPlayerAPI_delete — so a later FvpVideoView.release
+    // cannot setDecoders/updateNativeSurface on a freed player.
+    if (!player_handle) {
+        return;
+    }
+    for (auto it = players.begin(); it != players.end(); ) {
+        auto player = it->second;
+        if (player->apiHandle != player_handle) {
+            ++it;
+            continue;
+        }
+        auto s = player->surface;
+        if (player->directSurface) {
+            player->setDecoders(mdk::MediaType::Video, {});
+        }
+        player->updateNativeSurface(nullptr);
+        if (s) {
+            env->DeleteGlobalRef(s);
+        }
+        it = players.erase(it);
+    }
+}
+"""
+cpp_text = fvp_plugin_cpp.read_text(encoding="utf-8")
+if "nativeReleasePlayer" in cpp_text and "apiHandle" in cpp_text:
+    print(f"ok fvp ({fvp_version}) already patched: nativeReleasePlayer")
+else:
+    if CPP_TP_OLD not in cpp_text:
+        print(
+            f"ERROR: fvp ({fvp_version}) TexturePlayer snippet missing; "
+            "upstream changed — update scripts/patch-media-kit.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    cpp_text = cpp_text.replace(CPP_TP_OLD, CPP_TP_NEW, 1)
+    if "Java_com_mediadevkit_fvp_FvpPlugin_nativeSetSurfaceSize" not in cpp_text:
+        print("ERROR: nativeSetSurfaceSize anchor missing for ReleasePlayer", file=sys.stderr)
+        sys.exit(1)
+    cpp_text = cpp_text.replace(
+        "extern \"C\"\nJNIEXPORT void JNICALL\nJava_com_mediadevkit_fvp_FvpPlugin_nativeSetSurfaceSize",
+        CPP_RELEASE_FN.lstrip("\n")
+        + "\nextern \"C\"\nJNIEXPORT void JNICALL\nJava_com_mediadevkit_fvp_FvpPlugin_nativeSetSurfaceSize",
+        1,
+    )
+    fvp_plugin_cpp.write_text(cpp_text, encoding="utf-8")
+    print(f"patched fvp ({fvp_version}): nativeReleasePlayer")
+cpp_check = fvp_plugin_cpp.read_text(encoding="utf-8")
+if "nativeReleasePlayer" not in cpp_check or "apiHandle" not in cpp_check:
+    print("ERROR: fvp_plugin.cpp missing nativeReleasePlayer", file=sys.stderr)
+    sys.exit(1)
+
+JAVA_NATIVE_OLD = """  static native void nativeSetSurface(long playerHandle, long texId, Surface surface, int w, int h, boolean tunnel);
+
+  /*!
+    Surface size change (SurfaceHolder.Callback.surfaceChanged). Only the GL
+    render path needs it; with "tunnel" the decoder owns the buffer geometry.
+   */
+  static native void nativeSetSurfaceSize(long texId, int w, int h);"""
+JAVA_NATIVE_NEW = """  static native void nativeSetSurface(long playerHandle, long texId, Surface surface, int w, int h, boolean tunnel);
+
+  /*!
+    Drop every native players[] entry for this handle (PlatformView surfaceIds).
+    Must run before Dart mdkPlayerAPI_delete.
+   */
+  static native void nativeReleasePlayer(long playerHandle);
+
+  /*!
+    Surface size change (SurfaceHolder.Callback.surfaceChanged). Only the GL
+    render path needs it; with "tunnel" the decoder owns the buffer geometry.
+   */
+  static native void nativeSetSurfaceSize(long texId, int w, int h);"""
+JAVA_HANDLER_OLD = """    } else if (call.method.equals("ReleaseRT")) {
+      final int texId = call.argument("texture"); // 32bit int, 0, 1, 2 .... but SurfaceTexture.id() is long
+      final long texId64 = texId; // MUST cast texId to long, otherwise remove() error
+      nativeSetSurface(0, texId, null, -1, -1, false);"""
+JAVA_HANDLER_NEW = """    } else if (call.method.equals("ReleasePlayer")) {
+      final Number h = call.argument("player");
+      nativeReleasePlayer(h.longValue());
+      result.success(null);
+    } else if (call.method.equals("ReleaseRT")) {
+      final int texId = call.argument("texture"); // 32bit int, 0, 1, 2 .... but SurfaceTexture.id() is long
+      final long texId64 = texId; // MUST cast texId to long, otherwise remove() error
+      nativeSetSurface(0, texId, null, -1, -1, false);"""
+java_text = fvp_plugin_java.read_text(encoding="utf-8")
+if "nativeReleasePlayer" in java_text and 'equals("ReleasePlayer")' in java_text:
+    print(f"ok fvp ({fvp_version}) already patched: FvpPlugin ReleasePlayer")
+else:
+    if JAVA_NATIVE_OLD not in java_text or JAVA_HANDLER_OLD not in java_text:
+        print(
+            f"ERROR: fvp ({fvp_version}) FvpPlugin ReleasePlayer anchors missing; "
+            "upstream changed — update scripts/patch-media-kit.sh",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    java_text = java_text.replace(JAVA_HANDLER_OLD, JAVA_HANDLER_NEW, 1)
+    java_text = java_text.replace(JAVA_NATIVE_OLD, JAVA_NATIVE_NEW, 1)
+    fvp_plugin_java.write_text(java_text, encoding="utf-8")
+    print(f"patched fvp ({fvp_version}): FvpPlugin ReleasePlayer")
+java_check = fvp_plugin_java.read_text(encoding="utf-8")
+if "nativeReleasePlayer" not in java_check or 'equals("ReleasePlayer")' not in java_check:
+    print("ERROR: FvpPlugin.java missing ReleasePlayer", file=sys.stderr)
+    sys.exit(1)
+
+PLAT_OLD = """  Future<void> releaseTexture(int playerHandle, int textureId) {
+    throw UnimplementedError('releaseTexture() has not been implemented.');
+  }
+
+  Future<void> setMixWithOthers(bool mixWithOthers) async {
+    throw UnimplementedError('setMixWithOthers() has not been implemented.');
+  }
+}"""
+PLAT_NEW = """  Future<void> releaseTexture(int playerHandle, int textureId) {
+    throw UnimplementedError('releaseTexture() has not been implemented.');
+  }
+
+  /// Clear native surface bindings for [playerHandle] (PlatformView path).
+  Future<void> releasePlayer(int playerHandle) {
+    throw UnimplementedError('releasePlayer() has not been implemented.');
+  }
+
+  Future<void> setMixWithOthers(bool mixWithOthers) async {
+    throw UnimplementedError('setMixWithOthers() has not been implemented.');
+  }
+}"""
+CH_OLD = """  @override
+  Future<void> releaseTexture(int playerHandle, int textureId) async {
+    await methodChannel.invokeMethod('ReleaseRT', {
+      "player": playerHandle,
+      "texture": textureId,
+    });
+  }
+
+  @override
+  Future<void> setMixWithOthers(bool mixWithOthers) async {
+    await methodChannel.invokeMethod('MixWithOthers', {"value": mixWithOthers});
+  }
+}"""
+CH_NEW = """  @override
+  Future<void> releaseTexture(int playerHandle, int textureId) async {
+    await methodChannel.invokeMethod('ReleaseRT', {
+      "player": playerHandle,
+      "texture": textureId,
+    });
+  }
+
+  @override
+  Future<void> releasePlayer(int playerHandle) async {
+    await methodChannel.invokeMethod('ReleasePlayer', {
+      "player": playerHandle,
+    });
+  }
+
+  @override
+  Future<void> setMixWithOthers(bool mixWithOthers) async {
+    await methodChannel.invokeMethod('MixWithOthers', {"value": mixWithOthers});
+  }
+}"""
+plat_text = fvp_plat.read_text(encoding="utf-8")
+if "releasePlayer(int playerHandle)" in plat_text:
+    print(f"ok fvp ({fvp_version}) already patched: FvpPlatform.releasePlayer")
+elif PLAT_OLD in plat_text:
+    fvp_plat.write_text(plat_text.replace(PLAT_OLD, PLAT_NEW, 1), encoding="utf-8")
+    print(f"patched fvp ({fvp_version}): FvpPlatform.releasePlayer")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) FvpPlatform.releasePlayer anchor missing",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+ch_text = fvp_ch.read_text(encoding="utf-8")
+if "ReleasePlayer" in ch_text:
+    print(f"ok fvp ({fvp_version}) already patched: MethodChannel ReleasePlayer")
+elif CH_OLD in ch_text:
+    fvp_ch.write_text(ch_text.replace(CH_OLD, CH_NEW, 1), encoding="utf-8")
+    print(f"patched fvp ({fvp_version}): MethodChannel ReleasePlayer")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) MethodChannel ReleasePlayer anchor missing",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# player.dart may have been written earlier in this run; re-read for final checks.
+player_check = player_dart.read_text(encoding="utf-8")
+if "releasePlayer(nativeHandle)" not in player_check or "Platform.isAndroid" not in player_check.split("Future<void> dispose", 1)[-1][:800]:
+    print("ERROR: Player.dispose missing Android-gated releasePlayer before mdk delete", file=sys.stderr)
     sys.exit(1)
 
 print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")

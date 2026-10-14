@@ -250,7 +250,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
 
     await kotvSoftPausePlayers(backends);
-    // release 完成（含 FVP Surface：先删 mdk 再卸 PlatformView）后再清 _playUrl。
+    // release 完成（含 FVP Surface：dispose 内先清 native 面再删 mdk）后再清 _playUrl。
     await kotvHardReleasePlayers(backends, waitFirst: fvp);
 
     _fvp = null;

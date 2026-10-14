@@ -207,9 +207,11 @@ class FvpPlayback extends KotvPlayback {
 
   /// 停声后拆掉 [VideoPlayerController]。
   ///
-  /// Android Surface（platformView）：须**先** `c.dispose()` 删掉 mdk（拆掉
-  /// tunnel/directSurface），再 `_c=null` 摘掉 PlatformView。若先卸 View，
-  /// `FvpVideoView.release→nativeSetSurface` 在 Redmi 上会 UAF。
+  /// Android Surface（platformView）：须**先** `c.dispose()`（补丁在
+  /// `mdkPlayerAPI_delete` 前按 handle 清 native `players[surfaceId]`，并在
+  /// Surface 仍在时 `setDecoders({})`），再摘 PlatformView；否则
+  /// `FvpVideoView.release` 会对已删 handle 调 `setDecoders`/`updateNativeSurface`。
+  /// JNI `tunnel` 清面时不读，绑定时的 `directSurface` 才决定是否清 decoder。
   /// Texture：先摘视图再 dispose（dispose 内 ReleaseRT 清正 textureId）。
   Future<void> _disposeController() async {
     final c = _c;
@@ -230,7 +232,7 @@ class FvpPlayback extends KotvPlayback {
     if (!identical(_c, c)) return;
 
     if (_androidSurface) {
-      // Surface：player 仍挂在树上时先删 mdk，再摘 PlatformView。
+      // Surface：dispose 内 ReleasePlayer 卸面，再摘 PlatformView（release 变 no-op）。
       try {
         await c.dispose();
       } catch (_) {}

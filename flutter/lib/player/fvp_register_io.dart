@@ -17,7 +17,7 @@ String _kotvFvpSig = '';
 String _kotvFvpClearKey = '';
 
 /// 安卓是否走 Surface（`playerRender`）：Surface→image=0 + platformView + tunnel；
-/// Texture→普通 AMediaCodec、tunnel 关。
+/// Texture→普通 AMediaCodec、tunnel 关。此处 tunnel 仅绑定时写 `directSurface`。
 bool _kotvFvpAndroidSurface = true;
 
 /// [decodeMode] 决定 prepare 用的解码器。
@@ -53,8 +53,9 @@ void kotvEnsureFvpRegistered({
 ///
 /// Android：[playerRender] Surface → platformView + `AMediaCodec:image=0` + tunnel；
 /// Texture → textureView + 普通 AMediaCodec，tunnel 关。
-/// fvp 的 `tunnel` 是 mdk 直绑 Surface（C++ `directSurface`，拆面时先清 decoder），
-/// **不是** Exo Media3 `setTunnelingEnabled` / FEATURE_TunneledPlayback。
+/// fvp 的 `tunnel` 只在绑定时写入 C++ `directSurface`（解码器直写 Surface），
+/// **不是** Exo Media3 `setTunnelingEnabled` / FEATURE_TunneledPlayback；
+/// `nativeSetSurface` 清面分支不读 JNI tunnel，只看已存的 `directSurface`。
 ///
 /// 缓冲：player `buffer=0+0`，create patch `setBufferRange(min:0,max:0)`；开播后再写预算 max。
 ///
@@ -103,7 +104,7 @@ void kotvRegisterFvp({
     'player': playerOpts,
   };
   if (kotvIsAndroid()) {
-    // Surface+image=0 须 tunnel=true，走 directSurface 安全拆面；Texture 关 tunnel。
+    // Surface+image=0 须 tunnel=true 才能绑 directSurface；Texture 关 tunnel。
     options['tunnel'] = androidSurface;
   } else if (windows) {
     // Win7 / Win10+ 共用：同设备渲染，跳过跨设备 GPU 拷贝。
