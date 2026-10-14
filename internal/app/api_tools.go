@@ -55,6 +55,8 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 		return a.toolBackupImport(strParam(params, "path"))
 	case "consumesyncimport":
 		return a.toolConsumeSyncImport()
+	case "mirrorsync":
+		return a.toolMirrorSync(strParam(params, "history"), strParam(params, "keep"))
 	case "castdiscover":
 		return a.toolCastDiscover()
 	case "cast":
@@ -373,6 +375,37 @@ func (a *App) toolConsumeSyncImport() (map[string]any, error) {
 		"history": hist,
 		"keep":    keep,
 	}, nil
+}
+
+// toolMirrorSync 把 Flutter SP 历史/收藏全量回写引擎 DB，供对端 Export / 配对拉取。
+func (a *App) toolMirrorSync(histRaw, keepRaw string) (map[string]any, error) {
+	histRaw = strings.TrimSpace(histRaw)
+	keepRaw = strings.TrimSpace(keepRaw)
+	if histRaw == "" && keepRaw == "" {
+		return map[string]any{"ok": true}, nil
+	}
+	if histRaw != "" {
+		var items []database.History
+		if err := json.Unmarshal([]byte(histRaw), &items); err != nil {
+			return nil, fmt.Errorf("history JSON: %w", err)
+		}
+		for i := range items {
+			items[i].Key = normalizeHistoryKey(items[i].Key)
+		}
+		if err := a.DB.ImportHistory(items, 2); err != nil {
+			return nil, err
+		}
+	}
+	if keepRaw != "" {
+		var items []database.Keep
+		if err := json.Unmarshal([]byte(keepRaw), &items); err != nil {
+			return nil, fmt.Errorf("keep JSON: %w", err)
+		}
+		if err := a.DB.ImportKeep(items, 2); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{"ok": true}, nil
 }
 
 func (a *App) toolCastDiscover() (map[string]any, error) {

@@ -440,6 +440,8 @@ func (a *App) listenEvents() {
 			case "live":
 				// 推到 Flutter：清内存表并重拉当前直播源频道列表。
 				remote.DefaultQueue.PushRefresh("live", "", "")
+			case "detail", "player", "category":
+				remote.DefaultQueue.PushRefresh(strings.ToLower(ev.Type), "", "")
 			case "subtitle":
 				if enh, ok := embed.ActiveEnhanced(); ok && ev.Path != "" {
 					_ = enh.AddSubtitleFile(ev.Path)

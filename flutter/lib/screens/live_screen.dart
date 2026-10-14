@@ -485,6 +485,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     bridge.onSubtitleFile = _onRemoteSubtitle;
     bridge.onLiveRefresh = _onRemoteLiveRefresh;
     bridge.onLiveDanmaku = _onRemoteLiveDanmaku;
+    bridge.onPlayerRefresh = _onRemotePlayerRefresh;
   }
 
   void _detachRemoteHandlers() {
@@ -495,6 +496,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (identical(bridge.onSubtitleFile, _onRemoteSubtitle)) bridge.onSubtitleFile = null;
     if (identical(bridge.onLiveRefresh, _onRemoteLiveRefresh)) bridge.onLiveRefresh = null;
     if (identical(bridge.onLiveDanmaku, _onRemoteLiveDanmaku)) bridge.onLiveDanmaku = null;
+    if (identical(bridge.onPlayerRefresh, _onRemotePlayerRefresh)) bridge.onPlayerRefresh = null;
+  }
+
+  void _onRemotePlayerRefresh() {
+    if (!mounted || _groups.isEmpty) return;
+    unawaited(_playChannel(_chIdx, line: _line));
   }
 
   void _onRemoteLiveDanmaku(String text) {

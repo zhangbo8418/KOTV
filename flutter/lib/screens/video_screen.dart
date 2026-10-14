@@ -51,11 +51,15 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   List<VodItem> _keeps = [];
   final ScrollController _scroll = ScrollController();
   int _loadGen = 0;
+  RemoteBridge? _boundRemote;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _bootstrap();
+      _attachRemoteHandlers();
+    });
     _bannerTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted || _tid != null) return;
       final n = _apiBanners.isNotEmpty ? _apiBanners.length : _bannerSlides.length;
@@ -66,9 +70,31 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   @override
   void dispose() {
+    _detachRemoteHandlers();
     _bannerTimer?.cancel();
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _attachRemoteHandlers() {
+    final bridge = ref.read(remoteBridgeProvider);
+    if (bridge == null) return;
+    _boundRemote = bridge;
+    bridge.onCategoryRefresh = _onRemoteCategoryRefresh;
+  }
+
+  void _detachRemoteHandlers() {
+    final bridge = _boundRemote;
+    _boundRemote = null;
+    if (bridge == null) return;
+    if (identical(bridge.onCategoryRefresh, _onRemoteCategoryRefresh)) {
+      bridge.onCategoryRefresh = null;
+    }
+  }
+
+  void _onRemoteCategoryRefresh() {
+    if (!mounted) return;
+    unawaited(_reload(refreshRepo: true));
   }
 
   List<VodItem> get _bannerSlides {

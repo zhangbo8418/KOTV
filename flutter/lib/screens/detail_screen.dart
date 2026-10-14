@@ -643,6 +643,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     bridge.onSubtitleFile = _onRemoteSubtitle;
     bridge.onDanmakuFile = _onRemoteDanmakuFile;
     bridge.onLiveDanmaku = _onRemoteLiveDanmaku;
+    bridge.onDetailRefresh = _onRemoteDetailRefresh;
+    bridge.onPlayerRefresh = _onRemotePlayerRefresh;
   }
 
   void _detachRemoteHandlers() {
@@ -653,6 +655,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (identical(bridge.onSubtitleFile, _onRemoteSubtitle)) bridge.onSubtitleFile = null;
     if (identical(bridge.onDanmakuFile, _onRemoteDanmakuFile)) bridge.onDanmakuFile = null;
     if (identical(bridge.onLiveDanmaku, _onRemoteLiveDanmaku)) bridge.onLiveDanmaku = null;
+    if (identical(bridge.onDetailRefresh, _onRemoteDetailRefresh)) bridge.onDetailRefresh = null;
+    if (identical(bridge.onPlayerRefresh, _onRemotePlayerRefresh)) bridge.onPlayerRefresh = null;
+  }
+
+  void _onRemoteDetailRefresh() {
+    if (!mounted) return;
+    unawaited(_load());
+  }
+
+  void _onRemotePlayerRefresh() {
+    if (!mounted || _epIdx < 0) return;
+    unawaited(_playAt(_epIdx));
   }
 
   void _onRemoteControl(String type, int seekMs) {

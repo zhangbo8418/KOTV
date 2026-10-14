@@ -22,9 +22,12 @@ func TestPushOpenDrain(t *testing.T) {
 func TestPushRefreshLiveEmptyPath(t *testing.T) {
 	q := &Queue{byClient: map[string]*clientBucket{}, known: map[string]struct{}{}}
 	q.PushRefresh("live", "", "c1")
+	q.PushRefresh("detail", "", "c1")
+	q.PushRefresh("player", "", "c1")
+	q.PushRefresh("category", "", "c1")
 	q.PushRefresh("subtitle", "", "c1")
 	_, _, refs, _, _ := q.Drain("c1")
-	if len(refs) != 1 || refs[0].Type != "live" {
-		t.Fatalf("refs=%+v want single live", refs)
+	if len(refs) != 4 {
+		t.Fatalf("refs=%+v want 4 ui refreshes", refs)
 	}
 }

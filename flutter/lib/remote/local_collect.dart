@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
 import 'sync_import_apply.dart';
+import 'sync_mirror_push.dart';
 
 class LocalCollect {
   static const _key = 'kotv_collect_v1';
@@ -118,6 +119,7 @@ class LocalCollect {
   static Future<void> clear() async {
     final p = await SharedPreferences.getInstance();
     await p.remove(_key);
+    SyncMirrorPush.scheduleKeep(const []);
   }
 
   static Future<void> remove(VodItem item) async {
@@ -183,6 +185,7 @@ class LocalCollect {
               })
           .toList()),
     );
+    SyncMirrorPush.scheduleKeep(toSyncTargets(items));
   }
 
   /// 同步协议 Keep JSON（site$$$id）。

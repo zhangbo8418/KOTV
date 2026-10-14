@@ -705,35 +705,6 @@ func (db *DB) UpsertSpiderStatus(s SpiderStatus) error {
 	return err
 }
 
-// MediaTrack 音轨/字幕偏好（按 history key 持久化）。
-type MediaTrack struct {
-	Key     string
-	Kind    string // audio / sub
-	TrackID int64
-	Name    string
-	Format  string
-}
-
-func (db *DB) SaveTrack(t MediaTrack) error {
-	_, err := db.conn.Exec(`INSERT OR REPLACE INTO track(key, kind, track_id, name, format) VALUES(?,?,?,?,?)`,
-		t.Key, t.Kind, t.TrackID, t.Name, t.Format)
-	return err
-}
-
-func (db *DB) GetTrack(key, kind string) (*MediaTrack, error) {
-	row := db.conn.QueryRow(
-		`SELECT key, kind, track_id, COALESCE(name,''), COALESCE(format,'')
-		 FROM track WHERE key = ? AND kind = ?`, key, kind)
-	var t MediaTrack
-	if err := row.Scan(&t.Key, &t.Kind, &t.TrackID, &t.Name, &t.Format); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &t, nil
-}
-
 func (db *DB) ListSpiderStatus() ([]SpiderStatus, error) {
 	rows, err := db.conn.Query(`SELECT site_key, status, COALESCE(message,''), COALESCE(updated_at,0) FROM spider_status`)
 	if err != nil {

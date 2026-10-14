@@ -8,6 +8,7 @@ import '../api/kotv_api.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
 import 'sync_import_apply.dart';
+import 'sync_mirror_push.dart';
 
 /// 轮询 Go 引擎遥控队列，并把播放状态回写给遥控页。
 class RemoteBridge {
@@ -26,6 +27,12 @@ class RemoteBridge {
   void Function(String text)? onLiveDanmaku;
   /// 遥控 refresh type=live：重拉当前直播源频道表。
   void Function()? onLiveRefresh;
+  /// 遥控 refresh type=detail：详情页重拉。
+  void Function()? onDetailRefresh;
+  /// 遥控 refresh type=player：点播重播当前集 / 直播重刷当前线。
+  void Function()? onPlayerRefresh;
+  /// 遥控 refresh type=category：首页/分类重载。
+  void Function()? onCategoryRefresh;
   /// 投屏/推送打开：kind=play|detail。
   void Function(Map<String, dynamic> open)? onOpen;
 
@@ -69,6 +76,18 @@ class RemoteBridge {
         final path = '${r['path'] ?? ''}'.trim();
         if (typ == 'live') {
           onLiveRefresh?.call();
+          continue;
+        }
+        if (typ == 'detail') {
+          onDetailRefresh?.call();
+          continue;
+        }
+        if (typ == 'player') {
+          onPlayerRefresh?.call();
+          continue;
+        }
+        if (typ == 'category') {
+          onCategoryRefresh?.call();
           continue;
         }
         if (path.isEmpty) continue;
@@ -276,6 +295,7 @@ class LocalHistory {
               })
           .toList()),
     );
+    SyncMirrorPush.scheduleHistory(toSyncTargets(items));
   }
 
   /// 同步协议 History JSON（site$$$id）。
@@ -332,6 +352,7 @@ class LocalHistory {
   static Future<void> clear() async {
     final p = await SharedPreferences.getInstance();
     await p.remove(_key);
+    SyncMirrorPush.scheduleHistory(const []);
   }
 
   static Future<void> remove(VodItem item) async {

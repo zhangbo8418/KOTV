@@ -112,9 +112,14 @@ func (q *Queue) PushRefresh(typ, path, clientID string) {
 	if typ == "" {
 		return
 	}
-	// live 仅通知重拉列表，无 path；字幕/弹幕必须带路径。
-	if path == "" && typ != "live" {
-		return
+	// live/detail/player/category 仅通知 UI，无 path；字幕/弹幕必须带路径。
+	switch typ {
+	case "live", "detail", "player", "category":
+		// ok
+	default:
+		if path == "" {
+			return
+		}
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
