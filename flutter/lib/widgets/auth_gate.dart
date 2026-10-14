@@ -9,8 +9,7 @@ import '../theme/kotv_palette.dart';
 import 'chrome.dart';
 import 'kotv_tv_text_field.dart';
 
-/// Web：打开页必须登录本站账号。
-/// PC/安卓连远端时在设置页走 [showRemoteLoginDialog]，不经此处。
+/// Web 进页闸：同源本站必须先登录（不配远程后端；PC/安卓远端登录走设置页）。
 Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async {
   if (!kIsWeb) return true;
   final api = ref.read(apiProvider);

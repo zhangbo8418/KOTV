@@ -21,19 +21,31 @@ func isLoopbackRequest(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// remoteAccessAllowed 非本机必须开启远端鉴权才可连入（登录/业务 API）。
-// 本机 loopback 始终允许。
+// remoteAccessAllowed 是否允许该客户端连入（再谈是否要登录）。
+// - 本机 loopback：始终允许（PC/安卓免登录）
+// - Web：同源本站入口，始终允许（仍强制登录；不依赖 remoteAuth，也不用配远程后端）
+// - 其它非本机（PC/安卓连远端）：须开启 remoteAuth
 func remoteAccessAllowed(r *http.Request) bool {
 	if isLoopbackRequest(r) {
+		return true
+	}
+	if isWebClient(r) {
 		return true
 	}
 	return auth.RemoteAuthEnabled()
 }
 
-func authRequiredFor(r *http.Request) bool {
+func isWebClient(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
 	plat := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform")))
-	// Web 固定本站后端：打开页必须登录（与 remoteAuth / 是否本机无关）。
-	if plat == "web" {
+	return plat == "web"
+}
+
+func authRequiredFor(r *http.Request) bool {
+	// Web：本站页面，必须登录后才能用业务（与 remoteAuth / 是否本机无关）。
+	if isWebClient(r) {
 		return true
 	}
 	if !auth.RemoteAuthEnabled() {
@@ -71,11 +83,10 @@ func publicAuthPath(path string) bool {
 	}
 }
 
-// withAuth 远端鉴权中间件；成功后绑定 userId。
-// 非本机且未开 remoteAuth：拒绝连接与登录（仅放行 health/net/auth/status 探测）。
-// Web（X-Kotv-Client-Platform=web）：始终要求登录。
-// 本机 loopback 的 PC/安卓：免登录，会话只用 clientId。
-// 非本机且开启 remoteAuth：必须 Bearer，会话用 u:<userId> 隔离。
+// withAuth 鉴权中间件；成功后绑定 userId。
+// - Web：始终允许连入且必须登录（同源本站，不配远程后端、不依赖 remoteAuth）
+// - 本机 loopback 的 PC/安卓：免登录，会话只用 clientId
+// - 非本机 PC/安卓：须开 remoteAuth 且 Bearer，会话用 u:<userId>
 func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
@@ -85,7 +96,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		loopback := isLoopbackRequest(r)
 		tok := auth.BearerFromHeader(r.Header.Get("Authorization"))
 		plat := strings.TrimSpace(r.Header.Get("X-Kotv-Client-Platform"))
-		webClient := strings.EqualFold(plat, "web")
+		webClient := isWebClient(r)
 
 		bindPlat := func() {
 			if plat != "" {
@@ -95,7 +106,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// 本机 PC/安卓：忽略 token 对会话的影响，只走 clientId。
-		// Web 即使从本机浏览器打开也要走登录。
+		// Web 即使从本机浏览器打开也要走登录，不进此短路径。
 		if loopback && !webClient {
 			done := hostclient.EnterSession(clientIDFromRequest(r), "", false)
 			defer done()
@@ -109,7 +120,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// 非本机未开远端鉴权：禁止登录与业务；仅允许探测接口。
+		// 非本机且非 Web、未开远端鉴权：禁止登录与业务；仅允许探测接口。
 		if !remoteAccessAllowed(r) {
 			if !probeOnlyPath(r.URL.Path) {
 				writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")

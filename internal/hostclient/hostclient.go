@@ -236,7 +236,7 @@ func RuntimeUserID() string {
 }
 
 // DataOwner 历史/收藏数据桶：直接用当前请求已绑定的 userId。
-// 远端强制登录后中间件会写入 userId；本机免登录则为空（共享默认桶）。
+// Web/远端登录后中间件写入 userId；本机 PC·安卓免登录则为空（共享默认桶）。
 // 不是二次鉴权，只是复用登录身份做数据分桶。
 func DataOwner() string {
 	return strings.TrimSpace(CurrentUserID())

@@ -23,7 +23,7 @@ Future<void> kotvSetAuthToken(String token) async {
   }
 }
 
-/// 登录会话里的 userId（远端强制登录后写入）；本机免登录为空。
+/// 登录会话里的 userId（Web 本站登录 / PC·安卓远端登录后写入）；本机免登录为空。
 /// 只供历史/收藏分桶，不是二次鉴权。
 Future<String> kotvSessionUserId() async {
   if (_userCached != null) return _userCached!;

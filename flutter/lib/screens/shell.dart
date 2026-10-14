@@ -59,7 +59,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     kotvHandleAppBack = () => _onShellBack(fromMouse: true);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      // 仅 Web：打开本站页面必须先登录。PC/安卓在设置里「远端登录」。
+      // Web：同源本站，进页必须先登录（无需配置远程引擎）。
       if (kIsWeb) {
         while (mounted) {
           final ok = await ensureRemoteAuthIfNeeded(context, ref);

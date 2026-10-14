@@ -30,6 +30,16 @@ func TestRemoteAccessAllowed(t *testing.T) {
 	if remoteAccessAllowed(lan) {
 		t.Fatal("LAN without remoteAuth must be denied")
 	}
+	webLan := &http.Request{
+		RemoteAddr: "192.168.1.8:54321",
+		Header:     http.Header{"X-Kotv-Client-Platform": []string{"web"}},
+	}
+	if !remoteAccessAllowed(webLan) {
+		t.Fatal("Web same-origin must be allowed without remoteAuth")
+	}
+	if !authRequiredFor(webLan) {
+		t.Fatal("Web must still require login")
+	}
 
 	settings.Set(settings.RemoteAuth, "true")
 	if !remoteAccessAllowed(lan) {
