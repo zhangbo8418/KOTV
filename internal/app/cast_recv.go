@@ -14,9 +14,13 @@ import (
 )
 
 // ApplyRemoteCast 处理局域网 /action?do=cast（手机端投到本机）。
-func (a *App) ApplyRemoteCast(configJSON, historyJSON string) {
+// deviceJSON 为对端设备描述（name/ip/uuid）；解析失败不影响开播。
+func (a *App) ApplyRemoteCast(configJSON, deviceJSON, historyJSON string) {
 	if strings.TrimSpace(historyJSON) == "" {
 		return
+	}
+	if name := castDeviceName(deviceJSON); name != "" {
+		log.Printf("cast from %s", name)
 	}
 	if err := a.ensureCastConfig(configJSON); err != nil {
 		log.Printf("cast config: %v", err)
@@ -115,6 +119,20 @@ type castHistoryDTO struct {
 	Speed      float64 `json:"speed"`
 	Opening    int64   `json:"opening"`
 	Ending     int64   `json:"ending"`
+}
+
+func castDeviceName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var d struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(raw), &d); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(d.Name)
 }
 
 func parseCastHistory(raw string) (database.History, bool) {

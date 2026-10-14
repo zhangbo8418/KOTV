@@ -1920,6 +1920,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _cast() async {
+    try {
+      final m = await ref.read(apiProvider).getMedia();
+      final media = m['media'];
+      final url = media is Map ? '${media['url'] ?? ''}'.trim() : '';
+      if (url.isEmpty) {
+        if (mounted) showAppNews(context, '请先播放内容再投屏');
+        return;
+      }
+    } catch (_) {
+      if (mounted) showAppNews(context, '请先播放内容再投屏');
+      return;
+    }
     final msg = await runKotvCast(
       context,
       ref.read(apiProvider),

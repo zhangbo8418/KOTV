@@ -159,14 +159,21 @@ class DetailScreen extends ConsumerStatefulWidget {
     final done = Completer<void>();
     _DetailScreenState._leaveDone = done;
     active._leaving = true;
-    if (_DetailScreenState._active == active) {
-      _DetailScreenState._active = null;
-    }
     try {
-      try {
-        active.ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
-      } catch (_) {}
-      active._immersiveFullscreen = false;
+      // 须完整退沉浸（系统栏/方向 + setState）；禁止只改布尔，否则树与 Surface 错位。
+      if (active._immersiveFullscreen) {
+        try {
+          await active._exitImmersiveFullscreen();
+        } catch (_) {}
+      } else {
+        try {
+          active.ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
+        } catch (_) {}
+      }
+      // 立刻清 _active：否则 goKotvPage→prepareLeave 仍会 await 本页硬停，切 Tab 像点不动。
+      if (_DetailScreenState._active == active) {
+        _DetailScreenState._active = null;
+      }
       try {
         await active._flushWatchProgress(force: true);
       } catch (_) {}
@@ -904,15 +911,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       try {
         await _flushWatchProgress(force: true);
       } catch (_) {}
-      // 先硬停再出栈：否则 Navigator.pop → dispose 里 ref 抛错时 FVP 会继续后台出声。
-      try {
-        await _stopHard();
-      } catch (_) {}
+      // 先退沉浸（布局落稳）再硬停：避免全屏 Positioned 与 release 同帧；停后再出栈防后台出声。
       if (_immersiveFullscreen) {
         try {
           await _exitImmersiveFullscreen();
         } catch (_) {}
       }
+      try {
+        await _stopHard();
+      } catch (_) {}
       if (_miniDesktop) {
         try {
           await _exitMini();
@@ -1185,7 +1192,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _danmakuItems.dispose();
     _fsSwipeDy.dispose();
     // 正常路径已在 [_stopHard] 里 await release+dispose，引擎引用已清空。
-    // 异常路径（未走 _leavePage）：树已在卸，仍尽量先 release 再 dispose 包装类。
+    // 异常路径：先调度 release（清 mdk），再摘引用；与 [_stopHard] 同序意图。
     if (!_stoppedHard) {
       final fvp = _fvp;
       final mk = _mk;
@@ -1196,6 +1203,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final zw = _zw;
       final mkPlayer = _mkPlayer;
       final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
+      unawaited(() async {
+        await kotvHardReleasePlayers(backends, waitFirst: fvp);
+        await kotvDisposeMpvPlayer(mkPlayer);
+        kotvDisposePlaybackWrappers(backends);
+      }());
       _fvp = null;
       _mk = null;
       _exo = null;
@@ -1207,11 +1219,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _playUrl = '';
       _lastVideoPaintRect = null;
       _videoLayerRect = null;
-      unawaited(() async {
-        await kotvHardReleasePlayers(backends, waitFirst: fvp);
-        await kotvDisposeMpvPlayer(mkPlayer);
-        kotvDisposePlaybackWrappers(backends);
-      }());
     }
     super.dispose();
   }
@@ -1892,6 +1899,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
+    if (_leaving) return;
     final d = _detail;
     if (d == null || d.flags.isEmpty) return;
     final flag = d.flags[_flagIdx.clamp(0, d.flags.length - 1)];
@@ -3038,9 +3046,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _enterFullscreen([KotvDesktopFullscreenKind desktopFs = KotvDesktopFullscreenKind.window]) async {
     final d = _detail;
-    if (d == null || !mounted || _playUrl.isEmpty) return;
+    if (d == null || !mounted || _playUrl.isEmpty || _immersiveFullscreen) return;
     if (_miniDesktop) await _exitMini();
-    if (!mounted) return;
+    if (!mounted || _immersiveFullscreen) return;
     if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
       // 抖音式：手机全屏保持竖屏，上下滑切集；点「全屏观看」才锁横屏。
       try {
@@ -3049,14 +3057,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     // 先藏系统栏：锁竖屏后系统 UI 可能被 OS 拉回，后面再补一次。
     await kotvEnterSystemFullscreen(desktopFs);
-    if (!mounted) return;
+    if (!mounted || _immersiveFullscreen) return;
     ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
     setState(() {
       _desktopFs = desktopFs;
       _immersiveFullscreen = true;
       _fsSwipeDy.value = 0;
     });
-    _syncFullscreen();
     // 壳层 SafeArea/底栏撤掉后再补一次沉浸，避免状态栏占位。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_immersiveFullscreen) return;
@@ -3090,17 +3097,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _immersiveEpCover = false;
       });
     }
+    // kotvExitSystemFullscreen 已恢复 edgeToEdge + 方向；勿再叠一次 setPreferredOrientations。
     await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
-    if (!kotvIsDesktop() && !KotvLayout.television) {
-      try {
-        await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-      } catch (_) {}
-    }
-    if (!mounted) return;
-    // 方向稳定后再量槽；稳定层只改 Positioned 几何，不卸 PlatformView。
+    if (!mounted || _immersiveFullscreen) return;
+    // 再等一帧量槽，避开退出当帧重建 Hybrid Positioned。
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || _immersiveFullscreen) return;
-    _syncVideoSlotRect();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _immersiveFullscreen) return;
+      _syncVideoSlotRect();
+    });
   }
 
   Future<void> _cast() async {
@@ -3476,25 +3482,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             key: _detailStackKey,
             fit: StackFit.expand,
             children: [
-              // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
-              // 仅氛围模式去掉黑底，四周才透 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影。
-              // 桌面 Offstage 保活（media_kit Texture 不宜整树卸装）。
-              if (kotvIsAndroid()) ...[
-                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
-                if (!_immersiveFullscreen) detailScaffold,
-              ] else ...[
-                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
-                Offstage(
-                  offstage: _immersiveFullscreen,
-                  child: ExcludeFocus(
-                    excluding: _immersiveFullscreen,
-                    child: TickerMode(
-                      enabled: !_immersiveFullscreen,
-                      child: detailScaffold,
-                    ),
+              // 沉浸默认黑底；氛围模式才透壁纸。
+              // 全平台 Offstage 保活详情树（含黑槽）：退出勿整树 remount，避免与方向/量槽同帧卡死。
+              // 沉浸期禁止 _syncVideoSlotRect，避免 setState 重建 Hybrid Positioned。
+              if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
+              Offstage(
+                offstage: _immersiveFullscreen,
+                child: ExcludeFocus(
+                  excluding: _immersiveFullscreen,
+                  child: TickerMode(
+                    enabled: !_immersiveFullscreen,
+                    child: detailScaffold,
                   ),
                 ),
-              ],
+              ),
               // 叠在 Scaffold 上以便全屏不卸 Texture；沉浸中即使 playUrl 空窗也保 PlatformView。
               if (_playUrl.isNotEmpty || _immersiveFullscreen)
                 _buildStableVideoLayer(context, stackSize: stackSize),

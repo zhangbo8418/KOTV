@@ -1686,12 +1686,8 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 		a.liveLoadCachedKey = ""
 		a.liveLoadCached = nil
 		a.liveLoadMu.Unlock()
-	}
-	loaded, err := lv.Load(liveSrc, force)
-	if err != nil {
-		return nil, err
-	}
-	if !force && cacheKey != "" {
+	} else if cacheKey != "" {
+		// 命中则跳过 Load+序列化；勿在 Load 成功后再短路（会丢掉刚拉到的表、可能一直返回空 groups）。
 		a.liveLoadMu.Lock()
 		if a.liveLoadCached != nil && a.liveLoadCachedKey == cacheKey {
 			out := a.liveLoadCached
@@ -1699,6 +1695,10 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 			return out, nil
 		}
 		a.liveLoadMu.Unlock()
+	}
+	loaded, err := lv.Load(liveSrc, force)
+	if err != nil {
+		return nil, err
 	}
 	groups := make([]map[string]any, 0, len(loaded.Groups))
 	for gi, g := range loaded.Groups {
@@ -2104,6 +2104,11 @@ func (a *App) APIPlayerExternal(playURL, playerVal string) error {
 	}
 	settings.Set(settings.Player, playerVal)
 	_ = settings.Save()
+	title := name
+	if i := strings.LastIndex(playURL, "/"); i >= 0 && i+1 < len(playURL) {
+		title = playURL[i+1:]
+	}
+	a.SetMediaPlaying(title, playURL)
 	return player.ExternalPlay(playURL, name)
 }
 

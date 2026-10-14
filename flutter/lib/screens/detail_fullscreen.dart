@@ -252,14 +252,17 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     });
     widget.playback.addListener(_onPlaybackChanged);
     // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
-    if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
-      // 先锁竖屏再进沉浸：锁方向常会把系统栏拉回来。电视保持横屏。
-      unawaited(() async {
-        await kotvLockPortrait();
-        await kotvEnterSystemFullscreen(widget.desktopFullscreen);
-      }());
-    } else {
-      unawaited(kotvEnterSystemFullscreen(widget.desktopFullscreen));
+    // 嵌入详情 Stack：系统栏/方向由父页独占，勿与 _enter/_exitImmersive 叠调（易方向抖动卡死）。
+    if (!widget.embedded) {
+      if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
+        // 先锁竖屏再进沉浸：锁方向常会把系统栏拉回来。电视保持横屏。
+        unawaited(() async {
+          await kotvLockPortrait();
+          await kotvEnterSystemFullscreen(widget.desktopFullscreen);
+        }());
+      } else {
+        unawaited(kotvEnterSystemFullscreen(widget.desktopFullscreen));
+      }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -304,7 +307,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _swipeAnim.dispose();
     _posSub?.cancel();
     widget.playback.removeListener(_onPlaybackChanged);
-    unawaited(_restoreChrome());
+    // 嵌入模式由父页恢复系统栏；此处再调会与 _exitImmersiveFullscreen 叠成方向竞态。
+    if (!widget.embedded) {
+      unawaited(_restoreChrome());
+    }
     super.dispose();
   }
 
@@ -1061,9 +1067,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         backgroundColor: widget.externalVideo ? Colors.transparent : Colors.black,
         body: LayoutBuilder(
           builder: (context, c) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _refreshForceLandscapeBtn();
-            });
+            // 横屏钮由 initState / playback listener 刷新；勿在 build 里登记 postFrame。
             return MouseRegion(
               cursor: _mouseCursor,
               onHover: (e) => _onHover(e, c),

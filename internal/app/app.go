@@ -462,7 +462,7 @@ func (a *App) listenEvents() {
 	}()
 	go func() {
 		for ev := range a.Server.Events().SubscribeCast() {
-			a.ApplyRemoteCast(ev.Config, ev.History)
+			a.ApplyRemoteCast(ev.Config, ev.Device, ev.History)
 		}
 	}()
 	go func() {
