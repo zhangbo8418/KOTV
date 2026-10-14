@@ -3481,20 +3481,27 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             key: _detailStackKey,
             fit: StackFit.expand,
             children: [
-              // 沉浸默认黑底；氛围模式才透壁纸。
-              // 全平台 Offstage 保活详情树（含黑槽）：退出勿整树 remount，避免与方向/量槽同帧卡死。
+              // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
+              // 仅氛围模式去掉黑底，四周才透 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影
+              // （7458fbe / ef4fb2d：稳定 Positioned 宿主，勿整页 Offstage 叠一层 Hybrid）。
+              // 桌面 Offstage 保活（media_kit Texture 不宜整树卸装）。
               // 沉浸期禁止 _syncVideoSlotRect，避免 setState 重建 Hybrid Positioned。
-              if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
-              Offstage(
-                offstage: _immersiveFullscreen,
-                child: ExcludeFocus(
-                  excluding: _immersiveFullscreen,
-                  child: TickerMode(
-                    enabled: !_immersiveFullscreen,
-                    child: detailScaffold,
+              if (kotvIsAndroid()) ...[
+                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
+                if (!_immersiveFullscreen) detailScaffold,
+              ] else ...[
+                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
+                Offstage(
+                  offstage: _immersiveFullscreen,
+                  child: ExcludeFocus(
+                    excluding: _immersiveFullscreen,
+                    child: TickerMode(
+                      enabled: !_immersiveFullscreen,
+                      child: detailScaffold,
+                    ),
                   ),
                 ),
-              ),
+              ],
               // 叠在 Scaffold 上以便全屏不卸 Texture；沉浸中即使 playUrl 空窗也保 PlatformView。
               if (_playUrl.isNotEmpty || _immersiveFullscreen)
                 _buildStableVideoLayer(context, stackSize: stackSize),
