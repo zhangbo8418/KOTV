@@ -7,16 +7,22 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 )
 
+// ShouldExpandSpiderMediaProxy 是否把网盘类 /proxy?url=&header= 展开成 CDN。
+// 本机（PublicBase 空）否：播放器打 /proxy，由 jar 流式回传。
+// 远端（PublicBase 非空）是：展开后 /proxy/play Range 转发。
+func ShouldExpandSpiderMediaProxy() bool {
+	return strings.TrimSpace(hostclient.PublicBase()) != ""
+}
+
 // ExpandSpiderMediaProxy 将网盘类「/proxy?do=*&url=&header=」展开为真实直链+请求头。
 //
-// jar 的 ProxyVideo / Quark / UC 等会把 CDN 地址和 Cookie 编进本地代理查询串。
-// 若播放器直接打 /proxy，Java bridge 会把整段视频溢写到磁盘再回传，远端播 2GB+
-// 原画几乎必挂（invalid or unsupported media / 超时）。
-// 展开后走本包 Register → /proxy/play，支持 Range 真流式转发。播放列表正文里的分片
-// 在转发时再登记到同一对外根。
+// jar（Quark / UC 等）常把 CDN 与 Cookie 编进本地代理查询串。本机请求应保持
+// /proxy→jar（本机 TCP 泵流），勿展开。仅远端客户端才展开后走 /proxy/play。
+// do=js|py 永不展开。调用前先看 ShouldExpandSpiderMediaProxy。
 func ExpandSpiderMediaProxy(raw string, existing map[string]string) (mediaURL string, headers map[string]string, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

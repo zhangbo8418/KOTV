@@ -107,7 +107,7 @@ func TestPreparePlaybackURLRemoteLocalFile(t *testing.T) {
 	}
 }
 
-func TestPreparePlaybackURLExpandsQuarkProxyByDefault(t *testing.T) {
+func TestPreparePlaybackURLLocalKeepsQuarkSpiderProxy(t *testing.T) {
 	a := &App{}
 	cdn := "https://cdn-quark.example/01.mkv"
 	hdrJSON := `{"Cookie":"qk=1","User-Agent":"Quark"}`
@@ -115,15 +115,11 @@ func TestPreparePlaybackURLExpandsQuarkProxyByDefault(t *testing.T) {
 		base64.StdEncoding.EncodeToString([]byte(cdn)) +
 		"&header=" + base64.StdEncoding.EncodeToString([]byte(hdrJSON))
 	got := a.PreparePlaybackURL(raw, nil)
-	if !strings.Contains(got, "/proxy/play?id=") {
-		t.Fatalf("default expected /proxy/play (CDN expand), got %q", got)
+	if strings.Contains(got, "/proxy/play?id=") {
+		t.Fatalf("local must keep /proxy for jar, got %q", got)
 	}
-	upstream, headers := playproxy.Resolve(got)
-	if upstream != cdn {
-		t.Fatalf("upstream=%q want %q", upstream, cdn)
-	}
-	if headers["Cookie"] != "qk=1" {
-		t.Fatalf("headers=%v", headers)
+	if !strings.Contains(got, "/proxy?") {
+		t.Fatalf("local expected spider /proxy, got %q", got)
 	}
 }
 
@@ -196,7 +192,11 @@ func TestPreparePlaybackURLLocalKeepsOtherLoopbackPort(t *testing.T) {
 	}
 }
 
-func TestPreparePlaybackURLExpandsM3U8Proxy(t *testing.T) {
+func TestPreparePlaybackURLRemoteExpandsM3U8Proxy(t *testing.T) {
+	done := hostclient.EnterSession("m3u8-proxy", "", false)
+	defer done()
+	hostclient.SetPublicBase("http://192.168.1.8:9978")
+
 	a := &App{}
 	cdn := "http://127.0.0.1:1/a.m3u8"
 	hdrJSON := `{"Cookie":"qk=1"}`
@@ -205,7 +205,7 @@ func TestPreparePlaybackURLExpandsM3U8Proxy(t *testing.T) {
 		"&header=" + base64.StdEncoding.EncodeToString([]byte(hdrJSON))
 	got := a.PreparePlaybackURL(raw, nil)
 	if !strings.Contains(got, "/proxy/play?id=") {
-		t.Fatalf("m3u8 proxy should be /proxy/play, got %q", got)
+		t.Fatalf("remote m3u8 proxy should be /proxy/play, got %q", got)
 	}
 	upstream, headers := playproxy.Resolve(got)
 	if upstream != cdn {

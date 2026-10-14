@@ -55,6 +55,10 @@ func TestHandleKeepsCookieAcrossRedirect(t *testing.T) {
 
 func TestTryHandleEmbeddedProxy(t *testing.T) {
 	t.Parallel()
+	done := hostclient.EnterSession("embedded-proxy", "", false)
+	defer done()
+	hostclient.SetPublicBase("http://192.168.1.8:9978")
+
 	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Cookie") != "qk=1" {
 			http.Error(w, "no cookie", http.StatusForbidden)
@@ -74,7 +78,7 @@ func TestTryHandleEmbeddedProxy(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/proxy?"+q.Encode(), nil)
 	rr := httptest.NewRecorder()
 	if !playproxy.TryHandleEmbeddedProxy(rr, req) {
-		t.Fatal("expected handle")
+		t.Fatal("expected handle on remote")
 	}
 	res := rr.Result()
 	defer res.Body.Close()
@@ -84,6 +88,20 @@ func TestTryHandleEmbeddedProxy(t *testing.T) {
 	}
 	if res.StatusCode != 200 || string(body) != "MP4" {
 		t.Fatalf("status=%d body=%s", res.StatusCode, body)
+	}
+}
+
+func TestTryHandleEmbeddedProxySkipsLocal(t *testing.T) {
+	t.Parallel()
+	hdr, _ := json.Marshal(map[string]string{"Cookie": "qk=1"})
+	q := url.Values{}
+	q.Set("do", "quark")
+	q.Set("url", base64.StdEncoding.EncodeToString([]byte("https://cdn.example/a.mp4")))
+	q.Set("header", base64.StdEncoding.EncodeToString(hdr))
+	req := httptest.NewRequest(http.MethodGet, "/proxy?"+q.Encode(), nil)
+	rr := httptest.NewRecorder()
+	if playproxy.TryHandleEmbeddedProxy(rr, req) {
+		t.Fatal("local must leave /proxy to jar")
 	}
 }
 

@@ -75,10 +75,12 @@ func (a *App) PreparePlayback(raw string, headers map[string]string) (string, st
 	}
 	// convert：proxy:// → http://127.0.0.1/proxy?...
 	raw = localproxy.ConvertScheme(raw)
-	// url+header 展开后走 /proxy/play。do=js|py 没有直链，展开失败后仍走脚本代理。
-	if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
-		raw = media
-		headers = hdrs
+	// 远端才把网盘类 url+header 展开成 CDN→/proxy/play；本机保持 /proxy→jar。
+	if playproxy.ShouldExpandSpiderMediaProxy() {
+		if media, hdrs, ok := playproxy.ExpandSpiderMediaProxy(raw, headers); ok {
+			raw = media
+			headers = hdrs
+		}
 	}
 	port := 9978
 	if a != nil && a.Server != nil {
