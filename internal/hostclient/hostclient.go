@@ -270,13 +270,11 @@ func RuntimeUserID() string {
 	return b.UserID
 }
 
-// DataOwner 历史/收藏数据桶。
-// 远端租户（dedicated）按 userId 隔离；本机共享返回空串（兼容旧库全局数据）。
+// DataOwner 历史/收藏数据桶：直接用当前请求已绑定的 userId。
+// 远端强制登录后中间件会写入 userId；本机免登录则为空（共享默认桶）。
+// 不是二次鉴权，只是复用登录身份做数据分桶。
 func DataOwner() string {
-	if DedicatedRuntime() {
-		return strings.TrimSpace(CurrentUserID())
-	}
-	return ""
+	return strings.TrimSpace(CurrentUserID())
 }
 
 // DedicatedRuntime 当前请求是否走独立 JVM/Py/JS（远端租户）；Go 引擎始终只有一个。
