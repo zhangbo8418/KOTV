@@ -68,10 +68,6 @@ public final class YouTubeExtractor {
     return url != null && PLAYLIST.matcher(url).find();
   }
 
-  public static String fetch(String url) throws Exception {
-    return fetchDetail(url).url;
-  }
-
   /** 可播地址 + VTT 字幕 + 标题/封面/简介。 */
   public static FetchDetail fetchDetail(String url) throws Exception {
     ensureInit();

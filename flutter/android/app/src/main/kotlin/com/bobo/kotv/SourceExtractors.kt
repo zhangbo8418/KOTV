@@ -45,48 +45,45 @@ object SourceExtractors {
         Scheme.YouTube -> {
           val detail = YouTubeExtractor.fetchDetail(url)
           if (detail.url.isBlank()) {
-            JSONObject().put("ok", false).put("error", "empty extract url")
-          } else {
-            val subs = JSONArray()
-            for (row in detail.subs) {
-              if (row.size < 2) continue
-              val su = row[1]?.trim().orEmpty()
-              if (su.isEmpty()) continue
-              subs.put(
-                JSONObject()
-                  .put("name", row.getOrNull(0)?.trim().orEmpty())
-                  .put("url", su)
-                  .put("lang", row.getOrNull(2)?.trim().orEmpty())
-                  .put("format", row.getOrNull(3)?.trim().orEmpty().ifEmpty { "text/vtt" }),
-              )
-            }
-            JSONObject()
-              .put("ok", true)
-              .put("url", detail.url)
-              .put("name", detail.name?.trim().orEmpty())
-              .put("artwork", detail.artwork?.trim().orEmpty())
-              .put("desc", detail.desc?.trim().orEmpty())
-              .put("subs", subs)
+            return JSONObject().put("ok", false).put("error", "empty extract url")
           }
+          val subs = JSONArray()
+          for (row in detail.subs) {
+            if (row.size < 2) continue
+            val su = row[1]?.trim().orEmpty()
+            if (su.isEmpty()) continue
+            subs.put(
+              JSONObject()
+                .put("name", row.getOrNull(0)?.trim().orEmpty())
+                .put("url", su)
+                .put("lang", row.getOrNull(2)?.trim().orEmpty())
+                .put("format", row.getOrNull(3)?.trim().orEmpty().ifEmpty { "text/vtt" }),
+            )
+          }
+          JSONObject()
+            .put("ok", true)
+            .put("url", detail.url)
+            .put("name", detail.name?.trim().orEmpty())
+            .put("artwork", detail.artwork?.trim().orEmpty())
+            .put("desc", detail.desc?.trim().orEmpty())
+            .put("subs", subs)
         }
-        else -> {
-          val out = when (schemeOf(url)) {
-            Scheme.JianPian -> fetchJianPian(url)
-            Scheme.TVBus -> fetchTVBus(url, body.optJSONObject("core"))
-            Scheme.Force -> ForceExtractor.fetch(url)
-            Scheme.None -> url
-            Scheme.YouTube -> url // unreachable
-          }
-          if (out.isBlank()) {
-            JSONObject().put("ok", false).put("error", "empty extract url")
-          } else {
-            JSONObject().put("ok", true).put("url", out)
-          }
-        }
+        Scheme.JianPian -> okFetchURL(fetchJianPian(url))
+        Scheme.TVBus -> okFetchURL(fetchTVBus(url, body.optJSONObject("core")))
+        Scheme.Force -> okFetchURL(ForceExtractor.fetch(url))
+        Scheme.None -> okFetchURL(url)
       }
     } catch (t: Throwable) {
       Log.e(TAG, "fetch failed: $url", t)
       JSONObject().put("ok", false).put("error", t.message ?: "extract failed")
+    }
+  }
+
+  private fun okFetchURL(out: String): JSONObject {
+    return if (out.isBlank()) {
+      JSONObject().put("ok", false).put("error", "empty extract url")
+    } else {
+      JSONObject().put("ok", true).put("url", out)
     }
   }
 

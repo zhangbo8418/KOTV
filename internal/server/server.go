@@ -457,7 +457,7 @@ func (s *Server) handleSpiderProxy(w http.ResponseWriter, r *http.Request) {
 		writeProxyResponse(w, status, contentType, body, headers)
 		return
 	}
-	// BaseLoader.getSpider(key)：先 Site，再 Live。
+	// siteKey：先点播站，再直播源。
 	if site := cfg.GetSite(siteKey); site != nil && site.Key != "" {
 		status, contentType, body, headers, err := cfg.Spider(*site).Proxy(params)
 		if err != nil {

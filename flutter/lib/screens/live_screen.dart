@@ -1378,6 +1378,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     bool live = true,
     String? format,
     Duration startAt = Duration.zero,
+    List<Map<String, dynamic>>? externalSubs,
   }) async {
     // 热缓存同步 peek，避免每台换台多一次 async。
     var playSettings = KotvSettingsCache.peek();
@@ -1489,6 +1490,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         if (stale()) {
           await _dropStalePlayback(pb);
           return;
+        }
+        if (externalSubs != null && externalSubs.isNotEmpty && pb is ExoPlayback) {
+          try {
+            pb.setExternalSubs(externalSubs);
+          } catch (_) {}
         }
         unawaited(pb.setVideoScale(_liveScale));
         if (_backend != KotvEmbedBackend.mpv && !pb.playing) {
@@ -1899,6 +1905,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       late final int lines;
       late final int lineIdx;
       late final String lineName;
+      List<Map<String, dynamic>>? externalSubs;
 
       // 引擎：非空 urls[line] 可直开；空串须 livePlay。
       late final String direct;
@@ -1943,6 +1950,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         lines = (data['lines'] as int?) ?? (playUrls.isEmpty ? 1 : playUrls.length);
         lineIdx = (data['line'] as int?) ?? useLine;
         lineName = '${data['lineName'] ?? ''}'.trim();
+        final playSubs = data['subs'];
+        if (playSubs is List && playSubs.isNotEmpty) {
+          externalSubs = [
+            for (final s in playSubs)
+              if (s is Map)
+                {
+                  'url': '${s['url'] ?? ''}',
+                  'name': '${s['name'] ?? ''}',
+                  'lang': '${s['lang'] ?? ''}',
+                  'format': '${s['format'] ?? ''}',
+                },
+          ];
+        }
         // 引擎解析结果写回内存 urls/directs，同台再切走直开。
         if (url.isNotEmpty) {
           _writeBackLivePlayUrl(
@@ -1968,6 +1988,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         headers: headers,
         drm: drm,
         format: format.isEmpty ? null : format,
+        externalSubs: externalSubs,
       );
       if (!mounted || serial != _playSerial) return;
       setState(() {

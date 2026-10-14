@@ -415,7 +415,7 @@ public class SpiderBridge {
                     jar = req.get("jar").getAsString();
                 }
                 if (jar != null && !jar.isEmpty()) {
-                    // BaseLoader.parseJar(jar, true)：加载后再设 recent。
+                    // parseJar(jar, recent=true)：加载后再设 recent。
                     parseJar(jar);
                     recentJar = jar;
                 }
@@ -1623,7 +1623,7 @@ public class SpiderBridge {
             case "searchContent": {
                 String key = args.get("key").getAsString();
                 boolean quick = args.has("quick") && args.get("quick").getAsBoolean();
-                // page 空或 "1" 走两参重载（SiteApi.hasPage）
+                // page 空或 "1" 走两参重载
                 if (!args.has("pg") || args.get("pg").isJsonNull()) {
                     return emptyToObject(spider.searchContent(key, quick));
                 }

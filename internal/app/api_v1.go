@@ -1804,13 +1804,15 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	if playURL == "" {
 		return nil, fmt.Errorf("空播放地址")
 	}
+	var liveSubs []model.Sub
 	if source.Match(playURL) {
 		source.Stop()
-		rewritten, ferr := source.Fetch(playURL, a.liveCoreJSON())
+		info, ferr := source.FetchInfo(playURL, a.liveCoreJSON())
 		if ferr != nil {
 			return nil, fmt.Errorf("专用源解析失败: %w", ferr)
 		}
-		playURL = rewritten
+		playURL = info.URL
+		liveSubs = info.Subs
 	}
 	playURL, directURL := a.PreparePlayback(playURL, headers)
 	if runtime.GOOS != "android" {
@@ -1819,6 +1821,20 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 			return nil, derr
 		}
 		ch.Drm = prepared
+	}
+	subsDTO := make([]map[string]any, 0, len(liveSubs))
+	for _, s := range liveSubs {
+		u := playproxy.PublicizeURL(localproxy.ConvertScheme(s.URL))
+		if u == "" {
+			continue
+		}
+		subsDTO = append(subsDTO, map[string]any{
+			"url":    u,
+			"name":   s.Name,
+			"lang":   s.Lang,
+			"format": s.Format,
+			"flag":   s.Flag,
+		})
 	}
 	return map[string]any{
 		"ok":       true,
@@ -1832,6 +1848,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		"lineName": ch.LineLabel(),
 		"format":   ch.Format,
 		"drm":      ch.Drm,
+		"subs":     subsDTO,
 		"error":    errString(err),
 	}, nil
 }

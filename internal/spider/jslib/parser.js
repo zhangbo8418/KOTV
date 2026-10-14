@@ -102,7 +102,7 @@ function resolveUrl(base, rel) {
   }
 }
 
-/** 同 html 复用 Document（FongMi Cache 同思路）；顶层函数共用一份。 */
+/** 同 html 复用 Document；顶层函数共用一份。 */
 const docCache = {
   pdfhHtml: "",
   pdfhDoc: null,

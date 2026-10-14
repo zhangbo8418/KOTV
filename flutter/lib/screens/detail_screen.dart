@@ -1207,7 +1207,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (await _switchEmptyDetail(name)) return;
       }
       _detailMagnet = data['magnet'] == true;
-      _detailExpand = data['expand'] == true || _detailMagnet;
+      _detailExpand = data['expand'] == true;
       final id = vod.id.isNotEmpty ? vod.id : _routeId;
       final site = vod.site.isNotEmpty ? vod.site : _routeSite;
       var configSource = '';
@@ -1375,7 +1375,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (data['expanded'] == true && data['vod'] is Map) {
         final expanded = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
         _detailMagnet = data['magnet'] == true;
-        _detailExpand = data['expand'] == true || _detailMagnet;
+        _detailExpand = data['expand'] == true;
         // 只替换线路/剧集，保留当前详情其它字段，避免整页重建冲掉扫码等弹窗。
         setState(() {
           _detail = cur.withFlags(expanded.flags);

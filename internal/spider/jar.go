@@ -171,7 +171,7 @@ func setRecentJar(jarSpec string) {
 
 const parseJarBridgeTimeout = javaBridgeCallTimeout
 
-// notifyParseJar BaseLoader.parseJar(jar, recent)：真加载 ClassLoader+Init+Proxy，可选设 recent。
+// notifyParseJar parseJar(jar, recent)：真加载 ClassLoader+Init+Proxy，可选设 recent。
 func notifyParseJar(jarPath string, recent bool) {
 	jarPath = strings.TrimSpace(jarPath)
 	if jarPath == "" {
