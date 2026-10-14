@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/kotv_settings_cache.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
@@ -51,6 +52,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   List<VodItem> _keeps = [];
   final ScrollController _scroll = ScrollController();
   int _loadGen = 0;
+  /// 合并并发 _reload，避免 bootstrap / epoch / 重试叠两次拉仓。
+  Future<void>? _reloadFlight;
   RemoteBridge? _boundRemote;
 
   @override
@@ -151,9 +154,20 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   Future<void> _bootstrap() async {
     await _refreshLocalMeta();
-    // 进首页仍 refreshRepo：重拉 http(s) 仓并 RefreshAfterConfig（核对 jar/js/py）。
-    // 与引擎远端/本机地址切换无关（那是 engineLauncher baseUrl）；分类切换不走此路径。
-    await _reload(refreshRepo: true);
+    // 暖启动：配置已 ready 且爬虫就绪时跳过 refreshRepo，直接拉首页。
+    // 远端断开时由 _reload 内 recoverOrFallbackLocal 切本机并强制拉仓。
+    var refreshRepo = true;
+    try {
+      final cfg = await ref.read(apiProvider).getConfig();
+      final ready = cfg['ready'] == true;
+      final spiderOk = cfg['spiderOk'] != false;
+      final source = '${cfg['source'] ?? ''}'.trim();
+      if (ready && spiderOk && source.isNotEmpty) {
+        refreshRepo = false;
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    await _reload(refreshRepo: refreshRepo, clearContent: refreshRepo);
   }
 
   /// 无点播源：source 空且错误像「未配置」。
@@ -191,8 +205,31 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     bool clearContent = false,
     bool refreshRepo = false,
     bool refreshConfig = false,
+  }) {
+    final prev = _reloadFlight;
+    final run = () async {
+      if (prev != null) {
+        try {
+          await prev;
+        } catch (_) {}
+      }
+      await _reloadBody(
+        clearContent: clearContent,
+        refreshRepo: refreshRepo,
+        refreshConfig: refreshConfig,
+      );
+    }();
+    _reloadFlight = run;
+    return run;
+  }
+
+  Future<void> _reloadBody({
+    bool clearContent = false,
+    bool refreshRepo = false,
+    bool refreshConfig = false,
   }) async {
     final gen = ++_loadGen;
+    var fellBack = false;
     setState(() {
       _loading = true;
       _statusMsg = null;
@@ -206,14 +243,28 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       }
     });
     try {
-      // 断线自动拉起引擎
       final launcher = ref.read(engineLauncherProvider);
-      final up = await launcher.recoverIfNeeded();
+      final up = await launcher.recoverOrFallbackLocal();
+      if (!mounted || gen != _loadGen) return;
+      if (launcher.takeFellBackToLocal()) {
+        fellBack = true;
+        KotvSettingsCache.clear();
+        ref.invalidate(engineReadyProvider);
+        ref.invalidate(configProvider);
+        ref.invalidate(settingsProvider);
+        refreshRepo = true;
+        clearContent = true;
+        setState(() {
+          _items.clear();
+          _types = [];
+          _filters = [];
+          _statusMsg = '远端不可达，已切回本机引擎';
+        });
+      }
       if (!up) {
-        if (!mounted || gen != _loadGen) return;
         setState(() {
           _ready = false;
-          _statusMsg = '无法连接 Go 引擎（:9978），请稍后点重试';
+          _statusMsg = '无法连接引擎，请稍后点重试';
           _loading = false;
         });
         return;
@@ -257,8 +308,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final data = await _fetchFirstPage(gen);
       if (!mounted || gen != _loadGen) return;
       _applyPage(data, replace: true);
-      if (repoErr.isNotEmpty && mounted && gen == _loadGen) {
+      if (!mounted || gen != _loadGen) return;
+      if (repoErr.isNotEmpty) {
         setState(() => _statusMsg = '仓库加载失败: $repoErr');
+      } else if (fellBack) {
+        setState(() => _statusMsg = '远端不可达，已切回本机引擎');
       }
       await _fillHomeRecommendIfEmpty(gen);
       // 仅配置可能变化时刷缓存；分类/筛选勿 invalidate，避免壳层壁纸重建闪一下。
@@ -273,14 +327,49 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         return;
       }
       if (msg.contains('Connection refused') || msg.contains('SocketException')) {
-        final ok = await ref.read(engineLauncherProvider).recoverIfNeeded();
+        final launcher = ref.read(engineLauncherProvider);
+        final ok = await launcher.recoverOrFallbackLocal();
+        if (!mounted || gen != _loadGen) return;
+        final retryFellBack = launcher.takeFellBackToLocal();
         if (ok) {
+          if (retryFellBack) {
+            KotvSettingsCache.clear();
+            ref.invalidate(engineReadyProvider);
+            ref.invalidate(configProvider);
+            ref.invalidate(settingsProvider);
+          }
           try {
+            // 重启/切本机后须再等 ready，否则会打到空仓。
+            final cfg = await _waitConfigReady();
+            if (!mounted || gen != _loadGen) return;
+            if (cfg['ready'] != true) {
+              setState(() {
+                _ready = false;
+                _statusMsg = '引擎已恢复，但点播源未就绪，请重试';
+              });
+              return;
+            }
+            setState(() => _ready = true);
+            if (retryFellBack) {
+              final source = '${cfg['source'] ?? ''}'.trim();
+              final lower = source.toLowerCase();
+              if (lower.startsWith('http://') || lower.startsWith('https://')) {
+                try {
+                  await ref.read(apiProvider).refreshConfig().timeout(const Duration(seconds: 45));
+                } catch (_) {}
+              }
+              if (!mounted || gen != _loadGen) return;
+            }
             final data = await _fetchFirstPage(gen);
             if (!mounted || gen != _loadGen) return;
             _applyPage(data, replace: true);
             await _fillHomeRecommendIfEmpty(gen);
-            setState(() => _statusMsg = null);
+            setState(() {
+              _statusMsg = retryFellBack ? '远端不可达，已切回本机引擎' : null;
+            });
+            if (retryFellBack) {
+              ref.invalidate(configProvider);
+            }
             return;
           } catch (e2) {
             if (!mounted || gen != _loadGen) return;

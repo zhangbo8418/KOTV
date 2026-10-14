@@ -10,6 +10,9 @@ class EngineLauncher {
   String baseUrl = 'http://127.0.0.1:9978';
   KotvApi? _api;
 
+  /// Web 固定同源，不会切本机进程。
+  bool takeFellBackToLocal() => false;
+
   KotvApi client() {
     _api ??= KotvApi(baseUrl: baseUrl);
     _api!.baseUrl = baseUrl;
@@ -41,6 +44,11 @@ class EngineLauncher {
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
     return _ping(baseUrl);
+  }
+
+  /// Web 无远端→本机切换；与 [recoverIfNeeded] 相同。
+  Future<bool> recoverOrFallbackLocal({bool forceRestart = false}) async {
+    return recoverIfNeeded(forceRestart: forceRestart);
   }
 
   Future<bool> onAppResumed() async {

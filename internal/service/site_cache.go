@@ -28,11 +28,6 @@ func extendCacheKey(extend map[string]string) string {
 	return b.String()
 }
 
-// ExtendCacheKey 供 UI 层构造与 SiteService 一致的分类缓存键。
-func ExtendCacheKey(extend map[string]string) string {
-	return extendCacheKey(extend)
-}
-
 func categoryCacheKey(site model.Site, tid, pg string, extend map[string]string) string {
 	return site.Key + "\x00" + tid + "\x00" + pg + "\x00" + extendCacheKey(extend)
 }
@@ -57,23 +52,4 @@ func (s *SiteService) putCategoryCache(site model.Site, tid, pg string, extend m
 		s.categoryCache = make(map[string]model.Result)
 	}
 	s.categoryCache[categoryCacheKey(site, tid, pg, extend)] = result
-}
-
-// PeekHomeContent 返回已缓存的首页数据。
-func (s *SiteService) PeekHomeContent() (model.Result, bool) {
-	site := s.cfg.Home()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.homeCacheSite == site.Key && (len(s.HomeResult.Types) > 0 || len(s.HomeResult.List) > 0) {
-		return s.HomeResult, true
-	}
-	return model.Result{}, false
-}
-
-// PeekCategoryContent 读取已缓存的分类页（保留 Fragment 数据）。
-func (s *SiteService) PeekCategoryContent(tid, pg string, extend map[string]string) (model.Result, bool) {
-	site := s.cfg.Home()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.getCategoryCache(site, tid, pg, extend)
 }

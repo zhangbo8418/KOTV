@@ -1685,6 +1685,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// 切换业务引擎：[baseUrl] 为空即本机。写 prefs → 换地址 → 作废缓存 →
   /// 本机未运行则拉起 → 重新加载本页（点播源 / 直播源 / 线路等换成新引擎的数据）。
   Future<void> _switchEngine(String baseUrl, {String user = ''}) async {
+    await DetailScreen.prepareLeave();
+    await LiveScreen.prepareLeave();
     final launcher = ref.read(engineLauncherProvider);
     final prefs = await SharedPreferences.getInstance();
     if (baseUrl.isEmpty) {
@@ -1700,9 +1702,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.invalidate(engineReadyProvider);
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);
-    if (baseUrl.isEmpty) {
-      ref.read(vodContentEpochProvider.notifier).state++;
-    }
+    // 双向切换都抬世代，首页回前台时强制重拉（含仓刷新）。
+    ref.read(vodContentEpochProvider.notifier).state++;
     if (!mounted) return;
     setState(() => _remoteUser = user);
     if (baseUrl.isEmpty) {

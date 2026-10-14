@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
+import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_id.dart';
 import '../api/kotv_engine_url.dart';
 import '../player/kotv_traffic.dart';
@@ -26,6 +28,16 @@ class EngineLauncher {
   KotvApi? _api;
   DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastResumeCheck = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 远端不可达已切本机；由 [takeFellBackToLocal] 读取并清除。
+  bool _fellBackToLocal = false;
+
+  /// 是否刚因远端不可达切到本机（读一次即清）。
+  bool takeFellBackToLocal() {
+    final v = _fellBackToLocal;
+    _fellBackToLocal = false;
+    return v;
+  }
 
   KotvApi client() {
     _api ??= KotvApi(baseUrl: baseUrl);
@@ -91,6 +103,8 @@ class EngineLauncher {
   /// `_ensureAndroidSpiderService`（还先 stop），导致首页 `_reload`/换源每次
   /// 都把 :9979 干掉；随后 detail/home 的 jar 调用会卡到 ~120s，UI 表现为
   /// 「无限加载中」而不是立刻失败。
+  ///
+  /// 远端地址只探测，不在此切本机；需要回落时用 [recoverOrFallbackLocal]。
   Future<bool> recoverIfNeeded({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
     if (!kotvIsLocalEngineBaseUrl(baseUrl)) return _ping(baseUrl);
@@ -108,6 +122,29 @@ class EngineLauncher {
       await _killOwnedQuietly();
     }
     return ensureReady(timeout: const Duration(seconds: 20));
+  }
+
+  /// 远端可达则返回 true；不可达则清 prefs/登录态、切本机并拉起。
+  /// 已是本机则等同 [recoverIfNeeded]。
+  Future<bool> recoverOrFallbackLocal({bool forceRestart = false}) async {
+    if (_shuttingDown) return false;
+    if (kotvIsLocalEngineBaseUrl(baseUrl)) {
+      return recoverIfNeeded(forceRestart: forceRestart);
+    }
+    if (await _ping(baseUrl)) return true;
+    debugPrint('engine: remote unreachable → fallback local ($baseUrl)');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // draft 保留，方便设置页再次登录；业务地址与登录态清掉。
+      await prefs.remove('engine_base_url');
+      await prefs.remove('remote_username');
+      await kotvClearAuthToken();
+    } catch (e) {
+      debugPrint('engine: clear remote prefs failed: $e');
+    }
+    applyBaseUrl('');
+    _fellBackToLocal = true;
+    return recoverIfNeeded(forceRestart: forceRestart);
   }
 
   /// 从后台回前台：只探活。健康则立即返回，不 stop/restart spider。

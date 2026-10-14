@@ -13,8 +13,15 @@ import 'marquee_text.dart';
 
 /// Legacy 背景：按 settings.backdrop（wallMode）切换渐变/壁纸/内置主题。
 class AppBackdrop extends ConsumerStatefulWidget {
-  const AppBackdrop({super.key, required this.child});
+  const AppBackdrop({
+    super.key,
+    required this.child,
+    this.periodicSettingsRefresh = true,
+  });
   final Widget child;
+
+  /// 壳层为 true；详情等嵌套层为 false，避免叠多个 30min 定时器。
+  final bool periodicSettingsRefresh;
 
   @override
   ConsumerState<AppBackdrop> createState() => _AppBackdropState();
@@ -26,6 +33,7 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
   @override
   void initState() {
     super.initState();
+    if (!widget.periodicSettingsRefresh) return;
     // 配置壁纸（如每日 bing）定时刷新。
     _wallTimer = Timer.periodic(const Duration(minutes: 30), (_) {
       if (!mounted) return;

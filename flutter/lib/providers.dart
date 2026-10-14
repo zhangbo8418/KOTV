@@ -12,7 +12,8 @@ final engineLauncherProvider = Provider<EngineLauncher>((ref) {
 
 final engineReadyProvider = FutureProvider<bool>((ref) async {
   final launcher = ref.watch(engineLauncherProvider);
-  return launcher.ensureReady();
+  // 远端不可达时切本机并拉起，避免一直停在离线页。
+  return launcher.recoverOrFallbackLocal();
 });
 
 final apiProvider = Provider<KotvApi>((ref) {

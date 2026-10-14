@@ -3496,10 +3496,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
           );
       // 详情压在壳层 Navigator 上（Cupertino/Material 路由默认不透明），
-      // 壳层壁纸透不出来，须自带 AppBackdrop。
+      // 壳层壁纸透不出来，须自带 AppBackdrop（勿重复壁纸定时刷新）。
       final detailScaffold = Scaffold(
         backgroundColor: Colors.transparent,
         body: AppBackdrop(
+          periodicSettingsRefresh: false,
           child: Column(
             children: [
               Visibility(
@@ -3599,6 +3600,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       body = Scaffold(
         backgroundColor: Colors.transparent,
         body: AppBackdrop(
+          periodicSettingsRefresh: false,
           child: Column(
             children: [
               LibraryTopBar(
