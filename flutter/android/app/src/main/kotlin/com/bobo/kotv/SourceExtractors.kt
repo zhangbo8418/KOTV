@@ -59,6 +59,33 @@ object SourceExtractors {
     }
   }
 
+  fun playlist(body: JSONObject): JSONObject {
+    val url = body.optString("url", "").trim()
+    if (url.isEmpty()) return JSONObject().put("ok", false).put("error", "empty url")
+    if (!YouTubeExtractor.matchPlaylist(url)) {
+      return JSONObject().put("ok", false).put("error", "not a youtube playlist")
+    }
+    return try {
+      val items = YouTubeExtractor.playlist(url)
+      val arr = JSONArray()
+      for (item in items) {
+        if (item.size < 2) continue
+        val name = item[0]?.trim().orEmpty()
+        val u = item[1]?.trim().orEmpty()
+        if (u.isEmpty()) continue
+        arr.put(JSONObject().put("name", if (name.isEmpty()) u else name).put("url", u))
+      }
+      if (arr.length() == 0) {
+        JSONObject().put("ok", false).put("error", "empty playlist")
+      } else {
+        JSONObject().put("ok", true).put("episodes", arr)
+      }
+    } catch (t: Throwable) {
+      Log.e(TAG, "playlist failed: $url", t)
+      JSONObject().put("ok", false).put("error", t.message ?: "playlist failed")
+    }
+  }
+
   fun stop() {
     try {
       val p = p2p

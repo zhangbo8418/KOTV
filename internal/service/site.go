@@ -383,8 +383,8 @@ func (s *SiteService) DetailContent(reqKey string, vod model.Vod) (model.Vod, er
 	detail := result.List[0]
 	detail.Site = site
 	detail.SetVodFlags()
-	// 磁力展开（DHT 等元数据）可能数十秒，不在详情关键路径同步执行；
-	// UI 进详情后异步 POST /api/v1/detail/expand → thunder.ParseVodContext，失败时仍保留原 magnet 链、起播再试。
+	// 磁力 / 播放列表展开可能数十秒，不在详情关键路径同步执行；
+	// UI 进详情后异步 POST /api/v1/detail/expand，失败时仍保留原链、起播再试。
 	s.mu.Lock()
 	s.DetailResult = result
 	s.mu.Unlock()
@@ -403,6 +403,17 @@ func (s *SiteService) CachedDetail(vodID string) (model.Vod, bool) {
 		return model.Vod{}, false
 	}
 	return v, true
+}
+
+// ReplaceDetailCache 用展开后的剧集覆盖详情缓存，供 EpisodeURLByIndex / 起播按集下标取址。
+func (s *SiteService) ReplaceDetailCache(vod model.Vod) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.DetailResult.List) == 0 {
+		s.DetailResult = model.Result{Success: true, List: []model.Vod{vod}}
+		return
+	}
+	s.DetailResult.List[0] = vod
 }
 
 // EpisodeURLByIndex 从详情缓存按线路+集下标取原始剧集地址（DTO 可能已置空直开字段）。

@@ -343,6 +343,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   int _nextPreloadSerial = 0;
   /// 详情接口 magnet：展开/取消磁力任务用（DTO 可能已清空须引擎集的 url）。
   bool _detailMagnet = false;
+  /// 详情接口 expand：磁力或 YouTube 播放列表等须异步展开。
+  bool _detailExpand = false;
   bool _preloadNextEpisode = false;
   bool _exoDiskCache = false;
   RemoteBridge? _boundRemote;
@@ -1205,6 +1207,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (await _switchEmptyDetail(name)) return;
       }
       _detailMagnet = data['magnet'] == true;
+      _detailExpand = data['expand'] == true || _detailMagnet;
       final id = vod.id.isNotEmpty ? vod.id : _routeId;
       final site = vod.site.isNotEmpty ? vod.site : _routeSite;
       var configSource = '';
@@ -1337,10 +1340,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         });
       }
       if (!mounted) return;
-      final needExpand = _detailMagnet;
+      final needExpand = _detailExpand;
       if (needExpand) {
         // 先展开再起播，避免异步 expand 与 _playAt 竞态清空选集。
-        await _expandMagnet(id: id, site: site);
+        await _expandDetail(id: id, site: site);
         if (mounted) await _resumeOrAutoPlay();
       } else {
         unawaited(_resumeOrAutoPlay());
@@ -1354,23 +1357,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  Future<void> _expandMagnet({required String id, required String site}) async {
+  Future<void> _expandDetail({required String id, required String site}) async {
     if (!mounted) return;
     final cur = _detail;
     if (cur == null) return;
     // 已在播非磁力：展开只更新列表，不抢状态栏、不清选集
     final playingNonMagnet = _playUrl.isNotEmpty && !_magnetPlay;
+    final magnet = _detailMagnet;
     if (!playingNonMagnet) {
-      setState(() => _status = '正在展开磁力文件…');
+      setState(() => _status = magnet ? '正在展开磁力文件…' : '正在展开播放列表…');
     }
-    _startBtProgressPoll(expanding: true);
+    if (magnet) _startBtProgressPoll(expanding: true);
     try {
-      // 空 url 契约下客户端 flags 无原始磁力链：引擎用详情缓存展开。
+      // 空 url 契约下客户端 flags 无原始链：引擎用详情缓存展开。
       final data = await ref.read(apiProvider).detailExpand(id: id, site: site, flags: const []);
       if (!mounted) return;
       if (data['expanded'] == true && data['vod'] is Map) {
         final expanded = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
         _detailMagnet = data['magnet'] == true;
+        _detailExpand = data['expand'] == true || _detailMagnet;
         // 只替换线路/剧集，保留当前详情其它字段，避免整页重建冲掉扫码等弹窗。
         setState(() {
           _detail = cur.withFlags(expanded.flags);
@@ -1378,16 +1383,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           _epPage = 0;
           if (!playingNonMagnet && _epIdx >= 0) _epIdx = -1;
           if (!playingNonMagnet) {
-            _status = '磁力文件已展开，可选集播放';
+            _status = magnet ? '磁力文件已展开，可选集播放' : '播放列表已展开，可选集播放';
           }
         });
       } else if (mounted && !playingNonMagnet) {
         setState(() => _status = '选择剧集开始播放');
       }
     } catch (e) {
-      if (mounted && !playingNonMagnet) setState(() => _status = '磁力展开失败，仍可点原链起播');
+      if (mounted && !playingNonMagnet) {
+        setState(() => _status = magnet ? '磁力展开失败，仍可点原链起播' : '播放列表展开失败，仍可点原链起播');
+      }
     } finally {
-      _stopBtProgressPoll();
+      if (magnet) _stopBtProgressPoll();
     }
   }
 

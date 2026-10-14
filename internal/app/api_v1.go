@@ -320,15 +320,18 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 	if detail.Site != nil {
 		sk = detail.Site.Key
 	}
+	needMagnet := thunder.NeedsParse(&detail)
+	needPlaylist := source.NeedsPlaylistExpand(&detail)
 	return map[string]any{
 		"ok":     true,
 		"vod":    vodDetailDTO(detail, sk, detailRules(cfg)),
-		"magnet": thunder.NeedsParse(&detail),
+		"magnet": needMagnet,
+		"expand": needMagnet || needPlaylist,
 		"desc":   model.CleanDesc(detail.VodContent),
 	}, nil
 }
 
-// APIDetailExpand 展开磁力/种子为媒体文件列表。
+// APIDetailExpand 展开磁力/种子与 YouTube 播放列表。
 // 优先用客户端传入的 flags / 上次详情缓存，禁止再次 DetailContent（会重跑爬虫并冲掉扫码弹窗）。
 func (a *App) APIDetailExpand(siteKey, vodID string, flagsIn []map[string]any) (map[string]any, error) {
 	if localCrawlerDisabled() {
@@ -366,31 +369,47 @@ func (a *App) APIDetailExpand(siteKey, vodID string, flagsIn []map[string]any) (
 			"ok":       true,
 			"expanded": false,
 			"magnet":   false,
+			"expand":   false,
 			"vod":      vodDetailDTO(detail, sk, detailRules(cfg)),
 			"message":  "无详情缓存，跳过展开",
 		}, nil
 	}
 	detail.SetVodFlags()
 	rules := detailRules(cfg)
-	if !thunder.NeedsParse(&detail) {
+	needMagnet := thunder.NeedsParse(&detail)
+	needPlaylist := source.NeedsPlaylistExpand(&detail)
+	if !needMagnet && !needPlaylist {
 		return map[string]any{
 			"ok":       true,
 			"expanded": false,
 			"magnet":   false,
+			"expand":   false,
 			"vod":      vodDetailDTO(detail, sk, rules),
 		}, nil
 	}
 	work := detail
 	work.VodFlags = thunder.CloneFlags(detail.VodFlags)
-	thunder.SetExpandProgress("正在展开磁力文件列表…")
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	thunder.ParseVodContext(ctx, &work)
-	thunder.SetExpandProgress("磁力文件列表已更新")
+	if needMagnet {
+		thunder.SetExpandProgress("正在展开磁力文件列表…")
+		thunder.ParseVodContext(ctx, &work)
+	}
+	if needPlaylist {
+		thunder.SetExpandProgress("正在展开播放列表…")
+		source.ParseVodPlaylists(ctx, &work)
+	}
+	sites.ReplaceDetailCache(work)
+	if needMagnet {
+		thunder.SetExpandProgress("磁力文件列表已更新")
+	} else {
+		thunder.SetExpandProgress("播放列表已更新")
+	}
 	return map[string]any{
 		"ok":       true,
 		"expanded": true,
-		"magnet":   true,
+		"magnet":   needMagnet,
+		"expand":   true,
 		"vod":      vodDetailDTO(work, sk, rules),
 	}, nil
 }

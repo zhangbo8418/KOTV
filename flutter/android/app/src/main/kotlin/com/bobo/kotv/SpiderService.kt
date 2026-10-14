@@ -190,6 +190,11 @@ class SpiderService private constructor(
           json(Status.OK, SourceExtractors.fetch(obj).toString())
         }
 
+        "/source/playlist" -> {
+          val obj = if (body.isBlank()) JSONObject() else JSONObject(body)
+          json(Status.OK, SourceExtractors.playlist(obj).toString())
+        }
+
         "/source/stop" -> {
           SourceExtractors.stop()
           json(Status.OK, JSONObject().put("ok", true).toString())

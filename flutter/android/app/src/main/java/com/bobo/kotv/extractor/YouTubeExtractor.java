@@ -5,11 +5,17 @@ import android.util.Base64;
 
 import androidx.media3.common.MimeTypes;
 
+import org.schabi.newpipe.extractor.ListExtractor;
 import org.schabi.newpipe.extractor.NewPipe;
+import org.schabi.newpipe.extractor.ServiceList;
+import org.schabi.newpipe.extractor.linkhandler.ListLinkHandler;
 import org.schabi.newpipe.extractor.localization.Localization;
+import org.schabi.newpipe.extractor.services.youtube.extractors.YoutubePlaylistExtractor;
+import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubePlaylistLinkHandlerFactory;
 import org.schabi.newpipe.extractor.stream.AudioStream;
 import org.schabi.newpipe.extractor.stream.Stream;
 import org.schabi.newpipe.extractor.stream.StreamInfo;
+import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 import org.schabi.newpipe.extractor.stream.StreamType;
 import org.schabi.newpipe.extractor.stream.VideoStream;
 import org.w3c.dom.Document;
@@ -17,9 +23,11 @@ import org.w3c.dom.Element;
 
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -37,6 +45,7 @@ public final class YouTubeExtractor {
   private static final String DASH_NAMESPACE = "urn:mpeg:dash:schema:mpd:2011";
   private static final String XSI_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance";
   private static final String DASH_PROFILE = "urn:mpeg:dash:profile:isoff-on-demand:2011";
+  private static final Pattern PLAYLIST = Pattern.compile("(?i)(youtube\\.com|youtu\\.be).*list=");
 
   private static volatile boolean inited;
 
@@ -53,9 +62,43 @@ public final class YouTubeExtractor {
     }
   }
 
+  public static boolean matchPlaylist(String url) {
+    return url != null && PLAYLIST.matcher(url).find();
+  }
+
   public static String fetch(String url) throws Exception {
     ensureInit();
     return getPlayUrl(StreamInfo.getInfo(url));
+  }
+
+  /** 播放列表 → [{name,url},…]；直播条目（duration==-1）跳过。 */
+  public static List<String[]> playlist(String url) throws Exception {
+    ensureInit();
+    ListLinkHandler handler = YoutubePlaylistLinkHandlerFactory.getInstance().fromUrl(url);
+    YoutubePlaylistExtractor extractor = new YoutubePlaylistExtractor(ServiceList.YouTube, handler);
+    extractor.forceLocalization(NewPipe.getPreferredLocalization());
+    extractor.fetchPage();
+    List<String[]> episodes = new ArrayList<>();
+    addPlaylistPage(extractor, episodes, extractor.getInitialPage());
+    return episodes;
+  }
+
+  private static void addPlaylistPage(
+      YoutubePlaylistExtractor extractor,
+      List<String[]> episodes,
+      ListExtractor.InfoItemsPage<StreamInfoItem> page)
+      throws Exception {
+    for (StreamInfoItem item : page.getItems()) {
+      if (item.getDuration() == -1) continue;
+      String name = item.getName();
+      String u = item.getUrl();
+      if (u == null || u.isEmpty()) continue;
+      if (name == null || name.isEmpty()) name = u;
+      episodes.add(new String[] {name, u});
+    }
+    if (page.hasNextPage()) {
+      addPlaylistPage(extractor, episodes, extractor.getPage(page.getNextPage()));
+    }
   }
 
   private static synchronized void ensureInit() {
