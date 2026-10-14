@@ -760,19 +760,18 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Action   string            `json:"action"`
-		Index    int               `json:"index"`
-		URL      string            `json:"url"`
-		OldURL   string            `json:"oldUrl"`
-		Name     string            `json:"name"`
-		Group    int               `json:"group"`
-		Channel  int               `json:"channel"`
-		Line     int               `json:"line"`
-		Password string            `json:"password"`
-		Day      int               `json:"day"`
-		Prog     int               `json:"prog"`
-		Force    bool              `json:"force"`
-		Headers  map[string]string `json:"headers"`
+		Action   string `json:"action"`
+		Index    int    `json:"index"`
+		URL      string `json:"url"`
+		OldURL   string `json:"oldUrl"`
+		Name     string `json:"name"`
+		Group    int    `json:"group"`
+		Channel  int    `json:"channel"`
+		Line     int    `json:"line"`
+		Password string `json:"password"`
+		Day      int    `json:"day"`
+		Prog     int    `json:"prog"`
+		Force    bool   `json:"force"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
 	switch strings.ToLower(strings.TrimSpace(body.Action)) {

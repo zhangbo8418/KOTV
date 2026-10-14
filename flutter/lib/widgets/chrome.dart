@@ -44,10 +44,13 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
     final bd = ref.watch(backdropProvider);
     final p = ref.watch(kotvPaletteProvider);
     // settings 未就绪时，回落 config.wallpaper，避免首屏空背景。
-    final cfgWall = ref.watch(configProvider).maybeWhen(
-          data: (c) => '${c['wallpaper'] ?? ''}'.trim(),
-          orElse: () => '',
-        );
+    // select 只盯 wallpaper 串：其它 config 字段刷新不重建壁纸层。
+    final cfgWall = ref.watch(configProvider.select(
+          (async) => async.maybeWhen(
+            data: (c) => '${c['wallpaper'] ?? ''}'.trim(),
+            orElse: () => '',
+          ),
+        ));
     final mode = '${bd['mode'] ?? ''}'.trim();
     var image = '${bd['image'] ?? ''}'.trim();
     if (image.isEmpty && (mode.isEmpty || mode == 'config')) {

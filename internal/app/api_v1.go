@@ -101,17 +101,20 @@ func (a *App) APIGetConfig() map[string]any {
 	if homeName == "" {
 		homeName = home.Key
 	}
+	spiderOk, spiderErr := spider.HostSpiderReady()
 	return map[string]any{
-		"ok":        true,
-		"ready":     ready,
-		"error":     errMsg,
-		"source":    source,
-		"home":      home.Key,
-		"homeName":  homeName,
-		"sites":     sites,
-		"wallpaper": exposeResourceURL(cfg.API().Wallpaper),
-		"logo":      exposeResourceURL(cfg.API().Logo),
-		"banner":    exposeResourceURL(cfg.API().Banner),
+		"ok":          true,
+		"ready":       ready,
+		"error":       errMsg,
+		"source":      source,
+		"home":        home.Key,
+		"homeName":    homeName,
+		"sites":       sites,
+		"wallpaper":   exposeResourceURL(cfg.API().Wallpaper),
+		"logo":        exposeResourceURL(cfg.API().Logo),
+		"banner":      exposeResourceURL(cfg.API().Banner),
+		"spiderOk":    spiderOk,
+		"spiderError": spiderErr,
 	}
 }
 
@@ -141,7 +144,7 @@ func (a *App) APIRefreshConfig() error {
 	}
 	lower := strings.ToLower(source)
 	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
-		return nil
+		return fmt.Errorf("当前源不是 http(s) 仓库，已跳过刷新")
 	}
 	prev := strings.TrimSpace(cfg.API().Spider)
 	if err := cfg.ReloadJSON(source); err != nil {
@@ -1687,14 +1690,17 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 		a.liveLoadCached = nil
 		a.liveLoadMu.Unlock()
 	} else if cacheKey != "" {
-		// 命中则跳过 Load+序列化；勿在 Load 成功后再短路（会丢掉刚拉到的表、可能一直返回空 groups）。
+		// 命中可复用序列化 DTO，但仍须对本 Scope Load，否则 Current() 空、play/epg 会报未加载。
 		a.liveLoadMu.Lock()
-		if a.liveLoadCached != nil && a.liveLoadCachedKey == cacheKey {
-			out := a.liveLoadCached
-			a.liveLoadMu.Unlock()
-			return out, nil
-		}
+		cached := a.liveLoadCached
+		cachedHit := cached != nil && a.liveLoadCachedKey == cacheKey
 		a.liveLoadMu.Unlock()
+		if cachedHit {
+			if _, err := lv.Load(liveSrc, false); err != nil {
+				return nil, err
+			}
+			return cached, nil
+		}
 	}
 	loaded, err := lv.Load(liveSrc, force)
 	if err != nil {
@@ -1709,13 +1715,11 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 			origLine := ch.URLIndex
 			playURLs := make([]string, 0, len(ch.URLs))
 			directURLs := make([]string, 0, len(ch.URLs))
-			var headers map[string]string
+			lineHeaders := make([]map[string]string, 0, len(ch.URLs))
 			for i := range ch.URLs {
 				ch.URLIndex = i
 				u, h := live.ResolvePlayURL(ch)
-				if headers == nil {
-					headers = h
-				}
+				lineHeaders = append(lineHeaders, h)
 				// 须引擎二次解析的线路不下发直链：客户端见空串则走 livePlay。
 				if live.NeedsEnginePlay(ch, u) {
 					playURLs = append(playURLs, "")
@@ -1728,6 +1732,12 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 				}
 			}
 			ch.URLIndex = origLine
+			var headers map[string]string
+			if origLine >= 0 && origLine < len(lineHeaders) {
+				headers = lineHeaders[origLine]
+			} else if len(lineHeaders) > 0 {
+				headers = lineHeaders[0]
+			}
 			drm := ch.Drm
 			if runtime.GOOS != "android" && drm != nil {
 				if prepared, derr := model.PrepareForDesktop(drm); derr == nil {
@@ -1735,17 +1745,18 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 				}
 			}
 			chs = append(chs, map[string]any{
-				"index":   ci,
-				"name":    ch.Name,
-				"number":  ch.Number,
-				"logo":    exposeResourceURL(ch.ResolvedLogo()),
-				"tvgId":   ch.TvgID,
-				"urls":    playURLs,
-				"directs": directURLs,
-				"line":    ch.URLIndex,
-				"headers": headers,
-				"format":  ch.Format,
-				"drm":     drm,
+				"index":       ci,
+				"name":        ch.Name,
+				"number":      ch.Number,
+				"logo":        exposeResourceURL(ch.ResolvedLogo()),
+				"tvgId":       ch.TvgID,
+				"urls":        playURLs,
+				"directs":     directURLs,
+				"line":        ch.URLIndex,
+				"headers":     headers,
+				"headerLines": lineHeaders,
+				"format":      ch.Format,
+				"drm":         drm,
 			})
 		}
 		groups = append(groups, map[string]any{

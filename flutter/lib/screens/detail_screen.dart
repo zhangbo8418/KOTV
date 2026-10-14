@@ -1778,13 +1778,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           final engineBase = ref.read(apiProvider).baseUrl;
           final playUrl = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', engineBase);
           if (playUrl.isNotEmpty) {
-            final headers = <String, String>{
-              for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
-                if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
-            };
+            final direct = kotvRewriteEngineLocalUrl('${data['direct'] ?? ''}', engineBase);
+            final mediaHint = direct.trim().isNotEmpty ? direct : playUrl;
+            final headers = kotvNormalizePlayHeaders(
+              {
+                for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
+                  if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
+              },
+              url: mediaHint,
+            );
             final warm = kotvResolvePlayOpenTarget(
               playUrl: playUrl,
-              directUrl: kotvRewriteEngineLocalUrl('${data['direct'] ?? ''}', engineBase),
+              directUrl: direct,
               headers: headers,
               magnet: false,
               sendHeaders: true,
@@ -2036,7 +2041,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         '${data['direct'] ?? ''}',
         ref.read(apiProvider).baseUrl,
       );
-      final headers = <String, String>{
+      final rawHeaders = <String, String>{
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
       };
@@ -2053,6 +2058,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         playSettings = await KotvSettingsCache.fetch(ref.read(apiProvider));
       } catch (_) {}
       if (playSettings.isNotEmpty) {
+        kotvApplyPlayUaSetting('${playSettings['ua'] ?? ''}');
         final fo = '${playSettings['playerFailover'] ?? ''}'.trim();
         if (fo.isNotEmpty) {
           _prefPlayerFailover = KotvPlaybackFailover.enabledFromSetting(fo) ? 'auto' : 'off';
@@ -2150,6 +2156,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           openUrl = mediaUrl;
           openHeaders = null;
         } else {
+          final mediaHint = directUrl.trim().isNotEmpty ? directUrl : playUrl;
+          final headers = kotvNormalizePlayHeaders(rawHeaders, url: mediaHint);
           final resolved = kotvResolvePlayOpenTarget(
             playUrl: playUrl,
             directUrl: directUrl,
@@ -2157,7 +2165,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             magnet: magnet,
             sendHeaders: kotvPlaybackSendsHeaders(
               playerVal: failover.playerVal,
-              mediaUrl: directUrl.trim().isNotEmpty ? directUrl : playUrl,
+              mediaUrl: mediaHint,
               headers: headers,
             ),
           );
@@ -3487,33 +3495,32 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             onNews: () => showAppNews(context, remoteHint(ref)),
             title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
           );
+      // 壁纸只靠壳层 AppBackdrop，详情不再嵌一层（避免双绘与双 30min 定时器）。
       final detailScaffold = Scaffold(
         backgroundColor: Colors.transparent,
-        body: AppBackdrop(
-          child: Column(
-            children: [
-              Visibility(
-                visible: false,
-                maintainSize: true,
-                maintainAnimation: true,
-                maintainState: true,
-                maintainInteractivity: false,
-                child: buildTopBar(),
+        body: Column(
+          children: [
+            Visibility(
+              visible: false,
+              maintainSize: true,
+              maintainAnimation: true,
+              maintainState: true,
+              maintainInteractivity: false,
+              child: buildTopBar(),
+            ),
+            Expanded(
+              child: KeyedSubtree(
+                key: _bodyClipKey,
+                child: _loading
+                    ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                    : _error != null
+                        ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                        : _detail == null
+                            ? const SizedBox.shrink()
+                            : _buildBody(),
               ),
-              Expanded(
-                child: KeyedSubtree(
-                  key: _bodyClipKey,
-                  child: _loading
-                      ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                      : _error != null
-                          ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
-                          : _detail == null
-                              ? const SizedBox.shrink()
-                              : _buildBody(),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
       body = LayoutBuilder(
@@ -3539,7 +3546,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             fit: StackFit.expand,
             children: [
               // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
-              // 仅氛围模式去掉黑底，四周才透 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影
+              // 仅氛围模式去掉黑底，四周才透壳层壁纸；Android 仍卸详情树防 Surface 镂空双影
               // （7458fbe / ef4fb2d：稳定 Positioned 宿主，勿整页 Offstage 叠一层 Hybrid）。
               // 桌面 Offstage 保活（media_kit Texture 不宜整树卸装）。
               // 沉浸期禁止 _syncVideoSlotRect，避免 setState 重建 Hybrid Positioned。
@@ -3588,25 +3595,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     } else {
       body = Scaffold(
         backgroundColor: Colors.transparent,
-        body: AppBackdrop(
-          child: Column(
-            children: [
-              LibraryTopBar(
-                onBack: () => unawaited(_leavePage()),
-                onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
-                onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
-                onNews: () => showAppNews(context, remoteHint(ref)),
-                title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
-              ),
-              Expanded(
-                child: _loading
-                    ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                    : _error != null
-                        ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
-                        : _buildBody(),
-              ),
-            ],
-          ),
+        body: Column(
+          children: [
+            LibraryTopBar(
+              onBack: () => unawaited(_leavePage()),
+              onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
+              onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
+              onNews: () => showAppNews(context, remoteHint(ref)),
+              title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
+            ),
+            Expanded(
+              child: _loading
+                  ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                  : _error != null
+                      ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                      : _buildBody(),
+            ),
+          ],
         ),
       );
     }

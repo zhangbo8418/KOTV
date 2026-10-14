@@ -420,15 +420,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       unawaited(MiniPlayerWindow.exit());
     }
     if (_immersive && !kotvIsDesktop()) {
-      if (KotvLayout.television) {
-        unawaited(SystemChrome.setPreferredOrientations(const [
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]));
-      } else {
-        unawaited(SystemChrome.setPreferredOrientations(DeviceOrientation.values));
-      }
-      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+      unawaited(kotvExitSystemFullscreen(wasDisplayFullscreen: false));
     }
     _hideTimer?.cancel();
     _catchupHideTimer?.cancel();
@@ -884,6 +876,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     });
   }
 
+  /// 注入的收藏组占 UI 第 0 位时，其后分组的引擎下标要减 1。
+  bool get _hasInjectedFavGroup =>
+      _groups.isNotEmpty && _groups.first['_kotvFav'] == true;
+
   /// UI 分组/频道 → 引擎真实下标（收藏组映射回源内位置）。
   ({int group, int channel})? _engineChannelRef(int uiGroup, int uiChannel) {
     if (uiGroup < 0 || uiGroup >= _groups.length) return null;
@@ -891,7 +887,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final chs = ((g['channels'] as List?) ?? []).whereType<Map>().toList();
     if (uiChannel < 0 || uiChannel >= chs.length) return null;
     if (g['_kotvFav'] != true) {
-      return (group: uiGroup, channel: uiChannel);
+      final engGroup = _hasInjectedFavGroup ? uiGroup - 1 : uiGroup;
+      if (engGroup < 0) return null;
+      return (group: engGroup, channel: uiChannel);
     }
     final ch = chs[uiChannel];
     final sg = ch['_srcGroup'];
@@ -908,7 +906,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final list = ((_groups[i]['channels'] as List?) ?? []).whereType<Map>().toList();
       for (var j = 0; j < list.length; j++) {
         if ('${list[j]['name'] ?? ''}'.trim() == name) {
-          return (group: i, channel: j);
+          final engGroup = _hasInjectedFavGroup ? i - 1 : i;
+          if (engGroup < 0) continue;
+          return (group: engGroup, channel: j);
         }
       }
     }
@@ -939,6 +939,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     Map<String, dynamic>? drm,
     List<Map<String, dynamic>>? subs,
   }) {
+    // 单槽 cached_m3u8 换台即失效，写回会导致同台再直开 404。
+    if (_isEphemeralLivePlayUrl(url) || _isEphemeralLivePlayUrl(direct)) {
+      return;
+    }
     final raw = ch['urls'];
     final list = raw is List ? List<dynamic>.from(raw) : <dynamic>[];
     while (list.length <= line) {
@@ -959,6 +963,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
     if (headers != null && headers.isNotEmpty) {
       ch['headers'] = Map<String, String>.from(headers);
+      final hl = ch['headerLines'];
+      final hList = hl is List ? List<dynamic>.from(hl) : <dynamic>[];
+      while (hList.length <= line) {
+        hList.add(<String, String>{});
+      }
+      if (line >= 0 && line < hList.length) {
+        hList[line] = Map<String, String>.from(headers);
+        ch['headerLines'] = hList;
+      }
     }
     if (format.isNotEmpty) ch['format'] = format;
     if (drm != null) ch['drm'] = drm;
@@ -985,7 +998,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return out.isEmpty ? null : out;
   }
 
-  Map<String, String>? _channelHeaders(Map ch) {
+  Map<String, String>? _channelHeaders(Map ch, {int? line}) {
+    final lines = ch['headerLines'];
+    if (line != null && lines is List && line >= 0 && line < lines.length) {
+      final raw = lines[line];
+      if (raw is Map) {
+        final out = <String, String>{
+          for (final e in raw.entries)
+            if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty)
+              '${e.key}': '${e.value}',
+        };
+        if (out.isNotEmpty) return out;
+      }
+    }
     final raw = ch['headers'];
     if (raw is! Map) return null;
     final out = <String, String>{
@@ -994,6 +1019,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           '${e.key}': '${e.value}',
     };
     return out.isEmpty ? null : out;
+  }
+
+  bool _isEphemeralLivePlayUrl(String url) {
+    final u = url.toLowerCase();
+    return u.contains('/proxy/cached_m3u8') || u.contains('/proxy/rolling_m3u8');
   }
 
   Future<void> _toggleChannelFav(int chIdx) async {
@@ -1506,7 +1536,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _playerVal = nextVal;
       _decodeMode = nextDecode;
       _renderMode = renderMode;
-      final hdrMap = headers == null ? <String, String>{} : Map<String, String>.from(headers);
+      final mediaHint = directUrl.trim().isNotEmpty ? directUrl : url;
+      final hdrMap = kotvNormalizePlayHeaders(headers, url: mediaHint);
       final resolved = kotvResolvePlayOpenTarget(
         playUrl: url,
         directUrl: directUrl,
@@ -1514,7 +1545,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         magnet: false,
         sendHeaders: kotvPlaybackSendsHeaders(
           playerVal: failover.playerVal,
-          mediaUrl: directUrl.trim().isNotEmpty ? directUrl : url,
+          mediaUrl: mediaHint,
           headers: hdrMap,
         ),
       );
@@ -1997,7 +2028,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           directs.isEmpty ? '' : directs[useLine.clamp(0, directs.length - 1)],
           engineBase,
         );
-        headers = _channelHeaders(ch);
+        headers = _channelHeaders(ch, line: useLine);
         final drmRaw = ch['drm'];
         drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
         format = '${ch['format'] ?? ''}'.trim();

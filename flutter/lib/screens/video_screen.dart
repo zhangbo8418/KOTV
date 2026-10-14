@@ -151,7 +151,18 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   Future<void> _bootstrap() async {
     await _refreshLocalMeta();
-    await _reload(refreshRepo: true);
+    // 暖启动：配置已 ready 且爬虫就绪时跳过无意义的 refreshRepo（避免二次拉仓/抬 jar 世代）。
+    var refreshRepo = true;
+    try {
+      final cfg = await ref.read(apiProvider).getConfig();
+      final ready = cfg['ready'] == true;
+      final spiderOk = cfg['spiderOk'] != false;
+      final source = '${cfg['source'] ?? ''}'.trim();
+      if (ready && spiderOk && source.isNotEmpty) {
+        refreshRepo = false;
+      }
+    } catch (_) {}
+    await _reload(refreshRepo: refreshRepo);
   }
 
   /// 无点播源：source 空且错误像「未配置」。
@@ -185,7 +196,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     return cfg;
   }
 
-  Future<void> _reload({bool clearContent = false, bool refreshRepo = false}) async {
+  Future<void> _reload({
+    bool clearContent = false,
+    bool refreshRepo = false,
+    bool refreshConfig = false,
+  }) async {
     final gen = ++_loadGen;
     setState(() {
       _loading = true;
@@ -255,8 +270,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         setState(() => _statusMsg = '仓库加载失败: $repoErr');
       }
       await _fillHomeRecommendIfEmpty(gen);
-      // 拉完首页再刷配置缓存，避免 invalidate 与首页 setState 同帧竞态触发 Inherited 断言
-      ref.invalidate(configProvider);
+      // 仅配置可能变化时刷缓存；分类/筛选勿 invalidate，避免壳层壁纸重建闪一下。
+      if (refreshRepo || clearContent || refreshConfig) {
+        ref.invalidate(configProvider);
+      }
     } catch (e) {
       if (!mounted || gen != _loadGen) return;
       final msg = '$e';
@@ -366,7 +383,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     if (_scroll.hasClients) {
       _scroll.jumpTo(0);
     }
-    unawaited(_reload());
+    unawaited(_reloadContentOnly());
   }
 
   /// 筛选 chip：先更新选中态并清空瀑布流，再加载。
@@ -383,7 +400,23 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     if (_scroll.hasClients) {
       _scroll.jumpTo(0);
     }
-    unawaited(_reload());
+    unawaited(_reloadContentOnly());
+  }
+
+  /// 分类/筛选：只拉内容，不等 ready、不 refresh、不 invalidate 配置（防壁纸闪）。
+  Future<void> _reloadContentOnly() async {
+    final gen = ++_loadGen;
+    try {
+      final data = await _fetchFirstPage(gen);
+      if (!mounted || gen != _loadGen) return;
+      _applyPage(data, replace: true);
+      await _fillHomeRecommendIfEmpty(gen);
+    } catch (e) {
+      if (!mounted || gen != _loadGen) return;
+      setState(() => _statusMsg = '$e');
+    } finally {
+      if (mounted && gen == _loadGen) setState(() => _loading = false);
+    }
   }
 
   Future<void> _loadMore() async {
@@ -552,7 +585,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     ref.listen<int>(vodContentEpochProvider, (prev, next) {
       if (prev == null || prev == next) return;
       // 网盘授权等只刷新列表文案；勿 clearContent，否则清空 _types 只剩「首页」。
-      unawaited(_reload());
+      unawaited(_reload(refreshConfig: true));
     });
     try {
       return _buildRoot(context);

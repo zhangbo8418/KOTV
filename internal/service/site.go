@@ -118,7 +118,8 @@ func (s *SiteService) HomeContent() (model.Result, error) {
 	epoch := s.loadEpoch.Load()
 	site := s.cfg.Home()
 	s.mu.Lock()
-	if s.homeCacheSite == site.Key && (len(s.HomeResult.Types) > 0 || len(s.HomeResult.List) > 0) {
+	// 与写入条件一致：仅 Types>0 才命中，避免「有 list 无 class」假命中却永不写入。
+	if s.homeCacheSite == site.Key && len(s.HomeResult.Types) > 0 {
 		result := s.HomeResult
 		s.mu.Unlock()
 		return result, nil

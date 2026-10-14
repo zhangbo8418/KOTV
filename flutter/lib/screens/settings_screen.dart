@@ -1468,7 +1468,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  /// 播放 User-Agent：空=默认；输入 `c`/`o` 快捷填 Chrome / OkHttp。
+  /// 播放缺省 User-Agent：列表/站点未带 UA 时使用；输入 `c`/`o` 快捷填 Chrome / OkHttp。
   Future<void> _editUa() async {
     final c = TextEditingController(text: g('ua'));
     final p = KotvPalette.of(context);
@@ -1498,7 +1498,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: p.dialogBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('User-Agent', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
+        title: Text('播放缺省 User-Agent', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
           width: 540,
           child: Column(
@@ -1506,7 +1506,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '留空使用默认。输入 c → Chrome，o → OkHttp。',
+                '列表/站点未带 User-Agent 时使用。留空用系统缺省。输入 c → Chrome，o → OkHttp。',
                 style: TextStyle(color: p.muted, fontSize: 12),
               ),
               const SizedBox(height: 10),
@@ -2514,8 +2514,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(label: '投屏', value: 'DLNA', onTap: _cast),
                         KotvSettingsCell(
-                          label: 'User-Agent',
-                          value: g('ua').isEmpty ? '默认' : _ellipsize(g('ua'), 22),
+                          label: '播放缺省 UA',
+                          value: g('ua').isEmpty ? '默认（列表未带时）' : _ellipsize(g('ua'), 22),
                           onTap: _editUa,
                         ),
                         KotvSettingsCell(
