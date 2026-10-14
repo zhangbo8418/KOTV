@@ -65,7 +65,7 @@ object KotvExoCacheWarmer {
               .setUpstreamDataSourceFactory(upstream)
               .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
               .createDataSource()
-          // FongMi Media3：Builder 仅接受 DataSpec 拷贝构造，URI 用 setUri。
+          // Media3 Builder 仅接受 DataSpec 拷贝构造，URI 用 setUri。
           val spec =
             DataSpec.Builder()
               .setUri(Uri.parse(u))

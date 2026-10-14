@@ -572,7 +572,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 	var playDrm *model.Drm
 	var didParse bool
 
-	// 一律先站点 playerContent（含站点 Header/PlayURL/parse），再 Source.fetch / 二次解析。
+	// 一律先站点 playerContent（含站点 Header/PlayURL/parse），再专用源预处理 / 二次解析。
 	// 仅磁力可先占位，真正取流仍在后面 thunder.Fetch。
 	if thunder.Match(epURL) {
 		playURL = epURL
@@ -1874,7 +1874,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	if prog < 0 || prog >= len(list) {
 		return nil, fmt.Errorf("节目无效")
 	}
-	url, headers, err := live.ResolveCatchupURL(a.Live, ch, list[prog])
+	url, headers, err := live.ResolveCatchupURL(a.Live, ch, list[prog], a.liveCoreJSON())
 	if err != nil {
 		return nil, err
 	}

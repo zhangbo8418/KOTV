@@ -77,7 +77,7 @@ import java.util.concurrent.atomic.AtomicLong
  * - auto：硬解优先；解码失败再整实例软解重建一次
  * - soft：按 softAudioPrefer / softVideoPrefer 决定 nextlib FFmpeg 音/视轨是否优先
  *
- * Media3 须为 FongMi 完整产物（scripts/build-fongmi-media3.sh 覆盖 webhtv 残缺 AAR）。
+ * Media3 须用 scripts/build-fongmi-media3.sh 产出的完整 AAR（覆盖 webhtv 残缺包）。
  */
 @OptIn(UnstableApi::class)
 class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {

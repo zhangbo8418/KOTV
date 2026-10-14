@@ -437,7 +437,7 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 	source.Stop()
 	thunder.Stop()
 
-	// site.isEmpty() && push_agent：直接把 id 当 url，再走 Source.fetch。
+	// site.isEmpty() && push_agent：直接把 id 当 url，再走专用源预处理。
 	if site.IsEmpty() && reqKey == PushAgentKey {
 		result = model.Result{
 			Success: true,
@@ -522,12 +522,11 @@ func (s *SiteService) PlayerContent(reqKey string, site model.Site, flag, id str
 	return result, nil
 }
 
-// applySourceFetch Source.fetch：特殊 scheme / .strm 预处理后再二次解析/起播。
-// - video:// → 剥前缀 + parse=1（逼宿主嗅探）
-// - push://  → 剥前缀 + parse=0（桌面直接播内层 URL）
-// - *.strm  → 读文本首行真实地址 + parse=0
-// 只处理 URL.Position 对应项并写回同 index（Url.v / replace）。
-// Force / JianPian / TVBus / Youtube 依赖 Android Native 预处理。
+// applySourceFetch 起播前预处理当前清晰度 URL，并写回 parse：
+// - video:// → 剥前缀 + parse=1（宿主嗅探）
+// - push:// / *.strm → 展开内层地址 + parse=0
+// - 荐片 / TVBus / Force / YouTube 等 Match → 仅 parse=0（真正 Fetch 在 APIPlay）
+// 只处理 URL.Position 对应项。
 func applySourceFetch(r *model.Result) {
 	if r == nil || len(r.URL.URLs) == 0 {
 		return
@@ -547,6 +546,8 @@ func applySourceFetch(r *model.Result) {
 	case forceParse:
 		r.Parse = model.FlexInt{Valid: true, Value: 1}
 	case directPlay:
+		r.Parse = model.FlexInt{Valid: true, Value: 0}
+	case source.Match(r.URL.URLs[i]):
 		r.Parse = model.FlexInt{Valid: true, Value: 0}
 	}
 }

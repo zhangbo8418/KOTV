@@ -80,7 +80,7 @@ func Play(url string, histKey string) error {
 
 	log.Printf("播放器设置=%s → mode=%s name=%s url=%s", player, mode, name, url)
 
-	// Source.fetch(Thunder)：magnet/thunder → 本地 HTTP。
+	// 磁力 / 专用源：先展开为可播 HTTP。
 	if thunder.Match(url) {
 		stream, err := thunder.Fetch(url)
 		if err != nil {

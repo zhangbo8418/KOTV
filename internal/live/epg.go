@@ -15,6 +15,7 @@ import (
 
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/paths"
+	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/util"
 )
 
@@ -114,7 +115,7 @@ func LoadChannelDays(ch *model.LiveChannel) []Epg {
 		return out
 	}
 	src := ChannelEPGSource(ch)
-	// 无花括号的 http(s) JSON 节目接口（LiveApi.fetchEpgDay → Epg.objectFrom）。
+	// 无花括号的 http(s) JSON 节目接口。
 	if out := loadHTTPJSONEPG(ch, src); len(out) > 0 {
 		return out
 	}
@@ -571,8 +572,9 @@ func FormatCatchup(url string, cp model.Catchup, prog EpgData) string {
 	return appendCatchup(url, result, cp.Replace)
 }
 
-// ResolveCatchupURL LiveApi.getUrl(channel, epg)：先取真实播放地址，再 format。
-func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData) (string, map[string]string, error) {
+// ResolveCatchupURL 先解析频道真实地址（含专用源 Fetch），再按回看规则 format。
+// core 供 TVBus 等 Fetch 使用，可空。
+func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData, core json.RawMessage) (string, map[string]string, error) {
 	if ch == nil {
 		return "", nil, fmt.Errorf("频道为空")
 	}
@@ -599,11 +601,19 @@ func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData) (string,
 	if base == "" {
 		return "", headers, fmt.Errorf("无播放地址")
 	}
+	if source.Match(base) {
+		source.Stop()
+		if rewritten, ferr := source.Fetch(base, core); ferr != nil {
+			return "", headers, fmt.Errorf("专用源解析失败: %w", ferr)
+		} else if rewritten != "" {
+			base = rewritten
+		}
+	}
 
 	cp := ch.CatchupRule()
 	// 解析后地址才是 PLTV 时，补默认规则（是否支持回看）。
 	if cp.IsEmpty() && (strings.Contains(base, "/PLTV/") || strings.Contains(ch.CurrentURL(), "/PLTV/")) {
- cp = model.CatchupPLTV()
+		cp = model.CatchupPLTV()
 	}
 	if cp.Regex != "" && !cp.Match(base) && !cp.Match(ch.CurrentURL()) {
 		return "", headers, fmt.Errorf("该源不支持回看")

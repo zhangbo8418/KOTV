@@ -396,7 +396,7 @@ class App : Application(), Application.ActivityLifecycleCallbacks {
       return removed
     }
 
-    /** 仅拦饭太硬 spider.merge.Ly（非 FongMi 宿主 WebView 配置页会卡死主线程）。
+    /** 仅拦饭太硬 spider.merge.Ly（非原生存储宿主时，WebView 配置页会卡死主线程）。
      * 勿用 ".merge.L"：会误伤 parser.merge.l.f（网盘/弹幕/订阅 AlertDialog）。 */
     private fun isJarHostConfigRunnable(runnable: Runnable): Boolean {
       val name = runnable.javaClass.name

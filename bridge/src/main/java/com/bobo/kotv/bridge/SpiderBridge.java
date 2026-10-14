@@ -758,7 +758,7 @@ public class SpiderBridge {
 
     /**
      * Desktop site ClassLoader（URLClassLoader，父 = bridge CL）。
-     * PC JVM 瘦包按 FongMi `pc/` 的 exclude + verifyUniversalJar 打包；运行时 Util/OkHttp 等由 bridge 提供。
+     * PC JVM 瘦包用 pc/ 的 exclude + verifyUniversalJar 打包；运行时 Util/OkHttp 等由 bridge 提供。
      * dex jar 不走此路径（Android 见 {@link #createDexLoader}）。
      */
     private static final class SpiderClassLoader extends URLClassLoader {
@@ -993,7 +993,7 @@ public class SpiderBridge {
     }
 
     /**
-     * 仅拦饭太硬 {@code spider.merge.Ly}（非 FongMi 宿主 WebView 配置页会卡死主线程）。
+     * 仅拦饭太硬 {@code spider.merge.Ly}（非原生存储宿主时，WebView 配置页会卡死主线程）。
      * 勿匹配 {@code .merge.L}：会误伤 {@code parser.merge.l.f}（网盘/弹幕/订阅 AlertDialog）。
      */
     private static boolean isJarHostConfigRunnable(Runnable runnable) {

@@ -261,6 +261,10 @@ func (s *Service) ResolvePlayURLParsed(ch *model.LiveChannel) (string, map[strin
 	if directPlay {
 		needParse = false
 	}
+	// 荐片 / TVBus / Force / YouTube：先交给后续 Fetch，勿当网页去二次解析。
+	if source.Match(raw) {
+		needParse = false
+	}
 
 	var parses []model.Parse
 	if s.cfg != nil {

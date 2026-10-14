@@ -12,6 +12,7 @@ import (
 
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
+	"github.com/bobo/KOTV/internal/source"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/util"
 )
@@ -107,13 +108,20 @@ func WebURL(r model.Result) string {
 
 // ResolveWithParses 对非直链播放结果执行二次解析。
 func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
+	ep := EpisodeURL(r)
+	// 专用源由后续 source.Fetch 展开；此处不得因 parse/useParse 先去嗅探。
+	if source.Match(ep) {
+		r.Parse = model.FlexInt{Valid: true, Value: 0}
+		parseLog("[parse] skip special source url=%s", parsePreview(ep, 120))
+		return r, nil
+	}
 	parses := opts.Parses
 	flags := opts.Flags
 	useParse := IsUseParse(r, flags, parses)
 	need := NeedParse(r)
 	if !need && !useParse {
 		parseLog("[parse] skip need=%v useParse=%v flag=%q playUrl=%s url=%s",
-			need, useParse, r.Flag, parsePreview(r.PlayURL, 80), parsePreview(EpisodeURL(r), 120))
+			need, useParse, r.Flag, parsePreview(r.PlayURL, 80), parsePreview(ep, 120))
 		return r, nil
 	}
 
