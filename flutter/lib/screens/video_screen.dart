@@ -42,8 +42,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   String? _statusMsg;
   bool _loading = true;
   bool _ready = false;
-  int _bannerIdx = 0;
-  Timer? _bannerTimer;
   List<ConfigBannerSlide> _apiBanners = [];
   String _apiBannerUrl = '';
   int _apiBannerLoadGen = 0;
@@ -63,18 +61,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _bootstrap();
       _attachRemoteHandlers();
     });
-    _bannerTimer = Timer.periodic(const Duration(seconds: 6), (_) {
-      if (!mounted || _tid != null) return;
-      final n = _apiBanners.isNotEmpty ? _apiBanners.length : _bannerSlides.length;
-      if (n < 2) return;
-      setState(() => _bannerIdx = (_bannerIdx + 1) % n);
-    });
   }
 
   @override
   void dispose() {
     _detachRemoteHandlers();
-    _bannerTimer?.cancel();
     _scroll.dispose();
     super.dispose();
   }
@@ -113,10 +104,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final gen = ++_apiBannerLoadGen;
     if (next.isEmpty) {
       if (_apiBanners.isNotEmpty && mounted) {
-        setState(() {
-          _apiBanners = [];
-          _bannerIdx = 0;
-        });
+        setState(() => _apiBanners = []);
       }
       return;
     }
@@ -126,10 +114,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   Future<void> _loadApiBanner(String url, int gen) async {
     final slides = await fetchConfigBanners(url);
     if (!mounted || gen != _apiBannerLoadGen) return;
-    setState(() {
-      _apiBanners = slides;
-      _bannerIdx = 0;
-    });
+    setState(() => _apiBanners = slides);
   }
 
   void _onApiBannerTap(ConfigBannerSlide slide) {
@@ -234,7 +219,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _loading = true;
       _statusMsg = null;
       _page = 1;
-      _bannerIdx = 0;
       // 断线重试保留骨架；换仓/换站必须清空，避免旧海报残留
       if (clearContent) {
         _items.clear();
@@ -455,7 +439,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       }
       _items.clear();
       _page = 1;
-      _bannerIdx = 0;
       _loading = true;
       _loadingMore = false;
       _statusMsg = null;
@@ -995,18 +978,50 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   /// 左上两卡与下方四卡完全同宽同高；轮播 = 右三列 × 两行高。
   /// 有接口 banner 时只替换轮播内容，功能卡布局不变。
   Widget _buildHomeFeatureGrid() {
-    final bannerUrl = ref.watch(configProvider).maybeWhen(
-          data: (c) => '${c['banner'] ?? ''}'.trim(),
-          orElse: () => '',
-        );
+    // 只盯 banner 字段，避免配置其它字段刷新重建整块首页网格。
+    final bannerUrl = ref.watch(configProvider.select(
+          (async) => async.maybeWhen(
+            data: (c) => '${c['banner'] ?? ''}'.trim(),
+            orElse: () => '',
+          ),
+        ));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _syncApiBanner(bannerUrl);
     });
 
     final useApi = _apiBanners.isNotEmpty;
-    final apiCur = useApi ? _apiBanners[_bannerIdx.clamp(0, 1 << 30) % _apiBanners.length] : null;
-    final slides = _bannerSlides;
-    final cur = slides.isEmpty ? null : slides[_bannerIdx.clamp(0, 1 << 30) % slides.length];
+    final vodSlides = _bannerSlides;
+    final bannerSlides = <_HomeBannerSlide>[
+      if (useApi)
+        for (final s in _apiBanners)
+          _HomeBannerSlide(
+            title: s.title,
+            subtitle: '点击搜索相关内容',
+            emptyTitle: '正在加载推荐…',
+            pic: s.image,
+            onTap: () => _onApiBannerTap(s),
+          )
+      else
+        for (final s in vodSlides)
+          _HomeBannerSlide(
+            title: s.name.isNotEmpty ? s.name : '暂无推荐内容',
+            subtitle: s.remarks.isNotEmpty ? s.remarks : '点击查看详情并播放',
+            emptyTitle: '暂无推荐内容',
+            pic: s.pic,
+            onTap: () => _open(s),
+          ),
+    ];
+    if (bannerSlides.isEmpty) {
+      bannerSlides.add(
+        _HomeBannerSlide(
+          title: '',
+          subtitle: '配置源后这里会轮播推荐',
+          emptyTitle: useApi ? '正在加载推荐…' : '暂无推荐内容',
+          pic: '',
+          onTap: null,
+        ),
+      );
+    }
     final bottomNav = KotvLayout.useBottomNav(context);
     final compact = KotvLayout.isCompact(context);
 
@@ -1040,81 +1055,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       );
     }
 
-    final bannerCount = useApi ? _apiBanners.length : slides.length;
-    final bannerTitle = useApi ? (apiCur?.title ?? '') : (cur?.name ?? '暂无推荐内容');
-    final bannerSub = useApi
-        ? (apiCur == null ? '配置源后这里会轮播推荐' : '点击搜索相关内容')
-        : ((cur != null && cur.remarks.isNotEmpty)
-            ? cur.remarks
-            : (cur == null ? '配置源后这里会轮播推荐' : '点击查看详情并播放'));
-    final bannerPic = useApi ? (apiCur?.image ?? '') : (cur?.pic ?? '');
-    final bannerEmptyTitle = useApi ? '正在加载推荐…' : '暂无推荐内容';
-
-    Widget banner(double radius) => TvFocus(
-          onPressed: useApi
-              ? () {
-                  if (apiCur != null) _onApiBannerTap(apiCur);
-                }
-              : (cur == null ? () {} : () => _open(cur)),
-          borderRadius: radius,
-          child: GestureDetector(
-            onTap: useApi
-                ? (apiCur == null ? null : () => _onApiBannerTap(apiCur))
-                : (cur == null ? null : () => _open(cur)),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(radius),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  const ColoredBox(color: Color(0xFF652291)),
-                  if (_isHttpUrl(bannerPic))
-                    KotvNetworkImage(bannerPic, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
-                  Positioned(
-                    left: 14,
-                    right: 14,
-                    bottom: 40,
-                    child: Text(
-                      bannerTitle.isNotEmpty ? bannerTitle : bannerEmptyTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        height: 1.15,
-                        shadows: const [Shadow(color: Color(0xCC000000), blurRadius: 8, offset: Offset(0, 1))],
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 14,
-                    right: 64,
-                    bottom: 14,
-                    child: Text(
-                      bannerSub,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.92),
-                        fontSize: 13,
-                        height: 1.15,
-                        shadows: const [Shadow(color: Color(0x99000000), blurRadius: 6, offset: Offset(0, 1))],
-                      ),
-                    ),
-                  ),
-                  if (bannerCount > 0)
-                    Positioned(
-                      right: 14,
-                      bottom: 14,
-                      child: Text(
-                        '${(bannerCount == 0 ? 0 : (_bannerIdx % bannerCount) + 1)}/$bannerCount',
-                        style: const TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
+    // 轮播自管定时器与 setState，避免拖整页（含壳层旁路）跟着重建。
+    Widget banner(double radius) => _HomeRotatingBanner(
+          key: ValueKey(useApi ? 'api|$bannerUrl|${bannerSlides.length}' : 'vod|${bannerSlides.length}'),
+          slides: bannerSlides,
+          radius: radius,
         );
 
     // 竖屏：轮播 + 下方两列功能卡
@@ -1370,10 +1315,150 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   String _ellipsize(String s, int n) => s.length <= n ? s : '${s.substring(0, n)}…';
+}
+
+class _HomeBannerSlide {
+  const _HomeBannerSlide({
+    required this.title,
+    required this.subtitle,
+    required this.emptyTitle,
+    required this.pic,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final String emptyTitle;
+  final String pic;
+  final VoidCallback? onTap;
+}
+
+/// 首页轮播：自管定时器，换帧只重建本卡，不牵动整页。
+/// 图走 Flutter Image（禁 PlatformView），避免 Android 原生图换层拖闪壳壁纸。
+class _HomeRotatingBanner extends StatefulWidget {
+  const _HomeRotatingBanner({
+    super.key,
+    required this.slides,
+    required this.radius,
+  });
+
+  final List<_HomeBannerSlide> slides;
+  final double radius;
+
+  @override
+  State<_HomeRotatingBanner> createState() => _HomeRotatingBannerState();
+}
+
+class _HomeRotatingBannerState extends State<_HomeRotatingBanner> {
+  int _idx = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (!mounted || widget.slides.length < 2) return;
+      setState(() => _idx = (_idx + 1) % widget.slides.length);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeRotatingBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.slides.length != oldWidget.slides.length) {
+      _idx = 0;
+    } else if (widget.slides.isNotEmpty) {
+      _idx = _idx % widget.slides.length;
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   static bool _isHttpUrl(String s) {
     final u = kotvParseImageUrl(s).url;
     return u.startsWith('http://') || u.startsWith('https://');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final n = widget.slides.length;
+    final cur = n == 0 ? null : widget.slides[_idx % n];
+    final title = (cur?.title ?? '').trim();
+    final sub = cur?.subtitle ?? '';
+    final pic = cur?.pic ?? '';
+    final emptyTitle = cur?.emptyTitle ?? '暂无推荐内容';
+    final onTap = cur?.onTap;
+
+    return TvFocus(
+      onPressed: onTap ?? () {},
+      borderRadius: widget.radius,
+      child: GestureDetector(
+        onTap: onTap,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(widget.radius),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              const ColoredBox(color: Color(0xFF652291)),
+              if (_isHttpUrl(pic))
+                KotvNetworkImage(
+                  pic,
+                  fit: BoxFit.cover,
+                  allowPlatformView: false,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) => const SizedBox(),
+                ),
+              Positioned(
+                left: 14,
+                right: 14,
+                bottom: 40,
+                child: Text(
+                  title.isNotEmpty ? title : emptyTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                    shadows: [Shadow(color: Color(0xCC000000), blurRadius: 8, offset: Offset(0, 1))],
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 14,
+                right: 64,
+                bottom: 14,
+                child: Text(
+                  sub,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.92),
+                    fontSize: 13,
+                    height: 1.15,
+                    shadows: const [Shadow(color: Color(0x99000000), blurRadius: 6, offset: Offset(0, 1))],
+                  ),
+                ),
+              ),
+              if (n > 0)
+                Positioned(
+                  right: 14,
+                  bottom: 14,
+                  child: Text(
+                    '${(_idx % n) + 1}/$n',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

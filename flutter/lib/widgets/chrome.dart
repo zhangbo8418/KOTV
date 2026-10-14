@@ -91,11 +91,14 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
               builder: (context, constraints) {
                 final dpr = MediaQuery.devicePixelRatioOf(context);
                 final w = (constraints.maxWidth * dpr).round().clamp(1, 1920);
+                // 壁纸必须走 Flutter Image：Android Glide PlatformView 会被
+                // 同屏其它原生图（轮播换帧）创建/销毁拖闪，整层背景会空一帧。
                 return KotvNetworkImage(
                   image,
                   key: ValueKey('$mode|$image'),
                   fit: BoxFit.cover,
                   filterQuality: FilterQuality.medium,
+                  allowPlatformView: false,
                   // 限制解码尺寸，降低 Win7 上大图解码导致的原生闪退风险
                   cacheWidth: w,
                   errorBuilder: (_, __, ___) => const SizedBox.shrink(),
