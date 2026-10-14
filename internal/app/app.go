@@ -147,6 +147,7 @@ func New() (*App, error) {
 	a.Server.SetSyncHandler(server.NewAppSyncHandler(db, func(code string) bool {
 		return code != "" && code == settings.Get(settings.SyncPairCode)
 	}))
+	a.Server.SetLibraryDB(db)
 
 	go a.listenEvents()
 
@@ -462,6 +463,48 @@ func (a *App) listenEvents() {
 	go func() {
 		for ev := range a.Server.Events().SubscribeCast() {
 			a.ApplyRemoteCast(ev.Config, ev.History)
+		}
+	}()
+	go func() {
+		for ev := range a.Server.Events().SubscribeOpen() {
+			kind := strings.ToLower(strings.TrimSpace(ev.Kind))
+			if kind == "" {
+				kind = "detail"
+			}
+			site := strings.TrimSpace(ev.Site)
+			id := strings.TrimSpace(ev.ID)
+			url := strings.TrimSpace(ev.URL)
+			if kind == "play" {
+				if url == "" {
+					url = id
+				}
+				if url == "" {
+					continue
+				}
+				if site == "" {
+					site = service.PushAgentKey
+				}
+				if id == "" {
+					id = url
+				}
+			} else if id == "" {
+				continue
+			}
+			name := strings.TrimSpace(ev.Name)
+			if name == "" {
+				name = id
+			}
+			remote.DefaultQueue.PushOpen(remote.OpenCmd{
+				Kind:     kind,
+				Site:     site,
+				ID:       id,
+				Name:     name,
+				Pic:      ev.Pic,
+				Flag:     ev.Flag,
+				Remarks:  ev.Remarks,
+				URL:      url,
+				Position: ev.Position,
+			}, ev.ClientID)
 		}
 	}()
 }

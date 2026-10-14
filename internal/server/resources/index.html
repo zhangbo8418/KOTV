@@ -43,7 +43,7 @@
               <option value="">全部 / 自动</option>
             </select>
           </div>
-          <div class="progress-wrap">
+          <div class="progress-wrap" id="progress_wrap" title="点击跳转进度">
             <div class="progress-bar"><div class="progress-fill" id="progress_fill"></div></div>
             <div class="progress-time">
               <span id="media_pos">00:00</span>
@@ -76,7 +76,27 @@
             <svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
           </button>
         </div>
+        <div class="chip-row refresh-row">
+          <button class="chip" type="button" data-refresh="detail">刷新详情</button>
+          <button class="chip" type="button" data-refresh="player">重播线路</button>
+          <button class="chip" type="button" data-refresh="category">刷新分类</button>
+          <button class="chip" type="button" data-refresh="live">刷新直播</button>
+        </div>
         <button class="btn-stop" data-action="stop">停止播放</button>
+      </section>
+
+      <!-- 片库：历史 / 收藏 -->
+      <section id="panel-library" class="panel">
+        <div class="glass card library-toolbar">
+          <h2>片库</h2>
+          <p class="hint">点选历史或收藏，在目标端打开播放。目标跟随「播放」页所选用户。</p>
+          <div class="chip-row">
+            <button class="chip active" type="button" data-lib="history">观看历史</button>
+            <button class="chip" type="button" data-lib="keep">我的收藏</button>
+            <button class="chip" type="button" id="btn_lib_refresh">刷新</button>
+          </div>
+        </div>
+        <div class="file-list" id="library_list"></div>
       </section>
 
       <!-- 搜索 -->
@@ -149,10 +169,14 @@
       </section>
     </main>
 
-    <nav class="nav">
+    <nav class="nav nav-7">
       <button class="nav-item active" data-tab="play">
         <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         <span>播放</span>
+      </button>
+      <button class="nav-item" data-tab="library">
+        <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
+        <span>片库</span>
       </button>
       <button class="nav-item" data-tab="search">
         <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>

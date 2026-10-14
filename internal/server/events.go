@@ -15,6 +15,7 @@ type Events struct {
 	controlSubs []chan controlEvent
 	refreshSubs []chan refreshEvent
 	castSubs    []chan castEvent
+	openSubs    []chan openEvent
 	postMsgSubs []chan string
 	// 按 Flutter clientId 分队列；无 clientId 的消息进 untagged（广播/兼容）。
 	postMsgQ        map[string][]string
@@ -49,6 +50,20 @@ type castEvent struct {
 	History string
 }
 
+// openEvent 遥控片库点选：打开详情或直链播放。
+type openEvent struct {
+	Kind     string
+	Site     string
+	ID       string
+	Name     string
+	Pic      string
+	Flag     string
+	Remarks  string
+	URL      string
+	Position int64
+	ClientID string
+}
+
 func NewEvents() *Events {
 	return &Events{
 		postMsgQ:    map[string][]string{},
@@ -63,6 +78,7 @@ func (e *Events) SubscribeSetting() <-chan settingEvent { return e.subscribeSett
 func (e *Events) SubscribeControl() <-chan controlEvent { return e.subscribeControl(16) }
 func (e *Events) SubscribeRefresh() <-chan refreshEvent { return e.subscribeRefresh(8) }
 func (e *Events) SubscribeCast() <-chan castEvent       { return e.subscribeCast(4) }
+func (e *Events) SubscribeOpen() <-chan openEvent       { return e.subscribeOpen(8) }
 
 func (e *Events) subscribeSearch(cap int) <-chan searchEvent {
 	e.mu.Lock()
@@ -104,6 +120,14 @@ func (e *Events) subscribeCast(cap int) <-chan castEvent {
 	return ch
 }
 
+func (e *Events) subscribeOpen(cap int) <-chan openEvent {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	ch := make(chan openEvent, cap)
+	e.openSubs = append(e.openSubs, ch)
+	return ch
+}
+
 func (e *Events) subscribe(subs *[]chan string, cap int) <-chan string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -128,6 +152,10 @@ func (e *Events) EmitRefresh(typ, path string) {
 }
 func (e *Events) EmitCast(config, device, history string) {
 	e.emitCast(castEvent{Config: config, Device: device, History: history})
+}
+
+func (e *Events) EmitOpen(ev openEvent) {
+	e.emitOpen(ev)
 }
 
 // EmitPostMsg 无目标客户端时入 untagged / 广播（兼容旧 JAR）。
@@ -262,6 +290,19 @@ func (e *Events) emitCast(msg castEvent) {
 		case ch <- msg:
 		default:
 			go func(c chan castEvent, m castEvent) { c <- m }(ch, msg)
+		}
+	}
+}
+
+func (e *Events) emitOpen(msg openEvent) {
+	e.mu.RLock()
+	snapshot := append([]chan openEvent(nil), e.openSubs...)
+	e.mu.RUnlock()
+	for _, ch := range snapshot {
+		select {
+		case ch <- msg:
+		default:
+			go func(c chan openEvent, m openEvent) { c <- m }(ch, msg)
 		}
 	}
 }

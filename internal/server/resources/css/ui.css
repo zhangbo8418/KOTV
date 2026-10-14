@@ -119,9 +119,9 @@ body {
 }
 .hero-state { font-size: 13px; color: var(--muted); }
 
-.progress-wrap { margin-top: 18px; }
+.progress-wrap { margin-top: 18px; cursor: pointer; }
 .progress-bar {
-  height: 6px; border-radius: 999px; overflow: hidden;
+  height: 10px; border-radius: 999px; overflow: hidden;
   background: rgba(255,255,255,0.12);
 }
 .progress-fill {
@@ -202,6 +202,16 @@ body {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
+.nav.nav-7 { grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.nav.nav-7 .nav-item { font-size: 10px; padding: 6px 2px; }
+.nav.nav-7 .nav-item svg { width: 20px; height: 20px; }
+.refresh-row { margin: 0 0 12px; }
+.library-toolbar { margin-bottom: 10px; }
+.lib-thumb {
+  width: 40px; height: 54px; border-radius: 8px; object-fit: cover;
+  background: rgba(255,255,255,0.08); flex-shrink: 0;
+}
+.lib-meta-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .nav-item {
   border: none; background: transparent; color: var(--muted);
   border-radius: 14px; padding: 8px 4px; cursor: pointer;

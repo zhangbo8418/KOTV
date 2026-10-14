@@ -5,6 +5,9 @@
   let danmakuSize = 25;
   let mediaTimer = null;
   let toastTimer = null;
+  let mediaPos = 0;
+  let mediaDur = 0;
+  let libraryType = 'history';
   let targetScopeId = localStorage.getItem('kotv_remote_user') || localStorage.getItem('kotv_remote_client') || '';
 
   const $ = (sel) => document.querySelector(sel);
@@ -86,6 +89,8 @@
       const playing = info.playing === true || info.playing === 'true' || info.state === 'playing';
       const pos = Number(info.position || 0);
       const dur = Number(info.duration || 0);
+      mediaPos = pos;
+      mediaDur = dur;
       const pct = dur > 0 ? Math.min(100, (pos / dur) * 100) : 0;
 
       $('#media_title').textContent = info.title || '未播放';
@@ -132,6 +137,7 @@
     if (nav) nav.classList.add('active');
     if (name === 'play') startMediaPoll();
     if (name === 'file') listFiles(fileRoot);
+    if (name === 'library') loadLibrary();
   }
 
   async function loadDevice() {
@@ -164,6 +170,109 @@
       }
     });
   });
+
+  // Progress seek
+  const progressWrap = $('#progress_wrap');
+  if (progressWrap) {
+    progressWrap.addEventListener('click', async (e) => {
+      if (!(mediaDur > 0)) return toast('暂无进度');
+      const rect = progressWrap.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+      const seek = Math.floor(mediaDur * ratio);
+      try {
+        await postAction({ do: 'control', type: 'seek', seek: String(seek) });
+        toast('已跳转 ' + formatTime(seek));
+        pollMedia();
+      } catch (_) {
+        toast('跳转失败');
+      }
+    });
+  }
+
+  // Refresh shortcuts
+  $$('[data-refresh]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const type = btn.dataset.refresh;
+      try {
+        await postAction({ do: 'refresh', type });
+        toast('已请求刷新');
+      } catch (_) {
+        toast('刷新失败');
+      }
+    });
+  });
+
+  // Library
+  async function loadLibrary() {
+    const list = $('#library_list');
+    if (!list) return;
+    list.innerHTML = '<div class="file-empty">加载中…</div>';
+    try {
+      const q = new URLSearchParams({ type: libraryType, limit: '80' });
+      applyTargetParams(q);
+      const res = await fetch('/library?' + q.toString());
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'load failed');
+      const items = Array.isArray(data.items) ? data.items : [];
+      list.innerHTML = '';
+      if (items.length === 0) {
+        list.appendChild(Object.assign(document.createElement('div'), {
+          className: 'file-empty',
+          textContent: libraryType === 'keep' ? '暂无收藏（需在 App 里收藏并同步到引擎）' : '暂无历史（在 App 观看后会同步到此）',
+        }));
+        return;
+      }
+      items.forEach((item) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'file-item';
+        const pic = String(item.pic || '').trim();
+        const thumb = pic
+          ? `<img class="lib-thumb" src="${escHtml(pic)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+          : `<div class="file-icon">▶</div>`;
+        const sub = [item.remarks, item.flag, item.site].filter(Boolean).join(' · ');
+        btn.innerHTML = `${thumb}
+          <div class="file-meta">
+            <div class="file-name">${escHtml(item.name || item.id || '未命名')}</div>
+            <div class="lib-meta-sub">${escHtml(sub)}</div>
+          </div>`;
+        btn.addEventListener('click', async () => {
+          try {
+            await postAction({
+              do: 'open',
+              kind: item.kind || 'detail',
+              site: item.site || '',
+              id: item.id || '',
+              name: item.name || '',
+              pic: item.pic || '',
+              flag: item.flag || '',
+              remarks: item.remarks || '',
+              url: item.url || '',
+              position: String(item.position || 0),
+            });
+            toast('已打开：' + (item.name || item.id || ''));
+            showTab('play');
+          } catch (_) {
+            toast('打开失败');
+          }
+        });
+        list.appendChild(btn);
+      });
+    } catch (_) {
+      list.innerHTML = '<div class="file-empty">加载失败</div>';
+      toast('片库加载失败');
+    }
+  }
+
+  $$('[data-lib]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      libraryType = chip.dataset.lib || 'history';
+      $$('[data-lib]').forEach((c) => c.classList.toggle('active', c === chip));
+      loadLibrary();
+    });
+  });
+  const btnLibRefresh = $('#btn_lib_refresh');
+  if (btnLibRefresh) btnLibRefresh.addEventListener('click', () => loadLibrary());
 
   // Search
   async function search() {
@@ -379,6 +488,8 @@
       targetScopeId = targetSel.value || '';
       localStorage.setItem('kotv_remote_user', targetScopeId);
       pollMedia();
+      const libPanel = $('#panel-library');
+      if (libPanel && libPanel.classList.contains('active')) loadLibrary();
     });
   }
   loadDevice();

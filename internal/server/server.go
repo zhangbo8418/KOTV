@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/config"
+	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	m3u8cache "github.com/bobo/KOTV/internal/m3u8"
@@ -47,6 +48,7 @@ type Server struct {
 	tvbusRespFn   func() string
 	syncHandler   *SyncHandler
 	contentAPI    ContentAPI
+	libraryDB     *database.DB
 	onShutdown    func()
 }
 
@@ -63,6 +65,14 @@ type Action struct {
 	Device   string // do=cast：对端设备 JSON
 	History  string // do=cast：历史 JSON
 	ClientID string // 目标 Flutter clientId（空=广播）
+	// do=open：片库点选打开
+	Kind     string
+	Site     string
+	ID       string
+	Flag     string
+	Remarks  string
+	Pic      string
+	Position int64 // do=open 续看进度
 }
 
 var defaultServer *Server
@@ -122,6 +132,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/delFile", s.handleDelPath)
 	mux.HandleFunc("/cache", s.handleCache)
 	mux.HandleFunc("/action", s.handleAction)
+	mux.HandleFunc("/library", s.handleLibrary)
 	mux.HandleFunc("/postMsg", s.handlePostMsg)
 	mux.HandleFunc("/uiReply", s.handleUIReply)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -291,6 +302,12 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		Path:    q.Get("path"),
 		Device:  q.Get("device"),
 		History: q.Get("history"),
+		Kind:    q.Get("kind"),
+		Site:    q.Get("site"),
+		ID:      first(q.Get("id"), q.Get("vodId")),
+		Flag:    first(q.Get("flag"), q.Get("vodFlag")),
+		Remarks: first(q.Get("remarks"), q.Get("vodRemarks")),
+		Pic:     first(q.Get("pic"), q.Get("vodPic")),
 		ClientID: hostclient.ResolveScopeKey(
 			q.Get("userId"),
 			q.Get("scopeId"),
@@ -300,6 +317,11 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("seek"); v != "" {
 		if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
 			action.SeekMs = ms
+		}
+	}
+	if v := first(q.Get("position"), q.Get("positionMs")); v != "" {
+		if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
+			action.Position = ms
 		}
 	}
 	switch action.Do {
@@ -317,6 +339,27 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		s.dispatchFileAction(action.Path)
 	case "cast":
 		s.events.EmitCast(action.Config, action.Device, action.History)
+	case "open":
+		kind := strings.ToLower(strings.TrimSpace(action.Kind))
+		if kind == "" {
+			if strings.TrimSpace(action.URL) != "" && (action.Site == "" || action.Site == "push_agent") {
+				kind = "play"
+			} else {
+				kind = "detail"
+			}
+		}
+		s.events.EmitOpen(openEvent{
+			Kind:     kind,
+			Site:     action.Site,
+			ID:       action.ID,
+			Name:     action.Name,
+			Pic:      action.Pic,
+			Flag:     action.Flag,
+			Remarks:  action.Remarks,
+			URL:      action.URL,
+			Position: action.Position,
+			ClientID: action.ClientID,
+		})
 	case "refresh":
 		typ := action.Type
 		if typ == "" {
