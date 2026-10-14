@@ -262,6 +262,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _zw = null;
     _mkPlayer = null;
     _playUrl = '';
+    _playDirect = '';
     if (mounted) {
       setState(() {});
       await WidgetsBinding.instance.endOfFrame;
@@ -337,6 +338,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   int _playSerial = 0;
   int _epgSerial = 0;
   String _playUrl = '';
+  /// 引擎下发的可直开 CDN（空则只能开 [_playUrl]）。
+  String _playDirect = '';
   /// [_releaseAllBackends] 已跑完则 dispose 不再二次硬拆。
   bool _releasedHard = false;
   Map<String, String>? _playHeaders;
@@ -460,6 +463,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _zw = null;
       _mkPlayer = null;
       _playUrl = '';
+      _playDirect = '';
       unawaited(() async {
         await kotvHardReleasePlayers(backends, waitFirst: fvp);
         await kotvDisposeMpvPlayer(mkPlayer);
@@ -864,10 +868,18 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return [for (final e in raw) '$e'.trim()];
   }
 
+  /// 与 urls 平行的可直开 CDN（PreparePlayback 的 direct）。
+  List<String> _channelDirectUrls(Map ch) {
+    final raw = ch['directs'];
+    if (raw is! List) return const [];
+    return [for (final e in raw) '$e'.trim()];
+  }
+
   void _writeBackLivePlayUrl(
     Map ch, {
     required int line,
     required String url,
+    String direct = '',
     Map<String, String>? headers,
     String format = '',
     Map<String, dynamic>? drm,
@@ -880,6 +892,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (line >= 0 && line < list.length) {
       list[line] = url;
       ch['urls'] = list;
+    }
+    final dRaw = ch['directs'];
+    final dList = dRaw is List ? List<dynamic>.from(dRaw) : <dynamic>[];
+    while (dList.length <= line) {
+      dList.add('');
+    }
+    if (line >= 0 && line < dList.length) {
+      dList[line] = direct;
+      ch['directs'] = dList;
     }
     if (headers != null && headers.isNotEmpty) {
       ch['headers'] = Map<String, String>.from(headers);
@@ -1351,6 +1372,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   Future<void> _openLiveUrl(
     String url, {
     required int serial,
+    String directUrl = '',
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     bool live = true,
@@ -1407,14 +1429,28 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _playerVal = nextVal;
       _decodeMode = nextDecode;
       _renderMode = renderMode;
-      final openUrl = url;
-      final openHeaders = headers;
+      final hdrMap = headers == null ? <String, String>{} : Map<String, String>.from(headers);
+      final resolved = kotvResolvePlayOpenTarget(
+        playUrl: url,
+        directUrl: directUrl,
+        headers: hdrMap,
+        magnet: false,
+        sendHeaders: kotvPlaybackSendsHeaders(
+          playerVal: failover.playerVal,
+          mediaUrl: directUrl.trim().isNotEmpty ? directUrl : url,
+          headers: hdrMap,
+        ),
+      );
+      final openUrl = resolved.url;
+      final openHeaders = resolved.headers;
       _releasedHard = false;
       // 仅换后端才等一帧挂宿主；同后端换 URL 不必 endOfFrame。
       final needRemount = !sameBackend;
       setState(() {
-        _playUrl = openUrl;
-        _playHeaders = openHeaders;
+        // 记住引擎 url/direct，换播放器时按能力重新分流。
+        _playUrl = url;
+        _playDirect = directUrl;
+        _playHeaders = headers;
         _playDrm = hasDrm ? drm : null;
         _playerVal = nextVal;
         _decodeMode = nextDecode;
@@ -1466,8 +1502,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           pb: pb,
           failover: failover,
           serial: serial,
-          url: openUrl,
-          headers: openHeaders,
+          url: url,
+          directUrl: directUrl,
+          headers: headers,
           drm: hasDrm ? drm : null,
           format: format,
           live: live,
@@ -1512,6 +1549,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     required KotvPlaybackFailover failover,
     required int serial,
     required String url,
+    String directUrl = '',
     Map<String, String>? headers,
     Map<String, dynamic>? drm,
     String? format,
@@ -1544,6 +1582,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         await _openLiveUrl(
           url,
           serial: serial,
+          directUrl: directUrl,
           headers: headers,
           drm: drm,
           format: format,
@@ -1862,9 +1901,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       late final String lineName;
 
       // 引擎：非空 urls[line] 可直开；空串须 livePlay。
+      late final String direct;
+      final engineBase = ref.read(apiProvider).baseUrl;
       final memUrl = playUrls.isEmpty ? '' : playUrls[useLine.clamp(0, playUrls.length - 1)];
+      final directs = _channelDirectUrls(ch);
       if (memUrl.isNotEmpty) {
-        url = kotvRewriteEngineLocalUrl(memUrl, ref.read(apiProvider).baseUrl);
+        url = kotvRewriteEngineLocalUrl(memUrl, engineBase);
+        direct = kotvRewriteEngineLocalUrl(
+          directs.isEmpty ? '' : directs[useLine.clamp(0, directs.length - 1)],
+          engineBase,
+        );
         headers = _channelHeaders(ch);
         final drmRaw = ch['drm'];
         drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
@@ -1884,7 +1930,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         if (!mounted || serial != _playSerial) return;
         final data = await playFut;
         if (!mounted || serial != _playSerial) return;
-        url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
+        url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', engineBase);
+        direct = kotvRewriteEngineLocalUrl('${data['direct'] ?? ''}', engineBase);
         final hdr = <String, String>{
           for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
             if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
@@ -1896,9 +1943,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         lines = (data['lines'] as int?) ?? (playUrls.isEmpty ? 1 : playUrls.length);
         lineIdx = (data['line'] as int?) ?? useLine;
         lineName = '${data['lineName'] ?? ''}'.trim();
-        // 引擎解析结果写回内存 urls，同台再切走直开。
+        // 引擎解析结果写回内存 urls/directs，同台再切走直开。
         if (url.isNotEmpty) {
-          _writeBackLivePlayUrl(ch, line: useLine, url: url, headers: headers, format: format, drm: drm);
+          _writeBackLivePlayUrl(
+            ch,
+            line: useLine,
+            url: url,
+            direct: direct,
+            headers: headers,
+            format: format,
+            drm: drm,
+          );
         }
       }
       if (url.isEmpty) throw Exception('空播放地址');
@@ -1909,6 +1964,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await _openLiveUrl(
         url,
         serial: serial,
+        directUrl: direct,
         headers: headers,
         drm: drm,
         format: format.isEmpty ? null : format,
@@ -1975,15 +2031,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (!mounted || serial != _playSerial) return;
       final data = await catchFut;
       if (!mounted || serial != _playSerial) return;
-      final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', ref.read(apiProvider).baseUrl);
+      final engineBase = ref.read(apiProvider).baseUrl;
+      final url = kotvRewriteEngineLocalUrl('${data['url'] ?? ''}', engineBase);
       if (url.isEmpty) throw Exception('空回看地址');
+      final direct = kotvRewriteEngineLocalUrl('${data['direct'] ?? ''}', engineBase);
       final headers = <String, String>{
         for (final e in Map<String, dynamic>.from((data['headers'] as Map?) ?? const {}).entries)
           if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
       };
       final drmRaw = data['drm'];
       final drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
-      await _openLiveUrl(url, serial: serial, headers: headers.isEmpty ? null : headers, drm: drm, live: true);
+      await _openLiveUrl(
+        url,
+        serial: serial,
+        directUrl: direct,
+        headers: headers.isEmpty ? null : headers,
+        drm: drm,
+        live: true,
+      );
       if (!mounted || serial != _playSerial) return;
       setState(() {
         _title = '${data['name'] ?? _title}';
@@ -2262,6 +2327,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await _openLiveUrl(
         _playUrl,
         serial: serial,
+        directUrl: _playDirect,
         headers: _playHeaders,
         drm: _playDrm,
         live: true,
@@ -2326,6 +2392,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         await _openLiveUrl(
           _playUrl,
           serial: serial,
+          directUrl: _playDirect,
           headers: _playHeaders,
           drm: _playDrm,
           live: true,

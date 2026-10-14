@@ -236,3 +236,16 @@ func TestPreparePlaybackDirectSkipsLoopback(t *testing.T) {
 		t.Fatalf("loopback must not be opened by the player, got %q", direct)
 	}
 }
+
+// 直播 Load/livePlay 与点播共用 PreparePlayback：无头则 url=原址、direct 空。
+func TestPreparePlaybackLivePlainURL(t *testing.T) {
+	a := &App{}
+	raw := "https://cdn.example/live.m3u8"
+	play, direct := a.PreparePlayback(raw, nil)
+	if play != raw {
+		t.Fatalf("play=%q want %q", play, raw)
+	}
+	if direct != "" {
+		t.Fatalf("direct=%q want empty", direct)
+	}
+}

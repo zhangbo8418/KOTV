@@ -1672,6 +1672,7 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 			ch.ApplyLive(loaded)
 			origLine := ch.URLIndex
 			playURLs := make([]string, 0, len(ch.URLs))
+			directURLs := make([]string, 0, len(ch.URLs))
 			var headers map[string]string
 			for i := range ch.URLs {
 				ch.URLIndex = i
@@ -1682,8 +1683,11 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 				// 须引擎二次解析的线路不下发直链：客户端见空串则走 livePlay。
 				if live.NeedsEnginePlay(ch, u) {
 					playURLs = append(playURLs, "")
+					directURLs = append(directURLs, "")
 				} else {
-					playURLs = append(playURLs, playproxy.PublicizeURL(u, h))
+					play, direct := a.PreparePlayback(u, h)
+					playURLs = append(playURLs, play)
+					directURLs = append(directURLs, direct)
 				}
 			}
 			ch.URLIndex = origLine
@@ -1700,6 +1704,7 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 				"logo":    exposeResourceURL(ch.ResolvedLogo()),
 				"tvgId":   ch.TvgID,
 				"urls":    playURLs,
+				"directs": directURLs,
 				"line":    ch.URLIndex,
 				"headers": headers,
 				"format":  ch.Format,
@@ -1773,6 +1778,7 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		}
 		playURL = rewritten
 	}
+	playURL, directURL := a.PreparePlayback(playURL, headers)
 	if runtime.GOOS != "android" {
 		prepared, derr := model.PrepareForDesktop(ch.Drm)
 		if derr != nil {
@@ -1782,7 +1788,8 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 	}
 	return map[string]any{
 		"ok":       true,
-		"url":      playproxy.PublicizeURL(playURL, headers),
+		"url":      playURL,
+		"direct":   directURL,
 		"headers":  headers,
 		"name":     ch.Name,
 		"group":    g.Name,
@@ -1871,6 +1878,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
+	playURL, directURL := a.PreparePlayback(url, headers)
 	var playDrm *model.Drm
 	if runtime.GOOS != "android" {
 		prepared, derr := model.PrepareForDesktop(ch.Drm)
@@ -1883,7 +1891,8 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	}
 	return map[string]any{
 		"ok":      true,
-		"url":     playproxy.PublicizeURL(url, headers),
+		"url":     playURL,
+		"direct":  directURL,
 		"headers": headers,
 		"name":    list[prog].Title,
 		"group":   g.Name,
