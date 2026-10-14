@@ -4,7 +4,6 @@ import 'package:http/http.dart' as http;
 
 import '../player/kotv_platform.dart';
 import 'kotv_auth_token.dart';
-import 'kotv_auth_user.dart';
 import 'kotv_client_id.dart';
 import 'kotv_engine_url.dart';
 
@@ -107,11 +106,7 @@ class KotvApi {
     });
     final token = '${data['token'] ?? ''}';
     if (token.isNotEmpty) await kotvSetAuthToken(token);
-    final user = data['user'];
-    if (user is Map) {
-      final id = '${user['id'] ?? ''}'.trim();
-      if (id.isNotEmpty) await kotvSetAuthUserId(id);
-    }
+    await _cacheSessionUser(data);
     return data;
   }
 
@@ -122,16 +117,25 @@ class KotvApi {
     try {
       final data = await _post('/api/v1/auth/logout', {});
       await kotvClearAuthToken();
-      await kotvClearAuthUserId();
       return data;
     } catch (_) {
       await kotvClearAuthToken();
-      await kotvClearAuthUserId();
       return {'ok': true};
     }
   }
 
-  Future<Map<String, dynamic>> authMe() => _get('/api/v1/auth/me');
+  Future<Map<String, dynamic>> authMe() async {
+    final data = await _get('/api/v1/auth/me');
+    await _cacheSessionUser(data);
+    return data;
+  }
+
+  Future<void> _cacheSessionUser(Map<String, dynamic> data) async {
+    final user = data['user'];
+    if (user is! Map) return;
+    final id = '${user['id'] ?? ''}'.trim();
+    if (id.isNotEmpty) await kotvSetSessionUserId(id);
+  }
 
   Future<Map<String, dynamic>> changePassword({
     required String oldPassword,

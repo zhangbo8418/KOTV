@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
-import '../api/kotv_auth_user.dart';
+import '../api/kotv_auth_token.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
 import 'sync_import_apply.dart';
@@ -132,12 +132,12 @@ class RemoteBridge {
   }
 }
 
-/// 本机观看历史；远端登录按 userId 分桶，本机共享默认桶。
+/// 本机观看历史；有登录会话时按 userId 分桶，本机免登录用默认桶。
 class LocalHistory {
   static const _keyBase = 'kotv_history_v1';
 
   static Future<String> _storageKey() async {
-    final uid = await kotvAuthUserId();
+    final uid = await kotvSessionUserId();
     if (uid.isEmpty) return _keyBase;
     return '${_keyBase}_u_$uid';
   }

@@ -11,7 +11,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
-import '../api/kotv_auth_user.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
@@ -1724,7 +1723,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (normalized.isEmpty || kotvIsLocalEngineBaseUrl(normalized)) {
       await prefs.remove('engine_base_url_draft');
       await kotvClearAuthToken();
-      await kotvClearAuthUserId();
       await _switchEngine('');
       if (!mounted) return;
       setState(() => _status = '已使用本机引擎');
@@ -1798,7 +1796,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await ref.read(apiProvider).logout();
     } catch (_) {
       await kotvClearAuthToken();
-      await kotvClearAuthUserId();
     }
     // draft 保留，方便再次登录
     await _switchEngine('');

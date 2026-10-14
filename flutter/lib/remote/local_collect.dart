@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../api/kotv_auth_user.dart';
+import '../api/kotv_auth_token.dart';
 import '../models/models.dart';
 import 'sync_import_apply.dart';
 import 'sync_mirror_push.dart';
@@ -11,7 +11,7 @@ class LocalCollect {
   static const _keyBase = 'kotv_collect_v1';
 
   static Future<String> _storageKey() async {
-    final uid = await kotvAuthUserId();
+    final uid = await kotvSessionUserId();
     if (uid.isEmpty) return _keyBase;
     return '${_keyBase}_u_$uid';
   }
