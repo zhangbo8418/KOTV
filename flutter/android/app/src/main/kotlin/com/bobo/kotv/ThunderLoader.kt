@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.regex.Pattern
 
 /**
- * 安卓迅雷：支持 magnet / thunder / ed2k / torrent / ftp 等，不走 anacrolix。
+ * 安卓迅雷：支持 magnet / thunder / ed2k / torrent；解码后偶发 ftp 也走 SDK（scheme ftp 本身走荐片）。
  *
  * 安全点：
  * - Init 在 Application.attachBaseContext 已 set

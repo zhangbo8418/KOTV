@@ -140,7 +140,7 @@ object SourceExtractors {
     val s = Uri.parse(raw.trim()).scheme?.lowercase().orEmpty()
     return when (s) {
       "tvbus" -> Scheme.TVBus
-      "jianpian", "tvbox-xg", "xg", "xgplay" -> Scheme.JianPian
+      "jianpian", "tvbox-xg", "xg", "xgplay", "ftp" -> Scheme.JianPian
       else -> Scheme.None
     }
   }

@@ -2052,6 +2052,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       );
       Object? lastOpenError;
       var opened = false;
+      final playSubs = data['subs'];
+      final subMaps = <Map<String, dynamic>>[
+        if (playSubs is List)
+          for (final s in playSubs)
+            if (s is Map)
+              {
+                'url': '${s['url'] ?? ''}',
+                'name': '${s['name'] ?? ''}',
+                'lang': '${s['lang'] ?? ''}',
+                'format': '${s['format'] ?? ''}',
+              },
+      ];
       for (var attempt = 0; attempt < 8; attempt++) {
         if (serial != _playAtSerial || !mounted) return;
         failover.markAttempt();
@@ -2070,6 +2082,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           } else {
             pb.applyPlayerOptions({'playerRender': renderMode});
           }
+          // 外挂字幕须在 open 前写入，才能进 MediaItem。
+          pb.setExternalSubs(subMaps);
         } else if (playSettings.isNotEmpty) {
           _fvp?.applyPlayerOptions(playSettings);
         }
@@ -2222,25 +2236,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         name: d.name,
         episode: ep.name,
       ));
-      final playSubs = data['subs'];
-      if (playSubs is List && playSubs.isNotEmpty) {
-        final subMaps = <Map<String, dynamic>>[
-          for (final s in playSubs)
-            if (s is Map)
-              {
-                'url': '${s['url'] ?? ''}',
-                'name': '${s['name'] ?? ''}',
-                'lang': '${s['lang'] ?? ''}',
-                'format': '${s['format'] ?? ''}',
-              },
-        ];
-        try {
-          final pb = _playback;
-          if (pb is ExoPlayback) {
-            pb.setExternalSubs(subMaps);
-          }
-        } catch (_) {}
-      }
       // YouTube 等专用源展开后带回的标题/封面/简介，刷新详情展示。
       final srcTitle = '${data['title'] ?? ''}'.trim();
       final srcArt = '${data['artwork'] ?? ''}'.trim();

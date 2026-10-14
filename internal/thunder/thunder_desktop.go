@@ -138,6 +138,7 @@ func Fetch(raw string) (string, error) {
 	raw = Decode(strings.TrimSpace(raw))
 	low := strings.ToLower(raw)
 	if strings.HasPrefix(low, "ed2k:") || strings.HasPrefix(low, "ftp:") {
+		// scheme ftp 走荐片；此处仅覆盖 thunder:// 解码后的偶发 ftp/ed2k。
 		return "", fmt.Errorf("电驴/FTP 仅 Android 迅雷支持")
 	}
 	setProgress("meta", 0, 0, 0, "正在获取磁力元数据…")

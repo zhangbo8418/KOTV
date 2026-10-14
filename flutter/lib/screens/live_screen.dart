@@ -883,6 +883,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     Map<String, String>? headers,
     String format = '',
     Map<String, dynamic>? drm,
+    List<Map<String, dynamic>>? subs,
   }) {
     final raw = ch['urls'];
     final list = raw is List ? List<dynamic>.from(raw) : <dynamic>[];
@@ -907,6 +908,27 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
     if (format.isNotEmpty) ch['format'] = format;
     if (drm != null) ch['drm'] = drm;
+    if (subs != null && subs.isNotEmpty) {
+      ch['subs'] = List<Map<String, dynamic>>.from(subs);
+    } else {
+      ch.remove('subs');
+    }
+  }
+
+  List<Map<String, dynamic>>? _channelSubs(Map ch) {
+    final raw = ch['subs'];
+    if (raw is! List || raw.isEmpty) return null;
+    final out = <Map<String, dynamic>>[
+      for (final s in raw)
+        if (s is Map)
+          {
+            'url': '${s['url'] ?? ''}',
+            'name': '${s['name'] ?? ''}',
+            'lang': '${s['lang'] ?? ''}',
+            'format': '${s['format'] ?? ''}',
+          },
+    ];
+    return out.isEmpty ? null : out;
   }
 
   Map<String, String>? _channelHeaders(Map ch) {
@@ -1477,6 +1499,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       }
       if (stale()) return;
       try {
+        // 外挂字幕须在 open 前写入，才能进 MediaItem。
+        if (pb is ExoPlayback) {
+          pb.setExternalSubs(externalSubs ?? const []);
+        }
         // waitReady:false：媒体交给引擎即返回；出画守卫后台跑，换台不等 silent-guard。
         await pb.open(
           openUrl,
@@ -1490,11 +1516,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         if (stale()) {
           await _dropStalePlayback(pb);
           return;
-        }
-        if (externalSubs != null && externalSubs.isNotEmpty && pb is ExoPlayback) {
-          try {
-            pb.setExternalSubs(externalSubs);
-          } catch (_) {}
         }
         unawaited(pb.setVideoScale(_liveScale));
         if (_backend != KotvEmbedBackend.mpv && !pb.playing) {
@@ -1515,6 +1536,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           format: format,
           live: live,
           startAt: startAt,
+          externalSubs: externalSubs,
         ));
         return;
       } on KotvSilentVideoException catch (e) {
@@ -1561,6 +1583,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     String? format,
     required bool live,
     required Duration startAt,
+    List<Map<String, dynamic>>? externalSubs,
   }) async {
     bool stale() => !mounted || serial != _playSerial;
     try {
@@ -1594,6 +1617,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           format: format,
           live: live,
           startAt: startAt,
+          externalSubs: externalSubs,
         );
       } catch (_) {}
     } catch (_) {}
@@ -1906,6 +1930,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       late final int lineIdx;
       late final String lineName;
       List<Map<String, dynamic>>? externalSubs;
+      var sourceTitle = '';
 
       // 引擎：非空 urls[line] 可直开；空串须 livePlay。
       late final String direct;
@@ -1925,6 +1950,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         lines = playUrls.length;
         lineIdx = useLine;
         lineName = '';
+        externalSubs = _channelSubs(ch);
         await stopFut;
       } else {
         if (eng == null) throw Exception('频道无效');
@@ -1950,6 +1976,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         lines = (data['lines'] as int?) ?? (playUrls.isEmpty ? 1 : playUrls.length);
         lineIdx = (data['line'] as int?) ?? useLine;
         lineName = '${data['lineName'] ?? ''}'.trim();
+        sourceTitle = '${data['title'] ?? ''}'.trim();
+        if (sourceTitle.isEmpty) {
+          sourceTitle = '${data['name'] ?? ''}'.trim();
+          if (sourceTitle == playChName) sourceTitle = '';
+        }
         final playSubs = data['subs'];
         if (playSubs is List && playSubs.isNotEmpty) {
           externalSubs = [
@@ -1963,7 +1994,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 },
           ];
         }
-        // 引擎解析结果写回内存 urls/directs，同台再切走直开。
+        // 引擎解析结果写回内存 urls/directs/subs，同台再切走直开。
         if (url.isNotEmpty) {
           _writeBackLivePlayUrl(
             ch,
@@ -1973,6 +2004,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             headers: headers,
             format: format,
             drm: drm,
+            subs: externalSubs,
           );
         }
       }
@@ -1992,6 +2024,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       );
       if (!mounted || serial != _playSerial) return;
       setState(() {
+        if (sourceTitle.isNotEmpty) _title = sourceTitle;
         _status = '播放中 · $_title';
         _rememberPlaying(playGroup, chIdx, playGroupName, playChName);
       });
@@ -2076,6 +2109,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               },
         ];
       }
+      final catchFormat = '${data['format'] ?? ''}'.trim();
       await _openLiveUrl(
         url,
         serial: serial,
@@ -2083,6 +2117,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         headers: headers.isEmpty ? null : headers,
         drm: drm,
         live: true,
+        format: catchFormat.isEmpty ? null : catchFormat,
         externalSubs: externalSubs,
       );
       if (!mounted || serial != _playSerial) return;

@@ -101,15 +101,10 @@ func EpisodeURL(r model.Result) string {
 	return urls[pos]
 }
 
-// WebURL 兼容旧调用：playUrl 前缀 + url（仅在明确需要拼前缀时使用）。
-func WebURL(r model.Result) string {
-	return r.PlayURL + EpisodeURL(r)
-}
-
 // ResolveWithParses 对非直链播放结果执行二次解析。
 func ResolveWithParses(r model.Result, opts Options) (model.Result, error) {
 	ep := EpisodeURL(r)
-	// 专用源由后续 source.Fetch 展开；此处不得因 parse/useParse 先去嗅探。
+	// 专用源由后续 source.FetchInfo 展开；此处不得因 parse/useParse 先去嗅探。
 	if source.Match(ep) {
 		r.Parse = model.FlexInt{Valid: true, Value: 0}
 		parseLog("[parse] skip special source url=%s", parsePreview(ep, 120))

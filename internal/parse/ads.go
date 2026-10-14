@@ -20,11 +20,6 @@ var (
 	rulesList []model.Rule
 )
 
-// SetAds 兼容旧调用：等同 SetVodAds。
-func SetAds(ads []string) {
-	SetVodAds(ads)
-}
-
 // SetVodAds 设置点播配置广告域名。
 func SetVodAds(ads []string) {
 	ruleMu.Lock()

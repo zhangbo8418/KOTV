@@ -786,11 +786,6 @@ func PlayURLWithHistory(url, histKey string) error {
 	return player.Play(url, histKey)
 }
 
-// PlayExternal 兼容旧调用。
-func PlayExternal(url string) error {
-	return PlayURL(url)
-}
-
 // setupFileLog 同时写 stderr 与 {Root}/data/log/kotv.log，方便排障。
 func setupFileLog() {
 	dir := paths.LogDir()

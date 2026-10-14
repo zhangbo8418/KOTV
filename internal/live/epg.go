@@ -16,6 +16,7 @@ import (
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/source"
+	"github.com/bobo/KOTV/internal/thunder"
 	"github.com/bobo/KOTV/internal/util"
 )
 
@@ -602,7 +603,16 @@ func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData, core jso
 	if base == "" {
 		return "", headers, nil, fmt.Errorf("无播放地址")
 	}
-	if source.Match(base) {
+	if thunder.Match(base) {
+		thunder.Stop()
+		local, ferr := thunder.Fetch(base)
+		if ferr != nil {
+			return "", headers, nil, fmt.Errorf("磁力链接解析失败: %w", ferr)
+		}
+		if local != "" {
+			base = local
+		}
+	} else if source.Match(base) {
 		source.Stop()
 		info, ferr := source.FetchInfo(base, core)
 		if ferr != nil {

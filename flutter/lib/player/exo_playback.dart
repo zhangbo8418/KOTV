@@ -647,6 +647,7 @@ class ExoPlayback extends KotvPlayback {
     _url = '';
     _w = 0;
     _h = 0;
+    _subs = const [];
     await _setSurfaceLayerEnabled(false);
     notifyListeners();
   }
@@ -662,6 +663,7 @@ class ExoPlayback extends KotvPlayback {
     _url = '';
     _w = 0;
     _h = 0;
+    _subs = const [];
     // 换集卸掉播放器以放开解码缓冲，SurfaceView 仍留在树上。
     notifyListeners();
   }

@@ -21,6 +21,8 @@ func TestNeedsEnginePlay(t *testing.T) {
 		{direct, "video:http://x", true},
 		{direct, "tvbus://x", true},
 		{direct, "https://www.youtube.com/watch?v=1", true},
+		{direct, "magnet:?xt=urn:btih:abc", true},
+		{direct, "ed2k://|file|a.mp4|1|hash|/", true},
 		{direct, "", true},
 	}
 	for _, c := range cases {

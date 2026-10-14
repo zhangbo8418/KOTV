@@ -28,7 +28,8 @@ func Match(raw string) bool {
 		return false
 	}
 	switch strings.ToLower(u.Scheme) {
-	case "tvbus", "jianpian", "tvbox-xg", "xg", "xgplay":
+	case "tvbus", "jianpian", "tvbox-xg", "xg", "xgplay", "ftp":
+		// ftp：荐片/xg 展开后的 P2P 路径。
 		return true
 	case "p2p", "p3p", "p4p", "p5p", "p6p", "p7p", "p8p", "p9p", "mitv":
 		return true

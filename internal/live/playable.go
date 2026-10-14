@@ -9,7 +9,7 @@ import (
 	"github.com/bobo/KOTV/internal/thunder"
 )
 
-// URLNeedsEnginePlay 仅按地址形态判断：空串 / 二次解析前缀 / 专用源。
+// URLNeedsEnginePlay 仅按地址形态判断：空串 / 二次解析前缀 / 专用源 / 磁力。
 func URLNeedsEnginePlay(rawURL string) bool {
 	raw := strings.TrimSpace(rawURL)
 	if raw == "" {
@@ -21,10 +21,10 @@ func URLNeedsEnginePlay(rawURL string) bool {
 		strings.HasPrefix(lower, "video:") {
 		return true
 	}
-	return source.Match(raw)
+	return source.Match(raw) || thunder.Match(raw)
 }
 
-// NeedsEnginePlay 客户端不能直接打开该线路，须经 APILivePlay（二次解析 / 专用源）。
+// NeedsEnginePlay 客户端不能直接打开该线路，须经 APILivePlay（二次解析 / 专用源 / 磁力）。
 // 判定集中在引擎，UI 只看 Load 下发的 urls 是否非空。
 func NeedsEnginePlay(ch *model.LiveChannel, rawURL string) bool {
 	if ch != nil && ch.Parse == 1 {

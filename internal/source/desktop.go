@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/bobo/KOTV/internal/model"
 )
 
 func fetchPlatformInfo(playURL string, _ json.RawMessage) (Info, error) {
@@ -26,12 +29,8 @@ func fetchPlatformInfo(playURL string, _ json.RawMessage) (Info, error) {
 
 	switch {
 	case strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be"):
-		out, err := fetchYouTubeDesktop(playURL)
-		if err != nil {
-			return Info{}, err
-		}
-		return Info{URL: out}, nil
-	case scheme == "jianpian" || scheme == "tvbox-xg" || scheme == "xg" || scheme == "xgplay":
+		return fetchYouTubeDesktopInfo(playURL)
+	case scheme == "jianpian" || scheme == "tvbox-xg" || scheme == "xg" || scheme == "xgplay" || scheme == "ftp":
 		return Info{}, fmt.Errorf("荐片 P2P 仅安卓支持（需 libjpa）: %s", playURL)
 	case scheme == "tvbus":
 		return Info{}, fmt.Errorf("TVBus 仅安卓支持: %s", playURL)
@@ -53,12 +52,11 @@ func isForceScheme(scheme string) bool {
 	}
 }
 
-// fetchYouTubeDesktop 用 PATH 里的 yt-dlp / youtube-dl 解析可播直链。
-// 优先选「音视频同封装」格式，避免 -g 打出两行分轨 URL。
-func fetchYouTubeDesktop(playURL string) (string, error) {
+// fetchYouTubeDesktopInfo 用 PATH 里的 yt-dlp / youtube-dl 解析可播直链，并尽量带回标题/封面/字幕。
+func fetchYouTubeDesktopInfo(playURL string) (Info, error) {
 	bin, err := lookYoutubeDL()
 	if err != nil {
-		return "", err
+		return Info{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
@@ -71,20 +69,135 @@ func fetchYouTubeDesktop(playURL string) (string, error) {
 		playURL,
 	).CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
-		return "", fmt.Errorf("YouTube 解析超时（请确认已安装 yt-dlp）")
+		return Info{}, fmt.Errorf("YouTube 解析超时（请确认已安装 yt-dlp）")
 	}
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("YouTube 解析失败: %s", msg)
+		return Info{}, fmt.Errorf("YouTube 解析失败: %s", msg)
 	}
 	pick := firstHTTPURL(string(out))
 	if pick == "" {
-		return "", fmt.Errorf("YouTube 未返回可播地址")
+		return Info{}, fmt.Errorf("YouTube 未返回可播地址")
 	}
-	return pick, nil
+	info := Info{URL: pick}
+	// 元数据/字幕失败不影响起播。
+	fillYouTubeDesktopMeta(ctx, bin, playURL, &info)
+	return info, nil
+}
+
+type ytDLPSubTrack struct {
+	URL string `json:"url"`
+	Ext string `json:"ext"`
+}
+
+type ytDLPMeta struct {
+	Title              string                     `json:"title"`
+	Thumbnail          string                     `json:"thumbnail"`
+	Description        string                     `json:"description"`
+	Subtitles          map[string][]ytDLPSubTrack `json:"subtitles"`
+	AutomaticCaptions  map[string][]ytDLPSubTrack `json:"automatic_captions"`
+}
+
+func fillYouTubeDesktopMeta(parent context.Context, bin, playURL string, info *Info) {
+	if info == nil || bin == "" || playURL == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin,
+		"-j",
+		"--skip-download",
+		"--no-playlist",
+		"--no-warnings",
+		playURL,
+	).Output()
+	if err != nil || len(out) == 0 {
+		return
+	}
+	var meta ytDLPMeta
+	if err := json.Unmarshal(out, &meta); err != nil {
+		return
+	}
+	info.Name = strings.TrimSpace(meta.Title)
+	info.Artwork = strings.TrimSpace(meta.Thumbnail)
+	info.Desc = strings.TrimSpace(meta.Description)
+	info.Subs = ytDLPSubs(meta.Subtitles, meta.AutomaticCaptions)
+}
+
+func ytDLPSubs(manual, auto map[string][]ytDLPSubTrack) []model.Sub {
+	out := pickYTDLPSubs(manual)
+	if len(out) == 0 {
+		out = pickYTDLPSubs(auto)
+	}
+	return out
+}
+
+func pickYTDLPSubs(byLang map[string][]ytDLPSubTrack) []model.Sub {
+	if len(byLang) == 0 {
+		return nil
+	}
+	langs := make([]string, 0, len(byLang))
+	for lang := range byLang {
+		langs = append(langs, lang)
+	}
+	sort.Strings(langs)
+	var out []model.Sub
+	for _, lang := range langs {
+		tracks := byLang[lang]
+		u, fmtName := pickYTDLPSubURL(tracks)
+		if u == "" {
+			continue
+		}
+		name := lang
+		out = append(out, model.Sub{
+			URL:    u,
+			Name:   name,
+			Lang:   lang,
+			Format: fmtName,
+		})
+		if len(out) >= 12 {
+			break
+		}
+	}
+	return out
+}
+
+func pickYTDLPSubURL(tracks []ytDLPSubTrack) (url, format string) {
+	prefer := []string{"vtt", "srt", "ttml", "srv3", "srv2", "srv1"}
+	for _, ext := range prefer {
+		for _, t := range tracks {
+			if strings.EqualFold(strings.TrimSpace(t.Ext), ext) {
+				u := strings.TrimSpace(t.URL)
+				if u != "" {
+					return u, mimeForSubExt(ext)
+				}
+			}
+		}
+	}
+	for _, t := range tracks {
+		u := strings.TrimSpace(t.URL)
+		if u == "" {
+			continue
+		}
+		return u, mimeForSubExt(t.Ext)
+	}
+	return "", ""
+}
+
+func mimeForSubExt(ext string) string {
+	switch strings.ToLower(strings.TrimSpace(ext)) {
+	case "vtt":
+		return "text/vtt"
+	case "srt":
+		return "application/x-subrip"
+	case "ttml", "xml":
+		return "application/ttml+xml"
+	default:
+		return "text/vtt"
+	}
 }
 
 func firstHTTPURL(raw string) string {

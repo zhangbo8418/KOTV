@@ -9,6 +9,7 @@ func TestMatchYouTubeAndForce(t *testing.T) {
 		"p2p://example.com:8080/chan":                 true,
 		"mitv://example.com/x":                        true,
 		"jianpian://id/1":                             true,
+		"ftp://127.0.0.1/path":                        true,
 		"tvbus://x":                                   true,
 		"https://example.com/a.m3u8":                  false,
 		"": false,

@@ -160,11 +160,6 @@ func Play(url string, histKey string) error {
 	return playExternal(name, url)
 }
 
-// PlaySimple 兼容旧调用。
-func PlaySimple(url string) error {
-	return Play(url, "")
-}
-
 func displayName(name string) string {
 	switch strings.ToLower(name) {
 	case "vlc":

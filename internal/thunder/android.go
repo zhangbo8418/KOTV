@@ -159,7 +159,7 @@ func ParseContext(_ context.Context, raw string) ([]model.Episode, error) {
 	return tryAndroidParse(raw)
 }
 
-// Fetch 在 Android 上仅走迅雷 SDK（magnet / thunder / ed2k / ftp 等）。
+// Fetch 在 Android 上仅走迅雷 SDK（magnet / thunder / ed2k；解码后偶发 ftp 也走 SDK）。
 func Fetch(raw string) (string, error) {
 	raw = Decode(strings.TrimSpace(raw))
 	// playerContent 前 Source.stop：先停旧任务再起新 Fetch。

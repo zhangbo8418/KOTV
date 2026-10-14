@@ -784,20 +784,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		}
 		danmakuDTO = append(danmakuDTO, map[string]any{"name": it.Name, "url": u})
 	}
-	subsDTO := make([]map[string]any, 0, len(playSubs))
-	for _, s := range playSubs {
-		u := playproxy.PublicizeURL(localproxy.ConvertScheme(s.URL))
-		if u == "" {
-			continue
-		}
-		subsDTO = append(subsDTO, map[string]any{
-			"url":    u,
-			"name":   s.Name,
-			"lang":   s.Lang,
-			"format": s.Format,
-			"flag":   s.Flag,
-		})
-	}
+	subsDTO := subsPublicDTO(playSubs)
 	exposedURL := playproxy.PublicizeURL(playURL, headers)
 	exposedMedia := mediaURL
 	if mediaURL == playURL || playproxy.NeedsLocalRelay(mediaURL) {
@@ -1805,7 +1792,16 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		return nil, fmt.Errorf("空播放地址")
 	}
 	var liveSubs []model.Sub
-	if source.Match(playURL) {
+	sourceTitle := ""
+	sourceArtwork := ""
+	if thunder.Match(playURL) {
+		thunder.Stop()
+		local, ferr := thunder.Fetch(playURL)
+		if ferr != nil {
+			return nil, fmt.Errorf("磁力链接解析失败: %w", ferr)
+		}
+		playURL = local
+	} else if source.Match(playURL) {
 		source.Stop()
 		info, ferr := source.FetchInfo(playURL, a.liveCoreJSON())
 		if ferr != nil {
@@ -1813,6 +1809,8 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		}
 		playURL = info.URL
 		liveSubs = info.Subs
+		sourceTitle = strings.TrimSpace(info.Name)
+		sourceArtwork = strings.TrimSpace(info.Artwork)
 	}
 	playURL, directURL := a.PreparePlayback(playURL, headers)
 	if runtime.GOOS != "android" {
@@ -1822,33 +1820,25 @@ func (a *App) APILivePlay(group, channel, line int) (map[string]any, error) {
 		}
 		ch.Drm = prepared
 	}
-	subsDTO := make([]map[string]any, 0, len(liveSubs))
-	for _, s := range liveSubs {
-		u := playproxy.PublicizeURL(localproxy.ConvertScheme(s.URL))
-		if u == "" {
-			continue
-		}
-		subsDTO = append(subsDTO, map[string]any{
-			"url":    u,
-			"name":   s.Name,
-			"lang":   s.Lang,
-			"format": s.Format,
-			"flag":   s.Flag,
-		})
+	name := ch.Name
+	if sourceTitle != "" {
+		name = sourceTitle
 	}
 	return map[string]any{
 		"ok":       true,
 		"url":      playURL,
 		"direct":   directURL,
 		"headers":  headers,
-		"name":     ch.Name,
+		"name":     name,
+		"title":    sourceTitle,
+		"artwork":  sourceArtwork,
 		"group":    g.Name,
 		"line":     ch.URLIndex,
 		"lines":    len(ch.URLs),
 		"lineName": ch.LineLabel(),
 		"format":   ch.Format,
 		"drm":      ch.Drm,
-		"subs":     subsDTO,
+		"subs":     subsPublicDTO(liveSubs),
 		"error":    errString(err),
 	}, nil
 }
@@ -1940,29 +1930,16 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	} else {
 		playDrm = ch.Drm
 	}
-	subsDTO := make([]map[string]any, 0, len(catchSubs))
-	for _, s := range catchSubs {
-		u := playproxy.PublicizeURL(localproxy.ConvertScheme(s.URL))
-		if u == "" {
-			continue
-		}
-		subsDTO = append(subsDTO, map[string]any{
-			"url":    u,
-			"name":   s.Name,
-			"lang":   s.Lang,
-			"format": s.Format,
-			"flag":   s.Flag,
-		})
-	}
 	return map[string]any{
 		"ok":      true,
 		"url":     playURL,
 		"direct":  directURL,
 		"headers": headers,
-		"subs":    subsDTO,
+		"subs":    subsPublicDTO(catchSubs),
 		"name":    list[prog].Title,
 		"group":   g.Name,
 		"channel": ch.Name,
+		"format":  ch.Format,
 		"drm":     playDrm,
 	}, nil
 }
@@ -2130,4 +2107,22 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func subsPublicDTO(subs []model.Sub) []map[string]any {
+	out := make([]map[string]any, 0, len(subs))
+	for _, s := range subs {
+		u := playproxy.PublicizeURL(localproxy.ConvertScheme(s.URL))
+		if u == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"url":    u,
+			"name":   s.Name,
+			"lang":   s.Lang,
+			"format": s.Format,
+			"flag":   s.Flag,
+		})
+	}
+	return out
 }
