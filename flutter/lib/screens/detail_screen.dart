@@ -596,7 +596,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _api = ref.read(apiProvider);
     _active = this;
     detailImmersiveBack = _handleImmersiveBack;
-    ref.read(detailChromeCoverProvider.notifier).state = true;
+    _holdChromeCover();
     kotvRegisterQuitHook(_prepareQuit);
     MiniPlayerWindow.onAndroidPipChanged = (inPip) {
       if (!mounted) return;
@@ -1158,11 +1158,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await _advanceToNextEpisode();
   }
 
-  void _clearChromeCover() {
+  bool _chromeCoverHeld = false;
+
+  void _holdChromeCover() {
+    if (_chromeCoverHeld) return;
+    _chromeCoverHeld = true;
     try {
-      if (ref.read(detailChromeCoverProvider)) {
-        ref.read(detailChromeCoverProvider.notifier).state = false;
-      }
+      kotvPushChromeCover(ref.read(detailChromeCoverProvider.notifier));
+    } catch (_) {
+      _chromeCoverHeld = false;
+    }
+  }
+
+  void _clearChromeCover() {
+    if (!_chromeCoverHeld) return;
+    _chromeCoverHeld = false;
+    try {
+      kotvPopChromeCover(ref.read(detailChromeCoverProvider.notifier));
     } catch (_) {}
   }
 

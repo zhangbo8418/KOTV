@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../nav/kotv_routes.dart';
+import '../providers.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../util/kotv_io.dart';
@@ -15,7 +17,7 @@ class _FsItem {
 }
 
 /// 点目录进入，点文件才返回路径。
-class FileBrowserScreen extends StatefulWidget {
+class FileBrowserScreen extends ConsumerStatefulWidget {
   const FileBrowserScreen({super.key, required this.root, this.title = '选择文件'});
 
   final String root;
@@ -28,19 +30,45 @@ class FileBrowserScreen extends StatefulWidget {
   }
 
   @override
-  State<FileBrowserScreen> createState() => _FileBrowserScreenState();
+  ConsumerState<FileBrowserScreen> createState() => _FileBrowserScreenState();
 }
 
-class _FileBrowserScreenState extends State<FileBrowserScreen> {
+class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   late String _dir;
   List<_FsItem> _items = [];
   String? _error;
+  bool _chromeCoverHeld = false;
 
   @override
   void initState() {
     super.initState();
     _dir = widget.root;
+    _holdChromeCover();
     _load();
+  }
+
+  void _holdChromeCover() {
+    if (_chromeCoverHeld) return;
+    _chromeCoverHeld = true;
+    try {
+      kotvPushChromeCover(ref.read(detailChromeCoverProvider.notifier));
+    } catch (_) {
+      _chromeCoverHeld = false;
+    }
+  }
+
+  void _clearChromeCover() {
+    if (!_chromeCoverHeld) return;
+    _chromeCoverHeld = false;
+    try {
+      kotvPopChromeCover(ref.read(detailChromeCoverProvider.notifier));
+    } catch (_) {}
+  }
+
+  @override
+  void deactivate() {
+    _clearChromeCover();
+    super.deactivate();
   }
 
   bool get _isRoot {

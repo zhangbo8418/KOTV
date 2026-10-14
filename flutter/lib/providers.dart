@@ -77,5 +77,21 @@ final vodContentEpochProvider = StateProvider<int>((ref) => 0);
 /// 点播竖屏沉浸全屏：隐藏 shell 底栏，避免原位全屏时露出「首页/直播/搜索/我的」。
 final detailImmersiveFullscreenProvider = StateProvider<bool>((ref) => false);
 
-/// 详情等压在壳内 Navigator 上的页：藏底栏并取消顶 SafeArea，让页内壁纸盖住壳层边条。
+/// 详情/文件浏览器等压在壳上的页：藏底栏并取消顶 SafeArea，让页内壁纸盖住壳层边条。
 final detailChromeCoverProvider = StateProvider<bool>((ref) => false);
+
+int _detailChromeCoverDepth = 0;
+
+/// 进盖壳页时调用；可嵌套（详情上再开文件浏览器）。
+void kotvPushChromeCover(StateController<bool> notifier) {
+  _detailChromeCoverDepth++;
+  if (!notifier.state) notifier.state = true;
+}
+
+/// 离盖壳页时调用；深度归零才关掉 provider。
+void kotvPopChromeCover(StateController<bool> notifier) {
+  if (_detailChromeCoverDepth > 0) _detailChromeCoverDepth--;
+  if (_detailChromeCoverDepth == 0 && notifier.state) {
+    notifier.state = false;
+  }
+}
