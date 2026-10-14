@@ -299,7 +299,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         setState(() => _statusMsg = '远端不可达，已切回本机引擎');
       }
       await _fillHomeRecommendIfEmpty(gen);
-      // 仅配置可能变化时刷缓存；分类/筛选勿 invalidate，避免壳层壁纸重建闪一下。
+      // 仅配置可能变化时刷缓存；分类/筛选勿 invalidate。
       if (refreshRepo || clearContent || refreshConfig) {
         ref.invalidate(configProvider);
       }
@@ -466,7 +466,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     unawaited(_reloadContentOnly());
   }
 
-  /// 分类/筛选：只拉内容，不等 ready、不 refresh、不 invalidate 配置（防壁纸闪）。
+  /// 分类/筛选：只拉内容，不等 ready、不 refresh、不 invalidate 配置。
   Future<void> _reloadContentOnly() async {
     final gen = ++_loadGen;
     try {
@@ -1055,7 +1055,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       );
     }
 
-    // 轮播自管定时器与 setState，避免拖整页（含壳层旁路）跟着重建。
+    // 轮播自管定时器，换帧不整页 setState。
     Widget banner(double radius) => _HomeRotatingBanner(
           key: ValueKey(useApi ? 'api|$bannerUrl|${bannerSlides.length}' : 'vod|${bannerSlides.length}'),
           slides: bannerSlides,
@@ -1333,8 +1333,7 @@ class _HomeBannerSlide {
   final VoidCallback? onTap;
 }
 
-/// 首页轮播：自管定时器，换帧只重建本卡，不牵动整页。
-/// 图走 Flutter Image（禁 PlatformView），避免 Android 原生图换层拖闪壳壁纸。
+/// 首页轮播：自管定时器，换帧只重建本卡。
 class _HomeRotatingBanner extends StatefulWidget {
   const _HomeRotatingBanner({
     super.key,
@@ -1408,7 +1407,6 @@ class _HomeRotatingBannerState extends State<_HomeRotatingBanner> {
                 KotvNetworkImage(
                   pic,
                   fit: BoxFit.cover,
-                  allowPlatformView: false,
                   gaplessPlayback: true,
                   errorBuilder: (_, __, ___) => const SizedBox(),
                 ),

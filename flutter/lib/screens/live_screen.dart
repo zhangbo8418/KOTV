@@ -4638,7 +4638,6 @@ class _LiveChannelLogo extends StatelessWidget {
                 logo.trim(),
                 key: ValueKey(logo.trim()),
                 fit: BoxFit.contain,
-                allowPlatformView: false,
                 gaplessPlayback: false,
                 singleFrame: true,
                 cacheWidth: width >= height

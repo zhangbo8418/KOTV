@@ -158,7 +158,6 @@ class VodListTile extends StatelessWidget {
         ? KotvNetworkImage(
             pic,
             fit: BoxFit.cover,
-            allowPlatformView: false,
             errorBuilder: (_, __, ___) => _ListInitial(letter: letter),
           )
         : _ListInitial(letter: letter);
