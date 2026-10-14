@@ -168,9 +168,9 @@ Uint8List? kotvDecodeDataImage(String raw) {
 }
 
 /// 统一网络海报。
-/// Android 大图：PlatformView + Glide 解析 `@Headers=`。
-/// [allowPlatformView] 为 false 时走客户端拉图，列表行里不能再嵌原生视图。
-/// 其它平台：按解析后的请求头拉图，User-Agent 覆盖客户端默认值。
+/// 默认走客户端拉图（含 `@Headers=`）；勿默认开 Android Glide PlatformView——
+/// 同屏壳壁纸/多图换帧时原生层创建销毁会拖闪背景。
+/// 仅个别确需 Glide 的场景再显式 [allowPlatformView]: true。
 class KotvNetworkImage extends StatelessWidget {
   const KotvNetworkImage(
     this.pic, {
@@ -181,7 +181,7 @@ class KotvNetworkImage extends StatelessWidget {
     this.filterQuality = FilterQuality.low,
     this.cacheWidth,
     this.cacheHeight,
-    this.allowPlatformView = true,
+    this.allowPlatformView = false,
     this.gaplessPlayback = true,
     this.singleFrame = false,
   });
@@ -193,7 +193,7 @@ class KotvNetworkImage extends StatelessWidget {
   final FilterQuality filterQuality;
   final int? cacheWidth;
   final int? cacheHeight;
-  /// 列表里的小图关掉。每行一个 PlatformView 会让滑动掉帧。
+  /// 默认 false。true 时 Android 用 Glide PlatformView（少用，易拖闪壳壁纸）。
   final bool allowPlatformView;
   /// 为 false 时换地址先清掉上一张，避免列表复用同一格时留着旧图。
   final bool gaplessPlayback;
