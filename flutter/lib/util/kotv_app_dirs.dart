@@ -69,6 +69,29 @@ Future<Directory> kotvLogDir() async {
 
 Directory kotvLogDirSync() => _ensureDir(p.join(kotvDataRootSync().path, 'data', 'log'));
 
+/// 桌面 MPV `demuxer-cache-dir`：应用 cache 下 `mpv-cache`（与安卓 cacheDir/mpv-cache 同约定）。
+Future<Directory> kotvMpvDemuxerCacheDir() async {
+  if (kIsWeb) {
+    return Directory.systemTemp;
+  }
+  final cache = await getApplicationCacheDirectory();
+  return _ensureDir(p.join(cache.path, 'mpv-cache'));
+}
+
+/// 清空 demuxer 磁盘缓存内容（保留目录）；失败忽略。
+Future<void> kotvClearMpvDemuxerCacheDir() async {
+  if (kIsWeb) return;
+  try {
+    final d = await kotvMpvDemuxerCacheDir();
+    if (!d.existsSync()) return;
+    await for (final e in d.list(followLinks: false)) {
+      try {
+        await e.delete(recursive: true);
+      } catch (_) {}
+    }
+  } catch (_) {}
+}
+
 Directory _ensureDir(String path) {
   final d = Directory(path);
   if (!d.existsSync()) {

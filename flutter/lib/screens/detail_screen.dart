@@ -45,6 +45,7 @@ import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/stable_focus.dart';
+import '../util/kotv_app_dirs.dart';
 import '../vod/content_clicker.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
@@ -501,28 +502,50 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return _mk!;
   }
 
-  /// 切到其它内置后端时停掉闲置引擎。
-  /// 调用方须在改 [_playerVal] **之前**调用，以便旧 FVP/Surface 仍在树上时完成 release。
-  /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
-  Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
-    if (keep != KotvEmbedBackend.mpv) {
-      _playingSub?.cancel();
-      _bufferingSub?.cancel();
-      _playingSub = null;
-      _bufferingSub = null;
+  /// 释放本页持有的桌面 media_kit Player（包装 + [Player]）。
+  /// [softStopFirst]：切走 MPV 后端时先 pause/stop，避免与新引擎抢 AO。
+  Future<void> _disposeDesktopMpvOwned({bool softStopFirst = false}) async {
+    if (kotvIsAndroid()) return;
+    if (_mk == null && _mkPlayer == null) return;
+    _playingSub?.cancel();
+    _bufferingSub?.cancel();
+    _playingSub = null;
+    _bufferingSub = null;
+    if (softStopFirst) {
       try {
         await _mk?.pause();
       } catch (_) {}
       try {
         await _mk?.stop();
       } catch (_) {}
-      final mkPlayer = _mkPlayer;
-      _mkPlayer = null;
-      try {
-        _mk?.dispose();
-      } catch (_) {}
-      _mk = null;
-      await kotvDisposeMpvPlayer(mkPlayer);
+    }
+    final mkPlayer = _mkPlayer;
+    _mkPlayer = null;
+    try {
+      _mk?.dispose();
+    } catch (_) {}
+    _mk = null;
+    await kotvDisposeMpvPlayer(mkPlayer);
+  }
+
+  /// 桌面点播换集：销毁 media_kit Player，避免连播映射/GPU 共享页只涨不降。
+  /// 不改 [_playUrl]，避免 Stable 视频层整段卸掉；随后 [setState] 让 Video remount。
+  Future<void> _recycleDesktopMpv() async {
+    if (kotvIsAndroid()) return;
+    await _disposeDesktopMpvOwned();
+    if (_mpvOpts.diskCache) {
+      await kotvClearMpvDemuxerCacheDir();
+    }
+    // 卸掉已 dispose 的 Texture；build 里 [_playback]/[_ensureMpv] 再建空实例，open 再挂源。
+    if (mounted) setState(() {});
+  }
+
+  /// 切到其它内置后端时停掉闲置引擎。
+  /// 调用方须在改 [_playerVal] **之前**调用，以便旧 FVP/Surface 仍在树上时完成 release。
+  /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
+  Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
+    if (keep != KotvEmbedBackend.mpv) {
+      await _disposeDesktopMpvOwned(softStopFirst: true);
     }
     if (keep != KotvEmbedBackend.fvp) {
       // 须拆掉实例：仅 stop 时 mdk 包缓存/纹理可能残留（ADB: ReleaseRT 后 PSS/Graphics 仍涨）。
@@ -571,8 +594,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 换集/换源：先停声。桌面 MPV 复用同一 Player（stop 后 open），Stable 宿主不拆；
-  /// 离开页由 [_stopHard] dispose。安卓原生 MPV stop 已拆 libmpv；FVP/Exo 换集硬拆再建。
+  /// 换集/换源：先停声。桌面 media_kit 随后 [_recycleDesktopMpv] 销毁再建；
+  /// 安卓原生 MPV stop 已拆 libmpv；FVP/Exo 换集硬拆再建。离开页走 [_stopHard]。
   Future<void> _stopAllBackends() async {
     await kotvStopPlayersForEpisodeSwitch([
       _mk,
@@ -798,17 +821,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     try {
       await _stopHard();
     } catch (_) {}
-    _playingSub?.cancel();
-    _bufferingSub?.cancel();
-    _playingSub = null;
-    _bufferingSub = null;
-    final mkPlayer = _mkPlayer;
-    _mkPlayer = null;
-    try {
-      _mk?.dispose();
-    } catch (_) {}
-    _mk = null;
-    await kotvDisposeMpvPlayer(mkPlayer);
+    // _stopHard 已摘引用；仅异常中断时再兜底，避免重复 dispose。
+    if (_mk != null || _mkPlayer != null) {
+      await _disposeDesktopMpvOwned(softStopFirst: true);
+    }
   }
 
   /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
@@ -878,6 +894,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     // media_kit Player 由页面持有：走 engine.release()。
     await kotvDisposeMpvPlayer(mkPlayer);
     kotvDisposePlaybackWrappers(backends);
+    if (_mpvOpts.diskCache && !kotvIsAndroid()) {
+      await kotvClearMpvDemuxerCacheDir();
+    }
 
     if (stopSerial == _playAtSerial) _stoppedHard = true;
   }
@@ -1993,6 +2012,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     // 解析/拉流可能要数秒：先停播，避免上一集在后台继续出声。
     await _stopAllBackends();
     if (serial != _playAtSerial || !mounted) return;
+    // 桌面：换集销毁 libmpv，避免连播映射/GPU 共享页只涨不降；稍后 _ensureMpv 再建。
+    await _recycleDesktopMpv();
+    if (serial != _playAtSerial || !mounted) return;
     // 先 await 软取消上一集，再 play。unawaited 会与本次 play 竞态：
     // SoftCancel 抬 epoch → JS/JAR 立刻报「脚本调用已中断」。
     await ref.read(apiProvider).cancelPending(
@@ -2056,10 +2078,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (playUrl.isEmpty) {
         // 空地址留在详情；Config 弹窗依赖 pause 仍保留的 Activity，勿出栈。
         // 无 msg：多为 Config 副作用，不标「加载失败」。
+        // 桌面已 [_recycleDesktopMpv]：勿再靠旧 Player；清舞台 URL，避免集号新、地址旧。
         final tip = '${data['msg'] ?? ''}'.trim();
         if (!mounted) return;
         _clearResumeSeek();
         setState(() {
+          _playUrl = '';
           _status = tip;
           _immersiveEpCover = false;
         });

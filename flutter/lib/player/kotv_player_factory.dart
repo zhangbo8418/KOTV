@@ -31,7 +31,7 @@ KotvPlayback createKotvPlayback(String playerVal) {
       return ExoPlayback();
     case KotvEmbedBackend.mpv:
       if (kotvIsAndroid()) return NativeMpvPlayback();
-      throw StateError('MPV 请用 MediaKitPlayback(Player()) 复用');
+      throw StateError('桌面 MPV 由详情页 kotvCreateMpvPlayer + MediaKitPlayback 持有');
   }
 }
 
@@ -65,7 +65,7 @@ Widget kotvPlaybackView({
       final m = mpv ?? playback;
       if (m is NativeMpvPlayback) return m.buildView(fit: fit);
       if (m is MediaKitPlayback) {
-        // ValueKey：Player 重建（离开页后再进）时 remount，避免挂已死 Texture。
+        // ValueKey：换集/重建 Player 时 remount，避免挂已 dispose 的 Texture。
         return KeyedSubtree(
           key: ValueKey<int>(identityHashCode(m.player)),
           child: Video(

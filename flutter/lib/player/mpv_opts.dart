@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../util/kotv_app_dirs.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
@@ -317,6 +318,11 @@ class KotvMpvOpts {
             await set(e.key, e.value);
           }
           await set('cache-on-disk', diskCache ? 'yes' : 'no');
+          // 桌面须定点 demuxer-cache-dir；安卓原生插件另写 cacheDir/mpv-cache。
+          if (diskCache && !kotvIsAndroid()) {
+            final dir = await kotvMpvDemuxerCacheDir();
+            await set('demuxer-cache-dir', dir.path);
+          }
         } catch (_) {}
       }
       try {
@@ -393,8 +399,8 @@ class KotvMpvOpts {
     if (!live) {
       final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
       out.addAll(props);
-      // Android 原生另有 diskCache 参数写 cache-on-disk + demuxer-cache-dir；
-      // 桌面 media_kit 走 [applyAfterAttach]。此处不塞 cache-on-disk，避免盖掉原生磁盘缓存。
+      // Android 原生另有 diskCache 写 cache-on-disk + demuxer-cache-dir；
+      // 桌面 media_kit 在 [applyAfterAttach] 写 cache-on-disk 与定点 demuxer-cache-dir。
     }
     for (final e in parseConfLines(conf)) {
       out[e.$1] = e.$2;
