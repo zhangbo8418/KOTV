@@ -290,7 +290,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     final busy = ref.watch(uiBusyProvider);
     final immersiveDetail =
         ref.watch(detailImmersiveFullscreenProvider) || DetailScreen.isImmersive;
-    final bottomNav = KotvLayout.useBottomNav(context) && !immersiveDetail;
+    final detailCover = ref.watch(detailChromeCoverProvider);
+    final bottomNav =
+        KotvLayout.useBottomNav(context) && !immersiveDetail && !detailCover;
 
     // 切主 Tab：原地换根路由，Navigator 元素不卸树，避免 GlobalKey reactivate 崩溃。
     ref.listen<KotvPage>(kotvPageProvider, (prev, next) {
@@ -331,11 +333,12 @@ class _AppShellState extends ConsumerState<AppShell> {
           // 详情沉浸全屏：铺满含刘海/手势条，否则画面缩在 SafeArea 里不像全屏。
           extendBody: immersiveDetail,
           body: SafeArea(
-            top: !immersiveDetail,
+            // 详情盖壳：顶也不留白，页内 AppBackdrop 伸到状态栏下，避免上下露壳层壁纸。
+            top: !immersiveDetail && !detailCover,
             left: !immersiveDetail,
             right: !immersiveDetail,
-            // 有底栏时由 Scaffold 占位；沉浸全屏不留底边；平板无底栏时仍避让手势条。
-            bottom: !immersiveDetail && !bottomNav,
+            // 有底栏时由 Scaffold 占位；沉浸/详情盖壳不留底边；平板无底栏时仍避让手势条。
+            bottom: !immersiveDetail && !bottomNav && !detailCover,
             child: ScaledLayoutBox(
               child: Stack(
                 fit: StackFit.expand,

@@ -769,11 +769,18 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		mediaURL = smbproxy.Rewrite(mediaURL)
 	}
 
-	title := vodID
-	if sourceTitle != "" {
-		title = sourceTitle
+	// 片名：专用源标题 > 详情缓存名；勿默认 vodID（很多站 id 是详情页 URL，会盖掉 UI 片名）。
+	title := strings.TrimSpace(sourceTitle)
+	if title == "" {
+		if cached, ok := sites.CachedDetail(vodID); ok {
+			title = strings.TrimSpace(cached.VodName)
+		}
 	}
-	a.SetMediaPlaying(title, playURL)
+	mediaTitle := title
+	if mediaTitle == "" {
+		mediaTitle = vodID
+	}
+	a.SetMediaPlaying(mediaTitle, playURL)
 
 	pubQualURLs := make([]string, len(qualURLs))
 	for i, u := range qualURLs {
@@ -809,7 +816,7 @@ func (a *App) APIPlay(siteKey, vodID, flag, episodeURL string, episodeIndex, qua
 		"subs":      subsDTO,
 		"artwork":   playArtwork,
 		"desc":      playDesc,
-		"title":     title,
+		"title":     title, // 可空：客户端仅在当前片名空时补全，勿用 id 覆盖
 		"msg":       playMsg,
 		"position":  playPosition,
 		"qualities": map[string]any{"names": qualNames, "urls": pubQualURLs},

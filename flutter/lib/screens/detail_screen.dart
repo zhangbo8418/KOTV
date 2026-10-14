@@ -175,6 +175,9 @@ class DetailScreen extends ConsumerStatefulWidget {
         _DetailScreenState._active = null;
       }
       try {
+        active._clearChromeCover();
+      } catch (_) {}
+      try {
         await active._flushWatchProgress(force: true);
       } catch (_) {}
       try {
@@ -593,6 +596,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _api = ref.read(apiProvider);
     _active = this;
     detailImmersiveBack = _handleImmersiveBack;
+    ref.read(detailChromeCoverProvider.notifier).state = true;
     kotvRegisterQuitHook(_prepareQuit);
     MiniPlayerWindow.onAndroidPipChanged = (inPip) {
       if (!mounted) return;
@@ -911,6 +915,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _leaving = true;
     // 立刻清 _active：否则 goKotvPage→prepareLeave 仍会 await 本页硬停，切 Tab 像点不动。
     if (_active == this) _active = null;
+    _clearChromeCover();
     try {
       try {
         await _flushWatchProgress(force: true);
@@ -1153,6 +1158,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await _advanceToNextEpisode();
   }
 
+  void _clearChromeCover() {
+    try {
+      if (ref.read(detailChromeCoverProvider)) {
+        ref.read(detailChromeCoverProvider.notifier).state = false;
+      }
+    } catch (_) {}
+  }
+
   @override
   void deactivate() {
     // dispose 不能用 ref。仅在「本地已退出沉浸」时清壳层标志。
@@ -1163,6 +1176,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         ref.read(detailImmersiveFullscreenProvider.notifier).state = false;
       } catch (_) {}
     }
+    // 出详情栈：恢复壳层底栏与顶 SafeArea。
+    _clearChromeCover();
     super.deactivate();
   }
 
@@ -1277,14 +1292,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         );
         await LocalHistory.replaceId(site: site, oldId: _routeId, newId: vod.id);
       }
+      // 空名才用入口标题补全；有名则保留详情结果。
+      final entry = _routeTitle.trim();
+      final apiName = vod.name.trim();
+      final displayName = apiName.isNotEmpty ? apiName : entry;
+      final named = displayName.isNotEmpty && displayName != apiName
+          ? vod.withMeta(name: displayName)
+          : vod;
       await LocalCollect.updateMeta(
         id: id,
         site: site,
         configSource: configSource,
-        name: vod.name,
-        pic: vod.pic,
-        remarks: vod.remarks,
-        typeName: vod.typeName,
+        name: named.name,
+        pic: named.pic,
+        remarks: named.remarks,
+        typeName: named.typeName,
       );
       final kept = await LocalCollect.isKept(id, site, configSource: configSource);
       final rev = await LocalRevSort.get(id, site);
@@ -1378,7 +1400,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         unawaited(KotvBufferBudget.warm());
       } catch (_) {}
       setState(() {
-        _detail = vod;
+        _detail = named;
+        if (displayName.isNotEmpty) _routeTitle = displayName;
         _kept = kept;
         _reversed = rev;
         _loading = false;
@@ -2296,17 +2319,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         name: d.name,
         episode: ep.name,
       ));
-      // YouTube 等专用源展开后带回的标题/封面/简介，刷新详情展示。
+      // 专用源可带回封面/简介；片名仅当前为空时补全，勿用 play.title（曾默认=vodID）覆盖已有名。
       final srcTitle = '${data['title'] ?? ''}'.trim();
       final srcArt = '${data['artwork'] ?? ''}'.trim();
       final srcDesc = '${data['desc'] ?? ''}'.trim();
       if (mounted && _detail != null && (srcTitle.isNotEmpty || srcArt.isNotEmpty || srcDesc.isNotEmpty)) {
+        final curName = _detail!.name.trim();
         setState(() {
           _detail = _detail!.withMeta(
-            name: srcTitle.isNotEmpty ? srcTitle : null,
+            name: (curName.isEmpty && srcTitle.isNotEmpty) ? srcTitle : null,
             pic: srcArt.isNotEmpty ? srcArt : null,
             content: srcDesc.isNotEmpty ? srcDesc : null,
           );
+          if (curName.isEmpty && srcTitle.isNotEmpty) {
+            _routeTitle = srcTitle;
+          }
         });
       }
       _scheduleNextEpisodePreload(
@@ -3497,33 +3524,37 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           );
       // 详情压在壳层 Navigator 上（Cupertino/Material 路由默认不透明），
       // 壳层壁纸透不出来，须自带 AppBackdrop（勿重复壁纸定时刷新）。
+      // SafeArea 只包内容：壁纸仍全屏，顶栏避开状态栏。
       final detailScaffold = Scaffold(
         backgroundColor: Colors.transparent,
         body: AppBackdrop(
           periodicSettingsRefresh: false,
-          child: Column(
-            children: [
-              Visibility(
-                visible: false,
-                maintainSize: true,
-                maintainAnimation: true,
-                maintainState: true,
-                maintainInteractivity: false,
-                child: buildTopBar(),
-              ),
-              Expanded(
-                child: KeyedSubtree(
-                  key: _bodyClipKey,
-                  child: _loading
-                      ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                      : _error != null
-                          ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
-                          : _detail == null
-                              ? const SizedBox.shrink()
-                              : _buildBody(),
+          child: SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                Visibility(
+                  visible: false,
+                  maintainSize: true,
+                  maintainAnimation: true,
+                  maintainState: true,
+                  maintainInteractivity: false,
+                  child: buildTopBar(),
                 ),
-              ),
-            ],
+                Expanded(
+                  child: KeyedSubtree(
+                    key: _bodyClipKey,
+                    child: _loading
+                        ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                        : _error != null
+                            ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                            : _detail == null
+                                ? const SizedBox.shrink()
+                                : _buildBody(),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -3582,9 +3613,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               if (_immersiveFullscreen && _detail != null)
                 _buildImmersiveFullscreenPage(externalVideo: true),
               // 非全屏：顶栏必须在视频层之上（返回/片名可点可见）。
+              // 壳层放宽顶 SafeArea 时用 padding.top；壳层仍垫顶时 padding 已为 0。
               if (!_immersiveFullscreen)
                 Positioned(
-                  top: 0,
+                  top: MediaQuery.paddingOf(context).top,
                   left: 0,
                   right: 0,
                   child: buildTopBar(),
@@ -3601,23 +3633,26 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         backgroundColor: Colors.transparent,
         body: AppBackdrop(
           periodicSettingsRefresh: false,
-          child: Column(
-            children: [
-              LibraryTopBar(
-                onBack: () => unawaited(_leavePage()),
-                onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
-                onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
-                onNews: () => showAppNews(context, remoteHint(ref)),
-                title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
-              ),
-              Expanded(
-                child: _loading
-                    ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                    : _error != null
-                        ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
-                        : _buildBody(),
-              ),
-            ],
+          child: SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                LibraryTopBar(
+                  onBack: () => unawaited(_leavePage()),
+                  onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
+                  onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
+                  onNews: () => showAppNews(context, remoteHint(ref)),
+                  title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
+                ),
+                Expanded(
+                  child: _loading
+                      ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                      : _error != null
+                          ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                          : _buildBody(),
+                ),
+              ],
+            ),
           ),
         ),
       );
