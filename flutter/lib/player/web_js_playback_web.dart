@@ -480,11 +480,15 @@ class WebJsPlayback extends KotvPlayback {
   }
 
   @override
+  bool get repeatOne => _loop;
+
+  @override
   Future<void> setRepeatOne(bool on) async {
     _loop = on;
     try {
       _api.setLoop(_container, on);
     } catch (_) {}
+    notifyListeners();
   }
 
   @override

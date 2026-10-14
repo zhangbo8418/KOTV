@@ -18,6 +18,7 @@ type clientBucket struct {
 	srch     []string
 	refresh  []RefreshCmd
 	danmaku  []string
+	opens    []OpenCmd
 }
 
 type ControlCmd struct {
@@ -29,6 +30,20 @@ type ControlCmd struct {
 type RefreshCmd struct {
 	Type string `json:"type"`
 	Path string `json:"path"`
+}
+
+// OpenCmd 投屏/推送打开详情或直链播放。
+// Kind=play：Site 常用 push_agent，ID 为可播 URL；Kind=detail：Site+ID 为点播条目。
+type OpenCmd struct {
+	Kind     string `json:"kind"` // play|detail
+	Site     string `json:"site"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Pic      string `json:"pic"`
+	Flag     string `json:"flag"`
+	Remarks  string `json:"remarks"`
+	URL      string `json:"url"`
+	Position int64  `json:"position"`
 }
 
 var DefaultQueue = &Queue{
@@ -94,7 +109,11 @@ func (q *Queue) PushSearch(keyword, clientID string) {
 func (q *Queue) PushRefresh(typ, path, clientID string) {
 	typ = strings.ToLower(strings.TrimSpace(typ))
 	path = strings.TrimSpace(path)
-	if typ == "" || path == "" {
+	if typ == "" {
+		return
+	}
+	// live 仅通知重拉列表，无 path；字幕/弹幕必须带路径。
+	if path == "" && typ != "live" {
 		return
 	}
 	q.mu.Lock()
@@ -124,24 +143,48 @@ func (q *Queue) PushLiveDanmaku(text, clientID string) {
 	}
 }
 
+func (q *Queue) PushOpen(cmd OpenCmd, clientID string) {
+	cmd.Kind = strings.ToLower(strings.TrimSpace(cmd.Kind))
+	if cmd.Kind == "" {
+		return
+	}
+	if cmd.Kind == "play" && strings.TrimSpace(cmd.URL) == "" && strings.TrimSpace(cmd.ID) == "" {
+		return
+	}
+	if cmd.Kind == "detail" && strings.TrimSpace(cmd.ID) == "" {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, id := range q.targetsLocked(clientID) {
+		b := q.bucketLocked(id)
+		b.opens = append(b.opens, cmd)
+		if len(b.opens) > 8 {
+			b.opens = b.opens[len(b.opens)-8:]
+		}
+	}
+}
+
 // Drain 取出并清空指定客户端缓冲；同时登记为已知客户端以便后续广播。
-func (q *Queue) Drain(clientID string) (controls []ControlCmd, searches []string, refreshes []RefreshCmd, danmaku []string) {
+func (q *Queue) Drain(clientID string) (controls []ControlCmd, searches []string, refreshes []RefreshCmd, danmaku []string, opens []OpenCmd) {
 	clientID = strings.TrimSpace(clientID)
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.rememberLocked(clientID)
 	b := q.byClient[clientID]
 	if b == nil {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 	controls = b.ctrl
 	searches = b.srch
 	refreshes = b.refresh
 	danmaku = b.danmaku
+	opens = b.opens
 	b.ctrl = nil
 	b.srch = nil
 	b.refresh = nil
 	b.danmaku = nil
+	b.opens = nil
 	return
 }
 
@@ -171,7 +214,9 @@ func WireFlutterBridge() {
 		OnSearch: func(keyword, clientID string) {
 			DefaultQueue.PushSearch(keyword, clientID)
 		},
-		OnPush: func() {},
+		OnPush: func() {
+			// 具体打开内容由 PushOpen 下发；此处保留钩子供桌面等扩展。
+		},
 		OnControl: func(typ string, seekMs int64, clientID string) {
 			DefaultQueue.PushControl(typ, seekMs, clientID)
 		},

@@ -309,11 +309,17 @@ func stashSyncPending(typ string, body []byte) {
 	_ = settings.Save()
 }
 
-// historyKeyFromTV：外部 site$$$vodId → KOTV vodId@site
+// historyKeyFromTV：外部 site@@@vodId@@@cid / site$$$vodId → KOTV vodId@site
 func historyKeyFromTV(key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return ""
+	}
+	if strings.Contains(key, "@@@") {
+		parts := strings.Split(key, "@@@")
+		if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
+			return parts[1] + "@" + parts[0]
+		}
 	}
 	if strings.Contains(key, "$$$") {
 		parts := strings.SplitN(key, "$$$", 2)

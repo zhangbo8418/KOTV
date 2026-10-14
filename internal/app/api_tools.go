@@ -17,10 +17,12 @@ import (
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/service"
 	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/subtitle"
 	"github.com/bobo/KOTV/internal/update"
+	"github.com/bobo/KOTV/internal/util"
 )
 
 const defaultSyncPort = "9978"
@@ -425,7 +427,18 @@ func (a *App) toolCast(index int) (map[string]any, error) {
 		headers = nil
 	}
 	castURL = playproxy.PublicizeURL(castURL)
-	used, err := cast.CastWith(devs[index], castURL, a.MediaTitle(), headers, posMs)
+	title := a.MediaTitle()
+	opt := cast.CastOptions{
+		Title:      title,
+		Headers:    headers,
+		PositionMs: posMs,
+	}
+	if devs[index].Protocol == cast.ProtocolApp {
+		opt.ConfigJSON = a.castConfigJSON()
+		opt.DeviceJSON = a.castDeviceJSON()
+		opt.HistoryJSON = a.castHistoryJSON(castURL, title, posMs)
+	}
+	used, err := cast.CastWithOpts(devs[index], castURL, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -436,6 +449,61 @@ func (a *App) toolCast(index int) (map[string]any, error) {
 		"label":    used.Label(),
 		"message":  "已投屏到 " + used.Label(),
 	}, nil
+}
+
+func (a *App) castConfigJSON() string {
+	src := strings.TrimSpace(settings.Get(settings.VOD))
+	b, err := json.Marshal(map[string]string{"url": src})
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func (a *App) castDeviceJSON() string {
+	ip := strings.TrimSpace(util.LanIP())
+	addr := ip
+	if addr != "" && !strings.Contains(addr, "://") {
+		addr = "http://" + addr + ":" + defaultSyncPort
+	}
+	b, err := json.Marshal(map[string]any{
+		"name": "KO影视",
+		"ip":   addr,
+		"uuid": settings.EnsureDeviceUUID(),
+		"type": 1,
+	})
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func (a *App) castHistoryJSON(episodeURL, title string, posMs int64) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "投屏播放"
+	}
+	episodeURL = strings.TrimSpace(episodeURL)
+	// 对端按 site@@@vodId@@@cid 解析；直链投屏用 push_agent + URL。
+	key := service.PushAgentKey + "@@@" + episodeURL + "@@@0"
+	if episodeURL == "" {
+		key = service.PushAgentKey + "@@@" + title + "@@@0"
+	}
+	b, err := json.Marshal(map[string]any{
+		"key":        key,
+		"vodName":    title,
+		"vodPic":     "",
+		"vodFlag":    "推送",
+		"vodRemarks": "1",
+		"episodeUrl": episodeURL,
+		"position":   posMs,
+		"duration":   0,
+		"speed":      1.0,
+	})
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func sendSyncData(host, pair, syncType string, mode int, body []byte) error {

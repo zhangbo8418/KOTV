@@ -104,6 +104,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       try {
         final dev = await ref.read(apiProvider).getDevice();
         var ip = '${dev['ip'] ?? ''}'.trim();
+        // /device.ip 可能是 http://host:9978；展示/同步用主机名。
+        if (ip.contains('://')) {
+          try {
+            ip = Uri.parse(ip).host;
+          } catch (_) {}
+        }
         if (ip == '127.0.0.1' || ip == '::1' || ip == 'localhost') {
           ip = '';
         }

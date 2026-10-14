@@ -46,6 +46,7 @@ class NativeMpvPlayback extends KotvPlayback {
   bool _nativeReady = false;
   bool _playing = false;
   bool _completed = false;
+  bool _repeatOne = false;
   bool _buffering = false;
   bool _ready = false;
   double _volume = 80;
@@ -113,6 +114,9 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   bool get completed => _completed;
+
+  @override
+  bool get repeatOne => _repeatOne;
 
   @override
   Duration get position => _position;
@@ -634,9 +638,11 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Future<void> setRepeatOne(bool on) async {
+    _repeatOne = on;
     try {
       await _ch.invokeMethod('setRepeatOne', {'on': on});
     } catch (_) {}
+    notifyListeners();
   }
 
   @override

@@ -1054,7 +1054,7 @@ func mergeStringMaps(a, b map[string]string) map[string]string {
 }
 
 func (a *App) APIRemotePoll() map[string]any {
-	ctrls, searches, refreshes, liveDm := remote.DefaultQueue.Drain(hostclient.ScopeID())
+	ctrls, searches, refreshes, liveDm, opens := remote.DefaultQueue.Drain(hostclient.ScopeID())
 	outCtrl := make([]map[string]any, 0, len(ctrls))
 	for _, c := range ctrls {
 		outCtrl = append(outCtrl, map[string]any{"type": c.Type, "seekMs": c.SeekMs})
@@ -1063,12 +1063,27 @@ func (a *App) APIRemotePoll() map[string]any {
 	for _, r := range refreshes {
 		outRef = append(outRef, map[string]any{"type": r.Type, "path": r.Path})
 	}
+	outOpen := make([]map[string]any, 0, len(opens))
+	for _, o := range opens {
+		outOpen = append(outOpen, map[string]any{
+			"kind":     o.Kind,
+			"site":     o.Site,
+			"id":       o.ID,
+			"name":     o.Name,
+			"pic":      o.Pic,
+			"flag":     o.Flag,
+			"remarks":  o.Remarks,
+			"url":      o.URL,
+			"position": o.Position,
+		})
+	}
 	return map[string]any{
 		"ok":          true,
 		"controls":    outCtrl,
 		"searches":    searches,
 		"refreshes":   outRef,
 		"danmakuLive": liveDm,
+		"opens":       outOpen,
 	}
 }
 

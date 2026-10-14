@@ -47,7 +47,6 @@ type App struct {
 	presence *clientsession.Presence
 
 	CurrentScreen    string
-	SelectedVod      *model.Vod
 	PendingSearch    string
 	RemoteSearchAuto bool
 
@@ -628,21 +627,13 @@ func (a *App) openPushURL(url string) {
 			name = base
 		}
 	}
-	vod := model.Vod{
-		VodID:   model.FlexString(play),
-		VodName: name,
-		VodTag:  "file",
-		VodFlags: []model.Flag{{
-			Flag: "本地",
-			Show: "本地",
-			Episodes: []model.Episode{
-				model.CreateEpisode(name, play),
-			},
-		}},
-	}
-	vod.SetCurrentFlag(0)
-	a.SelectedVod = &vod
-	a.CurrentScreen = "detail"
+	remote.DefaultQueue.PushOpen(remote.OpenCmd{
+		Kind: "play",
+		Site: service.PushAgentKey,
+		ID:   play,
+		Name: name,
+		URL:  play,
+	}, "")
 }
 
 func (a *App) Shutdown() {

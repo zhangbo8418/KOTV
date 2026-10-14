@@ -6,13 +6,13 @@ import (
 	"strings"
 
 	"github.com/bobo/KOTV/internal/database"
-	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/remote"
 	"github.com/bobo/KOTV/internal/server"
+	"github.com/bobo/KOTV/internal/service"
 	"github.com/bobo/KOTV/internal/settings"
 )
 
-// ApplyRemoteCast 处理局域网 /action?do=cast（手机端投到桌面）。
+// ApplyRemoteCast 处理局域网 /action?do=cast（手机端投到本机）。
 func (a *App) ApplyRemoteCast(configJSON, historyJSON string) {
 	if strings.TrimSpace(historyJSON) == "" {
 		return
@@ -27,25 +27,50 @@ func (a *App) ApplyRemoteCast(configJSON, historyJSON string) {
 	}
 	_ = a.DB.SaveHistory(h)
 
-	// 有可播直链时直接起播；否则打开详情（VideoActivity.cast）。
-	if h.EpisodeURL != "" && server.MatchPushURL(h.EpisodeURL) && !IsEphemeralPlayURL(h.EpisodeURL) {
-		if err := a.PlayHistory(h); err == nil {
-			remote.NotifyPush()
-			return
+	ep := strings.TrimSpace(h.EpisodeURL)
+	// 可播直链（含对端公网化后的 /proxy/…）走 push 播放；目录项走详情。
+	if ep != "" && server.MatchPushURL(ep) {
+		title := strings.TrimSpace(h.VodName)
+		if title == "" {
+			title = "投屏播放"
 		}
+		flag := strings.TrimSpace(h.VodFlag)
+		if flag == "" {
+			flag = "推送"
+		}
+		remarks := strings.TrimSpace(h.VodRemarks)
+		if remarks == "" {
+			remarks = "1"
+		}
+		remote.DefaultQueue.PushOpen(remote.OpenCmd{
+			Kind:     "play",
+			Site:     service.PushAgentKey,
+			ID:       ep,
+			Name:     title,
+			Pic:      h.VodPic,
+			Flag:     flag,
+			Remarks:  remarks,
+			URL:      ep,
+			Position: h.Position,
+		}, "")
+		remote.NotifyPush()
+		return
 	}
+
 	vodID, siteKey := splitHistoryKey(h.Key)
-	vod := model.Vod{
-		VodID:      model.FlexString(vodID),
-		VodName:    h.VodName,
-		VodPic:     h.VodPic,
-		VodRemarks: h.VodRemarks,
+	if strings.TrimSpace(vodID) == "" {
+		return
 	}
-	if site := a.Config.GetSite(siteKey); site != nil {
-		vod.Site = site
-	}
-	a.SelectedVod = &vod
-	a.CurrentScreen = "detail"
+	remote.DefaultQueue.PushOpen(remote.OpenCmd{
+		Kind:     "detail",
+		Site:     siteKey,
+		ID:       vodID,
+		Name:     h.VodName,
+		Pic:      h.VodPic,
+		Flag:     h.VodFlag,
+		Remarks:  h.VodRemarks,
+		Position: h.Position,
+	}, "")
 	remote.NotifyPush()
 }
 
@@ -126,11 +151,17 @@ func parseCastHistory(raw string) (database.History, bool) {
 	}, true
 }
 
-// normalizeHistoryKey 把外部 siteKey$$$vodId 归一成 KOTV 的 vodId@siteKey。
+// normalizeHistoryKey 把外部 site@@@vodId@@@cid / site$$$vodId 归一成 KOTV 的 vodId@siteKey。
 func normalizeHistoryKey(key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return ""
+	}
+	if strings.Contains(key, "@@@") {
+		parts := strings.Split(key, "@@@")
+		if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
+			return parts[1] + "@" + parts[0]
+		}
 	}
 	if strings.Contains(key, "$$$") {
 		parts := strings.SplitN(key, "$$$", 2)

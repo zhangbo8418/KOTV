@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../desktop/mini_player_window.dart';
+import '../models/models.dart';
 import '../nav/kotv_page.dart';
 import '../player/playback_guard.dart';
 import '../providers.dart';
@@ -16,6 +17,7 @@ import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
+import '../vod/vod_open.dart';
 import '../widgets/auth_gate.dart';
 import '../widgets/chrome.dart';
 import 'collect_screen.dart';
@@ -82,6 +84,9 @@ class _AppShellState extends ConsumerState<AppShell> {
         goKotvPage(ref, KotvPage.search);
         ref.read(pendingSearchProvider.notifier).state = kw;
       }
+      ..onOpen = (open) {
+        unawaited(_handleRemoteOpen(open));
+      }
       ..start();
     _postMsg = PostMsgHost(api, navigatorKey: rootNavigatorKey)..start();
     ref.read(remoteBridgeProvider.notifier).state = _bridge;
@@ -95,6 +100,55 @@ class _AppShellState extends ConsumerState<AppShell> {
       }
       await LocalHistory.setIncognito(inc);
     }).catchError((_) {});
+  }
+
+  Future<void> _handleRemoteOpen(Map<String, dynamic> open) async {
+    if (!mounted) return;
+    final kind = '${open['kind'] ?? ''}'.trim().toLowerCase();
+    final name = '${open['name'] ?? ''}'.trim();
+    final pic = '${open['pic'] ?? ''}'.trim();
+    final flag = '${open['flag'] ?? ''}'.trim();
+    final remarks = '${open['remarks'] ?? ''}'.trim();
+    final pos = (open['position'] is num) ? (open['position'] as num).toInt() : 0;
+    final ctx = rootNavigatorKey.currentContext ?? context;
+    if (kind == 'play') {
+      final url = '${open['url'] ?? open['id'] ?? ''}'.trim();
+      if (url.isEmpty) return;
+      final site = '${open['site'] ?? 'push_agent'}'.trim();
+      final id = '${open['id'] ?? url}'.trim();
+      final item = VodItem(
+        id: id.isEmpty ? url : id,
+        name: name.isEmpty ? '投屏播放' : name,
+        pic: pic,
+        // push_agent 单集名为「1」，空 remarks 会导致续播匹配失败。
+        remarks: remarks.isEmpty ? '1' : remarks,
+        site: site.isEmpty ? 'push_agent' : site,
+        flag: flag.isEmpty ? '推送' : flag,
+        positionMs: pos,
+      );
+      // 详情续播读 LocalHistory；投屏带入的进度需先写入。
+      await LocalHistory.push(item);
+      if (!mounted) return;
+      await openVodItem(ctx, ref, item, site: site.isEmpty ? 'push_agent' : site);
+      return;
+    }
+    if (kind == 'detail') {
+      final id = '${open['id'] ?? ''}'.trim();
+      if (id.isEmpty) return;
+      final site = '${open['site'] ?? ''}'.trim();
+      final item = VodItem(
+        id: id,
+        name: name.isEmpty ? id : name,
+        pic: pic,
+        remarks: remarks,
+        site: site,
+        flag: flag,
+        positionMs: pos,
+      );
+      await LocalHistory.push(item);
+      if (!mounted) return;
+      await openVodItem(ctx, ref, item, site: site);
+    }
   }
 
   @override

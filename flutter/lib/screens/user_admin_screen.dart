@@ -87,6 +87,11 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
       try {
         final dev = await _api.getDevice();
         var ip = '${dev['ip'] ?? ''}'.trim();
+        if (ip.contains('://')) {
+          try {
+            ip = Uri.parse(ip).host;
+          } catch (_) {}
+        }
         if (ip == '127.0.0.1' || ip == '::1' || ip == 'localhost') {
           ip = '';
         }

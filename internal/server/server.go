@@ -162,9 +162,15 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/device", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		info := collectDeviceAddrs()
+		// ip 为可直拼 /action 的根地址（兼容对端投屏/同步）；裸 IP 见 ipv4。
+		addr := strings.TrimSpace(info.Primary)
+		if addr != "" && !strings.Contains(addr, "://") {
+			addr = fmt.Sprintf("http://%s:%d", addr, defaultPort)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name":     "KO影视",
-			"ip":       info.Primary,
+			"ip":       addr,
+			"type":     1,
 			"ipv4":     info.IPv4,
 			"ipv6":     info.IPv6,
 			"publicIp": info.PublicIP,

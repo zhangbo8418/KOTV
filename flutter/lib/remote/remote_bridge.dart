@@ -26,6 +26,8 @@ class RemoteBridge {
   void Function(String text)? onLiveDanmaku;
   /// 遥控 refresh type=live：重拉当前直播源频道表。
   void Function()? onLiveRefresh;
+  /// 投屏/推送打开：kind=play|detail。
+  void Function(Map<String, dynamic> open)? onOpen;
 
   void start() {
     _timer?.cancel();
@@ -80,6 +82,11 @@ class RemoteBridge {
       for (final t in live) {
         final text = '$t'.trim();
         if (text.isNotEmpty) onLiveDanmaku?.call(text);
+      }
+      final opens = (data['opens'] as List?) ?? const [];
+      for (final o in opens) {
+        if (o is! Map) continue;
+        onOpen?.call(Map<String, dynamic>.from(o));
       }
     } catch (e) {
       debugPrint('remote poll: $e');

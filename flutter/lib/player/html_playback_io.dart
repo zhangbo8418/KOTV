@@ -18,6 +18,7 @@ class HtmlPlayback extends KotvPlayback {
   bool _completed = false;
   bool _opening = false;
   bool _live = false;
+  bool _repeatOne = false;
   double _volume = 100;
   double _rate = 1;
 
@@ -28,6 +29,9 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   bool get completed => _completed;
+
+  @override
+  bool get repeatOne => _repeatOne;
 
   @override
   Duration get position => _c?.value.position ?? Duration.zero;
@@ -292,7 +296,9 @@ class HtmlPlayback extends KotvPlayback {
 
   @override
   Future<void> setRepeatOne(bool on) async {
+    _repeatOne = on;
     await _c?.setLooping(on);
+    notifyListeners();
   }
 
   @override

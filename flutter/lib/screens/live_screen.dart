@@ -26,6 +26,7 @@ import '../player/mpv_opts.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
 import '../player/subtitle_style_util.dart';
+import '../player/danmaku_layer.dart';
 import '../player/playback_failover.dart';
 import '../player/tv_remote_keys.dart';
 import '../providers.dart';
@@ -340,6 +341,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   String _playUrl = '';
   /// 引擎下发的可直开 CDN（空则只能开 [_playUrl]）。
   String _playDirect = '';
+  /// 遥控即时弹幕（直播页无弹幕设置 UI，仅接收展示）。
+  final ValueNotifier<List<DanmakuItem>> _danmakuItems = ValueNotifier(const []);
   /// [_releaseAllBackends] 已跑完则 dispose 不再二次硬拆。
   bool _releasedHard = false;
   Map<String, String>? _playHeaders;
@@ -443,6 +446,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _groupScroll.dispose();
     _channelScroll.dispose();
     _zapTimer?.cancel();
+    _danmakuItems.dispose();
     // 正常路径已在 [_releaseAllBackends]；异常路径尽量先 release 再 dispose 包装类。
     if (!_releasedHard) {
       final fvp = _fvp;
@@ -480,6 +484,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     bridge.onControl = _onRemoteControl;
     bridge.onSubtitleFile = _onRemoteSubtitle;
     bridge.onLiveRefresh = _onRemoteLiveRefresh;
+    bridge.onLiveDanmaku = _onRemoteLiveDanmaku;
   }
 
   void _detachRemoteHandlers() {
@@ -489,6 +494,29 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (identical(bridge.onControl, _onRemoteControl)) bridge.onControl = null;
     if (identical(bridge.onSubtitleFile, _onRemoteSubtitle)) bridge.onSubtitleFile = null;
     if (identical(bridge.onLiveRefresh, _onRemoteLiveRefresh)) bridge.onLiveRefresh = null;
+    if (identical(bridge.onLiveDanmaku, _onRemoteLiveDanmaku)) bridge.onLiveDanmaku = null;
+  }
+
+  void _onRemoteLiveDanmaku(String text) {
+    if (!mounted || text.trim().isEmpty) return;
+    final sec = _playback.position.inMilliseconds / 1000.0;
+    final next = List<DanmakuItem>.of(_danmakuItems.value)
+      ..add(DanmakuItem(time: sec, content: text.trim()));
+    _danmakuItems.value = next;
+  }
+
+  Widget _buildLiveDanmakuOverlay() {
+    return ValueListenableBuilder<List<DanmakuItem>>(
+      valueListenable: _danmakuItems,
+      builder: (context, items, _) {
+        if (items.isEmpty) return const SizedBox.shrink();
+        return DanmakuOverlay(
+          enabled: true,
+          player: _playback,
+          items: items,
+        );
+      },
+    );
   }
 
   void _onRemoteLiveRefresh() {
@@ -498,10 +526,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   void _onRemoteControl(String type, int seekMs) {
-    if (!mounted || _playUrl.isEmpty) return;
+    if (!mounted) return;
     final t = type.trim().toLowerCase();
     switch (t) {
+      case 'prev':
+        unawaited(_stepChannel(delta: _liveInvert ? 1 : -1));
+        break;
+      case 'next':
+        unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
+        break;
+      case 'replay':
+        if (_playUrl.isEmpty || !_catchup) return;
+        unawaited(() async {
+          await _playback.seek(Duration.zero);
+          await _playback.play();
+        }());
+        break;
       case 'play':
+        if (_playUrl.isEmpty) return;
         unawaited(_playback.play());
         break;
       case 'pause':
@@ -517,16 +559,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         }
         break;
       case 'seek':
+        if (!_catchup || _playUrl.isEmpty) return;
         if (seekMs > 0) {
           unawaited(_playback.seek(Duration(milliseconds: seekMs)));
         }
         break;
       case 'forward':
+      case 'forward10':
+        if (!_catchup || _playUrl.isEmpty) return;
         final ms = seekMs > 0 ? seekMs : 10000;
         unawaited(_playback.seek(_playback.position + Duration(milliseconds: ms)));
         break;
       case 'backward':
       case 'rewind':
+      case 'back10':
+        if (!_catchup || _playUrl.isEmpty) return;
         final ms = seekMs > 0 ? seekMs : 10000;
         final next = _playback.position - Duration(milliseconds: ms);
         unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
@@ -3363,6 +3410,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   _buildSharedLiveVideo(),
                   // Android Hybrid：起播/换台无帧时盖黑防叠影；桌面 Texture 不挂此层。
                   _buildLiveSurfaceCover(),
+                  _buildLiveDanmakuOverlay(),
                   KotvBufferingOverlay(
                     player: _playback,
                     force: _status.contains('解析') ||
@@ -4110,6 +4158,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 ),
                 // Android Hybrid：起播/换台无帧时盖黑防叠影；桌面 Texture 不挂此层。
                 _buildLiveSurfaceCover(),
+                _buildLiveDanmakuOverlay(),
                 KotvBufferingOverlay(
                   player: _playback,
                   force: _status.contains('解析') ||

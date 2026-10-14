@@ -439,9 +439,13 @@ class HtmlPlayback extends KotvPlayback {
   }
 
   @override
+  bool get repeatOne => _loop;
+
+  @override
   Future<void> setRepeatOne(bool on) async {
     _loop = on;
     _video.loop = on;
+    notifyListeners();
   }
 
   @override

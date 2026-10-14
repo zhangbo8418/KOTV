@@ -1,5 +1,5 @@
 // Package cast 统一发现并投送媒体到局域网设备。
-// 当前支持：DLNA/UPnP MediaRenderer、Google Chromecast（含 Google TV 等兼容设备）。
+// 支持：DLNA/UPnP MediaRenderer、Google Chromecast、局域网 App（/device + /action?do=cast）。
 package cast
 
 import (
@@ -35,9 +35,11 @@ type Device struct {
 	dlna     dlna.Device
 	castIP   string
 	castPort int
+	appBase  string
+	appUUID  string
 }
 
-// Discover 并行搜索 DLNA 与 Chromecast。
+// Discover 并行搜索 DLNA、Chromecast 与局域网 App（/device）。
 // 结果优先 DLNA（多数国产电视/盒子的 Chromecast 广播不可靠）。
 func Discover(timeout time.Duration) ([]Device, error) {
 	if timeout <= 0 {
@@ -57,7 +59,7 @@ func Discover(timeout time.Duration) ([]Device, error) {
 		errs = append(errs, err)
 		mu.Unlock()
 	}
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		devs, err := dlna.Discover(timeout)
@@ -87,6 +89,17 @@ func Discover(timeout time.Duration) ([]Device, error) {
 		out = append(out, devs...)
 		mu.Unlock()
 	}()
+	go func() {
+		defer wg.Done()
+		devs, err := discoverAppPeers(timeout)
+		if err != nil {
+			addErr(fmt.Errorf("App: %w", err))
+			return
+		}
+		mu.Lock()
+		out = append(out, devs...)
+		mu.Unlock()
+	}()
 	wg.Wait()
 	if len(out) == 0 && len(errs) > 0 {
 		return nil, errs[0]
@@ -99,11 +112,19 @@ func Discover(timeout time.Duration) ([]Device, error) {
 		if pi == pj {
 			return out[i].Name < out[j].Name
 		}
-		if pi == ProtocolDLNA {
-			return true
+		rank := func(p Protocol) int {
+			switch p {
+			case ProtocolDLNA:
+				return 0
+			case ProtocolApp:
+				return 1
+			default:
+				return 2
+			}
 		}
-		if pj == ProtocolDLNA {
-			return false
+		ri, rj := rank(pi), rank(pj)
+		if ri != rj {
+			return ri < rj
 		}
 		return pi < pj
 	})
@@ -181,19 +202,39 @@ func Cast(d Device, mediaURL, title string) error {
 	return err
 }
 
+// CastOptions 投送附加参数（App 协议需要 config/device/history）。
+type CastOptions struct {
+	Title      string
+	Headers    map[string]string
+	PositionMs int64
+	ConfigJSON string
+	DeviceJSON string
+	HistoryJSON string
+}
+
 // CastWith 投送；headers 写入 DIDL（兼容遥控端），positionMs 起播续看。
 // Chromecast 失败时，若同 IP 存在 DLNA 设备则自动回退；used 为实际成功的协议设备。
 func CastWith(d Device, mediaURL, title string, headers map[string]string, positionMs int64) (Device, error) {
+	return CastWithOpts(d, mediaURL, CastOptions{
+		Title:      title,
+		Headers:    headers,
+		PositionMs: positionMs,
+	})
+}
+
+// CastWithOpts 带 App 投屏载荷的投送。
+func CastWithOpts(d Device, mediaURL string, opt CastOptions) (Device, error) {
 	mediaURL = dlna.RewriteLocalURL(mediaURL)
-	if mediaURL == "" {
+	if mediaURL == "" && d.Protocol != ProtocolApp {
 		return d, fmt.Errorf("媒体地址为空")
 	}
+	title := strings.TrimSpace(opt.Title)
 	switch d.Protocol {
 	case ProtocolDLNA:
 		err := dlna.CastWith(d.dlna, mediaURL, dlna.CastOptions{
 			Title:      title,
-			Headers:    headers,
-			PositionMs: positionMs,
+			Headers:    opt.Headers,
+			PositionMs: opt.PositionMs,
 		})
 		return d, err
 	case ProtocolChromecast:
@@ -205,8 +246,8 @@ func CastWith(d Device, mediaURL, title string, headers map[string]string, posit
 			log.Printf("cast: Chromecast 失败，回退 DLNA %s (%s): %v", alt.Name, alt.Detail, err)
 			if err2 := dlna.CastWith(alt.dlna, mediaURL, dlna.CastOptions{
 				Title:      title,
-				Headers:    headers,
-				PositionMs: positionMs,
+				Headers:    opt.Headers,
+				PositionMs: opt.PositionMs,
 			}); err2 == nil {
 				return alt, nil
 			} else {
@@ -214,6 +255,17 @@ func CastWith(d Device, mediaURL, title string, headers map[string]string, posit
 			}
 		}
 		return d, fmt.Errorf("%w\n\n%s", err, chromecastHint())
+	case ProtocolApp:
+		hist := strings.TrimSpace(opt.HistoryJSON)
+		if hist == "" {
+			return d, fmt.Errorf("App 投屏缺少 history")
+		}
+		err := castAppPeer(d, appCastPayload{
+			Config:  opt.ConfigJSON,
+			Device:  opt.DeviceJSON,
+			History: hist,
+		})
+		return d, err
 	default:
 		return d, fmt.Errorf("不支持的协议: %s", d.Protocol)
 	}
@@ -263,52 +315,6 @@ func hostMatchesLocation(host, location string) bool {
 func chromecastHint() string {
 	return "提示：若 Chrome 能投同一台电视，可再试一次 Chromecast；仍失败请选同设备的 DLNA（控制更完整）。"
 }
-
-// Pause / Play / Stop / Seek / Next 仅 DLNA 有效。
-func Pause(d Device) error {
-	if d.Protocol != ProtocolDLNA {
-		return fmt.Errorf("当前设备不支持暂停控制")
-	}
-	return dlna.Pause(d.dlna)
-}
-
-func Play(d Device) error {
-	if d.Protocol != ProtocolDLNA {
-		return fmt.Errorf("当前设备不支持播放控制")
-	}
-	return dlna.Play(d.dlna)
-}
-
-func Stop(d Device) error {
-	if d.Protocol != ProtocolDLNA {
-		return fmt.Errorf("当前设备不支持停止控制")
-	}
-	return dlna.Stop(d.dlna)
-}
-
-func Seek(d Device, ms int64) error {
-	if d.Protocol != ProtocolDLNA {
-		return fmt.Errorf("当前设备不支持进度控制")
-	}
-	return dlna.Seek(d.dlna, ms)
-}
-
-func Next(d Device) error {
-	if d.Protocol != ProtocolDLNA {
-		return fmt.Errorf("当前设备不支持下一集")
-	}
-	return dlna.Next(d.dlna)
-}
-
-// PositionMs 查询设备进度；非 DLNA 或失败返回 -1。
-func PositionMs(d Device) int64 {
-	if d.Protocol != ProtocolDLNA {
-		return -1
-	}
-	return dlna.PositionMs(d.dlna)
-}
-
-func IsDLNA(d Device) bool { return d.Protocol == ProtocolDLNA }
 
 func castChromecast(d Device, mediaURL string) error {
 	if d.castIP == "" || d.castPort == 0 {

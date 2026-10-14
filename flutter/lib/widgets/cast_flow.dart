@@ -21,7 +21,7 @@ Future<bool> ensureCastPermissions() async {
   }
 }
 
-/// 搜索 DLNA / Chromecast 并投送当前引擎 MediaURL。
+/// 搜索 DLNA / Chromecast / 局域网 App 并投送当前引擎 MediaURL。
 /// 返回状态文案；取消返回 null。
 Future<String?> runKotvCast(
   BuildContext context,
@@ -52,7 +52,7 @@ Future<String?> runKotvCast(
   final devices = ((data['devices'] as List?) ?? []).whereType<Map>().toList();
   if (devices.isEmpty) {
     status('未发现投屏设备');
-    showAppNews(context, '未发现设备。\n已搜索 DLNA / Chromecast\n请确认设备与本机在同一局域网，并已授予投屏相关权限。');
+    showAppNews(context, '未发现设备。\n已搜索 DLNA / Chromecast / 局域网 App\n请确认设备与本机在同一局域网，并已授予投屏相关权限。');
     return '未发现投屏设备';
   }
   final opts = <(String, String)>[

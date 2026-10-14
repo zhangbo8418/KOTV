@@ -656,31 +656,56 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   void _onRemoteControl(String type, int seekMs) {
-    if (!mounted || _playUrl.isEmpty) return;
+    if (!mounted) return;
     final t = type.trim().toLowerCase();
     switch (t) {
+      case 'prev':
+        if (_epIdx > 0) unawaited(_playAt(_epIdx - 1));
+        break;
+      case 'next':
+        unawaited(_advanceToNextEpisode(fromEnd: false));
+        break;
+      case 'replay':
+        if (_playUrl.isEmpty) return;
+        unawaited(() async {
+          await _playback.seek(Duration.zero);
+          await _playback.play();
+        }());
+        break;
+      case 'repeat':
+        if (_playUrl.isEmpty) return;
+        unawaited(_playback.setRepeatOne(!_playback.repeatOne));
+        break;
       case 'play':
+        if (_playUrl.isEmpty) return;
         unawaited(_playback.play());
         break;
       case 'pause':
+        if (_playUrl.isEmpty) return;
         unawaited(_playback.pause());
         break;
       case 'toggle':
       case 'playpause':
       case 'play_pause':
+        if (_playUrl.isEmpty) return;
         unawaited(_playback.playOrPause());
         break;
       case 'seek':
+        if (_playUrl.isEmpty) return;
         if (seekMs > 0) {
           unawaited(_playback.seek(Duration(milliseconds: seekMs)));
         }
         break;
       case 'forward':
+      case 'forward10':
+        if (_playUrl.isEmpty) return;
         final ms = seekMs > 0 ? seekMs : 10000;
         unawaited(_playback.seek(_playback.position + Duration(milliseconds: ms)));
         break;
       case 'backward':
       case 'rewind':
+      case 'back10':
+        if (_playUrl.isEmpty) return;
         final ms = seekMs > 0 ? seekMs : 10000;
         final next = _playback.position - Duration(milliseconds: ms);
         unawaited(_playback.seek(next.isNegative ? Duration.zero : next));

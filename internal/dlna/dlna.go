@@ -174,30 +174,6 @@ func CastWith(d Device, mediaURL string, opt CastOptions) error {
 	return nil
 }
 
-// Play 继续播放。
-func Play(d Device) error {
-	if d.client == nil {
-		return fmt.Errorf("设备无效")
-	}
-	return d.client.Play(0, "1")
-}
-
-// Pause 暂停。
-func Pause(d Device) error {
-	if d.client == nil {
-		return fmt.Errorf("设备无效")
-	}
-	return d.client.Pause(0)
-}
-
-// Stop 停止设备播放。
-func Stop(d Device) error {
-	if d.client == nil {
-		return fmt.Errorf("设备无效")
-	}
-	return d.client.Stop(0)
-}
-
 // Seek 跳转到指定毫秒（REL_TIME）。
 func Seek(d Device, ms int64) error {
 	if d.client == nil {
@@ -207,34 +183,6 @@ func Seek(d Device, ms int64) error {
 		ms = 0
 	}
 	return d.client.Seek(0, "REL_TIME", FormatRelTime(ms))
-}
-
-// Next 下一资源（依赖接收端是否支持）。
-func Next(d Device) error {
-	if d.client == nil {
-		return fmt.Errorf("设备无效")
-	}
-	return d.client.Next(0)
-}
-
-// Previous 上一资源。
-func Previous(d Device) error {
-	if d.client == nil {
-		return fmt.Errorf("设备无效")
-	}
-	return d.client.Previous(0)
-}
-
-// PositionMs 查询当前进度毫秒；失败返回 -1。
-func PositionMs(d Device) int64 {
-	if d.client == nil {
-		return -1
-	}
-	_, _, _, _, rel, _, _, _, err := d.client.GetPositionInfo(0)
-	if err != nil {
-		return -1
-	}
-	return parseRelTimeMs(rel)
 }
 
 // FormatRelTime 毫秒 → HH:MM:SS。
