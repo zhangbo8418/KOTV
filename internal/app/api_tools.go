@@ -15,6 +15,7 @@ import (
 	"github.com/bobo/KOTV/internal/cacheclean"
 	"github.com/bobo/KOTV/internal/cast"
 	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/service"
@@ -392,7 +393,8 @@ func (a *App) toolMirrorSync(histRaw, keepRaw string) (map[string]any, error) {
 		for i := range items {
 			items[i].Key = normalizeHistoryKey(items[i].Key)
 		}
-		if err := a.DB.ImportHistory(items, 2); err != nil {
+		owner := hostclient.DataOwner()
+		if err := a.DB.ImportHistory(owner, items, 2); err != nil {
 			return nil, err
 		}
 	}
@@ -401,7 +403,8 @@ func (a *App) toolMirrorSync(histRaw, keepRaw string) (map[string]any, error) {
 		if err := json.Unmarshal([]byte(keepRaw), &items); err != nil {
 			return nil, fmt.Errorf("keep JSON: %w", err)
 		}
-		if err := a.DB.ImportKeep(items, 2); err != nil {
+		owner := hostclient.DataOwner()
+		if err := a.DB.ImportKeep(owner, items, 2); err != nil {
 			return nil, err
 		}
 	}

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../player/kotv_platform.dart';
 import 'kotv_auth_token.dart';
+import 'kotv_auth_user.dart';
 import 'kotv_client_id.dart';
 import 'kotv_engine_url.dart';
 
@@ -106,6 +107,11 @@ class KotvApi {
     });
     final token = '${data['token'] ?? ''}';
     if (token.isNotEmpty) await kotvSetAuthToken(token);
+    final user = data['user'];
+    if (user is Map) {
+      final id = '${user['id'] ?? ''}'.trim();
+      if (id.isNotEmpty) await kotvSetAuthUserId(id);
+    }
     return data;
   }
 
@@ -116,9 +122,11 @@ class KotvApi {
     try {
       final data = await _post('/api/v1/auth/logout', {});
       await kotvClearAuthToken();
+      await kotvClearAuthUserId();
       return data;
     } catch (_) {
       await kotvClearAuthToken();
+      await kotvClearAuthUserId();
       return {'ok': true};
     }
   }

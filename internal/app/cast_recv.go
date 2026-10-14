@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/remote"
 	"github.com/bobo/KOTV/internal/server"
 	"github.com/bobo/KOTV/internal/service"
@@ -25,7 +26,7 @@ func (a *App) ApplyRemoteCast(configJSON, historyJSON string) {
 		log.Printf("cast: 无法解析 history")
 		return
 	}
-	_ = a.DB.SaveHistory(h)
+	_ = a.DB.SaveHistory(hostclient.DataOwner(), h)
 
 	ep := strings.TrimSpace(h.EpisodeURL)
 	// 可播直链（含对端公网化后的 /proxy/…）走 push 播放；目录项走详情。

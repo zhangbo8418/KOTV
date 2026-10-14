@@ -85,7 +85,8 @@ func (db *DB) migrate() error {
 			config_id INTEGER
 		)`,
 		`CREATE TABLE IF NOT EXISTS history (
-			key TEXT PRIMARY KEY,
+			owner TEXT NOT NULL DEFAULT '',
+			key TEXT NOT NULL,
 			vod_pic TEXT,
 			vod_name TEXT,
 			vod_flag TEXT,
@@ -101,10 +102,12 @@ func (db *DB) migrate() error {
 			speed REAL,
 			player INTEGER,
 			scale INTEGER,
-			cid INTEGER
+			cid INTEGER,
+			PRIMARY KEY (owner, key)
 		)`,
 		`CREATE TABLE IF NOT EXISTS keep (
-			key TEXT PRIMARY KEY,
+			owner TEXT NOT NULL DEFAULT '',
+			key TEXT NOT NULL,
 			vod_pic TEXT,
 			vod_name TEXT,
 			vod_flag TEXT,
@@ -112,7 +115,8 @@ func (db *DB) migrate() error {
 			create_time INTEGER,
 			type INTEGER DEFAULT 0,
 			cid INTEGER DEFAULT 0,
-			site_name TEXT
+			site_name TEXT,
+			PRIMARY KEY (owner, key)
 		)`,
 		`CREATE TABLE IF NOT EXISTS spider_status (
 			site_key TEXT PRIMARY KEY,
@@ -142,6 +146,80 @@ func (db *DB) migrate() error {
 	}
 	for _, s := range alterCols {
 		_, _ = db.conn.Exec(s)
+	}
+	if err := db.migrateOwnerBuckets(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateOwnerBuckets 旧库无 owner 列时重建为 (owner, key) 主键；已有数据归入 owner=''。
+func (db *DB) migrateOwnerBuckets() error {
+	hasOwner := func(table string) bool {
+		rows, err := db.conn.Query(`PRAGMA table_info(` + table + `)`)
+		if err != nil {
+			return false
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var cid int
+			var name, ctype string
+			var notnull, pk int
+			var dflt any
+			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+				return false
+			}
+			if name == "owner" {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasOwner("history") {
+		stmts := []string{
+			`CREATE TABLE history_owner_mig (
+				owner TEXT NOT NULL DEFAULT '',
+				key TEXT NOT NULL,
+				vod_pic TEXT, vod_name TEXT, vod_flag TEXT, vod_remarks TEXT, episode_url TEXT,
+				rev_sort INTEGER, rev_play INTEGER, create_time INTEGER,
+				opening INTEGER, ending INTEGER, position INTEGER, duration INTEGER,
+				speed REAL, player INTEGER, scale INTEGER, cid INTEGER,
+				PRIMARY KEY (owner, key)
+			)`,
+			`INSERT INTO history_owner_mig(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url,
+				rev_sort, rev_play, create_time, opening, ending, position, duration, speed, player, scale, cid)
+			 SELECT '', key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url,
+				rev_sort, rev_play, create_time, opening, ending, position, duration, speed, player, scale, cid
+			 FROM history`,
+			`DROP TABLE history`,
+			`ALTER TABLE history_owner_mig RENAME TO history`,
+		}
+		for _, s := range stmts {
+			if _, err := db.conn.Exec(s); err != nil {
+				return fmt.Errorf("migrate history owner: %w", err)
+			}
+		}
+	}
+	if !hasOwner("keep") {
+		stmts := []string{
+			`CREATE TABLE keep_owner_mig (
+				owner TEXT NOT NULL DEFAULT '',
+				key TEXT NOT NULL,
+				vod_pic TEXT, vod_name TEXT, vod_flag TEXT, vod_remarks TEXT,
+				create_time INTEGER, type INTEGER DEFAULT 0, cid INTEGER DEFAULT 0, site_name TEXT,
+				PRIMARY KEY (owner, key)
+			)`,
+			`INSERT INTO keep_owner_mig(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, create_time, type, cid, site_name)
+			 SELECT '', key, vod_pic, vod_name, vod_flag, vod_remarks, create_time, COALESCE(type,0), COALESCE(cid,0), COALESCE(site_name,'')
+			 FROM keep`,
+			`DROP TABLE keep`,
+			`ALTER TABLE keep_owner_mig RENAME TO keep`,
+		}
+		for _, s := range stmts {
+			if _, err := db.conn.Exec(s); err != nil {
+				return fmt.Errorf("migrate keep owner: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -452,12 +530,12 @@ func StartPositionMs(h *History) int64 {
 	return start
 }
 
-func (db *DB) ListHistory(limit int) ([]History, error) {
+func (db *DB) ListHistory(owner string, limit int) ([]History, error) {
 	rows, err := db.conn.Query(
 		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
 		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1),
 		        COALESCE(opening,0), COALESCE(ending,0)
-		 FROM history ORDER BY rev_play DESC, create_time DESC LIMIT ?`, limit)
+		 FROM history WHERE owner = ? ORDER BY rev_play DESC, create_time DESC LIMIT ?`, owner, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -474,25 +552,25 @@ func (db *DB) ListHistory(limit int) ([]History, error) {
 	return out, rows.Err()
 }
 
-func (db *DB) SaveHistory(h History) error {
+func (db *DB) SaveHistory(owner string, h History) error {
 	now := time.Now().UnixMilli()
 	_, err := db.conn.Exec(`INSERT OR REPLACE INTO history
-		(key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, position, duration, speed, opening, ending)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		h.Key, h.VodPic, h.VodName, h.VodFlag, h.VodRemarks, h.EpisodeURL, now, now,
+		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, position, duration, speed, opening, ending)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		owner, h.Key, h.VodPic, h.VodName, h.VodFlag, h.VodRemarks, h.EpisodeURL, now, now,
 		h.Position, h.Duration, h.Speed, h.Opening, h.Ending)
 	return err
 }
 
 // UpdateHistoryProgress 更新续播进度。
-func (db *DB) UpdateHistoryProgress(key string, position, duration int64) error {
-	_, err := db.conn.Exec(`UPDATE history SET position=?, duration=?, rev_play=? WHERE key=?`,
-		position, duration, time.Now().UnixMilli(), key)
+func (db *DB) UpdateHistoryProgress(owner, key string, position, duration int64) error {
+	_, err := db.conn.Exec(`UPDATE history SET position=?, duration=?, rev_play=? WHERE owner=? AND key=?`,
+		position, duration, time.Now().UnixMilli(), owner, key)
 	return err
 }
 
 // UpdateHistoryOffsets 更新片头/片尾（毫秒），跨集复用；无历史行时插入占位。
-func (db *DB) UpdateHistoryOffsets(key string, opening, ending int64) error {
+func (db *DB) UpdateHistoryOffsets(owner, key string, opening, ending int64) error {
 	if key == "" {
 		return nil
 	}
@@ -503,37 +581,37 @@ func (db *DB) UpdateHistoryOffsets(key string, opening, ending int64) error {
 		ending = 0
 	}
 	now := time.Now().UnixMilli()
-	_, err := db.conn.Exec(`INSERT INTO history(key, opening, ending, create_time, rev_play, speed)
-		VALUES(?,?,?,?,?,1)
-		ON CONFLICT(key) DO UPDATE SET opening=excluded.opening, ending=excluded.ending, rev_play=excluded.rev_play`,
-		key, opening, ending, now, now)
+	_, err := db.conn.Exec(`INSERT INTO history(owner, key, opening, ending, create_time, rev_play, speed)
+		VALUES(?,?,?,?,?,?,1)
+		ON CONFLICT(owner, key) DO UPDATE SET opening=excluded.opening, ending=excluded.ending, rev_play=excluded.rev_play`,
+		owner, key, opening, ending, now, now)
 	return err
 }
 
 // DeleteHistory 删除单条历史。
-func (db *DB) DeleteHistory(key string) error {
-	_, err := db.conn.Exec(`DELETE FROM history WHERE key = ?`, key)
+func (db *DB) DeleteHistory(owner, key string) error {
+	_, err := db.conn.Exec(`DELETE FROM history WHERE owner = ? AND key = ?`, owner, key)
 	return err
 }
 
-// ClearHistory 清空全部历史。
-func (db *DB) ClearHistory() error {
-	_, err := db.conn.Exec(`DELETE FROM history`)
+// ClearHistory 清空指定 owner 的历史。
+func (db *DB) ClearHistory(owner string) error {
+	_, err := db.conn.Exec(`DELETE FROM history WHERE owner = ?`, owner)
 	return err
 }
 
-// ListAllHistory 导出全部历史（备份/同步）。
-func (db *DB) ListAllHistory() ([]History, error) {
-	return db.ListHistory(10000)
+// ListAllHistory 导出指定 owner 的历史（备份/同步）。
+func (db *DB) ListAllHistory(owner string) ([]History, error) {
+	return db.ListHistory(owner, 10000)
 }
 
-// ListAllKeep 导出全部收藏。
-func (db *DB) ListAllKeep(typ int64) ([]Keep, error) {
-	return db.ListKeep(typ, 10000)
+// ListAllKeep 导出指定 owner 的收藏。
+func (db *DB) ListAllKeep(owner string, typ int64) ([]Keep, error) {
+	return db.ListKeep(owner, typ, 10000)
 }
 
-// ImportHistory 批量导入历史；mode 1=合并，2=覆盖。
-func (db *DB) ImportHistory(items []History, mode int) error {
+// ImportHistory 批量导入历史；mode 1=合并，2=覆盖（仅该 owner）。
+func (db *DB) ImportHistory(owner string, items []History, mode int) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	tx, err := db.conn.Begin()
@@ -542,13 +620,13 @@ func (db *DB) ImportHistory(items []History, mode int) error {
 	}
 	defer tx.Rollback()
 	if mode == 2 {
-		if _, err := tx.Exec(`DELETE FROM history`); err != nil {
+		if _, err := tx.Exec(`DELETE FROM history WHERE owner = ?`, owner); err != nil {
 			return err
 		}
 	}
 	stmt := `INSERT OR REPLACE INTO history
-		(key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, position, duration, speed, opening, ending)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, position, duration, speed, opening, ending)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	for _, h := range items {
 		ct := h.CreateTime
 		if ct == 0 {
@@ -558,7 +636,7 @@ func (db *DB) ImportHistory(items []History, mode int) error {
 		if speed == 0 {
 			speed = 1
 		}
-		if _, err := tx.Exec(stmt, h.Key, h.VodPic, h.VodName, h.VodFlag, h.VodRemarks, h.EpisodeURL,
+		if _, err := tx.Exec(stmt, owner, h.Key, h.VodPic, h.VodName, h.VodFlag, h.VodRemarks, h.EpisodeURL,
 			ct, ct, h.Position, h.Duration, speed, h.Opening, h.Ending); err != nil {
 			return err
 		}
@@ -566,8 +644,8 @@ func (db *DB) ImportHistory(items []History, mode int) error {
 	return tx.Commit()
 }
 
-// ImportKeep 批量导入收藏；mode 1=合并，2=覆盖。
-func (db *DB) ImportKeep(items []Keep, mode int) error {
+// ImportKeep 批量导入收藏；mode 1=合并，2=覆盖（仅该 owner 的点播收藏）。
+func (db *DB) ImportKeep(owner string, items []Keep, mode int) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	tx, err := db.conn.Begin()
@@ -576,18 +654,18 @@ func (db *DB) ImportKeep(items []Keep, mode int) error {
 	}
 	defer tx.Rollback()
 	if mode == 2 {
-		if _, err := tx.Exec(`DELETE FROM keep WHERE type = ?`, KeepTypeVod); err != nil {
+		if _, err := tx.Exec(`DELETE FROM keep WHERE owner = ? AND type = ?`, owner, KeepTypeVod); err != nil {
 			return err
 		}
 	}
-	stmt := `INSERT OR REPLACE INTO keep(key, vod_pic, vod_name, vod_flag, vod_remarks, create_time, type, cid, site_name)
-		VALUES(?,?,?,?,?,?,?,?,?)`
+	stmt := `INSERT OR REPLACE INTO keep(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, create_time, type, cid, site_name)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`
 	for _, k := range items {
 		ct := k.CreateTime
 		if ct == 0 {
 			ct = time.Now().UnixMilli()
 		}
-		if _, err := tx.Exec(stmt, k.Key, k.VodPic, k.VodName, k.VodFlag, k.VodRemarks,
+		if _, err := tx.Exec(stmt, owner, k.Key, k.VodPic, k.VodName, k.VodFlag, k.VodRemarks,
 			ct, k.Type, k.CID, k.SiteName); err != nil {
 			return err
 		}
@@ -596,18 +674,18 @@ func (db *DB) ImportKeep(items []Keep, mode int) error {
 }
 
 // DeleteKeep 删除单条收藏。
-func (db *DB) DeleteKeep(key string) error {
-	_, err := db.conn.Exec(`DELETE FROM keep WHERE key = ?`, key)
+func (db *DB) DeleteKeep(owner, key string) error {
+	_, err := db.conn.Exec(`DELETE FROM keep WHERE owner = ? AND key = ?`, owner, key)
 	return err
 }
 
-// GetHistory 按 key 读取历史。
-func (db *DB) GetHistory(key string) (*History, error) {
+// GetHistory 按 owner+key 读取历史。
+func (db *DB) GetHistory(owner, key string) (*History, error) {
 	row := db.conn.QueryRow(
 		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
 		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1),
 		        COALESCE(opening,0), COALESCE(ending,0)
-		 FROM history WHERE key = ?`, key)
+		 FROM history WHERE owner = ? AND key = ?`, owner, key)
 	var h History
 	err := row.Scan(&h.Key, &h.VodPic, &h.VodName, &h.VodFlag, &h.VodRemarks, &h.EpisodeURL,
 		&h.CreateTime, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending)
@@ -643,33 +721,33 @@ func KeepLiveKey(liveName, channel string) string {
 	return liveName + "$$$" + channel
 }
 
-func (db *DB) IsKept(key string) (bool, error) {
+func (db *DB) IsKept(owner, key string) (bool, error) {
 	var n int
-	err := db.conn.QueryRow(`SELECT COUNT(1) FROM keep WHERE key = ?`, key).Scan(&n)
+	err := db.conn.QueryRow(`SELECT COUNT(1) FROM keep WHERE owner = ? AND key = ?`, owner, key).Scan(&n)
 	return n > 0, err
 }
 
-func (db *DB) ToggleKeep(k Keep) (bool, error) {
-	kept, err := db.IsKept(k.Key)
+func (db *DB) ToggleKeep(owner string, k Keep) (bool, error) {
+	kept, err := db.IsKept(owner, k.Key)
 	if err != nil {
 		return false, err
 	}
 	if kept {
-		_, err = db.conn.Exec(`DELETE FROM keep WHERE key = ?`, k.Key)
+		_, err = db.conn.Exec(`DELETE FROM keep WHERE owner = ? AND key = ?`, owner, k.Key)
 		return false, err
 	}
 	k.CreateTime = time.Now().UnixMilli()
-	_, err = db.conn.Exec(`INSERT INTO keep(key, vod_pic, vod_name, vod_flag, vod_remarks, create_time, type, cid, site_name)
-		VALUES(?,?,?,?,?,?,?,?,?)`,
-		k.Key, k.VodPic, k.VodName, k.VodFlag, k.VodRemarks, k.CreateTime, k.Type, k.CID, k.SiteName)
+	_, err = db.conn.Exec(`INSERT INTO keep(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, create_time, type, cid, site_name)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		owner, k.Key, k.VodPic, k.VodName, k.VodFlag, k.VodRemarks, k.CreateTime, k.Type, k.CID, k.SiteName)
 	return true, err
 }
 
-func (db *DB) ListKeep(typ int64, limit int) ([]Keep, error) {
+func (db *DB) ListKeep(owner string, typ int64, limit int) ([]Keep, error) {
 	rows, err := db.conn.Query(
 		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
 		        COALESCE(create_time,0), COALESCE(type,0), COALESCE(cid,0), COALESCE(site_name,'')
-		 FROM keep WHERE type = ? ORDER BY create_time DESC LIMIT ?`, typ, limit)
+		 FROM keep WHERE owner = ? AND type = ? ORDER BY create_time DESC LIMIT ?`, owner, typ, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -686,8 +764,8 @@ func (db *DB) ListKeep(typ int64, limit int) ([]Keep, error) {
 	return out, rows.Err()
 }
 
-func (db *DB) ListKeepLive() ([]Keep, error) {
-	return db.ListKeep(KeepTypeLive, 500)
+func (db *DB) ListKeepLive(owner string) ([]Keep, error) {
+	return db.ListKeep(owner, KeepTypeLive, 500)
 }
 
 // SpiderStatus 爬虫检测结果。

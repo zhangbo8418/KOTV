@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
+import '../api/kotv_auth_user.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
 import 'sync_import_apply.dart';
@@ -131,9 +132,15 @@ class RemoteBridge {
   }
 }
 
-/// 本机观看历史（取舍：不先做 Go DB 同步）。
+/// 本机观看历史；远端登录按 userId 分桶，本机共享默认桶。
 class LocalHistory {
-  static const _key = 'kotv_history_v1';
+  static const _keyBase = 'kotv_history_v1';
+
+  static Future<String> _storageKey() async {
+    final uid = await kotvAuthUserId();
+    if (uid.isEmpty) return _keyBase;
+    return '${_keyBase}_u_$uid';
+  }
 
   static Future<List<VodItem>> list() async {
     await SyncImportApply.pull();
@@ -142,7 +149,7 @@ class LocalHistory {
 
   static Future<List<VodItem>> _listRaw() async {
     final p = await SharedPreferences.getInstance();
-    final raw = p.getString(_key);
+    final raw = p.getString(await _storageKey());
     if (raw == null || raw.isEmpty) return [];
     try {
       final decoded = jsonDecode(raw);
@@ -280,7 +287,7 @@ class LocalHistory {
   static Future<void> _persist(List<VodItem> items) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(
-      _key,
+      await _storageKey(),
       jsonEncode(items
           .map((e) => {
                 'vod_id': e.id,
@@ -351,7 +358,7 @@ class LocalHistory {
 
   static Future<void> clear() async {
     final p = await SharedPreferences.getInstance();
-    await p.remove(_key);
+    await p.remove(await _storageKey());
     SyncMirrorPush.scheduleHistory(const []);
   }
 

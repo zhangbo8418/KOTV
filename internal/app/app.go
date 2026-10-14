@@ -158,7 +158,7 @@ func New() (*App, error) {
 		if p.HistoryKey == "" || settings.IsIncognito() {
 			return
 		}
-		_ = db.UpdateHistoryProgress(p.HistoryKey, p.PositionMs, p.DurationMs)
+		_ = db.UpdateHistoryProgress(hostclient.DataOwner(), p.HistoryKey, p.PositionMs, p.DurationMs)
 	})
 
 	st := appruntime.Status()

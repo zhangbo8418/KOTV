@@ -2,12 +2,19 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../api/kotv_auth_user.dart';
 import '../models/models.dart';
 import 'sync_import_apply.dart';
 import 'sync_mirror_push.dart';
 
 class LocalCollect {
-  static const _key = 'kotv_collect_v1';
+  static const _keyBase = 'kotv_collect_v1';
+
+  static Future<String> _storageKey() async {
+    final uid = await kotvAuthUserId();
+    if (uid.isEmpty) return _keyBase;
+    return '${_keyBase}_u_$uid';
+  }
 
   static Future<List<VodItem>> list() async {
     await SyncImportApply.pull();
@@ -16,7 +23,7 @@ class LocalCollect {
 
   static Future<List<VodItem>> _listRaw() async {
     final p = await SharedPreferences.getInstance();
-    final raw = p.getString(_key);
+    final raw = p.getString(await _storageKey());
     if (raw == null || raw.isEmpty) return [];
     try {
       final decoded = jsonDecode(raw);
@@ -118,7 +125,7 @@ class LocalCollect {
 
   static Future<void> clear() async {
     final p = await SharedPreferences.getInstance();
-    await p.remove(_key);
+    await p.remove(await _storageKey());
     SyncMirrorPush.scheduleKeep(const []);
   }
 
@@ -167,7 +174,7 @@ class LocalCollect {
   static Future<void> _save(List<VodItem> items) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(
-      _key,
+      await _storageKey(),
       jsonEncode(items
           .map((e) => {
                 'vod_id': e.id,

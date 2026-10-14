@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
+import '../api/kotv_auth_user.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
 import 'chrome.dart';
@@ -18,10 +19,12 @@ Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async
     final tok = await kotvAuthToken();
     if (tok.isNotEmpty) {
       try {
-        await api.authMe();
+        final me = await api.authMe();
+        await _rememberAuthUser(me);
         return true;
       } catch (_) {
         await kotvClearAuthToken();
+        await kotvClearAuthUserId();
       }
     }
     if (!context.mounted) return false;
@@ -61,10 +64,12 @@ Future<bool> ensureRemoteAuthIfNeeded(BuildContext context, WidgetRef ref) async
   final tok = await kotvAuthToken();
   if (tok.isNotEmpty) {
     try {
-      await api.authMe();
+      final me = await api.authMe();
+      await _rememberAuthUser(me);
       return true;
     } catch (_) {
       await kotvClearAuthToken();
+      await kotvClearAuthUserId();
     }
   }
 
@@ -211,6 +216,13 @@ Future<RemoteLoginResult> showRemoteLoginDialog(
     }
     return const RemoteLoginResult(ok: false);
   }
+}
+
+Future<void> _rememberAuthUser(Map<String, dynamic> me) async {
+  final user = me['user'];
+  if (user is! Map) return;
+  final id = '${user['id'] ?? ''}'.trim();
+  if (id.isNotEmpty) await kotvSetAuthUserId(id);
 }
 
 /// API 抛出「需要登录」时弹出登录并返回是否成功。

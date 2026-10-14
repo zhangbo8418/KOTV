@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/settings"
 )
 
@@ -63,10 +64,11 @@ func Import(db *database.DB, data []byte) (*Payload, error) {
 	if payload.Version > version {
 		return nil, fmt.Errorf("备份版本 %d 不受支持", payload.Version)
 	}
-	if err := db.ImportHistory(payload.History, 2); err != nil {
+	owner := hostclient.DataOwner()
+	if err := db.ImportHistory(owner, payload.History, 2); err != nil {
 		return nil, fmt.Errorf("恢复历史失败: %w", err)
 	}
-	if err := db.ImportKeep(payload.Keep, 2); err != nil {
+	if err := db.ImportKeep(owner, payload.Keep, 2); err != nil {
 		return nil, fmt.Errorf("恢复收藏失败: %w", err)
 	}
 	if len(payload.Settings) > 0 {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/settings"
 )
 
@@ -161,15 +162,16 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 	return &SyncHandler{
 		ValidatePair: validatePair,
 		Export: func(typ string) (json.RawMessage, error) {
+			owner := hostclient.DataOwner()
 			switch typ {
 			case "history":
-				items, err := db.ListAllHistory()
+				items, err := db.ListAllHistory(owner)
 				if err != nil {
 					return nil, err
 				}
 				return json.Marshal(items)
 			case "keep":
-				items, err := db.ListAllKeep(database.KeepTypeVod)
+				items, err := db.ListAllKeep(owner, database.KeepTypeVod)
 				if err != nil {
 					return nil, err
 				}
@@ -179,6 +181,7 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 			}
 		},
 		Import: func(typ string, mode int, body []byte) error {
+			owner := hostclient.DataOwner()
 			switch typ {
 			case "history":
 				var items []database.History
@@ -186,7 +189,7 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 					return err
 				}
 				normalizeHistoryKeys(items)
-				if err := db.ImportHistory(items, mode); err != nil {
+				if err := db.ImportHistory(owner, items, mode); err != nil {
 					return err
 				}
 				stashSyncPending("history", body)
@@ -196,7 +199,7 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 				if err := json.Unmarshal(body, &items); err != nil {
 					return err
 				}
-				if err := db.ImportKeep(items, mode); err != nil {
+				if err := db.ImportKeep(owner, items, mode); err != nil {
 					return err
 				}
 				stashSyncPending("keep", body)
@@ -210,6 +213,7 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 			if force {
 				mode = 2
 			}
+			owner := hostclient.DataOwner()
 			body := []byte(targetsJSON)
 			switch typ {
 			case "history":
@@ -218,7 +222,7 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 					return err
 				}
 				normalizeHistoryKeys(items)
-				if err := db.ImportHistory(items, mode); err != nil {
+				if err := db.ImportHistory(owner, items, mode); err != nil {
 					return err
 				}
 				stashSyncPending("history", body)
@@ -228,7 +232,7 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 				if err := json.Unmarshal(body, &items); err != nil {
 					return err
 				}
-				if err := db.ImportKeep(items, mode); err != nil {
+				if err := db.ImportKeep(owner, items, mode); err != nil {
 					return err
 				}
 				stashSyncPending("keep", body)
@@ -239,9 +243,10 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 		},
 		ExportTVForm: func(typ string) (url.Values, error) {
 			form := url.Values{}
+			owner := hostclient.DataOwner()
 			switch typ {
 			case "history":
-				items, err := db.ListAllHistory()
+				items, err := db.ListAllHistory(owner)
 				if err != nil {
 					return nil, err
 				}
@@ -257,7 +262,7 @@ func NewAppSyncHandler(db *database.DB, validatePair func(string) bool) *SyncHan
 				form.Set("config", string(cfg))
 				form.Set("targets", string(b))
 			case "keep":
-				items, err := db.ListAllKeep(database.KeepTypeVod)
+				items, err := db.ListAllKeep(owner, database.KeepTypeVod)
 				if err != nil {
 					return nil, err
 				}
