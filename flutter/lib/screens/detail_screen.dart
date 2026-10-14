@@ -789,7 +789,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(api.cancelPending(hard: false, thunder: false));
     }
 
-    // soft pause → release（FVP Surface 在引擎内先摘 VideoPlayer）→ 清 _playUrl → dispose 包装类。
+    // soft pause → release（FVP Surface：引擎内先删 mdk 再摘 PlatformView）→ 清 _playUrl → dispose 包装类。
     final fvp = _fvp;
     final mk = _mk;
     final exo = _exo;

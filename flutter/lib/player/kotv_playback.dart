@@ -158,10 +158,10 @@ abstract class KotvPlayback extends ChangeNotifier {
   /// 离开详情/直播/切 Tab：拆掉原生播放器与 AO，避免后台漏音。
   ///
   /// **页面契约**：soft pause → `await release()` → 再清 `_playUrl` 卸宿主 →
-  /// `dispose()` 包装类。`release()` 内须先停声并拆掉原生绑定；FVP Android
-  /// Surface（platformView）在引擎内先摘掉 [VideoPlayer] 再 `c.dispose()`，
-  /// 因负 surfaceId 不会走 ReleaseRT，原生 map 只靠 PlatformView.dispose。
-  /// Texture / Exo / MPV：release 内或插件侧清面后即可删 player。
+  /// `dispose()` 包装类。`release()` 内须先停声并拆掉原生绑定。
+  /// FVP Android Surface：引擎内先 `c.dispose()` 删 mdk，再摘 PlatformView
+  /// （先卸 View 会在 Redmi 上 nativeSetSurface UAF）。Texture / Exo / MPV：
+  /// release 内或插件侧清面后即可删 player。
   /// 默认等同 [stop]；原生引擎应覆盖为 stop 后销毁实例。
   Future<void> release() => stop();
 

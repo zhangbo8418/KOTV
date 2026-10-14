@@ -205,12 +205,12 @@ class FvpPlayback extends KotvPlayback {
     _viewGen.value++;
   }
 
-  /// 停声后卸掉 [VideoPlayer]，再 `c.dispose()`。
+  /// 停声后拆掉 [VideoPlayerController]。
   ///
-  /// Android Surface（platformView）：Dart dispose **不会**对负 surfaceId 调
-  /// nativeSetSurface；原生 map 只靠 [FvpVideoView.dispose]→release。须先让
-  /// buildView 摘掉 VideoPlayer（player 仍活），再 mdk 删除，否则卸树时 UAF。
-  /// Texture：dispose 内 ReleaseRT 可清正 textureId；仍先摘视图再 dispose。
+  /// Android Surface（platformView）：须**先** `c.dispose()` 删掉 mdk（拆掉
+  /// tunnel/directSurface），再 `_c=null` 摘掉 PlatformView。若先卸 View，
+  /// `FvpVideoView.release→nativeSetSurface` 在 Redmi 上会 UAF。
+  /// Texture：先摘视图再 dispose（dispose 内 ReleaseRT 清正 textureId）。
   Future<void> _disposeController() async {
     final c = _c;
     final l = _listener;
@@ -228,7 +228,21 @@ class FvpPlayback extends KotvPlayback {
       c.setBufferRange(min: 0, max: 1, drop: true);
     } catch (_) {}
     if (!identical(_c, c)) return;
-    // 先从树上摘掉 VideoPlayer → PlatformView dispose → nativeSetSurface(null)（player 仍活）。
+
+    if (_androidSurface) {
+      // Surface：player 仍挂在树上时先删 mdk，再摘 PlatformView。
+      try {
+        await c.dispose();
+      } catch (_) {}
+      if (!identical(_c, c)) return;
+      _c = null;
+      _bumpView();
+      await SchedulerBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      return;
+    }
+
+    // Texture：先摘视图再 dispose。
     _c = null;
     _bumpView();
     await SchedulerBinding.instance.endOfFrame;

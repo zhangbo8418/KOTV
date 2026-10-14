@@ -19,6 +19,8 @@
 # FvpVideoView.surfaceDestroyed 上游会 release()→nativeSetSurface(null)。全屏改
 # LayoutParams 常触发临时 surfaceDestroyed，整表抹掉 players 后易定格/崩。改成空
 # 实现（与 KotvExo SurfaceView 同语义）；永久卸面仍走 dispose()→release()。
+# release() 清 map 须 tunnel=false（同 ReleaseRT）；上游传 bind 时的 tunnel=true
+# 会在 Redmi PlatformView.dispose→nativeSetSurface 上 UAF。
 #
 # prepare 失败写入 _players[-hashCode] 时若覆盖同 key，旧 player 会泄漏；改为先 dispose 再挂新的。
 #
@@ -808,6 +810,49 @@ if "surfaceDestroyed(SurfaceHolder holder) {\n        release();" in fvv_check:
     sys.exit(1)
 if "dispose() {\n        surfaceView.getHolder().removeCallback(this);\n        release();" not in fvv_check:
     print("ERROR: FvpVideoView.dispose must still call release()", file=sys.stderr)
+    sys.exit(1)
+
+# PlatformView 永久卸面：清 map 须同 ReleaseRT（tunnel=false）。
+# 上游 release() 传构造时的 tunnel=true；Redmi 上 nativeSetSurface(0,id,null,-1,-1,true)
+# 会走 directSurface 拆解码器路径 → UAF（tombstone: FvpVideoView.release→nativeSetSurface）。
+FVP_RELEASE_OLD = """    private void release() {
+        if (released) {
+            return;
+        }
+        released = true;
+        FvpPlugin.nativeSetSurface(0, surfaceId, null, -1, -1, tunnel);
+    }"""
+FVP_RELEASE_NEW = """    private void release() {
+        if (released) {
+            return;
+        }
+        released = true;
+        // KOTV: match ReleaseRT — clear with tunnel=false. Passing the bind-time
+        // tunnel=true here UAF's on Redmi MediaCodec during PlatformView.dispose.
+        FvpPlugin.nativeSetSurface(0, surfaceId, null, -1, -1, false);
+    }"""
+fvv_text = fvp_video_view.read_text(encoding="utf-8")
+if FVP_RELEASE_NEW in fvv_text:
+    print(f"ok fvp ({fvp_version}) already patched: FvpVideoView.release tunnel=false")
+elif FVP_RELEASE_OLD in fvv_text:
+    fvp_video_view.write_text(
+        fvv_text.replace(FVP_RELEASE_OLD, FVP_RELEASE_NEW, 1),
+        encoding="utf-8",
+    )
+    print(f"patched fvp ({fvp_version}): FvpVideoView.release tunnel=false")
+else:
+    print(
+        f"ERROR: fvp ({fvp_version}) FvpVideoView.release snippet missing; "
+        "upstream changed — update scripts/patch-media-kit.sh",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+fvv_check = fvp_video_view.read_text(encoding="utf-8")
+if "nativeSetSurface(0, surfaceId, null, -1, -1, tunnel);" in fvv_check:
+    print("ERROR: FvpVideoView.release still clears with tunnel=true", file=sys.stderr)
+    sys.exit(1)
+if "nativeSetSurface(0, surfaceId, null, -1, -1, false);" not in fvv_check:
+    print("ERROR: FvpVideoView.release must clear with tunnel=false", file=sys.stderr)
     sys.exit(1)
 
 print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
