@@ -2413,9 +2413,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     });
   }
   /// 把黑槽在详情 Stack 内的位置/尺寸写入 [_videoLayerRect]。
-  /// 沉浸全屏时详情树 Offstage 仍可布局，继续量槽便于退出立刻有矩形。
+  /// 沉浸期间禁止 sync：setState 会 rebuild 包着 Hybrid Surface 的 Positioned。
+  /// 退出全屏后再量槽（见 [_exitImmersiveFullscreen]）。
   void _syncVideoSlotRect() {
-    if (!mounted || !_useStableVideoLayer) return;
+    if (!mounted || !_useStableVideoLayer || _immersiveFullscreen) return;
     final slotBox = _videoSlotKey.currentContext?.findRenderObject() as RenderBox?;
     final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
     if (slotBox == null ||
@@ -2452,7 +2453,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       builder: (context, constraints) {
         final size = constraints.biggest;
         final prev = _videoLayerRect;
-        if (size.width >= 1 &&
+        if (!_immersiveFullscreen &&
+            size.width >= 1 &&
             size.height >= 1 &&
             (prev == null ||
                 (prev.width - size.width).abs() >= 0.5 ||
@@ -3474,21 +3476,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             key: _detailStackKey,
             fit: StackFit.expand,
             children: [
-              // 沉浸默认黑底；氛围模式才透壁纸。详情树 Offstage 保活（含黑槽），
-              // 便于退出全屏量几何；勿卸树以免 Hybrid Surface 短暂失配。
-              if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
-              Offstage(
-                offstage: _immersiveFullscreen,
-                child: ExcludeFocus(
-                  excluding: _immersiveFullscreen,
-                  child: TickerMode(
-                    enabled: !_immersiveFullscreen,
-                    child: detailScaffold,
+              // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
+              // 仅氛围模式去掉黑底，四周才透 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影。
+              // 桌面 Offstage 保活（media_kit Texture 不宜整树卸装）。
+              if (kotvIsAndroid()) ...[
+                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
+                if (!_immersiveFullscreen) detailScaffold,
+              ] else ...[
+                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
+                Offstage(
+                  offstage: _immersiveFullscreen,
+                  child: ExcludeFocus(
+                    excluding: _immersiveFullscreen,
+                    child: TickerMode(
+                      enabled: !_immersiveFullscreen,
+                      child: detailScaffold,
+                    ),
                   ),
                 ),
-              ),
-              // 叠在 Scaffold 上以便全屏不卸 Texture；非全屏矩形已与顶栏下内容区相交。
-              if (_playUrl.isNotEmpty) _buildStableVideoLayer(context, stackSize: stackSize),
+              ],
+              // 叠在 Scaffold 上以便全屏不卸 Texture；沉浸中即使 playUrl 空窗也保 PlatformView。
+              if (_playUrl.isNotEmpty || _immersiveFullscreen)
+                _buildStableVideoLayer(context, stackSize: stackSize),
               // 换集过渡黑盖：仅 Android Hybrid；桌面 Texture 不盖。
               if (kotvIsAndroid() && _immersiveFullscreen && _immersiveEpCover)
                 const Positioned.fill(

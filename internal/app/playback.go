@@ -66,6 +66,16 @@ func (a *App) PreparePlaybackURL(raw string, headers map[string]string) string {
 // PreparePlayback 的第二个返回值是能自己带请求头的播放器要打开的站点地址。
 // 为空时，这类播放器也打开第一个返回值。
 func (a *App) PreparePlayback(raw string, headers map[string]string) (string, string) {
+	return a.preparePlayback(raw, headers, true)
+}
+
+// PreparePlaybackListed 直播列表批量用：只做代理/公网化，不拉每路 m3u8。
+// 广告过滤在 livePlay / 点播起播时再 Resolve；列表里上百路绝对不能串行抓。
+func (a *App) PreparePlaybackListed(raw string, headers map[string]string) (string, string) {
+	return a.preparePlayback(raw, headers, false)
+}
+
+func (a *App) preparePlayback(raw string, headers map[string]string, resolveM3U8 bool) (string, string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || IsEphemeralPlayURL(raw) {
 		return raw, ""
@@ -95,11 +105,13 @@ func (a *App) PreparePlayback(raw string, headers map[string]string) (string, st
 		if localproxy.IsSpiderProxyURL(playURL) {
 			return playproxy.PublicizeURL(playURL, headers), ""
 		}
-		if resolved, src, err := m3u8.ResolveForPlayback(playURL, headers, port); err == nil && resolved != "" {
-			if src != "" && src != resolved {
-				direct = src
+		if resolveM3U8 {
+			if resolved, src, err := m3u8.ResolveForPlayback(playURL, headers, port); err == nil && resolved != "" {
+				if src != "" && src != resolved {
+					direct = src
+				}
+				playURL = resolved
 			}
-			playURL = resolved
 		}
 		before := playURL
 		playURL = playproxy.Register(playURL, headers)

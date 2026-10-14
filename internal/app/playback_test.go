@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/playproxy"
@@ -242,6 +243,23 @@ func TestPreparePlaybackLivePlainURL(t *testing.T) {
 	a := &App{}
 	raw := "https://cdn.example/live.m3u8"
 	play, direct := a.PreparePlayback(raw, nil)
+	if play != raw {
+		t.Fatalf("play=%q want %q", play, raw)
+	}
+	if direct != "" {
+		t.Fatalf("direct=%q want empty", direct)
+	}
+}
+
+// 列表路径不得去拉含 m3u8 的直播地址（广告过滤默认开时 Resolve 会 HTTP）。
+func TestPreparePlaybackListedSkipsM3U8Resolve(t *testing.T) {
+	a := &App{}
+	raw := "https://tv.bobohome.store:20250/migu?id=608807420.m3u8"
+	start := time.Now()
+	play, direct := a.PreparePlaybackListed(raw, nil)
+	if dur := time.Since(start); dur > 200*time.Millisecond {
+		t.Fatalf("listed prepare too slow: %s (must not Resolve)", dur)
+	}
 	if play != raw {
 		t.Fatalf("play=%q want %q", play, raw)
 	}

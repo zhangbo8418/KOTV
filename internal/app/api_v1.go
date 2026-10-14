@@ -1721,7 +1721,8 @@ func (a *App) APILiveLoad(index int, url string, force bool) (map[string]any, er
 					playURLs = append(playURLs, "")
 					directURLs = append(directURLs, "")
 				} else {
-					play, direct := a.PreparePlayback(u, h)
+					// 列表勿 Resolve 每路 m3u8（默认广告过滤会对含 m3u8 的 URL 逐条 HTTP）。
+					play, direct := a.PreparePlaybackListed(u, h)
 					playURLs = append(playURLs, play)
 					directURLs = append(directURLs, direct)
 				}
