@@ -572,22 +572,23 @@ func FormatCatchup(url string, cp model.Catchup, prog EpgData) string {
 	return appendCatchup(url, result, cp.Replace)
 }
 
-// ResolveCatchupURL 先解析频道真实地址（含专用源 Fetch），再按回看规则 format。
-// core 供 TVBus 等 Fetch 使用，可空。
-func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData, core json.RawMessage) (string, map[string]string, error) {
+// ResolveCatchupURL 先解析频道真实地址（含专用源 FetchInfo），再按回看规则 format。
+// core 供 TVBus 等 Fetch 使用，可空；subs 来自专用源展开（如 YouTube）。
+func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData, core json.RawMessage) (string, map[string]string, []model.Sub, error) {
 	if ch == nil {
-		return "", nil, fmt.Errorf("频道为空")
+		return "", nil, nil, fmt.Errorf("频道为空")
 	}
 	if prog.StartTime == 0 {
-		return "", nil, fmt.Errorf("节目时间无效")
+		return "", nil, nil, fmt.Errorf("节目时间无效")
 	}
 	if prog.IsFuture() {
-		return "", nil, fmt.Errorf("尚未播出")
+		return "", nil, nil, fmt.Errorf("尚未播出")
 	}
 
 	var (
 		base    string
 		headers map[string]string
+		subs    []model.Sub
 		err     error
 	)
 	if s != nil {
@@ -599,15 +600,18 @@ func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData, core jso
 		base, headers = ResolvePlayURL(ch)
 	}
 	if base == "" {
-		return "", headers, fmt.Errorf("无播放地址")
+		return "", headers, nil, fmt.Errorf("无播放地址")
 	}
 	if source.Match(base) {
 		source.Stop()
-		if rewritten, ferr := source.Fetch(base, core); ferr != nil {
-			return "", headers, fmt.Errorf("专用源解析失败: %w", ferr)
-		} else if rewritten != "" {
-			base = rewritten
+		info, ferr := source.FetchInfo(base, core)
+		if ferr != nil {
+			return "", headers, nil, fmt.Errorf("专用源解析失败: %w", ferr)
 		}
+		if info.URL != "" {
+			base = info.URL
+		}
+		subs = info.Subs
 	}
 
 	cp := ch.CatchupRule()
@@ -616,7 +620,7 @@ func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData, core jso
 		cp = model.CatchupPLTV()
 	}
 	if cp.Regex != "" && !cp.Match(base) && !cp.Match(ch.CurrentURL()) {
-		return "", headers, fmt.Errorf("该源不支持回看")
+		return "", headers, nil, fmt.Errorf("该源不支持回看")
 	}
 	// 回看地址格式化(realUrl)：format 必须作用在带 PLTV 的地址上，
 	// 否则只给直播地址拼 playseek，播放器会一直缓冲。
@@ -630,7 +634,7 @@ func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData, core jso
 	}
 	catchURL := FormatCatchup(formatBase, cp, prog)
 	if catchURL == "" {
-		return "", headers, fmt.Errorf("该源不支持回看")
+		return "", headers, nil, fmt.Errorf("该源不支持回看")
 	}
 	if headers == nil {
 		headers = map[string]string{}
@@ -640,7 +644,7 @@ func ResolveCatchupURL(s *Service, ch *model.LiveChannel, prog EpgData, core jso
 			headers["rtsp_range"] = r
 		}
 	}
-	return catchURL, headers, nil
+	return catchURL, headers, subs, nil
 }
 
 var catchupTokenRe = regexp.MustCompile(`\$?\{[^}]*\}`)

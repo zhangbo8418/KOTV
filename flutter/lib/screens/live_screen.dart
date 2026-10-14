@@ -2062,6 +2062,20 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       };
       final drmRaw = data['drm'];
       final drm = drmRaw is Map ? Map<String, dynamic>.from(drmRaw) : null;
+      List<Map<String, dynamic>>? externalSubs;
+      final playSubs = data['subs'];
+      if (playSubs is List && playSubs.isNotEmpty) {
+        externalSubs = [
+          for (final s in playSubs)
+            if (s is Map)
+              {
+                'url': '${s['url'] ?? ''}',
+                'name': '${s['name'] ?? ''}',
+                'lang': '${s['lang'] ?? ''}',
+                'format': '${s['format'] ?? ''}',
+              },
+        ];
+      }
       await _openLiveUrl(
         url,
         serial: serial,
@@ -2069,6 +2083,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         headers: headers.isEmpty ? null : headers,
         drm: drm,
         live: true,
+        externalSubs: externalSubs,
       );
       if (!mounted || serial != _playSerial) return;
       setState(() {

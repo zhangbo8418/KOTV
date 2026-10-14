@@ -1925,7 +1925,7 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	if prog < 0 || prog >= len(list) {
 		return nil, fmt.Errorf("节目无效")
 	}
-	url, headers, err := live.ResolveCatchupURL(a.Live, ch, list[prog], a.liveCoreJSON())
+	url, headers, catchSubs, err := live.ResolveCatchupURL(a.Live, ch, list[prog], a.liveCoreJSON())
 	if err != nil {
 		return nil, err
 	}
@@ -1940,11 +1940,26 @@ func (a *App) APILiveCatchup(group, channel, day, prog int) (map[string]any, err
 	} else {
 		playDrm = ch.Drm
 	}
+	subsDTO := make([]map[string]any, 0, len(catchSubs))
+	for _, s := range catchSubs {
+		u := playproxy.PublicizeURL(localproxy.ConvertScheme(s.URL))
+		if u == "" {
+			continue
+		}
+		subsDTO = append(subsDTO, map[string]any{
+			"url":    u,
+			"name":   s.Name,
+			"lang":   s.Lang,
+			"format": s.Format,
+			"flag":   s.Flag,
+		})
+	}
 	return map[string]any{
 		"ok":      true,
 		"url":     playURL,
 		"direct":  directURL,
 		"headers": headers,
+		"subs":    subsDTO,
 		"name":    list[prog].Title,
 		"group":   g.Name,
 		"channel": ch.Name,
