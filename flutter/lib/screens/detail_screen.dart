@@ -1887,7 +1887,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     required String name,
     required String episode,
     List<DanmakuSource> spiderSources = const [],
+    int? playSerial,
   }) async {
+    final serial = playSerial ?? _playAtSerial;
     _danmakuItems.value = const [];
     if (!_danmakuLoad) return;
     _lastPlayDanmaku = playDanmaku;
@@ -1914,8 +1916,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       List<DanmakuSource> sources = spiderList;
       if (_danmakuSpiderFirst) {
         if (canSpider) items = await DanmakuLoader.loadUrl(spiderUrl, followSources: spiderList.length <= 1);
+        if (!mounted || serial != _playAtSerial) return;
         if (items.isEmpty && canApi) {
           final body = await DanmakuLoader.fetchApiBody(api, name: name, episode: episode);
+          if (!mounted || serial != _playAtSerial) return;
           sources = DanmakuLoader.listSources(body);
           if (sources.isNotEmpty) {
             final idx = _danmakuSourceIdx.clamp(0, sources.length - 1);
@@ -1927,6 +1931,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       } else {
         if (canApi) {
           final body = await DanmakuLoader.fetchApiBody(api, name: name, episode: episode);
+          if (!mounted || serial != _playAtSerial) return;
           sources = DanmakuLoader.listSources(body);
           if (sources.isNotEmpty) {
             final idx = _danmakuSourceIdx.clamp(0, sources.length - 1);
@@ -1935,12 +1940,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             items = DanmakuParser.parse(body);
           }
         }
+        if (!mounted || serial != _playAtSerial) return;
         if (items.isEmpty && canSpider) {
           items = await DanmakuLoader.loadUrl(spiderUrl, followSources: spiderList.length <= 1);
           if (sources.isEmpty) sources = spiderList;
         }
       }
-      if (!mounted) return;
+      if (!mounted || serial != _playAtSerial) return;
       if (_danmakuOffsetSec.abs() > 0.0001) {
         items = [
           for (final it in items)
@@ -1953,13 +1959,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             ),
         ];
       }
+      if (!mounted || serial != _playAtSerial) return;
       setState(() {
         _danmakuSources = sources;
         if (_danmakuSourceIdx >= sources.length) _danmakuSourceIdx = 0;
       });
       _danmakuItems.value = items;
     } catch (_) {
-      if (mounted) {
+      if (mounted && serial == _playAtSerial) {
         setState(() => _danmakuSources = const []);
         _danmakuItems.value = const [];
       }
@@ -2381,6 +2388,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         spiderSources: spiderDm,
         name: d.name,
         episode: ep.name,
+        playSerial: serial,
       ));
       // 专用源可带回封面/简介；片名仅当前为空时补全，勿用 play.title（曾默认=vodID）覆盖已有名。
       final srcTitle = '${data['title'] ?? ''}'.trim();

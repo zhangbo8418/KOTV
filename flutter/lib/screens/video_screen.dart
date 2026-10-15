@@ -11,6 +11,7 @@ import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../util/kotv_image_cache.dart';
 import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
@@ -54,6 +55,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   List<VodItem> _keeps = [];
   final ScrollController _scroll = ScrollController();
   int _loadGen = 0;
+  /// 首屏 autofill 连续续页计数（触底用户滚动不计入）。
+  int _autofillStreak = 0;
   /// 合并并发 _reload，避免 bootstrap / epoch / 重试叠两次拉仓。
   Future<void>? _reloadFlight;
   RemoteBridge? _boundRemote;
@@ -451,6 +454,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _page = 1;
       _pageCount = 0;
       _hasMore = true;
+      _autofillStreak = 0;
       _loading = true;
       _loadingMore = false;
       _statusMsg = null;
@@ -475,6 +479,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _page = 1;
       _pageCount = 0;
       _hasMore = true;
+      _autofillStreak = 0;
       _loading = true;
       _loadingMore = false;
       _statusMsg = null;
@@ -502,18 +507,25 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     }
   }
 
-  Future<void> _loadMore() async {
+  Future<void> _loadMore({bool fromAutofill = false}) async {
     if (_tid == null || _tid!.isEmpty || _loadingMore || _loading || !_ready || !_hasMore) return;
+    if (fromAutofill && _autofillStreak >= 3) return;
+    final gen = _loadGen;
     setState(() => _loadingMore = true);
     try {
       final next = _page + 1;
       final data = await ref.read(apiProvider).category(_tid!, pg: '$next', extend: Map<String, String>.from(_extend));
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       _applyPage(data, replace: false, requestedPage: next);
+      if (fromAutofill) {
+        _autofillStreak++;
+      } else {
+        _autofillStreak = 0;
+      }
       _scheduleAutofill();
     } catch (_) {
     } finally {
-      if (mounted) setState(() => _loadingMore = false);
+      if (mounted && gen == _loadGen) setState(() => _loadingMore = false);
     }
   }
 
@@ -523,9 +535,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       if (!mounted) return;
       if (_tid == null || _tid!.isEmpty) return;
       if (!_hasMore || _loadingMore || _loading || !_ready) return;
+      if (_autofillStreak >= 3) return;
       if (!_scroll.hasClients) return;
       if (_scroll.position.maxScrollExtent > 80) return;
-      unawaited(_loadMore());
+      unawaited(_loadMore(fromAutofill: true));
     });
   }
 
@@ -665,6 +678,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         });
         try {
           await ref.read(apiProvider).setHome(key);
+          if (mounted) {
+            await kotvClearImageMemory(context: context, ref: ref);
+          }
           // 配置在首页请求结束之后再刷新。_reload 返回时会 invalidate。
           await _reload(clearContent: true);
         } catch (e) {
@@ -1335,6 +1351,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           );
         },
         childCount: items.length,
+        addAutomaticKeepAlives: false,
       ),
     );
   }
@@ -1369,6 +1386,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               );
             },
             childCount: items.length,
+            addAutomaticKeepAlives: false,
           ),
         );
       },

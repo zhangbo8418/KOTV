@@ -151,6 +151,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
+  /// 直播切台：FVP 只 pause，其它后端走换集停播。
+  Future<void> _stopPlaybackForLiveZap() async {
+    final p = _playback;
+    if (p is FvpPlayback) {
+      await p.pauseForLiveZap();
+      return;
+    }
+    await p.stopForEpisodeSwitch();
+  }
+
   KotvPlayback _ensureMpv() {
     if (kotvIsAndroid()) {
       _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
@@ -1998,7 +2008,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     // 只停当前后端；与取地址并行。
     final stopFut = () async {
       try {
-        await _playback.stopForEpisodeSwitch();
+        await _stopPlaybackForLiveZap();
       } catch (_) {}
     }();
 
@@ -2153,7 +2163,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (eng == null) throw Exception('频道无效');
       final stopFut = () async {
         try {
-          await _playback.stopForEpisodeSwitch();
+          await _stopPlaybackForLiveZap();
         } catch (_) {}
       }();
       final catchFut = ref.read(apiProvider).liveCatchup(

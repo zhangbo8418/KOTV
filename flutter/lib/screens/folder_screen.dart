@@ -39,6 +39,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   /// 0 = 未知总页（靠空列表停）；>0 为明确末页。
   int _pageCount = 0;
   bool _hasMore = true;
+  int _autofillStreak = 0;
   final ScrollController _scroll = ScrollController();
 
   @override
@@ -53,7 +54,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
     super.dispose();
   }
 
-  Future<void> _load({required bool replace}) async {
+  Future<void> _load({required bool replace, bool fromAutofill = false}) async {
     if (replace) {
       setState(() {
         _loading = true;
@@ -61,9 +62,11 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
         _page = 1;
         _pageCount = 0;
         _hasMore = true;
+        _autofillStreak = 0;
       });
     } else {
       if (_loadingMore || !_hasMore) return;
+      if (fromAutofill && _autofillStreak >= 3) return;
       setState(() => _loadingMore = true);
     }
     try {
@@ -100,6 +103,11 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
           _items = list;
         } else {
           _items = [..._items, ...list];
+          if (fromAutofill) {
+            _autofillStreak++;
+          } else {
+            _autofillStreak = 0;
+          }
         }
         _hasMore = list.isNotEmpty && (_pageCount == 0 || _page < _pageCount);
         _loading = false;
@@ -120,9 +128,10 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   void _scheduleAutofill() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_hasMore || _loadingMore || _loading) return;
+      if (_autofillStreak >= 3) return;
       if (!_scroll.hasClients) return;
       if (_scroll.position.maxScrollExtent > 80) return;
-      unawaited(_load(replace: false));
+      unawaited(_load(replace: false, fromAutofill: true));
     });
   }
 

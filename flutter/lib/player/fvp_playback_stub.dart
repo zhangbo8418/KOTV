@@ -56,6 +56,10 @@ class FvpPlayback extends KotvPlayback {
   Future<void> pause() async {}
   @override
   Future<void> stop() async {}
+
+  /// 与 IO 侧同名，避免条件导入缺方法。
+  Future<void> pauseForLiveZap() async {}
+
   @override
   Future<void> seek(Duration d) async {}
   @override

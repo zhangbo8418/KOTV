@@ -1982,6 +1982,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         try {
           final api = ref.read(apiProvider);
           await api.setHome(key);
+          if (mounted) {
+            await kotvClearImageMemory(context: context, ref: ref);
+          }
           // setHome 只改当前站。首页请求放在遮罩里，爬虫在这一步执行。
           await api.home();
           ref.invalidate(configProvider);

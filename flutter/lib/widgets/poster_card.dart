@@ -43,6 +43,9 @@ class PosterCard extends StatelessWidget {
                 final barH = (c.maxHeight * 0.18).clamp(30.0, 48.0);
                 final remarkBottom = barH + 4;
                 final titleLines = barH >= 40 ? 2 : 1;
+                final dpr = MediaQuery.devicePixelRatioOf(context);
+                final cacheW = (c.maxWidth * dpr).round().clamp(1, 720);
+                final cacheH = (c.maxHeight * dpr).round().clamp(1, 960);
                 final letter = () {
                   final s = item.name.trim();
                   if (s.isEmpty) return '?';
@@ -71,6 +74,9 @@ class PosterCard extends StatelessWidget {
                           : KotvNetworkImage(
                               item.pic.trim(),
                               fit: BoxFit.cover,
+                              cacheWidth: cacheW,
+                              cacheHeight: cacheH,
+                              singleFrame: true,
                               errorBuilder: (_, __, ___) => ColoredBox(color: p.posterPh),
                             ),
                     ),
@@ -154,10 +160,15 @@ class VodListTile extends StatelessWidget {
     final p = KotvPalette.of(context);
     final pic = item.pic.trim();
     final letter = kotvNameInitial(item.name);
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final cachePx = (48 * dpr).round().clamp(1, 192);
     final thumb = pic.isNotEmpty && kotvIsPictureUrl(pic)
         ? KotvNetworkImage(
             pic,
             fit: BoxFit.cover,
+            cacheWidth: cachePx,
+            cacheHeight: cachePx,
+            singleFrame: true,
             errorBuilder: (_, __, ___) => _ListInitial(letter: letter),
           )
         : _ListInitial(letter: letter);

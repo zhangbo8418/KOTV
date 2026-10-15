@@ -235,7 +235,7 @@ Future<void> kotvSoftPausePlayers(Iterable<KotvPlayback?> players) async {
   await Future.wait<void>(players.map(one));
 }
 
-/// 换集/切台：对各后端 [KotvPlayback.stopForEpisodeSwitch]（保留画面宿主）。
+/// 点播换集：对各后端 [KotvPlayback.stopForEpisodeSwitch]（FVP 会 dispose 缓冲）。
 Future<void> kotvStopPlayersForEpisodeSwitch(Iterable<KotvPlayback?> players) async {
   Future<void> one(KotvPlayback? p) async {
     if (p == null) return;

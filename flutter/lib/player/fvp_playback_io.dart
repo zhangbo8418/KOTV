@@ -616,7 +616,12 @@ class FvpPlayback extends KotvPlayback {
 
   @override
   Future<void> stopForEpisodeSwitch() async {
-    // 只停声；换源由 open() 单次 dispose+再建，避免换台双重 endOfFrame+50ms。
+    // 点播换集：拆掉 demux/解码缓冲，避免连切叠压。直播切台请走 pause。
+    await stop();
+  }
+
+  /// 直播切台：只停声，由下次 open 再建，避免双重 dispose。
+  Future<void> pauseForLiveZap() async {
     try {
       await _c?.pause();
     } catch (_) {}

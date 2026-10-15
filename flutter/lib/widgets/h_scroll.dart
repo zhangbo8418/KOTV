@@ -61,7 +61,8 @@ class _HScrollListState extends State<HScrollList> {
   var _placeTries = 0;
   var _placed = false;
 
-  bool get _measure => widget.itemStride == null && widget.scrollToIndex != null && widget.scrollToIndex! > 0;
+  bool get _measure =>
+      !_placed && widget.itemStride == null && widget.scrollToIndex != null && widget.scrollToIndex! > 0;
 
   double _offset(int? index) {
     final stride = widget.itemStride;
