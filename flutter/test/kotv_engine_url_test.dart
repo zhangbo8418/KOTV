@@ -17,6 +17,25 @@ void main() {
     expect(kotvIsLocalEngineBaseUrl('https://tv.example.com'), isFalse);
   });
 
+  test('effective defaults empty/malformed to local 9978', () {
+    expect(kotvEffectiveEngineBaseUrl(''), kotvDefaultLocalEngineBaseUrl);
+    expect(kotvEffectiveEngineBaseUrl('http://'), kotvDefaultLocalEngineBaseUrl);
+    expect(kotvEffectiveEngineBaseUrl('http://:9978'), kotvDefaultLocalEngineBaseUrl);
+    expect(kotvEffectiveEngineBaseUrl('ftp://tv.example.com'), kotvDefaultLocalEngineBaseUrl);
+    expect(kotvEffectiveEngineBaseUrl('http://10.0.0.8'), 'http://10.0.0.8:9978');
+    expect(kotvEffectiveEngineBaseUrl('https://tv.example.com'), 'https://tv.example.com');
+    expect(kotvEffectiveEngineBaseUrl('https://tv.example.com:8443'), 'https://tv.example.com:8443');
+  });
+
+  test('store writes empty for local/invalid', () {
+    expect(kotvStoreEngineBaseUrl(''), '');
+    expect(kotvStoreEngineBaseUrl('http://127.0.0.1:9978'), '');
+    expect(kotvStoreEngineBaseUrl('http://'), '');
+    expect(kotvStoreEngineBaseUrl('ftp://tv.example.com'), '');
+    expect(kotvStoreEngineBaseUrl('10.0.0.8'), 'http://10.0.0.8:9978');
+    expect(kotvStoreEngineBaseUrl('https://tv.example.com'), 'https://tv.example.com');
+  });
+
   test('rewrite loopback proxy to remote engine host', () {
     expect(
       kotvRewriteEngineLocalUrl(

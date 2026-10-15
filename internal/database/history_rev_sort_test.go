@@ -91,4 +91,32 @@ func TestRenameHistoryPreservesFields(t *testing.T) {
 	if got.RevSort != 1 || got.RevPlay != 77 || got.Opening != 11 || got.Ending != 22 {
 		t.Fatalf("got=%+v", got)
 	}
+	if got.Position != 33 || got.Duration != 44 || got.VodName != "剧" {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestRenameHistoryDropsOldWhenNewExists(t *testing.T) {
+	dir := t.TempDir()
+	db, err := OpenPath(filepath.Join(dir, "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.ImportHistory("", []History{
+		{Key: "old@s", VodName: "旧", RevPlay: 1},
+		{Key: "new@s", VodName: "新", RevPlay: 2},
+	}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RenameHistory("", "old@s", "new@s"); err != nil {
+		t.Fatal(err)
+	}
+	if old, _ := db.GetHistory("", "old@s"); old != nil {
+		t.Fatal("old should be gone")
+	}
+	got, err := db.GetHistory("", "new@s")
+	if err != nil || got == nil || got.VodName != "新" {
+		t.Fatalf("new should remain untouched: %+v err=%v", got, err)
+	}
 }

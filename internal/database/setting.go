@@ -65,10 +65,9 @@ func (db *DB) ListSettings(owner string) (map[string]string, error) {
 	return out, rows.Err()
 }
 
-// DeleteSettingsOwner 删除某 owner 全部设置行（禁止 owner=''，避免误清本机全局）。
+// DeleteSettingsOwner 删除某 owner 全部设置行（含 owner=''，供备份覆盖写入）。
 func (db *DB) DeleteSettingsOwner(owner string) error {
-	owner = strings.TrimSpace(owner)
-	if db == nil || db.conn == nil || owner == "" {
+	if db == nil || db.conn == nil {
 		return nil
 	}
 	_, err := db.conn.Exec(`DELETE FROM setting WHERE owner = ?`, owner)

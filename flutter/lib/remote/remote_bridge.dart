@@ -130,8 +130,7 @@ class RemoteBridge {
 
 
 Future<KotvApi> _engineApi() async {
-  final base = (await KotvClientStore.engineBaseUrl()).trim();
-  return KotvApi(baseUrl: base.isEmpty ? 'http://127.0.0.1:9978' : base);
+  return KotvApi(baseUrl: await KotvClientStore.effectiveEngineBaseUrl());
 }
 
 String _historyKey(String site, String id) {

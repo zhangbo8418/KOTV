@@ -1682,11 +1682,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await DetailScreen.prepareLeave();
     await LiveScreen.prepareLeave();
     final launcher = ref.read(engineLauncherProvider);
-    if (baseUrl.isEmpty) {
+    if (baseUrl.isEmpty || kotvIsLocalEngineBaseUrl(baseUrl)) {
       await KotvClientStore.clearEngine();
     } else {
       await KotvClientStore.update((d) {
-        d.engineBaseUrl = baseUrl;
+        d.engineBaseUrl = kotvStoreEngineBaseUrl(baseUrl);
         d.remoteUsername = user;
       });
     }

@@ -54,8 +54,7 @@ class EngineLauncher {
 
   /// 切换引擎地址。远端地址不会再被 ensureReady 静默改回本机。
   void applyBaseUrl(String url) {
-    final n = kotvNormalizeEngineBaseUrl(url);
-    _syncBaseUrl(n.isEmpty ? 'http://127.0.0.1:9978' : n);
+    _syncBaseUrl(kotvEffectiveEngineBaseUrl(url));
   }
 
   bool _acceptLocalHealth() {

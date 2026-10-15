@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../util/kotv_app_dirs.dart';
 import '../util/kotv_io.dart';
+import 'kotv_engine_url.dart';
 
 /// Flutter 客户端态：引擎地址、鉴权、窗口几何、clientId。
 /// 桌面/安卓：`{kotvDataRoot}/ui/client.json`；Web：SharedPreferences。
@@ -16,7 +17,7 @@ class KotvClientStore {
   static const _webKey = 'kotv_client_json_v1';
 
   static KotvClientData? _cache;
-  static Future<void>? _loadFuture;
+  static Future<KotvClientData>? _loadFuture;
 
   static Future<KotvClientData> load() {
     return _loadFuture ??= _doLoad().whenComplete(() {
@@ -62,6 +63,11 @@ class KotvClientStore {
   // --- field helpers ---
 
   static Future<String> engineBaseUrl() async => (await load()).engineBaseUrl;
+
+  /// 运行时连引擎用的地址（无文件/空/畸形 → 本机 9978）。
+  static Future<String> effectiveEngineBaseUrl() async =>
+      kotvEffectiveEngineBaseUrl(await engineBaseUrl());
+
   static Future<String> engineBaseUrlDraft() async => (await load()).engineBaseUrlDraft;
   static Future<String> remoteUsername() async => (await load()).remoteUsername;
   static Future<String> authToken() async => (await load()).authToken;
@@ -74,8 +80,13 @@ class KotvClientStore {
     return d.clientId;
   }
 
-  static Future<void> setEngineBaseUrl(String v) => update((d) => d.engineBaseUrl = v.trim());
-  static Future<void> setEngineBaseUrlDraft(String v) => update((d) => d.engineBaseUrlDraft = v.trim());
+  static Future<void> setEngineBaseUrl(String v) => update((d) {
+        d.engineBaseUrl = kotvStoreEngineBaseUrl(v);
+      });
+  static Future<void> setEngineBaseUrlDraft(String v) => update((d) {
+        final n = kotvNormalizeEngineBaseUrl(v);
+        d.engineBaseUrlDraft = (n.isEmpty || kotvIsLocalEngineBaseUrl(n)) ? '' : kotvEffectiveEngineBaseUrl(n);
+      });
   static Future<void> setRemoteUsername(String v) => update((d) => d.remoteUsername = v.trim());
   static Future<void> setAuthToken(String v) => update((d) => d.authToken = v.trim());
   static Future<void> setAuthUserId(String v) => update((d) => d.authUserId = v.trim());

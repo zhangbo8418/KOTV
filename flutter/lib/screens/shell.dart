@@ -11,6 +11,7 @@ import '../nav/kotv_page.dart';
 import '../player/playback_guard.dart';
 import '../providers.dart';
 import '../player/play_headers.dart';
+import '../api/kotv_engine_url.dart';
 import '../api/kotv_settings_cache.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
@@ -514,5 +515,5 @@ void kotvPageBack(WidgetRef ref) {
 
 String remoteHint(WidgetRef ref) {
   final base = ref.read(engineLauncherProvider).baseUrl;
-  return base.isEmpty ? 'http://127.0.0.1:9978' : base;
+  return kotvEffectiveEngineBaseUrl(base);
 }

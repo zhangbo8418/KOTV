@@ -804,7 +804,7 @@ func ReplaceEntries(entries []Entry) {
 	ReplaceEntriesForOwner("", entries)
 }
 
-// ReplaceEntriesForOwner 覆盖写入指定 owner 的设置行。
+// ReplaceEntriesForOwner 覆盖写入指定 owner 的设置行（先清空该 owner 再写入）。
 // host-only 键仅在 owner=="" 时写入。
 func ReplaceEntriesForOwner(owner string, entries []Entry) {
 	if owner == "" {
@@ -818,6 +818,7 @@ func ReplaceEntriesForOwner(owner string, entries []Entry) {
 	if storeDB == nil {
 		return
 	}
+	_ = storeDB.DeleteSettingsOwner(owner)
 	for _, e := range entries {
 		id := strings.TrimSpace(e.ID)
 		if id == "" {

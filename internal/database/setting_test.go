@@ -37,6 +37,29 @@ func TestSettingOwnerBuckets(t *testing.T) {
 	}
 }
 
+func TestDeleteSettingsOwnerClearsHost(t *testing.T) {
+	db, err := OpenPath(filepath.Join(t.TempDir(), "set-host.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.SetSetting("", "vod", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetSetting("", "home", "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteSettingsOwner(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := db.GetSetting("", "vod"); ok {
+		t.Fatal("host vod should be cleared")
+	}
+	if _, ok, _ := db.GetSetting("", "home"); ok {
+		t.Fatal("host home should be cleared")
+	}
+}
+
 func TestAuthUserAndToken(t *testing.T) {
 	db, err := OpenPath(filepath.Join(t.TempDir(), "auth.db"))
 	if err != nil {

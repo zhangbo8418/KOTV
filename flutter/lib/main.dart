@@ -66,8 +66,7 @@ Future<void> _kotvSyncLanguageSetting() async {
         locale.countryCode == 'MO';
     final lang = traditional ? 'zh-Hant' : '';
     if (lang.isEmpty) return;
-    var base = (await KotvClientStore.engineBaseUrl()).trim();
-    if (base.isEmpty) base = 'http://127.0.0.1:9978';
+    final base = await KotvClientStore.effectiveEngineBaseUrl();
     await http
         .post(
           Uri.parse('$base/api/v1/settings'),
@@ -209,34 +208,30 @@ Future<void> main() async {
       await windowManager.focus();
     });
   }
-  var engineUrl = client.engineBaseUrl.isEmpty ? null : client.engineBaseUrl;
+  var engineUrl = kotvEffectiveEngineBaseUrl(client.engineBaseUrl);
   // Web：固定同源引擎（本页所在服务器），不可改远端地址。
   if (kIsWeb) {
     await KotvClientStore.setEngineBaseUrl('');
     final origin = Uri.base.origin;
-    engineUrl = (origin.isNotEmpty && origin != 'null') ? origin : 'http://127.0.0.1:9978';
+    engineUrl = (origin.isNotEmpty && origin != 'null') ? origin : kotvDefaultLocalEngineBaseUrl;
   } else {
     // 远端地址若无 token：降级为草稿，启动仍用本机（不拉远端仓）
     final tok = client.authToken.trim();
-    if (engineUrl != null &&
-        engineUrl.isNotEmpty &&
-        !kotvIsLocalEngineBaseUrl(engineUrl) &&
-        tok.isEmpty) {
+    final stored = client.engineBaseUrl.trim();
+    if (stored.isNotEmpty && !kotvIsLocalEngineBaseUrl(stored) && tok.isEmpty) {
       await KotvClientStore.update((d) {
-        d.engineBaseUrlDraft = engineUrl!;
+        d.engineBaseUrlDraft = kotvEffectiveEngineBaseUrl(stored);
         d.engineBaseUrl = '';
         d.remoteUsername = '';
       });
-      engineUrl = null;
+      engineUrl = kotvDefaultLocalEngineBaseUrl;
     }
   }
   runApp(ProviderScope(
     overrides: [
       engineLauncherProvider.overrideWith((ref) {
         final launcher = EngineLauncher();
-        if (engineUrl != null && engineUrl.isNotEmpty) {
-          launcher.baseUrl = engineUrl;
-        }
+        launcher.applyBaseUrl(engineUrl);
         ref.onDispose(launcher.dispose);
         return launcher;
       }),
@@ -420,7 +415,7 @@ class _EngineOfflinePage extends ConsumerWidget {
   Future<void> _setupBackendUrl(BuildContext context, WidgetRef ref) async {
     final launcher = ref.read(engineLauncherProvider);
     final ctrl = TextEditingController(
-      text: launcher.baseUrl == 'http://127.0.0.1:9978' ? '' : launcher.baseUrl,
+      text: kotvIsLocalEngineBaseUrl(launcher.baseUrl) ? '' : launcher.baseUrl,
     );
     final navCtx = rootNavigatorKey.currentContext ?? context;
     final p = KotvPalette.of(navCtx);
@@ -448,13 +443,13 @@ class _EngineOfflinePage extends ConsumerWidget {
       ),
     );
     if (v == null) return;
-    final n = kotvNormalizeEngineBaseUrl(v);
-    if (n.isEmpty) {
+    final stored = kotvStoreEngineBaseUrl(v);
+    if (stored.isEmpty) {
       await KotvClientStore.clearEngine();
       launcher.applyBaseUrl('');
     } else {
-      await KotvClientStore.setEngineBaseUrl(n);
-      launcher.applyBaseUrl(n);
+      await KotvClientStore.setEngineBaseUrl(stored);
+      launcher.applyBaseUrl(stored);
     }
     ref.read(apiProvider).baseUrl = launcher.baseUrl;
     KotvSettingsCache.clear();

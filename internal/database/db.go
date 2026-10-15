@@ -754,31 +754,48 @@ func (db *DB) GetHistory(owner, key string) (*History, error) {
 }
 
 // RenameHistory 迁移历史键，保留 opening/ending/rev_sort/rev_play 等字段。
-// 若新键已存在则只删旧键。
+// 若新键已存在则只删旧键。单事务，避免删后插失败丢行。
 func (db *DB) RenameHistory(owner, oldKey, newKey string) error {
 	oldKey = strings.TrimSpace(oldKey)
 	newKey = strings.TrimSpace(newKey)
 	if oldKey == "" || newKey == "" || oldKey == newKey {
 		return nil
 	}
-	old, err := db.GetHistory(owner, oldKey)
+	tx, err := db.conn.Begin()
 	if err != nil {
 		return err
 	}
-	if old == nil {
+	defer tx.Rollback()
+
+	var old History
+	err = tx.QueryRow(
+		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
+		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_play,0), COALESCE(rev_sort,0),
+		        COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1), COALESCE(opening,0), COALESCE(ending,0)
+		 FROM history WHERE owner = ? AND key = ?`, owner, oldKey,
+	).Scan(&old.Key, &old.VodPic, &old.VodName, &old.VodFlag, &old.VodRemarks, &old.EpisodeURL,
+		&old.CreateTime, &old.RevPlay, &old.RevSort, &old.Position, &old.Duration, &old.Speed, &old.Opening, &old.Ending)
+	if err == sql.ErrNoRows {
 		return nil
 	}
-	exist, err := db.GetHistory(owner, newKey)
 	if err != nil {
 		return err
 	}
-	if err := db.DeleteHistory(owner, oldKey); err != nil {
+
+	var existKey string
+	err = tx.QueryRow(`SELECT key FROM history WHERE owner = ? AND key = ?`, owner, newKey).Scan(&existKey)
+	newExists := err == nil
+	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
-	if exist != nil {
-		return nil
+
+	if newExists {
+		if _, err := tx.Exec(`DELETE FROM history WHERE owner = ? AND key = ?`, owner, oldKey); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
-	old.Key = newKey
+
 	now := time.Now().UnixMilli()
 	speed := old.Speed
 	if speed == 0 {
@@ -792,12 +809,17 @@ func (db *DB) RenameHistory(owner, oldKey, newKey string) error {
 	if ct == 0 {
 		ct = now
 	}
-	_, err = db.conn.Exec(`INSERT INTO history
+	if _, err := tx.Exec(`INSERT INTO history
 		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, rev_sort, position, duration, speed, opening, ending)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		owner, newKey, old.VodPic, old.VodName, old.VodFlag, old.VodRemarks, old.EpisodeURL,
-		ct, rp, old.RevSort, old.Position, old.Duration, speed, old.Opening, old.Ending)
-	return err
+		ct, rp, old.RevSort, old.Position, old.Duration, speed, old.Opening, old.Ending); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM history WHERE owner = ? AND key = ?`, owner, oldKey); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SaveKeep 写入/更新收藏（不切换）。
@@ -907,23 +929,6 @@ func (db *DB) UpsertSpiderStatus(s SpiderStatus) error {
 	_, err := db.conn.Exec(`INSERT OR REPLACE INTO spider_status(site_key, status, message, updated_at) VALUES(?,?,?,?)`,
 		s.SiteKey, s.Status, s.Message, s.UpdatedAt)
 	return err
-}
-
-func (db *DB) ListSpiderStatus() ([]SpiderStatus, error) {
-	rows, err := db.conn.Query(`SELECT site_key, status, COALESCE(message,''), COALESCE(updated_at,0) FROM spider_status`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []SpiderStatus
-	for rows.Next() {
-		var s SpiderStatus
-		if err := rows.Scan(&s.SiteKey, &s.Status, &s.Message, &s.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
 }
 
 func nullStr(s string) interface{} {

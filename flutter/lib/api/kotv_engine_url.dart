@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+/// 本机引擎默认地址（无 client.json / 无有效远端地址时使用）。
+const kotvDefaultLocalEngineBaseUrl = 'http://127.0.0.1:9978';
+
 /// 引擎 baseUrl 是否指向本机（127.0.0.1 / localhost / ::1）。
 /// 本机连接不鉴权、不带账号；仅非本机地址才用远端登录。
 bool kotvIsLocalEngineBaseUrl(String baseUrl) {
@@ -40,6 +43,36 @@ String kotvNormalizeEngineBaseUrl(String raw) {
     v = bare;
   }
   return v;
+}
+
+/// 运行时有效引擎地址：无地址 / 空 host / 无效 → 本机 9978；http 无端口补 9978。
+String kotvEffectiveEngineBaseUrl(String raw) {
+  final n = kotvNormalizeEngineBaseUrl(raw);
+  if (n.isEmpty) return kotvDefaultLocalEngineBaseUrl;
+  late final Uri u;
+  try {
+    u = Uri.parse(n);
+  } catch (_) {
+    return kotvDefaultLocalEngineBaseUrl;
+  }
+  if (u.host.isEmpty) return kotvDefaultLocalEngineBaseUrl;
+  final scheme = u.scheme.toLowerCase();
+  if (scheme != 'http' && scheme != 'https') {
+    return kotvDefaultLocalEngineBaseUrl;
+  }
+  if (!u.hasPort && scheme == 'http') {
+    return u.replace(port: 9978).toString();
+  }
+  return n;
+}
+
+/// 写入 client.json 的引擎地址：本机/无效存空串；远端 http 无端口时带上 9978。
+String kotvStoreEngineBaseUrl(String raw) {
+  final n = kotvNormalizeEngineBaseUrl(raw);
+  if (n.isEmpty || kotvIsLocalEngineBaseUrl(n)) return '';
+  final effective = kotvEffectiveEngineBaseUrl(n);
+  if (kotvIsLocalEngineBaseUrl(effective)) return '';
+  return effective;
 }
 
 /// 本进程 HTTP 服务提供的路径。其它回环路径是 jar 自己的监听。
