@@ -22,6 +22,7 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
 	appruntime "github.com/bobo/KOTV/internal/runtime"
 	"github.com/bobo/KOTV/internal/util"
@@ -579,7 +580,7 @@ func logSniffPageDiag(ctx context.Context, depth int) {
 }
 
 func androidBrowserSniff(pageURL string, headers map[string]string, click string, rules []model.Rule, ads []string, timeout time.Duration, detect bool, isVideo func(string) bool, manualVideo bool) (string, map[string]string, error) {
-	const base = "http://127.0.0.1:9979/sniff"
+	base := localproxy.DefaultBridgeBaseURL() + "/sniff"
 	if len(rules) == 0 {
 		rules = GetRules()
 	}

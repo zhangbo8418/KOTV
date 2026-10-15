@@ -728,6 +728,38 @@ func (db *DB) DeleteKeep(owner, key string) error {
 	return err
 }
 
+// ClearKeepType 删除某 owner 指定 type 的全部收藏。
+func (db *DB) ClearKeepType(owner string, typ int64) error {
+	_, err := db.conn.Exec(`DELETE FROM keep WHERE owner = ? AND type = ?`, owner, typ)
+	return err
+}
+
+// ReplaceKeepLive 单事务覆盖直播收藏列表。
+func (db *DB) ReplaceKeepLive(owner string, names []string) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM keep WHERE owner = ? AND type = ?`, owner, KeepTypeLive); err != nil {
+		return err
+	}
+	now := time.Now().UnixMilli()
+	for _, ch := range names {
+		ch = strings.TrimSpace(ch)
+		if ch == "" {
+			continue
+		}
+		key := KeepLiveKey("live", ch)
+		if _, err := tx.Exec(`INSERT INTO keep(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, create_time, type, cid, site_name)
+			VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			owner, key, "", ch, "", "", now, KeepTypeLive, 0, ""); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // GetHistory 按 owner+key 读取历史。
 func (db *DB) GetHistory(owner, key string) (*History, error) {
 	row := db.conn.QueryRow(
@@ -989,13 +1021,6 @@ func nullStr(s string) interface{} {
 		return nil
 	}
 	return s
-}
-
-func intPtr(p *int) interface{} {
-	if p == nil {
-		return nil
-	}
-	return *p
 }
 
 func flexIntPtr(f model.FlexInt) interface{} {

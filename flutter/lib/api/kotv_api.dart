@@ -106,7 +106,6 @@ class KotvApi {
     });
     final token = '${data['token'] ?? ''}';
     if (token.isNotEmpty) await kotvSetAuthToken(token);
-    await _cacheSessionUser(data);
     return data;
   }
 
@@ -124,18 +123,7 @@ class KotvApi {
     }
   }
 
-  Future<Map<String, dynamic>> authMe() async {
-    final data = await _get('/api/v1/auth/me');
-    await _cacheSessionUser(data);
-    return data;
-  }
-
-  Future<void> _cacheSessionUser(Map<String, dynamic> data) async {
-    final user = data['user'];
-    if (user is! Map) return;
-    final id = '${user['id'] ?? ''}'.trim();
-    if (id.isNotEmpty) await kotvSetSessionUserId(id);
-  }
+  Future<Map<String, dynamic>> authMe() => _get('/api/v1/auth/me');
 
   Future<Map<String, dynamic>> changePassword({
     required String oldPassword,

@@ -34,13 +34,6 @@ class KotvClientStore {
       data = await _loadFile();
     }
     data ??= KotvClientData();
-    if (data.isEmpty) {
-      final migrated = await _migrateFromLegacyPrefs();
-      if (migrated != null) {
-        data = migrated;
-        await _persist(data);
-      }
-    }
     _cache = data;
     return data;
   }
@@ -71,7 +64,6 @@ class KotvClientStore {
   static Future<String> engineBaseUrlDraft() async => (await load()).engineBaseUrlDraft;
   static Future<String> remoteUsername() async => (await load()).remoteUsername;
   static Future<String> authToken() async => (await load()).authToken;
-  static Future<String> authUserId() async => (await load()).authUserId;
   static Future<String> clientId() async {
     final d = await load();
     if (d.clientId.isNotEmpty) return d.clientId;
@@ -89,10 +81,8 @@ class KotvClientStore {
       });
   static Future<void> setRemoteUsername(String v) => update((d) => d.remoteUsername = v.trim());
   static Future<void> setAuthToken(String v) => update((d) => d.authToken = v.trim());
-  static Future<void> setAuthUserId(String v) => update((d) => d.authUserId = v.trim());
   static Future<void> clearAuth() => update((d) {
         d.authToken = '';
-        d.authUserId = '';
       });
 
   static Future<void> clearEngine() => update((d) {
@@ -162,43 +152,6 @@ class KotvClientStore {
     await p.setString(_webKey, jsonEncode(data.toJson()));
   }
 
-  /// 旧 SharedPreferences 键 → 一次迁入。
-  static Future<KotvClientData?> _migrateFromLegacyPrefs() async {
-    try {
-      final p = await SharedPreferences.getInstance();
-      final d = KotvClientData(
-        engineBaseUrl: (p.getString('engine_base_url') ?? '').trim(),
-        engineBaseUrlDraft: (p.getString('engine_base_url_draft') ?? '').trim(),
-        remoteUsername: (p.getString('remote_username') ?? '').trim(),
-        authToken: (p.getString('kotv_auth_token') ?? '').trim(),
-        authUserId: (p.getString('kotv_auth_user_id') ?? '').trim(),
-        clientId: (p.getString('kotv_client_id') ?? '').trim(),
-        windowW: p.getDouble('window_w'),
-        windowH: p.getDouble('window_h'),
-        windowX: p.getDouble('window_x'),
-        windowY: p.getDouble('window_y'),
-      );
-      if (d.isEmpty) return null;
-      for (final k in [
-        'engine_base_url',
-        'engine_base_url_draft',
-        'remote_username',
-        'kotv_auth_token',
-        'kotv_auth_user_id',
-        'kotv_client_id',
-        'window_w',
-        'window_h',
-        'window_x',
-        'window_y',
-      ]) {
-        await p.remove(k);
-      }
-      return d;
-    } catch (_) {
-      return null;
-    }
-  }
-
   static String _newClientId() {
     final r = Random.secure();
     final bytes = List<int>.generate(16, (_) => r.nextInt(256));
@@ -212,7 +165,6 @@ class KotvClientData {
     this.engineBaseUrlDraft = '',
     this.remoteUsername = '',
     this.authToken = '',
-    this.authUserId = '',
     this.clientId = '',
     this.windowW,
     this.windowH,
@@ -224,7 +176,6 @@ class KotvClientData {
   String engineBaseUrlDraft;
   String remoteUsername;
   String authToken;
-  String authUserId;
   String clientId;
   double? windowW;
   double? windowH;
@@ -236,7 +187,6 @@ class KotvClientData {
       engineBaseUrlDraft.isEmpty &&
       remoteUsername.isEmpty &&
       authToken.isEmpty &&
-      authUserId.isEmpty &&
       clientId.isEmpty &&
       windowW == null &&
       windowH == null &&
@@ -257,7 +207,6 @@ class KotvClientData {
       engineBaseUrlDraft: '${j['engineBaseUrlDraft'] ?? ''}'.trim(),
       remoteUsername: '${j['remoteUsername'] ?? ''}'.trim(),
       authToken: '${j['authToken'] ?? ''}'.trim(),
-      authUserId: '${j['authUserId'] ?? ''}'.trim(),
       clientId: '${j['clientId'] ?? ''}'.trim(),
       windowW: numOrNull(wmap?['w']),
       windowH: numOrNull(wmap?['h']),
@@ -271,7 +220,6 @@ class KotvClientData {
         'engineBaseUrlDraft': engineBaseUrlDraft,
         'remoteUsername': remoteUsername,
         'authToken': authToken,
-        'authUserId': authUserId,
         'clientId': clientId,
         if (windowW != null || windowH != null || windowX != null || windowY != null)
           'window': {

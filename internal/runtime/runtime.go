@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -8,6 +9,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/bobo/KOTV/internal/localproxy"
 )
 
 // 平台标识（用于下载键、提示信息等）。
@@ -334,7 +337,7 @@ func Status() map[string]string {
 
 func probeAndroidSpider() string {
 	client := &http.Client{Timeout: 800 * time.Millisecond}
-	resp, err := client.Get("http://127.0.0.1:9979/health")
+	resp, err := client.Get(localproxy.DefaultBridgeBaseURL() + "/health")
 	if err != nil {
 		return ""
 	}
@@ -342,7 +345,7 @@ func probeAndroidSpider() string {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ""
 	}
-	return "android-bridge(:9979)"
+	return fmt.Sprintf("android-bridge(:%d)", localproxy.DefaultBridgePort)
 }
 
 func orMissing(p string) string {

@@ -466,7 +466,7 @@ class EngineLauncher {
   /// 仅 [forceRestart] 或多次 start 仍不通时才 stop+start。
   Future<void> _ensureAndroidSpiderService({bool forceRestart = false}) async {
     if (!Platform.isAndroid) return;
-    if (!forceRestart && await _pingHttpOk('http://127.0.0.1:9979/health')) {
+    if (!forceRestart && await _pingHttpOk('$kotvDefaultSpiderBridgeBaseUrl/health')) {
       _androidSpiderServiceStarted = true;
       return;
     }
@@ -474,7 +474,7 @@ class EngineLauncher {
     final inflight = _spiderEnsuring;
     if (inflight != null) {
       await inflight;
-      if (!forceRestart && await _pingHttpOk('http://127.0.0.1:9979/health')) {
+      if (!forceRestart && await _pingHttpOk('$kotvDefaultSpiderBridgeBaseUrl/health')) {
         _androidSpiderServiceStarted = true;
         return;
       }
@@ -494,7 +494,7 @@ class EngineLauncher {
       const ch = MethodChannel('kotv_android_spider');
       for (var i = 0; i < 6; i++) {
         // 负载下偶发 ping 失败：停之前再探一次，避免误杀活着的 :9979。
-        if (!forceRestart && await _pingHttpOk('http://127.0.0.1:9979/health')) {
+        if (!forceRestart && await _pingHttpOk('$kotvDefaultSpiderBridgeBaseUrl/health')) {
           _androidSpiderServiceStarted = true;
           debugPrint('android spider service ready on 9979');
           return;
@@ -512,7 +512,7 @@ class EngineLauncher {
         } catch (e) {
           debugPrint('android spider service start failed: $e');
         }
-        if (await _pingHttpOk('http://127.0.0.1:9979/health')) {
+        if (await _pingHttpOk('$kotvDefaultSpiderBridgeBaseUrl/health')) {
           _androidSpiderServiceStarted = true;
           debugPrint('android spider service ready on 9979');
           return;

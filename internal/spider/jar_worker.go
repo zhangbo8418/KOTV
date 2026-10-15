@@ -98,9 +98,9 @@ func KillUserRuntime(userID string) {
 func HostSpiderReady() (ok bool, errMsg string) {
 	if runtime.GOOS == "android" {
 		client := &http.Client{Timeout: 800 * time.Millisecond}
-		resp, err := client.Get("http://127.0.0.1:9979/health")
+		resp, err := client.Get(localproxy.DefaultBridgeBaseURL() + "/health")
 		if err != nil {
-			return false, "安卓 SpiderService(:9979) 不可达：请保持 App/前台服务运行"
+			return false, fmt.Sprintf("安卓 SpiderService(:%d) 不可达：请保持 App/前台服务运行", localproxy.DefaultBridgePort)
 		}
 		_ = resp.Body.Close()
 		if resp.StatusCode >= 400 {
@@ -325,7 +325,7 @@ func RestartSharedRuntime() {
 	softCancelSharedBridgeOnly()
 	if runtime.GOOS == "android" {
 		client := &http.Client{Timeout: 2 * time.Second}
-		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:9979/jar/interrupt", bytes.NewReader([]byte("{}")))
+		req, err := http.NewRequest(http.MethodPost, localproxy.DefaultBridgeBaseURL()+"/jar/interrupt", bytes.NewReader([]byte("{}")))
 		if err == nil {
 			req.Header.Set("Content-Type", "application/json")
 			if resp, err := client.Do(req); err == nil {
@@ -707,7 +707,7 @@ func trimCString(s string) string {
 func pushBridgeIfAlive(payload []byte) {
 	if runtime.GOOS == "android" {
 		client := &http.Client{Timeout: 300 * time.Millisecond}
-		resp, err := client.Get("http://127.0.0.1:9979/health")
+		resp, err := client.Get(localproxy.DefaultBridgeBaseURL() + "/health")
 		if err != nil {
 			return
 		}
@@ -784,7 +784,7 @@ func androidPostJar(payload []byte, timeout time.Duration) (string, error) {
 }
 
 func androidPostJarCtx(ctx context.Context, payload []byte) (string, error) {
-	return postJarPathCtx(ctx, "http://127.0.0.1:9979", "/jar/call", payload)
+	return postJarPathCtx(ctx, localproxy.DefaultBridgeBaseURL(), "/jar/call", payload)
 }
 
 func postJarPath(base, path string, payload []byte, timeout time.Duration) error {

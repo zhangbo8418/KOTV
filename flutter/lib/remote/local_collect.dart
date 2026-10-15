@@ -1,10 +1,8 @@
 import '../api/kotv_api.dart';
-import '../api/kotv_client_store.dart';
 import '../models/models.dart';
+import 'engine_api.dart';
 
-Future<KotvApi> _engineApi() async {
-  return KotvApi(baseUrl: await KotvClientStore.effectiveEngineBaseUrl());
-}
+Future<KotvApi> _engineApi() => kotvEngineApi();
 
 String _keepKey(String site, String id) {
   if (site.isEmpty) return id;

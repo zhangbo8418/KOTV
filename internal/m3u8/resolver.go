@@ -98,8 +98,8 @@ func playbackProxyBase(localPort int) string {
 	if pb := hostclient.PublicBase(); pb != "" {
 		return strings.TrimRight(pb, "/")
 	}
-	if localPort <= 0 {
-		localPort = localproxy.DefaultPort
+	if localPort <= 0 || localPort == localproxy.DefaultPort {
+		return localproxy.LocalBaseURL()
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", localPort)
 }

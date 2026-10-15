@@ -742,7 +742,7 @@ func ListEntries() []Entry {
 	defer mu.RUnlock()
 	out := make([]Entry, len(data.List))
 	for i, it := range data.List {
-		out[i] = Entry{ID: it.ID, Label: it.Label, Value: it.Value}
+		out[i] = Entry(it)
 	}
 	return out
 }
@@ -800,23 +800,23 @@ func ListEntriesForOwner(owner string, includeHostOnly bool) []Entry {
 }
 
 // ReplaceEntries 替换内存设置列表（保留 cache）；并覆盖写入 owner=''。
-func ReplaceEntries(entries []Entry) {
-	ReplaceEntriesForOwner("", entries)
+func ReplaceEntries(entries []Entry) error {
+	return ReplaceEntriesForOwner("", entries)
 }
 
 // ReplaceEntriesForOwner 覆盖写入指定 owner 的设置行（DB 单事务先清后写）。
 // host-only 键仅在 owner=="" 时写入。
-func ReplaceEntriesForOwner(owner string, entries []Entry) {
+func ReplaceEntriesForOwner(owner string, entries []Entry) error {
 	if owner == "" {
 		mu.Lock()
 		data.List = make([]item, 0, len(entries))
 		for _, e := range entries {
-			data.List = append(data.List, item{ID: e.ID, Label: e.Label, Value: e.Value})
+			data.List = append(data.List, item(e))
 		}
 		mu.Unlock()
 	}
 	if storeDB == nil {
-		return
+		return nil
 	}
 	items := make([]database.SettingKV, 0, len(entries))
 	for _, e := range entries {
@@ -829,7 +829,7 @@ func ReplaceEntriesForOwner(owner string, entries []Entry) {
 		}
 		items = append(items, database.SettingKV{ID: id, Value: e.Value})
 	}
-	_ = storeDB.ReplaceSettings(owner, items)
+	return storeDB.ReplaceSettings(owner, items)
 }
 
 // EnsureDeviceUUID 确保设备 UUID 存在。

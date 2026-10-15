@@ -11,10 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
 )
 
-const androidSourceBase = "http://127.0.0.1:9979"
+var androidSourceBase = localproxy.DefaultBridgeBaseURL()
 
 type androidSourceResp struct {
 	OK      bool   `json:"ok"`

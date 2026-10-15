@@ -13,10 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
 )
 
-const androidThunderBase = "http://127.0.0.1:9979"
+var androidThunderBase = localproxy.DefaultBridgeBaseURL()
 
 type androidThunderFile struct {
 	Name    string `json:"name"`

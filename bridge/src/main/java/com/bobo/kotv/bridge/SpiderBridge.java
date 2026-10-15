@@ -177,7 +177,7 @@ public class SpiderBridge {
         }
         if (serveHttp) {
             if (httpPort <= 0) {
-                httpPort = 9979;
+                httpPort = com.github.catvod.Proxy.DEFAULT_BRIDGE_PORT;
             }
             serveHttp(httpPort);
             return;

@@ -191,19 +191,6 @@ func ResolveScopeKey(userID, scopeID, clientID string) string {
 	return ""
 }
 
-// NormalizeScopeKey 兼容旧调用：已带前缀原样；裸 id 当作 clientId（本机）。
-// 新代码请用 ResolveScopeKey，以便区分 userId / clientId。
-func NormalizeScopeKey(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if strings.HasPrefix(raw, "u:") || strings.HasPrefix(raw, "c:") {
-		return raw
-	}
-	return "c:" + raw
-}
-
 // UserIDFromScope 从 ScopeID 取出裸 userId；非 u: 前缀返回空。
 func UserIDFromScope(scope string) string {
 	scope = strings.TrimSpace(scope)

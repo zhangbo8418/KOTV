@@ -3,8 +3,14 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 /// 本机引擎默认端口（与 Go `localproxy.DefaultPort` 一致）。
 const kotvDefaultEnginePort = 9978;
 
+/// 安卓 Spider 侧车端口（与 Go `localproxy.DefaultBridgePort` 一致；≠ 引擎端口）。
+const kotvDefaultSpiderBridgePort = 9979;
+
 /// 本机引擎默认地址（无 client.json / 无有效远端地址时使用）。
 const kotvDefaultLocalEngineBaseUrl = 'http://127.0.0.1:$kotvDefaultEnginePort';
+
+/// 本机 Spider 侧车根地址。
+const kotvDefaultSpiderBridgeBaseUrl = 'http://127.0.0.1:$kotvDefaultSpiderBridgePort';
 
 /// 引擎 baseUrl 是否指向本机（127.0.0.1 / localhost / ::1）。
 /// 本机连接不鉴权、不带账号；仅非本机地址才用远端登录。
@@ -48,20 +54,29 @@ String kotvNormalizeEngineBaseUrl(String raw) {
   return v;
 }
 
-/// 运行时有效引擎地址：无地址 / 空 host / 无效 → 本机 9978；http 无端口补 9978。
+/// Web 无配置地址时用页面 origin；否则本机引擎默认根。
+String kotvFallbackEngineBaseUrl() {
+  if (kIsWeb) {
+    final origin = Uri.base.origin;
+    if (origin.isNotEmpty && origin != 'null') return origin;
+  }
+  return kotvDefaultLocalEngineBaseUrl;
+}
+
+/// 运行时有效引擎地址：无地址 / 空 host / 无效 → Web 用页面 origin，否则本机 9978；http 无端口补 9978。
 String kotvEffectiveEngineBaseUrl(String raw) {
   final n = kotvNormalizeEngineBaseUrl(raw);
-  if (n.isEmpty) return kotvDefaultLocalEngineBaseUrl;
+  if (n.isEmpty) return kotvFallbackEngineBaseUrl();
   late final Uri u;
   try {
     u = Uri.parse(n);
   } catch (_) {
-    return kotvDefaultLocalEngineBaseUrl;
+    return kotvFallbackEngineBaseUrl();
   }
-  if (u.host.isEmpty) return kotvDefaultLocalEngineBaseUrl;
+  if (u.host.isEmpty) return kotvFallbackEngineBaseUrl();
   final scheme = u.scheme.toLowerCase();
   if (scheme != 'http' && scheme != 'https') {
-    return kotvDefaultLocalEngineBaseUrl;
+    return kotvFallbackEngineBaseUrl();
   }
   if (!u.hasPort && scheme == 'http') {
     return u.replace(port: kotvDefaultEnginePort).toString();

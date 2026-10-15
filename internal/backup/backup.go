@@ -84,8 +84,10 @@ func Import(db *database.DB, data []byte) (*Payload, error) {
 	if err := db.ImportKeep(owner, payload.Keep, 2); err != nil {
 		return nil, fmt.Errorf("恢复收藏失败: %w", err)
 	}
-	if len(payload.Settings) > 0 {
-		settings.ReplaceEntriesForOwner(owner, payload.Settings)
+	if err := settings.ReplaceEntriesForOwner(owner, payload.Settings); err != nil {
+		return nil, fmt.Errorf("恢复设置失败: %w", err)
+	}
+	if owner == "" {
 		if err := settings.Save(); err != nil {
 			return nil, fmt.Errorf("恢复设置失败: %w", err)
 		}

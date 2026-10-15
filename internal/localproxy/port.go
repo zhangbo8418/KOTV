@@ -13,6 +13,9 @@ import (
 
 const DefaultPort = 9978
 
+// DefaultBridgePort 安卓 SpiderService / JAR·PY 侧车端口（与引擎 DefaultPort 分离）。
+const DefaultBridgePort = 9979
+
 var port atomic.Int32
 
 func init() {
@@ -41,6 +44,11 @@ func DefaultLocalBaseURL() string {
 // LocalBaseURL 当前运行时本机引擎根（无 /proxy）。
 func LocalBaseURL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d", Port())
+}
+
+// DefaultBridgeBaseURL 本机 Spider 侧车根地址（无尾斜杠）。
+func DefaultBridgeBaseURL() string {
+	return fmt.Sprintf("http://127.0.0.1:%d", DefaultBridgePort)
 }
 
 func BaseURL(local bool) string {

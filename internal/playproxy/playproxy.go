@@ -111,7 +111,10 @@ func LocalHTTPBase() string {
 	if b := hostclient.PublicBase(); b != "" {
 		return b
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d", enginePort())
+	if p := enginePort(); p > 0 && p != localproxy.DefaultPort {
+		return fmt.Sprintf("http://127.0.0.1:%d", p)
+	}
+	return localproxy.LocalBaseURL()
 }
 
 // PublicizeURL 把地址改成当前请求的客户端打得开的形式。

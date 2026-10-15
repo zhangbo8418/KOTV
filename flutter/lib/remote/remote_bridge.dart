@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../api/kotv_api.dart';
-import '../api/kotv_client_store.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
+import 'engine_api.dart';
 
 /// 轮询 Go 引擎遥控队列，并把播放状态回写给遥控页。
 class RemoteBridge {
@@ -129,9 +129,7 @@ class RemoteBridge {
 }
 
 
-Future<KotvApi> _engineApi() async {
-  return KotvApi(baseUrl: await KotvClientStore.effectiveEngineBaseUrl());
-}
+Future<KotvApi> _engineApi() => kotvEngineApi();
 
 String _historyKey(String site, String id) {
   if (site.isEmpty) return id;

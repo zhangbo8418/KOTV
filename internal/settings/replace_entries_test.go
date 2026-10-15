@@ -26,10 +26,12 @@ func TestReplaceEntriesForOwnerClearsMissingKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ReplaceEntriesForOwner("u1", []Entry{
+	if err := ReplaceEntriesForOwner("u1", []Entry{
 		{ID: "vod", Value: "new-vod"},
 		{ID: "home", Value: "new-home"},
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	v, ok, err := db.GetSetting("u1", "vod")
 	if err != nil || !ok || v != "new-vod" {
@@ -56,10 +58,12 @@ func TestReplaceEntriesForOwnerSkipsHostOnlyForRemote(t *testing.T) {
 	if err := db.SetSetting("", "deviceUUID", "host-uuid"); err != nil {
 		t.Fatal(err)
 	}
-	ReplaceEntriesForOwner("u2", []Entry{
+	if err := ReplaceEntriesForOwner("u2", []Entry{
 		{ID: "vod", Value: "u2-vod"},
 		{ID: "deviceUUID", Value: "stolen"},
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	v, ok, err := db.GetSetting("u2", "vod")
 	if err != nil || !ok || v != "u2-vod" {
 		t.Fatalf("vod=%q ok=%v err=%v", v, ok, err)

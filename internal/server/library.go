@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -275,13 +274,15 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "kept": kept})
 	case "clearkeep":
+		var err error
 		if typ == "livekeep" || typ == "livefav" {
-			items, _ := db.ListKeepLive(owner)
-			for _, it := range items {
-				_ = db.DeleteKeep(owner, it.Key)
-			}
+			err = db.ClearKeepType(owner, database.KeepTypeLive)
 		} else {
-			_ = db.ImportKeep(owner, nil, 2)
+			err = db.ImportKeep(owner, nil, 2)
+		}
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "deletekeep":
@@ -291,21 +292,9 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "replacelivefav":
-		items, _ := db.ListKeepLive(owner)
-		for _, it := range items {
-			_ = db.DeleteKeep(owner, it.Key)
-		}
-		for _, ch := range body.Names {
-			ch = strings.TrimSpace(ch)
-			if ch == "" {
-				continue
-			}
-			_, _ = db.ToggleKeep(owner, database.Keep{
-				Key:        database.KeepLiveKey("live", ch),
-				VodName:    ch,
-				Type:       database.KeepTypeLive,
-				CreateTime: time.Now().UnixMilli(),
-			})
+		if err := db.ReplaceKeepLive(owner, body.Names); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
@@ -313,19 +302,8 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 	}
 }
 
-func libraryOwnerFromRequest(r *http.Request) string {
-	if u := hostclient.DataOwner(); u != "" {
-		return u
-	}
-	scope := hostclient.ResolveScopeKey(
-		r.URL.Query().Get("userId"),
-		r.URL.Query().Get("scopeId"),
-		first(r.URL.Query().Get("clientId"), r.Header.Get("X-Kotv-Client-Id")),
-	)
-	if u := hostclient.UserIDFromScope(scope); u != "" {
-		return u
-	}
-	return ""
+func libraryOwnerFromRequest(_ *http.Request) string {
+	return hostclient.DataOwner()
 }
 
 // splitLibraryKey：vodId@site 或 site$$$vodId → site, id。

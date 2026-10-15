@@ -7,6 +7,9 @@ public class Proxy {
     /** 本机引擎默认端口（与 Go localproxy.DefaultPort 一致）。 */
     public static final int DEFAULT_PORT = 9978;
 
+    /** 安卓 Spider 侧车默认端口（与 Go localproxy.DefaultBridgePort 一致）。 */
+    public static final int DEFAULT_BRIDGE_PORT = 9979;
+
     private static int port = -1;
 
     public static void set(int port) {

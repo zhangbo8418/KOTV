@@ -530,7 +530,7 @@ func (s *pySpider) interrupt() {
 	if goruntime.GOOS == "android" {
 		// 清 Chaquopy 进程内 session，避免换源后复用旧 Spider
 		client := &http.Client{Timeout: 2 * time.Second}
-		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:9979/py/interrupt", bytes.NewReader([]byte("{}")))
+		req, err := http.NewRequest(http.MethodPost, localproxy.DefaultBridgeBaseURL()+"/py/interrupt", bytes.NewReader([]byte("{}")))
 		if err == nil {
 			resp, err := client.Do(req)
 			if err == nil {
@@ -593,7 +593,7 @@ func (s *pySpider) runAndroidLocked(method string, args map[string]interface{}) 
 }
 
 func (s *pySpider) androidCallPythonLocked(method string, args map[string]interface{}, scriptPath, runnerPath string) (string, error) {
-	const base = "http://127.0.0.1:9979"
+	base := localproxy.DefaultBridgeBaseURL()
 	payload := map[string]interface{}{
 		"runnerPath": runnerPath,
 		"scriptPath": scriptPath,

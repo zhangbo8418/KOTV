@@ -18,6 +18,8 @@ void main() {
   });
 
   test('effective defaults empty/malformed to local 9978', () {
+    // VM 测试非 Web：空/畸形回落本机；Web 由 kotvFallbackEngineBaseUrl 走页面 origin。
+    expect(kotvFallbackEngineBaseUrl(), kotvDefaultLocalEngineBaseUrl);
     expect(kotvEffectiveEngineBaseUrl(''), kotvDefaultLocalEngineBaseUrl);
     expect(kotvEffectiveEngineBaseUrl('http://'), kotvDefaultLocalEngineBaseUrl);
     expect(kotvEffectiveEngineBaseUrl('http://:9978'), kotvDefaultLocalEngineBaseUrl);
