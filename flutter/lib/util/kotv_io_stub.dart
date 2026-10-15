@@ -55,6 +55,8 @@ class Directory {
 class FileSystemEntity {
   String get path => '';
   static bool isDirectorySync(String path) => false;
+  Future<FileSystemEntity> delete({bool recursive = false}) async => this;
+  void deleteSync({bool recursive = false}) {}
 }
 
 class FileStat {
