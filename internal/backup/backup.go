@@ -16,16 +16,28 @@ const version = 1
 
 // Payload 备份包内容。
 type Payload struct {
-	Version  int                 `json:"version"`
-	Settings []settings.Entry    `json:"settings"`
-	History  []database.History  `json:"history"`
-	Keep     []database.Keep     `json:"keep"`
+	Version  int                `json:"version"`
+	Settings []settings.Entry   `json:"settings"`
+	History  []database.History `json:"history"`
+	Keep     []database.Keep    `json:"keep"`
 }
 
-// ExportClient 用客户端传入的历史/收藏打包（不读引擎 DB 列表）。
-func ExportClient(hist []database.History, keep []database.Keep) ([]byte, error) {
+// Export 从引擎 SQLite 导出当前 owner 的历史/收藏与 settings。
+func Export(db *database.DB) ([]byte, error) {
+	if db == nil {
+		return nil, fmt.Errorf("库未就绪")
+	}
+	owner := hostclient.DataOwner()
+	hist, err := db.ListAllHistory(owner)
+	if err != nil {
+		return nil, fmt.Errorf("导出历史失败: %w", err)
+	}
 	if hist == nil {
 		hist = []database.History{}
+	}
+	keep, err := db.ListAllKeep(owner, database.KeepTypeVod)
+	if err != nil {
+		return nil, fmt.Errorf("导出收藏失败: %w", err)
 	}
 	if keep == nil {
 		keep = []database.Keep{}

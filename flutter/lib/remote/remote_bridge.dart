@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api/kotv_api.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
-import 'sync_import_apply.dart';
 
 /// 轮询 Go 引擎遥控队列，并把播放状态回写给遥控页。
 class RemoteBridge {
@@ -285,59 +283,6 @@ class LocalHistory {
         },
       });
     } catch (_) {}
-  }
-
-  static Future<void> replaceAll(List<VodItem> items) async {
-    final api = await _engineApi();
-    await api.tools('mirrorSync', {
-      'history': jsonEncode(toSyncTargets(items.take(60).toList())),
-    });
-  }
-
-  static List<Map<String, dynamic>> toSyncTargets(List<VodItem> items) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    return [
-      for (final e in items)
-        if (e.id.isNotEmpty)
-          {
-            'key': '${e.site}\$\$\$${e.id}',
-            'vodPic': e.pic,
-            'vodName': e.name,
-            'vodFlag': e.flag,
-            'vodRemarks': e.remarks,
-            if (e.site == 'push_agent') 'episodeUrl': e.id,
-            'createTime': now,
-            'position': e.positionMs,
-            'duration': e.durationMs,
-            'speed': 1.0,
-            'opening': 0,
-            'ending': 0,
-          },
-    ];
-  }
-
-  static List<VodItem> fromSyncTargets(String raw) {
-    final out = <VodItem>[];
-    for (final j in decodeSyncList(raw)) {
-      var site = '';
-      var id = '';
-      parseSyncVodKey('${j['key'] ?? ''}', (s, i) {
-        site = s;
-        id = i;
-      });
-      if (id.isEmpty) continue;
-      out.add(VodItem(
-        id: id,
-        name: '${j['vodName'] ?? ''}',
-        pic: '${j['vodPic'] ?? ''}',
-        remarks: '${j['vodRemarks'] ?? ''}',
-        site: site,
-        flag: '${j['vodFlag'] ?? ''}',
-        positionMs: syncInt(j['position']),
-        durationMs: syncInt(j['duration']),
-      ));
-    }
-    return out;
   }
 
   static Future<void> clear() async {

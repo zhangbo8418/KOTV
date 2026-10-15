@@ -265,24 +265,6 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	case "togglelivefav":
-		ch := strings.TrimSpace(body.Name)
-		if ch == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing name"})
-			return
-		}
-		k := database.Keep{
-			Key:        database.KeepLiveKey("live", ch),
-			VodName:    ch,
-			Type:       database.KeepTypeLive,
-			CreateTime: time.Now().UnixMilli(),
-		}
-		kept, err := db.ToggleKeep(owner, k)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "kept": kept})
 	case "replacelivefav":
 		items, _ := db.ListKeepLive(owner)
 		for _, it := range items {

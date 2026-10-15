@@ -48,14 +48,11 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 			strParam(params, "host"),
 			strParam(params, "pair"),
 			strParam(params, "type"),
-			strParam(params, "targets"),
 		)
 	case "backupexport":
 		return a.toolBackupExport(params)
 	case "backupimport":
 		return a.toolBackupImport(strParam(params, "path"))
-	case "mirrorsync":
-		return a.toolMirrorSync(strParam(params, "history"), strParam(params, "keep"))
 	case "castdiscover":
 		return a.toolCastDiscover()
 	case "cast":
@@ -278,11 +275,10 @@ func (a *App) toolCheckSpider() (map[string]any, error) {
 	}, nil
 }
 
-func (a *App) toolSyncSend(host, pair, syncType, targets string) (map[string]any, error) {
+func (a *App) toolSyncSend(host, pair, syncType string) (map[string]any, error) {
 	host = strings.TrimSpace(host)
 	pair = strings.TrimSpace(pair)
 	syncType = strings.TrimSpace(syncType)
-	targets = strings.TrimSpace(targets)
 	if host == "" {
 		return nil, fmt.Errorf("IP 不能为空")
 	}
@@ -292,13 +288,33 @@ func (a *App) toolSyncSend(host, pair, syncType, targets string) (map[string]any
 	if syncType != "history" && syncType != "keep" {
 		return nil, fmt.Errorf("无效同步类型")
 	}
-	if targets == "" {
-		return nil, fmt.Errorf("请提供 targets（客户端历史/收藏）")
+	if a.DB == nil {
+		return nil, fmt.Errorf("库未就绪")
 	}
-	if !json.Valid([]byte(targets)) {
-		return nil, fmt.Errorf("targets 不是合法 JSON")
+	owner := hostclient.DataOwner()
+	var body []byte
+	var err error
+	switch syncType {
+	case "history":
+		items, e := a.DB.ListAllHistory(owner)
+		if e != nil {
+			return nil, e
+		}
+		for i := range items {
+			items[i].Key = database.ExternalHistoryKey(items[i].Key)
+		}
+		body, err = json.Marshal(items)
+	case "keep":
+		items, e := a.DB.ListAllKeep(owner, database.KeepTypeVod)
+		if e != nil {
+			return nil, e
+		}
+		body, err = json.Marshal(items)
 	}
-	if err := sendSyncData(host, pair, syncType, 1, []byte(targets)); err != nil {
+	if err != nil {
+		return nil, err
+	}
+	if err := sendSyncData(host, pair, syncType, 1, body); err != nil {
 		return nil, err
 	}
 	label := "历史"
@@ -313,20 +329,7 @@ func (a *App) toolBackupExport(params map[string]any) (map[string]any, error) {
 	if path == "" {
 		return nil, fmt.Errorf("请指定备份路径")
 	}
-	histRaw := strParam(params, "history")
-	keepRaw := strParam(params, "keep")
-	if histRaw == "" || keepRaw == "" {
-		return nil, fmt.Errorf("请提供 history 与 keep（客户端列表）")
-	}
-	var hist []database.History
-	var keep []database.Keep
-	if err := json.Unmarshal([]byte(histRaw), &hist); err != nil {
-		return nil, fmt.Errorf("history 不是合法 JSON: %w", err)
-	}
-	if err := json.Unmarshal([]byte(keepRaw), &keep); err != nil {
-		return nil, fmt.Errorf("keep 不是合法 JSON: %w", err)
-	}
-	data, err := backup.ExportClient(hist, keep)
+	data, err := backup.Export(a.DB)
 	if err != nil {
 		return nil, err
 	}
@@ -348,52 +351,14 @@ func (a *App) toolBackupImport(path string) (map[string]any, error) {
 	if len(data) > 32<<20 {
 		return nil, fmt.Errorf("备份文件过大")
 	}
-	payload, err := backup.Import(a.DB, data)
-	if err != nil {
+	if _, err := backup.Import(a.DB, data); err != nil {
 		return nil, err
 	}
 	a.SyncDLNARenderer()
-	histJSON, _ := json.Marshal(payload.History)
-	keepJSON, _ := json.Marshal(payload.Keep)
 	return map[string]any{
 		"ok":      true,
 		"message": "备份已恢复",
-		"history": string(histJSON),
-		"keep":    string(keepJSON),
 	}, nil
-}
-
-// toolMirrorSync 全量覆盖写入引擎 history/keep（备份恢复等批量导入）。
-func (a *App) toolMirrorSync(histRaw, keepRaw string) (map[string]any, error) {
-	histRaw = strings.TrimSpace(histRaw)
-	keepRaw = strings.TrimSpace(keepRaw)
-	if histRaw == "" && keepRaw == "" {
-		return map[string]any{"ok": true}, nil
-	}
-	if histRaw != "" {
-		var items []database.History
-		if err := json.Unmarshal([]byte(histRaw), &items); err != nil {
-			return nil, fmt.Errorf("history JSON: %w", err)
-		}
-		for i := range items {
-			items[i].Key = database.NormalizeExternalHistoryKey(items[i].Key)
-		}
-		owner := hostclient.DataOwner()
-		if err := a.DB.ImportHistory(owner, items, 2); err != nil {
-			return nil, err
-		}
-	}
-	if keepRaw != "" {
-		var items []database.Keep
-		if err := json.Unmarshal([]byte(keepRaw), &items); err != nil {
-			return nil, fmt.Errorf("keep JSON: %w", err)
-		}
-		owner := hostclient.DataOwner()
-		if err := a.DB.ImportKeep(owner, items, 2); err != nil {
-			return nil, err
-		}
-	}
-	return map[string]any{"ok": true}, nil
 }
 
 func (a *App) toolCastDiscover() (map[string]any, error) {

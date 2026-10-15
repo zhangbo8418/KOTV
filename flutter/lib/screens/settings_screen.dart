@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import '../util/kotv_io.dart';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -22,7 +21,6 @@ import '../player/play_headers.dart';
 import '../player/video_eq.dart';
 import '../providers.dart';
 import '../api/kotv_settings_cache.dart';
-import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
@@ -1862,14 +1860,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
     if (ok != true) return;
     final typeTrim = type.trim();
-    final targets = typeTrim == 'keep'
-        ? LocalCollect.toSyncTargets(await LocalCollect.list())
-        : LocalHistory.toSyncTargets(await LocalHistory.list());
     final data = await _runTool('正在发送', () => ref.read(apiProvider).tools('syncSend', {
           'host': hostCtrl.text.trim(),
           'pair': pairCtrl.text.trim(),
           'type': typeTrim,
-          'targets': jsonEncode(targets),
         }));
     if (data == null || !mounted) return;
     setState(() => _status = '${data['message'] ?? '已发送'}');
@@ -1879,15 +1873,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final dir = await getApplicationDocumentsDirectory();
     final def = '${dir.path}${Platform.pathSeparator}kotv-backup.json.gz';
     await _prompt('备份导出路径', def, def, (path) async {
-      final hist = LocalHistory.toSyncTargets(await LocalHistory.list());
-      final keep = LocalCollect.toSyncTargets(await LocalCollect.list());
       final data = await _runTool(
         '正在备份',
-        () => ref.read(apiProvider).tools('backupExport', {
-              'path': path,
-              'history': jsonEncode(hist),
-              'keep': jsonEncode(keep),
-            }),
+        () => ref.read(apiProvider).tools('backupExport', {'path': path}),
       );
       if (data == null || !mounted) return;
       setState(() => _status = '${data['message'] ?? '备份已导出'} → $path');

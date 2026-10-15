@@ -548,7 +548,7 @@ func StartPositionMs(h *History) int64 {
 func (db *DB) ListHistory(owner string, limit int) ([]History, error) {
 	rows, err := db.conn.Query(
 		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1),
+		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_sort,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1),
 		        COALESCE(opening,0), COALESCE(ending,0)
 		 FROM history WHERE owner = ? ORDER BY rev_play DESC, create_time DESC LIMIT ?`, owner, limit)
 	if err != nil {
@@ -559,7 +559,7 @@ func (db *DB) ListHistory(owner string, limit int) ([]History, error) {
 	for rows.Next() {
 		var h History
 		if err := rows.Scan(&h.Key, &h.VodPic, &h.VodName, &h.VodFlag, &h.VodRemarks, &h.EpisodeURL,
-			&h.CreateTime, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending); err != nil {
+			&h.CreateTime, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -675,8 +675,8 @@ func (db *DB) ImportHistory(owner string, items []History, mode int) error {
 		}
 	}
 	stmt := `INSERT OR REPLACE INTO history
-		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, position, duration, speed, opening, ending)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, rev_sort, position, duration, speed, opening, ending)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	for _, h := range items {
 		ct := h.CreateTime
 		if ct == 0 {
@@ -687,7 +687,7 @@ func (db *DB) ImportHistory(owner string, items []History, mode int) error {
 			speed = 1
 		}
 		if _, err := tx.Exec(stmt, owner, h.Key, h.VodPic, h.VodName, h.VodFlag, h.VodRemarks, h.EpisodeURL,
-			ct, ct, h.Position, h.Duration, speed, h.Opening, h.Ending); err != nil {
+			ct, ct, h.RevSort, h.Position, h.Duration, speed, h.Opening, h.Ending); err != nil {
 			return err
 		}
 	}

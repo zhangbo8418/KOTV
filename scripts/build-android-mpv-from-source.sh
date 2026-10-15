@@ -64,7 +64,7 @@ git -C "$WORK/webhtv" fetch --depth 1 origin "$WEBHTV_REF"
 git -C "$WORK/webhtv" checkout -q FETCH_HEAD 2>/dev/null \
   || git -C "$WORK/webhtv" checkout -q "$WEBHTV_REF"
 
-# 覆盖 webhtv 锁里的 FFmpeg：跟 FongMi 9.0.1 分支 tip，不跟它仓库里钉死的旧提交。
+# 覆盖 webhtv 锁里的 FFmpeg：跟上游 release-9.0-fongmi tip，不跟它仓库里钉死的旧提交。
 python3 - "$WORK/webhtv/third_party/mpv-native-lock.json" "$FFMPEG_REPO" "$FFMPEG_COMMIT" <<'PY'
 import json, pathlib, sys
 path = pathlib.Path(sys.argv[1])

@@ -1,10 +1,7 @@
-import 'dart:convert';
-
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
 import '../models/models.dart';
-import 'sync_import_apply.dart';
 
 Future<KotvApi> _engineApi() async {
   final p = await SharedPreferences.getInstance();
@@ -95,7 +92,9 @@ class LocalCollect {
       VodItem? old;
       for (final e in cur) {
         if (e.id == oldId && e.site == site) {
-          if (configSource.trim().isEmpty || e.configSource.trim() == configSource.trim() || e.configSource.trim().isEmpty) {
+          if (configSource.trim().isEmpty ||
+              e.configSource.trim() == configSource.trim() ||
+              e.configSource.trim().isEmpty) {
             old = e;
             break;
           }
@@ -166,58 +165,5 @@ class LocalCollect {
       'action': 'deleteKeep',
       'key': _keepKey(item.site, item.id),
     });
-  }
-
-  static Future<void> replaceAll(List<VodItem> items) async {
-    await (await _engineApi()).tools('mirrorSync', {
-      'keep': jsonEncode(toSyncTargets(items.take(200).toList())),
-    });
-  }
-
-  /// 同步协议 Keep JSON（site$$$id）。
-  static List<Map<String, dynamic>> toSyncTargets(List<VodItem> items) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    return [
-      for (final e in items)
-        if (e.id.isNotEmpty)
-          {
-            'key': _keepKey(e.site, e.id),
-            'vodPic': e.pic,
-            'vodName': e.name,
-            'vodFlag': e.flag,
-            'vodRemarks': e.remarks,
-            'createTime': now,
-            'type': 0,
-            'cid': 0,
-            'siteName': e.configSource.trim().isNotEmpty ? e.configSource.trim() : e.site,
-          },
-    ];
-  }
-
-  static List<VodItem> fromSyncTargets(String raw) {
-    final out = <VodItem>[];
-    for (final j in decodeSyncList(raw)) {
-      var site = '';
-      var id = '';
-      parseSyncVodKey('${j['key'] ?? ''}', (s, i) {
-        site = s;
-        id = i;
-      });
-      if (id.isEmpty) {
-        final sn = '${j['siteName'] ?? ''}'.trim();
-        if (sn.isNotEmpty) site = sn;
-      }
-      if (id.isEmpty) continue;
-      out.add(VodItem(
-        id: id,
-        name: '${j['vodName'] ?? ''}',
-        pic: '${j['vodPic'] ?? ''}',
-        remarks: '${j['vodRemarks'] ?? ''}',
-        site: site,
-        flag: '${j['vodFlag'] ?? ''}',
-        configSource: '${j['config_source'] ?? j['configSource'] ?? j['siteName'] ?? ''}',
-      ));
-    }
-    return out;
   }
 }
