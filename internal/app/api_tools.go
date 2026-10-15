@@ -144,7 +144,7 @@ func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {
 	reloaded := false
 	if opt.Script || opt.Jar {
 		// 爬虫包清掉后必须重载配置，重新下载 JAR / 拉站源；LoadJar 同步 parseJar。
-		// 会话当前源在 ReloadConfig 里会被 settings.VOD 盖掉，先记下，再按该地址重新 GET。
+		// ReloadConfig 以 settings.VOD 为准；远端多会话源可能不同，先记下再按会话地址重拉。
 		snaps := a.snapshotSessionSources()
 		var restoreErr error
 		err := spider.WithSyncLoadJar(func() error {

@@ -176,6 +176,9 @@ func (a *App) finishConfigLoad(cfg *config.Manager, sess *clientsession.Session,
 			sess.Live.SyncFromConfig()
 		}
 		clientsession.SaveSource(sess.ClientID, sess.Source, cfg.Home().Key)
+		// 本机 c: 会话的 Manager 是 ephemeral，parseConfig 不写 settings.VOD；
+		// 不在此同步则冷启动 InitFromSettings 仍用旧指针，表现为换仓后下次启动还原。
+		mirrorLocalSelectedVod(sess, sess.Source)
 		return
 	}
 	a.Ready = true

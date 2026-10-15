@@ -321,8 +321,8 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 	}
 	cur := strings.TrimSpace(sess.Source)
 	if cur != "" && cur == src && sess.Ready {
-		// 源未变时也必须恢复首页：ephemeral SetHome 不写 settings.VOD，
-		// 全局 Init 常落在站点列表第一项（如 Youtube），不能在此直接 return。
+		// 源未变时也必须恢复首页：home 主要记在 client_sessions，
+		// 全局 Init 常落在站点列表第一项，不能在此直接 return。
 		applyHome(homeKey)
 		return
 	}
@@ -343,6 +343,8 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 	if sess.Live != nil {
 		sess.Live.SyncFromConfig()
 	}
+	// 升级前仅写入 client_sessions 的本机换仓，在此把 settings.VOD 补齐。
+	mirrorLocalSelectedVod(sess, src)
 }
 
 // scopeLive 当前 Scope 的直播服务（有会话则用会话内选中源）。
@@ -641,6 +643,7 @@ func (a *App) restoreSessionSources(snaps []sessionSourceSnap) error {
 			s.sess.Sites.InvalidateHomeOnly()
 		}
 		clientsession.SaveSource(s.sess.ClientID, s.src, s.home)
+		mirrorLocalSelectedVod(s.sess, s.src)
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))

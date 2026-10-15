@@ -28,7 +28,7 @@ type Manager struct {
 	api         model.Api
 	home        model.Site
 	db          *database.DB
-	ephemeral   bool // 多用户临时会话：不写 settings.VOD / 不持久化 home
+	ephemeral   bool // 会话克隆：parseConfig 不写 settings.VOD（本机 c: 由 App 同步）
 	onRepoWrite func(string)
 }
 
@@ -69,7 +69,7 @@ func (m *Manager) SetHome(site model.Site) {
 	}
 }
 
-// Ephemeral 是否为多用户临时会话（不写共享 settings / home）。
+// Ephemeral 是否为按 Scope 隔离的会话配置（parseConfig 不写 settings.VOD）。
 func (m *Manager) Ephemeral() bool {
 	return m.ephemeral
 }
@@ -98,7 +98,7 @@ func (m *Manager) noteWrittenRepo(url string) {
 }
 
 // CloneEphemeral 深拷贝站点相关切片，供按 Scope 隔离的「当前选中源」会话。
-// 列表内容从共享配置克隆起步；之后该会话换源不写全局 settings.VOD。
+// 列表从共享配置克隆；Manager 内换源不写 settings.VOD，本机 c: 由 App 另同步。
 func (m *Manager) CloneEphemeral() *Manager {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
