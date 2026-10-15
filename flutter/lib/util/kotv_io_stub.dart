@@ -24,12 +24,22 @@ class Platform {
 class File {
   File(this.path);
   final String path;
+  Directory get parent {
+    final i = path.lastIndexOf('/');
+    if (i <= 0) return Directory('/');
+    return Directory(path.substring(0, i));
+  }
+
   bool existsSync() => false;
   Future<bool> exists() async => false;
   Future<String> readAsString({encoding}) async => '';
   String readAsStringSync({encoding}) => '';
   Future<File> writeAsString(String contents, {encoding, mode, flush}) async => this;
   void writeAsStringSync(String contents, {encoding, mode, flush}) {}
+  Future<File> delete({bool recursive = false}) async => this;
+  void deleteSync({bool recursive = false}) {}
+  Future<File> rename(String newPath) async => File(newPath);
+  File renameSync(String newPath) => File(newPath);
   Future<int> length() async => 0;
   int lengthSync() => 0;
   Future<FileStat> stat() async => FileStat._();
