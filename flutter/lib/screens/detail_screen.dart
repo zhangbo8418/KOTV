@@ -392,16 +392,41 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
+  /// 已有后端实例；勿在 build/浮层里触发 [_ensureMpv] 等惰性创建。
+  KotvPlayback? get _existingPlayback {
+    switch (_backend) {
+      case KotvEmbedBackend.html:
+        return _html;
+      case KotvEmbedBackend.art:
+        return _art;
+      case KotvEmbedBackend.xg:
+        return _xg;
+      case KotvEmbedBackend.zw:
+        return _zw;
+      case KotvEmbedBackend.fvp:
+        return _fvp;
+      case KotvEmbedBackend.exo:
+        return _exo;
+      case KotvEmbedBackend.mpv:
+        return _mk;
+    }
+  }
+
   String get _enginePrefix => flutterPlayerLabel(_playerVal);
 
-  bool get _isBuffering => _playUrl.isNotEmpty && _playback.stalling;
+  bool get _isBuffering {
+    if (_playUrl.isEmpty) return false;
+    final p = _existingPlayback;
+    return p != null && p.stalling;
+  }
 
   /// 换集/解析时 [_playUrl] 可能已清空但原生仍在播，不能单靠它判断可否 pop。
   bool get _playbackSessionActive {
     if (_allowPop) return false;
     if (_playUrl.isNotEmpty) return true;
     if (_stoppedHard) return false;
-    final p = _playback;
+    final p = _existingPlayback;
+    if (p == null) return false;
     if (p.playing || p.buffering) return true;
     if (p.position > Duration.zero && !p.completed) return true;
     return false;
@@ -529,15 +554,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 桌面点播换集：销毁 media_kit Player，避免连播映射/GPU 共享页只涨不降。
-  /// 不改 [_playUrl]，避免 Stable 视频层整段卸掉；随后 [setState] 让 Video remount。
-  Future<void> _recycleDesktopMpv() async {
+  /// 不改 [_playUrl]，避免 Stable 视频层整段卸掉；随后 [setState] 卸已死 Texture。
+  /// [serial] 须为本次 [_playAt] 世代：离页 [_stopHard] 抬世代后禁止再 setState，以免 build 建出孤儿 Player。
+  Future<void> _recycleDesktopMpv({required int serial}) async {
     if (kotvIsAndroid()) return;
     await _disposeDesktopMpvOwned();
     if (_mpvOpts.diskCache) {
       await kotvClearMpvDemuxerCacheDir();
     }
-    // 卸掉已 dispose 的 Texture；build 里 [_playback]/[_ensureMpv] 再建空实例，open 再挂源。
-    if (mounted) setState(() {});
+    // 离页/换代后勿 remount：[_ensureMpv] 会在 Overlay/画面 build 里新建实例且无人 dispose。
+    if (!mounted || _leaving || serial != _playAtSerial) return;
+    setState(() {});
   }
 
   /// 切到其它内置后端时停掉闲置引擎。
@@ -2013,7 +2040,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await _stopAllBackends();
     if (serial != _playAtSerial || !mounted) return;
     // 桌面：换集销毁 libmpv，避免连播映射/GPU 共享页只涨不降；稍后 _ensureMpv 再建。
-    await _recycleDesktopMpv();
+    await _recycleDesktopMpv(serial: serial);
     if (serial != _playAtSerial || !mounted) return;
     // 先 await 软取消上一集，再 play。unawaited 会与本次 play 竞态：
     // SoftCancel 抬 epoch → JS/JAR 立刻报「脚本调用已中断」。
@@ -2455,6 +2482,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 全屏/详情共用画面。原位全屏时 Element 不挪树；Android 原生 Surface 另加 KeyedSubtree。
   /// 固定画幅：Exo/其它用 [AspectRatio]；Android MPV 走原生 video-aspect-override，勿再套一层。
   Widget _buildSharedVideo({BoxFit fit = BoxFit.contain}) {
+    // 桌面换集刚 dispose：勿经 [_playback] 提前 _ensureMpv，否则解析期/离页交错易留孤儿实例。
+    if (!kotvIsAndroid() && _backend == KotvEmbedBackend.mpv && _mk == null) {
+      return const ColoredBox(color: Colors.black);
+    }
     Widget inner = kotvPlaybackView(
       playerVal: _playerVal,
       playback: _playback,
@@ -2691,59 +2722,78 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             if (_immersiveFullscreen) ...[
               // 全屏控件在外层；此处不叠内嵌解析/中心钮。
             ] else ...[
-              ValueListenableBuilder<List<DanmakuItem>>(
-                valueListenable: _danmakuItems,
-                builder: (context, items, _) => DanmakuOverlay(
-                  enabled: _danmakuOn,
-                  player: _playback,
-                  items: items,
-                  fontSize: _danmakuSize,
-                  opacity: _danmakuOpacity,
-                  rows: _danmakuRows,
-                  maxOnScreen: _danmakuMaxOnScreen,
-                  scrollAreaRatio: _danmakuScrollArea,
-                  showScroll: _danmakuShowScroll,
-                  showTop: _danmakuShowTop,
-                  showBottom: _danmakuShowBottom,
-                  showReverse: _danmakuShowReverse,
-                  showSpecial: _danmakuShowSpecial,
-                  showPositioned: _danmakuShowPositioned,
-                  bold: _danmakuBold,
-                  durationMs: _danmakuDurationMs,
-                  fixedDurationMs: _danmakuFixedDurationMs,
-                  lineSpacing: _danmakuLineSpacing,
-                  strokeMode: _danmakuStrokeMode,
-                  colorMode: _danmakuColorMode,
-                  rowsTop: _danmakuRowsTop,
-                  rowsBottom: _danmakuRowsBottom,
-                  fontFamily: _danmakuFontFamily,
-                  scrollGapRatio: _danmakuScrollGap,
-                  strokeWidth: _danmakuStrokeWidth,
-                  shadowOpacity: _danmakuShadowOpacity,
-                  projectionOffsetX: _danmakuProjectionOffsetX,
-                  projectionOffsetY: _danmakuProjectionOffsetY,
-                  projectionOpacity: _danmakuProjectionOpacity,
-                ),
-              ),
-              KotvBufferingOverlay(
-                player: _playback,
-                force: _status.contains('解析') ||
-                    _status.contains('嗅探') ||
-                    _status.contains('换集中'),
-                forceText: (_status.contains('解析') ||
-                        _status.contains('嗅探') ||
-                        _status.contains('换集中'))
-                    ? '正在解析播放地址'
-                    : null,
-              ),
-              ExcludeFocus(
-                child: CenterPlayPauseButton(
-                  player: _playback,
-                  hideWhenBuffering: true,
-                  enabled: !_status.contains('解析') &&
-                      !_status.contains('嗅探') &&
-                      !_status.contains('换集中'),
-                ),
+              Builder(
+                builder: (context) {
+                  final pb = _existingPlayback;
+                  final parsing = _status.contains('解析') ||
+                      _status.contains('嗅探') ||
+                      _status.contains('换集中');
+                  if (pb == null) {
+                    // 桌面换集 dispose 后、open 前：勿 [_playback] 惰性建实例。
+                    if (!parsing) return const SizedBox.shrink();
+                    return const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: Colors.white70),
+                          SizedBox(height: 12),
+                          Text('正在解析播放地址', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        ],
+                      ),
+                    );
+                  }
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ValueListenableBuilder<List<DanmakuItem>>(
+                        valueListenable: _danmakuItems,
+                        builder: (context, items, _) => DanmakuOverlay(
+                          enabled: _danmakuOn,
+                          player: pb,
+                          items: items,
+                          fontSize: _danmakuSize,
+                          opacity: _danmakuOpacity,
+                          rows: _danmakuRows,
+                          maxOnScreen: _danmakuMaxOnScreen,
+                          scrollAreaRatio: _danmakuScrollArea,
+                          showScroll: _danmakuShowScroll,
+                          showTop: _danmakuShowTop,
+                          showBottom: _danmakuShowBottom,
+                          showReverse: _danmakuShowReverse,
+                          showSpecial: _danmakuShowSpecial,
+                          showPositioned: _danmakuShowPositioned,
+                          bold: _danmakuBold,
+                          durationMs: _danmakuDurationMs,
+                          fixedDurationMs: _danmakuFixedDurationMs,
+                          lineSpacing: _danmakuLineSpacing,
+                          strokeMode: _danmakuStrokeMode,
+                          colorMode: _danmakuColorMode,
+                          rowsTop: _danmakuRowsTop,
+                          rowsBottom: _danmakuRowsBottom,
+                          fontFamily: _danmakuFontFamily,
+                          scrollGapRatio: _danmakuScrollGap,
+                          strokeWidth: _danmakuStrokeWidth,
+                          shadowOpacity: _danmakuShadowOpacity,
+                          projectionOffsetX: _danmakuProjectionOffsetX,
+                          projectionOffsetY: _danmakuProjectionOffsetY,
+                          projectionOpacity: _danmakuProjectionOpacity,
+                        ),
+                      ),
+                      KotvBufferingOverlay(
+                        player: pb,
+                        force: parsing,
+                        forceText: parsing ? '正在解析播放地址' : null,
+                      ),
+                      ExcludeFocus(
+                        child: CenterPlayPauseButton(
+                          player: pb,
+                          hideWhenBuffering: true,
+                          enabled: !parsing,
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ],
           ],
