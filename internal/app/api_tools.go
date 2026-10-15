@@ -40,6 +40,9 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 	case "checkspider":
 		return a.toolCheckSpider()
 	case "resetpair":
+		if hostclient.DataOwner() != "" {
+			return nil, fmt.Errorf("远端会话不能重置配对码")
+		}
 		code := settings.ResetSyncPairCode()
 		_ = settings.Save()
 		return map[string]any{"ok": true, "pairCode": code, "message": "新配对码: " + code}, nil

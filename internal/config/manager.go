@@ -55,13 +55,17 @@ func (m *Manager) Home() model.Site {
 	return m.home
 }
 
-// SetHome 切换首页站点；有配置 URL 时写入 config.home（仓级默认）。
-// 用户当前首页另由 setting(owner,'home') 持久化。
+// SetHome 切换首页站点；非 ephemeral 且有配置 URL 时写入 config.home（仓级默认）。
+// 用户当前首页另由 setting(owner,'home') 持久化；ephemeral 不改共享仓默认。
 func (m *Manager) SetHome(site model.Site) {
 	m.mu.Lock()
 	m.home = site
 	cfgURL := m.api.URL
+	ephem := m.ephemeral
 	m.mu.Unlock()
+	if ephem {
+		return
+	}
 	if m.db != nil && site.Key != "" && cfgURL != "" {
 		if err := m.db.SetConfigHome(cfgURL, database.ConfigTypeSite, site.Key); err != nil {
 			log.Printf("保存首页站点失败: %v", err)

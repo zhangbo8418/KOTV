@@ -9,10 +9,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'desktop/mini_player_window.dart';
+import 'api/kotv_client_store.dart';
 import 'api/kotv_engine_url.dart';
 import 'api/kotv_settings_cache.dart';
 import 'engine/engine_launcher.dart';
@@ -66,8 +66,7 @@ Future<void> _kotvSyncLanguageSetting() async {
         locale.countryCode == 'MO';
     final lang = traditional ? 'zh-Hant' : '';
     if (lang.isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    var base = (prefs.getString('engine_base_url') ?? '').trim();
+    var base = (await KotvClientStore.engineBaseUrl()).trim();
     if (base.isEmpty) base = 'http://127.0.0.1:9978';
     await http
         .post(
@@ -183,13 +182,13 @@ Future<void> main() async {
   }
   unawaited(KotvBufferBudget.warm());
   unawaited(_kotvSyncLanguageSetting());
-  final prefs = await SharedPreferences.getInstance();
+  final client = await KotvClientStore.load();
   if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
     await windowManager.ensureInitialized();
-    final savedW = prefs.getDouble('window_w');
-    final savedH = prefs.getDouble('window_h');
-    final savedX = prefs.getDouble('window_x');
-    final savedY = prefs.getDouble('window_y');
+    final savedW = client.windowW;
+    final savedH = client.windowH;
+    final savedX = client.windowX;
+    final savedY = client.windowY;
     final size = Size(
       (savedW ?? 1280).clamp(kotvMinWindowSize.width, 10000),
       (savedH ?? 720).clamp(kotvMinWindowSize.height, 10000),
@@ -210,22 +209,24 @@ Future<void> main() async {
       await windowManager.focus();
     });
   }
-  var engineUrl = prefs.getString('engine_base_url');
+  var engineUrl = client.engineBaseUrl.isEmpty ? null : client.engineBaseUrl;
   // Web：固定同源引擎（本页所在服务器），不可改远端地址。
   if (kIsWeb) {
-    await prefs.remove('engine_base_url');
+    await KotvClientStore.setEngineBaseUrl('');
     final origin = Uri.base.origin;
     engineUrl = (origin.isNotEmpty && origin != 'null') ? origin : 'http://127.0.0.1:9978';
   } else {
     // 远端地址若无 token：降级为草稿，启动仍用本机（不拉远端仓）
-    final tok = (prefs.getString('kotv_auth_token') ?? '').trim();
+    final tok = client.authToken.trim();
     if (engineUrl != null &&
         engineUrl.isNotEmpty &&
         !kotvIsLocalEngineBaseUrl(engineUrl) &&
         tok.isEmpty) {
-      await prefs.setString('engine_base_url_draft', engineUrl);
-      await prefs.remove('engine_base_url');
-      await prefs.remove('remote_username');
+      await KotvClientStore.update((d) {
+        d.engineBaseUrlDraft = engineUrl!;
+        d.engineBaseUrl = '';
+        d.remoteUsername = '';
+      });
       engineUrl = null;
     }
   }
@@ -301,11 +302,12 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
     try {
       final size = await windowManager.getSize();
       final pos = await windowManager.getPosition();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble('window_w', size.width);
-      await prefs.setDouble('window_h', size.height);
-      await prefs.setDouble('window_x', pos.dx);
-      await prefs.setDouble('window_y', pos.dy);
+      await KotvClientStore.setWindowBounds(
+        w: size.width,
+        h: size.height,
+        x: pos.dx,
+        y: pos.dy,
+      );
     } catch (_) {}
   }
 
@@ -446,13 +448,12 @@ class _EngineOfflinePage extends ConsumerWidget {
       ),
     );
     if (v == null) return;
-    final prefs = await SharedPreferences.getInstance();
     final n = kotvNormalizeEngineBaseUrl(v);
     if (n.isEmpty) {
-      await prefs.remove('engine_base_url');
+      await KotvClientStore.clearEngine();
       launcher.applyBaseUrl('');
     } else {
-      await prefs.setString('engine_base_url', n);
+      await KotvClientStore.setEngineBaseUrl(n);
       launcher.applyBaseUrl(n);
     }
     ref.read(apiProvider).baseUrl = launcher.baseUrl;

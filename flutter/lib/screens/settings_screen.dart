@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
+import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
 import '../models/models.dart';
@@ -68,11 +68,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((p) async {
-      final draft = p.getString('engine_base_url_draft') ?? '';
-      final effective = p.getString('engine_base_url') ?? '';
+    KotvClientStore.load().then((c) {
+      final draft = c.engineBaseUrlDraft;
+      final effective = c.engineBaseUrl;
       _engineCtrl.text = draft.isNotEmpty ? draft : effective;
-      _remoteUser = p.getString('remote_username') ?? '';
+      _remoteUser = c.remoteUsername;
       if (mounted) setState(() {});
     });
     _reload();
@@ -1676,19 +1676,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     showAppNews(context, msg);
   }
 
-  /// 切换业务引擎：[baseUrl] 为空即本机。写 prefs → 换地址 → 作废缓存 →
+  /// 切换业务引擎：[baseUrl] 为空即本机。写 client.json → 换地址 → 作废缓存 →
   /// 本机未运行则拉起 → 重新加载本页（点播源 / 直播源 / 线路等换成新引擎的数据）。
   Future<void> _switchEngine(String baseUrl, {String user = ''}) async {
     await DetailScreen.prepareLeave();
     await LiveScreen.prepareLeave();
     final launcher = ref.read(engineLauncherProvider);
-    final prefs = await SharedPreferences.getInstance();
     if (baseUrl.isEmpty) {
-      await prefs.remove('engine_base_url');
-      await prefs.remove('remote_username');
+      await KotvClientStore.clearEngine();
     } else {
-      await prefs.setString('engine_base_url', baseUrl);
-      await prefs.setString('remote_username', user);
+      await KotvClientStore.update((d) {
+        d.engineBaseUrl = baseUrl;
+        d.remoteUsername = user;
+      });
     }
     launcher.applyBaseUrl(baseUrl);
     ref.read(apiProvider).baseUrl = launcher.baseUrl;
@@ -1712,11 +1712,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _applyEngineUrl(String raw) async {
     final normalized = kotvNormalizeEngineBaseUrl(raw);
     _engineCtrl.text = normalized;
-    final prefs = await SharedPreferences.getInstance();
 
     // 空 / 本机：立即切回本机，清远端登录态
     if (normalized.isEmpty || kotvIsLocalEngineBaseUrl(normalized)) {
-      await prefs.remove('engine_base_url_draft');
+      await KotvClientStore.setEngineBaseUrlDraft('');
       await kotvClearAuthToken();
       await _switchEngine('');
       if (!mounted) return;
@@ -1726,7 +1725,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
 
     // 远端：只探测，不切换业务引擎；未登录继续用本机仓
-    await prefs.setString('engine_base_url_draft', normalized);
+    await KotvClientStore.setEngineBaseUrlDraft(normalized);
     if (!mounted) return;
     setState(() => _status = '正在探测 $normalized…');
 

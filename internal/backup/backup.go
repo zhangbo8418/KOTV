@@ -42,9 +42,10 @@ func Export(db *database.DB) ([]byte, error) {
 	if keep == nil {
 		keep = []database.Keep{}
 	}
+	includeHost := owner == ""
 	payload := Payload{
 		Version:  version,
-		Settings: settings.ListEntries(),
+		Settings: settings.ListEntriesForOwner(owner, includeHost),
 		History:  hist,
 		Keep:     keep,
 	}
@@ -84,7 +85,7 @@ func Import(db *database.DB, data []byte) (*Payload, error) {
 		return nil, fmt.Errorf("恢复收藏失败: %w", err)
 	}
 	if len(payload.Settings) > 0 {
-		settings.ReplaceEntries(payload.Settings)
+		settings.ReplaceEntriesForOwner(owner, payload.Settings)
 		if err := settings.Save(); err != nil {
 			return nil, fmt.Errorf("恢复设置失败: %w", err)
 		}

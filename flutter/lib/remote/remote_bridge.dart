@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
+import '../api/kotv_client_store.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
 
@@ -130,8 +130,7 @@ class RemoteBridge {
 
 
 Future<KotvApi> _engineApi() async {
-  final p = await SharedPreferences.getInstance();
-  final base = (p.getString('engine_base_url') ?? '').trim();
+  final base = (await KotvClientStore.engineBaseUrl()).trim();
   return KotvApi(baseUrl: base.isEmpty ? 'http://127.0.0.1:9978' : base);
 }
 
@@ -256,31 +255,11 @@ class LocalHistory {
     required String newId,
   }) async {
     if (oldId.isEmpty || newId.isEmpty || oldId == newId) return;
-    final api = await _engineApi();
     try {
-      final cur = await list();
-      VodItem? old;
-      for (final e in cur) {
-        if (e.id == oldId && e.site == site) {
-          old = e;
-          break;
-        }
-      }
-      if (old == null) return;
-      await api.libraryAction({'action': 'deleteHistory', 'key': _historyKey(site, oldId)});
-      if (cur.any((e) => e.id == newId && e.site == site)) return;
-      await api.libraryAction({
-        'action': 'saveHistory',
-        'item': {
-          'key': _historyKey(site, newId),
-          'vodPic': old.pic,
-          'vodName': old.name,
-          'vodFlag': old.flag,
-          'vodRemarks': old.remarks,
-          'position': old.positionMs,
-          'duration': old.durationMs,
-          'speed': 1.0,
-        },
+      await (await _engineApi()).libraryAction({
+        'action': 'renameHistory',
+        'key': _historyKey(site, oldId),
+        'newKey': _historyKey(site, newId),
       });
     } catch (_) {}
   }

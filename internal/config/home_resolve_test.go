@@ -116,7 +116,7 @@ func TestSetHome_PersistsExplicitChoice(t *testing.T) {
 	}
 }
 
-func TestSetHome_EphemeralAlsoPersistsDB(t *testing.T) {
+func TestSetHome_EphemeralDoesNotPersistDB(t *testing.T) {
 	db, err := database.OpenPath(filepath.Join(t.TempDir(), "ephemeral-home.db"))
 	if err != nil {
 		t.Fatalf("OpenPath: %v", err)
@@ -136,11 +136,14 @@ func TestSetHome_EphemeralAlsoPersistsDB(t *testing.T) {
 	}
 	ephem := base.CloneEphemeral()
 	ephem.SetHome(model.Site{Key: "cfg", Name: "网盘及弹幕配置"})
+	if ephem.Home().Key != "cfg" {
+		t.Fatalf("runtime Home=%q want cfg", ephem.Home().Key)
+	}
 	got, err := db.FindConfig(url, database.ConfigTypeSite)
 	if err != nil || got == nil {
 		t.Fatalf("FindConfig: %v", err)
 	}
-	if got.Home != "cfg" {
-		t.Fatalf("ephemeral SetHome DB home=%q want cfg", got.Home)
+	if got.Home != "Youtube" {
+		t.Fatalf("ephemeral SetHome must not change DB home=%q want Youtube", got.Home)
 	}
 }

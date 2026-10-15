@@ -48,9 +48,8 @@ func Data() string { return ensure(filepath.Join(Root(), "data")) }
 func CacheRoot() string { return ensure(filepath.Join(Root(), "cache")) }
 
 // Assets 返回本地 assets 资源根，对应 bridge AssetManager 的 {root}/assets（供 assets:// 使用）。
-func Assets() string  { return ensure(filepath.Join(Root(), "assets")) }
-func DB() string      { return filepath.Join(ensure(filepath.Join(Root(), "db")), "tv.db") }
-func Setting() string { return filepath.Join(ensure(Root()), "setting.ini") }
+func Assets() string { return ensure(filepath.Join(Root(), "assets")) }
+func DB() string     { return filepath.Join(ensure(filepath.Join(Root(), "db")), "tv.db") }
 
 // 下列缓存均在 CacheRoot 下，与 bridge 的 Root/cache/* 保持一致，避免 data/cache 再套一层。
 func JarCache() string { return ensure(filepath.Join(CacheRoot(), "jar")) }

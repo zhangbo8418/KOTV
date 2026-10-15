@@ -135,6 +135,7 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 		Keep    *database.Keep    `json:"keep"`
 		Name    string            `json:"name"`
 		Key     string            `json:"key"`
+		NewKey  string            `json:"newKey"`
 		Names   []string          `json:"names"`
 		Opening int64             `json:"opening"`
 		Ending  int64             `json:"ending"`
@@ -216,6 +217,18 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			key = body.Item.Key
 		}
 		if err := db.DeleteHistory(owner, key); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "renamehistory":
+		oldKey := strings.TrimSpace(body.Key)
+		newKey := strings.TrimSpace(body.NewKey)
+		if oldKey == "" || newKey == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			return
+		}
+		if err := db.RenameHistory(owner, oldKey, newKey); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}

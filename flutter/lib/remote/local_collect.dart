@@ -1,11 +1,9 @@
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../api/kotv_api.dart';
+import '../api/kotv_client_store.dart';
 import '../models/models.dart';
 
 Future<KotvApi> _engineApi() async {
-  final p = await SharedPreferences.getInstance();
-  final base = (p.getString('engine_base_url') ?? '').trim();
+  final base = (await KotvClientStore.engineBaseUrl()).trim();
   return KotvApi(baseUrl: base.isEmpty ? 'http://127.0.0.1:9978' : base);
 }
 

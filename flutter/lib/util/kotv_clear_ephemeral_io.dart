@@ -18,7 +18,7 @@ bool _isProtectedDataRootName(String name) {
   return low == 'kotv' || low == 'db';
 }
 
-/// 清理 Flutter / 引擎旁可再生文件（不含数据库；引擎地址与鉴权仍留在本地 prefs）。
+/// 清理 Flutter / 引擎旁可再生文件（不含数据库；保留 ui/client.json 鉴权与引擎地址）。
 ///
 /// 绝不删除 [kotvDataRoot] 下的 db/setting（Android 上曾误整清 cacheDir 把多仓 DB 一起删掉）。
 Future<int> kotvClearFlutterEphemeral() async {
@@ -32,6 +32,7 @@ Future<int> kotvClearFlutterEphemeral() async {
     final root = dataRootPath;
     final name = p.basename(path);
     if (_isProtectedDataRootName(name)) return true;
+    if (name.toLowerCase() == 'client.json') return true;
     if (root == null || root.isEmpty) return false;
     final norm = p.normalize(path);
     return norm == root;
@@ -41,8 +42,9 @@ Future<int> kotvClearFlutterEphemeral() async {
     if (protectDataRoot && (isDataRootOrProtected(e.path) || _isProtectedDataRootName(p.basename(e.path)))) {
       return;
     }
-    // 即便 scrub ui/log，也绝不动 db。
+    // 即便 scrub ui/log，也绝不动 db / client.json。
     if (_isProtectedDataRootName(p.basename(e.path))) return;
+    if (p.basename(e.path).toLowerCase() == 'client.json') return;
     try {
       if (e is Directory) {
         await e.delete(recursive: true);
@@ -67,7 +69,11 @@ Future<int> kotvClearFlutterEphemeral() async {
   }
 
   try {
-    await scrubDir(await kotvUiDir(), match: (_) => true, protectDataRoot: false);
+    await scrubDir(
+      await kotvUiDir(),
+      match: (name) => name.toLowerCase() != 'client.json',
+      protectDataRoot: false,
+    );
   } catch (_) {}
 
   try {

@@ -4,11 +4,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_id.dart';
+import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
 import '../player/kotv_traffic.dart';
 import '../util/kotv_app_dirs.dart';
@@ -134,13 +134,11 @@ class EngineLauncher {
     if (await _ping(baseUrl)) return true;
     debugPrint('engine: remote unreachable → fallback local ($baseUrl)');
     try {
-      final prefs = await SharedPreferences.getInstance();
       // draft 保留，方便设置页再次登录；业务地址与登录态清掉。
-      await prefs.remove('engine_base_url');
-      await prefs.remove('remote_username');
+      await KotvClientStore.clearEngine();
       await kotvClearAuthToken();
     } catch (e) {
-      debugPrint('engine: clear remote prefs failed: $e');
+      debugPrint('engine: clear remote client store failed: $e');
     }
     applyBaseUrl('');
     _fellBackToLocal = true;

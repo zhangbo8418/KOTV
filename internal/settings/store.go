@@ -188,6 +188,12 @@ func isHostOnly(t Type) bool {
 	}
 }
 
+// IsHostOnly 宿主机专用键：远端用户不可读写。
+func IsHostOnly(t Type) bool { return isHostOnly(t) }
+
+// IsHostOnlyID 按设置 id 字符串判断。
+func IsHostOnlyID(id string) bool { return isHostOnly(Type(strings.TrimSpace(id))) }
+
 // resolveOwner 本机/宿主机键 → ''；远端用户偏好 → userId。
 func resolveOwner(t Type) string {
 	if isHostOnly(t) {
@@ -730,7 +736,7 @@ type Entry struct {
 	Value string `json:"value"`
 }
 
-// ListEntries 返回当前设置列表副本。
+// ListEntries 返回内存全局设置副本（宿主默认表）。
 func ListEntries() []Entry {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -741,13 +747,86 @@ func ListEntries() []Entry {
 	return out
 }
 
-// ReplaceEntries 事务性替换设置列表（保留 cache）。
+func filterHostOnly(entries []Entry, includeHostOnly bool) []Entry {
+	if includeHostOnly {
+		return entries
+	}
+	out := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if !IsHostOnlyID(e.ID) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// ListEntriesForOwner 从 SQLite 导出指定 owner 的设置。
+// includeHostOnly=false 时跳过宿主机专用键（远端用户备份）。
+func ListEntriesForOwner(owner string, includeHostOnly bool) []Entry {
+	if storeDB == nil {
+		if owner != "" {
+			return []Entry{}
+		}
+		return filterHostOnly(ListEntries(), includeHostOnly)
+	}
+	m, err := storeDB.ListSettings(owner)
+	if err != nil {
+		return []Entry{}
+	}
+	if len(m) == 0 {
+		if owner == "" {
+			return filterHostOnly(ListEntries(), includeHostOnly)
+		}
+		return []Entry{}
+	}
+	labels := map[string]string{}
+	mu.RLock()
+	for _, it := range data.List {
+		labels[it.ID] = it.Label
+	}
+	mu.RUnlock()
+	out := make([]Entry, 0, len(m))
+	for id, v := range m {
+		if !includeHostOnly && IsHostOnlyID(id) {
+			continue
+		}
+		label := labels[id]
+		if label == "" {
+			label = id
+		}
+		out = append(out, Entry{ID: id, Label: label, Value: v})
+	}
+	return out
+}
+
+// ReplaceEntries 事务性替换内存设置列表（保留 cache）；并写入 owner=''。
 func ReplaceEntries(entries []Entry) {
-	mu.Lock()
-	defer mu.Unlock()
-	data.List = make([]item, len(entries))
-	for i, e := range entries {
-		data.List[i] = item{ID: e.ID, Label: e.Label, Value: e.Value}
+	ReplaceEntriesForOwner("", entries)
+}
+
+// ReplaceEntriesForOwner 覆盖写入指定 owner 的设置行。
+// host-only 键仅在 owner=="" 时写入。
+func ReplaceEntriesForOwner(owner string, entries []Entry) {
+	if owner == "" {
+		mu.Lock()
+		data.List = make([]item, 0, len(entries))
+		for _, e := range entries {
+			data.List = append(data.List, item{ID: e.ID, Label: e.Label, Value: e.Value})
+		}
+		mu.Unlock()
+	}
+	if storeDB == nil {
+		return
+	}
+	for _, e := range entries {
+		id := strings.TrimSpace(e.ID)
+		if id == "" {
+			continue
+		}
+		if IsHostOnlyID(id) && owner != "" {
+			continue
+		}
+		_ = storeDB.SetSetting(owner, id, e.Value)
 	}
 }
 

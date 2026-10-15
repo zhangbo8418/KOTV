@@ -522,6 +522,7 @@ type History struct {
 	VodRemarks string  `json:"vodRemarks"`
 	EpisodeURL string  `json:"episodeUrl"`
 	CreateTime int64   `json:"createTime"`
+	RevPlay    int64   `json:"revPlay"`
 	RevSort    int64   `json:"revSort"`
 	Position   int64   `json:"position"`
 	Duration   int64   `json:"duration"`
@@ -548,8 +549,8 @@ func StartPositionMs(h *History) int64 {
 func (db *DB) ListHistory(owner string, limit int) ([]History, error) {
 	rows, err := db.conn.Query(
 		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_sort,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1),
-		        COALESCE(opening,0), COALESCE(ending,0)
+		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_play,0), COALESCE(rev_sort,0),
+		        COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1), COALESCE(opening,0), COALESCE(ending,0)
 		 FROM history WHERE owner = ? ORDER BY rev_play DESC, create_time DESC LIMIT ?`, owner, limit)
 	if err != nil {
 		return nil, err
@@ -559,7 +560,7 @@ func (db *DB) ListHistory(owner string, limit int) ([]History, error) {
 	for rows.Next() {
 		var h History
 		if err := rows.Scan(&h.Key, &h.VodPic, &h.VodName, &h.VodFlag, &h.VodRemarks, &h.EpisodeURL,
-			&h.CreateTime, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending); err != nil {
+			&h.CreateTime, &h.RevPlay, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -682,12 +683,16 @@ func (db *DB) ImportHistory(owner string, items []History, mode int) error {
 		if ct == 0 {
 			ct = time.Now().UnixMilli()
 		}
+		rp := h.RevPlay
+		if rp == 0 {
+			rp = ct
+		}
 		speed := h.Speed
 		if speed == 0 {
 			speed = 1
 		}
 		if _, err := tx.Exec(stmt, owner, h.Key, h.VodPic, h.VodName, h.VodFlag, h.VodRemarks, h.EpisodeURL,
-			ct, ct, h.RevSort, h.Position, h.Duration, speed, h.Opening, h.Ending); err != nil {
+			ct, rp, h.RevSort, h.Position, h.Duration, speed, h.Opening, h.Ending); err != nil {
 			return err
 		}
 	}
@@ -733,12 +738,12 @@ func (db *DB) DeleteKeep(owner, key string) error {
 func (db *DB) GetHistory(owner, key string) (*History, error) {
 	row := db.conn.QueryRow(
 		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_sort,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1),
-		        COALESCE(opening,0), COALESCE(ending,0)
+		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_play,0), COALESCE(rev_sort,0),
+		        COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1), COALESCE(opening,0), COALESCE(ending,0)
 		 FROM history WHERE owner = ? AND key = ?`, owner, key)
 	var h History
 	err := row.Scan(&h.Key, &h.VodPic, &h.VodName, &h.VodFlag, &h.VodRemarks, &h.EpisodeURL,
-		&h.CreateTime, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending)
+		&h.CreateTime, &h.RevPlay, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -746,6 +751,53 @@ func (db *DB) GetHistory(owner, key string) (*History, error) {
 		return nil, err
 	}
 	return &h, nil
+}
+
+// RenameHistory 迁移历史键，保留 opening/ending/rev_sort/rev_play 等字段。
+// 若新键已存在则只删旧键。
+func (db *DB) RenameHistory(owner, oldKey, newKey string) error {
+	oldKey = strings.TrimSpace(oldKey)
+	newKey = strings.TrimSpace(newKey)
+	if oldKey == "" || newKey == "" || oldKey == newKey {
+		return nil
+	}
+	old, err := db.GetHistory(owner, oldKey)
+	if err != nil {
+		return err
+	}
+	if old == nil {
+		return nil
+	}
+	exist, err := db.GetHistory(owner, newKey)
+	if err != nil {
+		return err
+	}
+	if err := db.DeleteHistory(owner, oldKey); err != nil {
+		return err
+	}
+	if exist != nil {
+		return nil
+	}
+	old.Key = newKey
+	now := time.Now().UnixMilli()
+	speed := old.Speed
+	if speed == 0 {
+		speed = 1
+	}
+	rp := old.RevPlay
+	if rp == 0 {
+		rp = now
+	}
+	ct := old.CreateTime
+	if ct == 0 {
+		ct = now
+	}
+	_, err = db.conn.Exec(`INSERT INTO history
+		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, rev_sort, position, duration, speed, opening, ending)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		owner, newKey, old.VodPic, old.VodName, old.VodFlag, old.VodRemarks, old.EpisodeURL,
+		ct, rp, old.RevSort, old.Position, old.Duration, speed, old.Opening, old.Ending)
+	return err
 }
 
 // SaveKeep 写入/更新收藏（不切换）。

@@ -1271,6 +1271,14 @@ func (a *App) APIGetSettings() map[string]any {
 		vals[string(settings.VOD)] = sess.Source
 	}
 	settings.OverlayClientProfile(vals, hostclient.CurrentPlatform())
+	remoteUser := hostclient.DataOwner() != ""
+	if remoteUser {
+		for k := range vals {
+			if settings.IsHostOnlyID(k) {
+				delete(vals, k)
+			}
+		}
+	}
 	out["settings"] = vals
 	vodURL := strings.TrimSpace(vals[string(settings.VOD)])
 	liveURL := strings.TrimSpace(vals[string(settings.LIVE)])
@@ -1287,9 +1295,11 @@ func (a *App) APIGetSettings() map[string]any {
 	out["searchHistory"] = settings.GetSearchHistory()
 	out["searchHot"] = settings.GetSearchHot()
 	out["backdrop"] = a.APIBackdrop()
-	out["pairCode"] = settings.EnsureSyncPairCode()
-	out["remoteAuth"] = strings.EqualFold(settings.Get(settings.RemoteAuth), "true")
-	out["allowRegister"] = strings.EqualFold(settings.Get(settings.AllowRegister), "true")
+	if !remoteUser {
+		out["pairCode"] = settings.EnsureSyncPairCode()
+		out["remoteAuth"] = strings.EqualFold(settings.Get(settings.RemoteAuth), "true")
+		out["allowRegister"] = strings.EqualFold(settings.Get(settings.AllowRegister), "true")
+	}
 	return out
 }
 
@@ -1541,10 +1551,14 @@ func (a *App) APISetSettings(kv map[string]string) error {
 	needProxy := false
 	needLive := false
 	needDLNA := false
+	remoteUser := hostclient.DataOwner() != ""
 	kv = settings.SetClientProfileKeys(kv, hostclient.CurrentPlatform())
 	for k, v := range kv {
 		k = strings.TrimSpace(k)
 		if k == "" {
+			continue
+		}
+		if remoteUser && settings.IsHostOnlyID(k) {
 			continue
 		}
 		if k == "searchHot" {
