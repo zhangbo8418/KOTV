@@ -69,13 +69,24 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
           .toList();
       final pc = (data['pagecount'] is num) ? (data['pagecount'] as num).toInt() : 1;
       if (!mounted) return;
+      // 空页视为末页，避免虚高 pagecount 空刷。
+      if (!replace && list.isEmpty) {
+        setState(() {
+          _pageCount = _page;
+          _loadingMore = false;
+        });
+        return;
+      }
       setState(() {
         _page = pg;
-        _pageCount = pc < 1 ? 1 : pc;
+        _pageCount = list.isEmpty && replace ? 1 : (pc < 1 ? 1 : pc);
         if (replace) {
           _items = list;
         } else {
           _items = [..._items, ...list];
+        }
+        if (!replace && pc > 0 && pg >= pc) {
+          _pageCount = pg;
         }
         _loading = false;
         _loadingMore = false;
@@ -114,7 +125,8 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
                   ? const Center(child: Text('空目录'))
                   : NotificationListener<ScrollNotification>(
                       onNotification: (n) {
-                        if (n.metrics.pixels >= n.metrics.maxScrollExtent - 80) {
+                        if (n.metrics.maxScrollExtent > 80 &&
+                            n.metrics.pixels >= n.metrics.maxScrollExtent - 80) {
                           _load(replace: false);
                         }
                         return false;

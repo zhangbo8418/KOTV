@@ -14,6 +14,7 @@ import '../desktop/mini_player_window.dart';
 import '../player/playback_guard.dart';
 import '../screens/detail_screen.dart';
 import '../screens/folder_screen.dart';
+import '../util/kotv_image_cache.dart';
 
 /// 网盘授权等会写 `/TVBox/`；API 30+ 需「所有文件访问」。失败返回 false。
 Future<bool> _ensureSharedStorageWrite() async {
@@ -205,6 +206,9 @@ Future<void> _openVodItemBody(
       if (cur != wantSource) {
         await kotvStopBackgroundPlayback();
         await api.loadConfig(wantSource).timeout(const Duration(seconds: 45));
+        if (context.mounted) {
+          await kotvClearImageMemory(context: context, ref: ref);
+        }
         ref.invalidate(configProvider);
         ref.invalidate(settingsProvider);
       }

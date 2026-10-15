@@ -7,6 +7,7 @@ import '../providers.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../util/kotv_wallpaper_cache.dart';
 import 'h_scroll.dart';
 import 'kotv_network_image.dart';
 import 'marquee_text.dart';
@@ -29,16 +30,51 @@ class AppBackdrop extends ConsumerStatefulWidget {
 
 class _AppBackdropState extends ConsumerState<AppBackdrop> {
   Timer? _wallTimer;
+  String _stickyWallUrl = '';
+  int _persistGen = 0;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_restoreDiskWall());
     if (!widget.periodicSettingsRefresh) return;
-    // 配置壁纸（如每日 bing）定时刷新。
+    // 配置壁纸（如每日 bing）定时刷新：先保持 sticky，再换图，避免先 blank。
     _wallTimer = Timer.periodic(const Duration(minutes: 30), (_) {
       if (!mounted) return;
       ref.invalidate(settingsProvider);
     });
+  }
+
+  Future<void> _restoreDiskWall() async {
+    final hit = await kotvLoadWallpaperDisk();
+    if (!mounted || hit == null) return;
+    setState(() => _stickyWallUrl = hit.url);
+    ref.read(stickyWallUrlProvider.notifier).state = hit.url;
+  }
+
+  void _stickWall(String url) {
+    final u = url.trim();
+    if (u.isEmpty) return;
+    if (u == _stickyWallUrl && ref.read(stickyWallUrlProvider) == u) {
+      unawaited(kotvPersistWallpaper(u));
+      return;
+    }
+    setState(() => _stickyWallUrl = u);
+    ref.read(stickyWallUrlProvider.notifier).state = u;
+    final gen = ++_persistGen;
+    unawaited(() async {
+      await kotvPersistWallpaper(u);
+      if (!mounted || gen != _persistGen) return;
+      // 落盘后触一次 rebuild，FileImage 可立刻顶上。
+      setState(() {});
+    }());
+  }
+
+  void _clearStickyWall() {
+    if (_stickyWallUrl.isEmpty && ref.read(stickyWallUrlProvider).isEmpty) return;
+    setState(() => _stickyWallUrl = '');
+    ref.read(stickyWallUrlProvider.notifier).state = '';
+    unawaited(kotvClearWallpaperDisk());
   }
 
   @override
@@ -50,7 +86,10 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
   @override
   Widget build(BuildContext context) {
     final bd = ref.watch(backdropProvider);
+    // 换源清 ImageCache 后递增，强制壁纸层按磁盘/网络重挂。
+    ref.watch(wallRepaintProvider);
     final p = ref.watch(kotvPaletteProvider);
+    final settingsReady = ref.watch(settingsProvider.select((s) => s.hasValue));
     // settings 未就绪时，回落 config.wallpaper，避免首屏空背景。
     // select 只盯 wallpaper 串：其它 config 字段刷新不重建壁纸层。
     final cfgWall = ref.watch(configProvider.select(
@@ -64,7 +103,29 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
     if (image.isEmpty && (mode.isEmpty || mode == 'config')) {
       image = cfgWall;
     }
+
+    final intentionalNoWall =
+        settingsReady && (mode == 'gradient' || mode.startsWith('builtin'));
+    if (intentionalNoWall) {
+      if (_stickyWallUrl.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _clearStickyWall();
+        });
+      }
+      image = '';
+    } else if (image.isNotEmpty) {
+      if (image != _stickyWallUrl) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _stickWall(image);
+        });
+      }
+    } else if (_stickyWallUrl.isNotEmpty) {
+      // loading / 短暂空串：继续显示上一张。
+      image = _stickyWallUrl;
+    }
+
     final hasWall = image.startsWith('http://') || image.startsWith('https://');
+    final disk = hasWall ? kotvWallpaperDiskImage(image) : null;
     // 渐变/光晕/压色跟 effectiveLight 走，跟随系统时才会切浅色
     final gradStart = p.gradStart;
     final gradEnd = p.gradEnd;
@@ -91,13 +152,31 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
               builder: (context, constraints) {
                 final dpr = MediaQuery.devicePixelRatioOf(context);
                 final w = (constraints.maxWidth * dpr).round().clamp(1, 1920);
+                // 磁盘命中优先：清 ImageCache 后立刻有图，不等网络。
+                if (disk != null) {
+                  return Image(
+                    image: ResizeImage(disk, width: w),
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.medium,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, __, ___) => KotvNetworkImage(
+                      image,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.medium,
+                      cacheWidth: w,
+                      gaplessPlayback: true,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  );
+                }
                 return KotvNetworkImage(
                   image,
-                  key: ValueKey('$mode|$image'),
                   fit: BoxFit.cover,
                   filterQuality: FilterQuality.medium,
                   // 限制解码尺寸，降低 Win7 上大图解码导致的原生闪退风险
                   cacheWidth: w,
+                  gaplessPlayback: true,
+                  // 失败时不拆掉整层：gapless 保留上一帧；无帧才缩成透明。
                   errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                 );
               },

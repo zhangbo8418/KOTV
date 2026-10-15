@@ -33,6 +33,8 @@ class VideoScreen extends ConsumerStatefulWidget {
 class _VideoScreenState extends ConsumerState<VideoScreen> {
   String? _tid;
   int _page = 1;
+  int _pageCount = 0;
+  bool _hasMore = true;
   bool _loadingMore = false;
   final _items = <VodItem>[];
   bool _listStyle = false;
@@ -219,6 +221,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _loading = true;
       _statusMsg = null;
       _page = 1;
+      _pageCount = 0;
+      _hasMore = true;
       // 断线重试保留骨架；换仓/换站必须清空，避免旧海报残留
       if (clearContent) {
         _items.clear();
@@ -439,6 +443,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       }
       _items.clear();
       _page = 1;
+      _pageCount = 0;
+      _hasMore = true;
       _loading = true;
       _loadingMore = false;
       _statusMsg = null;
@@ -456,6 +462,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _extend[key] = value;
       _items.clear();
       _page = 1;
+      _pageCount = 0;
+      _hasMore = true;
       _loading = true;
       _loadingMore = false;
       _statusMsg = null;
@@ -483,20 +491,20 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   Future<void> _loadMore() async {
-    if (_tid == null || _tid!.isEmpty || _loadingMore || _loading || !_ready) return;
+    if (_tid == null || _tid!.isEmpty || _loadingMore || _loading || !_ready || !_hasMore) return;
     setState(() => _loadingMore = true);
     try {
       final next = _page + 1;
       final data = await ref.read(apiProvider).category(_tid!, pg: '$next', extend: Map<String, String>.from(_extend));
-      _page = next;
-      _applyPage(data, replace: false);
+      if (!mounted) return;
+      _applyPage(data, replace: false, requestedPage: next);
     } catch (_) {
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
   }
 
-  void _applyPage(Map<String, dynamic> data, {required bool replace}) {
+  void _applyPage(Map<String, dynamic> data, {required bool replace, int? requestedPage}) {
     try {
       final list = ((data['list'] as List?) ?? [])
           .whereType<Map>()
@@ -511,6 +519,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           .whereType<Map>()
           .map((e) => CategoryFilter.fromJson(Map<String, dynamic>.from(e)))
           .toList();
+      final pcRaw = data['pagecount'];
+      final pc = (pcRaw is num) ? pcRaw.toInt() : 0;
       final home = replace && (_tid == null || _tid!.isEmpty);
       final emptyHome = home && types.isEmpty && list.isEmpty;
       final pageStyle = '${data['style'] ?? ''}'.trim();
@@ -545,13 +555,23 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _extend.clear();
         }
         if (replace) {
+          _page = 1;
+          _pageCount = pc < 0 ? 0 : pc;
           if (!emptyHome || _items.isEmpty) {
             _items
               ..clear()
               ..addAll(list);
           }
+          final inCat = _tid != null && _tid!.isNotEmpty;
+          _hasMore = inCat && list.isNotEmpty && (_pageCount == 0 || _page < _pageCount);
+        } else if (list.isEmpty) {
+          // 空页视为末页，不推进页码。
+          _hasMore = false;
         } else {
+          if (requestedPage != null) _page = requestedPage;
+          if (pc > 0) _pageCount = pc;
           _items.addAll(list);
+          _hasMore = _pageCount == 0 || _page < _pageCount;
         }
       });
     } catch (e) {
@@ -909,7 +929,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final bottomPad = 24.0;
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
-        if (!onHome && n.metrics.pixels > n.metrics.maxScrollExtent - 300) _loadMore();
+        // 短列表 maxScrollExtent≈0 时勿触底连打。
+        if (!onHome &&
+            n.metrics.maxScrollExtent > 80 &&
+            n.metrics.pixels > n.metrics.maxScrollExtent - 300) {
+          _loadMore();
+        }
         return false;
       },
       child: CustomScrollView(

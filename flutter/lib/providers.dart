@@ -55,14 +55,29 @@ final settingsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   return ref.watch(apiProvider).getSettings();
 });
 
+/// settings 刷新 loading 时保留上一份 backdrop，避免壁纸层闪空。
+final Map<String, dynamic> _stickyBackdrop = <String, dynamic>{};
+
 /// 背景规格：优先 settings.backdrop（wallMode）。
 final backdropProvider = Provider<Map<String, dynamic>>((ref) {
   final st = ref.watch(settingsProvider);
   return st.maybeWhen(
-    data: (d) => Map<String, dynamic>.from((d['backdrop'] as Map?) ?? const {}),
-    orElse: () => const <String, dynamic>{},
+    data: (d) {
+      final m = Map<String, dynamic>.from((d['backdrop'] as Map?) ?? const {});
+      _stickyBackdrop
+        ..clear()
+        ..addAll(m);
+      return Map<String, dynamic>.from(_stickyBackdrop);
+    },
+    orElse: () => Map<String, dynamic>.from(_stickyBackdrop),
   );
 });
+
+/// AppBackdrop 粘住的壁纸 URL；换源清 ImageCache 后用来预热。
+final stickyWallUrlProvider = StateProvider<String>((ref) => '');
+
+/// 递增后强制壳层壁纸层按磁盘/网络重挂，避免 clearLiveImages 后空白。
+final wallRepaintProvider = StateProvider<int>((ref) => 0);
 
 final pendingSearchProvider = StateProvider<String?>((ref) => null);
 

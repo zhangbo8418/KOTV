@@ -26,6 +26,7 @@ import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/stable_focus.dart';
 import '../util/kotv_clear_ephemeral.dart';
+import '../util/kotv_image_cache.dart';
 import '../util/pick_font_file.dart';
 import '../util/runtime_info.dart';
 import '../widgets/auth_gate.dart';
@@ -1663,6 +1664,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       await kotvClearFlutterEphemeral();
     } catch (_) {}
+    if (mounted) {
+      await kotvClearImageMemory(context: context, ref: ref);
+    }
     if (data == null || !mounted) return;
     final msg = '${data['message'] ?? '清理完成'}';
     if (data['reloaded'] == true) {
@@ -1693,6 +1697,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     launcher.applyBaseUrl(baseUrl);
     ref.read(apiProvider).baseUrl = launcher.baseUrl;
     KotvSettingsCache.clear();
+    if (mounted) {
+      await kotvClearImageMemory(context: context, ref: ref);
+    }
     ref.invalidate(engineReadyProvider);
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);

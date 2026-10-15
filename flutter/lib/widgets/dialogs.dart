@@ -19,6 +19,7 @@ import '../api/kotv_settings_cache.dart';
 import '../screens/detail_screen.dart';
 import '../screens/file_browser_screen.dart';
 import '../screens/live_screen.dart';
+import '../util/kotv_image_cache.dart';
 import 'chrome.dart';
 import 'h_scroll.dart';
 
@@ -373,6 +374,9 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
             try {
               await _prepareLeavePlayback();
               await api.loadConfig(src).timeout(const Duration(seconds: 45));
+              if (ctx.mounted) {
+                await kotvClearImageMemory(context: ctx, ref: ref);
+              }
               ref.invalidate(configProvider);
               ref.invalidate(settingsProvider);
               if (ctx.mounted) Navigator.pop(ctx, true);
@@ -896,6 +900,9 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
       final err = '${h['error'] ?? ''}'.trim();
       if (err.isNotEmpty) break;
       await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    if (context.mounted) {
+      await kotvClearImageMemory(context: context, ref: ref);
     }
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);

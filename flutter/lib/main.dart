@@ -25,6 +25,7 @@ import 'theme/layout_scale.dart';
 import 'theme/kotv_palette.dart';
 import 'theme/kotv_theme.dart';
 import 'util/kotv_app_dirs.dart';
+import 'util/kotv_image_cache.dart';
 import 'widgets/chrome.dart';
 import 'widgets/kotv_tv_text_field.dart';
 import 'widgets/h_scroll.dart';
@@ -127,6 +128,7 @@ Widget _kotvErrorWidget(FlutterErrorDetails details) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  kotvConfigureImageCacheBudget();
   // Android 冷启动即 edge-to-edge，状态栏透明（与 MainActivity / styles 一致）。
   if (!kIsWeb && Platform.isAndroid) {
     try {
