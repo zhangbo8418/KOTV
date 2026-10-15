@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import '../api/kotv_engine_url.dart';
 import 'kotv_platform.dart';
 
 /// 缓冲浮层统一测速（[Traffic]：与播放器解耦）。
@@ -21,7 +22,7 @@ class KotvTraffic {
   static const _host = MethodChannel('kotv_host');
 
   /// 由 [EngineLauncher] / 设置页同步。
-  static String engineBaseUrl = 'http://127.0.0.1:9978';
+  static String engineBaseUrl = kotvDefaultLocalEngineBaseUrl;
 
   static final Map<String, ({int bytes, int atMs})> _base = {};
   static int _speedBps = 0;

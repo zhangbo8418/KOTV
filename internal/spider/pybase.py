@@ -125,6 +125,7 @@ class Spider(metaclass=ABCMeta):
         )
 
     def getProxyUrl(self, local=True):
+        # 缺省端口与 Go localproxy.DefaultPort 一致
         port = os.environ.get("KOTV_PROXY_PORT", "9978")
         if local:
             host = "127.0.0.1"
@@ -138,6 +139,7 @@ class Spider(metaclass=ABCMeta):
         print(message, file=sys.stderr, flush=True)
 
     def _cache_base(self):
+        # 缺省端口与 Go localproxy.DefaultPort 一致
         port = os.environ.get("KOTV_PROXY_PORT", "9978")
         return f"http://127.0.0.1:{port}/cache"
 

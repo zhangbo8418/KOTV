@@ -33,6 +33,16 @@ func Port() int {
 	return p
 }
 
+// DefaultLocalBaseURL 本机引擎默认根（无 /proxy），供回落与客户端约定。
+func DefaultLocalBaseURL() string {
+	return fmt.Sprintf("http://127.0.0.1:%d", DefaultPort)
+}
+
+// LocalBaseURL 当前运行时本机引擎根（无 /proxy）。
+func LocalBaseURL() string {
+	return fmt.Sprintf("http://127.0.0.1:%d", Port())
+}
+
 func BaseURL(local bool) string {
 	if !local {
 		// 远端请求：优先当前对外根（域名/反代），避免把局域网 IP 交给客户端。

@@ -350,7 +350,7 @@ class KotvEngineService : Service() {
 
   private fun engineHealthy(): Boolean {
     return try {
-      val url = URL("http://127.0.0.1:9978/api/v1/health")
+      val url = URL("${KotvEngineDefaults.BASE_URL}/api/v1/health")
       val conn = (url.openConnection() as HttpURLConnection).apply {
         connectTimeout = 800
         readTimeout = 800

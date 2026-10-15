@@ -16,6 +16,7 @@ import (
 	"github.com/bobo/KOTV/internal/cast"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/service"
@@ -25,8 +26,6 @@ import (
 	"github.com/bobo/KOTV/internal/update"
 	"github.com/bobo/KOTV/internal/util"
 )
-
-const defaultSyncPort = "9978"
 
 // APITools Flutter 设置页工具动作（备份/爬虫/更新/同步/投屏等）。
 func (a *App) APITools(action string, params map[string]any) (map[string]any, error) {
@@ -257,11 +256,6 @@ func (a *App) toolCheckSpider() (map[string]any, error) {
 		} else {
 			ok++
 		}
-		_ = a.DB.UpsertSpiderStatus(database.SpiderStatus{
-			SiteKey: site.Key,
-			Status:  st,
-			Message: msg,
-		})
 		results = append(results, map[string]any{
 			"key":     site.Key,
 			"name":    site.Name,
@@ -453,7 +447,7 @@ func (a *App) castDeviceJSON() string {
 	ip := strings.TrimSpace(util.LanIP())
 	addr := ip
 	if addr != "" && !strings.Contains(addr, "://") {
-		addr = "http://" + addr + ":" + defaultSyncPort
+		addr = fmt.Sprintf("http://%s:%d", addr, localproxy.DefaultPort)
 	}
 	b, err := json.Marshal(map[string]any{
 		"name": "KO影视",
@@ -501,7 +495,7 @@ func sendSyncData(host, pair, syncType string, mode int, body []byte) error {
 	h, p, err := net.SplitHostPort(host)
 	if err != nil {
 		h = host
-		p = defaultSyncPort
+		p = fmt.Sprintf("%d", localproxy.DefaultPort)
 	}
 	addr := net.JoinHostPort(h, p)
 	url := fmt.Sprintf("http://%s/action?do=sync&type=%s&mode=%d&pair=%s", addr, syncType, mode, pair)

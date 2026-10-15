@@ -51,7 +51,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Map<String, String> _s = {};
   Map<String, String> _runtime = {};
   List<Map<String, dynamic>> _parses = [];
-  String _port = '9978';
+  String _port = '$kotvDefaultEnginePort';
   String _version = '0.1.0';
   String _status = '';
   String _pairCode = '';
@@ -94,7 +94,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final rt = Map<String, dynamic>.from((data['runtime'] as Map?) ?? {});
       _runtime = {for (final e in rt.entries) e.key: '${e.value ?? ''}'};
       _parses = ((data['parses'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
-      _port = '${data['port'] ?? '9978'}';
+      _port = '${data['port'] ?? kotvDefaultEnginePort}';
       _version = '${data['version'] ?? '0.1.0'}';
       _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
       _vodDesc = '${data['vodDesc'] ?? ''}';

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 )
 
@@ -209,7 +210,7 @@ func waitBuffer(ctx context.Context, t *torrent.Torrent, file *torrent.File) err
 }
 
 func localURL(ih string) string {
-	port := 9978
+	port := localproxy.DefaultPort
 	if portFn != nil {
 		if p := portFn(); p > 0 {
 			port = p

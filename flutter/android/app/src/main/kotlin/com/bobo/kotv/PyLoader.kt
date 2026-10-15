@@ -129,7 +129,7 @@ def kotv_py_dispatch(req_json):
         ext = req.get("ext") or ""
         api = req["api"]
         cache_root = req["cacheRoot"]
-        proxy_port = int(req.get("proxyPort") or 9978)
+        proxy_port = int(req.get("proxyPort") or ${KotvEngineDefaults.PORT})
         proxy_host = str(req.get("proxyHost") or "").strip() or "127.0.0.1"
         method = req["method"]
         args = req.get("args") or {}

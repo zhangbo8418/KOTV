@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 桌面 FFmpeg 外部解码库：dav1d（AV1）+ libxml2 + libaribcaption（日标字幕）。
-# 静态装进 PREFIX，与安卓 webhtv 锁的版本对齐。
+# 静态装进 PREFIX（版本见下方 DAV1D_VER / LIBXML2_VER / ARIBCAPTION_VER）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

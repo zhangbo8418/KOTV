@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/settings"
 )
@@ -98,7 +99,7 @@ func playbackProxyBase(localPort int) string {
 		return strings.TrimRight(pb, "/")
 	}
 	if localPort <= 0 {
-		localPort = 9978
+		localPort = localproxy.DefaultPort
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", localPort)
 }

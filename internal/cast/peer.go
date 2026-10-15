@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/util"
 )
@@ -23,7 +24,7 @@ type peerInfo struct {
 	UUID string `json:"uuid"`
 }
 
-// discoverAppPeers 扫描本机网段 :9978/device，发现其它 KOTV / 兼容端。
+// discoverAppPeers 扫描本机网段引擎端口 /device，发现其它 KOTV / 兼容端。
 func discoverAppPeers(timeout time.Duration) ([]Device, error) {
 	if timeout <= 0 {
 		timeout = 4 * time.Second
@@ -90,7 +91,7 @@ func peerScanBases() []string {
 		if host == lan {
 			continue
 		}
-		out = append(out, fmt.Sprintf("http://%s:9978", host))
+		out = append(out, fmt.Sprintf("http://%s:%d", host, localproxy.DefaultPort))
 	}
 	return out
 }

@@ -75,7 +75,7 @@ class LocalCollect {
     return data['kept'] == true;
   }
 
-  /// 详情返回真实 id 后迁移键；若新键已存在则去掉旧条目。
+  /// 详情返回真实 id 后迁移键；若新键已存在则只删旧（服务端单事务）。
   static Future<void> replaceId({
     required String site,
     required String oldId,
@@ -83,35 +83,11 @@ class LocalCollect {
     String configSource = '',
   }) async {
     if (oldId.isEmpty || newId.isEmpty || oldId == newId) return;
-    final api = await _engineApi();
     try {
-      final cur = await list();
-      VodItem? old;
-      for (final e in cur) {
-        if (e.id == oldId && e.site == site) {
-          if (configSource.trim().isEmpty ||
-              e.configSource.trim() == configSource.trim() ||
-              e.configSource.trim().isEmpty) {
-            old = e;
-            break;
-          }
-        }
-      }
-      if (old == null) return;
-      final hasNew = cur.any((e) => e.id == newId && e.site == site);
-      await api.libraryAction({'action': 'deleteKeep', 'key': _keepKey(site, oldId)});
-      if (hasNew) return;
-      await api.libraryAction({
-        'action': 'saveKeep',
-        'keep': _keepBody(VodItem(
-          id: newId,
-          name: old.name,
-          pic: old.pic,
-          remarks: old.remarks,
-          site: site,
-          flag: old.flag,
-          configSource: configSource.trim().isNotEmpty ? configSource : old.configSource,
-        )),
+      await (await _engineApi()).libraryAction({
+        'action': 'renameKeep',
+        'key': _keepKey(site, oldId),
+        'newKey': _keepKey(site, newId),
       });
     } catch (_) {}
   }

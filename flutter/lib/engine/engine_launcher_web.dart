@@ -1,5 +1,6 @@
 import '../api/kotv_api.dart';
 import '../api/kotv_client_id.dart';
+import '../api/kotv_engine_url.dart';
 import '../player/kotv_traffic.dart';
 
 /// Web：不拉起本机进程，只探测 / 会话离开。
@@ -7,7 +8,7 @@ class EngineLauncher {
   EngineLauncher();
 
   bool _shuttingDown = false;
-  String baseUrl = 'http://127.0.0.1:9978';
+  String baseUrl = kotvDefaultLocalEngineBaseUrl;
   KotvApi? _api;
 
   /// Web 固定同源，不会切本机进程。
@@ -23,7 +24,7 @@ class EngineLauncher {
   void applyBaseUrl(String url) {
     // Web 只能用当前页面同源后端，忽略外部改址。
     final origin = Uri.base.origin;
-    baseUrl = (origin.isNotEmpty && origin != 'null') ? origin : 'http://127.0.0.1:9978';
+    baseUrl = (origin.isNotEmpty && origin != 'null') ? origin : kotvDefaultLocalEngineBaseUrl;
     _api?.baseUrl = baseUrl;
     KotvTraffic.engineBaseUrl = baseUrl;
   }

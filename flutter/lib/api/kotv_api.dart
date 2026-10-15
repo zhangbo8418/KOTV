@@ -9,7 +9,7 @@ import 'kotv_engine_url.dart';
 
 class KotvApi {
   KotvApi({String? baseUrl, String? clientId})
-      : baseUrl = baseUrl ?? 'http://127.0.0.1:9978',
+      : baseUrl = baseUrl ?? kotvDefaultLocalEngineBaseUrl,
         _clientId = clientId?.trim() ?? '';
 
   String baseUrl;

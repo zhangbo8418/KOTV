@@ -118,12 +118,6 @@ func (db *DB) migrate() error {
 			site_name TEXT,
 			PRIMARY KEY (owner, key)
 		)`,
-		`CREATE TABLE IF NOT EXISTS spider_status (
-			site_key TEXT PRIMARY KEY,
-			status INTEGER,
-			message TEXT,
-			updated_at INTEGER
-		)`,
 		`CREATE TABLE IF NOT EXISTS setting (
 			owner TEXT NOT NULL DEFAULT '',
 			id TEXT NOT NULL,
@@ -875,6 +869,24 @@ func (db *DB) IsKept(owner, key string) (bool, error) {
 	return n > 0, err
 }
 
+// GetKeep 按 owner+key 读取收藏。
+func (db *DB) GetKeep(owner, key string) (*Keep, error) {
+	row := db.conn.QueryRow(
+		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
+		        COALESCE(create_time,0), COALESCE(type,0), COALESCE(cid,0), COALESCE(site_name,'')
+		 FROM keep WHERE owner = ? AND key = ?`, owner, key)
+	var k Keep
+	err := row.Scan(&k.Key, &k.VodPic, &k.VodName, &k.VodFlag, &k.VodRemarks,
+		&k.CreateTime, &k.Type, &k.CID, &k.SiteName)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
 func (db *DB) ToggleKeep(owner string, k Keep) (bool, error) {
 	kept, err := db.IsKept(owner, k.Key)
 	if err != nil {
@@ -916,19 +928,60 @@ func (db *DB) ListKeepLive(owner string) ([]Keep, error) {
 	return db.ListKeep(owner, KeepTypeLive, 500)
 }
 
-// SpiderStatus 爬虫检测结果。
-type SpiderStatus struct {
-	SiteKey   string
-	Status    int // 1 ok, 0 fail
-	Message   string
-	UpdatedAt int64
-}
+// RenameKeep 迁移收藏键；若新键已存在则只删旧键。单事务。
+func (db *DB) RenameKeep(owner, oldKey, newKey string) error {
+	oldKey = strings.TrimSpace(oldKey)
+	newKey = strings.TrimSpace(newKey)
+	if oldKey == "" || newKey == "" || oldKey == newKey {
+		return nil
+	}
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-func (db *DB) UpsertSpiderStatus(s SpiderStatus) error {
-	s.UpdatedAt = time.Now().UnixMilli()
-	_, err := db.conn.Exec(`INSERT OR REPLACE INTO spider_status(site_key, status, message, updated_at) VALUES(?,?,?,?)`,
-		s.SiteKey, s.Status, s.Message, s.UpdatedAt)
-	return err
+	var old Keep
+	err = tx.QueryRow(
+		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
+		        COALESCE(create_time,0), COALESCE(type,0), COALESCE(cid,0), COALESCE(site_name,'')
+		 FROM keep WHERE owner = ? AND key = ?`, owner, oldKey,
+	).Scan(&old.Key, &old.VodPic, &old.VodName, &old.VodFlag, &old.VodRemarks,
+		&old.CreateTime, &old.Type, &old.CID, &old.SiteName)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	var existKey string
+	err = tx.QueryRow(`SELECT key FROM keep WHERE owner = ? AND key = ?`, owner, newKey).Scan(&existKey)
+	newExists := err == nil
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+
+	if newExists {
+		if _, err := tx.Exec(`DELETE FROM keep WHERE owner = ? AND key = ?`, owner, oldKey); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	ct := old.CreateTime
+	if ct == 0 {
+		ct = time.Now().UnixMilli()
+	}
+	if _, err := tx.Exec(`INSERT INTO keep(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, create_time, type, cid, site_name)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		owner, newKey, old.VodPic, old.VodName, old.VodFlag, old.VodRemarks, ct, old.Type, old.CID, old.SiteName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM keep WHERE owner = ? AND key = ?`, owner, oldKey); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func nullStr(s string) interface{} {

@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+/// 本机引擎默认端口（与 Go `localproxy.DefaultPort` 一致）。
+const kotvDefaultEnginePort = 9978;
+
 /// 本机引擎默认地址（无 client.json / 无有效远端地址时使用）。
-const kotvDefaultLocalEngineBaseUrl = 'http://127.0.0.1:9978';
+const kotvDefaultLocalEngineBaseUrl = 'http://127.0.0.1:$kotvDefaultEnginePort';
 
 /// 引擎 baseUrl 是否指向本机（127.0.0.1 / localhost / ::1）。
 /// 本机连接不鉴权、不带账号；仅非本机地址才用远端登录。
@@ -61,7 +64,7 @@ String kotvEffectiveEngineBaseUrl(String raw) {
     return kotvDefaultLocalEngineBaseUrl;
   }
   if (!u.hasPort && scheme == 'http') {
-    return u.replace(port: 9978).toString();
+    return u.replace(port: kotvDefaultEnginePort).toString();
   }
   return n;
 }

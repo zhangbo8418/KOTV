@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// SettingKV 批量覆盖写入用的 id/value 对。
+type SettingKV struct {
+	ID    string
+	Value string
+}
+
 // GetSetting 读取 owner+id；无行返回 ok=false。
 func (db *DB) GetSetting(owner, id string) (value string, ok bool, err error) {
 	if db == nil || db.conn == nil {
@@ -72,6 +78,34 @@ func (db *DB) DeleteSettingsOwner(owner string) error {
 	}
 	_, err := db.conn.Exec(`DELETE FROM setting WHERE owner = ?`, owner)
 	return err
+}
+
+// ReplaceSettings 单事务清空 owner 后写入 [items]（覆盖语义）。
+func (db *DB) ReplaceSettings(owner string, items []SettingKV) error {
+	if db == nil || db.conn == nil {
+		return nil
+	}
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM setting WHERE owner = ?`, owner); err != nil {
+		return err
+	}
+	for _, it := range items {
+		id := strings.TrimSpace(it.ID)
+		if id == "" {
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO setting(owner, id, value) VALUES(?,?,?)`,
+			owner, id, it.Value,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ClearKeep 清空某 owner 全部收藏（点播+直播）。

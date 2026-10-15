@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/settings"
 )
 
@@ -72,7 +73,7 @@ func enginePort() int {
 			return p
 		}
 	}
-	return 9978
+	return localproxy.DefaultPort
 }
 
 func register(rawURL string, headers map[string]string) string {

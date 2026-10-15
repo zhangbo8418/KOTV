@@ -717,11 +717,11 @@ public class SpiderBridge {
 
     private static int configuredProxyPort() {
         String value = System.getProperty("kotv.proxy.port", System.getenv("KOTV_PROXY_PORT"));
-        if (value == null || value.isEmpty()) return 9978;
+        if (value == null || value.isEmpty()) return com.github.catvod.Proxy.DEFAULT_PORT;
         try {
             return Integer.parseInt(value.trim());
         } catch (Exception ignored) {
-            return 9978;
+            return com.github.catvod.Proxy.DEFAULT_PORT;
         }
     }
 

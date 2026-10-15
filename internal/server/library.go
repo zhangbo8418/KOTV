@@ -233,6 +233,18 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "renamekeep":
+		oldKey := strings.TrimSpace(body.Key)
+		newKey := strings.TrimSpace(body.NewKey)
+		if oldKey == "" || newKey == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			return
+		}
+		if err := db.RenameKeep(owner, oldKey, newKey); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "savekeep":
 		if body.Keep == nil || strings.TrimSpace(body.Keep.Key) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing keep"})

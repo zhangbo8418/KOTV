@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/kotv_engine_url.dart';
 import '../models/models.dart';
 import '../nav/kotv_page.dart';
 import '../providers.dart';
@@ -74,7 +75,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       };
       final lines = <String>[
         'KO影视 Flutter ${st['version'] ?? '0.1.0'}',
-        '引擎端口：${st['port'] ?? '9978'}',
+        '引擎端口：${st['port'] ?? kotvDefaultEnginePort}',
         '',
         '运行时：',
         ...formatKotvRuntimeLines(rt).map((e) => '  $e'),

@@ -20,6 +20,7 @@ import (
 
 	analog "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
+	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/util"
@@ -562,7 +563,7 @@ func entryKey(ih string, index int) string {
 }
 
 func localURL(key string) string {
-	port := 9978
+	port := localproxy.DefaultPort
 	if portFn != nil {
 		if p := portFn(); p > 0 {
 			port = p

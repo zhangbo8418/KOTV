@@ -34,8 +34,6 @@ import (
 //go:embed resources
 var remoteFS embed.FS
 
-const defaultPort = 9978
-
 // Server 局域网 HTTP 遥控服务。
 type Server struct {
 	mu            sync.RWMutex
@@ -91,7 +89,7 @@ func (s *Server) Port() int {
 	if s.port > 0 {
 		return s.port
 	}
-	return defaultPort
+	return localproxy.DefaultPort
 }
 
 func (s *Server) Events() *Events { return s.events }
@@ -176,7 +174,7 @@ func (s *Server) Start() error {
 		// ip 为可直拼 /action 的根地址（兼容对端投屏/同步）；裸 IP 见 ipv4。
 		addr := strings.TrimSpace(info.Primary)
 		if addr != "" && !strings.Contains(addr, "://") {
-			addr = fmt.Sprintf("http://%s:%d", addr, defaultPort)
+			addr = fmt.Sprintf("http://%s:%d", addr, localproxy.DefaultPort)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name":     "KO影视",
@@ -189,17 +187,17 @@ func (s *Server) Start() error {
 		})
 	})
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", defaultPort))
+	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", localproxy.DefaultPort))
 	if err != nil {
 		return fmt.Errorf("无法启动 HTTP 服务: %w", err)
 	}
 	s.mu.Lock()
-	s.port = defaultPort
+	s.port = localproxy.DefaultPort
 	s.mu.Unlock()
-	localproxy.SetPort(defaultPort)
-	playproxy.SetPortFunc(func() int { return defaultPort })
-	thunder.SetPortFunc(func() int { return defaultPort })
-	spider.SetLocalProxyPort(defaultPort)
+	localproxy.SetPort(localproxy.DefaultPort)
+	playproxy.SetPortFunc(func() int { return localproxy.DefaultPort })
+	thunder.SetPortFunc(func() int { return localproxy.DefaultPort })
+	spider.SetLocalProxyPort(localproxy.DefaultPort)
 
 	s.http = &http.Server{Handler: cors(mux)}
 	go func() {

@@ -4,6 +4,9 @@ import com.github.catvod.utils.Util;
 
 public class Proxy {
 
+    /** 本机引擎默认端口（与 Go localproxy.DefaultPort 一致）。 */
+    public static final int DEFAULT_PORT = 9978;
+
     private static int port = -1;
 
     public static void set(int port) {
@@ -27,7 +30,7 @@ public class Proxy {
     /** KOTV / 社区站点 Util.notify、UI 握手用本地根地址 */
     public static String getHostPort() {
         ensurePort();
-        if (port <= 0) return "http://127.0.0.1:9978";
+        if (port <= 0) return "http://127.0.0.1:" + DEFAULT_PORT;
         return "http://127.0.0.1:" + port;
     }
 

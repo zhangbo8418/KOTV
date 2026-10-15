@@ -37,6 +37,37 @@ func TestSettingOwnerBuckets(t *testing.T) {
 	}
 }
 
+func TestReplaceSettingsTransactional(t *testing.T) {
+	db, err := OpenPath(filepath.Join(t.TempDir(), "rep.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.SetSetting("u1", "vod", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetSetting("u1", "theme", "dark"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReplaceSettings("u1", []SettingKV{
+		{ID: "vod", Value: "new"},
+		{ID: "home", Value: "s1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v, ok, err := db.GetSetting("u1", "vod")
+	if err != nil || !ok || v != "new" {
+		t.Fatalf("vod=%q ok=%v err=%v", v, ok, err)
+	}
+	if _, ok, _ = db.GetSetting("u1", "theme"); ok {
+		t.Fatal("theme should be cleared")
+	}
+	v, ok, err = db.GetSetting("u1", "home")
+	if err != nil || !ok || v != "s1" {
+		t.Fatalf("home=%q ok=%v err=%v", v, ok, err)
+	}
+}
+
 func TestDeleteSettingsOwnerClearsHost(t *testing.T) {
 	db, err := OpenPath(filepath.Join(t.TempDir(), "set-host.db"))
 	if err != nil {

@@ -92,7 +92,7 @@ func (a *App) preparePlayback(raw string, headers map[string]string, resolveM3U8
 			headers = hdrs
 		}
 	}
-	port := 9978
+	port := localproxy.DefaultPort
 	if a != nil && a.Server != nil {
 		if p := a.Server.Port(); p > 0 {
 			port = p

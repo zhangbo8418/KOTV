@@ -69,7 +69,7 @@ String _joinEngine(String base, String pathAndQuery) {
   while (b.endsWith('/')) {
     b = b.substring(0, b.length - 1);
   }
-  if (b.isEmpty) b = 'http://127.0.0.1:9978';
+  if (b.isEmpty) b = kotvDefaultLocalEngineBaseUrl;
   if (pathAndQuery.startsWith('/')) return '$b$pathAndQuery';
   return '$b/$pathAndQuery';
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 桌面 FFmpeg 前缀：FongMi FFmpeg 9 + dependency/avs3a（libarcdav3a / AV3A，与移动端一致）。
+# 桌面 FFmpeg 前缀：FongMi FFmpeg 9 + dependency/avs3a（libarcdav3a / AV3A）。
 # 支持 Linux / macOS / Windows(GitHub Actions MinGW)。
 set -euo pipefail
 
@@ -244,7 +244,7 @@ fi
 echo "==> build desktop FFmpeg+AV3A prefix → $PREFIX ($(uname -s))"
 clone_ffmpeg
 
-# dav1d / libxml2 / libaribcaption（与安卓对齐）
+# dav1d / libxml2 / libaribcaption（desktop codec deps）
 chmod +x "$ROOT/scripts/ensure-desktop-ffmpeg-codecs.sh"
 KOTV_MPV_BUILD_DIR="$BUILD_DIR" KOTV_DESKTOP_FFMPEG_PREFIX="$PREFIX" \
   "$ROOT/scripts/ensure-desktop-ffmpeg-codecs.sh"
@@ -332,7 +332,7 @@ FFMPEG_EXTRA+=(--extra-ldflags="-L${PREF_NATIVE}/lib")
 # 播放不需要 avdevice；与 fvp/mdk 同进程时 libavdevice 易引入重复注册/堆损坏（mac ObjC 类，Win Vulkan 路径 talloc）。
 FFMPEG_EXTRA+=(--disable-avdevice)
 FFMPEG_EXTRA+=(--enable-network)
-# 与安卓对齐的外置解码/解析库。
+# 外置解码/解析库：dav1d / libxml2 / libaribcaption。
 FFMPEG_EXTRA+=(--enable-libdav1d)
 FFMPEG_EXTRA+=(--enable-libxml2)
 FFMPEG_EXTRA+=(--enable-libaribcaption)

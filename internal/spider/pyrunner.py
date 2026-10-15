@@ -88,6 +88,7 @@ def _install_java_module_stubs():
     class Proxy:
         @staticmethod
         def getPort():
+            # 缺省端口与 Go localproxy.DefaultPort 一致
             try:
                 return int(os.environ.get("KOTV_PROXY_PORT", "9978") or "9978")
             except Exception:

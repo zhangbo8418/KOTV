@@ -123,9 +123,9 @@ object KotvImgUtil {
     return try {
       System.getProperty("kotv.proxy.port")?.toIntOrNull()
         ?: System.getenv("KOTV_PROXY_PORT")?.toIntOrNull()
-        ?: 9978
+        ?: KotvEngineDefaults.PORT
     } catch (_: Throwable) {
-      9978
+      KotvEngineDefaults.PORT
     }
   }
 

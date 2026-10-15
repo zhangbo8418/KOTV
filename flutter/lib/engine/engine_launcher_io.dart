@@ -24,7 +24,7 @@ class EngineLauncher {
   bool _shuttingDown = false;
   bool _androidSpiderServiceStarted = false;
   bool _noBundledEngine = false;
-  String baseUrl = 'http://127.0.0.1:9978';
+  String baseUrl = kotvDefaultLocalEngineBaseUrl;
   KotvApi? _api;
   DateTime _lastStartAttempt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastResumeCheck = DateTime.fromMillisecondsSinceEpoch(0);
@@ -123,7 +123,7 @@ class EngineLauncher {
     return ensureReady(timeout: const Duration(seconds: 20));
   }
 
-  /// 远端可达则返回 true；不可达则清 prefs/登录态、切本机并拉起。
+  /// 远端可达则返回 true；不可达则清 client 引擎地址/登录态、切本机并拉起。
   /// 已是本机则等同 [recoverIfNeeded]。
   Future<bool> recoverOrFallbackLocal({bool forceRestart = false}) async {
     if (_shuttingDown) return false;
@@ -404,8 +404,8 @@ class EngineLauncher {
       if (Platform.isAndroid) {
         await _startAndroidEngineService();
         for (var i = 0; i < 40; i++) {
-          if (await _ping('http://127.0.0.1:9978')) {
-            _syncBaseUrl('http://127.0.0.1:9978');
+          if (await _ping(kotvDefaultLocalEngineBaseUrl)) {
+            _syncBaseUrl(kotvDefaultLocalEngineBaseUrl);
             debugPrint('engine android: service healthy on 9978');
             return;
           }

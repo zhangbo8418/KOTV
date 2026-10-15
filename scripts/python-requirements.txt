@@ -1,4 +1,4 @@
-# 与移动端 requirements 保持一致（桌面额外加 certifi 补 CA）
+# 桌面 Python spider 依赖（额外 certifi 补 CA）
 lxml
 ujson
 pyquery

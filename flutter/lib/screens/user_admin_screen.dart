@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
+import '../api/kotv_engine_url.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
@@ -36,7 +37,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
   List<String> _deviceIpv4 = [];
   List<String> _deviceIpv6 = [];
   String _devicePublicIp = '';
-  String _devicePort = '9978';
+  String _devicePort = '$kotvDefaultEnginePort';
 
   KotvApi get _api => ref.read(apiProvider);
 
@@ -82,7 +83,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
     try {
       try {
         final st = await _api.getSettings();
-        _devicePort = '${st['port'] ?? '9978'}';
+        _devicePort = '${st['port'] ?? kotvDefaultEnginePort}';
       } catch (_) {}
       try {
         final dev = await _api.getDevice();

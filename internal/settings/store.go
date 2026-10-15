@@ -799,12 +799,12 @@ func ListEntriesForOwner(owner string, includeHostOnly bool) []Entry {
 	return out
 }
 
-// ReplaceEntries 事务性替换内存设置列表（保留 cache）；并写入 owner=''。
+// ReplaceEntries 替换内存设置列表（保留 cache）；并覆盖写入 owner=''。
 func ReplaceEntries(entries []Entry) {
 	ReplaceEntriesForOwner("", entries)
 }
 
-// ReplaceEntriesForOwner 覆盖写入指定 owner 的设置行（先清空该 owner 再写入）。
+// ReplaceEntriesForOwner 覆盖写入指定 owner 的设置行（DB 单事务先清后写）。
 // host-only 键仅在 owner=="" 时写入。
 func ReplaceEntriesForOwner(owner string, entries []Entry) {
 	if owner == "" {
@@ -818,7 +818,7 @@ func ReplaceEntriesForOwner(owner string, entries []Entry) {
 	if storeDB == nil {
 		return
 	}
-	_ = storeDB.DeleteSettingsOwner(owner)
+	items := make([]database.SettingKV, 0, len(entries))
 	for _, e := range entries {
 		id := strings.TrimSpace(e.ID)
 		if id == "" {
@@ -827,8 +827,9 @@ func ReplaceEntriesForOwner(owner string, entries []Entry) {
 		if IsHostOnlyID(id) && owner != "" {
 			continue
 		}
-		_ = storeDB.SetSetting(owner, id, e.Value)
+		items = append(items, database.SettingKV{ID: id, Value: e.Value})
 	}
+	_ = storeDB.ReplaceSettings(owner, items)
 }
 
 // EnsureDeviceUUID 确保设备 UUID 存在。
