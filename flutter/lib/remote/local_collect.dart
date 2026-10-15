@@ -3,106 +3,82 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
-import '../api/kotv_auth_token.dart';
 import '../models/models.dart';
 import 'sync_import_apply.dart';
-import 'sync_mirror_push.dart';
 
+Future<KotvApi> _engineApi() async {
+  final p = await SharedPreferences.getInstance();
+  final base = (p.getString('engine_base_url') ?? '').trim();
+  return KotvApi(baseUrl: base.isEmpty ? 'http://127.0.0.1:9978' : base);
+}
+
+String _keepKey(String site, String id) {
+  if (site.isEmpty) return id;
+  return '$site\$\$\$$id';
+}
+
+/// 点播收藏：全部经引擎 /library（SQLite）；Flutter 只记引擎地址与鉴权。
 class LocalCollect {
-  static const _keyBase = 'kotv_collect_v1';
-
-  static Future<String> _storageKey() async {
-    final uid = await kotvSessionUserId();
-    if (uid.isEmpty) return _keyBase;
-    return '${_keyBase}_u_$uid';
-  }
-
-  static Future<KotvApi> _api() async {
-    final p = await SharedPreferences.getInstance();
-    final base = (p.getString('engine_base_url') ?? '').trim();
-    return KotvApi(baseUrl: base.isEmpty ? 'http://127.0.0.1:9978' : base);
+  static Map<String, dynamic> _keepBody(VodItem item) {
+    return {
+      'key': _keepKey(item.site, item.id),
+      'vodPic': item.pic,
+      'vodName': item.name,
+      'vodFlag': item.flag,
+      'vodRemarks': item.remarks,
+      'type': 0,
+      'cid': 0,
+      'siteName': item.configSource.trim().isNotEmpty ? item.configSource.trim() : item.site,
+    };
   }
 
   static Future<List<VodItem>> list() async {
-    try {
-      final data = await (await _api()).library('keep');
-      final raw = (data['items'] as List?) ?? const [];
-      final items = <VodItem>[];
-      for (final e in raw) {
-        if (e is! Map) continue;
-        final m = Map<String, dynamic>.from(e);
-        final id = '${m['id'] ?? ''}'.trim();
-        final site = '${m['site'] ?? ''}'.trim();
-        if (id.isEmpty) continue;
-        items.add(VodItem(
-          id: id,
-          name: '${m['name'] ?? ''}',
-          pic: '${m['pic'] ?? ''}',
-          remarks: '${m['remarks'] ?? ''}',
-          site: site,
-          flag: '${m['flag'] ?? ''}',
-          configSource: '${m['siteName'] ?? ''}',
-        ));
-      }
-      return items;
-    } catch (_) {
-      await SyncImportApply.pull();
-      return _listRaw();
+    final data = await (await _engineApi()).library('keep');
+    final raw = (data['items'] as List?) ?? const [];
+    final items = <VodItem>[];
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final m = Map<String, dynamic>.from(e);
+      final id = '${m['id'] ?? ''}'.trim();
+      final site = '${m['site'] ?? ''}'.trim();
+      if (id.isEmpty) continue;
+      items.add(VodItem(
+        id: id,
+        name: '${m['name'] ?? ''}',
+        pic: '${m['pic'] ?? ''}',
+        remarks: '${m['remarks'] ?? ''}',
+        site: site,
+        flag: '${m['flag'] ?? ''}',
+        configSource: '${m['siteName'] ?? ''}',
+      ));
     }
-  }
-
-  static Future<List<VodItem>> _listRaw() async {
-    final p = await SharedPreferences.getInstance();
-    final raw = p.getString(await _storageKey());
-    if (raw == null || raw.isEmpty) return [];
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return [];
-      return decoded
-          .whereType<Map>()
-          .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  /// 去重：优先 (configSource, site, id)；configSource 空时兼容旧条目。
-  static int _indexOf(
-    List<VodItem> cur, {
-    required String id,
-    required String site,
-    String configSource = '',
-  }) {
-    final cs = configSource.trim();
-    final exact = cur.indexWhere(
-      (e) => e.id == id && e.site == site && e.configSource.trim() == cs,
-    );
-    if (exact >= 0) return exact;
-    if (cs.isNotEmpty) {
-      return cur.indexWhere(
-        (e) => e.id == id && e.site == site && e.configSource.trim().isEmpty,
-      );
-    }
-    return cur.indexWhere((e) => e.id == id && e.site == site);
+    return items;
   }
 
   static Future<bool> isKept(String id, String site, {String configSource = ''}) async {
-    final list = await _listRaw();
-    return _indexOf(list, id: id, site: site, configSource: configSource) >= 0;
+    if (id.isEmpty) return false;
+    try {
+      final items = await list();
+      final cs = configSource.trim();
+      if (cs.isNotEmpty) {
+        final exact = items.any(
+          (e) => e.id == id && e.site == site && e.configSource.trim() == cs,
+        );
+        if (exact) return true;
+      }
+      return items.any((e) => e.id == id && e.site == site);
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<bool> toggle(VodItem item) async {
-    final cur = await _listRaw();
-    final i = _indexOf(cur, id: item.id, site: item.site, configSource: item.configSource);
-    if (i >= 0) {
-      cur.removeAt(i);
-      await _save(cur);
-      return false;
-    }
-    cur.insert(0, item);
-    await _save(cur.take(200).toList());
-    return true;
+    if (item.id.isEmpty) return false;
+    final data = await (await _engineApi()).libraryAction({
+      'action': 'toggleKeep',
+      'keep': _keepBody(item),
+    });
+    return data['kept'] == true;
   }
 
   /// 详情返回真实 id 后迁移键；若新键已存在则去掉旧条目。
@@ -113,18 +89,35 @@ class LocalCollect {
     String configSource = '',
   }) async {
     if (oldId.isEmpty || newId.isEmpty || oldId == newId) return;
-    final cur = await _listRaw();
-    final oldIdx = _indexOf(cur, id: oldId, site: site, configSource: configSource);
-    if (oldIdx < 0) return;
-    final newIdx = _indexOf(cur, id: newId, site: site, configSource: configSource);
-    if (newIdx >= 0) {
-      cur.removeAt(oldIdx);
-      await _save(cur);
-      return;
-    }
-    final e = cur[oldIdx];
-    cur[oldIdx] = _copy(e, id: newId);
-    await _save(cur);
+    final api = await _engineApi();
+    try {
+      final cur = await list();
+      VodItem? old;
+      for (final e in cur) {
+        if (e.id == oldId && e.site == site) {
+          if (configSource.trim().isEmpty || e.configSource.trim() == configSource.trim() || e.configSource.trim().isEmpty) {
+            old = e;
+            break;
+          }
+        }
+      }
+      if (old == null) return;
+      final hasNew = cur.any((e) => e.id == newId && e.site == site);
+      await api.libraryAction({'action': 'deleteKeep', 'key': _keepKey(site, oldId)});
+      if (hasNew) return;
+      await api.libraryAction({
+        'action': 'saveKeep',
+        'keep': _keepBody(VodItem(
+          id: newId,
+          name: old.name,
+          pic: old.pic,
+          remarks: old.remarks,
+          site: site,
+          flag: old.flag,
+          configSource: configSource.trim().isNotEmpty ? configSource : old.configSource,
+        )),
+      });
+    } catch (_) {}
   }
 
   /// 已收藏时用详情最新 name/pic 等回写展示字段。
@@ -138,91 +131,47 @@ class LocalCollect {
     String? typeName,
   }) async {
     if (id.isEmpty) return;
-    final cur = await _listRaw();
-    final i = _indexOf(cur, id: id, site: site, configSource: configSource);
-    if (i < 0) return;
-    final e = cur[i];
-    cur[i] = _copy(
-      e,
-      name: (name != null && name.isNotEmpty) ? name : null,
-      pic: (pic != null && pic.isNotEmpty) ? pic : null,
-      remarks: remarks,
-      typeName: typeName,
-      configSource: configSource.isNotEmpty ? configSource : null,
-    );
-    await _save(cur);
+    try {
+      final cur = await list();
+      final i = cur.indexWhere((e) {
+        if (e.id != id || e.site != site) return false;
+        final cs = configSource.trim();
+        if (cs.isEmpty) return true;
+        return e.configSource.trim() == cs || e.configSource.trim().isEmpty;
+      });
+      if (i < 0) return;
+      final e = cur[i];
+      await (await _engineApi()).libraryAction({
+        'action': 'saveKeep',
+        'keep': _keepBody(VodItem(
+          id: id,
+          name: (name != null && name.isNotEmpty) ? name : e.name,
+          pic: (pic != null && pic.isNotEmpty) ? pic : e.pic,
+          remarks: remarks ?? e.remarks,
+          typeName: typeName ?? e.typeName,
+          site: site,
+          flag: e.flag,
+          configSource: configSource.isNotEmpty ? configSource : e.configSource,
+        )),
+      });
+    } catch (_) {}
   }
 
   static Future<void> clear() async {
-    final p = await SharedPreferences.getInstance();
-    await p.remove(await _storageKey());
-    SyncMirrorPush.scheduleKeep(const []);
+    await (await _engineApi()).libraryAction({'action': 'clearKeep'});
   }
 
   static Future<void> remove(VodItem item) async {
-    final cur = await _listRaw();
-    final i = _indexOf(cur, id: item.id, site: item.site, configSource: item.configSource);
-    if (i >= 0) {
-      cur.removeAt(i);
-    } else {
-      cur.removeWhere((e) => e.id == item.id && e.site == item.site);
-    }
-    await _save(cur);
+    await (await _engineApi()).libraryAction({
+      'action': 'deleteKeep',
+      'key': _keepKey(item.site, item.id),
+    });
   }
 
   static Future<void> replaceAll(List<VodItem> items) async {
-    await _save(items.take(200).toList());
-  }
-
-  static VodItem _copy(
-    VodItem e, {
-    String? id,
-    String? name,
-    String? pic,
-    String? remarks,
-    String? typeName,
-    String? configSource,
-  }) {
-    return VodItem(
-      id: id ?? e.id,
-      name: name ?? e.name,
-      pic: pic ?? e.pic,
-      remarks: remarks ?? e.remarks,
-      typeName: typeName ?? e.typeName,
-      site: e.site,
-      action: e.action,
-      vodTag: e.vodTag,
-      cate: e.cate,
-      folder: e.folder,
-      flag: e.flag,
-      configSource: configSource ?? e.configSource,
-      positionMs: e.positionMs,
-      durationMs: e.durationMs,
-    );
-  }
-
-  static Future<void> _save(List<VodItem> items) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString(
-      await _storageKey(),
-      jsonEncode(items
-          .map((e) => {
-                'vod_id': e.id,
-                'vod_name': e.name,
-                'vod_pic': e.pic,
-                'vod_remarks': e.remarks,
-                'type_name': e.typeName,
-                'site': e.site,
-                if (e.vodTag.trim().isNotEmpty) 'vod_tag': e.vodTag,
-                if (e.cate.trim().isNotEmpty) 'cate': e.cate,
-                if (e.action.trim().isNotEmpty) 'action': e.action,
-                if (e.flag.trim().isNotEmpty) 'vod_flag': e.flag,
-                if (e.configSource.trim().isNotEmpty) 'config_source': e.configSource,
-                if (e.folder) 'is_folder': true,
-              })
-          .toList()),
-    );
-    SyncMirrorPush.scheduleKeep(toSyncTargets(items));
+    await (await _engineApi()).tools('mirrorSync', {
+      'keep': jsonEncode(toSyncTargets(items.take(200).toList())),
+    });
   }
 
   /// 同步协议 Keep JSON（site$$$id）。
@@ -232,7 +181,7 @@ class LocalCollect {
       for (final e in items)
         if (e.id.isNotEmpty)
           {
-            'key': '${e.site}\$\$\$${e.id}',
+            'key': _keepKey(e.site, e.id),
             'vodPic': e.pic,
             'vodName': e.name,
             'vodFlag': e.flag,
@@ -240,8 +189,7 @@ class LocalCollect {
             'createTime': now,
             'type': 0,
             'cid': 0,
-            'siteName': e.site,
-            if (e.configSource.trim().isNotEmpty) 'config_source': e.configSource,
+            'siteName': e.configSource.trim().isNotEmpty ? e.configSource.trim() : e.site,
           },
     ];
   }
@@ -267,7 +215,7 @@ class LocalCollect {
         remarks: '${j['vodRemarks'] ?? ''}',
         site: site,
         flag: '${j['vodFlag'] ?? ''}',
-        configSource: '${j['config_source'] ?? j['configSource'] ?? ''}',
+        configSource: '${j['config_source'] ?? j['configSource'] ?? j['siteName'] ?? ''}',
       ));
     }
     return out;

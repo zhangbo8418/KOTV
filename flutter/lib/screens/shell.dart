@@ -12,7 +12,6 @@ import '../player/playback_guard.dart';
 import '../providers.dart';
 import '../player/play_headers.dart';
 import '../api/kotv_settings_cache.dart';
-import '../remote/local_collect.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
@@ -90,15 +89,13 @@ class _AppShellState extends ConsumerState<AppShell> {
       ..start();
     _postMsg = PostMsgHost(api, navigatorKey: rootNavigatorKey)..start();
     ref.read(remoteBridgeProvider.notifier).state = _bridge;
-    // 启动拉引擎设置，并同步无痕等。
+    // 启动拉引擎设置（无痕等由引擎 settings 管理，历史写入时再读）。
     KotvSettingsCache.fetch(api, force: true).then((map) async {
-      final inc = '${map['incognito'] ?? ''}'.toLowerCase() == 'true';
       kotvApplyPlayUaSetting('${map['ua'] ?? ''}');
       final bootLive = '${map['bootLive'] ?? ''}'.toLowerCase();
       if (bootLive == 'true' || bootLive == '1' || bootLive == 'on') {
         if (mounted) goKotvPage(ref, KotvPage.live);
       }
-      await LocalHistory.setIncognito(inc);
     }).catchError((_) {});
   }
 

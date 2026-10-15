@@ -51,7 +51,7 @@ func ExportClient(hist []database.History, keep []database.Keep) ([]byte, error)
 	return buf.Bytes(), nil
 }
 
-// Import 从 gzip JSON 恢复；写入引擎 DB 的 history/keep 与 settings，并返回 payload 供客户端落 SP。
+// Import 从 gzip JSON 恢复；写入引擎 DB 的 history/keep 与 settings，并返回 payload。
 func Import(db *database.DB, data []byte) (*Payload, error) {
 	raw, err := gunzip(data)
 	if err != nil {

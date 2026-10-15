@@ -54,8 +54,6 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 		return a.toolBackupExport(params)
 	case "backupimport":
 		return a.toolBackupImport(strParam(params, "path"))
-	case "consumesyncimport":
-		return a.toolConsumeSyncImport()
 	case "mirrorsync":
 		return a.toolMirrorSync(strParam(params, "history"), strParam(params, "keep"))
 	case "castdiscover":
@@ -365,20 +363,7 @@ func (a *App) toolBackupImport(path string) (map[string]any, error) {
 	}, nil
 }
 
-func (a *App) toolConsumeSyncImport() (map[string]any, error) {
-	hist := strings.TrimSpace(settings.Get(settings.SyncHistoryPending))
-	keep := strings.TrimSpace(settings.Get(settings.SyncKeepPending))
-	settings.Set(settings.SyncHistoryPending, "")
-	settings.Set(settings.SyncKeepPending, "")
-	_ = settings.Save()
-	return map[string]any{
-		"ok":      true,
-		"history": hist,
-		"keep":    keep,
-	}, nil
-}
-
-// toolMirrorSync 把 Flutter SP 历史/收藏全量回写引擎 DB，供对端 Export / 配对拉取。
+// toolMirrorSync 全量覆盖写入引擎 history/keep（备份恢复等批量导入）。
 func (a *App) toolMirrorSync(histRaw, keepRaw string) (map[string]any, error) {
 	histRaw = strings.TrimSpace(histRaw)
 	keepRaw = strings.TrimSpace(keepRaw)

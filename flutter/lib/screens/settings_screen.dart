@@ -117,7 +117,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       } catch (_) {
         _deviceIp = '';
       }
-      await LocalHistory.setIncognito(g('incognito', 'false') == 'true');
       kotvApplyPlayUaSetting(g('ua'));
       if (kotvIsAndroid()) {
         _androidVulkanOk = await NativeMpvPlayback.isVulkanAvailable();
@@ -146,9 +145,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       });
       if (key == 'ua') {
         kotvApplyPlayUaSetting(value);
-      }
-      if (key == 'incognito') {
-        await LocalHistory.setIncognito(value == 'true');
       }
       ref.invalidate(settingsProvider);
       if (key == 'vod' ||
@@ -1905,14 +1901,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _prompt('备份文件路径', def, def, (path) async {
       final data = await _runTool('正在恢复', () => ref.read(apiProvider).tools('backupImport', {'path': path}));
       if (data == null || !mounted) return;
-      final histRaw = '${data['history'] ?? ''}'.trim();
-      final keepRaw = '${data['keep'] ?? ''}'.trim();
-      if (histRaw.isNotEmpty) {
-        await LocalHistory.replaceAll(LocalHistory.fromSyncTargets(histRaw));
-      }
-      if (keepRaw.isNotEmpty) {
-        await LocalCollect.replaceAll(LocalCollect.fromSyncTargets(keepRaw));
-      }
+      // backupImport 已写入引擎 SQLite；Flutter 无业务落盘，只需刷新。
       setState(() => _status = '${data['message'] ?? '备份已恢复'}');
       await _reload();
       ref.invalidate(configProvider);

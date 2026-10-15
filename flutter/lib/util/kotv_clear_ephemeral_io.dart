@@ -18,7 +18,7 @@ bool _isProtectedDataRootName(String name) {
   return low == 'kotv' || low == 'db';
 }
 
-/// 清理 Flutter / 引擎旁可再生文件（不含数据库、SharedPreferences）。
+/// 清理 Flutter / 引擎旁可再生文件（不含数据库；引擎地址与鉴权仍留在本地 prefs）。
 ///
 /// 绝不删除 [kotvDataRoot] 下的 db/setting（Android 上曾误整清 cacheDir 把多仓 DB 一起删掉）。
 Future<int> kotvClearFlutterEphemeral() async {

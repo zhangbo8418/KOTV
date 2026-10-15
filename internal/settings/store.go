@@ -61,11 +61,8 @@ const (
 	Incognito    Type = "incognito"
 	SyncPairCode Type = "syncPairCode"
 	DeviceUUID   Type = "deviceUUID"
-	// SyncHistoryPending / SyncKeepPending：同步接收后待客户端落 SP 的 JSON。
-	SyncHistoryPending Type = "kotv_sync_history"
-	SyncKeepPending    Type = "kotv_sync_keep"
-	RemoteAuth         Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
-	AllowRegister      Type = "allowRegister" // 开放注册，默认 false
+	RemoteAuth   Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
+	AllowRegister Type = "allowRegister" // 开放注册，默认 false
 
 	// 播放细项（须进 APIGetSettings 白名单，否则冷启动丢设置）。
 	AudioPassThrough         Type = "audioPassThrough"

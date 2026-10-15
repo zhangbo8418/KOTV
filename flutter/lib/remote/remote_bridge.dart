@@ -5,11 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/kotv_api.dart';
-import '../api/kotv_auth_token.dart';
 import '../models/models.dart';
 import '../player/kotv_platform.dart';
 import 'sync_import_apply.dart';
-import 'sync_mirror_push.dart';
 
 /// 轮询 Go 引擎遥控队列，并把播放状态回写给遥控页。
 class RemoteBridge {
@@ -132,93 +130,50 @@ class RemoteBridge {
   }
 }
 
-/// 本机观看历史；有登录会话时按 userId 分桶，本机免登录用默认桶。
+
+Future<KotvApi> _engineApi() async {
+  final p = await SharedPreferences.getInstance();
+  final base = (p.getString('engine_base_url') ?? '').trim();
+  return KotvApi(baseUrl: base.isEmpty ? 'http://127.0.0.1:9978' : base);
+}
+
+String _historyKey(String site, String id) {
+  if (site.isEmpty) return id;
+  return '$id@$site';
+}
+
+/// 观看历史：全部经引擎 /library（SQLite）；Flutter 只记引擎地址与鉴权。
 class LocalHistory {
-  static const _keyBase = 'kotv_history_v1';
-
-  static Future<String> _storageKey() async {
-    final uid = await kotvSessionUserId();
-    if (uid.isEmpty) return _keyBase;
-    return '${_keyBase}_u_$uid';
-  }
-
-  static Future<KotvApi> _api() async {
-    final p = await SharedPreferences.getInstance();
-    final base = (p.getString('engine_base_url') ?? '').trim();
-    return KotvApi(baseUrl: base.isEmpty ? 'http://127.0.0.1:9978' : base);
-  }
-
   static Future<List<VodItem>> list() async {
-    try {
-      final data = await (await _api()).library('history');
-      final raw = (data['items'] as List?) ?? const [];
-      final items = <VodItem>[];
-      for (final e in raw) {
-        if (e is! Map) continue;
-        final m = Map<String, dynamic>.from(e);
-        final id = '${m['id'] ?? ''}'.trim();
-        final site = '${m['site'] ?? ''}'.trim();
-        if (id.isEmpty) continue;
-        items.add(VodItem(
-          id: id,
-          name: '${m['name'] ?? ''}',
-          pic: '${m['pic'] ?? ''}',
-          remarks: '${m['remarks'] ?? ''}',
-          site: site,
-          flag: '${m['flag'] ?? ''}',
-          positionMs: (m['position'] as num?)?.toInt() ?? 0,
-          durationMs: (m['duration'] as num?)?.toInt() ?? 0,
-        ));
-      }
-      await _writeSpCache(items);
-      return items;
-    } catch (_) {
-      await SyncImportApply.pull();
-      return _listRaw();
+    final data = await (await _engineApi()).library('history');
+    final raw = (data['items'] as List?) ?? const [];
+    final items = <VodItem>[];
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final m = Map<String, dynamic>.from(e);
+      final id = '${m['id'] ?? ''}'.trim();
+      final site = '${m['site'] ?? ''}'.trim();
+      if (id.isEmpty) continue;
+      items.add(VodItem(
+        id: id,
+        name: '${m['name'] ?? ''}',
+        pic: '${m['pic'] ?? ''}',
+        remarks: '${m['remarks'] ?? ''}',
+        site: site,
+        flag: '${m['flag'] ?? ''}',
+        positionMs: (m['position'] as num?)?.toInt() ?? 0,
+        durationMs: (m['duration'] as num?)?.toInt() ?? 0,
+      ));
     }
+    return items;
   }
 
-  static Future<void> _writeSpCache(List<VodItem> items) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString(
-      await _storageKey(),
-      jsonEncode(items
-          .map((e) => {
-                'vod_id': e.id,
-                'vod_name': e.name,
-                'vod_pic': e.pic,
-                'vod_remarks': e.remarks,
-                'type_name': e.typeName,
-                'site': e.site,
-                if (e.flag.trim().isNotEmpty) 'vod_flag': e.flag,
-                if (e.positionMs > 0) 'position': e.positionMs,
-                if (e.durationMs > 0) 'duration': e.durationMs,
-              })
-          .toList()),
-    );
-  }
-
-  static Future<List<VodItem>> _listRaw() async {
-    final p = await SharedPreferences.getInstance();
-    final raw = p.getString(await _storageKey());
-    if (raw == null || raw.isEmpty) return [];
+  static Future<bool> _incognito(KotvApi api) async {
     try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return [];
-      return decoded
-          .whereType<Map>()
-          .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  static Future<bool> _incognito() async {
-    try {
-      final p = await SharedPreferences.getInstance();
-      // 无痕：不写本地历史；与引擎 settings.incognito 一致（启动后改设置需重启或走引擎）。
-      return p.getString('kotv_incognito') == 'true';
+      final s = await api.getSettings();
+      final map = (s['settings'] as Map?) ?? const {};
+      final v = '${map['incognito'] ?? ''}'.trim().toLowerCase();
+      return v == 'true' || v == '1' || v == 'on';
     } catch (_) {
       return false;
     }
@@ -226,40 +181,38 @@ class LocalHistory {
 
   static Future<void> push(VodItem item) async {
     if (item.id.isEmpty) return;
-    if (await _incognito()) return;
-    final cur = await _listRaw();
-    var stored = item;
-    if (item.positionMs <= 0) {
-      for (final e in cur) {
-        if (e.id != item.id || e.site != item.site) continue;
-        if (e.remarks != item.remarks || e.flag != item.flag) continue;
-        if (e.positionMs <= 0) continue;
-        stored = VodItem(
-          id: item.id,
-          name: item.name,
-          pic: item.pic,
-          remarks: item.remarks,
-          typeName: item.typeName,
-          site: item.site,
-          action: item.action,
-          vodTag: item.vodTag,
-          cate: item.cate,
-          folder: item.folder,
-          flag: item.flag,
-          configSource: item.configSource,
-          positionMs: e.positionMs,
-          durationMs: item.durationMs > 0 ? item.durationMs : e.durationMs,
-        );
-        break;
-      }
+    final api = await _engineApi();
+    if (await _incognito(api)) return;
+    var positionMs = item.positionMs;
+    var durationMs = item.durationMs;
+    if (positionMs <= 0) {
+      try {
+        for (final e in await list()) {
+          if (e.id != item.id || e.site != item.site) continue;
+          if (e.remarks != item.remarks || e.flag != item.flag) continue;
+          if (e.positionMs <= 0) continue;
+          positionMs = e.positionMs;
+          durationMs = durationMs > 0 ? durationMs : e.durationMs;
+          break;
+        }
+      } catch (_) {}
     }
-    cur.removeWhere((e) => e.id == item.id && e.site == item.site);
-    cur.insert(0, stored);
-    final trimmed = cur.take(60).toList();
-    await _persist(trimmed);
+    await api.libraryAction({
+      'action': 'saveHistory',
+      'item': {
+        'key': _historyKey(item.site, item.id),
+        'vodPic': item.pic,
+        'vodName': item.name,
+        'vodFlag': item.flag,
+        'vodRemarks': item.remarks,
+        if (item.site == 'push_agent') 'episodeUrl': item.id,
+        'position': positionMs,
+        'duration': durationMs,
+        'speed': 1.0,
+      },
+    });
   }
 
-  /// 起播只记「看到哪一集」：同集保留进度；换集才清零进度。勿用 [push](positionMs:0) 冲掉续播。
   static Future<void> touchEpisode({
     required String id,
     required String name,
@@ -270,93 +223,77 @@ class LocalHistory {
     String typeName = '',
   }) async {
     if (id.isEmpty) return;
-    if (await _incognito()) return;
-    final cur = await _listRaw();
+    final api = await _engineApi();
+    if (await _incognito(api)) return;
     var positionMs = 0;
     var durationMs = 0;
-    for (final e in cur) {
-      if (e.id != id || e.site != site) continue;
-      if (e.remarks == remarks && e.flag == flag) {
-        positionMs = e.positionMs;
-        durationMs = e.durationMs;
+    try {
+      for (final e in await list()) {
+        if (e.id != id || e.site != site) continue;
+        if (e.remarks == remarks && e.flag == flag) {
+          positionMs = e.positionMs;
+          durationMs = e.durationMs;
+        }
+        break;
       }
-      break;
-    }
-    cur.removeWhere((e) => e.id == id && e.site == site);
-    cur.insert(
-      0,
-      VodItem(
-        id: id,
-        name: name,
-        pic: pic,
-        site: site,
-        remarks: remarks,
-        flag: flag,
-        typeName: typeName,
-        positionMs: positionMs,
-        durationMs: durationMs,
-      ),
-    );
-    await _persist(cur.take(60).toList());
+    } catch (_) {}
+    await api.libraryAction({
+      'action': 'saveHistory',
+      'item': {
+        'key': _historyKey(site, id),
+        'vodPic': pic,
+        'vodName': name,
+        'vodFlag': flag,
+        'vodRemarks': remarks,
+        'position': positionMs,
+        'duration': durationMs,
+        'speed': 1.0,
+      },
+    });
   }
 
-  /// 详情返回真实 id 后迁移键；若新键已存在则去掉旧条目。
   static Future<void> replaceId({
     required String site,
     required String oldId,
     required String newId,
   }) async {
     if (oldId.isEmpty || newId.isEmpty || oldId == newId) return;
-    final cur = await _listRaw();
-    final oldIdx = cur.indexWhere((e) => e.id == oldId && e.site == site);
-    if (oldIdx < 0) return;
-    final newIdx = cur.indexWhere((e) => e.id == newId && e.site == site);
-    if (newIdx >= 0) {
-      cur.removeAt(oldIdx);
-      await _persist(cur);
-      return;
-    }
-    final e = cur[oldIdx];
-    cur[oldIdx] = VodItem(
-      id: newId,
-      name: e.name,
-      pic: e.pic,
-      remarks: e.remarks,
-      typeName: e.typeName,
-      site: e.site,
-      flag: e.flag,
-      positionMs: e.positionMs,
-      durationMs: e.durationMs,
-    );
-    await _persist(cur);
+    final api = await _engineApi();
+    try {
+      final cur = await list();
+      VodItem? old;
+      for (final e in cur) {
+        if (e.id == oldId && e.site == site) {
+          old = e;
+          break;
+        }
+      }
+      if (old == null) return;
+      await api.libraryAction({'action': 'deleteHistory', 'key': _historyKey(site, oldId)});
+      if (cur.any((e) => e.id == newId && e.site == site)) return;
+      await api.libraryAction({
+        'action': 'saveHistory',
+        'item': {
+          'key': _historyKey(site, newId),
+          'vodPic': old.pic,
+          'vodName': old.name,
+          'vodFlag': old.flag,
+          'vodRemarks': old.remarks,
+          'position': old.positionMs,
+          'duration': old.durationMs,
+          'speed': 1.0,
+        },
+      });
+    } catch (_) {}
   }
 
   static Future<void> replaceAll(List<VodItem> items) async {
-    await _persist(items.take(60).toList());
+    final api = await _engineApi();
+    await api.tools('mirrorSync', {
+      'history': jsonEncode(toSyncTargets(items.take(60).toList())),
+    });
   }
 
-  static Future<void> _persist(List<VodItem> items) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString(
-      await _storageKey(),
-      jsonEncode(items
-          .map((e) => {
-                'vod_id': e.id,
-                'vod_name': e.name,
-                'vod_pic': e.pic,
-                'vod_remarks': e.remarks,
-                'type_name': e.typeName,
-                'site': e.site,
-                if (e.flag.trim().isNotEmpty) 'vod_flag': e.flag,
-                if (e.positionMs > 0) 'position': e.positionMs,
-                if (e.durationMs > 0) 'duration': e.durationMs,
-              })
-          .toList()),
-    );
-    SyncMirrorPush.scheduleHistory(toSyncTargets(items));
-  }
-
-  /// 同步协议 History JSON（site$$$id）。
   static List<Map<String, dynamic>> toSyncTargets(List<VodItem> items) {
     final now = DateTime.now().millisecondsSinceEpoch;
     return [
@@ -368,7 +305,6 @@ class LocalHistory {
             'vodName': e.name,
             'vodFlag': e.flag,
             'vodRemarks': e.remarks,
-            // push_agent 直链：id 即播放地址，写回引擎以免投屏 episodeUrl 被 mode=2 抹掉。
             if (e.site == 'push_agent') 'episodeUrl': e.id,
             'createTime': now,
             'position': e.positionMs,
@@ -404,38 +340,32 @@ class LocalHistory {
     return out;
   }
 
-  static Future<void> setIncognito(bool on) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString('kotv_incognito', on ? 'true' : 'false');
-  }
-
   static Future<void> clear() async {
-    final p = await SharedPreferences.getInstance();
-    await p.remove(await _storageKey());
-    SyncMirrorPush.scheduleHistory(const []);
+    await (await _engineApi()).libraryAction({'action': 'clearHistory'});
   }
 
   static Future<void> remove(VodItem item) async {
-    final cur = await _listRaw();
-    cur.removeWhere((e) => e.id == item.id && e.site == item.site);
-    await _persist(cur);
+    await (await _engineApi()).libraryAction({
+      'action': 'deleteHistory',
+      'key': _historyKey(item.site, item.id),
+    });
   }
 }
 
-/// 片头/片尾偏移（秒），按 vodId@site 本地持久化。
+/// 片头/片尾偏移（秒）：写入引擎 history。
 class LocalPlayOffsets {
-  static String _key(String id, String site) => 'kotv_off_${site}_$id';
-
   static Future<(int openingSec, int endingSec)> get(String id, String site) async {
     if (id.isEmpty) return (0, 0);
-    final p = await SharedPreferences.getInstance();
-    final raw = p.getString(_key(id, site));
-    if (raw == null || raw.isEmpty) return (0, 0);
     try {
-      final m = jsonDecode(raw) as Map;
-      final open = (m['opening'] is num) ? (m['opening'] as num).toInt() : 0;
-      final end = (m['ending'] is num) ? (m['ending'] as num).toInt() : 0;
-      return (open.clamp(0, 3600), end.clamp(0, 3600));
+      final data = await (await _engineApi()).libraryAction({
+        'action': 'getHistory',
+        'key': _historyKey(site, id),
+      });
+      final item = data['item'];
+      if (item is! Map) return (0, 0);
+      final openMs = (item['opening'] as num?)?.toInt() ?? 0;
+      final endMs = (item['ending'] as num?)?.toInt() ?? 0;
+      return ((openMs ~/ 1000).clamp(0, 3600), (endMs ~/ 1000).clamp(0, 3600));
     } catch (_) {
       return (0, 0);
     }
@@ -443,33 +373,47 @@ class LocalPlayOffsets {
 
   static Future<void> set(String id, String site, int openingSec, int endingSec) async {
     if (id.isEmpty) return;
-    final p = await SharedPreferences.getInstance();
-    await p.setString(
-      _key(id, site),
-      jsonEncode({
-        'opening': openingSec.clamp(0, 3600),
-        'ending': endingSec.clamp(0, 3600),
-      }),
-    );
+    try {
+      await (await _engineApi()).libraryAction({
+        'action': 'updateOffsets',
+        'key': _historyKey(site, id),
+        'opening': openingSec.clamp(0, 3600) * 1000,
+        'ending': endingSec.clamp(0, 3600) * 1000,
+      });
+    } catch (_) {}
   }
 }
 
-/// 详情集列表倒序偏好，按 vodId@site 本地持久化。
+/// 详情集列表倒序：写入引擎 history.rev_sort。
 class LocalRevSort {
-  static String _key(String id, String site) => 'kotv_rev_${site}_$id';
-
   static Future<bool> get(String id, String site) async {
     if (id.isEmpty) return false;
-    final p = await SharedPreferences.getInstance();
-    return p.getBool(_key(id, site)) ?? false;
+    try {
+      final data = await (await _engineApi()).libraryAction({
+        'action': 'getHistory',
+        'key': _historyKey(site, id),
+      });
+      final item = data['item'];
+      if (item is! Map) return false;
+      final v = item['revSort'];
+      return v == true || v == 1 || '$v' == '1';
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<void> set(String id, String site, bool reversed) async {
     if (id.isEmpty) return;
-    final p = await SharedPreferences.getInstance();
-    await p.setBool(_key(id, site), reversed);
+    try {
+      await (await _engineApi()).libraryAction({
+        'action': 'setRevSort',
+        'key': _historyKey(site, id),
+        'revSort': reversed,
+      });
+    } catch (_) {}
   }
 }
+
 
 /// Flutter 页内播放器显示名。
 String flutterPlayerLabel(String val) {

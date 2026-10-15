@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../api/kotv_engine_url.dart';
@@ -52,8 +51,6 @@ import 'detail_screen.dart';
 import 'shell.dart';
 
 const _liveKeepSep = '\$\$\$';
-const _liveKeepPrefKey = 'kotv_live_keep';
-const _liveFavPrefKey = 'kotv_live_fav_names';
 const _liveFavGroupName = '收藏';
 /// 频道栏 / 信息条 / 控件自动隐藏（5s）。
 const _liveOverlayHide = Duration(seconds: 5);
@@ -802,12 +799,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (cached.isNotEmpty) return cached;
     try {
       final map = await KotvSettingsCache.fetch(ref.read(apiProvider));
-      final keep = '${map['liveKeep'] ?? ''}'.trim();
-      if (keep.isNotEmpty) return keep;
-    } catch (_) {}
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return (prefs.getString(_liveKeepPrefKey) ?? '').trim();
+      return '${map['liveKeep'] ?? ''}'.trim();
     } catch (_) {
       return '';
     }
@@ -1195,10 +1187,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final val = [srcName, groupName, chName, lineURL].join(_liveKeepSep);
     try {
       await _persistLiveSetting('liveKeep', val);
-    } catch (_) {}
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_liveKeepPrefKey, val);
     } catch (_) {}
   }
 

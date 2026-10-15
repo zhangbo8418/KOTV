@@ -129,13 +129,16 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *database.DB, owner string) {
 	var body struct {
-		Action string            `json:"action"`
-		Type   string            `json:"type"`
-		Item   *database.History `json:"item"`
-		Keep   *database.Keep    `json:"keep"`
-		Name   string            `json:"name"`
-		Key    string            `json:"key"`
-		Names  []string          `json:"names"`
+		Action  string            `json:"action"`
+		Type    string            `json:"type"`
+		Item    *database.History `json:"item"`
+		Keep    *database.Keep    `json:"keep"`
+		Name    string            `json:"name"`
+		Key     string            `json:"key"`
+		Names   []string          `json:"names"`
+		Opening int64             `json:"opening"`
+		Ending  int64             `json:"ending"`
+		RevSort any               `json:"revSort"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
 	action := strings.ToLower(strings.TrimSpace(body.Action))
@@ -147,6 +150,56 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			return
 		}
 		if err := db.SaveHistory(owner, *body.Item); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "gethistory":
+		key := strings.TrimSpace(body.Key)
+		if key == "" && body.Item != nil {
+			key = body.Item.Key
+		}
+		if key == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			return
+		}
+		h, err := db.GetHistory(owner, key)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		if h == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": nil})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": h})
+	case "updateoffsets":
+		key := strings.TrimSpace(body.Key)
+		if key == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			return
+		}
+		if err := db.UpdateHistoryOffsets(owner, key, body.Opening, body.Ending); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "setrevsort":
+		key := strings.TrimSpace(body.Key)
+		if key == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing key"})
+			return
+		}
+		rev := false
+		switch v := body.RevSort.(type) {
+		case bool:
+			rev = v
+		case float64:
+			rev = v != 0
+		case string:
+			rev = strings.EqualFold(strings.TrimSpace(v), "true") || v == "1"
+		}
+		if err := db.UpdateHistoryRevSort(owner, key, rev); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
@@ -163,6 +216,20 @@ func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *
 			key = body.Item.Key
 		}
 		if err := db.DeleteHistory(owner, key); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "savekeep":
+		if body.Keep == nil || strings.TrimSpace(body.Keep.Key) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing keep"})
+			return
+		}
+		k := *body.Keep
+		if k.Type == 0 && (typ == "livekeep" || typ == "livefav") {
+			k.Type = database.KeepTypeLive
+		}
+		if err := db.SaveKeep(owner, k); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}

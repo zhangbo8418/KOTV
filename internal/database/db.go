@@ -522,6 +522,7 @@ type History struct {
 	VodRemarks string  `json:"vodRemarks"`
 	EpisodeURL string  `json:"episodeUrl"`
 	CreateTime int64   `json:"createTime"`
+	RevSort    int64   `json:"revSort"`
 	Position   int64   `json:"position"`
 	Duration   int64   `json:"duration"`
 	Speed      float64 `json:"speed"`
@@ -568,11 +569,46 @@ func (db *DB) ListHistory(owner string, limit int) ([]History, error) {
 
 func (db *DB) SaveHistory(owner string, h History) error {
 	now := time.Now().UnixMilli()
-	_, err := db.conn.Exec(`INSERT OR REPLACE INTO history
+	speed := h.Speed
+	if speed == 0 {
+		speed = 1
+	}
+	// UPSERT：保留已有 rev_sort；opening/ending 仅在本次显式传入非 0 时覆盖。
+	_, err := db.conn.Exec(`INSERT INTO history
 		(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, episode_url, create_time, rev_play, position, duration, speed, opening, ending)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(owner, key) DO UPDATE SET
+			vod_pic=excluded.vod_pic,
+			vod_name=excluded.vod_name,
+			vod_flag=excluded.vod_flag,
+			vod_remarks=excluded.vod_remarks,
+			episode_url=excluded.episode_url,
+			create_time=excluded.create_time,
+			rev_play=excluded.rev_play,
+			position=excluded.position,
+			duration=excluded.duration,
+			speed=excluded.speed,
+			opening=CASE WHEN excluded.opening != 0 THEN excluded.opening ELSE history.opening END,
+			ending=CASE WHEN excluded.ending != 0 THEN excluded.ending ELSE history.ending END`,
 		owner, h.Key, h.VodPic, h.VodName, h.VodFlag, h.VodRemarks, h.EpisodeURL, now, now,
-		h.Position, h.Duration, h.Speed, h.Opening, h.Ending)
+		h.Position, h.Duration, speed, h.Opening, h.Ending)
+	return err
+}
+
+// UpdateHistoryRevSort 更新详情集列表倒序标记。
+func (db *DB) UpdateHistoryRevSort(owner, key string, revSort bool) error {
+	if key == "" {
+		return nil
+	}
+	var v int64
+	if revSort {
+		v = 1
+	}
+	now := time.Now().UnixMilli()
+	_, err := db.conn.Exec(`INSERT INTO history(owner, key, rev_sort, create_time, rev_play, speed)
+		VALUES(?,?,?,?,?,1)
+		ON CONFLICT(owner, key) DO UPDATE SET rev_sort=excluded.rev_sort`,
+		owner, key, v, now, now)
 	return err
 }
 
@@ -697,12 +733,12 @@ func (db *DB) DeleteKeep(owner, key string) error {
 func (db *DB) GetHistory(owner, key string) (*History, error) {
 	row := db.conn.QueryRow(
 		`SELECT key, COALESCE(vod_pic,''), COALESCE(vod_name,''), COALESCE(vod_flag,''), COALESCE(vod_remarks,''),
-		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1),
+		        COALESCE(episode_url,''), COALESCE(create_time,0), COALESCE(rev_sort,0), COALESCE(position,0), COALESCE(duration,0), COALESCE(speed,1),
 		        COALESCE(opening,0), COALESCE(ending,0)
 		 FROM history WHERE owner = ? AND key = ?`, owner, key)
 	var h History
 	err := row.Scan(&h.Key, &h.VodPic, &h.VodName, &h.VodFlag, &h.VodRemarks, &h.EpisodeURL,
-		&h.CreateTime, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending)
+		&h.CreateTime, &h.RevSort, &h.Position, &h.Duration, &h.Speed, &h.Opening, &h.Ending)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -710,6 +746,30 @@ func (db *DB) GetHistory(owner, key string) (*History, error) {
 		return nil, err
 	}
 	return &h, nil
+}
+
+// SaveKeep 写入/更新收藏（不切换）。
+func (db *DB) SaveKeep(owner string, k Keep) error {
+	if strings.TrimSpace(k.Key) == "" {
+		return fmt.Errorf("missing keep key")
+	}
+	ct := k.CreateTime
+	if ct == 0 {
+		ct = time.Now().UnixMilli()
+	}
+	_, err := db.conn.Exec(`INSERT INTO keep(owner, key, vod_pic, vod_name, vod_flag, vod_remarks, create_time, type, cid, site_name)
+		VALUES(?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(owner, key) DO UPDATE SET
+			vod_pic=excluded.vod_pic,
+			vod_name=excluded.vod_name,
+			vod_flag=excluded.vod_flag,
+			vod_remarks=excluded.vod_remarks,
+			create_time=excluded.create_time,
+			type=excluded.type,
+			cid=excluded.cid,
+			site_name=excluded.site_name`,
+		owner, k.Key, k.VodPic, k.VodName, k.VodFlag, k.VodRemarks, ct, k.Type, k.CID, k.SiteName)
+	return err
 }
 
 const (
