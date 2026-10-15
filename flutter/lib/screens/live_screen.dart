@@ -832,18 +832,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _loadFavNames() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = (prefs.getString(_liveFavPrefKey) ?? '').trim();
+      final data = await ref.read(apiProvider).library('liveKeep');
+      final names = (data['names'] as List?)
+              ?.map((e) => '$e'.trim())
+              .where((e) => e.isNotEmpty)
+              .toList() ??
+          const <String>[];
       _favNames
         ..clear()
-        ..addAll(raw.split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty));
-    } catch (_) {}
+        ..addAll(names);
+    } catch (_) {
+      // 引擎未就绪时保持内存态
+    }
   }
 
   Future<void> _persistFavNames() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_liveFavPrefKey, _favNames.join('\n'));
+      await ref.read(apiProvider).libraryAction({
+        'action': 'replaceLiveFav',
+        'names': _favNames.toList(),
+      });
     } catch (_) {}
   }
 

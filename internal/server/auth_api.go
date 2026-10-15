@@ -452,6 +452,9 @@ func (s *Server) handleAdminUserAction(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if s.contentAPI != nil {
+			s.contentAPI.PurgeUserData(id)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case r.Method == http.MethodPost && action == "enable":
 		if err := auth.SetEnabled(id, true); err != nil {

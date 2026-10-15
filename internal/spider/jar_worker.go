@@ -132,6 +132,7 @@ var (
 	netConfigJSON     []byte // 空 clientId 默认桶（兼容）
 	netConfigByClient map[string][]byte
 	userProxyJSON     []byte
+	userProxyByClient map[string][]byte
 	localProxyJSON    []byte // 本机 HTTP 实听端口 → bridge Proxy.set
 	netPrimed         bool   // Android HTTP 用
 )
@@ -213,7 +214,7 @@ func SetNetConfig(headers, proxy, hosts, doh []byte) {
 	pushBridgeIfAlive(payload)
 }
 
-// SetUserProxy 把 KOTV 用户代理设置下发到 bridge。
+// SetUserProxy 把 KOTV 用户代理设置下发到 bridge（按 ScopeID 分桶）。
 func SetUserProxy(spec string) {
 	spec = strings.TrimSpace(spec)
 	url := ""
@@ -224,13 +225,21 @@ func SetUserProxy(spec string) {
 			url = spec
 		}
 	}
-	req := map[string]interface{}{"method": "configProxy", "args": map[string]string{"url": url}}
+	cid := hostclient.ScopeID()
+	args := map[string]string{"url": url}
+	req := map[string]interface{}{"method": "configProxy", "args": args, "clientId": cid}
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return
 	}
 	netConfigMu.Lock()
-	userProxyJSON = payload
+	if userProxyByClient == nil {
+		userProxyByClient = map[string][]byte{}
+	}
+	userProxyByClient[cid] = payload
+	if cid == "" {
+		userProxyJSON = payload
+	}
 	netPrimed = false
 	netConfigMu.Unlock()
 	pushBridgeIfAlive(payload)
@@ -273,7 +282,10 @@ func currentNetConfig() [][]byte {
 		seen[key] = struct{}{}
 		out = append(out, payload)
 	}
-	if len(userProxyJSON) > 0 {
+	cid := hostclient.ScopeID()
+	if p := userProxyByClient[cid]; len(p) > 0 {
+		out = append(out, p)
+	} else if len(userProxyJSON) > 0 {
 		out = append(out, userProxyJSON)
 	}
 	if len(localProxyJSON) > 0 {

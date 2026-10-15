@@ -463,6 +463,21 @@ class KotvApi {
   Future<Map<String, dynamic>> siteAction({required String site, required String action}) =>
       _post('/api/v1/action', {'site': site, 'action': action});
 
+  /// 片库列表：history / keep / liveKeep（SQLite，按登录 owner 分桶）。
+  Future<Map<String, dynamic>> library(String type, {int limit = 200}) =>
+      _get('/library', {'type': type, 'limit': '$limit'});
+
+  Future<Map<String, dynamic>> libraryAction(Map<String, dynamic> body) async {
+    final res = await http
+        .post(
+          _u('/library'),
+          headers: await _headers({'Content-Type': 'application/json'}),
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 30));
+    return _decode(res);
+  }
+
   /// 打断进行中的详情/分类等爬虫请求。
   /// [hard] 硬杀所属 JVM/Py/JS；换集默认 false（软取消）。
   /// [thunder] 停磁力 Fetch / 专用源；默认 false（离开详情不停；磁力起播显式 true）。

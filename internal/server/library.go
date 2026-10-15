@@ -2,9 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -26,6 +28,13 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "库未就绪"})
 		return
 	}
+	owner := libraryOwnerFromRequest(r)
+
+	if r.Method == http.MethodPost {
+		s.handleLibraryWrite(w, r, db, owner)
+		return
+	}
+
 	typ := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("type")))
 	if typ == "" {
 		typ = "history"
@@ -36,7 +45,6 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	owner := libraryOwnerFromRequest(r)
 	switch typ {
 	case "history":
 		items, err := db.ListHistory(owner, limit)
@@ -97,12 +105,144 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": typ, "owner": owner, "items": out})
+	case "liveKeep", "livefav":
+		items, err := db.ListKeepLive(owner)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		names := make([]string, 0, len(items))
+		for _, k := range items {
+			n := strings.TrimSpace(k.VodName)
+			if n == "" {
+				n = strings.TrimSpace(k.Key)
+			}
+			if n != "" {
+				names = append(names, n)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": "liveKeep", "owner": owner, "names": names, "items": items})
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "type 仅支持 history / keep"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "type 仅支持 history / keep / liveKeep"})
+	}
+}
+
+func (s *Server) handleLibraryWrite(w http.ResponseWriter, r *http.Request, db *database.DB, owner string) {
+	var body struct {
+		Action string            `json:"action"`
+		Type   string            `json:"type"`
+		Item   *database.History `json:"item"`
+		Keep   *database.Keep    `json:"keep"`
+		Name   string            `json:"name"`
+		Key    string            `json:"key"`
+		Names  []string          `json:"names"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+	action := strings.ToLower(strings.TrimSpace(body.Action))
+	typ := strings.ToLower(strings.TrimSpace(body.Type))
+	switch action {
+	case "savehistory":
+		if body.Item == nil || strings.TrimSpace(body.Item.Key) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing item"})
+			return
+		}
+		if err := db.SaveHistory(owner, *body.Item); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "clearhistory":
+		if err := db.ClearHistory(owner); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "deletehistory":
+		key := strings.TrimSpace(body.Key)
+		if key == "" && body.Item != nil {
+			key = body.Item.Key
+		}
+		if err := db.DeleteHistory(owner, key); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "togglekeep":
+		if body.Keep == nil || strings.TrimSpace(body.Keep.Key) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing keep"})
+			return
+		}
+		k := *body.Keep
+		if k.Type == 0 && (typ == "livekeep" || typ == "livefav") {
+			k.Type = database.KeepTypeLive
+		}
+		kept, err := db.ToggleKeep(owner, k)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "kept": kept})
+	case "clearkeep":
+		if typ == "livekeep" || typ == "livefav" {
+			items, _ := db.ListKeepLive(owner)
+			for _, it := range items {
+				_ = db.DeleteKeep(owner, it.Key)
+			}
+		} else {
+			_ = db.ImportKeep(owner, nil, 2)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "deletekeep":
+		if err := db.DeleteKeep(owner, strings.TrimSpace(body.Key)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "togglelivefav":
+		ch := strings.TrimSpace(body.Name)
+		if ch == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "missing name"})
+			return
+		}
+		k := database.Keep{
+			Key:        database.KeepLiveKey("live", ch),
+			VodName:    ch,
+			Type:       database.KeepTypeLive,
+			CreateTime: time.Now().UnixMilli(),
+		}
+		kept, err := db.ToggleKeep(owner, k)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "kept": kept})
+	case "replacelivefav":
+		items, _ := db.ListKeepLive(owner)
+		for _, it := range items {
+			_ = db.DeleteKeep(owner, it.Key)
+		}
+		for _, ch := range body.Names {
+			ch = strings.TrimSpace(ch)
+			if ch == "" {
+				continue
+			}
+			_, _ = db.ToggleKeep(owner, database.Keep{
+				Key:        database.KeepLiveKey("live", ch),
+				VodName:    ch,
+				Type:       database.KeepTypeLive,
+				CreateTime: time.Now().UnixMilli(),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "unknown action"})
 	}
 }
 
 func libraryOwnerFromRequest(r *http.Request) string {
+	if u := hostclient.DataOwner(); u != "" {
+		return u
+	}
 	scope := hostclient.ResolveScopeKey(
 		r.URL.Query().Get("userId"),
 		r.URL.Query().Get("scopeId"),

@@ -55,8 +55,8 @@ func (m *Manager) Home() model.Site {
 	return m.home
 }
 
-// SetHome 切换首页站点；有配置 URL 时写入 DB（供冷启动 Init 回落）。
-// ephemeral 会话另由 client_sessions 记每位用户的 home；两者并存。
+// SetHome 切换首页站点；有配置 URL 时写入 config.home（仓级默认）。
+// 用户当前首页另由 setting(owner,'home') 持久化。
 func (m *Manager) SetHome(site model.Site) {
 	m.mu.Lock()
 	m.home = site
@@ -299,24 +299,36 @@ func (m *Manager) EnsureVodFromHistory() {
 }
 
 // InitFromSettings 以 settings.VOD 为准加载；仅未配置时回落 DB 最近一条。
+// 成功后按 settings.Home 恢复首页站（禁止默默落到列表第一项盖掉已选）。
 func (m *Manager) InitFromSettings() error {
 	vod := strings.TrimSpace(settings.Get(settings.VOD))
 	if vod == "" {
 		_ = m.fillVodPointerIfEmpty()
 		vod = strings.TrimSpace(settings.Get(settings.VOD))
 	}
+	var err error
 	if vod != "" {
-		return m.initFromVod(vod)
-	}
-	if c := m.latestSiteConfig(); c != nil {
+		err = m.initFromVod(vod)
+	} else if c := m.latestSiteConfig(); c != nil {
 		if strings.TrimSpace(c.JSON) != "" {
-			return m.ParseConfig(c, true)
+			err = m.ParseConfig(c, true)
+		} else if strings.TrimSpace(c.URL) != "" {
+			err = m.ParseConfig(c, false)
+		} else {
+			err = fmt.Errorf("未配置点播源")
 		}
-		if strings.TrimSpace(c.URL) != "" {
-			return m.ParseConfig(c, false)
+	} else {
+		err = fmt.Errorf("未配置点播源")
+	}
+	if err != nil {
+		return err
+	}
+	if homeKey := strings.TrimSpace(settings.Get(settings.Home)); homeKey != "" {
+		if site := m.GetSite(homeKey); site != nil {
+			m.SetHome(*site)
 		}
 	}
-	return fmt.Errorf("未配置点播源")
+	return nil
 }
 
 func (m *Manager) latestSiteConfig() *database.Config {

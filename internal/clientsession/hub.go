@@ -11,8 +11,8 @@ import (
 	"github.com/bobo/KOTV/internal/service"
 )
 
-// Session 单 Scope：当前点播源/首页/直播选中 + 媒体态。
-// 配置为 ephemeral Manager；本机 c: 换源另由 App 同步 settings.VOD 供冷启动。
+// Session 远端 Dedicated 内存会话：当前点播源/首页/直播选中 + 媒体态。
+// 持久化走 setting(owner=userId)；本机不建会话，只用全局 Config + setting(owner='')。
 type Session struct {
 	ClientID string
 	Cfg      *config.Manager

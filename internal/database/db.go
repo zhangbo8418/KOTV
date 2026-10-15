@@ -124,20 +124,34 @@ func (db *DB) migrate() error {
 			message TEXT,
 			updated_at INTEGER
 		)`,
-		`CREATE TABLE IF NOT EXISTS track (
-			key TEXT NOT NULL,
-			kind TEXT NOT NULL,
-			track_id INTEGER NOT NULL DEFAULT -1,
-			name TEXT,
-			format TEXT,
-			PRIMARY KEY (key, kind)
+		`CREATE TABLE IF NOT EXISTS setting (
+			owner TEXT NOT NULL DEFAULT '',
+			id TEXT NOT NULL,
+			value TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (owner, id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS auth_user (
+			id TEXT PRIMARY KEY,
+			username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+			pass_hash TEXT NOT NULL,
+			role TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			must_change_password INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS auth_token (
+			token TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			expires_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_token_user ON auth_token(user_id)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.conn.Exec(s); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	_, _ = db.conn.Exec(`DROP TABLE IF EXISTS track`)
 	// 兼容旧 keep 表：补列
 	alterCols := []string{
 		`ALTER TABLE keep ADD COLUMN type INTEGER DEFAULT 0`,

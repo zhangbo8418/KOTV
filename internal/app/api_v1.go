@@ -164,26 +164,31 @@ func (a *App) APIRefreshConfig() error {
 }
 
 func (a *App) finishConfigLoad(cfg *config.Manager, sess *clientsession.Session, source string) {
+	u := strings.TrimSpace(cfg.API().URL)
+	if u == "" {
+		u = strings.TrimSpace(source)
+	}
+	homeKey := strings.TrimSpace(cfg.Home().Key)
 	if sess != nil {
 		sess.Ready = true
 		sess.ErrMsg = ""
-		if u := strings.TrimSpace(cfg.API().URL); u != "" {
-			sess.Source = u
-		} else {
-			sess.Source = strings.TrimSpace(source)
-		}
+		sess.Source = u
 		if sess.Live != nil {
 			sess.Live.SyncFromConfig()
 		}
-		clientsession.SaveSource(sess.ClientID, sess.Source, cfg.Home().Key)
-		// 本机 c: 会话的 Manager 是 ephemeral，parseConfig 不写 settings.VOD；
-		// 不在此同步则冷启动 InitFromSettings 仍用旧指针，表现为换仓后下次启动还原。
-		mirrorLocalSelectedVod(sess, sess.Source)
-		return
+	} else {
+		a.Ready = true
+		a.ErrMsg = ""
+		a.Live.SyncFromConfig()
 	}
-	a.Ready = true
-	a.ErrMsg = ""
-	a.Live.SyncFromConfig()
+	// Dedicated 下 settings.Set 写入 owner=userId；本机写入 owner=''。
+	if u != "" {
+		settings.Set(settings.VOD, u)
+	}
+	if homeKey != "" {
+		settings.Set(settings.Home, homeKey)
+	}
+	_ = settings.Save()
 }
 
 func (a *App) APISetHome(siteKey string) error {
@@ -194,16 +199,13 @@ func (a *App) APISetHome(siteKey string) error {
 	}
 	sites.InvalidateHomeOnly()
 	cfg.SetHome(*site)
-	if sess != nil {
-		src := strings.TrimSpace(sess.Source)
-		if src == "" {
-			src = strings.TrimSpace(cfg.API().URL)
-		}
-		if src == "" {
-			src = strings.TrimSpace(settings.Get(settings.VOD))
-		}
-		clientsession.SaveSource(sess.ClientID, src, site.Key)
+	settings.Set(settings.Home, site.Key)
+	if u := strings.TrimSpace(cfg.API().URL); u != "" {
+		settings.Set(settings.VOD, u)
+	} else if sess != nil && strings.TrimSpace(sess.Source) != "" {
+		settings.Set(settings.VOD, sess.Source)
 	}
+	_ = settings.Save()
 	return nil
 }
 
@@ -1211,7 +1213,7 @@ func (a *App) editConfig(typ int64, oldURL, newURL, name string) error {
 func (a *App) APIGetSettings() map[string]any {
 	cfg, _, sess := a.scope()
 	keys := []settings.Type{
-		settings.VOD, settings.LIVE, settings.Theme, settings.Player, settings.PlayerLive,
+		settings.VOD, settings.Home, settings.LIVE, settings.Theme, settings.Player, settings.PlayerLive,
 		settings.Proxy, settings.PlayerSpeed, settings.PlayerScale, settings.PlayerDecode,
 		settings.PlayerRender,
 		settings.PlayerFailover,
@@ -1566,8 +1568,11 @@ func (a *App) APISetSettings(kv map[string]string) error {
 		return err
 	}
 	if needProxy {
-		util.SetProxy(settings.Get(settings.Proxy))
-		spider.SetUserProxy(settings.Get(settings.Proxy))
+		p := settings.Get(settings.Proxy)
+		spider.SetUserProxy(p)
+		if !hostclient.DedicatedRuntime() {
+			util.SetProxy(p)
+		}
 	}
 	if needLive {
 		a.syncLive()

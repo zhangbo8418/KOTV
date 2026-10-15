@@ -6,7 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 bool _isFlutterEphemeralName(String name) {
   final low = name.toLowerCase();
-  if (low == 'kotv' || low == 'db' || low == 'setting.ini') return false;
+  if (low == 'kotv' || low == 'db') return false;
   if (low.startsWith('kotv-')) return true;
   if (low.endsWith('.log')) return true;
   if (low.endsWith('.vbs') && low.contains('kotv')) return true;
@@ -15,10 +15,10 @@ bool _isFlutterEphemeralName(String name) {
 
 bool _isProtectedDataRootName(String name) {
   final low = name.toLowerCase();
-  return low == 'kotv' || low == 'db' || low == 'setting.ini';
+  return low == 'kotv' || low == 'db';
 }
 
-/// 清理 Flutter / 引擎旁可再生文件（不含 setting.ini、数据库、SharedPreferences）。
+/// 清理 Flutter / 引擎旁可再生文件（不含数据库、SharedPreferences）。
 ///
 /// 绝不删除 [kotvDataRoot] 下的 db/setting（Android 上曾误整清 cacheDir 把多仓 DB 一起删掉）。
 Future<int> kotvClearFlutterEphemeral() async {
@@ -41,7 +41,7 @@ Future<int> kotvClearFlutterEphemeral() async {
     if (protectDataRoot && (isDataRootOrProtected(e.path) || _isProtectedDataRootName(p.basename(e.path)))) {
       return;
     }
-    // 即便 scrub ui/log，也绝不动 db 与 setting.ini。
+    // 即便 scrub ui/log，也绝不动 db。
     if (_isProtectedDataRootName(p.basename(e.path))) return;
     try {
       if (e is Directory) {

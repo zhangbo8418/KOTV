@@ -53,6 +53,7 @@ type ContentAPI interface {
 	APICancelPending(opts map[string]any) map[string]any
 	APISessionPing() map[string]any
 	APISessionLeave() map[string]any
+	PurgeUserData(userID string)
 }
 
 func (s *Server) SetContentAPI(api ContentAPI) {

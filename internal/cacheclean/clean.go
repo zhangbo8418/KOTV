@@ -1,5 +1,5 @@
 // Package cacheclean 清理爬虫/磁力/日志等用户缓存（不删设置与数据库）。
-// 「全部」时还会扫数据根，去掉 setting.ini / db 以外的残留。
+// 「全部」时还会扫数据根，去掉 db 以外的残留。
 package cacheclean
 
 import (
@@ -124,7 +124,7 @@ func Run(opt Options) Result {
 		}
 	}
 
-	// 全选：再扫一遍数据根，删掉 setting.ini / db 以外的可再生目录与文件。
+	// 全选：再扫一遍数据根，删掉 db 以外的可再生目录与文件。
 	if opt.Script && opt.Jar && opt.Magnet && opt.Logs && opt.Other {
 		n, err := sweepRootKeepConfigAndDB(paths.Root())
 		if n > 0 || err != nil {
@@ -149,7 +149,7 @@ func sweepRootKeepConfigAndDB(root string) (int64, error) {
 	for _, e := range entries {
 		name := e.Name()
 		low := strings.ToLower(name)
-		if low == "setting.ini" || low == "db" {
+		if low == "db" {
 			continue
 		}
 		p := filepath.Join(root, name)

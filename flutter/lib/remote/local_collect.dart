@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../api/kotv_api.dart';
 import '../api/kotv_auth_token.dart';
 import '../models/models.dart';
 import 'sync_import_apply.dart';
@@ -16,9 +17,38 @@ class LocalCollect {
     return '${_keyBase}_u_$uid';
   }
 
+  static Future<KotvApi> _api() async {
+    final p = await SharedPreferences.getInstance();
+    final base = (p.getString('engine_base_url') ?? '').trim();
+    return KotvApi(baseUrl: base.isEmpty ? 'http://127.0.0.1:9978' : base);
+  }
+
   static Future<List<VodItem>> list() async {
-    await SyncImportApply.pull();
-    return _listRaw();
+    try {
+      final data = await (await _api()).library('keep');
+      final raw = (data['items'] as List?) ?? const [];
+      final items = <VodItem>[];
+      for (final e in raw) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final id = '${m['id'] ?? ''}'.trim();
+        final site = '${m['site'] ?? ''}'.trim();
+        if (id.isEmpty) continue;
+        items.add(VodItem(
+          id: id,
+          name: '${m['name'] ?? ''}',
+          pic: '${m['pic'] ?? ''}',
+          remarks: '${m['remarks'] ?? ''}',
+          site: site,
+          flag: '${m['flag'] ?? ''}',
+          configSource: '${m['siteName'] ?? ''}',
+        ));
+      }
+      return items;
+    } catch (_) {
+      await SyncImportApply.pull();
+      return _listRaw();
+    }
   }
 
   static Future<List<VodItem>> _listRaw() async {

@@ -142,9 +142,60 @@ class LocalHistory {
     return '${_keyBase}_u_$uid';
   }
 
+  static Future<KotvApi> _api() async {
+    final p = await SharedPreferences.getInstance();
+    final base = (p.getString('engine_base_url') ?? '').trim();
+    return KotvApi(baseUrl: base.isEmpty ? 'http://127.0.0.1:9978' : base);
+  }
+
   static Future<List<VodItem>> list() async {
-    await SyncImportApply.pull();
-    return _listRaw();
+    try {
+      final data = await (await _api()).library('history');
+      final raw = (data['items'] as List?) ?? const [];
+      final items = <VodItem>[];
+      for (final e in raw) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final id = '${m['id'] ?? ''}'.trim();
+        final site = '${m['site'] ?? ''}'.trim();
+        if (id.isEmpty) continue;
+        items.add(VodItem(
+          id: id,
+          name: '${m['name'] ?? ''}',
+          pic: '${m['pic'] ?? ''}',
+          remarks: '${m['remarks'] ?? ''}',
+          site: site,
+          flag: '${m['flag'] ?? ''}',
+          positionMs: (m['position'] as num?)?.toInt() ?? 0,
+          durationMs: (m['duration'] as num?)?.toInt() ?? 0,
+        ));
+      }
+      await _writeSpCache(items);
+      return items;
+    } catch (_) {
+      await SyncImportApply.pull();
+      return _listRaw();
+    }
+  }
+
+  static Future<void> _writeSpCache(List<VodItem> items) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(
+      await _storageKey(),
+      jsonEncode(items
+          .map((e) => {
+                'vod_id': e.id,
+                'vod_name': e.name,
+                'vod_pic': e.pic,
+                'vod_remarks': e.remarks,
+                'type_name': e.typeName,
+                'site': e.site,
+                if (e.flag.trim().isNotEmpty) 'vod_flag': e.flag,
+                if (e.positionMs > 0) 'position': e.positionMs,
+                if (e.durationMs > 0) 'duration': e.durationMs,
+              })
+          .toList()),
+    );
   }
 
   static Future<List<VodItem>> _listRaw() async {

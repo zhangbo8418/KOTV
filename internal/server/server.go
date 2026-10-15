@@ -132,7 +132,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/delFile", s.handleDelPath)
 	mux.HandleFunc("/cache", s.handleCache)
 	mux.HandleFunc("/action", s.handleAction)
-	mux.HandleFunc("/library", s.handleLibrary)
+	mux.HandleFunc("/library", s.withAuth(s.handleLibrary))
 	mux.HandleFunc("/postMsg", s.handlePostMsg)
 	mux.HandleFunc("/uiReply", s.handleUIReply)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

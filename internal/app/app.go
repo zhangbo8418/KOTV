@@ -73,6 +73,13 @@ func Default() *App { return defaultApp }
 func New() (*App, error) {
 	_ = os.MkdirAll(os.TempDir(), 0o755)
 	setupFileLog()
+
+	db, err := database.Open()
+	if err != nil {
+		return nil, fmt.Errorf("数据库初始化失败: %w", err)
+	}
+	settings.BindDB(db)
+	auth.BindDB(db)
 	if err := settings.Load(); err != nil {
 		log.Printf("加载设置失败: %v", err)
 	}
@@ -83,11 +90,6 @@ func New() (*App, error) {
 	}
 	util.SetProxy(settings.Get(settings.Proxy))
 	spider.SetUserProxy(settings.Get(settings.Proxy))
-
-	db, err := database.Open()
-	if err != nil {
-		return nil, fmt.Errorf("数据库初始化失败: %w", err)
-	}
 
 	cfg := config.NewManager(db)
 	sites := service.NewSiteService(cfg)
@@ -169,10 +171,13 @@ func New() (*App, error) {
 	return a, nil
 }
 
-// scope 返回当前 Scope 的点播配置与 SiteService。
-// 无 ScopeID：用全局 App.Config（本机单前端）。
-// 有 ScopeID：ephemeral 会话——可在共享的多仓/单仓列表里各自选不同当前源；脚本磁盘缓存仍全局共享。
+// scope 返回当前点播配置与 SiteService。
+// 本机（非 Dedicated）：始终全局 App.Config，偏好落 setting(owner='')。
+// 远端 Dedicated：内存 ephemeral 会话，偏好落 setting(owner=userId)。
 func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *clientsession.Session) {
+	if !hostclient.DedicatedRuntime() {
+		return a.Config, a.Sites, nil
+	}
 	cid := hostclient.ScopeID()
 	if cid == "" {
 		return a.Config, a.Sites, nil
@@ -194,7 +199,6 @@ func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *cl
 		cloned.SetRepoWriteHook(s.NoteRepo)
 		return s
 	})
-	// 自愈：Cfg 被换成新 Manager 后 Sites 仍钉旧指针时，换源/换站会一直 Get ""。
 	if sess.Sites == nil || sess.Sites.Config() != sess.Cfg {
 		log.Printf("session %s: rebound Sites to Cfg", cid)
 		bindSessionConfig(sess, sess.Cfg)
@@ -287,7 +291,7 @@ func (a *App) dropReposForUser(userID string) {
 	}
 }
 
-// bootstrapSession 首次进入时从磁盘恢复该 Scope 上次选中的点播源与首页。
+// bootstrapSession 远端会话首次进入时从 setting(owner=userId) 恢复选中仓库与首页。
 func (a *App) bootstrapSession(sess *clientsession.Session) {
 	if sess == nil || sess.Bootstrapped {
 		return
@@ -309,20 +313,18 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 		bindSessionConfig(sess, a.Config.CloneEphemeral())
 		sess.Ready = true
 		sess.ErrMsg = ""
-		sess.Source = settings.Get(settings.VOD)
+		sess.Source = strings.TrimSpace(a.Config.API().URL)
 	}
-	src, homeKey := clientsession.LoadSource(sess.ClientID)
-	src = strings.TrimSpace(src)
+	// Dedicated 请求下 settings.Get 已按 DataOwner 分桶。
+	src := strings.TrimSpace(settings.Get(settings.VOD))
+	homeKey := strings.TrimSpace(settings.Get(settings.Home))
 	if src == "" {
 		adoptGlobal()
-		// 无独立源记录时仍尝试套用已记首页（与全局同源）。
 		applyHome(homeKey)
 		return
 	}
 	cur := strings.TrimSpace(sess.Source)
 	if cur != "" && cur == src && sess.Ready {
-		// 源未变时也必须恢复首页：home 主要记在 client_sessions，
-		// 全局 Init 常落在站点列表第一项，不能在此直接 return。
 		applyHome(homeKey)
 		return
 	}
@@ -343,8 +345,6 @@ func (a *App) bootstrapSession(sess *clientsession.Session) {
 	if sess.Live != nil {
 		sess.Live.SyncFromConfig()
 	}
-	// 升级前仅写入 client_sessions 的本机换仓，在此把 settings.VOD 补齐。
-	mirrorLocalSelectedVod(sess, src)
 }
 
 // scopeLive 当前 Scope 的直播服务（有会话则用会话内选中源）。
@@ -568,7 +568,7 @@ func (a *App) LoadVodSource(source string) error {
 	return nil
 }
 
-// syncSessionsFromGlobal 全局换源成功后，会话侧整图换到新配置，避免 Cfg/Sites 仍钉旧实例。
+// syncSessionsFromGlobal 宿主全局换源后：有独立 Source 的远端会话保持原仓重载，无则跟全局。
 func (a *App) syncSessionsFromGlobal() {
 	if a == nil || a.sessions == nil || !a.Ready {
 		return
@@ -577,10 +577,26 @@ func (a *App) syncSessionsFromGlobal() {
 		if sess == nil {
 			return
 		}
-		bindSessionConfig(sess, a.Config.CloneEphemeral())
+		src := strings.TrimSpace(sess.Source)
+		if src == "" {
+			bindSessionConfig(sess, a.Config.CloneEphemeral())
+			sess.Ready = true
+			sess.ErrMsg = ""
+			sess.Source = strings.TrimSpace(a.Config.API().URL)
+			return
+		}
+		if err := sess.Cfg.LoadFromSource(src); err != nil {
+			bindSessionConfig(sess, a.Config.CloneEphemeral())
+			sess.Ready = true
+			sess.ErrMsg = ""
+			sess.Source = strings.TrimSpace(a.Config.API().URL)
+			return
+		}
 		sess.Ready = true
 		sess.ErrMsg = ""
-		sess.Source = settings.Get(settings.VOD)
+		if sess.Live != nil {
+			sess.Live.SyncFromConfig()
+		}
 	})
 }
 
@@ -599,18 +615,18 @@ func (a *App) snapshotSessionSources() []sessionSourceSnap {
 		if sess == nil {
 			return
 		}
-		src, home := clientsession.LoadSource(sess.ClientID)
-		src = strings.TrimSpace(src)
-		if src == "" {
-			src = strings.TrimSpace(sess.Source)
-		}
+		src := strings.TrimSpace(sess.Source)
 		if src == "" {
 			return
+		}
+		home := ""
+		if sess.Cfg != nil {
+			home = strings.TrimSpace(sess.Cfg.Home().Key)
 		}
 		out = append(out, sessionSourceSnap{
 			sess: sess,
 			src:  src,
-			home: strings.TrimSpace(home),
+			home: home,
 		})
 	})
 	return out
@@ -642,8 +658,6 @@ func (a *App) restoreSessionSources(snaps []sessionSourceSnap) error {
 		if s.sess.Sites != nil {
 			s.sess.Sites.InvalidateHomeOnly()
 		}
-		clientsession.SaveSource(s.sess.ClientID, s.src, s.home)
-		mirrorLocalSelectedVod(s.sess, s.src)
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))

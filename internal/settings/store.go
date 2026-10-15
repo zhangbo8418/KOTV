@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
 	"runtime"
 	"strings"
 	"sync"
 
-	"github.com/bobo/KOTV/internal/paths"
+	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/util"
 )
 
@@ -19,6 +19,7 @@ type Type string
 
 const (
 	VOD                Type = "vod"
+	Home               Type = "home" // 当前首页站 key
 	LIVE               Type = "live"
 	LOG                Type = "log"
 	Player             Type = "player"     // 点播播放器
@@ -173,14 +174,43 @@ type file struct {
 }
 
 var (
-	mu   sync.RWMutex
-	data = defaultFile()
+	mu      sync.RWMutex
+	data    = defaultFile()
+	storeDB *database.DB
 )
+
+// BindDB 设置持久化到 SQLite（须在 Load 前调用）。
+func BindDB(db *database.DB) { storeDB = db }
+
+func isHostOnly(t Type) bool {
+	switch t {
+	case RemoteAuth, AllowRegister, DeviceUUID, SyncPairCode, UpdateURL, LOG, DLNARenderer:
+		return true
+	default:
+		return false
+	}
+}
+
+// resolveOwner 本机/宿主机键 → ''；远端用户偏好 → userId。
+func resolveOwner(t Type) string {
+	if isHostOnly(t) {
+		return ""
+	}
+	return hostclient.DataOwner()
+}
+
+func persistDB(owner, id, value string) {
+	if storeDB == nil || id == "" {
+		return
+	}
+	_ = storeDB.SetSetting(owner, id, value)
+}
 
 func defaultFile() file {
 	return file{
 		List: []item{
 			{ID: "vod", Label: "点播", Value: ""},
+			{ID: "home", Label: "首页站", Value: ""},
 			{ID: "live", Label: "直播", Value: ""},
 			{ID: "log", Label: "日志级别", Value: "info"},
 			{ID: "player", Label: "点播播放器", Value: defaultVodPlayerValue()},
@@ -352,20 +382,42 @@ func ResolvePlayerVod() string {
 	return defaultVodPlayerValue()
 }
 
-// Load 从 setting.ini 加载设置。
+// Load 从数据库加载全局设置（owner=''），并补齐缺省项。
 func Load() error {
 	mu.Lock()
 	defer mu.Unlock()
-	b, err := os.ReadFile(paths.Setting())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+	if storeDB != nil {
+		m, err := storeDB.ListSettings("")
+		if err != nil {
+			return err
 		}
-		return err
+		for id, v := range m {
+			found := false
+			for i := range data.List {
+				if data.List[i].ID == id {
+					data.List[i].Value = v
+					found = true
+					break
+				}
+			}
+			if !found {
+				data.List = append(data.List, item{ID: id, Label: id, Value: v})
+			}
+		}
+		if raw, ok := m["searchHistory"]; ok && raw != "" {
+			if data.Cache == nil {
+				data.Cache = map[string]json.RawMessage{}
+			}
+			data.Cache["searchHistory"] = json.RawMessage(raw)
+		}
+		if raw, ok := m["searchHot"]; ok && raw != "" {
+			if data.Cache == nil {
+				data.Cache = map[string]json.RawMessage{}
+			}
+			data.Cache["searchHot"] = json.RawMessage(raw)
+		}
 	}
-	if err := json.Unmarshal(b, &data); err != nil {
-		return err
-	}
+	ensureSettingLocked(Home, "首页站", "")
 	ensureSettingLocked(PlayerLive, "直播播放器", defaultLivePlayerValue())
 	ensureSettingLocked(PlayerRender, "渲染方式", "surface")
 	ensureSettingLocked(PlayerFailover, "自动切换播放器", "auto")
@@ -462,6 +514,14 @@ func Load() error {
 	ensureSettingLocked(SearchZhuyin, "注音键盘", "false")
 	ensureSettingLocked(ExoDiskPreloadThreads, "Exo预读线程", "1")
 	ensureSettingLocked(ExoDiskPreloadSizeMb, "Exo预读容量MB", "128")
+	// 缺省项写入库（全局 owner=''）
+	if storeDB != nil {
+		for _, it := range data.List {
+			if _, ok, _ := storeDB.GetSetting("", it.ID); !ok {
+				_ = storeDB.SetSetting("", it.ID, it.Value)
+			}
+		}
+	}
 	return nil
 }
 
@@ -485,36 +545,60 @@ func dropSettingLocked(id string) {
 	data.List = out
 }
 
-// Save 持久化设置。
+// Save 将内存中的全局设置刷入数据库（owner=''）。单键 Set 已即时落库。
 func Save() error {
 	mu.RLock()
 	defer mu.RUnlock()
-	cleaned := data
-	cleaned.List = withoutSetting(withoutSetting(data.List, "backendProxyPlay"), "crash")
-	b, err := json.MarshalIndent(cleaned, "", "  ")
-	if err != nil {
-		return err
+	if storeDB == nil {
+		return nil
 	}
-	return os.WriteFile(paths.Setting(), b, 0o644)
-}
-
-func withoutSetting(list []item, id string) []item {
-	out := make([]item, 0, len(list))
-	for _, it := range list {
-		if it.ID == id {
+	for _, it := range data.List {
+		if it.ID == "backendProxyPlay" || it.ID == "crash" {
 			continue
 		}
-		out = append(out, it)
+		if err := storeDB.SetSetting("", it.ID, it.Value); err != nil {
+			return err
+		}
 	}
-	return out
+	if data.Cache != nil {
+		if raw, ok := data.Cache["searchHistory"]; ok {
+			_ = storeDB.SetSetting("", "searchHistory", string(raw))
+		}
+		if raw, ok := data.Cache["searchHot"]; ok {
+			_ = storeDB.SetSetting("", "searchHot", string(raw))
+		}
+	}
+	return nil
 }
 
-// Get 获取设置值。
+// Get 获取设置值（按当前 DataOwner；宿主机键始终全局）。
 func Get(t Type) string {
+	owner := resolveOwner(t)
+	id := string(t)
+	if storeDB != nil {
+		if v, ok, err := storeDB.GetSetting(owner, id); err == nil && ok {
+			return v
+		}
+		// 远端用户缺键：用内置缺省，不读宿主已选 vod/live。
+		if owner != "" && !isHostOnly(t) {
+			return defaultValue(id)
+		}
+	}
 	mu.RLock()
 	defer mu.RUnlock()
 	for _, it := range data.List {
-		if it.ID == string(t) {
+		if it.ID == id {
+			return it.Value
+		}
+	}
+	return ""
+}
+
+func defaultValue(id string) string {
+	mu.RLock()
+	defer mu.RUnlock()
+	for _, it := range data.List {
+		if it.ID == id {
 			return it.Value
 		}
 	}
@@ -532,20 +616,29 @@ func PlayUA() string {
 	return DefaultPlayUA
 }
 
-// Set 设置值。已删除的项不再写回。
+// Set 设置值并立即写入数据库对应 owner。
 func Set(t Type, value string) {
 	if t == "backendProxyPlay" || t == "crash" {
 		return
 	}
+	owner := resolveOwner(t)
+	id := string(t)
 	mu.Lock()
-	defer mu.Unlock()
-	for i := range data.List {
-		if data.List[i].ID == string(t) {
-			data.List[i].Value = value
-			return
+	if owner == "" {
+		found := false
+		for i := range data.List {
+			if data.List[i].ID == id {
+				data.List[i].Value = value
+				found = true
+				break
+			}
+		}
+		if !found {
+			data.List = append(data.List, item{ID: id, Label: id, Value: value})
 		}
 	}
-	data.List = append(data.List, item{ID: string(t), Label: string(t), Value: value})
+	mu.Unlock()
+	persistDB(owner, id, value)
 }
 
 // IsAdFilterEnabled M3U8 广告过滤开关。
@@ -595,11 +688,24 @@ type SearchHistory struct {
 	Items []string `json:"items"`
 }
 
+func searchCacheOwner() string { return hostclient.DataOwner() }
+
 func GetSearchHistory() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	raw, ok := data.Cache["searchHistory"]
-	if !ok {
+	owner := searchCacheOwner()
+	var raw json.RawMessage
+	if storeDB != nil {
+		if v, ok, err := storeDB.GetSetting(owner, "searchHistory"); err == nil && ok && v != "" {
+			raw = json.RawMessage(v)
+		}
+	}
+	if len(raw) == 0 {
+		mu.RLock()
+		if owner == "" {
+			raw = data.Cache["searchHistory"]
+		}
+		mu.RUnlock()
+	}
+	if len(raw) == 0 {
 		return nil
 	}
 	var h SearchHistory
@@ -679,10 +785,19 @@ func ResetSyncPairCode() string {
 }
 
 func GetSearchHot() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	raw, ok := data.Cache["searchHot"]
-	if !ok {
+	owner := searchCacheOwner()
+	var raw json.RawMessage
+	if storeDB != nil {
+		if v, ok, err := storeDB.GetSetting(owner, "searchHot"); err == nil && ok && v != "" {
+			raw = json.RawMessage(v)
+		}
+	}
+	if len(raw) == 0 && owner == "" {
+		mu.RLock()
+		raw = data.Cache["searchHot"]
+		mu.RUnlock()
+	}
+	if len(raw) == 0 {
 		return nil
 	}
 	var h SearchHistory
@@ -700,11 +815,6 @@ func GetSearchHot() []string {
 }
 
 func SetSearchHot(items []string) {
-	mu.Lock()
-	defer mu.Unlock()
-	if data.Cache == nil {
-		data.Cache = map[string]json.RawMessage{}
-	}
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(items))
 	for _, it := range items {
@@ -722,15 +832,32 @@ func SetSearchHot(items []string) {
 		}
 	}
 	b, _ := json.Marshal(SearchHistory{Items: out})
-	data.Cache["searchHot"] = b
+	owner := searchCacheOwner()
+	if owner == "" {
+		mu.Lock()
+		if data.Cache == nil {
+			data.Cache = map[string]json.RawMessage{}
+		}
+		data.Cache["searchHot"] = b
+		mu.Unlock()
+	}
+	persistDB(owner, "searchHot", string(b))
 }
 
 func AddSearchHistory(q string) {
-	mu.Lock()
-	defer mu.Unlock()
+	owner := searchCacheOwner()
 	var h SearchHistory
-	if raw, ok := data.Cache["searchHistory"]; ok {
-		_ = json.Unmarshal(raw, &h)
+	if storeDB != nil {
+		if v, ok, err := storeDB.GetSetting(owner, "searchHistory"); err == nil && ok && v != "" {
+			_ = json.Unmarshal([]byte(v), &h)
+		}
+	}
+	if len(h.Items) == 0 && owner == "" {
+		mu.RLock()
+		if raw, ok := data.Cache["searchHistory"]; ok {
+			_ = json.Unmarshal(raw, &h)
+		}
+		mu.RUnlock()
 	}
 	for i, v := range h.Items {
 		if v == q {
@@ -743,5 +870,13 @@ func AddSearchHistory(q string) {
 		h.Items = h.Items[len(h.Items)-30:]
 	}
 	b, _ := json.Marshal(h)
-	data.Cache["searchHistory"] = b
+	if owner == "" {
+		mu.Lock()
+		if data.Cache == nil {
+			data.Cache = map[string]json.RawMessage{}
+		}
+		data.Cache["searchHistory"] = b
+		mu.Unlock()
+	}
+	persistDB(owner, "searchHistory", string(b))
 }
