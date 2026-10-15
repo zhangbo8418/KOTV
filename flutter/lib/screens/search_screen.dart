@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/models.dart';
+import '../player/kotv_platform.dart';
 import '../providers.dart';
 import '../api/kotv_settings_cache.dart';
 import '../search/suggest_words.dart';
@@ -335,26 +336,36 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         Expanded(
           child: Padding(
             padding: EdgeInsets.fromLTRB(KotvLayout.isCompact(context) ? 12 : 24, 0, KotvLayout.isCompact(context) ? 12 : 24, 16),
-            child: MediaQuery.sizeOf(context).width < MediaQuery.sizeOf(context).height
-                ? Column(
+            child: Builder(
+              builder: (context) {
+                final size = MediaQuery.sizeOf(context);
+                final portrait = size.width < size.height;
+                // 横屏首字母软键盘是给 TV/遥控的（readOnly，系统 IME 落不了汉字）。
+                // 桌面横屏须可编辑框，否则 PC 搜不了中文。
+                final useInitials = !portrait && !kotvIsDesktop();
+                if (portrait) {
+                  return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       SizedBox(height: 168, child: _leftPanel(initials: false)),
                       const SizedBox(height: 12),
                       Expanded(child: _rightPanel()),
                     ],
-                  )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(
-                        width: MediaQuery.sizeOf(context).width * 0.34 - 24,
-                        child: _leftPanel(initials: true),
-                      ),
-                      const SizedBox(width: 24),
-                      Expanded(child: _rightPanel()),
-                    ],
-                  ),
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      width: size.width * 0.34 - 24,
+                      child: _leftPanel(initials: useInitials),
+                    ),
+                    const SizedBox(width: 24),
+                    Expanded(child: _rightPanel()),
+                  ],
+                );
+              },
+            ),
           ),
         ),
       ],
