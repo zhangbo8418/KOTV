@@ -212,6 +212,7 @@ class NavPill extends StatelessWidget {
     this.autofocus = false,
     this.onFocusChange,
     this.scrollIntoView = false,
+    this.trailingIcon,
   });
 
   final String label;
@@ -220,6 +221,8 @@ class NavPill extends StatelessWidget {
   final bool autofocus;
   final ValueChanged<bool>? onFocusChange;
   final bool scrollIntoView;
+  /// 分类有筛选时旁挂漏斗；展开用划掉态。
+  final IconData? trailingIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -229,6 +232,7 @@ class NavPill extends StatelessWidget {
     final fs = compact ? 14.0 : 16.0;
     final r = compact ? 12.0 : 14.0;
     final px = compact ? 10.0 : 12.0;
+    final fg = selected ? Colors.white : p.fg;
     return TvFocus(
       autofocus: autofocus,
       onPressed: onTap,
@@ -250,16 +254,27 @@ class NavPill extends StatelessWidget {
               border: selected ? Border.all(color: p.primary.withOpacity(0.85)) : null,
             ),
             alignment: Alignment.center,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: selected ? Colors.white : p.fg,
-                fontSize: fs,
-                fontWeight: FontWeight.w700,
-                height: 1.1,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: fs,
+                      fontWeight: FontWeight.w700,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+                if (trailingIcon != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(trailingIcon, size: compact ? 14 : 16, color: fg),
+                ],
+              ],
             ),
           ),
         ),
@@ -852,14 +867,19 @@ class CategoryNavBar extends StatefulWidget {
     required this.selectedTid,
     required this.onCategory,
     required this.onLive,
+    this.filtersExpanded = false,
+    this.onToggleFilter,
   });
 
   final String homeLabel;
   final VoidCallback onHome;
   final bool homeSelected;
-  final List<({String id, String name})> categories;
+  final List<({String id, String name, bool hasFilters})> categories;
   final String? selectedTid;
   final void Function(String tid) onCategory;
+  /// 再点已选中分类标题时展开/收起筛选。
+  final VoidCallback? onToggleFilter;
+  final bool filtersExpanded;
   final VoidCallback onLive;
 
   @override
@@ -937,15 +957,29 @@ class _CategoryNavBarState extends State<CategoryNavBar> {
                 separatorBuilder: (_, __) => SizedBox(width: 8 * s),
                 itemBuilder: (_, i) {
                   final c = widget.categories[i];
+                  final selected = widget.selectedTid == c.id;
+                  IconData? filterIcon;
+                  if (c.hasFilters) {
+                    filterIcon = (selected && widget.filtersExpanded)
+                        ? Icons.filter_alt_off
+                        : Icons.filter_alt;
+                  }
                   return FocusTraversalOrder(
                     order: NumericFocusOrder(i + 1),
                     child: NavPill(
                       key: ValueKey('nav-cat-${c.id}'),
                       label: c.name,
-                      selected: widget.selectedTid == c.id,
+                      selected: selected,
                       scrollIntoView: true,
+                      trailingIcon: filterIcon,
                       onFocusChange: (v) => _onPillFocus('cat:${c.id}', v),
-                      onTap: () => widget.onCategory(c.id),
+                      onTap: () {
+                        if (selected) {
+                          if (c.hasFilters) widget.onToggleFilter?.call();
+                          return;
+                        }
+                        widget.onCategory(c.id);
+                      },
                     ),
                   );
                 },

@@ -40,6 +40,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   bool _listStyle = false;
   List<CategoryType> _types = [];
   List<CategoryFilter> _filters = [];
+  /// 筛选行默认收起；再点当前分类标题才展开。
+  bool _filtersExpanded = false;
   final Map<String, String> _extend = {};
   String? _statusMsg;
   bool _loading = true;
@@ -228,6 +230,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         _items.clear();
         _types = [];
         _filters = [];
+        _filtersExpanded = false;
       }
     });
     try {
@@ -303,6 +306,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         setState(() => _statusMsg = '远端不可达，已切回本机引擎');
       }
       await _fillHomeRecommendIfEmpty(gen);
+      _scheduleAutofill();
       // 仅配置可能变化时刷缓存；分类/筛选勿 invalidate。
       if (refreshRepo || clearContent || refreshConfig) {
         ref.invalidate(configProvider);
@@ -352,6 +356,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             if (!mounted || gen != _loadGen) return;
             _applyPage(data, replace: true);
             await _fillHomeRecommendIfEmpty(gen);
+            _scheduleAutofill();
             setState(() {
               _statusMsg = retryFellBack ? '远端不可达，已切回本机引擎' : null;
             });
@@ -437,6 +442,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _tid = tid;
       _extend.clear();
       _filters = filters;
+      _filtersExpanded = false;
       // 仅写入非空 init，不回退到首个 value。
       for (final f in _filters) {
         if (f.init.isNotEmpty) _extend[f.key] = f.init;
@@ -453,6 +459,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       _scroll.jumpTo(0);
     }
     unawaited(_reloadContentOnly());
+  }
+
+  void _toggleFilters() {
+    if (_filters.isEmpty) return;
+    setState(() => _filtersExpanded = !_filtersExpanded);
   }
 
   /// 筛选 chip：先更新选中态并清空瀑布流，再加载。
@@ -482,6 +493,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       if (!mounted || gen != _loadGen) return;
       _applyPage(data, replace: true);
       await _fillHomeRecommendIfEmpty(gen);
+      _scheduleAutofill();
     } catch (e) {
       if (!mounted || gen != _loadGen) return;
       setState(() => _statusMsg = '$e');
@@ -498,10 +510,23 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final data = await ref.read(apiProvider).category(_tid!, pg: '$next', extend: Map<String, String>.from(_extend));
       if (!mounted) return;
       _applyPage(data, replace: false, requestedPage: next);
+      _scheduleAutofill();
     } catch (_) {
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
+  }
+
+  /// 首屏装不满且还有后续页时自动续载，避免 maxScrollExtent 门槛拦死。
+  void _scheduleAutofill() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_tid == null || _tid!.isEmpty) return;
+      if (!_hasMore || _loadingMore || _loading || !_ready) return;
+      if (!_scroll.hasClients) return;
+      if (_scroll.position.maxScrollExtent > 80) return;
+      unawaited(_loadMore());
+    });
   }
 
   void _applyPage(Map<String, dynamic> data, {required bool replace, int? requestedPage}) {
@@ -756,6 +781,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               _tid = null;
               _extend.clear();
               _filters = [];
+              _filtersExpanded = false;
               _types = [];
               _items.clear();
               _statusMsg = null;
@@ -779,12 +805,22 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 _switchCategory(null);
               }
             },
-            categories: [for (final t in _types) (id: t.id, name: t.name)],
+            categories: [
+              for (final t in _types)
+                (
+                  id: t.id,
+                  name: t.name,
+                  hasFilters: t.filters.isNotEmpty ||
+                      (t.id == _tid && _filters.isNotEmpty),
+                ),
+            ],
             selectedTid: _tid,
+            filtersExpanded: _filtersExpanded,
             onCategory: (tid) => _switchCategory(tid),
+            onToggleFilter: _toggleFilters,
             onLive: () => goKotvPage(ref, KotvPage.live),
           ),
-        if (ready && !onHome && _filters.isNotEmpty) _buildFilters(),
+        if (ready && !onHome && _filtersExpanded && _filters.isNotEmpty) _buildFilters(),
         if (ready && _statusMsg != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(28, 6, 28, 0),

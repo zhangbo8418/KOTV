@@ -36,12 +36,21 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   String? _error;
   List<VodItem> _items = [];
   int _page = 1;
-  int _pageCount = 1;
+  /// 0 = 未知总页（靠空列表停）；>0 为明确末页。
+  int _pageCount = 0;
+  bool _hasMore = true;
+  final ScrollController _scroll = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _load(replace: true);
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
   }
 
   Future<void> _load({required bool replace}) async {
@@ -50,9 +59,11 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
         _loading = true;
         _error = null;
         _page = 1;
+        _pageCount = 0;
+        _hasMore = true;
       });
     } else {
-      if (_loadingMore || _page >= _pageCount) return;
+      if (_loadingMore || !_hasMore) return;
       setState(() => _loadingMore = true);
     }
     try {
@@ -67,30 +78,34 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
           .whereType<Map>()
           .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
           .toList();
-      final pc = (data['pagecount'] is num) ? (data['pagecount'] as num).toInt() : 1;
+      final pcRaw = data['pagecount'];
+      final pc = (pcRaw is num) ? pcRaw.toInt() : 0;
       if (!mounted) return;
       // 空页视为末页，避免虚高 pagecount 空刷。
       if (!replace && list.isEmpty) {
         setState(() {
-          _pageCount = _page;
+          _hasMore = false;
           _loadingMore = false;
         });
         return;
       }
       setState(() {
         _page = pg;
-        _pageCount = list.isEmpty && replace ? 1 : (pc < 1 ? 1 : pc);
+        if (pc > 0) {
+          _pageCount = pc;
+        } else if (replace) {
+          _pageCount = 0;
+        }
         if (replace) {
           _items = list;
         } else {
           _items = [..._items, ...list];
         }
-        if (!replace && pc > 0 && pg >= pc) {
-          _pageCount = pg;
-        }
+        _hasMore = list.isNotEmpty && (_pageCount == 0 || _page < _pageCount);
         _loading = false;
         _loadingMore = false;
       });
+      _scheduleAutofill();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -99,6 +114,16 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
         _loadingMore = false;
       });
     }
+  }
+
+  /// 首屏装不满且还有后续页时自动续载，避免 maxScrollExtent 门槛拦死。
+  void _scheduleAutofill() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_hasMore || _loadingMore || _loading) return;
+      if (!_scroll.hasClients) return;
+      if (_scroll.position.maxScrollExtent > 80) return;
+      unawaited(_load(replace: false));
+    });
   }
 
   @override
@@ -134,6 +159,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
                       child: RefreshIndicator(
                         onRefresh: () => _load(replace: true),
                         child: ListView.separated(
+                          controller: _scroll,
                           padding: EdgeInsets.symmetric(horizontal: 16 * s, vertical: 8 * s),
                           itemCount: _items.length + (_loadingMore ? 1 : 0),
                           separatorBuilder: (_, __) => Divider(height: 1, color: p.outline),
