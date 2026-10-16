@@ -35,7 +35,7 @@ resolve_ndk() {
 build_android_abi() {
   local abi="$1"  # arm64-v8a | armeabi-v7a
   local api=24
-  local prebuilt cc goarch goarm=""
+  local prebuilt cc cxx goarch goarm=""
   prebuilt="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/* | head -1)"
   case "$abi" in
     arm64-v8a)
@@ -52,16 +52,18 @@ build_android_abi() {
       exit 1
       ;;
   esac
+  # CGO 若链入 C++（Go 1.27 + 新依赖更易触发），须用 NDK clang++，否则会落到主机 g++ 链 AArch64。
+  cxx="${cc}++"
   local jni_dir="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
   mkdir -p "$jni_dir"
   # anet（torrent 间接依赖）在 Go 1.23+ 仍用 //go:linkname 访问 net.zoneCache。
-  local ldflags='-s -w -checklinkname=0'
+  local ldflags="-s -w -checklinkname=0 -extld=${cxx}"
   echo "==> android $abi (GOARCH=$goarch${goarm:+ GOARM=$goarm})"
   if [[ -n "$goarm" ]]; then
-    CGO_ENABLED=1 GOOS=android GOARCH="$goarch" GOARM="$goarm" CC="$cc" \
+    CGO_ENABLED=1 GOOS=android GOARCH="$goarch" GOARM="$goarm" CC="$cc" CXX="$cxx" \
       go build -tags kotv_android -ldflags "$ldflags" -o "$jni_dir/libkotv_engine.so" ./cmd/engine
   else
-    CGO_ENABLED=1 GOOS=android GOARCH="$goarch" CC="$cc" \
+    CGO_ENABLED=1 GOOS=android GOARCH="$goarch" CC="$cc" CXX="$cxx" \
       go build -tags kotv_android -ldflags "$ldflags" -o "$jni_dir/libkotv_engine.so" ./cmd/engine
   fi
   # arm64 再拷一份到 assets 便于校验；v7 只进 jniLibs。
