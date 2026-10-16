@@ -272,7 +272,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: '1.27.2'
           check-latest: true
           cache: true
 
@@ -342,7 +342,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: '1.27.2'
           check-latest: true
           cache: true
 
@@ -411,7 +411,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: '1.27.2'
           check-latest: true
           cache: true
 
@@ -526,7 +526,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: '1.27.2'
           check-latest: true
           cache: true
 
@@ -629,7 +629,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: '1.27.2'
           check-latest: true
           cache: true
 

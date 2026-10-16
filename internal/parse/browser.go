@@ -306,11 +306,11 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		if c == nil || c.Target == nil {
 			return
 		}
-		body, err := network.GetResponseBody(reqID).Do(cdp.WithExecutor(context.Background(), c.Target))
-		if err != nil || len(body) == 0 || len(body) > 512*1024 {
+		result, err := cdp.Call(ctx, c.Target, network.GetResponseBody, network.GetResponseBodyParams{RequestID: reqID})
+		if err != nil || len(result.Body) == 0 || len(result.Body) > 512*1024 {
 			return
 		}
-		text := string(body)
+		text := string(result.Body)
 		if play, hdr, note := sniffPlayAPIResult(text); note != "" {
 			parseLog("[sniff] play-api depth=%d %s from=%s", depth, note, parsePreview(cand.url, 80))
 		} else if play != "" {
@@ -323,9 +323,15 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		}
 	}
 
-	chromedp.ListenTarget(ctx, func(ev any) {
-		switch e := ev.(type) {
-		case *fetch.EventRequestPaused:
+	fetchEvents := chromedp.Events(ctx, fetch.RequestPaused)
+	requestEvents := chromedp.Events(ctx, network.RequestWillBeSent)
+	responseEvents := chromedp.Events(ctx, network.ResponseReceived)
+	finishedEvents := chromedp.Events(ctx, network.LoadingFinished)
+	go func() {
+		for e, eventErr := range fetchEvents {
+			if eventErr != nil {
+				return
+			}
 			reqURL := ""
 			if e.Request != nil {
 				reqURL = e.Request.URL
@@ -336,24 +342,32 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 				if c == nil || c.Target == nil {
 					return
 				}
-				exec := cdp.WithExecutor(context.Background(), c.Target)
 				if IsAdURL(reqURL) {
-					_ = fetch.FailRequest(reqID, network.ErrorReasonBlockedByClient).Do(exec)
+					_, _ = cdp.Call(ctx, c.Target, fetch.FailRequest, fetch.FailRequestParams{
+						RequestID:   reqID,
+						ErrorReason: network.ErrorReasonBlockedByClient,
+					})
 					return
 				}
 				if strings.Contains(reqURL, "/cdn-cgi/challenge-platform/") {
 					parseLog("[sniff] cloudflare challenge depth=%d url=%s", depth, parsePreview(reqURL, 160))
 				}
-				_ = fetch.ContinueRequest(reqID).Do(exec)
+				_, _ = cdp.Call(ctx, c.Target, fetch.ContinueRequest, fetch.ContinueRequestParams{RequestID: reqID})
 			}()
-		case *network.EventRequestWillBeSent:
-			if e.Request == nil {
+		}
+	}()
+	go func() {
+		for e, eventErr := range requestEvents {
+			if eventErr != nil {
 				return
+			}
+			if e.Request == nil {
+				continue
 			}
 			u := e.Request.URL
 			reqHdr := headerFromNetwork(e.Request.Headers)
 			if IsAdURL(u) {
-				return
+				continue
 			}
 			if strings.Contains(u, "/cdn-cgi/challenge-platform/") {
 				parseLog("[sniff] cloudflare challenge depth=%d url=%s", depth, parsePreview(u, 160))
@@ -365,12 +379,18 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			}
 			if detect && depth < 1 && shouldFollowNestedPlayer(u, pageURL, e.Type) {
 				tryFollow(u, reqHdr, "net")
-				return
+				continue
 			}
 			emit(u, reqHdr)
-		case *network.EventResponseReceived:
-			if e.Response == nil {
+		}
+	}()
+	go func() {
+		for e, eventErr := range responseEvents {
+			if eventErr != nil {
 				return
+			}
+			if e.Response == nil {
+				continue
 			}
 			mime := strings.ToLower(e.Response.MimeType)
 			u := e.Response.URL
@@ -380,7 +400,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 				strings.HasPrefix(mime, "video/") ||
 				strings.HasPrefix(mime, "audio/") {
 				emit(u, headerFromNetwork(e.Response.Headers))
-				return
+				continue
 			}
 			if shouldParseSniffBody(u, mime, e.Type) {
 				bodyMu.Lock()
@@ -388,26 +408,40 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 				bodyMu.Unlock()
 			}
 			emit(u, headerFromNetwork(e.Response.Headers))
-		case *network.EventLoadingFinished:
+		}
+	}()
+	go func() {
+		for e, eventErr := range finishedEvents {
+			if eventErr != nil {
+				return
+			}
 			reqID := e.RequestID
 			go tryEmitFromBody(reqID)
 		}
-	})
+	}()
 
 	parseLog("[sniff] chromium run depth=%d", depth)
-	actions := []chromedp.Action{
-		network.Enable(),
-		fetch.Enable(),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			prof := resolveSniffProfile(headers)
-			parseLog("[sniff] client depth=%d mobile=%v platform=%s ua=%s", depth, prof.mobile, prof.platform, parsePreview(prof.ua, 80))
-			uaOverride := emulation.SetUserAgentOverride(prof.ua).
-				WithPlatform(prof.platform).
-				WithUserAgentMetadata(sniffUAMetadata(prof))
-			if err := uaOverride.Do(ctx); err != nil {
+	actions := []chromedp.Action[chromedp.Void]{
+		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+			if _, err := cdp.Call(ctx, t, network.Enable, network.EnableParams{}); err != nil {
 				return err
 			}
-			_, err := page.AddScriptToEvaluateOnNewDocument(sniffStealthJS(prof)).Do(ctx)
+			_, err := cdp.Call(ctx, t, fetch.Enable, fetch.EnableParams{})
+			return err
+		}),
+		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+			prof := resolveSniffProfile(headers)
+			parseLog("[sniff] client depth=%d mobile=%v platform=%s ua=%s", depth, prof.mobile, prof.platform, parsePreview(prof.ua, 80))
+			if _, err := cdp.Call(ctx, t, emulation.SetUserAgentOverride, emulation.SetUserAgentOverrideParams{
+				UserAgent:         prof.ua,
+				Platform:          prof.platform,
+				UserAgentMetadata: sniffUAMetadata(prof),
+			}); err != nil {
+				return err
+			}
+			_, err := cdp.Call(ctx, t, page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{
+				Source: sniffStealthJS(prof),
+			})
 			if err != nil {
 				return err
 			}
@@ -425,22 +459,22 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			if len(extra) == 0 {
 				return nil
 			}
-			return network.SetExtraHTTPHeaders(extra).Do(ctx)
+			_, err = cdp.Call(ctx, t, network.SetExtraHTTPHeaders, network.SetExtraHTTPHeadersParams{Headers: extra})
+			return err
 		}),
-		chromedp.ActionFunc(func(ctx context.Context) error {
+		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
 			cookie := headerValue(headers, "Cookie")
 			if cookie == "" {
 				return nil
 			}
-			return applyCookies(ctx, pageURL, cookie)
+			return applyCookies(ctx, t, pageURL, cookie)
 		}),
 		// 勿用 chromedp.Navigate：它会等 load；广告站常永不 load，15s 超时前轮询/跟 iframe 跑不动。
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			nav := page.Navigate(pageURL)
-			if ref := headerValue(headers, "Referer"); ref != "" {
-				nav = nav.WithReferrer(ref)
-			}
-			_, _, _, _, err := nav.Do(ctx)
+		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+			_, err := cdp.Call(ctx, t, page.Navigate, page.NavigateParams{
+				URL:      pageURL,
+				Referrer: headerValue(headers, "Referer"),
+			})
 			return err
 		}),
 		chromedp.Sleep(1200 * time.Millisecond),
@@ -449,17 +483,18 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	for _, js := range scripts {
 		js := js
 		actions = append(actions,
-			chromedp.ActionFunc(func(ctx context.Context) error {
+			chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
 				if strings.TrimSpace(js) == "" {
 					return nil
 				}
-				return chromedp.Evaluate(js, nil).Do(ctx)
+				_, err := chromedp.Evaluate[any](js)(ctx, t)
+				return err
 			}),
 			chromedp.Sleep(300*time.Millisecond),
 		)
 	}
 	// 轮询 iframe.src + DOM 媒体；总时长由 ctx 超时约束。
-	actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
+	actions = append(actions, chromedp.Func(func(ctx context.Context, _ *chromedp.Target) error {
 		deadline := deadlineOf(ctx)
 		ticker := time.NewTicker(800 * time.Millisecond)
 		defer ticker.Stop()
@@ -488,7 +523,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 
 	runErr := make(chan error, 1)
 	go func() {
-		runErr <- chromedp.Run(ctx, actions...)
+		runErr <- chromedp.Do(ctx, actions...)
 	}()
 
 	select {
@@ -564,11 +599,11 @@ func logSniffPageDiag(ctx context.Context, depth int) {
 		return
 	default:
 	}
-	var title, platform string
-	if err := chromedp.Title(&title).Do(ctx); err != nil {
+	title, err := chromedp.Run(ctx, chromedp.Title())
+	if err != nil {
 		return
 	}
-	_ = chromedp.Evaluate(`navigator.platform`, &platform).Do(ctx)
+	platform, _ := chromedp.Run(ctx, chromedp.Evaluate[string](`navigator.platform`))
 	iframes := collectIFrameURLs(ctx)
 	parseLog("[sniff] diag depth=%d title=%q platform=%q iframes=%d", depth, title, platform, len(iframes))
 	for i, f := range iframes {
@@ -670,14 +705,12 @@ func fallbackDOM(ctx context.Context, rules []model.Rule, isVideo func(string) b
 }
 
 func probeDOMMedia(ctx context.Context, videoOK func(string) bool) (string, map[string]string) {
-	var html string
-	if err := chromedp.OuterHTML("html", &html).Do(ctx); err == nil {
+	if html, err := chromedp.Run(ctx, chromedp.OuterHTML("html")); err == nil {
 		if u := ExtractMediaURL(html); videoOK(u) {
 			return u, nil
 		}
 	}
-	var hrefs string
-	_ = chromedp.Evaluate(
+	hrefs, _ := chromedp.Run(ctx, chromedp.Evaluate[string](
 		`(() => {
 			const out = [];
 			document.querySelectorAll('video,source').forEach(e => {
@@ -696,8 +729,7 @@ func probeDOMMedia(ctx context.Context, videoOK func(string) bool) (string, map[
 			});
 			return out.filter(Boolean).join('\n');
 		})()`,
-		&hrefs,
-	).Do(ctx)
+	))
 	for _, line := range strings.Split(hrefs, "\n") {
 		line = strings.TrimSpace(line)
 		if videoOK(line) {
@@ -708,14 +740,12 @@ func probeDOMMedia(ctx context.Context, videoOK func(string) bool) (string, map[
 }
 
 func collectIFrameURLs(ctx context.Context) []string {
-	var raw string
-	_ = chromedp.Evaluate(
+	raw, _ := chromedp.Run(ctx, chromedp.Evaluate[string](
 		`Array.from(document.querySelectorAll('iframe'))
 			.map(f => f.src || f.getAttribute('src') || '')
 			.filter(s => /^https?:\/\//i.test(s))
 			.join('\n')`,
-		&raw,
-	).Do(ctx)
+	))
 	var out []string
 	seen := map[string]bool{}
 	for _, line := range strings.Split(raw, "\n") {
@@ -877,7 +907,7 @@ func collectScripts(pageURL, click string, rules []model.Rule) []string {
 	return out
 }
 
-func applyCookies(ctx context.Context, pageURL, cookieHeader string) error {
+func applyCookies(ctx context.Context, t *chromedp.Target, pageURL, cookieHeader string) error {
 	u, err := url.Parse(pageURL)
 	if err != nil || u.Host == "" {
 		return nil
@@ -897,11 +927,13 @@ func applyCookies(ctx context.Context, pageURL, cookieHeader string) error {
 		if name == "" {
 			continue
 		}
-		expr := network.SetCookie(name, val).
-			WithURL(pageURL).
-			WithDomain(u.Hostname()).
-			WithPath("/")
-		if err := expr.Do(ctx); err != nil {
+		if _, err := cdp.Call(ctx, t, network.SetCookie, network.SetCookieParams{
+			Name:   name,
+			Value:  val,
+			URL:    pageURL,
+			Domain: u.Hostname(),
+			Path:   "/",
+		}); err != nil {
 			return err
 		}
 	}
