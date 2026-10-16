@@ -221,7 +221,8 @@ type CastOptions struct {
 // CastWithOpts 投送；headers 写入 DIDL，positionMs 起播续看。
 // Chromecast 失败时，若同 IP 存在 DLNA 设备则自动回退；used 为实际成功的协议设备。
 func CastWithOpts(d Device, mediaURL string, opt CastOptions) (Device, error) {
-	mediaURL = dlna.RewriteLocalURL(mediaURL)
+	// 回环改写由 toolCast 统一完成；此处只做空串校验。
+	mediaURL = strings.TrimSpace(mediaURL)
 	if mediaURL == "" && d.Protocol != ProtocolApp {
 		return d, fmt.Errorf("媒体地址为空")
 	}

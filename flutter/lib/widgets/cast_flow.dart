@@ -42,7 +42,7 @@ Future<bool> ensureCastPermissions() async {
 }
 
 /// 搜索 DLNA / Chromecast / 局域网 App 并投送当前引擎 MediaURL。
-/// 弹窗内显示该设备投屏状态；成功后记住设备供下次标 ✓。取消返回 null。
+/// 弹窗内显示该设备投屏状态；成功后记住实际成功设备供下次标 ✓。取消返回 null。
 Future<String?> runKotvCast(
   BuildContext context,
   KotvApi api, {
@@ -89,6 +89,7 @@ Future<String?> runKotvCast(
     ),
   );
   if (result == null) {
+    // 投屏进行中已禁止关闭；null 才是用户取消。
     status('已取消投屏');
     return null;
   }
@@ -116,17 +117,24 @@ class _CastDeviceDialog extends StatefulWidget {
 }
 
 class _CastDeviceDialogState extends State<_CastDeviceDialog> {
+  /// 正在请求的行。
   int? _busyIndex;
+  /// 显示状态文案的行（失败后仍保留，直至下次点击）。
+  int? _statusIndex;
   String? _rowStatus;
   bool _rowOk = false;
+  /// 投屏请求中或成功待关闭：禁止遮罩/返回误关。
+  bool _blockPop = false;
 
   Future<void> _castAt(int i) async {
-    if (_busyIndex != null) return;
+    if (_blockPop) return;
     final d = widget.devices[i];
     final index = int.tryParse('${d['index']}') ?? i;
     final label = _castDeviceLabel(d);
     setState(() {
+      _blockPop = true;
       _busyIndex = i;
+      _statusIndex = i;
       _rowStatus = '投屏中…';
       _rowOk = false;
     });
@@ -134,10 +142,26 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
     try {
       final cast = await widget.api.tools('cast', {'index': index});
       final msg = '${cast['message'] ?? '已投屏到 $label'}';
-      final key = _castDeviceKey(d);
+      // 以服务端实际成功设备为准（Chromecast 回退 DLNA 时 protocol/name/detail 会变）。
+      final used = <String, dynamic>{
+        'protocol': cast['protocol'] ?? d['protocol'],
+        'name': cast['name'] ?? d['name'],
+        'detail': cast['detail'] ?? d['detail'],
+        'label': cast['label'] ?? d['label'],
+      };
+      final key = _castDeviceKey(used);
+      var statusIdx = i;
+      for (var j = 0; j < widget.devices.length; j++) {
+        if (_castDeviceKey(widget.devices[j]) == key) {
+          statusIdx = j;
+          break;
+        }
+      }
       widget.onCastSuccess(key);
       if (!mounted) return;
       setState(() {
+        _busyIndex = null;
+        _statusIndex = statusIdx;
         _rowStatus = '已投屏';
         _rowOk = true;
       });
@@ -147,7 +171,9 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        _blockPop = false;
         _busyIndex = null;
+        _statusIndex = i;
         _rowStatus = '失败：$e';
         _rowOk = false;
       });
@@ -158,68 +184,69 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
-    final casting = _busyIndex != null;
-    return SimpleDialog(
-      backgroundColor: p.dialogBg,
-      title: Text('投屏到', style: TextStyle(color: p.fg)),
-      children: [
-        for (var i = 0; i < widget.devices.length; i++)
-          Builder(
-            builder: (ctx) {
-              final d = widget.devices[i];
-              final key = _castDeviceKey(d);
-              final label = _castDeviceLabel(d);
-              final isLast = widget.lastKey != null && widget.lastKey == key;
-              final isBusy = _busyIndex == i;
-              final showStatus = isBusy && _rowStatus != null;
-              final trailing = showStatus
-                  ? _rowStatus!
-                  : (isLast ? '上次投屏' : '');
-              final muted = casting && !isBusy;
-              return KotvStableFocus(
-                autofocus: i == 0 && !casting,
-                scrollIntoView: true,
-                onPressed: muted ? null : () => unawaited(_castAt(i)),
-                borderRadius: 8,
-                child: Opacity(
-                  opacity: muted ? 0.45 : 1,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            label + (isLast && !showStatus ? '  ✓' : ''),
-                            style: TextStyle(
-                              color: p.fg,
-                              fontWeight: isLast || isBusy ? FontWeight.w700 : FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        if (trailing.isNotEmpty)
-                          Flexible(
+    return PopScope(
+      canPop: !_blockPop,
+      child: SimpleDialog(
+        backgroundColor: p.dialogBg,
+        title: Text('投屏到', style: TextStyle(color: p.fg)),
+        children: [
+          for (var i = 0; i < widget.devices.length; i++)
+            Builder(
+              builder: (ctx) {
+                final d = widget.devices[i];
+                final key = _castDeviceKey(d);
+                final label = _castDeviceLabel(d);
+                final isLast = widget.lastKey != null && widget.lastKey == key;
+                final showStatus = _statusIndex == i && _rowStatus != null;
+                final trailing = showStatus
+                    ? _rowStatus!
+                    : (isLast ? '上次投屏' : '');
+                final muted = _blockPop && _busyIndex != i;
+                return KotvStableFocus(
+                  autofocus: i == 0 && !_blockPop,
+                  scrollIntoView: true,
+                  onPressed: _blockPop ? null : () => unawaited(_castAt(i)),
+                  borderRadius: 8,
+                  child: Opacity(
+                    opacity: muted ? 0.45 : 1,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
                             child: Text(
-                              trailing,
-                              textAlign: TextAlign.right,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                              label + (isLast && !showStatus ? '  ✓' : ''),
                               style: TextStyle(
-                                color: showStatus
-                                    ? (_rowOk ? const Color(0xFF5CDB95) : p.primary)
-                                    : p.muted,
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
+                                color: p.fg,
+                                fontWeight: isLast || showStatus ? FontWeight.w700 : FontWeight.w500,
                               ),
                             ),
                           ),
-                      ],
+                          if (trailing.isNotEmpty)
+                            Flexible(
+                              child: Text(
+                                trailing,
+                                textAlign: TextAlign.right,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: showStatus
+                                      ? (_rowOk ? const Color(0xFF5CDB95) : p.primary)
+                                      : p.muted,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
-          ),
-      ],
+                );
+              },
+            ),
+        ],
+      ),
     );
   }
 }

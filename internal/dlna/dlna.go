@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bobo/KOTV/internal/util"
@@ -30,11 +29,6 @@ type CastOptions struct {
 	Headers    map[string]string
 	PositionMs int64 // 起播续看位置
 }
-
-var (
-	mu      sync.Mutex
-	devices []Device
-)
 
 // Discover 搜索局域网 MediaRenderer。
 func Discover(timeout time.Duration) ([]Device, error) {
@@ -77,9 +71,6 @@ func Discover(timeout time.Duration) ([]Device, error) {
 			client:   c,
 		})
 	}
-	mu.Lock()
-	devices = out
-	mu.Unlock()
 	return out, nil
 }
 
@@ -128,14 +119,11 @@ func discoverWithHostIP(ctx context.Context, hostIP string) ([]Device, error) {
 			client:   c,
 		})
 	}
-	mu.Lock()
-	devices = out
-	mu.Unlock()
 	return out, nil
 }
 
 // CastWith 投送并可选写入自定义头、起播进度。
-// 调用方应先 RewriteLocalURL；此处不再改写，避免与入口重复。
+// 媒体 URL 须已由投屏入口改写为局域网可访问地址。
 func CastWith(d Device, mediaURL string, opt CastOptions) error {
 	if d.client == nil {
 		return fmt.Errorf("设备无效")

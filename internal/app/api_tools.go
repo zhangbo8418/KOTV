@@ -435,6 +435,7 @@ func (a *App) toolCast(index int) (map[string]any, error) {
 		"ok":       true,
 		"name":     used.Name,
 		"protocol": string(used.Protocol),
+		"detail":   used.Detail,
 		"label":    used.Label(),
 		"message":  "已投屏到 " + used.Label(),
 	}, nil
