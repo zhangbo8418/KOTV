@@ -3,6 +3,8 @@ package danmaku
 import (
 	"encoding/xml"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -22,7 +24,10 @@ type Item struct {
 	Content string
 }
 
-const itemsMax = 20000 // 单次加载条数上限，避免超大 XML 占满内存
+const (
+	itemsMax     = 20000   // 单次解析条数上限
+	bodyBytesMax = 8 << 20 // 读入字节上限（解码后同样拒绝更大正文）
+)
 
 var (
 	mu    sync.RWMutex
@@ -38,11 +43,76 @@ func Clear() {
 	mu.Unlock()
 }
 
-func capItems(parsed []Item) []Item {
-	if len(parsed) > itemsMax {
-		return parsed[:itemsMax]
+func errBodyTooLarge() error {
+	return fmt.Errorf("弹幕正文超过 %d 字节", bodyBytesMax)
+}
+
+func readLimited(r io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, bodyBytesMax+1))
+	if err != nil {
+		return nil, err
 	}
-	return parsed
+	if len(b) > bodyBytesMax {
+		return nil, errBodyTooLarge()
+	}
+	return b, nil
+}
+
+func loadBody(pathOrURL string) (string, error) {
+	if local, ok := util.FileURLPath(pathOrURL); ok {
+		return readFileLimited(local)
+	}
+	if pathOrURL == "" || !strings.Contains(pathOrURL, "://") {
+		return readFileLimited(pathOrURL)
+	}
+	req, err := http.NewRequest(http.MethodGet, pathOrURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", util.OkHttpUA)
+	resp, err := util.GetClient().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, err := readLimited(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("弹幕下载失败: http=%d", resp.StatusCode)
+	}
+	b := util.DecodeContentEncoding(resp.Header.Get("Content-Encoding"), raw)
+	if len(b) > bodyBytesMax {
+		return "", errBodyTooLarge()
+	}
+	return string(b), nil
+}
+
+func readFileLimited(path string) (string, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if st.Size() > bodyBytesMax {
+		return "", errBodyTooLarge()
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	b, err := readLimited(f)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func store(parsed []Item) {
+	mu.Lock()
+	items = parsed
+	mu.Unlock()
 }
 
 // LoadURL 从弹幕地址加载。
@@ -50,14 +120,11 @@ func LoadURL(u string) error {
 	if u == "" || !settings.IsDanmakuEnabled() {
 		return nil
 	}
-	body, err := util.HTTPGet(u, nil)
+	body, err := loadBody(u)
 	if err != nil {
 		return err
 	}
-	parsed := capItems(Parse(body))
-	mu.Lock()
-	items = parsed
-	mu.Unlock()
+	store(Parse(body))
 	return nil
 }
 
@@ -66,14 +133,11 @@ func LoadFile(path string) error {
 	if path == "" || !settings.IsDanmakuEnabled() {
 		return nil
 	}
-	b, err := os.ReadFile(path)
+	body, err := readFileLimited(path)
 	if err != nil {
 		return err
 	}
-	parsed := capItems(Parse(string(b)))
-	mu.Lock()
-	items = parsed
-	mu.Unlock()
+	store(Parse(body))
 	return nil
 }
 
@@ -142,39 +206,58 @@ func Parse(body string) []Item {
 	return parseText(body)
 }
 
-type bilibiliXML struct {
-	D []struct {
-		P    string `xml:"p,attr"`
-		Text string `xml:",chardata"`
-	} `xml:"d"`
+type danmakuD struct {
+	P    string `xml:"p,attr"`
+	Text string `xml:",chardata"`
 }
 
 func parseXML(body string) []Item {
-	var doc bilibiliXML
-	if err := xml.Unmarshal([]byte(body), &doc); err != nil {
-		return parseText(body)
-	}
+	dec := xml.NewDecoder(strings.NewReader(body))
 	var out []Item
-	for _, d := range doc.D {
-		parts := strings.Split(d.P, ",")
-		it := Item{Content: strings.TrimSpace(d.Text), Mode: 1, Size: 25}
-		if len(parts) > 0 {
-			it.Time, _ = strconv.ParseFloat(parts[0], 64)
+	sawD := false
+	for len(out) < itemsMax {
+		tok, err := dec.Token()
+		if err != nil {
+			break
 		}
-		if len(parts) > 1 {
-			it.Mode, _ = strconv.Atoi(parts[1])
+		se, ok := tok.(xml.StartElement)
+		if !ok || se.Name.Local != "d" {
+			continue
 		}
-		if len(parts) > 2 {
-			it.Size, _ = strconv.Atoi(parts[2])
+		var d danmakuD
+		if err := dec.DecodeElement(&d, &se); err != nil {
+			break
 		}
-		if len(parts) > 3 {
-			it.Color, _ = strconv.Atoi(parts[3])
-		}
-		if it.Content != "" {
+		sawD = true
+		if it, ok := itemFromMeta(d.P, d.Text); ok {
 			out = append(out, it)
 		}
 	}
+	if !sawD {
+		return parseText(body)
+	}
 	return out
+}
+
+func itemFromMeta(meta, text string) (Item, bool) {
+	it := Item{Content: strings.TrimSpace(text), Mode: 1, Size: 25}
+	parts := strings.Split(meta, ",")
+	if len(parts) > 0 {
+		it.Time, _ = strconv.ParseFloat(parts[0], 64)
+	}
+	if len(parts) > 1 {
+		it.Mode, _ = strconv.Atoi(parts[1])
+	}
+	if len(parts) > 2 {
+		it.Size, _ = strconv.Atoi(parts[2])
+	}
+	if len(parts) > 3 {
+		it.Color, _ = strconv.Atoi(parts[3])
+	}
+	if it.Content == "" {
+		return Item{}, false
+	}
+	return it, true
 }
 
 var textLineRe = regexp.MustCompile(`^\[([^\]]+)\](.*)$`)
@@ -182,26 +265,15 @@ var textLineRe = regexp.MustCompile(`^\[([^\]]+)\](.*)$`)
 func parseText(body string) []Item {
 	var out []Item
 	for _, line := range strings.Split(body, "\n") {
+		if len(out) >= itemsMax {
+			break
+		}
 		line = strings.TrimSpace(line)
 		m := textLineRe.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
-		meta := strings.Split(m[1], ",")
-		it := Item{Content: strings.TrimSpace(m[2]), Mode: 1, Size: 25}
-		if len(meta) > 0 {
-			it.Time, _ = strconv.ParseFloat(meta[0], 64)
-		}
-		if len(meta) > 1 {
-			it.Mode, _ = strconv.Atoi(meta[1])
-		}
-		if len(meta) > 2 {
-			it.Size, _ = strconv.Atoi(meta[2])
-		}
-		if len(meta) > 3 {
-			it.Color, _ = strconv.Atoi(meta[3])
-		}
-		if it.Content != "" {
+		if it, ok := itemFromMeta(m[1], m[2]); ok {
 			out = append(out, it)
 		}
 	}

@@ -106,7 +106,7 @@ func register(rawURL string, headers map[string]string) string {
 
 const entriesMax = 256
 
-// trimEntriesHalfLocked 超上限时删一半，并 kill 对应 splice（调用方已持 mu）。
+// trimEntriesHalfLocked 达上限时删一半，并 kill 对应 splice（调用方已持 mu）。
 func trimEntriesHalfLocked(max int) {
 	if len(entries) < max {
 		return

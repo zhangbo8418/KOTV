@@ -25,7 +25,7 @@ TMP_ABS="$ROOT/$TMP_REL"
 mkdir -p "$(dirname "$TMP_ABS")"
 
 LDFLAGS="-s -w -X github.com/bobo/KOTV/internal/update.CurrentVersion=${VERSION} -linkmode external -extldflags '-static'"
-IMAGE="${KOTV_STATIC_GO_IMAGE:-golang:1.26-alpine}"
+IMAGE="${KOTV_STATIC_GO_IMAGE:-golang:1.27.2-alpine}"
 # Docker/CI 挂载仓库时 git 常不可用或 safe.directory 失败，关掉 VCS stamping
 BUILD_VCS="-buildvcs=false"
 
