@@ -225,10 +225,7 @@ func (s *castSession) getStatus(ctx context.Context) (*castlib.ReceiverStatusRes
 			return &st, nil
 		case <-s.events:
 			if st := s.snapshot(); st != nil {
-				// 可能是推送的 RECEIVER_STATUS
-				if len(st.Status.Applications) > 0 || st.Status.Volume.Level > 0 || true {
-					return st, nil
-				}
+				return st, nil
 			}
 		}
 	}

@@ -39,10 +39,12 @@ Future<bool> ensureCastPermissions() async {
 }
 
 /// 搜索设备并投送；弹窗显示投屏中/可断开；成功返回状态文案，取消返回 null。
+/// [positionMs] 为本机播放进度，投到电视时用于续看。
 Future<String?> runKotvCast(
   BuildContext context,
   KotvApi api, {
   void Function(String msg)? onStatus,
+  int? positionMs,
 }) async {
   void status(String m) => onStatus?.call(m);
 
@@ -91,6 +93,7 @@ Future<String?> runKotvCast(
       activeKey: activeKey,
       activeLabel: active ? '${session['label'] ?? session['name'] ?? ''}'.trim() : '',
       onStatus: status,
+      positionMs: positionMs,
     ),
   );
   if (result == null) {
@@ -108,6 +111,7 @@ class _CastDeviceDialog extends StatefulWidget {
     required this.activeKey,
     required this.activeLabel,
     required this.onStatus,
+    this.positionMs,
   });
 
   final KotvApi api;
@@ -115,6 +119,7 @@ class _CastDeviceDialog extends StatefulWidget {
   final String activeKey;
   final String activeLabel;
   final void Function(String msg) onStatus;
+  final int? positionMs;
 
   @override
   State<_CastDeviceDialog> createState() => _CastDeviceDialogState();
@@ -144,7 +149,10 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
     });
     widget.onStatus('正在投屏到 $label…');
     try {
-      final cast = await widget.api.tools('cast', {'index': index});
+      final params = <String, dynamic>{'index': index};
+      final pos = widget.positionMs;
+      if (pos != null && pos > 0) params['positionMs'] = pos;
+      final cast = await widget.api.tools('cast', params);
       final msg = '${cast['message'] ?? '已投屏到 $label'}';
       final key = '${cast['key'] ?? ''}'.trim().isNotEmpty
           ? '${cast['key']}'.trim()
@@ -216,6 +224,7 @@ class _CastDeviceDialogState extends State<_CastDeviceDialog> {
         _busyIndex = null;
       });
       widget.onStatus(msg);
+      if (mounted) Navigator.of(context, rootNavigator: true).pop(msg);
     } catch (e) {
       if (!mounted) return;
       setState(() {

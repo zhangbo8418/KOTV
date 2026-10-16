@@ -36,7 +36,6 @@ type Device struct {
 	castIP   string
 	castPort int
 	appBase  string
-	appUUID  string
 }
 
 // Discover 并行搜索 DLNA、Chromecast 与局域网 App（/device）。

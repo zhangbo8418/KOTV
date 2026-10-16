@@ -3292,6 +3292,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final msg = await runKotvCast(
       context,
       ref.read(apiProvider),
+      positionMs: _playback.position.inMilliseconds,
       onStatus: (m) {
         if (mounted) setState(() => _status = m);
       },
@@ -3299,7 +3300,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (msg != null && mounted) {
       setState(() => _status = msg);
       // 投屏成功后暂停本机，避免双端同播；播放器保留便于停投后续看。
-      if (msg.contains('已投屏到')) {
+      if (msg.startsWith('已投屏到')) {
         unawaited(_playback.pause());
       }
     }

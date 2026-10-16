@@ -14,7 +14,7 @@ var _posterBytesTotal = 0;
 const int _posterBytesMax = 32 << 20; // 32MB
 
 void _posterBytesPut(String urlKey, Uint8List bytes) {
-  if (bytes.isEmpty) return;
+  if (bytes.isEmpty || bytes.length > _posterBytesMax) return;
   final old = _posterBytes.remove(urlKey);
   if (old != null) _posterBytesTotal -= old.length;
   while (_posterBytes.isNotEmpty && _posterBytesTotal + bytes.length > _posterBytesMax) {
@@ -31,6 +31,11 @@ Uint8List? _posterBytesGet(String urlKey) {
   if (hit == null) return null;
   _posterBytes[urlKey] = hit;
   return hit;
+}
+
+void _posterBytesRemove(String urlKey) {
+  final old = _posterBytes.remove(urlKey);
+  if (old != null) _posterBytesTotal -= old.length;
 }
 
 void _posterBytesClear() {
@@ -64,6 +69,19 @@ int _fnv1a(Uint8List bytes) {
   return h;
 }
 
+String _headersFingerprint(Map<String, String> headers) {
+  if (headers.isEmpty) return '';
+  final keys = headers.keys.toList()..sort();
+  final b = StringBuffer();
+  for (final k in keys) {
+    b.write(k);
+    b.write('=');
+    b.write(headers[k]);
+    b.write(';');
+  }
+  return '${_fnv1a(Uint8List.fromList(b.toString().codeUnits))}';
+}
+
 void _posterEvictUnreferenced() {
   var unrefBytes = 0;
   for (final e in _posterDecoded.values) {
@@ -83,7 +101,11 @@ void _posterEvictUnreferenced() {
 
 _PosterDecodedEntry? _posterAcquire(String key) {
   final e = _posterDecoded.remove(key);
-  if (e == null || e.orphaned) return null;
+  if (e == null) return null;
+  if (e.orphaned) {
+    e.image.dispose();
+    return null;
+  }
   e.refs++;
   _posterDecoded[key] = e;
   return e;
@@ -139,6 +161,10 @@ void kotvClearPosterImageCache() {
   }());
 }
 
+class _PosterLoadAborted implements Exception {
+  const _PosterLoadAborted();
+}
+
 /// 列表海报：State 自管 HttpClient，[dispose] 时 abort；解码图进引用计数缓存。
 class KotvPosterNetImage extends StatefulWidget {
   const KotvPosterNetImage(
@@ -169,6 +195,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
   int _gen = 0;
   HttpClientRequest? _req;
   StreamSubscription<List<int>>? _sub;
+  Completer<void>? _bodyDone;
 
   @override
   void initState() {
@@ -198,6 +225,11 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       _req?.abort();
     } catch (_) {}
     _req = null;
+    final done = _bodyDone;
+    _bodyDone = null;
+    if (done != null && !done.isCompleted) {
+      done.completeError(const _PosterLoadAborted());
+    }
     unawaited(_sub?.cancel() ?? Future<void>.value());
     _sub = null;
   }
@@ -236,7 +268,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     final dataBytes = kotvDecodeDataImage(raw);
     if (dataBytes != null) {
       final key = 'data|${dataBytes.length}|${_fnv1a(dataBytes)}|$tw|$th';
-      await _decodeAndShow(dataBytes, key, tw, th, gen, putBytesKey: null);
+      await _decodeAndShow(dataBytes, key, tw, th, gen);
       return;
     }
 
@@ -248,7 +280,8 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       return;
     }
 
-    final urlKey = parsed.url;
+    final hdrFp = _headersFingerprint(parsed.headers);
+    final urlKey = hdrFp.isEmpty ? parsed.url : '${parsed.url}|h:$hdrFp';
     final cacheKey = '$urlKey|$tw|$th';
     final decodedHit = _posterAcquire(cacheKey);
     if (decodedHit != null) {
@@ -262,7 +295,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
 
     final cachedBytes = _posterBytesGet(urlKey);
     if (cachedBytes != null) {
-      await _decodeAndShow(cachedBytes, cacheKey, tw, th, gen, putBytesKey: null);
+      await _decodeAndShow(cachedBytes, cacheKey, tw, th, gen, bytesKey: urlKey);
       return;
     }
 
@@ -288,24 +321,38 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       }
       final builder = BytesBuilder(copy: false);
       final done = Completer<void>();
+      _bodyDone = done;
       _sub = res.listen(
         builder.add,
-        onDone: done.complete,
-        onError: done.completeError,
+        onDone: () {
+          if (!done.isCompleted) done.complete();
+        },
+        onError: (Object e, StackTrace st) {
+          if (!done.isCompleted) done.completeError(e, st);
+        },
         cancelOnError: true,
       );
-      await done.future;
-      _sub = null;
-      _req = null;
+      try {
+        await done.future;
+      } on _PosterLoadAborted {
+        return;
+      } finally {
+        if (identical(_bodyDone, done)) _bodyDone = null;
+        _sub = null;
+        _req = null;
+      }
       final bytes = builder.takeBytes();
       if (bytes.isEmpty) throw StateError('empty image');
       // 即使格子已回收，仍入字节池，供滚回免再下。
       _posterBytesPut(urlKey, bytes);
       if (gen != _gen || !mounted) return;
-      await _decodeAndShow(bytes, cacheKey, tw, th, gen, putBytesKey: null);
+      await _decodeAndShow(bytes, cacheKey, tw, th, gen, bytesKey: urlKey);
+    } on _PosterLoadAborted {
+      return;
     } catch (e) {
       _req = null;
       _sub = null;
+      _bodyDone = null;
       if (gen != _gen || !mounted) return;
       setState(() => _error = e);
     }
@@ -317,13 +364,12 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     int tw,
     int th,
     int gen, {
-    String? putBytesKey,
+    String? bytesKey,
   }) async {
     ui.Codec? codec;
     try {
       final raced = _posterAcquire(cacheKey);
       if (raced != null) {
-        if (putBytesKey != null) _posterBytesPut(putBytesKey, bytes);
         if (gen != _gen || !mounted) {
           _posterRelease(raced);
           return;
@@ -336,7 +382,6 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       final frame = await codec.getNextFrame();
       codec.dispose();
       codec = null;
-      if (putBytesKey != null) _posterBytesPut(putBytesKey, bytes);
       if (gen != _gen || !mounted) {
         frame.image.dispose();
         return;
@@ -346,6 +391,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       setState(() => _hold(entry));
     } catch (e) {
       codec?.dispose();
+      if (bytesKey != null) _posterBytesRemove(bytesKey);
       if (gen != _gen || !mounted) return;
       setState(() => _error = e);
     }

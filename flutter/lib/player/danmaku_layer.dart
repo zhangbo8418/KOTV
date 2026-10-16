@@ -197,10 +197,6 @@ class DanmakuLoader {
     if (resp.statusCode < 200 || resp.statusCode >= 300) return '';
     return utf8.decode(resp.bodyBytes, allowMalformed: true);
   }
-
-  static String? _urlFromSource(dynamic item) {
-    return _sourceFrom(item, 0)?.url;
-  }
 }
 
 class DanmakuSource {
@@ -351,18 +347,23 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     }
     if (!identical(oldWidget.items, widget.items) && oldWidget.items != widget.items) {
       _sorted = _sortedCopy(widget.items);
-      _flying.clear();
-      _cursor = 0;
-      _lastActivateSec = -1;
+      if (widget.enabled) {
+        _reseedWindow();
+      } else {
+        _flying.clear();
+        _cursor = 0;
+        _lastActivateSec = -1;
+      }
     }
     if (oldWidget.enabled != widget.enabled) {
       if (!widget.enabled) {
         _flying.clear();
         _lastActivateSec = -1;
+        _cursor = 0;
+        if (mounted) setState(() {});
       } else {
         _rebase(widget.player.position, paused: !widget.player.playing, rate: widget.player.rate);
-        _lastActivateSec = -1;
-        _cursor = 0;
+        _reseedWindow();
       }
     }
     // 密度/类型/时长等改了：清空在飞弹幕，回放最近窗口按新规则重投（否则观感像「设置无效」）。
@@ -393,16 +394,28 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
         oldWidget.projectionOpacity != widget.projectionOpacity ||
         oldWidget.opacity != widget.opacity;
     if (layoutChanged && widget.enabled) {
-      _flying.clear();
-      final mediaSec = _mediaPos.inMilliseconds / 1000.0;
-      _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
-      _cursor = 0;
-      while (_cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
-        _cursor++;
-      }
-      if (_layoutW >= 1) _scheduleActivate(_layoutW);
+      _reseedWindow();
     }
     _syncTicker();
+  }
+
+  /// 清屏后按最近窗口重投；暂停时也刷一帧，避免残影留在画面上。
+  void _reseedWindow() {
+    _flying.clear();
+    final mediaSec = _mediaPos.inMilliseconds / 1000.0;
+    _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
+    _cursor = 0;
+    while (_cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
+      _cursor++;
+    }
+    if (_layoutW >= 1 && widget.enabled) {
+      if (_paused) {
+        _activate(mediaSec, viewW: _layoutW);
+      } else {
+        _scheduleActivate(_layoutW);
+      }
+    }
+    if (mounted) setState(() {});
   }
 
   List<DanmakuItem> _sortedCopy(List<DanmakuItem> items) {
@@ -432,14 +445,13 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
 
   void _onPosition(Duration d) {
     if (!mounted) return;
+    // 与上次上报位置比，勿用墙钟外推，否则流滞后会被当成回跳误清屏。
     // 非对称：回跳易残影，前跳仅大跳才清（避免缓冲校准误清屏）。
-    final jumpBack = d + const Duration(milliseconds: 300) < _mediaPos;
-    final jumpFwd = d > _mediaPos + const Duration(milliseconds: 1500);
+    final jumpBack = d + const Duration(milliseconds: 300) < _basePos;
+    final jumpFwd = d > _basePos + const Duration(milliseconds: 1500);
     _rebase(d, paused: !widget.player.playing, rate: widget.player.rate);
     if (jumpBack || jumpFwd) {
-      _flying.clear();
-      _lastActivateSec = -1;
-      _cursor = 0;
+      _reseedWindow();
     }
   }
 
@@ -481,21 +493,19 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
   void _activate(double mediaSec, {required double viewW}) {
     if (!widget.enabled || _sorted.isEmpty) return;
     if (_lastActivateSec < 0) {
-      _lastActivateSec = mediaSec;
-      // 首次：游标移到当前时间，避免一上来把片头全吐出。
-      while (_cursor < _sorted.length && _sorted[_cursor].time < mediaSec) {
-        _cursor++;
-      }
-      return;
-    }
-    if (mediaSec + 0.05 < _lastActivateSec) {
-      _flying.clear();
-      _lastActivateSec = mediaSec;
+      // 冷启动：只投最近窗口，避免片头全吐或空屏。
+      _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
       _cursor = 0;
-      while (_cursor < _sorted.length && _sorted[_cursor].time < mediaSec) {
+      while (_cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
         _cursor++;
       }
-      return;
+    } else if (mediaSec + 0.05 < _lastActivateSec) {
+      _flying.clear();
+      _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
+      _cursor = 0;
+      while (_cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
+        _cursor++;
+      }
     }
     final from = _lastActivateSec;
     final to = mediaSec;

@@ -20,6 +20,7 @@ import (
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/playproxy"
+	"github.com/bobo/KOTV/internal/remote"
 	"github.com/bobo/KOTV/internal/service"
 	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/spider"
@@ -60,7 +61,7 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 		return a.toolCastDiscover()
 	case "cast":
 		idx := intParam(params, "index", -1)
-		return a.toolCast(idx)
+		return a.toolCast(idx, params)
 	case "caststatus":
 		return a.toolCastStatus()
 	case "caststop":
@@ -390,7 +391,7 @@ func (a *App) toolCastDiscover() (map[string]any, error) {
 	}, nil
 }
 
-func (a *App) toolCast(index int) (map[string]any, error) {
+func (a *App) toolCast(index int, params map[string]any) (map[string]any, error) {
 	a.castMu.Lock()
 	devs := a.castDevs
 	a.castMu.Unlock()
@@ -401,9 +402,23 @@ func (a *App) toolCast(index int) (map[string]any, error) {
 	if mediaURL == "" {
 		return nil, fmt.Errorf("请先播放内容再投屏")
 	}
-	posMs := int64(0)
-	if eng := embed.Active(); eng != nil {
-		posMs = eng.PositionMs()
+	// Flutter 播放器进度优先；其次 embed；再读本机媒体快照。
+	posMs := int64(intParam(params, "positionMs", 0))
+	if posMs <= 0 {
+		if eng := embed.Active(); eng != nil {
+			posMs = eng.PositionMs()
+		}
+	}
+	if posMs <= 0 {
+		if snap := remote.SnapshotMediaFromStore(); snap != nil {
+			if v := strings.TrimSpace(snap["position"]); v != "" {
+				var n int64
+				_, _ = fmt.Sscanf(v, "%d", &n)
+				if n > 0 {
+					posMs = n
+				}
+			}
+		}
 	}
 	castURL, headers := playproxy.Resolve(mediaURL)
 	if castURL == "" {

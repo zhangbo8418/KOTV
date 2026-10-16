@@ -159,7 +159,6 @@ func probeAppPeer(client *http.Client, base, selfUUID, selfIP string) (Device, b
 		Protocol: ProtocolApp,
 		Detail:   base,
 		appBase:  base,
-		appUUID:  uuid,
 	}, true
 }
 

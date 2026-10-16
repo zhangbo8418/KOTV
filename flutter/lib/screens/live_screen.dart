@@ -2321,12 +2321,17 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (mounted) showAppNews(context, '请先播放内容再投屏');
       return;
     }
-    final msg = await runKotvCast(context, ref.read(apiProvider), onStatus: (m) {
-      if (mounted) setState(() => _status = m);
-    });
+    final msg = await runKotvCast(
+      context,
+      ref.read(apiProvider),
+      positionMs: _playback.position.inMilliseconds,
+      onStatus: (m) {
+        if (mounted) setState(() => _status = m);
+      },
+    );
     if (msg != null && mounted) {
       setState(() => _status = msg);
-      if (msg.contains('已投屏到')) {
+      if (msg.startsWith('已投屏到')) {
         unawaited(_playback.pause());
       }
     }
