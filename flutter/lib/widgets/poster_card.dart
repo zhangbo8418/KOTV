@@ -9,7 +9,8 @@ import '../vod/list_style.dart';
 import 'kotv_network_image.dart';
 import 'kotv_poster_image.dart';
 
-/// 海报：图片按比例裁切，标题在图片下面，备注在图片上。
+/// 海报：图片按比例裁切，名称在图片下面，备注在图片上。
+/// 矩形名称有半透明底和内边距；圆形名称没有底。
 class PosterCard extends StatelessWidget {
   const PosterCard({
     super.key,
@@ -51,7 +52,12 @@ class PosterCard extends StatelessWidget {
                   c.maxWidth <= 0) {
                 return ColoredBox(color: p.posterPh);
               }
-              final titleH = kotvPosterTitleDesign;
+              final television = KotvLayout.television;
+              final titleH = kotvPosterTitleExtent(
+                television: television,
+                oval: oval,
+                textScaler: MediaQuery.textScalerOf(context),
+              );
               final designW = kotvPosterDesignBucket(c.maxWidth,
                   max: ratio > 1 ? 640 : 480);
               final letter = kotvNameInitial(item.name);
@@ -122,9 +128,11 @@ class PosterCard extends StatelessWidget {
                   SizedBox(
                     height: titleH,
                     child: ColoredBox(
-                      color: p.posterBar,
+                      color: oval ? const Color(0x00000000) : kotvPosterNameBg,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: oval
+                            ? EdgeInsets.only(top: television ? 4 : 0)
+                            : const EdgeInsets.all(kotvPosterNamePad),
                         child: Align(
                           alignment: Alignment.center,
                           child: Text(
@@ -132,12 +140,7 @@ class PosterCard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: p.fg,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              height: 1.15,
-                            ),
+                            style: kotvPosterNameStyle(television: television),
                           ),
                         ),
                       ),

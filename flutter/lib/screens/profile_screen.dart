@@ -406,7 +406,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     itemBuilder: (_, i) {
                       final it = _recent[i];
                       final posterH = compact ? 168.0 : 240.0;
-                      final titleH = kotvPosterTitleDesign;
+                      final titleH = kotvPosterTitleExtent(
+                        television: KotvLayout.television,
+                        oval: false,
+                        textScaler: MediaQuery.textScalerOf(context),
+                      );
                       final posterW = (posterH - titleH) * 0.75;
                       return SizedBox(
                         width: posterW,

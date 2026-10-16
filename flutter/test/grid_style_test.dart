@@ -63,6 +63,17 @@ void main() {
     expect(kotvPosterSizeValue('3'), 3);
   });
 
+  test('title strip is one text line plus its padding', () {
+    final line = kotvPosterNameLineHeight(television: false);
+    expect(kotvPosterNameFont(television: false), 14);
+    expect(kotvPosterTitleExtent(television: false, oval: false), line + 12);
+    expect(kotvPosterTitleExtent(television: false, oval: true), line);
+    final tvLine = kotvPosterNameLineHeight(television: true);
+    expect(kotvPosterNameFont(television: true), 16);
+    expect(kotvPosterTitleExtent(television: true, oval: false), tvLine + 12);
+    expect(kotvPosterTitleExtent(television: true, oval: true), tvLine + 4);
+  });
+
   test('cell aspect is image height plus title', () {
     final aspect = kotvPosterCellAspect(
       extent: 300,
