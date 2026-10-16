@@ -607,7 +607,9 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
       textDirection: ui.TextDirection.ltr,
       maxLines: 1,
     )..layout();
-    return tp.width;
+    final w = tp.width;
+    tp.dispose();
+    return w;
   }
 
   /// 滚动轨：无可用轨返回 null（丢弃，避免叠轨）。
@@ -789,8 +791,13 @@ class _Flying {
     required List<Shadow> shadows,
     required String strokeMode,
   }) {
+    final shadowKey = shadows.isEmpty
+        ? '0'
+        : shadows
+            .map((s) => '${s.offset.dx},${s.offset.dy},${s.blurRadius},${s.color.toARGB32()}')
+            .join('|');
     final key =
-        '${item.content}\x00$fontSize\x00${color.toARGB32()}\x00$bold\x00$fontFamily\x00$strokeMode\x00${shadows.length}';
+        '${item.content}\x00$fontSize\x00${color.toARGB32()}\x00$bold\x00$fontFamily\x00$strokeMode\x00$shadowKey';
     final cached = _painter;
     if (cached != null && _painterKey == key) return cached;
     cached?.dispose();
