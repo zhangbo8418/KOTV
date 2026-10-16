@@ -49,11 +49,10 @@ const (
 // 桌面共享一个 Chromium 进程；最多 2 个并发 tab，避免超级解析打出几十个 chrome。
 // 按 userID 登记进行中的 sniff cancel，供 KillUserRuntime / 心跳回收。
 var (
-	sharedAllocOnce   sync.Once
-	sharedAllocCtx    context.Context
-	sharedAllocCancel context.CancelFunc
-	sharedAllocErr    error
-	sniffSem          = make(chan struct{}, 2)
+	sharedAllocOnce sync.Once
+	sharedAllocCtx  context.Context
+	sharedAllocErr  error
+	sniffSem        = make(chan struct{}, 2)
 
 	userSniffMu sync.Mutex
 	userSniffs  = map[string][]context.CancelFunc{} // userID -> cancels
@@ -143,7 +142,7 @@ func ensureSharedChromium() (context.Context, error) {
 				chromedp.Flag("window-position", "-32000,-32000"),
 			)
 		}
-		sharedAllocCtx, sharedAllocCancel = chromedp.NewExecAllocator(context.Background(), opts...)
+		sharedAllocCtx, _ = chromedp.NewExecAllocator(context.Background(), opts...)
 	})
 	return sharedAllocCtx, sharedAllocErr
 }
@@ -285,16 +284,11 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	}
 
 	// XHR/Fetch 响应体候选（部分接口以 text/html 返回 JSON 播放地址）。
-	type bodyCand struct {
-		url  string
-		mime string
-		typ  network.ResourceType
-	}
 	var bodyMu sync.Mutex
-	bodyPending := map[network.RequestID]bodyCand{}
+	bodyPending := map[network.RequestID]string{} // requestID → 来源 URL（仅日志）
 	tryEmitFromBody := func(reqID network.RequestID) {
 		bodyMu.Lock()
-		cand, ok := bodyPending[reqID]
+		fromURL, ok := bodyPending[reqID]
 		if ok {
 			delete(bodyPending, reqID)
 		}
@@ -312,9 +306,9 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 		}
 		text := string(result.Body)
 		if play, hdr, note := sniffPlayAPIResult(text); note != "" {
-			parseLog("[sniff] play-api depth=%d %s from=%s", depth, note, parsePreview(cand.url, 80))
+			parseLog("[sniff] play-api depth=%d %s from=%s", depth, note, parsePreview(fromURL, 80))
 		} else if play != "" {
-			parseLog("[sniff] xhr-json depth=%d from=%s out=%s", depth, parsePreview(cand.url, 80), parsePreview(play, 120))
+			parseLog("[sniff] xhr-json depth=%d from=%s out=%s", depth, parsePreview(fromURL, 80), parsePreview(play, 120))
 			emit(play, sanitizePlayHeaders(hdr))
 			return
 		}
@@ -330,6 +324,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	go func() {
 		for e, eventErr := range fetchEvents {
 			if eventErr != nil {
+				parseLog("[sniff] fetch event err depth=%d: %v", depth, eventErr)
 				return
 			}
 			reqURL := ""
@@ -359,6 +354,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	go func() {
 		for e, eventErr := range requestEvents {
 			if eventErr != nil {
+				parseLog("[sniff] request event err depth=%d: %v", depth, eventErr)
 				return
 			}
 			if e.Request == nil {
@@ -373,9 +369,10 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 				parseLog("[sniff] cloudflare challenge depth=%d url=%s", depth, parsePreview(u, 160))
 			}
 			// 已是媒体直链时直接收，勿当嵌套页跟进。
+			// continue（非 return）：旧 ListenTarget 回调里 return 只结束当次事件，须继续收后续请求。
 			if videoOK(u) {
 				emit(u, reqHdr)
-				return
+				continue
 			}
 			if detect && depth < 1 && shouldFollowNestedPlayer(u, pageURL, e.Type) {
 				tryFollow(u, reqHdr, "net")
@@ -387,6 +384,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	go func() {
 		for e, eventErr := range responseEvents {
 			if eventErr != nil {
+				parseLog("[sniff] response event err depth=%d: %v", depth, eventErr)
 				return
 			}
 			if e.Response == nil {
@@ -404,7 +402,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			}
 			if shouldParseSniffBody(u, mime, e.Type) {
 				bodyMu.Lock()
-				bodyPending[e.RequestID] = bodyCand{url: u, mime: mime, typ: e.Type}
+				bodyPending[e.RequestID] = u
 				bodyMu.Unlock()
 			}
 			emit(u, headerFromNetwork(e.Response.Headers))
@@ -413,6 +411,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 	go func() {
 		for e, eventErr := range finishedEvents {
 			if eventErr != nil {
+				parseLog("[sniff] loadingFinished event err depth=%d: %v", depth, eventErr)
 				return
 			}
 			reqID := e.RequestID
@@ -450,7 +449,7 @@ func browserSniff(pageURL string, headers map[string]string, click string, rules
 			}
 			extra := network.Headers{}
 			for k, v := range headers {
-				// Referer 只用于 Navigate.WithReferrer；写进 ExtraHeaders 会污染云播跳转/XHR。
+				// Referer 只写进 Navigate.Referrer；写进 ExtraHeaders 会污染云播跳转/XHR。
 				if strings.EqualFold(k, "User-Agent") || strings.EqualFold(k, "Cookie") || strings.EqualFold(k, "Referer") {
 					continue
 				}
