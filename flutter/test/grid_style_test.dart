@@ -23,6 +23,35 @@ void main() {
       kotvPosterColumns(width: 400, height: 800, size: 2, landStyle: true),
       2,
     );
+    // 1080p 逻辑约 960×540，4K/8K 逻辑可到 1920×1080 或更大；电视列数不跟短边走。
+    expect(
+      kotvPosterColumns(
+          width: 960, height: 540, size: 2, landStyle: false, television: true),
+      5,
+    );
+    expect(
+      kotvPosterColumns(
+          width: 1920,
+          height: 1080,
+          size: 2,
+          landStyle: false,
+          television: true),
+      5,
+    );
+    expect(
+      kotvPosterColumns(
+          width: 3840,
+          height: 2160,
+          size: 2,
+          landStyle: false,
+          television: true),
+      5,
+    );
+    expect(
+      kotvPosterColumns(
+          width: 1920, height: 1080, size: 2, landStyle: true, television: true),
+      4,
+    );
   });
 
   test('style ratio is capped and defaults by type', () {

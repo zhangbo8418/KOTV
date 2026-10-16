@@ -77,14 +77,17 @@ int kotvWatchPosterSize(WidgetRef ref) {
 }
 
 /// 横屏基数 7，竖屏 5；短边 ≥ 600 再加 1。列数 = |尺寸档 − 基数|，横图样式再减 1。
+/// 电视不加这档：逻辑短边分不开 1080p 和 4K/8K，系统电视标记见 [KotvLayout.television]。
 int kotvPosterColumns({
   required double width,
   required double height,
   required int size,
   required bool landStyle,
+  bool television = false,
 }) {
-  var base = width >= height ? 7 : 5;
-  if (math.min(width, height) >= 600) base += 1;
+  final landscape = television || width >= height;
+  var base = landscape ? 7 : 5;
+  if (!television && math.min(width, height) >= 600) base += 1;
   var n = (kotvPosterSizeValue('$size') - base).abs();
   if (landStyle) n -= 1;
   if (n < 1) n = 1;
@@ -123,6 +126,7 @@ double kotvPosterCellAspect({
           height: screen.height,
           size: size,
           landStyle: style.isLand,
+          television: KotvLayout.television,
         );
   final aspect = kotvPosterCellAspect(
     extent: extent.isFinite ? extent : 0,
