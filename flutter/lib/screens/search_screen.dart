@@ -17,6 +17,7 @@ import '../theme/kotv_theme.dart';
 import '../widgets/chrome.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/poster_card.dart';
+import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
 import 'shell.dart';
 
@@ -71,10 +72,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Future<void> _loadHot() async {
     try {
       final st = await ref.read(apiProvider).getSettings();
-      final settings = Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
+      final settings =
+          Map<String, dynamic>.from((st['settings'] as Map?) ?? const {});
       KotvSettingsCache.replace(settings);
-      final zhuyin = '${settings['searchZhuyin'] ?? ''}'.toLowerCase() == 'true';
-      final hot = ((st['searchHot'] as List?) ?? []).map((e) => '$e').where((e) => e.isNotEmpty).toList();
+      final zhuyin =
+          '${settings['searchZhuyin'] ?? ''}'.toLowerCase() == 'true';
+      final hot = ((st['searchHot'] as List?) ?? [])
+          .map((e) => '$e')
+          .where((e) => e.isNotEmpty)
+          .toList();
       if (!mounted) return;
       setState(() {
         _zhuyin = zhuyin;
@@ -125,17 +131,23 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         final words = parseSuggestTitles(res.body);
         if (words.isEmpty) return;
         setState(() => _hot = words);
-        await KotvSettingsCache.set(ref.read(apiProvider), 'searchHot', jsonEncode(words));
+        await KotvSettingsCache.set(
+            ref.read(apiProvider), 'searchHot', jsonEncode(words));
       } catch (_) {}
       return;
     }
     if (mounted) setState(() => _wordTitle = '联想');
     try {
       final key = Uri.encodeQueryComponent(zhuToPin(text));
-      final res = await http.get(
-        Uri.parse('https://suggest.video.iqiyi.com/?if=mobile&key=$key'),
-      ).timeout(const Duration(seconds: 8));
-      if (!mounted || gen != _wordGen || _ctrl.text.trim().isEmpty || res.statusCode != 200) return;
+      final res = await http
+          .get(
+            Uri.parse('https://suggest.video.iqiyi.com/?if=mobile&key=$key'),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (!mounted ||
+          gen != _wordGen ||
+          _ctrl.text.trim().isEmpty ||
+          res.statusCode != 200) return;
       setState(() => _hot = parseSuggestTitles(res.body));
     } catch (_) {
       if (mounted && gen == _wordGen) setState(() => _hot = const []);
@@ -146,7 +158,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final next = !_zhuyin;
     setState(() => _zhuyin = next);
     try {
-      await KotvSettingsCache.set(ref.read(apiProvider), 'searchZhuyin', next ? 'true' : 'false');
+      await KotvSettingsCache.set(
+          ref.read(apiProvider), 'searchZhuyin', next ? 'true' : 'false');
     } catch (_) {}
   }
 
@@ -272,7 +285,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           if (!mounted || gen != _searchGen) return;
           final site = sites[i];
           try {
-            final data = await ref.read(apiProvider).search(kw, sites: [site.key]);
+            final data =
+                await ref.read(apiProvider).search(kw, sites: [site.key]);
             if (!mounted || gen != _searchGen) return;
             final got = _parseCollects(data);
             setState(() {
@@ -335,7 +349,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         ),
         Expanded(
           child: Padding(
-            padding: EdgeInsets.fromLTRB(KotvLayout.isCompact(context) ? 12 : 24, 0, KotvLayout.isCompact(context) ? 12 : 24, 16),
+            padding: EdgeInsets.fromLTRB(
+                KotvLayout.isCompact(context) ? 12 : 24,
+                0,
+                KotvLayout.isCompact(context) ? 12 : 24,
+                16),
             child: Builder(
               builder: (context) {
                 final size = MediaQuery.sizeOf(context);
@@ -386,9 +404,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           selection: TextSelection.collapsed(offset: cursor - 1),
         );
       case '←':
-        _ctrl.selection = TextSelection.collapsed(offset: cursor <= 0 ? 0 : cursor - 1);
+        _ctrl.selection =
+            TextSelection.collapsed(offset: cursor <= 0 ? 0 : cursor - 1);
       case '→':
-        _ctrl.selection = TextSelection.collapsed(offset: cursor >= text.length ? text.length : cursor + 1);
+        _ctrl.selection = TextSelection.collapsed(
+            offset: cursor >= text.length ? text.length : cursor + 1);
       case '搜索':
         unawaited(_search(text));
       case '注音':
@@ -405,8 +425,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   Widget _initialsKeyboard() {
     final p = KotvPalette.of(context);
-    final letters = (_zhuyin ? _zhuyinKeys : _keys).runes.map(String.fromCharCode).toList();
-    final cells = <String?>['退格', '←', '→', '搜索', _zhuyin ? '英文' : '注音', null, null, ...letters];
+    final letters =
+        (_zhuyin ? _zhuyinKeys : _keys).runes.map(String.fromCharCode).toList();
+    final cells = <String?>[
+      '退格',
+      '←',
+      '→',
+      '搜索',
+      _zhuyin ? '英文' : '注音',
+      null,
+      null,
+      ...letters
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -452,7 +482,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   decoration: BoxDecoration(
                     color: label == '搜索' ? p.selected : p.pillBg,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: label == '搜索' ? p.primary.withOpacity(0.9) : p.pillBorder),
+                    border: Border.all(
+                        color: label == '搜索'
+                            ? p.primary.withOpacity(0.9)
+                            : p.pillBorder),
                   ),
                   child: Center(
                     child: Text(
@@ -535,8 +568,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           onTap: () {
             if (_ctrl.text.isEmpty) return;
             final runes = _ctrl.text.runes.toList();
-            _ctrl.text = String.fromCharCodes(runes.sublist(0, runes.length - 1));
-            _ctrl.selection = TextSelection.collapsed(offset: _ctrl.text.length);
+            _ctrl.text =
+                String.fromCharCodes(runes.sublist(0, runes.length - 1));
+            _ctrl.selection =
+                TextSelection.collapsed(offset: _ctrl.text.length);
           },
         ),
         const SizedBox(height: 12),
@@ -554,7 +589,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   fontSize: 14,
                   onTap: () {
                     _ctrl.text += _keys[i];
-                    _ctrl.selection = TextSelection.collapsed(offset: _ctrl.text.length);
+                    _ctrl.selection =
+                        TextSelection.collapsed(offset: _ctrl.text.length);
                   },
                 ),
               ),
@@ -607,12 +643,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           const SizedBox(
                             width: 28,
                             height: 28,
-                            child: CircularProgressIndicator(strokeWidth: 2.6, color: Colors.white),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.6, color: Colors.white),
                           ),
                           const SizedBox(height: 14),
                           const Text(
                             '正在搜索…',
-                            style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600),
                           ),
                           const SizedBox(height: 6),
                           Text(
@@ -620,7 +660,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                 ? '$_doneSites / $_totalSites 站点 · 已找到 $_hitCount 条'
                                 : (_status ?? ''),
                             textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13),
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.75),
+                                fontSize: 13),
                           ),
                         ],
                       ),
@@ -637,21 +679,25 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             top: 0,
             child: Material(
               color: const Color(0xCC1A1228),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(14)),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: Row(
                   children: [
                     const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         '继续搜索 $_doneSites/$_totalSites · 已找到 $_hitCount 条',
-                        style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13),
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.9), fontSize: 13),
                       ),
                     ),
                   ],
@@ -676,7 +722,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Text(_wordTitle, style: TextStyle(color: p.fg, fontSize: 20, fontWeight: FontWeight.w700)),
+            child: Text(_wordTitle,
+                style: TextStyle(
+                    color: p.fg, fontSize: 20, fontWeight: FontWeight.w700)),
           ),
           Expanded(
             child: ListView.separated(
@@ -722,21 +770,22 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Widget _resultPosterSliver(_SiteCollect c) {
+    final size = kotvWatchPosterSize(ref);
+    final style = kotvGridStyleOfItems(c.list);
     return SliverLayoutBuilder(
       builder: (context, constraints) {
-        final compact = KotvLayout.isCompact(context);
-        final gap = compact ? 6.0 : 10.0;
-        final pad = compact ? const EdgeInsets.fromLTRB(12, 8, 12, 16) : EdgeInsets.zero;
+        final pad = KotvLayout.isCompact(context)
+            ? const EdgeInsets.fromLTRB(12, 8, 12, 16)
+            : EdgeInsets.zero;
         final inner = constraints.crossAxisExtent - pad.horizontal;
-        final cross = !inner.isFinite || inner <= 0
-            ? (compact ? 3 : 4)
-            : (compact ? 3 : (inner / (200.0 + gap)).floor().clamp(3, 6));
+        final m =
+            kotvPosterMetrics(context, extent: inner, style: style, size: size);
         final grid = SliverGrid(
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: cross,
-            mainAxisSpacing: gap,
-            crossAxisSpacing: gap,
-            childAspectRatio: 214 / 286,
+            crossAxisCount: m.columns,
+            mainAxisSpacing: m.gap,
+            crossAxisSpacing: m.gap,
+            childAspectRatio: m.aspect,
           ),
           delegate: SliverChildBuilderDelegate(
             (context, i) {
@@ -744,8 +793,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               return PosterCard(
                 item: it,
                 autofocus: false,
+                ratio: style.ratio,
+                oval: style.isOval,
                 onTap: () => openVodItem(context, ref, it, site: c.site),
-                onLongPress: (it.hasAction || it.isFolder) ? null : () => searchByName(ref, it.name),
+                onLongPress: (it.hasAction || it.isFolder)
+                    ? null
+                    : () => searchByName(ref, it.name),
               );
             },
             childCount: c.list.length,

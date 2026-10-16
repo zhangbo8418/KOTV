@@ -65,6 +65,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _deviceIp = '';
   bool _loading = true;
   bool _busy = false;
+
   /// 安卓：设备支持 Vulkan≥1.2 时才显示开关。
   bool _androidVulkanOk = false;
   final _engineCtrl = TextEditingController();
@@ -97,7 +98,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _s = {for (final e in map.entries) e.key: '${e.value ?? ''}'};
       final rt = Map<String, dynamic>.from((data['runtime'] as Map?) ?? {});
       _runtime = {for (final e in rt.entries) e.key: '${e.value ?? ''}'};
-      _parses = ((data['parses'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      _parses = ((data['parses'] as List?) ?? [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
       _port = '${data['port'] ?? kotvDefaultEnginePort}';
       _version = '${data['version'] ?? '0.1.0'}';
       _pairCode = '${data['pairCode'] ?? g('syncPairCode')}';
@@ -131,9 +135,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   String g(String k, [String d = '']) => _s[k]?.isNotEmpty == true ? _s[k]! : d;
 
+  String _posterSizeLabel(String raw) {
+    switch (int.tryParse(raw.trim()) ?? 2) {
+      case 0:
+        return '小';
+      case 1:
+        return '中';
+      case 3:
+        return '特大';
+      default:
+        return '大';
+    }
+  }
+
   Future<void> _set(String key, String value, {String? msg}) async {
     try {
-      final data = await KotvSettingsCache.set(ref.read(apiProvider), key, value);
+      final data =
+          await KotvSettingsCache.set(ref.read(apiProvider), key, value);
       final map = Map<String, dynamic>.from((data['settings'] as Map?) ?? {});
       setState(() {
         // 合并而非整表替换：避免 API 白名单漏键时把刚写入的值冲掉
@@ -204,7 +222,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: p.dialogBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text(title, style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
+        title: Text(title,
+            style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
           width: 540,
           child: KotvTvTextField(
@@ -217,13 +236,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               hintStyle: TextStyle(color: p.muted),
               filled: true,
               fillColor: p.input,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none),
             ),
           ),
         ),
         actions: [
-          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
-          KotvFocusAction(label: '确定', filled: true, onPressed: () => Navigator.pop(ctx, c.text.trim())),
+          KotvFocusAction(
+              label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
+          KotvFocusAction(
+              label: '确定',
+              filled: true,
+              onPressed: () => Navigator.pop(ctx, c.text.trim())),
         ],
       ),
     );
@@ -238,7 +263,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     String? defaultValue,
   }) async {
     final cur = g(key, defaultValue ?? '');
-    final v = await pickChoice(context, title: title, current: cur, options: options);
+    final v =
+        await pickChoice(context, title: title, current: cur, options: options);
     if (v != null) await _set(key, v, msg: msg);
   }
 
@@ -284,14 +310,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await _set('proxy', 'false#', msg: '代理已关闭');
       return;
     }
-    final c = TextEditingController(text: url.isEmpty ? 'http://127.0.0.1:7890' : url);
+    final c = TextEditingController(
+        text: url.isEmpty ? 'http://127.0.0.1:7890' : url);
     final p = KotvPalette.of(context);
     final next = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: p.dialogBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('代理地址', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
+        title: Text('代理地址',
+            style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
           width: 540,
           child: KotvTvTextField(
@@ -303,13 +331,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               hintStyle: TextStyle(color: p.muted),
               filled: true,
               fillColor: p.input,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none),
             ),
           ),
         ),
         actions: [
-          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
-          KotvFocusAction(label: '确定', filled: true, onPressed: () => Navigator.pop(ctx, c.text.trim())),
+          KotvFocusAction(
+              label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
+          KotvFocusAction(
+              label: '确定',
+              filled: true,
+              onPressed: () => Navigator.pop(ctx, c.text.trim())),
         ],
       ),
     );
@@ -355,7 +389,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               Expanded(
                                 child: Text(
                                   title,
-                                  style: TextStyle(color: p.fg, fontSize: 17, fontWeight: FontWeight.w700),
+                                  style: TextStyle(
+                                      color: p.fg,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700),
                                 ),
                               ),
                               TvFocus(
@@ -404,15 +441,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       scrollIntoView: true,
       child: ExcludeFocus(
         child: ListTile(
-        title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
-        subtitle: subtitle == null
-            ? null
-            : Text(subtitle, style: TextStyle(color: p.muted, fontSize: 12)),
-        trailing: Switch.adaptive(
-          value: value,
-          onChanged: (v) => unawaited(onChanged(v)),
+          title: Text(label,
+              style: TextStyle(
+                  color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
+          subtitle: subtitle == null
+              ? null
+              : Text(subtitle, style: TextStyle(color: p.muted, fontSize: 12)),
+          trailing: Switch.adaptive(
+            value: value,
+            onChanged: (v) => unawaited(onChanged(v)),
+          ),
         ),
-      ),
       ),
     );
   }
@@ -429,23 +468,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       scrollIntoView: true,
       child: ExcludeFocus(
         child: ListTile(
-        title: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 140),
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: p.muted, fontSize: 14),
+          title: Text(label,
+              style: TextStyle(
+                  color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 140),
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: p.muted, fontSize: 14),
+                ),
               ),
-            ),
-            Icon(Icons.chevron_right, color: p.muted.withOpacity(0.7)),
-          ],
+              Icon(Icons.chevron_right, color: p.muted.withOpacity(0.7)),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -476,19 +517,36 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _showPlayerSubSheet(
       title: 'Exo 设置',
       buildChildren: (setSheet) {
-        final exoDiskCache = kotvSettingsFlag(g('exoDiskCache', 'false'), def: false);
+        final exoDiskCache =
+            kotvSettingsFlag(g('exoDiskCache', 'false'), def: false);
         final exoAdblock = kotvSettingsFlag(g('exoAdblock', 'true'), def: true);
-        final exoTunneling = kotvSettingsFlag(g('exoTunneling', 'false'), def: false);
-        final exoPreferAac = kotvSettingsFlag(g('exoPreferAac', 'false'), def: false);
-        final exoSkipSilence = kotvSettingsFlag(g('exoSkipSilence', 'false'), def: false);
-        final exoSoftAudioPrefer = kotvSettingsFlag(g('exoSoftAudioPrefer', 'false'), def: false);
-        final exoSoftVideoPrefer = kotvSettingsFlag(g('exoSoftVideoPrefer', 'false'), def: false);
-        final exoBuffer = (int.tryParse(g('exoBuffer', '1')) ?? 1).clamp(1, 10).toDouble();
-        final exoPreload = (int.tryParse(g('exoDiskPreloadMs', '120000')) ?? 120000).clamp(20000, 120000).toDouble();
-        final exoPreloadThreads = (int.tryParse(g('exoDiskPreloadThreads', '1')) ?? 1).clamp(1, 10).toDouble();
-        final exoPreloadSizeMb = (int.tryParse(g('exoDiskPreloadSizeMb', '128')) ?? 128).clamp(128, 4096).toDouble();
+        final exoTunneling =
+            kotvSettingsFlag(g('exoTunneling', 'false'), def: false);
+        final exoPreferAac =
+            kotvSettingsFlag(g('exoPreferAac', 'false'), def: false);
+        final exoSkipSilence =
+            kotvSettingsFlag(g('exoSkipSilence', 'false'), def: false);
+        final exoSoftAudioPrefer =
+            kotvSettingsFlag(g('exoSoftAudioPrefer', 'false'), def: false);
+        final exoSoftVideoPrefer =
+            kotvSettingsFlag(g('exoSoftVideoPrefer', 'false'), def: false);
+        final exoBuffer =
+            (int.tryParse(g('exoBuffer', '1')) ?? 1).clamp(1, 10).toDouble();
+        final exoPreload =
+            (int.tryParse(g('exoDiskPreloadMs', '120000')) ?? 120000)
+                .clamp(20000, 120000)
+                .toDouble();
+        final exoPreloadThreads =
+            (int.tryParse(g('exoDiskPreloadThreads', '1')) ?? 1)
+                .clamp(1, 10)
+                .toDouble();
+        final exoPreloadSizeMb =
+            (int.tryParse(g('exoDiskPreloadSizeMb', '128')) ?? 128)
+                .clamp(128, 4096)
+                .toDouble();
         final exoLibass = kotvSettingsFlag(g('exoLibass', 'true'), def: true);
-        final exoSecondary = g('exoSecondarySubtitle', 'default').trim().toLowerCase();
+        final exoSecondary =
+            g('exoSecondarySubtitle', 'default').trim().toLowerCase();
         final exoDolby = int.tryParse(g('exoDolbyVision', '0')) ?? 0;
         final exoDolbyLabel = switch (exoDolby) {
           1 => '假定支持',
@@ -501,7 +559,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '磁盘缓存',
             value: exoDiskCache,
             onChanged: (v) async {
-              await _set('exoDiskCache', v ? 'true' : 'false', msg: v ? '已开启 Exo 磁盘缓存' : '已关闭 Exo 磁盘缓存');
+              await _set('exoDiskCache', v ? 'true' : 'false',
+                  msg: v ? '已开启 Exo 磁盘缓存' : '已关闭 Exo 磁盘缓存');
               setSheet(() {});
             },
           ),
@@ -512,8 +571,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 120000,
             divisions: 10,
             format: (v) => '${(v / 1000).round()} s',
-            onChanging: (v) => setSheet(() => _s['exoDiskPreloadMs'] = '${v.round()}'),
-            onCommit: (v) => _set('exoDiskPreloadMs', '${v.round()}', msg: 'Exo 磁盘预读已更新'),
+            onChanging: (v) =>
+                setSheet(() => _s['exoDiskPreloadMs'] = '${v.round()}'),
+            onCommit: (v) =>
+                _set('exoDiskPreloadMs', '${v.round()}', msg: 'Exo 磁盘预读已更新'),
           ),
           _sheetSlider(
             label: '预读线程',
@@ -522,7 +583,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 10,
             divisions: 9,
             format: (v) => '${v.round()}',
-            onChanging: (v) => setSheet(() => _s['exoDiskPreloadThreads'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['exoDiskPreloadThreads'] = '${v.round()}'),
             onCommit: (v) => _set('exoDiskPreloadThreads', '${v.round()}'),
           ),
           _sheetSlider(
@@ -532,7 +594,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 4096,
             divisions: 31,
             format: (v) => '${v.round()} MB',
-            onChanging: (v) => setSheet(() => _s['exoDiskPreloadSizeMb'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['exoDiskPreloadSizeMb'] = '${v.round()}'),
             onCommit: (v) => _set('exoDiskPreloadSizeMb', '${v.round()}'),
           ),
           _sheetSlider(
@@ -543,7 +606,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             divisions: 9,
             format: (v) => '${v.round()}×',
             onChanging: (v) => setSheet(() => _s['exoBuffer'] = '${v.round()}'),
-            onCommit: (v) => _set('exoBuffer', '${v.round()}', msg: '缓冲倍率已更新（播放中会重开）'),
+            onCommit: (v) =>
+                _set('exoBuffer', '${v.round()}', msg: '缓冲倍率已更新（播放中会重开）'),
           ),
           _sheetToggle(
             label: 'HLS 去广告',
@@ -590,7 +654,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '软解优先音轨（仅软解·重开生效）',
             value: exoSoftAudioPrefer,
             onChanged: (v) async {
-              await _set('exoSoftAudioPrefer', v ? 'true' : 'false', msg: '仅软解码模式生效，重开播放后应用');
+              await _set('exoSoftAudioPrefer', v ? 'true' : 'false',
+                  msg: '仅软解码模式生效，重开播放后应用');
               setSheet(() {});
             },
           ),
@@ -598,7 +663,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '软解优先视轨（仅软解·重开生效）',
             value: exoSoftVideoPrefer,
             onChanged: (v) async {
-              await _set('exoSoftVideoPrefer', v ? 'true' : 'false', msg: '仅软解码模式生效，重开播放后应用');
+              await _set('exoSoftVideoPrefer', v ? 'true' : 'false',
+                  msg: '仅软解码模式生效，重开播放后应用');
               setSheet(() {});
             },
           ),
@@ -618,11 +684,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               _ => '关闭',
             },
             onTap: () async {
-              final picked = await pickChoice(context, title: '双字幕', current: exoSecondary == 'on' ? 'auto' : exoSecondary, options: const [
-                ('关闭', 'off'),
-                ('自动（选另一语言轨）', 'auto'),
-                ('跟随播放器默认', 'default'),
-              ]);
+              final picked = await pickChoice(context,
+                  title: '双字幕',
+                  current: exoSecondary == 'on' ? 'auto' : exoSecondary,
+                  options: const [
+                    ('关闭', 'off'),
+                    ('自动（选另一语言轨）', 'auto'),
+                    ('跟随播放器默认', 'default'),
+                  ]);
               if (picked == null) return;
               await _set('exoSecondarySubtitle', picked, msg: '重启播放生效');
               setSheet(() {});
@@ -670,7 +739,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 options: opts,
               );
               if (picked == null) return;
-              await _set('exoPreferredTextLangs', picked.join(','), msg: '首选字幕语言已更新');
+              await _set('exoPreferredTextLangs', picked.join(','),
+                  msg: '首选字幕语言已更新');
               setSheet(() {});
             },
           ),
@@ -689,8 +759,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       buildChildren: (setSheet) {
         final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
         final mpvVulkan = g('mpvVulkan', 'false') == 'true';
-        final mpvTlsVerify = kotvSettingsFlag(g('mpvTlsVerify', 'true'), def: true);
-        final mpvDiskCache = kotvSettingsFlag(g('mpvDiskCache', 'false'), def: false);
+        final mpvTlsVerify =
+            kotvSettingsFlag(g('mpvTlsVerify', 'true'), def: true);
+        final mpvDiskCache =
+            kotvSettingsFlag(g('mpvDiskCache', 'false'), def: false);
         final conf = g('mpvConf').trim();
         return [
           if (showGpuNext)
@@ -730,7 +802,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           _sheetNav(
             label: 'mpv.conf',
-            value: conf.isEmpty ? '未配置' : _ellipsize(conf.replaceAll('\n', ' '), 18),
+            value: conf.isEmpty
+                ? '未配置'
+                : _ellipsize(conf.replaceAll('\n', ' '), 18),
             onTap: () async {
               await _prompt(
                 'MPV 配置（mpv.conf）',
@@ -760,15 +834,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         var videoEq = g('videoEq', 'off').trim().toLowerCase();
         if (videoEq == 'on') videoEq = 'custom';
         final custom = videoEq == 'custom';
-        double num(String key, [double def = 0]) => double.tryParse(g(key, '$def')) ?? def;
+        double num(String key, [double def = 0]) =>
+            double.tryParse(g(key, '$def')) ?? def;
         Future<void> savePreset(String next) async {
           final label = KotvVideoEq.presetLabels[next] ?? next;
-          await _set('videoEq', next, msg: next == 'off' ? '已关闭画面调色' : '画面调色：$label');
+          await _set('videoEq', next,
+              msg: next == 'off' ? '已关闭画面调色' : '画面调色：$label');
           setSheet(() {});
         }
+
         Widget chip(String id, String label) {
           final p = KotvPalette.of(context);
-          final on = videoEq == id || (id == 'off' && (videoEq.isEmpty || videoEq == 'off'));
+          final on = videoEq == id ||
+              (id == 'off' && (videoEq.isEmpty || videoEq == 'off'));
           return Padding(
             padding: const EdgeInsets.only(right: 8, bottom: 8),
             child: KotvStableFocus(
@@ -787,12 +865,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           );
         }
+
         return [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: Wrap(
               children: [
-                for (final e in KotvVideoEq.presetLabels.entries) chip(e.key, e.value),
+                for (final e in KotvVideoEq.presetLabels.entries)
+                  chip(e.key, e.value),
               ],
             ),
           ),
@@ -804,7 +884,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               max: 100,
               divisions: 40,
               format: (v) => '${v.round()}',
-              onChanging: (v) => setSheet(() => _s['videoBrightness'] = '${v.round()}'),
+              onChanging: (v) =>
+                  setSheet(() => _s['videoBrightness'] = '${v.round()}'),
               onCommit: (v) => _set('videoBrightness', '${v.round()}'),
             ),
             _sheetSlider(
@@ -814,7 +895,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               max: 100,
               divisions: 40,
               format: (v) => '${v.round()}',
-              onChanging: (v) => setSheet(() => _s['videoContrast'] = '${v.round()}'),
+              onChanging: (v) =>
+                  setSheet(() => _s['videoContrast'] = '${v.round()}'),
               onCommit: (v) => _set('videoContrast', '${v.round()}'),
             ),
             _sheetSlider(
@@ -824,7 +906,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               max: 100,
               divisions: 40,
               format: (v) => '${v.round()}',
-              onChanging: (v) => setSheet(() => _s['videoSaturation'] = '${v.round()}'),
+              onChanging: (v) =>
+                  setSheet(() => _s['videoSaturation'] = '${v.round()}'),
               onCommit: (v) => _set('videoSaturation', '${v.round()}'),
             ),
             _sheetSlider(
@@ -834,7 +917,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               max: 100,
               divisions: 40,
               format: (v) => '${v.round()}',
-              onChanging: (v) => setSheet(() => _s['videoGamma'] = '${v.round()}'),
+              onChanging: (v) =>
+                  setSheet(() => _s['videoGamma'] = '${v.round()}'),
               onCommit: (v) => _set('videoGamma', '${v.round()}'),
             ),
             _sheetSlider(
@@ -844,7 +928,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               max: 100,
               divisions: 40,
               format: (v) => '${v.round()}',
-              onChanging: (v) => setSheet(() => _s['videoHue'] = '${v.round()}'),
+              onChanging: (v) =>
+                  setSheet(() => _s['videoHue'] = '${v.round()}'),
               onCommit: (v) => _set('videoHue', '${v.round()}'),
             ),
             _sheetSlider(
@@ -854,7 +939,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               max: 100,
               divisions: 40,
               format: (v) => '${v.round()}',
-              onChanging: (v) => setSheet(() => _s['videoTemperature'] = '${v.round()}'),
+              onChanging: (v) =>
+                  setSheet(() => _s['videoTemperature'] = '${v.round()}'),
               onCommit: (v) => _set('videoTemperature', '${v.round()}'),
             ),
             _sheetSlider(
@@ -864,7 +950,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               max: 100,
               divisions: 20,
               format: (v) => '${v.round()}',
-              onChanging: (v) => setSheet(() => _s['videoSharpness'] = '${v.round()}'),
+              onChanging: (v) =>
+                  setSheet(() => _s['videoSharpness'] = '${v.round()}'),
               onCommit: (v) => _set('videoSharpness', '${v.round()}'),
             ),
             _sheetSlider(
@@ -874,7 +961,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               max: 100,
               divisions: 40,
               format: (v) => '${v.round()}',
-              onChanging: (v) => setSheet(() => _s['videoShadow'] = '${v.round()}'),
+              onChanging: (v) =>
+                  setSheet(() => _s['videoShadow'] = '${v.round()}'),
               onCommit: (v) => _set('videoShadow', '${v.round()}'),
             ),
             Padding(
@@ -909,7 +997,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
                 'Exo Surface/Texture 均走原生调色（隧道/HDR 下不可用）；锐度/阴影在 Exo 为近似实现，MPV/FVP 更完整。播控内可按住预览原画。',
-                style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
+                style: TextStyle(
+                    color: KotvPalette.of(context).muted, fontSize: 12),
               ),
             ),
           ],
@@ -922,9 +1011,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     List<int> centerHz = const [60, 230, 910, 3600, 14000];
     if (kotvIsAndroid()) {
       try {
-        final raw = await const MethodChannel('kotv_exo').invokeMethod<dynamic>('getEqualizerCenters');
+        final raw = await const MethodChannel('kotv_exo')
+            .invokeMethod<dynamic>('getEqualizerCenters');
         if (raw is List && raw.isNotEmpty) {
-          centerHz = raw.map((e) => (e as num).toInt()).where((hz) => hz > 0).toList();
+          centerHz =
+              raw.map((e) => (e as num).toInt()).where((hz) => hz > 0).toList();
         }
       } catch (_) {}
     }
@@ -942,11 +1033,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           }
           return def;
         }
+
         Future<void> writeBands(Map<String, double> map) async {
-          final s = map.entries.map((e) => '${e.key}:${e.value.round()}').join(',');
+          final s =
+              map.entries.map((e) => '${e.key}:${e.value.round()}').join(',');
           await _set('audioEqBands', s);
           setSheet(() {});
         }
+
         const presetChips = <(String, String)>[
           ('off', '关闭'),
           ('natural', '自然'),
@@ -975,9 +1069,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           final p = KotvPalette.of(context);
           final on = audioEq == id;
           Future<void> pick() async {
-            await _set('audioEq', id, msg: id == 'off' ? '已关闭音频均衡' : '音频均衡：$label');
+            await _set('audioEq', id,
+                msg: id == 'off' ? '已关闭音频均衡' : '音频均衡：$label');
             setSheet(() {});
           }
+
           return Padding(
             padding: const EdgeInsets.only(right: 8, bottom: 8),
             child: KotvStableFocus(
@@ -996,8 +1092,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           );
         }
-        final dialogue = kotvAudioDialogueFromSettings({'audioDialogue': g('audioDialogue', '0')}).toDouble();
-        final channelMode = kotvAudioChannelModeFromSettings({'audioChannelMode': g('audioChannelMode', 'auto')});
+
+        final dialogue = kotvAudioDialogueFromSettings(
+            {'audioDialogue': g('audioDialogue', '0')}).toDouble();
+        final channelMode = kotvAudioChannelModeFromSettings(
+            {'audioChannelMode': g('audioChannelMode', 'auto')});
         final channelLabel = switch (channelMode) {
           'stereo' => '立体声',
           'mono' => '单声道',
@@ -1007,7 +1106,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         return [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child: Wrap(children: [for (final e in presetChips) chip(e.$1, e.$2)]),
+            child:
+                Wrap(children: [for (final e in presetChips) chip(e.$1, e.$2)]),
           ),
           _sheetSlider(
             label: '对白增强',
@@ -1016,12 +1116,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 100,
             divisions: 20,
             format: (v) => v <= 0 ? '关' : '${v.round()}',
-            onChanging: (v) => setSheet(() => _s['audioDialogue'] = '${v.round()}'),
-            onCommit: (v) => _set('audioDialogue', '${v.round()}', msg: '对白增强已更新'),
+            onChanging: (v) =>
+                setSheet(() => _s['audioDialogue'] = '${v.round()}'),
+            onCommit: (v) =>
+                _set('audioDialogue', '${v.round()}', msg: '对白增强已更新'),
           ),
           _sheetSlider(
             label: '声道平衡',
-            value: (double.tryParse(g('audioBalance', '0')) ?? 0).clamp(-100.0, 100.0),
+            value: (double.tryParse(g('audioBalance', '0')) ?? 0)
+                .clamp(-100.0, 100.0),
             min: -100,
             max: 100,
             divisions: 40,
@@ -1030,19 +1133,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               if (n == 0) return '居中';
               return n < 0 ? '左 ${-n}' : '右 $n';
             },
-            onChanging: (v) => setSheet(() => _s['audioBalance'] = '${v.round()}'),
-            onCommit: (v) => _set('audioBalance', '${v.round()}', msg: '声道平衡已更新'),
+            onChanging: (v) =>
+                setSheet(() => _s['audioBalance'] = '${v.round()}'),
+            onCommit: (v) =>
+                _set('audioBalance', '${v.round()}', msg: '声道平衡已更新'),
           ),
           _sheetNav(
             label: '声道模式',
             value: channelLabel,
             onTap: () async {
-              final picked = await pickChoice(context, title: '声道模式', current: channelMode, options: const [
-                ('自动', 'auto'),
-                ('立体声', 'stereo'),
-                ('单声道', 'mono'),
-                ('左右反转', 'reverse'),
-              ]);
+              final picked = await pickChoice(context,
+                  title: '声道模式',
+                  current: channelMode,
+                  options: const [
+                    ('自动', 'auto'),
+                    ('立体声', 'stereo'),
+                    ('单声道', 'mono'),
+                    ('左右反转', 'reverse'),
+                  ]);
               if (picked == null) return;
               await _set('audioChannelMode', picked, msg: '声道模式已更新');
               setSheet(() {});
@@ -1050,12 +1158,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           _sheetSlider(
             label: '音量稳定',
-            value: (double.tryParse(g('audioStability', '0')) ?? 0).clamp(0, 100),
+            value:
+                (double.tryParse(g('audioStability', '0')) ?? 0).clamp(0, 100),
             min: 0,
             max: 100,
             divisions: 20,
             format: (v) => v <= 0 ? '关' : '${v.round()}',
-            onChanging: (v) => setSheet(() => _s['audioStability'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['audioStability'] = '${v.round()}'),
             onCommit: (v) => _set('audioStability', '${v.round()}'),
           ),
           _sheetSlider(
@@ -1065,40 +1175,48 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 1200,
             divisions: 24,
             format: (v) => v <= 0 ? '0' : '+${(v / 100).toStringAsFixed(1)} dB',
-            onChanging: (v) => setSheet(() => _s['audioBoost'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['audioBoost'] = '${v.round()}'),
             onCommit: (v) => _set('audioBoost', '${v.round()}'),
           ),
           _sheetSlider(
             label: '前置衰减',
-            value: (double.tryParse(g('audioPreamp', '0')) ?? 0).clamp(-1200, 0),
+            value:
+                (double.tryParse(g('audioPreamp', '0')) ?? 0).clamp(-1200, 0),
             min: -1200,
             max: 0,
             divisions: 24,
             format: (v) => v >= 0 ? '0' : '${(v / 100).toStringAsFixed(1)} dB',
-            onChanging: (v) => setSheet(() => _s['audioPreamp'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['audioPreamp'] = '${v.round()}'),
             onCommit: (v) => _set('audioPreamp', '${v.round()}'),
           ),
           _sheetToggle(
             label: '响度归一',
-            value: kotvAudioLoudnessFromSettings({'audioLoudness': g('audioLoudness', 'false')}),
+            value: kotvAudioLoudnessFromSettings(
+                {'audioLoudness': g('audioLoudness', 'false')}),
             onChanged: (v) async {
-              await _set('audioLoudness', v ? 'true' : 'false', msg: v ? '响度归一已开启' : '响度归一已关闭');
+              await _set('audioLoudness', v ? 'true' : 'false',
+                  msg: v ? '响度归一已开启' : '响度归一已关闭');
               setSheet(() {});
             },
           ),
           _sheetSlider(
             label: '中置增益',
-            value: (double.tryParse(g('audioCenterGain', '0')) ?? 0).clamp(0, 1200),
+            value: (double.tryParse(g('audioCenterGain', '0')) ?? 0)
+                .clamp(0, 1200),
             min: 0,
             max: 1200,
             divisions: 24,
             format: (v) => v <= 0 ? '0' : '+${(v / 100).toStringAsFixed(1)} dB',
-            onChanging: (v) => setSheet(() => _s['audioCenterGain'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['audioCenterGain'] = '${v.round()}'),
             onCommit: (v) => _set('audioCenterGain', '${v.round()}'),
           ),
           _sheetSlider(
             label: '音画偏移',
-            value: (double.tryParse(g('audioOffsetMs', '0')) ?? 0).clamp(-10000, 10000),
+            value: (double.tryParse(g('audioOffsetMs', '0')) ?? 0)
+                .clamp(-10000, 10000),
             min: -10000,
             max: 10000,
             divisions: 200,
@@ -1107,8 +1225,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               if (n == 0) return '0 ms';
               return n > 0 ? '声滞后 ${n} ms' : '声超前 ${-n} ms';
             },
-            onChanging: (v) => setSheet(() => _s['audioOffsetMs'] = '${v.round()}'),
-            onCommit: (v) => _set('audioOffsetMs', '${v.round()}', msg: '音画偏移已更新'),
+            onChanging: (v) =>
+                setSheet(() => _s['audioOffsetMs'] = '${v.round()}'),
+            onCommit: (v) =>
+                _set('audioOffsetMs', '${v.round()}', msg: '音画偏移已更新'),
           ),
           if (audioEq == 'custom') ...[
             for (final e in freqs.entries)
@@ -1122,8 +1242,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 onChanging: (v) {
                   freqs[e.key] = v;
                   setSheet(() {
-                    _s['audioEqBands'] =
-                        freqs.entries.map((x) => '${x.key}:${x.value.round()}').join(',');
+                    _s['audioEqBands'] = freqs.entries
+                        .map((x) => '${x.key}:${x.value.round()}')
+                        .join(',');
                   });
                 },
                 onCommit: (v) {
@@ -1148,7 +1269,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
               '自定义频段优先使用本机 Equalizer 中心频率。直通开启时均衡/对白/声道效果不生效；播控内可按住试听原音。',
-              style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
+              style:
+                  TextStyle(color: KotvPalette.of(context).muted, fontSize: 12),
             ),
           ),
         ];
@@ -1160,12 +1282,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _showPlayerSubSheet(
       title: '字幕样式',
       buildChildren: (setSheet) {
-        final scale = (double.tryParse(g('subtitleFontScale', '1.0')) ?? 1.0).clamp(0.5, 2.0);
+        final scale = (double.tryParse(g('subtitleFontScale', '1.0')) ?? 1.0)
+            .clamp(0.5, 2.0);
         final pos = kotvSubtitlePosFromSettings(g('subtitlePos', '0'));
-        final border = (double.tryParse(g('subtitleBorderSize', '2')) ?? 2).clamp(0.0, 8.0);
+        final border = (double.tryParse(g('subtitleBorderSize', '2')) ?? 2)
+            .clamp(0.0, 8.0);
         final color = g('subtitleColor', '#FFFFFF');
         final borderColor = g('subtitleBorderColor', '#000000');
-        final styleMode = g('subtitleStyleMode', 'original').trim().toLowerCase();
+        final styleMode =
+            g('subtitleStyleMode', 'original').trim().toLowerCase();
         final styleLabel = switch (styleMode) {
           'original' => '原样',
           'system' => '系统',
@@ -1184,11 +1309,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '样式模式',
             value: styleLabel,
             onTap: () async {
-              final picked = await pickChoice(context, title: '字幕样式模式', current: styleMode, options: const [
-                ('原样（保留片源样式）', 'original'),
-                ('系统字幕样式', 'system'),
-                ('自定义', 'custom'),
-              ]);
+              final picked = await pickChoice(context,
+                  title: '字幕样式模式',
+                  current: styleMode,
+                  options: const [
+                    ('原样（保留片源样式）', 'original'),
+                    ('系统字幕样式', 'system'),
+                    ('自定义', 'custom'),
+                  ]);
               if (picked == null) return;
               await _set('subtitleStyleMode', picked, msg: '字幕样式模式已更新');
               setSheet(() {});
@@ -1198,13 +1326,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '描边类型',
             value: edgeLabel,
             onTap: () async {
-              final picked = await pickChoice(context, title: '字幕描边类型', current: edgeType, options: const [
-                ('无', 'none'),
-                ('描边', 'outline'),
-                ('阴影', 'shadow'),
-                ('凸起', 'raised'),
-                ('凹陷', 'depressed'),
-              ]);
+              final picked = await pickChoice(context,
+                  title: '字幕描边类型',
+                  current: edgeType,
+                  options: const [
+                    ('无', 'none'),
+                    ('描边', 'outline'),
+                    ('阴影', 'shadow'),
+                    ('凸起', 'raised'),
+                    ('凹陷', 'depressed'),
+                  ]);
               if (picked == null) return;
               await _set('subtitleEdgeType', picked);
               setSheet(() {});
@@ -1217,8 +1348,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 2.0,
             divisions: 15,
             format: (v) => v.toStringAsFixed(2),
-            onChanging: (v) => setSheet(() => _s['subtitleFontScale'] = v.toStringAsFixed(2)),
-            onCommit: (v) => _set('subtitleFontScale', v.toStringAsFixed(2), msg: '字幕字号已更新'),
+            onChanging: (v) =>
+                setSheet(() => _s['subtitleFontScale'] = v.toStringAsFixed(2)),
+            onCommit: (v) =>
+                _set('subtitleFontScale', v.toStringAsFixed(2), msg: '字幕字号已更新'),
           ),
           _sheetSlider(
             label: '垂直位置',
@@ -1227,8 +1360,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 30,
             divisions: 50,
             format: (v) => '${v.round()}',
-            onChanging: (v) => setSheet(() => _s['subtitlePos'] = '${v.round()}'),
-            onCommit: (v) => _set('subtitlePos', '${v.round()}', msg: '字幕位置已更新'),
+            onChanging: (v) =>
+                setSheet(() => _s['subtitlePos'] = '${v.round()}'),
+            onCommit: (v) =>
+                _set('subtitlePos', '${v.round()}', msg: '字幕位置已更新'),
           ),
           _sheetSlider(
             label: '描边宽度',
@@ -1237,17 +1372,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 8,
             divisions: 16,
             format: (v) => v.toStringAsFixed(1),
-            onChanging: (v) => setSheet(() => _s['subtitleBorderSize'] = v.toStringAsFixed(1)),
-            onCommit: (v) => _set('subtitleBorderSize', v.toStringAsFixed(1), msg: '字幕描边已更新'),
+            onChanging: (v) =>
+                setSheet(() => _s['subtitleBorderSize'] = v.toStringAsFixed(1)),
+            onCommit: (v) => _set('subtitleBorderSize', v.toStringAsFixed(1),
+                msg: '字幕描边已更新'),
           ),
           _sheetSlider(
             label: '阴影强度',
-            value: (double.tryParse(g('subtitleShadowStrength', '50')) ?? 50).clamp(0, 100),
+            value: (double.tryParse(g('subtitleShadowStrength', '50')) ?? 50)
+                .clamp(0, 100),
             min: 0,
             max: 100,
             divisions: 20,
             format: (v) => '${v.round()}',
-            onChanging: (v) => setSheet(() => _s['subtitleShadowStrength'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['subtitleShadowStrength'] = '${v.round()}'),
             onCommit: (v) => _set('subtitleShadowStrength', '${v.round()}'),
           ),
           _sheetNav(
@@ -1260,12 +1399,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
             onTap: () async {
               final cur = g('subtitleFont', 'default').trim().toLowerCase();
-              final picked = await pickChoice(context, title: '字幕字体', current: cur == 'sans-serif' ? 'sans' : (cur == 'monospace' ? 'mono' : cur), options: const [
-                ('默认', 'default'),
-                ('无衬线', 'sans'),
-                ('衬线', 'serif'),
-                ('等宽', 'mono'),
-              ]);
+              final picked = await pickChoice(context,
+                  title: '字幕字体',
+                  current: cur == 'sans-serif'
+                      ? 'sans'
+                      : (cur == 'monospace' ? 'mono' : cur),
+                  options: const [
+                    ('默认', 'default'),
+                    ('无衬线', 'sans'),
+                    ('衬线', 'serif'),
+                    ('等宽', 'mono'),
+                  ]);
               if (picked == null) return;
               await _set('subtitleFont', picked);
               setSheet(() {});
@@ -1280,10 +1424,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               return slash.isEmpty ? p : slash.last;
             }(),
             onTap: () async {
-              final picked = await pickChoice(context, title: '字幕字体文件', current: g('subtitleFontPath').isEmpty ? 'none' : 'file', options: const [
-                ('不使用外挂字体', 'none'),
-                ('选择字体文件…', 'file'),
-              ]);
+              final picked = await pickChoice(context,
+                  title: '字幕字体文件',
+                  current: g('subtitleFontPath').isEmpty ? 'none' : 'file',
+                  options: const [
+                    ('不使用外挂字体', 'none'),
+                    ('选择字体文件…', 'file'),
+                  ]);
               if (picked == null) return;
               if (picked == 'none') {
                 await _set('subtitleFontPath', '');
@@ -1297,37 +1444,44 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           _sheetSlider(
             label: '正文透明度',
-            value: (double.tryParse(g('subtitleTextOpacity', '100')) ?? 100).clamp(0, 100),
+            value: (double.tryParse(g('subtitleTextOpacity', '100')) ?? 100)
+                .clamp(0, 100),
             min: 0,
             max: 100,
             divisions: 20,
             format: (v) => '${v.round()}%',
-            onChanging: (v) => setSheet(() => _s['subtitleTextOpacity'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['subtitleTextOpacity'] = '${v.round()}'),
             onCommit: (v) => _set('subtitleTextOpacity', '${v.round()}'),
           ),
           _sheetSlider(
             label: '背景透明度',
-            value: (double.tryParse(g('subtitleBgOpacity', '100')) ?? 100).clamp(0, 100),
+            value: (double.tryParse(g('subtitleBgOpacity', '100')) ?? 100)
+                .clamp(0, 100),
             min: 0,
             max: 100,
             divisions: 20,
             format: (v) => '${v.round()}%',
-            onChanging: (v) => setSheet(() => _s['subtitleBgOpacity'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['subtitleBgOpacity'] = '${v.round()}'),
             onCommit: (v) => _set('subtitleBgOpacity', '${v.round()}'),
           ),
           _sheetSlider(
             label: '描边透明度',
-            value: (double.tryParse(g('subtitleEdgeOpacity', '100')) ?? 100).clamp(0, 100),
+            value: (double.tryParse(g('subtitleEdgeOpacity', '100')) ?? 100)
+                .clamp(0, 100),
             min: 0,
             max: 100,
             divisions: 20,
             format: (v) => '${v.round()}%',
-            onChanging: (v) => setSheet(() => _s['subtitleEdgeOpacity'] = '${v.round()}'),
+            onChanging: (v) =>
+                setSheet(() => _s['subtitleEdgeOpacity'] = '${v.round()}'),
             onCommit: (v) => _set('subtitleEdgeOpacity', '${v.round()}'),
           ),
           _sheetSlider(
             label: '时间偏移',
-            value: (double.tryParse(g('subtitleOffsetMs', '0')) ?? 0).clamp(-300000, 300000),
+            value: (double.tryParse(g('subtitleOffsetMs', '0')) ?? 0)
+                .clamp(-300000, 300000),
             min: -300000,
             max: 300000,
             divisions: 120,
@@ -1336,33 +1490,42 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               if (s == 0) return '0 s';
               return s > 0 ? '+$s s' : '$s s';
             },
-            onChanging: (v) => setSheet(() => _s['subtitleOffsetMs'] = '${v.round()}'),
-            onCommit: (v) => _set('subtitleOffsetMs', '${v.round()}', msg: '字幕偏移已更新'),
+            onChanging: (v) =>
+                setSheet(() => _s['subtitleOffsetMs'] = '${v.round()}'),
+            onCommit: (v) =>
+                _set('subtitleOffsetMs', '${v.round()}', msg: '字幕偏移已更新'),
           ),
           _sheetSlider(
             label: '副字幕位置',
-            value: (double.tryParse(g('subtitleSecondaryPos', '10')) ?? 10).clamp(0.0, 150.0),
+            value: (double.tryParse(g('subtitleSecondaryPos', '10')) ?? 10)
+                .clamp(0.0, 150.0),
             min: 0,
             max: 150,
             divisions: 30,
             format: (v) => '${v.round()}',
-            onChanging: (v) => setSheet(() => _s['subtitleSecondaryPos'] = '${v.round()}'),
-            onCommit: (v) => _set('subtitleSecondaryPos', '${v.round()}', msg: '副字幕位置已更新'),
+            onChanging: (v) =>
+                setSheet(() => _s['subtitleSecondaryPos'] = '${v.round()}'),
+            onCommit: (v) =>
+                _set('subtitleSecondaryPos', '${v.round()}', msg: '副字幕位置已更新'),
           ),
           _sheetNav(
             label: '字幕颜色',
             value: color,
             onTap: () async {
-              final picked = await pickChoice(context, title: '字幕颜色', current: color, options: const [
-                ('白色', '#FFFFFF'),
-                ('黄色', '#FFFF00'),
-                ('青色', '#00FFFF'),
-                ('绿色', '#00FF00'),
-                ('自定义…', '__custom__'),
-              ]);
+              final picked = await pickChoice(context,
+                  title: '字幕颜色',
+                  current: color,
+                  options: const [
+                    ('白色', '#FFFFFF'),
+                    ('黄色', '#FFFF00'),
+                    ('青色', '#00FFFF'),
+                    ('绿色', '#00FF00'),
+                    ('自定义…', '__custom__'),
+                  ]);
               if (picked == null) return;
               if (picked == '__custom__') {
-                await _prompt('字幕颜色', '#FFFFFF', color, (v) => _set('subtitleColor', v.trim()));
+                await _prompt('字幕颜色', '#FFFFFF', color,
+                    (v) => _set('subtitleColor', v.trim()));
               } else {
                 await _set('subtitleColor', picked);
               }
@@ -1373,15 +1536,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: '描边颜色',
             value: borderColor,
             onTap: () async {
-              final picked = await pickChoice(context, title: '描边颜色', current: borderColor, options: const [
-                ('黑色', '#000000'),
-                ('深灰', '#333333'),
-                ('无描边色', '#00000000'),
-                ('自定义…', '__custom__'),
-              ]);
+              final picked = await pickChoice(context,
+                  title: '描边颜色',
+                  current: borderColor,
+                  options: const [
+                    ('黑色', '#000000'),
+                    ('深灰', '#333333'),
+                    ('无描边色', '#00000000'),
+                    ('自定义…', '__custom__'),
+                  ]);
               if (picked == null) return;
               if (picked == '__custom__') {
-                await _prompt('描边颜色', '#000000', borderColor, (v) => _set('subtitleBorderColor', v.trim()));
+                await _prompt('描边颜色', '#000000', borderColor,
+                    (v) => _set('subtitleBorderColor', v.trim()));
               } else {
                 await _set('subtitleBorderColor', picked);
               }
@@ -1393,15 +1560,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             value: g('subtitleBgColor', '#00000000'),
             onTap: () async {
               final cur = g('subtitleBgColor', '#00000000');
-              final picked = await pickChoice(context, title: '字幕背景', current: cur, options: const [
-                ('透明', '#00000000'),
-                ('半透明黑', '#80000000'),
-                ('深黑', '#CC000000'),
-                ('自定义…', '__custom__'),
-              ]);
+              final picked = await pickChoice(context,
+                  title: '字幕背景',
+                  current: cur,
+                  options: const [
+                    ('透明', '#00000000'),
+                    ('半透明黑', '#80000000'),
+                    ('深黑', '#CC000000'),
+                    ('自定义…', '__custom__'),
+                  ]);
               if (picked == null) return;
               if (picked == '__custom__') {
-                await _prompt('字幕背景色', '#80000000', cur, (v) => _set('subtitleBgColor', v.trim()));
+                await _prompt('字幕背景色', '#80000000', cur,
+                    (v) => _set('subtitleBgColor', v.trim()));
               } else {
                 await _set('subtitleBgColor', picked);
               }
@@ -1417,7 +1588,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _showPlayerSubSheet(
       title: '默认倍速',
       buildChildren: (setSheet) {
-        final v = (double.tryParse(g('playerSpeed', '1.0')) ?? 1.0).clamp(0.1, 5.0);
+        final v =
+            (double.tryParse(g('playerSpeed', '1.0')) ?? 1.0).clamp(0.1, 5.0);
         return [
           _sheetSlider(
             label: '倍速',
@@ -1426,8 +1598,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 5.0,
             divisions: 49,
             format: (x) => '${x.toStringAsFixed(1)}×',
-            onChanging: (x) => setSheet(() => _s['playerSpeed'] = x.toStringAsFixed(1)),
-            onCommit: (x) => _set('playerSpeed', x.toStringAsFixed(1), msg: '默认倍速已更新'),
+            onChanging: (x) =>
+                setSheet(() => _s['playerSpeed'] = x.toStringAsFixed(1)),
+            onCommit: (x) =>
+                _set('playerSpeed', x.toStringAsFixed(1), msg: '默认倍速已更新'),
           ),
         ];
       },
@@ -1438,7 +1612,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _showPlayerSubSheet(
       title: '长按临时倍速',
       buildChildren: (setSheet) {
-        final v = (double.tryParse(g('playerSpeedLongPress', '2.0')) ?? 2.0).clamp(2.0, 5.0);
+        final v = (double.tryParse(g('playerSpeedLongPress', '2.0')) ?? 2.0)
+            .clamp(2.0, 5.0);
         return [
           _sheetSlider(
             label: '倍速',
@@ -1447,8 +1622,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             max: 5.0,
             divisions: 30,
             format: (x) => '${x.toStringAsFixed(1)}×',
-            onChanging: (x) => setSheet(() => _s['playerSpeedLongPress'] = x.toStringAsFixed(1)),
-            onCommit: (x) => _set('playerSpeedLongPress', x.toStringAsFixed(1), msg: '长按倍速已更新'),
+            onChanging: (x) => setSheet(
+                () => _s['playerSpeedLongPress'] = x.toStringAsFixed(1)),
+            onCommit: (x) => _set('playerSpeedLongPress', x.toStringAsFixed(1),
+                msg: '长按倍速已更新'),
           ),
         ];
       },
@@ -1496,7 +1673,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: p.dialogBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('播放缺省 User-Agent', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
+        title: Text('播放缺省 User-Agent',
+            style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
           width: 540,
           child: Column(
@@ -1519,20 +1697,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   hintStyle: TextStyle(color: p.muted, fontSize: 12),
                   filled: true,
                   fillColor: p.input,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none),
                 ),
               ),
             ],
           ),
         ),
         actions: [
-          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
-          KotvFocusAction(label: '确定', filled: true, onPressed: () => Navigator.pop(ctx, c.text.trim())),
+          KotvFocusAction(
+              label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx)),
+          KotvFocusAction(
+              label: '确定',
+              filled: true,
+              onPressed: () => Navigator.pop(ctx, c.text.trim())),
         ],
       ),
     );
     c.dispose();
-    if (v != null) await _set('ua', v, msg: v.isEmpty ? '已恢复默认 User-Agent' : 'User-Agent 已保存');
+    if (v != null)
+      await _set('ua', v,
+          msg: v.isEmpty ? '已恢复默认 User-Agent' : 'User-Agent 已保存');
   }
 
   Future<T?> _runTool<T>(String label, Future<T> Function() run) async {
@@ -1551,14 +1737,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  String _ellipsize(String s, [int n = 28]) => s.length <= n ? s : '${s.substring(0, n)}…';
+  String _ellipsize(String s, [int n = 28]) =>
+      s.length <= n ? s : '${s.substring(0, n)}…';
 
   String get _adMode {
     final on = g('adFilter', 'true');
     final enabled = on.isEmpty || on == 'true' || on == '1' || on == 'on';
     if (!enabled) return 'off';
     final cfg = g('m3u8FilterConfig');
-    if (cfg.contains('"mode":"mild"') || cfg.contains('"mode": "mild"')) return 'mild';
+    if (cfg.contains('"mode":"mild"') || cfg.contains('"mode": "mild"'))
+      return 'mild';
     // 旧版「暴力」配置 → 温和（只去断点）
     if (cfg.contains('"violentFilterModeFlag":true')) return 'mild';
     return 'smart';
@@ -1584,16 +1772,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _pickAd() async {
-    final v = await pickChoice(context, title: '广告过滤', current: _adMode, options: const [
-      ('关闭', 'off'),
-      ('智能（推荐）', 'smart'),
-      ('温和（仅去断点）', 'mild'),
-    ]);
+    final v = await pickChoice(context,
+        title: '广告过滤',
+        current: _adMode,
+        options: const [
+          ('关闭', 'off'),
+          ('智能（推荐）', 'smart'),
+          ('温和（仅去断点）', 'mild'),
+        ]);
     if (v != null) await _setAdMode(v);
   }
 
   Future<void> _checkUpdate() async {
-    final data = await _runTool('检查更新中', () => ref.read(apiProvider).tools('checkUpdate'));
+    final data = await _runTool(
+        '检查更新中', () => ref.read(apiProvider).tools('checkUpdate'));
     if (data == null || !mounted) return;
     final msg = '${data['message'] ?? ''}';
     setState(() => _status = msg);
@@ -1601,11 +1793,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _checkSpider() async {
-    final data = await _runTool('检测爬虫中', () => ref.read(apiProvider).tools('checkSpider'));
+    final data = await _runTool(
+        '检测爬虫中', () => ref.read(apiProvider).tools('checkSpider'));
     if (data == null || !mounted) return;
     final msg = '${data['message'] ?? ''}';
     setState(() => _status = msg);
-    final results = ((data['results'] as List?) ?? []).whereType<Map>().toList();
+    final results =
+        ((data['results'] as List?) ?? []).whereType<Map>().toList();
     if (results.isEmpty) {
       showAppNews(context, msg);
       return;
@@ -1618,14 +1812,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _clearCache() async {
-    final choice = await pickChoice(context, title: '清理缓存', current: 'all', options: const [
-      ('全部清理（推荐）', 'all'),
-      ('仅 JS / Python', 'script'),
-      ('仅 JAR', 'jar'),
-      ('仅磁力下载', 'magnet'),
-      ('仅日志', 'logs'),
-      ('杂项（HTTP/EPG/字幕等）', 'other'),
-    ]);
+    final choice = await pickChoice(context,
+        title: '清理缓存',
+        current: 'all',
+        options: const [
+          ('全部清理（推荐）', 'all'),
+          ('仅 JS / Python', 'script'),
+          ('仅 JAR', 'jar'),
+          ('仅磁力下载', 'magnet'),
+          ('仅日志', 'logs'),
+          ('杂项（HTTP/EPG/字幕等）', 'other'),
+        ]);
     if (choice == null || !mounted) return;
     final pal = KotvPalette.of(context);
     final ok = await showDialog<bool>(
@@ -1642,7 +1839,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           style: TextStyle(color: pal.muted),
         ),
         actions: [
-          KotvFocusAction(label: '取消', color: pal.muted, onPressed: () => Navigator.pop(ctx, false)),
+          KotvFocusAction(
+              label: '取消',
+              color: pal.muted,
+              onPressed: () => Navigator.pop(ctx, false)),
           KotvFocusAction(
             label: '清理',
             color: pal.fg,
@@ -1662,7 +1862,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       'logs': choice == 'all' || choice == 'logs',
       'other': choice == 'all' || choice == 'other',
     };
-    final data = await _runTool('正在清理缓存', () => ref.read(apiProvider).tools('clearCache', params));
+    final data = await _runTool(
+        '正在清理缓存', () => ref.read(apiProvider).tools('clearCache', params));
     // 引擎与 UI 均在同一数据根（如 %APPDATA%/KOTV）；另扫系统临时目录残留。
     try {
       await kotvClearFlutterEphemeral();
@@ -1742,7 +1943,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await _switchEngine('');
       if (!mounted) return;
       setState(() => _status = '已使用本机引擎');
-      showAppNews(context, '已切换为本机引擎\n${ref.read(engineLauncherProvider).baseUrl}');
+      showAppNews(
+          context, '已切换为本机引擎\n${ref.read(engineLauncherProvider).baseUrl}');
       return;
     }
 
@@ -1761,7 +1963,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final spiderOk = h['spiderOk'];
       if (spiderOk == false) {
         if (!mounted) return;
-        showAppNews(context, '引擎可达，但爬虫未就绪\n$normalized\n${h['spiderError'] ?? ''}');
+        showAppNews(
+            context, '引擎可达，但爬虫未就绪\n$normalized\n${h['spiderError'] ?? ''}');
       }
     } catch (e) {
       if (!mounted) return;
@@ -1823,7 +2026,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _engineLogin() async {
     // 兼容入口：对当前草稿/远端地址走同一套探测+登录
     final draft = _engineCtrl.text.trim();
-    if (draft.isEmpty || kotvIsLocalEngineBaseUrl(kotvNormalizeEngineBaseUrl(draft))) {
+    if (draft.isEmpty ||
+        kotvIsLocalEngineBaseUrl(kotvNormalizeEngineBaseUrl(draft))) {
       showAppNews(context, '请先填写远端引擎地址');
       return;
     }
@@ -1836,7 +2040,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _resetPair() async {
-    final data = await _runTool('重置配对码', () => ref.read(apiProvider).tools('resetPair'));
+    final data =
+        await _runTool('重置配对码', () => ref.read(apiProvider).tools('resetPair'));
     if (data == null || !mounted) return;
     setState(() {
       _pairCode = '${data['pairCode'] ?? ''}';
@@ -1853,7 +2058,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: p.dialogBg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text(type == 'keep' ? '发送收藏到设备' : '发送历史到设备', style: TextStyle(color: p.fg)),
+        title: Text(type == 'keep' ? '发送收藏到设备' : '发送历史到设备',
+            style: TextStyle(color: p.fg)),
         content: SizedBox(
           width: 420,
           child: Column(
@@ -1862,30 +2068,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               KotvTvTextField(
                 controller: hostCtrl,
                 style: TextStyle(color: p.fg),
-                decoration: InputDecoration(hintText: '192.168.1.100 或 IP:9978', hintStyle: TextStyle(color: p.muted)),
+                decoration: InputDecoration(
+                    hintText: '192.168.1.100 或 IP:9978',
+                    hintStyle: TextStyle(color: p.muted)),
               ),
               const SizedBox(height: 10),
               KotvTvTextField(
                 controller: pairCtrl,
                 style: TextStyle(color: p.fg),
-                decoration: InputDecoration(hintText: '对端配对码', hintStyle: TextStyle(color: p.muted)),
+                decoration: InputDecoration(
+                    hintText: '对端配对码', hintStyle: TextStyle(color: p.muted)),
               ),
             ],
           ),
         ),
         actions: [
-          KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx, false)),
-          KotvFocusAction(label: '发送', filled: true, onPressed: () => Navigator.pop(ctx, true)),
+          KotvFocusAction(
+              label: '取消',
+              color: p.muted,
+              onPressed: () => Navigator.pop(ctx, false)),
+          KotvFocusAction(
+              label: '发送',
+              filled: true,
+              onPressed: () => Navigator.pop(ctx, true)),
         ],
       ),
     );
     if (ok != true) return;
     final typeTrim = type.trim();
-    final data = await _runTool('正在发送', () => ref.read(apiProvider).tools('syncSend', {
-          'host': hostCtrl.text.trim(),
-          'pair': pairCtrl.text.trim(),
-          'type': typeTrim,
-        }));
+    final data = await _runTool(
+        '正在发送',
+        () => ref.read(apiProvider).tools('syncSend', {
+              'host': hostCtrl.text.trim(),
+              'pair': pairCtrl.text.trim(),
+              'type': typeTrim,
+            }));
     if (data == null || !mounted) return;
     setState(() => _status = '${data['message'] ?? '已发送'}');
   }
@@ -1908,7 +2125,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final dir = await getApplicationDocumentsDirectory();
     final def = '${dir.path}${Platform.pathSeparator}kotv-backup.json.gz';
     await _prompt('备份文件路径', def, def, (path) async {
-      final data = await _runTool('正在恢复', () => ref.read(apiProvider).tools('backupImport', {'path': path}));
+      final data = await _runTool('正在恢复',
+          () => ref.read(apiProvider).tools('backupImport', {'path': path}));
       if (data == null || !mounted) return;
       // backupImport 已写入引擎 SQLite；Flutter 无业务落盘，只需刷新。
       setState(() => _status = '${data['message'] ?? '备份已恢复'}');
@@ -1997,9 +2215,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         try {
           final api = ref.read(apiProvider);
           await api.setHome(key);
-          if (mounted) {
-            await kotvClearImageMemory(context: context, ref: ref);
-          }
           // setHome 只改当前站。首页请求放在遮罩里，爬虫在这一步执行。
           await api.home();
           ref.invalidate(configProvider);
@@ -2014,9 +2229,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Future<void> _showRuntime(EngineLauncher launcher, AsyncValue<Map<String, dynamic>> cfg) async {
-    final buf = StringBuffer('KO影视 $_version\n引擎 ${launcher.baseUrl}\n遥控端口 $_port\n');
-    buf.writeln('ready=${cfg.maybeWhen(data: (c) => c['ready'], orElse: () => false)}');
+  Future<void> _showRuntime(
+      EngineLauncher launcher, AsyncValue<Map<String, dynamic>> cfg) async {
+    final buf =
+        StringBuffer('KO影视 $_version\n引擎 ${launcher.baseUrl}\n遥控端口 $_port\n');
+    buf.writeln(
+        'ready=${cfg.maybeWhen(data: (c) => c['ready'], orElse: () => false)}');
     for (final line in formatKotvRuntimeLines(_runtime)) {
       buf.writeln(line);
     }
@@ -2050,9 +2268,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       orElse: () => <SiteInfo>[],
     );
 
-    final playerVal = kotvClampPlayerVal(g('player', kotvDefaultVodPlayer()), live: false);
+    final playerVal =
+        kotvClampPlayerVal(g('player', kotvDefaultVodPlayer()), live: false);
     final playerLabel = flutterPlayerLabel(playerVal);
-    final livePlayerVal = kotvClampPlayerVal(g('playerLive', kotvDefaultLivePlayer()), live: true);
+    final livePlayerVal = kotvClampPlayerVal(
+        g('playerLive', kotvDefaultLivePlayer()),
+        live: true);
     final livePlayerLabel = flutterPlayerLabel(livePlayerVal);
     final speed = g('playerSpeed', '1.0');
     final scale = g('playerScale', 'default');
@@ -2084,15 +2305,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           '4:3': '4:3',
         }[scaleLive] ??
         scaleLive;
-    final decodeLabel = {'auto': '自动', 'soft': '软解码', 'hard': '硬解码'}[decode] ?? decode;
+    final decodeLabel =
+        {'auto': '自动', 'soft': '软解码', 'hard': '硬解码'}[decode] ?? decode;
     final renderLabel = kotvPlayerRenderLabel(render);
-    final failoverLabel = (playerFailover == 'off' || playerFailover == 'false') ? '关闭' : '自动';
-    final liveChangeLabel = (liveAutoChange == 'false' || liveAutoChange == 'off') ? '关闭' : '开启';
-    final adLabel = {'off': '关闭', 'smart': '智能', 'mild': '温和', 'on': '智能'}[ad] ?? ad;
-    final themeLabel = {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
-    final audioPassThrough = kotvSettingsFlag(g('audioPassThrough', 'true'), def: true);
+    final failoverLabel =
+        (playerFailover == 'off' || playerFailover == 'false') ? '关闭' : '自动';
+    final liveChangeLabel =
+        (liveAutoChange == 'false' || liveAutoChange == 'off') ? '关闭' : '开启';
+    final adLabel =
+        {'off': '关闭', 'smart': '智能', 'mild': '温和', 'on': '智能'}[ad] ?? ad;
+    final themeLabel =
+        {'dark': '深色', 'light': '浅色', 'system': '跟随系统'}[theme] ?? theme;
+    final audioPassThrough =
+        kotvSettingsFlag(g('audioPassThrough', 'true'), def: true);
     final videoEq = g('videoEq', 'off').trim().toLowerCase();
-    final videoEqLabel = KotvVideoEq.presetLabels[videoEq == 'on' ? 'custom' : videoEq] ?? '关闭';
+    final videoEqLabel =
+        KotvVideoEq.presetLabels[videoEq == 'on' ? 'custom' : videoEq] ?? '关闭';
     final audioEq = g('audioEq', 'off').trim().toLowerCase();
     final audioEqLabel = switch (audioEq) {
       'natural' => '自然',
@@ -2113,16 +2341,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // 全平台：点播/直播任一选了内置 MPV 才露出 MPV 相关项
     final usesMpv = kotvEmbedBackend(playerVal) == KotvEmbedBackend.mpv ||
         kotvEmbedBackend(livePlayerVal) == KotvEmbedBackend.mpv;
-    final showMpvOpts = usesMpv && (kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS());
+    final showMpvOpts =
+        usesMpv && (kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS());
     final showMpvVulkan = usesMpv &&
-        ((kotvIsDesktop() || kotvIsIOS()) || (kotvIsAndroid() && _androidVulkanOk));
+        ((kotvIsDesktop() || kotvIsIOS()) ||
+            (kotvIsAndroid() && _androidVulkanOk));
     final showMpvGpuNext = usesMpv && kotvIsAndroid();
     final showMpvTls = usesMpv && kotvIsAndroid();
     final canPickPlayer = kotvCanSwitchPlayer(live: false);
     final canPickLivePlayer = kotvCanSwitchPlayer(live: true);
-    final playerUnavailableHint = kIsWeb
-        ? 'Web 端仅支持浏览器 HTML5 播放'
-        : '当前客户端无法切换内置播放器';
+    final playerUnavailableHint =
+        kIsWeb ? 'Web 端仅支持浏览器 HTML5 播放' : '当前客户端无法切换内置播放器';
     final lanHintIp = _deviceIp.isNotEmpty ? _deviceIp : '<本机IP>';
 
     return Column(
@@ -2131,7 +2360,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           onBack: () => kotvPageBack(ref),
           onSearch: () => goKotvPage(ref, KotvPage.search),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
-          onNews: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://$lanHintIp:$_port/\n（Web 包为客户端；普通引擎为遥控。遥控见 /remote/）'),
+          onNews: () => showAppNews(context,
+              '同一局域网内浏览器打开\nhttp://$lanHintIp:$_port/\n（Web 包为客户端；普通引擎为遥控。遥控见 /remote/）'),
           title: '设置',
         ),
         if (_status.isNotEmpty)
@@ -2140,7 +2370,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             child: Builder(builder: (context) {
               final p = KotvPalette.of(context);
               return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: p.pillBg,
                   borderRadius: BorderRadius.circular(8),
@@ -2154,10 +2385,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         child: SizedBox(
                           width: 14,
                           height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: p.primary),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: p.primary),
                         ),
                       ),
-                    Expanded(child: Text(_status, style: TextStyle(color: p.muted, fontSize: 13))),
+                    Expanded(
+                        child: Text(_status,
+                            style: TextStyle(color: p.muted, fontSize: 13))),
                     TvFocus(
                       onPressed: () => setState(() => _status = ''),
                       borderRadius: 12,
@@ -2174,18 +2408,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         Expanded(
           child: _loading
-              ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+              ? Center(
+                  child: CircularProgressIndicator(
+                      color: KotvPalette.of(context).primary))
               : ListView(
                   padding: const EdgeInsets.fromLTRB(24, 14, 24, 40),
                   children: [
                     const KotvSettingsSectionTitle('数据源'),
                     KotvSettingsCard(children: [
-                      KotvSettingsWideTile(label: '首页数据源', value: homeName, onTap: () => _pickHome(sites)),
+                      KotvSettingsWideTile(
+                          label: '首页数据源',
+                          value: homeName,
+                          onTap: () => _pickHome(sites)),
                       KotvSettingsGrid(children: [
                         KotvSettingsCell(
                           label: '点播源',
                           value: () {
-                            final desc = _vodDesc.trim().isNotEmpty ? _vodDesc.trim() : g('vod');
+                            final desc = _vodDesc.trim().isNotEmpty
+                                ? _vodDesc.trim()
+                                : g('vod');
                             return desc.isEmpty ? '未配置' : desc;
                           }(),
                           onTap: () async {
@@ -2201,7 +2442,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '直播源',
                           value: () {
-                            final desc = _liveDesc.trim().isNotEmpty ? _liveDesc.trim() : g('live');
+                            final desc = _liveDesc.trim().isNotEmpty
+                                ? _liveDesc.trim()
+                                : g('live');
                             return desc.isEmpty ? '未配置' : desc;
                           }(),
                           onTap: () async {
@@ -2259,20 +2502,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         if (!kIsWeb)
                           KotvSettingsCell(
                             label: '引擎地址',
-                            value: _engineCtrl.text.isNotEmpty ? _engineCtrl.text : launcher.baseUrl,
+                            value: _engineCtrl.text.isNotEmpty
+                                ? _engineCtrl.text
+                                : launcher.baseUrl,
                             onTap: () => _prompt(
                               '引擎地址（http / https）',
                               'http://192.168.1.8:9978 或 https://engine.example.com',
-                              _engineCtrl.text.isEmpty ? launcher.baseUrl : _engineCtrl.text,
+                              _engineCtrl.text.isEmpty
+                                  ? launcher.baseUrl
+                                  : _engineCtrl.text,
                               _applyEngineUrl,
                             ),
                           ),
                         if (!kIsWeb)
                           KotvSettingsCell(
-                            label: kotvIsLocalEngineBaseUrl(launcher.baseUrl) ? '远端登录' : '远端账号',
+                            label: kotvIsLocalEngineBaseUrl(launcher.baseUrl)
+                                ? '远端登录'
+                                : '远端账号',
                             value: kotvIsLocalEngineBaseUrl(launcher.baseUrl)
                                 ? '未连接'
-                                : (_remoteUser.isNotEmpty ? '$_remoteUser · 退出' : '退出'),
+                                : (_remoteUser.isNotEmpty
+                                    ? '$_remoteUser · 退出'
+                                    : '退出'),
                             onTap: () async {
                               if (!kotvIsLocalEngineBaseUrl(launcher.baseUrl)) {
                                 await _logoutRemote();
@@ -2290,8 +2541,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           label: '点播播放器',
                           value: playerLabel,
                           onTap: canPickPlayer
-                              ? () => _pick('点播播放器', 'player', kotvVodPlayerOptions(), msg: '点播播放器已切换')
-                              : () => showAppNews(context, playerUnavailableHint),
+                              ? () => _pick(
+                                  '点播播放器', 'player', kotvVodPlayerOptions(),
+                                  msg: '点播播放器已切换')
+                              : () =>
+                                  showAppNews(context, playerUnavailableHint),
                         ),
                         KotvSettingsCell(
                           label: '直播播放器',
@@ -2303,7 +2557,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                     kotvLivePlayerOptions(),
                                     msg: '直播播放器已切换',
                                   )
-                              : () => showAppNews(context, playerUnavailableHint),
+                              : () =>
+                                  showAppNews(context, playerUnavailableHint),
                         ),
                         KotvSettingsCell(
                           label: '解码方式',
@@ -2314,8 +2569,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ('硬解码', 'hard'),
                           ]),
                         ),
+                        KotvSettingsCell(
+                          label: '海报尺寸',
+                          value: _posterSizeLabel(g('size', '2')),
+                          onTap: () => _pick(
+                              '海报尺寸',
+                              'size',
+                              const [
+                                ('小', '0'),
+                                ('中', '1'),
+                                ('大', '2'),
+                                ('特大', '3'),
+                              ],
+                              msg: '海报尺寸已保存'),
+                        ),
                         if (kotvIsAndroid() &&
-                            (kotvPlayerRenderApplies(playerVal) || kotvPlayerRenderApplies(livePlayerVal)))
+                            (kotvPlayerRenderApplies(playerVal) ||
+                                kotvPlayerRenderApplies(livePlayerVal)))
                           KotvSettingsCell(
                             label: '渲染方式',
                             value: renderLabel,
@@ -2331,10 +2601,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               );
                               if (v == null) return;
                               await _set('playerRender', v);
-                              if (v == 'texture' && g('exoTunneling') == 'true') {
-                                await _set('exoTunneling', 'false', msg: 'Texture 已关隧道');
+                              if (v == 'texture' &&
+                                  g('exoTunneling') == 'true') {
+                                await _set('exoTunneling', 'false',
+                                    msg: 'Texture 已关隧道');
                               } else {
-                                setState(() => _status = '仅 Android Exo / 原生 MPV / FVP 生效，已保存');
+                                setState(() => _status =
+                                    '仅 Android Exo / 原生 MPV / FVP 生效，已保存');
                               }
                             },
                           ),
@@ -2401,7 +2674,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '自动切换播放器',
                           value: failoverLabel,
-                          onTap: () => _pick('自动切换播放器', 'playerFailover', const [
+                          onTap: () =>
+                              _pick('自动切换播放器', 'playerFailover', const [
                             ('自动（黑屏/停滞时换播放器）', 'auto'),
                             ('关闭（只用所选播放器）', 'off'),
                           ]),
@@ -2416,25 +2690,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: '跨分组换台',
-                          value: (g('liveAcross', 'true') == 'false') ? '关闭' : '开启',
+                          value: (g('liveAcross', 'true') == 'false')
+                              ? '关闭'
+                              : '开启',
                           onTap: () => unawaited(_set(
                             'liveAcross',
-                            g('liveAcross', 'true') == 'false' ? 'true' : 'false',
+                            g('liveAcross', 'true') == 'false'
+                                ? 'true'
+                                : 'false',
                             msg: '跨分组换台已更新',
                           )),
                         ),
                         KotvSettingsCell(
                           label: '换台方向反转',
-                          value: (g('liveInvert', 'false') == 'true') ? '开启' : '关闭',
+                          value: (g('liveInvert', 'false') == 'true')
+                              ? '开启'
+                              : '关闭',
                           onTap: () => unawaited(_set(
                             'liveInvert',
-                            g('liveInvert', 'false') == 'true' ? 'false' : 'true',
+                            g('liveInvert', 'false') == 'true'
+                                ? 'false'
+                                : 'true',
                             msg: '换台方向已更新',
                           )),
                         ),
                         KotvSettingsCell(
                           label: '开机进直播',
-                          value: (g('bootLive', 'false') == 'true') ? '开启' : '关闭',
+                          value:
+                              (g('bootLive', 'false') == 'true') ? '开启' : '关闭',
                           onTap: () => unawaited(_set(
                             'bootLive',
                             g('bootLive', 'false') == 'true' ? 'false' : 'true',
@@ -2443,10 +2726,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         KotvSettingsCell(
                           label: '预加载下一集',
-                          value: (g('preloadNextEpisode', 'false') == 'true') ? '开启' : '关闭',
+                          value: (g('preloadNextEpisode', 'false') == 'true')
+                              ? '开启'
+                              : '关闭',
                           onTap: () => unawaited(_set(
                             'preloadNextEpisode',
-                            g('preloadNextEpisode', 'false') == 'true' ? 'false' : 'true',
+                            g('preloadNextEpisode', 'false') == 'true'
+                                ? 'false'
+                                : 'true',
                             msg: '预加载下一集已更新',
                           )),
                         ),
@@ -2498,7 +2785,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     const KotvSettingsSectionTitle('功能'),
                     KotvSettingsCard(children: [
                       KotvSettingsGrid(children: [
-                        KotvSettingsCell(label: '广告过滤', value: adLabel, onTap: _pickAd),
+                        KotvSettingsCell(
+                            label: '广告过滤', value: adLabel, onTap: _pickAd),
                         KotvSettingsCell(
                           label: '弹幕',
                           value: danOn ? '开启' : '关闭',
@@ -2507,35 +2795,47 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '无痕模式',
                           value: incognito ? '开启' : '关闭',
-                          onTap: () => _set('incognito', incognito ? 'false' : 'true', msg: incognito ? '无痕已关闭' : '无痕已开启'),
+                          onTap: () => _set(
+                              'incognito', incognito ? 'false' : 'true',
+                              msg: incognito ? '无痕已关闭' : '无痕已开启'),
                         ),
                         KotvSettingsCell(
                           label: '投屏接收',
                           value: dmr ? '开启' : '关闭',
-                          onTap: () => _set('dlnaRenderer', dmr ? 'false' : 'true', msg: dmr ? '已关闭 DLNA 被投端' : '已开启 DLNA 被投端'),
+                          onTap: () => _set(
+                              'dlnaRenderer', dmr ? 'false' : 'true',
+                              msg: dmr ? '已关闭 DLNA 被投端' : '已开启 DLNA 被投端'),
                         ),
-                        KotvSettingsCell(label: '投屏', value: 'DLNA', onTap: _cast),
+                        KotvSettingsCell(
+                            label: '投屏', value: 'DLNA', onTap: _cast),
                         KotvSettingsCell(
                           label: '播放缺省 UA',
-                          value: g('ua').isEmpty ? '默认（列表未带时）' : _ellipsize(g('ua'), 22),
+                          value: g('ua').isEmpty
+                              ? '默认（列表未带时）'
+                              : _ellipsize(g('ua'), 22),
                           onTap: _editUa,
                         ),
                         KotvSettingsCell(
                           label: 'Assrt Token',
                           value: g('assrtToken').isEmpty ? '未配置' : '已配置',
-                          onTap: () => _prompt('Assrt Token', 'token', g('assrtToken'), (v) => _set('assrtToken', v)),
+                          onTap: () => _prompt('Assrt Token', 'token',
+                              g('assrtToken'), (v) => _set('assrtToken', v)),
                         ),
                         KotvSettingsCell(
                           label: 'Web / 遥控',
-                          value: _deviceIp.isNotEmpty ? '$_deviceIp:$_port' : ':$_port',
-                          onTap: () => showAppNews(context, '同一局域网内浏览器打开\nhttp://$lanHintIp:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
+                          value: _deviceIp.isNotEmpty
+                              ? '$_deviceIp:$_port'
+                              : ':$_port',
+                          onTap: () => showAppNews(context,
+                              '同一局域网内浏览器打开\nhttp://$lanHintIp:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
                         ),
                         KotvSettingsCell(
                           label: '用户管理',
                           value: '管理员',
                           onTap: () {
                             Navigator.of(context).push(
-                              MaterialPageRoute<void>(builder: (_) => const UserAdminScreen()),
+                              MaterialPageRoute<void>(
+                                  builder: (_) => const UserAdminScreen()),
                             );
                           },
                         ),
@@ -2547,23 +2847,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '选择主题',
                           value: themeLabel,
-                          onTap: () => _pick('主题', 'theme', const [
-                            ('深色', 'dark'),
-                            ('浅色', 'light'),
-                            ('跟随系统', 'system'),
-                          ], msg: '主题已保存'),
+                          onTap: () => _pick(
+                              '主题',
+                              'theme',
+                              const [
+                                ('深色', 'dark'),
+                                ('浅色', 'light'),
+                                ('跟随系统', 'system'),
+                              ],
+                              msg: '主题已保存'),
                         ),
-                        KotvSettingsCell(label: '换张壁纸', value: _wallLabel(wall), onTap: _pickWall),
+                        KotvSettingsCell(
+                            label: '换张壁纸',
+                            value: _wallLabel(wall),
+                            onTap: _pickWall),
                         KotvSettingsCell(label: '重置壁纸', onTap: _resetWall),
                       ]),
                     ]),
                     const KotvSettingsSectionTitle('隐私与同步'),
                     KotvSettingsCard(children: [
                       KotvSettingsGrid(columns: 4, children: [
-                        KotvSettingsCell(label: '配对码', value: _pairCode.isEmpty ? '查看' : _pairCode, onTap: _showPair),
+                        KotvSettingsCell(
+                            label: '配对码',
+                            value: _pairCode.isEmpty ? '查看' : _pairCode,
+                            onTap: _showPair),
                         KotvSettingsCell(label: '重置配对码', onTap: _resetPair),
-                        KotvSettingsCell(label: '发送历史', onTap: () => _syncSend('history')),
-                        KotvSettingsCell(label: '发送收藏', onTap: () => _syncSend('keep')),
+                        KotvSettingsCell(
+                            label: '发送历史', onTap: () => _syncSend('history')),
+                        KotvSettingsCell(
+                            label: '发送收藏', onTap: () => _syncSend('keep')),
                       ]),
                     ]),
                     const KotvSettingsSectionTitle('更多'),
@@ -2571,19 +2883,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       KotvSettingsGrid(columns: 4, children: [
                         KotvSettingsCell(
                           label: '更新地址',
-                          value: g('updateUrl').isEmpty ? '未配置' : g('updateUrl'),
-                          onTap: () => _prompt('更新地址', 'version.json URL', g('updateUrl'), (v) => _set('updateUrl', v)),
+                          value:
+                              g('updateUrl').isEmpty ? '未配置' : g('updateUrl'),
+                          onTap: () => _prompt('更新地址', 'version.json URL',
+                              g('updateUrl'), (v) => _set('updateUrl', v)),
                         ),
                         KotvSettingsCell(label: '数据备份', onTap: _backupExport),
                         KotvSettingsCell(label: '恢复备份', onTap: _backupImport),
                         KotvSettingsCell(label: '清理缓存', onTap: _clearCache),
-                        if (!Platform.isIOS) KotvSettingsCell(label: '检测爬虫', onTap: _checkSpider),
-                        KotvSettingsCell(label: '检查更新', value: _version, onTap: _checkUpdate),
-                        KotvSettingsCell(label: '运行库', onTap: () => _showRuntime(launcher, cfg)),
+                        if (!Platform.isIOS)
+                          KotvSettingsCell(label: '检测爬虫', onTap: _checkSpider),
+                        KotvSettingsCell(
+                            label: '检查更新',
+                            value: _version,
+                            onTap: _checkUpdate),
+                        KotvSettingsCell(
+                            label: '运行库',
+                            onTap: () => _showRuntime(launcher, cfg)),
                         KotvSettingsCell(
                           label: '关于',
                           value: 'KO影视',
-                          onTap: () => showAppNews(context, 'KO影视 Flutter $_version\n引擎端口 $_port'),
+                          onTap: () => showAppNews(
+                              context, 'KO影视 Flutter $_version\n引擎端口 $_port'),
                         ),
                       ]),
                     ]),

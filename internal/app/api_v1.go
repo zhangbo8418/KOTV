@@ -93,7 +93,7 @@ func (a *App) APIGetConfig() map[string]any {
 			"searchable": s.IsSearchable(),
 			"changeable": s.IsChangeable(),
 			"indexs":     s.IsIndex(),
-			"style":      styleTypeOf(s.Style),
+			"style":      siteStyleDTO(s.Style),
 			"home":       s.Key == home.Key,
 		})
 	}
@@ -120,10 +120,20 @@ func (a *App) APIGetConfig() map[string]any {
 
 func (a *App) APILoadConfig(source string) error {
 	cfg, sites, sess := a.scope()
-	// 先停旧运行时，再加载新源。失败时内存里仍是旧配置。
-	sites.InvalidateLoads()
+	prev := strings.TrimSpace(cfg.API().Spider)
+	// 清缓存和爬虫实例。jar 地址没变时不杀进程；加载失败时内存里仍是旧配置。
+	sites.DropContentCache()
+	sites.SoftCancelPending()
+	spider.DropCallerInstances()
 	if err := cfg.LoadFromSource(source); err != nil {
 		return err
+	}
+	next := strings.TrimSpace(cfg.API().Spider)
+	if config.SpiderSpecChanged(prev, next) {
+		sites.InvalidateLoads()
+		if next != "" {
+			_ = spider.LoadJar(next, cfg.API().URL)
+		}
 	}
 	a.finishConfigLoad(cfg, sess, source)
 	return nil
@@ -224,7 +234,7 @@ func (a *App) APIHome() (map[string]any, error) {
 		"site":  home.Key,
 		"class": typesDTO(res.Types),
 		"list":  vodsDTO(res.List, home.Key),
-		"style": styleTypeOf(home.Style),
+		"style": model.PageViewStyle(res.List, home.Style).DTO(),
 	}, nil
 }
 
@@ -250,7 +260,7 @@ func (a *App) APICategory(tid, pg string, extend map[string]string, siteKey stri
 		"pg":        pg,
 		"pagecount": res.PageCount.Value,
 		"list":      vodsDTO(res.List, used.Key),
-		"style":     styleTypeOf(used.Style),
+		"style":     model.PageViewStyle(res.List, used.Style).DTO(),
 		"filters":   filtersDTO(sites.FiltersForCategory(tid)),
 	}, nil
 }
@@ -861,11 +871,22 @@ func filtersDTO(filters []model.Filter) []map[string]any {
 	return out
 }
 
-func styleTypeOf(s *model.Style) string {
-	if s == nil {
-		return ""
+func siteStyleDTO(s *model.Style) map[string]any {
+	st, ok := model.StyleView(s)
+	if !ok {
+		st = model.RectView()
 	}
-	return strings.TrimSpace(s.Type.String())
+	return st.DTO()
+}
+
+func vodStyleDTO(v model.Vod) map[string]any {
+	fb := model.RectView()
+	if v.Site != nil {
+		if st, ok := model.StyleView(v.Site.Style); ok {
+			fb = st
+		}
+	}
+	return v.ResolveStyle(fb).DTO()
 }
 
 func exposeResourceURL(raw string) string {
@@ -890,7 +911,7 @@ func vodsDTO(list []model.Vod, siteKey string) []map[string]any {
 			"vod_tag":     v.VodTag,
 			"cate":        v.Cate.String(),
 			"is_folder":   vodLooksLikeFolder(v),
-			"style":       styleTypeOf(v.Style),
+			"style":       vodStyleDTO(v),
 		})
 	}
 	return out
@@ -1214,7 +1235,7 @@ func (a *App) APIGetSettings() map[string]any {
 	cfg, _, sess := a.scope()
 	keys := []settings.Type{
 		settings.VOD, settings.Home, settings.LIVE, settings.Theme, settings.Player, settings.PlayerLive,
-		settings.Proxy, settings.PlayerSpeed, settings.PlayerScale, settings.PlayerDecode,
+		settings.Proxy, settings.PlayerSpeed, settings.PlayerScale, settings.PosterSize, settings.PlayerDecode,
 		settings.PlayerRender,
 		settings.PlayerFailover,
 		settings.PlayerVolume, settings.PlayerAmbient, settings.PlayerStableVolume,

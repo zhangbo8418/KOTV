@@ -33,12 +33,10 @@ class KotvPosterNetImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final w = (designWidth * dpr).round().clamp(1, 720);
-    final h = (designHeight * dpr).round().clamp(1, 960);
     return KotvNetworkImage(
       pic,
       fit: fit,
       cacheWidth: w,
-      cacheHeight: h,
       singleFrame: true,
       gaplessPlayback: false,
       errorBuilder: errorBuilder,

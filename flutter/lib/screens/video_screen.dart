@@ -11,13 +11,13 @@ import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
-import '../util/kotv_image_cache.dart';
 import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
 import '../widgets/poster_card.dart';
+import '../vod/grid_style.dart';
 import '../vod/list_style.dart';
 import '../vod/vod_open.dart';
 import 'detail_screen.dart';
@@ -39,8 +39,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   bool _loadingMore = false;
   final _items = <VodItem>[];
   bool _listStyle = false;
+  KotvGridStyle _gridStyle = const KotvGridStyle();
   List<CategoryType> _types = [];
   List<CategoryFilter> _filters = [];
+
   /// 筛选行默认收起；再点当前分类标题才展开。
   bool _filtersExpanded = false;
   final Map<String, String> _extend = {};
@@ -55,8 +57,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   List<VodItem> _keeps = [];
   final ScrollController _scroll = ScrollController();
   int _loadGen = 0;
+
   /// 首屏 autofill 连续续页计数（触底用户滚动不计入）。
   int _autofillStreak = 0;
+
   /// 合并并发 _reload，避免 bootstrap / epoch / 重试叠两次拉仓。
   Future<void>? _reloadFlight;
   RemoteBridge? _boundRemote;
@@ -167,7 +171,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final source = '${cfg['source'] ?? ''}'.trim();
     if (source.isNotEmpty) return false;
     final err = '${cfg['error'] ?? ''}';
-    return err.isEmpty || err.contains('未配置') || err.contains('点播源') || err.contains('请输入');
+    return err.isEmpty ||
+        err.contains('未配置') ||
+        err.contains('点播源') ||
+        err.contains('请输入');
   }
 
   /// 等到 ready，或确认无源；有源加载中则继续等。
@@ -278,9 +285,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           _items.clear();
           _loading = false;
           // 有源却未 ready：显示错误/重试，不要伪装成「未配置」
-          _statusMsg = source.isEmpty
-              ? null
-              : (err.isNotEmpty ? err : '点播源加载超时，请重试');
+          _statusMsg =
+              source.isEmpty ? null : (err.isNotEmpty ? err : '点播源加载超时，请重试');
         });
         return;
       }
@@ -291,7 +297,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         final lower = source.toLowerCase();
         if (lower.startsWith('http://') || lower.startsWith('https://')) {
           try {
-            await ref.read(apiProvider).refreshConfig().timeout(const Duration(seconds: 45));
+            await ref
+                .read(apiProvider)
+                .refreshConfig()
+                .timeout(const Duration(seconds: 45));
           } catch (e) {
             repoErr = '$e';
           }
@@ -308,7 +317,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       } else if (fellBack) {
         setState(() => _statusMsg = '远端不可达，已切回本机引擎');
       }
-      await _fillHomeRecommendIfEmpty(gen);
+      unawaited(_fillHomeRecommendIfEmpty(gen));
       _scheduleAutofill();
       // 仅配置可能变化时刷缓存；分类/筛选勿 invalidate。
       if (refreshRepo || clearContent || refreshConfig) {
@@ -321,7 +330,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         setState(() => _statusMsg = '首页加载超时，请重试或换源');
         return;
       }
-      if (msg.contains('Connection refused') || msg.contains('SocketException')) {
+      if (msg.contains('Connection refused') ||
+          msg.contains('SocketException')) {
         final launcher = ref.read(engineLauncherProvider);
         final ok = await launcher.recoverOrFallbackLocal();
         if (!mounted || gen != _loadGen) return;
@@ -350,7 +360,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               final lower = source.toLowerCase();
               if (lower.startsWith('http://') || lower.startsWith('https://')) {
                 try {
-                  await ref.read(apiProvider).refreshConfig().timeout(const Duration(seconds: 45));
+                  await ref
+                      .read(apiProvider)
+                      .refreshConfig()
+                      .timeout(const Duration(seconds: 45));
                 } catch (_) {}
               }
               if (!mounted || gen != _loadGen) return;
@@ -358,7 +371,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             final data = await _fetchFirstPage(gen);
             if (!mounted || gen != _loadGen) return;
             _applyPage(data, replace: true);
-            await _fillHomeRecommendIfEmpty(gen);
+            unawaited(_fillHomeRecommendIfEmpty(gen));
             _scheduleAutofill();
             setState(() {
               _statusMsg = retryFellBack ? '远端不可达，已切回本机引擎' : null;
@@ -497,7 +510,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final data = await _fetchFirstPage(gen);
       if (!mounted || gen != _loadGen) return;
       _applyPage(data, replace: true);
-      await _fillHomeRecommendIfEmpty(gen);
+      unawaited(_fillHomeRecommendIfEmpty(gen));
       _scheduleAutofill();
     } catch (e) {
       if (!mounted || gen != _loadGen) return;
@@ -508,13 +521,19 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   Future<void> _loadMore({bool fromAutofill = false}) async {
-    if (_tid == null || _tid!.isEmpty || _loadingMore || _loading || !_ready || !_hasMore) return;
+    if (_tid == null ||
+        _tid!.isEmpty ||
+        _loadingMore ||
+        _loading ||
+        !_ready ||
+        !_hasMore) return;
     if (fromAutofill && _autofillStreak >= 3) return;
     final gen = _loadGen;
     setState(() => _loadingMore = true);
     try {
       final next = _page + 1;
-      final data = await ref.read(apiProvider).category(_tid!, pg: '$next', extend: Map<String, String>.from(_extend));
+      final data = await ref.read(apiProvider).category(_tid!,
+          pg: '$next', extend: Map<String, String>.from(_extend));
       if (!mounted || gen != _loadGen) return;
       _applyPage(data, replace: false, requestedPage: next);
       if (fromAutofill) {
@@ -542,7 +561,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     });
   }
 
-  void _applyPage(Map<String, dynamic> data, {required bool replace, int? requestedPage}) {
+  void _applyPage(Map<String, dynamic> data,
+      {required bool replace, int? requestedPage}) {
     try {
       final list = ((data['list'] as List?) ?? [])
           .whereType<Map>()
@@ -551,7 +571,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final types = ((data['class'] as List?) ?? [])
           .whereType<Map>()
           .map((e) => CategoryType.fromJson(Map<String, dynamic>.from(e)))
-          .where((t) => t.id.isNotEmpty && t.id != 'home' && t.name != '首页' && t.name != '推荐')
+          .where((t) =>
+              t.id.isNotEmpty &&
+              t.id != 'home' &&
+              t.name != '首页' &&
+              t.name != '推荐')
           .toList();
       final filters = ((data['filters'] as List?) ?? [])
           .whereType<Map>()
@@ -561,11 +585,13 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final pc = (pcRaw is num) ? pcRaw.toInt() : 0;
       final home = replace && (_tid == null || _tid!.isEmpty);
       final emptyHome = home && types.isEmpty && list.isEmpty;
-      final pageStyle = '${data['style'] ?? ''}'.trim();
-      final nextList = kotvListStyle(page: pageStyle, items: list.map((e) => e.styleType));
+      final pageStyle = KotvGridStyle.parse(data['style']);
+      final nextList = pageStyle.isList ||
+          kotvListStyle(items: list.map((e) => e.styleType));
       setState(() {
         if (replace) {
           _listStyle = nextList;
+          _gridStyle = pageStyle;
         } else if (!_listStyle) {
           _listStyle = nextList;
         }
@@ -601,7 +627,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               ..addAll(list);
           }
           final inCat = _tid != null && _tid!.isNotEmpty;
-          _hasMore = inCat && list.isNotEmpty && (_pageCount == 0 || _page < _pageCount);
+          _hasMore = inCat &&
+              list.isNotEmpty &&
+              (_pageCount == 0 || _page < _pageCount);
         } else if (list.isEmpty) {
           // 空页视为末页，不推进页码。
           _hasMore = false;
@@ -678,9 +706,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         });
         try {
           await ref.read(apiProvider).setHome(key);
-          if (mounted) {
-            await kotvClearImageMemory(context: context, ref: ref);
-          }
           // 配置在首页请求结束之后再刷新。_reload 返回时会 invalidate。
           await _reload(clearContent: true);
         } catch (e) {
@@ -724,11 +749,18 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             children: [
               Icon(Icons.error_outline, color: p.primary, size: 40),
               const SizedBox(height: 12),
-              Text('首页渲染出错', style: TextStyle(color: p.fg, fontSize: 16, fontWeight: FontWeight.w600)),
+              Text('首页渲染出错',
+                  style: TextStyle(
+                      color: p.fg, fontSize: 16, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
-              Text('$e', textAlign: TextAlign.center, style: TextStyle(color: p.muted, fontSize: 12)),
+              Text('$e',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: p.muted, fontSize: 12)),
               const SizedBox(height: 16),
-              AppPill(label: '重试', width: 100, onTap: () => _reload(clearContent: true)),
+              AppPill(
+                  label: '重试',
+                  width: 100,
+                  onTap: () => _reload(clearContent: true)),
             ],
           ),
         ),
@@ -752,8 +784,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       orElse: () => <SiteInfo>[],
     );
     SiteInfo? home;
-    final homeKey = cfg.maybeWhen(data: (c) => '${c['home'] ?? ''}'.trim(), orElse: () => '');
-    final homeNameCfg = cfg.maybeWhen(data: (c) => '${c['homeName'] ?? ''}'.trim(), orElse: () => '');
+    final homeKey = cfg.maybeWhen(
+        data: (c) => '${c['home'] ?? ''}'.trim(), orElse: () => '');
+    final homeNameCfg = cfg.maybeWhen(
+        data: (c) => '${c['homeName'] ?? ''}'.trim(), orElse: () => '');
     for (final s in sites) {
       if (homeKey.isNotEmpty ? s.key == homeKey : s.home) {
         home = s;
@@ -762,11 +796,16 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     }
     // 隐藏站作首页时不在 sites[]；用顶层 home/homeName。
     if (home == null && homeKey.isNotEmpty) {
-      home = SiteInfo(key: homeKey, name: homeNameCfg.isNotEmpty ? homeNameCfg : homeKey, home: true);
+      home = SiteInfo(
+          key: homeKey,
+          name: homeNameCfg.isNotEmpty ? homeNameCfg : homeKey,
+          home: true);
     }
     home ??= sites.isEmpty ? null : sites.first;
-    final cfgSource = cfg.maybeWhen(data: (c) => '${c['source'] ?? ''}'.trim(), orElse: () => '');
-    final cfgReady = cfg.maybeWhen(data: (c) => c['ready'] == true, orElse: () => false);
+    final cfgSource = cfg.maybeWhen(
+        data: (c) => '${c['source'] ?? ''}'.trim(), orElse: () => '');
+    final cfgReady =
+        cfg.maybeWhen(data: (c) => c['ready'] == true, orElse: () => false);
     final ready = _ready || cfgReady;
     // 有源但尚未 ready：显示加载，而不是「请先添加点播源」
     // 勿用 contains('加载')：会误伤「点播源加载超时」，导致超时后永久转圈。
@@ -782,7 +821,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         ? (loadingSource ? '加载中…' : '未配置源')
         : ((home != null && home.name.isNotEmpty)
             ? home.name
-            : cfg.maybeWhen(data: (c) => c['ready'] == true ? '选站' : '未配置源', orElse: () => '…'));
+            : cfg.maybeWhen(
+                data: (c) => c['ready'] == true ? '选站' : '未配置源',
+                orElse: () => '…'));
     final busy = ref.watch(uiBusyProvider);
     final onHome = (_tid ?? '').isEmpty;
 
@@ -836,16 +877,24 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             onToggleFilter: _toggleFilters,
             onLive: () => goKotvPage(ref, KotvPage.live),
           ),
-        if (ready && !onHome && _filtersExpanded && _filters.isNotEmpty) _buildFilters(),
+        if (ready && !onHome && _filtersExpanded && _filters.isNotEmpty)
+          _buildFilters(),
         if (ready && _statusMsg != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(28, 6, 28, 0),
             child: Row(
               children: [
                 Expanded(
-                  child: Text(_statusMsg ?? '', style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 13)),
+                  child: Text(_statusMsg ?? '',
+                      style: TextStyle(
+                          color: KotvPalette.of(context).muted, fontSize: 13)),
                 ),
-                AppPill(label: '重试', width: 88, height: 32, fontSize: 13, onTap: _reload),
+                AppPill(
+                    label: '重试',
+                    width: 88,
+                    height: 32,
+                    fontSize: 13,
+                    onTap: _reload),
               ],
             ),
           ),
@@ -870,18 +919,27 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           const SizedBox(
             width: 36,
             height: 36,
-            child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFFCF4274)),
+            child: CircularProgressIndicator(
+                strokeWidth: 3, color: Color(0xFFCF4274)),
           ),
           const SizedBox(height: 16),
-          Text('正在加载点播源…', style: TextStyle(color: p.fg, fontSize: 18, fontWeight: FontWeight.w700)),
-          if ((_statusMsg ?? '').isNotEmpty && !(_statusMsg ?? '').contains('正在加载')) ...[
+          Text('正在加载点播源…',
+              style: TextStyle(
+                  color: p.fg, fontSize: 18, fontWeight: FontWeight.w700)),
+          if ((_statusMsg ?? '').isNotEmpty &&
+              !(_statusMsg ?? '').contains('正在加载')) ...[
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Text(_statusMsg!, textAlign: TextAlign.center, style: TextStyle(color: p.muted, fontSize: 13)),
+              child: Text(_statusMsg!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: p.muted, fontSize: 13)),
             ),
             const SizedBox(height: 14),
-            AppPill(label: '重试', width: 100, onTap: () => _reload(clearContent: true)),
+            AppPill(
+                label: '重试',
+                width: 100,
+                onTap: () => _reload(clearContent: true)),
           ],
         ],
       ),
@@ -894,11 +952,14 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('请先添加点播源', style: TextStyle(color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
+          Text('请先添加点播源',
+              style: TextStyle(
+                  color: p.fg, fontSize: 22, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           Text('粘贴配置 URL 或 JSON，即可开始大屏观影', style: TextStyle(color: p.muted)),
           const SizedBox(height: 16),
-          AppPill(label: '添加点播源', width: 160, autofocus: true, onTap: _addSource),
+          AppPill(
+              label: '添加点播源', width: 160, autofocus: true, onTap: _addSource),
         ],
       ),
     );
@@ -922,44 +983,47 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Builder(builder: (context) {
-                final selIdx = f.values.indexWhere((v) => (_extend[f.key] ?? '') == v.value);
+                final selIdx = f.values
+                    .indexWhere((v) => (_extend[f.key] ?? '') == v.value);
                 return Row(
-                children: [
-                  SizedBox(
-                    width: labelW,
-                    child: Text(
-                      f.name,
-                      style: TextStyle(
-                        color: p.fg.withOpacity(p.light ? 0.72 : 0.78),
-                        fontSize: compact ? 12 : 14,
-                        fontWeight: FontWeight.w600,
+                  children: [
+                    SizedBox(
+                      width: labelW,
+                      child: Text(
+                        f.name,
+                        style: TextStyle(
+                          color: p.fg.withOpacity(p.light ? 0.72 : 0.78),
+                          fontSize: compact ? 12 : 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                  ),
-                  Expanded(
-                    child: SizedBox(
-                      height: pillH,
-                      child: HScrollList(
-                        scrollToIndex: selIdx >= 0 ? selIdx : null,
-                        itemStride: pillW == null ? null : pillW * LayoutScale.layoutOf(context) + sepW,
-                        itemCount: f.values.length,
-                        separatorBuilder: (_, __) => SizedBox(width: sepW),
-                        itemBuilder: (_, i) {
-                          final v = f.values[i];
-                          final sel = (_extend[f.key] ?? '') == v.value;
-                          return AppPill(
-                            label: v.name,
-                            width: pillW,
-                            height: pillH,
-                            fontSize: pillFs,
-                            selected: sel,
-                            onTap: () => _switchFilter(f.key, v.value),
-                          );
-                        },
+                    Expanded(
+                      child: SizedBox(
+                        height: pillH,
+                        child: HScrollList(
+                          scrollToIndex: selIdx >= 0 ? selIdx : null,
+                          itemStride: pillW == null
+                              ? null
+                              : pillW * LayoutScale.layoutOf(context) + sepW,
+                          itemCount: f.values.length,
+                          separatorBuilder: (_, __) => SizedBox(width: sepW),
+                          itemBuilder: (_, i) {
+                            final v = f.values[i];
+                            final sel = (_extend[f.key] ?? '') == v.value;
+                            return AppPill(
+                              label: v.name,
+                              width: pillW,
+                              height: pillH,
+                              fontSize: pillFs,
+                              selected: sel,
+                              onTap: () => _switchFilter(f.key, v.value),
+                            );
+                          },
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
                 );
               }),
             ),
@@ -972,7 +1036,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     final busy = ref.watch(uiBusyProvider);
     // 全局遮罩已在转圈时，页内不再叠第二个 spinner
     if (busy == null && _loading && _items.isEmpty && _types.isEmpty) {
-      return Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary));
+      return Center(
+          child: CircularProgressIndicator(
+              color: KotvPalette.of(context).primary));
     }
 
     final onHome = (_tid ?? '').isEmpty;
@@ -996,34 +1062,52 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           if (onHome) ...[
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(pad * LayoutScale.of(context), 10 * LayoutScale.of(context), pad * LayoutScale.of(context), 0),
+                padding: EdgeInsets.fromLTRB(
+                    pad * LayoutScale.of(context),
+                    10 * LayoutScale.of(context),
+                    pad * LayoutScale.of(context),
+                    0),
                 child: _buildHomeFeatureGrid(),
               ),
             ),
-            SliverToBoxAdapter(child: SizedBox(height: 16 * LayoutScale.of(context))),
+            SliverToBoxAdapter(
+                child: SizedBox(height: 16 * LayoutScale.of(context))),
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: pad * LayoutScale.of(context)),
+                padding: EdgeInsets.symmetric(
+                    horizontal: pad * LayoutScale.of(context)),
                 child: const SectionTitle('为你推荐', subtitle: '来自当前站源的热门内容'),
               ),
             ),
-            SliverToBoxAdapter(child: SizedBox(height: 10 * LayoutScale.of(context))),
+            SliverToBoxAdapter(
+                child: SizedBox(height: 10 * LayoutScale.of(context))),
             if (_items.isEmpty && _loading)
               SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary)),
+                child: Center(
+                    child: CircularProgressIndicator(
+                        color: KotvPalette.of(context).primary)),
               )
             else
               SliverPadding(
-                padding: EdgeInsets.fromLTRB(pad * LayoutScale.of(context), 0, pad * LayoutScale.of(context), bottomPad * LayoutScale.of(context)),
-                sliver: _listStyle ? _listSliver(_items) : _posterSliver(_items),
+                padding: EdgeInsets.fromLTRB(
+                    pad * LayoutScale.of(context),
+                    0,
+                    pad * LayoutScale.of(context),
+                    bottomPad * LayoutScale.of(context)),
+                sliver:
+                    _listStyle ? _listSliver(_items) : _posterSliver(_items),
               ),
           ] else ...[
             SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.fromLTRB(catPad, 10, catPad, 0),
                 child: SectionTitle(
-                  _types.where((t) => t.id == _tid).map((t) => t.name).firstOrNull ?? '分类',
+                  _types
+                          .where((t) => t.id == _tid)
+                          .map((t) => t.name)
+                          .firstOrNull ??
+                      '分类',
                   subtitle: '发现更多精彩内容',
                 ),
               ),
@@ -1032,19 +1116,26 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             if (_items.isEmpty && _loading)
               SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary)),
+                child: Center(
+                    child: CircularProgressIndicator(
+                        color: KotvPalette.of(context).primary)),
               )
             else if (_items.isEmpty)
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.all(40),
-                  child: Center(child: Text('暂无内容', style: TextStyle(color: KotvPalette.of(context).muted))),
+                  child: Center(
+                      child: Text('暂无内容',
+                          style:
+                              TextStyle(color: KotvPalette.of(context).muted))),
                 ),
               )
             else
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(catPad, 0, catPad, bottomPad),
-                sliver: _categoryIsFolder || _listStyle ? _listSliver(_items) : _posterSliver(_items),
+                sliver: _categoryIsFolder || _listStyle
+                    ? _listSliver(_items)
+                    : _posterSliver(_items),
               ),
           ],
         ],
@@ -1058,11 +1149,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   Widget _buildHomeFeatureGrid() {
     // 只盯 banner 字段，避免配置其它字段刷新重建整块首页网格。
     final bannerUrl = ref.watch(configProvider.select(
-          (async) => async.maybeWhen(
-            data: (c) => '${c['banner'] ?? ''}'.trim(),
-            orElse: () => '',
-          ),
-        ));
+      (async) => async.maybeWhen(
+        data: (c) => '${c['banner'] ?? ''}'.trim(),
+        orElse: () => '',
+      ),
+    ));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _syncApiBanner(bannerUrl);
     });
@@ -1135,7 +1226,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
     // 轮播自管定时器，换帧不整页 setState。
     Widget banner(double radius) => _HomeRotatingBanner(
-          key: ValueKey(useApi ? 'api|$bannerUrl|${bannerSlides.length}' : 'vod|${bannerSlides.length}'),
+          key: ValueKey(useApi
+              ? 'api|$bannerUrl|${bannerSlides.length}'
+              : 'vod|${bannerSlides.length}'),
           slides: bannerSlides,
           radius: radius,
         );
@@ -1222,7 +1315,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         final cardH = (cardW * 0.52).clamp(100.0, 132.0);
         final heroH = cardH * 2 + gap;
 
-        Widget cell(Widget child) => SizedBox(width: cardW, height: cardH, child: child);
+        Widget cell(Widget child) =>
+            SizedBox(width: cardW, height: cardH, child: child);
 
         return Column(
           children: [
@@ -1343,7 +1437,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                 it.isFolder ? Icons.folder_outlined : Icons.movie_outlined,
                 color: p.primary,
               ),
-              title: Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+              title:
+                  Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis),
               subtitle: it.remarks.isEmpty ? null : Text(it.remarks),
               trailing: it.isFolder ? const Icon(Icons.chevron_right) : null,
               onTap: () => _open(it),
@@ -1358,22 +1453,18 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   Widget _posterSliver(List<VodItem> items) {
+    final size = kotvWatchPosterSize(ref);
     return SliverLayoutBuilder(
       builder: (context, constraints) {
-        final compact = KotvLayout.isCompact(context);
-        // 列数按逻辑宽度算，避免 scale 越小列越多、海报被压成扁条
-        // 窄屏固定 3 列，不再按 cell 宽度计算（竖屏宽度有限，避免只出 2 列）
-        final gap = compact ? 6.0 : 10.0;
         final extent = constraints.crossAxisExtent;
-        final cross = !extent.isFinite || extent <= 0
-            ? (compact ? 3 : 4)
-            : (compact ? 3 : (extent / (200.0 + gap)).floor().clamp(3, 5));
+        final m = kotvPosterMetrics(context,
+            extent: extent, style: _gridStyle, size: size);
         return SliverGrid(
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: cross,
-            mainAxisSpacing: gap,
-            crossAxisSpacing: gap,
-            childAspectRatio: 214 / 286,
+            crossAxisCount: m.columns,
+            mainAxisSpacing: m.gap,
+            crossAxisSpacing: m.gap,
+            childAspectRatio: m.aspect,
           ),
           delegate: SliverChildBuilderDelegate(
             (context, i) {
@@ -1382,6 +1473,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
               return PosterCard(
                 item: it,
                 autofocus: false,
+                ratio: _gridStyle.ratio,
+                oval: _gridStyle.isOval,
                 onTap: () => _open(it),
                 onLongPress: () => _searchItem(it),
               );
@@ -1394,7 +1487,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     );
   }
 
-  String _ellipsize(String s, int n) => s.length <= n ? s : '${s.substring(0, n)}…';
+  String _ellipsize(String s, int n) =>
+      s.length <= n ? s : '${s.substring(0, n)}…';
 }
 
 class _HomeBannerSlide {
@@ -1503,7 +1597,12 @@ class _HomeRotatingBannerState extends State<_HomeRotatingBanner> {
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
                     height: 1.15,
-                    shadows: [Shadow(color: Color(0xCC000000), blurRadius: 8, offset: Offset(0, 1))],
+                    shadows: [
+                      Shadow(
+                          color: Color(0xCC000000),
+                          blurRadius: 8,
+                          offset: Offset(0, 1))
+                    ],
                   ),
                 ),
               ),
@@ -1519,7 +1618,12 @@ class _HomeRotatingBannerState extends State<_HomeRotatingBanner> {
                     color: Colors.white.withOpacity(0.92),
                     fontSize: 13,
                     height: 1.15,
-                    shadows: const [Shadow(color: Color(0x99000000), blurRadius: 6, offset: Offset(0, 1))],
+                    shadows: const [
+                      Shadow(
+                          color: Color(0x99000000),
+                          blurRadius: 6,
+                          offset: Offset(0, 1))
+                    ],
                   ),
                 ),
               ),

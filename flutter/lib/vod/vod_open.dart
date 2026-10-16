@@ -14,7 +14,6 @@ import '../desktop/mini_player_window.dart';
 import '../player/playback_guard.dart';
 import '../screens/detail_screen.dart';
 import '../screens/folder_screen.dart';
-import '../util/kotv_image_cache.dart';
 
 /// 网盘授权等会写 `/TVBox/`；API 30+ 需「所有文件访问」。失败返回 false。
 Future<bool> _ensureSharedStorageWrite() async {
@@ -40,7 +39,9 @@ bool siteNeedsSharedWrite(WidgetRef ref, String siteKey) {
 }
 
 /// 配置站 / action 打开前弹出系统授权。未授予则拦住，不继续进授权页。
-Future<bool> _gateSharedStorageWrite(BuildContext context, WidgetRef ref, String siteKey, {required bool force}) async {
+Future<bool> _gateSharedStorageWrite(
+    BuildContext context, WidgetRef ref, String siteKey,
+    {required bool force}) async {
   if (!force && !siteNeedsSharedWrite(ref, siteKey)) return true;
   final ok = await _ensureSharedStorageWrite();
   if (ok) return true;
@@ -94,7 +95,9 @@ bool siteIsIndex(WidgetRef ref, String siteKey) {
   }
   final homeKey = '${cfg?['home'] ?? ''}'.trim();
   for (final s in sites) {
-    if (homeKey.isNotEmpty ? '${s['key'] ?? ''}' == homeKey : s['home'] == true) {
+    if (homeKey.isNotEmpty
+        ? '${s['key'] ?? ''}' == homeKey
+        : s['home'] == true) {
       return s['indexs'] == true;
     }
   }
@@ -152,7 +155,8 @@ Future<void> _openVodItemBody(
 }) async {
   final siteKey = (site ?? item.site).trim();
   if (item.hasAction) {
-    if (!await _gateSharedStorageWrite(context, ref, siteKey, force: true)) return;
+    if (!await _gateSharedStorageWrite(context, ref, siteKey, force: true))
+      return;
     if (!context.mounted) return;
     final api = ref.read(apiProvider);
     try {
@@ -184,7 +188,9 @@ Future<void> _openVodItemBody(
           tid: item.id,
           title: item.name,
           site: siteKey,
-          extend: extend == null || extend.isEmpty ? const {} : Map<String, String>.from(extend),
+          extend: extend == null || extend.isEmpty
+              ? const {}
+              : Map<String, String>.from(extend),
         ),
       ),
     );
@@ -206,9 +212,6 @@ Future<void> _openVodItemBody(
       if (cur != wantSource) {
         await kotvStopBackgroundPlayback();
         await api.loadConfig(wantSource).timeout(const Duration(seconds: 45));
-        if (context.mounted) {
-          await kotvClearImageMemory(context: context, ref: ref);
-        }
         ref.invalidate(configProvider);
         ref.invalidate(settingsProvider);
       }
@@ -222,8 +225,10 @@ Future<void> _openVodItemBody(
     if (!context.mounted) return;
   }
   // 仅 api 含 Config 的站弹出系统授权；未授予不进详情。
-  if (DetailScreen.isForeground && DetailScreen.matches(item.id, siteKey)) return;
-  if (!await _gateSharedStorageWrite(context, ref, siteKey, force: false)) return;
+  if (DetailScreen.isForeground && DetailScreen.matches(item.id, siteKey))
+    return;
+  if (!await _gateSharedStorageWrite(context, ref, siteKey, force: false))
+    return;
   if (!context.mounted) return;
   // 先进详情页再拉详情：点了立刻跳转。jar 在 detailContent 里 finish 详情层由详情页自己出栈。
   final mark = fromFolder ? item.name : '';

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
+import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
 import '../widgets/chrome.dart';
 import '../widgets/poster_card.dart';
@@ -39,7 +40,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final compact = KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
+    final compact =
+        KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
     final land = KotvLayout.isLandscapeCompact(context);
     final pillH = land ? 30.0 : (compact ? 32.0 : 40.0);
     final pillFs = land ? 12.0 : (compact ? 13.0 : 15.0);
@@ -79,7 +81,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               ),
               if (!compact) ...[
                 SizedBox(width: gap),
-                AppPill(label: '刷新', width: refreshW, height: pillH, fontSize: pillFs, onTap: _reload),
+                AppPill(
+                    label: '刷新',
+                    width: refreshW,
+                    height: pillH,
+                    fontSize: pillFs,
+                    onTap: _reload),
               ],
             ],
           ),
@@ -87,15 +94,22 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         if (_deleting)
           const Padding(
             padding: EdgeInsets.only(bottom: 4),
-            child: Text('删除模式：点击海报即可移除', style: TextStyle(color: Color(0xFFCF4274), fontSize: 14)),
+            child: Text('删除模式：点击海报即可移除',
+                style: TextStyle(color: Color(0xFFCF4274), fontSize: 14)),
           ),
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator(color: Colors.white))
+              ? const Center(
+                  child: CircularProgressIndicator(color: Colors.white))
               : _items.isEmpty
-                  ? const Center(child: Text('暂无历史记录', style: TextStyle(color: Colors.white70, fontSize: 18)))
+                  ? const Center(
+                      child: Text('暂无历史记录',
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 18)))
                   : PosterFlow(
                       items: _items,
+                      size: kotvWatchPosterSize(ref),
+                      style: kotvGridStyleOfItems(_items),
                       onOpen: (it) async {
                         if (_deleting) {
                           await LocalHistory.remove(it);

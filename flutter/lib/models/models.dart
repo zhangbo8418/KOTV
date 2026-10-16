@@ -15,6 +15,7 @@ class VodItem {
     this.positionMs = 0,
     this.durationMs = 0,
     this.styleType = '',
+    this.styleRatio = 0.75,
   });
 
   final String id;
@@ -27,14 +28,18 @@ class VodItem {
   final String vodTag;
   final String cate;
   final bool folder;
+
   /// 历史恢复用线路 flag（vodFlag）。
   final String flag;
+
   /// 点播配置 source，收藏去重用；空表示旧条目。
   final String configSource;
+
   /// 续播进度（毫秒）。
   final int positionMs;
   final int durationMs;
   final String styleType;
+  final double styleRatio;
 
   bool get hasAction => action.trim().isNotEmpty;
 
@@ -60,12 +65,22 @@ class VodItem {
         positionMs: _asInt(j['position'] ?? j['positionMs']),
         durationMs: _asInt(j['duration'] ?? j['durationMs']),
         styleType: _styleType(j['style']),
+        styleRatio: _styleRatio(j['style']),
       );
 
   static String _styleType(dynamic v) {
     if (v is String) return v.trim();
     if (v is Map) return '${v['type'] ?? ''}'.trim();
     return '';
+  }
+
+  static double _styleRatio(dynamic v) {
+    if (v is! Map) return 0.75;
+    final raw = v['ratio'];
+    final n = raw is num ? raw.toDouble() : double.tryParse('$raw');
+    if (n == null || n <= 0) return 0.75;
+    if (n > 4) return 4;
+    return n;
   }
 
   static int _asInt(dynamic v) {
@@ -85,7 +100,11 @@ class FilterOption {
 }
 
 class CategoryFilter {
-  CategoryFilter({required this.key, required this.name, this.init = '', this.values = const []});
+  CategoryFilter(
+      {required this.key,
+      required this.name,
+      this.init = '',
+      this.values = const []});
   final String key;
   final String name;
   final String init;
@@ -102,7 +121,11 @@ class CategoryFilter {
 }
 
 class CategoryType {
-  CategoryType({required this.id, required this.name, this.typeFlag = '', this.filters = const []});
+  CategoryType(
+      {required this.id,
+      required this.name,
+      this.typeFlag = '',
+      this.filters = const []});
   final String id;
   final String name;
   final String typeFlag;
@@ -125,6 +148,7 @@ class CategoryType {
 class EpisodeItem {
   EpisodeItem({required this.name, required this.url, this.headers});
   final String name;
+
   /// 非空：引擎判定可直开；空串：须 /api/v1/play（按集下标取 raw）。
   final String url;
   final Map<String, String>? headers;
@@ -135,7 +159,8 @@ class EpisodeItem {
     if (raw is Map) {
       final m = <String, String>{
         for (final e in raw.entries)
-          if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty) '${e.key}': '${e.value}',
+          if ('${e.key}'.trim().isNotEmpty && '${e.value}'.trim().isNotEmpty)
+            '${e.key}': '${e.value}',
       };
       if (m.isNotEmpty) hdr = m;
     }
@@ -227,9 +252,12 @@ class VodDetail {
 
   VodDetail withMeta({String? name, String? pic, String? content}) => VodDetail(
         id: id,
-        name: (name != null && name.trim().isNotEmpty) ? name.trim() : this.name,
+        name:
+            (name != null && name.trim().isNotEmpty) ? name.trim() : this.name,
         pic: (pic != null && pic.trim().isNotEmpty) ? pic.trim() : this.pic,
-        content: (content != null && content.trim().isNotEmpty) ? content.trim() : this.content,
+        content: (content != null && content.trim().isNotEmpty)
+            ? content.trim()
+            : this.content,
         site: site,
         remarks: remarks,
         year: year,
@@ -256,6 +284,7 @@ class SiteInfo {
   final bool home;
   final bool searchable;
   final bool changeable;
+
   /// 豆瓣等索引站，点条目去全网搜索而不是本站详情。
   final bool indexs;
   final String styleType;

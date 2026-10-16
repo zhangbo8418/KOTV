@@ -79,6 +79,24 @@ func clearJarForUser(userID string) {
 	jarMu.Unlock()
 }
 
+// DropCallerInstances 清掉当前会话的爬虫实例和 jar 解析标记，不杀 JVM/JS 进程。
+func DropCallerInstances() {
+	clearJSMemoryCaches()
+	uid := strings.TrimSpace(hostclient.RuntimeUserID())
+	if uid != "" {
+		DestroyUserScripts(uid)
+		clearJarForUser(uid)
+	} else {
+		clearSharedJsPy()
+		clearSharedJarSpiders()
+	}
+	bumpJarRefreshGen()
+	req := bridgeRequest{Method: "clear"}
+	if payload, err := json.Marshal(req); err == nil {
+		_, _ = callJavaBridge(payload)
+	}
+}
+
 func clearJar() {
 	jarMu.Lock()
 	jarSpiders = map[string]*jarSpider{}

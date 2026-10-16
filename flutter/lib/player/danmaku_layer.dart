@@ -9,6 +9,12 @@ import 'package:http/http.dart' as http;
 import 'danmaku_file_read.dart';
 import 'kotv_playback.dart';
 
+/// Flutter 3.19 没有 Color.toARGB32；3.47 的 value 仍可用。
+int _colorArgb(Color color) {
+  // ignore: deprecated_member_use
+  return color.value;
+}
+
 /// 单条弹幕（internal/danmaku.Item）。
 class DanmakuItem {
   const DanmakuItem({
@@ -37,7 +43,8 @@ class DanmakuParser {
 
   static List<DanmakuItem> _parseXml(String body) {
     final out = <DanmakuItem>[];
-    final re = RegExp(r'''<d\s+p="([^"]*)"[^>]*>([^<]*)</d>''', multiLine: true);
+    final re =
+        RegExp(r'''<d\s+p="([^"]*)"[^>]*>([^<]*)</d>''', multiLine: true);
     for (final m in re.allMatches(body)) {
       final meta = m.group(1) ?? '';
       final text = _xmlUnescape(m.group(2) ?? '').trim();
@@ -83,9 +90,11 @@ class DanmakuParser {
 }
 
 class DanmakuLoader {
-  static Future<List<DanmakuItem>> loadUrl(String url, {bool followSources = true}) async {
+  static Future<List<DanmakuItem>> loadUrl(String url,
+      {bool followSources = true}) async {
     if (url.trim().isEmpty) return const [];
-    final resp = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 12));
+    final resp =
+        await http.get(Uri.parse(url)).timeout(const Duration(seconds: 12));
     if (resp.statusCode < 200 || resp.statusCode >= 300) return const [];
     final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
     return _parseBodyOrSources(body, followSources: followSources);
@@ -99,7 +108,8 @@ class DanmakuLoader {
 
   /// 模板 GET：`https://…?n={name}&e={episode}`；无占位符时 POST name/episode。
   /// 响应可为弹幕正文，或 `[{name,url},…]` 源列表（再拉首条 url）。
-  static Future<List<DanmakuItem>> loadApi(String api, {required String name, required String episode}) async {
+  static Future<List<DanmakuItem>> loadApi(String api,
+      {required String name, required String episode}) async {
     final base = api.trim();
     if (base.isEmpty) return const [];
     final hasTpl = base.contains('{name}') || base.contains('{episode}');
@@ -110,20 +120,19 @@ class DanmakuLoader {
           .replaceAll('{episode}', Uri.encodeComponent(episode));
       resp = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 12));
     } else {
-      resp = await http
-          .post(
-            Uri.parse(base),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'name': name, 'episode': episode},
-          )
-          .timeout(const Duration(seconds: 12));
+      resp = await http.post(
+        Uri.parse(base),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {'name': name, 'episode': episode},
+      ).timeout(const Duration(seconds: 12));
     }
     if (resp.statusCode < 200 || resp.statusCode >= 300) return const [];
     final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
     return _parseBodyOrSources(body, followSources: true);
   }
 
-  static Future<List<DanmakuItem>> _parseBodyOrSources(String body, {required bool followSources}) async {
+  static Future<List<DanmakuItem>> _parseBodyOrSources(String body,
+      {required bool followSources}) async {
     if (followSources) {
       final src = _firstSourceUrl(body);
       if (src != null && src.isNotEmpty) {
@@ -175,7 +184,8 @@ class DanmakuLoader {
   }
 
   /// 拉搜索接口正文（不跟进源），便于列出多源。
-  static Future<String> fetchApiBody(String api, {required String name, required String episode}) async {
+  static Future<String> fetchApiBody(String api,
+      {required String name, required String episode}) async {
     final base = api.trim();
     if (base.isEmpty) return '';
     final hasTpl = base.contains('{name}') || base.contains('{episode}');
@@ -186,13 +196,11 @@ class DanmakuLoader {
           .replaceAll('{episode}', Uri.encodeComponent(episode));
       resp = await http.get(Uri.parse(u)).timeout(const Duration(seconds: 12));
     } else {
-      resp = await http
-          .post(
-            Uri.parse(base),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'name': name, 'episode': episode},
-          )
-          .timeout(const Duration(seconds: 12));
+      resp = await http.post(
+        Uri.parse(base),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {'name': name, 'episode': episode},
+      ).timeout(const Duration(seconds: 12));
     }
     if (resp.statusCode < 200 || resp.statusCode >= 300) return '';
     return utf8.decode(resp.bodyBytes, allowMalformed: true);
@@ -233,12 +241,16 @@ class DanmakuOverlay extends StatefulWidget {
     this.rowsTop = 3,
     this.rowsBottom = 3,
     this.fontFamily = 'default',
+
     /// 同轨水平间隙占屏宽比例（0–0.2）；原硬编码 0.08。
     this.scrollGapRatio = 0.08,
+
     /// 描边宽度相对字号（outline）。
     this.strokeWidth = 0.12,
+
     /// 阴影不透明度（shadow）。
     this.shadowOpacity = 0.5,
+
     /// 投影偏移相对字号、投影透明度（projection）。
     this.projectionOffsetX = 0.08,
     this.projectionOffsetY = 0.08,
@@ -252,6 +264,7 @@ class DanmakuOverlay extends StatefulWidget {
   final double opacity;
   final int rows;
   final int maxOnScreen;
+
   /// 滚动弹幕占用的画面高度比例（顶部起算）。
   final double scrollAreaRatio;
   final bool showScroll;
@@ -280,7 +293,8 @@ class DanmakuOverlay extends StatefulWidget {
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
 }
 
-class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProviderStateMixin {
+class _DanmakuOverlayState extends State<DanmakuOverlay>
+    with SingleTickerProviderStateMixin {
   static const _maxActivateWindowSec = 3.0;
 
   late final AnimationController _tick =
@@ -346,7 +360,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
       _posSub?.cancel();
       _bindPlayer(widget.player);
     }
-    if (!identical(oldWidget.items, widget.items) && oldWidget.items != widget.items) {
+    if (!identical(oldWidget.items, widget.items) &&
+        oldWidget.items != widget.items) {
       _sorted = _sortedCopy(widget.items);
       if (widget.enabled) {
         _reseedWindow();
@@ -363,7 +378,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
         _cursor = 0;
         if (mounted) setState(() {});
       } else {
-        _rebase(widget.player.position, paused: !widget.player.playing, rate: widget.player.rate);
+        _rebase(widget.player.position,
+            paused: !widget.player.playing, rate: widget.player.rate);
         _reseedWindow();
       }
     }
@@ -413,7 +429,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     final mediaSec = _mediaPos.inMilliseconds / 1000.0;
     _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
     _cursor = 0;
-    while (_cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
+    while (
+        _cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
       _cursor++;
     }
     if (_layoutW >= 1 && widget.enabled) {
@@ -504,14 +521,16 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
       // 冷启动：只投最近窗口，避免片头全吐或空屏。
       _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
       _cursor = 0;
-      while (_cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
+      while (_cursor < _sorted.length &&
+          _sorted[_cursor].time < _lastActivateSec) {
         _cursor++;
       }
     } else if (mediaSec + 0.05 < _lastActivateSec) {
       _clearFlying();
       _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
       _cursor = 0;
-      while (_cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
+      while (_cursor < _sorted.length &&
+          _sorted[_cursor].time < _lastActivateSec) {
         _cursor++;
       }
     }
@@ -585,8 +604,8 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     _lastActivateSec = to;
 
     _flying.removeWhere((f) {
-      final dead =
-          mediaSec - f.activatedSec > f.durationMs / 1000.0 + 0.25 || mediaSec < f.activatedSec - 0.05;
+      final dead = mediaSec - f.activatedSec > f.durationMs / 1000.0 + 0.25 ||
+          mediaSec < f.activatedSec - 0.05;
       if (dead) f.dispose();
       return dead;
     });
@@ -662,7 +681,9 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
       final durSec = f.durationMs / 1000.0;
       if (durSec <= 0) continue;
       final t = ((mediaSec - f.activatedSec) / durSec).clamp(0.0, 1.0);
-      final existW = f.textWidth > 0 ? f.textWidth : _estimateTextWidth(f.item.content, widget.fontSize);
+      final existW = f.textWidth > 0
+          ? f.textWidth
+          : _estimateTextWidth(f.item.content, widget.fontSize);
       final travel = viewW + existW;
       final x = reverse ? -existW + t * travel : viewW - t * travel;
       final right = x + existW;
@@ -794,10 +815,11 @@ class _Flying {
     final shadowKey = shadows.isEmpty
         ? '0'
         : shadows
-            .map((s) => '${s.offset.dx},${s.offset.dy},${s.blurRadius},${s.color.toARGB32()}')
+            .map((s) =>
+                '${s.offset.dx},${s.offset.dy},${s.blurRadius},${_colorArgb(s.color)}')
             .join('|');
     final key =
-        '${item.content}\x00$fontSize\x00${color.toARGB32()}\x00$bold\x00$fontFamily\x00$strokeMode\x00$shadowKey';
+        '${item.content}\x00$fontSize\x00${_colorArgb(color)}\x00$bold\x00$fontFamily\x00$strokeMode\x00$shadowKey';
     final cached = _painter;
     if (cached != null && _painterKey == key) return cached;
     cached?.dispose();
@@ -916,13 +938,16 @@ class _DanmakuPainter extends CustomPainter {
     final lanes = rows.clamp(1, 16);
     final topLanes = rowsTop.clamp(1, 8);
     final bottomLanes = rowsBottom.clamp(1, 8);
-    final areaH = (size.height * scrollAreaRatio.clamp(0.1, 1.0)).clamp(40.0, size.height);
+    final areaH = (size.height * scrollAreaRatio.clamp(0.1, 1.0))
+        .clamp(40.0, size.height);
     final fs = fontSize.clamp(12.0, 48.0);
     // 行高不低于字高，避免邻轨纵向压字。
-    final laneH = math.max(
-      fs * lineSpacing.clamp(1.0, 2.0),
-      areaH / lanes,
-    ).clamp(fs, 80.0);
+    final laneH = math
+        .max(
+          fs * lineSpacing.clamp(1.0, 2.0),
+          areaH / lanes,
+        )
+        .clamp(fs, 80.0);
     final shadows = _shadows(fs);
     final family = switch (fontFamily.trim().toLowerCase()) {
       'sans' || 'sans-serif' => 'sans-serif',
@@ -948,13 +973,18 @@ class _DanmakuPainter extends CustomPainter {
       late final double y;
       if (mode == 4) {
         x = (size.width - tp.width) / 2;
-        y = size.height - 12.0 - tp.height - (f.lane % bottomLanes) * (tp.height + 4);
+        y = size.height -
+            12.0 -
+            tp.height -
+            (f.lane % bottomLanes) * (tp.height + 4);
       } else if (mode == 5) {
         x = (size.width - tp.width) / 2;
         y = 12.0 + (f.lane % topLanes) * (tp.height + 4);
       } else if (mode == 7) {
         // 定位弹幕：按内容哈希落在画面中部附近。
-        x = (size.width * 0.15) + (f.item.content.hashCode.abs() % 70) / 100.0 * size.width * 0.7 - tp.width / 2;
+        x = (size.width * 0.15) +
+            (f.item.content.hashCode.abs() % 70) / 100.0 * size.width * 0.7 -
+            tp.width / 2;
         y = (size.height * 0.2) + (f.lane % 5) / 5.0 * size.height * 0.5;
       } else if (mode == 6) {
         y = 12.0 + (f.lane % lanes) * laneH;

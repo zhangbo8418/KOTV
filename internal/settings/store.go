@@ -37,6 +37,7 @@ const (
 	PreferredParse     Type = "preferredParse"
 	PlayerSpeed        Type = "playerSpeed"
 	PlayerScale        Type = "playerScale"
+	PosterSize         Type = "size" // 海报尺寸档 0..3，默认 2
 	PlayerDecode       Type = "playerDecode"
 	PlayerRender       Type = "playerRender"   // 渲染方式：surface | texture
 	PlayerFailover     Type = "playerFailover" // 黑屏/停滞自动切换播放器：auto | off
@@ -45,23 +46,23 @@ const (
 	PlayerStableVolume Type = "playerStableVolume"
 	UA                 Type = "ua" // 播放 User-Agent；空则用 Media3 默认
 	// MPV：mpv_vulkan / mpv_gpu_next + 自定义 mpv.conf
-	MpvVulkan    Type = "mpvVulkan"
-	MpvGpuNext   Type = "mpvGpuNext"
-	MpvConf      Type = "mpvConf"
-	LiveKeep     Type = "liveKeep"     // 上次直播：源$$$分组$$$频道$$$线路URL
-	LiveAcross   Type = "liveAcross"   // 跨分组换台，默认 true
-	LiveChange   Type = "liveChange"   // 播放失败自动换线，默认 true
-	LiveInvert   Type = "liveInvert"   // 反转上下换台方向，默认 false
-	DLNARenderer Type = "dlnaRenderer" // 作为 DLNA 被投端，默认 false
-	UpdateURL    Type = "updateUrl"
-	AvatarPath   Type = "avatarPath"
-	WallMode     Type = "wallMode"
-	WallURL      Type = "wallURL"
-	WallFile     Type = "wallFile"
-	Incognito    Type = "incognito"
-	SyncPairCode Type = "syncPairCode"
-	DeviceUUID   Type = "deviceUUID"
-	RemoteAuth   Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
+	MpvVulkan     Type = "mpvVulkan"
+	MpvGpuNext    Type = "mpvGpuNext"
+	MpvConf       Type = "mpvConf"
+	LiveKeep      Type = "liveKeep"     // 上次直播：源$$$分组$$$频道$$$线路URL
+	LiveAcross    Type = "liveAcross"   // 跨分组换台，默认 true
+	LiveChange    Type = "liveChange"   // 播放失败自动换线，默认 true
+	LiveInvert    Type = "liveInvert"   // 反转上下换台方向，默认 false
+	DLNARenderer  Type = "dlnaRenderer" // 作为 DLNA 被投端，默认 false
+	UpdateURL     Type = "updateUrl"
+	AvatarPath    Type = "avatarPath"
+	WallMode      Type = "wallMode"
+	WallURL       Type = "wallURL"
+	WallFile      Type = "wallFile"
+	Incognito     Type = "incognito"
+	SyncPairCode  Type = "syncPairCode"
+	DeviceUUID    Type = "deviceUUID"
+	RemoteAuth    Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
 	AllowRegister Type = "allowRegister" // 开放注册，默认 false
 
 	// 播放细项（须进 APIGetSettings 白名单，否则冷启动丢设置）。

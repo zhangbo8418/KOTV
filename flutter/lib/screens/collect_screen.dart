@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
 import '../theme/layout_scale.dart';
+import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
 import '../widgets/chrome.dart';
 import '../widgets/poster_card.dart';
@@ -49,7 +50,8 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final compact = KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
+    final compact =
+        KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
     final land = KotvLayout.isLandscapeCompact(context);
     final pillH = land ? 30.0 : (compact ? 32.0 : 40.0);
     final pillFs = land ? 12.0 : (compact ? 13.0 : 15.0);
@@ -92,15 +94,22 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
         if (_deleting)
           const Padding(
             padding: EdgeInsets.only(bottom: 4),
-            child: Text('删除模式：点击海报即可移除', style: TextStyle(color: Color(0xFFCF4274), fontSize: 14)),
+            child: Text('删除模式：点击海报即可移除',
+                style: TextStyle(color: Color(0xFFCF4274), fontSize: 14)),
           ),
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator(color: Colors.white))
+              ? const Center(
+                  child: CircularProgressIndicator(color: Colors.white))
               : _items.isEmpty
-                  ? const Center(child: Text('暂无收藏', style: TextStyle(color: Colors.white70, fontSize: 18)))
+                  ? const Center(
+                      child: Text('暂无收藏',
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 18)))
                   : PosterFlow(
                       items: _items,
+                      size: kotvWatchPosterSize(ref),
+                      style: kotvGridStyleOfItems(_items),
                       padding: const EdgeInsets.fromLTRB(60, 10, 60, 24),
                       onOpen: (it) async {
                         if (_deleting) {

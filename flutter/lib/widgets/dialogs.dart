@@ -19,7 +19,6 @@ import '../api/kotv_settings_cache.dart';
 import '../screens/detail_screen.dart';
 import '../screens/file_browser_screen.dart';
 import '../screens/live_screen.dart';
-import '../util/kotv_image_cache.dart';
 import 'chrome.dart';
 import 'h_scroll.dart';
 
@@ -29,14 +28,18 @@ Future<void> _prepareLeavePlayback() async {
 }
 
 /// 弹窗尺寸：窄屏用满宽减边距，避免固定 720 被压成竖条。
-({double width, double height, EdgeInsets inset, bool compact}) _dialogMetrics(BuildContext context) {
+({double width, double height, EdgeInsets inset, bool compact}) _dialogMetrics(
+    BuildContext context) {
   final sz = MediaQuery.sizeOf(context);
   final compact = KotvLayout.isCompact(context);
-  final inset = compact ? const EdgeInsets.symmetric(horizontal: 10, vertical: 12) : const EdgeInsets.symmetric(horizontal: 48, vertical: 40);
+  final inset = compact
+      ? const EdgeInsets.symmetric(horizontal: 10, vertical: 12)
+      : const EdgeInsets.symmetric(horizontal: 48, vertical: 40);
   final innerW = sz.width - inset.horizontal;
   final innerH = sz.height - inset.vertical;
   final width = innerW.clamp(280.0, 720.0);
-  final height = (innerH * (compact ? 0.86 : 0.82)).clamp(compact ? 300.0 : 360.0, 560.0);
+  final height =
+      (innerH * (compact ? 0.86 : 0.82)).clamp(compact ? 300.0 : 360.0, 560.0);
   return (width: width, height: height, inset: inset, compact: compact);
 }
 
@@ -63,7 +66,8 @@ Future<String?> _pickConfigFile(BuildContext context) async {
         useBrowser = await ch.invokeMethod<bool>('useFileBrowser') ?? false;
       } catch (_) {}
       if (useBrowser && context.mounted) {
-        final root = ((await ch.invokeMethod<String>('storageRoot')) ?? '').trim();
+        final root =
+            ((await ch.invokeMethod<String>('storageRoot')) ?? '').trim();
         final picked = await FileBrowserScreen.pick(
           context,
           root: root.isEmpty ? '/storage/emulated/0' : root,
@@ -106,7 +110,9 @@ Widget _configDialogActions({
       child: LayoutBuilder(
         builder: (context, cons) {
           final s = LayoutScale.layoutOf(context);
-          final w = cons.maxWidth.isFinite && cons.maxWidth > 0 ? cons.maxWidth / s : 72.0;
+          final w = cons.maxWidth.isFinite && cons.maxWidth > 0
+              ? cons.maxWidth / s
+              : 72.0;
           return AppPill(
             label: label,
             onTap: onTap,
@@ -127,7 +133,8 @@ Widget _configDialogActions({
         SizedBox(width: gap),
         stretch(label: '取消', onTap: onCancel),
         SizedBox(width: gap),
-        stretch(label: confirmLabel, onTap: onConfirm, selected: confirmSelected),
+        stretch(
+            label: confirmLabel, onTap: onConfirm, selected: confirmSelected),
       ],
     );
   }
@@ -137,13 +144,18 @@ Widget _configDialogActions({
       const Spacer(),
       AppPill(label: '取消', width: 96, onTap: onCancel),
       SizedBox(width: gap),
-      AppPill(label: confirmLabel, width: 96, selected: confirmSelected, onTap: onConfirm),
+      AppPill(
+          label: confirmLabel,
+          width: 96,
+          selected: confirmSelected,
+          onTap: onConfirm),
     ],
   );
 }
 
 /// 一行里胶囊高度会乘布局缩放，旁边圆形按钮固定 36。行高取二者较大值再加分隔。
-double _pillRowStride(BuildContext context, {required double pillHeight, required double gap, double beside = 36}) {
+double _pillRowStride(BuildContext context,
+    {required double pillHeight, required double gap, double beside = 36}) {
   final h = pillHeight * LayoutScale.layoutOf(context);
   return (h > beside ? h : beside) + gap;
 }
@@ -179,7 +191,8 @@ Future<void> showSitePicker(
 
           final curHomeIdx = local.indexWhere((s) => s.home);
           final curFocus = curHomeIdx >= 0 ? curHomeIdx : focusIdx;
-          final stride = _pillRowStride(ctx, pillHeight: m.compact ? 40 : 44, gap: m.compact ? 4 : 8);
+          final stride = _pillRowStride(ctx,
+              pillHeight: m.compact ? 40 : 44, gap: m.compact ? 4 : 8);
           if (pinnedFocus != curFocus || (pinnedStride - stride).abs() > 0.5) {
             pinnedFocus = curFocus;
             pinnedStride = stride;
@@ -187,7 +200,8 @@ Future<void> showSitePicker(
             if (!scrollCtrl.hasClients) {
               scrollCtrl.arm(offset);
             } else {
-              WidgetsBinding.instance.addPostFrameCallback((_) => scrollCtrl.reveal(offset));
+              WidgetsBinding.instance
+                  .addPostFrameCallback((_) => scrollCtrl.reveal(offset));
             }
           }
 
@@ -204,7 +218,11 @@ Future<void> showSitePicker(
                   border: Border.all(color: KotvPalette.of(ctx).outline),
                 ),
                 child: Padding(
-                  padding: EdgeInsets.fromLTRB(m.compact ? 14 : 28, m.compact ? 14 : 24, m.compact ? 14 : 28, m.compact ? 12 : 24),
+                  padding: EdgeInsets.fromLTRB(
+                      m.compact ? 14 : 28,
+                      m.compact ? 14 : 24,
+                      m.compact ? 14 : 28,
+                      m.compact ? 12 : 24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -221,14 +239,20 @@ Future<void> showSitePicker(
                               ),
                             ),
                           ),
-                          AppPill(label: '关闭', width: m.compact ? 72 : 96, height: 36, onTap: () => Navigator.pop(ctx)),
+                          AppPill(
+                              label: '关闭',
+                              width: m.compact ? 72 : 96,
+                              height: 36,
+                              onTap: () => Navigator.pop(ctx)),
                         ],
                       ),
                       SizedBox(height: m.compact ? 6 : 8),
                       Text(
                         '点名称切换；右侧图标：可搜索 / 可换源（长按=全部）',
                         maxLines: m.compact ? 1 : null,
-                        overflow: m.compact ? TextOverflow.ellipsis : TextOverflow.visible,
+                        overflow: m.compact
+                            ? TextOverflow.ellipsis
+                            : TextOverflow.visible,
                         softWrap: !m.compact,
                         style: TextStyle(
                           color: KotvPalette.of(ctx).muted,
@@ -241,7 +265,8 @@ Future<void> showSitePicker(
                         child: ListView.separated(
                           controller: scrollCtrl,
                           itemCount: local.length,
-                          separatorBuilder: (_, __) => SizedBox(height: m.compact ? 4 : 8),
+                          separatorBuilder: (_, __) =>
+                              SizedBox(height: m.compact ? 4 : 8),
                           itemBuilder: (_, i) {
                             final s = local[i];
                             if (m.compact) {
@@ -262,25 +287,35 @@ Future<void> showSitePicker(
                                   ),
                                   const SizedBox(width: 8),
                                   _CircleIcon(
-                                    icon: s.searchable ? Icons.search : Icons.visibility_off,
+                                    icon: s.searchable
+                                        ? Icons.search
+                                        : Icons.visibility_off,
                                     onTap: () async {
-                                      await ref.read(apiProvider).toggleSite(field: 'searchable', key: s.key);
+                                      await ref.read(apiProvider).toggleSite(
+                                          field: 'searchable', key: s.key);
                                       await reload();
                                     },
                                     onLongPress: () async {
-                                      await ref.read(apiProvider).toggleSite(field: 'searchable', all: !s.searchable);
+                                      await ref.read(apiProvider).toggleSite(
+                                          field: 'searchable',
+                                          all: !s.searchable);
                                       await reload();
                                     },
                                   ),
                                   const SizedBox(width: 8),
                                   _CircleIcon(
-                                    icon: s.changeable ? Icons.refresh : Icons.visibility_off,
+                                    icon: s.changeable
+                                        ? Icons.refresh
+                                        : Icons.visibility_off,
                                     onTap: () async {
-                                      await ref.read(apiProvider).toggleSite(field: 'changeable', key: s.key);
+                                      await ref.read(apiProvider).toggleSite(
+                                          field: 'changeable', key: s.key);
                                       await reload();
                                     },
                                     onLongPress: () async {
-                                      await ref.read(apiProvider).toggleSite(field: 'changeable', all: !s.changeable);
+                                      await ref.read(apiProvider).toggleSite(
+                                          field: 'changeable',
+                                          all: !s.changeable);
                                       await reload();
                                     },
                                   ),
@@ -303,25 +338,35 @@ Future<void> showSitePicker(
                                 ),
                                 const SizedBox(width: 8),
                                 _CircleIcon(
-                                  icon: s.searchable ? Icons.search : Icons.search_off,
+                                  icon: s.searchable
+                                      ? Icons.search
+                                      : Icons.search_off,
                                   onTap: () async {
-                                    await ref.read(apiProvider).toggleSite(field: 'searchable', key: s.key);
+                                    await ref.read(apiProvider).toggleSite(
+                                        field: 'searchable', key: s.key);
                                     await reload();
                                   },
                                   onLongPress: () async {
-                                    await ref.read(apiProvider).toggleSite(field: 'searchable', all: !s.searchable);
+                                    await ref.read(apiProvider).toggleSite(
+                                        field: 'searchable',
+                                        all: !s.searchable);
                                     await reload();
                                   },
                                 ),
                                 const SizedBox(width: 6),
                                 _CircleIcon(
-                                  icon: s.changeable ? Icons.refresh : Icons.visibility_off,
+                                  icon: s.changeable
+                                      ? Icons.refresh
+                                      : Icons.visibility_off,
                                   onTap: () async {
-                                    await ref.read(apiProvider).toggleSite(field: 'changeable', key: s.key);
+                                    await ref.read(apiProvider).toggleSite(
+                                        field: 'changeable', key: s.key);
                                     await reload();
                                   },
                                   onLongPress: () async {
-                                    await ref.read(apiProvider).toggleSite(field: 'changeable', all: !s.changeable);
+                                    await ref.read(apiProvider).toggleSite(
+                                        field: 'changeable',
+                                        all: !s.changeable);
                                     await reload();
                                   },
                                 ),
@@ -374,9 +419,6 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
             try {
               await _prepareLeavePlayback();
               await api.loadConfig(src).timeout(const Duration(seconds: 45));
-              if (ctx.mounted) {
-                await kotvClearImageMemory(context: ctx, ref: ref);
-              }
               ref.invalidate(configProvider);
               ref.invalidate(settingsProvider);
               if (ctx.mounted) Navigator.pop(ctx, true);
@@ -422,9 +464,15 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text('添加点播源', style: TextStyle(color: p.fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700)),
+                      Text('添加点播源',
+                          style: TextStyle(
+                              color: p.fg,
+                              fontSize: m.compact ? 20 : 22,
+                              fontWeight: FontWeight.w700)),
                       const SizedBox(height: 8),
-                      Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON', style: TextStyle(color: p.muted, fontSize: m.compact ? 12 : 13)),
+                      Text('支持单线路、多仓索引、本地路径，或 {"sites":[…]} JSON',
+                          style: TextStyle(
+                              color: p.muted, fontSize: m.compact ? 12 : 13)),
                       const SizedBox(height: 12),
                       KotvTvTextField(
                         controller: ctrl,
@@ -441,7 +489,8 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
                       ),
                       if (status.isNotEmpty) ...[
                         const SizedBox(height: 10),
-                        Text(status, style: TextStyle(color: p.primary, fontSize: 13)),
+                        Text(status,
+                            style: TextStyle(color: p.primary, fontSize: 13)),
                       ],
                       const SizedBox(height: 16),
                       _configDialogActions(
@@ -467,7 +516,9 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
 
 /// 编辑当前点播源名称/地址（设置页长按编辑）。
 /// 返回保存后的地址/名称；取消则为 null。
-Future<({String url, String name})?> showEditVodDialog(BuildContext context, WidgetRef ref, {String? url, String? title}) async {
+Future<({String url, String name})?> showEditVodDialog(
+    BuildContext context, WidgetRef ref,
+    {String? url, String? title}) async {
   final api = ref.read(apiProvider);
   var oldUrl = (url ?? '').trim();
   var initialName = (title ?? '').trim();
@@ -486,7 +537,8 @@ Future<({String url, String name})?> showEditVodDialog(BuildContext context, Wid
   }
   if (!context.mounted) return null;
   if (oldUrl.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先添加点播源')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('请先添加点播源')));
     return null;
   }
   return _showEditSourceDialog(
@@ -496,13 +548,16 @@ Future<({String url, String name})?> showEditVodDialog(BuildContext context, Wid
     hint: '可改名称与地址；名称可空，空则列表显示完整地址；地址清空保存即删除',
     oldUrl: oldUrl,
     initialName: initialName,
-    onSave: (newUrl, name) => api.editRepo(oldUrl: oldUrl, url: newUrl, name: name),
+    onSave: (newUrl, name) =>
+        api.editRepo(oldUrl: oldUrl, url: newUrl, name: name),
     onDelete: api.deleteRepo,
   );
 }
 
 /// 编辑当前直播源名称/地址。返回保存结果；取消则为 null。
-Future<({String url, String name})?> showEditLiveDialog(BuildContext context, WidgetRef ref, {String? url, String? title}) async {
+Future<({String url, String name})?> showEditLiveDialog(
+    BuildContext context, WidgetRef ref,
+    {String? url, String? title}) async {
   final api = ref.read(apiProvider);
   var oldUrl = (url ?? '').trim();
   var initialName = (title ?? '').trim();
@@ -528,7 +583,8 @@ Future<({String url, String name})?> showEditLiveDialog(BuildContext context, Wi
   }
   if (!context.mounted) return null;
   if (oldUrl.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先添加直播源')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('请先添加直播源')));
     return null;
   }
   return _showEditSourceDialog(
@@ -538,7 +594,8 @@ Future<({String url, String name})?> showEditLiveDialog(BuildContext context, Wi
     hint: '可改名称与地址；名称可空，空则列表显示完整地址；地址清空保存即删除',
     oldUrl: oldUrl,
     initialName: initialName,
-    onSave: (newUrl, name) => api.editLive(oldUrl: oldUrl, url: newUrl, name: name),
+    onSave: (newUrl, name) =>
+        api.editLive(oldUrl: oldUrl, url: newUrl, name: name),
     onDelete: api.deleteLive,
     stopPlaybackAlways: true,
   );
@@ -551,8 +608,10 @@ Future<({String url, String name})?> _showEditSourceDialog(
   required String hint,
   required String oldUrl,
   required String initialName,
-  required Future<Map<String, dynamic>> Function(String url, String name) onSave,
+  required Future<Map<String, dynamic>> Function(String url, String name)
+      onSave,
   Future<Map<String, dynamic>> Function(String url)? onDelete,
+
   /// 直播源：任意保存/删除都停播；点播仅 URL 变更或删除时停。
   bool stopPlaybackAlways = false,
 }) async {
@@ -585,7 +644,8 @@ Future<({String url, String name})?> _showEditSourceDialog(
                 await onDelete(oldUrl).timeout(const Duration(seconds: 45));
                 ref.invalidate(configProvider);
                 ref.invalidate(settingsProvider);
-                if (ctx.mounted) Navigator.of(ctx, rootNavigator: true).pop(true);
+                if (ctx.mounted)
+                  Navigator.of(ctx, rootNavigator: true).pop(true);
               } on TimeoutException {
                 setLocal(() {
                   busy = false;
@@ -654,9 +714,14 @@ Future<({String url, String name})?> _showEditSourceDialog(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(kindTitle, style: TextStyle(color: p.fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700)),
+                      Text(kindTitle,
+                          style: TextStyle(
+                              color: p.fg,
+                              fontSize: m.compact ? 20 : 22,
+                              fontWeight: FontWeight.w700)),
                       const SizedBox(height: 8),
-                      Text(hint, style: TextStyle(color: p.muted, fontSize: 12)),
+                      Text(hint,
+                          style: TextStyle(color: p.muted, fontSize: 12)),
                       const SizedBox(height: 12),
                       KotvTvTextField(
                         controller: nameCtrl,
@@ -668,7 +733,9 @@ Future<({String url, String name})?> _showEditSourceDialog(
                           hintStyle: TextStyle(color: p.muted),
                           filled: true,
                           fillColor: p.input,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none),
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -683,12 +750,15 @@ Future<({String url, String name})?> _showEditSourceDialog(
                           hintStyle: TextStyle(color: p.muted),
                           filled: true,
                           fillColor: p.input,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none),
                         ),
                       ),
                       if (status.isNotEmpty) ...[
                         const SizedBox(height: 10),
-                        Text(status, style: TextStyle(color: p.primary, fontSize: 13)),
+                        Text(status,
+                            style: TextStyle(color: p.primary, fontSize: 13)),
                       ],
                       const SizedBox(height: 16),
                       _configDialogActions(
@@ -740,6 +810,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
           Navigator.pop(ctx, true);
         }
       }
+
       return Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: m.inset,
@@ -757,9 +828,15 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('直播源', style: TextStyle(color: p.fg, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700)),
+                  Text('直播源',
+                      style: TextStyle(
+                          color: p.fg,
+                          fontSize: m.compact ? 20 : 22,
+                          fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
-                  Text('可填在线 M3U/TXT/JSON 地址，或本机路径', style: TextStyle(color: p.muted, fontSize: m.compact ? 12 : 13)),
+                  Text('可填在线 M3U/TXT/JSON 地址，或本机路径',
+                      style: TextStyle(
+                          color: p.muted, fontSize: m.compact ? 12 : 13)),
                   const SizedBox(height: 12),
                   KotvTvTextField(
                     controller: ctrl,
@@ -824,7 +901,8 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
       fetch: api.liveSources,
       addLabel: '＋ 添加直播源',
       vodStyle: false,
-      onEdit: (url, title) => showEditLiveDialog(ctx, ref, url: url, title: title),
+      onEdit: (url, title) =>
+          showEditLiveDialog(ctx, ref, url: url, title: title),
       onDelete: (url) async {
         await _prepareLeavePlayback();
         await api.deleteLive(url);
@@ -871,7 +949,8 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
       vodStyle: true,
       fallbackCurrent: current,
       keepAtStart: true,
-      onEdit: (url, title) => showEditVodDialog(ctx, ref, url: url, title: title),
+      onEdit: (url, title) =>
+          showEditVodDialog(ctx, ref, url: url, title: title),
       onDelete: (url) async {
         await _prepareLeavePlayback();
         await api.deleteRepo(url);
@@ -889,28 +968,19 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
   await _prepareLeavePlayback();
   if (!context.mounted) return false;
 
-  final label = selected.length > 40 ? '${selected.substring(0, 40)}…' : selected;
+  final label =
+      selected.length > 40 ? '${selected.substring(0, 40)}…' : selected;
   ref.read(uiBusyProvider.notifier).state = '切换线路中…\n$label';
   try {
     await api.loadConfig(selected).timeout(const Duration(seconds: 45));
-    // 等引擎 ready，避免立刻 home 打到半截配置
-    for (var i = 0; i < 40; i++) {
-      final h = await api.health();
-      if (h['ready'] == true) break;
-      final err = '${h['error'] ?? ''}'.trim();
-      if (err.isNotEmpty) break;
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    }
-    if (context.mounted) {
-      await kotvClearImageMemory(context: context, ref: ref);
-    }
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);
     return true;
   } catch (e) {
     if (context.mounted) {
       final msg = e is TimeoutException ? '加载超时，源地址可能无效' : '$e';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('切换失败: $msg')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('切换失败: $msg')));
     }
     return false;
   } finally {
@@ -933,10 +1003,12 @@ Future<String?> pickChoice(
       title: Text(title, style: TextStyle(color: p.fg)),
       children: [
         for (var i = 0; i < options.length; i++)
-            KotvStableFocus(
-            autofocus: options[i].$2 == current || (i == 0 && !options.any((o) => o.$2 == current)),
+          KotvStableFocus(
+            autofocus: options[i].$2 == current ||
+                (i == 0 && !options.any((o) => o.$2 == current)),
             scrollIntoView: true,
-            onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(options[i].$2),
+            onPressed: () =>
+                Navigator.of(ctx, rootNavigator: true).pop(options[i].$2),
             borderRadius: 8,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
@@ -984,7 +1056,8 @@ Future<List<String>?> pickMultiChoice(
                         scrollIntoView: true,
                         onPressed: () {
                           setLocal(() {
-                            if (!selected.remove(options[i].$2)) selected.add(options[i].$2);
+                            if (!selected.remove(options[i].$2))
+                              selected.add(options[i].$2);
                           });
                         },
                         child: ExcludeFocus(
@@ -993,7 +1066,8 @@ Future<List<String>?> pickMultiChoice(
                             value: selected.contains(options[i].$2),
                             activeColor: p.fg,
                             checkColor: p.dialogBg,
-                            title: Text(options[i].$1, style: TextStyle(color: p.fg)),
+                            title: Text(options[i].$1,
+                                style: TextStyle(color: p.fg)),
                             controlAffinity: ListTileControlAffinity.leading,
                             onChanged: (on) {
                               setLocal(() {
@@ -1071,7 +1145,8 @@ class _SourceListDialog extends StatefulWidget {
   final bool vodStyle;
   final String fallbackCurrent;
   final bool keepAtStart;
-  final Future<({String url, String name})?> Function(String url, String title) onEdit;
+  final Future<({String url, String name})?> Function(String url, String title)
+      onEdit;
   final Future<void> Function(String url) onDelete;
 
   @override
@@ -1085,7 +1160,8 @@ class _SourceListDialogState extends State<_SourceListDialog> {
   var _pinnedStride = -1.0;
 
   int _indexOf(Map<String, dynamic> data) {
-    final list = ((data[widget.listKey] as List?) ?? []).whereType<Map>().toList();
+    final list =
+        ((data[widget.listKey] as List?) ?? []).whereType<Map>().toList();
     final current = '${data[widget.currentKey] ?? widget.fallbackCurrent}';
     for (var i = 0; i < list.length; i++) {
       final url = '${list[i]['url'] ?? ''}';
@@ -1140,12 +1216,15 @@ class _SourceListDialogState extends State<_SourceListDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final list = ((_local[widget.listKey] as List?) ?? []).whereType<Map>().toList();
+    final list =
+        ((_local[widget.listKey] as List?) ?? []).whereType<Map>().toList();
     final current = '${_local[widget.currentKey] ?? widget.fallbackCurrent}';
     final currentIndex = _indexOf(_local);
     final focusIndex = currentIndex >= 0 ? currentIndex : 0;
     final stride = _pillRowStride(context, pillHeight: 44, gap: 8);
-    if (!widget.keepAtStart && (_pinnedIndex != currentIndex || (_pinnedStride - stride).abs() > 0.5)) {
+    if (!widget.keepAtStart &&
+        (_pinnedIndex != currentIndex ||
+            (_pinnedStride - stride).abs() > 0.5)) {
       _pinnedIndex = currentIndex;
       _pinnedStride = stride;
       final offset = currentIndex <= 0 ? 0.0 : currentIndex * stride;
@@ -1182,10 +1261,14 @@ class _SourceListDialogState extends State<_SourceListDialog> {
               children: [
                 Text(
                   widget.title,
-                  style: TextStyle(color: titleColor, fontSize: m.compact ? 20 : 22, fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                      color: titleColor,
+                      fontSize: m.compact ? 20 : 22,
+                      fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 6),
-                Text(widget.hint, style: TextStyle(color: hintColor, fontSize: 14)),
+                Text(widget.hint,
+                    style: TextStyle(color: hintColor, fontSize: 14)),
                 const SizedBox(height: 12),
                 Expanded(
                   child: ListView.separated(
@@ -1209,10 +1292,14 @@ class _SourceListDialogState extends State<_SourceListDialog> {
                         key: ValueKey('$url|$name'),
                         label: name,
                         current: isCurrent,
-                        autofocus: widget.keepAtStart ? i == 0 : i == focusIndex,
-                        onTap: isCurrent ? () {} : () => Navigator.pop(context, url),
+                        autofocus:
+                            widget.keepAtStart ? i == 0 : i == focusIndex,
+                        onTap: isCurrent
+                            ? () {}
+                            : () => Navigator.pop(context, url),
                         onLongPress: () async {
-                          final edited = await widget.onEdit(url, '${r['title'] ?? ''}');
+                          final edited =
+                              await widget.onEdit(url, '${r['title'] ?? ''}');
                           if (edited == null || !mounted) return;
                           _applyLocalEdit(url, edited.url, edited.name);
                           await _reload();
@@ -1287,7 +1374,8 @@ class _RepoRow extends StatelessWidget {
 }
 
 class _CircleIcon extends StatelessWidget {
-  const _CircleIcon({required this.icon, required this.onTap, this.onLongPress});
+  const _CircleIcon(
+      {required this.icon, required this.onTap, this.onLongPress});
   final IconData icon;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
@@ -1307,7 +1395,8 @@ class _CircleIcon extends StatelessWidget {
           onTap: onTap,
           onLongPress: onLongPress,
           canRequestFocus: false,
-          child: SizedBox(width: 36, height: 36, child: Icon(icon, color: p.fg, size: 18)),
+          child: SizedBox(
+              width: 36, height: 36, child: Icon(icon, color: p.fg, size: 18)),
         ),
       ),
     );
@@ -1338,7 +1427,8 @@ class SettingTitle extends StatelessWidget {
           ),
           if (hint != null && hint!.isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text(hint!, style: TextStyle(color: p.muted, fontSize: 12, height: 1.3)),
+            Text(hint!,
+                style: TextStyle(color: p.muted, fontSize: 12, height: 1.3)),
           ],
         ],
       ),
@@ -1347,7 +1437,11 @@ class SettingTitle extends StatelessWidget {
 }
 
 class SettingChip extends StatelessWidget {
-  const SettingChip({super.key, required this.label, required this.selected, required this.onTap});
+  const SettingChip(
+      {super.key,
+      required this.label,
+      required this.selected,
+      required this.onTap});
   final String label;
   final bool selected;
   final VoidCallback onTap;
@@ -1360,39 +1454,44 @@ class SettingChip extends StatelessWidget {
       borderRadius: 10,
       scrollIntoView: true,
       child: Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        canRequestFocus: false,
-        borderRadius: BorderRadius.circular(10),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOut,
-          constraints: const BoxConstraints(minWidth: 108, minHeight: 40),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: selected ? p.selected : p.pillBg,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: selected ? p.primary.withOpacity(0.9) : p.pillBorder,
-              width: selected ? 1.2 : 1,
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          canRequestFocus: false,
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            constraints: const BoxConstraints(minWidth: 108, minHeight: 40),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? p.selected : p.pillBg,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: selected ? p.primary.withOpacity(0.9) : p.pillBorder,
+                width: selected ? 1.2 : 1,
+              ),
+              boxShadow: selected
+                  ? [
+                      BoxShadow(
+                          color: p.selected.withOpacity(0.35),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4))
+                    ]
+                  : null,
             ),
-            boxShadow: selected
-                ? [BoxShadow(color: p.selected.withOpacity(0.35), blurRadius: 12, offset: const Offset(0, 4))]
-                : null,
-          ),
-          child: Center(
-            child: Text(
-              selected ? '✓ $label' : label,
-              style: TextStyle(
-                color: selected ? Colors.white : p.fg,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
+            child: Center(
+              child: Text(
+                selected ? '✓ $label' : label,
+                style: TextStyle(
+                  color: selected ? Colors.white : p.fg,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -1421,50 +1520,56 @@ class SettingRow extends StatelessWidget {
         borderRadius: 12,
         scrollIntoView: true,
         child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          canRequestFocus: false,
-          borderRadius: BorderRadius.circular(12),
-          child: Ink(
-            decoration: BoxDecoration(
-              color: p.pillBg,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: p.pillBorder),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w600)),
-                        if (subtitle != null && subtitle!.isNotEmpty) ...[
-                          const SizedBox(height: 3),
-                          Text(subtitle!, style: TextStyle(color: p.muted, fontSize: 12)),
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            canRequestFocus: false,
+            borderRadius: BorderRadius.circular(12),
+            child: Ink(
+              decoration: BoxDecoration(
+                color: p.pillBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: p.pillBorder),
+              ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(label,
+                              style: TextStyle(
+                                  color: p.fg,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600)),
+                          if (subtitle != null && subtitle!.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text(subtitle!,
+                                style: TextStyle(color: p.muted, fontSize: 12)),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Flexible(
-                    child: Text(
-                      value,
-                      textAlign: TextAlign.right,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: p.muted, fontSize: 13.5),
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: Text(
+                        value,
+                        textAlign: TextAlign.right,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: p.muted, fontSize: 13.5),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  Icon(Icons.chevron_right_rounded, color: p.muted, size: 20),
-                ],
+                    const SizedBox(width: 6),
+                    Icon(Icons.chevron_right_rounded, color: p.muted, size: 20),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
         ),
       ),
     );
@@ -1487,7 +1592,8 @@ class SettingPanel extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: p.outline.withOpacity(0.45)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+      child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
     );
   }
 }
@@ -1507,7 +1613,8 @@ class KotvSettingsSectionTitle extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 18, 4, 10),
       child: Text(
         label,
-        style: TextStyle(color: p.fg, fontSize: 17, fontWeight: FontWeight.w700),
+        style:
+            TextStyle(color: p.fg, fontSize: 17, fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -1523,7 +1630,8 @@ class KotvSettingsCard extends StatelessWidget {
     final kids = <Widget>[];
     for (var i = 0; i < children.length; i++) {
       if (i > 0) {
-        kids.add(Divider(height: 1, thickness: 1, color: p.fg.withOpacity(0.08)));
+        kids.add(
+            Divider(height: 1, thickness: 1, color: p.fg.withOpacity(0.08)));
       }
       kids.add(children[i]);
     }
@@ -1531,7 +1639,8 @@ class KotvSettingsCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
       child: ColoredBox(
         color: p.pillBg.withOpacity(0.72),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: kids),
+        child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch, children: kids),
       ),
     );
   }
@@ -1557,33 +1666,41 @@ class KotvSettingsWideTile extends StatelessWidget {
       borderRadius: 8,
       scrollIntoView: true,
       child: Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        canRequestFocus: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w500)),
-              ),
-              if (value.isNotEmpty)
-                Flexible(
-                  child: Text(
-                    value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: TextStyle(color: p.muted, fontSize: 14),
-                  ),
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          canRequestFocus: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(label,
+                      style: TextStyle(
+                          color: p.fg,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500)),
                 ),
-              const SizedBox(width: 4),
-              Text('›', style: TextStyle(color: p.muted.withOpacity(0.7), fontSize: 18, height: 1)),
-            ],
+                if (value.isNotEmpty)
+                  Flexible(
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(color: p.muted, fontSize: 14),
+                    ),
+                  ),
+                const SizedBox(width: 4),
+                Text('›',
+                    style: TextStyle(
+                        color: p.muted.withOpacity(0.7),
+                        fontSize: 18,
+                        height: 1)),
+              ],
+            ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -1624,37 +1741,44 @@ class KotvSettingsCell extends StatelessWidget {
       borderRadius: 8,
       scrollIntoView: true,
       child: Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        canRequestFocus: false,
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: oneCol ? 14 : 12, vertical: oneCol ? 14 : 13),
-          // 标签按内容宽，数值吃满剩余宽度（由布局 ellipsis，不再硬截 10 字）。
-          child: Row(
-            children: [
-              Text(label, maxLines: 1, style: labelStyle),
-              if (value.isNotEmpty) ...[
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    value,
-                    maxLines: oneCol ? 2 : 2,
-                    overflow: TextOverflow.ellipsis,
-                    // 短文案右对齐；完整接口地址左起显示，避免只露路径末段。
-                    textAlign: value.contains('://') ? TextAlign.left : TextAlign.right,
-                    style: valueStyle,
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          canRequestFocus: false,
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+                horizontal: oneCol ? 14 : 12, vertical: oneCol ? 14 : 13),
+            // 标签按内容宽，数值吃满剩余宽度（由布局 ellipsis，不再硬截 10 字）。
+            child: Row(
+              children: [
+                Text(label, maxLines: 1, style: labelStyle),
+                if (value.isNotEmpty) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      value,
+                      maxLines: oneCol ? 2 : 2,
+                      overflow: TextOverflow.ellipsis,
+                      // 短文案右对齐；完整接口地址左起显示，避免只露路径末段。
+                      textAlign: value.contains('://')
+                          ? TextAlign.left
+                          : TextAlign.right,
+                      style: valueStyle,
+                    ),
                   ),
-                ),
-              ] else
-                const Spacer(),
-              const SizedBox(width: 4),
-              Text('›', style: TextStyle(color: p.muted.withOpacity(0.7), fontSize: oneCol ? 18 : 16, height: 1)),
-            ],
+                ] else
+                  const Spacer(),
+                const SizedBox(width: 4),
+                Text('›',
+                    style: TextStyle(
+                        color: p.muted.withOpacity(0.7),
+                        fontSize: oneCol ? 18 : 16,
+                        height: 1)),
+              ],
+            ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -1684,14 +1808,19 @@ class KotvSettingsGrid extends StatelessWidget {
         slice.add(const SizedBox.shrink());
       }
       if (rows.isNotEmpty) {
-        rows.add(Divider(height: 1, thickness: 1, color: Colors.white.withOpacity(0.08)));
+        rows.add(Divider(
+            height: 1, thickness: 1, color: Colors.white.withOpacity(0.08)));
       }
       rows.add(IntrinsicHeight(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             for (var c = 0; c < slice.length; c++) ...[
-              if (c > 0) VerticalDivider(width: 1, thickness: 1, color: Colors.white.withOpacity(0.08)),
+              if (c > 0)
+                VerticalDivider(
+                    width: 1,
+                    thickness: 1,
+                    color: Colors.white.withOpacity(0.08)),
               Expanded(child: slice[c]),
             ],
           ],

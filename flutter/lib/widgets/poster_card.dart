@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../vod/grid_style.dart';
 import '../vod/list_style.dart';
 import 'kotv_network_image.dart';
 import 'kotv_poster_image.dart';
@@ -16,12 +17,18 @@ class PosterCard extends StatelessWidget {
     required this.onTap,
     this.onLongPress,
     this.autofocus = false,
+    this.ratio = 0.75,
+    this.oval = false,
   });
 
   final VodItem item;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final bool autofocus;
+
+  /// 图片宽高比（宽 / 高）。格子高度已按它算好，这里只决定裁切形状。
+  final double ratio;
+  final bool oval;
 
   @override
   Widget build(BuildContext context) {
@@ -35,101 +42,115 @@ class PosterCard extends StatelessWidget {
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: ClipRRect(
-            borderRadius: BorderRadius.circular(10 * s),
-            child: LayoutBuilder(
-              builder: (context, c) {
-                if (!c.hasBoundedHeight || !c.hasBoundedWidth || c.maxHeight <= 0 || c.maxWidth <= 0) {
-                  return ColoredBox(color: p.posterPh);
-                }
-                final barH = (c.maxHeight * 0.18).clamp(30.0, 48.0);
-                final remarkBottom = barH + 4;
-                final titleLines = barH >= 40 ? 2 : 1;
-                // 按格子逻辑尺寸量化解码，降低像素与内存；滚回同桶可命中。
-                final designW = kotvPosterDesignBucket(c.maxWidth, max: 214);
-                final designH = kotvPosterDesignBucket(c.maxHeight, max: 286);
-                final letter = () {
-                  final s = item.name.trim();
-                  if (s.isEmpty) return '?';
-                  final it = s.runes.iterator;
-                  return it.moveNext() ? String.fromCharCode(it.current) : '?';
-                }();
-                return Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    ColoredBox(
-                      color: p.posterPh,
-                      child: item.pic.isEmpty || !_isHttpPic(item.pic)
-                          ? Center(
-                              child: item.isFolder
-                                  ? Icon(Icons.folder_outlined, color: p.fg.withOpacity(0.35), size: 54 * s)
-                                  : Text(
-                                      letter,
-                                      style: TextStyle(
-                                        color: p.fg.withOpacity(0.35),
-                                        fontSize: 54 * s,
-                                        fontWeight: FontWeight.w700,
-                                        height: 1.2,
-                                      ),
-                                    ),
-                            )
-                          : KotvPosterNetImage(
-                              item.pic.trim(),
-                              fit: BoxFit.cover,
-                              designWidth: designW,
-                              designHeight: designH,
-                              errorBuilder: (_, __, ___) => ColoredBox(color: p.posterPh),
-                            ),
-                    ),
-                    if (item.remarks.isNotEmpty)
-                      Positioned(
-                        left: 5 * s,
-                        bottom: remarkBottom,
-                        child: Container(
-                          padding: EdgeInsets.symmetric(horizontal: 5 * s, vertical: 2 * s),
-                          decoration: BoxDecoration(
-                            color: p.primary.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(5 * s),
-                          ),
-                          child: Text(
-                            item.remarks,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              height: 1.2,
-                            ),
-                          ),
-                        ),
+          borderRadius: BorderRadius.circular(10 * s),
+          child: LayoutBuilder(
+            builder: (context, c) {
+              if (!c.hasBoundedHeight ||
+                  !c.hasBoundedWidth ||
+                  c.maxHeight <= 0 ||
+                  c.maxWidth <= 0) {
+                return ColoredBox(color: p.posterPh);
+              }
+              final titleH = kotvPosterTitleDesign * s;
+              final designW = kotvPosterDesignBucket(c.maxWidth,
+                  max: ratio > 1 ? 640 : 480);
+              final letter = () {
+                final name = item.name.trim();
+                if (name.isEmpty) return '?';
+                final it = name.runes.iterator;
+                return it.moveNext() ? String.fromCharCode(it.current) : '?';
+              }();
+              Widget image = ColoredBox(
+                color: p.posterPh,
+                child: item.pic.isEmpty || !_isHttpPic(item.pic)
+                    ? Center(
+                        child: item.isFolder
+                            ? Icon(Icons.folder_outlined,
+                                color: p.fg.withOpacity(0.35), size: 54 * s)
+                            : Text(
+                                letter,
+                                style: TextStyle(
+                                  color: p.fg.withOpacity(0.35),
+                                  fontSize: 54 * s,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.2,
+                                ),
+                              ),
+                      )
+                    : KotvPosterNetImage(
+                        item.pic.trim(),
+                        fit: BoxFit.cover,
+                        designWidth: designW,
+                        errorBuilder: (_, __, ___) =>
+                            ColoredBox(color: p.posterPh),
                       ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: barH,
-                      child: Container(
+              );
+              if (oval) image = ClipOval(child: image);
+              return Column(
+                children: [
+                  Expanded(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        image,
+                        if (item.remarks.isNotEmpty)
+                          Positioned(
+                            left: 5 * s,
+                            right: 5 * s,
+                            bottom: 4 * s,
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Container(
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: 5 * s, vertical: 2 * s),
+                                decoration: BoxDecoration(
+                                  color: p.primary.withOpacity(0.9),
+                                  borderRadius: BorderRadius.circular(5 * s),
+                                ),
+                                child: Text(
+                                  item.remarks,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    height: titleH,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4 * s),
+                      child: Align(
                         alignment: Alignment.center,
-                        color: p.posterBar,
-                        padding: EdgeInsets.symmetric(horizontal: 5 * s, vertical: 2),
                         child: Text(
                           item.name,
-                          maxLines: titleLines,
+                          maxLines: titleH >= 40 ? 2 : 1,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: p.fg,
-                            fontSize: titleLines == 2 ? 12.5 : 14,
+                            fontSize: 13 * s,
                             fontWeight: FontWeight.w700,
                             height: 1.15,
                           ),
                         ),
                       ),
                     ),
-                  ],
-                );
-              },
-            ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
+      ),
     );
   }
 
@@ -165,7 +186,6 @@ class VodListTile extends StatelessWidget {
             pic,
             fit: BoxFit.cover,
             designWidth: 48,
-            designHeight: 48,
             errorBuilder: (_, __, ___) => _ListInitial(letter: letter),
           )
         : _ListInitial(letter: letter);
@@ -191,7 +211,8 @@ class VodListTile extends StatelessWidget {
                     item.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                        color: p.fg, fontSize: 15, fontWeight: FontWeight.w600),
                   ),
                   if (item.remarks.isNotEmpty)
                     Text(
@@ -222,14 +243,15 @@ class _ListInitial extends StatelessWidget {
       child: Center(
         child: Text(
           letter,
-          style: TextStyle(color: p.fg, fontSize: 20, fontWeight: FontWeight.w700),
+          style:
+              TextStyle(color: p.fg, fontSize: 20, fontWeight: FontWeight.w700),
         ),
       ),
     );
   }
 }
 
-/// 海报流：按宽度算列数；窄屏最多 3 列，避免格子过矮只露半截。
+/// 海报流：列数按屏幕方向、短边和平海报尺寸档计算。
 class PosterFlow extends StatelessWidget {
   const PosterFlow({
     super.key,
@@ -237,33 +259,36 @@ class PosterFlow extends StatelessWidget {
     required this.onOpen,
     this.onLongPress,
     this.padding = const EdgeInsets.fromLTRB(50, 10, 50, 24),
+    this.size = 2,
+    this.style = const KotvGridStyle(),
   });
 
   final List<VodItem> items;
   final void Function(VodItem) onOpen;
   final void Function(VodItem)? onLongPress;
   final EdgeInsets padding;
+  final int size;
+  final KotvGridStyle style;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, c) {
-        final compact = KotvLayout.isCompact(context);
-        // 用逻辑宽度算列数，不要乘 scale，否则缩得越小列越多、海报越矮
-        final gap = compact ? 6.0 : 10.0;
-        final pad = compact ? const EdgeInsets.fromLTRB(12, 8, 12, 16) : padding;
+        final pad = KotvLayout.isCompact(context)
+            ? const EdgeInsets.fromLTRB(12, 8, 12, 16)
+            : padding;
         final inner = c.maxWidth - pad.horizontal;
-        // 窄屏强制 3 列；宽屏按 200px cell 算
-        final cross = compact ? 3 : (inner / (200.0 + gap)).floor().clamp(3, 5);
+        final m =
+            kotvPosterMetrics(context, extent: inner, style: style, size: size);
         return GridView.builder(
           padding: pad,
           addAutomaticKeepAlives: false,
           cacheExtent: 800,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: cross,
-            mainAxisSpacing: gap,
-            crossAxisSpacing: gap,
-            childAspectRatio: 214 / 286,
+            crossAxisCount: m.columns,
+            mainAxisSpacing: m.gap,
+            crossAxisSpacing: m.gap,
+            childAspectRatio: m.aspect,
           ),
           itemCount: items.length,
           itemBuilder: (context, i) {
@@ -271,6 +296,8 @@ class PosterFlow extends StatelessWidget {
             return PosterCard(
               item: it,
               autofocus: false,
+              ratio: style.ratio,
+              oval: style.isOval,
               onTap: () => onOpen(it),
               onLongPress: onLongPress == null ? null : () => onLongPress!(it),
             );
