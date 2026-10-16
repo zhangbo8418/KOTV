@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../player/kotv_platform.dart';
 import '../providers.dart';
 import 'kotv_wallpaper_cache.dart';
 import '../widgets/kotv_network_image.dart';
@@ -29,6 +30,14 @@ Future<void> kotvClearImageMemory({
 
   if (context == null || !context.mounted || url.isEmpty) return;
 
+  if (kotvIsWindows()) {
+    final bytes = await kotvReadWallpaperBytes(url);
+    if (!context.mounted || bytes == null) return;
+    try {
+      await precacheImage(MemoryImage(bytes), context);
+    } catch (_) {}
+    return;
+  }
   final disk = kotvWallpaperDiskImage(url);
   if (disk != null) {
     try {

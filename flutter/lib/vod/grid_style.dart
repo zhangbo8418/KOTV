@@ -14,15 +14,18 @@ const double kotvPosterNamePad = 6;
 /// 手机 14，电视 16。字号显式给出，再交给 [TextScaler]，测量和绘制用同一份样式。
 double kotvPosterNameFont({required bool television}) => television ? 16 : 14;
 
-TextStyle kotvPosterNameStyle({required bool television, Color? color}) =>
-    TextStyle(
-      color: color,
-      fontSize: kotvPosterNameFont(television: television),
-      fontWeight: FontWeight.w700,
-      height: 1.15,
-      fontFamily: kotvThemeFontFamily(),
-      fontFamilyFallback: kotvFontFallbacks(),
-    );
+TextStyle kotvPosterNameStyle({required bool television, Color? color}) {
+  // 只有 Win7 指定 NotoSansSC。其它平台 fontFamily 留空，沿用系统字体。
+  final family = kotvThemeFontFamily();
+  return TextStyle(
+    color: color,
+    fontSize: kotvPosterNameFont(television: television),
+    fontWeight: FontWeight.w700,
+    height: 1.15,
+    fontFamily: family,
+    fontFamilyFallback: family == null ? null : kotvFontFallbacks(),
+  );
+}
 
 final _posterNameLineHeights = <String, double>{};
 

@@ -32,7 +32,8 @@ class KotvColors {
 /// 真 Win7 上 COLR 常认字却渲不出，须把 [NotoEmoji]（黑白）放在 [NotoColorEmoji] 前面。
 List<String> kotvFontFallbacks() => _kotvFontFallbacks();
 
-/// 仅 Win7 指定内嵌字体；其它平台用系统默认，再靠 [kotvFontFallbacks]。
+/// 仅 Win7 用内嵌 NotoSansSC。Win7 没有可用的彩色 emoji，文字也靠这套内嵌字体。
+/// 其它平台走系统字体，不使用 NotoSansSC。
 String? kotvThemeFontFamily() =>
     !kIsWeb && Platform.isWindows && kotvIsWindows7() ? 'NotoSansSC' : null;
 
@@ -40,14 +41,14 @@ List<String> _kotvFontFallbacks() {
   if (kIsWeb) return const [];
   if (Platform.isWindows) {
     if (kotvIsWindows7()) {
-      // COLR 在 Win7 常认字却渲不出；黑白 NotoEmoji 必须排在彩色前面，否则会空白。
+      // 系统没有彩色 emoji。黑白 NotoEmoji 必须排在彩色前面，否则会空白。
       return const [
-        'Segoe UI',
-        'Microsoft YaHei UI',
-        'Microsoft YaHei',
         'NotoSansSC',
         'NotoEmoji',
         'NotoColorEmoji',
+        'Segoe UI',
+        'Microsoft YaHei UI',
+        'Microsoft YaHei',
         'Segoe UI Symbol',
       ];
     }
@@ -55,7 +56,6 @@ List<String> _kotvFontFallbacks() {
       'Segoe UI',
       'Microsoft YaHei UI',
       'Microsoft YaHei',
-      'NotoSansSC',
       'Segoe UI Emoji',
       'NotoColorEmoji',
       'Segoe UI Symbol',

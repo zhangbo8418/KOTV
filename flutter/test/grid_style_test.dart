@@ -76,8 +76,10 @@ void main() {
     expect(style.inherit, isTrue);
     expect(style.fontWeight, FontWeight.w700);
     expect(style.height, 1.15);
-    expect(style.fontFamily, kotvThemeFontFamily());
-    expect(style.fontFamilyFallback, kotvFontFallbacks());
+    final family = kotvThemeFontFamily();
+    expect(style.fontFamily, family);
+    expect(style.fontFamilyFallback, family == null ? isNull : kotvFontFallbacks());
+    expect(kotvFontFallbacks().contains('NotoSansSC'), family != null);
   });
 
   test('cell aspect matches the image ratio', () {

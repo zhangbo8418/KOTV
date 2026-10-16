@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../player/kotv_platform.dart';
 import '../providers.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
@@ -152,6 +154,10 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
               builder: (context, constraints) {
                 final dpr = MediaQuery.devicePixelRatioOf(context);
                 final w = (constraints.maxWidth * dpr).round().clamp(1, 1920);
+                // Windows 解码会占着壁纸文件，替换文件时画面会空掉。改成读进内存再画。
+                if (kotvIsWindows()) {
+                  return _WinWallImage(url: image, decodeWidth: w);
+                }
                 // 磁盘命中优先：清 ImageCache 后立刻有图，不等网络。
                 if (disk != null) {
                   return Image(
@@ -173,10 +179,8 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
                   image,
                   fit: BoxFit.cover,
                   filterQuality: FilterQuality.medium,
-                  // 限制解码尺寸，降低 Win7 上大图解码导致的原生闪退风险
                   cacheWidth: w,
                   gaplessPlayback: true,
-                  // 失败时不拆掉整层：gapless 保留上一帧；无帧才缩成透明。
                   errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                 );
               },
@@ -187,6 +191,74 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
         Positioned(left: -100, bottom: -60, child: _Glow(glowBot, 360)),
         Positioned(right: 80, bottom: 80, child: _Glow(glowMid, 220)),
         widget.child,
+      ],
+    );
+  }
+}
+
+/// Windows 壁纸：字节留在内存里画。新图没到之前继续显示上一张。
+class _WinWallImage extends StatefulWidget {
+  const _WinWallImage({required this.url, required this.decodeWidth});
+
+  final String url;
+  final int decodeWidth;
+
+  @override
+  State<_WinWallImage> createState() => _WinWallImageState();
+}
+
+class _WinWallImageState extends State<_WinWallImage> {
+  Uint8List? _bytes;
+  int _gen = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load(widget.url));
+  }
+
+  @override
+  void didUpdateWidget(covariant _WinWallImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) unawaited(_load(widget.url));
+  }
+
+  Future<void> _load(String url) async {
+    final gen = ++_gen;
+    var bytes = await kotvReadWallpaperBytes(url);
+    if (bytes == null) {
+      await kotvPersistWallpaper(url);
+      bytes = await kotvReadWallpaperBytes(url);
+    }
+    if (!mounted || gen != _gen || bytes == null) return;
+    setState(() => _bytes = bytes);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final net = KotvNetworkImage(
+      widget.url,
+      fit: BoxFit.cover,
+      filterQuality: FilterQuality.medium,
+      cacheWidth: widget.decodeWidth,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+    );
+    final bytes = _bytes;
+    if (bytes == null) return net;
+    // 内存图还没解出来时底下仍是网络图，避免换文件或重解码时闪空。
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        net,
+        Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+          gaplessPlayback: true,
+          cacheWidth: widget.decodeWidth,
+          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        ),
       ],
     );
   }
