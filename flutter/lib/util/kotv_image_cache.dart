@@ -7,7 +7,9 @@ import '../widgets/kotv_network_image.dart';
 
 /// 启动时收紧 ImageCache 上限，减轻长时间浏览海报堆积。
 void kotvConfigureImageCacheBudget() {
-  PaintingBinding.instance.imageCache.maximumSizeBytes = 64 << 20; // 64MB
+  final cache = PaintingBinding.instance.imageCache;
+  cache.maximumSize = 200;
+  cache.maximumSizeBytes = 64 << 20; // 64MB
 }
 
 /// 清海报等全局 ImageCache；立刻按粘住的壁纸预热并触发壳层重挂。

@@ -21,21 +21,6 @@ ImageProvider kotvStillMemoryImage(Uint8List bytes) {
   return _KotvStillMemoryImage(bytes);
 }
 
-class _KotvImageLoad {
-  HttpClientRequest? request;
-  StreamSubscription<List<int>>? sub;
-  bool cancelled = false;
-
-  void abort() {
-    if (cancelled) return;
-    cancelled = true;
-    try {
-      request?.abort();
-    } catch (_) {}
-    unawaited(sub?.cancel() ?? Future<void>.value());
-  }
-}
-
 class KotvHttpImage extends ImageProvider<KotvHttpImage> {
   const KotvHttpImage(this.url, {this.headers, this.scale = 1.0, this.singleFrame = false});
 
@@ -53,47 +38,31 @@ class KotvHttpImage extends ImageProvider<KotvHttpImage> {
 
   @override
   ImageStreamCompleter loadImage(KotvHttpImage key, ImageDecoderCallback decode) {
-    final load = _KotvImageLoad();
-    final ImageStreamCompleter completer;
     if (key.singleFrame) {
-      completer = OneFrameImageStreamCompleter(_firstFrame(key, (buffer) => decode(buffer), load));
-    } else {
-      completer = MultiFrameImageStreamCompleter(
-        codec: _fetch(key, (buffer) => decode(buffer), load),
-        scale: key.scale,
-      );
+      return OneFrameImageStreamCompleter(_firstFrame(key, (buffer) => decode(buffer)));
     }
-    // 格子滚出视口、无 listener 时中止在途下载，避免全分辨率继续解码。
-    completer.addOnLastListenerRemovedCallback(load.abort);
-    return completer;
+    return MultiFrameImageStreamCompleter(
+      codec: _fetch(key, (buffer) => decode(buffer)),
+      scale: key.scale,
+    );
   }
 
   @override
   ImageStreamCompleter loadBuffer(KotvHttpImage key, DecoderBufferCallback decode) {
-    final load = _KotvImageLoad();
-    final ImageStreamCompleter completer;
     if (key.singleFrame) {
-      completer = OneFrameImageStreamCompleter(_firstFrame(key, (buffer) => decode(buffer), load));
-    } else {
-      completer = MultiFrameImageStreamCompleter(
-        codec: _fetch(key, (buffer) => decode(buffer), load),
-        scale: key.scale,
-      );
+      return OneFrameImageStreamCompleter(_firstFrame(key, (buffer) => decode(buffer)));
     }
-    completer.addOnLastListenerRemovedCallback(load.abort);
-    return completer;
+    return MultiFrameImageStreamCompleter(
+      codec: _fetch(key, (buffer) => decode(buffer)),
+      scale: key.scale,
+    );
   }
 
   static Future<ImageInfo> _firstFrame(
     KotvHttpImage key,
     Future<ui.Codec> Function(ui.ImmutableBuffer buffer) decode,
-    _KotvImageLoad load,
   ) async {
-    final codec = await _fetch(key, decode, load);
-    if (load.cancelled) {
-      codec.dispose();
-      throw StateError('image cancelled: ${key.url}');
-    }
+    final codec = await _fetch(key, decode);
     final frame = await codec.getNextFrame();
     codec.dispose();
     return ImageInfo(image: frame.image, scale: key.scale);
@@ -102,60 +71,27 @@ class KotvHttpImage extends ImageProvider<KotvHttpImage> {
   static Future<ui.Codec> _fetch(
     KotvHttpImage key,
     Future<ui.Codec> Function(ui.ImmutableBuffer buffer) decode,
-    _KotvImageLoad load,
   ) async {
     try {
-      if (load.cancelled) throw StateError('image cancelled: ${key.url}');
       final uri = Uri.parse(key.url);
       final req = await _client.getUrl(uri);
-      load.request = req;
-      if (load.cancelled) {
-        try {
-          req.abort();
-        } catch (_) {}
-        throw StateError('image cancelled: ${key.url}');
-      }
       key.headers?.forEach((name, value) {
         req.headers.set(name, value);
       });
       final res = await req.close();
-      if (load.cancelled) {
-        await res.drain<void>();
-        throw StateError('image cancelled: ${key.url}');
-      }
       if (res.statusCode != HttpStatus.ok) {
         await res.drain<void>();
         throw NetworkImageLoadException(statusCode: res.statusCode, uri: uri);
       }
-      final builder = BytesBuilder(copy: false);
-      final done = Completer<void>();
-      load.sub = res.listen(
-        (chunk) {
-          if (load.cancelled) return;
-          builder.add(chunk);
-        },
-        onDone: done.complete,
-        onError: done.completeError,
-        cancelOnError: true,
-      );
-      await done.future;
-      if (load.cancelled) {
-        throw StateError('image cancelled: ${key.url}');
-      }
-      final bytes = builder.takeBytes();
+      final bytes = await consolidateHttpClientResponseBytes(res);
       if (bytes.isEmpty) {
         throw StateError('empty image: $uri');
       }
-      if (load.cancelled) {
-        throw StateError('image cancelled: ${key.url}');
-      }
-      return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+      return await decode(await ui.ImmutableBuffer.fromUint8List(bytes));
     } catch (e) {
-      if (!load.cancelled) {
-        scheduleMicrotask(() {
-          PaintingBinding.instance.imageCache.evict(key);
-        });
-      }
+      scheduleMicrotask(() {
+        PaintingBinding.instance.imageCache.evict(key);
+      });
       rethrow;
     }
   }
