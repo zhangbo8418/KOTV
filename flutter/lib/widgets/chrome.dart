@@ -522,21 +522,31 @@ class SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
-    return SizedBox(
-      height: 32,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(title, style: TextStyle(color: p.fg, fontSize: 24, fontWeight: FontWeight.w700)),
-          if (subtitle.isNotEmpty) ...[
-            const SizedBox(width: 12),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 2),
-              child: Text(subtitle, style: TextStyle(color: p.muted, fontSize: 14)),
+    final scaler = MediaQuery.textScalerOf(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          title,
+          textScaler: TextScaler.noScaling,
+          style: TextStyle(
+            color: p.fg,
+            fontSize: scaler.scale(24),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if (subtitle.isNotEmpty) ...[
+          SizedBox(width: scaler.scale(12)),
+          Padding(
+            padding: EdgeInsets.only(bottom: scaler.scale(2)),
+            child: Text(
+              subtitle,
+              textScaler: TextScaler.noScaling,
+              style: TextStyle(color: p.muted, fontSize: scaler.scale(14)),
             ),
-          ],
+          ),
         ],
-      ),
+      ],
     );
   }
 }

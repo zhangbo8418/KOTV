@@ -9,7 +9,7 @@ import '../vod/list_style.dart';
 import 'kotv_network_image.dart';
 import 'kotv_poster_image.dart';
 
-/// 海报：图片按比例裁切，名称在图片下面，备注在图片上。
+/// 海报：图片按比例裁切，名称条盖在图片底部，备注在名称条上方。
 /// 名称底和文字颜色走当前主题。
 class PosterCard extends StatelessWidget {
   const PosterCard({
@@ -27,7 +27,7 @@ class PosterCard extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool autofocus;
 
-  /// 图片宽高比（宽 / 高）。格子高度已按它算好，这里只决定裁切形状。
+  /// 图片宽高比（宽 / 高）。格子高度已按它算好，名称条不另占高度。
   final double ratio;
   final bool oval;
 
@@ -55,7 +55,6 @@ class PosterCard extends StatelessWidget {
               final television = KotvLayout.television;
               final titleH = kotvPosterTitleExtent(
                 television: television,
-                oval: oval,
                 textScaler: MediaQuery.textScalerOf(context),
               );
               final designW = kotvPosterDesignBucket(c.maxWidth,
@@ -87,52 +86,48 @@ class PosterCard extends StatelessWidget {
                       ),
               );
               if (oval) image = ClipOval(child: image);
-              return Column(
+              return Stack(
+                fit: StackFit.expand,
                 children: [
-                  Expanded(
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        image,
-                        if (item.remarks.isNotEmpty)
-                          Positioned(
-                            left: 5 * s,
-                            right: 5 * s,
-                            bottom: 4 * s,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Container(
-                                padding: EdgeInsets.symmetric(
-                                    horizontal: 5 * s, vertical: 2 * s),
-                                decoration: BoxDecoration(
-                                  color: p.primary.withOpacity(0.9),
-                                  borderRadius: BorderRadius.circular(5 * s),
-                                ),
-                                child: Text(
-                                  item.remarks,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.2,
-                                  ),
-                                ),
-                              ),
+                  image,
+                  if (item.remarks.isNotEmpty)
+                    Positioned(
+                      left: 5 * s,
+                      right: 5 * s,
+                      bottom: titleH + 4 * s,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Container(
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 5 * s, vertical: 2 * s),
+                          decoration: BoxDecoration(
+                            color: p.primary.withOpacity(0.9),
+                            borderRadius: BorderRadius.circular(5 * s),
+                          ),
+                          child: Text(
+                            item.remarks,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              height: 1.2,
                             ),
                           ),
-                      ],
+                        ),
+                      ),
                     ),
-                  ),
-                  SizedBox(
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
                     height: titleH,
                     child: ColoredBox(
                       color: p.posterBar,
                       child: Padding(
-                        padding: oval
-                            ? EdgeInsets.only(top: television ? 4 : 0)
-                            : const EdgeInsets.all(kotvPosterNamePad),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: kotvPosterNamePad),
                         child: Align(
                           alignment: Alignment.center,
                           child: Text(

@@ -32,6 +32,10 @@ class KotvColors {
 /// 真 Win7 上 COLR 常认字却渲不出，须把 [NotoEmoji]（黑白）放在 [NotoColorEmoji] 前面。
 List<String> kotvFontFallbacks() => _kotvFontFallbacks();
 
+/// 仅 Win7 指定内嵌字体；其它平台用系统默认，再靠 [kotvFontFallbacks]。
+String? kotvThemeFontFamily() =>
+    !kIsWeb && Platform.isWindows && kotvIsWindows7() ? 'NotoSansSC' : null;
+
 List<String> _kotvFontFallbacks() {
   if (kIsWeb) return const [];
   if (Platform.isWindows) {
@@ -88,15 +92,13 @@ ThemeData buildKotvTheme([KotvPalette palette = KotvPalette.defaults]) {
     outline: palette.outline,
   );
   final fallbacks = _kotvFontFallbacks();
-  // 仅 Win7 内嵌 NotoSansSC；其它平台用系统默认无衬线 + fallback 链。
-  final useEmbeddedCJK = !kIsWeb && Platform.isWindows && kotvIsWindows7();
   return ThemeData(
     useMaterial3: true,
     brightness: scheme.brightness,
     colorScheme: scheme,
     scaffoldBackgroundColor: Colors.transparent,
     extensions: [palette],
-    fontFamily: useEmbeddedCJK ? 'NotoSansSC' : null,
+    fontFamily: kotvThemeFontFamily(),
     fontFamilyFallback: fallbacks,
     // Android 14+ 预测性返回 / 全面屏手势；iOS/macOS 用 Cupertino 跟手侧滑
     // Win7（Flutter 3.19）由 adapt-flutter-win7-sdk.sh 将 PredictiveBack 换成 Zoom

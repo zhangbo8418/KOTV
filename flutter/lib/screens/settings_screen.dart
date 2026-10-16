@@ -12,7 +12,6 @@ import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_store.dart';
 import '../api/kotv_engine_url.dart';
 import '../engine/engine_launcher.dart';
-import '../models/models.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/mpv_opts.dart';
@@ -2195,40 +2194,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _set('wallMode', 'gradient', msg: '已重置为极光紫');
   }
 
-  Future<void> _pickHome(List<SiteInfo> sites) async {
-    await showSitePicker(
-      context,
-      ref,
-      sites: sites,
-      onSelect: (key) async {
-        String name = key;
-        for (final s in sites) {
-          if (s.key == key) {
-            name = s.name;
-            break;
-          }
-        }
-        // 换首页前停详情/直播，避免后台继续出声。
-        await DetailScreen.prepareLeave();
-        await LiveScreen.prepareLeave();
-        ref.read(uiBusyProvider.notifier).state = '正在切换到 $name…';
-        try {
-          final api = ref.read(apiProvider);
-          await api.setHome(key);
-          // setHome 只改当前站。首页请求放在遮罩里，爬虫在这一步执行。
-          await api.home();
-          ref.invalidate(configProvider);
-          ref.invalidate(settingsProvider);
-          setState(() => _status = '已切换首页数据源：$name');
-        } catch (e) {
-          setState(() => _status = '切换失败: $e');
-        } finally {
-          ref.read(uiBusyProvider.notifier).state = null;
-        }
-      },
-    );
-  }
-
   Future<void> _showRuntime(
       EngineLauncher launcher, AsyncValue<Map<String, dynamic>> cfg) async {
     final buf =
@@ -2244,29 +2209,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final cfg = ref.watch(configProvider);
-    final homeName = cfg.maybeWhen(
-      data: (c) {
-        final key = '${c['home'] ?? ''}'.trim();
-        final named = '${c['homeName'] ?? ''}'.trim();
-        if (named.isNotEmpty) return named;
-        final sites = ((c['sites'] as List?) ?? []).whereType<Map>();
-        for (final s in sites) {
-          if ('${s['key'] ?? ''}' == key || s['home'] == true) {
-            return '${s['name'] ?? s['key']}';
-          }
-        }
-        return key.isNotEmpty ? key : '未选择';
-      },
-      orElse: () => '未选择',
-    );
     final launcher = ref.watch(engineLauncherProvider);
-    final sites = cfg.maybeWhen(
-      data: (c) => ((c['sites'] as List?) ?? [])
-          .whereType<Map>()
-          .map((e) => SiteInfo.fromJson(Map<String, dynamic>.from(e)))
-          .toList(),
-      orElse: () => <SiteInfo>[],
-    );
 
     final playerVal =
         kotvClampPlayerVal(g('player', kotvDefaultVodPlayer()), live: false);
@@ -2416,10 +2359,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   children: [
                     const KotvSettingsSectionTitle('数据源'),
                     KotvSettingsCard(children: [
-                      KotvSettingsWideTile(
-                          label: '首页数据源',
-                          value: homeName,
-                          onTap: () => _pickHome(sites)),
                       KotvSettingsGrid(children: [
                         KotvSettingsCell(
                           label: '点播源',

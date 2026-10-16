@@ -6,18 +6,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../theme/layout_scale.dart';
+import '../theme/kotv_theme.dart';
 
-/// 矩形名称上下左右内边距。
+/// 名称条上下左右内边距。
 const double kotvPosterNamePad = 6;
 
-/// 手机 14，电视 16。不继承主题字高，避免和测量不一致。
+/// 手机 14，电视 16。字号显式给出，再交给 [TextScaler]，测量和绘制用同一份样式。
 double kotvPosterNameFont({required bool television}) => television ? 16 : 14;
 
 TextStyle kotvPosterNameStyle({required bool television, Color? color}) =>
     TextStyle(
-      inherit: false,
       color: color,
       fontSize: kotvPosterNameFont(television: television),
+      fontWeight: FontWeight.w700,
+      height: 1.15,
+      fontFamily: kotvThemeFontFamily(),
+      fontFamilyFallback: kotvFontFallbacks(),
     );
 
 final _posterNameLineHeights = <String, double>{};
@@ -26,12 +30,14 @@ double kotvPosterNameLineHeight({
   required bool television,
   TextScaler textScaler = TextScaler.noScaling,
 }) {
-  final font = kotvPosterNameFont(television: television);
-  final key = '$television|${textScaler.scale(font)}';
+  final style = kotvPosterNameStyle(television: television);
+  final font = style.fontSize ?? kotvPosterNameFont(television: television);
+  final key =
+      '${style.fontFamily}|${style.fontWeight}|${style.height}|${textScaler.scale(font)}';
   final hit = _posterNameLineHeights[key];
   if (hit != null) return hit;
   final painter = TextPainter(
-    text: TextSpan(text: '国', style: kotvPosterNameStyle(television: television)),
+    text: TextSpan(text: '国', style: style),
     textDirection: TextDirection.ltr,
     textScaler: textScaler,
     maxLines: 1,
@@ -39,16 +45,14 @@ double kotvPosterNameLineHeight({
   return _posterNameLineHeights[key] = painter.height;
 }
 
-/// 名称在图片下面，高度是一行字。矩形加上下内边距；圆形电视再留 4。
+/// 名称条盖在图片上，高度是一行字加上下内边距。
 double kotvPosterTitleExtent({
   required bool television,
-  required bool oval,
   TextScaler textScaler = TextScaler.noScaling,
 }) {
-  final line =
-      kotvPosterNameLineHeight(television: television, textScaler: textScaler);
-  if (oval) return line + (television ? 4 : 0);
-  return line + kotvPosterNamePad * 2;
+  return kotvPosterNameLineHeight(
+          television: television, textScaler: textScaler) +
+      kotvPosterNamePad * 2;
 }
 
 class KotvGridStyle {
@@ -135,21 +139,9 @@ int kotvPosterColumns({
   return n;
 }
 
-/// 格子宽高比：图片高 = 宽 / ratio，标题在图片下面。
-double kotvPosterCellAspect({
-  required double extent,
-  required int columns,
-  required double gap,
-  required double ratio,
-  required double titleHeight,
-}) {
-  final r = KotvGridStyle.clampRatio(ratio, oval: false);
-  if (extent <= 0 || columns < 1) return r;
-  final cellW = (extent - gap * (columns - 1)) / columns;
-  if (cellW <= 0) return r;
-  final title = titleHeight < 0 ? 0.0 : titleHeight;
-  return cellW / (cellW / r + title);
-}
+/// 格子宽高比等于图片比例。名称条盖在图片上，不增加格子高度。
+double kotvPosterCellAspect({required double ratio, bool oval = false}) =>
+    KotvGridStyle.clampRatio(ratio, oval: oval);
 
 /// 当前窗口下的海报网格参数。
 ({int columns, double aspect, double gap}) kotvPosterMetrics(
@@ -169,16 +161,6 @@ double kotvPosterCellAspect({
           landStyle: style.isLand,
           television: KotvLayout.television,
         );
-  final aspect = kotvPosterCellAspect(
-    extent: extent.isFinite ? extent : 0,
-    columns: cols,
-    gap: gap,
-    ratio: style.ratio,
-    titleHeight: kotvPosterTitleExtent(
-      television: KotvLayout.television,
-      oval: style.isOval,
-      textScaler: MediaQuery.textScalerOf(context),
-    ),
-  );
+  final aspect = kotvPosterCellAspect(ratio: style.ratio, oval: style.isOval);
   return (columns: cols, aspect: aspect, gap: gap);
 }

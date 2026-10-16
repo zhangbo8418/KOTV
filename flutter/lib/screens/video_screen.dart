@@ -1234,8 +1234,9 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
     // 竖屏：轮播 + 下方两列功能卡
     if (bottomNav || compact) {
-      final gap = 10.0;
-      final cardH = 76.0;
+      final gap = LayoutScale.s(context, 10);
+      final cardH = LayoutScale.s(context, 76);
+      final bannerH = LayoutScale.s(context, 150);
       final actions = <Widget>[
         feature(
           title: '继续观看',
@@ -1283,7 +1284,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       ];
       return Column(
         children: [
-          SizedBox(height: 150, child: banner(10)),
+          SizedBox(height: bannerH, child: banner(LayoutScale.s(context, 10))),
           SizedBox(height: gap),
           for (var i = 0; i < actions.length; i += 2) ...[
             if (i > 0) SizedBox(height: gap),
@@ -1306,13 +1307,15 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
     return LayoutBuilder(
       builder: (context, c) {
-        final gap = 16.0;
+        final scale = LayoutScale.of(context);
+        final gap = LayoutScale.s(context, 16);
         final w = c.maxWidth;
-        // 四列等宽：左列宽 = 下方每张卡宽
-        final cardW = ((w - gap * 3) / 4).clamp(48.0, 400.0);
-        // 卡高略小于宽，接近参考图比例
-        final cardH = (cardW * 0.52).clamp(100.0, 132.0);
+        // 四列等宽：左列宽 = 下方每张卡宽，铺满当前窗口。
+        final rawW = (w - gap * 3) / 4;
+        final cardW = rawW.isFinite && rawW > 0 ? rawW : 1.0;
+        final cardH = cardW * 0.52 * scale;
         final heroH = cardH * 2 + gap;
+        final radius = LayoutScale.s(context, 14);
 
         Widget cell(Widget child) =>
             SizedBox(width: cardW, height: cardH, child: child);
@@ -1351,7 +1354,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
                     ),
                   ),
                   SizedBox(width: gap),
-                  Expanded(child: banner(14)),
+                  Expanded(child: banner(radius)),
                 ],
               ),
             ),

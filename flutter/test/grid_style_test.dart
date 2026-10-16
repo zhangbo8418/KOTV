@@ -1,4 +1,6 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kotv/theme/kotv_theme.dart';
 import 'package:kotv/vod/grid_style.dart';
 
 void main() {
@@ -66,22 +68,22 @@ void main() {
   test('title strip is one text line plus its padding', () {
     final line = kotvPosterNameLineHeight(television: false);
     expect(kotvPosterNameFont(television: false), 14);
-    expect(kotvPosterTitleExtent(television: false, oval: false), line + 12);
-    expect(kotvPosterTitleExtent(television: false, oval: true), line);
+    expect(kotvPosterTitleExtent(television: false), line + kotvPosterNamePad * 2);
     final tvLine = kotvPosterNameLineHeight(television: true);
     expect(kotvPosterNameFont(television: true), 16);
-    expect(kotvPosterTitleExtent(television: true, oval: false), tvLine + 12);
-    expect(kotvPosterTitleExtent(television: true, oval: true), tvLine + 4);
+    expect(kotvPosterTitleExtent(television: true), tvLine + kotvPosterNamePad * 2);
+    final style = kotvPosterNameStyle(television: false);
+    expect(style.inherit, isTrue);
+    expect(style.fontWeight, FontWeight.w700);
+    expect(style.height, 1.15);
+    expect(style.fontFamily, kotvThemeFontFamily());
+    expect(style.fontFamilyFallback, kotvFontFallbacks());
   });
 
-  test('cell aspect is image height plus title', () {
-    final aspect = kotvPosterCellAspect(
-      extent: 300,
-      columns: 3,
-      gap: 0,
-      ratio: 1,
-      titleHeight: 36,
-    );
-    expect(aspect, closeTo(100 / 136, 0.001));
+  test('cell aspect matches the image ratio', () {
+    expect(kotvPosterCellAspect(ratio: 0.75), 0.75);
+    expect(kotvPosterCellAspect(ratio: 1.33), 1.33);
+    expect(kotvPosterCellAspect(ratio: 0, oval: true), 1);
+    expect(kotvPosterCellAspect(ratio: 9), 4);
   });
 }
