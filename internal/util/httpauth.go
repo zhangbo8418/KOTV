@@ -52,7 +52,7 @@ func trimHTTPAuthHostsLocked() {
 	trimMapHalf(authUserByHost)
 }
 
-// ApplyStickyAuthQuery RequestInterceptor：有 ?auth= 则记；无则按 host 回填。
+// ApplyStickyAuthQuery：URL 带 ?auth= 则按 host 记住；无则回填已记凭据。
 func ApplyStickyAuthQuery(rawURL string) string {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
@@ -82,7 +82,7 @@ func ApplyStickyAuthQuery(rawURL string) string {
 	return u.String()
 }
 
-// ApplyBasicFromUserInfo AuthInterceptor.check：URL userinfo → Basic，并按 host 记忆。
+// ApplyBasicFromUserInfo：URL userinfo 转 Basic，并按 host 记忆。
 func ApplyBasicFromUserInfo(req *http.Request) {
 	if req == nil || req.URL == nil {
 		return
@@ -103,7 +103,7 @@ func ApplyBasicFromUserInfo(req *http.Request) {
 	req.Header.Set("Authorization", BasicAuthHeader(userInfo))
 }
 
-// RetryAuthOn401 AuthInterceptor：401 时用记忆凭据发 Digest/Basic 再请求一次。
+// RetryAuthOn401：401 时用记忆凭据发 Digest/Basic 再请求一次。
 func RetryAuthOn401(client *http.Client, req *http.Request, resp *http.Response) (*http.Response, error) {
 	if client == nil || req == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
 		return resp, nil
@@ -141,7 +141,7 @@ func RetryAuthOn401(client *http.Client, req *http.Request, resp *http.Response)
 	return client.Do(retry)
 }
 
-// BasicAuthHeader Auth.basic。
+// BasicAuthHeader 生成 Basic Authorization 头。
 func BasicAuthHeader(userInfo string) string {
 	if !strings.Contains(userInfo, ":") {
 		userInfo += ":"
@@ -149,7 +149,7 @@ func BasicAuthHeader(userInfo string) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(userInfo))
 }
 
-// DigestAuthHeader Auth.digest。
+// DigestAuthHeader 生成 Digest Authorization 头。
 func DigestAuthHeader(userInfo, wwwAuthenticate string, req *http.Request) string {
 	header := strings.TrimSpace(wwwAuthenticate)
 	if len(header) >= 7 && strings.EqualFold(header[:7], "Digest ") {
