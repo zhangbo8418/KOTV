@@ -57,7 +57,9 @@ build_android_abi() {
   local jni_dir="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
   mkdir -p "$jni_dir"
   # anet（torrent 间接依赖）在 Go 1.23+ 仍用 //go:linkname 访问 net.zoneCache。
-  local ldflags="-s -w -checklinkname=0 -extld=${cxx}"
+  # 引擎从 nativeLibraryDir 直接 exec，动态链接器不会搜可执行文件所在目录，
+  # 即使 APK 里已有 libc++_shared.so 也加载不到。静态链入 libc++。
+  local ldflags="-s -w -checklinkname=0 -extld=${cxx} -extldflags=-static-libstdc++"
   echo "==> android $abi (GOARCH=$goarch${goarm:+ GOARM=$goarm})"
   if [[ -n "$goarm" ]]; then
     CGO_ENABLED=1 GOOS=android GOARCH="$goarch" GOARM="$goarm" CC="$cc" CXX="$cxx" \
@@ -65,6 +67,12 @@ build_android_abi() {
   else
     CGO_ENABLED=1 GOOS=android GOARCH="$goarch" CC="$cc" CXX="$cxx" \
       go build -tags kotv_android -ldflags "$ldflags" -o "$jni_dir/libkotv_engine.so" ./cmd/engine
+  fi
+  # 直接 exec 时动态链接器只提供系统库；再出现 libc++_shared 就是这次的启动失败。
+  if "$prebuilt/bin/llvm-readelf" -d "$jni_dir/libkotv_engine.so" | grep -F 'libc++_shared.so' >/dev/null; then
+    echo "ERROR: $jni_dir/libkotv_engine.so still NEEDED libc++_shared.so" >&2
+    "$prebuilt/bin/llvm-readelf" -d "$jni_dir/libkotv_engine.so" >&2 || true
+    exit 1
   fi
   # arm64 再拷一份到 assets 便于校验；v7 只进 jniLibs。
   if [[ "$abi" == "arm64-v8a" ]]; then
