@@ -889,7 +889,7 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
     return false;
   }
   if (!context.mounted) return false;
-  final selected = await showDialog<String>(
+  final selected = await showDialog<_SourceChoice>(
     context: context,
     builder: (ctx) => _SourceListDialog(
       key: const ValueKey('live-source-list'),
@@ -911,12 +911,12 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
   );
   if (!context.mounted) return false;
   if (selected == null) return false;
-  if (selected.isEmpty) {
+  if (selected.url.isEmpty) {
     await showAddLiveDialog(context, ref);
     return true;
   }
   await _prepareLeavePlayback();
-  await KotvSettingsCache.set(api, 'live', selected);
+  await KotvSettingsCache.set(api, 'live', selected.url);
   return true;
 }
 
@@ -935,7 +935,7 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
   final current = '${data['current'] ?? ''}';
 
   if (!context.mounted) return false;
-  final selected = await showDialog<String>(
+  final selected = await showDialog<_SourceChoice>(
     context: context,
     builder: (ctx) => _SourceListDialog(
       key: const ValueKey('repo-source-list'),
@@ -960,7 +960,7 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
 
   if (!context.mounted) return false;
   if (selected == null) return false;
-  if (selected.isEmpty) {
+  if (selected.url.isEmpty) {
     return showAddVodDialog(context, ref);
   }
 
@@ -968,11 +968,16 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
   await _prepareLeavePlayback();
   if (!context.mounted) return false;
 
-  final label =
-      selected.length > 40 ? '${selected.substring(0, 40)}…' : selected;
-  ref.read(uiBusyProvider.notifier).state = '切换线路中…\n$label';
+  final title = selected.title.trim();
+  final link = selected.url.trim();
+  final named = title.isNotEmpty &&
+      title != link &&
+      !title.toLowerCase().startsWith('http://') &&
+      !title.toLowerCase().startsWith('https://');
+  ref.read(uiBusyProvider.notifier).state =
+      named ? '正在切换到 $title…' : '正在切换线路…';
   try {
-    await api.loadConfig(selected).timeout(const Duration(seconds: 45));
+    await api.loadConfig(selected.url).timeout(const Duration(seconds: 45));
     ref.invalidate(configProvider);
     ref.invalidate(settingsProvider);
     return true;
@@ -1116,6 +1121,12 @@ Future<List<String>?> pickMultiChoice(
       );
     },
   );
+}
+
+class _SourceChoice {
+  const _SourceChoice(this.url, this.title);
+  final String url;
+  final String title;
 }
 
 class _SourceListDialog extends StatefulWidget {
@@ -1280,7 +1291,7 @@ class _SourceListDialogState extends State<_SourceListDialog> {
                         return _RepoRow(
                           label: widget.addLabel,
                           autofocus: list.isEmpty,
-                          onTap: () => Navigator.pop(context, ''),
+                          onTap: () => Navigator.pop(context, const _SourceChoice('', '')),
                           onDelete: null,
                         );
                       }
@@ -1288,6 +1299,7 @@ class _SourceListDialogState extends State<_SourceListDialog> {
                       final url = '${r['url'] ?? ''}';
                       final isCurrent = r['current'] == true || url == current;
                       final name = '${r['name'] ?? url}';
+                      final title = '${r['title'] ?? ''}'.trim();
                       return _RepoRow(
                         key: ValueKey('$url|$name'),
                         label: name,
@@ -1296,7 +1308,8 @@ class _SourceListDialogState extends State<_SourceListDialog> {
                             widget.keepAtStart ? i == 0 : i == focusIndex,
                         onTap: isCurrent
                             ? () {}
-                            : () => Navigator.pop(context, url),
+                            : () => Navigator.pop(
+                                context, _SourceChoice(url, title)),
                         onLongPress: () async {
                           final edited =
                               await widget.onEdit(url, '${r['title'] ?? ''}');
