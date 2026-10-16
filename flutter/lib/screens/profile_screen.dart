@@ -398,6 +398,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     padding: EdgeInsets.zero,
+                    addAutomaticKeepAlives: false,
                     itemCount: _recent.length,
                     separatorBuilder: (_, __) => const SizedBox(width: 10),
                     itemBuilder: (_, i) {
