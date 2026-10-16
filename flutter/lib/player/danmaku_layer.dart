@@ -313,6 +313,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     _tick.removeListener(_onTick);
     _posSub?.cancel();
     widget.player.removeListener(_onPlayerNotify);
+    _clearFlying();
     _tick.dispose();
     super.dispose();
   }
@@ -350,14 +351,14 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
       if (widget.enabled) {
         _reseedWindow();
       } else {
-        _flying.clear();
+        _clearFlying();
         _cursor = 0;
         _lastActivateSec = -1;
       }
     }
     if (oldWidget.enabled != widget.enabled) {
       if (!widget.enabled) {
-        _flying.clear();
+        _clearFlying();
         _lastActivateSec = -1;
         _cursor = 0;
         if (mounted) setState(() {});
@@ -399,9 +400,16 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     _syncTicker();
   }
 
+  void _clearFlying() {
+    for (final f in _flying) {
+      f.dispose();
+    }
+    _flying.clear();
+  }
+
   /// 清屏后按最近窗口重投；暂停时也刷一帧，避免残影留在画面上。
   void _reseedWindow() {
-    _flying.clear();
+    _clearFlying();
     final mediaSec = _mediaPos.inMilliseconds / 1000.0;
     _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
     _cursor = 0;
@@ -500,7 +508,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
         _cursor++;
       }
     } else if (mediaSec + 0.05 < _lastActivateSec) {
-      _flying.clear();
+      _clearFlying();
       _lastActivateSec = math.max(0.0, mediaSec - _maxActivateWindowSec);
       _cursor = 0;
       while (_cursor < _sorted.length && _sorted[_cursor].time < _lastActivateSec) {
@@ -576,10 +584,16 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
     _cursor = i;
     _lastActivateSec = to;
 
-    _flying.removeWhere(
-      (f) => mediaSec - f.activatedSec > f.durationMs / 1000.0 + 0.25 || mediaSec < f.activatedSec - 0.05,
-    );
+    _flying.removeWhere((f) {
+      final dead =
+          mediaSec - f.activatedSec > f.durationMs / 1000.0 + 0.25 || mediaSec < f.activatedSec - 0.05;
+      if (dead) f.dispose();
+      return dead;
+    });
     if (_flying.length > maxOn) {
+      for (var k = 0; k < _flying.length - maxOn; k++) {
+        _flying[k].dispose();
+      }
       _flying.removeRange(0, _flying.length - maxOn);
     }
   }
@@ -696,25 +710,29 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     if (!widget.enabled) return const SizedBox.shrink();
+    // LayoutBuilder 放在 AnimatedBuilder 外：高刷下勿每帧重做布局约束。
+    // _tick 已跟显示器 vsync（60/90/120Hz），卡顿主因是每帧重建文字排版。
     return IgnorePointer(
       child: RepaintBoundary(
         child: ClipRect(
-          child: AnimatedBuilder(
-            animation: _tick,
-            builder: (context, _) {
-              return LayoutBuilder(
-                builder: (context, c) {
-                  final w = c.maxWidth;
-                  final h = c.maxHeight;
-                  if (w < 1 || h < 1) return const SizedBox.shrink();
-                  if ((w - _layoutW).abs() > 0.5) {
-                    _scheduleActivate(w);
-                  } else {
-                    _layoutW = w;
-                  }
+          child: LayoutBuilder(
+            builder: (context, c) {
+              final w = c.maxWidth;
+              final h = c.maxHeight;
+              if (w < 1 || h < 1) return const SizedBox.shrink();
+              if ((w - _layoutW).abs() > 0.5) {
+                _scheduleActivate(w);
+              } else {
+                _layoutW = w;
+              }
+              return AnimatedBuilder(
+                animation: _tick,
+                builder: (context, _) {
                   final mediaSec = _mediaPos.inMilliseconds / 1000.0;
                   return CustomPaint(
                     size: Size(w, h),
+                    isComplex: true,
+                    willChange: !_paused,
                     painter: _DanmakuPainter(
                       flying: _flying,
                       mediaSec: mediaSec,
@@ -759,6 +777,47 @@ class _Flying {
   final int lane;
   final int durationMs;
   final double textWidth;
+
+  TextPainter? _painter;
+  String? _painterKey;
+
+  TextPainter painterFor({
+    required double fontSize,
+    required Color color,
+    required bool bold,
+    required String? fontFamily,
+    required List<Shadow> shadows,
+    required String strokeMode,
+  }) {
+    final key =
+        '${item.content}\x00$fontSize\x00${color.toARGB32()}\x00$bold\x00$fontFamily\x00$strokeMode\x00${shadows.length}';
+    final cached = _painter;
+    if (cached != null && _painterKey == key) return cached;
+    cached?.dispose();
+    final tp = TextPainter(
+      text: TextSpan(
+        text: item.content,
+        style: TextStyle(
+          color: color,
+          fontSize: fontSize,
+          fontFamily: fontFamily,
+          fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+          shadows: shadows,
+        ),
+      ),
+      textDirection: ui.TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    _painter = tp;
+    _painterKey = key;
+    return tp;
+  }
+
+  void dispose() {
+    _painter?.dispose();
+    _painter = null;
+    _painterKey = null;
+  }
 }
 
 class _DanmakuPainter extends CustomPainter {
@@ -858,32 +917,25 @@ class _DanmakuPainter extends CustomPainter {
       areaH / lanes,
     ).clamp(fs, 80.0);
     final shadows = _shadows(fs);
+    final family = switch (fontFamily.trim().toLowerCase()) {
+      'sans' || 'sans-serif' => 'sans-serif',
+      'serif' => 'serif',
+      'mono' || 'monospace' => 'monospace',
+      _ => null,
+    };
     for (final f in flying) {
       final durSec = f.durationMs / 1000.0;
       if (durSec <= 0) continue;
       final t = (mediaSec - f.activatedSec) / durSec;
       if (t < 0 || t > 1) continue;
-      final fs = fontSize.clamp(12.0, 48.0);
-      final family = switch (fontFamily.trim().toLowerCase()) {
-        'sans' || 'sans-serif' => 'sans-serif',
-        'serif' => 'serif',
-        'mono' || 'monospace' => 'monospace',
-        _ => null,
-      };
-      final tp = TextPainter(
-        text: TextSpan(
-          text: f.item.content,
-          style: TextStyle(
-            color: _resolveColor(f.item.color),
-            fontSize: fs,
-            fontFamily: family,
-            fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
-            shadows: shadows,
-          ),
-        ),
-        textDirection: ui.TextDirection.ltr,
-        maxLines: 1,
-      )..layout();
+      final tp = f.painterFor(
+        fontSize: fs,
+        color: _resolveColor(f.item.color),
+        bold: bold,
+        fontFamily: family,
+        shadows: shadows,
+        strokeMode: strokeMode,
+      );
       final mode = f.item.mode;
       late final double x;
       late final double y;
