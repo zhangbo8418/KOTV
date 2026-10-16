@@ -249,6 +249,19 @@ func lookup(ih string) (*entry, bool) {
 	return e, ok
 }
 
+// ClearEntries 丢弃边下边播登记（清理缓存/磁力时与磁盘对齐）。
+func ClearEntries() {
+	mu.Lock()
+	defer mu.Unlock()
+	for _, e := range entries {
+		if e == nil || e.t == nil {
+			continue
+		}
+		e.t.Drop()
+	}
+	entries = map[string]*entry{}
+}
+
 func contentType(name string) string {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".mp4", ".m4v":

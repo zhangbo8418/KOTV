@@ -42,6 +42,13 @@ func RegisterRolling(mediaURL string, headers map[string]string) string {
 	return id
 }
 
+// ClearRolling 清空滚动 m3u8 登记表（清理缓存工具）。
+func ClearRolling() {
+	rollingMu.Lock()
+	rollingEntries = map[string]rollingEntry{}
+	rollingMu.Unlock()
+}
+
 // ServeRolling 重新拉取已登记的媒体列表，绝对化后把带头切片改成代理地址。
 func ServeRolling(id string) (string, bool) {
 	if id == "" {

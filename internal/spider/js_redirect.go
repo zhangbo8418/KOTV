@@ -14,9 +14,22 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// jsRedirectMap ResponseInterceptor.redirectMap：
-// key = 302 Location（绝对 URL），value = 发起 302 的原始请求 URL。
-var jsRedirectMap sync.Map
+// jsRedirectMap：302 Location（绝对 URL）→ 发起请求的原始 URL（JS 爬虫 insecure 客户端）。
+const jsRedirectMax = 512
+
+var (
+	jsRedirectMu  sync.Mutex
+	jsRedirectMap = map[string]string{}
+	jsRedirectOrd []string
+)
+
+// ClearJSRedirectMap 清空 JS 侧 302 回源映射（清理缓存工具）。
+func ClearJSRedirectMap() {
+	jsRedirectMu.Lock()
+	defer jsRedirectMu.Unlock()
+	jsRedirectMap = map[string]string{}
+	jsRedirectOrd = nil
+}
 
 func rememberJSRedirect(from, location string) {
 	from = strings.TrimSpace(from)
@@ -28,7 +41,17 @@ func rememberJSRedirect(from, location string) {
 	if abs == "" {
 		return
 	}
-	jsRedirectMap.Store(abs, from)
+	jsRedirectMu.Lock()
+	defer jsRedirectMu.Unlock()
+	if _, ok := jsRedirectMap[abs]; !ok {
+		jsRedirectOrd = append(jsRedirectOrd, abs)
+	}
+	jsRedirectMap[abs] = from
+	for len(jsRedirectMap) > jsRedirectMax && len(jsRedirectOrd) > 0 {
+		victim := jsRedirectOrd[0]
+		jsRedirectOrd = jsRedirectOrd[1:]
+		delete(jsRedirectMap, victim)
+	}
 }
 
 func resolveJSRedirectURL(base, location string) string {
@@ -47,12 +70,13 @@ func resolveJSRedirectURL(base, location string) string {
 }
 
 func lookupJSRedirectOrigin(requestURL string) (string, bool) {
-	if v, ok := jsRedirectMap.Load(strings.TrimSpace(requestURL)); ok {
-		if s, ok := v.(string); ok && s != "" {
-			return s, true
-		}
+	jsRedirectMu.Lock()
+	defer jsRedirectMu.Unlock()
+	s, ok := jsRedirectMap[strings.TrimSpace(requestURL)]
+	if !ok || s == "" {
+		return "", false
 	}
-	return "", false
+	return s, true
 }
 
 func trackJSRedirects(req *http.Request, via []*http.Request) error {
@@ -163,7 +187,7 @@ func wrapDialTimeout(base func(context.Context, string, string) (net.Conn, error
 	}
 }
 
-// decodeJSContentEncoding ResponseInterceptor：gzip + Inflater(nowrap) deflate。
+// decodeJSContentEncoding：gzip，以及 nowrap deflate。
 func decodeJSContentEncoding(encoding string, body []byte) []byte {
 	return util.DecodeContentEncoding(encoding, body)
 }

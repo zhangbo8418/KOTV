@@ -35,6 +35,9 @@ func categoryCacheKey(site model.Site, tid, pg string, extend map[string]string)
 func (s *SiteService) invalidateContentCache() {
 	s.homeCacheSite = ""
 	s.HomeResult = model.Result{}
+	s.DetailResult = model.Result{}
+	s.PlayerResult = model.Result{}
+	s.SearchResult = []model.Collect{model.CollectAll()}
 	s.categoryCache = make(map[string]model.Result)
 }
 
@@ -47,9 +50,17 @@ func (s *SiteService) getCategoryCache(site model.Site, tid, pg string, extend m
 	return result, ok
 }
 
+const categoryCacheMax = 128
+
 func (s *SiteService) putCategoryCache(site model.Site, tid, pg string, extend map[string]string, result model.Result) {
+	key := categoryCacheKey(site, tid, pg, extend)
 	if s.categoryCache == nil {
-		s.categoryCache = make(map[string]model.Result)
+		s.categoryCache = map[string]model.Result{key: result}
+		return
 	}
-	s.categoryCache[categoryCacheKey(site, tid, pg, extend)] = result
+	if _, exists := s.categoryCache[key]; !exists && len(s.categoryCache) >= categoryCacheMax {
+		s.categoryCache = map[string]model.Result{key: result}
+		return
+	}
+	s.categoryCache[key] = result
 }

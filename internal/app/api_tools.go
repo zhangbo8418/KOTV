@@ -12,17 +12,22 @@ import (
 	"time"
 
 	"github.com/bobo/KOTV/internal/backup"
+	"github.com/bobo/KOTV/internal/btstream"
 	"github.com/bobo/KOTV/internal/cacheclean"
 	"github.com/bobo/KOTV/internal/cast"
+	"github.com/bobo/KOTV/internal/clientsession"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/dlna"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
+	"github.com/bobo/KOTV/internal/m3u8"
 	"github.com/bobo/KOTV/internal/player/embed"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/remote"
+	"github.com/bobo/KOTV/internal/server"
 	"github.com/bobo/KOTV/internal/service"
 	"github.com/bobo/KOTV/internal/settings"
+	"github.com/bobo/KOTV/internal/smbproxy"
 	"github.com/bobo/KOTV/internal/spider"
 	"github.com/bobo/KOTV/internal/subtitle"
 	"github.com/bobo/KOTV/internal/update"
@@ -77,6 +82,40 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 		return a.toolAssrtDownload(strParam(params, "url"), strParam(params, "name"), strParam(params, "size"))
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
+	}
+}
+
+// clearVolatileMemory 清理缓存时同步丢掉可再生的进程内表（磁盘已由 cacheclean 处理）。
+func (a *App) clearVolatileMemory(opt cacheclean.Options) {
+	dropSites := func() {
+		if a.Sites != nil {
+			a.Sites.DropContentCache()
+		}
+		if a.sessions != nil {
+			a.sessions.ForEach(func(sess *clientsession.Session) {
+				if sess != nil && sess.Sites != nil {
+					sess.Sites.DropContentCache()
+				}
+			})
+		}
+	}
+	if opt.Other {
+		server.ClearImageCache()
+		util.ClearInsecureRedirectMap()
+		spider.ClearJSRedirectMap()
+		playproxy.Clear()
+		smbproxy.Clear()
+		m3u8.ClearRolling()
+		m3u8.DefaultCache.Clear()
+		a.liveLoadCachedKey = ""
+		a.liveLoadCached = nil
+		dropSites()
+	}
+	if opt.Magnet {
+		btstream.ClearEntries()
+	}
+	if (opt.Script || opt.Jar) && !opt.Other {
+		dropSites()
 	}
 }
 
@@ -136,6 +175,7 @@ func (a *App) toolClearCache(params map[string]any) (map[string]any, error) {
 		Other:  boolParam(params, "other", true),
 	}
 	res := cacheclean.Run(opt)
+	a.clearVolatileMemory(opt)
 	msg := fmt.Sprintf("已清理 %s", res.FreedHuman)
 	if len(res.Cleared) > 0 {
 		msg += "（" + strings.Join(res.Cleared, "、") + "）"

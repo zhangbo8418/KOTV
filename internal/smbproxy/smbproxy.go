@@ -33,10 +33,23 @@ func Rewrite(raw string) string {
 		return raw
 	}
 	id := newID()
+	now := time.Now()
 	mu.Lock()
-	sessions[id] = &session{raw: raw, expiresAt: time.Now().Add(6 * time.Hour)}
+	for k, s := range sessions {
+		if s != nil && now.After(s.expiresAt) {
+			delete(sessions, k)
+		}
+	}
+	sessions[id] = &session{raw: raw, expiresAt: now.Add(6 * time.Hour)}
 	mu.Unlock()
 	return fmt.Sprintf("%s/proxy/smb/?id=%s", playproxy.LocalHTTPBase(), id)
+}
+
+// Clear 清空 SMB 代理会话表（清理缓存工具）。
+func Clear() {
+	mu.Lock()
+	sessions = map[string]*session{}
+	mu.Unlock()
 }
 
 func newID() string {

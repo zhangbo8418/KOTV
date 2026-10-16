@@ -56,7 +56,7 @@ func Run(opt Options) Result {
 		add("JS", paths.JsCache(), n, err)
 		n, err = wipeDirKeepRoot(paths.PyCache())
 		add("Python", paths.PyCache(), n, err)
-		// CatVod Path.py / Path.js
+		// bridge 侧脚本落盘目录
 		n, err = wipeDirKeepRoot(filepath.Join(paths.Root(), "cache", "js"))
 		if n > 0 || err == nil {
 			add("JS(bridge)", filepath.Join(paths.Root(), "cache", "js"), n, err)

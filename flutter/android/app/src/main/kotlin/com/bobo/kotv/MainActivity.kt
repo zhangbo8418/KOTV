@@ -141,6 +141,14 @@ class MainActivity : FlutterActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) isInPictureInPictureMode else false,
           )
         }
+        "clearExoCache" -> {
+          try {
+            KotvExoCache.clear(this)
+            result.success(true)
+          } catch (e: Exception) {
+            result.error("exo_cache", e.message, null)
+          }
+        }
         "ensureCastPermissions" -> ensureCastPermissions(result)
         "ensureStoragePermission" -> ensureStoragePermission(result)
         "ensureReadMediaPermission" -> ensureReadMediaPermission(result)

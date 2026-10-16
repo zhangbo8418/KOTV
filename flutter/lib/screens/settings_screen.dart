@@ -25,8 +25,11 @@ import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/stable_focus.dart';
+import '../util/kotv_app_dirs.dart';
 import '../util/kotv_clear_ephemeral.dart';
+import '../util/kotv_exo_cache_clear.dart';
 import '../util/kotv_image_cache.dart';
+import '../util/kotv_wallpaper_cache.dart';
 import '../util/pick_font_file.dart';
 import '../util/runtime_info.dart';
 import '../widgets/auth_gate.dart';
@@ -1664,6 +1667,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       await kotvClearFlutterEphemeral();
     } catch (_) {}
+    if (params['other'] == true) {
+      try {
+        await kotvClearWallpaperDisk();
+      } catch (_) {}
+      try {
+        await kotvClearMpvDemuxerCacheDir();
+      } catch (_) {}
+      try {
+        await kotvClearExoDiskCache();
+      } catch (_) {}
+    }
     if (mounted) {
       await kotvClearImageMemory(context: context, ref: ref);
     }

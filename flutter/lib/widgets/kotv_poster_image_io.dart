@@ -317,7 +317,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
         setState(() {});
         return;
       }
-      _blankIfNeeded();
+      // 有字节可解：保留旧图直到新帧，避免滚回闪白。
       await _decodeAndShow(dataBytes, key, tw, th, gen);
       return;
     }
@@ -347,13 +347,14 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       return;
     }
 
-    _blankIfNeeded();
-
     final cachedBytes = _posterBytesGet(urlKey);
     if (cachedBytes != null) {
+      // 字节命中：不解空白，旧图留到解码完成。
       await _decodeAndShow(cachedBytes, cacheKey, tw, th, gen, bytesKey: urlKey);
       return;
     }
+
+    _blankIfNeeded();
 
     try {
       final uri = Uri.parse(parsed.url);

@@ -91,10 +91,23 @@ func register(rawURL string, headers map[string]string) string {
 		}
 		cp[k] = v
 	}
+	now := time.Now()
 	mu.Lock()
-	entries[id] = entry{URL: rawURL, Headers: cp, ExpiresAt: time.Now().Add(6 * time.Hour)}
+	for k, e := range entries {
+		if now.After(e.ExpiresAt) {
+			delete(entries, k)
+		}
+	}
+	entries[id] = entry{URL: rawURL, Headers: cp, ExpiresAt: now.Add(6 * time.Hour)}
 	mu.Unlock()
 	return fmt.Sprintf("%s/proxy/play?id=%s", LocalHTTPBase(), id)
+}
+
+// Clear 清空播放代理登记表（清理缓存工具）。
+func Clear() {
+	mu.Lock()
+	entries = map[string]entry{}
+	mu.Unlock()
 }
 
 func isLoopbackHost(host string) bool {

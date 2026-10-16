@@ -22,8 +22,22 @@ var client = &http.Client{Timeout: 30 * time.Second}
 // insecureClient：爬虫/CMS/jar 下载用不校验证书（OkHttp trust-all）；鉴权/更新仍走 client。
 var insecureClient = newInsecureClient(nil)
 
-// insecureRedirectMap ResponseInterceptor.redirectMap（CMS insecure）。
-var insecureRedirectMap sync.Map
+// insecureRedirectMap：302 Location（绝对 URL）→ 发起请求的原始 URL（CMS insecure 客户端）。
+const insecureRedirectMax = 512
+
+var (
+	insecureRedirectMu  sync.Mutex
+	insecureRedirectMap = map[string]string{}
+	insecureRedirectOrd []string
+)
+
+// ClearInsecureRedirectMap 清空 302 回源映射（清理缓存工具）。
+func ClearInsecureRedirectMap() {
+	insecureRedirectMu.Lock()
+	defer insecureRedirectMu.Unlock()
+	insecureRedirectMap = map[string]string{}
+	insecureRedirectOrd = nil
+}
 
 func rememberInsecureRedirect(from, location string) {
 	from = strings.TrimSpace(from)
@@ -39,16 +53,27 @@ func rememberInsecureRedirect(from, location string) {
 			}
 		}
 	}
-	insecureRedirectMap.Store(abs, from)
+	insecureRedirectMu.Lock()
+	defer insecureRedirectMu.Unlock()
+	if _, ok := insecureRedirectMap[abs]; !ok {
+		insecureRedirectOrd = append(insecureRedirectOrd, abs)
+	}
+	insecureRedirectMap[abs] = from
+	for len(insecureRedirectMap) > insecureRedirectMax && len(insecureRedirectOrd) > 0 {
+		victim := insecureRedirectOrd[0]
+		insecureRedirectOrd = insecureRedirectOrd[1:]
+		delete(insecureRedirectMap, victim)
+	}
 }
 
 func lookupInsecureRedirectOrigin(requestURL string) (string, bool) {
-	if v, ok := insecureRedirectMap.Load(strings.TrimSpace(requestURL)); ok {
-		if s, ok := v.(string); ok && s != "" {
-			return s, true
-		}
+	insecureRedirectMu.Lock()
+	defer insecureRedirectMu.Unlock()
+	s, ok := insecureRedirectMap[strings.TrimSpace(requestURL)]
+	if !ok || s == "" {
+		return "", false
 	}
-	return "", false
+	return s, true
 }
 
 func trackInsecureRedirects(req *http.Request, via []*http.Request) error {

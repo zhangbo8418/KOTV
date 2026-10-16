@@ -44,6 +44,21 @@ object KotvExoCache {
     }
   }
 
+  /** 释放 SimpleCache 并删除 exo 目录（设置「清理缓存」）。 */
+  fun clear(ctx: Context) {
+    synchronized(this) {
+      try {
+        cache?.release()
+      } catch (_: Throwable) {
+      }
+      cache = null
+      val dir = File(ctx.cacheDir, "exo")
+      if (dir.exists()) {
+        dir.deleteRecursively()
+      }
+    }
+  }
+
   private fun defaultMaxBytes(ctx: Context): Long {
     val free = ctx.cacheDir.usableSpace.coerceAtLeast(0)
     // 最多占用可用空间的 20%，钳到 256MiB–2GiB。

@@ -16,16 +16,75 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-const maxDataURILength = 8 * 1024 * 1024
+const (
+	maxDataURILength   = 8 * 1024 * 1024
+	imageCacheMaxItems = 64
+	imageCacheMaxBytes = 32 << 20 // 32MB
+)
 
 var (
-	imageMIME  = regexp.MustCompile(`(?i)^image/[a-z0-9.+-]+$`)
-	imageCache sync.Map // key(md5) -> cachedImage
+	imageMIME = regexp.MustCompile(`(?i)^image/[a-z0-9.+-]+$`)
+
+	imageMu     sync.Mutex
+	imageByKey  = map[string]cachedImage{}
+	imageOrder  []string // 最旧在前
+	imageBytes  int
 )
 
 type cachedImage struct {
 	mime string
 	data []byte
+}
+
+// ClearImageCache 清空内存封面/dataURI 缓存（清理缓存工具）。
+func ClearImageCache() {
+	imageMu.Lock()
+	defer imageMu.Unlock()
+	imageByKey = map[string]cachedImage{}
+	imageOrder = nil
+	imageBytes = 0
+}
+
+func imageStore(key string, img cachedImage) {
+	imageMu.Lock()
+	defer imageMu.Unlock()
+	if old, ok := imageByKey[key]; ok {
+		imageBytes -= len(old.data)
+		for i, k := range imageOrder {
+			if k == key {
+				imageOrder = append(imageOrder[:i], imageOrder[i+1:]...)
+				break
+			}
+		}
+	}
+	imageByKey[key] = img
+	imageOrder = append(imageOrder, key)
+	imageBytes += len(img.data)
+	for (len(imageByKey) > imageCacheMaxItems || imageBytes > imageCacheMaxBytes) && len(imageOrder) > 0 {
+		victim := imageOrder[0]
+		imageOrder = imageOrder[1:]
+		if v, ok := imageByKey[victim]; ok {
+			imageBytes -= len(v.data)
+			delete(imageByKey, victim)
+		}
+	}
+}
+
+func imageLoad(key string) (cachedImage, bool) {
+	imageMu.Lock()
+	defer imageMu.Unlock()
+	img, ok := imageByKey[key]
+	if !ok {
+		return cachedImage{}, false
+	}
+	// 命中挪到尾部
+	for i, k := range imageOrder {
+		if k == key {
+			imageOrder = append(append(imageOrder[:i], imageOrder[i+1:]...), key)
+			break
+		}
+	}
+	return img, true
 }
 
 // CacheDataURI 把 data: 图片写入内存并返回 /image/{md5}；其它地址原样返回。
@@ -45,12 +104,12 @@ func CacheDataURI(url string) string {
 	if key == "" {
 		return ""
 	}
-	if _, ok := imageCache.Load(key); !ok {
+	if _, ok := imageLoad(key); !ok {
 		img := decodeDataURI(url)
 		if img == nil {
 			return ""
 		}
-		imageCache.Store(key, *img)
+		imageStore(key, *img)
 	}
 	return "/image/" + key
 }
@@ -86,12 +145,11 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		v, ok := imageCache.Load(key)
+		img, ok := imageLoad(key)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		img := v.(cachedImage)
 		w.Header().Set("Content-Type", img.mime)
 		w.Header().Set("Content-Length", itoaLen(len(img.data)))
 		if r.Method == http.MethodHead {
@@ -114,7 +172,7 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "empty body", http.StatusBadRequest)
 			return
 		}
-		imageCache.Store(key, cachedImage{mime: mime, data: body})
+		imageStore(key, cachedImage{mime: mime, data: body})
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	default:

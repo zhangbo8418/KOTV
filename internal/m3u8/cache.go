@@ -33,6 +33,13 @@ func (c *Cache) Get(id string) (string, bool) {
 	return v, ok
 }
 
+// Clear 清空静态 m3u8 缓存槽（清理缓存工具）。
+func (c *Cache) Clear() {
+	c.mu.Lock()
+	c.data = map[string]string{}
+	c.mu.Unlock()
+}
+
 func randomID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
