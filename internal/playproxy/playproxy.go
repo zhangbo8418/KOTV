@@ -106,18 +106,23 @@ func register(rawURL string, headers map[string]string) string {
 
 const entriesMax = 256
 
-// trimEntriesHalfLocked 超上限时删一半（调用方已持 mu）。
+// trimEntriesHalfLocked 超上限时删一半，并 kill 对应 splice（调用方已持 mu）。
 func trimEntriesHalfLocked(max int) {
 	if len(entries) < max {
 		return
 	}
 	n := len(entries) / 2
+	killed := make([]string, 0, n)
 	for k := range entries {
 		if n <= 0 {
 			break
 		}
 		delete(entries, k)
+		killed = append(killed, k)
 		n--
+	}
+	for _, id := range killed {
+		killSpliceByKey(id)
 	}
 }
 
@@ -355,6 +360,22 @@ func beginSplice(key string) *spliceHold {
 		prev.kill()
 	}
 	return slot
+}
+
+// killSpliceByKey 半裁登记表时结束对应活跃 splice。
+func killSpliceByKey(key string) {
+	if key == "" {
+		return
+	}
+	spliceMu.Lock()
+	h := spliceLive[key]
+	if h != nil {
+		delete(spliceLive, key)
+	}
+	spliceMu.Unlock()
+	if h != nil {
+		h.kill()
+	}
 }
 
 func (s *spliceHold) kill() {

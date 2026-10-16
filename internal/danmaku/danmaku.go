@@ -22,6 +22,8 @@ type Item struct {
 	Content string
 }
 
+const itemsMax = 20000 // 单次加载条数上限，避免超大 XML 占满内存
+
 var (
 	mu    sync.RWMutex
 	items []Item
@@ -36,6 +38,13 @@ func Clear() {
 	mu.Unlock()
 }
 
+func capItems(parsed []Item) []Item {
+	if len(parsed) > itemsMax {
+		return parsed[:itemsMax]
+	}
+	return parsed
+}
+
 // LoadURL 从弹幕地址加载。
 func LoadURL(u string) error {
 	if u == "" || !settings.IsDanmakuEnabled() {
@@ -45,7 +54,7 @@ func LoadURL(u string) error {
 	if err != nil {
 		return err
 	}
-	parsed := Parse(body)
+	parsed := capItems(Parse(body))
 	mu.Lock()
 	items = parsed
 	mu.Unlock()
@@ -61,7 +70,7 @@ func LoadFile(path string) error {
 	if err != nil {
 		return err
 	}
-	parsed := Parse(string(b))
+	parsed := capItems(Parse(string(b)))
 	mu.Lock()
 	items = parsed
 	mu.Unlock()

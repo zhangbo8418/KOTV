@@ -129,7 +129,7 @@ func drainBody(resp *http.Response) []byte {
 	return b
 }
 
-// jsRequestTransport 关闭自动解压；TLS 不校验（OkHttp trust-all）；hosts 表改写 dial 主机名。
+// jsRequestTransport 关闭自动解压；TLS 不校验；hosts 表改写 dial 主机名。
 func jsRequestTransport() http.RoundTripper {
 	base := util.GetClient().Transport
 	if base == nil {

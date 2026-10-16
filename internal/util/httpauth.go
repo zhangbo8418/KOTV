@@ -14,21 +14,42 @@ import (
 	"sync"
 )
 
-// RequestInterceptor.checkAuth + AuthInterceptor 的 Go 侧表（JS _http / CMS insecure 共用）。
+// HTTP 粘性鉴权表（JS _http / CMS insecure 共用）：按 host 记住 ?auth= 与 Basic userinfo。
+const httpAuthHostMax = 256
+
 var (
-	httpAuthMu     sync.RWMutex
+	httpAuthMu      sync.RWMutex
 	authQueryByHost = map[string]string{}
 	authUserByHost  = map[string]string{}
 )
 
 var digestParamRe = regexp.MustCompile(`(\w+)=(?:"([^"]*)"|([^,\s"]+))`)
 
-// ClearHTTPAuth 换源/重载配置时清空粘性 auth。
+// ClearHTTPAuth 清空粘性 auth 表（换源 / 清理缓存）。
 func ClearHTTPAuth() {
 	httpAuthMu.Lock()
 	authQueryByHost = map[string]string{}
 	authUserByHost = map[string]string{}
 	httpAuthMu.Unlock()
+}
+
+// trimHTTPAuthHostsLocked 超上限时两表各删约一半（调用方已持写锁）。
+func trimHTTPAuthHostsLocked() {
+	trimMapHalf := func(m map[string]string) {
+		if len(m) < httpAuthHostMax {
+			return
+		}
+		n := len(m) / 2
+		for k := range m {
+			if n <= 0 {
+				break
+			}
+			delete(m, k)
+			n--
+		}
+	}
+	trimMapHalf(authQueryByHost)
+	trimMapHalf(authUserByHost)
 }
 
 // ApplyStickyAuthQuery RequestInterceptor：有 ?auth= 则记；无则按 host 回填。
@@ -46,6 +67,7 @@ func ApplyStickyAuthQuery(rawURL string) string {
 	if auth := strings.TrimSpace(q.Get("auth")); auth != "" {
 		httpAuthMu.Lock()
 		authQueryByHost[host] = auth
+		trimHTTPAuthHostsLocked()
 		httpAuthMu.Unlock()
 		return rawURL
 	}
@@ -76,6 +98,7 @@ func ApplyBasicFromUserInfo(req *http.Request) {
 	host := req.URL.Hostname()
 	httpAuthMu.Lock()
 	authUserByHost[host] = userInfo
+	trimHTTPAuthHostsLocked()
 	httpAuthMu.Unlock()
 	req.Header.Set("Authorization", BasicAuthHeader(userInfo))
 }

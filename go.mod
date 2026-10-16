@@ -1,19 +1,22 @@
 module github.com/bobo/KOTV
 
-go 1.26.4
+go 1.27.2
 
 require (
-	github.com/anacrolix/log v0.17.0
-	github.com/anacrolix/torrent v1.59.1
+	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
+	github.com/anacrolix/torrent v1.61.0
 	github.com/antchfx/htmlquery v1.3.6
 	github.com/buger/jsonparser v1.1.1
 	github.com/buke/quickjs-go v0.7.7
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
 	github.com/chromedp/chromedp v0.16.0
+	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/huin/goupnp v1.3.0
 	github.com/koron/go-ssdp v0.0.4
 	github.com/vishen/go-chromecast v0.3.4
+	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.56.0
+	golang.org/x/sync v0.21.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.38.0
 	modernc.org/sqlite v1.54.0
@@ -21,12 +24,12 @@ require (
 
 require (
 	github.com/RoaringBitmap/roaring v1.2.3 // indirect
-	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
+	github.com/anacrolix/btree v0.0.0-20251201064447-d86c3fa41bd8 // indirect
 	github.com/anacrolix/chansync v0.7.0 // indirect
 	github.com/anacrolix/dht/v2 v2.23.0 // indirect
-	github.com/anacrolix/envpprof v1.3.0 // indirect
-	github.com/anacrolix/generics v0.1.0 // indirect
+	github.com/anacrolix/envpprof v1.4.0 // indirect
+	github.com/anacrolix/generics v0.1.1-0.20251125230353-15d98d46693b // indirect
 	github.com/anacrolix/go-libutp v1.3.2 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
@@ -34,7 +37,7 @@ require (
 	github.com/anacrolix/mmsg v1.0.1 // indirect
 	github.com/anacrolix/multiless v0.4.0 // indirect
 	github.com/anacrolix/stm v0.5.0 // indirect
-	github.com/anacrolix/sync v0.5.4 // indirect
+	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1 // indirect
 	github.com/anacrolix/upnp v0.1.4 // indirect
 	github.com/anacrolix/utp v0.1.0 // indirect
 	github.com/antchfx/xpath v1.3.6 // indirect
@@ -52,7 +55,7 @@ require (
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
 	github.com/go-llsqlite/crawshaw v0.5.6-0.20250312230104-194977a03421 // indirect
-	github.com/go-logr/logr v1.4.2 // indirect
+	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
@@ -60,10 +63,10 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/btree v1.1.2 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
-	github.com/hirochachacha/go-smb2 v1.1.0 // indirect
 	github.com/huandu/xstrings v1.3.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.3 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -96,17 +99,16 @@ require (
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
-	github.com/tidwall/btree v1.6.0 // indirect
-	github.com/wlynxg/anet v0.0.3 // indirect
+	github.com/tidwall/btree v1.8.1 // indirect
+	github.com/wlynxg/anet v0.0.5 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
-	go.opentelemetry.io/otel v1.32.0 // indirect
-	go.opentelemetry.io/otel/metric v1.32.0 // indirect
-	go.opentelemetry.io/otel/trace v1.32.0 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/otel v1.38.0 // indirect
+	go.opentelemetry.io/otel/metric v1.38.0 // indirect
+	go.opentelemetry.io/otel/trace v1.38.0 // indirect
+	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6 // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/time v0.8.0 // indirect
+	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect
 	modernc.org/libc v1.74.1 // indirect

@@ -54,13 +54,15 @@ build_android_abi() {
   esac
   local jni_dir="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
   mkdir -p "$jni_dir"
+  # anet（torrent 间接依赖）在 Go 1.23+ 仍用 //go:linkname 访问 net.zoneCache。
+  local ldflags='-s -w -checklinkname=0'
   echo "==> android $abi (GOARCH=$goarch${goarm:+ GOARM=$goarm})"
   if [[ -n "$goarm" ]]; then
     CGO_ENABLED=1 GOOS=android GOARCH="$goarch" GOARM="$goarm" CC="$cc" \
-      go build -tags kotv_android -o "$jni_dir/libkotv_engine.so" ./cmd/engine
+      go build -tags kotv_android -ldflags "$ldflags" -o "$jni_dir/libkotv_engine.so" ./cmd/engine
   else
     CGO_ENABLED=1 GOOS=android GOARCH="$goarch" CC="$cc" \
-      go build -tags kotv_android -o "$jni_dir/libkotv_engine.so" ./cmd/engine
+      go build -tags kotv_android -ldflags "$ldflags" -o "$jni_dir/libkotv_engine.so" ./cmd/engine
   fi
   # arm64 再拷一份到 assets 便于校验；v7 只进 jniLibs。
   if [[ "$abi" == "arm64-v8a" ]]; then

@@ -103,6 +103,7 @@ func (a *App) clearVolatileMemory(opt cacheclean.Options) {
 	if opt.Other {
 		server.ClearImageCache()
 		util.ClearInsecureRedirectMap()
+		util.ClearHTTPAuth()
 		spider.ClearJSRedirectMap()
 		playproxy.Clear()
 		smbproxy.Clear()

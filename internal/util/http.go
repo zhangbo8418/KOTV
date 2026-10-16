@@ -19,7 +19,7 @@ import (
 
 var client = &http.Client{Timeout: 30 * time.Second}
 
-// insecureClient：爬虫/CMS/jar 下载用不校验证书（OkHttp trust-all）；鉴权/更新仍走 client。
+// insecureClient：爬虫/CMS/jar 下载跳过 TLS 校验；鉴权/更新仍走 client。
 var insecureClient = newInsecureClient(nil)
 
 // insecureRedirectMap：302 Location（绝对 URL）→ 发起请求的原始 URL（CMS insecure 客户端）。

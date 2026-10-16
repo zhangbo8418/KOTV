@@ -1681,6 +1681,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (mounted) {
       await kotvClearImageMemory(context: context, ref: ref);
     }
+    KotvSettingsCache.clear();
     if (data == null || !mounted) return;
     final msg = '${data['message'] ?? '清理完成'}';
     if (data['reloaded'] == true) {
