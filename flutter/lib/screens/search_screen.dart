@@ -748,6 +748,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               );
             },
             childCount: c.list.length,
+            addAutomaticKeepAlives: false,
           ),
         );
         if (pad == EdgeInsets.zero) return grid;

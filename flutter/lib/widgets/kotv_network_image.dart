@@ -167,7 +167,7 @@ Uint8List? kotvDecodeDataImage(String raw) {
   }
 }
 
-/// 统一网络海报。
+/// 通用网络图（壁纸、台标、详情封面等；分类列表海报用 [KotvPosterNetImage]）。
 /// 默认走客户端拉图（含 `@Headers=`）；勿默认开 Android Glide PlatformView——
 /// 同屏壳壁纸/多图换帧时原生层创建销毁会拖闪背景。
 /// 仅个别确需 Glide 的场景再显式 [allowPlatformView]: true。

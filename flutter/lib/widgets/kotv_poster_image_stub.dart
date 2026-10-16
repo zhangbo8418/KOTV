@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'kotv_network_image.dart';
 
+/// Web：无独立解码池，清缓存由 ImageCache 承担。
+void kotvClearPosterImageCache() {}
+
 /// Web：无 dart:io abort，回落网络图 + 固定解码桶。
 class KotvPosterNetImage extends StatelessWidget {
   const KotvPosterNetImage(

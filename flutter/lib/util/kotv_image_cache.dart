@@ -4,15 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers.dart';
 import 'kotv_wallpaper_cache.dart';
 import '../widgets/kotv_network_image.dart';
+import '../widgets/kotv_poster_image.dart';
 
-/// 启动时收紧 ImageCache 上限，减轻长时间浏览海报堆积。
+/// 启动时为 Image 路径设字节上限（壁纸/台标/详情封面等）；列表海报自管解码池。
 void kotvConfigureImageCacheBudget() {
-  final cache = PaintingBinding.instance.imageCache;
-  cache.maximumSize = 200;
-  cache.maximumSizeBytes = 64 << 20; // 64MB
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 64 << 20; // 64MB
 }
 
-/// 清海报等全局 ImageCache；立刻按粘住的壁纸预热并触发壳层重挂。
+/// 清全局 ImageCache 与海报解码池；立刻按粘住的壁纸预热并触发壳层重挂。
 Future<void> kotvClearImageMemory({
   BuildContext? context,
   WidgetRef? ref,
@@ -21,6 +20,7 @@ Future<void> kotvClearImageMemory({
   final cache = PaintingBinding.instance.imageCache;
   cache.clear();
   cache.clearLiveImages();
+  kotvClearPosterImageCache();
 
   final url = (wallUrl ?? ref?.read(stickyWallUrlProvider) ?? '').trim();
   if (ref != null) {
