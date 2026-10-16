@@ -2324,7 +2324,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final msg = await runKotvCast(context, ref.read(apiProvider), onStatus: (m) {
       if (mounted) setState(() => _status = m);
     });
-    if (msg != null && mounted) setState(() => _status = msg);
+    if (msg != null && mounted) {
+      setState(() => _status = msg);
+      if (msg.contains('已投屏到')) {
+        unawaited(_playback.pause());
+      }
+    }
   }
 
   Future<void> _enterMini() async {

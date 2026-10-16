@@ -3296,7 +3296,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (mounted) setState(() => _status = m);
       },
     );
-    if (msg != null && mounted) setState(() => _status = msg);
+    if (msg != null && mounted) {
+      setState(() => _status = msg);
+      // 投屏成功后暂停本机，避免双端同播；播放器保留便于停投后续看。
+      if (msg.contains('已投屏到')) {
+        unawaited(_playback.pause());
+      }
+    }
   }
 
   Future<void> _enterMini() async {

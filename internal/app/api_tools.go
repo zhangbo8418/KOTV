@@ -61,6 +61,10 @@ func (a *App) APITools(action string, params map[string]any) (map[string]any, er
 	case "cast":
 		idx := intParam(params, "index", -1)
 		return a.toolCast(idx)
+	case "caststatus":
+		return a.toolCastStatus()
+	case "caststop":
+		return a.toolCastStop()
 	case "clearcache":
 		return a.toolClearCache(params)
 	case "assrtsearch":
@@ -431,13 +435,50 @@ func (a *App) toolCast(index int) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	sess := cast.SessionFromDevice(used)
+	cast.SetSession(sess)
 	return map[string]any{
 		"ok":       true,
 		"name":     used.Name,
 		"protocol": string(used.Protocol),
 		"detail":   used.Detail,
 		"label":    used.Label(),
+		"key":      sess.Key(),
 		"message":  "已投屏到 " + used.Label(),
+	}, nil
+}
+
+func (a *App) toolCastStatus() (map[string]any, error) {
+	st := cast.ProbeSession()
+	out := map[string]any{
+		"ok":     true,
+		"active": st.Active,
+	}
+	if st.Active {
+		out["name"] = st.Name
+		out["protocol"] = string(st.Protocol)
+		out["detail"] = st.Detail
+		out["label"] = st.Label
+		out["key"] = st.Key
+		out["state"] = st.State
+	}
+	return out, nil
+}
+
+func (a *App) toolCastStop() (map[string]any, error) {
+	err := cast.StopSession()
+	if err != nil {
+		// 已尽力清会话；仍回报文案供 UI。
+		return map[string]any{
+			"ok":      true,
+			"active":  false,
+			"message": "已断开投屏（对端可能未响应：" + err.Error() + "）",
+		}, nil
+	}
+	return map[string]any{
+		"ok":      true,
+		"active":  false,
+		"message": "已断开投屏",
 	}, nil
 }
 
