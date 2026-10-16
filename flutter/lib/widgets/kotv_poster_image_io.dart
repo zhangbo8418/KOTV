@@ -8,6 +8,36 @@ import 'package:flutter/material.dart';
 
 import 'kotv_network_image.dart';
 
+/// 压缩字节 LRU：滚回免再下；换源清空。
+final LinkedHashMap<String, Uint8List> _posterBytes = LinkedHashMap<String, Uint8List>();
+var _posterBytesTotal = 0;
+const int _posterBytesMax = 32 << 20; // 32MB
+
+void _posterBytesPut(String urlKey, Uint8List bytes) {
+  if (bytes.isEmpty) return;
+  final old = _posterBytes.remove(urlKey);
+  if (old != null) _posterBytesTotal -= old.length;
+  while (_posterBytes.isNotEmpty && _posterBytesTotal + bytes.length > _posterBytesMax) {
+    final first = _posterBytes.keys.first;
+    final evicted = _posterBytes.remove(first);
+    if (evicted != null) _posterBytesTotal -= evicted.length;
+  }
+  _posterBytes[urlKey] = bytes;
+  _posterBytesTotal += bytes.length;
+}
+
+Uint8List? _posterBytesGet(String urlKey) {
+  final hit = _posterBytes.remove(urlKey);
+  if (hit == null) return null;
+  _posterBytes[urlKey] = hit;
+  return hit;
+}
+
+void _posterBytesClear() {
+  _posterBytes.clear();
+  _posterBytesTotal = 0;
+}
+
 /// 解码像素条目：可在清缓存后游离，等最后引用释放再 dispose。
 class _PosterDecodedEntry {
   _PosterDecodedEntry(this.image, this.key);
@@ -15,14 +45,15 @@ class _PosterDecodedEntry {
   final ui.Image image;
   final String key;
   int refs = 0;
-  /// 已从可命中池摘掉（换源清空）；不再被 acquire，仅等 refs 归零后释放。
   bool orphaned = false;
+
+  int get approxBytes => image.width * image.height * 4;
 }
 
 final LinkedHashMap<String, _PosterDecodedEntry> _posterDecoded = LinkedHashMap<String, _PosterDecodedEntry>();
 
-/// 无引用条目上限：供近距滚回命中；超出则 dispose 最旧无引用图。
-const int _posterUnreferencedMax = 48;
+/// 无引用解码图像素预算（约 48MB）；有引用永不踢。
+const int _posterDecodedUnrefBudget = 48 << 20;
 
 int _fnv1a(Uint8List bytes) {
   var h = 2166136261;
@@ -34,19 +65,19 @@ int _fnv1a(Uint8List bytes) {
 }
 
 void _posterEvictUnreferenced() {
-  var unreferenced = 0;
+  var unrefBytes = 0;
   for (final e in _posterDecoded.values) {
-    if (e.refs <= 0) unreferenced++;
+    if (e.refs <= 0) unrefBytes += e.approxBytes;
   }
-  if (unreferenced <= _posterUnreferencedMax) return;
+  if (unrefBytes <= _posterDecodedUnrefBudget) return;
   final keys = _posterDecoded.keys.toList();
   for (final key in keys) {
-    if (unreferenced <= _posterUnreferencedMax) break;
+    if (unrefBytes <= _posterDecodedUnrefBudget) break;
     final e = _posterDecoded[key];
     if (e == null || e.refs > 0) continue;
     _posterDecoded.remove(key);
+    unrefBytes -= e.approxBytes;
     e.image.dispose();
-    unreferenced--;
   }
 }
 
@@ -65,13 +96,11 @@ void _posterRelease(_PosterDecodedEntry e) {
     e.image.dispose();
     return;
   }
-  // 仍在池内：移到末尾，供滚回；超额再淘汰。
   _posterDecoded.remove(e.key);
   _posterDecoded[e.key] = e;
   _posterEvictUnreferenced();
 }
 
-/// 入库并占用 1 引用；若 key 已有存活条目则沿用并 dispose 重复解码。
 _PosterDecodedEntry _posterPutLive(String key, ui.Image image) {
   final existing = _posterDecoded.remove(key);
   if (existing != null && !existing.orphaned) {
@@ -89,8 +118,9 @@ _PosterDecodedEntry _posterPutLive(String key, ui.Image image) {
   return e;
 }
 
-/// 换源/清内存：可命中池清空；仍在画的条目标 orphan，等 State 释放后再 dispose。
+/// 换源/清内存：清空字节池；解码池有引用则 orphan，无引用立即 dispose。
 void kotvClearPosterImageCache() {
+  _posterBytesClear();
   final live = <_PosterDecodedEntry>[];
   for (final e in _posterDecoded.values) {
     if (e.refs > 0) {
@@ -101,7 +131,6 @@ void kotvClearPosterImageCache() {
     }
   }
   _posterDecoded.clear();
-  // live 仅由各 State._held 持有；不再进入可命中池。
   assert(() {
     for (final e in live) {
       assert(e.refs > 0 && e.orphaned);
@@ -124,7 +153,6 @@ class KotvPosterNetImage extends StatefulWidget {
   final String pic;
   final BoxFit fit;
   final ImageErrorWidgetBuilder? errorBuilder;
-  /// 与网格 childAspectRatio 214/286 一致，解码键稳定。
   final double designWidth;
   final double designHeight;
 
@@ -208,7 +236,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     final dataBytes = kotvDecodeDataImage(raw);
     if (dataBytes != null) {
       final key = 'data|${dataBytes.length}|${_fnv1a(dataBytes)}|$tw|$th';
-      await _decodeAndShow(dataBytes, key, tw, th, gen);
+      await _decodeAndShow(dataBytes, key, tw, th, gen, putBytesKey: null);
       return;
     }
 
@@ -220,14 +248,21 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       return;
     }
 
-    final cacheKey = '${parsed.url}|$tw|$th';
-    final hit = _posterAcquire(cacheKey);
-    if (hit != null) {
+    final urlKey = parsed.url;
+    final cacheKey = '$urlKey|$tw|$th';
+    final decodedHit = _posterAcquire(cacheKey);
+    if (decodedHit != null) {
       if (gen != _gen || !mounted) {
-        _posterRelease(hit);
+        _posterRelease(decodedHit);
         return;
       }
-      setState(() => _hold(hit));
+      setState(() => _hold(decodedHit));
+      return;
+    }
+
+    final cachedBytes = _posterBytesGet(urlKey);
+    if (cachedBytes != null) {
+      await _decodeAndShow(cachedBytes, cacheKey, tw, th, gen, putBytesKey: null);
       return;
     }
 
@@ -265,7 +300,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       if (gen != _gen || !mounted) return;
       final bytes = builder.takeBytes();
       if (bytes.isEmpty) throw StateError('empty image');
-      await _decodeAndShow(bytes, cacheKey, tw, th, gen);
+      await _decodeAndShow(bytes, cacheKey, tw, th, gen, putBytesKey: urlKey);
     } catch (e) {
       _req = null;
       _sub = null;
@@ -274,11 +309,19 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     }
   }
 
-  Future<void> _decodeAndShow(Uint8List bytes, String cacheKey, int tw, int th, int gen) async {
+  Future<void> _decodeAndShow(
+    Uint8List bytes,
+    String cacheKey,
+    int tw,
+    int th,
+    int gen, {
+    String? putBytesKey,
+  }) async {
     ui.Codec? codec;
     try {
       final raced = _posterAcquire(cacheKey);
       if (raced != null) {
+        if (putBytesKey != null) _posterBytesPut(putBytesKey, bytes);
         if (gen != _gen || !mounted) {
           _posterRelease(raced);
           return;
@@ -296,6 +339,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
         return;
       }
 
+      if (putBytesKey != null) _posterBytesPut(putBytesKey, bytes);
       final entry = _posterPutLive(cacheKey, frame.image);
       setState(() => _hold(entry));
     } catch (e) {

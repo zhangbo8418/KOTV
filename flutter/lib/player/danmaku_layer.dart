@@ -232,7 +232,7 @@ class DanmakuOverlay extends StatefulWidget {
     this.durationMs = 8000,
     this.fixedDurationMs = 5000,
     this.lineSpacing = 1.4,
-    this.strokeMode = 'shadow',
+    this.strokeMode = 'outline',
     this.colorMode = 'original',
     this.rowsTop = 3,
     this.rowsBottom = 3,
@@ -432,10 +432,11 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
 
   void _onPosition(Duration d) {
     if (!mounted) return;
-    final jumpBack = d + const Duration(milliseconds: 400) < _mediaPos;
-    final jumpFwd = d > _mediaPos + const Duration(seconds: 2);
+    final delta = (d - _mediaPos).abs();
+    // 跳变超过 300ms：清屏重投，避免旧弹幕瞬移成残影。
+    final jumped = delta > const Duration(milliseconds: 300);
     _rebase(d, paused: !widget.player.playing, rate: widget.player.rate);
-    if (jumpBack || jumpFwd) {
+    if (jumped) {
       _flying.clear();
       _lastActivateSec = -1;
       _cursor = 0;
@@ -686,47 +687,49 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
   Widget build(BuildContext context) {
     if (!widget.enabled) return const SizedBox.shrink();
     return IgnorePointer(
-      child: ClipRect(
-        child: AnimatedBuilder(
-          animation: _tick,
-          builder: (context, _) {
-            return LayoutBuilder(
-              builder: (context, c) {
-                final w = c.maxWidth;
-                final h = c.maxHeight;
-                if (w < 1 || h < 1) return const SizedBox.shrink();
-                if ((w - _layoutW).abs() > 0.5) {
-                  _scheduleActivate(w);
-                } else {
-                  _layoutW = w;
-                }
-                final mediaSec = _mediaPos.inMilliseconds / 1000.0;
-                return CustomPaint(
-                  size: Size(w, h),
-                  painter: _DanmakuPainter(
-                    flying: _flying,
-                    mediaSec: mediaSec,
-                    fontSize: widget.fontSize,
-                    opacity: widget.opacity,
-                    rows: widget.rows,
-                    scrollAreaRatio: widget.scrollAreaRatio,
-                    bold: widget.bold,
-                    lineSpacing: widget.lineSpacing,
-                    strokeMode: widget.strokeMode,
-                    colorMode: widget.colorMode,
-                    rowsTop: widget.rowsTop,
-                    rowsBottom: widget.rowsBottom,
-                    fontFamily: widget.fontFamily,
-                    strokeWidth: widget.strokeWidth,
-                    shadowOpacity: widget.shadowOpacity,
-                    projectionOffsetX: widget.projectionOffsetX,
-                    projectionOffsetY: widget.projectionOffsetY,
-                    projectionOpacity: widget.projectionOpacity,
-                  ),
-                );
-              },
-            );
-          },
+      child: RepaintBoundary(
+        child: ClipRect(
+          child: AnimatedBuilder(
+            animation: _tick,
+            builder: (context, _) {
+              return LayoutBuilder(
+                builder: (context, c) {
+                  final w = c.maxWidth;
+                  final h = c.maxHeight;
+                  if (w < 1 || h < 1) return const SizedBox.shrink();
+                  if ((w - _layoutW).abs() > 0.5) {
+                    _scheduleActivate(w);
+                  } else {
+                    _layoutW = w;
+                  }
+                  final mediaSec = _mediaPos.inMilliseconds / 1000.0;
+                  return CustomPaint(
+                    size: Size(w, h),
+                    painter: _DanmakuPainter(
+                      flying: _flying,
+                      mediaSec: mediaSec,
+                      fontSize: widget.fontSize,
+                      opacity: widget.opacity,
+                      rows: widget.rows,
+                      scrollAreaRatio: widget.scrollAreaRatio,
+                      bold: widget.bold,
+                      lineSpacing: widget.lineSpacing,
+                      strokeMode: widget.strokeMode,
+                      colorMode: widget.colorMode,
+                      rowsTop: widget.rowsTop,
+                      rowsBottom: widget.rowsBottom,
+                      fontFamily: widget.fontFamily,
+                      strokeWidth: widget.strokeWidth,
+                      shadowOpacity: widget.shadowOpacity,
+                      projectionOffsetX: widget.projectionOffsetX,
+                      projectionOffsetY: widget.projectionOffsetY,
+                      projectionOpacity: widget.projectionOpacity,
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -758,7 +761,7 @@ class _DanmakuPainter extends CustomPainter {
     this.scrollAreaRatio = 0.5,
     this.bold = false,
     this.lineSpacing = 1.4,
-    this.strokeMode = 'shadow',
+    this.strokeMode = 'outline',
     this.colorMode = 'original',
     this.rowsTop = 3,
     this.rowsBottom = 3,

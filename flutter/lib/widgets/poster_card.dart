@@ -253,6 +253,7 @@ class PosterFlow extends StatelessWidget {
         return GridView.builder(
           padding: pad,
           addAutomaticKeepAlives: false,
+          cacheExtent: 800,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: cross,
             mainAxisSpacing: gap,

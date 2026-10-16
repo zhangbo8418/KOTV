@@ -707,6 +707,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   Widget _resultsList() {
     return CustomScrollView(
+      cacheExtent: 800,
       slivers: [
         for (final c in _collects) ...[
           SliverToBoxAdapter(

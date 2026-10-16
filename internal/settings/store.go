@@ -316,7 +316,7 @@ func defaultFile() file {
 			{ID: "danmakuShowSpecial", Label: "特殊弹幕", Value: "true"},
 			{ID: "danmakuShowPositioned", Label: "定位弹幕", Value: "true"},
 			{ID: "danmakuFixedDurationMs", Label: "固定弹幕时长", Value: "5000"},
-			{ID: "danmakuStrokeMode", Label: "弹幕描边", Value: "shadow"},
+			{ID: "danmakuStrokeMode", Label: "弹幕描边", Value: "outline"},
 			{ID: "danmakuColorMode", Label: "弹幕颜色", Value: "original"},
 			{ID: "danmakuFont", Label: "弹幕字体", Value: "default"},
 			{ID: "danmakuRowsTop", Label: "顶部弹幕行数", Value: "3"},

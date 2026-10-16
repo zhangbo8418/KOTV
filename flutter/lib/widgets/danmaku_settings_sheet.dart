@@ -296,14 +296,14 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
                       _toggle('粗体', flag('danmakuBold', false), (v) => _set('danmakuBold', v ? 'true' : 'false')),
                       _nav(
                         '描边样式',
-                        switch (g('danmakuStrokeMode', 'shadow').trim().toLowerCase()) {
+                        switch (g('danmakuStrokeMode', 'outline').trim().toLowerCase()) {
                           'none' => '无',
                           'outline' => '描边',
                           'projection' => '投影',
                           _ => '阴影',
                         },
                         () async {
-                          final cur = g('danmakuStrokeMode', 'shadow').trim().toLowerCase();
+                          final cur = g('danmakuStrokeMode', 'outline').trim().toLowerCase();
                           final picked = await pickChoice(context, title: '弹幕描边', current: cur, options: const [
                             ('无', 'none'),
                             ('描边', 'outline'),
@@ -313,7 +313,7 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
                           if (picked != null) await _set('danmakuStrokeMode', picked);
                         },
                       ),
-                      if (g('danmakuStrokeMode', 'shadow').trim().toLowerCase() == 'outline')
+                      if (g('danmakuStrokeMode', 'outline').trim().toLowerCase() == 'outline')
                         _slider(
                           label: '描边宽度',
                           value: ((double.tryParse(g('danmakuStrokeWidth', '0.12')) ?? 0.12) * 100).clamp(5.0, 30.0),
@@ -324,7 +324,7 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
                           onChanging: (v) => setState(() => _s['danmakuStrokeWidth'] = (v / 100).toStringAsFixed(2)),
                           onCommit: (v) => _set('danmakuStrokeWidth', (v / 100).toStringAsFixed(2)),
                         ),
-                      if (g('danmakuStrokeMode', 'shadow').trim().toLowerCase() == 'shadow')
+                      if (g('danmakuStrokeMode', 'outline').trim().toLowerCase() == 'shadow')
                         _slider(
                           label: '阴影透明度',
                           value: ((double.tryParse(g('danmakuShadowOpacity', '0.5')) ?? 0.5) * 100).clamp(0.0, 90.0),
@@ -335,7 +335,7 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
                           onChanging: (v) => setState(() => _s['danmakuShadowOpacity'] = (v / 100).toStringAsFixed(2)),
                           onCommit: (v) => _set('danmakuShadowOpacity', (v / 100).toStringAsFixed(2)),
                         ),
-                      if (g('danmakuStrokeMode', 'shadow').trim().toLowerCase() == 'projection') ...[
+                      if (g('danmakuStrokeMode', 'outline').trim().toLowerCase() == 'projection') ...[
                         _slider(
                           label: '投影偏移 X',
                           value: ((double.tryParse(g('danmakuProjectionOffsetX', '0.08')) ?? 0.08) * 100).clamp(2.0, 15.0),

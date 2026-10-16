@@ -266,7 +266,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   int _danmakuDurationMs = 8000;
   int _danmakuFixedDurationMs = 5000;
   double _danmakuLineSpacing = 1.4;
-  String _danmakuStrokeMode = 'shadow';
+  String _danmakuStrokeMode = 'outline';
   String _danmakuColorMode = 'original';
   String _danmakuFontFamily = 'default';
   int _danmakuRowsTop = 3;
@@ -2900,7 +2900,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _danmakuDurationMs = int.tryParse('${settings['danmakuDurationMs'] ?? '8000'}') ?? 8000;
     _danmakuFixedDurationMs = int.tryParse('${settings['danmakuFixedDurationMs'] ?? '5000'}') ?? 5000;
     _danmakuLineSpacing = double.tryParse('${settings['danmakuLineSpacing'] ?? '1.4'}') ?? 1.4;
-    _danmakuStrokeMode = kotvNormalizeDanmakuStroke('${settings['danmakuStrokeMode'] ?? 'shadow'}');
+    _danmakuStrokeMode = kotvNormalizeDanmakuStroke('${settings['danmakuStrokeMode'] ?? 'outline'}');
     _danmakuColorMode = kotvNormalizeDanmakuColorMode('${settings['danmakuColorMode'] ?? 'original'}');
     _danmakuFontFamily = kotvNormalizeSubtitleFont('${settings['danmakuFont'] ?? 'default'}');
     _danmakuRowsTop = (int.tryParse('${settings['danmakuRowsTop'] ?? '3'}') ?? 3).clamp(1, 8);

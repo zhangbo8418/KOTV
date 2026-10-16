@@ -74,7 +74,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.danmakuDurationMs = 8000,
     this.danmakuFixedDurationMs = 5000,
     this.danmakuLineSpacing = 1.4,
-    this.danmakuStrokeMode = 'shadow',
+    this.danmakuStrokeMode = 'outline',
     this.danmakuColorMode = 'original',
     this.danmakuFontFamily = 'default',
     this.danmakuRowsTop = 3,

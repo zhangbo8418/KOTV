@@ -48,12 +48,12 @@ double kotvSubtitleShadowStrength(String? raw, {double def = 50}) {
   return (double.tryParse('${raw ?? ''}') ?? def).clamp(0, 100);
 }
 
-/// none / outline / shadow / projection。
+/// none / outline / shadow / projection。空或未知时默认 outline（硬描边，减轻拖影）。
 String kotvNormalizeDanmakuStroke(String? raw) {
   final s = (raw ?? '').trim().toLowerCase();
   return switch (s) {
-    'none' || 'outline' || 'projection' => s,
-    _ => 'shadow',
+    'none' || 'outline' || 'shadow' || 'projection' => s,
+    _ => 'outline',
   };
 }
 

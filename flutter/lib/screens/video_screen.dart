@@ -991,6 +991,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       },
       child: CustomScrollView(
         controller: _scroll,
+        cacheExtent: 800,
         slivers: [
           if (onHome) ...[
             SliverToBoxAdapter(
