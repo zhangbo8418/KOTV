@@ -33,6 +33,16 @@ func RegisterRolling(mediaURL string, headers map[string]string) string {
 			delete(rollingEntries, k)
 		}
 	}
+	if len(rollingEntries) >= rollingMax {
+		n := len(rollingEntries) / 2
+		for k := range rollingEntries {
+			if n <= 0 {
+				break
+			}
+			delete(rollingEntries, k)
+			n--
+		}
+	}
 	rollingEntries[id] = rollingEntry{
 		URL:       mediaURL,
 		Headers:   cp,
@@ -41,6 +51,8 @@ func RegisterRolling(mediaURL string, headers map[string]string) string {
 	rollingMu.Unlock()
 	return id
 }
+
+const rollingMax = 256
 
 // ClearRolling 清空滚动 m3u8 登记表（清理缓存工具）。
 func ClearRolling() {

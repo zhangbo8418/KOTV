@@ -47,6 +47,8 @@ type entry struct {
 	file *torrent.File
 }
 
+const entriesMax = 32
+
 var (
 	mu      sync.Mutex
 	client  *torrent.Client
@@ -147,6 +149,19 @@ func Resolve(ctx context.Context, magnet string) (string, error) {
 	prioritizeStart(t, file)
 
 	mu.Lock()
+	if len(entries) >= entriesMax {
+		n := len(entries) / 2
+		for k, e := range entries {
+			if n <= 0 {
+				break
+			}
+			if e != nil && e.t != nil {
+				e.t.Drop()
+			}
+			delete(entries, k)
+			n--
+		}
+	}
 	entries[ih] = &entry{t: t, file: file}
 	mu.Unlock()
 
@@ -249,7 +264,7 @@ func lookup(ih string) (*entry, bool) {
 	return e, ok
 }
 
-// ClearEntries 丢弃边下边播登记（清理缓存/磁力时与磁盘对齐）。
+// ClearEntries 丢弃边下边播登记并关闭 BT 客户端（清理缓存/磁力时与磁盘对齐）。
 func ClearEntries() {
 	mu.Lock()
 	defer mu.Unlock()
@@ -260,6 +275,10 @@ func ClearEntries() {
 		e.t.Drop()
 	}
 	entries = map[string]*entry{}
+	if client != nil {
+		client.Close()
+		client = nil
+	}
 }
 
 func contentType(name string) string {

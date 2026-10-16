@@ -40,10 +40,22 @@ func Rewrite(raw string) string {
 			delete(sessions, k)
 		}
 	}
+	if len(sessions) >= sessionsMax {
+		n := len(sessions) / 2
+		for k := range sessions {
+			if n <= 0 {
+				break
+			}
+			delete(sessions, k)
+			n--
+		}
+	}
 	sessions[id] = &session{raw: raw, expiresAt: now.Add(6 * time.Hour)}
 	mu.Unlock()
 	return fmt.Sprintf("%s/proxy/smb/?id=%s", playproxy.LocalHTTPBase(), id)
 }
+
+const sessionsMax = 256
 
 // Clear 清空 SMB 代理会话表（清理缓存工具）。
 func Clear() {

@@ -13,7 +13,7 @@ import (
 	"github.com/bobo/KOTV/internal/util"
 )
 
-// Module.java：LruCache(50) + http / assets:// / lib/ 取源。
+// JS 模块内存 LRU，容量 50（http / assets:// / lib/ 取源）。
 const jsMemMaxEntries = 50
 
 var (

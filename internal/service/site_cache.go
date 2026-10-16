@@ -59,8 +59,14 @@ func (s *SiteService) putCategoryCache(site model.Site, tid, pg string, extend m
 		return
 	}
 	if _, exists := s.categoryCache[key]; !exists && len(s.categoryCache) >= categoryCacheMax {
-		s.categoryCache = map[string]model.Result{key: result}
-		return
+		n := len(s.categoryCache) / 2
+		for k := range s.categoryCache {
+			if n <= 0 {
+				break
+			}
+			delete(s.categoryCache, k)
+			n--
+		}
 	}
 	s.categoryCache[key] = result
 }

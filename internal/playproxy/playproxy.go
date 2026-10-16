@@ -98,13 +98,43 @@ func register(rawURL string, headers map[string]string) string {
 			delete(entries, k)
 		}
 	}
+	trimEntriesHalfLocked(entriesMax)
 	entries[id] = entry{URL: rawURL, Headers: cp, ExpiresAt: now.Add(6 * time.Hour)}
 	mu.Unlock()
 	return fmt.Sprintf("%s/proxy/play?id=%s", LocalHTTPBase(), id)
 }
 
-// Clear 清空播放代理登记表（清理缓存工具）。
+const entriesMax = 256
+
+// trimEntriesHalfLocked 超上限时删一半（调用方已持 mu）。
+func trimEntriesHalfLocked(max int) {
+	if len(entries) < max {
+		return
+	}
+	n := len(entries) / 2
+	for k := range entries {
+		if n <= 0 {
+			break
+		}
+		delete(entries, k)
+		n--
+	}
+}
+
+// Clear 清空播放代理登记表与活跃 splice 槽（清理缓存工具）。
 func Clear() {
+	spliceMu.Lock()
+	holds := make([]*spliceHold, 0, len(spliceLive))
+	for _, h := range spliceLive {
+		holds = append(holds, h)
+	}
+	spliceLive = map[string]*spliceHold{}
+	spliceMu.Unlock()
+	for _, h := range holds {
+		if h != nil {
+			h.kill()
+		}
+	}
 	mu.Lock()
 	entries = map[string]entry{}
 	mu.Unlock()
