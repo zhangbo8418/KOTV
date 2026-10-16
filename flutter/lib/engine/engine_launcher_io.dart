@@ -243,6 +243,48 @@ class EngineLauncher {
     return _starting!;
   }
 
+  /// 桌面：探测非回环 IPv4，写入 KOTV_LAN_IP（投屏/SSDP 外发用）。
+  Future<String?> _detectLanIpv4() async {
+    try {
+      final ifaces = await NetworkInterface.list(
+        includeLinkLocal: false,
+        type: InternetAddressType.IPv4,
+      );
+      String? fallback;
+      for (final iface in ifaces) {
+        final name = iface.name.toLowerCase();
+        for (final addr in iface.addresses) {
+          if (addr.isLoopback) continue;
+          final ip = addr.address;
+          if (ip.isEmpty) continue;
+          if (name.startsWith('wlan') ||
+              name.startsWith('en') ||
+              name.startsWith('eth') ||
+              name.startsWith('wl') ||
+              name.contains('wi-fi') ||
+              name.contains('wifi') ||
+              name.contains('ethernet')) {
+            return ip;
+          }
+          fallback ??= ip;
+        }
+      }
+      return fallback;
+    } catch (e) {
+      debugPrint('detect lan ip: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, String>> _withLanIp(Map<String, String> env) async {
+    if ((env['KOTV_LAN_IP'] ?? '').trim().isNotEmpty) return env;
+    final ip = (await _detectLanIpv4())?.trim() ?? '';
+    if (ip.isEmpty) return env;
+    final out = Map<String, String>.from(env);
+    out['KOTV_LAN_IP'] = ip;
+    return out;
+  }
+
   Map<String, String> _runtimeEnv() {
     final env = Map<String, String>.from(Platform.environment);
     if ((env['KOTV_RUNTIME'] ?? '').trim().isNotEmpty) {
@@ -452,7 +494,8 @@ class EngineLauncher {
 
       await _killStrayEngines(exceptPid: _proc?.pid);
       await Future<void>.delayed(const Duration(milliseconds: 250));
-      debugPrint('engine start: $bin runtime=${env['KOTV_RUNTIME']}');
+      env = await _withLanIp(env);
+      debugPrint('engine start: $bin runtime=${env['KOTV_RUNTIME']} lan=${env['KOTV_LAN_IP']}');
       await _spawn(bin, env);
     } catch (e, st) {
       debugPrint('engine start skipped: $e\n$st');

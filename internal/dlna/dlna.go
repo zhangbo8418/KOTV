@@ -134,21 +134,13 @@ func discoverWithHostIP(ctx context.Context, hostIP string) ([]Device, error) {
 	return out, nil
 }
 
-// Devices 返回最近一次发现的设备。
-func Devices() []Device {
-	mu.Lock()
-	defer mu.Unlock()
-	out := make([]Device, len(devices))
-	copy(out, devices)
-	return out
-}
-
 // CastWith 投送并可选写入自定义头、起播进度。
+// 调用方应先 RewriteLocalURL；此处不再改写，避免与入口重复。
 func CastWith(d Device, mediaURL string, opt CastOptions) error {
 	if d.client == nil {
 		return fmt.Errorf("设备无效")
 	}
-	mediaURL = RewriteLocalURL(mediaURL)
+	mediaURL = strings.TrimSpace(mediaURL)
 	if mediaURL == "" {
 		return fmt.Errorf("媒体地址为空")
 	}
@@ -205,30 +197,54 @@ func parseRelTimeMs(rel string) int64 {
 	return (h*3600 + m*60 + s) * 1000
 }
 
-// RewriteLocalURL 将 127.0.0.1 / localhost 改写为局域网 IP。
+// RewriteLocalURL 将投屏外发地址中的回环主机改为局域网 IP。
+// LanIP 为空时原样返回，由投屏入口检测并报错，禁止把 127 推给电视。
 func RewriteLocalURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return raw
 	}
-	host := u.Hostname()
-	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
-		ip := LocalIP()
-		if ip == "" {
-			return raw
+	ip := LocalIP()
+	if ip == "" {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err == nil {
+		host := u.Hostname()
+		if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+			port := u.Port()
+			if port != "" {
+				u.Host = ip + ":" + port
+			} else {
+				u.Host = ip
+			}
+			return u.String()
 		}
-		port := u.Port()
-		if port != "" {
-			u.Host = ip + ":" + port
-		} else {
-			u.Host = ip
-		}
-		return u.String()
+	}
+	// 解析边界：字面量 127.0.0.1 仍替换，避免电视收到回环。
+	if strings.Contains(raw, "127.0.0.1") {
+		return strings.ReplaceAll(raw, "127.0.0.1", ip)
 	}
 	return raw
 }
 
-// LocalIP 获取首选局域网 IPv4（含安卓 KOTV_LAN_IP 注入路径）。
+// IsLoopbackMediaURL 判断媒体 URL 主机是否仍为回环（投屏前拦截用）。
+func IsLoopbackMediaURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return strings.Contains(raw, "127.0.0.1") ||
+			strings.Contains(strings.ToLower(raw), "://localhost") ||
+			strings.Contains(raw, "[::1]")
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+}
+
+// LocalIP 获取首选局域网 IPv4（含安卓 / 桌面 KOTV_LAN_IP 注入路径）。
 func LocalIP() string {
 	return util.LanIP()
 }
