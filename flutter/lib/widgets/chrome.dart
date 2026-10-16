@@ -541,7 +541,7 @@ class SectionTitle extends StatelessWidget {
   }
 }
 
-/// 详情选集芯片：newDetailEpisodeChip（半透明紫底 / 选中粉底）。
+/// 详情选集芯片。未选中用胶囊底，选中用强调色。
 class EpisodeChip extends StatelessWidget {
   const EpisodeChip({
     super.key,
@@ -562,7 +562,8 @@ class EpisodeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = selected ? const Color(0xF2C73C62) : const Color(0x9E141038);
+    final p = KotvPalette.of(context);
+    final bg = selected ? p.selected : p.pillBg;
     return TvFocus(
       autofocus: autofocus,
       onPressed: onTap,
@@ -584,7 +585,11 @@ class EpisodeChip extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: Colors.white, fontSize: fontSize, fontWeight: FontWeight.w700),
+              style: TextStyle(
+                color: selected ? Colors.white : p.fg,
+                fontSize: fontSize,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ),

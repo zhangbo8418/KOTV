@@ -1402,7 +1402,7 @@ func (a *App) APIBackdrop() map[string]any {
 	fg, muted, outline := "#FFFFFFFF", "#D8FFFFFF", "#B0D8A5E8"
 	input, pillBg, pillBorder := "#FF582D91", "#E618161E", "#C84A4855"
 	statusBar, catBar, bottomNav := "#60551C72", "#4D653AA8", "#EE1A0F2E"
-	dialogBg, posterPh := "#FA3B1970", "#FF3A1A6E"
+	dialogBg, posterBar, posterPh := "#FA3B1970", "#CC653AA8", "#FF3A1A6E"
 	selected, focus := "#F2C73C62", "#FFFFD54F"
 	name := "极光紫"
 	switch mode {
@@ -1413,14 +1413,14 @@ func (a *App) APIBackdrop() map[string]any {
 			fg, muted, outline = "#FF0E3A5C", "#CC0E3A5C", "#88156B8A"
 			input, pillBg, pillBorder = "#FFE8F4FC", "#E6FFFFFF", "#882E86AB"
 			statusBar, catBar, bottomNav = "#99C8E0F2", "#88A8D4E8", "#EEF2F8FC"
-			dialogBg, posterPh = "#F2E8F4FC", "#FFB0D4E8"
+			dialogBg, posterBar, posterPh = "#F2E8F4FC", "#CC2E86AB", "#FFB0D4E8"
 			selected, focus = "#F22E86AB", "#FF156B8A"
 		} else {
 			primary, surface, variant = "#4FC3F7", "#156B8A", "#2E86AB"
 			fg, muted, outline = "#FFFFFFFF", "#D8FFFFFF", "#904FC3F7"
 			input, pillBg, pillBorder = "#FF0E3A5C", "#E60A2438", "#884FC3F7"
 			statusBar, catBar, bottomNav = "#600E3A5C", "#4D1A5C8A", "#EE0A1E2E"
-			dialogBg, posterPh = "#FA0E3A5C", "#FF0E3A5C"
+			dialogBg, posterBar, posterPh = "#FA0E3A5C", "#CC156B8A", "#FF0E3A5C"
 			selected, focus = "#F22E86AB", "#FF4FC3F7"
 		}
 	case "builtin2":
@@ -1430,14 +1430,14 @@ func (a *App) APIBackdrop() map[string]any {
 			fg, muted, outline = "#FF5A1A3A", "#CC5A1A3A", "#88C73C62"
 			input, pillBg, pillBorder = "#FFFFF0F5", "#E6FFFFFF", "#88E86A83"
 			statusBar, catBar, bottomNav = "#99F7E3F2", "#88F0D0E0", "#EEFFF5F8"
-			dialogBg, posterPh = "#F2FFF0F5", "#FFE8B0C0"
+			dialogBg, posterBar, posterPh = "#F2FFF0F5", "#CCC73C62", "#FFE8B0C0"
 			selected, focus = "#F2C73C62", "#FFE91E63"
 		} else {
 			primary, surface, variant = "#FF6F91", "#7B2D8E", "#C73C62"
 			fg, muted, outline = "#FFFFFFFF", "#D8FFFFFF", "#B0FF8AA5"
 			input, pillBg, pillBorder = "#FF5A2068", "#E61A0C22", "#C8E86A83"
 			statusBar, catBar, bottomNav = "#60551C48", "#4D7B2D8E", "#EE1A0A1E"
-			dialogBg, posterPh = "#FA5A2068", "#FF4A1848"
+			dialogBg, posterBar, posterPh = "#FA5A2068", "#CCC73C62", "#FF4A1848"
 			selected, focus = "#F2C73C62", "#FFFF8A65"
 		}
 	case "builtin3":
@@ -1447,14 +1447,14 @@ func (a *App) APIBackdrop() map[string]any {
 			fg, muted, outline = "#FF0F202E", "#CC0F202E", "#88266E8C"
 			input, pillBg, pillBorder = "#FFE8F0F2", "#E6FFFFFF", "#884DA8DA"
 			statusBar, catBar, bottomNav = "#99D5E4E8", "#88C0D4DA", "#EEF0F4F6"
-			dialogBg, posterPh = "#F2E8F0F2", "#FFB0C8D0"
+			dialogBg, posterBar, posterPh = "#F2E8F0F2", "#CC266E8C", "#FFB0C8D0"
 			selected, focus = "#F24DA8DA", "#FF266E8C"
 		} else {
 			primary, surface, variant = "#80CBC4", "#203A43", "#4DA8DA"
 			fg, muted, outline = "#FFFFFFFF", "#D8FFFFFF", "#9080CBC4"
 			input, pillBg, pillBorder = "#FF152830", "#E60A141C", "#884DA8DA"
 			statusBar, catBar, bottomNav = "#600F202E", "#4D203A43", "#EE0A1218"
-			dialogBg, posterPh = "#FA152830", "#FF0F202E"
+			dialogBg, posterBar, posterPh = "#FA152830", "#CC203A43", "#FF0F202E"
 			selected, focus = "#F24DA8DA", "#FF80CBC4"
 		}
 	default:
@@ -1474,7 +1474,7 @@ func (a *App) APIBackdrop() map[string]any {
 			fg, muted, outline = "#FF1B1B24", "#CC45464F", "#88767680"
 			input, pillBg, pillBorder = "#FFDDE2FF", "#E6FFFFFF", "#88767680"
 			statusBar, catBar, bottomNav = "#99E9EEFB", "#88D8D0F0", "#EEFCF8FF"
-			dialogBg, posterPh = "#F2FCF8FF", "#FFD0C8E8"
+			dialogBg, posterBar, posterPh = "#F2FCF8FF", "#CC653AA8", "#FFD0C8E8"
 			selected, focus = "#F2C73C62", "#FF1A2A6C"
 		}
 	}
@@ -1536,6 +1536,7 @@ func (a *App) APIBackdrop() map[string]any {
 		"catBar":     catBar,
 		"bottomNav":  bottomNav,
 		"dialogBg":   dialogBg,
+		"posterBar":  posterBar,
 		"posterPh":   posterPh,
 		"selected":   selected,
 		"focus":      focus,

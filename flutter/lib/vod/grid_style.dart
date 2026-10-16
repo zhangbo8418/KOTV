@@ -10,15 +10,13 @@ import '../theme/layout_scale.dart';
 /// 矩形名称上下左右内边距。
 const double kotvPosterNamePad = 6;
 
-/// 名称底：20% 黑。
-const Color kotvPosterNameBg = Color(0x33000000);
-
 /// 手机 14，电视 16。不继承主题字高，避免和测量不一致。
 double kotvPosterNameFont({required bool television}) => television ? 16 : 14;
 
-TextStyle kotvPosterNameStyle({required bool television}) => TextStyle(
+TextStyle kotvPosterNameStyle({required bool television, Color? color}) =>
+    TextStyle(
       inherit: false,
-      color: const Color(0xFFFFFFFF),
+      color: color,
       fontSize: kotvPosterNameFont(television: television),
     );
 

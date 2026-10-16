@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../remote/local_collect.dart';
+import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
 import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
@@ -58,6 +59,7 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
     final delW = land ? 72.0 : (compact ? 88.0 : 120.0);
     final clearW = land ? 72.0 : (compact ? 88.0 : 120.0);
     final gap = land ? 6.0 : (compact ? 6.0 : 8.0);
+    final p = KotvPalette.of(context);
     return Column(
       children: [
         LibraryTopBar(
@@ -92,20 +94,18 @@ class _CollectScreenState extends ConsumerState<CollectScreen> {
           ),
         ),
         if (_deleting)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 4),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
             child: Text('删除模式：点击海报即可移除',
-                style: TextStyle(color: Color(0xFFCF4274), fontSize: 14)),
+                style: TextStyle(color: p.primary, fontSize: 14)),
           ),
         Expanded(
           child: _loading
-              ? const Center(
-                  child: CircularProgressIndicator(color: Colors.white))
+              ? Center(child: CircularProgressIndicator(color: p.primary))
               : _items.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text('暂无收藏',
-                          style:
-                              TextStyle(color: Colors.white70, fontSize: 18)))
+                          style: TextStyle(color: p.muted, fontSize: 18)))
                   : PosterFlow(
                       items: _items,
                       size: kotvWatchPosterSize(ref),

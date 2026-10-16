@@ -1813,6 +1813,7 @@ class KotvSettingsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cols = effectiveColumns(context, columns);
+    final line = KotvPalette.of(context).fg.withOpacity(0.08);
     final rows = <Widget>[];
     for (var i = 0; i < children.length; i += cols) {
       final end = i + cols > children.length ? children.length : i + cols;
@@ -1821,8 +1822,7 @@ class KotvSettingsGrid extends StatelessWidget {
         slice.add(const SizedBox.shrink());
       }
       if (rows.isNotEmpty) {
-        rows.add(Divider(
-            height: 1, thickness: 1, color: Colors.white.withOpacity(0.08)));
+        rows.add(Divider(height: 1, thickness: 1, color: line));
       }
       rows.add(IntrinsicHeight(
         child: Row(
@@ -1830,10 +1830,7 @@ class KotvSettingsGrid extends StatelessWidget {
           children: [
             for (var c = 0; c < slice.length; c++) ...[
               if (c > 0)
-                VerticalDivider(
-                    width: 1,
-                    thickness: 1,
-                    color: Colors.white.withOpacity(0.08)),
+                VerticalDivider(width: 1, thickness: 1, color: line),
               Expanded(child: slice[c]),
             ],
           ],

@@ -633,24 +633,24 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 280),
                   child: Material(
-                    color: const Color(0xCC1A1228),
+                    color: p.dialogBg,
                     borderRadius: BorderRadius.circular(14),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const SizedBox(
+                          SizedBox(
                             width: 28,
                             height: 28,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2.6, color: Colors.white),
+                                strokeWidth: 2.6, color: p.primary),
                           ),
                           const SizedBox(height: 14),
-                          const Text(
+                          Text(
                             '正在搜索…',
                             style: TextStyle(
-                                color: Colors.white,
+                                color: p.fg,
                                 fontSize: 15,
                                 fontWeight: FontWeight.w600),
                           ),
@@ -660,9 +660,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                 ? '$_doneSites / $_totalSites 站点 · 已找到 $_hitCount 条'
                                 : (_status ?? ''),
                             textAlign: TextAlign.center,
-                            style: TextStyle(
-                                color: Colors.white.withOpacity(0.75),
-                                fontSize: 13),
+                            style: TextStyle(color: p.muted, fontSize: 13),
                           ),
                         ],
                       ),
@@ -678,7 +676,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             right: 0,
             top: 0,
             child: Material(
-              color: const Color(0xCC1A1228),
+              color: p.dialogBg,
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(14)),
               child: Padding(
@@ -686,18 +684,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: Row(
                   children: [
-                    const SizedBox(
+                    SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                          strokeWidth: 2, color: p.primary),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         '继续搜索 $_doneSites/$_totalSites · 已找到 $_hitCount 条',
-                        style: TextStyle(
-                            color: Colors.white.withOpacity(0.9), fontSize: 13),
+                        style: TextStyle(color: p.fg, fontSize: 13),
                       ),
                     ),
                   ],

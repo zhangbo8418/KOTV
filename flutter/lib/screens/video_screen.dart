@@ -903,7 +903,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         ),
         // 有全局遮罩时不再画底栏进度条，避免两层转圈
         if (busy == null && (_loading || _loadingMore))
-          const LinearProgressIndicator(minHeight: 2, color: Color(0xFFCF4274)),
+          LinearProgressIndicator(
+              minHeight: 2, color: KotvPalette.of(context).primary),
       ],
     );
   }
@@ -914,11 +915,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(
+          SizedBox(
             width: 36,
             height: 36,
             child: CircularProgressIndicator(
-                strokeWidth: 3, color: Color(0xFFCF4274)),
+                strokeWidth: 3, color: p.primary),
           ),
           const SizedBox(height: 16),
           Text('正在加载点播源…',

@@ -39,6 +39,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
     required this.catBar,
     required this.bottomNav,
     required this.dialogBg,
+    required this.posterBar,
     required this.posterPh,
     required this.selected,
     required this.focus,
@@ -66,6 +67,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
   final Color catBar;
   final Color bottomNav;
   final Color dialogBg;
+  final Color posterBar;
   final Color posterPh;
   final Color selected;
   final Color focus;
@@ -93,6 +95,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
     catBar: Color(0xB318181E),
     bottomNav: Color(0xB30E0E14),
     dialogBg: Color(0xE0121218),
+    posterBar: Color(0xE618181E),
     posterPh: Color(0xFF1A1A22),
     selected: Color(0xD9C73C62),
     focus: Color(0xFFFFD54F),
@@ -115,7 +118,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
     final name = kotvWallModeNames[mode] ?? '极光紫';
 
     // 默认极光紫 / 配置墙纸 / 网络 / 本地：同一套 UI 色
-    // 浅色：顶栏和分类栏用高不透明底，避免壁纸透出来发灰。
+    // 浅色：顶栏/分类栏高不透明，海报底栏用浅霜白底 + 深色字，避免壁纸透底导致发灰看不清
     var p = light
         ? const KotvPalette(
             mode: 'gradient',
@@ -134,6 +137,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
             catBar: Color(0xC8EEF0F8),
             bottomNav: Color(0xB3FCF8FF),
             dialogBg: Color(0xE0FCF8FF),
+            posterBar: Color(0xE6FFFFFF),
             posterPh: Color(0xFFD0C8E8),
             selected: Color(0xD9C73C62),
             focus: Color(0xFFC73C62),
@@ -166,6 +170,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 catBar: _c(0xE8D8ECF5),
                 bottomNav: _c(0xB3F2F8FC),
                 dialogBg: _c(0xE0E8F4FC),
+                posterBar: _c(0xF2FFFFFF),
                 posterPh: _c(0xFFB0D4E8),
                 selected: _c(0xD92E86AB),
                 focus: _c(0xFFC73C62),
@@ -193,6 +198,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 catBar: _c(0xB318181E),
                 bottomNav: _c(0xB30E0E14),
                 dialogBg: _c(0xE0121218),
+                posterBar: _c(0xE618181E),
                 posterPh: _c(0xFF0E3A5C),
                 selected: _c(0xD92E86AB),
                 focus: _c(0xFF4FC3F7),
@@ -222,6 +228,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 catBar: _c(0xE8F5E0EA),
                 bottomNav: _c(0xB3FFF5F8),
                 dialogBg: _c(0xE0FFF0F5),
+                posterBar: _c(0xF2FFFFFF),
                 posterPh: _c(0xFFE8B0C0),
                 selected: _c(0xD9C73C62),
                 focus: _c(0xFFC73C62),
@@ -249,6 +256,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 catBar: _c(0xB318181E),
                 bottomNav: _c(0xB30E0E14),
                 dialogBg: _c(0xE0121218),
+                posterBar: _c(0xE618181E),
                 posterPh: _c(0xFF4A1848),
                 selected: _c(0xD9C73C62),
                 focus: _c(0xFFFF8A65),
@@ -278,6 +286,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 catBar: _c(0xE8D8E6EA),
                 bottomNav: _c(0xB3F0F4F6),
                 dialogBg: _c(0xE0E8F0F2),
+                posterBar: _c(0xF2FFFFFF),
                 posterPh: _c(0xFFB0C8D0),
                 selected: _c(0xD94DA8DA),
                 focus: _c(0xFFC73C62),
@@ -305,6 +314,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
                 catBar: _c(0xB318181E),
                 bottomNav: _c(0xB30E0E14),
                 dialogBg: _c(0xE0121218),
+                posterBar: _c(0xE618181E),
                 posterPh: _c(0xFF0F202E),
                 selected: _c(0xD94DA8DA),
                 focus: _c(0xFF80CBC4),
@@ -339,6 +349,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
     Color? catBar,
     Color? bottomNav,
     Color? dialogBg,
+    Color? posterBar,
     Color? posterPh,
     Color? selected,
     Color? focus,
@@ -366,6 +377,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
       catBar: catBar ?? this.catBar,
       bottomNav: bottomNav ?? this.bottomNav,
       dialogBg: dialogBg ?? this.dialogBg,
+      posterBar: posterBar ?? this.posterBar,
       posterPh: posterPh ?? this.posterPh,
       selected: selected ?? this.selected,
       focus: focus ?? this.focus,
@@ -399,6 +411,7 @@ class KotvPalette extends ThemeExtension<KotvPalette> {
       catBar: mix(catBar, other.catBar),
       bottomNav: mix(bottomNav, other.bottomNav),
       dialogBg: mix(dialogBg, other.dialogBg),
+      posterBar: mix(posterBar, other.posterBar),
       posterPh: mix(posterPh, other.posterPh),
       selected: mix(selected, other.selected),
       focus: mix(focus, other.focus),

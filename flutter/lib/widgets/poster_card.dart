@@ -10,7 +10,7 @@ import 'kotv_network_image.dart';
 import 'kotv_poster_image.dart';
 
 /// 海报：图片按比例裁切，名称在图片下面，备注在图片上。
-/// 矩形名称有半透明底和内边距；圆形名称没有底。
+/// 名称底和文字颜色走当前主题。
 class PosterCard extends StatelessWidget {
   const PosterCard({
     super.key,
@@ -128,7 +128,7 @@ class PosterCard extends StatelessWidget {
                   SizedBox(
                     height: titleH,
                     child: ColoredBox(
-                      color: oval ? const Color(0x00000000) : kotvPosterNameBg,
+                      color: p.posterBar,
                       child: Padding(
                         padding: oval
                             ? EdgeInsets.only(top: television ? 4 : 0)
@@ -140,7 +140,10 @@ class PosterCard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
-                            style: kotvPosterNameStyle(television: television),
+                            style: kotvPosterNameStyle(
+                              television: television,
+                              color: p.fg,
+                            ),
                           ),
                         ),
                       ),

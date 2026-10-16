@@ -3090,7 +3090,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                     else if (canCatchup)
                       Text('回看', style: TextStyle(color: p.primary, fontSize: 12, fontWeight: FontWeight.w700))
                     else if (now && !_catchup)
-                      const Text('正在播出', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      Text('正在播出', style: TextStyle(color: p.muted, fontSize: 12)),
                   ],
                 ),
               ),
@@ -3099,6 +3099,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       );
     }
 
+    final p = KotvPalette.of(context);
     return Padding(
       padding: EdgeInsets.only(bottom: land ? 2 : 4),
       child: TvFocus(
@@ -3107,8 +3108,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         onPressed: canCatchup ? activate : null,
         child: Material(
             color: sel
-                ? (playing ? const Color(0xE0C73C62) : const Color(0xB0C73C62))
-                : const Color(0x9918161E),
+                ? p.selected.withOpacity(playing ? 0.95 : 0.75)
+                : p.pillBg.withOpacity(0.7),
             borderRadius: BorderRadius.circular(6),
             child: Padding(
               padding: EdgeInsets.symmetric(
@@ -3126,7 +3127,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: Colors.white.withOpacity(sel ? 1 : 0.75),
+                          color: sel ? Colors.white : p.fg.withOpacity(0.75),
                           fontSize: land ? 11 : 12,
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
@@ -3137,7 +3138,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                       '$label${playing ? ' · 回看中' : (canCatchup ? ' · 回看' : '')}',
                       active: sel,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(sel ? 1 : 0.85),
+                        color: sel ? Colors.white : p.fg,
                         fontSize: land ? 12 : (12.0 * wScale.clamp(1.0, 1.2)),
                         height: 1.2,
                         fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
@@ -3404,7 +3405,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('请先在设置中配置直播源，或在点播配置中包含 lives', style: TextStyle(color: Colors.white70, fontSize: 16)),
+                  Text('请先在设置中配置直播源，或在点播配置中包含 lives',
+                      style: TextStyle(color: KotvPalette.of(context).muted, fontSize: 16)),
                   const SizedBox(height: 16),
                   AppPill(label: '打开设置', width: 140, selected: true, onTap: () => goKotvPage(ref, KotvPage.settings)),
                   const SizedBox(height: 10),
@@ -3579,8 +3581,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         onEnter: (_) => _cancelHideOverlays(),
                         onExit: (_) => _scheduleHideOverlays(),
                         child: Material(
-                          color: const Color(0x99120A24),
+                          color: KotvPalette.of(context).dialogBg,
                           child: Builder(builder: (context) {
+                            final p = KotvPalette.of(context);
                             final screenW = c.maxWidth;
                             final land = KotvLayout.isLandscapeCompact(context);
                             // 列宽按屏宽缩放：写死 120/240/220 在 1080P 全屏仍偏窄，中文台名/EPG 会被 ellipsis 裁掉。
@@ -3706,7 +3709,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                             onPressed: () => _selectChannelFromList(i),
                                             onLongPress: () => unawaited(_toggleChannelFav(i)),
                                             child: Material(
-                                              color: sel ? const Color(0x2EFFFFFF) : Colors.transparent,
+                                              color: sel
+                                                  ? p.selected.withOpacity(0.28)
+                                                  : p.pillBg.withOpacity(0.55),
                                               borderRadius: BorderRadius.circular(8),
                                               child: SizedBox(
                                                 height: chH,
@@ -3720,7 +3725,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                           _channelNumberLabel(ch, i),
                                                           softWrap: false,
                                                           style: TextStyle(
-                                                            color: Colors.white.withOpacity(0.8),
+                                                            color: p.muted,
                                                             fontSize: land ? 12 : 16,
                                                             fontFeatures: const [FontFeature.tabularFigures()],
                                                           ),
@@ -3734,9 +3739,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                           name,
                                                           selected: sel,
                                                           style: TextStyle(
-                                                            color: Colors.white,
+                                                            color: p.fg,
                                                             fontSize: land ? 12 : (15.0 * wScale.clamp(1.0, 1.2)),
                                                             height: 1.15,
+                                                            fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                                                           ),
                                                         ),
                                                       ),
@@ -3774,14 +3780,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         }
                                       },
                                       child: Material(
-                                        color: _epgOpen ? const Color(0x40C73C62) : const Color(0xFF1C1826),
+                                        color: _epgOpen
+                                            ? p.selected.withOpacity(0.4)
+                                            : p.pillBg,
                                         borderRadius: BorderRadius.circular(8),
                                         child: Center(
                                           child: Text(
                                             (_epgOpen ? '收起' : '节目单').split('').join('\n'),
                                             textAlign: TextAlign.center,
                                             style: TextStyle(
-                                              color: Colors.white.withOpacity(_epgOpen ? 1 : 0.9),
+                                              color: p.fg,
                                               fontSize: land ? 11 : 12,
                                               height: 1.25,
                                               fontWeight: FontWeight.w600,
@@ -3803,7 +3811,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                           child: Text(
                                             'EPG',
                                             style: TextStyle(
-                                              color: Colors.white.withOpacity(0.7),
+                                              color: p.muted,
                                               fontSize: land ? 11 : 13,
                                               fontWeight: FontWeight.w600,
                                             ),
@@ -3820,7 +3828,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                               ? Center(
                                                   child: Text(
                                                     '暂无节目单',
-                                                    style: TextStyle(color: Colors.white54, fontSize: land ? 11 : 13),
+                                                    style: TextStyle(color: p.muted, fontSize: land ? 11 : 13),
                                                   ),
                                                 )
                                               : ListView.builder(
@@ -3855,8 +3863,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                         onEnter: (_) => _cancelHideOverlays(),
                         onExit: (_) => _scheduleHideOverlays(),
                         child: Material(
-                          color: const Color(0x99120A24),
+                          color: KotvPalette.of(context).dialogBg,
                           child: Builder(builder: (context) {
+                            final p = KotvPalette.of(context);
                             final land = KotvLayout.isLandscapeCompact(context);
                             final wScale = land
                                 ? 1.0
@@ -3873,7 +3882,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                 Text(
                                   '直播设置',
                                   style: TextStyle(
-                                    color: Colors.white,
+                                    color: p.fg,
                                     fontSize: land ? 14 : 18,
                                     fontWeight: FontWeight.w700,
                                   ),
@@ -3980,8 +3989,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                       max: 100,
                                       divisions: 99,
                                       format: (v) => '${v.round()}',
-                                      foreground: Colors.white70,
-                                      valueColor: Colors.white70,
                                       padding: const EdgeInsets.only(top: 4),
                                       onChanging: (v) => unawaited(_playback.setVolume(v)),
                                       onCommit: (v) async {
@@ -3996,7 +4003,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                 const SizedBox(height: 8),
                                 AppPill(label: '打开设置页', height: 40, onTap: () => goKotvPage(ref, KotvPage.settings)),
                                 const SizedBox(height: 16),
-                                const Text('直播源', style: TextStyle(color: Colors.white70)),
+                                Text('直播源', style: TextStyle(color: p.muted)),
                                 const SizedBox(height: 8),
                                 for (var i = 0; i < _sources.length; i++)
                                   Padding(
