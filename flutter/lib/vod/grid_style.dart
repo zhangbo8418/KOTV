@@ -7,7 +7,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../theme/layout_scale.dart';
 
-/// 海报标题区高度（设计像素）。图片在上，标题在下。
+/// 海报标题条高度（逻辑像素，不随窗口缩放）。图片在上，标题在下。
 const double kotvPosterTitleDesign = 36;
 
 class KotvGridStyle {
@@ -133,7 +133,7 @@ double kotvPosterCellAspect({
     columns: cols,
     gap: gap,
     ratio: style.ratio,
-    titleHeight: kotvPosterTitleDesign * LayoutScale.of(context),
+    titleHeight: kotvPosterTitleDesign,
   );
   return (columns: cols, aspect: aspect, gap: gap);
 }

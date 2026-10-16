@@ -51,7 +51,7 @@ class PosterCard extends StatelessWidget {
                   c.maxWidth <= 0) {
                 return ColoredBox(color: p.posterPh);
               }
-              final titleH = kotvPosterTitleDesign * s;
+              final titleH = kotvPosterTitleDesign;
               final designW = kotvPosterDesignBucket(c.maxWidth,
                   max: ratio > 1 ? 640 : 480);
               final letter = () {
@@ -126,20 +126,23 @@ class PosterCard extends StatelessWidget {
                   ),
                   SizedBox(
                     height: titleH,
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4 * s),
-                      child: Align(
-                        alignment: Alignment.center,
-                        child: Text(
-                          item.name,
-                          maxLines: titleH >= 40 ? 2 : 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: p.fg,
-                            fontSize: 13 * s,
-                            fontWeight: FontWeight.w700,
-                            height: 1.15,
+                    child: ColoredBox(
+                      color: p.posterBar,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Align(
+                          alignment: Alignment.center,
+                          child: Text(
+                            item.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: p.fg,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              height: 1.15,
+                            ),
                           ),
                         ),
                       ),
