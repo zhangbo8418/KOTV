@@ -57,8 +57,31 @@ class _PosterDecodedEntry {
 
 final LinkedHashMap<String, _PosterDecodedEntry> _posterDecoded = LinkedHashMap<String, _PosterDecodedEntry>();
 
-/// 无引用解码图像素预算（约 48MB）；有引用永不踢。
+/// 无引用解码图像素预算（约 48MB）；有引用（视口内）由格子 dispose 释放后再纳入本预算淘汰。
 const int _posterDecodedUnrefBudget = 48 << 20;
+
+/// 同时解码上限，避免飞滚时 codec 打满主线程。
+const int _posterDecodeMaxInflight = 4;
+var _posterDecodeInflight = 0;
+final List<Completer<void>> _posterDecodeWait = <Completer<void>>[];
+
+Future<void> _posterDecodeAcquire() async {
+  if (_posterDecodeInflight < _posterDecodeMaxInflight) {
+    _posterDecodeInflight++;
+    return;
+  }
+  final c = Completer<void>();
+  _posterDecodeWait.add(c);
+  await c.future;
+}
+
+void _posterDecodeRelease() {
+  if (_posterDecodeWait.isNotEmpty) {
+    _posterDecodeWait.removeAt(0).complete();
+    return;
+  }
+  if (_posterDecodeInflight > 0) _posterDecodeInflight--;
+}
 
 int _fnv1a(Uint8List bytes) {
   var h = 2166136261;
@@ -80,6 +103,13 @@ String _headersFingerprint(Map<String, String> headers) {
     b.write(';');
   }
   return '${_fnv1a(Uint8List.fromList(b.toString().codeUnits))}';
+}
+
+/// 逻辑尺寸量化到 16px 桶，减少同列格子 key 碎片，便于滚回命中。
+double kotvPosterDesignBucket(double logical, {double max = 214}) {
+  if (!(logical > 0)) return max;
+  final stepped = ((logical + 15) ~/ 16) * 16;
+  return stepped.clamp(48, max).toDouble();
 }
 
 void _posterEvictUnreferenced() {
@@ -118,23 +148,25 @@ void _posterRelease(_PosterDecodedEntry e) {
     e.image.dispose();
     return;
   }
+  // LRU：挪到尾部；超预算再踢最旧无引用项。
   _posterDecoded.remove(e.key);
   _posterDecoded[e.key] = e;
   _posterEvictUnreferenced();
 }
 
-_PosterDecodedEntry _posterPutLive(String key, ui.Image image) {
+/// [initialRefs] 为 0 时表示仅入池（格子已卸树），供滚回命中。
+_PosterDecodedEntry _posterPut(String key, ui.Image image, {required int initialRefs}) {
   final existing = _posterDecoded.remove(key);
   if (existing != null && !existing.orphaned) {
     if (existing.refs > 0) {
       image.dispose();
-      existing.refs++;
+      if (initialRefs > 0) existing.refs++;
       _posterDecoded[key] = existing;
       return existing;
     }
     existing.image.dispose();
   }
-  final e = _PosterDecodedEntry(image, key)..refs = 1;
+  final e = _PosterDecodedEntry(image, key)..refs = initialRefs < 0 ? 0 : initialRefs;
   _posterDecoded[key] = e;
   _posterEvictUnreferenced();
   return e;
@@ -187,7 +219,9 @@ class KotvPosterNetImage extends StatefulWidget {
 }
 
 class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
-  static final HttpClient _client = HttpClient()..autoUncompress = true;
+  static final HttpClient _client = HttpClient()
+    ..autoUncompress = true
+    ..maxConnectionsPerHost = 6;
 
   ui.Image? _image;
   _PosterDecodedEntry? _held;
@@ -247,20 +281,25 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     _error = null;
   }
 
+  void _swapHold(_PosterDecodedEntry e) {
+    final prev = _held;
+    _hold(e);
+    if (prev != null && !identical(prev, e)) _posterRelease(prev);
+  }
+
   Future<void> _load() async {
     final gen = ++_gen;
     _abort();
-    _dropHeld();
-    _error = null;
-    if (mounted) setState(() {});
 
     final raw = widget.pic.trim();
     if (raw.isEmpty) {
+      _dropHeld();
       _error = StateError('empty pic');
       if (mounted && gen == _gen) setState(() {});
       return;
     }
 
+    if (!mounted) return;
     final dpr = View.of(context).devicePixelRatio;
     final tw = (widget.designWidth * dpr).round().clamp(1, 720);
     final th = (widget.designHeight * dpr).round().clamp(1, 960);
@@ -268,6 +307,17 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     final dataBytes = kotvDecodeDataImage(raw);
     if (dataBytes != null) {
       final key = 'data|${dataBytes.length}|${_fnv1a(dataBytes)}|$tw|$th';
+      final hit = _posterAcquire(key);
+      if (hit != null) {
+        if (gen != _gen || !mounted) {
+          _posterRelease(hit);
+          return;
+        }
+        _swapHold(hit);
+        setState(() {});
+        return;
+      }
+      _blankIfNeeded();
       await _decodeAndShow(dataBytes, key, tw, th, gen);
       return;
     }
@@ -275,6 +325,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     final parsed = kotvResolveImageRequest(raw);
     if (parsed.url.isEmpty ||
         !(parsed.url.startsWith('http://') || parsed.url.startsWith('https://'))) {
+      _dropHeld();
       _error = StateError('bad pic');
       if (mounted && gen == _gen) setState(() {});
       return;
@@ -283,15 +334,20 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     final hdrFp = _headersFingerprint(parsed.headers);
     final urlKey = hdrFp.isEmpty ? parsed.url : '${parsed.url}|h:$hdrFp';
     final cacheKey = '$urlKey|$tw|$th';
+
+    // 先同步拿解码池：命中则无缝换图，避免滚回先闪空白。
     final decodedHit = _posterAcquire(cacheKey);
     if (decodedHit != null) {
       if (gen != _gen || !mounted) {
         _posterRelease(decodedHit);
         return;
       }
-      setState(() => _hold(decodedHit));
+      _swapHold(decodedHit);
+      setState(() {});
       return;
     }
+
+    _blankIfNeeded();
 
     final cachedBytes = _posterBytesGet(urlKey);
     if (cachedBytes != null) {
@@ -311,10 +367,6 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       _req = req;
       parsed.headers.forEach(req.headers.set);
       final res = await req.close();
-      if (gen != _gen || !mounted) {
-        await res.drain<void>();
-        return;
-      }
       if (res.statusCode != HttpStatus.ok) {
         await res.drain<void>();
         throw NetworkImageLoadException(statusCode: res.statusCode, uri: uri);
@@ -345,7 +397,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       if (bytes.isEmpty) throw StateError('empty image');
       // 即使格子已回收，仍入字节池，供滚回免再下。
       _posterBytesPut(urlKey, bytes);
-      if (gen != _gen || !mounted) return;
+      // 格子已卸也继续解码入池，避免滚回只剩字节命中再卡一帧。
       await _decodeAndShow(bytes, cacheKey, tw, th, gen, bytesKey: urlKey);
     } on _PosterLoadAborted {
       return;
@@ -358,6 +410,13 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     }
   }
 
+  void _blankIfNeeded() {
+    if (_held == null && _error == null) return;
+    _dropHeld();
+    _error = null;
+    if (mounted) setState(() {});
+  }
+
   Future<void> _decodeAndShow(
     Uint8List bytes,
     String cacheKey,
@@ -367,6 +426,7 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     String? bytesKey,
   }) async {
     ui.Codec? codec;
+    var gateHeld = false;
     try {
       final raced = _posterAcquire(cacheKey);
       if (raced != null) {
@@ -374,26 +434,34 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
           _posterRelease(raced);
           return;
         }
-        setState(() => _hold(raced));
+        _swapHold(raced);
+        setState(() {});
         return;
+      }
+
+      await _posterDecodeAcquire();
+      gateHeld = true;
+      if (gen != _gen) {
+        // 世代已变：仍解码入池，不挂到本 State。
       }
 
       codec = await ui.instantiateImageCodec(bytes, targetWidth: tw, targetHeight: th);
       final frame = await codec.getNextFrame();
       codec.dispose();
       codec = null;
-      if (gen != _gen || !mounted) {
-        frame.image.dispose();
-        return;
-      }
 
-      final entry = _posterPutLive(cacheKey, frame.image);
-      setState(() => _hold(entry));
+      final hold = gen == _gen && mounted;
+      final entry = _posterPut(cacheKey, frame.image, initialRefs: hold ? 1 : 0);
+      if (!hold) return;
+      _swapHold(entry);
+      setState(() {});
     } catch (e) {
       codec?.dispose();
       if (bytesKey != null) _posterBytesRemove(bytesKey);
       if (gen != _gen || !mounted) return;
       setState(() => _error = e);
+    } finally {
+      if (gateHeld) _posterDecodeRelease();
     }
   }
 

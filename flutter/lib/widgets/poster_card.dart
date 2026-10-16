@@ -44,6 +44,9 @@ class PosterCard extends StatelessWidget {
                 final barH = (c.maxHeight * 0.18).clamp(30.0, 48.0);
                 final remarkBottom = barH + 4;
                 final titleLines = barH >= 40 ? 2 : 1;
+                // 按格子逻辑尺寸量化解码，降低像素与内存；滚回同桶可命中。
+                final designW = kotvPosterDesignBucket(c.maxWidth, max: 214);
+                final designH = kotvPosterDesignBucket(c.maxHeight, max: 286);
                 final letter = () {
                   final s = item.name.trim();
                   if (s.isEmpty) return '?';
@@ -72,6 +75,8 @@ class PosterCard extends StatelessWidget {
                           : KotvPosterNetImage(
                               item.pic.trim(),
                               fit: BoxFit.cover,
+                              designWidth: designW,
+                              designHeight: designH,
                               errorBuilder: (_, __, ___) => ColoredBox(color: p.posterPh),
                             ),
                     ),
@@ -249,7 +254,7 @@ class PosterFlow extends StatelessWidget {
         final pad = compact ? const EdgeInsets.fromLTRB(12, 8, 12, 16) : padding;
         final inner = c.maxWidth - pad.horizontal;
         // 窄屏强制 3 列；宽屏按 200px cell 算
-        final cross = compact ? 3 : (inner / (200.0 + gap)).floor().clamp(3, 6);
+        final cross = compact ? 3 : (inner / (200.0 + gap)).floor().clamp(3, 5);
         return GridView.builder(
           padding: pad,
           addAutomaticKeepAlives: false,
