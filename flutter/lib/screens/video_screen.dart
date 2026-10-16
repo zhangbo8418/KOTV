@@ -588,13 +588,10 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final home = replace && (_tid == null || _tid!.isEmpty);
       final emptyHome = home && types.isEmpty && list.isEmpty;
       final pageStyle = KotvGridStyle.parse(data['style']);
-      final nextList = pageStyle.isList;
       setState(() {
         if (replace) {
-          _listStyle = nextList;
+          _listStyle = pageStyle.isList;
           _gridStyle = pageStyle;
-        } else if (!_listStyle) {
-          _listStyle = nextList;
         }
         _statusMsg = emptyHome ? '首页没有返回分类和推荐，请重试' : null;
         if (types.isNotEmpty) {

@@ -54,12 +54,7 @@ class PosterCard extends StatelessWidget {
               final titleH = kotvPosterTitleDesign;
               final designW = kotvPosterDesignBucket(c.maxWidth,
                   max: ratio > 1 ? 640 : 480);
-              final letter = () {
-                final name = item.name.trim();
-                if (name.isEmpty) return '?';
-                final it = name.runes.iterator;
-                return it.moveNext() ? String.fromCharCode(it.current) : '?';
-              }();
+              final letter = kotvNameInitial(item.name);
               Widget image = ColoredBox(
                 color: p.posterPh,
                 child: item.pic.isEmpty || !_isHttpPic(item.pic)
