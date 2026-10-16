@@ -18,7 +18,6 @@ import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
 import '../widgets/poster_card.dart';
 import '../vod/grid_style.dart';
-import '../vod/list_style.dart';
 import '../vod/vod_open.dart';
 import 'detail_screen.dart';
 import 'live_screen.dart';
@@ -435,10 +434,13 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           .map((e) => VodItem.fromJson(Map<String, dynamic>.from(e)))
           .toList();
       if (list.isEmpty) return;
+      final pageStyle = KotvGridStyle.parse(data['style']);
       setState(() {
         _items
           ..clear()
           ..addAll(list);
+        _gridStyle = pageStyle;
+        _listStyle = pageStyle.isList;
       });
     } catch (_) {}
   }
@@ -586,8 +588,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       final home = replace && (_tid == null || _tid!.isEmpty);
       final emptyHome = home && types.isEmpty && list.isEmpty;
       final pageStyle = KotvGridStyle.parse(data['style']);
-      final nextList = pageStyle.isList ||
-          kotvListStyle(items: list.map((e) => e.styleType));
+      final nextList = pageStyle.isList;
       setState(() {
         if (replace) {
           _listStyle = nextList;
@@ -1133,7 +1134,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
             else
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(catPad, 0, catPad, bottomPad),
-                sliver: _categoryIsFolder || _listStyle
+                sliver: _listStyle
                     ? _listSliver(_items)
                     : _posterSliver(_items),
               ),

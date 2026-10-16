@@ -127,6 +127,9 @@ type Type struct {
 	TypeID   FlexString `json:"type_id"`
 	TypeName string     `json:"type_name"`
 	TypeFlag string     `json:"type_flag"`
+	Land     FlexString `json:"land"`
+	Circle   FlexString `json:"circle"`
+	Ratio    FlexString `json:"ratio"`
 	Filters  []Filter   `json:"filters,omitempty"`
 	Selected bool       `json:"-"`
 }
@@ -144,6 +147,9 @@ func (t *Type) UnmarshalJSON(data []byte) error {
 		TypeName string     `json:"type_name"`
 		Name     string     `json:"name"`
 		TypeFlag string     `json:"type_flag"`
+		Land     FlexString `json:"land"`
+		Circle   FlexString `json:"circle"`
+		Ratio    FlexString `json:"ratio"`
 		Filters  []Filter   `json:"filters"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -161,6 +167,9 @@ func (t *Type) UnmarshalJSON(data []byte) error {
 		TypeID:   id,
 		TypeName: name,
 		TypeFlag: raw.TypeFlag,
+		Land:     raw.Land,
+		Circle:   raw.Circle,
+		Ratio:    raw.Ratio,
 		Filters:  raw.Filters,
 	}
 	return nil
@@ -276,7 +285,7 @@ func (u *URL) UnmarshalJSON(data []byte) error {
 	}
 	if len(data) > 0 && data[0] == '{' {
 		var obj struct {
-			Values   []struct {
+			Values []struct {
 				N string `json:"n"`
 				V string `json:"v"`
 			} `json:"values"`

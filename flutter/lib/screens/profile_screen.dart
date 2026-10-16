@@ -15,6 +15,7 @@ import '../util/runtime_info.dart';
 import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
+import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
 import '../widgets/poster_card.dart';
 import 'shell.dart';
@@ -405,7 +406,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     itemBuilder: (_, i) {
                       final it = _recent[i];
                       final posterH = compact ? 168.0 : 240.0;
-                      final posterW = posterH * 214 / 286;
+                      final titleH = kotvPosterTitleDesign * s;
+                      final posterW = (posterH - titleH) * 0.75;
                       return SizedBox(
                         width: posterW,
                         height: posterH,

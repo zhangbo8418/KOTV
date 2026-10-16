@@ -780,6 +780,26 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         final inner = constraints.crossAxisExtent - pad.horizontal;
         final m =
             kotvPosterMetrics(context, extent: inner, style: style, size: size);
+        if (style.isList) {
+          final list = SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, i) {
+                final it = c.list[i];
+                return VodListTile(
+                  item: it,
+                  onTap: () => openVodItem(context, ref, it, site: c.site),
+                  onLongPress: (it.hasAction || it.isFolder)
+                      ? null
+                      : () => searchByName(ref, it.name),
+                );
+              },
+              childCount: c.list.length,
+              addAutomaticKeepAlives: false,
+            ),
+          );
+          if (pad == EdgeInsets.zero) return list;
+          return SliverPadding(padding: pad, sliver: list);
+        }
         final grid = SliverGrid(
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: m.columns,

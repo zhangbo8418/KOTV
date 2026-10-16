@@ -260,7 +260,7 @@ func (a *App) APICategory(tid, pg string, extend map[string]string, siteKey stri
 		"pg":        pg,
 		"pagecount": res.PageCount.Value,
 		"list":      vodsDTO(res.List, used.Key),
-		"style":     model.PageViewStyle(res.List, used.Style).DTO(),
+		"style":     categoryStyleDTO(sites, res, used, tid).DTO(),
 		"filters":   filtersDTO(sites.FiltersForCategory(tid)),
 	}, nil
 }
@@ -877,6 +877,21 @@ func siteStyleDTO(s *model.Style) map[string]any {
 		st = model.RectView()
 	}
 	return st.DTO()
+}
+
+func categoryStyleDTO(sites *service.SiteService, res model.Result, site model.Site, tid string) model.ViewStyle {
+	typ, ok := model.FindType(res.Types, tid)
+	if !ok {
+		typ, ok = sites.TypeByID(tid)
+	}
+	folder := ok && strings.TrimSpace(typ.TypeFlag) == "1"
+	land, circle, ratio := "", "", ""
+	if ok {
+		land = typ.Land.String()
+		circle = typ.Circle.String()
+		ratio = typ.Ratio.String()
+	}
+	return model.CategoryPageStyle(res.List, site.Style, folder, land, circle, ratio)
 }
 
 func vodStyleDTO(v model.Vod) map[string]any {

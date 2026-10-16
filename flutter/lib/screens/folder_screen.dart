@@ -7,8 +7,9 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
-import '../theme/kotv_theme.dart';
+import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
+import '../widgets/poster_card.dart';
 
 /// `vod_tag=folder` 用 categoryContent(tid=vod_id) 进目录。
 class FolderScreen extends ConsumerStatefulWidget {
@@ -23,6 +24,7 @@ class FolderScreen extends ConsumerStatefulWidget {
   final String tid;
   final String title;
   final String site;
+
   /// 父级分类筛选，嵌套目录继续带上。
   final Map<String, String> extend;
 
@@ -36,10 +38,12 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
   String? _error;
   List<VodItem> _items = [];
   int _page = 1;
+
   /// 0 = 未知总页（靠空列表停）；>0 为明确末页。
   int _pageCount = 0;
   bool _hasMore = true;
   int _autofillStreak = 0;
+  KotvGridStyle _style = const KotvGridStyle();
   final ScrollController _scroll = ScrollController();
 
   @override
@@ -75,7 +79,9 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
             widget.tid,
             pg: '$pg',
             site: widget.site,
-            extend: widget.extend.isEmpty ? null : Map<String, String>.from(widget.extend),
+            extend: widget.extend.isEmpty
+                ? null
+                : Map<String, String>.from(widget.extend),
           );
       final list = ((data['list'] as List?) ?? [])
           .whereType<Map>()
@@ -101,6 +107,7 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
         }
         if (replace) {
           _items = list;
+          _style = KotvGridStyle.parse(data['style']);
         } else {
           _items = [..._items, ...list];
           if (fromAutofill) {
@@ -160,50 +167,94 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
                   : NotificationListener<ScrollNotification>(
                       onNotification: (n) {
                         if (n.metrics.maxScrollExtent > 80 &&
-                            n.metrics.pixels >= n.metrics.maxScrollExtent - 80) {
+                            n.metrics.pixels >=
+                                n.metrics.maxScrollExtent - 80) {
                           _load(replace: false);
                         }
                         return false;
                       },
                       child: RefreshIndicator(
                         onRefresh: () => _load(replace: true),
-                        child: ListView.separated(
-                          controller: _scroll,
-                          padding: EdgeInsets.symmetric(horizontal: 16 * s, vertical: 8 * s),
-                          itemCount: _items.length + (_loadingMore ? 1 : 0),
-                          separatorBuilder: (_, __) => Divider(height: 1, color: p.outline),
-                          itemBuilder: (context, i) {
-                            if (i >= _items.length) {
-                              return const Padding(
-                                padding: EdgeInsets.all(16),
-                                child: Center(child: CircularProgressIndicator()),
-                              );
-                            }
-                            final it = _items[i];
-                            return TvFocus(
-                              onPressed: () => openVodItem(
-                                context,
-                                ref,
-                                it,
-                                site: widget.site,
-                                fromFolder: true,
-                                extend: widget.extend,
-                              ),
-                              onLongPress: it.hasAction || it.isFolder ? null : () => searchByName(ref, it.name),
-                              child: ListTile(
-                                leading: Icon(
-                                  it.isFolder ? Icons.folder_outlined : Icons.movie_outlined,
-                                  color: p.primary,
-                                ),
-                                title: Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-                                subtitle: it.remarks.isEmpty ? null : Text(it.remarks),
-                                trailing: it.isFolder ? const Icon(Icons.chevron_right) : null,
-                              ),
-                            );
-                          },
-                        ),
+                        child: _style.isList ? _list(s, p) : _grid(),
                       ),
                     ),
+    );
+  }
+
+  void _open(VodItem it) {
+    openVodItem(
+      context,
+      ref,
+      it,
+      site: widget.site,
+      fromFolder: true,
+      extend: widget.extend,
+    );
+  }
+
+  Widget _list(double s, KotvPalette p) {
+    return ListView.separated(
+      controller: _scroll,
+      padding: EdgeInsets.symmetric(horizontal: 16 * s, vertical: 8 * s),
+      itemCount: _items.length + (_loadingMore ? 1 : 0),
+      separatorBuilder: (_, __) => Divider(height: 1, color: p.outline),
+      itemBuilder: (context, i) {
+        if (i >= _items.length) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final it = _items[i];
+        return VodListTile(
+          item: it,
+          onTap: () => _open(it),
+          onLongPress: it.hasAction || it.isFolder
+              ? null
+              : () => searchByName(ref, it.name),
+        );
+      },
+    );
+  }
+
+  Widget _grid() {
+    final size = kotvWatchPosterSize(ref);
+    return LayoutBuilder(
+      builder: (context, c) {
+        final pad = KotvLayout.isCompact(context) ? 12.0 : 16.0;
+        final m = kotvPosterMetrics(
+          context,
+          extent: c.maxWidth - pad * 2,
+          style: _style,
+          size: size,
+        );
+        return GridView.builder(
+          controller: _scroll,
+          padding: EdgeInsets.all(pad),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: m.columns,
+            mainAxisSpacing: m.gap,
+            crossAxisSpacing: m.gap,
+            childAspectRatio: m.aspect,
+          ),
+          itemCount: _items.length + (_loadingMore ? 1 : 0),
+          itemBuilder: (context, i) {
+            if (i >= _items.length) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final it = _items[i];
+            return PosterCard(
+              item: it,
+              ratio: _style.ratio,
+              oval: _style.isOval,
+              onTap: () => _open(it),
+              onLongPress: it.hasAction || it.isFolder
+                  ? null
+                  : () => searchByName(ref, it.name),
+            );
+          },
+        );
+      },
     );
   }
 }

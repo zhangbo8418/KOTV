@@ -20,14 +20,12 @@ class KotvPosterNetImage extends StatelessWidget {
     this.fit = BoxFit.cover,
     this.errorBuilder,
     this.designWidth = 214,
-    this.designHeight = 286,
   });
 
   final String pic;
   final BoxFit fit;
   final ImageErrorWidgetBuilder? errorBuilder;
   final double designWidth;
-  final double designHeight;
 
   @override
   Widget build(BuildContext context) {

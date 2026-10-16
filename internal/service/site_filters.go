@@ -48,6 +48,13 @@ func mergeFilterDefaults(extend map[string]string, filters []model.Filter) {
 	}
 }
 
+// TypeByID 返回首页缓存里的分类（含 type_flag、land、circle、ratio）。
+func (s *SiteService) TypeByID(tid string) (model.Type, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return model.FindType(s.HomeResult.Types, tid)
+}
+
 // FiltersForCategory 返回首页缓存里某分类的筛选项（含 filters 全局表 fallback）。
 func (s *SiteService) FiltersForCategory(tid string) []model.Filter {
 	s.mu.Lock()

@@ -9,7 +9,7 @@ import '../vod/list_style.dart';
 import 'kotv_network_image.dart';
 import 'kotv_poster_image.dart';
 
-/// poster：约 214×280、圆角 10、底栏标题、备注粉角标。
+/// 海报：图片按比例裁切，标题在图片下面，备注在图片上。
 class PosterCard extends StatelessWidget {
   const PosterCard({
     super.key,
@@ -251,7 +251,7 @@ class _ListInitial extends StatelessWidget {
   }
 }
 
-/// 海报流：列数按屏幕方向、短边和平海报尺寸档计算。
+/// 海报流：列数按屏幕方向、短边和海报尺寸档计算。列表样式改成横向行。
 class PosterFlow extends StatelessWidget {
   const PosterFlow({
     super.key,
@@ -280,6 +280,23 @@ class PosterFlow extends StatelessWidget {
         final inner = c.maxWidth - pad.horizontal;
         final m =
             kotvPosterMetrics(context, extent: inner, style: style, size: size);
+        if (style.isList) {
+          return ListView.builder(
+            padding: pad,
+            addAutomaticKeepAlives: false,
+            cacheExtent: 800,
+            itemCount: items.length,
+            itemBuilder: (context, i) {
+              final it = items[i];
+              return VodListTile(
+                item: it,
+                onTap: () => onOpen(it),
+                onLongPress:
+                    onLongPress == null ? null : () => onLongPress!(it),
+              );
+            },
+          );
+        }
         return GridView.builder(
           padding: pad,
           addAutomaticKeepAlives: false,

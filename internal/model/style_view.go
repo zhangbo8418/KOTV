@@ -45,16 +45,54 @@ func (v Vod) ResolveStyle(fallback ViewStyle) ViewStyle {
 	return fallback
 }
 
+// ListView 横向列表。
+func ListView() ViewStyle { return ViewStyle{Type: "list", Ratio: 1} }
+
 // PageViewStyle 列表页样式：有条目时用第一条的有效样式，否则用站点样式，再否则矩形。
 func PageViewStyle(list []Vod, site *Style) ViewStyle {
 	fb, ok := StyleView(site)
 	if !ok {
 		fb = RectView()
 	}
+	return applyFirstStyle(list, fb)
+}
+
+// CategoryPageStyle 分类页：目录分类缺省是列表；否则站点样式，再否则分类上的 land/circle/ratio，再否则矩形。
+// 有条目时用第一条的有效样式盖过这个缺省。
+func CategoryPageStyle(list []Vod, site *Style, folder bool, land, circle, ratio string) ViewStyle {
+	fb := RectView()
+	switch {
+	case folder:
+		fb = ListView()
+	default:
+		if st, ok := StyleView(site); ok {
+			fb = st
+		} else if st, ok := viewFromFlags(land, circle, ratio); ok {
+			fb = st
+		}
+	}
+	return applyFirstStyle(list, fb)
+}
+
+func applyFirstStyle(list []Vod, fb ViewStyle) ViewStyle {
+	if strings.TrimSpace(fb.Type) == "" {
+		fb = RectView()
+	}
 	if len(list) == 0 {
 		return fb
 	}
 	return list[0].ResolveStyle(fb)
+}
+
+// FindType 按 type_id 查找分类。
+func FindType(types []Type, tid string) (Type, bool) {
+	tid = strings.TrimSpace(tid)
+	for _, typ := range types {
+		if typ.TypeID.String() == tid {
+			return typ, true
+		}
+	}
+	return Type{}, false
 }
 
 func styleObjectView(s Style) ViewStyle {
