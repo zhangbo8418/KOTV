@@ -297,10 +297,12 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       await done.future;
       _sub = null;
       _req = null;
-      if (gen != _gen || !mounted) return;
       final bytes = builder.takeBytes();
       if (bytes.isEmpty) throw StateError('empty image');
-      await _decodeAndShow(bytes, cacheKey, tw, th, gen, putBytesKey: urlKey);
+      // 即使格子已回收，仍入字节池，供滚回免再下。
+      _posterBytesPut(urlKey, bytes);
+      if (gen != _gen || !mounted) return;
+      await _decodeAndShow(bytes, cacheKey, tw, th, gen, putBytesKey: null);
     } catch (e) {
       _req = null;
       _sub = null;
@@ -334,12 +336,12 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
       final frame = await codec.getNextFrame();
       codec.dispose();
       codec = null;
+      if (putBytesKey != null) _posterBytesPut(putBytesKey, bytes);
       if (gen != _gen || !mounted) {
         frame.image.dispose();
         return;
       }
 
-      if (putBytesKey != null) _posterBytesPut(putBytesKey, bytes);
       final entry = _posterPutLive(cacheKey, frame.image);
       setState(() => _hold(entry));
     } catch (e) {

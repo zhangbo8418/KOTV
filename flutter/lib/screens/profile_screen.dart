@@ -399,6 +399,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     scrollDirection: Axis.horizontal,
                     padding: EdgeInsets.zero,
                     addAutomaticKeepAlives: false,
+                    cacheExtent: 800,
                     itemCount: _recent.length,
                     separatorBuilder: (_, __) => const SizedBox(width: 10),
                     itemBuilder: (_, i) {

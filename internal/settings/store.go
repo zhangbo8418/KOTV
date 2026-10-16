@@ -489,7 +489,7 @@ func Load() error {
 	ensureSettingLocked(DanmakuShowSpecial, "特殊弹幕", "true")
 	ensureSettingLocked(DanmakuShowPositioned, "定位弹幕", "true")
 	ensureSettingLocked(DanmakuFixedDurationMs, "固定弹幕时长", "5000")
-	ensureSettingLocked(DanmakuStrokeMode, "弹幕描边", "shadow")
+	ensureSettingLocked(DanmakuStrokeMode, "弹幕描边", "outline")
 	ensureSettingLocked(DanmakuColorMode, "弹幕颜色", "original")
 	ensureSettingLocked(DanmakuFont, "弹幕字体", "default")
 	ensureSettingLocked(DanmakuRowsTop, "顶部弹幕行数", "3")

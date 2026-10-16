@@ -432,11 +432,11 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> with SingleTickerProvid
 
   void _onPosition(Duration d) {
     if (!mounted) return;
-    final delta = (d - _mediaPos).abs();
-    // 跳变超过 300ms：清屏重投，避免旧弹幕瞬移成残影。
-    final jumped = delta > const Duration(milliseconds: 300);
+    // 非对称：回跳易残影，前跳仅大跳才清（避免缓冲校准误清屏）。
+    final jumpBack = d + const Duration(milliseconds: 300) < _mediaPos;
+    final jumpFwd = d > _mediaPos + const Duration(milliseconds: 1500);
     _rebase(d, paused: !widget.player.playing, rate: widget.player.rate);
-    if (jumped) {
+    if (jumpBack || jumpFwd) {
       _flying.clear();
       _lastActivateSec = -1;
       _cursor = 0;
