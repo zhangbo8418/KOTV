@@ -647,19 +647,20 @@ class EpisodeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     final bg = selected ? p.selected : p.pillBg;
     return TvFocus(
       autofocus: autofocus,
       onPressed: onTap,
-      borderRadius: 8,
+      borderRadius: 8 * ui,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
           canRequestFocus: false,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8 * ui),
           child: Container(
-            height: height,
+            height: height * ui,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: bg,

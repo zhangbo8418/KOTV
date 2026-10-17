@@ -154,7 +154,7 @@ double kotvPosterCellAspect({required double ratio, bool oval = false}) =>
   required int size,
 }) {
   final screen = MediaQuery.sizeOf(context);
-  final gap = KotvLayout.isCompact(context) ? 6.0 : 10.0;
+  final gap = LayoutScale.s(context, KotvLayout.isCompact(context) ? 6 : 10);
   final cols = !extent.isFinite || extent <= 0
       ? 1
       : kotvPosterColumns(

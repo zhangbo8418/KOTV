@@ -3936,27 +3936,29 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
 
     Widget lower() {
+      final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
       final pillH = compact ? 28.0 : 36.0;
       final pillFs = compact ? 12.0 : 15.0;
       final epH = compact ? 32.0 : 42.0;
       final epFs = compact ? 12.0 : 14.0;
-      final gap = compact ? 6.0 : 10.0;
+      final gap = (compact ? 6.0 : 10.0) * ui;
       final srcLabelFs = compact ? 13.0 : 16.0;
+      final pillBox = pillH * LayoutScale.layoutOf(context);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(height: compact ? 8 : 10),
+          SizedBox(height: (compact ? 8 : 10) * ui),
           Row(
             children: [
               Text('视频来源', style: TextStyle(color: fg, fontSize: srcLabelFs, fontWeight: FontWeight.w700)),
-              SizedBox(width: compact ? 8 : 14),
+              SizedBox(width: (compact ? 8 : 14) * ui),
               Expanded(
                 child: SizedBox(
-                  height: pillH + 2,
+                  height: pillBox + 2 * ui,
                   child: HScrollList(
                     scrollToIndex: _flagIdx,
                     itemCount: flags.length,
-                    separatorBuilder: (_, __) => SizedBox(width: compact ? 6 : 8),
+                    separatorBuilder: (_, __) => SizedBox(width: (compact ? 6 : 8) * ui),
                     itemBuilder: (_, i) => AppPill(
                       label: flags[i].show,
                       height: pillH,
@@ -3973,13 +3975,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             ],
           ),
           if (pageCount > 1) ...[
-            SizedBox(height: compact ? 8 : 10),
+            SizedBox(height: (compact ? 8 : 10) * ui),
             SizedBox(
-              height: pillH,
+              height: pillBox,
               child: HScrollList(
                 scrollToIndex: _epPage,
                 itemCount: pageCount,
-                separatorBuilder: (_, __) => SizedBox(width: compact ? 6 : 8),
+                separatorBuilder: (_, __) => SizedBox(width: (compact ? 6 : 8) * ui),
                 itemBuilder: (_, i) {
                   final from = i * _epSize + 1;
                   final to = ((i + 1) * _epSize).clamp(0, eps.length);
@@ -3994,7 +3996,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               ),
             ),
           ],
-          SizedBox(height: compact ? 8 : 12),
+          SizedBox(height: (compact ? 8 : 12) * ui),
           if (pageEps.isEmpty)
             Text('无剧集', style: TextStyle(color: muted))
           else
@@ -4009,7 +4011,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                     for (var i = 0; i < pageEps.length; i++)
                       SizedBox(
                         width: w,
-                        height: epH,
+                        height: epH * ui,
                         child: EpisodeChip(
                           label: pageEps[i].name,
                           selected: _epIdx == _epPage * _epSize + i,

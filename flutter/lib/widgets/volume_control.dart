@@ -7,6 +7,7 @@ import '../player/kotv_playback.dart';
 import '../player/tv_remote_keys.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../theme/layout_scale.dart';
 
 /// 播控右侧音量：默认只显示扬声器；获焦/悬停展开滑条；激活后左右键调音并落盘。
 class KotvVolumeControl extends StatefulWidget {
@@ -147,7 +148,9 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighl
   @override
   Widget build(BuildContext context) {
     final land = widget.compact;
-    final iconSz = land ? (widget.iconSize <= 34 ? 18.0 : 20.0) : (widget.iconSize <= 34 ? 18.0 : 22.0);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final iconSz = (land ? (widget.iconSize <= 34 ? 18.0 : 20.0) : (widget.iconSize <= 34 ? 18.0 : 22.0)) * ui;
+    final box = widget.iconSize * ui;
     final ring = _ringColor(KotvPalette.of(context));
     return MouseRegion(
       onEnter: (_) => _setHover(true),
@@ -165,7 +168,7 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighl
                 alignment: Alignment.centerRight,
                 child: _expanded
                     ? SizedBox(
-                        width: widget.sliderWidth,
+                        width: widget.sliderWidth * ui,
                         child: SliderTheme(
                           data: SliderTheme.of(context).copyWith(
                             trackHeight: land ? 2 : 3,
@@ -213,8 +216,8 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighl
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 120),
-                    width: widget.iconSize,
-                    height: widget.iconSize,
+                    width: box,
+                    height: box,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: kotvRing(_highlight) ? ring.withOpacity(0.22) : null,

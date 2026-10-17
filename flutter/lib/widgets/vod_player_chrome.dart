@@ -268,7 +268,8 @@ class CenterPlayPauseButton extends StatelessWidget {
         if (hideWhenBuffering && player.stalling) return const SizedBox.shrink();
         if (player.playing && !showWhilePlaying) return const SizedBox.shrink();
         final land = KotvLayout.isLandscapeCompact(context);
-        final size = land ? 56.0 : 72.0;
+        final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+        final size = (land ? 56.0 : 72.0) * ui;
         void toggle() {
           unawaited(player.playOrPause());
           onPressed?.call();
@@ -349,10 +350,11 @@ class _VodInlineControlsState extends State<VodInlineControls> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final narrow = widget.miniActive || constraints.maxWidth < 480;
+          final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
           final iconSize = narrow ? 32.0 : 40.0;
           final volW = narrow ? 72.0 : 110.0;
           return Padding(
-            padding: EdgeInsets.fromLTRB(narrow ? 4 : 8, narrow ? 2 : 6, narrow ? 4 : 8, narrow ? 2 : 6),
+            padding: EdgeInsets.fromLTRB((narrow ? 4 : 8) * ui, (narrow ? 2 : 6) * ui, (narrow ? 4 : 8) * ui, (narrow ? 2 : 6) * ui),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -395,7 +397,7 @@ class _VodInlineControlsState extends State<VodInlineControls> {
                         );
                       },
                     ),
-                    SizedBox(width: narrow ? 4 : 8),
+                    SizedBox(width: (narrow ? 4 : 8) * ui),
                     Expanded(
                       child: StreamBuilder<Duration>(
                         stream: player.positionStream,
@@ -493,7 +495,9 @@ class _IconAct extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final iconSz = size <= 34 ? 18.0 : 22.0;
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final iconSz = (size <= 34 ? 18.0 : 22.0) * ui;
+    final box = size * ui;
     return Tooltip(
       message: tip,
       child: TvFocus(
@@ -502,21 +506,21 @@ class _IconAct extends StatelessWidget {
         scrollIntoView: scrollIntoView,
         onPressed: onTap,
         onLongPress: onLongPress,
-        borderRadius: 8,
+        borderRadius: 8 * ui,
         child: SizedBox(
-          width: size,
-          height: size,
+          width: box,
+          height: box,
           child: Stack(
             alignment: Alignment.center,
             children: [
               Icon(icon, color: Colors.white, size: iconSz),
               if (badge != null)
                 Positioned(
-                  right: 2,
-                  top: 2,
+                  right: 2 * ui,
+                  top: 2 * ui,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                    decoration: BoxDecoration(color: const Color(0xFFE52D27), borderRadius: BorderRadius.circular(4)),
+                    padding: EdgeInsets.symmetric(horizontal: 3 * ui, vertical: ui),
+                    decoration: BoxDecoration(color: const Color(0xFFE52D27), borderRadius: BorderRadius.circular(4 * ui)),
                     child: Text(badge!, style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)),
                   ),
                 ),
@@ -538,13 +542,14 @@ class _TextAct extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     return TvFocus(
       focusNode: focusNode,
       onPressed: onTap,
-      borderRadius: 8,
+      borderRadius: 8 * ui,
       scrollIntoView: scrollIntoView,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 10 * ui),
         child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
       ),
     );
@@ -560,12 +565,13 @@ class _OffsetClock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     return TvFocus(
       focusNode: focusNode,
       scrollIntoView: true,
-      borderRadius: 6,
+      borderRadius: 6 * ui,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: 6 * ui, vertical: 4 * ui),
         child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
       ),
     );
@@ -581,16 +587,17 @@ class _TinyBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     return TvFocus(
       focusNode: focusNode,
       onPressed: onTap,
-      borderRadius: 6,
+      borderRadius: 6 * ui,
       scrollIntoView: true,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: 8 * ui, vertical: 4 * ui),
         decoration: BoxDecoration(
           color: const Color(0x33FFFFFF),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(6 * ui),
         ),
         child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
       ),
@@ -1378,45 +1385,46 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     String? subtitle,
     required List<Widget> children,
   }) {
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(ctx));
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: EdgeInsets.fromLTRB(12 * ui, 0, 12 * ui, 12 * ui),
         child: Material(
           color: const Color(0xCC2A2A30),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(18 * ui),
           clipBehavior: Clip.antiAlias,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.72),
             child: ListView(
               shrinkWrap: true,
-              padding: const EdgeInsets.fromLTRB(4, 10, 4, 12),
+              padding: EdgeInsets.fromLTRB(4 * ui, 10 * ui, 4 * ui, 12 * ui),
               children: [
                 Center(
                   child: Container(
-                    width: 40,
-                    height: 4,
+                    width: 40 * ui,
+                    height: 4 * ui,
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.28),
                       borderRadius: BorderRadius.circular(99),
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
+                SizedBox(height: 10 * ui),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
+                  padding: EdgeInsets.fromLTRB(16 * ui, 4 * ui, 16 * ui, 2 * ui),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(title, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
                       if (subtitle != null && subtitle.isNotEmpty) ...[
-                        const SizedBox(height: 4),
+                        SizedBox(height: 4 * ui),
                         Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 13)),
                       ],
                     ],
                   ),
                 ),
-                const SizedBox(height: 4),
+                SizedBox(height: 4 * ui),
                 ...children,
               ],
             ),
@@ -1432,20 +1440,21 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     bool selected = false,
     required VoidCallback onTap,
   }) {
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     return KotvStableFocus(
       autofocus: selected,
       scrollIntoView: true,
       onPressed: onTap,
-      borderRadius: 8,
+      borderRadius: 8 * ui,
       child: SizedBox(
-        height: 52,
+        height: 52 * ui,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: EdgeInsets.symmetric(horizontal: 16 * ui),
           child: Row(
             children: [
               if (icon != null) ...[
-                Icon(icon, color: Colors.white, size: 24),
-                const SizedBox(width: 16),
+                Icon(icon, color: Colors.white, size: 24 * ui),
+                SizedBox(width: 16 * ui),
               ],
               Expanded(
                 child: Text(
@@ -1457,7 +1466,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                   ),
                 ),
               ),
-              if (selected) const Icon(Icons.check, color: Colors.white, size: 22),
+              if (selected) Icon(Icons.check, color: Colors.white, size: 22 * ui),
             ],
           ),
         ),
@@ -1875,19 +1884,20 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               required ValueChanged<bool> onChanged,
               bool autofocus = false,
             }) {
+              final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
               return TvFocus(
                 autofocus: autofocus,
                 onPressed: () => onChanged(!value),
-                borderRadius: 8,
+                borderRadius: 8 * ui,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: EdgeInsets.symmetric(horizontal: 8 * ui, vertical: 2 * ui),
                   child: SizedBox(
-                    height: 52,
+                    height: 52 * ui,
                     child: Row(
                       children: [
-                        const SizedBox(width: 8),
-                        Icon(icon, color: Colors.white, size: 24),
-                        const SizedBox(width: 16),
+                        SizedBox(width: 8 * ui),
+                        Icon(icon, color: Colors.white, size: 24 * ui),
+                        SizedBox(width: 16 * ui),
                         Expanded(
                           child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
                         ),
@@ -1901,7 +1911,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                             onChanged: onChanged,
                           ),
                         ),
-                        const SizedBox(width: 4),
+                        SizedBox(width: 4 * ui),
                       ],
                     ),
                   ),
@@ -1916,18 +1926,19 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               required VoidCallback onTap,
               bool autofocus = false,
             }) {
+              final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
               return TvFocus(
                 autofocus: autofocus,
                 onPressed: onTap,
-                borderRadius: 8,
+                borderRadius: 8 * ui,
                 child: SizedBox(
-                  height: 52,
+                  height: 52 * ui,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: EdgeInsets.symmetric(horizontal: 16 * ui),
                     child: Row(
                       children: [
-                        Icon(icon, color: Colors.white, size: 24),
-                        const SizedBox(width: 16),
+                        Icon(icon, color: Colors.white, size: 24 * ui),
+                        SizedBox(width: 16 * ui),
                         Expanded(
                           child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
                         ),
@@ -1935,7 +1946,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                           trailing.isEmpty ? '' : trailing,
                           style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 15),
                         ),
-                        Icon(Icons.chevron_right, color: Colors.white.withOpacity(0.45), size: 22),
+                        Icon(Icons.chevron_right, color: Colors.white.withOpacity(0.45), size: 22 * ui),
                       ],
                     ),
                   ),

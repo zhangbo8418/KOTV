@@ -965,14 +965,21 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: Colors.white.withOpacity(0.28)),
               ),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: 18 * LayoutScale.growAboveDesign(LayoutScale.of(context)),
+                  vertical: 10 * LayoutScale.growAboveDesign(LayoutScale.of(context)),
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.screen_rotation_rounded, color: Colors.white, size: 20),
-                    SizedBox(width: 8),
-                    Text(
+                    Icon(
+                      Icons.screen_rotation_rounded,
+                      color: Colors.white,
+                      size: 20 * LayoutScale.growAboveDesign(LayoutScale.of(context)),
+                    ),
+                    SizedBox(width: 8 * LayoutScale.growAboveDesign(LayoutScale.of(context))),
+                    const Text(
                       '全屏观看',
                       style: TextStyle(
                         color: Colors.white,

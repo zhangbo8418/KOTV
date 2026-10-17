@@ -99,13 +99,14 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
         ? flutterPlayerLabel(kotvDefaultLivePlayer())
         : widget.playerLabel;
     final land = KotvLayout.isLandscapeCompact(context);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     final iconSize = land ? 30.0 : 40.0;
     final compact = widget.miniActive || MediaQuery.sizeOf(context).width < 560 || land;
     return Material(
       color: widget.translucent ? const Color(0x660A0A12) : const Color(0xCC0A0A12),
       // 按钮/音量不挂 positionStream；仅时间与进度条随流重建（同点播内嵌底栏）。
       child: Padding(
-        padding: EdgeInsets.fromLTRB(compact ? 4 : 10, land ? 2 : 4, compact ? 4 : 10, land ? 4 : 6),
+        padding: EdgeInsets.fromLTRB((compact ? 4 : 10) * ui, (land ? 2 : 4) * ui, (compact ? 4 : 10) * ui, (land ? 4 : 6) * ui),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -218,9 +219,9 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
                     enabled: boundedMediaDuration(dur),
                     onInteraction: widget.onBump,
                     theme: SliderTheme.of(context).copyWith(
-                      trackHeight: land ? 2 : 3,
-                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: land ? 5 : 6),
-                      overlayShape: RoundSliderOverlayShape(overlayRadius: land ? 10 : 12),
+                      trackHeight: (land ? 2 : 3) * ui,
+                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: (land ? 5 : 6) * ui),
+                      overlayShape: RoundSliderOverlayShape(overlayRadius: (land ? 10 : 12) * ui),
                       activeTrackColor: KotvColors.primary,
                       inactiveTrackColor: Colors.white24,
                       secondaryActiveTrackColor: Colors.white38,
@@ -244,29 +245,32 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
     bool autofocus = false,
     FocusNode? focusNode,
   }) {
-    final sz = size ?? (compact ? 32.0 : 40.0);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final sz = (size ?? (compact ? 32.0 : 40.0)) * ui;
+    final iconSz = ((size ?? (compact ? 32.0 : 40.0)) <= 32 ? 16.0 : 22.0) * ui;
     return Tooltip(
       message: tip,
       child: TvFocus(
         autofocus: autofocus,
         focusNode: focusNode,
         onPressed: onTap,
-        borderRadius: 8,
+        borderRadius: 8 * ui,
         child: SizedBox(
           width: sz,
           height: sz,
-          child: Icon(icon, color: Colors.white, size: sz <= 32 ? 16 : 22),
+          child: Icon(icon, color: Colors.white, size: iconSz),
         ),
       ),
     );
   }
 
   Widget _textAct(String label, VoidCallback onTap) {
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     return TvFocus(
       onPressed: onTap,
-      borderRadius: 8,
+      borderRadius: 8 * ui,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: 8 * ui, vertical: 8 * ui),
         child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
       ),
     );

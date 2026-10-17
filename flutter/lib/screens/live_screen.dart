@@ -2735,7 +2735,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   /// 频道号列宽：按位数 tabular，避免 PC 全屏/侧栏被裁成半个字。
   double _channelNumColWidth(double fontSize, {int digits = 3}) {
-    return (fontSize * 0.62 * digits.clamp(3, 8) + 10).clamp(40.0, 120.0);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    return (fontSize * 0.62 * digits.clamp(3, 8) + 10).clamp(40.0, 120.0) * ui;
   }
 
   /// 未选中用省略号。选中才跑马灯，避免频道列表每一行都挂动画。
@@ -3025,7 +3026,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   Widget _epgProgramTile(
     int i, {
     required bool land,
-    required double wScale,
     bool portrait = false,
   }) {
     final prog = _programs[i];
@@ -3100,28 +3100,29 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
 
     final p = KotvPalette.of(context);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     return Padding(
-      padding: EdgeInsets.only(bottom: land ? 2 : 4),
+      padding: EdgeInsets.only(bottom: (land ? 2 : 4) * ui),
       child: TvFocus(
         focusNode: _progFocus.of('p:$i'),
-        borderRadius: 6,
+        borderRadius: 6 * ui,
         onPressed: canCatchup ? activate : null,
         child: Material(
             color: sel
                 ? p.selected.withOpacity(playing ? 0.95 : 0.75)
                 : p.pillBg.withOpacity(0.7),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(6 * ui),
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: land ? 6 : 8,
-                vertical: land ? 5 : 8,
+                horizontal: (land ? 6 : 8) * ui,
+                vertical: (land ? 5 : 8) * ui,
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (start.isNotEmpty)
                     SizedBox(
-                      width: land ? 38 : 44,
+                      width: (land ? 38 : 44) * ui,
                       child: Text(
                         start,
                         maxLines: 1,
@@ -3139,7 +3140,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                       active: sel,
                       style: TextStyle(
                         color: sel ? Colors.white : p.fg,
-                        fontSize: land ? 12 : (12.0 * wScale.clamp(1.0, 1.2)),
+                        fontSize: 12,
                         height: 1.2,
                         fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                       ),
@@ -3586,29 +3587,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             final p = KotvPalette.of(context);
                             final screenW = c.maxWidth;
                             final land = KotvLayout.isLandscapeCompact(context);
-                            // 列宽按屏宽缩放：写死 120/240/220 在 1080P 全屏仍偏窄，中文台名/EPG 会被 ellipsis 裁掉。
-                            final wScale = land
-                                ? 1.0
-                                : (screenW / LayoutScale.designW).clamp(1.0, 1.55);
-                            var groupW = (land ? 112.0 : 136.0) * wScale;
-                            var channelW = (land ? 248.0 : 280.0) * wScale;
-                            var epgW = (land ? 200.0 : 260.0) * wScale;
-                            var epgTabW = land ? 28.0 : 32.0;
-                            final padH = (land ? 6.0 : 8.0) * 2;
-                            final gap1 = land ? 4.0 : 6.0;
-                            final gapTab = land ? 4.0 : 6.0;
-                            final gap2 = land ? 6.0 : 6.0;
+                            final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+                            var groupW = (land ? 112.0 : 136.0) * ui;
+                            var channelW = (land ? 248.0 : 280.0) * ui;
+                            var epgW = (land ? 200.0 : 260.0) * ui;
+                            var epgTabW = (land ? 28.0 : 32.0) * ui;
+                            final padH = (land ? 6.0 : 8.0) * 2 * ui;
+                            final gap1 = (land ? 4.0 : 6.0) * ui;
+                            final gapTab = (land ? 4.0 : 6.0) * ui;
+                            final gap2 = 6.0 * ui;
                             final pillH = land ? 30.0 : 36.0;
-                            final chH = land ? 36.0 : 48.0;
-                            final groupStride = pillH * LayoutScale.layoutOf(context) + (land ? 4.0 : 6.0);
-                            final channelStride = chH + (land ? 2.0 : 4.0);
-                            final epgFont = land ? 12.0 : (12.0 * wScale.clamp(1.0, 1.2));
+                            final chH = (land ? 36.0 : 48.0) * ui;
+                            final groupStride = pillH * LayoutScale.layoutOf(context) + (land ? 4.0 : 6.0) * ui;
+                            final channelStride = chH + (land ? 2.0 : 4.0) * ui;
+                            const epgFont = 12.0;
                             final epgStride = _oneLine(
                                   context,
-                                  TextStyle(fontSize: epgFont, height: 1.2, fontWeight: FontWeight.w700),
+                                  const TextStyle(fontSize: epgFont, height: 1.2, fontWeight: FontWeight.w700),
                                 ) +
-                                (land ? 10.0 : 16.0) +
-                                (land ? 2.0 : 4.0);
+                                (land ? 10.0 : 16.0) * ui +
+                                (land ? 2.0 : 4.0) * ui;
                             _pinList(_groupScroll, _groupIdx, groupStride, _groupStride, _pinnedGroup);
                             _pinList(_channelScroll, _channelListIndex(), channelStride, _channelStride, _pinnedChannel);
                             _pinList(_epgScroll, _epgHighlightIndex(), epgStride, _epgStride, _pinnedEpg);
@@ -3618,13 +3616,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             _groupStride = groupStride;
                             _channelStride = channelStride;
                             _epgStride = epgStride;
-                            final font = land ? 12.0 : (13.0 * wScale.clamp(1.0, 1.25));
-                            final logoW = land ? 28.0 : 40.0;
-                            final logoH = land ? 22.0 : 30.0;
+                            final font = land ? 12.0 : 13.0;
+                            final logoW = (land ? 28.0 : 40.0) * ui;
+                            final logoH = (land ? 22.0 : 30.0) * ui;
                             final numDigits = _channelNumDigitsFor(_channels);
                             final numColW = _channelNumColWidth(font, digits: numDigits);
-                            final channelChrome = numColW + (land ? 4 : 12) + logoW + (land ? 6 : 12);
-                            final channelFloor = channelChrome + 56;
+                            final channelChrome = numColW + (land ? 4 : 12) * ui + logoW + (land ? 6 : 12) * ui;
+                            final channelFloor = channelChrome + 56 * ui;
                             // 桌面全屏最多约占半屏，避免挡完画面；窄屏仍可到 92%
                             final maxFrac = (_immersive && !land) ? 0.52 : 0.92;
                             final contentW0 = groupW +
@@ -3644,9 +3642,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                 gap2: gap2,
                                 epgOpen: _epgOpen,
                                 channelFloor: channelFloor,
-                                groupFloor: land ? 72.0 : 88.0,
-                                epgFloor: land ? 120.0 : 140.0,
-                                epgTabFloor: land ? 24.0 : 28.0,
+                                groupFloor: (land ? 72.0 : 88.0) * ui,
+                                epgFloor: (land ? 120.0 : 140.0) * ui,
+                                epgTabFloor: (land ? 24.0 : 28.0) * ui,
                                 groupW: groupW,
                                 channelW: channelW,
                                 epgW: epgW,
@@ -3661,7 +3659,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             width: panelW,
                             child: ClipRect(
                             child: Padding(
-                              padding: EdgeInsets.fromLTRB(land ? 6 : 8, land ? 8 : 10, land ? 6 : 8, land ? 8 : 10),
+                              padding: EdgeInsets.fromLTRB((land ? 6 : 8) * ui, (land ? 8 : 10) * ui, (land ? 6 : 8) * ui, (land ? 8 : 10) * ui),
                               child: Row(
                                 children: [
                                   SizedBox(
@@ -3673,7 +3671,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         final g = _groups[i];
                                         final locked = _groupLocked(i);
                                         return Padding(
-                                          padding: EdgeInsets.only(bottom: land ? 4 : 6),
+                                          padding: EdgeInsets.only(bottom: (land ? 4 : 6) * ui),
                                           child: AppPill(
                                             label: '${locked ? '🔒 ' : ''}${g['name'] ?? ''}',
                                             height: pillH,
@@ -3702,21 +3700,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                         final logo = '${ch['logo'] ?? ''}';
                                         final sel = _chIdx >= 0 && i == _chIdx;
                                         return Padding(
-                                          padding: EdgeInsets.only(bottom: land ? 2 : 4),
+                                          padding: EdgeInsets.only(bottom: (land ? 2 : 4) * ui),
                                           child: TvFocus(
                                             focusNode: _chFocus.of('ch:$i'),
-                                            borderRadius: 8,
+                                            borderRadius: 8 * ui,
                                             onPressed: () => _selectChannelFromList(i),
                                             onLongPress: () => unawaited(_toggleChannelFav(i)),
                                             child: Material(
                                               color: sel
                                                   ? p.selected.withOpacity(0.28)
                                                   : p.pillBg.withOpacity(0.55),
-                                              borderRadius: BorderRadius.circular(8),
+                                              borderRadius: BorderRadius.circular(8 * ui),
                                               child: SizedBox(
                                                 height: chH,
                                                 child: Padding(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                                                  padding: EdgeInsets.symmetric(horizontal: 6 * ui),
                                                   child: Row(
                                                     children: [
                                                       SizedBox(
@@ -3731,16 +3729,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                           ),
                                                         ),
                                                       ),
-                                                      SizedBox(width: land ? 4 : 12),
+                                                      SizedBox(width: (land ? 4 : 12) * ui),
                                                       _LiveChannelLogo(name: name, logo: logo, width: logoW, height: logoH),
-                                                      SizedBox(width: land ? 6 : 12),
+                                                      SizedBox(width: (land ? 6 : 12) * ui),
                                                       Expanded(
                                                         child: _liveListTitle(
                                                           name,
                                                           selected: sel,
                                                           style: TextStyle(
                                                             color: p.fg,
-                                                            fontSize: land ? 12 : (15.0 * wScale.clamp(1.0, 1.2)),
+                                                            fontSize: land ? 12 : 15,
                                                             height: 1.15,
                                                             fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                                                           ),
@@ -3807,7 +3805,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                       crossAxisAlignment: CrossAxisAlignment.stretch,
                                       children: [
                                         Padding(
-                                          padding: EdgeInsets.only(bottom: land ? 4 : 6, left: 2),
+                                          padding: EdgeInsets.only(bottom: (land ? 4 : 6) * ui, left: 2 * ui),
                                           child: Text(
                                             'EPG',
                                             style: TextStyle(
@@ -3822,7 +3820,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                             land: land,
                                             resetHideOnSelect: true,
                                           ),
-                                        SizedBox(height: land ? 4 : 6),
+                                        SizedBox(height: (land ? 4 : 6) * ui),
                                         Expanded(
                                           child: _programs.isEmpty
                                               ? Center(
@@ -3837,7 +3835,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                   itemBuilder: (_, i) => _epgProgramTile(
                                                     i,
                                                     land: land,
-                                                    wScale: wScale,
                                                   ),
                                                 ),
                                         ),
@@ -3867,17 +3864,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                           child: Builder(builder: (context) {
                             final p = KotvPalette.of(context);
                             final land = KotvLayout.isLandscapeCompact(context);
-                            final wScale = land
-                                ? 1.0
-                                : (c.maxWidth / LayoutScale.designW).clamp(1.0, 1.55);
+                            final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
                             final rightW = land
-                                ? (c.maxWidth * 0.30).clamp(180.0, 240.0)
-                                : (240.0 * wScale).clamp(220.0, 360.0);
+                                ? (c.maxWidth * 0.30).clamp(180.0, 240.0) * ui
+                                : 240.0 * ui;
                             final pillH = land ? 30.0 : 40.0;
                             return SizedBox(
                             width: rightW,
                             child: ListView(
-                              padding: EdgeInsets.all(land ? 8 : 14),
+                              padding: EdgeInsets.all((land ? 8 : 14) * ui),
                               children: [
                                 Text(
                                   '直播设置',
@@ -3887,7 +3882,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
-                                SizedBox(height: land ? 8 : 12),
+                                SizedBox(height: (land ? 8 : 12) * ui),
                                 AppPill(
                                   label: '上一频道',
                                   height: pillH,
@@ -3900,7 +3895,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                     unawaited(_stepChannel(delta: _liveInvert ? 1 : -1));
                                   },
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(
                                   label: '下一频道',
                                   height: 40,
@@ -3910,7 +3905,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                     unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
                                   },
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(
                                   label: '换线路 (${_line + 1}/$_lines)',
                                   height: 40,
@@ -3919,50 +3914,50 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                     _playChannel(_chIdx, line: (_line + 1) % _lines);
                                   },
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(label: '刷新 EPG', height: 40, onTap: _loadEpg),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(label: '投屏', height: 40, onTap: () => unawaited(_cast())),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(
                                   label: '画面比例 · ${_liveScaleLabel(_liveScale)}',
                                   height: 40,
                                   onTap: () => unawaited(_cycleLiveScale()),
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(
                                   label: '跨组换台 · ${_liveAcross ? '开' : '关'}',
                                   height: 40,
                                   onTap: _onLiveAcross,
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(
                                   label: '反转换台 · ${_liveInvert ? '开' : '关'}',
                                   height: 40,
                                   onTap: _onLiveInvert,
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(
                                   label: '失败换线 · ${_liveAutoChange ? '开' : '关'}',
                                   height: 40,
                                   onTap: _onLiveFailSwitch,
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(label: '迷你桌面播放', height: 40, onTap: () => unawaited(_enterMini())),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(
                                   label: _immersive ? '退出全屏' : '全屏观看',
                                   height: 40,
                                   onTap: () => unawaited(_toggleLiveFullscreen()),
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 if (kotvCanSwitchPlayer(live: true)) ...[
                                   AppPill(
                                     label: '播放器 · ${flutterPlayerLabel(_playerVal)}',
                                     height: 40,
                                     onTap: () => unawaited(_pickPlayer()),
                                   ),
-                                  const SizedBox(height: 8),
+                                  SizedBox(height: 8 * ui),
                                 ],
                                 AppPill(
                                   label: '解码 · $_decodeLabel',
@@ -3970,14 +3965,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                   onTap: () => unawaited(_pickDecode()),
                                 ),
                                 if (kotvPlayerRenderApplies(_playerVal)) ...[
-                                  const SizedBox(height: 8),
+                                  SizedBox(height: 8 * ui),
                                   AppPill(
                                     label: '渲染 · ${kotvPlayerRenderLabel(_renderMode)}',
                                     height: 40,
                                     onTap: () => unawaited(_pickRender()),
                                   ),
                                 ],
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 ListenableBuilder(
                                   listenable: _playback,
                                   builder: (context, _) {
@@ -4000,14 +3995,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                     );
                                   },
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(label: '打开设置页', height: 40, onTap: () => goKotvPage(ref, KotvPage.settings)),
-                                const SizedBox(height: 16),
+                                SizedBox(height: 16 * ui),
                                 Text('直播源', style: TextStyle(color: p.muted)),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 for (var i = 0; i < _sources.length; i++)
                                   Padding(
-                                    padding: const EdgeInsets.only(bottom: 6),
+                                    padding: EdgeInsets.only(bottom: 6 * ui),
                                     child: AppPill(
                                       // 仅一个源时换源位文案为「刷新」；再点当前源会 force 重拉频道表。
                                       label: _sources.length == 1
@@ -4027,7 +4022,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                       ),
                                     ),
                                   ),
-                                const SizedBox(height: 12),
+                                SizedBox(height: 12 * ui),
                                   AppPill(
                                   label: '配置直播源',
                                   height: 40,
@@ -4036,7 +4031,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                     await _bootstrap(forceLoad: true);
                                   },
                                 ),
-                                const SizedBox(height: 8),
+                                SizedBox(height: 8 * ui),
                                 AppPill(label: '关闭面板', height: 40, onTap: () => setState(() => _rightOpen = false)),
                               ],
                             ),
@@ -4592,7 +4587,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   controller: _epgScroll,
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
                   itemCount: _programs.length,
-                  itemBuilder: (_, i) => _epgProgramTile(i, land: false, wScale: 1, portrait: true),
+                  itemBuilder: (_, i) => _epgProgramTile(i, land: false, portrait: true),
                 ),
         ),
       ],

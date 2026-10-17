@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
 import '../theme/kotv_theme.dart';
+import '../theme/layout_scale.dart';
 
 /// 播放器全屏按钮：移动端直接进入；桌面在图标上方弹出抽屉式选项。
 class KotvFullscreenExpandButton extends StatefulWidget {
@@ -137,20 +138,21 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
     required String label,
     required KotvDesktopFullscreenKind kind,
   }) {
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     return TvFocus(
       onPressed: () => _pick(kind),
-      borderRadius: 12,
+      borderRadius: 12 * ui,
       child: InkWell(
       onTap: () => _pick(kind),
       canRequestFocus: false,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(12 * ui),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        padding: EdgeInsets.symmetric(horizontal: 14 * ui, vertical: 11 * ui),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 18, color: Colors.white.withOpacity(0.92)),
-            const SizedBox(width: 10),
+            Icon(icon, size: 18 * ui, color: Colors.white.withOpacity(0.92)),
+            SizedBox(width: 10 * ui),
             Text(
               label,
               style: TextStyle(
@@ -168,7 +170,9 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
 
   @override
   Widget build(BuildContext context) {
-    final iconSz = widget.iconSize ?? (widget.size <= 34 ? 18.0 : 22.0);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final box = widget.size * ui;
+    final iconSz = (widget.iconSize ?? (widget.size <= 34 ? 18.0 : 22.0)) * ui;
     return CompositedTransformTarget(
       link: _link,
       child: Tooltip(
@@ -177,8 +181,8 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
           onPressed: _onTap,
           borderRadius: 8,
           child: SizedBox(
-            width: widget.size,
-            height: widget.size,
+            width: box,
+            height: box,
             child: Icon(Icons.fullscreen, color: Colors.white, size: iconSz),
           ),
         ),
