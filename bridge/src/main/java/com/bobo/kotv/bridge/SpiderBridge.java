@@ -26,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -54,6 +55,9 @@ public class SpiderBridge {
     private static final ConcurrentHashMap<String, Object> jarLocks = new ConcurrentHashMap<>();
     /** 卸掉后加一。已经开始的 parseJar 看到代数变了就不再放进 loaders。 */
     private static final ConcurrentHashMap<String, Long> jarEpoch = new ConcurrentHashMap<>();
+    /** 这次卸载之后才发出的请求才能再装 jar。更早的请求即使晚到也不装。 */
+    private static final AtomicLong acceptedJarGen = new AtomicLong();
+    private static final ThreadLocal<Long> callJarGen = new ThreadLocal<>();
     private static volatile String recentJar;
 
     /** 同 jar 的 pdfh/pdfa/pd/pdfl 共用；invoke 时 synchronized，避免 Cache 并发写。 */
@@ -369,6 +373,14 @@ public class SpiderBridge {
                 com.github.catvod.utils.Util.clearRemoteUi();
             }
             String method = req.get("method").getAsString();
+            long callGen = Long.MAX_VALUE;
+            if (req.has("jarGen") && !req.get("jarGen").isJsonNull()) {
+                callGen = req.get("jarGen").getAsLong();
+            }
+            if ("unloadJar".equals(method) || "clear".equals(method)) {
+                acceptJarGen(callGen);
+            }
+            callJarGen.set(callGen);
             if ("selfCheck".equals(method)) {
                 return selfCheck();
             }
@@ -410,26 +422,14 @@ public class SpiderBridge {
                 return "{}";
             }
             if ("setRecent".equals(method)) {
-                String jar = "";
-                if (argsObj.has("jar") && !argsObj.get("jar").isJsonNull()) {
-                    jar = argsObj.get("jar").getAsString();
-                } else if (req.has("jar") && !req.get("jar").isJsonNull()) {
-                    jar = req.get("jar").getAsString();
-                }
-                if (jar != null && !jar.isEmpty()) {
-                    parseJar(jar, true);
-                }
+                String jar = jarArg(argsObj, req);
+                if (!jar.isEmpty()) parseJar(jar, true);
                 return "{}";
             }
             // 只确保 ClassLoader+Init+Proxy。recent 在锁内设置，卸掉后不再写回。
             if ("parseJar".equals(method)) {
-                String jar = "";
-                if (argsObj.has("jar") && !argsObj.get("jar").isJsonNull()) {
-                    jar = argsObj.get("jar").getAsString();
-                } else if (req.has("jar") && !req.get("jar").isJsonNull()) {
-                    jar = req.get("jar").getAsString();
-                }
-                if (jar != null && !jar.isEmpty()) {
+                String jar = jarArg(argsObj, req);
+                if (!jar.isEmpty()) {
                     boolean recent = argsObj.has("recent") && !argsObj.get("recent").isJsonNull()
                             && argsObj.get("recent").getAsBoolean();
                     parseJar(jar, recent);
@@ -447,7 +447,7 @@ public class SpiderBridge {
             // 否则磁盘换了新包、内存里仍是旧类（需整包 clear 才生效）。
             if ("reloadJar".equals(method)) {
                 String jar = jarArg(argsObj, req);
-                if (!jar.isEmpty()) {
+                if (!jar.isEmpty() && !jarGenStale()) {
                     boolean keepRecent = jar.equals(recentJar);
                     unloadJar(jar);
                     parseJar(jar, keepRecent);
@@ -511,6 +511,7 @@ public class SpiderBridge {
             err.addProperty("error", t.toString());
             return GSON.toJson(err);
         } finally {
+            callJarGen.remove();
             if (remoteUi) {
                 com.github.catvod.utils.Util.leaveRemoteUi();
             }
@@ -675,17 +676,38 @@ public class SpiderBridge {
      * 同一 jar 只加载一次，创建 ClassLoader 并调用 Init / 注册 Proxy。
      * 桌面用 URLClassLoader 代替 DexClassLoader。
      */
+    private static void acceptJarGen(long gen) {
+        if (gen == Long.MAX_VALUE) return;
+        long cur;
+        do {
+            cur = acceptedJarGen.get();
+            if (gen <= cur) return;
+        } while (!acceptedJarGen.compareAndSet(cur, gen));
+    }
+
+    private static boolean jarGenStale() {
+        Long gen = callJarGen.get();
+        return gen != null && gen < acceptedJarGen.get();
+    }
+
     private static void parseJar(String jarPath) throws Exception {
-        parseJar(jarPath, false);
+        parseJar(jarPath, false, false);
     }
 
     private static void parseJar(String jarPath, boolean recent) throws Exception {
+        parseJar(jarPath, recent, false);
+    }
+
+    private static void parseJar(String jarPath, boolean recent, boolean onlyIfRecent) throws Exception {
         if (Thread.interrupted()) return;
         if (jarPath == null || jarPath.isEmpty()) return;
+        if (jarGenStale()) return;
         long epoch = jarEpoch.getOrDefault(jarPath, 0L);
         Object lock = jarLocks.computeIfAbsent(jarPath, k -> new Object());
         synchronized (lock) {
             if (Thread.interrupted()) return;
+            if (jarGenStale()) return;
+            if (onlyIfRecent && !jarPath.equals(recentJar)) return;
             if (epoch != jarEpoch.getOrDefault(jarPath, 0L)) return;
             if (loaders.containsKey(jarPath)) {
                 if (recent) recentJar = jarPath;
@@ -711,7 +733,8 @@ public class SpiderBridge {
                 } finally {
                     Thread.currentThread().setContextClassLoader(prev);
                 }
-                if (Thread.interrupted() || epoch != jarEpoch.getOrDefault(jarPath, 0L)) {
+                if (Thread.interrupted() || jarGenStale() || (onlyIfRecent && !jarPath.equals(recentJar))
+                        || epoch != jarEpoch.getOrDefault(jarPath, 0L)) {
                     closeLoader(loader);
                     return;
                 }
@@ -1386,13 +1409,8 @@ public class SpiderBridge {
         proxyMethods.clear();
         jsParseSessions.clear();
         recentJar = null;
-        for (ClassLoader loader : loaders.values()) {
-            if (loader instanceof URLClassLoader) {
-                try {
-                    ((URLClassLoader) loader).close();
-                } catch (IOException ignored) {
-                }
-            }
+        for (ClassLoader loader : new ArrayList<>(loaders.values())) {
+            closeLoader(loader);
         }
         loaders.clear();
         jarLocks.clear();
@@ -1750,19 +1768,8 @@ public class SpiderBridge {
         if (recent == null || recent.isEmpty()) {
             throw new IllegalStateException("No jar loaded for recent");
         }
-        Object lock = jarLocks.computeIfAbsent(recent, k -> new Object());
-        synchronized (lock) {
-            if (!recent.equals(recentJar)) {
-                throw new IllegalStateException("No jar loaded for recent");
-            }
-            ClassLoader loader = loaders.get(recent);
-            if (loader != null) return loader;
-        }
-        if (!recent.equals(recentJar)) {
-            throw new IllegalStateException("No jar loaded for recent");
-        }
         try {
-            parseJar(recent);
+            parseJar(recent, false, true);
         } catch (Exception e) {
             throw new IllegalStateException("No jar loaded for recent key: " + recent, e);
         }

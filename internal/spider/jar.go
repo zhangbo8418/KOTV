@@ -39,6 +39,8 @@ var (
 	parseJarNotified sync.Map // dest -> struct{}
 	// 同 dest 进行中的 parseJar：并发 EnsureJar 等待完成，避免未加载完就调爬虫。
 	parseJarFlights sync.Map // dest -> *parseJarFlight
+	// 卸载时加一。更早发出的加载请求晚到也不再装。
+	jarWireGen atomic.Uint64
 	// 清缓存重载：LoadJar 同步 parseJar，避免首页先拉站时 ClassLoader 未就绪。
 	forceSyncParseJar atomic.Bool
 )
@@ -232,8 +234,10 @@ func clearJar() {
 	configBase = ""
 	jarMu.Unlock()
 	bumpJarRefreshGen()
+	jarWireGen.Add(1)
 	// destroy spiders and drop loaders；向 bridge 发 clear；独立进程可按需 Kill 重建。
 	req := bridgeRequest{Method: "clear"}
+	fillBridgeClient(&req)
 	if payload, err := json.Marshal(req); err == nil {
 		_, _ = callJavaBridge(payload)
 	}
@@ -325,6 +329,8 @@ func notifyParseJar(jarPath string, recent bool) {
 	}
 	// recent=false（EnsureJar）：同 dest 只真正 parse 一次；进行中则等待，已完成则跳过。
 	// recent=true（LoadJar）：换源须设 recent，仍通知；若同 dest 进行中则先等完再跑。
+	// 代数在进入时记下。卸载之后才把请求发出去，晚到的旧请求不会再装。
+	gen := jarWireGen.Load()
 	if !recent {
 		if f, ok := parseJarFlights.Load(jarPath); ok {
 			<-f.(*parseJarFlight).done
@@ -359,6 +365,8 @@ func notifyParseJar(jarPath string, recent bool) {
 			"recent": recent,
 		},
 	}
+	fillBridgeClient(&req)
+	req.JarGen = gen
 	payload, _ := json.Marshal(req)
 	callParseJarBridge(payload)
 }
@@ -546,12 +554,14 @@ type bridgeRequest struct {
 	ClientID string                 `json:"clientId,omitempty"`
 	UserID   string                 `json:"userId,omitempty"`
 	RemoteUI bool                   `json:"remoteUi,omitempty"`
+	JarGen   uint64                 `json:"jarGen"`
 }
 
 func fillBridgeClient(req *bridgeRequest) {
 	req.ClientID = hostclient.ScopeID()
 	req.UserID = hostclient.CurrentUserID()
 	req.RemoteUI = hostclient.PublicBase() != ""
+	req.JarGen = jarWireGen.Load()
 }
 
 func (s *jarSpider) resolveJarPath() (string, error) {
@@ -581,6 +591,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	if spec == "" {
 		return "", fmt.Errorf("空 jar")
 	}
+	wireGen := jarWireGen.Load()
 	if allowOverride {
 		// 仅 spider-override.jar 可劫持配置里的 spider。
 		// data/spider.jar 若也劫持，会换成过期的 PC 瘦包（缺 Nostr 等类）。
@@ -640,7 +651,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 			if err := downloadBinary(downloadURL, dest); err != nil {
 				log.Printf("spider.jar 刷新失败，沿用旧缓存 (%s): %v", downloadURL, err)
 			} else if newSum := fileMD5(dest); newSum != oldSum {
-				if err := reloadBridgeJar(dest); err != nil {
+				if err := reloadBridgeJar(dest, wireGen); err != nil {
 					log.Printf("spider.jar 内存重载失败，沿用已加载类 (%s): %v", dest, err)
 				}
 			}
@@ -664,7 +675,7 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	}
 	if hadCache {
 		if newSum := fileMD5(dest); newSum != oldSum {
-			if err := reloadBridgeJar(dest); err != nil {
+			if err := reloadBridgeJar(dest, wireGen); err != nil {
 				log.Printf("spider.jar 内存重载失败，沿用已加载类 (%s): %v", dest, err)
 			}
 		}
@@ -692,6 +703,7 @@ func fileExistsNonEmpty(path string) bool {
 }
 
 func (s *jarSpider) call(method string, args map[string]interface{}) (string, error) {
+	gen := jarWireGen.Load()
 	jp, err := s.resolveJarPath()
 	if err != nil {
 		return "", err
@@ -707,6 +719,7 @@ func (s *jarSpider) call(method string, args map[string]interface{}) (string, er
 		Args: args,
 	}
 	fillBridgeClient(&req)
+	req.JarGen = gen
 	payload, _ := json.Marshal(req)
 
 	raw, err := callJavaBridge(payload)
@@ -954,21 +967,23 @@ func JsParse(jar, op, html, rule, url, texts, urls string) (value string, list [
 
 func unloadBridgeJar(jarPath string) error {
 	parseJarNotified.Delete(jarPath)
-	return callBridgeJar("unloadJar", jarPath)
+	jarWireGen.Add(1)
+	return callBridgeJar(jarPath, "unloadJar", jarWireGen.Load())
 }
 
 // reloadBridgeJar 磁盘包刷新后让 bridge 丢弃该 jar 的旧 ClassLoader+爬虫并重载。
-func reloadBridgeJar(jarPath string) error {
+func reloadBridgeJar(jarPath string, gen uint64) error {
 	parseJarNotified.Delete(jarPath)
-	return callBridgeJar("reloadJar", jarPath)
+	return callBridgeJar(jarPath, "reloadJar", gen)
 }
 
-func callBridgeJar(method, jarPath string) error {
+func callBridgeJar(jarPath, method string, gen uint64) error {
 	req := bridgeRequest{
 		Method: method,
 		Jar:    jarPath,
 	}
 	fillBridgeClient(&req)
+	req.JarGen = gen
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return err
