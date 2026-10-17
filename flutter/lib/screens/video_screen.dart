@@ -1232,11 +1232,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           radius: radius,
         );
 
-    // 竖屏：轮播 + 下方两列功能卡
+    // 竖屏不套桌面 1280 的缩放，否则轮播和功能卡会被压到只剩标题。
     if (bottomNav || compact) {
-      final gap = LayoutScale.s(context, 10);
-      final cardH = LayoutScale.s(context, 76);
-      final bannerH = LayoutScale.s(context, 150);
+      const gap = 10.0;
+      const cardH = 76.0;
+      const bannerH = 150.0;
       final actions = <Widget>[
         feature(
           title: '继续观看',
@@ -1284,7 +1284,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       ];
       return Column(
         children: [
-          SizedBox(height: bannerH, child: banner(LayoutScale.s(context, 10))),
+          SizedBox(height: bannerH, child: banner(10)),
           SizedBox(height: gap),
           for (var i = 0; i < actions.length; i += 2) ...[
             if (i > 0) SizedBox(height: gap),
