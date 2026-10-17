@@ -5,15 +5,17 @@ import 'package:flutter/material.dart';
 /// 桌面默认可缩窗口下限（可模拟手机竖/横屏）；迷你窗可临时更小。
 const Size kotvMinWindowSize = Size(320, 280);
 
-/// 默认窗口 1280×720：随窗口宽度等比缩放布局尺寸。
+/// 默认窗口 1280×720。更大的窗口按这个样式整页放大：
+/// 1080p 为 1.5 倍，4K 为 3 倍，8K 为 6 倍。小窗口不低于 0.55。
 /// 文字走 [MediaQuery.textScaler]；间距/高度/图标用 [s]/[of]。
 class LayoutScale extends InheritedWidget {
   const LayoutScale({super.key, required this.scale, required super.child});
 
   static const designW = 1280.0;
   static const designH = 720.0;
+  static const minScale = 0.55;
 
-  /// 相对设计稿的缩放系数（已 clamp）。
+  /// 相对 1280×720 的缩放系数。只有小窗口有下限。
   final double scale;
 
   static double of(BuildContext context) =>
@@ -29,13 +31,20 @@ class LayoutScale extends InheritedWidget {
   /// 设计稿像素 → 当前窗口尺寸。
   static double s(BuildContext context, double designPx) => designPx * of(context);
 
+  /// 大于 1280×720 时，固定高度的栏按同一倍数放大。设计稿及更小为 1，避免把栏压矮后裁字。
+  static double growAboveDesign(double scale) {
+    if (!scale.isFinite || scale <= 1) return 1;
+    return scale;
+  }
+
   /// 由可用宽高计算缩放。竖/横都保持字与控件等比，避免过小导致底栏裁切字。
   static double compute(double width, [double height = designH]) {
     final byW = width / designW;
     final byH = height / designH;
     // 取宽高更紧的一边，超宽屏不会只按宽度放大到发虚。
     final v = math.min(byW, byH);
-    return v.clamp(0.55, 1.35);
+    if (!v.isFinite) return 1;
+    return math.max(v, minScale);
   }
 
   @override

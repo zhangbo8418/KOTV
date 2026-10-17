@@ -4411,14 +4411,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final p = KotvPalette.of(context);
     final compact = KotvLayout.isCompact(context) || KotvLayout.useBottomNav(context);
     final s = LayoutScale.layoutOf(context);
-    final w = (compact ? 48.0 : 72.0) * (compact ? 1.0 : s.clamp(0.75, 1.0));
-    final h = (compact ? 36.0 : 56.0) * (compact ? 1.0 : s.clamp(0.75, 1.0));
-    final iconSz = compact ? 14.0 : 20.0;
+    final ui = compact ? 1.0 : (s < 0.75 ? 0.75 : s);
+    final w = (compact ? 48.0 : 72.0) * ui;
+    final h = (compact ? 36.0 : 56.0) * ui;
+    final iconSz = (compact ? 14.0 : 20.0) * ui;
     final fs = compact ? 9.0 : 11.0;
-    final gap = compact ? 1.0 : 4.0;
-    final radius = compact ? 7.0 : 10.0;
+    final gap = (compact ? 1.0 : 4.0) * ui;
+    final radius = (compact ? 7.0 : 10.0) * ui;
     return Padding(
-      padding: EdgeInsets.only(right: compact ? 4 : 8),
+      padding: EdgeInsets.only(right: (compact ? 4 : 8) * ui),
       child: TvFocus(
         onPressed: onTap,
         borderRadius: radius,

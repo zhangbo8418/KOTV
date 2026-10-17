@@ -69,6 +69,7 @@ class PosterCard extends StatelessWidget {
                                 color: p.fg.withOpacity(0.35), size: 54 * s)
                             : Text(
                                 letter,
+                                textScaler: TextScaler.noScaling,
                                 style: TextStyle(
                                   color: p.fg.withOpacity(0.35),
                                   fontSize: 54 * s,

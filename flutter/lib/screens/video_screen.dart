@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1232,11 +1233,11 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           radius: radius,
         );
 
-    // 竖屏不套桌面 1280 的缩放，否则轮播和功能卡会被压到只剩标题。
+    // 竖屏仍按窗口缩放，高度不低于能放下标题和副标题的尺寸。
     if (bottomNav || compact) {
-      const gap = 10.0;
-      const cardH = 76.0;
-      const bannerH = 150.0;
+      final gap = LayoutScale.s(context, 10);
+      final cardH = math.max(76.0, LayoutScale.s(context, 76));
+      final bannerH = math.max(150.0, LayoutScale.s(context, 150));
       final actions = <Widget>[
         feature(
           title: '继续观看',
@@ -1284,7 +1285,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
       ];
       return Column(
         children: [
-          SizedBox(height: bannerH, child: banner(10)),
+          SizedBox(height: bannerH, child: banner(math.max(10.0, LayoutScale.s(context, 10)))),
           SizedBox(height: gap),
           for (var i = 0; i < actions.length; i += 2) ...[
             if (i > 0) SizedBox(height: gap),
@@ -1307,13 +1308,13 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
 
     return LayoutBuilder(
       builder: (context, c) {
-        final scale = LayoutScale.of(context);
         final gap = LayoutScale.s(context, 16);
         final w = c.maxWidth;
         // 四列等宽：左列宽 = 下方每张卡宽，铺满当前窗口。
         final rawW = (w - gap * 3) / 4;
         final cardW = rawW.isFinite && rawW > 0 ? rawW : 1.0;
-        final cardH = cardW * 0.52 * scale;
+        // 宽度已经跟着窗口变大。高度用 720p 的 0.46，不再乘缩放，避免大屏卡片被拉高、字显得小。
+        final cardH = cardW * 0.46;
         final heroH = cardH * 2 + gap;
         final radius = LayoutScale.s(context, 14);
 

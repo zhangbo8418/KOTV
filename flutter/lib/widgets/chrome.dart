@@ -300,10 +300,11 @@ class NavPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
     final compact = KotvLayout.isCompact(context);
-    final h = compact ? 32.0 : 36.0;
+    final grow = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final h = (compact ? 32.0 : 36.0) * grow;
     final fs = compact ? 14.0 : 16.0;
-    final r = compact ? 12.0 : 14.0;
-    final px = compact ? 10.0 : 12.0;
+    final r = (compact ? 12.0 : 14.0) * grow;
+    final px = (compact ? 10.0 : 12.0) * grow;
     final fg = selected ? Colors.white : p.fg;
     return TvFocus(
       autofocus: autofocus,
@@ -343,8 +344,8 @@ class NavPill extends StatelessWidget {
                   ),
                 ),
                 if (trailingIcon != null) ...[
-                  const SizedBox(width: 4),
-                  Icon(trailingIcon, size: compact ? 14 : 16, color: fg),
+                  SizedBox(width: 4 * grow),
+                  Icon(trailingIcon, size: (compact ? 14 : 16) * grow, color: fg),
                 ],
               ],
             ),
@@ -491,7 +492,8 @@ class FeatureCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = LayoutScale.layoutOf(context);
-    final radius = 14 * s.clamp(0.75, 1.2);
+    final grow = LayoutScale.growAboveDesign(s);
+    final radius = 14 * s;
     return TvFocus(
       onPressed: onTap,
       borderRadius: radius,
@@ -518,11 +520,11 @@ class FeatureCard extends StatelessWidget {
                   final tight = h < 100;
                   final tiny = h < 72;
                   final narrow = w < 168;
-                  final padX = narrow ? 10.0 : (tiny ? 10.0 : (tight ? 12.0 : 16.0));
-                  final padY = tiny ? 6.0 : (tight ? 8.0 : 10.0);
+                  final padX = (narrow ? 10.0 : (tiny ? 10.0 : (tight ? 12.0 : 16.0))) * grow;
+                  final padY = (tiny ? 6.0 : (tight ? 8.0 : 10.0)) * grow;
                   final titleFs = tiny ? 14.0 : (tight || narrow ? 16.0 : 18.0);
                   final subFs = tiny ? 11.0 : (tight || narrow ? 12.0 : 13.0);
-                  final iconS = narrow ? 20.0 : (tiny ? 18.0 : (tight ? 24.0 : 30.0));
+                  final iconS = (narrow ? 20.0 : (tiny ? 18.0 : (tight ? 24.0 : 30.0))) * grow;
                   final showSub = subtitle.isNotEmpty && h >= 52;
                   final showIcon = w >= 96;
                   return Padding(
@@ -550,7 +552,7 @@ class FeatureCard extends StatelessWidget {
                                 ),
                               ),
                               if (showSub) ...[
-                                SizedBox(height: tiny ? 2 : 3),
+                                SizedBox(height: (tiny ? 2 : 3) * grow),
                                 FittedBox(
                                   fit: BoxFit.scaleDown,
                                   alignment: Alignment.centerLeft,
@@ -570,7 +572,7 @@ class FeatureCard extends StatelessWidget {
                           ),
                         ),
                         if (showIcon) ...[
-                          SizedBox(width: narrow ? 4 : 8),
+                          SizedBox(width: (narrow ? 4 : 8) * grow),
                           Icon(icon, size: iconS, color: Colors.white.withOpacity(0.62)),
                         ],
                       ],
@@ -733,7 +735,8 @@ class _TopStatusBarState extends State<TopStatusBar> {
     final compact = KotvLayout.isCompact(context);
     final bottomNav = KotvLayout.useBottomNav(context);
     final landscape = KotvLayout.isLandscapeCompact(context);
-    final h = compact ? 40.0 : (landscape ? 36.0 : 52.0);
+    final grow = LayoutScale.growAboveDesign(s);
+    final h = (compact ? 40.0 : (landscape ? 36.0 : 52.0)) * grow;
     final padH = compact ? 10.0 : (landscape ? 14.0 : 24.0 * s);
     return Container(
       height: h,
@@ -769,7 +772,7 @@ class _TopStatusBarState extends State<TopStatusBar> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w700, height: 1.2),
                       ),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10 * grow),
                     ],
                     // 按文字宽度自适应；loose 避免拉满剩余空间，超长时再省略
                     Flexible(
@@ -782,7 +785,7 @@ class _TopStatusBarState extends State<TopStatusBar> {
                       ),
                     ),
                     if (!bottomNav) ...[
-                      SizedBox(width: landscape ? 6 : 8),
+                      SizedBox(width: (landscape ? 6 : 8) * grow),
                       TvFocus(
                         onPressed: widget.onSettings,
                         child: Material(
@@ -793,9 +796,10 @@ class _TopStatusBarState extends State<TopStatusBar> {
                             onTap: widget.onSettings,
                             canRequestFocus: false,
                             child: SizedBox(
-                              width: landscape ? 28 : 36,
-                              height: landscape ? 28 : 36,
-                              child: Icon(Icons.settings, color: p.fg, size: landscape ? 16 : 20),
+                              width: (landscape ? 28 : 36) * grow,
+                              height: (landscape ? 28 : 36) * grow,
+                              child: Icon(Icons.settings,
+                                  color: p.fg, size: (landscape ? 16 : 20) * grow),
                             ),
                           ),
                         ),
@@ -819,24 +823,27 @@ class _NewsPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = LayoutScale.layoutOf(context);
+    final grow = LayoutScale.growAboveDesign(s);
     final p = KotvPalette.of(context);
+    final radius = 16 * grow;
     return TvFocus(
       onPressed: onTap,
-      borderRadius: 16 * s,
+      borderRadius: radius,
       child: InkWell(
         onTap: onTap,
         canRequestFocus: false,
-        borderRadius: BorderRadius.circular(16 * s),
-        // 按文字固有宽度收缩，避免固定 132*s 在「字不缩、壳缩小」时内部 RIGHT OVERFLOW
+        borderRadius: BorderRadius.circular(radius),
+        // 按文字固有宽度收缩，避免固定宽度在字不缩时把内容挤出。
         child: Container(
-          height: 32,
-          decoration: BoxDecoration(color: p.pillBg, borderRadius: BorderRadius.circular(16)),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          height: 32 * grow,
+          decoration: BoxDecoration(
+              color: p.pillBg, borderRadius: BorderRadius.circular(radius)),
+          padding: EdgeInsets.symmetric(horizontal: 12 * grow),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('●', style: TextStyle(color: p.focus, fontSize: 11)),
-              const SizedBox(width: 6),
+              SizedBox(width: 6 * grow),
               Text('最新消息', style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w700, height: 1.2)),
             ],
           ),
@@ -1017,10 +1024,12 @@ class _CategoryNavBarState extends State<CategoryNavBar> {
         : widget.categories.indexWhere((c) => c.id == widget.selectedTid);
     // 固定高度匹配 NavPill(36)，避免 scale 把栏压矮后胶囊溢出。
     // 按声明顺序走焦点，避免横向列表按几何距离把焦点跳到左边或右边那一项。
+    final grow = LayoutScale.growAboveDesign(s);
     return Container(
-      height: compact ? 40.0 : 48.0,
+      height: (compact ? 40.0 : 48.0) * grow,
       color: p.catBar,
-      padding: EdgeInsets.symmetric(horizontal: compact ? 10.0 : 24.0 * s, vertical: 6),
+      padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10.0 : 24.0 * s, vertical: 6 * grow),
       child: FocusTraversalGroup(
         policy: OrderedTraversalPolicy(),
         child: Row(
