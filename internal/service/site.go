@@ -61,16 +61,6 @@ func (s *SiteService) Config() *config.Manager {
 	return s.cfg
 }
 
-// InvalidateLoads 换源：作废缓存，并立刻硬杀当前所属 JVM/Py/JS（本机共享池或远端该用户）。
-// 不删脚本磁盘缓存；慢站靠单次调用超时，不在换源外层死等。
-func (s *SiteService) InvalidateLoads() {
-	s.loadEpoch.Add(1)
-	s.mu.Lock()
-	s.invalidateContentCache()
-	s.mu.Unlock()
-	spider.RestartCallerRuntime()
-}
-
 // DropContentCache 清内容缓存，不停止 JVM/Py/JS。
 func (s *SiteService) DropContentCache() {
 	s.loadEpoch.Add(1)

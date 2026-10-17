@@ -57,6 +57,8 @@ const jsCallTimeout = 45 * time.Second
 // QuickJS Runtime 绑定创建 goroutine，所有调用经 worker 串行执行。
 type jsSpider struct {
 	key, api, ext, jar string
+	appliedKey         string
+	appliedExt         string
 
 	once   sync.Once
 	reqCh  chan jsReq
@@ -73,6 +75,7 @@ type jsSpider struct {
 	timerMu sync.Mutex
 	timers  map[int32]context.CancelFunc
 	timerID atomic.Int32
+	siteMu  sync.Mutex
 }
 
 type jsReq struct {
@@ -137,20 +140,24 @@ func (s *jsSpider) alive() bool {
 
 func newJsSpider(key, api, ext, jar string) Spider {
 	jsPyMu.Lock()
-	defer jsPyMu.Unlock()
-	ck := jsPyKey("js", key, api, ext, jar)
-	if s, ok := jsPy[ck]; ok {
-		if pool, ok := s.(*jsPool); ok {
-			return pool
-		}
-		if js, ok := s.(*jsSpider); ok && js.alive() {
-			return s
-		}
-		delete(jsPy, ck)
+	ck := jsPyKey("js", api)
+	s, ok := jsPy[ck]
+	if !ok {
+		s = newJsPool(key, api, ext, jar)
+		jsPy[ck] = s
 	}
-	s := newJsPool(key, api, ext, jar)
-	jsPy[ck] = s
-	return s
+	jsPyMu.Unlock()
+	if pool, ok := s.(*jsPool); ok {
+		pool.retarget(key, ext, jar)
+		return pool
+	}
+	if js, ok := s.(*jsSpider); ok && js.alive() {
+		return js
+	}
+	jsPyMu.Lock()
+	delete(jsPy, ck)
+	jsPyMu.Unlock()
+	return newJsSpider(key, api, ext, jar)
 }
 
 func (s *jsSpider) startWorker() {
@@ -283,11 +290,14 @@ func (s *jsSpider) runWorker() (err error) {
 		s.clearTimers()
 	}()
 	// createObj 后立即 init
+	key, ext := s.siteKeyExt()
 	if _, err := s.callOn(ctx, spider, "init", s.initArg()); err != nil {
 		jsLog("[js] init fail key=%s err=%v", s.key, err)
 		return fmt.Errorf("JS init 失败: %w", err)
 	}
 	jsLog("[js] init ok key=%s", s.key)
+	s.appliedKey = key
+	s.appliedExt = ext
 	s.inited.Store(true)
 
 	for {
@@ -303,6 +313,18 @@ func (s *jsSpider) runWorker() (err error) {
 			done := hostclient.Enter(req.clientID)
 			s.activeEpoch.Store(req.epoch)
 			s.deadline.Store(time.Now().Add(jsCallTimeout).UnixNano())
+			key, ext := s.siteKeyExt()
+			if s.appliedKey != key || s.appliedExt != ext {
+				if _, err := s.callOn(ctx, spider, "init", s.initArg()); err != nil {
+					done()
+					s.activeClient.Store("")
+					req.resp <- jsResp{err: err}
+					continue
+				}
+				s.appliedKey = key
+				s.appliedExt = ext
+				s.inited.Store(true)
+			}
 			args := req.args
 			if req.method == "init" {
 				if s.inited.Load() {
@@ -331,14 +353,21 @@ func (s *jsSpider) runWorker() (err error) {
 }
 
 // initArg CatVod 脚本包装 {stype,skey,ext}。
+func (s *jsSpider) siteKeyExt() (string, string) {
+	s.siteMu.Lock()
+	defer s.siteMu.Unlock()
+	return s.key, s.ext
+}
+
 func (s *jsSpider) initArg() interface{} {
-	extVal := jsExtValue(s.ext)
+	key, ext := s.siteKeyExt()
+	extVal := jsExtValue(ext)
 	if !s.cat.Load() {
 		return extVal
 	}
 	return map[string]interface{}{
 		"stype": 3,
-		"skey":  s.key,
+		"skey":  key,
 		"ext":   extVal,
 	}
 }
@@ -1345,7 +1374,9 @@ func (s *jsSpider) interrupt() {
 }
 
 func (s *jsSpider) Init(ext string) error {
+	s.siteMu.Lock()
 	s.ext = ext
+	s.siteMu.Unlock()
 	// EnsureJar 只在 runWorker 做一次；此处勿再同步 HTTP parseJar。
 	_, err := s.invoke("init", ext)
 	return err

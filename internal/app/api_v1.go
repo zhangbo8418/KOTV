@@ -120,20 +120,16 @@ func (a *App) APIGetConfig() map[string]any {
 
 func (a *App) APILoadConfig(source string) error {
 	cfg, sites, sess := a.scope()
-	prev := strings.TrimSpace(cfg.API().Spider)
-	// 清缓存和爬虫实例。jar 地址没变时不杀进程；加载失败时内存里仍是旧配置。
+	prevAPI := cfg.API()
+	prev := config.JarSpecs(prevAPI)
 	sites.DropContentCache()
 	sites.SoftCancelPending()
-	spider.DropCallerInstances()
 	if err := cfg.LoadFromSource(source); err != nil {
 		return err
 	}
-	next := strings.TrimSpace(cfg.API().Spider)
-	if config.SpiderSpecChanged(prev, next) {
-		sites.InvalidateLoads()
-		if next != "" {
-			_ = spider.LoadJar(next, cfg.API().URL)
-		}
+	nextAPI := cfg.API()
+	if err := spider.ApplyConfigJars(prev, config.JarSpecs(nextAPI), prevAPI.Spider, nextAPI.Spider, nextAPI.URL); err != nil {
+		log.Printf("spider.jar 加载失败: %v", err)
 	}
 	a.finishConfigLoad(cfg, sess, source)
 	return nil
@@ -156,16 +152,13 @@ func (a *App) APIRefreshConfig() error {
 	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		return fmt.Errorf("当前源不是 http(s) 仓库，已跳过刷新")
 	}
-	prev := strings.TrimSpace(cfg.API().Spider)
+	prevAPI := cfg.API()
+	prev := config.JarSpecs(prevAPI)
 	if err := cfg.ReloadJSON(source); err != nil {
 		return err
 	}
-	next := strings.TrimSpace(cfg.API().Spider)
-	// 地址变了先停旧运行时，再加载。地址没变也要重新核对 jar 字节和 js/py。
-	if config.SpiderSpecChanged(prev, next) {
-		sites.InvalidateLoads()
-	}
-	if err := spider.RefreshAfterConfig(next, cfg.API().URL); err != nil {
+	nextAPI := cfg.API()
+	if err := spider.ApplyConfigJars(prev, config.JarSpecs(nextAPI), prevAPI.Spider, nextAPI.Spider, nextAPI.URL); err != nil {
 		log.Printf("spider.jar 加载失败: %v", err)
 	}
 	sites.DropContentCache()

@@ -67,13 +67,16 @@ func (s *pySpider) activeClientID() string {
 
 func newPySpider(key, api, ext, jar string) Spider {
 	jsPyMu.Lock()
-	defer jsPyMu.Unlock()
-	ck := jsPyKey("py", key, api, ext, jar)
-	if s, ok := jsPy[ck]; ok {
-		return s
+	ck := jsPyKey("py", api)
+	s, ok := jsPy[ck]
+	if !ok {
+		s = newPyPool(key, api, ext, jar)
+		jsPy[ck] = s
 	}
-	s := newPyPool(key, api, ext, jar)
-	jsPy[ck] = s
+	jsPyMu.Unlock()
+	if pool, ok := s.(*pyPool); ok {
+		pool.retarget(key, ext, jar)
+	}
 	return s
 }
 
@@ -114,11 +117,35 @@ func clearSharedJsPy() {
 	}
 }
 
-// jsPyKey 运行时实例键：含 RuntimeUserID（远端租户独立引擎；本机空=共享池）。
-// 脚本文件仍按 api MD5 落在全局 PyCache/JsCache，全用户共用。
-func jsPyKey(kind, key, api, ext, jar string) string {
-	uid := hostclient.RuntimeUserID()
-	return uid + "\x01" + kind + ":" + key + "\x00" + api + "\x00" + ext + "\x00" + jar
+// jsPyKey 运行时实例键：用户 + 脚本 api。同一份脚本复用已有池。
+func jsPyKey(kind, api string) string {
+	return hostclient.RuntimeUserID() + "\x01" + kind + ":" + api
+}
+
+// ReleaseOtherScripts 切站后关掉当前站用不到的 Py/JS 池。正在搜索的其它脚本不走这里。
+func ReleaseOtherScripts(api string) {
+	keepPy := jsPyKey("py", api)
+	keepJs := jsPyKey("js", api)
+	prefix := hostclient.RuntimeUserID() + "\x01"
+	jsPyMu.Lock()
+	var doomed []Spider
+	for k, s := range jsPy {
+		if !strings.HasPrefix(k, prefix) || k == keepPy || k == keepJs {
+			continue
+		}
+		doomed = append(doomed, s)
+		delete(jsPy, k)
+		if recentJsKey == k {
+			recentJsKey = ""
+		}
+		if recentPyKey == k {
+			recentPyKey = ""
+		}
+	}
+	jsPyMu.Unlock()
+	for _, s := range doomed {
+		s.Destroy()
+	}
 }
 
 // DestroyUserScripts 销毁指定用户的全部 Py/JS 池。
@@ -144,13 +171,13 @@ func DestroyUserScripts(userID string) {
 
 func setRecentJs(key, api, ext, jar string) {
 	jsPyMu.Lock()
-	recentJsKey = jsPyKey("js", key, api, ext, jar)
+	recentJsKey = jsPyKey("js", api)
 	jsPyMu.Unlock()
 }
 
 func setRecentPy(key, api, ext, jar string) {
 	jsPyMu.Lock()
-	recentPyKey = jsPyKey("py", key, api, ext, jar)
+	recentPyKey = jsPyKey("py", api)
 	jsPyMu.Unlock()
 }
 
@@ -334,7 +361,7 @@ func (s *pySpider) run(method string, args map[string]interface{}) (string, erro
 		return "", err
 	}
 	if !s.inited && method != "init" {
-		if _, err := s.callLocked(startEpoch, "init", map[string]interface{}{"extend": s.ext}); err != nil {
+		if _, err := s.callLocked(startEpoch, "init", map[string]interface{}{"extend": s.ext, "siteKey": s.key}); err != nil {
 			s.stopLocked()
 			return "", err
 		}
@@ -407,7 +434,6 @@ func (s *pySpider) callLocked(startEpoch uint64, method string, args map[string]
 	select {
 	case result := <-exchange:
 		if s.epoch.Load() != startEpoch {
-			s.stopLocked()
 			return "", ErrScriptInterrupted
 		}
 		if result.err != nil {
@@ -541,22 +567,18 @@ func (s *pySpider) interrupt() {
 		s.inited = false
 		return
 	}
-	if p := s.proc.Load(); p != nil {
-		killProcessTree(p)
-	}
-	s.stopLocked()
 }
 
 func (s *pySpider) Init(ext string) error {
-	// PyLoader.getSpider：computeIfAbsent 后 init 只一次。
 	s.mu.Lock()
-	if s.inited {
+	if s.inited && s.ext == ext {
 		s.mu.Unlock()
 		return nil
 	}
 	s.ext = ext
+	s.inited = false
 	s.mu.Unlock()
-	_, err := s.run("init", map[string]interface{}{"extend": ext})
+	_, err := s.run("init", map[string]interface{}{"extend": ext, "siteKey": s.key})
 	return err
 }
 
@@ -577,7 +599,7 @@ func (s *pySpider) runAndroidLocked(method string, args map[string]interface{}) 
 		return "", err
 	}
 	if !s.inited && method != "init" {
-		if _, err := s.androidCallPythonLocked("init", map[string]interface{}{"extend": s.ext}, script, runner); err != nil {
+		if _, err := s.androidCallPythonLocked("init", map[string]interface{}{"extend": s.ext, "siteKey": s.key}, script, runner); err != nil {
 			return "", err
 		}
 		s.inited = true

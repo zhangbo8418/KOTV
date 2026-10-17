@@ -19,6 +19,20 @@ func newPyPool(key, api, ext, jar string) *pyPool {
 	return &pyPool{key: key, api: api, ext: ext, jar: jar, max: scriptPoolSize()}
 }
 
+func (p *pyPool) retarget(key, ext, jar string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.key, p.ext, p.jar = key, ext, jar
+	for _, s := range p.slots {
+		s.mu.Lock()
+		if s.key != key || s.ext != ext || s.jar != jar {
+			s.key, s.ext, s.jar = key, ext, jar
+			s.inited = false
+		}
+		s.mu.Unlock()
+	}
+}
+
 func (p *pyPool) acquire() (*pySpider, int) {
 	p.mu.Lock()
 	for {

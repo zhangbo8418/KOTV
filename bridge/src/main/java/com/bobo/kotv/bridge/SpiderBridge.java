@@ -437,16 +437,18 @@ public class SpiderBridge {
                 }
                 return "{}";
             }
+            if ("unloadJar".equals(method)) {
+                String jar = jarArg(argsObj, req);
+                if (!jar.isEmpty()) {
+                    unloadJar(jar);
+                }
+                return "{}";
+            }
             // 缓存刷新后按路径重载：丢弃该 jar 的爬虫/ClassLoader 再重新 parseJar，
             // 否则磁盘换了新包、内存里仍是旧类（需整包 clear 才生效）。
             if ("reloadJar".equals(method)) {
-                String jar = "";
-                if (argsObj.has("jar") && !argsObj.get("jar").isJsonNull()) {
-                    jar = argsObj.get("jar").getAsString();
-                } else if (req.has("jar") && !req.get("jar").isJsonNull()) {
-                    jar = req.get("jar").getAsString();
-                }
-                if (jar != null && !jar.isEmpty()) {
+                String jar = jarArg(argsObj, req);
+                if (!jar.isEmpty()) {
                     unloadJar(jar);
                     parseJar(jar);
                 }
@@ -1360,6 +1362,16 @@ public class SpiderBridge {
             com.github.catvod.net.OkHttp.get().clear();
         } catch (Throwable ignored) {
         }
+    }
+
+    private static String jarArg(com.google.gson.JsonObject argsObj, com.google.gson.JsonObject req) {
+        String jar = "";
+        if (argsObj != null && argsObj.has("jar") && !argsObj.get("jar").isJsonNull()) {
+            jar = argsObj.get("jar").getAsString();
+        } else if (req != null && req.has("jar") && !req.get("jar").isJsonNull()) {
+            jar = req.get("jar").getAsString();
+        }
+        return jar == null ? "" : jar;
     }
 
     /** 按路径卸载单个 jar：destroy 其爬虫、关闭 loader 并移除缓存，供磁盘包刷新后重载。 */

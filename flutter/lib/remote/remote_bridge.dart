@@ -37,7 +37,12 @@ class RemoteBridge {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(milliseconds: 700), (_) => _tick());
     _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+    _pingTimer = Timer.periodic(const Duration(seconds: 30), (_) => _pingNow());
+    _pingNow();
+  }
+
+  void _pingNow() {
+    Future<void>(() async {
       try {
         await api.sessionPing();
       } catch (_) {}

@@ -412,9 +412,30 @@ func (m *Manager) initFromVod(vod string) error {
 	return m.ParseConfig(cfg, false)
 }
 
-// SpiderSpecChanged 为真时刷新仓库后要停掉旧运行时再加载新 jar。
-func SpiderSpecChanged(prev, next string) bool {
-	return strings.TrimSpace(prev) != strings.TrimSpace(next)
+// JarSpecs 一份站源里去重后的 jar。空 jar 继承根 spider，不另算一份。
+func JarSpecs(api model.Api) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(spec string) {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			return
+		}
+		if _, ok := seen[spec]; ok {
+			return
+		}
+		seen[spec] = struct{}{}
+		out = append(out, spec)
+	}
+	root := strings.TrimSpace(api.Spider)
+	add(root)
+	for i := range api.Sites {
+		add(api.Sites[i].Jar)
+	}
+	for i := range api.Lives {
+		add(api.Lives[i].JAR)
+	}
+	return out
 }
 
 // ReloadFresh 重新加载点播源。http(s) 不使用库内 JSON，重新请求该地址。

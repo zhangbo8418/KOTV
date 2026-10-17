@@ -32,6 +32,32 @@ func TestGet_PyBeforeJSWhenBoth(t *testing.T) {
 	}
 }
 
+func TestSameScriptReusedUntilLeft(t *testing.T) {
+	Clear()
+	t.Cleanup(Clear)
+	first := newPySpider("site-a", "http://example.com/a.py", "e1", "")
+	again := newPySpider("site-b", "http://example.com/a.py", "e2", "")
+	if first != again {
+		t.Fatal("同一份 py 应复用已有池")
+	}
+	if again.(*pyPool).ext != "e2" {
+		t.Fatal("同一池应改用新的 ext")
+	}
+	other := newPySpider("site-c", "http://example.com/b.py", "", "")
+	if other == first {
+		t.Fatal("另一份 py 应另开一池")
+	}
+	ReleaseOtherScripts("http://example.com/b.py")
+	jsPyMu.Lock()
+	defer jsPyMu.Unlock()
+	if _, ok := jsPy[jsPyKey("py", "http://example.com/a.py")]; ok {
+		t.Fatal("离开的 py 应关掉")
+	}
+	if _, ok := jsPy[jsPyKey("py", "http://example.com/b.py")]; !ok {
+		t.Fatal("当前 py 应留着")
+	}
+}
+
 func TestIsCSP(t *testing.T) {
 	if !isCSP("csp_XPath") {
 		t.Fatal("csp_ prefix")

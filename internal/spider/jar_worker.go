@@ -111,16 +111,10 @@ func HostSpiderReady() (ok bool, errMsg string) {
 	return true, ""
 }
 
-// RestartUserRuntime 硬杀该用户运行时；下次调用会冷启动新 JVM。
-func RestartUserRuntime(userID string) {
-	KillUserRuntime(userID)
-}
-
-// RestartCallerRuntime 硬重启当前请求所属运行时：远端该用户的 JVM/Py/JS，或本机共享池。
-// 取消 / 换源立刻调用，不在外层死等；慢站靠单次 JAR/JS/Py 调用超时。
+// RestartCallerRuntime 卡死恢复时硬重启当前请求所属运行时。切仓不走这里。
 func RestartCallerRuntime() {
 	if uid := hostclient.RuntimeUserID(); uid != "" {
-		RestartUserRuntime(uid)
+		KillUserRuntime(uid)
 		return
 	}
 	RestartSharedRuntime()

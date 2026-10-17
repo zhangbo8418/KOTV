@@ -59,9 +59,9 @@ type App struct {
 	castDevs []cast.Device
 
 	// APILiveLoad 序列化缓存：按直播源 URL 键复用已建 DTO。
-	liveLoadMu         sync.Mutex
-	liveLoadCachedKey  string
-	liveLoadCached     map[string]any
+	liveLoadMu        sync.Mutex
+	liveLoadCachedKey string
+	liveLoadCached    map[string]any
 
 	DanmakuToast string
 }
@@ -172,7 +172,7 @@ func New() (*App, error) {
 }
 
 // scope 返回当前点播配置与 SiteService。
-// 本机（非 Dedicated）：始终全局 App.Config，偏好落 setting(owner='')。
+// 本机（非 Dedicated）：始终全局 App.Config，偏好落 setting(owner=”)。
 // 远端 Dedicated：内存 ephemeral 会话，偏好落 setting(owner=userId)。
 func (a *App) scope() (cfg *config.Manager, sites *service.SiteService, sess *clientsession.Session) {
 	if !hostclient.DedicatedRuntime() {
@@ -536,11 +536,17 @@ func (a *App) ReloadConfig() error {
 	// 换仓前先不可用，避免 Clear 窗口内仍 Ready 去 Get ""。
 	a.Ready = false
 	a.ErrMsg = ""
-	a.Sites.InvalidateLoads()
+	prevAPI := a.Config.API()
+	prev := config.JarSpecs(prevAPI)
+	a.Sites.DropContentCache()
 	a.Config.Clear()
 	if err := a.Config.InitFromSettings(); err != nil {
 		a.ErrMsg = err.Error()
 		return err
+	}
+	nextAPI := a.Config.API()
+	if err := spider.ApplyConfigJars(prev, config.JarSpecs(nextAPI), prevAPI.Spider, nextAPI.Spider, nextAPI.URL); err != nil {
+		log.Printf("spider.jar 加载失败: %v", err)
 	}
 	a.Ready = true
 	a.ErrMsg = ""
@@ -555,11 +561,17 @@ func (a *App) LoadVodSource(source string) error {
 	spider.SetUserProxy(settings.Get(settings.Proxy))
 	a.Ready = false
 	a.ErrMsg = ""
-	a.Sites.InvalidateLoads()
+	prevAPI := a.Config.API()
+	prev := config.JarSpecs(prevAPI)
+	a.Sites.DropContentCache()
 	a.Config.Clear()
 	if err := a.Config.LoadFromSource(source); err != nil {
 		a.ErrMsg = err.Error()
 		return err
+	}
+	nextAPI := a.Config.API()
+	if err := spider.ApplyConfigJars(prev, config.JarSpecs(nextAPI), prevAPI.Spider, nextAPI.Spider, nextAPI.URL); err != nil {
+		log.Printf("spider.jar 加载失败: %v", err)
 	}
 	a.Ready = true
 	a.ErrMsg = ""

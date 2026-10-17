@@ -454,6 +454,9 @@ def invoke(method, args):
         return "{}"
     if method == "init":
         download_dependencies()
+        sk = args.get("siteKey")
+        if sk and sp is not None:
+            sp.siteKey = sk
         return encode_result(fn(args.get("extend", ext)))
     if method == "homeContent":
         return encode_result(fn(args.get("filter", True)))

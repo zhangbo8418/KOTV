@@ -20,6 +20,17 @@ func newJsPool(key, api, ext, jar string) *jsPool {
 	return &jsPool{key: key, api: api, ext: ext, jar: jar, max: scriptPoolSize()}
 }
 
+func (p *jsPool) retarget(key, ext, jar string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.key, p.ext, p.jar = key, ext, jar
+	for _, s := range p.slots {
+		s.siteMu.Lock()
+		s.key, s.ext, s.jar = key, ext, jar
+		s.siteMu.Unlock()
+	}
+}
+
 func newJsSpiderWorker(key, api, ext, jar string) *jsSpider {
 	return &jsSpider{
 		key:    key,

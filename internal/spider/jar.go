@@ -79,22 +79,114 @@ func clearJarForUser(userID string) {
 	jarMu.Unlock()
 }
 
-// DropCallerInstances 清掉当前会话的爬虫实例和 jar 解析标记，不杀 JVM/JS 进程。
-func DropCallerInstances() {
+// ApplyConfigJars 切仓成功后：卸掉新站源里不再出现的 jar，并丢掉当前用户的 Py/JS。不杀 JVM。
+func ApplyConfigJars(prev, next []string, prevRoot, nextRoot, configBase string) error {
+	nextSet := jarSpecSet(next)
+	var removed []string
+	for _, spec := range prev {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		if _, ok := nextSet[spec]; ok {
+			continue
+		}
+		removed = append(removed, spec)
+	}
+	for _, spec := range removed {
+		if path := existingJarFile(spec, configBase); path != "" {
+			if err := unloadBridgeJar(path); err != nil {
+				log.Printf("jar 卸载失败 %s: %v", path, err)
+			}
+		}
+	}
+	dropRemovedJarSpiders(removed, prevRoot, nextSet)
+	releaseConfigScripts()
+	nextRoot = strings.TrimSpace(nextRoot)
+	if nextRoot == "" {
+		return nil
+	}
+	return LoadJar(nextRoot, configBase)
+}
+
+func jarSpecSet(specs []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		out[spec] = struct{}{}
+	}
+	return out
+}
+
+func dropRemovedJarSpiders(removed []string, prevRoot string, nextSet map[string]struct{}) {
+	gone := jarSpecSet(removed)
+	_, rootKept := nextSet[strings.TrimSpace(prevRoot)]
+	uid := hostclient.RuntimeUserID()
+	prefix := uid + "\x01"
+	jarMu.Lock()
+	for k, s := range jarSpiders {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		j := strings.TrimSpace(s.jar)
+		if j == "" {
+			if !rootKept && strings.TrimSpace(prevRoot) != "" {
+				delete(jarSpiders, k)
+			}
+			continue
+		}
+		if _, ok := gone[j]; ok {
+			delete(jarSpiders, k)
+		}
+	}
+	jarMu.Unlock()
+}
+
+func releaseConfigScripts() {
 	clearJSMemoryCaches()
-	uid := strings.TrimSpace(hostclient.RuntimeUserID())
-	if uid != "" {
+	if uid := strings.TrimSpace(hostclient.RuntimeUserID()); uid != "" {
 		DestroyUserScripts(uid)
-		clearJarForUser(uid)
-	} else {
-		clearSharedJsPy()
-		clearSharedJarSpiders()
+		return
 	}
-	bumpJarRefreshGen()
-	req := bridgeRequest{Method: "clear"}
-	if payload, err := json.Marshal(req); err == nil {
-		_, _ = callJavaBridge(payload)
+	clearSharedJsPy()
+}
+
+// existingJarFile 只查已经落在磁盘上的 jar，不下载。
+func existingJarFile(spec, configBase string) string {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return ""
 	}
+	if strings.HasPrefix(spec, "assets://") {
+		spec = fmt.Sprintf("http://127.0.0.1:%d/%s", localproxy.Port(), strings.TrimPrefix(spec, "assets://"))
+	}
+	path, _ := util.SplitJarSpec(spec)
+	base := strings.TrimSpace(configBase)
+	if base == "" {
+		base = ConfigBase()
+	}
+	downloadURL := path
+	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") && !strings.HasPrefix(strings.ToLower(path), "file:") {
+		downloadURL = util.ResolveJarURL(base, spec)
+	}
+	downloadURL = normalizeLocalJarURL(downloadURL, base)
+	if downloadURL == "" {
+		return ""
+	}
+	if localPath, ok := localFilePath(downloadURL); ok {
+		if fileExistsNonEmpty(localPath) {
+			return localPath
+		}
+		return ""
+	}
+	dest := paths.JarPath(util.MD5(downloadURL))
+	if fileExistsNonEmpty(dest) {
+		return dest
+	}
+	return ""
 }
 
 func clearJar() {
@@ -835,10 +927,20 @@ func JsParse(jar, op, html, rule, url, texts, urls string) (value string, list [
 	return resp.Value, resp.List, nil
 }
 
+func unloadBridgeJar(jarPath string) error {
+	parseJarNotified.Delete(jarPath)
+	return callBridgeJar("unloadJar", jarPath)
+}
+
 // reloadBridgeJar 磁盘包刷新后让 bridge 丢弃该 jar 的旧 ClassLoader+爬虫并重载。
 func reloadBridgeJar(jarPath string) error {
+	parseJarNotified.Delete(jarPath)
+	return callBridgeJar("reloadJar", jarPath)
+}
+
+func callBridgeJar(method, jarPath string) error {
 	req := bridgeRequest{
-		Method: "reloadJar",
+		Method: method,
 		Jar:    jarPath,
 	}
 	fillBridgeClient(&req)
