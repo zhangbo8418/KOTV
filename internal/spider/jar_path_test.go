@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/bobo/KOTV/internal/hostclient"
@@ -64,5 +65,68 @@ func TestJarRecentSkipWhileBridgeAlive(t *testing.T) {
 	rememberJarRecent("/u.jar")
 	if !jarRecentCanSkip("/u.jar") {
 		t.Fatal("该用户自己的 recent 应跳过")
+	}
+}
+
+func TestParseJarFailureRetriesNextTime(t *testing.T) {
+	const path = "/retry.jar"
+	calls := 0
+	prev := callParseJar
+	callParseJar = func([]byte) error {
+		calls++
+		if calls == 1 {
+			return errors.New("down")
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		callParseJar = prev
+		parseJarNotified.Delete(jarRunKey(path))
+		parseJarFlights.Delete(jarRunKey(path))
+	})
+	if err := notifyParseJar(path, false); err == nil {
+		t.Fatal("第一次应失败")
+	}
+	if _, ok := parseJarNotified.Load(jarRunKey(path)); ok {
+		t.Fatal("失败不应记成已加载")
+	}
+	if err := notifyParseJar(path, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := parseJarNotified.Load(jarRunKey(path)); !ok {
+		t.Fatal("成功后应记上")
+	}
+	if err := notifyParseJar(path, false); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("成功后不应再请求，calls=%d", calls)
+	}
+}
+
+func TestParseJarNotifiedSeparateByUser(t *testing.T) {
+	const path = "/shared.jar"
+	calls := 0
+	prev := callParseJar
+	callParseJar = func([]byte) error {
+		calls++
+		return nil
+	}
+	t.Cleanup(func() {
+		callParseJar = prev
+		parseJarNotified.Delete("\x01" + path)
+	})
+	if err := notifyParseJar(path, false); err != nil {
+		t.Fatal(err)
+	}
+	leave := hostclient.EnterSession("c-parse", "other-parse", true)
+	defer leave()
+	other := jarRunKey(path)
+	t.Cleanup(func() { parseJarNotified.Delete(other) })
+	if err := notifyParseJar(path, false); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("另一台 JVM 不应跳过，calls=%d", calls)
 	}
 }
