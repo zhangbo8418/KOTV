@@ -233,18 +233,18 @@ func (s *pySpider) ensureScript() (string, error) {
 		return api, nil
 	}
 	dest := filepath.Join(paths.PyCache(), util.MD5(s.api)+".py")
-	// http(s) 主脚本每次覆盖写入（Chaquopy download/writeFile）；失败沿用旧文件。
 	if strings.HasPrefix(api, "http://") || strings.HasPrefix(api, "https://") {
-		data, err := util.HTTPGetInsecure(s.api, nil)
-		if err == nil {
-			if werr := os.WriteFile(dest, []byte(data), 0o644); werr == nil {
-				s.scriptPath = dest
-				return dest, nil
+		err := doOnce("py:"+dest, func() error {
+			data, err := util.HTTPGetInsecure(api, nil)
+			if err != nil {
+				return err
 			}
-		} else {
+			return writeFileAtomic(dest, []byte(data))
+		})
+		if err != nil {
 			log.Printf("py script refresh failed (%s): %v", s.api, err)
 		}
-		if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
+		if st, statErr := os.Stat(dest); statErr == nil && st.Size() > 0 {
 			s.scriptPath = dest
 			return dest, nil
 		}
@@ -252,7 +252,9 @@ func (s *pySpider) ensureScript() (string, error) {
 	}
 	// api 本身就是 Python 源码（非 URL、非本地路径）：写入缓存后加载。
 	if isInlinePySource(api) {
-		if err := os.WriteFile(dest, []byte(s.api), 0o644); err != nil {
+		if err := doOnce("py:"+dest, func() error {
+			return writeFileAtomic(dest, []byte(s.api))
+		}); err != nil {
 			return "", err
 		}
 		s.scriptPath = dest
@@ -262,15 +264,29 @@ func (s *pySpider) ensureScript() (string, error) {
 		s.scriptPath = dest
 		return dest, nil
 	}
-	data, err := util.HTTPGetInsecure(s.api, nil)
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(dest, []byte(data), 0o644); err != nil {
+	if err := doOnce("py:"+dest, func() error {
+		data, err := util.HTTPGetInsecure(s.api, nil)
+		if err != nil {
+			return err
+		}
+		return writeFileAtomic(dest, []byte(data))
+	}); err != nil {
+		if st, statErr := os.Stat(dest); statErr == nil && st.Size() > 0 {
+			s.scriptPath = dest
+			return dest, nil
+		}
 		return "", err
 	}
 	s.scriptPath = dest
 	return dest, nil
+}
+
+func writeFileAtomic(dest string, data []byte) error {
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dest)
 }
 
 // isInlinePySource 判断 api 是否为内联源码：不带协议、不是路径，且含换行或语句特征。

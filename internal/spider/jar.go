@@ -461,6 +461,12 @@ func localFilePath(rawURL string) (string, bool) {
 }
 
 func downloadBinary(rawURL, dest string) error {
+	return doOnce("jar:"+dest, func() error {
+		return writeJarFile(rawURL, dest)
+	})
+}
+
+func writeJarFile(rawURL, dest string) error {
 	var (
 		b   []byte
 		err error

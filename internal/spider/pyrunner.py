@@ -5,6 +5,7 @@ import os
 import re
 import ssl
 import sys
+import time
 import traceback
 
 
@@ -326,6 +327,9 @@ def _download_dep(name):
     dep_url = urljoin(api, os.path.basename(name))
     if not str(dep_url).startswith("http"):
         return
+    lock = _acquire_download(target + ".lock")
+    if lock is None:
+        return
     try:
         ctx = ssl._create_unverified_context()
         with urlopen(dep_url, timeout=30, context=ctx) as response:
@@ -333,10 +337,45 @@ def _download_dep(name):
         if not _looks_like_python_source(data):
             print("[pyrunner] skip non-python dep %s from %s" % (name, dep_url), file=sys.stderr)
             return
-        with open(target, "wb") as output:
+        tmp = target + ".tmp"
+        with open(tmp, "wb") as output:
             output.write(data)
+        os.replace(tmp, target)
     except Exception as exc:
         print("[pyrunner] download %s failed: %s" % (name, exc), file=sys.stderr)
+    finally:
+        _release_download(lock, target + ".lock")
+
+
+def _acquire_download(lock_path):
+    """拿到锁则由本进程下载。别人正在下时等到结束并返回 None，不再另下。"""
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        try:
+            return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+        except FileExistsError:
+            time.sleep(0.05)
+            if not os.path.exists(lock_path):
+                return None
+    try:
+        os.remove(lock_path)
+    except OSError:
+        pass
+    try:
+        return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+    except FileExistsError:
+        return None
+
+
+def _release_download(fd, lock_path):
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    try:
+        os.remove(lock_path)
+    except OSError:
+        pass
 
 
 def _preload_imports_from_source():

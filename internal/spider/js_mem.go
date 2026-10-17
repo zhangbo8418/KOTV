@@ -105,6 +105,18 @@ func moduleFetch(name string) string {
 	if cached, ok := jsMemGet(name); ok && cached != "" {
 		return cached
 	}
+	_ = doOnce("js:"+name, func() error {
+		if cached, ok := jsMemGet(name); ok && cached != "" {
+			return nil
+		}
+		moduleFetchStore(name)
+		return nil
+	})
+	cached, _ := jsMemGet(name)
+	return cached
+}
+
+func moduleFetchStore(name string) {
 	start := time.Now()
 	var content string
 	var via string
@@ -172,7 +184,6 @@ func moduleFetch(name string) string {
 	} else {
 		jsLog("[js-mod] miss name=%s cost=%s", name, time.Since(start).Truncate(time.Millisecond))
 	}
-	return content
 }
 
 func toLibAssetPath(name string) string {
