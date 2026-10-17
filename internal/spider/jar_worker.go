@@ -47,6 +47,9 @@ type javaBridgeClient struct {
 
 var javaBridge javaBridgeClient
 
+// Android SpiderService 最近一次 /jar/call 是否成功。失败后下次进详情重新 parseJar。
+var androidJarReachable atomic.Bool
+
 // 远端已登录用户：每人独立 JVM；空 userId 走共享 javaBridge（本机）。
 var (
 	userBridgesMu sync.Mutex
@@ -79,6 +82,7 @@ func KillUserRuntime(userID string) {
 	if userID == "" {
 		return
 	}
+	forgetJarRecent(userID)
 	DestroyUserScripts(userID)
 	clearJarForUser(userID)
 	userBridgesMu.Lock()
@@ -314,6 +318,7 @@ func InterruptJavaBridgeForClient(clientID string) {
 
 // RestartSharedRuntime 硬重启本机共享 JVM/Py/JS（不动远端各用户独立运行时，不删脚本磁盘缓存）。
 func RestartSharedRuntime() {
+	forgetJarRecent("")
 	cancelJarCalls("")
 	// 只软取消 + 杀掉共享 bridge，绝不碰 userBridges。
 	softCancelSharedBridgeOnly()
@@ -765,7 +770,14 @@ func androidPostJar(payload []byte, timeout time.Duration) (string, error) {
 }
 
 func androidPostJarCtx(ctx context.Context, payload []byte) (string, error) {
-	return postJarPathCtx(ctx, localproxy.DefaultBridgeBaseURL(), "/jar/call", payload)
+	out, err := postJarPathCtx(ctx, localproxy.DefaultBridgeBaseURL(), "/jar/call", payload)
+	if err != nil {
+		androidJarReachable.Store(false)
+		forgetJarRecent(hostclient.RuntimeUserID())
+		return "", err
+	}
+	androidJarReachable.Store(true)
+	return out, nil
 }
 
 func postJarPath(base, path string, payload []byte, timeout time.Duration) error {

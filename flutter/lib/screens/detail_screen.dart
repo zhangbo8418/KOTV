@@ -1301,6 +1301,93 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     super.dispose();
   }
 
+  void _applyDetailSettings(Map<String, dynamic> settings) {
+    final decode = '${settings['playerDecode'] ?? 'auto'}';
+    if (decode.isNotEmpty) {
+      _decodeMode = decode;
+      _prefDecodeMode = decode;
+    }
+    _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
+    _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+    _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
+    _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
+    final mk = _mk;
+    if (mk is NativeMpvPlayback) {
+      unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+    } else if (mk is MediaKitPlayback) {
+      unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
+    }
+    _exo?.applyPlayerOptions(settings);
+    _fvp?.applyPlayerOptions(settings);
+    final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
+    final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
+    final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
+    final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
+    final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
+    final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
+    final subBg = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
+    final styleMode = '${settings['subtitleStyleMode'] ?? 'original'}'.trim().toLowerCase();
+    final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
+    final forceStyle = styleMode == 'custom';
+    final useSystem = styleMode == 'system';
+    final double textOp = (double.tryParse('${settings['subtitleTextOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+    final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+    final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
+    final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
+    final shadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
+    final subFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
+    final subFontPath = '${settings['subtitleFontPath'] ?? ''}'.trim();
+    unawaited(_playback.setSubtitleStyle(
+      scale: fontScale,
+      pos: subPos.clamp(-20, 30),
+      secondaryPos: subSecPos.clamp(0, 150),
+      color: forceStyle && subColor.isNotEmpty ? subColor : null,
+      borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
+      borderSize: forceStyle ? subBorderSize.clamp(0, 8).toDouble() : null,
+      bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
+      edgeType: forceStyle ? edgeType : null,
+      useSystemStyle: useSystem,
+      textOpacity: forceStyle || useSystem ? textOp : null,
+      bgOpacity: forceStyle || useSystem ? bgOp : null,
+      edgeOpacity: forceStyle || useSystem ? edgeOp : null,
+      shadowStrength: forceStyle || useSystem ? shadowStrength : null,
+      font: forceStyle || useSystem ? subFont : null,
+      fontPath: forceStyle || useSystem ? (subFontPath.isEmpty ? null : subFontPath) : null,
+      forceStyle: forceStyle,
+    ));
+    unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
+    final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
+    _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
+    _holdSpeed = (double.tryParse('${settings['playerSpeedLongPress'] ?? '2.0'}') ?? 2.0).clamp(2.0, 5.0).toDouble();
+    _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
+    _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
+    _syncAndroidAutoPip();
+    _applyDanmakuPrefsFromSettings(settings, applyOffset: true);
+    final scale = '${settings['playerScale'] ?? 'default'}';
+    _aspect = _aspectFromScale(scale);
+    unawaited(_playback.setVideoScale(_aspect.key));
+    var playerVal = '${settings['player'] ?? kotvDefaultVodPlayer()}'.trim();
+    if (playerVal.isEmpty) {
+      playerVal = kotvDefaultVodPlayer();
+    }
+    _playerVal = kotvClampPlayerVal(playerVal, live: false);
+    _prefPlayerVal = _playerVal;
+    final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
+    _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
+    _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
+    final skipRaw = '${settings['playerSkipOpeningEnding'] ?? 'true'}'.toLowerCase();
+    _skipOpeningEnding = skipRaw != 'false' && skipRaw != '0' && skipRaw != 'off';
+    _prefVolume = _normalizePlayerVolumePref(settings['playerVolume']);
+    if (_prefVolume == 80) {
+      final rawVol = double.tryParse('${settings['playerVolume'] ?? ''}');
+      if (rawVol != null && rawVol <= 0) {
+        unawaited(KotvSettingsCache.set(ref.read(apiProvider), 'playerVolume', '80'));
+      }
+    }
+    kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
+    unawaited(KotvBufferBudget.warm());
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -1334,13 +1421,34 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _detailExpand = data['expand'] == true;
       final id = vod.id.isNotEmpty ? vod.id : _routeId;
       final site = vod.site.isNotEmpty ? vod.site : _routeSite;
-      var configSource = '';
-      try {
-        final cfg = await ref.read(apiProvider).getConfig();
-        configSource = '${cfg['source'] ?? ''}'.trim();
-      } catch (_) {}
+      final entry = _routeTitle.trim();
+      final apiName = vod.name.trim();
+      final displayName = apiName.isNotEmpty ? apiName : entry;
+      final named = displayName.isNotEmpty && displayName != apiName
+          ? vod.withMeta(name: displayName)
+          : vod;
+      final cachedSettings = KotvSettingsCache.peek();
+      if (cachedSettings.isNotEmpty) {
+        _applyDetailSettings(cachedSettings);
+      }
+      if (!mounted) return;
+      setState(() {
+        _detail = named;
+        if (displayName.isNotEmpty) _routeTitle = displayName;
+        _loading = false;
+      });
+      var configSource = _configSource;
+      final cachedCfg = ref.read(configProvider).valueOrNull;
+      if (cachedCfg != null) {
+        configSource = '${cachedCfg['source'] ?? ''}'.trim();
+      } else {
+        try {
+          final cfg = await ref.read(apiProvider).getConfig();
+          configSource = '${cfg['source'] ?? ''}'.trim();
+        } catch (_) {}
+      }
+      if (!mounted) return;
       _configSource = configSource;
-      // 入口 id ≠ 详情 id：迁移收藏/历史键，避免双份与 play 键分裂。
       if (vod.id.isNotEmpty && _routeId.isNotEmpty && vod.id != _routeId) {
         await LocalCollect.replaceId(
           site: site,
@@ -1350,13 +1458,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         );
         await LocalHistory.replaceId(site: site, oldId: _routeId, newId: vod.id);
       }
-      // 空名才用入口标题补全；有名则保留详情结果。
-      final entry = _routeTitle.trim();
-      final apiName = vod.name.trim();
-      final displayName = apiName.isNotEmpty ? apiName : entry;
-      final named = displayName.isNotEmpty && displayName != apiName
-          ? vod.withMeta(name: displayName)
-          : vod;
       await LocalCollect.updateMeta(
         id: id,
         site: site,
@@ -1368,101 +1469,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       );
       final kept = await LocalCollect.isKept(id, site, configSource: configSource);
       final rev = await LocalRevSort.get(id, site);
-      try {
-        final settings = await KotvSettingsCache.fetch(ref.read(apiProvider), force: true);
-        final decode = '${settings['playerDecode'] ?? 'auto'}';
-        if (decode.isNotEmpty) {
-          _decodeMode = decode;
-          _prefDecodeMode = decode;
-        }
-        _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
-        _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
-        _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode'] ?? 'false', def: false);
-        _exoDiskCache = kotvSettingsFlag(settings['exoDiskCache'] ?? 'false', def: false);
-        final mk = _mk;
-        if (mk is NativeMpvPlayback) {
-          unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
-        } else if (mk is MediaKitPlayback) {
-          unawaited(mk.applyOpts(_mpvOpts.copyWith(decodeMode: _decodeMode)));
-        }
-        _exo?.applyPlayerOptions(settings);
-        _fvp?.applyPlayerOptions(settings);
-        final fontScale = (double.tryParse('${settings['subtitleFontScale'] ?? '1.0'}') ?? 1.0).clamp(0.5, 2.0);
-        final subPos = kotvSubtitlePosFromSettings(settings['subtitlePos']);
-        final subSecPos = double.tryParse('${settings['subtitleSecondaryPos'] ?? '10'}') ?? 10.0;
-        final subColor = '${settings['subtitleColor'] ?? '#FFFFFF'}'.trim();
-        final subBorder = '${settings['subtitleBorderColor'] ?? '#000000'}'.trim();
-        final subBorderSize = double.tryParse('${settings['subtitleBorderSize'] ?? '2'}') ?? 2.0;
-        final subBg = '${settings['subtitleBgColor'] ?? '#00000000'}'.trim();
-        final styleMode = '${settings['subtitleStyleMode'] ?? 'original'}'.trim().toLowerCase();
-        final edgeType = '${settings['subtitleEdgeType'] ?? 'outline'}'.trim().toLowerCase();
-        final forceStyle = styleMode == 'custom';
-        final useSystem = styleMode == 'system';
-        final double textOp = (double.tryParse('${settings['subtitleTextOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
-        final double bgOp = (double.tryParse('${settings['subtitleBgOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
-        final double edgeOp = (double.tryParse('${settings['subtitleEdgeOpacity'] ?? '100'}') ?? 100.0).clamp(0.0, 100.0);
-        final subOffset = int.tryParse('${settings['subtitleOffsetMs'] ?? '0'}') ?? 0;
-        final shadowStrength = kotvSubtitleShadowStrength('${settings['subtitleShadowStrength'] ?? '50'}');
-        final subFont = kotvNormalizeSubtitleFont('${settings['subtitleFont'] ?? 'default'}');
-        final subFontPath = '${settings['subtitleFontPath'] ?? ''}'.trim();
-        unawaited(_playback.setSubtitleStyle(
-          scale: fontScale,
-          pos: subPos.clamp(-20, 30),
-          secondaryPos: subSecPos.clamp(0, 150),
-          color: forceStyle && subColor.isNotEmpty ? subColor : null,
-          borderColor: forceStyle && subBorder.isNotEmpty ? subBorder : null,
-          borderSize: forceStyle ? subBorderSize.clamp(0, 8).toDouble() : null,
-          bgColor: forceStyle && subBg.isNotEmpty ? subBg : null,
-          edgeType: forceStyle ? edgeType : null,
-          useSystemStyle: useSystem,
-          textOpacity: forceStyle || useSystem ? textOp : null,
-          bgOpacity: forceStyle || useSystem ? bgOp : null,
-          edgeOpacity: forceStyle || useSystem ? edgeOp : null,
-          shadowStrength: forceStyle || useSystem ? shadowStrength : null,
-          font: forceStyle || useSystem ? subFont : null,
-          fontPath: forceStyle || useSystem ? (subFontPath.isEmpty ? null : subFontPath) : null,
-          forceStyle: forceStyle,
-        ));
-        unawaited(_playback.setSubtitleOffsetMs(subOffset.clamp(-300000, 300000)));
-        final bg = '${settings['playerBackground'] ?? 'pip'}'.trim().toLowerCase();
-        _playerBackground = (bg == 'off' || bg == 'audio' || bg == 'pip') ? bg : 'pip';
-        _holdSpeed = (double.tryParse('${settings['playerSpeedLongPress'] ?? '2.0'}') ?? 2.0).clamp(2.0, 5.0).toDouble();
-        _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
-        _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
-        _syncAndroidAutoPip();
-        _applyDanmakuPrefsFromSettings(settings, applyOffset: true);
-        final scale = '${settings['playerScale'] ?? 'default'}';
-        _aspect = _aspectFromScale(scale);
-        unawaited(_playback.setVideoScale(_aspect.key));
-        var playerVal = '${settings['player'] ?? kotvDefaultVodPlayer()}'.trim();
-        if (playerVal.isEmpty) {
-          playerVal = kotvDefaultVodPlayer();
-        }
-        _playerVal = kotvClampPlayerVal(playerVal, live: false);
-        _prefPlayerVal = _playerVal;
-        final failoverMode = '${settings['playerFailover'] ?? 'auto'}'.trim().toLowerCase();
-        _prefPlayerFailover = (failoverMode == 'off' || failoverMode == 'false') ? 'off' : 'auto';
-        // 绝不在进详情时创建原生播放器：初始化会卡死 UI / 手机闪退。
-        // 音量/倍速等偏好先记下，真正 [_playAt] open 后再套。
-        _prefSpeed = double.tryParse('${settings['playerSpeed'] ?? ''}');
-        final skipRaw = '${settings['playerSkipOpeningEnding'] ?? 'true'}'.toLowerCase();
-        _skipOpeningEnding = skipRaw != 'false' && skipRaw != '0' && skipRaw != 'off';
-        _prefVolume = _normalizePlayerVolumePref(settings['playerVolume']);
-        if (_prefVolume == 80) {
-          final rawVol = double.tryParse('${settings['playerVolume'] ?? ''}');
-          if (rawVol != null && rawVol <= 0) {
-            unawaited(KotvSettingsCache.set(ref.read(apiProvider), 'playerVolume', '80'));
-          }
-        }
-        kotvApplyPlayUaSetting('${settings['ua'] ?? ''}');
-        unawaited(KotvBufferBudget.warm());
-      } catch (_) {}
+      if (!mounted) return;
+      if (KotvSettingsCache.peek().isEmpty) {
+        try {
+          final settings = await KotvSettingsCache.fetch(ref.read(apiProvider));
+          if (mounted && settings.isNotEmpty) _applyDetailSettings(settings);
+        } catch (_) {}
+      }
+      if (!mounted) return;
       setState(() {
-        _detail = named;
-        if (displayName.isNotEmpty) _routeTitle = displayName;
         _kept = kept;
         _reversed = rev;
-        _loading = false;
       });
       final off = await LocalPlayOffsets.get(id, site);
       if (mounted) {

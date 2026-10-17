@@ -496,8 +496,7 @@ public class SpiderBridge {
             String spiderMethod = method;
             try {
             Spider spider = getSpider(key, api, ext, jar);
-                // recent 只由 parseJar(recent=true)/setRecent/Site.recent 更新，
-            // 不在每次 spider 方法调用时覆盖（避免并行多 jar 时 Mix/Json 抖 recent）。
+                adoptRecentIfEmpty(jar);
                 return nonempty(invoke(spider, spiderMethod, argsObj, jar));
         } catch (Throwable t) {
             t.printStackTrace(System.err);
@@ -646,6 +645,13 @@ public class SpiderBridge {
                 e.printStackTrace(System.err);
                 throw e;
             }
+    }
+
+    /** recent 为空且该 jar 已装入时记上，进程重启后的第一次调用仍能给 proxy 用。已有 recent 不覆盖。 */
+    private static void adoptRecentIfEmpty(String jarPath) {
+        if (jarPath == null || jarPath.isEmpty()) return;
+        if (recentJar != null && !recentJar.isEmpty()) return;
+        if (loaders.containsKey(jarPath)) recentJar = jarPath;
     }
 
     /** {@code csp_Nostr} → {@code com.github.catvod.spider.Nostr}，按 {@code api.split("csp_")[1]} 取类名。 */

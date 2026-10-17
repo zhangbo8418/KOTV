@@ -64,6 +64,7 @@ var (
 	parseJarNotified sync.Map // dest -> struct{}
 	// 同 dest 进行中的 parseJar：并发 EnsureJar 等待完成，避免未加载完就调爬虫。
 	parseJarFlights sync.Map // dest -> *parseJarFlight
+	jarRecentByUser sync.Map // RuntimeUserID -> 已设为 recent 的本地路径
 	// 卸载时加一。更早发出的加载请求晚到也不再装。
 	jarWireGen atomic.Uint64
 	// 清缓存重载：LoadJar 同步 parseJar，避免首页先拉站时 ClassLoader 未就绪。
@@ -180,6 +181,7 @@ func dropJarSpiders(prefix string, all bool) {
 }
 
 func sendBridgeClear() {
+	forgetJarRecent(hostclient.RuntimeUserID())
 	jarWireGen.Add(1)
 	req := bridgeRequest{Method: "clear"}
 	fillBridgeClient(&req)
@@ -207,6 +209,7 @@ func bumpJarRefreshGen() {
 		parseJarFlights.Delete(k)
 		return true
 	})
+	forgetAllJarRecent()
 }
 
 type parseJarFlight struct {
@@ -252,28 +255,88 @@ func ConfigBase() string {
 
 func setRecentJar(jarSpec string) {
 	jarSpec = strings.TrimSpace(jarSpec)
+	var dest string
 	if jarSpec == "" {
-		jp := currentJarPath()
-		if jp == "" {
+		dest = currentJarPath()
+		if dest == "" {
 			return
 		}
-		notifyParseJar(jp, true)
+	} else {
+		var err error
+		dest, err = cacheJar(jarSpec, "", false)
+		if err != nil || dest == "" {
+			return
+		}
+	}
+	if jarRecentCanSkip(dest) {
 		return
 	}
-	dest, err := cacheJar(jarSpec, "", false)
-	if err != nil {
+	if err := notifyParseJar(dest, true); err != nil {
+		forgetJarRecent(hostclient.RuntimeUserID())
 		return
 	}
-	notifyParseJar(dest, true)
+	rememberJarRecent(dest)
+}
+
+func rememberJarRecent(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	jarRecentByUser.Store(hostclient.RuntimeUserID(), path)
+}
+
+func forgetJarRecent(userID string) {
+	jarRecentByUser.Delete(strings.TrimSpace(userID))
+}
+
+func dropJarRecent(path string) {
+	uid := hostclient.RuntimeUserID()
+	if cur, _ := jarRecentByUser.Load(uid); cur == path {
+		forgetJarRecent(uid)
+	}
+}
+
+func forgetAllJarRecent() {
+	jarRecentByUser.Range(func(k, _ any) bool {
+		jarRecentByUser.Delete(k)
+		return true
+	})
+}
+
+func jarRecentCanSkip(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	v, ok := jarRecentByUser.Load(hostclient.RuntimeUserID())
+	if !ok {
+		return false
+	}
+	cur, _ := v.(string)
+	if cur != path {
+		return false
+	}
+	return bridgeAliveForRecent()
+}
+
+var bridgeAliveForRecent = func() bool {
+	if runtime.GOOS == "android" {
+		return androidJarReachable.Load()
+	}
+	b := bridgeForCurrent()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.aliveLocked()
 }
 
 const parseJarBridgeTimeout = javaBridgeCallTimeout
 
 // notifyParseJar parseJar(jar, recent)：真加载 ClassLoader+Init+Proxy，可选设 recent。
-func notifyParseJar(jarPath string, recent bool) {
+func notifyParseJar(jarPath string, recent bool) error {
 	jarPath = strings.TrimSpace(jarPath)
 	if jarPath == "" {
-		return
+		return nil
 	}
 	// recent=false（EnsureJar）：同 dest 只真正 parse 一次；进行中则等待，已完成则跳过。
 	// recent=true（LoadJar）：换源须设 recent，仍通知；若同 dest 进行中则先等完再跑。
@@ -282,10 +345,10 @@ func notifyParseJar(jarPath string, recent bool) {
 	if !recent {
 		if f, ok := parseJarFlights.Load(jarPath); ok {
 			<-f.(*parseJarFlight).done
-			return
+			return nil
 		}
 		if _, done := parseJarNotified.Load(jarPath); done {
-			return
+			return nil
 		}
 	}
 
@@ -294,7 +357,7 @@ func notifyParseJar(jarPath string, recent bool) {
 		existing := actual.(*parseJarFlight)
 		<-existing.done
 		if !recent {
-			return
+			return nil
 		}
 		flight = &parseJarFlight{done: make(chan struct{})}
 		parseJarFlights.Store(jarPath, flight)
@@ -316,17 +379,18 @@ func notifyParseJar(jarPath string, recent bool) {
 	fillBridgeClient(&req)
 	req.JarGen = gen
 	payload, _ := json.Marshal(req)
-	callParseJarBridge(payload)
+	return callParseJarBridge(payload)
 }
 
-func callParseJarBridge(payload []byte) {
+func callParseJarBridge(payload []byte) error {
 	ctx, cancel := context.WithTimeout(context.Background(), parseJarBridgeTimeout)
 	defer cancel()
 	if runtime.GOOS == "android" {
 		if _, err := androidPostJarCtx(ctx, payload); err != nil {
 			log.Printf("parseJar bridge: %v", err)
+			return err
 		}
-		return
+		return nil
 	}
 	cid := hostclient.ScopeID()
 	ctx2, end := beginJarCall(cid)
@@ -335,11 +399,23 @@ func callParseJarBridge(payload []byte) {
 	defer cancel2()
 	if _, err := bridgeForCurrent().callCtx(ctx2, payload); err != nil {
 		log.Printf("parseJar bridge: %v", err)
+		return err
 	}
+	return nil
 }
 
 func notifyParseJarAsync(jarPath string, recent bool) {
-	go notifyParseJar(jarPath, recent)
+	cid := hostclient.Current()
+	uid := hostclient.CurrentUserID()
+	ded := hostclient.DedicatedRuntime()
+	go func() {
+		done := hostclient.EnterSession(cid, uid, ded)
+		defer done()
+		if err := notifyParseJar(jarPath, recent); err != nil || !recent {
+			return
+		}
+		rememberJarRecent(jarPath)
+	}()
 }
 
 // EnsureJar JarLoader.dex：下载并 parseJar，不改 recent（供 JS 站挂 Function 用）。
@@ -380,7 +456,9 @@ func LoadJar(spec string, configBaseArg ...string) error {
 	// VodConfig.parseJar(spider, true)：ClassLoader+Init+Proxy 后设为 recent。
 	// 换源默认不阻塞 HTTP（Init 可能在 WebView 配置页卡住）；清缓存路径 WithSyncLoadJar 同步。
 	if forceSyncParseJar.Load() {
-		notifyParseJar(dest, true)
+		if err := notifyParseJar(dest, true); err == nil {
+			rememberJarRecent(dest)
+		}
 	} else {
 		notifyParseJarAsync(dest, true)
 	}
@@ -590,7 +668,6 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	oldSum := ""
 	if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
 		hadCache = true
-		oldSum = fileMD5(dest)
 		if expectMD5 == "" {
 			// 无 md5：仅本世代首次强制刷新（LoadJar/clear 后）；同世代业务 call 直接用磁盘包。
 			if v, ok := jarNoMD5Refreshed.Load(downloadURL); ok {
@@ -598,6 +675,9 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 					return dest, nil
 				}
 			}
+		}
+		oldSum = fileMD5(dest)
+		if expectMD5 == "" {
 			if err := downloadBinary(downloadURL, dest); err != nil {
 				log.Printf("spider.jar 刷新失败，沿用旧缓存 (%s): %v", downloadURL, err)
 			} else if newSum := fileMD5(dest); newSum != oldSum {
@@ -917,6 +997,7 @@ func JsParse(jar, op, html, rule, url, texts, urls string) (value string, list [
 
 func unloadBridgeJar(jarPath string) error {
 	parseJarNotified.Delete(jarPath)
+	dropJarRecent(jarPath)
 	jarWireGen.Add(1)
 	return callBridgeJar(jarPath, "unloadJar", jarWireGen.Load())
 }
@@ -924,6 +1005,7 @@ func unloadBridgeJar(jarPath string) error {
 // reloadBridgeJar 磁盘包刷新后让 bridge 丢弃该 jar 的旧 ClassLoader+爬虫并重载。
 func reloadBridgeJar(jarPath string, gen uint64) error {
 	parseJarNotified.Delete(jarPath)
+	dropJarRecent(jarPath)
 	return callBridgeJar(jarPath, "reloadJar", gen)
 }
 
