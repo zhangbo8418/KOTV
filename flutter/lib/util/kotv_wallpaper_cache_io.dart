@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/painting.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -69,15 +68,6 @@ Future<Uint8List?> kotvReadWallpaperBytes(String url) {
     if (!_looksLikeImage(bytes)) return null;
     return bytes;
   });
-}
-
-/// 若磁盘已有该 URL 的壁纸，返回 [FileImage]。
-ImageProvider? kotvWallpaperDiskImage(String url) {
-  final u = url.trim();
-  if (u.isEmpty || _cachedPath == null || _cachedUrl != u) return null;
-  final f = File(_cachedPath!);
-  if (!f.existsSync()) return null;
-  return FileImage(f);
 }
 
 /// 冷启动：读上次成功落盘的壁纸。current 被占用时会落在 current.hold。

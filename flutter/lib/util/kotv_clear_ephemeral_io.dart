@@ -81,7 +81,6 @@ Future<int> kotvClearFlutterEphemeral() async {
       final low = name.toLowerCase();
       return low.startsWith('kotv-') ||
           low.startsWith('flutter') ||
-          low == 'kotv-mpv.log' ||
           low.endsWith('.err.log');
     }, protectDataRoot: false);
   } catch (_) {}

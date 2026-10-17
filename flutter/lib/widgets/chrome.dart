@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../player/kotv_platform.dart';
 import '../providers.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
@@ -127,7 +126,6 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
     }
 
     final hasWall = image.startsWith('http://') || image.startsWith('https://');
-    final disk = hasWall ? kotvWallpaperDiskImage(image) : null;
     // 渐变/光晕/压色跟 effectiveLight 走，跟随系统时才会切浅色
     final gradStart = p.gradStart;
     final gradEnd = p.gradEnd;
@@ -154,35 +152,7 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
               builder: (context, constraints) {
                 final dpr = MediaQuery.devicePixelRatioOf(context);
                 final w = (constraints.maxWidth * dpr).round().clamp(1, 1920);
-                // Windows 解码会占着壁纸文件，替换文件时画面会空掉。改成读进内存再画。
-                if (kotvIsWindows()) {
-                  return _WinWallImage(url: image, decodeWidth: w);
-                }
-                // 磁盘命中优先：清 ImageCache 后立刻有图，不等网络。
-                if (disk != null) {
-                  return Image(
-                    image: ResizeImage(disk, width: w),
-                    fit: BoxFit.cover,
-                    filterQuality: FilterQuality.medium,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, __, ___) => KotvNetworkImage(
-                      image,
-                      fit: BoxFit.cover,
-                      filterQuality: FilterQuality.medium,
-                      cacheWidth: w,
-                      gaplessPlayback: true,
-                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                    ),
-                  );
-                }
-                return KotvNetworkImage(
-                  image,
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.medium,
-                  cacheWidth: w,
-                  gaplessPlayback: true,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                );
+                return _WinWallImage(url: image, decodeWidth: w);
               },
             ),
           ),
@@ -251,8 +221,9 @@ class _WinWallImageState extends State<_WinWallImage> {
       fit: StackFit.expand,
       children: [
         net,
-        Image(
-          image: ResizeImage(kotvStillMemoryImage(bytes), width: widget.decodeWidth),
+        KotvFrameImage(
+          bytes: bytes,
+          targetWidth: widget.decodeWidth,
           fit: BoxFit.cover,
           filterQuality: FilterQuality.medium,
           gaplessPlayback: true,

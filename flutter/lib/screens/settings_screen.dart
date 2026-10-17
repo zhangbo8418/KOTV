@@ -810,7 +810,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onTap: () async {
               await _prompt(
                 'MPV 配置（mpv.conf）',
-                '桌面诊断：kotv-log=debug 加深 libmpv 日志；kotv-log=no 关闭。',
+                '',
                 g('mpvConf'),
                 (v) async {
                   final conflicts = KotvMpvOpts.findConfConflicts(v);
@@ -1882,7 +1882,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       } catch (_) {}
     }
     if (mounted) {
-      await kotvClearImageMemory(context: context, ref: ref);
+      await kotvClearImageMemory(ref: ref);
     }
     KotvSettingsCache.clear();
     if (data == null || !mounted) return;
@@ -1916,7 +1916,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.read(apiProvider).baseUrl = launcher.baseUrl;
     KotvSettingsCache.clear();
     if (mounted) {
-      await kotvClearImageMemory(context: context, ref: ref);
+      await kotvClearImageMemory(ref: ref);
     }
     ref.invalidate(engineReadyProvider);
     ref.invalidate(configProvider);

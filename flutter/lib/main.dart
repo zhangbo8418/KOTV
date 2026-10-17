@@ -456,7 +456,7 @@ class _EngineOfflinePage extends ConsumerWidget {
     ref.read(apiProvider).baseUrl = launcher.baseUrl;
     KotvSettingsCache.clear();
     if (context.mounted) {
-      await kotvClearImageMemory(context: context, ref: ref);
+      await kotvClearImageMemory(ref: ref);
     }
     ref.invalidate(engineReadyProvider);
   }

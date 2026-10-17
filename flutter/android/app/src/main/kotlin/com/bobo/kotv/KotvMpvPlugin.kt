@@ -1236,7 +1236,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         value = line.substring(sp.range.last + 1).trim()
       }
       if (key.isEmpty()) continue
-      // `kotv-*` 是应用自用开关（如 kotv-log=debug），不是 mpv 选项。
+      // `kotv-*` 是应用自用开关，不是 mpv 选项。
       if (key.startsWith("kotv-")) continue
       val base = if (key.startsWith("no-")) key.substring(3) else key
       if (MANAGED_CONF_OPTIONS.contains(key) || MANAGED_CONF_OPTIONS.contains(base)) {

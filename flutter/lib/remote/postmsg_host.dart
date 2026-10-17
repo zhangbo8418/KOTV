@@ -808,11 +808,13 @@ class PostMsgHost {
                 ),
                 child: Padding(
                   padding: EdgeInsets.all(pad),
-                  child: Image(
-                    image: kotvStillMemoryImage(img),
+                  child: SizedBox(
                     width: w,
                     height: h,
-                    fit: BoxFit.contain,
+                    child: KotvFrameImage(
+                      bytes: img,
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
               ),

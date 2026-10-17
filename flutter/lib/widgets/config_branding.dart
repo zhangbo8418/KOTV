@@ -28,14 +28,22 @@ class ConfigLogoAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = logoUrl.trim();
     final bg = backgroundColor ?? const Color(0xFF6E29CD);
-    final child = CircleAvatar(
-      radius: radius,
-      backgroundColor: bg,
-      backgroundImage: url.isNotEmpty && _isHttp(url) ? kotvResolvedImageProvider(url) : null,
-      onBackgroundImageError: url.isNotEmpty && _isHttp(url) ? (_, __) {} : null,
-      child: url.isNotEmpty && _isHttp(url)
-          ? null
-          : Icon(fallbackIcon, size: radius * 1.05, color: Colors.white),
+    final icon = Icon(fallbackIcon, size: radius * 1.05, color: Colors.white);
+    final child = ClipOval(
+      child: ColoredBox(
+        color: bg,
+        child: SizedBox(
+          width: radius * 2,
+          height: radius * 2,
+          child: url.isNotEmpty && _isHttp(url)
+              ? KotvNetworkImage(
+                  url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => icon,
+                )
+              : Center(child: icon),
+        ),
+      ),
     );
     if (onTap == null) return child;
     return TvFocus(

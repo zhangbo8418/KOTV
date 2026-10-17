@@ -514,7 +514,7 @@ class KotvMpvOpts {
         value = line.substring(m.end).trim();
       }
       if (key.isEmpty) continue;
-      // `kotv-*` 是应用自用开关（如 kotv-log=debug），不是 mpv 属性。
+      // `kotv-*` 是应用自用开关，不是 mpv 属性。
       if (key.startsWith('kotv-')) continue;
       if (skipManaged) {
         final base = key.startsWith('no-') ? key.substring(3) : key;

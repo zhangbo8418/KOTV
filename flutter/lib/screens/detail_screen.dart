@@ -510,7 +510,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       });
       return _mk!;
     }
-    final player = kotvCreateMpvPlayer(conf: _mpvOpts.conf);
+    final player = kotvCreateMpvPlayer();
     _mkPlayer = player;
     _mk = MediaKitPlayback(player, opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
     _playingSub?.cancel();
@@ -3241,20 +3241,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await kotvLockPortrait();
       } catch (_) {}
     }
-    // 先藏系统栏：锁竖屏后系统 UI 可能被 OS 拉回，后面再补一次。
-    await kotvEnterSystemFullscreen(desktopFs);
-    if (!mounted || _immersiveFullscreen) return;
+    // 先铺开画面，等这一帧画完，再进一次系统全屏。全窗口不调用系统全屏。
     ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
     setState(() {
       _desktopFs = desktopFs;
       _immersiveFullscreen = true;
       _fsSwipeDy.value = 0;
     });
-    // 壳层 SafeArea/底栏撤掉后再补一次沉浸，避免状态栏占位。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_immersiveFullscreen) return;
-      unawaited(kotvEnterSystemFullscreen(_desktopFs));
-    });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_immersiveFullscreen) return;
+    await kotvEnterSystemFullscreen(desktopFs);
   }
 
   /// 全屏返回：弹窗、右侧选集、底栏、退出全屏。同一按键的第二次投递不再往下关一层。

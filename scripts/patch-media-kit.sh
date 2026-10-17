@@ -3,8 +3,7 @@
 #
 # mpv 的 MPV_FORMAT_FLAG 是 int（4 字节），bool_set 取 !!flag；media_kit 只 calloc<Bool>(1)，
 # 高 3 字节是堆上脏数据。Windows（CoTaskMemAlloc）常非零 → play() 写 pause=false 被 mpv
-# 读成 pause=true，表现为「播放中、缓冲在涨、time-pos 不动，点一下暂停才起播」（Win7 实锤，
-# kotv-mpv.log：[dart] play 后紧跟 Set property: pause=true）。macOS/Linux calloc 通常整块清零
+# 读成 pause=true，表现为「播放中、缓冲在涨、time-pos 不动，点一下暂停才起播」。macOS/Linux calloc 通常整块清零
 # 所以不复现。pub.dev 1.2.6 与上游 main 均未修，故在 flutter pub get 之后打补丁。
 #
 # 另外删掉 media_kit 写死的 network-timeout=5。安卓播放器不设这个选项。
