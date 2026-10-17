@@ -365,6 +365,7 @@ class MediaKitPlayback extends KotvPlayback {
     if (_diag) {
       KotvMpvDiag.note('open done (play sent) dart.playing=${player.state.playing}');
       KotvMpvDiag.scheduleOpenSnapshots(player);
+      KotvMpvDiag.startPlayWatch(player);
     }
     // 新媒开始加载后再允许采信尺寸（避免上一集残留宽高）。
     _acceptSize = true;
@@ -410,6 +411,7 @@ class MediaKitPlayback extends KotvPlayback {
     _clearVideoSize();
     _speedBps = 0;
     if (_diag) {
+      KotvMpvDiag.stopPlayWatch();
       KotvMpvDiag.note(reason);
       await KotvMpvDiag.snapshot(player, reason: 'before-$reason');
     }

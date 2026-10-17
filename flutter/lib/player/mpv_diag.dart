@@ -32,6 +32,9 @@ class KotvMpvDiag {
   static final StringBuffer _pending = StringBuffer();
   static Timer? _flushTimer;
   static int _seq = 0;
+  static Timer? _playWatch;
+  static int _playWatchGen = 0;
+  static int _playWatchSec = 0;
 
   /// 从 mpv.conf 风格文本里取 `kotv-log=<level>`；未写则 `info`。
   /// 关闭（`kotv-log=no`）时返回 [MPVLogLevel.error]（media_kit 自身要吃 error）。
@@ -162,6 +165,28 @@ class KotvMpvDiag {
       }
     }
     _write('[snap:$reason] ${parts.join(' ')}');
+  }
+
+  /// 播放期间每 5 秒复用 [snapshot] 写一行。涨完会停在高位，相邻两行的 `rss` / `time-pos` 能对上那一段。
+  /// 同一时刻只留一个计时器；[stopPlayWatch] 或再次开始都会停掉上一个。
+  /// 不读 `demuxer-cache-state`。
+  static void startPlayWatch(Player player) {
+    stopPlayWatch();
+    if (_disabled) return;
+    final gen = _playWatchGen;
+    _playWatch = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (gen != _playWatchGen || _disabled) return;
+      _playWatchSec += 5;
+      unawaited(snapshot(player, reason: 'play+${_playWatchSec}s'));
+    });
+  }
+
+  /// 换集、停止、离开页时停掉播放期取样。
+  static void stopPlayWatch() {
+    _playWatchGen++;
+    _playWatch?.cancel();
+    _playWatch = null;
+    _playWatchSec = 0;
   }
 
   /// open 后按 [delays] 定点快照（起播停滞时能看到 time-pos 是否在动）。
