@@ -25,11 +25,36 @@ import (
 )
 
 var (
-	jarMu      sync.Mutex
-	jarPath    string
-	configBase string // 相对 spider.jar / ./js 等据此解析
-	jarSpiders = map[string]*jarSpider{}
+	jarMu         sync.Mutex
+	jarPathByUser sync.Map // RuntimeUserID -> 根 jar 本地路径；本机键为空
+	configBase    string   // 相对 spider.jar / ./js 等据此解析
+	jarSpiders    = map[string]*jarSpider{}
 )
+
+func currentJarPath() string {
+	v, ok := jarPathByUser.Load(hostclient.RuntimeUserID())
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
+func setCurrentJarPath(path string) {
+	uid := hostclient.RuntimeUserID()
+	if path == "" {
+		jarPathByUser.Delete(uid)
+		return
+	}
+	jarPathByUser.Store(uid, path)
+}
+
+func clearAllJarPaths() {
+	jarPathByUser.Range(func(k, _ any) bool {
+		jarPathByUser.Delete(k)
+		return true
+	})
+}
 
 // 无 md5 jar：仅 LoadJar/clearJar 换世代后首次强制刷新（非每个业务 call）。
 var (
@@ -121,11 +146,7 @@ func rootOverridePath() string {
 func clearRuntimeJars() {
 	uid := hostclient.RuntimeUserID()
 	dropJarSpiders(uid+"\x01", false)
-	if uid == "" {
-		jarMu.Lock()
-		jarPath = ""
-		jarMu.Unlock()
-	}
+	setCurrentJarPath("")
 	sendBridgeClear()
 }
 
@@ -136,8 +157,8 @@ func releaseConfigScripts() {
 
 func clearJar() {
 	dropJarSpiders("", true)
+	clearAllJarPaths()
 	jarMu.Lock()
-	jarPath = ""
 	configBase = ""
 	jarMu.Unlock()
 	bumpJarRefreshGen()
@@ -162,8 +183,13 @@ func sendBridgeClear() {
 	jarWireGen.Add(1)
 	req := bridgeRequest{Method: "clear"}
 	fillBridgeClient(&req)
-	if payload, err := json.Marshal(req); err == nil {
-		_, _ = callJavaBridge(payload)
+	payload, err := json.Marshal(req)
+	if err != nil {
+		log.Printf("jar 卸载失败: %v", err)
+		return
+	}
+	if _, err := callJavaBridge(payload); err != nil {
+		log.Printf("jar 卸载失败: %v", err)
 	}
 }
 
@@ -227,9 +253,7 @@ func ConfigBase() string {
 func setRecentJar(jarSpec string) {
 	jarSpec = strings.TrimSpace(jarSpec)
 	if jarSpec == "" {
-		jarMu.Lock()
-		jp := jarPath
-		jarMu.Unlock()
+		jp := currentJarPath()
 		if jp == "" {
 			return
 		}
@@ -352,9 +376,7 @@ func LoadJar(spec string, configBaseArg ...string) error {
 	if err != nil {
 		return err
 	}
-	jarMu.Lock()
-	jarPath = dest
-	jarMu.Unlock()
+	setCurrentJarPath(dest)
 	// VodConfig.parseJar(spider, true)：ClassLoader+Init+Proxy 后设为 recent。
 	// 换源默认不阻塞 HTTP（Init 可能在 WebView 配置页卡住）；清缓存路径 WithSyncLoadJar 同步。
 	if forceSyncParseJar.Load() {
@@ -497,16 +519,14 @@ func (s *jarSpider) resolveJarPath() (string, error) {
 		}
 		return dest, nil
 	}
-	jarMu.Lock()
-	jp := jarPath
-	jarMu.Unlock()
+	jp := currentJarPath()
 	if jp == "" {
 		return "", fmt.Errorf("spider.jar 未加载，请检查配置中的 spider 字段")
 	}
 	return jp, nil
 }
 
-// cacheJar 下载并缓存 jar，返回本地路径（不改写全局 jarPath）。
+// cacheJar 下载并缓存 jar，返回本地路径（不改写当前用户的根 jar 路径）。
 // ;md5; 仅用于「本地缓存是否命中」；
 // 无 md5、或 md5 不匹配时重新下载并照常加载，不因校验失败拒绝使用。
 // allowOverride：仅根 LoadJar 允许 data/spider-override.jar 劫持；站点/JS jar 必须按各自 spec 缓存。

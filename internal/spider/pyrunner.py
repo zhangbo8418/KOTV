@@ -310,7 +310,7 @@ for _shadow in list(os.listdir(cache)) if os.path.isdir(cache) else []:
 def _download_dep(name):
     """从爬虫 api 同目录拉取依赖 py 到 cache（失败忽略，由后续 import 报错）。
 
-    依赖来自 getDependence()；始终覆盖写入（Chaquopy download/writeFile 同）。
+    依赖来自 getDependence()；每次 init 覆盖写入。
     内置 base.spider 包不从仓拉 base.py。
     """
     name = name if str(name).endswith(".py") else str(name) + ".py"

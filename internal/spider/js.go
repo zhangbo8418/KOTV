@@ -891,9 +891,7 @@ func (s *jsSpider) resolveJsJar() string {
 	if j := strings.TrimSpace(s.jar); j != "" {
 		return j
 	}
-	jarMu.Lock()
-	defer jarMu.Unlock()
-	return jarPath
+	return currentJarPath()
 }
 
 func (s *jsSpider) jsReq(c *qjs.Context, this *qjs.Value, args []*qjs.Value) *qjs.Value {
