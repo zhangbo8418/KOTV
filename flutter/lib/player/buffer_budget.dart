@@ -16,7 +16,8 @@ import 'kotv_platform.dart';
 ///
 /// Web / HTML5：由浏览器自己管缓冲，不走本预算。
 ///
-/// 预算按当前可用内存的比例：约 15% 可用内存，且不超过总内存的 5%。
+/// 预算按当前可用内存的比例：约 15% 可用内存，且不超过总内存的 5%，
+/// 再钳到手机 24–96MB、桌面 48–384MB（与 [KotvMemBudget] 同一组上下限）。
 class KotvBufferBudget {
   KotvBufferBudget._();
 
@@ -77,7 +78,14 @@ class KotvBufferBudget {
     return _cached!;
   }
 
-  /// 可用内存优先：约 15% avail，且不超过总内存 5%。
+  /// 手机 24–96MB，桌面 48–384MB。与安卓 KotvMemBudget 同一组上下限。
+  static int minBytes({required bool desktop}) =>
+      desktop ? 48 * 1024 * 1024 : 24 * 1024 * 1024;
+
+  static int maxBytes({required bool desktop}) =>
+      desktop ? 384 * 1024 * 1024 : 96 * 1024 * 1024;
+
+  /// 可用内存优先：约 15% avail，且不超过总内存 5%，再钳到 [minBytes]/[maxBytes]。
   ///
   /// 读不到可用内存时用总内存的 5%。总内存也没有时，按桌面 8GiB、其它 3GiB 估算后再取 5%。
   static int fromDevice({
@@ -88,10 +96,16 @@ class KotvBufferBudget {
     final total = totalBytes > 0
         ? totalBytes
         : (desktop ? 8 * 1024 * 1024 * 1024 : 3 * 1024 * 1024 * 1024);
-    final byTotal = (total * 0.05).round();
-    if (availBytes <= 0) return byTotal;
-    final byAvail = (availBytes * 0.15).round();
-    return byAvail < byTotal ? byAvail : byTotal;
+    var budget = (total * 0.05).round();
+    if (availBytes > 0) {
+      final byAvail = (availBytes * 0.15).round();
+      if (byAvail < budget) budget = byAvail;
+    }
+    final minB = minBytes(desktop: desktop);
+    final maxB = maxBytes(desktop: desktop);
+    if (budget < minB) return minB;
+    if (budget > maxB) return maxB;
+    return budget;
   }
 
   static int _fallback() => fromDevice(
@@ -100,7 +114,7 @@ class KotvBufferBudget {
         desktop: kotvIsDesktop(),
       );
 
-  /// mpv `demuxer-max-bytes` 风格：`96MiB`。数值就是预算字节，不再另钳一段固定兆字节。
+  /// mpv `demuxer-max-bytes` 风格：`96MiB`。数值就是已经钳过的预算字节。
   static String mpvMiB(int n) {
     final mib = (n / (1024 * 1024)).round();
     return '${mib < 0 ? 0 : mib}MiB';

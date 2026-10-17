@@ -6,8 +6,9 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * 与 Dart [KotvBufferBudget] 一致的内存预算：约 15% avail 且 ≤ 总内存 5%；钳到 24–96MiB。
- * Exo / MPV 共用，避免两处拷贝漂移。
+ * 与 Dart KotvBufferBudget.fromDevice 同一组上下限：
+ * 手机 24–96MiB，桌面 48–384MiB。约 15% avail 且不超过总内存 5%，再钳到该区间。
+ * Exo / MPV 共用，避免两处数字漂移。
  */
 object KotvMemBudget {
   fun bytes(ctx: Context?, desktop: Boolean = false): Int {

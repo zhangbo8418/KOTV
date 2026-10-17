@@ -635,9 +635,7 @@ class ExoPlayback extends KotvPlayback {
     notifyListeners();
   }
 
-  @override
-  Future<void> stop() async {
-    // 原生侧会拆掉 ExoPlayer，放开解码器缓冲。Surface 宿主留着，下次 open 再建播放器。
+  Future<void> _unloadKeepingPlayer() async {
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
@@ -648,23 +646,19 @@ class ExoPlayback extends KotvPlayback {
     _w = 0;
     _h = 0;
     _subs = const [];
+  }
+
+  @override
+  Future<void> stop() async {
+    await _unloadKeepingPlayer();
     await _setSurfaceLayerEnabled(false);
     notifyListeners();
   }
 
   @override
   Future<void> stopForEpisodeSwitch() async {
-    try {
-      await _ch.invokeMethod('stop');
-    } catch (_) {}
-    _playing = false;
-    _position = Duration.zero;
-    _ready = false;
-    _url = '';
-    _w = 0;
-    _h = 0;
-    _subs = const [];
-    // 换集卸掉播放器以放开解码缓冲，SurfaceView 仍留在树上。
+    // 换集只卸当前文件，ExoPlayer 留着。Surface 仍在树上。
+    await _unloadKeepingPlayer();
     notifyListeners();
   }
 

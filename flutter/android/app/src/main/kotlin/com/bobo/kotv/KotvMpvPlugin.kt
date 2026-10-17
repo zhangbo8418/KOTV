@@ -399,12 +399,20 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         main.post {
           try {
             pendingUrl = null
-            // 仅 command("stop") 在 Rockchip/部分机型上仍占着 demuxer/MediaCodec。
-            // 拆掉 libmpv 上下文放开缓冲；Surface 宿主保留，下次 open→ensurePlayer 再建。
-            destroyPlayer()
+            // 作废进行中的 loadfile。换集只卸文件，上下文留到 dispose 或模式变化再拆。
+            loadGen.incrementAndGet()
+            if (created.get()) {
+              MPVLib.command(arrayOf("stop"))
+            }
             playing = false
             buffering = false
             paused = true
+            eof = false
+            width = 0
+            height = 0
+            positionSec = 0.0
+            durationSec = 0.0
+            loadedUrl = ""
             result.success(null)
           } catch (e: Throwable) {
             result.error("STOP_FAILED", e.message, null)

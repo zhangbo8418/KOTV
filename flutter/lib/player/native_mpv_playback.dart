@@ -559,38 +559,29 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  @override
-  Future<void> stop() async {
+  Future<void> _unloadKeepingContext() async {
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
-    // 原生 stop 已 destroyCreatedContext；须重建 create。
-    _nativeReady = false;
-    _textureId = null;
     _playing = false;
     _buffering = false;
     _ready = false;
     _url = '';
     _w = 0;
     _h = 0;
+  }
+
+  @override
+  Future<void> stop() async {
+    await _unloadKeepingContext();
     await _setSurfaceLayerEnabled(false);
     notifyListeners();
   }
 
   @override
   Future<void> stopForEpisodeSwitch() async {
-    try {
-      await _ch.invokeMethod('stop');
-    } catch (_) {}
-    // 原生已拆上下文放开 demuxer/解码缓冲；PlatformView 宿主仍留在树上。
-    _nativeReady = false;
-    _textureId = null;
-    _playing = false;
-    _buffering = false;
-    _ready = false;
-    _url = '';
-    _w = 0;
-    _h = 0;
+    // 换集只卸当前文件。不拆 libmpv，下次 open 仍 loadfile。
+    await _unloadKeepingContext();
     notifyListeners();
   }
 

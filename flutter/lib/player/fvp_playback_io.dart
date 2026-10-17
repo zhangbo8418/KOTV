@@ -872,8 +872,9 @@ class FvpPlayback extends KotvPlayback {
             )
           : 60000;
       // max 算不出来也必须先钉死 min=0，绝不能 return 留下 mdk 默认 minMs=1000。
+      // max=0 在 mdk 里是不限时长，不能当作点播缓冲；先用 60s，码率出来再改。
       if (maxMs <= 0) {
-        c.setBufferRange(min: 0, max: 0);
+        c.setBufferRange(min: 0, max: 60000, drop: false);
         return;
       }
       c.setBufferRange(min: 0, max: maxMs, drop: false);

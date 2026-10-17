@@ -401,7 +401,7 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> stop() => _stopUnload(reason: 'stop');
 
-  /// 换集/换台：先卸文件；点播详情桌面路径会再 dispose Player 再建（见 DetailScreen._recycleDesktopMpv）。
+  /// 换集/换台：只卸文件。Player 留到离页或换引擎再 dispose。
   @override
   Future<void> stopForEpisodeSwitch() => _stopUnload(reason: 'stopForEpisodeSwitch');
 

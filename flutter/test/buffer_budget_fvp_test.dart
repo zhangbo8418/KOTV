@@ -13,7 +13,7 @@ void main() {
     expect(KotvBufferBudget.fvpMaxBufferMs(0, bitsPerSec: 4 * 1000 * 1000), 0);
   });
 
-  test('fromDevice follows available memory and does not clamp to a fixed size', () {
+  test('fromDevice follows available memory and clamps to the shared ceiling', () {
     const gb = 1024 * 1024 * 1024;
     final tight = KotvBufferBudget.fromDevice(
       totalBytes: 8 * gb,
@@ -26,14 +26,19 @@ void main() {
       availBytes: 32 * gb,
       desktop: true,
     );
-    expect(roomy, (64 * gb * 0.05).round());
-    expect(roomy, greaterThan(384 * 1024 * 1024));
+    expect(roomy, KotvBufferBudget.maxBytes(desktop: true));
     final noAvail = KotvBufferBudget.fromDevice(
       totalBytes: 8 * gb,
       availBytes: 0,
       desktop: false,
     );
-    expect(noAvail, (8 * gb * 0.05).round());
+    expect(noAvail, KotvBufferBudget.maxBytes(desktop: false));
+    final tiny = KotvBufferBudget.fromDevice(
+      totalBytes: 256 * 1024 * 1024,
+      availBytes: 64 * 1024 * 1024,
+      desktop: false,
+    );
+    expect(tiny, KotvBufferBudget.minBytes(desktop: false));
   });
 
   test('mpvMiB keeps the budget proportion', () {

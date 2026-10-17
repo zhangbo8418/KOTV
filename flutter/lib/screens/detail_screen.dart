@@ -553,26 +553,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await kotvDisposeMpvPlayer(mkPlayer);
   }
 
-  /// 桌面点播换集：销毁 media_kit Player，避免连播映射/GPU 共享页只涨不降。
-  /// 不改 [_playUrl]，避免 Stable 视频层整段卸掉；随后 [setState] 卸已死 Texture。
-  /// [serial] 须为本次 [_playAt] 世代：离页 [_stopHard] 抬世代后禁止再 setState，以免 build 建出孤儿 Player。
-  Future<void> _recycleDesktopMpv({required int serial}) async {
-    if (kotvIsAndroid()) return;
-    await _disposeDesktopMpvOwned();
-    if (_mpvOpts.diskCache) {
-      await kotvClearMpvDemuxerCacheDir();
-    }
-    // 离页/换代后勿 remount：[_ensureMpv] 会在 Overlay/画面 build 里新建实例且无人 dispose。
-    if (!mounted || _leaving || serial != _playAtSerial) return;
-    setState(() {});
-  }
-
   /// 切到其它内置后端时停掉闲置引擎。
   /// 调用方须在改 [_playerVal] **之前**调用，以便旧 FVP/Surface 仍在树上时完成 release。
   /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
   Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
     if (keep != KotvEmbedBackend.mpv) {
-      await _disposeDesktopMpvOwned(softStopFirst: true);
+      if (kotvIsAndroid()) {
+        final mk = _mk;
+        try {
+          await mk?.release();
+        } catch (_) {}
+        try {
+          mk?.dispose();
+        } catch (_) {}
+        _mk = null;
+      } else {
+        await _disposeDesktopMpvOwned(softStopFirst: true);
+      }
     }
     if (keep != KotvEmbedBackend.fvp) {
       // 须拆掉实例：仅 stop 时 mdk 包缓存/纹理可能残留（ADB: ReleaseRT 后 PSS/Graphics 仍涨）。
@@ -586,7 +583,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (identical(_fvp, fvp)) _fvp = null;
     }
     if (keep != KotvEmbedBackend.exo) {
-      // stop 已拆播放器；再 release 以 dispose 通道和 Texture。
+      // release 拆掉 ExoPlayer 和 Texture。stop 只卸文件，换引擎必须走 release。
       final exo = _exo;
       await kotvSoftPausePlayers([exo]);
       try {
@@ -621,8 +618,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 换集/换源：先停声。桌面 media_kit 随后 [_recycleDesktopMpv] 销毁再建；
-  /// 安卓原生 MPV stop 已拆 libmpv；FVP/Exo 换集硬拆再建。离开页走 [_stopHard]。
+  /// 换集/换源：只停声、卸当前文件。播放器实例留着，下一集在同一实例上打开。
+  /// 离开页或换引擎才拆实例。
   Future<void> _stopAllBackends() async {
     await kotvStopPlayersForEpisodeSwitch([
       _mk,
@@ -2063,9 +2060,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     // 解析/拉流可能要数秒：先停播，避免上一集在后台继续出声。
     await _stopAllBackends();
     if (serial != _playAtSerial || !mounted) return;
-    // 桌面：换集销毁 libmpv，避免连播映射/GPU 共享页只涨不降；稍后 _ensureMpv 再建。
-    await _recycleDesktopMpv(serial: serial);
-    if (serial != _playAtSerial || !mounted) return;
     // 先 await 软取消上一集，再 play。unawaited 会与本次 play 竞态：
     // SoftCancel 抬 epoch → JS/JAR 立刻报「脚本调用已中断」。
     await ref.read(apiProvider).cancelPending(
@@ -2129,7 +2123,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (playUrl.isEmpty) {
         // 空地址留在详情；Config 弹窗依赖 pause 仍保留的 Activity，勿出栈。
         // 无 msg：多为 Config 副作用，不标「加载失败」。
-        // 桌面已 [_recycleDesktopMpv]：勿再靠旧 Player；清舞台 URL，避免集号新、地址旧。
+        // 上一集已卸文件。清舞台 URL，避免集号新、地址旧。
         final tip = '${data['msg'] ?? ''}'.trim();
         if (!mounted) return;
         _clearResumeSeek();
@@ -2507,7 +2501,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 全屏/详情共用画面。原位全屏时 Element 不挪树；Android 原生 Surface 另加 KeyedSubtree。
   /// 固定画幅：Exo/其它用 [AspectRatio]；Android MPV 走原生 video-aspect-override，勿再套一层。
   Widget _buildSharedVideo({BoxFit fit = BoxFit.contain}) {
-    // 桌面换集刚 dispose：勿经 [_playback] 提前 _ensureMpv，否则解析期/离页交错易留孤儿实例。
+    // 桌面 MPV 还没有实例时不要在 build 里创建，避免离页交错留下无人释放的 Player。
     if (!kotvIsAndroid() && _backend == KotvEmbedBackend.mpv && _mk == null) {
       return const ColoredBox(color: Colors.black);
     }

@@ -181,16 +181,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
   Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
     if (keep != KotvEmbedBackend.mpv) {
-      try {
-        await _mk?.pause();
-      } catch (_) {}
-      try {
-        await _mk?.stop();
-      } catch (_) {}
+      final mk = _mk;
       final mkPlayer = _mkPlayer;
+      try {
+        await mk?.release();
+      } catch (_) {}
       _mkPlayer = null;
       try {
-        _mk?.dispose();
+        mk?.dispose();
       } catch (_) {}
       _mk = null;
       await kotvDisposeMpvPlayer(mkPlayer);

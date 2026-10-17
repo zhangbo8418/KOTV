@@ -659,10 +659,13 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       }
       "stop" -> {
         main.post {
-          // player.stop() 在 Rockchip 上留着 MediaCodec 和它的输出缓冲。
-          // 换集、停播都拆掉播放器；SurfaceView 仍由宿主留着，下次 open 再绑。
+          // 换集只卸当前文件。播放器留着，下一集 setMediaItem 复用同一套缓冲。
+          // 离页或换引擎走 dispose → releasePlayer。
           try {
-            releasePlayer()
+            diskPreload.stop()
+            KotvExoCacheWarmer.cancel()
+            player?.stop()
+            player?.clearMediaItems()
           } catch (_: Throwable) {
           }
           result.success(true)
