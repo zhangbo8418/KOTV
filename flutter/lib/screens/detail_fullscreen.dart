@@ -967,8 +967,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
               ),
               child: Padding(
                 padding: EdgeInsets.symmetric(
-                  horizontal: 18 * LayoutScale.growAboveDesign(LayoutScale.of(context)),
-                  vertical: 10 * LayoutScale.growAboveDesign(LayoutScale.of(context)),
+                  horizontal: LayoutScale.dp(context, 18),
+                  vertical: LayoutScale.dp(context, 10),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -976,9 +976,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                     Icon(
                       Icons.screen_rotation_rounded,
                       color: Colors.white,
-                      size: 20 * LayoutScale.growAboveDesign(LayoutScale.of(context)),
+                      size: LayoutScale.dp(context, 20),
                     ),
-                    SizedBox(width: 8 * LayoutScale.growAboveDesign(LayoutScale.of(context))),
+                    SizedBox(width: LayoutScale.dp(context, 8)),
                     const Text(
                       '全屏观看',
                       style: TextStyle(
@@ -1074,7 +1074,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         backgroundColor: widget.externalVideo ? Colors.transparent : Colors.black,
         body: LayoutBuilder(
           builder: (context, c) {
-            final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+            final ui = LayoutScale.grow(context);
             // 横屏钮由 initState / playback listener 刷新；勿在 build 里登记 postFrame。
             return MouseRegion(
               cursor: _mouseCursor,

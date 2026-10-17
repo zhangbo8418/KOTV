@@ -149,8 +149,8 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
     return Scaffold(
       backgroundColor: p.surface,
       appBar: AppBar(
-        toolbarHeight: kToolbarHeight * LayoutScale.growAboveDesign(s),
-        iconTheme: IconThemeData(size: 24 * LayoutScale.growAboveDesign(s), color: p.fg),
+        toolbarHeight: LayoutScale.dp(context, kToolbarHeight),
+        iconTheme: IconThemeData(size: LayoutScale.dp(context, 24), color: p.fg),
         title: Text(widget.title.isEmpty ? '目录' : widget.title),
         backgroundColor: p.surface,
         foregroundColor: p.fg,

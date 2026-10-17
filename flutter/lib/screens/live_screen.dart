@@ -2735,7 +2735,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   /// 频道号列宽：按位数 tabular，避免 PC 全屏/侧栏被裁成半个字。
   double _channelNumColWidth(double fontSize, {int digits = 3}) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return (fontSize * 0.62 * digits.clamp(3, 8) + 10).clamp(40.0, 120.0) * ui;
   }
 
@@ -3100,7 +3100,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
 
     final p = KotvPalette.of(context);
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return Padding(
       padding: EdgeInsets.only(bottom: (land ? 2 : 4) * ui),
       child: TvFocus(
@@ -3587,7 +3587,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             final p = KotvPalette.of(context);
                             final screenW = c.maxWidth;
                             final land = KotvLayout.isLandscapeCompact(context);
-                            final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+                            final ui = LayoutScale.grow(context);
                             var groupW = (land ? 112.0 : 136.0) * ui;
                             var channelW = (land ? 248.0 : 280.0) * ui;
                             var epgW = (land ? 200.0 : 260.0) * ui;
@@ -3864,7 +3864,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                           child: Builder(builder: (context) {
                             final p = KotvPalette.of(context);
                             final land = KotvLayout.isLandscapeCompact(context);
-                            final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+                            final ui = LayoutScale.grow(context);
                             final rightW = land
                                 ? (c.maxWidth * 0.30).clamp(180.0, 240.0) * ui
                                 : 240.0 * ui;

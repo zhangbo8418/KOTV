@@ -364,7 +364,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                           color: Colors.black.withOpacity(0.55),
                             child: Center(
                               child: Builder(builder: (context) {
-                              final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+                              final ui = LayoutScale.grow(context);
                               return Container(
                               constraints: BoxConstraints(
                                 minWidth: (KotvLayout.isCompact(context) ? 200 : 280) * ui,

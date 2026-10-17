@@ -183,7 +183,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: Text('管理员登录', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 360 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+          width: LayoutScale.dp(ctx, 360),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -260,7 +260,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: Text('创建账号', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
           content: SizedBox(
-            width: 360 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+            width: LayoutScale.dp(ctx, 360),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -433,7 +433,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
           style: TextStyle(color: p.fg, fontWeight: FontWeight.w700),
         ),
         content: SizedBox(
-          width: 360 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+          width: LayoutScale.dp(ctx, 360),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

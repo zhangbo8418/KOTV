@@ -89,7 +89,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final s = LayoutScale.layoutOf(context);
-    final grow = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final grow = LayoutScale.grow(context);
     final cfg = ref.watch(configProvider);
     final siteCount = cfg.maybeWhen(
       data: (c) => ((c['sites'] as List?) ?? []).length,

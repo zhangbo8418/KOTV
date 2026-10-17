@@ -427,7 +427,7 @@ class _EngineOfflinePage extends ConsumerWidget {
         backgroundColor: p.dialogBg,
         title: Text('连接后端服务', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 520 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+          width: LayoutScale.dp(ctx, 520),
           child: KotvTvTextField(
             controller: ctrl,
             autofocus: true,

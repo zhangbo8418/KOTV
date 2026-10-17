@@ -138,7 +138,7 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
     required String label,
     required KotvDesktopFullscreenKind kind,
   }) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return TvFocus(
       onPressed: () => _pick(kind),
       borderRadius: 12 * ui,
@@ -170,7 +170,7 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
 
   @override
   Widget build(BuildContext context) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     final box = widget.size * ui;
     final iconSz = (widget.iconSize ?? (widget.size <= 34 ? 18.0 : 22.0)) * ui;
     return CompositedTransformTarget(

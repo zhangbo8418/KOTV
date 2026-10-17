@@ -99,7 +99,7 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
         ? flutterPlayerLabel(kotvDefaultLivePlayer())
         : widget.playerLabel;
     final land = KotvLayout.isLandscapeCompact(context);
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     final iconSize = land ? 30.0 : 40.0;
     final compact = widget.miniActive || MediaQuery.sizeOf(context).width < 560 || land;
     return Material(
@@ -245,7 +245,7 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
     bool autofocus = false,
     FocusNode? focusNode,
   }) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     final sz = (size ?? (compact ? 32.0 : 40.0)) * ui;
     final iconSz = ((size ?? (compact ? 32.0 : 40.0)) <= 32 ? 16.0 : 22.0) * ui;
     return Tooltip(
@@ -265,7 +265,7 @@ class _LiveCatchupChromeState extends State<LiveCatchupChrome> {
   }
 
   Widget _textAct(String label, VoidCallback onTap) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return TvFocus(
       onPressed: onTap,
       borderRadius: 8 * ui,

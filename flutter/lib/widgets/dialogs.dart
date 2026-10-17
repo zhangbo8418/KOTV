@@ -32,7 +32,7 @@ Future<void> _prepareLeavePlayback() async {
     _dialogMetrics(BuildContext context) {
   final sz = MediaQuery.sizeOf(context);
   final compact = KotvLayout.isCompact(context);
-  final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+  final ui = LayoutScale.grow(context);
   final inset = compact
       ? EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 12 * ui)
       : EdgeInsets.symmetric(horizontal: 48 * ui, vertical: 40 * ui);
@@ -163,7 +163,7 @@ Widget _configDialogActions({
 double _pillRowStride(BuildContext context,
     {required double pillHeight, required double gap, double beside = 36}) {
   final h = pillHeight * LayoutScale.layoutOf(context);
-  final icon = beside * LayoutScale.growAboveDesign(LayoutScale.of(context));
+  final icon = LayoutScale.dp(context, beside);
   return (h > icon ? h : icon) + gap;
 }
 
@@ -1056,7 +1056,7 @@ Future<List<String>?> pickMultiChoice(
             backgroundColor: p.dialogBg,
             title: Text(title, style: TextStyle(color: p.fg)),
             content: SizedBox(
-              width: 420 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+              width: LayoutScale.dp(ctx, 420),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -1403,7 +1403,7 @@ class _CircleIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     // 遥控器要能落到搜索/换源/删除；纯 InkWell 无焦点框。
     return TvFocus(
       onPressed: onTap,
@@ -1472,7 +1472,7 @@ class SettingChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return TvFocus(
       onPressed: onTap,
       borderRadius: 10 * ui,

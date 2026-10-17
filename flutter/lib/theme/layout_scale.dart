@@ -7,7 +7,7 @@ const Size kotvMinWindowSize = Size(320, 280);
 
 /// 默认窗口 1280×720。更大的窗口按这个样式整页放大：
 /// 1080p 为 1.5 倍，4K 为 3 倍，8K 为 6 倍。小窗口不低于 0.55。
-/// 文字走 [MediaQuery.textScaler]；间距/高度/图标用 [s]/[of]。
+/// 文字走 [MediaQuery.textScaler]。大于 720p 的外框用 [grow]/[dp]，会随窗口缩小的间距用 [s]。
 class LayoutScale extends InheritedWidget {
   const LayoutScale({super.key, required this.scale, required super.child});
 
@@ -28,14 +28,18 @@ class LayoutScale extends InheritedWidget {
     return math.max(s, t);
   }
 
-  /// 设计稿像素 → 当前窗口尺寸。
+  /// 设计稿像素 → 当前窗口尺寸。小窗会缩小。
   static double s(BuildContext context, double designPx) => designPx * of(context);
 
-  /// 大于 1280×720 时，固定高度的栏按同一倍数放大。设计稿及更小为 1，避免把栏压矮后裁字。
-  static double growAboveDesign(double scale) {
+  /// 大于 1280×720 的放大倍数。不超过时为 1，避免把栏压矮后裁字。
+  static double grow(BuildContext context) {
+    final scale = of(context);
     if (!scale.isFinite || scale <= 1) return 1;
     return scale;
   }
+
+  /// 设计像素按 [grow] 换成当前尺寸。小窗保持设计值。
+  static double dp(BuildContext context, double designPx) => designPx * grow(context);
 
   /// 由可用宽高计算缩放。竖/横都保持字与控件等比，避免过小导致底栏裁切字。
   static double compute(double width, [double height = designH]) {
@@ -81,11 +85,6 @@ class KotvLayout {
     if (isLandscapeCompact(context)) return false;
     final size = MediaQuery.sizeOf(context);
     return size.width < 720 || size.shortestSide < 560;
-  }
-
-  static EdgeInsets pagePadding(BuildContext context, {double desk = 28, double compact = 12}) {
-    final v = isCompact(context) ? compact : desk;
-    return EdgeInsets.symmetric(horizontal: v);
   }
 }
 

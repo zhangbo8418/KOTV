@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../player/kotv_playback.dart';
 import '../player/kotv_traffic.dart';
+import '../theme/layout_scale.dart';
 
 /// 缓冲中在**播放器 Stack 内**居中显示转圈 + 实时网速（必须叠在视频区域，不能挂全局 Overlay）。
 ///
@@ -145,22 +146,27 @@ class _KotvBufferingOverlayState extends State<KotvBufferingOverlay> {
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: const Color(0xFF111111),
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(LayoutScale.dp(context, 20)),
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+              padding: EdgeInsets.fromLTRB(
+                LayoutScale.dp(context, 18),
+                LayoutScale.dp(context, 14),
+                LayoutScale.dp(context, 18),
+                LayoutScale.dp(context, 14),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(
+                  SizedBox(
+                    width: LayoutScale.dp(context, 28),
+                    height: LayoutScale.dp(context, 28),
+                    child: const CircularProgressIndicator(
                       color: Color(0xFFE53955),
                       strokeWidth: 3,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: LayoutScale.dp(context, 10)),
                   Text(
                     label,
                     style: const TextStyle(

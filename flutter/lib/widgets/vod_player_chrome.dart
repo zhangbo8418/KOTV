@@ -268,7 +268,7 @@ class CenterPlayPauseButton extends StatelessWidget {
         if (hideWhenBuffering && player.stalling) return const SizedBox.shrink();
         if (player.playing && !showWhilePlaying) return const SizedBox.shrink();
         final land = KotvLayout.isLandscapeCompact(context);
-        final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+        final ui = LayoutScale.grow(context);
         final size = (land ? 56.0 : 72.0) * ui;
         void toggle() {
           unawaited(player.playOrPause());
@@ -350,7 +350,7 @@ class _VodInlineControlsState extends State<VodInlineControls> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final narrow = widget.miniActive || constraints.maxWidth < 480;
-          final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+          final ui = LayoutScale.grow(context);
           final iconSize = narrow ? 32.0 : 40.0;
           final volW = narrow ? 72.0 : 110.0;
           return Padding(
@@ -451,9 +451,9 @@ class _VodInlineControlsState extends State<VodInlineControls> {
 
 SliderThemeData _sliderTheme(BuildContext context) {
   return SliderTheme.of(context).copyWith(
-    trackHeight: 3,
-    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+    trackHeight: LayoutScale.dp(context, 3),
+    thumbShape: RoundSliderThumbShape(enabledThumbRadius: LayoutScale.dp(context, 6)),
+    overlayShape: RoundSliderOverlayShape(overlayRadius: LayoutScale.dp(context, 12)),
     activeTrackColor: KotvColors.primary,
     inactiveTrackColor: Colors.white24,
     secondaryActiveTrackColor: Colors.white38,
@@ -495,7 +495,7 @@ class _IconAct extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     final iconSz = (size <= 34 ? 18.0 : 22.0) * ui;
     final box = size * ui;
     return Tooltip(
@@ -542,7 +542,7 @@ class _TextAct extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return TvFocus(
       focusNode: focusNode,
       onPressed: onTap,
@@ -565,7 +565,7 @@ class _OffsetClock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return TvFocus(
       focusNode: focusNode,
       scrollIntoView: true,
@@ -587,7 +587,7 @@ class _TinyBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return TvFocus(
       focusNode: focusNode,
       onPressed: onTap,
@@ -1385,7 +1385,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     String? subtitle,
     required List<Widget> children,
   }) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(ctx));
+    final ui = LayoutScale.grow(ctx);
     return SafeArea(
       top: false,
       child: Padding(
@@ -1440,7 +1440,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     bool selected = false,
     required VoidCallback onTap,
   }) {
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return KotvStableFocus(
       autofocus: selected,
       scrollIntoView: true,
@@ -1884,7 +1884,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               required ValueChanged<bool> onChanged,
               bool autofocus = false,
             }) {
-              final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+              final ui = LayoutScale.grow(context);
               return TvFocus(
                 autofocus: autofocus,
                 onPressed: () => onChanged(!value),
@@ -1926,7 +1926,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
               required VoidCallback onTap,
               bool autofocus = false,
             }) {
-              final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+              final ui = LayoutScale.grow(context);
               return TvFocus(
                 autofocus: autofocus,
                 onPressed: onTap,

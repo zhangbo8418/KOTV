@@ -300,7 +300,7 @@ class NavPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
     final compact = KotvLayout.isCompact(context);
-    final grow = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final grow = LayoutScale.grow(context);
     final h = (compact ? 32.0 : 36.0) * grow;
     final fs = compact ? 14.0 : 16.0;
     final r = (compact ? 12.0 : 14.0) * grow;
@@ -492,7 +492,7 @@ class FeatureCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = LayoutScale.layoutOf(context);
-    final grow = LayoutScale.growAboveDesign(s);
+    final grow = LayoutScale.grow(context);
     final radius = 14 * s;
     return TvFocus(
       onPressed: onTap,
@@ -647,7 +647,7 @@ class EpisodeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     final bg = selected ? p.selected : p.pillBg;
     return TvFocus(
       autofocus: autofocus,
@@ -736,7 +736,7 @@ class _TopStatusBarState extends State<TopStatusBar> {
     final compact = KotvLayout.isCompact(context);
     final bottomNav = KotvLayout.useBottomNav(context);
     final landscape = KotvLayout.isLandscapeCompact(context);
-    final grow = LayoutScale.growAboveDesign(s);
+    final grow = LayoutScale.grow(context);
     final h = (compact ? 40.0 : (landscape ? 36.0 : 52.0)) * grow;
     final padH = compact ? 10.0 : (landscape ? 14.0 : 24.0 * s);
     return Container(
@@ -824,7 +824,7 @@ class _NewsPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = LayoutScale.layoutOf(context);
-    final grow = LayoutScale.growAboveDesign(s);
+    final grow = LayoutScale.grow(context);
     final p = KotvPalette.of(context);
     final radius = 16 * grow;
     return TvFocus(
@@ -1025,7 +1025,7 @@ class _CategoryNavBarState extends State<CategoryNavBar> {
         : widget.categories.indexWhere((c) => c.id == widget.selectedTid);
     // 固定高度匹配 NavPill(36)，避免 scale 把栏压矮后胶囊溢出。
     // 按声明顺序走焦点，避免横向列表按几何距离把焦点跳到左边或右边那一项。
-    final grow = LayoutScale.growAboveDesign(s);
+    final grow = LayoutScale.grow(context);
     return Container(
       height: (compact ? 40.0 : 48.0) * grow,
       color: p.catBar,

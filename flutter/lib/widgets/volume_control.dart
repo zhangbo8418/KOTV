@@ -148,7 +148,7 @@ class _KotvVolumeControlState extends State<KotvVolumeControl> with KotvKeyHighl
   @override
   Widget build(BuildContext context) {
     final land = widget.compact;
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     final iconSz = (land ? (widget.iconSize <= 34 ? 18.0 : 20.0) : (widget.iconSize <= 34 ? 18.0 : 22.0)) * ui;
     final box = widget.iconSize * ui;
     final ring = _ringColor(KotvPalette.of(context));

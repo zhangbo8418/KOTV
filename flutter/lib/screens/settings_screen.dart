@@ -225,7 +225,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text(title,
             style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 540 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+          width: LayoutScale.dp(ctx, 540),
           child: KotvTvTextField(
             controller: c,
             autofocus: true,
@@ -321,7 +321,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text('代理地址',
             style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 540 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+          width: LayoutScale.dp(ctx, 540),
           child: KotvTvTextField(
             controller: c,
             autofocus: true,
@@ -476,7 +476,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             children: [
               ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxWidth: 140 * LayoutScale.growAboveDesign(LayoutScale.of(context)),
+                  maxWidth: LayoutScale.dp(context, 140),
                 ),
                 child: Text(
                   value,
@@ -1678,7 +1678,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text('播放缺省 User-Agent',
             style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 540 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+          width: LayoutScale.dp(ctx, 540),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2063,7 +2063,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text(type == 'keep' ? '发送收藏到设备' : '发送历史到设备',
             style: TextStyle(color: p.fg)),
         content: SizedBox(
-          width: 420 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+          width: LayoutScale.dp(ctx, 420),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

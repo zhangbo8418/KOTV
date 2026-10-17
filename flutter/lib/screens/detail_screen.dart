@@ -3936,7 +3936,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
 
     Widget lower() {
-      final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+      final ui = LayoutScale.grow(context);
       final pillH = compact ? 28.0 : 36.0;
       final pillFs = compact ? 12.0 : 15.0;
       final epH = compact ? 32.0 : 42.0;
@@ -4347,7 +4347,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         backgroundColor: p.dialogBg,
         title: Text(d.name, style: TextStyle(color: p.fg)),
         content: SizedBox(
-          width: 520 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
+          width: LayoutScale.dp(ctx, 520),
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

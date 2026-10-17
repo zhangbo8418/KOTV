@@ -162,7 +162,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
-    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+    final ui = LayoutScale.grow(context);
     return PopScope(
       canPop: _isRoot,
       onPopInvoked: (didPop) {
