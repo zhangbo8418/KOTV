@@ -361,12 +361,6 @@ func clearSharedJarSpiders() {
 	dropJarSpiders("\x01", false)
 }
 
-// InterruptJavaBridge 硬杀本机共享 JVM（兼容旧调用）；等同 RestartSharedRuntime 的 JVM 部分但不清 Py/JS。
-// 新代码请用 RestartSharedRuntime。
-func InterruptJavaBridge() {
-	RestartSharedRuntime()
-}
-
 func softCancelJavaBridge(clientID string) {
 	body, _ := json.Marshal(map[string]string{"clientId": clientID})
 	payload, _ := json.Marshal(map[string]interface{}{

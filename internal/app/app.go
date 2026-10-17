@@ -540,6 +540,7 @@ func (a *App) ReloadConfig() error {
 	a.Config.Clear()
 	if err := a.Config.LoadSettings(false); err != nil {
 		a.ErrMsg = err.Error()
+		a.switchConfigJars(model.Api{})
 		return err
 	}
 	a.switchConfigJars(a.Config.API())
@@ -560,6 +561,7 @@ func (a *App) LoadVodSource(source string) error {
 	a.Config.Clear()
 	if err := a.Config.LoadVod(source, false); err != nil {
 		a.ErrMsg = err.Error()
+		a.switchConfigJars(model.Api{})
 		return err
 	}
 	a.switchConfigJars(a.Config.API())
@@ -706,7 +708,7 @@ func (a *App) Shutdown() {
 	}
 	// 关停：打断脚本/JAR 并关 bridge，勿再拉起 JVM。
 	spider.InterruptScriptSpiders()
-	spider.InterruptJavaBridge()
+	spider.RestartSharedRuntime()
 	spider.ResetScriptSpiders()
 	spider.ShutdownJavaBridge()
 	dlna.StopRenderer()

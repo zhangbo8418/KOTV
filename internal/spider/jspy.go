@@ -119,26 +119,26 @@ func destroyScripts(prefix string, all bool, keep ...string) {
 			keepSet[k] = struct{}{}
 		}
 	}
+	kept := func(k string) bool {
+		_, ok := keepSet[k]
+		return ok
+	}
 	jsPyMu.Lock()
 	var doomed []Spider
 	for k, s := range jsPy {
 		if !all && !strings.HasPrefix(k, prefix) {
 			continue
 		}
-		if _, ok := keepSet[k]; ok {
+		if kept(k) {
 			continue
 		}
 		doomed = append(doomed, s)
 		delete(jsPy, k)
-		if recentJsKey == k {
-			recentJsKey = ""
-		}
-		if recentPyKey == k {
-			recentPyKey = ""
-		}
 	}
-	if all {
+	if all || (recentJsKey != "" && strings.HasPrefix(recentJsKey, prefix) && !kept(recentJsKey)) {
 		recentJsKey = ""
+	}
+	if all || (recentPyKey != "" && strings.HasPrefix(recentPyKey, prefix) && !kept(recentPyKey)) {
 		recentPyKey = ""
 	}
 	jsPyMu.Unlock()

@@ -131,12 +131,7 @@ func clearRuntimeJars() {
 
 func releaseConfigScripts() {
 	clearJSMemoryCaches()
-	uid := strings.TrimSpace(hostclient.RuntimeUserID())
-	if uid != "" {
-		destroyScripts(uid+"\x01", false)
-		return
-	}
-	destroyScripts("\x01", false)
+	destroyScripts(hostclient.RuntimeUserID()+"\x01", false)
 }
 
 func clearJar() {

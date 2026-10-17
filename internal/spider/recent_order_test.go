@@ -95,7 +95,7 @@ func TestReleaseConfigScriptsClearsCurrentUserOnly(t *testing.T) {
 	jsPy["\x01py:http://example.com/a.py"] = newPyPool("a", "http://example.com/a.py", "", "")
 	jsPy["\x01js:http://example.com/a.js"] = newJsPool("a", "http://example.com/a.js", "", "")
 	jsPy["u2\x01py:http://example.com/b.py"] = newPyPool("b", "http://example.com/b.py", "", "")
-	recentPyKey = "\x01py:http://example.com/a.py"
+	recentPyKey = "\x01py:http://example.com/missing.py"
 	recentJsKey = "u2\x01js:http://example.com/b.js"
 	jsPyMu.Unlock()
 
