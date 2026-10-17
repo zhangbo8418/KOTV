@@ -475,7 +475,8 @@ class _KotvPosterNetImageState extends State<KotvPosterNetImage> {
     final img = _image;
     if (img != null) {
       return RawImage(
-        image: img,
+        // 卸树时 RawImage 会 dispose 句柄；池里留原件，这里只交副本。
+        image: img.clone(),
         fit: widget.fit,
         filterQuality: FilterQuality.low,
       );

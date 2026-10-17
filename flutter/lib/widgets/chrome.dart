@@ -32,7 +32,6 @@ class AppBackdrop extends ConsumerStatefulWidget {
 class _AppBackdropState extends ConsumerState<AppBackdrop> {
   Timer? _wallTimer;
   String _stickyWallUrl = '';
-  int _persistGen = 0;
 
   @override
   void initState() {
@@ -62,13 +61,7 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
     }
     setState(() => _stickyWallUrl = u);
     ref.read(stickyWallUrlProvider.notifier).state = u;
-    final gen = ++_persistGen;
-    unawaited(() async {
-      await kotvPersistWallpaper(u);
-      if (!mounted || gen != _persistGen) return;
-      // 落盘后触一次 rebuild，FileImage 可立刻顶上。
-      setState(() {});
-    }());
+    unawaited(kotvPersistWallpaper(u));
   }
 
   void _clearStickyWall() {
@@ -152,7 +145,7 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
               builder: (context, constraints) {
                 final dpr = MediaQuery.devicePixelRatioOf(context);
                 final w = (constraints.maxWidth * dpr).round().clamp(1, 1920);
-                return _WinWallImage(url: image, decodeWidth: w);
+                return _CachedWallImage(url: image, decodeWidth: w);
               },
             ),
           ),
@@ -166,18 +159,18 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
   }
 }
 
-/// Windows 壁纸：字节留在内存里画。新图没到之前继续显示上一张。
-class _WinWallImage extends StatefulWidget {
-  const _WinWallImage({required this.url, required this.decodeWidth});
+/// 壁纸：有落盘字节就从内存解，否则同一组件按地址拉。同时只留一个 codec。
+class _CachedWallImage extends StatefulWidget {
+  const _CachedWallImage({required this.url, required this.decodeWidth});
 
   final String url;
   final int decodeWidth;
 
   @override
-  State<_WinWallImage> createState() => _WinWallImageState();
+  State<_CachedWallImage> createState() => _CachedWallImageState();
 }
 
-class _WinWallImageState extends State<_WinWallImage> {
+class _CachedWallImageState extends State<_CachedWallImage> {
   Uint8List? _bytes;
   int _gen = 0;
 
@@ -188,9 +181,12 @@ class _WinWallImageState extends State<_WinWallImage> {
   }
 
   @override
-  void didUpdateWidget(covariant _WinWallImage oldWidget) {
+  void didUpdateWidget(covariant _CachedWallImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) unawaited(_load(widget.url));
+    if (oldWidget.url != widget.url) {
+      _bytes = null;
+      unawaited(_load(widget.url));
+    }
   }
 
   Future<void> _load(String url) async {
@@ -206,30 +202,16 @@ class _WinWallImageState extends State<_WinWallImage> {
 
   @override
   Widget build(BuildContext context) {
-    final net = KotvNetworkImage(
-      widget.url,
+    final parsed = kotvResolveImageRequest(widget.url);
+    return KotvFrameImage(
+      bytes: _bytes,
+      url: parsed.url,
+      headers: parsed.headers,
+      targetWidth: widget.decodeWidth,
       fit: BoxFit.cover,
       filterQuality: FilterQuality.medium,
-      cacheWidth: widget.decodeWidth,
       gaplessPlayback: true,
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-    );
-    final bytes = _bytes;
-    if (bytes == null) return net;
-    // 内存图还没解出来时底下仍是网络图，避免换文件或重解码时闪空。
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        net,
-        KotvFrameImage(
-          bytes: bytes,
-          targetWidth: widget.decodeWidth,
-          fit: BoxFit.cover,
-          filterQuality: FilterQuality.medium,
-          gaplessPlayback: true,
-          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-        ),
-      ],
     );
   }
 }

@@ -29,19 +29,21 @@ class ConfigLogoAvatar extends StatelessWidget {
     final url = logoUrl.trim();
     final bg = backgroundColor ?? const Color(0xFF6E29CD);
     final icon = Icon(fallbackIcon, size: radius * 1.05, color: Colors.white);
+    final px = (radius * 2 * MediaQuery.devicePixelRatioOf(context)).round().clamp(1, 512);
     final child = ClipOval(
       child: ColoredBox(
         color: bg,
         child: SizedBox(
           width: radius * 2,
           height: radius * 2,
-          child: url.isNotEmpty && _isHttp(url)
-              ? KotvNetworkImage(
+          child: url.isEmpty
+              ? Center(child: icon)
+              : KotvNetworkImage(
                   url,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => icon,
-                )
-              : Center(child: icon),
+                  cacheWidth: px,
+                  errorBuilder: (_, __, ___) => Center(child: icon),
+                ),
         ),
       ),
     );

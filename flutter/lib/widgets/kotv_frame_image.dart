@@ -41,7 +41,7 @@ class KotvFrameImage extends StatefulWidget {
 class _KotvFrameImageState extends State<KotvFrameImage> {
   static final http.Client _client = http.Client();
 
-  ui.Image? _image;
+  ui.Image? _owned;
   ui.Codec? _codec;
   Timer? _timer;
   int _gen = 0;
@@ -66,9 +66,9 @@ class _KotvFrameImageState extends State<KotvFrameImage> {
       return;
     }
     if (!widget.gaplessPlayback) {
-      final prev = _image;
-      _image = null;
-      if (prev != null) _dropImage(prev);
+      final prev = _owned;
+      _owned = null;
+      prev?.dispose();
     }
     _start();
   }
@@ -79,8 +79,8 @@ class _KotvFrameImageState extends State<KotvFrameImage> {
     _timer?.cancel();
     _codec?.dispose();
     _codec = null;
-    _image?.dispose();
-    _image = null;
+    _owned?.dispose();
+    _owned = null;
     super.dispose();
   }
 
@@ -134,10 +134,11 @@ class _KotvFrameImageState extends State<KotvFrameImage> {
         frame.image.dispose();
         return;
       }
-      final prev = _image;
+      final prev = _owned;
       final next = frame.image;
-      setState(() => _image = next);
-      if (prev != null && !identical(prev, next)) _dropImage(prev);
+      _owned = next;
+      setState(() {});
+      if (prev != null && !identical(prev, next)) prev.dispose();
       _shown++;
       if (codec.frameCount <= 1) {
         _releaseCodec();
@@ -156,7 +157,8 @@ class _KotvFrameImageState extends State<KotvFrameImage> {
         unawaited(_showNext(gen));
       });
     } catch (e, st) {
-      frame?.image.dispose();
+      final failed = frame?.image;
+      if (failed != null && !identical(failed, _owned)) failed.dispose();
       if (!mounted || gen != _gen) return;
       setState(() {
         _error = e;
@@ -168,12 +170,6 @@ class _KotvFrameImageState extends State<KotvFrameImage> {
   void _releaseCodec() {
     _codec?.dispose();
     _codec = null;
-  }
-
-  void _dropImage(ui.Image image) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      image.dispose();
-    });
   }
 
   static Future<Uint8List> _fetch(String url, Map<String, String> headers) async {
@@ -191,13 +187,15 @@ class _KotvFrameImageState extends State<KotvFrameImage> {
   @override
   Widget build(BuildContext context) {
     final err = _error;
-    if (err != null && _image == null) {
+    final owned = _owned;
+    if (err != null && owned == null) {
       final builder = widget.errorBuilder;
       if (builder != null) return builder(context, err, _stack);
       return const SizedBox.shrink();
     }
+    // RawImage 会在换图和卸树时 dispose 它拿到的那份句柄，这里只把副本交出去。
     return RawImage(
-      image: _image,
+      image: owned?.clone(),
       fit: widget.fit,
       alignment: widget.alignment,
       filterQuality: widget.filterQuality,
