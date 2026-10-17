@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import '../util/kotv_io.dart';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -793,7 +792,7 @@ class PostMsgHost {
           ),
         ];
       case 'image':
-        final img = _decodeDataImage('${el['source'] ?? ''}');
+        final img = kotvDecodeDataImage('${el['source'] ?? ''}');
         if (img == null) return const [];
         final w = _num(el['width']) > 0 ? _num(el['width']) * uiScale : null;
         final h = _num(el['height']) > 0 ? _num(el['height']) * uiScale : null;
@@ -1068,19 +1067,4 @@ class PostMsgHost {
     } catch (_) {}
   }
 
-  Uint8List? _decodeDataImage(String source) {
-    final src = source.trim();
-    final comma = src.indexOf(',');
-    if (!src.startsWith('data:') || comma < 0) return null;
-    final meta = src.substring(0, comma);
-    final payload = src.substring(comma + 1);
-    try {
-      if (meta.contains(';base64')) {
-        return base64Decode(payload);
-      }
-      return Uint8List.fromList(utf8.encode(Uri.decodeComponent(payload)));
-    } catch (_) {
-      return null;
-    }
-  }
 }

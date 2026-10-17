@@ -55,6 +55,7 @@ void main() {
     );
     expect(png, isNotNull);
     expect(png, isNotEmpty);
+    expect(kotvDecodeDataImage('data:image/png,hi'), isNotNull);
     expect(kotvDecodeDataImage('data:text/plain;base64,YQ=='), isNull);
     expect(kotvDecodeDataImage('https://example.com/a.jpg'), isNull);
   });

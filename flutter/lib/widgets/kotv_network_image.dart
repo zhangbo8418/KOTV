@@ -1,10 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 
 import '../api/kotv_engine_url.dart';
 import '../player/kotv_traffic.dart';
@@ -156,11 +153,16 @@ Uint8List? kotvDecodeDataImage(String raw) {
   final comma = s.indexOf(',');
   if (comma < 5) return null;
   final meta = s.substring(5, comma).toLowerCase();
-  if (!meta.endsWith(';base64')) return null;
   final mime = meta.split(';').first;
   if (!RegExp(r'^image/[a-z0-9.+-]+$').hasMatch(mime)) return null;
+  final payload = s.substring(comma + 1);
   try {
-    final bytes = base64Decode(s.substring(comma + 1).replaceAll(RegExp(r'\s'), ''));
+    final Uint8List bytes;
+    if (meta.contains(';base64')) {
+      bytes = base64Decode(payload.replaceAll(RegExp(r'\s'), ''));
+    } else {
+      bytes = Uint8List.fromList(utf8.encode(Uri.decodeComponent(payload)));
+    }
     if (bytes.isEmpty) return null;
     return bytes;
   } catch (_) {
@@ -169,9 +171,7 @@ Uint8List? kotvDecodeDataImage(String raw) {
 }
 
 /// 通用网络图（壁纸、台标、详情封面等；分类列表海报用 [KotvPosterNetImage]）。
-/// 默认走客户端拉图（含 `@Headers=`）；勿默认开 Android Glide PlatformView——
-/// 同屏壳壁纸/多图换帧时原生层创建销毁会拖闪背景。
-/// 仅个别确需 Glide 的场景再显式 [allowPlatformView]: true。
+/// 地址里的 `@Headers=` 在这里解开，再交给 [KotvFrameImage]。
 class KotvNetworkImage extends StatelessWidget {
   const KotvNetworkImage(
     this.pic, {
@@ -182,7 +182,6 @@ class KotvNetworkImage extends StatelessWidget {
     this.filterQuality = FilterQuality.low,
     this.cacheWidth,
     this.cacheHeight,
-    this.allowPlatformView = false,
     this.gaplessPlayback = true,
   });
 
@@ -193,8 +192,6 @@ class KotvNetworkImage extends StatelessWidget {
   final FilterQuality filterQuality;
   final int? cacheWidth;
   final int? cacheHeight;
-  /// 默认 false。true 时 Android 用 Glide PlatformView（少用，易拖闪壳壁纸）。
-  final bool allowPlatformView;
   /// 为 false 时换地址先清掉上一张，避免列表复用同一格时留着旧图。
   final bool gaplessPlayback;
 
@@ -206,25 +203,6 @@ class KotvNetworkImage extends StatelessWidget {
         return errorBuilder!(context, StateError('empty pic'), StackTrace.empty);
       }
       return const SizedBox.shrink();
-    }
-
-    final useGlide = allowPlatformView && !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    if (useGlide) {
-      final fitParam = fit == BoxFit.contain ? 'contain' : 'cover';
-      // 海报 PlatformView 不参与遥控器焦点，避免焦点陷进原生 ImageView。
-      return ExcludeFocus(
-        child: AndroidView(
-          viewType: 'kotv/glide_image',
-          key: ValueKey('glide|$raw|$fitParam'),
-          creationParams: <String, dynamic>{
-            'url': raw,
-            'fit': fitParam,
-          },
-          creationParamsCodec: const StandardMessageCodec(),
-          gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{},
-          hitTestBehavior: PlatformViewHitTestBehavior.transparent,
-        ),
-      );
     }
 
     final bytes = kotvDecodeDataImage(raw);

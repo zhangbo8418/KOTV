@@ -55,13 +55,9 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
   void _stickWall(String url) {
     final u = url.trim();
     if (u.isEmpty) return;
-    if (u == _stickyWallUrl && ref.read(stickyWallUrlProvider) == u) {
-      unawaited(kotvPersistWallpaper(u));
-      return;
-    }
+    if (u == _stickyWallUrl && ref.read(stickyWallUrlProvider) == u) return;
     setState(() => _stickyWallUrl = u);
     ref.read(stickyWallUrlProvider.notifier).state = u;
-    unawaited(kotvPersistWallpaper(u));
   }
 
   void _clearStickyWall() {
@@ -172,6 +168,7 @@ class _CachedWallImage extends StatefulWidget {
 
 class _CachedWallImageState extends State<_CachedWallImage> {
   Uint8List? _bytes;
+  bool _checked = false;
   int _gen = 0;
 
   @override
@@ -184,7 +181,7 @@ class _CachedWallImageState extends State<_CachedWallImage> {
   void didUpdateWidget(covariant _CachedWallImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url != widget.url) {
-      _bytes = null;
+      _checked = false;
       unawaited(_load(widget.url));
     }
   }
@@ -196,20 +193,32 @@ class _CachedWallImageState extends State<_CachedWallImage> {
       await kotvPersistWallpaper(url);
       bytes = await kotvReadWallpaperBytes(url);
     }
-    if (!mounted || gen != _gen || bytes == null) return;
-    setState(() => _bytes = bytes);
+    if (!mounted || gen != _gen) return;
+    setState(() {
+      _checked = true;
+      _bytes = bytes;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final parsed = kotvResolveImageRequest(widget.url);
-    return KotvFrameImage(
-      bytes: _bytes,
-      url: parsed.url,
-      headers: parsed.headers,
-      targetWidth: widget.decodeWidth,
+    final bytes = _bytes;
+    if (bytes != null) {
+      return KotvFrameImage(
+        bytes: bytes,
+        targetWidth: widget.decodeWidth,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    }
+    if (!_checked) return const SizedBox.expand();
+    return KotvNetworkImage(
+      widget.url,
       fit: BoxFit.cover,
       filterQuality: FilterQuality.medium,
+      cacheWidth: widget.decodeWidth,
       gaplessPlayback: true,
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
     );

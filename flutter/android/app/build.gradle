@@ -1,7 +1,6 @@
 plugins {
     id "com.android.application"
     id "kotlin-android"
-    id "kotlin-kapt"
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
     id "com.chaquo.python"
@@ -217,9 +216,6 @@ dependencies {
     implementation "androidx.media3:media3-effect:$media3"
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
     implementation "com.squareup.okhttp3:okhttp-android:5.5.0"
-    // 海报用 Glide + @Headers=
-    implementation "com.github.bumptech.glide:glide:4.16.0"
-    kapt "com.github.bumptech.glide:compiler:4.16.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load
     implementation "wang.harlon.quickjs:wrapper-android:3.2.3"
     // YouTube 提取（NewPipeExtractor）
