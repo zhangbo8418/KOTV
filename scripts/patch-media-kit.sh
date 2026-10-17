@@ -38,6 +38,10 @@
 # （均为 mdk Global-Options 文档项）。上游 fvp 会写 d3d11.sync.cpu，wiki/mdk.dll 均无此
 # 全局选项（仅有环境变量 D3D11_SYNC_CPU 与文档项 d3d11.sync.kmt），故删掉那一行。
 #
+# window_manager 0.4.3 进入系统全屏只改主窗口，离开时才 ForceChildRefresh
+# 把 Flutter 子窗口宽度 +1 再改回。Win7 第一次全屏因此画面定住，还原后再进才动。
+# 进入分支末尾补同一次 ForceChildRefresh。
+#
 # 幂等：已打过直接通过；找不到目标片段且未打过 → 失败（禁止带着 bug 出包）。
 # 用法：scripts/patch-media-kit.sh   （flutter-pub-get.sh 末尾自动调用）
 set -euo pipefail
@@ -1135,4 +1139,53 @@ if "releasePlayer(nativeHandle)" not in player_check or "Platform.isAndroid" not
     sys.exit(1)
 
 print(f"ok fvp ({fvp_version}) patches applied ({player_dart})")
+
+wm_root = None
+wm_version = "?"
+for pkg in data.get("packages", []):
+    if pkg.get("name") != "window_manager":
+        continue
+    uri = pkg.get("rootUri") or ""
+    if uri.startswith("file:"):
+        wm_root = pathlib.Path(url2pathname(urlparse(uri).path))
+    else:
+        wm_root = (cfg.parent / uri).resolve()
+    wm_version = wm_root.name
+    break
+if wm_root is None:
+    print("ERROR: window_manager not in package_config.json", file=sys.stderr)
+    sys.exit(1)
+wm_cpp = wm_root / "windows" / "window_manager.cpp"
+if not wm_cpp.is_file():
+    print(f"ERROR: missing {wm_cpp}", file=sys.stderr)
+    sys.exit(1)
+WM_OLD = """                     SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+  } else {  // Restore from fullscreen"""
+WM_NEW = """                     SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+    // KOTV patch (scripts/patch-media-kit.sh): leave already calls
+    // ForceChildRefresh from WM_SIZE. Enter never did, so the first
+    // fullscreen on Windows 7 leaves the picture stuck.
+    ForceChildRefresh();
+  } else {  // Restore from fullscreen"""
+wm_text = wm_cpp.read_text(encoding="utf-8")
+if "Enter never did, so the first" in wm_text and "ForceChildRefresh();" in wm_text.split("Restore from fullscreen", 1)[0]:
+    print(f"ok window_manager ({wm_version}) already patched: fullscreen enter ForceChildRefresh")
+elif WM_OLD in wm_text:
+    wm_cpp.write_text(wm_text.replace(WM_OLD, WM_NEW, 1), encoding="utf-8")
+    print(f"patched window_manager ({wm_version}): fullscreen enter ForceChildRefresh")
+else:
+    print(
+        f"ERROR: window_manager ({wm_version}) SetFullScreen anchor missing; "
+        "upstream changed — update scripts/patch-media-kit.sh",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+wm_check = wm_cpp.read_text(encoding="utf-8")
+anchor = "} else {  // Restore from fullscreen"
+idx = wm_check.find(anchor)
+if idx < 0 or "ForceChildRefresh();" not in wm_check[max(0, idx - 400):idx]:
+    print("ERROR: window_manager enter-fullscreen still missing ForceChildRefresh", file=sys.stderr)
+    sys.exit(1)
 PY
