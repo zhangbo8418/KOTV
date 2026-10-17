@@ -88,7 +88,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final s = LayoutScale.of(context);
+    final s = LayoutScale.layoutOf(context);
+    final grow = LayoutScale.growAboveDesign(LayoutScale.of(context));
     final cfg = ref.watch(configProvider);
     final siteCount = cfg.maybeWhen(
       data: (c) => ((c['sites'] as List?) ?? []).length,
@@ -97,11 +98,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final logoUrl = cfg.maybeWhen(data: (c) => '${c['logo'] ?? ''}'.trim(), orElse: () => '');
     final bottomNav = KotvLayout.useBottomNav(context);
     final compact = KotvLayout.isCompact(context);
-    // 固定高度：不跟过小的 design scale 把用户信息挤爆
-    final cardH = compact ? 200.0 : 128.0;
-    final featureH = compact ? 72.0 : 104.0;
-    final gap = compact ? 12.0 : 16.0;
-    final sidePad = compact ? 12.0 : 28.0;
+    // 小窗保持设计高度，大于 720p 再按同一倍数加高，避免字被缩回卡片里。
+    final cardH = (compact ? 200.0 : 128.0) * grow;
+    final featureH = (compact ? 72.0 : 104.0) * grow;
+    final gap = (compact ? 12.0 : 16.0) * s;
+    final sidePad = (compact ? 12.0 : 28.0) * s;
     final p = KotvPalette.of(context);
 
     Widget logoAvatar({required double radius}) => ConfigLogoAvatar(
@@ -147,7 +148,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             Column(
               children: [
                 SizedBox(
-                  height: 72,
+                  height: featureH,
                   child: Row(
                     children: [
                       Expanded(
@@ -157,7 +158,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           start: const Color(0xEE6E29CD),
                           end: const Color(0xEE3B19A7),
                           icon: Icons.settings,
-                          height: 72,
+                          height: featureH,
                           onTap: () => goKotvPage(ref, KotvPage.settings),
                         ),
                       ),
@@ -169,7 +170,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           start: const Color(0xF0E5BA43),
                           end: const Color(0xF0B57928),
                           icon: Icons.download,
-                          height: 72,
+                          height: featureH,
                           onTap: _checkUpdate,
                         ),
                       ),
@@ -183,7 +184,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   start: const Color(0xEE49A7E9),
                   end: const Color(0xEE376EC5),
                   icon: Icons.info_outline,
-                  height: 72,
+                  height: featureH,
                   onTap: _showAbout,
                 ),
               ],
@@ -207,7 +208,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   flex: 34,
                   child: Row(
                     children: [
-                      logoAvatar(radius: 30),
+                      logoAvatar(radius: 30 * s),
                       SizedBox(width: 12 * s),
                       Expanded(
                         child: Column(

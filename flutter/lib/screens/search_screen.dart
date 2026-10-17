@@ -581,8 +581,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           children: [
             for (var i = 0; i < _keys.length; i++)
               SizedBox(
-                width: 44,
-                height: 42,
+                width: 44 * LayoutScale.layoutOf(context),
+                height: 42 * LayoutScale.layoutOf(context),
                 child: AppPill(
                   label: _keys[i],
                   height: 42,

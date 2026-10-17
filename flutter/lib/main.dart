@@ -388,7 +388,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
                 break;
             }
           },
-          child: child ?? const SizedBox.shrink(),
+          child: ScaledLayoutBox(child: child ?? const SizedBox.shrink()),
         );
       },
       home: ready.when(
@@ -427,7 +427,7 @@ class _EngineOfflinePage extends ConsumerWidget {
         backgroundColor: p.dialogBg,
         title: Text('连接后端服务', style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 520,
+          width: 520 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
           child: KotvTvTextField(
             controller: ctrl,
             autofocus: true,

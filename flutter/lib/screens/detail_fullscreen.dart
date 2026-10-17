@@ -1074,6 +1074,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         backgroundColor: widget.externalVideo ? Colors.transparent : Colors.black,
         body: LayoutBuilder(
           builder: (context, c) {
+            final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
             // 横屏钮由 initState / playback listener 刷新；勿在 build 里登记 postFrame。
             return MouseRegion(
               cursor: _mouseCursor,
@@ -1169,10 +1170,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                     IgnorePointer(
                       child: Center(
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                          padding: EdgeInsets.symmetric(horizontal: 18 * ui, vertical: 10 * ui),
                           decoration: BoxDecoration(
                             color: Colors.black.withOpacity(0.62),
-                            borderRadius: BorderRadius.circular(22),
+                            borderRadius: BorderRadius.circular(22 * ui),
                           ),
                           child: Text(
                             _holdSpeedHint!,
@@ -1197,10 +1198,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                           opacity: 1,
                           duration: const Duration(milliseconds: 120),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                            padding: EdgeInsets.symmetric(horizontal: 18 * ui, vertical: 10 * ui),
                             decoration: BoxDecoration(
                               color: Colors.black.withOpacity(0.62),
-                              borderRadius: BorderRadius.circular(22),
+                              borderRadius: BorderRadius.circular(22 * ui),
                             ),
                             child: Text(
                               _swipeHint!,

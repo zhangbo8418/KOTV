@@ -337,8 +337,7 @@ class _AppShellState extends ConsumerState<AppShell> {
             right: !immersiveDetail,
             // 有底栏时由 Scaffold 占位；沉浸/详情盖壳不留底边；平板无底栏时仍避让手势条。
             bottom: !immersiveDetail && !bottomNav && !detailCover,
-            child: ScaledLayoutBox(
-              child: Stack(
+            child: Stack(
                 fit: StackFit.expand,
                 children: [
                   // 内层 Navigator 会抢走系统返回；无子路由可 pop 时必须用
@@ -363,27 +362,29 @@ class _AppShellState extends ConsumerState<AppShell> {
                         onLongPress: () => ref.read(uiBusyProvider.notifier).state = null,
                         child: ColoredBox(
                           color: Colors.black.withOpacity(0.55),
-                          child: Center(
-                            child: Container(
+                            child: Center(
+                              child: Builder(builder: (context) {
+                              final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
+                              return Container(
                               constraints: BoxConstraints(
-                                minWidth: KotvLayout.isCompact(context) ? 200 : 280,
-                                maxWidth: 420,
+                                minWidth: (KotvLayout.isCompact(context) ? 200 : 280) * ui,
+                                maxWidth: 420 * ui,
                               ),
-                              padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 28),
+                              padding: EdgeInsets.symmetric(horizontal: 36 * ui, vertical: 28 * ui),
                               decoration: BoxDecoration(
                                 color: KotvPalette.of(context).dialogBg,
-                                borderRadius: BorderRadius.circular(18),
+                                borderRadius: BorderRadius.circular(18 * ui),
                                 border: Border.all(color: KotvPalette.of(context).outline),
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   SizedBox(
-                                    width: 36,
-                                    height: 36,
+                                    width: 36 * ui,
+                                    height: 36 * ui,
                                     child: CircularProgressIndicator(color: KotvPalette.of(context).fg, strokeWidth: 3),
                                   ),
-                                  const SizedBox(height: 14),
+                                  SizedBox(height: 14 * ui),
                                   Text(
                                     busy,
                                     textAlign: TextAlign.center,
@@ -391,14 +392,14 @@ class _AppShellState extends ConsumerState<AppShell> {
                                   ),
                                 ],
                               ),
-                            ),
+                            );
+                            }),
                           ),
                         ),
                       ),
                     ),
                 ],
               ),
-            ),
           ),
           bottomNavigationBar: bottomNav
               ? Builder(builder: (context) {

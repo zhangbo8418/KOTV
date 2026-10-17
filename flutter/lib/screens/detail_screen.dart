@@ -4347,7 +4347,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         backgroundColor: p.dialogBg,
         title: Text(d.name, style: TextStyle(color: p.fg)),
         content: SizedBox(
-          width: 520,
+          width: 520 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

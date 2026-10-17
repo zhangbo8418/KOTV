@@ -22,6 +22,7 @@ import '../providers.dart';
 import '../api/kotv_settings_cache.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/kotv_palette.dart';
+import '../theme/layout_scale.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/stable_focus.dart';
 import '../util/kotv_app_dirs.dart';
@@ -224,7 +225,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text(title,
             style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 540,
+          width: 540 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
           child: KotvTvTextField(
             controller: c,
             autofocus: true,
@@ -320,7 +321,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text('代理地址',
             style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 540,
+          width: 540 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
           child: KotvTvTextField(
             controller: c,
             autofocus: true,
@@ -474,7 +475,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 140),
+                constraints: BoxConstraints(
+                  maxWidth: 140 * LayoutScale.growAboveDesign(LayoutScale.of(context)),
+                ),
                 child: Text(
                   value,
                   maxLines: 1,
@@ -1675,7 +1678,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text('播放缺省 User-Agent',
             style: TextStyle(color: p.fg, fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 540,
+          width: 540 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2060,7 +2063,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: Text(type == 'keep' ? '发送收藏到设备' : '发送历史到设备',
             style: TextStyle(color: p.fg)),
         content: SizedBox(
-          width: 420,
+          width: 420 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

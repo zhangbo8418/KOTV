@@ -83,13 +83,6 @@ class KotvLayout {
     return size.width < 720 || size.shortestSide < 560;
   }
 
-  /// 全屏播放器控件缩放：手机横屏缩小菜单/字号。
-  static double chromeScale(BuildContext context) {
-    if (isLandscapeCompact(context)) return 0.72;
-    if (useBottomNav(context)) return 0.88;
-    return 1.0;
-  }
-
   static EdgeInsets pagePadding(BuildContext context, {double desk = 28, double compact = 12}) {
     final v = isCompact(context) ? compact : desk;
     return EdgeInsets.symmetric(horizontal: v);

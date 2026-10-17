@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../nav/kotv_routes.dart';
 import '../providers.dart';
 import '../theme/kotv_palette.dart';
+import '../theme/layout_scale.dart';
 import '../theme/kotv_theme.dart';
 import '../util/kotv_io.dart';
 
@@ -161,6 +162,7 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     return PopScope(
       canPop: _isRoot,
       onPopInvoked: (didPop) {
@@ -169,6 +171,8 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
       child: Scaffold(
         backgroundColor: p.surface,
         appBar: AppBar(
+          toolbarHeight: kToolbarHeight * ui,
+          iconTheme: IconThemeData(size: 24 * ui, color: p.fg),
           backgroundColor: p.surface,
           foregroundColor: p.fg,
           title: Text(widget.title),

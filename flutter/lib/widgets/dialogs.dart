@@ -27,20 +27,26 @@ Future<void> _prepareLeavePlayback() async {
   await LiveScreen.prepareLeave();
 }
 
-/// 弹窗尺寸：窄屏用满宽减边距，避免固定 720 被压成竖条。
-({double width, double height, EdgeInsets inset, bool compact}) _dialogMetrics(
-    BuildContext context) {
+/// 弹窗尺寸：窄屏用满宽减边距。大于 720p 时上限跟窗口倍数走，仍不超过屏幕。
+({double width, double height, EdgeInsets inset, bool compact, double ui})
+    _dialogMetrics(BuildContext context) {
   final sz = MediaQuery.sizeOf(context);
   final compact = KotvLayout.isCompact(context);
+  final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
   final inset = compact
-      ? const EdgeInsets.symmetric(horizontal: 10, vertical: 12)
-      : const EdgeInsets.symmetric(horizontal: 48, vertical: 40);
-  final innerW = sz.width - inset.horizontal;
-  final innerH = sz.height - inset.vertical;
-  final width = innerW.clamp(280.0, 720.0);
-  final height =
-      (innerH * (compact ? 0.86 : 0.82)).clamp(compact ? 300.0 : 360.0, 560.0);
-  return (width: width, height: height, inset: inset, compact: compact);
+      ? EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 12 * ui)
+      : EdgeInsets.symmetric(horizontal: 48 * ui, vertical: 40 * ui);
+  final innerW = (sz.width - inset.horizontal).clamp(0.0, double.infinity);
+  final innerH = (sz.height - inset.vertical).clamp(0.0, double.infinity);
+  final widthHi = 720.0 * ui < innerW ? 720.0 * ui : innerW;
+  final widthLo = 280.0 * ui < widthHi ? 280.0 * ui : widthHi;
+  final width = innerW < widthLo ? widthLo : (innerW > widthHi ? widthHi : innerW);
+  final ratioH = innerH * (compact ? 0.86 : 0.82);
+  final capH = 560.0 * ui < innerH ? 560.0 * ui : innerH;
+  final floorH = (compact ? 300.0 : 360.0) * ui;
+  final heightLo = floorH < capH ? floorH : capH;
+  final height = ratioH < heightLo ? heightLo : (ratioH > capH ? capH : ratioH);
+  return (width: width, height: height, inset: inset, compact: compact, ui: ui);
 }
 
 // 添加源时选择本机配置文件。
@@ -153,11 +159,12 @@ Widget _configDialogActions({
   );
 }
 
-/// 一行里胶囊高度会乘布局缩放，旁边圆形按钮固定 36。行高取二者较大值再加分隔。
+/// 一行里胶囊高度会乘布局缩放，旁边圆形按钮同样放大。行高取二者较大值再加分隔。
 double _pillRowStride(BuildContext context,
     {required double pillHeight, required double gap, double beside = 36}) {
   final h = pillHeight * LayoutScale.layoutOf(context);
-  return (h > beside ? h : beside) + gap;
+  final icon = beside * LayoutScale.growAboveDesign(LayoutScale.of(context));
+  return (h > icon ? h : icon) + gap;
 }
 
 Future<void> showSitePicker(
@@ -214,7 +221,7 @@ Future<void> showSitePicker(
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: KotvPalette.of(ctx).dialogBg,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(18 * m.ui),
                   border: Border.all(color: KotvPalette.of(ctx).outline),
                 ),
                 child: Padding(
@@ -455,7 +462,7 @@ Future<bool> showAddVodDialog(BuildContext context, WidgetRef ref) async {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: p.dialogBg,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(18 * m.ui),
                   border: Border.all(color: p.outline),
                 ),
                 child: Padding(
@@ -705,7 +712,7 @@ Future<({String url, String name})?> _showEditSourceDialog(
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: p.dialogBg,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(18 * m.ui),
                   border: Border.all(color: p.outline),
                 ),
                 child: Padding(
@@ -819,7 +826,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: p.dialogBg,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(18 * m.ui),
               border: Border.all(color: p.outline),
             ),
             child: Padding(
@@ -1049,7 +1056,7 @@ Future<List<String>?> pickMultiChoice(
             backgroundColor: p.dialogBg,
             title: Text(title, style: TextStyle(color: p.fg)),
             content: SizedBox(
-              width: 420,
+              width: 420 * LayoutScale.growAboveDesign(LayoutScale.of(ctx)),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -1262,7 +1269,7 @@ class _SourceListDialogState extends State<_SourceListDialog> {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: bg,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(18 * m.ui),
             border: Border.all(color: border),
           ),
           child: Padding(
@@ -1396,10 +1403,11 @@ class _CircleIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     // 遥控器要能落到搜索/换源/删除；纯 InkWell 无焦点框。
     return TvFocus(
       onPressed: onTap,
-      borderRadius: 18,
+      borderRadius: 18 * ui,
       child: Material(
         color: p.pillBg,
         shape: const CircleBorder(),
@@ -1409,7 +1417,9 @@ class _CircleIcon extends StatelessWidget {
           onLongPress: onLongPress,
           canRequestFocus: false,
           child: SizedBox(
-              width: 36, height: 36, child: Icon(icon, color: p.fg, size: 18)),
+              width: 36 * ui,
+              height: 36 * ui,
+              child: Icon(icon, color: p.fg, size: 18 * ui)),
         ),
       ),
     );
@@ -1462,21 +1472,22 @@ class SettingChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = KotvPalette.of(context);
+    final ui = LayoutScale.growAboveDesign(LayoutScale.of(context));
     return TvFocus(
       onPressed: onTap,
-      borderRadius: 10,
+      borderRadius: 10 * ui,
       scrollIntoView: true,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
           canRequestFocus: false,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(10 * ui),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             curve: Curves.easeOut,
-            constraints: const BoxConstraints(minWidth: 108, minHeight: 40),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            constraints: BoxConstraints(minWidth: 108 * ui, minHeight: 40 * ui),
+            padding: EdgeInsets.symmetric(horizontal: 16 * ui, vertical: 10 * ui),
             decoration: BoxDecoration(
               color: selected ? p.selected : p.pillBg,
               borderRadius: BorderRadius.circular(10),
