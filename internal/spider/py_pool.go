@@ -2,6 +2,7 @@ package spider
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // pyPool 同站 Python 进程池：每个 slot 一个常驻 pySpider，多用户可并行打同一站。
@@ -13,6 +14,7 @@ type pyPool struct {
 	max     int
 	waiters []chan struct{}
 	busy    []bool
+	closed  atomic.Bool
 }
 
 func newPyPool(key, api, ext, jar string) *pyPool {
@@ -22,6 +24,9 @@ func newPyPool(key, api, ext, jar string) *pyPool {
 func (p *pyPool) retarget(key, ext, jar string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.closed.Load() {
+		return
+	}
 	p.key, p.ext, p.jar = key, ext, jar
 	for _, s := range p.slots {
 		s.mu.Lock()
@@ -33,14 +38,18 @@ func (p *pyPool) retarget(key, ext, jar string) {
 	}
 }
 
-func (p *pyPool) acquire() (*pySpider, int) {
+func (p *pyPool) acquire() (*pySpider, int, error) {
 	p.mu.Lock()
 	for {
+		if p.closed.Load() {
+			p.mu.Unlock()
+			return nil, -1, ErrScriptInterrupted
+		}
 		for i, s := range p.slots {
 			if !p.busy[i] {
 				p.busy[i] = true
 				p.mu.Unlock()
-				return s, i
+				return s, i, nil
 			}
 		}
 		if len(p.slots) < p.max {
@@ -49,9 +58,9 @@ func (p *pyPool) acquire() (*pySpider, int) {
 			p.busy = append(p.busy, true)
 			idx := len(p.slots) - 1
 			p.mu.Unlock()
-			return s, idx
+			return s, idx, nil
 		}
-		ch := make(chan struct{}, 1)
+		ch := make(chan struct{})
 		p.waiters = append(p.waiters, ch)
 		p.mu.Unlock()
 		<-ch
@@ -98,7 +107,10 @@ func (p *pyPool) interrupt() {
 }
 
 func (p *pyPool) withSlot(fn func(s *pySpider, slot int) (string, error)) (string, error) {
-	s, idx := p.acquire()
+	s, idx, err := p.acquire()
+	if err != nil {
+		return "", err
+	}
 	defer p.release(idx)
 	return fn(s, idx)
 }
@@ -138,7 +150,10 @@ func (p *pyPool) LiveContent(url string) (string, error) {
 	return p.withSlot(func(s *pySpider, _ int) (string, error) { return s.LiveContent(url) })
 }
 func (p *pyPool) Proxy(params map[string]string) (int, string, []byte, map[string]string, error) {
-	s, idx := p.acquire()
+	s, idx, err := p.acquire()
+	if err != nil {
+		return 0, "", nil, nil, err
+	}
 	defer p.release(idx)
 	return s.Proxy(params)
 }
@@ -146,21 +161,33 @@ func (p *pyPool) Action(action string) (string, error) {
 	return p.withSlot(func(s *pySpider, _ int) (string, error) { return s.Action(action) })
 }
 func (p *pyPool) ManualVideoCheck() (bool, error) {
-	s, idx := p.acquire()
+	s, idx, err := p.acquire()
+	if err != nil {
+		return false, err
+	}
 	defer p.release(idx)
 	return s.ManualVideoCheck()
 }
 func (p *pyPool) IsVideoFormat(u string) (bool, error) {
-	s, idx := p.acquire()
+	s, idx, err := p.acquire()
+	if err != nil {
+		return false, err
+	}
 	defer p.release(idx)
 	return s.IsVideoFormat(u)
 }
 func (p *pyPool) Destroy() {
 	p.mu.Lock()
+	p.closed.Store(true)
 	slots := append([]*pySpider(nil), p.slots...)
 	p.slots = nil
 	p.busy = nil
+	waiters := p.waiters
+	p.waiters = nil
 	p.mu.Unlock()
+	for _, ch := range waiters {
+		close(ch)
+	}
 	for _, s := range slots {
 		s.Destroy()
 	}

@@ -120,13 +120,12 @@ func (a *App) APIGetConfig() map[string]any {
 
 func (a *App) APILoadConfig(source string) error {
 	cfg, sites, sess := a.scope()
-	prevAPI := cfg.API()
 	sites.DropContentCache()
 	sites.SoftCancelPending()
-	if err := cfg.LoadFromSource(source); err != nil {
+	if err := cfg.LoadVod(source, false); err != nil {
 		return err
 	}
-	a.switchConfigJars(prevAPI, cfg.API())
+	a.switchConfigJars(cfg.API())
 	a.finishConfigLoad(cfg, sess, source)
 	return nil
 }
@@ -148,18 +147,17 @@ func (a *App) APIRefreshConfig() error {
 	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		return fmt.Errorf("当前源不是 http(s) 仓库，已跳过刷新")
 	}
-	prevAPI := cfg.API()
 	if err := cfg.ReloadJSON(source); err != nil {
 		return err
 	}
-	a.switchConfigJars(prevAPI, cfg.API())
+	a.switchConfigJars(cfg.API())
 	sites.DropContentCache()
 	a.finishConfigLoad(cfg, sess, source)
 	return nil
 }
 
-func (a *App) switchConfigJars(prev, next model.Api) {
-	if err := spider.ApplyConfigJars(prev.URL, prev.Spider, config.JarSpecs(prev), next.URL, next.Spider, config.JarSpecs(next)); err != nil {
+func (a *App) switchConfigJars(next model.Api) {
+	if err := spider.ApplyConfigJars(next.URL, next.Spider); err != nil {
 		log.Printf("spider.jar 加载失败: %v", err)
 	}
 }

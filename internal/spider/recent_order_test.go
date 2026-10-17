@@ -58,6 +58,68 @@ func TestSameScriptReusedUntilLeft(t *testing.T) {
 	}
 }
 
+func TestPoolAcquireAfterDestroy(t *testing.T) {
+	py := newPyPool("k", "http://example.com/a.py", "", "")
+	if _, _, err := py.acquire(); err != nil {
+		t.Fatal(err)
+	}
+	py.Destroy()
+	if _, _, err := py.acquire(); err == nil {
+		t.Fatal("销毁后的 Python 池不应再拉起进程")
+	}
+	js := newJsPool("k", "http://example.com/a.js", "", "")
+	if _, _, err := js.acquire(); err != nil {
+		t.Fatal(err)
+	}
+	js.Destroy()
+	if _, _, err := js.acquire(); err == nil {
+		t.Fatal("销毁后的 JS 池不应再开 Runtime")
+	}
+}
+
+func TestPyStartLockedAfterDestroy(t *testing.T) {
+	s := &pySpider{key: "k", api: "http://example.com/a.py"}
+	s.Destroy()
+	s.mu.Lock()
+	err := s.startLocked("python", "runner", "script")
+	s.mu.Unlock()
+	if err == nil {
+		t.Fatal("已销毁的 Python 不应再启动进程")
+	}
+}
+
+func TestReleaseConfigScriptsClearsCurrentUserOnly(t *testing.T) {
+	Clear()
+	t.Cleanup(Clear)
+	jsPyMu.Lock()
+	jsPy["\x01py:http://example.com/a.py"] = newPyPool("a", "http://example.com/a.py", "", "")
+	jsPy["\x01js:http://example.com/a.js"] = newJsPool("a", "http://example.com/a.js", "", "")
+	jsPy["u2\x01py:http://example.com/b.py"] = newPyPool("b", "http://example.com/b.py", "", "")
+	recentPyKey = "\x01py:http://example.com/a.py"
+	recentJsKey = "u2\x01js:http://example.com/b.js"
+	jsPyMu.Unlock()
+
+	releaseConfigScripts()
+
+	jsPyMu.Lock()
+	defer jsPyMu.Unlock()
+	if _, ok := jsPy["\x01py:http://example.com/a.py"]; ok {
+		t.Fatal("切仓应清掉当前用户的全部 py")
+	}
+	if _, ok := jsPy["\x01js:http://example.com/a.js"]; ok {
+		t.Fatal("切仓应清掉当前用户的全部 js")
+	}
+	if _, ok := jsPy["u2\x01py:http://example.com/b.py"]; !ok {
+		t.Fatal("切仓不应清掉其他用户")
+	}
+	if recentPyKey != "" {
+		t.Fatal("当前用户的 recent 应清掉")
+	}
+	if recentJsKey != "u2\x01js:http://example.com/b.js" {
+		t.Fatalf("其他用户 recent 应留着, got %q", recentJsKey)
+	}
+}
+
 func TestIsCSP(t *testing.T) {
 	if !isCSP("csp_XPath") {
 		t.Fatal("csp_ prefix")

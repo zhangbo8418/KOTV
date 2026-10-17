@@ -358,14 +358,7 @@ func softCancelSharedBridgeOnly() {
 }
 
 func clearSharedJarSpiders() {
-	jarMu.Lock()
-	for k := range jarSpiders {
-		// 本机共享：RuntimeUserID 为空，cacheKey 以 "\x01" 开头
-		if strings.HasPrefix(k, "\x01") {
-			delete(jarSpiders, k)
-		}
-	}
-	jarMu.Unlock()
+	dropJarSpiders("\x01", false)
 }
 
 // InterruptJavaBridge 硬杀本机共享 JVM（兼容旧调用）；等同 RestartSharedRuntime 的 JVM 部分但不清 Py/JS。

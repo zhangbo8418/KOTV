@@ -56,6 +56,7 @@ type pySpider struct {
 	proc         atomic.Pointer[os.Process]
 	epoch        atomic.Uint64
 	nextID       atomic.Uint64
+	dead         atomic.Bool
 	inited       bool
 	activeClient atomic.Value // string
 }
@@ -81,40 +82,12 @@ func newPySpider(key, api, ext, jar string) Spider {
 }
 
 func clearJsPy() {
-	jsPyMu.Lock()
-	spiders := make([]Spider, 0, len(jsPy))
-	for _, s := range jsPy {
-		spiders = append(spiders, s)
-	}
-	jsPy = map[string]Spider{}
-	recentJsKey = ""
-	recentPyKey = ""
-	jsPyMu.Unlock()
-	for _, s := range spiders {
-		s.Destroy()
-	}
+	destroyScripts("", true)
 }
 
 // clearSharedJsPy 只销毁本机共享池（uid 空），保留远端每用户的 Py/JS。
 func clearSharedJsPy() {
-	jsPyMu.Lock()
-	var doomed []Spider
-	for k, s := range jsPy {
-		if strings.HasPrefix(k, "\x01") {
-			doomed = append(doomed, s)
-			delete(jsPy, k)
-		}
-	}
-	if strings.HasPrefix(recentJsKey, "\x01") {
-		recentJsKey = ""
-	}
-	if strings.HasPrefix(recentPyKey, "\x01") {
-		recentPyKey = ""
-	}
-	jsPyMu.Unlock()
-	for _, s := range doomed {
-		s.Destroy()
-	}
+	destroyScripts("\x01", false)
 }
 
 // jsPyKey 运行时实例键：用户 + 脚本 api。同一份脚本复用已有池。
@@ -127,10 +100,32 @@ func ReleaseOtherScripts(api string) {
 	keepPy := jsPyKey("py", api)
 	keepJs := jsPyKey("js", api)
 	prefix := hostclient.RuntimeUserID() + "\x01"
+	destroyScripts(prefix, false, keepPy, keepJs)
+}
+
+// DestroyUserScripts 销毁指定用户的全部 Py/JS 池。
+func DestroyUserScripts(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	destroyScripts(userID+"\x01", false)
+}
+
+func destroyScripts(prefix string, all bool, keep ...string) {
+	keepSet := map[string]struct{}{}
+	for _, k := range keep {
+		if k != "" {
+			keepSet[k] = struct{}{}
+		}
+	}
 	jsPyMu.Lock()
 	var doomed []Spider
 	for k, s := range jsPy {
-		if !strings.HasPrefix(k, prefix) || k == keepPy || k == keepJs {
+		if !all && !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		if _, ok := keepSet[k]; ok {
 			continue
 		}
 		doomed = append(doomed, s)
@@ -142,26 +137,9 @@ func ReleaseOtherScripts(api string) {
 			recentPyKey = ""
 		}
 	}
-	jsPyMu.Unlock()
-	for _, s := range doomed {
-		s.Destroy()
-	}
-}
-
-// DestroyUserScripts 销毁指定用户的全部 Py/JS 池。
-func DestroyUserScripts(userID string) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return
-	}
-	prefix := userID + "\x01"
-	jsPyMu.Lock()
-	var doomed []Spider
-	for k, s := range jsPy {
-		if strings.HasPrefix(k, prefix) {
-			doomed = append(doomed, s)
-			delete(jsPy, k)
-		}
+	if all {
+		recentJsKey = ""
+		recentPyKey = ""
 	}
 	jsPyMu.Unlock()
 	for _, s := range doomed {
@@ -335,6 +313,9 @@ func pyRunnerPath() (string, error) {
 func (s *pySpider) run(method string, args map[string]interface{}) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.dead.Load() {
+		return "", ErrScriptInterrupted
+	}
 	cid := hostclient.ScopeID()
 	s.activeClient.Store(cid)
 	defer s.activeClient.Store("")
@@ -491,6 +472,9 @@ func pySitePackages(pythonExe string) []string {
 }
 
 func (s *pySpider) startLocked(python, runner, script string) error {
+	if s.dead.Load() {
+		return ErrScriptInterrupted
+	}
 	if s.cmd != nil && s.cmd.Process != nil && s.cmd.ProcessState == nil {
 		return nil
 	}
@@ -528,6 +512,10 @@ func (s *pySpider) startLocked(python, runner, script string) error {
 	}
 	s.cmd, s.stdin, s.stdout = cmd, stdin, bufio.NewReader(stdout)
 	s.proc.Store(cmd.Process)
+	if s.dead.Load() {
+		s.stopLocked()
+		return ErrScriptInterrupted
+	}
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
@@ -727,10 +715,12 @@ func (s *pySpider) IsVideoFormat(u string) (bool, error) {
 }
 
 func (s *pySpider) Destroy() {
-	s.mu.Lock()
-	if s.cmd != nil && s.inited {
-		_, _ = s.callLocked(s.epoch.Load(), "destroy", map[string]interface{}{})
+	s.dead.Store(true)
+	s.epoch.Add(1)
+	if p := s.proc.Load(); p != nil {
+		killProcessTree(p)
 	}
+	s.mu.Lock()
 	s.stopLocked()
 	s.mu.Unlock()
 	s.interrupt()

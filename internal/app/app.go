@@ -536,14 +536,13 @@ func (a *App) ReloadConfig() error {
 	// 换仓前先不可用，避免 Clear 窗口内仍 Ready 去 Get ""。
 	a.Ready = false
 	a.ErrMsg = ""
-	prevAPI := a.Config.API()
 	a.Sites.DropContentCache()
 	a.Config.Clear()
-	if err := a.Config.InitFromSettings(); err != nil {
+	if err := a.Config.LoadSettings(false); err != nil {
 		a.ErrMsg = err.Error()
 		return err
 	}
-	a.switchConfigJars(prevAPI, a.Config.API())
+	a.switchConfigJars(a.Config.API())
 	a.Ready = true
 	a.ErrMsg = ""
 	a.Live.SyncFromConfig()
@@ -557,14 +556,13 @@ func (a *App) LoadVodSource(source string) error {
 	spider.SetUserProxy(settings.Get(settings.Proxy))
 	a.Ready = false
 	a.ErrMsg = ""
-	prevAPI := a.Config.API()
 	a.Sites.DropContentCache()
 	a.Config.Clear()
-	if err := a.Config.LoadFromSource(source); err != nil {
+	if err := a.Config.LoadVod(source, false); err != nil {
 		a.ErrMsg = err.Error()
 		return err
 	}
-	a.switchConfigJars(prevAPI, a.Config.API())
+	a.switchConfigJars(a.Config.API())
 	a.Ready = true
 	a.ErrMsg = ""
 	a.Live.SyncFromConfig()

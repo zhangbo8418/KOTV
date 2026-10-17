@@ -305,6 +305,11 @@ func (m *Manager) EnsureVodFromHistory() {
 // InitFromSettings 以 settings.VOD 为准加载；仅未配置时回落 DB 最近一条。
 // 成功后按 settings.Home 恢复首页站（禁止默默落到列表第一项盖掉已选）。
 func (m *Manager) InitFromSettings() error {
+	return m.LoadSettings(true)
+}
+
+// LoadSettings 按设置加载点播源。loadJar 为假时只更新配置，jar 由换仓清理之后再装。
+func (m *Manager) LoadSettings(loadJar bool) error {
 	vod := strings.TrimSpace(settings.Get(settings.VOD))
 	if vod == "" {
 		_ = m.fillVodPointerIfEmpty()
@@ -312,12 +317,12 @@ func (m *Manager) InitFromSettings() error {
 	}
 	var err error
 	if vod != "" {
-		err = m.initFromVod(vod)
+		err = m.loadVod(vod, loadJar)
 	} else if c := m.latestSiteConfig(); c != nil {
 		if strings.TrimSpace(c.JSON) != "" {
-			err = m.ParseConfig(c, true)
+			err = m.parseConfig(c, true, loadJar)
 		} else if strings.TrimSpace(c.URL) != "" {
-			err = m.ParseConfig(c, false)
+			err = m.parseConfig(c, false, loadJar)
 		} else {
 			err = fmt.Errorf("未配置点播源")
 		}
@@ -367,7 +372,7 @@ func (m *Manager) fillVodPointerIfEmpty() string {
 	return u
 }
 
-func (m *Manager) initFromVod(vod string) error {
+func (m *Manager) loadVod(vod string, loadJar bool) error {
 	vod = NormalizeSource(vod)
 	if vod == "" {
 		return fmt.Errorf("未配置点播源")
@@ -381,13 +386,13 @@ func (m *Manager) initFromVod(vod string) error {
 		if cfg == nil {
 			return fmt.Errorf("配置不存在: %s", vod)
 		}
-		return m.ParseConfig(cfg, cfg.JSON != "")
+		return m.parseConfig(cfg, cfg.JSON != "", loadJar)
 	}
 	// http(s) 每次请求该地址。file 在库里已有正文时用正文，否则读文件。
 	if looksLikeURL(vod) {
 		lower := strings.ToLower(vod)
 		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-			return m.ReloadFresh(vod)
+			return m.reloadFresh(vod, loadJar)
 		}
 		cfg, err := m.db.FindConfig(vod, database.ConfigTypeSite)
 		if err != nil {
@@ -399,47 +404,25 @@ func (m *Manager) initFromVod(vod string) error {
 			cfg.URL = vod
 		}
 		if strings.TrimSpace(cfg.JSON) != "" {
-			return m.ParseConfig(cfg, true)
+			return m.parseConfig(cfg, true, loadJar)
 		}
-		return m.ParseConfig(cfg, false)
+		return m.parseConfig(cfg, false, loadJar)
 	}
 	// 直接粘贴的 JSON 正文：无 url，按内容派生稳定键（同份幂等、不同份并存）。
 	if strings.HasPrefix(vod, "{") || strings.HasPrefix(vod, "[") {
 		cfg := &database.Config{Type: database.ConfigTypeSite, URL: inlineConfigKey(vod), JSON: vod, Name: inlineConfigName(vod)}
-		return m.ParseConfig(cfg, true)
+		return m.parseConfig(cfg, true, loadJar)
 	}
 	cfg := &database.Config{Type: database.ConfigTypeSite, URL: vod}
-	return m.ParseConfig(cfg, false)
-}
-
-// JarSpecs 一份站源里去重后的 jar。空 jar 继承根 spider，不另算一份。
-func JarSpecs(api model.Api) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	add := func(spec string) {
-		spec = strings.TrimSpace(spec)
-		if spec == "" {
-			return
-		}
-		if _, ok := seen[spec]; ok {
-			return
-		}
-		seen[spec] = struct{}{}
-		out = append(out, spec)
-	}
-	root := strings.TrimSpace(api.Spider)
-	add(root)
-	for i := range api.Sites {
-		add(api.Sites[i].Jar)
-	}
-	for i := range api.Lives {
-		add(api.Lives[i].JAR)
-	}
-	return out
+	return m.parseConfig(cfg, false, loadJar)
 }
 
 // ReloadFresh 重新加载点播源。http(s) 不使用库内 JSON，重新请求该地址。
 func (m *Manager) ReloadFresh(source string) error {
+	return m.reloadFresh(source, true)
+}
+
+func (m *Manager) reloadFresh(source string, loadJar bool) error {
 	source = NormalizeSource(source)
 	if source == "" {
 		return fmt.Errorf("未配置点播源")
@@ -457,9 +440,9 @@ func (m *Manager) ReloadFresh(source string) error {
 				cfg.URL = source
 			}
 		}
-		return m.ParseConfig(cfg, false)
+		return m.parseConfig(cfg, false, loadJar)
 	}
-	return m.initFromVod(source)
+	return m.loadVod(source, loadJar)
 }
 
 // ReloadJSON 重新请求 http(s) 仓库并更新站点，不加载 jar。
@@ -554,11 +537,16 @@ func NormalizeSource(source string) string {
 
 // LoadFromSource 加载 URL 或 JSON 正文。解析成功才写库、切当前源；失败时内存里仍是旧配置。
 func (m *Manager) LoadFromSource(source string) error {
+	return m.LoadVod(source, true)
+}
+
+// LoadVod 加载 URL 或 JSON 正文。loadJar 为假时只更新配置，jar 由换仓清理之后再装。
+func (m *Manager) LoadVod(source string, loadJar bool) error {
 	source = NormalizeSource(source)
 	if source == "" {
 		return fmt.Errorf("请输入点播源 URL 或粘贴 JSON")
 	}
-	return m.initFromVod(source)
+	return m.loadVod(source, loadJar)
 }
 
 // ParseConfig 解析配置。
@@ -595,7 +583,7 @@ func (m *Manager) parseConfig(cfg *database.Config, isJSON bool, loadJar bool) e
 		return fmt.Errorf("%s", msg)
 	}
 	if depots := ParseDepotIndex(cleaned); len(depots) > 0 {
-		return m.loadDepotIndex(cfg, depots)
+		return m.loadDepotIndex(cfg, depots, loadJar)
 	}
 
 	api, err := util.DecodeJSON[model.Api](cleaned)
@@ -699,7 +687,7 @@ func ParseDepotIndex(raw string) []model.Depot {
 }
 
 // 批量写入 name+url → 删除索引自身 → 自动加载第一项真实配置。
-func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot) error {
+func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot, loadJar bool) error {
 	if len(depots) == 0 {
 		return fmt.Errorf("仓库索引 urls 为空")
 	}
@@ -742,7 +730,7 @@ func (m *Manager) loadDepotIndex(index *database.Config, depots []model.Depot) e
 		next = &database.Config{Type: database.ConfigTypeSite, URL: first, Name: strings.TrimSpace(depots[0].Name)}
 	}
 	log.Printf("仓库索引展开完成，加载首个线路: %s", first)
-	return m.ParseConfig(next, false)
+	return m.parseConfig(next, false, loadJar)
 }
 
 func (m *Manager) fetchData(source string, isJSON bool, inline string) (string, error) {

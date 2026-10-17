@@ -3,6 +3,7 @@ package spider
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 // jsPool 同站 QuickJS Runtime 池：每个 slot 独立 Runtime，多用户可并行打同一站。
@@ -14,6 +15,7 @@ type jsPool struct {
 	max     int
 	waiters []chan struct{}
 	busy    []bool
+	closed  atomic.Bool
 }
 
 func newJsPool(key, api, ext, jar string) *jsPool {
@@ -23,6 +25,9 @@ func newJsPool(key, api, ext, jar string) *jsPool {
 func (p *jsPool) retarget(key, ext, jar string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.closed.Load() {
+		return
+	}
 	p.key, p.ext, p.jar = key, ext, jar
 	for _, s := range p.slots {
 		s.siteMu.Lock()
@@ -43,14 +48,18 @@ func newJsSpiderWorker(key, api, ext, jar string) *jsSpider {
 	}
 }
 
-func (p *jsPool) acquire() (*jsSpider, int) {
+func (p *jsPool) acquire() (*jsSpider, int, error) {
 	p.mu.Lock()
 	for {
+		if p.closed.Load() {
+			p.mu.Unlock()
+			return nil, -1, ErrScriptInterrupted
+		}
 		for i, s := range p.slots {
 			if !p.busy[i] {
 				p.busy[i] = true
 				p.mu.Unlock()
-				return s, i
+				return s, i, nil
 			}
 		}
 		if len(p.slots) < p.max {
@@ -59,9 +68,9 @@ func (p *jsPool) acquire() (*jsSpider, int) {
 			p.busy = append(p.busy, true)
 			idx := len(p.slots) - 1
 			p.mu.Unlock()
-			return s, idx
+			return s, idx, nil
 		}
-		ch := make(chan struct{}, 1)
+		ch := make(chan struct{})
 		p.waiters = append(p.waiters, ch)
 		p.mu.Unlock()
 		<-ch
@@ -108,14 +117,20 @@ func (p *jsPool) interrupt() {
 }
 
 func (p *jsPool) withSlot(fn func(s *jsSpider) (string, error)) (string, error) {
-	s, idx := p.acquire()
+	s, idx, err := p.acquire()
+	if err != nil {
+		return "", err
+	}
 	defer p.release(idx)
 	return fn(s)
 }
 
 // withStickySlot 同 slot 连续跑多段（如 home→homeVod），避免二次 acquire 冷启新 Runtime。
 func (p *jsPool) withStickySlot(fn func(s *jsSpider) error) error {
-	s, idx := p.acquire()
+	s, idx, err := p.acquire()
+	if err != nil {
+		return err
+	}
 	defer p.release(idx)
 	return fn(s)
 }
@@ -167,7 +182,10 @@ func (p *jsPool) LiveContent(url string) (string, error) {
 	return p.withSlot(func(s *jsSpider) (string, error) { return s.LiveContent(url) })
 }
 func (p *jsPool) Proxy(params map[string]string) (int, string, []byte, map[string]string, error) {
-	s, idx := p.acquire()
+	s, idx, err := p.acquire()
+	if err != nil {
+		return 0, "", nil, nil, err
+	}
 	defer p.release(idx)
 	return s.Proxy(params)
 }
@@ -175,21 +193,33 @@ func (p *jsPool) Action(action string) (string, error) {
 	return p.withSlot(func(s *jsSpider) (string, error) { return s.Action(action) })
 }
 func (p *jsPool) ManualVideoCheck() (bool, error) {
-	s, idx := p.acquire()
+	s, idx, err := p.acquire()
+	if err != nil {
+		return false, err
+	}
 	defer p.release(idx)
 	return s.ManualVideoCheck()
 }
 func (p *jsPool) IsVideoFormat(u string) (bool, error) {
-	s, idx := p.acquire()
+	s, idx, err := p.acquire()
+	if err != nil {
+		return false, err
+	}
 	defer p.release(idx)
 	return s.IsVideoFormat(u)
 }
 func (p *jsPool) Destroy() {
 	p.mu.Lock()
+	p.closed.Store(true)
 	slots := append([]*jsSpider(nil), p.slots...)
 	p.slots = nil
 	p.busy = nil
+	waiters := p.waiters
+	p.waiters = nil
 	p.mu.Unlock()
+	for _, ch := range waiters {
+		close(ch)
+	}
 	for _, s := range slots {
 		s.Destroy()
 	}

@@ -71,80 +71,18 @@ func clearJarForUser(userID string) {
 	if userID == "" {
 		return
 	}
-	prefix := userID + "\x01"
-	jarMu.Lock()
-	for k := range jarSpiders {
-		if strings.HasPrefix(k, prefix) {
-			delete(jarSpiders, k)
-		}
-	}
-	jarMu.Unlock()
+	dropJarSpiders(userID+"\x01", false)
 }
 
-// ApplyConfigJars 切仓成功后：按「各自配置地址解析后的下载地址 + md5」卸掉不再使用的 jar，并丢掉当前用户的 Py/JS。不杀 JVM。
-func ApplyConfigJars(prevURL, prevRoot string, prevSpecs []string, nextURL, nextRoot string, nextSpecs []string) error {
-	prevIDs := jarIDSet(prevURL, prevRoot, prevSpecs)
-	nextIDs := jarIDSet(nextURL, nextRoot, nextSpecs)
-	for id, path := range prevIDs {
-		if _, ok := nextIDs[id]; ok {
-			continue
-		}
-		if path == "" {
-			continue
-		}
-		if err := unloadBridgeJar(path); err != nil {
-			log.Printf("jar 卸载失败 %s: %v", path, err)
-		}
-	}
-	dropJarSpidersExcept(prevURL, prevRoot, nextIDs)
+// ApplyConfigJars 切仓成功后：清掉当前 JVM 里已加载的全部 jar，再装新仓库的根 jar。不杀 JVM。
+func ApplyConfigJars(nextURL, nextRoot string) error {
+	clearRuntimeJars()
 	releaseConfigScripts()
 	nextRoot = strings.TrimSpace(nextRoot)
 	if nextRoot == "" {
 		return nil
 	}
 	return LoadJar(nextRoot, nextURL)
-}
-
-// jarIdentity 是解析后的下载地址加上 md5。同一地址不同 md5 是另一份。
-func jarIdentity(spec, configURL string) (id, local string, ok bool) {
-	downloadURL, sum, ok := jarDownloadURL(spec, configURL)
-	if !ok {
-		return "", "", false
-	}
-	return downloadURL + "\x00" + sum, jarLocalPath(downloadURL), true
-}
-
-// jarSpecID 与 jarIDSet 使用同一身份。根 jar 走覆盖文件时不和规格地址混在一起。
-func jarSpecID(spec, configURL, root string) (id, local string, ok bool) {
-	id, local, ok = jarIdentity(spec, configURL)
-	if !ok {
-		return "", "", false
-	}
-	override := rootOverridePath()
-	if override == "" {
-		return id, local, true
-	}
-	rootID, _, rootOK := jarIdentity(root, configURL)
-	if rootOK && id == rootID {
-		return "override\x00" + override, override, true
-	}
-	return id, local, true
-}
-
-func jarIDSet(configURL, root string, specs []string) map[string]string {
-	out := map[string]string{}
-	add := func(spec string) {
-		id, local, ok := jarSpecID(spec, configURL, root)
-		if !ok {
-			return
-		}
-		out[id] = local
-	}
-	add(root)
-	for _, spec := range specs {
-		add(spec)
-	}
-	return out
 }
 
 func jarDownloadURL(spec, configURL string) (downloadURL, sum string, ok bool) {
@@ -172,20 +110,6 @@ func jarDownloadURL(spec, configURL string) (downloadURL, sum string, ok bool) {
 	return downloadURL, sum, true
 }
 
-func jarLocalPath(downloadURL string) string {
-	if localPath, ok := localFilePath(downloadURL); ok {
-		if fileExistsNonEmpty(localPath) {
-			return localPath
-		}
-		return ""
-	}
-	dest := paths.JarPath(util.MD5(downloadURL))
-	if fileExistsNonEmpty(dest) {
-		return dest
-	}
-	return ""
-}
-
 func rootOverridePath() string {
 	override := filepath.Join(paths.Data(), "spider-override.jar")
 	if fileExistsNonEmpty(override) {
@@ -194,48 +118,53 @@ func rootOverridePath() string {
 	return ""
 }
 
-func dropJarSpidersExcept(prevURL, prevRoot string, keep map[string]string) {
+func clearRuntimeJars() {
 	uid := hostclient.RuntimeUserID()
-	prefix := uid + "\x01"
-	jarMu.Lock()
-	for k, s := range jarSpiders {
-		if !strings.HasPrefix(k, prefix) {
-			continue
-		}
-		spec := strings.TrimSpace(s.jar)
-		if spec == "" {
-			spec = prevRoot
-		}
-		id, _, ok := jarSpecID(spec, prevURL, prevRoot)
-		if !ok {
-			continue
-		}
-		if _, ok := keep[id]; ok {
-			continue
-		}
-		delete(jarSpiders, k)
+	dropJarSpiders(uid+"\x01", false)
+	if uid == "" {
+		jarMu.Lock()
+		jarPath = ""
+		jarMu.Unlock()
 	}
-	jarMu.Unlock()
+	sendBridgeClear()
 }
 
 func releaseConfigScripts() {
 	clearJSMemoryCaches()
-	if uid := strings.TrimSpace(hostclient.RuntimeUserID()); uid != "" {
-		DestroyUserScripts(uid)
+	uid := strings.TrimSpace(hostclient.RuntimeUserID())
+	if uid != "" {
+		destroyScripts(uid+"\x01", false)
 		return
 	}
-	clearSharedJsPy()
+	destroyScripts("\x01", false)
 }
 
 func clearJar() {
+	dropJarSpiders("", true)
 	jarMu.Lock()
-	jarSpiders = map[string]*jarSpider{}
 	jarPath = ""
 	configBase = ""
 	jarMu.Unlock()
 	bumpJarRefreshGen()
+	sendBridgeClear()
+}
+
+func dropJarSpiders(prefix string, all bool) {
+	jarMu.Lock()
+	defer jarMu.Unlock()
+	if all {
+		jarSpiders = map[string]*jarSpider{}
+		return
+	}
+	for k := range jarSpiders {
+		if strings.HasPrefix(k, prefix) {
+			delete(jarSpiders, k)
+		}
+	}
+}
+
+func sendBridgeClear() {
 	jarWireGen.Add(1)
-	// destroy spiders and drop loaders；向 bridge 发 clear；独立进程可按需 Kill 重建。
 	req := bridgeRequest{Method: "clear"}
 	fillBridgeClient(&req)
 	if payload, err := json.Marshal(req); err == nil {
