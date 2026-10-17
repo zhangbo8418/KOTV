@@ -11,6 +11,8 @@ import '../api/kotv_engine_url.dart';
 import '../player/kotv_traffic.dart';
 import 'kotv_bytes_image_stub.dart' if (dart.library.io) 'kotv_bytes_image_io.dart';
 
+export 'kotv_bytes_image_stub.dart' if (dart.library.io) 'kotv_bytes_image_io.dart' show kotvStillMemoryImage;
+
 /// 默认海报 UA（非 Android 直连时用）。
 const kotvDefaultImageUa =
     'Mozilla/5.0 (Linux; Android 7.1.2; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Safari/537.36';
@@ -183,7 +185,6 @@ class KotvNetworkImage extends StatelessWidget {
     this.cacheHeight,
     this.allowPlatformView = false,
     this.gaplessPlayback = true,
-    this.singleFrame = false,
   });
 
   final String pic;
@@ -197,8 +198,6 @@ class KotvNetworkImage extends StatelessWidget {
   final bool allowPlatformView;
   /// 为 false 时换地址先清掉上一张，避免列表复用同一格时留着旧图。
   final bool gaplessPlayback;
-  /// 只解第一帧。台标动图不再逐帧回写图片缓存。
-  final bool singleFrame;
 
   @override
   Widget build(BuildContext context) {
@@ -231,29 +230,17 @@ class KotvNetworkImage extends StatelessWidget {
 
     final bytes = kotvDecodeDataImage(raw);
     if (bytes != null) {
-      if (singleFrame) {
-        var provider = kotvStillMemoryImage(bytes);
-        if (cacheWidth != null || cacheHeight != null) {
-          provider = ResizeImage(provider, width: cacheWidth, height: cacheHeight);
-        }
-        return Image(
-          image: provider,
-          fit: fit,
-          alignment: alignment,
-          errorBuilder: errorBuilder,
-          filterQuality: filterQuality,
-          gaplessPlayback: gaplessPlayback,
-        );
+      var provider = kotvStillMemoryImage(bytes);
+      if (cacheWidth != null || cacheHeight != null) {
+        provider = ResizeImage(provider, width: cacheWidth, height: cacheHeight);
       }
-      return Image.memory(
-        bytes,
+      return Image(
+        image: provider,
         fit: fit,
         alignment: alignment,
         errorBuilder: errorBuilder,
         filterQuality: filterQuality,
         gaplessPlayback: gaplessPlayback,
-        cacheWidth: cacheWidth,
-        cacheHeight: cacheHeight,
       );
     }
 
@@ -265,7 +252,7 @@ class KotvNetworkImage extends StatelessWidget {
       }
       return const SizedBox.shrink();
     }
-    var provider = kotvBytesImageProvider(parsed.url, parsed.headers, singleFrame: singleFrame);
+    var provider = kotvBytesImageProvider(parsed.url, parsed.headers);
     if (cacheWidth != null || cacheHeight != null) {
       provider = ResizeImage(provider, width: cacheWidth, height: cacheHeight);
     }

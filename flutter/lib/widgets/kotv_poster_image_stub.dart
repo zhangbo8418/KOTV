@@ -35,7 +35,6 @@ class KotvPosterNetImage extends StatelessWidget {
       pic,
       fit: fit,
       cacheWidth: w,
-      singleFrame: true,
       gaplessPlayback: false,
       errorBuilder: errorBuilder,
     );

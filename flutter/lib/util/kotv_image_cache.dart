@@ -34,7 +34,7 @@ Future<void> kotvClearImageMemory({
     final bytes = await kotvReadWallpaperBytes(url);
     if (!context.mounted || bytes == null) return;
     try {
-      await precacheImage(MemoryImage(bytes), context);
+      await precacheImage(kotvStillMemoryImage(bytes), context);
     } catch (_) {}
     return;
   }

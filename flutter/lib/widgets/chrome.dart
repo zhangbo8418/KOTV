@@ -251,12 +251,11 @@ class _WinWallImageState extends State<_WinWallImage> {
       fit: StackFit.expand,
       children: [
         net,
-        Image.memory(
-          bytes,
+        Image(
+          image: ResizeImage(kotvStillMemoryImage(bytes), width: widget.decodeWidth),
           fit: BoxFit.cover,
           filterQuality: FilterQuality.medium,
           gaplessPlayback: true,
-          cacheWidth: widget.decodeWidth,
           errorBuilder: (_, __, ___) => const SizedBox.shrink(),
         ),
       ],

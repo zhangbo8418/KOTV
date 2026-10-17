@@ -4655,7 +4655,6 @@ class _LiveChannelLogo extends StatelessWidget {
                 key: ValueKey(logo.trim()),
                 fit: BoxFit.contain,
                 gaplessPlayback: false,
-                singleFrame: true,
                 cacheWidth: width >= height
                     ? (width * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(1, 512)
                     : null,

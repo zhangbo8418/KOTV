@@ -12,6 +12,7 @@ import '../player/kotv_platform.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
+import '../widgets/kotv_network_image.dart';
 import '../widgets/chrome.dart';
 import '../widgets/kotv_tv_text_field.dart';
 
@@ -807,7 +808,12 @@ class PostMsgHost {
                 ),
                 child: Padding(
                   padding: EdgeInsets.all(pad),
-                  child: Image.memory(img, width: w, height: h, fit: BoxFit.contain),
+                  child: Image(
+                    image: kotvStillMemoryImage(img),
+                    width: w,
+                    height: h,
+                    fit: BoxFit.contain,
+                  ),
                 ),
               ),
             ),
