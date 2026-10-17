@@ -326,6 +326,8 @@ class ExoPlayback extends KotvPlayback {
   }
 
   void _onEvent(dynamic raw) {
+    // 卸文件后、下次 open 写入地址前，丢掉上一集的进度和结束事件。
+    if (_url.isEmpty) return;
     if (raw is! Map) return;
     final m = Map<String, dynamic>.from(raw);
     final event = '${m['event'] ?? ''}';
@@ -640,12 +642,17 @@ class ExoPlayback extends KotvPlayback {
       await _ch.invokeMethod('stop');
     } catch (_) {}
     _playing = false;
+    _completed = false;
     _position = Duration.zero;
+    _duration = Duration.zero;
+    _buffered = Duration.zero;
     _ready = false;
     _url = '';
     _w = 0;
     _h = 0;
     _subs = const [];
+    if (!_posCtrl.isClosed) _posCtrl.add(Duration.zero);
+    if (!_bufCtrl.isClosed) _bufCtrl.add(Duration.zero);
   }
 
   @override

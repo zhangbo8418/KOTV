@@ -340,6 +340,8 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   void _onEvent(dynamic raw) {
+    // 卸文件后、下次 open 写入地址前，丢掉上一集的进度和结束事件。
+    if (_url.isEmpty) return;
     if (raw is String) {
       try {
         raw = jsonDecode(raw);
@@ -565,10 +567,16 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
     _playing = false;
     _buffering = false;
+    _completed = false;
     _ready = false;
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    _buffered = Duration.zero;
     _url = '';
     _w = 0;
     _h = 0;
+    if (!_posCtrl.isClosed) _posCtrl.add(Duration.zero);
+    if (!_bufCtrl.isClosed) _bufCtrl.add(Duration.zero);
   }
 
   @override
