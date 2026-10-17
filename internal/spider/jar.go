@@ -112,20 +112,29 @@ func jarIdentity(spec, configURL string) (id, local string, ok bool) {
 	return downloadURL + "\x00" + sum, jarLocalPath(downloadURL), true
 }
 
+// jarSpecID 与 jarIDSet 使用同一身份。根 jar 走覆盖文件时不和规格地址混在一起。
+func jarSpecID(spec, configURL, root string) (id, local string, ok bool) {
+	id, local, ok = jarIdentity(spec, configURL)
+	if !ok {
+		return "", "", false
+	}
+	override := rootOverridePath()
+	if override == "" {
+		return id, local, true
+	}
+	rootID, _, rootOK := jarIdentity(root, configURL)
+	if rootOK && id == rootID {
+		return "override\x00" + override, override, true
+	}
+	return id, local, true
+}
+
 func jarIDSet(configURL, root string, specs []string) map[string]string {
 	out := map[string]string{}
-	rootURL, rootSum, rootOK := jarDownloadURL(root, configURL)
-	override := rootOverridePath()
 	add := func(spec string) {
-		downloadURL, sum, ok := jarDownloadURL(spec, configURL)
+		id, local, ok := jarSpecID(spec, configURL, root)
 		if !ok {
 			return
-		}
-		id := downloadURL + "\x00" + sum
-		local := jarLocalPath(downloadURL)
-		if override != "" && rootOK && downloadURL == rootURL && sum == rootSum {
-			id = "override\x00" + override
-			local = override
 		}
 		out[id] = local
 	}
@@ -195,14 +204,9 @@ func dropJarSpidersExcept(prevURL, prevRoot string, keep map[string]string) {
 		if spec == "" {
 			spec = prevRoot
 		}
-		id, _, ok := jarIdentity(spec, prevURL)
+		id, _, ok := jarSpecID(spec, prevURL, prevRoot)
 		if !ok {
 			continue
-		}
-		if rootOverridePath() != "" {
-			if rootID, _, rootOK := jarIdentity(prevRoot, prevURL); rootOK && id == rootID {
-				id = "override\x00" + rootOverridePath()
-			}
 		}
 		if _, ok := keep[id]; ok {
 			continue
@@ -577,45 +581,34 @@ func cacheJar(spec, configBase string, allowOverride bool) (string, error) {
 	if spec == "" {
 		return "", fmt.Errorf("空 jar")
 	}
-	// assets://：UrlUtil.convert，走本地代理（任意站点 jar，不限根 LoadJar）。
-	if strings.HasPrefix(spec, "assets://") {
-		localBase := fmt.Sprintf("http://127.0.0.1:%d", localproxy.Port())
-		spec = localBase + "/" + strings.TrimPrefix(spec, "assets://")
-	}
 	if allowOverride {
 		// 仅 spider-override.jar 可劫持配置里的 spider。
 		// data/spider.jar 若也劫持，会换成过期的 PC 瘦包（缺 Nostr 等类）。
-		if override := filepath.Join(paths.Data(), "spider-override.jar"); fileExistsNonEmpty(override) {
+		if override := rootOverridePath(); override != "" {
 			log.Printf("spider.jar 使用本地覆盖: %s", override)
 			return override, nil
 		}
 	}
-	path, expectMD5 := util.SplitJarSpec(spec)
+	downloadURL, expectMD5, ok := jarDownloadURL(spec, configBase)
+	if !ok || downloadURL == "" {
+		return "", fmt.Errorf("无效的 spider 地址: %s", spec)
+	}
 	if strings.HasPrefix(expectMD5, "http://") || strings.HasPrefix(expectMD5, "https://") {
 		value, err := util.HTTPGetInsecure(expectMD5, nil)
 		if err != nil {
 			log.Printf("spider.jar 远程 md5 读取失败，将直接下载: %v", err)
 			expectMD5 = ""
 		} else {
-			expectMD5 = strings.TrimSpace(value)
+			expectMD5 = strings.ToLower(strings.TrimSpace(value))
 		}
 	}
-	expectMD5 = strings.ToLower(strings.TrimSpace(expectMD5))
 	base := strings.TrimSpace(configBase)
 	if base == "" {
 		base = ConfigBase()
 	}
-	downloadURL := path
-	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") && !strings.HasPrefix(strings.ToLower(path), "file:") {
-		downloadURL = util.ResolveJarURL(base, spec)
-	}
-	downloadURL = normalizeLocalJarURL(downloadURL, base)
-	if downloadURL == "" {
-		return "", fmt.Errorf("无效的 spider 地址: %s", spec)
-	}
 	// 相对路径仍未解析成绝对 URL：缺少配置基址时无法下载
 	if !strings.HasPrefix(downloadURL, "http://") && !strings.HasPrefix(downloadURL, "https://") && !strings.HasPrefix(strings.ToLower(downloadURL), "file:") && !filepath.IsAbs(downloadURL) {
-		return "", fmt.Errorf("无法解析相对 spider 路径 %q（配置基址为空或无效: %q）", path, base)
+		return "", fmt.Errorf("无法解析相对 spider 路径 %q（配置基址为空或无效: %q）", spec, base)
 	}
 	// file:// / 本地路径直接加载，不经 HTTP、不强制拷进缓存。
 	if localPath, ok := localFilePath(downloadURL); ok {

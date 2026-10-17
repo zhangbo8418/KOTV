@@ -46,6 +46,31 @@ func TestJarIdentityRelativeUsesOwnConfig(t *testing.T) {
 	}
 }
 
+func TestJarIDSetAowuSecondJarNotInXia(t *testing.T) {
+	xia := "https://tv.bobohome.store:20250/🧑潇洒哥/"
+	ao := "https://tv.bobohome.store:20250/🐅嗷呜/"
+	wID, _, ok := jarIdentity("./jars/Woshinidie.jar", ao)
+	if !ok {
+		t.Fatal("identity")
+	}
+	aoSet := jarIDSet(ao, "./spider.jar", []string{"./spider.jar", "./jars/Woshinidie.jar"})
+	xiaSet := jarIDSet(xia, "./spider.jar", []string{"./spider.jar"})
+	if _, ok := aoSet[wID]; !ok {
+		t.Fatal("aowu set missing second jar")
+	}
+	if _, ok := xiaSet[wID]; ok {
+		t.Fatal("xia set contains aowu second jar")
+	}
+	rootAo, _, okAo := jarIdentity("./spider.jar", ao)
+	rootXia, _, okXia := jarIdentity("./spider.jar", xia)
+	if !okAo || !okXia || rootAo == rootXia {
+		t.Fatal("roots must differ")
+	}
+	if _, ok := xiaSet[rootAo]; ok {
+		t.Fatal("xia set contains aowu root")
+	}
+}
+
 func TestJarIDSetKeepsDistinctMD5(t *testing.T) {
 	base := "https://example.com/box/"
 	jar := "https://example.com/a.jar"

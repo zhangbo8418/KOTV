@@ -52,6 +52,8 @@ public class SpiderBridge {
     private static final ConcurrentHashMap<String, JsParseSession> jsParseSessions = new ConcurrentHashMap<>();
     /** 按 jarPath 锁，避免一个 jar Init 卡住阻塞其它 jar 加载。 */
     private static final ConcurrentHashMap<String, Object> jarLocks = new ConcurrentHashMap<>();
+    /** 卸掉后加一。已经开始的 parseJar 看到代数变了就不再放进 loaders。 */
+    private static final ConcurrentHashMap<String, Long> jarEpoch = new ConcurrentHashMap<>();
     private static volatile String recentJar;
 
     /** 同 jar 的 pdfh/pdfa/pd/pdfl 共用；invoke 时 synchronized，避免 Cache 并发写。 */
@@ -415,13 +417,11 @@ public class SpiderBridge {
                     jar = req.get("jar").getAsString();
                 }
                 if (jar != null && !jar.isEmpty()) {
-                    // parseJar(jar, recent=true)：加载后再设 recent。
-                    parseJar(jar);
-                    recentJar = jar;
+                    parseJar(jar, true);
                 }
                 return "{}";
             }
-            // JarLoader.parseJar / dex：只确保 ClassLoader+Init+Proxy，不改 recent。
+            // 只确保 ClassLoader+Init+Proxy。recent 在锁内设置，卸掉后不再写回。
             if ("parseJar".equals(method)) {
                 String jar = "";
                 if (argsObj.has("jar") && !argsObj.get("jar").isJsonNull()) {
@@ -430,10 +430,9 @@ public class SpiderBridge {
                     jar = req.get("jar").getAsString();
                 }
                 if (jar != null && !jar.isEmpty()) {
-                    parseJar(jar);
-                    if (argsObj.has("recent") && argsObj.get("recent").getAsBoolean()) {
-                        recentJar = jar;
-                    }
+                    boolean recent = argsObj.has("recent") && !argsObj.get("recent").isJsonNull()
+                            && argsObj.get("recent").getAsBoolean();
+                    parseJar(jar, recent);
                 }
                 return "{}";
             }
@@ -449,8 +448,9 @@ public class SpiderBridge {
             if ("reloadJar".equals(method)) {
                 String jar = jarArg(argsObj, req);
                 if (!jar.isEmpty()) {
+                    boolean keepRecent = jar.equals(recentJar);
                     unloadJar(jar);
-                    parseJar(jar);
+                    parseJar(jar, keepRecent);
                 }
                 return "{}";
             }
@@ -672,36 +672,65 @@ public class SpiderBridge {
     }
 
     /**
-     * JarLoader.parseJar：同一 jar 只加载一次，创建 ClassLoader 并调用 Init / 注册 Proxy。
+     * 同一 jar 只加载一次，创建 ClassLoader 并调用 Init / 注册 Proxy。
      * 桌面用 URLClassLoader 代替 DexClassLoader。
      */
     private static void parseJar(String jarPath) throws Exception {
+        parseJar(jarPath, false);
+    }
+
+    private static void parseJar(String jarPath, boolean recent) throws Exception {
         if (Thread.interrupted()) return;
         if (jarPath == null || jarPath.isEmpty()) return;
-        if (loaders.containsKey(jarPath)) return;
+        long epoch = jarEpoch.getOrDefault(jarPath, 0L);
         Object lock = jarLocks.computeIfAbsent(jarPath, k -> new Object());
         synchronized (lock) {
             if (Thread.interrupted()) return;
-            if (loaders.containsKey(jarPath)) return;
+            if (epoch != jarEpoch.getOrDefault(jarPath, 0L)) return;
+            if (loaders.containsKey(jarPath)) {
+                if (recent) recentJar = jarPath;
+                return;
+            }
+            ClassLoader loader = null;
             try {
                 if (Thread.interrupted()) return;
-                ClassLoader loader = createLoader(jarPath);
-                if (Thread.interrupted()) return;
+                loader = createLoader(jarPath);
+                if (Thread.interrupted()) {
+                    closeLoader(loader);
+                    return;
+                }
                 ClassLoader prev = Thread.currentThread().getContextClassLoader();
                 try {
                     Thread.currentThread().setContextClassLoader(loader);
                     initializeHost();
-                    if (Thread.interrupted()) return;
+                    if (Thread.interrupted()) {
+                        closeLoader(loader);
+                        return;
+                    }
                     initializeSpiderJar(jarPath, loader);
                 } finally {
                     Thread.currentThread().setContextClassLoader(prev);
                 }
-                if (Thread.interrupted()) return;
+                if (Thread.interrupted() || epoch != jarEpoch.getOrDefault(jarPath, 0L)) {
+                    closeLoader(loader);
+                    return;
+                }
                 loaders.put(jarPath, loader);
+                if (recent) recentJar = jarPath;
             } catch (Exception e) {
+                closeLoader(loader);
                 System.err.println("parseJar failed: " + jarPath + ": " + e);
                 e.printStackTrace(System.err);
                 throw e;
+            }
+        }
+    }
+
+    private static void closeLoader(ClassLoader loader) {
+        if (loader instanceof URLClassLoader) {
+            try {
+                ((URLClassLoader) loader).close();
+            } catch (IOException ignored) {
             }
         }
     }
@@ -1337,6 +1366,15 @@ public class SpiderBridge {
     }
 
     private static void clear() {
+        Set<String> paths = new HashSet<>(jarLocks.keySet());
+        paths.addAll(loaders.keySet());
+        for (String path : paths) {
+            Object lock = jarLocks.get(path);
+            if (lock == null) continue;
+            synchronized (lock) {
+                jarEpoch.merge(path, 1L, Long::sum);
+            }
+        }
         for (Spider spider : spiders.values()) {
             try {
                 spider.destroy();
@@ -1374,9 +1412,19 @@ public class SpiderBridge {
         return jar == null ? "" : jar;
     }
 
-    /** 按路径卸载单个 jar：destroy 其爬虫、关闭 loader 并移除缓存，供磁盘包刷新后重载。 */
+    /** 按路径卸载单个 jar：destroy 其爬虫、关闭 loader。recent 指着这条路径时清掉。 */
     private static void unloadJar(String jarPath) {
         if (jarPath == null || jarPath.isEmpty()) return;
+        Object lock = jarLocks.computeIfAbsent(jarPath, k -> new Object());
+        ClassLoader removed;
+        synchronized (lock) {
+            jarEpoch.merge(jarPath, 1L, Long::sum);
+            removed = loaders.remove(jarPath);
+            proxyMethods.remove(jarPath);
+            jsParseSessions.remove(jarPath);
+            if (jarPath.equals(recentJar)) recentJar = null;
+        }
+        closeLoader(removed);
         // spKey = md5(jar) + siteKey，见 getSpider。
         String prefix = md5Hex(jarPath);
         for (java.util.Iterator<Map.Entry<String, Spider>> it = spiders.entrySet().iterator(); it.hasNext();) {
@@ -1389,16 +1437,6 @@ public class SpiderBridge {
             }
             it.remove();
         }
-        ClassLoader loader = loaders.remove(jarPath);
-        if (loader instanceof URLClassLoader) {
-            try {
-                ((URLClassLoader) loader).close();
-            } catch (IOException ignored) {
-            }
-        }
-        proxyMethods.remove(jarPath);
-        jsParseSessions.remove(jarPath);
-        // recentJar 只是路径：重载后同路径新 loader 仍是「最近」，保留给 jsonExt 用。
     }
 
     private static Object invokeProxyMethod(Method method, Map<String, String> params) {
@@ -1712,17 +1750,24 @@ public class SpiderBridge {
         if (recent == null || recent.isEmpty()) {
             throw new IllegalStateException("No jar loaded for recent");
         }
-        ClassLoader loader = loaders.get(recent);
-        if (loader == null) {
-            // recent 已设但尚未 parseJar（例如仅 setRecent 旧路径）：补一次真加载。
-            try {
-                parseJar(recent);
-            } catch (Exception e) {
-                throw new IllegalStateException("No jar loaded for recent key: " + recent, e);
+        Object lock = jarLocks.computeIfAbsent(recent, k -> new Object());
+        synchronized (lock) {
+            if (!recent.equals(recentJar)) {
+                throw new IllegalStateException("No jar loaded for recent");
             }
-            loader = loaders.get(recent);
+            ClassLoader loader = loaders.get(recent);
+            if (loader != null) return loader;
         }
-        if (loader == null) {
+        if (!recent.equals(recentJar)) {
+            throw new IllegalStateException("No jar loaded for recent");
+        }
+        try {
+            parseJar(recent);
+        } catch (Exception e) {
+            throw new IllegalStateException("No jar loaded for recent key: " + recent, e);
+        }
+        ClassLoader loader = loaders.get(recent);
+        if (loader == null || !recent.equals(recentJar)) {
             throw new IllegalStateException("No jar loaded for recent key: " + recent);
         }
         return loader;
