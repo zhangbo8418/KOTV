@@ -79,103 +79,89 @@ func clearJarForUser(userID string) {
 	jarMu.Unlock()
 }
 
-// ApplyConfigJars 切仓成功后：卸掉新站源里不再出现的 jar，并丢掉当前用户的 Py/JS。不杀 JVM。
-func ApplyConfigJars(prev, next []string, prevRoot, nextRoot, configBase string) error {
-	nextSet := jarSpecSet(next)
-	var removed []string
-	for _, spec := range prev {
-		spec = strings.TrimSpace(spec)
-		if spec == "" {
+// ApplyConfigJars 切仓成功后：按「各自配置地址解析后的下载地址 + md5」卸掉不再使用的 jar，并丢掉当前用户的 Py/JS。不杀 JVM。
+func ApplyConfigJars(prevURL, prevRoot string, prevSpecs []string, nextURL, nextRoot string, nextSpecs []string) error {
+	prevIDs := jarIDSet(prevURL, prevRoot, prevSpecs)
+	nextIDs := jarIDSet(nextURL, nextRoot, nextSpecs)
+	for id, path := range prevIDs {
+		if _, ok := nextIDs[id]; ok {
 			continue
 		}
-		if _, ok := nextSet[spec]; ok {
+		if path == "" {
 			continue
 		}
-		removed = append(removed, spec)
-	}
-	for _, spec := range removed {
-		if path := existingJarFile(spec, configBase); path != "" {
-			if err := unloadBridgeJar(path); err != nil {
-				log.Printf("jar 卸载失败 %s: %v", path, err)
-			}
+		if err := unloadBridgeJar(path); err != nil {
+			log.Printf("jar 卸载失败 %s: %v", path, err)
 		}
 	}
-	dropRemovedJarSpiders(removed, prevRoot, nextSet)
+	dropJarSpidersExcept(prevURL, prevRoot, nextIDs)
 	releaseConfigScripts()
 	nextRoot = strings.TrimSpace(nextRoot)
 	if nextRoot == "" {
 		return nil
 	}
-	return LoadJar(nextRoot, configBase)
+	return LoadJar(nextRoot, nextURL)
 }
 
-func jarSpecSet(specs []string) map[string]struct{} {
-	out := make(map[string]struct{}, len(specs))
-	for _, spec := range specs {
-		spec = strings.TrimSpace(spec)
-		if spec == "" {
-			continue
+// jarIdentity 是解析后的下载地址加上 md5。同一地址不同 md5 是另一份。
+func jarIdentity(spec, configURL string) (id, local string, ok bool) {
+	downloadURL, sum, ok := jarDownloadURL(spec, configURL)
+	if !ok {
+		return "", "", false
+	}
+	return downloadURL + "\x00" + sum, jarLocalPath(downloadURL), true
+}
+
+func jarIDSet(configURL, root string, specs []string) map[string]string {
+	out := map[string]string{}
+	rootURL, rootSum, rootOK := jarDownloadURL(root, configURL)
+	override := rootOverridePath()
+	add := func(spec string) {
+		downloadURL, sum, ok := jarDownloadURL(spec, configURL)
+		if !ok {
+			return
 		}
-		out[spec] = struct{}{}
+		id := downloadURL + "\x00" + sum
+		local := jarLocalPath(downloadURL)
+		if override != "" && rootOK && downloadURL == rootURL && sum == rootSum {
+			id = "override\x00" + override
+			local = override
+		}
+		out[id] = local
+	}
+	add(root)
+	for _, spec := range specs {
+		add(spec)
 	}
 	return out
 }
 
-func dropRemovedJarSpiders(removed []string, prevRoot string, nextSet map[string]struct{}) {
-	gone := jarSpecSet(removed)
-	_, rootKept := nextSet[strings.TrimSpace(prevRoot)]
-	uid := hostclient.RuntimeUserID()
-	prefix := uid + "\x01"
-	jarMu.Lock()
-	for k, s := range jarSpiders {
-		if !strings.HasPrefix(k, prefix) {
-			continue
-		}
-		j := strings.TrimSpace(s.jar)
-		if j == "" {
-			if !rootKept && strings.TrimSpace(prevRoot) != "" {
-				delete(jarSpiders, k)
-			}
-			continue
-		}
-		if _, ok := gone[j]; ok {
-			delete(jarSpiders, k)
-		}
-	}
-	jarMu.Unlock()
-}
-
-func releaseConfigScripts() {
-	clearJSMemoryCaches()
-	if uid := strings.TrimSpace(hostclient.RuntimeUserID()); uid != "" {
-		DestroyUserScripts(uid)
-		return
-	}
-	clearSharedJsPy()
-}
-
-// existingJarFile 只查已经落在磁盘上的 jar，不下载。
-func existingJarFile(spec, configBase string) string {
+func jarDownloadURL(spec, configURL string) (downloadURL, sum string, ok bool) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
-		return ""
+		return "", "", false
 	}
 	if strings.HasPrefix(spec, "assets://") {
 		spec = fmt.Sprintf("http://127.0.0.1:%d/%s", localproxy.Port(), strings.TrimPrefix(spec, "assets://"))
 	}
-	path, _ := util.SplitJarSpec(spec)
-	base := strings.TrimSpace(configBase)
+	path, sum := util.SplitJarSpec(spec)
+	sum = strings.ToLower(strings.TrimSpace(sum))
+	base := strings.TrimSpace(configURL)
 	if base == "" {
 		base = ConfigBase()
 	}
-	downloadURL := path
+	downloadURL = path
 	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") && !strings.HasPrefix(strings.ToLower(path), "file:") {
 		downloadURL = util.ResolveJarURL(base, spec)
 	}
 	downloadURL = normalizeLocalJarURL(downloadURL, base)
 	if downloadURL == "" {
-		return ""
+		return "", "", false
 	}
+	return downloadURL, sum, true
+}
+
+func jarLocalPath(downloadURL string) string {
 	if localPath, ok := localFilePath(downloadURL); ok {
 		if fileExistsNonEmpty(localPath) {
 			return localPath
@@ -187,6 +173,52 @@ func existingJarFile(spec, configBase string) string {
 		return dest
 	}
 	return ""
+}
+
+func rootOverridePath() string {
+	override := filepath.Join(paths.Data(), "spider-override.jar")
+	if fileExistsNonEmpty(override) {
+		return override
+	}
+	return ""
+}
+
+func dropJarSpidersExcept(prevURL, prevRoot string, keep map[string]string) {
+	uid := hostclient.RuntimeUserID()
+	prefix := uid + "\x01"
+	jarMu.Lock()
+	for k, s := range jarSpiders {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		spec := strings.TrimSpace(s.jar)
+		if spec == "" {
+			spec = prevRoot
+		}
+		id, _, ok := jarIdentity(spec, prevURL)
+		if !ok {
+			continue
+		}
+		if rootOverridePath() != "" {
+			if rootID, _, rootOK := jarIdentity(prevRoot, prevURL); rootOK && id == rootID {
+				id = "override\x00" + rootOverridePath()
+			}
+		}
+		if _, ok := keep[id]; ok {
+			continue
+		}
+		delete(jarSpiders, k)
+	}
+	jarMu.Unlock()
+}
+
+func releaseConfigScripts() {
+	clearJSMemoryCaches()
+	if uid := strings.TrimSpace(hostclient.RuntimeUserID()); uid != "" {
+		DestroyUserScripts(uid)
+		return
+	}
+	clearSharedJsPy()
 }
 
 func clearJar() {

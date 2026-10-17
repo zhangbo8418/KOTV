@@ -121,16 +121,12 @@ func (a *App) APIGetConfig() map[string]any {
 func (a *App) APILoadConfig(source string) error {
 	cfg, sites, sess := a.scope()
 	prevAPI := cfg.API()
-	prev := config.JarSpecs(prevAPI)
 	sites.DropContentCache()
 	sites.SoftCancelPending()
 	if err := cfg.LoadFromSource(source); err != nil {
 		return err
 	}
-	nextAPI := cfg.API()
-	if err := spider.ApplyConfigJars(prev, config.JarSpecs(nextAPI), prevAPI.Spider, nextAPI.Spider, nextAPI.URL); err != nil {
-		log.Printf("spider.jar 加载失败: %v", err)
-	}
+	a.switchConfigJars(prevAPI, cfg.API())
 	a.finishConfigLoad(cfg, sess, source)
 	return nil
 }
@@ -153,17 +149,19 @@ func (a *App) APIRefreshConfig() error {
 		return fmt.Errorf("当前源不是 http(s) 仓库，已跳过刷新")
 	}
 	prevAPI := cfg.API()
-	prev := config.JarSpecs(prevAPI)
 	if err := cfg.ReloadJSON(source); err != nil {
 		return err
 	}
-	nextAPI := cfg.API()
-	if err := spider.ApplyConfigJars(prev, config.JarSpecs(nextAPI), prevAPI.Spider, nextAPI.Spider, nextAPI.URL); err != nil {
-		log.Printf("spider.jar 加载失败: %v", err)
-	}
+	a.switchConfigJars(prevAPI, cfg.API())
 	sites.DropContentCache()
 	a.finishConfigLoad(cfg, sess, source)
 	return nil
+}
+
+func (a *App) switchConfigJars(prev, next model.Api) {
+	if err := spider.ApplyConfigJars(prev.URL, prev.Spider, config.JarSpecs(prev), next.URL, next.Spider, config.JarSpecs(next)); err != nil {
+		log.Printf("spider.jar 加载失败: %v", err)
+	}
 }
 
 func (a *App) finishConfigLoad(cfg *config.Manager, sess *clientsession.Session, source string) {

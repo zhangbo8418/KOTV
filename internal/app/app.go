@@ -537,17 +537,13 @@ func (a *App) ReloadConfig() error {
 	a.Ready = false
 	a.ErrMsg = ""
 	prevAPI := a.Config.API()
-	prev := config.JarSpecs(prevAPI)
 	a.Sites.DropContentCache()
 	a.Config.Clear()
 	if err := a.Config.InitFromSettings(); err != nil {
 		a.ErrMsg = err.Error()
 		return err
 	}
-	nextAPI := a.Config.API()
-	if err := spider.ApplyConfigJars(prev, config.JarSpecs(nextAPI), prevAPI.Spider, nextAPI.Spider, nextAPI.URL); err != nil {
-		log.Printf("spider.jar 加载失败: %v", err)
-	}
+	a.switchConfigJars(prevAPI, a.Config.API())
 	a.Ready = true
 	a.ErrMsg = ""
 	a.Live.SyncFromConfig()
@@ -562,17 +558,13 @@ func (a *App) LoadVodSource(source string) error {
 	a.Ready = false
 	a.ErrMsg = ""
 	prevAPI := a.Config.API()
-	prev := config.JarSpecs(prevAPI)
 	a.Sites.DropContentCache()
 	a.Config.Clear()
 	if err := a.Config.LoadFromSource(source); err != nil {
 		a.ErrMsg = err.Error()
 		return err
 	}
-	nextAPI := a.Config.API()
-	if err := spider.ApplyConfigJars(prev, config.JarSpecs(nextAPI), prevAPI.Spider, nextAPI.Spider, nextAPI.URL); err != nil {
-		log.Printf("spider.jar 加载失败: %v", err)
-	}
+	a.switchConfigJars(prevAPI, a.Config.API())
 	a.Ready = true
 	a.ErrMsg = ""
 	a.Live.SyncFromConfig()
