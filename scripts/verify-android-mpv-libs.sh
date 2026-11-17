@@ -57,7 +57,17 @@ check_abi() {
 }
 
 echo "==> verify Android MPV native"
-for abi in "${KOTV_ANDROID_MPV_ABIS[@]}"; do
+MPV_JAVA="$ROOT/flutter/android/app/src/main/java/is/xyz/mpv/MPVLib.java"
+if ! kotv_android_mpv_check_jni_java_callbacks "$MPV_JAVA"; then
+  fail=1
+fi
+# 可选：KOTV_ANDROID_MPV_VERIFY_ABIS="arm64-v8a" 只核指定 ABI（本地抽包验证）。
+VERIFY_ABIS=("${KOTV_ANDROID_MPV_ABIS[@]}")
+if [[ -n "${KOTV_ANDROID_MPV_VERIFY_ABIS:-}" ]]; then
+  # shellcheck disable=SC2206
+  VERIFY_ABIS=(${KOTV_ANDROID_MPV_VERIFY_ABIS})
+fi
+for abi in "${VERIFY_ABIS[@]}"; do
   check_abi "$abi"
 done
 [[ "$fail" == 0 ]] || exit 1

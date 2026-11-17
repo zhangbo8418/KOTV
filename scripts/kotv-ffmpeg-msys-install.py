@@ -106,7 +106,7 @@ def main() -> int:
         return 1
     for lib in LIBS:
         install_lib(root, prefix, lib)
-    print(f"ok FFmpeg prefix install → {prefix}")
+    print(f"ok FFmpeg prefix install -> {prefix}")
     return 0
 
 

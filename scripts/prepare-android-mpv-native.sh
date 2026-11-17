@@ -15,7 +15,11 @@ chmod +x "$ROOT/scripts/build-android-mpv-from-source.sh" \
   "$ROOT/scripts/verify-android-mpv-libs.sh"
 
 echo "==> prepare Android MPV native (source suite → jniLibs; vulkan stub → assets)"
-"$ROOT/scripts/build-android-mpv-from-source.sh"
+if [[ "${KOTV_SKIP_ANDROID_MPV_SOURCE:-}" == "1" ]]; then
+  echo "ok skip Android MPV source rebuild (KOTV_SKIP_ANDROID_MPV_SOURCE=1)"
+else
+  "$ROOT/scripts/build-android-mpv-from-source.sh"
+fi
 
 # 构建产出的 libc++ 与 libmpv 配套（含 from_chars）。勿用本机 NDK 另拷一份覆盖。
 ensure_libcxx() {
@@ -70,7 +74,12 @@ strip_assets_keep_vulkan() {
   echo "  ok $abi: assets keep libvulkan.so stub only"
 }
 
-for abi in "${KOTV_ANDROID_MPV_ABIS[@]}"; do
+PREPARE_ABIS=("${KOTV_ANDROID_MPV_ABIS[@]}")
+if [[ -n "${KOTV_ANDROID_MPV_VERIFY_ABIS:-}" ]]; then
+  # shellcheck disable=SC2206
+  PREPARE_ABIS=(${KOTV_ANDROID_MPV_VERIFY_ABIS})
+fi
+for abi in "${PREPARE_ABIS[@]}"; do
   echo "==> native: $abi"
   ensure_libcxx "$abi"
   "$ROOT/scripts/build-android-libvulkan-stub.sh" "$abi"

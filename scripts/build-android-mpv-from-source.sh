@@ -30,6 +30,34 @@ JNI="$ROOT/flutter/android/app/src/main/jniLibs"
 STAMP="$ASSET/.kotv-source-build"
 ARCHES="${KOTV_ANDROID_MPV_ARCHES:-armv7l arm64}"
 
+# 先解析 tip / 读 stamp：套件已在 jniLibs 或 assets 时直接复用，不要求本机 cmake/meson。
+FFMPEG_COMMIT="$(kotv_resolve_git_ref "$FFMPEG_REPO" "$FFMPEG_REF" "${KOTV_FFMPEG_COMMIT:-}")"
+MPV_COMMIT="$(kotv_resolve_git_ref "$MPV_REPO" "$MPV_REF" "${KOTV_MPV_COMMIT:-}")"
+MPV_ANDROID_COMMIT="$(kotv_resolve_git_ref "$MPV_ANDROID_REPO" "$MPV_ANDROID_REF" "${KOTV_MPV_ANDROID_COMMIT:-}")"
+LIBPLACEBO_COMMIT="$(kotv_resolve_git_ref "$LIBPLACEBO_REPO" "$LIBPLACEBO_REF" "${KOTV_LIBPLACEBO_COMMIT:-}")"
+echo "ok android pins: ffmpeg=${FFMPEG_COMMIT:0:12} mpv=${MPV_COMMIT:0:12} builder=${MPV_ANDROID_COMMIT:0:12} libplacebo=${LIBPLACEBO_COMMIT:0:12}"
+
+want="builder=${MPV_ANDROID_COMMIT:0:12} ffmpeg=${FFMPEG_COMMIT:0:12} mpv=${MPV_COMMIT:0:12} libplacebo=${LIBPLACEBO_COMMIT:0:12}"
+if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$want" ]] \
+  && kotv_android_mpv_has_suite "$ASSET" arm64-v8a \
+  && kotv_android_mpv_has_suite "$ASSET" armeabi-v7a; then
+  echo "ok cached Android MPV source build ($want)"
+  exit 0
+fi
+if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$want" ]] \
+  && kotv_android_mpv_has_suite "$JNI" arm64-v8a \
+  && kotv_android_mpv_has_suite "$JNI" armeabi-v7a; then
+  echo "ok cached Android MPV already in jniLibs ($want)"
+  exit 0
+fi
+# 无 stamp 但 jniLibs 已有完整套件（例如从 CI APK 抽出）：允许跳过重编。
+if [[ "${KOTV_ANDROID_MPV_ALLOW_EXISTING_JNI:-}" == "1" ]] \
+  && kotv_android_mpv_has_suite "$JNI" arm64-v8a \
+  && kotv_android_mpv_has_suite "$JNI" armeabi-v7a; then
+  echo "ok reuse existing jniLibs suite (KOTV_ANDROID_MPV_ALLOW_EXISTING_JNI=1)"
+  exit 0
+fi
+
 for cmd in git curl python3 pkg-config perl cmake gperf make wget tar; do
   if ! command -v "$cmd" >/dev/null; then
     echo "ERROR: missing host tool '$cmd' (Android MPV source build)." >&2
@@ -51,26 +79,6 @@ if [[ "$meson_ok" != 1 ]]; then
   exit 1
 fi
 echo "ok host meson $meson_ver"
-
-FFMPEG_COMMIT="$(kotv_resolve_git_ref "$FFMPEG_REPO" "$FFMPEG_REF" "${KOTV_FFMPEG_COMMIT:-}")"
-MPV_COMMIT="$(kotv_resolve_git_ref "$MPV_REPO" "$MPV_REF" "${KOTV_MPV_COMMIT:-}")"
-MPV_ANDROID_COMMIT="$(kotv_resolve_git_ref "$MPV_ANDROID_REPO" "$MPV_ANDROID_REF" "${KOTV_MPV_ANDROID_COMMIT:-}")"
-LIBPLACEBO_COMMIT="$(kotv_resolve_git_ref "$LIBPLACEBO_REPO" "$LIBPLACEBO_REF" "${KOTV_LIBPLACEBO_COMMIT:-}")"
-echo "ok android pins: ffmpeg=${FFMPEG_COMMIT:0:12} mpv=${MPV_COMMIT:0:12} builder=${MPV_ANDROID_COMMIT:0:12} libplacebo=${LIBPLACEBO_COMMIT:0:12}"
-
-want="builder=${MPV_ANDROID_COMMIT:0:12} ffmpeg=${FFMPEG_COMMIT:0:12} mpv=${MPV_COMMIT:0:12} libplacebo=${LIBPLACEBO_COMMIT:0:12}"
-if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$want" ]] \
-  && kotv_android_mpv_has_suite "$ASSET" arm64-v8a \
-  && kotv_android_mpv_has_suite "$ASSET" armeabi-v7a; then
-  echo "ok cached Android MPV source build ($want)"
-  exit 0
-fi
-if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$want" ]] \
-  && kotv_android_mpv_has_suite "$JNI" arm64-v8a \
-  && kotv_android_mpv_has_suite "$JNI" armeabi-v7a; then
-  echo "ok cached Android MPV already in jniLibs ($want)"
-  exit 0
-fi
 
 SRC="$WORK/mpv-android"
 echo "==> clone mpv-android ${MPV_ANDROID_COMMIT:0:12}"

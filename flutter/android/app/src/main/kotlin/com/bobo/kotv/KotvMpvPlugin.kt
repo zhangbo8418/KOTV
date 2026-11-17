@@ -2385,7 +2385,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     return hasVideo && allVideoImage
   }
 
-  override fun endFile(reason: Int, error: Int, errorText: String?) {
+  override fun eventEndFile(reason: Int, error: Int, errorText: String?) {
     val gen = activeLoadGen
     when (reason) {
       // 有排队或正在无缝切入：不算播完（keep-open=no 自然前进 / skipToQueued 兜底；旧文件 end-file 晚到也忽略）。

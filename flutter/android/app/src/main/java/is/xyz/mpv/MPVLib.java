@@ -249,8 +249,11 @@ public final class MPVLib {
      * 否则 libmpv DT_NEEDED 仍优先绑到空壳。
      */
     public static synchronized void removeAppVulkanStubIfPresent(Context context) {
+        if (context == null) return;
         try {
+            // attachBaseContext 时尚无 ApplicationContext，直接用传入的 Context。
             Context app = context.getApplicationContext();
+            if (app == null) app = context;
             File stub = new File(app.getApplicationInfo().nativeLibraryDir, "libvulkan.so");
             if (stub.isFile()) {
                 long len = stub.length();
@@ -530,19 +533,29 @@ public final class MPVLib {
         }
     }
 
+    /** libplayer JNI：eventCommandReply (JI)V 兼容入口。 */
     public static void eventCommandReply(long requestId, int error) {
+        eventCommandReply(requestId, error, 0L);
+    }
+
+    /**
+     * libplayer 在 create() 时 GetStaticMethodID("eventCommandReply", "(JIJ)V")。
+     * 缺此重载则 create 抛 NoSuchMethodError。
+     */
+    public static void eventCommandReply(long requestId, int error, long result) {
         synchronized (OBSERVERS) {
-            for (EventObserver observer : OBSERVERS) observer.eventCommandReply(requestId, error);
+            for (EventObserver observer : OBSERVERS) {
+                observer.eventCommandReply(requestId, error, result);
+            }
         }
     }
 
+    /** libplayer JNI：eventEndFile (IILjava/lang/String;)V */
     public static void eventEndFile(int reason, int error, String errorText) {
-        endFile(reason, error, errorText);
-    }
-
-    public static void endFile(int reason, int error, String errorText) {
         synchronized (OBSERVERS) {
-            for (EventObserver observer : OBSERVERS) observer.endFile(reason, error, errorText);
+            for (EventObserver observer : OBSERVERS) {
+                observer.eventEndFile(reason, error, errorText);
+            }
         }
     }
 
@@ -583,8 +596,18 @@ public final class MPVLib {
         default void eventCommandReply(long requestId, int error) {
         }
 
-        default void endFile(int reason, int error, String errorText) {
+        default void eventCommandReply(long requestId, int error, long result) {
+            eventCommandReply(requestId, error);
+        }
+
+        default void eventEndFile(int reason, int error, String errorText) {
             event(MpvEvent.MPV_EVENT_END_FILE);
+        }
+
+        /** @deprecated 用 {@link #eventEndFile}；保留以免旧实现编译失败。 */
+        @Deprecated
+        default void endFile(int reason, int error, String errorText) {
+            eventEndFile(reason, error, errorText);
         }
     }
 

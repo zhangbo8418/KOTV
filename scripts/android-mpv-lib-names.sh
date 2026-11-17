@@ -74,6 +74,30 @@ kotv_android_libcxx_has_from_chars() {
   grep -a -q 'from_chars_floating' "$so" 2>/dev/null
 }
 
+# 核对 MPVLib.java 具备 libplayer create() 所需的静态回调（防签名漂移）。
+kotv_android_mpv_check_jni_java_callbacks() {
+  local java="${1:?}"
+  local fail=0
+  [[ -f "$java" ]] || {
+    echo "ERROR: missing $java" >&2
+    return 1
+  }
+  # JNI (JIJ)V → (long, int, long)
+  if ! grep -qE 'void[[:space:]]+eventCommandReply[[:space:]]*\([[:space:]]*long[[:space:]]+[^,]+,[[:space:]]*int[[:space:]]+[^,]+,[[:space:]]*long[[:space:]]+' "$java"; then
+    echo "ERROR: $java missing eventCommandReply(long,int,long) for libplayer JNI (JIJ)V" >&2
+    fail=1
+  fi
+  if ! grep -qE 'void[[:space:]]+eventEndFile[[:space:]]*\([[:space:]]*int[[:space:]]+' "$java"; then
+    echo "ERROR: $java missing eventEndFile(int,int,String) for libplayer JNI" >&2
+    fail=1
+  fi
+  if ! grep -qE 'void[[:space:]]+logMessage[[:space:]]*\(' "$java"; then
+    echo "ERROR: $java missing logMessage(...)" >&2
+    fail=1
+  fi
+  [[ "$fail" == 0 ]]
+}
+
 # $1=父目录（assets 或 jniLibs），$2=abi
 kotv_android_mpv_has_suite() {
   local parent="${1:?}" abi="${2:?}" lib
