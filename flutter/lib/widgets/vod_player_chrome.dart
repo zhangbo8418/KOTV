@@ -741,6 +741,8 @@ class VodFullscreenChrome extends StatefulWidget {
     this.onMini,
     this.onRotate,
     this.rotateLabel,
+    this.locked = false,
+    this.onLockChanged,
     this.danmakuSources = const [],
     this.danmakuSourceIdx = 0,
     this.onDanmakuSourceChanged,
@@ -772,6 +774,9 @@ class VodFullscreenChrome extends StatefulWidget {
   /// 手机抖音式：竖屏 ↔ 横屏全屏切换。
   final VoidCallback? onRotate;
   final String? rotateLabel;
+  /// 手势锁屏（仅父级显示解锁钮时顶底栏已隐藏）。
+  final bool locked;
+  final ValueChanged<bool>? onLockChanged;
   final List<String> episodes;
   final int epIdx;
   final void Function(int idx)? onSelectEp;
@@ -2477,6 +2482,13 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                       _TextAct(
                         label: widget.rotateLabel ?? '旋转',
                         onTap: widget.onRotate!,
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (widget.onLockChanged != null) ...[
+                      _TextAct(
+                        label: '锁屏',
+                        onTap: () => widget.onLockChanged!(true),
                       ),
                       const SizedBox(width: 8),
                     ],

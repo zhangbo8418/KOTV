@@ -115,6 +115,29 @@ func (h *Hub) RemoveByUser(userID string) {
 	h.mu.Unlock()
 }
 
+// HasScopeForUser 是否还有该用户的会话（Leave 卸 Scope 后据此决定是否 KillUserRuntime）。
+func (h *Hub) HasScopeForUser(userID string) bool {
+	if h == nil {
+		return false
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	key := "u:" + userID
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.byID[key]; ok {
+		return true
+	}
+	for id := range h.byID {
+		if id == userID || strings.HasSuffix(id, ":"+userID) {
+			return true
+		}
+	}
+	return false
+}
+
 // RemoveAll 清空全部会话。
 func (h *Hub) RemoveAll() {
 	h.mu.Lock()

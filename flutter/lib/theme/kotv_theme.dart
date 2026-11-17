@@ -235,6 +235,11 @@ class KotvKeyHighlight {
   static void disarm() {
     if (active.value) active.value = false;
   }
+
+  /// 程序化 requestFocus 前调用，否则环仍关着看不见。
+  static void arm() {
+    if (!active.value) active.value = true;
+  }
 }
 
 /// 把框架焦点高亮接到 [KotvKeyHighlight]：未按键时不画环。

@@ -13,6 +13,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.content.res.Configuration
+import android.media.AudioManager
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.wifi.WifiManager
@@ -246,9 +247,56 @@ class MainActivity : FlutterActivity() {
             ),
           )
         }
+        "getBrightness" -> result.success(windowBrightnessPercent())
+        "setBrightness" -> {
+          val p = (call.arguments as? Number)?.toFloat() ?: 50f
+          setWindowBrightnessPercent(p)
+          result.success(true)
+        }
+        "getSystemVolume" -> result.success(systemVolumePercent())
+        "setSystemVolume" -> {
+          val p = (call.arguments as? Number)?.toFloat() ?: 50f
+          setSystemVolumePercent(p)
+          result.success(true)
+        }
         else -> result.notImplemented()
       }
     }
+  }
+
+  private fun windowBrightnessPercent(): Double {
+    val lp = window.attributes
+    val raw = lp.screenBrightness
+    val v = if (raw < 0f) {
+      try {
+        Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
+      } catch (_: Exception) {
+        0.5f
+      }
+    } else {
+      raw
+    }
+    return (v.coerceIn(0f, 1f) * 100.0)
+  }
+
+  private fun setWindowBrightnessPercent(percent: Float) {
+    val lp = window.attributes
+    lp.screenBrightness = (percent / 100f).coerceIn(0.01f, 1f)
+    window.attributes = lp
+  }
+
+  private fun systemVolumePercent(): Double {
+    val am = getSystemService(AUDIO_SERVICE) as AudioManager
+    val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+    val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+    return cur.toDouble() / max * 100.0
+  }
+
+  private fun setSystemVolumePercent(percent: Float) {
+    val am = getSystemService(AUDIO_SERVICE) as AudioManager
+    val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+    val idx = ((percent / 100f) * max).toInt().coerceIn(0, max)
+    am.setStreamVolume(AudioManager.STREAM_MUSIC, idx, 0)
   }
 
   /** ACTION_OPEN_DOCUMENT → 真实路径 file:// */

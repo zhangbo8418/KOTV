@@ -13,27 +13,79 @@ import (
 	"sync"
 )
 
-// HTTP 粘性鉴权表（JS _http / CMS insecure 共用）：按 host 记住 ?auth= 与 Basic userinfo。
+// HTTP 粘性鉴权表（JS _http / CMS insecure 共用）：按 owner（RuntimeUserID）+ host 记住 ?auth= 与 Basic userinfo。
 const httpAuthHostMax = 256
 
 var (
 	httpAuthMu      sync.RWMutex
-	authQueryByHost = map[string]string{}
-	authUserByHost  = map[string]string{}
+	authQueryByOwner = map[string]map[string]string{} // owner -> host -> auth
+	authUserByOwner  = map[string]map[string]string{}
+	httpAuthOwnerFn  func() string
 )
 
 var digestParamRe = regexp.MustCompile(`(\w+)=(?:"([^"]*)"|([^,\s"]+))`)
 
-// ClearHTTPAuth 清空粘性 auth 表（换源 / 清理缓存）。
+// SetHTTPAuthOwner 注入租户键（通常 hostclient.RuntimeUserID）；空串=本机共享桶。
+func SetHTTPAuthOwner(fn func() string) {
+	httpAuthOwnerFn = fn
+}
+
+func httpAuthOwner() string {
+	if httpAuthOwnerFn == nil {
+		return ""
+	}
+	return strings.TrimSpace(httpAuthOwnerFn())
+}
+
+func authQueryMap(owner string) map[string]string {
+	m := authQueryByOwner[owner]
+	if m == nil {
+		m = map[string]string{}
+		authQueryByOwner[owner] = m
+	}
+	return m
+}
+
+func authUserMap(owner string) map[string]string {
+	m := authUserByOwner[owner]
+	if m == nil {
+		m = map[string]string{}
+		authUserByOwner[owner] = m
+	}
+	return m
+}
+
+// ClearHTTPAuth 清空当前租户桶的粘性 auth（换源）。owner 空则清本机共享桶。
 func ClearHTTPAuth() {
+	owner := httpAuthOwner()
 	httpAuthMu.Lock()
-	authQueryByHost = map[string]string{}
-	authUserByHost = map[string]string{}
+	delete(authQueryByOwner, owner)
+	delete(authUserByOwner, owner)
+	httpAuthMu.Unlock()
+}
+
+// ClearAllHTTPAuth 清空全部租户桶（清缓存）。
+func ClearAllHTTPAuth() {
+	httpAuthMu.Lock()
+	authQueryByOwner = map[string]map[string]string{}
+	authUserByOwner = map[string]map[string]string{}
+	httpAuthMu.Unlock()
+}
+
+// ClearHTTPAuthForUser 清指定远端用户桶。
+func ClearHTTPAuthForUser(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	httpAuthMu.Lock()
+	delete(authQueryByOwner, userID)
+	delete(authUserByOwner, userID)
 	httpAuthMu.Unlock()
 }
 
 // trimHTTPAuthHostsLocked 超上限时两表各删约一半（调用方已持写锁）。
-func trimHTTPAuthHostsLocked() {
+func trimHTTPAuthHostsLocked(owner string) {
 	trimMapHalf := func(m map[string]string) {
 		if len(m) < httpAuthHostMax {
 			return
@@ -47,8 +99,8 @@ func trimHTTPAuthHostsLocked() {
 			n--
 		}
 	}
-	trimMapHalf(authQueryByHost)
-	trimMapHalf(authUserByHost)
+	trimMapHalf(authQueryMap(owner))
+	trimMapHalf(authUserMap(owner))
 }
 
 // ApplyStickyAuthQuery：URL 带 ?auth= 则按 host 记住；无则回填已记凭据。
@@ -63,17 +115,18 @@ func ApplyStickyAuthQuery(rawURL string) string {
 	}
 	host := u.Hostname()
 	q := u.Query()
+	owner := httpAuthOwner()
 	if auth := strings.TrimSpace(q.Get("auth")); auth != "" {
 		httpAuthMu.Lock()
-		authQueryByHost[host] = auth
-		trimHTTPAuthHostsLocked()
+		authQueryMap(owner)[host] = auth
+		trimHTTPAuthHostsLocked(owner)
 		httpAuthMu.Unlock()
 		return rawURL
 	}
 	httpAuthMu.RLock()
-	stored, ok := authQueryByHost[host]
+	stored := authQueryByOwner[owner][host]
 	httpAuthMu.RUnlock()
-	if !ok || stored == "" {
+	if stored == "" {
 		return rawURL
 	}
 	q.Set("auth", stored)
@@ -95,9 +148,10 @@ func ApplyBasicFromUserInfo(req *http.Request) {
 		return
 	}
 	host := req.URL.Hostname()
+	owner := httpAuthOwner()
 	httpAuthMu.Lock()
-	authUserByHost[host] = userInfo
-	trimHTTPAuthHostsLocked()
+	authUserMap(owner)[host] = userInfo
+	trimHTTPAuthHostsLocked(owner)
 	httpAuthMu.Unlock()
 	req.Header.Set("Authorization", BasicAuthHeader(userInfo))
 }
@@ -116,8 +170,9 @@ func RetryAuthOn401(client *http.Client, req *http.Request, resp *http.Response)
 		userInfo = req.URL.User.String()
 	}
 	if userInfo == "" {
+		owner := httpAuthOwner()
 		httpAuthMu.RLock()
-		userInfo = authUserByHost[host]
+		userInfo = authUserByOwner[owner][host]
 		httpAuthMu.RUnlock()
 	}
 	if userInfo == "" {

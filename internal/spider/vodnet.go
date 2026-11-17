@@ -13,6 +13,7 @@ import (
 
 func init() {
 	util.SetVodNetHooks(RewriteVodURLHost, InjectVodHeaders)
+	util.SetHTTPAuthOwner(hostclient.RuntimeUserID)
 }
 
 // 点播配置 headers/hosts 的 Go 侧表（jar 仍走 bridge SetNetConfig）。
@@ -48,10 +49,8 @@ func setGoNetConfig(headersJSON, hostsJSON []byte) {
 		vodHostByOwner[owner] = hosts
 	}
 	vodNetMu.Unlock()
-	// 粘性 auth 为进程全局表；远端换源勿整表 wipe，避免串清其它租户。
-	if hostclient.RuntimeUserID() == "" {
-		util.ClearHTTPAuth()
-	}
+	// 按 RuntimeUserID 分桶；换源只清当前租户。
+	util.ClearHTTPAuth()
 }
 
 // clearGoNetConfigForUser 清远端用户的 Go 侧 headers/hosts 桶。

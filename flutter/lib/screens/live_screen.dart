@@ -93,6 +93,28 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   static Completer<void>? _leaveDone;
 
+  static bool get isActive => _active != null;
+
+  /// 选源弹窗关闭后拉回页内焦点（部分盒子 PlatformView 会抢走原生焦点）。
+  static void restoreFocusAfterSourcePicker() {
+    _active?._restoreFocusAfterSourcePicker();
+  }
+
+  void _restoreFocusAfterSourcePicker() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (KotvLayout.television) KotvKeyHighlight.arm();
+      _remoteFocus.clear();
+      if (_rightOpen) {
+        _rightFocus.requestFocus();
+      } else if (_leftOpen) {
+        _focusChannelList();
+      } else {
+        _focus.requestFocus();
+      }
+    });
+  }
+
   static Future<void> prepareLeave() async {
     final inFlight = _leaveDone;
     if (inFlight != null) {
@@ -459,11 +481,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   bool _endedBusy = false;
   bool _pickingPlayer = false;
 
-  @override
   void _onLiveGlobalFocus() {
     if (!mounted || !_liveUiOpen) return;
+    if (_livePopupOpen()) return;
     final primary = FocusManager.instance.primaryFocus;
     if (primary == null || identical(primary, _focus)) return;
+    final ctx = primary.context;
+    if (ctx == null) return;
+    // 勿记住弹窗 / 其它路由上的节点，否则关窗 restore 打到已卸树焦点。
+    if (ctx.findAncestorStateOfType<_LiveScreenState>() != this) return;
     _remoteFocus.remember(primary);
   }
 
@@ -3379,10 +3405,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void _seekByRemote(Duration delta) {
     final next = _playback.position + delta;
     unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
-    if (_catchup) {
-      _pulseCatchupChrome();
-    } else {
-      _bumpLiveChrome();
+    // 回看/直播 seek 不亮整套播控；换台频道信息条由换台路径单独 pulse。
+    if (_catchup && _catchupChrome) {
+      _scheduleHideOverlays();
     }
   }
 

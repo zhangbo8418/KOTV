@@ -2552,6 +2552,13 @@ internal class KotvMpvSurfaceHost(context: Context) :
     stripPlatformViewFocus()
   }
 
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    stripPlatformViewFocus()
+    // OEM 可能稍后把 wrapper 设回 focusable，layout 后再剥一次。
+    post { stripPlatformViewFocus() }
+  }
+
   fun currentSurface(): Surface? {
     if (useTexture) {
       val s = textureSurface
@@ -2599,7 +2606,10 @@ internal class KotvMpvSurfaceHost(context: Context) :
 
   override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
     super.onSizeChanged(w, h, oldw, oldh)
-    post { layoutVideoFrame() }
+    post {
+      layoutVideoFrame()
+      stripPlatformViewFocus()
+    }
   }
 
   fun currentOsdSurface(): Surface? {

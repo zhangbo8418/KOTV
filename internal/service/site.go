@@ -115,8 +115,21 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 }
 
 // SoftCancelPending 软取消当前 Scope 进行中请求（JAR 不杀唯一 JVM）。
+// 若中断导致根 jar 路径空，立刻 EnsureRootJar，避免 CSP 空 jar 站卡住。
 func (s *SiteService) SoftCancelPending() {
 	spider.SoftCancelForClient(hostclient.ScopeID())
+	if s == nil || s.cfg == nil {
+		return
+	}
+	if spider.CurrentJarPath() != "" {
+		return
+	}
+	api := s.cfg.API()
+	sp := strings.TrimSpace(api.Spider)
+	if sp == "" {
+		return
+	}
+	_ = spider.EnsureRootJar(sp, api.URL)
 }
 
 // CancelPendingContent 卡死恢复：SoftCancel→清本租户；仅 bridge 不健康时 HardRestart。

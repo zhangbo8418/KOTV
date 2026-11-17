@@ -18,9 +18,22 @@ import Darwin
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
     channel.setMethodCallHandler { call, result in
-      if call.method == "getMemoryInfo" {
+      switch call.method {
+      case "getMemoryInfo":
         result(Self.memoryInfo())
-      } else {
+      case "getBrightness":
+        result(Double(UIScreen.main.brightness) * 100.0)
+      case "setBrightness":
+        if let p = call.arguments as? Double {
+          UIScreen.main.brightness = CGFloat(max(0.01, min(1.0, p / 100.0)))
+          result(true)
+        } else if let n = call.arguments as? NSNumber {
+          UIScreen.main.brightness = CGFloat(max(0.01, min(1.0, n.doubleValue / 100.0)))
+          result(true)
+        } else {
+          result(FlutterError(code: "bad_args", message: "brightness percent", details: nil))
+        }
+      default:
         result(FlutterMethodNotImplemented)
       }
     }

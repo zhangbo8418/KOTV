@@ -41,6 +41,9 @@ func currentJarPath() string {
 	return s
 }
 
+// CurrentJarPath 当前租户根 jar 本地路径（空则 CSP 站可能无法 resolve）。
+func CurrentJarPath() string { return currentJarPath() }
+
 func setCurrentJarPath(path string) {
 	uid := hostclient.RuntimeUserID()
 	if path == "" {

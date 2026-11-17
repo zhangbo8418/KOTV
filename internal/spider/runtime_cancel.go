@@ -6,6 +6,7 @@ import (
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/paths"
+	"github.com/bobo/KOTV/internal/util"
 )
 
 // 爬虫运行时取消 / 重启门面（JVM · Python · QuickJS · Node · Chromium）。
@@ -58,6 +59,7 @@ func forgetUserRuntimeState(userID string) {
 	clearJSRedirectsForUser(userID)
 	clearNetConfigForUser(userID)
 	clearPlayInfoForUser(userID)
+	util.ClearHTTPAuthForUser(userID)
 }
 
 // KillUserRuntime 清指定用户在单 JVM 内的 bridge 租户态 + 删 UserJVMDir，并杀掉其 Py/JS/Node/Chromium。

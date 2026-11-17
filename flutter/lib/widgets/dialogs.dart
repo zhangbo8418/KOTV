@@ -24,9 +24,18 @@ import '../screens/live_screen.dart';
 import 'chrome.dart';
 import 'h_scroll.dart';
 
-Future<void> _prepareLeavePlayback() async {
+Future<void> _prepareLeavePlayback({bool leaveLive = true}) async {
   await DetailScreen.prepareLeave();
-  await LiveScreen.prepareLeave();
+  // 同页选直播源时勿硬 prepareLeave Live（会卸 PlatformView 导致部分 TV 键死）。
+  if (leaveLive) await LiveScreen.prepareLeave();
+}
+
+Future<void> _prepareLeaveForLiveSourcePick() async {
+  await DetailScreen.prepareLeave();
+}
+
+void _restoreLiveFocusAfterPicker() {
+  LiveScreen.restoreFocusAfterSourcePicker();
 }
 
 /// 弹窗尺寸：窄屏用满宽减边距。大于 720p 时上限跟窗口倍数走，仍不超过屏幕。
@@ -933,21 +942,29 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
           : null,
       onDelete: canManage
           ? (url) async {
-              await _prepareLeavePlayback();
+              await _prepareLeaveForLiveSourcePick();
               await api.deleteLive(url);
             }
           : null,
     ),
   );
   if (!context.mounted) return false;
-  if (selected == null) return false;
+  if (selected == null) {
+    _restoreLiveFocusAfterPicker();
+    return false;
+  }
   if (selected.url.isEmpty) {
-    if (!canManage) return false;
+    if (!canManage) {
+      _restoreLiveFocusAfterPicker();
+      return false;
+    }
     await showAddLiveDialog(context, ref);
+    _restoreLiveFocusAfterPicker();
     return true;
   }
-  await _prepareLeavePlayback();
+  await _prepareLeaveForLiveSourcePick();
   await KotvSettingsCache.set(api, 'live', selected.url);
+  _restoreLiveFocusAfterPicker();
   return true;
 }
 

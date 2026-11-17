@@ -487,6 +487,10 @@ func (a *App) APISessionLeave() map[string]any {
 		a.dropSessionLives(sess)
 		a.sessions.Remove(sid)
 	}
+	// 仅当该用户已无剩余 Scope 才 KillUserRuntime（避免误杀仍在线的同用户会话）。
+	if uid != "" && a.sessions != nil && a.sessions.HasScopeForUser(uid) {
+		return map[string]any{"ok": true, "runtimeKept": true}
+	}
 	if a.presence != nil && uid != "" {
 		a.presence.Leave(uid) // → releaseUserRuntime
 	} else if uid != "" {

@@ -2804,6 +2804,12 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
     super.onAttachedToWindow()
     // Flutter PlatformViewWrapper 默认 focusable，需连父链一起关掉。
     stripPlatformViewFocus()
+    post { stripPlatformViewFocus() }
+  }
+
+  override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+    super.onSizeChanged(w, h, oldw, oldh)
+    post { stripPlatformViewFocus() }
   }
 
   /** 去掉 SurfaceView/TextureView，只留黑底（出画前滑动无独立 Surface 图层）。 */

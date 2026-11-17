@@ -130,6 +130,7 @@ Future<void> main() async {
       final tv = await const MethodChannel('kotv_android').invokeMethod<bool>('isTelevision');
       KotvLayout.television = tv == true;
       if (KotvLayout.television) {
+        FocusManager.instance.highlightMode = FocusHighlightMode.traditional;
         await SystemChrome.setPreferredOrientations(const [
           DeviceOrientation.landscapeLeft,
           DeviceOrientation.landscapeRight,
@@ -360,6 +361,13 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
         return Listener(
           behavior: HitTestBehavior.translucent,
           onPointerDown: (e) {
+            // 电视上 phantom pointer 会误关环；仅桌面真鼠标/触控板 disarm。
+            if (KotvLayout.television) {
+              if (e.kind == PointerDeviceKind.mouse && (e.buttons & kSecondaryMouseButton) != 0) {
+                kotvHandleAppBack?.call();
+              }
+              return;
+            }
             switch (e.kind) {
               case PointerDeviceKind.mouse:
               case PointerDeviceKind.trackpad:
