@@ -791,6 +791,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         _applySwipeDelta(total.dy);
         break;
       case KotvFsMode.none:
+      case KotvFsMode.channel:
       case KotvFsMode.pinch:
         break;
     }
@@ -933,6 +934,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         if (_pointerSwiping) _applySwipeDelta(e.delta.dy);
         break;
       case KotvFsMode.none:
+      case KotvFsMode.channel:
       case KotvFsMode.pinch:
         break;
     }
@@ -996,6 +998,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
           if (dist < kTouchSlop) _handleVideoTap();
         }
         break;
+      case KotvFsMode.channel:
       case KotvFsMode.pinch:
         break;
     }

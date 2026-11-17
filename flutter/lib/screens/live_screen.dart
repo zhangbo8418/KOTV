@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +19,7 @@ import '../player/art_playback.dart';
 import '../player/xg_playback.dart';
 import '../player/zw_playback.dart';
 import '../player/fullscreen_mode.dart';
+import '../player/fullscreen_gesture.dart';
 import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
 import '../player/background_playback.dart';
@@ -451,6 +454,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   int _livePlayTimeoutSec = 15;
   bool _liveAcross = true;
   bool _liveInvert = false;
+
+  /// 沉浸画面手势（非电视）：亮/音/回看 seek/中区甩动换台。
+  KotvFsMode _liveGMode = KotvFsMode.none;
+  KotvSideGestureSession? _liveSideGesture;
+  Duration? _liveSeekPreviewBase;
+  Duration _liveSeekPreviewDelta = Duration.zero;
+  int? _liveSwipePointer;
+  Offset? _liveSwipeDownAt;
+  final Map<int, Offset> _livePointers = {};
+  double _livePinchScale = 1.0;
+  double _livePinchStartScale = 1.0;
+  double _livePinchSpan0 = 1;
+  Offset _livePinchFocal = Offset.zero;
+  Timer? _liveWheelHudTimer;
+  DateTime? _liveLastTapAt;
   String _liveScale = 'default';
   AspectSpec _liveAspect = const AspectSpec(key: 'default', fit: BoxFit.contain);
   /// off | audio | pip
@@ -587,6 +605,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _catchupHideTimer?.cancel();
     _portraitHideTimer?.cancel();
     _cursorHideTimer?.cancel();
+    _liveWheelHudTimer?.cancel();
     _unwireLivePlaybackErrors();
     _unwireLivePlaybackEnded();
     _remoteFocus.clear();
@@ -3096,6 +3115,344 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     unawaited(_toggleLiveFullscreen());
   }
 
+  bool get _livePlayerGestures => !KotvLayout.television;
+
+  Future<void> _liveSetPlayerVolume(double percent) => _playback.setVolume(percent);
+
+  void _liveClearSideHud() {
+    if (_liveSideGesture == null) return;
+    setState(() => _liveSideGesture = null);
+  }
+
+  void _liveCancelSeekPreview() {
+    if (_liveSeekPreviewBase == null) return;
+    setState(() {
+      _liveSeekPreviewBase = null;
+      _liveSeekPreviewDelta = Duration.zero;
+    });
+  }
+
+  Duration get _liveSeekPreviewTarget {
+    final base = _liveSeekPreviewBase ?? _playback.position;
+    final dur = _playback.duration;
+    var t = base + _liveSeekPreviewDelta;
+    if (dur > Duration.zero && t > dur) t = dur;
+    if (t.isNegative) t = Duration.zero;
+    return t;
+  }
+
+  void _liveCommitSeekPreview() {
+    if (_liveSeekPreviewBase == null) return;
+    final target = _liveSeekPreviewTarget;
+    _liveSeekPreviewBase = null;
+    _liveSeekPreviewDelta = Duration.zero;
+    unawaited(_playback.seek(target));
+    setState(() {});
+  }
+
+  void _liveNudgeSeekPreview(Duration step) {
+    _liveSeekPreviewBase ??= _playback.position;
+    setState(() => _liveSeekPreviewDelta += step);
+  }
+
+  void _liveScheduleWheelHudSettle() {
+    _liveWheelHudTimer?.cancel();
+    _liveWheelHudTimer = Timer(KotvFsGesture.wheelHudSettle, () {
+      if (!mounted) return;
+      if (_liveSeekPreviewBase != null) _liveCommitSeekPreview();
+      _liveClearSideHud();
+    });
+  }
+
+  Future<void> _livePrimeSide(bool bright) async {
+    final want = bright ? KotvFsMode.bright : KotvFsMode.volume;
+    final session = bright
+        ? await KotvSideGestureSession.beginBright()
+        : await KotvSideGestureSession.beginVolume(playerVolume: _playback.volume);
+    if (!mounted) return;
+    if (_liveGMode != want) return;
+    if (session == null) {
+      _liveGMode = KotvFsMode.none;
+      return;
+    }
+    setState(() => _liveSideGesture = session);
+  }
+
+  void _liveApplySideDrag(double upPositive, double height) {
+    final s = _liveSideGesture;
+    if (s == null) return;
+    s.apply(upPositive, height);
+    unawaited(s.flush(setPlayerVolume: _liveSetPlayerVolume));
+    setState(() {});
+  }
+
+  Future<void> _liveNudgeVolume(double delta) async {
+    if (delta == 0) return;
+    var s = _liveSideGesture;
+    if (s == null || s.kind != 'volume') {
+      s = await KotvSideGestureSession.beginVolume(playerVolume: _playback.volume);
+      if (!mounted) return;
+      setState(() => _liveSideGesture = s);
+    }
+    s.applyPercentDelta(delta);
+    unawaited(s.flush(setPlayerVolume: _liveSetPlayerVolume));
+    if (mounted) setState(() {});
+    _liveScheduleWheelHudSettle();
+  }
+
+  void _liveBeginDragMode(KotvFsMode mode) {
+    _liveWheelHudTimer?.cancel();
+    if (mode != KotvFsMode.seek && _liveSeekPreviewBase != null) {
+      _liveCancelSeekPreview();
+    }
+    if (mode != KotvFsMode.bright && mode != KotvFsMode.volume) {
+      _liveClearSideHud();
+    }
+    switch (mode) {
+      case KotvFsMode.seek:
+        _liveGMode = KotvFsMode.seek;
+        _liveSeekPreviewBase = _playback.position;
+        _liveSeekPreviewDelta = Duration.zero;
+        setState(() {});
+        break;
+      case KotvFsMode.bright:
+        _liveGMode = KotvFsMode.bright;
+        unawaited(_livePrimeSide(true));
+        break;
+      case KotvFsMode.volume:
+        _liveGMode = KotvFsMode.volume;
+        unawaited(_livePrimeSide(false));
+        break;
+      case KotvFsMode.channel:
+        _liveGMode = KotvFsMode.channel;
+        break;
+      case KotvFsMode.none:
+      case KotvFsMode.ep:
+      case KotvFsMode.pinch:
+        break;
+    }
+  }
+
+  void _liveHandleTapAt(Offset local, Size size) {
+    final now = DateTime.now();
+    final last = _liveLastTapAt;
+    _liveLastTapAt = now;
+    if (last != null && now.difference(last) < kDoubleTapTimeout) {
+      _liveLastTapAt = null;
+      _onLiveDoubleTap();
+      return;
+    }
+    switch (KotvFsGesture.liveTapZone(local.dx, size.width)) {
+      case 0:
+        _toggleLeft();
+        break;
+      case 2:
+        _toggleRight();
+        break;
+      default:
+        _onCenterTap();
+        break;
+    }
+  }
+
+  void _onLiveFsPointerDown(PointerDownEvent e) {
+    if (e.buttons == kSecondaryMouseButton) {
+      kotvHandleAppBack?.call();
+      return;
+    }
+    if (e.buttons != kPrimaryButton) return;
+    if (_leftOpen || _rightOpen || _epgOpen) return;
+    // 电视：只保留短点三分区，不启拖/滚手势。
+    if (!_livePlayerGestures) {
+      _liveSwipePointer = e.pointer;
+      _liveSwipeDownAt = e.position;
+      _liveGMode = KotvFsMode.none;
+      return;
+    }
+    _livePointers[e.pointer] = e.position;
+    final touchLike = KotvFsGesture.isTouchLike(e.kind);
+    final size = MediaQuery.sizeOf(context);
+    if (touchLike && _livePointers.length >= 2) {
+      final pts = _livePointers.values.toList();
+      _liveGMode = KotvFsMode.pinch;
+      _livePinchStartScale = _livePinchScale;
+      _livePinchSpan0 = (pts[0] - pts[1]).distance.clamp(1.0, 10000.0);
+      _livePinchFocal = Offset((pts[0].dx + pts[1].dx) / 2, (pts[0].dy + pts[1].dy) / 2);
+      _liveSwipePointer = null;
+      return;
+    }
+    if (_liveSwipePointer != null) return;
+    if (touchLike && KotvFsGesture.isEdge(e.position, size)) return;
+    _liveWheelHudTimer?.cancel();
+    _liveSwipePointer = e.pointer;
+    _liveSwipeDownAt = e.position;
+    _liveGMode = KotvFsMode.none;
+  }
+
+  void _onLiveFsPointerMove(PointerMoveEvent e) {
+    if (!_livePlayerGestures) return; // 电视忽略拖移
+    if (_livePointers.containsKey(e.pointer)) {
+      _livePointers[e.pointer] = e.position;
+    }
+    if (_liveGMode == KotvFsMode.pinch && _livePointers.length >= 2) {
+      final pts = _livePointers.values.toList();
+      final span = (pts[0] - pts[1]).distance.clamp(1.0, 10000.0);
+      final next = (_livePinchStartScale * span / _livePinchSpan0).clamp(1.0, 5.0);
+      _livePinchFocal = Offset((pts[0].dx + pts[1].dx) / 2, (pts[0].dy + pts[1].dy) / 2);
+      setState(() => _livePinchScale = next);
+      return;
+    }
+    if (e.pointer != _liveSwipePointer || _liveSwipeDownAt == null) return;
+    final total = e.position - _liveSwipeDownAt!;
+    final size = MediaQuery.sizeOf(context);
+    if (_liveGMode == KotvFsMode.none) {
+      if (total.distance < kTouchSlop) return;
+      final mode = KotvFsGesture.classifyLiveDrag(
+        total: total,
+        downX: _liveSwipeDownAt!.dx,
+        width: size.width,
+        catchup: _catchup,
+      );
+      if (mode == KotvFsMode.none) return;
+      _liveBeginDragMode(mode);
+      return;
+    }
+    switch (_liveGMode) {
+      case KotvFsMode.seek:
+        final ms = (total.dx * KotvFsGesture.seekMsPerPx).round();
+        setState(() {
+          _liveSeekPreviewBase ??= _playback.position;
+          _liveSeekPreviewDelta = Duration(milliseconds: ms);
+        });
+        break;
+      case KotvFsMode.bright:
+      case KotvFsMode.volume:
+        _liveApplySideDrag(-total.dy, size.height);
+        break;
+      case KotvFsMode.channel:
+      case KotvFsMode.none:
+      case KotvFsMode.ep:
+      case KotvFsMode.pinch:
+        break;
+    }
+  }
+
+  void _endLiveFsPointer(int pointer, {required bool cancelled, Offset? upPos}) {
+    _livePointers.remove(pointer);
+    if (_liveGMode == KotvFsMode.pinch) {
+      if (_livePointers.length < 2) _liveGMode = KotvFsMode.none;
+      return;
+    }
+    if (pointer != _liveSwipePointer) return;
+    final downAt = _liveSwipeDownAt;
+    final mode = _liveGMode;
+    final total = (downAt != null && upPos != null) ? upPos - downAt : Offset.zero;
+    _liveSwipePointer = null;
+    _liveSwipeDownAt = null;
+    _liveGMode = KotvFsMode.none;
+    switch (mode) {
+      case KotvFsMode.seek:
+        if (!cancelled && _liveSeekPreviewBase != null) {
+          _liveCommitSeekPreview();
+        } else {
+          _liveCancelSeekPreview();
+        }
+        break;
+      case KotvFsMode.bright:
+      case KotvFsMode.volume:
+        _liveClearSideHud();
+        break;
+      case KotvFsMode.channel:
+        if (!cancelled) {
+          final sign = KotvFsGesture.liveChannelFlingSign(total);
+          if (sign != null) {
+            final delta = _liveInvert ? -sign : sign;
+            unawaited(_stepChannel(delta: delta));
+          }
+        }
+        break;
+      case KotvFsMode.none:
+        if (!cancelled && downAt != null && upPos != null) {
+          final dist = (upPos - downAt).distance;
+          if (dist < kTouchSlop) {
+            _liveHandleTapAt(upPos, MediaQuery.sizeOf(context));
+          }
+        }
+        break;
+      case KotvFsMode.ep:
+      case KotvFsMode.pinch:
+        break;
+    }
+  }
+
+  void _onLiveFsPointerUp(PointerUpEvent e) {
+    _endLiveFsPointer(e.pointer, cancelled: false, upPos: e.position);
+  }
+
+  void _onLiveFsPointerCancel(PointerCancelEvent e) {
+    _endLiveFsPointer(e.pointer, cancelled: true);
+  }
+
+  void _onLiveFsPointerSignal(PointerSignalEvent e) {
+    if (!_livePlayerGestures || e is! PointerScrollEvent) return;
+    if (_leftOpen || _rightOpen || _epgOpen) return;
+    if (_liveGMode == KotvFsMode.pinch) return;
+    if (_liveSwipePointer != null && _liveGMode != KotvFsMode.none) return;
+    final kind = KotvFsGesture.classifyLiveScroll(
+      dx: e.scrollDelta.dx,
+      dy: e.scrollDelta.dy,
+      shift: KotvFsGesture.shiftPressed,
+      catchup: _catchup,
+    );
+    switch (kind) {
+      case KotvFsScrollKind.volume:
+        unawaited(_liveNudgeVolume(KotvFsGesture.volumeDeltaFromScrollDy(e.scrollDelta.dy)));
+        break;
+      case KotvFsScrollKind.seek:
+        _liveNudgeSeekPreview(
+          KotvFsGesture.seekDeltaFromScroll(
+            dx: e.scrollDelta.dx,
+            dy: e.scrollDelta.dy,
+            shift: KotvFsGesture.shiftPressed,
+          ),
+        );
+        _liveScheduleWheelHudSettle();
+        break;
+      case KotvFsScrollKind.none:
+        break;
+    }
+  }
+
+  void _onLiveFsPanZoomUpdate(PointerPanZoomUpdateEvent e) {
+    if (!_livePlayerGestures) return;
+    if (_leftOpen || _rightOpen || _epgOpen) return;
+    if (_liveGMode == KotvFsMode.pinch) return;
+    if (_liveSwipePointer != null && _liveGMode != KotvFsMode.none) return;
+    final kind = KotvFsGesture.classifyLiveScroll(
+      dx: e.localPanDelta.dx,
+      dy: e.localPanDelta.dy,
+      shift: false,
+      catchup: _catchup,
+    );
+    switch (kind) {
+      case KotvFsScrollKind.volume:
+        unawaited(_liveNudgeVolume(KotvFsGesture.volumeDeltaFromScrollDy(e.localPanDelta.dy)));
+        break;
+      case KotvFsScrollKind.seek:
+        _liveNudgeSeekPreview(
+          KotvFsGesture.seekDeltaFromScroll(
+            dx: e.localPanDelta.dx,
+            dy: e.localPanDelta.dy,
+            shift: false,
+          ),
+        );
+        _liveScheduleWheelHudSettle();
+        break;
+      case KotvFsScrollKind.none:
+        break;
+    }
+  }
+
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
     const hot = 16.0;
     var zone = -1;
@@ -3651,7 +4008,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  _buildSharedLiveVideo(),
+                  Transform(
+                    alignment: Alignment.center,
+                    transform: KotvFsGesture.pinchMatrix(
+                      tx: _livePinchScale > 1.01
+                          ? (_livePinchFocal.dx - c.maxWidth / 2) * (1 - 1 / _livePinchScale)
+                          : 0.0,
+                      ty: _livePinchScale > 1.01
+                          ? (_livePinchFocal.dy - c.maxHeight / 2) * (1 - 1 / _livePinchScale)
+                          : 0.0,
+                      scale: _livePinchScale,
+                    ),
+                    child: _buildSharedLiveVideo(),
+                  ),
                   // Android Hybrid：起播/换台无帧时盖黑防叠影；桌面 Texture 不挂此层。
                   _buildLiveSurfaceCover(),
                   _buildLiveDanmakuOverlay(),
@@ -3685,40 +4054,85 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             ),
                           ),
                         if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
-                        // 点击分区：左 28% 频道 / 右 28% 设置 / 中 点画面播停
+                        // 触屏/鼠标/触控板：拖分区手势；抬手短点仍左栏/中播停/右设置。
                         Positioned.fill(
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 28,
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onTap: _toggleLeft,
-                                  onSecondaryTap: () => kotvHandleAppBack?.call(),
-                                  onDoubleTap: _onLiveDoubleTap,
-                                ),
-                              ),
-                              Expanded(
-                                flex: 44,
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onTap: _onCenterTap,
-                                  onSecondaryTap: () => kotvHandleAppBack?.call(),
-                                  onDoubleTap: _onLiveDoubleTap,
-                                ),
-                              ),
-                              Expanded(
-                                flex: 28,
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onTap: _toggleRight,
-                                  onSecondaryTap: () => kotvHandleAppBack?.call(),
-                                  onDoubleTap: _onLiveDoubleTap,
-                                ),
-                              ),
-                            ],
+                          child: Listener(
+                            behavior: HitTestBehavior.translucent,
+                            onPointerDown: _onLiveFsPointerDown,
+                            onPointerMove: _onLiveFsPointerMove,
+                            onPointerUp: _onLiveFsPointerUp,
+                            onPointerCancel: _onLiveFsPointerCancel,
+                            onPointerSignal: _onLiveFsPointerSignal,
+                            onPointerPanZoomUpdate: _onLiveFsPanZoomUpdate,
                           ),
                         ),
+                        if (_liveSideGesture != null)
+                          IgnorePointer(
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.62),
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _liveSideGesture!.kind == 'bright'
+                                          ? Icons.brightness_6_rounded
+                                          : Icons.volume_up_rounded,
+                                      color: Colors.white,
+                                      size: 22,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      '${_liveSideGesture!.percent.round()}%',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (_liveSeekPreviewBase != null)
+                          IgnorePointer(
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.72),
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _liveSeekPreviewDelta >= Duration.zero
+                                          ? Icons.fast_forward_rounded
+                                          : Icons.fast_rewind_rounded,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      '${fmtBoundedPlayerTime(_liveSeekPreviewTarget)} / ${fmtBoundedPlayerTime(_playback.duration)}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        fontFeatures: [FontFeature.tabularFigures()],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         if (_playUrl.isNotEmpty && !_leftOpen && !_rightOpen)
                           if (_catchup)
                             ExcludeFocus(
