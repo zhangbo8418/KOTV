@@ -239,49 +239,8 @@ else:
     print("ok patched extract_archive gnu/lua mirrors")
 PY
 
-# webhtv 对 mpv 浅克隆 + tag deepen 在 CI 上不稳：要么 shallow 文件冲突，要么 describe 对不上。
-# 保留原 deepen 顺序并加重试；最终以 lock 的 MPV_VERSION 文件为准（webhtv 本就会写这个文件）。
-python3 - "$build_sh" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-old = '''  if [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_DESCRIBE_TAG" HEAD 2>/dev/null || true)" != "v$MPV_VERSION" ]; then
-    # Fetch the upstream tag first. A depth-1 tag fetch marks the tag commit as
-    # a shallow boundary; expanding the selected FongMi commit afterwards
-    # reconnects that commit and keeps git-describe deterministic.
-    git -C "$deps/mpv" fetch --depth=1 "$MPV_TAG_REPO" \\
-      "refs/tags/$MPV_DESCRIBE_TAG:refs/tags/$MPV_DESCRIBE_TAG"
-    git -C "$deps/mpv" fetch --depth="$MPV_HISTORY_DEPTH" origin "$MPV_COMMIT"
-  fi
-  [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_DESCRIBE_TAG" HEAD)" = "v$MPV_VERSION" ] || die "MPV describe version mismatch"'''
-new = '''  if [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_DESCRIBE_TAG" HEAD 2>/dev/null || true)" != "v$MPV_VERSION" ]; then
-    # Same deepen order as upstream webhtv, with retries for shallow-file races.
-    _ok=0
-    for _try in 1 2 3 4 5 6; do
-      rm -f "$deps/mpv/.git/shallow.lock" || true
-      if git -C "$deps/mpv" fetch --depth=1 "$MPV_TAG_REPO" \\
-          "refs/tags/$MPV_DESCRIBE_TAG:refs/tags/$MPV_DESCRIBE_TAG" \\
-        && git -C "$deps/mpv" fetch --depth="$MPV_HISTORY_DEPTH" origin "$MPV_COMMIT" \\
-        && [ "$(git -C "$deps/mpv" describe --abbrev=9 --tags --match "$MPV_DESCRIBE_TAG" HEAD 2>/dev/null || true)" = "v$MPV_VERSION" ]; then
-        _ok=1
-        break
-      fi
-      sleep "$_try"
-    done
-    if [ "$_ok" != "1" ]; then
-      log "MPV git-describe still mismatched after retries; embedding lock version $MPV_VERSION"
-      git -C "$deps/mpv" fetch --unshallow origin 2>/dev/null || true
-      git -C "$deps/mpv" fetch --no-tags "$MPV_TAG_REPO" \\
-        "refs/tags/$MPV_DESCRIBE_TAG:refs/tags/$MPV_DESCRIBE_TAG" 2>/dev/null || true
-    fi
-  fi'''
-if old not in text:
-    raise SystemExit("ERROR: webhtv mpv shallow-fetch block changed; update KOTV patch")
-path.write_text(text.replace(old, new, 1), encoding="utf-8")
-print("ok patched webhtv mpv shallow fetch + soft describe")
-PY
+# webhtv 对 mpv 浅克隆 + tag deepen 在 CI 上不稳：shallow 锁冲突或 describe 对不上 tip。
+python3 "$ROOT/scripts/patch-webhtv-mpv-shallow-fetch.py" "$build_sh"
 
 # 安卓 libplacebo 启用 libdovi（杜比视界）：复用 webhtv exo-dv5 预编译静态库。
 OVERRIDES="$WORK/webhtv/third_party/mpv-native-overrides"
