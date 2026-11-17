@@ -108,7 +108,7 @@ class DetailFullscreenPage extends StatefulWidget {
   final Widget videoChild;
   /// 桌面：画面由外层 Positioned 宿主绘制，本页只叠控件，避免卸树重建 Texture。
   final bool externalVideo;
-  /// 外层稳定视频层跟手位移（抖音式上下滑）；为 null 时仅本页控件位移。
+  /// 外层稳定视频层跟手位移（上下滑切集）；为 null 时仅本页控件位移。
   final ValueNotifier<double>? swipeOffset;
   final String vodName;
   final String title;
@@ -220,11 +220,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   bool _remoteHoldSpeed = false;
   DateTime? _lastTapAt;
   bool? _playingForChrome;
-  StreamSubscription<Duration>? _posSub;
-  Duration _pos = Duration.zero;
   final GlobalKey<VodFullscreenChromeState> _chromeKey = GlobalKey<VodFullscreenChromeState>();
 
-  /// 抖音式上下滑切集：跟手位移 + 松手吸附/切集
+  /// 上下滑切集：跟手位移 + 松手吸附/切集。
   double _dragDy = 0;
   bool _dragging = false;
   int? _swipePointer;
@@ -242,7 +240,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   Duration? _seekPreviewBase;
   Duration _seekPreviewDelta = Duration.zero;
 
-  /// 手机触屏：seek / 侧边亮音 / 捏合；中间竖滑切集。电视/桌面仅竖滑切集。
+  /// 非电视：seek / 侧边亮音 / 切集；触/笔另支持捏合。电视仅竖滑切集。
   _FsGestureMode _gMode = _FsGestureMode.none;
   KotvSideGestureSession? _sideGesture;
   double _pinchScale = 1.0;
@@ -251,8 +249,15 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   Offset _pinchFocal = Offset.zero;
   final Map<int, Offset> _pointers = {};
   bool _gestureLocked = false;
+  Timer? _wheelHudTimer;
+  /// 滚轮/双指 settle 时：true 提交 seek，false 只收音量 HUD。
+  bool _wheelHudCommitSeek = false;
 
-  bool get _phoneTouchGestures => !KotvLayout.television && !kotvIsDesktop() && !kIsWeb;
+  /// 点播全屏播放器手势（非电视）。
+  bool get _playerGestures => !KotvLayout.television;
+
+  /// 锁屏按钮：随手机/平板触控 chrome，不强行加桌面锁。
+  bool get _gestureLockUi => !KotvLayout.television && !kotvIsDesktop() && !kIsWeb;
 
   String get _title {
     if (_epIdx >= 0 && _epIdx < widget.episodes.length) {
@@ -287,7 +292,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         if (t == null || !mounted) return;
         setState(() => _setDragDy(t.value));
       });
-    _pos = widget.playback.position;
     _playingForChrome = widget.playback.playing;
     _bindPlaybackStreams(widget.playback);
     // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
@@ -317,13 +321,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _bindPlaybackStreams(KotvPlayback pb) {
     pb.addListener(_onPlaybackChanged);
-    _posSub?.cancel();
-    _pos = pb.position;
-    _posSub = pb.positionStream.listen((d) {
-      if (!mounted) return;
-      if (d.inSeconds == _pos.inSeconds) return;
-      setState(() => _pos = d);
-    });
   }
 
   @override
@@ -351,8 +348,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
     _hideTimer?.cancel();
     _hintTimer?.cancel();
+    _wheelHudTimer?.cancel();
     _swipeAnim.dispose();
-    _posSub?.cancel();
     widget.playback.removeListener(_onPlaybackChanged);
     // 嵌入模式由父页恢复系统栏；此处再调会与 _exitImmersiveFullscreen 叠成方向竞态。
     if (!widget.embedded) {
@@ -651,7 +648,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _flashSwipeHint('已是最后一集');
       return;
     }
-    // 底栏/遥控下一集：先抖音式动画再切；上滑手势已在 onDone 前播完。
+    // 底栏/遥控下一集：先跟手动画再切；上滑手势已在 onDone 前播完。
     if (!didAnimate) {
       unawaited(() async {
         final ok = await animateAutoNext();
@@ -668,7 +665,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
   }
 
-  /// 播完自动下一集：与上滑手势同一套跟手/吸附动画（抖音式）。
+  /// 播完自动下一集：与上滑手势同一套跟手/吸附动画。
   Future<bool> animateAutoNext() async {
     if (!mounted) return false;
     if (_epIdx + 1 >= widget.episodes.length) return false;
@@ -739,10 +736,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Future<void> _primeSideGesture(bool bright) async {
-    final session = bright
+    final KotvSideGestureSession? session = bright
         ? await KotvSideGestureSession.beginBright()
         : await KotvSideGestureSession.beginVolume(playerVolume: widget.playback.volume);
-    if (!mounted || (_gMode != _FsGestureMode.bright && _gMode != _FsGestureMode.volume)) return;
+    if (!mounted || session == null) return;
+    if (_gMode != _FsGestureMode.bright && _gMode != _FsGestureMode.volume) return;
     setState(() => _sideGesture = session);
   }
 
@@ -757,13 +755,111 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     setState(() {});
   }
 
+  void _applyDragKind(KotvFsDragKind kind, Offset total) {
+    switch (kind) {
+      case KotvFsDragKind.seek:
+        _gMode = _FsGestureMode.seek;
+        _seekPreviewBase = widget.playback.position;
+        _seekPreviewDelta = Duration.zero;
+        setState(() {});
+        break;
+      case KotvFsDragKind.bright:
+        _gMode = _FsGestureMode.bright;
+        unawaited(_primeSideGesture(true));
+        break;
+      case KotvFsDragKind.volume:
+        _gMode = _FsGestureMode.volume;
+        unawaited(_primeSideGesture(false));
+        break;
+      case KotvFsDragKind.ep:
+        _gMode = _FsGestureMode.ep;
+        _beginSwipe();
+        _pointerSwiping = true;
+        _applySwipeDelta(total.dy);
+        break;
+      case KotvFsDragKind.none:
+        break;
+    }
+  }
+
+  void _scheduleWheelHudSettle({required bool commitSeek}) {
+    _wheelHudCommitSeek = commitSeek;
+    _wheelHudTimer?.cancel();
+    _wheelHudTimer = Timer(KotvFsGesture.wheelHudSettle, () {
+      if (!mounted) return;
+      if (_wheelHudCommitSeek) {
+        if (_seekPreviewBase != null) {
+          _commitSeekPreview();
+        }
+      } else if (_sideGesture != null) {
+        setState(() => _sideGesture = null);
+      }
+    });
+  }
+
+  Future<void> _nudgeVolumeByDelta(double delta) async {
+    if (delta == 0 || _gestureLocked) return;
+    var s = _sideGesture;
+    if (s == null || s.kind != 'volume') {
+      s = await KotvSideGestureSession.beginVolume(playerVolume: widget.playback.volume);
+      if (!mounted) return;
+      setState(() => _sideGesture = s);
+    }
+    s.applyPercentDelta(delta);
+    unawaited(s.applyHardware());
+    if (!s.useSystemVolume) {
+      unawaited(widget.playback.setVolume(s.percent));
+    }
+    if (mounted) setState(() {});
+    _scheduleWheelHudSettle(commitSeek: false);
+  }
+
+  void _nudgeSeekByDelta(Duration step) {
+    if (step == Duration.zero || _gestureLocked) return;
+    _nudgeSeekPreview(step);
+    _scheduleWheelHudSettle(commitSeek: true);
+  }
+
+  void _onPlayerScrollDelta(double dx, double dy, {required bool shift}) {
+    if (!_playerGestures || _gestureLocked) return;
+    if (_gMode != _FsGestureMode.none && _gMode != _FsGestureMode.seek && _gMode != _FsGestureMode.volume) {
+      return;
+    }
+    // 拖拽进行中不抢滚轮。
+    if (_swipePointer != null && _gMode != _FsGestureMode.none) return;
+    final kind = KotvFsGesture.classifyScroll(dx: dx, dy: dy, shift: shift);
+    switch (kind) {
+      case KotvFsScrollKind.volume:
+        unawaited(_nudgeVolumeByDelta(KotvFsGesture.volumeDeltaFromScrollDy(dy)));
+        break;
+      case KotvFsScrollKind.seek:
+        _nudgeSeekByDelta(KotvFsGesture.seekDeltaFromScroll(dx: dx, dy: dy, shift: shift));
+        break;
+      case KotvFsScrollKind.none:
+        break;
+    }
+  }
+
+  void _onPointerSignal(PointerSignalEvent e) {
+    if (e is! PointerScrollEvent) return;
+    final shift = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+        HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
+    _onPlayerScrollDelta(e.scrollDelta.dx, e.scrollDelta.dy, shift: shift);
+  }
+
+  void _onPointerPanZoomUpdate(PointerPanZoomUpdateEvent e) {
+    // 触控板双指平移；捏合缩放不在桌面触控板处理（避系统手势）。
+    _onPlayerScrollDelta(e.localPanDelta.dx, e.localPanDelta.dy, shift: false);
+  }
+
   void _onSwipePointerDown(PointerDownEvent e) {
     // 右键由全局 kotvHandleAppBack 统一处理（全屏时只退出全屏）。
     if (e.buttons != kPrimaryButton) return;
     _pointers[e.pointer] = e.position;
     if (_gestureLocked) return;
 
-    if (_phoneTouchGestures && _pointers.length >= 2) {
+    final touchLike = KotvFsGesture.isTouchLike(e.kind);
+    if (_playerGestures && touchLike && _pointers.length >= 2) {
       _stopHoldSpeed();
       final pts = _pointers.values.toList();
       _gMode = _FsGestureMode.pinch;
@@ -777,7 +873,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
     if (_swipePointer != null) return;
     final size = MediaQuery.sizeOf(context);
-    if (_phoneTouchGestures && KotvFsGesture.isEdge(e.position, size)) return;
+    if (touchLike && KotvFsGesture.isEdge(e.position, size)) return;
     _swipePointer = e.pointer;
     _swipeDownAt = e.position;
     _swipeVelocity = VelocityTracker.withKind(e.kind)..addPosition(e.timeStamp, e.position);
@@ -807,36 +903,16 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
     if (_gMode == _FsGestureMode.none) {
       if (total.distance < kTouchSlop) return;
-      if (_phoneTouchGestures) {
-        if (total.dx.abs() >= total.dy.abs()) {
-          _gMode = _FsGestureMode.seek;
-          _seekPreviewBase = widget.playback.position;
-          _seekPreviewDelta = Duration.zero;
-          setState(() {});
-        } else {
-          final x = _swipeDownAt!.dx;
-          if (KotvFsGesture.isLeftQuarter(x, size.width)) {
-            _gMode = _FsGestureMode.bright;
-            unawaited(_primeSideGesture(true));
-          } else if (KotvFsGesture.isRightQuarter(x, size.width)) {
-            _gMode = _FsGestureMode.volume;
-            unawaited(_primeSideGesture(false));
-          } else if (_canSwipeEps) {
-            _gMode = _FsGestureMode.ep;
-            _beginSwipe();
-            _pointerSwiping = true;
-            _applySwipeDelta(total.dy);
-          }
-        }
-        return;
-      }
-      // 电视/桌面：仅竖滑切集
-      if (!_canSwipeEps) return;
-      if (total.dy.abs() <= total.dx.abs()) return;
-      _gMode = _FsGestureMode.ep;
-      _beginSwipe();
-      _pointerSwiping = true;
-      _applySwipeDelta(total.dy);
+      final kind = _playerGestures
+          ? KotvFsGesture.classifyDrag(
+              total: total,
+              downX: _swipeDownAt!.dx,
+              width: size.width,
+              canEp: _canSwipeEps,
+              allowBright: true,
+            )
+          : KotvFsGesture.classifyTvDrag(total: total, canEp: _canSwipeEps);
+      _applyDragKind(kind, total);
       return;
     }
 
@@ -966,7 +1042,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     final v = velocityDy;
     final commitNext = (v < -420 || _dragDy < -h * 0.18) && _epIdx + 1 < widget.episodes.length;
     final commitPrev = (v > 420 || _dragDy > h * 0.18) && _epIdx > 0;
-    // 上滑 = 下一集（抖音同款）；下滑 = 上一集
+    // 上滑 = 下一集；下滑 = 上一集
     if (commitNext) {
       _lastSwipeAt = now;
       final next = _epIdx + 1;
@@ -1355,7 +1431,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         _flashSwipeHint('比例：${a.key == 'default' ? '适应' : a.key == 'fill' ? '拉伸' : a.key == 'zoom' ? 'Zoom' : a.key}');
       },
       locked: _gestureLocked,
-      onLockChanged: _phoneTouchGestures ? _setGestureLocked : null,
+      onLockChanged: _gestureLockUi ? _setGestureLocked : null,
       playUrl: widget.playUrl,
       decodeMode: _decodeMode,
       renderMode: _renderMode,
@@ -1517,6 +1593,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         onPointerMove: _onSwipePointerMove,
                         onPointerUp: _onSwipePointerUp,
                         onPointerCancel: _onSwipePointerCancel,
+                        onPointerSignal: _onPointerSignal,
+                        onPointerPanZoomUpdate: _onPointerPanZoomUpdate,
                       ),
                     ),
                   ),
