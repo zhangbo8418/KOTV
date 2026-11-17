@@ -310,8 +310,10 @@ Future<void> kotvSoftPausePlayers(Iterable<KotvPlayback?> players) async {
   await Future.wait<void>(players.map(one));
 }
 
-/// 点播换集：对各后端 [KotvPlayback.stopForEpisodeSwitch]（FVP 会 dispose 缓冲）。
+/// 点播硬切换集：先 soft pause 消音，再 [KotvPlayback.stopForEpisodeSwitch]（FVP 会 dispose 缓冲）。
+/// 无缝 skipToNext 不调用本方法。
 Future<void> kotvStopPlayersForEpisodeSwitch(Iterable<KotvPlayback?> players) async {
+  await kotvSoftPausePlayers(players);
   Future<void> one(KotvPlayback? p) async {
     if (p == null) return;
     try {

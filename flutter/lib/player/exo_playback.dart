@@ -676,14 +676,17 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> stopForEpisodeSwitch() async {
-    // 换集只卸当前文件，ExoPlayer 留着。Surface 仍在树上。
+    // 硬切换集：先 pause 消音，再卸文件；ExoPlayer 留着。无缝不走本路径。
+    try {
+      await pause();
+    } catch (_) {}
     await _unloadKeepingPlayer();
     notifyListeners();
   }
 
   @override
   Future<void> release() async {
-    // stop → 短排空 → dispose（须 await，勿丢后台留下解码缓冲）。
+    // stop → 短排空 → dispose（须 await 跑完，避免留下解码缓冲）。
     await kotvTeardownPlayback(
       stop: () async {
         try {

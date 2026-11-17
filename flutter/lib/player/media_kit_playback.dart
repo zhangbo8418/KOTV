@@ -17,15 +17,23 @@ import 'silent_video_guard.dart';
 import 'video_eq.dart';
 
 /// 进行中的桌面 libmpv 拆机。页面 leave 可能先返回，但新建 Player 前必须等它跑完，
-/// 避免与后台 pause/stop/dispose 抢 AO（不在此做「超时弃等待」）。
+/// 避免与后台 pause/stop/dispose 抢 AO。
 Future<void>? _kotvMpvTeardown;
 
+/// 拆机门闩等待超时后置位：进程内 libmpv 可能已毒，禁止再建 Player，须重启应用。
+bool kotvMpvTeardownStuck = false;
+
 /// 等待上一次 [kotvDisposeMpvPlayer] 结束（含页面超时后仍在跑的那次）。
-Future<void> kotvAwaitMpvTeardown() async {
+/// [limit] 仅放开本等待；超时置 [kotvMpvTeardownStuck]，内层 dispose 仍继续跑。
+Future<void> kotvAwaitMpvTeardown({
+  Duration limit = const Duration(seconds: 15),
+}) async {
   final t = _kotvMpvTeardown;
   if (t == null) return;
   try {
-    await t;
+    await t.timeout(limit);
+  } on TimeoutException {
+    kotvMpvTeardownStuck = true;
   } catch (_) {}
 }
 
@@ -62,7 +70,11 @@ Future<void> kotvDisposeMpvPlayer(Player? player) async {
 
 /// 按缓冲预算创建 [Player]。点播和直播同一份内存比例。
 /// 起播请先 [kotvAwaitMpvTeardown] / [kotvTakeDesktopMpvPlayer]，勿与拆机并发。
+/// [kotvMpvTeardownStuck] 时抛 [StateError]，勿再 create。
 Player kotvCreateMpvPlayer() {
+  if (kotvMpvTeardownStuck) {
+    throw StateError('播放器异常，请重启应用');
+  }
   final budget = KotvBufferBudget.bytes();
   return Player(
     configuration: PlayerConfiguration(
@@ -71,7 +83,7 @@ Player kotvCreateMpvPlayer() {
   );
 }
 
-/// 桌面起播前取 Player：先等拆机门闩；已有实例返回 null；否则 [kotvCreateMpvPlayer]。
+/// 桌面起播前取 Player：先等拆机门闩；已有实例或 [kotvMpvTeardownStuck] 返回 null；否则 [kotvCreateMpvPlayer]。
 /// 详情/直播 [_primeDesktopMpv] 共用；调用方负责 bind，若期间已有实例须自行 dispose 返回值。
 Future<Player?> kotvTakeDesktopMpvPlayer({
   required bool alreadyBound,
@@ -79,6 +91,7 @@ Future<Player?> kotvTakeDesktopMpvPlayer({
 }) async {
   if (kotvIsAndroid()) return null;
   await kotvAwaitMpvTeardown();
+  if (kotvMpvTeardownStuck) return null;
   if (alreadyBound) return null;
   final player = kotvCreateMpvPlayer();
   if (!isMounted()) {
@@ -783,6 +796,10 @@ class MediaKitPlayback extends KotvPlayback {
     _completedGate = null;
     _clearVideoSize();
     _speedBps = 0;
+    // 硬切换集/换台：先 pause 消音，再 stop 卸文件（无缝不走本路径）。
+    try {
+      await player.pause();
+    } catch (_) {}
     try {
       await player.stop();
     } catch (_) {}

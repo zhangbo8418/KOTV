@@ -217,6 +217,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
     // 同步创建；异步起播路径先 [_primeDesktopMpv]。直播须 live:true（关 cache-pause）。
     if (_mk != null) return _mk!;
+    if (kotvMpvTeardownStuck) {
+      throw StateError('播放器异常，请重启应用');
+    }
     _bindDesktopMpv(kotvCreateMpvPlayer());
     return _mk!;
   }
@@ -232,17 +235,27 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
-  Future<void> _primeDesktopMpv() async {
+  /// [kotvMpvTeardownStuck] 时写状态提示重启，返回 false。
+  Future<bool> _primeDesktopMpv() async {
+    if (kotvMpvTeardownStuck) {
+      if (mounted) setState(() => _status = '播放器异常，请重启应用');
+      return false;
+    }
     final player = await kotvTakeDesktopMpvPlayer(
       alreadyBound: _mk != null && _mkPlayer != null,
       isMounted: () => mounted,
     );
-    if (player == null) return;
+    if (kotvMpvTeardownStuck) {
+      if (mounted) setState(() => _status = '播放器异常，请重启应用');
+      return false;
+    }
+    if (player == null) return true;
     if (_mk != null) {
       await kotvDisposeMpvPlayer(player);
-      return;
+      return true;
     }
     _bindDesktopMpv(player);
+    return true;
   }
 
   /// Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘）。
@@ -1681,7 +1694,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     /// 超时/无画面恢复：沿用当前会话解码（常为 soft），勿改写 [_prefDecodeMode]。
     String? startDecodeOverride,
   }) async {
-    await _primeDesktopMpv();
+    if (!await _primeDesktopMpv()) return;
     if (!mounted || serial != _playSerial) return;
     // 热缓存同步 peek，避免每台换台多一次 async。
     var playSettings = KotvSettingsCache.peek();
@@ -2378,7 +2391,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         await _playChannel(chIdx, line: next);
         return;
       }
-      setState(() => _status = '播放失败: $e');
+      setState(() {
+        _status = kotvMpvTeardownStuck || (e is StateError && e.message.contains('播放器异常'))
+            ? '播放器异常，请重启应用'
+            : '播放失败: $e';
+      });
     }
   }
 

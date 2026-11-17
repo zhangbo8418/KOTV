@@ -149,7 +149,7 @@ class DetailScreen extends ConsumerStatefulWidget {
 
   /// 换源/切 Tab：放开 PopScope，并 await 硬停（含桌面 MPV dispose），避免卸树后仍占 AO/出声。
   /// 并发调用挂同一 Completer。硬停等待有上限以便 UI 返回；桌面 libmpv 拆机仍跑完，
-  /// 再建前由 [kotvAwaitMpvTeardown] 串行。
+  /// 再建前由 [kotvAwaitMpvTeardown] 串行（超时置 [kotvMpvTeardownStuck]）。
   static Future<void> prepareLeave() async {
     final inFlight = _DetailScreenState._leaveDone;
     if (inFlight != null) {
@@ -538,6 +538,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     // 同步兜底创建；正常起播应已 [_primeDesktopMpv]（内含拆机等待）。
     // 若拆机仍在跑，调用方须先 await [kotvAwaitMpvTeardown]。
+    if (kotvMpvTeardownStuck) {
+      throw StateError('播放器异常，请重启应用');
+    }
     final player = kotvCreateMpvPlayer();
     _bindDesktopMpv(player);
     return _mk!;
@@ -564,21 +567,31 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
-  Future<void> _primeDesktopMpv() async {
+  /// [kotvMpvTeardownStuck] 时写状态提示重启，返回 false。
+  Future<bool> _primeDesktopMpv() async {
+    if (kotvMpvTeardownStuck) {
+      if (mounted) setState(() => _status = '播放器异常，请重启应用');
+      return false;
+    }
     final player = await kotvTakeDesktopMpvPlayer(
       alreadyBound: _mk != null && _mkPlayer != null,
       isMounted: () => mounted,
     );
-    if (player == null) return;
+    if (kotvMpvTeardownStuck) {
+      if (mounted) setState(() => _status = '播放器异常，请重启应用');
+      return false;
+    }
+    if (player == null) return true;
     if (_mk != null) {
       await kotvDisposeMpvPlayer(player);
-      return;
+      return true;
     }
     _bindDesktopMpv(player);
+    return true;
   }
 
   /// 释放桌面 media_kit 的包装 + [Player]（Android 原生 MPV 不走这里）。
-  /// 硬切 [_playAt]、换引擎、起播失败重试、改直出选项时调用；无缝 skipToNext 不调用。
+  /// 换引擎、起播失败重试、改直出选项、silent 重建时调用；硬切 [_playAt] / 无缝 skipToNext 不调用。
   /// 离开页由 [_stopHard] 自行卸 Player，不必再调本方法。
   /// [softStopFirst]：尚未 stop 时先 pause/stop，避免与新引擎抢 AO。
   Future<void> _disposeDesktopMpvOwned({bool softStopFirst = false}) async {
@@ -2284,7 +2297,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
     if (_leaving) return;
-    await _primeDesktopMpv();
+    if (!await _primeDesktopMpv()) return;
     if (_leaving || !mounted) return;
     final d = _detail;
     if (d == null || d.flags.isEmpty) return;
@@ -2338,10 +2351,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await _writeWatchProgress(flushPos, flushDur, force: true, episodeName: prevEpName);
       } catch (_) {}
     }
-    // 硬切：先卸文件；桌面 MPV 再拆 Player（Win7 卡死实例不能复用）。
-    // 无缝：[_advanceToNextEpisode]→skipToNext / 引擎 transition，不进 [_playAt]，此处不影响。
+    // 硬切：pause 消音 + stop 卸文件，桌面 MPV 实例保留（无缝不进 [_playAt]）。
     await _stopAllBackends();
-    await _disposeDesktopMpvOwned();
     if (serial != _playAtSerial || !mounted) return;
     // 先 await 软取消上一集（Java / Python·JS / Node），再 play。
     // unawaited 会与本次 play 竞态；软取消未结束就开新解析时，脚本可能报「已中断」。
@@ -2743,10 +2754,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _stopBtProgressPoll();
       _playbackLive = false;
       _sessionStartedAt = null;
-      final tip = _friendlyPlayError(
-        e,
-        triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
-      );
+      final tip = kotvMpvTeardownStuck || (e is StateError && e.message.contains('播放器异常'))
+          ? '播放器异常，请重启应用'
+          : _friendlyPlayError(
+              e,
+              triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
+            );
       // 留页并保留舞台；勿清 _playUrl 拆掉播放区。
       if (mounted) {
         setState(() {

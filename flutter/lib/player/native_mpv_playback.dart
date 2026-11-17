@@ -636,7 +636,10 @@ class NativeMpvPlayback extends KotvPlayback {
 
   @override
   Future<void> stopForEpisodeSwitch() async {
-    // 换集只卸当前文件。不拆 libmpv，下次 open 仍 loadfile。
+    // 硬切换集：先 pause 消音，再卸文件。不拆 libmpv；无缝不走本路径。
+    try {
+      await pause();
+    } catch (_) {}
     await _unloadKeepingContext();
     notifyListeners();
   }
