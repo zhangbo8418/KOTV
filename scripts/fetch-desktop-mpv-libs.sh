@@ -14,11 +14,19 @@ marker_ok() {
   [[ -f "$f" && "$(wc -c <"$f" | tr -d ' ')" -ge "$min" ]]
 }
 
-# 与 build-desktop-mpv / ffmpeg / libplacebo 默认钉一致；改钉后缓存失效。
+# shellcheck source=scripts/kotv-resolve-git-ref.sh
+source "$ROOT/scripts/kotv-resolve-git-ref.sh"
+
+# stamp 写入解析到的真实 SHA（跟 tip 时与构建一致，避免误命中旧缓存）。
 kotv_mpv_src_stamp() {
-  local mpv="${KOTV_MPV_COMMIT:-ada80027ceffc141720be69ab5caccd886a6fd70}"
-  local ff="${KOTV_FFMPEG_COMMIT:-bdf17191d55d78984ea742fe858fbf9b9aaa5775}"
-  local pl="${KOTV_LIBPLACEBO_TAG:-v7.387.0}"
+  local mpv_repo="${KOTV_MPV_REPO:-https://github.com/FongMi/mpv.git}"
+  local mpv_ref="${KOTV_MPV_REF:-fongmi}"
+  local ff_repo="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
+  local ff_ref="${KOTV_FFMPEG_REF:-release-9.1-fongmi}"
+  local mpv ff pl
+  mpv="$(kotv_resolve_git_ref "$mpv_repo" "$mpv_ref" "${KOTV_MPV_COMMIT:-}")"
+  ff="$(kotv_resolve_git_ref "$ff_repo" "$ff_ref" "${KOTV_FFMPEG_COMMIT:-}")"
+  pl="${KOTV_LIBPLACEBO_TAG:-v7.387.0}"
   printf 'mpv=%s ffmpeg=%s libplacebo=%s\n' "$mpv" "$ff" "$pl"
 }
 

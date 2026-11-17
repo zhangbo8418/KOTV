@@ -14,13 +14,22 @@ ASSET="$ROOT/flutter/assets/mpv-libs"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 MPV_REPO="${KOTV_MPV_REPO:-https://github.com/FongMi/mpv.git}"
-MPV_COMMIT="${KOTV_MPV_COMMIT:-ada80027ceffc141720be69ab5caccd886a6fd70}"
+# 默认解析 fongmi tip；KOTV_MPV_COMMIT 可覆盖做可复现构建。
+MPV_REF="${KOTV_MPV_REF:-fongmi}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 AV3A="${KOTV_BUILD_MPV_AV3A:-1}"
 
+# shellcheck source=scripts/kotv-resolve-git-ref.sh
+source "$ROOT/scripts/kotv-resolve-git-ref.sh"
+MPV_COMMIT="$(kotv_resolve_git_ref "$MPV_REPO" "$MPV_REF" "${KOTV_MPV_COMMIT:-}")"
+echo "ok mpv ${MPV_COMMIT:0:12} (ref=${MPV_REF})"
+
 mkdir -p "$ASSET/windows" "$ASSET/linux" "$ASSET/macos"
 
-
+# 三平台共用：浅取并检出已解析的 MPV_COMMIT。
+kotv_checkout_mpv_src() {
+  kotv_git_checkout_commit "$BUILD_DIR/mpv" "$MPV_REPO" "$MPV_COMMIT"
+}
 
 # Win7 发行包：子系统钉 6.01；与 Win10+ 同编 Vulkan + D3D11。
 kotv_is_mpv_win7_build() {
@@ -903,7 +912,7 @@ harvest_windows_mpv_dlls() {
   chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
   "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$dest"
 }
-# mpv ada80027+ 要求 libplacebo >=7.387.0（meson.build）。
+# 当前 fongmi tip 的 meson.build：libplacebo >=7.387.0。
 LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.387.0}"
 LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.387.0}"
 
@@ -1483,16 +1492,8 @@ build_mpv_linux() {
   ensure_windows_libass
   ensure_lua_pkg
   mkdir -p "$BUILD_DIR"
-  cd "$BUILD_DIR"
-  if [[ ! -d mpv/.git ]]; then
-    git clone --filter=blob:none --depth 1 "$MPV_REPO" mpv
-    git -C mpv fetch --depth 1 origin "$MPV_COMMIT"
-    git -C mpv checkout -q "$MPV_COMMIT"
-  else
-    git -C mpv fetch --depth 1 origin "$MPV_COMMIT" 2>/dev/null || true
-    git -C mpv checkout -q "$MPV_COMMIT"
-  fi
-  cd mpv
+  kotv_checkout_mpv_src
+  cd "$BUILD_DIR/mpv"
   rm -rf build
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
@@ -1547,16 +1548,8 @@ build_mpv_macos() {
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
   mkdir -p "$BUILD_DIR"
-  cd "$BUILD_DIR"
-  if [[ ! -d mpv/.git ]]; then
-    git clone --filter=blob:none --depth 1 "$MPV_REPO" mpv
-    git -C mpv fetch --depth 1 origin "$MPV_COMMIT"
-    git -C mpv checkout -q "$MPV_COMMIT"
-  else
-    git -C mpv fetch --depth 1 origin "$MPV_COMMIT" 2>/dev/null || true
-    git -C mpv checkout -q "$MPV_COMMIT"
-  fi
-  cd mpv
+  kotv_checkout_mpv_src
+  cd "$BUILD_DIR/mpv"
   rm -rf build
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
@@ -1706,16 +1699,8 @@ pkg_config_path = '$pkg_win'
 EOF
   ensure_libplacebo
 
-  cd "$BUILD_DIR"
-  if [[ ! -d mpv/.git ]]; then
-    git clone --filter=blob:none --depth 1 "$MPV_REPO" mpv
-    git -C mpv fetch --depth 1 origin "$MPV_COMMIT"
-    git -C mpv checkout -q "$MPV_COMMIT"
-  else
-    git -C mpv fetch --depth 1 origin "$MPV_COMMIT" 2>/dev/null || true
-    git -C mpv checkout -q "$MPV_COMMIT"
-  fi
-  cd mpv
+  kotv_checkout_mpv_src
+  cd "$BUILD_DIR/mpv"
   if kotv_is_windows_build && kotv_is_mpv_win7_build; then
     apply_mpv_win7_patches
     export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"

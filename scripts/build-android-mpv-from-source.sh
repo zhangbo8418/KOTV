@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 安卓 libmpv / FFmpeg / libplayer JNI 从源码编。
 # webhtv 只提供交叉编译脚本、补丁与 JNI 源码。
-# FFmpeg 默认钉死 e02d612 基线 commit；要跟 tip 设 KOTV_FFMPEG_FOLLOW_TIP=1。
-# CI 不下载预编译 .so，也不提交 .so。
+# 默认解析上游 tip：FFmpeg=release-9.1-fongmi，mpv/mpv-android=fongmi；
+# KOTV_*_COMMIT 可覆盖做可复现构建。CI 不下载预编译 .so，也不提交 .so。
 #
 # 现网功能：aaudio android android-media-ndk audiotrack egl-android ffmpeg gl
 #   iconv libarchive libass libavdevice libbluray dvdnav libcurl libplacebo libdovi lua
@@ -13,9 +13,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/kotv-win-build-env.sh
 source "$ROOT/scripts/kotv-win-build-env.sh"
+# shellcheck source=scripts/kotv-resolve-git-ref.sh
+source "$ROOT/scripts/kotv-resolve-git-ref.sh"
 WEBHTV_REF="${KOTV_WEBHTV_MPV_PIN:-${KOTV_WEBHTV_MPV_REF:-main}}"
 FFMPEG_REPO="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
-FFMPEG_REF="${KOTV_FFMPEG_REF:-release-9.0-fongmi}"
+FFMPEG_REF="${KOTV_FFMPEG_REF:-release-9.1-fongmi}"
+MPV_REPO="${KOTV_MPV_REPO:-https://github.com/FongMi/mpv.git}"
+MPV_REF="${KOTV_MPV_REF:-fongmi}"
+MPV_ANDROID_REPO="${KOTV_MPV_ANDROID_REPO:-https://github.com/FongMi/mpv-android.git}"
+MPV_ANDROID_REF="${KOTV_MPV_ANDROID_REF:-fongmi}"
+# 与桌面 meson 要求一致：libplacebo >=7.387.0
+LIBPLACEBO_REPO="${KOTV_LIBPLACEBO_REPO:-https://github.com/haasn/libplacebo.git}"
+LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.387.0}"
 WORK="${KOTV_ANDROID_MPV_SRC:-$ROOT/.build/android-mpv-src}"
 ASSET="$ROOT/flutter/android/app/src/main/assets/mpv-libs"
 STAMP="$ASSET/.kotv-source-build"
@@ -32,23 +41,18 @@ done
 command -v meson >/dev/null || echo "WARN: meson not in PATH (libplacebo may fail)" >&2
 command -v ninja >/dev/null || echo "WARN: ninja not in PATH (libplacebo may fail)" >&2
 
-resolve_ffmpeg_sha() {
-  if [[ -n "${KOTV_FFMPEG_COMMIT:-}" ]]; then
-    printf '%s\n' "$KOTV_FFMPEG_COMMIT"
-    return
-  fi
-  if [[ "${KOTV_FFMPEG_FOLLOW_TIP:-}" == "1" ]]; then
-    local sha
-    sha="$(git ls-remote "$FFMPEG_REPO" "refs/heads/${FFMPEG_REF}" | awk '{print $1; exit}')"
-    [[ -n "$sha" ]] || { echo "ERROR: cannot resolve $FFMPEG_REPO $FFMPEG_REF" >&2; exit 1; }
-    printf '%s\n' "$sha"
-    return
-  fi
-  printf '%s\n' "bdf17191d55d78984ea742fe858fbf9b9aaa5775"
-}
-
-FFMPEG_COMMIT="$(resolve_ffmpeg_sha)"
-want="webhtv=${WEBHTV_REF} ffmpeg=${FFMPEG_COMMIT:0:12} libdovi=1 lcms=1 xxhash=1"
+FFMPEG_COMMIT="$(kotv_resolve_git_ref "$FFMPEG_REPO" "$FFMPEG_REF" "${KOTV_FFMPEG_COMMIT:-}")"
+MPV_COMMIT="$(kotv_resolve_git_ref "$MPV_REPO" "$MPV_REF" "${KOTV_MPV_COMMIT:-}")"
+MPV_ANDROID_COMMIT="$(kotv_resolve_git_ref "$MPV_ANDROID_REPO" "$MPV_ANDROID_REF" "${KOTV_MPV_ANDROID_COMMIT:-}")"
+if [[ -n "${KOTV_LIBPLACEBO_COMMIT:-}" ]]; then
+  LIBPLACEBO_COMMIT="$KOTV_LIBPLACEBO_COMMIT"
+else
+  LIBPLACEBO_COMMIT="$(git ls-remote "$LIBPLACEBO_REPO" "refs/tags/${LIBPLACEBO_TAG}" | awk '{print $1; exit}')"
+  [[ -n "$LIBPLACEBO_COMMIT" ]] || LIBPLACEBO_COMMIT="$(git ls-remote "$LIBPLACEBO_REPO" "$LIBPLACEBO_TAG" | awk '{print $1; exit}')"
+  [[ -n "$LIBPLACEBO_COMMIT" ]] || { echo "ERROR: cannot resolve $LIBPLACEBO_REPO $LIBPLACEBO_TAG" >&2; exit 1; }
+fi
+echo "ok android pins: ffmpeg=${FFMPEG_COMMIT:0:12} mpv=${MPV_COMMIT:0:12} builder=${MPV_ANDROID_COMMIT:0:12} libplacebo=${LIBPLACEBO_COMMIT:0:12}"
+want="webhtv=${WEBHTV_REF} ffmpeg=${FFMPEG_COMMIT:0:12} mpv=${MPV_COMMIT:0:12} builder=${MPV_ANDROID_COMMIT:0:12} libplacebo=${LIBPLACEBO_COMMIT:0:12} libdovi=1 lcms=1 xxhash=1"
 jni="$ROOT/flutter/android/app/src/main/jniLibs"
 has_suite() {
   local abi="$1" dir="$2"
@@ -63,7 +67,7 @@ if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$want" ]] && has_suite arm64-v8a "$jn
   exit 0
 fi
 
-echo "==> clone webhtv $WEBHTV_REF (builder only; FFmpeg → ${FFMPEG_REF} ${FFMPEG_COMMIT:0:12})"
+echo "==> clone webhtv $WEBHTV_REF (overlay ffmpeg/mpv/builder/libplacebo tips)"
 mkdir -p "$WORK"
 if [[ ! -d "$WORK/webhtv/.git" ]]; then
   git clone --filter=blob:none --depth 1 https://github.com/fish2018/webhtv.git "$WORK/webhtv"
@@ -72,17 +76,33 @@ git -C "$WORK/webhtv" fetch --depth 1 origin "$WEBHTV_REF"
 git -C "$WORK/webhtv" checkout -q FETCH_HEAD 2>/dev/null \
   || git -C "$WORK/webhtv" checkout -q "$WEBHTV_REF"
 
-# 覆盖 webhtv 锁里的 FFmpeg：跟上游 release-9.0-fongmi tip，不跟它仓库里钉死的旧提交。
-python3 - "$WORK/webhtv/third_party/mpv-native-lock.json" "$FFMPEG_REPO" "$FFMPEG_COMMIT" <<'PY'
+# 覆盖 webhtv 锁：跟当前上游 tip，不沿用 lock 内过期 SHA。
+python3 - "$WORK/webhtv/third_party/mpv-native-lock.json" \
+  "$FFMPEG_REPO" "$FFMPEG_COMMIT" \
+  "$MPV_REPO" "$MPV_COMMIT" \
+  "$MPV_ANDROID_REPO" "$MPV_ANDROID_COMMIT" \
+  "$LIBPLACEBO_REPO" "$LIBPLACEBO_COMMIT" "$LIBPLACEBO_TAG" <<'PY'
 import json, pathlib, sys
 path = pathlib.Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8"))
 ff = data.setdefault("sources", {}).setdefault("ffmpeg", {})
 ff["repo"] = sys.argv[2]
 ff["commit"] = sys.argv[3]
-ff["version"] = "9.0.1-fongmi-tip"
+ff["version"] = "9.1-fongmi-tip"
+mpv = data.setdefault("sources", {}).setdefault("mpv", {})
+mpv["repo"] = sys.argv[4]
+mpv["commit"] = sys.argv[5]
+mpv["version"] = f"git-{sys.argv[5][:12]}"
+builder = data.setdefault("builder", {})
+builder["repo"] = sys.argv[6]
+builder["commit"] = sys.argv[7]
+pl = data.setdefault("sources", {}).setdefault("libplacebo", {})
+pl["repo"] = sys.argv[8]
+pl["commit"] = sys.argv[9]
+pl["version"] = sys.argv[10].lstrip("v")
+pl["submodules"] = True
 path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-print(f"ok lock ffmpeg → {sys.argv[3][:12]}")
+print(f"ok lock ffmpeg→{sys.argv[3][:12]} mpv→{sys.argv[5][:12]} builder→{sys.argv[7][:12]} libplacebo→{sys.argv[9][:12]}")
 PY
 
 # GHA 上 downloads.videolan.org 经常超时；ISO 三件套改走公共镜像（sha256 不变）。

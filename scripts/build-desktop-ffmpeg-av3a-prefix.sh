@@ -9,28 +9,15 @@ source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 FFMPEG_REPO="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
-# 默认钉死 e02d612 可用的 FongMi commit；要跟 tip 设 KOTV_FFMPEG_FOLLOW_TIP=1（可再配 KOTV_FFMPEG_REF）。
-FFMPEG_REF="${KOTV_FFMPEG_REF:-release-9.0-fongmi}"
+# 默认解析 release-9.1-fongmi tip；KOTV_FFMPEG_COMMIT 可覆盖做可复现构建。
+FFMPEG_REF="${KOTV_FFMPEG_REF:-release-9.1-fongmi}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 PKG_BIN="$BUILD_DIR/bin"
 
-resolve_ffmpeg_sha() {
-  if [[ -n "${KOTV_FFMPEG_COMMIT:-}" ]]; then
-    printf '%s\n' "$KOTV_FFMPEG_COMMIT"
-    return
-  fi
-  if [[ "${KOTV_FFMPEG_FOLLOW_TIP:-}" == "1" ]]; then
-    local sha
-    sha="$(git ls-remote "$FFMPEG_REPO" "refs/heads/${FFMPEG_REF}" | awk '{print $1; exit}')"
-    [[ -n "$sha" ]] || { echo "ERROR: cannot resolve $FFMPEG_REPO $FFMPEG_REF" >&2; exit 1; }
-    printf '%s\n' "$sha"
-    return
-  fi
-  # e02d612 基线：avcodec/mediacodec Dolby Vision profile 5 GPU mapping
-  printf '%s\n' "bdf17191d55d78984ea742fe858fbf9b9aaa5775"
-}
+# shellcheck source=scripts/kotv-resolve-git-ref.sh
+source "$ROOT/scripts/kotv-resolve-git-ref.sh"
 
-FFMPEG_COMMIT="$(resolve_ffmpeg_sha)"
+FFMPEG_COMMIT="$(kotv_resolve_git_ref "$FFMPEG_REPO" "$FFMPEG_REF" "${KOTV_FFMPEG_COMMIT:-}")"
 echo "ok FFmpeg ${FFMPEG_COMMIT:0:12} (ref=${FFMPEG_REF})"
 
 
@@ -59,30 +46,13 @@ cd "$BUILD_DIR"
 
 clone_ffmpeg() {
   mkdir -p "$BUILD_DIR"
-  if [[ ! -d ffmpeg/.git ]]; then
-    git clone --filter=blob:none "$FFMPEG_REPO" ffmpeg
-  fi
-  git -C ffmpeg fetch --depth 1 origin "$FFMPEG_COMMIT" \
-    || git -C ffmpeg fetch --depth 1 origin "$FFMPEG_REF"
-  git -C ffmpeg checkout -q "$FFMPEG_COMMIT" \
-    || git -C ffmpeg checkout -q FETCH_HEAD
-  # 确保落到 resolve 出来的 tip（分支 tip 可能比 FETCH_HEAD 更新）。
-  if [[ "$(git -C ffmpeg rev-parse HEAD)" != "$FFMPEG_COMMIT" ]]; then
-    git -C ffmpeg fetch --depth 1 origin "$FFMPEG_COMMIT"
-    git -C ffmpeg checkout -q "$FFMPEG_COMMIT"
-  fi
+  kotv_git_checkout_commit "$BUILD_DIR/ffmpeg" "$FFMPEG_REPO" "$FFMPEG_COMMIT"
 }
 
-# v21: bdf17191 avs3a 链 libear（speaker_renderer）；.pc/extra-libs 带 -lear。
-# v20: FFmpeg bdf17191（含直播状态暴露）；桌面/安卓同源钉。
-# v19: 曾钉 04482c8（e02d612 直播基线）。
-# v18: arib PIC；Windows libavcodec/arib 补 d2d1。
-# v17: zlib PIC；xz 只装 liblzma；FFmpeg/libxml 用 LIBXML_STATIC。
-# v16: codecs 静态 zlib/lzma；mac 探测链 -lc++；清 DYLD 防 Abort。
-# v15: libxml2 完整启用 zlib+lzma（PREFIX 自带依赖）。
-# v14: +dav1d +libxml2 +libaribcaption + 平台硬解（d3d11va/videotoolbox/vaapi）。
+# v22: 默认跟 release-9.1-fongmi tip（含 libarcdav3a / libear）。
+# v21: bdf17191 avs3a 链 libear；曾默认 release-9.0-fongmi。
 # HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v21-${FFMPEG_COMMIT:0:12}"
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v22-${FFMPEG_COMMIT:0:12}"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
