@@ -74,6 +74,24 @@ kotv_git_checkout_commit "$BS/deps/mpv" "$MPV_REPO" "$MPV_COMMIT"
 [[ "$(git -C "$BS/deps/mpv" rev-parse HEAD)" == "$MPV_COMMIT" ]] \
   || { echo "ERROR: mpv HEAD != $MPV_COMMIT" >&2; exit 1; }
 
+# CMake 4 起拒绝 cmake_minimum_required < 3.5（uavs3d 仍写 3.1）。
+# 给 android_cmake_setup 统一加 POLICY_VERSION_MINIMUM，避免各依赖分别打补丁。
+python3 - "$BS/include/cmake-android.sh" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = '-DCMAKE_POSITION_INDEPENDENT_CODE=ON \\\n'
+flag = '-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \\\n\t\t'
+if "CMAKE_POLICY_VERSION_MINIMUM" in text:
+    print("ok cmake-android already sets CMAKE_POLICY_VERSION_MINIMUM")
+elif needle not in text:
+    raise SystemExit("ERROR: cmake-android.sh PIC flag line changed; update KOTV patch")
+else:
+    path.write_text(text.replace(needle, needle + flag, 1), encoding="utf-8")
+    print("ok patched cmake-android.sh for CMAKE_POLICY_VERSION_MINIMUM=3.5")
+PY
+
 # mpv-android path.sh 把 ANDROID_HOME 指到 buildscripts/sdk/…；尽量链已有 SDK。
 if [[ -z "${ANDROID_HOME:-}" ]]; then
   if [[ -n "${ANDROID_SDK_ROOT:-}" && -d "$ANDROID_SDK_ROOT" ]]; then

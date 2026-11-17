@@ -912,87 +912,85 @@ harvest_windows_mpv_dlls() {
   chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
   "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$dest"
 }
-# 当前 fongmi tip 的 meson.build：libplacebo >=7.387.0。
+# mpv fongmi tip 需要 libplacebo 新 API（pl_dispatch_prepared / pl_source_peak_* 等）。
+# 默认跟 libplacebo fongmi tip；KOTV_LIBPLACEBO_COMMIT 可覆盖。meson 下限仍是 7.387.0。
+LIBPLACEBO_REPO="${KOTV_LIBPLACEBO_REPO:-https://github.com/FongMi/libplacebo.git}"
+LIBPLACEBO_REF="${KOTV_LIBPLACEBO_REF:-fongmi}"
 LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.387.0}"
-LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.387.0}"
+LIBPLACEBO_COMMIT="$(kotv_resolve_git_ref "$LIBPLACEBO_REPO" "$LIBPLACEBO_REF" "${KOTV_LIBPLACEBO_COMMIT:-}")"
+echo "ok libplacebo ${LIBPLACEBO_COMMIT:0:12} (ref=${LIBPLACEBO_REF})"
 
 ensure_libplacebo() {
-  local want_profile cached_profile
+  local want_profile cached_profile cached_commit
   want_profile="$(kotv_libplacebo_profile)"
   cached_profile="$(cat "$BUILD_DIR/.libplacebo-profile" 2>/dev/null || true)"
+  cached_commit="$(cat "$BUILD_DIR/.libplacebo-commit" 2>/dev/null || true)"
   # macOS：只用自前缀 libplacebo，禁止 pkg-config 命中 Homebrew（arm64 runner 编 x86_64 会链错架构）。
   if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
   else
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   fi
-  if pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo 2>/dev/null; then
-    if [[ "$cached_profile" == "$want_profile" ]]; then
-      if kotv_is_windows_build && [[ ! -f "$PREFIX/lib/libplacebo.a" ]]; then
-        echo "==> windows: prefix libplacebo is not static; rebuilding ($want_profile)"
-      else
-        echo "ok libplacebo $(pkg-config --modversion libplacebo) (profile=$want_profile)"
-        return
-      fi
+  if pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo 2>/dev/null \
+    && [[ "$cached_profile" == "$want_profile" ]] \
+    && [[ "$cached_commit" == "$LIBPLACEBO_COMMIT" ]]; then
+    if kotv_is_windows_build && [[ ! -f "$PREFIX/lib/libplacebo.a" ]]; then
+      echo "==> windows: prefix libplacebo is not static; rebuilding ($want_profile)"
+    elif [[ -f "$PREFIX/include/libplacebo/dispatch.h" ]] \
+      && grep -q 'pl_dispatch_prepared' "$PREFIX/include/libplacebo/dispatch.h" 2>/dev/null; then
+      echo "ok libplacebo $(pkg-config --modversion libplacebo) (${LIBPLACEBO_COMMIT:0:12}, profile=$want_profile)"
+      return
     else
-      echo "==> libplacebo profile ${cached_profile:-<none>} -> $want_profile, rebuilding"
-      rm -f "$PREFIX/lib/libplacebo.a" "$PREFIX/lib/pkgconfig/libplacebo.pc" 2>/dev/null || true
+      echo "==> libplacebo headers lack pl_dispatch_prepared; rebuilding"
     fi
+  elif [[ "$cached_commit" != "$LIBPLACEBO_COMMIT" || "$cached_profile" != "$want_profile" ]]; then
+    echo "==> libplacebo cache miss (commit=${cached_commit:-none}→${LIBPLACEBO_COMMIT:0:12}, profile=${cached_profile:-none}→$want_profile)"
+    rm -f "$PREFIX/lib/libplacebo.a" "$PREFIX/lib/pkgconfig/libplacebo.pc" 2>/dev/null || true
   fi
   ensure_libdovi
   ensure_placebo_extras
-  echo "==> build libplacebo $LIBPLACEBO_TAG (profile=$want_profile, need >= $LIBPLACEBO_MIN)"
+  echo "==> build libplacebo ${LIBPLACEBO_COMMIT:0:12} (profile=$want_profile, need >= $LIBPLACEBO_MIN)"
   need meson
   need ninja
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
-  if [[ ! -d libplacebo/.git ]]; then
-    local clone_ok=0
-    local attempt
-    for attempt in 1 2 3 4 5; do
-      echo "  libplacebo clone attempt $attempt"
+  # 旧缓存可能仍指向 haasn；remote 不符则整树重建。
+  if [[ -d libplacebo/.git ]]; then
+    local cur_remote
+    cur_remote="$(git -C libplacebo remote get-url origin 2>/dev/null || true)"
+    if [[ "$cur_remote" != "$LIBPLACEBO_REPO" ]]; then
+      echo "==> libplacebo remote $cur_remote → $LIBPLACEBO_REPO; recloning"
       rm -rf libplacebo
-      if git clone --depth 1 --recurse-submodules --branch "$LIBPLACEBO_TAG" \
-        https://github.com/haasn/libplacebo.git libplacebo; then
-        clone_ok=1
-        break
-      fi
-      sleep $((attempt * 3))
-    done
-    if [[ $clone_ok -ne 1 ]]; then
-      echo "ERROR: libplacebo clone/submodules failed after retries" >&2
-      exit 1
-    fi
-  else
-    # 旧缓存常停在 v7.360.x；改钉后必须显式 checkout，否则仍编出旧 soversion。
-    git -C libplacebo fetch --depth 1 origin tag "$LIBPLACEBO_TAG" 2>/dev/null \
-      || git -C libplacebo fetch --depth 1 origin "$LIBPLACEBO_TAG"
-    git -C libplacebo checkout -q FETCH_HEAD 2>/dev/null \
-      || git -C libplacebo checkout -q "$LIBPLACEBO_TAG"
-    local sm_ok=0
-    local attempt
-    for attempt in 1 2 3 4 5; do
-      if git -C libplacebo submodule update --init --recursive; then
-        sm_ok=1
-        break
-      fi
-      echo "  libplacebo submodule retry $attempt"
-      sleep $((attempt * 3))
-    done
-    if [[ $sm_ok -ne 1 ]]; then
-      echo "ERROR: libplacebo submodule update failed after retries" >&2
-      exit 1
     fi
   fi
-  cd libplacebo
-  # 确认源码版本，避免 profile 缓存掩盖错 tag。
-  echo "  libplacebo HEAD=$(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)"
+  local clone_ok=0 attempt
+  for attempt in 1 2 3 4 5; do
+    echo "  libplacebo checkout attempt $attempt"
+    if kotv_git_checkout_commit "$BUILD_DIR/libplacebo" "$LIBPLACEBO_REPO" "$LIBPLACEBO_COMMIT" \
+      && git -C "$BUILD_DIR/libplacebo" submodule update --init --recursive; then
+      clone_ok=1
+      break
+    fi
+    sleep $((attempt * 3))
+  done
+  if [[ $clone_ok -ne 1 ]]; then
+    echo "ERROR: libplacebo checkout/submodules failed after retries" >&2
+    exit 1
+  fi
+  [[ "$(git -C "$BUILD_DIR/libplacebo" rev-parse HEAD)" == "$LIBPLACEBO_COMMIT" ]] \
+    || { echo "ERROR: libplacebo HEAD != $LIBPLACEBO_COMMIT" >&2; exit 1; }
+  cd "$BUILD_DIR/libplacebo"
+  echo "  libplacebo HEAD=$(git rev-parse --short HEAD)"
   if [[ ! -f 3rdparty/Vulkan-Headers/CMakeLists.txt ]]; then
     echo "ERROR: libplacebo Vulkan-Headers submodule missing" >&2
     exit 1
   fi
+  if ! grep -q 'pl_dispatch_prepared' src/include/libplacebo/dispatch.h 2>/dev/null; then
+    echo "ERROR: libplacebo source lacks pl_dispatch_prepared (wrong ref?)" >&2
+    exit 1
+  fi
   rm -rf build
-  # 旧 7.360 装到前缀的 .pc/.dylib 会让校验误读；换大版本先清掉。
+  # 换 commit 时清掉前缀旧产物，避免校验误读。
   rm -f "$PREFIX/lib/libplacebo"* "$PREFIX/lib/pkgconfig/libplacebo.pc" 2>/dev/null || true
   rm -rf "$PREFIX/include/libplacebo" 2>/dev/null || true
   local placebo_lib=shared
@@ -1066,6 +1064,7 @@ ensure_libplacebo() {
   kotv_meson_compile build "libplacebo"
   meson install -C build
   echo "$want_profile" > "$BUILD_DIR/.libplacebo-profile"
+  printf '%s\n' "$LIBPLACEBO_COMMIT" >"$BUILD_DIR/.libplacebo-commit"
   # 某些平台仍会装到 lib/<triplet>/pkgconfig；一并加入 PATH
   if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
@@ -1076,6 +1075,11 @@ ensure_libplacebo() {
     echo "ERROR: libplacebo install not visible to pkg-config (>= $LIBPLACEBO_MIN)" >&2
     pkg-config --modversion libplacebo 2>&1 || true
     find "$PREFIX" -name 'libplacebo.pc' 2>/dev/null || true
+    exit 1
+  fi
+  if [[ ! -f "$PREFIX/include/libplacebo/dispatch.h" ]] \
+    || ! grep -q 'pl_dispatch_prepared' "$PREFIX/include/libplacebo/dispatch.h"; then
+    echo "ERROR: installed libplacebo lacks pl_dispatch_prepared" >&2
     exit 1
   fi
   # 确认真正编进了 libdovi / lcms / xxhash。
@@ -1090,7 +1094,7 @@ ensure_libplacebo() {
       fi
     done
   fi
-  echo "ok libplacebo $(pkg-config --modversion libplacebo) (built, libdovi+lcms+xxhash)"
+  echo "ok libplacebo $(pkg-config --modversion libplacebo) (built ${LIBPLACEBO_COMMIT:0:12}, libdovi+lcms+xxhash)"
 }
 
 ensure_lua_pkg() {
