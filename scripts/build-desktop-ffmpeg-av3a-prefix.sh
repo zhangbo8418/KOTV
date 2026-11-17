@@ -411,43 +411,13 @@ if ! ./configure \
   exit 1
 fi
 
-# Windows/MSYS：默认 INSTALL_FILES 把上百个 libavutil 头文件拼进一条 sh -c，
-# 命令行过长会在单引号处截断 → unexpected EOF while looking for matching `''。
-if kotv_is_windows_build; then
-  python3 - ffbuild/common.mak <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-marker = "kotv-install-one-by-one"
-if marker in text:
-    print("ok ffbuild/common.mak already installs headers one-by-one")
-    raise SystemExit(0)
-# 逐文件 install，避免一条命令塞满 ARG_MAX。
-replacement = (
-    "INSTALL_FILES = @$("
-    "foreach F,$(2),"
-    "printf 'INSTALL\\t%s -> %s\\n' \"$(F:$(SRC_PATH)/%=%)\" \"$(3)\"; "
-    "$(INSTALL) $(1) $(F) \"$(3)\";) "
-    f"# {marker}"
-)
-out = []
-n = 0
-for line in text.splitlines(keepends=True):
-    if line.startswith("INSTALL_FILES ="):
-        out.append(replacement + "\n")
-        n += 1
-    else:
-        out.append(line)
-if n < 1:
-    raise SystemExit("ERROR: ffbuild/common.mak has no INSTALL_FILES = line")
-path.write_text("".join(out), encoding="utf-8")
-print(f"ok patched INSTALL_FILES one-by-one ({n} defs)")
-PY
-fi
-
 $MAKE -j"$JOBS"
-$MAKE install
+# Windows/MSYS：`make install` 把头文件列表展开进一条 sh -c，触顶 ARG_MAX。
+if kotv_is_windows_build; then
+  python3 "$ROOT/scripts/kotv-ffmpeg-msys-install.py" --src "$PWD" --prefix "$PREFIX"
+else
+  $MAKE install
+fi
 
 lib="$PREFIX/lib/libavcodec.a"
 [[ -f "$lib" ]] || lib="$PREFIX/lib/libavcodec.dll.a"
@@ -460,7 +430,7 @@ if ! grep -aqE 'libdav1d|dav1d_data_props' "$lib" 2>/dev/null \
   echo "ERROR: $lib built without libdav1d" >&2
   exit 1
 fi
-# lavf：HTTPS + 直播常用 RTSP/RTMP（FongMi 无 libnghttp2 选项；HTTP/2+3 走 mpv libcurl）。
+# lavf：HTTPS + 直播常用 RTSP/RTMP（本树 configure 无 libnghttp2；HTTP/2+3 走 mpv libcurl）。
 if [[ -f ffbuild/config.h ]]; then
   fail_proto=0
   if ! grep -qE '^#define CONFIG_HTTPS_PROTOCOL 1$' ffbuild/config.h; then

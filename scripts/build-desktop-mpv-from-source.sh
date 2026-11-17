@@ -912,8 +912,8 @@ harvest_windows_mpv_dlls() {
   chmod +x "$ROOT/scripts/verify-windows-mpv-bundle.sh"
   "$ROOT/scripts/verify-windows-mpv-bundle.sh" "$dest"
 }
-# mpv fongmi tip 需要 libplacebo 新 API（pl_dispatch_prepared / pl_source_peak_* 等）。
-# 默认跟 libplacebo fongmi tip；KOTV_LIBPLACEBO_COMMIT 可覆盖。meson 下限仍是 7.387.0。
+# mpv tip 需要 libplacebo 新 API（pl_dispatch_prepared / pl_source_peak_* 等）。
+# 默认解析 libplacebo 分支 tip；KOTV_LIBPLACEBO_COMMIT 可覆盖。meson 下限 7.387.0。
 LIBPLACEBO_REPO="${KOTV_LIBPLACEBO_REPO:-https://github.com/FongMi/libplacebo.git}"
 LIBPLACEBO_REF="${KOTV_LIBPLACEBO_REF:-fongmi}"
 LIBPLACEBO_MIN="${KOTV_LIBPLACEBO_MIN:-7.387.0}"
@@ -954,7 +954,7 @@ ensure_libplacebo() {
   need ninja
   mkdir -p "$BUILD_DIR"
   cd "$BUILD_DIR"
-  # 旧缓存可能仍指向 haasn；remote 不符则整树重建。
+  # remote 与配置不符则整树重建（避免旧缓存源码树残留）。
   if [[ -d libplacebo/.git ]]; then
     local cur_remote
     cur_remote="$(git -C libplacebo remote get-url origin 2>/dev/null || true)"

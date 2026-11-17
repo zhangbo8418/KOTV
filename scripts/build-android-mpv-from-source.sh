@@ -33,12 +33,24 @@ ARCHES="${KOTV_ANDROID_MPV_ARCHES:-armv7l arm64}"
 for cmd in git curl python3 pkg-config perl cmake gperf make wget tar; do
   if ! command -v "$cmd" >/dev/null; then
     echo "ERROR: missing host tool '$cmd' (Android MPV source build)." >&2
-    echo "  Debian/Ubuntu: sudo apt-get install -y gperf meson ninja-build nasm pkg-config cmake wget" >&2
+    echo "  Debian/Ubuntu: sudo apt-get install -y gperf ninja-build nasm pkg-config cmake wget" >&2
+    echo "  meson>=1.11: sudo pip3 install --upgrade 'meson>=1.11'" >&2
     exit 1
   fi
 done
-command -v meson >/dev/null || echo "WARN: meson not in PATH" >&2
+if ! command -v meson >/dev/null; then
+  echo "ERROR: meson not in PATH (need >=1.11 for fontconfig 2.18.3)" >&2
+  exit 1
+fi
 command -v ninja >/dev/null || echo "WARN: ninja not in PATH" >&2
+# fontconfig 2.18.3: meson_version >= 1.11.0
+meson_ver="$(meson --version 2>/dev/null | head -1 | tr -dc '0-9.')"
+meson_ok="$(python3 -c "import sys; v=tuple(int(x) for x in '${meson_ver}'.split('.')[:2] or [0,0]); sys.exit(0 if v>=(1,11) else 1)" 2>/dev/null && echo 1 || echo 0)"
+if [[ "$meson_ok" != 1 ]]; then
+  echo "ERROR: meson ${meson_ver:-unknown} < 1.11 (fontconfig 2.18.3). pip3 install -U 'meson>=1.11'" >&2
+  exit 1
+fi
+echo "ok host meson $meson_ver"
 
 FFMPEG_COMMIT="$(kotv_resolve_git_ref "$FFMPEG_REPO" "$FFMPEG_REF" "${KOTV_FFMPEG_COMMIT:-}")"
 MPV_COMMIT="$(kotv_resolve_git_ref "$MPV_REPO" "$MPV_REF" "${KOTV_MPV_COMMIT:-}")"
@@ -74,25 +86,10 @@ kotv_git_checkout_commit "$BS/deps/mpv" "$MPV_REPO" "$MPV_COMMIT"
 [[ "$(git -C "$BS/deps/mpv" rev-parse HEAD)" == "$MPV_COMMIT" ]] \
   || { echo "ERROR: mpv HEAD != $MPV_COMMIT" >&2; exit 1; }
 
-# CMake 4 起拒绝 cmake_minimum_required < 3.5（uavs3d 仍写 3.1）。
-# 给 android_cmake_setup 统一加 POLICY_VERSION_MINIMUM，避免各依赖分别打补丁。
-python3 - "$BS/include/cmake-android.sh" <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-needle = '-DCMAKE_POSITION_INDEPENDENT_CODE=ON \\\n'
-flag = '-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \\\n\t\t'
-if "CMAKE_POLICY_VERSION_MINIMUM" in text:
-    print("ok cmake-android already sets CMAKE_POLICY_VERSION_MINIMUM")
-elif needle not in text:
-    raise SystemExit("ERROR: cmake-android.sh PIC flag line changed; update KOTV patch")
-else:
-    path.write_text(text.replace(needle, needle + flag, 1), encoding="utf-8")
-    print("ok patched cmake-android.sh for CMAKE_POLICY_VERSION_MINIMUM=3.5")
-PY
+chmod +x "$ROOT/scripts/kotv-patch-mpv-android-cmake.sh"
+"$ROOT/scripts/kotv-patch-mpv-android-cmake.sh" "$BS/include/cmake-android.sh"
 
-# mpv-android path.sh 把 ANDROID_HOME 指到 buildscripts/sdk/…；尽量链已有 SDK。
+# path.sh 把 ANDROID_HOME 指到 buildscripts/sdk/…；尽量链已有 SDK。
 if [[ -z "${ANDROID_HOME:-}" ]]; then
   if [[ -n "${ANDROID_SDK_ROOT:-}" && -d "$ANDROID_SDK_ROOT" ]]; then
     export ANDROID_HOME="$ANDROID_SDK_ROOT"
