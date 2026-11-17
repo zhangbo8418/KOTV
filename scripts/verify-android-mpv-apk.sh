@@ -24,7 +24,7 @@ while IFS= read -r abi; do
     "assets/mpv-libs/${abi}/libvulkan.so"
     "lib/${abi}/libmpv.so"
     "lib/${abi}/libplayer.so"
-    "lib/${abi}/libmvcodec.so"
+    "lib/${abi}/libffmpeg.so"
     "lib/${abi}/libkotv_dl.so"
     "lib/${abi}/libc++_shared.so"
   )
@@ -78,10 +78,18 @@ while IFS= read -r abi; do
     exit 1
   fi
   # 套件不得再出现在 assets（与 lib/ 重复）。
-  for dup in libmpv.so libplayer.so libmvcodec.so libc++_shared.so libkotv_dl.so; do
+  for dup in libmpv.so libplayer.so libffmpeg.so libc++_shared.so libkotv_dl.so; do
     p="assets/mpv-libs/${abi}/${dup}"
     if grep -qxF "$p" <<<"$listing"; then
       echo "ERROR: APK must not contain $p (duplicate of lib/${abi}/)" >&2
+      exit 1
+    fi
+  done
+  # 旧 webhtv 拆库不得再进 APK。
+  for legacy in libmvcodec.so libmvutil.so libmwresample.so libmwscale.so libmvformat.so libmvfilter.so libmvdevice.so; do
+    p="lib/${abi}/${legacy}"
+    if grep -qxF "$p" <<<"$listing"; then
+      echo "ERROR: APK must not contain legacy split $p (use libffmpeg.so)" >&2
       exit 1
     fi
   done

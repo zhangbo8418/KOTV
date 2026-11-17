@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # 安卓 libmpv / FFmpeg / libplayer JNI 从源码编。
-# webhtv 只提供交叉编译脚本、补丁与 JNI 源码。
-# 默认解析上游 tip：FFmpeg=release-9.1-fongmi，mpv/mpv-android=fongmi；
+# 宿主：FongMi/mpv-android（fongmi），产物为合并的 libffmpeg.so + libmpv.so + libplayer.so。
+# 默认解析上游 tip：FFmpeg=release-9.1-fongmi，mpv/mpv-android/libplacebo=fongmi；
 # KOTV_*_COMMIT 可覆盖做可复现构建。CI 不下载预编译 .so，也不提交 .so。
 #
-# 现网功能：aaudio android android-media-ndk audiotrack egl-android ffmpeg gl
-#   iconv libarchive libass libavdevice libbluray dvdnav libcurl libplacebo libdovi lua
-#   opensles rubberband uchardet vulkan + AV3A。
-# 伪装成 .png/.jpg 的 HLS 分片由播放器 demuxer-lavf-o（extension_picky=0）处理。
+# 现网能力（跟 FongMi buildscripts）：opengl/vulkan/shaderc/libass/libcurl/libbluray/
+#   dvdnav/libarchive/rubberband + FFmpeg AV3A(libarcdav3a) + DoVi RPU（libffmpeg 内）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,48 +13,41 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/kotv-win-build-env.sh"
 # shellcheck source=scripts/kotv-resolve-git-ref.sh
 source "$ROOT/scripts/kotv-resolve-git-ref.sh"
-WEBHTV_REF="${KOTV_WEBHTV_MPV_PIN:-${KOTV_WEBHTV_MPV_REF:-main}}"
+
 FFMPEG_REPO="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
 FFMPEG_REF="${KOTV_FFMPEG_REF:-release-9.1-fongmi}"
 MPV_REPO="${KOTV_MPV_REPO:-https://github.com/FongMi/mpv.git}"
 MPV_REF="${KOTV_MPV_REF:-fongmi}"
 MPV_ANDROID_REPO="${KOTV_MPV_ANDROID_REPO:-https://github.com/FongMi/mpv-android.git}"
 MPV_ANDROID_REF="${KOTV_MPV_ANDROID_REF:-fongmi}"
-# 与桌面 meson 要求一致：libplacebo >=7.387.0
-LIBPLACEBO_REPO="${KOTV_LIBPLACEBO_REPO:-https://github.com/haasn/libplacebo.git}"
-LIBPLACEBO_TAG="${KOTV_LIBPLACEBO_TAG:-v7.387.0}"
+LIBPLACEBO_REPO="${KOTV_LIBPLACEBO_REPO:-https://github.com/FongMi/libplacebo.git}"
+LIBPLACEBO_REF="${KOTV_LIBPLACEBO_REF:-fongmi}"
 WORK="${KOTV_ANDROID_MPV_SRC:-$ROOT/.build/android-mpv-src}"
 ASSET="$ROOT/flutter/android/app/src/main/assets/mpv-libs"
 STAMP="$ASSET/.kotv-source-build"
-JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+ARCHES="${KOTV_ANDROID_MPV_ARCHES:-armv7l arm64}"
 
-for cmd in git curl python3 pkg-config perl cmake gperf make; do
+for cmd in git curl python3 pkg-config perl cmake gperf make wget tar; do
   if ! command -v "$cmd" >/dev/null; then
     echo "ERROR: missing host tool '$cmd' (Android MPV source build)." >&2
-    echo "  Debian/Ubuntu: sudo apt-get install -y gperf meson ninja-build nasm pkg-config cmake" >&2
+    echo "  Debian/Ubuntu: sudo apt-get install -y gperf meson ninja-build nasm pkg-config cmake wget" >&2
     exit 1
   fi
 done
-# meson/ninja 在交叉编 libplacebo 时需要；未进上面列表以免 macOS brew 路径差异误报过早。
-command -v meson >/dev/null || echo "WARN: meson not in PATH (libplacebo may fail)" >&2
-command -v ninja >/dev/null || echo "WARN: ninja not in PATH (libplacebo may fail)" >&2
+command -v meson >/dev/null || echo "WARN: meson not in PATH" >&2
+command -v ninja >/dev/null || echo "WARN: ninja not in PATH" >&2
 
 FFMPEG_COMMIT="$(kotv_resolve_git_ref "$FFMPEG_REPO" "$FFMPEG_REF" "${KOTV_FFMPEG_COMMIT:-}")"
 MPV_COMMIT="$(kotv_resolve_git_ref "$MPV_REPO" "$MPV_REF" "${KOTV_MPV_COMMIT:-}")"
 MPV_ANDROID_COMMIT="$(kotv_resolve_git_ref "$MPV_ANDROID_REPO" "$MPV_ANDROID_REF" "${KOTV_MPV_ANDROID_COMMIT:-}")"
-if [[ -n "${KOTV_LIBPLACEBO_COMMIT:-}" ]]; then
-  LIBPLACEBO_COMMIT="$KOTV_LIBPLACEBO_COMMIT"
-else
-  LIBPLACEBO_COMMIT="$(git ls-remote "$LIBPLACEBO_REPO" "refs/tags/${LIBPLACEBO_TAG}" | awk '{print $1; exit}')"
-  [[ -n "$LIBPLACEBO_COMMIT" ]] || LIBPLACEBO_COMMIT="$(git ls-remote "$LIBPLACEBO_REPO" "$LIBPLACEBO_TAG" | awk '{print $1; exit}')"
-  [[ -n "$LIBPLACEBO_COMMIT" ]] || { echo "ERROR: cannot resolve $LIBPLACEBO_REPO $LIBPLACEBO_TAG" >&2; exit 1; }
-fi
+LIBPLACEBO_COMMIT="$(kotv_resolve_git_ref "$LIBPLACEBO_REPO" "$LIBPLACEBO_REF" "${KOTV_LIBPLACEBO_COMMIT:-}")"
 echo "ok android pins: ffmpeg=${FFMPEG_COMMIT:0:12} mpv=${MPV_COMMIT:0:12} builder=${MPV_ANDROID_COMMIT:0:12} libplacebo=${LIBPLACEBO_COMMIT:0:12}"
-want="webhtv=${WEBHTV_REF} ffmpeg=${FFMPEG_COMMIT:0:12} mpv=${MPV_COMMIT:0:12} builder=${MPV_ANDROID_COMMIT:0:12} libplacebo=${LIBPLACEBO_COMMIT:0:12} libdovi=1 lcms=1 xxhash=1"
+
+want="fongmi-android=${MPV_ANDROID_COMMIT:0:12} ffmpeg=${FFMPEG_COMMIT:0:12} mpv=${MPV_COMMIT:0:12} libplacebo=${LIBPLACEBO_COMMIT:0:12}"
 jni="$ROOT/flutter/android/app/src/main/jniLibs"
 has_suite() {
   local abi="$1" dir="$2"
-  [[ -s "$dir/$abi/libmpv.so" && -s "$dir/$abi/libplayer.so" && -s "$dir/$abi/libmvcodec.so" ]]
+  [[ -s "$dir/$abi/libmpv.so" && -s "$dir/$abi/libplayer.so" && -s "$dir/$abi/libffmpeg.so" && -s "$dir/$abi/libc++_shared.so" ]]
 }
 if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$want" ]] && has_suite arm64-v8a "$ASSET" && has_suite armeabi-v7a "$ASSET"; then
   echo "ok cached Android MPV source build ($want)"
@@ -67,629 +58,81 @@ if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$want" ]] && has_suite arm64-v8a "$jn
   exit 0
 fi
 
-echo "==> clone webhtv $WEBHTV_REF (overlay ffmpeg/mpv/builder/libplacebo tips)"
+SRC="$WORK/mpv-android"
+echo "==> clone FongMi/mpv-android ${MPV_ANDROID_COMMIT:0:12}"
 mkdir -p "$WORK"
-if [[ ! -d "$WORK/webhtv/.git" ]]; then
-  git clone --filter=blob:none --depth 1 https://github.com/fish2018/webhtv.git "$WORK/webhtv"
+if [[ ! -d "$SRC/.git" ]]; then
+  git clone --filter=blob:none --depth 1 "$MPV_ANDROID_REPO" "$SRC"
 fi
-git -C "$WORK/webhtv" fetch --depth 1 origin "$WEBHTV_REF"
-git -C "$WORK/webhtv" checkout -q FETCH_HEAD 2>/dev/null \
-  || git -C "$WORK/webhtv" checkout -q "$WEBHTV_REF"
+git -C "$SRC" fetch --depth 1 origin "$MPV_ANDROID_COMMIT"
+git -C "$SRC" checkout -q "$MPV_ANDROID_COMMIT" 2>/dev/null \
+  || git -C "$SRC" checkout -q FETCH_HEAD
+[[ "$(git -C "$SRC" rev-parse HEAD)" == "$MPV_ANDROID_COMMIT" ]] \
+  || { echo "ERROR: mpv-android HEAD != $MPV_ANDROID_COMMIT" >&2; exit 1; }
 
-# 覆盖 webhtv 锁：跟当前上游 tip，不沿用 lock 内过期 SHA。
-python3 - "$WORK/webhtv/third_party/mpv-native-lock.json" \
-  "$FFMPEG_REPO" "$FFMPEG_COMMIT" \
-  "$MPV_REPO" "$MPV_COMMIT" \
-  "$MPV_ANDROID_REPO" "$MPV_ANDROID_COMMIT" \
-  "$LIBPLACEBO_REPO" "$LIBPLACEBO_COMMIT" "$LIBPLACEBO_TAG" <<'PY'
-import json, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-data = json.loads(path.read_text(encoding="utf-8"))
-ff = data.setdefault("sources", {}).setdefault("ffmpeg", {})
-ff["repo"] = sys.argv[2]
-ff["commit"] = sys.argv[3]
-ff["version"] = "9.1-fongmi-tip"
-mpv = data.setdefault("sources", {}).setdefault("mpv", {})
-mpv["repo"] = sys.argv[4]
-mpv["commit"] = sys.argv[5]
-mpv["version"] = f"git-{sys.argv[5][:12]}"
-builder = data.setdefault("builder", {})
-builder["repo"] = sys.argv[6]
-builder["commit"] = sys.argv[7]
-pl = data.setdefault("sources", {}).setdefault("libplacebo", {})
-pl["repo"] = sys.argv[8]
-pl["commit"] = sys.argv[9]
-pl["version"] = sys.argv[10].lstrip("v")
-pl["submodules"] = True
-path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-print(f"ok lock ffmpeg→{sys.argv[3][:12]} mpv→{sys.argv[5][:12]} builder→{sys.argv[7][:12]} libplacebo→{sys.argv[9][:12]}")
-PY
-
-# GHA 上 downloads.videolan.org 经常超时；ISO 三件套改走公共镜像（sha256 不变）。
-# lua.org 在 GHA 上也常超时；改钉 Debian lua5.2 orig（仍是 5.2.4；mpv 禁止 5.3+）。
-# extract 用 --strip-components=1，官方 lua-5.2.4/ 与 Debian lua5.2-5.2.4/ 等价。
-python3 - "$WORK/webhtv/third_party/mpv-native-lock.json" <<'PY'
-import json
-from pathlib import Path
-
-path = Path(__import__("sys").argv[1])
-data = json.loads(path.read_text(encoding="utf-8"))
-sources = data.setdefault("sources", {})
-primary = "https://mirrors.ocf.berkeley.edu/videolan-ftp/"
-old_prefixes = (
-    "https://downloads.videolan.org/pub/videolan/",
-    "https://download.videolan.org/pub/videolan/",
-    "https://ftp.videolan.org/pub/videolan/",
-    "https://mirror.aarnet.edu.au/pub/videolan/",
-)
-changed = []
-for key in ("libbluray", "libdvdread", "libdvdnav"):
-    src = sources.get(key)
-    if not isinstance(src, dict):
-        continue
-    url = str(src.get("url") or "")
-    rel = ""
-    for old in old_prefixes:
-        if url.startswith(old):
-            rel = url[len(old) :]
-            break
-    if not rel and "/libbluray/" in url:
-        # 已是镜像路径时不改
-        continue
-    if not rel:
-        continue
-    src["url"] = primary + rel
-    changed.append(f"{key}→{src['url']}")
-
-lua = sources.get("lua")
-if isinstance(lua, dict):
-    # scripts/vendor/lua5.2_5.2.4.orig.tar.gz
-    lua["url"] = "https://deb.debian.org/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"
-    lua["sha256"] = "86fb7e23cbbddfcd92684e5f8017ff41c9112251d1656dbece415a97fad171c0"
-    lua["version"] = "5.2.4"
-    changed.append("lua→debian-orig-5.2.4")
-
-path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-print("ok lock videolan mirrors: " + (", ".join(changed) if changed else "none"))
-PY
-
-build_sh="$WORK/webhtv/scripts/build_mpv_native.sh"
-chmod +x "$build_sh"
-# 给 webhtv 下载逻辑用：vendor 在 KOTV 仓库根，不在 webhtv 树内。
-export KOTV_LUA_VENDOR="$ROOT/scripts/vendor/lua5.2_5.2.4.orig.tar.gz"
-
-# ftp.gnu.org / lua.org 经常连不上。libiconv、lua 走镜像或 vendor。
-python3 - "$build_sh" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-new = (
-    '    _kotv_file="${url##*/}"\n'
-    '    _kotv_ok=0\n'
-    '    # KOTV：lua 优先 vendor，再 Debian 镜像；libiconv 走 GNU 镜像。\n'
-    '    if [[ -n "${KOTV_LUA_VENDOR:-}" && -f "${KOTV_LUA_VENDOR}" ]] && '
-    '[[ "$_kotv_file" == lua5.2_*.orig.tar.gz || "$_kotv_file" == lua-5.2.*.tar.gz ]]; then\n'
-    '      mkdir -p "$(dirname "$archive")"\n'
-    '      cp -f "$KOTV_LUA_VENDOR" "$archive"\n'
-    '      _kotv_ok=1\n'
-    '      log "using vendored lua: $KOTV_LUA_VENDOR"\n'
-    '    fi\n'
-    '    if [[ "$_kotv_ok" != 1 ]]; then\n'
-    '      if [[ "$_kotv_file" == libiconv-*.tar.gz ]]; then\n'
-    '        _kotv_urls=(\n'
-    '          "https://mirrors.kernel.org/gnu/libiconv/${_kotv_file}"\n'
-    '          "https://mirror.csclub.uwaterloo.ca/gnu/libiconv/${_kotv_file}"\n'
-    '          "https://mirrors.ocf.berkeley.edu/gnu/libiconv/${_kotv_file}"\n'
-    '          "https://ftp.gnu.org/pub/gnu/libiconv/${_kotv_file}"\n'
-    '        )\n'
-    '      elif [[ "$_kotv_file" == lua5.2_*.orig.tar.gz || "$_kotv_file" == lua-5.2.*.tar.gz ]]; then\n'
-    '        _kotv_urls=(\n'
-    '          "https://deb.debian.org/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"\n'
-    '          "https://mirrors.edge.kernel.org/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"\n'
-    '          "https://mirrors.tuna.tsinghua.edu.cn/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"\n'
-    '          "https://mirrors.ustc.edu.cn/debian/pool/main/l/lua5.2/lua5.2_5.2.4.orig.tar.gz"\n'
-    '          "$url"\n'
-    '        )\n'
-    '      else\n'
-    '        _kotv_urls=("$url")\n'
-    '      fi\n'
-    '      for _kotv_try in "${_kotv_urls[@]}"; do\n'
-    '        rm -f "$archive"\n'
-    '        if curl --location --fail --connect-timeout 20 --max-time 300 '
-    '--retry 2 --retry-delay 2 --retry-all-errors --output "$archive" "$_kotv_try"; then\n'
-    '          _kotv_ok=1\n'
-    '          break\n'
-    '        fi\n'
-    '        log "download failed, next source: $name"\n'
-    '      done\n'
-    '    fi\n'
-    '    [ "$_kotv_ok" = 1 ]\n'
-)
-if "KOTV_LUA_VENDOR" in text and "lua5.2_5.2.4.orig.tar.gz" in text:
-    print("ok extract_archive already prefers lua vendor + debian mirrors")
-elif "_kotv_urls" in text:
-    # 旧补丁只有 libiconv：整段替换成含 lua vendor 的版本。
-    pat = re.compile(
-        r'    _kotv_file="\$\{url##\*/\}"\n'
-        r'    _kotv_ok=0\n'
-        r'.*?'
-        r'    \[ "\$_kotv_ok" = 1 \]\n',
-        re.S,
-    )
-    new_text, n = pat.subn(new, text, count=1)
-    if n != 1:
-        raise SystemExit("ERROR: cannot upgrade extract_archive kotv mirror block")
-    path.write_text(new_text, encoding="utf-8")
-    print("ok upgraded extract_archive with lua vendor + debian mirrors")
-else:
-    old_plain = '    curl --location --fail --retry 3 --output "$archive" "$url"\n'
-    old_timeout = (
-        '    curl --location --fail --connect-timeout 20 --max-time 300 '
-        '--retry 3 --retry-delay 2 --retry-all-errors --output "$archive" "$url"\n'
-    )
-    if old_plain in text:
-        path.write_text(text.replace(old_plain, new, 1), encoding="utf-8")
-    elif old_timeout in text:
-        path.write_text(text.replace(old_timeout, new, 1), encoding="utf-8")
-    else:
-        raise SystemExit("ERROR: extract_archive curl line changed")
-    print("ok patched extract_archive gnu/lua mirrors")
-PY
-
-# webhtv 对 mpv 浅克隆 + tag deepen 在 CI 上不稳：shallow 锁冲突或 describe 对不上 tip。
-python3 "$ROOT/scripts/patch-webhtv-mpv-shallow-fetch.py" "$build_sh"
-
-# 安卓 libplacebo 启用 libdovi（杜比视界）：复用 webhtv exo-dv5 预编译静态库。
-OVERRIDES="$WORK/webhtv/third_party/mpv-native-overrides"
-DOVI_NATIVE="$WORK/webhtv/third_party/exo-dv5-native"
-[[ -d "$DOVI_NATIVE/prebuilt/arm64-v8a" ]] || { echo "ERROR: missing $DOVI_NATIVE prebuilt libdovi" >&2; exit 1; }
-
-cat >"$OVERRIDES/libdovi.sh" <<'EOF'
-#!/bin/bash -e
-# Install webhtv exo-dv5 prebuilt libdovi into the ABI prefix for libplacebo.
-. ../../include/path.sh
-
-if [ "$1" == "build" ]; then
-	true
-elif [ "$1" == "clean" ]; then
-	exit 0
-else
-	exit 255
+BS="$SRC/buildscripts"
+mkdir -p "$BS/deps"
+# 预置 mpv 到 tip commit（ci.sh 见已有 deps/mpv 则跳过 clone）。
+if [[ ! -d "$BS/deps/mpv/.git" ]]; then
+  git clone --filter=blob:none --depth 1 "$MPV_REPO" "$BS/deps/mpv"
 fi
+git -C "$BS/deps/mpv" fetch --depth 1 origin "$MPV_COMMIT"
+git -C "$BS/deps/mpv" checkout -q "$MPV_COMMIT" 2>/dev/null \
+  || git -C "$BS/deps/mpv" checkout -q FETCH_HEAD
+[[ "$(git -C "$BS/deps/mpv" rev-parse HEAD)" == "$MPV_COMMIT" ]] \
+  || { echo "ERROR: mpv HEAD != $MPV_COMMIT" >&2; exit 1; }
 
-WEBHTV_ROOT="${WEBHTV_ROOT:-}"
-if [ -z "$WEBHTV_ROOT" ]; then
-	# deps/libdovi -> buildscripts -> mpv-android -> work -> webhtv (via env preferred)
-	echo "ERROR: WEBHTV_ROOT unset (needed for exo-dv5-native libdovi)" >&2
-	exit 1
-fi
-
-case "$prefix_name" in
-	arm64) abi=arm64-v8a ;;
-	armv7l) abi=armeabi-v7a ;;
-	*)
-		echo "ERROR: unsupported prefix_name=$prefix_name for libdovi" >&2
-		exit 1
-		;;
-esac
-
-src="$WEBHTV_ROOT/third_party/exo-dv5-native"
-[ -f "$src/prebuilt/$abi/libdovi.a" ] || {
-	echo "ERROR: missing $src/prebuilt/$abi/libdovi.a" >&2
-	exit 1
-}
-[ -f "$src/include/libdovi/rpu_parser.h" ] || {
-	echo "ERROR: missing $src/include/libdovi/rpu_parser.h" >&2
-	exit 1
-}
-
-mkdir -p "$prefix_dir/lib" "$prefix_dir/include/libdovi" "$prefix_dir/lib/pkgconfig"
-cp -f "$src/prebuilt/$abi/libdovi.a" "$prefix_dir/lib/libdovi.a"
-cp -f "$src/include/libdovi/"*.h "$prefix_dir/include/libdovi/"
-cat >"$prefix_dir/lib/pkgconfig/dovi.pc" <<PC
-prefix=/usr/local
-exec_prefix=\${prefix}
-libdir=\${prefix}/lib
-includedir=\${prefix}/include
-
-Name: dovi
-Description: Dolby Vision metadata library (libdovi)
-Version: 3.3.0
-Libs: -L\${libdir} -ldovi
-Libs.private: -ldl -lm
-Cflags: -I\${includedir}
-PC
-
-pkg-config --exists dovi || {
-	echo "ERROR: dovi.pc not visible after install" >&2
-	exit 1
-}
-echo "ok libdovi ($abi) -> $prefix_dir/lib/libdovi.a"
-EOF
-chmod +x "$OVERRIDES/libdovi.sh"
-
-python3 - "$OVERRIDES/libplacebo.sh" <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-old = """meson setup "$build" --cross-file "$prefix_dir/crossfile.txt" \\
-	-Dopengl=enabled -Dvulkan=enabled \\
-	-Dshaderc=enabled -Dglslang=disabled \\
-	-Ddemos=false
-
-config_header="$build/src/include/libplacebo/config.h"
-for backend in OPENGL VULKAN; do
-	grep -Eq "^#define PL_HAVE_${backend} 1([[:space:]]|$)" "$config_header" || {
-		echo "libplacebo backend PL_HAVE_${backend}=1 is missing." >&2
-		exit 1
-	}
-done"""
-new = """if [ ! -f "$prefix_dir/lib/libdovi.a" ]; then
-	echo "libdovi dependency is missing: $prefix_dir/lib/libdovi.a" >&2
-	exit 1
-fi
-if [ ! -f "$prefix_dir/lib/liblcms2.a" ]; then
-	echo "lcms2 dependency is missing: $prefix_dir/lib/liblcms2.a" >&2
-	exit 1
-fi
-if [ ! -f "$prefix_dir/lib/libxxhash.a" ]; then
-	echo "xxhash dependency is missing: $prefix_dir/lib/libxxhash.a" >&2
-	exit 1
-fi
-meson setup "$build" --cross-file "$prefix_dir/crossfile.txt" \\
-	-Dopengl=enabled -Dvulkan=enabled \\
-	-Dshaderc=enabled -Dglslang=disabled \\
-	-Ddovi=enabled -Dlibdovi=enabled \\
-	-Dlcms=enabled -Dxxhash=enabled \\
-	-Ddemos=false
-
-config_header="$build/src/include/libplacebo/config.h"
-for backend in OPENGL VULKAN LIBDOVI LCMS XXHASH; do
-	grep -Eq "^#define PL_HAVE_${backend} 1([[:space:]]|$)" "$config_header" || {
-		echo "libplacebo feature PL_HAVE_${backend}=1 is missing." >&2
-		exit 1
-	}
-done"""
-if old not in text:
-    raise SystemExit("ERROR: webhtv libplacebo.sh meson block changed; update KOTV patch")
-# Also pull -ldovi/-llcms2/-lxxhash into Libs for static link consumers.
-text2 = text.replace(old, new, 1)
-text2 = text2.replace(
-    'for library in ("-lshaderc", "-lc++"):',
-    'for library in ("-lshaderc", "-ldovi", "-llcms2", "-lxxhash", "-lc++"):',
-    1,
-)
-# Idempotent if already patched once
-if '("-lshaderc", "-ldovi", "-llcms2", "-lxxhash", "-lc++")' not in text2 and '("-lshaderc", "-ldovi", "-lc++")' in text2:
-    text2 = text2.replace(
-        'for library in ("-lshaderc", "-ldovi", "-lc++"):',
-        'for library in ("-lshaderc", "-ldovi", "-llcms2", "-lxxhash", "-lc++"):',
-        1,
-    )
-path.write_text(text2, encoding="utf-8")
-print("ok patched webhtv libplacebo.sh for libdovi+lcms+xxhash")
-PY
-
-# lcms2 + xxhash 覆盖脚本（与 libdovi 一样装进 ABI prefix）
-cat >"$OVERRIDES/lcms2.sh" <<'EOF'
-#!/bin/bash -e
-. ../../include/path.sh
-build=_build$ndk_suffix
-if [ "$1" == "build" ]; then
-	true
-elif [ "$1" == "clean" ]; then
-	rm -rf "$build"
-	exit 0
-else
-	exit 255
-fi
-unset CC CXX
-meson setup "$build" --cross-file "$prefix_dir/crossfile.txt" \
-	-Ddefault_library=static -Dutils=false -Dsamples=false \
-	-Dfastfloat=false -Dthreaded=false -Djpeg=disabled -Dtiff=disabled
-ninja -C "$build" -j"$cores"
-DESTDIR="$prefix_dir" ninja -C "$build" install
-[ -f "$prefix_dir/lib/liblcms2.a" ] || { echo "ERROR: liblcms2.a missing" >&2; exit 1; }
-EOF
-chmod +x "$OVERRIDES/lcms2.sh"
-
-cat >"$OVERRIDES/xxhash.sh" <<'EOF'
-#!/bin/bash -e
-. ../../include/path.sh
-. ../../include/depinfo.sh
-if [ "$1" == "build" ]; then
-	true
-elif [ "$1" == "clean" ]; then
-	rm -f libxxhash.a xxhash.o libxxhash.pc
-	exit 0
-else
-	exit 255
-fi
-# CMake+NDK 在此环境链静态库会报 “Error running link command: no such file”；改用官方 Makefile。
-make -f Makefile clean >/dev/null 2>&1 || true
-make -f Makefile libxxhash.a \
-	CC="$CC" \
-	AR="$AR" \
-	CFLAGS="${CFLAGS:--O3 -fPIC} -fPIC" \
-	-j"$cores"
-mkdir -p "$prefix_dir/lib" "$prefix_dir/include" "$prefix_dir/lib/pkgconfig"
-cp -f libxxhash.a "$prefix_dir/lib/libxxhash.a"
-cp -f xxhash.h "$prefix_dir/include/xxhash.h"
-[ -f xxh3.h ] && cp -f xxh3.h "$prefix_dir/include/xxh3.h" || true
-cat >"$prefix_dir/lib/pkgconfig/libxxhash.pc" <<'PC'
-prefix=/usr/local
-exec_prefix=${prefix}
-libdir=${prefix}/lib
-includedir=${prefix}/include
-Name: xxhash
-Description: extremely fast hash algorithm
-Version: 0.8.3
-Libs: -L${libdir} -lxxhash
-Cflags: -I${includedir}
-PC
-[ -f "$prefix_dir/lib/libxxhash.a" ] || { echo "ERROR: libxxhash.a missing" >&2; exit 1; }
-EOF
-chmod +x "$OVERRIDES/xxhash.sh"
-
-python3 - "$OVERRIDES/depinfo.sh" <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-if "dep_libdovi=" not in text:
-    text = text.replace("dep_shaderc=()\n", "dep_shaderc=()\ndep_libdovi=()\n", 1)
-if "dep_lcms2=" not in text:
-    text = text.replace("dep_libdovi=()\n", "dep_libdovi=()\ndep_lcms2=()\ndep_xxhash=()\n", 1)
-# libplacebo deps: shaderc + libdovi + lcms2 + xxhash
-for old, new in (
-    ("dep_libplacebo=(shaderc)", "dep_libplacebo=(shaderc libdovi lcms2 xxhash)"),
-    ("dep_libplacebo=(shaderc libdovi)", "dep_libplacebo=(shaderc libdovi lcms2 xxhash)"),
-):
-    if old in text:
-        text = text.replace(old, new, 1)
-        break
-else:
-    if "dep_libplacebo=(shaderc libdovi lcms2 xxhash)" not in text:
-        raise SystemExit("ERROR: unexpected dep_libplacebo in webhtv depinfo.sh")
-path.write_text(text, encoding="utf-8")
-print("ok patched webhtv depinfo.sh for libdovi+lcms+xxhash")
-PY
-
-python3 - "$build_sh" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-
-# prepare_framework: copy + chmod libdovi.sh（缩进与 upstream 一致）
-old_cp = (
-    '  cp "$OVERRIDE_DIR/libplacebo.sh" "$BUILDSCRIPTS/scripts/libplacebo.sh"\n'
-    '  cp "$OVERRIDE_DIR/nghttp2.sh" "$BUILDSCRIPTS/scripts/nghttp2.sh"\n'
-)
-new_cp = (
-    '  cp "$OVERRIDE_DIR/libplacebo.sh" "$BUILDSCRIPTS/scripts/libplacebo.sh"\n'
-    '  cp "$OVERRIDE_DIR/libdovi.sh" "$BUILDSCRIPTS/scripts/libdovi.sh"\n'
-    '  cp "$OVERRIDE_DIR/lcms2.sh" "$BUILDSCRIPTS/scripts/lcms2.sh"\n'
-    '  cp "$OVERRIDE_DIR/xxhash.sh" "$BUILDSCRIPTS/scripts/xxhash.sh"\n'
-    '  cp "$OVERRIDE_DIR/nghttp2.sh" "$BUILDSCRIPTS/scripts/nghttp2.sh"\n'
-)
-if old_cp not in text:
-    raise SystemExit("ERROR: webhtv prepare_framework libplacebo copy block changed")
-text = text.replace(old_cp, new_cp, 1)
-
-old_chmod = (
-    '  chmod +x "$BUILDSCRIPTS/scripts/libass.sh" "$BUILDSCRIPTS/scripts/lua.sh" \\\n'
-    '    "$BUILDSCRIPTS/scripts/shaderc.sh" \\\n'
-    '    "$BUILDSCRIPTS/scripts/libplacebo.sh" "$BUILDSCRIPTS/scripts/nghttp2.sh" \\\n'
-    '    "$BUILDSCRIPTS/scripts/curl.sh" "$BUILDSCRIPTS/scripts/mpv.sh"\n'
-)
-new_chmod = (
-    '  chmod +x "$BUILDSCRIPTS/scripts/libass.sh" "$BUILDSCRIPTS/scripts/lua.sh" \\\n'
-    '    "$BUILDSCRIPTS/scripts/shaderc.sh" \\\n'
-    '    "$BUILDSCRIPTS/scripts/libplacebo.sh" "$BUILDSCRIPTS/scripts/libdovi.sh" \\\n'
-    '    "$BUILDSCRIPTS/scripts/lcms2.sh" "$BUILDSCRIPTS/scripts/xxhash.sh" \\\n'
-    '    "$BUILDSCRIPTS/scripts/nghttp2.sh" \\\n'
-    '    "$BUILDSCRIPTS/scripts/curl.sh" "$BUILDSCRIPTS/scripts/mpv.sh"\n'
-)
-if old_chmod not in text:
-    raise SystemExit("ERROR: webhtv prepare_framework chmod block changed")
-text = text.replace(old_chmod, new_chmod, 1)
-
-# prepare_sources: stub deps/libdovi + fetch lcms2/xxhash
-needle = '  checkout_repo libplacebo "$LIBPLACEBO_REPO" "$LIBPLACEBO_COMMIT" "$deps/libplacebo" "$LIBPLACEBO_SUBMODULES"'
-if needle not in text:
-    raise SystemExit("ERROR: webhtv libplacebo checkout line changed")
-if 'extract_archive lcms2' not in text:
-    text = text.replace(
-        needle,
-        '  mkdir -p "$deps/libdovi"\n'
-        '  extract_archive lcms2 \\\n'
-        '    "https://github.com/mm2/Little-CMS/releases/download/lcms2.16/lcms2-2.16.tar.gz" \\\n'
-        '    "d873d34ad8b9b4cea010631f1a6228d2087475e4dc5e763eb81acc23d9d45a51" \\\n'
-        '    "$deps/lcms2"\n'
-        '  extract_archive xxhash \\\n'
-        '    "https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz" \\\n'
-        '    "aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80" \\\n'
-        '    "$deps/xxhash"\n'
-        + needle,
-        1,
-    )
-
-# targets: libdovi/lcms2/xxhash before libplacebo
-old_t = "    shaderc libplacebo\n"
-new_t = "    shaderc libdovi lcms2 xxhash libplacebo\n"
-if old_t not in text:
-    if "shaderc libdovi lcms2 xxhash libplacebo" not in text:
-        # already partially patched to libdovi only
-        old_t2 = "    shaderc libdovi libplacebo\n"
-        if old_t2 in text:
-            text = text.replace(old_t2, new_t, 1)
-        else:
-            raise SystemExit("ERROR: webhtv targets shaderc/libplacebo line changed")
-else:
-    text = text.replace(old_t, new_t, 1)
-
-old_case = (
-    '      shaderc) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/libshaderc.a" ] ;;\n'
-    '      libplacebo) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/libplacebo.a" ] ;;\n'
-)
-new_case = (
-    '      shaderc) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/libshaderc.a" ] ;;\n'
-    '      libdovi) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/libdovi.a" ] ;;\n'
-    '      lcms2) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/liblcms2.a" ] ;;\n'
-    '      xxhash) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/libxxhash.a" ] ;;\n'
-    '      libplacebo) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/libplacebo.a" ] ;;\n'
-)
-if old_case not in text:
-    old_case2 = (
-        '      shaderc) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/libshaderc.a" ] ;;\n'
-        '      libdovi) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/libdovi.a" ] ;;\n'
-        '      libplacebo) [ -f "$BUILDSCRIPTS/prefix/$prefix_name/lib/libplacebo.a" ] ;;\n'
-    )
-    if old_case2 in text:
-        text = text.replace(old_case2, new_case, 1)
-    else:
-        raise SystemExit("ERROR: webhtv target case shaderc/libplacebo changed")
-else:
-    text = text.replace(old_case, new_case, 1)
-
-# Export WEBHTV_ROOT for libdovi.sh when building ABIs
-old_build = '  log "Building pinned MPV native stack for $abi"\n'
-new_build = '  export WEBHTV_ROOT="$ROOT"\n  log "Building pinned MPV native stack for $abi"\n'
-if old_build not in text:
-    raise SystemExit("ERROR: webhtv build_abi log line changed")
-text = text.replace(old_build, new_build, 1)
-
-# verify_directory: require libdovi symbols in libmpv
-old_ver = (
-    '  grep -Fq "v$LIBPLACEBO_VERSION" <<<"$version_strings" || '
-    'die "unexpected libplacebo version in $directory/libmpv.so"\n'
-)
-new_ver = (
-    old_ver
-    + '  grep -Eq "dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu|dovi_rpu_get_header" '
-    '<<<"$version_strings" || die "libdovi markers missing from $directory/libmpv.so"\n'
-)
-if old_ver not in text:
-    raise SystemExit("ERROR: webhtv verify libplacebo version check changed")
-if "libdovi markers missing" not in text:
-    text = text.replace(old_ver, new_ver, 1)
-
-# FongMi FFmpeg tip 已自带 output_mutex 序列化；再硬 apply 会挡掉后续 diagnostics/avs3 补丁。
-# 但 tip 没有 webhtv verify 依赖的日志字符串，跳过补丁后必须注入，否则 libmvcodec.so 校验失败。
-old_out = (
-    '  [ -f "$FFMPEG_MEDIACODEC_OUTPUT_PATCH" ] || die "missing FFmpeg MediaCodec output serialization patch: $FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
-    '  git -C "$deps/ffmpeg" apply --check "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
-    '  git -C "$deps/ffmpeg" apply "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
-)
-new_out = (
-    '  [ -f "$FFMPEG_MEDIACODEC_OUTPUT_PATCH" ] || die "missing FFmpeg MediaCodec output serialization patch: $FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
-    '  if grep -Fq "output_mutex" "$deps/ffmpeg/libavcodec/mediacodecdec_common.h"; then\n'
-    '    log "skip FFmpeg MediaCodec output serialization (already in tree)"\n'
-    '    mc="$deps/ffmpeg/libavcodec/mediacodecdec_common.c"\n'
-    '    if ! grep -Fq "WebHTV MediaCodec output release/flush serialization enabled" "$mc"; then\n'
-    '      python3 - "$mc" <<\'PY\'\n'
-    'from pathlib import Path\n'
-    'import sys\n'
-    'path = Path(sys.argv[1])\n'
-    'text = path.read_text(encoding="utf-8")\n'
-    'marker = \'WebHTV MediaCodec output release/flush serialization enabled\'\n'
-    'if marker in text:\n'
-    '    raise SystemExit(0)\n'
-    'needle = "s->output_mutex_initialized = true;"\n'
-    'idx = text.find(needle)\n'
-    'if idx < 0:\n'
-    '    raise SystemExit("cannot find output_mutex_initialized assignment for verify marker")\n'
-    'insert = needle + "\\n    av_log(avctx, AV_LOG_VERBOSE, \\"" + marker + "\\\\n\\");"\n'
-    'path.write_text(text[:idx] + insert + text[idx + len(needle):], encoding="utf-8")\n'
-    'print("ok injected MediaCodec serialization verify marker")\n'
-    'PY\n'
-    '      grep -Fq "WebHTV MediaCodec output release/flush serialization enabled" "$mc" \\\n'
-    '        || die "MediaCodec serialization verify marker missing after inject"\n'
-    '      log "injected WebHTV MediaCodec serialization verify marker"\n'
-    '    fi\n'
-    '  else\n'
-    '    git -C "$deps/ffmpeg" apply --check "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
-    '    git -C "$deps/ffmpeg" apply "$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
-    '  fi\n'
-)
-if old_out in text:
-    text = text.replace(old_out, new_out, 1)
-elif "injected WebHTV MediaCodec serialization verify marker" in text:
-    pass  # already upgraded
-elif 'log "skip FFmpeg MediaCodec output serialization (already in tree)"' in text:
-    # 旧版只 skip、不注入 marker：替换整个 if/else 块
-    import re
-    pat = re.compile(
-        r'  if grep -Fq "output_mutex" "\$deps/ffmpeg/libavcodec/mediacodecdec_common\.h"; then\n'
-        r'    log "skip FFmpeg MediaCodec output serialization \(already in tree\)"\n'
-        r'  else\n'
-        r'    git -C "\$deps/ffmpeg" apply --check "\$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
-        r'    git -C "\$deps/ffmpeg" apply "\$FFMPEG_MEDIACODEC_OUTPUT_PATCH"\n'
-        r'  fi\n',
-        re.M,
-    )
-    # new_out 去掉开头的 [ -f ... ] 行，只替换 if 块
-    repl = new_out.split("\n", 1)[1]
-    text2, n = pat.subn(repl, text, count=1)
-    if n != 1:
-        raise SystemExit("ERROR: webhtv FFmpeg output serialization skip block changed")
-    text = text2
-else:
-    raise SystemExit("ERROR: webhtv FFmpeg output serialization apply block changed")
-
-path.write_text(text, encoding="utf-8")
-print("ok patched webhtv build_mpv_native.sh for libdovi")
-PY
-
-# webhtv 锁的是 NDK r29。CI 给 kotv_dl 用的 r28c 不能拿来编这套。
-ensure_ndk29() {
-  local want="29.0.14206865"
-  local sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-  if [[ -z "$sdk" && -d "$HOME/Android/Sdk" ]]; then
-    sdk="$HOME/Android/Sdk"
-  elif [[ -z "$sdk" && -d "$HOME/Library/Android/sdk" ]]; then
-    sdk="$HOME/Library/Android/sdk"
+# FongMi path.sh 写死 ANDROID_HOME=$DIR/sdk/android-sdk-$os；尽量链到已有 SDK。
+if [[ -z "${ANDROID_HOME:-}" ]]; then
+  if [[ -n "${ANDROID_SDK_ROOT:-}" && -d "$ANDROID_SDK_ROOT" ]]; then
+    export ANDROID_HOME="$ANDROID_SDK_ROOT"
+  elif [[ -d "$HOME/Android/Sdk" ]]; then
+    export ANDROID_HOME="$HOME/Android/Sdk"
+  elif [[ -d "$HOME/Library/Android/sdk" ]]; then
+    export ANDROID_HOME="$HOME/Library/Android/sdk"
   fi
-  local ndk="${sdk}/ndk/${want}"
-  if [[ ! -f "$ndk/source.properties" ]] || ! grep -q "Pkg.Revision = $want" "$ndk/source.properties"; then
-    command -v sdkmanager >/dev/null || { echo "ERROR: need Android NDK $want (sdkmanager missing)" >&2; exit 1; }
-    yes | sdkmanager --licenses >/dev/null || true
-    # 进度写在 stdout。调用方用 $(...) 取路径，进度不能混进去。
-    sdkmanager "ndk;${want}" >&2
-  fi
-  [[ -f "$ndk/source.properties" ]] || { echo "ERROR: NDK $want not at $ndk" >&2; exit 1; }
-  printf '%s\n' "$ndk"
-}
+fi
 
-NDK29="$(ensure_ndk29)"
-echo "==> build Android FFmpeg + mpv + libplayer JNI (arm64-v8a + armeabi-v7a), jobs=$JOBS"
-echo "    NDK=$NDK29"
+export IN_CI=1
+export FFMPEG_GIT_URL="$FFMPEG_REPO"
+export FFMPEG_GIT_COMMIT="$FFMPEG_COMMIT"
+export LIBPLACEBO_GIT_URL="$LIBPLACEBO_REPO"
+export LIBPLACEBO_GIT_COMMIT="$LIBPLACEBO_COMMIT"
+export MPV_GIT_URL="$MPV_REPO"
+export MPV_GIT_REF="$MPV_REF"
+export MPV_ANDROID_ARCHES="$ARCHES"
+export MPV_ANDROID_NATIVE_ONLY=1
+export WGET="${WGET:-wget --progress=dot:giga}"
+# 宿主 jobs：buildall 读 cores；path.sh 默认 nproc。
+export cores="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+
+echo "==> FongMi ci.sh install (SDK/NDK + deps + prefix)"
 (
-  export ANDROID_NDK_HOME="$NDK29"
-  cd "$WORK/webhtv"
-  ./scripts/build_mpv_native.sh --abi all --install --jobs "$JOBS" --work-dir "$WORK/build"
-  ./scripts/build_mpv_player_jni.sh --abi all --install --work-dir "$WORK/build"
+  cd "$BS"
+  # install 会链 ANDROID_HOME、下 NDK r30、编 base prefix + libplacebo
+  ./include/ci.sh install
+)
+
+echo "==> FongMi ci.sh build (mpv + ndk-build libplayer, native-only)"
+(
+  cd "$BS"
+  ./include/ci.sh build
 )
 
 copy_abi() {
-  local flavor="$1" abi="$2"
-  local src="$WORK/webhtv/app/src/$flavor/assets/mpv-libs/$abi"
+  local abi="$1"
+  local src="$SRC/app/src/main/libs/$abi"
   local dest="$ASSET/$abi"
   mkdir -p "$dest"
-  [[ -s "$src/libmpv.so" ]] || { echo "ERROR: missing $src/libmpv.so" >&2; exit 1; }
+  [[ -d "$src" ]] || { echo "ERROR: missing FongMi libs dir $src" >&2; exit 1; }
+  # 清掉旧 webhtv 拆库残留，避免 staging 混装。
+  rm -f "$dest"/libmv*.so "$dest"/libmw*.so
   local lib
-  for lib in libc++_shared.so libmvutil.so libmwresample.so libmwscale.so \
-      libmvcodec.so libmvformat.so libmvfilter.so libmvdevice.so \
-      libmpv.so libplayer.so; do
+  for lib in libc++_shared.so libffmpeg.so libmpv.so libplayer.so; do
     [[ -s "$src/$lib" ]] || { echo "ERROR: missing $src/$lib" >&2; exit 1; }
     cp -f "$src/$lib" "$dest/$lib"
   done
+  # FongMi verify-package 已跑过；这里再做 KOTV 业务校验。
   if ! grep -aq 'libcurl' "$dest/libmpv.so"; then
     echo "ERROR: $abi/libmpv.so built without libcurl" >&2
     exit 1
@@ -698,22 +141,22 @@ copy_abi() {
     echo "ERROR: $abi/libmpv.so lacks vulkan" >&2
     exit 1
   fi
-  if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$dest/libmvcodec.so"; then
-    echo "ERROR: $abi/libmvcodec.so lacks AV3A" >&2
+  if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid|--enable-libarcdav3a' "$dest/libffmpeg.so"; then
+    echo "ERROR: $abi/libffmpeg.so lacks AV3A" >&2
+    exit 1
+  fi
+  if ! grep -aqE 'av_dovi_rpu_parser_|dovi_rpu' "$dest/libffmpeg.so"; then
+    echo "ERROR: $abi/libffmpeg.so lacks Dolby Vision RPU parser" >&2
     exit 1
   fi
   if ! grep -aq 'dvdnav' "$dest/libmpv.so" || ! grep -aq 'libbluray' "$dest/libmpv.so"; then
     echo "ERROR: $abi/libmpv.so lacks DVD/Blu-ray ISO (dvdnav + libbluray)" >&2
     exit 1
   fi
-  if ! grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu|dovi_rpu_get_header' "$dest/libmpv.so"; then
-    echo "ERROR: $abi/libmpv.so lacks libdovi (Dolby Vision via libplacebo)" >&2
-    exit 1
-  fi
-  echo "ok $abi source libmpv $(wc -c <"$dest/libmpv.so" | tr -d ' ') bytes"
+  echo "ok $abi source libmpv $(wc -c <"$dest/libmpv.so" | tr -d ' ') bytes (ffmpeg=$(wc -c <"$dest/libffmpeg.so" | tr -d ' '))"
 }
 
-copy_abi arm64_v8a arm64-v8a
-copy_abi armeabi_v7a armeabi-v7a
+copy_abi arm64-v8a
+copy_abi armeabi-v7a
 printf '%s\n' "$want" >"$STAMP"
-echo "==> Android MPV source build staged at $ASSET"
+echo "==> Android MPV source build staged at $ASSET ($want)"

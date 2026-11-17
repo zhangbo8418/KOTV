@@ -37,16 +37,11 @@ public final class MPVLib {
             // assets 仅保留 vulkan stub；套件在 jniLibs，由 LOAD_ORDER / loadLibrary 加载。
             "vulkan",
     };
+    // FongMi/mpv-android：合并 FFmpeg 核 libffmpeg.so（不再加载 webhtv mv*/mw* 拆库）。
     private static final String[] LOAD_ORDER = {
             "c++_shared",
             "kotv_dl",
-            "mvutil",
-            "mwresample",
-            "mwscale",
-            "mvcodec",
-            "mvformat",
-            "mvfilter",
-            "mvdevice",
+            "ffmpeg",
             "mpv",
             "player"
     };

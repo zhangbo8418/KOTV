@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Android 自研 MPV 套件名称（供 prepare / verify / CI cache key 共用）。
 # 套件进 jniLibs（System.loadLibrary）；assets/mpv-libs 仅保留 libvulkan stub。
+# FongMi/mpv-android：合并 FFmpeg → libffmpeg.so（不再用 webhtv 的 mv*/mw* 拆库）。
 # shellcheck disable=SC2034
 
 # libmpv 依赖的 libc++ 符号；ass-kt 等旧 libc++ 会缺。
@@ -9,13 +10,7 @@ KOTV_ANDROID_LIBCXX_REQUIRED_SYM='_ZNSt6__ndk127__from_chars_floating_pointIfE'
 # jniLibs 必须具备的自研套件（与 MPVLib LOAD_ORDER / prepare sync 一致）。
 KOTV_ANDROID_MPV_JNI_REQUIRED=(
   libc++_shared.so
-  libmvutil.so
-  libmwresample.so
-  libmwscale.so
-  libmvcodec.so
-  libmvformat.so
-  libmvfilter.so
-  libmvdevice.so
+  libffmpeg.so
   libmpv.so
   libplayer.so
   libkotv_dl.so
@@ -30,7 +25,7 @@ KOTV_ANDROID_MPV_MERGE_OVERLAY=(
 KOTV_ANDROID_MPV_ASSET_FORBIDDEN=(
   libmpv.so
   libplayer.so
-  libmvcodec.so
+  libffmpeg.so
   libc++_shared.so
   libkotv_dl.so
 )
@@ -39,9 +34,28 @@ KOTV_ANDROID_MPV_ASSET_FORBIDDEN=(
 KOTV_ANDROID_MPV_APK_REQUIRED=(
   libmpv.so
   libplayer.so
-  libmvcodec.so
+  libffmpeg.so
   libkotv_dl.so
   libc++_shared.so
+)
+
+# 旧 webhtv 拆库名：sync 时删除，避免与 libffmpeg 混装。
+KOTV_ANDROID_MPV_LEGACY_SPLIT=(
+  libmvutil.so
+  libmwresample.so
+  libmwscale.so
+  libmvcodec.so
+  libmvformat.so
+  libmvfilter.so
+  libmvdevice.so
+)
+
+# 安卓 APK 禁止的 FVP/mdk 产物（FVP 插件已从 settings 剔除）。
+# 注意：自研套件的 libffmpeg.so 是 FongMi 合并核，不在此列。
+KOTV_ANDROID_FVP_APK_FORBIDDEN=(
+  libfvp.so
+  libmdk.so
+  libdav1d.so
 )
 
 kotv_android_nm_bin() {
