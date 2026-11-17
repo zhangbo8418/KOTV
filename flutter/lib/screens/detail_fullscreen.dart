@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../player/danmaku_layer.dart';
 import '../player/fullscreen_mode.dart';
-import '../player/gesture_brightness_volume.dart';
+import '../player/fullscreen_gesture.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
 import '../player/native_mpv_playback.dart';
@@ -214,8 +214,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   bool _chromeStayImmersive = false;
   /// 为 true 时，恢复 playing 后解除 [_chromeStayImmersive]（换集）；关选集后为 false，须用户点出。
   bool _clearImmersiveOnPlay = false;
-  /// 进全屏安静窗：挡住 playing 闪断 / 合成 hover / focus 误亮栏。
-  DateTime? _chromeQuietUntil;
   /// 本 pointer 已长按倍速：抬手勿当单击亮栏。
   bool _suppressTapAfterHold = false;
   /// 遥控上键已进入临时倍速：抬键只恢复倍速，不走短按亮栏。
@@ -244,13 +242,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   Duration? _seekPreviewBase;
   Duration _seekPreviewDelta = Duration.zero;
 
-  /// 手机触屏手势（非电视）：seek / 侧边亮音 / 捏合；中间竖滑仍抖音切集。
+  /// 手机触屏：seek / 侧边亮音 / 捏合；中间竖滑切集。电视/桌面仅竖滑切集。
   _FsGestureMode _gMode = _FsGestureMode.none;
-  double _gestureBrightBase = 50;
-  double _gestureVolBase = 50;
-  bool _gestureVolSystem = false;
-  double? _sideGesturePercent;
-  String? _sideGestureKind; // bright | volume
+  KotvSideGestureSession? _sideGesture;
   double _pinchScale = 1.0;
   double _pinchStartScale = 1.0;
   double _pinchSpan0 = 0;
@@ -258,7 +252,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   final Map<int, Offset> _pointers = {};
   bool _gestureLocked = false;
 
-  bool get _phoneTouchGestures => !KotvLayout.television && !kIsWeb;
+  bool get _phoneTouchGestures => !KotvLayout.television && !kotvIsDesktop() && !kIsWeb;
 
   String get _title {
     if (_epIdx >= 0 && _epIdx < widget.episodes.length) {
@@ -294,13 +288,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         setState(() => _setDragDy(t.value));
       });
     _pos = widget.playback.position;
-    _posSub = widget.playback.positionStream.listen((d) {
-      if (!mounted) return;
-      // 时间轴只显示到秒：MPV 每帧都推位置，逐条 setState 会整页重建到掉帧。
-      if (d.inSeconds == _pos.inSeconds) return;
-      setState(() => _pos = d);
-    });
-    widget.playback.addListener(_onPlaybackChanged);
+    _playingForChrome = widget.playback.playing;
+    _bindPlaybackStreams(widget.playback);
     // 自动下一集由详情页负责；此处勿再听 completed（会与父页抢跳导致连跳）
     // 嵌入详情 Stack：系统栏/方向由父页独占，勿与 _enter/_exitImmersive 叠调（易方向抖动卡死）。
     if (!widget.embedded) {
@@ -317,25 +306,24 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _refreshForceLandscapeBtn();
-      // 播放中进全屏默认沉浸；暂停才亮栏。安静窗挡住进场闪断/hover/focus。
+      // 播放中进全屏默认沉浸；已暂停则亮栏方便继续播。
       if (widget.playback.playing) {
-        _beginEnterChromeQuiet();
+        _hideChromeImmersive();
       } else {
         _setChrome(show: true, hideCursor: false);
       }
     });
   }
 
-  bool get _inChromeQuiet =>
-      _chromeQuietUntil != null && DateTime.now().isBefore(_chromeQuietUntil!);
-
-  void _beginEnterChromeQuiet() {
-    _hideChromeImmersive();
-    _chromeQuietUntil = DateTime.now().add(const Duration(milliseconds: 1500));
-  }
-
-  void _clearChromeQuiet() {
-    _chromeQuietUntil = null;
+  void _bindPlaybackStreams(KotvPlayback pb) {
+    pb.addListener(_onPlaybackChanged);
+    _posSub?.cancel();
+    _pos = pb.position;
+    _posSub = pb.positionStream.listen((d) {
+      if (!mounted) return;
+      if (d.inSeconds == _pos.inSeconds) return;
+      setState(() => _pos = d);
+    });
   }
 
   @override
@@ -349,14 +337,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (oldWidget.ambientOn != widget.ambientOn) _ambientOn = widget.ambientOn;
     if (!identical(oldWidget.playback, widget.playback)) {
       oldWidget.playback.removeListener(_onPlaybackChanged);
-      widget.playback.addListener(_onPlaybackChanged);
-      _posSub?.cancel();
-      _pos = widget.playback.position;
-      _posSub = widget.playback.positionStream.listen((d) {
-        if (!mounted) return;
-        if (d.inSeconds == _pos.inSeconds) return;
-        setState(() => _pos = d);
-      });
+      _playingForChrome = widget.playback.playing;
+      _bindPlaybackStreams(widget.playback);
       _refreshForceLandscapeBtn();
     }
   }
@@ -387,8 +369,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _playingForChrome = playing;
     if (!playing) {
       _hideTimer?.cancel();
-      // 换集/关选集/进场安静窗：pause 不亮栏；安静窗外用户暂停仍亮。
-      if (_epOpen || _chromeStayImmersive || _inChromeQuiet) return;
+      // 换集/关选集沉浸锁：不亮栏。缓冲/卡顿时 playing 短暂 false 也不当作用户暂停。
+      if (_epOpen || _chromeStayImmersive) return;
+      if (widget.playback.buffering || widget.playback.stalling) return;
       _setChrome(show: true, hideCursor: false);
       return;
     }
@@ -464,16 +447,15 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (mounted) setState(() => _holdSpeedHint = null);
   }
 
-  /// 亮顶底栏。非 [intentional]：栏隐不 reveal，仅栏已显续命；尊重沉浸锁/安静窗。
+  /// 亮顶底栏。非 [intentional]：栏隐不 reveal，仅栏已显续命；尊重沉浸锁。
   void _bumpChrome({bool intentional = false}) {
     if (_epOpen) return;
     if (!intentional) {
-      if (_chromeStayImmersive || _inChromeQuiet) return;
+      if (_chromeStayImmersive) return;
       if (!_showChrome) return;
       _schedulePlayingHide();
       return;
     }
-    _clearChromeQuiet();
     _chromeStayImmersive = false;
     _clearImmersiveOnPlay = false;
     _setChrome(show: true, hideCursor: false);
@@ -485,9 +467,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _chromeHold = hold;
     if (hold) {
       _hideTimer?.cancel();
-      // 沉浸锁/安静窗/栏隐：焦点停在栏位也不亮栏。
-      if (!_chromeStayImmersive && !_inChromeQuiet && !_epOpen && _showChrome) {
-        _setChrome(show: true, hideCursor: false);
+      // 沉浸锁/栏隐：焦点停在栏位也不亮栏。
+      if (!_chromeStayImmersive && !_epOpen && _showChrome) {
+        _schedulePlayingHide();
       }
     } else {
       _schedulePlayingHide();
@@ -509,10 +491,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       }
       if (!kotvIsDesktop()) {
         unawaited(widget.playback.playOrPause());
-        return;
-      }
-      if (widget.embedded) {
-        (widget.onDoubleTapEmbedded ?? widget.onExitEmbedded)?.call();
         return;
       }
       unawaited(_exitFullscreen());
@@ -612,7 +590,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return true;
     }
     if (_showChrome) {
-      _setChrome(show: false, hideCursor: true);
+      _hideChromeImmersive();
       return true;
     }
     return false;
@@ -626,7 +604,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         _hideChromeImmersive();
         _stopHoldSpeed();
         _cancelSeekPreview();
-        _clearSideGestureOverlay();
+        _sideGesture = null;
       }
     });
   }
@@ -697,7 +675,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (_swipeAnim.isAnimating || _dragging) return false;
     final h = MediaQuery.sizeOf(context).height;
     if (h <= 0) return false;
-    beginEpisodeSwitchQuiet();
+    // 沉浸锁由详情 [_advanceToNextEpisode] 统一 beginEpisodeSwitchQuiet。
     final next = _epIdx + 1;
     final name = widget.episodes[next];
     _flashSwipeHint(name.isEmpty ? '下一集' : '下一集 · $name');
@@ -760,55 +738,23 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     setState(() => _setDragDy(next));
   }
 
-  static const _edgeIgnore = 24.0;
-
-  bool _isEdge(Offset p, Size size) =>
-      p.dx < _edgeIgnore ||
-      p.dy < _edgeIgnore ||
-      p.dx > size.width - _edgeIgnore ||
-      p.dy > size.height - _edgeIgnore;
-
   Future<void> _primeSideGesture(bool bright) async {
-    if (bright) {
-      final b = await KotvGestureBrightVol.getBrightness();
-      _gestureBrightBase = b ?? 50;
-      _sideGestureKind = 'bright';
-      _sideGesturePercent = _gestureBrightBase;
-    } else {
-      final sys = await KotvGestureBrightVol.getSystemVolume();
-      if (sys != null) {
-        _gestureVolSystem = true;
-        _gestureVolBase = sys;
-      } else {
-        _gestureVolSystem = false;
-        _gestureVolBase = widget.playback.volume.clamp(0, 100);
-      }
-      _sideGestureKind = 'volume';
-      _sideGesturePercent = _gestureVolBase;
-    }
-    if (mounted) setState(() {});
+    final session = bright
+        ? await KotvSideGestureSession.beginBright()
+        : await KotvSideGestureSession.beginVolume(playerVolume: widget.playback.volume);
+    if (!mounted || (_gMode != _FsGestureMode.bright && _gMode != _FsGestureMode.volume)) return;
+    setState(() => _sideGesture = session);
   }
 
-  void _applySideGesture(double deltaY, double height) {
-    final base = _gMode == _FsGestureMode.bright ? _gestureBrightBase : _gestureVolBase;
-    final next = (base + deltaY * 2.0 / height * 100).clamp(0.0, 100.0);
-    _sideGesturePercent = next;
-    if (_gMode == _FsGestureMode.bright) {
-      unawaited(KotvGestureBrightVol.setBrightness(next));
-    } else if (_gestureVolSystem) {
-      unawaited(KotvGestureBrightVol.setSystemVolume(next));
-    } else {
-      unawaited(widget.playback.setVolume(next));
+  void _applySideGesture(double upPositive, double height) {
+    final s = _sideGesture;
+    if (s == null) return;
+    s.apply(upPositive, height);
+    unawaited(s.applyHardware());
+    if (!s.useSystemVolume && s.kind == 'volume') {
+      unawaited(widget.playback.setVolume(s.percent));
     }
     setState(() {});
-  }
-
-  void _clearSideGestureOverlay() {
-    if (_sideGesturePercent == null && _sideGestureKind == null) return;
-    setState(() {
-      _sideGesturePercent = null;
-      _sideGestureKind = null;
-    });
   }
 
   void _onSwipePointerDown(PointerDownEvent e) {
@@ -831,7 +777,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
     if (_swipePointer != null) return;
     final size = MediaQuery.sizeOf(context);
-    if (_phoneTouchGestures && _isEdge(e.position, size)) return;
+    if (_phoneTouchGestures && KotvFsGesture.isEdge(e.position, size)) return;
     _swipePointer = e.pointer;
     _swipeDownAt = e.position;
     _swipeVelocity = VelocityTracker.withKind(e.kind)..addPosition(e.timeStamp, e.position);
@@ -869,12 +815,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
           setState(() {});
         } else {
           final x = _swipeDownAt!.dx;
-          final leftQ = size.width / 4;
-          final rightQ = size.width * 3 / 4;
-          if (x <= leftQ) {
+          if (KotvFsGesture.isLeftQuarter(x, size.width)) {
             _gMode = _FsGestureMode.bright;
             unawaited(_primeSideGesture(true));
-          } else if (x >= rightQ) {
+          } else if (KotvFsGesture.isRightQuarter(x, size.width)) {
             _gMode = _FsGestureMode.volume;
             unawaited(_primeSideGesture(false));
           } else if (_canSwipeEps) {
@@ -898,8 +842,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
     switch (_gMode) {
       case _FsGestureMode.seek:
-        // FongMi: deltaX * 50ms
-        final ms = (total.dx * 50).round();
+        final ms = (total.dx * KotvFsGesture.seekMsPerPx).round();
         setState(() {
           _seekPreviewBase ??= widget.playback.position;
           _seekPreviewDelta = Duration(milliseconds: ms);
@@ -943,7 +886,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (_holdingSpeed) _stopHoldSpeed();
     if (suppressTap) {
       _suppressTapAfterHold = false;
-      _clearSideGestureOverlay();
+      if (_sideGesture != null) setState(() => _sideGesture = null);
       if (_seekPreviewBase != null) _cancelSeekPreview();
       return;
     }
@@ -957,7 +900,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         break;
       case _FsGestureMode.bright:
       case _FsGestureMode.volume:
-        _clearSideGestureOverlay();
+        if (_sideGesture != null) setState(() => _sideGesture = null);
         break;
       case _FsGestureMode.ep:
         if (swiping) {
@@ -1245,7 +1188,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _pointerIn = true;
       _chromeKey.currentState?.cancelScheduledCloseEpisodes();
     }
-    final onRight = e.localPosition.dx >= c.maxWidth - 24;
+    final onRight = e.localPosition.dx >= c.maxWidth - KotvFsGesture.edgeIgnore;
     if (onRight && !_epOpen && widget.episodes.isNotEmpty) {
       _chromeKey.currentState?.openEpisodes();
       setState(() {});
@@ -1597,7 +1540,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         ),
                       ),
                     ),
-                  if (_sideGesturePercent != null && _sideGestureKind != null)
+                  if (_sideGesture != null)
                     IgnorePointer(
                       child: Center(
                         child: Container(
@@ -1610,7 +1553,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                _sideGestureKind == 'bright'
+                                _sideGesture!.kind == 'bright'
                                     ? Icons.brightness_6_rounded
                                     : Icons.volume_up_rounded,
                                 color: Colors.white,
@@ -1618,7 +1561,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                               ),
                               SizedBox(width: 10 * ui),
                               Text(
-                                '${_sideGesturePercent!.round()}%',
+                                '${_sideGesture!.percent.round()}%',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 16 * ui,

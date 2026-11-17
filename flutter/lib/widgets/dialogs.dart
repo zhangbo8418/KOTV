@@ -18,25 +18,14 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../api/kotv_role.dart';
 import '../api/kotv_settings_cache.dart';
-import '../screens/detail_screen.dart';
+import '../player/playback_guard.dart';
 import '../screens/file_browser_screen.dart';
 import '../screens/live_screen.dart';
 import 'chrome.dart';
 import 'h_scroll.dart';
 
-Future<void> _prepareLeavePlayback({bool leaveLive = true}) async {
-  await DetailScreen.prepareLeave();
-  // 同页选直播源时勿硬 prepareLeave Live（会卸 PlatformView 导致部分 TV 键死）。
-  if (leaveLive) await LiveScreen.prepareLeave();
-}
-
-Future<void> _prepareLeaveForLiveSourcePick() async {
-  await DetailScreen.prepareLeave();
-}
-
-void _restoreLiveFocusAfterPicker() {
-  LiveScreen.restoreFocusAfterSourcePicker();
-}
+Future<void> _prepareLeavePlayback({bool leaveLive = true}) =>
+    kotvStopBackgroundPlayback(leaveLive: leaveLive);
 
 /// 弹窗尺寸：窄屏用满宽减边距。大于 720p 时上限跟窗口倍数走，仍不超过屏幕。
 ({double width, double height, EdgeInsets inset, bool compact, double ui})
@@ -911,6 +900,7 @@ Future<void> showAddLiveDialog(BuildContext context, WidgetRef ref) async {
 }
 
 /// 已保存的直播源列表。返回 true 表示已切换或新加，调用方应刷新。
+/// 同页选源只停点播，不卸 Live PlatformView；关窗后统一拉回焦点。
 Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
   final api = ref.read(apiProvider);
   final canManage = await kotvCanManageShared(
@@ -925,47 +915,42 @@ Future<bool> showLivePicker(BuildContext context, WidgetRef ref) async {
     return false;
   }
   if (!context.mounted) return false;
-  final selected = await showDialog<_SourceChoice>(
-    context: context,
-    builder: (ctx) => _SourceListDialog(
-      key: const ValueKey('live-source-list'),
-      title: '直播源',
-      hint: canManage ? '点选切换；长按改名；右侧删除可移除' : '点选切换已有直播源',
-      listKey: 'configs',
-      currentKey: 'live',
-      initial: data,
-      fetch: api.liveSources,
-      addLabel: canManage ? '＋ 添加直播源' : null,
-      vodStyle: false,
-      onEdit: canManage
-          ? (url, title) => showEditLiveDialog(ctx, ref, url: url, title: title)
-          : null,
-      onDelete: canManage
-          ? (url) async {
-              await _prepareLeaveForLiveSourcePick();
-              await api.deleteLive(url);
-            }
-          : null,
-    ),
-  );
-  if (!context.mounted) return false;
-  if (selected == null) {
-    _restoreLiveFocusAfterPicker();
-    return false;
-  }
-  if (selected.url.isEmpty) {
-    if (!canManage) {
-      _restoreLiveFocusAfterPicker();
-      return false;
+  try {
+    final selected = await showDialog<_SourceChoice>(
+      context: context,
+      builder: (ctx) => _SourceListDialog(
+        key: const ValueKey('live-source-list'),
+        title: '直播源',
+        hint: canManage ? '点选切换；长按改名；右侧删除可移除' : '点选切换已有直播源',
+        listKey: 'configs',
+        currentKey: 'live',
+        initial: data,
+        fetch: api.liveSources,
+        addLabel: canManage ? '＋ 添加直播源' : null,
+        vodStyle: false,
+        onEdit: canManage
+            ? (url, title) => showEditLiveDialog(ctx, ref, url: url, title: title)
+            : null,
+        onDelete: canManage
+            ? (url) async {
+                await _prepareLeavePlayback(leaveLive: false);
+                await api.deleteLive(url);
+              }
+            : null,
+      ),
+    );
+    if (!context.mounted || selected == null) return false;
+    if (selected.url.isEmpty) {
+      if (!canManage) return false;
+      await showAddLiveDialog(context, ref);
+      return true;
     }
-    await showAddLiveDialog(context, ref);
-    _restoreLiveFocusAfterPicker();
+    await _prepareLeavePlayback(leaveLive: false);
+    await KotvSettingsCache.set(api, 'live', selected.url);
     return true;
+  } finally {
+    LiveScreen.restoreFocusAfterSourcePicker();
   }
-  await _prepareLeaveForLiveSourcePick();
-  await KotvSettingsCache.set(api, 'live', selected.url);
-  _restoreLiveFocusAfterPicker();
-  return true;
 }
 
 /// 多仓/线路切换。返回 true 表示已成功切换并应刷新首页。

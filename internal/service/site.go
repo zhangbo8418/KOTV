@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -115,27 +116,22 @@ func (s *SiteService) HomeLoadEpoch() uint64 {
 }
 
 // SoftCancelPending 软取消当前 Scope 进行中请求（JAR 不杀唯一 JVM）。
-// 若中断导致根 jar 路径空，立刻 EnsureRootJar，避免 CSP 空 jar 站卡住。
+// 若中断后根 jar 路径空，补 EnsureRootJar，避免 CSP 空 jar 站卡住。
 func (s *SiteService) SoftCancelPending() {
 	spider.SoftCancelForClient(hostclient.ScopeID())
-	if s == nil || s.cfg == nil {
-		return
+	if spider.CurrentJarPath() == "" {
+		s.ensureConfigRootJar()
 	}
-	if spider.CurrentJarPath() != "" {
-		return
-	}
-	api := s.cfg.API()
-	sp := strings.TrimSpace(api.Spider)
-	if sp == "" {
-		return
-	}
-	_ = spider.EnsureRootJar(sp, api.URL)
 }
 
 // CancelPendingContent 卡死恢复：SoftCancel→清本租户；仅 bridge 不健康时 HardRestart。
-// 清 jar 路径指针后立刻 EnsureRootJar（本机与远端 Dedicated 同口径），避免 CSP 空 jar 站再也无法用。
+// 清 jar 路径指针后立刻 EnsureRootJar（本机与远端 Dedicated 同口径）。
 func (s *SiteService) CancelPendingContent() {
 	spider.RestartCallerRuntime()
+	s.ensureConfigRootJar()
+}
+
+func (s *SiteService) ensureConfigRootJar() {
 	if s == nil || s.cfg == nil {
 		return
 	}
@@ -144,7 +140,9 @@ func (s *SiteService) CancelPendingContent() {
 	if sp == "" {
 		return
 	}
-	_ = spider.EnsureRootJar(sp, api.URL)
+	if err := spider.EnsureRootJar(sp, api.URL); err != nil {
+		log.Printf("ensureConfigRootJar: %v", err)
+	}
 }
 
 func (s *SiteService) HomeContent() (model.Result, error) {
