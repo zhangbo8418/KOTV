@@ -419,16 +419,27 @@ else
   $MAKE install
 fi
 
-# tip 把 config.h 写在树根；旧布局偶发在 ffbuild/。
-kotv_ffmpeg_config_h() {
-  local cand
-  for cand in config.h ffbuild/config.h; do
-    if [[ -f "$cand" ]]; then
-      printf '%s\n' "$cand"
-      return 0
-    fi
+# tip：特性在 config.h，协议/组件在 config_components.h；旧树偶发 ffbuild/config.h。
+# 不用 mapfile（macOS /bin/bash 3.2 无此内建）。
+kotv_ffmpeg_config_has() {
+  local pat="${1:?}" cand
+  local found=0
+  for cand in config.h config_components.h ffbuild/config.h ffbuild/config_components.h; do
+    [[ -f "$cand" ]] || continue
+    found=1
+    grep -qE "$pat" "$cand" && return 0
   done
+  [[ "$found" == 1 ]] && return 1
   return 1
+}
+
+kotv_ffmpeg_config_dump() {
+  local cand
+  for cand in config.h config_components.h ffbuild/config.h ffbuild/config_components.h; do
+    [[ -f "$cand" ]] || continue
+    echo "-- $cand --" >&2
+    grep -E 'CONFIG_(HTTPS|HTTP_PROTOCOL|RTSP|RTMP|OPENSSL|SCHANNEL|SECURETRANSPORT|LIBDAV1D|LIBXML2|LIBARIBCAPTION|D3D11VA|VIDEOTOOLBOX|VAAPI)' "$cand" | head -80 >&2 || true
+  done
 }
 
 lib="$PREFIX/lib/libavcodec.a"
@@ -444,55 +455,55 @@ if ! grep -aqE 'libdav1d|dav1d_data_props' "$lib" 2>/dev/null \
 fi
 
 # lavf：HTTPS + 直播常用 RTSP/RTMP（本树 configure 无 libnghttp2；HTTP/2+3 走 mpv libcurl）。
-cfg_h="$(kotv_ffmpeg_config_h)" || {
+if [[ ! -f config.h && ! -f ffbuild/config.h ]]; then
   echo "ERROR: missing FFmpeg config.h after build" >&2
   exit 1
-}
+fi
 fail_proto=0
-if ! grep -qE '^#define CONFIG_HTTPS_PROTOCOL 1$' "$cfg_h"; then
+if ! kotv_ffmpeg_config_has '^#define CONFIG_HTTPS_PROTOCOL 1$'; then
   echo "ERROR: FFmpeg missing CONFIG_HTTPS_PROTOCOL=1" >&2
   fail_proto=1
 fi
-if ! grep -qE '^#define CONFIG_HTTP_PROTOCOL 1$' "$cfg_h"; then
+if ! kotv_ffmpeg_config_has '^#define CONFIG_HTTP_PROTOCOL 1$'; then
   echo "ERROR: FFmpeg missing CONFIG_HTTP_PROTOCOL=1" >&2
   fail_proto=1
 fi
-if ! grep -qE '^#define CONFIG_RTSP_(DEMUXER|PROTOCOL) 1$' "$cfg_h"; then
+if ! kotv_ffmpeg_config_has '^#define CONFIG_RTSP_(DEMUXER|PROTOCOL) 1$'; then
   echo "ERROR: FFmpeg missing RTSP demuxer/protocol" >&2
   fail_proto=1
 fi
-if ! grep -qE '^#define CONFIG_RTMP(_PROTOCOL|_DEMUXER)? 1$' "$cfg_h" \
-  && ! grep -qE '^#define CONFIG_RTMP[A-Z_]*PROTOCOL 1$' "$cfg_h"; then
+if ! kotv_ffmpeg_config_has '^#define CONFIG_RTMP(_PROTOCOL|_DEMUXER)? 1$' \
+  && ! kotv_ffmpeg_config_has '^#define CONFIG_RTMP[A-Z_]*PROTOCOL 1$'; then
   echo "ERROR: FFmpeg missing RTMP protocol" >&2
   fail_proto=1
 fi
 for feat in LIBDAV1D LIBXML2 LIBARIBCAPTION; do
-  if ! grep -qE "^#define CONFIG_${feat} 1\$" "$cfg_h"; then
+  if ! kotv_ffmpeg_config_has "^#define CONFIG_${feat} 1\$"; then
     echo "ERROR: FFmpeg missing CONFIG_${feat}=1" >&2
     fail_proto=1
   fi
 done
 if kotv_is_windows_build; then
-  if ! grep -qE '^#define CONFIG_D3D11VA 1$' "$cfg_h"; then
+  if ! kotv_ffmpeg_config_has '^#define CONFIG_D3D11VA 1$'; then
     echo "ERROR: FFmpeg missing CONFIG_D3D11VA=1" >&2
     fail_proto=1
   fi
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  if ! grep -qE '^#define CONFIG_VIDEOTOOLBOX 1$' "$cfg_h"; then
+  if ! kotv_ffmpeg_config_has '^#define CONFIG_VIDEOTOOLBOX 1$'; then
     echo "ERROR: FFmpeg missing CONFIG_VIDEOTOOLBOX=1" >&2
     fail_proto=1
   fi
 else
-  if ! grep -qE '^#define CONFIG_VAAPI 1$' "$cfg_h"; then
+  if ! kotv_ffmpeg_config_has '^#define CONFIG_VAAPI 1$'; then
     echo "ERROR: FFmpeg missing CONFIG_VAAPI=1" >&2
     fail_proto=1
   fi
 fi
 if [[ "$fail_proto" != 0 ]]; then
-  grep -E 'CONFIG_(HTTPS|HTTP_PROTOCOL|RTSP|RTMP|OPENSSL|SCHANNEL|SECURETRANSPORT|LIBDAV1D|LIBXML2|LIBARIBCAPTION|D3D11VA|VIDEOTOOLBOX|VAAPI)' "$cfg_h" | head -80 >&2 || true
+  kotv_ffmpeg_config_dump
   exit 1
 fi
-echo "ok FFmpeg: HTTPS/RTSP/RTMP + dav1d/xml2/arib + hwaccel ($cfg_h)"
+echo "ok FFmpeg: HTTPS/RTSP/RTMP + dav1d/xml2/arib + hwaccel"
 
 mkdir -p "$PREFIX"
 promote_arcdav3a_in_avcodec_pc

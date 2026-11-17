@@ -95,6 +95,15 @@ kotv_android_mpv_check_jni_java_callbacks() {
     echo "ERROR: $java missing logMessage(...)" >&2
     fail=1
   fi
+  # stream.cpp：FindClass("is/xyz/mpv/MPVLib$Stream") + openStream
+  if ! grep -qE 'interface[[:space:]]+Stream[[:space:]]*\{' "$java"; then
+    echo "ERROR: $java missing MPVLib.Stream for libplayer JNI" >&2
+    fail=1
+  fi
+  if ! grep -qE 'Stream[[:space:]]+openStream[[:space:]]*\(' "$java"; then
+    echo "ERROR: $java missing openStream(...) for libplayer JNI" >&2
+    fail=1
+  fi
   [[ "$fail" == 0 ]]
 }
 

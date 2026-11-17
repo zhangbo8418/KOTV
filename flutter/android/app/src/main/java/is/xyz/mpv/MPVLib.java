@@ -17,9 +17,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 public final class MPVLib {
 
@@ -48,6 +51,8 @@ public final class MPVLib {
 
     private static final List<EventObserver> OBSERVERS = new ArrayList<>();
     private static final List<LogObserver> LOG_OBSERVERS = new ArrayList<>();
+    /** libplayer stream.cpp：FindClass(MPVLib$Stream) + openStream。 */
+    private static final ConcurrentHashMap<String, Supplier<Stream>> STREAMS = new ConcurrentHashMap<>();
     private static boolean loaded;
     private static Throwable loadError;
     private static String loadedAbi;
@@ -443,7 +448,38 @@ public final class MPVLib {
 
     public static native int enqueueCommand(long requestId, String[] cmd);
 
+    public static native int enqueueCommandLongResult(long requestId, String resultKey, String[] cmd);
+
     public static native int setOptionString(String name, String value);
+
+    /** libplayer 自定义读流：JNI openStream → Stream.read/seek/size/cancel/close。 */
+    public interface Stream {
+        int read(ByteBuffer buffer);
+
+        long seek(long position);
+
+        long size();
+
+        void cancel();
+
+        void close();
+    }
+
+    public static void registerStream(String uri, Supplier<Stream> factory) {
+        if (uri == null || factory == null) return;
+        STREAMS.put(uri, factory);
+    }
+
+    public static void unregisterStream(String uri) {
+        if (uri == null) return;
+        STREAMS.remove(uri);
+    }
+
+    public static Stream openStream(String uri) {
+        if (uri == null) return null;
+        Supplier<Stream> factory = STREAMS.get(uri);
+        return factory == null ? null : factory.get();
+    }
 
     public static native Bitmap grabThumbnail(int dimension);
 
