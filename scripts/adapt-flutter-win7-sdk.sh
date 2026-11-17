@@ -34,6 +34,12 @@ if [[ -f "$THEME" ]]; then
   perl -i -pe 's/PredictiveBackPageTransitionsBuilder\(\)/ZoomPageTransitionsBuilder()/g' "$THEME"
 fi
 
+# Matrix4：3.19 无 *ByDouble（主线 vector_math 新 API）。源码应优先用旧 API；此处兜底防漏。
+while IFS= read -r -d '' f; do
+  perl -i -pe 's/translateByDouble\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*[^)]+\)/translate($1, $2, $3)/g' "$f"
+  perl -i -pe 's/scaleByDouble\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*[^)]+\)/scale($1, $2, $3)/g' "$f"
+done < <(find "$ROOT/flutter/lib" -name '*.dart' -print0)
+
 # video_player 2.9.2 无 viewType / VideoViewType。主工程 FVP 固定 Texture；Win7 线删掉命名参数与类型引用才能编过。
 PLAYBACK="$ROOT/flutter/lib/player/fvp_playback_io.dart"
 if [[ -f "$PLAYBACK" ]]; then

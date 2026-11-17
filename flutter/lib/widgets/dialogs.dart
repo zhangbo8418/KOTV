@@ -119,7 +119,7 @@ Future<String?> _pickConfigFile(BuildContext context) async {
       if (raw.startsWith('file:')) return raw;
       return Uri.file(raw).toString();
     } catch (_) {
-      // 回落桌面同款选择器
+      // 回落桌面选择器
     }
   }
   final XFile? file = await openFile(acceptedTypeGroups: [_configFileTypes]);

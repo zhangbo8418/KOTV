@@ -3057,7 +3057,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     unawaited(_playChannel(i, showList: true));
   }
 
-  /// 点中间：关菜单，或像抖音一样点画面播/停（左右仍是频道/设置）。
+  /// 点中间：关菜单，或点画面播/停（左右仍是频道/设置）。
   void _onCenterTap() {
     if (_leftOpen || _rightOpen) {
       setState(() {
@@ -3631,7 +3631,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       );
     }
 
-    // 竖屏 / 窄窗：上播放器 + 下频道列表（移动端布局）。沉浸全屏则走下方 PC 同款左右菜单。
+    // 竖屏 / 窄窗：上播放器 + 下频道列表（移动端布局）。沉浸全屏则走下方左右菜单。
     if (!_immersive && (KotvLayout.useBottomNav(context) || KotvLayout.isCompact(context))) {
       return _buildPortraitLive();
     }
@@ -3685,7 +3685,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                             ),
                           ),
                         if (_error != null) Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
-                        // 点击分区：左 28% 频道 / 右 28% 设置 / 中 点画面播停（抖音式）
+                        // 点击分区：左 28% 频道 / 右 28% 设置 / 中 点画面播停
                         Positioned.fill(
                           child: Row(
                             children: [

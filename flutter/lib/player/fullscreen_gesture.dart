@@ -3,6 +3,7 @@ import 'dart:ui' show Offset, Size;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/services.dart' show HardwareKeyboard, LogicalKeyboardKey;
+import 'package:vector_math/vector_math_64.dart' show Matrix4;
 
 import 'gesture_brightness_volume.dart';
 import 'kotv_platform.dart';
@@ -96,6 +97,21 @@ abstract final class KotvFsGesture {
     final steps = (along.abs() / 40.0).clamp(1.0, 4.0).round();
     final sign = along > 0 ? 1 : -1;
     return wheelSeekStep * (sign * steps);
+  }
+
+  /// 捏合画面矩阵。用 [Matrix4.translate]/[Matrix4.scale]：Win7 钉 Flutter 3.19
+  /// 无 `translateByDouble`/`scaleByDouble`；主线仍保留旧 API（仅弃用提示）。
+  static Matrix4 pinchMatrix({
+    required double tx,
+    required double ty,
+    required double scale,
+  }) {
+    final m = Matrix4.identity();
+    // ignore: deprecated_member_use
+    m.translate(tx, ty);
+    // ignore: deprecated_member_use
+    m.scale(scale, scale, 1.0);
+    return m;
   }
 }
 

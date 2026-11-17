@@ -1530,18 +1530,15 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                     height: c.maxHeight,
                     child: Transform(
                       alignment: Alignment.center,
-                      transform: () {
-                        final m = Matrix4.identity();
-                        final tx = _pinchScale > 1.01
+                      transform: KotvFsGesture.pinchMatrix(
+                        tx: _pinchScale > 1.01
                             ? (_pinchFocal.dx - c.maxWidth / 2) * (1 - 1 / _pinchScale)
-                            : 0.0;
-                        final ty = _pinchScale > 1.01
+                            : 0.0,
+                        ty: _pinchScale > 1.01
                             ? (_pinchFocal.dy - c.maxHeight / 2) * (1 - 1 / _pinchScale)
-                            : 0.0;
-                        m.translateByDouble(tx, ty, 0, 1);
-                        m.scaleByDouble(_pinchScale, _pinchScale, 1, 1);
-                        return m;
-                      }(),
+                            : 0.0,
+                        scale: _pinchScale,
+                      ),
                       child: Stack(
                       fit: StackFit.expand,
                       clipBehavior: Clip.hardEdge,
