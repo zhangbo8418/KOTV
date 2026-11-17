@@ -252,9 +252,15 @@ body {
   width: 36px; height: 36px; border-radius: 10px;
   display: grid; place-items: center; flex-shrink: 0;
   background: rgba(255,255,255,0.1); font-size: 16px;
+  color: var(--text);
 }
+.file-icon svg { display: block; fill: currentColor; }
 .file-icon.dir { background: rgba(36,61,208,0.35); }
 .file-meta { min-width: 0; flex: 1; }
 .file-name { font-size: 14px; font-weight: 600; word-break: break-all; }
 .file-time { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .file-empty { text-align: center; color: var(--muted); padding: 28px 8px; font-size: 13px; }
+.repo-item { cursor: default; }
+.repo-item.repo-current { border-color: rgba(207,66,116,0.45); }
+.repo-actions { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
+.chip.danger { color: #fca5a5; border-color: rgba(185,28,28,0.45); }

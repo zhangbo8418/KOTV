@@ -47,9 +47,15 @@ func webRoutes(remote fs.FS) []route {
 	remoteServer := http.FileServer(http.FS(remote))
 	webRoot := resolveWebappDir()
 	if webRoot == "" {
-		return []route{{"/", needPublic, func(w http.ResponseWriter, r *http.Request) {
-			serveLocalAssetOr(w, r, remoteServer)
-		}}}
+		// 无 Flutter webapp 时 / 仍为遥控；同时挂 /css/、/js/，供遥控/管理页用绝对路径。
+		return []route{
+			{"/css/", needPublic, remoteServer.ServeHTTP},
+			{"/js/", needPublic, remoteServer.ServeHTTP},
+			{"/admin/", needPublic, remoteServer.ServeHTTP},
+			{"/", needPublic, func(w http.ResponseWriter, r *http.Request) {
+				serveLocalAssetOr(w, r, remoteServer)
+			}},
+		}
 	}
 
 	log.Printf("HTTP Web UI: / ← %s ；遥控 /remote/ ；管理 /admin/", webRoot)

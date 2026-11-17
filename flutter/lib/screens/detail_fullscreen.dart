@@ -1533,14 +1533,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                     height: c.maxHeight,
                     child: Transform(
                       alignment: Alignment.center,
-                      transform: KotvFsGesture.pinchMatrix(
-                        tx: _pinchScale > 1.01
-                            ? (_pinchFocal.dx - c.maxWidth / 2) * (1 - 1 / _pinchScale)
-                            : 0.0,
-                        ty: _pinchScale > 1.01
-                            ? (_pinchFocal.dy - c.maxHeight / 2) * (1 - 1 / _pinchScale)
-                            : 0.0,
+                      transform: KotvFsGesture.pinchTransform(
                         scale: _pinchScale,
+                        focal: _pinchFocal,
+                        size: Size(c.maxWidth, c.maxHeight),
                       ),
                       child: Stack(
                       fit: StackFit.expand,

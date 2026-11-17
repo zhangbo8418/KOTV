@@ -2260,6 +2260,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
     if (_leaving) return;
+    // 桌面：等上一次 libmpv 限时拆机结束，再允许新建 Player（卡死弃僵尸后可再播）。
+    await kotvAwaitMpvTeardown();
+    if (_leaving || !mounted) return;
     final d = _detail;
     if (d == null || d.flags.isEmpty) return;
     final flag = d.flags[_flagIdx.clamp(0, d.flags.length - 1)];

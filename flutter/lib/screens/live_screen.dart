@@ -1654,6 +1654,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     /// 超时/无画面恢复：沿用当前会话解码（常为 soft），勿改写 [_prefDecodeMode]。
     String? startDecodeOverride,
   }) async {
+    // 桌面：等上一次 libmpv 限时拆机结束，再允许新建 Player。
+    await kotvAwaitMpvTeardown();
+    if (!mounted || serial != _playSerial) return;
     // 热缓存同步 peek，避免每台换台多一次 async。
     var playSettings = KotvSettingsCache.peek();
     if (playSettings.isEmpty) {
@@ -3333,6 +3336,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       case KotvFsMode.none:
       case KotvFsMode.ep:
       case KotvFsMode.pinch:
+        // channel：位移在抬手 fling；ep/pinch 不在直播拖分区。
         break;
     }
   }
@@ -3454,7 +3458,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
-    const hot = 16.0;
+    const hot = KotvFsGesture.desktopEdgeHover;
     var zone = -1;
     if (e.localPosition.dx <= hot) {
       zone = 0;
@@ -4010,14 +4014,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 children: [
                   Transform(
                     alignment: Alignment.center,
-                    transform: KotvFsGesture.pinchMatrix(
-                      tx: _livePinchScale > 1.01
-                          ? (_livePinchFocal.dx - c.maxWidth / 2) * (1 - 1 / _livePinchScale)
-                          : 0.0,
-                      ty: _livePinchScale > 1.01
-                          ? (_livePinchFocal.dy - c.maxHeight / 2) * (1 - 1 / _livePinchScale)
-                          : 0.0,
+                    transform: KotvFsGesture.pinchTransform(
                       scale: _livePinchScale,
+                      focal: _livePinchFocal,
+                      size: Size(c.maxWidth, c.maxHeight),
                     ),
                     child: _buildSharedLiveVideo(),
                   ),

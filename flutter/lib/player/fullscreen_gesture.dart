@@ -20,6 +20,10 @@ enum KotvFsScrollKind { none, volume, seek }
 /// 全屏手势常量、分区判定与侧边亮/音会话（点播 / 直播共用策略层）。
 abstract final class KotvFsGesture {
   static const edgeIgnore = 24.0;
+
+  /// 桌面悬停开侧栏：比触屏 [edgeIgnore] 更窄，避免误开。
+  static const desktopEdgeHover = 16.0;
+
   static const seekMsPerPx = 50;
   static const wheelVolumeStep = 4.0;
   static const wheelSeekStep = Duration(seconds: 5);
@@ -160,6 +164,17 @@ abstract final class KotvFsGesture {
     // ignore: deprecated_member_use
     m.scale(scale, scale, 1.0);
     return m;
+  }
+
+  /// 捏合：焦点相对画面中心的平移 + 缩放（点播/直播共用）。
+  static Matrix4 pinchTransform({
+    required double scale,
+    required Offset focal,
+    required Size size,
+  }) {
+    final tx = scale > 1.01 ? (focal.dx - size.width / 2) * (1 - 1 / scale) : 0.0;
+    final ty = scale > 1.01 ? (focal.dy - size.height / 2) * (1 - 1 / scale) : 0.0;
+    return pinchMatrix(tx: tx, ty: ty, scale: scale);
   }
 
   /// 抬手三分区：左 28% / 中 44% / 右 28%。

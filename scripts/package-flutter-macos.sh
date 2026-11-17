@@ -18,9 +18,18 @@ else
   export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flutter-io.cn}"
 fi
 
+# 优先显式平台参数（与 package.sh 一致）：./scripts/package-flutter-macos.sh macos-x64|macos-arm64
+# 其次 KOTV_MACOS_FORCE_ARCH（CI 兼容）；否则跟 uname。
+PLAT_ARG="${1:-}"
 ARCH="$(uname -m)"
-# CI 可钉死：KOTV_MACOS_FORCE_ARCH=x86_64|arm64（避免 Rosetta 下 uname 偶发仍报 arm64）
-if [[ "${KOTV_MACOS_FORCE_ARCH:-}" == "x86_64" || "${KOTV_MACOS_FORCE_ARCH:-}" == "amd64" ]]; then
+if [[ "$PLAT_ARG" == "macos-x64" || "$PLAT_ARG" == "macos-amd64" ]]; then
+  ARCH=x86_64
+elif [[ "$PLAT_ARG" == "macos-arm64" || "$PLAT_ARG" == "macos-aarch64" ]]; then
+  ARCH=arm64
+elif [[ -n "$PLAT_ARG" ]]; then
+  echo "ERROR: unknown platform '$PLAT_ARG' (want macos-x64 or macos-arm64)" >&2
+  exit 1
+elif [[ "${KOTV_MACOS_FORCE_ARCH:-}" == "x86_64" || "${KOTV_MACOS_FORCE_ARCH:-}" == "amd64" ]]; then
   ARCH=x86_64
 elif [[ "${KOTV_MACOS_FORCE_ARCH:-}" == "arm64" || "${KOTV_MACOS_FORCE_ARCH:-}" == "aarch64" ]]; then
   ARCH=arm64
@@ -40,7 +49,7 @@ fi
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 kotv_check_version_literals "$VERSION"
 REL_ARCH="$(kotv_release_arch "$PLAT")"
-echo "==> version=$VERSION arch=$REL_ARCH ($PLAT) GOARCH=$GOARCH (uname=$(uname -m) force=${KOTV_MACOS_FORCE_ARCH:-})"
+echo "==> version=$VERSION arch=$REL_ARCH ($PLAT) GOARCH=$GOARCH (uname=$(uname -m) arg=${PLAT_ARG:-} force=${KOTV_MACOS_FORCE_ARCH:-})"
 
 chmod +x "$ROOT/scripts/"*.sh
 

@@ -3,6 +3,7 @@
   const $ = (s) => document.querySelector(s);
   const api = (path, opts) => kotvAuth.json(path, opts);
   const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  let repoPanel = null;
 
   function toast(msg) {
     const el = $('#toast');
@@ -88,6 +89,18 @@
     } catch (e) {
       toast(e.message);
     }
+    if (!repoPanel && window.kotvRepos) {
+      repoPanel = kotvRepos.bindPanel({
+        kindSelect: $('#repo_kind'),
+        urlInput: $('#repo_url'),
+        nameInput: $('#repo_name'),
+        listEl: $('#admin_repo_list'),
+        addBtn: $('#btn_repo_add'),
+        refreshBtn: $('#btn_repo_refresh'),
+        onToast: toast,
+      });
+    }
+    if (repoPanel) repoPanel.refresh();
   }
 
   async function login() {

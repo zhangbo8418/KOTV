@@ -280,16 +280,25 @@ abstract class KotvPlayback extends ChangeNotifier {
 /// 离开播放统一拆机：stop → 短等排空 AO/事件线程 → dispose。
 ///
 /// 对应 Windows media_kit [kotvDisposeMpvPlayer]；各平台 MPV / FVP / Exo 共用。
-/// 勿对会囤包缓存/解码缓冲的引擎设 [disposeTimeout]：超时把 dispose 丢后台会导致泄漏。
-/// 调用方宜先 pause；本函数不改音量。
+/// 正常路径勿对会囤包缓存/解码缓冲的引擎设 [disposeTimeout]。
+/// 桌面 libmpv **卡死恢复**可设 [stopTimeout]/[disposeTimeout]：超时弃等待（僵尸可能残留至进程退出），
+/// 以便 UI 再建 Player。调用方宜先 pause；本函数不改音量。
 Future<void> kotvTeardownPlayback({
   required Future<void> Function() stop,
   required Future<void> Function() dispose,
   Duration drain = const Duration(milliseconds: 400),
+  Duration? stopTimeout,
   Duration? disposeTimeout,
 }) async {
   try {
-    await stop();
+    final stopFut = stop();
+    if (stopTimeout != null) {
+      await stopFut.timeout(stopTimeout);
+    } else {
+      await stopFut;
+    }
+  } on TimeoutException {
+    // stop 仍可能在跑；继续走 dispose 尝试。
   } catch (_) {}
   await Future<void>.delayed(drain);
   final fut = dispose();

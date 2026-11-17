@@ -138,6 +138,10 @@
     if (name === 'play') startMediaPoll();
     if (name === 'file') listFiles(fileRoot);
     if (name === 'library') loadLibrary();
+    if (name === 'setting') {
+      if (!repoPanel) bindRepoPanel();
+      if (repoPanel) repoPanel.refresh();
+    }
   }
 
   async function loadDevice() {
@@ -229,7 +233,7 @@
         const pic = String(item.pic || '').trim();
         const thumb = pic
           ? `<img class="lib-thumb" src="${escHtml(pic)}" alt="" loading="lazy" onerror="this.style.display='none'">`
-          : `<div class="file-icon">▶</div>`;
+          : `<div class="file-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M8 5v14l11-7z"/></svg></div>`;
         const sub = [item.remarks, item.flag, item.site].filter(Boolean).join(' · ');
         btn.innerHTML = `${thumb}
           <div class="file-meta">
@@ -333,19 +337,25 @@
   $('#btn_danmaku').addEventListener('click', sendDanmaku);
   $('#danmaku_text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendDanmaku(); });
 
-  // Setting
-  async function saveSetting() {
-    const name = $('#setting_name').value.trim() || 'vod';
-    const text = $('#setting_text').value.trim();
-    if (!text) return toast('请输入配置内容');
-    try {
-      await postAction({ do: 'setting', name, text, config: text });
-      toast('配置已保存');
-    } catch (_) {
-      toast('保存失败');
+  // Setting：点播/直播仓库 CRUD（kotv-repos.js）
+  let repoPanel = null;
+  function bindRepoPanel() {
+    if (!window.kotvRepos || !$('#repo_list')) return;
+    repoPanel = kotvRepos.bindPanel({
+      kindSelect: $('#setting_kind'),
+      urlInput: $('#setting_text'),
+      nameInput: $('#setting_name_label'),
+      listEl: $('#repo_list'),
+      addBtn: $('#btn_setting'),
+      refreshBtn: $('#btn_repo_refresh'),
+      onToast: toast,
+    });
+  }
+  function refreshReposIfVisible() {
+    if (repoPanel && $('#panel-setting') && $('#panel-setting').classList.contains('active')) {
+      repoPanel.refresh();
     }
   }
-  $('#btn_setting').addEventListener('click', saveSetting);
 
   // Files
   let fileRoot = '';
@@ -394,7 +404,7 @@
         const up = document.createElement('button');
         up.type = 'button';
         up.className = 'file-item';
-        up.innerHTML = `<div class="file-icon dir">↑</div><div class="file-meta"><div class="file-name">..</div><div class="file-time">返回上级</div></div>`;
+        up.innerHTML = `<div class="file-icon dir"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg></div><div class="file-meta"><div class="file-name">..</div><div class="file-time">返回上级</div></div>`;
         up.addEventListener('click', () => listFiles(fileParent));
         list.appendChild(up);
       }
@@ -407,7 +417,10 @@
         btn.type = 'button';
         btn.className = 'file-item';
         const dir = isDir(node);
-        btn.innerHTML = `<div class="file-icon${dir ? ' dir' : ''}">${dir ? 'D' : 'F'}</div>
+        const icon = dir
+          ? `<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>`
+          : `<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>`;
+        btn.innerHTML = `<div class="file-icon${dir ? ' dir' : ''}">${icon}</div>
           <div class="file-meta"><div class="file-name">${escHtml(node.name)}</div><div class="file-time">${escHtml(formatFileTime(node.time))}</div></div>`;
         btn.addEventListener('click', async () => {
           if (dir) {
@@ -526,6 +539,7 @@
       return;
     }
     loadDevice();
+    bindRepoPanel();
     const tab = qs.get('tab');
     showTab(tab && $(`#panel-${tab}`) ? tab : 'play');
   }

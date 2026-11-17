@@ -58,11 +58,28 @@
         <thead><tr><th>用户</th><th>角色</th><th>状态</th><th>操作</th></tr></thead>
         <tbody id="user_rows"></tbody>
       </table>
+
+      <div class="glass card" style="margin-top:16px">
+        <h2>仓库管理</h2>
+        <p class="sub">增删改查点播仓库与直播源，保存到后端数据库（与 App 设置同源 API）</p>
+        <div class="row">
+          <select id="repo_kind" class="field" style="max-width:120px">
+            <option value="vod">点播</option>
+            <option value="live">直播</option>
+          </select>
+          <input id="repo_url" class="field" placeholder="配置地址或 JSON">
+          <input id="repo_name" class="field" placeholder="备注名（可选）" style="max-width:140px">
+          <button class="btn" id="btn_repo_add" type="button">添加 / 切换</button>
+          <button class="btn ghost" id="btn_repo_refresh" type="button">刷新</button>
+        </div>
+        <div class="file-list" id="admin_repo_list" style="margin-top:12px"></div>
+      </div>
     </section>
   </div>
   <div id="toast"></div>
   <script src="/js/noble.min.js"></script>
   <script src="/js/kotv-auth.js"></script>
+  <script src="/js/kotv-repos.js"></script>
   <script src="/admin/admin.js"></script>
 </body>
 </html>
