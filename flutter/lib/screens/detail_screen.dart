@@ -185,7 +185,7 @@ class DetailScreen extends ConsumerStatefulWidget {
       try {
         active._chromeCover.release(active.ref.read(detailChromeCoverProvider.notifier));
       } catch (_) {}
-      // 短超时 flush/软停不挡返回；硬停等待有上限，桌面 MPV 拆机由门闩串到下次起播。
+      // 短超时 flush/先 pause 消音不挡返回；完整拆机仍走 [_stopHard]（其内再 soft pause，幂等）。
       try {
         await active
             ._flushWatchProgress(force: true)
@@ -590,32 +590,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return true;
   }
 
-  /// 释放桌面 media_kit 的包装 + [Player]（Android 原生 MPV 不走这里）。
-  /// 换引擎、起播失败重试、改直出选项、silent 重建时调用；硬切 [_playAt] / 无缝 skipToNext 不调用。
-  /// 离开页由 [_stopHard] 自行卸 Player，不必再调本方法。
-  /// [softStopFirst]：尚未 stop 时先 pause/stop，避免与新引擎抢 AO。
-  Future<void> _disposeDesktopMpvOwned({bool softStopFirst = false}) async {
-    if (kotvIsAndroid()) return;
-    if (_mk == null && _mkPlayer == null) return;
-    _playingSub?.cancel();
-    _bufferingSub?.cancel();
-    _playingSub = null;
-    _bufferingSub = null;
-    if (softStopFirst) {
-      try {
-        await _mk?.pause();
-      } catch (_) {}
-      try {
-        await _mk?.stop();
-      } catch (_) {}
-    }
+  /// 卸本页 MPV 会话（经 [kotvReleaseOwnedMpv]）。
+  /// 换引擎 / silent / Win7 直出重建时调用；硬切 [_playAt] / 无缝不调用。
+  /// 离页由 [_stopHard] 直接 [kotvDisposeMpvPlayer]，不必再调本方法。
+  Future<void> _releaseOwnedMpv() async {
+    final mk = _mk;
     final mkPlayer = _mkPlayer;
-    _mkPlayer = null;
-    try {
-      _mk?.dispose();
-    } catch (_) {}
-    _mk = null;
-    await kotvDisposeMpvPlayer(mkPlayer);
+    if (mk == null && mkPlayer == null) return;
+    await kotvReleaseOwnedMpv(
+      wrapper: mk,
+      desktopPlayer: mkPlayer,
+      detach: () {
+        _playingSub?.cancel();
+        _bufferingSub?.cancel();
+        _playingSub = null;
+        _bufferingSub = null;
+        _mkPlayer = null;
+        _mk = null;
+      },
+    );
   }
 
   /// 起播无画面：按 [kotvPlanSilentRecover] 拆机 / 换引擎 / 同引擎再建。
@@ -636,19 +629,19 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         return false;
       case KotvSilentRecoverAction.giveUp:
         if (canRecreateDesktopMpv) {
-          await _disposeDesktopMpvOwned(softStopFirst: true);
+          await _releaseOwnedMpv();
         }
         return false;
       case KotvSilentRecoverAction.retrySameEngine:
         if (canRecreateDesktopMpv) {
-          await _disposeDesktopMpvOwned(softStopFirst: true);
+          await _releaseOwnedMpv();
         }
         if (!mounted || serial != _playAtSerial) return null;
         return true;
       case KotvSilentRecoverAction.applyStep:
         final step = plan.step!;
         if (canRecreateDesktopMpv) {
-          await _disposeDesktopMpvOwned(softStopFirst: true);
+          await _releaseOwnedMpv();
         } else {
           try {
             await pb.release();
@@ -682,18 +675,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
   Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
     if (keep != KotvEmbedBackend.mpv) {
-      if (kotvIsAndroid()) {
-        final mk = _mk;
-        try {
-          await mk?.release();
-        } catch (_) {}
-        try {
-          mk?.dispose();
-        } catch (_) {}
-        _mk = null;
-      } else {
-        await _disposeDesktopMpvOwned(softStopFirst: true);
-      }
+      await _releaseOwnedMpv();
     }
     if (keep != KotvEmbedBackend.fvp) {
       // 须拆掉实例：仅 stop 时 mdk 包缓存/纹理可能残留（ADB: ReleaseRT 后 PSS/Graphics 仍涨）。
@@ -993,7 +975,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await _flushWatchProgress(force: true);
       } catch (_) {}
     }
-    await _disposeDesktopMpvOwned(softStopFirst: true);
+    await _releaseOwnedMpv();
     if (playing && mounted) await _playAt(_epIdx);
   }
 
@@ -1011,12 +993,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _prepareQuit() async {
     await _stopHardAwait();
-    // _stopHard 中途失败时桌面 Player 可能仍在。
-    await _disposeDesktopMpvOwned(softStopFirst: true);
   }
 
-  /// await stop，等原生停住（Win7 上 unawaited stop 不够）。
-  /// soft pause → release → 清宿主 → dispose 包装类（不改音量）。
+  /// 离页硬停：soft pause → release → 清宿主 → [kotvDisposeMpvPlayer] + 包装 dispose。
+  /// 桌面 media_kit 的 stop+dispose 只经 [kotvDisposeMpvPlayer]（门闩）；勿再叠 softStop。
   /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
   /// [skipFlush]：离开页已落过进度时跳过二次 flush。
   Future<void> _stopHard({bool skipFlush = false}) async {
@@ -3080,7 +3060,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                       _status.contains('嗅探') ||
                       _status.contains('换集中');
                   if (pb == null) {
-                    // 桌面换集 dispose 后、open 前：勿 [_playback] 惰性建实例。
+                    // 尚无播放器实例（解析中或未起播）：勿 [_playback] 惰性建实例。
                     if (!parsing) return const SizedBox.shrink();
                     return const Center(
                       child: Column(

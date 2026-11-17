@@ -39,6 +39,7 @@ Future<void> kotvAwaitMpvTeardown({
 
 /// 安全释放 libmpv [Player]：pause → stop → 短排空 → dispose，并登记拆机门闩。
 /// 各桌面平台共用 [kotvTeardownPlayback]。**不设超时**：须跑完；UI 层超时只放开等待。
+/// 这是对 media_kit [Player] 做 stop+dispose 的**唯一**入口；外层勿再 pause/stop 同一实例。
 Future<void> kotvDisposeMpvPlayer(Player? player) async {
   if (player == null) return;
   final prev = _kotvMpvTeardown;
@@ -66,6 +67,32 @@ Future<void> kotvDisposeMpvPlayer(Player? player) async {
       _kotvMpvTeardown = null;
     }
   }
+}
+
+/// 卸页面持有的 MPV 会话（详情/直播共用）。
+/// [detach]：取消订阅并置空 `_mk` / `_mkPlayer`（须在包装 dispose 前完成）。
+/// 桌面：包装 dispose → [kotvDisposeMpvPlayer]（内含 pause→stop→dispose）。
+/// Android：[KotvPlayback.release] → 包装 dispose（无 media_kit Player）。
+/// 硬切/换台勿调用；仅离页、换引擎、silent/Win7 重建等。
+Future<void> kotvReleaseOwnedMpv({
+  required KotvPlayback? wrapper,
+  required Player? desktopPlayer,
+  required void Function() detach,
+}) async {
+  detach();
+  if (kotvIsAndroid()) {
+    try {
+      await wrapper?.release();
+    } catch (_) {}
+    try {
+      wrapper?.dispose();
+    } catch (_) {}
+    return;
+  }
+  try {
+    wrapper?.dispose();
+  } catch (_) {}
+  await kotvDisposeMpvPlayer(desktopPlayer);
 }
 
 /// 按缓冲预算创建 [Player]。点播和直播同一份内存比例。

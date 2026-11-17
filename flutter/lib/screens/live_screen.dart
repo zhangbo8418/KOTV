@@ -271,19 +271,19 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     });
   }
 
-  /// 拆掉 MPV（Android 原生或桌面 media_kit Player）；下次 [_playback] 按当前设置新建。
+  /// 卸本页 MPV 会话（经 [kotvReleaseOwnedMpv]）；下次 [_playback] 按当前设置新建。
   Future<void> _releaseMpv() async {
     final mk = _mk;
     final mkPlayer = _mkPlayer;
-    try {
-      await mk?.release();
-    } catch (_) {}
-    _mkPlayer = null;
-    try {
-      mk?.dispose();
-    } catch (_) {}
-    _mk = null;
-    await kotvDisposeMpvPlayer(mkPlayer);
+    if (mk == null && mkPlayer == null) return;
+    await kotvReleaseOwnedMpv(
+      wrapper: mk,
+      desktopPlayer: mkPlayer,
+      detach: () {
+        _mkPlayer = null;
+        _mk = null;
+      },
+    );
   }
 
   /// 起播/出画失败：按 [kotvPlanSilentRecover] 拆机 / 换引擎 / 同引擎再建。
