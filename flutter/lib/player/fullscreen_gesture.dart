@@ -2,47 +2,39 @@ import 'dart:ui' show Offset, Size;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/services.dart' show HardwareKeyboard, LogicalKeyboardKey;
 
 import 'gesture_brightness_volume.dart';
 import 'kotv_platform.dart';
 
 export 'gesture_brightness_volume.dart';
 
-/// 点播全屏拖分区（策略层；页面状态机映射到本地 mode）。
-enum KotvFsDragKind { none, seek, bright, volume, ep }
+/// 点播全屏手势模式（拖分区 + 捏合；滚轮不占此态）。
+enum KotvFsMode { none, seek, bright, volume, ep, pinch }
 
 /// 滚轮 / 触控板双指：音量或 seek。
 enum KotvFsScrollKind { none, volume, seek }
 
-/// 全屏手势常量、分区判定与侧边亮/音会话（点播全屏共用）。
+/// 全屏手势常量、分区判定与侧边亮/音会话（点播全屏唯一策略层）。
 abstract final class KotvFsGesture {
-  /// 靠边忽略（触/笔；与悬停开选集边缘一致）。
   static const edgeIgnore = 24.0;
-
-  /// 横向位移 1px → 预览毫秒。
   static const seekMsPerPx = 50;
-
-  /// 滚轮/双指每格音量（0–100）。
   static const wheelVolumeStep = 4.0;
-
-  /// 滚轮/双指每格 seek。
   static const wheelSeekStep = Duration(seconds: 5);
-
-  /// 滚动停顿后收 HUD / 提交 seek。
   static const wheelHudSettle = Duration(milliseconds: 700);
-
-  /// 判定主轴时，横需超过纵此倍数才算横滚。
   static const scrollAxisBias = 1.15;
 
   static bool get supportsBrightness =>
       !kIsWeb && (kotvIsAndroid() || kotvIsIOS());
 
-  static bool get supportsSystemVolume => !kIsWeb && kotvIsAndroid();
-
   static bool isTouchLike(PointerDeviceKind kind) =>
       kind == PointerDeviceKind.touch ||
       kind == PointerDeviceKind.stylus ||
       kind == PointerDeviceKind.invertedStylus;
+
+  static bool get shiftPressed =>
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
 
   static bool isLeftQuarter(double x, double width) => x <= width / 4;
 
@@ -54,35 +46,27 @@ abstract final class KotvFsGesture {
       p.dx > size.width - edgeIgnore ||
       p.dy > size.height - edgeIgnore;
 
-  /// 过 slop 后判定拖分区。无亮度通道时左区竖拖回落切集（或 none）。
-  static KotvFsDragKind classifyDrag({
+  /// [television]：仅竖滑切集。否则 seek / 亮（有通道）/ 音 / 中区切集。
+  static KotvFsMode classifyDrag({
     required Offset total,
     required double downX,
     required double width,
     required bool canEp,
-    required bool allowBright,
+    required bool television,
   }) {
-    if (total.dx.abs() >= total.dy.abs()) return KotvFsDragKind.seek;
-    if (isLeftQuarter(downX, width)) {
-      if (allowBright && supportsBrightness) return KotvFsDragKind.bright;
-      return canEp ? KotvFsDragKind.ep : KotvFsDragKind.none;
+    if (television) {
+      if (!canEp || total.dy.abs() <= total.dx.abs()) return KotvFsMode.none;
+      return KotvFsMode.ep;
     }
-    if (isRightQuarter(downX, width)) return KotvFsDragKind.volume;
-    if (canEp) return KotvFsDragKind.ep;
-    return KotvFsDragKind.none;
+    if (total.dx.abs() >= total.dy.abs()) return KotvFsMode.seek;
+    if (isLeftQuarter(downX, width)) {
+      if (supportsBrightness) return KotvFsMode.bright;
+      return canEp ? KotvFsMode.ep : KotvFsMode.none;
+    }
+    if (isRightQuarter(downX, width)) return KotvFsMode.volume;
+    return canEp ? KotvFsMode.ep : KotvFsMode.none;
   }
 
-  /// 电视：仅竖滑切集。
-  static KotvFsDragKind classifyTvDrag({
-    required Offset total,
-    required bool canEp,
-  }) {
-    if (!canEp) return KotvFsDragKind.none;
-    if (total.dy.abs() <= total.dx.abs()) return KotvFsDragKind.none;
-    return KotvFsDragKind.ep;
-  }
-
-  /// [shift] 时纵滚也当 seek（无横轴鼠标兜底）。
   static KotvFsScrollKind classifyScroll({
     required double dx,
     required double dy,
@@ -96,7 +80,6 @@ abstract final class KotvFsGesture {
     return KotvFsScrollKind.none;
   }
 
-  /// 滚轮上增大音量：屏幕 scrollDy 向下为正。
   static double volumeDeltaFromScrollDy(double scrollDy) {
     if (scrollDy == 0) return 0;
     final steps = (scrollDy.abs() / 40.0).clamp(1.0, 4.0);
@@ -162,6 +145,14 @@ class KotvSideGestureSession {
     }
     if (useSystemVolume) {
       await KotvGestureBrightVol.setSystemVolume(percent);
+    }
+  }
+
+  /// 写硬件；非系统音量时回调播放器音量。
+  Future<void> flush({Future<void> Function(double percent)? setPlayerVolume}) async {
+    await applyHardware();
+    if (kind == 'volume' && !useSystemVolume && setPlayerVolume != null) {
+      await setPlayerVolume(percent);
     }
   }
 }

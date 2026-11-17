@@ -19,8 +19,6 @@ import '../widgets/buffering_overlay.dart';
 import '../widgets/vod_player_chrome.dart';
 import 'shell.dart';
 
-enum _FsGestureMode { none, seek, bright, volume, ep, pinch }
-
 /// 详情页全屏：MPV / FVP / Exo 共用同一套顶底控件。
 class DetailFullscreenPage extends StatefulWidget {
   const DetailFullscreenPage({
@@ -241,7 +239,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   Duration _seekPreviewDelta = Duration.zero;
 
   /// 非电视：seek / 侧边亮音 / 切集；触/笔另支持捏合。电视仅竖滑切集。
-  _FsGestureMode _gMode = _FsGestureMode.none;
+  KotvFsMode _gMode = KotvFsMode.none;
   KotvSideGestureSession? _sideGesture;
   double _pinchScale = 1.0;
   double _pinchStartScale = 1.0;
@@ -250,14 +248,14 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   final Map<int, Offset> _pointers = {};
   bool _gestureLocked = false;
   Timer? _wheelHudTimer;
-  /// 滚轮/双指 settle 时：true 提交 seek，false 只收音量 HUD。
-  bool _wheelHudCommitSeek = false;
 
   /// 点播全屏播放器手势（非电视）。
   bool get _playerGestures => !KotvLayout.television;
 
   /// 锁屏按钮：随手机/平板触控 chrome，不强行加桌面锁。
   bool get _gestureLockUi => !KotvLayout.television && !kotvIsDesktop() && !kIsWeb;
+
+  Future<void> _setPlayerVolume(double percent) => widget.playback.setVolume(percent);
 
   String get _title {
     if (_epIdx >= 0 && _epIdx < widget.episodes.length) {
@@ -736,64 +734,75 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Future<void> _primeSideGesture(bool bright) async {
+    final want = bright ? KotvFsMode.bright : KotvFsMode.volume;
     final KotvSideGestureSession? session = bright
         ? await KotvSideGestureSession.beginBright()
         : await KotvSideGestureSession.beginVolume(playerVolume: widget.playback.volume);
-    if (!mounted || session == null) return;
-    if (_gMode != _FsGestureMode.bright && _gMode != _FsGestureMode.volume) return;
+    if (!mounted) return;
+    if (_gMode != want) return;
+    if (session == null) {
+      // 无亮度通道或读取失败：退出该模式，避免空 HUD 跟手。
+      _gMode = KotvFsMode.none;
+      return;
+    }
     setState(() => _sideGesture = session);
   }
 
-  void _applySideGesture(double upPositive, double height) {
+  void _applySideDrag(double upPositive, double height) {
     final s = _sideGesture;
     if (s == null) return;
     s.apply(upPositive, height);
-    unawaited(s.applyHardware());
-    if (!s.useSystemVolume && s.kind == 'volume') {
-      unawaited(widget.playback.setVolume(s.percent));
-    }
+    unawaited(s.flush(setPlayerVolume: _setPlayerVolume));
     setState(() {});
   }
 
-  void _applyDragKind(KotvFsDragKind kind, Offset total) {
-    switch (kind) {
-      case KotvFsDragKind.seek:
-        _gMode = _FsGestureMode.seek;
+  void _clearSideHud() {
+    if (_sideGesture == null) return;
+    setState(() => _sideGesture = null);
+  }
+
+  void _beginDragMode(KotvFsMode mode, Offset total) {
+    _wheelHudTimer?.cancel();
+    if (mode != KotvFsMode.seek && _seekPreviewBase != null) {
+      _cancelSeekPreview();
+    }
+    if (mode != KotvFsMode.bright && mode != KotvFsMode.volume) {
+      _clearSideHud();
+    }
+    switch (mode) {
+      case KotvFsMode.seek:
+        _gMode = KotvFsMode.seek;
         _seekPreviewBase = widget.playback.position;
         _seekPreviewDelta = Duration.zero;
         setState(() {});
         break;
-      case KotvFsDragKind.bright:
-        _gMode = _FsGestureMode.bright;
+      case KotvFsMode.bright:
+        _gMode = KotvFsMode.bright;
         unawaited(_primeSideGesture(true));
         break;
-      case KotvFsDragKind.volume:
-        _gMode = _FsGestureMode.volume;
+      case KotvFsMode.volume:
+        _gMode = KotvFsMode.volume;
         unawaited(_primeSideGesture(false));
         break;
-      case KotvFsDragKind.ep:
-        _gMode = _FsGestureMode.ep;
+      case KotvFsMode.ep:
+        _gMode = KotvFsMode.ep;
         _beginSwipe();
         _pointerSwiping = true;
         _applySwipeDelta(total.dy);
         break;
-      case KotvFsDragKind.none:
+      case KotvFsMode.none:
+      case KotvFsMode.pinch:
         break;
     }
   }
 
-  void _scheduleWheelHudSettle({required bool commitSeek}) {
-    _wheelHudCommitSeek = commitSeek;
+  /// 滚轮/双指停顿后：提交 seek 预览并收起侧边 HUD。
+  void _scheduleWheelHudSettle() {
     _wheelHudTimer?.cancel();
     _wheelHudTimer = Timer(KotvFsGesture.wheelHudSettle, () {
       if (!mounted) return;
-      if (_wheelHudCommitSeek) {
-        if (_seekPreviewBase != null) {
-          _commitSeekPreview();
-        }
-      } else if (_sideGesture != null) {
-        setState(() => _sideGesture = null);
-      }
+      if (_seekPreviewBase != null) _commitSeekPreview();
+      _clearSideHud();
     });
   }
 
@@ -806,27 +815,22 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       setState(() => _sideGesture = s);
     }
     s.applyPercentDelta(delta);
-    unawaited(s.applyHardware());
-    if (!s.useSystemVolume) {
-      unawaited(widget.playback.setVolume(s.percent));
-    }
+    unawaited(s.flush(setPlayerVolume: _setPlayerVolume));
     if (mounted) setState(() {});
-    _scheduleWheelHudSettle(commitSeek: false);
+    _scheduleWheelHudSettle();
   }
 
   void _nudgeSeekByDelta(Duration step) {
     if (step == Duration.zero || _gestureLocked) return;
     _nudgeSeekPreview(step);
-    _scheduleWheelHudSettle(commitSeek: true);
+    _scheduleWheelHudSettle();
   }
 
   void _onPlayerScrollDelta(double dx, double dy, {required bool shift}) {
     if (!_playerGestures || _gestureLocked) return;
-    if (_gMode != _FsGestureMode.none && _gMode != _FsGestureMode.seek && _gMode != _FsGestureMode.volume) {
-      return;
-    }
-    // 拖拽进行中不抢滚轮。
-    if (_swipePointer != null && _gMode != _FsGestureMode.none) return;
+    // 拖拽/捏合进行中不抢滚轮。
+    if (_gMode == KotvFsMode.pinch) return;
+    if (_swipePointer != null && _gMode != KotvFsMode.none) return;
     final kind = KotvFsGesture.classifyScroll(dx: dx, dy: dy, shift: shift);
     switch (kind) {
       case KotvFsScrollKind.volume:
@@ -842,13 +846,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _onPointerSignal(PointerSignalEvent e) {
     if (e is! PointerScrollEvent) return;
-    final shift = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
-        HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
-    _onPlayerScrollDelta(e.scrollDelta.dx, e.scrollDelta.dy, shift: shift);
+    _onPlayerScrollDelta(e.scrollDelta.dx, e.scrollDelta.dy, shift: KotvFsGesture.shiftPressed);
   }
 
   void _onPointerPanZoomUpdate(PointerPanZoomUpdateEvent e) {
-    // 触控板双指平移；捏合缩放不在桌面触控板处理（避系统手势）。
+    // 触控板双指平移；捏合缩放不走触控板（避系统手势）。
     _onPlayerScrollDelta(e.localPanDelta.dx, e.localPanDelta.dy, shift: false);
   }
 
@@ -857,12 +859,13 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (e.buttons != kPrimaryButton) return;
     _pointers[e.pointer] = e.position;
     if (_gestureLocked) return;
+    _wheelHudTimer?.cancel();
 
     final touchLike = KotvFsGesture.isTouchLike(e.kind);
     if (_playerGestures && touchLike && _pointers.length >= 2) {
       _stopHoldSpeed();
       final pts = _pointers.values.toList();
-      _gMode = _FsGestureMode.pinch;
+      _gMode = KotvFsMode.pinch;
       _pinchStartScale = _pinchScale;
       _pinchSpan0 = (pts[0] - pts[1]).distance.clamp(1.0, 10000.0);
       _pinchFocal = Offset((pts[0].dx + pts[1].dx) / 2, (pts[0].dy + pts[1].dy) / 2);
@@ -877,7 +880,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _swipePointer = e.pointer;
     _swipeDownAt = e.position;
     _swipeVelocity = VelocityTracker.withKind(e.kind)..addPosition(e.timeStamp, e.position);
-    _gMode = _FsGestureMode.none;
+    _gMode = KotvFsMode.none;
   }
 
   void _onSwipePointerMove(PointerMoveEvent e) {
@@ -886,7 +889,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
     if (_gestureLocked) return;
 
-    if (_gMode == _FsGestureMode.pinch && _pointers.length >= 2) {
+    if (_gMode == KotvFsMode.pinch && _pointers.length >= 2) {
       final pts = _pointers.values.toList();
       final span = (pts[0] - pts[1]).distance.clamp(1.0, 10000.0);
       final next = (_pinchStartScale * span / _pinchSpan0).clamp(1.0, 5.0);
@@ -901,47 +904,45 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     final total = e.position - _swipeDownAt!;
     final size = MediaQuery.sizeOf(context);
 
-    if (_gMode == _FsGestureMode.none) {
+    if (_gMode == KotvFsMode.none) {
       if (total.distance < kTouchSlop) return;
-      final kind = _playerGestures
-          ? KotvFsGesture.classifyDrag(
-              total: total,
-              downX: _swipeDownAt!.dx,
-              width: size.width,
-              canEp: _canSwipeEps,
-              allowBright: true,
-            )
-          : KotvFsGesture.classifyTvDrag(total: total, canEp: _canSwipeEps);
-      _applyDragKind(kind, total);
+      final mode = KotvFsGesture.classifyDrag(
+        total: total,
+        downX: _swipeDownAt!.dx,
+        width: size.width,
+        canEp: _canSwipeEps,
+        television: !_playerGestures,
+      );
+      _beginDragMode(mode, total);
       return;
     }
 
     switch (_gMode) {
-      case _FsGestureMode.seek:
+      case KotvFsMode.seek:
         final ms = (total.dx * KotvFsGesture.seekMsPerPx).round();
         setState(() {
           _seekPreviewBase ??= widget.playback.position;
           _seekPreviewDelta = Duration(milliseconds: ms);
         });
         break;
-      case _FsGestureMode.bright:
-      case _FsGestureMode.volume:
-        _applySideGesture(-total.dy, size.height);
+      case KotvFsMode.bright:
+      case KotvFsMode.volume:
+        _applySideDrag(-total.dy, size.height);
         break;
-      case _FsGestureMode.ep:
+      case KotvFsMode.ep:
         if (_pointerSwiping) _applySwipeDelta(e.delta.dy);
         break;
-      case _FsGestureMode.none:
-      case _FsGestureMode.pinch:
+      case KotvFsMode.none:
+      case KotvFsMode.pinch:
         break;
     }
   }
 
   void _endGesturePointer(int pointer, {required bool cancelled, Offset? upPos, Duration? timeStamp}) {
     _pointers.remove(pointer);
-    if (_gMode == _FsGestureMode.pinch) {
+    if (_gMode == KotvFsMode.pinch) {
       if (_pointers.length < 2) {
-        _gMode = _FsGestureMode.none;
+        _gMode = KotvFsMode.none;
       }
       return;
     }
@@ -958,27 +959,27 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _swipeDownAt = null;
     _swipeVelocity = null;
     _pointerSwiping = false;
-    _gMode = _FsGestureMode.none;
+    _gMode = KotvFsMode.none;
     if (_holdingSpeed) _stopHoldSpeed();
     if (suppressTap) {
       _suppressTapAfterHold = false;
-      if (_sideGesture != null) setState(() => _sideGesture = null);
+      _clearSideHud();
       if (_seekPreviewBase != null) _cancelSeekPreview();
       return;
     }
     switch (mode) {
-      case _FsGestureMode.seek:
+      case KotvFsMode.seek:
         if (!cancelled && _seekPreviewBase != null) {
           _commitSeekPreview();
         } else {
           _cancelSeekPreview();
         }
         break;
-      case _FsGestureMode.bright:
-      case _FsGestureMode.volume:
-        if (_sideGesture != null) setState(() => _sideGesture = null);
+      case KotvFsMode.bright:
+      case KotvFsMode.volume:
+        _clearSideHud();
         break;
-      case _FsGestureMode.ep:
+      case KotvFsMode.ep:
         if (swiping) {
           if (cancelled) {
             unawaited(_animateSwipeTo(0));
@@ -989,13 +990,13 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
           unawaited(_animateSwipeTo(0));
         }
         break;
-      case _FsGestureMode.none:
+      case KotvFsMode.none:
         if (!cancelled) {
           final dist = downAt == null || upPos == null ? 0.0 : (upPos - downAt).distance;
           if (dist < kTouchSlop) _handleVideoTap();
         }
         break;
-      case _FsGestureMode.pinch:
+      case KotvFsMode.pinch:
         break;
     }
   }

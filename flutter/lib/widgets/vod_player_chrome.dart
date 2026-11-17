@@ -771,7 +771,7 @@ class VodFullscreenChrome extends StatefulWidget {
   final VoidCallback? onEpisodesAutoClosed;
   /// 指针停在顶/底栏或焦点在控件上：父级应暂停自动隐藏。
   final ValueChanged<bool>? onHoldChanged;
-  /// 手机抖音式：竖屏 ↔ 横屏全屏切换。
+  /// 手机：竖屏 ↔ 横屏全屏切换。
   final VoidCallback? onRotate;
   final String? rotateLabel;
   /// 手势锁屏（仅父级显示解锁钮时顶底栏已隐藏）。

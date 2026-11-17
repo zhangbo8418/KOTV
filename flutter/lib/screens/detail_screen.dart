@@ -235,7 +235,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   int _epIdx = -1;
   /// 全屏页在父 setState 下更新；保留 GlobalKey 仅供自动切集动画。
   final GlobalKey<DetailFullscreenPageState> _fsPageKey = GlobalKey<DetailFullscreenPageState>();
-  /// 抖音式上下滑：稳定视频层与全屏控件共用位移。
+  /// 上下滑切集：稳定视频层与全屏控件共用位移。
   final ValueNotifier<double> _fsSwipeDy = ValueNotifier<double>(0);
   /// 详情内嵌：菜单键弹出后播停键自动获焦。
   bool _chromeRemoteFocus = false;
@@ -1236,7 +1236,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _fsPageKey.currentState?.beginEpisodeSwitchQuiet();
       if (await _takeSeamlessNext(next)) return;
       if (mounted) setState(() => _status = fromEnd ? '自动播放下一集…' : '播放下一集…');
-      // 仅自动连播需要抖音式动画；手势/按钮已在全屏页内播过，勿再 animate。
+      // 仅自动连播需要跟手动画；手势/按钮已在全屏页内播过，勿再 animate。
       if (_immersiveFullscreen && fromEnd) {
         await _fsPageKey.currentState?.animateAutoNext();
       }
@@ -3394,7 +3394,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (_miniDesktop) await _exitMini();
       if (!mounted || _immersiveFullscreen) return;
       if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
-        // 抖音式：手机全屏保持竖屏，上下滑切集；点「全屏观看」才锁横屏。
+        // 手机全屏保持竖屏，上下滑切集；点「全屏观看」才锁横屏。
         try {
           await kotvLockPortrait();
         } catch (_) {}
