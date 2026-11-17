@@ -130,7 +130,7 @@ Future<void> main() async {
       final tv = await const MethodChannel('kotv_android').invokeMethod<bool>('isTelevision');
       KotvLayout.television = tv == true;
       if (KotvLayout.television) {
-        FocusManager.instance.highlightMode = FocusHighlightMode.traditional;
+        FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTraditional;
         await SystemChrome.setPreferredOrientations(const [
           DeviceOrientation.landscapeLeft,
           DeviceOrientation.landscapeRight,

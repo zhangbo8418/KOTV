@@ -84,6 +84,9 @@ class LiveScreen extends ConsumerStatefulWidget {
 
   static bool get isImmersive => _LiveScreenState._active?._immersive == true;
 
+  static void restoreFocusAfterSourcePicker() =>
+      _LiveScreenState.restoreFocusAfterSourcePicker();
+
   @override
   ConsumerState<LiveScreen> createState() => _LiveScreenState();
 }
