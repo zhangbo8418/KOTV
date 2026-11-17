@@ -98,6 +98,7 @@ class NativeMpvPlayback extends KotvPlayback {
 
   KotvMpvOpts get opts => _opts;
 
+  @override
   void setExtraOpenProps(Map<String, String> props) {
     _extraOpenProps = Map<String, String>.from(props);
   }

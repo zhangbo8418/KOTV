@@ -1,11 +1,19 @@
 /// DVD / Blu-ray / ISO：走自带 libmpv（dvdnav + libbluray，或 `force-iso`）。
 ///
-/// 开播请用 [openPlan]；详情与播控只认这一处，勿再散落改写。
+/// 开播请用 [openPlan] / [openPlanAny]；详情与播控只认这一处。
 class KotvDiscPlay {
   KotvDiscPlay._();
 
   /// 是否像碟片 / ISO（含 `http(s)` 直链 `.iso`、`file:`、本机路径、VIDEO_TS、BDMV）。
   static bool looksLike(String raw) => openPlan(raw) != null;
+
+  /// 任一候选像碟片 / ISO。
+  static bool looksLikeAny(Iterable<String> candidates) {
+    for (final c in candidates) {
+      if (looksLike(c)) return true;
+    }
+    return false;
+  }
 
   /// 开播计划；非碟片返回 null。
   ///
@@ -48,9 +56,15 @@ class KotvDiscPlay {
     return null;
   }
 
-  /// 兼容旧调用：非碟片时原样返回（[forceMpv] 仍为 true，与历史签名一致）。
-  static ({String url, Map<String, String> props, bool forceMpv}) rewrite(String raw) {
-    return openPlan(raw) ?? (url: raw.trim(), props: const {}, forceMpv: true);
+  /// 按候选顺序取第一个有效开播计划。
+  static ({String url, Map<String, String> props, bool forceMpv})? openPlanAny(
+    Iterable<String> candidates,
+  ) {
+    for (final c in candidates) {
+      final plan = openPlan(c);
+      if (plan != null) return plan;
+    }
+    return null;
   }
 
   static bool _endsWithIso(String s) {

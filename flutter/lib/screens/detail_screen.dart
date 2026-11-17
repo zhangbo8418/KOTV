@@ -1995,7 +1995,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           format: format,
           adFilterOn: _adFilterOn,
         );
-        if (KotvDiscPlay.looksLike(target.url) || KotvDiscPlay.looksLike(nextEp.url)) return;
+        if (KotvDiscPlay.looksLikeAny([target.url, nextEp.url])) return;
         final queued = await pb.queueNext(
           id: key,
           url: target.url,
@@ -2471,12 +2471,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       // 每次 failover 新建 Exo/FVP 时用这份，避免仍按进页默认 surface create（ADB: FVP→Exo render=surface）。
       final renderMode = kotvNormalizePlayerRender(_renderMode);
       _renderMode = renderMode;
-      // 有 DRM 或 SMB 强制 Exo；本地碟片/ISO 强制 MPV（自编译 dvdnav/libbluray）。
+      // 有 DRM 或 SMB 强制 Exo；碟片/ISO 强制 MPV（dvdnav/libbluray 或 force-iso）。
       final smb = mediaUrl.trim().toLowerCase().startsWith('smb://') ||
           playUrl.trim().toLowerCase().startsWith('smb://');
-      final discHint = KotvDiscPlay.looksLike(mediaUrl) ||
-          KotvDiscPlay.looksLike(playUrl) ||
-          KotvDiscPlay.looksLike(ep.url);
+      final discHint = KotvDiscPlay.looksLikeAny([mediaUrl, playUrl, ep.url]);
       final String startPlayer;
       if ((hasDrm || smb) && kotvIsAndroid()) {
         startPlayer = 'innie#exo';
@@ -2584,9 +2582,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         var openUrl = target.url;
         final openHeaders = target.headers;
         var discProps = <String, String>{};
-        final disc = KotvDiscPlay.openPlan(openUrl) ??
-            KotvDiscPlay.openPlan(ep.url) ??
-            KotvDiscPlay.openPlan(mediaUrl);
+        final disc = KotvDiscPlay.openPlanAny([openUrl, ep.url, mediaUrl]);
         if (disc != null) {
           openUrl = disc.url;
           discProps = disc.props;
@@ -2605,12 +2601,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _wirePlaybackNotify(pb);
         try {
           if (discProps.isNotEmpty) {
-            final mk = _mk;
-            if (mk is NativeMpvPlayback) {
-              mk.setExtraOpenProps(discProps);
-            } else if (mk is MediaKitPlayback) {
-              mk.setExtraOpenProps(discProps);
-            }
+            pb.setExtraOpenProps(discProps);
           }
           // 起播前定音量/倍速，避免先以默认 100 出声再被偏好压小。
           final speed = _prefSpeed;

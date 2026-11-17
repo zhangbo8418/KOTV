@@ -186,6 +186,7 @@ class MediaKitPlayback extends KotvPlayback {
   Duration _durationFull = Duration.zero;
   bool _observedMpvProps = false;
 
+  @override
   void setExtraOpenProps(Map<String, String> props) {
     _extraOpenProps = Map<String, String>.from(props);
   }

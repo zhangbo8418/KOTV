@@ -192,6 +192,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setDiscChapter(int index) async {}
   Future<void> openDiscMenu() async {}
 
+  /// 下次 [open] 附加属性（如 `force-iso` / `dvd-device`）；默认忽略。
+  void setExtraOpenProps(Map<String, String> props) {}
+
   /// 外挂字幕文件（本地路径或 URL）；不支持的引擎忽略。
   Future<void> addSubtitleFile(String path, {String? title}) async {}
 

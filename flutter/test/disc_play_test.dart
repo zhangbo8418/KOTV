@@ -34,4 +34,14 @@ void main() {
     expect(KotvDiscPlay.looksLike('https://cdn.example/a.m3u8'), isFalse);
     expect(KotvDiscPlay.looksLike('dvd://'), isTrue);
   });
+
+  test('openPlanAny / looksLikeAny pick first disc candidate', () {
+    expect(
+      KotvDiscPlay.looksLikeAny(['https://cdn.example/a.m3u8', '/a.iso']),
+      isTrue,
+    );
+    final r = KotvDiscPlay.openPlanAny(['https://x/a.m3u8', '/mnt/film.iso']);
+    expect(r!.url, '/mnt/film.iso');
+    expect(r.props['force-iso'], 'yes');
+  });
 }
