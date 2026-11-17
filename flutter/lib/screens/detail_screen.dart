@@ -233,6 +233,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String? _error;
   bool _loading = true;
   int _flagIdx = 0;
+  /// 最近一次真正起播时的线路；进度/预加载认这个，避免焦点浏览线路污染。
+  int _playFlagIdx = 0;
   int _epIdx = -1;
   /// 全屏页在父 setState 下更新；保留 GlobalKey 仅供自动切集动画。
   final GlobalKey<DetailFullscreenPageState> _fsPageKey = GlobalKey<DetailFullscreenPageState>();
@@ -1331,9 +1333,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (force && positionMs <= 0) return;
     final epName = (episodeName ?? _currentEpisodeName() ?? '').trim();
     if (epName.isEmpty) return;
-    final flag = d.flags.isEmpty
-        ? ''
-        : d.flags[_flagIdx.clamp(0, d.flags.length - 1)].flag;
+    final flagIdx = _playFlagIdx.clamp(0, d.flags.isEmpty ? 0 : d.flags.length - 1);
+    final flag = d.flags.isEmpty ? '' : d.flags[flagIdx].flag;
     try {
       await LocalHistory.push(VodItem(
         id: _detailId(),
@@ -2291,6 +2292,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final eps = _eps;
     if (epIdx < 0 || epIdx >= eps.length) return;
     final ep = eps[epIdx];
+    _playFlagIdx = _flagIdx;
     final prevEpIdx = _epIdx;
     final prevEpName = (prevEpIdx >= 0 && prevEpIdx != epIdx) ? (_currentEpisodeName() ?? '') : '';
     final flushPos = prevEpName.isNotEmpty ? _playback.position.inMilliseconds : 0;
@@ -2581,11 +2583,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         );
         var openUrl = target.url;
         final openHeaders = target.headers;
-        var discProps = <String, String>{};
         final disc = KotvDiscPlay.openPlanAny([openUrl, ep.url, mediaUrl]);
         if (disc != null) {
           openUrl = disc.url;
-          discProps = disc.props;
         }
         // 先挂播放器视图再 open（Texture / 平台视图需进树；全屏靠原位 Positioned）。
         setState(() {
@@ -2600,9 +2600,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         if (serial != _playAtSerial || !mounted) return;
         _wirePlaybackNotify(pb);
         try {
-          if (discProps.isNotEmpty) {
-            pb.setExtraOpenProps(discProps);
-          }
+          // 每次 open 复位 force-iso，避免会话复用粘滞。
+          pb.setExtraOpenProps(KotvDiscPlay.openPropsFor(disc?.props));
           // 起播前定音量/倍速，避免先以默认 100 出声再被偏好压小。
           final speed = _prefSpeed;
           if (speed != null && speed > 0) {
@@ -4270,12 +4269,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                       height: pillH,
                       fontSize: pillFs,
                       selected: i == _flagIdx,
-                      onFocusChange: (focused) {
-                        _detailFocusArm.onFocusChange('flag:$i', focused, () {
-                          if (!mounted || i == _flagIdx) return;
-                          _selectFlag(i, autoPlay: false);
-                        });
-                      },
+                      // 线路须确认后再切：焦点浏览不改 [_flagIdx]，避免进度/预加载写到未播放线路。
                       onTap: () {
                         if (i == _flagIdx) return;
                         _selectFlag(i);

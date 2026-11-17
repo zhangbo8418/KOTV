@@ -4,7 +4,18 @@
 class KotvDiscPlay {
   KotvDiscPlay._();
 
-  /// 是否像碟片 / ISO（含 `http(s)` 直链 `.iso`、`file:`、本机路径、VIDEO_TS、BDMV）。
+  /// 每次 open 先复位，避免会话复用后 `force-iso` 粘滞。
+  static const Map<String, String> clearedOpenProps = {'force-iso': 'no'};
+
+  /// 合并开播 props：始终带 [clearedOpenProps]，再叠计划里的项。
+  static Map<String, String> openPropsFor(Map<String, String>? planProps) {
+    if (planProps == null || planProps.isEmpty) {
+      return Map<String, String>.from(clearedOpenProps);
+    }
+    return {...clearedOpenProps, ...planProps};
+  }
+
+  /// 是否像碟片 / ISO（含 `http(s)` 直链 `.iso`、`file:`、本机路径、本地 VIDEO_TS、BDMV）。
   static bool looksLike(String raw) => openPlan(raw) != null;
 
   /// 任一候选像碟片 / ISO。
@@ -17,9 +28,9 @@ class KotvDiscPlay {
 
   /// 开播计划；非碟片返回 null。
   ///
-  /// - `.iso`：保留原 URL，附加 `force-iso=yes`（mpv 按 ISO9660/UDF 打开）
-  /// - `VIDEO_TS` 目录：`dvd://` + `dvd-device`
-  /// - `BDMV` 目录：`bd://` + `bluray-device`
+  /// - `.iso`（含远程 URL）：保留原 URL，附加 `force-iso=yes`
+  /// - 本地 `VIDEO_TS` 目录：`dvd://` + `dvd-device`
+  /// - 本地 `BDMV` 目录：`bd://` + `bluray-device`
   static ({String url, Map<String, String> props, bool forceMpv})? openPlan(String raw) {
     final u = raw.trim();
     if (u.isEmpty) return null;
@@ -28,9 +39,20 @@ class KotvDiscPlay {
       return (url: u, props: const {}, forceMpv: true);
     }
 
+    if (_endsWithIso(_pathOf(u)) || _endsWithIso(u)) {
+      return (
+        url: u,
+        props: const {'force-iso': 'yes'},
+        forceMpv: true,
+      );
+    }
+
+    // 目录碟需要本机可读 device；远程 path 里偶然含 VIDEO_TS/BDMV 不得改写。
+    if (!_isLocalDiscPath(u)) return null;
+
     final path = _pathOf(u);
     final upper = path.replaceAll('\\', '/').toUpperCase();
-    if (upper.contains('/BDMV') || upper.endsWith('BDMV')) {
+    if (_pathHasDiscMarker(upper, 'BDMV')) {
       final device = _discRoot(path, 'BDMV');
       return (
         url: 'bd://',
@@ -38,18 +60,11 @@ class KotvDiscPlay {
         forceMpv: true,
       );
     }
-    if (upper.contains('/VIDEO_TS') || upper.endsWith('VIDEO_TS')) {
+    if (_pathHasDiscMarker(upper, 'VIDEO_TS')) {
       final device = _discRoot(path, 'VIDEO_TS');
       return (
         url: 'dvd://',
         props: {'dvd-device': device},
-        forceMpv: true,
-      );
-    }
-    if (_endsWithIso(path) || _endsWithIso(u)) {
-      return (
-        url: u,
-        props: const {'force-iso': 'yes'},
         forceMpv: true,
       );
     }
@@ -65,6 +80,24 @@ class KotvDiscPlay {
       if (plan != null) return plan;
     }
     return null;
+  }
+
+  /// 本机 / file: / content:；带其它 scheme 的不当目录碟。
+  static bool _isLocalDiscPath(String u) {
+    final t = u.trim();
+    if (t.isEmpty) return false;
+    final low = t.toLowerCase();
+    if (low.startsWith('file:') || low.startsWith('content:')) return true;
+    if (low.contains('://')) return false;
+    return t.startsWith('/') || RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(t);
+  }
+
+  /// 路径段边界匹配，避免 `VIDEO_TS_BACKUP` / `BDMV_COPY` 误中。
+  static bool _pathHasDiscMarker(String upperNormPath, String marker) {
+    final m = marker.toUpperCase();
+    if (upperNormPath == m || upperNormPath.endsWith('/$m')) return true;
+    if (upperNormPath.contains('/$m/')) return true;
+    return false;
   }
 
   static bool _endsWithIso(String s) {

@@ -35,6 +35,21 @@ void main() {
     expect(KotvDiscPlay.looksLike('dvd://'), isTrue);
   });
 
+  test('http path with VIDEO_TS / BDMV substring is not disc', () {
+    expect(KotvDiscPlay.openPlan('https://cdn.example/VIDEO_TS/a.m3u8'), isNull);
+    expect(KotvDiscPlay.openPlan('https://cdn.example/BDMV/a.m2ts'), isNull);
+    expect(KotvDiscPlay.openPlan('/data/VIDEO_TS_BACKUP/a.m3u8'), isNull);
+  });
+
+  test('openPropsFor always clears force-iso unless plan sets yes', () {
+    expect(KotvDiscPlay.openPropsFor(null)['force-iso'], 'no');
+    expect(KotvDiscPlay.openPropsFor({})['force-iso'], 'no');
+    expect(
+      KotvDiscPlay.openPropsFor({'force-iso': 'yes'})['force-iso'],
+      'yes',
+    );
+  });
+
   test('openPlanAny / looksLikeAny pick first disc candidate', () {
     expect(
       KotvDiscPlay.looksLikeAny(['https://cdn.example/a.m3u8', '/a.iso']),

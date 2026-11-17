@@ -669,11 +669,13 @@ class MediaKitPlayback extends KotvPlayback {
     await _optsReady;
     await _opts.applyAfterAttach(player, live: live);
     await _ensureMpvTimelineObservers();
-    if (_extraOpenProps.isNotEmpty) {
-      for (final e in _extraOpenProps.entries) {
-        await _mpvSet(e.key, e.value);
-      }
-      _extraOpenProps = const {};
+    // 无额外项时也复位 force-iso，避免上一集 ISO 粘在会话里。
+    final openProps = _extraOpenProps.isEmpty
+        ? const <String, String>{'force-iso': 'no'}
+        : _extraOpenProps;
+    _extraOpenProps = const {};
+    for (final e in openProps.entries) {
+      await _mpvSet(e.key, e.value);
     }
     // start 经 Media 在 load 时定位（等同原生 loadfile start=），勿 open 后再 seek。
     // 302 由 libmpv 在这一次打开里跟。

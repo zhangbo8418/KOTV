@@ -500,7 +500,8 @@ class NativeMpvPlayback extends KotvPlayback {
       await KotvBufferBudget.warm(force: true);
       // 开播 mime：无扩展名的 /proxy/play 须靠 mime 触发 lavf HLS demuxer。
       final mime = kotvPlayMime(url, format);
-      final openProps = Map<String, String>.from(_extraOpenProps);
+      // 缺省也带 force-iso=no，避免会话复用后粘滞。
+      final openProps = <String, String>{'force-iso': 'no', ..._extraOpenProps};
       _extraOpenProps = const {};
       await _ch.invokeMethod('open', {
         'url': url,
@@ -511,7 +512,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
         'conf': _opts.conf,
-        if (openProps.isNotEmpty) 'props': openProps,
+        'props': openProps,
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
         'diskCache': _opts.diskCache && !live,

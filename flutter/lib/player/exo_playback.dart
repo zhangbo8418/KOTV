@@ -683,7 +683,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> release() async {
-    // stop → 短排空 → dispose。不设 disposeTimeout：超时丢后台会留下解码缓冲（与 FVP 同因）。
+    // stop → 短排空 → dispose（须 await，勿丢后台留下解码缓冲）。
     await kotvTeardownPlayback(
       stop: () async {
         try {
@@ -1340,7 +1340,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   void dispose() {
-    // 正常路径已在 [release] 里 await 拆机；此处仅兜底（不设 disposeTimeout）。
+    // 正常路径已在 [release] 里 await 拆机；此处仅兜底。
     if (_nativeReady) {
       _nativeReady = false;
       unawaited(

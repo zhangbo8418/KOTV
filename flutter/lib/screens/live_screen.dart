@@ -1505,8 +1505,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
-  Future<void> _selectGroup(int i) async {
-    if (!await _ensureUnlocked(i)) return;
+  /// [allowUnlock]：点按可为锁定组弹解锁；焦点停留切换时勿弹窗。
+  Future<void> _selectGroup(int i, {bool allowUnlock = true}) async {
+    if (allowUnlock) {
+      if (!await _ensureUnlocked(i)) return;
+    } else if (_groupLocked(i)) {
+      return;
+    }
     final remembered = _rememberedChannel(i);
     final playingHere = i == _playGroupIdx && _playChIdx >= 0 && _playChIdx < _channelCountAt(i);
     setState(() {
@@ -4311,10 +4316,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                   selected: i == _groupIdx,
                                                   marqueeWhenSelected: true,
                                                   onFocusChange: (focused) {
-                                                    _groupFocusArm.onFocusChange(i, focused, () {
+                                                    _groupFocusArm.onFocusChange('land:$i', focused, () {
                                                       if (!mounted || i == _groupIdx) return;
                                                       _cancelHideOverlays();
-                                                      unawaited(_selectGroup(i));
+                                                      unawaited(_selectGroup(i, allowUnlock: false));
                                                     });
                                                   },
                                                   onTap: () {
@@ -5126,9 +5131,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   child: TvFocus(
                     borderRadius: 6,
                     onFocusChange: (focused) {
-                      _groupFocusArm.onFocusChange('p$i', focused, () {
+                      _groupFocusArm.onFocusChange('port:$i', focused, () {
                         if (!mounted || i == _groupIdx) return;
-                        unawaited(_selectGroup(i));
+                        unawaited(_selectGroup(i, allowUnlock: false));
                       });
                     },
                     onPressed: () => unawaited(_selectGroup(i)),
