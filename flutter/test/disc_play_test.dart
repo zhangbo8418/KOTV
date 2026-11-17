@@ -2,26 +2,35 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kotv/player/disc_play.dart';
 
 void main() {
-  test('ISO → dvd:// + dvd-device', () {
-    final r = KotvDiscPlay.rewrite('/sdcard/Movies/movie.iso');
-    expect(r.forceMpv, isTrue);
-    expect(r.url, 'dvd://');
-    expect(r.props['dvd-device'], '/sdcard/Movies/movie.iso');
+  test('ISO → force-iso on original path', () {
+    final r = KotvDiscPlay.openPlan('/sdcard/Movies/movie.iso');
+    expect(r, isNotNull);
+    expect(r!.forceMpv, isTrue);
+    expect(r.url, '/sdcard/Movies/movie.iso');
+    expect(r.props['force-iso'], 'yes');
+  });
+
+  test('http ISO → force-iso keeps URL', () {
+    final r = KotvDiscPlay.openPlan('https://cdn.example/film.iso');
+    expect(r, isNotNull);
+    expect(r!.url, 'https://cdn.example/film.iso');
+    expect(r.props['force-iso'], 'yes');
+    expect(KotvDiscPlay.looksLike('https://cdn.example/film.iso'), isTrue);
   });
 
   test('VIDEO_TS folder → dvd device root', () {
-    final r = KotvDiscPlay.rewrite('/data/VIDEO_TS/VTS_01_1.VOB');
-    expect(r.url, 'dvd://');
+    final r = KotvDiscPlay.openPlan('/data/VIDEO_TS/VTS_01_1.VOB');
+    expect(r!.url, 'dvd://');
     expect(r.props['dvd-device'], '/data');
   });
 
   test('BDMV → bd:// + bluray-device', () {
-    final r = KotvDiscPlay.rewrite('/mnt/disc/BDMV/STREAM/00000.m2ts');
-    expect(r.url, 'bd://');
+    final r = KotvDiscPlay.openPlan('/mnt/disc/BDMV/STREAM/00000.m2ts');
+    expect(r!.url, 'bd://');
     expect(r.props['bluray-device'], '/mnt/disc');
   });
 
-  test('looksLike rejects http', () {
+  test('looksLike rejects non-iso http', () {
     expect(KotvDiscPlay.looksLike('https://cdn.example/a.m3u8'), isFalse);
     expect(KotvDiscPlay.looksLike('dvd://'), isTrue);
   });

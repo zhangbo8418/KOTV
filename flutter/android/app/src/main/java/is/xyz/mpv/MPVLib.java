@@ -452,7 +452,7 @@ public final class MPVLib {
 
     public static native int setOptionString(String name, String value);
 
-    /** libplayer 自定义读流：JNI openStream → Stream.read/seek/size/cancel/close。 */
+    /** libplayer 可选读流（JNI openStream）；业务未接线，符号保留给 so。 */
     public interface Stream {
         int read(ByteBuffer buffer);
 

@@ -133,7 +133,7 @@ Go Engine（单进程，:9978）
 
 | 引擎 | 平台 | 说明 |
 |------|------|------|
-| **MPV** | Android：Media3 `MpvPlayer`（HLS 走 Media3 Timeline）；桌面 / Windows / iOS：`media_kit` + 自带 libmpv（`scripts/fetch-desktop-mpv-libs.sh` 捆绑） | 选项 `mpv.conf` / hwdec；Android 可开 gpu-next / Vulkan；桌面 / iOS 走 `vo=libmpv` Texture（渲染 API 由 media_kit 定为 OpenGL/ANGLE）；Win7 开直出=`dxva2`（失败则会话退回关直出），关直出与 Win10+ 同为 `hwdec=auto`；「硬解直出」UI 仅 Win7 |
+| **MPV** | Android：自研 `KotvMpvPlugin` + `MPVLib` / jniLibs（不依赖 media3-mpvplayer）；桌面 / Windows / iOS：`media_kit` + 自带 libmpv（`scripts/fetch-desktop-mpv-libs.sh` 捆绑） | 选项 `mpv.conf` / hwdec；Android 可开 gpu-next / Vulkan；桌面 / iOS 走 `vo=libmpv` Texture（渲染 API 由 media_kit 定为 OpenGL/ANGLE）；Win7 开直出=`dxva2`（失败则会话退回关直出），关直出与 Win10+ 同为 `hwdec=auto`；「硬解直出」UI 仅 Win7；ISO 用 `force-iso` / 目录碟 `dvd://`·`bd://`（见 `disc_play.dart`） |
 | **FVP**（libmdk） | 桌面 / iOS（Android 仅 Exo + MPV） | 备选页内引擎，硬/软/自动解码列表由设置下发 |
 | 外部播放器 | 全平台 | 安卓 Intent；桌面网格选本机视频应用后把当前播放地址（含代理）原样交给该应用；引擎 API 仅无 GUI 兜底 |
 

@@ -58,6 +58,7 @@ import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/danmaku_search_dialog.dart';
 import '../widgets/chrome.dart';
+import '../widgets/focus_arm.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
@@ -154,7 +155,7 @@ class DetailScreen extends ConsumerStatefulWidget {
     if (inFlight != null) {
       if (_DetailScreenState._active == null) return;
       try {
-        await inFlight.future.timeout(kotvMpvLeaveTimeout);
+        await inFlight.future.timeout(const Duration(seconds: 5));
       } catch (_) {}
       return;
     }
@@ -242,6 +243,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   final GlobalKey<VodInlineControlsState> _inlineChromeKey =
       GlobalKey<VodInlineControlsState>();
   int _epPage = 0;
+  /// 焦点停留后切换线路 / 分集区间。
+  final KotvFocusArm _detailFocusArm = KotvFocusArm();
   bool _reversed = false;
   /// 起播续播 seek（毫秒）；仅当目标集 remarks/flag 与历史一致时并入 startAt。
   int _resumeSeekMs = 0;
@@ -532,7 +535,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       });
       return _mk!;
     }
-    // 同步创建：起播路径须先 [kotvAcquireMpvPlayer] / [_primeDesktopMpv] 等过拆机门闩。
+    // 同步创建：异步起播路径先 [_primeDesktopMpv]。
     final player = kotvCreateMpvPlayer();
     _bindDesktopMpv(player);
     return _mk!;
@@ -558,7 +561,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     });
   }
 
-  /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
+  /// 桌面起播前：无实例则 [kotvTakeDesktopMpvPlayer] 再建。
   Future<void> _primeDesktopMpv() async {
     final player = await kotvTakeDesktopMpvPlayer(
       alreadyBound: _mk != null && _mkPlayer != null,
@@ -653,8 +656,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 硬停并限时等待；离开页 / 换片 / 停播控件共用。
-  /// 默认 [kotvMpvLeaveTimeout]，覆盖桌面 libmpv 分段弃等待窗口。
-  Future<void> _stopHardAwait({bool skipFlush = false, Duration timeout = kotvMpvLeaveTimeout}) async {
+  Future<void> _stopHardAwait({bool skipFlush = false, Duration timeout = const Duration(seconds: 4)}) async {
     try {
       await _stopHard(skipFlush: skipFlush).timeout(timeout);
     } catch (_) {}
@@ -1079,7 +1081,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final inFlight = _leaveDone;
     if (_leaving || inFlight != null) {
       try {
-        await (inFlight ?? _leaveDone)?.future.timeout(kotvMpvLeaveTimeout);
+        await (inFlight ?? _leaveDone)?.future.timeout(const Duration(seconds: 5));
       } catch (_) {}
       afterPop?.call();
       return;
@@ -1091,7 +1093,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_active == this) _active = null;
     _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
     try {
-      // 进度/软停短超时不挡返回；先 pop，再 await 硬停（[kotvMpvLeaveTimeout]）。
+      // 进度/软停短超时不挡返回；先 pop，再 await 硬停。
       try {
         await _flushWatchProgress(force: true)
             .timeout(const Duration(milliseconds: 400));
@@ -1417,6 +1419,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _stopBtProgressPoll();
     _danmakuItems.dispose();
     _fsSwipeDy.dispose();
+    _detailFocusArm.dispose();
     // 正常路径已在 [_stopHard] 里 await release+dispose，引擎引用已清空。
     // 异常路径：先调度 release（清 mdk），再摘引用；与 [_stopHard] 同序意图。
     if (!_stoppedHard) {
@@ -2581,10 +2584,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         var openUrl = target.url;
         final openHeaders = target.headers;
         var discProps = <String, String>{};
-        if (KotvDiscPlay.looksLike(openUrl) || KotvDiscPlay.looksLike(ep.url)) {
-          final disc = KotvDiscPlay.rewrite(
-            KotvDiscPlay.looksLike(openUrl) ? openUrl : ep.url,
-          );
+        final disc = KotvDiscPlay.openPlan(openUrl) ??
+            KotvDiscPlay.openPlan(ep.url) ??
+            KotvDiscPlay.openPlan(mediaUrl);
+        if (disc != null) {
           openUrl = disc.url;
           discProps = disc.props;
         }
@@ -4276,6 +4279,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                       height: pillH,
                       fontSize: pillFs,
                       selected: i == _flagIdx,
+                      onFocusChange: (focused) {
+                        _detailFocusArm.onFocusChange('flag:$i', focused, () {
+                          if (!mounted || i == _flagIdx) return;
+                          _selectFlag(i, autoPlay: false);
+                        });
+                      },
                       onTap: () {
                         if (i == _flagIdx) return;
                         _selectFlag(i);
@@ -4302,6 +4311,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                     height: pillH,
                     fontSize: pillFs,
                     selected: i == _epPage,
+                    onFocusChange: (focused) {
+                      _detailFocusArm.onFocusChange('ep:$i', focused, () {
+                        if (!mounted || i == _epPage) return;
+                        setState(() => _epPage = i);
+                      });
+                    },
                     onTap: () => setState(() => _epPage = i),
                   );
                 },

@@ -53,6 +53,7 @@ import '../widgets/kotv_network_image.dart';
 import '../widgets/kotv_step_slider.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/focus_arm.dart';
 import '../widgets/live_player_chrome.dart';
 import '../widgets/marquee_text.dart';
 import '../widgets/mini_hover_shell.dart';
@@ -123,7 +124,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final inFlight = _leaveDone;
     if (inFlight != null) {
       try {
-        await inFlight.future.timeout(kotvMpvLeaveTimeout);
+        await inFlight.future.timeout(const Duration(seconds: 5));
       } catch (_) {}
       return;
     }
@@ -137,7 +138,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           await active._exitImmersive();
         } catch (_) {}
       }
-      await active._releaseAllBackends().timeout(kotvMpvLeaveTimeout);
+      await active._releaseAllBackends().timeout(const Duration(seconds: 4));
     } catch (_) {
     } finally {
       if (!done.isCompleted) done.complete();
@@ -162,6 +163,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   final KotvFocusBag _progFocus = KotvFocusBag();
   final FocusNode _epgTabFocus = FocusNode(debugLabel: 'live_epg_tab');
   final KotvRemoteFocusMemory _remoteFocus = KotvRemoteFocusMemory();
+  /// 焦点停留后切换分类列表（不播台）。
+  final KotvFocusArm _groupFocusArm = KotvFocusArm();
   final KotvJumpController _epgScroll = KotvJumpController();
   // 竖屏与全屏面板不会同时出现，分类、频道、节目单各共用一个控制器。
   final KotvJumpController _groupScroll = KotvJumpController();
@@ -211,7 +214,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
       return _mk!;
     }
-    // 同步创建：起播路径须先 [_primeDesktopMpv]。直播须 live:true（关 cache-pause）。
+    // 同步创建；异步起播路径先 [_primeDesktopMpv]。直播须 live:true（关 cache-pause）。
     if (_mk != null) return _mk!;
     _bindDesktopMpv(kotvCreateMpvPlayer());
     return _mk!;
@@ -227,7 +230,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     );
   }
 
-  /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
+  /// 桌面起播前：无实例则 [kotvTakeDesktopMpvPlayer] 再建。
   Future<void> _primeDesktopMpv() async {
     final player = await kotvTakeDesktopMpvPlayer(
       alreadyBound: _mk != null && _mkPlayer != null,
@@ -623,6 +626,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _portraitHideTimer?.cancel();
     _cursorHideTimer?.cancel();
     _liveWheelHudTimer?.cancel();
+    _groupFocusArm.dispose();
     _unwireLivePlaybackErrors();
     _unwireLivePlaybackEnded();
     _remoteFocus.clear();
@@ -3091,8 +3095,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       }
       return;
     }
-    // 列表内点台保持频道栏打开，避免一点就收起。
-    unawaited(_playChannel(i, showList: true));
+    // 点台后收起频道栏，避免挡画面。
+    unawaited(_playChannel(i));
   }
 
   /// 点中间：关菜单，或点画面播/停（左右仍是频道/设置）。
@@ -4306,9 +4310,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                                   fontSize: font,
                                                   selected: i == _groupIdx,
                                                   marqueeWhenSelected: true,
+                                                  onFocusChange: (focused) {
+                                                    _groupFocusArm.onFocusChange(i, focused, () {
+                                                      if (!mounted || i == _groupIdx) return;
+                                                      _cancelHideOverlays();
+                                                      unawaited(_selectGroup(i));
+                                                    });
+                                                  },
                                                   onTap: () {
                                                     _cancelHideOverlays();
-                                                    _selectGroup(i);
+                                                    unawaited(_selectGroup(i));
                                                   },
                                                 ),
                                               );
@@ -5114,7 +5125,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                   padding: const EdgeInsets.only(bottom: 3),
                   child: TvFocus(
                     borderRadius: 6,
-                    onPressed: () => _selectGroup(i),
+                    onFocusChange: (focused) {
+                      _groupFocusArm.onFocusChange('p$i', focused, () {
+                        if (!mounted || i == _groupIdx) return;
+                        unawaited(_selectGroup(i));
+                      });
+                    },
+                    onPressed: () => unawaited(_selectGroup(i)),
                     child: Material(
                       color: sel ? p.selected : p.pillBg.withOpacity(0.7),
                       borderRadius: BorderRadius.circular(6),

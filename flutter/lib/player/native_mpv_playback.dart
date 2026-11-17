@@ -478,7 +478,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _duration = Duration.zero;
     notifyListeners();
 
-    // 原生 MPVLib 无 props 通道；碟机等额外项折进 conf。DRM（含 ClearKey）请用 Exo。
+    // 碟片/ISO 等额外项经 open.props → applyRuntimeOpts。DRM（含 ClearKey）请用 Exo。
     if (drm != null && drm.isNotEmpty) {
       _lastError = 'MPV 不支持该 DRM，请用内置 ExoPlayer';
       _buffering = false;
@@ -497,17 +497,10 @@ class NativeMpvPlayback extends KotvPlayback {
     await _syncSurfaceLayer();
     try {
       await KotvBufferBudget.warm(force: true);
-      // dvd-device / bluray-device 等：经 conf 片段尝试写入（非 props 透传）。
-      final confExtra = StringBuffer(_opts.conf);
-      for (final e in _extraOpenProps.entries) {
-        if (e.key.isEmpty) continue;
-        if (confExtra.isNotEmpty && !confExtra.toString().endsWith('\n')) {
-          confExtra.writeln();
-        }
-        confExtra.writeln('${e.key}=${e.value}');
-      }
       // 开播 mime：无扩展名的 /proxy/play 须靠 mime 触发 lavf HLS demuxer。
       final mime = kotvPlayMime(url, format);
+      final openProps = Map<String, String>.from(_extraOpenProps);
+      _extraOpenProps = const {};
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
@@ -516,7 +509,8 @@ class NativeMpvPlayback extends KotvPlayback {
         'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
-        'conf': confExtra.toString(),
+        'conf': _opts.conf,
+        if (openProps.isNotEmpty) 'props': openProps,
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
         'diskCache': _opts.diskCache && !live,
@@ -528,7 +522,6 @@ class NativeMpvPlayback extends KotvPlayback {
         if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
         ..._opts.equalizerChannelArgs(),
       });
-      _extraOpenProps = const {};
       // open 会 recreate 属性；再刷一次比例。
       await _ch.invokeMethod('setAspect', {'mode': _videoScale});
     } on MissingPluginException {

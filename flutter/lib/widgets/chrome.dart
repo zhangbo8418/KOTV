@@ -10,6 +10,7 @@ import '../theme/kotv_palette.dart';
 import '../theme/kotv_emoji_text.dart';
 import '../theme/kotv_theme.dart';
 import '../util/kotv_wallpaper_cache.dart';
+import 'focus_arm.dart';
 import 'h_scroll.dart';
 import 'kotv_network_image.dart';
 import 'marquee_text.dart';
@@ -332,6 +333,7 @@ class AppPill extends StatelessWidget {
     this.fontSize = 15,
     this.autofocus = false,
     this.focusNode,
+    this.onFocusChange,
     this.suffix,
     this.marqueeWhenSelected = false,
     this.growWithWindow = false,
@@ -348,6 +350,7 @@ class AppPill extends StatelessWidget {
   final double fontSize;
   final bool autofocus;
   final FocusNode? focusNode;
+  final ValueChanged<bool>? onFocusChange;
   /// 固定显示在文案后的标记（如「（当前）」），不参与省略，避免长 URL 把标记裁掉。
   final String? suffix;
   /// 选中时对过长 label 跑马灯（直播分组等）。
@@ -407,6 +410,7 @@ class AppPill extends StatelessWidget {
       autofocus: autofocus,
       focusNode: focusNode,
       onPressed: onTap,
+      onFocusChange: onFocusChange,
       borderRadius: 8 * s,
       child: Material(
         color: Colors.transparent,
@@ -994,36 +998,26 @@ class CategoryNavBar extends StatefulWidget {
 }
 
 class _CategoryNavBarState extends State<CategoryNavBar> {
-  Timer? _arm;
-  String? _pending;
+  final KotvFocusArm _focusArm = KotvFocusArm();
 
   @override
   void dispose() {
-    _arm?.cancel();
+    _focusArm.dispose();
     super.dispose();
   }
 
   /// 焦点落到分类上约 100ms 后切换。滑过时焦点离开就取消，避免连打请求。
   void _onPillFocus(String token, bool focused) {
-    if (focused) {
-      _arm?.cancel();
-      _pending = token;
-      _arm = Timer(const Duration(milliseconds: 100), () {
-        if (!mounted || _pending != token) return;
-        if (token == 'home') {
-          if (!widget.homeSelected) widget.onHome();
-          return;
-        }
-        final tid = token.startsWith('cat:') ? token.substring(4) : token;
-        if (tid.isEmpty || tid == widget.selectedTid) return;
-        widget.onCategory(tid);
-      });
-      return;
-    }
-    if (_pending == token) {
-      _arm?.cancel();
-      _pending = null;
-    }
+    _focusArm.onFocusChange(token, focused, () {
+      if (!mounted) return;
+      if (token == 'home') {
+        if (!widget.homeSelected) widget.onHome();
+        return;
+      }
+      final tid = token.startsWith('cat:') ? token.substring(4) : token;
+      if (tid.isEmpty || tid == widget.selectedTid) return;
+      widget.onCategory(tid);
+    });
   }
 
   @override

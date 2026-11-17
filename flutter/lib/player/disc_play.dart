@@ -1,39 +1,27 @@
-/// 本地 DVD / Blu-ray / ISO：走自带 libmpv（dvdnav + libbluray）。
+/// DVD / Blu-ray / ISO：走自带 libmpv（dvdnav + libbluray，或 `force-iso`）。
 ///
-/// 说明：`IsoSessionManager` stub 只满足 webhtv `register_iso_protocol` JNI 链接，
-/// **不是**碟片播放入口。实际播用 mpv 的 `dvd://` / `bd://` + device 属性。
+/// 开播请用 [openPlan]；详情与播控只认这一处，勿再散落改写。
 class KotvDiscPlay {
   KotvDiscPlay._();
 
-  /// 是否像碟片路径（本地 ISO / VIDEO_TS / BDMV）。
-  static bool looksLike(String raw) {
-    final u = raw.trim();
-    if (u.isEmpty) return false;
-    final low = u.toLowerCase();
-    if (low.startsWith('dvd://') || low.startsWith('bd://') || low.startsWith('bluray://')) {
-      return true;
-    }
-    if (low.contains('://') && !low.startsWith('file:')) return false;
-    final path = _pathOf(u);
-    if (path.toLowerCase().endsWith('.iso')) return true;
-    if (path.toUpperCase().contains('/VIDEO_TS') || path.toUpperCase().endsWith('VIDEO_TS')) {
-      return true;
-    }
-    if (path.toUpperCase().contains('/BDMV') || path.toUpperCase().endsWith('BDMV')) {
-      return true;
-    }
-    return false;
-  }
+  /// 是否像碟片 / ISO（含 `http(s)` 直链 `.iso`、`file:`、本机路径、VIDEO_TS、BDMV）。
+  static bool looksLike(String raw) => openPlan(raw) != null;
 
-  /// 改写为 mpv 可播 URL + 附加属性；[forceMpv] 恒 true。
-  static ({String url, Map<String, String> props, bool forceMpv}) rewrite(String raw) {
+  /// 开播计划；非碟片返回 null。
+  ///
+  /// - `.iso`：保留原 URL，附加 `force-iso=yes`（mpv 按 ISO9660/UDF 打开）
+  /// - `VIDEO_TS` 目录：`dvd://` + `dvd-device`
+  /// - `BDMV` 目录：`bd://` + `bluray-device`
+  static ({String url, Map<String, String> props, bool forceMpv})? openPlan(String raw) {
     final u = raw.trim();
+    if (u.isEmpty) return null;
     final low = u.toLowerCase();
     if (low.startsWith('dvd://') || low.startsWith('bd://') || low.startsWith('bluray://')) {
       return (url: u, props: const {}, forceMpv: true);
     }
+
     final path = _pathOf(u);
-    final upper = path.toUpperCase();
+    final upper = path.replaceAll('\\', '/').toUpperCase();
     if (upper.contains('/BDMV') || upper.endsWith('BDMV')) {
       final device = _discRoot(path, 'BDMV');
       return (
@@ -42,15 +30,38 @@ class KotvDiscPlay {
         forceMpv: true,
       );
     }
-    if (upper.contains('/VIDEO_TS') || upper.endsWith('VIDEO_TS') || path.toLowerCase().endsWith('.iso')) {
-      final device = path.toLowerCase().endsWith('.iso') ? path : _discRoot(path, 'VIDEO_TS');
+    if (upper.contains('/VIDEO_TS') || upper.endsWith('VIDEO_TS')) {
+      final device = _discRoot(path, 'VIDEO_TS');
       return (
         url: 'dvd://',
         props: {'dvd-device': device},
         forceMpv: true,
       );
     }
-    return (url: u, props: const {}, forceMpv: true);
+    if (_endsWithIso(path) || _endsWithIso(u)) {
+      return (
+        url: u,
+        props: const {'force-iso': 'yes'},
+        forceMpv: true,
+      );
+    }
+    return null;
+  }
+
+  /// 兼容旧调用：非碟片时原样返回（[forceMpv] 仍为 true，与历史签名一致）。
+  static ({String url, Map<String, String> props, bool forceMpv}) rewrite(String raw) {
+    return openPlan(raw) ?? (url: raw.trim(), props: const {}, forceMpv: true);
+  }
+
+  static bool _endsWithIso(String s) {
+    final t = s.trim().toLowerCase();
+    if (t.endsWith('.iso')) return true;
+    try {
+      final p = Uri.parse(t).path.toLowerCase();
+      return p.endsWith('.iso');
+    } catch (_) {
+      return false;
+    }
   }
 
   static String _pathOf(String u) {
@@ -62,6 +73,12 @@ class KotvDiscPlay {
         if (p.isNotEmpty) return p;
       } catch (_) {}
       return t.replaceFirst(RegExp(r'^file://', caseSensitive: false), '');
+    }
+    if (t.contains('://')) {
+      try {
+        final uri = Uri.parse(t);
+        if (uri.path.isNotEmpty) return uri.path;
+      } catch (_) {}
     }
     return t;
   }
